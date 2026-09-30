@@ -34,6 +34,7 @@ import NanoUI.Internal.Layout.Arena (getParent, getWidgetId)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
 import NanoUI.Internal.Store (deleteSlot, fieldInt, fieldPoint, findSlot, flagSlot, insertSlot, quietFlag, setFlagSlot, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectHit, v2X, v2Y)
+import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
 
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
@@ -119,7 +120,7 @@ data Reorder = Reorder
   deriving (Eq, Show)
 
 -- | Drag-and-drop reorder of a list of item ids. Pass the order and each
--- item's rect as drawn last frame ('respRect'), in the order drawn: the
+-- item's response from this view pass, in the order drawn: the
 -- order passed, or 'reorderPreview' for a live preview. A press on an item
 -- starts a drag; once the pointer passes the drag threshold the item takes
 -- the place of the item nearest the pointer, so the list can wrap over
@@ -129,22 +130,24 @@ data Reorder = Reorder
 -- Allocate @orderCell <- newState [0 .. 4]@ during component setup.
 --
 -- > (order, setOrder) <- useState orderCell
--- > rects <- liftIO (readIORef lastRects)
--- > r <- useReorder order rects
--- > drawn <- forM (reorderPreview r) $ \i -> (i,) . respRect <$> chip i
--- > liftIO (writeIORef lastRects drawn)
+-- > drawn <- forM order $ \i -> (i,) <$> chip i
+-- > r <- useReorder order drawn
 -- > setOrder (reorderOrder r)
-useReorder :: [Int] -> [(Int, Rect)] -> NanoUI Reorder
-useReorder order items = do
+--
+-- Only an owned press starts the drag; clipping, covering controls and
+-- disabled scopes are respected. Geometry comes from the response's last layout.
+useReorder :: [Int] -> [(Int, Response)] -> NanoUI Reorder
+useReorder order responses = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
       dragK = slotKey SlotDrag key
       startK = slotKey SlotDragW key
       movedK = slotKey SlotDrop key
-      mouse@(V2 mx my) = inputMousePos inp
+      V2 mx my = inputMousePos inp
       press = pressedIn MouseLeft inp
-      hit = fst <$> find (\(_, r) -> rectHit r mouse) items
+      hit = fst <$> find (respPressed . snd) responses
+      items = [(i, respRect r) | (i, r) <- responses]
   store <- liftIO (getStore ctx)
   let dragging = if press then fromMaybe (-1) hit else findSlot fieldInt (-1) dragK store
       (sx, sy) = if press then (mx, my) else findSlot fieldPoint (mx, my) startK store

@@ -2,6 +2,11 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** `useReorder` takes keyed `Response`s from this view pass rather
+  than raw rectangles, so only owned presses arm it. Table reordering uses the
+  same path; table resize edges and pane gestures reject covered, disabled or
+  clipped starts while preserving an already-started drag outside its bounds.
+
 - `KeysOnly` claims an exact list of shortcut chords; `KeysNone` reserves no
   keys and `KeysReadOnly` claims selection/copy without destructive edits.
   Selectable rich text uses the read-only policy. **Breaking:** `KeyClaim`

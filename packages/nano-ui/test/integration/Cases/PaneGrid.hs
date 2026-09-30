@@ -21,6 +21,7 @@ tests =
   , spec "pane-grid-drop-commit" runDropCommitTest
   , spec "pane-grid-tab-drop" runTabDropTest
   , spec "pane-grid-covered-drop" runCoveredDropTest
+  , spec "pane-grid-covered-gestures" runCoveredGesturesTest
   ]
 
 -- | Two panes side by side in a 600 by 400 grid: a 16px gutter from 292 to
@@ -41,6 +42,26 @@ runCoveredDropTest ctx failed = do
   _ <- warmup2 ctx inp ui
   r <- evalUi ctx inp ui
   assertEq failed (1, Nothing) (pgrPaneCount r, pgrDropTarget r)
+
+runCoveredGesturesTest :: Context -> IORef Int -> IO ()
+runCoveredGesturesTest ctx failed = do
+  let inp = withInputOff 600 400
+      ui = columnWith (fillW . fillH) $ do
+        result <- paneGrid defaultPaneGridConfig
+          { pgLayout = fillW . fillH, pgTree = Just halves
+          , pgViewPane = \_ _ -> pure (PaneView "Pane" True)
+          }
+        panelWith (pinAt 0 0 . pointer PointerBlock . fixedWH 600 400) (pure ())
+        pure result
+  _ <- warmup2 ctx inp ui
+  forM_ [V2 300 200, V2 150 200] $ \pos -> do
+    let down = pressAt inp pos
+        moved = holdAt down (V2 450 200)
+    _ <- evalUi ctx down ui
+    _ <- evalUi ctx moved ui
+    _ <- evalUi ctx (releaseAt moved) ui
+    after <- evalUi ctx inp ui
+    assertEq failed (Just halves) (pgrTree after)
 
 runDropDestinationTest :: Context -> IORef Int -> IO ()
 runDropDestinationTest ctx failed = do

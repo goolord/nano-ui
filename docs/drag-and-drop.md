@@ -107,5 +107,7 @@ It returns `Nothing` if the grid snapshot changed or that destination was
 already committed. Use targets in the context that produced them and resolve
 them in the same view build.
 
-`useReorder` retains its existing nearest-item behavior for wrapped lists.
+`useReorder` retains its nearest-item behavior for wrapped lists. Pass keyed
+widget `Response`s from the current view pass, not saved rectangles: the
+response grants pointer ownership and supplies last layout's geometry.
 OS file/text drops continue to use `useDrop` and `dropZone`.

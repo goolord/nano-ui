@@ -40,7 +40,7 @@ import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, 
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
-import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
@@ -579,20 +579,24 @@ tableConfigured cfg f key cols inputRows curSort =
               if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane
             pure (frozenHs ++ unfrozenHs)
       mBodyRect <- lastRect vWid
+      covered <- liftIO (pointerCovered ctx tableWid)
+      clip <- liftIO (getPrevClipRect ctx tableWid)
+      disabled <- liftIO (isDisabled ctx tableWid)
       let mouse = inputMousePos inp
+          reachable = not (covered || disabled) && maybe True (`rectContains` mouse) clip
           headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
           -- Also used as the resize cursor's zones.
           edgeZones = headerEdgeZones 4 mBodyRect headerRects
           hitCol zones = fst <$> find (\(_, r) -> rectContains r mouse) zones
-          edgeCol = hitCol edgeZones
+          edgeCol = if reachable then hitCol edgeZones else Nothing
           isResize = drag0 /= HeaderIdle
           resizing = isResize && heldIn MouseLeft inp
-      unless (null edgeZones) . liftIO $
+      when (reachable && not (null edgeZones)) . liftIO $
         -- Strict in the spine and the rects, so no thunk waits in the IORef.
         modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
       reorder <-
         withKey ("reorder" :: Text) $
-          useReorder vis (if resizing || isJust edgeCol then [] else headerRects)
+          useReorder vis (if resizing || isJust edgeCol then [] else headerPairs)
       let vis' = reorderOrder reorder
           mReorder = reorderDragging reorder
           pressResize = pressedIn MouseLeft inp && isJust edgeCol

@@ -430,7 +430,7 @@ paneGrid cfg = do
       then void (renderPane env maxPane baseRect)
       else do
         rendered <- maybe (pure []) (renderNode env (M.fromList [(diSplitId d, d) | d <- visibleDividers])) visibleTree
-        runGestures env dividers rendered dragMoved dragZone
+        runGestures wid env dividers rendered dragMoved dragZone
         when (lifted && rectNonEmpty baseRect) $
           drawDragOverlay env wid mouse (dpRect <$> dragZone)
         -- Keyboard focus also rings the focused pane, so the arrow keys show
@@ -689,14 +689,18 @@ drawDragOverlay env wid (V2 mx my) zone =
 
 -- | Arm, run and finish the resize and drag gestures.
 runGestures ::
+  WidgetId ->
   GridEnv ->
   [DividerInfo] ->
   [RenderedPane] ->
   Bool ->
   Maybe DropPreview ->
   NanoUI ()
-runGestures env dividers rendered moved zone = do
+runGestures wid env dividers rendered moved zone = do
   inp <- askInput
+  covered <- liftIO (pointerCovered (geCtx env) wid)
+  clip <- liftIO (getPrevClipRect (geCtx env) wid)
+  disabled <- liftIO (isDisabled (geCtx env) wid)
   let mouse = inputMousePos inp
       down = heldIn MouseLeft inp
       setGesture mirror g = void (updateGrid env mirror (\s -> s {gsGesture = g}))
@@ -709,7 +713,9 @@ runGestures env dividers rendered moved zone = do
         let v = rpView pane
          in any (`rectHit` mouse) (rpHandle pane)
               || (pvDraggable v && any (`rectHit` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
-  when (pressedIn MouseLeft inp && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
+  when (pressedIn MouseLeft inp && not (covered || disabled)
+      && maybe True (`rectHit` mouse) clip
+      && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
     case (hitDiv, pickHit) of
       (Just d, _) -> setGesture True (Resize (diSplitId d) (diRatio d) (mouseMain (diAxis d) mouse))
       (_, Just pane) -> setGesture True (Drag (rpPaneId pane) mouse False (pvTitle (rpView pane)))

@@ -32,6 +32,7 @@ tests :: [Spec]
 tests =
   [ spec "table-sort" runTableSortTest
   , pixelSpec "table-reorder" runTableReorderTest
+  , pixelSpec "table-covered-gestures" runTableCoveredGesturesTest
   , pixelSpec "table-scroll-reveal" runTableScrollRevealTest
   , pixelSpec "table-shared-scroll-metrics" runTableSharedScrollMetricsTest
   , pixelSpec "page-wheel-above-table" runPageWheelAboveTableTest
@@ -137,6 +138,29 @@ runTableReorderTest ctx failed = do
   draw input {inputMousePos = first}
   settled <- warmup2 ctx input ui
   assertEq failed [1, 2, 0] (tableColOrder settled)
+
+-- A same-layer scrim blocks both header reordering and resize edges.
+runTableCoveredGesturesTest :: Context -> IORef Int -> IO ()
+runTableCoveredGesturesTest ctx failed = do
+  let input = withInputOff 500 240
+      ui = columnWith (fillW . fillH) $ do
+        result <- simpleTable ["First", "Second", "Third"] [["a", "b", "c"]]
+        panelWith (pinAt 0 0 . pointer PointerBlock . fixedWH 500 240) (pure ())
+        pure result
+  _ <- warmup2 ctx input ui
+  before <- headerButtonRects ctx
+  assertJust failed (listToMaybe before) $ \first -> do
+    let middle@(V2 _ cy) = spanCenter first
+        edge = V2 (rectX first + rectW first - 1) cy
+    forM_ [middle, edge] $ \pos@(V2 x y) -> do
+      let down = pressAt input pos
+          moved = holdAt down (V2 (x + 120) y)
+      _ <- evalUi ctx down ui
+      _ <- evalUi ctx moved ui
+      _ <- evalUi ctx (releaseAt moved) ui
+      result <- warmup2 ctx input ui
+      assertEq failed [0, 1, 2] (tableColOrder result)
+      assertEq failed before =<< headerButtonRects ctx
 
 -- Row label nearest the bottom edge of the body viewport.
 rowLabelIndex :: T.Text -> Maybe Int
@@ -397,9 +421,11 @@ tableFillRows =
 -- on the header cell and down in the column body.
 runTableColResizeDemoReproTest :: Context -> IORef Int -> IO ()
 runTableColResizeDemoReproTest _ failed =
-  forM_ [False, True] $ \inBody -> do
+  forM_ [(inBody, k) | inBody <- [False, True], k <- [0 .. 4]] $ \(inBody, k) -> do
     ctx <- newPixelContext
-    let inp0 = (withInput 700 500) {inputMousePos = V2 400 100}
+    -- Test each edge independently: widening earlier columns can scroll the
+    -- last edge out of view, where it deliberately cannot start a resize.
+    let inp0 = (withInput 1200 500) {inputMousePos = V2 400 100}
         ui =
           scrollWith (tight . grow) $
             columnWith (padAll 6 . gap 6 . fillW) $
@@ -407,38 +433,36 @@ runTableColResizeDemoReproTest _ failed =
                 sortedTable (tableWith (fixedH 280) "people" demoPeopleCols demoPeopleRows)
     _ <- warmup2 ctx inp0 ui
     bodyBot <- tableBodyBottom ctx
-    hdrs0 <- headerButtonRects ctx
-    forM_ (zip [0 ..] hdrs0) $ \(k, _) -> do
-      hdrs <- headerButtonRects ctx
-      case drop k hdrs of
-        Rect hx hy hw hh : _ | bodyBot > hy + hh + 20 -> do
-          let edgeX = hx + hw - 2
-              grabY = if inBody then (hy + hh + bodyBot) / 2 else hy + hh / 2
-              hoverInp = inp0 {inputMousePos = V2 edgeX grabY}
-          _ <- runFrame ctx hoverInp ui
-          assertEq failed UiCursorEwResize =<< uiCursorKind ctx hoverInp
-          -- Away from the edge, the header is not a resize zone.
-          midKind <- uiCursorKind ctx inp0 {inputMousePos = V2 (hx + hw / 2) grabY}
-          assert failed (midKind /= UiCursorEwResize)
-          let pressInp = applyMouseButton MouseLeft True hoverInp
-              dragInp x = inp0 {inputMousePos = V2 x grabY, inputButtonsHeld = buttonsFromList [MouseLeft]}
-          before <- headerButtonRects ctx
-          _ <- runFrame ctx pressInp ui
-          _ <- runFrame ctx (dragInp (edgeX + 60)) ui
-          _ <- runFrame ctx (dragInp (edgeX + 60)) ui
-          _ <- runFrame ctx (dragInp (edgeX + 60)) ui
-          after <- headerButtonRects ctx
-          case (drop k before, drop k after) of
-            (Rect _ _ wb _ : _, Rect _ _ wa _ : _) -> assertGt failed wa (wb + 30)
-            _ -> assert failed False
-          -- The arrow stays for the whole drag, off the edge too, and goes
-          -- once the button is let go.
-          let offInp = inp0 {inputMousePos = V2 (edgeX + 60) 490, inputButtonsHeld = buttonsFromList [MouseLeft]}
-          assertEq failed UiCursorEwResize =<< uiCursorKind ctx offInp
-          _ <- runFrame ctx (applyMouseButton MouseLeft False offInp) ui
-          released <- uiCursorKind ctx offInp
-          assert failed (released /= UiCursorEwResize)
-        _ -> assert failed False
+    hdrs <- headerButtonRects ctx
+    case drop k hdrs of
+      Rect hx hy hw hh : _ | bodyBot > hy + hh + 20 -> do
+        let edgeX = hx + hw - 2
+            grabY = if inBody then (hy + hh + bodyBot) / 2 else hy + hh / 2
+            hoverInp = inp0 {inputMousePos = V2 edgeX grabY}
+        _ <- runFrame ctx hoverInp ui
+        assertEq failed UiCursorEwResize =<< uiCursorKind ctx hoverInp
+        -- Away from the edge, the header is not a resize zone.
+        midKind <- uiCursorKind ctx inp0 {inputMousePos = V2 (hx + hw / 2) grabY}
+        assert failed (midKind /= UiCursorEwResize)
+        let pressInp = applyMouseButton MouseLeft True hoverInp
+            dragInp x = inp0 {inputMousePos = V2 x grabY, inputButtonsHeld = buttonsFromList [MouseLeft]}
+        before <- headerButtonRects ctx
+        _ <- runFrame ctx pressInp ui
+        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+        after <- headerButtonRects ctx
+        case (drop k before, drop k after) of
+          (Rect _ _ wb _ : _, Rect _ _ wa _ : _) -> assertGt failed wa (wb + 30)
+          _ -> assert failed False
+        -- The arrow stays for the whole drag, off the edge too, and goes
+        -- once the button is let go.
+        let offInp = inp0 {inputMousePos = V2 (edgeX + 60) 490, inputButtonsHeld = buttonsFromList [MouseLeft]}
+        assertEq failed UiCursorEwResize =<< uiCursorKind ctx offInp
+        _ <- runFrame ctx (applyMouseButton MouseLeft False offInp) ui
+        released <- uiCursorKind ctx offInp
+        assert failed (released /= UiCursorEwResize)
+      _ -> assert failed False
 
 demoPeopleCols :: Colonnade Headed (T.Text, T.Text, T.Text, T.Text, T.Text) T.Text
 demoPeopleCols =

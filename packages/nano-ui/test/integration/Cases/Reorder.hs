@@ -12,7 +12,31 @@ tests =
   , spec "reorder-preview-stable" runReorderPreviewStableTest
   , spec "insertion-index-bounds" runInsertionIndexTest
   , spec "drag-idle-and-abort" runDragIdleAndAbortTest
+  , spec "reorder-owned-press" runReorderOwnedPressTest
   ]
+
+-- | Covered and clipped controls cannot start a reorder gesture.
+runReorderOwnedPressTest :: Context -> IORef Int -> IO ()
+runReorderOwnedPressTest ctx failed = do
+  let inp = withInputOff 300 100
+      contents = columnWith tight $ do
+        items <- rowWith (tight . gap 10) $
+          forM [0, 1 :: Int] $ \i -> (i,) <$> buttonWith' (fixedWH 40 30) "Item"
+        useReorder [0, 1] items
+      covered = layersWith (fixedWH 100 50) $ do
+        result <- contents
+        panelWith (pointer PointerBlock . fixedWH 40 30) (pure ())
+        pure result
+      clipped = scrollWith (fixedWH 40 30) contents
+  forM_ [(covered, V2 20 15), (clipped, V2 70 15)] $ \(ui, pos) -> do
+    _ <- warmup2 ctx inp ui
+    let down = pressAt inp pos
+        moved = holdAt down (V2 90 15)
+    armed <- evalUi ctx down ui
+    assertEq failed Nothing (reorderDragging armed)
+    _ <- evalUi ctx moved ui
+    result <- evalUi ctx (releaseAt moved) ui
+    assertEq failed [0, 1] (reorderOrder result)
 
 -- | Five 40 by 30 slots in a row, 50 apart.
 slotsInRow :: [Rect]
@@ -52,7 +76,15 @@ runInsertionIndexTest _ failed = do
 
 -- | Run @frames@ against a fixed order and rects, returning each result.
 drive :: Context -> [Int] -> [(Int, Rect)] -> [Input] -> IO [Reorder]
-drive ctx order items = mapM (\i -> evalUi ctx i (useReorder order items))
+drive ctx order items = mapM (\i -> evalUi ctx i (useReorder order (responses i items)))
+
+-- Synthetic owned responses isolate the reorder math from widget layout.
+responses :: Input -> [(Int, Rect)] -> [(Int, Response)]
+responses inp = map $ \(i, rect) -> (i, mempty
+  { rawRespRect = rect
+  , rawRespHeld = if heldIn MouseLeft inp && rectContains rect (inputMousePos inp)
+      then buttonsFromList [MouseLeft] else noButtons
+  })
 
 runReorderDragTest :: Context -> IORef Int -> IO ()
 runReorderDragTest ctx failed = do
@@ -128,7 +160,8 @@ runReorderPreviewStableTest ctx failed = do
     inp = withInput 400 200
     ui = do
       drawn <- liftIO (readIORef shown)
-      r <- useReorder [0 .. 4] (zip drawn slotsInRow)
+      input <- askInput
+      r <- useReorder [0 .. 4] (responses input (zip drawn slotsInRow))
       liftIO (writeIORef shown (reorderPreview r))
       pure r
     press = pressAt inp (V2 20 15)
