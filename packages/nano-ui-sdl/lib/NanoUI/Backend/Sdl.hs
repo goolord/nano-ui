@@ -69,7 +69,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Typeable (Typeable)
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
-import NanoUI.Sdl.Internal.Session (runSdlSession, runSdlSessionWith)
+import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
 import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Internal.Dialog
@@ -85,12 +85,12 @@ import NanoUI.Testing (runFrameReduce)
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = runSdlSession options (`sdlDrawFrame` ui)
 
--- | Set up a component once with explicit access to the SDL session. Retain
--- the environment in the returned view for dialogs, debug data or font changes.
-runSdlAppWith :: SdlOptions -> (SdlEnv -> IO (NanoUI ())) -> IO ()
-runSdlAppWith options setup = runSdlSessionWith options $ \env -> do
-  ui <- setup env
-  pure (`sdlDrawFrame` ui)
+-- | Run a view with application state constructed in IO before starting the
+-- session. The view receives the SDL environment for dialogs, debug data or
+-- font changes, together with the same application state on every frame.
+runSdlAppWith :: SdlOptions -> state -> (SdlEnv -> state -> NanoUI ()) -> IO ()
+runSdlAppWith options state view = runSdlSession options $ \ctx env inp forceFull ->
+  sdlDrawFrame ctx (view env state) env inp forceFull
 
 -- | Run a model-driven view, folding emitted messages through the update
 -- function in emission order. Messages of other runtime types are ignored.

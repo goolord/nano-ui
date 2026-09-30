@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 -- | nano-ui widget cookbook.
 --
 -- The whole showcase is one function, 'demoUi'. Every tab is a different
@@ -45,7 +47,9 @@
 
 module SdlDemo
     ( main
-     , newDemoUi
+     , DemoState
+     , newDemoState
+     , demoUi
     ) where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
@@ -116,12 +120,16 @@ main :: IO ()
 main = do
   args <- getArgs
   case dropWhile (/= "--record") args of
-    _ : dir : _ -> SdlRecord.record dir newDemoUi
+    _ : dir : _ -> do
+      state <- newDemoState
+      SdlRecord.record dir (\env -> demoUi env state)
     _ -> do
       let (updates, _, _) = getOpt Permute options args
       case sequence updates of
         Nothing -> putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
-        Just fs -> runSdlAppWith (foldl' (flip id) demoOptions fs) newDemoUi
+        Just fs -> do
+          state <- newDemoState
+          runSdlAppWith (foldl' (flip id) demoOptions fs) state demoUi
 
 ------------------------------------------------------------------------------
 -- §2  Assets & shared look
@@ -240,29 +248,28 @@ data DemoState = DemoState
   }
 
 -- | Construct a showcase instance before running its per-frame view.
-newDemoUi :: SdlEnv -> IO (NanoUI ())
-newDemoUi env = do
-  cells <- DemoState
-    <$> newState demoAccent
-    <*> newState 12
-    <*> newState 0xC0FF
-    <*> newState Nothing
-    <*> newState Nothing
-    <*> newState Nothing
-    <*> newState Nothing
-    <*> newState Nothing
-    <*> newState demoPeople
-    <*> newState [1, 2, 3]
-    <*> newState [1]
-    <*> newPlotCache
-    <*> newTask
-    <*> newTask
-    <*> mapM (const newImageHandle) demoSwatches
-    <*> newImageHandle
-    <*> newState []
-    <*> loadDemoSettings
-    <*> newIORef Nothing
-  pure (demoUi env cells)
+newDemoState :: IO DemoState
+newDemoState = do
+  demoAccentCell <- newState demoAccent
+  demoCountCell <- newState 12
+  demoMaskCell <- newState 0xC0FF
+  demoOpenCell <- newState Nothing
+  demoSaveCell <- newState Nothing
+  demoGifCell <- newState Nothing
+  demoIconsCell <- newState Nothing
+  demoFolderCell <- newState Nothing
+  demoPeopleCell <- newState demoPeople
+  demoDocsCell <- newState [1, 2, 3]
+  demoPinnedCell <- newState [1]
+  demoPlotCache <- newPlotCache
+  demoScreenshotTask <- newTask
+  demoDecodeTask <- newTask
+  demoSwatchImages <- mapM (const newImageHandle) demoSwatches
+  demoLandscapeImage <- newImageHandle
+  demoGifImagesCell <- newState []
+  demoSettingsValue <- loadDemoSettings
+  demoDebugText <- newIORef Nothing
+  pure DemoState {..}
 
 demoUi :: SdlEnv -> DemoState -> NanoUI ()
 demoUi env cells = do

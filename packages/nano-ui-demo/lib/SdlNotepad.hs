@@ -7,7 +7,9 @@
 -- Run with @cabal run nano-ui-sdl-notepad@.
 module SdlNotepad
   ( main
-  , newNotepadUi
+  , NotepadState
+  , newNotepadState
+  , notepadUi
   ) where
 
 import Control.Exception (SomeException, try)
@@ -30,31 +32,38 @@ import NanoUI.Shortcut
 --------------------------------------------------------------------------------
 
 main :: IO ()
-main =
+main = do
+  state <- newNotepadState
   runSdlAppWith
     defaultSdlOptions
       { -- A close request goes to the view, which may ask about unsaved changes.
         sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
-    newNotepadUi
+    state
+    notepadUi
 
 --------------------------------------------------------------------------------
 -- The application
 --------------------------------------------------------------------------------
 
--- | Allocate one notepad instance. Its document and dialog handles stay typed
--- in this closure; the returned view can be composed like any NanoUI action.
-newNotepadUi :: SdlEnv -> IO (NanoUI ())
-newNotepadUi env = do
-  doc <- newState emptyDocument
-  editor <- newState (WidgetId 0)
-  open <- newState Nothing
-  save <- newState Nothing
-  pure (notepadUi env doc editor open save)
+data NotepadState = NotepadState
+  !(StateCell TextDocument)
+  !(StateCell WidgetId)
+  !(StateCell (Maybe FileDialogId))
+  !(StateCell (Maybe FileDialogId))
 
-notepadUi :: SdlEnv -> StateCell TextDocument -> StateCell WidgetId -> StateCell (Maybe FileDialogId) -> StateCell (Maybe FileDialogId) -> NanoUI ()
-notepadUi env docCell editorCell openCell saveCell = do
+-- | Allocate the document and dialog state before starting the SDL session.
+newNotepadState :: IO NotepadState
+newNotepadState =
+  NotepadState
+    <$> newState emptyDocument
+    <*> newState (WidgetId 0)
+    <*> newState Nothing
+    <*> newState Nothing
+
+notepadUi :: SdlEnv -> NotepadState -> NanoUI ()
+notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
   ------------------------------------------------------------------ hooks ---
   (doc, setDoc) <- useState docCell
   (docPath, setDocPath) <- useText ""

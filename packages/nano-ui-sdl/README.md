@@ -19,14 +19,15 @@ main = runSdlApp defaultSdlOptions (label "Hello")
 with `NanoUI.Emit`. `SdlOptions` sets the window, fonts, font size, theme, and
 vsync.
 
-For SDL-specific operations, `runSdlAppWith` calls setup once with the typed
-session environment. Capture it in the returned view:
+For SDL-specific operations, `runSdlAppWith` passes the typed session
+environment and your application state to the view. Construct state in IO
+before starting the runner:
 
 ```haskell
-runSdlAppWith defaultSdlOptions $ \env -> do
+main = do
   pending <- newState Nothing
-  pure $ do
-    (_, setPending) <- useState pending
+  runSdlAppWith defaultSdlOptions pending $ \env pendingCell -> do
+    (_, setPending) <- useState pendingCell
     whenM (button "Open") $
       setPending =<< askOpenFileDialog env defaultFileDialogOptions
 ```

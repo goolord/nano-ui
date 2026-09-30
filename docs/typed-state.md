@@ -72,7 +72,9 @@ and nested views update their original form without an ambient prefix store.
 optional typed slot. Multiple slots of the same type are independent. Core
 window, sensor, paragraph, and SVG state has concrete context ownership.
 
-SDL-specific operations receive `SdlEnv` from `runSdlAppWith` setup. RGFW's
+`runSdlAppWith` passes `SdlEnv` and application state to the view; construct
+that state in IO before calling the runner. SDL-specific operations take
+the environment explicitly. RGFW's
 `runRgfwAppWith` and `runRgfwAppReduceCustomWith` supply a typed debug sampler.
 Ordinary runners serve views that need only the core API.
 
