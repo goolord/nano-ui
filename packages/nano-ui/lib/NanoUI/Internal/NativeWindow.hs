@@ -28,6 +28,10 @@ module NanoUI.Internal.NativeWindow
   , WindowState (..)
   , defaultWindowState
   , askWindow
+  , WindowCapabilities (..)
+  , noWindowCapabilities
+  , allWindowCapabilities
+  , askWindowCapabilities
 
     -- * From a view
   , setWindowTitleUi
@@ -143,11 +147,28 @@ askWindow = do
         writeIORef (nwStateRead nw) True
         (\st -> st {winSize = size}) <$> readIORef (nwState nw)
 
--- | A host that does nothing.
+-- | What a host supports, for a view to check before offering a control
+-- ('WindowCapabilities'). Nothing without a window, as under a test context.
+askWindowCapabilities :: NanoUI WindowCapabilities
+askWindowCapabilities =
+  withContext $ \ctx ->
+    maybe noWindowCapabilities (hostCapabilities . nwHost) <$> askHostIO (ctxNativeWindow ctx)
+
+-- | Supports no request.
+noWindowCapabilities :: WindowCapabilities
+noWindowCapabilities = WindowCapabilities False False False False False False False False False
+
+-- | Supports every request.
+allWindowCapabilities :: WindowCapabilities
+allWindowCapabilities = WindowCapabilities True True True True True True True True True
+
+-- | A host that does nothing and says so ('noWindowCapabilities'). A backend
+-- updates it with the operations it has and sets 'hostCapabilities' to match.
 defaultWindowHost :: WindowHost
 defaultWindowHost =
   WindowHost
-    { hostSetTitle = \_ -> pure ()
+    { hostCapabilities = noWindowCapabilities
+    , hostSetTitle = \_ -> pure ()
     , hostSetIcon = \_ -> pure ()
     , hostSetMinSize = \_ -> pure ()
     , hostSetMaxSize = \_ -> pure ()

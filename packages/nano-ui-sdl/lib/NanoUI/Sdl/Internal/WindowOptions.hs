@@ -12,10 +12,11 @@ import Data.Bits (zeroBits, (.&.))
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Int (Int32)
 import Data.IORef (IORef, readIORef, writeIORef)
+import Data.Maybe (isNothing)
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (RgbaPixels, Size (..), WindowMode (..), rgbaBytes, rgbaHeight, rgbaWidth)
-import NanoUI.Backend (WindowHost (..), WindowState (..), defaultWindowState, sizeLimitAt)
+import NanoUI.Backend (WindowCapabilities (..), WindowHost (..), WindowState (..), allWindowCapabilities, defaultWindowState, sizeLimitAt)
 import NanoUI.Sdl.Internal.Display (outPair, queryWindowPosition, sendWaylandSizeLimits, windowPosCentered)
 import NanoUI.Sdl.Internal.Frame (nativeFrameOutset)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
@@ -34,7 +35,9 @@ import SDL3.Sys.Video qualified as SDL
 windowHostFor :: Ptr SDL_Window -> IO Float -> Maybe (IORef (Int32, Int32, Int32, Int32)) -> WindowHost
 windowHostFor win zoom limits =
   WindowHost
-    { hostSetTitle = \t -> TextForeign.withCString t (void . SDL.setWindowTitleSafe win . PtrConst.unsafeFromPtr)
+    { -- A Wayland toplevel cannot place itself.
+      hostCapabilities = allWindowCapabilities {wcMove = isNothing limits}
+    , hostSetTitle = \t -> TextForeign.withCString t (void . SDL.setWindowTitleSafe win . PtrConst.unsafeFromPtr)
     , hostSetIcon = setIcon win
     , hostSetMinSize = sizeLimit SDL.setWindowMinimumSizeSafe (\(w, h) (_, _, xw, xh) -> (w, h, raiseMax w xw, raiseMax h xh))
     , hostSetMaxSize = sizeLimit SDL.setWindowMaximumSizeSafe (\(w, h) (nw, nh, _, _) -> (lowerMin nw w, lowerMin nh h, w, h))

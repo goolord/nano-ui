@@ -1082,6 +1082,8 @@ module NanoUI
   , WindowMode (..)
   , WindowState (..)
   , askWindow
+  , WindowCapabilities (..)
+  , askWindowCapabilities
   , setWindowTitleUi
   , setWindowIconUi
   , setWindowMinSizeUi

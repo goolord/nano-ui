@@ -54,8 +54,10 @@ import NanoUI.Backend
   , Input (..)
   , Key (..)
   , Modifiers (..)
+  , WindowCapabilities (..)
   , WindowHost (..)
   , WindowState (..)
+  , allWindowCapabilities
   , answerScreenshots
   , cancelTasks
   , closeWindowHost
@@ -345,7 +347,8 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
             p -> p
       installWindowHost ctx settings {wsPosition = place} $
         defaultWindowHost
-          { hostSetTitle = R.setWindowName win
+          { hostCapabilities = allWindowCapabilities {wcOpacity = False}
+          , hostSetTitle = R.setWindowName win
           , hostSetIcon = \p -> void (R.setWindowIcon win (rgbaWidth p) (rgbaHeight p) (rgbaBytes p))
           , hostSetMinSize = limit R.setWindowMinSize
           , hostSetMaxSize = limit R.setWindowMaxSize

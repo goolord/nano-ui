@@ -23,7 +23,18 @@ tests =
   , spec "native-window-screenshot-lifecycle" runScreenshotLifecycleTest
   , spec "native-window-screenshot-failures" runScreenshotFailuresTest
   , spec "native-window-setter-retry" runSetterRetryTest
+  , spec "native-window-capabilities" runCapabilitiesTest
   ]
+
+-- | A view learns which requests the window carries out: none without a
+-- host, and what the installed host declares.
+runCapabilitiesTest :: Context -> IORef Int -> IO ()
+runCapabilitiesTest ctx failed = do
+  assertEq failed noWindowCapabilities =<< warmup2 ctx inp askWindowCapabilities
+  let caps = allWindowCapabilities {wcMove = False}
+  installWindowHost ctx defaultWindowSettings defaultWindowHost {hostCapabilities = caps}
+  assertEq failed caps =<< warmup2 ctx inp askWindowCapabilities
+  closeWindowHost ctx
 
 inp :: Input
 inp = withInput 200 100

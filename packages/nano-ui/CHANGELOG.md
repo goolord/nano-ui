@@ -74,6 +74,12 @@
   Backend runners close the screenshot host during teardown; custom hosts use
   `closeWindowHost`. `answerScreenshotsAfter` supports pre-present readback with
   post-present callbacks.
+- `askWindowCapabilities` tells a view which window requests its backend
+  carries out (`WindowCapabilities`), instead of unsupported ones silently
+  doing nothing: RGFW cannot fade, and SDL on Wayland cannot place a window.
+  **Breaking:** `WindowHost` has a `hostCapabilities` field;
+  `defaultWindowHost` declares none, and `allWindowCapabilities` and
+  `noWindowCapabilities` start a backend's declaration.
 - Native setters cache a new value only after the host callback succeeds, so
   a failed request can be retried. RGBA byte-count validation avoids overflow.
 

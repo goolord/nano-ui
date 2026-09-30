@@ -262,7 +262,9 @@ module NanoUI.Backend
     -- 'installWindowHost', which applies the remaining settings through the
     -- 'WindowHost'. The host carries out view requests such as
     -- 'NanoUI.setWindowTitleUi' and 'NanoUI.moveWindowUi'. Build it by
-    -- updating 'defaultWindowHost', so fields added later are no-ops.
+    -- updating 'defaultWindowHost', so fields added later are no-ops, and
+    -- set 'hostCapabilities' to the operations it carries out, which views
+    -- read with 'NanoUI.askWindowCapabilities'.
     --
     -- Each frame, before the view runs, report the window's scale, position,
     -- focus and mode with 'reportWindowState' (views read it with
@@ -280,6 +282,9 @@ module NanoUI.Backend
     -- view clears the request ('clearWindowClose').
   , WindowHost (..)
   , defaultWindowHost
+  , WindowCapabilities (..)
+  , noWindowCapabilities
+  , allWindowCapabilities
   , installWindowHost
   , closeWindowHost
   , sizeLimitAt
@@ -335,7 +340,10 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
 import NanoUI.Internal.NativeWindow
   ( WindowHost (..)
+  , WindowCapabilities (..)
   , WindowState (..)
+  , allWindowCapabilities
+  , noWindowCapabilities
   , answerScreenshots
   , answerScreenshotsAfter
   , closeWindowHost

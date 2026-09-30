@@ -7,6 +7,7 @@ module NanoUI.Internal.NativeWindow.Types
   , WindowMode (..)
   , WindowState (..)
   , WindowHost (..)
+  , WindowCapabilities (..)
   , NativeWindow (..)
   )
 where
@@ -94,7 +95,9 @@ data WindowState = WindowState
 -- | Backend operations invoked on the UI thread. Sizes are in layout units;
 -- zero axes or absent size limits mean unlimited. Build from defaultWindowHost.
 data WindowHost = WindowHost
-  { hostSetTitle :: Text -> IO ()
+  { hostCapabilities :: !WindowCapabilities
+  -- ^ The requests this host carries out; the rest do nothing.
+  , hostSetTitle :: Text -> IO ()
   , hostSetIcon :: RgbaPixels -> IO ()
   , hostSetMinSize :: Maybe Size -> IO ()
   , hostSetMaxSize :: Maybe Size -> IO ()
@@ -107,6 +110,35 @@ data WindowHost = WindowHost
   , hostMaximize :: IO ()
   , hostRestore :: IO ()
   }
+
+-- | Which window requests a backend carries out on this platform. A request
+-- it does not support does nothing, and the window's state
+-- ('NanoUI.askWindow') stays as it was, so check before offering a control
+-- for it. Even a supported request can be refused or adjusted by the desktop;
+-- the reported state says what happened.
+data WindowCapabilities = WindowCapabilities
+  { wcTitle :: !Bool
+  -- ^ 'NanoUI.setWindowTitleUi'.
+  , wcIcon :: !Bool
+  -- ^ 'NanoUI.setWindowIconUi'.
+  , wcSizeLimits :: !Bool
+  -- ^ 'NanoUI.setWindowMinSizeUi' and 'NanoUI.setWindowMaxSizeUi'.
+  , wcOpacity :: !Bool
+  -- ^ 'NanoUI.setWindowOpacityUi'.
+  , wcMode :: !Bool
+  -- ^ 'NanoUI.setWindowModeUi'.
+  , wcMove :: !Bool
+  -- ^ 'NanoUI.moveWindowUi' and 'NanoUI.centerWindowUi'. Not on Wayland,
+  -- where only the compositor places windows.
+  , wcResize :: !Bool
+  -- ^ 'NanoUI.resizeWindowUi'.
+  , wcMinimize :: !Bool
+  -- ^ 'NanoUI.minimizeWindowUi'.
+  , wcMaximize :: !Bool
+  -- ^ 'NanoUI.maximizeWindowUi', 'NanoUI.restoreWindowUi' and
+  -- 'NanoUI.toggleMaximizedUi'.
+  }
+  deriving (Eq, Show)
 
 -- | Concrete session-owned host, last settings/state, and pending callbacks.
 data NativeWindow = NativeWindow
