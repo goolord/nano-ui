@@ -16,9 +16,9 @@
 -- Inputs are controlled: the widget's value outlives the frame only because
 -- you persist it and pass it back. Primitive @use*@ hooks keep local state
 -- by widget identity and must be called in the same order every frame.
--- 'newDemo' captures explicitly owned state and resources in the view's
--- closure. All hooks sit together at the top of 'demoUi', even for tabs
--- that are currently hidden.
+-- 'newDemo' allocates explicitly owned state and resources once, and 'main'
+-- passes them to 'demoUi'. All hooks sit together at the top of 'demoUi',
+-- even for tabs that are currently hidden.
 --
 -- Style is expressed as layout-style functions threaded through the container
 -- widget: columnWith (padAll 6 . gap 8 . fillW) $...  Text widgets compose
@@ -48,7 +48,9 @@
 
 module SdlDemo
     ( main
-     , newDemo
+    , DemoState
+    , newDemo
+    , demoUi
     ) where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
@@ -121,15 +123,15 @@ main = do
   args <- getArgs
   case dropWhile (/= "--record") args of
     _ : dir : _ -> do
-      view <- newDemo
-      SdlRecord.record dir view
+      state <- newDemo
+      SdlRecord.record dir (demoUi state)
     _ -> do
       let (updates, _, _) = getOpt Permute options args
       case sequence updates of
         Nothing -> putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
         Just fs -> do
-          view <- newDemo
-          runSdlAppWith (foldl' (flip id) demoOptions fs) view
+          state <- newDemo
+          runSdlApp (foldl' (flip id) demoOptions fs) (demoUi state)
 
 ------------------------------------------------------------------------------
 -- §2  Assets & shared look
@@ -250,9 +252,9 @@ data DemoState = DemoState
   , demoDebugText :: !(IORef (Maybe CachedDebugText))
   }
 
--- | Construct a showcase view with private state and resources.
--- Call once per instance before running its per-frame view.
-newDemo :: IO (SdlEnv -> NanoUI ())
+-- | Allocate a showcase's private state and resources. Call once per
+-- instance, before the session, and draw it with 'demoUi'.
+newDemo :: IO DemoState
 newDemo = do
   demoAccentCell <- newState demoAccent
   demoCountCell <- newState 12
@@ -273,11 +275,10 @@ newDemo = do
   demoGifImagesCell <- newState []
   demoSettingsValue <- loadDemoSettings
   demoDebugText <- newIORef Nothing
-  let state = DemoState {..}
-  pure $ \env -> demoUi env state
+  pure DemoState {..}
 
-demoUi :: SdlEnv -> DemoState -> NanoUI ()
-demoUi env cells = do
+demoUi :: DemoState -> NanoUI ()
+demoUi cells = do
   let DemoSettings demoFontFamilies debugOpenFromEnv = demoSettingsValue cells
   ---------------------------------------------------------------- hooks ---
   -- Toolbar / overlays.
@@ -325,9 +326,9 @@ demoUi env cells = do
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
   (folderPath, setFolderPath) <- useText ""
-  useFileDialog env openDlg setOpenDlg (setOpenPath . T.intercalate ", " . map T.pack)
-  useFileDialog env saveDlg setSaveDlg (setSavePath . maybe "" T.pack . listToMaybe)
-  useFileDialog env folderDlg setFolderDlg (setFolderPath . maybe "" T.pack . listToMaybe)
+  useFileDialog openDlg setOpenDlg (setOpenPath . T.intercalate ", " . map T.pack)
+  useFileDialog saveDlg setSaveDlg (setSavePath . maybe "" T.pack . listToMaybe)
+  useFileDialog folderDlg setFolderDlg (setFolderPath . maybe "" T.pack . listToMaybe)
   -- List tab.
   (searchText, setSearchText) <- useText "" -- live searchInput text
   (searchQuery, setSearchQuery) <- useText "" -- committed searchInput value
@@ -354,7 +355,7 @@ demoUi env cells = do
   -- Diagnostics tab: last raw drop event (files/text/paths).
   (dropRaw, setDropRaw) <- useText ""
   rawInp <- askInput
-  dbg <- debugText (demoDebugText cells) =<< askSdlDebug env
+  dbg <- maybe (pure noDebugText) (debugText (demoDebugText cells)) =<< askSdlDebug
   let wideWorkspace = sizeW (inputWindowSize rawInp) >= 1000
       inspectorWidth = if wideWorkspace then fixedW 280 else fillW
       volText = T.pack (show (round vol :: Int))
@@ -479,7 +480,7 @@ demoUi env cells = do
                   tooltip fResp "Type to filter; Enter applies, Esc reverts."
                   setFontChoice fVal
                   when (respChanged fResp && not (T.null fVal)) $
-                    setSdlUiFont env (FontSearch [T.unpack fVal])
+                    setSdlUiFont (FontSearch [T.unpack fVal])
                   separator
                   heading "Accent"
                   muted "Choose a color or enter an exact value."
@@ -507,9 +508,9 @@ demoUi env cells = do
               heading "File Dialogs"
               rowWith (tight . gap gapInline . fillW) $ do
                 whenM (button "Open File…") $
-                  setOpenDlg . Just =<< askOpenFileDialog env defaultFileDialogOptions {dialogAllowMany = True}
-                whenM (button "Save File…") (setSaveDlg . Just =<< askSaveFileDialog env defaultFileDialogOptions)
-                whenM (button "Browse Folder…") (setFolderDlg . Just =<< askOpenFolderDialog env defaultFileDialogOptions)
+                  setOpenDlg . Just =<< askOpenFileDialog defaultFileDialogOptions {dialogAllowMany = True}
+                whenM (button "Save File…") (setSaveDlg . Just =<< askSaveFileDialog defaultFileDialogOptions)
+                whenM (button "Browse Folder…") (setFolderDlg . Just =<< askOpenFolderDialog defaultFileDialogOptions)
               separator
               -- Drag & drop: dropZone returns a target; dropReceived reports its
               -- files and texts. dropHovering mirrors the hover state for styling.
@@ -1133,6 +1134,10 @@ data DebugText = DebugText
 -- The backend samples at 4 Hz. Share the formatted text between samples
 -- instead of running printf for every field on every continuous frame.
 data CachedDebugText = CachedDebugText !SdlDebugSnapshot !DebugText
+
+-- | What the readouts show outside an SDL session.
+noDebugText :: DebugText
+noDebugText = DebugText T.empty [] [] [] [] []
 
 debugText :: IORef (Maybe CachedDebugText) -> SdlDebugSnapshot -> NanoUI DebugText
 debugText ref s =

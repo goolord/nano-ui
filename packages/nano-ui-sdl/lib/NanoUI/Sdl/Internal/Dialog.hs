@@ -43,8 +43,8 @@ import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
 import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr, freeStablePtr, newStablePtr)
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
 import NanoUI.Sdl.Internal.DialogState
-import NanoUI.Sdl.Internal.Window (SdlEnv (..))
-import NanoUI.Monad (NanoUI)
+import NanoUI.Sdl.Internal.Window (SdlEnv (..), askSdlEnv)
+import NanoUI.Internal.Monad (NanoUI, askContext)
 import NanoUI.Testing (Context, markDirty, liftIO)
 import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -129,24 +129,35 @@ cancelFileDialog :: SdlEnv -> FileDialogId -> IO ()
 cancelFileDialog env (FileDialogId owner ref) =
   when (owner == sdlCachedCtx env) (atomicWriteIORef ref FileDialogUnknown)
 
--- | Open-file dialog, usable from within 'NanoUI' widget code. Returns
--- a handle owned by the supplied SDL session.
-askOpenFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI FileDialogId
-askOpenFileDialog env opts = liftIO (openFileDialog env opts)
+-- | Open an open-file dialog from a view, owned by the open SDL session.
+-- Outside a session the handle reports 'FileDialogFailed'.
+askOpenFileDialog :: FileDialogOptions -> NanoUI FileDialogId
+askOpenFileDialog = askDialog OpenDialog
 
--- | Save-file dialog, usable from within 'NanoUI' widget code. Returns
--- a handle owned by the supplied SDL session.
-askSaveFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI FileDialogId
-askSaveFileDialog env opts = liftIO (saveFileDialog env opts)
+-- | 'askOpenFileDialog' for a save-file dialog.
+askSaveFileDialog :: FileDialogOptions -> NanoUI FileDialogId
+askSaveFileDialog = askDialog SaveDialog
 
--- | Folder dialog, usable from within 'NanoUI' widget code. Returns
--- a handle owned by the supplied SDL session.
-askOpenFolderDialog :: SdlEnv -> FileDialogOptions -> NanoUI FileDialogId
-askOpenFolderDialog env opts = liftIO (openFolderDialog env opts)
+-- | 'askOpenFileDialog' for a folder dialog.
+askOpenFolderDialog :: FileDialogOptions -> NanoUI FileDialogId
+askOpenFolderDialog = askDialog FolderDialog
 
--- | Consuming poll, with the same focus restoration as 'pollFileDialog'.
-pollFileDialogUi :: SdlEnv -> FileDialogId -> NanoUI FileDialogResult
-pollFileDialogUi env = liftIO . pollFileDialog env
+askDialog :: DialogKind -> FileDialogOptions -> NanoUI FileDialogId
+askDialog kind opts =
+  askSdlEnv >>= \case
+    Just env -> liftIO (launchDialog env kind opts)
+    Nothing -> do
+      owner <- liftIO . newIORef =<< askContext
+      liftIO (FileDialogId owner <$> newIORef FileDialogFailed)
+
+-- | Consuming poll from a view, with the same focus restoration as
+-- 'pollFileDialog'. Outside a session it consumes the handle's result
+-- without touching a window.
+pollFileDialogUi :: FileDialogId -> NanoUI FileDialogResult
+pollFileDialogUi did@(FileDialogId _ ref) =
+  askSdlEnv >>= \case
+    Just env -> liftIO (pollFileDialog env did)
+    Nothing -> liftIO (takeResult ref)
 
 -- | Observe without consuming or restoring focus. Repeated peeks report the
 -- same result until 'pollFileDialogUi' consumes it. Use polling for actions

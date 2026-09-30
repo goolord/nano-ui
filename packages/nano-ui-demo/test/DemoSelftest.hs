@@ -42,9 +42,9 @@ import SdlDemo qualified
 -- widget interactions, failing loudly on any regression.
 selftest :: Bool -> IO ()
 selftest continuous = do
-  view <- SdlDemo.newDemo
+  state <- SdlDemo.newDemo
   withHiddenWindow 1280 800 (V2 640 400) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env idle -> do
-    let demoUi = view env
+    let demoUi = SdlDemo.demoUi state
     -- The shaped path (fmShape / pushText) must match SDL3_ttf's run widths,
     -- including GPOS kerning and ligatures (To, AV, fi).
     let checkRun :: Float -> FontStyle -> String -> IO ()
@@ -249,7 +249,7 @@ selftest continuous = do
     -- backend refresh rather than freezing the first snapshot in the cache.
     sampledDraws <- newIORef 0
     let observeDebug = do
-          snapshot <- askSdlDebug env
+          snapshot <- maybe (liftIO (ioError (userError "selftest: no SDL session for the debug readout"))) pure =<< askSdlDebug
           liftIO $ writeIORef sampledDraws (dbgPresents (dbgCore snapshot))
           demoUi
     drawWith observeDebug base

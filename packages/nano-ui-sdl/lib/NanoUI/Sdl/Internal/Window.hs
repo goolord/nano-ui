@@ -10,6 +10,8 @@ module NanoUI.Sdl.Internal.Window
   , defaultSdlOptions
   , withSdl
   , withSdlBench
+  , askSdlEnv
+  , withSdlEnv
   , syncDisplay
   , windowZoom
   , saveScreenshot
@@ -29,7 +31,8 @@ import Data.ByteString.Internal qualified as BSI
 import Data.Foldable (for_)
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust, isNothing)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import System.IO.Unsafe (unsafePerformIO)
 import System.Environment (lookupEnv)
 import System.Info (os)
 import Text.Read (readMaybe)
@@ -41,7 +44,7 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import NanoUI (Appearance, ImageId, Input (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
+import NanoUI (Appearance, ImageId, Input (..), NanoUI, RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
 import NanoUI.Backend (cancelTasks, closeWindowHost, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, withClipboard)
@@ -454,13 +457,35 @@ withSdlWindow bench opts ctx act =
     for_ requested (setSdlHint sDL_HINT_RENDER_DRIVER)
     fontSource <- resolveNanoUIFont (sdlAppFont opts)
     monoSource <- resolveNanoUIFont (sdlAppMonoFont opts)
-    Acquire.with (startSdlWindow bench opts ctx guessed fontSource monoSource) (uncurry act)
+    Acquire.with (startSdlWindow bench opts ctx guessed fontSource monoSource) $ \(ctx', env) ->
+      bracket (atomicModifyIORef' liveSession (\outer -> (Just env, outer))) (writeIORef liveSession) $ \_ ->
+        act ctx' env
   where
     -- SDL's GL renderer -- what 'RenderDriverAuto' asks for on Windows --
     -- keeps its context current on the OS thread that created it, and the
     -- same thread pumps the window's messages. An unbound caller can be moved
     -- between OS threads across a safe foreign call, so pin the session to one.
     inBoundThread a = if rtsSupportsBoundThreads then runInBoundThread a else a
+
+-- | The environment of the SDL session that is open, if any. SDL runs one
+-- video session at a time on its display thread, so views reach theirs here
+-- rather than being handed it. A session opened inside another restores the
+-- outer one when it closes.
+{-# NOINLINE liveSession #-}
+liveSession :: IORef (Maybe SdlEnv)
+liveSession = unsafePerformIO (newIORef Nothing)
+
+-- | The open session's environment, for a view that wants the IO-level SDL
+-- operations ('NanoUI.Sdl.Internal.Dialog.openFileDialog' and the like) or
+-- to hand the environment to a thread. 'Nothing' outside a session, as
+-- under a test context. View-side SDL operations find it themselves.
+askSdlEnv :: NanoUI (Maybe SdlEnv)
+askSdlEnv = liftIO (readIORef liveSession)
+
+-- | Run with the open session's environment, or answer @outside@ when no
+-- session is open.
+withSdlEnv :: a -> (SdlEnv -> NanoUI a) -> NanoUI a
+withSdlEnv outside k = askSdlEnv >>= maybe (pure outside) k
 
 startSdlWindow ::
   Bool -> SdlOptions -> Context -> Bool -> FontSource -> FontSource -> Acquire (Context, SdlEnv)

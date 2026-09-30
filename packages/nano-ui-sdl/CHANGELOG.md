@@ -7,8 +7,8 @@
   `NanoUI.Sdl.Internal.Window`; ordinary views use the session operations.
 
 - **Breaking:** `FileDialogId` is opaque and session-owned. `pollFileDialogUi`
-  takes the session environment and consumes results once, restoring window
-  focus just like `pollFileDialog`. Use `peekFileDialogUi` for observation.
+  consumes results once, restoring window focus just like `pollFileDialog`.
+  Use `peekFileDialogUi` for observation.
   Dialog launch helpers return `FileDialogId`, not an always-`Just` value;
   failures are reported through `FileDialogFailed` when polled.
 
@@ -18,16 +18,20 @@
 - **Breaking:** `runSdlAppReduce` takes `model -> NanoUIE msg ()` from the new
   `nano-ui-emit` package, without `Typeable` or runtime message filtering.
 
-- **Breaking:** SDL-specific debug, font/scale, dialog launch, and chrome
-  helpers take `SdlEnv` explicitly. `runSdlAppWith` takes an
-  `SdlEnv -> NanoUI ()` view; capture application state in its closure.
-  Dialog polling takes the same environment;
-  the session no longer installs itself in a dynamic host registry.
+- **Breaking:** views never handle `SdlEnv`. The open session's view-side
+  operations find it themselves: `askOpenFileDialog`, `askSaveFileDialog`,
+  `askOpenFolderDialog`, `pollFileDialogUi`, `setSdlUiFont`, `setSdlUiScale`,
+  `windowCaption`, `windowCaptionWith` and `setWindowChromeUi` lost their
+  environment argument, and `askSdlDebug` answers `Maybe SdlDebugSnapshot`.
+  Outside a session they do nothing (a dialog reports `FileDialogFailed`).
+  Removed `runSdlAppWith` and `runSdlAppReduceWith`: allocate state once in
+  IO, pass it to the view, and run it with `runSdlApp` or `runSdlAppReduce`.
+  `askSdlEnv` opts into the explicit session for the IO-level operations.
 
 ### Added
 
-- `runSdlAppReduceWith` supplies the live SDL environment to typed reducer
-  views, preserving access to dialogs, debug information and window chrome.
+- `clearWindowChromeUi`, `setWindowDecorationsUi` and `setWindowShadowUi`
+  from a view, and `sdlDebugSnapshot` for an explicit session from IO.
 
 - Everything a window without the desktop's title bar has to do for itself.
   `windowCaption` is the whole of it in one call from a view -- it draws the

@@ -2,7 +2,6 @@
 module NanoUI.Backend.Sdl
   ( RgbaImage (..)
   , SdlDebugSnapshot (..)
-  , SdlEnv
   , SdlOptions (..)
   , RenderDriver (..)
   , askSdlDebug
@@ -24,6 +23,14 @@ module NanoUI.Backend.Sdl
   , askOpenFolderDialog
   , pollFileDialogUi
   , peekFileDialogUi
+    -- * Explicit sessions
+
+    -- | View-side operations find the open session themselves. For the
+    -- IO-level ones above ('openFileDialog', 'pollFileDialog') and below, or
+    -- to hand the session to another thread, take it with 'askSdlEnv'.
+  , SdlEnv
+  , askSdlEnv
+  , sdlDebugSnapshot
     -- * External URLs
   , openUrl
     -- * The window
@@ -40,7 +47,9 @@ module NanoUI.Backend.Sdl
   , windowResizable
   , WindowDecorations (..)
   , setWindowDecorations
+  , setWindowDecorationsUi
   , setWindowShadow
+  , setWindowShadowUi
 
     -- * Window chrome
   , WindowChrome (..)
@@ -48,6 +57,7 @@ module NanoUI.Backend.Sdl
   , defaultResizeBorder
   , setWindowChrome
   , clearWindowChrome
+  , clearWindowChromeUi
   , CaptionOptions (..)
   , defaultCaptionOptions
   , windowCaption
@@ -56,9 +66,7 @@ module NanoUI.Backend.Sdl
   , NanoUIFont (..)
   , listFontFamilies
   , runSdlApp
-  , runSdlAppWith
   , runSdlAppReduce
-  , runSdlAppReduceWith
   , sdlDrawFrame
   , syncDisplay
   , withSdl
@@ -69,10 +77,10 @@ module NanoUI.Backend.Sdl
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
-import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
+import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDebugSnapshot, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv, SdlOptions (..), captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
+import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv, SdlOptions (..), askSdlEnv, captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Internal.Dialog
 import NanoUI.Sdl.Internal.Chrome
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
@@ -82,16 +90,17 @@ import NanoUI.Emit (NanoUIE, runFrameReduce)
 
 -- | Open an SDL window and run a view until close or the quit predicate fires.
 -- Owns and releases the native resources. Call from the application's display
--- thread; the view is rebuilt for each requested frame.
+-- thread; the view is rebuilt for each requested frame. Allocate owned state
+-- once in IO first and pass it to the view:
+--
+-- > main = do
+-- >   state <- newEditor
+-- >   runSdlApp defaultSdlOptions (editorUi state)
+--
+-- SDL-specific view operations (file dialogs, fonts, window chrome, debug
+-- data) act on this session without being handed it.
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = runSdlSession options (`sdlDrawFrame` ui)
-
--- | Run a view that receives the SDL environment for dialogs, debug data or
--- font changes. Application state can be captured in the view's closure;
--- allocate any owned state once in IO before starting the session.
-runSdlAppWith :: SdlOptions -> (SdlEnv -> NanoUI ()) -> IO ()
-runSdlAppWith options view = runSdlSession options $ \ctx env inp forceFull ->
-  sdlDrawFrame ctx (view env) env inp forceFull
 
 -- | Run a model-driven view, folding emitted messages through the update
 -- function in emission order. The view's message type must match the reducer.
@@ -103,22 +112,10 @@ runSdlAppReduce ::
   -> model
   -> (model -> NanoUIE msg ())
   -> IO ()
-runSdlAppReduce options update model view = runSdlAppReduceWith options update model (const view)
-
--- | 'runSdlAppReduce' with the live SDL environment, for reducer views using
--- dialogs, debug information, custom chrome or font changes. The environment
--- is valid only inside this session; application state stays in the closure.
-runSdlAppReduceWith ::
-  Eq model =>
-  SdlOptions
-  -> (msg -> model -> model)
-  -> model
-  -> (SdlEnv -> model -> NanoUIE msg ())
-  -> IO ()
-runSdlAppReduceWith options update model view = do
+runSdlAppReduce options update model view = do
   modelRef <- newIORef model
   runSdlSession options $ \ctx env inp forceFull ->
     drawFrameWith ctx env inp forceFull $ do
       m <- readIORef modelRef
-      (_, m', _, drawData, dirty) <- runFrameReduce update ctx inp m (view env)
+      (_, m', _, drawData, dirty) <- runFrameReduce update ctx inp m view
       (drawData, dirty) <$ writeIORef modelRef m'

@@ -16,14 +16,16 @@
 -- >     flex
 -- >     label "My App"
 -- >     flex
--- >     closing <- windowCaption env menus
+-- >     closing <- windowCaption menus
 -- >     when closing quitUi
 module NanoUI.Sdl.Internal.Chrome
   ( -- * The window
     windowResizable
   , WindowDecorations (..)
   , setWindowDecorations
+  , setWindowDecorationsUi
   , setWindowShadow
+  , setWindowShadowUi
 
     -- * A window that draws its own chrome
   , WindowChrome (..)
@@ -31,6 +33,7 @@ module NanoUI.Sdl.Internal.Chrome
   , defaultResizeBorder
   , setWindowChrome
   , clearWindowChrome
+  , clearWindowChromeUi
 
     -- * From a view
   , CaptionOptions (..)
@@ -42,6 +45,7 @@ module NanoUI.Sdl.Internal.Chrome
 
 import Control.Monad (void, when)
 import Data.Bits (zeroBits, (.&.))
+import Data.Foldable (for_)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isNothing)
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
@@ -52,7 +56,7 @@ import NanoUI
 import NanoUI.Sdl.Internal.Chrome.Types
 import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Frame
-import NanoUI.Sdl.Internal.Window (SdlEnv (..), windowZoom)
+import NanoUI.Sdl.Internal.Window (SdlEnv (..), askSdlEnv, windowZoom, withSdlEnv)
 import SDL3.Sys.Bindgen.Video (SDL_HitTest (..), SDL_HitTestResult (..), SDL_WindowFlags)
 import SDL3.Sys.Video qualified as SDL
 
@@ -197,9 +201,10 @@ edgeHit left right top bottom
 -- three the application has to decide: the other two are the window's own
 -- and are already done.
 --
--- The environment is supplied by the session's setup callback.
-windowCaption :: SdlEnv -> [Rect] -> NanoUI Bool
-windowCaption env = windowCaptionWith env defaultCaptionOptions
+-- Outside an SDL session the buttons still draw and act through the core
+-- window requests, and no drag region is handed over.
+windowCaption :: [Rect] -> NanoUI Bool
+windowCaption = windowCaptionWith defaultCaptionOptions
 
 -- | What the caption hands the desktop, beside the buttons themselves.
 data CaptionOptions = CaptionOptions
@@ -223,10 +228,11 @@ defaultCaptionOptions =
     }
 
 -- | 'windowCaption' with buttons and edges of your own.
-windowCaptionWith :: SdlEnv -> CaptionOptions -> [Rect] -> NanoUI Bool
-windowCaptionWith env opts taken = do
+windowCaptionWith :: CaptionOptions -> [Rect] -> NanoUI Bool
+windowCaptionWith opts taken = do
   width <- windowWidth
-  flags <- liftIO (windowFlagsOf env)
+  session <- askSdlEnv
+  flags <- maybe (pure zeroBits) (liftIO . windowFlagsOf) session
   let maxed = hasFlag SDL.SDL_WINDOW_MAXIMIZED flags
       fullscreen = hasFlag SDL.SDL_WINDOW_FULLSCREEN flags
       immovable = maxed || fullscreen || not (hasFlag SDL.SDL_WINDOW_RESIZABLE flags)
@@ -237,7 +243,7 @@ windowCaptionWith env opts taken = do
         | otherwise = capButtons opts
   (action, buttons) <- captionButtonsConfigured cfg maxed
   liftIO $
-    when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
+    for_ session $ \env -> when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
       setWindowChrome
         env
         WindowChrome
@@ -257,5 +263,17 @@ windowCaptionWith env opts taken = do
 -- | Hand the window's chrome regions over from within a view. 'windowCaption'
 -- does this for a view that draws the usual three buttons; this is for one
 -- that draws something else.
-setWindowChromeUi :: SdlEnv -> WindowChrome -> NanoUI ()
-setWindowChromeUi env chrome = liftIO (setWindowChrome env chrome)
+setWindowChromeUi :: WindowChrome -> NanoUI ()
+setWindowChromeUi chrome = withSdlEnv () (\env -> liftIO (setWindowChrome env chrome))
+
+-- | 'clearWindowChrome' from a view.
+clearWindowChromeUi :: NanoUI ()
+clearWindowChromeUi = withSdlEnv () (liftIO . clearWindowChrome)
+
+-- | 'setWindowDecorations' from a view.
+setWindowDecorationsUi :: WindowDecorations -> NanoUI ()
+setWindowDecorationsUi d = withSdlEnv () (\env -> liftIO (setWindowDecorations env d))
+
+-- | 'setWindowShadow' from a view.
+setWindowShadowUi :: Bool -> NanoUI ()
+setWindowShadowUi on = withSdlEnv () (\env -> liftIO (setWindowShadow env on))

@@ -3,6 +3,7 @@ module NanoUI.Sdl.Internal.Runner
   ( sdlDrawFrame
   , drawFrameWith
   , askSdlDebug
+  , sdlDebugSnapshot
   , setSdlUiFont
   , setSdlUiScale
   ) where
@@ -24,7 +25,7 @@ import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
-import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), captureFrame, windowZoom)
+import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), captureFrame, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Internal.Image as SdlImage
@@ -240,11 +241,15 @@ ensureRetain env w h scale = do
   where
     roundUp n = max retainBlock (((n + retainBlock - 1) `div` retainBlock) * retainBlock)
 
--- | Read debug information, refreshing at most four times per second.
--- The explicit environment belongs to the current session. Repeated queries keep
--- the debug sampler active and can schedule periodic frames.
-askSdlDebug :: SdlEnv -> NanoUI SdlDebugSnapshot
-askSdlDebug = liftIO . sample
+-- | Read the open session's debug information, refreshing at most four
+-- times per second; 'Nothing' outside a session. Repeated queries keep the
+-- debug sampler active and can schedule periodic frames.
+askSdlDebug :: NanoUI (Maybe SdlDebugSnapshot)
+askSdlDebug = withSdlEnv Nothing (fmap Just . liftIO . sdlDebugSnapshot)
+
+-- | 'askSdlDebug' for an explicit session, from IO.
+sdlDebugSnapshot :: SdlEnv -> IO SdlDebugSnapshot
+sdlDebugSnapshot = sample
   where
     sample env = do
       -- The display is queried only when the snapshot refreshes.
@@ -268,14 +273,14 @@ askSdlDebug = liftIO . sample
 -- | Request a UI font family. The SDL display thread resolves and applies it
 -- before the next frame (see 'NanoUI.Sdl.Internal.Window.syncDisplay'), rebuilding the
 -- glyph atlas and text resolver.
-setSdlUiFont :: SdlEnv -> NanoUIFont -> NanoUI ()
-setSdlUiFont env font = liftIO (writeIORef (sdlFontRequestRef env) font)
+setSdlUiFont :: NanoUIFont -> NanoUI ()
+setSdlUiFont font = withSdlEnv () $ \env -> liftIO (writeIORef (sdlFontRequestRef env) font)
 
 -- | Set the UI scale (see 'NanoUI.Sdl.Internal.Window.sdlAppUiScale'): a zoom on top
 -- of the pixel density, or zero or less to follow the display. The display
 -- thread applies it before the next frame, which this wakes.
-setSdlUiScale :: SdlEnv -> Float -> NanoUI ()
-setSdlUiScale env s = liftIO (request env)
+setSdlUiScale :: Float -> NanoUI ()
+setSdlUiScale s = withSdlEnv () (liftIO . request)
   where
     request host = do
       cur <- readIORef (sdlUiScaleRef host)

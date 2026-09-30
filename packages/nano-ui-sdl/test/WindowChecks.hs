@@ -8,14 +8,14 @@ import Control.Monad (unless, void, when)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isNothing)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Foreign.C.String (peekCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (castPtr)
 import Foreign.Storable (peek)
 import NanoUI
-import NanoUI.Backend (emptyInput)
+import NanoUI.Backend (emptyInput, runNanoUI)
 import NanoUI.Emit (emit, liftNanoUI)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
@@ -76,20 +76,28 @@ shoot name ctx env full ui = do
 check :: String -> Bool -> IO ()
 check name ok = unless ok (fail name)
 
--- The reducer view receives the actual session environment on every pass,
--- including the follow-up frame after reducing a message.
+-- A reducer view reaches its own session without being handed it, on every
+-- pass including the follow-up frame after reducing a message. Once the
+-- session closes, no view can reach it, and a dialog asked for outside one
+-- fails instead of touching a window.
 reducerEnvironmentCheck :: IO ()
 reducerEnvironmentCheck = do
   observed <- newIORef []
   completed <- timeout 10000000 $
-    runSdlAppReduceWith options (+) (0 :: Int) $ \env model -> do
-      title <- liftIO (getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr)
+    runSdlAppReduce options (+) (0 :: Int) $ \model -> do
+      live <- liftNanoUI askSdlEnv
+      title <- liftIO (traverse (\env -> getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr) live)
       liftIO (modifyIORef' observed ((model, title) :))
       if model == 0 then emit 1 else liftNanoUI quitUi
-  check "environment-aware reducer terminates" (completed == Just ())
+  check "reducer terminates" (completed == Just ())
   seen <- readIORef observed
-  check "environment-aware reducer sees both models and native title"
-    (any ((== 0) . fst) seen && any ((== 1) . fst) seen && all ((== "nano-ui") . snd) seen)
+  check "reducer sees both models and its session's native title"
+    (any ((== 0) . fst) seen && any ((== 1) . fst) seen && all ((== Just "nano-ui") . snd) seen)
+  ctx <- newPixelContext
+  (closed, dialog) <- runNanoUI ctx emptyInput $
+    (,) <$> askSdlEnv <*> (pollFileDialogUi =<< askOpenFileDialog defaultFileDialogOptions)
+  check "a closed session is out of reach" (isNothing closed)
+  expect "a dialog outside a session fails" FileDialogFailed dialog
 
 dialogStateChecks :: IO ()
 dialogStateChecks = do

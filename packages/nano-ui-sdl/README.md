@@ -20,41 +20,48 @@ main = runSdlApp defaultSdlOptions (label "Hello")
 emission and widget adapters. `SdlOptions` sets the window, fonts, font size,
 theme, and vsync.
 
-For SDL-specific operations, `runSdlAppWith` passes the typed session
-environment to the view:
+SDL-specific operations are ordinary view actions. They act on the session
+the view runs in, so nothing is passed to them:
 
 ```haskell
-main = runSdlAppWith defaultSdlOptions $ \env ->
-  whenM (button "Reset scale") (setSdlUiScale env 1)
+main = runSdlApp defaultSdlOptions $
+  whenM (button "Reset scale") (setSdlUiScale 1)
 ```
 
 Primitive hooks such as `useInt` and `useText` need no setup. When a view
-needs explicitly owned state or arbitrary value types, construct it once
-in IO and capture it in a closure:
+needs explicitly owned state or arbitrary value types, allocate it once in IO
+as a record and pass it to the view:
 
 ```haskell
 main = do
-  view <- newFilePicker
-  runSdlAppWith defaultSdlOptions view
+  picker <- newFilePicker
+  runSdlApp defaultSdlOptions (filePicker picker)
 
-newFilePicker :: IO (SdlEnv -> NanoUI ())
-newFilePicker = do
-  pending <- newState Nothing
-  pure $ \env -> do
-    (_, setPending) <- useState pending
-    whenM (button "Open") $
-      setPending . Just =<< askOpenFileDialog env defaultFileDialogOptions
+newtype FilePicker = FilePicker (StateCell (Maybe FileDialogId))
+
+newFilePicker :: IO FilePicker
+newFilePicker = FilePicker <$> newState Nothing
+
+filePicker :: FilePicker -> NanoUI ()
+filePicker (FilePicker pending) = do
+  (_, setPending) <- useState pending
+  whenM (button "Open") $
+    setPending . Just =<< askOpenFileDialog defaultFileDialogOptions
 ```
 
-`askSdlDebug`, `setSdlUiFont`, `setSdlUiScale`, the dialog launch helpers, and
-the window-chrome helpers take this environment explicitly. Keep it within
-its session. `pollFileDialogUi env handle` consumes a completed result once
-and restores window focus. `peekFileDialogUi handle` observes without consuming.
-Launch helpers return a handle directly; failures arrive as `FileDialogFailed`.
+`pollFileDialogUi handle` consumes a completed result once and restores
+window focus. `peekFileDialogUi handle` observes without consuming. Launch
+helpers return a handle directly; failures arrive as `FileDialogFailed`, as
+they do for a dialog asked for outside an SDL session. `askSdlDebug`,
+`setSdlUiFont`, `setSdlUiScale`, `windowCaption` and the `*Ui` chrome
+setters likewise act on the open session, and do nothing without one.
 
-`SdlEnv` is an opaque session capability. Its mutable caches and native pointers
-are not application API. Low-level render integrations and native tests that
-need those details explicitly import `NanoUI.Sdl.Internal.Window`, whose record
+To opt into the session explicitly, for the IO-level operations
+(`openFileDialog`, `pollFileDialog`, `setWindowChrome`, `saveScreenshot`) or
+to hand it to another thread, take it with `askSdlEnv`. `SdlEnv` is an opaque
+session capability. Its mutable caches and native pointers are not
+application API. Low-level render integrations and native tests that need
+those details explicitly import `NanoUI.Sdl.Internal.Window`, whose record
 representation is unstable.
 
 ## Windows and screenshots

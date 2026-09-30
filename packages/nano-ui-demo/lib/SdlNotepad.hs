@@ -7,7 +7,9 @@
 -- Run with @cabal run nano-ui-sdl-notepad@.
 module SdlNotepad
   ( main
+  , NotepadState
   , newNotepad
+  , notepadUi
   ) where
 
 import Control.Exception (SomeException, try)
@@ -31,14 +33,14 @@ import NanoUI.Shortcut
 
 main :: IO ()
 main = do
-  view <- newNotepad
-  runSdlAppWith
+  state <- newNotepad
+  runSdlApp
     defaultSdlOptions
       { -- A close request goes to the view, which may ask about unsaved changes.
         sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
-    view
+    (notepadUi state)
 
 --------------------------------------------------------------------------------
 -- The application
@@ -50,20 +52,18 @@ data NotepadState = NotepadState
   !(StateCell (Maybe FileDialogId))
   !(StateCell (Maybe FileDialogId))
 
--- | Construct a notepad view with private document and dialog state.
--- Call once per instance before starting the SDL session.
-newNotepad :: IO (SdlEnv -> NanoUI ())
-newNotepad = do
-  state <-
-    NotepadState
-      <$> newState emptyDocument
-      <*> newState (WidgetId 0)
-      <*> newState Nothing
-      <*> newState Nothing
-  pure $ \env -> notepadUi env state
+-- | A notepad's private document and dialog state. Allocate one per
+-- instance before starting the SDL session, and draw it with 'notepadUi'.
+newNotepad :: IO NotepadState
+newNotepad =
+  NotepadState
+    <$> newState emptyDocument
+    <*> newState (WidgetId 0)
+    <*> newState Nothing
+    <*> newState Nothing
 
-notepadUi :: SdlEnv -> NotepadState -> NanoUI ()
-notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
+notepadUi :: NotepadState -> NanoUI ()
+notepadUi (NotepadState docCell editorCell openCell saveCell) = do
   ------------------------------------------------------------------ hooks ---
   (doc, setDoc) <- useState docCell
   (docPath, setDocPath) <- useText ""
@@ -80,7 +80,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
   (zoom, setZoom) <- useFloat 1.0
 
   ----------------------------------------------------------- file dialogs ---
-  useFileDialog env openDlg setOpenDlg $ \chosenPaths ->
+  useFileDialog openDlg setOpenDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       setOpenMenu ""
       setDocGen (docGen + 1)
@@ -94,7 +94,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
           setDocPath (T.pack filePath)
           setDocDirty False
           setStatusMsg ("Opened " <> T.pack filePath)
-  useFileDialog env saveDlg setSaveDlg $ \chosenPaths ->
+  useFileDialog saveDlg setSaveDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       setOpenMenu ""
       saved <- writeDocument filePath doc
@@ -116,7 +116,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
 
     saveDocument forceDialog =
       if forceDialog || T.null docPath
-        then setSaveDlg . Just =<< askSaveFileDialog env defaultFileDialogOptions
+        then setSaveDlg . Just =<< askSaveFileDialog defaultFileDialogOptions
         else do
           saved <- writeDocument (T.unpack docPath) doc
           if saved
@@ -135,7 +135,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
     newCmd = ("New", ctrl <> key 'n', newDocument)
-    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg . Just =<< askOpenFileDialog env defaultFileDialogOptions)
+    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg . Just =<< askOpenFileDialog defaultFileDialogOptions)
     saveCmd = ("Save", ctrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
     -- Quit, or ask first when there are unsaved changes.

@@ -72,11 +72,11 @@ and nested views update their original form without an ambient prefix store.
 optional typed slot. Multiple slots of the same type are independent. Core
 window, sensor, paragraph, and SVG state has concrete context ownership.
 
-`runSdlAppWith` takes an `SdlEnv -> NanoUI ()` view and passes only the session
-environment. Primitive hooks need no setup. Capture any explicitly owned
-state or resources in an ordinary closure, constructing them once in IO
-before calling the runner. SDL-specific operations take the environment
-explicitly. RGFW's
+Primitive hooks need no setup. Allocate explicitly owned state and resources
+once in IO, as a record, and pass it to the view given to `runSdlApp`:
+`state <- newEditor; runSdlApp opts (editorUi state)`. SDL-specific view
+operations act on the open session without being handed it; `askSdlEnv`
+opts into the explicit session for IO-level operations. RGFW's
 `runRgfwAppWith` and `runRgfwAppReduceCustomWith` supply a typed debug sampler.
 Ordinary runners serve views that need only the core API.
 
