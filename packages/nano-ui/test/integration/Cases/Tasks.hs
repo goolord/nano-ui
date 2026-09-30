@@ -75,7 +75,7 @@ lamp on = box (fixedWH 20 20) (if on then colorRGBA 40 200 80 255 else colorRGBA
 -- | The next frame shows @v@ and requests no further frame.
 settled :: (Eq a, Show a) => Context -> IORef Int -> NanoUI a -> a -> IO ()
 settled ctx failed ui v = do
-  (a, _, _, dirty) <- runFrame ctx inp ui
+  (a, _, dirty) <- runFrame ctx inp ui
   assertEq failed (v, False) (a, dirty)
 
 -- | The frame that picks up a job's result shows @v@ and repaints fully,

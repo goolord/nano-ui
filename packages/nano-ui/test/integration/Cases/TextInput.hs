@@ -91,11 +91,11 @@ runTextInputBatchTest ctx failed = do
       assertEq failed (IM.lookup (slotKey SlotAnchor slot) ints) (Just anchor)
   checkSelection 1 4
   -- An event filtered to nothing must not delete the current selection.
-  ((_, unchanged), _, _, _) <- step (inp {inputChars = "\n\t"})
+  ((_, unchanged), _, _) <- step (inp {inputChars = "\n\t"})
   assertEq failed unchanged "aOLDz"
   checkSelection 1 4
   -- Navigation follows text insertion within a frame.
-  ((_, committed), _, _, _) <- step (left {inputChars = "é\n世界\t"})
+  ((_, committed), _, _) <- step (left {inputChars = "é\n世界\t"})
   assertEq failed committed "aé世界z"
   checkSelection 3 3
 

@@ -41,7 +41,7 @@ testGlWindow assert =
             view = columnWith tight (opsBox (\r -> [FillRect r red]) >> opsBox (\r -> [FillRect r backdrop, FillRect r backdrop]))
         ctx <- newRgfwContext theme
         writeIORef (ctxPaintFull ctx) True
-        (_, _, draw, _) <- runFrame ctx inp view
+        (_, draw, _) <- runFrame ctx inp view
         (base, overlay) <- collectRasterSpans ctx inp
         renderArenaGl renderer getCozetteFont 1 w h (themeWindow theme) DamageFull [] draw base overlay
         img <- maybe (fail "OpenGL window: no screenshot") pure =<< retainedPixels renderer w h

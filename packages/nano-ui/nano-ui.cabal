@@ -76,7 +76,6 @@ library
         NanoUI.Backend
         NanoUI.Bidi
         NanoUI.Effectful
-        NanoUI.Emit
         NanoUI.Input
         NanoUI.Monad
         NanoUI.Path

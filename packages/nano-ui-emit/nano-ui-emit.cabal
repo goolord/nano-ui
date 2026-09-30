@@ -1,0 +1,43 @@
+cabal-version:      3.4
+name:               nano-ui-emit
+version:            0.1.0.0
+synopsis:           Statically typed messages and reducers for nano-ui
+description:        Typed emitting views, widget adapters, and headless reducer runners.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
+category:           Graphics
+build-type:         Simple
+extra-doc-files:    README.md CHANGELOG.md
+extra-source-files: test/compile-fail/WrongMessage.hs
+
+source-repository head
+    type:           git
+    location:       https://github.com/goolord/nano-ui.git
+    subdir:         packages/nano-ui-emit
+
+library
+    default-language: GHC2024
+    ghc-options:      -Wall -Wcompat -Wredundant-constraints
+    exposed-modules:  NanoUI.Emit
+    hs-source-dirs:   lib
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui ^>=0.2,
+        transformers ^>=0.6
+
+test-suite nano-ui-emit-test
+    type:             exitcode-stdio-1.0
+    default-language: GHC2024
+    default-extensions: OverloadedStrings
+    ghc-options:      -Wall -Wcompat -Wredundant-constraints
+    main-is:          Main.hs
+    hs-source-dirs:   test
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui,
+        nano-ui-emit,
+        text ^>=2.1

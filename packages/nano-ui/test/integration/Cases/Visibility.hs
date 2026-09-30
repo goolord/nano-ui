@@ -3,7 +3,6 @@ module Cases.Visibility (tests) where
 import Spec
 import Control.Concurrent (threadDelay)
 import GHC.Stack (HasCallStack)
-import NanoUI.Emit (emit)
 
 tests :: [Spec]
 tests =
@@ -14,7 +13,6 @@ tests =
   , spec "visibility-anticipate" runAnticipateTest
   , spec "visibility-removed" runRemovedTest
   , spec "visibility-tabs" runTabsTest
-  , spec "visibility-two-passes" runTwoPassesTest
   , spec "visibility-use-visibility" runUseVisibilityTest
   , spec "visibility-ids" runIdsTest
   , spec "visibility-floating" runFloatingTest
@@ -34,7 +32,7 @@ inp = withInputOff 300 200
 
 -- | Run a frame; return the view's result and whether it asked for a follow-up frame.
 step :: Context -> Input -> NanoUI a -> IO (a, Bool)
-step ctx i ui = (\(a, _, _, follow) -> (a, follow)) <$> runFrame ctx i ui
+step ctx i ui = (\(a, _, follow) -> (a, follow)) <$> runFrame ctx i ui
 
 settle :: Context -> Input -> NanoUI a -> Int -> IO ()
 settle ctx i ui n = replicateM_ n (step ctx i ui)
@@ -229,21 +227,6 @@ runTabsTest ctx failed = do
   writeIORef activeRef 0 >> settle ctx inp ui 3
   readIORef eventsRef >>= assertEq failed [BecameVisible, BecameVisible]
 
--- A hook write on the event reruns the view without the event; the message is sent once.
-runTwoPassesTest :: Context -> IORef Int -> IO ()
-runTwoPassesTest ctx failed = do
-  seenRef <- newIORef (0 :: Int)
-  let view _ = column $ do
-        (loaded, setLoaded) <- useFlag False
-        (vis, _) <- sensor (label (if loaded then "loaded" else "loading"))
-        when (becameVisible vis) (liftIO (modifyIORef' seenRef (+ 1)) >> emit (1 :: Int) >> setLoaded True)
-        pure (loaded, (visVisible vis, visEvent vis))
-      frame model = (\(r, model', _, _, _) -> (r, model')) <$> runFrameReduce (+) ctx inp model view
-  (second, model2) <- frame (0 :: Int) >>= frame . snd
-  model5 <- snd <$> (frame model2 >>= frame . snd >>= frame . snd)
-  seen <- readIORef seenRef
-  assertEq failed ((True, on), 1, 1) (second, seen, model5)
-
 -- 'useVisibility' watches an earlier widget, takes one id, and reports its removal once.
 runUseVisibilityTest :: Context -> IORef Int -> IO ()
 runUseVisibilityTest ctx failed = do
@@ -355,7 +338,7 @@ runPinnedTest ctx failed = do
   (sid, _) <- evalUi ctx inp ui
   -- The strip is above the viewport; its pinned box is 50 pixels into it.
   setScrollOffset ctx sid 100 >> settle ctx inp ui 3
-  ((_, vs), _, draw, follow) <- runFrame ctx inp ui
+  ((_, vs), draw, follow) <- runFrame ctx inp ui
   colours <- map snd <$> drawQuads draw
   assertEq failed ([True, True], False) (map (`elem` colours) [red, blue], follow)
   expectVis failed [on, on] vs

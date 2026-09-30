@@ -3,8 +3,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | Implementation of "NanoUI.Monad", plus running a view against a context,
--- reading and swapping the context, id-frame plumbing, and the frame's
--- message queue.
+-- reading and swapping the context, and id-frame plumbing.
 module NanoUI.Internal.Monad
   ( NanoUI (..)
   , NanoUIEs
@@ -16,7 +15,6 @@ module NanoUI.Internal.Monad
   , liftIO
   , withContext
   , withUiResource
-  , emit
   , withKey
   , keyedTag
   , scope
@@ -102,7 +100,6 @@ import Data.Hashable (Hashable, hash)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Monoid (Ap (..))
 import Data.Text (Text)
-import Data.Typeable (Typeable)
 import Data.Word (Word64)
 import Effectful
   ( Dispatch (Static)
@@ -231,11 +228,6 @@ withContext f = NanoUI (getStaticRep >>= \r -> unsafeEff_ (f $! repContext r))
 withUiResource :: IO a -> (a -> IO ()) -> NanoUI b -> NanoUI b
 withUiResource acquire release (NanoUI action) =
   NanoUI (unsafeEff $ \es -> bracket acquire release (\_ -> unEff action es))
-
--- | Queue a typed message for the frame's reducer, in emission order.
-{-# INLINE emit #-}
-emit :: Typeable msg => msg -> NanoUI ()
-emit msg = withContext (\ctx -> pushMessage ctx (FrameMsg msg))
 
 -- | The id 'nextId' would issue, without consuming it.
 {-# INLINE currentId #-}

@@ -57,7 +57,7 @@ runScrollThumbCursorTest ctx failed = do
   let inp0 = withInput 200 120
       ui = scrollArea (fillW . fixedH 80)
              (column (replicateM 8 (label "scroll line") >> pure ()))
-  ((sid, ()), _, _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
+  ((sid, ()), _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
   assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
     let thumbX = rx + rw - scrollBarGutter ScrollBarList 0 / 2
         tryYs = [ry + rh * n / 8 | n <- [1 .. 7]]
@@ -81,7 +81,7 @@ runScrollThumbHoverTest ctx failed = do
   let rest = scrollBarThumbColor (themeInput theme) theme
       hovered = scrollBarThumbHoverColor (themeInput theme) theme
       thumbIs inp want = do
-        (_, _, dd, _) <- runFrame ctx inp ui
+        (_, dd, _) <- runFrame ctx inp ui
         colors <- map snd <$> drawQuads dd
         assert failed (want `elem` colors && notElem (if want == rest then hovered else rest) colors)
   assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
@@ -222,7 +222,7 @@ runPageScrollBackdropCoverageTest ctx failed = do
       backdrop ui prep = do
         sid <- warmup2 ctx inp0 ui
         prep sid
-        (_, _, draw, _) <- runFrame ctx inp0 ui
+        (_, draw, _) <- runFrame ctx inp0 ui
         quads <- drawQuads draw
         getPrevRect ctx sid >>= \case
           Nothing -> False <$ assert failed False
@@ -253,7 +253,7 @@ runTallLabelCullTest ctx failed = do
   forM_ [0, 3333, 1000000] $ \off -> do
     setScrollOffset ctx sid off
     _ <- runFrame ctx inp0 ui
-    (_, _, draw, _) <- runFrame ctx inp0 ui
+    (_, draw, _) <- runFrame ctx inp0 ui
     assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
       quads <- drawQuads draw
       -- Glyph boxes, not the scroller's backdrop, border or bar.
@@ -377,7 +377,7 @@ runScrollButtonClickTest ctx failed = do
         forM_ [(1 :: Int) .. 8] $ \_ -> void (runFrame c wheel ui)
         off <- getScrollOffset c sid
         assertGt failed off 0
-        ((_, _, resp1), _, _, _) <- runFrame c inp0 ui
+        ((_, _, resp1), _, _) <- runFrame c inp0 ui
         (_, hit1, _) <- runClick c inp0 ui (centerOf resp1)
         assertEq failed hit1 "yes"
 
@@ -471,7 +471,7 @@ runScrollLockstepProbeTest ctx failed = do
   yss <- forM steps $ \off -> do
     setScrollOffset ctx sid off
     _ <- runFrame ctx inp0 ui
-    (_, _, draw, _) <- runFrame ctx inp0 ui
+    (_, draw, _) <- runFrame ctx inp0 ui
     spans <- collectTextSpans ctx
     let keyYs = [listToMaybe (spanYOf k spans) | k <- keys]
     quads <- decodeQuads draw

@@ -24,6 +24,7 @@ fails the build instead of swapping.
 | Test suite | Covers |
 | --- | --- |
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and drawing, run headlessly frame by frame |
+| `nano-ui-emit-test` | Typed emission, widget adapters, reducers, rebuilds, and queue isolation |
 | `text-buffer-spec` | The multi-line text buffer |
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
 | `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite; with a display, OpenGL frames and loop wakes |
@@ -69,6 +70,7 @@ comment box and put the `user-attachments` URL GitHub gives back in
 | Path | Contents |
 | --- | --- |
 | `packages/nano-ui` | The core: widgets, layout, input handling, and the draw list |
+| `packages/nano-ui-emit` | Typed emitting views, widget adapters, and reducer runners |
 | `packages/nano-ui-sdl`, `packages/nano-ui-rgfw` | Window backends |
 | `packages/nano-ui-rgfw-bindings` | RGFW bindings, with the C source |
 | `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts and diagrams, and forms |
@@ -88,7 +90,6 @@ packages follow the same rule with `NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`
 | `NanoUI.hs` | The public API and its documentation |
 | `NanoUI/Widgets/` | Public widget modules, for qualified imports and names `NanoUI` does not re-export |
 | `NanoUI/Internal/Widgets/` | The widget implementations |
-| `NanoUI/Emit.hs` | Reducer-style widgets |
 | `NanoUI/Internal/Monad.hs`, `NanoUI/Internal/Id.hs` | The `Ui` effect, widget ids, and keys |
 | `NanoUI/Internal/Hooks.hs`, `NanoUI/Internal/Store.hs`, `NanoUI/Internal/Context.hs`, `NanoUI/Internal/Context/` | Widget state and the frame context |
 | `NanoUI/Internal/Layout/` | Layout storage and the solver |

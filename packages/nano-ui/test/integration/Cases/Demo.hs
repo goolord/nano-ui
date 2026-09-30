@@ -235,12 +235,12 @@ runColorPickerEditTest ctx failed = do
   -- Tab past the field and the hue bar to the R field.
   replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace, KeyBackspace, KeyBackspace]}) ui
-  ((_, col), _, _, _) <- runFrame ctx (inp0 {inputChars = "10"}) ui
+  ((_, col), _, _) <- runFrame ctx (inp0 {inputChars = "10"}) ui
   assertEq failed (colorR col) 10
   assertEq failed (colorG col) 102
-  ((_, stepped), _, _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
+  ((_, stepped), _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
   assertEq failed (colorR stepped) 11
-  ((_, lettered), _, _, _) <- runFrame ctx (inp0 {inputChars = "x"}) ui
+  ((_, lettered), _, _) <- runFrame ctx (inp0 {inputChars = "x"}) ui
   assertEq failed (colorR lettered) 11
 
 -- A channel field that had focus must not pull the colour back while the
@@ -259,7 +259,7 @@ runColorPickerDragAfterFieldTest ctx failed = do
       drag = holdAt press (V2 (rectX sv + rectW sv * 0.9) (rectY sv + rectH sv * 0.9))
   _ <- runFrame ctx press ui
   _ <- runFrame ctx drag ui
-  ((_, col), _, _, _) <- runFrame ctx drag ui
+  ((_, col), _, _) <- runFrame ctx drag ui
   -- Low value keeps every channel dark; a field still writing R would leave
   -- it at 204.
   assert failed (colorR col < 60)
@@ -272,7 +272,7 @@ runColorPickerChangeOnceTest ctx failed = do
   colorRef <- newIORef initial
   let inp0 = withInput 400 420
       ui = held colorRef colorPicker'
-      changed inp = (\((resp, _), _, _, _) -> respChanged resp) <$> runFrame ctx inp ui
+      changed inp = (\((resp, _), _, _) -> respChanged resp) <$> runFrame ctx inp ui
   (resp, _) <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
   assert failed =<< changed (keyInp KeyRight inp0)

@@ -30,7 +30,6 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
-import Data.Typeable (Typeable)
 import Data.Word (Word8, Word32)
 import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime)
@@ -86,12 +85,12 @@ import NanoUI.Testing
   , collectRasterSpans
   , damageIsEmpty
   , drawCmdCount
-  , runFrameReduce
   , takeDamage
   , takeDamagePieces
   , uiCursorKind
   )
 import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
+import NanoUI.Emit (NanoUIE, liftNanoUI, runFrameReduce)
 import NanoUI.Runner
   ( SessionDriver (..)
   , runSessionLoop
@@ -230,22 +229,22 @@ mapRgfwCursor kind = case cursorFallback kind of
 -- | Run a view in an owned RGFW/OpenGL window until quit. Native resources are
 -- released on exit. Window creation failure prints a message and returns.
 runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
-runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> app)
+runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> liftNanoUI app)
 
 -- | Construct one component with the session's explicit typed debug handle.
 runRgfwAppWith :: RgfwOptions -> (RgfwDebugSampler -> IO (NanoUI ())) -> IO ()
 runRgfwAppWith opts setup =
   runRgfwAppReduceCustomWith opts (\_ -> (optionsTheme opts, optScale opts)) (\() m -> m) () $ \debug ->
-    const <$> setup debug
+    const . liftNanoUI <$> setup debug
 
 -- | Model-driven runner. Fold emitted messages through the update function
--- in order, ignoring messages of other runtime types.
+-- in order, with the message type checked at compile time.
 runRgfwAppReduce ::
-  (Typeable msg, Eq model) =>
+  Eq model =>
   RgfwOptions ->
   (msg -> model -> model) ->
   model ->
-  (model -> NanoUI ()) ->
+  (model -> NanoUIE msg ()) ->
   IO ()
 runRgfwAppReduce opts =
   runRgfwAppReduceCustom opts (\_ -> (optionsTheme opts, optScale opts))
@@ -254,24 +253,24 @@ runRgfwAppReduce opts =
 -- model. A non-positive scale follows the monitor. OpenGL calls remain on
 -- the creating OS thread; native resources are released on exit.
 runRgfwAppReduceCustom ::
-  (Typeable msg, Eq model) =>
+  Eq model =>
   RgfwOptions ->
   (model -> (Theme, Float)) ->
   (msg -> model -> model) ->
   model ->
-  (model -> NanoUI ()) ->
+  (model -> NanoUIE msg ()) ->
   IO ()
 runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view =
   runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel (\_ -> pure view)
 
 -- | Model runner with a one-time typed session setup callback.
 runRgfwAppReduceCustomWith ::
-  (Typeable msg, Eq model) =>
+  Eq model =>
   RgfwOptions ->
   (model -> (Theme, Float)) ->
   (msg -> model -> model) ->
   model ->
-  (RgfwDebugSampler -> IO (model -> NanoUI ())) ->
+  (RgfwDebugSampler -> IO (model -> NanoUIE msg ())) ->
   IO ()
 runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup = inBoundThread $ do
   -- Open hidden at the requested scale: the monitor's scale is unknown until

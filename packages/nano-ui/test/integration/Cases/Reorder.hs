@@ -31,7 +31,7 @@ runDragIdleAndAbortTest ctx failed = do
   _ <- evalUi ctx press ui
   _ <- evalUi ctx moved ui
   _ <- runFrame ctx moved ui
-  (drag, _, _, dirty) <- runFrame ctx moved ui
+  (drag, _, dirty) <- runFrame ctx moved ui
   assertEq failed (Just Dragging) (dragPhase <$> drag)
   assert failed (not dirty)
 

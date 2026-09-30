@@ -119,7 +119,7 @@ runCustomWidgetQueuedClickTest ctx failed = do
   warm <- warmup2 ctx inp0 ui
   forM_ (zip [0 :: Int ..] warm) $ \(i, resp0) -> do
     writeIORef (ctxClickedId ctx) (respId resp0)
-    (resps, _, _, _) <- runFrame ctx inp0 ui
+    (resps, _, _) <- runFrame ctx inp0 ui
     assert failed (map respClicked resps == [j == i | j <- [0 .. length resps - 1]])
 
 -- | A label, then an 80x40 custom widget with this content key and drawing.
@@ -130,7 +130,7 @@ afterLabel key draw = column $ do
 
 -- | Run a frame and decode the quads it drew.
 frameQuads :: Context -> Input -> NanoUI a -> IO [(Rect, Color)]
-frameQuads ctx inp ui = runFrame ctx inp ui >>= \(_, _, draw, _) -> drawQuads draw
+frameQuads ctx inp ui = runFrame ctx inp ui >>= \(_, draw, _) -> drawQuads draw
 
 red, blue :: Color
 red = colorRGBA 255 0 0 255
@@ -291,11 +291,11 @@ runDropTargetTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
 
   let beginInp = dropsInp [DropEvent DropBegin Nothing ""]
-  (tgtBegin, _, _, _) <- runFrame ctx beginInp ui
+  (tgtBegin, _, _) <- runFrame ctx beginInp ui
   assert failed (not (dropHovered tgtBegin))
 
   let hoverInp = dropsInp [DropEvent DropPosition (Just dropPoint) ""]
-  (tgtHover, _, _, _) <- runFrame ctx hoverInp ui
+  (tgtHover, _, _) <- runFrame ctx hoverInp ui
   assert failed (dropHovered tgtHover)
   assert failed (dropPosition tgtHover == Just dropPoint)
 
@@ -305,7 +305,7 @@ runDropTargetTest ctx failed = do
           [ DropEvent DropFile (Just dropPoint) "/tmp/a.txt"
           , DropEvent DropText (Just dropPoint) "hello"
           ]
-  (tgtDrop, _, _, _) <- runFrame ctx dropInp ui
+  (tgtDrop, _, _) <- runFrame ctx dropInp ui
   assert failed (dropReceived tgtDrop)
   assert failed (dropFiles tgtDrop == ["/tmp/a.txt"])
   assert failed (dropTexts tgtDrop == ["hello"])
@@ -317,11 +317,11 @@ runDropTargetTest ctx failed = do
           [ DropEvent DropFile (Just (V2 0 0)) "/tmp/origin.txt"
           , DropEvent DropComplete Nothing ""
           ]
-  (tgtOrigin, _, _, _) <- runFrame ctx originDrop ui
+  (tgtOrigin, _, _) <- runFrame ctx originDrop ui
   assert failed (dropFiles tgtOrigin == ["/tmp/origin.txt"])
 
   -- The completing drop clears hover state.
-  (tgtDone, _, _, _) <- runFrame ctx inp0 ui
+  (tgtDone, _, _) <- runFrame ctx inp0 ui
   assert failed (not (dropHovered tgtDone))
 
   -- A fresh drag that moves outside the target no longer delivers to it.
@@ -332,6 +332,6 @@ runDropTargetTest ctx failed = do
           [ DropEvent DropFile (Just (V2 250 250)) "/tmp/out.txt"
           , DropEvent DropComplete Nothing ""
           ]
-  (tgtOut, _, _, _) <- runFrame ctx outInp ui
+  (tgtOut, _, _) <- runFrame ctx outInp ui
   assert failed (not (dropReceived tgtOut))
   assert failed (null (dropFiles tgtOut))

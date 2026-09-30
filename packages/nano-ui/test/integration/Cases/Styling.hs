@@ -126,7 +126,7 @@ runStyledDamageTest ctx failed = do
   _ <- warmup2 ctx inp (ui blue)
   _ <- takeDamage ctx
   forM_ [green, blue] $ \c -> do
-    (_, _, draw, _) <- runFrame ctx inp (ui c)
+    (_, draw, _) <- runFrame ctx inp (ui c)
     assertEq failed DamageFull =<< takeDamage ctx
     quads <- drawQuads draw
     assert failed (any ((== c) . snd) quads)

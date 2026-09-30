@@ -2,6 +2,16 @@
 
 ## 0.2.0.0 -- Unreleased
 
+### Typed emission package (breaking)
+
+- Moved `NanoUI.Emit`, reducer runners, and reducer testing helpers to
+  `nano-ui-emit`. Emitting views use `NanoUIE msg a`; emission and reduction
+  no longer require `Typeable` or silently filter mismatched messages.
+- Removed core `emit`, `FrameMsg`, `decodeMessages`, and the context message
+  queue. `runFrame`, `runFrameEff`, and `run2Frames` now return
+  `(result, drawData, dirty)`; the new `runFrameE` returns typed messages.
+- Removed `runFrameReduceEff`; use the new typed runners for reducer views.
+
 ### Typed state ownership (breaking)
 
 - `newState` allocates a `StateCell a`; `useState` now reads that handle,
@@ -21,7 +31,7 @@
 
 - `NanoUI.Effectful`, for programs that use `effectful`: `NanoUI`'s
   constructor, `NanoUIEs`, the `Ui` effect, `runUi`, `runFrameEff`,
-  `runFrameReduceEff`, `embedNanoUI`, which runs a view in any row with `Ui`,
+  `embedNanoUI`, which runs a view in any row with `Ui`,
   and `withRunInNanoUI`, which hands a view a function to run that row's
   actions inside it, in the scope they are run in.
 - `NanoUI.Adornment`, for qualified import: icons, texts and views drawn

@@ -241,7 +241,7 @@ runPinOutsideParentPaintTest ctx failed = do
   forM_ [green, red] $ \col -> assert failed =<< drawn col full
   writeIORef (ctxPaintFull ctx) False
   _ <- takeDamage ctx
-  (_, _, draw, _) <- runFrame ctx input0 (ui 2)
+  (_, draw, _) <- runFrame ctx input0 (ui 2)
   takeDamage ctx >>= \d -> assert failed (case d of DamageClip _ -> True; DamageFull -> False)
   assert failed =<< drawn blue draw
   writeIORef (ctxPaintFull ctx) True

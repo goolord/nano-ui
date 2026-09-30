@@ -61,7 +61,7 @@ runRichTextLinkTest ctx failed = do
         let (press, release) = clickPair inp0 pos
         void (runFrame ctx inp0 {inputMousePos = pos} ui)
         void (runFrame ctx press ui)
-        ((_, clicked), _, _, _) <- runFrame ctx release ui
+        ((_, clicked), _, _) <- runFrame ctx release ui
         pure clicked
   linkClick <- clickAt onLink
   assertEq failed (Just "docs-target") linkClick
@@ -69,7 +69,7 @@ runRichTextLinkTest ctx failed = do
   assert failed handShown
   -- The hovered link is underlined once, across its words and the space
   -- between them.
-  (_, _, dd, _) <- runFrame ctx inp0 {inputMousePos = onLink} ui
+  (_, dd, _) <- runFrame ctx inp0 {inputMousePos = onLink} ui
   quads <- drawQuads dd
   let underlines = [r | (r@(Rect _ _ w h), _) <- quads, h < 3, abs (w - linkW) < 0.5]
   assertEq failed 1 (length underlines)
@@ -180,7 +180,7 @@ runRichTextScrollCullTest ctx failed = do
   forM_ [0, 3333, 1000000] $ \off -> do
     setScrollOffset ctx sid off
     _ <- runFrame ctx inp0 ui
-    (_, _, draw, _) <- runFrame ctx inp0 ui
+    (_, draw, _) <- runFrame ctx inp0 ui
     assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
       quads <- drawQuads draw
       -- Glyph boxes, not the scroller's backdrop, border or bar.

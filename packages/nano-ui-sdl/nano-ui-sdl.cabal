@@ -95,6 +95,7 @@ library
         filepath ^>=1.5,
         file-embed ^>=0.0.16,
         nano-ui ^>=0.2,
+        nano-ui-emit ^>=0.1,
         primitive ^>=0.9,
         vector ^>=0.13,
         record-hasfield ^>=1.0,

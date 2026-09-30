@@ -4,7 +4,6 @@
 module NanoUI.Testing
   ( -- * Frame
     runFrame
-  , runFrameReduce
   , needsRedraw
   , pointerDragActive
   , textFieldActive
@@ -96,10 +95,6 @@ module NanoUI.Testing
   , atlasChanges
   , AtlasUpload (..)
     -- * Messages
-  , FrameMsg (..)
-  , decodeMessages
-  , reduceMessages
-  , reduceUpdates
     -- * Draw
   , DrawData (..)
   , DrawCmd (..)
@@ -148,7 +143,7 @@ import NanoUI.Internal.Draw
 import NanoUI.Internal.Damage (damagePieces, floatingPanelRects)
 import NanoUI.Internal.Font (WrapResult (..), caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX, wrapTextIO, wrapTextLinesIO)
 import NanoUI.Internal.Widgets.ColorPicker
-import NanoUI.Internal.Frame (runFrame, runFrameReduce)
+import NanoUI.Internal.Frame (runFrame)
 import NanoUI.Internal.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCursorWanted, uiCursorKind)
 import NanoUI.Internal.Frame.Input
 import NanoUI.Internal.Frame.Spans (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, widgetNodeCount)

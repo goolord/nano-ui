@@ -77,7 +77,7 @@ runTooltipScrollPosTest ctx failed = do
           before <- getScrollOffset ctx sid
           _ <- runFrame ctx wheel ui
           after <- getScrollOffset ctx sid
-          ((_, btn), _, _, _) <- runFrame ctx hover ui
+          ((_, btn), _, _) <- runFrame ctx hover ui
           if inView btn || after <= before then pure (after, btn) else pump
     (off, btn1) <- pump
     assert failed (off > 0)

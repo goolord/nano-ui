@@ -25,9 +25,8 @@ module NanoUI.Effectful
   , withRunInNanoUI
   , runUi
   , runFrameEff
-  , runFrameReduceEff
   )
 where
 
-import NanoUI.Internal.Frame (runFrameEff, runFrameReduceEff)
+import NanoUI.Internal.Frame (runFrameEff)
 import NanoUI.Internal.Monad (NanoUI (..), NanoUIEs, Ui, embedNanoUI, runUi, withRunInNanoUI)

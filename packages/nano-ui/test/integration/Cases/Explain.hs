@@ -163,7 +163,7 @@ runExplainHoverTest ctx failed = do
   _ <- warmup2 ctx inp ui
   getExplainedNode ctx >>= assert failed . isNothing
   needsRedraw ctx inp overA >>= assert failed
-  (_, _, draw, again) <- runFrame ctx overA ui
+  (_, draw, again) <- runFrame ctx overA ui
   quads <- drawQuads draw
   assert failed (again && drawnAt quads (respRect a, colorRGBA (colorR tint) (colorG tint) (colorB tint) 0x40))
   assertJustM failed (getExplainedNode ctx) $ \node -> do
@@ -175,11 +175,11 @@ runExplainHoverTest ctx failed = do
   takeDamage ctx >>= assert failed . damageIsEmpty
   needsRedraw ctx overA overA >>= assert failed . not
   needsRedraw ctx overA nudged >>= assert failed
-  (_, _, _, againNudged) <- runFrame ctx nudged ui
+  (_, _, againNudged) <- runFrame ctx nudged ui
   takeDamage ctx >>= \dmg -> assert failed (not againNudged && damageIsEmpty dmg)
   needsRedraw ctx nudged nudged >>= assert failed . not
   needsRedraw ctx nudged overB >>= assert failed
-  (_, _, _, againB) <- runFrame ctx overB ui
+  (_, _, againB) <- runFrame ctx overB ui
   dmg <- takeDamage ctx
   assert failed (againB && clipCovers dmg (respRect a) && clipCovers dmg (respRect b))
   assertJustM failed (getExplainedNode ctx) $ assertEq failed (respRect b) . explainedRect

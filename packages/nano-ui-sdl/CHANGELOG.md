@@ -2,6 +2,9 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** `runSdlAppReduce` takes `model -> NanoUIE msg ()` from the new
+  `nano-ui-emit` package, without `Typeable` or runtime message filtering.
+
 - **Breaking:** SDL-specific debug, font/scale, dialog launch, and chrome
   helpers take `SdlEnv` explicitly. `runSdlAppWith` takes application state
   constructed in IO and supplies it alongside `SdlEnv` to the per-frame view.

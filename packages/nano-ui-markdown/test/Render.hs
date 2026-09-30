@@ -82,7 +82,7 @@ paints :: Color -> NanoUI a -> IO Bool
 paints c ui = do
   ctx <- drawn 600 400 ui
   writeIORef (ctxPaintFull ctx) True
-  (_, _, dd, _) <- runFrame ctx (withInput 600 400) ui
+  (_, dd, _) <- runFrame ctx (withInput 600 400) ui
   withForeignPtr (drawVertices dd) $ \vp ->
     fmap or . forM [0 .. drawVertexCount dd - 1] $ \i -> do
       rgba <- forM [2 .. 5] $ \k -> peekByteOff vp (i * 32 + 4 * k) :: IO Float

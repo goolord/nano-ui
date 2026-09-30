@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Breaking:** reducer runners take `model -> NanoUIE msg ()` from the new
+  `nano-ui-emit` package. Message types are checked statically; `Typeable`
+  constraints and runtime message filtering are gone.
+
 - **Breaking:** `askRgfwDebug` and `debugWindowBody` take a typed debug sampler.
   `runRgfwAppWith` and `runRgfwAppReduceCustomWith` provide it during setup;
   published snapshots and formatted rows are retained in typed references.

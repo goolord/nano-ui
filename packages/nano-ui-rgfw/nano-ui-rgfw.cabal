@@ -60,6 +60,7 @@ library
         file-embed ^>=0.0.16,
         nano-ui-rgfw-bindings ^>=0.1,
         nano-ui ^>=0.2,
+        nano-ui-emit ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   lib
@@ -72,6 +73,7 @@ executable nano-ui-rgfw-demo
     build-depends:
         base >=4.20 && <4.23,
         nano-ui,
+        nano-ui-emit,
         nano-ui-rgfw,
         text ^>=2.1
     hs-source-dirs:   examples
@@ -86,6 +88,7 @@ executable nano-ui-rgfw-profile
         base >=4.20 && <4.23,
         bytestring,
         nano-ui,
+        nano-ui-emit,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,
         text ^>=2.1

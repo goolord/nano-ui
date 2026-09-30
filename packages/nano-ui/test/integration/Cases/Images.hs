@@ -34,7 +34,7 @@ type Corner = (Float, Float, Float, Float, Float)
 -- quad's corners with UVs normalized to image @iid@'s 0-1 range.
 frame :: Context -> ImageId -> NanoUI a -> IO (a, DrawData, [[Corner]])
 frame ctx iid ui = do
-  (a, _, dd, _) <- run2Frames ctx (withInput 400 400) (column ui)
+  (a, dd, _) <- run2Frames ctx (withInput 400 400) (column ui)
   (a0, b0, a1, b1) <- fromMaybe (0, 0, 1, 1) <$> lookupImageUv ctx iid
   fmap ((,,) a dd . concat) . withForeignPtr (drawVertices dd) $ \vp -> withForeignPtr (drawIndices dd) $ \ip ->
     forM [c | c <- drawCmdElems dd, cmdTextureId c == atlasTextureId] $ \cmd -> do
@@ -263,7 +263,7 @@ runImageLargeIdTest ctx failed = do
 runSvgIconConfiguredTest :: Context -> IORef Int -> IO ()
 runSvgIconConfiguredTest ctx failed = do
   doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
-  let quadsOf ui = (\(_, _, dd, _) -> dd) <$> run2Frames ctx (withInput 200 200) (column ui) >>= drawQuads
+  let quadsOf ui = (\(_, dd, _) -> dd) <$> run2Frames ctx (withInput 200 200) (column ui) >>= drawQuads
       white = colorRGBA 255 255 255
   plain <- quadsOf (svgIconWith (fixedWH 16 16) doc)
   quadsOf (svgIconConfigured defaultImageConfig {icLayout = fixedWH 16 16} doc) >>= assertEq failed plain
@@ -282,7 +282,7 @@ runUseImageRgbaTest ctx failed = do
   let px v = BS.replicate (8 * 8 * 4) v
       hook owner k = useImageRgba owner k 8 8 (px 90)
       frameOf :: NanoUI x -> IO x
-      frameOf ui = (\(a, _, _, _) -> a) <$> runFrame ctx (withInput 100 100) ui
+      frameOf ui = (\(a, _, _) -> a) <$> runFrame ctx (withInput 100 100) ui
       originOf iid = fmap (\(u0, v0, _, _) -> (u0, v0)) <$> lookupImageUv ctx iid
   Just a <- frameOf (hook textImage ("a" :: T.Text))
   frameOf (hook textImage ("a" :: T.Text)) >>= assertEq failed (Just a)

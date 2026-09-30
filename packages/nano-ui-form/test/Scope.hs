@@ -175,7 +175,7 @@ testSubmitPulse = do
     ui = nanoFormSubmit owner "submit" "Save" (pure (42 :: Int))
   initial <- warmup2 ctx input ui
   check "form submitted before activation" (initial == Nothing)
-  (submitted, _, _, _) <-
+  (submitted, _, _) <-
     runFrame ctx (keyInp KeyEnter input) ui
   check "valid submission did not return its value" (submitted == Just 42)
   idle <- warmup2 ctx input ui
@@ -194,7 +194,7 @@ testSubmitSkipsTextArea = do
     [(wid, _)] -> do
       writeIORef (ctxFocusId ctx) wid
       _ <- warmup2 ctx input ui
-      (submitted, _, _, _) <-
+      (submitted, _, _) <-
         runFrame ctx (keyInp KeyEnter input) ui
       check "Enter in a focused text area submitted the form" (submitted == Nothing)
     _ -> fail "expected one submit-test text area"

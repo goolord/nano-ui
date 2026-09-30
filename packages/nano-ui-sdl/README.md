@@ -15,9 +15,10 @@ main :: IO ()
 main = runSdlApp defaultSdlOptions (label "Hello")
 ```
 
-`runSdlAppReduce` runs a view against a model and an update function, for use
-with `NanoUI.Emit`. `SdlOptions` sets the window, fonts, font size, theme, and
-vsync.
+`runSdlAppReduce` pairs a `model -> NanoUIE msg ()` view with an update function
+`msg -> model -> model`. Add `nano-ui-emit` and import `NanoUI.Emit` for typed
+emission and widget adapters. `SdlOptions` sets the window, fonts, font size,
+theme, and vsync.
 
 For SDL-specific operations, `runSdlAppWith` passes the typed session
 environment and your application state to the view. Construct state in IO

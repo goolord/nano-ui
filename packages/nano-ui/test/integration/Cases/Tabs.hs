@@ -5,14 +5,12 @@ import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeRect, getParent, getText, getWidgetId)
 
 tests :: [Spec]
 tests =
   [ spec "panel-body-swap-damage" runPanelBodySwapDamageTest
   , spec "tabs-laziness" runTabsLazinessTest
-  , spec "tabs-emit" runTabsEmitTest
   , spec "tabs-closable" runTabsClosableTest
   , pixelSpec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
@@ -189,32 +187,6 @@ runTabsLazinessTest ctx failed = do
   _ <- runFrame ctx inp ui
   assertEq failed [0, 1, 0] =<< mapM readIORef [evalCountA, evalCountB, evalCountC]
 
-data TabMsg = MsgSelect DummyTab | MsgClose DummyTab
-  deriving (Eq, Show)
-
-runTabsEmitTest :: Context -> IORef Int -> IO ()
-runTabsEmitTest ctx failed = do
-  let
-    inp0 = withInput 300 100
-    ui curTab =
-      Emit.emitChanged
-        ( \active ->
-            tabs
-              active
-              [ tab TabA "Alpha" (label "Body A")
-              , tab TabB "Beta" (label "Body B")
-              ]
-        )
-        curTab
-        MsgSelect
-  _ <- runFrame ctx inp0 (ui TabA)
-  spans <- collectTextSpans ctx
-  assertJust failed (spanRect "Beta" spans) $ \r -> do
-    let (press, release) = clickPair inp0 (spanCenter r)
-    _ <- runFrame ctx press (ui TabA)
-    (_, msgs, _, _) <- runFrame ctx release (ui TabA)
-    assertEq failed (decodeMessages msgs :: [TabMsg]) [MsgSelect TabB]
-
 -- Composite responses expose every flag of their widget response.
 runTabResponseForwardingTest :: Context -> IORef Int -> IO ()
 runTabResponseForwardingTest _ failed = do
@@ -345,7 +317,7 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   assertJustM failed (findCloseButtonRect ctx) $ \r -> check =<< runClick ctx inp (ui True) (spanCenter r)
   forM_ [wid | (txt, wid) <- headers, txt == "Disabled" || txt == "\215"] $ \wid -> do
     writeIORef (ctxFocusId ctx) wid
-    (result, _, _, _) <- runFrame ctx (keyInp KeyEnter inp) (ui True)
+    (result, _, _) <- runFrame ctx (keyInp KeyEnter inp) (ui True)
     check result
   -- Re-enabling the same header preserves its identity and restores activation.
   _ <- warmup2 ctx inp (ui False)
@@ -483,7 +455,7 @@ runTabsScrollTest _ failed = do
   -- the bar's height (header 28 + 4 slack + 2 slop), derived from the input
   -- so a resize of the test window cannot silently shrink coverage.
   theme <- readIORef (ctxTheme ctx)
-  (_, _, dd, _) <- run2Frames ctx inp (mkTabs 0)
+  (_, dd, _) <- run2Frames ctx inp (mkTabs 0)
   quads <- drawQuads dd
   let Size winW _ = inputWindowSize inp
       bar = Rect 0 0 winW 34

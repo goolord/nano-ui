@@ -41,10 +41,13 @@ Code in the view can therefore run more than once. Load files and allocate
 long-lived resources before entering the backend runner. Guard one-shot IO
 with an event such as `whenM (button "Save") saveDocument`.
 
-For model-driven applications, `NanoUI.Emit` adapts ordinary widgets to emit
-messages. A backend reducer runner applies matching messages in order after
-the view has run. A changed model requests another frame; the drawing from
-the current frame still represents the model passed into it.
+For model-driven applications, `NanoUI.Emit` in the separate `nano-ui-emit`
+package adapts ordinary widgets to emit messages in `NanoUIE msg a`. A backend
+reducer runner applies all messages in order after the view has run; the
+message type must match its update function. A changed model requests another
+frame; the drawing from the current frame still represents the model passed
+into it. Lift ordinary actions with `Emit.liftNanoUI` and wrap containers with
+`Emit.withNanoUI`, for example `Emit.withNanoUI column`.
 
 Use `Emit.emitWhen (button "Save") Save` for activation,
 `Emit.emitChanged (slider 0 100) volume SetVolume` for changed values, and

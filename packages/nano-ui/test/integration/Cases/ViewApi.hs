@@ -53,7 +53,7 @@ runLastRectTest ctx failed = do
         before <- lastRect wid
         (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec {widgetLayout = fixedWH 120 40 defaultLayout}
         pure (before, respRect resp)
-  ((first, _), _, _, _) <- runFrame ctx inp ui
+  ((first, _), _, _) <- runFrame ctx inp ui
   assertEq failed first Nothing
   (second, laidOut) <- warmup2 ctx inp ui
   assertEq failed second (Just laidOut)
@@ -97,7 +97,7 @@ runHoldFocusModalTest ctx failed = do
   -- Tab puts the keyboard on a widget in the modal.
   _ <- runFrame ctx (tabInp inp) ui
   inModal <- readIORef (ctxFocusId ctx)
-  (page, _, _, _) <- runFrame ctx inp ui
+  (page, _, _) <- runFrame ctx inp ui
   _ <- runFrame ctx inp ui
   focus <- readIORef (ctxFocusId ctx)
   assert failed (inModal /= WidgetId 0 && inModal /= page)
@@ -135,10 +135,10 @@ runClipboardTest ctx0 failed = do
   board <- newIORef (Nothing :: Maybe Text)
   let ctx = withClipboard ctx0 (readIORef board) (\t -> writeIORef board (Just t) >> pure True)
       inp = withInput 400 300
-  ((empty, _), _, _, _) <- runFrame ctx inp ((,) <$> getClipboard <*> setClipboard "copied")
+  ((empty, _), _, _) <- runFrame ctx inp ((,) <$> getClipboard <*> setClipboard "copied")
   assertEq failed empty Nothing
   assertEq failed (Just "copied") =<< readIORef board
-  ((pasted, _), _, _, _) <- runFrame ctx inp ((,) <$> getClipboard <*> pure ())
+  ((pasted, _), _, _) <- runFrame ctx inp ((,) <$> getClipboard <*> pure ())
   assertEq failed pasted (Just "copied")
 
 -- | A pointer that moves within one widget runs no frame, unless that widget
@@ -243,7 +243,7 @@ runPaneGridInitialTest ctx failed = do
   -- A pane made later takes an id above every id in the initial tree.
   writeIORef splitIt True
   writeIORef rects IM.empty
-  (PaneGridResponse {pgrPanes = panes}, _, _, _) <- runFrame ctx (withInput 900 400) ui
+  (PaneGridResponse {pgrPanes = panes}, _, _) <- runFrame ctx (withInput 900 400) ui
   assertEq failed (length panes) 3
   assert failed (all (\p -> p `elem` [10, 20] || p > 30) panes)
 
@@ -269,8 +269,8 @@ runPaneGridInitialOnceTest ctx failed = do
   writeIORef closing True
   replicateM_ 3 (runFrame ctx inp ui)
   writeIORef closing False
-  (PaneGridResponse {pgrPanes = after}, _, _, _) <- runFrame ctx inp ui
-  (PaneGridResponse {pgrPanes = again}, _, _, _) <- runFrame ctx inp ui
+  (PaneGridResponse {pgrPanes = after}, _, _) <- runFrame ctx inp ui
+  (PaneGridResponse {pgrPanes = again}, _, _) <- runFrame ctx inp ui
   assertEq failed (length again) 1
   assert failed (all (> 30) again)
   assert failed (after == [] || after == again)
@@ -287,7 +287,7 @@ runPaneGridUnfocusableTest ctx failed = do
   _ <- runFrame ctx (tabInp inp) (ui False)
   assertEq failed (WidgetId 0) . snd =<< evalUi ctx inp (ui False)
   _ <- runFrame ctx (tabInp inp) (ui True)
-  ((_, focused), _, _, _) <- runFrame ctx inp (ui True)
+  ((_, focused), _, _) <- runFrame ctx inp (ui True)
   assert failed (focused /= WidgetId 0)
 
 -- | The scroll commands run from a view: a list scrolls a row into view, a
@@ -308,7 +308,7 @@ runScrollUiTest ctx failed = do
         pure (sid == sid', m)
       settle = replicateM_ 3 (runFrame ctx inp ui)
       offsetNow = do
-        ((_, m), _, _, _) <- runFrame ctx inp ui
+        ((_, m), _, _) <- runFrame ctx inp ui
         pure (fmap (v2Y . scrollOffset) m)
   (same, m0) <- warmup2 ctx inp ui
   assert failed same
@@ -340,7 +340,7 @@ runScrollMetricsReadTest ctx failed = do
         _ <- scrollArea (fillW . fillH) $
           void (customWidget defaultCustomWidgetSpec {widgetLayout = fixedWH 180 1000 defaultLayout})
         pure (fmap (rectH . scrollViewport) m)
-      dirtyAfter i = (\(_, _, _, d) -> d) <$> runFrame ctx i ui
+      dirtyAfter i = (\(_, _, d) -> d) <$> runFrame ctx i ui
   replicateM_ 3 (runFrame ctx (withInput 400 300) ui)
   assert failed . not =<< dirtyAfter (withInput 400 300)
   assert failed =<< dirtyAfter (withInput 400 200)
@@ -359,12 +359,12 @@ runTakeEscapeTest ctx failed = do
         pure (resp, first, again)
   (resp, none, _) <- warmup2 ctx inp ui
   assertEq failed none False
-  ((_, first, again), _, _, _) <- runFrame ctx esc ui
+  ((_, first, again), _, _) <- runFrame ctx esc ui
   assertEq failed (first, again) (True, False)
   -- Open the field's right-click menu: that Escape closes the menu instead.
   let (press, release) = rightClickPair inp (centerOf resp)
   mapM_ (\i -> runFrame ctx i ui) [press, release, inp]
-  ((_, forMenu, _), _, _, _) <- runFrame ctx esc ui
+  ((_, forMenu, _), _, _) <- runFrame ctx esc ui
   assertEq failed forMenu False
 
 -- | 'modalWith' sizes the panel, and a body that fills it gets the inside.
@@ -398,7 +398,7 @@ runModalPanelWithTest ctx failed = do
     -- Centred in the window, with no title-bar or body-padding offset.
     assert failed (abs (rectX r + rectW r / 2 - 400) <= 1)
     assert failed (abs (rectY r + rectH r / 2 - 300) <= 1)
-  ((dismiss, _), _, _, _) <- runFrame ctx (keyInp KeyEscape inp) ui
+  ((dismiss, _), _, _) <- runFrame ctx (keyInp KeyEscape inp) ui
   assert failed (respClicked dismiss)
 
 -- | 'rowWith'' reports where the row was laid out, for a row that drops

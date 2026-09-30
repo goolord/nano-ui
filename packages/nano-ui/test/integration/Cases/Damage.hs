@@ -70,7 +70,7 @@ runFarLabelsDamagePiecesTest ctx failed = do
       tshow = T.pack . show :: Int -> T.Text
   _ <- warmup2 ctx inp (ui 1)
   writeIORef (ctxPaintFull ctx) False
-  (_, _, dd, _) <- runFrame ctx inp (ui 2)
+  (_, dd, _) <- runFrame ctx inp (ui 2)
   dmg <- takeDamage ctx
   pieces <- takeDamagePieces ctx
   assert failed (case dmg of DamageClip _ -> True; DamageFull -> False)
@@ -204,7 +204,7 @@ runOrphanAnimationDamageSettlesTest ctx failed = do
         pure bar
       withoutBar = columnWith (padAll 20) (pure ())
   -- Warm up: the bar widget occupies a nonzero 40x20 rect in the arena.
-  (wid, _, _, _) <- runFrame ctx inp withBar
+  (wid, _, _) <- runFrame ctx inp withBar
   _ <- takeDamage ctx
   -- keepAnimating-style perpetual animation on an established widget.
   startAnimation ctx wid 0 1 1e9
@@ -251,7 +251,7 @@ runClipFrameBackdropTest ctx failed = do
         pure file
   file <- warmup2 ctx inp0 ui
   _ <- runFrame ctx inp0 {inputMousePos = centerOf file} ui
-  (_, _, draw, _) <- runFrame ctx inp0 ui
+  (_, draw, _) <- runFrame ctx inp0 ui
   dmg <- takeDamage ctx
   theme <- readIORef (ctxTheme ctx)
   quads <- drawQuads draw

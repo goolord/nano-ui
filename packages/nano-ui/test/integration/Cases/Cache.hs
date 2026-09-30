@@ -106,11 +106,11 @@ runMetricCacheInvalidationTest ctx failed = do
       warm <- newContext
       void $ runFrame warm inp ui
       let configured = configure warm
-      (_, _, draw, _) <- runFrame configured inp ui
+      (_, draw, _) <- runFrame configured inp ui
       actual <- snapshotDraw draw
       spans <- collectTextSpans configured
       fresh <- configure <$> newContext
-      (_, _, coldDraw, _) <- runFrame fresh inp ui
+      (_, coldDraw, _) <- runFrame fresh inp ui
       assertEq failed actual =<< snapshotDraw coldDraw
       assertEq failed spans =<< collectTextSpans fresh
 
@@ -135,24 +135,24 @@ runWidgetPlacementCacheTest _ctx failed =
         inp = withInputOff 400 300
     void $ runFrame ctx inp (header ctx AlignStart 0 0)
     start <- collectTextSpans ctx
-    (_, _, draw, _) <- runFrame ctx inp (header ctx AlignEnd 0 0)
+    (_, draw, _) <- runFrame ctx inp (header ctx AlignEnd 0 0)
     aligned <- snapshotDraw draw
     end <- collectTextSpans ctx
     assert failed (start /= end)
     freshBase <- newContext
     let fresh = withFontMetrics freshBase ((monospaceMetrics 12) {fmSnapScale = scale})
-    (_, _, expectedDraw, _) <- runFrame fresh inp (header fresh AlignEnd 0 0)
+    (_, expectedDraw, _) <- runFrame fresh inp (header fresh AlignEnd 0 0)
     assertEq failed aligned =<< snapshotDraw expectedDraw
 
     cache <- readIORef (ctxWidgetTextCache ctx) >>= evaluate >>= makeStableName
     forM_ [(0.25, 0.5), (9.75, 3.25), (0, 0)] $ \(x, y) -> do
-      (_, _, movedDraw, _) <- runFrame ctx inp (header ctx AlignEnd x y)
+      (_, movedDraw, _) <- runFrame ctx inp (header ctx AlignEnd x y)
       moved <- snapshotDraw movedDraw
       cache' <- readIORef (ctxWidgetTextCache ctx) >>= evaluate >>= makeStableName
       assert failed (cache == cache')
       -- Force a fresh placement at the same origin and compare actual bytes.
       clearMeasureCache fresh
-      (_, _, coldDraw, _) <- runFrame fresh inp (header fresh AlignEnd x y)
+      (_, coldDraw, _) <- runFrame fresh inp (header fresh AlignEnd x y)
       assertEq failed moved =<< snapshotDraw coldDraw
 
 runLayoutPaintStateTest :: Context -> IORef Int -> IO ()
@@ -170,17 +170,17 @@ runLayoutPaintStateTest ctx failed = do
           void (labelWith (fontColor color) "paint only")
       red = colorRGBA 255 0 0 255
       blue = colorRGBA 0 0 255 255
-  (_, _, firstDraw, _) <- runFrame ctx inp (ui 0.2 red)
+  (_, firstDraw, _) <- runFrame ctx inp (ui 0.2 red)
   first <- snapshotDraw firstDraw
   cache <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
-  (_, _, changedDraw, _) <- runFrame ctx inp (ui 0.8 blue)
+  (_, changedDraw, _) <- runFrame ctx inp (ui 0.8 blue)
   changed <- snapshotDraw changedDraw
   cache' <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
   assert failed (cache == cache')
   assert failed (first /= changed)
   -- A cache hit must preserve this frame's slider value and paint colors.
   writeIORef (ctxLayoutCache ctx) Nothing
-  (_, _, coldDraw, _) <- runFrame ctx inp (ui 0.8 blue)
+  (_, coldDraw, _) <- runFrame ctx inp (ui 0.8 blue)
   assertEq failed changed =<< snapshotDraw coldDraw
 
 -- | A full frame with no damage, built from the same view output as the
@@ -212,7 +212,7 @@ runDrawReuseTest ctx failed = do
             registerCustomDrawing ctx (WidgetId 777) 0 $ \_ r ->
               smallArrayFromList [FillRect r (colorRGBA stray 0 0 255)]
       base = (red, 0.2, red, 1, 1, 0)
-      frame s = (\(_, _, dd, _) -> dd) <$> runFrame ctx inp (ui s)
+      frame s = (\(_, dd, _) -> dd) <$> runFrame ctx inp (ui s)
       -- Two frames of @s@ after @from@: the first paints @s@, and the second
       -- returns the first's draw data when @reused@.
       check from s reused = do
@@ -269,7 +269,7 @@ runContinuousDrawReuseTest ctx failed = do
         pure b
       frame c inp target = do
         writeIORef (ctxDamageWanted c) False
-        (b, _, dd, _) <- runFrame c inp (ui target)
+        (b, dd, _) <- runFrame c inp (ui target)
         writeIORef (ctxDamageWanted c) True
         pure (b, dd)
       -- One frame on both contexts: its response, whether it reused the

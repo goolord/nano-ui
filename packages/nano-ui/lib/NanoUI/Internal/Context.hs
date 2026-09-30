@@ -86,8 +86,6 @@ module NanoUI.Internal.Context
   , setDrawExternalText
   , askHostIO
   , hostOrInit
-  , pushMessage
-  , drainMessages
   -- Constructors
   , newContext
   , newPixelContext
@@ -101,10 +99,6 @@ module NanoUI.Internal.Context
   , requestInputMethod
   , fieldComposition
   , AnimationState (..)
-  , FrameMsg (..)
-  , decodeMessages
-  , reduceMessages
-  , reduceUpdates
   , WidgetStore (..)
   , bumpMirror
   , slotKey
@@ -535,19 +529,6 @@ setDrawSquareGeometry ctx = Draw.setDrawSquareGeometry (ctxDrawArena ctx)
 setDrawExternalText :: Context -> Bool -> IO ()
 setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
 
--- | Queue a message for this frame. 'drainMessages' restores emission order.
-{-# INLINE pushMessage #-}
-pushMessage :: Context -> FrameMsg -> IO ()
-pushMessage ctx msg = modifyIORef' (ctxMessages ctx) (msg :)
-
--- | Read queued messages in emission order and clear the queue.
-{-# INLINE drainMessages #-}
-drainMessages :: Context -> IO [FrameMsg]
-drainMessages ctx = do
-  msgs <- readIORef (ctxMessages ctx)
-  writeIORef (ctxMessages ctx) []
-  pure (reverse msgs)
-
 -- =============================================================================
 -- Constructors
 -- =============================================================================
@@ -579,7 +560,6 @@ newContext = do
   ctxDrawingCache <- newIORef initialDrawingCacheState
   ctxIdContext <- newIORef initialIdContext
   ctxContainerStack <- newIORef []
-  ctxMessages <- newIORef []
   ctxFocusables <- newIORef =<< newPrimArray 64
   ctxFocusablesCount <- newIORef 0
   ctxSpanBase <- newSpanArena

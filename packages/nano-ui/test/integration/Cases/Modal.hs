@@ -45,7 +45,7 @@ runModalOverlayTest ctx failed = do
     assert failed (respClicked dlgHit)
 
     let esc = keyInp KeyEscape inp0
-    ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
+    ((_, dlgEsc, _), _, _) <- runFrame ctx esc ui
     assert failed (respClicked dlgEsc)
     assert failed =<< overlayConsumesQuit ctx esc
     _ <- runFrame ctx esc closedUi

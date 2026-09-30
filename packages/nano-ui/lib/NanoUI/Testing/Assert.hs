@@ -21,7 +21,7 @@ import Data.IORef (IORef, modifyIORef')
 import GHC.Stack (HasCallStack, callStack, prettyCallStack, withFrozenCallStack)
 import NanoUI (Input (..), NanoUI, Size (..))
 import NanoUI.Backend (emptyInput)
-import NanoUI.Testing (Context, DrawData, FrameMsg, runFrame)
+import NanoUI.Testing (Context, DrawData, runFrame)
 
 -- | Increment a test's failure counter without printing a diagnostic.
 bump :: IORef Int -> IO ()
@@ -65,9 +65,9 @@ withInput w h = emptyInput {inputWindowSize = Size w h}
 
 -- | Run twice with the same input and return the second frame. Use event-free
 -- input for warmup; press/key events would otherwise be delivered twice.
-run2Frames :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
+run2Frames :: Context -> Input -> NanoUI a -> IO (a, DrawData, Bool)
 run2Frames ctx inp ui = runFrame ctx inp ui >> runFrame ctx inp ui
 
 -- | Run a complete headless frame and return only the view's result.
 evalUi :: Context -> Input -> NanoUI a -> IO a
-evalUi ctx inp ui = (\(a, _, _, _) -> a) <$> runFrame ctx inp ui
+evalUi ctx inp ui = (\(a, _, _) -> a) <$> runFrame ctx inp ui

@@ -106,8 +106,9 @@ greeter = columnWith (gap 8 . padAll 16) $ do
   labelWith (fontSize size) (if shout then T.toUpper greeting else greeting)
 ```
 
-For an Elm-style update function, `NanoUI.Emit` adapts ordinary widgets to emit
-messages, and `runSdlAppReduce` folds them into the model:
+For an Elm-style update function, `NanoUI.Emit` from the `nano-ui-emit` package
+adapts ordinary widgets to emit statically typed messages, and `runSdlAppReduce`
+folds them into the model:
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -126,10 +127,10 @@ update :: Msg -> Int -> Int
 update Increment n = n + 1
 update Decrement n = n - 1
 
-view :: Int -> NanoUI ()
-view n = row $ do
+view :: Int -> Emit.NanoUIE Msg ()
+view n = Emit.withNanoUI row $ do
   Emit.emitWhen (button "-") Decrement
-  label (T.pack (show n))
+  Emit.liftNanoUI (label (T.pack (show n)))
   Emit.emitWhen (button "+") Increment
 ```
 
@@ -168,6 +169,7 @@ suite checks that the vertex writers compile without dictionaries or tuples.
 | `nano-ui-rgfw-bindings` | Haskell bindings to RGFW |
 | `nano-ui-diagrams` | Line, bar, scatter, and area charts, and drawing with [diagrams](https://diagrams.github.io/) |
 | `nano-ui-form` | Validated forms built on [ditto](https://hackage.haskell.org/package/ditto) |
+| `nano-ui-emit` | Statically typed emitting views, widget adapters, and reducers |
 | `nano-ui-markdown` | Markdown documents drawn with rich text, parsed incrementally for streamed chat replies |
 | `nano-ui-demo` | Example applications |
 

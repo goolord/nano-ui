@@ -16,8 +16,9 @@ main :: IO ()
 main = runRgfwApp defaultRgfwOptions {optScale = 2} (label "Hello")
 ```
 
-`runRgfwAppReduce` takes a model and an update function, for use with
-`NanoUI.Emit`. `RgfwOptions` sets the window (`optWindow`, the core's
+`runRgfwAppReduce` pairs a `model -> NanoUIE msg ()` view with an update function
+`msg -> model -> model`. Add `nano-ui-emit` and import `NanoUI.Emit` for typed
+emission and widget adapters. `RgfwOptions` sets the window (`optWindow`, the core's
 `WindowSettings`, which the SDL backend takes too, with its size in layout
 units), the theme, the UI scale, and the refresh rate used for pacing
 animations. RGFW places a window itself, so one where the desktop would put

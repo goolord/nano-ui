@@ -23,9 +23,9 @@ openMenu :: Context -> IORef Int -> Input -> IO (Response, Maybe (Response, Resp
 openMenu ctx failed inp0 = do
   (btnWarm, _) <- warmup2 ctx inp0 menuUi
   let (inpRightDown, inpRightUp) = rightClickPair inp0 (centerOf btnWarm)
-  ((btnDown, _), _, _, _) <- runFrame ctx inpRightDown menuUi
+  ((btnDown, _), _, _) <- runFrame ctx inpRightDown menuUi
   assert failed (not (respRightClicked btnDown))
-  ((btnUp, mInside), _, _, _) <- runFrame ctx inpRightUp menuUi
+  ((btnUp, mInside), _, _) <- runFrame ctx inpRightUp menuUi
   pure (btnUp, mInside)
 
 runContextMenuOpenTest :: Context -> IORef Int -> IO ()
@@ -45,7 +45,7 @@ runContextMenuOpenTest ctx failed = do
   _ <- openMenu ctx failed inp0
   let inpRightOut = fst (rightClickPair inp0 (V2 500 400))
   _ <- runFrame ctx inpRightOut menuUi
-  ((_, mAfterRight), _, _, _) <- runFrame ctx inp0 menuUi
+  ((_, mAfterRight), _, _) <- runFrame ctx inp0 menuUi
   assert failed (case mAfterRight of Nothing -> True; Just _ -> False)
 
 runContextMenuScrollPosTest :: Context -> IORef Int -> IO ()
@@ -71,7 +71,7 @@ runContextMenuScrollPosTest ctx failed = do
           before <- getScrollOffset ctx sid
           _ <- runFrame ctx wheel ui
           after <- getScrollOffset ctx sid
-          ((_, (btn, _)), _, _, _) <- runFrame ctx hover ui
+          ((_, (btn, _)), _, _) <- runFrame ctx hover ui
           if inView btn || after <= before then pure (after, btn) else pump
     (off, btn1) <- pump
     assert failed (off > 0)

@@ -34,7 +34,7 @@ spanFg txt spans = lookup txt [(t, fg) | (_, t, fg, _, _) <- spans]
 frames :: Int -> Context -> NanoUI a -> IO (a, [(Rect, Color)], [DemoSpan])
 frames n ctx ui = do
   replicateM_ (n - 1) (warmup ctx inp ui)
-  (a, _, draw, _) <- runFrame ctx inp ui
+  (a, draw, _) <- runFrame ctx inp ui
   (,,) a <$> drawQuads draw <*> collectTextSpans ctx
 
 -- | Warning and danger text use the theme's warning and danger colours, and fade when disabled.

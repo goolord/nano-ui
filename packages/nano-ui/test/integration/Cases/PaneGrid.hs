@@ -81,7 +81,7 @@ runDropCommitTest ctx failed = do
             repeated <- commitPaneDrop target
             pure (r, committed, repeated)
   _ <- warmup2 ctx inp (view halves)
-  ((before, committed, repeated), _, _, dirty) <- runFrame ctx inp ui
+  ((before, committed, repeated), _, dirty) <- runFrame ctx inp ui
   assert failed dirty
   assertEq failed (Just halves) (pgrTree before)
   assertEq failed Nothing repeated

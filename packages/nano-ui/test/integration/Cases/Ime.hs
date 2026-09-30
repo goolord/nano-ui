@@ -163,7 +163,7 @@ runImeAreaPaintTest ctx failed = do
       near a b = abs (a - b) <= 1
       paint step = do
         writeIORef (ctxPaintFull ctx) True
-        (_, _, draw, _) <- runFrame ctx step ui
+        (_, draw, _) <- runFrame ctx step ui
         (,) <$> drawQuads draw <*> collectTextSpans ctx
       carets quads cx = [r | (r@(Rect x _ w h), _) <- quads, near x cx, w <= 1.5, h >= cell / 2]
       -- On the row showing @line@: a composition @len@ cells long starting

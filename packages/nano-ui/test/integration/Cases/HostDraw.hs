@@ -36,7 +36,7 @@ runTextInputFontTest base failed = do
       field = void (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)} "Hg")
       extent ui = do
         _ <- runFrame ctx inp (column ui)
-        (_, _, dd, _) <- runFrame ctx inp (column ui)
+        (_, dd, _) <- runFrame ctx inp (column ui)
         ps <- glyphVertices dd
         let xs = map fst ps
             ys = map snd ps
@@ -68,7 +68,7 @@ runGlyphPagesTest ctx failed = do
   let glyph x page = [x, 0, 6, 10, page + 0.25, 0.5, page + 0.5, 0.75]
       glyphs = ShapedGlyphs (primArrayFromList (concat [glyph 0 0, glyph 8 1, glyph 16 1]))
       fm = (monospaceMetrics 12) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just glyphs)))}
-  (_, _, dd, _) <- runFrame (withFontMetrics ctx fm) (withInput 300 200) (label "abc")
+  (_, dd, _) <- runFrame (withFontMetrics ctx fm) (withInput 300 200) (label "abc")
   let onPage page = [c | c <- drawCmdElems dd, cmdTextureId c == glyphPageTextureId page, cmdIndexCount c > 0]
       vertexUs cmd =
         withForeignPtr (drawVertices dd) $ \vp ->
@@ -115,11 +115,11 @@ runSquareGeometryTest :: Context -> IORef Int -> IO ()
 runSquareGeometryTest ctx failed = do
   let inp = withInput 300 200
       uniform (a, b, c) = a == b && b == c
-  (_, _, dRound, _) <- runFrame ctx inp controls
+  (_, dRound, _) <- runFrame ctx inp controls
   roundTris <- triangleAlphas dRound
   assert failed (not (all uniform roundTris))
   setDrawSquareGeometry ctx True
-  (_, _, dSquare, _) <- runFrame ctx inp controls
+  (_, dSquare, _) <- runFrame ctx inp controls
   squareTris <- triangleAlphas dSquare
   assert failed (not (null squareTris))
   assert failed (all uniform squareTris)
@@ -132,8 +132,8 @@ runExternalTextTest ctx failed = do
   let inp = withInput 400 100
       ui txt = column (void (label txt))
   setDrawExternalText ctx True
-  (_, _, dShort, _) <- runFrame ctx inp (ui "ab")
-  (_, _, dLong, _) <- runFrame ctx inp (ui "abcdefghijklmnop")
+  (_, dShort, _) <- runFrame ctx inp (ui "ab")
+  (_, dLong, _) <- runFrame ctx inp (ui "abcdefghijklmnop")
   spans <- collectTextSpans ctx
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
@@ -155,7 +155,7 @@ runConcentricCirclesTest ctx failed = do
             drawCircle ring 2.5 (colorRGBA 255 255 0 255)
         }
   setDrawSnapScale ctx 1
-  (_, _, dd, _) <- runFrame ctx inp ui
+  (_, dd, _) <- runFrame ctx inp ui
   setDrawSnapScale ctx 0
   verts <- vertexColours dd
   let centreOf rgb = case [(x, y) | (x, y, c) <- verts, c == rgb] of

@@ -66,7 +66,6 @@ module NanoUI.Backend.Sdl
   ) where
 
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Typeable (Typeable)
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
@@ -77,7 +76,7 @@ import NanoUI.Sdl.Internal.Chrome
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Internal.Font.Search (listFontFamilies)
 import NanoUI.Sdl.Internal.Url (openUrl)
-import NanoUI.Testing (runFrameReduce)
+import NanoUI.Emit (NanoUIE, runFrameReduce)
 
 -- | Open an SDL window and run a view until close or the quit predicate fires.
 -- Owns and releases the native resources. Call from the application's display
@@ -93,14 +92,14 @@ runSdlAppWith options state view = runSdlSession options $ \ctx env inp forceFul
   sdlDrawFrame ctx (view env state) env inp forceFull
 
 -- | Run a model-driven view, folding emitted messages through the update
--- function in emission order. Messages of other runtime types are ignored.
+-- function in emission order. The view's message type must match the reducer.
 -- Use the adapters in "NanoUI.Emit" to emit changes from ordinary widgets.
 runSdlAppReduce ::
-  (Typeable msg, Eq model) =>
+  Eq model =>
   SdlOptions
   -> (msg -> model -> model)
   -> model
-  -> (model -> NanoUI ())
+  -> (model -> NanoUIE msg ())
   -> IO ()
 runSdlAppReduce options update model view = do
   modelRef <- newIORef model

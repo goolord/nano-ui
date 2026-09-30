@@ -32,7 +32,7 @@ runSlidersDragApartTest ctx failed = do
       press = pressAt inp0 (V2 (tx + tw * 0.25) (ty + th / 2))
       drag = press {inputButtonsPressed = noButtons, inputMousePos = V2 (tx + tw * 0.75) (ty + th / 2)}
   _ <- runFrame ctx press ui
-  (((_, v1), (_, v2)), _, _, _) <- runFrame ctx drag ui
+  (((_, v1), (_, v2)), _, _) <- runFrame ctx drag ui
   assertEq failed v1 20
   assertGt failed v2 50
 
@@ -45,7 +45,7 @@ runRadioGroupsApartTest ctx failed = do
   let inp0 = withInput 200 240
       ui = column ((,) <$> held aRef (radio' ["x", "y"]) <*> held bRef (radio' ["p", "q", "r"]))
   _ <- warmup2 ctx inp0 ui
-  (_, _, _, dirty) <- runFrame ctx inp0 ui
+  (_, _, dirty) <- runFrame ctx inp0 ui
   assert failed (not dirty)
   spans <- collectTextSpans ctx
   assertJust failed (spanRectOf "q" spans) $ \r -> do
@@ -60,7 +60,7 @@ runSliderOutOfRangeSettlesTest ctx failed = do
   let inp0 = withInput 300 80
       ui = column (slider' 0 1 1.2)
   _ <- warmup2 ctx inp0 ui
-  ((resp, v), _, _, dirty) <- runFrame ctx inp0 ui
+  ((resp, v), _, dirty) <- runFrame ctx inp0 ui
   assertEq failed v 1
   assert failed (not (respChanged resp))
   assert failed (not dirty)
@@ -187,7 +187,7 @@ runSelectChangeOnceTest ctx failed = do
     let
       lowPos = V2 (v2X (centerOf resp)) (lowY + 0.5)
       (pickPress, pickRelease) = clickPair inp0 lowPos
-      frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
+      frame inp = (\((r, i), _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
     assertEq failed UiCursorPointer =<< cursorOver ctx inp0 ui lowPos
     pressed <- frame pickPress
     assertEq failed UiCursorPointer =<< uiCursorKind ctx pickPress

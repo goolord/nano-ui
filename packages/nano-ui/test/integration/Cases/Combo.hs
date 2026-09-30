@@ -51,7 +51,7 @@ runComboKeyboardPickTest ctx failed = do
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
-  ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
+  ((r, t), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (respChanged r)
   assertEq failed t "Beta Serif"
   spans <- collectTextSpans ctx
@@ -89,7 +89,7 @@ runComboHoverHighlightTest ctx failed = do
     let hover = inp0 {inputMousePos = spanCenter rowRect}
     _ <- runFrame ctx hover ui
     -- Hover alone must not commit anything.
-    ((r0, t0), _, _, _) <- runFrame ctx hover ui
+    ((r0, t0), _, _) <- runFrame ctx hover ui
     assert failed (not (respChanged r0) && T.null t0)
     -- Menu rows show the pointer cursor while hovered.
     assert failed =<< cursorKindIs ctx hover UiCursorPointer
@@ -100,7 +100,7 @@ runComboHoverHighlightTest ctx failed = do
       ([dBg], [aBg]) -> assert failed (dBg /= aBg)
       _ -> assert failed False
     -- Enter commits the hovered row.
-    ((r1, t1), _, _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
+    ((r1, t1), _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
     assert failed (respChanged r1)
     assertEq failed t1 "Delta Round"
 
@@ -120,7 +120,7 @@ runComboKeysOverStillPointerTest ctx failed = do
     _ <- runFrame ctx hover ui
     _ <- runFrame ctx (keyInp KeyDown hover) ui
     _ <- runFrame ctx hover ui
-    ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
+    ((r, t), _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
     assert failed (respChanged r)
     assertEq failed t "Gamma Mono"
 
@@ -145,7 +145,7 @@ runComboScrollbarDragTest ctx failed = do
   _ <- runFrame ctx press {inputButtonsPressed = noButtons} ui
   -- Release over a row position (bottom of the list): must not pick.
   let release = applyMouseButton MouseLeft False press
-  ((r, t), _, _, _) <- runFrame ctx release ui
+  ((r, t), _, _) <- runFrame ctx release ui
   assert failed (T.null t && not (respChanged r))
   overlays1 <- collectOverlayTextSpans ctx inp0
   assert failed (not (hasText "Fam 01" overlays1))
@@ -160,15 +160,15 @@ runComboBlurCommitTest ctx failed = do
   let inp0 = withInput 320 200
       ui = column (held textRef (comboBox' "Font" comboOpts))
   warmupFocused ctx inp0 ui
-  ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "N"}) ui
+  ((rA, tA), _, _) <- runFrame ctx (inp0 {inputChars = "N"}) ui
   assertEq failed tA "N"
   assert failed (not (respChanged rA))
-  ((rB, tB), _, _, _) <- runFrame ctx (inp0 {inputChars = "o"}) ui
+  ((rB, tB), _, _) <- runFrame ctx (inp0 {inputChars = "o"}) ui
   assertEq failed tB "No"
   assert failed (not (respChanged rB))
   _ <- runFrame ctx (inp0 {inputChars = " bar"}) ui
   _ <- runFrame ctx (chordInp (ctrl <> key KeyBackspace) inp0) ui
-  ((rW, tW), _, _, _) <- runFrame ctx inp0 ui
+  ((rW, tW), _, _) <- runFrame ctx inp0 ui
   assertEq failed tW "No "
   assert failed (not (respChanged rW))
   _ <- runFrame ctx (keyInp KeyBackspace inp0) ui
@@ -176,10 +176,10 @@ runComboBlurCommitTest ctx failed = do
   -- blur commits the typed text.
   let away = pressAt inp0 (V2 310 5)
   _ <- runFrame ctx away ui
-  ((rC, tC), _, _, _) <- runFrame ctx (applyMouseButton MouseLeft False inp0) ui
+  ((rC, tC), _, _) <- runFrame ctx (applyMouseButton MouseLeft False inp0) ui
   assertEq failed tC "No"
   assert failed (respChanged rC)
-  ((rD, _), _, _, _) <- runFrame ctx inp0 ui
+  ((rD, _), _, _) <- runFrame ctx inp0 ui
   assert failed (not (respChanged rD))
 
 -- Unfocused, the combo is just a search field: the value is visible and no
@@ -199,7 +199,7 @@ runComboEscapeRevertTest ctx failed = do
   assert failed (hasText "Inter" spans0)
   _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx (inp0 {inputChars = "No"}) ui
-  ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEscape inp0) ui
+  ((r, t), _, _) <- runFrame ctx (keyInp KeyEscape inp0) ui
   assert failed (not (respChanged r))
   assertEq failed t "Inter"
   assertEq failed (WidgetId 0) =<< getFocusId ctx

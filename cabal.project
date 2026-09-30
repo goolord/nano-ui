@@ -1,5 +1,6 @@
 packages:
   packages/nano-ui
+  packages/nano-ui-emit
   packages/nano-ui-sdl
   packages/nano-ui-diagrams
   packages/nano-ui-demo
@@ -20,6 +21,9 @@ package *
 -- development build without failing a downstream build of a published package.
 -- The flags lines turn on the SDL backend and the executables that need it.
 package nano-ui
+  ghc-options: -Werror
+
+package nano-ui-emit
   ghc-options: -Werror
 
 package nano-ui-sdl

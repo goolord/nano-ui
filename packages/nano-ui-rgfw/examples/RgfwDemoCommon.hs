@@ -183,14 +183,14 @@ update msg m =
         ClearNotes       -> m' {notesVal = ""}
         ToggleDebug b    -> m' {debugOpen = b}
 
-appView :: RgfwDebugSampler -> Model -> NanoUI ()
-appView debug m = do
+appView :: RgfwDebugSampler -> Model -> Emit.NanoUIE Msg ()
+appView debug m = Emit.withRunInNanoUIE $ \run -> do
   panelWith (padAll 12 . gap 8 . fillW . fillH) $ do
     rowWith (gap 8 . fixedH 24 . fillW) $ do
       label "nano-ui on RGFW"
       flex
 
-      Emit.emitWhen
+      run $ Emit.emitWhen
         ( button
             ( case currentTheme m of
                 ThemeNight -> "[Theme: Tomorrow Night]"
@@ -200,11 +200,11 @@ appView debug m = do
         )
         CycleTheme
 
-      Emit.emitWhen
+      run $ Emit.emitWhen
         (button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]"))
         CycleScale
 
-      Emit.emitWhen
+      run $ Emit.emitWhen
         (button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]"))
         (ToggleDebug (not (debugOpen m)))
 
@@ -216,23 +216,23 @@ appView debug m = do
         , tab TabAbout "About" ()
         , tab TabDiagnostics "Diagnostics" ()
         ]
-    when (nextTab /= activeTab m) (Emit.emit (SetTab nextTab))
+    when (nextTab /= activeTab m) (run (Emit.emit (SetTab nextTab)))
 
     separator
 
     case activeTab m of
-      TabControls -> viewControlsTab m
+      TabControls -> run (viewControlsTab m)
       TabGallery -> viewGalleryTab
       TabAbout -> viewAboutTab
-      TabDiagnostics -> viewDiagnosticsTab m
+      TabDiagnostics -> run (viewDiagnosticsTab m)
 
     when (debugOpen m) $ do
       snap <- askRgfwDebug debug
       (win, _) <- window True "Debug" (debugWindowBody debug snap)
-      when (respClicked win) (Emit.emit (ToggleDebug False))
+      when (respClicked win) (run (Emit.emit (ToggleDebug False)))
 
-viewControlsTab :: Model -> NanoUI ()
-viewControlsTab m = do
+viewControlsTab :: Model -> Emit.NanoUIE Msg ()
+viewControlsTab m = Emit.withRunInNanoUIE $ \run -> do
   gridWith 2 (gap 12 . fillW . fillH) $ do
     panelWith (padAll 10 . gap 6 . fixedW 380 . fillH) $ do
       label "Controls"
@@ -240,12 +240,12 @@ viewControlsTab m = do
 
       gridWith 4 (gap 6 . fixedH 22 . fillW) $ do
         label ("Counter: " <> T.pack (show (counter m)))
-        Emit.emitWhen (button " +1 ") Increment
-        Emit.emitWhen (button " -1 ") Decrement
-        Emit.emitWhen (button " Reset ") Reset
+        run $ Emit.emitWhen (button " +1 ") Increment
+        run $ Emit.emitWhen (button " -1 ") Decrement
+        run $ Emit.emitWhen (button " Reset ") Reset
 
       gridWith 1 (gap 6 . fixedH 20) $ do
-        Emit.emitChanged (checkbox "Turbo mode") (turboOn m) ToggleTurbo
+        run $ Emit.emitChanged (checkbox "Turbo mode") (turboOn m) ToggleTurbo
 
       gridWith 2 (gap 6 . fixedH 22) $ do
         label "Context Menu:"
@@ -255,39 +255,39 @@ viewControlsTab m = do
           menuSeparator
           whenM
             (menuItemShortcut "Cut" (ctrl <> key 'x'))
-            (Emit.emit (SetNotesText "Cut text to clipboard"))
+            (run (Emit.emit (SetNotesText "Cut text to clipboard")))
           whenM
             (menuItemShortcut "Copy" (ctrl <> key 'c'))
-            (Emit.emit (SetNotesText "Copied text to clipboard"))
+            (run (Emit.emit (SetNotesText "Copied text to clipboard")))
           whenM
             (menuItemShortcut "Paste" (ctrl <> key 'v'))
-            (Emit.emit (SetNotesText "Pasted text from clipboard"))
+            (run (Emit.emit (SetNotesText "Pasted text from clipboard")))
           menuSeparator
           menuHeader "System"
-          whenM (menuItem "Reset Counter") (Emit.emit Reset)
+          whenM (menuItem "Reset Counter") (run (Emit.emit Reset))
           menuItemDisabled "Disabled Command"
 
       gridWith 1 (gap 2) $ do
         let
           volPct = round (volumeVal m * 100) :: Int
         label ("Master Volume: " <> T.pack (show volPct) <> "%")
-        Emit.emitChanged (slider 0 1) (volumeVal m) SetVolume
+        run $ Emit.emitChanged (slider 0 1) (volumeVal m) SetVolume
 
       gridWith 1 (gap 2) $ do
         let
           opPct = round (opacityVal m * 100) :: Int
         label ("Surface Opacity: " <> T.pack (show opPct) <> "%")
-        Emit.emitChanged (slider 0 1) (opacityVal m) SetOpacity
+        run $ Emit.emitChanged (slider 0 1) (opacityVal m) SetOpacity
 
       gridWith 1 (gap 2) $ do
         label "Single-line Text Input:"
-        Emit.emitChanged textInput (textVal m) SetInputText
+        run $ Emit.emitChanged textInput (textVal m) SetInputText
 
       gridWith 1 (gap 2) $ do
         gridWith 2 (gap 4 . fixedH 18) $ do
           label "Multi-line Notes Field:"
-          Emit.emitWhen (button "Clear") ClearNotes
-        Emit.emitEdited textArea' (notesVal m) SetNotesText
+          run $ Emit.emitWhen (button "Clear") ClearNotes
+        run $ Emit.emitEdited textArea' (notesVal m) SetNotesText
 
       gridWith 1 (gap 2) $ do
         label "Preset:"
@@ -299,7 +299,7 @@ viewControlsTab m = do
                 ProfileQuality -> "Quality (High Detail)"
             )
             (profileOpt m)
-        when (radVal /= profileOpt m) (Emit.emit (SetProfile radVal))
+        when (radVal /= profileOpt m) (run (Emit.emit (SetProfile radVal)))
 
     panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
       label "State"
@@ -410,8 +410,8 @@ viewAboutTab =
     label "Themes are made square: corner radius 0 and 1px borders, so drawn boxes match hit boxes."
     label "The scale button cycles Auto, 1x, 1.5x, 2x, 3x and 0.5x; Auto follows the monitor."
 
-viewDiagnosticsTab :: Model -> NanoUI ()
-viewDiagnosticsTab m = do
+viewDiagnosticsTab :: Model -> Emit.NanoUIE Msg ()
+viewDiagnosticsTab m = Emit.withRunInNanoUIE $ \run -> do
   Size w h <- inputWindowSize <$> askInput
   panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
     label "Diagnostics"
@@ -438,7 +438,7 @@ viewDiagnosticsTab m = do
 
     separator
 
-    Emit.emitWhen
+    run $ Emit.emitWhen
       (button (if debugOpen m then "[Close Debug Window]" else "[Open Debug Window]"))
       (ToggleDebug (not (debugOpen m)))
 

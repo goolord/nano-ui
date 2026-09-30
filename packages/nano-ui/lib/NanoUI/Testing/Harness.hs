@@ -22,7 +22,6 @@ module NanoUI.Testing.Harness
   , warmupFocused
   , held
   , runClick
-  , runClickReduce
   , assertSpansHas
   , spanYOf
   , spanXOf
@@ -65,7 +64,6 @@ import Data.List (maximumBy)
 import Data.Maybe (isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text qualified as T
-import Data.Typeable (Typeable)
 import Data.Word (Word32)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
@@ -280,7 +278,7 @@ warmup2 ctx inp ui = warmup ctx inp ui >> evalUi ctx inp ui
 
 -- | Two-frame warmup returning the second result and borrowed drawing buffers.
 warmupDraw :: Context -> Input -> NanoUI a -> IO (a, DrawData)
-warmupDraw ctx inp ui = (\(a, _, draw, _) -> (a, draw)) <$> run2Frames ctx inp ui
+warmupDraw ctx inp ui = (\(a, draw, _) -> (a, draw)) <$> run2Frames ctx inp ui
 
 -- | Warm the view up, then Tab onto its first focusable.
 warmupFocused :: Context -> Input -> NanoUI a -> IO ()
@@ -300,23 +298,6 @@ held ref widget = do
 -- the release frame's result.
 runClick :: Context -> Input -> NanoUI a -> V2 -> IO a
 runClick ctx inp0 ui pos = let (press, release) = clickPair inp0 pos in warmup ctx press ui >> evalUi ctx release ui
-
--- | Run left press and release frames ('clickPair') through a reducer. Returns
--- the final model, release-frame messages, and release-frame dirty flag.
-runClickReduce ::
-  (Typeable msg, Eq model) =>
-  (msg -> model -> model)
-  -> Context
-  -> Input
-  -> model
-  -> (model -> NanoUI Response)
-  -> V2
-  -> IO (model, [msg], Bool)
-runClickReduce reduce ctx inp0 model0 view pos = do
-  let (press, release) = clickPair inp0 pos
-  (_, modelP, _, _, _) <- runFrameReduce reduce ctx press model0 view
-  (_, modelR, msgs, _, dirty) <- runFrameReduce reduce ctx release modelP view
-  pure (modelR, msgs, dirty)
 
 -- | Count a failure unless some span contains the substring.
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()

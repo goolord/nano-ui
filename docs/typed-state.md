@@ -98,8 +98,8 @@ snapshots efficiently, rather than merely replacing its lookup structure.
 The CommonMark integration retains a concrete map of destinations and titles
 and uses CommonMark's typed `insertReference` API. CommonMark internally uses
 runtime-typed extension entries; those are not NanoUI state stores. Optional
-`Emit` keeps its existing runtime-typed message filtering, independently of
-state ownership.
+emission lives in `nano-ui-emit`: `NanoUIE msg a` captures the message type,
+with no runtime-typed message queue or filtering in core.
 
 ## Migration and verification
 

@@ -38,7 +38,7 @@ asking :: Context -> (NanoUI () -> NanoUI a) -> IO (NanoUI a, [WidgetId] -> Inpu
 asking ctx mk = do
   q <- newIORef []
   let ui = mk (mapM_ requestFocus =<< liftIO (atomicModifyIORef' q ([],)))
-  pure (ui, \ids i -> writeIORef q ids >> runFrame ctx i ui >>= \(_, _, _, dirty) -> (dirty,) <$> getFocusId ctx)
+  pure (ui, \ids i -> writeIORef q ids >> runFrame ctx i ui >>= \(_, _, dirty) -> (dirty,) <$> getFocusId ctx)
 
 -- | A field focused from code shows the ring and accepts typing from the
 -- next frame, not the requesting one.
@@ -194,9 +194,9 @@ runFocusRequestFirstPassTest ctx failed = do
 runFocusRequestIdleTest :: Context -> IORef Int -> IO ()
 runFocusRequestIdleTest ctx failed = do
   let ui = column (fst <$> textInput' "" >>= \r -> r <$ requestFocus (respId r))
-  (r0, _, _, first) <- runFrame ctx inp ui
+  (r0, _, first) <- runFrame ctx inp ui
   r <- warmup2 ctx inp ui
-  (_, _, _, dirty) <- runFrame ctx inp ui
+  (_, _, dirty) <- runFrame ctx inp ui
   assertEq failed (True, False) (first, dirty)
   assertEq failed (respId r0) =<< getFocusId ctx
   assert failed . not =<< needsRedraw ctx inp inp

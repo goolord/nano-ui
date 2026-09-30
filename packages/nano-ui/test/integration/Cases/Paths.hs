@@ -556,7 +556,7 @@ runDashTest _ failed = do
 canvasVertices :: Context -> (Rect -> CanvasM ()) -> IO [(V2, Float)]
 canvasVertices ctx draw = do
   setDrawSnapScale ctx 1
-  (resp, _, dd, _) <- runFrame ctx (withInput 300 300) (canvas (fixedWH 200 200) draw)
+  (resp, dd, _) <- runFrame ctx (withInput 300 300) (canvas (fixedWH 200 200) draw)
   setDrawSnapScale ctx 0
   let Rect ox oy _ _ = respRect resp
   withForeignPtr (drawVertices dd) $ \vp ->
@@ -679,7 +679,7 @@ runClipTest ctx failed = do
   let ui = canvas (fixedWH 100 100) $ \(Rect x y _ _) -> do
         withClip (Rect (x + 10) (y + 10) 20 20) (drawRect (Rect x y 100 100) red)
         drawRect (Rect x y 50 50) black
-  (resp, _, dd, _) <- runFrame ctx (withInput 300 300) ui
+  (resp, dd, _) <- runFrame ctx (withInput 300 300) ui
   let Rect x y _ _ = respRect resp
       clips = [(cmdClipX c - x, cmdClipY c - y, cmdClipW c, cmdClipH c) | c <- drawCmdElems dd, cmdIndexCount c > 0]
   assert failed ((10, 10, 20, 20) `elem` clips)

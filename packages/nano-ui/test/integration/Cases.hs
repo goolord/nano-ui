@@ -13,7 +13,6 @@ import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Monad (localInput)
 import NanoUI.Effectful (Ui, embedNanoUI, runFrameEff, withRunInNanoUI)
-import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , arenaArrays
@@ -36,9 +35,6 @@ tests :: [Spec]
 tests =
   [ spec "embed-state" runEmbedStateTest
   , spec "host-slot" runHostSlotTest
-  , spec "reduce-messages" runReduceMessagesTest
-  , spec "reduce-click" runReduceClickTest
-  , spec "widget-no-string-emit" runWidgetNoStringEmitTest
   , spec "id-keyed-list" runIdKeyedListTest
   , spec "fit-muted-width" runFitMutedWidthTest
   , spec "layout-reuse" runLayoutReuseTest
@@ -71,14 +67,14 @@ tests =
 runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do
   let inp = withInput 200 200
-      keyedIds :: [String] -> IO ([WidgetId], [FrameMsg], DrawData, Bool)
+      keyedIds :: [String] -> IO ([WidgetId], DrawData, Bool)
       keyedIds keys = runFrame ctx inp (column (mapM (\k -> withKey k nextId) keys))
       idFor :: String -> [String] -> [WidgetId] -> Maybe WidgetId
       idFor key keys ids = lookup key (zip keys ids)
-  (idsA, _, _, _) <- keyedIds ["a", "b", "c"]
-  (idsPrep, _, _, _) <- keyedIds ["x", "a", "b", "c"]
-  (idsApp, _, _, _) <- keyedIds ["a", "b", "c", "y"]
-  (idsRev, _, _, _) <- keyedIds ["c", "b", "a"]
+  (idsA, _, _) <- keyedIds ["a", "b", "c"]
+  (idsPrep, _, _) <- keyedIds ["x", "a", "b", "c"]
+  (idsApp, _, _) <- keyedIds ["a", "b", "c", "y"]
+  (idsRev, _, _) <- keyedIds ["c", "b", "a"]
   case idsA of
     [a, b, c] -> assert failed (a /= b && b /= c && a /= c)
     _ -> assert failed False
@@ -170,9 +166,9 @@ runDrawingTest ctx failed = do
                 (colorRGBA 255 0 0 255)
             )
       inp = withInput 200 80
-  (_, _, draw, _) <- runFrame ctx inp ui
+  (_, draw, _) <- runFrame ctx inp ui
   assert failed (drawIndexCount draw >= 6 && not (drawCmdNull draw))
-  (_, _, draw2, _) <- runFrame ctx inp ui
+  (_, draw2, _) <- runFrame ctx inp ui
   assert failed (drawIndexCount draw2 >= 6 && not (drawCmdNull draw2))
 
 runPointerCursorTest :: Context -> IORef Int -> IO ()
@@ -271,11 +267,11 @@ runImageTest ctx failed = do
   (u4, _) <- vertUv drawData 4
   assert failed (abs (u0 - u4) >= 1e-6)
   -- Fresh ids start above the registered ones and never repeat.
-  ((fresh1, fresh2), _, _, _) <- runFrame ctx inp0 ((,) <$> freshImageId <*> freshImageId)
+  ((fresh1, fresh2), _, _) <- runFrame ctx inp0 ((,) <$> freshImageId <*> freshImageId)
   assertEq failed (map unImageId [fresh1, fresh2]) [8, 9]
   let missing = image imgLayout (ImageId 0)
   _ <- runFrame ctx inp0 missing
-  (_, _, missingData, _) <- runFrame ctx inp0 missing
+  (_, missingData, _) <- runFrame ctx inp0 missing
   assert failed (not (any (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems missingData)))
 
 -- | Hover enter and press repaint only the button, and pointer motion inside
@@ -290,7 +286,7 @@ runHoverDamageTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   d0 <- takeDamage ctx
   assertEq failed d0 DamageFull
-  (resp, _, _, _) <- runFrame ctx inp0 ui
+  (resp, _, _) <- runFrame ctx inp0 ui
   let V2 cx cy = centerOf resp
       inp1 = inp0 {inputMousePos = V2 cx cy}
       inp2 = inp0 {inputMousePos = V2 (cx + 1) cy}
@@ -322,14 +318,14 @@ runCheckboxInitialTest ctx failed = do
   let Rect rx ry _ _ = respRect resp
       (press, release) = clickPair inp0 (V2 (rx + 1) (ry + 0.5))
   _ <- runFrame ctx press ui
-  ((_, checked), _, _, _) <- runFrame ctx release ui
+  ((_, checked), _, _) <- runFrame ctx release ui
   assert failed (not checked)
   drawnAs 0
   -- The toggled value persists on an idle frame.
-  ((_, idle), _, _, _) <- runFrame ctx inp0 ui
+  ((_, idle), _, _) <- runFrame ctx inp0 ui
   assert failed (not idle)
   _ <- runFrame ctx press ui
-  ((_, checked2), _, _, _) <- runFrame ctx release ui
+  ((_, checked2), _, _) <- runFrame ctx release ui
   assert failed checked2
   drawnAs 1
 
@@ -342,7 +338,7 @@ runSliderFillWidthTest ctx failed = do
   assertGt failed rw 300
   let track = sliderTrackBounds rx ry rw rh
       endDrag = V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
-  ((_, val), _, _, _) <- runFrame ctx (pressAt inp0 endDrag) ui
+  ((_, val), _, _) <- runFrame ctx (pressAt inp0 endDrag) ui
   assertGt failed val 90
 
 -- | Percent children size against the row width, and flex like CSS: two 50%
@@ -479,19 +475,19 @@ runHostSlotTest ctx failed = do
       hostUiInt = do
         _ <- column (pure ())
         askHost intHost
-  (miss, _, _, _) <- runFrame ctx inp hostUiString
+  (miss, _, _) <- runFrame ctx inp hostUiString
   setHost stringHost ("ok" :: String)
   setHost intHost (1 :: Int)
   setHost otherStringHost ("independent" :: String)
-  (hitS, _, _, _) <- runFrame ctx inp hostUiString
-  (hitI, _, _, _) <- runFrame ctx inp hostUiInt
+  (hitS, _, _) <- runFrame ctx inp hostUiString
+  (hitI, _, _) <- runFrame ctx inp hostUiInt
   assert failed (miss == Nothing && hitS == Just "ok" && hitI == Just 1)
   assertEq failed (Just "independent") =<< runNanoUI ctx inp (askHost otherStringHost)
   _ <- compactHost compactOwner ([0 .. 9999] :: [Int])
   let compactUi = do
         _ <- column (pure ())
         askCompact compactOwner
-  (got, _, _, _) <- runFrame ctx inp compactUi
+  (got, _, _) <- runFrame ctx inp compactUi
   case got of
     Just xs | length xs == 10000 && last xs == 9999 -> pure ()
     _ -> assert failed False
@@ -509,88 +505,16 @@ runEmbedStateTest ctx failed = do
           localInput inp {inputWindowSize = Size 123 45} (run (embedNanoUI windowWidth))
         n <- get
         pure (n, w)
-  ((n, w), _, _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
+  ((n, w), _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
   assertEq failed n 2
   assertEq failed w 123
-
-data CounterMsg = Inc | Dec
-  deriving (Eq, Show)
-
-data Counter = Counter {counterN :: Int}
-  deriving (Eq, Show)
-
-updateCounter :: CounterMsg -> Counter -> Counter
-updateCounter Inc m = m {counterN = counterN m + 1}
-updateCounter Dec m = m {counterN = counterN m - 1}
-
-runReduceMessagesTest :: Context -> IORef Int -> IO ()
-runReduceMessagesTest ctx failed = do
-  let
-    inp = withInput 80 80
-    model0 = Counter 0
-    view _ =
-      column $
-        Emit.emit Inc >> Emit.emit Dec >> Emit.emit Inc >> Emit.emit ("noise" :: String)
-  ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
-  assert failed (msgs == [Inc, Dec, Inc] && model1 == Counter 1 && dirty)
-  -- Messages that cancel out leave the model unchanged and not dirty.
-  let
-    identity _ = column (Emit.emit Inc >> Emit.emit Dec)
-  ((), model2, msgs2, _, dirty2) <-
-    runFrameReduce updateCounter ctx inp model0 identity
-  assert failed (msgs2 == [Inc, Dec] && model2 == Counter 0 && not dirty2)
-  -- Generic adapters run the control once and distinguish value changes from
-  -- edit pulses. A response-only pulse cannot emit the unchanged value.
-  calls <- newIORef (0 :: Int)
-  let
-    control value = liftIO (modifyIORef' calls (+ 1)) >> pure (value + 1)
-    adapters = do
-      Emit.emitWhen (pure False) (1 :: Int)
-      Emit.emitWhen (pure True) (2 :: Int)
-      Emit.emitChanged pure (3 :: Int) id
-      Emit.emitChanged control (3 :: Int) id
-      Emit.emitEdited (\v -> pure (mempty, v + 1)) (5 :: Int) id
-      Emit.emitEdited (\v -> pure (mempty {rawRespChanged = True}, v)) (6 :: Int) id
-      Emit.emitEdited
-        (\v -> pure (mempty {rawRespChanged = True}, v + 1))
-        (7 :: Int)
-        id
-  (_, emitted, _, _) <- runFrame ctx inp adapters
-  assertEq failed [2, 4, 8] (decodeMessages emitted :: [Int])
-  assertEq failed 1 =<< readIORef calls
-
-runReduceClickTest :: Context -> IORef Int -> IO ()
-runReduceClickTest ctx failed = do
-  let inp0 = withInput 240 120
-      view m = do
-        resp <- button' "Go"
-        when (respClicked resp) (Emit.emit Inc)
-        label (T.pack (show (counterN m)))
-        pure resp
-  _ <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
-  (resp, model0, _, _, _) <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
-  assertEq failed model0 (Counter 0)
-  (modelR, msgs, dirty) <- runClickReduce updateCounter ctx inp0 (Counter 0) view (centerOf resp)
-  assert failed (msgs == [Inc] && modelR == Counter 1 && dirty)
-  (_, model1, _, _, _) <- runFrameReduce updateCounter ctx inp0 modelR view
-  assertEq failed model1 (Counter 1)
-
-runWidgetNoStringEmitTest :: Context -> IORef Int -> IO ()
-runWidgetNoStringEmitTest ctx failed = do
-  let inp0 = withInput 240 120
-  (resp, _, _, _) <- runFrame ctx inp0 (button' "Go")
-  let (press, release) = clickPair inp0 (centerOf resp)
-  _ <- runFrame ctx press (button "Go")
-  (clicked, msgs, _, _) <- runFrame ctx release (button "Go")
-  assert failed clicked
-  assert failed (null msgs)
 
 runPanelPaintsTest :: Context -> IORef Int -> IO ()
 runPanelPaintsTest ctx failed = do
   let inp = withInput 200 200
       fat = padAll 16 . fillW
-  (_, _, colDraw, _) <- runFrame ctx inp (columnWith fat (label "x"))
-  (_, _, panDraw, _) <- runFrame ctx inp (panelWith fat (label "x"))
+  (_, colDraw, _) <- runFrame ctx inp (columnWith fat (label "x"))
+  (_, panDraw, _) <- runFrame ctx inp (panelWith fat (label "x"))
   assertGt failed (drawVertexCount panDraw) (drawVertexCount colDraw)
 
 -- | Where 'seedMixedGrid' has got to.
@@ -770,7 +694,7 @@ runPaneGridMixedDragTest ctx failed = do
           returned <- readIORef rects
           assert failed (not (IM.member (fromIntegral pa) returned))
           -- Releasing outside the grid restores the committed layout.
-          (cancelled, _, _, _) <- runFrame ctx (release {inputMousePos = V2 (-20) (-20)}) ui
+          (cancelled, _, _) <- runFrame ctx (release {inputMousePos = V2 (-20) (-20)}) ui
           assertEq failed (pgrPanes cancelled) [pa, pb, pc]
           writeIORef rects IM.empty
           _ <- warmup2 ctx inp0 ui
@@ -780,7 +704,7 @@ runPaneGridMixedDragTest ctx failed = do
           assertEq failed restoredStates initialStates
           _ <- runFrame ctx press ui
           _ <- runFrame ctx hold ui
-          (pgr1, _, _, _) <- runFrame ctx release ui
+          (pgr1, _, _) <- runFrame ctx release ui
           assertEq failed (pgrPanes pgr1) [pb, pc, pa]
           _ <- warmup2 ctx inp0 ui
           droppedStates <- readIORef paneStates
@@ -795,7 +719,7 @@ runPaneGridMixedDragTest ctx failed = do
             _ <- runFrame ctx closeHold ui
             duringClose <- readIORef rects
             assertEq failed (IM.size duringClose) 3
-            (closed, _, _, _) <- runFrame ctx (release {inputMousePos = closePos}) ui
+            (closed, _, _) <- runFrame ctx (release {inputMousePos = closePos}) ui
             assertEq failed (pgrPanes closed) [pb, pc]
     _ -> assert failed False
 
@@ -1080,10 +1004,10 @@ runSearchInputClearTest ctx failed = do
   assertJustM failed (scanClear (bx + bw - 6)) $ \cx -> do
     let press = pressAt inp0 (V2 cx cy)
     _ <- runFrame ctx press ui
-    ((r1, t1), _, _, _) <- runFrame ctx inp0 ui
+    ((r1, t1), _, _) <- runFrame ctx inp0 ui
     assertEq failed t1 ""
     assert failed (respChanged r1)
-    ((r2, _), _, _, _) <- runFrame ctx inp0 ui
+    ((r2, _), _, _) <- runFrame ctx inp0 ui
     assert failed (not (respChanged r2))
 
 -- Typing is echoed immediately but the change pulse only fires after the text
@@ -1094,10 +1018,10 @@ runSearchInputDebounceTest ctx failed = do
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
   warmupFocused ctx inp0 ui
-  ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
+  ((rA, tA), _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
   assertEq failed tA "a"
   assert failed (not (respChanged rA))
-  ((rB, tB), _, _, _) <- runFrame ctx (inp0 {inputChars = "b"}) ui
+  ((rB, tB), _, _) <- runFrame ctx (inp0 {inputChars = "b"}) ui
   assertEq failed tB "ab"
   assert failed (not (respChanged rB))
   -- No input marks the end of the pause, so the field asks for the frame
@@ -1106,13 +1030,13 @@ runSearchInputDebounceTest ctx failed = do
   wakeAt <- getWakeAt ctx
   assert failed (wakeAt > typedAt && wakeAt < typedAt + 0.06)
   threadDelay 80000
-  ((rC, tC), _, _, _) <- runFrame ctx inp0 ui
+  ((rC, tC), _, _) <- runFrame ctx inp0 ui
   assertEq failed tC "ab"
   assert failed (respChanged rC)
   -- Committed: nothing is pending.
   assertEq failed 0 =<< getWakeAt ctx
   threadDelay 50000
-  ((rD, _), _, _, _) <- runFrame ctx inp0 ui
+  ((rD, _), _, _) <- runFrame ctx inp0 ui
   assert failed (not (respChanged rD))
 
 -- Text the caller puts in a focused search field, which nobody has typed in,
@@ -1126,12 +1050,12 @@ runSearchInputSetTextDebounceTest ctx failed = do
       ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
   warmupFocused ctx inp0 ui
   writeIORef queryRef "recent"
-  ((rA, tA), _, _, _) <- runFrame ctx inp0 ui
+  ((rA, tA), _, _) <- runFrame ctx inp0 ui
   assertEq failed tA "recent"
   assert failed (not (respChanged rA))
   assert failed . (> 0) =<< getWakeAt ctx
   threadDelay 80000
-  ((rB, _), _, _, _) <- runFrame ctx inp0 ui
+  ((rB, _), _, _) <- runFrame ctx inp0 ui
   assert failed (respChanged rB)
   assertEq failed 0 =<< getWakeAt ctx
 

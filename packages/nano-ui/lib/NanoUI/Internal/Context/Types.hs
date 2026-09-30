@@ -65,10 +65,6 @@ module NanoUI.Internal.Context.Types
   , CustomDrawContext (..)
   , CustomDrawBuild
   , ThemeScopes (..)
-  , FrameMsg (..)
-  , decodeMessages
-  , reduceMessages
-  , reduceUpdates
   , intKey
   ) where
 
@@ -94,7 +90,6 @@ import Data.Primitive.PrimVar (PrimVar, newPrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word32, Word64)
 import Data.Text (Text)
-import Data.Typeable (Typeable, cast)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Animation (Animation)
@@ -131,22 +126,6 @@ data ThemeScopes = ThemeScopes
   , tsPrevSig :: {-# UNPACK #-} !Word64
   -- ^ Last frame's scope signature ('NanoUI.Internal.Layout.Arena.getScopeSignature').
   }
-
--- | A runtime-typed message emitted by a view. Reducers select messages by type.
-data FrameMsg where
-  FrameMsg :: Typeable a => a -> FrameMsg
-
--- | Extract messages of the requested type in traversal order; skip other types.
-decodeMessages :: (Foldable f, Typeable a) => f FrameMsg -> [a]
-decodeMessages = foldr (\(FrameMsg x) rest -> maybe rest (: rest) (cast x)) []
-
--- | Strictly fold matching messages through an update function in traversal order.
-reduceMessages :: (Foldable f, Typeable msg) => (msg -> model -> model) -> model -> f FrameMsg -> model
-reduceMessages update = foldl' (\model (FrameMsg x) -> maybe model (`update` model) (cast x))
-
--- | Apply messages whose type is @model -> model@, in traversal order.
-reduceUpdates :: (Foldable f, Typeable model) => model -> f FrameMsg -> model
-reduceUpdates = reduceMessages ($)
 
 -- | A memo table in two generations: the young map, its size, and the old
 -- map. A full young map replaces the old one, so an entry that stops being
@@ -965,7 +944,6 @@ data Context = Context
   -- ('NanoUI.Internal.Context.followSystemTheme'); 'Nothing' for a fixed
   -- base theme.
   , ctxContainerStack :: IORef [Int]
-  , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
   , ctxFocusablesCount :: IORef Int
   , ctxSpanBase :: SpanArena

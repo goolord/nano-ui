@@ -110,9 +110,9 @@ runFitHeaderNoShrinkTest ctx failed = do
       tall = withInput 400 800
       short = withInput 400 200
   _ <- runFrame ctx tall only
-  (r0, _, _, _) <- runFrame ctx tall only
+  (r0, _, _) <- runFrame ctx tall only
   _ <- runFrame ctx short withBody
-  (r1, _, _, _) <- runFrame ctx short withBody
+  (r1, _, _) <- runFrame ctx short withBody
   assert failed (rectH (respRect r1) + 0.5 >= rectH (respRect r0))
 
 runWindowOverlayTest :: Context -> IORef Int -> IO ()
@@ -127,7 +127,7 @@ runWindowOverlayTest ctx failed = do
         (win, mBody) <- window False "Debug" (label "Body")
         pure (win, mBody)
   do
-    ((win, mBody), _, _, _) <- runFrame ctx inp0 closedUi
+    ((win, mBody), _, _) <- runFrame ctx inp0 closedUi
     assert failed (not (respClicked win))
     assert failed (case mBody of Nothing -> True; _ -> False)
     closedSpans <- collectOverlayTextSpans ctx inp0
@@ -145,7 +145,7 @@ runWindowOverlayTest ctx failed = do
   (outsideMid, _, _) <- evalUi ctx (pressAt inp0 (V2 (wx + ww / 2) (wy + wh * 0.7))) ui
   assert failed (not (respClicked outsideMid))
   let esc = keyInp KeyEscape inp0
-  ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
+  ((_, winEsc, _), _, _) <- runFrame ctx esc ui
   assert failed (not (respClicked winEsc))
   let Rect px py pw _ =
         case map snd (IM.toList panels) of
@@ -195,7 +195,7 @@ runOverlayClickThroughTest ctx failed = do
     clickNone clicked u pos = runClick ctx inp0 u pos >>= \hit -> assert failed (not (clicked hit))
     runCovered u = do
       _ <- warmup2 ctx inp0 u
-      ((_, cover0, mInside0), _, _, _) <- runFrame ctx inp0 u
+      ((_, cover0, mInside0), _, _) <- runFrame ctx inp0 u
       let coverRect = respRect cover0
       assert failed (rectW coverRect > 0 && rectH coverRect > 0)
       assertJust failed mInside0 $ \inside0 -> do
@@ -209,7 +209,7 @@ runOverlayClickThroughTest ctx failed = do
         assert failed (maybe False respClicked mInsideHit)
     runStacked = do
       _ <- warmup2 ctx inp0 stackedUi
-      ((_, mLo0, hi0, mHi0), _, _, _) <- runFrame ctx inp0 stackedUi
+      ((_, mLo0, hi0, mHi0), _, _) <- runFrame ctx inp0 stackedUi
       assertJust failed ((,) <$> mLo0 <*> mHi0) $ \(loBtn, hiBtn) -> do
           let cover = respRect hi0
               kids = [respRect loBtn, respRect hiBtn]
@@ -232,7 +232,7 @@ runWindowDragTest ctx failed = do
       dest = V2 (x0 + 24 - 50) (y0 + 22 + 30)
   runDragFrom ctx inp0 ui (windowTitleGrab r0) dest
   assertEq failed DamageFull =<< takeDamage ctx
-  (win1, _, _, _) <- runFrame ctx (inp0 {inputMousePos = dest}) ui
+  (win1, _, _) <- runFrame ctx (inp0 {inputMousePos = dest}) ui
   let Rect x1 y1 _ _ = respRect win1
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
@@ -265,7 +265,7 @@ runWindowLayoutReuseTest ctx failed = do
       -- with nothing to reuse.
       sameAfter beforeInp before frameInp u = do
         _ <- runFrame ctx beforeInp before
-        (win, _, _, _) <- runFrame ctx frameInp u
+        (win, _, _) <- runFrame ctx frameInp u
         reused <- layout
         writeIORef (ctxLayoutCache ctx) Nothing
         _ <- runFrame ctx frameInp u
@@ -485,7 +485,7 @@ runWindowResizeHaloHitTest ctx failed = do
   _ <- runFrame ctx press ui
   let moved = press {inputMousePos = V2 (destX + 24) (y0 + 22), inputButtonsPressed = noButtons}
   _ <- runFrame ctx moved ui
-  ((_, win1), _, _, _) <- runFrame ctx (inp0 {inputMousePos = V2 destX (y0 + 22)}) ui
+  ((_, win1), _, _) <- runFrame ctx (inp0 {inputMousePos = V2 destX (y0 + 22)}) ui
   let Rect x1 y1 _ h1 = respRect win1
       hit = V2 (bx + bw - 2) (by + bh - 2)
       inHalo = let s = 12

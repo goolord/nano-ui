@@ -26,7 +26,7 @@ runCollectionApiTest ctx failed = do
   _ <- runFrame ctx (withInputOff 300 100) $
     hstack (SA.smallArrayFromList [liftIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
   assertEq failed [9, 2, 7] =<< readIORef seen
-  ((emptySelect, emptyRadio, combo), _, _, _) <- runFrame ctx (withInputOff 300 200) $
+  ((emptySelect, emptyRadio, combo), _, _) <- runFrame ctx (withInputOff 300 200) $
     withKey ("collection-options" :: Text) $ column $ do
       selectIndex <- select (SA.emptySmallArray :: SA.SmallArray Text) 5
       radioIndex <- radio (Seq.empty :: Seq.Seq Text) (-1)
@@ -53,7 +53,7 @@ runControlledStateTest ctx failed = do
       (range, _) <- slider' 0 100 value
       pure (expectedId, check, field, range)
   _ <- runFrame ctx inp (ui True "initial" 25)
-  ((expectedId, check, field, range), _, _, _) <-
+  ((expectedId, check, field, range), _, _) <-
     runFrame ctx inp (ui False "replacement" 75)
   assertEq failed expectedId (respId check)
   store <- getStore ctx
@@ -99,7 +99,7 @@ runControlledInputsTest ctx failed = do
     , (inp, (False, "twox"), (False, "twox"))
     ]
     $ \(input, value, expected) -> do
-      (result, _, _, _) <- runFrame ctx input (ui value)
+      (result, _, _) <- runFrame ctx input (ui value)
       assertEq failed expected result
       spans <- collectTextSpans ctx
       assert failed (any (\(_, txt, _, _, _) -> txt == snd expected) spans)
@@ -156,21 +156,21 @@ runTypedStateTest ctx failed = do
           modifyState left (+ 1)
         pure n
   _ <- warmup2 ctx inp view
-  (n, _, _, _) <- runFrame ctx (keyInp (KeyChar 'a') inp) view
+  (n, _, _) <- runFrame ctx (keyInp (KeyChar 'a') inp) view
   assertEq failed 2 n
   assertEq failed DamageFull =<< takeDamage ctx
   spans <- collectTextSpans ctx
   assert failed (any (\(_, text, _, _, _) -> text == "2") spans)
-  (_, _, _, dirty) <- runFrame ctx inp view
+  (_, _, dirty) <- runFrame ctx inp view
   assertEq failed False dirty
   assert failed . damageIsEmpty =<< takeDamage ctx
   (_, setLeft) <- runNanoUI ctx inp (useState left)
   runNanoUI ctx inp (modifyState left (+ 3) >> setLeft 0)
   assertEq failed 0 =<< runNanoUI ctx inp (readCell left)
   runNanoUI ctx inp (modifyState left (+ 7))
-  (before, _, _, _) <- runFrame ctx inp ((,) <$> item ("left" :: Text) left <*> item "right" right)
+  (before, _, _) <- runFrame ctx inp ((,) <$> item ("left" :: Text) left <*> item "right" right)
   _ <- runFrame ctx inp (item ("right" :: Text) right)
-  (after, _, _, _) <- runFrame ctx inp ((,) <$> item ("right" :: Text) right <*> item "left" left)
+  (after, _, _) <- runFrame ctx inp ((,) <$> item ("right" :: Text) right <*> item "left" left)
   assertEq failed (7, 0) before
   assertEq failed (0, 7) after
   fresh <- newState (0 :: Int)

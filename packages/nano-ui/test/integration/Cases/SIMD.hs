@@ -96,7 +96,7 @@ runDrawLayersTest _ failed = do
   forM_ views $ \view -> do
     ctx <- newContext
     forM_ [1 .. 3 :: Int] $ \_ -> do
-      (_, _, dd, _) <- runFrame ctx emptyInput view
+      (_, dd, _) <- runFrame ctx emptyInput view
       let
         cmds = drawCmdElems dd
         tags = map (fromEnum . cmdLayer) cmds

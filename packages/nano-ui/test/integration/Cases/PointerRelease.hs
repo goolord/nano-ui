@@ -32,10 +32,10 @@ releaseAfterMove ctx failed lbl ui picked = do
         press = pressAt inp0 (V2 px py)
         release = applyMouseButton MouseLeft False inp0 {inputMousePos = V2 px (py + shift)}
     _ <- runFrame ctx press (ui 0)
-    (missed, _, _, dirty) <- runFrame ctx release (ui shift)
+    (missed, _, dirty) <- runFrame ctx release (ui shift)
     assert failed (not (picked missed))
     assert failed dirty
-    (next, _, _, _) <- runFrame ctx inp0 {inputMousePos = V2 px (py + shift)} (ui shift)
+    (next, _, _) <- runFrame ctx inp0 {inputMousePos = V2 px (py + shift)} (ui shift)
     assert failed (picked next)
 
 runReleaseMovedRadioTest :: Context -> IORef Int -> IO ()
@@ -79,25 +79,25 @@ runReleaseElsewhereTest ctx failed = do
       releaseOn r p = releaseAt (dragTo r p)
   -- Button to button.
   _ <- runFrame ctx (pressOn a) ui
-  ((_, bDrag, _, _), _, _, _) <- runFrame ctx (dragTo b (pressOn a)) ui
+  ((_, bDrag, _, _), _, _) <- runFrame ctx (dragTo b (pressOn a)) ui
   assert failed (not (respHovered bDrag) && not (respPressed bDrag))
-  ((aUp, bUp, _, _), _, _, _) <- runFrame ctx (releaseOn b (pressOn a)) ui
+  ((aUp, bUp, _, _), _, _) <- runFrame ctx (releaseOn b (pressOn a)) ui
   assert failed (not (respClicked aUp) && not (respClicked bUp))
-  ((aNext, bNext, _, _), _, _, _) <- runFrame ctx (at b) ui
+  ((aNext, bNext, _, _), _, _) <- runFrame ctx (at b) ui
   assert failed (not (respClicked aNext) && not (respClicked bNext))
 
   -- Button to checkbox: the checkbox must not toggle.
   _ <- runFrame ctx (pressOn a) ui
-  ((_, _, cbUp, _), _, _, _) <- runFrame ctx (releaseOn cb (pressOn a)) ui
+  ((_, _, cbUp, _), _, _) <- runFrame ctx (releaseOn cb (pressOn a)) ui
   assert failed (not (respClicked cbUp))
-  ((_, _, _, checked), _, _, _) <- runFrame ctx (at cb) ui
+  ((_, _, _, checked), _, _) <- runFrame ctx (at cb) ui
   assert failed (not checked)
 
   -- Checkbox to button: neither fires, and the box stays clear.
   _ <- runFrame ctx (pressOn cb) ui
-  ((_, bOver, cbOff, _), _, _, _) <- runFrame ctx (releaseOn b (pressOn cb)) ui
+  ((_, bOver, cbOff, _), _, _) <- runFrame ctx (releaseOn b (pressOn cb)) ui
   assert failed (not (respClicked bOver) && not (respClicked cbOff))
-  ((_, _, _, stillOff), _, _, _) <- runFrame ctx (at b) ui
+  ((_, _, _, stillOff), _, _) <- runFrame ctx (at b) ui
   assert failed (not stillOff)
 
 -- | The same rule for the right button: a context menu opens where the right
@@ -116,13 +116,13 @@ runRightReleaseElsewhereTest ctx failed = do
       rightReleaseOn r p = snd (rightClickPair p (centerOf r))
   -- Right press on the button, release over the menu area: no menu.
   _ <- runFrame ctx (rightPressOn a) ui
-  ((aUp, _, menuUp), _, _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn a)) ui
+  ((aUp, _, menuUp), _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn a)) ui
   assert failed (not (respRightClicked aUp))
   assert failed (isNothing menuUp)
 
   -- Right press and release inside the area: the menu opens.
   _ <- runFrame ctx (rightPressOn lbl) ui
-  ((_, _, menuSame), _, _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn lbl)) ui
+  ((_, _, menuSame), _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn lbl)) ui
   assert failed (isJust menuSame)
 
 -- | Leaving a widget mid-press and coming back still clicks it, and a plain
@@ -140,13 +140,13 @@ runReleaseReturnsTest ctx failed = do
       releaseOn r p = releaseAt (moveTo r p)
   -- Straight click.
   _ <- runFrame ctx (pressOn a) ui
-  ((aUp, _), _, _, _) <- runFrame ctx (releaseOn a (pressOn a)) ui
+  ((aUp, _), _, _) <- runFrame ctx (releaseOn a (pressOn a)) ui
   assert failed (respClicked aUp)
 
   -- Wander off and back before letting go.
   _ <- runFrame ctx (pressOn b) ui
   _ <- runFrame ctx (moveTo a (pressOn b)) ui
-  ((_, bBack), _, _, _) <- runFrame ctx (releaseOn b (pressOn b)) ui
+  ((_, bBack), _, _) <- runFrame ctx (releaseOn b (pressOn b)) ui
   assert failed (respClicked bBack)
   void (runFrame ctx inp0 ui)
 
@@ -168,7 +168,7 @@ runOverlapPressTest ctx failed = do
   hot <- getHotId ctx
   assert failed (hot == respId a)
   _ <- runFrame ctx press ui
-  ((aHeld, bHeld), _, _, _) <- runFrame ctx held' ui
+  ((aHeld, bHeld), _, _) <- runFrame ctx held' ui
   assert failed (respPressed aHeld && not (respPressed bHeld))
   void (runFrame ctx (applyMouseButton MouseLeft False overlap) ui)
   void (runFrame ctx inp0 ui)

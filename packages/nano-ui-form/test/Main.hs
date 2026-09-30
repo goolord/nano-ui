@@ -101,7 +101,7 @@ main = do
     secondCaption = firstCaption {fieldLabel = Just "Second caption"}
   _ <- runFrame captionCtx emptyInput (renderCaption firstCaption)
   updateFieldInput captionOwner captionCtx "captions" "stable-key" (FormInputText "kept")
-  (captionResult, _, _, _) <-
+  (captionResult, _, _) <-
     runFrame captionCtx emptyInput (renderCaption secondCaption)
   expectOk "Caption changes retain named field values" (== "kept") captionResult
   captionSpans <- collectTextSpans captionCtx

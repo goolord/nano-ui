@@ -42,7 +42,7 @@ assert name False = putStrLn ("[FAIL] " ++ name) >> exitFailure
 raster :: Context -> Int -> Int -> Word32 -> NanoUI a -> (a -> ([DemoSpan], [DemoSpan]) -> (Int -> Int -> IO Word32) -> IO b) -> IO b
 raster ctx w h bg ui k = do
   let inp = withInputOff (fromIntegral w) (fromIntegral h)
-  (a, _, draw, _) <- run2Frames ctx inp ui
+  (a, draw, _) <- run2Frames ctx inp ui
   (base, overlay) <- collectRasterSpans ctx inp
   bracket (newOffscreenRgfwSurface w h) freeRgfwSurface $ \surf -> do
     clearScreen surf bg
@@ -159,7 +159,7 @@ testTriangleRaster =
       clearScreen surf 0
       ctx <- newPixelContext
       setDrawSquareGeometry ctx True
-      (_, _, draw, _) <- runFrame ctx (withInput 8 8) (drawing (fixedWH 8 8) (\_ -> pure (FillTriangle ax ay bx by cx cy red)))
+      (_, draw, _) <- runFrame ctx (withInput 8 8) (drawing (fixedWH 8 8) (\_ -> pure (FillTriangle ax ay bx by cx cy red)))
       let clip cmd = cmd {cmdClipX = clipX, cmdClipY = clipY, cmdClipW = clipW, cmdClipH = clipH}
       renderArena surf getCozetteFont 1 draw {drawCommands = U.map clip (drawCommands draw)} [] []
       pixels <- mapM (peekElemOff (sBuffer surf)) [0 .. 63]

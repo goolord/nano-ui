@@ -32,6 +32,7 @@ import NanoUI
   )
 import NanoUI.Backend (Damage (..), emptyInput)
 import NanoUI.Testing (ctxPaintFull, collectRasterSpans, damageIsEmpty, runFrame, takeDamage, takeDamagePieces)
+import NanoUI.Emit (runNanoUIE)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readRetainedPixels, renderArenaGl)
@@ -69,7 +70,7 @@ measure name action = do
 main :: IO ()
 main = do
   debug <- newRgfwDebugSampler
-  let appView = Demo.appView debug
+  let appView = void . runNanoUIE . Demo.appView debug
       m = initialModel
       theme = themeForChoice (currentTheme m)
       userScale = physScaleFor (dpiScale m)
@@ -91,7 +92,7 @@ main = do
         -- Returns whether the frame drew anything.
         let present ctx force frameInp view = do
               writeIORef (ctxPaintFull ctx) force
-              (_, _, draw, _) <- runFrame ctx frameInp view
+              (_, draw, _) <- runFrame ctx frameInp view
               damage <- takeDamage ctx
               let drawn = force || not (damageIsEmpty damage)
               when drawn $ do

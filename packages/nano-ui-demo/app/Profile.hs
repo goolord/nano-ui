@@ -106,7 +106,7 @@ main = do
       void (runFrame ctx' inp demoUi)
     setDrawReuse ctx' False
 
-    (_, _, dd, _) <- runFrame ctx' inp demoUi
+    (_, dd, _) <- runFrame ctx' inp demoUi
     printf "  -> Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
       (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
 
@@ -124,7 +124,7 @@ main = do
         measureBench "Full DemoUi (Debug Open, SDL Present)" (drawDemo inp)
         measureBench "Full DemoUi (Debug Open, runFrame)" $
           void (runFrame ctx' inp demoUi)
-        (_, _, ddDbg, _) <- runFrame ctx' inp demoUi
+        (_, ddDbg, _) <- runFrame ctx' inp demoUi
         printf "  -> Debug Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
           (drawVertexCount ddDbg) (drawIndexCount ddDbg) (drawCmdCount ddDbg)
 
@@ -178,7 +178,7 @@ main = do
       ]
     measureBench "Tab: Table (SDL Present)" $
       void (sdlDrawFrame ctx' tabTableUi sdlEnv inp False)
-    (_, _, ddTable, _) <- runFrame ctx' inp tabTableUi
+    (_, ddTable, _) <- runFrame ctx' inp tabTableUi
     printf "  -> Table DrawCmds: %d (Vertices: %d, Indices: %d)\n"
       (drawCmdCount ddTable) (drawVertexCount ddTable) (drawIndexCount ddTable)
     runFrames
@@ -187,7 +187,7 @@ main = do
       ]
     putStrLn ""
 
-    (images, _, _, _) <- runFrame ctx' inp $
+    (images, _, _) <- runFrame ctx' inp $
       smallArrayFromList <$> forM demoSwatches (\(_, pixels) -> registerFresh 32 32 pixels)
 
     putStrLn "--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---"
@@ -263,7 +263,7 @@ main = do
     -- ones, as a live thumbnail does: getting it to the GPU is the cost.
     void $ runFrame ctx' inp $ forM_ [1 .. 12 :: Int] $ \i ->
       registerFresh 1024 256 (BS.replicate (1024 * 256 * 4) (fromIntegral i))
-    (liveImage, _, _, _) <- runFrame ctx' inp freshImageId
+    (liveImage, _, _) <- runFrame ctx' inp freshImageId
     let livePixels k = BS.replicate (64 * 64 * 4) (if even k then 40 else 200)
     nextLive <- newCounter 0
     measureBench "Images: one 64x64 changing, 12 1024x256" $

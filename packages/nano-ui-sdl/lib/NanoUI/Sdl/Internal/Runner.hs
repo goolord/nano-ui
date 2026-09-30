@@ -52,7 +52,7 @@ import SDL3.Sys.Render
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO Bool
 sdlDrawFrame ctx ui env inp forceFull =
   drawFrameWith ctx env inp forceFull $ do
-    (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
+    (_, drawData, dirtyAfterUi) <- runFrame ctx inp ui
     pure (drawData, dirtyAfterUi)
 
 -- | Draw and present a frame whose UI pass is the given action, which answers

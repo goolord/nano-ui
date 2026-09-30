@@ -38,7 +38,7 @@ runAnimationSettleTest ctx failed = do
   assert failed (not live)
   needAfter <- needsRedraw ctx inp inp
   assert failed (not needAfter)
-  (_, _, _, dirty) <- runFrame ctx inp (label "settle")
+  (_, _, dirty) <- runFrame ctx inp (label "settle")
   assert failed (not dirty)
 
 -- A settled 'animateTo' value holds its target for as long as the view reads
@@ -191,7 +191,7 @@ runCompositeAnimationIsolationTest _ failed = do
         label (T.pack (show (a, b)))
         pure (a, b)
     replicateM_ 80 (runFrame ctx inp ui)
-    ((V2 ax ay, V2 bx by), _, _, _) <- runFrame ctx inp ui
+    ((V2 ax ay, V2 bx by), _, _) <- runFrame ctx inp ui
     assert failed (abs (ax - 1) < 0.05 && abs (ay - 2) < 0.05)
     assert failed (abs (bx + 1) < 0.05 && abs (by + 2) < 0.05)
     live <- anyAnimating ctx
@@ -228,14 +228,14 @@ runSpinnerTest ctx failed = do
         label "Loading a long label so the window has more than the spinner"
         spinnerWith' id 18
   _ <- runFrame ctx inp ui
-  (resp, _, draw0, _) <- runFrame ctx inp ui
+  (resp, draw0, _) <- runFrame ctx inp ui
   _ <- takeDamage ctx
   need <- needsRedraw ctx inp inp
   assert failed need
   quads0 <- drawQuads draw0
   assert failed (any ((== themeAccent theme) . snd) quads0)
   threadDelay 60000
-  (_, _, draw1, _) <- runFrame ctx inp ui
+  (_, draw1, _) <- runFrame ctx inp ui
   dmg <- takeDamage ctx
   case dmg of
     DamageClip r -> assert failed (rectW r < 80 && rectH r < 80 && rectIntersect r (respRect resp) /= Nothing)

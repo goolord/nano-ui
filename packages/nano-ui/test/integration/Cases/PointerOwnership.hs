@@ -262,7 +262,7 @@ page mOv vc (V2 dx dy) =
 open :: Maybe Overlay -> Victim -> V2 -> V2 -> IO (Context, V2, Maybe Rect)
 open mOv vc (V2 offX offY) shift = do
   ctx <- newPixelContext
-  let frame inp = (\(a, _, _, _) -> a) <$> runFrame ctx inp (page mOv vc shift)
+  let frame inp = (\(a, _, _) -> a) <$> runFrame ctx inp (page mOv vc shift)
   _ <- frame win
   (src, (resp, _)) <- frame win
   let hot = V2 (rectX (respRect resp) + offX) (rectY (respRect resp) + offY)
@@ -285,7 +285,7 @@ runPointerOwnershipTest _ failed = do
     offset <- do
       ctx <- newPixelContext
       _ <- runFrame ctx win (page Nothing vc (V2 0 0))
-      ((_, (resp, _)), _, _, _) <- runFrame ctx win (page Nothing vc (V2 0 0))
+      ((_, (resp, _)), _, _) <- runFrame ctx win (page Nothing vc (V2 0 0))
       V2 hx hy <- vcHot vc ctx resp
       pure (V2 (hx - rectX (respRect resp)) (hy - rectY (respRect resp)))
     -- The control: with no overlay the widget does notice, so staying quiet
@@ -311,7 +311,7 @@ scenario mOv vc offset shift gesture = do
   (ctx, hot, mRect) <- open mOv vc offset shift
   case mRect of
     Just r | rectContains r hot -> do
-      let frame inp = (\((_, v), _, _, _) -> v) <$> runFrame ctx inp (page mOv vc shift)
+      let frame inp = (\((_, v), _, _) -> v) <$> runFrame ctx inp (page mOv vc shift)
           at p = win {inputMousePos = p}
       (resp0, value0) <- frame (at hot)
       probe0 <- vcProbe vc ctx resp0
@@ -401,7 +401,7 @@ runPointerCaptureTest ctx failed = do
         s <- columnWith (fixedW 320) (slider' 0 100 50)
         (_, b) <- window True "Capture window" (columnWith (fixedWH 300 200) (button' "inside"))
         pure (s, b)
-      frame inp = (\(a, _, _, _) -> a) <$> runFrame ctx inp ui
+      frame inp = (\(a, _, _) -> a) <$> runFrame ctx inp ui
       at p = win {inputMousePos = p}
       hold = holdAt win
   _ <- frame win

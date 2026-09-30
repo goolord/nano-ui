@@ -129,7 +129,7 @@ runAdornedButtonTest ctx failed = do
   assert failed (rectRight labelB + 4 <= rectX iconB && rectRight iconB <= rectRight (respRect b))
   assert failed (abs (cw - ch) <= 1 && covers (respRect c) iconC)
   iconTinted iconA draw >>= assert failed
-  (_, _, hoverDraw, _) <- runFrame ctx (inp0 {inputMousePos = centerOf a}) ui
+  (_, hoverDraw, _) <- runFrame ctx (inp0 {inputMousePos = centerOf a}) ui
   iconTinted iconA hoverDraw >>= assert failed
   (a', _, _, _) <- runClick ctx inp0 ui (spanCenter iconA)
   assert failed (respClicked a')
@@ -233,14 +233,14 @@ runAdornedFieldControlTest ctx failed = do
   _ <- runClick ctx inp0 ui (V2 (rectX showR - 20) (v2Y (spanCenter showR)))
   readIORef (ctxFocusId ctx) >>= assertEq failed (respId field)
   replicateM_ 2 (runFrame ctx (over showR) ui)
-  (((hovered, _), _), _, _, _) <- runFrame ctx (over showR) ui
+  (((hovered, _), _), _, _) <- runFrame ctx (over showR) ui
   assert failed (not (respHovered hovered))
   uiCursorKind ctx (over showR) >>= assertEq failed UiCursorPointer
   ((clicked, _), _) <- runClick ctx inp0 ui (spanCenter showR)
   assert failed (not (respClicked clicked))
   readIORef showClicks >>= assertEq failed 2
   readIORef (ctxFocusId ctx) >>= assertEq failed (respId field)
-  (((_, typed), _), _, _, _) <- runFrame ctx ((over showR) {inputChars = "c"}) ui
+  (((_, typed), _), _, _) <- runFrame ctx ((over showR) {inputChars = "c"}) ui
   assertEq failed "abc" typed
   replicateM_ 2 (runFrame ctx (over offR) ui)
   readIORef (ctxHotId ctx) >>= assertEq failed (respId field)
@@ -260,7 +260,7 @@ runAdornedButtonControlTest ctx failed = do
   spans <- collectTextSpans ctx
   Just xR <- pure (spanRectOf "x" spans)
   Just chipR <- pure (spanRectOf "Chip" spans)
-  (tapped, _, _, _) <- runFrame ctx (inp0 {inputMousePos = spanCenter xR, inputButtonsPressed = buttonsFromList [MouseLeft], inputButtonsReleased = buttonsFromList [MouseLeft]}) ui
+  (tapped, _, _) <- runFrame ctx (inp0 {inputMousePos = spanCenter xR, inputButtonsPressed = buttonsFromList [MouseLeft], inputButtonsReleased = buttonsFromList [MouseLeft]}) ui
   onControl <- runClick ctx inp0 ui (spanCenter xR)
   assert failed (not (respClicked tapped || respClicked onControl))
   readIORef removes >>= assertEq failed 2

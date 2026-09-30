@@ -156,7 +156,7 @@ testRendering :: Context -> Input -> IO ()
 testRendering ctx inp = do
   -- The second frame draws from the cache.
   forM_ ["diagram", "cached diagram"] $ \what -> do
-    (_, _, dd, _) <- runFrame ctx inp (diagram (fixedWH 200 80) (circle 1 # fc coral # lw none))
+    (_, dd, _) <- runFrame ctx inp (diagram (fixedWH 200 80) (circle 1 # fc coral # lw none))
     check (what <> " produced no draw commands") (drawIndexCount dd > 0 && not (drawCmdNull dd))
 
 linePlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B

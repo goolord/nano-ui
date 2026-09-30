@@ -3,7 +3,6 @@ module Cases.Keyboard (tests) where
 import Spec
 import Data.IntMap.Strict qualified as IM
 import NanoUI.Internal.Context (Context (..), getFocusVisible, intKey)
-import NanoUI.Emit qualified as Emit
 import NanoUI.Internal.Store (WidgetStore (..))
 
 tests :: [Spec]
@@ -27,11 +26,11 @@ runKeyboardDisabledTest _ctx failed = do
       check :: (Eq a, Show a) => NanoUI (Response, a) -> Input -> IO ()
       check widget pressed = do
         ctx <- newContext
-        ((resp, before), _, _, _) <- runFrame ctx inp widget
+        ((resp, before), _, _) <- runFrame ctx inp widget
         let wid = respId resp
         st <- getStore ctx
         writeIORef (ctxFocusId ctx) wid
-        ((afterResp, after), _, _, _) <- runFrame ctx pressed (disabledWhen True widget)
+        ((afterResp, after), _, _) <- runFrame ctx pressed (disabledWhen True widget)
         assertEq failed after before
         assert failed (not (respChanged afterResp) && not (respClicked afterResp))
         afterStore <- getStore ctx
@@ -55,13 +54,13 @@ runKeyboardModalEligibilityTest ctx failed = do
         outside <- checkbox' "Outside" False
         (_, inside) <- modal True "Modal" (checkbox' "Inside" False)
         pure (outside, inside)
-  ((outside, inside), _, _, _) <- runFrame ctx inp ui
+  ((outside, inside), _, _) <- runFrame ctx inp ui
   writeIORef (ctxFocusId ctx) (respId (fst outside))
-  (((_, outsideValue), _), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
+  (((_, outsideValue), _), _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
   assert failed (not outsideValue)
   assertJust failed inside $ \(resp, _) -> do
     writeIORef (ctxFocusId ctx) (respId resp)
-    ((_, after), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
+    ((_, after), _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
     assert failed (maybe False snd after)
 
 -- | A Space press, which also types a space.
@@ -77,16 +76,15 @@ runKeyboardButtonTest ctx failed = do
         b <- button "B"
         pure (a, b)
   warmupFocused ctx inp0 ui
-  ((aEnter, _), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
+  ((aEnter, _), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed aEnter
-  ((aSpace, _), _, _, _) <- runFrame ctx (spaceInp inp0) ui
+  ((aSpace, _), _, _) <- runFrame ctx (spaceInp inp0) ui
   assert failed aSpace
   _ <- runFrame ctx (tabInp inp0) ui
-  ((_, bEnter), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
+  ((_, bEnter), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed bEnter
 
--- | A focused checkbox toggles with Space and Enter, and 'Emit.emitChanged'
--- emits its new value on keyboard activation.
+-- | A focused checkbox toggles with Space and Enter.
 runKeyboardCheckboxTest :: Context -> IORef Int -> IO ()
 runKeyboardCheckboxTest ctx failed = do
   checkedRef <- newIORef False
@@ -94,19 +92,10 @@ runKeyboardCheckboxTest ctx failed = do
     inp0 = withInputOff 200 100
     ui = column (held checkedRef (checkbox' "Opt"))
   warmupFocused ctx inp0 ui
-  ((_, checked1), _, _, _) <- runFrame ctx (spaceInp inp0) ui
+  ((_, checked1), _, _) <- runFrame ctx (spaceInp inp0) ui
   assert failed checked1
-  ((_, checked2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
+  ((_, checked2), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (not checked2)
-  let
-    emitUi = do
-      wid <- currentId
-      Emit.emitChanged (checkbox "Emit") False id
-      pure wid
-  (wid, _, _, _) <- runFrame ctx inp0 emitUi
-  writeIORef (ctxFocusId ctx) wid
-  (_, messages, _, _) <- runFrame ctx (keyInp KeyEnter inp0) emitUi
-  assertEq failed [True] (decodeMessages messages :: [Bool])
 
 -- | A focused slider steps with the arrow keys.
 runKeyboardSliderTest :: Context -> IORef Int -> IO ()
@@ -117,13 +106,13 @@ runKeyboardSliderTest ctx failed = do
   (_, v0) <- warmup2 ctx inp0 ui
   assertEq failed v0 50
   _ <- runFrame ctx (tabInp inp0) ui
-  ((_, v1), _, _, _) <- runFrame ctx (keyInp KeyRight inp0) ui
+  ((_, v1), _, _) <- runFrame ctx (keyInp KeyRight inp0) ui
   assertGt failed v1 50
-  ((_, v2), _, _, _) <- runFrame ctx (keyInp KeyLeft inp0) ui
+  ((_, v2), _, _) <- runFrame ctx (keyInp KeyLeft inp0) ui
   assertEq failed v2 50
-  ((_, v3), _, _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
+  ((_, v3), _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed v3 49
-  ((_, v4), _, _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
+  ((_, v4), _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
   assertEq failed v4 50
 
 -- | A focused radio group changes selection with the arrow keys.
@@ -135,11 +124,11 @@ runKeyboardRadioTest ctx failed = do
   (_, sel0) <- warmup2 ctx inp0 ui
   assertEq failed sel0 0
   _ <- runFrame ctx (tabInp inp0) ui
-  ((_, sel1), _, _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
+  ((_, sel1), _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed sel1 1
-  ((_, sel2), _, _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
+  ((_, sel2), _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed sel2 2
-  ((_, sel3), _, _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
+  ((_, sel3), _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
   assertEq failed sel3 1
 
 -- | A toggle switch flips with Space and Enter while focused, and on click.
@@ -151,16 +140,16 @@ runKeyboardToggleTest ctx failed = do
   (resp0, v0) <- warmup2 ctx inp0 ui
   assert failed (not v0)
   _ <- runFrame ctx (tabInp inp0) ui
-  ((_, v1), _, _, _) <- runFrame ctx (spaceInp inp0) ui
+  ((_, v1), _, _) <- runFrame ctx (spaceInp inp0) ui
   assert failed v1
-  ((_, v2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
+  ((_, v2), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (not v2)
   let (press, release) = clickPair inp0 (centerOf resp0)
   _ <- runFrame ctx press ui
-  ((clicked, v3), _, _, _) <- runFrame ctx release ui
+  ((clicked, v3), _, _) <- runFrame ctx release ui
   assert failed (respClicked clicked && v3)
   _ <- runFrame ctx press ui
-  ((clicked2, v4), _, _, _) <- runFrame ctx release ui
+  ((clicked2, v4), _, _) <- runFrame ctx release ui
   assert failed (respClicked clicked2 && not v4)
 
 data KB = KBA | KBB
@@ -176,10 +165,10 @@ runKeyboardTabHeaderTest ctx failed = do
           , tab KBB "Beta" (label "BodyB")
           ]
   warmupFocused ctx inp0 (ui KBA)
-  (active1, _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
+  (active1, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
   assertEq failed active1 KBA
   _ <- runFrame ctx (tabInp inp0) (ui KBA)
-  (active2, _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
+  (active2, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
   assertEq failed active2 KBB
 
 -- Moving focus with Tab shows the focus ring; a pointer press hides it.

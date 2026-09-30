@@ -3,8 +3,6 @@
 module NanoUI.Internal.Frame
   ( runFrame
   , runFrameEff
-  , runFrameReduce
-  , runFrameReduceEff
   )
 where
 
@@ -12,7 +10,6 @@ import Control.Monad (unless, when, (<$!>))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (isJust, isNothing)
-import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Atlas (atlasToken)
 import NanoUI.Internal.Context
@@ -42,44 +39,11 @@ import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
--- view result, emitted messages, borrowed draw buffers, and whether state
+-- view result, borrowed draw buffers, and whether state
 -- needs a follow-up frame. A local-state change can rebuild the view within
 -- this call, with one-shot input removed. Native presentation is the host's job.
-runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
+runFrame :: Context -> Input -> NanoUI a -> IO (a, DrawData, Bool)
 runFrame ctx inp ui = runFrameEff runEff ctx inp (unNanoUI ui)
-
--- | View this model, then apply decoded messages at frame end.
--- DrawData is from the pre-reduce model (one-frame lag). The idle
--- loop redraws when the reduced model differs.
-runFrameReduce ::
-  (Typeable msg, Eq model) =>
-  (msg -> model -> model)
-  -> Context
-  -> Input
-  -> model
-  -> (model -> NanoUI a)
-  -> IO (a, model, [msg], DrawData, Bool)
-runFrameReduce update ctx inp model view = runFrameReduceEff runEff update ctx inp model (unNanoUI . view)
-
--- | 'runFrameReduce' for a larger effect stack, with a runner that interprets
--- the remaining effects in IO.
-runFrameReduceEff ::
-  (IOE :> es, Typeable msg, Eq model) =>
-  (forall x. Eff es x -> IO x)
-  -> (msg -> model -> model)
-  -> Context
-  -> Input
-  -> model
-  -> (model -> Eff (Ui : es) a)
-  -> IO (a, model, [msg], DrawData, Bool)
-runFrameReduceEff unlift update ctx inp model view = do
-  (a, msgs, draw, dirty) <- runFrameEff unlift ctx inp (view model)
-  let
-    typed = decodeMessages msgs
-    model' = foldl' (flip update) model typed
-  when (model' /= model) (markDirty ctx)
-  dirty' <- isDirty ctx
-  pure (a, model', typed, draw, dirty || dirty')
 
 -- | 'runFrame' with a runner for the effects remaining after 'Ui'. Run frames
 -- serially on a context; its arenas and stores are mutable and reused.
@@ -89,7 +53,7 @@ runFrameEff ::
   -> Context
   -> Input
   -> Eff (Ui : es) a
-  -> IO (a, [FrameMsg], DrawData, Bool)
+  -> IO (a, DrawData, Bool)
 runFrameEff unlift ctx rawInp ui = do
   ensureMetricCaches ctx
   snap <- captureFrameSnapshot ctx
@@ -241,9 +205,8 @@ runFrameEff unlift ctx rawInp ui = do
         _ -> False
   writeDamage ctx frameInp snap mayReuse layoutFloats
   drawData <- paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse
-  msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
-  pure (result, msgs, drawData, dirtyAfterUi)
+  pure (result, drawData, dirtyAfterUi)
 
 -- | The key the frame's draw would be kept under ('drawReuseKey'), or
 -- 'Nothing' when it can be neither kept nor reused: reuse is off, the frame

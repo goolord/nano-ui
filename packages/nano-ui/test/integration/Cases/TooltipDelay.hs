@@ -63,7 +63,7 @@ waitFor ctx failed d slack = do
   assert failed (wakeAt >= before + d && wakeAt < before + d + slack)
   let settles = do
         _ <- runFrame ctx hover ui
-        ((_, after1), _, _, dirty) <- runFrame ctx hover ui
+        ((_, after1), _, dirty) <- runFrame ctx hover ui
         assertEq failed (False, after0) (dirty, after1)
         assert failed . not =<< needsRedraw ctx hover hover
   pure (ui, hover, wakeAt, settles)

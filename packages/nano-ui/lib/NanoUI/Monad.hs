@@ -9,7 +9,6 @@ module NanoUI.Monad
     NanoUI
   , liftIO
   , withUiResource
-  , emit
 
     -- * Widget ids
   , withKey
