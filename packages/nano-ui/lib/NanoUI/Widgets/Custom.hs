@@ -155,6 +155,8 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- ^ Keys the widget handles itself while focused; shortcuts and
     -- 'NanoUI.keyPressed' ignore them. Default 'KeysNavigate'. A terminal or
     -- an editor with its own chords uses 'KeysAll'.
+    -- Use 'KeysOnly' with "NanoUI.Shortcut" chords for precise ownership,
+    -- 'KeysNone' to reserve none, or 'KeysReadOnly' for selectable text.
   , widgetDamageSlop :: !Float
     -- ^ Padding added to dirty rectangles (for shadows, glow, or drag handles).
   , widgetTrackPointer :: !Bool
@@ -230,7 +232,8 @@ customWidgetWithId wid spec = do
         (widgetCursor spec)
         (widgetDamageSlop spec)
         (widgetTrackPointer spec)
-  resp0 <- addWidgetStyled wid NodeDrawing T.empty 0 (widgetLayout spec) (fromEnum (widgetKeys spec))
+        (widgetKeys spec)
+  resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
   cdc <- liftIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
   pure (widgetInteract spec resp0 cdc inp)
 

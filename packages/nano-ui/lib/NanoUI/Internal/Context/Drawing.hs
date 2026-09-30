@@ -200,7 +200,7 @@ pruneDrawOpCache ctx = do
 {-# INLINE registerCustomDrawing #-}
 registerCustomDrawing :: Context -> WidgetId -> Int -> CustomDrawBuild -> IO ()
 registerCustomDrawing ctx wid content build =
-  registerCustomEntry ctx wid (CustomDrawingEntry content build Nothing 0 False)
+  registerCustomEntry ctx wid (CustomDrawingEntry content build Nothing 0 False KeysNone)
 
 -- | Register a painter together with the cursor, repaint margin and pointer
 -- tracking it asks for.

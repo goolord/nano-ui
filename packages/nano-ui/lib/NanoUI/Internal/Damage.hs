@@ -571,7 +571,7 @@ refreshCustomDrawings ctx@Context {ctxNodeArena = na} = do
       rect <- getNodeRect na i
       mCustom <- lookupCustomDrawing ctx wid
       changed <- case mCustom of
-        Just (CustomDrawingEntry content build _ _ _) -> do
+        Just CustomDrawingEntry {cdrContent = content, cdrBuild = build} -> do
           cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
           refreshCustomDrawingOps ctx wid content rect cdc build
         Nothing -> do

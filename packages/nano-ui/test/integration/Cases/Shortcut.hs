@@ -29,6 +29,7 @@ tests =
   , spec "shortcut-focused-text-area" runShortcutFocusedTextAreaTest
   , spec "shortcut-focus-from-code" runShortcutFocusFromCodeTest
   , spec "shortcut-disabled-focus" runShortcutDisabledFocusTest
+  , spec "shortcut-precise-claims" runPreciseClaimsTest
   ]
 
 inp0 :: Input
@@ -51,6 +52,28 @@ runShortcutDisabledFocusTest ctx failed = do
 
 ctrlHeld :: Modifiers
 ctrlHeld = noModifiers {modCtrl = True}
+
+runPreciseClaimsTest :: Context -> IORef Int -> IO ()
+runPreciseClaimsTest ctx failed = do
+  let ui claim chord = do
+        (r, _) <- customWidget defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = claim}
+        global <- shortcut chord
+        local <- focusedKeyPressed (respId r) (maybe KeyEscape id (shortcutKey chord))
+        pure (r, global, local)
+      check claim chord expected = do
+        (r, _, _) <- warmup2 ctx inp0 (ui claim chord)
+        writeIORef (ctxFocusId ctx) (respId r)
+        (_, global, local) <- evalUi ctx (chordInp chord inp0) (ui claim chord)
+        assertEq failed expected global
+        assertEq failed True local
+      exact = KeysOnly [ctrl <> key 'k', key KeyDelete]
+  check exact (ctrl <> key 'k') False
+  check exact (alt <> key 'k') True
+  check exact (key 'k') True
+  check exact (key KeyDelete) False
+  check KeysNone (ctrl <> key 'k') True
+  check KeysReadOnly (ctrl <> key 'c') False
+  check KeysReadOnly (key KeyDelete) True
 
 -- | Build the view @mk note@ and a frame runner returning what @note@
 -- recorded that frame, newest first.

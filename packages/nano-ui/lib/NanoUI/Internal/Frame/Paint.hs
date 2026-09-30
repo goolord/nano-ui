@@ -210,7 +210,7 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
     else walkChildrenWithOccluders env idx
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawing ctx wid
-  forM_ mBuild $ \(CustomDrawingEntry _ build _ _ _) -> do
+  forM_ mBuild $ \CustomDrawingEntry {cdrBuild = build} -> do
     cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
     emitDrawingOps env rect (build cdc rect)
 
@@ -388,7 +388,7 @@ paintDrawingNode env@PaintEnv {peContext = ctx} idx rect = do
   wid <- getWidgetId (peNodeArena env) idx
   mCustomBuild <- lookupCustomDrawing ctx wid
   case mCustomBuild of
-    Just (CustomDrawingEntry content customBuild _ _ _) -> do
+    Just CustomDrawingEntry {cdrContent = content, cdrBuild = customBuild} -> do
       ops <- cachedCustomDrawingOps ctx wid content rect (mkCustomDrawContext ctx (peFontMetrics env) wid) customBuild
       emitDrawingOps env rect ops
     Nothing -> do

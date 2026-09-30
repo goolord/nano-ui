@@ -140,12 +140,15 @@ focusTakesChord kind mods k =
     FocusControl KeysNavigate -> activates || moves
     FocusControl KeysType -> fieldTakes True
     FocusControl KeysAll -> True
+    FocusControl KeysNone -> False
+    FocusControl KeysReadOnly -> readOnlyTakes
+    FocusControl (KeysOnly chords) -> Shortcut (Just k) mods `elem` chords
     FocusTextLine -> fieldTakes False
-    FocusTextSelectable ->
-      k `elem` [KeyLeft, KeyRight, KeyHome, KeyEnd]
-        || (chordModifiers mods && k `elem` [KeyChar 'a', KeyChar 'c'])
+    FocusTextSelectable -> readOnlyTakes
     FocusComposing -> True
   where
+    readOnlyTakes = k `elem` [KeyLeft, KeyRight, KeyHome, KeyEnd]
+      || (chordModifiers mods && k `elem` [KeyChar 'a', KeyChar 'c'])
     activates = shiftAtMost mods && (k == KeyEnter || k == KeySpace)
     moves = shiftAtMost mods && k `elem` [KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd, KeyPageUp, KeyPageDown]
     fieldTakes multi =

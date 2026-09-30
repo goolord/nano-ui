@@ -39,7 +39,7 @@ import NanoUI.Internal.Store (eqByPtr, ptrEq)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
-import NanoUI.Internal.Widgets.Node (Response, addWidget, addWidgetStyled, respClicked, respHovered, respRect)
+import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -153,7 +153,7 @@ richTextWithMode' selectable f pieces = do
       selection <- if selectable then Just <$> newIORef (RichSelection plain (TB.Cursor 0 0) (TB.Cursor 0 0) False False) else pure Nothing
       pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured selection)
   when (selectable && not (T.null plain)) (liftIO (registerFocusable ctx wid))
-  resp <- if selectable then addWidgetStyled wid NodeDrawing T.empty 0 base (fromEnum KeysType) else addWidget wid NodeDrawing T.empty 0 base
+  resp <- addWidget wid NodeDrawing T.empty 0 base
   let Rect rx ry rw _ = respRect resp
       runs = paraRuns para0
       layoutAt width = layoutLines runs (paraEmptyLine para0) align width (paraTokens para0)
@@ -268,6 +268,7 @@ richTextWithMode' selectable f pieces = do
         (Just (\_ _ _ -> if isJust hoveredRun then UiCursorPointer else if selectable then UiCursorText else UiCursorDefault))
         0
         False
+        (if selectable then KeysReadOnly else KeysNone)
   let clicked
         | respClicked resp && not dragReleased = hoveredRun >>= runTarget . indexSmallArray runs
         | otherwise = Nothing

@@ -32,7 +32,6 @@ module NanoUI.Internal.Context
   , PointerRoute (..)
   , FocusKind (..)
   , KeyClaim (..)
-  , drawingKeyClaim
   , InputMethodRequest (..)
   , FocusRequest (..)
   , intKey

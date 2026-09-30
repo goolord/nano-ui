@@ -22,11 +22,12 @@ module NanoUI.Internal.Widgets.Drop
 import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.List (find)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO, takeEscape)
 import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
@@ -73,8 +74,9 @@ useDrag (DragHandle ref) sources = do
   let armed = if pressedIn MouseLeft inp
         then (\(a, _) -> DragState a pos False) <$> find (respPressed . snd) sources
         else old
-      step (DragState a origin@(V2 sx sy) hot) =
-        let cancelled = pressedIn KeyEscape inp || all ((/= a) . fst) sources
+  escaped <- if isJust armed then takeEscape else pure False
+  let step (DragState a origin@(V2 sx sy) hot) =
+        let cancelled = escaped || all ((/= a) . fst) sources
               || (not (heldIn MouseLeft inp) && not (releasedIn MouseLeft inp))
             dx = x - sx
             dy = y - sy

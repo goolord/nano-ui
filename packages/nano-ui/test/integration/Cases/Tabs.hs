@@ -25,6 +25,7 @@ tests =
   , spec "tab-response-forwarding" runTabResponseForwardingTest
   , spec "tabs-contained-body-damage" runTabsContainedBodyDamageTest
   , spec "tabs-drag-lifecycle" runTabDragLifecycleTest
+  , spec "drag-escape-ownership" runDragEscapeOwnershipTest
   , spec "tabs-drag-controls" runTabDragControlsTest
   , spec "tabs-drag-reorder" runTabDragReorderTest
   , spec "tabs-vertical-drop-bounds" runVerticalDropBoundsTest
@@ -126,7 +127,7 @@ runTabDragLifecycleTest ctx failed = do
     _ <- evalUi ctx press (ui keys)
     _ <- evalUi ctx moved (ui keys)
     let cancelInput = case reason of
-          0 -> moved {inputKeys = inputKeysFromList [KeyEscape]}
+          0 -> keyInp KeyEscape moved
           1 -> inp
           _ -> moved
         remaining = if reason == 2 then [TabB, TabC] else keys
@@ -135,6 +136,34 @@ runTabDragLifecycleTest ctx failed = do
     (_, ended) <- evalUi ctx (releaseAt moved) (ui keys)
     assertEq failed Nothing ended
     void (warmup2 ctx inp (ui keys))
+
+runDragEscapeOwnershipTest :: Context -> IORef Int -> IO ()
+runDragEscapeOwnershipTest ctx failed = do
+  handle <- newDrag
+  let inp = withInputOff 400 200
+      ui takeFirst = modalPanel True $ do
+        when takeFirst (void takeEscape)
+        source <- button' "Drag"
+        gesture <- useDrag handle [((), source)]
+        later <- takeEscape
+        pure (source, gesture, later)
+  (_, body) <- warmup2 ctx inp (ui False)
+  assertJust failed body $ \(source, _, _) -> do
+    let p@(V2 x y) = centerOf source
+        down = pressAt inp p
+        moved = holdAt down (V2 (x + 15) y)
+        escape = keyInp KeyEscape moved
+    _ <- evalUi ctx down (ui False)
+    _ <- evalUi ctx moved (ui False)
+    (_, claimed) <- evalUi ctx escape (ui True)
+    assertJust failed claimed $ \(_, gesture, later) -> do
+      assertEq failed (Just Dragging) (dragPhase <$> gesture)
+      assertEq failed False later
+    (dialog, cancelled) <- evalUi ctx escape (ui False)
+    assertJust failed cancelled $ \(_, gesture, later) -> do
+      assertEq failed (Just DragCancelled) (dragPhase <$> gesture)
+      assertEq failed False later
+    assertEq failed False (respClicked dialog)
 
 runTabDragControlsTest :: Context -> IORef Int -> IO ()
 runTabDragControlsTest ctx failed = do

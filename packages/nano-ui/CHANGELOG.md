@@ -2,6 +2,13 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- `KeysOnly` claims an exact list of shortcut chords; `KeysNone` reserves no
+  keys and `KeysReadOnly` claims selection/copy without destructive edits.
+  Selectable rich text uses the read-only policy. **Breaking:** `KeyClaim`
+  no longer derives `Enum` or `Bounded`; custom registrations carry it directly.
+- Local drag cancellation uses Escape arbitration, so cancelling a drag does
+  not also dismiss its enclosing modal or run a later Escape handler.
+
 - Middle, right and extra mouse-button gestures retain the pressed control's
   identity. A containing mouse area cannot also handle that control's click,
   and reordering another control under the press does not transfer ownership.

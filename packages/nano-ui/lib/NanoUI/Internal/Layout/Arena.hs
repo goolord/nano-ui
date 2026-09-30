@@ -244,9 +244,8 @@ data NodeType
   | NodePopup
   -- ^ A popup such as a menu or a tooltip. Floating.
   | NodeDrawing
-  -- ^ A custom widget or drawing that the application paints. The style
-  -- index holds the custom widget's keys
-  -- ('NanoUI.Internal.Context.drawingKeyClaim').
+  -- ^ A custom widget or drawing that the application paints. Its registration
+  -- holds drawing behavior and keyboard claims.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | Whether the node is a control the pointer can hover: a button, slider,

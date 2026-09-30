@@ -464,7 +464,7 @@ recordFocusKind ctx ime = do
             NodeTextArea -> pure (FocusControl KeysType)
             -- A tree row moves with the arrows; any other button activates.
             NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
-            NodeDrawing -> FocusControl . drawingKeyClaim <$> si
+            NodeDrawing -> FocusControl . maybe KeysNone cdrKeys <$> lookupCustomDrawing ctx focus
             _ -> pure (FocusControl KeysNavigate)
   was <- getsInteraction ctx isFocusKind
   when (kind /= was) $ modifyInteraction ctx (\s -> s {isFocusKind = kind})

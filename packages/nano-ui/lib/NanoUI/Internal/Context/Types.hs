@@ -57,7 +57,6 @@ module NanoUI.Internal.Context.Types
   , PointerRoute (..)
   , FocusKind (..)
   , KeyClaim (..)
-  , drawingKeyClaim
   , InputMethodRequest (..)
   , FocusRequest (..)
   , initialInteractionState
@@ -100,6 +99,7 @@ import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Internal.Image (ImageLook)
 import NanoUI.Internal.Input (Composition, InputPurpose, MouseButton, UiCursorKind)
+import NanoUI.Internal.Shortcut (Shortcut)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
 import NanoUI.Internal.Style (Appearance, Direction, Flow, FontStyle, FontVariant, FontWeight, Layout, Padding, PointerMode, Sizing, Theme)
@@ -652,6 +652,8 @@ data CustomDrawingEntry = CustomDrawingEntry
     -- leaves the default margin in place.
   , cdrTracked :: !Bool
     -- ^ Whether the widget wants a frame for every pointer move over it.
+  , cdrKeys :: !KeyClaim
+    -- ^ The widget's actual claims, rather than a lossy style-index encoding.
   }
 
 -- | A registered drawing: content version plus the op builder. The version
@@ -811,15 +813,14 @@ data KeyClaim
     KeysType
   | -- | Every key: a terminal, or an editor with its own chords.
     KeysAll
-  deriving (Eq, Show, Enum, Bounded)
-
--- | Decode a drawing node's style index, which a custom widget sets to the
--- claim's 'fromEnum'. Out-of-range values, including unset (a canvas),
--- give 'KeysNavigate'.
-drawingKeyClaim :: Int -> KeyClaim
-drawingKeyClaim si
-  | si > 0 && si <= fromEnum (maxBound :: KeyClaim) = toEnum si
-  | otherwise = KeysNavigate
+  | -- | No keys: focus alone does not reserve application shortcuts.
+    KeysNone
+  | -- | Read-only text selection: movement, select-all and copy, but no edits.
+    KeysReadOnly
+  | -- | Exactly these chords, including their modifiers. A chord without a
+    -- key claims nothing. Presets remain available for ordinary controls.
+    KeysOnly ![Shortcut]
+  deriving (Eq, Show)
 
 -- | Pointer routed to the page, with no held gesture, menu, or pending edit command.
 initialInteractionState :: InteractionState
