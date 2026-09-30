@@ -22,6 +22,10 @@ view volume = Emit.withNanoUI column $ do
 needs no `Typeable` constraint: emitting a different type is a compile error.
 Function-valued messages and polymorphic message types work too.
 
+Use `mapMessages ChildMessage childView` to embed a reusable component's
+message type in a parent message type. It preserves the result and sends
+messages directly to the parent in order, without a nested collection queue.
+
 - `liftNanoUI` runs an ordinary widget or UI operation.
 - `withNanoUI` wraps a typed body in an ordinary layout or scope, such as
   `column`, `rowWith layout`, `withKey key`, or `disabledWhen True`.

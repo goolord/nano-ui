@@ -13,6 +13,9 @@
 
 ### Added
 
+- `runSdlAppReduceWith` supplies the live SDL environment to typed reducer
+  views, preserving access to dialogs, debug information and window chrome.
+
 - Everything a window without the desktop's title bar has to do for itself.
   `windowCaption` is the whole of it in one call from a view -- it draws the
   three caption buttons, minimizes and maximizes for you, tells the desktop

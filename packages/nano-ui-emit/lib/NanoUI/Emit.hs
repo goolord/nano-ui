@@ -6,6 +6,7 @@ module NanoUI.Emit
   , liftNanoUI
   , withNanoUI
   , withRunInNanoUIE
+  , mapMessages
   , runNanoUIE
   , emit
   , emitWhen
@@ -53,6 +54,15 @@ withRunInNanoUIE ::
   ((forall r. NanoUIE msg r -> NanoUI r) -> NanoUI a) -> NanoUIE msg a
 withRunInNanoUIE body = NanoUIE $ ReaderT $ \sink ->
   body (\(NanoUIE action) -> runReaderT action sink)
+
+-- | Embed a child's message type in its parent's. Messages go straight to
+-- the parent sink in traversal order, including across frame rebuilds.
+--
+-- > mapMessages SettingsMessage (settingsView settings)
+{-# INLINE mapMessages #-}
+mapMessages :: (child -> parent) -> NanoUIE child a -> NanoUIE parent a
+mapMessages f (NanoUIE body) = NanoUIE $ ReaderT $ \sink ->
+  runReaderT body (sink . f)
 
 -- | Collect messages from one UI action, in emission order. For complete
 -- frames use 'runFrameE', which also retains messages across rebuilds.

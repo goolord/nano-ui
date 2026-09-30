@@ -43,6 +43,7 @@ main = do
   testTabs
   testRebuild
   testScopes
+  testMapMessages
   testIsolation
   putStrLn "Typed emission tests passed."
 
@@ -192,6 +193,28 @@ testScopes = do
   check
     "nested collectors have independent message types"
     (inner == [True] && outer == [4])
+
+testMapMessages :: IO ()
+testMapMessages = do
+  ctx <- newContext
+  let child = withRunInNanoUIE $ \run -> column $ do
+        run (emit True)
+        run (withNanoUI row (emit False))
+        pure (42 :: Int)
+      ui = do
+        emit (Left "before" :: Either String Int)
+        result <- mapMessages Right (mapMessages (\b -> if b then 1 else 2) child)
+        emit (Left "after")
+        pure result
+  (result, msgs, _, _) <- runFrameE ctx (withInputOff 100 100) ui
+  check "mapped children keep results and message order"
+    (result == 42 && msgs == [Left "before", Right 1, Right 2, Left "after"])
+  cell <- newState False
+  (_, rebuilt, _, _) <- runFrameE ctx (withInputOff 100 100) $
+    mapMessages Just $ do
+      (done, setDone) <- liftNanoUI (useState cell)
+      unless done $ emit True >> liftNanoUI (setDone True)
+  check "mapped messages survive a child rebuild once" (rebuilt == [Just True])
 
 testIsolation :: IO ()
 testIsolation = do

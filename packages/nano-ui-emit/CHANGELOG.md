@@ -2,6 +2,8 @@
 
 ## 0.1.0.0 -- Unreleased
 
+- `mapMessages` embeds child components' messages in a parent's message type.
+
 - Extracted `NanoUI.Emit` from core with `NanoUIE msg a` and statically typed
   emission, replacing the runtime-typed context queue.
 - Widget adapters, UI lifting/scopes, typed frame and reducer runners, and

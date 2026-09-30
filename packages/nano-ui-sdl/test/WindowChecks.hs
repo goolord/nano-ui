@@ -16,11 +16,13 @@ import Foreign.Ptr (castPtr)
 import Foreign.Storable (peek)
 import NanoUI
 import NanoUI.Backend (emptyInput)
+import NanoUI.Emit (emit, liftNanoUI)
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
 import SDL3.Sys.Video qualified as SDL
+import System.Timeout (timeout)
 import "nano-ui-sdl" NanoUI.Backend.Sdl
 
 -- | Run all checks. @gpu@ means a real display with a GPU renderer, which
@@ -31,6 +33,7 @@ windowChecks drivers gpu = do
   mapM_ (optionChecks gpu) [1, 2]
   mapM_ screenshotChecks [False, True]
   transparencyChecks gpu
+  reducerEnvironmentCheck
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
 -- | Small hidden window, bundled font, scale 1 (one layout unit per pixel).
@@ -69,6 +72,21 @@ shoot name ctx env full ui = do
 
 check :: String -> Bool -> IO ()
 check name ok = unless ok (fail name)
+
+-- The reducer view receives the actual session environment on every pass,
+-- including the follow-up frame after reducing a message.
+reducerEnvironmentCheck :: IO ()
+reducerEnvironmentCheck = do
+  observed <- newIORef []
+  completed <- timeout 10000000 $
+    runSdlAppReduceWith options (+) (0 :: Int) $ \env model -> do
+      title <- liftIO (getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr)
+      liftIO (modifyIORef' observed ((model, title) :))
+      if model == 0 then emit 1 else liftNanoUI quitUi
+  check "environment-aware reducer terminates" (completed == Just ())
+  seen <- readIORef observed
+  check "environment-aware reducer sees both models and native title"
+    (any ((== 0) . fst) seen && any ((== 1) . fst) seen && all ((== "nano-ui") . snd) seen)
 
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()
 expect name want got = unless (want == got) (fail (name ++ ": wanted " ++ show want ++ ", got " ++ show got))

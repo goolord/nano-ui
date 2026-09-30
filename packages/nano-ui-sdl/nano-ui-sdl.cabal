@@ -130,6 +130,7 @@ test-suite nano-ui-render-test
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
         nano-ui,
+        nano-ui-emit,
         nano-ui-sdl,
         primitive ^>=0.9,
         sdl3-bindgen-sys ^>=0.0.0.2,

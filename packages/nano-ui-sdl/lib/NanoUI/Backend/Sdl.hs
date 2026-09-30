@@ -57,6 +57,7 @@ module NanoUI.Backend.Sdl
   , runSdlApp
   , runSdlAppWith
   , runSdlAppReduce
+  , runSdlAppReduceWith
   , sdlDrawFrame
   , syncDisplay
   , withSdl
@@ -101,10 +102,22 @@ runSdlAppReduce ::
   -> model
   -> (model -> NanoUIE msg ())
   -> IO ()
-runSdlAppReduce options update model view = do
+runSdlAppReduce options update model view = runSdlAppReduceWith options update model (const view)
+
+-- | 'runSdlAppReduce' with the live SDL environment, for reducer views using
+-- dialogs, debug information, custom chrome or font changes. The environment
+-- is valid only inside this session; application state stays in the closure.
+runSdlAppReduceWith ::
+  Eq model =>
+  SdlOptions
+  -> (msg -> model -> model)
+  -> model
+  -> (SdlEnv -> model -> NanoUIE msg ())
+  -> IO ()
+runSdlAppReduceWith options update model view = do
   modelRef <- newIORef model
   runSdlSession options $ \ctx env inp forceFull ->
     drawFrameWith ctx env inp forceFull $ do
       m <- readIORef modelRef
-      (_, m', _, drawData, dirty) <- runFrameReduce update ctx inp m view
+      (_, m', _, drawData, dirty) <- runFrameReduce update ctx inp m (view env)
       (drawData, dirty) <$ writeIORef modelRef m'
