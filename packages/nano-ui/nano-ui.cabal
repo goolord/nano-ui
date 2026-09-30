@@ -121,6 +121,7 @@ library
         NanoUI.Internal.Derived
         NanoUI.Internal.Resource
         NanoUI.Internal.Host
+        NanoUI.Internal.BackendSession
         NanoUI.Internal.NativeWindow.Types
         NanoUI.Internal.Sensor.Types
         NanoUI.Internal.RichText.Types

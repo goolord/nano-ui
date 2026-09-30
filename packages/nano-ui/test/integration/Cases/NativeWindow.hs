@@ -1,10 +1,15 @@
+{-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 module Cases.NativeWindow (tests) where
 
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (IOException, try)
 import Data.ByteString qualified as BS
-import Data.Maybe (fromJust, isJust)
+import Data.Maybe (fromJust, isJust, isNothing)
 import Spec
+import GHC.TypeLits (symbolSing)
+import NanoUI.Internal.Context (Context (..))
 import System.Timeout (timeout)
 
 tests :: [Spec]
@@ -24,7 +29,25 @@ tests =
   , spec "native-window-screenshot-failures" runScreenshotFailuresTest
   , spec "native-window-setter-retry" runSetterRetryTest
   , spec "native-window-capabilities" runCapabilitiesTest
+  , spec "backend-session" runBackendSessionTest
   ]
+
+type instance BackendSession ('Custom "test") = Int
+
+-- | A backend's session value is found through its own singleton, by every
+-- copy of the context, and by nothing else; it leaves with the session.
+runBackendSessionTest :: Context -> IORef Int -> IO ()
+runBackendSessionTest ctx failed = do
+  let here = SCustom (symbolSing @"test")
+      elsewhere = SCustom (symbolSing @"other")
+      copy = ctx {ctxHotId = ctxHotId ctx}
+  separate <- newContext
+  withBackendSession ctx here 7 $ do
+    assertEq failed (Just 7) =<< warmup2 copy inp (askBackendSession here)
+    assert failed . isNothing =<< backendSession SSdl ctx
+    assert failed . isNothing =<< backendSession elsewhere ctx
+    assert failed . isNothing =<< backendSession here separate
+  assert failed . isNothing =<< backendSession here ctx
 
 -- | A view learns which requests the window carries out: none without a
 -- host, and what the installed host declares.

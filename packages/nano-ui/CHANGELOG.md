@@ -74,6 +74,15 @@
   Backend runners close the screenshot host during teardown; custom hosts use
   `closeWindowHost`. `answerScreenshotsAfter` supports pre-present readback with
   post-present callbacks.
+- A context carries the session value of the backend driving it. A backend
+  names itself in the `Backend` kind (`Sdl`, `Rgfw`, or `Custom` for one
+  outside this repository), gives the value's type with a `BackendSession`
+  instance, and installs it with `withBackendSession`; its view-side
+  operations read it back with `askBackendSession` and the backend's
+  `SBackend` singleton. Matching singletons proves the type, so the lookup
+  uses no `Typeable` or cast, and a context another backend drives answers
+  `Nothing`.
+
 - `askWindowCapabilities` tells a view which window requests its backend
   carries out (`WindowCapabilities`), instead of unsupported ones silently
   doing nothing: RGFW cannot fade, and SDL on Wayland cannot place a window.

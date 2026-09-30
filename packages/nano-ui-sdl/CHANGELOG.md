@@ -27,6 +27,8 @@
   Removed `runSdlAppWith` and `runSdlAppReduceWith`: allocate state once in
   IO, pass it to the view, and run it with `runSdlApp` or `runSdlAppReduce`.
   `askSdlEnv` opts into the explicit session for the IO-level operations.
+  The session lives on the context it drives (`BackendSession 'Sdl`), not in
+  a process-wide variable, so another context never reaches it.
 
 ### Added
 

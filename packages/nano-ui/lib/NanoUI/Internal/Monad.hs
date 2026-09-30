@@ -31,6 +31,7 @@ module NanoUI.Internal.Monad
   , askDefaultLayout
   , withDefaultLayout
   , askHost
+  , askBackendSession
   , uiFontMetrics
   , uiFontSize
   , resolveFontUi
@@ -98,6 +99,7 @@ import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bits ((.&.))
 import Data.Hashable (Hashable, hash)
+import NanoUI.Internal.BackendSession (BackendSession, SBackend)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Monoid (Ap (..))
 import Data.Text (Text)
@@ -764,6 +766,13 @@ scrollRectIntoViewUi wid r align behavior = withContext (\ctx -> scrollRectIntoV
 -- the app's.
 setScrollStepUi :: WidgetId -> Float -> NanoUI ()
 setScrollStepUi wid px = withContext (\ctx -> setScrollStep ctx wid px)
+
+-- | The session value of the backend driving this view, if it is the
+-- backend asked for ('NanoUI.Internal.Context.withBackendSession'). For a
+-- backend's own view-side operations.
+{-# INLINE askBackendSession #-}
+askBackendSession :: SBackend b -> NanoUI (Maybe (BackendSession b))
+askBackendSession backend = withContext (backendSession backend)
 
 -- | Read an explicit typed host slot. 'Nothing' means it is uninstalled.
 {-# INLINE askHost #-}

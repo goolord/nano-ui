@@ -282,6 +282,23 @@ module NanoUI.Backend
     -- view clears the request ('clearWindowClose').
   , WindowHost (..)
   , defaultWindowHost
+
+    -- * The backend's session
+
+    -- | A backend names itself in the 'Backend' kind and gives its session
+    -- value's type with a 'BackendSession' instance, then runs the session
+    -- under 'withBackendSession'. Its view-side operations read the value
+    -- back with 'askBackendSession' and the backend's singleton; a view
+    -- another backend drives gets 'Nothing'.
+    --
+    -- > type instance BackendSession 'Sdl = SdlEnv
+    -- > askSdlEnv = askBackendSession SSdl
+  , Backend (..)
+  , SBackend (..)
+  , BackendSession
+  , withBackendSession
+  , backendSession
+  , askBackendSession
   , WindowCapabilities (..)
   , noWindowCapabilities
   , allWindowCapabilities
@@ -319,6 +336,7 @@ module NanoUI.Backend
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
+import NanoUI.Internal.BackendSession (Backend (..), BackendSession, SBackend (..))
 import NanoUI.Internal.Context
   ( Context, newContext, newPixelContext, withFontMetrics, withMonoFontMetrics
   , withMeasureText, withFontResolver, withFontSize, withClipboard
@@ -327,6 +345,7 @@ import NanoUI.Internal.Context
   , atlasTextureId, atlasSnapshot, atlasChanges, AtlasUpload (..)
   , getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance
   , setExplainLayout, setSystemAppearance, setWakeLoop, setWakeLoopChecked
+  , withBackendSession, backendSession
   )
 import NanoUI.Internal.Frame (runFrame)
 import NanoUI.Internal.Frame.Spans (collectRasterSpans)

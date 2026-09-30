@@ -6,6 +6,8 @@
 -- module; views normally only need "NanoUI".
 module NanoUI.Internal.Context
   ( Context (..)
+  , withBackendSession
+  , backendSession
   , module NanoUI.Internal.Context.Core
   , module NanoUI.Internal.Context.Scroll
   , module NanoUI.Internal.Context.Animation
@@ -124,8 +126,10 @@ import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import NanoUI.Internal.Derived (emptyDerivedCache)
 import NanoUI.Internal.Resource (newHeld)
-import NanoUI.Internal.Host (Host, newHost, setHost, askHostIO, hostOrInit)
+import NanoUI.Internal.Host (Host, newHost, setHost, clearHost, askHostIO, hostOrInit)
 import Data.List (find)
+import Control.Exception (bracket)
+import NanoUI.Internal.BackendSession (BackendSession, SBackend, SomeBackendSession (..), sessionFor)
 import Data.Maybe (fromMaybe, isJust)
 import Data.HashMap.Strict qualified as HashMap
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -581,6 +585,7 @@ newContext = do
   ctxDerivedCache <- newIORef emptyDerivedCache
   ctxHeld <- newHeld
   ctxNativeWindow <- newHost
+  ctxBackendSession <- newHost
   ctxSensors <- newHost
   ctxParagraphs <- newHost
   ctxSvgRasters <- newIORef Map.empty
@@ -700,3 +705,21 @@ isFocusable ctx wid = do
         | i >= count = pure False
         | otherwise = readPrimArray arr i >>= \w -> if w == wid then pure True else go (i + 1)
   go 0
+
+-- | Run a backend's session with its value installed on the context, where
+-- the backend's view-side operations find it ('backendSession'). Every copy
+-- of the context shares it, and a separate context has its own. The previous
+-- value comes back afterwards, even on an exception.
+withBackendSession :: Context -> SBackend b -> BackendSession b -> IO a -> IO a
+withBackendSession ctx backend session act =
+  bracket
+    (askHostIO slot <* setHost slot (SomeBackendSession backend session))
+    (maybe (clearHost slot) (setHost slot))
+    (const act)
+  where
+    slot = ctxBackendSession ctx
+
+-- | The session value of the backend driving this context, if it is the
+-- backend asked for.
+backendSession :: SBackend b -> Context -> IO (Maybe (BackendSession b))
+backendSession backend ctx = (>>= sessionFor backend) <$> askHostIO (ctxBackendSession ctx)

@@ -71,6 +71,7 @@ import Control.Concurrent (ThreadId)
 import NanoUI.Internal.Derived (DerivedCache)
 import NanoUI.Internal.Resource (Held)
 import NanoUI.Internal.Host (Host)
+import NanoUI.Internal.BackendSession (SomeBackendSession)
 import NanoUI.Internal.NativeWindow.Types (NativeWindow)
 import NanoUI.Internal.Sensor.Types (Sensors)
 import NanoUI.Internal.RichText.Types (Paragraphs)
@@ -907,6 +908,9 @@ data Context = Context
   , ctxDerivedCache :: !(IORef DerivedCache)
   , ctxHeld :: !Held
   , ctxNativeWindow :: !(Host NativeWindow)
+  , ctxBackendSession :: !(Host SomeBackendSession)
+  -- ^ What the backend driving this context keeps for its session
+  -- ('NanoUI.Internal.Context.withBackendSession').
   , ctxSensors :: !(Host Sensors)
   , ctxParagraphs :: !(Host Paragraphs)
   , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Float, Float, Float, Float)) ImageId))
