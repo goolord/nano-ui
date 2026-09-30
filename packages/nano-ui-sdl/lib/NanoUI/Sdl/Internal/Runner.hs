@@ -11,20 +11,20 @@ module NanoUI.Sdl.Internal.Runner
 import Control.Exception (finally, mask_)
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
-import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (isJust, isNothing)
+import Data.IORef (IORef, readIORef, writeIORef)
+import Data.Maybe (isJust)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (answerScreenshots, answerScreenshotsAfter)
 import NanoUI.Testing
-import NanoUI.Internal.Context (Context (ctxDamageWanted))
+import NanoUI.Internal.Context (Context (ctxDamageWanted), markDirtyCovered)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Debug
-import NanoUI.Sdl.Internal.Display (outPair, pushRefreshEvent, queryMouseWindowPos, queryWindowLogicalSize, sendWaylandSizeLimits)
+import NanoUI.Sdl.Internal.Display (outPair, queryMouseWindowPos, queryWindowLogicalSize, scaleMoved, sendWaylandSizeLimits)
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
-import NanoUI.Sdl.Internal.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
+import NanoUI.Sdl.Internal.Render (flushRenderBatch, glyphPageTexture, renderDrawDataPass, snapDamage)
 import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), captureFrame, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
@@ -52,9 +52,7 @@ import SDL3.Sys.Render
 -- context/input returned by @syncDisplay@.
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO Bool
 sdlDrawFrame ctx ui env inp forceFull =
-  drawFrameWith ctx env inp forceFull $ do
-    (_, drawData, dirtyAfterUi) <- runFrame ctx inp ui
-    pure (drawData, dirtyAfterUi)
+  drawFrameWith ctx env inp forceFull ((\(_, drawData, dirty) -> (drawData, dirty)) <$> runFrame ctx inp ui)
 
 -- | Draw and present a frame whose UI pass is the given action, which answers
 -- the draw data and whether the context needs another frame. Both
@@ -72,6 +70,10 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   let Size lw lh = inputWindowSize inp
       pw = max 1 (round (lw * scale))
       ph = max 1 (round (lh * scale))
+      -- A transparent window repaints in full on any change: a clip frame
+      -- blends its backdrop over the old pixels, which would show through a
+      -- translucent window colour.
+      transparent = isJust (sdlTransparent env)
   -- The render target and whether to repaint everything are chosen before
   -- the UI pass, so paint can cull to damage for retained partial updates.
   --
@@ -82,7 +84,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- content scale and window pixel density can differ. A transparent window
   -- always draws retained: the copy to the window premultiplies its alpha.
   direct <-
-    if sdlContinuous env && isNothing (sdlTransparent env)
+    if sdlContinuous env && not transparent
       then do
         (ok, ow, oh) <- outPair (getRenderOutputSize ren)
         pure (ok && fromIntegral ow == pw && fromIntegral oh == ph)
@@ -92,10 +94,6 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       then pure (nullPtr, False)
       else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
-      -- A transparent window repaints in full on any change: a clip frame
-      -- blends its backdrop over the old pixels, which would show through a
-      -- translucent window colour.
-      transparent = isJust (sdlTransparent env)
   writeIORef (ctxPaintFull ctx) (presentFull || transparent)
   -- A full present ignores the frame's damage (below), so the frame need not
   -- work it out beyond what reusing its last draw takes. Frames run outside
@@ -134,70 +132,33 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       -- With nothing to repaint, the retained frame on screen is this one.
       -- A dropped frame's screenshots wait for the next frame, which the
       -- reset requested.
-      when (not atlasReset && damageIsEmpty damage && tex /= nullPtr) $
+      when (not atlasReset && damageIsEmpty damage && not direct) $
         answerScreenshots ctx (captureFrame env tex)
       pure (atlasReset || dirtyAfterUi)
     else do
       -- A null texture draws full-repaint sessions straight to the window.
-      okBegin <- setRenderTarget ren tex
-      okScale <- setRenderScale ren scale scale
-      unless (okBegin && okScale) $ fail "SDL_SetRenderTarget/Scale failed"
+      unlessM ((&&) <$> setRenderTarget ren tex <*> setRenderScale ren scale scale) $
+        fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
-      glyphTex <- glyphAtlasTextures (sdlFontCache env)
+      let glyphs = glyphAtlasHandle (sdlFontCache env)
       -- A transparent window draws atlas textures with its own blend mode.
       -- Set it after the UI pass, which can create atlas textures.
       for_ (sdlTransparent env) $ \(blend, _) -> do
-        imageTex <- SdlImage.lookupImage (sdlImages env) atlasTextureId
-        for_ (imageTex : map glyphTex [0 .. glyphAtlasPages - 1]) $ \t ->
-          unless (t == nullPtr) (void (setTextureBlendMode t blend))
-      -- Persistent batch created once per session (sdlBatch): no C
-      -- calloc/free pair per presented frame. Flush unconditionally so an
-      -- aborted pass cannot leak pending geometry into the next frame.
-      --
+        textures <- (:) <$> SdlImage.lookupImage (sdlImages env) atlasTextureId <*> traverse (glyphPageTexture glyphs) [0 .. glyphAtlasPages - 1]
+        for_ (filter (/= nullPtr) textures) (`setTextureBlendMode` blend)
       -- Full repaints clear the target, including bare backdrop regions.
       -- Partial updates preserve the undamaged part of the retained texture.
-      let batch = sdlBatch env
-      renderDrawDataPass
-        batch
-        ren
-        (themeWindow theme)
-        drawData
-        (sdlImages env)
-        glyphTex
-        damage
-        `finally` flushRenderBatch batch
+      -- The batch is flushed even when the pass throws, so no geometry leaks
+      -- into the next frame.
+      renderDrawDataPass (sdlBatch env) ren (themeWindow theme) drawData (sdlImages env) glyphs damage
+        `finally` flushRenderBatch (sdlBatch env)
       t2 <- getMonotonicTime
-      -- Damage limits updates to the retained texture, not the final copy:
-      -- SDL leaves the window backbuffer undefined after each present.
-      -- Restore the window's pixel coordinate system before polling events.
-      -- Retained sessions do this as part of their final texture copy.
-      okBlit <-
-        if tex == nullPtr
-          then setRenderScale ren 1 1
-          else do
-            okTarget <- setRenderTarget ren nullPtr
-            okClip <- setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
-            void $ setRenderScale ren 1 1
-            -- The texture is larger than the window: copy only the used area.
-            r <- readIORef (sdlRetain env)
-            let src = SDL_FRect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))
-            okCopy <- with src $ \srcP ->
-              renderTexture ren tex (PtrConst.unsafeFromPtr srcP) (PtrConst.unsafeFromPtr nullPtr)
-            pure (okTarget && okClip && okCopy)
-      unless okBlit $ fail "SDL window presentation preparation failed"
-      -- SDL replaced a Wayland toplevel's size limits with its own at every
-      -- configure; the present commits them with the frame. SDL's are none,
-      -- so no limits are sent only to clear the ones sent before.
-      for_ (sdlSizeLimits env) $ \ref -> do
-        limits@(nw, nh, xw, xh) <- readIORef ref
-        sent <- readIORef (sdlSizeLimitsSent env)
-        let some = limits /= (0, 0, 0, 0)
-        when (some || sent) $ do
-          sendWaylandSizeLimits (sdlWindow env) nw nh xw xh
-          writeIORef (sdlSizeLimitsSent env) some
+      unlessM (if direct then setRenderScale ren 1 1 else copyRetained env tex) $
+        fail "SDL window presentation preparation failed"
+      sendSizeLimits env
       -- Read the direct backbuffer before present, but invoke view callbacks
       -- only afterwards, just as for retained frames.
-      if tex == nullPtr
+      if direct
         then answerScreenshotsAfter ctx (captureFrame env tex) (void (renderPresentSafe ren))
         else void (renderPresentSafe ren)
       t3 <- getMonotonicTime
@@ -205,10 +166,38 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
         (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
       writeIORef (sdlLastPresented env) True
-      unless (tex == nullPtr) $ answerScreenshots ctx (captureFrame env tex)
+      unless direct $ answerScreenshots ctx (captureFrame env tex)
       pure dirtyAfterUi
   where
     ren = sdlRenderer env
+
+-- | Copy the used area of the retained texture to the window, back in the
+-- window's pixel coordinates for the events polled next. Damage limits
+-- updates to the retained texture, not to this copy: SDL leaves the window
+-- backbuffer undefined after each present.
+copyRetained :: SdlEnv -> Ptr SDL_Texture -> IO Bool
+copyRetained env tex = do
+  okTarget <- setRenderTarget ren nullPtr
+  okClip <- setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
+  void $ setRenderScale ren 1 1
+  -- The texture is larger than the window: copy only the used area.
+  r <- readIORef (sdlRetain env)
+  okCopy <- with (SDL_FRect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))) $ \src ->
+    renderTexture ren tex (PtrConst.unsafeFromPtr src) (PtrConst.unsafeFromPtr nullPtr)
+  pure (okTarget && okClip && okCopy)
+  where
+    ren = sdlRenderer env
+
+-- | SDL replaces a Wayland toplevel's size limits with its own at every
+-- configure, so they go again with each present, which commits them. SDL's
+-- are none, so no limits are sent only to clear the ones sent before.
+sendSizeLimits :: SdlEnv -> IO ()
+sendSizeLimits env = for_ (sdlSizeLimits env) $ \ref -> do
+  limits@(nw, nh, xw, xh) <- readIORef ref
+  let some = limits /= (0, 0, 0, 0)
+  whenM ((some ||) <$> readIORef (sdlSizeLimitsSent env)) $ do
+    sendWaylandSizeLimits (sdlWindow env) nw nh xw xh
+    writeIORef (sdlSizeLimitsSent env) some
 
 -- | Pixels a retained texture is rounded up to, in each dimension.
 retainBlock :: Int
@@ -223,7 +212,7 @@ ensureRetain env w h scale = do
       -- for a shrink of a block or so, which a drag back out would undo.
       roomy = retainCapW r - w > 2 * retainBlock || retainCapH r - h > 2 * retainBlock
       -- A new used size or density holds none of the frame to be drawn.
-      stale = w /= retainW r || h /= retainH r || abs (retainScale r - scale) > 0.001
+      stale = w /= retainW r || h /= retainH r || scaleMoved (retainScale r) scale
   if tex /= nullPtr && fits && not roomy
     then do
       when stale $ writeIORef (sdlRetain env) r {retainW = w, retainH = h, retainScale = scale}
@@ -269,19 +258,23 @@ sdlDebugSnapshot env = do
     pure snap
 
 -- | Request a UI font family. The SDL display thread resolves and applies it
--- before the next frame (see 'NanoUI.Sdl.Internal.Window.syncDisplay'), rebuilding the
--- glyph atlas and text resolver.
+-- before the next frame, which this asks for (see
+-- 'NanoUI.Sdl.Internal.Window.syncDisplay'), rebuilding the glyph atlas and
+-- text resolver.
 setSdlUiFont :: NanoUIFont -> NanoUI ()
-setSdlUiFont font = withSdlEnv () $ \env -> writeIORef (sdlFontRequestRef env) font
+setSdlUiFont = requestDisplay sdlFontRequestRef
 
 -- | Set the UI scale (see 'NanoUI.Sdl.Internal.Window.sdlAppUiScale'): a zoom on top
 -- of the pixel density, or zero or less to follow the display. The display
--- thread applies it before the next frame, which this wakes.
+-- thread applies it before the next frame, which this asks for.
 setSdlUiScale :: Float -> NanoUI ()
-setSdlUiScale s = withSdlEnv () request
-  where
-    request host = do
-      cur <- readIORef (sdlUiScaleRef host)
-      when (cur /= s) $ do
-        writeIORef (sdlUiScaleRef host) s
-        pushRefreshEvent
+setSdlUiScale = requestDisplay sdlUiScaleRef
+
+-- | Hand the display thread a new setting and ask for the frame it is
+-- applied before. Asking for the setting already asked for asks for nothing.
+requestDisplay :: Eq a => (SdlEnv -> IORef a) -> a -> NanoUI ()
+requestDisplay field new = do
+  ctx <- askContext
+  withSdlEnv () $ \env -> do
+    cur <- readIORef (field env)
+    when (cur /= new) $ writeIORef (field env) new >> markDirtyCovered ctx

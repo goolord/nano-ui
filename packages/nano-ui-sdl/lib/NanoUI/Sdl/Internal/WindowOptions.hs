@@ -8,7 +8,6 @@ module NanoUI.Sdl.Internal.WindowOptions
   ) where
 
 import Control.Monad (unless, void)
-import Data.Bits (zeroBits, (.&.))
 import Data.ByteString.Unsafe qualified as BSU
 import Data.Int (Int32)
 import Data.IORef (IORef, readIORef, writeIORef)
@@ -18,7 +17,7 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (RgbaPixels, Size (..), WindowMode (..), rgbaBytes, rgbaHeight, rgbaWidth)
 import NanoUI.Backend (WindowCapabilities (..), WindowHost (..), WindowState (..), allWindowCapabilities, defaultWindowState, sizeLimitAt)
 import NanoUI.Sdl.Internal.Display (outPair, queryWindowPosition, sendWaylandSizeLimits, windowPosCentered)
-import NanoUI.Sdl.Internal.Frame (nativeFrameOutset)
+import NanoUI.Sdl.Internal.Frame (hasFlag, nativeFrameOutset)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -105,7 +104,7 @@ queryWindowState :: Ptr SDL_Window -> Float -> IO WindowState
 queryWindowState win scale = do
   flags <- SDL.getWindowFlags win
   (ok, x, y) <- outPair (queryWindowPosition win)
-  let has bit = flags .&. bit /= zeroBits
+  let has bit = hasFlag bit flags
   pure
     defaultWindowState
       { winScale = scale

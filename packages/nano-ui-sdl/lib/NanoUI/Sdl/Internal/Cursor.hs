@@ -84,14 +84,12 @@ cursorFor :: SdlCursors -> UiCursorKind -> IO (Ptr Mouse.SDL_Cursor)
 cursorFor SdlCursors {scDefault, scSystem} kind = case sdlSystemCursor kind of
   Nothing -> pure scDefault
   Just sys -> do
-    c <-
-      lookup sys <$> readIORef scSystem >>= \case
-        Just c -> pure c
-        Nothing -> do
-          c <- createSystemCursorSafe sys
-          modifyIORef' scSystem ((sys, c) :)
-          pure c
+    c <- maybe (create sys) pure . lookup sys =<< readIORef scSystem
     pure (if c == nullPtr then scDefault else c)
+  where
+    create sys = do
+      c <- createSystemCursorSafe sys
+      c <$ modifyIORef' scSystem ((sys, c) :)
 
 syncPointerCursor :: SdlCursors -> Context -> Input -> IO ()
 syncPointerCursor cursors ctx inp = do

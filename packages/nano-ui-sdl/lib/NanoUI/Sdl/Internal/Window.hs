@@ -32,7 +32,6 @@ import Data.Acquire qualified as Acquire
 import Data.Bits (zeroBits, (.|.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
-import Data.Foldable (for_)
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -44,10 +43,10 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Foreign qualified as TextForeign
 import Foreign.C.String (withCString)
-import Foreign.Marshal.Utils (copyBytes, maybePeek, with)
+import Foreign.Marshal.Utils (fromBool, maybePeek, with)
 import Foreign.Storable (peek)
-import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import NanoUI (Appearance, ImageId, Input (..), NanoUI, RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
+import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import NanoUI (Appearance, ImageId, Input (..), NanoUI, RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels, unlessM)
 import NanoUI.Backend (Backend (..), BackendSession, SBackend (..), askBackendSession, withBackendSession, cancelTasks, closeWindowHost, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, withClipboard)
@@ -97,7 +96,7 @@ import SDL3.Sys.Render
   , setRenderVSync
   )
 import SDL3.Sys.Stdinc (free)
-import SDL3.Sys.Surface (convertSurface, destroySurface, saveBMP)
+import SDL3.Sys.Surface (convertPixels, destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
 import SDL3.Sys.Video qualified as SDL
 
@@ -223,9 +222,6 @@ windowFlags opts =
     settings = sdlWindowSettings opts
     flag on bit = if on then bit else zeroBits
 
-scaleEpsilon :: Float
-scaleEpsilon = 0.001
-
 -- | Native resources owned by a 'withSdl' callback. Window, renderer, and font
 -- handles must stay on the display thread and must not outlive the callback.
 -- Use the supplied context, which contains this environment as host data.
@@ -314,11 +310,11 @@ syncDisplay ctx env inp = do
   zoom <- windowZoom env
   let scale = density * zoom
   oldScale <- readIORef (sdlScaleRef env)
-  let scaleChanged = abs (scale - oldScale) > scaleEpsilon
+  let scaleChanged = scaleMoved scale oldScale
   when scaleChanged $ do
     -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
     -- pixel density moves.
-    setRenderScale (sdlRenderer env) 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
+    unlessM (setRenderScale (sdlRenderer env) 1 1) (fail "SDL_SetRenderScale failed")
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
   -- Runtime font-family switch: the app publishes its requested family through
@@ -362,14 +358,35 @@ syncDisplay ctx env inp = do
 -- exceptions. Supplies an SDL-equipped context. This does not run an event
 -- loop or apply the high-level runner's initial theme/image registration.
 withSdl :: SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
-withSdl = withSdlWindow False
+withSdl opts = withSdlWindow hints (windowFlags opts) opts
+  where
+    hints = do
+      setSdlHint sDL_HINT_RENDER_VSYNC (if sdlAppVsync opts then "1" else "0")
+      -- Text fields draw IME composition at their caret, so ask SDL for
+      -- SDL_EVENT_TEXT_EDITING instead of letting the IME draw it. The
+      -- candidate list stays the IME's, placed by SDL_SetTextInputArea.
+      setSdlHint sDL_HINT_IME_IMPLEMENTED_UI "composition"
+      -- SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
+      -- commit-timing-v1 protocols. Without them (sway, wlroots, many
+      -- others) it selects X11/XWayland, giving a scale-1 window on a
+      -- scale-2 (or fractional) output that the compositor upscales, so
+      -- text looks blurred. Native Wayland with
+      -- SDL_WINDOW_HIGH_PIXEL_DENSITY rasterizes at the real output scale.
+      -- An explicit SDL_VIDEO_DRIVER wins, and pure X11 sessions are left
+      -- alone.
+      wayland <- lookupEnv "WAYLAND_DISPLAY"
+      driver <- lookupEnv "SDL_VIDEO_DRIVER"
+      when (isJust wayland && isNothing driver) $
+        setSdlHint sDL_HINT_VIDEO_DRIVER "wayland"
 
 -- | 'withSdl' for measurements: a hidden 800x600 window, bundled fonts,
--- scale 1, continuous drawing, and no vsync or text-input setup.
+-- scale 1, continuous drawing, and no vsync. The window is hidden only: on
+-- Windows it must not be resizable as well.
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlBench =
   withSdlWindow
-    True
+    (setSdlHint sDL_HINT_ASSERT "always_ignore" >> setSdlHint sDL_HINT_RENDER_VSYNC "0")
+    SDL.SDL_WINDOW_HIDDEN
     defaultSdlOptions
       { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui-bench", wsSize = Size 800 600}
       , sdlAppVsync = False
@@ -395,72 +412,48 @@ setSdlHint name value =
     BS.useAsCString value $ \cvalue ->
       void $ setHint (PtrConst.unsafeFromPtr cname) (PtrConst.unsafeFromPtr cvalue)
 
--- | Run a window/renderer creation under a render driver nano-ui guessed at,
--- and if it fails, drop the hint and try once more. A Windows machine whose
--- GL will not create a context -- a remote desktop session, a VM on the basic
--- display adapter -- then opens on whatever SDL can give rather than failing
--- to start. Pass 'False' when the driver is the caller's own choice or when
--- no hint was set: their failure is theirs to see, and a creation that failed
--- for some other reason should report that reason once.
-retryWithoutRenderDriver ::
-  Bool -> IO (Ptr SDL_Window, Ptr SDL_Renderer) -> IO (Ptr SDL_Window, Ptr SDL_Renderer)
-retryWithoutRenderDriver False create = create
-retryWithoutRenderDriver True create =
-  create `catch` \(_ :: IOException) -> do
-    void $ BS.useAsCString sDL_HINT_RENDER_DRIVER (resetHint . PtrConst.unsafeFromPtr)
-    create
+-- | Create the window and renderer under the render driver the options ask
+-- for, unless @SDL_RENDER_DRIVER@ in the environment names one.
+--
+-- 'RenderDriverAuto' asks for GL on Windows. Windows' modal size loop hands
+-- the app one step at a time and cannot take the next until the app returns.
+-- SDL's D3D11 renderer presents through a two-buffer flip-model swap chain,
+-- so a present blocks until a back buffer comes free -- about a refresh --
+-- even with vsync off. A drag presents a newly sized swap chain every step,
+-- so those stalls land in the size loop and the window (and the pointer with
+-- it) judders; the bigger the window, the worse. The GL renderer does not
+-- block that way. Measured on a 120Hz display: present p99 6.4ms under d3d11
+-- against a flawless drag under opengl. Benchmarks take the same driver as
+-- the apps they stand in for, so their present numbers are numbers a user
+-- can see.
+--
+-- That guess is dropped again if the creation fails under it, and the
+-- creation tried once more. A Windows machine whose GL will not create a
+-- context -- a remote desktop session, a VM on the basic display adapter --
+-- then opens on whatever SDL can give rather than failing to start. A driver
+-- the caller chose is not retried: its failure is theirs to see, and a
+-- creation that failed for some other reason should report that reason once.
+withRenderDriver :: RenderDriver -> IO a -> IO a
+withRenderDriver driver create = do
+  fromEnv <- isJust <$> lookupEnv "SDL_RENDER_DRIVER"
+  case driver of
+    _ | fromEnv -> create
+    RenderDriverNamed name -> setSdlHint sDL_HINT_RENDER_DRIVER name >> create
+    RenderDriverAuto | os == "mingw32" -> do
+      setSdlHint sDL_HINT_RENDER_DRIVER "opengl"
+      create `catch` \(_ :: IOException) -> do
+        void $ BS.useAsCString sDL_HINT_RENDER_DRIVER (resetHint . PtrConst.unsafeFromPtr)
+        create
+    _ -> create
 
--- | Open a session. A bench session is a hidden window with bench hints and
--- no vsync setup or text input.
-withSdlWindow :: Bool -> SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
-withSdlWindow bench opts ctx act =
+-- | Open a session: set the hints, then open a window with the flags.
+withSdlWindow :: IO () -> SDL_WindowFlags -> SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
+withSdlWindow hints flags opts ctx act =
   inBoundThread $ withTtf $ do
-    if bench
-      then do
-        setSdlHint sDL_HINT_ASSERT "always_ignore"
-        setSdlHint sDL_HINT_RENDER_VSYNC "0"
-      else do
-        setSdlHint sDL_HINT_RENDER_VSYNC (if sdlAppVsync opts then "1" else "0")
-        -- Text fields draw IME composition at their caret, so ask SDL for
-        -- SDL_EVENT_TEXT_EDITING instead of letting the IME draw it. The
-        -- candidate list stays the IME's, placed by SDL_SetTextInputArea.
-        setSdlHint sDL_HINT_IME_IMPLEMENTED_UI "composition"
-        -- SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
-        -- commit-timing-v1 protocols. Without them (sway, wlroots, many
-        -- others) it selects X11/XWayland, giving a scale-1 window on a
-        -- scale-2 (or fractional) output that the compositor upscales, so
-        -- text looks blurred. Native Wayland with
-        -- SDL_WINDOW_HIGH_PIXEL_DENSITY rasterizes at the real output scale.
-        -- An explicit SDL_VIDEO_DRIVER wins, and pure X11 sessions are left
-        -- alone.
-        wayland <- lookupEnv "WAYLAND_DISPLAY"
-        driver <- lookupEnv "SDL_VIDEO_DRIVER"
-        when (isJust wayland && isNothing driver) $
-          setSdlHint sDL_HINT_VIDEO_DRIVER "wayland"
-    -- Windows' modal size loop hands the app one step at a time and cannot
-    -- take the next until the app returns. SDL's D3D11 renderer presents
-    -- through a two-buffer flip-model swap chain, so a present blocks until a
-    -- back buffer comes free -- about a refresh -- even with vsync off. A drag
-    -- presents a newly sized swap chain every step, so those stalls land in
-    -- the size loop and the window (and the pointer with it) judders; the
-    -- bigger the window, the worse. The GL renderer does not block that way.
-    -- Measured on a 120Hz display: present p99 6.4ms under d3d11 against a
-    -- flawless drag under opengl. Benchmarks take the same driver as the apps
-    -- they stand in for, so their present numbers are numbers a user can see.
-    renderDriver <- lookupEnv "SDL_RENDER_DRIVER"
-    let
-      -- The @SDL_RENDER_DRIVER@ hint to set, if any.
-      requested = case sdlRenderDriver opts of
-        _ | isJust renderDriver -> Nothing
-        RenderDriverNamed name -> Just name
-        RenderDriverAuto | os == "mingw32" -> Just "opengl"
-        _ -> Nothing
-      -- Only a driver nano-ui chose for the caller is worth dropping again.
-      guessed = isJust requested && sdlRenderDriver opts == RenderDriverAuto
-    for_ requested (setSdlHint sDL_HINT_RENDER_DRIVER)
+    hints
     fontSource <- resolveNanoUIFont (sdlAppFont opts)
     monoSource <- resolveNanoUIFont (sdlAppMonoFont opts)
-    Acquire.with (startSdlWindow bench opts ctx guessed fontSource monoSource) $ \(ctx', env) ->
+    Acquire.with (startSdlWindow opts flags ctx fontSource monoSource) $ \(ctx', env) ->
       withBackendSession ctx' SSdl env (act ctx' env)
   where
     -- SDL's GL renderer -- what 'RenderDriverAuto' asks for on Windows --
@@ -486,12 +479,12 @@ withSdlEnv :: a -> (SdlEnv -> IO a) -> NanoUI a
 withSdlEnv outside k = askSdlEnv >>= maybe (pure outside) (liftIO . k)
 
 startSdlWindow ::
-  Bool -> SdlOptions -> Context -> Bool -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
-startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
+  SdlOptions -> SDL_WindowFlags -> Context -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
+startSdlWindow opts flags ctx fontSource monoSource = do
   mkAcquire
-    (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO)) >>= (`unless` fail "SDL_Init(SDL_INIT_VIDEO) failed"))
+    (unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) (fail "SDL_Init(SDL_INIT_VIDEO) failed"))
     (const quitSafe)
-  liftIO $ initRefreshEvent >>= (`unless` fail "SDL_RegisterEvents failed for refresh wake")
+  liftIO $ unlessM initRefreshEvent (fail "SDL_RegisterEvents failed for refresh wake")
   let
     settings = sdlWindowSettings opts
     Size w h = wsSize settings
@@ -502,11 +495,8 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   sdlChromeState <- mkAcquire newChromeState clearChromeState
   (sdlWindow, sdlRenderer) <-
     mkAcquire
-      ( retryWithoutRenderDriver guessedDriver $
+      ( withRenderDriver (sdlRenderDriver opts) $
           TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
-            -- A bench window is hidden only: on Windows it must not be
-            -- resizable as well.
-            let flags = if bench then SDL.SDL_WINDOW_HIDDEN else windowFlags opts
             (ok, win, ren) <-
               outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
             unless ok $ fail "SDL_CreateWindowAndRenderer failed"
@@ -520,7 +510,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   density <- liftIO $ queryWindowPixelDensity sdlWindow
   zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)
   -- The requested size is logical, so the window grows with the zoom.
-  liftIO $ when (abs (zoom - 1) > scaleEpsilon) $ zoomWindow sdlWindow (wsSize settings) zoom
+  liftIO $ when (scaleMoved zoom 1) $ zoomWindow sdlWindow (wsSize settings) zoom
   -- After the zoom: SDL sizes a borderless window as though its view were
   -- the whole of it, so the desktop's frame goes on around a view that is
   -- already the size asked for, and the window grows by the frame.
@@ -556,16 +546,15 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
     sdlContinuous = sdlAppContinuous opts
   sdlTransparent <-
     liftIO $
-      if wsTransparent settings && not bench
+      if wsTransparent settings
         then Just <$> transparentBlends sdlRenderer
         else pure Nothing
-  liftIO $ setRenderScale sdlRenderer 1 1 >>= (`unless` fail "SDL_SetRenderScale failed")
+  liftIO $ unlessM (setRenderScale sdlRenderer 1 1) (fail "SDL_SetRenderScale failed")
   -- Text input runs only while a widget takes text ('syncTextInput'); this
   -- stops it when the session ends.
-  unless bench $
-    mkAcquire
-      (void (setRenderVSync sdlRenderer (if sdlVsync then 1 else 0)))
-      (const (void (stopTextInputSafe sdlWindow)))
+  mkAcquire
+    (void (setRenderVSync sdlRenderer (fromBool sdlVsync)))
+    (const (void (stopTextInputSafe sdlWindow)))
   sdlLastPresented <- liftIO $ newIORef False
   sdlTextInput <- liftIO newTextInputSync
   -- Decided while the window is shown, before the settings apply its limits.
@@ -650,12 +639,8 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
 -- after a present; a direct-to-window session reads the backbuffer.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path =
-  bracket
-    (readFrame env . retainTexture =<< readIORef (sdlRetain env))
-    destroySurface $ \surface ->
-    if surface == nullPtr
-      then pure False
-      else withCString path (saveBMP surface . PtrConst.unsafeFromPtr)
+  withSurface (readFrame env . retainTexture =<< readIORef (sdlRetain env)) False $ \surface ->
+    withCString path (saveBMP surface . PtrConst.unsafeFromPtr)
 
 -- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
 -- window pixels (logical size times display scale) with the drawn alpha,
@@ -673,27 +658,22 @@ captureScreenshot env = do
 -- | The frame's pixels from the retained texture, or from the window
 -- backbuffer when the target is null (valid only before presenting).
 captureFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Maybe RgbaPixels)
-captureFrame env target = bracket converted destroySurface $ \rgba ->
-  if rgba == nullPtr
-    then pure Nothing
-    else do
-      Surface.SDL_Surface _ _ sw sh pitch pixels _ _ <- peek rgba
-      let
-        w = fromIntegral sw
-        h = fromIntegral sh
-        rowBytes = w * 4
-      bytes <- BSI.create (h * rowBytes) $ \dst ->
-        for_ [0 .. h - 1] $ \y ->
-          copyBytes
-            (dst `plusPtr` (y * rowBytes))
-            (castPtr pixels `plusPtr` (y * fromIntegral pitch))
-            rowBytes
-      pure (rgbaPixels w h bytes)
- where
-  converted = bracket (readFrame env target) destroySurface $ \surface ->
-    if surface == nullPtr
-      then pure nullPtr
-      else convertSurface surface Pixels.SDL_PIXELFORMAT_RGBA32
+captureFrame env target = withSurface (readFrame env target) Nothing $ \surface -> do
+  Surface.SDL_Surface _ format sw sh pitch pixels _ _ <- peek surface
+  let w = fromIntegral sw
+      h = fromIntegral sh
+  -- Converted straight into the result, from whatever format was read back;
+  -- a failed conversion leaves too few bytes for 'rgbaPixels'.
+  bytes <- BSI.createUptoN (w * h * 4) $ \dst -> do
+    ok <- convertPixels (fromIntegral w) (fromIntegral h) format (PtrConst.unsafeFromPtr pixels) (fromIntegral pitch) Pixels.SDL_PIXELFORMAT_RGBA32 (castPtr dst) (fromIntegral w * 4)
+    pure (if ok then w * h * 4 else 0)
+  pure (rgbaPixels w h bytes)
+
+-- | Run an action on a new surface, and free it after; @none@ when there is
+-- no surface.
+withSurface :: IO (Ptr SDL_Surface) -> a -> (Ptr SDL_Surface -> IO a) -> IO a
+withSurface make none act = bracket make destroySurface $ \surface ->
+  if surface == nullPtr then pure none else act surface
 
 -- | Read the used area of the retained texture, or the backbuffer for a null
 -- target, into a new surface. Null on failure.

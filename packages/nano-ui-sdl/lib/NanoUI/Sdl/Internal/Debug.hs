@@ -1,12 +1,11 @@
 -- | SDL display facts combined with the core frame-timing sampler.
 module NanoUI.Sdl.Internal.Debug
   ( SdlDebugSnapshot (..)
-  , emptySdlDebug
   , traceFrame
   ) where
 
 import Data.Text (Text, unpack)
-import NanoUI.Internal.Debug (CoreDebugSnapshot (..), emptyCoreDebugSnapshot)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..))
 import Text.Printf (printf)
 
 -- | Published timing, font, renderer, and display information. Scale is
@@ -21,18 +20,6 @@ data SdlDebugSnapshot = SdlDebugSnapshot
   }
   deriving (Eq, Show)
 
--- | Placeholder snapshot before an SDL session publishes measurements.
-emptySdlDebug :: SdlDebugSnapshot
-emptySdlDebug =
-  SdlDebugSnapshot
-    { dbgCore     = emptyCoreDebugSnapshot
-    , dbgScale    = 1
-    , dbgFontPath = ""
-    , dbgRenderer = ""
-    , dbgVsync    = True
-    , dbgRefreshHz = 0
-    }
-
 -- | Per-refresh timing trace (NANO_FRAME_TRACE). Prints the snapshot's phase
 -- EMAs so live-loop costs can be compared across builds.
 traceFrame :: SdlDebugSnapshot -> IO ()
@@ -41,7 +28,7 @@ traceFrame s =
     "TRACE refreshHz=%3d rend=%s vsync=%d presentFps=%6.0f loopFps=%6.0f frameMs=%6.3f uiMs=%6.3f renderMs=%6.3f presentMs=%6.3f verts=%5d cmds=%2d presents=%d skips=%d\n"
     (dbgRefreshHz s)
     (unpack (dbgRenderer s))
-    (if dbgVsync s then 1 else 0 :: Int)
+    (fromEnum (dbgVsync s))
     (dbgPresentFps c)
     (dbgLoopFps c)
     (dbgFrameMs c)

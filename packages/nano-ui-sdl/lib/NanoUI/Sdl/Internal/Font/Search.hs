@@ -8,15 +8,15 @@ module NanoUI.Sdl.Internal.Font.Search
   ) where
 
 import Control.Exception (IOException, catch)
+import Control.Monad (filterM)
 import Data.Containers.ListUtils (nubOrd)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
-import Data.List (isInfixOf, sort, sortOn, stripPrefix)
+import Data.List (isInfixOf, partition, sort, sortOn, stripPrefix)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Set as Set
-import System.Directory (getHomeDirectory)
-import System.Directory.Recursive (getFilesRecursive)
+import System.Directory (doesDirectoryExist, getHomeDirectory, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeBaseName, takeExtension, (</>))
 import System.Info (os)
@@ -74,7 +74,7 @@ fontStems =
     Just stems -> pure stems
     Nothing -> do
       roots <- defaultFontDirs
-      files <- concat <$> mapM (fmap (sort . filter isFontFile) . filesBelow) roots
+      files <- concat <$> mapM (fmap sort . fontFilesBelow) roots
       let stems = map (\path -> (normalize (takeBaseName path), path)) files
       writeIORef fontStemsRef (Just stems)
       pure stems
@@ -83,9 +83,16 @@ fontStems =
 fontStemsRef :: IORef (Maybe [(String, FilePath)])
 fontStemsRef = unsafePerformIO (newIORef Nothing)
 
-filesBelow :: FilePath -> IO [FilePath]
-filesBelow root =
-  getFilesRecursive root `catch` \(_ :: IOException) -> pure []
+-- | Every font file under a directory; none from one that cannot be read.
+-- Only an entry not named like a font file is asked whether it is a
+-- directory: those questions are most of the time a walk of a large font
+-- folder takes.
+fontFilesBelow :: FilePath -> IO [FilePath]
+fontFilesBelow dir = do
+  entries <- map (dir </>) <$> listDirectory dir `catch` \(_ :: IOException) -> pure []
+  let (fonts, others) = partition isFontFile entries
+  subdirs <- filterM doesDirectoryExist others
+  (fonts ++) . concat <$> mapM fontFilesBelow subdirs
 
 defaultFontDirs :: IO [FilePath]
 defaultFontDirs =

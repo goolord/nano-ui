@@ -27,12 +27,13 @@ module NanoUI.Sdl.Internal.Frame
   , applyDecorations
   , applyWindowShadow
   , nativeFrameOutset
+  , hasFlag
   ) where
 
 import Control.Monad (void, when)
-import Data.Bits ((.&.), (.|.))
+import Data.Bits (zeroBits, (.&.))
 import Foreign.Ptr (Ptr)
-import SDL3.Sys.Bindgen.Video (SDL_Window)
+import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags)
 import SDL3.Sys.Video qualified as SDL
 
 #if defined(mingw32_HOST_OS)
@@ -41,7 +42,7 @@ import Data.Int (Int32)
 import Data.Word (Word32)
 import Foreign.C.Types (CInt (..))
 import Foreign.Marshal.Array (withArray)
-import Foreign.Marshal.Utils (with)
+import Foreign.Marshal.Utils (fromBool, with)
 import Foreign.Ptr (castPtr, nullPtr)
 import NanoUI.Sdl.Internal.Display (outPair)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -82,8 +83,7 @@ applyDecorations win decorations = do
   void (SDL.setWindowBorderedSafe win (decorations == DecorationsFull))
   when (decorations == DecorationsFrame) $ do
     flags <- SDL.getWindowFlags win
-    let movable =
-          flags .&. (SDL.SDL_WINDOW_RESIZABLE .|. SDL.SDL_WINDOW_FULLSCREEN) == SDL.SDL_WINDOW_RESIZABLE
+    let movable = hasFlag SDL.SDL_WINDOW_RESIZABLE flags && not (hasFlag SDL.SDL_WINDOW_FULLSCREEN flags)
     -- A frame on a window that cannot be resized by it is only a margin
     -- that takes clicks meant for whatever is behind the window; the shadow
     -- is all such a window wants of it. A window with the frame has the
@@ -91,6 +91,10 @@ applyDecorations win decorations = do
     -- anyway extends the frame over the topmost row of the view, which is a
     -- row the view draws its own border on.
     if movable then applyNativeFrame win True else applyWindowShadow win True
+
+-- | Whether window flags include a flag.
+hasFlag :: SDL_WindowFlags -> SDL_WindowFlags -> Bool
+hasFlag bit flags = flags .&. bit /= zeroBits
 
 -- | Put the desktop's own frame back under a borderless window, or take it
 -- away again.
@@ -121,7 +125,7 @@ nativeFrameOutset :: Ptr SDL_Window -> IO (Int, Int)
 #if defined(mingw32_HOST_OS)
 applyNativeFrame win on =
   withHwnd win () $ \hwnd -> do
-    nanoUiSetNativeFrame hwnd (if on then 1 else 0)
+    nanoUiSetNativeFrame hwnd (fromBool on)
     -- The desktop draws a line of its own around a window that has a frame,
     -- and along the top, where the client area reaches the edge of the
     -- window, it falls on the view's first row. The view draws its own

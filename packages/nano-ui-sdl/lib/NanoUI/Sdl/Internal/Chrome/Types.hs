@@ -10,7 +10,7 @@ module NanoUI.Sdl.Internal.Chrome.Types
   , clearChromeState
   ) where
 
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef)
 import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import NanoUI (Rect (..))
@@ -75,7 +75,4 @@ newChromeState = ChromeState <$> newIORef defaultWindowChrome <*> newIORef Nothi
 -- the window and so releases it after the window is destroyed: nothing can
 -- ask again once this has run.
 clearChromeState :: ChromeState -> IO ()
-clearChromeState st = do
-  cb <- readIORef (chromeCallback st)
-  writeIORef (chromeCallback st) Nothing
-  mapM_ freeHaskellFunPtr cb
+clearChromeState st = atomicModifyIORef' (chromeCallback st) (Nothing,) >>= mapM_ freeHaskellFunPtr

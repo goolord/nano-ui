@@ -44,7 +44,6 @@ module NanoUI.Sdl.Internal.Chrome
   ) where
 
 import Control.Monad (void, when)
-import Data.Bits (zeroBits, (.&.))
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isNothing)
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
@@ -75,9 +74,6 @@ windowResizable env = hasFlag SDL.SDL_WINDOW_RESIZABLE <$> windowFlagsOf env
 
 windowFlagsOf :: SdlEnv -> IO SDL_WindowFlags
 windowFlagsOf = SDL.getWindowFlags . sdlWindow
-
-hasFlag :: SDL_WindowFlags -> SDL_WindowFlags -> Bool
-hasFlag bit flags = flags .&. bit /= zeroBits
 
 -- | Change how much of the desktop's decoration the window keeps, from
 -- whatever 'NanoUI.Backend.Sdl.sdlWindowDecorations' or an earlier call
@@ -115,8 +111,7 @@ setWindowChrome env chrome = do
       , chromeResizeBorder = chromeResizeBorder chrome * zoom
       , chromeResizeTop = chromeResizeTop chrome * zoom
       }
-  installed <- readIORef (chromeCallback st)
-  when (isNothing installed) $ do
+  whenM (isNothing <$> readIORef (chromeCallback st)) $ do
     callback <- mkHitTest (hitTest st)
     writeIORef (chromeCallback st) (Just callback)
     void (SDL.setWindowHitTestSafe (sdlWindow env) (SDL_HitTest (castFunPtr callback)) nullPtr)
@@ -157,10 +152,11 @@ hitTest st win area _ = do
         | ok && (border > 0 || top > 0) =
             edgeHit (x < border) (x >= fromIntegral pw - border) (y < top) (y >= fromIntegral ph - border)
         | otherwise = SDL.SDL_HITTEST_NORMAL
-  pure $
-    if edge /= SDL.SDL_HITTEST_NORMAL
-      then edge
-      else if any (`rectContains` V2 x y) drag then SDL.SDL_HITTEST_DRAGGABLE else SDL.SDL_HITTEST_NORMAL
+      answer
+        | edge /= SDL.SDL_HITTEST_NORMAL = edge
+        | any (`rectContains` V2 x y) drag = SDL.SDL_HITTEST_DRAGGABLE
+        | otherwise = SDL.SDL_HITTEST_NORMAL
+  pure answer
 
 -- | The @SDL_HitTestResult@ for an edge or corner, from the sides of the
 -- window the point is near.

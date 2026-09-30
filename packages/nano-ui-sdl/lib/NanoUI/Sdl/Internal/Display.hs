@@ -3,6 +3,7 @@
 -- | SDL window dimensions, display scale, refresh timing, and event-loop wake support.
 module NanoUI.Sdl.Internal.Display
   ( queryWindowPixelDensity
+  , scaleMoved
   , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
@@ -21,7 +22,7 @@ module NanoUI.Sdl.Internal.Display
   , querySystemAppearance
   ) where
 
-import Control.Monad (unless, void)
+import Control.Monad (void)
 import Foreign.C.Types (CBool (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
@@ -29,7 +30,8 @@ import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
 import Data.Int (Int32)
 import Data.Word (Word32)
-import NanoUI (Appearance (..), Size (..), V2 (..))
+import NanoUI (Appearance (..), Size (..), V2 (..), ifM, unlessM)
+import NanoUI.Monad ((<&&>))
 import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -49,6 +51,10 @@ import System.IO.Unsafe (unsafePerformIO)
 -- squeezed them back down on every present.
 queryWindowPixelDensity :: Ptr SDL_Window -> IO Float
 queryWindowPixelDensity win = (\s -> if s > 0 then s else 1) <$> getWindowPixelDensity win
+
+-- | Whether a scale or zoom moved by more than float rounding does.
+scaleMoved :: Float -> Float -> Bool
+scaleMoved a b = abs (a - b) > 0.001
 
 -- | Window size in window (logical) coordinates; 0x0 when SDL cannot say.
 -- SDL_GetWindowSize already returns the window-coordinate size, not pixels.
@@ -81,8 +87,7 @@ outPair f = alloca $ \pa -> alloca $ \pb -> do
 installResizeWatch :: IO () -> IO (IO ())
 installResizeWatch act = do
   fp <- mkResizeCb act
-  ok <- (/= 0) <$> installResizeWatchC fp
-  unless ok $ fail "SDL_AddEventWatch failed"
+  unlessM ((/= 0) <$> installResizeWatchC fp) (fail "SDL_AddEventWatch failed")
   pure $ do
     removeResizeWatchC
     freeHaskellFunPtr fp
@@ -99,14 +104,11 @@ refreshEventType :: IO Word32
 refreshEventType = (\(Uint32 ty) -> ty) <$> peek refreshEvent.type'
 
 initRefreshEvent :: IO Bool
-initRefreshEvent = do
-  registered <- refreshEventType
-  if registered /= 0
-    then pure True
-    else do
-      ty <- registerEvents 1
-      poke refreshEvent.type' (Uint32 ty)
-      pure (ty /= 0)
+initRefreshEvent =
+  ifM ((/= 0) <$> refreshEventType) (pure True) $ do
+    ty <- registerEvents 1
+    poke refreshEvent.type' (Uint32 ty)
+    pure (ty /= 0)
 
 -- | Wake the event loop from any thread.
 --
@@ -124,9 +126,7 @@ pushRefreshEvent = void tryPushRefreshEvent
 -- for the loop's own dirty marks; a push that fails lets the next wake try
 -- again ('NanoUI.Backend.setWakeLoopChecked').
 tryPushRefreshEvent :: IO Bool
-tryPushRefreshEvent = do
-  ty <- refreshEventType
-  if ty == 0 then pure False else pushEventSafe refreshEvent
+tryPushRefreshEvent = ((/= 0) <$> refreshEventType) <&&> pushEventSafe refreshEvent
 
 -- | Whether the pointer is over the window (SDL's mouse focus). Once it has
 -- left, 'queryMouseWindowPos' still answers the last position inside.

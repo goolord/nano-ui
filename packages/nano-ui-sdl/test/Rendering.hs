@@ -40,7 +40,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness (warmupDraw)
 import SDL3.Sys.Bindgen.Mouse qualified as M
-import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
+import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video qualified as Video
 import SDL3.Sys.Events (pushEvent)
@@ -65,7 +65,6 @@ foreign import capi unsafe "SDL3/SDL.h SDL_FillSurfaceRect" fillSurface :: Ptr (
 foreign import ccall unsafe "nano_ui_text_atlas_create" newAtlas :: Ptr SDL_Renderer -> IO (Ptr ())
 foreign import ccall unsafe "nano_ui_text_atlas_destroy" freeAtlas :: Ptr () -> IO ()
 foreign import ccall unsafe "nano_ui_text_atlas_reset" resetAtlas :: Ptr () -> IO ()
-foreign import ccall unsafe "nano_ui_text_atlas_texture" atlasTexture :: Ptr () -> CInt -> IO (Ptr SDL_Texture)
 foreign import ccall unsafe "nano_ui_text_atlas_insert_surface" insertAtlas :: Ptr () -> Ptr () -> Ptr CFloat -> IO CBool
 
 -- A padded pitch deliberately differs from both the glyph width and atlas pitch.
@@ -91,14 +90,13 @@ insertInto atlas surface =
         pure (Just (page, [px (u0 - fromIntegral page), px v0, px (u1 - u0), px (v1 - v0)]))
       else pure Nothing
 
-atlasChecks :: SdlEnv -> ((Int -> Ptr SDL_Texture) -> DrawData -> IO ()) -> IO ()
+atlasChecks :: SdlEnv -> (Ptr () -> DrawData -> IO ()) -> IO ()
 atlasChecks env draw = withGlyphSurface $ \surface ->
   bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> do
     unless (atlas /= nullPtr) (fail "atlas creation failed")
     let firstGlyph name = insertInto atlas surface >>= \r -> unless (r == Just (0, [5, 1, 3, 2])) (fail (name ++ ": " ++ show r))
         sampleOn page name x y expected = do
-          textures <- mapM (atlasTexture atlas) [0 .. 3]
-          draw (textures !!) =<< texturedTriangle (glyphPageTextureId page) [(24, x / 2048), (28, y / 2048)]
+          draw atlas =<< texturedTriangle (glyphPageTextureId page) [(24, x / 2048), (28, y / 2048)]
           expectPixel env name expected
         sample = sampleOn 0
         fill = insertInto atlas surface >>= \case
@@ -318,8 +316,8 @@ main = do
   ctx <- newPixelContext
   withSdlBench ctx $ \_ env -> bracket newImageAtlas destroyImageAtlas $ \images ->
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do
-      let drawWithGlyph tex dd dmg = renderDrawDataPass batch (sdlRenderer env) black dd images tex dmg >> flushRenderBatch batch
-          draw = drawWithGlyph (const nullPtr)
+      let drawWithGlyph glyphs dd dmg = renderDrawDataPass batch (sdlRenderer env) black dd images glyphs dmg >> flushRenderBatch batch
+          draw = drawWithGlyph nullPtr
           damage = DamageClip (Rect 15 15 10 10)
           step name act = act >> putStrLn ("SDL " ++ name ++ ": ok")
       case args of
@@ -347,7 +345,7 @@ main = do
               untouched <- pixel env 12 12
               unless (inside == (255, 0, 0) && untouched == (0, 0, 0)) $
                 fail (name ++ ": clipped geometry lost or escaped damage: " ++ show (inside, untouched))
-          step "glyph upload, padding and reset readback" (atlasChecks env (\tex dd -> drawWithGlyph tex dd DamageFull))
+          step "glyph upload, padding and reset readback" (atlasChecks env (\glyphs dd -> drawWithGlyph glyphs dd DamageFull))
           step "image atlas upload, and turned and faded image readback" (imageChecks env ctx images (`draw` DamageFull))
           step "canvas paths, caps, joins and dashes readback" (pathChecks env ctx (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks

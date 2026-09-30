@@ -2,6 +2,15 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- `setSdlUiFont` asks for the frame that applies the new family, as
+  `setSdlUiScale` does. A family picked from a view no longer waits for the
+  next input to show.
+
+- Installed fonts are found by listing each font folder once and asking only
+  about entries not named like font files; an unreadable subfolder is
+  skipped instead of hiding its whole root. The `dir-traverse` dependency is
+  gone.
+
 - **Breaking:** the application facade exports `SdlEnv` opaquely. Native
   integrations that access its record fields must explicitly import
   `NanoUI.Sdl.Internal.Window`; ordinary views use the session operations.

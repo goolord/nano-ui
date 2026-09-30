@@ -143,21 +143,18 @@ askOpenFolderDialog :: FileDialogOptions -> NanoUI FileDialogId
 askOpenFolderDialog = askDialog FolderDialog
 
 askDialog :: DialogKind -> FileDialogOptions -> NanoUI FileDialogId
-askDialog kind opts =
-  askSdlEnv >>= \case
-    Just env -> liftIO (launchDialog env kind opts)
-    Nothing -> do
-      owner <- liftIO . newIORef =<< askContext
-      liftIO (FileDialogId owner <$> newIORef FileDialogFailed)
+askDialog kind opts = do
+  ctx <- askContext
+  askSdlEnv >>= liftIO . \case
+    Just env -> launchDialog env kind opts
+    Nothing -> FileDialogId <$> newIORef ctx <*> newIORef FileDialogFailed
 
 -- | Consuming poll from a view, with the same focus restoration as
 -- 'pollFileDialog'. Outside a session it consumes the handle's result
 -- without touching a window.
 pollFileDialogUi :: FileDialogId -> NanoUI FileDialogResult
 pollFileDialogUi did@(FileDialogId _ ref) =
-  askSdlEnv >>= \case
-    Just env -> liftIO (pollFileDialog env did)
-    Nothing -> liftIO (takeResult ref)
+  liftIO . maybe (takeResult ref) (`pollFileDialog` did) =<< askSdlEnv
 
 -- | Observe without consuming or restoring focus. Repeated peeks report the
 -- same result until 'pollFileDialogUi' consumes it. Use polling for actions
@@ -181,11 +178,13 @@ launchDialog env kind opts = do
       else newArray [SDL_DialogFileFilter (PtrConst.unsafeFromPtr n) (PtrConst.unsafeFromPtr p) | (n, p) <- names]
   location <- traverse newCString (dialogDefaultLocation opts)
   result <- newIORef FileDialogPending
-  let release = do
+  let finish outcome = do
         mapM_ (\(n, p) -> free n >> free p) names
         free filters
         mapM_ free location
-  userdata <- castPtr . castStablePtrToPtr <$> newStablePtr (result, release)
+        completeResult result outcome
+        pushRefreshEvent
+  userdata <- castPtr . castStablePtrToPtr <$> newStablePtr finish
   let win = sdlWindow env
       filtersConst = PtrConst.unsafeFromPtr filters
       nfilters = fromIntegral (length names)
@@ -200,8 +199,9 @@ launchDialog env kind opts = do
   pure (FileDialogId (sdlCachedCtx env) result)
 
 -- | The callback every dialog shares, made once a process. A launch's
--- userdata carries its result cell and the release of its buffers, so there
--- is no callback to free while SDL might still call it.
+-- userdata carries what finishes it (releasing its buffers, recording the
+-- outcome, waking the loop), so there is no callback to free while SDL might
+-- still call it.
 {-# NOINLINE dialogCallback #-}
 dialogCallback :: SDL_DialogFileCallback
 dialogCallback = unsafePerformIO (SDL_DialogFileCallback . castFunPtr <$> mkDialogCallback onResult)
@@ -215,17 +215,14 @@ dialogCallback = unsafePerformIO (SDL_DialogFileCallback . castFunPtr <$> mkDial
 onResult :: Ptr () -> Ptr () -> Int32 -> IO ()
 onResult userdata filelist _filterIdx = do
   let launch = castPtrToStablePtr userdata
-  (result, release :: IO ()) <- deRefStablePtr launch
+  finish <- deRefStablePtr launch
   freeStablePtr launch
   paths <- maybePeek (peekArray0 nullPtr >=> traverse peekCString) (castPtr filelist)
-  release
-  let outcome = case paths of
-        Nothing -> FileDialogFailed
-        Just [] -> FileDialogCancelled
-        Just ps -> FileDialogSelected ps
   -- A cancelled dialog's handle stays unknown.
-  completeResult result outcome
-  pushRefreshEvent
+  finish $ case paths of
+    Nothing -> FileDialogFailed
+    Just [] -> FileDialogCancelled
+    Just ps -> FileDialogSelected ps
 
 -- SDL_DialogFileCallback is `void (*)(void *, const char * const *, int)`,
 -- flattened to `void *` pointers at the FFI boundary.

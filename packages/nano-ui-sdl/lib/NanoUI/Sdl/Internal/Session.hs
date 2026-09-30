@@ -1,20 +1,20 @@
 -- | SDL window session loop: event poll, resize sync, frame present.
 module NanoUI.Sdl.Internal.Session
   ( runSdlSession
-  , runSdlSessionWith
   ) where
 
 import Control.Exception (bracket)
 import Control.Monad (forM_, unless, void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
-import NanoUI (WindowSettings (..), followSystemTheme)
+import Foreign.Marshal.Utils (fromBool)
+import NanoUI (WindowSettings (..), followSystemTheme, unlessM, whenM)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Internal.Input
-import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent)
+import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
 import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
@@ -24,19 +24,14 @@ import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 -- frame and answers whether another is needed; its flag forces a full
 -- repaint.
 runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO Bool) -> IO ()
-runSdlSession options drawFn = runSdlSessionWith options (\_ -> pure drawFn)
-
--- | Construct the frame action once with the session's typed SDL environment.
-runSdlSessionWith :: SdlOptions -> (SdlEnv -> IO (Context -> SdlEnv -> Input -> Bool -> IO Bool)) -> IO ()
-runSdlSessionWith options setup = do
+runSdlSession options drawFn = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
   forM_ (sdlAppThemeFor options) (followSystemTheme ctx)
   setExplainLayout ctx (sdlExplainLayout options)
   forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
-    registerImage ctx image w h pixels >>= (`unless` fail "registerImage failed")
+    unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
   withSdl options ctx $ \ctx0 env -> do
-    drawFn <- setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
@@ -44,6 +39,10 @@ runSdlSessionWith options setup = do
     -- cannot take the next drag step while a present waits for vblank. The
     -- main loop turns vsync back on before its own frames.
     vsyncPaused <- newIORef False
+    let pauseVsync paused =
+          when (sdlVsync env) $ whenM ((/= paused) <$> readIORef vsyncPaused) $ do
+            void $ setRenderVSync (sdlRenderer env) (fromBool (not paused))
+            writeIORef vsyncPaused paused
     -- Window size the resize watch presented since the main loop last
     -- decided whether to draw. That frame already covers the size change and
     -- expose events the loop is about to see.
@@ -57,10 +56,7 @@ runSdlSessionWith options setup = do
           writeIORef prev inpSynced
           scale1 <- readIORef (sdlScaleRef env)
           unless (inputWindowSize inpSynced == inputWindowSize inp && scale1 == scale0) $ do
-            paused <- readIORef vsyncPaused
-            when (sdlVsync env && not paused) $ do
-              void $ setRenderVSync (sdlRenderer env) 0
-              writeIORef vsyncPaused True
+            pauseVsync True
             _ <- drawFn ctx' env inpSynced True
             writeIORef resizePresented (Just (inputWindowSize inpSynced))
     -- A wake (a background thread changed what the view reads, a file dialog
@@ -74,9 +70,7 @@ runSdlSessionWith options setup = do
     let settle c inp = do
           pending <- pollEvents >>= noteWake
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
-          if null pending
-            then pure (c', inp')
-            else settle c' inp'
+          if null pending then pure (c', inp') else settle c' inp'
     -- The opening frames are drawn here, outside the loop, so what one asks
     -- for beyond itself has to be carried into the loop by hand. A frame
     -- answers the wakes that came before it, and leaves the context dirty
@@ -95,7 +89,7 @@ runSdlSessionWith options setup = do
     startupFrame ctx1b inp0b
     (ctx2, inp1) <- settle ctx1b inp0b
     scale1 <- readIORef (sdlScaleRef env)
-    when (inputWindowSize inp1 /= inputWindowSize inp0b || abs (scale1 - scaleSettle) > 0.001 || abs (scaleSettle - scale0) > 0.001) $
+    when (inputWindowSize inp1 /= inputWindowSize inp0b || scaleMoved scale1 scaleSettle || scaleMoved scaleSettle scale0) $
       startupFrame ctx2 inp1
     writeIORef prev inp1
     -- The last opening frame may have asked for another: it marked the
@@ -103,8 +97,7 @@ runSdlSessionWith options setup = do
     -- it began, which the drains above took off the queue. Queue that wake
     -- again, or the loop would block on a view waiting to be drawn until some
     -- input happened along.
-    wokeSinceLastFrame <- readIORef wakeRef
-    when wokeSinceLastFrame pushRefreshEvent
+    whenM (readIORef wakeRef) pushRefreshEvent
     let drv =
           SessionDriver
             { sdPollEvents    = pollEvents >>= noteWake
@@ -117,10 +110,7 @@ runSdlSessionWith options setup = do
             , sdIsButtonEdge  = isButtonEdge
             , sdIsSessionQuit = (== EvQuit)
             , sdSyncDisplay   = \c inp -> do
-                paused <- readIORef vsyncPaused
-                when paused $ do
-                  void $ setRenderVSync (sdlRenderer env) 1
-                  writeIORef vsyncPaused False
+                pauseVsync False
                 synced@(_, inp') <- syncDisplay c env inp
                 synced <$ writeIORef prev inp'
             , sdDebug         = sdlDebug env
@@ -139,7 +129,7 @@ runSdlSessionWith options setup = do
                 presented <- readIORef resizePresented
                 writeIORef resizePresented Nothing
                 wakeDue <- readIORef wakeRef
-                let (prevInp', inpSynced') = case presented of
+                let !(prevInp', inpSynced') = case presented of
                       Just size
                         | size == inputWindowSize inpSynced ->
                             (prevInp {inputWindowSize = size}, inpSynced {inputWindowRedraw = False})
@@ -150,11 +140,11 @@ runSdlSessionWith options setup = do
                 -- Only a frame that runs answers a wake.
                 drawn <- tryWithDrawingLock drawing $ do
                   writeIORef wakeRef False
-                  drawFn c env inpSynced (forceFull || sdlContinuous env)
+                  drawFn c env inpSynced forceFull
                 -- A frame the lock turned away leaves its wake's event off
                 -- the queue: queue it again for the pass after the lock is
                 -- free.
-                when (isNothing drawn) $ readIORef wakeRef >>= (`when` pushRefreshEvent)
+                when (isNothing drawn) $ whenM (readIORef wakeRef) pushRefreshEvent
                 pure (fromMaybe False drawn)
             , sdOnCursor      = syncPointerCursor (sdlCursors env)
             , sdAlignSec      = sdlRefreshPeriod env

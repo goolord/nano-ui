@@ -40,7 +40,7 @@ destroyImageAtlas (ImageAtlas ref) = mask_ (publish ref Nothing)
 
 -- | Make a texture (or none) the atlas's, and destroy the one it replaces.
 publish :: IORef (Maybe AtlasTexture) -> Maybe AtlasTexture -> IO ()
-publish ref new = atomicModifyIORef' ref (\old -> (new, old)) >>= mapM_ (destroyTexture . atTexture)
+publish ref new = atomicModifyIORef' ref (new,) >>= mapM_ (destroyTexture . atTexture)
 
 -- | Bring the texture up to the context's image atlas. Pixels written in
 -- place since the last upload go up as those rects only; a new texture is
