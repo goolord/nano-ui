@@ -41,9 +41,10 @@ import NanoUI.Internal.Context (Context (..), registerImage)
 import NanoUI.Internal.Draw (getDrawSnapScale)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, nextId, liftIO, uiTheme, withContext)
-import NanoUI.Svg (Svg, parseSvg, rasterizeSvg, svgKey, svgMonochrome, svgSize)
+import NanoUI.Svg (Svg, parseSvg, rasterizeSvgIn, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
-import NanoUI.Internal.Types (Color (..), ImageId (..), colorRGBA, colorToWord32)
+import NanoUI.Internal.Image (ContentFit (..), ImageLook (..), fitRect, imageLook, turnedRect)
+import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), colorRGBA, colorToWord32)
 import NanoUI.Internal.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
 import NanoUI.Internal.Widgets.Image (ImageConfig (..), defaultImageConfig, imageConfigured', imageNode)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled)
@@ -156,13 +157,19 @@ svgIconWith f doc = void (svgIconWith' f doc)
 
 -- | The document is rasterized once per pixel size and colour, at the
 -- display's scale, and kept in the image atlas for as long as the app runs.
+-- A rect of another shape than the document's letterboxes it, centred, as
+-- SVG's default @xMidYMid meet@ does.
 svgIconWith' :: (Layout -> Layout) -> Svg -> NanoUI Response
-svgIconWith' f = svgIconConfigured' defaultImageConfig {icLayout = f}
+svgIconWith' f = svgIconConfigured' defaultImageConfig {icLayout = f, icFit = FitContain}
 
 -- | An SVG document drawn like 'NanoUI.imageConfigured' draws an image:
 -- faded, rotated, fitted and aligned in its rect. The rect is sized as in
 -- 'svgIconWith': a fixed width and height from 'icLayout', or else the
--- document's own size.
+-- document's own size. Fit and alignment place the document's own shape
+-- ('svgSize'), so 'FitCover' crops real content and 'FitFill' stretches it;
+-- use 'FitContain' for the letterboxing 'svgIconWith' does. The document is
+-- rasterized at the fitted size, so it stays sharp. 'icCrop' is in raster
+-- pixels.
 --
 -- > svgIconConfigured defaultImageConfig {icLayout = fixedWH 24 24, icRotation = RotateFloating turn} spinnerIcon
 svgIconConfigured :: ImageConfig -> Svg -> NanoUI ()
@@ -184,24 +191,32 @@ svgIconConfigured' cfg doc = do
       oneColour = svgMonochrome doc
       white = colorRGBA 255 255 255 255
       lay = lay0 {layoutWidth = Fixed w, layoutHeight = Fixed h, layoutFontColor = Just (if oneColour then color else white)}
+      -- The raster is the rect before any solid rotation, stretched over it
+      -- when drawn; the document is fitted inside the raster instead.
+      Rect _ _ bw bh = turnedRect FitFill AlignCenter AlignMiddle (lookRotation (imageLook cfg white)) (w, h) (Rect 0 0 w h)
+      Rect cx cy cw ch = fitRect (icFit cfg) (icAlignX cfg) (icAlignY cfg) (docW, docH) (Rect 0 0 bw bh)
   iid <- liftIO $ do
     scale <- getDrawSnapScale (ctxDrawArena ctx)
-    let pw = max 1 (ceiling (w * max 1 scale))
-        ph = max 1 (ceiling (h * max 1 scale))
+    let pw = max 1 (ceiling (bw * max 1 scale))
+        ph = max 1 (ceiling (bh * max 1 scale))
+        kx = fromIntegral pw / bw
+        ky = fromIntegral ph / bh
+        content = (cx * kx, cy * ky, cw * kx, ch * ky)
         -- A one-colour raster is white and tinted when drawn, so every colour
         -- shares it.
         rasterColor = if oneColour then white else color
-        key = (svgKey doc, pw, ph, colorToWord32 rasterColor)
+        key = (svgKey doc, pw, ph, colorToWord32 rasterColor, content)
     let cache = ctxSvgRasters ctx
     known <- Map.lookup key <$> readIORef cache
     case known of
       Just iid -> pure iid
       Nothing -> do
         iid <- Atlas.freshImageId (ctxImageAtlas ctx)
-        ok <- registerImage ctx iid pw ph (rasterizeSvg pw ph rasterColor doc)
+        let (x, y, cw', ch') = content
+        ok <- registerImage ctx iid pw ph (rasterizeSvgIn pw ph (Rect x y cw' ch') rasterColor doc)
         when ok $ modifyIORef' cache (Map.insert key iid)
         pure (if ok then iid else ImageId 0)
-  imageConfigured' cfg {icLayout = const lay} iid
+  imageConfigured' cfg {icLayout = const lay, icFit = FitFill, icAlignX = AlignCenter, icAlignY = AlignMiddle} iid
 
 -- | A solid rectangle sized by the layout modifier.
 box :: (Layout -> Layout) -> Color -> NanoUI ()

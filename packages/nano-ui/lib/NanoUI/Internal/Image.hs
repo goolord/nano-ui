@@ -8,6 +8,7 @@ module NanoUI.Internal.Image
   , ImageConfig (..)
   , defaultImageConfig
   , fitRect
+  , turnedRect
   , ImageLook (..)
   , imageLook
   , plainLook

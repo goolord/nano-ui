@@ -504,7 +504,8 @@ and a rotation (`RotateSolid` fits the turned image in its rect,
 `RotateFloating` keeps the unturned layout and crops). An axis the layout
 leaves unsized takes the image's own size, and a fit height follows the
 width in the image's shape, so `icLayout = fillW` fills the width without
-stretching it. `svgIconConfigured` draws an SVG icon the same way, and
+stretching it. `svgIconConfigured` draws an SVG icon the same way, fitting
+the document's own shape (`svgIcon` letterboxes, as `FitContain`), and
 `fitRect` is the placement a fit makes. A canvas draws images with
 `drawImageWith`, whose `ImageDraw` holds the rect, the part of the image,
 the turn, the tint and the opacity; `drawImage` and `drawImageUV` are its

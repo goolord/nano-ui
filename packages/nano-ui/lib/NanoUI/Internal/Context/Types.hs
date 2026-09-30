@@ -909,7 +909,8 @@ data Context = Context
   , ctxNativeWindow :: !(Host NativeWindow)
   , ctxSensors :: !(Host Sensors)
   , ctxParagraphs :: !(Host Paragraphs)
-  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32) ImageId))
+  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Float, Float, Float, Float)) ImageId))
+  -- ^ SVG rasters by document, pixel size, colour and content rect.
   -- Whole-layout reuse cache: cached signature and solved rects,
   -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))

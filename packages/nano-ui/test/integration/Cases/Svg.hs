@@ -2,13 +2,40 @@ module Cases.Svg (tests) where
 
 import Spec
 import Data.ByteString qualified as BS
-import NanoUI.Svg (rasterizeSvg, svgMonochrome)
+import Data.Map.Strict qualified as Map
+import NanoUI.Internal.Context (Context (..))
+import NanoUI.Svg (rasterizeSvg, rasterizeSvgIn, svgMonochrome)
 
 tests :: [Spec]
 tests =
   [ spec "svg-raster" runSvgRasterTest
   , spec "svg-icon" runSvgIconTest
+  , spec "svg-fit-content" runSvgFitContentTest
   ]
+
+-- | Fit and alignment place the document's own 2:1 shape, not a square raster
+-- it was first letterboxed into.
+runSvgFitContentTest :: Context -> IORef Int -> IO ()
+runSvgFitContentTest ctx failed = do
+  doc <- either fail pure (parseSvg "<svg width='20' height='10' viewBox='0 0 20 10'><rect width='20' height='10' fill='#ff0000'/></svg>")
+  let white = colorRGBA 255 255 255 255
+      alphas bytes = [BS.index bytes (i * 4 + 3) | i <- [0 .. 99]]
+  -- Letterboxed by 'rasterizeSvg'; covering and stretched by 'rasterizeSvgIn'.
+  assertEq failed 0 (BS.index (rasterizeSvg 10 10 white doc) 3)
+  assert failed (all (== 255) (alphas (rasterizeSvgIn 10 10 (Rect (-5) 0 20 10) white doc)))
+  assert failed (all (== 255) (alphas (rasterizeSvgIn 10 10 (Rect 0 0 10 10) white doc)))
+  assert failed (all (== 0) (alphas (rasterizeSvgIn 10 10 (Rect 0 0 0 0) white doc)))
+  let inp = withInputOff 200 200
+      icon fit ax = svgIconConfigured defaultImageConfig {icLayout = fixedWH 20 20, icFit = fit, icAlignX = ax} doc
+      contentOf ui = do
+        writeIORef (ctxSvgRasters ctx) Map.empty
+        _ <- warmupDraw ctx inp ui
+        map (\(_, _, _, _, content) -> content) . Map.keys <$> readIORef (ctxSvgRasters ctx)
+  assertEq failed [(-10, 0, 40, 20)] =<< contentOf (icon FitCover AlignCenter)
+  assertEq failed [(0, 0, 40, 20)] =<< contentOf (icon FitCover AlignStart)
+  assertEq failed [(0, 0, 20, 20)] =<< contentOf (icon FitFill AlignCenter)
+  assertEq failed [(0, 5, 20, 10)] =<< contentOf (icon FitContain AlignCenter)
+  assertEq failed [(0, 5, 20, 10)] =<< contentOf (svgIconWith (fixedWH 20 20) doc)
 
 -- | Strokes, even-odd holes and transforms rasterize where they should.
 runSvgRasterTest :: Context -> IORef Int -> IO ()

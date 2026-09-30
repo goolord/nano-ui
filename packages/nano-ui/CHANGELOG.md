@@ -21,6 +21,12 @@
 - Local drag cancellation uses Escape arbitration, so cancelling a drag does
   not also dismiss its enclosing modal or run a later Escape handler.
 
+- `svgIconConfigured` fits and aligns the document's own shape rather than a
+  raster it had already letterboxed, so `FitCover` crops real content and
+  alignment moves it. `FitFill`, the `defaultImageConfig` fit, now stretches
+  a document like an image; `svgIcon`/`svgIconWith` still letterbox. Added
+  `rasterizeSvgIn` to draw a document's viewport over a given raster rect.
+
 - Selectable rich text keeps its selection in widget state rather than the
   paragraph measurement cache. Font, colour, alignment and theme changes,
   appended text and cache eviction no longer clear it, and idle passes reuse
