@@ -16,7 +16,7 @@ import Foreign.Storable (peekByteOff)
 import NanoUI
   ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
   , V2 (..), WidgetId, background, checkboxBoxSize, colorA, colorB, colorG, colorR, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
-  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, liftIO
+  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, liftIO, withKey
   )
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), getTheme, lookupCustomDrawing)
@@ -136,6 +136,15 @@ customCode =
 
 spec :: Spec
 spec = before newMarkdownCache $ do
+  it "holds a few passes' blocks however many keys churn through it" $ \cache -> do
+    ctx <- newContext
+    let doc = parseMarkdown (T.intercalate "\n\n" ["paragraph " <> T.pack (show i) | i <- [1 .. 50 :: Int]])
+    -- Fresh keys every frame: 6000 blocks over the run, 50 of them live.
+    forM_ [1 .. 120 :: Int] $ \frame ->
+      void (runFrame ctx (withInput 600 400) (withKey frame (markdown cache doc)))
+    held <- markdownCacheSize cache
+    held `shouldSatisfy` (<= 2048)
+    held `shouldSatisfy` (>= 50)
   it "draws every kind of block's text" $ \cache -> do
     ctx <-
       drawn 600 800 . view cache . parseMarkdown $

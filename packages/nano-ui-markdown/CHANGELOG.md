@@ -6,6 +6,10 @@
   allocated with `newMarkdownCache`. Inline caches have explicit ownership.
   Reference definitions enter CommonMark through its typed insertion API;
   this package no longer imports `Data.Dynamic`.
+- A `MarkdownCache` sizes itself from the blocks one pass draws, not from
+  its history: keys that churn (a document redrawn under new keys) no longer
+  double its capacity each time it fills. `markdownCacheSize` reports what it
+  holds.
 
 ### Added
 

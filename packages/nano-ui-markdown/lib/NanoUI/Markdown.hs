@@ -65,6 +65,7 @@ module NanoUI.Markdown
   , markdown
   , MarkdownCache
   , newMarkdownCache
+  , markdownCacheSize
   , markdownConfigured
   , MarkdownConfig (..)
   , defaultMarkdownConfig

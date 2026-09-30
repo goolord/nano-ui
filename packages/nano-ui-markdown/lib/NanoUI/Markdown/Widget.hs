@@ -4,6 +4,7 @@ module NanoUI.Markdown.Widget
   , defaultMarkdownConfig
   , MarkdownCache
   , newMarkdownCache
+  , markdownCacheSize
   , markdown
   , markdownConfigured
   ) where
@@ -13,7 +14,7 @@ import Control.Monad (unless, void, when, zipWithM)
 import Data.Char (isSpace)
 import Data.Foldable (asum)
 import Data.Hashable (Hashable, hash)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
@@ -189,6 +190,7 @@ markdown cache = markdownConfigured cache defaultMarkdownConfig
 -- | 'markdown' with a configuration.
 markdownConfigured :: MarkdownCache -> MarkdownConfig -> MarkdownDoc -> NanoUI (Maybe Text)
 markdownConfigured cache cfg doc = do
+  liftIO (startPass cache)
   theme <- uiTheme
   size <- uiFontSize
   -- Pin the body size (the backend default if unset) so headings and small
@@ -288,7 +290,8 @@ keptInlines :: Env -> [Span] -> NanoUI [Inline]
 keptInlines env xs = do
   wid <- nextId
   liftIO $ do
-    let MarkdownCache ref = envCache env
+    let MarkdownCache ref passRef = envCache env
+    modifyIORef' passRef (\(PassCount n most) -> PassCount (n + 1) most)
     KeptGens bound cur old <- readIORef ref
     let k = intKey wid
         found = maybe (IM.lookup k old) Just (IM.lookup k cur)
@@ -300,30 +303,50 @@ keptInlines env xs = do
         , mdInlineCodeBackground cfg == codeBg
         , ptrEq (mdInlineCode cfg) code -> do
             -- Found only in the older generation: carry it into this one.
-            unless (IM.member k cur) (writeIORef ref (keep bound cur old k e))
+            unless (IM.member k cur) (writeIORef ref =<< keep passRef bound cur old k e)
             pure pieces
       _ -> do
         let pieces = inlines env xs
             e = KeptEntry xs (envTheme env) (mdLinkColor cfg) (mdInlineCodeBackground cfg) (mdInlineCode cfg) pieces
-        pieces <$ writeIORef ref (keep bound cur old k e)
+        pieces <$ (writeIORef ref =<< keep passRef bound cur old k e)
   where
     cfg = envCfg env
-    -- Past the bound, the newer generation becomes the older one and the
-    -- bound grows to twice what it held, so what a frame draws stays while
-    -- blocks the view stopped drawing drop out.
-    keep bound cur old k e
-      | IM.size cur < bound = KeptGens bound (IM.insert k e cur) old
-      | otherwise = KeptGens (max keptBound (2 * IM.size cur)) (IM.singleton k e) cur
+    -- Past the bound, the newer generation becomes the older one, dropping
+    -- blocks no pass drew since the last turn. The bound becomes twice the
+    -- most blocks one pass drew since then, not twice what churn filled it
+    -- with, so a long-lived cache holds about four passes' worth.
+    keep passRef bound cur old k e
+      | IM.size cur < bound = pure (KeptGens bound (IM.insert k e cur) old)
+      | otherwise = do
+          PassCount n most <- readIORef passRef
+          writeIORef passRef (PassCount n 0)
+          pure (KeptGens (max keptBound (2 * max n most)) (IM.singleton k e) cur)
 
--- | Pieces 'keptInlines' made, by widget key, in two generations.
-newtype MarkdownCache = MarkdownCache (IORef KeptGens)
+-- | Pieces 'keptInlines' made, by widget key, in two generations, and the
+-- blocks each pass drew.
+data MarkdownCache = MarkdownCache !(IORef KeptGens) !(IORef PassCount)
 
--- | Allocate once during component setup. The cache retains only typed inline
--- data; paragraph layout and interaction state remain in the UI context.
+-- | Allocate once during component setup, one per document drawn. The cache
+-- retains only typed inline data; paragraph layout and interaction state
+-- remain in the UI context. It holds a few passes' worth of blocks, whatever
+-- the document's history.
 newMarkdownCache :: IO MarkdownCache
-newMarkdownCache = MarkdownCache <$> newIORef (KeptGens keptBound IM.empty IM.empty)
+newMarkdownCache = MarkdownCache <$> newIORef (KeptGens keptBound IM.empty IM.empty) <*> newIORef (PassCount 0 0)
+
+-- | Blocks the cache holds, for diagnostics.
+markdownCacheSize :: MarkdownCache -> IO Int
+markdownCacheSize (MarkdownCache ref _) = do
+  KeptGens _ cur old <- readIORef ref
+  pure (IM.size (IM.union cur old))
 
 data KeptGens = KeptGens !Int !(IM.IntMap KeptEntry) !(IM.IntMap KeptEntry)
+
+-- | Blocks drawn this pass, and the most one pass drew since the generations
+-- last turned.
+data PassCount = PassCount !Int !Int
+
+startPass :: MarkdownCache -> IO ()
+startPass (MarkdownCache _ passRef) = modifyIORef' passRef (\(PassCount n most) -> PassCount 0 (max n most))
 
 -- | Spans, what styled them, and their pieces.
 data KeptEntry = KeptEntry [Span] !Theme !(Maybe Color) !(Maybe Color) (Layout -> Layout) [Inline]
