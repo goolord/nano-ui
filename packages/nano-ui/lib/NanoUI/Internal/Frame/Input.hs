@@ -432,14 +432,15 @@ tabNext cur ids shift =
       | shift -> reverse (if null before then ids else before)
       | otherwise -> after ++ ids
 
--- | While a modal is open, take keyboard focus away from a widget outside the
--- top modal. The frame runs this after the pointer steps, which can move
+-- | Take keyboard focus away from display-only content or a widget outside
+-- the top modal. The frame runs this after the pointer steps, which can move
 -- focus, and before 'finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
-    unlessM (widgetOverlayAllowed ctx focus) $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+    unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus)) $
+      writeIORef (ctxFocusId ctx) (WidgetId 0)
 
 -- | Record in 'isFocusKind' what kind of widget has the keyboard and which
 -- keys it claims ('KeyClaim'), from last frame's nodes. Runs before the
@@ -449,9 +450,11 @@ constrainFocusToModal ctx = do
 recordFocusKind :: Context -> Bool -> IO ()
 recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)
+  disabled <- isDisabled ctx focus
+  inert <- isInert ctx focus
   kind <- case () of
     _
-      | hashWidgetId focus == 0 -> pure FocusNone
+      | hashWidgetId focus == 0 || disabled || inert -> pure FocusNone
       | ime -> pure FocusComposing
       | otherwise -> withWidgetNode ctx focus FocusNone $ \idx -> do
           let si = getStyleIdx (ctxNodeArena ctx) idx

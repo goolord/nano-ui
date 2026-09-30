@@ -49,6 +49,7 @@ module NanoUI.Internal.Context.Core
   , recordSlot
   , writeStoreBool
   , isDisabled
+  , isInert
   -- Theme scopes
   , newThemeScopes
   , beginThemeScopes
@@ -72,18 +73,19 @@ import Data.Primitive.PrimVar (readPrimVar)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
 import Data.Foldable (foldlM)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.IntSet qualified as IS
 import GHC.Clock (getMonotonicTime)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Internal.Layout.Arena (NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeContainer), getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId, getNodeType, getStyleIdx, getParent)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Theme, disabledTheme)
 import NanoUI.Internal.Types (Damage, DamageBounds (..), Rect (..), defaultDamageSlop, rectH, rectW)
 import NanoUI.Widgets.TextCommand (TextCommand)
+import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 
 -- =============================================================================
 -- State records
@@ -500,6 +502,24 @@ scopeDisabled Context {ctxNodeArena = na} wid = do
 -- =============================================================================
 -- Theme scopes
 -- =============================================================================
+
+-- | Display-only descendants cannot acquire focus or handle input. Before a
+-- widget is added, inspect the open container instead of its not-yet-built node.
+isInert :: Context -> WidgetId -> IO Bool
+isInert ctx wid = do
+  node <- lookupNodeByWidgetId na wid
+  parent <- maybe (fromMaybe (-1) . listToMaybe <$> readIORef (ctxContainerStack ctx)) pure node
+  go parent
+  where
+    na = ctxNodeArena ctx
+    go i
+      | i < 0 = pure False
+      | otherwise = do
+          nt <- getNodeType na i
+          si <- getStyleIdx na i
+          if nt == NodeContainer && hasFlag containerFlagInert si
+            then pure True
+            else getParent na i >>= go
 
 -- | Allocate empty current/previous scope arrays. Only entries below their
 -- recorded counts are initialised and may be read.

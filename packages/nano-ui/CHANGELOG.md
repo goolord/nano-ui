@@ -2,6 +2,11 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Display-only button content and `Adornment.view` exclude their descendants
+  from keyboard focus and IME, and suppress both routed and raw input without
+  fading their appearance. A disabled focused widget no longer reserves keys
+  from application shortcuts and listeners.
+
 - **Breaking:** tab widgets require `Hashable` keys. Header, adornment and body
   state now follow `tabKey` through reordering and removal, rather than the
   tab's position in the list. Derive or implement `Hashable` for custom keys.

@@ -201,6 +201,7 @@ keyboardFocused wid
       focus <- focusedWidget
       pure (focus == wid)
         <&&> liftIO (not <$> isDisabled ctx wid)
+        <&&> liftIO (not <$> isInert ctx wid)
         <&&> liftIO (not <$> pointerBlockedByModal ctx)
 
 -- | Request input method (IME) text for widget @wid@, like iced's

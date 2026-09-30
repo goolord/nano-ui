@@ -48,7 +48,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Id (IdContext (..), WidgetId (..), enterScope, hashWidgetId, mix64, scopeTag)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, localInput, nextId, liftIO, withContext, withIdFrame)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, inertView, localInput, nextId, liftIO, withContext, withIdFrame)
 import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectHit, rectUnion, rectW)
@@ -196,18 +196,17 @@ container nt layout child = do
     addNodeFromLayout (ctxNodeArena ctx) nt parent layout
   withContainerNode True idx child
 
--- | A container whose widgets are for display: they see no pointer, and a
+-- | A container whose widgets are for display: they see no interaction, and a
 -- press passes through them to the widget they are drawn in
 -- ('NanoUI.Internal.Frame.Hit.innermostHit').
 inertContainer :: Layout -> NanoUI a -> NanoUI a
 inertContainer layout child = do
   ctx <- askContext
-  inp <- askInput
   idx <- liftIO $ do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
     idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagInert
-  withContainerNode True idx (localInput (withoutPointer inp) child)
+  withContainerNode True idx (inertView child)
 
 -- | A plain container that clips its children to its rect, drawing none of
 -- its own. It takes a fresh id, so the pointer is clipped from the frame

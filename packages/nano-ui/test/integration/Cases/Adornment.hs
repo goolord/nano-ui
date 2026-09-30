@@ -3,7 +3,7 @@ module Cases.Adornment (tests) where
 import Spec
 import NanoUI.Adornment qualified as A
 import Data.Text qualified as T
-import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Context (Context (..), getFocusables)
 import NanoUI.Internal.Layout.Arena (flowChildrenInOrder, getNodeRect, lookupNodeByWidgetId)
 
 tests :: [Spec]
@@ -17,6 +17,7 @@ tests =
   , spec "adorned-field-control" runAdornedFieldControlTest
   , spec "adorned-button-control" runAdornedButtonControlTest
   , spec "button-content" runButtonContentTest
+  , spec "adornment-keyboard-inert" runAdornmentKeyboardInertTest
   , spec "search-span-clip" runSearchSpanClipTest
   , spec "adornment-clip" runAdornmentClipTest
   ]
@@ -289,6 +290,35 @@ runButtonContentTest ctx failed = do
   (_, onNested) <- runClick ctx inp0 ui (centerOf nested)
   assert failed (respClicked onLabel && respClicked onNested)
   readIORef inner >>= assert failed . not
+
+-- | Display content neither enters tab order nor requests the input method.
+runAdornmentKeyboardInertTest :: Context -> IORef Int -> IO ()
+runAdornmentKeyboardInertTest ctx failed = do
+  clicks <- newIORef (0 :: Int)
+  childId <- newIORef (WidgetId 0)
+  let inp = withInputOff 600 300
+      decorative = do
+        whenM (button "Display only") (liftIO (modifyIORef' clicks (+ 1)))
+        (field, _) <- textInput' "Decoration"
+        liftIO (writeIORef childId (respId field))
+      ui = column $ do
+        outer <- buttonContent' decorative
+        adorned <- buttonConfigured' defaultButtonConfig
+          {bcAdornments = A.trailing (A.view decorative)} "Adorned"
+        after <- button' "After"
+        pure [outer, adorned, after]
+  resps <- warmup2 ctx inp ui
+  assertEq failed (map respId resps) =<< getFocusables ctx
+  forM_ (resps ++ take 1 resps) $ \expected -> do
+    _ <- runFrame ctx (tabInp inp) ui
+    assertEq failed (respId expected) =<< getFocusId ctx
+    _ <- runFrame ctx (keyInp KeyEnter inp) ui
+    pure ()
+  assertEq failed 0 =<< readIORef clicks
+  -- Retained/programmatically assigned focus cannot request IME for decoration.
+  writeIORef (ctxFocusId ctx) =<< readIORef childId
+  _ <- runFrame ctx inp ui
+  assertEq failed Nothing =<< textInputArea ctx
 
 -- | A search field's text spans clip short of its clear button, as paint
 -- clips the text.

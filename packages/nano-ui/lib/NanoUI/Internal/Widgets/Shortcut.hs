@@ -52,7 +52,10 @@ keyFree :: Context -> Modifiers -> Key -> IO Bool
 keyFree ctx mods k = do
   blocked <- pointerBlockedByModal ctx
   kind <- getsInteraction ctx isFocusKind
-  pure (not blocked && not (focusTakesChord kind mods k))
+  focus <- getFocusId ctx
+  disabled <- isDisabled ctx focus
+  inert <- isInert ctx focus
+  pure (not blocked && (disabled || inert || not (focusTakesChord kind mods k)))
 
 -- | 'True' on a frame where the chord is pressed with exactly its modifiers.
 -- Auto-repeats count as presses. Only the first shortcut declared for a chord

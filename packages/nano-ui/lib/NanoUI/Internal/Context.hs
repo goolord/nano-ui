@@ -120,7 +120,7 @@ module NanoUI.Internal.Context
   )
 where
 
-import Control.Monad (foldM, forM, when)
+import Control.Monad (foldM, forM, unless, when)
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import NanoUI.Internal.Derived (emptyDerivedCache)
@@ -641,11 +641,12 @@ getHotId :: Context -> IO WidgetId
 getHotId ctx = readIORef (ctxHotId ctx)
 
 -- | Add @wid@ to this frame's keyboard focus order, unless it is declared in a
--- disabled scope.
+-- disabled or display-only scope.
 registerFocusable :: Context -> WidgetId -> IO ()
 registerFocusable ctx wid = do
   scope <- getArenaScope (ctxNodeArena ctx)
-  when (scope .&. 1 == 0) $ do
+  inert <- isInert ctx wid
+  when (scope .&. 1 == 0 && not inert) $ do
     idx <- readIORef (ctxFocusablesCount ctx)
     arr <- readIORef (ctxFocusables ctx)
     cap <- getSizeofMutablePrimArray arr
@@ -666,7 +667,11 @@ registerFocusable ctx wid = do
 -- 'NanoUI.Internal.Frame.TextArea.textInputArea'. With no request the input
 -- method stays off; the last request of a build wins.
 requestInputMethod :: Context -> WidgetId -> Maybe Rect -> InputPurpose -> IO ()
-requestInputMethod ctx wid caret purpose = writeIORef (ctxInputMethod ctx) $! Just (InputMethodRequest wid caret purpose)
+requestInputMethod ctx wid caret purpose = do
+  inert <- isInert ctx wid
+  disabled <- isDisabled ctx wid
+  unless (inert || disabled) $
+    writeIORef (ctxInputMethod ctx) $! Just (InputMethodRequest wid caret purpose)
 
 -- | The frame's composition, if @wid@ has focus and owns it
 -- ('NanoUI.Internal.Frame.TextInput.claimComposition').

@@ -28,10 +28,26 @@ tests =
   , spec "key-frame-modifiers" runKeyFrameModifiersTest
   , spec "shortcut-focused-text-area" runShortcutFocusedTextAreaTest
   , spec "shortcut-focus-from-code" runShortcutFocusFromCodeTest
+  , spec "shortcut-disabled-focus" runShortcutDisabledFocusTest
   ]
 
 inp0 :: Input
 inp0 = withInput 400 300
+
+runShortcutDisabledFocusTest :: Context -> IORef Int -> IO ()
+runShortcutDisabledFocusTest ctx failed = do
+  let ui disabled = do
+        before <- keyPressed KeyDelete
+        (field, _) <- disabledWhen disabled (textInput' "value")
+        after <- shortcut (ctrl <> key 'a')
+        pure (field, before, after)
+  (field, _, _) <- warmup2 ctx inp0 (ui False)
+  writeIORef (ctxFocusId ctx) (respId field)
+  (_, _, after) <- evalUi ctx (chordInp (ctrl <> key 'a') inp0) (ui True)
+  assertEq failed True after
+  _ <- warmup2 ctx inp0 (ui True)
+  (_, before, _) <- evalUi ctx (keyInp KeyDelete inp0) (ui True)
+  assertEq failed True before
 
 ctrlHeld :: Modifiers
 ctrlHeld = noModifiers {modCtrl = True}

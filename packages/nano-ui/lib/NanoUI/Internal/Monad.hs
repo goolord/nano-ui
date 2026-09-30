@@ -27,6 +27,7 @@ module NanoUI.Internal.Monad
   , askInput
   , askFrameInput
   , localInput
+  , inertView
   , askDefaultLayout
   , withDefaultLayout
   , askHost
@@ -128,7 +129,7 @@ import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Layout.Arena (arenaCount, getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
-import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, Pressable (..), inputMousePos, inputWindowSize, noButtons, stripInteractionInput)
+import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, Pressable (..), inputMousePos, inputWindowSize, noButtons, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
 -- | A view: widgets, layout, local state and IO. Backend runners execute it
@@ -489,6 +490,14 @@ askFrameInput = do
 localInput :: Input -> NanoUI a -> NanoUI a
 localInput inp (NanoUI m) = NanoUI (localStaticRep (\r -> r {repInput = inp}) m)
 
+-- | Display-only content sees neither routed nor raw interaction input.
+-- Its container flag independently excludes its widgets from focus and IME.
+inertView :: NanoUI a -> NanoUI a
+inertView (NanoUI m) = NanoUI $
+  localStaticRep (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)}) m
+  where
+    inert i = (withoutPointer (stripInteractionInput i)) {inputKeysHeld = mempty, inputComposition = Nothing}
+
 -- | The window's content size in logical pixels ('NanoUI.winSize' of
 -- 'NanoUI.askWindow').
 {-# INLINE windowSize #-}
@@ -537,7 +546,10 @@ lastRect wid = withContext $ \ctx -> do
 holdFocus :: WidgetId -> NanoUI ()
 holdFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
-  unlessM (pointerBlockedByModal ctx) $ do
+  inert <- isInert ctx wid
+  disabled <- isDisabled ctx wid
+  blocked <- pointerBlockedByModal ctx
+  unless (inert || disabled || blocked) $ do
     markTabConsumed ctx
     when (focus /= wid) $ do
       writeIORef (ctxFocusId ctx) wid
