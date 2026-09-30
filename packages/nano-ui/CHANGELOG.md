@@ -21,6 +21,11 @@
 - Local drag cancellation uses Escape arbitration, so cancelling a drag does
   not also dismiss its enclosing modal or run a later Escape handler.
 
+- **Breaking:** `Svg` is an opaque newtype rather than an alias for
+  @nano-svg@'s `Document`, and only `parseSvg`/`loadSvg` make one, so its
+  raster cache key always matches its source. `svgDocument` reads the parsed
+  shapes.
+
 - `svgIconConfigured` fits and aligns the document's own shape rather than a
   raster it had already letterboxed, so `FitCover` crops real content and
   alignment moves it. `FitFill`, the `defaultImageConfig` fit, now stretches

@@ -7,6 +7,7 @@
 -- text, masks, clipping and filters are not among them.
 module NanoUI.Svg
   ( Svg
+  , svgDocument
   , svgSize
   , svgKey
   , svgMonochrome
@@ -42,28 +43,39 @@ import Graphics.NanoSvg
   , averageScale
   , black
   , multiply
-  , parseSvg
   )
+import Graphics.NanoSvg qualified as NanoSvg
 import NanoUI.Internal.Path (Rings (..), buildRings, cleanRings, ringCount)
 import NanoUI.Internal.Path qualified as P
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, finite)
 
--- | A parsed SVG document, as @nano-svg@ returns it.
-type Svg = Document
+-- | A parsed SVG document. Only 'parseSvg' makes one, so its raster cache
+-- key ('svgKey') always describes its source: an edited @nano-svg@
+-- 'Document' cannot reuse another drawing's rasters.
+newtype Svg = Svg Document
+  deriving newtype (Eq, Show)
+
+-- | Parse an SVG document's bytes.
+parseSvg :: ByteString -> Either String Svg
+parseSvg = fmap Svg . NanoSvg.parseSvg
+
+-- | The parsed shapes, read-only, as @nano-svg@ returns them.
+svgDocument :: Svg -> Document
+svgDocument (Svg doc) = doc
 
 -- | The document's own width and height, from its @width@ and @height@ or
 -- else its @viewBox@.
 svgSize :: Svg -> (Float, Float)
-svgSize = documentSize
+svgSize = documentSize . svgDocument
 
 -- | A hash of the source, for caching rasters.
 svgKey :: Svg -> Int
-svgKey = documentKey
+svgKey = documentKey . svgDocument
 
 -- | Every paint is @currentColor@ or unspecified, so the drawing is one
 -- colour and can be tinted.
 svgMonochrome :: Svg -> Bool
-svgMonochrome = documentMonochrome
+svgMonochrome = documentMonochrome . svgDocument
 
 --------------------------------------------------------------------------------
 -- Flattening
@@ -186,7 +198,7 @@ strokeWalk w cap join miterLimit contours point end =
 -- bottom), scaled to fit and centred as SVG's default @xMidYMid meet@ does.
 -- @current@ is what @currentColor@, and an unspecified fill, paint with.
 rasterizeSvg :: Int -> Int -> Color -> Svg -> ByteString
-rasterizeSvg width height current svg = rasterizeView width height (Matrix s 0 0 s tx ty) current svg
+rasterizeSvg width height current (Svg svg) = rasterizeView width height (Matrix s 0 0 s tx ty) current svg
   where
     Box vx vy vw vh = documentViewBox svg
     s = min (fromIntegral width / vw) (fromIntegral height / vh)
@@ -200,7 +212,7 @@ rasterizeSvg width height current svg = rasterizeView width height (Matrix s 0 0
 --
 -- > rasterizeSvgIn 64 64 (Rect (-16) 0 96 64) white doc  -- a 3:2 icon covering a square
 rasterizeSvgIn :: Int -> Int -> Rect -> Color -> Svg -> ByteString
-rasterizeSvgIn width height (Rect x y w h) current svg =
+rasterizeSvgIn width height (Rect x y w h) current (Svg svg) =
   rasterizeView width height (Matrix (s * kx) 0 0 (s * ky) (x + ox * kx) (y + oy * ky)) current svg
   where
     Box vx vy vw vh = documentViewBox svg
@@ -212,7 +224,7 @@ rasterizeSvgIn width height (Rect x y w h) current svg =
     ky = h / dh
 
 -- | Render with @view@ mapping viewBox units to raster pixels.
-rasterizeView :: Int -> Int -> Matrix -> Color -> Svg -> ByteString
+rasterizeView :: Int -> Int -> Matrix -> Color -> Document -> ByteString
 rasterizeView width height view current svg
   | width <= 0 || height <= 0 = BS.empty
   | not (finiteView view) = BS.replicate (width * height * 4) 0
