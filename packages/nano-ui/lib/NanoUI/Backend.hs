@@ -227,6 +227,10 @@ module NanoUI.Backend
     -- focus and mode with 'reportWindowState' (views read it with
     -- 'NanoUI.askWindow'). Once the frame is on screen, call
     -- 'answerScreenshots' with a capture of it.
+    -- For a direct backbuffer use 'answerScreenshotsAfter' to capture before
+    -- presentation but deliver callbacks afterwards. Bracket the whole session
+    -- (including its opening frames) with 'closeWindowHost' and 'cancelTasks'
+    -- before releasing native resources. Both cleanups are idempotent.
     --
     -- @runSessionLoop@ in "NanoUI.Runner" handles closing: a close request
     -- either ends the session or, per the settings, is passed to the view,
@@ -236,11 +240,13 @@ module NanoUI.Backend
   , WindowHost (..)
   , defaultWindowHost
   , installWindowHost
+  , closeWindowHost
   , sizeLimitAt
   , WindowState (..)
   , defaultWindowState
   , reportWindowState
   , answerScreenshots
+  , answerScreenshotsAfter
   , requestWindowClose
   , clearWindowClose
   , quitRequested
@@ -278,6 +284,8 @@ import NanoUI.Internal.NativeWindow
   ( WindowHost (..)
   , WindowState (..)
   , answerScreenshots
+  , answerScreenshotsAfter
+  , closeWindowHost
   , clearWindowClose
   , defaultWindowHost
   , defaultWindowState

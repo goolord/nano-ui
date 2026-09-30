@@ -1,8 +1,11 @@
 module Cases.NativeWindow (tests) where
 
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (IOException, try)
 import Data.ByteString qualified as BS
 import Data.Maybe (fromJust, isJust)
 import Spec
+import System.Timeout (timeout)
 
 tests :: [Spec]
 tests =
@@ -17,6 +20,9 @@ tests =
   , spec "native-window-state-repaints" runStateRepaintTest
   , spec "native-window-screenshot-from-a-click" runScreenshotFromClickTest
   , spec "native-window-use-screenshot" runUseScreenshotTest
+  , spec "native-window-screenshot-lifecycle" runScreenshotLifecycleTest
+  , spec "native-window-screenshot-failures" runScreenshotFailuresTest
+  , spec "native-window-setter-retry" runSetterRetryTest
   ]
 
 inp :: Input
@@ -83,6 +89,7 @@ runPixelsTest _ failed = do
   assertEq failed [True, False, False, False, False] $
     map isJust [rgbaPixels 2 3 (bytes 24), rgbaPixels 2 3 (bytes 23), rgbaPixels 2 3 (bytes 25), rgbaPixels 0 3 (bytes 0), rgbaPixels (-2) (-3) (bytes 24)]
   assertEq failed (Just (2, 3, 24)) ((\p -> (rgbaWidth p, rgbaHeight p, BS.length (rgbaBytes p))) <$> rgbaPixels 2 3 (bytes 24))
+  assertEq failed Nothing (rgbaPixels (maxBound `div` 2 + 1) 4 BS.empty)
 
 -- | Screenshots wait for the backend until after their frame, then are
 -- answered once, in order, from a single capture at the last reported scale.
@@ -119,6 +126,72 @@ runScreenshotRequestsTest ctx failed = do
   expect (("replaced", Nothing) : ("failed", Nothing) : two) 1
   -- Nothing was asked of the window itself.
   assertEq failed [] =<< readIORef calls
+
+-- | Closing and replacing a window complete pending and late thread requests.
+runScreenshotLifecycleTest :: Context -> IORef Int -> IO ()
+runScreenshotLifecycleTest ctx failed = do
+  _ <- recordingHost defaultWindowSettings ctx
+  oldShoot <- evalUi ctx inp askScreenshot
+  _ <- recordingHost defaultWindowSettings ctx
+  assertEq failed (Just Nothing) =<< timeout 1000000 oldShoot
+  wait <- newWakeSignal ctx
+  shoot <- evalUi ctx inp askScreenshot
+  result <- newEmptyMVar
+  _ <- forkIO (shoot >>= putMVar result)
+  _ <- wait 1000000
+  closeWindowHost ctx
+  assertEq failed (Just Nothing) =<< timeout 1000000 (takeMVar result)
+  assertEq failed (Just Nothing) =<< timeout 1000000 shoot
+  closeWindowHost ctx
+  -- Access after closing cannot call stale native callbacks.
+  calls <- recordingHost defaultWindowSettings ctx
+  closeWindowHost ctx
+  evalUi ctx inp (setWindowTitleUi "closed")
+  assertEq failed [] =<< readIORef calls
+
+runScreenshotFailuresTest :: Context -> IORef Int -> IO ()
+runScreenshotFailuresTest ctx failed = do
+  _ <- recordingHost defaultWindowSettings ctx
+  answers <- newIORef []
+  let ask action = evalUi ctx inp (requestScreenshot action)
+      note shot = modifyIORef' answers (isJust shot :)
+      broken = ioError (userError "capture failed")
+      checkError action = try @IOException action >>= assert failed . either (const True) (const False)
+  ask note
+  ask note
+  checkError (answerScreenshots ctx broken)
+  assertEq failed [False, False] =<< readIORef answers
+  writeIORef answers []
+  ask (\_ -> broken)
+  ask note
+  checkError (answerScreenshots ctx (pure (Just (solid 1 1))))
+  assertEq failed [True] =<< readIORef answers
+  -- Capturing may precede present; user callbacks must follow it.
+  events <- newIORef ([] :: [String])
+  ask (\_ -> modifyIORef' events ("answer" :))
+  answerScreenshotsAfter ctx
+    (Nothing <$ modifyIORef' events ("capture" :))
+    (modifyIORef' events ("present" :))
+  assertEq failed ["answer", "present", "capture"] =<< readIORef events
+  ask (\_ -> broken)
+  ask note
+  checkError (closeWindowHost ctx)
+  assertEq failed [False, True] =<< readIORef answers
+  closeWindowHost ctx
+
+runSetterRetryTest :: Context -> IORef Int -> IO ()
+runSetterRetryTest ctx failed = do
+  attempts <- newIORef (0 :: Int)
+  installWindowHost ctx defaultWindowSettings defaultWindowHost
+    { hostSetTitle = \_ -> do
+        modifyIORef' attempts (+ 1)
+        n <- readIORef attempts
+        when (n == 1) (ioError (userError "native failure"))
+    }
+  first <- try @IOException (evalUi ctx inp (setWindowTitleUi "retry"))
+  assert failed (either (const True) (const False) first)
+  replicateM_ 2 (evalUi ctx inp (setWindowTitleUi "retry"))
+  assertEq failed 2 =<< readIORef attempts
 
 -- | Installing a host applies, through it, the settings a window does not
 -- open with: size limits, icon, opacity and position. Setters then act only

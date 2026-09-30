@@ -32,7 +32,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Debug
 import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
-import NanoUI.Internal.NativeWindow (quitRequested, requestWindowClose)
+import NanoUI.Internal.NativeWindow (closeWindowHost, quitRequested, requestWindowClose)
 import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types (V2 (..))
 
@@ -330,4 +330,4 @@ runSessionLoop drv ctx0 inp0 = do
   -- An opening frame the backend drew before the loop may have called
   -- 'NanoUI.quitUi' already; waiting first could block for good.
   (quitRequested ctx0 >>= \quit -> unless quit (loop ctx0 inp0 [] startT False False))
-    `finally` (cancelTasks ctx0 >> writeIORef (ctxLoopThread ctx0) Nothing)
+    `finally` (closeWindowHost ctx0 `finally` cancelTasks ctx0 `finally` writeIORef (ctxLoopThread ctx0) Nothing)

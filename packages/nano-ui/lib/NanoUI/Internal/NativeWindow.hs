@@ -52,14 +52,17 @@ module NanoUI.Internal.NativeWindow
   , WindowHost (..)
   , defaultWindowHost
   , installWindowHost
+  , closeWindowHost
   , reportWindowState
   , answerScreenshots
+  , answerScreenshotsAfter
   , requestWindowClose
   , clearWindowClose
   , quitRequested
   ) where
 
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (SomeException, finally, mask, throwIO, try)
 import Control.Monad (join, unless, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -68,7 +71,7 @@ import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeI
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Context (Context (ctxNativeWindow), markDirty, markDirtyCovered, wakeFromThread)
-import NanoUI.Internal.Host (askHostIO, setHost)
+import NanoUI.Internal.Host (askHostIO, clearHost, setHost)
 import NanoUI.Internal.NativeWindow.Types
 import NanoUI.Internal.Monad (NanoUI, windowSize, withContext)
 import NanoUI.Internal.Tasks (Task, useTask)
@@ -79,7 +82,7 @@ import NanoUI.Internal.Types (Size (..))
 -- with @registerImageRgba iid (rgbaWidth p) (rgbaHeight p) (rgbaBytes p)@.
 rgbaPixels :: Int -> Int -> ByteString -> Maybe RgbaPixels
 rgbaPixels w h bytes
-  | w > 0 && h > 0 && BS.length bytes == w * h * 4 = Just (RgbaPixels w h bytes)
+  | w > 0 && h > 0 && toInteger (BS.length bytes) == toInteger w * toInteger h * 4 = Just (RgbaPixels w h bytes)
   | otherwise = Nothing
 
 -- | A resizable, opaque 1280x800 window titled @"nano-ui"@, placed by the
@@ -166,14 +169,14 @@ defaultWindowHost =
 -- pending screenshots with 'Nothing'.
 installWindowHost :: Context -> WindowSettings -> WindowHost -> IO ()
 installWindowHost ctx settings host = do
-  answerScreenshots ctx (pure Nothing)
+  closeWindowHost ctx
   nw <-
     NativeWindow host
       <$> newIORef settings {wsMinSize = Nothing, wsMaxSize = Nothing, wsIcon = Nothing, wsOpacity = 1}
       <*> newIORef defaultWindowState
       <*> newIORef False
       <*> newIORef False
-      <*> newIORef []
+      <*> newIORef (Just [])
   setHost (ctxNativeWindow ctx) nw
   setMinSize nw (wsMinSize settings)
   setMaxSize nw (wsMaxSize settings)
@@ -183,6 +186,18 @@ installWindowHost ctx settings host = do
     WindowPositionDefault -> pure ()
     WindowPositionCentered -> hostCenter host
     WindowPositionAt x y -> hostMove host x y
+
+-- | End native-window access before releasing the platform window. Pending
+-- screenshots receive Nothing, including actions obtained before closing but
+-- invoked afterwards. Idempotent; call even if the opening frame failed.
+-- Every queued callback is attempted before a callback exception propagates.
+closeWindowHost :: Context -> IO ()
+closeWindowHost ctx = mask $ \_ -> do
+  old <- askHostIO (ctxNativeWindow ctx)
+  clearHost (ctxNativeWindow ctx)
+  traverse_ (\nw -> do
+    waiting <- atomicModifyIORef' (nwShots nw) (Nothing,)
+    completeScreenshots Nothing (reverse (fromMaybe [] waiting))) old
 
 -- | Report the window's state once a frame, before the view runs. The
 -- 'winSize' and 'winCloseRequested' passed in are ignored; they come from
@@ -235,7 +250,9 @@ withNativeWindow act = withContext (`withHost` act)
 setting :: Eq a => (WindowSettings -> a) -> (a -> WindowSettings -> WindowSettings) -> (WindowHost -> a -> IO ()) -> NativeWindow -> a -> IO ()
 setting get put apply nw v = do
   s <- readIORef (nwSettings nw)
-  unless (get s == v) $ writeIORef (nwSettings nw) (put v s) >> apply (nwHost nw) v
+  unless (get s == v) $ do
+    apply (nwHost nw) v
+    modifyIORef' (nwSettings nw) (put v)
 
 -- | Set one size limit. On an axis where the minimum would pass the maximum,
 -- the limit being set wins and the other moves to it, and goes to the host
@@ -368,12 +385,17 @@ requestScreenshot answer = withContext $ \ctx -> askHostIO (ctxNativeWindow ctx)
 
 -- | Queue an answer for 'answerScreenshots'.
 queueScreenshot :: NativeWindow -> (Maybe Screenshot -> IO ()) -> IO ()
-queueScreenshot nw answer = atomicModifyIORef' (nwShots nw) (\waiting -> (answer : waiting, ()))
+queueScreenshot nw answer = do
+  accepted <- atomicModifyIORef' (nwShots nw) $ \case
+    Nothing -> (Nothing, False)
+    Just waiting -> (Just (answer : waiting), True)
+  unless accepted (answer Nothing)
 
 -- | An action for another thread, such as a 'NanoUI.useTaskStatus' job. It
 -- wakes the loop, waits for the next frame to be presented, and returns a
 -- screenshot of it, as 'requestScreenshot' does. Without a window it returns
--- 'Nothing' at once. On the UI thread it deadlocks.
+-- 'Nothing' at once, also after that window is closed or replaced. On the UI
+-- thread it deadlocks while the window is open.
 --
 -- > shoot <- askScreenshot
 -- > saved <- useTaskStatus task shots (shoot >>= traverse_ (savePng "shot.png"))
@@ -406,11 +428,31 @@ useScreenshot owner k = join <$> (useTask owner k =<< askScreenshot)
 -- anything the damage pass diffs, so answering any requests a frame that
 -- repaints whole.
 answerScreenshots :: Context -> IO (Maybe RgbaPixels) -> IO ()
-answerScreenshots ctx capture =
-  withHost ctx $ \nw -> do
-    waiting <- atomicModifyIORef' (nwShots nw) ([],)
-    unless (null waiting) $ do
-      scale <- winScale <$> readIORef (nwState nw)
+answerScreenshots ctx capture = answerScreenshotsAfter ctx capture (pure ())
+
+-- | Capture only if requests are pending, run the presentation action, then
+-- deliver the answers. For a backbuffer that must be read before presentation.
+-- Capture or presentation failure answers the batch with Nothing before
+-- propagating the exception. A throwing callback cannot strand later answers.
+answerScreenshotsAfter :: Context -> IO (Maybe RgbaPixels) -> IO () -> IO ()
+answerScreenshotsAfter ctx capture present = mask $ \restore -> do
+  host <- askHostIO (ctxNativeWindow ctx)
+  waiting <- maybe (pure [])
+    (\nw -> atomicModifyIORef' (nwShots nw) (\pending -> (fmap (const []) pending, reverse (fromMaybe [] pending)))) host
+  if null waiting then restore present else do
+    outcome <- try @SomeException $ restore $ do
+      scale <- maybe (pure 1) (fmap winScale . readIORef . nwState) host
       shot <- fmap (`Screenshot` scale) <$> capture
-      mapM_ ($ shot) (reverse waiting)
-      markDirty ctx
+      present
+      pure shot
+    delivered <- try @SomeException $
+      completeScreenshots (either (const Nothing) id outcome) waiting
+        `finally` markDirty ctx
+    either throwIO (const (either throwIO pure delivered)) outcome
+
+completeScreenshots :: Maybe Screenshot -> [Maybe Screenshot -> IO ()] -> IO ()
+completeScreenshots shot answers = mask $ \restore -> do
+  results <- mapM (try @SomeException . restore . ($ shot)) answers
+  case [e | Left e <- results] of
+    e : _ -> throwIO e
+    [] -> pure ()

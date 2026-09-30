@@ -14,7 +14,7 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isJust, isNothing)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-import NanoUI.Backend (answerScreenshots)
+import NanoUI.Backend (answerScreenshots, answerScreenshotsAfter)
 import NanoUI.Testing
 import NanoUI.Internal.Context (Context (ctxDamageWanted))
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
@@ -184,9 +184,6 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
               renderTexture ren tex (PtrConst.unsafeFromPtr srcP) (PtrConst.unsafeFromPtr nullPtr)
             pure (okTarget && okClip && okCopy)
       unless okBlit $ fail "SDL window presentation preparation failed"
-      -- The backbuffer is undefined after present, so capture a frame drawn
-      -- straight to it before presenting.
-      when (tex == nullPtr) $ answerScreenshots ctx (captureFrame env tex)
       -- SDL replaced a Wayland toplevel's size limits with its own at every
       -- configure; the present commits them with the frame. SDL's are none,
       -- so no limits are sent only to clear the ones sent before.
@@ -197,7 +194,11 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
         when (some || sent) $ do
           sendWaylandSizeLimits (sdlWindow env) nw nh xw xh
           writeIORef (sdlSizeLimitsSent env) some
-      void $ renderPresentSafe ren
+      -- Read the direct backbuffer before present, but invoke view callbacks
+      -- only afterwards, just as for retained frames.
+      if tex == nullPtr
+        then answerScreenshotsAfter ctx (captureFrame env tex) (void (renderPresentSafe ren))
+        else void (renderPresentSafe ren)
       t3 <- getMonotonicTime
       let ms a b = (b - a) * 1000
       noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)

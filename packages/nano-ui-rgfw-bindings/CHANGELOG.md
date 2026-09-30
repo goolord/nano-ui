@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Reject overflowing icon dimensions and sizes outside the native integer
+  range before passing pixel data to RGFW.
+
+## Unreleased
+
 ### Added
 
 - `rgfw_windowHide` in `RGFW.Raw`.

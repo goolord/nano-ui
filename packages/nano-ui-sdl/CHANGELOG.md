@@ -2,6 +2,9 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Direct-backbuffer screenshots invoke callbacks after presentation, matching
+  retained frames. Session teardown closes pending screenshot requests.
+
 - **Breaking:** `runSdlAppReduce` takes `model -> NanoUIE msg ()` from the new
   `nano-ui-emit` package, without `Typeable` or runtime message filtering.
 

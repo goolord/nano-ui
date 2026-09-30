@@ -1,6 +1,6 @@
 -- | Explicit, typed host slots. Ownership is carried by a handle rather than
 -- recovered from a runtime type in a context-wide heterogeneous map.
-module NanoUI.Internal.Host (Host, newHost, setHost, askHostIO, hostOrInit) where
+module NanoUI.Internal.Host (Host, newHost, setHost, clearHost, askHostIO, hostOrInit) where
 
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 
@@ -13,6 +13,9 @@ newHost = Host <$> newIORef Nothing
 {-# INLINE setHost #-}
 setHost :: Host a -> a -> IO ()
 setHost (Host ref) value = writeIORef ref (Just value)
+
+clearHost :: Host a -> IO ()
+clearHost (Host ref) = writeIORef ref Nothing
 
 {-# INLINE askHostIO #-}
 askHostIO :: Host a -> IO (Maybe a)

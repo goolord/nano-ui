@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Clean up tasks and screenshot requests even if the opening frame fails.
+
+## Unreleased
+
 - **Breaking:** reducer runners take `model -> NanoUIE msg ()` from the new
   `nano-ui-emit` package. Message types are checked statically; `Typeable`
   constraints and runtime message filtering are gone.

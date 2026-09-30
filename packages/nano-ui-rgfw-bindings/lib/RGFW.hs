@@ -51,7 +51,7 @@ import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Text.Foreign qualified as TF
 import Data.Word (Word32, Word8)
 import Foreign.C.String (withCString)
-import Foreign.C.Types (CSize (..), CUChar (..), CUInt (..))
+import Foreign.C.Types (CInt, CSize (..), CUChar (..), CUInt (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek)
@@ -239,7 +239,10 @@ writeClipboardText txt =
 -- size, too few bytes, or an RGFW failure.
 setWindowIcon :: Window -> Int -> Int -> ByteString -> IO Bool
 setWindowIcon (Window win) w h pixels
-  | w <= 0 || h <= 0 || BS.length pixels < w * h * 4 = pure False
+  | w <= 0 || h <= 0
+      || toInteger w > toInteger (maxBound :: CInt)
+      || toInteger h > toInteger (maxBound :: CInt)
+      || toInteger (BS.length pixels) < toInteger w * toInteger h * 4 = pure False
   | otherwise =
       unsafeUseAsCString pixels $ \p ->
         (/= 0) <$> c_RGFW_window_setIcon win (castPtr p) (fromIntegral w) (fromIntegral h) (CUChar rgfw_formatRGBA8)

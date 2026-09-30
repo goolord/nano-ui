@@ -115,5 +115,6 @@ data NativeWindow = NativeWindow
   , nwState :: !(IORef WindowState)
   , nwStateRead :: !(IORef Bool)
   , nwQuit :: !(IORef Bool)
-  , nwShots :: !(IORef [Maybe Screenshot -> IO ()])
+  , nwShots :: !(IORef (Maybe [Maybe Screenshot -> IO ()]))
+  -- ^ Nothing closes the queue atomically, including captured thread actions.
   }

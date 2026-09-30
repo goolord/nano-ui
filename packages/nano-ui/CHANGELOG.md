@@ -2,6 +2,15 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Screenshot requests complete with `Nothing` when their window is closed or
+  replaced, including requests made later through captured thread actions.
+  Capture and callback exceptions cannot abandon the rest of a pending batch.
+  Backend runners close the screenshot host during teardown; custom hosts use
+  `closeWindowHost`. `answerScreenshotsAfter` supports pre-present readback with
+  post-present callbacks.
+- Native setters cache a new value only after the host callback succeeds, so
+  a failed request can be retried. RGBA byte-count validation avoids overflow.
+
 - Restored the primed and layout-only convenience variants of custom reference
   widgets (`knob`, `toggleSwitch`, progress widgets, `spinner`, `sparkline`),
   keeping their naming consistent with ordinary controls.

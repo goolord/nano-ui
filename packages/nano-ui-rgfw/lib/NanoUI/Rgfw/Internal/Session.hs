@@ -22,7 +22,7 @@ module NanoUI.Rgfw.Internal.Session
   ) where
 
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
-import Control.Exception (bracket)
+import Control.Exception (bracket, finally, onException)
 import Control.Monad (unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.Char (chr, isDigit, isPrint, toLower)
@@ -57,6 +57,8 @@ import NanoUI.Backend
   , WindowHost (..)
   , WindowState (..)
   , answerScreenshots
+  , cancelTasks
+  , closeWindowHost
   , applyKey
   , applyMouseButton
   , applyPointerLeave
@@ -376,7 +378,8 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
           syncCursor c inp = uiCursorKind c inp >>= syncCursorKind cursorRef (R.showMouse win) (setIcon . mapRgfwCursor)
           setIcon icon = void $ if icon == R.rgfw_mouseArrow then R.setMouseDefault win else R.setMouseStandard win icon
 
-      bracket newGlRenderer freeGlRenderer $ \renderer -> R.withEventBuffer $ \evPtr -> do
+      let cleanup = closeWindowHost ctx `finally` cancelTasks ctx
+      bracket (newGlRenderer `onException` cleanup) (\r -> cleanup `finally` freeGlRenderer r) $ \renderer -> R.withEventBuffer $ \evPtr -> do
         let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
 
         -- A frame whose damage is empty would swap in the picture already on
