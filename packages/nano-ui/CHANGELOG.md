@@ -2,6 +2,10 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Middle, right and extra mouse-button gestures retain the pressed control's
+  identity. A containing mouse area cannot also handle that control's click,
+  and reordering another control under the press does not transfer ownership.
+
 - Display-only button content and `Adornment.view` exclude their descendants
   from keyboard focus and IME, and suppress both routed and raw input without
   fading their appearance. A disabled focused widget no longer reserves keys

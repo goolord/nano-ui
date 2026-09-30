@@ -95,13 +95,13 @@ runFrameEff unlift ctx rawInp ui = do
   updateScrollDrag ctx layerInp
   -- Read from the last frame's nodes, before the build resets them.
   recordFocusKind ctx imeKeys
+  armPointerPress ctx frameInp
   resetUiBuild ctx True
   beginFrameModal ctx
   -- An Escape the IME consumed must not also quit the app.
   when (inputKeysNull (inputKeys frameInp) && pressedIn KeyEscape rawInp) $
     markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
-  armPointerPress ctx frameInp
   focusBefore <- readIORef (ctxFocusId ctx)
   result0 <- unlift (runUi ctx frameInp ui)
   -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.

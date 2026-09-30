@@ -118,16 +118,17 @@ refreshHover ctx inp = do
     when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
     when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
--- | Record in 'ctxPressPos' where each button pressed this frame went down.
--- Runs before the view. A widget treats a release as its click, or a held
--- button as held on it, only if the press point is also on it, so a press
--- that drifts onto a neighbour clicks nothing. 'disarmPointerPress' clears
--- the point on release.
+-- | Capture the press point and reached control before rebuilding the arena.
+-- Non-left buttons retain this owner through movement and reordering; passive
+-- content still bubbles to mouse areas. 'disarmPointerPress' clears releases.
 armPointerPress :: Context -> Input -> IO ()
 armPointerPress ctx inp =
   when (anyButtonPressed inp) $ do
     let here = inputMousePos inp
-    modifyIORef' (ctxPressPos ctx) $ \m -> foldr (`M.insert` here) m (buttonsToList (inputButtonsPressed inp))
+    owner <- getsInteraction ctx isPointerRoute >>= \case
+      RouteLayer _ -> reachedAt ctx here >>= traverse (getWidgetId (ctxNodeArena ctx))
+      _ -> pure (Just (WidgetId 0))
+    modifyIORef' (ctxPressPos ctx) $ \m -> foldr (`M.insert` (here, owner)) m (buttonsToList (inputButtonsPressed inp))
     -- A pointer press hides the keyboard focus ring.
     when (pressedIn MouseLeft inp) $ writeIORef (ctxFocusVisible ctx) False
 

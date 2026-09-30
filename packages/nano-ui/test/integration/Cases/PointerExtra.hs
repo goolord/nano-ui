@@ -242,4 +242,20 @@ runMouseAreaTest ctx failed = do
     assert failed (all (\(_, b', a) -> respHovered a && maybe False respHovered b') rs)
     (_, bClicked, aClicked) <- runClick ctx (at (centerOf b)) ui (centerOf b)
     assert failed (maybe False respClicked bClicked && not (respClicked aClicked))
+    forM_ [MouseRight, MouseMiddle, MouseOther 7] $ \btn -> do
+      let (down, up) = clickPairWith btn win (centerOf b)
+      [(_, heldChild, heldArea), (_, clickedChild, clickedArea)] <- frames ctx ui [down, up]
+      assert failed (maybe False (respHeldWith btn) heldChild && not (respHeldWith btn heldArea))
+      assert failed (maybe False (respClickedWith btn) clickedChild && not (respClickedWith btn clickedArea))
   assert failed (rectContains (respRect area0) beside)
+  -- A different widget moving under the original press does not inherit it.
+  let keyed order = row $ forM order $ \name -> withKey name (button' name)
+  [first, _] <- warmup2 ctx win (keyed ["First", "Second"])
+  forM_ [MouseRight, MouseMiddle, MouseOther 7] $ \btn -> do
+    let down = pressWith btn win (centerOf first)
+    _ <- runFrame ctx down (keyed ["First", "Second"])
+    _ <- runFrame ctx (clearEphemeral down) (keyed ["Second", "First"])
+    (released, _, _) <- runFrame ctx (releaseWith btn down) (keyed ["Second", "First"])
+    assert failed (all (not . respClickedWith btn) released)
+    _ <- warmup2 ctx win (keyed ["First", "Second"])
+    pure ()

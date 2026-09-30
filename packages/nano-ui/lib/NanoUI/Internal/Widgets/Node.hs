@@ -400,7 +400,10 @@ resolveInteraction ctx inp idx wid = do
       let
         -- Whether the button went down on this widget. A press the frame
         -- never saw (synthesized or swallowed input) rules nobody out.
-        startedHere b = maybe (pure True) (widgetHit ctx mIdx rect) (M.lookup b presses)
+        startedHere b = case M.lookup b presses of
+          Just (_, Just owner) | b /= MouseLeft -> pure (owner == wid)
+          Just (p, _) -> widgetHit ctx mIdx rect p
+          Nothing -> pure True
       -- A held left button belongs to the widget it went down on; others
       -- the drag passes over are not hovered.
       captured <-

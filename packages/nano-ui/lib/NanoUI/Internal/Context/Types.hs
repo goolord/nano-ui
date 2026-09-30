@@ -861,7 +861,9 @@ data Context = Context
   -- ('NanoUI.Internal.Frame.Input.armPointerPress'). Clicks and holds belong
   -- to the widget pressed, so widgets hit-test this as well as the pointer.
   -- A button with no entry (release without a press) is judged alone.
-  , ctxPressPos :: IORef (Map MouseButton V2)
+  , ctxPressPos :: IORef (Map MouseButton (V2, Maybe WidgetId))
+  -- ^ Press point and the reached control's identity. Passive content has no
+  -- owner; its containing mouse area can handle the gesture geometrically.
   , ctxFocusId :: IORef WidgetId
   -- | Focus last moved by keyboard or code, so the focused widget shows its
   -- ring. A pointer press hides it.
