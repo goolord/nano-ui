@@ -3,6 +3,8 @@
 module Cases.PaneGrid (tests) where
 
 import Data.IntMap.Strict qualified as IM
+import Control.Exception (IOException, try)
+import Data.Either (isLeft)
 import Data.Maybe (listToMaybe)
 import Data.Word (Word64)
 import Spec
@@ -22,6 +24,9 @@ tests =
   , spec "pane-grid-tab-drop" runTabDropTest
   , spec "pane-grid-covered-drop" runCoveredDropTest
   , spec "pane-grid-covered-gestures" runCoveredGesturesTest
+  , spec "pane-grid-controlled-rejection" runControlledRejectionTest
+  , spec "pane-grid-empty" runEmptyTest
+  , spec "pane-grid-validation" runValidationTest
   ]
 
 -- | Two panes side by side in a 600 by 400 grid: a 16px gutter from 292 to
@@ -48,7 +53,7 @@ runCoveredGesturesTest ctx failed = do
   let inp = withInputOff 600 400
       ui = columnWith (fillW . fillH) $ do
         result <- paneGrid defaultPaneGridConfig
-          { pgLayout = fillW . fillH, pgTree = Just halves
+          { pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)
           , pgViewPane = \_ _ -> pure (PaneView "Pane" True)
           }
         panelWith (pinAt 0 0 . pointer PointerBlock . fixedWH 600 400) (pure ())
@@ -63,13 +68,77 @@ runCoveredGesturesTest ctx failed = do
     after <- evalUi ctx inp ui
     assertEq failed (Just halves) (pgrTree after)
 
+runControlledRejectionTest :: Context -> IORef Int -> IO ()
+runControlledRejectionTest ctx failed = do
+  edit <- newIORef False
+  proposed <- newIORef Nothing
+  let inp = withInputOff 600 400
+      ui = do
+        r <- paneGrid defaultPaneGridConfig
+          { pgLayout = fillW . fillH, pgTree = ControlledTree (Just halves)
+          , pgViewPane = \pid pctx -> do
+              wanted <- liftIO (readIORef edit)
+              when (wanted && pid == 10) $ do
+                liftIO (writeIORef edit False)
+                void (pgcSplit pctx AxisH)
+              pure (PaneView "Pane" False)
+          }
+        when (pgrChanged r) (liftIO (writeIORef proposed (pgrTree r)))
+        pure r
+  _ <- warmup2 ctx inp ui
+  writeIORef edit True
+  _ <- evalUi ctx inp ui
+  change <- readIORef proposed
+  assert failed (change /= Nothing && change /= Just halves)
+  rejected <- evalUi ctx inp ui
+  assertEq failed (Just halves) (pgrTree rejected)
+  let initial t = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just t)}
+  -- Unlike controlled replacement, a changed seed does not overwrite state.
+  kept <- evalUi ctx inp (initial (Pane 90))
+  assertEq failed (Just halves) (pgrTree kept)
+
+runEmptyTest :: Context -> IORef Int -> IO ()
+runEmptyTest ctx failed = do
+  close <- newIORef False
+  let inp = withInputOff 600 400
+      drawGrid arrangement = paneGrid defaultPaneGridConfig
+        { pgLayout = fillW . fillH, pgTree = arrangement
+        , pgViewPane = \_ pctx -> do
+            wanted <- liftIO (readIORef close)
+            when wanted (liftIO (writeIORef close False) >> pgcClose pctx)
+            pure (PaneView "Pane" False)
+        }
+  empty <- warmup2 ctx inp (drawGrid (InitialTree Nothing))
+  assertEq failed (Nothing, 0, []) (pgrTree empty, pgrPaneCount empty, pgrPanes empty)
+  _ <- warmup2 ctx inp (drawGrid (ControlledTree (Just (Pane 1))))
+  writeIORef close True
+  _ <- evalUi ctx inp (drawGrid (InitialTree Nothing))
+  closed <- warmup2 ctx inp (drawGrid (InitialTree Nothing))
+  assertEq failed (Nothing, 0) (pgrTree closed, pgrPaneCount closed)
+  restored <- evalUi ctx inp (drawGrid (ControlledTree (Just (Pane 1))))
+  assertEq failed [1] (pgrPanes restored)
+  cleared <- evalUi ctx inp (drawGrid (ControlledTree Nothing))
+  assertEq failed [] (pgrPanes cleared)
+
+runValidationTest :: Context -> IORef Int -> IO ()
+runValidationTest ctx failed = do
+  assertEq failed (Right ()) (validateGridTree halves)
+  let invalid = [Pane 0, Pane (2 ^ (63 :: Int)), Split 1 AxisV 0.5 (Pane 1) (Pane 2)
+                , Split 3 AxisV 0.5 (Pane 1) (Pane 1), Split 3 AxisV (0 / 0) (Pane 1) (Pane 2)
+                , Split 3 AxisV 1.1 (Pane 1) (Pane 2)]
+  forM_ invalid $ \arrangement -> do
+    assert failed (isLeft (validateGridTree arrangement))
+    result <- try @IOException $ runFrame ctx (withInput 600 400) $
+      paneGrid defaultPaneGridConfig {pgTree = ControlledTree (Just arrangement)}
+    assert failed (isLeft result)
+
 runDropDestinationTest :: Context -> IORef Int -> IO ()
 runDropDestinationTest ctx failed = do
   rendered <- newIORef []
   let inp = withInput 600 400
       ui = paneGrid defaultPaneGridConfig
         { pgLayout = fillW . fillH
-        , pgTree = Just halves
+        , pgTree = InitialTree (Just halves)
         , pgViewPane = \pid _ -> do
             liftIO (modifyIORef' rendered (pid :))
             pure (PaneView "Pane" False)
@@ -92,7 +161,7 @@ runDropDestinationTest ctx failed = do
 runDropCommitTest :: Context -> IORef Int -> IO ()
 runDropCommitTest ctx failed = do
   let inp = (withInput 600 400) {inputMousePos = V2 5 200}
-      view arrangement = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = Just arrangement}
+      view arrangement = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just arrangement)}
       ui = do
         r <- view halves
         case pgrDropTarget r of
@@ -113,7 +182,7 @@ runDropCommitTest ctx failed = do
     assertEq failed 3 (pgrPaneCount after)
   stale <- maybe (fail "missing target") pure (pgrDropTarget after)
   rejected <- evalUi ctx inp $ do
-    _ <- view (Pane 90)
+    _ <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree (Just (Pane 90))}
     commitPaneDrop stale
   assertEq failed Nothing rejected
 
@@ -174,7 +243,7 @@ probeGrid f body = do
           { pgLayout = fillW . fillH
           , pgSpacing = 4
           , pgLeeway = 6
-          , pgTree = Just halves
+          , pgTree = InitialTree (Just halves)
           , pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' told (IM.insert (fromIntegral pid) (pgcRect pctx)))
               (_, area) <- mouseArea (fillW . fillH) (body pid)
@@ -204,7 +273,7 @@ runOverflowTest :: Context -> IORef Int -> IO ()
 runOverflowTest ctx failed = do
   forM_ [AxisV, AxisH] $ \axis -> do
     (ui, laid, told) <-
-      probeGrid (\c -> c {pgTree = Just (Split 30 axis 0.5 (Pane 10) (Pane 20))}) $ \pid ->
+      probeGrid (\c -> c {pgTree = InitialTree (Just (Split 30 axis 0.5 (Pane 10) (Pane 20)))}) $ \pid ->
         when (pid == 10) . void . panelWith (fillW . fillH) . rowWith fillW $ do
           labelWith fillW "A title that runs on"
           box (minW 900 . minH 900 . fillW) (colorRGBA 255 0 0 255)
@@ -227,10 +296,10 @@ runTreeTest ctx failed = do
   let
     inp = withInput 600 400
     ui =
-      paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = Just halves}
+      paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)}
     controlled = do
       t <- liftIO (readIORef given)
-      resp <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = t}
+      resp <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree t}
       liftIO (writeIORef given (pgrTree resp))
       pure resp
   resp0 <- warmup2 ctx inp ui
@@ -272,7 +341,7 @@ runCommittedTest ctx failed = do
         paneGrid
           defaultPaneGridConfig
             { pgLayout = fillW . fillH
-            , pgTree = Just halves
+            , pgTree = InitialTree (Just halves)
             , pgViewPane = \pid pctx -> do
                 wanted <- liftIO (readIORef splitNow)
                 when (wanted && pid == 10) $ do
@@ -314,7 +383,7 @@ runDragHandleTest ctx failed = do
       paneGrid
         defaultPaneGridConfig
           { pgLayout = fillW . fillH
-          , pgTree = Just halves
+          , pgTree = InitialTree (Just halves)
           , pgViewPane = \_ pctx -> do
               paneDragHandle pctx (fillW . fixedH 40) $ do
                 flex
@@ -356,7 +425,7 @@ runDividerColorTest ctx failed = do
       paneGrid
         defaultPaneGridConfig
           { pgLayout = fillW . fillH
-          , pgTree = Just halves
+          , pgTree = InitialTree (Just halves)
           , pgDividerColor = Just c
           }
   (_, dd) <- warmupDraw ctx inp ui
@@ -374,7 +443,7 @@ runResetTest ctx failed = do
     ui = do
       (arrangement, setArrangement) <- useState arrangementCell
       resp <-
-        paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = arrangement}
+        paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree arrangement}
       setArrangement (pgrTree resp)
       wanted <- liftIO (readIORef resetNow)
       when wanted $ do
@@ -404,7 +473,7 @@ runClipTest ctx failed = do
       paneGrid
         defaultPaneGridConfig
           { pgLayout = fillW . fillH
-          , pgTree = Just halves
+          , pgTree = InitialTree (Just halves)
           , pgViewPane = \pid _ -> do
               when (pid == 10) . rowWith (tight . gap 0) $ do
                 box (fixedWH 400 30) (colorRGBA 200 0 0 255)

@@ -20,6 +20,8 @@
 module NanoUI.Widgets.PaneGrid
   ( GridAxis (..)
   , GridNode (..)
+  , PaneTree (..)
+  , validateGridTree
   , PaneGridConfig (..)
   , defaultPaneGridConfig
   , PaneGridCtx (pgcPaneId, pgcRect, pgcMaximized, pgcDragging, pgcDndActive, pgcSplit, pgcClose, pgcMaximize, pgcRestore)
@@ -37,6 +39,7 @@ import Control.Monad (forM_, unless, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Hashable (hash)
 import Data.List (find)
+import Data.Set qualified as S
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -67,6 +70,29 @@ import NanoUI.Internal.Widgets.SplitPane
 -- Public API
 -- -----------------------------------------------------------------------------
 
+-- | Who owns the arrangement. Initial trees are read only when this widget
+-- identity first appears; controlled trees are authoritative on every pass.
+-- In either mode Nothing is an empty workspace, including after the last close.
+data PaneTree = InitialTree !(Maybe GridNode) | ControlledTree !(Maybe GridNode)
+  deriving (Eq, Show)
+
+-- | Validate a persisted/application-built tree before using it. Pane and split
+-- ids share one namespace; ratios must be finite and between zero and one.
+-- 'paneGrid' also validates any tree it adopts, failing before rendering it.
+validateGridTree :: GridNode -> Either String ()
+validateGridTree tree = void (walk S.empty tree)
+  where
+    insertId seen ident
+      | ident == 0 || ident >= 2 ^ (63 :: Int) = Left "pane grid: ids must be in [1, 2^63)"
+      | S.member ident seen = Left "pane grid: duplicate pane or split id"
+      | otherwise = Right (S.insert ident seen)
+    walk seen (Pane ident) = insertId seen ident
+    walk seen (Split ident _ ratio left right) = do
+      next <- insertId seen ident
+      if isNaN ratio || isInfinite ratio || ratio < 0 || ratio > 1
+        then Left "pane grid: ratio must be finite and in [0, 1]"
+        else walk next left >>= (`walk` right)
+
 -- | Configuration for a pane grid.
 data PaneGridConfig = PaneGridConfig
   { pgLayout :: !(Layout -> Layout)
@@ -96,34 +122,29 @@ data PaneGridConfig = PaneGridConfig
     -- neighbour's minimum, and its divider can still be dragged. Only that one
     -- split is pinned: a pinned sidebar keeps its width, but its row's height
     -- still follows the grid.
-  , pgTree :: !(Maybe GridNode)
-    -- ^ The split tree to show (default 'Nothing': start with one pane).
-    -- The grid takes this tree on its first frame, and again on any frame
-    -- it differs from the tree passed the frame before. In between, the grid
-    -- keeps its own tree, which drags, splits and closes change.
-    --
-    -- A constant is a starting layout. It cannot reset the grid to that
-    -- layout later: the constant never changes, so the grid never takes it
-    -- again. To replace the arrangement, such as with a Reset button, keep
-    -- the tree in state and pass back 'pgrTree' every frame; setting the
-    -- state to another tree then replaces the grid's:
+  , pgTree :: !PaneTree
+    -- ^ 'InitialTree' seeds internally owned state once. 'ControlledTree'
+    -- adopts the caller's arrangement on every pass: retain 'pgrTree' to accept
+    -- an edit, or keep the old value to reject it. A replacement cancels any
+    -- gesture on the replaced arrangement. Both modes permit an empty grid.
     --
     -- Allocate @arrangementCell <- newState (Just startLayout)@ during setup,
     -- then read and update it in the view:
     --
     -- > (arrangement, setArrangement) <- useState arrangementCell
-    -- > resp <- paneGrid cfg {pgTree = arrangement}
+    -- > resp <- paneGrid cfg {pgTree = ControlledTree arrangement}
     -- > setArrangement (pgrTree resp)
     -- > whenM (button "Reset layout") (setArrangement (Just startLayout))
     --
-    -- When the last pane closes, the grid restarts with one fresh pane.
+    -- Closing the last pane leaves the grid empty until the caller supplies
+    -- another controlled tree or changes the grid's widget identity.
     --
     -- Pane and split ids are the caller's: unique within the tree, from 1 to
     -- below @2^63@ (0 means "none"). Panes the grid creates later get higher
     -- ids. Ratios apply from the first frame, and pinned panes keep the size
     -- their ratio gives them:
     --
-    -- > pgTree = Just (Split 3 AxisV 0.25 (Pane 1) (Pane 2))
+    -- > pgTree = InitialTree (Just (Split 3 AxisV 0.25 (Pane 1) (Pane 2)))
   , pgDividerColor :: !(Maybe Color)
     -- ^ The colour of the gutters between panes (default 'Nothing': a faint
     -- tint of the panel colour with a line down the middle from
@@ -149,7 +170,7 @@ defaultPaneGridConfig =
     , pgEdgeBand = 20
     , pgPreserveDragSize = False
     , pgFixedPanes = const False
-    , pgTree = Nothing
+    , pgTree = InitialTree (Just (Pane 1))
     , pgDividerColor = Nothing
     , pgFocusable = True
     , pgViewPane = \_ _ -> pure (PaneView "" False)
@@ -203,7 +224,7 @@ data PaneGridResponse = PaneGridResponse
     -- tree as it is, nor for a tree the caller passed in 'pgTree'.
   , pgrTree :: !(Maybe GridNode)
     -- ^ The split tree, 'Nothing' once the last pane has been closed. Pass
-    -- it back in 'pgTree' to keep the grid controlled.
+    -- it back as 'ControlledTree' in 'pgTree' to accept changes.
   , pgrPaneCount :: !Int
     -- ^ Number of panes (0 once the last pane has been closed).
   , pgrPanes :: ![Word64]
@@ -333,46 +354,43 @@ paneGrid cfg = do
       edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
   stored <- lookupSlot fieldGrid key <$> liftIO (getStore ctx)
+  let given = case pgTree cfg of InitialTree t -> t; ControlledTree t -> t
+      adopt = case pgTree cfg of
+        InitialTree _ -> maybe True (const False) stored
+        ControlledTree _ -> maybe True ((/= given) . gsTree) stored
+  when adopt $ forM_ given $ \t ->
+    either (liftIO . fail) pure (validateGridTree t)
   Rect ox oy ow oh <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
   let lay = pgLayout cfg (paneLay minSize)
       -- The panes share the grid's content box, inside its padding.
       baseRect = padContentClip ox oy ow oh (layoutPadding lay)
-      given = pgTree cfg
-      -- After the last pane closes, restart with a fresh, never-used id.
-      resumed@(current, st) = case stored of
-        Just s@GridState {gsTree = Just tr} -> (tr, s)
-        _ ->
-          let seed = maybe 1 gsSeed stored
-           in (Pane seed, GridState (Just (Pane seed)) (seed + 1) 0 0 Nothing NoGesture (gsGiven =<< stored))
-      (tree0, started)
-        | given == gsGiven st = resumed
-        -- A new tree from the caller replaces the grid's and cancels a
-        -- gesture on the old one, unless it is the tree already shown.
-        | Just new <- given, new /= current =
-            (new, st {gsTree = Just new, gsSeed = max (gsSeed st) (treeMaxId new + 1), gsGesture = NoGesture, gsGiven = given})
-        | otherwise = (current, st {gsGiven = given})
+      st = fromMaybe (GridState Nothing 1 0 0 Nothing NoGesture) stored
+      started
+        | adopt = st {gsTree = given, gsSeed = max (gsSeed st) (maybe 1 ((+ 1) . treeMaxId) given), gsGesture = NoGesture}
+        | otherwise = st
       curSpan = (rectW baseRect, rectH baseRect)
       -- On a size change, re-ratio pinned panes' splits before layout. A move
       -- or a first fit needs no reflow.
-      tree = case gsSpan started of
+      reflow tree0 = case gsSpan started of
         Just (pw, ph)
           | (pw, ph) /= curSpan
           , any (pgFixedPanes cfg) (treePanes tree0) ->
               reflowFixed (pgFixedPanes cfg) minSize gutter (baseRect {rectW = pw, rectH = ph}) baseRect tree0
         _ -> tree0
-      gs = started {gsTree = Just tree, gsSpan = Just curSpan}
+      arrangement = reflow <$> gsTree started
+      gs = started {gsTree = arrangement, gsSpan = Just curSpan}
   when (Just gs /= stored) $ liftIO (modifyStore ctx (insertSlot fieldGrid key gs))
-  let (maxPane, focused) = paneFocus tree gs
+  let (maxPane, focused) = maybe (0, 0) (`paneFocus` gs) arrangement
       mouse = inputMousePos inp
-      (regions, dividers) = layoutNode minSize gutter tree baseRect
+      (regions, dividers) = maybe (M.empty, []) (\t -> layoutNode minSize gutter t baseRect) arrangement
       -- Drop geometry, computed while the drag is armed so the release frame
       -- can still resolve it. The target is the outer edge band, else the
       -- pane nearest the pointer, else nothing outside the grid. Hit tests
       -- use the grid without the dragged pane, not the on-screen preview, so
       -- showing the preview cannot change the target. 'dropPreviewTreeSized'
       -- lays out the result of the drop.
-      (dragMoved, dragZone, remaining) = case gsGesture gs of
-        Drag pid press moved0 _ ->
+      (dragMoved, dragZone, remaining) = case (arrangement, gsGesture gs) of
+        (Just tree, Drag pid press moved0 _) ->
           let mFrom = M.lookup pid regions
               V2 dx dy = v2Sub mouse press
               moved = moved0 || dx * dx + dy * dy > dragThresholdPx * dragThresholdPx
@@ -392,7 +410,7 @@ paneGrid cfg = do
       -- screen shows the post-drop tree with an empty slot, or the tree
       -- without the dragged pane when there is no target.
       (visibleTree, (visibleRegions, visibleDividers))
-        | not lifted = (Just tree, (regions, dividers))
+        | not lifted = (arrangement, (regions, dividers))
         | Just dp <- dragZone = (Just (dpTree dp), (dpRegions dp, dpDividers dp))
         | otherwise = (remaining, maybe (M.empty, []) (\t -> layoutNode minSize gutter t baseRect) remaining)
       env =
@@ -467,6 +485,7 @@ paneGrid cfg = do
         | maxPane /= 0 || gsMax end /= 0 || gsTree end /= gsTree gs = Nothing
         | not (rectHit baseRect mouse) = Nothing
         | otherwise = do
+            tree <- arrangement
             (q, r) <- find (\(_, r) -> rectHit r mouse) (M.toList regions)
             let seed = gsSeed end
                 np = seed + 1
@@ -796,7 +815,7 @@ splitPane env pid axis =
 closePane :: GridEnv -> Word64 -> NanoUI ()
 closePane env pid =
   void . updateGrid env True $ \s ->
-    s {gsTree = gsTree s >>= treeRemovePane pid, gsMax = if gsMax s == pid then 0 else gsMax s}
+    s {gsTree = gsTree s >>= treeRemovePane pid, gsMax = if gsMax s == pid then 0 else gsMax s, gsGesture = NoGesture}
 
 -- | Maximizing hides the dividers and every other pane, so an armed drag or
 -- resize gesture could never complete; cancel it instead of leaking it.

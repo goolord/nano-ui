@@ -12,7 +12,7 @@ import NanoUI.Internal.Widgets.SplitPane (GridNode)
 -- | A grid's state between frames, under its widget id.
 data GridState = GridState
   { gsTree :: !(Maybe GridNode)
-  -- ^ Nothing after the last pane closes; the next frame starts afresh.
+  -- ^ Nothing is an empty workspace, including after the last pane closes.
   , gsSeed :: !Word64
   -- ^ Monotonic split/pane id, including across closure of the last pane.
   , gsFocus :: !Word64
@@ -20,8 +20,6 @@ data GridState = GridState
   , gsSpan :: !(Maybe (Float, Float))
   -- ^ Last fitted size, used to reflow pinned panes.
   , gsGesture :: !Gesture
-  , gsGiven :: !(Maybe GridNode)
-  -- ^ Tree passed by the caller last frame.
   }
   deriving (Eq, Show)
 

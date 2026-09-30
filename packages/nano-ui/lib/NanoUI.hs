@@ -399,6 +399,8 @@ module NanoUI
   , commitPaneDrop
   , GridAxis (..)
   , GridNode (..)
+  , PaneTree (..)
+  , validateGridTree
   , paneGrid
   , paneDragHandle
 

@@ -2,6 +2,13 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** `pgTree` takes `InitialTree (Maybe GridNode)` or
+  `ControlledTree (Maybe GridNode)`. Initial trees seed once; controlled trees
+  are authoritative on every pass, so ignoring a proposal rejects it and
+  passing the original value resets the grid. Closing the final pane leaves an
+  empty workspace. `validateGridTree` checks persisted trees for unique, valid
+  ids and finite ratios before adoption; `paneGrid` rejects invalid inputs.
+
 - **Breaking:** `useReorder` takes keyed `Response`s from this view pass rather
   than raw rectangles, so only owned presses arm it. Table reordering uses the
   same path; table resize edges and pane gestures reject covered, disabled or
@@ -137,13 +144,11 @@
   without the caller hashing it first.
 - `checkboxWith` and `checkboxWith'`, a checkbox with a layout modifier:
   `checkboxWith alignMid` centres it in a row taller than itself.
-- `pgTree` on `PaneGridConfig`, the split tree a grid shows, with pane and
-  split ids of the caller's choosing; `NanoUI` exports `GridNode` to write it
-  with. The grid starts from it and takes it again whenever it changes, so a
-  constant tree is a starting layout, and a caller that passes back
-  `pgrTree`, the grid's tree after the frame, can replace the arrangement,
-  such as to reset it. `GridNode` and `GridAxis` derive `Read`, so a tree
-  saved with `show` reads back.
+- `pgTree` on `PaneGridConfig`, with explicit initial or controlled ownership
+  through `PaneTree`. Pane and split ids belong to the caller; `NanoUI` exports
+  `GridNode` to build the tree and `pgrTree` reports the resulting arrangement.
+  `GridNode` and `GridAxis` derive `Read`; validate a restored tree with
+  `validateGridTree` before adopting it.
 - A pane grid clips each pane's content to the pane, for paint and the
   pointer.
 - `pgrCommitted` on `PaneGridResponse`: the tree changed and nothing is being

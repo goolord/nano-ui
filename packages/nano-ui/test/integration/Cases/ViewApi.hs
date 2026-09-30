@@ -205,7 +205,7 @@ runPaneGridInitialTest ctx failed = do
           , pgMinSize = 40
           , pgSpacing = 4
           , pgFixedPanes = (== 10)
-          , pgTree = Just (Split 30 AxisV 0.25 (Pane 10) (Pane 20))
+          , pgTree = InitialTree (Just (Split 30 AxisV 0.25 (Pane 10) (Pane 20)))
           , pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
               body <- nextId
@@ -247,16 +247,15 @@ runPaneGridInitialTest ctx failed = do
   assertEq failed (length panes) 3
   assert failed (all (\p -> p `elem` [10, 20] || p > 30) panes)
 
--- | 'pgTree' is where a grid starts, not where it goes back to: once its
--- last pane is closed it starts again from one fresh pane, whose id no closed
--- pane had.
+-- | 'InitialTree' seeds only once: closing every pane leaves an empty grid,
+-- rather than recreating the seed or inventing another pane.
 runPaneGridInitialOnceTest :: Context -> IORef Int -> IO ()
 runPaneGridInitialOnceTest ctx failed = do
   closing <- newIORef False
   let cfg =
         defaultPaneGridConfig
           { pgLayout = fillW . fillH
-          , pgTree = Just (Split 30 AxisV 0.5 (Pane 10) (Pane 20))
+          , pgTree = InitialTree (Just (Split 30 AxisV 0.5 (Pane 10) (Pane 20)))
           , pgViewPane = \_ pctx -> do
               close <- liftIO (readIORef closing)
               when close (pgcClose pctx)
@@ -271,9 +270,8 @@ runPaneGridInitialOnceTest ctx failed = do
   writeIORef closing False
   (PaneGridResponse {pgrPanes = after}, _, _) <- runFrame ctx inp ui
   (PaneGridResponse {pgrPanes = again}, _, _) <- runFrame ctx inp ui
-  assertEq failed (length again) 1
-  assert failed (all (> 30) again)
-  assert failed (after == [] || after == again)
+  assertEq failed [] after
+  assertEq failed [] again
 
 -- | A grid that is not focusable is no Tab stop.
 runPaneGridUnfocusableTest :: Context -> IORef Int -> IO ()

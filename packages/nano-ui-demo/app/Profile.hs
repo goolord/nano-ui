@@ -431,7 +431,7 @@ benchSplit =
     paneGrid
       defaultPaneGridConfig
         { pgLayout = fillW . fillH
-        , pgTree = Just (Split 3 AxisV 0.5 (Pane 1) (Pane 2))
+        , pgTree = InitialTree (Just (Split 3 AxisV 0.5 (Pane 1) (Pane 2)))
         , pgViewPane = \_ _ -> do
             columnWith (tight . gap 4 . fillW) (forM_ wrapParagraphs label)
             pure (PaneView "P" False)
