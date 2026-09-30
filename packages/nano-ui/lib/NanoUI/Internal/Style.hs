@@ -152,6 +152,9 @@ module NanoUI.Internal.Style
   , pinAt
   , PointerMode (PointerAuto, PointerBlock, PointerPass)
   , pointer
+  , TextBreak (BreakWords, BreakAnywhere)
+  , textBreak
+  , breakAnywhere
   ) where
 
 import Control.Applicative ((<|>))
@@ -308,6 +311,8 @@ data Layout = Layout
   -- ^ Placed next to 'layoutGap' so both share one word.
   , layoutLineAlign :: {-# UNPACK #-} !LineAlign
   -- ^ Also in the 'layoutGap' word.
+  , layoutTextBreak :: {-# UNPACK #-} !TextBreak
+  -- ^ Where rich text may wrap ('textBreak'). Also in the 'layoutGap' word.
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
   , layoutMinW :: {-# UNPACK #-} !Float
@@ -360,6 +365,7 @@ defaultLayout =
     , layoutFlow = Line
     , layoutLineGap = -1
     , layoutLineAlign = LinesStart
+    , layoutTextBreak = BreakWords
     , layoutAspect = 0
     , layoutPin = Nothing
     , layoutPointer = PointerAuto
@@ -754,6 +760,45 @@ instance Bounded PointerMode where
 -- >   drawing (pointer PointerPass . fillW . fillH) glow
 pointer :: PointerMode -> Layout -> Layout
 pointer m l = l {layoutPointer = m}
+
+-- | Where rich text may wrap a line: 'BreakWords' (the default) or
+-- 'BreakAnywhere'. Independent of the font, so monospaced prose still wraps
+-- at spaces.
+--
+-- A byte so it packs into the 'layoutGap' word of 'Layout'.
+newtype TextBreak = TextBreak Word8
+  deriving newtype (Eq, Enum)
+
+-- | Wrap at spaces and newlines; a word longer than the line gets a line of
+-- its own.
+pattern BreakWords :: TextBreak
+pattern BreakWords = TextBreak 0
+
+-- | Wrap between any two characters, keeping combining marks, emoji
+-- sequences and flags whole. For code and long identifiers.
+pattern BreakAnywhere :: TextBreak
+pattern BreakAnywhere = TextBreak 1
+
+{-# COMPLETE BreakWords, BreakAnywhere #-}
+
+instance Show TextBreak where
+  show = \case
+    BreakWords -> "BreakWords"
+    _ -> "BreakAnywhere"
+
+instance Bounded TextBreak where
+  minBound = BreakWords
+  maxBound = BreakAnywhere
+
+-- | Set where rich text may wrap its lines.
+textBreak :: TextBreak -> Layout -> Layout
+textBreak b l = l {layoutTextBreak = b}
+
+-- | Wrap rich text between any two characters, as for code:
+--
+-- > richTextWith (fontMono . breakAnywhere) [inlineText source]
+breakAnywhere :: Layout -> Layout
+breakAnywhere = textBreak BreakAnywhere
 
 -- | Surface colours and border geometry. Border width and corner radius use
 -- logical pixels and affect painting, not layout size.

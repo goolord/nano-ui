@@ -32,6 +32,12 @@
   a document like an image; `svgIcon`/`svgIconWith` still letterbox. Added
   `rasterizeSvgIn` to draw a document's viewport over a given raster rect.
 
+- Rich-text wrapping is a layout setting, `textBreak`, rather than a side
+  effect of the font: monospaced prose now wraps at spaces, and
+  `breakAnywhere` (`BreakAnywhere`) wraps between characters in any font,
+  keeping combining marks, emoji sequences and flags whole. Markdown code
+  opts in, as before.
+
 - Selectable rich text keeps its selection in widget state rather than the
   paragraph measurement cache. Font, colour, alignment and theme changes,
   appended text and cache eviction no longer clear it, and idle passes reuse

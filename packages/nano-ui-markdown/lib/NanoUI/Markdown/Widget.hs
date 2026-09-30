@@ -40,6 +40,7 @@ import NanoUI
   , borderColor
   , borderWidth
   , box
+  , breakAnywhere
   , buttonWith
   , checkboxBoxSize
   , colorToWord32
@@ -375,7 +376,7 @@ inlines env = concatMap (go id Nothing)
       Code t ->
         -- Code in a link keeps the link's colour.
         let ink = if isJust target then id else fontColor (themeOrange theme)
-         in [codeBackground (piece (mdInlineCode cfg . fontMono . ink . style) target t)]
+         in [codeBackground (piece (mdInlineCode cfg . fontMono . breakAnywhere . ink . style) target t)]
       Link url _ xs -> concatMap (go (fontColor linkColor' . style) (target <|> Just url)) xs
       Image src _ alt ->
         let txt = if null alt then "image" else spansText alt
@@ -404,7 +405,7 @@ codeBlock env info code = do
               void (setClipboard code)
       void $
         selectableRichTextWith
-          (tight . fillW . fontMono . fontColor (styleFg (themeInput theme)) . envText env)
+          (tight . fillW . fontMono . breakAnywhere . fontColor (styleFg (themeInput theme)) . envText env)
           [inlineText code]
 
 -- | A list: each item's marker beside its blocks; tight lists have less

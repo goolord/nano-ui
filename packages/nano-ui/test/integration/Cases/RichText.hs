@@ -26,7 +26,30 @@ tests =
   , spec "rich-text-same-pieces" runRichTextSamePiecesTest
   , spec "rich-text-scroll-popup" runRichTextScrollPopupTest
   , spec "rich-text-selection-persistence" runSelectionPersistenceTest
+  , spec "rich-text-break-policy" runTextBreakTest
   ]
+
+-- | Wrapping follows 'textBreak', not the font: monospaced text keeps whole
+-- words, and 'breakAnywhere' wraps inside one without splitting a flag.
+runTextBreakTest :: Context -> IORef Int -> IO ()
+runTextBreakTest ctx failed = do
+  let inp = withInput 600 400
+      fm = ctxFontMetrics ctx
+      flag = "\x1F1FA\x1F1F8"
+  advA <- lineWidthIO fm "a"
+  advFlag <- lineWidthIO fm (T.take 1 flag)
+  let heightOf f pieces = do
+        (r, _) <- warmup2 ctx inp (column (richTextWith' f pieces))
+        let Rect _ _ _ h = respRect r in pure h
+      word = inlineText "abcdefghijklmnop"
+  lineH <- heightOf fontMono ["a"]
+  assert failed (lineH > 0 && advA > 0 && advFlag > 0)
+  assertEq failed lineH =<< heightOf (fontMono . fixedW (8 * advA)) [word]
+  assertEq failed (2 * lineH) =<< heightOf (fontMono . breakAnywhere . fixedW (8.5 * advA)) [word]
+  -- Each flag is two regional indicators that fit a line only together.
+  flags <- heightOf (breakAnywhere . fixedW (1.5 * advFlag)) [inlineText (T.replicate 3 flag)]
+  lineFlag <- heightOf id [inlineText flag]
+  assertEq failed (3 * lineFlag) flags
 
 -- | Selection is widget state; styling, streaming and cache eviction preserve it.
 runSelectionPersistenceTest :: Context -> IORef Int -> IO ()

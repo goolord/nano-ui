@@ -20,6 +20,7 @@ module NanoUI.Widgets.RichText
   ) where
 
 import Control.Monad (foldM, unless, when)
+import Data.Char (isMark)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -130,8 +131,8 @@ richTextWithMode' selectable f pieces = do
   inp <- askInput
   base <- f <$> askDefaultLayout
   theme <- uiTheme
-  let styled = [(piece, pieceFont l, pieceColor theme l target) | piece@(Inline _ style target _) <- pieces, let l = style base]
-      plainInput = T.concat [txt | (Inline txt _ _ _, _, _) <- styled]
+  let styled = [(piece, pieceFont l, pieceColor theme l target, layoutTextBreak l) | piece@(Inline _ style target _) <- pieces, let l = style base]
+      plainInput = T.concat [txt | (Inline txt _ _ _, _, _, _) <- styled]
       align = layoutAlignX base
   Paragraphs cacheRef <- liftIO $ Host.hostOrInit (ctxParagraphs ctx) (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- liftIO (readIORef (ctxMetricGen ctx))
@@ -142,10 +143,11 @@ richTextWithMode' selectable f pieces = do
   sameInputs <- liftIO (maybe (pure False) reused cached)
   let hashed =
         foldl'
-          ( \h (Inline txt _ target bg, TextFont size variant weight fstyle deco, Color rgba) ->
+          ( \h (Inline txt _ target bg, TextFont size variant weight fstyle deco, Color rgba, brk) ->
               h `hashWithSalt` txt `hashWithSalt` size `hashWithSalt` fromEnum variant
                 `hashWithSalt` fromEnum weight `hashWithSalt` fromEnum fstyle `hashWithSalt` fromEnum deco
                 `hashWithSalt` rgba `hashWithSalt` target `hashWithSalt` fmap (\(Color c) -> c) bg
+                `hashWithSalt` fromEnum brk
           )
           (gen `hashWithSalt` fromEnum align `hashWithSalt` selectable)
           styled
@@ -156,7 +158,7 @@ richTextWithMode' selectable f pieces = do
   para0 <- case cached of
     Just para | paraKey para == key -> liftIO (para <$ unless sameInputs (writeIORef (paraInputs para) inputs))
     _ -> liftIO $ do
-      let starts = scanl (+) 0 [T.length txt | (Inline txt _ _ _, _, _) <- styled]
+      let starts = scanl (+) 0 [T.length txt | (Inline txt _ _ _, _, _, _) <- styled]
       resolved <- mapM (measurePiece ctx) (zip3 [0 ..] starts styled)
       let runs = smallArrayFromList (map fst resolved)
           tokens = concatMap snd resolved
@@ -468,30 +470,60 @@ pieceColor theme l target =
   let toneCol = textToneColor theme (layoutFontVariant l) (layoutFontTone l)
    in fromMaybe (maybe toneCol (const (themeLink theme)) target) (layoutFontColor l)
 
--- | A piece's line metrics and its tokens measured in its font.
-measurePiece :: Context -> (Int, Int, (Inline, TextFont, Color)) -> IO (Run, [Token])
-measurePiece ctx (i, start, (Inline txt _ target bg, font, color)) = do
+-- | A piece's line metrics and its tokens measured in its font. A piece that
+-- may break anywhere is measured a character cluster at a time.
+measurePiece :: Context -> (Int, Int, (Inline, TextFont, Color, TextBreak)) -> IO (Run, [Token])
+measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
   (fm, _) <- resolveTextFont ctx font
-  let mono = case font of TextFont _ FontMono _ _ _ -> True; _ -> False
+  let anywhere = brk == BreakAnywhere
       parts
-        | mono = map T.singleton (T.unpack txt)
-        | otherwise = T.groupBy (\a b -> kindOf mono a == kindOf mono b && kindOf mono a /= Break) txt
-  monoMetrics <- if mono then prepareFontMetrics fm txt else pure fm
-  tokens <- reverse . snd <$> foldM (measure fm mono monoMetrics) (start, []) parts
+        | anywhere = clusters txt
+        | otherwise = T.groupBy (\a b -> kindOf False a == kindOf False b && kindOf False a /= Break) txt
+  wholeMetrics <- if anywhere then prepareFontMetrics fm txt else pure fm
+  tokens <- reverse . snd <$> foldM (measure fm anywhere wholeMetrics) (start, []) parts
   pure (Run font color (fmLineHeight fm) (fmAscent fm) target bg, tokens)
   where
-    kindOf mono c
+    kindOf anywhere c
       | c == '\n' = Break
-      | mono && (c == ' ' || c == '\t') = GlyphSpace
-      | mono = Glyph
+      | anywhere && (c == ' ' || c == '\t') = GlyphSpace
+      | anywhere = Glyph
       | c == ' ' || c == '\t' = Space
       | otherwise = Word
-    measure fm mono monoMetrics (at, acc) part = do
-      let kind = kindOf mono (T.head part)
-      prepared <- if mono then pure monoMetrics else prepareFontMetrics fm part
+    measure fm anywhere wholeMetrics (at, acc) part = do
+      let kind = kindOf anywhere (T.head part)
+      prepared <- if anywhere then pure wholeMetrics else prepareFontMetrics fm part
       let w = if kind == Break then 0 else Font.lineWidth prepared part
           token = Token part i kind w at prepared
       pure (at + T.length part, token : acc)
+
+-- | Text split into user-perceived characters, closely enough for wrapping:
+-- a character keeps the combining marks, variation selectors and emoji
+-- modifiers after it, a zero-width joiner joins the next character on, and
+-- regional indicators pair into flags. A newline is its own cluster.
+clusters :: Text -> [Text]
+clusters = go
+  where
+    go t = case T.uncons t of
+      Nothing -> []
+      Just (c, rest) ->
+        let n = 1 + extend (isRegional c) rest
+         in T.take n t : go (T.drop n t)
+    -- Characters after the first that stay in its cluster.
+    extend regional t = case T.uncons t of
+      Just (c, rest)
+        | c == '\x200D' -> case T.uncons rest of
+            Just (_, rest') -> 2 + extend False rest'
+            Nothing -> 1
+        | attaches c -> 1 + extend False rest
+        | regional && isRegional c -> 1 + extend False rest
+      _ -> 0
+    attaches c =
+      isMark c
+        || (c >= '\xFE00' && c <= '\xFE0F')
+        || (c >= '\x1F3FB' && c <= '\x1F3FF')
+        || (c >= '\xE0020' && c <= '\xE007F')
+        || (c >= '\xE0100' && c <= '\xE01EF')
+    isRegional c = c >= '\x1F1E6' && c <= '\x1F1FF'
 
 -- | Greedy line breaking at @width@, aligned by @align@. Breaks only at
 -- spaces or newlines, drops spaces at a wrap, and gives an overlong word its

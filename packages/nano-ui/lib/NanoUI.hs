@@ -790,6 +790,9 @@ module NanoUI
   , textDecoration
   , fontUnderline
   , fontStrike
+  , TextBreak (..)
+  , textBreak
+  , breakAnywhere
   , Tone (..)
   , fontTone
 
