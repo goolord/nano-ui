@@ -2,6 +2,11 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- `NanoUI.Backend` now includes context construction, frame execution,
+  rendering buffers, text spans, atlas updates, cursor resolution and damage
+  extraction. `NanoUI.Runner` exports the opaque debug sampler and constructor
+  required by `SessionDriver`; a basic backend needs no testing/internal imports.
+
 - Screenshot requests complete with `Nothing` when their window is closed or
   replaced, including requests made later through captured thread actions.
   Capture and callback exceptions cannot abandon the rest of a pending batch.

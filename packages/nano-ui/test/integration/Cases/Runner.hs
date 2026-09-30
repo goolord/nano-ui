@@ -11,7 +11,6 @@ import Control.Exception
   , try
   )
 import NanoUI.Internal.Context (wakeFromThread)
-import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Runner
 
 tests :: [Spec]

@@ -6,7 +6,7 @@ import GHC.Conc (getAllocationCounter)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Testing (newPixelContext, runFrame, setDrawReuse)
+import NanoUI.Testing (setDrawReuse)
 import NanoUI.Backend.Sdl (SdlEnv (..), sdlDrawFrame, syncDisplay, withSdlBench)
 import System.Exit (exitFailure)
 import System.IO (hSetEncoding, stderr, stdout)

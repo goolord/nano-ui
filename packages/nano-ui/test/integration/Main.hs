@@ -1,5 +1,6 @@
 module Main (main) where
 
+import BackendApi (backendApiCheck)
 import Cases.Runner qualified
 import Cases.SIMD qualified
 import Cases.NoThunks qualified
@@ -56,7 +57,8 @@ import Cases.Tasks qualified
 import NanoUI.Testing.Runner (runTests)
 
 main :: IO ()
-main =
+main = do
+  backendApiCheck
   runTests . concat $
     [ Cases.Runner.tests
     , Cases.SIMD.tests

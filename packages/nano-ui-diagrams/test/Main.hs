@@ -24,7 +24,7 @@ import Diagrams.Prelude
   )
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Internal.Context (Context (..), DrawingCacheState (..), withFontMetrics)
+import NanoUI.Internal.Context (Context (..), DrawingCacheState (..))
 import NanoUI.Internal.Context.Types (DrawOpCacheEntry (..))
 import NanoUI.Diagrams
   ( B
@@ -65,7 +65,6 @@ import NanoUI.Plot.Types
   , Series (..)
   )
 import NanoUI.Plot.Widget qualified as Plot
-import NanoUI.Testing (DrawData (..), drawCmdNull, newPixelContext, runFrame)
 import Test.Hspec (describe, hspec, it)
 
 -- | Fail with @msg@ unless the condition holds.

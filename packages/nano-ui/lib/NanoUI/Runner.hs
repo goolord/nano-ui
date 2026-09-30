@@ -10,6 +10,8 @@ module NanoUI.Runner
   , shouldRedrawFrame
     -- * Session loop
   , SessionDriver (..)
+  , DebugSamplerRef
+  , newDebugSampler
   , runSessionLoop
   ) where
 

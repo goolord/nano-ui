@@ -19,18 +19,59 @@
 -- 'WindowState') are the same entities in both, so importing both is safe.
 --
 -- A backend's frame is: collect events into an 'Input', run the view with
--- "NanoUI.Runner" or "NanoUI.Testing", take the 'Damage' and present the
--- rectangles it names. The @Context@ that "NanoUI.Testing" creates holds the
--- state that outlives a frame, and the font callbacks below are what it
--- measures text with.
+-- 'runFrame', take the 'Damage' and present the rectangles it names. 'Context'
+-- holds state that outlives a frame. "NanoUI.Runner" supplies a reusable loop;
+-- "NanoUI.Testing" adds assertions and inspection helpers for tests.
 module NanoUI.Backend
   ( -- * Running a view
 
-    -- | This runs one view against a @Context@ from "NanoUI.Testing" and an
-    -- 'Input'. Most backends want a whole frame instead: @runFrame@ in
-    -- "NanoUI.Testing", or the runners in "NanoUI.Runner", which lay out,
-    -- paint and collect damage around a call to this.
+    -- | Run the view only. 'runFrame' additionally solves layout and paints.
     runNanoUI
+  , runFrame
+  , Context
+  , newContext
+  , newPixelContext
+  , withFontMetrics
+  , withMonoFontMetrics
+  , withMeasureText
+  , withFontResolver
+  , withFontSize
+  , withClipboard
+  , markDirty
+  , clearDirty
+  , isDirty
+  , requestWakeAt
+  , requestWakeAfter
+  , getWakeAt
+
+    -- * Rendering a frame
+  , DrawData (..)
+  , DrawCmd (..)
+  , Layer (..)
+  , drawCmdNull
+  , drawCmdElems
+  , forDrawCmdsInLayer_
+  , drawCmdCount
+  , vertexSize
+  , indexSize
+  , collectRasterSpans
+  , uiCursorKind
+  , UiCursorKind (..)
+  , takeDamage
+  , takeDamagePieces
+  , damagePieces
+  , damageIsEmpty
+  , registerImage
+  , registerImages
+  , atlasTextureId
+  , atlasSnapshot
+  , atlasChanges
+  , AtlasUpload (..)
+  , backdropDimTextureId
+  , glyphAtlasTextureId
+  , glyphAtlasPages
+  , glyphPageTextureId
+  , textureGlyphPage
 
     -- * Input
 
@@ -145,7 +186,7 @@ module NanoUI.Backend
     -- * Damage
 
     -- | What changed since the last frame, so a backend can present part of
-    -- the window instead of all of it. @takeDamage@ in "NanoUI.Testing"
+    -- the window instead of all of it. 'takeDamage'
     -- reads the frame's damage; the @Now@ functions mark a rectangle from
     -- inside a view, which a custom widget that paints outside its own node
     -- needs.
@@ -273,9 +314,21 @@ module NanoUI.Backend
 where
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
-import NanoUI.Internal.Context (getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance, setExplainLayout, setSystemAppearance, setWakeLoop, setWakeLoopChecked)
+import NanoUI.Internal.Context
+  ( Context, newContext, newPixelContext, withFontMetrics, withMonoFontMetrics
+  , withMeasureText, withFontResolver, withFontSize, withClipboard
+  , markDirty, clearDirty, isDirty, requestWakeAt, requestWakeAfter, getWakeAt
+  , takeDamage, takeDamagePieces, registerImage, registerImages
+  , atlasTextureId, atlasSnapshot, atlasChanges, AtlasUpload (..)
+  , getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance
+  , setExplainLayout, setSystemAppearance, setWakeLoop, setWakeLoopChecked
+  )
+import NanoUI.Internal.Frame (runFrame)
+import NanoUI.Internal.Frame.Spans (collectRasterSpans)
+import NanoUI.Internal.Frame.Cursor (uiCursorKind)
+import NanoUI.Internal.Damage (damagePieces)
 import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
-import NanoUI.Internal.Draw (drawTextBox)
+import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id
 import NanoUI.Internal.Input

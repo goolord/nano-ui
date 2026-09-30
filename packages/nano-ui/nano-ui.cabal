@@ -237,6 +237,7 @@ test-suite nano-ui-test
     main-is:          Main.hs
     other-modules:
         Cases
+        BackendApi
         Spec
         Cases.Animation
         Cases.Caption

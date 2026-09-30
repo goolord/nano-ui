@@ -9,7 +9,7 @@ import qualified Data.Text as T
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Testing (newPixelContext, textIndexAtX)
+import NanoUI.Testing (textIndexAtX)
 import NanoUI.Backend.Sdl
   ( NanoUIFont (..)
   , SdlEnv (..)
