@@ -17,7 +17,9 @@
   is focused: not from a text area, an input method commit, another focused
   control, or behind a modal. Holding Enter submits once.
 - `inputWidget` adapts custom controlled widgets to named or positional fields,
-  with explicit decoding, encoding, and response policy.
+  with explicit decoding, encoding, and a `Publish` policy: `OnChange`,
+  `OnChangeOr` a response predicate, or `OnlyWhen` one, which holds edits
+  back until, for example, a commit.
 - `NanoUI.Form.Input` replaces the parallel `Named` and `Unnamed` modules.
   Built-in inputs take `FieldName`, separating the optional key from the optional
   caption. String literals retain the usual syntax with `OverloadedStrings`;

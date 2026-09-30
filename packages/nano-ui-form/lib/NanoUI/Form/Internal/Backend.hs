@@ -12,6 +12,8 @@ module NanoUI.Form.Internal.Backend
   , liftNanoUI
   , withFormWidgets
   , updateFieldInput
+  , fieldDraft
+  , setFieldDraft
   , markFormSubmitted
   , isFormSubmitted
   , resetFormState
@@ -78,6 +80,9 @@ emptyFormStateStore = FormStateStore Map.empty False
 data StoredForm = StoredForm
   { sfGeneration :: !Int
   , sfState      :: !FormStateStore
+  , sfDrafts     :: !(Map.Map Text (FormInput, FormInput))
+  -- ^ Edits a field holds back until it publishes: the form value the edit
+  -- started from, and the edit.
   }
   deriving (Eq)
 
@@ -133,7 +138,7 @@ withFormWidgets owner prefix action = do
 getStoredForm :: FormState -> Text -> IO StoredForm
 getStoredForm (FormState ref) prefix = do
   forms <- readIORef ref
-  pure $! fromMaybe (StoredForm 0 emptyFormStateStore) (Map.lookup prefix forms)
+  pure $! fromMaybe (StoredForm 0 emptyFormStateStore Map.empty) (Map.lookup prefix forms)
 
 setStoredForm :: FormState -> Text -> StoredForm -> IO ()
 setStoredForm (FormState ref) prefix !stored = modifyIORef' ref (Map.insert prefix stored)
@@ -165,6 +170,16 @@ updateFieldInput owner ctx prefix fieldKey inputVal =
   modifyFormStore owner ctx prefix $ \fss ->
     fss {fssInputs = Map.insert fieldKey inputVal (fssInputs fss)}
 
+-- | A field's unpublished edit: the form value it started from, and the edit.
+fieldDraft :: FormState -> Text -> Text -> IO (Maybe (FormInput, FormInput))
+fieldDraft owner prefix fieldKey = Map.lookup fieldKey . sfDrafts <$> getStoredForm owner prefix
+
+-- | Keep or drop a field's unpublished edit.
+setFieldDraft :: FormState -> Context -> Text -> Text -> Maybe (FormInput, FormInput) -> IO ()
+setFieldDraft owner ctx prefix fieldKey draft =
+  modifyStoredForm owner ctx prefix $ \stored ->
+    stored {sfDrafts = Map.alter (const draft) fieldKey (sfDrafts stored)}
+
 -- | Mark a form as submitted.
 markFormSubmitted :: FormState -> Context -> Text -> Bool -> IO ()
 markFormSubmitted owner ctx prefix isSubmitted =
@@ -178,9 +193,9 @@ isFormSubmitted owner prefix = fssSubmitted <$> getFormStore owner prefix
 -- repopulate the form with its old values on the next frame.
 resetFormState :: FormState -> Context -> Text -> IO ()
 resetFormState owner ctx prefix = modifyStoredForm owner ctx prefix $ \stored ->
-  if sfState stored == emptyFormStateStore
+  if sfState stored == emptyFormStateStore && Map.null (sfDrafts stored)
     then stored
-    else StoredForm (sfGeneration stored + 1) emptyFormStateStore
+    else StoredForm (sfGeneration stored + 1) emptyFormStateStore Map.empty
 
 -- | Ditto reads from the typed owner supplied by the form runner.
 instance Environment FormUI FormInput where

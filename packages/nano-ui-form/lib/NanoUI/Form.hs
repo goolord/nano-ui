@@ -15,6 +15,7 @@ module NanoUI.Form
   , FormConfig (..)
   , defaultFormConfig
   , inputWidget
+  , Publish (..)
   , FieldName (..)
   , named
   , unnamed
@@ -67,7 +68,7 @@ where
 import Ditto.Core qualified as Ditto
 import Ditto.Types qualified as Ditto
 import NanoUI.Form.Internal.Backend (FormInput (..), FormUI (..), FormState, newFormState, liftNanoUI)
-import NanoUI.Form.Internal.Field (inputWidget)
+import NanoUI.Form.Internal.Field (Publish (..), inputWidget)
 import NanoUI.Form.Input
   ( FieldName (..)
   , childErrors

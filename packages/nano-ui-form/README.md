@@ -85,17 +85,25 @@ form key; `fieldKey = Nothing` selects positional identity.
 import NanoUI qualified as UI
 
 volume :: Form Text Float
-volume = inputWidget (Just "volume") decode UI.respChanged FormInputFloat
+volume = inputWidget (Just "volume") decode (OnChangeOr UI.respChanged) FormInputFloat
   (UI.knob' 0 100) 50
   where
     decode (FormInputFloat n) = Right n
     decode _ = Left "Expected a volume"
 ```
 
-The arguments are the optional stable name, decoder, response predicate,
+The arguments are the optional stable name, decoder, publication policy,
 encoder, widget, and initial value. `Nothing` selects positional naming.
 Naming does not add a visible label; compose one into the widget action if
-wanted. Either the response predicate or a changed value publishes an edit.
+wanted. The policy says when an edit reaches the form:
+
+- `OnChange` publishes whenever the widget returns a different value.
+- `OnChangeOr p` also publishes when `p` holds for the response, for
+  controls that report an edit that kept the value.
+- `OnlyWhen p` publishes only when `p` holds, such as
+  `OnlyWhen UI.respSubmitted` for a field that commits on Enter. The field
+  holds the edit and shows it to the widget until then; an outside change to
+  the field's value, or a reset, discards it.
 
 ## Build
 

@@ -58,6 +58,7 @@ import NanoUI.Form.Internal.Field
   , fieldErrors
   , inputWidget
   , labelled
+  , Publish (..)
   )
 import NanoUI.Form.Types (FieldName (..), Form, FormView (..), named, unnamed)
 
@@ -91,7 +92,7 @@ inputCheckbox name initial =
   inputWidget
     (fieldKey name)
     (Right . decodeBool initial)
-    respClicked
+    (OnChangeOr respClicked)
     FormInputBool
     (checkbox' (fromMaybe "" (fieldLabel name)))
     initial
@@ -145,7 +146,7 @@ captioned ::
   (Eq a, FormError FormInput err) =>
   FieldName -> (FormInput -> a) -> (a -> FormInput) -> (a -> NUI.NanoUI (NUI.Response, a)) -> a -> Form err a
 captioned name decode encode widget =
-  inputWidget (fieldKey name) (Right . decode) respChanged encode (labelled (fieldLabel name) widget)
+  inputWidget (fieldKey name) (Right . decode) (OnChangeOr respChanged) encode (labelled (fieldLabel name) widget)
 
 -- | Static label inside a form.
 label :: Text -> Form err ()

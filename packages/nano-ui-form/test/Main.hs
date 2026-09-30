@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int8)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
@@ -64,7 +65,7 @@ main = do
         <$> inputWidget
           (Just "internal-key")
           decodeText
-          (const False)
+          OnChange
           FormInputText
           ( \value ->
               NUI.label "Visible caption"
@@ -74,7 +75,7 @@ main = do
         <*> inputWidget
           Nothing
           decodeText
-          NUI.respChanged
+          (OnChangeOr NUI.respChanged)
           FormInputText
           NUI.textInput'
           "automatic"
@@ -88,6 +89,42 @@ main = do
     =<< runCustom
   updateFieldInput customOwner customCtx "custom" "internal-key" (FormInputBool True)
   expectErrors "Custom field decoder errors reach ditto" ((== ["Expected text"]) . map snd) . snd =<< runCustom
+
+  -- A commit-only field holds its edit back from the form, shows it to the
+  -- control, and publishes it on commit.
+  commitCtx <- newContext
+  commitOwner <- newFormState
+  commitNow <- newIORef False
+  shown <- newIORef ""
+  let
+    commitForm :: Form Text Text
+    commitForm =
+      inputWidget
+        (Just "draft")
+        decodeText
+        (OnlyWhen NUI.respSubmitted)
+        FormInputText
+        ( \value -> do
+            submitted <- NUI.liftIO (writeIORef shown value >> readIORef commitNow)
+            pure (NUI.setSubmitted submitted mempty, if value == "a" then "ab" else value)
+        )
+        "a"
+    runCommit = runNanoUI commitCtx emptyInput (runNanoForm commitOwner "commit" commitForm)
+    drawCommit (fieldView, _) = runNanoUI commitCtx emptyInput (runFormView (Ditto.unView fieldView []))
+  drawCommit =<< runCommit
+  editing <- runCommit
+  expectOk "A commit-only field does not publish an uncommitted edit" (== "a") (snd editing)
+  drawCommit editing
+  check "A commit-only field shows its held edit" . (== "ab") =<< readIORef shown
+  writeIORef commitNow True
+  drawCommit editing
+  expectOk "A commit-only field publishes its edit on commit" (== "ab") . snd =<< runCommit
+  writeIORef commitNow False
+  updateFieldInput commitOwner commitCtx "commit" "draft" (FormInputText "a")
+  drawCommit =<< runCommit
+  updateFieldInput commitOwner commitCtx "commit" "draft" (FormInputText "external")
+  drawCommit =<< runCommit
+  check "An outside change replaces a held edit" . (== "external") =<< readIORef shown
 
   captionCtx <- newContext
   captionOwner <- newFormState
