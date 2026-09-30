@@ -75,8 +75,8 @@
   `closeWindowHost`. `answerScreenshotsAfter` supports pre-present readback with
   post-present callbacks.
 - A context carries the session value of the backend driving it. A backend
-  names itself in the `Backend` kind (`Sdl`, `Rgfw`, or `Custom` for one
-  outside this repository), gives the value's type with a `BackendSession`
+  names itself in the `Backend` kind (`Sdl`, or `Custom` for one outside
+  this repository), gives the value's type with a `BackendSession`
   instance, and installs it with `withBackendSession`; its view-side
   operations read it back with `askBackendSession` and the backend's
   `SBackend` singleton. Matching singletons proves the type, so the lookup

@@ -8,6 +8,7 @@ module NanoUI.Internal.Context
   ( Context (..)
   , withBackendSession
   , backendSession
+  , frameNumber
   , module NanoUI.Internal.Context.Core
   , module NanoUI.Internal.Context.Scroll
   , module NanoUI.Internal.Context.Animation
@@ -125,7 +126,8 @@ import Control.Monad (foldM, forM, unless, when)
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import NanoUI.Internal.Derived (emptyDerivedCache)
-import NanoUI.Internal.Resource (newHeld)
+import NanoUI.Internal.Resource (Held (..), newHeld)
+import Data.Primitive.PrimVar (readPrimVar)
 import NanoUI.Internal.Host (Host, newHost, setHost, clearHost, askHostIO, hostOrInit)
 import Data.List (find)
 import Control.Exception (bracket)
@@ -723,3 +725,9 @@ withBackendSession ctx backend session act =
 -- backend asked for.
 backendSession :: SBackend b -> Context -> IO (Maybe (BackendSession b))
 backendSession backend ctx = (>>= sessionFor backend) <$> askHostIO (ctxBackendSession ctx)
+
+-- | Which frame the context is on: it advances once a frame, and the view
+-- passes of one frame share it. For caches that size themselves by what a
+-- frame uses.
+frameNumber :: Context -> IO Int
+frameNumber = readPrimVar . heldFrame . ctxHeld

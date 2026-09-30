@@ -17,20 +17,18 @@ import Data.Kind (Type)
 import Data.Type.Equality (TestEquality (..), (:~:) (..))
 import GHC.TypeLits (SSymbol, Symbol)
 
--- | The backends that can drive a context, as a kind. A backend outside this
--- repository names itself with 'Custom'.
-data Backend = Sdl | Rgfw | Custom Symbol
+-- | The backends that keep a session on the context, as a kind. A backend
+-- outside this repository names itself with 'Custom'.
+data Backend = Sdl | Custom Symbol
 
 -- | The singleton of a 'Backend'.
 type SBackend :: Backend -> Type
 data SBackend b where
   SSdl :: SBackend 'Sdl
-  SRgfw :: SBackend 'Rgfw
   SCustom :: SSymbol s -> SBackend ('Custom s)
 
 instance TestEquality SBackend where
   testEquality SSdl SSdl = Just Refl
-  testEquality SRgfw SRgfw = Just Refl
   testEquality (SCustom a) (SCustom b) = (\Refl -> Refl) <$> testEquality a b
   testEquality _ _ = Nothing
 

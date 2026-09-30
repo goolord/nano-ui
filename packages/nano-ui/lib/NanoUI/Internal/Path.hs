@@ -33,6 +33,7 @@ module NanoUI.Internal.Path
   , affine
   , transformPoint
   , invert
+  , transformFinite
     -- * Strokes, fills and paints
   , Stroke (..)
   , stroke

@@ -47,7 +47,7 @@ import Graphics.NanoSvg
 import Graphics.NanoSvg qualified as NanoSvg
 import NanoUI.Internal.Path (Rings (..), buildRings, cleanRings, ringCount)
 import NanoUI.Internal.Path qualified as P
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, finite)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR)
 
 -- | A parsed SVG document. Only 'parseSvg' makes one, so its raster cache
 -- key ('svgKey') always describes its source: an edited @nano-svg@
@@ -198,12 +198,8 @@ strokeWalk w cap join miterLimit contours point end =
 -- bottom), scaled to fit and centred as SVG's default @xMidYMid meet@ does.
 -- @current@ is what @currentColor@, and an unspecified fill, paint with.
 rasterizeSvg :: Int -> Int -> Color -> Svg -> ByteString
-rasterizeSvg width height current (Svg svg) = rasterizeView width height (Matrix s 0 0 s tx ty) current svg
-  where
-    Box vx vy vw vh = documentViewBox svg
-    s = min (fromIntegral width / vw) (fromIntegral height / vh)
-    tx = (fromIntegral width - vw * s) / 2 - vx * s
-    ty = (fromIntegral height - vh * s) / 2 - vy * s
+rasterizeSvg width height current (Svg svg) =
+  rasterizeView width height (meet (documentViewBox svg) (fromIntegral width) (fromIntegral height)) current svg
 
 -- | 'rasterizeSvg' with the document's own viewport ('svgSize') drawn over
 -- @Rect x y w h@, in raster pixels, instead of fitted to the raster. A rect of
@@ -213,21 +209,23 @@ rasterizeSvg width height current (Svg svg) = rasterizeView width height (Matrix
 -- > rasterizeSvgIn 64 64 (Rect (-16) 0 96 64) white doc  -- a 3:2 icon covering a square
 rasterizeSvgIn :: Int -> Int -> Rect -> Color -> Svg -> ByteString
 rasterizeSvgIn width height (Rect x y w h) current (Svg svg) =
-  rasterizeView width height (Matrix (s * kx) 0 0 (s * ky) (x + ox * kx) (y + oy * ky)) current svg
+  rasterizeView width height (Matrix (w / dw) 0 0 (h / dh) x y `multiply` meet (documentViewBox svg) dw dh) current svg
   where
-    Box vx vy vw vh = documentViewBox svg
     (dw, dh) = documentSize svg
-    s = min (dw / vw) (dh / vh)
-    ox = (dw - vw * s) / 2 - vx * s
-    oy = (dh - vh * s) / 2 - vy * s
-    kx = w / dw
-    ky = h / dh
+
+-- | The viewBox fitted into a @w@ by @h@ viewport and centred, as SVG's
+-- default @xMidYMid meet@ does.
+meet :: Box -> Float -> Float -> Matrix
+meet (Box vx vy vw vh) w h = Matrix s 0 0 s ((w - vw * s) / 2 - vx * s) ((h - vh * s) / 2 - vy * s)
+  where
+    s = min (w / vw) (h / vh)
 
 -- | Render with @view@ mapping viewBox units to raster pixels.
 rasterizeView :: Int -> Int -> Matrix -> Color -> Document -> ByteString
-rasterizeView width height view current svg
+rasterizeView width height view@(Matrix a b c d e f) current svg
   | width <= 0 || height <= 0 = BS.empty
-  | not (finiteView view) = BS.replicate (width * height * 4) 0
+  -- A degenerate viewBox or rect makes a view of infinities or NaNs.
+  | not (P.transformFinite (P.Transform a b c d e f)) = BS.replicate (width * height * 4) 0
   | otherwise = BSI.unsafeCreate (width * height * 4) $ \out ->
       forM_ [0 .. width * height - 1] $ \i -> do
         let al = indexPrimArray image (i * 4 + 3)
@@ -267,11 +265,6 @@ rasterizeView width height view current svg
             -- A hairline thinner than a pixel keeps its weight as opacity.
             composite width height acc cov col (opacity * styleStrokeOpacity style * min 1 (wanted / w))
       unsafeFreezePrimArray acc
-
--- | A degenerate viewBox or rect makes a view of infinities or NaNs, which
--- draws nothing.
-finiteView :: Matrix -> Bool
-finiteView (Matrix a b c d e f) = all finite [a, b, c, d, e, f]
 
 -- | Coverage of the rings with at least three points in @cov@ (cleared
 -- first): five sample rows a pixel, each span's coverage split exactly

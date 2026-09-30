@@ -13,7 +13,7 @@ module NanoUI.Form.Internal.Backend
   , withFormWidgets
   , updateFieldInput
   , fieldDraft
-  , setFieldDraft
+  , storeFieldEdit
   , markFormSubmitted
   , isFormSubmitted
   , resetFormState
@@ -174,11 +174,15 @@ updateFieldInput owner ctx prefix fieldKey inputVal =
 fieldDraft :: FormState -> Text -> Text -> IO (Maybe (FormInput, FormInput))
 fieldDraft owner prefix fieldKey = Map.lookup fieldKey . sfDrafts <$> getStoredForm owner prefix
 
--- | Keep or drop a field's unpublished edit.
-setFieldDraft :: FormState -> Context -> Text -> Text -> Maybe (FormInput, FormInput) -> IO ()
-setFieldDraft owner ctx prefix fieldKey draft =
+-- | Keep or drop a field's unpublished edit and, in the same update, publish
+-- a value for it.
+storeFieldEdit :: FormState -> Context -> Text -> Text -> Maybe (FormInput, FormInput) -> Maybe FormInput -> IO ()
+storeFieldEdit owner ctx prefix fieldKey draft published =
   modifyStoredForm owner ctx prefix $ \stored ->
-    stored {sfDrafts = Map.alter (const draft) fieldKey (sfDrafts stored)}
+    stored
+      { sfDrafts = Map.alter (const draft) fieldKey (sfDrafts stored)
+      , sfState = maybe id (\v fss -> fss {fssInputs = Map.insert fieldKey v (fssInputs fss)}) published (sfState stored)
+      }
 
 -- | Mark a form as submitted.
 markFormSubmitted :: FormState -> Context -> Text -> Bool -> IO ()

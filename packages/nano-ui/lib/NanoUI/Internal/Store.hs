@@ -192,7 +192,7 @@ fieldGrid = Field storeGrid (\m st -> st {storeGrid = m})
 fieldTableColumns :: Field ([Int], [Float])
 fieldTableColumns = Field storeTableColumns (\m st -> st {storeTableColumns = m})
 
--- | Read-only paragraph selection, independent of its measurement cache.
+-- | A selectable paragraph's selection, kept apart from its measurement cache.
 fieldRichSelection :: Field RichSelection
 fieldRichSelection = Field storeRichSelection (\m st -> st {storeRichSelection = m})
 

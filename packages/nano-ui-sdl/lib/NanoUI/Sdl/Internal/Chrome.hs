@@ -45,7 +45,6 @@ module NanoUI.Sdl.Internal.Chrome
 
 import Control.Monad (void, when)
 import Data.Bits (zeroBits, (.&.))
-import Data.Foldable (for_)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isNothing)
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
@@ -56,7 +55,7 @@ import NanoUI
 import NanoUI.Sdl.Internal.Chrome.Types
 import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Frame
-import NanoUI.Sdl.Internal.Window (SdlEnv (..), askSdlEnv, windowZoom, withSdlEnv)
+import NanoUI.Sdl.Internal.Window (SdlEnv (..), windowZoom, withSdlEnv)
 import SDL3.Sys.Bindgen.Video (SDL_HitTest (..), SDL_HitTestResult (..), SDL_WindowFlags)
 import SDL3.Sys.Video qualified as SDL
 
@@ -231,19 +230,21 @@ defaultCaptionOptions =
 windowCaptionWith :: CaptionOptions -> [Rect] -> NanoUI Bool
 windowCaptionWith opts taken = do
   width <- windowWidth
-  session <- askSdlEnv
-  flags <- maybe (pure zeroBits) (liftIO . windowFlagsOf) session
-  let maxed = hasFlag SDL.SDL_WINDOW_MAXIMIZED flags
-      fullscreen = hasFlag SDL.SDL_WINDOW_FULLSCREEN flags
-      immovable = maxed || fullscreen || not (hasFlag SDL.SDL_WINDOW_RESIZABLE flags)
+  -- Maximized and fullscreen come from the state every backend reports; only
+  -- handing the drag region over needs the SDL session.
+  win <- askWindow
+  let maxed = winMaximized win
+      fullscreen = winFullscreen win
       -- The close button's corner is the window's, and a window that fills
       -- the screen has square ones.
       cfg
         | maxed || fullscreen = (capButtons opts) {capCornerRadius = 0}
         | otherwise = capButtons opts
   (action, buttons) <- captionButtonsConfigured cfg maxed
-  liftIO $
-    for_ session $ \env -> when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
+  withSdlEnv () $ \env -> do
+    flags <- windowFlagsOf env
+    let immovable = maxed || fullscreen || not (hasFlag SDL.SDL_WINDOW_RESIZABLE flags)
+    when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
       setWindowChrome
         env
         WindowChrome
@@ -264,16 +265,16 @@ windowCaptionWith opts taken = do
 -- does this for a view that draws the usual three buttons; this is for one
 -- that draws something else.
 setWindowChromeUi :: WindowChrome -> NanoUI ()
-setWindowChromeUi chrome = withSdlEnv () (\env -> liftIO (setWindowChrome env chrome))
+setWindowChromeUi chrome = withSdlEnv () (`setWindowChrome` chrome)
 
 -- | 'clearWindowChrome' from a view.
 clearWindowChromeUi :: NanoUI ()
-clearWindowChromeUi = withSdlEnv () (liftIO . clearWindowChrome)
+clearWindowChromeUi = withSdlEnv () clearWindowChrome
 
 -- | 'setWindowDecorations' from a view.
 setWindowDecorationsUi :: WindowDecorations -> NanoUI ()
-setWindowDecorationsUi d = withSdlEnv () (\env -> liftIO (setWindowDecorations env d))
+setWindowDecorationsUi d = withSdlEnv () (`setWindowDecorations` d)
 
 -- | 'setWindowShadow' from a view.
 setWindowShadowUi :: Bool -> NanoUI ()
-setWindowShadowUi on = withSdlEnv () (\env -> liftIO (setWindowShadow env on))
+setWindowShadowUi on = withSdlEnv () (`setWindowShadow` on)

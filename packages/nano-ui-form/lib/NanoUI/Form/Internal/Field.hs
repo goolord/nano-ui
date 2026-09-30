@@ -38,7 +38,7 @@ import NanoUI.Form.Internal.Backend
    , FormScope (..)
    , askFormScope
   , fieldDraft
-  , setFieldDraft
+  , storeFieldEdit
   , updateFieldInput
   )
 import NanoUI.Form.Types (Form, FormView (..))
@@ -96,6 +96,8 @@ fieldView ::
 fieldView (FormScope owner prefix) draftValue publish encode widget formId value = FormView $ withKey fieldKey $ do
   ctx <- askContext
   case publish of
+    OnChange -> immediate ctx (const False)
+    OnChangeOr changed -> immediate ctx changed
     OnlyWhen commit -> do
       let current = encode value
       pending <- liftIO (fieldDraft owner prefix fieldKey)
@@ -104,23 +106,20 @@ fieldView (FormScope owner prefix) draftValue publish encode widget formId value
             Just (base, draft) | base == current, Just held <- draftValue draft -> held
             _ -> value
       (response, newValue) <- widget shown
-      liftIO $
-        if commit response
-          then do
-            setFieldDraft owner ctx prefix fieldKey Nothing
-            updateFieldInput owner ctx prefix fieldKey (encode newValue)
-          else
-            setFieldDraft owner ctx prefix fieldKey $
-              if newValue == value then Nothing else Just (current, encode newValue)
-    _ -> do
-      (response, newValue) <- widget value
-      let signalled = case publish of
-            OnChangeOr changed -> changed response
-            _ -> False
-      when (signalled || newValue /= value) $
-        liftIO (updateFieldInput owner ctx prefix fieldKey (encode newValue))
+      let committed = commit response
+          draft
+            | committed || newValue == value = Nothing
+            | otherwise = Just (current, encode newValue)
+          published = if committed then Just (encode newValue) else Nothing
+      -- An idle field has no draft and publishes nothing, so writes nothing.
+      when (draft /= pending || committed) $
+        liftIO (storeFieldEdit owner ctx prefix fieldKey draft published)
  where
   fieldKey = encodeFormId formId
+  immediate ctx changed = do
+    (response, newValue) <- widget value
+    when (changed response || newValue /= value) $
+      liftIO (updateFieldInput owner ctx prefix fieldKey (encode newValue))
 
 decodeBool :: Bool -> FormInput -> Bool
 decodeBool _ (FormInputBool value) = value

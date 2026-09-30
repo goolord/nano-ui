@@ -30,7 +30,9 @@ runSvgFitContentTest ctx failed = do
       contentOf ui = do
         writeIORef (ctxSvgRasters ctx) Map.empty
         _ <- warmupDraw ctx inp ui
-        map (\(_, _, _, _, content) -> content) . Map.keys <$> readIORef (ctxSvgRasters ctx)
+        -- The key holds the content rect in eighths of a raster pixel.
+        let pixels v = fromIntegral v / 8 :: Float
+        map (\(_, _, _, _, (x, y, w, h)) -> (pixels x, pixels y, pixels w, pixels h)) . Map.keys <$> readIORef (ctxSvgRasters ctx)
   assertEq failed [(-10, 0, 40, 20)] =<< contentOf (icon FitCover AlignCenter)
   assertEq failed [(0, 0, 40, 20)] =<< contentOf (icon FitCover AlignStart)
   assertEq failed [(0, 0, 20, 20)] =<< contentOf (icon FitFill AlignCenter)

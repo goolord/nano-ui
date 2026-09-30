@@ -482,8 +482,8 @@ askSdlEnv = askBackendSession SSdl
 
 -- | Run with the open session's environment, or answer @outside@ when no
 -- session is open.
-withSdlEnv :: a -> (SdlEnv -> NanoUI a) -> NanoUI a
-withSdlEnv outside k = askSdlEnv >>= maybe (pure outside) k
+withSdlEnv :: a -> (SdlEnv -> IO a) -> NanoUI a
+withSdlEnv outside k = askSdlEnv >>= maybe (pure outside) (liftIO . k)
 
 startSdlWindow ::
   Bool -> SdlOptions -> Context -> Bool -> FontSource -> FontSource -> Acquire (Context, SdlEnv)

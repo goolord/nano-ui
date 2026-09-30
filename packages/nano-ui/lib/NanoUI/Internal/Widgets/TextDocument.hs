@@ -95,9 +95,7 @@ editDocument e = bufferDocument . TB.applyEdit e . documentBuffer
 --
 -- > replaceDocumentRange (Cursor 0 0) (Cursor 0 5) "Hello" doc
 replaceDocumentRange :: TB.Cursor -> TB.Cursor -> Text -> TextDocument -> TextDocument
-replaceDocumentRange a b inserted doc =
-  let buf = documentBuffer doc
-   in bufferDocument (TB.applyEdit (TB.replaceEdit inserted a b buf) buf)
+replaceDocumentRange a b inserted doc = editDocument (TB.replaceEdit inserted a b (documentBuffer doc)) doc
 
 -- | The document a buffer holds, sharing its lines, in O(1). The buffer's
 -- lines must not contain newlines, as no buffer built by 'TB.fromText' or

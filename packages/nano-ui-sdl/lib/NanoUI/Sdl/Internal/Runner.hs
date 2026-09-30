@@ -245,42 +245,40 @@ ensureRetain env w h scale = do
 -- times per second; 'Nothing' outside a session. Repeated queries keep the
 -- debug sampler active and can schedule periodic frames.
 askSdlDebug :: NanoUI (Maybe SdlDebugSnapshot)
-askSdlDebug = withSdlEnv Nothing (fmap Just . liftIO . sdlDebugSnapshot)
+askSdlDebug = withSdlEnv Nothing (fmap Just . sdlDebugSnapshot)
 
 -- | 'askSdlDebug' for an explicit session, from IO.
 sdlDebugSnapshot :: SdlEnv -> IO SdlDebugSnapshot
-sdlDebugSnapshot = sample
-  where
-    sample env = do
-      -- The display is queried only when the snapshot refreshes.
-      refreshDebugSnapshot (sdlDebug env) (sdlDebugPublished env) $ \core -> do
-        scale <- readIORef (sdlScaleRef env)
-        fontSource <- sdlFontCacheSource (sdlFontCache env)
-        Size ww wh <- queryWindowLogicalSize (sdlWindow env)
-        V2 mx my <- queryMouseWindowPos
-        let snap =
-              SdlDebugSnapshot
-                { dbgCore = core {dbgWinW = ww, dbgWinH = wh, dbgMouseX = mx, dbgMouseY = my}
-                , dbgScale = scale
-                , dbgFontPath = fontSourceLabel fontSource
-                , dbgRenderer = sdlRendererName env
-                , dbgVsync = sdlVsync env
-                , dbgRefreshHz = round (1 / sdlRefreshPeriod env)
-                }
-        when (sdlFrameTrace env) (traceFrame snap)
-        pure snap
+sdlDebugSnapshot env = do
+  -- The display is queried only when the snapshot refreshes.
+  refreshDebugSnapshot (sdlDebug env) (sdlDebugPublished env) $ \core -> do
+    scale <- readIORef (sdlScaleRef env)
+    fontSource <- sdlFontCacheSource (sdlFontCache env)
+    Size ww wh <- queryWindowLogicalSize (sdlWindow env)
+    V2 mx my <- queryMouseWindowPos
+    let snap =
+          SdlDebugSnapshot
+            { dbgCore = core {dbgWinW = ww, dbgWinH = wh, dbgMouseX = mx, dbgMouseY = my}
+            , dbgScale = scale
+            , dbgFontPath = fontSourceLabel fontSource
+            , dbgRenderer = sdlRendererName env
+            , dbgVsync = sdlVsync env
+            , dbgRefreshHz = round (1 / sdlRefreshPeriod env)
+            }
+    when (sdlFrameTrace env) (traceFrame snap)
+    pure snap
 
 -- | Request a UI font family. The SDL display thread resolves and applies it
 -- before the next frame (see 'NanoUI.Sdl.Internal.Window.syncDisplay'), rebuilding the
 -- glyph atlas and text resolver.
 setSdlUiFont :: NanoUIFont -> NanoUI ()
-setSdlUiFont font = withSdlEnv () $ \env -> liftIO (writeIORef (sdlFontRequestRef env) font)
+setSdlUiFont font = withSdlEnv () $ \env -> writeIORef (sdlFontRequestRef env) font
 
 -- | Set the UI scale (see 'NanoUI.Sdl.Internal.Window.sdlAppUiScale'): a zoom on top
 -- of the pixel density, or zero or less to follow the display. The display
 -- thread applies it before the next frame, which this wakes.
 setSdlUiScale :: Float -> NanoUI ()
-setSdlUiScale s = withSdlEnv () (liftIO . request)
+setSdlUiScale s = withSdlEnv () request
   where
     request host = do
       cur <- readIORef (sdlUiScaleRef host)

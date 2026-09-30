@@ -913,8 +913,9 @@ data Context = Context
   -- ('NanoUI.Internal.Context.withBackendSession').
   , ctxSensors :: !(Host Sensors)
   , ctxParagraphs :: !(Host Paragraphs)
-  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Float, Float, Float, Float)) ImageId))
-  -- ^ SVG rasters by document, pixel size, colour and content rect.
+  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Int, Int, Int, Int)) ImageId))
+  -- ^ SVG rasters by document, pixel size, colour and content rect (in
+  -- eighths of a raster pixel).
   -- Whole-layout reuse cache: cached signature and solved rects,
   -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))

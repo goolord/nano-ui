@@ -167,7 +167,7 @@ richTextWithMode' selectable f pieces = do
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
       measured <- newIORef Unmeasured
       inputsRef <- newIORef inputs
-      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured plainInput (TB.fromText plainInput))
+      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured (if selectable then plainInput else T.empty) (TB.fromText plainInput))
   -- Forced, so selection sync compares this address rather than a selector thunk.
   let !plain = paraText para0
   when (selectable && not (T.null plain)) (liftIO (registerFocusable ctx wid))
@@ -184,7 +184,7 @@ richTextWithMode' selectable f pieces = do
   (selection, dragReleased) <-
     if selectable
       then do
-        (current, dragged) <- updateSelection ctx inp wid resp plain (paraBuffer para) (paraLines para)
+        (current, dragged) <- updateSelection ctx inp wid resp plain (paraBuffer para0) (paraLines para)
         pure (Just current, dragged)
       else pure (Nothing, False)
   focused <- if selectable then keyboardFocused wid else pure False
@@ -260,7 +260,7 @@ richTextWithMode' selectable f pieces = do
               DecorationStrikethrough -> [strike]
               DecorationUnderlineStrike -> [under, strike]
               DecorationNone -> []
-      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap selectionKey selection `hashWithSalt` focused
+      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection `hashWithSalt` focused
   liftIO $ do
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $ do
       ParagraphCache n bound m <- readIORef cacheRef
@@ -302,7 +302,7 @@ updateSelection ctx inp wid resp plain buffer lines' = do
   let key = intKey wid
       initial = RichSelection plain (TB.Cursor 0 0) (TB.Cursor 0 0) False False 0 0
   !stored <- liftIO (findSlot fieldRichSelection initial key <$> getStore ctx)
-  let synced = syncSelection plain buffer stored
+  let synced = syncSelection plain stored
   focused <- keyboardFocused wid
   commands <- if focused then liftIO (fieldTextCommands ctx readOnlyMode inp) else pure []
   afterKeys <-
@@ -319,17 +319,17 @@ updateSelection ctx inp wid resp plain buffer lines' = do
   (next, dragReleased) <-
     if press
       then do
-        let pos = cursorAtPoint plain lines' (respRect resp) mouse
+        let pos = pointAt plain lines' (respRect resp) mouse
         requestFocus wid
-        pure (selectionIn plain pos pos held False, False)
+        pure (selectionAt plain pos pos held False, False)
       else
         if selectionDragging afterKeys && (held || released)
           then do
-            let pos = cursorAtPoint plain lines' (respRect resp) mouse
-                dragAnchor = selectionAnchor afterKeys
-                didMove = selectionMoved afterKeys || pos /= dragAnchor
+            let pos = pointAt plain lines' (respRect resp) mouse
+                dragAnchor = (selectionAnchor afterKeys, anchorOffset afterKeys)
+                didMove = selectionMoved afterKeys || fst pos /= fst dragAnchor
             pure
-              ( selectionIn plain dragAnchor pos held (didMove && held)
+              ( selectionAt plain dragAnchor pos held (didMove && held)
               , released && didMove
               )
           else
@@ -343,33 +343,42 @@ updateSelection ctx inp wid resp plain buffer lines' = do
 readOnlyMode :: EditorMode
 readOnlyMode = multiLineMode {modeEditable = False}
 
-syncSelection :: Text -> TB.TextBuffer -> RichSelection -> RichSelection
-syncSelection plain buffer previous
+-- | The stored selection over the paragraph's current text. Changed text
+-- keeps the selection's offsets, clamped to its length, without building a
+-- text buffer.
+syncSelection :: Text -> RichSelection -> RichSelection
+syncSelection plain previous
   | ptrEq (selectionText previous) plain = previous
   -- A rebuilt paragraph has equal text at a new address: adopt it once, so
   -- later passes compare by pointer rather than by content.
   | selectionText previous == plain = previous {selectionText = plain}
   | otherwise =
-      selectionIn plain (TB.clampCursor buffer (selectionAnchor previous)) (TB.clampCursor buffer (selectionCursor previous)) False False
+      let clamped o = let o' = min (T.length plain) o in (cursorAtOffset plain o', o')
+          cursorOff = if selectionCursor previous < selectionAnchor previous then selectionStart previous else selectionEnd previous
+       in selectionAt plain (clamped (anchorOffset previous)) (clamped cursorOff) False False
 
 selectionEditor :: TB.TextBuffer -> RichSelection -> Editor
 selectionEditor buffer selection =
   Editor (TB.withCursor (selectionCursor selection) buffer) (selectionAnchor selection) emptyHistory
 
--- Cache document offsets only when selection changes, not on every idle pass.
-selectionIn :: Text -> TB.Cursor -> TB.Cursor -> Bool -> Bool -> RichSelection
-selectionIn txt anchor cursor dragging moved =
-  let a = cursorOffset txt anchor
-      c = cursorOffset txt cursor
-   in RichSelection txt anchor cursor dragging moved (min a c) (max a c)
+-- | A selection between two positions whose document offsets are known, so
+-- drawing reads them rather than walking the text each pass.
+selectionAt :: Text -> (TB.Cursor, Int) -> (TB.Cursor, Int) -> Bool -> Bool -> RichSelection
+selectionAt txt (anchor, a) (cursor, c) dragging moved =
+  RichSelection txt anchor cursor dragging moved (min a c) (max a c)
 
-selectionKey :: RichSelection -> (Int, Int)
-selectionKey selection = (selectionStart selection, selectionEnd selection)
+-- | 'selectionAt' for positions a text command left, which carry no offset.
+selectionIn :: Text -> TB.Cursor -> TB.Cursor -> Bool -> Bool -> RichSelection
+selectionIn txt anchor cursor = selectionAt txt (anchor, cursorOffset txt anchor) (cursor, cursorOffset txt cursor)
+
+-- | The anchor's document offset: whichever end of the range it is.
+anchorOffset :: RichSelection -> Int
+anchorOffset s = if selectionAnchor s <= selectionCursor s then selectionStart s else selectionEnd s
 
 selectionOffsets :: RichSelection -> Maybe (Int, Int)
-selectionOffsets selection =
-  let (lo, hi) = selectionKey selection
-   in if lo == hi then Nothing else Just (lo, hi)
+selectionOffsets s
+  | selectionStart s == selectionEnd s = Nothing
+  | otherwise = Just (selectionStart s, selectionEnd s)
 
 -- | Draw the selected portions of each laid-out token with the theme's native
 -- selection colour, preserving the paragraph's per-run font shaping.
@@ -390,11 +399,12 @@ selectionOps x0 y0 line lo hi color = concatMap drawToken (lineTokens line)
               | (sx, ex) <- selectionSpans fm txt (a - start) (b - start)
               ]
 
-cursorAtPoint :: Text -> [Line] -> Rect -> V2 -> TB.Cursor
-cursorAtPoint plain lines' (Rect rx ry _ _) (V2 px py) =
+-- | The position under a point, and its document offset.
+pointAt :: Text -> [Line] -> Rect -> V2 -> (TB.Cursor, Int)
+pointAt plain lines' (Rect rx ry _ _) (V2 px py) =
   let line = lineAtY (py - ry) lines'
-      offset = tokenIndexAtX line (px - rx)
-   in cursorAtOffset plain offset
+      offset = max 0 (min (T.length plain) (tokenIndexAtX line (px - rx)))
+   in (cursorAtOffset plain offset, offset)
 
 lineAtY :: Float -> [Line] -> Line
 lineAtY y = go

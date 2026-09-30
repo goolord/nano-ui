@@ -145,6 +145,13 @@ spec = before newMarkdownCache $ do
     held <- markdownCacheSize cache
     held `shouldSatisfy` (<= 2048)
     held `shouldSatisfy` (>= 50)
+  it "keeps every block a frame draws when documents share it" $ \cache -> do
+    ctx <- newContext
+    let doc = parseMarkdown (T.intercalate "\n\n" ["paragraph " <> T.pack (show i) | i <- [1 .. 50 :: Int]])
+        docs = forM_ [1 .. 60 :: Int] $ \i -> withKey i (markdown cache doc)
+    replicateM_ 4 (void (runFrame ctx (withInput 600 400) docs))
+    held <- markdownCacheSize cache
+    held `shouldSatisfy` (>= 3000)
   it "draws every kind of block's text" $ \cache -> do
     ctx <-
       drawn 600 800 . view cache . parseMarkdown $

@@ -199,9 +199,13 @@ svgIconConfigured' cfg doc = do
     scale <- getDrawSnapScale (ctxDrawArena ctx)
     let pw = max 1 (ceiling (bw * max 1 scale))
         ph = max 1 (ceiling (bh * max 1 scale))
-        kx = fromIntegral pw / bw
-        ky = fromIntegral ph / bh
-        content = (cx * kx, cy * ky, cw * kx, ch * ky)
+        -- A zero-sized rect draws nothing, so its content is empty rather
+        -- than infinite.
+        per px b = if b > 0 then fromIntegral px / b else 0
+        -- The content rect in eighths of a raster pixel: sizes a hair apart
+        -- share a raster, and the key compares whole numbers.
+        eighths v = round (v * 8) :: Int
+        content@(qx, qy, qw, qh) = (eighths (cx * per pw bw), eighths (cy * per ph bh), eighths (cw * per pw bw), eighths (ch * per ph bh))
         -- A one-colour raster is white and tinted when drawn, so every colour
         -- shares it.
         rasterColor = if oneColour then white else color
@@ -212,8 +216,8 @@ svgIconConfigured' cfg doc = do
       Just iid -> pure iid
       Nothing -> do
         iid <- Atlas.freshImageId (ctxImageAtlas ctx)
-        let (x, y, cw', ch') = content
-        ok <- registerImage ctx iid pw ph (rasterizeSvgIn pw ph (Rect x y cw' ch') rasterColor doc)
+        let placed = Rect (fromIntegral qx / 8) (fromIntegral qy / 8) (fromIntegral qw / 8) (fromIntegral qh / 8)
+        ok <- registerImage ctx iid pw ph (rasterizeSvgIn pw ph placed rasterColor doc)
         when ok $ modifyIORef' cache (Map.insert key iid)
         pure (if ok then iid else ImageId 0)
   imageConfigured' cfg {icLayout = const lay, icFit = FitFill, icAlignX = AlignCenter, icAlignY = AlignMiddle} iid
