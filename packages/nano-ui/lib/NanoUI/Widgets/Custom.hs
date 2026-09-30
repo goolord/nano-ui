@@ -9,8 +9,8 @@
 -- pointer tracking; 'drawContext' gives the drawing hover and press state.
 -- 'useDrag2DOn' and 'useWheelDeltaOn' are gesture hooks that take the
 -- widget's 'Response'; 'knob' and 'toggleSwitch' show them in use. Each
--- reference widget comes as @x@ at its default size, and as @xWith'@, which
--- takes a layout modifier and a size and also returns the 'Response'.
+-- reference widget follows the ordinary @x@, @x'@, @xWith@ and @xWith'@
+-- convention: a prime adds the 'Response', and @With@ accepts layout and size.
 module NanoUI.Widgets.Custom
   ( -- * Custom widgets
     CustomWidgetSpec (..)
@@ -72,16 +72,28 @@ module NanoUI.Widgets.Custom
   , useWheelDelta
     -- * Reference widgets
   , knob
+  , knob'
+  , knobWith
   , knobWith'
   , toggleSwitch
+  , toggleSwitch'
+  , toggleSwitchWith
   , toggleSwitchWith'
   , circularProgress
+  , circularProgress'
+  , circularProgressWith
   , circularProgressWith'
   , spinner
+  , spinner'
+  , spinnerWith
   , spinnerWith'
   , progressBar
+  , progressBar'
+  , progressBarWith
   , progressBarWith'
   , sparkline
+  , sparkline'
+  , sparklineWith
   , sparklineWith'
   ) where
 
@@ -369,6 +381,14 @@ wheelIf on = do
 knob :: Float -> Float -> Float -> NanoUI Float
 knob minV maxV value = snd <$> knobWith' id 36 minV maxV value
 
+-- | 'knob' returning its response.
+knob' :: Float -> Float -> Float -> NanoUI (Response, Float)
+knob' = knobWith' id 36
+
+-- | 'knob' with a layout modifier and diameter.
+knobWith :: (Layout -> Layout) -> Float -> Float -> Float -> Float -> NanoUI Float
+knobWith f diameter lo hi value = snd <$> knobWith' f diameter lo hi value
+
 -- | 'knob' with a layout modifier and a diameter in pixels, returning the
 -- response and the updated value.
 knobWith' ::
@@ -425,6 +445,14 @@ knobWith' f diameter minV maxV value = do
 toggleSwitch :: Bool -> NanoUI Bool
 toggleSwitch on = snd <$> toggleSwitchWith' id on
 
+-- | 'toggleSwitch' returning its response.
+toggleSwitch' :: Bool -> NanoUI (Response, Bool)
+toggleSwitch' = toggleSwitchWith' id
+
+-- | 'toggleSwitch' with a layout modifier.
+toggleSwitchWith :: (Layout -> Layout) -> Bool -> NanoUI Bool
+toggleSwitchWith f on = snd <$> toggleSwitchWith' f on
+
 -- | 'toggleSwitch' with a layout modifier, returning the response and the
 -- updated flag.
 toggleSwitchWith' ::
@@ -459,6 +487,14 @@ toggleSwitchWith' f on = do
 circularProgress :: Float -> NanoUI ()
 circularProgress frac = void (circularProgressWith' id 32 frac)
 
+-- | 'circularProgress' returning its response.
+circularProgress' :: Float -> NanoUI Response
+circularProgress' = circularProgressWith' id 32
+
+-- | 'circularProgress' with a layout modifier and diameter.
+circularProgressWith :: (Layout -> Layout) -> Float -> Float -> NanoUI ()
+circularProgressWith f diameter = void . circularProgressWith' f diameter
+
 -- | 'circularProgress' with a layout modifier and a diameter in pixels,
 -- returning its response.
 circularProgressWith' :: (Layout -> Layout) -> Float -> Float -> NanoUI Response
@@ -480,6 +516,14 @@ circularProgressWith' f diameter frac =
 {-# INLINE spinner #-}
 spinner :: NanoUI ()
 spinner = void (spinnerWith' id 18)
+
+-- | 'spinner' returning its response.
+spinner' :: NanoUI Response
+spinner' = spinnerWith' id 18
+
+-- | 'spinner' with a layout modifier and diameter.
+spinnerWith :: (Layout -> Layout) -> Float -> NanoUI ()
+spinnerWith f = void . spinnerWith' f
 
 -- | 'spinner' with a layout modifier and a diameter in pixels, returning its
 -- response. It requests animation frames while declared.
@@ -512,6 +556,14 @@ spinnerWith' f diameter = do
 progressBar :: Float -> NanoUI ()
 progressBar frac = void (progressBarWith' id progressBarDefaultHeight frac)
 
+-- | 'progressBar' returning its response.
+progressBar' :: Float -> NanoUI Response
+progressBar' = progressBarWith' id progressBarDefaultHeight
+
+-- | 'progressBar' with a layout modifier and height.
+progressBarWith :: (Layout -> Layout) -> Float -> Float -> NanoUI ()
+progressBarWith f height = void . progressBarWith' f height
+
 -- | 'progressBar' with a layout modifier and a height in pixels, returning
 -- its response.
 progressBarWith' :: (Layout -> Layout) -> Float -> Float -> NanoUI Response
@@ -542,6 +594,14 @@ progressBarDefaultWidth = 120.0
 {-# INLINE sparkline #-}
 sparkline :: [Float] -> NanoUI ()
 sparkline values = void (sparklineWith' id 80 24 values)
+
+-- | 'sparkline' returning its response.
+sparkline' :: [Float] -> NanoUI Response
+sparkline' = sparklineWith' id 80 24
+
+-- | 'sparkline' with a layout modifier, width and height.
+sparklineWith :: (Layout -> Layout) -> Float -> Float -> [Float] -> NanoUI ()
+sparklineWith f w h = void . sparklineWith' f w h
 
 -- | 'sparkline' with a layout modifier and a preferred size, returning its
 -- response.

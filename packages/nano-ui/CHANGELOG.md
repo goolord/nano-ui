@@ -2,6 +2,10 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Restored the primed and layout-only convenience variants of custom reference
+  widgets (`knob`, `toggleSwitch`, progress widgets, `spinner`, `sparkline`),
+  keeping their naming consistent with ordinary controls.
+
 ### Typed emission package (breaking)
 
 - Moved `NanoUI.Emit`, reducer runners, and reducer testing helpers to
@@ -1293,10 +1297,6 @@
   `textAreaBarLane` and `textAreaLineHeight`), and `resizeFromEdge` and `windowResizeEdgeAt`
   from `NanoUI.Frame.Window`.
 - `keyed`, an alias of `withKey`.
-- The `x'` and `xWith` forms of `knob`, `toggleSwitch`, `circularProgress`,
-  `spinner`, `progressBar` and `sparkline`. Each keeps `x`, at its default
-  size, and `xWith'`, which takes a layout modifier and a size and returns
-  the `Response` too.
 - `emptyInputKeys` and `emptyDropEvents` from `NanoUI.Backend` and
   `NanoUI.Input`; use `mempty`.
 
