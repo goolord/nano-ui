@@ -62,6 +62,7 @@ import NanoUI.Backend.Rgfw
   , RgfwDebugSampler
   )
 import NanoUI.Emit qualified as Emit
+import Data.Hashable (Hashable (..))
 
 data TabChoice
   = TabControls
@@ -69,6 +70,9 @@ data TabChoice
   | TabAbout
   | TabDiagnostics
   deriving (Bounded, Enum, Eq, Show)
+
+instance Hashable TabChoice where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 data ThemeChoice
   = ThemeNight

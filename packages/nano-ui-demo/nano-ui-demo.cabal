@@ -87,6 +87,7 @@ library demo-common
     build-depends:
         bytestring ^>=0.12,
         diagrams-lib >=1.6 && <1.7,
+        hashable ^>=1.5,
         filepath ^>=1.5,
         JuicyPixels ^>=3.3,
         nano-ui ^>=0.2,

@@ -2,6 +2,10 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** tab widgets require `Hashable` keys. Header, adornment and body
+  state now follow `tabKey` through reordering and removal, rather than the
+  tab's position in the list. Derive or implement `Hashable` for custom keys.
+
 - `NanoUI.Backend` now includes context construction, frame execution,
   rendering buffers, text spans, atlas updates, cursor resolution and damage
   extraction. `NanoUI.Runner` exports the opaque debug sampler and constructor

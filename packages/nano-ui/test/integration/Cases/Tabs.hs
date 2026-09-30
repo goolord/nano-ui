@@ -1,6 +1,7 @@
 module Cases.Tabs (tests) where
 
 import Spec
+import Data.Hashable (Hashable (..))
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Sequence qualified as Seq
@@ -19,6 +20,7 @@ tests =
   , spec "tabs-range-damage" runTabsRangeDamageTest
   , spec "tabs-state-persistence" runTabsStatePersistenceTest
   , spec "tabs-bodies-apart" runTabsBodiesApartTest
+  , spec "tabs-keyed-reorder-state" runTabsKeyedReorderTest
   , spec "tabs-damage" runTabsDamageTest
   , spec "tab-response-forwarding" runTabResponseForwardingTest
   , spec "tabs-contained-body-damage" runTabsContainedBodyDamageTest
@@ -30,7 +32,39 @@ tests =
   ]
 
 data DummyTab = TabA | TabB | TabC
-  deriving (Eq, Show)
+  deriving (Eq, Show, Enum)
+
+instance Hashable DummyTab where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
+
+-- Header focus and body-local state follow the key, not the list position.
+runTabsKeyedReorderTest :: Context -> IORef Int -> IO ()
+runTabsKeyedReorderTest ctx failed = do
+  seen <- newIORef Nothing
+  let inp = withInputOff 500 250
+      body key = do
+        (n, setN) <- useInt 0
+        (field, _) <- textInput' (T.pack (show key))
+        liftIO (writeIORef seen (Just (n, setN, respId field)))
+      ui active order = tabs' active [tab key (T.pack (show key)) (body key) | key <- order]
+      readBody = readIORef seen >>= maybe (fail "tab body did not run") pure
+  original <- warmup2 ctx inp (ui TabB [TabA, TabB, TabC])
+  (_, setN, fieldId) <- readBody
+  runNanoUI ctx inp (setN 7)
+  writeIORef (ctxFocusId ctx) fieldId
+  forM_ [[TabC, TabA, TabB], [TabB, TabC], [TabC, TabB]] $ \order -> do
+    moved <- warmup2 ctx inp (ui TabB order)
+    (n, _, fieldId') <- readBody
+    assertEq failed (7, fieldId) (n, fieldId')
+    assertEq failed fieldId =<< getFocusId ctx
+    forM_ order $ \key ->
+      assertEq failed (respId <$> lookup key (tabHeaders original)) (respId <$> lookup key (tabHeaders moved))
+  _ <- warmup2 ctx inp (ui TabC [TabC, TabB])
+  (other, _, _) <- readBody
+  assertEq failed 0 other
+  _ <- warmup2 ctx inp (ui TabB [TabC, TabB])
+  (kept, _, _) <- readBody
+  assertEq failed 7 kept
 
 runVerticalDropBoundsTest :: Context -> IORef Int -> IO ()
 runVerticalDropBoundsTest ctx failed = do

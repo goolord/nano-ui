@@ -9,9 +9,10 @@ module NanoUI.Internal.Widgets.Tabs
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad (when, zipWithM)
+import Control.Monad (when)
 import Data.Bits ((.|.))
 import Data.Foldable (toList)
+import Data.Hashable (Hashable (..))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -47,9 +48,15 @@ data TabStyle
   -- 'tabs' draws round the tab's content.
   deriving (Eq, Show, Enum, Bounded)
 
+instance Hashable TabStyle where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
+
 -- | Header strip position relative to the selected tab's body.
 data TabOrientation = TabTop | TabBottom | TabLeft | TabRight
   deriving (Eq, Show, Enum, Bounded)
+
+instance Hashable TabOrientation where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 -- | Header look and placement for 'tabsConfigured' and 'tabBarConfigured'.
 data TabsConfig = TabsConfig
@@ -136,7 +143,7 @@ tagTabChrome wid part style orient = do
       setStyleIdx (ctxNodeArena ctx) parent (tabChromeEncode part (fromEnum style) (fromEnum orient))
 
 tabStrip ::
-  Eq a =>
+  Hashable a =>
   TabsConfig ->
   a ->
   [Tab a body] ->
@@ -319,7 +326,7 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
 -- headers show the clicked tab as selected at once; without it they show
 -- @cur@, the key passed in.
 renderHeaders ::
-  Eq a =>
+  Hashable a =>
   Context ->
   TabStyle ->
   TabOrientation ->
@@ -328,7 +335,7 @@ renderHeaders ::
   [Tab a body] ->
   NanoUI (TabResponse a)
 renderHeaders ctx style orient follow cur tabList = do
-  hdrs <- zipWithM (\i t -> withKey i (renderHeader style orient cur t)) [0 :: Int ..] tabList
+  hdrs <- mapM (\t -> withKey (tabKey t) (renderHeader style orient cur t)) tabList
   let clickedKeys = [k | (k, r, False) <- hdrs, respClicked r]
       closedKey = listToMaybe [k | (k, _, True) <- hdrs]
       keyed = [(k, r) | (k, r, _) <- hdrs]
@@ -382,26 +389,26 @@ tabBadgeView col txt =
 -- the active key after this frame's clicks, or Enter or Space on a focused
 -- header. Only the active tab's body runs.
 {-# INLINE tabs #-}
-tabs :: (Foldable f, Eq a) => a -> f (Tab a (NanoUI ())) -> NanoUI a
+tabs :: (Foldable f, Hashable a) => a -> f (Tab a (NanoUI ())) -> NanoUI a
 tabs = tabsConfigured defaultTabsConfig
 
 -- | 'tabs' returning the 'TabResponse', which also reports a closed tab.
 {-# INLINE tabs' #-}
-tabs' :: (Foldable f, Eq a) => a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
+tabs' :: (Foldable f, Hashable a) => a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
 tabs' = tabsConfigured' defaultTabsConfig
 
 -- | 'tabs' with a header style and placement.
-tabsConfigured :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI a
+tabsConfigured :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI a
 tabsConfigured cfg active = fmap tabActive . tabsConfigured' cfg active
 
 -- | 'tabsConfigured' with selection, close requests, and header interaction details.
-tabsConfigured' :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
+tabsConfigured' :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
 tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
   where
     ts = toList inputTabs
     -- Only the active tab's body runs, or the first tab's when none matches.
-    -- Each tab's body is keyed by its place in the list, so bodies at the same
-    -- position in different tabs do not share widget ids and state.
+    -- Both bodies and headers use the semantic key: their widget state and
+    -- focus follow the tab through reordering and removal of neighbours.
     -- A contained body is a bordered surface the selected header opens onto.
     body k = do
       let contained = tabsStyle cfg == TabContained
@@ -411,25 +418,24 @@ tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
       columnWith (surface . tight . fillW) $ do
         mapM_ (\wid -> tagTabChrome wid TabChromeBody (tabsStyle cfg) (tabsOrientation cfg)) bodyId
         mapM_
-          (\(i, t) -> withKey (i :: Int) (tabBody t))
-          (find ((== k) . tabKey . snd) its <|> listToMaybe its)
-    its = zip [0 ..] ts
+          (\t -> withKey (tabKey t) (tabBody t))
+          (find ((== k) . tabKey) ts <|> listToMaybe ts)
 
 -- | Tab headers only; the caller renders the body.
 {-# INLINE tabBar #-}
-tabBar :: (Foldable f, Eq a) => a -> f (Tab a body) -> NanoUI a
+tabBar :: (Foldable f, Hashable a) => a -> f (Tab a body) -> NanoUI a
 tabBar = tabBarConfigured defaultTabsConfig
 
 {-# INLINE tabBar' #-}
 -- | Header-only 'tabBar' with selection and close requests. Does not run tab bodies.
-tabBar' :: (Foldable f, Eq a) => a -> f (Tab a body) -> NanoUI (TabResponse a)
+tabBar' :: (Foldable f, Hashable a) => a -> f (Tab a body) -> NanoUI (TabResponse a)
 tabBar' = tabBarConfigured' defaultTabsConfig
 
 -- | Header-only bar with explicit style/orientation. Returns the selected key
 -- without running tab bodies.
-tabBarConfigured :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a body) -> NanoUI a
+tabBarConfigured :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a body) -> NanoUI a
 tabBarConfigured cfg active = fmap tabActive . tabBarConfigured' cfg active
 
 -- | 'tabBarConfigured' with interaction details and optional close request.
-tabBarConfigured' :: (Foldable f, Eq a) => TabsConfig -> a -> f (Tab a body) -> NanoUI (TabResponse a)
+tabBarConfigured' :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a body) -> NanoUI (TabResponse a)
 tabBarConfigured' cfg active ts = tabStrip cfg active (toList ts) Nothing

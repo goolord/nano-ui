@@ -296,6 +296,7 @@ test-suite nano-ui-test
         containers,
         directory,
         effectful ^>=2.6,
+        hashable ^>=1.5,
         filepath,
         nothunks,
         primitive ^>=0.9,

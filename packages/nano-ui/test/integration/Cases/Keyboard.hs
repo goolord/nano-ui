@@ -1,6 +1,7 @@
 module Cases.Keyboard (tests) where
 
 import Spec
+import Data.Hashable (Hashable (..))
 import Data.IntMap.Strict qualified as IM
 import NanoUI.Internal.Context (Context (..), getFocusVisible, intKey)
 import NanoUI.Internal.Store (WidgetStore (..))
@@ -153,7 +154,10 @@ runKeyboardToggleTest ctx failed = do
   assert failed (respClicked clicked2 && not v4)
 
 data KB = KBA | KBB
-  deriving (Eq, Show)
+  deriving (Eq, Show, Enum)
+
+instance Hashable KB where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 -- | Tab headers are focusable and switch the active tab with Enter.
 runKeyboardTabHeaderTest :: Context -> IORef Int -> IO ()

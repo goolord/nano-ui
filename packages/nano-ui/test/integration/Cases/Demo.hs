@@ -1,6 +1,7 @@
 module Cases.Demo (tests) where
 
 import Spec
+import Data.Hashable (Hashable (..))
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
@@ -25,6 +26,9 @@ data DemoTab
   | List
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+instance Hashable DemoTab where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 data DemoTheme
   = Light

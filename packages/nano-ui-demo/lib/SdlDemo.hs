@@ -65,6 +65,7 @@ import NanoUI.Backend.Sdl
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatExplainRows)
 import NanoUI.Diagrams
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Hashable (Hashable (..))
 import NanoUI.Shortcut
 import Paths_nano_ui_demo (getDataFileName)
 import Diagrams.Prelude
@@ -181,6 +182,9 @@ data DemoTab
   | Plots
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+instance Hashable DemoTab where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 -- | Theme choices for the Controls-tab theme pickers.
 data DemoTheme

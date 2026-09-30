@@ -72,6 +72,7 @@ executable nano-ui-rgfw-demo
     other-modules:    RgfwDemoCommon
     build-depends:
         base >=4.20 && <4.23,
+        hashable ^>=1.5,
         nano-ui,
         nano-ui-emit,
         nano-ui-rgfw,
@@ -87,6 +88,7 @@ executable nano-ui-rgfw-profile
     build-depends:
         base >=4.20 && <4.23,
         bytestring,
+        hashable ^>=1.5,
         nano-ui,
         nano-ui-emit,
         nano-ui-rgfw,
