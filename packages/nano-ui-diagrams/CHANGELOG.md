@@ -57,8 +57,12 @@
 ### Removed
 
 - `chartXDomain` and `chartYDomain` from `NanoUI.Plot.Chrome` (use
-  `seriesDomains`), `diagramPointAtWithExtents` from `NanoUI.Plot.Hit`, and
-  the `NanoUI.Diagrams.Internal.Tessellation` module.
+  `seriesDomains`), and `diagramPointAtWithExtents` from `NanoUI.Plot.Hit`.
+- **Breaking:** the public `NanoUI.Diagrams.Tessellation` module
+  (`triangulatePolygon`, `fillPolygon`, `strokePolyline`, `flattenCubic`).
+  The backend fills and strokes through nano-ui's paths; build shapes with
+  `NanoUI.Path` (`polygon`, `polyline`, `cubicTo`) and draw them with
+  `drawPath` and `drawStrokePath`.
 
 ## 0.1.0.0
 
