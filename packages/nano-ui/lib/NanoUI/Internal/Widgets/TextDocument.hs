@@ -9,10 +9,13 @@ module NanoUI.Internal.Widgets.TextDocument
   , documentLine
   , documentLineCount
   , sameDocument
+  , documentRange
+  , editDocument
+  , replaceDocumentRange
+  , documentBuffer
+  , bufferDocument
 
     -- * For the widgets
-  , bufferDocument
-  , documentBuffer
   , sameLines
   ) where
 
@@ -74,12 +77,37 @@ documentLineCount = Seq.length . documentLines
 sameDocument :: TextDocument -> TextDocument -> Bool
 sameDocument a b = sameLines (documentLines a) (documentLines b)
 
--- | The document a buffer holds, sharing its lines.
+-- | The text between two positions, in either order and clamped to the
+-- document, with a newline for each line break crossed. Reads only the lines
+-- between them.
+documentRange :: TB.Cursor -> TB.Cursor -> TextDocument -> Text
+documentRange a b = TB.selectedText a b . documentBuffer
+
+-- | Apply an edit, as a text area records one ('TB.replaceEdit' makes one).
+-- The new document shares every line the edit does not touch, so it costs
+-- O(log lines) plus the lines it spans, and a text area given it redraws
+-- only those lines.
+editDocument :: TB.TextEdit -> TextDocument -> TextDocument
+editDocument e = bufferDocument . TB.applyEdit e . documentBuffer
+
+-- | Replace the text between two positions (in either order, clamped) with
+-- @inserted@, which may hold newlines:
+--
+-- > replaceDocumentRange (Cursor 0 0) (Cursor 0 5) "Hello" doc
+replaceDocumentRange :: TB.Cursor -> TB.Cursor -> Text -> TextDocument -> TextDocument
+replaceDocumentRange a b inserted doc =
+  let buf = documentBuffer doc
+   in bufferDocument (TB.applyEdit (TB.replaceEdit inserted a b buf) buf)
+
+-- | The document a buffer holds, sharing its lines, in O(1). The buffer's
+-- lines must not contain newlines, as no buffer built by 'TB.fromText' or
+-- edited with 'TB.applyEdit' does.
 bufferDocument :: TB.TextBuffer -> TextDocument
 bufferDocument = TextDocument . TB.bufferLines
 
 -- | A buffer over the document's lines, sharing them, with the cursor at the
--- start.
+-- start, in O(1): for moving through a document or running
+-- "NanoUI.Widgets.TextBuffer" functions over it.
 documentBuffer :: TextDocument -> TB.TextBuffer
 documentBuffer = TB.fromLines . documentLines
 

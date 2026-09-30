@@ -6,6 +6,8 @@ import NanoUI.Input (Input (..), Key (..), Modifiers (..), emptyInput, inputKeys
 import NanoUI.Internal.Input (onMac)
 import NanoUI.Widgets.TextArea as TA
 import NanoUI.Widgets.TextBuffer as TB
+import NanoUI.Widgets.TextDocument qualified as TD
+import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Widgets.TextEditor as TE
 import Test.Hspec
 
@@ -120,6 +122,25 @@ spec = do
     it "deleting to the line end or start removes the rest of the line on either side" $ do
       TB.toText (edit TE.multiLineMode [TE.Delete TE.LineEnd] (TB.moveRight (TB.fromText "hello"))) `shouldBe` "h"
       TB.toText (edit TE.multiLineMode [TE.Delete TE.LineStart] (TB.moveToEOL (TB.fromText "hello"))) `shouldBe` ""
+
+  describe "NanoUI.Widgets.TextDocument editing" $ do
+    it "replaces a range, reads one back, and shares untouched lines" $ do
+      let
+        doc0 = TD.textDocument "one\ntwo\nthree\nfour"
+        doc1 = TD.replaceDocumentRange (TB.Cursor 2 5) (TB.Cursor 1 1) "W\nX" doc0
+      TD.documentText doc1 `shouldBe` "one\ntW\nX\nfour"
+      TD.documentRange (TB.Cursor 0 1) (TB.Cursor 1 2) doc1 `shouldBe` "ne\ntW"
+      -- Forced first, so the comparison sees values rather than thunks.
+      let shared row = let !a = TD.documentLine row doc0; !b = TD.documentLine row doc1 in ptrEq a b
+      map shared [0, 3] `shouldBe` [True, True]
+    it "applies and inverts a recorded edit" $ do
+      let
+        doc0 = TD.textDocument "alpha\nbeta"
+        e = TB.replaceEdit "B" (TB.Cursor 1 0) (TB.Cursor 1 1) (TD.documentBuffer doc0)
+        doc1 = TD.editDocument e doc0
+      TD.documentText doc1 `shouldBe` "alpha\nBeta"
+      TD.editDocument (TB.invertEdit e) doc1 `shouldBe` doc0
+      TD.bufferDocument (TD.documentBuffer doc1) `shouldBe` doc1
 
   describe "NanoUI.Widgets.TextBuffer edits" $ do
     it "applies an edit across lines and inverts it back" $ do

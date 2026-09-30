@@ -4,6 +4,11 @@
 -- the lines it changed, not the length of the document. Join the lines into
 -- one @Text@ with 'documentText' only when the whole text is wanted, such as
 -- when saving.
+--
+-- Programs edit a document the same way: 'replaceDocumentRange' and
+-- 'editDocument' change only the lines they touch, and 'documentBuffer' and
+-- 'bufferDocument' move between a document and a
+-- "NanoUI.Widgets.TextBuffer" in O(1) for searching or moving through it.
 module NanoUI.Widgets.TextDocument
   ( TextDocument
   , textDocument
@@ -13,6 +18,13 @@ module NanoUI.Widgets.TextDocument
   , documentLine
   , documentLineCount
   , sameDocument
+
+    -- * Editing
+  , documentRange
+  , replaceDocumentRange
+  , editDocument
+  , documentBuffer
+  , bufferDocument
   ) where
 
 import NanoUI.Internal.Widgets.TextDocument

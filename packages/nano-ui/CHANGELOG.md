@@ -32,6 +32,12 @@
   a document like an image; `svgIcon`/`svgIconWith` still letterbox. Added
   `rasterizeSvgIn` to draw a document's viewport over a given raster rect.
 
+- `TextDocument` has a public editing story: `replaceDocumentRange`,
+  `editDocument` (a `TextEdit`) and `documentRange` touch only the lines
+  involved, and `documentBuffer`/`bufferDocument` convert to and from a
+  `TextBuffer` in O(1). Model code no longer rejoins the text or imports
+  internals to transform a large document.
+
 - Rich-text wrapping is a layout setting, `textBreak`, rather than a side
   effect of the font: monospaced prose now wraps at spaces, and
   `breakAnywhere` (`BreakAnywhere`) wraps between characters in any font,
