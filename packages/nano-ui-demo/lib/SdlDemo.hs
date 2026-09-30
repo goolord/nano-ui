@@ -14,10 +14,11 @@
 -- @
 --
 -- Inputs are controlled: the widget's value outlives the frame only because
--- you persist it and pass it back. State lives in hooks created by the
--- @use*@ functions. Hooks must be called in the same order every frame, so
--- all of them sit together at the top of 'demoUi', even for tabs that are
--- currently hidden.
+-- you persist it and pass it back. Primitive @use*@ hooks keep local state
+-- by widget identity and must be called in the same order every frame.
+-- 'newDemo' captures explicitly owned state and resources in the view's
+-- closure. All hooks sit together at the top of 'demoUi', even for tabs
+-- that are currently hidden.
 --
 -- Style is expressed as layout-style functions threaded through the container
 -- widget: columnWith (padAll 6 . gap 8 . fillW) $...  Text widgets compose
@@ -47,9 +48,7 @@
 
 module SdlDemo
     ( main
-     , DemoState
-     , newDemoState
-     , demoUi
+     , newDemo
     ) where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
@@ -121,15 +120,15 @@ main = do
   args <- getArgs
   case dropWhile (/= "--record") args of
     _ : dir : _ -> do
-      state <- newDemoState
-      SdlRecord.record dir (\env -> demoUi env state)
+      view <- newDemo
+      SdlRecord.record dir view
     _ -> do
       let (updates, _, _) = getOpt Permute options args
       case sequence updates of
         Nothing -> putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
         Just fs -> do
-          state <- newDemoState
-          runSdlAppWith (foldl' (flip id) demoOptions fs) state demoUi
+          view <- newDemo
+          runSdlAppWith (foldl' (flip id) demoOptions fs) view
 
 ------------------------------------------------------------------------------
 -- §2  Assets & shared look
@@ -247,9 +246,10 @@ data DemoState = DemoState
   , demoDebugText :: !(IORef (Maybe CachedDebugText))
   }
 
--- | Construct a showcase instance before running its per-frame view.
-newDemoState :: IO DemoState
-newDemoState = do
+-- | Construct a showcase view with private state and resources.
+-- Call once per instance before running its per-frame view.
+newDemo :: IO (SdlEnv -> NanoUI ())
+newDemo = do
   demoAccentCell <- newState demoAccent
   demoCountCell <- newState 12
   demoMaskCell <- newState 0xC0FF
@@ -269,7 +269,8 @@ newDemoState = do
   demoGifImagesCell <- newState []
   demoSettingsValue <- loadDemoSettings
   demoDebugText <- newIORef Nothing
-  pure DemoState {..}
+  let state = DemoState {..}
+  pure $ \env -> demoUi env state
 
 demoUi :: SdlEnv -> DemoState -> NanoUI ()
 demoUi env cells = do

@@ -21,14 +21,27 @@ emission and widget adapters. `SdlOptions` sets the window, fonts, font size,
 theme, and vsync.
 
 For SDL-specific operations, `runSdlAppWith` passes the typed session
-environment and your application state to the view. Construct state in IO
-before starting the runner:
+environment to the view:
+
+```haskell
+main = runSdlAppWith defaultSdlOptions $ \env ->
+  whenM (button "Reset scale") (setSdlUiScale env 1)
+```
+
+Primitive hooks such as `useInt` and `useText` need no setup. When a view
+needs explicitly owned state or arbitrary value types, construct it once
+in IO and capture it in a closure:
 
 ```haskell
 main = do
+  view <- newFilePicker
+  runSdlAppWith defaultSdlOptions view
+
+newFilePicker :: IO (SdlEnv -> NanoUI ())
+newFilePicker = do
   pending <- newState Nothing
-  runSdlAppWith defaultSdlOptions pending $ \env pendingCell -> do
-    (_, setPending) <- useState pendingCell
+  pure $ \env -> do
+    (_, setPending) <- useState pending
     whenM (button "Open") $
       setPending =<< askOpenFileDialog env defaultFileDialogOptions
 ```

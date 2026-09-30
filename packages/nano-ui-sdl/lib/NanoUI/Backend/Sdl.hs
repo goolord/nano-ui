@@ -84,12 +84,12 @@ import NanoUI.Emit (NanoUIE, runFrameReduce)
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = runSdlSession options (`sdlDrawFrame` ui)
 
--- | Run a view with application state constructed in IO before starting the
--- session. The view receives the SDL environment for dialogs, debug data or
--- font changes, together with the same application state on every frame.
-runSdlAppWith :: SdlOptions -> state -> (SdlEnv -> state -> NanoUI ()) -> IO ()
-runSdlAppWith options state view = runSdlSession options $ \ctx env inp forceFull ->
-  sdlDrawFrame ctx (view env state) env inp forceFull
+-- | Run a view that receives the SDL environment for dialogs, debug data or
+-- font changes. Application state can be captured in the view's closure;
+-- allocate any owned state once in IO before starting the session.
+runSdlAppWith :: SdlOptions -> (SdlEnv -> NanoUI ()) -> IO ()
+runSdlAppWith options view = runSdlSession options $ \ctx env inp forceFull ->
+  sdlDrawFrame ctx (view env) env inp forceFull
 
 -- | Run a model-driven view, folding emitted messages through the update
 -- function in emission order. The view's message type must match the reducer.

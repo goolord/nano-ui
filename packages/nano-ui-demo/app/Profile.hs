@@ -86,9 +86,9 @@ main = do
   ctx0 <- newPixelContext
   -- The workloads repeat one scene: time their paint instead of reusing it.
   setDrawReuse ctx0 False
-  state <- SdlDemo.newDemoState
+  view <- SdlDemo.newDemo
   withSdlBench ctx0 $ \ctx sdlEnv -> do
-    let demoUi = SdlDemo.demoUi sdlEnv state
+    let demoUi = view sdlEnv
     plotCache <- newPlotCache
     (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
     (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputButtonsHeld = buttonsFromList [MouseLeft]}

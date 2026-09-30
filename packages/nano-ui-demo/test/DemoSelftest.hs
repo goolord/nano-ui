@@ -1,4 +1,4 @@
--- | Headless UI test for the SDL demo. It draws 'demoUi' on a hidden
+-- | Headless UI test for the SDL demo. It draws the constructed view on a hidden
 -- window, drives real mouse and keyboard gestures, and checks the text spans
 -- each frame produced. With @continuous@ set it exercises direct-to-window
 -- presentation.
@@ -38,13 +38,13 @@ import qualified Data.Text as T
 import DemoApp (withHiddenWindow)
 import SdlDemo qualified
 
--- | Draw 'demoUi' on a hidden SDL window and drive it through the main
+-- | Draw the demo on a hidden SDL window and drive it through the main
 -- widget interactions, failing loudly on any regression.
 selftest :: Bool -> IO ()
 selftest continuous = do
-  state <- SdlDemo.newDemoState
+  view <- SdlDemo.newDemo
   withHiddenWindow 1280 800 (V2 640 400) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env idle -> do
-    let demoUi = SdlDemo.demoUi env state
+    let demoUi = view env
     -- The shaped path (fmShape / pushText) must match SDL3_ttf's run widths,
     -- including GPOS kerning and ligatures (To, AV, fi).
     let checkRun :: Float -> FontStyle -> String -> IO ()

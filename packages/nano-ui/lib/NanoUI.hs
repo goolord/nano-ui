@@ -514,6 +514,11 @@ module NanoUI
   , insertionIndex
 
     -- * Local state
+
+    -- | Primitive hooks such as 'useInt' and 'useText' need no setup and
+    -- retain values by widget identity. For arbitrary value types or explicit
+    -- ownership, allocate a 'StateCell' once with 'newState' in IO and capture
+    -- it in the view's closure; 'useState' reads it on each pass.
   , StateCell
   , newState
   , useState

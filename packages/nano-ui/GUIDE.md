@@ -71,9 +71,12 @@ Primitive hooks use their initial argument only while their slot has no value.
 Changing `useText ""` to a different initial value at the same widget id is
 not a reset. Use the setter to change state.
 
-For arbitrary types, allocate a typed `StateCell a` once during component
-setup, then read it with `useState` in the per-frame view. Only `Eq a` is
-required; there is no runtime type lookup:
+Primitive hooks are the simplest choice for local state of their supported
+types and need no setup. For arbitrary types or state whose identity and
+lifetime should follow an explicit owner, allocate a typed `StateCell a`
+once during component setup, then read it with `useState` in the per-frame
+view. Keep the cell private in a closure. Only `Eq a` is required; there is
+no runtime type lookup:
 
 ```haskell
 newEditor :: IO (NanoUI ())

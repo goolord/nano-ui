@@ -25,9 +25,9 @@ import SdlNotepad qualified
 
 selftest :: IO ()
 selftest = do
-  state <- SdlNotepad.newNotepadState
+  view <- SdlNotepad.newNotepad
   withHiddenWindow 1000 720 (V2 500 400) id $ \ctx env base -> do
-      let notepadUi = SdlNotepad.notepadUi env state
+      let notepadUi = view env
       let
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
         click = clickPos drawFrame base

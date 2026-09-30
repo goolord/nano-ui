@@ -7,9 +7,7 @@
 -- Run with @cabal run nano-ui-sdl-notepad@.
 module SdlNotepad
   ( main
-  , NotepadState
-  , newNotepadState
-  , notepadUi
+  , newNotepad
   ) where
 
 import Control.Exception (SomeException, try)
@@ -33,15 +31,14 @@ import NanoUI.Shortcut
 
 main :: IO ()
 main = do
-  state <- newNotepadState
+  view <- newNotepad
   runSdlAppWith
     defaultSdlOptions
       { -- A close request goes to the view, which may ask about unsaved changes.
         sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
-    state
-    notepadUi
+    view
 
 --------------------------------------------------------------------------------
 -- The application
@@ -53,14 +50,17 @@ data NotepadState = NotepadState
   !(StateCell (Maybe FileDialogId))
   !(StateCell (Maybe FileDialogId))
 
--- | Allocate the document and dialog state before starting the SDL session.
-newNotepadState :: IO NotepadState
-newNotepadState =
-  NotepadState
-    <$> newState emptyDocument
-    <*> newState (WidgetId 0)
-    <*> newState Nothing
-    <*> newState Nothing
+-- | Construct a notepad view with private document and dialog state.
+-- Call once per instance before starting the SDL session.
+newNotepad :: IO (SdlEnv -> NanoUI ())
+newNotepad = do
+  state <-
+    NotepadState
+      <$> newState emptyDocument
+      <*> newState (WidgetId 0)
+      <*> newState Nothing
+      <*> newState Nothing
+  pure $ \env -> notepadUi env state
 
 notepadUi :: SdlEnv -> NotepadState -> NanoUI ()
 notepadUi env (NotepadState docCell editorCell openCell saveCell) = do

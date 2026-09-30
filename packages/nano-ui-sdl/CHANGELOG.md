@@ -6,8 +6,8 @@
   `nano-ui-emit` package, without `Typeable` or runtime message filtering.
 
 - **Breaking:** SDL-specific debug, font/scale, dialog launch, and chrome
-  helpers take `SdlEnv` explicitly. `runSdlAppWith` takes application state
-  constructed in IO and supplies it alongside `SdlEnv` to the per-frame view.
+  helpers take `SdlEnv` explicitly. `runSdlAppWith` takes an
+  `SdlEnv -> NanoUI ()` view; capture application state in its closure.
   Dialog polling reads the dialog handle directly;
   the session no longer installs itself in a dynamic host registry.
 
