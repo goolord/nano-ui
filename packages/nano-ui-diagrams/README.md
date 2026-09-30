@@ -22,9 +22,10 @@ temperatures =
       , line "Outdoor" [(0, 8), (1, 11), (2, 14), (3, 12)]
       ]
 
-view :: NanoUI ()
-view = column $ do
-  resp <- plot (minH 240 . fillW) temperatures
+-- Allocate cache <- newPlotCache once before running the view.
+view :: PlotCache -> NanoUI ()
+view cache = column $ do
+  resp <- plot cache (minH 240 . fillW) temperatures
   case plotHover resp of
     Just h -> label (T.pack (show (hoverDataX h, hoverDataY h)))
     Nothing -> pure ()

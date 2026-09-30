@@ -118,6 +118,15 @@ library
         NanoUI.Internal.Widgets.TextArea
         NanoUI.Internal.Widgets.TextDocument
     other-modules:
+        NanoUI.Internal.Equality
+        NanoUI.Internal.Derived
+        NanoUI.Internal.Resource
+        NanoUI.Internal.Host
+        NanoUI.Internal.NativeWindow.Types
+        NanoUI.Internal.Sensor.Types
+        NanoUI.Internal.RichText.Types
+        NanoUI.Internal.Store.Types
+        NanoUI.Internal.TextEditor.Types
         NanoUI.Internal.Animatable
         NanoUI.Internal.Animation
         NanoUI.Internal.Atlas

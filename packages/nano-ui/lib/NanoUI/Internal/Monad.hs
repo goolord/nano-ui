@@ -242,7 +242,7 @@ emit msg = withContext (\ctx -> pushMessage ctx (FrameMsg msg))
 currentId :: NanoUI WidgetId
 currentId = withContext (fmap idContextWidgetId . readIORef . ctxIdContext)
 
--- | Consume the next sibling id. Widgets and state hooks share this sequence,
+-- | Consume the next sibling id. Widgets and positional hooks share this sequence,
 -- so conditional calls need their own 'scope'.
 {-# INLINE nextId #-}
 nextId :: NanoUI WidgetId
@@ -761,11 +761,10 @@ scrollRectIntoViewUi wid r align behavior = withContext (\ctx -> scrollRectIntoV
 setScrollStepUi :: WidgetId -> Float -> NanoUI ()
 setScrollStepUi wid px = withContext (\ctx -> setScrollStep ctx wid px)
 
--- | Retrieve the host value installed in the context. 'Nothing' means no
--- value was installed or its runtime type differs from the requested type.
+-- | Read an explicit typed host slot. 'Nothing' means it is uninstalled.
 {-# INLINE askHost #-}
-askHost :: Typeable a => NanoUI (Maybe a)
-askHost = withContext askHostIO
+askHost :: Host a -> NanoUI (Maybe a)
+askHost = liftIO . askHostIO
 
 -- | Request repaint bounds relative to a widget's rectangle.
 {-# INLINE damageWidgetNow #-}

@@ -47,6 +47,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, nextId, liftIO, withContext)
 import NanoUI.Internal.Store
+import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, minW)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyle, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
@@ -87,8 +88,8 @@ saveTextInputState key s =
 textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
   let buf = TB.withCursor (TB.Cursor 0 (tisCursor s)) (TB.fromText (tisText s))
-      history = case lookupDyn (slotKey SlotTextHistory key) store of
-        Just (text, h) | text == tisText s -> h
+      history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
+        Just (FieldHistory text h) | text == tisText s -> h
         _ -> emptyHistory
    in Editor buf (TB.clampCursor buf (TB.Cursor 0 (tisAnchor s))) history
 
@@ -101,7 +102,7 @@ editorTextState ed =
 saveTextEditor :: Int -> Editor -> WidgetStore -> WidgetStore
 saveTextEditor key ed =
   let s = editorTextState ed
-   in insertDyn (slotKey SlotTextHistory key) (tisText s, editorHistory ed) . saveTextInputState key s
+   in insertSlot fieldHistory (slotKey SlotTextHistory key) (FieldHistory (tisText s) (editorHistory ed)) . saveTextInputState key s
 
 -- | Run this frame's commands on a field, or 'Nothing' when it had none.
 editTextInput :: Context -> EditorMode -> Input -> WidgetStore -> Int -> TextInputState -> IO (Maybe Editor)
@@ -223,11 +224,11 @@ editTextField wid mode initial unfocusedText = do
     stored = lookupSlot fieldText key store
     s0 = loadTextInputState store key (fromMaybe initial stored)
     pulse = memberSlot fieldInt pulseKey store
-  when (isNothing stored || lookupDyn modeKey store /= Just mode || pulse) $
+  when (isNothing stored || lookupSlot fieldEditorMode modeKey store /= Just mode || pulse) $
     liftIO . modifyStore ctx $
       (if isNothing stored then insertSlot fieldText key initial else id)
         . deleteSlot fieldInt pulseKey
-        . insertDyn modeKey mode
+        . insertSlot fieldEditorMode modeKey mode
   isFocus <- keyboardFocused wid
   -- Password fields request 'InputSecure' so the IME neither shows nor
   -- learns their text.

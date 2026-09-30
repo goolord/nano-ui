@@ -50,7 +50,8 @@ import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip)
 import NanoUI.Internal.Shortcut qualified as Shortcut
-import NanoUI.Internal.Store (insertDyn, lookupDyn)
+import NanoUI.Internal.Store (fieldGrid, insertSlot, lookupSlot)
+import NanoUI.Internal.Store.Types (GridState (..), Gesture (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
@@ -107,7 +108,10 @@ data PaneGridConfig = PaneGridConfig
     -- the tree in state and pass back 'pgrTree' every frame; setting the
     -- state to another tree then replaces the grid's:
     --
-    -- > (arrangement, setArrangement) <- useState (Just startLayout)
+    -- Allocate @arrangementCell <- newState (Just startLayout)@ during setup,
+    -- then read and update it in the view:
+    --
+    -- > (arrangement, setArrangement) <- useState arrangementCell
     -- > resp <- paneGrid cfg {pgTree = arrangement}
     -- > setArrangement (pgrTree resp)
     -- > whenM (button "Reset layout") (setArrangement (Just startLayout))
@@ -251,55 +255,17 @@ commitPaneDrop (PaneGridDrop _ _ _ wid expected tree) = do
   ctx <- askContext
   let key = intKey wid
       pane = gsSeed expected + 1
-  current <- lookupDyn key <$> liftIO (getStore ctx)
+  current <- lookupSlot fieldGrid key <$> liftIO (getStore ctx)
   if current /= Just expected
     then pure Nothing
     else do
-      liftIO . modifyStore ctx . insertDyn key $
+      liftIO . modifyStore ctx . insertSlot fieldGrid key $
         expected {gsTree = Just tree, gsSeed = pane + 1, gsFocus = pane}
       pure (Just (pane, tree))
 
 -- -----------------------------------------------------------------------------
 -- Internal state
 -- -----------------------------------------------------------------------------
-
--- | A grid's state between frames: one value in the widget store, under the
--- grid's key.
-data GridState = GridState
-  { gsTree :: !(Maybe GridNode)
-    -- ^ 'Nothing' once the last pane has been closed: the next frame starts
-    -- again from one fresh pane.
-  , gsSeed :: !Word64
-    -- ^ Next fresh split / pane id. Strictly monotonic per grid, across a
-    -- closed last pane too, so ids are never reused and state keyed by pane
-    -- id cannot collide with a closed pane's state.
-  , gsFocus :: !Word64
-    -- ^ Keyboard-navigation focus (0 = none: the first pane).
-  , gsMax :: !Word64
-    -- ^ Maximized pane (0 = none).
-  , gsSpan :: !(Maybe (Float, Float))
-    -- ^ The grid size (width, height) the tree was last fitted to. A new
-    -- size reflows the splits of pinned panes ('pgFixedPanes'). Tracked even
-    -- with nothing pinned, so a pin added later reflows from the right size.
-  , gsGesture :: !Gesture
-  , gsGiven :: !(Maybe GridNode)
-    -- ^ The 'pgTree' the caller passed last frame.
-  }
-  deriving (Eq, Show)
-
--- | The pointer gesture a press on the grid armed. It lasts until the button
--- comes up.
-data Gesture
-  = NoGesture
-  | Resize !Word64 !Float !Float
-    -- ^ A divider drag: the split's id, and its ratio and the pointer's
-    -- main-axis coordinate at the press, so the divider moves by the pointer's
-    -- delta instead of snapping to it.
-  | Drag !Word64 !V2 !Bool !Text
-    -- ^ A pane drag: the pane's id, the pointer at the press (for the drag
-    -- threshold), whether the pointer has crossed the threshold since, and
-    -- the pane's title for the drag indicator.
-  deriving (Eq, Show)
 
 data RenderedPane = RenderedPane
   { rpPaneId :: !Word64
@@ -366,7 +332,7 @@ paneGrid cfg = do
       leeway = max 0 (pgLeeway cfg)
       edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
-  stored <- lookupDyn key <$> liftIO (getStore ctx)
+  stored <- lookupSlot fieldGrid key <$> liftIO (getStore ctx)
   Rect ox oy ow oh <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
   let lay = pgLayout cfg (paneLay minSize)
       -- The panes share the grid's content box, inside its padding.
@@ -395,7 +361,7 @@ paneGrid cfg = do
               reflowFixed (pgFixedPanes cfg) minSize gutter (baseRect {rectW = pw, rectH = ph}) baseRect tree0
         _ -> tree0
       gs = started {gsTree = Just tree, gsSpan = Just curSpan}
-  when (Just gs /= stored) $ liftIO (modifyStore ctx (insertDyn key gs))
+  when (Just gs /= stored) $ liftIO (modifyStore ctx (insertSlot fieldGrid key gs))
   let (maxPane, focused) = paneFocus tree gs
       mouse = inputMousePos inp
       (regions, dividers) = layoutNode minSize gutter tree baseRect
@@ -492,7 +458,7 @@ paneGrid cfg = do
     whenM (shortcutOnce (Shortcut.key 'x')) (closePane env focused)
     whenM takeEscape (restorePane env)
 
-  end <- fromMaybe gs . lookupDyn key <$> liftIO (getStore ctx)
+  end <- fromMaybe gs . lookupSlot fieldGrid key <$> liftIO (getStore ctx)
   covered <- liftIO (pointerCovered ctx wid)
   clip <- liftIO (getPrevClipRect ctx wid)
   let dropTarget
@@ -808,10 +774,10 @@ centerOf r = (rectX r + rectW r / 2, rectY r + rectH r / 2)
 updateGrid :: GridEnv -> Bool -> (GridState -> GridState) -> NanoUI GridState
 updateGrid env mirror f = liftIO $ do
   st <- getStore (geCtx env)
-  let old = fromMaybe (geState env) (lookupDyn (geKey env) st)
+  let old = fromMaybe (geState env) (lookupSlot fieldGrid (geKey env) st)
       new = f old
   when (new /= old) $
-    setStore (geCtx env) ((if mirror then bumpMirror else id) (insertDyn (geKey env) new st))
+    setStore (geCtx env) ((if mirror then bumpMirror else id) (insertSlot fieldGrid (geKey env) new st))
   pure new
 
 -- | Split a pane, focusing and returning the new one.

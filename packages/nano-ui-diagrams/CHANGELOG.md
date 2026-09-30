@@ -4,6 +4,9 @@
 
 ### Changed
 
+- **Breaking:** plot widgets take an explicit `PlotCache`, allocated once
+  with `newPlotCache`. Cached chart values no longer use dynamic widget slots.
+
 - Widgets and view functions have `NanoUI` types instead of
   `Ui :> es => Eff es`, and the package no longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).

@@ -9,8 +9,10 @@ module NanoUI.Rgfw.Internal.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
   , runRgfwApp
+  , runRgfwAppWith
   , runRgfwAppReduce
   , runRgfwAppReduceCustom
+  , runRgfwAppReduceCustomWith
   -- * Input translation
   , RgfwEvent
   , decodeRgfwEvents
@@ -76,7 +78,6 @@ import NanoUI.Backend
   )
 import NanoUI.Internal.Context
   ( Context (..)
-  , setHost
   , withClipboard
   )
 import NanoUI.Testing
@@ -99,8 +100,7 @@ import NanoUI.Runner
 import NanoUI.Internal.Layout.Arena (arenaCount)
 import NanoUI.Rgfw.Internal.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Internal.Debug
-  ( RgfwDebugHost (..)
-  , RgfwDebugSampler (..)
+  ( RgfwDebugSampler (..)
   , RgfwFrameStats (..)
   , newRgfwDebugSampler
   )
@@ -232,6 +232,12 @@ mapRgfwCursor kind = case cursorFallback kind of
 runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
 runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> app)
 
+-- | Construct one component with the session's explicit typed debug handle.
+runRgfwAppWith :: RgfwOptions -> (RgfwDebugSampler -> IO (NanoUI ())) -> IO ()
+runRgfwAppWith opts setup =
+  runRgfwAppReduceCustomWith opts (\_ -> (optionsTheme opts, optScale opts)) (\() m -> m) () $ \debug ->
+    const <$> setup debug
+
 -- | Model-driven runner. Fold emitted messages through the update function
 -- in order, ignoring messages of other runtime types.
 runRgfwAppReduce ::
@@ -255,7 +261,19 @@ runRgfwAppReduceCustom ::
   model ->
   (model -> NanoUI ()) ->
   IO ()
-runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inBoundThread $ do
+runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view =
+  runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel (\_ -> pure view)
+
+-- | Model runner with a one-time typed session setup callback.
+runRgfwAppReduceCustomWith ::
+  (Typeable msg, Eq model) =>
+  RgfwOptions ->
+  (model -> (Theme, Float)) ->
+  (msg -> model -> model) ->
+  model ->
+  (RgfwDebugSampler -> IO (model -> NanoUI ())) ->
+  IO ()
+runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup = inBoundThread $ do
   -- Open hidden at the requested scale: the monitor's scale is unknown until
   -- the window exists. Resize, place and show it once that scale is known.
   let flags =
@@ -315,7 +333,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       ctx0 <- newRgfwContext initTheme
       let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
       debugSampler <- newRgfwDebugSampler
-      setHost ctx (RgfwDebugHost debugSampler)
+      view <- setup debugSampler
       setExplainLayout ctx (optExplainLayout opts)
       -- Size limits are in layout units, converted at the current scale.
       let limit set s = do

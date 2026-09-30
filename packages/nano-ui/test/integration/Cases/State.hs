@@ -4,16 +4,19 @@ import Spec
 import Data.ByteString qualified as BS
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import Data.Primitive.SmallArray qualified as SA
 import NanoUI.Internal.Context (Context (..), intKey, lookupImageUv)
 import NanoUI.Internal.Store (WidgetStore (..))
+import NanoUI.Shortcut qualified as Shortcut
 
 tests :: [Spec]
 tests =
   [ spec "controlled-state" runControlledStateTest
   , spec "controlled-inputs" runControlledInputsTest
   , spec "hook-state" runHookStateTest
+  , spec "typed-state-lifecycle" runTypedStateTest
   , spec "collection-api" runCollectionApiTest
   ]
 
@@ -128,5 +131,47 @@ runHookStateTest ctx failed = do
   check "text" (useText "initial") "initial" "changed"
   check "flag" (useFlag False) False True
   check "enum" (useEnum LT) LT GT
-  check "dynamic" (useState (0 :: Int, False)) (0, False) (12, True)
+  cell <- newState (0 :: Int, False)
+  check "typed" (useState cell) (0, False) (12, True)
   check "table-sort" (useTableSort (SortCol 0 SortAsc)) (SortCol 0 SortAsc) (SortCol 2 SortDesc)
+
+-- Cells survive hiding and keyed reordering, while independent instances do
+-- not share state. A keyboard event must run once across the mirror rebuild.
+runTypedStateTest :: Context -> IORef Int -> IO ()
+runTypedStateTest ctx failed = do
+  left <- newState (0 :: Int)
+  right <- newState (0 :: Int)
+  let inp = withInputOff 300 100
+      readCell cell = fst <$> useState cell
+      item :: Text -> StateCell Int -> NanoUI Int
+      item name cell = withKey name $ do
+        n <- readCell cell
+        label (T.pack (show n))
+        pure n
+      view = do
+        n <- readCell left
+        label (T.pack (show n))
+        whenM (shortcut (Shortcut.key 'a')) $ do
+          modifyState left (+ 1)
+          modifyState left (+ 1)
+        pure n
+  _ <- warmup2 ctx inp view
+  (n, _, _, _) <- runFrame ctx (keyInp (KeyChar 'a') inp) view
+  assertEq failed 2 n
+  assertEq failed DamageFull =<< takeDamage ctx
+  spans <- collectTextSpans ctx
+  assert failed (any (\(_, text, _, _, _) -> text == "2") spans)
+  (_, _, _, dirty) <- runFrame ctx inp view
+  assertEq failed False dirty
+  assert failed . damageIsEmpty =<< takeDamage ctx
+  (_, setLeft) <- runNanoUI ctx inp (useState left)
+  runNanoUI ctx inp (modifyState left (+ 3) >> setLeft 0)
+  assertEq failed 0 =<< runNanoUI ctx inp (readCell left)
+  runNanoUI ctx inp (modifyState left (+ 7))
+  (before, _, _, _) <- runFrame ctx inp ((,) <$> item ("left" :: Text) left <*> item "right" right)
+  _ <- runFrame ctx inp (item ("right" :: Text) right)
+  (after, _, _, _) <- runFrame ctx inp ((,) <$> item ("right" :: Text) right <*> item "left" left)
+  assertEq failed (7, 0) before
+  assertEq failed (0, 7) after
+  fresh <- newState (0 :: Int)
+  assertEq failed 0 =<< runNanoUI ctx inp (readCell fresh)

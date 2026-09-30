@@ -73,7 +73,12 @@ module NanoUI.Internal.Context.Types
   ) where
 
 import Control.Concurrent (ThreadId)
-import Data.Dynamic (Dynamic)
+import NanoUI.Internal.Derived (DerivedCache)
+import NanoUI.Internal.Resource (Held)
+import NanoUI.Internal.Host (Host)
+import NanoUI.Internal.NativeWindow.Types (NativeWindow)
+import NanoUI.Internal.Sensor.Types (Sensors)
+import NanoUI.Internal.RichText.Types (Paragraphs)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
@@ -87,9 +92,9 @@ import Data.Primitive.Array (MutableArray, newArray)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, setPrimArray)
 import Data.Primitive.PrimVar (PrimVar, newPrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
-import Data.Word (Word64)
+import Data.Word (Word32, Word64)
 import Data.Text (Text)
-import Data.Typeable (TypeRep, Typeable, cast)
+import Data.Typeable (Typeable, cast)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Animation (Animation)
@@ -917,7 +922,12 @@ data Context = Context
   -- | What widgets derive from their arguments and keep between frames
   -- (a table's column widths and sort), by widget key. It is not state, so
   -- a write neither damages nor wakes the loop. Cleared with the text caches.
-  , ctxDerivedCache :: !(IORef (IntMap Dynamic))
+  , ctxDerivedCache :: !(IORef DerivedCache)
+  , ctxHeld :: !Held
+  , ctxNativeWindow :: !(Host NativeWindow)
+  , ctxSensors :: !(Host Sensors)
+  , ctxParagraphs :: !(Host Paragraphs)
+  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32) ImageId))
   -- Whole-layout reuse cache: cached signature and solved rects,
   -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))
@@ -992,7 +1002,6 @@ data Context = Context
   -- anything asked for without input to cause it, or 0 for none. Each frame
   -- starts from 0 and whatever still needs a later frame asks again, so the
   -- loop sleeps until then instead of polling.
-  , ctxHost :: IORef (Map TypeRep Dynamic)
   }
 
 -- | Convert a widget's hash to its store key. The representation assumes a

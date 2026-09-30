@@ -21,9 +21,10 @@ signup =
     <$> withFieldErrors (inputText "Name" "" `prove` notEmpty "Name is required")
     <*> withFieldErrors (inputText "Email" "" `prove` validEmail (const "Not an email address"))
 
-view :: NanoUI ()
-view = do
-  submitted <- nanoFormSubmit "signup" "Sign up" signup
+-- Allocate owner <- newFormState once before running the view.
+view :: FormState -> NanoUI ()
+view owner = do
+  submitted <- nanoFormSubmit owner "signup" "Sign up" signup
   case submitted of
     Just (Signup name _) -> label ("Welcome, " <> name)
     Nothing -> pure ()
@@ -46,9 +47,15 @@ default). The library itself does not depend on a backend.
 ## Form identity and results
 
 Give each form a stable key, such as `"signup"`, and use different keys for
-independent forms in the same view. The form runner keeps field values and
+independent forms in the same view. Allocate `newFormState` once per component
+or session and pass it as the first argument to each runner and `resetForm`.
+The typed owner keeps field values and
 validation state between frames under that identity. Use the reset operations
 in `NanoUI.Form.Runner` when starting a new entry with the same form.
+
+Deferred field views capture their owner during evaluation. Rendering them
+later or inside another form still updates the original form; there is no
+ambient form-prefix store to restore.
 
 The `Just` returned by `nanoFormSubmit` is an event for that frame. Store the
 submitted value if it must remain visible later. In the example, the welcome

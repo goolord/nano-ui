@@ -8,7 +8,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.IORef (atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
 import Foreign.C.Types (CInt (..))
 import GHC.Clock (getMonotonicTime)
-import NanoUI (Size (..), WindowSettings (..), askWake, defaultWindowSettings, label, quitUi, useTask)
+import NanoUI (Size (..), WindowSettings (..), askWake, defaultWindowSettings, label, quitUi, useTask, newTask)
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
 import System.CPUTime (getCPUTime)
 import System.Environment (lookupEnv)
@@ -38,6 +38,8 @@ testRgfwWake = do
       latest <- newIORef (0 :: Int)
       shown <- newEmptyMVar
       streamed <- newEmptyMVar
+      job <- newTask
+      producer <- newTask
       let failNow msg = putStrLn ("[FAIL] RGFW wake: " ++ msg) >> hFlush stdout >> c_exit 1
           await what signal = timeout 5000000 (takeMVar signal) >>= maybe (failNow (what ++ " never showed")) pure
           next p = writeIORef phase p >> join (readIORef wakeRef)
@@ -56,11 +58,11 @@ testRgfwWake = do
             liftIO (writeIORef wakeRef wake)
             liftIO (readIORef phase) >>= \case
               0 -> do
-                r <- useTask ("job" :: String) (threadDelay 300000 >> pure (42 :: Int))
+                r <- useTask job ("job" :: String) (threadDelay 300000 >> pure (42 :: Int))
                 when (r == Just 42) (liftIO (void (tryPutMVar shown ())))
                 label "job"
               1 -> do
-                _ <- useTask ("stream" :: String) (produce wake)
+                _ <- useTask producer ("stream" :: String) (produce wake)
                 v <- liftIO (readIORef latest)
                 when (v == -1) (liftIO (void (tryPutMVar streamed ())))
                 label "stream"

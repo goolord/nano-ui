@@ -3,8 +3,12 @@
 -- view against a model and an update function for "NanoUI.Emit".
 module NanoUI.Backend.Rgfw
   ( runRgfwApp
+  , runRgfwAppWith
   , runRgfwAppReduce
   , runRgfwAppReduceCustom
+  , runRgfwAppReduceCustomWith
+  , RgfwDebugSampler
+  , newRgfwDebugSampler
   , RgfwOptions (..)
   , defaultRgfwOptions
   , WindowSettings (..)
@@ -23,6 +27,8 @@ import NanoUI (WindowMode (..), WindowPosition (..), WindowSettings (..), defaul
 import NanoUI.Rgfw.Internal.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSnapshot (..)
+  , RgfwDebugSampler
+  , newRgfwDebugSampler
   , askRgfwDebug
   , debugWindowBody
   , emptyRgfwDebug
@@ -31,6 +37,8 @@ import NanoUI.Rgfw.Internal.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
   , runRgfwApp
+  , runRgfwAppWith
   , runRgfwAppReduce
   , runRgfwAppReduceCustom
+  , runRgfwAppReduceCustomWith
   )

@@ -1,6 +1,6 @@
 module Main (main) where
 
-import ChatDemo (chatDemoUi)
+import ChatDemo (newChatDemoUi)
 import NanoUI (Key (KeyEscape), Pressable (..), Size (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Backend.Sdl
   ( SdlOptions (..)
@@ -9,7 +9,8 @@ import NanoUI.Backend.Sdl
   )
 
 main :: IO ()
-main =
+main = do
+  chatDemoUi <- newChatDemoUi
   runSdlApp
     defaultSdlOptions
       { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui-markdown example", wsSize = Size 900 760}

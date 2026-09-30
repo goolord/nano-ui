@@ -31,19 +31,18 @@ import Control.Exception (IOException, try)
 import Control.Monad (void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (modifyIORef', readIORef)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Atlas qualified as Atlas
-import NanoUI.Internal.Context (Context (..), hostOrInit, registerImage)
+import NanoUI.Internal.Context (Context (..), registerImage)
 import NanoUI.Internal.Draw (getDrawSnapScale)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, nextId, liftIO, uiTheme, withContext)
 import NanoUI.Svg (Svg, parseSvg, rasterizeSvg, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
-import Data.Word (Word32)
 import NanoUI.Internal.Types (Color (..), ImageId (..), colorRGBA, colorToWord32)
 import NanoUI.Internal.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
 import NanoUI.Internal.Widgets.Image (ImageConfig (..), defaultImageConfig, imageConfigured', imageNode)
@@ -193,7 +192,7 @@ svgIconConfigured' cfg doc = do
         -- shares it.
         rasterColor = if oneColour then white else color
         key = (svgKey doc, pw, ph, colorToWord32 rasterColor)
-    SvgRasters cache <- hostOrInit ctx (SvgRasters <$> newIORef Map.empty)
+    let cache = ctxSvgRasters ctx
     known <- Map.lookup key <$> readIORef cache
     case known of
       Just iid -> pure iid
@@ -203,9 +202,6 @@ svgIconConfigured' cfg doc = do
         when ok $ modifyIORef' cache (Map.insert key iid)
         pure (if ok then iid else ImageId 0)
   imageConfigured' cfg {icLayout = const lay} iid
-
--- | Rasterized SVG documents by document, pixel size and colour.
-newtype SvgRasters = SvgRasters (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
 
 -- | A solid rectangle sized by the layout modifier.
 box :: (Layout -> Layout) -> Color -> NanoUI ()

@@ -29,7 +29,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, whenM, (<&&>))
-import NanoUI.Internal.Store (fieldInt, insertSlot, lookupDyn)
+import NanoUI.Internal.Store (fieldInt, fieldEditorMode, insertSlot, lookupSlot)
 import NanoUI.Internal.Style (Style (..), Theme, themeSeparator)
 import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), Size (..), V2 (..), clamp, lerpColor, rectContains)
 import NanoUI.Internal.Widgets.TextArea (textAreaFieldEditor)
@@ -74,7 +74,7 @@ textFieldEditor ctx wid = do
           NodeTextInput -> Just . textInputMode <$> getStyleIdx (ctxNodeArena ctx) idx
           NodeTextArea -> pure (Just multiLineMode)
           _ -> pure Nothing
-      Nothing -> pure (lookupDyn (slotKey SlotTextMode key) store)
+      Nothing -> pure (lookupSlot fieldEditorMode (slotKey SlotTextMode key) store)
   pure $ flip fmap mMode $ \mode ->
     let (ed, save) = (if modeMultiLine mode then textAreaFieldEditor else textInputFieldEditor) store key
      in (mode, ed, save)

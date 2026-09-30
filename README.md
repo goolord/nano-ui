@@ -187,6 +187,9 @@ cabal run nano-ui-markdown-example  # a Markdown chat reply streaming in
 
 ## Documentation
 
+[Typed state ownership](docs/typed-state.md) explains component setup, the
+handle-based APIs, access costs, and migration from implicit generic hooks.
+
 The [user guide](packages/nano-ui/GUIDE.md) covers application setup, stable
 widget identity, layout, background work, custom drawing, and headless tests.
 

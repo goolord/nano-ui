@@ -17,6 +17,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Ditto.Backend (FormError)
+import Ditto.Core qualified as Ditto
 import Ditto.Generalized.Named qualified as Named
 import Ditto.Generalized.Unnamed qualified as Unnamed
 import Ditto.Types (FormId, encodeFormId)
@@ -33,7 +34,8 @@ import NanoUI
 import NanoUI qualified as NUI
 import NanoUI.Form.Internal.Backend
   ( FormInput (..)
-  , getActiveFormPrefix
+   , FormScope (..)
+   , askFormScope
   , updateFieldInput
   )
 import NanoUI.Form.Types (Form, FormView (..))
@@ -54,8 +56,9 @@ inputWidget ::
   -> (a -> NanoUI (Response, a))
   -> a
   -> Form err a
-inputWidget name decode changed encode widget =
-  maybe Unnamed.input Named.input name decode (fieldView changed encode widget)
+inputWidget name decode changed encode widget initial = do
+  owner <- Ditto.liftForm askFormScope
+  maybe Unnamed.input Named.input name decode (fieldView owner changed encode widget) initial
 
 labelled :: Maybe Text -> (a -> NanoUI b) -> a -> NanoUI b
 labelled caption widget value = mapM_ NUI.label caption >> widget value
@@ -64,18 +67,18 @@ labelled caption widget value = mapM_ NUI.label caption >> widget value
 -- report activation rather than change, so callers supply the response flag.
 fieldView ::
   Eq a =>
-  (Response -> Bool)
+  FormScope
+  -> (Response -> Bool)
   -> (a -> FormInput)
   -> (a -> NanoUI (Response, a))
   -> FormId
   -> a
   -> FormView
-fieldView changed encode widget formId value = FormView $ withKey fieldKey $ do
+fieldView (FormScope owner prefix) changed encode widget formId value = FormView $ withKey fieldKey $ do
   ctx <- askContext
-  prefix <- liftIO (getActiveFormPrefix ctx)
   (response, newValue) <- widget value
   when (changed response || newValue /= value) $
-    liftIO (updateFieldInput ctx prefix fieldKey (encode newValue))
+    liftIO (updateFieldInput owner ctx prefix fieldKey (encode newValue))
  where
   fieldKey = encodeFormId formId
 

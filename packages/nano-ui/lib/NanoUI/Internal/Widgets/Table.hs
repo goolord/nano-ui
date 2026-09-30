@@ -42,11 +42,12 @@ import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
 import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
 import NanoUI.Internal.Hooks (useInt)
+import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, withKey)
-import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, fieldFloat, fieldInt, fieldIntSet, findSlot, insertDyn, lookupDyn, slotKey, slotWrite)
+import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
@@ -57,14 +58,6 @@ import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDe
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
 import NanoUI.Internal.Frame.Scroll.Geometry (defaultScrollConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Internal.Widgets.Node
-
--- | Ascending or descending text order.
-data SortDir = SortAsc | SortDesc
-  deriving (Eq, Show, Enum, Bounded)
-
--- | Sort column by zero-based source-column index, independent of display order.
-data SortCol = SortCol {sortColIndex :: !Int, sortColDir :: !SortDir}
-  deriving (Eq, Show)
 
 -- | Size to content, share spare space, or request a fixed logical-pixel width.
 data ColSize = ColContent | ColStretch | ColFixed Float
@@ -138,34 +131,6 @@ isNumericCell txt =
         _ -> s
    in not (T.null digits) && T.all isDigit digits
 
--- | Data derived from a table's rows: cell text, each column's content width
--- and numeric flag, and the sorted row order. Cached in 'ctxDerivedCache'
--- with each row's object and each cell's width, so a frame encodes only rows
--- that are not last frame's objects, measures only cells whose text changed,
--- and sorts only when a sort key changed.
-data TableDerived = TableDerived
-  { tdRows :: !Opaque
-  , tdCols :: !Opaque
-  , tdFont :: !Opaque
-  , tdMonoFont :: !Opaque
-    -- ^ The sans and mono metrics the cells were measured with.
-  , tdRowObjs :: !(SmallArray Opaque)
-  , tdHeaders :: !(V.Vector Text)
-  , tdEncoded :: !(SmallArray (V.Vector Text))
-  , tdCellW :: !(PrimArray Float)
-    -- ^ Each cell's padded width in its column's font, column by column.
-  , tdTextRow :: !(PrimArray Int)
-    -- ^ For each column, a row whose cell is not numeric, or -1 when every
-    -- cell is.
-  , tdWidths :: !(PrimArray Float)
-  , tdNumeric :: !(SmallArray Bool)
-  , tdSort :: !SortCol
-  , tdOrder :: !(PrimArray Int)
-  }
-
--- | A value of any type, kept only to compare by pointer.
-data Opaque = forall a. Opaque a
-
 samePtr :: Opaque -> b -> Bool
 samePtr (Opaque a) b = isTrue# (reallyUnsafePtrEquality# a b)
 
@@ -176,7 +141,7 @@ samePtr (Opaque a) b = isTrue# (reallyUnsafePtrEquality# a b)
 -- derives the data evaluates them before keeping them.
 tableDerived :: Foldable f => Context -> Int -> Colonnade Headed row Text -> f row -> SortCol -> IO TableDerived
 tableDerived ctx key !cols !rows sort = do
-  cached <- readDerived ctx key
+  cached <- readDerived tableCache ctx key
   let hdrs = Encode.header id cols
   derived <- case cached of
     Just d | samePtr (tdRows d) rows && samePtr (tdCols d) cols -> pure d
@@ -186,7 +151,7 @@ tableDerived ctx key !cols !rows sort = do
         | otherwise = derived {tdSort = sort, tdOrder = orderFor sort (tdEncoded derived)}
   case cached of
     Just d | samePtr (Opaque d) resorted -> pure ()
-    _ -> writeDerived ctx key resorted
+    _ -> writeDerived tableCache ctx key resorted
   pure resorted
 
 -- | Row indices sorted by the sort column's text.
@@ -467,7 +432,7 @@ tableConfigured cfg f key cols inputRows curSort =
       liftIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
         -- The column order and the widths columns were dragged to.
-        (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupDyn stateKey st0)
+        (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupSlot fieldTableColumns stateKey st0)
         order0 = normalizeOrder n storedOrder
         hidden0 = findSlot fieldIntSet (tableHidden cfg) stateKey st0
         widths0 = take n (storedWidths ++ repeat 0 :: [Float])
@@ -666,7 +631,7 @@ tableConfigured cfg f key cols inputRows curSort =
               setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
       -- Compare before writing, so an idle table writes nothing.
       liftIO . writeSlots ctx $
-        SlotWrites (\st -> lookupDyn stateKey st == Just (nextOrder, widths1)) (insertDyn stateKey (nextOrder, widths1))
+        SlotWrites (\st -> lookupSlot fieldTableColumns stateKey st == Just (nextOrder, widths1)) (insertSlot fieldTableColumns stateKey (nextOrder, widths1))
           <> slotWrite fieldIntSet stateKey nextHidden
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (packHeaderDrag nextDrag)
           <> slotWrite fieldFloat stateKey nextDragX

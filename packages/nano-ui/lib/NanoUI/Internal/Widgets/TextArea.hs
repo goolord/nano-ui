@@ -36,6 +36,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO)
 import NanoUI.Internal.Store
+import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), clamp)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -150,7 +151,7 @@ textAreaWith' f value = do
   let textKey = slotKey SlotTextAreaText (intKey wid)
       -- The text last passed or returned, and its document: passing it back
       -- neither splits it again nor, while nothing is edited, joins it.
-      cached :: Maybe (Text, TextDocument) = lookupDyn textKey store
+      cached = lookupSlot fieldTextDocument textKey store
       incoming = case cached of
         Just (t, doc) | t == value -> doc
         _ -> textDocument value
@@ -161,7 +162,7 @@ textAreaWith' f value = do
       let out
             | sameDocument doc incoming = value
             | otherwise = documentText doc
-      liftIO $ modifyStore ctx (insertDyn textKey (out, doc))
+      liftIO $ modifyStore ctx (insertSlot fieldTextDocument textKey (out, doc))
       pure (resp, out)
 
 -- | Multi-line text editor over a 'TextDocument'. Pass the current document;
@@ -201,12 +202,12 @@ textAreaCore f wid value = do
       seenKey = slotKey SlotSeen key
       bufKey = slotKey SlotTextAreaBuffer key
       changedSlotKey = slotKey SlotTextAreaChanged key
-      stored :: Maybe TB.TextBuffer = lookupDyn bufKey store0
+      stored = lookupSlot fieldBuffer bufKey store0
       adoptDocument
         | fmap bufferDocument stored == Just value = id
         | otherwise =
-            insertDyn bufKey (maybe id keepCaret stored (documentBuffer value))
-              . deleteSlot fieldDyn (slotKey SlotTextHistory key)
+            insertSlot fieldBuffer bufKey (maybe id keepCaret stored (documentBuffer value))
+              . deleteSlot fieldHistory (slotKey SlotTextHistory key)
       keepCaret old new = (TB.withCursor (TB.getCursor old) new) {TB.preferredCol = TB.preferredCol old}
   -- Adopt the caller's document the way 'adoptSlot' does. Comparing the
   -- document the caller passes back with the stored one is O(1) ('==' checks
@@ -215,15 +216,15 @@ textAreaCore f wid value = do
   -- undo history, recorded against the old text, goes. Seed the scroll slot
   -- too: the wheel and drag paths write offsets through setScrollOffset2D,
   -- which only updates the text area's slot once it exists.
-  when (lookupDyn seenKey store0 /= Just value) $
+  when (lookupSlot fieldDocument seenKey store0 /= Just value) $
     liftIO . setStore ctx $
-      insertDyn seenKey value
+      insertSlot fieldDocument seenKey value
         . adoptDocument
         . overField fieldPoint (IM.insertWith (\_ old -> old) (slotKey SlotTextAreaScroll key) (0, 0))
-        . insertDyn (slotKey SlotTextMode key) multiLineMode
+        . insertSlot fieldEditorMode (slotKey SlotTextMode key) multiLineMode
         $ store0
   store <- liftIO (getStore ctx)
-  let current = maybe value bufferDocument (lookupDyn bufKey store)
+  let current = maybe value bufferDocument (lookupSlot fieldBuffer bufKey store)
       -- Set by commands run outside the frame ('applyTextFieldCommand') whose
       -- edits carry no keys or chars; folded into 'changed' so the caller
       -- gets its respChanged pulse, then cleared in the state write below.
@@ -279,9 +280,9 @@ textAreaCore f wid value = do
   -- damage it and wake the loop forever.
   unless (sameDocument newDoc value) $
     liftIO $ modifyStore ctx $ \st ->
-      case lookupDyn seenKey st of
+      case lookupSlot fieldDocument seenKey st of
         Just seen | sameDocument seen newDoc -> st
-        _ -> insertDyn seenKey newDoc st
+        _ -> insertSlot fieldDocument seenKey newDoc st
   resp <- addWidget wid NodeTextArea "" 0 layout
   pure (setChanged stateChanged resp, newDoc)
 
@@ -289,7 +290,7 @@ textAreaCore f wid value = do
 -- widget stores one over the lines of every document it adopts, so it is only
 -- missing for a text area never declared, which holds an empty document.
 textAreaBuffer :: WidgetStore -> Int -> TB.TextBuffer
-textAreaBuffer store key = fromMaybe TB.empty (lookupDyn (slotKey SlotTextAreaBuffer key) store)
+textAreaBuffer store key = fromMaybe TB.empty (lookupSlot fieldBuffer (slotKey SlotTextAreaBuffer key) store)
 
 -- | The text area's editor state as stored.
 loadTextAreaState :: WidgetStore -> Int -> TextAreaState
@@ -308,7 +309,9 @@ loadTextAreaState store key =
         , lineHeight = 16
         , -- Replacing the document drops its history, so the history is
           -- always the current document's.
-          history = fromMaybe emptyHistory (lookupDyn (slotKey SlotTextHistory key) store)
+          history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
+            Just (AreaHistory h) -> h
+            _ -> emptyHistory
         }
 
 -- | Store the editor state. The buffer holds the document and the caret.
@@ -316,8 +319,8 @@ saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state =
   insertSlot fieldPoint (slotKey SlotTextAreaScroll key) (realToFrac sx, realToFrac sy)
     . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (realToFrac vw, realToFrac vh)
-    . insertDyn (slotKey SlotTextAreaBuffer key) (buffer state)
-    . insertDyn (slotKey SlotTextHistory key) (history state)
+    . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (buffer state)
+    . insertSlot fieldHistory (slotKey SlotTextHistory key) (AreaHistory (history state))
     . insertSlot fieldInt (slotKey SlotTextAreaAnchorRow key) anchorRow
     . insertSlot fieldInt (slotKey SlotTextAreaAnchorCol key) anchorCol
   where

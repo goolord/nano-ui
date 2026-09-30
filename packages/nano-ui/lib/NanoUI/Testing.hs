@@ -42,6 +42,8 @@ module NanoUI.Testing
   , setDrawReuse
   , ctxFontMetrics
   , setHost
+  , Host
+  , newHost
   , askHost
   , withFontMetrics
   , withMonoFontMetrics

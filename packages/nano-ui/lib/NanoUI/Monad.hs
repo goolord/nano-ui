@@ -61,6 +61,9 @@ module NanoUI.Monad
   , setClipboard
 
     -- * Host
+  , Host
+  , newHost
+  , setHost
   , askHost
 
     -- * Scrolling
@@ -89,3 +92,4 @@ module NanoUI.Monad
 where
 
 import NanoUI.Internal.Monad
+import NanoUI.Internal.Host (Host, newHost, setHost)

@@ -20,8 +20,9 @@ slotsInRow = [Rect (fromIntegral i * 50) 0 40 30 | i <- [0 .. 4 :: Int]]
 
 runDragIdleAndAbortTest :: Context -> IORef Int -> IO ()
 runDragIdleAndAbortTest ctx failed = do
+  dragHandle <- newDrag
   let inp = withInput 400 200
-      ui = useDrag [(1 :: Int, mempty {rawRespHeld = buttonsFromList [MouseLeft]})]
+      ui = useDrag dragHandle [(1 :: Int, mempty {rawRespHeld = buttonsFromList [MouseLeft]})]
       press = pressAt inp (V2 10 10)
       moved = holdAt press (V2 40 10)
   _ <- evalUi ctx press ui

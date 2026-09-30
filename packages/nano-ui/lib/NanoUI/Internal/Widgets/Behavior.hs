@@ -126,7 +126,9 @@ data Reorder = Reorder
 -- several rows. Store 'reorderOrder'; releasing outside every item drops
 -- at the nearest one too.
 --
--- > (order, setOrder) <- useState [0 .. 4]
+-- Allocate @orderCell <- newState [0 .. 4]@ during component setup.
+--
+-- > (order, setOrder) <- useState orderCell
 -- > rects <- liftIO (readIORef lastRects)
 -- > r <- useReorder order rects
 -- > drawn <- forM (reorderPreview r) $ \i -> (i,) . respRect <$> chip i

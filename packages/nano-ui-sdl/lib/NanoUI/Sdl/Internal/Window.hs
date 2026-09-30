@@ -44,7 +44,7 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import NanoUI (Appearance, ImageId, Input (..), RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels)
 import NanoUI.Backend (cancelTasks, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
-import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, setHost, withClipboard)
+import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, withClipboard)
 import NanoUI.Sdl.Internal.Display
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations)
@@ -53,6 +53,7 @@ import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
+import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Internal.Input (TextInputSync, newTextInputSync)
 import NanoUI.Sdl.Internal.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
@@ -238,6 +239,7 @@ data SdlEnv = SdlEnv
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: DebugSamplerRef
+  , sdlDebugPublished :: IORef (Maybe SdlDebugSnapshot)
   , sdlFrameTrace :: !Bool
   -- ^ Whether @NANO_FRAME_TRACE@ was set when the session opened.
   , sdlRetain :: IORef Retain
@@ -514,6 +516,7 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   sdlImages <- mkAcquire newImageAtlas destroyImageAtlas
   sdlCursors <- mkAcquire initCursors destroyCursors
   sdlDebug <- liftIO newDebugSampler
+  sdlDebugPublished <- liftIO (newIORef Nothing)
   sdlFrameTrace <- liftIO $ isJust <$> lookupEnv "NANO_FRAME_TRACE"
   sdlRetain <- mkAcquire (newIORef (Retain nullPtr 0 0 0 0 0)) $ \ref -> do
     tex <- retainTexture <$> readIORef ref
@@ -554,7 +557,6 @@ startSdlWindow bench opts ctx guessedDriver fontSource monoSource = do
   -- Before the wake action, so the first frame has the right theme without
   -- a wake.
   liftIO $ setSystemAppearance ctx' =<< querySystemAppearance
-  liftIO $ setHost ctx' env
   -- Background hook jobs are cancelled with the session, before SDL quits,
   -- including when a host drives frames itself inside 'withSdl'.
   mkAcquire (setWakeLoopChecked ctx' tryPushRefreshEvent) (const (cancelTasks ctx'))

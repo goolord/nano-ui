@@ -57,6 +57,7 @@ main = do
   frames <- newIORef (0 :: Int)
   started <- newIORef False
   typedAt <- newIORef (0 :: Double)
+  startTime <- newState (0 :: Double)
   runSdlApp
     defaultSdlOptions
       { sdlWindowSettings =
@@ -67,10 +68,10 @@ main = do
             }
       , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
-    (idleUi scene frames started typedAt)
+    (idleUi scene frames started typedAt startTime)
 
-idleUi :: String -> IORef Int -> IORef Bool -> IORef Double -> NanoUI ()
-idleUi scene frames started typedAt = do
+idleUi :: String -> IORef Int -> IORef Bool -> IORef Double -> StateCell Double -> NanoUI ()
+idleUi scene frames started typedAt startTime = do
   n <- liftIO (readIORef frames)
   liftIO (writeIORef frames (n + 1))
   ctx <- askContext
@@ -107,7 +108,7 @@ idleUi scene frames started typedAt = do
       printf "search %s committed %.0f ms after the key\n" (show query') ((now - sent) * 1000)
       hFlush stdout
     t <- uiTime
-    (t0, setT0) <- useState (0 :: Double)
+    (t0, setT0) <- useState startTime
     when (t0 == 0) (setT0 t)
     -- A loading indicator that goes away, as an app's would after startup.
     when (scene == "spinner" && t0 > 0 && t - t0 < 3) spinner

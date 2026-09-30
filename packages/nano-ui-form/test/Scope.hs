@@ -22,14 +22,14 @@ import NanoUI.Form
 import NanoUI.Form.Internal.Backend
   ( FormStateStore (..)
   , emptyFormStateStore
-  , getActiveFormPrefix
+  , FormScope (..)
+  , askFormScope
+  , runFormUI
   , getFormStore
   , markFormSubmitted
   , resetFormState
-  , setActiveFormPrefix
   , setFormStore
   , updateFieldInput
-  , withFormPrefix
   )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -82,9 +82,9 @@ clickOn ctx ui rect = void (runClick ctx input ui (spanCenter rect))
 enabledForm :: Form Text Bool
 enabledForm = inputCheckbox "enabled" False
 
-readEnabled :: Context -> Text -> IO Bool
-readEnabled ctx prefix = do
-  (_, result) <- runNanoUI ctx input (runNanoForm prefix enabledForm)
+readEnabled :: FormState -> Context -> Text -> IO Bool
+readEnabled owner ctx prefix = do
+  (_, result) <- runNanoUI ctx input (runNanoForm owner prefix enabledForm)
   case result of
     Ditto.Ok (Ditto.Proved _ value) -> pure value
     Ditto.Error _ -> fail "checkbox form unexpectedly failed validation"
@@ -92,11 +92,12 @@ readEnabled ctx prefix = do
 testDeferredViews :: IO ()
 testDeferredViews = do
   ctx <- newPixelContext
+  owner <- newFormState
   let
     ui :: NanoUI ()
     ui = columnWith fillW $ do
-      (left, _) <- runNanoForm "left" enabledForm
-      (right, _) <- runNanoForm "right" enabledForm
+      (left, _) <- runNanoForm owner "left" enabledForm
+      (right, _) <- runNanoForm owner "right" enabledForm
       runFormView (Ditto.unView left [] <> Ditto.unView right [])
   _ <- warmup2 ctx input ui
   controls <- checkboxes ctx
@@ -107,44 +108,43 @@ testDeferredViews = do
         (leftId /= rightId)
       clickOn ctx ui leftRect
       _ <- warmup2 ctx input ui
-      check "deferred view wrote to the wrong form" =<< readEnabled ctx "left"
-      check "editing one form changed another form" . not =<< readEnabled ctx "right"
+      check "deferred view wrote to the wrong form" =<< readEnabled owner ctx "left"
+      check "editing one form changed another form" . not =<< readEnabled owner ctx "right"
     _ -> fail "expected two deferred checkbox fields"
 
 testNestedViews :: IO ()
 testNestedViews = do
   ctx <- newPixelContext
-  setActiveFormPrefix ctx "host"
+  owner <- newFormState
   let
-    nested = Ditto.view (FormView (void (nanoFormLive "inner" enabledForm)))
+    nested = Ditto.view (FormView (void (nanoFormLive owner "inner" enabledForm)))
     outer = nested *> enabledForm
-    ui = nanoFormLive "outer" outer
+    ui = nanoFormLive owner "outer" outer
   _ <- warmup2 ctx input ui
   controls <- checkboxes ctx
   case controls of
     [_, (_, outerRect)] -> do
       clickOn ctx ui outerRect
       _ <- warmup2 ctx input ui
-      check "field following a nested form lost its owner" =<< readEnabled ctx "outer"
-      check "outer field wrote to the nested form" . not =<< readEnabled ctx "inner"
-      check "form evaluation or rendering leaked its prefix" . (== "host")
-        =<< getActiveFormPrefix ctx
+      check "field following a nested form lost its owner" =<< readEnabled owner ctx "outer"
+      check "outer field wrote to the nested form" . not =<< readEnabled owner ctx "inner"
     _ -> fail "expected nested and outer checkbox fields"
 
 testPrefixRestoration :: IO ()
 testPrefixRestoration = do
   ctx <- newPixelContext
-  result <-
-    try
-      ( runNanoUI ctx input $ withFormPrefix "outer" $ withFormPrefix "inner" $ do
-          liftIO (updateFieldInput ctx "inner" "value" (FormInputText "preserved"))
-          liftIO (ioError (userError "form failed"))
-      ) ::
-      IO (Either IOException ())
+  owner <- newFormState
+  (prefix, result) <- runNanoUI ctx input $ runFormUI owner "outer" $ do
+    result <- liftNanoUI . liftIO . try $ runNanoUI ctx input $ runFormUI owner "inner" $ do
+      FormScope innerOwner innerPrefix <- askFormScope
+      liftNanoUI $ liftIO $ do
+        updateFieldInput innerOwner ctx innerPrefix "value" (FormInputText "preserved")
+        ioError (userError "form failed")
+    FormScope _ prefix <- askFormScope
+    pure (prefix, result :: Either IOException ())
   check "expected a form exception" (either (const True) (const False) result)
-  check "exception leaked the active form prefix" . (== "")
-    =<< getActiveFormPrefix ctx
-  store <- getFormStore ctx "inner"
+  check "exception changed the enclosing form owner" (prefix == "outer")
+  store <- getFormStore owner "inner"
   check
     "prefix restoration discarded field updates"
     (Map.lookup "value" (fssInputs store) == Just (FormInputText "preserved"))
@@ -152,10 +152,11 @@ testPrefixRestoration = do
 testFormInvalidation :: IO ()
 testFormInvalidation = do
   ctx <- newPixelContext
+  owner <- newFormState
   forM_
-    [ updateFieldInput ctx "form" "field" (FormInputText "value")
-    , markFormSubmitted ctx "form" True
-    , resetFormState ctx "form"
+    [ updateFieldInput owner ctx "form" "field" (FormInputText "value")
+    , markFormSubmitted owner ctx "form" True
+    , resetFormState owner ctx "form"
     ]
     $ \update -> do
       clearDirty ctx
@@ -169,8 +170,9 @@ testFormInvalidation = do
 testSubmitPulse :: IO ()
 testSubmitPulse = do
   ctx <- newPixelContext
+  owner <- newFormState
   let
-    ui = nanoFormSubmit "submit" "Save" (pure (42 :: Int))
+    ui = nanoFormSubmit owner "submit" "Save" (pure (42 :: Int))
   initial <- warmup2 ctx input ui
   check "form submitted before activation" (initial == Nothing)
   (submitted, _, _, _) <-
@@ -183,8 +185,9 @@ testSubmitPulse = do
 testSubmitSkipsTextArea :: IO ()
 testSubmitSkipsTextArea = do
   ctx <- newPixelContext
+  owner <- newFormState
   let
-    ui = nanoFormSubmit "submit-notes" "Save" (inputTextArea "notes" "")
+    ui = nanoFormSubmit owner "submit-notes" "Save" (inputTextArea "notes" "")
   _ <- warmup2 ctx input ui
   controls <- controlsOf NodeTextArea ctx
   case controls of
@@ -199,12 +202,13 @@ testSubmitSkipsTextArea = do
 testResetWidgets :: IO ()
 testResetWidgets = do
   ctx <- newPixelContext
+  owner <- newFormState
   let
     ui =
       columnWith fillW $
         (,)
-          <$> nanoFormLive "reset-left" enabledForm
-          <*> nanoFormLive "reset-right" enabledForm
+          <$> nanoFormLive owner "reset-left" enabledForm
+          <*> nanoFormLive owner "reset-right" enabledForm
   _ <- warmup2 ctx input ui
   controls <- checkboxes ctx
   case controls of
@@ -212,7 +216,7 @@ testResetWidgets = do
       forM_ [leftRect, rightRect] (clickOn ctx ui)
       edited <- warmup2 ctx input ui
       check "checkboxes did not retain their edits" (edited == (Just True, Just True))
-      runNanoUI ctx input (resetForm "reset-left")
+      runNanoUI ctx input (resetForm owner "reset-left")
       reset <- warmup2 ctx input ui
       check
         "reset did not restore defaults or changed another form"
@@ -221,7 +225,7 @@ testResetWidgets = do
       check
         "reset changed another form's widget identity"
         (map fst (drop 1 after) == [rightId])
-      setFormStore ctx "reset-left" emptyFormStateStore
+      setFormStore owner ctx "reset-left" emptyFormStateStore
       persisted <- warmup2 ctx input ui
       check
         "writing form data revived a retired widget cache"
@@ -231,8 +235,9 @@ testResetWidgets = do
 testResetTextArea :: IO ()
 testResetTextArea = do
   ctx <- newPixelContext
+  owner <- newFormState
   let
-    ui = nanoFormLive "reset-editor" (inputTextArea "notes" "initial")
+    ui = nanoFormLive owner "reset-editor" (inputTextArea "notes" "initial")
   _ <- warmup2 ctx input ui
   controls <- controlsOf NodeTextArea ctx
   case controls of
@@ -241,7 +246,7 @@ testResetTextArea = do
       void (runFrame ctx input {inputChars = "edited"} ui)
       edited <- warmup2 ctx input ui
       check "text area did not retain its edit" (edited == Just "editedinitial")
-      runNanoUI ctx input (resetForm "reset-editor")
+      runNanoUI ctx input (resetForm owner "reset-editor")
       reset <- warmup2 ctx input ui
       check "reset retained the text area's cached buffer" (reset == Just "initial")
     _ -> fail "expected one reset-test text area"

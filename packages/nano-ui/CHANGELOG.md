@@ -2,6 +2,21 @@
 
 ## 0.2.0.0 -- Unreleased
 
+### Typed state ownership (breaking)
+
+- `newState` allocates a `StateCell a`; `useState` now reads that handle,
+  without `Typeable`, and `modifyState` applies a pure update to its latest
+  value. Reads are O(1). Equal writes remain idle; changed writes rebuild the
+  view with one-shot input removed and repaint dependent content.
+- `newTask`, `newStream`, `newImageHandle`, and `newDrag` allocate typed
+  owners passed first to their `use*` operations. Screenshots use a task
+  handle. Task/image key-change, skip-frame, and session-end cleanup remain.
+- `Host a`/`newHost` replace implicit context-wide host lookup. Host and
+  compact-host access take an explicit typed slot.
+- Removed dynamic widget/host stores. Built-in editor, pane-grid, table,
+  sensor, paragraph, SVG, and derived-cache state has concrete types. An
+  unchanged store snapshot skips slot-diff construction.
+
 ### Added
 
 - `NanoUI.Effectful`, for programs that use `effectful`: `NanoUI`'s

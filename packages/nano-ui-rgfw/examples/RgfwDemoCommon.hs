@@ -58,7 +58,8 @@ import NanoUI.Backend.Rgfw
   , debugWindowBody
   , defaultRgfwOptions
   , defaultWindowSettings
-  , runRgfwAppReduceCustom
+  , runRgfwAppReduceCustomWith
+  , RgfwDebugSampler
   )
 import NanoUI.Emit qualified as Emit
 
@@ -182,8 +183,8 @@ update msg m =
         ClearNotes       -> m' {notesVal = ""}
         ToggleDebug b    -> m' {debugOpen = b}
 
-appView :: Model -> NanoUI ()
-appView m = do
+appView :: RgfwDebugSampler -> Model -> NanoUI ()
+appView debug m = do
   panelWith (padAll 12 . gap 8 . fillW . fillH) $ do
     rowWith (gap 8 . fixedH 24 . fillW) $ do
       label "nano-ui on RGFW"
@@ -226,8 +227,8 @@ appView m = do
       TabDiagnostics -> viewDiagnosticsTab m
 
     when (debugOpen m) $ do
-      snap <- askRgfwDebug
-      (win, _) <- window True "Debug" (debugWindowBody snap)
+      snap <- askRgfwDebug debug
+      (win, _) <- window True "Debug" (debugWindowBody debug snap)
       when (respClicked win) (Emit.emit (ToggleDebug False))
 
 viewControlsTab :: Model -> NanoUI ()
@@ -449,4 +450,4 @@ main = do
           , optTheme  = tomorrowNightMinDarkTheme
           , optScale  = 0.0 -- 0.0 uses the DPI reported by the OS by default
           }
-  runRgfwAppReduceCustom opts (\m -> (themeForChoice (currentTheme m), physScaleFor (dpiScale m))) update initialModel appView
+  runRgfwAppReduceCustomWith opts (\m -> (themeForChoice (currentTheme m), physScaleFor (dpiScale m))) update initialModel (pure . appView)

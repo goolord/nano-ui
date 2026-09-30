@@ -2,6 +2,8 @@
 module NanoUI.Markdown.Widget
   ( MarkdownConfig (..)
   , defaultMarkdownConfig
+  , MarkdownCache
+  , newMarkdownCache
   , markdown
   , markdownConfigured
   ) where
@@ -95,8 +97,8 @@ import NanoUI
   , whenM
   , withKey
   )
-import NanoUI.Internal.Context (hostOrInit, intKey)
-import NanoUI.Internal.Monad (freshWidget, liftIO)
+import NanoUI.Internal.Context (intKey)
+import NanoUI.Internal.Monad (nextId, liftIO)
 import NanoUI.Internal.Store (eqByPtr, ptrEq)
 import NanoUI.Markdown.Document (MarkdownDoc, markdownBlocks)
 import NanoUI.Markdown.Syntax
@@ -181,12 +183,12 @@ defaultMarkdownConfig =
 -- Each top-level block is keyed by its position and kind, so appending to a
 -- document keeps the ids, and the cached text layout, of earlier blocks.
 -- Text is not selectable; code blocks have a copy button.
-markdown :: MarkdownDoc -> NanoUI (Maybe Text)
-markdown = markdownConfigured defaultMarkdownConfig
+markdown :: MarkdownCache -> MarkdownDoc -> NanoUI (Maybe Text)
+markdown cache = markdownConfigured cache defaultMarkdownConfig
 
 -- | 'markdown' with a configuration.
-markdownConfigured :: MarkdownConfig -> MarkdownDoc -> NanoUI (Maybe Text)
-markdownConfigured cfg doc = do
+markdownConfigured :: MarkdownCache -> MarkdownConfig -> MarkdownDoc -> NanoUI (Maybe Text)
+markdownConfigured cache cfg doc = do
   theme <- uiTheme
   size <- uiFontSize
   -- Pin the body size (the backend default if unset) so headings and small
@@ -197,6 +199,7 @@ markdownConfigured cfg doc = do
   let env =
         Env
           { envCfg = cfg
+          , envCache = cache
           , envTheme = theme
           , envText = text
           , envSize = layoutFontSize base
@@ -209,6 +212,7 @@ markdownConfigured cfg doc = do
 -- inside quotes); envMetrics is the body font, which sizes list markers.
 data Env = Env
   { envCfg :: !(MarkdownConfig)
+  , envCache :: !MarkdownCache
   , envTheme :: !Theme
   , envText :: !(Layout -> Layout)
   , envSize :: !Float
@@ -282,9 +286,9 @@ soleImage cfg = \case
 -- frame while a reply streams into its last block.
 keptInlines :: Env -> [Span] -> NanoUI [Inline]
 keptInlines env xs = do
-  (wid, ctx) <- freshWidget
+  wid <- nextId
   liftIO $ do
-    Kept ref <- hostOrInit ctx (Kept <$> newIORef (KeptGens keptBound IM.empty IM.empty))
+    let MarkdownCache ref = envCache env
     KeptGens bound cur old <- readIORef ref
     let k = intKey wid
         found = maybe (IM.lookup k old) Just (IM.lookup k cur)
@@ -312,7 +316,12 @@ keptInlines env xs = do
       | otherwise = KeptGens (max keptBound (2 * IM.size cur)) (IM.singleton k e) cur
 
 -- | Pieces 'keptInlines' made, by widget key, in two generations.
-newtype Kept = Kept (IORef KeptGens)
+newtype MarkdownCache = MarkdownCache (IORef KeptGens)
+
+-- | Allocate once during component setup. The cache retains only typed inline
+-- data; paragraph layout and interaction state remain in the UI context.
+newMarkdownCache :: IO MarkdownCache
+newMarkdownCache = MarkdownCache <$> newIORef (KeptGens keptBound IM.empty IM.empty)
 
 data KeptGens = KeptGens !Int !(IM.IntMap KeptEntry) !(IM.IntMap KeptEntry)
 

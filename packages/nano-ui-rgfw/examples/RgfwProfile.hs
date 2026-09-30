@@ -36,7 +36,9 @@ import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readRetainedPixels, renderArenaGl)
 import qualified RGFW as R
-import RgfwDemoCommon (Model (..), appView, currentTheme, dpiScale, initialModel, physScaleFor, themeForChoice)
+import RgfwDemoCommon (Model (..), currentTheme, dpiScale, initialModel, physScaleFor, themeForChoice)
+import RgfwDemoCommon qualified as Demo
+import NanoUI.Backend.Rgfw (newRgfwDebugSampler)
 
 iterations :: Int
 iterations = 500
@@ -66,7 +68,9 @@ measure name action = do
 
 main :: IO ()
 main = do
-  let m = initialModel
+  debug <- newRgfwDebugSampler
+  let appView = Demo.appView debug
+      m = initialModel
       theme = themeForChoice (currentTheme m)
       userScale = physScaleFor (dpiScale m)
       !scale = if userScale > 0.0 then userScale else 1.0

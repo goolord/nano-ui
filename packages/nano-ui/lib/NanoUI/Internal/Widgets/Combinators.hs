@@ -10,12 +10,10 @@ module NanoUI.Internal.Widgets.Combinators
   )
 where
 
-import Control.Monad (when, (>=>))
-import Data.Dynamic (fromDynamic, toDyn)
+import Control.Monad (when)
 import Data.IORef (modifyIORef', readIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
-import Data.Typeable (Typeable)
+import NanoUI.Internal.Derived (DerivedField, lookupDerived, insertDerived)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Store (fieldInt, Field, boolInt)
@@ -93,15 +91,14 @@ finishInput field ctx wid original resp value = do
   pure (setChanged (value /= original) resp, value)
 
 -- | The value widget @key@ cached in 'ctxDerivedCache', if present.
-readDerived :: Typeable a => Context -> Int -> IO (Maybe a)
-readDerived ctx key = (IM.lookup key >=> fromDynamic) <$> readIORef (ctxDerivedCache ctx)
+readDerived :: DerivedField a -> Context -> Int -> IO (Maybe a)
+readDerived field ctx key = lookupDerived field key <$> readIORef (ctxDerivedCache ctx)
 
 -- | Cache a value derived by widget @key@. Entries of widgets no longer
 -- built are never removed one by one, so a full cache is cleared instead,
 -- when a new key would grow it; replacing a key's entry never clears it.
-writeDerived :: Typeable a => Context -> Int -> a -> IO ()
-writeDerived ctx key v = modifyIORef' (ctxDerivedCache ctx) $ \cache ->
-  IM.insert key (toDyn v) (if IM.size cache >= 64 && IM.notMember key cache then IM.empty else cache)
+writeDerived :: DerivedField a -> Context -> Int -> a -> IO ()
+writeDerived field ctx key value = modifyIORef' (ctxDerivedCache ctx) (insertDerived field key value)
 
 -- | Run an index-based picker over every value of a bounded enum. Indices
 -- are offset by @fromEnum minBound@, so enums that do not start at 0 map

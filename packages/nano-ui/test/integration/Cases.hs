@@ -468,23 +468,29 @@ runAspectLayoutTest ctx failed = do
 
 runHostSlotTest :: Context -> IORef Int -> IO ()
 runHostSlotTest ctx failed = do
+  stringHost <- newHost
+  intHost <- newHost
+  otherStringHost <- newHost
+  compactOwner <- newHost
   let inp = withInput 80 80
       hostUiString = do
         _ <- column (pure ())
-        askHost @String
+        askHost stringHost
       hostUiInt = do
         _ <- column (pure ())
-        askHost @Int
+        askHost intHost
   (miss, _, _, _) <- runFrame ctx inp hostUiString
-  setHost ctx ("ok" :: String)
-  setHost ctx (1 :: Int)
+  setHost stringHost ("ok" :: String)
+  setHost intHost (1 :: Int)
+  setHost otherStringHost ("independent" :: String)
   (hitS, _, _, _) <- runFrame ctx inp hostUiString
   (hitI, _, _, _) <- runFrame ctx inp hostUiInt
   assert failed (miss == Nothing && hitS == Just "ok" && hitI == Just 1)
-  _ <- compactHost ctx ([0 .. 9999] :: [Int])
+  assertEq failed (Just "independent") =<< runNanoUI ctx inp (askHost otherStringHost)
+  _ <- compactHost compactOwner ([0 .. 9999] :: [Int])
   let compactUi = do
         _ <- column (pure ())
-        askCompact @[Int]
+        askCompact compactOwner
   (got, _, _, _) <- runFrame ctx inp compactUi
   case got of
     Just xs | length xs == 10000 && last xs == 9999 -> pure ()

@@ -65,10 +65,11 @@ runClippedDropBoundsTest ctx failed = do
 
 runTabDragLifecycleTest :: Context -> IORef Int -> IO ()
 runTabDragLifecycleTest ctx failed = do
+  dragHandle <- newDrag
   let inp = withInput 400 200
       ui order = do
         r <- tabBar' TabA [tab k (T.pack (show k)) () | k <- order]
-        d <- useDrag (tabHeaders r)
+        d <- useDrag dragHandle (tabHeaders r)
         pure (r, d)
       keys = [TabA, TabB, TabC]
   (r, _) <- warmup2 ctx inp (ui keys)
@@ -105,11 +106,12 @@ runTabDragLifecycleTest ctx failed = do
 
 runTabDragControlsTest :: Context -> IORef Int -> IO ()
 runTabDragControlsTest ctx failed = do
+  dragHandle <- newDrag
   let inp = withInput 400 200
       ui = do
         r <- tabBar' TabA
           [closableTab TabA "Alpha" (), (tab TabB "Disabled" ()) {tabDisabled = True}]
-        useDrag (tabHeaders r)
+        useDrag dragHandle (tabHeaders r)
   _ <- warmup2 ctx inp ui
   spans <- collectTextSpans ctx
   close <- findCloseButtonRect ctx
@@ -125,12 +127,13 @@ runTabDragControlsTest ctx failed = do
 
 runTabDragReorderTest :: Context -> IORef Int -> IO ()
 runTabDragReorderTest ctx failed = do
+  dragHandle <- newDrag
   orderRef <- newIORef [TabA, TabB, TabC]
   let inp = withInput 400 200
       ui = do
         order <- liftIO (readIORef orderRef)
         r <- tabBar' TabA [tab k (T.pack (show k)) () | k <- order]
-        gesture <- useDrag (tabHeaders r)
+        gesture <- useDrag dragHandle (tabHeaders r)
         forM_ gesture $ \d -> when (dragPhase d == DragReleased) $ do
           let rest = filter ((/= dragPayload d) . fst) (tabHeaders r)
           forM_ (insertionIndex DragAxisX (tabStripRect r) (map (respRect . snd) rest) (dragAt d)) $ \i -> do

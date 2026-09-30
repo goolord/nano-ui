@@ -1,6 +1,7 @@
 -- | SDL window session loop: event poll, resize sync, frame present.
 module NanoUI.Sdl.Internal.Session
   ( runSdlSession
+  , runSdlSessionWith
   ) where
 
 import Control.Exception (bracket)
@@ -23,7 +24,11 @@ import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 -- frame and answers whether another is needed; its flag forces a full
 -- repaint.
 runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO Bool) -> IO ()
-runSdlSession options drawFn = do
+runSdlSession options drawFn = runSdlSessionWith options (\_ -> pure drawFn)
+
+-- | Construct the frame action once with the session's typed SDL environment.
+runSdlSessionWith :: SdlOptions -> (SdlEnv -> IO (Context -> SdlEnv -> Input -> Bool -> IO Bool)) -> IO ()
+runSdlSessionWith options setup = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
   forM_ (sdlAppThemeFor options) (followSystemTheme ctx)
@@ -31,6 +36,7 @@ runSdlSession options drawFn = do
   forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
     registerImage ctx image w h pixels >>= (`unless` fail "registerImage failed")
   withSdl options ctx $ \ctx0 env -> do
+    drawFn <- setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
     prev <- newIORef emptyInput
     drawing <- newDrawingLock

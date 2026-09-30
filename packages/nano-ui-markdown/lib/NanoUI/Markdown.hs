@@ -9,17 +9,21 @@
 -- keep it in your model, and draw it every frame. 'markdown' returns the
 -- link clicked this frame, if any:
 --
--- > view :: MarkdownDoc -> NanoUI ()
--- > view doc = do
--- >   (lastLink, setLastLink) <- useState ("" :: Text)
--- >   clicked <- markdown doc
+-- Allocate @cache <- newMarkdownCache@ during component setup.
+--
+-- > view :: MarkdownCache -> MarkdownDoc -> NanoUI ()
+-- > view cache doc = do
+-- >   (lastLink, setLastLink) <- useText ""
+-- >   clicked <- markdown cache doc
 -- >   for_ clicked setLastLink
 -- >   unless (T.null lastLink) $ label ("Clicked " <> lastLink)
 --
 -- Grow a streamed reply with 'appendMarkdown'. When tokens arrive on a
 -- worker thread, nano-ui's @useStream@ can append each one there:
 --
--- > doc <- useStream replyId emptyMarkdown $ \update ->
+-- Allocate @stream <- newStream@ once during setup.
+--
+-- > doc <- useStream stream replyId emptyMarkdown $ \update ->
 -- >   onToken client (\token -> update (appendMarkdown token))
 --
 -- On the UI thread, append a frame's tokens in one call:
@@ -59,6 +63,8 @@ module NanoUI.Markdown
 
     -- * Drawing
   , markdown
+  , MarkdownCache
+  , newMarkdownCache
   , markdownConfigured
   , MarkdownConfig (..)
   , defaultMarkdownConfig

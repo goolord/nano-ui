@@ -45,7 +45,8 @@ import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCar
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Store (collapseFieldSelection, fieldFloat, fieldPoint, findSlot, insertDyn, insertSlot, lookupDyn, lookupSlot)
+import NanoUI.Internal.Store (collapseFieldSelection, fieldFloat, fieldPoint, fieldBuffer, fieldLineWidths, findSlot, insertSlot, lookupSlot)
+import NanoUI.Internal.Store.Types (LineWidths (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
@@ -249,7 +250,7 @@ textAreaContentMetrics ctx idx = do
       buf = TA.textAreaBuffer store key
       lns = TB.bufferLines buf
       (seenHead, seenTail) = TB.changedLines buf
-      cached = lookupDyn widthsKey store
+      cached = lookupSlot fieldLineWidths widthsKey store
   case cached of
     Just (LineWidths font fontGen _ _ widestW contentH)
       | font == size && fontGen == gen && seenHead >= Seq.length lns -> pure (widestW, contentH)
@@ -280,14 +281,9 @@ textAreaContentMetrics ctx idx = do
             | otherwise = widestFrom 0 widths
           pick a b = if snd b > snd a then b else a
       modifyStore ctx $
-        insertDyn widthsKey (LineWidths size gen widths widest' contentW contentH)
-          . insertDyn (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf)
+        insertSlot fieldLineWidths widthsKey (LineWidths size gen widths widest' contentW contentH)
+          . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf)
       pure (contentW, contentH)
-
--- | Measured widths of a text area's lines, the font size and metric
--- generation they were measured at, the widest line with its width, and the
--- content height.
-data LineWidths = LineWidths !Float !Int !(Seq Float) !Int !Float !Float
 
 -- | Field rect and scrollbars of a text area, for its node font and content
 -- extent. Zoom changes the node font, so scroll and hit math resolve it here

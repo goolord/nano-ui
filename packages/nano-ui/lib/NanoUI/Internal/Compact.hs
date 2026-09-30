@@ -5,17 +5,16 @@ module NanoUI.Internal.Compact
   , askCompact
   ) where
 
-import Data.Typeable (Typeable)
 import GHC.Compact (Compact, compact, getCompact)
-import NanoUI.Internal.Context (Context, setHost)
+import NanoUI.Internal.Host (Host, setHost)
 import NanoUI.Internal.Monad (NanoUI, askHost)
 
--- | Copy data into a compact region and store it by type in the context.
+-- | Copy data into a compact region and retain it in an explicit typed slot.
 -- GHC's 'compact' restrictions apply: values containing functions or mutable
 -- objects cannot be compacted. This is not an FFI buffer-pinning operation.
-compactHost :: Typeable a => Context -> a -> IO (Compact a)
-compactHost ctx a = compact a >>= \region -> region <$ setHost ctx region
+compactHost :: Host (Compact a) -> a -> IO (Compact a)
+compactHost owner a = compact a >>= \region -> region <$ setHost owner region
 
--- | Read the compacted host value of the requested type, or 'Nothing' if absent.
-askCompact :: forall a. Typeable a => NanoUI (Maybe a)
-askCompact = fmap getCompact <$> askHost @(Compact a)
+-- | Read a compacted value from its typed owner, or 'Nothing' if uninstalled.
+askCompact :: Host (Compact a) -> NanoUI (Maybe a)
+askCompact owner = fmap getCompact <$> askHost owner

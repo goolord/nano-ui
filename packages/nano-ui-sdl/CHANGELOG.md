@@ -2,6 +2,11 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** SDL-specific debug, font/scale, dialog launch, and chrome
+  helpers take `SdlEnv` explicitly. `runSdlAppWith` supplies it to a one-time
+  component setup callback. Dialog polling reads the dialog handle directly;
+  the session no longer installs itself in a dynamic host registry.
+
 ### Added
 
 - Everything a window without the desktop's title bar has to do for itself.

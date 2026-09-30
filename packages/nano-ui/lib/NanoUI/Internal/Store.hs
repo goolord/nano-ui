@@ -12,7 +12,14 @@ module NanoUI.Internal.Store
   , fieldPoint
   , fieldText
   , fieldIntSet
-  , fieldDyn
+  , fieldBuffer
+  , fieldDocument
+  , fieldTextDocument
+  , fieldHistory
+  , fieldEditorMode
+  , fieldLineWidths
+  , fieldGrid
+  , fieldTableColumns
   , fieldQuiet
   , overField
   , lookupSlot
@@ -27,8 +34,6 @@ module NanoUI.Internal.Store
   , SlotWrites (..)
   , slotWrite
   , slotWriteOr
-  , lookupDyn
-  , insertDyn
   , slotKey
   , Slot (..)
   , fieldSelection
@@ -48,35 +53,18 @@ module NanoUI.Internal.Store
   )
 where
 
-import Data.Dynamic (Dynamic, Typeable, fromDynamic, toDyn)
 import Data.IntMap.Strict (IntMap)
 import Data.IntSet (IntSet)
 import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Internal.Id (mix64)
-
--- | Physical-equality shortcut. Pointer equality implies value equality for
--- immutable values, so callers may use 'True' to skip a structural comparison
--- of a field the caller never rebuilt. 'False' only means \"compare properly\".
---
--- It compares the closures as passed and forces neither: force a selector
--- application or other thunk first, or the check always fails. It stays lazy
--- so a literal passed straight in keeps its identity
--- ('NanoUI.Internal.Layout.Arena.setNodeText'). The two may differ in type,
--- as a cache compares a container it kept existentially with the caller's.
-{-# INLINE ptrEq #-}
-ptrEq :: a -> b -> Bool
-ptrEq a b = isTrue# (reallyUnsafePtrEquality# a b)
-
--- | '==' with a physical-equality fast path. Unchanged fields of a
--- record-updated store keep their identity, so whole-store comparisons become
--- cheap when only one map was rebuilt.
-{-# INLINE eqByPtr #-}
-eqByPtr :: Eq a => a -> a -> Bool
-eqByPtr !a !b = ptrEq a b || a == b
+import NanoUI.Internal.Equality (eqByPtr, ptrEq)
+import NanoUI.Internal.Store.Types (GridState, LineWidths, TextHistory)
+import NanoUI.Internal.TextEditor.Types (EditorMode)
+import NanoUI.Internal.Widgets.TextDocument (TextDocument)
+import NanoUI.Widgets.TextBuffer (TextBuffer)
 
 -- | Keys whose values differ between two maps, a key that left or joined
 -- included.
@@ -105,12 +93,21 @@ diffKeys = diffKeysBy eqByPtr
 -- bookkeeping. Lazy: a caller that only asks whether anything changed stops
 -- at the first changed key.
 slotChangedKeys :: WidgetStore -> WidgetStore -> [Int]
-slotChangedKeys old new =
-  diffKeys (storeInt old) (storeInt new)
-    ++ diffKeys (storeDouble old) (storeDouble new)
-    ++ diffKeys (storeText old) (storeText new)
-    ++ diffKeys (storeIntSet old) (storeIntSet new)
-    ++ diffKeysBy ptrEq (storeDyn old) (storeDyn new)
+slotChangedKeys !old !new
+  | ptrEq old new = []
+  | otherwise =
+      diffKeys (storeInt old) (storeInt new)
+        ++ diffKeys (storeDouble old) (storeDouble new)
+        ++ diffKeys (storeText old) (storeText new)
+        ++ diffKeys (storeIntSet old) (storeIntSet new)
+        ++ diffKeysBy ptrEq (storeBuffer old) (storeBuffer new)
+        ++ diffKeysBy ptrEq (storeDocument old) (storeDocument new)
+        ++ diffKeysBy ptrEq (storeTextDocument old) (storeTextDocument new)
+        ++ diffKeysBy ptrEq (storeHistory old) (storeHistory new)
+        ++ diffKeys (storeEditorMode old) (storeEditorMode new)
+        ++ diffKeysBy ptrEq (storeLineWidths old) (storeLineWidths new)
+        ++ diffKeys (storeGrid old) (storeGrid new)
+        ++ diffKeys (storeTableColumns old) (storeTableColumns new)
 
 -- | Widget state for every widget, in maps by value type. Same-type fields
 -- that share a widget key use 'slotKey'.
@@ -123,7 +120,14 @@ data WidgetStore = WidgetStore
   , storePoint :: !(IntMap (Float, Float))
   , storeText :: !(IntMap Text)
   , storeIntSet :: !(IntMap IntSet)
-  , storeDyn :: !(IntMap Dynamic)
+  , storeBuffer :: !(IntMap TextBuffer)
+  , storeDocument :: !(IntMap TextDocument)
+  , storeTextDocument :: !(IntMap (Text, TextDocument))
+  , storeHistory :: !(IntMap TextHistory)
+  , storeEditorMode :: !(IntMap EditorMode)
+  , storeLineWidths :: !(IntMap LineWidths)
+  , storeGrid :: !(IntMap GridState)
+  , storeTableColumns :: !(IntMap ([Int], [Float]))
   , storeQuiet :: !(IntMap Int)
   -- ^ Interaction bookkeeping no paint reads, such as whether a drag hook's
   -- press is still held. Writes to it neither damage nor wake the loop: the
@@ -160,9 +164,29 @@ fieldText = Field storeText (\m st -> st {storeText = m})
 fieldIntSet :: Field IntSet
 fieldIntSet = Field storeIntSet (\m st -> st {storeIntSet = m})
 
--- | Runtime-typed slots. Prefer 'lookupDyn' and 'insertDyn' for typed access.
-fieldDyn :: Field Dynamic
-fieldDyn = Field storeDyn (\m st -> st {storeDyn = m})
+fieldBuffer :: Field TextBuffer
+fieldBuffer = Field storeBuffer (\m st -> st {storeBuffer = m})
+
+fieldDocument :: Field TextDocument
+fieldDocument = Field storeDocument (\m st -> st {storeDocument = m})
+
+fieldTextDocument :: Field (Text, TextDocument)
+fieldTextDocument = Field storeTextDocument (\m st -> st {storeTextDocument = m})
+
+fieldHistory :: Field TextHistory
+fieldHistory = Field storeHistory (\m st -> st {storeHistory = m})
+
+fieldEditorMode :: Field EditorMode
+fieldEditorMode = Field storeEditorMode (\m st -> st {storeEditorMode = m})
+
+fieldLineWidths :: Field LineWidths
+fieldLineWidths = Field storeLineWidths (\m st -> st {storeLineWidths = m})
+
+fieldGrid :: Field GridState
+fieldGrid = Field storeGrid (\m st -> st {storeGrid = m})
+
+fieldTableColumns :: Field ([Int], [Float])
+fieldTableColumns = Field storeTableColumns (\m st -> st {storeTableColumns = m})
 
 -- | Integer bookkeeping slots that no paint reads ('storeQuiet'). The store
 -- diff that drives damage skips them.
@@ -246,16 +270,6 @@ slotWrite field k v = SlotWrites (\st -> lookupSlot field k st == Just v) (inser
 slotWriteOr :: Eq a => Field a -> a -> Int -> a -> SlotWrites
 slotWriteOr field def k v = SlotWrites (\st -> findSlot field def k st == v) (insertSlot field k v)
 
--- | Read a runtime-typed slot. 'Nothing' means absent or a different stored type.
-{-# INLINE lookupDyn #-}
-lookupDyn :: Typeable a => Int -> WidgetStore -> Maybe a
-lookupDyn k st = IM.lookup k (storeDyn st) >>= fromDynamic
-
--- | Store a runtime-typed value, replacing any value under the same dynamic key.
-{-# INLINE insertDyn #-}
-insertDyn :: Typeable a => Int -> a -> WidgetStore -> WidgetStore
-insertDyn k = insertSlot fieldDyn k . toDyn
-
 -- | Empty maps, zero state generation, and no open select.
 emptyWidgetStore :: WidgetStore
 emptyWidgetStore =
@@ -268,7 +282,14 @@ emptyWidgetStore =
     , storePoint = IM.empty
     , storeText = IM.empty
     , storeIntSet = IM.empty
-    , storeDyn = IM.empty
+    , storeBuffer = IM.empty
+    , storeDocument = IM.empty
+    , storeTextDocument = IM.empty
+    , storeHistory = IM.empty
+    , storeEditorMode = IM.empty
+    , storeLineWidths = IM.empty
+    , storeGrid = IM.empty
+    , storeTableColumns = IM.empty
     , storeQuiet = IM.empty
     }
 
@@ -340,12 +361,12 @@ data Slot
   | SlotTextAreaViewport
   | SlotTextAreaAnchorRow
   | SlotTextAreaAnchorCol
-  | -- | The text area's 'NanoUI.Widgets.TextBuffer.TextBuffer' (in 'storeDyn'):
+  | -- | The text area's 'NanoUI.Widgets.TextBuffer.TextBuffer' (in 'storeBuffer'):
     -- its lines, which are its current document, its caret, and which lines
     -- changed since they were measured. Loads and paint read it. The document
-    -- last passed or returned is under 'SlotSeen', in 'storeDyn'.
+    -- last passed or returned is under 'SlotSeen', in 'storeDocument'.
     SlotTextAreaBuffer
-  | -- | For a text area over 'Text' (in 'storeDyn'): the text last passed or
+  | -- | For a text area over 'Text' (in 'storeTextDocument'): the text last passed or
     -- returned and the document it is the text of, so a frame that edits
     -- nothing neither splits nor joins the text.
     SlotTextAreaText
@@ -355,12 +376,12 @@ data Slot
     -- still gets a @respChanged@ pulse for edits that carry no keys or chars.
     SlotTextAreaChanged
   | -- | A text field's undo history with the text it was recorded against, in
-    -- 'storeDyn'.
+    -- 'storeHistory'.
     SlotTextHistory
   | -- | How the text field with this id edits (its editor mode, in
-    -- 'storeDyn'). Commands sent to the id between frames read it.
+    -- 'storeEditorMode'). Commands sent to the id between frames read it.
     SlotTextMode
-  | -- | A text area's measured line widths and content extent, in 'storeDyn',
+  | -- | A text area's measured line widths and content extent, in 'storeLineWidths',
     -- kept in step with its lines so an edit remeasures only the lines it
     -- changed.
     SlotTextAreaWidths

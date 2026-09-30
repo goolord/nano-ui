@@ -26,13 +26,13 @@ module NanoUI.Internal.Widgets.Sensor
 
 import Control.Monad (foldM, unless, void, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
-import Data.Primitive.Array (MutableArray, newArray, readArray, sizeofMutableArray, writeArray)
+import Data.Primitive.Array (newArray, readArray, sizeofMutableArray, writeArray)
 import GHC.Clock (getMonotonicTime)
-import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Host qualified as Host
+import NanoUI.Internal.Sensor.Types
 import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -41,31 +41,6 @@ import NanoUI.Internal.Style (Direction (..), Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), Size (..), rectInflate, rectIntersect)
 import NanoUI.Internal.Widgets.Node (container, tagContainer)
 
--- | Whether a widget was on screen when the last frame was laid out.
-data Visibility = Visibility
-  { visVisible :: !Bool
-    -- ^ The widget overlapped the window and every enclosing scroller and
-    -- panel, each grown by 'sensorAnticipate', for at least 'sensorDelay'.
-    -- A zero-width or zero-height widget counts as a line or point.
-  , visEvent :: !(Maybe VisibilityEvent)
-    -- ^ How 'visVisible' changed at the last layout. Reported only to the
-    -- first view pass that reads the sensor after the change.
-  , visRect :: !Rect
-    -- ^ The on-screen part of the widget, in logical window coordinates,
-    -- ignoring the anticipate margin; empty when off screen. Movement alone
-    -- does not request a frame.
-  , visBounds :: !Rect
-    -- ^ The whole widget in logical window coordinates, on screen or not;
-    -- empty when it had no node.
-  }
-  deriving (Eq, Show)
-
--- | A widget entering or leaving view.
-data VisibilityEvent
-  = BecameVisible
-  | BecameHidden
-  deriving (Eq, Show)
-
 -- | Whether the widget came into view at the last layout.
 becameVisible :: Visibility -> Bool
 becameVisible v = visEvent v == Just BecameVisible
@@ -73,23 +48,6 @@ becameVisible v = visEvent v == Just BecameVisible
 -- | Whether the widget went out of view at the last layout.
 becameHidden :: Visibility -> Bool
 becameHidden v = visEvent v == Just BecameHidden
-
--- | When a sensor counts its widget as visible, and how 'sensorConfigured'
--- lays out its body.
-data SensorConfig = SensorConfig
-  { sensorAnticipate :: Float
-    -- ^ Logical pixels to grow the window and every enclosing clip by. With
-    -- 200, the widget counts as visible up to 200 pixels before it scrolls
-    -- in, in time to start loading it. Negative values count as 0.
-  , sensorDelay :: Double
-    -- ^ Seconds the widget must stay in view before it counts as visible,
-    -- so a fast fling does not load every row it passes. Leaving view is
-    -- immediate and restarts the wait. Waiting schedules a wake-up rather
-    -- than drawing frames.
-  , sensorLayout :: Layout -> Layout
-    -- ^ Modifies the 'sensorConfigured' container, a column without padding.
-    -- Ignored by 'useVisibility'.
-  }
 
 -- | No margin, no delay, unpadded column.
 defaultSensorConfig :: SensorConfig
@@ -134,27 +92,6 @@ useVisibility cfg target = do
   (wid, ctx) <- freshWidget
   liftIO (watchSensor ctx wid (Watch target cfg))
 
--- | Per-context sensor state, stored as a host value ('hostOrInit') so a
--- context without sensors never allocates it.
-data Sensors = Sensors (IORef SensorState) (IORef ClipMemo)
-
--- | The pass number (bumped by 'beginSensors'), the cells watched this pass
--- (newest first, each once) and their count, and every sensor's cell by key
--- with the map's size. A steady frame writes cells, not the map.
-data SensorState = SensorState Int [Cell] Int (IntMap Cell) Int
-
--- | One sensor, by key.
-data Cell = Cell Int (IORef CellState)
-
--- | The pass that last watched the sensor, its last watch and its last result.
-data CellState = CellState Int Watch Seen
-
-data Watch = Watch WidgetId SensorConfig
-
--- | Last result, plus the monotonic time the widget entered view while the
--- 'sensorDelay' runs (0 otherwise).
-data Seen = Seen Visibility Double
-
 -- | Initial state for a new sensor: hidden, no node.
 unseen :: Seen
 unseen = Seen (Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)) 0
@@ -163,7 +100,7 @@ unseen = Seen (Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)) 0
 -- consumes the event, so a second view pass in the frame sees none.
 watchSensor :: Context -> WidgetId -> Watch -> IO Visibility
 watchSensor ctx wid watch = do
-  Sensors ref _ <- hostOrInit ctx (Sensors <$> newIORef (SensorState 1 [] 0 IM.empty 0) <*> (newIORef . ClipMemo 0 =<< newArray 0 NoClips))
+  Sensors ref _ <- Host.hostOrInit (ctxSensors ctx) (Sensors <$> newIORef (SensorState 1 [] 0 IM.empty 0) <*> (newIORef . ClipMemo 0 =<< newArray 0 NoClips))
   SensorState pass watched n cells size <- readIORef ref
   let k = intKey wid
   case IM.lookup k cells of
@@ -182,7 +119,7 @@ watchSensor ctx wid watch = do
 -- | Start a pass: clear the last pass's watches before the view reruns.
 beginSensors :: Context -> IO ()
 beginSensors ctx =
-  askHostIO ctx >>= mapM_ (\(Sensors ref _) -> modifyIORef' ref (\(SensorState pass _ _ cells size) -> SensorState (pass + 1) [] 0 cells size))
+  Host.askHostIO (ctxSensors ctx) >>= mapM_ (\(Sensors ref _) -> modifyIORef' ref (\(SensorState pass _ _ cells size) -> SensorState (pass + 1) [] 0 cells size))
 
 -- | Measure every watch against the final layout. Sensors not built this
 -- pass are dropped. A visibility change marks the context dirty: the view's
@@ -190,7 +127,7 @@ beginSensors ctx =
 -- repaints like a model change.
 updateSensors :: Context -> Size -> IO ()
 updateSensors ctx size =
-  askHostIO ctx >>= mapM_ (\(Sensors ref memoRef) -> do
+  Host.askHostIO (ctxSensors ctx) >>= mapM_ (\(Sensors ref memoRef) -> do
     SensorState pass watched n _ count <- readIORef ref
     unless (n == 0 && count == 0) $ do
       memo <- freshMemo ctx memoRef
@@ -284,14 +221,6 @@ enterClips ctx@Context {ctxNodeArena = na} margin (exact, grown) i = do
         unless walked (void (rectIntersect c rect))
         maybe (Just c) (rectIntersect c . grow) cut
   pure (within id exact, within (rectInflate margin) grown)
-
--- | The clips inside each ancestor by node index, for one 'updateSensors'.
--- Entries of an earlier stamp count as absent, so the array is reused
--- rather than cleared.
-data ClipMemo = ClipMemo Int (MutableArray RealWorld MemoEntry)
-
--- | The stamp and margin the clips were computed for.
-data MemoEntry = NoClips | Clips Int Float (Maybe Rect, Maybe Rect)
 
 -- | Bump the stamp and make room for every node of this layout.
 freshMemo :: Context -> IORef ClipMemo -> IO ClipMemo

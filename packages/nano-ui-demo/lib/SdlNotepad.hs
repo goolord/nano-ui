@@ -7,7 +7,7 @@
 -- Run with @cabal run nano-ui-sdl-notepad@.
 module SdlNotepad
   ( main
-  , notepadUi
+  , newNotepadUi
   ) where
 
 import Control.Exception (SomeException, try)
@@ -31,22 +31,32 @@ import NanoUI.Shortcut
 
 main :: IO ()
 main =
-  runSdlApp
+  runSdlAppWith
     defaultSdlOptions
       { -- A close request goes to the view, which may ask about unsaved changes.
         sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
-    notepadUi
+    newNotepadUi
 
 --------------------------------------------------------------------------------
 -- The application
 --------------------------------------------------------------------------------
 
-notepadUi :: NanoUI ()
-notepadUi = do
+-- | Allocate one notepad instance. Its document and dialog handles stay typed
+-- in this closure; the returned view can be composed like any NanoUI action.
+newNotepadUi :: SdlEnv -> IO (NanoUI ())
+newNotepadUi env = do
+  doc <- newState emptyDocument
+  editor <- newState (WidgetId 0)
+  open <- newState Nothing
+  save <- newState Nothing
+  pure (notepadUi env doc editor open save)
+
+notepadUi :: SdlEnv -> StateCell TextDocument -> StateCell WidgetId -> StateCell (Maybe FileDialogId) -> StateCell (Maybe FileDialogId) -> NanoUI ()
+notepadUi env docCell editorCell openCell saveCell = do
   ------------------------------------------------------------------ hooks ---
-  (doc, setDoc) <- useState emptyDocument
+  (doc, setDoc) <- useState docCell
   (docPath, setDocPath) <- useText ""
   (docDirty, setDocDirty) <- useFlag False
   (docGen, setDocGen) <- useInt 0
@@ -55,9 +65,9 @@ notepadUi = do
   (showStatus, setShowStatus) <- useFlag True
   (aboutOpen, setAboutOpen) <- useFlag False
   (confirmExit, setConfirmExit) <- useFlag False
-  (editorId, setEditorId) <- useState (WidgetId 0)
-  (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
-  (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
+  (editorId, setEditorId) <- useState editorCell
+  (openDlg, setOpenDlg) <- useState openCell
+  (saveDlg, setSaveDlg) <- useState saveCell
   (zoom, setZoom) <- useFloat 1.0
 
   ----------------------------------------------------------- file dialogs ---
@@ -97,7 +107,7 @@ notepadUi = do
 
     saveDocument forceDialog =
       if forceDialog || T.null docPath
-        then setSaveDlg =<< askSaveFileDialog defaultFileDialogOptions
+        then setSaveDlg =<< askSaveFileDialog env defaultFileDialogOptions
         else do
           saved <- writeDocument (T.unpack docPath) doc
           if saved
@@ -116,7 +126,7 @@ notepadUi = do
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
     newCmd = ("New", ctrl <> key 'n', newDocument)
-    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions)
+    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg =<< askOpenFileDialog env defaultFileDialogOptions)
     saveCmd = ("Save", ctrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
     -- Quit, or ask first when there are unsaved changes.

@@ -4,7 +4,6 @@ module NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSnapshot (..)
   , RgfwFrameStats (..)
   , RgfwDebugSampler (..)
-  , RgfwDebugHost (..)
   , newRgfwDebugSampler
   , emptyRgfwDebug
   , askRgfwDebug
@@ -12,7 +11,7 @@ module NanoUI.Rgfw.Internal.Debug
   ) where
 
 import Control.Monad (when)
-import Data.IORef (IORef, newIORef, readIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Printf (printf)
@@ -33,12 +32,7 @@ import NanoUI
   , separator
   , liftIO
   )
-import NanoUI.Internal.Context (askHostIO, setHost)
-import NanoUI.Internal.Monad
-  ( askContext
-  , askHost
-  , askInput
-  )
+import NanoUI.Internal.Monad (askInput)
 import NanoUI.Internal.Debug
   ( CoreDebugSnapshot (..)
   , DebugSamplerRef
@@ -72,10 +66,9 @@ data RgfwDebugSnapshot = RgfwDebugSnapshot
 data RgfwDebugSampler = RgfwDebugSampler
   { rdsSampler  :: !DebugSamplerRef
   , rdsFrame    :: !(IORef RgfwFrameStats)
+  , rdsPublished :: !(IORef (Maybe RgfwDebugSnapshot))
+  , rdsRows :: !(IORef (Maybe RgfwDebugRows))
   }
-
--- | Runtime-typed host entry used by 'askRgfwDebug' to locate the sampler.
-newtype RgfwDebugHost = RgfwDebugHost RgfwDebugSampler
 
 -- | Allocate a sampler with empty timing and frame stats.
 newRgfwDebugSampler :: IO RgfwDebugSampler
@@ -83,6 +76,8 @@ newRgfwDebugSampler =
   RgfwDebugSampler
     <$> newDebugSampler
     <*> newIORef (dbgFrame emptyRgfwDebug)
+    <*> newIORef Nothing
+    <*> newIORef Nothing
 
 -- | Placeholder with zero counts and unit scale before measurements exist.
 emptyRgfwDebug :: RgfwDebugSnapshot
@@ -93,19 +88,15 @@ emptyRgfwDebug =
     }
 
 -- | Read debug data, refreshing at most four times per second. Returns
--- 'emptyRgfwDebug' outside an RGFW session. Queries keep debug refresh active.
-askRgfwDebug :: NanoUI RgfwDebugSnapshot
-askRgfwDebug = do
+-- Queries keep the supplied session's debug refresh active.
+askRgfwDebug :: RgfwDebugSampler -> NanoUI RgfwDebugSnapshot
+askRgfwDebug s = do
   inp <- askInput
-  mhost <- askHost @RgfwDebugHost
-  case mhost of
-    Nothing -> pure emptyRgfwDebug
-    Just (RgfwDebugHost s) ->
-      liftIO $ refreshDebugSnapshot (rdsSampler s) $ \core -> do
-        let Size lw lh = inputWindowSize inp
-            V2 mx my = inputMousePos inp
-        frame <- readIORef (rdsFrame s)
-        pure RgfwDebugSnapshot {dbgCore = core {dbgWinW = lw, dbgWinH = lh, dbgMouseX = mx, dbgMouseY = my}, dbgFrame = frame}
+  liftIO $ refreshDebugSnapshot (rdsSampler s) (rdsPublished s) $ \core -> do
+    let Size lw lh = inputWindowSize inp
+        V2 mx my = inputMousePos inp
+    frame <- readIORef (rdsFrame s)
+    pure RgfwDebugSnapshot {dbgCore = core {dbgWinW = lw, dbgWinH = lh, dbgMouseX = mx, dbgMouseY = my}, dbgFrame = frame}
 
 -- | Arena nodes plus the draw buffer sizes.
 layoutRows :: RgfwDebugSnapshot -> Rows
@@ -139,16 +130,15 @@ type Rows = [(Text, Text)]
 -- | Draw timing, geometry, display, and RTS rows for a snapshot, plus a
 -- layout overlay checkbox that, when on, shows the node under the pointer.
 -- Place this inside a window or panel; it creates no container.
-debugWindowBody :: RgfwDebugSnapshot -> NanoUI ()
-debugWindowBody snap = do
-  ctx <- askContext
+debugWindowBody :: RgfwDebugSampler -> RgfwDebugSnapshot -> NanoUI ()
+debugWindowBody owner snap = do
   (fps, layout, display, rts) <- liftIO $ do
-    cached <- askHostIO ctx
+    cached <- readIORef (rdsRows owner)
     case cached of
       Just (RgfwDebugRows shown rows) | shown == snap -> pure rows
       _ -> do
         let rows = (formatFpsRows (dbgCore snap), layoutRows snap, displayRows snap, dbgRts (dbgCore snap))
-        setHost ctx (RgfwDebugRows snap rows)
+        writeIORef (rdsRows owner) (Just (RgfwDebugRows snap rows))
         pure rows
   heading "Frame"
   kvBlock fps

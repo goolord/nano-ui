@@ -1,15 +1,16 @@
 # Local drag and drop
 
 `useDrag` tracks a gesture over `(payload, Response)` pairs. Applications
-own the data and choose which target accepts a release.
+own the data and choose which target accepts a release. Allocate
+`dragHandle <- newDrag` once during component setup, then use it in the view:
 
 ```haskell
 headers <- tabBar' active documents
-gesture <- useDrag (tabHeaders headers)
+gesture <- useDrag dragHandle (tabHeaders headers)
 ```
 
-Call under the same key every frame, including for empty sources. Payloads
-must be unique and have `Eq` and `Typeable` instances. Capturing the payload
+Call with the same handle every frame, including for empty sources. Payloads
+must be unique and have an `Eq` instance. Capturing the payload
 on press preserves identity through reordering; removing its source cancels.
 
 Below the threshold, the result is `Nothing`. Otherwise it is a `Drag` whose
@@ -73,7 +74,7 @@ accumulator or existing application effects, then call `useDrag` after
 ```haskell
 grid <- paneGrid cfg
 sources <- collectedHeaderResponses
-gesture <- useDrag sources
+gesture <- useDrag dragHandle sources
 
 case (gesture, pgrDropTarget grid) of
   (Just d, Just target)

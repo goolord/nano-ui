@@ -101,7 +101,7 @@ module NanoUI
     -- | Every widget and hook takes the next 'WidgetId' in its container:
     -- ids count up in call order among siblings, and a container starts a
     -- new count for its children. Widget state is stored under that id, so
-    -- the same widgets and hooks must run in the same order every frame.
+    -- the same widgets and positional hooks must run in the same order every frame.
     --
     -- A widget that runs on some frames and not others moves the ids of the
     -- siblings after it. Put the conditional part inside 'scope', which takes
@@ -412,6 +412,8 @@ module NanoUI
   , freshImageId
   , registerImageRgba
   , useImageRgba
+  , ImageHandle
+  , newImageHandle
   , Svg
   , parseSvg
   , loadSvg
@@ -507,10 +509,15 @@ module NanoUI
   , DragPhase (..)
   , DragAxis (..)
   , useDrag
+  , DragHandle
+  , newDrag
   , insertionIndex
 
     -- * Local state
+  , StateCell
+  , newState
   , useState
+  , modifyState
   , useFlag
   , useToggle
   , useInt
@@ -525,11 +532,11 @@ module NanoUI
     -- its result once available. The loop sleeps while a job runs and wakes
     -- when it ends. A job starts on the first frame its hook sees a key,
     -- restarts when the key changes, and is killed when the view stops
-    -- calling the hook:
+    -- calling the hook. Allocate @searchTask <- newTask@ during setup:
     --
     -- > (query, setQuery) <- useText ""
     -- > setQuery =<< textInput query
-    -- > hits <- useTask query (searchIndex index query)
+    -- > hits <- useTask searchTask query (searchIndex index query)
     -- > mapM_ (label . hitTitle) (fromMaybe [] hits)
     --
     -- While a new key's job runs, 'useTask' keeps returning the previous
@@ -539,6 +546,10 @@ module NanoUI
     -- schedule another frame.
   , TaskStatus (..)
   , useTaskStatus
+  , Task
+  , newTask
+  , Stream
+  , newStream
   , useTask
   , useStream
   , askWake
@@ -637,9 +648,11 @@ module NanoUI
     -- first comes within 200 pixels of the viewport (@decodeRgba@ stands for
     -- an image decoder):
     --
-    -- > thumbnail :: FilePath -> NanoUI ()
-    -- > thumbnail path = do
-    -- >   (picture, setPicture) <- useState Nothing
+    -- Allocate @pictureCell <- newState Nothing@ once during component setup.
+    --
+    -- > thumbnail :: StateCell (Maybe ImageId) -> FilePath -> NanoUI ()
+    -- > thumbnail pictureCell path = do
+    -- >   (picture, setPicture) <- useState pictureCell
     -- >   let cfg = defaultSensorConfig {sensorAnticipate = 200, sensorLayout = fixedWH 96 96}
     -- >   (vis, _) <- sensorConfigured cfg $
     -- >     maybe (label "Loading") (image (fixedWH 96 96)) picture

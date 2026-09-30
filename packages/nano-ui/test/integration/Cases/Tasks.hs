@@ -91,9 +91,10 @@ takesNews ctx failed ui v = do
 -- requests frames nor wakes the loop until it ends.
 runTaskResultTest :: Context -> IORef Int -> IO ()
 runTaskResultTest ctx failed = do
+  job <- newTask
   wait <- newWakeSignal ctx
   gate <- newEmptyMVar
-  let ui = useTask ("answer" :: String) (takeMVar gate >> pure (42 :: Int)) >>= \a -> a <$ lamp (isJust a)
+  let ui = useTask job ("answer" :: String) (takeMVar gate >> pure (42 :: Int)) >>= \a -> a <$ lamp (isJust a)
   _ <- warmup2 ctx inp ui
   settled ctx failed ui Nothing
   assertEq failed 0 =<< getWakeAt ctx
@@ -107,11 +108,12 @@ runTaskResultTest ctx failed = do
 -- hook returns the previous key's result.
 runTaskKeyChangeTest :: Context -> IORef Int -> IO ()
 runTaskKeyChangeTest ctx failed = do
+  job <- newTask
   wait <- newWakeSignal ctx
   (sleep, _, killedIn) <- sleeper
   gate <- newEmptyMVar
   keyRef <- newIORef (1 :: Int)
-  let ui = liftIO (readIORef keyRef) >>= \k -> useTask k (if k == 2 then sleep >> pure k else takeMVar gate >> pure (k * 10))
+  let ui = liftIO (readIORef keyRef) >>= \k -> useTask job k (if k == 2 then sleep >> pure k else takeMVar gate >> pure (k * 10))
   _ <- wait 0
   assertEq failed Nothing =<< evalUi ctx inp ui
   putMVar gate ()
@@ -125,14 +127,16 @@ runTaskKeyChangeTest ctx failed = do
   putMVar gate ()
   assertEq failed (Just (Just 30)) =<< frameUntil wait ctx ui (== Just 30)
 
--- | A hook that keeps its key but returns another type starts a new job and
--- carries no result over, which has another type.
+-- | Switching typed owners at the same view position carries no result over.
+-- A handle's result type itself cannot be changed.
 runTaskTypeChangeTest :: Context -> IORef Int -> IO ()
 runTaskTypeChangeTest ctx failed = do
+  intJob <- newTask
+  stringJob <- newTask
   wait <- newWakeSignal ctx
   gate <- newEmptyMVar
-  let asInt = useTask ("same" :: String) (pure (1 :: Int))
-      asString = useTask ("same" :: String) (readMVar gate >> pure ("one" :: String))
+  let asInt = useTask intJob ("same" :: String) (pure (1 :: Int))
+      asString = useTask stringJob ("same" :: String) (readMVar gate >> pure ("one" :: String))
   assertEq failed (Just (Just 1)) =<< frameUntil wait ctx asInt isJust
   assertEq failed Nothing =<< evalUi ctx inp asString
   putMVar gate ()
@@ -143,9 +147,10 @@ runTaskTypeChangeTest ctx failed = do
 -- call kills it without requesting a frame; a later call starts a new job.
 runTaskLeaseTest :: Context -> IORef Int -> IO ()
 runTaskLeaseTest ctx failed = do
+  job <- newTask
   starts <- newIORef 0
   (sleep, _, killedIn) <- sleeper
-  let ui shown = scope (when shown (void (useTask ("lease" :: String) (tick starts >> sleep)))) >> label "lease"
+  let ui shown = scope (when shown (void (useTask job ("lease" :: String) (tick starts >> sleep)))) >> label "lease"
   replicateM_ 3 (runFrame ctx inp (ui True))
   assert failed =<< reaches starts 1
   assert failed . not =<< killedIn 20000
@@ -159,11 +164,13 @@ runTaskLeaseTest ctx failed = do
 -- keeps its job through later frames until a frame skips it too.
 runTaskPartialLeaseTest :: Context -> IORef Int -> IO ()
 runTaskPartialLeaseTest ctx failed = do
+  jobA <- newTask
+  jobB <- newTask
   (sleepA, startedA, killedA) <- sleeper
   (sleepB, startedB, killedB) <- sleeper
   let ui showA showB = do
-        scope (when showA (void (useTask ("a" :: String) sleepA)))
-        scope (when showB (void (useTask ("b" :: String) sleepB)))
+        scope (when showA (void (useTask jobA ("a" :: String) sleepA)))
+        scope (when showB (void (useTask jobB ("b" :: String) sleepB)))
         label "lease"
   _ <- runFrame ctx inp (ui True True)
   startedA >> startedB
@@ -177,10 +184,11 @@ runTaskPartialLeaseTest ctx failed = do
 -- | A frame that runs the view twice after a hook write starts the job once.
 runTaskTwoPassTest :: Context -> IORef Int -> IO ()
 runTaskTwoPassTest ctx failed = do
+  job <- newTask
   starts <- newIORef 0
   let ui = do
         (n, setN) <- useInt 0
-        _ <- useTask ("once" :: String) (tick starts >> threadDelay 10000000)
+        _ <- useTask job ("once" :: String) (tick starts >> threadDelay 10000000)
         n <$ when (n == 0) (setN 1)
   assertEq failed 1 =<< evalUi ctx inp ui
   assert failed =<< reaches starts 1
@@ -193,6 +201,9 @@ runTaskTwoPassTest ctx failed = do
 -- handler, and 'useTask' keeps its last result.
 runTaskFailureTest :: Context -> IORef Int -> IO ()
 runTaskFailureTest ctx failed = do
+  thrownJob <- newTask
+  lazyJob <- newTask
+  plainJob <- newTask
   wait <- newWakeSignal ctx
   gate <- newEmptyMVar
   uncaught <- newIORef 0
@@ -201,9 +212,9 @@ runTaskFailureTest ctx failed = do
   flip finally (setUncaughtExceptionHandler handler) $ do
     let ui =
           (,,)
-            <$> useTaskStatus ("thrown" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
-            <*> useTaskStatus ("lazy" :: String) (readMVar gate >> pure (error "lazy" :: Int))
-            <*> useTask ("thrown too" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
+            <$> useTaskStatus thrownJob ("thrown" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
+            <*> useTaskStatus lazyJob ("lazy" :: String) (readMVar gate >> pure (error "lazy" :: Int))
+            <*> useTask plainJob ("thrown too" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
         failure = \case
           TaskFailed e Nothing -> Just (displayException e)
           _ -> Nothing
@@ -222,12 +233,13 @@ runTaskFailureTest ctx failed = do
 -- then failed, carrying the previous key's result.
 runTaskStatusTest :: Context -> IORef Int -> IO ()
 runTaskStatusTest ctx failed = do
+  job <- newTask
   wait <- newWakeSignal ctx
   gate <- newEmptyMVar
   keyRef <- newIORef (1 :: Int)
   let ui = do
         k <- liftIO (readIORef keyRef)
-        status <- useTaskStatus k (takeMVar gate >> if k == 1 then pure ("one" :: String) else ioError (userError "two"))
+        status <- useTaskStatus job k (takeMVar gate >> if k == 1 then pure ("one" :: String) else ioError (userError "two"))
         pure $ case status of
           TaskRunning prev -> ("running" :: String, prev)
           TaskDone a -> ("done", Just a)
@@ -245,12 +257,13 @@ runTaskStatusTest ctx failed = do
 -- | The same input runs again under a new attempt count.
 runTaskRetryTest :: Context -> IORef Int -> IO ()
 runTaskRetryTest ctx failed = do
+  job <- newTask
   wait <- newWakeSignal ctx
   starts <- newIORef 0
   attempt <- newIORef (0 :: Int)
   let ui = do
         n <- liftIO (readIORef attempt)
-        useTask ("same input" :: String, n) (tick starts >> readIORef starts)
+        useTask job ("same input" :: String, n) (tick starts >> readIORef starts)
   _ <- wait 0
   assertEq failed (Just (Just 1)) =<< frameUntil wait ctx ui isJust
   assertEq failed (Just 1) =<< evalUi ctx inp ui
@@ -262,11 +275,12 @@ runTaskRetryTest ctx failed = do
 -- once their cleanup has run. After it nothing wakes the loop.
 runTaskShutdownTest :: Context -> IORef Int -> IO ()
 runTaskShutdownTest ctx failed = do
+  job <- newTask
   (sleep, started, killedIn) <- sleeper
   cleaned <- newIORef False
   wakes <- newIORef 0
   setWakeLoop ctx (tick wakes)
-  _ <- runFrame ctx inp (useTask ("shutdown" :: String) (sleep `finally` writeIORef cleaned True))
+  _ <- runFrame ctx inp (useTask job ("shutdown" :: String) (sleep `finally` writeIORef cleaned True))
   started
   cancelTasks ctx
   assert failed =<< readIORef cleaned
@@ -307,8 +321,9 @@ runWakeSignalAfterDrainTest ctx failed = do
 -- overflow, fails the job and wakes the loop.
 runTaskAsyncFailureTest :: Context -> IORef Int -> IO ()
 runTaskAsyncFailureTest ctx failed = do
+  job <- newTask
   wait <- newWakeSignal ctx
-  let ui = useTaskStatus ("overflow" :: String) (throwIO StackOverflow :: IO Int)
+  let ui = useTaskStatus job ("overflow" :: String) (throwIO StackOverflow :: IO Int)
       isFailed = \case
         TaskFailed _ _ -> True
         _ -> False
@@ -321,6 +336,7 @@ runTaskAsyncFailureTest ctx failed = do
 -- value.
 runWakeFromThreadTest :: Context -> IORef Int -> IO ()
 runWakeFromThreadTest ctx failed = do
+  job <- newTask
   wait <- newWakeSignal ctx
   latest <- newIORef (0 :: Int)
   go <- newEmptyMVar
@@ -332,7 +348,7 @@ runWakeFromThreadTest ctx failed = do
         takeMVar go
       ui = do
         wake <- askWake
-        _ <- useTask ("stream" :: String) (produce wake)
+        _ <- useTask job ("stream" :: String) (produce wake)
         n <- liftIO (readIORef latest)
         n <$ lamp (n > 0)
   _ <- warmup2 ctx inp ui
@@ -348,6 +364,7 @@ runWakeFromThreadTest ctx failed = do
 -- rate costs one frame, showing the final state.
 runStreamTest :: Context -> IORef Int -> IO ()
 runStreamTest ctx failed = do
+  stream <- newStream
   wait <- newWakeSignal ctx
   go <- newEmptyMVar
   burst <- newEmptyMVar
@@ -357,7 +374,7 @@ runStreamTest ctx failed = do
         putMVar burst ()
         takeMVar go
       ui = do
-        n <- useStream ("stream" :: String) 0 produce
+        n <- useStream stream ("stream" :: String) 0 produce
         n <$ lamp (n > 0)
   _ <- warmup2 ctx inp ui
   settled ctx failed ui 0
@@ -372,12 +389,13 @@ runStreamTest ctx failed = do
 -- Late updates from the old producer are dropped.
 runStreamKeyChangeTest :: Context -> IORef Int -> IO ()
 runStreamKeyChangeTest ctx failed = do
+  stream <- newStream
   wait <- newWakeSignal ctx
   (sleep, _, killedIn) <- sleeper
   keyRef <- newIORef (1 :: Int)
   let ui = do
         k <- liftIO (readIORef keyRef)
-        useStream k [] (\update -> update (k :) >> sleep)
+        useStream stream k [] (\update -> update (k :) >> sleep)
   _ <- wait 0
   assertEq failed (Just [1]) =<< frameUntil wait ctx ui (not . null)
   writeIORef keyRef 2

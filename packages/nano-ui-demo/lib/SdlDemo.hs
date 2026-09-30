@@ -45,7 +45,7 @@
 
 module SdlDemo
     ( main
-    , demoUi
+     , newDemoUi
     ) where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
@@ -61,8 +61,7 @@ import NanoUI.Path qualified as P
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatExplainRows)
 import NanoUI.Diagrams
-import NanoUI.Internal.Monad (withContext)
-import NanoUI.Internal.Context (askHostIO, hostOrInit, setHost)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI.Shortcut
 import Paths_nano_ui_demo (getDataFileName)
 import Diagrams.Prelude
@@ -117,12 +116,12 @@ main :: IO ()
 main = do
   args <- getArgs
   case dropWhile (/= "--record") args of
-    _ : dir : _ -> SdlRecord.record dir demoUi
+    _ : dir : _ -> SdlRecord.record dir newDemoUi
     _ -> do
       let (updates, _, _) = getOpt Permute options args
       case sequence updates of
         Nothing -> putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
-        Just fs -> runSdlApp (foldl' (flip id) demoOptions fs) demoUi
+        Just fs -> runSdlAppWith (foldl' (flip id) demoOptions fs) newDemoUi
 
 ------------------------------------------------------------------------------
 -- §2  Assets & shared look
@@ -202,8 +201,8 @@ themeChoice = \case
 -- chosen family is applied with 'setSdlUiFont'.
 data DemoSettings = DemoSettings ![T.Text] !Bool
 
-demoSettings :: NanoUI DemoSettings
-demoSettings = withContext $ \ctx -> hostOrInit ctx $ do
+loadDemoSettings :: IO DemoSettings
+loadDemoSettings = do
   families <- map T.pack <$> listFontFamilies
   debugOpen <- isJust <$> lookupEnv "NANO_DEBUG_OPEN"
   let fallback = ["Inter", "Noto Sans", "Adwaita Sans", "Cantarell", "Liberation Sans", "FreeSans"]
@@ -218,9 +217,56 @@ demoSettings = withContext $ \ctx -> hostOrInit ctx $ do
 --   2. toolbar              brand, live FPS, OK / Cancel / About / Debug
 --   3. two-column body      left: live state; right: tabbed demos
 --   4. overlays             Debug window + About modal
-demoUi :: NanoUI ()
-demoUi = do
-  DemoSettings demoFontFamilies debugOpenFromEnv <- demoSettings
+data DemoState = DemoState
+  { demoAccentCell :: !(StateCell Color)
+  , demoCountCell :: !(StateCell Double)
+  , demoMaskCell :: !(StateCell Double)
+  , demoOpenCell :: !(StateCell (Maybe FileDialogId))
+  , demoSaveCell :: !(StateCell (Maybe FileDialogId))
+  , demoGifCell :: !(StateCell (Maybe (Either String [(Int, Int, BS.ByteString)])))
+  , demoIconsCell :: !(StateCell (Maybe [Either String Svg]))
+  , demoFolderCell :: !(StateCell (Maybe FileDialogId))
+  , demoPeopleCell :: !(StateCell [DemoPerson])
+  , demoDocsCell :: !(StateCell [Int])
+  , demoPinnedCell :: !(StateCell [Int])
+  , demoPlotCache :: !PlotCache
+  , demoScreenshotTask :: !(Task Int ())
+  , demoDecodeTask :: !(Task T.Text (Either String [(Int, Int, BS.ByteString)]))
+  , demoSwatchImages :: ![ImageHandle T.Text]
+  , demoLandscapeImage :: !(ImageHandle T.Text)
+  , demoGifImagesCell :: !(StateCell [ImageHandle Int])
+  , demoSettingsValue :: !DemoSettings
+  , demoDebugText :: !(IORef (Maybe CachedDebugText))
+  }
+
+-- | Construct a showcase instance before running its per-frame view.
+newDemoUi :: SdlEnv -> IO (NanoUI ())
+newDemoUi env = do
+  cells <- DemoState
+    <$> newState demoAccent
+    <*> newState 12
+    <*> newState 0xC0FF
+    <*> newState Nothing
+    <*> newState Nothing
+    <*> newState Nothing
+    <*> newState Nothing
+    <*> newState Nothing
+    <*> newState demoPeople
+    <*> newState [1, 2, 3]
+    <*> newState [1]
+    <*> newPlotCache
+    <*> newTask
+    <*> newTask
+    <*> mapM (const newImageHandle) demoSwatches
+    <*> newImageHandle
+    <*> newState []
+    <*> loadDemoSettings
+    <*> newIORef Nothing
+  pure (demoUi env cells)
+
+demoUi :: SdlEnv -> DemoState -> NanoUI ()
+demoUi env cells = do
+  let DemoSettings demoFontFamilies debugOpenFromEnv = demoSettingsValue cells
   ---------------------------------------------------------------- hooks ---
   -- Toolbar / overlays.
   (click, setClick) <- useText "" -- label of the last button / menu item clicked
@@ -235,26 +281,27 @@ demoUi = do
     scope $
       if shots == 0
         then pure Nothing
-        else Just <$> useTaskStatus shots (shoot >>= maybe (ioError (userError "no frame to capture")) (savePng "nano-ui-demo.png"))
+        else Just <$> useTaskStatus (demoScreenshotTask cells) shots (shoot >>= maybe (ioError (userError "no frame to capture")) (savePng "nano-ui-demo.png"))
   (activeTab, setActiveTab) <- useEnum Controls -- tabs
   -- Controls tab.
   (checked, setChecked) <- useFlag False -- checkbox
   (vol, setVol) <- useFloat 50 -- slider
   (quality, setQuality) <- useText "Medium" -- select
-  (accent, setAccent) <- useState demoAccent -- colorPickerRGBA
+  (accent, setAccent) <- useState (demoAccentCell cells) -- colorPickerRGBA
   (themeSel, setThemeSel) <- useEnum ThemeDefault -- boundedRadio
   (fontChoice, setFontChoice) <- useText "Inter" -- comboBox
   (name, setName) <- useText "" -- textInput
   (notes, setNotes) <- useText "Edit me.\nSecond line." -- textArea
-  (count, setCount) <- useState (12 :: Double) -- numericInput
-  (mask, setMask) <- useState (0xC0FF :: Double) -- hexadecimal numericInput
+  (count, setCount) <- useState (demoCountCell cells) -- numericInput
+  (mask, setMask) <- useState (demoMaskCell cells) -- hexadecimal numericInput
   (dropLog, setDropLog) <- useText "" -- dropZone result, multi-line
   (dropHovering, setDropHovering) <- useFlag False -- drag-over state
   -- File dialog handles; results land in the paths below via useFileDialog.
-  (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
-  (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
-  (lick, setLick) <- useState (Nothing :: Maybe (Either String [(Int, Int, BS.ByteString)])) -- GIF frames, once decoded
-  (icons, setIcons) <- useState (Nothing :: Maybe [Either String Svg]) -- SVG icons, read on first show
+  (openDlg, setOpenDlg) <- useState (demoOpenCell cells)
+  (saveDlg, setSaveDlg) <- useState (demoSaveCell cells)
+  (lick, setLick) <- useState (demoGifCell cells) -- GIF frames, once decoded
+  (gifImages, setGifImages) <- useState (demoGifImagesCell cells)
+  (icons, setIcons) <- useState (demoIconsCell cells) -- SVG icons, read on first show
   (weight, setWeight) <- useText "" -- adorned textInput
   (saving, toggleSaving) <- useToggle False -- content button showing a spinner
   (secret, setSecret) <- useText "" -- password field with a show/hide control
@@ -262,7 +309,7 @@ demoUi = do
   (imageTurn, setImageTurn) <- useFloat 30 -- imageConfigured rotation, in degrees
   (imageFade, setImageFade) <- useFloat 1 -- imageConfigured opacity
   (imageZoom, setImageZoom) <- useFloat 1 -- imageConfigured zoom
-  (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
+  (folderDlg, setFolderDlg) <- useState (demoFolderCell cells)
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
   (folderPath, setFolderPath) <- useText ""
@@ -272,7 +319,7 @@ demoUi = do
   -- List tab.
   (searchText, setSearchText) <- useText "" -- live searchInput text
   (searchQuery, setSearchQuery) <- useText "" -- committed searchInput value
-  (peopleMatches, setPeopleMatches) <- useState demoPeople -- filtered rows
+  (peopleMatches, setPeopleMatches) <- useState (demoPeopleCell cells) -- filtered rows
   (treeSel, setTreeSel) <- useInt 0 -- tree selection index
   -- Table tab.
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
@@ -280,9 +327,9 @@ demoUi = do
   -- selected one, and those pinned open.
   (tabLook, setTabLook) <- useEnum TabContained
   (tabPlace, setTabPlace) <- useEnum TabTop
-  (docs, setDocs) <- useState [1, 2, 3 :: Int]
+  (docs, setDocs) <- useState (demoDocsCell cells)
   (activeDoc, setActiveDoc) <- useInt 1
-  (pinned, setPinned) <- useState [1 :: Int]
+  (pinned, setPinned) <- useState (demoPinnedCell cells)
   -- Panes tab.
   (showPaneHeaders, setShowPaneHeaders) <- useFlag True -- pane headers on/off
   -- Typography tab.
@@ -295,7 +342,7 @@ demoUi = do
   -- Diagnostics tab: last raw drop event (files/text/paths).
   (dropRaw, setDropRaw) <- useText ""
   rawInp <- askInput
-  dbg <- debugText =<< askSdlDebug
+  dbg <- debugText (demoDebugText cells) =<< askSdlDebug env
   let wideWorkspace = sizeW (inputWindowSize rawInp) >= 1000
       inspectorWidth = if wideWorkspace then fixedW 280 else fillW
       volText = T.pack (show (round vol :: Int))
@@ -420,7 +467,7 @@ demoUi = do
                   tooltip fResp "Type to filter; Enter applies, Esc reverts."
                   setFontChoice fVal
                   when (respChanged fResp && not (T.null fVal)) $
-                    setSdlUiFont (FontSearch [T.unpack fVal])
+                    setSdlUiFont env (FontSearch [T.unpack fVal])
                   separator
                   heading "Accent"
                   muted "Choose a color or enter an exact value."
@@ -448,9 +495,9 @@ demoUi = do
               heading "File Dialogs"
               rowWith (tight . gap gapInline . fillW) $ do
                 whenM (button "Open File…") $
-                  setOpenDlg =<< askOpenFileDialog defaultFileDialogOptions {dialogAllowMany = True}
-                whenM (button "Save File…") (setSaveDlg =<< askSaveFileDialog defaultFileDialogOptions)
-                whenM (button "Browse Folder…") (setFolderDlg =<< askOpenFolderDialog defaultFileDialogOptions)
+                  setOpenDlg =<< askOpenFileDialog env defaultFileDialogOptions {dialogAllowMany = True}
+                whenM (button "Save File…") (setSaveDlg =<< askSaveFileDialog env defaultFileDialogOptions)
+                whenM (button "Browse Folder…") (setFolderDlg =<< askOpenFolderDialog env defaultFileDialogOptions)
               separator
               -- Drag & drop: dropZone returns a target; dropReceived reports its
               -- files and texts. dropHovering mirrors the hover state for styling.
@@ -483,7 +530,7 @@ demoUi = do
               separator
               -- Generated RGBA images, registered only while this tab shows
               -- so their atlas space is freed otherwise.
-              swatches <- catMaybes <$> forM demoSwatches (\(caption, pixels) -> fmap (,caption) <$> useImageRgba caption 32 32 pixels)
+              swatches <- catMaybes <$> forM (zip (demoSwatchImages cells) demoSwatches) (\(owner, (caption, pixels)) -> fmap (,caption) <$> useImageRgba owner caption 32 32 pixels)
               -- A wrapping row with centred lines holds the swatches; layers
               -- put a badge on each image's corner.
               rowWith (wrap . lineAlign LinesCenter . tight . gap gapInline . fillW) $
@@ -499,7 +546,7 @@ demoUi = do
               -- zoomed, and filling the width at its own aspect. The scope
               -- keeps later widget ids stable whether or not the image is
               -- registered.
-              landscape <- useImageRgba ("landscape" :: T.Text) 96 48 demoLandscape
+              landscape <- useImageRgba (demoLandscapeImage cells) ("landscape" :: T.Text) 96 48 demoLandscape
               scope $ for_ landscape $ \iid -> columnWith (tight . gap gapText . fillW) $ do
                 rowWith (wrap . tight . gap gapInline . fillW) $ do
                   for_ [minBound .. maxBound] $ \fit ->
@@ -584,13 +631,16 @@ demoUi = do
               -- picks the frame at 100 ms each. The sensor limits
               -- keepAnimating to while the GIF is on screen.
               scope . when (isNothing lick) $ do
-                decoded <- useTask ("lick.gif" :: T.Text) (decodeGif =<< getDataFileName "data/lick.gif")
-                mapM_ (setLick . Just) decoded
+                decoded <- useTask (demoDecodeTask cells) ("lick.gif" :: T.Text) (decodeGif =<< getDataFileName "data/lick.gif")
+                forM_ decoded $ \result -> do
+                  owners <- liftIO $ either (const (pure [])) (mapM (const newImageHandle)) result
+                  setGifImages owners
+                  setLick (Just result)
               scope $ case lick of
                 Nothing -> labelWith (fillW . fontMuted) "Loading lick.gif..."
                 Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
                 Just (Right decoded) -> do
-                  frames <- smallArrayFromList . catMaybes <$> forM (zip [0 :: Int ..] decoded) (\(i, (w, h, px)) -> useImageRgba i w h px)
+                  frames <- smallArrayFromList . catMaybes <$> forM (zip3 gifImages [0 :: Int ..] decoded) (\(owner, i, (w, h, px)) -> useImageRgba owner i w h px)
                   t <- uiTime
                   if sizeofSmallArray frames < length decoded
                     then muted "The image atlas has no room for lick.gif."
@@ -764,11 +814,11 @@ demoUi = do
               responsiveRowCol 760 (tight . gap 16 . fillW) $ do
                 -- A crosshair cursor for reading values off the plot.
                 captioned "Sine + cosine" $
-                  withCursorShape UiCursorCrosshair (plot (minH 240 . fillW) sineCosineChart)
-                captioned "Weekly counts" (barChart (minH 240 . fillW) weeklyBars)
+                  withCursorShape UiCursorCrosshair (plot (demoPlotCache cells) (minH 240 . fillW) sineCosineChart)
+                captioned "Weekly counts" (barChart (demoPlotCache cells) (minH 240 . fillW) weeklyBars)
               responsiveRowCol 760 (tight . gap 16 . fillW) $ do
-                captioned "Sleep vs focus" (plot (minH 240 . fillW) sleepFocusChart)
-                captioned "Area" (areaChart (minH 240 . fillW) areaDemo)
+                captioned "Sleep vs focus" (plot (demoPlotCache cells) (minH 240 . fillW) sleepFocusChart)
+                captioned "Area" (areaChart (demoPlotCache cells) (minH 240 . fillW) areaDemo)
               captioned "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
               -- NanoUI.Path paths on a plain canvas, without diagrams:
               -- transforms, fill rules, a gradient, joins, caps and dashes.
@@ -875,7 +925,7 @@ weightsStyles =
 -- | Mixed styles and links in one wrapped paragraph.
 richTextSample :: NanoUI ()
 richTextSample = do
-  (lastLink, setLastLink) <- useState ("none yet" :: T.Text)
+  (lastLink, setLastLink) <- useText "none yet"
   target <-
     richTextWith fillW
       [ "A paragraph can mix ", strong "bold", ", ", emphasis "italic", ", "
@@ -1072,12 +1122,12 @@ data DebugText = DebugText
 -- instead of running printf for every field on every continuous frame.
 data CachedDebugText = CachedDebugText !SdlDebugSnapshot !DebugText
 
-debugText :: SdlDebugSnapshot -> NanoUI DebugText
-debugText s =
-  withContext $ \ctx ->
-    askHostIO ctx >>= \case
+debugText :: IORef (Maybe CachedDebugText) -> SdlDebugSnapshot -> NanoUI DebugText
+debugText ref s =
+  liftIO $
+    readIORef ref >>= \case
       Just (CachedDebugText previous cached) | previous == s -> pure cached
-      _ -> text <$ setHost ctx (CachedDebugText s text)
+      _ -> text <$ writeIORef ref (Just (CachedDebugText s text))
   where
     c = dbgCore s
     haskellMs = dbgUiMs c + dbgRenderMs c

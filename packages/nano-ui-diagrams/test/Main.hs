@@ -132,22 +132,24 @@ testChartCache :: IO ()
 testChartCache = do
   base <- newPixelContext
   other <- newPixelContext
+  owner <- Plot.newPlotCache
+  otherOwner <- Plot.newPlotCache
   let
     inp = emptyInput {inputWindowSize = Size 400 240}
     fm = monospaceMetrics 16
     larger = monospaceMetrics 24
     ctx = withFontMetrics base fm
-    render c = do
+    render cacheOwner c = do
       _ <-
-        runFrame c inp $ Plot.lineChart (fixedWH 360 200) [(0, 0), (1, 1)]
+        runFrame c inp $ Plot.lineChart cacheOwner (fixedWH 360 200) [(0, 0), (1, 1)]
       cache <- readIORef (ctxDrawingCache c)
       pure (map doeContent (toList (dcsDrawOpCache cache)))
-  first <- render ctx
-  again <- render ctx
+  first <- render owner ctx
+  again <- render owner ctx
   check "chart cache did not reuse unchanged content" (not (null first) && first == again)
-  changed <- render (withFontMetrics base larger)
+  changed <- render owner (withFontMetrics base larger)
   check "chart cache ignored changed font metrics" (changed /= first)
-  independent <- render (withFontMetrics other larger)
+  independent <- render otherOwner (withFontMetrics other larger)
   check "chart cache version leaked across contexts" (independent == first)
 
 testRendering :: Context -> Input -> IO ()

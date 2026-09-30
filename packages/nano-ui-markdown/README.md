@@ -12,16 +12,17 @@ import Control.Monad (unless)
 import Data.Foldable (for_)
 import Data.Text (Text)
 import Data.Text qualified as T
-import NanoUI (NanoUI, label, useState)
+import NanoUI (NanoUI, label, useText)
 import NanoUI.Markdown
 
 readme :: MarkdownDoc
 readme = parseMarkdown "# Hello\n\nSome *emphasis*, `code` and [a link](https://example.com)."
 
-view :: NanoUI ()
-view = do
-  (lastLink, setLastLink) <- useState ("" :: Text)
-  clicked <- markdown readme
+-- Allocate cache <- newMarkdownCache once during component setup.
+view :: MarkdownCache -> NanoUI ()
+view cache = do
+  (lastLink, setLastLink) <- useText ""
+  clicked <- markdown cache readme
   for_ clicked setLastLink
   unless (T.null lastLink) $ label ("Clicked " <> lastLink)
 ```
@@ -34,14 +35,15 @@ document once and keep it in your model, rather than parsing it every frame.
 A reply that arrives on a thread of its own, from a network client, streams
 into the view with nano-ui's `useStream`: the producer appends each token to
 the document on its thread, and the view draws the document so far. No
-`IORef` is needed, and the UI thread does no parsing:
+`IORef` is needed, and the UI thread does no parsing. Allocate
+`stream <- newStream` once during component setup:
 
 ```haskell
-replyView :: Client -> Int -> NanoUI ()
-replyView client replyId = do
-  doc <- useStream replyId emptyMarkdown $ \update ->
+replyView :: MarkdownCache -> Stream Int MarkdownDoc -> Client -> Int -> NanoUI ()
+replyView cache stream client replyId = do
+  doc <- useStream stream replyId emptyMarkdown $ \update ->
     onToken client (\token -> update (appendMarkdown token))
-  void (markdown doc)
+  void (markdown cache doc)
 ```
 
 A reply kept in a model instead takes the tokens that arrived in a frame at
@@ -94,7 +96,8 @@ which `markdownBlocks` returns.
 
 ## Drawing
 
-`markdownConfigured` takes a `MarkdownConfig`: the column's layout, the body
+`markdownConfigured` takes a component-owned `MarkdownCache` and a
+`MarkdownConfig`: the column's layout, the body
 and heading fonts, the link colour, style modifiers over the look of inline
 code (with a background, if you like), code blocks, quotes and table cells,
 whether code blocks have a copy button, and `mdImage`, which resolves an
@@ -112,6 +115,7 @@ and Ctrl+C copies the selection (Command+A and Command+C on macOS).
 
 ```haskell
 markdownConfigured
+  cache
   defaultMarkdownConfig
     { mdText = fontSize 15
     , mdImage = \src -> lookup src loadedImages
@@ -139,15 +143,17 @@ highlighted =
 ```
 
 An image can load as it is drawn, with `useTask` (`decodePng` stands for a
-decoder of yours, which registers the image and returns its id and size):
+decoder of yours, which returns the image id and size). Allocate one `newTask`
+handle per source in a component-owned map during setup. Here `taskFor` retrieves
+the handle for a source:
 
 ```haskell
-lazyImages :: MarkdownConfig
-lazyImages =
+lazyImages :: (Text -> Task Text (ImageId, Size)) -> MarkdownConfig
+lazyImages taskFor =
   defaultMarkdownConfig
     { mdBlock = \own -> \case
         Paragraph [Image src _ alt] -> do
-          loaded <- useTask src (decodePng src)
+          loaded <- useTask (taskFor src) src (decodePng src)
           case loaded of
             Just (iid, Size w h) -> void (image (fixedWH w h) iid)
             Nothing -> label ("Loading " <> spansText alt)

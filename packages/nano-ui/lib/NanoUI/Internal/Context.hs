@@ -79,6 +79,8 @@ module NanoUI.Internal.Context
   , withClipboard
   , enableMeasureCache
   , setHost
+  , Host
+  , newHost
   , setDrawSnapScale
   , setDrawSquareGeometry
   , setDrawExternalText
@@ -124,10 +126,12 @@ module NanoUI.Internal.Context
   )
 where
 
-import Control.Monad (foldM, forM, when, (<=<))
+import Control.Monad (foldM, forM, when)
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
-import Data.Dynamic (fromDynamic, toDyn)
+import NanoUI.Internal.Derived (emptyDerivedCache)
+import NanoUI.Internal.Resource (newHeld)
+import NanoUI.Internal.Host (Host, newHost, setHost, askHostIO, hostOrInit)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust)
 import Data.HashMap.Strict qualified as HashMap
@@ -141,9 +145,7 @@ import Data.Primitive.PrimArray
   , getSizeofMutablePrimArray
   , resizeMutablePrimArray
   )
-import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import Data.Typeable (Typeable, typeOf, typeRep)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr)
 
@@ -382,7 +384,7 @@ invalidateTextCaches :: Context -> IO ()
 invalidateTextCaches ctx = do
   writeIORef (ctxSpanCache ctx) IM.empty
   writeIORef (ctxWidgetTextCache ctx) IM.empty
-  writeIORef (ctxDerivedCache ctx) IM.empty
+  writeIORef (ctxDerivedCache ctx) emptyDerivedCache
   writeIORef (ctxLayoutCache ctx) Nothing
   modifyIORef' (ctxMetricGen ctx) (+ 1)
 
@@ -515,12 +517,6 @@ enableMeasureCache ctx =
       ref <- newIORef emptyGenCache
       pure ctx {ctxMeasureCache = Just ref, ctxMeasureText = cacheMeasureText ref 0 (ctxMeasureText ctx)}
 
--- | Store one host value per runtime type. Replaces only the value of that
--- type; other host entries remain available. Does not wake the loop.
-{-# INLINE setHost #-}
-setHost :: forall a. (Typeable a) => Context -> a -> IO ()
-setHost ctx val = modifyIORef' (ctxHost ctx) (Map.insert (typeOf val) (toDyn val))
-
 -- | Set the device pixel scale used to snap geometry origins/endpoints to
 -- whole pixels. The SDL backend calls this when the window pixel density is synced.
 {-# INLINE setDrawSnapScale #-}
@@ -538,16 +534,6 @@ setDrawSquareGeometry ctx = Draw.setDrawSquareGeometry (ctxDrawArena ctx)
 {-# INLINE setDrawExternalText #-}
 setDrawExternalText :: Context -> Bool -> IO ()
 setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
-
--- | Retrieve the host value of the requested type, or 'Nothing' if absent.
-{-# INLINE askHostIO #-}
-askHostIO :: forall a. (Typeable a) => Context -> IO (Maybe a)
-askHostIO ctx = (fromDynamic <=< Map.lookup (typeRep (Proxy :: Proxy a))) <$> readIORef (ctxHost ctx)
-
--- | The host value of the requested type, storing the one @new@ builds when
--- there is none yet: how a widget keeps a cache of its own on the context.
-hostOrInit :: forall a. (Typeable a) => Context -> IO a -> IO a
-hostOrInit ctx new = askHostIO ctx >>= maybe (new >>= \v -> v <$ setHost ctx v) pure
 
 -- | Queue a message for this frame. 'drainMessages' restores emission order.
 {-# INLINE pushMessage #-}
@@ -607,14 +593,18 @@ newContext = do
   ctxWakePending <- newIORef False
   ctxLoopThread <- newIORef Nothing
   ctxWakeAt <- newIORef 0
-  ctxHost <- newIORef Map.empty
   ctxTheme <- newIORef defaultTheme
   ctxThemeScopes <- newIORef =<< newThemeScopes
   ctxSystemAppearance <- newIORef Nothing
   ctxThemeFor <- newIORef Nothing
   ctxSpanCache <- newIORef IM.empty
   ctxWidgetTextCache <- newIORef IM.empty
-  ctxDerivedCache <- newIORef IM.empty
+  ctxDerivedCache <- newIORef emptyDerivedCache
+  ctxHeld <- newHeld
+  ctxNativeWindow <- newHost
+  ctxSensors <- newHost
+  ctxParagraphs <- newHost
+  ctxSvgRasters <- newIORef Map.empty
   ctxLayoutCache <- newIORef Nothing
   ctxMetricGen <- newIORef 0
   ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)

@@ -7,6 +7,8 @@ module NanoUI.Form
   , FormView (..)
   , FormInput (..)
   , FormUI (..)
+  , FormState
+  , newFormState
   , liftNanoUI
   , FormStatus (..)
   , FormMode (..)
@@ -64,7 +66,7 @@ where
 
 import Ditto.Core qualified as Ditto
 import Ditto.Types qualified as Ditto
-import NanoUI.Form.Internal.Backend (FormInput (..), FormUI (..), liftNanoUI)
+import NanoUI.Form.Internal.Backend (FormInput (..), FormUI (..), FormState, newFormState, liftNanoUI)
 import NanoUI.Form.Internal.Field (inputWidget)
 import NanoUI.Form.Input
   ( FieldName (..)

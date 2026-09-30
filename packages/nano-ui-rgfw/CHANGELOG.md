@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Breaking:** `askRgfwDebug` and `debugWindowBody` take a typed debug sampler.
+  `runRgfwAppWith` and `runRgfwAppReduceCustomWith` provide it during setup;
+  published snapshots and formatted rows are retained in typed references.
+
 ### Added
 
 - `optExplainLayout` opens a window with the layout overlay on, and

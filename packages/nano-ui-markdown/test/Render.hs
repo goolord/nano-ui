@@ -97,17 +97,18 @@ drawn w h ui = newContext >>= \ctx -> ctx <$ warmup2 ctx (withInput w h) ui
 -- must be drawn.
 idsAcross :: Text -> Text -> [(Text, Text)] -> [Text] -> Expectation
 idsAcross start more same new = do
+  cache <- newMarkdownCache
   let doc = parseMarkdown start
-  ctx <- drawn 600 600 (view doc)
+  ctx <- drawn 600 600 (view cache doc)
   was <- drawnWords ctx
-  _ <- warmup2 ctx (withInput 600 600) (view (appendMarkdown more doc))
+  _ <- warmup2 ctx (withInput 600 600) (view cache (appendMarkdown more doc))
   now <- drawnWords ctx
   let idOf w ws = wWidget <$> wordNamed w ws
   mapM_ (\(w, w') -> (w', isJust (idOf w was), idOf w' now) `shouldBe` (w', True, idOf w was)) same
   mapM_ (\w -> map wText now `shouldContain` [w]) new
 
-view :: MarkdownDoc -> NanoUI (Maybe Text)
-view doc = columnWith (fixedW 500 . padAll 10) (markdown doc)
+view :: MarkdownCache -> MarkdownDoc -> NanoUI (Maybe Text)
+view cache doc = columnWith (fixedW 500 . padAll 10) (markdown cache doc)
 
 -- | Click a drawn word in a 600 by 400 window and return the reported link.
 clickWord :: NanoUI (Maybe Text) -> Text -> IO (Maybe Text)
@@ -134,10 +135,10 @@ customCode =
     }
 
 spec :: Spec
-spec = do
-  it "draws every kind of block's text" $ do
+spec = before newMarkdownCache $ do
+  it "draws every kind of block's text" $ \cache -> do
     ctx <-
-      drawn 600 800 . view . parseMarkdown $
+      drawn 600 800 . view cache . parseMarkdown $
         "# Title\n\nHello *world*, see [the docs](https://example.com).\n\n\
         \- one\n- [x] two\n\n1. first\n\n> quoted\n\n| h1 | h2 |\n|---|---|\n| c1 | c2 |\n\n\
         \```hs\ncode here\n```\n\n---\n\n![alt text](missing.png)"
@@ -147,15 +148,15 @@ spec = do
     spans <- collectTextSpans ctx
     map (`hasText` spans) ["hs"] `shouldBe` [True]
 
-  it "draws headings larger than body text" $ do
-    ws <- drawnWords =<< drawn 600 400 (view (parseMarkdown "# Big\n\nsmall"))
+  it "draws headings larger than body text" $ \cache -> do
+    ws <- drawnWords =<< drawn 600 400 (view cache (parseMarkdown "# Big\n\nsmall"))
     let size w = maybe 0 wSize (wordNamed w ws)
     size "Big" `shouldSatisfy` (> max 16 (size "small"))
 
-  it "scales headings and small text from the backend's default font size" $ do
+  it "scales headings and small text from the backend's default font size" $ \cache -> do
     -- Text height equals font size in this resolver; the body size is 20.
     ctx <- (`withFontMetrics` monospaceMetrics 20) <$> newContext
-    _ <- warmup2 ctx (withInput 600 800) . view . parseMarkdown $
+    _ <- warmup2 ctx (withInput 600 800) . view cache . parseMarkdown $
       "# h1\n\n## h2\n\n### h3\n\n#### h4\n\n##### h5\n\n###### h6\n\nbody\n\n```\ncode\n```"
     ws <- drawnWords ctx
     let size w = maybe 0 wSize (wordNamed w ws)
@@ -163,15 +164,15 @@ spec = do
     -- The copy button's text is 0.8 times the body size.
     fmap (\(Rect _ _ _ h) -> h) . spanRect "Copy" <$> collectTextSpans ctx `shouldReturn` Just 16
 
-  it "returns the destination of a clicked link" $ do
-    let ui = view (parseMarkdown "Read [the docs](https://example.com/docs) or <https://auto.link> now.")
+  it "returns the destination of a clicked link" $ \cache -> do
+    let ui = view cache (parseMarkdown "Read [the docs](https://example.com/docs) or <https://auto.link> now.")
     clickWord ui "docs" `shouldReturn` Just "https://example.com/docs"
     clickWord ui "https://auto.link" `shouldReturn` Just "https://auto.link"
     clickWord ui "Read" `shouldReturn` Nothing
 
-  it "selects and copies styled Markdown text" $ do
+  it "selects and copies styled Markdown text" $ \cache -> do
     let inp = withInput 600 400
-        ui = view (parseMarkdown "Select **these** words")
+        ui = view cache (parseMarkdown "Select **these** words")
     ctx0 <- drawn 600 400 ui
     clipboard <- newIORef Nothing
     let ctx = withClipboard ctx0 (readIORef clipboard) (\txt -> writeIORef clipboard (Just txt) >> pure True)
@@ -197,9 +198,9 @@ spec = do
     _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
     readIORef clipboard `shouldReturn` Just "Select these words"
 
-  it "selects and copies code blocks without losing whitespace" $ do
+  it "selects and copies code blocks without losing whitespace" $ \cache -> do
     let inp = withInput 600 400
-        ui = view (parseMarkdown "```\n  let x = 1\n```")
+        ui = view cache (parseMarkdown "```\n  let x = 1\n```")
     ctx0 <- drawn 600 400 ui
     clipboard <- newIORef Nothing
     let ctx = withClipboard ctx0 (readIORef clipboard) (\txt -> writeIORef clipboard (Just txt) >> pure True)
@@ -211,17 +212,17 @@ spec = do
     _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
     readIORef clipboard `shouldReturn` Just "  let x = 1"
 
-  it "keeps earlier blocks' ids while text streams in" $
+  it "keeps earlier blocks' ids while text streams in" $ \_ ->
     -- The growing block keeps its id too.
     idsAcross "para one\n\n- item two\n\nstrea" "ming on\n\n# new block" [("one", "one"), ("two", "two"), ("strea", "streaming")] ["new"]
 
-  it "keeps the ids of the items and paragraphs inside a growing list or quote" $ do
+  it "keeps the ids of the items and paragraphs inside a growing list or quote" $ \_ -> do
     -- A list's second item grows and gains a nested list and a sibling. A
     -- quote's second paragraph grows and a third follows.
     idsAcross "- first\n- sec" "ond\n  - nested\n- third" [("first", "first"), ("sec", "second")] ["nested", "third"]
     idsAcross "> quoted\n>\n> gro" "wing\n>\n> after" [("quoted", "quoted"), ("gro", "growing")] ["after"]
 
-  it "measures and repaints only the block that grew when text is appended" $ do
+  it "measures and repaints only the block that grew when text is appended" $ \cache -> do
     base <- newContext
     measured <- newIORef []
     inView <- newIORef False
@@ -235,7 +236,7 @@ spec = do
         doc2 = appendMarkdown "ma delta" doc1
         measuring doc = do
           writeIORef measured []
-          void (runFrame ctx inp (liftIO (writeIORef inView True) *> view doc <* liftIO (writeIORef inView False)))
+          void (runFrame ctx inp (liftIO (writeIORef inView True) *> view cache doc <* liftIO (writeIORef inView False)))
           readIORef measured
     measuring doc1 >>= (`shouldContain` ["first"])
     _ <- measuring doc1
@@ -251,24 +252,24 @@ spec = do
     -- Redrawing the same document measures nothing.
     measuring doc2 `shouldReturn` []
 
-  it "copies a code block's code" $ do
+  it "copies a code block's code" $ \cache -> do
     copied <- newIORef Nothing
     base <- newContext
     let ctx = withClipboard base (pure Nothing) (\t -> True <$ writeIORef copied (Just t))
-        ui = view (parseMarkdown "```\nlet x = 1\n  in x\n```")
+        ui = view cache (parseMarkdown "```\nlet x = 1\n  in x\n```")
     _ <- warmup2 ctx (withInput 600 400) ui
     Just r <- spanRect "Copy" <$> collectTextSpans ctx
     void (runClick ctx (withInput 600 400) ui (spanCenter r))
     readIORef copied `shouldReturn` Just "let x = 1\n  in x"
 
-  it "takes a code block's language up to the first space or tab" $ do
-    ctx <- drawn 600 400 (view (parseMarkdown "```hs\tlinenos\ncode\n```"))
+  it "takes a code block's language up to the first space or tab" $ \cache -> do
+    ctx <- drawn 600 400 (view cache (parseMarkdown "```hs\tlinenos\ncode\n```"))
     isJust . spanRectOf "hs" <$> collectTextSpans ctx `shouldReturn` True
 
-  it "wraps a code line wider than the document and shows all of it" $ do
+  it "wraps a code line wider than the document and shows all of it" $ \cache -> do
     let long = "a_long_identifier_much_wider_than_the_column_it_is_drawn_in"
     -- No fixed-width ancestor: the column fills the window.
-    ctx <- drawn 400 400 (columnWith (fillW . padAll 10) (markdown (parseMarkdown ("```\nfirst\n" <> long <> "\nlast\n```"))))
+    ctx <- drawn 400 400 (columnWith (fillW . padAll 10) (markdown cache (parseMarkdown ("```\nfirst\n" <> long <> "\nlast\n```"))))
     code <- drawnWords ctx
     let texts = map wText code
         middle = takeWhile (/= "last") (drop 1 (dropWhile (/= "first") texts))
@@ -278,21 +279,21 @@ spec = do
     -- Every wrapped line starts within the code block's available width.
     mapM_ (\w -> let V2 x _ = wPos w in x < 390 `shouldBe` True) code
 
-  it "keeps a wrapped code line's indent and the spaces inside it" $ do
+  it "keeps a wrapped code line's indent and the spaces inside it" $ \cache -> do
     let line = "    x  =  alpha  beta  gamma  delta  epsilon  zeta  eta  theta"
-    ctx <- drawn 300 400 (columnWith (fillW . padAll 10) (markdown (parseMarkdown ("```\n" <> line <> "\n```"))))
+    ctx <- drawn 300 400 (columnWith (fillW . padAll 10) (markdown cache (parseMarkdown ("```\n" <> line <> "\n```"))))
     code <- map wText <$> drawnWords ctx
     length code `shouldSatisfy` (> 1)
     take 1 code `shouldSatisfy` all ("    x  =  " `T.isPrefixOf`)
     -- Each line is a substring of the source line, spaces included.
     mapM_ (\t -> (t, t `T.isInfixOf` line) `shouldBe` (t, True)) code
 
-  it "lets the wheel over a code block scroll the page" $ do
+  it "lets the wheel over a code block scroll the page" $ \cache -> do
     ctx <- newContext
     let inp = withInput 400 300
         paras n = T.concat ["para " <> T.pack (show i) <> "\n\n" | i <- [1 .. n :: Int]]
         doc = parseMarkdown (paras 3 <> "```\ncode\n```\n\n" <> paras 30)
-        ui = scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown doc))
+        ui = scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))
     (sid, _) <- warmup2 ctx inp ui
     [code] <- pure . filter ((== "code") . wText) =<< drawnWords ctx
     let V2 x y = wPos code
@@ -302,8 +303,8 @@ spec = do
     replicateM_ 30 (runFrame ctx over {inputDeltaTime = 0.05} ui)
     getScrollOffset ctx sid `shouldNotReturn` 0
 
-  it "draws a resolved image, which returns its source when clicked" $ do
-    let ui = columnWith (fixedW 500) (markdownConfigured catImages (parseMarkdown "![a cat](cat.png)\n\n![a dog](dog.png)"))
+  it "draws a resolved image, which returns its source when clicked" $ \cache -> do
+    let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "![a cat](cat.png)\n\n![a dog](dog.png)"))
     ctx <- drawn 600 400 ui
     images <- map snd <$> nodesOf NodeImage ctx
     case images of
@@ -316,8 +317,8 @@ spec = do
     ws `shouldContain` ["dog"]
     ws `shouldNotContain` ["cat"]
 
-  it "sends a click on an image in a link to the link, and shows the link's title over it" $ do
-    let ui = columnWith (fixedW 500) (markdownConfigured catImages (parseMarkdown "[![a cat](cat.png)](https://cats.example \"All about cats\")"))
+  it "sends a click on an image in a link to the link, and shows the link's title over it" $ \cache -> do
+    let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "[![a cat](cat.png)](https://cats.example \"All about cats\")"))
         inp = withInput 600 400
     ctx <- drawn 600 400 ui
     [r] <- map snd <$> nodesOf NodeImage ctx
@@ -330,8 +331,8 @@ spec = do
     hasText "All about cats" <$> collectOverlayTextSpans ctx over `shouldReturn` True
     runClick ctx inp ui (spanCenter r) `shouldReturn` Just "https://cats.example"
 
-  it "gives a paragraph that turns into a drawn image fresh ids" $ do
-    let ui = columnWith (fixedW 500) . markdownConfigured catImages
+  it "gives a paragraph that turns into a drawn image fresh ids" $ \cache -> do
+    let ui = columnWith (fixedW 500) . markdownConfigured cache catImages
         unfinished = parseMarkdown "![a cat](cat.png"
     ctx <- drawn 600 400 (ui unfinished)
     textIds <- nub . map wWidget <$> drawnWords ctx
@@ -340,27 +341,27 @@ spec = do
     (length textIds, length imageIds) `shouldBe` (1, 1)
     imageIds `shouldNotBe` textIds
 
-  it "shows an image it does not draw as its alt text, a link to its source" $ do
-    let ui = view (parseMarkdown "See ![the diagram](diagram.png) here.")
+  it "shows an image it does not draw as its alt text, a link to its source" $ \cache -> do
+    let ui = view cache (parseMarkdown "See ![the diagram](diagram.png) here.")
     ctx <- drawn 600 400 ui
     theme <- readIORef (ctxTheme ctx)
     fmap wColor . wordNamed "diagram" <$> drawnWords ctx `shouldReturn` Just (themeLink theme)
     clickWord ui "diagram" `shouldReturn` Just "diagram.png"
 
-  it "sizes an ordered list's markers by its widest number" $ do
+  it "sizes an ordered list's markers by its widest number" $ \cache -> do
     -- "1" is narrow, so "10." is wider than the last marker, "11.".
     base <- newContext
     let fm = (monospaceMetrics 16) {fmAdvance = \c -> case c of '1' -> 2; 'x' -> 7; _ -> 8}
         ctx = withFontMetrics base fm
-    _ <- warmup2 ctx (withInput 600 400) (view (parseMarkdown "10. ten\n11. eleven\n"))
+    _ <- warmup2 ctx (withInput 600 400) (view cache (parseMarkdown "10. ten\n11. eleven\n"))
     fmap (\(Rect _ _ w _) -> w) . spanRectOf "10." <$> collectTextSpans ctx `shouldReturn` Just 18
 
-  it "keeps wrapped table text inside its rows on the first frame and after resizing" $ do
+  it "keeps wrapped table text inside its rows on the first frame and after resizing" $ \cache -> do
     let doc = parseMarkdown
           "| Category | Keys |\n|---|---|\n\
           \| Motions | `h j k l`, `w b e`, with counts and words that wrap across several lines |\n\
           \| Operators | `d c y` with a motion, a text object, or doubled |\n\nAfter"
-        ui = columnWith fillW (markdown doc)
+        ui = columnWith fillW (markdown cache doc)
         bottom (Rect _ y _ h) = y + h
         rectTop (Rect _ y _ _) = y
     ctx <- newContext
@@ -384,10 +385,10 @@ spec = do
           bottom o1 `shouldBe` bottom o2
         _ -> expectationFailure ("expected a table and six cells, got " <> show panels)
 
-  it "lines a table cell's wrapped lines up as its column is aligned" $ do
+  it "lines a table cell's wrapped lines up as its column is aligned" $ \cache -> do
     let cellText = "words that wrap over a few lines of a narrow column"
         row = "| " <> T.intercalate " | " (replicate 3 cellText) <> " |"
-    ctx <- drawn 400 600 (columnWith (fixedW 380 . padAll 10) (markdown (parseMarkdown ("| l | r | c |\n|---|--:|:-:|\n" <> row))))
+    ctx <- drawn 400 600 (columnWith (fixedW 380 . padAll 10) (markdown cache (parseMarkdown ("| l | r | c |\n|---|--:|:-:|\n" <> row))))
     ws <- drawnWords ctx
     -- The monospace test font is 12 wide per character.
     let extent w = let V2 x _ = wPos w in (x, x + 12 * fromIntegral (T.length (wText w)))
@@ -401,18 +402,18 @@ spec = do
         length (nub [round (x0 + x1) :: Int | (x0, x1) <- centre]) `shouldBe` 1
       other -> expectationFailure ("expected three body cells, got " <> show (length other))
 
-  it "draws a quote's list markers in its muted text colour" $ do
-    ctx <- drawn 600 400 (view (parseMarkdown "> - bullet\n>\n> text\n>\n> - [x] done\n"))
+  it "draws a quote's list markers in its muted text colour" $ \cache -> do
+    ctx <- drawn 600 400 (view cache (parseMarkdown "> - bullet\n>\n> text\n>\n> - [x] done\n"))
     theme <- readIORef (ctxTheme ctx)
     ms <- markers ctx
     case map (\(_, _, ops) -> ops) ms of
       [[FillCircle _ _ _ bullet], FillRoundedRect _ _ boxFill : _] -> (bullet, boxFill) `shouldBe` (themeMuted theme, themeMuted theme)
       _ -> expectationFailure ("expected a bullet and a checked box, got " <> show (length ms) <> " markers")
 
-  it "draws a task item's box as nano-ui draws a checkbox, at the bullet's id and under another version" $ do
-    ctx <- drawn 600 400 (view (parseMarkdown "- a\n"))
+  it "draws a task item's box as nano-ui draws a checkbox, at the bullet's id and under another version" $ \cache -> do
+    ctx <- drawn 600 400 (view cache (parseMarkdown "- a\n"))
     [(bulletId, bulletVersion, _)] <- markers ctx
-    _ <- warmup2 ctx (withInput 600 400) (view (parseMarkdown "- [ ] a\n"))
+    _ <- warmup2 ctx (withInput 600 400) (view cache (parseMarkdown "- [ ] a\n"))
     [(boxId, boxVersion, ops)] <- markers ctx
     (boxId, boxVersion /= bulletVersion) `shouldBe` (bulletId, True)
     theme <- readIORef (ctxTheme ctx)
@@ -424,9 +425,9 @@ spec = do
         ops == toList (runCanvasFor cdc (drawCheckbox theme r False)) `shouldBe` True
       _ -> expectationFailure ("expected an unchecked box's two ops, got " <> show (length ops))
 
-  it "draws the blocks mdBlock draws, at every depth, and the rest as it would" $ do
+  it "draws the blocks mdBlock draws, at every depth, and the rest as it would" $ \cache -> do
     ctx <-
-      drawn 600 600 . columnWith (fixedW 500) . markdownConfigured customCode . parseMarkdown $
+      drawn 600 600 . columnWith (fixedW 500) . markdownConfigured cache customCode . parseMarkdown $
         "```hs\ntop\n```\n\n> ```hs\n> quoted\n> ```\n\n- item\n\n  ```hs\n  listed\n  ```\n\n```py\nother\n```\n\nafter"
     spans <- collectTextSpans ctx
     map (`hasText` spans) ["custom top", "custom quoted", "custom listed", "py"] `shouldBe` replicate 4 True
@@ -434,7 +435,7 @@ spec = do
     -- Only the Python block uses the default widget, with its copy button.
     length [() | (_, "Copy", _, _, _) <- spans] `shouldBe` 1
 
-  it "wraps the widget's own drawing in chrome of its own, where the block is, and returns its link" $ do
+  it "wraps the widget's own drawing in chrome of its own, where the block is, and returns its link" $ \cache -> do
     let cfg :: MarkdownConfig
         cfg =
           defaultMarkdownConfig
@@ -442,7 +443,7 @@ spec = do
                 Paragraph _ -> panel (own b)
                 _ -> own b
             }
-        ui = columnWith (fixedW 500) (markdownConfigured cfg (parseMarkdown "See [the docs](/docs).\n\n> Quoted [link](/quoted)."))
+        ui = columnWith (fixedW 500) (markdownConfigured cache cfg (parseMarkdown "See [the docs](/docs).\n\n> Quoted [link](/quoted)."))
     clickWord ui "docs" `shouldReturn` Just "/docs"
     clickWord ui "link" `shouldReturn` Just "/quoted"
     -- The quoted paragraph keeps the quote's muted colour.
@@ -450,7 +451,7 @@ spec = do
     theme <- readIORef (ctxTheme ctx)
     fmap wColor . wordNamed "Quoted" <$> drawnWords ctx `shouldReturn` Just (themeMuted theme)
 
-  it "styles inline code, quotes, table cells and code blocks over their own look" $ do
+  it "styles inline code, quotes, table cells and code blocks over their own look" $ \cache -> do
     let tint = colorRGBA 1 2 3 255
         codeInk = colorRGBA 40 50 60 255
         quoteInk = colorRGBA 70 80 90 255
@@ -462,7 +463,7 @@ spec = do
             , mdQuote = fontColor quoteInk
             , mdTableCell = \header -> if header then id else foreground cellInk
             }
-        ui c = columnWith (fixedW 500) (markdownConfigured c (parseMarkdown "Run `build` now.\n\n> quoted\n\n| head |\n|---|\n| cell |"))
+        ui c = columnWith (fixedW 500) (markdownConfigured cache c (parseMarkdown "Run `build` now.\n\n> quoted\n\n| head |\n|---|\n| cell |"))
     ctx <- drawn 600 400 (ui cfg)
     ws <- drawnWords ctx
     theme <- readIORef (ctxTheme ctx)
@@ -473,7 +474,7 @@ spec = do
     [Rect x _ _ _] <- drawnFills tint ctx
     x `shouldBe` let V2 cx _ = wPos code in cx
     (drawnFills tint =<< drawn 600 400 (ui defaultMarkdownConfig)) `shouldReturn` []
-    let block c = columnWith (fixedW 500) (markdownConfigured (defaultMarkdownConfig :: MarkdownConfig) {mdCodeBlock = background c} (parseMarkdown "```\ncode\n```"))
+    let block c = columnWith (fixedW 500) (markdownConfigured cache (defaultMarkdownConfig :: MarkdownConfig) {mdCodeBlock = background c} (parseMarkdown "```\ncode\n```"))
     paints tint (block tint) `shouldReturn` True
     paints tint (block (colorRGBA 9 9 9 255)) `shouldReturn` False
   where

@@ -49,10 +49,11 @@ data Rec = Rec
   }
 
 -- | Record the tour of @ui@ into @dir@, which must exist.
-record :: FilePath -> NanoUI () -> IO ()
-record dir ui = do
+record :: FilePath -> (SdlEnv -> IO (NanoUI ())) -> IO ()
+record dir setup = do
   logRef <- newIORef []
   withHiddenWindow winW winH (V2 (-10) (-10)) id $ \ctx env idle -> do
+    ui <- setup env
     (ctx', base) <- syncDisplay ctx env idle
     -- The first frames load fonts; the Graphics tab loads its images once.
     replicateM_ 3 (void (sdlDrawFrame ctx' ui env base True))

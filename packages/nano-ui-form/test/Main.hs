@@ -54,6 +54,7 @@ main = do
   runScopeTests
 
   customCtx <- newContext
+  customOwner <- newFormState
   let
     decodeText (FormInputText t) = Right t
     decodeText _ = Left "Expected text"
@@ -77,28 +78,29 @@ main = do
           FormInputText
           NUI.textInput'
           "automatic"
-    runCustom = runNanoUI customCtx emptyInput (runNanoForm "custom" customForm)
+    runCustom = runNanoUI customCtx emptyInput (runNanoForm customOwner "custom" customForm)
   (customView, _) <- runCustom
   runNanoUI customCtx emptyInput (runFormView (Ditto.unView customView []))
   expectOk "Custom fields publish value changes without a response flag" (== ("edited", "automatic")) . snd
     =<< runCustom
-  updateFieldInput customCtx "custom" "internal-key" (FormInputText "external")
+  updateFieldInput customOwner customCtx "custom" "internal-key" (FormInputText "external")
   expectOk "Custom field identity is independent of its visible label" (== ("external", "automatic")) . snd
     =<< runCustom
-  updateFieldInput customCtx "custom" "internal-key" (FormInputBool True)
+  updateFieldInput customOwner customCtx "custom" "internal-key" (FormInputBool True)
   expectErrors "Custom field decoder errors reach ditto" ((== ["Expected text"]) . map snd) . snd =<< runCustom
 
   captionCtx <- newContext
+  captionOwner <- newFormState
   let
     renderCaption spec = columnWith tight $ do
       (fieldView, result) <-
-        runNanoForm "captions" (inputText spec "initial" :: Form Text Text)
+        runNanoForm captionOwner "captions" (inputText spec "initial" :: Form Text Text)
       runFormView (Ditto.unView fieldView [])
       pure result
     firstCaption = (named "stable-key") {fieldLabel = Just "First caption"}
     secondCaption = firstCaption {fieldLabel = Just "Second caption"}
   _ <- runFrame captionCtx emptyInput (renderCaption firstCaption)
-  updateFieldInput captionCtx "captions" "stable-key" (FormInputText "kept")
+  updateFieldInput captionOwner captionCtx "captions" "stable-key" (FormInputText "kept")
   (captionResult, _, _, _) <-
     runFrame captionCtx emptyInput (renderCaption secondCaption)
   expectOk "Caption changes retain named field values" (== "kept") captionResult
@@ -110,6 +112,7 @@ main = do
     ("Second caption" `elem` captions && "First caption" `notElem` captions)
 
   ctx <- newContext
+  owner <- newFormState
   let
     inp = emptyInput {inputWindowSize = Size 60 20}
 
@@ -121,11 +124,11 @@ main = do
         <*> inputRadio "radio" (Seq.fromList ["First", "Second"]) 0
         <*> inputSelect unnamed (Just "Only") 0
   (_, collectionResult) <-
-    runNanoUI ctx inp (runNanoForm "collections" collectionForm)
+    runNanoUI ctx inp (runNanoForm owner "collections" collectionForm)
   expectOk "Foldable form options preserve initial indices" (== (1, 0, 0)) collectionResult
 
   putStrLn "\n--- Validation Failure & Errors (runNanoUI) ---"
-  (_, res2) <- runNanoUI ctx inp (runNanoForm "failing" failingForm)
+  (_, res2) <- runNanoUI ctx inp (runNanoForm owner "failing" failingForm)
   case res2 of
     Ditto.Error errs -> do
       let
@@ -145,13 +148,13 @@ main = do
         <*> inputEnumSelect unnamed (-12)
     checkEnums expected =
       expectOk "Enum fields use zero-based widget indices independently of enum bounds" (== expected) . snd
-        =<< runNanoUI ctx inp (runNanoForm "enums" enumForm)
+        =<< runNanoUI ctx inp (runNanoForm owner "enums" enumForm)
   checkEnums (-42, 42, -12)
-  updateFieldInput ctx "enums" "select" (FormInputInt 0)
-  updateFieldInput ctx "enums" "radio" (FormInputInt 255)
+  updateFieldInput owner ctx "enums" "select" (FormInputInt 0)
+  updateFieldInput owner ctx "enums" "radio" (FormInputInt 255)
   checkEnums (minBound, maxBound, -12)
-  updateFieldInput ctx "enums" "select" (FormInputInt (-10))
-  updateFieldInput ctx "enums" "radio" (FormInputInt 300)
+  updateFieldInput owner ctx "enums" "select" (FormInputInt (-10))
+  updateFieldInput owner ctx "enums" "radio" (FormInputInt 300)
   checkEnums (minBound, maxBound, -12)
 
   putStrLn
@@ -166,7 +169,7 @@ main = do
         <*> withFieldErrors (inputText "bio" "Bio text" `prove` notEmpty "Bio required")
 
   -- Frame 1: Initial valid state
-  (v1, r1) <- runNanoUI ctx inp (runNanoForm "multi" multiForm)
+  (v1, r1) <- runNanoUI ctx inp (runNanoForm owner "multi" multiForm)
   case r1 of
     Ditto.Ok (Ditto.Proved _ (u, a, b)) -> do
       check "Initial valid form decoded" (u == "Ada" && a == 25 && b == "Bio text")
@@ -174,8 +177,8 @@ main = do
     _ -> fail "Expected valid initial form"
 
   -- Frame 2: Update age to 15 (invalid)
-  updateFieldInput ctx "multi" "age" (FormInputFloat 15)
-  (v2, r2) <- runNanoUI ctx inp (runNanoForm "multi" multiForm)
+  updateFieldInput owner ctx "multi" "age" (FormInputFloat 15)
+  (v2, r2) <- runNanoUI ctx inp (runNanoForm owner "multi" multiForm)
   case r2 of
     Ditto.Error errs -> do
       check "Age failed validation" (length errs == 1)
@@ -184,11 +187,11 @@ main = do
     Ditto.Ok _ -> fail "Expected age validation error"
 
   -- Frame 3: User updates Bio to "Bio modified"
-  updateFieldInput ctx "multi" "bio" (FormInputText "Bio modified")
+  updateFieldInput owner ctx "multi" "bio" (FormInputText "Bio modified")
 
   -- Frame 4: Fix age back to 30 (error clears)
-  updateFieldInput ctx "multi" "age" (FormInputFloat 30)
-  (v4, r4) <- runNanoUI ctx inp (runNanoForm "multi" multiForm)
+  updateFieldInput owner ctx "multi" "age" (FormInputFloat 30)
+  (v4, r4) <- runNanoUI ctx inp (runNanoForm owner "multi" multiForm)
   case r4 of
     Ditto.Ok (Ditto.Proved _ (u, a, b)) -> do
       check
@@ -204,7 +207,7 @@ main = do
     longErrorForm =
       withFieldErrors
         (inputText "email" "bad-email" `prove` validEmail (\_ -> emailErrorMsg))
-  (v7, r7) <- runNanoUI ctx inp (runNanoForm "longError" longErrorForm)
+  (v7, r7) <- runNanoUI ctx inp (runNanoForm owner "longError" longErrorForm)
   case r7 of
     Ditto.Error errs -> do
       check "Caught long email error" (length errs == 1)

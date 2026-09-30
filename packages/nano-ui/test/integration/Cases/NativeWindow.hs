@@ -244,11 +244,12 @@ runScreenshotFromClickTest ctx failed = do
 -- once.
 runUseScreenshotTest :: Context -> IORef Int -> IO ()
 runUseScreenshotTest ctx failed = do
+  job <- newTask
   _ <- recordingHost defaultWindowSettings ctx
   wait <- newWakeSignal ctx
   captures <- newIORef (0 :: Int)
   let capture = Just (solid 4 4) <$ modifyIORef' captures (+ 1)
-      ui = fmap (rgbaWidth . screenshotPixels) <$> useScreenshot ("shot" :: String)
+      ui = fmap (rgbaWidth . screenshotPixels) <$> useScreenshot job ("shot" :: String)
       -- Run frames, answering each as a backend would, until the view has
       -- its screenshot.
       go :: Int -> IO (Maybe Int)

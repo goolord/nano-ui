@@ -18,6 +18,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Float (castFloatToWord32, castWord32ToFloat)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Derived (ComboMatches (..), comboCache)
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
@@ -52,21 +53,17 @@ comboFiltered options q
   where
     opts = toList options
 
--- | A combo's matches for one query over one options list, with the widest
--- match's width once a focused frame has measured it.
-data ComboMatches = ComboMatches ![Text] !Text [Text] !(Maybe Float)
-
 -- | 'comboFiltered', kept in 'ctxDerivedCache' under the combo's key while the
 -- options are the same list and the query the same text. A combo filters its
 -- options on every frame, focused or not, and a long list (a font picker's
 -- families) would otherwise lowercase every option each time.
 comboMatches :: Context -> Int -> [Text] -> Text -> IO ComboMatches
 comboMatches ctx key !opts q =
-  readDerived ctx key >>= \case
+  readDerived comboCache ctx key >>= \case
     Just m@(ComboMatches o q' _ _) | ptrEq o opts && q' == q -> pure m
     _ -> do
       let m = ComboMatches opts q (comboFiltered opts q) Nothing
-      m <$ writeDerived ctx key m
+      m <$ writeDerived comboCache ctx key m
 
 -- | A combo's state between frames.
 data ComboState = ComboState
@@ -321,7 +318,7 @@ comboBox' placeholder options value = do
       _
         | isFocus && not (null displayed) -> do
             w <- foldM (\widest t -> max widest . fst <$!> ctxMeasureText ctx t) 0 displayed
-            w <$ writeDerived ctx key (ComboMatches opts query matches (Just w))
+            w <$ writeDerived comboCache ctx key (ComboMatches opts query matches (Just w))
         | otherwise -> pure (csContentW cs0)
   let step =
         comboStep

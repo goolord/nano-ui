@@ -4,15 +4,20 @@
 --
 -- Worker threads never touch the context's stores. A job writes into its own
 -- 'IORef' and wakes the loop ('wakeFromThread'); the view reads the ref on its
--- next call to the hook. A job is tied to its hook's widget id and lives while
+-- next call to the hook. A job belongs to its typed handle and lives while
 -- the view keeps calling the hook ('useHeld'). 'sweepHeld' ends the rest.
 module NanoUI.Internal.Tasks
   ( TaskStatus (..)
+  , Task
+  , newTask
+  , Stream
+  , newStream
   , useTaskStatus
   , useTask
   , useStream
   , askWake
   , useHeld
+  , holdAction
   , sweepHeld
   , cancelTasks
   )
@@ -21,84 +26,96 @@ where
 import Control.Concurrent (forkIO, forkIOWithUnmask, killThread, newEmptyMVar, putMVar, readMVar)
 import Control.Exception (AsyncException (ThreadKilled), SomeException, evaluate, finally, fromException, mask_, throwIO, try)
 import Control.Monad (filterM, forM_, unless, void, when)
-import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.Primitive.PrimVar (PrimVar, modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
-import Data.Type.Equality ((:~:) (Refl))
-import Data.Typeable (Typeable, cast, eqT)
+import Data.Primitive.PrimVar (modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
+import Data.Unique (hashUnique, newUnique)
 import GHC.Conc (labelThread)
-import GHC.Exts (RealWorld)
-import NanoUI.Internal.Context (Context (ctxWakeLoop), askHostIO, hostOrInit, intKey, wakeFromThread)
+import NanoUI.Internal.Context (Context (ctxWakeLoop, ctxHeld), intKey, wakeFromThread)
+import NanoUI.Internal.Resource (Resource (..), newResource, Held (..), Holding (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, freshWidget, liftIO)
 import System.Timeout (timeout)
 
--- | Per-context hook resources, stored as a host value ('hostOrInit'): the
--- resources by widget store key; the frame the view is running, which each
--- hook stamps its entry with; how many entries are stamped this frame (in
--- any view pass); and how many there are. A frame whose hooks all ran ends
--- without looking at any entry.
-data Held = Held !(IORef (IntMap Holding)) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int) !(PrimVar RealWorld Int)
-
--- | A hook's key (compared by value), its resource, the release action, and
--- the last frame its hook ran. The release returns an action that waits until
--- the release has finished, which only the session's end ('cancelTasks') runs.
-data Holding = forall k. (Eq k, Typeable k) => Holding !k !Dynamic !(IO (IO ())) !(PrimVar RealWorld Int)
-
--- | Hold a resource for key @k@ at this hook's widget id. While the key is
+-- | Hold a resource for key @k@ in its typed owner. While the key is
 -- unchanged the cached value is returned. Otherwise the old resource is
--- released and @acquire@ builds a new one; it gets the old value when the
--- types match. A second view pass in the same frame reuses the first pass's
+-- released and @acquire@ builds a new one, receiving the old value.
+-- A second view pass in the same frame reuses the first pass's
 -- value. Resources are released when a frame skips the hook ('sweepHeld') and
 -- when the session ends ('cancelTasks'). Holds job threads and
 -- 'NanoUI.useImageRgba' images.
-useHeld :: (Eq k, Typeable k, Typeable a) => k -> (Context -> Maybe a -> IO (a, IO ())) -> NanoUI a
-useHeld k acquire = useHeldBy k Just (\ctx old -> (\(v, release) -> (v, v, pure () <$ release)) <$> acquire ctx old)
+useHeld :: Eq k => Resource k a -> k -> (Context -> Maybe a -> IO (a, IO ())) -> NanoUI a
+useHeld owner k acquire = useHeldBy owner k Just (\ctx old -> (\(v, release) -> (v, v, pure () <$ release)) <$> acquire ctx old)
 
 -- | 'useHeld' keeping an @s@ and returning what @view@ finds in it. An entry
--- @view@ finds nothing in is replaced, as one of another type is.
+-- @view@ finds nothing in is replaced.
 {-# INLINE useHeldBy #-}
-useHeldBy :: (Eq k, Typeable k, Typeable s) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO (IO ()))) -> NanoUI b
-useHeldBy k view acquire = do
-  (wid, ctx) <- freshWidget
+useHeldBy :: Eq k => Resource k s -> k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO (IO ()))) -> NanoUI b
+useHeldBy (Resource key cell) k view acquire = do
+  ctx <- askContext
   liftIO $ do
-    Held ref frameVar stampedVar countVar <- hostOrInit ctx newHeld
-    held <- readIORef ref
-    frame <- readPrimVar frameVar
-    let key = intKey wid
-        entry = IM.lookup key held
-        valueOf (Holding _ v _ _) = view =<< fromDynamic v
+    let registry = ctxHeld ctx
+        ref = heldEntries registry
+        stampedVar = heldStamped registry
+        countVar = heldCount registry
+    entry <- readIORef cell
+    frame <- readPrimVar (heldFrame registry)
+    let valueOf (_, v, _) = view v
         stamp = modifyPrimVar stampedVar (+ 1)
     case entry of
-      Just h@(Holding k0 _ _ seen) | cast k0 == Just k, Just v <- valueOf h -> do
-        s <- readPrimVar seen
-        unless (s == frame) $ writePrimVar seen frame >> stamp
+      Just h@(k0, _, holding) | k0 == k, Just v <- valueOf h -> do
+        touch registry frame holding
         pure v
       _ -> do
         -- The replaced entry leaves the map, and the counts, before its
         -- release, so an @acquire@ that throws leaves nothing released
         -- behind for a later frame to release again.
-        forM_ entry $ \old -> do
-          writeIORef ref $! IM.delete key held
+        forM_ entry $ \(_, _, old) -> do
+          modifyIORef' ref (IM.delete key)
           modifyPrimVar countVar (subtract 1)
-          s <- seenIn old
+          s <- readPrimVar (holdingSeen old)
           when (s == frame) $ modifyPrimVar stampedVar (subtract 1)
-          void (letGo old)
+          void (holdingRelease old)
         (stored, v, release) <- acquire ctx (valueOf =<< entry)
         seen <- newPrimVar frame
-        modifyIORef' ref (IM.insert key (Holding k (toDyn stored) release seen))
+        let holding = Holding (writeIORef cell Nothing >> release) seen
+        writeIORef cell (Just (k, stored, holding))
+        modifyIORef' ref (IM.insert key holding)
         stamp
         modifyPrimVar countVar (+ 1)
         pure v
-  where
-    newHeld = Held <$> newIORef IM.empty <*> newPrimVar 0 <*> newPrimVar 0 <*> newPrimVar 0
-    seenIn (Holding _ _ _ seen) = readPrimVar seen
 
--- | Start releasing a resource; the result waits until it is released.
-letGo :: Holding -> IO (IO ())
-letGo (Holding _ _ release _) = release
+touch :: Held -> Int -> Holding -> IO ()
+touch registry frame holding = do
+  seen <- readPrimVar (holdingSeen holding)
+  unless (seen == frame) $ do
+    writePrimVar (holdingSeen holding) frame
+    modifyPrimVar (heldStamped registry) (+ 1)
+
+-- | Lease a callback-only built-in resource at a widget id. There is no
+-- payload to recover: sweeping only runs its cleanup action.
+holdAction :: IO () -> NanoUI ()
+holdAction release = do
+  (wid, ctx) <- freshWidget
+  liftIO $ do
+    let registry = ctxHeld ctx
+        widget = intKey wid
+    frame <- readPrimVar (heldFrame registry)
+    widgets <- readIORef (heldWidgets registry)
+    entries <- readIORef (heldEntries registry)
+    case IM.lookup widget widgets >>= (`IM.lookup` entries) of
+      Just holding -> touch registry frame holding
+      Nothing -> do
+        key <- hashUnique <$> newUnique
+        seen <- newPrimVar frame
+        let cleanup = do
+              modifyIORef' (heldWidgets registry) (IM.delete widget)
+              release
+              pure (pure ())
+        modifyIORef' (heldWidgets registry) (IM.insert widget key)
+        modifyIORef' (heldEntries registry) (IM.insert key (Holding cleanup seen))
+        modifyPrimVar (heldStamped registry) (+ 1)
+        modifyPrimVar (heldCount registry) (+ 1)
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
 -- earlier key, so the view can keep showing it instead of flickering.
@@ -115,20 +132,24 @@ data TaskStatus a
 -- allocates.
 data Outcome a = Outcome !(TaskStatus a) !(Maybe a)
 
--- | A job's result box as its hook keeps it. The type of the box itself is
--- known here, so finding it costs a fingerprint compare; a 'Dynamic' of the
--- box would build that type from the caller's result type on every call.
-data TaskBox = forall a. Typeable a => TaskBox !(IORef (Outcome a))
+-- | Allocate one typed task owner per component/session. Key and result types
+-- are fixed by the handle. Skipping its hook releases its running job.
+newtype Task k a = Task (Resource k (IORef (Outcome a)))
 
--- | The box, if its job returns an @a@.
-taskRef :: forall a. Typeable a => TaskBox -> Maybe (IORef (Outcome a))
-taskRef (TaskBox (ref :: IORef (Outcome b))) = (\Refl -> ref) <$> eqT @a @b
+newTask :: IO (Task k a)
+newTask = Task <$> newResource
+
+-- | A typed stream owner, allocated before the per-frame view.
+newtype Stream k s = Stream (Resource k (IORef s))
+
+newStream :: IO (Stream k s)
+newStream = Stream <$> newResource
 
 -- | 'useHeldBy' for a job. @start@ builds what the hook keeps, the result
 -- box (given the old box when @view@ finds one) and the action to fork.
 {-# INLINE useJob #-}
-useJob :: (Eq k, Typeable k, Typeable s) => k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> NanoUI b
-useJob k view start = useHeldBy k view $ \ctx old -> do
+useJob :: Eq k => Resource k s -> k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> NanoUI b
+useJob owner k view start = useHeldBy owner k view $ \ctx old -> do
   (stored, box, run) <- start ctx old
   done <- newEmptyMVar
   -- Masked until the handler is in place, so a job killed before it first
@@ -148,7 +169,7 @@ useJob k view start = useHeldBy k view $ \ctx old -> do
 -- that a Retry button bumps:
 --
 -- > (attempt, setAttempt) <- useInt 0
--- > status <- useTaskStatus (path, attempt) (T.readFile path)
+-- > status <- useTaskStatus task (path, attempt) (T.readFile path)
 -- > case status of
 -- >   TaskRunning _ -> label "Loading..."
 -- >   TaskDone contents -> label contents
@@ -157,12 +178,11 @@ useJob k view start = useHeldBy k view $ \ctx old -> do
 -- >     whenM (button "Retry") (setAttempt (attempt + 1))
 --
 -- The loop sleeps while the job runs and wakes once when it ends; that frame
--- repaints the whole window. Like any hook it takes the next widget id, and a
--- frame that skips the call kills the job. Call it where the result is shown,
--- or above any tab or branch that should not end the job. Wrap a conditional
--- call in 'NanoUI.scope' so later hooks keep their ids:
+-- repaints the whole window. Allocate @task <- newTask@ once during setup.
+-- This consumes no widget id. A frame that skips the handle kills its job;
+-- call it above a tab or branch that should not end it:
 --
--- > scope (when shown (void (useTask path (T.readFile path))))
+-- > when shown (void (useTask task path (T.readFile path)))
 --
 -- Kills are asynchronous and sent from another thread, so the frame does not
 -- wait. An old job may run briefly alongside its replacement, until it next
@@ -177,29 +197,29 @@ useJob k view start = useHeldBy k view $ \ctx old -> do
 -- asynchronous ones such as a stack overflow included; only the hook's own
 -- kill ends the job without one. Build with @-threaded@ so jobs run while the
 -- loop sleeps.
-useTaskStatus :: (Eq k, Typeable k, Typeable a) => k -> IO a -> NanoUI (TaskStatus a)
-useTaskStatus k run = (\(Outcome status _) -> status) <$> useOutcome k run
+useTaskStatus :: Eq k => Task k a -> k -> IO a -> NanoUI (TaskStatus a)
+useTaskStatus owner k run = (\(Outcome status _) -> status) <$> useOutcome owner k run
 
 -- | Like 'useTaskStatus', but returns only the latest result: the current
 -- job's once it returns, otherwise the previous key's, or 'Nothing'. A failed
 -- job keeps the previous result.
 --
 -- > (path, setPath) <- useText "notes.txt"
--- > contents <- useTask path (T.readFile (T.unpack path))
+-- > contents <- useTask task path (T.readFile (T.unpack path))
 -- > label (fromMaybe "Loading..." contents)
-useTask :: (Eq k, Typeable k, Typeable a) => k -> IO a -> NanoUI (Maybe a)
-useTask k run = (\(Outcome _ latest) -> latest) <$> useOutcome k run
+useTask :: Eq k => Task k a -> k -> IO a -> NanoUI (Maybe a)
+useTask owner k run = (\(Outcome _ latest) -> latest) <$> useOutcome owner k run
 
 -- | The job's outcome as of this frame. A new key's job starts as running,
 -- carrying the replaced job's latest result.
-useOutcome :: (Eq k, Typeable k, Typeable a) => k -> IO a -> NanoUI (Outcome a)
-useOutcome k run = do
-  box <- useJob k taskRef $ \ctx old -> do
+useOutcome :: Eq k => Task k a -> k -> IO a -> NanoUI (Outcome a)
+useOutcome (Task owner) k run = do
+  box <- useJob owner k Just $ \ctx old -> do
     prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
     box <- newIORef (Outcome (TaskRunning prev) prev)
     let finish = (>> wakeFromThread ctx) . atomicWriteIORef box
     pure
-      ( TaskBox box
+      ( box
       , box
       , try (run >>= evaluate) >>= \case
           Right a -> finish (Outcome (TaskDone a) (Just a))
@@ -216,9 +236,10 @@ useOutcome k run = do
 -- wakes the loop. Each call returns the current state, starting from
 -- @initial@:
 --
--- > sensorView :: NanoUI ()
--- > sensorView = do
--- >   reading <- useStream () Nothing $ \update -> forever $ do
+-- Allocate @stream <- newStream@ during setup, then read it in the view:
+--
+-- > sensorView stream = do
+-- >   reading <- useStream stream () Nothing $ \update -> forever $ do
 -- >     r <- readSensor
 -- >     update (const (Just r))
 -- >   label (maybe "--" (T.pack . show) reading)
@@ -229,9 +250,9 @@ useOutcome k run = do
 -- hook kills it. A producer that returns leaves the state as it last set it.
 -- An uncaught exception ends the producer like any 'forkIO' thread; catch it
 -- inside to show it in the state.
-useStream :: (Eq k, Typeable k, Typeable s) => k -> s -> (((s -> s) -> IO ()) -> IO ()) -> NanoUI s
-useStream k initial produce = do
-  box <- useJob k Just $ \ctx _ -> do
+useStream :: Eq k => Stream k s -> k -> s -> (((s -> s) -> IO ()) -> IO ()) -> NanoUI s
+useStream (Stream owner) k initial produce = do
+  box <- useJob owner k Just $ \ctx _ -> do
     box <- newIORef initial
     pure (box, box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
   liftIO (readIORef box)
@@ -250,9 +271,9 @@ askWake = wakeFromThread <$> askContext
 -- Two view passes in one frame count as one. When every hook ran, it touches
 -- no entry.
 sweepHeld :: Context -> IO ()
-sweepHeld ctx = askHostIO ctx >>= mapM_ sweep
+sweepHeld ctx = sweep (ctxHeld ctx)
   where
-    sweep (Held ref frameVar stampedVar countVar) = do
+    sweep (Held ref _ frameVar stampedVar countVar) = do
       frame <- readPrimVar frameVar
       stamped <- readPrimVar stampedVar
       count <- readPrimVar countVar
@@ -260,10 +281,10 @@ sweepHeld ctx = askHostIO ctx >>= mapM_ sweep
       writePrimVar stampedVar 0
       unless (stamped == count) $ do
         held <- readIORef ref
-        gone <- filterM (\(_, Holding _ _ _ seen) -> (/= frame) <$> readPrimVar seen) (IM.toAscList held)
+        gone <- filterM (\(_, Holding _ seen) -> (/= frame) <$> readPrimVar seen) (IM.toAscList held)
         writeIORef ref $! IM.withoutKeys held (IS.fromDistinctAscList (map fst gone))
         writePrimVar countVar (count - length gone)
-        mapM_ (letGo . snd) gone
+        mapM_ (holdingRelease . snd) gone
 
 -- | Kill every job on the context and release images held by
 -- 'NanoUI.useImageRgba', at session end. 'NanoUI.Runner.runSessionLoop' calls
@@ -275,13 +296,13 @@ sweepHeld ctx = askHostIO ctx >>= mapM_ sweep
 cancelTasks :: Context -> IO ()
 cancelTasks ctx = do
   writeIORef (ctxWakeLoop ctx) Nothing
-  askHostIO ctx >>= mapM_ cancelAll
+  cancelAll (ctxHeld ctx)
   where
-    cancelAll (Held ref _ stampedVar countVar) = do
+    cancelAll (Held ref _ _ stampedVar countVar) = do
       held <- readIORef ref
       writeIORef ref IM.empty
       writePrimVar stampedVar 0
       writePrimVar countVar 0
       -- Every kill is sent before the wait, so the jobs unwind together.
-      waits <- mapM letGo held
+      waits <- mapM holdingRelease held
       void (timeout 1000000 (sequence_ waits))

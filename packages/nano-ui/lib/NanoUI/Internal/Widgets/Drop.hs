@@ -13,6 +13,8 @@ module NanoUI.Internal.Widgets.Drop
   , dropZone
   , Drag (..)
   , DragPhase (..)
+  , DragHandle
+  , newDrag
   , useDrag
   , insertionIndex
   ) where
@@ -21,11 +23,11 @@ import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.List (find)
 import Data.Text (Text)
-import Data.Typeable (Typeable)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO)
-import NanoUI.Internal.Store (deleteSlot, fieldDyn, fieldPoint, flagSlot, insertDyn, insertSlot, lookupDyn, lookupSlot, setFlagSlot)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO)
+import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -51,17 +53,23 @@ data Drag a = Drag
 data DragState a = DragState !a !V2 !Bool
   deriving (Eq)
 
--- | Track a drag across uniquely keyed responses. Call under a stable key
+-- | Component-owned gesture state, allocated once before rendering. Use on
+-- the UI thread in one session; each independent gesture needs its own handle.
+newtype DragHandle a = DragHandle (IORef (Maybe (DragState a)))
+
+newDrag :: IO (DragHandle a)
+newDrag = DragHandle <$> newIORef Nothing
+
+-- | Track a drag across uniquely keyed responses. Call with the same handle
 -- every frame, including for an empty collection. Only owned presses start;
 -- payload identity survives reordering. Below the threshold, returns Nothing.
 -- Escape, lost hold or source removal cancels; only DragReleased may commit.
-useDrag :: forall a. (Eq a, Typeable a) => [(a, Response)] -> NanoUI (Maybe (Drag a))
-useDrag sources = do
-  (wid, ctx) <- freshWidget
+useDrag :: Eq a => DragHandle a -> [(a, Response)] -> NanoUI (Maybe (Drag a))
+useDrag (DragHandle ref) sources = do
+  ctx <- askContext
   inp <- askInput
-  let key = intKey wid
-      pos@(V2 x y) = inputMousePos inp
-  old <- lookupDyn key <$> liftIO (getStore ctx)
+  let pos@(V2 x y) = inputMousePos inp
+  old <- liftIO (readIORef ref)
   let armed = if pressedIn MouseLeft inp
         then (\(a, _) -> DragState a pos False) <$> find (respPressed . snd) sources
         else old
@@ -80,8 +88,10 @@ useDrag sources = do
             retained = if cancelled || released then Nothing else Just (DragState a origin moved)
          in (retained, emitted)
       (next, result) = maybe (Nothing, Nothing) step armed
-  when (next /= old) $
-    liftIO (modifyStore ctx (maybe (deleteSlot fieldDyn key) (insertDyn key) next))
+  when (next /= old) $ liftIO $ do
+    writeIORef ref next
+    damageFull ctx
+    markDirtyCovered ctx
   pure result
 
 -- | Insertion slot in an ordered row or column, bounded by its visible

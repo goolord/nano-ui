@@ -11,6 +11,7 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray,
 import qualified Data.IntSet as IS
 import NanoUI.Internal.Context (Context (..), adoptSlot, getPrevRect, getStore, intKey, registerFocusable, writeSlots)
 import NanoUI.Internal.Font (treeChevronRect)
+import NanoUI.Internal.Derived (TreeItem (..), TreeRow, TreeRows (..), treeCache)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -23,13 +24,6 @@ import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (columnWith)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
-
--- | Label and child items for a tree row. An empty child list makes a leaf.
-data TreeItem = TreeItem {treeItemLabel :: !Text, treeItemChildren :: ![TreeItem]}
-  deriving (Eq, Show)
-
--- | A visible row: pre-order node index, depth, whether it has children, label.
-type TreeRow = (Int, Int, Bool, Text)
 
 -- | Nodes in a subtree, its root included.
 subtreeSize :: TreeItem -> Int
@@ -52,10 +46,6 @@ visibleRows expanded items = smallArrayFromList (go 0 0 items (const []))
               then go (idx + 1) (depth + 1) kids (\next -> go next depth rest k)
               else go (idx + subtreeSize item) depth rest k
 
--- | The item count and visible rows derived from an item container and
--- expansion set.
-data TreeRows = forall f. TreeRows !(f TreeItem) !IS.IntSet !Int !(SmallArray TreeRow)
-
 -- | The item count and visible rows, from the cache while the items are the
 -- same container and the expansion set is equal. The caller's container is
 -- compared, not a list made from it, so a vector or sequence hits too. The
@@ -63,7 +53,7 @@ data TreeRows = forall f. TreeRows !(f TreeItem) !IS.IntSet !Int !(SmallArray Tr
 -- a thunk until forced.
 cachedRows :: Foldable f => Context -> Int -> f TreeItem -> IS.IntSet -> IO (Int, SmallArray TreeRow)
 cachedRows ctx key !items !expanded = do
-  cached <- readDerived ctx key
+  cached <- readDerived treeCache ctx key
   case cached of
     Just (TreeRows items' expanded' total rows)
       | ptrEq items' items && expanded' == expanded -> pure (total, rows)
@@ -71,7 +61,7 @@ cachedRows ctx key !items !expanded = do
       let list = toList items
           !total = forestSize list
           !rows = visibleRows (`IS.member` expanded) list
-      (total, rows) <$ writeDerived ctx key (TreeRows items expanded total rows)
+      (total, rows) <$ writeDerived treeCache ctx key (TreeRows items expanded total rows)
 
 treeKeyNav ::
   KeyNav ->

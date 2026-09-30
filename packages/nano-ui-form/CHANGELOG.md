@@ -2,6 +2,11 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** runners and `resetForm` take a `FormState` allocated with
+  `newFormState`. `FormUI` has a typed lexical owner; field views capture it
+  during evaluation, preserving deferred/nested views without dynamic slots
+  or ambient prefix mutation.
+
 - No longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
 - `defaultErrorView`'s callout takes the theme's danger colour, which its

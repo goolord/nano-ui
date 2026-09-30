@@ -34,20 +34,11 @@ import Data.Char (isPrint, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.TextEditor.Types
 import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), chordModifiers, modJump, modMacCommand, modPrimary, noModifiers, onMac)
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
 import NanoUI.Widgets.TextBuffer qualified as TB
-
--- | How a field lets its document be changed.
-data EditorMode = EditorMode
-  { modeMultiLine :: !Bool
-  , modeEditable :: !Bool
-  -- ^ Off for selectable labels: only motion, selection and copy apply.
-  , modeCopyable :: !Bool
-  -- ^ Off for passwords: nothing reaches the clipboard.
-  }
-  deriving (Eq, Show)
 
 -- | Editable, copyable text without newline insertion.
 singleLineMode :: EditorMode
@@ -81,41 +72,6 @@ hasSelection ed = editorAnchor ed /= TB.getCursor (editorBuffer ed)
 --------------------------------------------------------------------------------
 -- History
 --------------------------------------------------------------------------------
-
--- | What started a group of edits, which decides what may join it.
-data EditKind = EditTyping | EditDeleting | EditOther
-  deriving (Eq, Show)
-
--- | An edit as history keeps it. Undo steps live for the life of a field and
--- are rarely replayed, so their texts are compact copies: they cost two
--- words less than a 'T.Text', and never keep alive the larger text a slice
--- was cut from.
-data StoredEdit = StoredEdit !Cursor !TS.ShortText !TS.ShortText
-  deriving (Eq, Show)
-
--- | Edits undone and redone as one step.
-data EditGroup = EditGroup
-  { groupKind :: !EditKind
-  , groupEdits :: ![StoredEdit]
-  -- ^ Newest first.
-  , groupBefore :: !(Cursor, Cursor)
-  -- ^ Anchor and cursor before the first edit.
-  , groupAfter :: !(Cursor, Cursor)
-  -- ^ Anchor and cursor after the last edit.
-  }
-  deriving (Eq, Show)
-
--- | Undo and redo groups, newest first, with grouping state for consecutive edits.
-data EditHistory = EditHistory
-  { historyUndo :: ![EditGroup]
-  , historyRedo :: ![EditGroup]
-  , historyDepth :: !Int
-  -- ^ Length of 'historyUndo'.
-  , historyOpen :: !Bool
-  -- ^ Whether the next edit may join the newest group. Undo, redo, cursor
-  -- moves and commands from outside the field close it.
-  }
-  deriving (Eq, Show)
 
 -- | No undo/redo steps and no open edit group.
 emptyHistory :: EditHistory

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking:** `markdown` and `markdownConfigured` take a `MarkdownCache`
+  allocated with `newMarkdownCache`. Inline caches have explicit ownership.
+  Reference definitions enter CommonMark through its typed insertion API;
+  this package no longer imports `Data.Dynamic`.
+
 ### Added
 
 - First release: `MarkdownDoc`, CommonMark with GitHub's tables, task lists

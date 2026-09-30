@@ -1,12 +1,15 @@
 -- | The ditto environment forms run in: field input values, form prefixes and
--- submitted state, kept in the widget store.
+-- submitted state, retained by an explicit typed owner.
 module NanoUI.Form.Internal.Backend
   ( FormInput (..)
   , formInputToText
   , FormUI (..)
+  , FormState
+  , newFormState
+  , FormScope (..)
+  , askFormScope
+  , runFormUI
   , liftNanoUI
-  , getActiveFormPrefix
-  , withFormPrefix
   , withFormWidgets
   , updateFieldInput
   , markFormSubmitted
@@ -17,11 +20,12 @@ module NanoUI.Form.Internal.Backend
   , emptyFormStateStore
   , getFormStore
   , setFormStore
-  , setActiveFormPrefix
   ) where
 
 import Control.Monad (when, (<$!>))
-import qualified Data.IntMap.Strict as IM
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader (ReaderT, ask, runReaderT)
+import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -29,7 +33,6 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TB
 import qualified Data.Text.Lazy.Builder.Int as TB
 import qualified Data.Text.Lazy.Builder.RealFloat as TB
-import Data.Hashable (hash)
 import Data.Maybe (fromMaybe)
 import qualified Ditto.Backend as Ditto
 import Ditto.Backend
@@ -40,9 +43,7 @@ import Ditto.Core (Environment (..))
 import Ditto.Types (Value (..), encodeFormId)
 import GHC.Generics (Generic)
 import NanoUI (NanoUI, liftIO, withKey)
-import NanoUI.Internal.Monad (askContext, withUiResource)
-import NanoUI.Internal.Context (Context, getStore, markDirty, modifyStore)
-import NanoUI.Internal.Store (fieldDyn, insertDyn, lookupDyn, lookupSlot, overField)
+import NanoUI.Internal.Context (Context, markDirty)
 
 -- | A form field's raw input value, before parsing.
 data FormInput
@@ -80,13 +81,29 @@ data StoredForm = StoredForm
   }
   deriving (Eq)
 
--- | Form execution monad wrapping 'NanoUI'.
-newtype FormUI a = FormUI { unFormUI :: NanoUI a }
+-- | Allocate once per component/session. Form prefixes distinguish the forms
+-- owned by this handle. The map is keyed by the full prefix, without hashing.
+newtype FormState = FormState (IORef (Map.Map Text StoredForm))
+
+newFormState :: IO FormState
+newFormState = FormState <$> newIORef Map.empty
+
+-- | Lexical ownership captured by field views during evaluation.
+data FormScope = FormScope !FormState !Text
+
+-- | Form evaluation reads its owner through a typed lexical environment.
+newtype FormUI a = FormUI { unFormUI :: ReaderT FormScope NanoUI a }
   deriving newtype (Functor, Applicative, Monad)
+
+askFormScope :: FormUI FormScope
+askFormScope = FormUI ask
+
+runFormUI :: FormState -> Text -> FormUI a -> NanoUI a
+runFormUI owner prefix (FormUI action) = runReaderT action (FormScope owner prefix)
 
 -- | Lift a 'NanoUI' action into 'FormUI'.
 liftNanoUI :: NanoUI a -> FormUI a
-liftNanoUI = FormUI
+liftNanoUI = FormUI . lift
 
 -- | Decode scalar values as text and preserve text lists for multi-value fields.
 instance Ditto.FormInput FormInput where
@@ -107,104 +124,69 @@ instance Ditto.FormInput FormInput where
 instance FormError FormInput Text where
   commonFormError = commonFormErrorText formInputToText
 
--- | Dynamic-store key for the form prefix active during evaluation or rendering.
-activePrefixSlot :: Int
-activePrefixSlot = -0x464F524D -- -'FORM'
-
--- | Hash a form prefix into a store key. This is a hash, not a collision-free encoding.
-formStoreKey :: Text -> Int
-formStoreKey prefix = hash ("nano-ui-form:" :: Text, prefix)
-
--- | Retrieve the active form prefix in the current context.
-getActiveFormPrefix :: Context -> IO Text
-getActiveFormPrefix ctx = do
-  ws <- getStore ctx
-  pure $! fromMaybe "" (lookupDyn activePrefixSlot ws)
-
--- | Set the active form prefix in the current context.
-setActiveFormPrefix :: Context -> Text -> IO ()
-setActiveFormPrefix ctx prefix = modifyStore ctx (insertDyn activePrefixSlot prefix)
-
--- | Evaluate or render a form under its own prefix, restoring the enclosing
--- prefix afterwards. Restore only this slot, so field updates survive the scope.
-withFormPrefix :: Text -> NanoUI a -> NanoUI a
-withFormPrefix prefix action = do
-  ctx <- askContext
-  let restorePrefix previous = modifyStore ctx (overField fieldDyn (IM.alter (const previous) activePrefixSlot))
-  withUiResource
-    (lookupSlot fieldDyn activePrefixSlot <$> getStore ctx)
-    restorePrefix
-    (liftIO (setActiveFormPrefix ctx prefix) >> action)
-
 -- | Stable widget identity for a form, renewed when its state is reset.
-withFormWidgets :: Text -> NanoUI a -> NanoUI a
-withFormWidgets prefix action = do
-  ctx <- askContext
-  stored <- liftIO (getStoredForm ctx prefix)
+withFormWidgets :: FormState -> Text -> NanoUI a -> NanoUI a
+withFormWidgets owner prefix action = do
+  stored <- liftIO (getStoredForm owner prefix)
   withKey (prefix, sfGeneration stored) action
 
-getStoredForm :: Context -> Text -> IO StoredForm
-getStoredForm ctx prefix = do
-  ws <- getStore ctx
-  -- Resolve the lookup here rather than returning a thunk over the whole store.
-  pure $! fromMaybe (StoredForm 0 emptyFormStateStore) (lookupDyn (formStoreKey prefix) ws)
+getStoredForm :: FormState -> Text -> IO StoredForm
+getStoredForm (FormState ref) prefix = do
+  forms <- readIORef ref
+  pure $! fromMaybe (StoredForm 0 emptyFormStateStore) (Map.lookup prefix forms)
 
-setStoredForm :: Context -> Text -> StoredForm -> IO ()
-setStoredForm ctx prefix !stored = modifyStore ctx (insertDyn (formStoreKey prefix) stored)
+setStoredForm :: FormState -> Text -> StoredForm -> IO ()
+setStoredForm (FormState ref) prefix !stored = modifyIORef' ref (Map.insert prefix stored)
 
 -- | Retrieve the 'FormStateStore' for a given form prefix.
-getFormStore :: Context -> Text -> IO FormStateStore
-getFormStore ctx prefix = sfState <$!> getStoredForm ctx prefix
+getFormStore :: FormState -> Text -> IO FormStateStore
+getFormStore owner prefix = sfState <$!> getStoredForm owner prefix
 
 -- | Persist the 'FormStateStore' for a given form prefix.
-setFormStore :: Context -> Text -> FormStateStore -> IO ()
-setFormStore ctx prefix fss = do
-  stored <- getStoredForm ctx prefix
-  setStoredForm ctx prefix stored {sfState = fss}
+setFormStore :: FormState -> Context -> Text -> FormStateStore -> IO ()
+setFormStore owner ctx prefix fss = modifyFormStore owner ctx prefix (const fss)
 
--- Form state lives in a Dynamic slot, which the core cannot compare. Keep
--- equality and redraw notification here rather than in each mutation.
-modifyFormStore :: Context -> Text -> (FormStateStore -> FormStateStore) -> IO ()
-modifyFormStore ctx prefix update =
-  modifyStoredForm ctx prefix (\stored -> stored {sfState = update (sfState stored)})
+-- Keep equality and redraw notification at the single mutation boundary.
+modifyFormStore :: FormState -> Context -> Text -> (FormStateStore -> FormStateStore) -> IO ()
+modifyFormStore owner ctx prefix update =
+  modifyStoredForm owner ctx prefix (\stored -> stored {sfState = update (sfState stored)})
 
-modifyStoredForm :: Context -> Text -> (StoredForm -> StoredForm) -> IO ()
-modifyStoredForm ctx prefix update = do
-  previous <- getStoredForm ctx prefix
+modifyStoredForm :: FormState -> Context -> Text -> (StoredForm -> StoredForm) -> IO ()
+modifyStoredForm owner ctx prefix update = do
+  previous <- getStoredForm owner prefix
   let next = update previous
   when (next /= previous) $ do
-    setStoredForm ctx prefix next
+    setStoredForm owner prefix next
     markDirty ctx
 
 -- | Update a specific field's input in the form store.
-updateFieldInput :: Context -> Text -> Text -> FormInput -> IO ()
-updateFieldInput ctx prefix fieldKey inputVal =
-  modifyFormStore ctx prefix $ \fss ->
+updateFieldInput :: FormState -> Context -> Text -> Text -> FormInput -> IO ()
+updateFieldInput owner ctx prefix fieldKey inputVal =
+  modifyFormStore owner ctx prefix $ \fss ->
     fss {fssInputs = Map.insert fieldKey inputVal (fssInputs fss)}
 
 -- | Mark a form as submitted.
-markFormSubmitted :: Context -> Text -> Bool -> IO ()
-markFormSubmitted ctx prefix isSubmitted =
-  modifyFormStore ctx prefix (\fss -> fss {fssSubmitted = isSubmitted})
+markFormSubmitted :: FormState -> Context -> Text -> Bool -> IO ()
+markFormSubmitted owner ctx prefix isSubmitted =
+  modifyFormStore owner ctx prefix (\fss -> fss {fssSubmitted = isSubmitted})
 
 -- | Check if a form has been submitted.
-isFormSubmitted :: Context -> Text -> IO Bool
-isFormSubmitted ctx prefix = fssSubmitted <$> getFormStore ctx prefix
+isFormSubmitted :: FormState -> Text -> IO Bool
+isFormSubmitted owner prefix = fssSubmitted <$> getFormStore owner prefix
 
 -- | Reset values and renew widget identity so cached control state cannot
 -- repopulate the form with its old values on the next frame.
-resetFormState :: Context -> Text -> IO ()
-resetFormState ctx prefix = modifyStoredForm ctx prefix $ \stored ->
+resetFormState :: FormState -> Context -> Text -> IO ()
+resetFormState owner ctx prefix = modifyStoredForm owner ctx prefix $ \stored ->
   if sfState stored == emptyFormStateStore
     then stored
     else StoredForm (sfGeneration stored + 1) emptyFormStateStore
 
--- | Environment instance for 'FormUI' connecting ditto to nano-ui's context store.
+-- | Ditto reads from the typed owner supplied by the form runner.
 instance Environment FormUI FormInput where
-  environment fid = FormUI $ do
-    ctx <- askContext
-    prefix <- liftIO (getActiveFormPrefix ctx)
-    fss <- liftIO (getFormStore ctx prefix)
+  environment fid = do
+    FormScope owner prefix <- askFormScope
+    fss <- liftNanoUI (liftIO (getFormStore owner prefix))
     let fieldKey = encodeFormId fid
     pure $ case Map.lookup fieldKey (fssInputs fss) of
       Just val -> Found val

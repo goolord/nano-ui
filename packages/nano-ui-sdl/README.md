@@ -19,6 +19,22 @@ main = runSdlApp defaultSdlOptions (label "Hello")
 with `NanoUI.Emit`. `SdlOptions` sets the window, fonts, font size, theme, and
 vsync.
 
+For SDL-specific operations, `runSdlAppWith` calls setup once with the typed
+session environment. Capture it in the returned view:
+
+```haskell
+runSdlAppWith defaultSdlOptions $ \env -> do
+  pending <- newState Nothing
+  pure $ do
+    (_, setPending) <- useState pending
+    whenM (button "Open") $
+      setPending =<< askOpenFileDialog env defaultFileDialogOptions
+```
+
+`askSdlDebug`, `setSdlUiFont`, `setSdlUiScale`, the dialog launch helpers, and
+the window-chrome helpers take this environment explicitly. Keep it within
+its session. `pollFileDialogUi` reads the typed dialog handle directly.
+
 ## Windows and screenshots
 
 `sdlWindowSettings` is the core's `WindowSettings`, which the RGFW backend

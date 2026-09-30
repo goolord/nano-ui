@@ -100,6 +100,7 @@ runDropCommitTest ctx failed = do
 -- that same frame. Previewing must never render an uncommitted pane id.
 runTabDropTest :: Context -> IORef Int -> IO ()
 runTabDropTest ctx failed = do
+  dragHandle <- newDrag
   headers <- newIORef []
   let inp = withInput 600 400
       ui = do
@@ -112,7 +113,7 @@ runTabDropTest ctx failed = do
               pure (PaneView "Editor" False)
           }
         sources <- liftIO (readIORef headers)
-        gesture <- useDrag sources
+        gesture <- useDrag dragHandle sources
         committed <- case (gesture, pgrDropTarget response) of
           (Just d, Just target) | dragPhase d == DragReleased -> commitPaneDrop target
           _ -> pure Nothing
@@ -346,10 +347,11 @@ runDividerColorTest ctx failed = do
 runResetTest :: Context -> IORef Int -> IO ()
 runResetTest ctx failed = do
   resetNow <- newIORef False
+  arrangementCell <- newState (Just halves)
   let
     inp = withInput 600 400
     ui = do
-      (arrangement, setArrangement) <- useState (Just halves)
+      (arrangement, setArrangement) <- useState arrangementCell
       resp <-
         paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = arrangement}
       setArrangement (pgrTree resp)

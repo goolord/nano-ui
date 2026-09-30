@@ -276,29 +276,32 @@ runSvgIconConfiguredTest ctx failed = do
 -- atlas space.
 runUseImageRgbaTest :: Context -> IORef Int -> IO ()
 runUseImageRgbaTest ctx failed = do
+  textImage <- newImageHandle
+  intImage <- newImageHandle
+  scopedImage <- newImageHandle
   let px v = BS.replicate (8 * 8 * 4) v
-      hook k = useImageRgba k 8 8 (px 90)
+      hook owner k = useImageRgba owner k 8 8 (px 90)
       frameOf :: NanoUI x -> IO x
       frameOf ui = (\(a, _, _, _) -> a) <$> runFrame ctx (withInput 100 100) ui
       originOf iid = fmap (\(u0, v0, _, _) -> (u0, v0)) <$> lookupImageUv ctx iid
-  Just a <- frameOf (hook ("a" :: T.Text))
-  frameOf (hook ("a" :: T.Text)) >>= assertEq failed (Just a)
+  Just a <- frameOf (hook textImage ("a" :: T.Text))
+  frameOf (hook textImage ("a" :: T.Text)) >>= assertEq failed (Just a)
   lookupImageSize ctx a >>= assertEq failed (Just (8, 8))
   aAt <- originOf a
   -- A new key: the old image is freed and the new one takes its space.
-  Just b <- frameOf (hook ("b" :: T.Text))
+  Just b <- frameOf (hook textImage ("b" :: T.Text))
   assert failed (b /= a)
   lookupImageSize ctx a >>= assertEq failed Nothing
   originOf b >>= assertEq failed aAt
   -- A frame without the hook frees its image; the next image reuses the space.
   frameOf (pure ())
   lookupImageSize ctx b >>= assertEq failed Nothing
-  Just c <- frameOf (hook (1 :: Int))
+  Just c <- frameOf (hook intImage (1 :: Int))
   originOf c >>= assertEq failed aAt
   assert failed (c /= a && c /= b)
   -- A hook in a scope keeps its image while the scope is shown and frees it
   -- when not; the preceding hook keeps its own.
-  let shown on = (,) <$> hook (1 :: Int) <*> scope (if on then hook ("s" :: T.Text) else pure Nothing)
+  let shown on = (,) <$> hook intImage (1 :: Int) <*> scope (if on then hook scopedImage ("s" :: T.Text) else pure Nothing)
   (c1, s) <- frameOf (shown True)
   assertEq failed (Just c) c1
   assertJust failed s $ \sid -> do

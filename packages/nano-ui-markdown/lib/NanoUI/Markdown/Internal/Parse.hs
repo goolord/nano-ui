@@ -27,9 +27,8 @@ import Commonmark.Extensions
   , strikethroughSpec
   , taskListSpec
   )
-import Commonmark.ReferenceMap (LinkInfo (..), ReferenceMap (..))
+import Commonmark.ReferenceMap (LinkInfo (..), ReferenceMap (..), emptyReferenceMap, insertReference)
 import Data.Char (isSpace)
-import Data.Dynamic (toDyn)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
@@ -111,7 +110,11 @@ defined :: Monad m => Refs -> BlockParser m Spans Blocks Blocks
 defined before = mempty <$ updateState add
   where
     add st = st {referenceMap = ReferenceMap (M.unionWith (++) refs (unReferenceMap (referenceMap st)))}
-    refs = M.map (\(url, title) -> [toDyn (LinkInfo url title [] Nothing)]) before
+    -- Let commonmark own its extension representation; our retained references
+    -- are the concrete Refs map, and enter through its typed insertion API.
+    refs = unReferenceMap $ M.foldlWithKey'
+      (\m label (url, title) -> insertReference label (LinkInfo url title [] Nothing) m)
+      emptyReferenceMap before
 
 -- | Split after the first @n@ lines, each ended by @\\n@, @\\r\\n@ or
 -- @\\r@.

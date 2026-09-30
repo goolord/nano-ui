@@ -44,7 +44,7 @@ import DemoData
   , sineCosineChart
   , weeklyBars
   )
-import SdlDemo (demoUi)
+import SdlDemo (newDemoUi)
 
 iterations :: Int
 iterations = 40
@@ -87,6 +87,8 @@ main = do
   -- The workloads repeat one scene: time their paint instead of reusing it.
   setDrawReuse ctx0 False
   withSdlBench ctx0 $ \ctx sdlEnv -> do
+    demoUi <- newDemoUi sdlEnv
+    plotCache <- newPlotCache
     (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
     (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputButtonsHeld = buttonsFromList [MouseLeft]}
     let drawDemo frameInp = void (sdlDrawFrame ctx' demoUi sdlEnv frameInp False)
@@ -143,12 +145,13 @@ main = do
           void (sdlDrawFrame ctx' demoUi sdlEnv inp {inputMousePos = V2 1130 (110 + fromIntegral (i `mod` 300))} False)
         putStrLn "--- 5b. IDLE CADENCE (debug gating) ---"
         cadRef <- newDebugSampler
+        cadPublished <- newIORef Nothing
         let cadence = do
               (active, due) <- debugCadence cadRef
               pure (show active, if due then 0 :: Int else if active then 250 else -1)
         (active0, wait0) <- cadence
         printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" active0 wait0
-        _ <- refreshDebugSnapshot cadRef pure
+        _ <- refreshDebugSnapshot cadRef cadPublished pure
         (active1, wait1) <- cadence
         printf "  stats window queried         : active=%-5s waitTimeout=%-3d (4 Hz HUD refresh sustained)\n" active1 wait1
         putStrLn ""
@@ -178,7 +181,7 @@ main = do
     printf "  -> Table DrawCmds: %d (Vertices: %d, Indices: %d)\n"
       (drawCmdCount ddTable) (drawVertexCount ddTable) (drawIndexCount ddTable)
     runFrames
-      [ ("Tab: Plots (4 Charts + Diagram)", tabPlotsUi)
+      [ ("Tab: Plots (4 Charts + Diagram)", tabPlotsUi plotCache)
       , ("Tab: Diagnostics", tabDiagnosticsUi)
       ]
     putStrLn ""
@@ -219,7 +222,7 @@ main = do
       [ ("Table: 50 rows x 5 cols", benchTable "bigTable" (tablePeople 50))
       , ("Table: 200 rows x 5 cols", benchTable "hugeTable" (tablePeople 200))
       , ("Tree: 50 items (unfolded)", benchLargeTree)
-      , ("Plot: Line chart (500 pts)", benchLargeChart)
+      , ("Plot: Line chart (500 pts)", benchLargeChart plotCache)
       , ("Table: 2000 rows x 5 cols", benchTable "giantTable" (tablePeople 2000))
       ]
     -- Rows built inside the frame, as a view that filters or maps them would.
@@ -355,11 +358,11 @@ tabTableUi = columnWith (tight . gap 8 . fillW) $ do
       demoPeople
       (SortCol 0 SortAsc)
 
-tabPlotsUi :: NanoUI ()
-tabPlotsUi = columnWith (tight . gap 8 . fillW) $ do
+tabPlotsUi :: PlotCache -> NanoUI ()
+tabPlotsUi cache = columnWith (tight . gap 8 . fillW) $ do
   heading "Plots"
-  void $ plot (fillW . fixedH 120) sineCosineChart
-  void $ barChart (fillW . fixedH 120) weeklyBars
+  void $ plot cache (fillW . fixedH 120) sineCosineChart
+  void $ barChart cache (fillW . fixedH 120) weeklyBars
 
 tabDiagnosticsUi :: NanoUI ()
 tabDiagnosticsUi = columnWith (tight . gap 4 . fillW) $ do
@@ -462,8 +465,8 @@ benchLargeTree =
   let treeNodes = [TreeItem (T.pack ("Branch " <> show i)) [TreeItem (T.pack ("Leaf " <> show i <> "." <> show j)) [] | j <- [1 .. 5 :: Int]] | i <- [1 .. 10 :: Int]]
    in void $ tree "bigTree" treeNodes 0
 
-benchLargeChart :: NanoUI ()
-benchLargeChart =
+benchLargeChart :: PlotCache -> NanoUI ()
+benchLargeChart cache =
   let pts = [(x, sin x * cos (x * 0.5)) | x <- [0.0, 0.02 .. 10.0 :: Double]]
       c = withGrid GridBoth $ chart [line "f(x)" pts]
-   in void $ plot (fillW . fixedH 200) c
+   in void $ plot cache (fillW . fixedH 200) c

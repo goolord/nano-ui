@@ -23,10 +23,11 @@ import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
-import Data.String (IsString (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
+import NanoUI.Internal.Host qualified as Host
+import NanoUI.Internal.RichText.Types
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
 import NanoUI.Internal.Font (FontMetrics (..), prepareFontMetrics, selectionSpans, textIndexAtX)
 import NanoUI.Internal.Font qualified as Font
@@ -44,17 +45,6 @@ import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor (Editor (..), EditorMode (..), editorSelection, emptyHistory, multiLineMode, runCommandIO)
 import System.IO.Unsafe (unsafeDupablePerformIO)
-
--- | A piece of a paragraph: text in one style, with an optional hyperlink
--- target and background colour. A string literal is unstyled text.
-data Inline = Inline !Text (Layout -> Layout) !(Maybe Text) !(Maybe Color)
-
-instance IsString Inline where
-  fromString = inlineText . T.pack
-
--- | Text in the paragraph's own style.
-inlineText :: Text -> Inline
-inlineText txt = Inline txt id Nothing Nothing
 
 -- | Text styled by font modifiers (@fontBold@, @fontSize 20@,
 -- @fontColor red . fontUnderline@), applied over the paragraph's layout.
@@ -115,76 +105,6 @@ richTextWithMode selectable f pieces = snd <$> richTextWithMode' selectable f pi
 richText' :: [Inline] -> NanoUI (Response, Maybe Text)
 richText' = richTextWith' id
 
--- A piece resolved to concrete font, colour and metrics.
-data Run = Run
-  { runFont :: !TextFont
-  , runColor :: !Color
-  , runLineHeight :: !Float
-  , runAscent :: !Float
-  , runTarget :: !(Maybe Text)
-  , runBackground :: !(Maybe Color)
-  }
-
-data TokenKind = Word | Space | Break | Glyph | GlyphSpace
-  deriving (Eq)
-
--- A word, a run of spaces or a line break, with its width in its piece's font.
-data Token = Token
-  { tokenText :: !Text
-  , tokenRun :: !Int
-  , tokenKind :: !TokenKind
-  , tokenWidth :: !Float
-  , tokenStart :: {-# UNPACK #-} !Int
-  , tokenMetrics :: !FontMetrics
-  }
-
--- A laid-out line: its top, height and baseline offset, and its tokens with
--- their x positions.
-data Line = Line
-  { lineStart :: {-# UNPACK #-} !Int
-  , lineTop :: !Float
-  , lineHeight :: !Float
-  , lineAscent :: !Float
-  , lineWidth :: !Float
-  , lineTokens :: ![(Float, Token)]
-  }
-
--- A paragraph's measured pieces, its lines at the width it last had and the
--- size it was last measured at, kept between frames while its pieces, fonts
--- and colours stay the same.
-data Paragraph = Paragraph
-  { paraKey :: !Int
-  , paraInputs :: !(IORef Inputs)
-  , paraRuns :: !(SmallArray Run)
-  , paraTokens :: ![Token]
-  , paraEmptyLine :: !(Float, Float)
-  , paraNatural :: (Float, Float)
-  , paraWidth :: !Float
-  , paraLines :: [Line]
-  , paraMeasured :: !(IORef Measured)
-  , paraSelection :: !(Maybe (IORef RichSelection))
-  }
-
--- What a paragraph's key was last worked out from: the pieces, the
--- paragraph's layout, the theme and the font metric generation. Pieces that
--- are the same list as last frame's under an equal layout and theme resolve
--- to the same fonts and colours, so the key is reused without hashing their
--- text.
-data Inputs = Inputs [Inline] !Layout !Theme !Int !Bool
-
-data RichSelection = RichSelection !Text !TB.Cursor !TB.Cursor !Bool !Bool
-  deriving (Eq)
-
--- The width a paragraph was last measured at and its extent there
--- ('measureAt').
-data Measured = Unmeasured | Measured !Float !Float !Float
-
--- Recently laid-out paragraphs by widget key, with their count and the
--- count that triggers dropping stale ones.
-data ParagraphCache = ParagraphCache !Int !Int !(IM.IntMap Paragraph)
-
-newtype Paragraphs = Paragraphs (IORef ParagraphCache)
-
 -- | 'richTextWith' returning the paragraph response and optional clicked link target.
 richTextWith' :: (Layout -> Layout) -> [Inline] -> NanoUI (Response, Maybe Text)
 richTextWith' = richTextWithMode' False
@@ -198,7 +118,7 @@ richTextWithMode' selectable f pieces = do
   let styled = [(piece, pieceFont l, pieceColor theme l target) | piece@(Inline _ style target _) <- pieces, let l = style base]
       plain = T.concat [txt | (Inline txt _ _ _, _, _) <- styled]
       align = layoutAlignX base
-  Paragraphs cacheRef <- liftIO $ hostOrInit ctx (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
+  Paragraphs cacheRef <- liftIO $ Host.hostOrInit (ctxParagraphs ctx) (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- liftIO (readIORef (ctxMetricGen ctx))
   let reused = \para -> do
         Inputs pieces0 base0 theme0 gen0 selectable0 <- readIORef (paraInputs para)

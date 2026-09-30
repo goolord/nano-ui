@@ -12,6 +12,8 @@ module NanoUI.Internal.Widgets.Image
   , imageConfigured
   , imageConfigured'
   , useImageRgba
+  , ImageHandle
+  , newImageHandle
   )
 where
 
@@ -19,7 +21,6 @@ import Control.Monad (void)
 import Data.ByteString (ByteString)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text qualified as T
-import Data.Typeable (Typeable)
 import NanoUI.Internal.Atlas qualified as Atlas
 import NanoUI.Internal.Context (Context (..), lookupImageSize, registerImage, releaseImage)
 import NanoUI.Internal.Id (WidgetId)
@@ -28,6 +29,7 @@ import NanoUI.Internal.Layout.Arena (ImageNode (..), NodeType (NodeImage), setIm
 import NanoUI.Internal.Monad (NanoUI, freshWidget, liftIO)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), aspect, defaultLayout)
 import NanoUI.Internal.Tasks (useHeld)
+import NanoUI.Internal.Resource (Resource, newResource)
 import NanoUI.Internal.Types (ImageId (..), colorRGBA)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetNode)
 
@@ -74,11 +76,20 @@ imageConfigured' cfg iid = do
             | otherwise = lay0
       imageNode wid (Just $! ImageNode look w h) lay iid
 
+-- | Typed ownership of one image registration, allocated during setup.
+newtype ImageHandle k = ImageHandle (Resource k (Maybe ImageId))
+  deriving newtype (Eq)
+
+newImageHandle :: IO (ImageHandle k)
+newImageHandle = ImageHandle <$> newResource
+
 -- | Register an RGBA image (4 bytes per pixel, rows top to bottom), @w@ by
 -- @h@ pixels, on the first frame this is called with a key, and return its
 -- id on every frame while the key stays the same:
 --
--- > thumb <- useImageRgba path w h pixels
+-- Allocate @owner <- newImageHandle@ during setup.
+--
+-- > thumb <- useImageRgba owner path w h pixels
 -- > mapM_ (image (fixedWH 96 96)) thumb
 --
 -- The image lives as long as the view keeps calling the hook, like a
@@ -86,11 +97,10 @@ imageConfigured' cfg iid = do
 -- old one; a frame that skips the call releases the image and frees its
 -- atlas space. Ids are never reused, so a stale id draws the placeholder
 -- 'NanoUI.image' shows for an unknown id. Returns 'Nothing' if the size or
--- pixels are invalid or the atlas is full, until the key changes. Like any
--- hook it takes the next widget id: call it on every frame that shows the
--- image, or inside 'NanoUI.scope' if only some frames call it.
-useImageRgba :: (Eq k, Typeable k) => k -> Int -> Int -> ByteString -> NanoUI (Maybe ImageId)
-useImageRgba k w h pixels = useHeld k $ \ctx _ -> do
+-- pixels are invalid or the atlas is full, until the key changes. It consumes
+-- no widget id. Call with the same handle on every frame that shows the image.
+useImageRgba :: Eq k => ImageHandle k -> k -> Int -> Int -> ByteString -> NanoUI (Maybe ImageId)
+useImageRgba (ImageHandle owner) k w h pixels = useHeld owner k $ \ctx _ -> do
   iid <- Atlas.freshImageId (ctxImageAtlas ctx)
   ok <- registerImage ctx iid w h pixels
   pure (if ok then (Just iid, releaseImage ctx iid) else (Nothing, pure ()))

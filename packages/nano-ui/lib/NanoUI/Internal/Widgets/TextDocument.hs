@@ -22,7 +22,7 @@ import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
-import NanoUI.Internal.Store (eqByPtr, ptrEq)
+import NanoUI.Internal.Equality (eqByPtr, ptrEq)
 import NanoUI.Widgets.TextBuffer qualified as TB
 
 -- | A text as its lines, without their newlines. There is always at least

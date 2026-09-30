@@ -36,6 +36,7 @@ import NanoUI
   )
 import NanoUI.Form
   ( Form
+  , FormState
   , FormView (..)
   , inRange
   , inputCheckbox
@@ -106,10 +107,10 @@ formatRegistration r =
     <> ", Color: " <> colorToHex (regThemeColor r)
     <> ", Subscribed: " <> (if regSubscribe r then "Yes" else "No")
 
-formDemoUi :: NanoUI ()
-formDemoUi = do
+formDemoUi :: FormState -> NanoUI ()
+formDemoUi owner = do
   (submittedMsg, setSubmitted) <- useText ""
-  (view', res) <- runNanoForm "user_reg" registrationForm
+  (view', res) <- runNanoForm owner "user_reg" registrationForm
   let mReg = case res of
         Ditto.Ok (Ditto.Proved _ a) -> Just a
         Ditto.Error _               -> Nothing
@@ -141,7 +142,7 @@ formDemoUi = do
                   Just reg -> setSubmitted ("Successfully registered: " <> formatRegistration reg)
                   Nothing  -> setSubmitted "Submission failed: Please fix the highlighted validation errors."
               when btnReset $ do
-                resetForm "user_reg"
+                resetForm owner "user_reg"
                 setSubmitted "Form has been reset to defaults."
 
         columnWith (tight . gap 12 . minW 340 . maxW 380) $ do

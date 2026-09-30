@@ -64,10 +64,36 @@ nameField = do
   setName =<< textInput name
 ```
 
-Hooks use their initial argument only while their slot has no value.
+Primitive hooks use their initial argument only while their slot has no value.
 Changing `useText ""` to a different initial value at the same widget id is
-not a reset. Use the setter to change state. `useState` supports other types
-with `Eq` and `Typeable`; keep its type stable at each hook position.
+not a reset. Use the setter to change state.
+
+For arbitrary types, allocate a typed `StateCell a` once during component
+setup, then read it with `useState` in the per-frame view. Only `Eq a` is
+required; there is no runtime type lookup:
+
+```haskell
+newEditor :: IO (NanoUI ())
+newEditor = do
+  document <- newState emptyDocument
+  pure $ do
+    (doc, setDoc) <- useState document
+    setDoc =<< textAreaDocument doc
+```
+
+Pass the resulting view to a runner, or compose it with other constructed
+views. Construct twice for independent state. A retained cell keeps its value
+while its view is hidden; dropping it allows collection. Allocate dynamic
+children when inserting them into a typed map keyed by their application id,
+and remove their handles when their state should be discarded.
+
+`modifyState cell transition` applies a pure function to the latest value,
+so successive updates compose even within a frame. Both it and the setter
+skip equal writes and integrate with redraw scheduling. Cells are UI-thread,
+single-session state; use the background-work API for worker communication.
+Allocation belongs outside the view: `liftIO (newState initial)` inside a view
+would reset it on every pass. `useState` consumes no widget id: its state is
+identified by the cell itself.
 
 A primed widget exposes a `Response`. Inputs return `(Response, value)`;
 buttons and labels return the response itself. `respChanged` reports an
@@ -79,7 +105,7 @@ Store its text on every frame; use the change flag to trigger a search.
 
 ## Stable identity
 
-Widgets and hooks share an id sequence within a container. Their call order
+Widgets and primitive hooks share an id sequence within a container. Their call order
 must remain stable between frames. Conditional content needs a scope:
 
 ```haskell
@@ -173,9 +199,9 @@ past loads nothing. `visRect` is the part on screen and `visBounds` the
 whole widget. Here `load` registers an image and returns its id:
 
 ```haskell
-lazyImage :: NanoUI ImageId -> NanoUI ()
-lazyImage load = do
-  (picture, setPicture) <- useState Nothing
+lazyImage :: StateCell (Maybe ImageId) -> NanoUI ImageId -> NanoUI ()
+lazyImage pictureCell load = do
+  (picture, setPicture) <- useState pictureCell
   let config = defaultSensorConfig {sensorAnticipate = 200, sensorLayout = fixedWH 96 96}
   (vis, _) <- sensorConfigured config $
     maybe (label "Loading") (image (fixedWH 96 96)) picture
@@ -347,10 +373,10 @@ debounce, or delayed update; request it again on each frame that still needs
 the deadline. Repeatedly marking the context dirty creates an unpaced loop.
 
 Work that should not hold up a frame, such as reading a file, runs in a hook
-on a thread of its own:
+on a thread of its own. Allocate `task <- newTask` once during setup:
 
 ```haskell
-status <- useTaskStatus path (T.readFile path)
+status <- useTaskStatus task path (T.readFile path)
 case status of
   TaskRunning _ -> label "Loading..."
   TaskDone contents -> label contents
@@ -364,19 +390,18 @@ loop. A new key kills the job and starts another; until the new one finishes,
 both hooks still hand back the last key's result (`TaskRunning (Just old)`),
 so a list of search results does not flicker empty as the query changes. To
 run the same work again, such as a Retry button, put a count in the key:
-`useTaskStatus (path, attempt)`. The old job is killed by an asynchronous
+`useTaskStatus task (path, attempt)`. The old job is killed by an asynchronous
 exception from another thread, so it can run on for a moment beside the new
 one: give a job that writes files or holds a resource a `bracket`. Synchronous
 exceptions from the action are caught as `TaskFailed`. Results are forced only
 to weak head normal form on the job's thread. Build with `-threaded`.
 
 The first frame that does not call the hook kills the job, so call it outside
-a tab or branch that should not end it. A hook that runs on some frames and
-not others goes inside `scope`, which takes one id either way, so the hooks
-after it keep theirs:
+a tab or branch that should not end it. Task handles consume no widget id,
+so a conditional task call does not shift later widgets:
 
 ```haskell
-scope (when previewOpen (void (useTask path (renderPreview path))))
+when previewOpen (void (useTask task path (renderPreview path)))
 ```
 
 `useStream` runs a producer that updates a state the view reads: a stream of
@@ -384,12 +409,12 @@ readings, a download's progress, a reply arriving a token at a time. The
 producer gets an `update` function, which applies a change to the hook's
 state atomically and wakes the loop; updates that come faster than frames
 cost one frame between them. The state starts from the value given, again
-for each new key, and the producer lives as long as the view calls the hook:
+for each new key, and the producer lives as long as the view calls the hook.
+Allocate `stream <- newStream` during setup:
 
 ```haskell
-sensorView :: NanoUI ()
-sensorView = do
-  reading <- useStream () Nothing $ \update -> forever $ do
+sensorView stream = do
+  reading <- useStream stream () Nothing $ \update -> forever $ do
     r <- readSensor
     update (const (Just r))
   label (maybe "--" (T.pack . show) reading)
@@ -459,7 +484,8 @@ their backend session.
 
 ## Images
 
-`useImageRgba key w h pixels` registers an image's RGBA pixels the first
+Allocate `owner <- newImageHandle` during setup.
+`useImageRgba owner key w h pixels` registers an image's RGBA pixels the first
 frame it is called with a key and hands back its id while the view keeps
 calling it; once the view stops, the image is let go and its room in the
 image atlas goes to the next image. For an image the app keeps for its whole
@@ -479,9 +505,9 @@ the turn, the tint and the opacity; `drawImage` and `drawImageUV` are its
 short forms.
 
 ```haskell
-thumbnail :: FilePath -> Int -> Int -> ByteString -> NanoUI ()
-thumbnail path w h pixels = do
-  photo <- useImageRgba path w h pixels
+thumbnail :: ImageHandle FilePath -> FilePath -> Int -> Int -> ByteString -> NanoUI ()
+thumbnail owner path w h pixels = do
+  photo <- useImageRgba owner path w h pixels
   for_ photo $
     imageConfigured defaultImageConfig {icLayout = fixedWH 120 90, icFit = FitCover}
 ```
@@ -554,14 +580,15 @@ screen, or `Nothing` outside a window: the frame's `RgbaPixels` and how many
 of them a layout unit is. Ask from an event, and keep the action short or
 fork it, since the next frame waits for it. `askScreenshot` gives a
 background job an action that waits for the next frame's screenshot, so a
-job can take and save one and say how that went:
+job can take and save one and say how that went. Allocate `task <- newTask`
+during setup:
 
 ```haskell
 shoot <- askScreenshot
-saved <- useTaskStatus shots (shoot >>= traverse_ (savePng "shot.png"))
+saved <- useTaskStatus task shots (shoot >>= traverse_ (savePng "shot.png"))
 ```
 
-`useScreenshot key` returns a screenshot for each key, for a view that shows
+`useScreenshot task key` returns a screenshot for each key, for a view that shows
 it. Make `RgbaPixels` for an icon with `rgbaPixels`, which checks that the
 bytes are four a pixel.
 

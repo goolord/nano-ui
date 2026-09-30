@@ -25,6 +25,11 @@ it is centred. RGFW windows are opaque and do not fade: `wsTransparent`,
 `wsOpacity` and `setWindowOpacityUi` do nothing here. The SDL backend has
 transparent and faded windows.
 
+`runRgfwAppWith` constructs a view once with a typed debug sampler; pass it
+to `askRgfwDebug` and `debugWindowBody`. For a reducer with model-derived theme
+and scale, `runRgfwAppReduceCustomWith` supplies the same setup phase. Debug
+data is owned by the session rather than discovered through a dynamic store.
+
 The theme is any core `Theme`. The backend draws it with square corners and 1px
 borders (`applyRgfwTheme`), since geometry is drawn as flat quads. The font is
 drawn from its 7x13 bitmap at 1x, from EPX-scaled bitmaps at 2x and 4x, and

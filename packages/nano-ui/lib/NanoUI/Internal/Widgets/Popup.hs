@@ -32,7 +32,7 @@ import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
 import NanoUI.Internal.Store (deleteSlot, fieldQuiet, findSlot, insertSlot)
 import NanoUI.Internal.Style
-import NanoUI.Internal.Tasks (useHeld)
+import NanoUI.Internal.Tasks (holdAction)
 import NanoUI.Internal.Types
 import NanoUI.Internal.Widgets.Behavior (useDismissable)
 import NanoUI.Internal.Widgets.Layout (label)
@@ -196,11 +196,11 @@ tooltipWidgetConfigured cfg target child = do
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
   result <- snd <$> popup open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) child
   -- A tooltip the view stops declaring while it waits or shows forgets its
-  -- time: the frame that skips it lets go of this hook ('useHeld'). Coming
+  -- time: the frame that skips it runs its cleanup ('holdAction'). Coming
   -- back, it waits out its delay again rather than opening at once or
   -- ending other tooltips' delays. The hook takes one id either way.
   if armed
-    then scope (useHeld () (\_ _ -> pure ((), modifyStore ctx (deleteSlot fieldQuiet (slotKey SlotTooltipShow (intKey wid))))))
+    then scope (holdAction (modifyStore ctx (deleteSlot fieldQuiet (slotKey SlotTooltipShow (intKey wid)))))
     else burstNextIds 1
   pure result
 

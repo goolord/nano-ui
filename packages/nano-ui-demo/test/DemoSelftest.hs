@@ -36,13 +36,14 @@ import NanoUI.Testing.Harness qualified as Harness
 import Text.Printf (printf)
 import qualified Data.Text as T
 import DemoApp (withHiddenWindow)
-import SdlDemo (demoUi)
+import SdlDemo (newDemoUi)
 
 -- | Draw 'demoUi' on a hidden SDL window and drive it through the main
 -- widget interactions, failing loudly on any regression.
 selftest :: Bool -> IO ()
 selftest continuous = do
   withHiddenWindow 1280 800 (V2 640 400) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env idle -> do
+    demoUi <- newDemoUi env
     -- The shaped path (fmShape / pushText) must match SDL3_ttf's run widths,
     -- including GPOS kerning and ligatures (To, AV, fi).
     let checkRun :: Float -> FontStyle -> String -> IO ()
@@ -247,7 +248,7 @@ selftest continuous = do
     -- backend refresh rather than freezing the first snapshot in the cache.
     sampledDraws <- newIORef 0
     let observeDebug = do
-          snapshot <- askSdlDebug
+          snapshot <- askSdlDebug env
           liftIO $ writeIORef sampledDraws (dbgPresents (dbgCore snapshot))
           demoUi
     drawWith observeDebug base

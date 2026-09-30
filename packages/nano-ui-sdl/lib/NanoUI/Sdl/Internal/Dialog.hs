@@ -43,7 +43,7 @@ import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..))
 import NanoUI.Monad (NanoUI)
-import NanoUI.Testing (askHost, markDirty, liftIO)
+import NanoUI.Testing (markDirty, liftIO)
 import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Dialog
@@ -146,23 +146,23 @@ cancelFileDialog :: SdlEnv -> FileDialogId -> IO ()
 cancelFileDialog _ (FileDialogId ref) = atomicWriteIORef ref FileDialogUnknown
 
 -- | Open-file dialog, usable from within 'NanoUI' widget code. Returns
--- 'Nothing' when there is no SDL host to launch a dialog.
-askOpenFileDialog :: FileDialogOptions -> NanoUI (Maybe FileDialogId)
-askOpenFileDialog opts = askHost >>= traverse (liftIO . (`openFileDialog` opts))
+-- a handle owned by the supplied SDL session.
+askOpenFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI (Maybe FileDialogId)
+askOpenFileDialog env opts = Just <$> liftIO (openFileDialog env opts)
 
 -- | Save-file dialog, usable from within 'NanoUI' widget code. Returns
--- 'Nothing' when there is no SDL host to launch a dialog.
-askSaveFileDialog :: FileDialogOptions -> NanoUI (Maybe FileDialogId)
-askSaveFileDialog opts = askHost >>= traverse (liftIO . (`saveFileDialog` opts))
+-- a handle owned by the supplied SDL session.
+askSaveFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI (Maybe FileDialogId)
+askSaveFileDialog env opts = Just <$> liftIO (saveFileDialog env opts)
 
 -- | Folder dialog, usable from within 'NanoUI' widget code. Returns
--- 'Nothing' when there is no SDL host to launch a dialog.
-askOpenFolderDialog :: FileDialogOptions -> NanoUI (Maybe FileDialogId)
-askOpenFolderDialog opts = askHost >>= traverse (liftIO . (`openFolderDialog` opts))
+-- a handle owned by the supplied SDL session.
+askOpenFolderDialog :: SdlEnv -> FileDialogOptions -> NanoUI (Maybe FileDialogId)
+askOpenFolderDialog env opts = Just <$> liftIO (openFolderDialog env opts)
 
 -- | Poll a dialog from within 'NanoUI' widget code.
 pollFileDialogUi :: FileDialogId -> NanoUI FileDialogResult
-pollFileDialogUi did = askHost >>= maybe (pure FileDialogUnknown) (liftIO . (`pollFileDialog` did))
+pollFileDialogUi (FileDialogId ref) = liftIO (readIORef ref)
 
 data DialogKind = OpenDialog | SaveDialog | FolderDialog
   deriving (Eq)

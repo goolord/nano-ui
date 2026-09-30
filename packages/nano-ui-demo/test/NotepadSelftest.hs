@@ -21,11 +21,12 @@ import NanoUI.Testing.Harness
   , requireSpan
   )
 import DemoApp (withHiddenWindow)
-import SdlNotepad (notepadUi)
+import SdlNotepad (newNotepadUi)
 
 selftest :: IO ()
 selftest = do
   withHiddenWindow 1000 720 (V2 500 400) id $ \ctx env base -> do
+      notepadUi <- newNotepadUi env
       let
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
         click = clickPos drawFrame base

@@ -31,11 +31,11 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Monad (askContext, withContext)
 import NanoUI.Monad (askInput)
 import NanoUI.Form.Internal.Backend
-  ( FormUI (..)
+  ( FormState
+  , runFormUI
   , isFormSubmitted
   , markFormSubmitted
   , resetFormState
-  , withFormPrefix
   , withFormWidgets
   )
 import NanoUI.Form.Types
@@ -49,28 +49,28 @@ import NanoUI.Form.Types
 
 -- | Evaluate a formlet and return its view and result. The view retains its
 -- prefix even when rendered after other forms or inside another form's view.
-runNanoForm :: Text -> Form err a -> NanoUI (Ditto.View err FormView, Ditto.Result err (Ditto.Proved a))
-runNanoForm prefix form = withNanoForm prefix form $ \view result -> do
-  let scopedView (FormView action) = FormView (withFormPrefix prefix action)
-  pure (scopedView <$> view, result)
+runNanoForm :: FormState -> Text -> Form err a -> NanoUI (Ditto.View err FormView, Ditto.Result err (Ditto.Proved a))
+runNanoForm owner prefix form = withNanoForm owner prefix form $ \view result ->
+  pure (view, result)
 
--- Immediate runners evaluate and render in one prefix scope. Only a deferred
--- view returned by runNanoForm needs to re-enter that scope when it is rendered.
+-- Field views capture their typed owner when the form is evaluated, so even
+-- deferred and nested views write to the right form without ambient state.
 withNanoForm ::
-  Text
+  FormState
+  -> Text
   -> Form err a
   -> (Ditto.View err FormView -> Ditto.Result err (Ditto.Proved a) -> NanoUI b)
   -> NanoUI b
-withNanoForm prefix form consume = withFormPrefix prefix $ do
-  (view, result) <- unFormUI (Ditto.runForm prefix form)
-  let keyedView (FormView action) = FormView (withFormWidgets prefix action)
+withNanoForm owner prefix form consume = do
+  (view, result) <- runFormUI owner prefix (Ditto.runForm prefix form)
+  let keyedView (FormView action) = FormView (withFormWidgets owner prefix action)
   consume (keyedView <$> view) result
 
 -- | Default form runner: renders the form every frame with live validation
 -- and yields @Just a@ whenever it is valid.
-nanoFormLive :: Text -> Form Text a -> NanoUI (Maybe a)
-nanoFormLive prefix form = do
-  status <- nanoFormEx defaultFormConfig prefix form
+nanoFormLive :: FormState -> Text -> Form Text a -> NanoUI (Maybe a)
+nanoFormLive owner prefix form = do
+  status <- nanoFormEx owner defaultFormConfig prefix form
   pure $ case status of
     FormValid a -> Just a
     FormInvalid _ -> Nothing
@@ -83,12 +83,12 @@ nanoFormLive prefix form = do
 -- forms as independent Enter targets.
 -- Validation errors are only displayed after the first submission attempt.
 -- Returns @Just a@ only on a valid submission.
-nanoFormSubmit :: Text -> Text -> Form Text a -> NanoUI (Maybe a)
-nanoFormSubmit prefix submitLabel form = do
+nanoFormSubmit :: FormState -> Text -> Text -> Form Text a -> NanoUI (Maybe a)
+nanoFormSubmit owner prefix submitLabel form = do
   ctx <- askContext
   inp <- askInput
-  submittedBefore <- liftIO (isFormSubmitted ctx prefix)
-  withNanoForm prefix form $ \view' res -> do
+  submittedBefore <- liftIO (isFormSubmitted owner prefix)
+  withNanoForm owner prefix form $ \view' res -> do
     btnClicked <- column $ do
       renderResult submittedBefore view' res
       button submitLabel
@@ -101,25 +101,25 @@ nanoFormSubmit prefix submitLabel form = do
         else pure False
     let clickedSubmit = btnClicked || enterPressed
     when clickedSubmit $
-      liftIO (markFormSubmitted ctx prefix True)
+      liftIO (markFormSubmitted owner ctx prefix True)
     pure $ case (clickedSubmit, res) of
       (True, Ditto.Ok (Ditto.Proved _ a)) -> Just a
       _                                  -> Nothing
 
 -- | Render with configured error visibility and an optional submit button.
 -- Returns current validity every frame, not a one-frame submission event.
-nanoFormEx :: FormConfig -> Text -> Form Text a -> NanoUI (FormStatus a)
-nanoFormEx cfg prefix form = do
+nanoFormEx :: FormState -> FormConfig -> Text -> Form Text a -> NanoUI (FormStatus a)
+nanoFormEx owner cfg prefix form = do
   ctx <- askContext
-  submittedBefore <- liftIO (isFormSubmitted ctx prefix)
-  withNanoForm prefix form $ \view' res -> do
+  submittedBefore <- liftIO (isFormSubmitted owner prefix)
+  withNanoForm owner prefix form $ \view' res -> do
     let showErrors = case fcMode cfg of
           FormLive     -> True
           FormOnSubmit -> submittedBefore
     column $ do
       renderResult showErrors view' res
       for_ (fcSubmitButton cfg) $ \lbl ->
-        whenM (button lbl) (liftIO (markFormSubmitted ctx prefix True))
+        whenM (button lbl) (liftIO (markFormSubmitted owner ctx prefix True))
     pure $ case res of
       Ditto.Ok (Ditto.Proved _ a) -> FormValid a
       Ditto.Error errs -> FormInvalid errs
@@ -134,5 +134,5 @@ renderResult showErrors view result =
 
 -- | Reset input values and the corresponding widget state for a form prefix.
 -- Re-evaluate the form on the next frame to render its defaults.
-resetForm :: Text -> NanoUI ()
-resetForm prefix = withContext (\ctx -> resetFormState ctx prefix)
+resetForm :: FormState -> Text -> NanoUI ()
+resetForm owner prefix = withContext (\ctx -> resetFormState owner ctx prefix)
