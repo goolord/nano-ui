@@ -2,6 +2,12 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** `FileDialogId` is opaque and session-owned. `pollFileDialogUi`
+  takes the session environment and consumes results once, restoring window
+  focus just like `pollFileDialog`. Use `peekFileDialogUi` for observation.
+  Dialog launch helpers return `FileDialogId`, not an always-`Just` value;
+  failures are reported through `FileDialogFailed` when polled.
+
 - Direct-backbuffer screenshots invoke callbacks after presentation, matching
   retained frames. Session teardown closes pending screenshot requests.
 
@@ -11,7 +17,7 @@
 - **Breaking:** SDL-specific debug, font/scale, dialog launch, and chrome
   helpers take `SdlEnv` explicitly. `runSdlAppWith` takes an
   `SdlEnv -> NanoUI ()` view; capture application state in its closure.
-  Dialog polling reads the dialog handle directly;
+  Dialog polling takes the same environment;
   the session no longer installs itself in a dynamic host registry.
 
 ### Added

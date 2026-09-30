@@ -23,13 +23,14 @@ import NanoUI.Testing (Context, newPixelContext)
 -- paths to the caller. Anything other than 'FileDialogPending' dismisses the
 -- handle, so each result is consumed exactly once.
 useFileDialog ::
+  SdlEnv ->
   Maybe FileDialogId ->
   (Maybe FileDialogId -> NanoUI ()) ->
   ([FilePath] -> NanoUI ()) ->
   NanoUI ()
-useFileDialog mdid clear onPaths =
+useFileDialog env mdid clear onPaths =
   for_ mdid $ \did ->
-    pollFileDialogUi did >>= \case
+    pollFileDialogUi env did >>= \case
       FileDialogPending -> pure ()
       FileDialogSelected paths -> onPaths paths >> clear Nothing
       _done -> clear Nothing

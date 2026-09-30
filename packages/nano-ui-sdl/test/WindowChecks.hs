@@ -17,6 +17,7 @@ import Foreign.Storable (peek)
 import NanoUI
 import NanoUI.Backend (emptyInput)
 import NanoUI.Emit (emit, liftNanoUI)
+import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -34,6 +35,7 @@ windowChecks drivers gpu = do
   mapM_ screenshotChecks [False, True]
   transparencyChecks gpu
   reducerEnvironmentCheck
+  dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
 -- | Small hidden window, bundled font, scale 1 (one layout unit per pixel).
@@ -87,6 +89,21 @@ reducerEnvironmentCheck = do
   seen <- readIORef observed
   check "environment-aware reducer sees both models and native title"
     (any ((== 0) . fst) seen && any ((== 1) . fst) seen && all ((== "nano-ui") . snd) seen)
+
+dialogStateChecks :: IO ()
+dialogStateChecks = do
+  result <- newIORef Dialog.FileDialogPending
+  Dialog.takeResult result >>= expect "pending poll is repeatable" Dialog.FileDialogPending
+  Dialog.takeResult result >>= expect "second pending poll" Dialog.FileDialogPending
+  Dialog.completeResult result (Dialog.FileDialogSelected ["chosen.txt"])
+  readIORef result >>= expect "peek does not consume" (Dialog.FileDialogSelected ["chosen.txt"])
+  Dialog.takeResult result >>= expect "completion delivered once" (Dialog.FileDialogSelected ["chosen.txt"])
+  Dialog.takeResult result >>= expect "completed handle consumed" Dialog.FileDialogUnknown
+  Dialog.completeResult result Dialog.FileDialogCancelled
+  Dialog.takeResult result >>= expect "late callback cannot revive consumed handle" Dialog.FileDialogUnknown
+  writeIORef result Dialog.FileDialogUnknown
+  Dialog.completeResult result (Dialog.FileDialogSelected ["abandoned.txt"])
+  Dialog.takeResult result >>= expect "abandoned callback discarded" Dialog.FileDialogUnknown
 
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()
 expect name want got = unless (want == got) (fail (name ++ ": wanted " ++ show want ++ ", got " ++ show got))

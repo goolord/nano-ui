@@ -43,12 +43,14 @@ newFilePicker = do
   pure $ \env -> do
     (_, setPending) <- useState pending
     whenM (button "Open") $
-      setPending =<< askOpenFileDialog env defaultFileDialogOptions
+      setPending . Just =<< askOpenFileDialog env defaultFileDialogOptions
 ```
 
 `askSdlDebug`, `setSdlUiFont`, `setSdlUiScale`, the dialog launch helpers, and
 the window-chrome helpers take this environment explicitly. Keep it within
-its session. `pollFileDialogUi` reads the typed dialog handle directly.
+its session. `pollFileDialogUi env handle` consumes a completed result once
+and restores window focus. `peekFileDialogUi handle` observes without consuming.
+Launch helpers return a handle directly; failures arrive as `FileDialogFailed`.
 
 ## Windows and screenshots
 

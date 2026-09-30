@@ -11,7 +11,7 @@ module NanoUI.Backend.Sdl
   , defaultSdlOptions
   , FileFilter (..)
   , FileDialogOptions (..)
-  , FileDialogId (..)
+  , FileDialogId
   , FileDialogResult (..)
   , defaultFileDialogOptions
   , openFileDialog
@@ -23,6 +23,7 @@ module NanoUI.Backend.Sdl
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
+  , peekFileDialogUi
     -- * External URLs
   , openUrl
     -- * The window

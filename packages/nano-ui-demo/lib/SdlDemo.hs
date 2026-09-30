@@ -321,9 +321,9 @@ demoUi env cells = do
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
   (folderPath, setFolderPath) <- useText ""
-  useFileDialog openDlg setOpenDlg (setOpenPath . T.intercalate ", " . map T.pack)
-  useFileDialog saveDlg setSaveDlg (setSavePath . maybe "" T.pack . listToMaybe)
-  useFileDialog folderDlg setFolderDlg (setFolderPath . maybe "" T.pack . listToMaybe)
+  useFileDialog env openDlg setOpenDlg (setOpenPath . T.intercalate ", " . map T.pack)
+  useFileDialog env saveDlg setSaveDlg (setSavePath . maybe "" T.pack . listToMaybe)
+  useFileDialog env folderDlg setFolderDlg (setFolderPath . maybe "" T.pack . listToMaybe)
   -- List tab.
   (searchText, setSearchText) <- useText "" -- live searchInput text
   (searchQuery, setSearchQuery) <- useText "" -- committed searchInput value
@@ -503,9 +503,9 @@ demoUi env cells = do
               heading "File Dialogs"
               rowWith (tight . gap gapInline . fillW) $ do
                 whenM (button "Open File…") $
-                  setOpenDlg =<< askOpenFileDialog env defaultFileDialogOptions {dialogAllowMany = True}
-                whenM (button "Save File…") (setSaveDlg =<< askSaveFileDialog env defaultFileDialogOptions)
-                whenM (button "Browse Folder…") (setFolderDlg =<< askOpenFolderDialog env defaultFileDialogOptions)
+                  setOpenDlg . Just =<< askOpenFileDialog env defaultFileDialogOptions {dialogAllowMany = True}
+                whenM (button "Save File…") (setSaveDlg . Just =<< askSaveFileDialog env defaultFileDialogOptions)
+                whenM (button "Browse Folder…") (setFolderDlg . Just =<< askOpenFolderDialog env defaultFileDialogOptions)
               separator
               -- Drag & drop: dropZone returns a target; dropReceived reports its
               -- files and texts. dropHovering mirrors the hover state for styling.

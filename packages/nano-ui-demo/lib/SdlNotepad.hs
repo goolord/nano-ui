@@ -80,7 +80,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
   (zoom, setZoom) <- useFloat 1.0
 
   ----------------------------------------------------------- file dialogs ---
-  useFileDialog openDlg setOpenDlg $ \chosenPaths ->
+  useFileDialog env openDlg setOpenDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       setOpenMenu ""
       setDocGen (docGen + 1)
@@ -94,7 +94,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
           setDocPath (T.pack filePath)
           setDocDirty False
           setStatusMsg ("Opened " <> T.pack filePath)
-  useFileDialog saveDlg setSaveDlg $ \chosenPaths ->
+  useFileDialog env saveDlg setSaveDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       setOpenMenu ""
       saved <- writeDocument filePath doc
@@ -116,7 +116,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
 
     saveDocument forceDialog =
       if forceDialog || T.null docPath
-        then setSaveDlg =<< askSaveFileDialog env defaultFileDialogOptions
+        then setSaveDlg . Just =<< askSaveFileDialog env defaultFileDialogOptions
         else do
           saved <- writeDocument (T.unpack docPath) doc
           if saved
@@ -135,7 +135,7 @@ notepadUi env (NotepadState docCell editorCell openCell saveCell) = do
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
     newCmd = ("New", ctrl <> key 'n', newDocument)
-    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg =<< askOpenFileDialog env defaultFileDialogOptions)
+    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg . Just =<< askOpenFileDialog env defaultFileDialogOptions)
     saveCmd = ("Save", ctrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
     -- Quit, or ask first when there are unsaved changes.

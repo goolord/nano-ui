@@ -15,7 +15,7 @@ module NanoUI.Sdl.Internal.Dialog
   ( FileFilter (..)
   , FileDialogOptions (..)
   , defaultFileDialogOptions
-  , FileDialogId (..)
+  , FileDialogId
   , FileDialogResult (..)
   , openFileDialog
   , saveFileDialog
@@ -26,11 +26,12 @@ module NanoUI.Sdl.Internal.Dialog
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
+  , peekFileDialogUi
   ) where
 
-import Control.Monad (forM, unless, void, (>=>))
+import Control.Monad (forM, unless, void, when, (>=>))
 import Data.Int (Int32)
-import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, newIORef, readIORef)
+import Data.IORef (IORef, atomicWriteIORef, newIORef, readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -41,9 +42,10 @@ import Foreign.Marshal.Utils (maybePeek)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
 import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr, freeStablePtr, newStablePtr)
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
+import NanoUI.Sdl.Internal.DialogState
 import NanoUI.Sdl.Internal.Window (SdlEnv (..))
 import NanoUI.Monad (NanoUI)
-import NanoUI.Testing (markDirty, liftIO)
+import NanoUI.Testing (Context, markDirty, liftIO)
 import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Dialog
@@ -79,27 +81,10 @@ data FileDialogOptions = FileDialogOptions
 defaultFileDialogOptions :: FileDialogOptions
 defaultFileDialogOptions = FileDialogOptions [] Nothing False
 
--- | Opaque handle returned by a non-blocking dialog launch: the cell the
--- dialog's result arrives in.
-newtype FileDialogId = FileDialogId (IORef FileDialogResult)
+-- | Opaque handle owned by the session that launched it. Passing it to a
+-- different session does not consume its result or touch either window.
+data FileDialogId = FileDialogId !(IORef Context) !(IORef FileDialogResult)
   deriving (Eq)
-
--- | Lifecycle state of a launched file dialog.
-data FileDialogResult
-  = FileDialogPending
-  -- ^ Still waiting for the user.
-  | FileDialogCancelled
-  -- ^ The user dismissed the dialog without choosing.
-  | FileDialogFailed
-  -- ^ SDL reported an error.
-  | FileDialogSelected [FilePath]
-  -- ^ The user chose one or more paths.
-  | FileDialogUnknown
-  -- ^ No dialog with this handle is being tracked. A handle becomes unknown
-  -- once its result has been delivered and consumed by 'pollFileDialog', or
-  -- after the dialog was abandoned via 'cancelFileDialog'. Never poll a
-  -- handle that returns 'FileDialogUnknown' again.
-  deriving (Eq, Show)
 
 -- | Launch an open-file dialog. Returns a handle to poll for completion.
 openFileDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
@@ -119,50 +104,55 @@ openFolderDialog env = launchDialog env FolderDialog
 -- first poll that observes the finished state returns it and forgets the
 -- handle, so later polls return 'FileDialogUnknown'.
 pollFileDialog :: SdlEnv -> FileDialogId -> IO FileDialogResult
-pollFileDialog env (FileDialogId ref) = do
-  -- Only the poll that takes a finished result out delivers it.
-  result <- atomicModifyIORef' ref $ \r -> (if r == FileDialogPending then r else FileDialogUnknown, r)
-  unless (result == FileDialogPending || result == FileDialogUnknown) $ do
-    -- The native dialog stole window focus; reclaim it so the app keeps
-    -- receiving hover/motion/wheel events without an extra click.
-    -- Restoration is a best-effort no-op when the window was never
-    -- minimized (its result is platform-dependent, so it is not a
-    -- reliable failure signal); only a failed raise means the window
-    -- may still lack focus and worth an audible warning.
-    void (restoreWindowSafe (sdlWindow env))
-    raised <- raiseWindowSafe (sdlWindow env)
-    unless raised $
-      hPutStrLn stderr "nano-ui: dialog completed but window raise failed; input may need a click"
-    -- The dialog finished; request a redraw so the caller can reflect
-    -- the result. Safe here: this runs on the polling (UI) thread.
-    markDirty =<< readIORef (sdlCachedCtx env)
-  pure result
+pollFileDialog env (FileDialogId owner ref)
+  | owner /= sdlCachedCtx env = pure FileDialogUnknown
+  | otherwise = do
+      -- Only the poll that takes a finished result out delivers it.
+      result <- takeResult ref
+      unless (result == FileDialogPending || result == FileDialogUnknown) $ do
+        -- The native dialog stole window focus; reclaim it so the app keeps
+        -- receiving hover/motion/wheel events without an extra click.
+        -- Restoration is a best-effort no-op when the window was never
+        -- minimized; only a failed raise signals a possible focus failure.
+        void (restoreWindowSafe (sdlWindow env))
+        raised <- raiseWindowSafe (sdlWindow env)
+        unless raised $
+          hPutStrLn stderr "nano-ui: dialog completed but window raise failed; input may need a click"
+        markDirty =<< readIORef (sdlCachedCtx env)
+      pure result
 
 -- | Stop tracking a dialog handle without waiting for the native dialog to
 -- finish. The handle returns 'FileDialogUnknown' if polled afterwards.
 -- The native dialog keeps running until the user dismisses it; its result is
 -- discarded.
 cancelFileDialog :: SdlEnv -> FileDialogId -> IO ()
-cancelFileDialog _ (FileDialogId ref) = atomicWriteIORef ref FileDialogUnknown
+cancelFileDialog env (FileDialogId owner ref) =
+  when (owner == sdlCachedCtx env) (atomicWriteIORef ref FileDialogUnknown)
 
 -- | Open-file dialog, usable from within 'NanoUI' widget code. Returns
 -- a handle owned by the supplied SDL session.
-askOpenFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI (Maybe FileDialogId)
-askOpenFileDialog env opts = Just <$> liftIO (openFileDialog env opts)
+askOpenFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI FileDialogId
+askOpenFileDialog env opts = liftIO (openFileDialog env opts)
 
 -- | Save-file dialog, usable from within 'NanoUI' widget code. Returns
 -- a handle owned by the supplied SDL session.
-askSaveFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI (Maybe FileDialogId)
-askSaveFileDialog env opts = Just <$> liftIO (saveFileDialog env opts)
+askSaveFileDialog :: SdlEnv -> FileDialogOptions -> NanoUI FileDialogId
+askSaveFileDialog env opts = liftIO (saveFileDialog env opts)
 
 -- | Folder dialog, usable from within 'NanoUI' widget code. Returns
 -- a handle owned by the supplied SDL session.
-askOpenFolderDialog :: SdlEnv -> FileDialogOptions -> NanoUI (Maybe FileDialogId)
-askOpenFolderDialog env opts = Just <$> liftIO (openFolderDialog env opts)
+askOpenFolderDialog :: SdlEnv -> FileDialogOptions -> NanoUI FileDialogId
+askOpenFolderDialog env opts = liftIO (openFolderDialog env opts)
 
--- | Poll a dialog from within 'NanoUI' widget code.
-pollFileDialogUi :: FileDialogId -> NanoUI FileDialogResult
-pollFileDialogUi (FileDialogId ref) = liftIO (readIORef ref)
+-- | Consuming poll, with the same focus restoration as 'pollFileDialog'.
+pollFileDialogUi :: SdlEnv -> FileDialogId -> NanoUI FileDialogResult
+pollFileDialogUi env = liftIO . pollFileDialog env
+
+-- | Observe without consuming or restoring focus. Repeated peeks report the
+-- same result until 'pollFileDialogUi' consumes it. Use polling for actions
+-- that must happen only once, such as opening the selected file.
+peekFileDialogUi :: FileDialogId -> NanoUI FileDialogResult
+peekFileDialogUi (FileDialogId _ ref) = liftIO (readIORef ref)
 
 data DialogKind = OpenDialog | SaveDialog | FolderDialog
   deriving (Eq)
@@ -196,7 +186,7 @@ launchDialog env kind opts = do
       showSaveFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst
     FolderDialog ->
       showOpenFolderDialogSafe dialogCallback userdata win locationConst (dialogAllowMany opts)
-  pure (FileDialogId result)
+  pure (FileDialogId (sdlCachedCtx env) result)
 
 -- | The callback every dialog shares, made once a process. A launch's
 -- userdata carries its result cell and the release of its buffers, so there
@@ -223,7 +213,7 @@ onResult userdata filelist _filterIdx = do
         Just [] -> FileDialogCancelled
         Just ps -> FileDialogSelected ps
   -- A cancelled dialog's handle stays unknown.
-  atomicModifyIORef' result $ \r -> (if r == FileDialogUnknown then r else outcome, ())
+  completeResult result outcome
   pushRefreshEvent
 
 -- SDL_DialogFileCallback is `void (*)(void *, const char * const *, int)`,
