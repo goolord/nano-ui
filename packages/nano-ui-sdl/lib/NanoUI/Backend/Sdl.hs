@@ -2,7 +2,7 @@
 module NanoUI.Backend.Sdl
   ( RgbaImage (..)
   , SdlDebugSnapshot (..)
-  , SdlEnv (..)
+  , SdlEnv
   , SdlOptions (..)
   , RenderDriver (..)
   , askSdlDebug
@@ -72,7 +72,7 @@ import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv (..), SdlOptions (..), captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
+import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv, SdlOptions (..), captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
 import NanoUI.Sdl.Internal.Dialog
 import NanoUI.Sdl.Internal.Chrome
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))

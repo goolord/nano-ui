@@ -18,6 +18,7 @@ import System.Environment (lookupEnv)
 import NanoUI
 import NanoUI.Backend (clearEphemeral)
 import NanoUI.Backend.Sdl
+import NanoUI.Sdl.Internal.Window (sdlWindow, sdlTextInput)
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, newTextInputSync, pollEvents, syncTextInput)
 import NanoUI.Testing (TextInputArea (..), collectTextSpans, textInputArea)
 import NanoUI.Testing.Harness (hasText, held, pressAt, releaseAt, tabInp)

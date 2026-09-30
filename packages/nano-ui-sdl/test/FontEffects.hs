@@ -12,7 +12,6 @@ import NanoUI.Backend
 import NanoUI.Testing (textIndexAtX)
 import NanoUI.Backend.Sdl
   ( NanoUIFont (..)
-  , SdlEnv (..)
   , SdlOptions (..)
   , defaultSdlOptions
   , syncDisplay
@@ -20,6 +19,7 @@ import NanoUI.Backend.Sdl
   , withSdlBench
   )
 import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
+import NanoUI.Sdl.Internal.Window (sdlFontRequestRef)
 import System.Environment (setEnv)
 import System.Mem (performGC)
 

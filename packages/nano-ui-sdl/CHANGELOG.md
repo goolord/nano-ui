@@ -2,6 +2,10 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** the application facade exports `SdlEnv` opaquely. Native
+  integrations that access its record fields must explicitly import
+  `NanoUI.Sdl.Internal.Window`; ordinary views use the session operations.
+
 - **Breaking:** `FileDialogId` is opaque and session-owned. `pollFileDialogUi`
   takes the session environment and consumes results once, restoring window
   focus just like `pollFileDialog`. Use `peekFileDialogUi` for observation.

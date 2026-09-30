@@ -25,6 +25,7 @@ import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSiz
 import SDL3.Sys.Video qualified as SDL
 import System.Timeout (timeout)
 import "nano-ui-sdl" NanoUI.Backend.Sdl
+import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlWindow, sdlTransparent)
 
 -- | Run all checks. @gpu@ means a real display with a GPU renderer, which
 -- adds checks the dummy driver cannot support: icon, opacity, position, and

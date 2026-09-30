@@ -52,6 +52,11 @@ its session. `pollFileDialogUi env handle` consumes a completed result once
 and restores window focus. `peekFileDialogUi handle` observes without consuming.
 Launch helpers return a handle directly; failures arrive as `FileDialogFailed`.
 
+`SdlEnv` is an opaque session capability. Its mutable caches and native pointers
+are not application API. Low-level render integrations and native tests that
+need those details explicitly import `NanoUI.Sdl.Internal.Window`, whose record
+representation is unstable.
+
 ## Windows and screenshots
 
 `sdlWindowSettings` is the core's `WindowSettings`, which the RGFW backend

@@ -68,6 +68,7 @@ library
         NanoUI.Backend.Sdl
         NanoUI.Sdl.Internal.Input
         NanoUI.Sdl.Internal.NanoUIFont
+        NanoUI.Sdl.Internal.Window
     other-modules:
         NanoUI.Sdl.Internal.Session
         NanoUI.Sdl.Internal.Runner
@@ -85,7 +86,6 @@ library
         NanoUI.Sdl.Internal.Image
         NanoUI.Sdl.Internal.Url
         NanoUI.Sdl.Internal.Render
-        NanoUI.Sdl.Internal.Window
         NanoUI.Sdl.Internal.WindowOptions
     build-depends:
         base >=4.20 && <4.23,

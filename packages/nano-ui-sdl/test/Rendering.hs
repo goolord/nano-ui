@@ -52,7 +52,8 @@ import System.Mem (performGC)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 import WindowChecks (windowChecks)
-import "nano-ui-sdl" NanoUI.Backend.Sdl (SdlEnv (..), syncDisplay, withSdlBench)
+import "nano-ui-sdl" NanoUI.Backend.Sdl (SdlEnv, syncDisplay, withSdlBench)
+import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlRenderer)
 import "nano-ui-sdl" NanoUI.Sdl.Internal.Input (SdlEvent (..), pollEvents)
 
 foreign import ccall unsafe "SDL_ReadSurfacePixel"
