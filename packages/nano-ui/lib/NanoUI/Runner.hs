@@ -34,8 +34,8 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Debug
 import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
-import NanoUI.Internal.NativeWindow (closeWindowHost, quitRequested, requestWindowClose)
-import NanoUI.Internal.Tasks (cancelTasks)
+import NanoUI.Internal.NativeWindow (closeWindowSlot, quitRequested, requestWindowClose)
+import NanoUI.Internal.Tasks (cancelTasksOf)
 import NanoUI.Internal.Types (V2 (..))
 
 -- | Standard upper bound for single-frame delta-time (50ms).
@@ -327,9 +327,16 @@ runSessionLoop drv ctx0 inp0 = do
           unless (quit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
             loop ctx' inpSynced rest now dirtyOut animNow
 
+  -- The session's end needs only refs that every copy of the context shares.
+  -- Holding 'ctx0' until then would keep its font metrics, and their caches,
+  -- alive after a font reload hands the loop a new context.
+  let !window = ctxNativeWindow ctx0
+      !wake = ctxWakeLoop ctx0
+      !held = ctxHeld ctx0
+      !loopThread = ctxLoopThread ctx0
   -- This thread's dirty marks need no wake action ('markDirty').
-  myThreadId >>= writeIORef (ctxLoopThread ctx0) . Just
+  myThreadId >>= writeIORef loopThread . Just
   -- An opening frame the backend drew before the loop may have called
   -- 'NanoUI.quitUi' already; waiting first could block for good.
   (quitRequested ctx0 >>= \quit -> unless quit (loop ctx0 inp0 [] startT False False))
-    `finally` (closeWindowHost ctx0 `finally` cancelTasks ctx0 `finally` writeIORef (ctxLoopThread ctx0) Nothing)
+    `finally` (closeWindowSlot window `finally` cancelTasksOf wake held `finally` writeIORef loopThread Nothing)

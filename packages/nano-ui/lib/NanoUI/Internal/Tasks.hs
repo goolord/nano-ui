@@ -20,6 +20,7 @@ module NanoUI.Internal.Tasks
   , holdAction
   , sweepHeld
   , cancelTasks
+  , cancelTasksOf
   )
 where
 
@@ -294,15 +295,17 @@ sweepHeld ctx = sweep (ctxHeld ctx)
 -- unwinding, so their 'Control.Exception.bracket' and
 -- 'Control.Exception.finally' cleanups run before the session's resources go.
 cancelTasks :: Context -> IO ()
-cancelTasks ctx = do
-  writeIORef (ctxWakeLoop ctx) Nothing
-  cancelAll (ctxHeld ctx)
-  where
-    cancelAll (Held ref _ _ stampedVar countVar) = do
-      held <- readIORef ref
-      writeIORef ref IM.empty
-      writePrimVar stampedVar 0
-      writePrimVar countVar 0
-      -- Every kill is sent before the wait, so the jobs unwind together.
-      waits <- mapM holdingRelease held
-      void (timeout 1000000 (sequence_ waits))
+cancelTasks ctx = cancelTasksOf (ctxWakeLoop ctx) (ctxHeld ctx)
+
+-- | 'cancelTasks' on the context's 'ctxWakeLoop' and 'ctxHeld', for a caller
+-- that keeps those rather than the context.
+cancelTasksOf :: IORef (Maybe (IO Bool)) -> Held -> IO ()
+cancelTasksOf wake (Held ref _ _ stampedVar countVar) = do
+  writeIORef wake Nothing
+  held <- readIORef ref
+  writeIORef ref IM.empty
+  writePrimVar stampedVar 0
+  writePrimVar countVar 0
+  -- Every kill is sent before the wait, so the jobs unwind together.
+  waits <- mapM holdingRelease held
+  void (timeout 1000000 (sequence_ waits))

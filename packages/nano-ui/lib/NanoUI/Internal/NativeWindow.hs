@@ -57,6 +57,7 @@ module NanoUI.Internal.NativeWindow
   , defaultWindowHost
   , installWindowHost
   , closeWindowHost
+  , closeWindowSlot
   , reportWindowState
   , answerScreenshots
   , answerScreenshotsAfter
@@ -75,7 +76,7 @@ import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeI
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Context (Context (ctxNativeWindow), markDirty, markDirtyCovered, wakeFromThread)
-import NanoUI.Internal.Host (askHostIO, clearHost, setHost)
+import NanoUI.Internal.Host (Host, askHostIO, clearHost, setHost)
 import NanoUI.Internal.NativeWindow.Types
 import NanoUI.Internal.Monad (NanoUI, windowSize, withContext)
 import NanoUI.Internal.Tasks (Task, useTask)
@@ -213,9 +214,14 @@ installWindowHost ctx settings host = do
 -- invoked afterwards. Idempotent; call even if the opening frame failed.
 -- Every queued callback is attempted before a callback exception propagates.
 closeWindowHost :: Context -> IO ()
-closeWindowHost ctx = mask $ \_ -> do
-  old <- askHostIO (ctxNativeWindow ctx)
-  clearHost (ctxNativeWindow ctx)
+closeWindowHost = closeWindowSlot . ctxNativeWindow
+
+-- | 'closeWindowHost' on the context's 'ctxNativeWindow', for a caller that
+-- keeps the slot rather than the context.
+closeWindowSlot :: Host NativeWindow -> IO ()
+closeWindowSlot slot = mask $ \_ -> do
+  old <- askHostIO slot
+  clearHost slot
   traverse_ (\nw -> do
     waiting <- atomicModifyIORef' (nwShots nw) (Nothing,)
     completeScreenshots Nothing (reverse (fromMaybe [] waiting))) old

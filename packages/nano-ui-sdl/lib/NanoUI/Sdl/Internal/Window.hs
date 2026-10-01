@@ -570,8 +570,12 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   -- a wake.
   liftIO $ setSystemAppearance ctx' =<< querySystemAppearance
   -- Background hook jobs are cancelled with the session, before SDL quits,
-  -- including when a host drives frames itself inside 'withSdl'.
-  mkAcquire (setWakeLoopChecked ctx' tryPushRefreshEvent) (const (closeWindowHost ctx' `finally` cancelTasks ctx'))
+  -- including when a host drives frames itself inside 'withSdl'. Ending it
+  -- reads the live context: holding this one until then would keep the
+  -- opening fonts' caches alive after a reload.
+  mkAcquire (setWakeLoopChecked ctx' tryPushRefreshEvent) $ \_ -> do
+    live <- readIORef sdlCachedCtx
+    closeWindowHost live `finally` cancelTasks live
   -- The remaining settings go through the host, as from a view. This runs
   -- after the decorations (size limits account for the frame) and after the
   -- zoom (which centres the enlarged window).
