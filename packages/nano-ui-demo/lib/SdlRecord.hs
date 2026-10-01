@@ -202,7 +202,8 @@ tour :: Rec -> IO ()
 tour r = do
   wait r 0.6
   -- Controls: a checkbox, a slider, a select, text, a theme, menus.
-  clickAt r =<< rightmost r "Feature"
+  clickAt r =<< rightmost r "Mute"
+  clickAt r =<< rightmost r "Mute"
   -- The Volume label sits above the slider's left end; the slider starts at
   -- 50 and spans the column.
   vol <- rightmost r "Volume"
@@ -270,9 +271,7 @@ tour r = do
   moveTo r (V2 800 330) 0.6
   moveTo r (V2 520 340) 1.0
   wait r 0.8
-  -- Diagnostics, then the Debug window, dragged by its title.
-  clickAt r =<< exact r "Diagnostics"
-  wait r 0.6
+  -- The Debug window, dragged by its title.
   clickAt r =<< exact r "Debug"
   wait r 0.4
   title <- rightmost r "Debug"

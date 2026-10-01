@@ -85,14 +85,14 @@ selftest continuous = do
         expect msg needle = void (spansWith msg needle)
         expectOverlay msg needle = expectText msg needle =<< collectOverlayTextSpans ctx' base
     void (sdlDrawFrame ctx' demoUi env base True)
-    spans0 <- spansWith "selftest: Controls body missing" "Feature"
+    spans0 <- spansWith "selftest: Controls body missing" "Mute"
     -- A field value wider than the glyph atlas draws glyph by glyph, and the
     -- text drawn before and after it in the frame survives.
     nameLbl <- requireSpan "selftest: Name label" (findRightmost "Name" spans0)
     clickPos (V2 (v2X nameLbl + 80) (v2Y nameLbl))
     drawOnce (base {inputChars = T.replicate 400 "f"})
     drawOnce base
-    spansLong <- spansWith "selftest: long field text lost the tab content" "Feature"
+    spansLong <- spansWith "selftest: long field text lost the tab content" "Mute"
     unless (length spansLong >= length spans0 - 1) $
       fail "selftest: long field text collapsed the span set"
     clickTab "Table"
@@ -105,7 +105,7 @@ selftest continuous = do
     clickTab "List"
     spansTree <- spansWith "selftest: tree missing after List tab" "src"
     clickPos =<< requireSpan "selftest: README.md" (findExact "README.md" spansTree)
-    expect "selftest: tree click did not select README.md" "7"
+    expect "selftest: tree click did not select README.md" "Selected item 7"
     clickTab "Typography"
     spansType <- spansWith "selftest: typography missing after Typography tab" "Live Playground"
     drawOnce (base {inputScroll = V2 0 (-350)})
@@ -199,14 +199,13 @@ selftest continuous = do
     unless (paneCount spansPane6 == 0) $ fail "selftest: disabling pane headers did not hide them"
     expectText "selftest: headerless panes lost their content" "Contents of" spansPane6
     clickTab "Controls"
-    spansCtl <- spansWith "selftest: Controls missing after tab back" "Feature"
-    feat0 <- requireSpan "selftest: Feature checkbox" (findRightmost "Feature" spansCtl)
-    clickPos feat0
-    expect "selftest: checkbox did not turn Feature on" "on"
-    clickPos feat0
-    expect "selftest: checkbox did not turn Feature off" "off"
-    clickPos feat0
-    spansOn2 <- spansWith "selftest: checkbox did not turn Feature on again" "on"
+    spansCtl <- spansWith "selftest: Controls missing after tab back" "Mute"
+    mute <- requireSpan "selftest: Mute checkbox" (findRightmost "Mute" spansCtl)
+    clickPos mute
+    expect "selftest: checkbox did not mute the volume" "muted"
+    clickPos mute
+    spansOn2 <- collectTextSpans ctx'
+    when (hasText "muted" spansOn2) $ fail "selftest: checkbox did not unmute the volume"
     -- Theme is a radio fieldset: all options stay visible in the plain spans;
     -- click "Tomorrow Light" directly (the state card shows the old value).
     lightOpt <- requireSpan "selftest: Tomorrow Light option" (findExact "Tomorrow Light" spansOn2)

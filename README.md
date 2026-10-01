@@ -185,7 +185,13 @@ cabal run nano-ui-sdl-logs       # streaming log viewer
 cabal run nano-ui-sdl-terminal   # terminal on /bin/sh (Linux and macOS)
 cabal run nano-ui-rgfw-demo      # the RGFW backend
 cabal run nano-ui-markdown-example  # a Markdown chat reply streaming in
+cabal run nano-ui-example-hello  # the first of the single-topic examples
 ```
+
+The [single-topic examples](packages/nano-ui-demo/README.md#examples) are
+short programs that each answer one question: where state lives, how layout
+works, how to validate a form, run work in the background, show 100,000 rows,
+and so on.
 
 ## Documentation
 

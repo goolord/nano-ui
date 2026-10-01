@@ -3,8 +3,8 @@ name:               nano-ui-demo
 version:            0.1.0.0
 synopsis:           Example applications for nano-ui
 description:
-    SDL3 examples for nano-ui: a widget tour, a text editor, a log viewer, and
-    a terminal.
+    SDL3 examples for nano-ui: a widget tour, a text editor, a log viewer, a
+    terminal, and short single-file examples that each teach one topic.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
@@ -136,6 +136,105 @@ executable nano-ui-sdl-terminal
     build-depends:    nano-ui-demo:demo-common
     if os(windows)
         buildable: False
+
+-- The single-file examples. Each is about one topic and depends only on the
+-- library packages, never on demo-common, so it can be copied out whole.
+common example
+    import:           sdl-app
+    import:           rts-options
+    hs-source-dirs:   examples
+    build-depends:
+        nano-ui ^>=0.2,
+        nano-ui-sdl ^>=0.2
+    if os(windows)
+        ghc-options: -optl-mconsole
+
+executable nano-ui-example-hello
+    import:           example
+    main-is:          Hello.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-state
+    import:           example
+    main-is:          State.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-components
+    import:           example
+    main-is:          Components.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-layout
+    import:           example
+    main-is:          Layout.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-forms
+    import:           example
+    main-is:          Forms.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-todo-list
+    import:           example
+    main-is:          TodoList.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-keyboard
+    import:           example
+    main-is:          Keyboard.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-overlays
+    import:           example
+    main-is:          Overlays.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-theming
+    import:           example
+    main-is:          Theming.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-animation
+    import:           example
+    main-is:          Animation.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-images
+    import:           example
+    main-is:          Images.hs
+    build-depends:
+        bytestring ^>=0.12,
+        text ^>=2.1
+
+executable nano-ui-example-canvas
+    import:           example
+    main-is:          Canvas.hs
+
+executable nano-ui-example-tasks
+    import:           example
+    main-is:          Tasks.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-files
+    import:           example
+    main-is:          Files.hs
+    build-depends:
+        bytestring ^>=0.12,
+        filepath ^>=1.5,
+        text ^>=2.1
+
+executable nano-ui-example-long-list
+    import:           example
+    main-is:          LongList.hs
+    build-depends:    text ^>=2.1
+
+executable nano-ui-example-live-chart
+    import:           example
+    main-is:          LiveChart.hs
+    build-depends:
+        containers >=0.7 && <0.9,
+        nano-ui-diagrams ^>=0.2,
+        text ^>=2.1
 
 -- Drives the demo, notepad, and log viewer in hidden windows.
 test-suite nano-ui-demo-test
