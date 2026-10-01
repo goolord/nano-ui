@@ -224,21 +224,30 @@ labelEx layout txt = do
   wid <- nextId
   addWidget wid NodeText txt 0 layout
 
--- | Takes up the remaining space along the parent's direction.
-{-# INLINE flex #-}
+-- | Takes up the remaining space along the parent's direction: across a row,
+-- down a column. Flexes in one container share that space equally.
 flex :: NanoUI ()
-flex = spacer (Grow 1) Fit
+flex = do
+  wid <- nextId
+  withContext $ \ctx ->
+    parentDirection ctx >>= \case
+      DirColumn -> addSizedLeaf ctx wid NodeSpacer Column Fit (Grow 1)
+      DirRow -> addSizedLeaf ctx wid NodeSpacer Row (Grow 1) Fit
 
 -- | A one-pixel rule: horizontal in a column, vertical in a row.
 separator :: NanoUI ()
 separator = do
   wid <- nextId
-  withContext $ \ctx -> do
-    parent <- currentParent ctx
-    parentDir <- if parent < 0 then pure DirColumn else getDirection (ctxNodeArena ctx) parent
-    case parentDir of
+  withContext $ \ctx ->
+    parentDirection ctx >>= \case
       DirColumn -> addSizedLeaf ctx wid NodeSeparator Column (Grow 1) (Fixed 1)
       DirRow -> addSizedLeaf ctx wid NodeSeparator Row (Fixed 1) (Grow 1)
+
+-- | The direction of the current parent, a column at the root.
+parentDirection :: Context -> IO DirTag
+parentDirection ctx = do
+  parent <- currentParent ctx
+  if parent < 0 then pure DirColumn else getDirection (ctxNodeArena ctx) parent
 
 -- | Empty space with the given sizing on each axis.
 {-# INLINE spacer #-}
@@ -257,10 +266,13 @@ addSizedLeaf ctx wid nt dir w h = do
       defaultLayout {layoutDirection = dir, layoutWidth = w, layoutHeight = h}
   setWidgetId (ctxNodeArena ctx) idx wid
 
--- | Fill the available space and centre the body's children on both axes.
+-- | Fill the available space and put the body in its middle on both axes.
+-- The body is one block whose children stack top to bottom as in a
+-- 'column', each placed across the block by its own alignment: give a child
+-- narrower than its siblings 'alignCenter' to centre it under them too.
 {-# INLINE center #-}
 center :: NanoUI a -> NanoUI a
-center = columnWith (grow . alignMid . alignCenter)
+center = layersWith grow . columnWith (tight . alignCenter . alignMid)
 
 -- | Scroll along the current layout direction, vertical by default. Constrain
 -- the viewport size so content can overflow it; the body still runs each frame.

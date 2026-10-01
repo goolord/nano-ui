@@ -2,6 +2,14 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Layout fixes. `flex` grows along its parent's direction, so in a column
+  it pushes what follows down; it used to grow only across. `center` centres
+  its body on both axes as one block (a layered `grow` box around a column),
+  where its children used to stay top-left. A `fillW` grid with
+  `gridMinColW` no longer leaves a gap below it the height of all its cells
+  stacked. A grow child its `maxW` or `maxH` caps gives the rest of its
+  share to its grow siblings instead of leaving a hole at the row's end.
+
 - **Breaking:** `pgTree` takes `InitialTree (Maybe GridNode)` or
   `ControlledTree (Maybe GridNode)`. Initial trees seed once; controlled trees
   are authoritative on every pass, so ignoring a proposal rejects it and

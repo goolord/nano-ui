@@ -694,7 +694,7 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
       innerAvailH = inner hAx padY
   (contentW, contentH) <-
     if gCols > 0 || minColW > 0
-      then measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap
+      then measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap
       else case flow of
         -- Layered children make a box as large as the largest on each axis.
         Layered -> do
@@ -952,16 +952,29 @@ gridRowHeight :: IOArr Float -> Int -> Int -> Int -> IO Float
 gridRowHeight hArr n cols r =
   foldUpTo (min cols (n - r * cols)) (\m j -> max m <$> readPrimArray hArr (r * cols + j)) 0
 
+-- | Content size of grid @idx@ with @gCols@ columns, or else as many
+-- @minColW@ wide as fit in @innerMaxW@.
+--
+-- Without a bound, columns of @minColW@ come out one, and the grid reports
+-- one column's width. When its width is assigned from above instead (a grow
+-- grid whose parent grows, 'growParent', or a percentage), it reports one
+-- row's height too, as a wrapping row does ('measureWrap'): the width it
+-- gets decides its rows. A column refits its height at that width
+-- ('recomputeFitHeightAtWidth'), and elsewhere it grows to its rows after
+-- placement ('adjustFitHeight'). Every cell stacked would be the least
+-- height its fit parents take ('positionNode'), a gap below a grid of
+-- several columns.
 measureGridScratch ::
   SolveEnv ->
   NodeIdx ->
+  SizingTag ->
   Int ->
   Float ->
   Float ->
   Float ->
   Float ->
   IO (Float, Float)
-measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap = do
+measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap = do
   let bounded = innerMaxW < 1e8
       cols = gridColumnCount gCols minColW (if bounded then innerMaxW else 0) gap
       colW = max 0 ((innerMaxW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
@@ -970,8 +983,13 @@ measureGridScratch env idx gCols minColW innerMaxW innerAvailH gap = do
     then pure (0, 0)
     else do
       FlexScratch {fsW = wArr, fsH = hArr} <- readIORef (naScratch (seArena env))
-      let numRows = (n + cols - 1) `quot` cols
-      totalH <- foldUpTo numRows (\t r -> (t +) <$> gridRowHeight hArr n cols r) 0
+      assigned <-
+        if bounded || gCols > 0
+          then pure False
+          else if wTag == SizingGrow then growParent (seArena env) idx else pure (wTag == SizingPercent)
+      let rowCols = if assigned then n else cols
+          numRows = (n + rowCols - 1) `quot` rowCols
+      totalH <- foldUpTo numRows (\t r -> (t +) <$> gridRowHeight hArr n rowCols r) 0
       let contentH = totalH + gap * fromIntegral (max 0 (numRows - 1))
       contentW <-
         if innerMaxW > 0 && innerMaxW < 1e8
@@ -1443,9 +1461,10 @@ placeRowLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap !x0 !top
               then (\b -> top + base - b) <$> childBaseline env ci crossH
               else pure (alignY ay top cross crossH)
           positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
-          -- A grow child that its max width stopped short of its share
-          -- hands the rest to the siblings after it instead of leaving a
-          -- hole.
+          -- The next child starts at this one's far edge, or at its share's
+          -- when it came out wider (a minimum width past its share), so
+          -- the row keeps its length. A max width already caps its share
+          -- ('distributeScratch').
           placedW <- readGeom (seArrays env) ci GeomW
           go (i + 1) (x + min fw placedW + gap)
   go 0 x0
@@ -1650,15 +1669,18 @@ distributeScratch na n avail gapSum horizontal = do
       -- what it needs while the rest re-share what is left.
       --
       -- 'fsGrow' holds each child's factor, 0 once it is not or no longer
-      -- growing, and 'fsOut' keeps the exact content size until the shares
-      -- are handed out.
-      growTotal <- foldUpTo n (\acc i -> do
-        AxisSizing tag val _ _ <- sizingAt i
+      -- growing (-1 once its maximum stops it, 'settleCapped'), and 'fsOut'
+      -- keeps the exact content size until the shares are handed out.
+      FlowAcc capped growTotal _ <- foldUpTo n (\(FlowAcc c acc _) i -> do
+        AxisSizing tag val _ hi <- sizingAt i
         let gf = if tag == SizingGrow then val else 0
         writePrimArray gfArr i (if gf > 0 then gf else 0)
-        pure (acc + gf)) 0
+        pure (FlowAcc (if gf > 0 && hi < 1e8 then c + 1 else c) (acc + gf) 0)) (FlowAcc 0 0 0)
       when (growTotal > 0) $ do
-        (free, gfSum) <- settleGrow out gfArr avail gapSum n 0
+        (free, gfSum) <-
+          if capped > 0
+            then settleCapped a idxArr out gfArr horizontal avail gapSum n
+            else settleGrow out gfArr avail gapSum n 0
         forUpTo_ n $ \i -> do
           gf <- readPrimArray gfArr i
           when (gf > 0) $ writePrimArray out i (max 0 (free * gf / gfSum))
@@ -1774,6 +1796,39 @@ settleGrow mainArr crossArr avail gapSum n !pass = do
     else do
       when (pass + 1 == waterFillAfter) $ waterFillGrow mainArr crossArr (avail - gapSum) n
       settleGrow mainArr crossArr avail gapSum n (pass + 1)
+
+-- | 'settleGrow' for children of which some grow with a maximum along the
+-- axis (@horizontal@ picks it), the scratch children in @idxArr@. A child
+-- whose share passes its maximum stops there, -1 in @crossArr@, and the
+-- rest share what it gave up; the children locked at their content size
+-- grow again, since the shares rose. Each round stops one more child, so
+-- there are at most as many rounds as children.
+settleCapped ::
+  NodeArenaArrays -> IOArr Int -> IOArr Float -> IOArr Float -> Bool -> Float -> Float -> Int -> IO (Float, Float)
+settleCapped a idxArr mainArr crossArr horizontal avail gapSum n = go
+  where
+    sizingAt i = readPrimArray idxArr i >>= \ci -> readAxisSizing a ci horizontal
+    go = do
+      shares@(free, gfSum) <- settleGrow mainArr crossArr avail gapSum n 0
+      let cap k i = do
+            gf <- readPrimArray crossArr i
+            if gf <= 0
+              then pure k
+              else do
+                hi <- axMax <$> sizingAt i
+                if free * gf / gfSum > hi + 1.0e-3
+                  then (k + 1 :: Int) <$ (writePrimArray mainArr i hi >> writePrimArray crossArr i (-1))
+                  else pure k
+      stopped <- foldUpTo n cap 0
+      if stopped == 0
+        then pure shares
+        else do
+          forUpTo_ n $ \i -> do
+            gf <- readPrimArray crossArr i
+            when (gf == 0) $ do
+              AxisSizing tag val _ _ <- sizingAt i
+              when (tag == SizingGrow && val > 0) $ writePrimArray crossArr i val
+          go
 
 -- | Sweeps 'settleGrow' makes before it sorts. Rows with varied content and
 -- weights settle in three or four, and below this the sweeps cost less than

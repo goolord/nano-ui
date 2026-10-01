@@ -16,6 +16,7 @@ tests =
   , spec "column-gap-grow" runColumnGapGrowTest
   , spec "grid-in-column-height" runGridInColumnHeightTest
   , spec "grid-wrapped-row-height" runGridWrappedRowHeightTest
+  , spec "adaptive-grid-in-column-height" runAdaptiveGridInColumnHeightTest
   ]
 
 runGridWrappedRowHeightTest :: Context -> IORef Int -> IO ()
@@ -193,3 +194,27 @@ runAlignBaselineTest ctx failed = do
       assert failed (rectY small > rectY big)
       assert failed (rectY after >= maximum [rectY r + rectH r | r <- [big, small, go, second]])
     _ -> assert failed False
+
+-- | A fill-width grid with adaptive columns ('gridMinColW') in a column,
+-- panel or page scroller is as tall as its rows, as 'gridWith' is, not as
+-- all of its cells stacked in the one column it has before it gets a width.
+runAdaptiveGridInColumnHeightTest :: Context -> IORef Int -> IO ()
+runAdaptiveGridInColumnHeightTest ctx failed = do
+  let cells = columnWith (gridMinColW 140 . fillW) (replicateM_ 7 (button "x"))
+      wrappers =
+        [ \b -> columnWith fillW (b >> label "after")
+        , \b -> panelWith (padAll 12 . gap 8 . fillW) (b >> label "after")
+        , \b -> scrollWith (padAll 12 . grow) $ columnWith (tight . gap 20 . fillW) $
+            columnWith (tight . gap 6 . fillW) (panelWith (padAll 12 . gap 8 . fillW) b >> label "after")
+        ]
+  forM_ wrappers $ \wrapper -> do
+    _ <- warmup2 ctx (withInput 760 600) (wrapper cells)
+    spans <- collectTextSpans ctx
+    let cellRects = [r | (r, t, _, _, _) <- spans, t == "x"]
+        cellBottoms = [rectY r + rectH r | r <- cellRects]
+    assertEq failed (length cellRects) 7
+    -- Four or five 140-wide columns fit, inside the padding, so two rows.
+    assert failed (length (nub (map rectX cellRects)) >= 4)
+    assertEq failed (length (nub (map rectY cellRects))) 2
+    assertJust failed (fst <$> spanOf "after" spans) $ \after ->
+      assert failed (rectY after < maximum cellBottoms + 40)

@@ -30,6 +30,9 @@ tests =
   , spec "pointer-modes" runPointerModesTest
   , spec "pointer-block-nested" runPointerBlockNestedTest
   , spec "pointer-covers-any-id" runPointerCoversAnyIdTest
+  , spec "center-body" runCenterTest
+  , spec "flex-direction" runFlexDirectionTest
+  , spec "grow-max-handoff" runGrowMaxHandoffTest
   ]
 
 red, green, blue, yellow :: Color
@@ -548,3 +551,50 @@ runPointerCoversAnyIdTest ctx failed = do
     assertEq failed uncovered (respHovered l)
     warmup ctx (at p) ui
     assertEq failed uncovered . hasText "Label tip" =<< collectOverlayTextSpans ctx (at p)
+
+-- | 'center' fills the room it is given and puts its body in the middle of
+-- it on both axes, as one block whose children stack top to bottom.
+runCenterTest :: Context -> IORef Int -> IO ()
+runCenterTest ctx failed = do
+  let inBox body = columnWith (tight . fixedW 200 . fixedH 100) (center body)
+  _ <- warmup2 ctx input0 (inBox (box (fixedWH 20 10) red))
+  rs <- arenaRects ctx
+  case reverse rs of
+    (b : _) -> assertEq failed (rectX b, rectY b, rectW b, rectH b) (90, 45, 20, 10)
+    [] -> assert failed False
+  _ <- warmup2 ctx input0 (inBox (box (fixedWH 40 10) red >> box (alignCenter . fixedWH 20 10) blue))
+  rs2 <- arenaRects ctx
+  case reverse rs2 of
+    (b : a : _) -> do
+      assertEq failed (rectX a, rectX b) (80, 90)
+      -- The block of both boxes and the gap between them sits mid-height.
+      assertEq failed (100 - (rectY b + rectH b)) (rectY a)
+    _ -> assert failed False
+
+-- | 'flex' takes the room left along its parent's direction: down a column,
+-- across a row.
+runFlexDirectionTest :: Context -> IORef Int -> IO ()
+runFlexDirectionTest ctx failed = do
+  let ends container = container $ box (fixedWH 20 10) red >> flex >> box (fixedWH 20 10) blue
+  _ <- warmup2 ctx input0 (ends (columnWith (tight . gap 0 . fixedW 100 . fixedH 200)))
+  rectsAt ctx [3] >>= assertEq failed [Rect 0 190 20 10]
+  _ <- warmup2 ctx input0 (ends (rowWith (tight . gap 0 . fixedW 200 . fixedH 50)))
+  rectsAt ctx [3] >>= assertEq failed [Rect 180 0 20 10]
+
+-- | A grow child its maximum caps gives up the rest of its share to the
+-- grow siblings, so a row is filled to its end, and a column likewise.
+runGrowMaxHandoffTest :: Context -> IORef Int -> IO ()
+runGrowMaxHandoffTest ctx failed = do
+  let ui = rowWith (tight . gap 0 . fixedW 400 . fixedH 20) $ do
+        box (fillW . maxW 100) red
+        box fillW green
+        box (minW 80) blue
+  _ <- warmup2 ctx input0 ui
+  rs <- map (\r -> (rectX r, rectW r)) <$> rectsAt ctx [1, 2, 3]
+  assertEq failed rs [(0, 100), (100, 220), (320, 80)]
+  let col = columnWith (tight . gap 0 . fixedW 20 . fixedH 300) $ do
+        box (fillH . maxH 50) red
+        box fillH green
+  _ <- warmup2 ctx input0 col
+  cs <- map (\r -> (rectY r, rectH r)) <$> rectsAt ctx [1, 2]
+  assertEq failed cs [(0, 50), (50, 250)]
