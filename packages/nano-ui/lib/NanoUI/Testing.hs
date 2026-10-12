@@ -58,6 +58,7 @@ module NanoUI.Testing
   , clearDirty
   , clearMeasureCache
   , isDirty
+  , lastFramePasses
   , setWakeLoop
   , requestWakeAt
   , requestWakeAfter
@@ -153,3 +154,4 @@ import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (askContext, askHost, askInput, liftIO)
 import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontTone, textNodeFontVariant, textNodeFontWeight, textNodeTextDecoration)
 import NanoUI.Internal.Types (Damage (..), damageIsEmpty)
+import NanoUI.Internal.Var (lastFramePasses)

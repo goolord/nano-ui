@@ -68,7 +68,8 @@ runWidgetIdIndexEpochWrapTest ctx failed = do
 -- | A table with @freeze@ frozen columns, and a label after it while @showLabel@.
 tableAndLabel :: Int -> Bool -> NanoUI (Maybe Response)
 tableAndLabel freeze showLabel = column $ do
-  (sortState, _) <- useTableSort (SortCol 0 SortAsc)
+  sortStateVar <- useVar (SortCol 0 SortAsc)
+  sortState <- readVar sortStateVar
   let rows = [(n, n) | n <- map (T.pack . show) [1 .. 20 :: Int]]
-  _ <- tableConfigured defaultTableConfig {tableFreezeCols = freeze} (fixedH 150) "people" (headed "Name" fst <> headed "Value" snd) rows sortState
+  _ <- tableConfigured' defaultTableConfig {tableFreezeCols = freeze} (fixedH 150) "people" (headed "Name" fst <> headed "Value" snd) rows (Var sortState)
   if showLabel then Just <$> label' "bye" else pure Nothing

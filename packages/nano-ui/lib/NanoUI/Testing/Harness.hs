@@ -21,6 +21,8 @@ module NanoUI.Testing.Harness
   , warmupDraw
   , warmupFocused
   , held
+  , FrameCost (..)
+  , frameCost
   , runClick
   , assertSpansHas
   , spanYOf
@@ -59,7 +61,7 @@ module NanoUI.Testing.Harness
 import Control.Applicative ((<|>))
 import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
 import Control.Monad (forM, forM_, unless, void, when)
-import Data.IORef (IORef, readIORef, writeIORef)
+import Data.IORef (IORef)
 import Data.List (maximumBy)
 import Data.Maybe (isJust, listToMaybe)
 import Data.Ord (comparing)
@@ -74,6 +76,7 @@ import NanoUI.Internal.Context (takeWakes)
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Shortcut (Shortcut (..))
+import NanoUI.Var (peekVar)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJustM, assertLt, bump, evalUi, run2Frames, withInput)
 import System.Timeout (timeout)
@@ -284,15 +287,39 @@ warmupDraw ctx inp ui = (\(a, draw, _) -> (a, draw)) <$> run2Frames ctx inp ui
 warmupFocused :: Context -> Input -> NanoUI a -> IO ()
 warmupFocused ctx inp ui = warmup2 ctx inp ui >> void (runFrame ctx (tabInp inp) ui)
 
--- | Drive a controlled input the way an application does: pass the value held
--- in the test's 'IORef' and store the widget's result for the next frame. Not
--- a hook: a hook write makes the frame run the view again without input, and
--- the frame then returns that pass's result without its click or change flags.
-held :: IORef a -> (a -> NanoUI (r, a)) -> NanoUI (r, a)
-held ref widget = do
-  result <- widget =<< liftIO (readIORef ref)
-  liftIO (writeIORef ref (snd result))
-  pure result
+-- | Run an input on a Var and return its result with the value it left in
+-- the Var. The read is not recorded, so it adds no rerun of its own; a view
+-- that reads the Var before the widget does make an edit rerun the view,
+-- and the frame then returns that pass's result without its click or change
+-- flags.
+held :: Var a -> (Var a -> NanoUI r) -> NanoUI (r, a)
+held v widget = (,) <$> widget v <*> peekVar v
+
+-- | What one frame cost: the view passes it ran, the damage it produced, and
+-- the frames that had to follow before the context stopped asking for one.
+data FrameCost = FrameCost
+  { fcPasses :: !Int
+  , fcDamage :: !Damage
+  , fcFollowUps :: !Int
+  }
+  deriving (Eq, Show)
+
+-- | Run one frame of @ui@ with @inp@, counting its view passes, then frames
+-- with @idle@ until one returns clean. Fails if eight of them do not settle.
+frameCost :: Context -> Input -> Input -> NanoUI a -> IO (a, FrameCost)
+frameCost ctx inp idle ui = do
+  (a, _, dirty) <- runFrame ctx inp ui
+  dmg <- takeDamage ctx
+  n <- lastFramePasses ctx
+  follow <- settle dirty 0
+  pure (a, FrameCost n dmg follow)
+  where
+    settle dirty k
+      | not dirty = pure k
+      | k >= (8 :: Int) = fail "frameCost: the view never settled"
+      | otherwise = do
+          (_, _, d) <- runFrame ctx idle ui
+          settle d (k + 1)
 
 -- | Run a press frame and a release frame at @pos@ ('clickPair'), returning
 -- the release frame's result.

@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+
 -- | Overlays: menu bars, context menus, tooltips, popovers, modal dialogs,
 -- floating windows, and asking before the window closes.
 --
@@ -29,22 +31,23 @@ module Main (main) where
 
 import Control.Monad (forM_, void, when)
 import Data.Text (Text)
+import GHC.Generics (Generic)
 import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 
 data Item = Item {itemId :: !Int, itemName :: !Text, itemFruit :: !Bool, itemPicked :: !Bool}
-  deriving (Eq)
+  deriving (Eq, Generic)
 
 -- | The items, and the id the next one gets.
-data Model = Model ![Item] !Int
-  deriving (Eq)
+data Model = Model {items :: ![Item], nextId :: !Int}
+  deriving (Eq, Generic)
 
-newtype App = App {appModel :: StateCell Model}
+newtype App = App {appModel :: Var Model}
 
 newApp :: IO App
 newApp =
-  App <$> newState (Model (zipWith3 (\i (n, f) p -> Item i n f p) [0 ..] produce (cycle [True, False])) 6)
+  App <$> newVar (Model (zipWith3 (\i (n, f) p -> Item i n f p) [0 ..] produce (cycle [True, False])) 6)
   where
     produce = [("Apple", True), ("Carrot", False), ("Cherry", True), ("Leek", False), ("Pear", True), ("Potato", False)]
 
@@ -58,56 +61,61 @@ main = do
       }
     (overlaysApp app)
 
+
 overlaysApp :: App -> NanoUI ()
 overlaysApp app = do
-  (Model items fresh, _) <- useState (appModel app)
-  (openMenu, setOpenMenu) <- useText ""
-  (filterOpen, setFilterOpen) <- useFlag False
-  (showFruit, setShowFruit) <- useFlag True
-  (showVeg, setShowVeg) <- useFlag True
-  (confirmDelete, setConfirmDelete) <- useFlag False
-  (inspectorOpen, setInspectorOpen) <- useFlag False
-  (asking, setAsking) <- useFlag False
-  (status, setStatus) <- useText "Right-click a row for its menu."
-  let editItems f = modifyState (appModel app) (\(Model xs n) -> Model (f xs) n)
-      picked = length (filter itemPicked items)
-      shown = filter (\i -> if itemFruit i then showFruit else showVeg) items
+  let itemsVar = app.appModel.items
+  openMenu <- useVar ""
+  filterOpen <- useVar False
+  showFruit <- useVar True
+  showVeg <- useVar True
+  confirmDelete <- useVar False
+  inspectorOpen <- useVar False
+  asking <- useVar False
+  status <- useVar "Right-click a row for its menu."
+  Model all' fresh <- readVar app.appModel
+  fruit <- readVar showFruit
+  veg <- readVar showVeg
+  inspecting <- readVar inspectorOpen
+  let picked = length (filter itemPicked all')
+      visible i = if itemFruit i then fruit else veg
       -- A menu row that closes its menu when picked.
-      item menuRow action = whenM menuRow (setOpenMenu "" >> action)
-      askDelete = setConfirmDelete True
+      item menuRow action = whenM menuRow (writeVar openMenu "" >> action)
+      askDelete = writeVar confirmDelete True
   columnWith (grow . gap 0) $ do
-    menuBar openMenu setOpenMenu
+    menuBar openMenu
       [ ( "File"
         , do
             item (menuItem "New item") $
-              modifyState (appModel app) (\(Model xs n) -> Model (xs <> [Item n ("Item " <> T.pack (show n)) True False]) (n + 1))
+              modifyVar app.appModel (\(Model xs n) -> Model (xs <> [Item n ("Item " <> T.pack (show n)) True False]) (n + 1))
             menuSeparator
-            item (menuItem "Quit...") (setAsking True)
+            item (menuItem "Quit...") (writeVar asking True)
         )
       , ( "Edit"
         , do
-            item (menuItem "Pick all") (editItems (map (\i -> i {itemPicked = True})))
-            item (menuItem "Pick none") (editItems (map (\i -> i {itemPicked = False})))
+            item (menuItem "Pick all") (modifyVar itemsVar (map (\i -> i {itemPicked = True})))
+            item (menuItem "Pick none") (modifyVar itemsVar (map (\i -> i {itemPicked = False})))
             menuSeparator
             -- The enabled and disabled rows swap, so they share a scope.
             scope $ if picked > 0 then item (menuItem "Delete picked...") askDelete else menuItemDisabled "Delete picked..."
         )
-      , ("Help", item (menuItem (if inspectorOpen then "Hide inspector" else "Show inspector")) (setInspectorOpen (not inspectorOpen)))
+      , ("Help", item (menuItem (if inspecting then "Hide inspector" else "Show inspector")) (writeVar inspectorOpen (not inspecting)))
       ]
     separator
     columnWith (padAll 16 . gap 12 . fillW . fillH) $ do
       rowWith (tight . gap 8 . alignMid . fillW) $ do
         filterR <- button' "Filter"
         tooltip filterR "Choose which kinds of item to show"
-        whenM (popupToggled filterR) (setFilterOpen (not filterOpen))
+        open <- readVar filterOpen
+        whenM (popupToggled filterR) (writeVar filterOpen (not open))
         let below = (defaultPopupConfig (AnchorRect (respRect filterR))) {cfgPlacement = PlacementBelow}
-        (filterPopR, _) <- popup filterOpen below $ do
+        (filterPopR, _) <- popup open below $ do
           menuHeader "Show"
-          setShowFruit =<< checkbox "Fruit" showFruit
-          setShowVeg =<< checkbox "Vegetables" showVeg
-        when (respClicked filterPopR) (setFilterOpen False)
+          checkbox "Fruit" showFruit
+          checkbox "Vegetables" showVeg
+        when (respClicked filterPopR) (writeVar filterOpen False)
         disabledWhen (picked == 0) $ whenM (styled destructive (button "Delete picked...")) askDelete
-        setInspectorOpen =<< toggleButton Accent "Inspector" inspectorOpen
+        toggleButton Accent "Inspector" inspectorOpen
         flex
         void $
           withTooltip (labelWith (tight . alignMid . fontMuted) (plural picked "item" <> " picked")) $ do
@@ -115,71 +123,77 @@ overlaysApp app = do
             muted "Edit > Pick all picks every row."
       scrollWith (grow . fillW) $
         columnWith (tight . gap 4 . fillW) $
-          forM_ shown $ \i -> withKey (itemId i) (itemRow editItems setStatus i)
-      muted status
+          -- Each row edits its own item through a Var that follows the
+          -- item's id, whatever the filter hides around it.
+          withElemVars itemId itemsVar $ \xs at ->
+            forM_ (filter visible xs) $ \i -> withKey (itemId i) (itemRow itemsVar status (at i))
+      muted =<< readVar status
 
   -- Overlays float over the page wherever they are declared; keeping them
   -- together at the end reads best. Each takes its ids whether open or not.
-  (winR, _) <- window inspectorOpen "Inspector" $ do
-    kv "Items" (T.pack (show (length items)))
-    kv "Showing" (T.pack (show (length shown)))
+  (winR, _) <- window inspecting "Inspector" $ do
+    kv "Items" (T.pack (show (length all')))
+    kv "Showing" (T.pack (show (length (filter visible all'))))
     kv "Picked" (T.pack (show picked))
     kv "Next id" (T.pack (show fresh))
-  when (respClicked winR) (setInspectorOpen False)
+  when (respClicked winR) (writeVar inspectorOpen False)
 
-  (deleteR, _) <- modal confirmDelete ("Delete " <> plural picked "item" <> "?") $ do
+  deleting <- readVar confirmDelete
+  (deleteR, _) <- modal deleting ("Delete " <> plural picked "item" <> "?") $ do
     muted "Picked rows hidden by the filter are deleted too."
     rowWith (tight . gap 8 . fillW) $ do
       flex
-      whenM (button "Cancel") (setConfirmDelete False)
+      whenM (button "Cancel") (writeVar confirmDelete False)
       whenM (styled destructive (button "Delete")) $ do
-        editItems (filter (not . itemPicked))
-        setStatus ("Deleted " <> plural picked "item" <> ".")
-        setConfirmDelete False
-  when (respClicked deleteR) (setConfirmDelete False)
+        modifyVar itemsVar (filter (not . itemPicked))
+        writeVar status ("Deleted " <> plural picked "item" <> ".")
+        writeVar confirmDelete False
+  when (respClicked deleteR) (writeVar confirmDelete False)
 
   -- The close button only asks while wsExitOnCloseRequest is off.
   closing <- winCloseRequested <$> askWindow
-  when closing (setConfirmDelete False >> setAsking True)
-  (quitR, _) <- modal asking "Quit?" $ do
+  when closing (writeVar confirmDelete False >> writeVar asking True)
+  quitting <- readVar asking
+  (quitR, _) <- modal quitting "Quit?" $ do
     label "Your list is not saved anywhere."
     rowWith (tight . gap 8 . fillW) $ do
       flex
-      whenM (button "Keep working") (setAsking False)
+      whenM (button "Keep working") (writeVar asking False)
       whenM (styled destructive (button "Quit")) quitUi
-  when (respClicked quitR) (setAsking False)
+  when (respClicked quitR) (writeVar asking False)
 
--- | One row: a checkbox across the row, with a context menu on it. Hooks
--- inside 'contextMenu' live under the row's key.
-itemRow :: (([Item] -> [Item]) -> NanoUI ()) -> (Text -> NanoUI ()) -> Item -> NanoUI ()
-itemRow editItems setStatus i = do
+-- | One row: a checkbox across the row that edits the item's picked flag,
+-- with a context menu on it. Vars inside 'contextMenu' live under the
+-- row's key.
+itemRow :: Var [Item] -> Var Text -> Var Item -> NanoUI ()
+itemRow itemsVar status item = do
+  i <- readVar item
   let iid = itemId i
-  (rowR, isPicked) <- checkboxWith' fillW (itemName i <> if itemFruit i then "  (fruit)" else "  (vegetable)") (itemPicked i)
-  when (isPicked /= itemPicked i) $
-    editItems (map (\x -> if itemId x == iid then x {itemPicked = isPicked} else x))
+  rowR <- checkboxWith' fillW (itemName i <> if itemFruit i then "  (fruit)" else "  (vegetable)") item.itemPicked
   void $ contextMenu rowR $ do
     menuHeader (itemName i)
-    whenM (menuItem "Pick only this") (editItems (map (\x -> x {itemPicked = itemId x == iid})))
-    whenM (menuItem "Move to top") (editItems (\xs -> filter ((== iid) . itemId) xs <> filter ((/= iid) . itemId) xs))
+    whenM (menuItem "Pick only this") (modifyVar itemsVar (map (\x -> x {itemPicked = itemId x == iid})))
+    whenM (menuItem "Move to top") (modifyVar itemsVar (\xs -> filter ((== iid) . itemId) xs <> filter ((/= iid) . itemId) xs))
     menuSeparator
     whenM (menuItem "Delete") $ do
-      editItems (filter ((/= iid) . itemId))
-      setStatus ("Deleted " <> itemName i <> ".")
+      modifyVar itemsVar (filter ((/= iid) . itemId))
+      writeVar status ("Deleted " <> itemName i <> ".")
 
 -- | A row of menu titles, each with a drop-down. @openMenu@ names the open
 -- one, or is empty. While one is open, pointing at another title switches
 -- to it, as desktop menu bars do.
-menuBar :: Text -> (Text -> NanoUI ()) -> [(Text, NanoUI ())] -> NanoUI ()
-menuBar openMenu setOpen entries =
-  rowWith (tight . fillW . padXY 4 2) $
+menuBar :: Var Text -> [(Text, NanoUI ())] -> NanoUI ()
+menuBar openMenu entries =
+  rowWith (tight . fillW . padXY 4 2) $ do
+    current <- readVar openMenu
     forM_ entries $ \(title, body) -> do
-      let isOpen = openMenu == title
+      let isOpen = current == title
       btn <- menuButton' title isOpen
-      whenM (popupToggled btn) (setOpen (if isOpen then "" else title))
-      when (not isOpen && not (T.null openMenu) && respHovered btn) (setOpen title)
+      whenM (popupToggled btn) (writeVar openMenu (if isOpen then "" else title))
+      when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu title)
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
       (popR, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
-      when (respClicked popR) (setOpen "")
+      when (respClicked popR) (writeVar openMenu "")
 
 -- | Whether a button that opens a popup should flip it this frame. It acts
 -- on the press: the popup closes on any press outside it, this button's

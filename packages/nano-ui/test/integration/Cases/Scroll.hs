@@ -271,8 +271,8 @@ runScrollTopClipTest ctx failed = do
           columnWith (padAll 8 . gap 8 . fillW) $
             card $ do
               heading "Controls"
-              (cb, _) <- checkbox' "Feature" False
-              _ <- slider 0 100 50
+              (cb, _) <- withValue False (checkbox' "Feature")
+              _ <- (snd <$> withValue 50 (slider 0 100))
               mapM_ (\i -> void (label (T.pack ("pad line " <> show (i :: Int))))) [1 .. 16]
               liftIO $ writeIORef cbRef (Just cb)
               pure ()
@@ -362,12 +362,13 @@ runScrollButtonClickTest ctx failed = do
     , (pixel, withInput 640 120, tight . grow)
     ] $ \(c, inp0, scrollLayout) -> do
       let ui = do
-            (hit, setHit) <- useText ""
+            hitVar <- useVar (T.pack "")
+            hit <- readVar hitVar
             (sid, resp) <- scrollArea scrollLayout $
                              column $ do
                                mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 6]
                                b <- button' "Target"
-                               when (respClicked b) (setHit "yes")
+                               when (respClicked b) (writeVar hitVar "yes")
                                pure b
             pure (sid, hit, resp)
       (sid, hit0, _) <- warmup2 c inp0 ui
@@ -411,12 +412,13 @@ runScrolledOutImmunityTest :: Context -> IORef Int -> IO ()
 runScrolledOutImmunityTest ctx failed = do
   let inp0 = withInput 240 160
       ui = do
-        (hit, setHit) <- useText ""
+        hitVar <- useVar (T.pack "")
+        hit <- readVar hitVar
         (sid, b) <- scrollArea (fillW . fixedH 8) $
                       column $ do
                         mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
                         btn <- button' "Target"
-                        when (respClicked btn) (setHit "yes")
+                        when (respClicked btn) (writeVar hitVar "yes")
                         pure btn
         pure (sid, b, hit)
   (sid, b, hit0) <- warmup2 ctx inp0 ui

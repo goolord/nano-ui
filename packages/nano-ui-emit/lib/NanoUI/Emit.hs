@@ -25,7 +25,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (ReaderT (..), ask, mapReaderT)
 import Data.IORef (modifyIORef', newIORef, readIORef)
-import NanoUI (Input, NanoUI, Response, V2, respChanged)
+import NanoUI (HasResponse (..), Input, NanoUI, Response, V2, Var, respChanged, withValue)
 import NanoUI.Internal.Context (isDirty, markDirty)
 import NanoUI.Testing (Context, DrawData, runFrame)
 import NanoUI.Testing.Harness (clickPair)
@@ -83,18 +83,24 @@ emit msg = NanoUIE (ask >>= lift . ($ msg))
 emitWhen :: NanoUI Bool -> msg -> NanoUIE msg ()
 emitWhen widget msg = liftNanoUI widget >>= \active -> when active (emit msg)
 
--- | Run a control once and emit only a changed value.
+-- | Run an input on the model's value and emit only a changed value. The
+-- input takes a Var, as built-in inputs do; it gets one holding @old@.
+--
+-- > emitChanged (slider 0 100) volume SetVolume
 {-# INLINE emitChanged #-}
-emitChanged :: Eq a => (a -> NanoUI a) -> a -> (a -> msg) -> NanoUIE msg ()
-emitChanged widget old toMsg = liftNanoUI (widget old) >>= \new -> when (new /= old) (emit (toMsg new))
+emitChanged :: Eq a => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
+emitChanged widget old toMsg = do
+  (_, new) <- liftNanoUI (withValue old widget)
+  when (new /= old) (emit (toMsg new))
 
--- | Emit a changed value only when the response also reports an edit.
+-- | Emit a changed value only when the input's response also reports an
+-- edit.
 {-# INLINE emitEdited #-}
 emitEdited ::
-  Eq a => (a -> NanoUI (Response, a)) -> a -> (a -> msg) -> NanoUIE msg ()
+  (Eq a, HasResponse r) => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
 emitEdited widget old toMsg = do
-  (resp, new) <- liftNanoUI (widget old)
-  when (respChanged resp && new /= old) (emit (toMsg new))
+  (r, new) <- liftNanoUI (withValue old widget)
+  when (respChanged (toResponse r) && new /= old) (emit (toMsg new))
 
 -- | Run a complete frame and collect messages from all its passes in order.
 -- The queue belongs to this invocation: an exception cannot leak messages

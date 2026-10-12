@@ -22,10 +22,10 @@ tests =
 runDisabledPointerTest :: Context -> IORef Int -> IO ()
 runDisabledPointerTest _ failed = do
   let inp = withInputOff 400 200
-      check :: (Eq a, Show a) => String -> a -> (a -> NanoUI (Response, a)) -> IO ()
+      check :: (Eq a, Show a) => String -> a -> (Var a -> NanoUI Response) -> IO ()
       check name initial widget = do
         ctx <- newContext
-        ref <- newIORef initial
+        ref <- newVar initial
         let ui = column (disabledWhen True (held ref widget))
         (resp, _) <- warmup2 ctx inp ui
         let V2 cx cy = centerOf resp
@@ -34,13 +34,13 @@ runDisabledPointerTest _ failed = do
         mapM_ (\i -> runFrame ctx i ui) [press, dragged, releaseAt dragged]
         _ <- runFrame ctx inp {inputMousePos = V2 cx cy, inputChars = "x"} ui
         (after, _) <- evalUi ctx inp ui
-        value <- readIORef ref
+        value <- readVarIO ref
         focus <- readIORef (ctxFocusId ctx)
         when (value /= initial || focus == respId resp) $ putStrLn ("  disabled " <> name <> " changed or took focus")
         assertEq failed value initial
         assert failed (not (respClicked after) && not (respHovered after))
         assert failed (focus /= respId resp)
-  check "button" False (\_ -> (\r -> (r, respClicked r)) <$> button' "Go")
+  check "button" False (\_ -> button' "Go")
   check "checkbox" False (checkbox' "Check")
   check "toggle" False (toggleSwitchWith' id)
   check "slider" (50 :: Float) (slider' 0 100)

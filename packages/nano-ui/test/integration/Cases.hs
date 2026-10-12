@@ -176,7 +176,7 @@ runPointerCursorTest ctx failed = do
   let inp0 = withInput 200 100
       ui = column $ do
         btn <- button' "Click"
-        (cb, _) <- checkbox' "Feature" False
+        (cb, _) <- withValue False (checkbox' "Feature")
         pure (btn, cb)
       wantAt inp = runFrame ctx inp ui >> pointerCursorWanted ctx inp
   (btn, cb) <- warmup2 ctx inp0 ui
@@ -309,7 +309,7 @@ runHoverDamageTest ctx failed = do
 -- is stored, and a click must show at once.
 runCheckboxInitialTest :: Context -> IORef Int -> IO ()
 runCheckboxInitialTest ctx failed = do
-  checkedRef <- newIORef True
+  checkedRef <- newVar True
   let inp0 = withInput 200 100
       ui = column (held checkedRef (checkbox' "Opt"))
   (resp, _) <- warmup2 ctx inp0 ui
@@ -332,7 +332,7 @@ runCheckboxInitialTest ctx failed = do
 runSliderFillWidthTest :: Context -> IORef Int -> IO ()
 runSliderFillWidthTest ctx failed = do
   let inp0 = withInput 400 120
-      ui = columnWith fillW (slider' 0 100 0)
+      ui = columnWith fillW (withValue 0 (slider' 0 100))
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
   assertGt failed rw 300
@@ -628,13 +628,14 @@ runPaneGridMixedDragTest ctx failed = do
         testGridConfig
           { pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
-              (value, setValue) <- useInt 0
+              valueVar <- useVar (0 :: Int)
+              value <- readVar valueVar
               marker <- nextId
               updates <- liftIO (readIORef stateUpdates)
               case IM.lookup (fromIntegral pid) updates of
                 Nothing -> pure ()
                 Just n -> do
-                  setValue n
+                  writeVar valueVar n
                   liftIO (modifyIORef' stateUpdates (IM.delete (fromIntegral pid)))
               liftIO (modifyIORef' paneStates (IM.insert (fromIntegral pid) (marker, value)))
               seedMixedGrid seed pid pctx
@@ -988,7 +989,7 @@ runPaneGridClippedControlTest ctx failed = do
 -- immediate (non-debounced) change pulse.
 runSearchInputClearTest :: Context -> IORef Int -> IO ()
 runSearchInputClearTest ctx failed = do
-  queryRef <- newIORef "hello world"
+  queryRef <- newVar "hello world"
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchInput' "Search…"))
   (resp, _) <- warmup2 ctx inp0 ui
@@ -1014,7 +1015,7 @@ runSearchInputClearTest ctx failed = do
 -- has been idle for the configured debounce window.
 runSearchInputDebounceTest :: Context -> IORef Int -> IO ()
 runSearchInputDebounceTest ctx failed = do
-  queryRef <- newIORef ""
+  queryRef <- newVar ""
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
   warmupFocused ctx inp0 ui
@@ -1045,11 +1046,11 @@ runSearchInputDebounceTest ctx failed = do
 -- the loop every debounce period for good.
 runSearchInputSetTextDebounceTest :: Context -> IORef Int -> IO ()
 runSearchInputSetTextDebounceTest ctx failed = do
-  queryRef <- newIORef ""
+  queryRef <- newVar ""
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
   warmupFocused ctx inp0 ui
-  writeIORef queryRef "recent"
+  writeVarIO queryRef "recent"
   ((rA, tA), _, _) <- runFrame ctx inp0 ui
   assertEq failed tA "recent"
   assert failed (not (respChanged rA))

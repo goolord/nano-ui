@@ -31,6 +31,7 @@ import NanoUI
   , scope
   , separator
   , liftIO
+  , withValue
   )
 import NanoUI.Internal.Monad (askInput)
 import NanoUI.Internal.Debug
@@ -145,7 +146,8 @@ debugWindowBody owner snap = do
   separator
   heading "Layout & Draw"
   kvBlock layout
-  explain <- checkbox "Outline layout nodes" =<< explainingLayout
+  on <- explainingLayout
+  (_, explain) <- withValue on (checkbox "Outline layout nodes")
   explainLayout explain
   scope $ when explain (kvBlock . formatExplainRows =<< explainedNode)
   separator

@@ -50,7 +50,7 @@ instance Enum OffsetChoice where
 runBoundedRadioTest :: Context -> IORef Int -> IO ()
 runBoundedRadioTest ctx failed = do
   let inp = withInputOff 300 160
-      ui = boundedRadio' (T.pack . show)
+      ui x = withValue x (boundedRadio' (T.pack . show))
   (_, initial) <- warmup2 ctx inp (ui (OffsetChoice 11))
   assertEq failed initial (OffsetChoice 11)
   spans <- collectTextSpans ctx
@@ -67,12 +67,12 @@ runControlsTabHeightTest ctx failed = do
       withInputOff 1280 800
     controlsBody dumpRef = do
       heading "Controls"
-      (cb, _) <- checkbox' "Feature" False
-      _ <- slider 0 100 50
-      _ <- select ["Low", "Medium", "High"] 1
-      (cp, _) <- colorPicker' (colorRGBA 204 102 102 255)
-      _ <- boundedRadio (T.pack . show) Dark
-      (ti, _) <- textInput' ""
+      (cb, _) <- withValue False (checkbox' "Feature")
+      _ <- (snd <$> withValue 50 (slider 0 100))
+      _ <- (snd <$> withValue 1 (select ["Low", "Medium", "High"]))
+      (cp, _) <- withValue (colorRGBA 204 102 102 255) colorPicker'
+      _ <- (snd <$> withValue Dark (boundedRadio (T.pack . show)))
+      (ti, _) <- withValue "" textInput'
       separator
       liftIO $ writeIORef dumpRef (Just (cb, cp, ti))
     demoPage dumpRef =
@@ -92,10 +92,9 @@ runControlsTabHeightTest ctx failed = do
                 heading "Gallery"
                 mapM_ (\i -> void (label (T.pack ("thumb line " <> show (i :: Int))))) [1 .. 8]
             card $ do
-              (demoTab, setDemoTab) <- useEnum Controls
-              setDemoTab
-                =<< tabs
-                  demoTab
+              demoTabVar <- useEnumVar Controls
+              tabs
+                  demoTabVar
                   [ tab t (T.pack (show t)) $ case t of
                       Controls -> controlsBody dumpRef
                       List -> heading "Tree"
@@ -162,7 +161,7 @@ runControlsTabHeightTest ctx failed = do
 runColorPickerCommitTest :: Context -> IORef Int -> IO ()
 runColorPickerCommitTest ctx failed = do
   let initial = colorRGBA 204 102 102 255
-  colorRef <- newIORef initial
+  colorRef <- newVar initial
   let inp0 = withInput 400 420
       ui = held colorRef colorPicker'
   (resp, _) <- warmup2 ctx inp0 ui
@@ -185,7 +184,7 @@ runColorPickerCommitTest ctx failed = do
 -- container that holds them, so the frame repaints a clip covering every part.
 runColorPickerPartDamageTest :: Context -> IORef Int -> IO ()
 runColorPickerPartDamageTest ctx failed = do
-  colorRef <- newIORef (colorRGBA 204 102 102 255)
+  colorRef <- newVar (colorRGBA 204 102 102 255)
   let inp0 = withInput 400 1200
       ui = held colorRef colorPickerRGBA'
   _ <- warmup2 ctx inp0 ui
@@ -207,7 +206,7 @@ runColorPickerPartDamageTest ctx failed = do
 -- DamageFull.
 runColorPickerDragDamageTest :: Context -> IORef Int -> IO ()
 runColorPickerDragDamageTest ctx failed = do
-  colorRef <- newIORef (colorRGBA 204 102 102 255)
+  colorRef <- newVar (colorRGBA 204 102 102 255)
   let inp0 = withInput 400 1200
       ui = held colorRef colorPickerRGBA'
   (resp, _) <- warmup2 ctx inp0 ui
@@ -223,7 +222,7 @@ runColorPickerDragDamageTest ctx failed = do
 runColorPickerRgbaTest :: Context -> IORef Int -> IO ()
 runColorPickerRgbaTest ctx failed = do
   let inp0 = withInputOff 400 460
-      ui = void (colorPickerRGBA (colorRGBA 204 102 102 128))
+      ui = void ((snd <$> withValue (colorRGBA 204 102 102 128) colorPickerRGBA))
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   forM_ ["#cc666680", "128", "Current", "New"] $ \needle -> assertSpansHas failed needle spans
@@ -234,7 +233,8 @@ runColorPickerEditTest :: Context -> IORef Int -> IO ()
 runColorPickerEditTest ctx failed = do
   let inp0 = withInput 400 460
       initial = colorRGBA 204 102 102 255
-      ui = colorPicker' initial
+  colorVar <- newVar initial
+  let ui = held colorVar colorPicker'
   _ <- warmup2 ctx inp0 ui
   -- Tab past the field and the hue bar to the R field.
   replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
@@ -252,7 +252,7 @@ runColorPickerEditTest ctx failed = do
 runColorPickerDragAfterFieldTest :: Context -> IORef Int -> IO ()
 runColorPickerDragAfterFieldTest ctx failed = do
   let initial = colorRGBA 204 102 102 255
-  colorRef <- newIORef initial
+  colorRef <- newVar initial
   let inp0 = withInput 400 460
       ui = held colorRef colorPicker'
   (resp, _) <- warmup2 ctx inp0 ui
@@ -273,7 +273,7 @@ runColorPickerDragAfterFieldTest ctx failed = do
 runColorPickerChangeOnceTest :: Context -> IORef Int -> IO ()
 runColorPickerChangeOnceTest ctx failed = do
   let initial = colorRGBA 204 102 102 255
-  colorRef <- newIORef initial
+  colorRef <- newVar initial
   let inp0 = withInput 400 420
       ui = held colorRef colorPicker'
       changed inp = (\((resp, _), _, _) -> respChanged resp) <$> runFrame ctx inp ui
@@ -292,7 +292,7 @@ runColorPickerChangeOnceTest ctx failed = do
 runColorPickerBarKeysTest :: Context -> IORef Int -> IO ()
 runColorPickerBarKeysTest ctx failed = do
   let initial = colorRGBA 204 102 102 200
-  colorRef <- newIORef initial
+  colorRef <- newVar initial
   let inp0 = withInput 440 460
       ui = held colorRef colorPickerRGBA'
       frame inp = snd <$> evalUi ctx inp ui

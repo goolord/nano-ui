@@ -2,7 +2,6 @@
 module NanoUI.Internal.Widgets.Menu
   ( contextMenu
   , contextMenuArea
-  , useContextMenu
   , menuButton
   , menuButton'
   , menuButtonWith

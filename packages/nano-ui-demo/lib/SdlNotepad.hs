@@ -2,7 +2,7 @@
 --
 -- It is self-contained: the menu bar is implemented locally on
 -- top of the generic 'popup' primitive, and the whole application is one
--- 'NanoUI' function driven by local state hooks.
+-- 'NanoUI' function over local state in Vars.
 --
 -- Run with @cabal run nano-ui-sdl-notepad@.
 module SdlNotepad
@@ -13,7 +13,7 @@ module SdlNotepad
   ) where
 
 import Control.Exception (SomeException, try)
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
 import Data.Either (isRight)
@@ -26,6 +26,7 @@ import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Shortcut
+import NanoUI.Var (peekVar)
 
 --------------------------------------------------------------------------------
 -- Application entry point
@@ -47,103 +48,103 @@ main = do
 --------------------------------------------------------------------------------
 
 data NotepadState = NotepadState
-  !(StateCell TextDocument)
-  !(StateCell WidgetId)
-  !(StateCell (Maybe FileDialogId))
-  !(StateCell (Maybe FileDialogId))
+  !(Var TextDocument)
+  !(Var WidgetId)
+  !(Var (Maybe FileDialogId))
+  !(Var (Maybe FileDialogId))
 
 -- | A notepad's private document and dialog state. Allocate one per
 -- instance before starting the SDL session, and draw it with 'notepadUi'.
 newNotepad :: IO NotepadState
 newNotepad =
   NotepadState
-    <$> newState emptyDocument
-    <*> newState (WidgetId 0)
-    <*> newState Nothing
-    <*> newState Nothing
+    <$> newVar emptyDocument
+    <*> newVar (WidgetId 0)
+    <*> newVar Nothing
+    <*> newVar Nothing
 
 notepadUi :: NotepadState -> NanoUI ()
-notepadUi (NotepadState docCell editorCell openCell saveCell) = do
-  ------------------------------------------------------------------ hooks ---
-  (doc, setDoc) <- useState docCell
-  (docPath, setDocPath) <- useText ""
-  (docDirty, setDocDirty) <- useFlag False
-  (docGen, setDocGen) <- useInt 0
-  (openMenu, setOpenMenu) <- useText ""
-  (statusMsg, setStatusMsg) <- useText "Ready"
-  (showStatus, setShowStatus) <- useFlag True
-  (aboutOpen, setAboutOpen) <- useFlag False
-  (confirmExit, setConfirmExit) <- useFlag False
-  (editorId, setEditorId) <- useState editorCell
-  (openDlg, setOpenDlg) <- useState openCell
-  (saveDlg, setSaveDlg) <- useState saveCell
-  (zoom, setZoom) <- useFloat 1.0
+notepadUi (NotepadState doc editorId openDlg saveDlg) = do
+  ------------------------------------------------------------------ state ---
+  docPath <- useVar ("" :: Text)
+  docDirty <- useVar False
+  docGen <- useVar (0 :: Int)
+  openMenu <- useVar ("" :: Text)
+  statusMsg <- useVar ("Ready" :: Text)
+  showStatus <- useVar True
+  aboutOpen <- useVar False
+  confirmExit <- useVar False
+  zoom <- useVar (1.0 :: Float)
 
   ----------------------------------------------------------- file dialogs ---
-  useFileDialog openDlg setOpenDlg $ \chosenPaths ->
+  useFileDialog openDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
-      setOpenMenu ""
-      setDocGen (docGen + 1)
+      writeVar openMenu ""
+      modifyVar docGen (+ 1)
       loaded <-
         liftIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
       case loaded of
-        Left _ -> setStatusMsg ("Could not open " <> T.pack filePath)
+        Left _ -> writeVar statusMsg ("Could not open " <> T.pack filePath)
         Right raw -> do
           -- Lenient decode: malformed bytes become U+FFFD instead of throwing.
-          setDoc (textDocument (TE.decodeUtf8With (\_ _ -> Just '\xFFFD') raw))
-          setDocPath (T.pack filePath)
-          setDocDirty False
-          setStatusMsg ("Opened " <> T.pack filePath)
-  useFileDialog saveDlg setSaveDlg $ \chosenPaths ->
+          writeVar doc (textDocument (TE.decodeUtf8With (\_ _ -> Just '\xFFFD') raw))
+          writeVar docPath (T.pack filePath)
+          writeVar docDirty False
+          writeVar statusMsg ("Opened " <> T.pack filePath)
+  useFileDialog saveDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
-      setOpenMenu ""
-      saved <- writeDocument filePath doc
+      writeVar openMenu ""
+      saved <- writeDocument filePath =<< peekVar doc
       if saved
         then do
-          setDocPath (T.pack filePath)
-          setDocDirty False
-          setStatusMsg ("Saved " <> T.pack filePath)
-        else setStatusMsg ("Could not save " <> T.pack filePath)
+          writeVar docPath (T.pack filePath)
+          writeVar docDirty False
+          writeVar statusMsg ("Saved " <> T.pack filePath)
+        else writeVar statusMsg ("Could not save " <> T.pack filePath)
 
   ------------------------------------------------------------- menu data ---
   let
     newDocument = do
-      setDoc emptyDocument
-      setDocPath ""
-      setDocGen (docGen + 1)
-      setDocDirty False
-      setStatusMsg "New document"
+      writeVar doc emptyDocument
+      writeVar docPath ""
+      modifyVar docGen (+ 1)
+      writeVar docDirty False
+      writeVar statusMsg "New document"
 
-    saveDocument forceDialog =
-      if forceDialog || T.null docPath
-        then setSaveDlg . Just =<< askSaveFileDialog defaultFileDialogOptions
+    saveDocument forceDialog = do
+      path <- peekVar docPath
+      if forceDialog || T.null path
+        then writeVar saveDlg . Just =<< askSaveFileDialog defaultFileDialogOptions
         else do
-          saved <- writeDocument (T.unpack docPath) doc
+          saved <- writeDocument (T.unpack path) =<< peekVar doc
           if saved
             then do
-              setDocDirty False
-              setStatusMsg ("Saved " <> docPath)
-            else setStatusMsg ("Could not save " <> docPath)
+              writeVar docDirty False
+              writeVar statusMsg ("Saved " <> path)
+            else writeVar statusMsg ("Could not save " <> path)
 
-    zoomIn = setZoom (min 4.0 (zoom * 1.1))
-    zoomOut = setZoom (max 0.5 (zoom / 1.1))
+    zoomIn = modifyVar zoom (\z -> min 4.0 (z * 1.1))
+    zoomOut = modifyVar zoom (\z -> max 0.5 (z / 1.1))
 
     -- A menu row and its action; running it closes the menu.
-    item menuRow action = whenM menuRow (setOpenMenu "" >> action)
-    editItem name chord cmd = item (menuItemShortcut name chord) (runTextCommand editorId cmd)
+    item menuRow action = whenM menuRow (writeVar openMenu "" >> action)
+    editItem name chord cmd =
+      item (menuItemShortcut name chord) (peekVar editorId >>= \editor -> runTextCommand editor cmd)
 
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
     newCmd = ("New", ctrl <> key 'n', newDocument)
-    openCmd = ("Open...", ctrl <> key 'o', setOpenDlg . Just =<< askOpenFileDialog defaultFileDialogOptions)
+    openCmd = ("Open...", ctrl <> key 'o', writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions)
     saveCmd = ("Save", ctrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
     -- Quit, or ask first when there are unsaved changes.
-    exitApp = if docDirty then setConfirmExit True else quitUi
+    exitApp = do
+      dirty <- peekVar docDirty
+      if dirty then writeVar confirmExit True else quitUi
     exitCmd = ("Exit", ctrl <> key 'q', exitApp)
     zoomInCmd = ("Zoom In", ctrl <> key '=', zoomIn)
     zoomOutCmd = ("Zoom Out", ctrl <> key '-', zoomOut)
-    resetZoomCmd = ("Reset Zoom", ctrl <> key '0', setZoom 1.0)
+    resetZoomCmd = ("Reset Zoom", ctrl <> key '0', writeVar zoom 1.0)
     commandItem (name, chord, action) = item (menuItemShortcut name chord) action
 
     fileMenu = do
@@ -155,8 +156,9 @@ notepadUi (NotepadState docCell editorCell openCell saveCell) = do
       commandItem exitCmd
 
     editMenu = do
-      canUndo <- textCanUndo editorId
-      canRedo <- textCanRedo editorId
+      editor <- peekVar editorId
+      canUndo <- textCanUndo editor
+      canRedo <- textCanRedo editor
       if canUndo then editItem "Undo" (ctrl <> key 'z') Undo else menuItemDisabled "Undo"
       if canRedo then editItem "Redo" (ctrl <> shift <> key 'z') Redo else menuItemDisabled "Redo"
       menuSeparator
@@ -167,16 +169,17 @@ notepadUi (NotepadState docCell editorCell openCell saveCell) = do
       editItem "Select All" (ctrl <> key 'a') SelectAll
 
     viewMenu = do
-      item (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar")) (setShowStatus (not showStatus))
+      statusShown <- readVar showStatus
+      item (menuItem (if statusShown then "Hide Status Bar" else "Show Status Bar")) (writeVar showStatus (not statusShown))
       menuSeparator
       commandItem zoomInCmd
       commandItem zoomOutCmd
       commandItem resetZoomCmd
       menuSeparator
-      item (menuItem "Document Statistics") (setStatusMsg (documentStats (documentText doc)))
+      item (menuItem "Document Statistics") (writeVar statusMsg . documentStats . documentText =<< peekVar doc)
 
     helpMenu = do
-      item (menuItem "About nano-ui Notepad") (setAboutOpen True)
+      item (menuItem "About nano-ui Notepad") (writeVar aboutOpen True)
       menuItemDisabled "nano-ui on GitHub"
 
   ------------------------------------------------------------- shortcuts ---
@@ -186,18 +189,12 @@ notepadUi (NotepadState docCell editorCell openCell saveCell) = do
   for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
     \(_, chord, action) -> whenM (shortcut chord) action
   whenM (or <$> traverse shortcut [ctrl <> shift <> key '=', ctrl <> key '+']) zoomIn
-
-  -------------------------------------------------------------- the window ---
   whenM (winCloseRequested <$> askWindow) exitApp
-  -- Cheap to set every frame: the window updates only when the title changes.
-  setWindowTitleUi $
-    (if T.null docPath then "Untitled" else docPath) <> (if docDirty then " *" else "") <> " - nano-ui Notepad"
 
   --------------------------------------------------------------- layout ---
   columnWith (grow . gap 0) $ do
     menuBar
       openMenu
-      setOpenMenu
       [ ("File", fileMenu)
       , ("Edit", editMenu)
       , ("View", viewMenu)
@@ -205,59 +202,75 @@ notepadUi (NotepadState docCell editorCell openCell saveCell) = do
       ]
     separator
 
-    (editorResp, editorDoc) <-
-      withKey docGen $
+    -- Read after the menus, which can replace the document or change the
+    -- zoom.
+    gen <- readVar docGen
+    zoomVal <- readVar zoom
+    before <- peekVar doc
+    editorResp <-
+      withKey gen $
         textAreaDocumentWith'
-          (grow . minW 240 . minH 160 . fontSizeScale zoom)
+          (grow . minW 240 . minH 160 . fontSizeScale zoomVal)
           doc
-    -- respChanged also pulses for cursor moves, which hand back the same
-    -- document.
-    when (respChanged editorResp && not (sameDocument editorDoc doc)) $ do
-      setDoc editorDoc
-      setDocDirty True
-    when (respId editorResp /= editorId) (setEditorId (respId editorResp))
+    -- respChanged also pulses for cursor moves, which leave the document as
+    -- it was.
+    when (respChanged editorResp) $ do
+      edited <- peekVar doc
+      unless (sameDocument edited before) (writeVar docDirty True)
+    writeVar editorId (respId editorResp)
 
-    when showStatus $ do
+    whenM (readVar showStatus) $ do
       separator
-      statusBar docPath docDirty doc statusMsg zoom
+      statusBar docPath docDirty doc statusMsg zoomVal
+
+  -------------------------------------------------------------- the window ---
+  -- Cheap to set every frame: the window updates only when the title changes.
+  -- Set after the editor, which marks the document changed.
+  path <- readVar docPath
+  dirty <- readVar docDirty
+  setWindowTitleUi $
+    (if T.null path then "Untitled" else path) <> (if dirty then " *" else "") <> " - nano-ui Notepad"
 
   --------------------------------------------------------------- overlays ---
+  aboutShown <- readVar aboutOpen
   (aboutResp, _) <-
-    modal aboutOpen "About" $ do
+    modal aboutShown "About" $ do
       heading "nano-ui Notepad"
       labelWith fontMuted "A menu-bar notepad built with nano-ui on SDL3."
       labelWith fontMuted "File, Edit, View and Help are wired to real actions."
       rowWith fillW $ do
         flex
-        whenM (button "Close") (setAboutOpen False)
-  when (respClicked aboutResp) (setAboutOpen False)
+        whenM (button "Close") (writeVar aboutOpen False)
+  when (respClicked aboutResp) (writeVar aboutOpen False)
+  confirmShown <- readVar confirmExit
   (confirmResp, _) <-
-    modal confirmExit "Unsaved changes" $ do
+    modal confirmShown "Unsaved changes" $ do
       label "Discard the changes to this document and exit?"
       rowWith fillW $ do
         flex
         whenM (button "Discard") quitUi
-        whenM (button "Cancel") (setConfirmExit False)
-  when (respClicked confirmResp) (setConfirmExit False)
+        whenM (button "Cancel") (writeVar confirmExit False)
+  when (respClicked confirmResp) (writeVar confirmExit False)
 
 --------------------------------------------------------------------------------
 -- Local menu-bar widget
 --------------------------------------------------------------------------------
 
--- | A horizontal menu bar. @openMenu@ is the label of the currently open
+-- | A horizontal menu bar. @openMenu@ holds the label of the currently open
 -- drop-down (the empty text when every menu is closed). Each entry pairs a
 -- label with its drop-down body; item actions are expected to close the menu.
-menuBar :: Text -> (Text -> NanoUI ()) -> [(Text, NanoUI ())] -> NanoUI ()
-menuBar openMenu setOpen entries = do
+menuBar :: Var Text -> [(Text, NanoUI ())] -> NanoUI ()
+menuBar openMenu entries = do
+  current <- readVar openMenu
   rowWith (tight . fillW . fixedH 28) $ do
     for_ entries $ \(menuLabel, body) -> do
-      let isOpen = openMenu == menuLabel
+      let isOpen = current == menuLabel
       btn <- menuButton' menuLabel isOpen
-      when (respClicked btn) (setOpen (if isOpen then "" else menuLabel))
-      when (not isOpen && not (T.null openMenu) && respHovered btn) (setOpen menuLabel)
+      when (respClicked btn) (writeVar openMenu (if isOpen then "" else menuLabel))
+      when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu menuLabel)
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
       (popupResp, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
-      when (respClicked popupResp) (setOpen "")
+      when (respClicked popupResp) (writeVar openMenu "")
     flex
 
 --------------------------------------------------------------------------------
@@ -273,8 +286,12 @@ writeDocument filePath doc = do
 -- | The status bar. It shows the line count, which the document keeps; the
 -- word and character counts read the whole text, so View > Document
 -- Statistics computes them when asked.
-statusBar :: Text -> Bool -> TextDocument -> Text -> Float -> NanoUI ()
-statusBar path dirty doc message zoomVal =
+statusBar :: Var Text -> Var Bool -> Var TextDocument -> Var Text -> Float -> NanoUI ()
+statusBar docPath docDirty docVar statusMsg zoomVal = do
+  path <- readVar docPath
+  dirty <- readVar docDirty
+  doc <- readVar docVar
+  message <- readVar statusMsg
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
     labelWith (tight . fontMuted) message
     flex

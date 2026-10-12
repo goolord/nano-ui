@@ -9,9 +9,9 @@
 --
 -- Reading the chosen file is slow work, so it runs on a worker thread with
 -- 'useTaskStatus', keyed by the path (see Tasks.hs). The file's text then
--- lives in an ordinary 'useText' hook that the 'textArea' edits. A flag
--- records unsaved changes, and 'setWindowTitleUi' shows it in the title bar;
--- the setter does nothing while the title is unchanged, so it runs every frame.
+-- lives in an ordinary 'Var' that the 'textArea' edits. A flag records
+-- unsaved changes, and 'setWindowTitleUi' shows it in the title bar; it does
+-- nothing while the title is unchanged, so it runs every frame.
 --
 -- Run it with @cabal run nano-ui-example-files@.
 module Main (main) where
@@ -37,18 +37,19 @@ import NanoUI.Backend.Sdl
   , runSdlApp
   )
 import NanoUI.Shortcut (ctrl, key)
+import NanoUI.Var (peekVar)
 import System.FilePath (takeFileName)
 
--- | The handles that positional hooks cannot hold: the two pending dialogs
--- and the file-reading job.
+-- | State the view needs beyond what positional Vars hold: the two pending
+-- dialogs (a handle is no positional slot type) and the file-reading job.
 data App = App
-  { appOpenDialog :: !(StateCell (Maybe FileDialogId))
-  , appSaveDialog :: !(StateCell (Maybe FileDialogId))
+  { appOpenDialog :: !(Var (Maybe FileDialogId))
+  , appSaveDialog :: !(Var (Maybe FileDialogId))
   , appRead :: !(Task Text Text)
   }
 
 newApp :: IO App
-newApp = App <$> newState Nothing <*> newState Nothing <*> newTask
+newApp = App <$> newVar Nothing <*> newVar Nothing <*> newTask
 
 main :: IO ()
 main = do
@@ -62,83 +63,88 @@ main = do
 
 view :: App -> NanoUI ()
 view app = do
-  (text, setText) <- useText ""
-  (path, setPath) <- useText "" -- "" while the text has never been saved
-  (dirty, setDirty) <- useFlag False
-  (reading, setReading) <- useText "" -- the file being read, or ""
-  (status, setStatus) <- useText "Open a file, or drop one on the strip below."
-  (hovering, setHovering) <- useFlag False
-  (openDlg, setOpenDlg) <- useState (appOpenDialog app)
-  (saveDlg, setSaveDlg) <- useState (appSaveDialog app)
+  text <- useVar ""
+  path <- useVar "" -- "" while the text has never been saved
+  dirty <- useVar False
+  reading <- useVar "" -- the file being read, or ""
+  status <- useVar "Open a file, or drop one on the strip below."
+  hovering <- useVar False
 
-  let askOpen = setOpenDlg . Just =<< askOpenFileDialog defaultFileDialogOptions
-      askSave = setSaveDlg . Just =<< askSaveFileDialog defaultFileDialogOptions
+  let askOpen = writeVar (appOpenDialog app) . Just =<< askOpenFileDialog defaultFileDialogOptions
+      askSave = writeVar (appSaveDialog app) . Just =<< askSaveFileDialog defaultFileDialogOptions
       -- Writing a small file is quick, so it happens right here. A large one
       -- would go through a task like the read below.
       writeTo file = do
-        result <- liftIO (try (BS.writeFile file (TE.encodeUtf8 text)))
+        contents <- peekVar text
+        result <- liftIO (try (BS.writeFile file (TE.encodeUtf8 contents)))
         case result of
-          Left (err :: IOException) -> setStatus ("Could not save: " <> T.pack (displayException err))
+          Left (err :: IOException) -> writeVar status ("Could not save: " <> T.pack (displayException err))
           Right () -> do
-            setPath (T.pack file)
-            setDirty False
-            setStatus ("Saved " <> T.pack file)
-      save = if T.null path then askSave else writeTo (T.unpack path)
+            writeVar path (T.pack file)
+            writeVar dirty False
+            writeVar status ("Saved " <> T.pack file)
+      save = do
+        saved <- peekVar path
+        if T.null saved then askSave else writeTo (T.unpack saved)
 
-  pollDialog openDlg setOpenDlg (setReading . T.pack)
-  pollDialog saveDlg setSaveDlg writeTo
+  pollDialog (appOpenDialog app) (writeVar reading . T.pack)
+  pollDialog (appSaveDialog app) writeTo
 
   whenM (shortcut (ctrl <> key 'o')) askOpen
   whenM (shortcut (ctrl <> key 's')) save
 
   -- The read job runs only while there is a file to read. Once it finishes,
-  -- clearing 'reading' stops calling the hook, which releases the job.
-  scope . unless (T.null reading) $ do
-    job <- useTaskStatus (appRead app) reading (readUtf8 (T.unpack reading))
+  -- clearing 'reading' stops calling 'useTaskStatus', which releases the job.
+  file <- readVar reading
+  scope . unless (T.null file) $ do
+    job <- useTaskStatus (appRead app) file (readUtf8 (T.unpack file))
     case job of
       TaskRunning _ -> pure ()
       TaskDone contents -> do
-        setText contents
-        setPath reading
-        setDirty False
-        setReading ""
-        setStatus ("Opened " <> reading)
+        writeVar text contents
+        writeVar path file
+        writeVar dirty False
+        writeVar reading ""
+        writeVar status ("Opened " <> file)
       TaskFailed err _ -> do
-        setReading ""
-        setStatus ("Could not open: " <> T.pack (displayException err))
+        writeVar reading ""
+        writeVar status ("Could not open: " <> T.pack (displayException err))
 
-  let name = if T.null path then "Untitled" else T.pack (takeFileName (T.unpack path))
-  setWindowTitleUi (name <> (if dirty then "*" else "") <> " — Files")
+  saved <- readVar path
+  unsaved <- readVar dirty
+  let name = if T.null saved then "Untitled" else T.pack (takeFileName (T.unpack saved))
+  setWindowTitleUi (name <> (if unsaved then "*" else "") <> " — Files")
 
   columnWith (padAll 12 . gap 8 . grow) $ do
     rowWith (tight . gap 8 . alignMid . fillW) $ do
       whenM (button "Open…") askOpen
       whenM (button "Save As…") askSave
-      scope (unless (T.null reading) spinner)
-      muted status
+      scope (unless (T.null file) spinner)
+      muted =<< readVar status
     -- The zone reports hover and drops for its own rect. Its hover is known
-    -- only after it is declared, so the label shows last frame's, kept in
-    -- a hook.
+    -- only after it is declared, so the label shows what was stored last;
+    -- a change runs the view again to show it.
+    over <- readVar hovering
     (_, _, target) <-
       dropZone (fillW . padXY 12 8) $
-        labelWith fontMuted (if hovering then "Release to open the file" else "Drop a file here to open it")
-    when (dropHovered target /= hovering) (setHovering (dropHovered target))
-    when (dropReceived target) $ for_ (listToMaybe (dropFiles target)) setReading
-    (editor, text') <- textAreaWith' grow text
-    -- respChanged also fires for caret moves, which return the same text.
-    when (respChanged editor && text' /= text) $ do
-      setText text'
-      setDirty True
+        labelWith fontMuted (if over then "Release to open the file" else "Drop a file here to open it")
+    writeVar hovering (dropHovered target)
+    when (dropReceived target) $ for_ (listToMaybe (dropFiles target)) (writeVar reading)
+    before <- peekVar text
+    textAreaWith grow text
+    -- Caret moves leave the text as it was.
+    after <- peekVar text
+    when (after /= before) (writeVar dirty True)
 
 -- | Poll a pending dialog once a frame. When it finishes, forget the handle
 -- and pass on the first chosen path; a cancel just forgets it.
-pollDialog :: Maybe FileDialogId -> (Maybe FileDialogId -> NanoUI ()) -> (FilePath -> NanoUI ()) -> NanoUI ()
-pollDialog pending setPending onPath =
-  for_ pending $ \dialog ->
+pollDialog :: Var (Maybe FileDialogId) -> (FilePath -> NanoUI ()) -> NanoUI ()
+pollDialog pending onPath =
+  peekVar pending >>= \handle -> for_ handle $ \dialog ->
     pollFileDialogUi dialog >>= \case
       FileDialogPending -> pure ()
-      FileDialogSelected chosen -> setPending Nothing >> for_ (listToMaybe chosen) onPath
-      _ -> setPending Nothing
+      FileDialogSelected chosen -> writeVar pending Nothing >> for_ (listToMaybe chosen) onPath
+      _ -> writeVar pending Nothing
 
 -- | Read a file as UTF-8, turning malformed bytes into U+FFFD instead of
 -- failing. The decoded 'Text' is strict, so the worker does all the work.

@@ -47,7 +47,7 @@ runSelectTruncateTest ctx failed = do
     inp = withInputOff 400 200
     long = "An option far too long for the field"
   (resp, _) <-
-    warmup2 ctx inp (column (selectWith' (fixedW 120) [long, "Short"] 0))
+    warmup2 ctx inp (column (withValue 0 (selectWith' (fixedW 120) [long, "Short"])))
   cut <- spansIn ctx (respRect resp)
   let
     Rect x _ w _ = respRect resp
@@ -78,19 +78,19 @@ runTruncateTextUiTest ctx failed = do
 -- turns it off.
 runToggleButtonTest :: Context -> IORef Int -> IO ()
 runToggleButtonTest ctx failed = do
-  ref <- newIORef False
+  ref <- newVar False
   let
     inp = withInputOff 300 200
     ui = column (held ref (toggleButton' Warning "M"))
   (resp, _) <- warmup2 ctx inp ui
   _ <- runClick ctx inp ui (centerOf resp)
-  assertEq failed True =<< readIORef ref
+  assertEq failed True =<< readVarIO ref
   tint <- themeWarning <$> getTheme ctx
   (_, draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw
   assert failed (tint `elem` fillsIn (respRect resp) quads)
   _ <- runClick ctx inp ui (centerOf resp)
-  assertEq failed False =<< readIORef ref
+  assertEq failed False =<< readVarIO ref
 
 runColorHelpersTest :: Context -> IORef Int -> IO ()
 runColorHelpersTest _ failed = do

@@ -89,9 +89,10 @@ runOverlaySiblingStateTest _ failed = do
   let inp = withInput 640 400
       ui overlay open edit = do
         _ <- overlay open "About" (label "body")
-        (txt, setTxt) <- useText "start"
-        when edit (setTxt "edited")
-        textInput txt
+        txtVar <- useVar "start"
+        txt <- readVar txtVar
+        when edit (writeVar txtVar "edited")
+        (snd <$> withValue txt textInput)
   forM_ [modal, window] $ \overlay -> do
     ctx <- newContext
     _ <- runFrame ctx inp (ui overlay False True)
@@ -406,10 +407,11 @@ runScrolledDebugToggleTest ctx failed = do
   let inp0 = withInput 640 400
       title = T.pack "Debug"
       ui = do
-        (open, setOpen) <- useFlag False
+        openVar <- useVar False
+        open <- readVar openVar
         (_, dbgBtn) <- scrollArea (tight . grow) $ do
           b <- button' "Debug"
-          when (respClicked b) (setOpen (not open))
+          when (respClicked b) (writeVar openVar (not open))
           pure b
         when open $ void (window True "Debug" (label "fps"))
         pure dbgBtn

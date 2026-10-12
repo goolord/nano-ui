@@ -33,9 +33,10 @@ Its package README lists the native windowing libraries it needs.
 
 A view describes the current interface. Each call registers layout nodes,
 reads input, and returns a result. Layout is solved after the view runs,
-then the frame resolves interactions and paints. A state-hook update can
-cause an additional view pass within the same frame. One-shot input is
-removed from that pass so it does not repeat a click or key press.
+then the frame resolves interactions and paints. A write to a `Var` the
+view already read can cause an additional view pass within the same frame.
+One-shot input is removed from that pass so it does not repeat a click or key
+press.
 
 Code in the view can therefore run more than once. Load files and allocate
 long-lived resources before entering the backend runner. Guard one-shot IO
@@ -56,63 +57,89 @@ an edit. The same adapters accept configured and custom widgets.
 
 ## Values and interaction state
 
-Inputs are controlled: pass their current value and retain the returned
-value for the next frame. The widget keeps interaction details such as the
-caret, selection, drag anchor, or open dropdown.
+State lives in a `Var`. An input takes the `Var` it edits: it shows the Var's
+value and stores the user's edits in it. The widget keeps interaction details
+such as the caret, selection, drag anchor, or open dropdown.
 
 ```haskell
 nameField :: NanoUI ()
 nameField = do
-  (name, setName) <- useText ""
-  setName =<< textInput name
+  name <- useVar ""
+  textInput name
+  greeting <- readVar name
+  label ("Hello, " <> greeting)
 ```
 
-Primitive hooks use their initial argument only while their slot has no value.
-Changing `useText ""` to a different initial value at the same widget id is
-not a reset. Use the setter to change state.
+A Var comes from one of three places:
 
-Primitive hooks are the simplest choice for local state of their supported
-types and need no setup. For arbitrary types or state whose identity and
-lifetime should follow an explicit owner, allocate a typed `StateCell a`
-once during component setup, then read it with `useState` in the per-frame
-view. Keep the cell private in a closure. Only `Eq a` is required; there is
-no runtime type lookup:
+- `useVar initial` keeps a Var at its position in the view and needs no setup.
+  It holds `Int`, `Double`, `Float`, `Bool`, `Text` or `SortCol`; `useEnumVar`
+  holds an enumeration. `initial` is used only while the slot has none, so
+  changing it later is not a reset: write the Var instead.
+- `newVar initial` makes a Var of any type in IO. Make it once during setup,
+  keep it in a record, and pass the record to the view. Two calls make two
+  independent Vars; passing one Var to two places shares it.
+- A `VarMap` holds one owned Var per key, for the rows of a list: `varAt`
+  finds or makes a row's Var, and `dropVar` forgets it.
 
 ```haskell
-newEditor :: IO (NanoUI ())
-newEditor = do
-  document <- newState emptyDocument
-  pure $ do
-    (doc, setDoc) <- useState document
-    setDoc =<< textAreaDocument doc
+data Editor = Editor {document :: Var TextDocument}
+
+newEditor :: IO Editor
+newEditor = Editor <$> newVar emptyDocument
+
+editorView :: Editor -> NanoUI ()
+editorView editor = textAreaDocument (document editor)
 ```
 
-Pass the resulting view to a runner, or compose it with other constructed
-views. Construct twice for independent state. A retained cell keeps its value
-while its view is hidden; dropping it allows collection. Allocate dynamic
-children when inserting them into a typed map keyed by their application id,
-and remove their handles when their state should be discarded.
+`readVar` reads a Var where you show it. `writeVar` replaces the value and
+`modifyVar` applies a pure function to the latest one, so successive changes
+compose even within a frame; equal writes do nothing. `peekVar` from `NanoUI.Var` reads without
+the bookkeeping below, for a value that drives an action rather than a
+drawing. `readVarIO` and `modifyVarIO` work from IO and other threads; after
+writing from another thread, run the action from `askWake` so the view runs.
+Allocation belongs outside the view: `liftIO (newVar initial)` inside a view
+would make a new Var on every pass.
 
-`modifyState cell transition` applies a pure function to the latest value,
-so successive updates compose even within a frame. Both it and the setter
-skip equal writes and integrate with redraw scheduling. Cells are UI-thread,
-single-session state; use the background-work API for worker communication.
-Allocation belongs outside the view: `liftIO (newState initial)` inside a view
-would reset it on every pass. `useState` consumes no widget id: its state is
-identified by the cell itself.
+A record in a Var gives a Var for each field: with `OverloadedRecordDot` and a
+`Generic` instance on the record, `settings.volume` is a `Var Float` that
+reads and writes only that field, and `slider 0 100 settings.volume` edits
+it. `zoomVar` focuses with a getter and setter of your own, and `zoomVarL`
+with a van Laarhoven lens. `forEachVar key list body` runs a row per element
+of a `Var [a]`, each under `withKey`, with a Var for the element that follows
+its key when the list is reordered; `withElemVars` is the same for rows you
+filter or order yourself.
 
-A primed widget exposes a `Response`. Inputs return `(Response, value)`;
-buttons and labels return the response itself. `respChanged` reports an
-edit, `respSubmitted` reports a commit, and `respClicked` reports activation.
-`respPressed` is a held-button state, not a one-frame press event.
+A string literal, or `Var x`, is a constant: the widget shows it and an edit is gone
+on the next frame. To give a widget a plain value and get the edit back, as a
+model or message-based view does, use `withValue value widget`, which returns
+the widget's result and the value it left.
 
-`searchInput'` returns edited text immediately but debounces `respChanged`.
-Store its text on every frame; use the change flag to trigger a search.
+### What a write costs
+
+A frame runs its view once, then solves layout and paints. A write to a Var
+that something earlier in the same view pass already read (with `readVar`, or
+a widget bound to the Var) makes what was drawn from the old value stale, so
+the frame runs the view a second time, without the one-shot input it already
+acted on, before drawing. A write that nothing read first costs nothing
+extra: read a Var below the widgets that edit it and typing into a field runs
+the view once. A widget bound to a Var that nothing else shows repaints only
+itself; a Var that other code read repaints the window, since a view can draw
+anything from a value it read.
+
+A primed widget returns a `Response` where the plain one returns `()`:
+`respChanged` reports an edit, `respSubmitted` reports a commit, and
+`respClicked` reports activation. `respPressed` is a held-button state, not a
+one-frame press event.
+
+`searchInput'` stores its text on every keystroke but debounces `respChanged`;
+use the change flag to trigger a search.
 
 ## Stable identity
 
-Widgets and primitive hooks share an id sequence within a container. Their call order
-must remain stable between frames. Conditional content needs a scope:
+Widgets share an id sequence within a container, and positional `useVar`s
+another. Their call order must remain stable between frames. Conditional
+content needs a scope:
 
 ```haskell
 details :: Bool -> NanoUI ()
@@ -122,7 +149,9 @@ details showDetails = column $ do
 ```
 
 Here `when` comes from `Control.Monad`. The scope consumes one sibling id
-whether its body is empty or not, so `nameField` keeps its state.
+whether its body is empty or not, so `nameField` keeps its state. Since Vars
+count apart from widgets, a widget that comes and goes never moves a
+`useVar`; a `useVar` that comes and goes needs a scope the same way.
 
 Use stable application keys for reorderable lists:
 
@@ -130,8 +159,8 @@ Use stable application keys for reorderable lists:
 names :: [(Int, Text)] -> NanoUI ()
 names entries = column $
   forM_ entries $ \(itemId, name) -> withKey itemId $ do
-    (checked, setChecked) <- useFlag False
-    setChecked =<< checkbox name checked
+    checked <- useVar False
+    checkbox name checked
 ```
 
 Import `forM_` from `Control.Monad` and `Text` from `Data.Text`. Keys must be
@@ -205,14 +234,14 @@ past loads nothing. `visRect` is the part on screen and `visBounds` the
 whole widget. Here `load` registers an image and returns its id:
 
 ```haskell
-lazyImage :: StateCell (Maybe ImageId) -> NanoUI ImageId -> NanoUI ()
-lazyImage pictureCell load = do
-  (picture, setPicture) <- useState pictureCell
+lazyImage :: Var (Maybe ImageId) -> NanoUI ImageId -> NanoUI ()
+lazyImage pictureVar load = do
+  picture <- readVar pictureVar
   let config = defaultSensorConfig {sensorAnticipate = 200, sensorLayout = fixedWH 96 96}
   (vis, _) <- sensorConfigured config $
     maybe (label "Loading") (image (fixedWH 96 96)) picture
   when (becameVisible vis && isNothing picture) $
-    setPicture . Just =<< load
+    writeVar pictureVar . Just =<< load
 ```
 
 During view construction, `respRect` uses recorded geometry from the prior
@@ -574,12 +603,13 @@ is set for the frame after the request, and the session goes on until the
 view calls `quitUi`, which ends it once that frame is drawn:
 
 ```haskell
-(asking, setAsking) <- useFlag False
+asking <- useVar False
 whenM (winCloseRequested <$> askWindow) $
-  if unsaved then setAsking True else quitUi
-_ <- modal asking "Discard your changes?" $ do
+  if unsaved then writeVar asking True else quitUi
+open <- readVar asking
+_ <- modal open "Discard your changes?" $ do
   whenM (button "Discard") quitUi
-  whenM (button "Keep editing") (setAsking False)
+  whenM (button "Keep editing") (writeVar asking False)
 ```
 
 `requestScreenshot` hands its action a `Screenshot` once the frame is on
@@ -642,9 +672,10 @@ its response rectangle, then send separate press and release frames.
 
 `NanoUI.Testing.Harness` supplies `warmup2`, `clickPair`, `runClick`, and
 text-span queries, with `clickPairWith` for another button, as in
-`clickPairWith MouseMiddle base pos`. Its `held` helper stores controlled
-input values outside the hook store, so an automatic hook rebuild does not
-hide a change flag that the test is trying to observe.
+`clickPairWith MouseMiddle base pos`. `held var widget` runs an input on a
+Var and returns its result with the value it left there, and `lastFramePasses`
+says whether the last frame ran its view a second time, which drops the change
+and click flags of that pass's result.
 
 A tooltip's delay runs on the real clock, so a test sets `tooltipDelay = 0`.
 `newWakeSignal` lets a test wait for a background job's wake, and

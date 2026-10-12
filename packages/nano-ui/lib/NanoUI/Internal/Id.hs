@@ -7,6 +7,7 @@ module NanoUI.Internal.Id
   , IdContext (..)
   , initialIdContext
   , idContextWidgetId
+  , scopeIdContext
   , widgetId
   , hashWidgetId
   , mix64
@@ -29,22 +30,30 @@ newtype WidgetId = WidgetId Word64
   deriving stock (Eq, Ord, Show)
   deriving newtype (Hashable, Prim)
 
--- | Parent-path hash and the next sibling's position within that path.
+-- | Parent-path hash, the next sibling widget's position within that path,
+-- and the next positional Var's position, counted separately so widgets
+-- that come and go never move a Var.
 data IdContext = IdContext
   { currentId :: {-# UNPACK #-} !Word64
   , siblingId :: {-# UNPACK #-} !Word64
+  , varSiblingId :: {-# UNPACK #-} !Word64
   }
   deriving stock (Eq, Show)
 
 -- | Root path and sibling position used at the start of each view pass.
 initialIdContext :: IdContext
-initialIdContext = IdContext 0x243F6A8885A308D3 0
+initialIdContext = IdContext 0x243F6A8885A308D3 0 0
+
+-- | A fresh scope at path @p@, with both counts at zero.
+{-# INLINE scopeIdContext #-}
+scopeIdContext :: Word64 -> IdContext
+scopeIdContext p = IdContext p 0 0
 
 -- | Id of the next sibling in this context. A zero hash becomes 1, so
 -- @WidgetId 0@ never names a real widget.
 {-# INLINE idContextWidgetId #-}
 idContextWidgetId :: IdContext -> WidgetId
-idContextWidgetId (IdContext cid sid) =
+idContextWidgetId (IdContext cid sid _) =
   let
     raw = mix64 cid sid
    in
@@ -70,10 +79,11 @@ enterKeyed :: Word64 -> IdContext -> (IdContext, IdContext)
 enterKeyed tag = enterChild tag keyedTag
 
 -- | Advance the parent's sibling counter and derive a child path from the
--- parent path, @seed@ and @tag@.
+-- parent path, @seed@ and @tag@. The child starts both counts at zero; the
+-- parent's Var count is untouched, so a scope takes no Var position.
 {-# INLINE enterChild #-}
 enterChild :: Word64 -> Word64 -> IdContext -> (IdContext, IdContext)
-enterChild seed tag (IdContext pid sib) = (IdContext pid (sib + 1), IdContext (mix64 (mix64 pid seed) tag) 0)
+enterChild seed tag (IdContext pid sib vs) = (IdContext pid (sib + 1) vs, scopeIdContext (mix64 (mix64 pid seed) tag))
 
 -- | Hash the call site's package, module, file, line, and column. Repeated
 -- calls at one source location return the same id; this is not a list-item key.

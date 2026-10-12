@@ -83,7 +83,7 @@ inputTextArea = textField textArea'
 
 textField ::
   FormError FormInput err =>
-  (Text -> NUI.NanoUI (NUI.Response, Text)) -> FieldName -> Text -> Form err Text
+  (NUI.Var Text -> NUI.NanoUI NUI.Response) -> FieldName -> Text -> Form err Text
 textField widget name = captioned name formInputToText FormInputText widget
 
 -- | Checkbox toggle input.
@@ -144,7 +144,7 @@ inputColor name initial = captioned name decode (FormInputText . colorToHex) col
 -- control count as changes.
 captioned ::
   (Eq a, FormError FormInput err) =>
-  FieldName -> (FormInput -> a) -> (a -> FormInput) -> (a -> NUI.NanoUI (NUI.Response, a)) -> a -> Form err a
+  FieldName -> (FormInput -> a) -> (a -> FormInput) -> (NUI.Var a -> NUI.NanoUI NUI.Response) -> a -> Form err a
 captioned name decode encode widget =
   inputWidget (fieldKey name) (Right . decode) (OnChangeOr respChanged) encode (labelled (fieldLabel name) widget)
 

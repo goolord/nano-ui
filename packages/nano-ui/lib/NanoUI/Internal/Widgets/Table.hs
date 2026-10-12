@@ -10,8 +10,10 @@ module NanoUI.Internal.Widgets.Table
   , table
   , tableWith
   , tableConfigured
+  , table'
+  , tableWith'
+  , tableConfigured'
   , simpleTable
-  , useTableSort
   , tableHiddenIndices
   , sortRows
   , Colonnade
@@ -41,7 +43,8 @@ import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
 import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
-import NanoUI.Internal.Hooks (useInt)
+import NanoUI.Internal.Var (Binding (..), bindVarOn)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
@@ -94,12 +97,6 @@ instance HasResponse TableResponse where
 -- | Hidden source-column indices in ascending order.
 tableHiddenIndices :: TableResponse -> [Int]
 tableHiddenIndices = IS.toAscList . tableHiddenCols
-
-packSort :: SortCol -> Int
-packSort (SortCol c dir) = c * 2 + fromEnum dir
-
-unpackSort :: Int -> SortCol
-unpackSort n = SortCol (n `div` 2) (toEnum (n `mod` 2))
 
 clampSortCol :: Int -> SortCol -> SortCol
 clampSortCol n (SortCol idx dir) = SortCol (clamp 0 (max 0 (n - 1)) idx) dir
@@ -328,12 +325,6 @@ nextSortCol cur clicked
   | clicked == sortColIndex cur = SortCol clicked (if sortColDir cur == SortAsc then SortDesc else SortAsc)
   | otherwise = SortCol clicked SortAsc
 
--- | Local sort state and setter. Call in a stable hook position each frame.
-useTableSort :: SortCol -> NanoUI (SortCol, SortCol -> NanoUI ())
-useTableSort initial = do
-  (packed, setPacked) <- useInt (packSort initial)
-  pure (unpackSort packed, setPacked . packSort)
-
 -- | Header resize gesture on column @i@, stored as one Int in the drag slot:
 -- 0 idle, @-(1000 + i)@ resizing. 'useReorder' keeps a reorder drag.
 data HeaderDrag = HeaderIdle | HeaderResize !Int
@@ -386,29 +377,69 @@ colBoxLayout fillInner hasStretch sizes contentWs stored i
     box = (fillH flatLayout) {layoutMinW = max floorW saved}
     fixed w = box {layoutWidth = Fixed w, layoutMaxW = w}
 
--- | Sortable table with resizable, reorderable columns. @key@ tells tables in
--- one scope apart, and the columns are a colonnade over @row@. Pass the
--- current sort; the 'TableResponse' carries the sort after this frame's
--- header clicks, along with the column order and hidden columns.
+-- | Sortable table with resizable, reorderable columns, showing and editing
+-- its sort in a Var: a header click changes it. @key@ tells tables in one
+-- scope apart, and the columns are a colonnade over @row@.
+--
+-- > table "files" cols files app.sort
 {-# INLINE table #-}
-table :: Foldable f => Text -> Colonnade Headed row Text -> f row -> SortCol -> NanoUI TableResponse
+table :: Foldable f => Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI ()
 table = tableConfigured defaultTableConfig id
+
+-- | 'table' returning the 'TableResponse': the column order and hidden
+-- columns along with the response.
+{-# INLINE table' #-}
+table' :: Foldable f => Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI TableResponse
+table' = tableConfigured' defaultTableConfig id
 
 -- | 'table' with a layout modifier.
 {-# INLINE tableWith #-}
-tableWith :: Foldable f => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> SortCol -> NanoUI TableResponse
+tableWith :: Foldable f => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI ()
 tableWith = tableConfigured defaultTableConfig
 
--- | A table of text rows under the given headers.
+-- | 'tableWith' returning the 'TableResponse'.
+{-# INLINE tableWith' #-}
+tableWith' :: Foldable f => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI TableResponse
+tableWith' = tableConfigured' defaultTableConfig
+
+-- | A table of text rows under the given headers, in the order given.
 simpleTable :: Foldable f => [Text] -> f [Text] -> NanoUI TableResponse
 simpleTable headers rows = do
   let cols = mconcat [headed h (\r -> smallAt r i "") | (i, h) <- zip [0 ..] headers]
       indexedRows = map smallArrayFromList (toList rows)
-  table "simple" cols indexedRows (SortCol 0 SortAsc)
+  tableCore defaultTableConfig id "simple" cols indexedRows (SortCol 0 SortAsc)
 
 -- | 'tableWith' with column sizes, frozen rows and columns, and initially
 -- hidden columns.
+{-# INLINE tableConfigured #-}
 tableConfigured ::
+  Foldable f =>
+  TableConfig ->
+  (Layout -> Layout) ->
+  Text ->
+  Colonnade Headed row Text ->
+  f row ->
+  Var SortCol ->
+  NanoUI ()
+tableConfigured cfg f key cols rows v = void (tableConfigured' cfg f key cols rows v)
+
+-- | 'tableConfigured' returning the 'TableResponse'. The rows are ordered
+-- before a header click is read, so a click that changes the sort runs the
+-- view again to show them in the new order.
+tableConfigured' ::
+  Foldable f =>
+  TableConfig ->
+  (Layout -> Layout) ->
+  Text ->
+  Colonnade Headed row Text ->
+  f row ->
+  Var SortCol ->
+  NanoUI TableResponse
+tableConfigured' cfg f key cols rows v =
+  bindVarOn Conservative tableSort v (tableCore cfg f key cols rows)
+
+-- | 'tableConfigured' on a plain sort.
+tableCore ::
   Foldable f =>
   TableConfig ->
   (Layout -> Layout) ->
@@ -417,7 +448,7 @@ tableConfigured ::
   f row ->
   SortCol ->
   NanoUI TableResponse
-tableConfigured cfg f key cols inputRows curSort =
+tableCore cfg f key cols inputRows curSort =
   withKey ("table:" <> key) $ do
     (stateWid, ctx) <- freshWidget
     vWid <- nextId

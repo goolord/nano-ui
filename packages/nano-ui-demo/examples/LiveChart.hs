@@ -10,7 +10,7 @@
 -- the feed runs, never while it is paused. Building the 'Chart' value each
 -- frame is fine; comparing 200 points is cheap.
 --
--- Pause stops calling the stream's hook, and that alone kills the producer.
+-- Pause stops calling 'useStream', and that alone kills the producer.
 -- With nothing running and nothing changing, the loop sleeps: a paused
 -- chart costs no frames at all. A stopped stream forgets its state, so the
 -- view saves the last samples on Pause and hands them back as the stream's
@@ -79,12 +79,12 @@ advance feed =
 
 data App = App
   { appFeed :: !(Stream () Feed)
-  , appSaved :: !(StateCell Feed)
+  , appSaved :: !(Var Feed)
   , appPlots :: !PlotCache
   }
 
 newApp :: IO App
-newApp = App <$> newStream <*> newState emptyFeed <*> newPlotCache
+newApp = App <$> newStream <*> newVar emptyFeed <*> newPlotCache
 
 main :: IO ()
 main = do
@@ -98,24 +98,25 @@ main = do
 
 view :: App -> NanoUI ()
 view app = columnWith (padAll 16 . gap 12 . grow) $ do
-  (running, setRunning) <- useFlag True
-  (saved, setSaved) <- useState (appSaved app)
+  running <- useVar True
+  isRunning <- readVar running
+  saved <- readVar (appSaved app)
   -- While running, the stream is the source of truth; 'saved' only seeds a
   -- restarted producer and is ignored after its first frame. While paused,
-  -- the hook is not called and the saved samples are shown instead.
+  -- 'useStream' is not called and the saved samples are shown instead.
   feed <-
     scope $
-      if running
+      if isRunning
         then useStream (appFeed app) () saved $ \update -> forever $ do
           threadDelay 100000
           update advance
         else pure saved
 
   rowWith (tight . gap 8 . alignMid . fillW) $ do
-    whenM (button (if running then "Pause" else "Resume")) $ do
-      when running (setSaved feed)
-      setRunning (not running)
-    muted (if running then "Live: a sample every 100 ms" else "Paused: the loop is idle")
+    whenM (button (if isRunning then "Pause" else "Resume")) $ do
+      when isRunning (writeVar (appSaved app) feed)
+      writeVar running (not isRunning)
+    muted (if isRunning then "Live: a sample every 100 ms" else "Paused: the loop is idle")
 
   let points = feedPoints feed
   -- A crosshair for reading values off the plot; the response reports the

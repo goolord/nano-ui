@@ -17,7 +17,7 @@
 --   what you choose to animate meanwhile, such as a spinner, does.
 --
 -- Each 'Task' or 'Stream' handle is allocated once in 'newApp', like any
--- other state that a positional hook cannot hold. Build with @-threaded@
+-- other state that 'useVar' cannot hold. Build with @-threaded@
 -- (the examples are) so jobs run while the loop sleeps.
 --
 -- Run it with @cabal run nano-ui-example-tasks@.
@@ -63,15 +63,15 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
 searchSection :: App -> NanoUI ()
 searchSection app = do
   heading "Slow search"
-  (query, setQuery) <- useText ""
-  (committed, setCommitted) <- useText ""
-  (resp, query') <- searchInput' "Find a word" query
-  setQuery query'
+  query <- useVar ""
+  committed <- useVar ""
+  resp <- searchInput' "Find a word" query
   -- searchInput' reports a change once typing pauses, so a fast typist
-  -- starts one job, not one per keystroke. Keying by query' would also work;
-  -- each new key would just kill the job before it.
-  when (respChanged resp) (setCommitted query')
-  status <- useTaskStatus (appSearch app) committed (slowSearch committed)
+  -- starts one job, not one per keystroke. Keying by the query itself would
+  -- also work; each new key would just kill the job before it.
+  when (respChanged resp) (writeVar committed =<< readVar query)
+  key <- readVar committed
+  status <- useTaskStatus (appSearch app) key (slowSearch key)
   -- While a new query runs, TaskRunning carries the previous results, so
   -- the list stays put instead of flashing empty.
   let (hits, running) = case status of
@@ -109,7 +109,8 @@ wordList =
 flakySection :: App -> NanoUI ()
 flakySection app = do
   heading "Flaky request"
-  (attempt, setAttempt) <- useInt 0
+  attemptVar <- useVar (0 :: Int)
+  attempt <- readVar attemptVar
   -- Same input every time, so the attempt number is the key: bumping it is
   -- what reruns the job.
   status <- useTaskStatus (appFlaky app) attempt (flakyRequest attempt)
@@ -120,10 +121,10 @@ flakySection app = do
       label "Contacting the server..."
     TaskDone reply -> rowWith (tight . gap 8 . alignMid) $ do
       label reply
-      whenM (button "Run again") (setAttempt (attempt + 1))
+      whenM (button "Run again") (modifyVar attemptVar (+ 1))
     TaskFailed err _ -> rowWith (tight . gap 8 . alignMid) $ do
       danger (T.pack (displayException err))
-      whenM (button "Retry") (setAttempt (attempt + 1))
+      whenM (button "Retry") (modifyVar attemptVar (+ 1))
 
 -- | Waits, then succeeds or throws on a coin flip. An exception thrown by
 -- the job becomes 'TaskFailed'.
@@ -139,13 +140,14 @@ flakyRequest attempt = do
 progressSection :: App -> NanoUI ()
 progressSection app = do
   heading "Streamed progress"
-  (running, setRunning) <- useFlag False
-  setRunning =<< checkbox "Run" running
-  -- When "Run" is unticked this hook is not called, and that alone kills
+  running <- useVar False
+  checkbox "Run" running
+  isRunning <- readVar running
+  -- When "Run" is unticked 'useStream' is not called, and that alone kills
   -- the producer: there is no stop button to wire up. Ticking it again
   -- starts a fresh producer from the initial value. The scope keeps
   -- anything declared after it on stable ids.
-  scope $ when running $ do
+  scope $ when isRunning $ do
     pct <- useStream (appProgress app) () (0 :: Int) $ \update ->
       forM_ [1 .. 100] $ \i -> do
         threadDelay 50000

@@ -13,10 +13,11 @@
 --
 -- > view :: MarkdownCache -> MarkdownDoc -> NanoUI ()
 -- > view cache doc = do
--- >   (lastLink, setLastLink) <- useText ""
+-- >   lastLink <- useVar ""
 -- >   clicked <- markdown cache doc
--- >   for_ clicked setLastLink
--- >   unless (T.null lastLink) $ label ("Clicked " <> lastLink)
+-- >   for_ clicked (writeVar lastLink)
+-- >   link <- readVar lastLink
+-- >   unless (T.null link) $ label ("Clicked " <> link)
 --
 -- Grow a streamed reply with 'appendMarkdown'. When tokens arrive on a
 -- worker thread, nano-ui's @useStream@ can append each one there:

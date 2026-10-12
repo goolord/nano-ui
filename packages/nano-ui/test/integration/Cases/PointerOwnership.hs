@@ -29,7 +29,7 @@ tests =
 -- with a pinned node (where presses check what covers their widget).
 runColorPickerBarSlackTest :: Context -> IORef Int -> IO ()
 runColorPickerBarSlackTest ctx failed = do
-  ref <- newIORef (colorRGBA 200 40 40 255)
+  ref <- newVar (colorRGBA 200 40 40 255)
   let inp0 = withInputOff 600 500
       ui = columnWith tight $ do
         _ <- buttonWith' (pinAt 500 400 . fixedWH 30 30) "x"
@@ -46,12 +46,12 @@ runColorPickerBarSlackTest ctx failed = do
       -- Down the bar's middle stretch, off hue 0 at either end.
       let p = V2 (hx - 1) (hy + hh * 0.3)
           down = holdAt inp0 (V2 (hx - 1) (hy + hh * 0.5))
-      before <- readIORef ref
+      before <- readVarIO ref
       _ <- runFrame ctx inp0 {inputMousePos = p} ui
       _ <- runFrame ctx (pressAt inp0 p) ui
       _ <- runFrame ctx down ui
       _ <- runFrame ctx (releaseAt down) ui
-      after <- readIORef ref
+      after <- readVarIO ref
       assert failed (after /= before)
     _ -> assert failed False
 
@@ -110,7 +110,7 @@ overlays :: [Overlay]
 overlays =
   [ Overlay
       { ovName = "text-menu"
-      , ovSource = fst <$> textInput' "source text"
+      , ovSource = fst <$> withValue "source text" textInput'
       , -- A right click low in the field and left of the hot point, so the
         -- menu opens down and to the right, over it.
         ovOpen = \src (V2 hx _) inp ->
@@ -121,13 +121,13 @@ overlays =
       }
   , Overlay
       { ovName = "select-dropdown"
-      , ovSource = fst <$> selectWith' fillW (numbered "option" [1 .. 12]) 0
+      , ovSource = fst <$> withValue 0 (selectWith' fillW (numbered "option" [1 .. 12]))
       , ovOpen = clickSource
       , ovRect = spanPanelRect
       }
   , Overlay
       { ovName = "combo-dropdown"
-      , ovSource = fst <$> comboBox' "pick" (numbered "choice" [1 .. 12]) ""
+      , ovSource = fst <$> withValue "" (comboBox' "pick" (numbered "choice" [1 .. 12]))
       , ovOpen = clickSource
       , ovRect = spanPanelRect
       }
@@ -167,43 +167,42 @@ shown = fmap (fmap show)
 victims :: IO [Victim]
 victims = do
   -- The tab bar does not keep its own state, so the test holds it.
-  tabRef <- newIORef (0 :: Int)
-  let tabUi = shown . held tabRef $ \cur ->
-        (\r -> (toResponse r, tabActive r))
-          <$> tabBar' cur [tab i (T.pack ("tab " <> show i)) () | i <- [0 .. 3 :: Int]]
+  tabRef <- newVar (0 :: Int)
+  let tabUi = shown . held tabRef $ \v ->
+        toResponse <$> tabBar' v [tab i (T.pack ("tab " <> show i)) () | i <- [0 .. 3 :: Int]]
   pure
     [ Victim "button" ((,"") <$> button' "victim button") (hotAt spanCenter) noProbe
-    , Victim "checkbox" (shown (checkbox' "victim checkbox" False)) (hotAt spanCenter) noProbe
+    , Victim "checkbox" (shown (withValue False (checkbox' "victim checkbox"))) (hotAt spanCenter) noProbe
     , -- The last option.
       Victim
         "radio"
-        (shown (radio' ["one", "two", "three"] 0))
+        (shown (withValue 0 (radio' ["one", "two", "three"])))
         (hotAt (\(Rect x y w h) -> V2 (x + w / 2) (y + h - 6)))
         noProbe
     , Victim
         "slider"
-        (shown (slider' 0 100 50))
+        (shown (withValue 50 (slider' 0 100)))
         (hotAt (\(Rect x y w h) -> V2 (x + w * 0.8) (y + h / 2)))
         noProbe
-    , Victim "knob" (shown (knobWith' id 36 0 100 50)) (hotAt spanCenter) noProbe
+    , Victim "knob" (shown (withValue 50 (knobWith' id 36 0 100))) (hotAt spanCenter) noProbe
     , Victim
         "color-picker"
-        (shown (colorPicker' (colorRGBA 200 40 40 255)))
+        (shown (withValue (colorRGBA 200 40 40 255) colorPicker'))
         (hotAt (spanCenter . colorPickerSvSquare))
         noProbe
     , -- The up arrow.
       Victim
         "numeric-stepper"
-        (shown (numericInput' 5))
+        (shown (withValue 5 numericInput'))
         (hotAt (\(Rect x y w h) -> V2 (x + w - 8) (y + h / 4)))
         noProbe
-    , Victim "text-input" (shown (textInput' "victim text")) (hotAt spanCenter) caretProbe
+    , Victim "text-input" (shown (withValue "victim text" textInput')) (hotAt spanCenter) caretProbe
     , Victim
         "text-area"
-        (shown (textAreaWith' (fixedH 120) (T.unlines (replicate 30 "victim area line"))))
+        (shown (withValue (T.unlines (replicate 30 "victim area line")) (textAreaWith' (fixedH 120))))
         (hotAt spanCenter)
         areaProbe
-    , Victim "select" (shown (selectWith' fillW ["a", "b", "c"] 0)) (hotAt spanCenter) selectProbe
+    , Victim "select" (shown (withValue 0 (selectWith' fillW ["a", "b", "c"]))) (hotAt spanCenter) selectProbe
     , -- The second tab.
       Victim "tab-bar" tabUi (hotAt (\(Rect x y _ h) -> V2 (x + 90) (y + h / 2))) noProbe
     , Victim
@@ -220,10 +219,11 @@ victims = do
     , Victim
         "table-columns"
         ( do
-            (sort, _) <- useTableSort (SortCol 0 SortAsc)
+            sortVar <- useVar (SortCol 0 SortAsc)
+            sort <- readVar sortVar
             let rows = [(name, "value") | name <- numbered "row" [1 .. 4]]
             (\r -> (toResponse r, show (tableSort r, tableColOrder r)))
-              <$> tableWith (fixedH 120) "victim table" (headed "Name" fst <> headed "Value" snd) rows sort
+              <$> tableWith' (fixedH 120) "victim table" (headed "Name" fst <> headed "Value" snd) rows (Var sort)
         )
         -- On the boundary between the two headers, where a press resizes.
         ( \ctx r -> do
@@ -398,7 +398,7 @@ runPointerRoutingLintTest _ failed = do
 runPointerCaptureTest :: Context -> IORef Int -> IO ()
 runPointerCaptureTest ctx failed = do
   let ui = do
-        s <- columnWith (fixedW 320) (slider' 0 100 50)
+        s <- columnWith (fixedW 320) (withValue 50 (slider' 0 100))
         (_, b) <- window True "Capture window" (columnWith (fixedWH 300 200) (button' "inside"))
         pure (s, b)
       frame inp = (\(a, _, _) -> a) <$> runFrame ctx inp ui

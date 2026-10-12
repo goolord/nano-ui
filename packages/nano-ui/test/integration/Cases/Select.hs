@@ -25,7 +25,7 @@ tests =
 runSlidersDragApartTest :: Context -> IORef Int -> IO ()
 runSlidersDragApartTest ctx failed = do
   let inp0 = withInput 300 120
-      ui = column ((,) <$> slider' 0 100 20 <*> slider' 0 100 20)
+      ui = column ((,) <$> withValue 20 (slider' 0 100) <*> withValue 20 (slider' 0 100))
   (_, (second, _)) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect second
       Rect tx ty tw th = sliderTrackBounds rx ry rw rh
@@ -40,8 +40,8 @@ runSlidersDragApartTest ctx failed = do
 -- steady frame leaves nothing to redraw.
 runRadioGroupsApartTest :: Context -> IORef Int -> IO ()
 runRadioGroupsApartTest ctx failed = do
-  aRef <- newIORef (0 :: Int)
-  bRef <- newIORef (2 :: Int)
+  aRef <- newVar (0 :: Int)
+  bRef <- newVar (2 :: Int)
   let inp0 = withInput 200 240
       ui = column ((,) <$> held aRef (radio' ["x", "y"]) <*> held bRef (radio' ["p", "q", "r"]))
   _ <- warmup2 ctx inp0 ui
@@ -50,15 +50,15 @@ runRadioGroupsApartTest ctx failed = do
   spans <- collectTextSpans ctx
   assertJust failed (spanRectOf "q" spans) $ \r -> do
     _ <- runClick ctx inp0 ui (spanCenter r)
-    assertEq failed 0 =<< readIORef aRef
-    assertEq failed 1 =<< readIORef bRef
+    assertEq failed 0 =<< readVarIO aRef
+    assertEq failed 1 =<< readVarIO bRef
 
 -- | A slider given a value outside its range shows it clamped and settles,
 -- rather than adopting the value afresh on every frame.
 runSliderOutOfRangeSettlesTest :: Context -> IORef Int -> IO ()
 runSliderOutOfRangeSettlesTest ctx failed = do
   let inp0 = withInput 300 80
-      ui = column (slider' 0 1 1.2)
+      ui = column (withValue 1.2 (slider' 0 1))
   _ <- warmup2 ctx inp0 ui
   ((resp, v), _, dirty) <- runFrame ctx inp0 ui
   assertEq failed v 1
@@ -68,7 +68,7 @@ runSliderOutOfRangeSettlesTest ctx failed = do
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = withInput 300 80
-      ui = column (slider' 0 100 50)
+      ui = column (withValue 50 (slider' 0 100))
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       trackMid = spanCenter (sliderTrackBounds rx ry rw rh)
@@ -82,7 +82,7 @@ runSliderCursorTest ctx failed = do
 
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
 runSelectOverlayDamageTest ctx failed = do
-  let ui = column (select' ["Low", "Medium", "High"] 0)
+  let ui = column (withValue 0 (select' ["Low", "Medium", "High"]))
       inp0 = (withInput 640 480) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let pos = centerOf resp
@@ -106,7 +106,7 @@ runSelectOverlayDamageTest ctx failed = do
 runSelectDropdownSpanColorsTest :: Context -> IORef Int -> IO ()
 runSelectDropdownSpanColorsTest ctx failed = do
   theme <- getTheme ctx
-  let ui = column (select' ["Low", "Medium", "High"] 0)
+  let ui = column (withValue 0 (select' ["Low", "Medium", "High"]))
       inp0 = (withInput 640 480) {inputMousePos = V2 600 400}
   (resp, _) <- warmup2 ctx inp0 ui
   let open = snd (clickPair inp0 (centerOf resp))
@@ -123,7 +123,7 @@ runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
   let inp0 = withInput 40 12
       items = [TreeItem "alpha" [], TreeItem "beta" []]
-      ui = column (tree' "t" items 0)
+      ui = column (withValue 0 (tree' "t" items))
   (resp, sel0) <- warmup2 ctx inp0 ui
   assertEq failed sel0 0
   let Rect rx ry _rh rh = respRect resp
@@ -136,7 +136,7 @@ runTreeSelectTest ctx failed = do
 -- | A click moves a radio group's mark on the frame it lands.
 runRadioClickMarksTest :: Context -> IORef Int -> IO ()
 runRadioClickMarksTest ctx failed = do
-  selRef <- newIORef (0 :: Int)
+  selRef <- newVar (0 :: Int)
   let inp0 = withInput 200 120
       ui = column (held selRef (radio' ["one", "two", "three"]))
   _ <- warmup2 ctx inp0 ui
@@ -151,7 +151,7 @@ runRadioClickMarksTest ctx failed = do
 -- Enter collapses the selected parent.
 runTreeKeyboardTest :: Context -> IORef Int -> IO ()
 runTreeKeyboardTest ctx failed = do
-  selectedRef <- newIORef 0
+  selectedRef <- newVar 0
   let items = SA.smallArrayFromList [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
       ui = column (held selectedRef (tree' "k" items))
       inp0 = withInput 40 12
@@ -175,7 +175,7 @@ runTreeKeyboardTest ctx failed = do
 -- frames. Reducer adapters must therefore emit only once per selection change.
 runSelectChangeOnceTest :: Context -> IORef Int -> IO ()
 runSelectChangeOnceTest ctx failed = do
-  indexRef <- newIORef 1
+  indexRef <- newVar 1
   let
     inp0 = withInput 320 200
     ui = held indexRef (select' ["Low", "Medium", "High"])
@@ -201,7 +201,7 @@ runSelectChangeOnceTest ctx failed = do
 runSelectDragToSelectTest :: Context -> IORef Int -> IO ()
 runSelectDragToSelectTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = select' ["Low", "Medium", "High"] 1
+      ui = withValue 1 (select' ["Low", "Medium", "High"])
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw _ = respRect resp
@@ -229,7 +229,7 @@ runSelectDragToSelectTest ctx failed = do
 
 runSelectKeyboardTest :: Context -> IORef Int -> IO ()
 runSelectKeyboardTest ctx failed = do
-  indexRef <- newIORef 1
+  indexRef <- newVar 1
   let inp0 = withInput 320 200
       ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
   (resp, idx0) <- warmup2 ctx inp0 ui
@@ -259,7 +259,7 @@ runSelectKeyboardTest ctx failed = do
 -- select focused.
 runSelectCloseKeepsFocusTest :: Context -> IORef Int -> IO ()
 runSelectCloseKeepsFocusTest ctx failed = do
-  indexRef <- newIORef 1
+  indexRef <- newVar 1
   let inp0 = withInput 320 200
       ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
       listed spans = any (\(_, txt, _, _, _) -> txt == "Low") spans

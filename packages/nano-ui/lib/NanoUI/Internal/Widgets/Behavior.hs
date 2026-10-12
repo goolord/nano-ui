@@ -127,12 +127,12 @@ data Reorder = Reorder
 -- several rows. Store 'reorderOrder'; releasing outside every item drops
 -- at the nearest one too.
 --
--- Allocate @orderCell <- newState [0 .. 4]@ during component setup.
+-- Make @orderVar <- newVar [0 .. 4]@ during component setup.
 --
--- > (order, setOrder) <- useState orderCell
+-- > order <- readVar orderVar
 -- > drawn <- forM order $ \i -> (i,) <$> chip i
 -- > r <- useReorder order drawn
--- > setOrder (reorderOrder r)
+-- > writeVar orderVar (reorderOrder r)
 --
 -- Only an owned press starts the drag; clipping, covering controls and
 -- disabled scopes are respected. Geometry comes from the response's last layout.

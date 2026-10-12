@@ -54,7 +54,7 @@ runAdornedFieldTest ctx failed = do
         { ticAdornments = A.leading (A.iconSized 16 doc) <> A.trailing (A.affix "kg")
         , ticLayout = fixedW 240 (ticLayout defaultTextInputConfig)
         }
-    ui = column (textInputConfigured' cfg "12")
+    ui = column (withValue "12" (textInputConfigured' cfg))
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   [iconR@(Rect _ _ iw ih), unitR] <- adornmentRects ctx resp
@@ -83,7 +83,7 @@ runAdornedFieldAffixChangeTest ctx failed = do
       column $
         textInputConfigured'
           defaultTextInputConfig {ticAdornments = A.trailing (A.affix unit), ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)}
-          value
+          (Var value)
     layoutWith unit = do
       _ <- warmup2 ctx inp0 (ui unit)
       spans <- collectTextSpans ctx
@@ -159,7 +159,7 @@ runTextInputClickStartTest :: Context -> IORef Int -> IO ()
 runTextInputClickStartTest ctx failed = do
   let
     inp0 = withInput 400 200
-    ui = column (textInput' "12")
+    ui = column (withValue "12" textInput')
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect x y _ h = respRect resp
   _ <- runClick ctx inp0 ui (V2 (x + 2) (y + h / 2))
@@ -184,7 +184,7 @@ runAdornedViewsTest ctx failed = do
         , ticLayout = fixedW 260 (ticLayout defaultTextInputConfig)
         }
     ui = column $ do
-      (field, _) <- textInputConfigured' cfg value
+      (field, _) <- withValue value (textInputConfigured' cfg)
       saving <- buttonConfigured' defaultButtonConfig {bcAdornments = A.leading (A.view (void (spinnerWith' id 14)))} "Saving"
       pure (field, saving)
   (field, saving) <- warmup2 ctx inp0 ui
@@ -222,7 +222,7 @@ runAdornedFieldControlTest ctx failed = do
               <> A.trailing (A.control (whenM (buttonWith tight "Show") (liftIO (modifyIORef' showClicks (+ 1)))))
         , ticLayout = fixedW 260 (ticLayout defaultTextInputConfig)
         }
-    ui = column ((,) <$> textInputConfigured' cfg "ab" <*> textInput' "bb")
+    ui = column ((,) <$> withValue "ab" (textInputConfigured' cfg) <*> withValue "bb" textInput')
   ((field, _), (other, _)) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   Just showR <- pure (spanRectOf "Show" spans)
@@ -299,7 +299,7 @@ runAdornmentKeyboardInertTest ctx failed = do
   let inp = withInputOff 600 300
       decorative = do
         whenM (button "Display only") (liftIO (modifyIORef' clicks (+ 1)))
-        (field, _) <- textInput' "Decoration"
+        (field, _) <- withValue "Decoration" textInput'
         liftIO (writeIORef childId (respId field))
       ui = column $ do
         outer <- buttonContent' decorative
@@ -326,7 +326,7 @@ runSearchSpanClipTest :: Context -> IORef Int -> IO ()
 runSearchSpanClipTest ctx failed = do
   let
     value = T.replicate 60 "9"
-    ui = column (searchInputConfigured' defaultSearchInputConfig {sicLayout = fixedW 200 (sicLayout defaultSearchInputConfig)} value)
+    ui = column (withValue value (searchInputConfigured' defaultSearchInputConfig {sicLayout = fixedW 200 (sicLayout defaultSearchInputConfig)}))
   (field, _) <- warmup2 ctx (withInputOff 400 200) ui
   [clip] <- spanClips value <$> collectTextSpans ctx
   assert failed (rectRight clip + 15 <= rectRight (respRect field))

@@ -19,6 +19,7 @@ import NanoUI.Backend (emptyInput, runNanoUI)
 import NanoUI.Form
 import NanoUI.Form.Internal.Backend (updateFieldInput)
 import NanoUI.Testing (collectTextSpans, newContext, runFrame)
+import NanoUI.Var (peekVar)
 import Scope (check, runScopeTests)
 import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
 
@@ -67,9 +68,10 @@ main = do
           decodeText
           OnChange
           FormInputText
-          ( \value ->
+          ( \v -> do
               NUI.label "Visible caption"
-                >> pure (mempty, if value == "initial" then "edited" else value)
+              NUI.modifyVar v (\value -> if value == "initial" then "edited" else value)
+              pure mempty
           )
           "initial"
         <*> inputWidget
@@ -104,9 +106,11 @@ main = do
         decodeText
         (OnlyWhen NUI.respSubmitted)
         FormInputText
-        ( \value -> do
+        ( \v -> do
+            value <- peekVar v
             submitted <- NUI.liftIO (writeIORef shown value >> readIORef commitNow)
-            pure (NUI.setSubmitted submitted mempty, if value == "a" then "ab" else value)
+            NUI.modifyVar v (\x -> if x == "a" then "ab" else x)
+            pure (NUI.setSubmitted submitted mempty)
         )
         "a"
     runCommit = runNanoUI commitCtx emptyInput (runNanoForm commitOwner "commit" commitForm)

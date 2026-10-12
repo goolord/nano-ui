@@ -45,7 +45,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Id (IdContext (..), WidgetId (..), enterScope, hashWidgetId, mix64, scopeTag)
+import NanoUI.Internal.Id (WidgetId (..), enterScope, hashWidgetId, initialIdContext, mix64, scopeIdContext, scopeTag)
+import NanoUI.Internal.Id.Cursor (readIdCursor, writeIdCursor)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, inertView, localInput, nextId, liftIO, withContext, withIdFrame)
@@ -237,11 +238,11 @@ containerResponse nt layout child = do
 -- clicks between children go to the area. Children do not cover the area,
 -- so hover stays true while the pointer is over them:
 --
--- > (hovered, setHovered) <- useFlag False
+-- > hovered <- useVar False
 -- > (_, item) <- mouseArea (fillW . gap 6) $ do
 -- >   label name
--- >   when hovered (void (button "Delete"))
--- > setHovered (respHovered item)
+-- >   whenM (readVar hovered) (void (button "Delete"))
+-- > writeVar hovered (respHovered item)
 -- > when (respClickedWith MouseMiddle item) (openInNewTab name)
 mouseArea :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
 mouseArea f body = do
@@ -258,14 +259,19 @@ withContainerNode scoped idx child = do
   (stack, parentIds) <- liftIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     writeIORef (ctxContainerStack ctx) (idx : stack)
-    ids <- readIORef (ctxIdContext ctx)
-    let !(!parentIds, !childIds) = if scoped then enterScope scopeTag ids else (ids, ids)
-    writeIORef (ctxIdContext ctx) childIds
+    parentIds <-
+      if scoped
+        then do
+          ids <- readIdCursor (ctxIdCursor ctx)
+          let !(!parentIds, !childIds) = enterScope scopeTag ids
+          writeIdCursor (ctxIdCursor ctx) childIds
+          pure parentIds
+        else pure initialIdContext
     pure (stack, parentIds)
   r <- child
   liftIO $ do
     writeIORef (ctxContainerStack ctx) stack
-    when scoped $ writeIORef (ctxIdContext ctx) parentIds
+    when scoped $ writeIdCursor (ctxIdCursor ctx) parentIds
   pure r
 
 -- | Run @child@ inside the node of widget @wid@, just added, in the id scope
@@ -276,7 +282,7 @@ withWidgetChildren wid@(WidgetId w) child = do
   ctx <- askContext
   mIdx <- liftIO (lookupNodeByWidgetId (ctxNodeArena ctx) wid)
   forM mIdx $ \idx ->
-    withContainerNode False idx (withIdFrame (\ids -> (ids, IdContext (mix64 w scopeTag) 0)) child)
+    withContainerNode False idx (withIdFrame (\ids -> (ids, scopeIdContext (mix64 w scopeTag))) child)
 
 -- | A floating panel (popup, modal, window): its node attaches to the root
 -- layer, and @body@ runs as a layer of its own, with the pointer when the

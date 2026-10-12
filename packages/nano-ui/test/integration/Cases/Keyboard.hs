@@ -38,22 +38,22 @@ runKeyboardDisabledTest _ctx failed = do
         assertEq failed
           (IM.lookup (intKey wid) (storeText st))
           (IM.lookup (intKey wid) (storeText afterStore))
-  check (checkbox' "Disabled" False) (keyInp KeyEnter inp)
-  check (checkbox' "Disabled" False) (spaceInp inp)
-  check (slider' 0 100 50) (keyInp KeyRight inp)
-  check (toggleSwitchWith' id False) (spaceInp inp)
-  check (textInput' "initial") (inp {inputChars = "x"})
-  check (textArea' "initial") (inp {inputChars = "x"})
-  check (searchInput' "Search" "initial") (inp {inputChars = "x"})
-  check (comboBox' "Choose" ["initial", "other"] "initial") (inp {inputChars = "x"})
+  check (withValue False (checkbox' "Disabled")) (keyInp KeyEnter inp)
+  check (withValue False (checkbox' "Disabled")) (spaceInp inp)
+  check (withValue 50 (slider' 0 100)) (keyInp KeyRight inp)
+  check (withValue False (toggleSwitchWith' id)) (spaceInp inp)
+  check (withValue "initial" textInput') (inp {inputChars = "x"})
+  check (withValue "initial" textArea') (inp {inputChars = "x"})
+  check (withValue "initial" (searchInput' "Search")) (inp {inputChars = "x"})
+  check (withValue "initial" (comboBox' "Choose" ["initial", "other"])) (inp {inputChars = "x"})
   check (do r <- button' "Disabled"; pure (r, respClicked r)) (keyInp KeyEnter inp)
 
 runKeyboardModalEligibilityTest :: Context -> IORef Int -> IO ()
 runKeyboardModalEligibilityTest ctx failed = do
   let inp = withInputOff 400 300
       ui = column $ do
-        outside <- checkbox' "Outside" False
-        (_, inside) <- modal True "Modal" (checkbox' "Inside" False)
+        outside <- withValue False (checkbox' "Outside")
+        (_, inside) <- modal True "Modal" (withValue False (checkbox' "Inside"))
         pure (outside, inside)
   ((outside, inside), _, _) <- runFrame ctx inp ui
   writeIORef (ctxFocusId ctx) (respId (fst outside))
@@ -88,7 +88,7 @@ runKeyboardButtonTest ctx failed = do
 -- | A focused checkbox toggles with Space and Enter.
 runKeyboardCheckboxTest :: Context -> IORef Int -> IO ()
 runKeyboardCheckboxTest ctx failed = do
-  checkedRef <- newIORef False
+  checkedRef <- newVar False
   let
     inp0 = withInputOff 200 100
     ui = column (held checkedRef (checkbox' "Opt"))
@@ -101,7 +101,7 @@ runKeyboardCheckboxTest ctx failed = do
 -- | A focused slider steps with the arrow keys.
 runKeyboardSliderTest :: Context -> IORef Int -> IO ()
 runKeyboardSliderTest ctx failed = do
-  valueRef <- newIORef 50
+  valueRef <- newVar 50
   let inp0 = withInputOff 300 80
       ui = column (held valueRef (slider' 0 100))
   (_, v0) <- warmup2 ctx inp0 ui
@@ -119,7 +119,7 @@ runKeyboardSliderTest ctx failed = do
 -- | A focused radio group changes selection with the arrow keys.
 runKeyboardRadioTest :: Context -> IORef Int -> IO ()
 runKeyboardRadioTest ctx failed = do
-  selectedRef <- newIORef 0
+  selectedRef <- newVar 0
   let inp0 = withInputOff 200 160
       ui = column (held selectedRef (radio' ["A", "B", "C"]))
   (_, sel0) <- warmup2 ctx inp0 ui
@@ -135,7 +135,7 @@ runKeyboardRadioTest ctx failed = do
 -- | A toggle switch flips with Space and Enter while focused, and on click.
 runKeyboardToggleTest :: Context -> IORef Int -> IO ()
 runKeyboardToggleTest ctx failed = do
-  onRef <- newIORef False
+  onRef <- newVar False
   let inp0 = withInputOff 200 100
       ui = column (held onRef (toggleSwitchWith' id))
   (resp0, v0) <- warmup2 ctx inp0 ui
@@ -164,7 +164,7 @@ runKeyboardTabHeaderTest :: Context -> IORef Int -> IO ()
 runKeyboardTabHeaderTest ctx failed = do
   let inp0 = withInputOff 300 100
       ui cur =
-        tabs cur
+        fmap tabActive . tabs' (Var cur) $
           [ tab KBA "Alpha" (label "BodyA")
           , tab KBB "Beta" (label "BodyB")
           ]

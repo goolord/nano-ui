@@ -1,12 +1,16 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+
 module Cases.State (tests) where
 
 import Spec
+import Control.Exception (ErrorCall (..), throwIO, try)
 import Data.ByteString qualified as BS
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import Data.Primitive.SmallArray qualified as SA
+import GHC.Generics (Generic)
 import NanoUI.Internal.Context (Context (..), intKey, lookupImageUv)
 import NanoUI.Internal.Store (WidgetStore (..))
 import NanoUI.Shortcut qualified as Shortcut
@@ -15,8 +19,13 @@ tests :: [Spec]
 tests =
   [ spec "controlled-state" runControlledStateTest
   , spec "controlled-inputs" runControlledInputsTest
-  , spec "hook-state" runHookStateTest
-  , spec "typed-state-lifecycle" runTypedStateTest
+  , spec "var-slots" runVarSlotTest
+  , spec "var-slot-identity" runVarSlotIdentityTest
+  , spec "var-lifecycle" runVarLifecycleTest
+  , spec "var-focus" runVarFocusTest
+  , spec "var-map" runVarMapTest
+  , spec "var-shared" runVarSharedTest
+  , spec "var-abort" runVarAbortTest
   , spec "collection-api" runCollectionApiTest
   ]
 
@@ -28,9 +37,9 @@ runCollectionApiTest ctx failed = do
   assertEq failed [9, 2, 7] =<< readIORef seen
   ((emptySelect, emptyRadio, combo), _, _) <- runFrame ctx (withInputOff 300 200) $
     withKey ("collection-options" :: Text) $ column $ do
-      selectIndex <- select (SA.emptySmallArray :: SA.SmallArray Text) 5
-      radioIndex <- radio (Seq.empty :: Seq.Seq Text) (-1)
-      comboValue <- comboBox "Choose" (Seq.fromList ["Alpha", "Beta"]) "Beta"
+      selectIndex <- (snd <$> withValue 5 (select (SA.emptySmallArray :: SA.SmallArray Text)))
+      radioIndex <- (snd <$> withValue (-1) (radio (Seq.empty :: Seq.Seq Text)))
+      comboValue <- (snd <$> withValue "Beta" (comboBox "Choose" (Seq.fromList ["Alpha", "Beta"])))
       pure (selectIndex, radioIndex, comboValue)
   assertEq failed 0 emptySelect
   assertEq failed 0 emptyRadio
@@ -47,10 +56,10 @@ runControlledStateTest ctx failed = do
     inp = withInputOff 300 200
     ui checked text value = column $ do
       expectedId <- currentId
-      (check, checked') <- checkbox' "Controlled" checked
+      (check, checked') <- withValue checked (checkbox' "Controlled")
       when (respChanged check) (liftIO (modifyIORef' callbacks (<> [checked'])))
-      (field, _) <- textInput' text
-      (range, _) <- slider' 0 100 value
+      (field, _) <- withValue text textInput'
+      (range, _) <- withValue value (slider' 0 100)
       pure (expectedId, check, field, range)
   _ <- runFrame ctx inp (ui True "initial" 25)
   ((expectedId, check, field, range), _, _) <-
@@ -80,8 +89,8 @@ runControlledInputsTest ctx failed = do
   let
     inp = withInputOff 300 200
     ui (checked, text) = column $ do
-      checked' <- checkbox "Opt" checked
-      text' <- textInput text
+      checked' <- (snd <$> withValue checked (checkbox "Opt"))
+      text' <- (snd <$> withValue text textInput)
       pure (checked', text')
   _ <- warmup2 ctx inp (ui (False, "one"))
   forM_
@@ -104,74 +113,176 @@ runControlledInputsTest ctx failed = do
       spans <- collectTextSpans ctx
       assert failed (any (\(_, txt, _, _, _) -> txt == snd expected) spans)
 
-runHookStateTest :: Context -> IORef Int -> IO ()
-runHookStateTest ctx failed = do
+-- | Positional Vars of every slot type keep a value across frames; an equal
+-- write leaves the loop asleep, a changed one outside a frame wakes it.
+runVarSlotTest :: Context -> IORef Int -> IO ()
+runVarSlotTest ctx failed = do
   let
     inp = withInputOff 300 100
-    check :: (Eq a, Show a) => Text -> NanoUI (a, a -> NanoUI ()) -> a -> a -> IO ()
-    check key hook initial changed = do
-      let
-        evaluate = runNanoUI ctx inp (withKey key hook)
-      (value, setValue) <- evaluate
+    check :: (Eq a, Show a) => Text -> NanoUI (Var a) -> a -> a -> IO ()
+    check key slot initial changed = do
+      let evaluate = runNanoUI ctx inp (withKey key (slot >>= \v -> (v,) <$> readVar v))
+      (v, value) <- evaluate
       assertEq failed initial value
       clearDirty ctx
-      runNanoUI ctx inp (setValue initial)
+      runNanoUI ctx inp (writeVar v initial)
       assertEq failed False =<< isDirty ctx
-
-      runNanoUI ctx inp (setValue changed)
+      runNanoUI ctx inp (writeVar v changed)
       assertEq failed True =<< isDirty ctx
-      assertEq failed changed . fst =<< evaluate
+      assertEq failed changed . snd =<< evaluate
+  check "int" (useVar (0 :: Int)) 0 12
+  check "float" (useVar (0 :: Float)) 0 1.5
+  check "double" (useVar (0 :: Double)) 0 2.5
+  check "text" (useVar ("initial" :: Text)) "initial" "changed"
+  check "flag" (useVar False) False True
+  check "enum" (useEnumVar LT) LT GT
+  check "sort" (useVar (SortCol 0 SortAsc)) (SortCol 0 SortAsc) (SortCol 2 SortDesc)
 
-      -- Reuse the original setter: comparing against its captured initial
-      -- value would incorrectly discard this update back to the initial.
-      runNanoUI ctx inp (setValue initial)
-      assertEq failed initial . fst =<< evaluate
-  check "int" (useInt 0) 0 12
-  check "float" (useFloat 0) 0 1.5
-  check "text" (useText "initial") "initial" "changed"
-  check "flag" (useFlag False) False True
-  check "enum" (useEnum LT) LT GT
-  cell <- newState (0 :: Int, False)
-  check "typed" (useState cell) (0, False) (12, True)
-  check "table-sort" (useTableSort (SortCol 0 SortAsc)) (SortCol 0 SortAsc) (SortCol 2 SortDesc)
-
--- Cells survive hiding and keyed reordering, while independent instances do
--- not share state. A keyboard event must run once across the mirror rebuild.
-runTypedStateTest :: Context -> IORef Int -> IO ()
-runTypedStateTest ctx failed = do
-  left <- newState (0 :: Int)
-  right <- newState (0 :: Int)
+-- | A slot that finds a value of another type starts over, and widgets that
+-- come and go before a positional Var leave it alone.
+runVarSlotIdentityTest :: Context -> IORef Int -> IO ()
+runVarSlotIdentityTest ctx failed = do
   let inp = withInputOff 300 100
-      readCell cell = fst <$> useState cell
-      item :: Text -> StateCell Int -> NanoUI Int
-      item name cell = withKey name $ do
-        n <- readCell cell
+      asInt = runNanoUI ctx inp (withKey ("slot" :: Text) (readVar =<< useVar (5 :: Int)))
+      asText = runNanoUI ctx inp (withKey ("slot" :: Text) (readVar =<< useVar ("five" :: Text)))
+  assertEq failed 5 =<< asInt
+  _ <- runNanoUI ctx inp (withKey ("slot" :: Text) (useVar (5 :: Int) >>= \v -> writeVar v 9))
+  assertEq failed 9 =<< asInt
+  assertEq failed "five" =<< asText
+  assertEq failed 5 =<< asInt
+  let view extra = column $ do
+        when extra (void (button "extra"))
+        n <- useVar (0 :: Int)
+        r <- button' "+"
+        when (respClicked r) (modifyVar n (+ 1))
+        (r,) <$> readVar n
+  (r0, _) <- warmup2 ctx inp (view False)
+  (_, after) <- runClick ctx inp (view False) (centerOf r0)
+  assertEq failed 1 after
+  (_, shownWithExtra) <- warmup2 ctx inp (view True)
+  assertEq failed 1 shownWithExtra
+
+-- | Owned Vars survive hiding and keyed reordering, independent ones do not
+-- share state, and a key press runs once even when its write reruns the view.
+runVarLifecycleTest :: Context -> IORef Int -> IO ()
+runVarLifecycleTest ctx failed = do
+  left <- newVar (0 :: Int)
+  right <- newVar (0 :: Int)
+  let inp = withInputOff 300 100
+      item :: Text -> Var Int -> NanoUI Int
+      item name v = withKey name $ do
+        n <- readVar v
         label (T.pack (show n))
         pure n
       view = do
-        n <- readCell left
+        n <- readVar left
         label (T.pack (show n))
         whenM (shortcut (Shortcut.key 'a')) $ do
-          modifyState left (+ 1)
-          modifyState left (+ 1)
-        pure n
+          modifyVar left (+ 1)
+          modifyVar left (+ 1)
+        readVar left
   _ <- warmup2 ctx inp view
   (n, _, _) <- runFrame ctx (keyInp (KeyChar 'a') inp) view
   assertEq failed 2 n
+  assertEq failed 2 =<< lastFramePasses ctx
   assertEq failed DamageFull =<< takeDamage ctx
   spans <- collectTextSpans ctx
   assert failed (any (\(_, text, _, _, _) -> text == "2") spans)
   (_, _, dirty) <- runFrame ctx inp view
   assertEq failed False dirty
   assert failed . damageIsEmpty =<< takeDamage ctx
-  (_, setLeft) <- runNanoUI ctx inp (useState left)
-  runNanoUI ctx inp (modifyState left (+ 3) >> setLeft 0)
-  assertEq failed 0 =<< runNanoUI ctx inp (readCell left)
-  runNanoUI ctx inp (modifyState left (+ 7))
-  (before, _, _) <- runFrame ctx inp ((,) <$> item ("left" :: Text) left <*> item "right" right)
-  _ <- runFrame ctx inp (item ("right" :: Text) right)
-  (after, _, _) <- runFrame ctx inp ((,) <$> item ("right" :: Text) right <*> item "left" left)
+  runNanoUI ctx inp (modifyVar left (+ 3) >> writeVar left 0)
+  assertEq failed 0 =<< readVarIO left
+  writeVarIO left 7
+  (before, _, _) <- runFrame ctx inp ((,) <$> item "left" left <*> item "right" right)
+  _ <- runFrame ctx inp (item "right" right)
+  (after, _, _) <- runFrame ctx inp ((,) <$> item "right" right <*> item "left" left)
   assertEq failed (7, 0) before
   assertEq failed (0, 7) after
-  fresh <- newState (0 :: Int)
-  assertEq failed 0 =<< runNanoUI ctx inp (readCell fresh)
+
+data Item = Item {rowKey :: !Int, rowName :: !Text, rowDone :: !Bool}
+  deriving (Eq, Show, Generic)
+
+newtype Items = Items {rows :: [Item]}
+  deriving (Eq, Show, Generic)
+
+-- | Field focus and element Vars write through to the whole value, and an
+-- element's Var follows its key when the list is reordered.
+runVarFocusTest :: Context -> IORef Int -> IO ()
+runVarFocusTest ctx failed = do
+  model <- newVar (Items [Item 1 "one" False, Item 2 "two" False, Item 3 "three" False])
+  let inp = withInputOff 400 300
+      view = column $ forEachVar rowKey model.rows $ \item -> do
+        checkbox "done" item.rowDone
+        label =<< readVar item.rowName
+  _ <- warmup2 ctx inp view
+  runNanoUI ctx inp (modifyVar model.rows reverse)
+  _ <- warmup2 ctx inp view
+  els <- runNanoUI ctx inp (withElemVars rowKey model.rows (\xs at -> pure (map at xs)))
+  case els of
+    first : _ -> runNanoUI ctx inp (writeVar first.rowName "THREE")
+    [] -> assert failed False
+  assertEq failed ["THREE", "two", "one"] . map rowName . rows =<< readVarIO model
+  runNanoUI ctx inp (modifyVar model.rows (filter ((/= 3) . rowKey)))
+  case els of
+    first : _ -> runNanoUI ctx inp (writeVar first.rowDone True)
+    [] -> pure ()
+  assertEq failed [False, False] . map rowDone . rows =<< readVarIO model
+  pair <- newVar ((1 :: Int), ("a" :: Text))
+  runNanoUI ctx inp (writeVar (zoomVar snd (\b (a, _) -> (a, b)) pair) "b")
+  assertEq failed (1, "b") =<< readVarIO pair
+
+-- | A Var map keeps a row's state under its key until the row is dropped.
+runVarMapTest :: Context -> IORef Int -> IO ()
+runVarMapTest ctx failed = do
+  m <- newVarMap
+  let inp = withInputOff 300 100
+      at k = runNanoUI ctx inp (varAt m (k :: Int) (0 :: Int))
+  a <- at 1
+  runNanoUI ctx inp (writeVar a 5)
+  assertEq failed 5 =<< (readVarIO =<< at 1)
+  assertEq failed 0 =<< (readVarIO =<< at 2)
+  runNanoUI ctx inp (dropVar m 1)
+  assertEq failed 0 =<< (readVarIO =<< at 1)
+  runNanoUI ctx inp (writeVar a 6 >> retainVars (/= 2) m)
+  assertEq failed 0 =<< (readVarIO =<< at 2)
+
+-- | A Var shown in two contexts: a write in one is not a backwards write in
+-- the other, and each repaints what it shows.
+runVarSharedTest :: Context -> IORef Int -> IO ()
+runVarSharedTest ctx failed = do
+  other <- newContext
+  shared <- newVar (0 :: Int)
+  let inp = withInputOff 300 100
+      view = column $ do
+        label . T.pack . show =<< readVar shared
+        r <- button' "+"
+        when (respClicked r) (modifyVar shared (+ 1))
+        pure r
+  r <- warmup2 ctx inp view
+  _ <- warmup2 other inp view
+  _ <- runClick ctx inp view (centerOf r)
+  assertEq failed 1 =<< readVarIO shared
+  _ <- runFrame other inp view
+  spans <- collectTextSpans other
+  assert failed (any (\(_, t, _, _, _) -> t == "1") spans)
+
+-- | A frame an exception cuts short leaves no rerun behind: the next frame
+-- runs its view once, and still repaints the change the failed frame made.
+runVarAbortTest :: Context -> IORef Int -> IO ()
+runVarAbortTest ctx failed = do
+  v <- newVar (0 :: Int)
+  let inp = withInputOff 300 100
+      view = label . T.pack . show =<< readVar v
+      failing :: NanoUI ()
+      failing = do
+        _ <- readVar v
+        writeVar v 1
+        liftIO (throwIO (ErrorCall "view failed"))
+  _ <- warmup2 ctx inp view
+  r <- try @ErrorCall (runFrame ctx inp failing)
+  assert failed (either (const True) (const False) r)
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp view
+  assertEq failed 1 =<< lastFramePasses ctx
+  assertEq failed DamageFull =<< takeDamage ctx

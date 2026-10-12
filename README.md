@@ -22,12 +22,11 @@ main :: IO ()
 main = runSdlApp defaultSdlOptions counter
 
 counter :: NanoUI ()
-counter = do
-  (n, setN) <- useInt 0
-  row $ do
-    whenM (button "-") (setN (n - 1))
-    label (T.pack (show n))
-    whenM (button "+") (setN (n + 1))
+counter = row $ do
+  n <- useVar (0 :: Int)
+  whenM (button "-") (modifyVar n (subtract 1))
+  label . T.pack . show =<< readVar n
+  whenM (button "+") (modifyVar n (+ 1))
 ```
 
 ## Features
@@ -68,8 +67,10 @@ counter = do
   view that changes on a timer, `useTaskStatus` and `useTask` run background
   work, `useStream` folds a producer's updates into a view's state, and
   `askWake` lets any thread wake the loop.
-- State in local hooks (`useInt`, `useText`, `useState`), in your own model,
-  or in a reducer with `NanoUI.Emit`.
+- State in `Var`s that inputs edit directly (`useVar` for local state,
+  `newVar` for state the app owns, `v.field` for one field of a record), or in
+  a reducer with `NanoUI.Emit`. A frame reruns its view only when something
+  writes a `Var` that the view already read.
 - Eased and spring animation.
 - Themes, including ones built from Base16 schemes, changed for part of a
   view with `styled` and composable modifiers, as in
@@ -87,23 +88,25 @@ counter = do
 
 ## Examples
 
-Inputs are controlled: pass the current value and keep the result. A change you
-don't store is undone on the next frame.
+State lives in a `Var`. An input takes the `Var` it edits and stores the user's
+edits in it; `readVar` reads it where you show it.
 
 ```haskell
 greeter :: NanoUI ()
 greeter = columnWith (gap 8 . padAll 16) $ do
-  (name, setName) <- useText "world"
-  (size, setSize) <- useFloat 16
-  (shout, setShout) <- useFlag False
+  name <- useVar "world"
+  size <- useVar 16
+  shout <- useVar False
 
   heading "Greeter"
-  setName =<< textInput name
-  setSize =<< slider 10 48 size
-  setShout =<< checkbox "Shout" shout
+  textInput name
+  slider 10 48 size
+  checkbox "Shout" shout
 
-  let greeting = "Hello, " <> name <> "!"
-  labelWith (fontSize size) (if shout then T.toUpper greeting else greeting)
+  greeting <- ("Hello, " <>) . (<> "!") <$> readVar name
+  loud <- readVar shout
+  px <- readVar size
+  labelWith (fontSize px) (if loud then T.toUpper greeting else greeting)
 ```
 
 For an Elm-style update function, `NanoUI.Emit` from the `nano-ui-emit` package
@@ -195,8 +198,8 @@ and so on.
 
 ## Documentation
 
-[Typed state ownership](docs/typed-state.md) explains component setup, the
-handle-based APIs, access costs, and migration from implicit generic hooks.
+[State](docs/typed-state.md) explains Vars, where they come from, what a
+write costs, the handle-based resource APIs, and migration from the old hooks.
 
 The [user guide](packages/nano-ui/GUIDE.md) covers application setup, stable
 widget identity, layout, background work, custom drawing, and headless tests.

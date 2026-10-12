@@ -169,14 +169,15 @@ useJob owner k view start = useHeldBy owner k view $ \ctx old -> do
 -- and starts another. To rerun with the same input, pair it with a counter
 -- that a Retry button bumps:
 --
--- > (attempt, setAttempt) <- useInt 0
+-- > attemptVar <- useVar (0 :: Int)
+-- > attempt <- readVar attemptVar
 -- > status <- useTaskStatus task (path, attempt) (T.readFile path)
 -- > case status of
 -- >   TaskRunning _ -> label "Loading..."
 -- >   TaskDone contents -> label contents
 -- >   TaskFailed e _ -> do
 -- >     danger (T.pack (displayException e))
--- >     whenM (button "Retry") (setAttempt (attempt + 1))
+-- >     whenM (button "Retry") (modifyVar attemptVar (+ 1))
 --
 -- The loop sleeps while the job runs and wakes once when it ends; that frame
 -- repaints the whole window. Allocate @task <- newTask@ once during setup.
@@ -205,7 +206,7 @@ useTaskStatus owner k run = (\(Outcome status _) -> status) <$> useOutcome owner
 -- job's once it returns, otherwise the previous key's, or 'Nothing'. A failed
 -- job keeps the previous result.
 --
--- > (path, setPath) <- useText "notes.txt"
+-- > path <- readVar =<< useVar "notes.txt"
 -- > contents <- useTask task path (T.readFile (T.unpack path))
 -- > label (fromMaybe "Loading..." contents)
 useTask :: Eq k => Task k a -> k -> IO a -> NanoUI (Maybe a)

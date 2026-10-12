@@ -10,13 +10,14 @@ module NanoUI.Internal.Widgets.Radio
   )
 where
 
-import Control.Monad (zipWithM)
+import Control.Monad (void, zipWithM)
 import Data.Foldable (toList)
 import Data.List (findIndex)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (adoptSlot, registerFocusable)
+import NanoUI.Internal.Equality (sameEnum)
 import NanoUI.Internal.Store (fieldInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, freshWidget, nextId, scope, liftIO)
@@ -24,6 +25,8 @@ import NanoUI.Internal.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Internal.WidgetText (buttonFlagChoice)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
+import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Combinators (finishInput, withBoundedIndex)
 import NanoUI.Internal.Widgets.Layout (column')
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
@@ -34,16 +37,21 @@ radioLay = tight (fillW defaultLayout)
 radioGroupLay :: Layout
 radioGroupLay = tight (gap 4 (fillW defaultLayout))
 
--- | A column of radio buttons over @options@ in fold order. Pass the selected
--- index; the result is the index after this frame's click or arrow keys.
+-- | A column of radio buttons over @options@ in fold order, showing and
+-- editing the selected index: a click or the arrow keys move it.
 {-# INLINE radio #-}
-radio :: Foldable f => f Text -> Int -> NanoUI Int
-radio options index = snd <$> radio' options index
+radio :: Foldable f => f Text -> Var Int -> NanoUI ()
+radio options v = void (radio' options v)
 
--- | 'radio' returning the group response and selected option index.
-radio' ::
+-- | 'radio' returning the group's 'Response'.
+{-# INLINE radio' #-}
+radio' :: Foldable f => f Text -> Var Int -> NanoUI Response
+radio' options v = bindVar RenderFinal v (radioCore options)
+
+-- | 'radio' on a plain index: the response and the index after this frame.
+radioCore ::
   Foldable f => f Text -> Int -> NanoUI (Response, Int)
-radio' options index =
+radioCore options index =
   -- A positional scope: groups declared side by side keep separate ids.
   scope $ do
     (gid, ctx) <- freshWidget
@@ -76,18 +84,20 @@ radio' options index =
 
 -- | Radio buttons for every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedRadio #-}
-boundedRadio :: (Bounded a, Enum a) => (a -> Text) -> a -> NanoUI a
-boundedRadio encode value = snd <$> boundedRadio' encode value
+boundedRadio :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()
+boundedRadio encode v = void (boundedRadio' encode v)
 
--- | 'boundedRadio' returning the response and selected enum value.
-boundedRadio' :: (Bounded a, Enum a) => (a -> Text) -> a -> NanoUI (Response, a)
-boundedRadio' encode value = withBoundedIndex encode value radio'
+-- | 'boundedRadio' returning the group's 'Response'.
+{-# INLINE boundedRadio' #-}
+boundedRadio' :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI Response
+boundedRadio' encode v = bindVarBy sameEnum RenderFinal v (\value -> withBoundedIndex encode value radioCore)
 
 -- | 'boundedRadio' labelled with 'show'.
 {-# INLINE enumRadio #-}
-enumRadio :: (Bounded a, Enum a, Show a) => a -> NanoUI a
+enumRadio :: (Bounded a, Enum a, Show a) => Var a -> NanoUI ()
 enumRadio = boundedRadio (T.pack . show)
 
--- | 'enumRadio' returning the response and selected enum value.
-enumRadio' :: (Bounded a, Enum a, Show a) => a -> NanoUI (Response, a)
+-- | 'enumRadio' returning the group's 'Response'.
+{-# INLINE enumRadio' #-}
+enumRadio' :: (Bounded a, Enum a, Show a) => Var a -> NanoUI Response
 enumRadio' = boundedRadio' (T.pack . show)

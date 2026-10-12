@@ -1,17 +1,14 @@
 -- | Hello: the smallest complete nano-ui app. Start here.
 --
 -- The view is a function that runs every frame. Nothing persists between
--- frames except the state you keep, and each widget call both draws the
--- widget and returns what the user did with it this frame: 'button' returns
--- 'True' on the frame it is clicked, 'textInput' returns the text after this
--- frame's typing.
+-- frames except the state you keep, and each widget call draws the widget
+-- and reports what the user did with it this frame: 'button' returns 'True'
+-- on the frame it is clicked.
 --
--- Inputs are controlled: you pass the current value in and store the value
--- that comes back. Forget to store it and the edit is undone on the next
--- frame, because the next frame passes the old value in again.
---
--- 'useText' and 'useInt' keep a value between frames with no setup. They
--- are positional, so call them in the same order every frame.
+-- State lives in a 'Var'. 'useVar' keeps one at its place in the view with
+-- no setup. An input takes the Var it edits, so typing into 'textInput'
+-- changes @name@ with nothing more to write. 'readVar' reads a Var where you
+-- show it.
 --
 -- Next: State.hs (where state lives), Layout.hs (arranging widgets),
 -- Components.hs (your own widgets), Forms.hs (validating and submitting).
@@ -37,12 +34,14 @@ main =
 hello :: NanoUI ()
 hello = columnWith (padAll 20 . gap 12 . fillW) $ do
   heading "Hello, nano-ui"
-  (name, setName) <- useText ""
-  -- Store what the field returns, and use it right away for the greeting.
-  name' <- textInput name
-  setName name'
-  label (if T.null name' then "What's your name?" else "Hello, " <> name' <> "!")
-  (clicks, setClicks) <- useInt 0
+  name <- useVar ""
+  textInput name
+  -- Read below the field that edits it, so the greeting shows this frame's
+  -- typing.
+  current <- readVar name
+  label (if T.null current then "What's your name?" else "Hello, " <> current <> "!")
+  clicks <- useVar (0 :: Int)
   rowWith (tight . gap 12 . alignMid) $ do
-    whenM (button "Click me") (setClicks (clicks + 1))
-    labelWith alignMid ("Clicked " <> T.pack (show clicks) <> " times")
+    whenM (button "Click me") (modifyVar clicks (+ 1))
+    n <- readVar clicks
+    labelWith alignMid ("Clicked " <> T.pack (show n) <> " times")

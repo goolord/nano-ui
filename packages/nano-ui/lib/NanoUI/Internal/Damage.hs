@@ -33,7 +33,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Context.Types (newPrevWalk, noImagePaint)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Store (diffKeys, eqByPtr, mirrorStoresChanged, ptrEq, slotChangedKeys)
+import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
@@ -493,7 +493,6 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
                     scrollChanged
                       && not layoutFloats
                       && not pointsChanged
-                      && storeMirrorGen oldStore == storeMirrorGen newStore
                       && storeOpenSelect oldStore == storeOpenSelect newStore
                       && null (slotChangedKeys oldStore newStore)
                 , fdSettledMoved = settledMoved
@@ -506,8 +505,8 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
           then pure (DamageFull, [])
           else do
             (misses, owners) <- storeKeyChanges ctx oldStore newStore
-            -- A changed key that resolves to no node (a local hook's key, or a
-            -- widget-internal key nothing in the arena carries) may have changed
+            -- A changed key that resolves to no node (a widget-internal key
+            -- nothing in the arena carries) may have changed
             -- paint state no diff describes, so nothing narrower than the window
             -- is known to cover it. Key 0 names no widget and is damaged by
             -- nothing, so its writes cannot escalate a frame.
@@ -600,11 +599,7 @@ needsFullDamage snap d =
     -- holds slider and knob values, not just scroll offsets.
     || fsOpaqueFollow snap
     || not (fdScrollOnly d)
-      && ( -- A local hook wrote state ('bumpMirror'). Its key names no
-           -- widget, and a float hook's key is not even in the store diff,
-           -- so nothing narrower than the window is known to cover it.
-           mirrorStoresChanged (fsStore snap) (fdStore d)
-             || sizeChanged
+      && ( sizeChanged
              || fdModalFlip d
              || fdFloatingChanged d
              || fdWindowLive d

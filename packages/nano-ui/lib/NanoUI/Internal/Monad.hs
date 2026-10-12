@@ -100,7 +100,7 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bits ((.&.))
 import Data.Hashable (Hashable, hash)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
-import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.IORef (modifyIORef', writeIORef)
 import Data.Monoid (Ap (..))
 import Data.Text (Text)
 import Data.Word (Word64)
@@ -129,6 +129,7 @@ import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
+import NanoUI.Internal.Id.Cursor (peekWidgetId, readIdCursor, skipSiblingIds, takeWidgetId, writeIdCursor)
 import NanoUI.Internal.Layout.Arena (arenaCount, getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, Pressable (..), inputMousePos, inputWindowSize, noButtons, stripInteractionInput, withoutPointer)
@@ -235,16 +236,13 @@ withUiResource acquire release (NanoUI action) =
 -- | The id 'nextId' would issue, without consuming it.
 {-# INLINE currentId #-}
 currentId :: NanoUI WidgetId
-currentId = withContext (fmap idContextWidgetId . readIORef . ctxIdContext)
+currentId = withContext (peekWidgetId . ctxIdCursor)
 
--- | Consume the next sibling id. Widgets and positional hooks share this sequence,
--- so conditional calls need their own 'scope'.
+-- | Consume the next sibling id. Widgets share this sequence (positional
+-- Vars count apart), so conditional widgets need their own 'scope'.
 {-# INLINE nextId #-}
 nextId :: NanoUI WidgetId
-nextId = withContext $ \ctx -> do
-  ic <- readIORef (ctxIdContext ctx)
-  writeIORef (ctxIdContext ctx) $! ic {siblingId = siblingId ic + 1}
-  pure (idContextWidgetId ic)
+nextId = withContext (takeWidgetId . ctxIdCursor)
 
 -- | The next sibling id ('nextId') and the view's 'Context', which a widget's body starts from.
 {-# INLINE freshWidget #-}
@@ -259,10 +257,7 @@ freshWidget = do
 burstNextIds :: Int -> NanoUI ()
 burstNextIds n
   | n <= 0 = pure ()
-  | otherwise = withContext $ \ctx ->
-      modifyIORef' (ctxIdContext ctx) $ \ic ->
-        let !sid = siblingId ic + fromIntegral n
-         in ic {siblingId = sid}
+  | otherwise = withContext $ \ctx -> skipSiblingIds (ctxIdCursor ctx) n
 
 -- | Run in the child context returned by @enter@, then restore its advanced
 -- parent context, including when the action throws an exception.
@@ -273,13 +268,13 @@ withIdFrame enter m = do
   ctx <- askContext
   withUiResource
     ( do
-        old <- readIORef (ctxIdContext ctx)
+        old <- readIdCursor (ctxIdCursor ctx)
         let
           !(!p, !c) = enter old
-        writeIORef (ctxIdContext ctx) c
+        writeIdCursor (ctxIdCursor ctx) c
         pure p
     )
-    (writeIORef (ctxIdContext ctx))
+    (writeIdCursor (ctxIdCursor ctx))
     m
 
 -- | Give the action a child id sequence while consuming one parent id.
@@ -581,7 +576,7 @@ isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWid
 -- its next frame the field sees it lost focus (a combo box or search field
 -- commits then).
 --
--- > (resp, query') <- searchInput' "Find" query
+-- > resp <- searchInput' "Find" query
 -- > findPressed <- shortcut (ctrl <> key 'f')
 -- > when findPressed (requestFocus (respId resp))
 --
@@ -590,7 +585,7 @@ isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWid
 -- 'currentId':
 --
 -- > whenM (shortcut (ctrl <> key 'l')) (requestFocus =<< currentId)
--- > address' <- textInput address
+-- > textInput address
 --
 -- Focus moves on the next frame, which the request schedules. The last
 -- request in a frame wins ('focusNext', 'focusPrevious' and 'clearFocus' are
@@ -667,7 +662,9 @@ takeEscape = do
 -- affect layout or input. A change repaints the whole window; setting the
 -- current value is a no-op, so a view can call this every frame:
 --
--- > explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
+-- > on <- explainingLayout
+-- > (_, on') <- withValue on (checkbox "Outline layout nodes")
+-- > explainLayout on'
 --
 -- Backend options can enable it at startup (@sdlExplainLayout@,
 -- @optExplainLayout@); on your own context use 'setExplainLayout' from

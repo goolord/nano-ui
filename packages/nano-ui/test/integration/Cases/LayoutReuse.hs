@@ -166,7 +166,7 @@ render f inLayers = \case
       LButtonAdorned -> void (buttonConfigured defaultButtonConfig {bcAdornments = leading (affix "$") <> trailing (affix (T.pack (show (pick v 1000))))} (words' v False))
       LSpacer -> spacer (Fixed (fromIntegral (5 + pick v 60))) (Fixed (fromIntegral (5 + pick (hash2 v 9) 30)))
       LSep -> separator
-      LCheck -> void (checkbox (words' v False) (pick v 2 == 0))
+      LCheck -> void ((snd <$> withValue (pick v 2 == 0) (checkbox (words' v False))))
       LMeasured ->
         void $ customWidget defaultCustomWidgetSpec
           { widgetMeasure = Just (\_ (w, _) -> (min w 90, fromIntegral (12 + pick v 20)))

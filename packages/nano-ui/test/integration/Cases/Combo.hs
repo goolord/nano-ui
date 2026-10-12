@@ -32,7 +32,7 @@ comboLongOpts =
 -- anything on its own: Enter with no highlight leaves the typed text alone.
 runComboFilterTest :: Context -> IORef Int -> IO ()
 runComboFilterTest ctx failed = do
-  textRef <- newIORef ""
+  textRef <- newVar ""
   let inp0 = withInput 320 100
       ui = held textRef (comboBox' "Font" comboOpts)
   warmupFocused ctx inp0 ui
@@ -47,7 +47,7 @@ runComboFilterTest ctx failed = do
 runComboKeyboardPickTest :: Context -> IORef Int -> IO ()
 runComboKeyboardPickTest ctx failed = do
   let inp0 = withInput 320 100
-      ui = comboBox' "Font" comboOpts ""
+      ui = withValue "" (comboBox' "Font" comboOpts)
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
@@ -61,7 +61,7 @@ runComboKeyboardPickTest ctx failed = do
 runComboMousePickTest :: Context -> IORef Int -> IO ()
 runComboMousePickTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = comboBox' "Font" comboOpts ""
+      ui = withValue "" (comboBox' "Font" comboOpts)
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
@@ -81,7 +81,7 @@ runComboMousePickTest ctx failed = do
 runComboHoverHighlightTest :: Context -> IORef Int -> IO ()
 runComboHoverHighlightTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = comboBox' "Font" comboOpts ""
+      ui = withValue "" (comboBox' "Font" comboOpts)
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
@@ -110,7 +110,7 @@ runComboHoverHighlightTest ctx failed = do
 runComboKeysOverStillPointerTest :: Context -> IORef Int -> IO ()
 runComboKeysOverStillPointerTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = comboBox' "Font" comboOpts ""
+      ui = withValue "" (comboBox' "Font" comboOpts)
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
@@ -129,7 +129,7 @@ runComboKeysOverStillPointerTest ctx failed = do
 runComboScrollbarDragTest :: Context -> IORef Int -> IO ()
 runComboScrollbarDragTest ctx failed = do
   let inp0 = withInput 320 300
-      ui = comboBox' "Fonts" comboLongOpts ""
+      ui = withValue "" (comboBox' "Fonts" comboLongOpts)
   (resp, _) <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
@@ -156,7 +156,7 @@ runComboScrollbarDragTest ctx failed = do
 -- commits the text.
 runComboBlurCommitTest :: Context -> IORef Int -> IO ()
 runComboBlurCommitTest ctx failed = do
-  textRef <- newIORef ""
+  textRef <- newVar ""
   let inp0 = withInput 320 200
       ui = column (held textRef (comboBox' "Font" comboOpts))
   warmupFocused ctx inp0 ui
@@ -187,7 +187,7 @@ runComboBlurCommitTest ctx failed = do
 -- the last committed value without a commit pulse, and the dropdown closes.
 runComboEscapeRevertTest :: Context -> IORef Int -> IO ()
 runComboEscapeRevertTest ctx failed = do
-  textRef <- newIORef "Inter"
+  textRef <- newVar "Inter"
   let inp0 = withInput 320 200
       ui = held textRef (comboBox' "Font" comboOpts)
   (r0, t0) <- warmup2 ctx inp0 ui
@@ -213,7 +213,7 @@ runComboWheelScrollTest :: Context -> IORef Int -> IO ()
 runComboWheelScrollTest ctx failed = do
   let inp0 = withInput 200 260
       long = "A Very Long Font Family Name That Overflows"
-      ui = comboBox' "Fonts" (comboLongOpts ++ [long]) ""
+      ui = withValue "" (comboBox' "Fonts" (comboLongOpts ++ [long]))
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   overlays0 <- collectOverlayTextSpans ctx inp0

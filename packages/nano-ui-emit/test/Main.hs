@@ -74,15 +74,15 @@ testAdapters = do
   ctx <- newContext
   calls <- newIORef (0 :: Int)
   let
-    control value = liftIO (modifyIORef' calls (+ 1)) >> pure (value + 1)
+    control v = liftIO (modifyIORef' calls (+ 1)) >> modifyVar v (+ 1)
     adapters = do
       emitWhen (pure False) (1 :: Int)
       emitWhen (pure True) 2
-      emitChanged pure 3 id
+      emitChanged (\_ -> pure ()) 3 id
       emitChanged control 3 id
-      emitEdited (\v -> pure (mempty, v + 1)) 5 id
-      emitEdited (\v -> pure (mempty {rawRespChanged = True}, v)) 6 id
-      emitEdited (\v -> pure (mempty {rawRespChanged = True}, v + 1)) 7 id
+      emitEdited (\v -> (mempty :: Response) <$ modifyVar v (+ 1)) 5 id
+      emitEdited (\_ -> pure mempty {rawRespChanged = True}) 6 id
+      emitEdited (\v -> mempty {rawRespChanged = True} <$ modifyVar v (+ 1)) 7 id
   (_, msgs, _, _) <- runFrameE ctx (withInput 80 80) adapters
   check "adapters distinguish edits and changes" (msgs == [2, 4, 8])
   check "control evaluated once" . (== 1) =<< readIORef calls
@@ -158,12 +158,13 @@ testRebuild = do
   let
     inp = withInputOff 300 200
     view _ = withRunInNanoUIE $ \run -> column $ do
-      (loaded, setLoaded) <- useFlag False
+      loadedVar <- useVar False
+      loaded <- readVar loadedVar
       (vis, _) <- sensor (label (if loaded then "loaded" else "loading"))
       when (becameVisible vis) $ do
         liftIO (modifyIORef' seenRef (+ 1))
         run (emit (1 :: Int))
-        setLoaded True
+        writeVar loadedVar True
       pure (loaded, (visVisible vis, visEvent vis))
     frame model =
       (\(r, model', _, _, _) -> (r, model')) <$> runFrameReduce (+) ctx inp model view
@@ -171,7 +172,7 @@ testRebuild = do
   model5 <- snd <$> (frame model2 >>= frame . snd >>= frame . snd)
   seen <- readIORef seenRef
   check
-    "message survives mirror rebuild exactly once"
+    "message survives a rerun exactly once"
     (second == (True, (True, Nothing)) && seen == 1 && model5 == 1)
 
 testScopes :: IO ()
@@ -209,11 +210,11 @@ testMapMessages = do
   (result, msgs, _, _) <- runFrameE ctx (withInputOff 100 100) ui
   check "mapped children keep results and message order"
     (result == 42 && msgs == [Left "before", Right 1, Right 2, Left "after"])
-  cell <- newState False
+  cell <- newVar False
   (_, rebuilt, _, _) <- runFrameE ctx (withInputOff 100 100) $
     mapMessages Just $ do
-      (done, setDone) <- liftNanoUI (useState cell)
-      unless done $ emit True >> liftNanoUI (setDone True)
+      done <- liftNanoUI (readVar cell)
+      unless done $ emit True >> liftNanoUI (writeVar cell True)
   check "mapped messages survive a child rebuild once" (rebuilt == [Just True])
 
 testIsolation :: IO ()

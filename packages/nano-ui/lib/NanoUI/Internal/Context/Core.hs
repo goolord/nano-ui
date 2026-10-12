@@ -409,8 +409,7 @@ modifyStore ctx f = do
   -- first would walk every changed map twice. Its lazy concatenation stops at
   -- the first changed key and allocates less than a list per map.
   when
-    ( storeMirrorGen prev /= storeMirrorGen store
-        || storeOpenSelect prev /= storeOpenSelect store
+    ( storeOpenSelect prev /= storeOpenSelect store
         || not (null changedKeys)
     )
     $ do

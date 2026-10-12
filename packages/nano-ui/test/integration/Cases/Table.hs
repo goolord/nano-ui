@@ -94,8 +94,8 @@ runTableLiveRowsTest ctx0 failed = do
     edits
 
 -- | A table sorted ascending on its first column, given everything but the sort.
-sortedTable :: (SortCol -> NanoUI TableResponse) -> NanoUI ()
-sortedTable build = void (build . fst =<< useTableSort (SortCol 0 SortAsc))
+sortedTable :: (Var SortCol -> NanoUI ()) -> NanoUI ()
+sortedTable build = build =<< useVar (SortCol 0 SortAsc)
 
 runTableSortTest :: Context -> IORef Int -> IO ()
 runTableSortTest _ failed = do
@@ -175,8 +175,8 @@ runPageWheelAboveTableTest ctx failed = do
       wheelAt = inp0 {inputMousePos = V2 160 80, inputScroll = V2 0 5}
       ui = scrollArea (fillW . fixedH 200 . gap 0) $ do
         mapM_ (\i -> label (T.pack ("head " <> show (i :: Int)))) [1 .. 10]
-        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableWith (fixedH 120) "people" tableScrollCols tableScrollRows tableSort
+        tableSortVar <- useVar (SortCol 0 SortAsc)
+        tableWith (fixedH 120) "people" tableScrollCols tableScrollRows tableSortVar
   (pageWid, _) <- warmup2 ctx inp0 ui
   _ <- runFrame ctx wheelAt ui
   _ <- runFrame ctx wheelAt ui

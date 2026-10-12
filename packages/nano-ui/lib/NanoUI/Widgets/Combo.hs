@@ -10,7 +10,7 @@ module NanoUI.Widgets.Combo
   )
 where
 
-import Control.Monad (foldM, mfilter, when, (<$!>))
+import Control.Monad (foldM, mfilter, void, when, (<$!>))
 import Data.Foldable (toList)
 import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
@@ -27,6 +27,8 @@ import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..),
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
 import NanoUI.Internal.Store (boolInt, ptrEq, deleteSlot, fieldFloat, fieldInt, fieldQuiet, fieldText, findSlot, flagSlot, insertSlot, lookupSlot, setFieldSelection)
+import NanoUI.Internal.Var (Binding (..), bindVar)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -271,16 +273,20 @@ comboStep ci cs0 =
 -- While the field holds focus, the shared select dropdown overlay lists the
 -- options filtered by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See
--- 'comboStep' for when the value commits. Pass the current text; the result is
--- the text after this frame, and @respChanged@ on 'comboBox'' marks a commit.
+-- 'comboStep' for when the value commits. The Var holds the field's text as
+-- the user types; @respChanged@ on 'comboBox'' marks a commit.
 {-# INLINE comboBox #-}
-comboBox :: Foldable f => Text -> f Text -> Text -> NanoUI Text
-comboBox placeholder options value = snd <$> comboBox' placeholder options value
+comboBox :: Foldable f => Text -> f Text -> Var Text -> NanoUI ()
+comboBox placeholder options v = void (comboBox' placeholder options v)
 
--- | 'comboBox' returning @(response, updatedText)@. The first text argument
--- is the placeholder; the last is the controlled value.
-comboBox' :: Foldable f => Text -> f Text -> Text -> NanoUI (Response, Text)
-comboBox' placeholder options value = do
+-- | 'comboBox' returning its 'Response'. The first argument is the
+-- placeholder.
+{-# INLINE comboBox' #-}
+comboBox' :: Foldable f => Text -> f Text -> Var Text -> NanoUI Response
+comboBox' placeholder options v = bindVar RenderFinal v (comboBoxCore placeholder options)
+
+comboBoxCore :: Foldable f => Text -> f Text -> Text -> NanoUI (Response, Text)
+comboBoxCore placeholder options value = do
   (resp, text) <-
     buildTextInput textInputFlagSearch searchInputLayout placeholder value Nothing
   ctx <- askContext

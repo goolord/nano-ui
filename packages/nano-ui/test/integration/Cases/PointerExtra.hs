@@ -82,7 +82,7 @@ runMiddleCoveredTest ctx failed = do
 -- without selecting the tab. A tab without a close button stays.
 runMiddleTabCloseTest :: Context -> IORef Int -> IO ()
 runMiddleTabCloseTest ctx failed = do
-  let ui = tabBar' (0 :: Int) [closableTab 0 "Alpha" (), closableTab 1 "Beta" (), tab 2 "Gamma" ()]
+  let ui = tabBar' (Var (0 :: Int)) [closableTab 0 "Alpha" (), closableTab 1 "Beta" (), tab 2 "Gamma" ()]
       na = ctxNodeArena ctx
   _ <- warmup2 ctx win ui
   spans <- collectTextSpans ctx

@@ -2,6 +2,11 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** `inputWidget` takes an input of
+  type `Var a -> NanoUI Response`, such as `UI.knob' 0 100`, following
+  nano-ui's inputs; the form runs it on a temporary `Var` holding the
+  field's value.
+
 - **Breaking:** runners and `resetForm` take a `FormState` allocated with
   `newFormState`. `FormUI` has a typed lexical owner; field views capture it
   during evaluation, preserving deferred/nested views without dynamic slots

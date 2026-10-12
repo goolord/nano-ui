@@ -9,7 +9,7 @@ module NanoUI.Internal.Widgets.Tabs
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad (when)
+import Control.Monad (void, when)
 import Data.Bits ((.|.))
 import Data.Foldable (toList)
 import Data.Hashable (Hashable (..))
@@ -23,7 +23,9 @@ import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrol
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
-import NanoUI.Internal.Monad (NanoUI, askContext, askInput, disabledWhen, freshWidget, nextId, requestFrame, liftIO, styled, uiTheme, withKey)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, disabledWhen, freshWidget, nextId, liftIO, styled, uiTheme, withKey)
+import NanoUI.Internal.Var (Binding (..), bindVarOn)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Store (fieldFloat, findSlot, slotWrite)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
@@ -153,9 +155,9 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
   (groupId, ctx) <- freshWidget
   let vertical = orient == TabLeft || orient == TabRight
       -- Headers ahead of the body take this frame's clicks. A body ahead of
-      -- them runs the key passed in, so they show it too until the caller
-      -- passes the new one.
-      bodyFirst = isJust mRenderBody && (orient == TabBottom || orient == TabRight)
+      -- them ran with the key passed in, so they show it too, and the
+      -- binding reruns the view to show the new one.
+      bodyFirst = bodyAhead orient (isJust mRenderBody)
       headers = renderHeaders ctx style orient (not bodyFirst) cur tabList
       barGap = if style == TabPill then 4 else 2
       edgeChrome = case style of
@@ -342,7 +344,6 @@ renderHeaders ctx style orient follow cur tabList = do
       nextTab = fromMaybe cur (listToMaybe clickedKeys)
       hasChanged = nextTab /= cur
       resp = setChanged hasChanged (setClicked (not (null clickedKeys)) (foldMap snd keyed))
-  when (hasChanged || isJust closedKey) requestFrame
   when follow $ liftIO (moveSelection ctx cur nextTab keyed)
   pure (TabResponse resp closedKey nextTab keyed (respRect resp))
 
@@ -385,25 +386,26 @@ tabBadgeView col txt =
     panel' (padXY 6 1 . tight . minH 17 . alignCenter . alignMid $ defaultLayout) $
       () <$ labelEx (tight . fontSizeScale 0.78 . fontColor col $ defaultLayout) txt
 
--- | Tab headers and the active tab's body. Pass the active key; the result is
--- the active key after this frame's clicks, or Enter or Space on a focused
--- header. Only the active tab's body runs.
+-- | Tab headers and the active tab's body, showing and editing the active
+-- key in a Var: a click, or Enter or Space on a focused header, changes it.
+-- Only the active tab's body runs.
 {-# INLINE tabs #-}
-tabs :: (Foldable f, Hashable a) => a -> f (Tab a (NanoUI ())) -> NanoUI a
+tabs :: (Foldable f, Hashable a) => Var a -> f (Tab a (NanoUI ())) -> NanoUI ()
 tabs = tabsConfigured defaultTabsConfig
 
 -- | 'tabs' returning the 'TabResponse', which also reports a closed tab.
 {-# INLINE tabs' #-}
-tabs' :: (Foldable f, Hashable a) => a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
+tabs' :: (Foldable f, Hashable a) => Var a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
 tabs' = tabsConfigured' defaultTabsConfig
 
 -- | 'tabs' with a header style and placement.
-tabsConfigured :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI a
-tabsConfigured cfg active = fmap tabActive . tabsConfigured' cfg active
+{-# INLINE tabsConfigured #-}
+tabsConfigured :: (Foldable f, Hashable a) => TabsConfig -> Var a -> f (Tab a (NanoUI ())) -> NanoUI ()
+tabsConfigured cfg active ts = void (tabsConfigured' cfg active ts)
 
 -- | 'tabsConfigured' with selection, close requests, and header interaction details.
-tabsConfigured' :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
-tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
+tabsConfigured' :: (Foldable f, Hashable a) => TabsConfig -> Var a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
+tabsConfigured' cfg active inputTabs = bindTabs cfg True active (\cur -> tabStrip cfg cur ts (Just body))
   where
     ts = toList inputTabs
     -- Only the active tab's body runs, or the first tab's when none matches.
@@ -421,21 +423,33 @@ tabsConfigured' cfg active inputTabs = tabStrip cfg active ts (Just body)
           (\t -> withKey (tabKey t) (tabBody t))
           (find ((== k) . tabKey) ts <|> listToMaybe ts)
 
--- | Tab headers only; the caller renders the body.
+-- | Run a tab strip on the active key in a Var. A body placed ahead of the
+-- headers has already run for the old key when a header is clicked, so a
+-- change there runs the view again.
+bindTabs :: Hashable a => TabsConfig -> Bool -> Var a -> (a -> NanoUI (TabResponse a)) -> NanoUI (TabResponse a)
+bindTabs cfg hasBody active =
+  bindVarOn (if bodyAhead (tabsOrientation cfg) hasBody then Conservative else RenderFinal) tabActive active
+
+-- | Whether a strip with a body lays the body out ahead of its headers.
+bodyAhead :: TabOrientation -> Bool -> Bool
+bodyAhead orient hasBody = hasBody && (orient == TabBottom || orient == TabRight)
+
+-- | Tab headers only, showing and editing the active key; the caller
+-- renders the body.
 {-# INLINE tabBar #-}
-tabBar :: (Foldable f, Hashable a) => a -> f (Tab a body) -> NanoUI a
+tabBar :: (Foldable f, Hashable a) => Var a -> f (Tab a body) -> NanoUI ()
 tabBar = tabBarConfigured defaultTabsConfig
 
 {-# INLINE tabBar' #-}
 -- | Header-only 'tabBar' with selection and close requests. Does not run tab bodies.
-tabBar' :: (Foldable f, Hashable a) => a -> f (Tab a body) -> NanoUI (TabResponse a)
+tabBar' :: (Foldable f, Hashable a) => Var a -> f (Tab a body) -> NanoUI (TabResponse a)
 tabBar' = tabBarConfigured' defaultTabsConfig
 
--- | Header-only bar with explicit style/orientation. Returns the selected key
--- without running tab bodies.
-tabBarConfigured :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a body) -> NanoUI a
-tabBarConfigured cfg active = fmap tabActive . tabBarConfigured' cfg active
+-- | Header-only bar with explicit style/orientation.
+{-# INLINE tabBarConfigured #-}
+tabBarConfigured :: (Foldable f, Hashable a) => TabsConfig -> Var a -> f (Tab a body) -> NanoUI ()
+tabBarConfigured cfg active ts = void (tabBarConfigured' cfg active ts)
 
 -- | 'tabBarConfigured' with interaction details and optional close request.
-tabBarConfigured' :: (Foldable f, Hashable a) => TabsConfig -> a -> f (Tab a body) -> NanoUI (TabResponse a)
-tabBarConfigured' cfg active ts = tabStrip cfg active (toList ts) Nothing
+tabBarConfigured' :: (Foldable f, Hashable a) => TabsConfig -> Var a -> f (Tab a body) -> NanoUI (TabResponse a)
+tabBarConfigured' cfg active ts = bindTabs cfg False active (\cur -> tabStrip cfg cur (toList ts) Nothing)

@@ -333,9 +333,10 @@ runScreenshotFromClickTest ctx failed = do
   passes <- newIORef (0 :: Int)
   let view = do
         liftIO (modifyIORef' passes (+ 1))
-        (shots, setShots) <- useInt 0
+        shotsVar <- useVar (0 :: Int)
+        shots <- readVar shotsVar
         resp <- button' "Shot"
-        when (respClicked resp) (requestScreenshot (\_ -> modifyIORef' answers (+ 1)) >> setShots (shots + 1))
+        when (respClicked resp) (requestScreenshot (\_ -> modifyIORef' answers (+ 1)) >> writeVar shotsVar (shots + 1))
         pure resp
   resp <- warmup2 ctx inp view
   let (press, release) = clickPair inp (centerOf resp)

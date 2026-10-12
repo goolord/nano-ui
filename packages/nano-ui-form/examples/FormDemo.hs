@@ -32,7 +32,9 @@ import NanoUI
   , separator
   , tight
   , toolbar
-  , useText
+  , readVar
+  , useVar
+  , writeVar
   )
 import NanoUI.Form
   ( Form
@@ -109,7 +111,7 @@ formatRegistration r =
 
 formDemoUi :: FormState -> NanoUI ()
 formDemoUi owner = do
-  (submittedMsg, setSubmitted) <- useText ""
+  submitted <- useVar ""
   (view', res) <- runNanoForm owner "user_reg" registrationForm
   let mReg = case res of
         Ditto.Ok (Ditto.Proved _ a) -> Just a
@@ -139,11 +141,11 @@ formDemoUi owner = do
               btnReset  <- button "Reset Form"
               when btnSubmit $ do
                 case mReg of
-                  Just reg -> setSubmitted ("Successfully registered: " <> formatRegistration reg)
-                  Nothing  -> setSubmitted "Submission failed: Please fix the highlighted validation errors."
+                  Just reg -> writeVar submitted ("Successfully registered: " <> formatRegistration reg)
+                  Nothing  -> writeVar submitted "Submission failed: Please fix the highlighted validation errors."
               when btnReset $ do
                 resetForm owner "user_reg"
-                setSubmitted "Form has been reset to defaults."
+                writeVar submitted "Form has been reset to defaults."
 
         columnWith (tight . gap 12 . minW 340 . maxW 380) $ do
           card $ do
@@ -175,6 +177,7 @@ formDemoUi owner = do
             heading "Submission Activity"
             muted "Record of last form submission:"
             separator
+            submittedMsg <- readVar submitted
             if T.null submittedMsg
               then muted "No submission attempted yet."
               else labelWith (tight . fillW . maxW 350 . fontMono) submittedMsg

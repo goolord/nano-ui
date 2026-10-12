@@ -106,18 +106,17 @@ brand = accentColor magenta . panelStyle (borderLeft 4 magenta . cornerRadius 2)
 
 view :: NanoUI ()
 view = do
-  (choice, setChoice) <- useEnum FollowSystem
-  (agree, setAgree) <- useFlag True
-  (level, setLevel) <- useFloat 40
+  choice <- useEnumVar FollowSystem
+  agree <- useVar True
+  level <- useVar 40
   scrollWith (padAll 20 . grow) $
     columnWith (tight . gap 16 . fillW) $ do
       rowWith (tight . gap 24 . fillW) $ do
         columnWith (tight . gap 8) $ do
           heading "Theme"
-          picked <- boundedRadio choiceName choice
-          setChoice picked
+          boundedRadio choiceName choice
           -- Every frame; a no-op unless the choice (or the system) changed.
-          setUiTheme =<< choiceTheme picked
+          setUiTheme =<< choiceTheme =<< readVar choice
 
         columnWith (tight . gap 10 . fillW) $ do
           heading "Button modifiers"
@@ -141,8 +140,8 @@ view = do
       styled brand $
         panelWith (padAll 14 . gap 8 . fillW) $ do
           heading "Brand section"
-          setAgree =<< checkbox "Uses the brand accent" agree
-          setLevel =<< slider 0 100 level
+          checkbox "Uses the brand accent" agree
+          slider 0 100 level
           _ <- styled pill (button "Pill, in brand colours")
           pure ()
 

@@ -200,7 +200,7 @@ runDrawReuseTest ctx failed = do
       blue = colorRGBA 0 0 255 255
       ui (boxColor, value, fontCol, iid, opacity, stray) = column $ do
         box (fixedWH 30 30) boxColor
-        void (slider 0 1 value)
+        void ((snd <$> withValue value (slider 0 1)))
         void (labelWith (fontColor fontCol) "paint only")
         imageConfigured defaultImageConfig {icLayout = fixedWH 20 20, icOpacity = opacity} (ImageId iid)
         -- A custom drawing on a container, which paint builds afresh.

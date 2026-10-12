@@ -81,11 +81,12 @@ runModalNoPhantomScrollTest ctx failed = do
 runModalCloseDamageTest :: Context -> IORef Int -> IO ()
 runModalCloseDamageTest ctx failed = do
   let ui = do
-        (open, setOpen) <- useFlag False
+        openVar <- useVar False
+        open <- readVar openVar
         resp <- button' "Open"
-        when (respClicked resp) (setOpen True)
+        when (respClicked resp) (writeVar openVar True)
         (dlg, _) <- modal open "Title" (label "body")
-        when (respClicked dlg) (setOpen False)
+        when (respClicked dlg) (writeVar openVar False)
         pure resp
       inp0 = withInputOff 320 240
       esc = keyInp KeyEscape inp0
@@ -163,7 +164,7 @@ runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
       body =
         columnWith (gap 14 . minW 560 . \l -> l {layoutPadding = Padding 0 0 0 0}) $ do
           labelWith (tight . fillW) "How cabal should log in to Hackage for uploads:"
-          _ <- radio ["cabal's config file (no login found in it)", "A username and password", "An API token"] (0 :: Int)
+          _ <- (snd <$> withValue (0 :: Int) (radio ["cabal's config file (no login found in it)", "A username and password", "An API token"]))
           labelWith (tight . fillW . fontSize 14) "Kept in memory for this session only. The password goes to cabal on its standard input."
           separator
           rowWith (fillW . gap 8 . alignMid . tight) $ do

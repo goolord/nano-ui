@@ -2,7 +2,7 @@
 -- row is a button in the row look ('buttonFlagRow').
 module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 
-import Control.Monad (zipWithM)
+import Control.Monad (void, zipWithM)
 import Data.IORef (writeIORef)
 import Data.Foldable (asum, find, fold, toList)
 import Data.Maybe (fromMaybe)
@@ -17,6 +17,8 @@ import NanoUI.Internal.Input (inputMousePos)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Store (fieldInt, fieldIntSet, lookupSlot, ptrEq, slotWrite)
 import NanoUI.Internal.Monad (NanoUI, askInput, focusedWidget, freshWidget, liftIO, withKey)
+import NanoUI.Internal.Var (Binding (..), bindVar)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (treeEncodeStyle)
@@ -122,16 +124,22 @@ treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selected expanded = do
       pure . (resp,) . Just $
         if hasKids && onChevron then (selected, toggle nodeIdx expanded) else (nodeIdx, expanded)
 
--- | Collapsible tree. Rows are numbered in pre-order; pass the selected row
--- and the result is the selection after this frame's click or arrow keys.
+-- | Collapsible tree, showing and editing the selected row in a Var. Rows
+-- are numbered in pre-order; a click or the arrow keys move the selection.
 -- Expansion is kept by the widget. @key@ distinguishes trees in one scope.
 {-# INLINE tree #-}
-tree :: Foldable f => Text -> f TreeItem -> Int -> NanoUI Int
-tree key items index = snd <$> tree' key items index
+tree :: Foldable f => Text -> f TreeItem -> Var Int -> NanoUI ()
+tree key items v = void (tree' key items v)
 
--- | 'tree' returning its response and selected pre-order item index.
-tree' :: Foldable f => Text -> f TreeItem -> Int -> NanoUI (Response, Int)
-tree' key inputItems index =
+-- | 'tree' returning its 'Response'.
+{-# INLINE tree' #-}
+tree' :: Foldable f => Text -> f TreeItem -> Var Int -> NanoUI Response
+tree' key items v = bindVar RenderFinal v (treeCore key items)
+
+-- | 'tree' on a plain row index: the response and the selection after this
+-- frame.
+treeCore :: Foldable f => Text -> f TreeItem -> Int -> NanoUI (Response, Int)
+treeCore key inputItems index =
   withKey ("tree:" <> key) $ do
     (groupId, ctx) <- freshWidget
     let groupKey = intKey groupId

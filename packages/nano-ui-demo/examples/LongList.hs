@@ -51,17 +51,19 @@ main =
 
 view :: NanoUI ()
 view = columnWith (padAll 12 . gap 8 . grow) $ do
-  (selected, setSelected) <- useInt 0
-  (target, setTarget) <- useInt 1
+  selectedVar <- useVar (0 :: Int)
+  -- numericInput edits a Double, even for whole numbers.
+  targetVar <- useVar (1 :: Double)
+  selected <- readVar selectedVar
 
   jump <- rowWith (tight . gap 8 . alignMid . fillW) $ do
     label "Jump to row"
     let cfg = defaultNumericInputConfig {nicMin = 1, nicMax = fromIntegral rowCount}
-    (field, value) <- numericInputConfigured' cfg (fromIntegral target)
-    setTarget (round value)
+    field <- numericInputConfigured' cfg targetVar
     go <- button "Go"
     muted ("Selected: row " <> T.pack (show (selected + 1)))
     pure (go || respSubmitted field)
+  target <- round <$> readVar targetVar
 
   -- Keys no widget took: while the number field is focused, Up and Down
   -- step its value instead and these stay False.
@@ -88,7 +90,7 @@ view = columnWith (padAll 12 . gap 8 . grow) $ do
       current = maybe selected fst command
   -- An instant command moves the offset now, before the rows are picked.
   for_ command $ \(goTo, align) -> do
-    setSelected goTo
+    writeVar selectedVar goTo
     scrollRectIntoViewUi sid (rowRect goTo) align ScrollInstant
 
   -- Read the metrics again, after the command, so the rows built are the
@@ -110,7 +112,7 @@ view = columnWith (padAll 12 . gap 8 . grow) $ do
       picks <- traverse (\i -> withKey i (listRow highlight (i == current) i)) [firstRow .. lastRow]
       spacer Fit (Fixed (fromIntegral (rowCount - 1 - lastRow) * rowH))
       pure (listToMaybe [i | (i, True) <- zip [firstRow ..] picks])
-  for_ clicked setSelected
+  for_ clicked (writeVar selectedVar)
   where
     clampRow = max 0 . min (rowCount - 1)
 

@@ -234,7 +234,7 @@ runCustomWidgetContentKeyTest ctx failed = do
 runReferenceKnobTest :: Context -> IORef Int -> IO ()
 runReferenceKnobTest ctx failed = do
   let inp0 = withInput 300 300
-      ui = column $ knobWith' id 36 0 100 25
+      ui = column $ withValue 25 (knobWith' id 36 0 100)
   (resp0, val0) <- warmup2 ctx inp0 ui
   assert failed (val0 == 25)
 
@@ -252,25 +252,25 @@ runReferenceKnobTest ctx failed = do
 -- Beside the button both work.
 runKnobCoveredTest :: Context -> IORef Int -> IO ()
 runKnobCoveredTest ctx failed = do
-  valueRef <- newIORef (0 :: Float)
+  valueRef <- newVar (0 :: Float)
   let inp0 = withInputOff 300 300
       ui = columnWith tight $ do
         k <- held valueRef (knobWith' id 60 0 100)
         _ <- buttonWith' (pinAt 0 0 . fixedWH 30 60) "x"
         pure k
       dragFrom p = do
-        writeIORef valueRef 50
+        writeVarIO valueRef 50
         warmup ctx inp0 {inputMousePos = p} ui
         _ <- runFrame ctx (pressAt inp0 p) ui
         let up = holdAt inp0 (V2 (v2X p) (v2Y p - 40))
         _ <- runFrame ctx up ui
         _ <- runFrame ctx (releaseAt up) ui
-        readIORef valueRef
+        readVarIO valueRef
       wheelAt p = do
-        writeIORef valueRef 50
+        writeVarIO valueRef 50
         warmup ctx inp0 {inputMousePos = p} ui
         _ <- runFrame ctx inp0 {inputMousePos = p, inputScroll = V2 0 3} ui
-        readIORef valueRef
+        readVarIO valueRef
   (k0, _) <- warmup2 ctx inp0 ui
   let Rect kx ky _ kh = respRect k0
       onButton = V2 (kx + 15) (ky + kh / 2)

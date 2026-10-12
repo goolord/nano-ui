@@ -12,7 +12,7 @@ module SdlLogs
 
 import Control.Monad (foldM, forM, forM_, void, when)
 import Data.Foldable (for_)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (readIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector.Mutable qualified as MV
@@ -21,13 +21,12 @@ import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Context
   ( Context (..)
-  , damageFull
   , getPrevRect
-  , markDirty
   , takeTextEditLastAction
   )
 import NanoUI.Internal.Monad (askContext)
 import NanoUI.Shortcut
+import NanoUI.Var (peekVar)
 import Text.Printf (printf)
 
 data LogLevel
@@ -56,8 +55,17 @@ data AppState = AppState
   , asStreaming :: !Bool
   , asLastStream :: {-# UNPACK #-} !Double
   , asFilterLevel :: !(Maybe LogLevel)
-  , asScrollerWid :: !(Maybe WidgetId)
+  , asGeneration :: {-# UNPACK #-} !Int
+  -- ^ Counts changes. The rings change in place, so two states are equal
+  -- when they have the same generation.
   }
+
+instance Eq AppState where
+  a == b = asGeneration a == asGeneration b
+
+-- | Count a change, so writing the state to its Var shows it.
+changed :: AppState -> AppState
+changed st = st {asGeneration = asGeneration st + 1}
 
 sampleServices :: [Text]
 sampleServices =
@@ -124,14 +132,14 @@ newAppState initialCount streaming = do
       , asStreaming = streaming
       , asLastStream = 0
       , asFilterLevel = Nothing
-      , asScrollerWid = Nothing
+      , asGeneration = 0
       }
     initialCount
 
--- | Append @count@ generated entries. The burst buttons, the streaming tick
--- and the tests all append through here.
+-- | Append @count@ generated entries, as a change. The burst buttons, the
+-- streaming tick and the tests all append through here.
 appendEntries :: AppState -> Int -> IO AppState
-appendEntries st0 count = foldM push st0 [asNextId st0 .. asNextId st0 + count - 1]
+appendEntries st0 count = changed <$> foldM push st0 [asNextId st0 .. asNextId st0 + count - 1]
  where
   push st i = do
     let entry = generateLogEntry i
@@ -168,7 +176,7 @@ setFilter level st = do
       )
       0
       [firstId .. asNextId st - 1]
-  pure st {asFilterLevel = level, asShownStart = 0, asShownCount = shown}
+  pure (changed st {asFilterLevel = level, asShownStart = 0, asShownCount = shown})
 
 -- | The @k@th shown entry.
 shownEntry :: AppState -> Int -> IO LogEntry
@@ -206,62 +214,61 @@ logStickyThresh = 8.0
 logChromeFallbackH :: Float
 logChromeFallbackH = 140.0
 
+-- | Change the state with an action on the rings.
+mutateState :: Var AppState -> (AppState -> IO AppState) -> NanoUI ()
+mutateState state f = writeVar state =<< liftIO . f =<< peekVar state
+
+-- | The viewer over @state@. @scroller@ holds the log scroller's id once it
+-- has been drawn.
 {-# NOINLINE logsApp #-}
-logsApp :: IORef AppState -> NanoUI ()
-logsApp stateRef = do
+logsApp :: Var AppState -> Var (Maybe WidgetId) -> NanoUI ()
+logsApp state scroller = do
   ctx <- askContext
   inp <- askInput
   now <- uiTime
 
-  -- The state lives outside the store, so a change must wake and repaint.
-  let mutateState f = liftIO $ do
-        readIORef stateRef >>= f >>= writeIORef stateRef
-        markDirty ctx
-        damageFull ctx
-
-  st0 <- liftIO $ readIORef stateRef
+  st0 <- peekVar state
 
   let streamEvery = 0.08
       sinceStream = now - asLastStream st0
       streamDue = asStreaming st0 && sinceStream >= streamEvery
   when streamDue $
-    mutateState $ \s -> (\s' -> s' {asLastStream = now}) <$> appendEntries s 1
+    mutateState state $ \s -> (\s' -> s' {asLastStream = now}) <$> appendEntries s 1
 
   -- Sleep until the next streaming tick. Marking the context dirty every
   -- frame to get there would run frames back to back in between.
   when (asStreaming st0) $
     wakeAfter (if streamDue then streamEvery else streamEvery - sinceStream)
 
-  (allSelected, setAllSelected) <- withKey ("log-all-selected" :: Text) (useFlag False)
+  allSelected <- useVar False
 
   -- Ctrl+A / Ctrl+C, or Select All / Copy from a row's context menu. Uses
   -- 'shortcutIn' because 'shortcut' would yield to a focused row.
   menuAction <- fmap snd <$> liftIO (takeTextEditLastAction ctx)
   let chosen c cmd = menuAction == Just cmd || shortcutIn (ctrl <> key c) inp
 
-  when (chosen 'a' SelectAll) $ setAllSelected True
+  when (chosen 'a' SelectAll) $ writeVar allSelected True
 
-  escape <- keyPressed KeyEscape
-  when (allSelected && escape) $
-    setAllSelected False
+  whenM (keyPressed KeyEscape) $
+    writeVar allSelected False
 
   -- A left click on a selectable row clears the Select-All highlight. The
   -- scrollbar is chrome, not an interactive widget, so `ctxActiveId` stays 0
   -- for gutter grabs and only an actual row press clears.
-  when (allSelected && (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp)) $ do
+  when (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp) $ do
     active <- liftIO $ readIORef (ctxActiveId ctx)
-    mRect <- liftIO $ maybe (pure Nothing) (getPrevRect ctx) (asScrollerWid st0)
+    mRect <- liftIO . maybe (pure Nothing) (getPrevRect ctx) =<< peekVar scroller
     when (active /= WidgetId 0 && maybe False (`rectContains` inputMousePos inp) mRect) $
-      setAllSelected False
+      writeVar allSelected False
 
   columnWith (tight . fillW . fillH . gap 0) $ do
-    stLive <- liftIO $ readIORef stateRef
-    renderHeaderToolbar mutateState stLive (allSelected, setAllSelected)
+    renderHeaderToolbar state allSelected
     separator
 
-    -- Re-read after the toolbar so its changes lay out in this frame.
-    st <- liftIO $ readIORef stateRef
-    renderLogScroller stateRef allSelected st
+    -- Read after the toolbar, so its changes lay out in this pass.
+    st <- readVar state
+    selected <- readVar allSelected
+    renderLogScroller scroller selected st
 
     -- Copy after the scroller pass: a focused row's own Ctrl+C runs inside
     -- selectableTextWith during the scroller pass and would otherwise overwrite
@@ -269,22 +276,20 @@ logsApp stateRef = do
     let copyAll = liftIO $ do
           rows <- forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st)
           void (ctxClipboardSet ctx (T.unlines rows))
-    when (allSelected && chosen 'c' Copy) copyAll
+    when (selected && chosen 'c' Copy) copyAll
 
     separator
-    renderStatusBar (asCount st) (asShownCount st) allSelected
+    renderStatusBar (asCount st) (asShownCount st) selected
 
-renderHeaderToolbar ::
-  ((AppState -> IO AppState) -> NanoUI ()) ->
-  AppState ->
-  (Bool, Bool -> NanoUI ()) ->
-  NanoUI ()
-renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
+renderHeaderToolbar :: Var AppState -> Var Bool -> NanoUI ()
+renderHeaderToolbar state allSelectedVar = do
+  st <- readVar state
+  allSelected <- readVar allSelectedVar
   let totalCount = asCount st
       filteredCount = asShownCount st
       filterPill lvl lbl =
         whenM (buttonWith (if asFilterLevel st == lvl then fontBold else id) lbl) $
-          mutateState (setFilter lvl)
+          mutateState state (setFilter lvl)
   tintedPanel (colorRGBA 24 29 38 255) (colorRGBA 45 52 64 255) fillW $ do
     columnWith (tight . fillW . padXY 12 10 . gap 8) $ do
       rowWith (tight . fillW . alignMid . gap 12) $ do
@@ -302,16 +307,16 @@ renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
 
       rowWith (tight . fillW . alignMid . gap 8) $ do
         whenM (button (if asStreaming st then "Pause Stream" else "Start Stream")) $
-          mutateState (\s -> pure s {asStreaming = not (asStreaming s), asLastStream = 0.0})
-        whenM (button "+100") $ mutateState (`appendEntries` 100)
-        whenM (button "+1000") $ mutateState (`appendEntries` 1000)
+          mutateState state (\s -> pure (changed s {asStreaming = not (asStreaming s), asLastStream = 0.0}))
+        whenM (button "+100") $ mutateState state (`appendEntries` 100)
+        whenM (button "+1000") $ mutateState state (`appendEntries` 1000)
         whenM (button "Clear") $
-          mutateState (\s -> pure s {asCount = 0, asNextId = 1, asShownStart = 0, asShownCount = 0})
+          mutateState state (\s -> pure (changed s {asCount = 0, asNextId = 1, asShownStart = 0, asShownCount = 0}))
 
         spacer (Fixed 8) Fit
 
         whenM (buttonWith (if allSelected then fontBold else id) (if allSelected then "Deselect All" else "Select All")) $
-          setAllSelected (not allSelected)
+          writeVar allSelectedVar (not allSelected)
 
         spacer (Fixed 8) Fit
 
@@ -319,19 +324,23 @@ renderHeaderToolbar mutateState st (allSelected, setAllSelected) = do
         filterPill Nothing "ALL"
         for_ [LevelInfo, LevelWarn, LevelError, LevelDebug] $ \lvl -> filterPill (Just lvl) (levelTag lvl)
 
-renderLogScroller :: IORef AppState -> Bool -> AppState -> NanoUI ()
-renderLogScroller stateRef allSelected st = do
+renderLogScroller :: Var (Maybe WidgetId) -> Bool -> AppState -> NanoUI ()
+renderLogScroller scroller allSelected st = do
   scrollWid <- withKey ("log-scroller" :: Text) nextId
-  when (asScrollerWid st /= Just scrollWid) $
-    liftIO $ writeIORef stateRef st {asScrollerWid = Just scrollWid}
+  writeVar scroller (Just scrollWid)
   ctx <- askContext
   mMetrics <- getScrollMetricsUi scrollWid
   endPad <- padB . layoutPadding <$> askDefaultLayout
   inp <- askInput
 
-  (sticky, setSticky) <- withKey ("log-sticky" :: Text) (useFlag True)
-  (prevScrollY, setPrevScrollY) <- withKey ("log-prev-scrolly" :: Text) (useFloat 0)
-  (reqJump, setReqJump) <- withKey ("log-req-jump" :: Text) (useFlag False)
+  -- Whether the view follows new entries, and the offset it had last frame:
+  -- carried from frame to frame, not shown, so they are peeked.
+  stickyVar <- useVar True
+  prevScrollYVar <- useVar (0 :: Float)
+  jumpRequest <- useVar False
+  sticky <- peekVar stickyVar
+  prevScrollY <- peekVar prevScrollYVar
+  reqJump <- readVar jumpRequest
 
   let n = asShownCount st
       totalH = fromIntegral n * logRowH
@@ -361,9 +370,9 @@ renderLogScroller stateRef allSelected st = do
         pure targetY
       else pure curY
 
-  setSticky isSticky
-  setPrevScrollY effY
-  when reqJump $ setReqJump False
+  writeVar stickyVar isSticky
+  writeVar prevScrollYVar effY
+  when reqJump $ writeVar jumpRequest False
 
   rowWith (tight . fillW . padXY 12 4 . alignMid . gap 8) $ do
     if isSticky
@@ -371,7 +380,7 @@ renderLogScroller stateRef allSelected st = do
       else do
         status amber "⏸ UNPINNED (reading history)"
         whenM (buttonWith (fontColor (colorRGBA 136 192 208 255) . fontBold) "Jump to Bottom") $
-          setReqJump True
+          writeVar jumpRequest True
 
   -- Visible rows plus one above and below.
   let (firstVis, lastVis) =
@@ -417,7 +426,8 @@ renderStatusBar totalCount filteredCount allSelected = do
 
 main :: IO ()
 main = do
-  appStateRef <- newIORef =<< newAppState 120 True
+  state <- newVar =<< newAppState 120 True
+  scroller <- newVar Nothing
   runSdlApp
     defaultSdlOptions
       { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Log Viewer", wsSize = Size 1050 720}
@@ -425,4 +435,4 @@ main = do
       -- ESC clears the selection (handled in logsApp); quit is Ctrl+Q.
       , sdlAppShouldQuit = shortcutIn (ctrl <> key 'q')
       }
-    (logsApp appStateRef)
+    (logsApp state scroller)

@@ -16,6 +16,8 @@ module NanoUI.Internal.Widgets.TextArea
   , textAreaDocument'
   , textAreaDocumentWith
   , textAreaDocumentWith'
+  , textAreaText
+  , textAreaCore
   , textAreaLayout
   , textAreaBuffer
   , loadTextAreaState
@@ -24,7 +26,7 @@ module NanoUI.Internal.Widgets.TextArea
   , textAreaFieldEditor
   ) where
 
-import Control.Monad (foldM, unless, when)
+import Control.Monad (foldM, unless, void, when)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -39,6 +41,8 @@ import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), clamp)
+import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, setChanged)
 import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
@@ -121,31 +125,35 @@ ensureCaretVisible state =
 textAreaLayout :: Layout
 textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 
--- | Multi-line text editor over 'Text'. Pass the current text; the result is
--- the text after this frame's edits. Pair it with a 'label' when a caption is
--- wanted.
+-- | Multi-line text editor over 'Text', showing and editing a Var. Pair it
+-- with a 'label' when a caption is wanted.
 --
--- A frame that changes the text joins the whole document into the returned
+-- A frame that changes the text joins the whole document into the Var's
 -- 'Text'. For long documents use 'textAreaDocument', whose edits cost only
 -- the lines they touch.
 {-# INLINE textArea #-}
-textArea :: Text -> NanoUI Text
-textArea value = snd <$> textAreaWith' id value
+textArea :: Var Text -> NanoUI ()
+textArea v = void (textAreaWith' id v)
 
--- | 'textArea' returning @(response, updatedText)@.
+-- | 'textArea' returning its 'Response'.
 {-# INLINE textArea' #-}
-textArea' :: Text -> NanoUI (Response, Text)
+textArea' :: Var Text -> NanoUI Response
 textArea' = textAreaWith' id
 
 -- | 'textArea' with a modifier applied to 'textAreaLayout', for example
 -- 'grow' to fill the parent.
 {-# INLINE textAreaWith #-}
-textAreaWith :: (Layout -> Layout) -> Text -> NanoUI Text
-textAreaWith f value = snd <$> textAreaWith' f value
+textAreaWith :: (Layout -> Layout) -> Var Text -> NanoUI ()
+textAreaWith f v = void (textAreaWith' f v)
 
--- | 'textAreaWith' returning @(response, updatedText)@.
-textAreaWith' :: (Layout -> Layout) -> Text -> NanoUI (Response, Text)
-textAreaWith' f value = do
+-- | 'textAreaWith' returning its 'Response'.
+{-# INLINE textAreaWith' #-}
+textAreaWith' :: (Layout -> Layout) -> Var Text -> NanoUI Response
+textAreaWith' f v = bindVar RenderFinal v (textAreaText f)
+
+-- | 'textAreaWith' on a plain 'Text'.
+textAreaText :: (Layout -> Layout) -> Text -> NanoUI (Response, Text)
+textAreaText f value = do
   (wid, ctx) <- freshWidget
   store <- liftIO (getStore ctx)
   let textKey = slotKey SlotTextAreaText (intKey wid)
@@ -165,29 +173,30 @@ textAreaWith' f value = do
       liftIO $ modifyStore ctx (insertSlot fieldTextDocument textKey (out, doc))
       pure (resp, out)
 
--- | Multi-line text editor over a 'TextDocument'. Pass the current document;
--- the result is the document after this frame's edits. An edit replaces the
--- lines it touches and shares the rest, and a frame without edits returns
--- the document it was passed. Edits avoid joining the whole document, though
--- their cost still depends on affected lines and tree operations. Join it
--- with 'documentText' when the whole text is wanted.
+-- | Multi-line text editor over a 'TextDocument', showing and editing a Var.
+-- An edit replaces the lines it touches and shares the rest, and a frame
+-- without edits leaves the document as it was. Edits avoid joining the whole
+-- document, though their cost still depends on affected lines and tree
+-- operations. Join it with 'documentText' when the whole text is wanted.
 {-# INLINE textAreaDocument #-}
-textAreaDocument :: TextDocument -> NanoUI TextDocument
-textAreaDocument value = snd <$> textAreaDocumentWith' id value
+textAreaDocument :: Var TextDocument -> NanoUI ()
+textAreaDocument v = void (textAreaDocumentWith' id v)
 
--- | 'textAreaDocument' returning @(response, updatedDocument)@.
+-- | 'textAreaDocument' returning its 'Response'.
 {-# INLINE textAreaDocument' #-}
-textAreaDocument' :: TextDocument -> NanoUI (Response, TextDocument)
+textAreaDocument' :: Var TextDocument -> NanoUI Response
 textAreaDocument' = textAreaDocumentWith' id
 
 -- | 'textAreaDocument' with a modifier applied to 'textAreaLayout'.
 {-# INLINE textAreaDocumentWith #-}
-textAreaDocumentWith :: (Layout -> Layout) -> TextDocument -> NanoUI TextDocument
-textAreaDocumentWith f value = snd <$> textAreaDocumentWith' f value
+textAreaDocumentWith :: (Layout -> Layout) -> Var TextDocument -> NanoUI ()
+textAreaDocumentWith f v = void (textAreaDocumentWith' f v)
 
--- | 'textAreaDocumentWith' returning @(response, updatedDocument)@.
-textAreaDocumentWith' :: (Layout -> Layout) -> TextDocument -> NanoUI (Response, TextDocument)
-textAreaDocumentWith' f value = do
+-- | 'textAreaDocumentWith' returning its 'Response'. Documents compare by
+-- identity: walking their lines on every frame would cost what they save.
+{-# INLINE textAreaDocumentWith' #-}
+textAreaDocumentWith' :: (Layout -> Layout) -> Var TextDocument -> NanoUI Response
+textAreaDocumentWith' f v = bindVarBy sameDocument RenderFinal v $ \value -> do
   wid <- nextId
   textAreaCore f wid value
 

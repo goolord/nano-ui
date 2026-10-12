@@ -50,6 +50,8 @@ import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, minW)
 import NanoUI.Internal.Types (Color)
+import NanoUI.Internal.Var (Binding (..), bindVar)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyle, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornWidget)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -165,39 +167,44 @@ defaultTextInputConfig =
     , ticAdornments = mempty
     }
 
--- | Single-line text field. Pass the current text; the result is the text
--- after this frame's typing, pastes, and menu edits.
+-- | Single-line text field showing and editing a Var: typing, pastes and
+-- menu edits change it.
+--
+-- > textInput draft
 {-# INLINE textInput #-}
-textInput :: Text -> NanoUI Text
-textInput value = snd <$> textInputConfigured' defaultTextInputConfig value
+textInput :: Var Text -> NanoUI ()
+textInput v = void (textInputConfigured' defaultTextInputConfig v)
 
--- | 'textInput' returning @(response, updatedText)@, including change/submit flags.
+-- | 'textInput' returning its 'Response', with change and submit flags.
 {-# INLINE textInput' #-}
-textInput' :: Text -> NanoUI (Response, Text)
+textInput' :: Var Text -> NanoUI Response
 textInput' = textInputConfigured' defaultTextInputConfig
 
 -- | 'textInput' with a placeholder, password masking, its own layout, or
 -- adornments.
 --
--- > secret' <- textInputConfigured defaultTextInputConfig {ticPassword = True} secret
--- > weight' <- textInputConfigured defaultTextInputConfig {ticAdornments = A.trailing (A.affix "kg")} weight
+-- > textInputConfigured defaultTextInputConfig {ticPassword = True} secret
+-- > textInputConfigured defaultTextInputConfig {ticAdornments = A.trailing (A.affix "kg")} weight
 {-# INLINE textInputConfigured #-}
-textInputConfigured :: TextInputConfig -> Text -> NanoUI Text
-textInputConfigured cfg value = snd <$> textInputConfigured' cfg value
+textInputConfigured :: TextInputConfig -> Var Text -> NanoUI ()
+textInputConfigured cfg v = void (textInputConfigured' cfg v)
 
--- | 'textInputConfigured' returning @(response, updatedText)@.
-textInputConfigured' :: TextInputConfig -> Text -> NanoUI (Response, Text)
-textInputConfigured' (TextInputConfig placeholder password lay adorns) value = do
-  r@(resp, txt) <-
-    buildTextInput
-      (if password then textInputFlagPassword else 0)
-      lay
-      placeholder
-      value
-      Nothing
+-- | 'textInputConfigured' returning its 'Response'.
+textInputConfigured' :: TextInputConfig -> Var Text -> NanoUI Response
+textInputConfigured' (TextInputConfig placeholder password lay adorns) v = do
+  -- The field stores its text before its adornments run, so a control
+  -- among them that sets the text has the last word.
+  resp <-
+    bindVar RenderFinal v $ \value ->
+      buildTextInput
+        (if password then textInputFlagPassword else 0)
+        lay
+        placeholder
+        value
+        Nothing
   -- A control among the adornments holds the pointer: its press is its own.
   taken <- adornWidget (respId resp) lay (fieldAdornmentColor lay) adorns
-  pure (if taken then (inertResponse resp, txt) else r)
+  pure (if taken then inertResponse resp else resp)
 
 -- | The colour of a field's adornments, muted from its text colour.
 fieldAdornmentColor :: Layout -> Theme -> Color
@@ -336,37 +343,36 @@ defaultSearchInputConfig =
     , sicLayout = searchInputLayout
     }
 
--- | Search box with a magnifier and a clear button; the first argument is the
--- placeholder. Pass the current text; the result is the text after this
--- frame. @respChanged@ on 'searchInput'' is debounced: it fires once typing
+-- | Search box with a magnifier and a clear button, showing and editing a
+-- Var; the first argument is the placeholder. The Var changes as the user
+-- types; @respChanged@ on 'searchInput'' is debounced: it fires once typing
 -- pauses, or at once when the field is cleared.
 {-# INLINE searchInput #-}
-searchInput :: Text -> Text -> NanoUI Text
-searchInput placeholder value = snd <$> searchInput' placeholder value
+searchInput :: Text -> Var Text -> NanoUI ()
+searchInput placeholder v = void (searchInput' placeholder v)
 
--- | 'searchInput' with a response. Text updates immediately; only the change
--- flag waits for the debounce interval.
+-- | 'searchInput' returning its 'Response'.
 {-# INLINE searchInput' #-}
-searchInput' :: Text -> Text -> NanoUI (Response, Text)
+searchInput' :: Text -> Var Text -> NanoUI Response
 searchInput' placeholder =
   searchInputConfigured' (defaultSearchInputConfig {sicPlaceholder = placeholder})
 
 -- | Search field with explicit placeholder, debounce in milliseconds, and layout.
 {-# INLINE searchInputConfigured #-}
-searchInputConfigured :: SearchInputConfig -> Text -> NanoUI Text
-searchInputConfigured cfg value = snd <$> searchInputConfigured' cfg value
+searchInputConfigured :: SearchInputConfig -> Var Text -> NanoUI ()
+searchInputConfigured cfg v = void (searchInputConfigured' cfg v)
 
--- | 'searchInputConfigured' returning @(response, updatedText)@. Store the
--- returned text every frame, including before the debounced change flag fires.
-searchInputConfigured' ::
-  SearchInputConfig -> Text -> NanoUI (Response, Text)
-searchInputConfigured' cfg value =
-  buildTextInput
-    textInputFlagSearch
-    (sicLayout cfg)
-    (sicPlaceholder cfg)
-    value
-    (Just (sicDebounceMs cfg))
+-- | 'searchInputConfigured' returning its 'Response'.
+{-# INLINE searchInputConfigured' #-}
+searchInputConfigured' :: SearchInputConfig -> Var Text -> NanoUI Response
+searchInputConfigured' cfg v =
+  bindVar RenderFinal v $ \value ->
+    buildTextInput
+      textInputFlagSearch
+      (sicLayout cfg)
+      (sicPlaceholder cfg)
+      value
+      (Just (sicDebounceMs cfg))
 
 -- -----------------------------------------------------------------------------
 -- Selectable text

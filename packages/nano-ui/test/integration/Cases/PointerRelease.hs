@@ -40,7 +40,7 @@ releaseAfterMove ctx failed lbl ui picked = do
 
 runReleaseMovedRadioTest :: Context -> IORef Int -> IO ()
 runReleaseMovedRadioTest ctx failed = do
-  sel <- newIORef (0 :: Int)
+  sel <- newVar (0 :: Int)
   releaseAfterMove ctx failed "two"
     ( \d -> column $ do
         columnWith (fixedH d . fillW) (pure ())
@@ -50,11 +50,11 @@ runReleaseMovedRadioTest ctx failed = do
 
 runReleaseMovedTabTest :: Context -> IORef Int -> IO ()
 runReleaseMovedTabTest ctx failed = do
-  cur <- newIORef (0 :: Int)
+  cur <- newVar (0 :: Int)
   releaseAfterMove ctx failed "Beta"
     ( \d -> column $ do
         columnWith (fixedH d . fillW) (pure ())
-        snd <$> held cur (\i -> (\r -> (r, tabActive r)) <$> tabBar' i [tab 0 "Alpha" (), tab 1 "Beta" ()])
+        snd <$> held cur (`tabBar'` [tab 0 "Alpha" (), tab 1 "Beta" ()])
     )
     (== 1)
 
@@ -64,7 +64,7 @@ runReleaseElsewhereTest :: Context -> IORef Int -> IO ()
 runReleaseElsewhereTest ctx failed = do
   -- The checkbox drives its own state across frames, so a stray toggle sticks
   -- and the value assertions below have something to catch.
-  flag <- newIORef False
+  flag <- newVar False
   let inp0 = withInput 320 240
       ui = column $ do
         a <- button' "Alpha"

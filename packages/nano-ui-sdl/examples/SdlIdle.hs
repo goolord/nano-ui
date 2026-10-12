@@ -37,6 +37,7 @@ import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (askContext, markDirty)
+import NanoUI.Var (peekVar)
 import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_TextInputEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -57,7 +58,6 @@ main = do
   frames <- newIORef (0 :: Int)
   started <- newIORef False
   typedAt <- newIORef (0 :: Double)
-  startTime <- newState (0 :: Double)
   runSdlApp
     defaultSdlOptions
       { sdlWindowSettings =
@@ -68,10 +68,10 @@ main = do
             }
       , sdlAppShouldQuit = pressedOnceIn KeyEscape
       }
-    (idleUi scene frames started typedAt startTime)
+    (idleUi scene frames started typedAt)
 
-idleUi :: String -> IORef Int -> IORef Bool -> IORef Double -> StateCell Double -> NanoUI ()
-idleUi scene frames started typedAt startTime = do
+idleUi :: String -> IORef Int -> IORef Bool -> IORef Double -> NanoUI ()
+idleUi scene frames started typedAt = do
   n <- liftIO (readIORef frames)
   liftIO (writeIORef frames (n + 1))
   ctx <- askContext
@@ -96,20 +96,23 @@ idleUi scene frames started typedAt startTime = do
   columnWith (gap 8 . padAll 16 . fillW . fillH) $ do
     heading "Idle probe"
     label "This window should use no CPU or GPU while it is left alone."
-    (query, setQuery) <- useText ""
-    (resp, query') <- searchInput' "Search" query
-    setQuery query'
+    query <- useVar ("" :: T.Text)
+    resp <- searchInput' "Search" query
     -- Hold keyboard focus without a click, as an app's search box would.
     when (scene `elem` ["focus", "type"] && n < 4) $
       requestFocus (respId resp)
-    when (scene == "type" && respChanged resp) $ liftIO $ do
-      now <- getMonotonicTime
-      sent <- readIORef typedAt
-      printf "search %s committed %.0f ms after the key\n" (show query') ((now - sent) * 1000)
-      hFlush stdout
+    when (scene == "type" && respChanged resp) $ do
+      committed <- peekVar query
+      liftIO $ do
+        now <- getMonotonicTime
+        sent <- readIORef typedAt
+        printf "search %s committed %.0f ms after the key\n" (show committed) ((now - sent) * 1000)
+        hFlush stdout
     t <- uiTime
-    (t0, setT0) <- useState startTime
-    when (t0 == 0) (setT0 t)
+    -- The first frame's time.
+    startTime <- useVar (0 :: Double)
+    modifyVar startTime (\t0 -> if t0 == 0 then t else t0)
+    t0 <- readVar startTime
     -- A loading indicator that goes away, as an app's would after startup.
     when (scene == "spinner" && t0 > 0 && t - t0 < 3) spinner
     when (scene == "clock") $ do
@@ -117,14 +120,14 @@ idleUi scene frames started typedAt startTime = do
           whole = floor up :: Int
       label ("Up " <> T.pack (show whole) <> " s")
       wakeAfter (fromIntegral (whole + 1) - up)
-    (flag, setFlag) <- useFlag True
-    setFlag =<< checkbox "A checkbox" flag
+    checkbox "A checkbox" =<< useVar True
     row $ do
       void (button "One")
       void (button "Two")
       void (button "Three")
+    matching <- readVar query
     forM_ [1 :: Int .. 12] $ \i ->
-      label ("Row " <> T.pack (show i) <> (if T.null query' then "" else " matching " <> query'))
+      label ("Row " <> T.pack (show i) <> (if T.null matching then "" else " matching " <> matching))
 
 -- | Queue an SDL_EVENT_TEXT_INPUT, as the keyboard would. The event and its
 -- string are leaked: SDL reads the text pointer when the loop takes the

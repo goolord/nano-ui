@@ -33,7 +33,7 @@ runTextInputFontTest base failed = do
       large = shapedFont 32 16 26
       ctx = withFontResolver (withFontMetrics base small) (\_ _ _ _ -> pure (large, False)) (\_ _ _ _ _ -> pure (32, 32))
       big = fontSize 32
-      field = void (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)} "Hg")
+      field = void ((snd <$> withValue "Hg" (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)})))
       extent ui = do
         _ <- runFrame ctx inp (column ui)
         (_, dd, _) <- runFrame ctx inp (column ui)
@@ -104,8 +104,8 @@ triangleAlphas dd =
 controls :: NanoUI ()
 controls = column $ do
   void (button "ok")
-  void (checkbox "check" True)
-  void (slider 0 1 0.5)
+  void ((snd <$> withValue True (checkbox "check")))
+  void ((snd <$> withValue 0.5 (slider 0 1)))
   void (button' "menu")
 
 -- | Rounded fills and AA strokes carry transparent fringe vertices next to

@@ -109,19 +109,24 @@ The [README's "How it works" section](../README.md#how-it-works) lists the steps
 ## Conventions
 
 - Public widgets follow the rules in the `NanoUI` module documentation: the
-  result comes first, a primed variant adds the `Response`, inputs are
-  controlled, and layout arguments are modifiers.
-- A controlled input adopts the caller's value with `adoptStoreInt`,
-  `adoptStoreFloat`, or `adoptStoreText`, and records what it returned with the
-  matching `recordStore*`. New inputs should use the same pair, so edits made
-  between frames survive a caller that passes the previous result back.
+  result comes first, a primed variant adds the `Response`, inputs take the
+  `Var` they edit, and layout arguments are modifiers.
+- An input is a value-style core, `fooCore :: ... -> a -> NanoUI (Response, a)`,
+  wrapped by `bindVar` (or `bindVarBy` with a cheaper equality) from
+  `NanoUI.Widgets.Custom`. Use `RenderFinal` when the core draws the value it
+  returns, and `Conservative` when it drew something from the old value before
+  the edit resolved, which reruns the view. Inside the core, adopt the incoming
+  value with `adoptStoreInt`, `adoptStoreFloat`, or `adoptStoreText` and record
+  what it returned with the matching `recordStore*`, so edits made between
+  frames by id (menus, text commands) survive.
 - Widget state in the store is read and written through the slot functions of
   `NanoUI.Internal.Store` (`findSlot fieldInt 0 key store`,
   `insertSlot fieldPoint key p . deleteSlot fieldInt key`), not through the
   maps. They compile to the record code they stand for. A widget that
   publishes state every frame writes it with `writeSlots`, which skips the
   write, and the store diff behind it, when nothing changed.
-- Local state goes through `NanoUI.Internal.Hooks`. Keyboard handling checks
+- Local state goes through `NanoUI.Internal.Var` (`useVar` keeps its own
+  per-scope counter, apart from widget ids). Keyboard handling checks
   `NanoUI.Internal.Widgets.Behavior.keyboardFocused` first, so disabled widgets and
   modals are respected.
 - Damage is part of correctness: a state change can need a follow-up frame

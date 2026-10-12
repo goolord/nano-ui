@@ -187,9 +187,10 @@ runTaskTwoPassTest ctx failed = do
   job <- newTask
   starts <- newIORef 0
   let ui = do
-        (n, setN) <- useInt 0
+        nVar <- useVar (0 :: Int)
+        n <- readVar nVar
         _ <- useTask job ("once" :: String) (tick starts >> threadDelay 10000000)
-        n <$ when (n == 0) (setN 1)
+        n <$ when (n == 0) (writeVar nVar 1)
   assertEq failed 1 =<< evalUi ctx inp ui
   assert failed =<< reaches starts 1
   threadDelay 20000

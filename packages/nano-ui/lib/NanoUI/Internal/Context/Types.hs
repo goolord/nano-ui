@@ -97,7 +97,9 @@ import NanoUI.Internal.Atlas (AtlasToken, ImageAtlas)
 import NanoUI.Internal.Draw.Types (DrawArena, DrawData, DrawOp, DrawingBuild)
 import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
-import NanoUI.Internal.Id (IdContext, WidgetId, hashWidgetId)
+import NanoUI.Internal.Id (WidgetId, hashWidgetId)
+import NanoUI.Internal.Id.Cursor (IdCursor)
+import NanoUI.Internal.Var.Types (SlotVar)
 import NanoUI.Internal.Image (ImageLook)
 import NanoUI.Internal.Input (Composition, InputPurpose, MouseButton, UiCursorKind)
 import NanoUI.Internal.Shortcut (Shortcut)
@@ -886,7 +888,13 @@ data Context = Context
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)
   , ctxDrawingCache :: IORef DrawingCacheState
-  , ctxIdContext :: IORef IdContext
+  , ctxIdCursor :: !IdCursor
+  , ctxVarFrame :: !(MutablePrimArray RealWorld Word64)
+  -- ^ Var bookkeeping for the frame being built: current pass tick, frame
+  -- base tick, pass number, flags, and the passes the last frame ran
+  -- ("NanoUI.Internal.Var").
+  , ctxVarSlots :: !(IORef (IntMap SlotVar))
+  -- ^ Positional Vars ('NanoUI.Var.useVar'), by Var key.
   , ctxFontMetrics :: FontMetrics
   -- ^ Base proportional-font metrics used by layout and drawing.
   , ctxMonoFontMetrics :: FontMetrics

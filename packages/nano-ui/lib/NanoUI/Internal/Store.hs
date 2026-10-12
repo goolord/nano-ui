@@ -3,8 +3,6 @@
 module NanoUI.Internal.Store
   ( WidgetStore (..)
   , emptyWidgetStore
-  , mirrorStoresChanged
-  , bumpMirror
   , Field
   , fieldInt
   , fieldFloat
@@ -115,8 +113,7 @@ slotChangedKeys !old !new
 -- | Widget state for every widget, in maps by value type. Same-type fields
 -- that share a widget key use 'slotKey'.
 data WidgetStore = WidgetStore
-  { storeMirrorGen :: {-# UNPACK #-} !Word64
-  , storeOpenSelect :: {-# UNPACK #-} !Int
+  { storeOpenSelect :: {-# UNPACK #-} !Int
   , storeInt :: !(IntMap Int)
   , storeFloat :: !(IntMap Float)
   , storeDouble :: !(IntMap Double)
@@ -278,12 +275,11 @@ slotWrite field k v = SlotWrites (\st -> lookupSlot field k st == Just v) (inser
 slotWriteOr :: Eq a => Field a -> a -> Int -> a -> SlotWrites
 slotWriteOr field def k v = SlotWrites (\st -> findSlot field def k st == v) (insertSlot field k v)
 
--- | Empty maps, zero state generation, and no open select.
+-- | Empty maps and no open select.
 emptyWidgetStore :: WidgetStore
 emptyWidgetStore =
   WidgetStore
-    { storeMirrorGen = 0
-    , storeOpenSelect = 0
+    { storeOpenSelect = 0
     , storeInt = IM.empty
     , storeFloat = IM.empty
     , storeDouble = IM.empty
@@ -301,17 +297,6 @@ emptyWidgetStore =
     , storeRichSelection = IM.empty
     , storeQuiet = IM.empty
     }
-
--- | Whether local-hook writes changed the generation used to request a view
--- rebuild. This compares the generation only, not individual maps.
-{-# INLINE mirrorStoresChanged #-}
-mirrorStoresChanged :: WidgetStore -> WidgetStore -> Bool
-mirrorStoresChanged old new = storeMirrorGen old /= storeMirrorGen new
-
--- | Advance the local-state generation so the frame can rebuild dependent widgets.
-{-# INLINE bumpMirror #-}
-bumpMirror :: WidgetStore -> WidgetStore
-bumpMirror st = st {storeMirrorGen = storeMirrorGen st + 1}
 
 -- | Derive a key for a named sub-slot, separating values such as cursor and
 -- anchor that share one widget and one typed map. Uses a non-cryptographic hash.

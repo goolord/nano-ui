@@ -5,6 +5,7 @@ import Cases.Runner qualified
 import Cases.SIMD qualified
 import Cases.NoThunks qualified
 import Cases.State qualified
+import Cases.Passes qualified
 import Cases qualified
 import Cases.Window qualified
 import Cases.Cache qualified
@@ -64,6 +65,7 @@ main = do
     , Cases.SIMD.tests
     , Cases.NoThunks.tests
     , Cases.State.tests
+    , Cases.Passes.tests
     , Cases.tests
     , Cases.Window.tests
     , Cases.Cache.tests

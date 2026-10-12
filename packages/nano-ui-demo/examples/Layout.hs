@@ -44,7 +44,11 @@ view =
       toolbar $ do
         labelWith (alignMid . fontSize 22 . fontMedium) "Layout"
         flex
-        explainLayout =<< checkbox "Explain layout" =<< explainingLayout
+        -- The overlay's state lives in the context: show it in the checkbox
+        -- and hand the checkbox's edit back.
+        on <- explainingLayout
+        (_, on') <- withValue on (checkbox "Explain layout")
+        explainLayout on'
 
       section "Rows, columns, gap and padding" "gap spaces the children; padAll pads inside the container's edge." $ do
         rowWith (gap 4) (mapM_ chip ["gap 4", "B", "C"])

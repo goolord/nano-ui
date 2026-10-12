@@ -7,10 +7,11 @@ module NanoUI.Internal.Widgets.NumericInput
   , numericInput'
   , numericInputConfigured
   , numericInputConfigured'
+  , numericInputCore
   )
 where
 
-import Control.Monad (when)
+import Control.Monad (void, when)
 import Data.Char (isDigit, isHexDigit)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -18,6 +19,7 @@ import Data.Text qualified as T
 import Data.Text.Read qualified as TR
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestInputMethod, requestWakeAt, modifyStore)
+import NanoUI.Internal.Equality (sameDouble)
 import NanoUI.Internal.Input (InputPurpose (..), Key (..), MouseButton (..), Pressable (..), inputModifiers, inputMousePos, modShift)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
@@ -29,6 +31,8 @@ import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
 import NanoUI.Widgets.TextEditor (singleLineMode)
 import NanoUI.Internal.Widgets.TextInput (TextInputState (..), editTextInput, editorTextState, loadTextInputState, saveTextEditor, saveTextInputState)
+import NanoUI.Internal.Var (Binding (..), bindVarBy)
+import NanoUI.Internal.Var.Types (Var)
 import Numeric (showFFloat, showHex)
 
 -- | How a numeric field reads, shows, and steps its value.
@@ -61,33 +65,40 @@ defaultNumericInputConfig =
     , nicLayout = defaultLayout {layoutWidth = Grow 1, layoutMinW = 80}
     }
 
--- | Numeric field over whole numbers. Pass the current value; the result is
--- the value after this frame's typing, arrow keys, and stepper clicks.
+-- | Numeric field over whole numbers, showing and editing a Var: typing,
+-- arrow keys and stepper clicks change it.
 --
 -- Only digits, and a leading minus sign when the range reaches below zero, can
 -- be typed. Up and Down step the value, Shift steps ten times as far, and
 -- holding a stepper arrow repeats. Enter, a step, or leaving the field rewrites
--- the text as the value, clamped to the range.
+-- the text as the value, clamped to the range. A value written to the Var
+-- while the field is focused replaces the text being typed.
 {-# INLINE numericInput #-}
-numericInput :: Double -> NanoUI Double
-numericInput value = snd <$> numericInputConfigured' defaultNumericInputConfig value
+numericInput :: Var Double -> NanoUI ()
+numericInput v = void (numericInputConfigured' defaultNumericInputConfig v)
 
--- | 'numericInput' returning @(response, updatedValue)@.
+-- | 'numericInput' returning its 'Response'.
 {-# INLINE numericInput' #-}
-numericInput' :: Double -> NanoUI (Response, Double)
+numericInput' :: Var Double -> NanoUI Response
 numericInput' = numericInputConfigured' defaultNumericInputConfig
 
 -- | 'numericInput' with a range, a step, decimal places, hexadecimal mode, or
 -- its own layout.
 --
--- > byte' <- numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 255, nicHex = True} byte
+-- > numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 255, nicHex = True} byte
 {-# INLINE numericInputConfigured #-}
-numericInputConfigured :: NumericInputConfig -> Double -> NanoUI Double
-numericInputConfigured cfg value = snd <$> numericInputConfigured' cfg value
+numericInputConfigured :: NumericInputConfig -> Var Double -> NanoUI ()
+numericInputConfigured cfg v = void (numericInputConfigured' cfg v)
 
--- | 'numericInputConfigured' returning @(response, updatedValue)@.
-numericInputConfigured' :: NumericInputConfig -> Double -> NanoUI (Response, Double)
-numericInputConfigured' cfg value = do
+-- | 'numericInputConfigured' returning its 'Response'.
+{-# INLINE numericInputConfigured' #-}
+numericInputConfigured' :: NumericInputConfig -> Var Double -> NanoUI Response
+numericInputConfigured' cfg v = bindVarBy sameDouble RenderFinal v (numericInputCore cfg)
+
+-- | 'numericInputConfigured' on a plain value: the response and the value
+-- after this frame.
+numericInputCore :: NumericInputConfig -> Double -> NanoUI (Response, Double)
+numericInputCore cfg value = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   liftIO $ registerFocusable ctx wid
@@ -99,11 +110,14 @@ numericInputConfigured' cfg value = do
     key = intKey wid
     given = clampNumber cfg value
     stored = lookupSlot fieldText key store
+    -- A value other than the last one the field returned was set by the
+    -- caller, and replaces the text even while the field is focused.
+    adopted = isFocus && maybe False (/= given) (lookupSlot fieldDouble key store)
     -- Unfocused, the field shows the caller's value; focused, it keeps the
     -- text being typed.
-    text0 = if isFocus then fromMaybe (formatNumber cfg given) stored else formatNumber cfg given
+    text0 = if isFocus && not adopted then fromMaybe (formatNumber cfg given) stored else formatNumber cfg given
     s0 = loadTextInputState store key text0
-    lastValue = findSlot fieldDouble given key store
+    lastValue = if adopted then given else findSlot fieldDouble given key store
   mEdited <- if isFocus then liftIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
   resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric
   let

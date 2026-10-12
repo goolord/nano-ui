@@ -29,8 +29,10 @@ import NanoUI
   , fillW
   , gap
   , tight
+  , Var
   , liftIO
   , withKey
+  , withValue
   )
 import NanoUI qualified as NUI
 import NanoUI.Form.Internal.Backend
@@ -60,8 +62,9 @@ data Publish
     -- until it publishes, the form value changes elsewhere, or the form resets.
     OnlyWhen (Response -> Bool)
 
--- | Adapt a controlled widget to a form. 'Just' supplies a stable field name;
--- 'Nothing' asks ditto to number it. Naming adds no visible label: include one
+-- | Adapt an input to a form. The input takes a Var, as built-in inputs do;
+-- the form gives it one holding the field's value and reads the edit back.
+-- 'Just' supplies a stable field name; 'Nothing' asks ditto to number it. Naming adds no visible label: include one
 -- in the widget action when wanted. 'Publish' says when an edit reaches the
 -- form. Decoding and validation errors follow ditto's normal path.
 inputWidget ::
@@ -70,7 +73,7 @@ inputWidget ::
   -> (FormInput -> Either err a)
   -> Publish
   -> (a -> FormInput)
-  -> (a -> NanoUI (Response, a))
+  -> (Var a -> NanoUI Response)
   -> a
   -> Form err a
 inputWidget name decode publish encode widget initial = do
@@ -78,7 +81,7 @@ inputWidget name decode publish encode widget initial = do
   let draftValue = either (const Nothing) Just . decode
   maybe Unnamed.input Named.input name decode (fieldView owner draftValue publish encode widget) initial
 
-labelled :: Maybe Text -> (a -> NanoUI b) -> a -> NanoUI b
+labelled :: Maybe Text -> (Var a -> NanoUI b) -> Var a -> NanoUI b
 labelled caption widget value = mapM_ NUI.label caption >> widget value
 
 -- | Keep the label and control in the same stable field scope, and publish
@@ -89,7 +92,7 @@ fieldView ::
   -> (FormInput -> Maybe a)
   -> Publish
   -> (a -> FormInput)
-  -> (a -> NanoUI (Response, a))
+  -> (Var a -> NanoUI Response)
   -> FormId
   -> a
   -> FormView
@@ -105,7 +108,7 @@ fieldView (FormScope owner prefix) draftValue publish encode widget formId value
       let shown = case pending of
             Just (base, draft) | base == current, Just held <- draftValue draft -> held
             _ -> value
-      (response, newValue) <- widget shown
+      (response, newValue) <- withValue shown widget
       let committed = commit response
           draft
             | committed || newValue == value = Nothing
@@ -117,7 +120,7 @@ fieldView (FormScope owner prefix) draftValue publish encode widget formId value
  where
   fieldKey = encodeFormId formId
   immediate ctx changed = do
-    (response, newValue) <- widget value
+    (response, newValue) <- withValue value widget
     when (changed response || newValue /= value) $
       liftIO (updateFieldInput owner ctx prefix fieldKey (encode newValue))
 

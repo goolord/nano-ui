@@ -12,7 +12,7 @@ import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
-  , UiCursorKind (..), V2 (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
+  , UiCursorKind (..), V2 (..), Var (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
   , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
@@ -172,7 +172,7 @@ testSquareThemedRaster :: IO ()
 testSquareThemedRaster = do
   let theme = tomorrowNightMinDarkTheme
   ctx <- newRgfwContext theme
-  raster ctx 240 120 (packColor (themeWindow theme)) (column (button "Button" >> checkbox "Checkbox label" True)) $ \_ (base, _) px -> do
+  raster ctx 240 120 (packColor (themeWindow theme)) (column (button "Button" >> checkbox "Checkbox label" (Var True))) $ \_ (base, _) px -> do
     nodesOf NodeButton ctx >>= \case
       Rect bx by bw bh : _ -> do
         let (x0, y0, x1, y1) = (round bx, round by, round (bx + bw) - 1, round (by + bh) - 1)

@@ -49,7 +49,9 @@ import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, takeEscape, whenM, withIdFrame, withKey)
-import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId)
+import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId, scopeIdContext)
+import NanoUI.Internal.Var (bindVarOn, requestRerun)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip)
 import NanoUI.Internal.Shortcut qualified as Shortcut
@@ -70,11 +72,11 @@ import NanoUI.Internal.Widgets.SplitPane
 -- Public API
 -- -----------------------------------------------------------------------------
 
--- | Who owns the arrangement. Initial trees are read only when this widget
--- identity first appears; controlled trees are authoritative on every pass.
--- In either mode Nothing is an empty workspace, including after the last close.
-data PaneTree = InitialTree !(Maybe GridNode) | ControlledTree !(Maybe GridNode)
-  deriving (Eq, Show)
+-- | Who owns the arrangement. An initial tree is read only when this widget
+-- identity first appears; a controlled tree lives in a Var, which the grid
+-- shows on every pass and stores its changes in. In either mode Nothing is
+-- an empty workspace, including after the last close.
+data PaneTree = InitialTree !(Maybe GridNode) | ControlledTree !(Var (Maybe GridNode))
 
 -- | Validate a persisted/application-built tree before using it. Pane and split
 -- ids share one namespace; ratios must be finite and between zero and one.
@@ -124,17 +126,14 @@ data PaneGridConfig = PaneGridConfig
     -- still follows the grid.
   , pgTree :: !PaneTree
     -- ^ 'InitialTree' seeds internally owned state once. 'ControlledTree'
-    -- adopts the caller's arrangement on every pass: retain 'pgrTree' to accept
-    -- an edit, or keep the old value to reject it. A replacement cancels any
-    -- gesture on the replaced arrangement. Both modes permit an empty grid.
+    -- keeps the arrangement in a Var: the grid stores each edit there, and a
+    -- tree written to it replaces the arrangement and cancels any gesture on
+    -- the old one. Both modes permit an empty grid.
     --
-    -- Allocate @arrangementCell <- newState (Just startLayout)@ during setup,
-    -- then read and update it in the view:
+    -- Allocate @arrangement <- newVar (Just startLayout)@ during setup, then:
     --
-    -- > (arrangement, setArrangement) <- useState arrangementCell
     -- > resp <- paneGrid cfg {pgTree = ControlledTree arrangement}
-    -- > setArrangement (pgrTree resp)
-    -- > whenM (button "Reset layout") (setArrangement (Just startLayout))
+    -- > whenM (button "Reset layout") (writeVar arrangement (Just startLayout))
     --
     -- Closing the last pane leaves the grid empty until the caller supplies
     -- another controlled tree or changes the grid's widget identity.
@@ -223,8 +222,7 @@ data PaneGridResponse = PaneGridResponse
     -- save 'pgrTree'. Not set for a maximize or restore, which leave the
     -- tree as it is, nor for a tree the caller passed in 'pgTree'.
   , pgrTree :: !(Maybe GridNode)
-    -- ^ The split tree, 'Nothing' once the last pane has been closed. Pass
-    -- it back as 'ControlledTree' in 'pgTree' to accept changes.
+    -- ^ The split tree, 'Nothing' once the last pane has been closed.
   , pgrPaneCount :: !Int
     -- ^ Number of panes (0 once the last pane has been closed).
   , pgrPanes :: ![Word64]
@@ -342,7 +340,13 @@ paneFocus tree g = (maxPane, focus)
 -- widget identity stable; pane callbacks receive actions for splits, closes,
 -- and maximisation through 'PaneGridCtx'.
 paneGrid :: PaneGridConfig -> NanoUI PaneGridResponse
-paneGrid cfg = do
+paneGrid cfg = case pgTree cfg of
+  InitialTree t -> paneGridCore cfg False t
+  -- The grid draws the tree it was given, so a change shows on a rerun.
+  ControlledTree v -> bindVarOn Conservative pgrTree v (paneGridCore cfg True)
+
+paneGridCore :: PaneGridConfig -> Bool -> Maybe GridNode -> NanoUI PaneGridResponse
+paneGridCore cfg controlled given = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   -- If Tab focus was turned off, drop any focus the grid still holds.
@@ -354,10 +358,9 @@ paneGrid cfg = do
       edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
   stored <- lookupSlot fieldGrid key <$> liftIO (getStore ctx)
-  let given = case pgTree cfg of InitialTree t -> t; ControlledTree t -> t
-      adopt = case pgTree cfg of
-        InitialTree _ -> maybe True (const False) stored
-        ControlledTree _ -> maybe True ((/= given) . gsTree) stored
+  let adopt
+        | controlled = maybe True ((/= given) . gsTree) stored
+        | otherwise = maybe True (const False) stored
   when adopt $ forM_ given $ \t ->
     either (liftIO . fail) pure (validateGridTree t)
   Rect ox oy ow oh <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
@@ -417,7 +420,7 @@ paneGrid cfg = do
         GridEnv
           { geCtx = ctx
           , geKey = key
-          , gePaneScope = IdContext (hashWidgetId wid) 0
+          , gePaneScope = scopeIdContext (hashWidgetId wid)
           , geCfg = cfg
           , geGutter = gutter
           , geThickness = spacing
@@ -722,7 +725,7 @@ runGestures wid env dividers rendered moved zone = do
   disabled <- liftIO (isDisabled (geCtx env) wid)
   let mouse = inputMousePos inp
       down = heldIn MouseLeft inp
-      setGesture mirror g = void (updateGrid env mirror (\s -> s {gsGesture = g}))
+      setGesture rerun g = void (updateGrid env rerun (\s -> s {gsGesture = g}))
       -- diBand already includes the leeway; inflating it would steal presses
       -- from neighbouring panes.
       hitDiv = find (\d -> rectHit (diBand d) mouse) dividers
@@ -793,16 +796,18 @@ centerOf r = (rectX r + rectW r / 2, rectY r + rectH r / 2)
 -- Store mutation helpers
 -- -----------------------------------------------------------------------------
 
--- | Update the grid's stored state and return it. With @mirror@, the
--- running frame rebuilds its view from the new state. A no-op update leaves
--- the store untouched.
+-- | Update the grid's stored state and return it. With @rerun@, the
+-- running frame rebuilds its view from the new state, and the rebuild's
+-- diffs repaint what moved. A no-op update leaves the store untouched.
 updateGrid :: GridEnv -> Bool -> (GridState -> GridState) -> NanoUI GridState
-updateGrid env mirror f = liftIO $ do
-  st <- getStore (geCtx env)
+updateGrid env rerun f = liftIO $ do
+  let ctx = geCtx env
+  st <- getStore ctx
   let old = fromMaybe (geState env) (lookupSlot fieldGrid (geKey env) st)
       new = f old
-  when (new /= old) $
-    setStore (geCtx env) ((if mirror then bumpMirror else id) (insertSlot fieldGrid (geKey env) new st))
+  when (new /= old) $ do
+    setStore ctx (insertSlot fieldGrid (geKey env) new st)
+    when rerun (requestRerun ctx)
   pure new
 
 -- | Split a pane, focusing and returning the new one.

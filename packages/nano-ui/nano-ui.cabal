@@ -86,6 +86,7 @@ library
         NanoUI.Testing.Assert
         NanoUI.Testing.Harness
         NanoUI.Testing.Runner
+        NanoUI.Var
         NanoUI.Widgets.Combo
         NanoUI.Widgets.Custom
         NanoUI.Widgets.PaneGrid
@@ -104,6 +105,7 @@ library
         NanoUI.Internal.Frame.TextArea
         NanoUI.Internal.Frame.Window
         NanoUI.Internal.Id
+        NanoUI.Internal.Id.Cursor
         NanoUI.Internal.Image
         NanoUI.Internal.Input
         NanoUI.Internal.Layout.Arena
@@ -112,12 +114,18 @@ library
         NanoUI.Internal.Path
         NanoUI.Internal.SIMD
         NanoUI.Internal.Store
+        NanoUI.Internal.Var
+        NanoUI.Internal.Var.Types
         NanoUI.Internal.Widgets.Custom
         NanoUI.Internal.Widgets.SplitPane
         NanoUI.Internal.Widgets.TextArea
         NanoUI.Internal.Widgets.TextDocument
     other-modules:
         NanoUI.Internal.Equality
+        NanoUI.Internal.Var.Cell
+        NanoUI.Internal.Var.Generic
+        NanoUI.Internal.Var.List
+        NanoUI.Internal.Var.Map
         NanoUI.Internal.Derived
         NanoUI.Internal.Resource
         NanoUI.Internal.Host
@@ -139,7 +147,6 @@ library
         NanoUI.Internal.Damage
         NanoUI.Internal.Draw
         NanoUI.Internal.Font
-        NanoUI.Internal.Hooks
         NanoUI.Internal.Frame
         NanoUI.Internal.Frame.Cursor
         NanoUI.Internal.Draw.Arena
@@ -259,6 +266,7 @@ test-suite nano-ui-test
         Cases.Svg
         Cases.Adornment
         Cases.State
+        Cases.Passes
         Cases.Table
         Cases.Modal
         Cases.NoThunks

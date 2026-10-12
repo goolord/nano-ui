@@ -55,7 +55,7 @@ runCursorShapeScopeTest ctx failed = do
 -- container gaps.
 runCursorShapeInnerWidgetsTest :: Context -> IORef Int -> IO ()
 runCursorShapeInnerWidgetsTest ctx failed = do
-  let ui = withCursorShape UiCursorMove . columnWith (gap 24) $ sequence [button' "Press", fst <$> textInput' "text", plainArea 120 60]
+  let ui = withCursorShape UiCursorMove . columnWith (gap 24) $ sequence [button' "Press", fst <$> withValue "text" textInput', plainArea 120 60]
   rs <- shapesOver failed ctx centerOf ui [UiCursorPointer, UiCursorText, UiCursorMove]
   shapesAt failed ctx ui [(V2 (bx + 4) (by + bh + 12), UiCursorMove) | Rect bx by _ bh <- map respRect (take 1 rs)]
 
@@ -74,7 +74,7 @@ runCursorShapeDisabledTest ctx failed =
   forM_ [(True, [UiCursorNotAllowed, UiCursorNotAllowed]), (False, [UiCursorPointer, UiCursorText])] $ \(off, wants) ->
     shapesOver failed ctx centerOf (ui off) wants
   where
-    ui off = withCursorShape UiCursorNotAllowed . disabledWhen off . column $ sequence [button' "Delete", fst <$> textInput' "name"]
+    ui off = withCursorShape UiCursorNotAllowed . disabledWhen off . column $ sequence [button' "Delete", fst <$> withValue "name" textInput']
 
 -- | A scope takes no id and adds no node, so widget ids, state and layout are
 -- unchanged.
@@ -82,9 +82,10 @@ runCursorShapeIdsLayoutTest :: Context -> IORef Int -> IO ()
 runCursorShapeIdsLayoutTest ctx failed = do
   let ui scoped = row $ do
         a <- (if scoped then withCursorShape UiCursorHelp else id) (button' "a")
-        (n, setN) <- useInt 0
+        nVar <- useVar (0 :: Int)
+        n <- readVar nVar
         b <- button' "b"
-        when (respClicked b) (setN (n + 1))
+        when (respClicked b) (writeVar nVar (n + 1))
         pure (a, b, n)
       ids (a, b) = (respId a, respId b, respRect a, respRect b)
   (a0, b0, _) <- warmup2 ctx inp (ui False)
@@ -127,8 +128,9 @@ runCursorShapeClippedTest ctx failed = do
 runCursorShapeRepeatedPassTest :: Context -> IORef Int -> IO ()
 runCursorShapeRepeatedPassTest ctx failed = do
   let ui = do
-        (n, setN) <- useInt 0
-        when (n == 0) (setN 1)
+        nVar <- useVar (0 :: Int)
+        n <- readVar nVar
+        when (n == 0) (writeVar nVar 1)
         d <- column ((if n == 0 then withCursorShape UiCursorMove else id) (plainArea 120 80))
         pure (d, n)
   (d, n) <- evalUi ctx inp ui

@@ -7,7 +7,6 @@ module ImeSelftest
   ) where
 
 import Control.Monad (unless, void)
-import Data.IORef (newIORef, readIORef)
 import Data.Maybe (isJust, isNothing)
 import Data.Text.Foreign qualified as TF
 import Foreign.C.String (peekCString)
@@ -37,7 +36,7 @@ import Data.ByteString qualified as BS
 selftest :: IO ()
 selftest =
   withHiddenWindow 480 200 (V2 5 5) id $ \ctx env base -> do
-    ref <- newIORef "ab"
+    ref <- newVar "ab"
     zoom <- windowZoom env
     let check ok msg = unless ok (fail ("ime: " <> msg))
         drawFrame inp = void (sdlDrawFrame ctx (void (column (held ref textInput'))) env inp False)
@@ -57,7 +56,7 @@ selftest =
     restartedInField <- sync (sdlTextInput env) composing
     drawFrame composing
     drawn <- hasText "abかな" <$> collectTextSpans ctx
-    value <- readIORef ref
+    value <- readVarIO ref
     running <- textInputActive (sdlWindow env)
     check (running && not restartedInField && drawn && value == "ab") ("in the field: " <> show (running, restartedInField, drawn, value))
     -- A fresh sync starts text input for the field.
@@ -76,7 +75,7 @@ selftest =
     (_, committed) <- typed "仮名" (editing "" 0 0 (step composing))
     check (isNothing (inputComposition committed) && inputChars committed == "仮名") "commit not applied"
     mapM_ drawFrame [committed, clearEphemeral committed]
-    readIORef ref >>= \v -> check (v == "ab仮名") ("the commit did not insert: " <> show v)
+    readVarIO ref >>= \v -> check (v == "ab仮名") ("the commit did not insert: " <> show v)
     -- Losing window focus ends the composition, even if SDL does not report it.
     (_, again) <- editing "か" 1 0 (step committed)
     (_, blurred) <- focusLost (step again)

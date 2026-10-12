@@ -44,14 +44,14 @@ asking ctx mk = do
 -- next frame, not the requesting one.
 runFocusRequestTypesTest :: Context -> IORef Int -> IO ()
 runFocusRequestTypesTest ctx failed = do
-  refs <- replicateM 2 (newIORef "")
+  refs <- replicateM 2 (newVar "")
   (ui, ask) <- asking ctx $ \req -> column (mapM (fmap (respId . fst) . (`held` textInput')) refs <* req)
   [_, b] <- warmup2 ctx inp ui
   assertEq failed (WidgetId 0) =<< getFocusId ctx
   assertEq failed (True, b) =<< ask [b] inp {inputChars = "y"}
   assert failed =<< getFocusVisible ctx
   _ <- runFrame ctx inp {inputChars = "x"} ui
-  assertEq failed ["", "x"] =<< mapM readIORef refs
+  assertEq failed ["", "x"] =<< mapM readVarIO refs
 
 -- | Every Tab-stop control kind can be focused by its response id.
 runFocusRequestKindsTest :: Context -> IORef Int -> IO ()
@@ -65,11 +65,11 @@ runFocusRequestKindsTest _ failed =
   where
     kinds :: [(String, NanoUI Response)]
     kinds =
-      [ ("button", button' "Go"), ("checkbox", fst <$> checkbox' "Check" False), ("toggle", fst <$> toggleSwitchWith' id False)
-      , ("slider", fst <$> slider' 0 100 50), ("knob", fst <$> knobWith' id 36 0 100 50), ("select", fst <$> select' ["One", "Two"] 0)
-      , ("text input", fst <$> textInput' "text"), ("search input", fst <$> searchInput' "Search" "text"), ("numeric input", fst <$> numericInput' 5)
-      , ("combo box", fst <$> comboBox' "Choose" ["a", "b"] "a"), ("text area", fst <$> textArea' "text")
-      , ("color picker", fst <$> colorPicker' (colorRGBA 200 40 40 255))
+      [ ("button", button' "Go"), ("checkbox", checkbox' "Check" (Var False)), ("toggle", toggleSwitchWith' id (Var False))
+      , ("slider", fst <$> withValue 50 (slider' 0 100)), ("knob", fst <$> withValue 50 (knobWith' id 36 0 100)), ("select", fst <$> withValue 0 (select' ["One", "Two"]))
+      , ("text input", fst <$> withValue "text" textInput'), ("search input", fst <$> withValue "text" (searchInput' "Search")), ("numeric input", fst <$> withValue 5 numericInput')
+      , ("combo box", fst <$> withValue "a" (comboBox' "Choose" ["a", "b"])), ("text area", fst <$> withValue "text" textArea')
+      , ("color picker", colorPicker' (Var (colorRGBA 200 40 40 255)))
       ]
 
 -- | Tab and Shift+Tab continue from the widget focused from code.
@@ -85,7 +85,7 @@ runFocusRequestTabOrderTest ctx failed = do
 -- | Requesting @WidgetId 0@ unfocuses the field, and the loop can sleep.
 runFocusRequestNoneTest :: Context -> IORef Int -> IO ()
 runFocusRequestNoneTest ctx failed = do
-  textRef <- newIORef ""
+  textRef <- newVar ""
   (ui, ask) <- asking ctx $ \req -> column (fst <$> held textRef textInput' <* req)
   r <- warmup2 ctx inp ui
   _ <- ask [respId r] inp
@@ -94,7 +94,7 @@ runFocusRequestNoneTest ctx failed = do
   assertEq failed (True, WidgetId 0) =<< ask [WidgetId 0] inp
   assert failed . not =<< textFieldActive ctx
   _ <- runFrame ctx inp {inputChars = "b"} ui
-  assertEq failed "a" =<< readIORef textRef
+  assertEq failed "a" =<< readVarIO textRef
   _ <- warmup2 ctx inp ui
   assert failed . not =<< needsRedraw ctx inp inp
   assertEq failed 0 =<< getWakeAt ctx
@@ -104,7 +104,7 @@ runFocusRequestNoneTest ctx failed = do
 runFocusRequestRefusedTest :: Context -> IORef Int -> IO ()
 runFocusRequestRefusedTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column $ do
-    ids <- sequence [respId . fst <$> textInput' "", respId . fst <$> disabledWhen True (textInput' ""), respId <$> label' "Label"]
+    ids <- sequence [respId . fst <$> withValue "" textInput', respId . fst <$> disabledWhen True (withValue "" textInput'), respId <$> label' "Label"]
     ids <$ req
   [field, off, lbl] <- warmup2 ctx inp ui
   _ <- ask [field] inp >> warmup ctx inp ui
@@ -116,8 +116,8 @@ runFocusRequestRefusedTest ctx failed = do
 runFocusRequestModalTest :: Context -> IORef Int -> IO ()
 runFocusRequestModalTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column $ do
-    (page, _) <- textInput' "page"
-    (_, inner) <- modal True "Dialog" (fst <$> textInput' "inside")
+    (page, _) <- withValue "page" textInput'
+    (_, inner) <- modal True "Dialog" (fst <$> withValue "inside" textInput')
     (respId page, respId <$> inner) <$ req
   (page, inner) <- warmup2 ctx inp ui
   assertJust failed inner $ \r -> do
@@ -131,10 +131,10 @@ runFocusRequestBehindModalTest :: Context -> IORef Int -> IO ()
 runFocusRequestBehindModalTest ctx failed = do
   open <- newIORef True
   let ui = column $ do
-        (page, _) <- textInput' "page"
+        (page, _) <- withValue "page" textInput'
         requestFocus (respId page)
         shown <- liftIO (readIORef open)
-        when shown $ void (modal True "Dialog" (textInput' "inside"))
+        when shown $ void (modal True "Dialog" (withValue "inside" textInput'))
         pure (respId page)
   _ <- warmup2 ctx inp ui
   replicateM_ 3 (warmup ctx inp ui)
@@ -147,16 +147,16 @@ runFocusRequestBehindModalTest ctx failed = do
 -- field commits its debounced query, as with a click elsewhere.
 runFocusRequestBlursPreviousTest :: Context -> IORef Int -> IO ()
 runFocusRequestBlursPreviousTest ctx failed = do
-  queryRef <- newIORef ""
+  queryRef <- newVar ""
   let cfg = defaultSearchInputConfig {sicDebounceMs = 600000}
   (ui, ask) <- asking ctx $ \req ->
-    column ((,) <$> (fst <$> held queryRef (searchInputConfigured' cfg)) <*> (respId . fst <$> textInput' "other") <* req)
+    column ((,) <$> (fst <$> held queryRef (searchInputConfigured' cfg)) <*> (respId . fst <$> withValue "other" textInput') <* req)
   (search, other) <- warmup2 ctx inp ui
   let sid = intKey (respId search)
       selection = (\st -> fieldSelection st sid (findSlot fieldText "" sid st)) <$> getStore ctx
   _ <- ask [respId search] inp
   (typed, _) <- evalUi ctx inp {inputChars = "abc"} ui
-  assertEq failed "abc" =<< readIORef queryRef
+  assertEq failed "abc" =<< readVarIO queryRef
   assert failed (not (respChanged typed))
   _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
   assertEq failed (0, 3) =<< selection
@@ -184,16 +184,17 @@ runFocusRequestDamageTest ctx failed = do
 runFocusRequestFirstPassTest :: Context -> IORef Int -> IO ()
 runFocusRequestFirstPassTest ctx failed = do
   r <- evalUi ctx inp . column $ do
-    (asked, setAsked) <- useFlag False
-    r <- respId . fst <$> textInput' ""
-    r <$ unless asked (requestFocus r >> setAsked True)
+    askedVar <- useVar False
+    asked <- readVar askedVar
+    r <- respId . fst <$> withValue "" textInput'
+    r <$ unless asked (requestFocus r >> writeVar askedVar True)
   assertEq failed r =<< getFocusId ctx
 
 -- | Requesting the already focused widget every frame costs no frames. A
 -- click on it hides the ring, and later requests do not bring it back.
 runFocusRequestIdleTest :: Context -> IORef Int -> IO ()
 runFocusRequestIdleTest ctx failed = do
-  let ui = column (fst <$> textInput' "" >>= \r -> r <$ requestFocus (respId r))
+  let ui = column (fst <$> withValue "" textInput' >>= \r -> r <$ requestFocus (respId r))
   (r0, _, first) <- runFrame ctx inp ui
   r <- warmup2 ctx inp ui
   (_, _, dirty) <- runFrame ctx inp ui
@@ -209,14 +210,14 @@ runFocusRequestIdleTest ctx failed = do
 -- lands after the frame ends, and a Tab in that frame continues from it.
 runFocusRequestOrderTest :: Context -> IORef Int -> IO ()
 runFocusRequestOrderTest ctx failed = do
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   (ui, ask) <- asking ctx $ \req ->
     column (req >> sequence [respId . fst <$> held textRef textInput', respId <$> button' "A", respId <$> button' "B"])
   [field, a, b] <- warmup2 ctx inp ui
   let focusAfter i ids = snd <$> ask ids i
   assertEq failed field =<< focusAfter inp [field]
   _ <- runFrame ctx inp {inputChars = "!"} ui
-  assertEq failed "hello!" =<< readIORef textRef
+  assertEq failed "hello!" =<< readVarIO textRef
   assertEq failed (WidgetId 0) =<< focusAfter inp [a, WidgetId 0]
   assertEq failed a =<< focusAfter inp [WidgetId 0, b, a]
   assertEq failed a =<< focusAfter (tabInp inp) [field]
@@ -226,7 +227,7 @@ runFocusRequestOrderTest ctx failed = do
 runFocusRequestClosesMenusTest :: Context -> IORef Int -> IO ()
 runFocusRequestClosesMenusTest ctx failed = do
   (ui, ask) <- asking ctx $ \req ->
-    column ((,,) <$> (fst <$> select' ["One", "Two", "Three"] 0) <*> (fst <$> textInput' "text") <*> (respId <$> button' "B") <* req)
+    column ((,,) <$> (fst <$> withValue 0 (select' ["One", "Two", "Three"])) <*> (fst <$> withValue "text" textInput') <*> (respId <$> button' "B") <* req)
   (sel, field, b) <- warmup2 ctx inp ui
   let closes open = do
         _ <- warmup2 ctx inp ui
@@ -267,7 +268,7 @@ runFocusClearReleaseTest :: Context -> IORef Int -> IO ()
 runFocusClearReleaseTest ctx failed = do
   act <- newIORef (const (pure ()))
   let ui = column $ do
-        (r, _) <- textInput' ("hello" :: T.Text)
+        (r, _) <- withValue ("hello" :: T.Text) textInput'
         f <- liftIO (readIORef act)
         f (respId r)
         after <- focusedWidget
@@ -297,7 +298,7 @@ runFocusTextCommandTest ctx failed = do
   run <- newIORef False
   let ui = column $ do
         off <- liftIO (readIORef offRef)
-        (r, _) <- disabledWhen off (textInput' ("hello" :: T.Text))
+        (r, _) <- disabledWhen off (withValue ("hello" :: T.Text) textInput')
         whenM (liftIO (readIORef run)) (runTextCommand (respId r) SelectAll)
         (,) (respId r) <$> focusedWidget
   (field, _) <- warmup2 ctx inp ui

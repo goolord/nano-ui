@@ -15,7 +15,7 @@ tests =
 -- down.
 runNumericInputTest :: Context -> IORef Int -> IO ()
 runNumericInputTest ctx failed = do
-  valueRef <- newIORef 12
+  valueRef <- newVar 12
   let inp = withInput 320 120
       cfg = defaultNumericInputConfig {nicMin = 0, nicMax = 100}
       ui = column (held valueRef (numericInputConfigured' cfg))
@@ -39,7 +39,7 @@ runNumericInputTest ctx failed = do
 -- decimal point, and steps like decimal mode.
 runNumericInputHexTest :: Context -> IORef Int -> IO ()
 runNumericInputHexTest ctx failed = do
-  valueRef <- newIORef 255
+  valueRef <- newVar 255
   let inp = withInput 320 120
       cfg = defaultNumericInputConfig {nicMin = 0, nicHex = True, nicDecimals = 2}
       ui = column (held valueRef (numericInputConfigured' cfg))

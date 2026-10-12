@@ -39,7 +39,7 @@ runShortcutDisabledFocusTest :: Context -> IORef Int -> IO ()
 runShortcutDisabledFocusTest ctx failed = do
   let ui disabled = do
         before <- keyPressed KeyDelete
-        (field, _) <- disabledWhen disabled (textInput' "value")
+        (field, _) <- disabledWhen disabled (withValue "value" textInput')
         after <- shortcut (ctrl <> key 'a')
         pure (field, before, after)
   (field, _, _) <- warmup2 ctx inp0 (ui False)
@@ -133,8 +133,9 @@ runShortcutOncePerPressTest :: Context -> IORef Int -> IO ()
 runShortcutOncePerPressTest ctx failed = do
   (ui, press) <- noting ctx $ \note -> column $ do
     note "pass"
-    (n, setN) <- useInt 0
-    whenM (shortcut (ctrl <> key 'k')) (note "fired" >> setN (n + 1))
+    nVar <- useVar (0 :: Int)
+    n <- readVar nVar
+    whenM (shortcut (ctrl <> key 'k')) (note "fired" >> writeVar nVar (n + 1))
     whenM (shortcut (ctrl <> key 'k')) (note "again")
     label (T.pack (show n))
   warmup ctx inp0 ui
@@ -167,14 +168,14 @@ runShortcutModalTest ctx failed = do
 -- shortcut was bound first; other chords still fire.
 runShortcutFocusedFieldTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedFieldTest ctx failed = do
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   (ui, press) <- noting ctx $ \note -> column $ do
     binds note [ctrl <> key 'a', ctrl <> key 's', key 'j', shift <> key 'j', alt <> key 'j', key KeyEnter, ctrl <> key KeyLeft, key (KeyF 2), ctrl <> key KeySpace]
     held textRef textInput'
   warmupFocused ctx inp0 ui
   fires failed press False [ctrl <> key 'a']
   _ <- runFrame ctx (keyInp KeyBackspace inp0) ui
-  assertEq failed "" =<< readIORef textRef
+  assertEq failed "" =<< readVarIO textRef
   fires failed press False [key 'j', shift <> key 'j', key KeyEnter, ctrl <> key KeyLeft]
   -- Alt with a letter types on macOS (Option).
   fires failed press True ([ctrl <> key 's', key (KeyF 2), ctrl <> key KeySpace] ++ [alt <> key 'j' | os /= "darwin"])
@@ -193,15 +194,15 @@ runShortcutFocusedControlTest ctx failed = do
   forM_ [key KeyEnter, shift <> key KeyEnter] $ \c -> assertEq failed ["button"] =<< press (chordInp c inp0)
   fires failed press True [ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
   s <- newContext
-  (sliderUi, pressS) <- noting s $ \note -> column (binds note chords >> void (slider 0 10 5))
+  (sliderUi, pressS) <- noting s $ \note -> column (binds note chords >> void ((snd <$> withValue 5 (slider 0 10))))
   warmupFocused s inp0 sliderUi
   fires failed pressS False [key KeyEnter, key KeyRight, shift <> key KeyRight]
   fires failed pressS True [ctrl <> key KeyEnter, alt <> key KeyLeft, key 's']
   sel <- newContext
-  selRef <- newIORef 0
+  selRef <- newVar 0
   (selUi, pressSel) <- noting sel $ \note -> column (binds note [ctrl <> key KeyDown] >> void (held selRef (select' ["a", "b", "c"])))
   warmupFocused sel inp0 selUi
-  let chosenAfter c = pressSel (chordInp c inp0) >> pressSel inp0 >> readIORef selRef
+  let chosenAfter c = pressSel (chordInp c inp0) >> pressSel inp0 >> readVarIO selRef
   assertEq failed 0 =<< chosenAfter (ctrl <> key KeyDown)
   assertEq failed 1 =<< chosenAfter (key KeyDown)
   c <- newContext
@@ -267,7 +268,7 @@ runKeyReleaseTest ctx failed = do
 -- field keeps Delete, F2 reaches the view. The raw input still has both.
 runKeyListenersFocusTest :: Context -> IORef Int -> IO ()
 runKeyListenersFocusTest ctx failed = do
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   let listen = mapM (\k -> (,) <$> keyPressed k <*> keyHeld k) [KeyDelete, KeyF 2]
       ui = column (listen <* held textRef textInput')
       pressBoth = applyKey (KeyF 2) True (applyKey KeyDelete True inp0)
@@ -304,17 +305,17 @@ runKeyRepeatsTest ctx failed = do
 -- submits a text field only once.
 runKeyRepeatsWidgetsTest :: Context -> IORef Int -> IO ()
 runKeyRepeatsWidgetsTest ctx failed = do
-  areaRef <- newIORef ""
+  areaRef <- newVar ""
   let area = column (held areaRef textArea')
   warmupFocused ctx inp0 area
   mapM_ (\i -> runFrame ctx i area) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
-  assertEq failed "\n\n\n" =<< readIORef areaRef
+  assertEq failed "\n\n\n" =<< readVarIO areaRef
   c <- newContext
   let buttons = column (button' "Go")
   warmupFocused c inp0 buttons
   assertEq failed [True, False] . map respClicked =<< mapM (\i -> evalUi c i buttons) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
   f <- newContext
-  fieldRef <- newIORef "x"
+  fieldRef <- newVar "x"
   let field = column (held fieldRef textInput')
   warmupFocused f inp0 field
   assertEq failed [True, False] . map (respSubmitted . fst) =<< mapM (\i -> evalUi f i field) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
@@ -358,19 +359,19 @@ runKeyFrameModifiersTest _ failed = do
 -- Ctrl or Alt with them go to shortcuts.
 runShortcutFocusedTextAreaTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedTextAreaTest ctx failed = do
-  textRef <- newIORef "hi"
+  textRef <- newVar "hi"
   (ui, press) <- noting ctx $ \note ->
     column (binds note [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, alt <> key KeyEnter, key KeyUp, ctrl <> key KeyUp, alt <> key KeyDown] >> held textRef textArea')
   warmupFocused ctx inp0 ui
   fires failed press False [key KeyEnter, shift <> key KeyEnter, key KeyUp]
   fires failed press True [ctrl <> key KeyEnter, alt <> key KeyEnter, ctrl <> key KeyUp, alt <> key KeyDown]
-  assertEq failed 2 . T.count "\n" =<< readIORef textRef
+  assertEq failed 2 . T.count "\n" =<< readVarIO textRef
 
 -- | Ctrl+F focuses a search box from code. The next frame's typing goes there
 -- and the chord types nothing into the previous field.
 runShortcutFocusFromCodeTest :: Context -> IORef Int -> IO ()
 runShortcutFocusFromCodeTest ctx failed = do
-  refs <- mapM newIORef ["notes", ""]
+  refs <- mapM newVar ["notes", ""]
   let ui = column $ do
         ids <- mapM (fmap (respId . fst) . (`held` textInput')) refs
         forM_ (drop 1 ids) (whenM (shortcut (ctrl <> key 'f')) . requestFocus)
@@ -381,4 +382,4 @@ runShortcutFocusFromCodeTest ctx failed = do
   _ <- runFrame ctx (chordInp (ctrl <> key 'f') inp0) ui
   assertEq failed search =<< getFocusId ctx
   _ <- runFrame ctx inp0 {inputChars = "abc"} ui
-  assertEq failed ["notes", "abc"] =<< mapM readIORef refs
+  assertEq failed ["notes", "abc"] =<< mapM readVarIO refs

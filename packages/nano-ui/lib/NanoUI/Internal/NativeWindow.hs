@@ -345,9 +345,10 @@ setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
 
 -- | Make the window windowed, fullscreen or hidden ('wsMode').
 --
--- > (fullscreen, toggleFullscreen) <- useToggle False
--- > whenM (shortcut (key (KeyF 11))) toggleFullscreen
--- > setWindowModeUi (if fullscreen then Fullscreen else Windowed)
+-- > fullscreen <- useVar False
+-- > whenM (shortcut (key (KeyF 11))) (modifyVar fullscreen not)
+-- > full <- readVar fullscreen
+-- > setWindowModeUi (if full then Fullscreen else Windowed)
 setWindowModeUi :: WindowMode -> NanoUI ()
 setWindowModeUi m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode = v}) hostSetMode nw m)
 
@@ -440,8 +441,9 @@ askScreenshot = withContext $ \ctx -> maybe (pure Nothing) (shoot ctx) <$> askHo
 -- screenshot, as 'useTask' does. Allocate @task <- newTask@ during setup;
 -- change the key to take another screenshot. This consumes no widget id.
 --
--- > (shots, setShots) <- useInt 0
--- > whenM (button "Screenshot") (setShots (shots + 1))
+-- > shotsVar <- useVar (0 :: Int)
+-- > whenM (button "Screenshot") (modifyVar shotsVar (+ 1))
+-- > shots <- readVar shotsVar
 -- > shot <- if shots == 0 then pure Nothing else useScreenshot task shots
 useScreenshot :: Eq k => Task k (Maybe Screenshot) -> k -> NanoUI (Maybe Screenshot)
 useScreenshot owner k = join <$> (useTask owner k =<< askScreenshot)

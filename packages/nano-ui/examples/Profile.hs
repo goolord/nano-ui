@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (evaluate)
-import Control.Monad (forM_, replicateM_, void, when)
+import Control.Monad (forM, forM_, replicateM_, void, when)
 import Data.ByteString (ByteString)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
@@ -36,11 +36,11 @@ windowScene n = columnWith (fillW . fillH) $ do
 -- text field on top: a large arena for the pointer to move over.
 pointerScene :: Int -> NanoUI ()
 pointerScene n = columnWith (fillW . fillH) $ do
-  void (textInput "")
+  textInput ""
   void $ scrollWith (fillW . fillH) $ columnWith (tight . fillW) $
     forM_ [1 .. n] $ \i -> rowWith (tight . fillW) $ do
       label (T.pack ("row " <> show i))
-      void (checkbox "c" False)
+      checkbox "c" (Var False)
       void (button (T.pack ("b" <> show i)))
 
 -- | 60 rows of 5 to 154 grow columns, with content widths up to 40 pixels
@@ -174,17 +174,33 @@ countedPathOps cdc rect = unsafePerformIO $ do
 
 -- | A focused text area over a long document, typing into its middle: the
 -- editor path, whose per-frame cost must not grow with the document.
-textAreaScene :: IORef TextDocument -> NanoUI ()
-textAreaScene ref = column $ do
-  doc <- textAreaDocumentWith grow =<< liftIO (readIORef ref)
-  liftIO (writeIORef ref doc)
+textAreaScene :: Var TextDocument -> NanoUI ()
+textAreaScene doc = column (textAreaDocumentWith grow doc)
 
 -- | 'textAreaScene' over 'Text', which joins the document on every frame
 -- that edits it.
-textAreaTextScene :: IORef Text -> NanoUI ()
-textAreaTextScene ref = column $ do
-  txt <- textAreaWith grow =<< liftIO (readIORef ref)
-  liftIO (writeIORef ref txt)
+textAreaTextScene :: Var Text -> NanoUI ()
+textAreaTextScene txt = column (textAreaWith grow txt)
+
+-- | 200 keyed rows of a label, a text field, a slider and a checkbox, each
+-- holding its own state. Returns row 1's slider and checkbox, and counts view
+-- passes in @passes@.
+formScene :: IORef Int -> NanoUI (Response, Response)
+formScene passes = do
+  liftIO (modifyIORef' passes (+ 1))
+  rows <- scrollWith (fillW . fillH) $ columnWith (tight . fillW) $
+    forM [1 .. 200 :: Int] $ \i -> withKey i $ rowWith (tight . fillW) $ do
+      t <- useVar ("" :: Text)
+      v <- useVar (50 :: Float)
+      c <- useVar False
+      label (T.pack ("row " <> show i))
+      textInput t
+      sr <- sliderWith' (fixedW 160) 0 100 v
+      cr <- checkbox' "on" c
+      pure (sr, cr)
+  case rows of
+    r : _ -> pure r
+    [] -> pure (mempty, mempty)
 
 clockIcon :: ByteString
 clockIcon =
@@ -301,13 +317,47 @@ main = do
       forM_ [1 .. frames] $ \i -> void (runFrame ctx (inp i) richTextScene)
       t1 <- getMonotonicTime
       putStrLn ("profiled " ++ show frames ++ " richtext frames" ++ (if resize then ", resizing" else "") ++ ": " ++ show ((t1 - t0) * 1000 / fromIntegral frames) ++ " ms/frame")
+    ("form" : _) -> do
+      -- Tab into row 1's field and type 500 characters, drag row 1's slider
+      -- for 500 frames, then click its checkbox 100 times. After each input,
+      -- frames run until the view settles, as a session loop would.
+      passes <- newIORef (0 :: Int)
+      frames <- newIORef (0 :: Int)
+      let inp = emptyInput {inputWindowSize = Size 1280 800, inputDeltaTime = 0.016}
+          ui = formScene passes
+          frame i = do
+            modifyIORef' frames (+ 1)
+            (r, _, dirty) <- runFrame ctx i ui
+            pure (r, dirty)
+          settle i = do
+            (r, dirty) <- frame i
+            let idle = i {inputChars = "", inputKeys = mempty, inputKeysNew = mempty, inputButtonsPressed = mempty, inputButtonsReleased = mempty}
+                go 0 = pure ()
+                go k = do (_, d) <- frame idle; when d (go (k - 1 :: Int))
+            when dirty (go 8)
+            pure r
+      (slider0, check0) <- settle inp
+      _ <- settle inp {inputKeys = inputKeysFromList [KeyTab], inputKeysNew = inputKeysFromList [KeyTab]}
+      writeIORef passes 0 >> writeIORef frames 0
+      forM_ (take 500 (cycle "typing ")) $ \c -> settle inp {inputChars = T.singleton c}
+      let at (V2 x y) dx = inp {inputMousePos = V2 (x + dx) y}
+          centre r = let Rect x y w h = respRect r in V2 (x + w / 2) (y + h / 2)
+      _ <- settle (applyMouseButton MouseLeft True (at (centre slider0) 0))
+      forM_ [1 .. 500 :: Int] $ \i -> settle (at (centre slider0) (if even i then 30 else -30)) {inputButtonsHeld = buttonsFromList [MouseLeft]}
+      _ <- settle (applyMouseButton MouseLeft False (at (centre slider0) 0))
+      forM_ [1 .. 100 :: Int] $ \_ -> do
+        _ <- settle (applyMouseButton MouseLeft True (at (centre check0) 0))
+        settle (applyMouseButton MouseLeft False (at (centre check0) 0))
+      n <- readIORef passes
+      f <- readIORef frames
+      putStrLn ("profiled form: " ++ show f ++ " frames, " ++ show n ++ " view passes")
     ("textarea" : _) -> do
-      ref <- newIORef (textDocument longDocument)
-      typeIntoMiddle (textAreaScene ref)
+      doc <- newVar (textDocument longDocument)
+      typeIntoMiddle (textAreaScene doc)
       putStrLn "profiled 1000 textarea keystroke frames"
     ("textarea-text" : _) -> do
-      ref <- newIORef longDocument
-      typeIntoMiddle (textAreaTextScene ref)
+      txt <- newVar longDocument
+      typeIntoMiddle (textAreaTextScene txt)
       putStrLn "profiled 1000 textarea-text keystroke frames"
     _ -> do
       let inp =

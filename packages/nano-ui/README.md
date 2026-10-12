@@ -20,12 +20,11 @@ main :: IO ()
 main = runSdlApp defaultSdlOptions counter
 
 counter :: NanoUI ()
-counter = do
-  (n, setN) <- useInt 0
-  row $ do
-    whenM (button "-") (setN (n - 1))
-    label (T.pack (show n))
-    whenM (button "+") (setN (n + 1))
+counter = row $ do
+  n <- useVar (0 :: Int)
+  whenM (button "-") (modifyVar n (subtract 1))
+  label . T.pack . show =<< readVar n
+  whenM (button "+") (modifyVar n (+ 1))
 ```
 
 ## Backends
@@ -48,29 +47,34 @@ headlessly on scripted input, for tests, and `NanoUI.Backend` has what a window
 backend is built from. Writing a GUI needs neither: everything for that is in
 `NanoUI`.
 
-## Inputs are controlled
+## Inputs edit Vars
 
-Pass the current value and keep the result. A change you don't store is undone
-on the next frame.
+State lives in a `Var`. An input takes the `Var` it edits and stores the user's
+edits in it; `readVar` reads it where you show it.
 
 ```haskell
 greeter :: NanoUI ()
 greeter = columnWith (gap 8 . padAll 16) $ do
-  (name, setName) <- useText "world"
-  (size, setSize) <- useFloat 16
-  (shout, setShout) <- useFlag False
+  name <- useVar "world"
+  size <- useVar 16
+  shout <- useVar False
 
   heading "Greeter"
-  setName =<< textInput name
-  setSize =<< slider 10 48 size
-  setShout =<< checkbox "Shout" shout
+  textInput name
+  slider 10 48 size
+  checkbox "Shout" shout
 
-  let greeting = "Hello, " <> name <> "!"
-  labelWith (fontSize size) (if shout then T.toUpper greeting else greeting)
+  greeting <- ("Hello, " <>) . (<> "!") <$> readVar name
+  loud <- readVar shout
+  px <- readVar size
+  labelWith (fontSize px) (if loud then T.toUpper greeting else greeting)
 ```
 
-State can live in local hooks (`useInt`, `useText`, `useState`), in your own
-model, or in a reducer: the separate `nano-ui-emit` package provides
+`useVar` keeps a Var at its place in the view; `newVar` makes one your app
+owns and passes around; `v.field` is a Var for one field of a record. A frame
+runs its view a second time only when something writes a Var the view already
+read, so reading a Var below the widgets that edit it costs nothing extra.
+State can also live in a reducer: the separate `nano-ui-emit` package provides
 `NanoUI.Emit` and `NanoUIE msg a` for typed messages, and the backends' reducer
 runners fold them into the model.
 

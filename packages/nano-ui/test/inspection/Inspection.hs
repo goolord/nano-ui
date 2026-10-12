@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 -- | Compile-time optimization invariants for nano-ui's hot-path coding
@@ -20,6 +21,11 @@ module Main
   , commandWriteProbe
   , canvasProbe
   , canvasByHand
+  , focusGetProbe
+  , focusGetByHand
+  , focusSetProbe
+  , focusSetByHand
+  , focusDotProbe
   )
 where
 
@@ -32,11 +38,13 @@ import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Mutable qualified as UM
 import GHC.Exts (RealWorld)
 import Foreign.Ptr (Ptr)
+import GHC.Generics (Generic)
 
 import Test.Inspection
 
 import NanoUI.Internal.SIMD qualified as SIMD
 import NanoUI.Internal.Store
+import NanoUI.Internal.Var.Types (Var, fieldLens)
 import NanoUI
   ( Animatable (..)
   , Color
@@ -159,3 +167,35 @@ canvasByHand :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
 canvasByHand _ !x color = smallArrayFromList [FillRect (Rect x 2 3 4) color, FillCircle 5 x 6 color]
 
 inspect $ 'canvasProbe === 'canvasByHand
+
+-- Var field focus: the Generic path search must leave no generic
+-- representation or class dictionary behind, so reading and replacing a
+-- nested field compile to a selector and a record update.
+data FocusInner = FocusInner {innerItems :: ![Int], innerNext :: !Int}
+  deriving (Eq, Generic)
+
+data FocusOuter = FocusOuter {outerInner :: !FocusInner, outerTitle :: !Text, outerCount :: !Int}
+  deriving (Eq, Generic)
+
+focusGetProbe :: FocusOuter -> [Int]
+focusGetProbe = fst (fieldLens @"innerItems") . fst (fieldLens @"outerInner")
+
+focusGetByHand :: FocusOuter -> [Int]
+focusGetByHand o = innerItems (outerInner o)
+
+focusSetProbe :: [Int] -> FocusOuter -> FocusOuter
+focusSetProbe xs o = snd (fieldLens @"outerInner") (snd (fieldLens @"innerItems") xs (outerInner o)) o
+
+focusSetByHand :: [Int] -> FocusOuter -> FocusOuter
+focusSetByHand xs o = o {outerInner = (outerInner o) {innerItems = xs}}
+
+-- The dot itself, on a Var.
+focusDotProbe :: Var FocusOuter -> Var [Int]
+focusDotProbe v = v.outerInner.innerItems
+
+inspect $ 'focusGetProbe === 'focusGetByHand
+inspect $ 'focusSetProbe === 'focusSetByHand
+inspect $ hasNoGenerics 'focusGetProbe
+inspect $ hasNoGenerics 'focusSetProbe
+inspect $ hasNoGenerics 'focusDotProbe
+inspect $ hasNoTypeClasses 'focusDotProbe

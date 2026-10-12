@@ -219,7 +219,7 @@ runTabsTest ctx failed = do
   let watched = sensor (label "in tab A") >>= \(vis, _) -> forM_ (visEvent vis) (liftIO . modifyIORef' eventsRef . (:))
       ui = do
         active <- liftIO (readIORef activeRef)
-        void (tabs active [tab 0 "A" watched, tab 1 "B" (label "in tab B")])
+        void (tabs' (Var active) [tab 0 "A" watched, tab 1 "B" (label "in tab B")])
   settle ctx inp ui 3
   writeIORef activeRef 1 >> settle ctx inp ui 3
   (_, follow) <- step ctx inp ui

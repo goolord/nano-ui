@@ -76,7 +76,7 @@ runTextInputBatchTest :: Context -> IORef Int -> IO ()
 runTextInputBatchTest ctx failed = do
   let
     inp = withInput 320 120
-    ui = column (textInput' "aOLDz")
+    ui = column (withValue "aOLDz" textInput')
     left = keyInp KeyLeft inp
     step event = runFrame ctx event ui
   (resp, _) <- warmup2 ctx inp ui
@@ -109,11 +109,11 @@ runTextAreaSpansTest ctx failed = do
 
 -- | A text area under a separate label ('labeledInput' for a text input).
 labeledArea :: T.Text -> T.Text -> NanoUI (Response, T.Text)
-labeledArea lbl initial = label lbl >> textArea' initial
+labeledArea lbl initial = label lbl >> withValue initial textArea'
 
 labeledInput :: T.Text -> T.Text -> NanoUI (Response, T.Text)
 labeledInput lbl initial =
-  label lbl >> textInputConfigured' defaultTextInputConfig {ticPlaceholder = "Enter " <> lbl} initial
+  label lbl >> withValue initial (textInputConfigured' defaultTextInputConfig {ticPlaceholder = "Enter " <> lbl})
 
 -- | Forty numbered lines, taller than a text area.
 fortyLines :: T.Text
@@ -139,7 +139,7 @@ runTextInputCursorTest ctx failed = do
 
 runTextInputCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputCutClearsSelectionTest ctx failed = do
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   (ctx', clipRef) <- memoryClipboard Nothing ctx
   let
     inp0 = withInput 320 120
@@ -154,7 +154,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
 -- the single-line text input like they do in the text area.
 runTextInputWordKeysTest :: Context -> IORef Int -> IO ()
 runTextInputWordKeysTest ctx failed = do
-  textRef <- newIORef "hello world"
+  textRef <- newVar "hello world"
   let
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
@@ -173,7 +173,7 @@ runTextInputWordKeysTest ctx failed = do
 runTextAreaCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextAreaCutClearsSelectionTest ctx failed = do
   (ctx', clipRef) <- memoryClipboard Nothing ctx
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   let
     inp0 = withInput 320 220
     ui = column (label "Notes" >> held textRef textArea')
@@ -186,7 +186,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
 
 runTextInputSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputSelectionTest ctx failed = do
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   let
     inp0 = withInput 320 120
     ui = column (button "Other" >> held textRef textInput')
@@ -204,7 +204,7 @@ runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputMouseSelectionTest ctx failed = do
   let
     inp0 = withInput 320 120
-    ui = column (textInput' "hello")
+    ui = column (withValue "hello" textInput')
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   assertJust failed (spanRectOf "hello" spans) $ \(Rect fx fy fw fh) -> do
@@ -223,7 +223,7 @@ runTextInputClickSelectTest ctx failed = do
     -- Click n times at the start of the field showing txt, then Backspace.
     clicksThenBackspace c txt n = do
       let
-        ui = column (textInput' txt)
+        ui = column (withValue txt textInput')
       _ <- warmup2 c inp0 ui
       spans <- collectTextSpans c
       forM (spanRectOf txt spans) $ \(Rect fx fy _ fh) -> do
@@ -235,7 +235,7 @@ runTextInputClickSelectTest ctx failed = do
 
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()
 runTextInputClipboardTest ctx failed = do
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   (ctx', clipRef) <- memoryClipboard Nothing ctx
   let
     inp0 = withInput 320 120
@@ -254,7 +254,7 @@ runTextInputPasswordTest ctx failed = do
   (ctx', clipRef) <- memoryClipboard Nothing ctx
   let
     inp0 = withInput 320 120
-    ui = column (textInputConfigured' defaultTextInputConfig {ticPassword = True} "hunter2")
+    ui = column (withValue "hunter2" (textInputConfigured' defaultTextInputConfig {ticPassword = True}))
   _ <- warmup2 ctx' inp0 ui
   spans <- collectTextSpans ctx'
   assert failed (not (hasText "hunter2" spans))
@@ -271,7 +271,7 @@ runTextInputPasswordTest ctx failed = do
 -- the result of the frame before it.
 runTextInputMenuTest :: Context -> IORef Int -> IO ()
 runTextInputMenuTest ctx failed = do
-  textRef <- newIORef "hello"
+  textRef <- newVar "hello"
   (ctx', clipRef) <- memoryClipboard (Just "pasted") ctx
   let
     inp0 = withInput 320 160
@@ -312,7 +312,7 @@ runTextInputFocusSdlTest ctx failed = do
 runTextInputDirtyTest :: Context -> IORef Int -> IO ()
 runTextInputDirtyTest ctx failed = do
   let
-    ui = column (textInput' "")
+    ui = column (withValue "" textInput')
     inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let
@@ -333,7 +333,7 @@ runTextInputDirtyTest ctx failed = do
 runTextInputDragWakeTest :: Context -> IORef Int -> IO ()
 runTextInputDragWakeTest ctx failed = do
   let
-    ui = column (textInput' "some text to select")
+    ui = column (withValue "some text to select" textInput')
     inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let
@@ -361,7 +361,7 @@ runTextInputFfCaretTest ctx failed = do
   assertEq failed (textIndexAtX fm fs (lineWidth fm (T.take 3 fs))) 3
   let
     inp0 = withInput 320 120
-    ui = column (textInput' fs)
+    ui = column (withValue fs textInput')
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   assertSpansHas failed fs spans
@@ -375,7 +375,7 @@ runTextInputScrollTest ctx failed = do
   let
     longText = "VeryLongTextEnteredIntoTheFieldThatExceedsTheWidth"
     inp0 = withInput 200 120
-    ui = column (textInput' longText)
+    ui = column (withValue longText textInput')
   (resp, _) <- warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx
   assertJust failed (spanRectOf longText spans0) $ \(Rect fx fy _ fh) -> do
@@ -404,7 +404,7 @@ runTextInputFontScrollTest base failed = do
         (\_ _ _ _ txt -> pure (32 * fromIntegral (T.length txt), 32))
     inp0 = withInput 400 200
     cfg = defaultTextInputConfig {ticLayout = fontSize 32 (fixedW 200 (ticLayout defaultTextInputConfig))}
-    ui = column (textInputConfigured' cfg "HgHgHgHgHg")
+    ui = column (withValue "HgHgHgHgHg" (textInputConfigured' cfg))
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry _ rh = respRect resp
   _ <- runClick ctx inp0 ui (V2 (rx + 20) (ry + rh / 2))
@@ -421,7 +421,7 @@ runTextInputCollapseUntouchedTest :: Context -> IORef Int -> IO ()
 runTextInputCollapseUntouchedTest ctx failed = do
   let
     inp0 = withInputOff 400 200
-    ui = column (textInput' "hello")
+    ui = column (withValue "hello" textInput')
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
   _ <- runClick ctx inp0 ui (V2 390 190)
@@ -439,7 +439,7 @@ runTextInputFontInsetTest base failed = do
     ctx = withMonospaceFonts 12 24 base
     inp0 = withInputOff 400 200
     cfg = defaultTextInputConfig {ticLayout = fontSize 24 (fixedW 300 (ticLayout defaultTextInputConfig))}
-    ui = column (textInputConfigured' cfg "abcdef")
+    ui = column (withValue "abcdef" (textInputConfigured' cfg))
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   case [r | (r, "abcdef", _, _, _) <- spans] of
@@ -482,7 +482,7 @@ runTextAreaZoomScrollTest :: Context -> IORef Int -> IO ()
 runTextAreaZoomScrollTest ctx failed = do
   let
     inp0 = withInput 320 220
-    ui = column $ textAreaWith' (fontSize 32) fortyLines
+    ui = column $ withValue fortyLines (textAreaWith' (fontSize 32))
   (resp, _) <- warmup2 ctx inp0 ui
   assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
     fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
@@ -672,7 +672,7 @@ runRefreshRedrawTest ctx failed = do
 -- release frame, where the caller still passes back the pre-cut result.
 runTextAreaMenuPulseTest :: Context -> IORef Int -> IO ()
 runTextAreaMenuPulseTest ctx failed = do
-  textRef <- newIORef "abc"
+  textRef <- newVar "abc"
   let
     inp0 = withInput 320 220
     ui = column (held textRef (textAreaWith' grow))
@@ -705,7 +705,7 @@ runTextAreaMenuPulseTest ctx failed = do
 -- field it edits, so Select All followed by typing replaces the text.
 runTextCommandFocusTest :: Context -> IORef Int -> IO ()
 runTextCommandFocusTest ctx failed = do
-  ref <- newIORef "abc"
+  ref <- newVar "abc"
   let
     inp = withInput 320 220
     ui = column $ do
@@ -716,14 +716,14 @@ runTextCommandFocusTest ctx failed = do
   selectAll <- warmup2 ctx inp ui
   _ <- runClick ctx inp ui (centerOf selectAll)
   mapM_ (\i -> runFrame ctx i ui) [inp, inp {inputChars = "Z"}, inp]
-  assertEq failed "Z" =<< readIORef ref
+  assertEq failed "Z" =<< readVarIO ref
 
 -- | An editor mounted under a fresh key scrolls on wheel hover without needing focus.
 runTextAreaRemountScrollTest :: Context -> IORef Int -> IO ()
 runTextAreaRemountScrollTest ctx failed = do
   let
     inp0 = withInput 320 220
-    mkUi k = column $ withKey k $ textAreaWith' grow fortyLines
+    mkUi k = column $ withKey k $ withValue fortyLines (textAreaWith' grow)
   _ <- warmup2 ctx inp0 (mkUi (1 :: Int))
   (resp, _) <- warmup2 ctx inp0 (mkUi (2 :: Int))
   assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
@@ -747,7 +747,7 @@ runTextAreaRemountScrollTest ctx failed = do
 -- field is passed clears its history.
 runTextUndoTest :: Context -> IORef Int -> IO ()
 runTextUndoTest ctx failed = do
-  ref <- newIORef ""
+  ref <- newVar ""
   commands <- newIORef []
   let
     inp = withInput 320 120
@@ -763,32 +763,32 @@ runTextUndoTest ctx failed = do
   _ <- warmup2 ctx inp ui
   _ <- frame (tabInp inp)
   mapM_ (\c -> frame inp {inputChars = T.singleton c}) ("red fox" :: String)
-  assertEq failed "red fox" =<< readIORef ref
+  assertEq failed "red fox" =<< readVarIO ref
   (_, canUndo) <- frame inp
   assert failed canUndo
   _ <- frame (chordInp (ctrl <> key 'z') inp)
-  assertEq failed "red " =<< readIORef ref
+  assertEq failed "red " =<< readVarIO ref
   _ <- frame (chordInp (ctrl <> key 'z') inp)
-  assertEq failed "" =<< readIORef ref
+  assertEq failed "" =<< readVarIO ref
   _ <- frame (chordInp (ctrl <> shift <> key 'z') inp)
-  assertEq failed "red " =<< readIORef ref
+  assertEq failed "red " =<< readVarIO ref
   _ <- frame (chordInp (ctrl <> key 'y') inp)
-  assertEq failed "red fox" =<< readIORef ref
+  assertEq failed "red fox" =<< readVarIO ref
   -- A command from outside the field's frame edits it and pulses it once.
   writeIORef commands [InsertText "!"]
   _ <- frame inp
   (pulsed, _) <- frame inp
   assert failed (respChanged pulsed)
-  assertEq failed "red fox!" =<< readIORef ref
+  assertEq failed "red fox!" =<< readVarIO ref
   (quiet, _) <- frame inp
   assert failed (not (respChanged quiet))
   writeIORef commands [Undo]
   _ <- frame inp
   _ <- frame inp
-  assertEq failed "red fox" =<< readIORef ref
+  assertEq failed "red fox" =<< readVarIO ref
   -- The caller replacing the value drops the history recorded against the
   -- old text.
-  writeIORef ref "something else"
+  writeVarIO ref "something else"
   _ <- frame inp
   (_, stillUndoable) <- frame inp
   assert failed (not stillUndoable)
@@ -799,14 +799,14 @@ runTextUndoTest ctx failed = do
 runTextAreaDocumentTest :: Context -> IORef Int -> IO ()
 runTextAreaDocumentTest ctx failed = do
   let original = T.intercalate "\n" ["line " <> T.pack (show i) | i <- [0 .. 999 :: Int]]
-  ref <- newIORef (textDocument original)
+  ref <- newVar (textDocument original)
   let
     inp = withInput 320 220
     ui = column $ do
       (resp, doc) <- held ref textAreaDocument'
       (,) (resp, doc) <$> textCanUndo (respId resp)
     frame i = do
-      before <- readIORef ref
+      before <- readVarIO ref
       ((resp, after), undoable) <- evalUi ctx i ui
       pure (before, resp, after, undoable)
   warmupFocused ctx inp ui
@@ -825,10 +825,10 @@ runTextAreaDocumentTest ctx failed = do
   (againIn, _, againOut, _) <- frame inp
   assert failed (sameDocument againIn againOut)
   _ <- frame (chordInp (ctrl <> key 'z') inp)
-  undone <- readIORef ref
+  undone <- readVarIO ref
   assertEq failed (documentText undone) original
   -- Replacing the document drops the history recorded against the old one.
-  writeIORef ref (textDocument "fresh")
+  writeVarIO ref (textDocument "fresh")
   _ <- frame inp
   (_, _, fresh, stillUndoable) <- frame inp
   assertEq failed fresh (textDocument "fresh")
@@ -838,7 +838,7 @@ runTextAreaDocumentTest ctx failed = do
   source <- newIORef original
   let
     -- Split inside the frame, so each frame passes a new copy.
-    copies = column (void (textAreaDocument =<< liftIO (textDocument <$> readIORef source)))
+    copies = column (textAreaDocument . Var =<< liftIO (textDocument <$> readIORef source))
     idle = inp {inputDeltaTime = 1}
   _ <- warmup2 copyCtx inp copies
   _ <- warmup2 copyCtx idle copies
@@ -848,7 +848,7 @@ runTextAreaDocumentTest ctx failed = do
 -- fresh measurement after edits that widen, move and shorten its widest line.
 runTextAreaWidthTrackingTest :: Context -> IORef Int -> IO ()
 runTextAreaWidthTrackingTest ctx failed = do
-  ref <- newIORef (T.intercalate "\n" (replicate 200 "short line" ++ ["the widest line of them all"] ++ replicate 200 "short line"))
+  ref <- newVar (T.intercalate "\n" (replicate 200 "short line" ++ ["the widest line of them all"] ++ replicate 200 "short line"))
   let
     inp = withInput 400 300
     ui = column (held ref (textAreaWith' grow))
@@ -857,7 +857,7 @@ runTextAreaWidthTrackingTest ctx failed = do
       (resp, _) <- frame inp
       assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
         (tracked, _) <- textAreaContentMetrics ctx (tahNodeIdx hit)
-        text <- readIORef ref
+        text <- readVarIO ref
         fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
         widths <- mapM (lineWidthIO fm) (T.splitOn "\n" text)
         assertEq failed (maximum widths) tracked
@@ -897,7 +897,7 @@ runTextAreaMenuSelectAllTest ctx failed = do
     lastLine = "the last line"
     original = T.intercalate "\n" (["line " <> T.pack (show i) | i <- [0 .. lastRow - 1]] ++ [lastLine])
     inp0 = withInput 400 300
-    ui = column (textAreaWith' grow original)
+    ui = column (withValue original (textAreaWith' grow))
   (resp, _) <- warmup2 ctx inp0 ui
   assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
     let

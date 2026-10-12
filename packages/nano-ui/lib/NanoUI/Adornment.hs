@@ -5,11 +5,12 @@
 --
 -- > import NanoUI.Adornment qualified as A
 -- >
--- > email' <- textInputConfigured defaultTextInputConfig
+-- > textInputConfigured defaultTextInputConfig
 -- >   { ticAdornments = A.leading (A.icon mailIcon) <> A.trailing (A.affix "@example.com") } email
--- > password' <- textInputConfigured defaultTextInputConfig
--- >   { ticPassword = not shown
--- >   , ticAdornments = A.trailing (A.control (whenM (buttonWith tight "Show") (setShown (not shown))))
+-- > hidden <- not <$> readVar shown
+-- > textInputConfigured defaultTextInputConfig
+-- >   { ticPassword = hidden
+-- >   , ticAdornments = A.trailing (A.control (whenM (buttonWith tight "Show") (modifyVar shown not)))
 -- >   } password
 --
 -- The widget lays each side out as a row inside its own box, the layout's gap

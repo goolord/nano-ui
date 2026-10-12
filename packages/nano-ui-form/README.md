@@ -79,7 +79,9 @@ form key; `fieldKey = Nothing` selects positional identity.
 
 ## Adapting a widget
 
-`inputWidget` adapts any controlled widget returning `(Response, value)`:
+`inputWidget` adapts any input of type `Var a -> NanoUI Response`, such as a
+primed widget with its other arguments applied. The form runs it on a
+temporary `Var` holding the field's value and reads the edit back:
 
 ```haskell
 import NanoUI qualified as UI
@@ -97,7 +99,7 @@ encoder, widget, and initial value. `Nothing` selects positional naming.
 Naming does not add a visible label; compose one into the widget action if
 wanted. The policy says when an edit reaches the form:
 
-- `OnChange` publishes whenever the widget returns a different value.
+- `OnChange` publishes whenever the widget leaves a different value.
 - `OnChangeOr p` also publishes when `p` holds for the response, for
   controls that report an edit that kept the value.
 - `OnlyWhen p` publishes only when `p` holds, such as

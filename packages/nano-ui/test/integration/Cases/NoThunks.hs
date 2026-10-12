@@ -23,8 +23,8 @@ runNoThunksTest :: Context -> IORef Int -> IO ()
 runNoThunksTest ctx failed = do
   let inp = withInput 300 200
       ui = column $ do
-        _ <- textInput "hello"
-        _ <- slider 0 100 42
+        _ <- (snd <$> withValue "hello" textInput)
+        _ <- (snd <$> withValue 42 (slider 0 100))
         pure ()
   _ <- warmup2 ctx inp ui
   store <- readIORef (ctxStore ctx)

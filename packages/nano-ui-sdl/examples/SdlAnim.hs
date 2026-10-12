@@ -72,13 +72,20 @@ punch = colorRGBA 232 224 208 255
 
 animUi :: NanoUI ()
 animUi = do
-  (exposed, setExposed) <- useFlag False
-  (rewinding, setRewinding) <- useFlag False
-  (lampOn, setLamp) <- useFlag False
-  (bellowsOpen, setBellows) <- useFlag False
-  (tossed, setTossed) <- useFlag False
-  (stiffSpring, setStiffSpring) <- useFlag False
-  (throwRaw, setThrowRaw) <- useFloat 75
+  exposure <- useVar False
+  rewind <- useVar False
+  lampSwitch <- useVar False
+  bellows <- useVar False
+  toss <- useVar False
+  spring <- useVar False
+  throwRaw <- useVar (75 :: Float)
+  -- The animations below start from these, so they are read up front.
+  exposed <- readVar exposure
+  rewinding <- readVar rewind
+  lampOn <- readVar lampSwitch
+  bellowsOpen <- readVar bellows
+  tossed <- readVar toss
+  stiffSpring <- readVar spring
   tossT <-
     withKey ("toss" :: String)
       ( animateTo
@@ -110,17 +117,16 @@ animUi = do
         flex
         withKey ("footage" :: String) (muted footage)
       rowWith (tight . gap 8 . alignMid . fillW) $ do
-        whenM (button "Expose") (setExposed True >> setRewinding False)
-        whenM (button "Rewind") (setExposed False >> setRewinding True)
-        whenM (button (if lampOn then "Lamp off" else "Lamp on")) (setLamp (not lampOn))
+        whenM (button "Expose") (writeVar exposure True >> writeVar rewind False)
+        whenM (button "Rewind") (writeVar exposure False >> writeVar rewind True)
+        whenM (button (if lampOn then "Lamp off" else "Lamp on")) (modifyVar lampSwitch not)
         flex
-        whenM (button (if tossed then "Catch" else "Toss")) (setTossed (not tossed))
-        whenM (button (if stiffSpring then "Stiff" else "Bouncy")) (setStiffSpring (not stiffSpring))
+        whenM (button (if tossed then "Catch" else "Toss")) (modifyVar toss not)
+        whenM (button (if stiffSpring then "Stiff" else "Bouncy")) (modifyVar spring not)
       throwSec <- do
         label "Throw"
-        newThrow <- slider 35 140 throwRaw
-        setThrowRaw newThrow
-        pure (newThrow / 100)
+        slider 35 140 throwRaw
+        (/ 100) <$> readVar throwRaw
       cycleThrow <- lockThrow exposed throwSec
       let cycleLen = pullCycleLen cycleThrow
       pullPhase <-
@@ -132,12 +138,12 @@ animUi = do
       laneTs <- transport exposed rewinding cycleThrow time wash lampGlow
       when
         (rewinding && not exposed && abs clock < 0.001 && all settled laneTs)
-        (setRewinding False)
+        (writeVar rewind False)
       panelWith (padXY 12 10 . gap 8 . fixedW (220 + 180 * bellowsT)) $ do
         rowWith (tight . gap 10 . alignMid . fillW) $ do
           whenM
             (button (if bellowsOpen then "Collapse" else "Extend"))
-            (setBellows (not bellowsOpen))
+            (modifyVar bellows not)
           flex
           let iris = 12 + 22 * bellowsT
               irisCol = lerpColor film (lerpColor paper ruby 0.18) bellowsT

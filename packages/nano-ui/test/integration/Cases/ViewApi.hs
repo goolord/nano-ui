@@ -183,7 +183,7 @@ runContentKeyOfTest _ failed = do
 runCheckboxWithTest :: Context -> IORef Int -> IO ()
 runCheckboxWithTest ctx failed = do
   let inp = withInput 400 300
-      ui = rowWith (tight . gap 0 . fixedH 60 . fillW) $ fst <$> checkboxWith' alignMid "Match case" False
+      ui = rowWith (tight . gap 0 . fixedH 60 . fillW) $ fst <$> withValue False (checkboxWith' alignMid "Match case")
   resp <- warmup2 ctx inp ui
   let r = respRect resp
       mid = rectY r + rectH r / 2
@@ -351,7 +351,7 @@ runTakeEscapeTest ctx failed = do
   let inp = withInput 400 300
       esc = keyInp KeyEscape inp
       ui = do
-        (resp, _) <- textInput' ("query" :: Text)
+        (resp, _) <- withValue ("query" :: Text) textInput'
         first <- takeEscape
         again <- takeEscape
         pure (resp, first, again)

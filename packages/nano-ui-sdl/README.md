@@ -28,25 +28,24 @@ main = runSdlApp defaultSdlOptions $
   whenM (button "Reset scale") (setSdlUiScale 1)
 ```
 
-Primitive hooks such as `useInt` and `useText` need no setup. When a view
-needs explicitly owned state or arbitrary value types, allocate it once in IO
-as a record and pass it to the view:
+`useVar` keeps local state with no setup. When a view needs explicitly owned
+state or a value type `useVar` does not hold, make a `Var` once in IO, keep it
+in a record, and pass it to the view:
 
 ```haskell
 main = do
   picker <- newFilePicker
   runSdlApp defaultSdlOptions (filePicker picker)
 
-newtype FilePicker = FilePicker (StateCell (Maybe FileDialogId))
+newtype FilePicker = FilePicker (Var (Maybe FileDialogId))
 
 newFilePicker :: IO FilePicker
-newFilePicker = FilePicker <$> newState Nothing
+newFilePicker = FilePicker <$> newVar Nothing
 
 filePicker :: FilePicker -> NanoUI ()
-filePicker (FilePicker pending) = do
-  (_, setPending) <- useState pending
+filePicker (FilePicker pending) =
   whenM (button "Open") $
-    setPending . Just =<< askOpenFileDialog defaultFileDialogOptions
+    writeVar pending . Just =<< askOpenFileDialog defaultFileDialogOptions
 ```
 
 `pollFileDialogUi handle` consumes a completed result once and restores

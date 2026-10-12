@@ -219,7 +219,7 @@ spec = do
     it "shows as the parse of its text" $
       show (appendMarkdown "b" (parseMarkdown "*a*\n")) `shouldBe` "parseMarkdown \"*a*\\nb\""
     it "keeps every token in a store that skips equal documents" $ do
-      -- The store mimics nano-ui's useState. A line ending changes no block
+      -- The store mimics nano-ui's writeVar. A line ending changes no block
       -- yet, but the doc must still differ or the text after it is lost.
       let tokens = ["Hello", "\n", "\n", "- one", "\n", "- two", "\n", "\n", "```", "\n", "x", "\n", "```"]
           store old new = if new == old then old else new

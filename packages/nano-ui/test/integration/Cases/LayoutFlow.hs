@@ -281,7 +281,7 @@ runLayerHitOrderTest ctx failed =
 runLayersFieldFocusTest :: Context -> IORef Int -> IO ()
 runLayersFieldFocusTest ctx failed = do
   let sized w = defaultTextInputConfig {ticLayout = fixedW w (ticLayout defaultTextInputConfig)}
-      field w t = fst <$> textInputConfigured' (sized w) t
+      field w t = fst <$> withValue t (textInputConfigured' (sized w))
       ui = column $ do
         (f, cover) <- layers $ (,) <$> field 200 "under" <*> buttonWith' (alignEnd . fixedWH 40 20) "x"
         (under, top) <- layers $ (,) <$> buttonWith' (fixedWH 200 30) "under" <*> field 100 "over"
@@ -310,8 +310,8 @@ runCoveredFieldSelectFocusTest ctx failed = do
   let sized w = defaultTextInputConfig {ticLayout = fixedW w (ticLayout defaultTextInputConfig)}
       ui = columnWith tight $ do
         cover <- buttonWith' (pinAt 100 0 . fixedWH 60 20) "x"
-        f <- fst <$> textInputConfigured' (sized 200) "text"
-        (s, over) <- layersWith tight $ (,) <$> (fst <$> selectWith' (fixedW 200) ["Alpha", "Beta"] 0) <*> buttonWith' (alignEnd . fixedWH 40 20) "y"
+        f <- fst <$> withValue "text" (textInputConfigured' (sized 200))
+        (s, over) <- layersWith tight $ (,) <$> (fst <$> withValue 0 (selectWith' (fixedW 200) ["Alpha", "Beta"])) <*> buttonWith' (alignEnd . fixedWH 40 20) "y"
         pure (cover, f, s, over)
   (cover0, field0, _, over0) <- warmup2 ctx input0 ui
   let press p = runClick ctx input0 {inputMousePos = p} ui p
@@ -332,8 +332,8 @@ runPinnedFieldTextCursorTest :: Context -> IORef Int -> IO ()
 runPinnedFieldTextCursorTest ctx failed = do
   let sized f = defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}
       ui = columnWith tight $ do
-        pinned <- fst <$> textInputConfigured' (sized (pinAt 50 0 . fixedW 100)) "pinned"
-        _ <- textInputConfigured' (sized (fixedW 300)) "under"
+        pinned <- fst <$> withValue "pinned" (textInputConfigured' (sized (pinAt 50 0 . fixedW 100)))
+        _ <- withValue "under" (textInputConfigured' (sized (fixedW 300)))
         pure pinned
   pinned0 <- warmup2 ctx input0 ui
   let p = centerOf pinned0
@@ -423,16 +423,16 @@ runCoveredWidgetNoPointerTest ctx failed = do
   ((area3, _), _) <- pressThrough covered beside
   assert failed (respPressed area3 && rectContains (respRect area0) beside)
   -- A slider under a pinned button stays where it was.
-  valueRef <- newIORef (0 :: Float)
+  valueRef <- newVar (0 :: Float)
   let sliders = columnWith (tight . fixedW 300) $ do
         _ <- held valueRef (sliderWith' id 0 100)
         buttonWith' (pinAt 200 0 . fixedWH 60 20) "x"
   (_, b4) <- pressThrough sliders . centerOf =<< warmup2 ctx inp sliders
   assert failed (respClicked b4)
-  readIORef valueRef >>= assertEq failed 0
+  readVarIO valueRef >>= assertEq failed 0
   -- A select under a pinned button stays shut.
   let selects = columnWith tight $ do
-        _ <- selectWith (fixedW 200) ["Alpha", "Beta", "Gamma"] 0
+        _ <- (snd <$> withValue 0 (selectWith (fixedW 200) ["Alpha", "Beta", "Gamma"]))
         buttonWith' (pinAt 120 0 . fixedWH 60 20) "y"
   onB5 <- centerOf <$> warmup2 ctx inp selects
   _ <- pressThrough selects onB5
@@ -486,7 +486,7 @@ runPointerModesTest ctx failed = do
     assert failed (respClicked b3)
   -- A blocking panel over a text field keeps a press from focusing it.
   let field mode = columnWith tight $ do
-        f <- fst <$> textInputConfigured' defaultTextInputConfig {ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)} "text"
+        f <- fst <$> withValue "text" (textInputConfigured' defaultTextInputConfig {ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)})
         panelWith (pointer mode . pinAt 60 0 . fixedWH 80 20) (pure ())
         pure f
   forM_ [(PointerAuto, True), (PointerBlock, False)] $ \(mode, focused) -> do

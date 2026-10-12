@@ -212,15 +212,16 @@ appView debug m = Emit.withRunInNanoUIE $ \run -> do
         (button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]"))
         (ToggleDebug (not (debugOpen m)))
 
-    nextTab <-
-      tabBar
-        (activeTab m)
-        [ tab TabControls "Controls" ()
-        , tab TabGallery "Unicode Gallery" ()
-        , tab TabAbout "About" ()
-        , tab TabDiagnostics "Diagnostics" ()
-        ]
-    when (nextTab /= activeTab m) (run (Emit.emit (SetTab nextTab)))
+    run $ Emit.emitChanged
+      ( `tabBar`
+          [ tab TabControls "Controls" ()
+          , tab TabGallery "Unicode Gallery" ()
+          , tab TabAbout "About" ()
+          , tab TabDiagnostics "Diagnostics" ()
+          ]
+      )
+      (activeTab m)
+      SetTab
 
     separator
 
@@ -295,15 +296,16 @@ viewControlsTab m = Emit.withRunInNanoUIE $ \run -> do
 
       gridWith 1 (gap 2) $ do
         label "Preset:"
-        radVal <-
-          boundedRadio
-            ( \case
-                ProfileFast -> "Fast (Low Latency)"
-                ProfileBalanced -> "Balanced (Standard)"
-                ProfileQuality -> "Quality (High Detail)"
-            )
-            (profileOpt m)
-        when (radVal /= profileOpt m) (run (Emit.emit (SetProfile radVal)))
+        run $ Emit.emitChanged
+          ( boundedRadio
+              ( \case
+                  ProfileFast -> "Fast (Low Latency)"
+                  ProfileBalanced -> "Balanced (Standard)"
+                  ProfileQuality -> "Quality (High Detail)"
+              )
+          )
+          (profileOpt m)
+          SetProfile
 
     panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
       label "State"

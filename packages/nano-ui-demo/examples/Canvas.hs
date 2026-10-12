@@ -8,8 +8,8 @@
 -- clamped to the canvas. Points are stored relative to the canvas corner, so
 -- the drawing stays put if the layout moves it.
 --
--- The finished strokes live in one 'StateCell' and the stroke being drawn in
--- another, both allocated once in setup. A press starts the live stroke,
+-- The finished strokes live in one 'Var' and the stroke being drawn in
+-- another, both made once in setup. A press starts the live stroke,
 -- each move adds a point, and the release moves it onto the finished list.
 --
 -- 'canvasContent' is the drawing's content key: while it stays the same the
@@ -30,6 +30,7 @@ import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import qualified NanoUI.Path as P
 import NanoUI.Shortcut (ctrl, key)
+import NanoUI.Var (peekVar)
 
 main :: IO ()
 main = do
@@ -59,12 +60,12 @@ data Sketch = Sketch
   deriving (Eq)
 
 data PaintState = PaintState
-  { sketchCell :: !(StateCell Sketch)
-  , liveCell :: !(StateCell (Maybe Ink))
+  { sketchVar :: !(Var Sketch)
+  , liveVar :: !(Var (Maybe Ink))
   }
 
 newPaintState :: IO PaintState
-newPaintState = PaintState <$> newState (Sketch [] 0) <*> newState Nothing
+newPaintState = PaintState <$> newVar (Sketch [] 0) <*> newVar Nothing
 
 -- | Apply an edit to the stroke list and bump the revision.
 edit :: ([Ink] -> [Ink]) -> Sketch -> Sketch
@@ -85,13 +86,14 @@ paper = colorRGB 250 248 242
 
 view :: PaintState -> NanoUI ()
 view st = do
-  (sketch, _) <- useState (sketchCell st)
-  (live, setLive) <- useState (liveCell st)
-  (colourIx, setColourIx) <- useInt 0
-  (width, setWidth) <- useFloat 6
+  sketch <- readVar (sketchVar st)
+  live <- readVar (liveVar st)
+  colourVar <- useVar (0 :: Int)
+  width <- useVar (6 :: Float)
+  colourIx <- readVar colourVar
   theme <- uiTheme
   let strokes = sketchStrokes sketch
-      undo = unless (null strokes) (modifyState (sketchCell st) (edit (drop 1)))
+      undo = unless (null strokes) (modifyVar (sketchVar st) (edit (drop 1)))
       colour = palette !! colourIx
   columnWith (padAll 16 . gap 12 . grow) $ do
     rowWith (tight . gap 8 . alignMid . fillW) $ do
@@ -99,13 +101,13 @@ view st = do
       -- one gets a border in the theme's text colour.
       forM_ (zip [0 ..] palette) $ \(i, c) -> do
         let ring = if i == colourIx then buttonStyle (borderWidth 3 . borderColor (styleFg (themePanel theme))) else id
-        whenM (styled (ring . tinted (const c)) (buttonWith (fixedWH 28 28) "")) (setColourIx i)
+        whenM (styled (ring . tinted (const c)) (buttonWith (fixedWH 28 28) "")) (writeVar colourVar i)
       labelWith (tight . alignMid . padLeft 12) "Width"
-      setWidth =<< sliderWith (fixedW 140) 1 30 width
+      sliderWith (fixedW 140) 1 30 width
       flex
       disabledWhen (null strokes) $ whenM (button "Undo") undo
       disabledWhen (null strokes) $
-        whenM (button "Clear") (modifyState (sketchCell st) (edit (const [])))
+        whenM (button "Clear") (modifyVar (sketchVar st) (edit (const [])))
     whenM (shortcut (ctrl <> key 'z')) undo
 
     -- Everything the drawing reads: the finished strokes (by revision) and
@@ -125,14 +127,15 @@ view st = do
     drag <- useDrag2DOn resp
     let Rect rx ry _ _ = respRect resp
         here = v2Sub (dragPosition drag) (V2 rx ry)
+    w <- peekVar width
     case (dragActive drag, live) of
-      (True, Nothing) -> setLive (Just (Ink colour width [here]))
+      (True, Nothing) -> writeVar (liveVar st) (Just (Ink colour w [here]))
       -- Skip moves under a pixel: they add points without changing the line.
       (True, Just s@(Ink _ _ (prev : _))) ->
-        when (far prev here) (setLive (Just s {inkPoints = here : inkPoints s}))
+        when (far prev here) (writeVar (liveVar st) (Just s {inkPoints = here : inkPoints s}))
       (False, Just s) -> do
-        modifyState (sketchCell st) (edit (s :))
-        setLive Nothing
+        modifyVar (sketchVar st) (edit (s :))
+        writeVar (liveVar st) Nothing
       _ -> pure ()
 
 far :: V2 -> V2 -> Bool

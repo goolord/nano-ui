@@ -12,7 +12,7 @@ import Control.Monad (unless)
 import Data.Foldable (for_)
 import Data.Text (Text)
 import Data.Text qualified as T
-import NanoUI (NanoUI, label, useText)
+import NanoUI (NanoUI, label, readVar, useVar, writeVar)
 import NanoUI.Markdown
 
 readme :: MarkdownDoc
@@ -21,9 +21,10 @@ readme = parseMarkdown "# Hello\n\nSome *emphasis*, `code` and [a link](https://
 -- Allocate cache <- newMarkdownCache once during component setup.
 view :: MarkdownCache -> NanoUI ()
 view cache = do
-  (lastLink, setLastLink) <- useText ""
+  lastLinkVar <- useVar ""
   clicked <- markdown cache readme
-  for_ clicked setLastLink
+  for_ clicked (writeVar lastLinkVar)
+  lastLink <- readVar lastLinkVar
   unless (T.null lastLink) $ label ("Clicked " <> lastLink)
 ```
 
@@ -77,7 +78,7 @@ those blocks may link to it: definitions at the end of a reply cost a whole
 parse an append.
 
 `markdownSource` gives a document's text back. Two documents are equal when
-their texts are, so one kept in `useState` changes with every append. The
+their texts are, so one kept in a `Var` changes with every append. The
 widget keeps the ids of the blocks before the one that changed, so they are not
 measured, laid out or repainted again. A chat log of thousands of paragraphs
 should draw only the messages in view, using `getScrollMetrics`.

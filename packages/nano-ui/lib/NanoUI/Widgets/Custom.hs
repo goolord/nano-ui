@@ -13,7 +13,17 @@
 -- convention: a prime adds the 'Response', and @With@ accepts layout and size.
 module NanoUI.Widgets.Custom
   ( -- * Custom widgets
-    CustomWidgetSpec (..)
+
+    -- ** On a Var
+
+    -- | A custom input built value-in, value-out runs on a 'Var' through
+    -- 'bindVar': it gets the Var's value and stores what it returns.
+    Binding (..)
+  , bindVar
+  , bindVarBy
+
+    -- ** Specs
+  , CustomWidgetSpec (..)
   , KeyClaim (..)
   , defaultCustomWidgetSpec
   , customWidget
@@ -105,6 +115,7 @@ import NanoUI.Internal.Context
 import Data.Word (Word64)
 import Data.Hashable (Hashable, hash)
 import GHC.Float (castFloatToWord32)
+import NanoUI.Internal.Equality (sameFloat)
 import NanoUI.Internal.Font (checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
@@ -114,6 +125,8 @@ import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
+import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (navStep, useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle)
 import NanoUI.Internal.Widgets.Node
@@ -225,14 +238,7 @@ customWidgetWithId wid spec = do
   liftIO $ do
     when (widgetFocusable spec) $ registerFocusable ctx wid
     mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
-    registerCustomEntry ctx wid $
-      CustomDrawingEntry
-        (widgetContent spec)
-        (widgetDraw spec)
-        (widgetCursor spec)
-        (widgetDamageSlop spec)
-        (widgetTrackPointer spec)
-        (widgetKeys spec)
+    registerCustomEntry ctx wid (specEntry spec)
   resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
   cdc <- liftIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
   pure (widgetInteract spec resp0 cdc inp)
@@ -377,60 +383,64 @@ wheelIf on = do
 -- Reference Custom Widgets
 -- -----------------------------------------------------------------------------
 
--- | Rotary knob over @[minV, maxV]@, 36 px across. Drag vertically, scroll,
--- or use the arrow keys. Pass the current value; the result is the value
--- after this frame.
+-- | Rotary knob over @[minV, maxV]@, 36 px across, showing and editing a
+-- Var. Drag vertically, scroll, or use the arrow keys.
 {-# INLINE knob #-}
-knob :: Float -> Float -> Float -> NanoUI Float
-knob minV maxV value = snd <$> knobWith' id 36 minV maxV value
+knob :: Float -> Float -> Var Float -> NanoUI ()
+knob minV maxV v = void (knobWith' id 36 minV maxV v)
 
 -- | 'knob' returning its response.
-knob' :: Float -> Float -> Float -> NanoUI (Response, Float)
+{-# INLINE knob' #-}
+knob' :: Float -> Float -> Var Float -> NanoUI Response
 knob' = knobWith' id 36
 
 -- | 'knob' with a layout modifier and diameter.
-knobWith :: (Layout -> Layout) -> Float -> Float -> Float -> Float -> NanoUI Float
-knobWith f diameter lo hi value = snd <$> knobWith' f diameter lo hi value
+{-# INLINE knobWith #-}
+knobWith :: (Layout -> Layout) -> Float -> Float -> Float -> Var Float -> NanoUI ()
+knobWith f diameter lo hi v = void (knobWith' f diameter lo hi v)
 
--- | 'knob' with a layout modifier and a diameter in pixels, returning the
--- response and the updated value.
-knobWith' ::
+-- | 'knob' with a layout modifier and a diameter in pixels, returning its
+-- response.
+{-# INLINE knobWith' #-}
+knobWith' :: (Layout -> Layout) -> Float -> Float -> Float -> Var Float -> NanoUI Response
+knobWith' f diameter minV maxV v = bindVarBy sameFloat RenderFinal v (knobCore f diameter minV maxV)
+
+knobCore ::
   (Layout -> Layout)
   -> Float
   -> Float
   -> Float
   -> Float
   -> NanoUI (Response, Float)
-knobWith' f diameter minV maxV value = do
+knobCore f diameter minV maxV value = do
   (wid, ctx) <- freshWidget
   -- NaN never equals itself, so it would be re-adopted, dirtying every frame.
   current <- liftIO $ adoptSlot fieldFloat ctx wid (if isNaN value then minV else value)
   let
     range = maxV - minV
-    frac = if range > 0 then clamp01 ((current - minV) / range) else 0
-  (resp, ()) <-
-    customWidgetWithId
-      wid
+    fracOf x = if range > 0 then clamp01 ((x - minV) / range) else 0
+    spec x =
       (fixedSizeSpec f diameter diameter)
         { widgetCursor = Just (\_ _ _ -> UiCursorNsResize)
         , widgetFocusable = True
-        , widgetContent = contentKey [frac]
-        , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
+        , widgetContent = contentKey [fracOf x]
+        , widgetDraw = \cdc (Rect bx by bw bh) -> runCanvasFor cdc $ do
             let
-              cx = x + w / 2
-              cy = y + h / 2
-              r = min (w / 2) (h / 2) - 2
+              cx = bx + bw / 2
+              cy = by + bh / 2
+              r = min (bw / 2) (bh / 2) - 2
               button = themeButton (cdcTheme cdc)
               bgCol
                 | cdcPressed cdc = styleActiveBg button
                 | cdcHovered cdc = styleHoverBg button
                 | otherwise = styleBg button
-              angle = (135 + frac * 270) * (pi / 180)
+              angle = (135 + fracOf x * 270) * (pi / 180)
               tip = V2 (cx + cos angle * (r * 0.75)) (cy + sin angle * (r * 0.75))
             drawCircle (V2 cx cy) r bgCol
             drawStrokeCircle (V2 cx cy) r 1.5 (styleBorder button)
             drawStrokeAA (V2 cx cy) tip 2.5 (themeAccent (cdcTheme cdc))
         }
+  (resp, ()) <- customWidgetWithId wid (spec current)
   -- A drag reports no movement while it is not held.
   drag <- useDrag2DOn resp
   (_, scrollY) <- useWheelDeltaOn resp
@@ -440,50 +450,77 @@ knobWith' f diameter minV maxV value = do
     finalVal
       | range > 0 && deltaNorm /= 0 = clamp minV maxV (current + deltaNorm * range)
       | otherwise = current
+  -- The drawing was registered before the turn was read: draw where it
+  -- ended, so this pass shows the value it returns.
+  when (finalVal /= current) $ liftIO (redrawCustom ctx wid (spec finalVal))
   finishInput fieldFloat ctx wid current resp finalVal
 
--- | On/off switch. Pass the current state; the result is the state after
--- this frame's click or Space/Enter.
+-- | On/off switch showing and editing a Var: a click or Space/Enter flips
+-- it.
 {-# INLINE toggleSwitch #-}
-toggleSwitch :: Bool -> NanoUI Bool
-toggleSwitch on = snd <$> toggleSwitchWith' id on
+toggleSwitch :: Var Bool -> NanoUI ()
+toggleSwitch v = void (toggleSwitchWith' id v)
 
 -- | 'toggleSwitch' returning its response.
-toggleSwitch' :: Bool -> NanoUI (Response, Bool)
+{-# INLINE toggleSwitch' #-}
+toggleSwitch' :: Var Bool -> NanoUI Response
 toggleSwitch' = toggleSwitchWith' id
 
 -- | 'toggleSwitch' with a layout modifier.
-toggleSwitchWith :: (Layout -> Layout) -> Bool -> NanoUI Bool
-toggleSwitchWith f on = snd <$> toggleSwitchWith' f on
+{-# INLINE toggleSwitchWith #-}
+toggleSwitchWith :: (Layout -> Layout) -> Var Bool -> NanoUI ()
+toggleSwitchWith f v = void (toggleSwitchWith' f v)
 
--- | 'toggleSwitch' with a layout modifier, returning the response and the
--- updated flag.
-toggleSwitchWith' ::
+-- | 'toggleSwitch' with a layout modifier, returning its response.
+{-# INLINE toggleSwitchWith' #-}
+toggleSwitchWith' :: (Layout -> Layout) -> Var Bool -> NanoUI Response
+toggleSwitchWith' f v = bindVar RenderFinal v (toggleSwitchCore f)
+
+toggleSwitchCore ::
   (Layout -> Layout) -> Bool -> NanoUI (Response, Bool)
-toggleSwitchWith' f on = do
+toggleSwitchCore f on = do
   (wid, ctx) <- freshWidget
   current <- intBool <$> liftIO (adoptSlot fieldInt ctx wid (boolInt on))
   let
     pillW = 44.0
     pillH = 24.0
-  (resp, ()) <-
-    customWidgetWithId
-      wid
+    spec isOn =
       (fixedSizeSpec f pillW pillH)
         { widgetCursor = Just (\_ _ _ -> UiCursorPointer)
         , widgetFocusable = True
         , widgetKeys = KeysActivate
-        , widgetContent = contentKey [if current then 1 else 0]
+        , widgetContent = contentKey [if isOn then 1 else 0]
         , widgetDraw = \cdc rect@(Rect x y w h) -> runCanvasFor cdc $ do
             let
               theme = cdcTheme cdc
               r = h / 2
-              thumbX = if current then x + w - r else x + r
-            drawRoundedRect rect r (if current then themeAccent theme else styleBg (themeButton theme))
+              thumbX = if isOn then x + w - r else x + r
+            drawRoundedRect rect r (if isOn then themeAccent theme else styleBg (themeButton theme))
             drawStrokeRoundedRect rect r 1 (styleBorder (themeButton theme))
             drawCircle (V2 thumbX (y + r)) (r - 3) (themeOnAccent theme)
         }
-  finishToggle ctx wid current resp
+  (resp, ()) <- customWidgetWithId wid (spec current)
+  result@(_, value) <- finishToggle ctx wid current resp
+  -- Flipped after its drawing was registered: draw the new state.
+  when (value /= current) $ liftIO (redrawCustom ctx wid (spec value))
+  pure result
+
+-- | Replace a custom widget's drawing for this frame, after its interaction
+-- changed what it shows.
+redrawCustom :: Context -> WidgetId -> CustomWidgetSpec a -> IO ()
+redrawCustom ctx wid spec = registerCustomEntry ctx wid (specEntry spec)
+
+-- | The drawing a spec registers.
+{-# INLINE specEntry #-}
+specEntry :: CustomWidgetSpec a -> CustomDrawingEntry
+specEntry spec =
+  CustomDrawingEntry
+    (widgetContent spec)
+    (widgetDraw spec)
+    (widgetCursor spec)
+    (widgetDamageSlop spec)
+    (widgetTrackPointer spec)
+    (widgetKeys spec)
 
 -- | Progress ring for a fraction in @[0, 1]@, 32 px across.
 {-# INLINE circularProgress #-}

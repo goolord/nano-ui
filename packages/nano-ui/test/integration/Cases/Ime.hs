@@ -55,9 +55,9 @@ shown ctx failed yes no = do
 
 -- | @widget@ holding @v@ in a column, focused by Tab, caret @back@
 -- characters from the end.
-field :: Context -> T.Text -> Int -> (T.Text -> NanoUI (Response, T.Text)) -> IO (IORef T.Text, NanoUI (Response, T.Text))
+field :: Context -> T.Text -> Int -> (Var T.Text -> NanoUI Response) -> IO (Var T.Text, NanoUI (Response, T.Text))
 field ctx v back widget = do
-  ref <- newIORef v
+  ref <- newVar v
   let ui = column (held ref widget)
   warmupFocused ctx inp ui
   frames ctx ui (replicate back (keyInp KeyLeft inp))
@@ -84,7 +84,7 @@ runImePreeditInlineTest ctx failed = do
     shown ctx failed [line] ["abcd"]
   frames ctx ui [commit "" inp, shifted KeyRight, composing "xyz" 3 inp]
   shown ctx failed ["abxyzd"] []
-  assertEq failed "abcd" =<< readIORef ref
+  assertEq failed "abcd" =<< readVarIO ref
   forM_ [(searchInput' "Find", "abxy", []), (textInputConfigured' defaultTextInputConfig {ticPassword = True}, "****", ["xy"])] $
     \(widget, line, hidden) -> do
       c <- newPixelContext
@@ -156,8 +156,8 @@ runImeAreaPaintTest :: Context -> IORef Int -> IO ()
 runImeAreaPaintTest ctx failed = do
   setDrawSquareGeometry ctx True
   theme <- getTheme ctx
-  ref <- newIORef "abcd"
-  areaRef <- newIORef "one\ntwo"
+  ref <- newVar "abcd"
+  areaRef <- newVar "one\ntwo"
   let cell = 16
       ui = column (held ref textInput' <* held areaRef textArea')
       near a b = abs (a - b) <= 1
@@ -231,8 +231,8 @@ runImeBidiTest base failed = do
 -- changes.
 runImeOwnerTest :: Context -> IORef Int -> IO ()
 runImeOwnerTest ctx failed = do
-  aRef <- newIORef "aa"
-  bRef <- newIORef "bb"
+  aRef <- newVar "aa"
+  bRef <- newVar "bb"
   let ui = column ((,) <$> held aRef textInput' <*> held bRef textInput')
       comp n = composing (T.take n "xyz") n inp
   -- With no focus it is shown nowhere, and Tab still moves focus.
@@ -253,13 +253,13 @@ runImeOwnerTest ctx failed = do
   assertEq failed "b" . snd . snd =<< evalUi ctx (keyInp KeyBackspace (comp 2)) ui
   _ <- runFrame ctx (comp 3) ui
   shown ctx failed ["bxyz"] []
-  assertEq failed "aa" =<< readIORef aRef
+  assertEq failed "aa" =<< readVarIO aRef
 
 -- | Starting, changing or ending a composition repaints its field on an
 -- idle frame.
 runImeDamageTest :: Context -> IORef Int -> IO ()
 runImeDamageTest ctx failed = do
-  ref <- newIORef "abcd"
+  ref <- newVar "abcd"
   let i = inp {inputDeltaTime = 1}
       ui = column (label "Above" *> held ref textInput' <* label "Below")
   warmupFocused ctx i ui
@@ -276,15 +276,16 @@ runImeDamageTest ctx failed = do
 -- once.
 runImeRepeatedPassTest :: Context -> IORef Int -> IO ()
 runImeRepeatedPassTest ctx failed = do
-  ref <- newIORef "ab"
+  ref <- newVar "ab"
   let ui = column $ do
-        (n, setN) <- useInt 0
-        held ref textInput' <* setN (n + 1)
+        nVar <- useVar (0 :: Int)
+        n <- readVar nVar
+        held ref textInput' <* writeVar nVar (n + 1)
   warmupFocused ctx inp ui
   _ <- runFrame ctx (composing "xy" 2 inp) ui
   shown ctx failed ["abxy"] []
   _ <- runFrame ctx (commit "z" inp) ui
-  assertEq failed "abz" =<< readIORef ref
+  assertEq failed "abz" =<< readVarIO ref
 
 -- | IME keys fire no shortcuts. While composing, presses, releases and held
 -- keys are dropped. On the commit frame, passed-on keys reach the field but
@@ -350,9 +351,9 @@ runImePurposeTest :: Context -> IORef Int -> IO ()
 runImePurposeTest ctx failed = do
   let ui = column $ do
         _ <- button "Before"
-        _ <- textInputConfigured defaultTextInputConfig {ticPassword = True} "secret"
-        _ <- numericInput 3
-        _ <- textArea "notes"
+        _ <- (snd <$> withValue "secret" (textInputConfigured defaultTextInputConfig {ticPassword = True}))
+        _ <- (snd <$> withValue 3 numericInput)
+        _ <- (snd <$> withValue "notes" textArea)
         selectableText "label"
   warmup2 ctx inp ui
   let purposeAfter i = runFrame ctx i ui >> fmap textInputAreaPurpose <$> textInputArea ctx

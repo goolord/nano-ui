@@ -36,15 +36,18 @@ import NanoUI
   , styled
   , tight
   , toolbar
-  , useInt
-   , useText
   , useStream
   , Stream
   , newStream
+  , modifyVar
+  , readVar
+  , useVar
   , v2Y
   , whenM
+  , writeVar
   )
 import NanoUI.Markdown
+import NanoUI.Var (peekVar)
 
 -- | The reply in 4-character tokens.
 tokens :: [Text]
@@ -60,24 +63,26 @@ chatDemoUi :: Stream Int (Int, MarkdownDoc) -> MarkdownCache -> NanoUI ()
 chatDemoUi stream cache = do
   -- A worker thread appends tokens; the view reads the token count and the
   -- document so far. Replay restarts the stream under a new key.
-  (replays, setReplays) <- useInt 0
-  (arrived, doc) <- useStream stream replays (0 :: Int, emptyMarkdown) $ \update ->
+  replays <- useVar (0 :: Int)
+  replay <- readVar replays
+  (arrived, doc) <- useStream stream replay (0 :: Int, emptyMarkdown) $ \update ->
     forM_ tokens $ \token -> do
       threadDelay (1000000 `div` tokensPerSecond)
       -- Force the document here, so the parse runs on this thread.
       update (\(n, d) -> let !n' = n + 1; !d' = appendMarkdown token d in (n', d'))
   let streaming = arrived < length tokens
-  -- Token count shown last frame, used to detect growth.
-  (shown, setShown) <- useInt 0
-  let grew = arrived /= shown
-  when grew (setShown arrived)
-  (lastLink, setLastLink) <- useText ""
+  -- Token count shown last frame, used to detect growth. Only this frame's
+  -- scrolling depends on it, so it is peeked, not read.
+  shownCount <- useVar (0 :: Int)
+  grew <- (/= arrived) <$> peekVar shownCount
+  writeVar shownCount arrived
+  lastLink <- useVar ("" :: Text)
   columnWith (fillW . fillH . padAll 16 . gap 12) $ do
     toolbar $ do
       heading "Chat"
       flex
       muted (if streaming then "Receiving..." else T.pack (show (length tokens)) <> " tokens")
-      whenM (button "Replay") (setReplays (replays + 1))
+      whenM (button "Replay") (modifyVar replays (+ 1))
     sid <- currentId
     metrics <- getScrollMetricsUi sid
     -- Stick to the bottom as text arrives, unless scrolled up.
@@ -93,8 +98,9 @@ chatDemoUi stream cache = do
               label "How do I stream Markdown into a nano-ui view?"
         card $ do
           target <- markdown cache doc
-          for_ target setLastLink
-    unless (T.null lastLink) $ muted ("Clicked link: " <> lastLink)
+          for_ target (writeVar lastLink)
+    link <- readVar lastLink
+    unless (T.null link) $ muted ("Clicked link: " <> link)
 
 reply :: Text
 reply =

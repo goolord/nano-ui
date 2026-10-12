@@ -2,6 +2,51 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking:** state lives in `Var`s, and inputs take the `Var` they edit
+  instead of a value to pass back. `textInput :: Var Text -> NanoUI ()`
+  shows the Var's text and stores the user's edits in it; primed variants
+  return the `Response`. `NanoUI.Var` (re-exported from `NanoUI`) provides
+  `newVar` for owned state of any type, `useVar`/`useEnumVar` for positional
+  state, `readVar` (tracked), `writeVar`, `modifyVar`, the `*IO`
+  variants for other threads, `VarMap` for keyed children, `forEachVar` and
+  `withElemVars` for list elements, `zoomVar`/`zoomVarL`, and `withValue` for
+  value-in, value-out use. With `OverloadedRecordDot` and a `Generic`
+  instance, `v.field` is a `Var` for one field, resolved at compile time.
+  `Var x` and string literals are constants. `NanoUI.Var` also exports
+  `peekVar`, an untracked read.
+
+  A frame runs its view a second time only when something writes a Var the
+  view already read in that pass, and repaints the window only when a
+  tracked read saw the old value or sees the new one. Typing into a field
+  nothing else reads now costs one view pass and repaints the field, where
+  every changed hook write cost two passes and a full repaint.
+
+  Positional Vars have their own per-scope counter, apart from widget ids,
+  so a conditional widget no longer moves later state, and a slot that
+  changes type resets instead of reinterpreting the old value.
+
+  | Removed | Replacement |
+  | --- | --- |
+  | `(t, setT) <- useText x`; `setT =<< textInput t` | `t <- useVar x`; `textInput t` |
+  | `useInt`, `useFloat`, `useFlag`, `useText` | `useVar` |
+  | `useEnum` | `useEnumVar` |
+  | `useToggle` | `useVar False` with `modifyVar v not` |
+  | `StateCell`, `newState` | `Var`, `newVar` |
+  | `useState cell` | `readVar v`, `writeVar v` |
+  | `modifyState cell f` | `modifyVar v f` |
+  | `useTableSort` | `useVar (SortCol 0 SortAsc)` |
+  | `useContextMenu` | `popup` with a `Var (Maybe V2)` |
+  | `x' <- slider 0 1 x` on a model value | `(_, x') <- withValue x (slider 0 1)` |
+  | `ControlledTree (Maybe GridNode)` | `ControlledTree (Var (Maybe GridNode))` |
+
+  `table'`, `tableWith'` and `tableConfigured'` return the `TableResponse`.
+  Changing tabs no longer requests an extra frame. `numericInput` adopts a
+  value written to its Var while it is focused. `knob` and `toggleSwitch`
+  draw the value they return. `held` in `NanoUI.Testing` takes a `Var`, and
+  `lastFramePasses` reports whether the last frame ran its view twice.
+  Custom inputs bind with `bindVar`/`bindVarBy` from
+  `NanoUI.Widgets.Custom`.
+
 - Layout fixes. `flex` grows along its parent's direction, so in a column
   it pushes what follows down; it used to grow only across. `center` centres
   its body on both axes as one block (a layered `grow` box around a column),
@@ -116,10 +161,8 @@
 
 ### Typed state ownership (breaking)
 
-- `newState` allocates a `StateCell a`; `useState` now reads that handle,
-  without `Typeable`, and `modifyState` applies a pure update to its latest
-  value. Reads are O(1). Equal writes remain idle; changed writes rebuild the
-  view with one-shot input removed and repaint dependent content.
+- Typed state cells replaced the `Typeable` lookups of `useState`. These
+  cells are now `Var`s; see the first entry of this release.
 - `newTask`, `newStream`, `newImageHandle`, and `newDrag` allocate typed
   owners passed first to their `use*` operations. Screenshots use a task
   handle. Task/image key-change, skip-frame, and session-end cleanup remain.
@@ -375,8 +418,8 @@
   the text is never joined or compared in full while typing. Build one with
   `textDocument` and read it with `documentText`, `documentLines`,
   `documentLine` and `documentLineCount`. `==` skips the lines two documents
-  share, so storing the edited document with `useState` reads no text
-  before the edit. Typing 1,000 characters into a
+  share, so storing the edited document in state reads no text before the
+  edit. Typing 1,000 characters into a
   100,000-line document takes 0.14 s instead of 1.5 s through `textArea`,
   and allocates 248 MB instead of 7.1 GB.
 - `NanoUI.Store` names the store's maps as `Field`s (`fieldInt`,

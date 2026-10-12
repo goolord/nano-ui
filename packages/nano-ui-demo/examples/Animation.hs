@@ -1,6 +1,6 @@
 -- | Animation: tweens, springs, animated colours, hover effects and a looping indicator.
 --
--- An animation hook returns this frame's value; you build the view from it
+-- An animation returns this frame's value; you build the view from it
 -- like any other number. 'animateTo' moves toward a target: an unchanged
 -- target keeps the running animation, a new one retargets from wherever the
 -- value is now, so flipping a toggle mid-flight reverses smoothly. A 'Tween'
@@ -9,8 +9,8 @@
 -- 'animateToA' animates every channel of an 'Animatable' value, such as a
 -- 'Color' or a 'V2'.
 --
--- Animation hooks take a widget id like any widget, so they must run on
--- every frame in the same order. Each one here runs under 'withKey': its
+-- Animations take a widget id like any widget, so they must run on every
+-- frame in the same order. Each one here runs under 'withKey': its
 -- state then follows the key rather than its position, and a widget added
 -- above it later does not restart it.
 --
@@ -44,17 +44,18 @@ keyed = withKey
 
 view :: NanoUI ()
 view = do
-  (open, setOpen) <- useFlag False
-  (right, setRight) <- useFlag False
-  (warm, setWarm) <- useFlag False
-  (running, setRunning) <- useFlag False
+  open <- useVar False
+  right <- useVar False
+  warm <- useVar False
+  running <- useVar False
   theme <- uiTheme
   scrollWith (padAll 20 . grow) $
     columnWith (tight . gap 18 . fillW) $ do
       -- 1. Expand and collapse: a tween from 0 to 1 scales the panel's
       -- height and fades its text in. The panel clips what does not fit yet.
-      openT <- keyed "details" (animateTo (Tween EaseOutCubic 0.3 0) (if open then 1 else 0))
-      setOpen =<< checkbox "Show details" open
+      checkbox "Show details" open
+      isOpen <- readVar open
+      openT <- keyed "details" (animateTo (Tween EaseOutCubic 0.3 0) (if isOpen then 1 else 0))
       -- The panel exists only while any of it shows, so 'scope' keeps the
       -- ids after it stable whether or not it is declared.
       scope . when (openT > 0.005) $
@@ -66,19 +67,21 @@ view = do
 
       -- 2. Springs: the same target, two feels. Click "Move" quickly a few
       -- times: a spring keeps its speed when retargeted.
-      bouncy <- keyed "bouncy" (animateTo (Spring presetBouncy) (if right then 1 else 0))
-      stiff <- keyed "stiff" (animateTo (Spring presetStiff) (if right then 1 else 0))
       rowWith (tight . gap 12 . alignMid) $ do
-        whenM (button "Move") (setRight (not right))
+        whenM (button "Move") (modifyVar right not)
         muted "Bouncy overshoots; stiff settles without."
+      isRight <- readVar right
+      bouncy <- keyed "bouncy" (animateTo (Spring presetBouncy) (if isRight then 1 else 0))
+      stiff <- keyed "stiff" (animateTo (Spring presetStiff) (if isRight then 1 else 0))
       rail "Bouncy" bouncy
       rail "Stiff" stiff
 
       -- 3. A colour: 'animateToA' tweens each RGBA channel. To blend between
       -- two fixed colours, animating one Float and using 'lerpColor' works too.
-      swatch <- keyed "swatch" (animateToA (Tween EaseInOutCubic 0.6 0) (if warm then themeOrange theme else themeAccent theme))
+      isWarm <- readVar warm
+      swatch <- keyed "swatch" (animateToA (Tween EaseInOutCubic 0.6 0) (if isWarm then themeOrange theme else themeAccent theme))
       rowWith (tight . gap 12 . alignMid) $ do
-        whenM (button (if warm then "Cool down" else "Warm up")) (setWarm (not warm))
+        whenM (button (if isWarm then "Cool down" else "Warm up")) (modifyVar warm not)
         box (fixedWH 120 36) swatch
 
       -- 4. Hover: the button's response says whether the pointer is over
@@ -91,8 +94,9 @@ view = do
       -- 5. A loop that runs only while asked to. 'pulse' sweeps 0..1 from
       -- the clock; 'keepAnimating' on the bar keeps the frames coming, and
       -- leaving the scope out (Run off) lets the loop sleep again.
-      setRunning =<< checkbox "Run" running
-      scope . when running $
+      checkbox "Run" running
+      isRunning <- readVar running
+      scope . when isRunning $
         rowWith (tight . gap 12 . alignMid . fillW) $ do
           p <- pulse 1.2
           box (fixedWH 14 14) (withAlpha (themeAccent theme) (0.25 + 0.75 * p))

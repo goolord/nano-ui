@@ -106,7 +106,7 @@ Application acceptance and gesture cancellation are decided by the caller.
 `commitPaneDrop` explicitly creates and focuses a pane, returning its id and
 the new tree. It does not inspect the mouse or require a drag; the caller owns
 the decision to commit. Fill the pane's content and, for a controlled grid,
-save the **returned tree**, not the earlier `pgrTree`. That response is a
+write the **returned tree** to the grid's `Var`, not the earlier `pgrTree`. That response is a
 pre-commit snapshot; `pgrCommitted` describes changes during `paneGrid`, not
 this later operation. A successful commit is itself the save notification.
 

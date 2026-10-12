@@ -10,12 +10,11 @@
 -- user did. There are no widget objects to keep and no callbacks to register.
 --
 -- > counter :: NanoUI ()
--- > counter = do
--- >   (n, setN) <- useInt 0
--- >   row $ do
--- >     whenM (button "-") (setN (n - 1))
--- >     label (T.pack (show n))
--- >     whenM (button "+") (setN (n + 1))
+-- > counter = row $ do
+-- >   n <- useVar (0 :: Int)
+-- >   whenM (button "-") (modifyVar n (subtract 1))
+-- >   label . T.pack . show =<< readVar n
+-- >   whenM (button "+") (modifyVar n (+ 1))
 --
 -- Run a view with a backend: @runSdlApp@ from @nano-ui-sdl@ or @runRgfwApp@
 -- from @nano-ui-rgfw@.
@@ -28,22 +27,25 @@
 -- = Conventions
 --
 -- * Widgets return what you usually need: 'Bool' for buttons and menu items,
---   the new value for inputs, and @()@ for text and decoration.
--- * A primed name also returns the widget's 'Response', for hover state,
---   geometry, tooltips, and change or submit flags: @button'@, @slider'@.
--- * Inputs are controlled. Pass the current value and keep the result; a
---   change you do not store is undone on the next frame. Editing state such
---   as the caret, a drag in progress, or an open dropdown stays inside the
---   widget.
+--   and @()@ for inputs, text and decoration.
+-- * A primed name returns the widget's 'Response' as well or instead, for
+--   hover state, geometry, tooltips, and change or submit flags:
+--   @button'@, @slider'@.
+-- * Inputs take the 'Var' they edit: @textInput draft@ shows @draft@ and
+--   stores the user's edits in it. A string literal or @'Var' x@ is a constant,
+--   shown but not kept. Editing state such as the caret, a drag in progress,
+--   or an open dropdown stays inside the widget.
 -- * Layout arguments are modifiers, as in @buttonWith (fixedW 120)@ or
 --   @columnWith (gap 8 . padAll 12)@. Widgets with more options take a
 --   configuration record: 'textInputConfigured', 'tabsConfigured'.
 --
 -- = State
 --
--- Keep state in local hooks ('useInt', 'useText', 'useState'), in a model you
--- pass down through the view, or in a reducer: @nano-ui-emit@ adapts widgets to
+-- Keep state in 'Var's: 'useVar' keeps one at its place in the view, and
+-- 'newVar' makes one the application owns. Read a Var with 'readVar' where
+-- you show it. Or keep a model in a reducer: @nano-ui-emit@ adapts widgets to
 -- emit messages, and the backends' reducer runners fold them into the model.
+-- See "NanoUI.Var".
 module NanoUI
   ( -- * Views
     NanoUI
@@ -79,7 +81,7 @@ module NanoUI
     -- widgets and widgets behind an open modal refuse focus. The move applies
     -- at the end of the frame; check it with 'isFocused' on the next frame:
     --
-    -- > (resp, query') <- searchInput' "Find" query
+    -- > resp <- searchInput' "Find" query
     -- > findPressed <- shortcut (ctrl <> key 'f')
     -- > when findPressed (requestFocus (respId resp))
     --
@@ -98,17 +100,19 @@ module NanoUI
 
     -- * Widget identity
 
-    -- | Every widget and hook takes the next 'WidgetId' in its container:
-    -- ids count up in call order among siblings, and a container starts a
-    -- new count for its children. Widget state is stored under that id, so
-    -- the same widgets and positional hooks must run in the same order every frame.
+    -- | Every widget takes the next 'WidgetId' in its container: ids count
+    -- up in call order among siblings, and a container starts a new count
+    -- for its children. Widget state is stored under that id, so the same
+    -- widgets must run in the same order every frame. Positional 'useVar's
+    -- keep a count of their own, so widgets never move them, nor they
+    -- widgets.
     --
-    -- A widget that runs on some frames and not others moves the ids of the
-    -- siblings after it. Put the conditional part inside 'scope', which takes
-    -- one id whether or not its body adds anything. For a list whose items
-    -- are added, removed or reordered, run each item under 'withKey' with a
-    -- key unique among its siblings, so the item's state follows its key
-    -- instead of its position.
+    -- A widget (or 'useVar') that runs on some frames and not others moves
+    -- the ids of the siblings after it. Put the conditional part inside
+    -- 'scope', which takes one id whether or not its body adds anything. For
+    -- a list whose items are added, removed or reordered, run each item under
+    -- 'withKey' with a key unique among its siblings, so the item's state
+    -- follows its key instead of its position.
   , scope
   , keyedTag
   , withKey
@@ -214,7 +218,6 @@ module NanoUI
   , menuHeader
   , contextMenu
   , contextMenuArea
-  , useContextMenu
 
     -- * Inputs
   , checkbox
@@ -287,7 +290,7 @@ module NanoUI
     -- right-click menu runs them, and an app can run them on a field by its
     -- id:
     --
-    -- > (resp, body') <- textArea' body
+    -- > resp <- textArea' body
     -- > canUndo <- textCanUndo (respId resp)
     -- > whenM (menuItem "Undo") (runTextCommand (respId resp) Undo)
     -- > whenM (menuItem "Insert date") (runTextCommand (respId resp) (InsertText today))
@@ -331,8 +334,10 @@ module NanoUI
   , table
   , tableWith
   , tableConfigured
+  , table'
+  , tableWith'
+  , tableConfigured'
   , simpleTable
-  , useTableSort
   , tableHiddenIndices
   , sortRows
   , Colonnade
@@ -515,35 +520,47 @@ module NanoUI
   , newDrag
   , insertionIndex
 
-    -- * Local state
+    -- * State
 
-    -- | Primitive hooks such as 'useInt' and 'useText' need no setup and
-    -- retain values by widget identity. For arbitrary value types or explicit
-    -- ownership, allocate a 'StateCell' once with 'newState' in IO and capture
-    -- it in the view's closure; 'useState' reads it on each pass.
-  , StateCell
-  , newState
-  , useState
-  , modifyState
-  , useFlag
-  , useToggle
-  , useInt
-  , useFloat
-  , useEnum
-  , useText
+    -- | A 'Var' holds state a widget shows and edits: input widgets take
+    -- one and store the user's edits in it. 'useVar' keeps one at its
+    -- position in the view; 'newVar' makes one the application owns. Read a
+    -- Var with 'readVar' where you show it; see "NanoUI.Var".
+  , Var (Var)
+  , newVar
+  , useVar
+  , useEnumVar
+  , VarSlot
+  , readVar
+  , writeVar
+  , modifyVar
+  , readVarIO
+  , writeVarIO
+  , modifyVarIO
+  , zoomVar
+  , zoomVarL
+  , forEachVar
+  , withElemVars
+  , VarMap
+  , newVarMap
+  , varAt
+  , dropVar
+  , retainVars
+  , withValue
 
     -- ** Background work
 
-    -- | These hooks run slow work on a background thread. 'useTaskStatus'
+    -- | These run slow work on a background thread. 'useTaskStatus'
     -- reports whether the job is running, done or failed; 'useTask' returns
     -- its result once available. The loop sleeps while a job runs and wakes
-    -- when it ends. A job starts on the first frame its hook sees a key,
+    -- when it ends. A job starts on the first frame its call sees a key,
     -- restarts when the key changes, and is killed when the view stops
-    -- calling the hook. Allocate @searchTask <- newTask@ during setup:
+    -- calling it. Allocate @searchTask <- newTask@ during setup:
     --
-    -- > (query, setQuery) <- useText ""
-    -- > setQuery =<< textInput query
-    -- > hits <- useTask searchTask query (searchIndex index query)
+    -- > query <- useVar ""
+    -- > textInput query
+    -- > q <- readVar query
+    -- > hits <- useTask searchTask q (searchIndex index q)
     -- > mapM_ (label . hitTitle) (fromMaybe [] hits)
     --
     -- While a new key's job runs, 'useTask' keeps returning the previous
@@ -642,7 +659,7 @@ module NanoUI
     -- sees (a scroll, a resize, content growing above it), the loop runs one
     -- more frame and the view reads the change in 'visEvent'. The event goes
     -- to the first view pass that reads the sensor, not to a rerun caused by
-    -- a hook write reacting to it. Sensors cost no frames while nothing
+    -- a Var write reacting to it. Sensors cost no frames while nothing
     -- moves. A sensor skipped on some frame (in a hidden tab, or a 'scope'
     -- that left it out) is forgotten, and reports 'BecameVisible' again once
     -- it is rebuilt and seen.
@@ -655,18 +672,18 @@ module NanoUI
     -- first comes within 200 pixels of the viewport (@decodeRgba@ stands for
     -- an image decoder):
     --
-    -- Allocate @pictureCell <- newState Nothing@ once during component setup.
+    -- Make @pictureVar <- newVar Nothing@ once during component setup.
     --
-    -- > thumbnail :: StateCell (Maybe ImageId) -> FilePath -> NanoUI ()
-    -- > thumbnail pictureCell path = do
-    -- >   (picture, setPicture) <- useState pictureCell
+    -- > thumbnail :: Var (Maybe ImageId) -> FilePath -> NanoUI ()
+    -- > thumbnail pictureVar path = do
+    -- >   picture <- readVar pictureVar
     -- >   let cfg = defaultSensorConfig {sensorAnticipate = 200, sensorLayout = fixedWH 96 96}
     -- >   (vis, _) <- sensorConfigured cfg $
     -- >     maybe (label "Loading") (image (fixedWH 96 96)) picture
     -- >   when (becameVisible vis && isNothing picture) $ do
     -- >     (w, h, rgba) <- liftIO (decodeRgba path)
     -- >     iid <- freshImageId
-    -- >     whenM (registerImageRgba iid w h rgba) (setPicture (Just iid))
+    -- >     whenM (registerImageRgba iid w h rgba) (writeVar pictureVar (Just iid))
   , Visibility (..)
   , VisibilityEvent (..)
   , becameVisible
@@ -1070,12 +1087,13 @@ module NanoUI
     --
     -- > editor :: NanoUI ()
     -- > editor = do
-    -- >   (asking, setAsking) <- useFlag False
+    -- >   asking <- useVar False
     -- >   closing <- winCloseRequested <$> askWindow
-    -- >   when closing (setAsking True)
-    -- >   _ <- modal asking "Discard your changes?" $ do
+    -- >   when closing (writeVar asking True)
+    -- >   open <- readVar asking
+    -- >   _ <- modal open "Discard your changes?" $ do
     -- >     whenM (button "Discard") quitUi
-    -- >     whenM (button "Keep editing") (setAsking False)
+    -- >     whenM (button "Keep editing") (writeVar asking False)
   , WindowSettings (..)
   , defaultWindowSettings
   , WindowPosition (..)
@@ -1117,7 +1135,6 @@ import NanoUI.Internal.Animation
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font (FontMetrics (..), lineWidth)
-import NanoUI.Internal.Hooks
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
@@ -1125,6 +1142,7 @@ import NanoUI.Internal.NativeWindow
 import NanoUI.Internal.Style
 import NanoUI.Internal.Tasks
 import NanoUI.Svg
+import NanoUI.Var
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Animate

@@ -180,10 +180,11 @@ runStateChangeDamageTest :: Context -> IORef Int -> IO ()
 runStateChangeDamageTest ctx failed = do
   let inp0 = withInput 400 300
       ui = do
-        (name, setName) <- useText ""
+        nameVar <- useVar ""
+        name <- readVar nameVar
         row $ do
           label ("Left pane: " <> name)
-          setName =<< textInput name
+          writeVar nameVar =<< (snd <$> withValue name textInput)
 
   -- Warm up and focus textInput via Tab
   warmupFocused ctx inp0 ui
@@ -272,7 +273,7 @@ runTextAreaSelectAllDamageTest ctx failed = do
   let inp0 = (withInputOff 800 600) {inputDeltaTime = 0.5}
       ui = column $ do
         _ <- label "Notes"
-        fst <$> textAreaWith' (fixedWH 200 80) "hello world"
+        fst <$> withValue "hello world" (textAreaWith' (fixedWH 200 80))
   area <- warmup2 ctx inp0 ui
   _ <- runClick ctx inp0 ui (centerOf area)
   _ <- warmup2 ctx inp0 ui
@@ -287,9 +288,10 @@ runTextAreaSelectAllDamageTest ctx failed = do
 runHookPaintChangeDamageTest :: Context -> IORef Int -> IO ()
 runHookPaintChangeDamageTest ctx failed = do
   let ui = do
-        (on, setOn) <- useFlag False
+        onVar <- useVar False
+        on <- readVar onVar
         resp <- button' "Toggle"
-        when (respClicked resp) (setOn (not on))
+        when (respClicked resp) (writeVar onVar (not on))
         -- Same length in a monospace font: the label keeps its rect, so only
         -- the text diff sees the change.
         void $ labelWith fontMono (if on then "one" else "two")
@@ -301,15 +303,16 @@ runHookPaintChangeDamageTest ctx failed = do
   dmg <- takeDamage ctx
   assertEq failed dmg DamageFull
 
--- | A 'useFloat' write that only changes a box's colour repaints the whole
--- window. The hook's key names no widget and floats are outside the store
--- diff, so only the hook write itself says the box needs repainting.
+-- | A Var write that only changes a box's colour repaints the whole window.
+-- The Var names no widget and the colour is outside the store diff, so only
+-- the tracked read of the old value says the box needs repainting.
 runFloatHookPaintChangeDamageTest :: Context -> IORef Int -> IO ()
 runFloatHookPaintChangeDamageTest ctx failed = do
   let ui = do
-        (level, setLevel) <- useFloat 0
+        levelVar <- useVar (0 :: Float)
+        level <- readVar levelVar
         resp <- button' "Raise"
-        when (respClicked resp) (setLevel (level + 1))
+        when (respClicked resp) (writeVar levelVar (level + 1))
         box (fixedWH 40 40) (if level > 0 then colorRGBA 255 0 0 255 else colorRGBA 0 0 255 255)
         pure resp
       inp0 = withInputOff 320 240

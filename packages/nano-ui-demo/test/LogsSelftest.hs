@@ -6,7 +6,6 @@ module LogsSelftest
   ) where
 
 import Control.Monad (unless, void)
-import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend.Sdl
@@ -15,21 +14,22 @@ import NanoUI.Shortcut
 import NanoUI.Testing (collectTextSpans)
 import NanoUI.Testing.Harness (chordInp, clickPos, expectText, findExact, hasText, keyInp, requireSpan)
 import DemoApp (withHiddenWindow)
-import SdlLogs (AppState (..), appendEntries, logsApp, newAppState)
+import SdlLogs (appendEntries, logsApp, newAppState)
 
 selftest :: IO ()
 selftest = do
   withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env baseInput -> do
-      appStateRef <- newIORef =<< newAppState 60 False
-      let drawFrame inp = void (sdlDrawFrame ctx (logsApp appStateRef) env inp False)
+      state <- newVar =<< newAppState 60 False
+      scroller <- newVar Nothing
+      let drawFrame inp = void (sdlDrawFrame ctx (logsApp state scroller) env inp False)
           click = clickPos drawFrame baseInput
-          append n = readIORef appStateRef >>= (`appendEntries` n) >>= writeIORef appStateRef
+          append n = readVarIO state >>= (`appendEntries` n) >>= writeVarIO state
           -- The frame's text spans; fails with @msg@ unless one contains @needle@.
           spansWith msg needle = do
             spans <- collectTextSpans ctx
             spans <$ expectText msg needle spans
           expect msg needle = void (spansWith msg needle)
-          scrollerId msg = maybe (fail msg) pure . asScrollerWid =<< readIORef appStateRef
+          scrollerId msg = maybe (fail msg) pure =<< readVarIO scroller
 
       drawFrame baseInput
       drawFrame baseInput

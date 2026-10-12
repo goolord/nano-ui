@@ -34,12 +34,14 @@ import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import NanoUI.Shortcut
+import NanoUI.Var (peekVar)
 
--- | The action log, newest first. A list needs a 'StateCell'.
-newtype App = App {appLog :: StateCell [Text]}
+-- | The action log, newest first. A list is no positional slot type, so it
+-- lives in a 'Var' made at setup.
+newtype App = App {appLog :: Var [Text]}
 
 newApp :: IO App
-newApp = App <$> newState []
+newApp = App <$> newVar []
 
 main :: IO ()
 main = do
@@ -60,22 +62,28 @@ rows = 3
 
 keyboardApp :: App -> NanoUI ()
 keyboardApp app = do
-  (saves, setSaves) <- useInt 0
-  (isBold, setBold) <- useFlag False
-  (sel, setSel) <- useInt 0
-  (query, setQuery) <- useText ""
-  (menuOpen, setMenuOpen) <- useFlag False
-  (entries, _) <- useState (appLog app)
+  saves <- useVar (0 :: Int)
+  boldVar <- useVar False
+  sel <- useVar (0 :: Int)
+  query <- useVar ""
+  menuOpen <- useVar False
   -- Each action is defined once, whatever triggers it.
-  let logged msg = modifyState (appLog app) (take 6 . (msg :))
-      save = setSaves (saves + 1) >> logged ("Saved (" <> T.pack (show (saves + 1)) <> ")")
-      toggleBold = setBold (not isBold) >> logged (if isBold then "Bold off" else "Bold on")
+  let logged msg = modifyVar (appLog app) (take 6 . (msg :))
+      save = do
+        modifyVar saves (+ 1)
+        n <- peekVar saves
+        logged ("Saved (" <> T.pack (show n) <> ")")
+      toggleBold = do
+        wasBold <- peekVar boldVar
+        writeVar boldVar (not wasBold)
+        logged (if wasBold then "Bold off" else "Bold on")
   columnWith (padAll 20 . gap 14 . fillW . fillH) $ do
     (mSave, mBold, mQuit) <- rowWith (tight . gap 12 . alignMid . fillW) $ do
-      btn <- menuButton' "Actions" menuOpen
-      whenM (popupToggled btn) (setMenuOpen (not menuOpen))
+      open <- readVar menuOpen
+      btn <- menuButton' "Actions" open
+      whenM (popupToggled btn) (writeVar menuOpen (not open))
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
-      (popR, picked) <- popup menuOpen cfg $ columnWith (tight . gap 0) $ do
+      (popR, picked) <- popup open cfg $ columnWith (tight . gap 0) $ do
         s <- menuItemShortcut "Save" saveChord
         b <- menuItemShortcut "Bold" boldChord
         menuSeparator
@@ -83,34 +91,38 @@ keyboardApp app = do
         pure (s, b, q)
       -- A click outside or Escape dismisses the menu; so does picking a row.
       let chosen@(s, b, q) = fromMaybe (False, False, False) picked
-      when (respClicked popR || s || b || q) (setMenuOpen False)
+      when (respClicked popR || s || b || q) (writeVar menuOpen False)
       flex
-      labelWith (tight . alignMid . fontMuted) ("Saved " <> T.pack (show saves) <> " times")
+      n <- readVar saves
+      labelWith (tight . alignMid . fontMuted) ("Saved " <> T.pack (show n) <> " times")
       pure chosen
     -- shortcutLabel spells a chord for this platform, as menu rows do.
+    isBold <- readVar boldVar
     labelWith (if isBold then fontBold else id) (shortcutLabel boldChord <> " makes this line bold.")
-    (searchR, query') <- searchInput' ("Search (" <> shortcutLabel findChord <> ")") query
-    setQuery query'
+    searchR <- searchInput' ("Search (" <> shortcutLabel findChord <> ")") query
     searchFocused <- isFocused (respId searchR)
     muted $
       if searchFocused
         then "The search field has focus: arrows and Ctrl+A are its own. Escape releases it."
         else "Nothing is typing: arrows move the selection below."
     gridWith cols (tight . gap 6) $
-      forM_ [0 .. cols * rows - 1] $ \i -> do
-        on <- toggleButtonWith (fixedWH 56 40) Accent (T.singleton (toEnum (fromEnum 'A' + i))) (i == sel)
-        when (on /= (i == sel)) (setSel i)
+      forM_ [0 .. cols * rows - 1] $ \i ->
+        -- Each toggle edits "is this cell the selected one": switching one on
+        -- selects it, and switching the selected one off changes nothing.
+        toggleButtonWith (fixedWH 56 40) Accent (T.singleton (toEnum (fromEnum 'A' + i))) $
+          zoomVar (== i) (\on cur -> if on then i else cur) sel
     -- keyPressed hears a key only when no focused widget uses it, so the
     -- grid needs no focus check of its own.
     let dir k = fromEnum <$> keyPressed k
     dx <- (-) <$> dir KeyRight <*> dir KeyLeft
     dy <- (-) <$> dir KeyDown <*> dir KeyUp
-    when (dx /= 0 || dy /= 0) $ do
-      let (r, c) = sel `divMod` cols
-      setSel (clampTo rows (r + dy) * cols + clampTo cols (c + dx))
+    when (dx /= 0 || dy /= 0) $
+      modifyVar sel $ \cur ->
+        let (r, c) = cur `divMod` cols
+         in clampTo rows (r + dy) * cols + clampTo cols (c + dx)
     separator
     labelWith (tight . fontMuted) "Last actions"
-    forM_ entries label
+    mapM_ label =<< readVar (appLog app)
     -- Bindings that work while the menu is closed. Declared after the menu,
     -- so while it is open its rows take the chords first.
     whenM ((mSave ||) <$> shortcut saveChord) save

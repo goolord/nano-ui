@@ -35,7 +35,9 @@ import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Behavior
 import NanoUI.Internal.Widgets.Node
-import NanoUI.Internal.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInputConfigured)
+import NanoUI.Internal.Var (Binding (..), bindVar)
+import NanoUI.Internal.Var.Types (Var)
+import NanoUI.Internal.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInputCore)
 import NanoUI.Widgets.TextEditor (singleLineMode)
 import NanoUI.Internal.Widgets.TextInput (editTextField)
 
@@ -254,21 +256,23 @@ colorPickerFieldLayout = tight . fillW . minW 40 $ defaultLayout
 -- value); on a bar they move its handle, and Home and End jump to its ends.
 -- Shift takes steps ten times larger.
 {-# INLINE colorPicker #-}
-colorPicker :: Color -> NanoUI Color
-colorPicker value = snd <$> colorPickerWith False value
+colorPicker :: Var Color -> NanoUI ()
+colorPicker v = void (colorPicker' v)
 
--- | 'colorPicker' returning @(response, updatedColour)@.
-colorPicker' :: Color -> NanoUI (Response, Color)
-colorPicker' = colorPickerWith False
+-- | 'colorPicker' returning its 'Response'.
+{-# INLINE colorPicker' #-}
+colorPicker' :: Var Color -> NanoUI Response
+colorPicker' v = bindVar RenderFinal v (colorPickerWith False)
 
 -- | 'colorPicker' with an alpha bar and an A / @#RRGGBBAA@ field.
 {-# INLINE colorPickerRGBA #-}
-colorPickerRGBA :: Color -> NanoUI Color
-colorPickerRGBA value = snd <$> colorPickerWith True value
+colorPickerRGBA :: Var Color -> NanoUI ()
+colorPickerRGBA v = void (colorPickerRGBA' v)
 
--- | 'colorPickerRGBA' returning its response and colour, including alpha.
-colorPickerRGBA' :: Color -> NanoUI (Response, Color)
-colorPickerRGBA' = colorPickerWith True
+-- | 'colorPickerRGBA' returning its 'Response'.
+{-# INLINE colorPickerRGBA' #-}
+colorPickerRGBA' :: Var Color -> NanoUI Response
+colorPickerRGBA' v = bindVar RenderFinal v (colorPickerWith True)
 
 -- | The byte fields: label, the channel read, and the channel write.
 rgbChannels, rgbaChannels :: [(Text, Color -> Word8, Word8 -> Color -> Color)]
@@ -422,7 +426,8 @@ channelField pct label hi value =
     void (addWidget labelWid NodeText label 0 (tight (alignMid defaultLayout)))
     -- Room for three digits beside the stepper.
     round
-      <$> numericInputConfigured
+      . snd
+      <$> numericInputCore
         defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = minW 60 colorPickerFieldLayout}
         (fromIntegral value)
 

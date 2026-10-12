@@ -6,7 +6,7 @@ module DemoApp
   ) where
 
 import Data.Foldable (for_)
-import NanoUI (Input (..), NanoUI, Size (..), V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings)
+import NanoUI (Input (..), NanoUI, Size (..), V2 (..), Var, WindowMode (..), WindowSettings (..), defaultWindowSettings, writeVar)
 import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
   ( FileDialogId
@@ -18,21 +18,22 @@ import NanoUI.Backend.Sdl
   , withSdl
   )
 import NanoUI.Testing (Context, newPixelContext)
+import NanoUI.Var (peekVar)
 
--- | Poll a pending dialog handle; on completion clear it and hand the chosen
--- paths to the caller. Anything other than 'FileDialogPending' dismisses the
--- handle, so each result is consumed exactly once.
+-- | Poll the dialog handle held in @dialog@; on completion clear it and hand
+-- the chosen paths to the caller. Anything other than 'FileDialogPending'
+-- dismisses the handle, so each result is consumed exactly once.
 useFileDialog ::
-  Maybe FileDialogId ->
-  (Maybe FileDialogId -> NanoUI ()) ->
+  Var (Maybe FileDialogId) ->
   ([FilePath] -> NanoUI ()) ->
   NanoUI ()
-useFileDialog mdid clear onPaths =
-  for_ mdid $ \did ->
+useFileDialog dialog onPaths = do
+  pending <- peekVar dialog
+  for_ pending $ \did ->
     pollFileDialogUi did >>= \case
       FileDialogPending -> pure ()
-      FileDialogSelected paths -> onPaths paths >> clear Nothing
-      _done -> clear Nothing
+      FileDialogSelected paths -> onPaths paths >> writeVar dialog Nothing
+      _done -> writeVar dialog Nothing
 
 -- | Run @k@ on a hidden, fixed @w@ by @h@ SDL window over a pixel-snapped
 -- context, with @opts@ applied to the window options. @k@ also gets the

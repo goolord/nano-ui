@@ -77,8 +77,8 @@ star =
 
 view :: Images -> NanoUI ()
 view images = do
-  (cellSize, setCellSize) <- useFloat 8
-  (showChecker, setShowChecker) <- useFlag True
+  cellSize <- useVar 8
+  showChecker <- useVar True
   theme <- uiTheme
   scrollWith (padAll 20 . grow) $
     columnWith (tight . gap 14 . fillW) $ do
@@ -99,13 +99,14 @@ view images = do
 
       separator
       heading "Regenerated on change"
-      setShowChecker =<< checkbox "Show the checkerboard" showChecker
-      setCellSize =<< slider 2 32 cellSize
-      let cell = round cellSize :: Int
+      checkbox "Show the checkerboard" showChecker
+      slider 2 32 cellSize
+      cell <- round <$> readVar cellSize :: NanoUI Int
+      shown <- readVar showChecker
       -- The key is the cell size: moving the slider to a new whole number
       -- builds new pixels and releases the old image. Unticking the box
-      -- skips the hook, which releases the image too.
-      scope . when showChecker $ do
+      -- skips 'useImageRgba', which releases the image too.
+      scope . when shown $ do
         board <- useImageRgba (checkerHandle images) cell 64 64 (checker cell)
         rowWith (tight . gap 12 . alignMid) $ do
           for_ board (image (fixedWH 128 128))

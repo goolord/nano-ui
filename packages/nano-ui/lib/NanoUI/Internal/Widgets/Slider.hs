@@ -7,40 +7,51 @@ module NanoUI.Internal.Widgets.Slider
   )
 where
 
+import Control.Monad (void, when)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Equality (sameFloat)
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, freshWidget, scope, liftIO)
 import NanoUI.Internal.Style (Layout, defaultLayout, fillW)
 import NanoUI.Internal.Store (fieldFloat)
 import NanoUI.Internal.Types (Rect (..), clamp)
+import NanoUI.Internal.Var (Binding (..), bindVarBy)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (DragAxis (..), holdActiveWhile, navStep, useDrag1D, useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput)
-import NanoUI.Internal.Widgets.Node (Response, addWidget)
+import NanoUI.Internal.Widgets.Node (Response, addWidget, setWidgetValue)
 
--- | Slider over @[minV, maxV]@ that fills the available width. Pass the
--- current value; the result is the value after this frame's drag or arrow
--- keys.
+-- | Slider over @[minV, maxV]@ that fills the available width, showing and
+-- editing a Var: a drag or the arrow keys move it.
+--
+-- > slider 0 100 app.volume
 {-# INLINE slider #-}
-slider :: Float -> Float -> Float -> NanoUI Float
-slider minV maxV value = snd <$> sliderWith' id minV maxV value
+slider :: Float -> Float -> Var Float -> NanoUI ()
+slider minV maxV v = void (sliderWith' id minV maxV v)
 
+-- | 'slider' returning its 'Response'.
 {-# INLINE slider' #-}
--- | 'slider' returning @(response, updatedValue)@ for the supplied bounds and value.
-slider' :: Float -> Float -> Float -> NanoUI (Response, Float)
+slider' :: Float -> Float -> Var Float -> NanoUI Response
 slider' = sliderWith' id
 
 -- | 'slider' with a layout modifier.
 --
--- > volume' <- sliderWith (fixedW 200) 0 100 volume
+-- > sliderWith (fixedW 200) 0 100 volume
 {-# INLINE sliderWith #-}
-sliderWith :: (Layout -> Layout) -> Float -> Float -> Float -> NanoUI Float
-sliderWith f minV maxV value = snd <$> sliderWith' f minV maxV value
+sliderWith :: (Layout -> Layout) -> Float -> Float -> Var Float -> NanoUI ()
+sliderWith f minV maxV v = void (sliderWith' f minV maxV v)
 
--- | 'sliderWith' returning the response and updated value.
-sliderWith' ::
+-- | 'sliderWith' returning its 'Response'.
+{-# INLINE sliderWith' #-}
+sliderWith' :: (Layout -> Layout) -> Float -> Float -> Var Float -> NanoUI Response
+sliderWith' f minV maxV v = bindVarBy sameFloat RenderFinal v (sliderCore f minV maxV)
+
+-- | 'sliderWith' on a plain value: the response and the value after this
+-- frame's drag or arrow keys.
+sliderCore ::
   (Layout -> Layout) -> Float -> Float -> Float -> NanoUI (Response, Float)
-sliderWith' f minV maxV value = do
+sliderCore f minV maxV value = do
   (wid, ctx) <- freshWidget
   liftIO $ registerFocusable ctx wid
   -- Adopt the value the slider can show, so one outside the range (or NaN)
@@ -49,8 +60,8 @@ sliderWith' f minV maxV value = do
   current <- liftIO $ adoptSlot fieldFloat ctx wid given
   let
     range = maxV - minV
-    frac = if range > 0 then (current - minV) / range else 0
-  resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
+    fracOf x = if range > 0 then (x - minV) / range else 0
+  resp <- addWidget wid NodeSlider "" (fracOf current) (f (fillW defaultLayout))
   mrect <- liftIO (getPrevRect ctx wid)
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
@@ -62,4 +73,7 @@ sliderWith' f minV maxV value = do
   let
     step = if range > 0 then range / 100 else 0
     finalVal = clamp minV maxV (dragged + fromIntegral (navStep nav) * step)
+  -- The node was added before the drag was read: show where it ended, so
+  -- this pass draws the value it returns.
+  when (finalVal /= current) . liftIO $ setWidgetValue ctx wid (fracOf finalVal)
   finishInput fieldFloat ctx wid current resp finalVal

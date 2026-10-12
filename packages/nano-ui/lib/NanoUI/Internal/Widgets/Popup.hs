@@ -19,13 +19,12 @@ module NanoUI.Internal.Widgets.Popup
 where
 
 import Control.Monad (void, when)
-import Data.IORef (modifyIORef')
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Id (WidgetId, enterScope, scopeTag)
+import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout)
@@ -104,10 +103,10 @@ floatingOverlay ::
   NanoUI (Bool, a) ->
   NanoUI (Response, Maybe a)
 floatingOverlay open dismissable addPanel enter body = do
-  (wid, ctx) <- freshWidget
+  (wid, _) <- freshWidget
   if not open
     then do
-      liftIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))
+      burstNextIds 1
       pure (mempty {rawRespId = wid}, Nothing)
     else do
       -- Hovered is the pointer on the panel as the panel's own layer sees it,

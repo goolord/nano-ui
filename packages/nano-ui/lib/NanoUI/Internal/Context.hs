@@ -102,7 +102,6 @@ module NanoUI.Internal.Context
   , fieldComposition
   , AnimationState (..)
   , WidgetStore (..)
-  , bumpMirror
   , slotKey
   , Slot (..)
   , intBool
@@ -162,11 +161,13 @@ import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics, wrapTextIO)
 import NanoUI.Internal.Frame.SpanArena (newSpanArena)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId, initialIdContext)
+import NanoUI.Internal.Id.Cursor (newIdCursor)
 import NanoUI.Internal.Input (Composition, InputPurpose)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Appearance (..), FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
 import NanoUI.Internal.Types (ImageId, Rect)
+import NanoUI.Internal.Var.Cell (frameSlots, newStamps)
 
 -- | Register tightly packed RGBA8 pixels under an image id. Width and height
 -- are positive pixel counts. Returns 'False' for invalid data or atlas limits;
@@ -563,7 +564,9 @@ newContext = do
   ctxAnimationState <- newIORef initialAnimationState
   ctxScrollState <- newIORef initialScrollState
   ctxDrawingCache <- newIORef initialDrawingCacheState
-  ctxIdContext <- newIORef initialIdContext
+  ctxIdCursor <- newIdCursor initialIdContext
+  ctxVarFrame <- newStamps frameSlots
+  ctxVarSlots <- newIORef IM.empty
   ctxContainerStack <- newIORef []
   ctxFocusables <- newIORef =<< newPrimArray 64
   ctxFocusablesCount <- newIORef 0

@@ -1,33 +1,40 @@
 -- | State: where a view's state lives, and how widgets keep theirs.
 --
--- A view runs every frame, so anything that must outlive a frame is stored
--- somewhere. There are two places:
+-- A view runs every frame, so anything that must outlive a frame is kept in
+-- a 'Var'. An input takes the Var it edits, and you read a Var with
+-- 'readVar' where you show it. Vars come from two places:
 --
--- * Positional hooks ('useInt', 'useText', 'useFlag', 'useEnum', 'useFloat',
---   'useToggle') need no setup. Each takes the next widget id in its
---   container and stores its value under that id.
--- * A 'StateCell' holds any type with an 'Eq' instance. Allocate it once in
---   IO ('newApp' below) and pass it to the view; the value lives in the
---   cell, not at a position.
+-- * 'useVar' keeps a Var at its position in the view and needs no setup.
+--   It holds an 'Int', 'Double', 'Float', 'Bool' or 'Text'; 'useEnumVar'
+--   holds an enumeration.
+-- * 'newVar' makes a Var of any type in IO ('newApp' below). Pass it to the
+--   view; the value lives in the Var, not at a position.
 --
--- Widget identity is positional: ids count up in call order among siblings,
--- and every container (row, column, panel) starts a new count for its
--- children while taking one id from its parent. Run the same widgets and
--- hooks in the same order every frame. Where that cannot hold, use 'scope'
--- for a part that comes and goes and 'withKey' for list items, as the last
--- two sections show.
+-- A record in a Var gives a Var for each field: @state.settings.volume@
+-- reads and writes just that field. That needs @OverloadedRecordDot@ and a
+-- 'Generic' instance on the record.
 --
--- State a view stops showing is kept: hide the extra options below and show
--- them again, and their value is still there.
+-- Positions count in call order. Widgets and Vars count separately, so a
+-- widget that comes and goes never moves a Var; a 'useVar' that comes and
+-- goes, or a list of rows each with its own, needs 'scope' or 'withKey', as
+-- the last two sections show. State a view stops showing is kept: hide the
+-- extra options below and show them again, and their value is still there.
+--
+-- What a change costs: a write to a Var the view already read this frame
+-- runs the view a second time, so what was drawn from the old value is
+-- redrawn. Read a Var below the widgets that edit it and nothing reruns.
 --
 -- See Hello.hs for the frame model and Components.hs for state owned by
 -- your own widgets. Escape quits.
 --
 -- Run it with @cabal run nano-ui-example-state@.
+{-# LANGUAGE OverloadedRecordDot #-}
+
 module Main (main) where
 
 import Control.Monad (forM_, unless, when)
 import qualified Data.Text as T
+import GHC.Generics (Generic)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 
@@ -37,19 +44,31 @@ main = do
   runSdlApp
     defaultSdlOptions
       { sdlAppShouldQuit = pressedOnceIn KeyEscape
-      , sdlWindowSettings = defaultWindowSettings {wsTitle = "State", wsSize = Size 720 760}
+      , sdlWindowSettings = defaultWindowSettings {wsTitle = "State", wsSize = Size 720 900}
       }
     (view state)
 
--- | State with no hook of its own type, allocated once before the session.
--- Allocating a cell inside the view would make a new one every frame.
+data Settings = Settings
+  { volume :: !Float
+  , silent :: !Bool
+  , nickname :: !T.Text
+  }
+  deriving (Eq, Generic)
+
+-- | State the application owns, made once before the session. Making a Var
+-- inside the view would make a new one every frame.
 data AppState = AppState
-  { notesCell :: !(StateCell [T.Text])
-  , playersCell :: !(StateCell [T.Text])
+  { notes :: !(Var [T.Text])
+  , players :: !(Var [T.Text])
+  , settings :: !(Var Settings)
   }
 
 newApp :: IO AppState
-newApp = AppState <$> newState ["Buy milk", "Call Sam"] <*> newState ["Ada", "Brook", "Cyd"]
+newApp =
+  AppState
+    <$> newVar ["Buy milk", "Call Sam"]
+    <*> newVar ["Ada", "Brook", "Cyd"]
+    <*> newVar (Settings 40 False "Ada")
 
 data Pace = Walk | Jog | Sprint
   deriving (Bounded, Enum, Eq, Show)
@@ -58,8 +77,9 @@ view :: AppState -> NanoUI ()
 view state =
   scrollWith (padAll 12 . grow) $
     columnWith (tight . gap 12 . fillW) $ do
-      hooks
-      cells state
+      local
+      owned state
+      fields state
       derived state
       conditional
       keyed state
@@ -69,90 +89,102 @@ view state =
 section :: T.Text -> NanoUI a -> NanoUI a
 section title body = panelWith (padAll 12 . gap 8 . fillW) (heading title >> body)
 
--- (a) Positional hooks: a value and a setter, kept under this call's id.
-hooks :: NanoUI ()
-hooks = section "Positional hooks" $ do
-  (count, setCount) <- useInt 0
-  (title, setTitle) <- useText "Morning run"
-  (outdoors, setOutdoors) <- useFlag True
-  (pace, setPace) <- useEnum Jog
-  counterRow "Count" count setCount
-  setTitle =<< textInput title
-  setOutdoors =<< checkbox "Outdoors" outdoors
-  setPace =<< enumRadio pace
+-- (a) Positional Vars: no setup, kept at their place in the view.
+local :: NanoUI ()
+local = section "Positional Vars" $ do
+  count <- useVar (0 :: Int)
+  title <- useVar "Morning run"
+  outdoors <- useVar True
+  pace <- useEnumVar Jog
+  counterRow "Count" count
+  textInput title
+  checkbox "Outdoors" outdoors
+  enumRadio pace
 
--- (b) A cell for a list, a type no hook stores. 'useState' reads it and
--- takes no id, so it can be read anywhere, as often as you like.
-cells :: AppState -> NanoUI ()
-cells state = section "State cells" $ do
-  (notes, setNotes) <- useState (notesCell state)
-  (draft, setDraft) <- useText ""
+-- (b) An owned Var holding a list, a type 'useVar' does not hold. Any
+-- number of places can read and write it.
+owned :: AppState -> NanoUI ()
+owned state = section "Owned Vars" $ do
+  draft <- useVar ""
   rowWith (tight . gap 8 . fillW) $ do
-    draft' <- textInput draft
-    setDraft draft'
-    -- 'modifyState' applies a change to the latest value. Writing
-    -- @setNotes (notes <> [draft'])@ starts from this frame's snapshot
-    -- instead, so two such writes in one frame would lose the first.
-    whenM (button "Add") . unless (T.null draft') $ do
-      modifyState (notesCell state) (<> [draft'])
-      setDraft ""
-    whenM (button "Clear") (setNotes [])
+    inputR <- textInput' draft
+    clicked <- button "Add"
+    when (clicked || respSubmitted inputR) $ do
+      text <- T.strip <$> readVar draft
+      -- 'modifyVar' applies a change to the latest value, so two changes
+      -- in one frame both land.
+      unless (T.null text) $ do
+        modifyVar state.notes (<> [text])
+        writeVar draft ""
+    whenM (button "Clear") (writeVar state.notes [])
   -- The list is in its own column, so its length does not move the ids of
   -- anything after it.
-  column (forM_ notes label)
+  column (mapM_ label =<< readVar state.notes)
 
--- (c) Derived values are computed from state every frame, never stored. A
--- second copy kept in a hook would have to be updated everywhere the
--- notes change, and would drift the first time one place forgot.
+-- (c) One record in one Var, a widget per field. Each widget edits its own
+-- field; nothing copies values back and forth.
+fields :: AppState -> NanoUI ()
+fields state = section "Fields of a record" $ do
+  rowWith (tight . gap 8 . alignMid . fillW) $ do
+    labelWith (alignMid . fixedW 80) "Volume"
+    sliderWith (fixedW 200) 0 100 state.settings.volume
+  checkbox "Silent" state.settings.silent
+  textInput state.settings.nickname
+  s <- readVar state.settings
+  muted (s.nickname <> (if s.silent then " (silent)" else " at volume " <> T.pack (show (round s.volume :: Int))))
+  whenM (button "Reset") (writeVar state.settings (Settings 40 False "Ada"))
+
+-- (d) Derived values are computed from state every frame, never stored. A
+-- second copy kept in a Var would have to be updated everywhere the notes
+-- change, and would drift the first time one place forgot.
 derived :: AppState -> NanoUI ()
 derived state = section "Derived values" $ do
-  (notes, _) <- useState (notesCell state)
-  let longest = foldr (\n best -> if T.length n > T.length best then n else best) "" notes
-  kv "Notes" (T.pack (show (length notes)))
-  kv "Characters" (T.pack (show (sum (map T.length notes))))
+  ns <- readVar state.notes
+  let longest = foldr (\n best -> if T.length n > T.length best then n else best) "" ns
+  kv "Notes" (T.pack (show (length ns)))
+  kv "Characters" (T.pack (show (sum (map T.length ns))))
   kv "Longest" (if T.null longest then "-" else longest)
 
--- (d) Conditional UI. The extra options run on some frames and not others,
--- so they sit in 'scope', which takes exactly one id whether or not its
--- body runs. Without it, the hook and row inside would push the counter
--- below along by two ids: showing the options, the level would read the
--- counter's slot and show its count, and the counter would read an empty
--- slot and start again from 0; hiding them would bring the old count back.
--- Wrapping the part in any container (a row, a column) works the same way,
--- since a container also takes one id.
+-- (e) Conditional UI. The extra options run on some frames and not others,
+-- so they sit in 'scope', which keeps their Vars apart from the rest.
+-- Without it, the 'useVar' inside would push the counter below along by
+-- one: showing the options, the level would read the counter's Var and
+-- show its count, and the counter would start again from 0. Widgets that
+-- come and go need no scope to keep Vars in place, since widgets and Vars
+-- count separately.
 conditional :: NanoUI ()
 conditional = section "Conditional UI" $ do
-  (advanced, setAdvanced) <- useFlag False
-  setAdvanced =<< checkbox "Show advanced options" advanced
-  scope . when advanced $ do
-    -- Hidden, this hook does not run, but its value is kept: hide the
-    -- options and show them again and the level is where you left it.
-    (level, setLevel) <- useInt 3
-    counterRow "Level" level setLevel
-  (clicks, setClicks) <- useInt 0
-  counterRow "Clicks" clicks setClicks
+  advanced <- useVar False
+  checkbox "Show advanced options" advanced
+  shown <- readVar advanced
+  scope . when shown $
+    -- Hidden, this Var's position is not reached, but its value is kept:
+    -- hide the options and show them again and the level is where you
+    -- left it.
+    counterRow "Level" =<< useVar 3
+  counterRow "Clicks" =<< useVar 0
 
-counterRow :: T.Text -> Int -> (Int -> NanoUI ()) -> NanoUI ()
-counterRow name n setN =
+counterRow :: T.Text -> Var Int -> NanoUI ()
+counterRow name n =
   rowWith (tight . gap 8 . alignMid) $ do
     labelWith (alignMid . fixedW 60) name
-    whenM (button "-") (setN (n - 1))
-    labelWith alignMid (T.pack (show n))
-    whenM (button "+") (setN (n + 1))
+    whenM (button "-") (modifyVar n (subtract 1))
+    labelWith alignMid . T.pack . show =<< readVar n
+    whenM (button "+") (modifyVar n (+ 1))
 
--- (e) A list that reorders. Each row runs under 'withKey' with the player's
--- name, so its counter is stored under the key rather than the position
--- and moves with the row. Without 'withKey' the names would move and the
--- scores would stay where they were.
+-- (f) A list that reorders. Each row runs under 'withKey' with the player's
+-- name, so its counter is kept under the key rather than the position and
+-- moves with the row. Without 'withKey' the names would move and the scores
+-- would stay where they were.
 keyed :: AppState -> NanoUI ()
 keyed state = section "Keyed lists" $ do
-  (players, _) <- useState (playersCell state)
   rowWith (tight . gap 8) $ do
-    whenM (button "Reverse") (modifyState (playersCell state) reverse)
-    whenM (button "Rotate") (modifyState (playersCell state) (\ps -> drop 1 ps <> take 1 ps))
-  column . forM_ players $ \name ->
+    whenM (button "Reverse") (modifyVar state.players reverse)
+    whenM (button "Rotate") (modifyVar state.players (\ps -> drop 1 ps <> take 1 ps))
+  names <- readVar state.players
+  column . forM_ names $ \name ->
     withKey name . rowWith (tight . gap 8 . alignMid) $ do
-      (score, setScore) <- useInt 0
+      score <- useVar (0 :: Int)
       labelWith (alignMid . fixedW 80) name
-      whenM (button "+1") (setScore (score + 1))
-      labelWith alignMid (T.pack (show score))
+      whenM (button "+1") (modifyVar score (+ 1))
+      labelWith alignMid . T.pack . show =<< readVar score

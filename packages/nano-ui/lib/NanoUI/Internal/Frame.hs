@@ -13,7 +13,7 @@ import Data.Maybe (isJust, isNothing)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Atlas (atlasToken)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Damage (FrameSnapshot (..), captureFrameSnapshot, updatePrevRects, writeDamage)
+import NanoUI.Internal.Damage (captureFrameSnapshot, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Frame.Input
 import NanoUI.Internal.Frame.Chrome (floatingSurface, paintMenuPanel)
@@ -26,16 +26,18 @@ import NanoUI.Internal.Frame.TextEdit
 import NanoUI.Internal.Frame.TextInput (claimComposition, settleInputMethod)
 import NanoUI.Internal.Frame.Window
 import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
+import NanoUI.Internal.Id.Cursor (writeIdCursor)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI (..), Ui, runUi, whenM)
 import NanoUI.Internal.NativeWindow (clearWindowClose)
-import NanoUI.Internal.Store (mirrorStoresChanged, ptrEq)
+import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
 import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), damageIsEmpty, rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
+import NanoUI.Internal.Var (beginVarPass, endVarFrame, takeVarRerun)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
 
 -- | Build, lay out, resolve input, and paint one headless frame. Returns the
@@ -103,24 +105,26 @@ runFrameEff unlift ctx rawInp ui = do
     markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   focusBefore <- readIORef (ctxFocusId ctx)
-  result0 <- unlift (runUi ctx frameInp ui)
-  -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
-  writeIORef (ctxClickedId ctx) (WidgetId 0)
-  storeMid <- getStore ctx
-  result <-
-    if mirrorStoresChanged (fsStore snap) storeMid
-      then do
-        resetUiBuild ctx False
-        unlift (runUi ctx (stripInteractionInput frameInp) ui)
-      else pure result0
+  result <- do
+    beginVarPass ctx 1
+    result0 <- unlift (runUi ctx frameInp ui)
+    -- Pending click is one-shot. Clear before a rerun so toggles do not fire twice.
+    writeIORef (ctxClickedId ctx) (WidgetId 0)
+    -- A backwards Var write means something this pass drew is stale: run
+    -- the view again without the input it already acted on.
+    rerun <- takeVarRerun ctx
+    r <-
+      if rerun
+        then do
+          resetUiBuild ctx False
+          beginVarPass ctx 2
+          unlift (runUi ctx (stripInteractionInput frameInp) ui)
+        else pure result0
+    endVarFrame ctx
+    pure r
   -- A close request is the view's to see once ('NanoUI.winCloseRequested'),
   -- and only a frame that ran the view has shown it.
   clearWindowClose ctx
-  -- The store this frame's arena was built from. A view run again after a
-  -- local-hook write can write the same state again (a pane divider being
-  -- dragged stores the tree on every run), which is not a change the arena
-  -- missed.
-  storeBuilt <- getStore ctx
   -- Scopes only change how nodes look, which the rect and text diffs below
   -- cannot see, and custom widgets' cached ops hold the old theme's colours.
   whenM (themeScopesChanged ctx) $ do
@@ -161,12 +165,6 @@ runFrameEff unlift ctx rawInp ui = do
   finalizeSelectKeyboard ctx frameInp
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
-  storeAfter <- getStore ctx
-  -- No layout input follows the store, so the solve stands unless a custom
-  -- measure moved.
-  when (mirrorStoresChanged storeBuilt storeAfter) $ do
-    layoutArena ctx size True
-    applyScrollOffsets ctx size
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
   updatePrevRects ctx size
@@ -291,7 +289,7 @@ paintFrame ctx frameInp size explain paintFull = do
 
 -- | Reset what a view run builds: the node arena, sensors, input method
 -- request, and the container, id, focus, hover, cursor-zone, drawing and
--- layout-overlay scopes. A second run after a mirror store write
+-- layout-overlay scopes. A second run after a backwards Var write
 -- (@newFrame@ 'False') keeps the store, animations, prev rects, and the
 -- theme scopes it compares against.
 resetUiBuild :: Context -> Bool -> IO ()
@@ -299,7 +297,7 @@ resetUiBuild ctx newFrame = do
   beginThemeScopes ctx newFrame
   resetNodeArena (ctxNodeArena ctx)
   writeIORef (ctxContainerStack ctx) []
-  writeIORef (ctxIdContext ctx) initialIdContext
+  writeIdCursor (ctxIdCursor ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
   -- The view re-requests the input method each run while a widget takes text.
   readIORef (ctxInputMethod ctx) >>= mapM_ (\_ -> writeIORef (ctxInputMethod ctx) Nothing)
