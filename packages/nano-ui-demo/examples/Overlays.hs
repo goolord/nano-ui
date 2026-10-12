@@ -107,7 +107,7 @@ overlaysApp app = do
         filterR <- button' "Filter"
         tooltip filterR "Choose which kinds of item to show"
         open <- readVar filterOpen
-        whenM (popupToggled filterR) (writeVar filterOpen (not open))
+        when (respClicked filterR) (writeVar filterOpen (not open))
         let below = (defaultPopupConfig (AnchorRect (respRect filterR))) {cfgPlacement = PlacementBelow}
         (filterPopR, _) <- popup open below $ do
           menuHeader "Show"
@@ -189,20 +189,11 @@ menuBar openMenu entries =
     forM_ entries $ \(title, body) -> do
       let isOpen = current == title
       btn <- menuButton' title isOpen
-      whenM (popupToggled btn) (writeVar openMenu (if isOpen then "" else title))
+      when (respClicked btn) (writeVar openMenu (if isOpen then "" else title))
       when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu title)
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
       (popR, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
       when (respClicked popR) (writeVar openMenu "")
-
--- | Whether a button that opens a popup should flip it this frame. It acts
--- on the press: the popup closes on any press outside it, this button's
--- included, so flipping on the click (the release) would reopen it at once.
--- Enter or Space on the focused button still counts.
-popupToggled :: Response -> NanoUI Bool
-popupToggled r = do
-  inp <- askInput
-  pure ((respPressed r && pressedIn MouseLeft inp) || (respClicked r && not (releasedIn MouseLeft inp)))
 
 plural :: Int -> Text -> Text
 plural n noun = T.pack (show n) <> " " <> noun <> (if n == 1 then "" else "s")

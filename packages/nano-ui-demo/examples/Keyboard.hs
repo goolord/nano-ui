@@ -81,7 +81,7 @@ keyboardApp app = do
     (mSave, mBold, mQuit) <- rowWith (tight . gap 12 . alignMid . fillW) $ do
       open <- readVar menuOpen
       btn <- menuButton' "Actions" open
-      whenM (popupToggled btn) (writeVar menuOpen (not open))
+      when (respClicked btn) (writeVar menuOpen (not open))
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
       (popR, picked) <- popup open cfg $ columnWith (tight . gap 0) $ do
         s <- menuItemShortcut "Save" saveChord
@@ -135,15 +135,6 @@ keyboardApp app = do
     whenM takeEscape $ do
       clearFocus
       logged "Escape: focus cleared"
-
--- | Whether a button that opens a popup should flip it this frame. It acts
--- on the press: the popup closes on any press outside it, this button's
--- included, so flipping on the click (the release) would reopen it at once.
--- Enter or Space on the focused button still counts.
-popupToggled :: Response -> NanoUI Bool
-popupToggled r = do
-  inp <- askInput
-  pure ((respPressed r && pressedIn MouseLeft inp) || (respClicked r && not (releasedIn MouseLeft inp)))
 
 clampTo :: Int -> Int -> Int
 clampTo n = max 0 . min (n - 1)

@@ -286,12 +286,14 @@ keyActivated wid = do
 
 -- | Escape and click-outside-rect dismiss. Consumes Escape when it fires. A
 -- press anywhere else dismisses, whoever it belongs to, so this watches the
--- frame's input rather than the pointer routed here. A press on an open
--- dropdown or text-edit menu, which may lie outside the panel it belongs to,
--- does not; nor does an Escape that closes one, or that something declared
+-- frame's input rather than the pointer routed here. A press on @opener@
+-- does not: the widget that opened the panel toggles it on its own click,
+-- which would otherwise reopen what the press just closed. Nor does a press
+-- on an open dropdown or text-edit menu, which may lie outside the panel it
+-- belongs to, or an Escape that closes one, or that something declared
 -- earlier (a popup inside this one) already took.
-useDismissable :: Rect -> NanoUI Bool
-useDismissable panel = do
+useDismissable :: Rect -> Rect -> NanoUI Bool
+useDismissable panel opener = do
   inp <- askFrameInput
   withContext $ \ctx -> do
     route <- getsInteraction ctx isPointerRoute
@@ -303,5 +305,6 @@ useDismissable panel = do
           _ -> True
         esc = pressedOnceIn KeyEscape inp && not taken && null menu && not dropdown
         pressed = anyButtonPressed inp && not onMenu
+        at = inputMousePos inp
     when esc (markEscapeConsumed ctx)
-    pure (esc || (pressed && not (rectHit panel (inputMousePos inp))))
+    pure (esc || (pressed && not (rectHit panel at || rectHit opener at)))

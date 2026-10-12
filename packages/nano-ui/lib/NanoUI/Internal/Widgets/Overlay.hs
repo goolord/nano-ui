@@ -174,7 +174,7 @@ overlay isModal hasChrome shape open title child = do
                 | otherwise -> Rect (max 0 (winW - seedW - margin)) margin seedW h1
     titleLayout =
       (fixedH barH . alignMid . tight) defaultLayout {layoutMinH = barH, layoutMaxH = barH}
-  floatingOverlay open isModal addOverlayNode enter $ do
+  floatingOverlay open (if isModal then Just (Rect 0 0 0 0) else Nothing) addOverlayNode enter $ do
     closed <-
       if hasChrome
         then do

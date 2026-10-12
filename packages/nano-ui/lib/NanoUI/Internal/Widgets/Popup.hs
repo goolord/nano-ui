@@ -59,7 +59,9 @@ defaultPopupConfig anchor =
 
 -- | A floating panel placed by the config, shown while @open@. Returns the
 -- body's result while open. The 'Response' reports a dismissal (Escape, or a
--- click outside when 'cfgDismissable') as a click.
+-- click outside when 'cfgDismissable') as a click. A press on an
+-- 'AnchorRect' is not outside, so a button that toggles its popup on
+-- 'respClicked' closes it rather than closing and reopening it.
 popup ::
   Bool ->
   PopupConfig ->
@@ -86,23 +88,28 @@ popupWith open cfg f child = do
         parent
         layout {layoutPadding = Padding 6 6 6 6, layoutGap = 4}
     seedFromPrev wid = getPrevRect ctx wid >>= mapM_ (seedFloatingPanel ctx wid)
-  floatingOverlay open (cfgDismissable cfg) addPopupNode seedFromPrev ((,) False <$> child)
+    dismiss
+      | not (cfgDismissable cfg) = Nothing
+      | AnchorRect r <- cfgAnchor cfg = Just r
+      | otherwise = Just (Rect 0 0 0 0)
+  floatingOverlay open dismiss addPopupNode seedFromPrev ((,) False <$> child)
 
 -- | The floating panel behind popups, modals and windows, shown while @open@
 -- with its body in its own id scope. @addPanel@ and @enter@ are those of
 -- 'floatingPanel', given the panel's id. The body returns whether it closed
 -- the panel along with its result. The 'Response' reports a dismissal (the
--- body's close, Escape, or a click outside when @dismissable@) as a click. A
+-- body's close, Escape, or a click outside when @dismiss@ is 'Just' the rect
+-- of what opened the panel, where a press is not outside) as a click. A
 -- closed panel still consumes its id scope, so the ids of later siblings do
 -- not shift when it opens.
 floatingOverlay ::
   Bool ->
-  Bool ->
+  Maybe Rect ->
   (WidgetId -> Int -> IO NodeIdx) ->
   (WidgetId -> IO ()) ->
   NanoUI (Bool, a) ->
   NanoUI (Response, Maybe a)
-floatingOverlay open dismissable addPanel enter body = do
+floatingOverlay open dismiss addPanel enter body = do
   (wid, _) <- freshWidget
   if not open
     then do
@@ -114,7 +121,9 @@ floatingOverlay open dismissable addPanel enter body = do
       (mouse, (closed, r)) <-
         floatingPanel wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
-      outside <- pure (dismissable && rectNonEmpty panel) <&&> useDismissable panel
+      outside <- case dismiss of
+        Just opener | rectNonEmpty panel -> useDismissable panel opener
+        _ -> pure False
       let dismissed = closed || outside
       pure
         ( mkResponse wid panel (rectHit panel mouse) dismissed dismissed

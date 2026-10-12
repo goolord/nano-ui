@@ -47,6 +47,11 @@
   Custom inputs bind with `bindVar`/`bindVarBy` from
   `NanoUI.Widgets.Custom`.
 
+- A dismissable `popup` with an `AnchorRect` anchor no longer counts a press
+  on that rect as outside. A `menuButton'` (or any button) that toggles its
+  drop-down on `respClicked` now closes it when clicked again, instead of the
+  press closing it and the release opening it again.
+
 - Layout fixes. `flex` grows along its parent's direction, so in a column
   it pushes what follows down; it used to grow only across. `center` centres
   its body on both axes as one block (a layered `grow` box around a column),

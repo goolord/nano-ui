@@ -8,6 +8,7 @@ tests =
   [ spec "context-menu-open" runContextMenuOpenTest
   , spec "context-menu-scroll-pos" runContextMenuScrollPosTest
   , spec "context-menu-disabled-row" runContextMenuDisabledRowTest
+  , spec "menu-button-popup-toggle" runMenuButtonPopupToggleTest
   ]
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
@@ -123,3 +124,34 @@ runContextMenuDisabledRowTest ctx failed = do
       assert failed (abs (rectX paste - rectX cut) < 0.5)
       assert failed (abs ((rectY paste - rectY cut) - (rectY undo - rectY paste)) < 0.5)
     _ -> assert failed False
+
+-- | A menu title toggling its drop-down on 'respClicked'. Returns the title
+-- and whether the drop-down was open going into the frame.
+dropDownUi :: NanoUI (Response, Bool)
+dropDownUi = column $ do
+  openVar <- useVar False
+  open <- readVar openVar
+  btn <- menuButton' "File" open
+  when (respClicked btn) (writeVar openVar (not open))
+  let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
+  (popR, _) <- popup open cfg (menuItem "New")
+  when (respClicked popR) (writeVar openVar False)
+  pure (btn, open)
+
+-- | Clicking the title of an open drop-down closes it: the press on the title
+-- is not a press outside the popup, which would close it for the release to
+-- open it again. A click elsewhere still closes it.
+runMenuButtonPopupToggleTest :: Context -> IORef Int -> IO ()
+runMenuButtonPopupToggleTest ctx failed = do
+  let inp0 = withInput 400 300
+      clickAt p = runClick ctx inp0 dropDownUi p >> (snd <$> warmup2 ctx inp0 dropDownUi)
+  (btn, open0) <- warmup2 ctx inp0 dropDownUi
+  assertEq failed False open0
+  opened <- clickAt (centerOf btn)
+  assertEq failed True opened
+  closed <- clickAt (centerOf btn)
+  assertEq failed False closed
+  reopened <- clickAt (centerOf btn)
+  assertEq failed True reopened
+  outside <- clickAt (V2 380 280)
+  assertEq failed False outside
