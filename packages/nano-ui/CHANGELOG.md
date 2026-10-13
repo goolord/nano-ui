@@ -15,9 +15,13 @@
   `Var x` and string literals are constants. `NanoUI.Var` also exports
   `peekVar`, an untracked read.
 
-  A frame runs its view a second time only when something writes a Var the
-  view already read in that pass, and repaints the window only when a
-  tracked read saw the old value or sees the new one. Typing into a field
+  A frame runs its view a second time only when something writes a part of
+  a Var the view already read in that pass, and repaints the window only
+  when a tracked read saw the old value or sees the new one. Parts are record
+  fields and list elements, two levels deep: with a model in one Var,
+  showing `m.title` above a slider on `m.volume` costs nothing extra, and
+  `forEachVar` lays rows out by their keys alone, so a row that edits its
+  own element reruns nothing for the rows above it. Typing into a field
   nothing else reads now costs one view pass and repaints the field, where
   every changed hook write cost two passes and a full repaint.
 

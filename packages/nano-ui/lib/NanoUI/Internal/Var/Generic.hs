@@ -11,6 +11,7 @@ module NanoUI.Internal.Var.Generic
   ( Side (..)
   , FieldPath
   , GFocus (..)
+  , PathIx (..)
   )
 where
 
@@ -80,3 +81,20 @@ instance GFocus p r a => GFocus ('SR ': p) (l :*: r) a where
   gget (_ :*: r) = gget @p r
   {-# INLINE gset #-}
   gset a (l :*: r) = l :*: gset @p a r
+
+-- | A number for a path, unique among the fields of one record: the path's
+-- sides read as binary digits after a leading one.
+class PathIx (p :: [Side]) where
+  pathIx :: Int -> Int
+
+instance PathIx '[] where
+  {-# INLINE pathIx #-}
+  pathIx acc = acc
+
+instance PathIx p => PathIx ('SL ': p) where
+  {-# INLINE pathIx #-}
+  pathIx acc = pathIx @p (2 * acc)
+
+instance PathIx p => PathIx ('SR ': p) where
+  {-# INLINE pathIx #-}
+  pathIx acc = pathIx @p (2 * acc + 1)

@@ -1,20 +1,22 @@
 -- | Reading and writing 'Var's from the view, and the bookkeeping that
 -- decides what a write costs.
 --
--- Within a pass, a tracked read ('readVar') stamps the cell as observed and
--- seen, and a widget bound to the Var ('bindVar') stamps it as observed. A
--- write that changes a cell observed earlier in the same pass is a
--- backwards write: something already drew the old value. In the first pass
--- that reruns the view; in the second it asks for a follow-up frame. A
--- write only repaints the whole window when a tracked read saw the old
--- value, or reads the new one later in the frame, since what a view does
--- with a value it read is beyond any diff. A widget that drew the value
--- it wrote damages only itself.
+-- Within a pass, a tracked read ('readVar') stamps the part of the cell it
+-- reads as observed and seen, and a widget bound to the Var ('bindVar')
+-- stamps its part as observed. Parts are record fields and list elements,
+-- two levels deep ('lensSig'). A write that changes a part observed
+-- earlier in the same pass is a backwards write: something already drew
+-- the old value. In the first pass that reruns the view; in the second it
+-- asks for a follow-up frame. A write only repaints the whole window when
+-- a tracked read saw the old value of its part, or reads the new one later
+-- in the frame, since what a view does with a value it read is beyond any
+-- diff. A widget that drew the value it wrote damages only itself.
 module NanoUI.Internal.Var
   ( newVar
   , useVar
   , useEnumVar
   , readVar
+  , readVarSig
   , peekVar
   , writeVar
   , modifyVar
@@ -104,18 +106,21 @@ slotVar match wrap initial = withContext $ \ctx -> do
 -- the same pass runs the view again so this read sees it. Read a Var where
 -- you show it, after the widgets that edit it, and no rerun is needed.
 readVar :: Var a -> NanoUI a
+readVar v@(VarRef _ l) = readVarSig (lensSig l) v
 readVar (Var a) = pure a
-readVar (VarRef cell@(Cell ref _) l) = withContext $ \ctx -> do
+
+-- | 'readVar', recording the read as one of the part @sig@ of the cell.
+readVarSig :: Sig -> Var a -> NanoUI a
+readVarSig _ (Var a) = pure a
+readVarSig sig (VarRef cell@(Cell ref _) l) = withContext $ \ctx -> do
   unless (isInert cell) $ do
     p <- frameSlot ctx passSlot
     when (p /= 0) $ do
-      writeStamp cell obsSlot p
-      seen <- readStamp cell seenSlot
-      when (seen /= p) $ do
-        writeStamp cell seenSlot p
-        chg <- readStamp cell chgSlot
-        base <- frameSlot ctx baseSlot
-        when (chg >= base) (setFlag ctx flagFull)
+      addToSet cell obsSet p sig
+      addToSet cell seenSet p sig
+      base <- frameSlot ctx baseSlot
+      changed <- changedSince cell base sig
+      when changed (setFlag ctx flagFull)
   peekLens l =<< readIORef ref
 
 -- | The Var's current value, without recording the read: for a value used
@@ -135,7 +140,7 @@ modifyVar :: Eq a => Var a -> (a -> a) -> NanoUI ()
 modifyVar (Var _) _ = pure ()
 modifyVar (VarRef cell l) f = withContext $ \ctx -> do
   changed <- modifyRoot cell l f eqByPtr
-  when changed (noteWrite ctx cell)
+  mapM_ (noteWrite ctx cell . writeSig l) changed
 
 -- | Read from any thread. Not recorded.
 readVarIO :: Var a -> IO a
@@ -153,7 +158,8 @@ modifyVarIO :: Eq a => Var a -> (a -> a) -> IO ()
 modifyVarIO (Var _) _ = pure ()
 modifyVarIO (VarRef cell l) f = do
   changed <- modifyRoot cell l f eqByPtr
-  when (changed && not (isInert cell)) (stampChange cell)
+  unless (isInert cell) $
+    mapM_ (\root -> nextTick >>= \t -> addChange cell Nothing t (writeSig l root)) changed
 
 -- | Run @body@ on a Var holding @a@ and return what it left there: for
 -- giving a value from elsewhere (a model, a message) to a widget that takes
@@ -166,45 +172,52 @@ withValue a body = do
   a' <- liftIO (readIORef ref)
   pure (r, a')
 
--- | Change the part of a cell a lens shows, atomically. Says whether it
--- changed. An inert cell is one body's alone and skips the atomic update.
+-- | Change the part of a cell a lens shows, atomically. Returns the new
+-- value of the whole cell if the part changed. An inert cell is one body's
+-- alone and skips the atomic update.
 {-# INLINE modifyRoot #-}
-modifyRoot :: Cell s -> Lens s a -> (a -> a) -> (a -> a -> Bool) -> IO Bool
+modifyRoot :: Cell s -> Lens s a -> (a -> a) -> (a -> a -> Bool) -> IO (Maybe s)
 modifyRoot cell@(Cell ref _) l f eq
   | isInert cell = do
-      (root', changed) <- step <$> readIORef ref
-      when changed (writeIORef ref $! root')
-      pure changed
+      (_, new) <- step <$> readIORef ref
+      mapM_ (writeIORef ref) new
+      pure new
   | otherwise = atomicModifyIORef' ref step
   where
     step root =
       let old = viewLens l root
           new = f old
-       in if eq new old then (root, False) else (overLens l (const new) root, True)
+       in if eq new old then (root, Nothing) else let !root' = overLens l (const new) root in (root', Just root')
 
--- | Stamp a cell changed outside a pass. The next frame's tracked reads see
--- the change as new and repaint whole; widgets bound to it diff themselves.
-stampChange :: Cell s -> IO ()
-stampChange cell = writeStamp cell chgSlot =<< nextTick
+-- | Stamp the part @sig@ of a cell changed outside a pass. The next
+-- frame's tracked reads of that part see the change as new and repaint
+-- whole; widgets bound to it diff themselves.
+stampChange :: Context -> Cell s -> Sig -> IO ()
+stampChange ctx cell sig = do
+  base <- frameSlot ctx baseSlot
+  t <- nextTick
+  addChange cell (Just base) t sig
 
--- | Record a changing write made by view code.
-noteWrite :: Context -> Cell s -> IO ()
-noteWrite ctx cell = unless (isInert cell) $ do
+-- | Record a changing write to the part @sig@ made by view code.
+noteWrite :: Context -> Cell s -> Sig -> IO ()
+noteWrite ctx cell sig = unless (isInert cell) $ do
   p <- frameSlot ctx passSlot
   if p == 0
-    then stampChange cell >> markDirtyCovered ctx
+    then stampChange ctx cell sig >> markDirtyCovered ctx
     else do
-      obs <- readStamp cell obsSlot
-      seen <- readStamp cell seenSlot
-      noteInPass ctx cell p (obs == p) (seen == p)
+      observed <- setHits cell obsSet p sig
+      seen <- setHits cell seenSet p sig
+      noteInPass ctx cell p observed seen sig
 
--- | Record a write in pass @p@: rerun if something observed the cell
--- earlier in the pass, and repaint whole if a tracked read saw it.
-noteInPass :: Context -> Cell s -> Word64 -> Bool -> Bool -> IO ()
-noteInPass ctx cell p observed seen = do
+-- | Record a write to the part @sig@ in pass @p@: rerun if something
+-- observed that part earlier in the pass, and repaint whole if a tracked
+-- read saw it.
+noteInPass :: Context -> Cell s -> Word64 -> Bool -> Bool -> Sig -> IO ()
+noteInPass ctx cell p observed seen sig = do
   when observed (backwards ctx seen)
   when seen (setFlag ctx flagFull)
-  writeStamp cell chgSlot p
+  base <- frameSlot ctx baseSlot
+  addChange cell (Just base) p sig
 
 -- | Something in this pass drew the old value: run the view again, or, in
 -- its last pass, ask for another frame. @opaque@ when a tracked read saw
@@ -249,10 +262,11 @@ bindWith :: (a -> a -> Bool) -> Binding -> (x -> r) -> (x -> a) -> Var a -> (a -
 bindWith _ _ result _ (Var a) widget = result <$> widget a
 bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
   ctx <- askContext
+  let sig = lensSig l
   (root0, a0, before) <- liftIO $ do
     root0 <- readIORef ref
     a0 <- peekLens l root0
-    before <- observeBinding ctx cell
+    before <- observeBinding ctx cell sig
     pure (root0, a0, before)
   x <- widget a0
   let a1 = value x
@@ -263,37 +277,45 @@ bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
     when (ptrEq root1 root0 && not (eq a1 a0)) $ do
       changed <-
         if isInert cell
-          then True <$ (writeIORef ref $! overLens l (const a1) root0)
+          then Nothing <$ (writeIORef ref $! overLens l (const a1) root0)
           else atomicModifyIORef' ref $ \root ->
             if ptrEq root root0 || not (eq a1 (viewLens l root))
-              then (overLens l (const a1) root, True)
-              else (root, False)
-      when changed (noteBound ctx cell mode before)
+              then let !root' = overLens l (const a1) root in (root', Just root')
+              else (root, Nothing)
+      mapM_ (noteBound ctx cell mode sig before . writeSig l) changed
   pure (result x)
 
--- | Stamp a bound cell observed, returning whether something observed it,
--- and whether a tracked read saw it, earlier in this pass.
-observeBinding :: Context -> Cell s -> IO (Bool, Bool)
-observeBinding ctx cell
+-- | Stamp the part @sig@ of a bound cell observed, returning whether
+-- something observed it, and whether a tracked read saw it, earlier in this
+-- pass.
+observeBinding :: Context -> Cell s -> Sig -> IO (Bool, Bool)
+observeBinding ctx cell sig
   | isInert cell = pure (False, False)
   | otherwise = do
       p <- frameSlot ctx passSlot
       if p == 0
         then pure (False, False)
         else do
-          obs <- readStamp cell obsSlot
-          seen <- readStamp cell seenSlot
-          writeStamp cell obsSlot p
-          pure (obs == p, seen == p)
+          observed <- setHits cell obsSet p sig
+          seen <- setHits cell seenSet p sig
+          addToSet cell obsSet p sig
+          pure (observed, seen)
 
--- | Record a bound widget's changing write. Its own node shows the value,
--- so only an earlier observer needs the view rerun.
-noteBound :: Context -> Cell s -> Binding -> (Bool, Bool) -> IO ()
-noteBound ctx cell mode (obsBefore, seenBefore) = unless (isInert cell) $ do
+-- | Record a bound widget's changing write to the part @wsig@. Its own node
+-- shows the value, so only an earlier observer needs the view rerun. A
+-- write that rekeyed a list element touched more than the widget observed
+-- ('writeSig'), so it is checked again.
+noteBound :: Context -> Cell s -> Binding -> Sig -> (Bool, Bool) -> Sig -> IO ()
+noteBound ctx cell mode sig (obsBefore, seenBefore) wsig = do
   p <- frameSlot ctx passSlot
   if p == 0
-    then stampChange cell >> markDirtyCovered ctx
-    else noteInPass ctx cell p (obsBefore || mode == Conservative) seenBefore
+    then stampChange ctx cell wsig >> markDirtyCovered ctx
+    else do
+      (observed, seen) <-
+        if wsig == sig
+          then pure (obsBefore, seenBefore)
+          else (,) <$> setHits cell obsSet p wsig <*> setHits cell seenSet p wsig
+      noteInPass ctx cell p (observed || mode == Conservative) seen wsig
 
 -- | Ask for the view to run again this frame, or for a follow-up frame when
 -- it already has. The follow-up repaints only what its diffs show.

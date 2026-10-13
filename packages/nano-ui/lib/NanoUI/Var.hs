@@ -33,7 +33,8 @@
 -- A view runs once per frame. When code writes a Var that something earlier
 -- in the same run already read, what that reader drew is stale, so the view
 -- runs a second time before anything is drawn. Read a Var after the widgets
--- that edit it and typing into a field costs one run.
+-- that edit it and typing into a field costs one run. Fields count apart:
+-- showing @m.title@ above a field that edits @m.name@ costs one run too.
 module NanoUI.Var
   ( -- * Vars
     Var (Var)

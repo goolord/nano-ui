@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+
 -- | What one interaction costs: view passes in the frame that saw it, the
 -- kind of damage it produced, and the frames that followed before the view
 -- settled. Each row runs on a fresh context.
@@ -6,6 +8,25 @@ module Cases.Passes (tests) where
 import Spec
 import Data.Text (Text)
 import Data.Text qualified as T
+import GHC.Generics (Generic)
+
+-- | A model kept whole in one Var, for the rows that focus its fields.
+data Model = Model {title :: !Text, volume :: !Float, name :: !Text}
+  deriving (Eq, Generic)
+
+data Entry = Entry {rowId :: !Int, rowName :: !Text, rowDone :: !Bool}
+  deriving (Eq, Generic)
+
+rows20 :: [Entry]
+rows20 = [Entry i ("Row " <> T.pack (show i)) False | i <- [0 .. 19]]
+
+-- | The response of the fourth row a view collects, after the view runs.
+fourth :: IORef [Response] -> NanoUI () -> NanoUI Response
+fourth hits ui = do
+  liftIO (writeIORef hits [])
+  ui
+  rs <- liftIO (readIORef hits)
+  pure (reverse rs !! 3)
 
 tests :: [Spec]
 tests = [spec "passes-per-interaction" runPassesTest]
@@ -94,6 +115,36 @@ runPassesTest _ failed = do
       , ("display above", (2, Full, 0),) <$> fresh 0 (clickOn . counter True)
       , ("display below", (1, Full, 0),) <$> fresh 0 (clickOn . counter False)
       , ("equal writes, idle", (1, NoDamage, 0),) <$> fresh "x" (\v -> idleFrame (column (writeVar v "x" >> textInput' v)))
+      , -- One Var holding a record: a field read elsewhere is another part.
+        ("model: field above slider", (1, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> dragOn (column (do label =<< readVar m.title; sliderWith' (fixedW 200) 0 100 m.volume)))
+      , ("model: field below slider", (1, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> dragOn (column (sliderWith' (fixedW 200) 0 100 m.volume <* (label =<< readVar m.title))))
+      , ("model: field above field", (1, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do label =<< readVar m.title; textInput' m.name)))
+      , ("model: whole read above field", (2, Full, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do x <- readVar m; label x.title; textInput' m.name)))
+      , ("model: zoomVar part above field", (2, Full, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do label =<< readVar (zoomVar (.title) (\t x -> x {title = t}) m); textInput' m.name)))
+      , -- A list in one Var, a checkbox per row and the row's name after it.
+        ("forEachVar rows: click row 3", (1, Clip, 1),) <$> do
+          v <- newVar rows20
+          hits <- newIORef []
+          clickOn . fourth hits . column . forEachVar rowId v $ \r -> row $ do
+            resp <- checkbox' "" r.rowDone
+            label =<< readVar r.rowName
+            liftIO (modifyIORef hits (resp :))
+      , ("withElemVars rows: click row 3", (2, Full, 1),) <$> do
+          v <- newVar rows20
+          hits <- newIORef []
+          clickOn . fourth hits . column . withElemVars rowId v $ \xs at -> forM_ xs $ \x -> withKey (rowId x) . row $ do
+            resp <- checkbox' "" (at x).rowDone
+            label =<< readVar (at x).rowName
+            liftIO (modifyIORef hits (resp :))
+      , -- A row that changes its own key changes the list's order of keys,
+        -- which forEachVar laid the rows out by.
+        ("forEachVar row rekeys itself", (2, Full, 0),) <$> do
+          v <- newVar rows20
+          hits <- newIORef []
+          clickOn . fourth hits . column . forEachVar rowId v $ \r -> row $ do
+            resp <- button' "Rekey"
+            when (respClicked resp) (modifyVar r.rowId (+ 100))
+            liftIO (modifyIORef hits (resp :))
       ]
   forM_ rows $ \(name, expected, actual) -> do
     putStrLn ("  " <> name <> ": " <> show actual)

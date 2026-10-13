@@ -71,9 +71,15 @@ Equality cuts writes off: equal writes do nothing. Text and documents compare
 by pointer first, a `TextDocument` by pointer only, and floating-point values
 treat NaN as equal to itself so a NaN cannot keep a view dirty.
 
-Stamps are per root cell, not per field: writing `app.body` after showing
-`app.title` counts as backwards. Keep values a view reads and writes in
-different places in separate Vars when that matters.
+Stamps are per part of a cell, two levels deep: a record field or a list
+element, then a field of that. Writing `app.body` after showing `app.title` is
+not backwards, nor is a row's write to its own element after `forEachVar` laid
+out the rows, since `forEachVar` reads only the list's keys and order. Each
+part is a bit at its level, so parts that share a bit count as one, and a
+write that only might overlap a read counts as overlapping it. A read of the
+whole Var, a part through `zoomVar`, or `withElemVars`' list counts as a read
+of all of it. A write that changes an element's key counts as a write to its
+whole list.
 
 `peekVar`, from `NanoUI.Var`, reads without tracking, for a value that drives an action rather
 than a drawing. `readVarIO`, `writeVarIO` and `modifyVarIO` work from IO and
@@ -182,6 +188,17 @@ every changed write forced a second pass and full damage:
 | Button, count displayed above | 2, full, 1 | 2, full, 0 |
 | Button, count displayed below | 2, full, 1 | 1, full, 0 |
 | Equal writes while idle | not measured | 1, none, 0 |
+
+With one Var holding a model, the same interactions cost:
+
+| Interaction | Before parts | Parts |
+| --- | --- | --- |
+| Slider drag, another field shown above | 2, full, 1 | 1, clip, 1 |
+| Slider drag, another field shown below | 1, full, 1 | 1, clip, 1 |
+| Keystroke, another field shown above | 2, full, 1 | 1, clip, 1 |
+| Keystroke, the whole model read above | 2, full, 1 | 2, full, 1 |
+| Checkbox in row 3 of 20, `forEachVar`, name read after it | 2, full, 1 | 1, clip, 1 |
+| The same with `withElemVars` | 2, full, 1 | 2, full, 1 |
 
 The remaining follow-up frame on a keystroke comes from the widget's own store
 write, not from the Var.

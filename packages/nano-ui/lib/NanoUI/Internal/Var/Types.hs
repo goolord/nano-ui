@@ -17,27 +17,34 @@ module NanoUI.Internal.Var.Types
   , zoomVarL
   , fieldLens
   , newElemCtx
+  , keyStep
+  , lensSig
+  , structSig
+  , writeSig
   , VarSlot (..)
   , SlotVar (..)
   )
 where
 
+import Control.Applicative ((<|>))
+import Data.Bits (bit, (.&.))
 import Data.Functor.Const (Const (..))
 import Data.Functor.Identity (Identity (..))
 import Data.HashMap.Strict qualified as HM
-import Data.Hashable (Hashable)
+import Data.Hashable (Hashable, hash)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.String (IsString (..))
 import Data.Text (Text)
+import Data.Word (Word64)
 import GHC.Generics (Generic (..))
 import GHC.Records (HasField (..))
 import GHC.TypeLits (Symbol)
 import NanoUI.Internal.Derived (SortCol)
 import NanoUI.Internal.Equality (ptrEq)
-import NanoUI.Internal.Var.Cell (Cell)
-import NanoUI.Internal.Var.Generic (FieldPath, GFocus (..))
+import NanoUI.Internal.Var.Cell (Cell, Sig (..), allBits)
+import NanoUI.Internal.Var.Generic (FieldPath, GFocus (..), PathIx (..))
 
 -- | State a widget can show and edit: a value held in a cell, or a constant.
 --
@@ -55,11 +62,13 @@ data Var a where
   Var :: a -> Var a
   VarRef :: {-# UNPACK #-} !(Cell s) -> !(Lens s a) -> Var a
 
--- | The path from a cell's value to the part a Var shows.
+-- | The path from a cell's value to the part a Var shows. Each step after
+-- 'Here' carries its bit for 'lensSig': a record field's or a list key's,
+-- or 0 for a step to an unknown part.
 data Lens s a where
   Here :: Lens a a
-  Field :: !(Lens s b) -> (b -> a) -> (a -> b -> b) -> Lens s a
-  Elem :: !(ElemCtx s k a) -> !k -> a -> Lens s a
+  Field :: {-# UNPACK #-} !Word64 -> !(Lens s b) -> (b -> a) -> (a -> b -> b) -> Lens s a
+  Elem :: {-# UNPACK #-} !Word64 -> !(ElemCtx s k a) -> !k -> a -> Lens s a
 
 -- | One list's elements, found by key: the list as it was when the elements
 -- were handed out, and an index of the current list built on first need.
@@ -73,8 +82,8 @@ newElemCtx l key xs = ElemCtx l key xs <$> newIORef Nothing
 -- shows the value it had when it was handed out.
 viewLens :: Lens s a -> s -> a
 viewLens Here s = s
-viewLens (Field l g _) s = g (viewLens l s)
-viewLens (Elem (ElemCtx l key _ _) k snap) s =
+viewLens (Field _ l g _) s = g (viewLens l s)
+viewLens (Elem _ (ElemCtx l key _ _) k snap) s =
   fromMaybe snap (find ((== k) . key) (viewLens l s))
 
 -- | Change the part of @s@ a lens shows. Changing an element whose key has
@@ -82,8 +91,8 @@ viewLens (Elem (ElemCtx l key _ _) k snap) s =
 -- before the changed one are copied.
 overLens :: Lens s a -> (a -> a) -> s -> s
 overLens Here f s = f s
-overLens (Field l g set) f s = overLens l (\b -> let !a = f (g b) in set a b) s
-overLens (Elem (ElemCtx l key _ _) k _) f s = overLens l update s
+overLens (Field _ l g set) f s = overLens l (\b -> let !a = f (g b) in set a b) s
+overLens (Elem _ (ElemCtx l key _ _) k _) f s = overLens l update s
   where
     update xs = case break ((== k) . key) xs of
       (before, x : after) -> let !y = f x in before ++ y : after
@@ -95,10 +104,10 @@ overLens (Elem (ElemCtx l key _ _) k _) f s = overLens l update s
 -- list compares by pointer with the one handed out.
 peekLens :: Lens s a -> s -> IO a
 peekLens Here s = pure s
-peekLens (Field l g _) s = do
+peekLens (Field _ l g _) s = do
   b <- peekLens l s
   pure $! g b
-peekLens (Elem (ElemCtx l key xs0 cache) k snap) s = do
+peekLens (Elem _ (ElemCtx l key xs0 cache) k snap) s = do
   !xs <- peekLens l s
   if ptrEq xs xs0
     then pure snap
@@ -113,14 +122,75 @@ peekLens (Elem (ElemCtx l key xs0 cache) k snap) s = do
           pure ix
       pure (HM.findWithDefault snap k index)
 
+-- | The part of the cell a path touches: its first two steps narrow it,
+-- and a step to an unknown part closes it.
+lensSig :: Lens s a -> Sig
+lensSig Here = Sig allBits allBits True
+lensSig (Field step l _ _) = narrow step (lensSig l)
+lensSig (Elem step (ElemCtx l _ _ _) _ _) = narrow step (lensSig l)
+
+narrow :: Word64 -> Sig -> Sig
+narrow step (Sig a b open)
+  | step == 0 || not open = Sig a b False
+  | a == allBits = Sig step allBits True
+  | otherwise = Sig a step False
+
+-- | The part of the cell that holds a list's keys and order, apart from
+-- what its elements hold, for a reader that only lays out one row per key.
+-- It takes a bit no field or key takes, at the list's level.
+structSig :: Lens s [a] -> Sig
+structSig l = case lensSig l of
+  Sig a _ True
+    | a == allBits -> Sig structBit allBits False
+    | otherwise -> Sig a structBit False
+  sig -> sig
+
+-- | The bit only 'structSig' takes.
+structBit :: Word64
+structBit = bit 63
+
+-- | A field's or key's bit, from a number: any bit but 'structBit'.
+{-# INLINE stepBit #-}
+stepBit :: Int -> Word64
+stepBit n = bit ((n .&. maxBound) `rem` 63)
+
+-- | A list key's bit.
+{-# INLINE keyStep #-}
+keyStep :: Hashable k => k -> Word64
+keyStep = stepBit . hash
+
+-- | The part a write through a path touched, given the cell's new value:
+-- the path's own part or, when the write changed an element's key, the
+-- whole of that element's list, keys and order included.
+writeSig :: Lens s a -> s -> Sig
+writeSig l s = maybe (lensSig l) (\(SomeLens l') -> lensSig l') (rekeyed l s)
+
+data SomeLens s = forall b. SomeLens (Lens s b)
+
+-- | The outermost list on the path that no longer holds the path's key.
+rekeyed :: Lens s a -> s -> Maybe (SomeLens s)
+rekeyed Here _ = Nothing
+rekeyed (Field _ l _ _) s = rekeyed l s
+rekeyed (Elem _ (ElemCtx l key _ _) k _) s =
+  rekeyed l s <|> (if any ((== k) . key) (viewLens l s) then Nothing else Just (SomeLens l))
+
 -- | Focus a Var on part of its value, given how to read the part and how to
 -- replace it. Writes through the result change that part of the whole.
 --
 -- > draft <- zoomVar fst (\a (_, b) -> (a, b)) pair
+--
+-- Where @v.field@ is known to touch one field, the part this shows is
+-- unknown, so a write through it counts as a write to all of @v@ when
+-- deciding what it costs.
 {-# INLINE zoomVar #-}
 zoomVar :: (s -> a) -> (a -> s -> s) -> Var s -> Var a
-zoomVar g _ (Var s) = Var (g s)
-zoomVar g set (VarRef cell l) = VarRef cell (Field l g set)
+zoomVar = zoomStep 0
+
+-- | 'zoomVar' with the step's bit for 'lensSig'.
+{-# INLINE zoomStep #-}
+zoomStep :: Word64 -> (s -> a) -> (a -> s -> s) -> Var s -> Var a
+zoomStep _ g _ (Var s) = Var (g s)
+zoomStep step g set (VarRef cell l) = VarRef cell (Field step l g set)
 
 -- | 'zoomVar' from a van Laarhoven lens, such as one from @lens@ or
 -- @microlens@.
@@ -128,9 +198,9 @@ zoomVar g set (VarRef cell l) = VarRef cell (Field l g set)
 zoomVarL :: (forall f. Functor f => (a -> f a) -> s -> f s) -> Var s -> Var a
 zoomVarL l = zoomVar (getConst . l Const) (\a -> runIdentity . l (\_ -> Identity a))
 
-instance (Generic s, GFocus (FieldPath x s (Rep s)) (Rep s) a) => HasField (x :: Symbol) (Var s) (Var a) where
+instance (Generic s, GFocus (FieldPath x s (Rep s)) (Rep s) a, PathIx (FieldPath x s (Rep s))) => HasField (x :: Symbol) (Var s) (Var a) where
   {-# INLINE getField #-}
-  getField = uncurry zoomVar (fieldLens @x)
+  getField = uncurry (zoomStep (stepBit (pathIx @(FieldPath x s (Rep s)) 1))) (fieldLens @x)
 
 -- | How to read field @x@ of @s@ and how to replace it, found through
 -- "GHC.Generics"; with optimisation, a selector and a record update.

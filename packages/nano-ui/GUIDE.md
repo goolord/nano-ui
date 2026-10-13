@@ -127,6 +127,15 @@ the view once. A widget bound to a Var that nothing else shows repaints only
 itself; a Var that other code read repaints the window, since a view can draw
 anything from a value it read.
 
+Reads and writes count by part. With a model in one Var, `m.title` and
+`m.volume` are different parts, so showing the title above a slider on the
+volume costs nothing extra. Parts go two levels deep: a field of the model, or
+an element of a list held in the Var, then a field of that. Reading the whole
+of `m`, or a part through `zoomVar`, counts as reading all of it.
+`forEachVar` reads only its list's keys and order, so a row that edits its
+own element costs nothing for the rows before it; `withElemVars` hands the
+body the elements themselves, so it counts as reading the whole list.
+
 A primed widget returns a `Response` where the plain one returns `()`:
 `respChanged` reports an edit, `respSubmitted` reports a commit, and
 `respClicked` reports activation. `respPressed` is a held-button state, not a
