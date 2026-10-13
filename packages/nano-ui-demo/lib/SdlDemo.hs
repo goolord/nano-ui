@@ -1,368 +1,230 @@
 {-# LANGUAGE RecordWildCards #-}
 
--- | nano-ui widget cookbook.
+-- | The nano-ui widget cookbook: one tab per widget family. Each tab is a
+-- function below that keeps its state next to the widgets using it. For
+-- short programs about one topic each (state, layout, forms, shortcuts,
+-- background work, ...), see this package's @examples@ directory.
 --
--- A tour of the widget families, one tab each. Every tab is its own function
--- below and declares the state it needs next to the widgets that use it; jump
--- to the family you care about. For short programs about one topic each
--- (state, layout, forms, shortcuts, background work, ...), see this package's
--- @examples@ directory.
+-- Every input takes the 'Var' it edits: @slider 0 100 volume@ draws
+-- @volume@ and stores a drag in it, and @readVar volume@ reads it where it
+-- is shown. 'useVar' keeps a small value at its place in the view; anything
+-- else (a list, an image handle, a plot cache) is made once by 'newDemo'.
 --
--- Every interactive widget takes the 'Var' it shows and stores the user's
--- edits in it:
---
--- @
---   x <- useVar 0.5         -- state kept at this position in the view
---   slider 0 1 x            -- draw x; a drag writes the new value to x
---   resp <- slider' 0 1 x   -- primed: also the Response
---   v <- readVar x          -- read it where it is shown
--- @
---
--- 'useVar' keeps small values ('Int', 'Double', 'Float', 'Bool', 'T.Text')
--- by position and must be called in the same order every frame;
--- 'useEnumVar' keeps an enumeration. A tab's body runs under its tab's key,
--- so its Vars keep their values while another tab is shown. Other state (a
--- colour, a list, a task, an image) is allocated once by 'newDemo', and
--- 'main' passes it to 'demoUi'.
---
--- Style is expressed as layout-style functions threaded through the container
--- widget: columnWith (padAll 6 . gap 8 . fillW) $...  Text widgets compose
--- font styles the same way (fontBold, fontSize n, fontMuted, ...).
---
--- Families, by tab:
---
---   * Controls:     checkbox, slider, select, textInput, textArea,
---                   numericInput, boundedRadio, comboBox, colorPicker,
---                   tooltips, contextMenu, file dialogs, dropZone
---   * Graphics:     image gallery, content fits, rotated and faded images,
---                   SVG icons and adornments, an animated GIF paused off
---                   screen, and a pulsing progressBar
---   * Typography:   label / labelWith + the @font*@ style combinators
---   * List:         tree, searchInput
---   * Table:        tableWith' with its sort in a Var
---   * Tabs:         tabsConfigured: styles, placements, badges, close
---                   buttons, controls in a header, and a new-tab button
---   * Panes:        paneGrid
---   * Plots:        plot, barChart, areaChart, diagram, canvas paths
---
--- The toolbar opens an About modal (F1) and a Debug window (F12) with the SDL
--- backend's frame statistics and the layout overlay. The automated UI test is
--- the @nano-ui-demo-test@ suite.
-
+-- The toolbar opens an About modal (F1) and a Debug window (F12) with the
+-- SDL backend's frame statistics and the layout overlay. The
+-- @nano-ui-demo-test@ suite drives this demo.
 module SdlDemo
-    ( main
-    , DemoState
-    , newDemo
-    , demoUi
-    ) where
+  ( main
+  , DemoState
+  , newDemo
+  , demoUi
+  ) where
 
+import Codec.Picture qualified as JP
 import Control.Exception (SomeException, displayException, evaluate, try)
-import Control.Monad (forM, forM_, unless, void, when)
+import Control.Monad (forM, unless, void, when)
+import Data.ByteString qualified as BS
+import Data.ByteString.Internal qualified as BSI
 import Data.Foldable (for_)
-import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
-import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Hashable (Hashable (..))
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Vector.Storable qualified as VS
 import Data.Word (Word64)
+import Diagrams.Prelude (Diagram, circle, fc, fromVertices, lc, lw, lwO, none, p2, (#))
 import NanoUI
 import NanoUI.Adornment qualified as A
-import NanoUI.Path qualified as P
 import NanoUI.Backend.Sdl
-import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatExplainRows)
 import NanoUI.Diagrams
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Hashable (Hashable (..))
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
+import NanoUI.Path qualified as P
 import NanoUI.Shortcut
-import NanoUI.Var (peekVar)
 import Paths_nano_ui_demo (getDataFileName)
-import Diagrams.Prelude
-  ( Diagram
-  , circle
-  , fc
-  , fromVertices
-  , lc
-  , lw
-  , lwO
-  , none
-  , p2
-  , ( # )
-  )
-import System.Console.GetOpt
-  ( ArgDescr (NoArg, ReqArg)
-  , ArgOrder (Permute)
-  , OptDescr (Option)
-  , getOpt
-  , usageInfo
-  )
+import System.Console.GetOpt (ArgDescr (..), ArgOrder (Permute), OptDescr (..), getOpt, usageInfo)
 import System.Environment (getArgs, lookupEnv)
-import Text.Read (readMaybe)
 import Text.Printf (printf)
-import qualified Codec.Picture as JP
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Internal as BSI
-import qualified Data.Text as T
-import qualified Data.Vector.Storable as VS
-import qualified SdlRecord
+import Text.Read (readMaybe)
 
 import DemoApp (useFileDialog)
 import DemoData
-  ( DemoPerson (..)
-  , colPeople
-  , demoLandscape
-  , demoPeople
-  , demoSwatches
-  , demoTree
-  , peopleColumns
-  , sineCosineChart
-  , weeklyBars
-  )
+import SdlRecord qualified
 
-------------------------------------------------------------------------------
--- §1  App entry (main)
-------------------------------------------------------------------------------
+-- Running ---------------------------------------------------------------------
 
--- | Run @cabal run nano-ui-sdl-demo@ for the windowed app. @--record DIR@
--- records the README video's frames (see "SdlRecord").
+-- | Run @cabal run nano-ui-sdl-demo -- --help@ for the options. @--record DIR@
+-- records the README video's frames instead (see "SdlRecord").
 main :: IO ()
 main = do
   args <- getArgs
   case dropWhile (/= "--record") args of
-    _ : dir : _ -> do
-      state <- newDemo
-      SdlRecord.record dir (demoUi state)
+    _ : dir : _ -> SdlRecord.record dir . demoUi =<< newDemo
     _ -> do
       let (updates, _, _) = getOpt Permute options args
       case sequence updates of
         Nothing -> putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
-        Just fs -> do
-          state <- newDemo
-          runSdlApp (foldl' (flip id) demoOptions fs) (demoUi state)
+        Just fs -> runSdlApp (foldl' (flip id) demoOptions fs) . demoUi =<< newDemo
 
-------------------------------------------------------------------------------
--- §2  Assets & shared look
-------------------------------------------------------------------------------
+demoOptions :: SdlOptions
+demoOptions =
+  defaultSdlOptions
+    { sdlAppShouldQuit = pressedOnceIn KeyEscape
+    , sdlAppTheme = Just defaultTheme
+    , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1280 800, wsMinSize = Just (Size 480 360)}
+    }
 
--- | Decode an animated GIF with JuicyPixels into each frame's width, height
--- and RGBA pixels, or an error message. The demo runs it through 'useTask'
--- so no frame waits on it.
-decodeGif :: FilePath -> IO (Either String [(Int, Int, BS.ByteString)])
-decodeGif path = do
-  decoded <- try $ do
-    bytes <- BS.readFile path
-    frames <- either fail pure (JP.decodeGifImages bytes)
-    when (null frames) (fail "the file has no frames")
-    forM frames $ \frame -> do
-      let rgba = JP.convertRGBA8 frame
-          (fp, n) = VS.unsafeToForeignPtr0 (JP.imageData rgba)
-      -- Force decoding here, on the worker thread, so registering only copies.
-      pixels <- evaluate (BSI.fromForeignPtr0 fp n)
-      pure (JP.imageWidth rgba, JP.imageHeight rgba, pixels)
-  pure (either (\e -> Left (displayException (e :: SomeException))) Right decoded)
+-- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text.
+options :: [OptDescr (Maybe (SdlOptions -> SdlOptions))]
+options =
+  [ Option "v" ["vsync"] (ReqArg (\s -> Just (\o -> o {sdlAppVsync = s `elem` ["true", "True", "1"]})) "BOOL")
+      "Turn vsync on or off (default: true)"
+  , Option "cbf" ["continuous", "benchmark", "fps"] (NoArg (Just (\o -> o {sdlAppContinuous = True, sdlAppVsync = False})))
+      "Render continuously without vsync, to show uncapped FPS"
+  , Option "" ["explain"] (NoArg (Just (\o -> o {sdlExplainLayout = True})))
+      "Start with the layout overlay on"
+  , Option "F" ["fullscreen"] (NoArg (Just (onWindow (\w -> w {wsMode = Fullscreen}))))
+      "Start fullscreen"
+  , Option "W" ["width"] (ReqArg (resize (\px sz -> sz {sizeW = px})) "PX") "Initial window width (default: 1280)"
+  , Option "H" ["height"] (ReqArg (resize (\px sz -> sz {sizeH = px})) "PX") "Initial window height (default: 800)"
+  , Option "h?" ["help"] (NoArg Nothing) "Show this help"
+  ]
+  where
+    onWindow f o = o {sdlWindowSettings = f (sdlWindowSettings o)}
+    resize f s = Just (maybe id (\px -> onWindow (\w -> w {wsSize = f px (wsSize w)})) (readMaybe s))
 
--- | Save a screenshot as a PNG with JuicyPixels.
-savePng :: FilePath -> Screenshot -> IO ()
-savePng path shot =
-  let px = screenshotPixels shot
-      (fp, n) = BSI.toForeignPtr0 (rgbaBytes px)
-   in JP.writePng path (JP.Image (rgbaWidth px) (rgbaHeight px) (VS.unsafeFromForeignPtr0 fp n) :: JP.Image JP.PixelRGBA8)
+-- State -----------------------------------------------------------------------
 
--- | Demo accent used by the colour picker and pane headers.
-demoAccent :: Color
-demoAccent = colorRGBA 204 102 102 255
-
--- Spacing rhythm for the demo cards and columns.
-gapLayout, gapInline, gapMicro, gapText :: Float
-gapLayout = 10
-gapInline = 12
-gapMicro = 6
-gapText = 4
-
--- | The tabbed card; each tab is a widget family.
-data DemoTab
-  = Controls
-  | Graphics
-  | Typography
-  | List
-  | Table
-  | Tabs
-  | Panes
-  | Plots
-  deriving (Bounded, Enum, Eq, Ord, Read, Show)
-
-instance Hashable DemoTab where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
-
--- | Theme choices for the Controls-tab theme pickers.
-data DemoTheme
-  = ThemeDefault
-  | TomorrowNightMin
-  | TomorrowLight
-  | TomorrowMidnightMin
-  | ThemeSystem
-  deriving (Bounded, Enum, Eq, Ord, Read, Show)
-
--- | A theme choice's label and the action that applies it each frame: a
--- fixed theme, or the default theme matching the system's light/dark
--- appearance. Re-setting the same theme is free.
-themeChoice :: DemoTheme -> (T.Text, NanoUI ())
-themeChoice = \case
-  ThemeDefault -> ("Default", setUiTheme defaultTheme)
-  TomorrowNightMin -> ("Tomorrow Night Min", setUiTheme tomorrowNightMinDarkTheme)
-  TomorrowLight -> ("Tomorrow Light", setUiTheme tomorrowMinLightTheme)
-  TomorrowMidnightMin -> ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
-  ThemeSystem -> ("Follow system", setUiTheme . defaultThemeFor =<< systemAppearance)
-
-------------------------------------------------------------------------------
--- §3  State and the app shell
-------------------------------------------------------------------------------
-
--- | The state no positional Var can hold, and the resources, allocated once.
+-- | What the tabs keep beyond their positional Vars, made once by 'newDemo'.
 data DemoState = DemoState
   { demoAccentColor :: !(Var Color)
   , demoOpenDialog :: !(Var (Maybe FileDialogId))
-  , demoSaveDialog :: !(Var (Maybe FileDialogId))
-  , demoFolderDialog :: !(Var (Maybe FileDialogId))
-  , demoIcons :: !(Var (Maybe [Either String Svg]))
-  , demoGif :: !(Var (Maybe (Either String [(Int, Int, BS.ByteString)])))
-  , demoGifImages :: !(Var [ImageHandle Int])
-  , demoPeopleMatches :: !(Var [DemoPerson])
   , demoDocs :: !(Var [Int])
-  , demoPinned :: !(Var [Int])
+  , demoIcons :: !(Either String Icons)
+  , demoGifTask :: !(Task () (Either String [GifFrame]))
+  , demoSwatchImages :: ![ImageHandle Text]
+  , demoLandscapeImage :: !(ImageHandle Text)
   , demoPlotCache :: !PlotCache
-  , demoScreenshotTask :: !(Task Int ())
-  , demoDecodeTask :: !(Task T.Text (Either String [(Int, Int, BS.ByteString)]))
-  , demoSwatchImages :: ![ImageHandle T.Text]
-  , demoLandscapeImage :: !(ImageHandle T.Text)
-  , demoFontFamilies :: ![T.Text]
-  -- ^ The font combo box's choices: the installed families, or a fallback
-  -- list if the scan finds none. The chosen one applies with 'setSdlUiFont'.
+  , demoFontFamilies :: ![Text]
   , demoDebugAtStart :: !Bool
-  -- ^ Whether @NANO_DEBUG_OPEN@ opens the Debug window at start.
-  , demoDebugText :: !(IORef (Maybe CachedDebugText))
+  -- ^ @NANO_DEBUG_OPEN@ opens the Debug window at start.
   }
 
--- | Allocate a showcase's private state and resources. Call once per
--- instance, before the session, and draw it with 'demoUi'.
+data Icons = Icons {iconClock, iconCheck, iconStar, iconFace :: !Svg}
+
+-- | One frame of an animated GIF: its image handle, size and RGBA pixels.
+data GifFrame = GifFrame !(ImageHandle ()) !Int !Int !BS.ByteString
+
+-- | Make a demo's state. Call it once, before the session, and draw it with
+-- 'demoUi'.
 newDemo :: IO DemoState
 newDemo = do
-  demoAccentColor <- newVar demoAccent
+  demoAccentColor <- newVar (colorRGBA 204 102 102 255)
   demoOpenDialog <- newVar Nothing
-  demoSaveDialog <- newVar Nothing
-  demoFolderDialog <- newVar Nothing
-  demoIcons <- newVar Nothing
-  demoGif <- newVar Nothing
-  demoGifImages <- newVar []
-  demoPeopleMatches <- newVar demoPeople
   demoDocs <- newVar [1, 2, 3]
-  demoPinned <- newVar [1]
-  demoPlotCache <- newPlotCache
-  demoScreenshotTask <- newTask
-  demoDecodeTask <- newTask
+  demoIcons <- loadIcons
+  demoGifTask <- newTask
   demoSwatchImages <- mapM (const newImageHandle) demoSwatches
   demoLandscapeImage <- newImageHandle
+  demoPlotCache <- newPlotCache
   families <- map T.pack <$> listFontFamilies
-  let fallback = ["Inter", "Noto Sans", "Adwaita Sans", "Cantarell", "Liberation Sans", "FreeSans"]
-      demoFontFamilies = if null families then fallback else families
+  let demoFontFamilies = if null families then ["Inter"] else families
   demoDebugAtStart <- isJust <$> lookupEnv "NANO_DEBUG_OPEN"
-  demoDebugText <- newIORef Nothing
   pure DemoState {..}
 
--- | The whole app: a toolbar, the tabbed card, and two overlays (the Debug
--- window and the About modal).
+loadIcons :: IO (Either String Icons)
+loadIcons = do
+  svgs <- mapM (\name -> loadSvg =<< getDataFileName ("data/icons/" <> name <> ".svg")) ["clock", "check", "star", "face"]
+  pure $ case sequence svgs of
+    Right [clock, check, star, face] -> Right (Icons clock check star face)
+    Right _ -> Left "expected four icons"
+    Left err -> Left err
+
+-- | Decode a GIF with JuicyPixels into its frames, each with an image handle
+-- of its own, or an error message. It runs on a task's worker thread, so
+-- the pixels are decoded there and registering them only copies.
+loadGif :: FilePath -> IO (Either String [GifFrame])
+loadGif path = do
+  result <- try $ do
+    images <- either fail pure . JP.decodeGifImages =<< BS.readFile path
+    when (null images) (fail "the file has no frames")
+    forM images $ \img -> do
+      let rgba = JP.convertRGBA8 img
+          (fp, n) = VS.unsafeToForeignPtr0 (JP.imageData rgba)
+      pixels <- evaluate (BSI.fromForeignPtr0 fp n)
+      owner <- newImageHandle
+      pure (GifFrame owner (JP.imageWidth rgba) (JP.imageHeight rgba) pixels)
+  pure (either (\e -> Left (displayException (e :: SomeException))) Right result)
+
+-- The shell -------------------------------------------------------------------
+
+data DemoTab = Controls | Graphics | Typography | List | Table | Tabs | Panes | Plots
+  deriving (Bounded, Enum, Eq, Show)
+
+-- | Tabs keep each tab's state under a hash of its key.
+instance Hashable DemoTab where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
+
+-- | The whole app: a toolbar, the tabbed card, the Debug window and the
+-- About modal.
 demoUi :: DemoState -> NanoUI ()
 demoUi st = do
   aboutOpen <- useVar False
   debugOpen <- useVar (demoDebugAtStart st)
   activeTab <- useEnumVar Controls
-  dbg <- maybe (pure noDebugText) (debugText (demoDebugText st)) =<< askSdlDebug
-  wide <- (>= 960) <$> windowWidth
-  -- The page padding matches the gap between cards. The page scrollbar sits
-  -- just inside the window's right edge, that same gap from the cards.
-  scrollWith (padAll gapLayout . grow) $
-    columnWith (tight . gap gapLayout . fillW) $ do
-      panelWith (padXY 16 12 . gap gapInline . fillW) $
-        responsiveRowCol 960 (tight . gap gapInline . alignMid . fillW) $ do
-          rowWith (tight . gap gapInline . alignMid) $ do
-            labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
-            labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
-          when wide flex
-          -- Live frame stats + the header buttons.
-          unless (T.null (dtFps dbg)) $
-            labelWith (tight . alignMid . fontMono . fontMuted) (dtFps dbg)
-          rowWith (tight . gap gapMicro . alignMid) $ do
-            -- F1 and F12 mirror the buttons. Shortcuts take no widget id.
-            whenM ((||) <$> button "About" <*> shortcut (key (KeyF 1))) (writeVar aboutOpen True)
-            whenM ((||) <$> button "Debug" <*> shortcut (key (KeyF 12))) (modifyVar debugOpen not)
-            screenshotButton (demoScreenshotTask st)
+  scrollWith (padAll 10 . grow) $
+    columnWith (tight . gap 10 . fillW) $ do
+      panelWith (padXY 16 12 . fillW) $
+        rowWith (tight . gap 12 . alignMid . fillW) $ do
+          labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
+          labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
+          flex
+          -- F1 and F12 do what the buttons do.
+          about <- button "About"
+          f1 <- shortcut (key (KeyF 1))
+          when (about || f1) (writeVar aboutOpen True)
+          debug <- button "Debug"
+          f12 <- shortcut (key (KeyF 12))
+          when (debug || f12) (modifyVar debugOpen not)
       -- Only the selected tab's body runs.
       panelWith (padAll 16 . gap 12 . fillW) $
-        tabs activeTab [tab page (T.pack (show page)) (demoTab st page) | page <- [minBound .. maxBound]]
-
-  -- Debug window: a plain draggable window opened by the toolbar toggle.
-  window debugOpen "Debug" (debugBody dbg)
-  -- About modal: a click outside or Esc closes it, like its Close button.
+        tabs activeTab [tab page (T.pack (show page)) (tabView st page) | page <- [minBound .. maxBound]]
+  window debugOpen "Debug" debugBody
   modal aboutOpen "About" $ do
     heading "nano-ui"
     muted "Immediate-mode GUI for Haskell."
     muted "Esc closes this dialog, then the app."
-    rowWith (gap gapInline . fillW) $ do
+    rowWith (gap 12 . fillW) $ do
       flex
       whenM (button "Close") (writeVar aboutOpen False)
 
-demoTab :: DemoState -> DemoTab -> NanoUI ()
-demoTab st = \case
+tabView :: DemoState -> DemoTab -> NanoUI ()
+tabView st = \case
   Controls -> controlsTab st
   Graphics -> graphicsTab st
   Typography -> typographyTab
-  List -> listTab st
+  List -> listTab
   Table -> tableTab
-  Tabs -> tabsTab st
+  Tabs -> tabsTab (demoDocs st)
   Panes -> panesTab
   Plots -> plotsTab (demoPlotCache st)
 
--- | Each click captures the next presented frame and saves it on a worker
--- thread; the label beside the button shows the result.
-screenshotButton :: Task Int () -> NanoUI ()
-screenshotButton task = do
-  shots <- useVar (0 :: Int)
-  shoot <- askScreenshot
-  whenM (button "Screenshot") (modifyVar shots (+ 1))
-  taken <- readVar shots
-  scope . when (taken > 0) $
-    useTaskStatus task taken (shoot >>= maybe (ioError (userError "no frame to capture")) (savePng "nano-ui-demo.png")) >>= \case
-      TaskRunning _ -> labelWith (tight . alignMid . fontMuted) "Saving..."
-      TaskDone () -> labelWith (tight . alignMid . fontMuted) "Saved nano-ui-demo.png"
-      TaskFailed e _ -> labelWith (tight . alignMid . fontDanger) (T.pack (displayException e))
-
--- | The SVG icons (clock, check, star, face), read from disk the first time
--- a tab showing them runs.
-useIcons :: DemoState -> NanoUI (Maybe [Either String Svg])
-useIcons st = do
-  -- Load before the read, so the first frame shows the icons.
-  whenM (isNothing <$> peekVar (demoIcons st)) $ do
-    paths <- liftIO (mapM (\file -> getDataFileName ("data/icons/" <> file <> ".svg")) ["clock", "check", "star", "face"])
-    writeVar (demoIcons st) . Just =<< liftIO (mapM loadSvg paths)
-  readVar (demoIcons st)
-
--- | Keep a caption close to its field; the enclosing column spaces field groups.
-demoField :: T.Text -> NanoUI a -> NanoUI a
-demoField caption widget =
+-- | A caption over a widget, as a form field has.
+field :: Text -> NanoUI a -> NanoUI a
+field caption widget =
   columnWith (tight . gap 4 . fillW) $ do
     labelWith (tight . fontMuted . fillW) caption
     widget
 
 -- | A caption over a chart or drawing.
-captioned :: T.Text -> NanoUI a -> NanoUI ()
-captioned caption body = columnWith (tight . gap gapMicro . fillW) (muted caption >> void body)
+figure :: Text -> NanoUI a -> NanoUI ()
+figure caption = void . field caption
 
--- | Dashed-out empty values in the readouts.
-orDash :: T.Text -> T.Text
-orDash s = if T.null s then "-" else s
+-- | A constructor's name without its three-letter prefix: @TabTop@ is "Top".
+enumLabel :: Show a => a -> Text
+enumLabel = T.drop 3 . T.pack . show
 
-------------------------------------------------------------------------------
--- §4  Controls
-------------------------------------------------------------------------------
+-- Controls --------------------------------------------------------------------
 
--- | Form widgets. Each takes the Var it shows and stores the user's change
--- in it.
 controlsTab :: DemoState -> NanoUI ()
 controlsTab st = do
   responsiveRowCol 760 (tight . gap 24 . fillW) $ do
@@ -376,7 +238,7 @@ controlsTab st = do
   separator
   popupsAndMenus
   separator
-  fileDialogs st
+  fileDialog (demoOpenDialog st)
   separator
   dragAndDrop
 
@@ -393,15 +255,15 @@ basicControls = do
     kv "Volume" (if mute then "muted" else T.pack (show (round vol :: Int)))
     -- A disabled widget keeps its layout and value but takes no input.
     disabledWhen mute (slider 0 100 volume)
-  demoField "Quality" (selectWith fillW ["Low", "Medium", "High"] quality)
+  field "Quality" (selectWith fillW ["Low", "Medium", "High"] quality)
 
 textControls :: NanoUI ()
 textControls = do
-  name <- useVar ("" :: T.Text)
-  notes <- useVar ("Edit me.\nSecond line." :: T.Text)
+  name <- useVar ""
+  notes <- useVar "Edit me.\nSecond line."
   heading "Text input"
-  demoField "Name" (textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} name)
-  demoField "Notes" (textArea notes)
+  field "Name" (textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} name)
+  field "Notes" (textArea notes)
 
 -- | Arrow keys or the stepper step the value; Shift steps by ten.
 numberControls :: NanoUI ()
@@ -409,42 +271,50 @@ numberControls = do
   count <- useVar (12 :: Double)
   mask <- useVar (0xC0FF :: Double)
   heading "Numbers"
-  rowWith (tight . gap gapInline . fillW) $ do
-    demoField "Count (0-100)"
-      (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 100} count)
-    demoField "Mask (hex)"
-      (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} mask)
+  rowWith (tight . gap 12 . fillW) $ do
+    field "Count (0-100)" (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 100} count)
+    field "Mask (hex)" (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} mask)
+
+-- | Themes by name, each with how to apply it. Setting the theme on every
+-- frame costs nothing while it stays the same.
+themes :: [(Text, NanoUI ())]
+themes =
+  [ ("Default", setUiTheme defaultTheme)
+  , ("Tomorrow Night Min", setUiTheme tomorrowNightMinDarkTheme)
+  , ("Tomorrow Light", setUiTheme tomorrowMinLightTheme)
+  , ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
+  , ("Follow system", setUiTheme . defaultThemeFor =<< systemAppearance)
+  ]
 
 appearanceControls :: DemoState -> NanoUI ()
 appearanceControls st = do
-  themeSel <- useEnumVar ThemeDefault
-  fontChoice <- useVar ("Inter" :: T.Text)
+  theme <- useVar (0 :: Int)
+  font <- useVar "Inter"
   heading "Appearance"
-  demoField "Theme" (boundedRadio (fst . themeChoice) themeSel)
-  snd . themeChoice =<< readVar themeSel
-  fResp <- demoField "Font" (comboBox' "Font" (demoFontFamilies st) fontChoice)
-  tooltip fResp "Type to filter; Enter applies, Esc reverts."
-  when (respChanged fResp) $ do
-    family <- readVar fontChoice
-    unless (T.null family) $
-      setSdlUiFont (FontSearch [T.unpack family])
+  field "Theme" (radio (map fst themes) theme)
+  snd . (themes !!) =<< readVar theme
+  fontResp <- field "Font" (comboBox' "Font" (demoFontFamilies st) font)
+  tooltip fontResp "Type to filter; Enter applies, Esc reverts."
+  when (respChanged fontResp) $ do
+    family <- readVar font
+    unless (T.null family) (setSdlUiFont (FontSearch [T.unpack family]))
   separator
   heading "Accent"
   muted "Choose a color or enter an exact value."
   colorPickerRGBA (demoAccentColor st)
 
--- | Popups & menus: act on respClicked of the item you want.
+-- | Tooltips, and a context menu whose rows act like buttons.
 popupsAndMenus :: NanoUI ()
 popupsAndMenus = do
-  picked <- useVar ("" :: T.Text)
+  picked <- useVar ""
   heading "Popups & Menus"
-  rowWith (tight . gap gapInline . alignMid . fillW) $ do
-    btnTip <- button' "Hover for Tooltip"
-    tooltip btnTip "This is a floating tooltip widget!"
-    btnFollow <- button' "Tooltip at Pointer"
-    tooltipConfigured defaultTooltipConfig {tooltipPlacement = PlacementAtCursor} btnFollow "This one follows the pointer."
-    btnMenu <- button' "Right-click Menu"
-    void $ contextMenu btnMenu $ do
+  rowWith (tight . gap 12 . alignMid . fillW) $ do
+    tip <- button' "Hover for Tooltip"
+    tooltip tip "This is a floating tooltip widget!"
+    follow <- button' "Tooltip at Pointer"
+    tooltipConfigured defaultTooltipConfig {tooltipPlacement = PlacementAtCursor} follow "This one follows the pointer."
+    menuBtn <- button' "Right-click Menu"
+    void $ contextMenu menuBtn $ do
       menuHeader "Context Menu"
       menuSeparator
       whenM (menuItemShortcut "Cut" (ctrl <> key 'x')) (writeVar picked "Cut")
@@ -453,62 +323,34 @@ popupsAndMenus = do
       menuSeparator
       menuItemDisabled "Disabled Option"
     choice <- readVar picked
-    unless (T.null choice) $ muted ("Picked " <> choice)
+    unless (T.null choice) (muted ("Picked " <> choice))
 
--- | File dialogs: ask for a modal dialog handle, keep it in a Var, and poll
--- it every frame via useFileDialog.
-fileDialogs :: DemoState -> NanoUI ()
-fileDialogs st = do
-  openPath <- useVar ("" :: T.Text)
-  savePath <- useVar ("" :: T.Text)
-  folderPath <- useVar ("" :: T.Text)
-  useFileDialog (demoOpenDialog st) (writeVar openPath . T.intercalate ", " . map T.pack)
-  useFileDialog (demoSaveDialog st) (writeVar savePath . maybe "" T.pack . listToMaybe)
-  useFileDialog (demoFolderDialog st) (writeVar folderPath . maybe "" T.pack . listToMaybe)
+-- | A native file dialog runs outside the view: ask for one, keep its handle,
+-- and 'useFileDialog' polls it until it answers.
+fileDialog :: Var (Maybe FileDialogId) -> NanoUI ()
+fileDialog dialog = do
+  opened <- useVar ""
+  useFileDialog dialog (writeVar opened . T.intercalate ", " . map T.pack)
   heading "File Dialogs"
-  rowWith (tight . gap gapInline . fillW) $ do
-    whenM (button "Open File…") $
-      writeVar (demoOpenDialog st) . Just =<< askOpenFileDialog defaultFileDialogOptions {dialogAllowMany = True}
-    whenM (button "Save File…") (writeVar (demoSaveDialog st) . Just =<< askSaveFileDialog defaultFileDialogOptions)
-    whenM (button "Browse Folder…") (writeVar (demoFolderDialog st) . Just =<< askOpenFolderDialog defaultFileDialogOptions)
-  kv "Opened" . orDash =<< readVar openPath
-  kv "Save to" . orDash =<< readVar savePath
-  kv "Folder" . orDash =<< readVar folderPath
+  whenM (button "Open File…") $
+    writeVar dialog . Just =<< askOpenFileDialog defaultFileDialogOptions {dialogAllowMany = True}
+  paths <- readVar opened
+  kv "Opened" (if T.null paths then "-" else paths)
 
--- | Drag & drop: dropZone returns a target; dropReceived reports its files
--- and texts. dropHovering mirrors the hover state for styling.
+-- | A drop zone reports the files and text dropped on it.
 dragAndDrop :: NanoUI ()
 dragAndDrop = do
-  dropLog <- useVar ("" :: T.Text)
-  dropHovering <- useVar False
+  dropped <- useVar ""
   heading "Drag & Drop"
-  muted "Drag a file or highlighted text from another app onto the zone."
-  hovering <- readVar dropHovering
-  received <- readVar dropLog
-  (_, _, dropTgt) <-
-    dropZone (padXY 16 12 . gap gapText . fillW) $ do
-      columnWith (tight . gap gapText . fillW) $ do
-        rowWith (tight . gap gapInline . alignMid . fillW) $ do
-          labelWith (tight . alignMid . fontMedium) "Drop Zone"
-          flex
-          labelWith (tight . alignMid . fontMono . fontMuted) (if hovering then "hovering" else "idle")
-        labelWith (tight . fontMuted . fillW) $
-          if hovering
-            then "Release to accept dropped files or text."
-            else "Files land here; text lands here too."
-        unless (T.null received) $ do
-          separator
-          labelWith (tight . fontMono . fillW) received
-  when (dropReceived dropTgt) $ do
-    let droppedLines =
-          [ "file:  " <> (if T.length f <= 60 then f else "…" <> T.takeEnd 59 f) | f <- dropFiles dropTgt ]
-            ++ [ "text:  " <> (if T.length t <= 60 then t else T.take 59 t <> "…") | t <- dropTexts dropTgt ]
-    unless (null droppedLines) $ writeVar dropLog (T.intercalate "\n" droppedLines)
-  writeVar dropHovering (dropHovered dropTgt)
+  (_, _, target) <- dropZone (padXY 16 12 . gap 4 . fillW) $ do
+    muted "Drop a file or highlighted text from another app here."
+    received <- readVar dropped
+    unless (T.null received) (labelWith (tight . fontMono . fillW) received)
+  when (dropReceived target) $
+    writeVar dropped . T.intercalate "\n" $
+      map ("file: " <>) (dropFiles target) <> map ("text: " <>) (dropTexts target)
 
-------------------------------------------------------------------------------
--- §5  Graphics
-------------------------------------------------------------------------------
+-- Graphics --------------------------------------------------------------------
 
 graphicsTab :: DemoState -> NanoUI ()
 graphicsTab st = do
@@ -516,58 +358,49 @@ graphicsTab st = do
   separator
   swatchGallery st
   separator
-  imageFits st
+  imageFits (demoLandscapeImage st)
   separator
-  iconsAndAdornments st
+  iconsAndAdornments (demoIcons st)
   separator
-  animatedGif st
+  animatedGif (demoGifTask st)
   separator
-  -- A plain response-driven bar. pulse provides a smooth clock-driven 0-1
-  -- sweep and keepAnimating holds it live.
-  muted "A single rounded bar, smoothly oscillating 0-100%."
-  progResp <- progressBarWith' id 12 =<< pulse 6
-  keepAnimating progResp
-  rowWith (tight . gap gapInline . alignMid) $ do
-    spinner
-    muted "Loading"
+  pulsingBar
 
--- | Generated RGBA images, registered only while this tab shows so their
--- atlas space is freed otherwise. A wrapping row with centred lines holds
--- them; layers put a badge on each image's corner.
+-- | Generated RGBA images, registered only while this tab shows, with a
+-- badge layered on each one's corner.
 swatchGallery :: DemoState -> NanoUI ()
-swatchGallery st = do
-  swatches <- catMaybes <$> forM (zip (demoSwatchImages st) demoSwatches) (\(owner, (caption, pixels)) -> fmap (,caption) <$> useImageRgba owner caption 32 32 pixels)
-  rowWith (wrap . lineAlign LinesCenter . tight . gap gapInline . fillW) $
-    for_ swatches $ \(iid, caption) ->
-      columnWith (tight . gap gapMicro) $ do
-        layersWith tight $ do
-          image (fixedWH 88 88) iid
-          panelWith (alignEnd . alignTop . padXY 4 1) $
-            labelWith (tight . fontMono . fontSize 11) "32px"
-        muted caption
+swatchGallery st =
+  rowWith (wrap . lineAlign LinesCenter . tight . gap 12 . fillW) $
+    for_ (zip (demoSwatchImages st) demoSwatches) $ \(owner, (caption, pixels)) -> do
+      registered <- useImageRgba owner caption 32 32 pixels
+      for_ registered $ \iid ->
+        columnWith (tight . gap 6) $ do
+          layersWith tight $ do
+            image (fixedWH 88 88) iid
+            panelWith (alignEnd . alignTop . padXY 4 1) $
+              labelWith (tight . fontMono . fontSize 11) "32px"
+          muted caption
 
--- | A wide image in each content fit, cropped, rotated, faded, zoomed, and
--- filling the width at its own aspect. The scope keeps later widget ids
--- stable whether or not the image is registered.
-imageFits :: DemoState -> NanoUI ()
-imageFits st = do
-  imageTurn <- useVar (30 :: Float) -- rotation, in degrees
-  imageFade <- useVar (1 :: Float)
-  imageZoom <- useVar (1 :: Float)
-  landscape <- useImageRgba (demoLandscapeImage st) ("landscape" :: T.Text) 96 48 demoLandscape
-  scope $ for_ landscape $ \iid -> columnWith (tight . gap gapText . fillW) $ do
-    rowWith (wrap . tight . gap gapInline . fillW) $ do
-      for_ [minBound .. maxBound] $ \fit ->
-        columnWith (tight . gap gapMicro) $ do
-          imageConfigured defaultImageConfig {icLayout = fixedWH 72 72, icFit = fit} iid
-          muted (T.drop 3 (T.pack (show fit)))
-      columnWith (tight . gap gapMicro) $ do
-        imageConfigured defaultImageConfig {icLayout = fixedWH 72 72, icFit = FitCover, icCrop = Just (Rect 0 0 48 48)} iid
-        muted "Crop"
-    rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      turn <- readVar imageTurn
-      fade <- readVar imageFade
-      zoom <- readVar imageZoom
+-- | A wide image in each content fit, cropped, then turned, faded and zoomed
+-- by sliders, then filling the width at its own aspect.
+imageFits :: ImageHandle Text -> NanoUI ()
+imageFits owner = do
+  angleVar <- useVar (30 :: Float) -- degrees
+  fadeVar <- useVar (1 :: Float)
+  scaleVar <- useVar (1 :: Float)
+  landscape <- useImageRgba owner "landscape" 96 48 demoLandscape
+  -- The scope takes one id whether or not the image is registered.
+  scope . for_ landscape $ \iid -> columnWith (tight . gap 4 . fillW) $ do
+    let thumb cfg caption = columnWith (tight . gap 6) $ do
+          imageConfigured cfg {icLayout = fixedWH 72 72} iid
+          muted caption
+    rowWith (wrap . tight . gap 12 . fillW) $ do
+      for_ [minBound .. maxBound] $ \fit -> thumb defaultImageConfig {icFit = fit} (enumLabel fit)
+      thumb defaultImageConfig {icFit = FitCover, icCrop = Just (Rect 0 0 48 48)} "Crop"
+    rowWith (tight . gap 12 . alignMid . fillW) $ do
+      turn <- readVar angleVar
+      fade <- readVar fadeVar
+      zoom <- readVar scaleVar
       imageConfigured
         defaultImageConfig
           { icLayout = fixedWH 96 96
@@ -577,192 +410,163 @@ imageFits st = do
           , icScale = zoom
           }
         iid
-      columnWith (tight . gap gapText . fillW) $ do
+      columnWith (tight . gap 4 . fillW) $ do
         kv "Turn" (T.pack (printf "%.0f deg" turn))
-        slider 0 360 imageTurn
+        slider 0 360 angleVar
         kv "Opacity" (T.pack (printf "%.2f" fade))
-        slider 0 1 imageFade
+        slider 0 1 fadeVar
         kv "Zoom" (T.pack (printf "%.2fx" zoom))
-        slider 0.5 3 imageZoom
+        slider 0.5 3 scaleVar
     imageConfigured defaultImageConfig {icLayout = fillW . maxW 360} iid
 
 -- | SVG icons, then adornments: icons, short texts and views drawn inside a
 -- button beside its label, or inside a field before or after its value. A
 -- press on one is a press on the widget, except on a control, which takes
--- its own. buttonContent lays out any view as a button's content, as iced's
--- buttons do.
-iconsAndAdornments :: DemoState -> NanoUI ()
-iconsAndAdornments st = do
+-- its own.
+iconsAndAdornments :: Either String Icons -> NanoUI ()
+iconsAndAdornments (Left err) = muted ("Could not load the icons: " <> T.pack err)
+iconsAndAdornments (Right Icons {..}) = do
   saving <- useVar False
-  weight <- useVar ("" :: T.Text)
-  secret <- useVar ("" :: T.Text)
+  weight <- useVar ""
+  secret <- useVar ""
   secretShown <- useVar False
-  icons <- useIcons st
-  scope $ for_ icons $ \loaded -> do
-    -- A one-colour icon takes the text colour (or a fontColor), and each size
-    -- rasterizes once.
-    tint <- themeAccent <$> uiTheme
-    rowWith (tight . gap gapInline . alignMid) $
-      forM_ loaded $ \case
-        Left err -> muted (T.pack err)
-        Right doc -> do
-          svgIcon 20 doc
-          svgIconWith (fixedWH 32 32 . fontColor tint) doc
-    case sequence loaded of
-      Right [clock, check, star, _] ->
-        rowWith (tight . gap gapInline . alignMid) $ do
-          -- A spinner is a view like any other; it animates only while it is
-          -- declared.
-          isSaving <- readVar saving
-          whenM (buttonContent (if isSaving then spinnerWith' id 14 >> label "Saving" else svgIcon 16 check >> label "Save"))
-            (modifyVar saving not)
-          void (buttonConfigured defaultButtonConfig {bcAdornments = A.trailing (A.icon star)} "Star")
-          void (iconButton clock "")
-          textInputConfigured
-            defaultTextInputConfig
-              { ticPlaceholder = "Weight"
-              , ticAdornments = A.leading (A.icon clock) <> A.trailing (A.affix "kg")
-              , ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)
-              }
-            weight
-          -- A control: the Show button takes its own presses, and the field
-          -- keeps its focus and caret.
-          shown <- readVar secretShown
-          textInputConfigured
-            defaultTextInputConfig
-              { ticPlaceholder = "Password"
-              , ticPassword = not shown
-              , ticAdornments =
-                  A.trailing (A.control (whenM (buttonWith tight (if shown then "Hide" else "Show")) (modifyVar secretShown not)))
-              , ticLayout = fixedW 220 (ticLayout defaultTextInputConfig)
-              }
-            secret
-      _ -> pure ()
+  -- A one-colour icon takes the text colour, or a fontColor.
+  tint <- themeAccent <$> uiTheme
+  rowWith (tight . gap 12 . alignMid) $
+    for_ [iconClock, iconCheck, iconStar, iconFace] $ \icon -> do
+      svgIcon 20 icon
+      svgIconWith (fixedWH 32 32 . fontColor tint) icon
+  rowWith (tight . gap 12 . alignMid) $ do
+    -- Any view can be a button's content; a spinner animates while shown.
+    isSaving <- readVar saving
+    whenM (buttonContent (if isSaving then spinnerWith' id 14 >> label "Saving" else svgIcon 16 iconCheck >> label "Save")) $
+      modifyVar saving not
+    void (buttonConfigured defaultButtonConfig {bcAdornments = A.trailing (A.icon iconStar)} "Star")
+    void (iconButton iconClock "")
+    textInputConfigured
+      defaultTextInputConfig
+        { ticPlaceholder = "Weight"
+        , ticAdornments = A.leading (A.icon iconClock) <> A.trailing (A.affix "kg")
+        , ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)
+        }
+      weight
+    -- A control: the Show button takes its own presses, and the field keeps
+    -- its focus and caret.
+    shown <- readVar secretShown
+    textInputConfigured
+      defaultTextInputConfig
+        { ticPlaceholder = "Password"
+        , ticPassword = not shown
+        , ticAdornments = A.trailing (A.control (whenM (buttonWith tight (if shown then "Hide" else "Show")) (modifyVar secretShown not)))
+        , ticLayout = fixedW 220 (ticLayout defaultTextInputConfig)
+        }
+      secret
 
--- | An animated GIF, decoded by useTask the first time this tab shows. The
--- result is stored in a Var and useTask is no longer called. Each GIF frame
--- is its own image (useImageRgba, keyed by index) registered while the tab
--- shows; the clock picks the frame at 100 ms each. The sensor limits
--- keepAnimating to while the GIF is on screen.
-animatedGif :: DemoState -> NanoUI ()
-animatedGif st = do
-  pending <- isNothing <$> peekVar (demoGif st)
-  scope . when pending $ do
-    decoded <- useTask (demoDecodeTask st) ("lick.gif" :: T.Text) (decodeGif =<< getDataFileName "data/lick.gif")
-    forM_ decoded $ \result -> do
-      owners <- liftIO $ either (const (pure [])) (mapM (const newImageHandle)) result
-      writeVar (demoGifImages st) owners
-      writeVar (demoGif st) (Just result)
-  lick <- readVar (demoGif st)
-  gifImages <- readVar (demoGifImages st)
-  scope $ case lick of
-    Nothing -> labelWith (fillW . fontMuted) "Loading lick.gif..."
+-- | An animated GIF, decoded on a worker thread ('useTask') while this tab
+-- shows. Each frame is its own image; the clock picks one every 100 ms, and
+-- the view wakes for the next one only while the GIF is on screen.
+animatedGif :: Task () (Either String [GifFrame]) -> NanoUI ()
+animatedGif task = do
+  decoded <- useTask task () (loadGif =<< getDataFileName "data/lick.gif")
+  scope $ case decoded of
+    Nothing -> muted "Loading lick.gif..."
     Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
-    Just (Right decoded) -> do
-      frames <- smallArrayFromList . catMaybes <$> forM (zip3 gifImages [0 :: Int ..] decoded) (\(owner, i, (w, h, px)) -> useImageRgba owner i w h px)
-      t <- uiTime
-      if sizeofSmallArray frames < length decoded
-        then muted "The image atlas has no room for lick.gif."
-        else do
-          (vis, gif) <- sensorWith (gap gapMicro) $ do
-            gif <- image' (fixedWH 150 150) (indexSmallArray frames (floor (t * 10) `mod` sizeofSmallArray frames))
+    Just (Right gif) -> do
+      registered <- mapM (\(GifFrame owner w h pixels) -> useImageRgba owner () w h pixels) gif
+      case sequence registered of
+        Nothing -> muted "The image atlas has no room for lick.gif."
+        Just frames -> do
+          t <- uiTime
+          let tick = floor (t * 10) :: Int
+          (vis, ()) <- sensorWith (gap 6) $ do
+            image (fixedWH 150 150) (frames !! (tick `mod` length frames))
             muted "lick.gif"
-            pure gif
-          when (visVisible vis) (keepAnimating gif)
+          when (visVisible vis) (wakeAfter (fromIntegral (tick + 1) / 10 - t))
 
-------------------------------------------------------------------------------
--- §6  Typography
-------------------------------------------------------------------------------
+-- | A bar sweeping 0-100% on the clock. Clock-driven drawing asks for frames
+-- with 'keepAnimating', here only while the bar is on screen.
+pulsingBar :: NanoUI ()
+pulsingBar = do
+  muted "A rounded bar, sweeping 0-100%."
+  (vis, sweep) <- sensor (progressBarWith' id 12 =<< pulse 6)
+  when (visVisible vis) (keepAnimating sweep)
+
+-- Typography ------------------------------------------------------------------
 
 typographyTab :: NanoUI ()
 typographyTab = do
-  sampleText <- useVar ("The quick brown fox jumps over the lazy dog" :: T.Text)
-  typeSize <- useVar (20.0 :: Float)
-  typeBold <- useVar False
-  typeItalic <- useVar True
-  typeUnderline <- useVar False
-  typeStrike <- useVar False
+  sample <- useVar "The quick brown fox jumps over the lazy dog"
+  sizeVar <- useVar (20 :: Float)
+  isBold <- useVar False
+  isItalic <- useVar True
+  isUnderlined <- useVar False
+  isStruck <- useVar False
   heading "Typography & Font Styling"
-  muted "Font sizing, variable weights, synthetic slant, and text decorations."
+  muted "Sizes, weights, slant and decorations are style modifiers, composed like layout ones."
   separator
-  -- Live playground: type in the box, flip toggles, drag the size slider and
-  -- watch the composed font style update the preview.
   heading "Live Playground"
-  columnWith (tight . gap gapInline . fillW) $ do
+  columnWith (tight . gap 12 . fillW) $ do
     muted "Preview text"
-    textInput sampleText
-  rowWith (tight . gap gapInline . fillW . alignMid) $ do
-    checkbox "Bold" typeBold
-    checkbox "Italic" typeItalic
-    checkbox "Underline" typeUnderline
-    checkbox "Strike" typeStrike
-  size <- readVar typeSize
-  columnWith (tight . gap gapText . fillW) $ do
+    textInput sample
+  rowWith (tight . gap 12 . fillW . alignMid) $ do
+    checkbox "Bold" isBold
+    checkbox "Italic" isItalic
+    checkbox "Underline" isUnderlined
+    checkbox "Strike" isStruck
+  size <- readVar sizeVar
+  columnWith (tight . gap 4 . fillW) $ do
     kv "Size" (T.pack (printf "%.0f px" size))
-    slider 12 40 typeSize
-  -- Font styles are ordinary style combinators; fold the toggles in.
-  let on flag style = (\b -> if b then style else id) <$> readVar flag
-  decorations <-
-    sequence
-      [on typeBold fontBold, on typeItalic fontItalic, on typeUnderline fontUnderline, on typeStrike fontStrike]
-  sample <- readVar sampleText
-  let customStyle = fontSize size . foldr (.) id decorations . fillW
-      previewTxt = if T.null sample then "Type specimen preview..." else sample
+    slider 12 40 sizeVar
+  let ifOn var style = (\on -> if on then style else id) <$> readVar var
+  bold' <- ifOn isBold fontBold
+  italic' <- ifOn isItalic fontItalic
+  underline' <- ifOn isUnderlined fontUnderline
+  strike' <- ifOn isStruck fontStrike
+  text <- readVar sample
   panelWith (padAll 10 . fillW) $
-    labelWith customStyle previewTxt
-  for_
-    [ ("Type Scale", typeScale)
-    , ("Weights & Styles", weightsStyles)
-    , ("Color & Highlights", colorHighlights)
-    , ("Rich Text", richTextSample)
+    labelWith (fontSize size . bold' . italic' . underline' . strike' . fillW) $
+      if T.null text then "Type specimen preview..." else text
+  separator
+  heading "Type Scale"
+  styleRows 60
+    [ ("32px", fontSize 32 . fontBold, "Display Headline")
+    , ("24px", fontSize 24 . fontSemiBold, "Page Section Title")
+    , ("18px", fontSize 18 . fontMedium, "Card Subtitle & Highlights")
+    , ("16px", fontSize 16, "Standard body text (16px base line height)")
+    , ("12px", fontSize 12 . fontMuted, "Auxiliary caption, footnote, or timestamp")
     ]
-    $ \(title, body) -> separator >> heading title >> body
+  separator
+  heading "Weights"
+  styleRows 96
+    [ (name, style, "Sphinx of black quartz, judge my vow.")
+    | (name, style) <-
+        [ ("Light", fontLight)
+        , ("Normal", id)
+        , ("Medium", fontMedium)
+        , ("SemiBold", fontSemiBold)
+        , ("Bold", fontBold)
+        , ("ExtraBold", fontExtraBold)
+        , ("Black", fontBlack)
+        ]
+    ]
+  separator
+  heading "Rich Text"
+  richTextSample
 
--- | Static gallery rows. Demonstrates the @font*@ style combinators on plain
--- labels.
-typeScale :: NanoUI ()
-typeScale =
-  columnWith (tight . gap gapMicro . fillW) $
-    for_
-      [ ("32px", fontSize 32 . fontBold, "Display Headline")
-      , ("24px", fontSize 24 . fontSemiBold, "Page Section Title")
-      , ("18px", fontSize 18 . fontMedium, "Card Subtitle & Highlights")
-      , ("16px", fontSize 16, "Standard body text (16px base line height)")
-      , ("12px", fontSize 12 . fontMuted, "Auxiliary caption, footnote, or timestamp")
-      ]
-      $ \(size, style, sample) ->
-        rowWith (tight . gap gapInline . alignMid . fillW) $ do
-          labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) size
-          labelWith (alignMid . style) sample
-
-weightsStyles :: NanoUI ()
-weightsStyles =
-  columnWith (tight . gap gapMicro . fillW) $
-    for_
-      [ ("Light", fontLight, sphinx)
-      , ("Normal", id, sphinx)
-      , ("Medium", fontMedium, sphinx)
-      , ("SemiBold", fontSemiBold, sphinx)
-      , ("Bold", fontBold, sphinx)
-      , ("ExtraBold", fontExtraBold, sphinx)
-      , ("Black", fontBlack, sphinx)
-      , ("Italic", fontItalic, "Slanted synthetic italic font style.")
-      , ("Underline", fontUnderline, "Underlined emphasis and interactive links.")
-      , ("Strike", fontStrike, "Completed tasks and deprecated pricing.")
-      , ("Both", fontUnderline . fontStrike, "Both underline and strikethrough lines.")
-      ]
-      $ \(name, style, sample) ->
-        rowWith (tight . gap gapInline . fillW) $ do
-          labelWith (tight . fixedW 96 . fontMono . fontMuted) name
-          labelWith style sample
- where
-  sphinx = "Sphinx of black quartz, judge my vow."
+-- | Rows of a name, in a column this wide, and a sample in that style.
+styleRows :: Float -> [(Text, LayoutModifier, Text)] -> NanoUI ()
+styleRows nameW rows =
+  columnWith (tight . gap 6 . fillW) $
+    for_ rows $ \(name, style, sample) ->
+      rowWith (tight . gap 12 . alignMid . fillW) $ do
+        labelWith (tight . alignMid . fixedW nameW . fontMono . fontMuted) name
+        labelWith (alignMid . style) sample
 
 -- | Mixed styles and links in one wrapped paragraph.
 richTextSample :: NanoUI ()
 richTextSample = do
-  lastLink <- useVar ("none yet" :: T.Text)
-  target <-
+  lastLink <- useVar "none yet"
+  clicked <-
     richTextWith fillW
       [ "A paragraph can mix ", strong "bold", ", ", emphasis "italic", ", "
       , inlineCode "monospace", " and ", inlineWith (fontSemiBold . fontColor (colorRGBA 229 192 123 255)) "coloured"
@@ -770,245 +574,164 @@ richTextSample = do
       , hyperlink "documentation" "the documentation", " or ", hyperlink "changelog" "the changelog"
       , ". It wraps at the width of its column."
       ]
-  for_ target (writeVar lastLink)
+  for_ clicked (writeVar lastLink)
   labelWith fontMuted . ("Last link clicked: " <>) =<< readVar lastLink
 
-colorHighlights :: NanoUI ()
-colorHighlights =
-  columnWith (tight . gap gapMicro . fillW) $ do
-    rowWith (tight . gap gapInline . fillW) $
-      for_
-        [ (colorRGBA 224 108 117 255, "Crimson Red")
-        , (colorRGBA 152 195 121 255, "Emerald Green")
-        , (colorRGBA 229 192 123 255, "Amber Gold")
-        , (colorRGBA 86 182 194 255, "Glacier Cyan")
-        , (colorRGBA 198 120 221 255, "Orchid Violet")
-        ]
-        $ \(color, name) -> labelWith (fontBold . fontColor color) name
-    rowWith (tight . gap gapInline . fillW . alignMid) $ do
-      muted "Sale example:"
-      labelWith (fontStrike . fontMuted) "$129.00"
-      labelWith (fontSize 18 . fontBold . fontColor (colorRGBA 152 195 121 255)) "$79.00"
-      labelWith (fontSize 12 . fontItalic . fontColor (colorRGBA 229 192 123 255)) "(Save 38%)"
+-- List and Table --------------------------------------------------------------
 
-------------------------------------------------------------------------------
--- §7  List & Table
-------------------------------------------------------------------------------
-
-listTab :: DemoState -> NanoUI ()
-listTab st = do
-  treeSel <- useVar (0 :: Int)
-  searchText <- useVar ("" :: T.Text) -- live searchInput text
-  searchQuery <- useVar ("" :: T.Text) -- committed searchInput value
+listTab :: NanoUI ()
+listTab = do
+  selected <- useVar (0 :: Int)
+  search <- useVar "" -- the field's text
+  query <- useVar "" -- the search, committed after a pause in typing
   heading "Tree"
-  -- tree: shows the selected index in a Var and stores a clicked one there.
-  scroll2DWith (fixedH 300 . fillW) $
-    tree "demo" demoTree treeSel
-  selected <- readVar treeSel
-  muted ("Selected item " <> T.pack (show selected))
+  scroll2DWith (fixedH 300 . fillW) (tree "demo" demoTree selected)
+  muted . ("Selected item " <>) . T.pack . show =<< readVar selected
   separator
   heading "Searchable list"
-  muted "Type to filter, or press Ctrl+F to jump here. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
-  qResp <- searchInput' "Filter people (name, role, city…)" searchText
-  -- Ctrl+F focuses the filter. Shortcuts take no widget id.
-  findPressed <- shortcut (ctrl <> key 'f')
-  when findPressed (requestFocus (respId qResp))
-  when (respChanged qResp) $ do
-    qVal <- readVar searchText
-    writeVar searchQuery qVal
-    writeVar (demoPeopleMatches st) (peopleMatching qVal)
-  query <- readVar searchQuery
-  peopleMatches <- readVar (demoPeopleMatches st)
-  rowWith (tight . gap gapInline . fillW . alignMid) $ do
-    muted ("Committed: " <> (if T.null query then "(none)" else query))
+  muted "Type to filter, or press Ctrl+F to jump here. The search commits after a pause in typing."
+  searchResp <- searchInput' "Filter people (name, role, city…)" search
+  whenM (shortcut (ctrl <> key 'f')) (requestFocus (respId searchResp))
+  when (respChanged searchResp) (writeVar query =<< readVar search)
+  committed <- readVar query
+  let matches = filter (matchesQuery committed) demoPeople
+  rowWith (tight . gap 12 . fillW . alignMid) $ do
+    muted ("Committed: " <> if T.null committed then "(none)" else committed)
     flex
-    muted ("Matches: " <> T.pack (show (length peopleMatches)))
+    muted ("Matches: " <> T.pack (show (length matches)))
   scroll2DWith (padAll 6 . fixedH 168 . fillW) $
-    columnWith (tight . gap gapMicro . fillW) $
-      if null peopleMatches
-        then void (muted "No matches.")
-        else
-          for_ peopleMatches $ \p ->
-            labelWith (tight . fillW) (personRowLabel p)
+    columnWith (tight . gap 6 . fillW) $
+      if null matches
+        then muted "No matches."
+        else for_ matches (labelWith (tight . fillW) . personRow)
 
--- | Filter the people list by a committed, case-folded query. The List tab
--- stores the result, so it is only recomputed when the query is committed.
-peopleMatching :: T.Text -> [DemoPerson]
-peopleMatching raw = filter (T.isInfixOf (T.toCaseFold raw) . haystack) demoPeople
-  where
-    haystack p = T.toCaseFold (T.unwords [demoPersonName p, demoPersonDept p, demoPersonCity p, demoPersonRole p])
+-- | Whether a person's name, department, city or role contains the query,
+-- ignoring case.
+matchesQuery :: Text -> DemoPerson -> Bool
+matchesQuery q p =
+  T.toCaseFold q `T.isInfixOf` T.toCaseFold (T.unwords [demoPersonName p, demoPersonDept p, demoPersonCity p, demoPersonRole p])
 
-personRowLabel :: DemoPerson -> T.Text
-personRowLabel p =
+personRow :: DemoPerson -> Text
+personRow p =
   demoPersonName p <> " - " <> demoPersonRole p <> ", " <> demoPersonCity p <> " (" <> T.pack (show (demoPersonAge p)) <> ")"
 
 tableTab :: NanoUI ()
 tableTab = do
-  -- The table shows the sort in a Var and stores a header click there.
   sortBy <- useVar (SortCol 0 SortAsc)
   heading "Table"
   muted "Click a header to sort. Drag a header to reorder."
   muted "Drag a header edge to resize. Right-click a header to hide."
-  tableResp <- tableWith' (fixedH 280) "people" colPeople demoPeople sortBy
-  nextSort <- readVar sortBy
+  people <- tableWith' (fixedH 280) "people" colPeople demoPeople sortBy
+  SortCol col dir <- readVar sortBy
   separator
-  kv "Sorted by" (fromMaybe "-" (columnName (sortColIndex nextSort)))
-  kv "Order" $ case sortColDir nextSort of
-    SortAsc -> "ascending"
-    SortDesc -> "descending"
-  kv "Hidden" $ case tableHiddenIndices tableResp of
+  kv "Sorted by" (fromMaybe "-" (columnName col))
+  kv "Order" (if dir == SortAsc then "ascending" else "descending")
+  kv "Hidden" $ case mapMaybe columnName (tableHiddenIndices people) of
     [] -> "none"
-    hidden -> T.intercalate ", " (mapMaybe columnName hidden)
+    hidden -> T.intercalate ", " hidden
   where
     columnName i = if i < 0 then Nothing else fst <$> listToMaybe (drop i peopleColumns)
 
-------------------------------------------------------------------------------
--- §8  Tabs & Panes
-------------------------------------------------------------------------------
+-- Tabs and Panes --------------------------------------------------------------
 
 -- | Tabs keep the selected key in a Var. Remove a tab yourself when
--- tabClosed names it. Only the selected tab's body runs.
-tabsTab :: DemoState -> NanoUI ()
-tabsTab st = do
-  tabLook <- useEnumVar TabContained
-  tabPlace <- useEnumVar TabTop
-  activeDoc <- useVar (1 :: Int)
-  icons <- useIcons st
+-- 'tabClosed' names it.
+tabsTab :: Var [Int] -> NanoUI ()
+tabsTab docsVar = do
+  look <- useEnumVar TabContained
+  place <- useEnumVar TabTop
+  active <- useVar (1 :: Int)
   heading "Tabs"
-  muted "A middle click also closes a tab. Pinned documents have no close button."
+  muted "A middle click also closes a tab. Only the selected tab's body runs."
   -- Two header-only strips pick the look of the one below.
-  let picker current = tabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} current
-      choices :: (Show a) => [a] -> [Tab a ()]
-      choices xs = [tab x (T.drop 3 (T.pack (show x))) () | x <- xs]
-  responsiveRowCol 760 (tight . gap gapInline . fillW) $ do
-    demoField "Style" (picker tabLook (choices [minBound .. maxBound]))
-    demoField "Placement" (picker tabPlace (choices [minBound .. maxBound]))
-  look <- readVar tabLook
-  place <- readVar tabPlace
-  docs <- readVar (demoDocs st)
-  pinned <- readVar (demoPinned st)
-  let star = case icons of
-        Just [_, _, Right s, _] -> Just s
-        _ -> Nothing
-      docName d = case d of
-        1 -> "Main.hs"
-        2 -> "Tabs.hs"
-        3 -> "README.md"
-        _ -> "Untitled-" <> T.pack (show d) <> ".hs"
-      -- A control in a header takes its own presses: the star pins a
-      -- document without selecting it.
-      pin d = case star of
-        Nothing -> mempty
-        Just s -> A.trailing . A.control $ do
-          theme <- uiTheme
-          let isPinned = d `elem` pinned
-              tint = if isPinned then themeAccent theme else themeMuted theme
-          whenM (styled subtle (buttonContentWith (tight . fixedWH 20 20) (svgIconWith (fixedWH 12 12 . fontColor tint) s))) $
-            writeVar (demoPinned st) (if isPinned then filter (/= d) pinned else d : pinned)
-      docTab d =
-        (closableTab d (docName d) (muted ("The body of " <> docName d <> ", which runs only while its tab is selected.")))
-          { tabClosable = d `notElem` pinned
-          , tabAdornments = pin d
-          }
-      problems = (tab 0 "Problems" (muted "Three problems.")) {tabBadge = Just "3"}
+  responsiveRowCol 760 (tight . gap 12 . fillW) $ do
+    field "Style" (choiceBar look)
+    field "Placement" (choiceBar place)
+  docs <- readVar docsVar
+  let fresh = 1 + maximum (3 : docs)
       -- Actions on the whole strip go after its headers.
-      fresh = 1 + maximum (3 : docs)
-      newDoc =
-        whenM (styled subtle (buttonWith (tight . fixedWH 28 28) "+")) $ do
-          writeVar (demoDocs st) (docs <> [fresh])
-          writeVar activeDoc fresh
-  tabResp <- tabsConfigured' (TabsConfig look place newDoc) activeDoc (problems : map docTab docs)
+      newDoc = whenM (styled subtle (buttonWith (tight . fixedWH 28 28) "+")) $ do
+        writeVar docsVar (docs <> [fresh])
+        writeVar active fresh
+      docTab d = closableTab d (docName d) (muted ("The body of " <> docName d <> ", which runs only while its tab is selected."))
+      problems = (tab 0 "Problems" (muted "Three problems.")) {tabBadge = Just "3"}
+  cfg <- TabsConfig <$> readVar look <*> readVar place <*> pure newDoc
+  tabResp <- tabsConfigured' cfg active (problems : map docTab docs)
   -- Closing the selected document selects the one before it.
   for_ (tabClosed tabResp) $ \d -> do
     let (before, after) = break (== d) docs
-    writeVar (demoDocs st) (before <> drop 1 after)
+    writeVar docsVar (before <> drop 1 after)
     when (tabActive tabResp == d) $
-      writeVar activeDoc (fromMaybe 0 (listToMaybe (reverse before)))
+      writeVar active (fromMaybe 0 (listToMaybe (reverse before)))
+  where
+    choiceBar :: (Bounded a, Enum a, Show a, Hashable a) => Var a -> NanoUI ()
+    choiceBar v = tabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} v [tab x (enumLabel x) () | x <- [minBound .. maxBound]]
+    docName = \case
+      1 -> "Main.hs"
+      2 -> "Tabs.hs"
+      3 -> "README.md"
+      d -> "Untitled-" <> T.pack (show d) <> ".hs"
 
 panesTab :: NanoUI ()
 panesTab = do
-  showPaneHeaders <- useVar True
+  headers <- useVar True
   heading "Pane Grid"
   muted "Drag a divider to resize. Drop a pane on another pane's center to swap them, on its edge to split it, or on the grid's outer edge to restructure the grid."
   muted "+ splits vertically, = splits horizontally, x closes, M maximizes, R restores. Arrow keys move between panes while the grid is focused."
-  checkbox "Pane headers" showPaneHeaders
-  pgr <- paneGrid . demoPaneGridCfg =<< readVar showPaneHeaders
+  checkbox "Pane headers" headers
+  showHeaders <- readVar headers
+  panes <-
+    paneGrid
+      defaultPaneGridConfig
+        { pgLayout = fillW . fixedH 380
+        , pgSpacing = 4
+        , pgMinSize = 60
+        , pgLeeway = 6
+        , pgViewPane = paneView showHeaders
+        }
   separator
-  kv "Panes" (T.pack (show (pgrPaneCount pgr)))
-  kv "Focused" (T.pack (show (pgrFocusedPane pgr)))
-  kv "Maximized" (T.pack (show (pgrMaximizedPane pgr)))
+  kv "Panes" (T.pack (show (pgrPaneCount panes)))
+  kv "Focused" (T.pack (show (pgrFocusedPane panes)))
+  kv "Maximized" (T.pack (show (pgrMaximizedPane panes)))
 
-demoPaneGridCfg :: Bool -> PaneGridConfig
-demoPaneGridCfg showHeader =
-  defaultPaneGridConfig
-    { pgLayout = fillW . fixedH 380
-    , pgSpacing = 4
-    , pgMinSize = 60
-    , pgLeeway = 6
-    , pgViewPane = demoPaneView showHeader
-    }
-
-demoPaneTitle :: Word64 -> Bool -> T.Text
-demoPaneTitle pid maximized =
-  "Pane "
-    <> T.pack (show pid)
-    <> if maximized then "  (maximized)" else ""
-
--- | The header is just the pane's own content, so it is entirely optional:
--- 'showHeader' 'False' drops it and the pane becomes a bare canvas body. The
--- whole pane is still a drag handle either way ('pvDraggable'), so a headerless
--- pane can be grabbed anywhere to reorder it.
-demoPaneHeader :: Word64 -> Bool -> PaneGridCtx -> NanoUI ()
-demoPaneHeader pid maximized pctx =
-  rowWith (tight . gap gapMicro . alignMid . fillW) $ do
-    box (alignMid . fixedWH 3 16) demoAccent
-    labelWith (tight . alignMid . fontMedium) (demoPaneTitle pid maximized)
-    flex
-    whenM (button "+") (void (pgcSplit pctx AxisV))
-    whenM (button "=") (void (pgcSplit pctx AxisH))
-    whenM (button (if maximized then "R" else "M")) (if maximized then pgcRestore pctx else pgcMaximize pctx)
-    whenM (button "x") (pgcClose pctx)
-
--- | Each pane is a card, so panes stay distinct with the headers off.
-demoPaneView :: Bool -> Word64 -> PaneGridCtx -> NanoUI PaneView
-demoPaneView showHeader pid pctx = do
-  let maximized = pgcMaximized pctx
-  panelWith (padAll gapLayout . gap gapLayout . grow) $ do
+-- | A pane: a card under an optional header of controls. Either way the
+-- whole pane is a drag handle.
+paneView :: Bool -> Word64 -> PaneGridCtx -> NanoUI PaneView
+paneView showHeader pid pane = do
+  let maximized = pgcMaximized pane
+      title = "Pane " <> T.pack (show pid) <> if maximized then "  (maximized)" else ""
+  panelWith (padAll 10 . gap 10 . grow) $ do
     when showHeader $ do
-      demoPaneHeader pid maximized pctx
+      rowWith (tight . gap 6 . alignMid . fillW) $ do
+        box (alignMid . fixedWH 3 16) . themeAccent =<< uiTheme
+        labelWith (tight . alignMid . fontMedium) title
+        flex
+        whenM (button "+") (void (pgcSplit pane AxisV))
+        whenM (button "=") (void (pgcSplit pane AxisH))
+        whenM (button (if maximized then "R" else "M")) (if maximized then pgcRestore pane else pgcMaximize pane)
+        whenM (button "x") (pgcClose pane)
       separator
-    void $ muted ("Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it.")
-  pure
-    PaneView
-      { pvTitle = demoPaneTitle pid maximized
-      , pvDraggable = True
-      }
+    muted ("Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it.")
+  pure PaneView {pvTitle = title, pvDraggable = True}
 
-------------------------------------------------------------------------------
--- §9  Plots
-------------------------------------------------------------------------------
+-- Plots -----------------------------------------------------------------------
 
--- | Auto ticks, shared scales, and decimation. The chart data lives in
--- "DemoData" and below.
 plotsTab :: PlotCache -> NanoUI ()
 plotsTab cache = do
   heading "Plots"
   muted "Auto ticks, shared scales, and decimation."
   responsiveRowCol 760 (tight . gap 16 . fillW) $ do
     -- A crosshair cursor for reading values off the plot.
-    captioned "Sine + cosine" $
-      withCursorShape UiCursorCrosshair (plot cache (minH 240 . fillW) sineCosineChart)
-    captioned "Weekly counts" (barChart cache (minH 240 . fillW) weeklyBars)
+    figure "Sine + cosine" (withCursorShape UiCursorCrosshair (plot cache (minH 240 . fillW) sineCosineChart))
+    figure "Weekly counts" (barChart cache (minH 240 . fillW) weeklyBars)
   responsiveRowCol 760 (tight . gap 16 . fillW) $ do
-    captioned "Sleep vs focus" (plot cache (minH 240 . fillW) sleepFocusChart)
-    captioned "Area" (areaChart cache (minH 240 . fillW) areaDemo)
-  captioned "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
-  -- NanoUI.Path paths on a plain canvas, without diagrams: transforms, fill
-  -- rules, a gradient, joins, caps and dashes. The drawing reads only the
-  -- series colours (yellow, orange and accent among them) and its rect, so
-  -- it is keyed by them: the paths are flattened and triangulated once, not
-  -- on every frame, and a move only translates them.
-  captioned "Canvas paths" $ do
+    figure "Sleep vs focus" (plot cache (minH 240 . fillW) sleepFocusChart)
+    figure "Area" (areaChart cache (minH 240 . fillW) areaData)
+  figure "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
+  -- The canvas draws from the theme's series colours and its rect alone, so
+  -- it is keyed by those colours: its paths are triangulated once, not on
+  -- every frame.
+  figure "Canvas paths" $ do
     theme <- uiTheme
     canvasConfigured
       defaultCanvasConfig
@@ -1017,47 +740,24 @@ plotsTab cache = do
         }
       (pathSample theme)
 
--- Hours slept (X) vs focus score (Y).
-sleepFocus :: [(Double, Double)]
-sleepFocus =
-  [ (4.0, 3.0)
-  , (5.5, 4.5)
-  , (6.0, 6.0)
-  , (6.5, 7.5)
-  , (7.0, 8.0)
-  , (7.5, 8.5)
-  , (8.0, 7.5)
-  , (9.0, 6.5)
-  ]
-
-sleepFocusChart :: Chart
-sleepFocusChart =
-  withGrid GridBoth $
-    withLegend LegendRight $
-      withYAxis "focus" $
-        withXAxis "hours slept" $
-          chart [scatter "focus" sleepFocus, line "trend" sleepFocus]
-
-areaDemo :: [(Double, Double)]
-areaDemo = [(x, abs (sin x)) | x <- [0, 0.05 .. (2 * pi)]]
-
 drawingSample :: PlotStyle -> Diagram B
 drawingSample ps =
   (circle 0.45 # fc (plotFill ps) # lw none)
     <> (circle 0.28 # fc (plotInk ps) # lw none)
     <> (fromVertices [p2 (-0.5, -0.5), p2 (0.5, 0.5)] # lc (plotGrid ps) # lwO 1.5)
 
--- | A pie chart; a transformed star with an even-odd hole, a gradient fill and
--- a round-joined outline; and a dashed curve with round caps.
+-- | Paths from "NanoUI.Path": a pie chart; a turned star with an even-odd
+-- hole, a gradient fill and a round-joined outline; and a dashed curve with
+-- round caps.
 pathSample :: Theme -> Rect -> CanvasM ()
 pathSample theme (Rect x y _ h) = do
   let r = h / 2 - 8
       centre = V2 (x + h / 2) (y + h / 2)
       shares = [0.4, 0.25, 0.2, 0.15]
       starts = scanl (+) (-pi / 2) (map (* (2 * pi)) shares)
-  forM_ (zip3 starts shares (themeSeries theme)) $ \(a0, share, col) ->
+  for_ (zip3 starts shares (themeSeries theme)) $ \(a0, share, col) ->
     drawPath (P.moveTo centre <> P.arc centre r a0 (2 * pi * share) <> P.close) col
-  -- The star is built around the origin, then rotated and moved into place.
+  -- The star is built around the origin, then turned and moved into place.
   let star =
         P.polygon
           [ V2 (k * cos a) (k * sin a)
@@ -1076,112 +776,42 @@ pathSample theme (Rect x y _ h) = do
     (P.moveTo (V2 (x + 250) (y + h - 16)) <> P.cubicTo (V2 (x + 280) (y - 20)) (V2 (x + 310) (y + h + 20)) (V2 (x + 350) (y + 16)))
     (P.Solid (themeAccent theme))
 
-------------------------------------------------------------------------------
--- §10  Debug window content
-------------------------------------------------------------------------------
+-- The Debug window ------------------------------------------------------------
 
-type DebugRows = [(T.Text, T.Text)]
-
--- | A debug sample formatted for the toolbar and the Debug window.
-data DebugText = DebugText
-  { dtFps :: !T.Text
-  , dtFrame :: !DebugRows
-  , dtDraw :: !DebugRows
-  , dtDisplay :: !DebugRows
-  , dtRuntime :: !DebugRows
-  }
-
--- The backend samples at 4 Hz. Share the formatted text between samples
--- instead of running printf for every field on every continuous frame.
-data CachedDebugText = CachedDebugText !SdlDebugSnapshot !DebugText
-
--- | What the readouts show outside an SDL session.
-noDebugText :: DebugText
-noDebugText = DebugText T.empty [] [] [] []
-
-debugText :: IORef (Maybe CachedDebugText) -> SdlDebugSnapshot -> NanoUI DebugText
-debugText ref s =
-  liftIO $
-    readIORef ref >>= \case
-      Just (CachedDebugText previous cached) | previous == s -> pure cached
-      _ -> text <$ writeIORef ref (Just (CachedDebugText s text))
-  where
-    c = dbgCore s
-    text =
-      DebugText
-        { dtFps =
-            if dbgPresentFps c > 0
-              then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
-              else ""
-        , dtFrame =
-            [ ("present", T.pack (printf "%6.1f fps" (dbgPresentFps c)))
-            , ("loop", T.pack (printf "%6.1f fps" (dbgLoopFps c)))
-            , ("frame cpu", T.pack (printf "%7.2f ms" (dbgFrameMs c)))
-            , ("haskell", T.pack (printf "%7.2f ms" (dbgUiMs c + dbgRenderMs c)))
-            , ("  ui", T.pack (printf "%7.2f ms" (dbgUiMs c)))
-            , ("  render", T.pack (printf "%7.2f ms" (dbgRenderMs c)))
-            , ("sdl present", T.pack (printf "%7.2f ms" (dbgPresentMs c)))
-            , ("draws", T.pack (printf "%10d" (dbgPresents c)))
-            , ("skips", T.pack (printf "%10d" (dbgSkips c)))
-            ]
-        , dtDraw =
-            [ ("verts", T.pack (printf "%10d" (dbgVerts c)))
-            , ("indices", T.pack (printf "%10d" (dbgIndices c)))
-            , ("cmds", T.pack (printf "%10d" (dbgCmds c)))
-            ]
-        , dtDisplay =
-            [ ("window", T.pack (printf "%4.0fx%-5.0f" (dbgWinW c) (dbgWinH c)))
-            , ("refresh", T.pack (printf "%7d Hz" (dbgRefreshHz s)))
-            , ("scale", T.pack (printf "%10.2f" (dbgScale s)))
-            , ("mouse", T.pack (printf "%4.0f, %-4.0f" (dbgMouseX c) (dbgMouseY c)))
-            , ("renderer", dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off")
-            , ("font", T.pack (dbgFontPath s))
-            ]
-        , dtRuntime = dbgRts c
-        }
-
-debugBody :: DebugText -> NanoUI ()
-debugBody text =
+-- | The SDL backend's frame statistics, which it samples four times a second
+-- while something asks for them (here, while the window is open), and the
+-- layout overlay.
+debugBody :: NanoUI ()
+debugBody =
   columnWith (tight . gap 4 . minW 300 . fillW) $ do
-    for_ [("Frame", dtFrame), ("Draw", dtDraw), ("Display", dtDisplay), ("Runtime", dtRuntime)] $ \(title, rows) -> do
-      heading title
-      mapM_ (uncurry kvMono) (rows text)
-      separator
-    -- The overlay outlines every layout node; the rows describe the one
-    -- under the pointer.
+    stats <- askSdlDebug
+    scope . for_ stats $ \s ->
+      for_ (debugSections s) $ \(title, rows) -> do
+        heading title
+        mapM_ (uncurry kvMono) rows
+        separator
+    -- The overlay outlines every layout node; the rows describe the one under
+    -- the pointer. Its switch lives in the context, so the checkbox edits a
+    -- copy.
     heading "Layout"
-    -- The overlay's switch is a context setting, not a Var: the checkbox
-    -- edits a copy of it.
     on <- explainingLayout
     (_, explain) <- withValue on (checkbox "Outline layout nodes")
     explainLayout explain
     scope $ when explain (mapM_ (uncurry kvMono) . formatExplainRows =<< explainedNode)
 
-------------------------------------------------------------------------------
--- §11  CLI plumbing
-------------------------------------------------------------------------------
-
-demoOptions :: SdlOptions
-demoOptions =
-  defaultSdlOptions
-    { sdlAppShouldQuit = pressedOnceIn KeyEscape
-    , sdlAppTheme = Just defaultTheme
-    , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1280 800, wsMinSize = Just (Size 480 360)}
-    }
-
--- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text.
-options :: [OptDescr (Maybe (SdlOptions -> SdlOptions))]
-options =
-  [ Option ['v'] ["vsync"] (ReqArg (\s -> Just $ \o -> o {sdlAppVsync = s `elem` ["true", "True", "1"]}) "BOOL") "Enable or disable vsync (true/false, default: true)"
-  , Option ['c', 'b', 'f'] ["continuous", "benchmark", "fps"] (NoArg (Just $ \o -> o {sdlAppContinuous = True, sdlAppVsync = False})) "Continuous unthrottled rendering, to show uncapped FPS (disables vsync)"
-  , Option [] ["explain"] (NoArg (Just $ \o -> o {sdlExplainLayout = True})) "Start with the layout overlay on, which outlines every layout node"
-  , Option ['F'] ["fullscreen"] (NoArg (Just $ withWindow (\w -> w {wsMode = Fullscreen}))) "Launch window in fullscreen mode"
-  , Option [] ["borderless"] (NoArg (Just $ \o -> o {sdlWindowDecorations = DecorationsFrame})) "Launch borderless window"
-  , Option ['t'] ["always-on-top"] (NoArg (Just $ \o -> o {sdlWindowAlwaysOnTop = True})) "Keep window always on top"
-  , Option ['W'] ["width"] (ReqArg (\s -> size (\w sz -> sz {sizeW = w}) s) "PX") "Initial window width in pixels (default: 1280)"
-  , Option ['H'] ["height"] (ReqArg (\s -> size (\h sz -> sz {sizeH = h}) s) "PX") "Initial window height in pixels (default: 800)"
-  , Option ['h', '?'] ["help"] (NoArg Nothing) "Show help and command-line options"
+debugSections :: SdlDebugSnapshot -> [(Text, [(Text, Text)])]
+debugSections s =
+  [ ("Frame", formatFpsRows c)
+  , ("Draw", formatDrawRows c)
+  , ( "Display"
+    , [ ("window", T.pack (printf "%.0f x %.0f" (dbgWinW c) (dbgWinH c)))
+      , ("refresh", T.pack (printf "%d Hz" (dbgRefreshHz s)))
+      , ("scale", T.pack (printf "%.2f" (dbgScale s)))
+      , ("renderer", dbgRenderer s <> if dbgVsync s then ", vsync on" else ", vsync off")
+      , ("font", T.pack (dbgFontPath s))
+      ]
+    )
+  , ("Runtime", dbgRts c)
   ]
   where
-    size f s = Just $ maybe id (\px -> withWindow (\w -> w {wsSize = f px (wsSize w)})) (readMaybe s)
-    withWindow f o = o {sdlWindowSettings = f (sdlWindowSettings o)}
+    c = dbgCore s

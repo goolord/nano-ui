@@ -93,13 +93,13 @@ library demo-common
         nano-ui ^>=0.2,
         nano-ui-diagrams ^>=0.2,
         nano-ui-sdl ^>=0.2,
-        primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13
     if !os(windows)
         exposed-modules:  SdlTerminal
         c-sources:        cbits/terminal-size.c
         build-depends:
+            primitive ^>=0.9,
             streaming ^>=0.2,
             unix ^>=2.8
 

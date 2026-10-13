@@ -10,6 +10,8 @@ module DemoData
   , demoTree
   , sineCosineChart
   , weeklyBars
+  , sleepFocusChart
+  , areaData
   , demoSwatches
   , demoLandscape
   ) where
@@ -97,6 +99,18 @@ weeklyBars =
   , ("Thu", 7)
   , ("Fri", 3)
   ]
+
+-- | Hours slept against a focus score, with a trend line.
+sleepFocusChart :: Chart
+sleepFocusChart =
+  withGrid GridBoth . withLegend LegendRight . withYAxis "focus" . withXAxis "hours slept" $
+    chart [scatter "focus" points, line "trend" points]
+  where
+    points = [(4, 3), (5.5, 4.5), (6, 6), (6.5, 7.5), (7, 8), (7.5, 8.5), (8, 7.5), (9, 6.5)]
+
+-- | One period of @|sin x|@, for the area chart.
+areaData :: [(Double, Double)]
+areaData = [(x, abs (sin x)) | x <- [0, 0.05 .. (2 * pi)]]
 
 -- | Captioned 32x32 RGBA images.
 demoSwatches :: [(T.Text, BS.ByteString)]
