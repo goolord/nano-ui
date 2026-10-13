@@ -94,9 +94,13 @@ editorView editor = textAreaDocument (document editor)
 
 `readVar` reads a Var where you show it. `writeVar` replaces the value and
 `modifyVar` applies a pure function to the latest one, so successive changes
-compose even within a frame; equal writes do nothing. `peekVar` from `NanoUI.Var` reads without
-the bookkeeping below, for a value that drives an action rather than a
-drawing. `readVarIO` and `modifyVarIO` work from IO and other threads; after
+compose even within a frame; equal writes do nothing. Use `readVar` in event
+handlers too: reading a Var and then writing it costs at most one more view
+pass, on the frame the event happened. To know whether an input changed its
+Var, use its primed variant's `respChanged`. `peekVar` from `NanoUI.Var` reads
+without the bookkeeping below, for a value carried from one frame to the next
+and compared with the current one, which a second view pass would otherwise
+see already updated. `readVarIO` and `modifyVarIO` work from IO and other threads; after
 writing from another thread, run the action from `askWake` so the view runs.
 Allocation belongs outside the view: `liftIO (newVar initial)` inside a view
 would make a new Var on every pass.

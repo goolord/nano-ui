@@ -135,7 +135,8 @@ textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 textArea :: Var Text -> NanoUI ()
 textArea v = void (textAreaWith' id v)
 
--- | 'textArea' returning its 'Response'.
+-- | 'textArea' returning its 'Response'. 'respChanged' reports a frame
+-- that changed the text; caret and selection moves leave it unset.
 {-# INLINE textArea' #-}
 textArea' :: Var Text -> NanoUI Response
 textArea' = textAreaWith' id
@@ -182,7 +183,8 @@ textAreaText f value = do
 textAreaDocument :: Var TextDocument -> NanoUI ()
 textAreaDocument v = void (textAreaDocumentWith' id v)
 
--- | 'textAreaDocument' returning its 'Response'.
+-- | 'textAreaDocument' returning its 'Response'. 'respChanged' reports a
+-- frame that changed the document; caret and selection moves leave it unset.
 {-# INLINE textAreaDocument' #-}
 textAreaDocument' :: Var TextDocument -> NanoUI Response
 textAreaDocument' = textAreaDocumentWith' id
@@ -234,13 +236,13 @@ textAreaCore f wid value = do
         $ store0
   store <- liftIO (getStore ctx)
   let current = maybe value bufferDocument (lookupSlot fieldBuffer bufKey store)
-      -- Set by commands run outside the frame ('applyTextFieldCommand') whose
-      -- edits carry no keys or chars; folded into 'changed' so the caller
-      -- gets its respChanged pulse, then cleared in the state write below.
+      -- Set by commands run outside the frame ('applyTextFieldCommand') that
+      -- changed the text; their edits carry no keys or chars, so this is the
+      -- caller's respChanged pulse for them. Cleared in the state write below.
       menuPulse = memberSlot fieldInt changedSlotKey store
   isFocus <- keyboardFocused wid
   when isFocus $ liftIO (requestInputMethod ctx wid Nothing InputNormal)
-  (newDoc, stateChanged) <-
+  (newDoc, edited) <-
     if isFocus
       then do
         editFm <-
@@ -264,10 +266,10 @@ textAreaCore f wid value = do
               | otherwise = current
             changed =
               textChanged
+                || menuPulse
                 || TB.getCursor newBuf /= TB.getCursor (buffer oldState)
                 || selectionAnchor newState /= selectionAnchor oldState
                 || scrollOffset newState /= scrollOffset oldState
-                || menuPulse
         -- Saving writes the new buffer, which is the document, and drops the
         -- menu pulse. The store damage is keyed on slots, not the widget, so
         -- damage the widget itself: a selection-only change (Ctrl+A) would
@@ -276,7 +278,7 @@ textAreaCore f wid value = do
           liftIO $ do
             damageWidget ctx wid DamageSelf
             modifyStore ctx (deleteSlot fieldInt changedSlotKey . saveTextAreaState key newState)
-        pure (doc, changed)
+        pure (doc, textChanged || menuPulse)
       else do
         -- A command run on the unfocused area ('applyTextFieldCommand') still
         -- pulses this frame's respChanged, once.
@@ -293,7 +295,9 @@ textAreaCore f wid value = do
         Just seen | sameDocument seen newDoc -> st
         _ -> insertSlot fieldDocument seenKey newDoc st
   resp <- addWidget wid NodeTextArea "" 0 layout
-  pure (setChanged stateChanged resp, newDoc)
+  -- respChanged reports an edit to the text, as on a text input; caret,
+  -- selection and scroll moves only repaint the area.
+  pure (setChanged edited resp, newDoc)
 
 -- | The text area's 'TB.TextBuffer', which holds its document and caret. The
 -- widget stores one over the lines of every document it adopts, so it is only

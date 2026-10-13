@@ -123,10 +123,12 @@ readVarSig sig (VarRef cell@(Cell ref _) l) = withContext $ \ctx -> do
       when changed (setFlag ctx flagFull)
   peekLens l =<< readIORef ref
 
--- | The Var's current value, without recording the read: for a value used
--- in a decision whose effects show elsewhere, such as starting a task.
--- Nothing drawn from it is redrawn when the Var changes later in the
--- frame; draw from 'readVar'.
+-- | The Var's current value, without recording the read: for a value
+-- carried from one frame to the next and compared with this frame's, which
+-- a second view pass would see already updated. Nothing drawn from it is
+-- redrawn when the Var changes later in the frame; draw from 'readVar'.
+-- Event handlers need no peek: a 'readVar' there followed by a write costs
+-- at most one more pass, on the frame of the event.
 peekVar :: Var a -> NanoUI a
 peekVar v = liftIO (readVarIO v)
 

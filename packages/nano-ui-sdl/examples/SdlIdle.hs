@@ -37,7 +37,6 @@ import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (askContext, markDirty)
-import NanoUI.Var (peekVar)
 import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_TextInputEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -102,7 +101,7 @@ idleUi scene frames started typedAt = do
     when (scene `elem` ["focus", "type"] && n < 4) $
       requestFocus (respId resp)
     when (scene == "type" && respChanged resp) $ do
-      committed <- peekVar query
+      committed <- readVar query
       liftIO $ do
         now <- getMonotonicTime
         sent <- readIORef typedAt

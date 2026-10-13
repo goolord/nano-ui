@@ -38,6 +38,7 @@ tests =
   , spec "text-undo" runTextUndoTest
   , spec "text-area-width-tracking" runTextAreaWidthTrackingTest
   , spec "text-area-document" runTextAreaDocumentTest
+  , spec "text-area-changed-means-edited" runTextAreaChangedTest
   , spec "text-area-spans" runTextAreaSpansTest
   , spec "text-input-cursor" runTextInputCursorTest
   , spec "text-input-batch" runTextInputBatchTest
@@ -183,6 +184,19 @@ runTextAreaCutClearsSelectionTest ctx failed = do
   assertEq failed (Just "hello") =<< readIORef clipRef
   assertEq failed cutVal ""
   assertEq failed "z" . snd =<< evalUi ctx' (inp0 {inputChars = "z"}) ui
+
+-- A text area's respChanged reports an edit to its text, as a text input's
+-- does: moving the caret or selecting leaves it unset.
+runTextAreaChangedTest :: Context -> IORef Int -> IO ()
+runTextAreaChangedTest ctx failed = do
+  textRef <- newVar "hello"
+  let inp0 = withInput 320 220
+      ui = column (fst <$> held textRef textArea')
+  warmupFocused ctx inp0 ui
+  assert failed . not . respChanged =<< evalUi ctx (keyInp KeyLeft inp0) ui
+  assert failed . not . respChanged =<< evalUi ctx (chordInp (ctrl <> key 'a') inp0) ui
+  assert failed . respChanged =<< evalUi ctx (inp0 {inputChars = "z"}) ui
+  assertEq failed "z" =<< readVarIO textRef
 
 runTextInputSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputSelectionTest ctx failed = do
@@ -814,7 +828,8 @@ runTextAreaDocumentTest ctx failed = do
   assert failed (sameDocument idleIn idleOut)
   assert failed (not (respChanged idleResp))
   (moveIn, moveResp, moveOut, _) <- frame (keyInp KeyDown inp)
-  assert failed (respChanged moveResp)
+  -- A caret move is no edit: the document is the one passed in.
+  assert failed (not (respChanged moveResp))
   assert failed (sameDocument moveIn moveOut)
   (typedIn, typedResp, typedOut, undoable) <- frame inp {inputChars = "x"}
   assert failed (respChanged typedResp)

@@ -34,7 +34,6 @@ import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import NanoUI.Shortcut
-import NanoUI.Var (peekVar)
 
 -- | The action log, newest first. A list is no positional slot type, so it
 -- lives in a 'Var' made at setup.
@@ -71,10 +70,10 @@ keyboardApp app = do
   let logged msg = modifyVar (appLog app) (take 6 . (msg :))
       save = do
         modifyVar saves (+ 1)
-        n <- peekVar saves
+        n <- readVar saves
         logged ("Saved (" <> T.pack (show n) <> ")")
       toggleBold = do
-        wasBold <- peekVar boldVar
+        wasBold <- readVar boldVar
         writeVar boldVar (not wasBold)
         logged (if wasBold then "Bold off" else "Bold on")
   columnWith (padAll 20 . gap 14 . fillW . fillH) $ do

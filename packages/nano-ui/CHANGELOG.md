@@ -37,6 +37,11 @@
   `Response` and the body's result, for a flag derived from other state or
   one the caller may refuse to clear, passed as a constant.
 
+  `respChanged` on `textArea'` and `textAreaDocument'` reports an edit to
+  the text, as on `textInput'`; caret, selection and scroll moves no longer
+  set it, so `when (respChanged r) (writeVar dirty True)` needs no
+  comparison of the value before and after.
+
   | Removed | Replacement |
   | --- | --- |
   | `(t, setT) <- useText x`; `setT =<< textInput t` | `t <- useVar x`; `textInput t` |

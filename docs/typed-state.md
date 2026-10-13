@@ -81,8 +81,11 @@ whole Var, a part through `zoomVar`, or `withElemVars`' list counts as a read
 of all of it. A write that changes an element's key counts as a write to its
 whole list.
 
-`peekVar`, from `NanoUI.Var`, reads without tracking, for a value that drives an action rather
-than a drawing. `readVarIO`, `writeVarIO` and `modifyVarIO` work from IO and
+`readVar` is right in event handlers too: a read followed by a write costs
+at most one more view pass, on that frame. `peekVar`, from `NanoUI.Var`, reads
+without tracking, for a value carried from one frame to the next and compared
+with the current one, which a second pass would otherwise see already
+updated. `readVarIO`, `writeVarIO` and `modifyVarIO` work from IO and
 other threads with no bookkeeping; after writing from another thread, run the
 action from `askWake` so the view runs.
 

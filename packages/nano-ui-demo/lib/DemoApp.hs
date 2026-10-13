@@ -6,7 +6,7 @@ module DemoApp
   ) where
 
 import Data.Foldable (for_)
-import NanoUI (Input (..), NanoUI, Size (..), V2 (..), Var, WindowMode (..), WindowSettings (..), defaultWindowSettings, writeVar)
+import NanoUI (Input (..), NanoUI, Size (..), V2 (..), Var, WindowMode (..), WindowSettings (..), defaultWindowSettings, readVar, writeVar)
 import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
   ( FileDialogId
@@ -18,7 +18,6 @@ import NanoUI.Backend.Sdl
   , withSdl
   )
 import NanoUI.Testing (Context, newPixelContext)
-import NanoUI.Var (peekVar)
 
 -- | Poll the dialog handle held in @dialog@; on completion clear it and hand
 -- the chosen paths to the caller. Anything other than 'FileDialogPending'
@@ -28,7 +27,7 @@ useFileDialog ::
   ([FilePath] -> NanoUI ()) ->
   NanoUI ()
 useFileDialog dialog onPaths = do
-  pending <- peekVar dialog
+  pending <- readVar dialog
   for_ pending $ \did ->
     pollFileDialogUi did >>= \case
       FileDialogPending -> pure ()

@@ -425,7 +425,7 @@ appearanceControls st = do
   fResp <- demoField "Font" (comboBox' "Font" (demoFontFamilies st) fontChoice)
   tooltip fResp "Type to filter; Enter applies, Esc reverts."
   when (respChanged fResp) $ do
-    family <- peekVar fontChoice
+    family <- readVar fontChoice
     unless (T.null family) $
       setSdlUiFont (FontSearch [T.unpack family])
   separator
@@ -814,7 +814,7 @@ listTab st = do
   findPressed <- shortcut (ctrl <> key 'f')
   when findPressed (requestFocus (respId qResp))
   when (respChanged qResp) $ do
-    qVal <- peekVar searchText
+    qVal <- readVar searchText
     writeVar searchQuery qVal
     writeVar (demoPeopleMatches st) (peopleMatching qVal)
   query <- readVar searchQuery

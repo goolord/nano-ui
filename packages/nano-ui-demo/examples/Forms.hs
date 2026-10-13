@@ -34,7 +34,6 @@ import GHC.Generics (Generic)
 import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
-import NanoUI.Var (peekVar)
 
 data Form = Form
   { formName :: !Text
@@ -120,7 +119,7 @@ signUp app = do
       let entered = any respSubmitted [nameR, emailR, ageR, passwordR, confirmR]
       when (clicked || (entered && agreed)) $ do
         writeVar form.formTried True
-        valid <- formValid <$> peekVar form
+        valid <- formValid <$> readVar form
         when valid (writeVar welcomed True)
   -- Escape, a click outside, or the close button close the modal.
   modal welcomed "Welcome aboard" $ do

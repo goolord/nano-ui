@@ -37,7 +37,6 @@ import NanoUI.Backend.Sdl
   , runSdlApp
   )
 import NanoUI.Shortcut (ctrl, key)
-import NanoUI.Var (peekVar)
 import System.FilePath (takeFileName)
 
 -- | State the view needs beyond what positional Vars hold: the two pending
@@ -75,7 +74,7 @@ view app = do
       -- Writing a small file is quick, so it happens right here. A large one
       -- would go through a task like the read below.
       writeTo file = do
-        contents <- peekVar text
+        contents <- readVar text
         result <- liftIO (try (BS.writeFile file (TE.encodeUtf8 contents)))
         case result of
           Left (err :: IOException) -> writeVar status ("Could not save: " <> T.pack (displayException err))
@@ -84,7 +83,7 @@ view app = do
             writeVar dirty False
             writeVar status ("Saved " <> T.pack file)
       save = do
-        saved <- peekVar path
+        saved <- readVar path
         if T.null saved then askSave else writeTo (T.unpack saved)
 
   pollDialog (appOpenDialog app) (writeVar reading . T.pack)
@@ -130,17 +129,15 @@ view app = do
         labelWith fontMuted (if over then "Release to open the file" else "Drop a file here to open it")
     writeVar hovering (dropHovered target)
     when (dropReceived target) $ for_ (listToMaybe (dropFiles target)) (writeVar reading)
-    before <- peekVar text
-    textAreaWith grow text
-    -- Caret moves leave the text as it was.
-    after <- peekVar text
-    when (after /= before) (writeVar dirty True)
+    -- respChanged reports an edit, not a caret move.
+    edited <- textAreaWith' grow text
+    when (respChanged edited) (writeVar dirty True)
 
 -- | Poll a pending dialog once a frame. When it finishes, forget the handle
 -- and pass on the first chosen path; a cancel just forgets it.
 pollDialog :: Var (Maybe FileDialogId) -> (FilePath -> NanoUI ()) -> NanoUI ()
 pollDialog pending onPath =
-  peekVar pending >>= \handle -> for_ handle $ \dialog ->
+  readVar pending >>= \handle -> for_ handle $ \dialog ->
     pollFileDialogUi dialog >>= \case
       FileDialogPending -> pure ()
       FileDialogSelected chosen -> writeVar pending Nothing >> for_ (listToMaybe chosen) onPath

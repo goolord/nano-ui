@@ -13,7 +13,7 @@ module SdlNotepad
   ) where
 
 import Control.Exception (SomeException, try)
-import Control.Monad (unless, when)
+import Control.Monad (when)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
 import Data.Either (isRight)
@@ -26,7 +26,6 @@ import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Shortcut
-import NanoUI.Var (peekVar)
 
 --------------------------------------------------------------------------------
 -- Application entry point
@@ -94,7 +93,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
   useFileDialog saveDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       writeVar openMenu ""
-      saved <- writeDocument filePath =<< peekVar doc
+      saved <- writeDocument filePath =<< readVar doc
       if saved
         then do
           writeVar docPath (T.pack filePath)
@@ -112,11 +111,11 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
       writeVar statusMsg "New document"
 
     saveDocument forceDialog = do
-      path <- peekVar docPath
+      path <- readVar docPath
       if forceDialog || T.null path
         then writeVar saveDlg . Just =<< askSaveFileDialog defaultFileDialogOptions
         else do
-          saved <- writeDocument (T.unpack path) =<< peekVar doc
+          saved <- writeDocument (T.unpack path) =<< readVar doc
           if saved
             then do
               writeVar docDirty False
@@ -129,7 +128,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     -- A menu row and its action; running it closes the menu.
     item menuRow action = whenM menuRow (writeVar openMenu "" >> action)
     editItem name chord cmd =
-      item (menuItemShortcut name chord) (peekVar editorId >>= \editor -> runTextCommand editor cmd)
+      item (menuItemShortcut name chord) (readVar editorId >>= \editor -> runTextCommand editor cmd)
 
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
@@ -139,7 +138,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
     -- Quit, or ask first when there are unsaved changes.
     exitApp = do
-      dirty <- peekVar docDirty
+      dirty <- readVar docDirty
       if dirty then writeVar confirmExit True else quitUi
     exitCmd = ("Exit", ctrl <> key 'q', exitApp)
     zoomInCmd = ("Zoom In", ctrl <> key '=', zoomIn)
@@ -156,7 +155,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
       commandItem exitCmd
 
     editMenu = do
-      editor <- peekVar editorId
+      editor <- readVar editorId
       canUndo <- textCanUndo editor
       canRedo <- textCanRedo editor
       if canUndo then editItem "Undo" (ctrl <> key 'z') Undo else menuItemDisabled "Undo"
@@ -176,7 +175,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
       commandItem zoomOutCmd
       commandItem resetZoomCmd
       menuSeparator
-      item (menuItem "Document Statistics") (writeVar statusMsg . documentStats . documentText =<< peekVar doc)
+      item (menuItem "Document Statistics") (writeVar statusMsg . documentStats . documentText =<< readVar doc)
 
     helpMenu = do
       item (menuItem "About nano-ui Notepad") (writeVar aboutOpen True)
@@ -206,17 +205,13 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     -- zoom.
     gen <- readVar docGen
     zoomVal <- readVar zoom
-    before <- peekVar doc
     editorResp <-
       withKey gen $
         textAreaDocumentWith'
           (grow . minW 240 . minH 160 . fontSizeScale zoomVal)
           doc
-    -- respChanged also pulses for cursor moves, which leave the document as
-    -- it was.
-    when (respChanged editorResp) $ do
-      edited <- peekVar doc
-      unless (sameDocument edited before) (writeVar docDirty True)
+    -- respChanged reports an edit, not a caret move.
+    when (respChanged editorResp) (writeVar docDirty True)
     writeVar editorId (respId editorResp)
 
     whenM (readVar showStatus) $ do
