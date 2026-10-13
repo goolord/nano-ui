@@ -8,7 +8,6 @@ module NanoUI.Internal.Widgets.Popup
   , popup'
   , popupWith
   , popupWith'
-  , popupShown
   , bindOpen
   , floatingOverlay
   , tooltipWidget
@@ -37,8 +36,8 @@ import NanoUI.Internal.Store (deleteSlot, fieldQuiet, findSlot, insertSlot)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Tasks (holdAction)
 import NanoUI.Internal.Types
-import NanoUI.Internal.Var (Binding (..), bindVarBy)
-import NanoUI.Internal.Var.Types (Var)
+import NanoUI.Internal.Var (Binding (..), bindVar)
+import NanoUI.Internal.Var.Types (Var, constVar)
 import NanoUI.Internal.Widgets.Behavior (useDismissable)
 import NanoUI.Internal.Widgets.Layout (label)
 import NanoUI.Internal.Widgets.Node
@@ -96,10 +95,12 @@ popupWith' open cfg f child = bindOpen open (\shown -> popupShown shown cfg f ch
 -- | Run a floating panel on the open flag in a Var, writing 'False' when
 -- the panel reports a dismissal. The panel drew itself open before the
 -- dismissal resolved, so a dismissal runs the view again.
+{-# INLINE bindOpen #-}
 bindOpen :: Var Bool -> (Bool -> NanoUI (Response, Maybe a)) -> NanoUI (Response, Maybe a)
-bindOpen v run = bindVarBy (==) Conservative v $ \open -> do
+bindOpen v run = bindVar Conservative v $ \open -> do
   r <- run open
-  pure (r, open && not (respClicked (fst r)))
+  let !keep = open && not (respClicked (fst r))
+  pure (r, keep)
 
 -- | 'popupWith'' on a plain open flag. The 'Response' reports a dismissal
 -- as a click, and the caller closes the popup.
@@ -235,7 +236,7 @@ tooltipWidgetConfigured cfg target child = do
   let (anchor, placement)
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
-  result <- snd <$> popupShown open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) id child
+  result <- snd <$> popupWith' (constVar open) ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) id child
   -- A tooltip the view stops declaring while it waits or shows forgets its
   -- time: the frame that skips it runs its cleanup ('holdAction'). Coming
   -- back, it waits out its delay again rather than opening at once or

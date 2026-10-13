@@ -264,9 +264,9 @@ textAreaCore f wid value = do
             doc
               | textChanged = bufferDocument newBuf
               | otherwise = current
+            edited = textChanged || menuPulse
             changed =
-              textChanged
-                || menuPulse
+              edited
                 || TB.getCursor newBuf /= TB.getCursor (buffer oldState)
                 || selectionAnchor newState /= selectionAnchor oldState
                 || scrollOffset newState /= scrollOffset oldState
@@ -278,7 +278,7 @@ textAreaCore f wid value = do
           liftIO $ do
             damageWidget ctx wid DamageSelf
             modifyStore ctx (deleteSlot fieldInt changedSlotKey . saveTextAreaState key newState)
-        pure (doc, textChanged || menuPulse)
+        pure (doc, edited)
       else do
         -- A command run on the unfocused area ('applyTextFieldCommand') still
         -- pulses this frame's respChanged, once.

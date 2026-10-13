@@ -12,27 +12,25 @@ module NanoUI.Internal.Var.Types
   , Lens (..)
   , ElemCtx (..)
   , viewLens
-  , overLens
+  , overLensSig
   , peekLens
   , zoomVar
   , zoomVarL
   , fieldLens
   , newElemCtx
-  , keyStep
+  , stepBit
   , lensSig
   , structSig
-  , writeSig
   , VarSlot (..)
   , SlotVar (..)
   )
 where
 
-import Control.Applicative ((<|>))
 import Data.Bits (bit, (.&.))
 import Data.Functor.Const (Const (..))
 import Data.Functor.Identity (Identity (..))
 import Data.HashMap.Strict qualified as HM
-import Data.Hashable (Hashable, hash)
+import Data.Hashable (Hashable)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -93,17 +91,26 @@ viewLens (Field _ l g _) s = g (viewLens l s)
 viewLens (Elem _ (ElemCtx l key _ _) k snap) s =
   fromMaybe snap (find ((== k) . key) (viewLens l s))
 
--- | Change the part of @s@ a lens shows. Changing an element whose key has
--- left the list changes nothing. Keys are unique, so only the elements
--- before the changed one are copied.
-overLens :: Lens s a -> (a -> a) -> s -> s
-overLens Here f s = f s
-overLens (Field _ l g set) f s = overLens l (\b -> let !a = f (g b) in set a b) s
-overLens (Elem _ (ElemCtx l key _ _) k _) f s = overLens l update s
+-- | Change the part of @s@ a lens shows, and say which part of @s@ that
+-- touched ('lensSig'): the lens's own part or, when the change gave a list
+-- element a new key, the whole of the outermost such list, keys and order
+-- included. Changing an element whose key has left the list changes
+-- nothing. Keys are unique, so only the elements before the changed one are
+-- copied.
+overLensSig :: Lens s a -> (a -> a) -> s -> (s, Sig)
+overLensSig l f s = case overPath l (\a -> (f a, Nothing)) s of
+  (s', rekeyed) -> (s', fromMaybe (lensSig l) rekeyed)
+
+-- | 'overLensSig' over a change that may itself report a rekeyed list.
+overPath :: Lens s a -> (a -> (a, Maybe Sig)) -> s -> (s, Maybe Sig)
+overPath Here f s = f s
+overPath (Field _ l g set) f s = overPath l (\b -> case f (g b) of (!a, w) -> (set a b, w)) s
+overPath (Elem _ (ElemCtx l key _ _) k _) f s = overPath l update s
   where
     update xs = case break ((== k) . key) xs of
-      (before, x : after) -> let !y = f x in before ++ y : after
-      (_, []) -> xs
+      (before, x : after) -> case f x of
+        (!y, w) -> (before ++ y : after, if key y == k then w else Just (lensSig l))
+      (_, []) -> (xs, Nothing)
 
 -- | 'viewLens', using an element's index instead of a linear search: the
 -- snapshot when the list is the one handed out, else an index of the
@@ -156,30 +163,11 @@ structSig l = case lensSig l of
 structBit :: Word64
 structBit = bit 63
 
--- | A field's or key's bit, from a number: any bit but 'structBit'.
+-- | A field's or key's bit, from a number such as a key's hash: any bit but
+-- 'structBit'.
 {-# INLINE stepBit #-}
 stepBit :: Int -> Word64
-stepBit n = bit ((n .&. maxBound) `rem` 63)
-
--- | A list key's bit.
-{-# INLINE keyStep #-}
-keyStep :: Hashable k => k -> Word64
-keyStep = stepBit . hash
-
--- | The part a write through a path touched, given the cell's new value:
--- the path's own part or, when the write changed an element's key, the
--- whole of that element's list, keys and order included.
-writeSig :: Lens s a -> s -> Sig
-writeSig l s = maybe (lensSig l) (\(SomeLens l') -> lensSig l') (rekeyed l s)
-
-data SomeLens s = forall b. SomeLens (Lens s b)
-
--- | The outermost list on the path that no longer holds the path's key.
-rekeyed :: Lens s a -> s -> Maybe (SomeLens s)
-rekeyed Here _ = Nothing
-rekeyed (Field _ l _ _) s = rekeyed l s
-rekeyed (Elem _ (ElemCtx l key _ _) k _) s =
-  rekeyed l s <|> (if any ((== k) . key) (viewLens l s) then Nothing else Just (SomeLens l))
+stepBit n = let i = n .&. 63 in bit (if i == 63 then 62 else i)
 
 -- | Focus a Var on part of its value, given how to read the part and how to
 -- replace it. Writes through the result change that part of the whole.

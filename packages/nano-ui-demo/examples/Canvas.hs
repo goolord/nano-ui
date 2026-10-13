@@ -30,7 +30,6 @@ import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import qualified NanoUI.Path as P
 import NanoUI.Shortcut (ctrl, key)
-import NanoUI.Var (peekVar)
 
 main :: IO ()
 main = do
@@ -127,7 +126,7 @@ view st = do
     drag <- useDrag2DOn resp
     let Rect rx ry _ _ = respRect resp
         here = v2Sub (dragPosition drag) (V2 rx ry)
-    w <- peekVar width
+    w <- readVar width
     case (dragActive drag, live) of
       (True, Nothing) -> writeVar (liveVar st) (Just (Ink colour w [here]))
       -- Skip moves under a pixel: they add points without changing the line.

@@ -8,17 +8,17 @@ module NanoUI.Internal.Var.Cell
   , newCell
   , newInertCell
   , isInert
-  , readStamp
   , Sig (..)
   , allBits
-  , sigHits
   , obsSet
   , seenSet
   , setHits
+  , passHits
+  , seenWhole
   , addToSet
-  , chgSlot
   , changedSince
   , addChange
+  , orWord
   , nextTick
   , newStamps
   , passSlot
@@ -140,33 +140,47 @@ bitsHit :: Cell s -> Int -> Sig -> IO Bool
 bitsHit cell at sig =
   sigHits <$> readStamp cell at <*> readStamp cell (at + 1) <*> readStamp cell (at + 2) <*> pure sig
 
+-- | Whether the obs and seen sets, stamped @p@, hold a path overlapping
+-- @sig@: whether something observed the part in this pass, and whether a
+-- tracked read saw it.
+{-# INLINE passHits #-}
+passHits :: Cell s -> Word64 -> Sig -> IO (Bool, Bool)
+passHits cell p sig = (,) <$> setHits cell obsSet p sig <*> setHits cell seenSet p sig
+
+-- | Whether the seen set, stamped @p@, already holds the whole of the part
+-- a one-level path names, so a read of it again records nothing new.
+{-# INLINE seenWhole #-}
+seenWhole :: Cell s -> Word64 -> Sig -> IO Bool
+seenWhole cell p (Sig a b _)
+  | b /= allBits = pure False
+  | otherwise = do
+      t0 <- readStamp cell seenSet
+      if t0 /= p then pure False else (\w -> w .&. a == a) <$> readStamp cell (seenSet + 1)
+
 -- | Add the path to the set at @set@ under tick @t@, emptying it first if it
 -- holds another tick's paths.
 {-# INLINE addToSet #-}
 addToSet :: Cell s -> Int -> Word64 -> Sig -> IO ()
 addToSet cell set t sig = do
   t0 <- readStamp cell set
-  if t0 == t
-    then orBits cell (set + 1) sig
-    else do
-      writeStamp cell set t
-      putBits cell (set + 1) sig
+  when (t0 /= t) (writeStamp cell set t)
+  addBits cell (set + 1) (t0 /= t) sig
 
--- | Write a path's bits over the three bit slots from @at@.
-putBits :: Cell s -> Int -> Sig -> IO ()
-putBits cell at (Sig a b _)
-  | b == allBits = writeStamp cell at a >> writeStamp cell (at + 1) 0 >> writeStamp cell (at + 2) 0
-  | otherwise = writeStamp cell at 0 >> writeStamp cell (at + 1) a >> writeStamp cell (at + 2) b
+-- | Add a path's bits to the three bit slots from @at@, clearing them first
+-- when @fresh@.
+addBits :: Cell s -> Int -> Bool -> Sig -> IO ()
+addBits (Cell _ stamps) at fresh (Sig a b _) = do
+  when fresh (setPrimArray stamps at 3 0)
+  if b == allBits
+    then orWord stamps at a
+    else orWord stamps (at + 1) a >> orWord stamps (at + 2) b
 
--- | Add a path's bits to the three bit slots from @at@.
-orBits :: Cell s -> Int -> Sig -> IO ()
-orBits cell at (Sig a b _)
-  | b == allBits = orStamp at a
-  | otherwise = orStamp (at + 1) a >> orStamp (at + 2) b
-  where
-    orStamp i x = do
-      old <- readStamp cell i
-      when (old .|. x /= old) (writeStamp cell i (old .|. x))
+-- | Set bits in one word of a prim array, writing only when that changes it.
+{-# INLINE orWord #-}
+orWord :: MutablePrimArray RealWorld Word64 -> Int -> Word64 -> IO ()
+orWord arr i x = do
+  old <- readPrimArray arr i
+  when (old .|. x /= old) (writePrimArray arr i (old .|. x))
 
 -- | Whether a part @sig@ overlaps changed after tick @base@. When the
 -- change set starts later than @base@, as after another session's change,
@@ -180,18 +194,16 @@ changedSince cell base sig = do
       from <- readStamp cell (chgSlot + 1)
       if from > base then pure True else bitsHit cell (chgSlot + 2) sig
 
--- | Record a change to the part @sig@ at tick @t@. With a @base@, the
--- session's frame start, a set that holds only changes from before it
--- starts over from it; without one (a write from IO) the set only grows.
-addChange :: Cell s -> Maybe Word64 -> Word64 -> Sig -> IO ()
-addChange cell mbase t sig = do
+-- | Record a change to the part @sig@ at tick @t@. A set that holds only
+-- changes from before @base@, the session's frame start, starts over from
+-- it. A write from IO passes 0, so its set only grows.
+addChange :: Cell s -> Word64 -> Word64 -> Sig -> IO ()
+addChange cell base t sig = do
   chg <- readStamp cell chgSlot
   writeStamp cell chgSlot t
-  case mbase of
-    Just base | chg < base -> do
-      writeStamp cell (chgSlot + 1) base
-      putBits cell (chgSlot + 2) sig
-    _ -> orBits cell (chgSlot + 2) sig
+  let fresh = chg < base
+  when fresh (writeStamp cell (chgSlot + 1) base)
+  addBits cell (chgSlot + 2) fresh sig
 
 -- | The last tick handed out, in one machine word.
 {-# NOINLINE tickClock #-}

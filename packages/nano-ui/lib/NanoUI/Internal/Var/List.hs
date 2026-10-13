@@ -6,10 +6,10 @@ module NanoUI.Internal.Var.List
 where
 
 import Data.Foldable (for_)
-import Data.Hashable (Hashable)
-import NanoUI.Internal.Monad (NanoUI, liftIO, withKey)
-import NanoUI.Internal.Var (readVar, readVarSig)
-import NanoUI.Internal.Var.Types (Lens (..), Var (..), keyStep, newElemCtx, structSig)
+import Data.Hashable (Hashable, hash)
+import NanoUI.Internal.Monad (NanoUI, keyedTag, liftIO)
+import NanoUI.Internal.Var (readCell, readVar)
+import NanoUI.Internal.Var.Types (Lens (..), Var (..), newElemCtx, stepBit, structSig)
 
 -- | Run @body@ for each element of the list, under 'withKey' of its key,
 -- with a Var for that element. The element's Var follows its key: if the
@@ -23,7 +23,9 @@ import NanoUI.Internal.Var.Types (Lens (..), Var (..), keyStep, newElemCtx, stru
 forEachVar :: Hashable k => (a -> k) -> Var [a] -> (Var a -> NanoUI ()) -> NanoUI ()
 forEachVar key v body = do
   (xs, at) <- elemVars True key v
-  for_ xs $ \x -> let !k = key x in withKey k (body (at k x))
+  -- One hash per key serves both the row's id, as 'withKey' would make it,
+  -- and its Var.
+  for_ xs $ \x -> let !k = key x; !h = hash k in keyedTag (fromIntegral h) (body (at k h x))
 
 -- | Read the list and give @body@ the elements with a function from an
 -- element to its Var, for when the view shows some of the elements, in
@@ -35,14 +37,15 @@ forEachVar key v body = do
 withElemVars :: Hashable k => (a -> k) -> Var [a] -> ([a] -> (a -> Var a) -> NanoUI r) -> NanoUI r
 withElemVars key v body = do
   (xs, at) <- elemVars False key v
-  body xs (\x -> at (key x) x)
+  body xs (\x -> let k = key x in at k (hash k) x)
 
--- | The list, read, and an element's Var given its key and the element.
--- With @keysOnly@, the read records only the list's keys and order.
-elemVars :: Hashable k => Bool -> (a -> k) -> Var [a] -> NanoUI ([a], k -> a -> Var a)
+-- | The list, read, and an element's Var given its key, the key's hash and
+-- the element. With @keysOnly@, the read records only the list's keys and
+-- order.
+elemVars :: Hashable k => Bool -> (a -> k) -> Var [a] -> NanoUI ([a], k -> Int -> a -> Var a)
 elemVars keysOnly key v = case v of
-  VarConst xs -> pure (xs, \_ x -> VarConst x)
+  VarConst xs -> pure (xs, \_ _ x -> VarConst x)
   VarRef cell l -> do
-    xs <- if keysOnly then readVarSig (structSig l) v else readVar v
+    xs <- if keysOnly then readCell (structSig l) cell l else readVar v
     ec <- liftIO (newElemCtx l key xs)
-    pure (xs, \k x -> VarRef cell (Elem (keyStep k) ec k x))
+    pure (xs, \k h x -> VarRef cell (Elem (stepBit h) ec k x))
