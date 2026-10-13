@@ -67,6 +67,12 @@
   Custom inputs bind with `bindVar`/`bindVarBy` from
   `NanoUI.Widgets.Custom`.
 
+- `enumTabs`, `boundedTabs` and `boundedTabsConfigured` show a tab for
+  every value of a bounded enumeration, and `enumTabBar`, `boundedTabBar`
+  and `boundedTabBarConfigured` a header for each, like `enumRadio` and
+  `boundedSelect`. The Var holds the value itself, so the enumeration needs
+  no `Hashable` instance: `enumTabs page pageBody`.
+
 - A dismissable `popup` with an `AnchorRect` anchor no longer counts a press
   on that rect as outside. A `menuButton'` (or any button) that toggles its
   drop-down on `respClicked` now closes it when clicked again, instead of the

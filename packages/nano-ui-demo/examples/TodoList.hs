@@ -86,10 +86,8 @@ todoApp app = do
         writeVar draft ""
         requestFocus (respId inputR)
     rowWith (tight . gap 12 . alignMid . fillW) $ do
-      -- tabBar keys must be Hashable; an enum's index is, so the bar edits
-      -- the filter through its index.
-      tabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} (zoomVar fromEnum (\i _ -> toEnum i) filt) $
-        [tab (fromEnum f) (T.pack (show f)) () | f <- [minBound .. maxBound :: Filter]]
+      -- A header for every filter, as a segmented control.
+      boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} (T.pack . show) filt
       flex
       todos <- readVar items
       let left = length (filter (not . todoDone) todos)

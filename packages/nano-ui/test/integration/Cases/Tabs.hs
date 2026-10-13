@@ -12,6 +12,7 @@ tests :: [Spec]
 tests =
   [ spec "panel-body-swap-damage" runPanelBodySwapDamageTest
   , spec "tabs-laziness" runTabsLazinessTest
+  , spec "tabs-enum" runEnumTabsTest
   , spec "tabs-closable" runTabsClosableTest
   , pixelSpec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
@@ -33,7 +34,7 @@ tests =
   ]
 
 data DummyTab = TabA | TabB | TabC
-  deriving (Eq, Show, Enum)
+  deriving (Eq, Show, Enum, Bounded)
 
 instance Hashable DummyTab where
   hashWithSalt salt = hashWithSalt salt . fromEnum
@@ -410,6 +411,30 @@ runTabsBodiesApartTest ctx failed = do
     _ <- warmup2 ctx inp0 (ui TabB)
     spansB <- collectTextSpans ctx
     assert failed (hasText "BOff" spansB)
+
+-- | enumTabs has a tab per value, labelled with show, and a click stores
+-- the value itself in the Var; boundedTabBar does the same with labels of
+-- its own and no bodies.
+runEnumTabsTest :: Context -> IORef Int -> IO ()
+runEnumTabsTest ctx failed = do
+  let inp0 = withInput 400 120
+  page <- newVar TabA
+  let ui = enumTabs page (label . ("Body of " <>) . T.pack . show)
+  _ <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  assert failed (hasText "Body of TabA" spans)
+  assertJust failed (spanRectOf "TabC" spans) $ \r -> do
+    _ <- runClick ctx inp0 ui (spanCenter r)
+    assertEq failed TabC =<< readVarIO page
+    _ <- warmup2 ctx inp0 ui
+    assert failed . hasText "Body of TabC" =<< collectTextSpans ctx
+  pick <- newVar TabA
+  let bar = boundedTabBar (T.toLower . T.pack . show) pick
+  _ <- warmup2 ctx inp0 bar
+  barSpans <- collectTextSpans ctx
+  assertJust failed (spanRectOf "tabb" barSpans) $ \r -> do
+    _ <- runClick ctx inp0 bar (spanCenter r)
+    assertEq failed TabB =<< readVarIO pick
 
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
 runTabsStatePersistenceTest ctx failed = do

@@ -5,6 +5,8 @@ module NanoUI.Internal.Widgets.Tabs
   , tab, closableTab
   , tabs, tabs', tabsConfigured, tabsConfigured'
   , tabBar, tabBar', tabBarConfigured, tabBarConfigured'
+  , boundedTabs, boundedTabsConfigured, enumTabs
+  , boundedTabBar, boundedTabBarConfigured, enumTabBar
   )
 where
 
@@ -17,6 +19,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
+import Data.Text qualified as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Chrome (tabHeaderVisualStyle)
 import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
@@ -25,7 +28,7 @@ import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, disabledWhen, freshWidget, nextId, liftIO, styled, uiTheme, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
-import NanoUI.Internal.Var.Types (Var)
+import NanoUI.Internal.Var.Types (Var, zoomVar)
 import NanoUI.Internal.Store (fieldFloat, findSlot, slotWrite)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
@@ -453,3 +456,50 @@ tabBarConfigured cfg active ts = void (tabBarConfigured' cfg active ts)
 -- | 'tabBarConfigured' with interaction details and optional close request.
 tabBarConfigured' :: (Foldable f, Hashable a) => TabsConfig -> Var a -> f (Tab a body) -> NanoUI (TabResponse a)
 tabBarConfigured' cfg active ts = bindTabs cfg False active (\cur -> tabStrip cfg cur (toList ts) Nothing)
+
+-- | 'tabs' with a tab for every value of a bounded enumeration, labelled by
+-- @encode@, each showing @body@ of its value. The Var holds the selected
+-- value itself, so the enumeration needs no 'Hashable' instance.
+--
+-- > page <- useEnumVar Overview
+-- > boundedTabs pageTitle page pageBody
+{-# INLINE boundedTabs #-}
+boundedTabs :: (Bounded a, Enum a) => (a -> Text) -> Var a -> (a -> NanoUI ()) -> NanoUI ()
+boundedTabs = boundedTabsConfigured defaultTabsConfig
+
+-- | 'boundedTabs' with a header style and placement.
+{-# INLINE boundedTabsConfigured #-}
+boundedTabsConfigured :: (Bounded a, Enum a) => TabsConfig -> (a -> Text) -> Var a -> (a -> NanoUI ()) -> NanoUI ()
+boundedTabsConfigured cfg encode active body =
+  tabsConfigured cfg (enumIndex active) (map (\x -> tab (fromEnum x) (encode x) (body x)) [minBound .. maxBound])
+
+-- | 'boundedTabs' labelled with 'show'.
+{-# INLINE enumTabs #-}
+enumTabs :: (Bounded a, Enum a, Show a) => Var a -> (a -> NanoUI ()) -> NanoUI ()
+enumTabs = boundedTabs (T.pack . show)
+
+-- | 'tabBar' with a header for every value of a bounded enumeration,
+-- labelled by @encode@.
+{-# INLINE boundedTabBar #-}
+boundedTabBar :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()
+boundedTabBar = boundedTabBarConfigured defaultTabsConfig
+
+-- | 'boundedTabBar' with a header style and placement; with 'TabSegmented'
+-- it is a segmented control:
+--
+-- > boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} alignName alignment
+{-# INLINE boundedTabBarConfigured #-}
+boundedTabBarConfigured :: (Bounded a, Enum a) => TabsConfig -> (a -> Text) -> Var a -> NanoUI ()
+boundedTabBarConfigured cfg encode active =
+  tabBarConfigured cfg (enumIndex active) (map (\x -> tab (fromEnum x) (encode x) ()) [minBound .. maxBound])
+
+-- | 'boundedTabBar' labelled with 'show'.
+{-# INLINE enumTabBar #-}
+enumTabBar :: (Bounded a, Enum a, Show a) => Var a -> NanoUI ()
+enumTabBar = boundedTabBar (T.pack . show)
+
+-- | An enumeration's Var seen as its index, which keys the tabs. The tabs
+-- only ever write the index of a value they list.
+{-# INLINE enumIndex #-}
+enumIndex :: Enum a => Var a -> Var Int
+enumIndex = zoomVar fromEnum (\i _ -> toEnum i)

@@ -26,7 +26,6 @@ import Control.Monad (forM, unless, void, when)
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Foldable (for_)
-import Data.Hashable (Hashable (..))
 import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -158,11 +157,7 @@ loadGif path = do
 -- The shell -------------------------------------------------------------------
 
 data DemoTab = Controls | Graphics | Typography | List | Table | Tabs | Panes | Plots
-  deriving (Bounded, Enum, Eq, Show)
-
--- | Tabs keep each tab's state under a hash of its key.
-instance Hashable DemoTab where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
+  deriving (Bounded, Enum, Show)
 
 -- | The whole app: a toolbar, the tabbed card, the Debug window and the
 -- About modal.
@@ -187,7 +182,7 @@ demoUi st = do
           when (debug || f12) (modifyVar debugOpen not)
       -- Only the selected tab's body runs.
       panelWith (padAll 16 . gap 12 . fillW) $
-        tabs activeTab [tab page (T.pack (show page)) (tabView st page) | page <- [minBound .. maxBound]]
+        enumTabs activeTab (tabView st)
   window debugOpen "Debug" debugBody
   modal aboutOpen "About" $ do
     heading "nano-ui"
@@ -537,17 +532,15 @@ typographyTab = do
     ]
   separator
   heading "Weights"
+  let sphinx = "Sphinx of black quartz, judge my vow."
   styleRows 96
-    [ (name, style, "Sphinx of black quartz, judge my vow.")
-    | (name, style) <-
-        [ ("Light", fontLight)
-        , ("Normal", id)
-        , ("Medium", fontMedium)
-        , ("SemiBold", fontSemiBold)
-        , ("Bold", fontBold)
-        , ("ExtraBold", fontExtraBold)
-        , ("Black", fontBlack)
-        ]
+    [ ("Light", fontLight, sphinx)
+    , ("Normal", id, sphinx)
+    , ("Medium", fontMedium, sphinx)
+    , ("SemiBold", fontSemiBold, sphinx)
+    , ("Bold", fontBold, sphinx)
+    , ("ExtraBold", fontExtraBold, sphinx)
+    , ("Black", fontBlack, sphinx)
     ]
   separator
   heading "Rich Text"
@@ -644,9 +637,10 @@ tabsTab docsVar = do
   heading "Tabs"
   muted "A middle click also closes a tab. Only the selected tab's body runs."
   -- Two header-only strips pick the look of the one below.
+  let segmented = defaultTabsConfig {tabsStyle = TabSegmented}
   responsiveRowCol 760 (tight . gap 12 . fillW) $ do
-    field "Style" (choiceBar look)
-    field "Placement" (choiceBar place)
+    field "Style" (boundedTabBarConfigured segmented enumLabel look)
+    field "Placement" (boundedTabBarConfigured segmented enumLabel place)
   docs <- readVar docsVar
   let fresh = 1 + maximum (3 : docs)
       -- Actions on the whole strip go after its headers.
@@ -664,8 +658,6 @@ tabsTab docsVar = do
     when (tabActive tabResp == d) $
       writeVar active (fromMaybe 0 (listToMaybe (reverse before)))
   where
-    choiceBar :: (Bounded a, Enum a, Show a, Hashable a) => Var a -> NanoUI ()
-    choiceBar v = tabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} v [tab x (enumLabel x) () | x <- [minBound .. maxBound]]
     docName = \case
       1 -> "Main.hs"
       2 -> "Tabs.hs"

@@ -322,6 +322,12 @@ module NanoUI
   , tabBar'
   , tabBarConfigured
   , tabBarConfigured'
+  , boundedTabs
+  , boundedTabsConfigured
+  , enumTabs
+  , boundedTabBar
+  , boundedTabBarConfigured
+  , enumTabBar
   , TreeItem (..)
   , tree
   , tree'
