@@ -20,9 +20,9 @@
 -- * 'newVar' makes a Var of any type in IO, for state the application owns:
 --   make it once, keep it in a record, and pass it to the view.
 -- * A 'VarMap' holds one Var per key, for the rows of a list.
--- * @'Var' x@ is a constant: the widget shows @x@ and an edit is gone on the
---   next frame. A string literal is a constant, so @textInput "draft"@
---   works as written; a number is wrapped, as in @slider 0 1 (Var 0.5)@.
+-- * @'constVar' x@ is a constant: the widget shows @x@ and an edit is gone
+--   on the next frame, for an input showing a value derived from other
+--   state, its change handled through the primed variant's response.
 --
 -- @v.field@ (with @OverloadedRecordDot@) is a Var for one field of the
 -- record in @v@, for a record type with one constructor and a 'Generic'
@@ -37,7 +37,8 @@
 -- showing @m.title@ above a field that edits @m.name@ costs one run too.
 module NanoUI.Var
   ( -- * Vars
-    Var (Var)
+    Var
+  , constVar
   , newVar
   , useVar
   , useEnumVar

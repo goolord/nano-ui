@@ -83,7 +83,7 @@ runAdornedFieldAffixChangeTest ctx failed = do
       column $
         textInputConfigured'
           defaultTextInputConfig {ticAdornments = A.trailing (A.affix unit), ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)}
-          (Var value)
+          (constVar value)
     layoutWith unit = do
       _ <- warmup2 ctx inp0 (ui unit)
       spans <- collectTextSpans ctx
@@ -147,7 +147,7 @@ runAdornmentIdsTest ctx failed = do
       _ <-
         textInputConfigured'
           defaultTextInputConfig {ticAdornments = if adorned then A.leading (A.icon doc) <> A.trailing (A.affix "kg") else mempty}
-          ""
+          (constVar "")
       currentId
   plain <- warmup2 ctx inp0 (ui False)
   assertEq failed plain =<< warmup2 ctx inp0 (ui True)

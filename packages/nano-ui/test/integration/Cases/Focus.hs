@@ -65,11 +65,11 @@ runFocusRequestKindsTest _ failed =
   where
     kinds :: [(String, NanoUI Response)]
     kinds =
-      [ ("button", button' "Go"), ("checkbox", checkbox' "Check" (Var False)), ("toggle", toggleSwitchWith' id (Var False))
+      [ ("button", button' "Go"), ("checkbox", checkbox' "Check" (constVar False)), ("toggle", toggleSwitchWith' id (constVar False))
       , ("slider", fst <$> withValue 50 (slider' 0 100)), ("knob", fst <$> withValue 50 (knobWith' id 36 0 100)), ("select", fst <$> withValue 0 (select' ["One", "Two"]))
       , ("text input", fst <$> withValue "text" textInput'), ("search input", fst <$> withValue "text" (searchInput' "Search")), ("numeric input", fst <$> withValue 5 numericInput')
       , ("combo box", fst <$> withValue "a" (comboBox' "Choose" ["a", "b"])), ("text area", fst <$> withValue "text" textArea')
-      , ("color picker", colorPicker' (Var (colorRGBA 200 40 40 255)))
+      , ("color picker", colorPicker' (constVar (colorRGBA 200 40 40 255)))
       ]
 
 -- | Tab and Shift+Tab continue from the widget focused from code.
@@ -117,7 +117,7 @@ runFocusRequestModalTest :: Context -> IORef Int -> IO ()
 runFocusRequestModalTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column $ do
     (page, _) <- withValue "page" textInput'
-    (_, inner) <- modal' (Var True) "Dialog" (fst <$> withValue "inside" textInput')
+    (_, inner) <- modal' (constVar True) "Dialog" (fst <$> withValue "inside" textInput')
     (respId page, respId <$> inner) <$ req
   (page, inner) <- warmup2 ctx inp ui
   assertJust failed inner $ \r -> do
@@ -134,7 +134,7 @@ runFocusRequestBehindModalTest ctx failed = do
         (page, _) <- withValue "page" textInput'
         requestFocus (respId page)
         shown <- liftIO (readIORef open)
-        when shown $ void (modal' (Var True) "Dialog" (withValue "inside" textInput'))
+        when shown $ void (modal' (constVar True) "Dialog" (withValue "inside" textInput'))
         pure (respId page)
   _ <- warmup2 ctx inp ui
   replicateM_ 3 (warmup ctx inp ui)

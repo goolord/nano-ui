@@ -71,5 +71,5 @@ tableAndLabel freeze showLabel = column $ do
   sortStateVar <- useVar (SortCol 0 SortAsc)
   sortState <- readVar sortStateVar
   let rows = [(n, n) | n <- map (T.pack . show) [1 .. 20 :: Int]]
-  _ <- tableConfigured' defaultTableConfig {tableFreezeCols = freeze} (fixedH 150) "people" (headed "Name" fst <> headed "Value" snd) rows (Var sortState)
+  _ <- tableConfigured' defaultTableConfig {tableFreezeCols = freeze} (fixedH 150) "people" (headed "Name" fst <> headed "Value" snd) rows (constVar sortState)
   if showLabel then Just <$> label' "bye" else pure Nothing

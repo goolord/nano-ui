@@ -853,7 +853,7 @@ runTextAreaDocumentTest ctx failed = do
   source <- newIORef original
   let
     -- Split inside the frame, so each frame passes a new copy.
-    copies = column (textAreaDocument . Var =<< liftIO (textDocument <$> readIORef source))
+    copies = column (textAreaDocument . constVar =<< liftIO (textDocument <$> readIORef source))
     idle = inp {inputDeltaTime = 1}
   _ <- warmup2 copyCtx inp copies
   _ <- warmup2 copyCtx idle copies

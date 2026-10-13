@@ -134,7 +134,7 @@ dropDownUi = column $ do
   btn <- menuButton' "File" open
   when (respClicked btn) (writeVar openVar (not open))
   let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
-  (popR, _) <- popup' (Var open) cfg (menuItem "New")
+  (popR, _) <- popup' (constVar open) cfg (menuItem "New")
   when (respClicked popR) (writeVar openVar False)
   pure (btn, open)
 

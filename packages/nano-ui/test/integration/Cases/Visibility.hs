@@ -219,7 +219,7 @@ runTabsTest ctx failed = do
   let watched = sensor (label "in tab A") >>= \(vis, _) -> forM_ (visEvent vis) (liftIO . modifyIORef' eventsRef . (:))
       ui = do
         active <- liftIO (readIORef activeRef)
-        void (tabs' (Var active) [tab 0 "A" watched, tab 1 "B" (label "in tab B")])
+        void (tabs' (constVar active) [tab 0 "A" watched, tab 1 "B" (label "in tab B")])
   settle ctx inp ui 3
   writeIORef activeRef 1 >> settle ctx inp ui 3
   (_, follow) <- step ctx inp ui
@@ -265,7 +265,7 @@ runFloatingTest ctx failed = do
   let wide = withInput 400 300
       ui = scrollArea (fixedH 100 . fixedW 60) . columnWith (tight . gap 0 . fillW) $ do
         replicateM_ 10 bar
-        (_, inWindow) <- window' (Var True) "Panel" (fst <$> sensor (label "in window"))
+        (_, inWindow) <- window' (constVar True) "Panel" (fst <$> sensor (label "in window"))
         (,) inWindow . fst <$> sensor bar
   settle ctx wide ui 2
   ((_, (inWindow, below)), follow) <- step ctx wide ui

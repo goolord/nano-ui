@@ -12,7 +12,7 @@ import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
-  , UiCursorKind (..), V2 (..), Var (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
+  , UiCursorKind (..), V2 (..), box, constVar, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
   , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window'
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
@@ -126,7 +126,7 @@ testZOrderRenderArena :: IO ()
 testZOrderRenderArena = do
   ctx <- newPixelContext
   let boxCol = colorRGBA 0x11 0x22 0x33 255
-  raster ctx 100 100 0 (box grow boxCol >> window' (Var True) "Z" (label "hi")) $ \_ (_, overlay) px -> do
+  raster ctx 100 100 0 (box grow boxCol >> window' (constVar True) "Z" (label "hi")) $ \_ (_, overlay) px -> do
     assert "Overlay text spans collected for floating window chrome" (not (null overlay))
     nodesOf NodeWindow ctx >>= \case
       Rect wx wy ww _ : _ -> do
@@ -172,7 +172,7 @@ testSquareThemedRaster :: IO ()
 testSquareThemedRaster = do
   let theme = tomorrowNightMinDarkTheme
   ctx <- newRgfwContext theme
-  raster ctx 240 120 (packColor (themeWindow theme)) (column (button "Button" >> checkbox "Checkbox label" (Var True))) $ \_ (base, _) px -> do
+  raster ctx 240 120 (packColor (themeWindow theme)) (column (button "Button" >> checkbox "Checkbox label" (constVar True))) $ \_ (base, _) px -> do
     nodesOf NodeButton ctx >>= \case
       Rect bx by bw bh : _ -> do
         let (x0, y0, x1, y1) = (round bx, round by, round (bx + bw) - 1, round (by + bh) - 1)

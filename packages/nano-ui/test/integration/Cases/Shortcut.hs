@@ -152,7 +152,7 @@ runShortcutModalTest ctx failed = do
   (ui, press) <- noting ctx $ \note -> column $ do
     binds note [ctrl <> key 's']
     open <- liftIO (readIORef openRef)
-    _ <- modal' (Var open) "Dialog" (binds note [ctrl <> key 'd'] >> label "Body")
+    _ <- modal' (constVar open) "Dialog" (binds note [ctrl <> key 'd'] >> label "Body")
     binds note [ctrl <> key 'e']
     whenM (keyPressed (KeyChar 'e')) (note "raw")
   warmup2 ctx inp0 ui

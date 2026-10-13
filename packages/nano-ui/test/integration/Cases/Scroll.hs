@@ -193,7 +193,7 @@ runScrollTextDamageTest ctx failed = do
     -- Taller: the last line gains two more, and the lane repaints. On the page
     -- the lines that moved repaint the window whole, so run this in a floating
     -- window, where they are clipped to the scroller's viewport.
-    let inWindow firstLine lastLine = snd <$> window' (Var True) "Lines" (scrollUi firstLine lastLine)
+    let inWindow firstLine lastLine = snd <$> window' (constVar True) "Lines" (scrollUi firstLine lastLine)
         winInp = withInputOff 640 400
     mWsid <- warmup2 ctx winInp (inWindow "count 1" "last")
     _ <- takeDamage ctx

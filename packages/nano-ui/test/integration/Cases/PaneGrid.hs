@@ -76,7 +76,7 @@ runControlledRejectionTest ctx failed = do
   let inp = withInputOff 600 400
       ui = do
         r <- paneGrid defaultPaneGridConfig
-          { pgLayout = fillW . fillH, pgTree = ControlledTree (Var (Just halves))
+          { pgLayout = fillW . fillH, pgTree = ControlledTree (constVar (Just halves))
           , pgViewPane = \pid pctx -> do
               wanted <- liftIO (readIORef edit)
               when (wanted && pid == 10) $ do
@@ -111,14 +111,14 @@ runEmptyTest ctx failed = do
         }
   empty <- warmup2 ctx inp (drawGrid (InitialTree Nothing))
   assertEq failed (Nothing, 0, []) (pgrTree empty, pgrPaneCount empty, pgrPanes empty)
-  _ <- warmup2 ctx inp (drawGrid (ControlledTree (Var (Just (Pane 1)))))
+  _ <- warmup2 ctx inp (drawGrid (ControlledTree (constVar (Just (Pane 1)))))
   writeIORef close True
   _ <- evalUi ctx inp (drawGrid (InitialTree Nothing))
   closed <- warmup2 ctx inp (drawGrid (InitialTree Nothing))
   assertEq failed (Nothing, 0) (pgrTree closed, pgrPaneCount closed)
-  restored <- evalUi ctx inp (drawGrid (ControlledTree (Var (Just (Pane 1)))))
+  restored <- evalUi ctx inp (drawGrid (ControlledTree (constVar (Just (Pane 1)))))
   assertEq failed [1] (pgrPanes restored)
-  cleared <- evalUi ctx inp (drawGrid (ControlledTree (Var Nothing)))
+  cleared <- evalUi ctx inp (drawGrid (ControlledTree (constVar Nothing)))
   assertEq failed [] (pgrPanes cleared)
 
 runValidationTest :: Context -> IORef Int -> IO ()
@@ -130,7 +130,7 @@ runValidationTest ctx failed = do
   forM_ invalid $ \arrangement -> do
     assert failed (isLeft (validateGridTree arrangement))
     result <- try @IOException $ runFrame ctx (withInput 600 400) $
-      paneGrid defaultPaneGridConfig {pgTree = ControlledTree (Var (Just arrangement))}
+      paneGrid defaultPaneGridConfig {pgTree = ControlledTree (constVar (Just arrangement))}
     assert failed (isLeft result)
 
 runDropDestinationTest :: Context -> IORef Int -> IO ()
@@ -183,7 +183,7 @@ runDropCommitTest ctx failed = do
     assertEq failed 3 (pgrPaneCount after)
   stale <- maybe (fail "missing target") pure (pgrDropTarget after)
   rejected <- evalUi ctx inp $ do
-    _ <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree (Var (Just (Pane 90)))}
+    _ <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree (constVar (Just (Pane 90)))}
     commitPaneDrop stale
   assertEq failed Nothing rejected
 
@@ -199,7 +199,7 @@ runTabDropTest ctx failed = do
         response <- paneGrid defaultPaneGridConfig
           { pgLayout = fillW . fillH
           , pgViewPane = \pid _ -> do
-              r <- tabBar' (Var (1 :: Int)) [tab 1 "Alpha" (), tab 2 "Beta" ()]
+              r <- tabBar' (constVar (1 :: Int)) [tab 1 "Alpha" (), tab 2 "Beta" ()]
               liftIO (modifyIORef' headers (++ [((pid, k), response) | (k, response) <- tabHeaders r]))
               pure (PaneView "Editor" False)
           }
@@ -300,7 +300,7 @@ runTreeTest ctx failed = do
       paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)}
     controlled = do
       t <- liftIO (readIORef given)
-      resp <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree (Var t)}
+      resp <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree (constVar t)}
       liftIO (writeIORef given (pgrTree resp))
       pure resp
   resp0 <- warmup2 ctx inp ui

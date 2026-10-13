@@ -12,7 +12,8 @@
   `withElemVars` for list elements, `zoomVar`/`zoomVarL`, and `withValue` for
   value-in, value-out use. With `OverloadedRecordDot` and a `Generic`
   instance, `v.field` is a `Var` for one field, resolved at compile time.
-  `Var x` and string literals are constants. `NanoUI.Var` also exports
+  `constVar x` is a constant, for an input showing a derived value; `Var` is
+  abstract. `NanoUI.Var` also exports
   `peekVar`, an untracked read.
 
   A frame runs its view a second time only when something writes a part of

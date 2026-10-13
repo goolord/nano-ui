@@ -15,7 +15,7 @@ import NanoUI
   , NanoUI
   , Size (..)
   , Theme
-  , Var (Var)
+  , constVar
   , boundedRadio
   , button
   , button'
@@ -234,7 +234,7 @@ appView debug m = Emit.withRunInNanoUIE $ \run -> do
 
     when (debugOpen m) $ do
       snap <- askRgfwDebug debug
-      (win, _) <- window' (Var True) "Debug" (debugWindowBody debug snap)
+      (win, _) <- window' (constVar True) "Debug" (debugWindowBody debug snap)
       when (respClicked win) (run (Emit.emit (ToggleDebug False)))
 
 viewControlsTab :: Model -> Emit.NanoUIE Msg ()

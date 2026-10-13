@@ -260,7 +260,7 @@ menuBar openMenu entries = do
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
       -- The open flag is derived from the open menu's name, so the popup
       -- gets a constant and closing it is written here.
-      (popupResp, _) <- popup' (Var isOpen) cfg (columnWith (tight . gap 0) body)
+      (popupResp, _) <- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
     flex
 

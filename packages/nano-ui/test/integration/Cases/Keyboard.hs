@@ -53,7 +53,7 @@ runKeyboardModalEligibilityTest ctx failed = do
   let inp = withInputOff 400 300
       ui = column $ do
         outside <- withValue False (checkbox' "Outside")
-        (_, inside) <- modal' (Var True) "Modal" (withValue False (checkbox' "Inside"))
+        (_, inside) <- modal' (constVar True) "Modal" (withValue False (checkbox' "Inside"))
         pure (outside, inside)
   ((outside, inside), _, _) <- runFrame ctx inp ui
   writeIORef (ctxFocusId ctx) (respId (fst outside))
@@ -164,7 +164,7 @@ runKeyboardTabHeaderTest :: Context -> IORef Int -> IO ()
 runKeyboardTabHeaderTest ctx failed = do
   let inp0 = withInputOff 300 100
       ui cur =
-        fmap tabActive . tabs' (Var cur) $
+        fmap tabActive . tabs' (constVar cur) $
           [ tab KBA "Alpha" (label "BodyA")
           , tab KBB "Beta" (label "BodyB")
           ]

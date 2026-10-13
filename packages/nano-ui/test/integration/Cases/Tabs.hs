@@ -48,7 +48,7 @@ runTabsKeyedReorderTest ctx failed = do
         n <- readVar nVar
         (field, _) <- withValue (T.pack (show key)) textInput'
         liftIO (writeIORef seen (Just (n, nVar, respId field)))
-      ui active order = tabs' (Var active) [tab key (T.pack (show key)) (body key) | key <- order]
+      ui active order = tabs' (constVar active) [tab key (T.pack (show key)) (body key) | key <- order]
       readBody = readIORef seen >>= maybe (fail "tab body did not run") pure
   original <- warmup2 ctx inp (ui TabB [TabA, TabB, TabC])
   (_, nVar, fieldId) <- readBody
@@ -71,7 +71,7 @@ runTabsKeyedReorderTest ctx failed = do
 runVerticalDropBoundsTest :: Context -> IORef Int -> IO ()
 runVerticalDropBoundsTest ctx failed = do
   let ui = panelWith (padAll 40 . fillW . fillH) $
-        tabBarConfigured' (TabsConfig TabUnderline TabLeft (pure ())) (Var TabA)
+        tabBarConfigured' (TabsConfig TabUnderline TabLeft (pure ())) (constVar TabA)
           [tab TabA "Alpha" (), tab TabB "Beta" ()]
   r <- warmup2 ctx (withInput 400 200) ui
   let bounds = tabStripRect r
@@ -86,7 +86,7 @@ runClippedDropBoundsTest ctx failed = do
         { pgLayout = fixedWH 200 60
         , pgViewPane = \_ _ -> do
             r <- panelWith (fixedW 600) $
-              tabBarConfigured' (TabsConfig TabUnderline orientation (pure ())) (Var TabA)
+              tabBarConfigured' (TabsConfig TabUnderline orientation (pure ())) (constVar TabA)
                 [tab TabA "Alpha" (), tab TabB "Beta" (), tab TabC "Gamma" ()]
             liftIO (writeIORef result (tabStripRect r))
             pure (PaneView "Tabs" False)
@@ -102,7 +102,7 @@ runTabDragLifecycleTest ctx failed = do
   dragHandle <- newDrag
   let inp = withInput 400 200
       ui order = do
-        r <- tabBar' (Var TabA) [tab k (T.pack (show k)) () | k <- order]
+        r <- tabBar' (constVar TabA) [tab k (T.pack (show k)) () | k <- order]
         d <- useDrag dragHandle (tabHeaders r)
         pure (r, d)
       keys = [TabA, TabB, TabC]
@@ -142,7 +142,7 @@ runDragEscapeOwnershipTest :: Context -> IORef Int -> IO ()
 runDragEscapeOwnershipTest ctx failed = do
   handle <- newDrag
   let inp = withInputOff 400 200
-      ui takeFirst = modalPanel' (Var True) $ do
+      ui takeFirst = modalPanel' (constVar True) $ do
         when takeFirst (void takeEscape)
         source <- button' "Drag"
         gesture <- useDrag handle [((), source)]
@@ -171,7 +171,7 @@ runTabDragControlsTest ctx failed = do
   dragHandle <- newDrag
   let inp = withInput 400 200
       ui = do
-        r <- tabBar' (Var TabA)
+        r <- tabBar' (constVar TabA)
           [closableTab TabA "Alpha" (), (tab TabB "Disabled" ()) {tabDisabled = True}]
         useDrag dragHandle (tabHeaders r)
   _ <- warmup2 ctx inp ui
@@ -194,7 +194,7 @@ runTabDragReorderTest ctx failed = do
   let inp = withInput 400 200
       ui = do
         order <- liftIO (readIORef orderRef)
-        r <- tabBar' (Var TabA) [tab k (T.pack (show k)) () | k <- order]
+        r <- tabBar' (constVar TabA) [tab k (T.pack (show k)) () | k <- order]
         gesture <- useDrag dragHandle (tabHeaders r)
         forM_ gesture $ \d -> when (dragPhase d == DragReleased) $ do
           let rest = filter ((/= dragPayload d) . fst) (tabHeaders r)
@@ -224,8 +224,8 @@ runTabDragReorderTest ctx failed = do
 runPanelBodySwapDamageTest :: Context -> IORef Int -> IO ()
 runPanelBodySwapDamageTest ctx failed = do
   let inp0 = withInput 400 300
-      uiA = window' (Var True) "TabWin" (columnWith (fixedH 300) (label "WIDE BODY ROW ONE"))
-      uiB = window' (Var True) "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
+      uiA = window' (constVar True) "TabWin" (columnWith (fixedH 300) (label "WIDE BODY ROW ONE"))
+      uiB = window' (constVar True) "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
   _ <- warmup2 ctx inp0 uiA
   _ <- runFrame ctx inp0 uiA
   _ <- takeDamage ctx
@@ -243,7 +243,7 @@ runTabsLazinessTest ctx failed = do
   evalCountB <- newIORef (0 :: Int)
   evalCountC <- newIORef (0 :: Int)
   let inp = withInput 200 100
-      ui = tabs' (Var TabB) $ Seq.fromList
+      ui = tabs' (constVar TabB) $ Seq.fromList
         [ tab TabA "A" (liftIO (modifyIORef' evalCountA (+ 1)) >> label "Body A")
         , tab TabB "B" (liftIO (modifyIORef' evalCountB (+ 1)) >> label "Body B")
         , tab TabC "C" (liftIO (modifyIORef' evalCountC (+ 1)) >> label "Body C")
@@ -263,7 +263,7 @@ runTabResponseForwardingTest _ failed = do
 runTabsClosableTest :: Context -> IORef Int -> IO ()
 runTabsClosableTest ctx failed = do
   let inp0 = withInput 300 100
-      ui curTab = tabs' (Var curTab)
+      ui curTab = tabs' (constVar curTab)
         [ closableTab TabA "Alpha" (label "Body A")
         , closableTab TabB "Beta" (label "Body B")
         ]
@@ -279,7 +279,7 @@ runTabsClosableTest ctx failed = do
 runTabsScrollWidenTest :: Context -> IORef Int -> IO ()
 runTabsScrollWidenTest _ failed = do
   let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
-      mkTabs = tabBar' (Var (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
+      mkTabs = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
       nodeRect ctx l = do
         let na = ctxNodeArena ctx
         found <- findNodeM na (fmap (== l) . getText na)
@@ -311,7 +311,7 @@ runTabsScrollWidenTest _ failed = do
 runTabsScrollCloseButtonTest :: Context -> IORef Int -> IO ()
 runTabsScrollCloseButtonTest _ failed = do
   let labels = ["Controls", "Graphics", "Typography"]
-      mkTabs = tabBar' (Var (0 :: Int)) [closableTab i l () | (i, l) <- zip [0 ..] labels]
+      mkTabs = tabBar' (constVar (0 :: Int)) [closableTab i l () | (i, l) <- zip [0 ..] labels]
       nodeRects ctx p = do
         let na = ctxNodeArena ctx
         n <- arenaCount na
@@ -342,7 +342,7 @@ runTabsRangeDamageTest :: Context -> IORef Int -> IO ()
 runTabsRangeDamageTest ctx failed = do
   let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
       ui = column $ do
-        _ <- tabBar' (Var (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
+        _ <- tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
         label "Below"
   _ <- warmup2 ctx (withInput 900 120) ui
   _ <- runFrame ctx (withInput 900 120) ui
@@ -363,7 +363,7 @@ runTabsDisabledTest :: Context -> IORef Int -> IO ()
 runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   ctx <- newContext
   let inp = withInputOff 400 240
-      ui disabled = tabsConfigured' defaultTabsConfig {tabsOrientation = orientation} (Var TabA)
+      ui disabled = tabsConfigured' defaultTabsConfig {tabsOrientation = orientation} (constVar TabA)
         [ (closableTab TabB "Disabled" (label "Body B")) {tabDisabled = disabled}
         , tab TabA "Enabled" (label "Body A")
         ]
@@ -399,7 +399,7 @@ runTabsBodiesApartTest ctx failed = do
         flag <- readVar flagVar
         whenM (button ("Toggle" <> name)) (writeVar flagVar (not flag))
         label (name <> if flag then "On" else "Off")
-      ui curTab = tabs' (Var curTab) [tab TabA "A" (body "A"), tab TabB "B" (body "B")]
+      ui curTab = tabs' (constVar curTab) [tab TabA "A" (body "A"), tab TabB "B" (body "B")]
   _ <- warmup2 ctx inp0 (ui TabA)
   spans <- collectTextSpans ctx
   assertJust failed (spanRectOf "ToggleA" spans) $ \r -> do
@@ -414,7 +414,7 @@ runTabsBodiesApartTest ctx failed = do
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
 runTabsStatePersistenceTest ctx failed = do
   let inp0 = withInput 300 100
-      ui curTab = tabs' (Var curTab)
+      ui curTab = tabs' (constVar curTab)
         [ tab TabA "A" $
             withKey ("tab-a" :: T.Text) $
               withKey ("flag" :: T.Text) $ do
@@ -444,7 +444,7 @@ runTabsStatePersistenceTest ctx failed = do
 runTabsDamageTest :: Context -> IORef Int -> IO ()
 runTabsDamageTest ctx failed = do
   let inp0 = withInputOff 300 100
-      ui curTab = tabs' (Var curTab)
+      ui curTab = tabs' (constVar curTab)
         [ tab TabA "Alpha" (label "Body A with some text")
         , tab TabB "Beta" (label "Body B different widgets")
         ]
@@ -488,7 +488,7 @@ runTabsDamageTest ctx failed = do
 runTabsScrollTest :: Context -> IORef Int -> IO ()
 runTabsScrollTest _ failed = do
   let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
-      mkTabs cur = tabBar' (Var cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] labels]
+      mkTabs cur = tabBar' (constVar cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] labels]
       arrowRect ctx ch = do
         spans <- collectTextSpans ctx
         pure [r | (r, t, _, _, _) <- spans, T.any (== ch) t]
@@ -588,7 +588,7 @@ runTabsScrollTest _ failed = do
   -- re-engages them and re-clips the tail. (One header fits the 240-wide
   -- window; two would still overflow the ~180px viewport between arrows.)
   let shortLabels = ["Controls"]
-      mkShort cur = tabBar' (Var cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] shortLabels]
+      mkShort cur = tabBar' (constVar cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] shortLabels]
   _ <- runFrame ctx inp (mkShort 0)
   _ <- warmup2 ctx inp (mkShort 0)
   spansS <- collectTextSpans ctx
@@ -608,7 +608,7 @@ runTabsScrollTest _ failed = do
 runTabsContainedBodyDamageTest :: Context -> IORef Int -> IO ()
 runTabsContainedBodyDamageTest ctx failed = do
   let inp0 = withInputOff 300 300
-      ui txt = tabsConfigured' defaultTabsConfig {tabsStyle = TabContained} (Var TabA)
+      ui txt = tabsConfigured' defaultTabsConfig {tabsStyle = TabContained} (constVar TabA)
         [ tab TabA "Alpha" (labelWith fillW txt)
         , tab TabB "Beta" (label "Body B")
         ]

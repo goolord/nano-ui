@@ -35,7 +35,7 @@ runWindowScrollGutterTest :: Context -> IORef Int -> IO ()
 runWindowScrollGutterTest ctx failed = do
   let inp0 = withInput 640 360
       long = T.pack (replicate 48 'M')
-      ui = window' (Var True) "GutterWin" $ do
+      ui = window' (constVar True) "GutterWin" $ do
         wide <- labelWith' fillW "WWWW"
         kv "Key" long
         mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
@@ -53,7 +53,7 @@ runWindowScrollGutterTest ctx failed = do
 
 runWindowCloseDamageTest :: Context -> IORef Int -> IO ()
 runWindowCloseDamageTest ctx failed = do
-  let ui open = void (window' (Var open) "Debug" (label "Body"))
+  let ui open = void (window' (constVar open) "Debug" (label "Body"))
       inp0 = withInput 640 400
   _ <- warmup2 ctx inp0 (ui True)
   _ <- runFrame ctx inp0 (ui False)
@@ -78,9 +78,9 @@ runOverlayPanelLiveTest _ failed = do
         assert failed =<< needsRedraw ctx inp inp
         _ <- runFrame ctx inp ui
         assertEq failed DamageFull =<< takeDamage ctx
-  checkStatic (void (window' (Var True) "Debug" (label "fps 0")))
-  checkStatic (void (modal' (Var True) "About" (label "body")))
-  checkDirtyWake (void (modal' (Var True) "About" (label "body")))
+  checkStatic (void (window' (constVar True) "Debug" (label "fps 0")))
+  checkStatic (void (modal' (constVar True) "About" (label "body")))
+  checkDirtyWake (void (modal' (constVar True) "About" (label "body")))
 
 -- Opening a modal or window must not shift the ids, and so the stored state,
 -- of the widgets after it.
@@ -88,7 +88,7 @@ runOverlaySiblingStateTest :: Context -> IORef Int -> IO ()
 runOverlaySiblingStateTest _ failed = do
   let inp = withInput 640 400
       ui overlay open edit = do
-        _ <- overlay (Var open) "About" (label "body")
+        _ <- overlay (constVar open) "About" (label "body")
         txtVar <- useVar "start"
         txt <- readVar txtVar
         when edit (writeVar txtVar "edited")
@@ -121,11 +121,11 @@ runWindowOverlayTest ctx failed = do
   let inp0 = withInput 640 400
       ui = do
         outside <- button' "Outside"
-        (win, mBody) <- window' (Var True) "Debug" (label "Body")
+        (win, mBody) <- window' (constVar True) "Debug" (label "Body")
         pure (outside, win, mBody)
       closedUi = do
         _ <- button "Outside"
-        (win, mBody) <- window' (Var False) "Debug" (label "Body")
+        (win, mBody) <- window' (constVar False) "Debug" (label "Body")
         pure (win, mBody)
   do
     ((win, mBody), _, _) <- runFrame ctx inp0 closedUi
@@ -163,18 +163,18 @@ runOverlayClickThroughTest ctx failed = do
     windowUi = do
       outsides <- column (replicateM 10 (button' "Outside"))
       (win, mInside) <-
-        window' (Var True) "Cover" $ do
+        window' (constVar True) "Cover" $ do
           button' "Inside"
       pure (outsides, win, mInside)
     modalUi = do
       outsides <- column (replicateM 10 (button' "Outside"))
       (dlg, mInside) <-
-        modal' (Var True) "Cover" $ do
+        modal' (constVar True) "Cover" $ do
           button' "Inside"
       pure (outsides, dlg, mInside)
     stackedUi = do
-      (lo, mLo) <- window' (Var True) "Low" (button' "LowBtn")
-      (hi, mHi) <- window' (Var True) "High" (button' "HighBtn")
+      (lo, mLo) <- window' (constVar True) "Low" (button' "LowBtn")
+      (hi, mHi) <- window' (constVar True) "High" (button' "HighBtn")
       pure (lo, mLo, hi, mHi)
     childSafePoint cover childRects =
       let
@@ -225,7 +225,7 @@ runOverlayClickThroughTest ctx failed = do
 runWindowDragTest :: Context -> IORef Int -> IO ()
 runWindowDragTest ctx failed = do
   let inp0 = withInput 640 400
-      ui = fmap fst (window' (Var True) "Debug" (label "Body"))
+      ui = fmap fst (window' (constVar True) "Debug" (label "Body"))
   win0 <- warmup2 ctx inp0 ui
   let r0 = respRect win0
       x0 = rectX r0
@@ -249,12 +249,12 @@ runWindowLayoutReuseTest ctx failed = do
   let inp0 = withInput 640 400
       ui modalOpen anchor = do
         column $ forM_ [1 .. 20 :: Int] $ \i -> void (button (T.pack ("row " <> show i)))
-        win <- fmap fst $ window' (Var True) "Tools" $ columnWith (maxW 260) $ do
+        win <- fmap fst $ window' (constVar True) "Tools" $ columnWith (maxW 260) $ do
           forM_ [1 .. 12 :: Int] $ \i -> labelWith fillW (T.replicate i "wrapping words ")
           void (button "ok")
-          void (popup' (Var True) (defaultPopupConfig (AnchorPoint anchor)) {cfgDismissable = False} (label "tip"))
+          void (popup' (constVar True) (defaultPopupConfig (AnchorPoint anchor)) {cfgDismissable = False} (label "tip"))
         -- A modal over it all, its note wrapped to the modal's width.
-        void (modal' (Var modalOpen) "Note" (label (T.replicate 12 "a note that wraps ")))
+        void (modal' (constVar modalOpen) "Note" (label (T.replicate 12 "a note that wraps ")))
         pure win
       layout = do
         let na = ctxNodeArena ctx
@@ -313,7 +313,7 @@ runWindowLayoutReuseTest ctx failed = do
 runWindowCustomMeasurePlacementTest :: Context -> IORef Int -> IO ()
 runWindowCustomMeasurePlacementTest ctx failed = do
   let inp = withInput 640 400
-      ui h = column $ fmap snd $ window' (Var True) "Tools" $ column $ do
+      ui h = column $ fmap snd $ window' (constVar True) "Tools" $ column $ do
         spacer (Fixed 240) (Fixed 1)
         fst <$> customWidget defaultCustomWidgetSpec
           { widgetMeasure = Just (\_ (w, _) -> if w >= 1e8 then (100, 20) else (w, h))
@@ -341,7 +341,7 @@ runPageWindowScrollTest _ failed = do
       title = T.pack "Debug"
       debugWindow =
         fmap fst $
-          window' (Var True) "Debug" $
+          window' (constVar True) "Debug" $
             column $
               mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
       nested = do
@@ -368,7 +368,7 @@ runWindowScrollOnlyDamageTest ctx failed = do
   let inp0 = withInput 640 400
       ui =
         fmap fst $
-          window' (Var True) "Debug" $
+          window' (constVar True) "Debug" $
             column $
               mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
   win <- warmup2 ctx inp0 ui
@@ -389,7 +389,7 @@ runWindowContentChurnTest ctx failed = do
   let inp0 = withInput 640 400
       ui k = do
         _ <- button "Outside"
-        fst <$> window' (Var True) "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
+        fst <$> window' (constVar True) "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
           void $ label (T.pack (replicate (1 + (k `mod` 9)) 'M'))
           void $ label "static row"
           )
@@ -413,7 +413,7 @@ runScrolledDebugToggleTest ctx failed = do
           b <- button' "Debug"
           when (respClicked b) (writeVar openVar (not open))
           pure b
-        when open $ void (window' (Var True) "Debug" (label "fps"))
+        when open $ void (window' (constVar True) "Debug" (label "fps"))
         pure dbgBtn
   dbgBtn <- warmup2 ctx inp0 ui
   _ <- runClick ctx inp0 ui (centerOf dbgBtn)
@@ -424,7 +424,7 @@ runScrolledDebugToggleTest ctx failed = do
 runWindowResizeTest :: Context -> IORef Int -> IO ()
 runWindowResizeTest ctx failed = do
   let inp0 = withInput 640 400
-      ui = fmap fst (window' (Var True) "Resize" (label "Body"))
+      ui = fmap fst (window' (constVar True) "Resize" (label "Body"))
   win0 <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx (respId win0)) $ \(Rect x0 y0 w0 h0) -> do
     assert failed (w0 > 0 && h0 > 0)
@@ -476,7 +476,7 @@ runWindowResizeHaloHitTest ctx failed = do
   let inp0 = withInput 640 400
       ui = do
         btn <- button' "Hit"
-        (win, _) <- window' (Var True) "Resize" (label "Body")
+        (win, _) <- window' (constVar True) "Resize" (label "Body")
         pure (btn, win)
   (btn0, win0) <- warmup2 ctx inp0 ui
   let Rect bx by bw bh = respRect btn0
@@ -518,7 +518,7 @@ runHeadingMonoTruncateTest :: Context -> IORef Int -> IO ()
 runHeadingMonoTruncateTest ctx failed = do
   let inp = withInput 1600 600
       longPath = T.pack "C:\\Users\\zach\\AppData\\Local\\Microsoft\\Windows\\Fonts\\JetBrainsMono-Regular.ttf"
-      ui = fst <$> window' (Var True) "Debug" (do
+      ui = fst <$> window' (constVar True) "Debug" (do
         heading "Draw"
         _ <- label "NormalLabel"
         kvMono "font" longPath)
@@ -548,7 +548,7 @@ runHeadingMonoTruncateTest ctx failed = do
 runWindowFitScrollGutterTest :: Context -> IORef Int -> IO ()
 runWindowFitScrollGutterTest ctx failed = do
   let inp = withInput 1200 300
-      ui = fst <$> window' (Var True) "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
+      ui = fst <$> window' (constVar True) "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
         mapM_ (\i -> kvMono (T.pack ("row " <> show (i :: Int))) (T.pack ("value" <> show i))) [1 .. 30])
   win <- warmup2 ctx inp ui
   let Rect wx _ ww _ = respRect win

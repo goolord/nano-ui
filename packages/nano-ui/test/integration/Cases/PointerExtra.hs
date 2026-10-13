@@ -72,7 +72,7 @@ runMiddleOwnershipTest ctx failed = do
 -- | A middle click beside a modal's panel reaches nothing under the modal.
 runMiddleCoveredTest :: Context -> IORef Int -> IO ()
 runMiddleCoveredTest ctx failed = do
-  let ui open = buttonWith' (fixedWH 380 280) "Under" <* modal' (Var open) "Cover" (label "on top")
+  let ui open = buttonWith' (fixedWH 380 280) "Under" <* modal' (constVar open) "Cover" (label "on top")
   Rect x y _ _ <- respRect <$> warmup2 ctx win (ui False)
   _ <- warmup2 ctx win (ui True)
   rs <- middleAt ctx (ui True) (V2 (x + 4) (y + 4))
@@ -82,7 +82,7 @@ runMiddleCoveredTest ctx failed = do
 -- without selecting the tab. A tab without a close button stays.
 runMiddleTabCloseTest :: Context -> IORef Int -> IO ()
 runMiddleTabCloseTest ctx failed = do
-  let ui = tabBar' (Var (0 :: Int)) [closableTab 0 "Alpha" (), closableTab 1 "Beta" (), tab 2 "Gamma" ()]
+  let ui = tabBar' (constVar (0 :: Int)) [closableTab 0 "Alpha" (), closableTab 1 "Beta" (), tab 2 "Gamma" ()]
       na = ctxNodeArena ctx
   _ <- warmup2 ctx win ui
   spans <- collectTextSpans ctx
@@ -95,7 +95,7 @@ runMiddleTabCloseTest ctx failed = do
 -- | A middle press outside a popup dismisses it; one inside does not.
 runMiddleDismissTest :: Context -> IORef Int -> IO ()
 runMiddleDismissTest ctx failed = do
-  let ui = fst <$> popup' (Var True) (defaultPopupConfig (AnchorPoint (V2 40 40))) (label "Popup body")
+  let ui = fst <$> popup' (constVar True) (defaultPopupConfig (AnchorPoint (V2 40 40))) (label "Popup body")
   shown <- warmup2 ctx win ui
   dismissed <- forM [centerOf shown, V2 380 280] $ \p -> respClicked <$> evalUi ctx (fst (clickPairWith MouseMiddle win p)) ui
   assertEq failed [False, True] dismissed
@@ -115,7 +115,7 @@ runSideButtonsTest ctx failed = do
   assert failed =<< redrawsAgain back
   assert failed =<< redrawsAgain backUp
   assertEq failed (True, False) =<< evalUi ctx back (sides <$> askInput)
-  let covered = sides <$> askInput <* modal' (Var True) "Cover" (label "on top")
+  let covered = sides <$> askInput <* modal' (constVar True) "Cover" (label "on top")
   _ <- warmup2 ctx win covered
   assertEq failed (False, False) =<< evalUi ctx back covered
 
@@ -204,7 +204,7 @@ runMouseListenersTest ctx failed = do
   assertEq failed [(True, True, False), (False, True, False), (False, False, True)] rs
   let off = disabledWhen True listen
   assertEq failed [(False, False, False)] =<< frames ctx off [back]
-  let covered = listen <* modal' (Var True) "Cover" (label "on top")
+  let covered = listen <* modal' (constVar True) "Cover" (label "on top")
   _ <- warmup2 ctx win covered
   assertEq failed [(False, False, False)] =<< frames ctx covered [back]
 

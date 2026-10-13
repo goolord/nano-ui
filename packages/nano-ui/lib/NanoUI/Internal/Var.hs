@@ -107,11 +107,11 @@ slotVar match wrap initial = withContext $ \ctx -> do
 -- you show it, after the widgets that edit it, and no rerun is needed.
 readVar :: Var a -> NanoUI a
 readVar v@(VarRef _ l) = readVarSig (lensSig l) v
-readVar (Var a) = pure a
+readVar (VarConst a) = pure a
 
 -- | 'readVar', recording the read as one of the part @sig@ of the cell.
 readVarSig :: Sig -> Var a -> NanoUI a
-readVarSig _ (Var a) = pure a
+readVarSig _ (VarConst a) = pure a
 readVarSig sig (VarRef cell@(Cell ref _) l) = withContext $ \ctx -> do
   unless (isInert cell) $ do
     p <- frameSlot ctx passSlot
@@ -139,14 +139,14 @@ writeVar v a = modifyVar v (const a)
 -- | Apply a change to the latest value, so successive changes in one frame
 -- all land. A change that leaves the value equal does nothing.
 modifyVar :: Eq a => Var a -> (a -> a) -> NanoUI ()
-modifyVar (Var _) _ = pure ()
+modifyVar (VarConst _) _ = pure ()
 modifyVar (VarRef cell l) f = withContext $ \ctx -> do
   changed <- modifyRoot cell l f eqByPtr
   mapM_ (noteWrite ctx cell . writeSig l) changed
 
 -- | Read from any thread. Not recorded.
 readVarIO :: Var a -> IO a
-readVarIO (Var a) = pure a
+readVarIO (VarConst a) = pure a
 readVarIO (VarRef (Cell ref _) l) = peekLens l =<< readIORef ref
 
 -- | Write from any thread, or from setup code. Nothing is woken: after
@@ -157,7 +157,7 @@ writeVarIO v a = modifyVarIO v (const a)
 
 -- | 'modifyVar' from any thread. Concurrent changes all land.
 modifyVarIO :: Eq a => Var a -> (a -> a) -> IO ()
-modifyVarIO (Var _) _ = pure ()
+modifyVarIO (VarConst _) _ = pure ()
 modifyVarIO (VarRef cell l) f = do
   changed <- modifyRoot cell l f eqByPtr
   unless (isInert cell) $
@@ -261,7 +261,7 @@ bindVarOn mode value = bindWith eqByPtr mode id value
 
 {-# INLINE bindWith #-}
 bindWith :: (a -> a -> Bool) -> Binding -> (x -> r) -> (x -> a) -> Var a -> (a -> NanoUI x) -> NanoUI r
-bindWith _ _ result _ (Var a) widget = result <$> widget a
+bindWith _ _ result _ (VarConst a) widget = result <$> widget a
 bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
   ctx <- askContext
   let sig = lensSig l

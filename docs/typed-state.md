@@ -36,8 +36,9 @@ A Var comes from one of three places:
 - A `VarMap` holds one Var per application key, for dynamic children:
   `varAt` finds or makes one, and `dropVar`/`retainVars` discard them.
 
-`Var x`, or a string literal through the `IsString` instance, is a
-constant whose writes go nowhere. `withValue value widget`
+`constVar x` is a constant whose writes go nowhere, for an input showing a
+value derived from other state. There is no `IsString` instance: a literal
+where a Var belongs is a type error, not a field that drops its edits. `withValue value widget`
 runs a widget on a temporary Var and returns its result with the value it
 left; the emit and form adapters use it.
 

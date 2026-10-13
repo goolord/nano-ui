@@ -32,8 +32,8 @@
 --   hover state, geometry, tooltips, and change or submit flags:
 --   @button'@, @slider'@.
 -- * Inputs take the 'Var' they edit: @textInput draft@ shows @draft@ and
---   stores the user's edits in it. A string literal or @'Var' x@ is a constant,
---   shown but not kept. Editing state such as the caret, a drag in progress,
+--   stores the user's edits in it. @'constVar' x@ is a constant, shown but
+--   not kept. Editing state such as the caret, a drag in progress,
 --   or an open dropdown stays inside the widget.
 -- * Layout arguments are modifiers, as in @buttonWith (fixedW 120)@ or
 --   @columnWith (gap 8 . padAll 12)@. Widgets with more options take a
@@ -533,7 +533,8 @@ module NanoUI
     -- one and store the user's edits in it. 'useVar' keeps one at its
     -- position in the view; 'newVar' makes one the application owns. Read a
     -- Var with 'readVar' where you show it; see "NanoUI.Var".
-  , Var (Var)
+  , Var
+  , constVar
   , newVar
   , useVar
   , useEnumVar

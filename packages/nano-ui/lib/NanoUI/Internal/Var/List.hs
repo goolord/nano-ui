@@ -41,7 +41,7 @@ withElemVars key v body = do
 -- With @keysOnly@, the read records only the list's keys and order.
 elemVars :: Hashable k => Bool -> (a -> k) -> Var [a] -> NanoUI ([a], k -> a -> Var a)
 elemVars keysOnly key v = case v of
-  Var xs -> pure (xs, \_ x -> Var x)
+  VarConst xs -> pure (xs, \_ x -> VarConst x)
   VarRef cell l -> do
     xs <- if keysOnly then readVarSig (structSig l) v else readVar v
     ec <- liftIO (newElemCtx l key xs)

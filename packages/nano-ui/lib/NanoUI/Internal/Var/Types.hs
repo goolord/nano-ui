@@ -8,6 +8,7 @@
 -- "NanoUI.Internal.Var".
 module NanoUI.Internal.Var.Types
   ( Var (..)
+  , constVar
   , Lens (..)
   , ElemCtx (..)
   , viewLens
@@ -35,7 +36,6 @@ import Data.Hashable (Hashable, hash)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
-import Data.String (IsString (..))
 import Data.Text (Text)
 import Data.Word (Word64)
 import GHC.Generics (Generic (..))
@@ -50,17 +50,24 @@ import NanoUI.Internal.Var.Generic (FieldPath, GFocus (..), PathIx (..))
 --
 -- * 'NanoUI.Var.newVar' and 'NanoUI.Var.useVar' make Vars that keep what
 --   widgets write to them.
--- * @'Var' x@ is a constant. A widget given one shows @x@, and an edit to it
---   is gone on the next frame. A string literal is a constant too, so
---   @textInput "draft"@ works as written; a number is wrapped, as in
---   @slider 0 1 (Var 0.5)@.
+-- * @'constVar' x@ is a constant. A widget given one shows @x@, and an edit
+--   to it is gone on the next frame.
 --
 -- @v.field@ focuses a Var on one field of its record, for any record with
 -- one constructor and a 'Generic' instance.
 data Var a where
-  -- | A constant.
-  Var :: a -> Var a
+  VarConst :: a -> Var a
   VarRef :: {-# UNPACK #-} !(Cell s) -> !(Lens s a) -> Var a
+
+-- | A Var that always holds @x@: a widget given one shows @x@ and its edits
+-- go nowhere. For showing a value derived from other state in an input,
+-- with the change handled through the primed variant's response:
+--
+-- > allDone <- all todoDone <$> readVar todos
+-- > r <- checkbox' "All done" (constVar allDone)
+-- > when (respChanged r) (modifyVar todos (map (\t -> t {todoDone = not allDone})))
+constVar :: a -> Var a
+constVar = VarConst
 
 -- | The path from a cell's value to the part a Var shows. Each step after
 -- 'Here' carries its bit for 'lensSig': a record field's or a list key's,
@@ -189,7 +196,7 @@ zoomVar = zoomStep 0
 -- | 'zoomVar' with the step's bit for 'lensSig'.
 {-# INLINE zoomStep #-}
 zoomStep :: Word64 -> (s -> a) -> (a -> s -> s) -> Var s -> Var a
-zoomStep _ g _ (Var s) = Var (g s)
+zoomStep _ g _ (VarConst s) = VarConst (g s)
 zoomStep step g set (VarRef cell l) = VarRef cell (Field step l g set)
 
 -- | 'zoomVar' from a van Laarhoven lens, such as one from @lens@ or
@@ -207,10 +214,6 @@ instance (Generic s, GFocus (FieldPath x s (Rep s)) (Rep s) a, PathIx (FieldPath
 {-# INLINE fieldLens #-}
 fieldLens :: forall x s a. (Generic s, GFocus (FieldPath x s (Rep s)) (Rep s) a) => (s -> a, a -> s -> s)
 fieldLens = (gget @(FieldPath x s (Rep s)) . from, \a -> to . gset @(FieldPath x s (Rep s)) a . from)
-
--- | A string literal is a constant.
-instance IsString a => IsString (Var a) where
-  fromString = Var . fromString
 
 -- | A positional Var as the slot table keeps it, tagged with its type so a
 -- slot that changes type starts over instead of being misread.

@@ -188,7 +188,7 @@ runExplainHoverTest ctx failed = do
 runExplainWindowLayerTest :: Context -> IORef Int -> IO ()
 runExplainWindowLayerTest ctx failed = do
   theme <- outlining ctx
-  let ui = label "page" >> snd <$> window' (Var True) "Win" (labelWith' (fixedWH 60 20) "inside")
+  let ui = label "page" >> snd <$> window' (constVar True) "Win" (labelWith' (fixedWH 60 20) "inside")
   assertJustM failed (warmup2 ctx inp ui) $ \inner -> do
     (_, quads) <- quadsOf ctx inp {inputMousePos = centerOf inner} ui
     nodes <- layerDepths ctx
@@ -201,7 +201,7 @@ runExplainWindowLayerTest ctx failed = do
       assertJustM failed (getExplainedNode ctx) $ \node ->
         assertEq failed (respRect inner, depth) (explainedRect node, explainedDepth node)
   -- A view that is only a window has no page: node 0 is the window root, outlined once over its fill.
-  (_, quads) <- quadsOf ctx inp (window' (Var True) "Win" (labelWith' (fixedWH 60 20) "inside"))
+  (_, quads) <- quadsOf ctx inp (window' (constVar True) "Win" (labelWith' (fixedWH 60 20) "inside"))
   assertJustM failed (listToMaybe <$> layerDepths ctx) $ \(r, depth) -> do
     let e = edge theme depth r
     assertEq failed (0, 1) (depth, length (filter (sameQuad e) quads))

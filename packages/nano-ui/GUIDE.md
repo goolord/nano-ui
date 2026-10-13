@@ -114,8 +114,9 @@ of a `Var [a]`, each under `withKey`, with a Var for the element that follows
 its key when the list is reordered; `withElemVars` is the same for rows you
 filter or order yourself.
 
-A string literal, or `Var x`, is a constant: the widget shows it and an edit is gone
-on the next frame. To give a widget a plain value and get the edit back, as a
+`constVar x` is a constant: the widget shows `x` and an edit is gone on the
+next frame. It suits an input that shows a value derived from other state,
+with the change handled through the primed variant's response. To give a widget a plain value and get the edit back, as a
 model or message-based view does, use `withValue value widget`, which returns
 the widget's result and the value it left.
 

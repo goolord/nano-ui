@@ -28,7 +28,7 @@ windowScene n = columnWith (fillW . fillH) $ do
     forM_ [1 .. n] $ \i -> rowWith (tight . fillW) $ do
       label (T.pack ("row " <> show i))
       void (button (T.pack ("b" <> show i)))
-  window (Var True) "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
+  window (constVar True) "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
     label "a floating window"
     void (button "ok")
 
@@ -36,11 +36,11 @@ windowScene n = columnWith (fillW . fillH) $ do
 -- text field on top: a large arena for the pointer to move over.
 pointerScene :: Int -> NanoUI ()
 pointerScene n = columnWith (fillW . fillH) $ do
-  textInput ""
+  textInput (constVar "")
   void $ scrollWith (fillW . fillH) $ columnWith (tight . fillW) $
     forM_ [1 .. n] $ \i -> rowWith (tight . fillW) $ do
       label (T.pack ("row " <> show i))
-      checkbox "c" (Var False)
+      checkbox "c" (constVar False)
       void (button (T.pack ("b" <> show i)))
 
 -- | 60 rows of 5 to 154 grow columns, with content widths up to 40 pixels

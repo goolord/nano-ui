@@ -193,15 +193,15 @@ main = do
     putStrLn "--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---"
     runFrames
       [ ("100x Button", repeated 2 100 $ \i -> void $ button (numbered "Button " i))
-      , ("100x Checkbox", repeated 2 100 $ \i -> checkbox (numbered "Checkbox " i) (Var (even i)))
-      , ("100x Slider", repeated 2 100 $ \i -> label (numbered "Slider " i) >> slider 0 100 (Var (fromIntegral i)))
-      , ("100x Radio Button", repeated 2 100 $ \i -> muted (numbered "Radio " i) >> radio ["A", "B", "C"] (Var (i `mod` 3)))
+      , ("100x Checkbox", repeated 2 100 $ \i -> checkbox (numbered "Checkbox " i) (constVar (even i)))
+      , ("100x Slider", repeated 2 100 $ \i -> label (numbered "Slider " i) >> slider 0 100 (constVar (fromIntegral i)))
+      , ("100x Radio Button", repeated 2 100 $ \i -> muted (numbered "Radio " i) >> radio ["A", "B", "C"] (constVar (i `mod` 3)))
       , ( "100x Select (Dropdown)"
-        , repeated 2 100 $ \i -> label (numbered "Select " i) >> select ["Option 1", "Option 2", "Option 3"] (Var (i `mod` 3))
+        , repeated 2 100 $ \i -> label (numbered "Select " i) >> select ["Option 1", "Option 2", "Option 3"] (constVar (i `mod` 3))
         )
-      , ("100x TextInput", repeated 2 100 $ \i -> muted (numbered "Input " i) >> textInput "Hello World")
-      , ("20x TextArea", repeated 4 20 $ \_ -> textArea "Line 1\nLine 2\nLine 3")
-      , ("20x ColorPicker", repeated 4 20 $ \_ -> label "Pick" >> colorPicker (Var (colorRGBA 100 150 200 255)))
+      , ("100x TextInput", repeated 2 100 $ \i -> muted (numbered "Input " i) >> textInput (constVar "Hello World"))
+      , ("20x TextArea", repeated 4 20 $ \_ -> textArea (constVar "Line 1\nLine 2\nLine 3"))
+      , ("20x ColorPicker", repeated 4 20 $ \_ -> label "Pick" >> colorPicker (constVar (colorRGBA 100 150 200 255)))
       , ("100x Label (Plain Text)", repeated 2 100 $ \i -> label (numbered "This is label text number " i))
       , ( "100x Box (Solid Rects)"
         , gridWith 10 (tight . gap 2 . fillW) $
@@ -281,7 +281,7 @@ main = do
 churnWindowUi :: Int -> NanoUI ()
 churnWindowUi k = do
   _ <- button "Outside"
-  void $ fst <$> window' (Var True) "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
+  void $ fst <$> window' (constVar True) "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
     void $ kvMono "value" (T.pack (replicate (1 + (k `mod` 9)) 'M'))
     label "static row"
     )
@@ -313,20 +313,20 @@ countDamageKinds ctx n act = go n (0, 0, 0)
 tabControlsUi :: NanoUI ()
 tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Controls"
-  checkbox "Feature" (Var False)
+  checkbox "Feature" (constVar False)
   label "Volume"
-  slider 0 100 (Var 50)
+  slider 0 100 (constVar 50)
   let qualities = ["Low", "Medium", "High"]
   label "Quality"
-  select qualities (Var 1)
+  select qualities (constVar 1)
   label "Accent"
-  colorPicker (Var (colorRGBA 204 102 102 255))
+  colorPicker (constVar (colorRGBA 204 102 102 255))
   muted "Theme"
-  radio ["Light", "Dark", "System"] (Var 1)
+  radio ["Light", "Dark", "System"] (constVar 1)
   muted "Name"
-  textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} ""
+  textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} (constVar "")
   muted "Notes"
-  textArea "Edit me.\nSecond line."
+  textArea (constVar "Edit me.\nSecond line.")
   rowWith (tight . gap 8 . fillW) $ do
     btnTip <- button' "Hover for Tooltip"
     tooltip btnTip "This is a floating tooltip widget!"
@@ -341,7 +341,7 @@ tabListUi :: NanoUI ()
 tabListUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Tree"
   scroll2DWith (fixedH 300 . fillW) $
-    tree "demo" demoTree (Var 0)
+    tree "demo" demoTree (constVar 0)
   heading "Items"
   scroll2DWith (padAll 6 . fixedH 136 . fillW) $
     columnWith (tight . gap 0 . fillW) $
@@ -356,7 +356,7 @@ tabTableUi = columnWith (tight . gap 8 . fillW) $ do
     "people"
     colPeople
     demoPeople
-    (Var (SortCol 0 SortAsc))
+    (constVar (SortCol 0 SortAsc))
 
 tabPlotsUi :: PlotCache -> NanoUI ()
 tabPlotsUi cache = columnWith (tight . gap 8 . fillW) $ do
@@ -396,7 +396,7 @@ registerFresh w h pixels = do
 
 -- | A sortable table. Build the rows outside the frame.
 benchTable :: T.Text -> [DemoPerson] -> NanoUI ()
-benchTable tableKey rows = tableWith (fixedH 400 . gap 8) tableKey colPeople rows (Var (SortCol 0 SortAsc))
+benchTable tableKey rows = tableWith (fixedH 400 . gap 8) tableKey colPeople rows (constVar (SortCol 0 SortAsc))
 
 tablePeople :: Int -> [DemoPerson]
 tablePeople n = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. n]]
@@ -438,7 +438,7 @@ benchSplit =
 
 -- | A text area holding one line.
 benchLongLine :: T.Text -> NanoUI ()
-benchLongLine txt = textAreaWith (fixedWH 600 200) (Var txt)
+benchLongLine txt = textAreaWith (fixedWH 600 200) (constVar txt)
 
 -- | The paragraphs between a label in the top-left corner and one in the
 -- bottom-right, both changing every frame.
@@ -463,7 +463,7 @@ wrapParagraphs =
 benchLargeTree :: NanoUI ()
 benchLargeTree =
   let treeNodes = [TreeItem (T.pack ("Branch " <> show i)) [TreeItem (T.pack ("Leaf " <> show i <> "." <> show j)) [] | j <- [1 .. 5 :: Int]] | i <- [1 .. 10 :: Int]]
-   in tree "bigTree" treeNodes (Var 0)
+   in tree "bigTree" treeNodes (constVar 0)
 
 benchLargeChart :: PlotCache -> NanoUI ()
 benchLargeChart cache =
