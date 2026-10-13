@@ -142,7 +142,7 @@ runDragEscapeOwnershipTest :: Context -> IORef Int -> IO ()
 runDragEscapeOwnershipTest ctx failed = do
   handle <- newDrag
   let inp = withInputOff 400 200
-      ui takeFirst = modalPanel True $ do
+      ui takeFirst = modalPanel' (Var True) $ do
         when takeFirst (void takeEscape)
         source <- button' "Drag"
         gesture <- useDrag handle [((), source)]
@@ -224,8 +224,8 @@ runTabDragReorderTest ctx failed = do
 runPanelBodySwapDamageTest :: Context -> IORef Int -> IO ()
 runPanelBodySwapDamageTest ctx failed = do
   let inp0 = withInput 400 300
-      uiA = window True "TabWin" (columnWith (fixedH 300) (label "WIDE BODY ROW ONE"))
-      uiB = window True "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
+      uiA = window' (Var True) "TabWin" (columnWith (fixedH 300) (label "WIDE BODY ROW ONE"))
+      uiB = window' (Var True) "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
   _ <- warmup2 ctx inp0 uiA
   _ <- runFrame ctx inp0 uiA
   _ <- takeDamage ctx

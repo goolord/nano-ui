@@ -122,9 +122,8 @@ signUp app = do
         writeVar form.formTried True
         valid <- formValid <$> peekVar form
         when valid (writeVar welcomed True)
-  -- Escape, a click outside, or the close button ask the modal to close.
-  isWelcomed <- readVar welcomed
-  (closeR, _) <- modal isWelcomed "Welcome aboard" $ do
+  -- Escape, a click outside, or the close button close the modal.
+  modal welcomed "Welcome aboard" $ do
     f <- readVar form
     kv "Name" (formName f)
     kv "Email" (formEmail f)
@@ -135,7 +134,6 @@ signUp app = do
       whenM (button "Start over") $ do
         writeVar form emptyForm
         writeVar welcomed False
-  when (respClicked closeR) (writeVar welcomed False)
 
 -- | A caption, the widget, and the error under it once a submit was tried.
 -- The error comes and goes, so it sits in a 'scope', which takes one id

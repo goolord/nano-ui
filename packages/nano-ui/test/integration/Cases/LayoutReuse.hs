@@ -155,7 +155,7 @@ render f inLayers = \case
       KLayers -> layersWith mods (body True)
       KWrapRow -> rowWith (wrap . mods) (body False)
       KWrapCol -> columnWith (wrap . mods) (body False)
-      KWindow -> void (window True (T.pack ("W" <> show (m `mod` 1000))) (columnWith mods (body False)))
+      KWindow -> void (window' (Var True) (T.pack ("W" <> show (m `mod` 1000))) (columnWith mods (body False)))
   Leaf kind i -> do
     let v = version i f
     case kind of

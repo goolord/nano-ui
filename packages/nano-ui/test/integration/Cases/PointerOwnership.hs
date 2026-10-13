@@ -136,19 +136,19 @@ overlays =
       , ovSource = do
           anchor <- button' "popup source"
           let cfg = defaultPopupConfig (AnchorRect (respRect anchor))
-          fst <$> popup True cfg {cfgPlacement = PlacementBelow, cfgDismissable = False} panelBody
+          fst <$> popup' (Var True) cfg {cfgPlacement = PlacementBelow, cfgDismissable = False} panelBody
       , ovOpen = alreadyOpen
       , ovRect = nodePanelRect
       }
   , Overlay
       { ovName = "window"
-      , ovSource = fst <$> window True "Overlay window" panelBody
+      , ovSource = fst <$> window' (Var True) "Overlay window" panelBody
       , ovOpen = alreadyOpen
       , ovRect = nodePanelRect
       }
   , Overlay
       { ovName = "modal"
-      , ovSource = fst <$> modal True "Overlay modal" panelBody
+      , ovSource = fst <$> modal' (Var True) "Overlay modal" panelBody
       , ovOpen = alreadyOpen
       , ovRect = nodePanelRect
       }
@@ -399,7 +399,7 @@ runPointerCaptureTest :: Context -> IORef Int -> IO ()
 runPointerCaptureTest ctx failed = do
   let ui = do
         s <- columnWith (fixedW 320) (withValue 50 (slider' 0 100))
-        (_, b) <- window True "Capture window" (columnWith (fixedWH 300 200) (button' "inside"))
+        (_, b) <- window' (Var True) "Capture window" (columnWith (fixedWH 300 200) (button' "inside"))
         pure (s, b)
       frame inp = (\(a, _, _) -> a) <$> runFrame ctx inp ui
       at p = win {inputMousePos = p}

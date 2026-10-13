@@ -29,7 +29,7 @@ import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, separator)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
-import NanoUI.Internal.Widgets.Popup (PopupConfig (..), defaultPopupConfig, popup)
+import NanoUI.Internal.Widgets.Popup (PopupConfig (..), defaultPopupConfig, popupShown)
 import NanoUI.Internal.Widgets.Shortcut (shortcut)
 import NanoUI.Internal.Shortcut (Shortcut, shortcutLabel)
 
@@ -72,7 +72,7 @@ runContextMenu (isOpen0, pos0, openAt, close) rightClick child = do
   when rightClick (openAt mouse)
   -- A release the menu itself sees, which is one on a row, picks.
   (popupResp, mBody) <-
-    popup (isOpen0 || rightClick) cfg $
+    popupShown (isOpen0 || rightClick) cfg id $
       (,) . releasedIn MouseLeft <$> askInput <*> columnWith (tight . gap 0) (child pos)
   let picked = respHovered popupResp && maybe False fst mBody
   when (respClicked popupResp || picked) close

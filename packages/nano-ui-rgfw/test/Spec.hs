@@ -13,7 +13,7 @@ import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
   , UiCursorKind (..), V2 (..), Var (..), box, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
-  , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window
+  , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window'
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
@@ -126,7 +126,7 @@ testZOrderRenderArena :: IO ()
 testZOrderRenderArena = do
   ctx <- newPixelContext
   let boxCol = colorRGBA 0x11 0x22 0x33 255
-  raster ctx 100 100 0 (box grow boxCol >> window True "Z" (label "hi")) $ \_ (_, overlay) px -> do
+  raster ctx 100 100 0 (box grow boxCol >> window' (Var True) "Z" (label "hi")) $ \_ (_, overlay) px -> do
     assert "Overlay text spans collected for floating window chrome" (not (null overlay))
     nodesOf NodeWindow ctx >>= \case
       Rect wx wy ww _ : _ -> do

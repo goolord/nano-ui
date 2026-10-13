@@ -53,7 +53,7 @@ runKeyboardModalEligibilityTest ctx failed = do
   let inp = withInputOff 400 300
       ui = column $ do
         outside <- withValue False (checkbox' "Outside")
-        (_, inside) <- modal True "Modal" (withValue False (checkbox' "Inside"))
+        (_, inside) <- modal' (Var True) "Modal" (withValue False (checkbox' "Inside"))
         pure (outside, inside)
   ((outside, inside), _, _) <- runFrame ctx inp ui
   writeIORef (ctxFocusId ctx) (respId (fst outside))

@@ -223,7 +223,7 @@ runPopupStyleTest :: Context -> IORef Int -> IO ()
 runPopupStyleTest ctx failed = do
   let sea = colorRGBA 12 60 90 255
       ui = styled (popupStyle (background sea)) $ do
-        (_, inner) <- modal True "Dialog" (panelWith (fixedWH 120 40 . tight) (snd <$> mouseArea (fillW . fillH) (pure ())))
+        (_, inner) <- modal' (Var True) "Dialog" (panelWith (fixedWH 120 40 . tight) (snd <$> mouseArea (fillW . fillH) (pure ())))
         pure (respRect <$> inner)
   (inner, draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw

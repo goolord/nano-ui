@@ -83,15 +83,15 @@ keyboardApp app = do
       btn <- menuButton' "Actions" open
       when (respClicked btn) (writeVar menuOpen (not open))
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
-      (popR, picked) <- popup open cfg $ columnWith (tight . gap 0) $ do
+      -- A click outside or Escape closes the menu; so does picking a row.
+      (_, picked) <- popup' menuOpen cfg $ columnWith (tight . gap 0) $ do
         s <- menuItemShortcut "Save" saveChord
         b <- menuItemShortcut "Bold" boldChord
         menuSeparator
         q <- menuItemShortcut "Quit" quitChord
         pure (s, b, q)
-      -- A click outside or Escape dismisses the menu; so does picking a row.
       let chosen@(s, b, q) = fromMaybe (False, False, False) picked
-      when (respClicked popR || s || b || q) (writeVar menuOpen False)
+      when (s || b || q) (writeVar menuOpen False)
       flex
       n <- readVar saves
       labelWith (tight . alignMid . fontMuted) ("Saved " <> T.pack (show n) <> " times")

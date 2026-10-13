@@ -15,6 +15,7 @@ import NanoUI
   , NanoUI
   , Size (..)
   , Theme
+  , Var (Var)
   , boundedRadio
   , button
   , button'
@@ -47,7 +48,7 @@ import NanoUI
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
   , whenM
-  , window
+  , window'
   )
 import NanoUI.Monad (askInput)
 import NanoUI.Shortcut (ctrl, key)
@@ -233,7 +234,7 @@ appView debug m = Emit.withRunInNanoUIE $ \run -> do
 
     when (debugOpen m) $ do
       snap <- askRgfwDebug debug
-      (win, _) <- window True "Debug" (debugWindowBody debug snap)
+      (win, _) <- window' (Var True) "Debug" (debugWindowBody debug snap)
       when (respClicked win) (run (Emit.emit (ToggleDebug False)))
 
 viewControlsTab :: Model -> Emit.NanoUIE Msg ()

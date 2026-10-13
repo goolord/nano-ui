@@ -91,7 +91,7 @@ runDrawLayersTest _ failed = do
       , label "content"
       , column $ do
           void (button "outside")
-          void (modal True "overlay" (button "inside"))
+          void (modal' (Var True) "overlay" (button "inside"))
       ]
   forM_ views $ \view -> do
     ctx <- newContext

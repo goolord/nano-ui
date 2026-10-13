@@ -3,12 +3,10 @@
 -- | Overlays: menu bars, context menus, tooltips, popovers, modal dialogs,
 -- floating windows, and asking before the window closes.
 --
--- Every overlay is controlled like an input: you pass whether it is open,
--- and it hands back a 'Response' whose 'respClicked' means "please close"
--- (Escape, a click outside, or its close button). Store False when you see
--- it; the overlay never closes itself. Its body is an ordinary view that runs
--- only while it is open, inside its own id scope, so opening it shifts no
--- other widget's state.
+-- Every overlay takes a @Var Bool@ like an input: it shows while the Var
+-- holds True, and Escape, a click outside or its close button write False.
+-- Its body is an ordinary view that runs only while it is open, inside its
+-- own id scope, so opening it shifts no other widget's state.
 --
 -- The menu bar is 'menuButton'' plus a 'popup' anchored under it, in a small
 -- helper below. The Filter button opens the same kind of popup holding
@@ -76,7 +74,6 @@ overlaysApp app = do
   Model all' fresh <- readVar app.appModel
   fruit <- readVar showFruit
   veg <- readVar showVeg
-  inspecting <- readVar inspectorOpen
   let picked = length (filter itemPicked all')
       visible i = if itemFruit i then fruit else veg
       -- A menu row that closes its menu when picked.
@@ -99,21 +96,21 @@ overlaysApp app = do
             -- The enabled and disabled rows swap, so they share a scope.
             scope $ if picked > 0 then item (menuItem "Delete picked...") askDelete else menuItemDisabled "Delete picked..."
         )
-      , ("Help", item (menuItem (if inspecting then "Hide inspector" else "Show inspector")) (writeVar inspectorOpen (not inspecting)))
+      , ("Help", do
+          inspecting <- readVar inspectorOpen
+          item (menuItem (if inspecting then "Hide inspector" else "Show inspector")) (writeVar inspectorOpen (not inspecting)))
       ]
     separator
     columnWith (padAll 16 . gap 12 . fillW . fillH) $ do
       rowWith (tight . gap 8 . alignMid . fillW) $ do
         filterR <- button' "Filter"
         tooltip filterR "Choose which kinds of item to show"
-        open <- readVar filterOpen
-        when (respClicked filterR) (writeVar filterOpen (not open))
+        when (respClicked filterR) (modifyVar filterOpen not)
         let below = (defaultPopupConfig (AnchorRect (respRect filterR))) {cfgPlacement = PlacementBelow}
-        (filterPopR, _) <- popup open below $ do
+        popup filterOpen below $ do
           menuHeader "Show"
           checkbox "Fruit" showFruit
           checkbox "Vegetables" showVeg
-        when (respClicked filterPopR) (writeVar filterOpen False)
         disabledWhen (picked == 0) $ whenM (styled destructive (button "Delete picked...")) askDelete
         toggleButton Accent "Inspector" inspectorOpen
         flex
@@ -131,15 +128,13 @@ overlaysApp app = do
 
   -- Overlays float over the page wherever they are declared; keeping them
   -- together at the end reads best. Each takes its ids whether open or not.
-  (winR, _) <- window inspecting "Inspector" $ do
+  window inspectorOpen "Inspector" $ do
     kv "Items" (T.pack (show (length all')))
     kv "Showing" (T.pack (show (length (filter visible all'))))
     kv "Picked" (T.pack (show picked))
     kv "Next id" (T.pack (show fresh))
-  when (respClicked winR) (writeVar inspectorOpen False)
 
-  deleting <- readVar confirmDelete
-  (deleteR, _) <- modal deleting ("Delete " <> plural picked "item" <> "?") $ do
+  modal confirmDelete ("Delete " <> plural picked "item" <> "?") $ do
     muted "Picked rows hidden by the filter are deleted too."
     rowWith (tight . gap 8 . fillW) $ do
       flex
@@ -148,19 +143,16 @@ overlaysApp app = do
         modifyVar itemsVar (filter (not . itemPicked))
         writeVar status ("Deleted " <> plural picked "item" <> ".")
         writeVar confirmDelete False
-  when (respClicked deleteR) (writeVar confirmDelete False)
 
   -- The close button only asks while wsExitOnCloseRequest is off.
   closing <- winCloseRequested <$> askWindow
   when closing (writeVar confirmDelete False >> writeVar asking True)
-  quitting <- readVar asking
-  (quitR, _) <- modal quitting "Quit?" $ do
+  modal asking "Quit?" $ do
     label "Your list is not saved anywhere."
     rowWith (tight . gap 8 . fillW) $ do
       flex
       whenM (button "Keep working") (writeVar asking False)
       whenM (styled destructive (button "Quit")) quitUi
-  when (respClicked quitR) (writeVar asking False)
 
 -- | One row: a checkbox across the row that edits the item's picked flag,
 -- with a context menu on it. Vars inside 'contextMenu' live under the
@@ -192,7 +184,9 @@ menuBar openMenu entries =
       when (respClicked btn) (writeVar openMenu (if isOpen then "" else title))
       when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu title)
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
-      (popR, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
+      -- The open flag is derived from the open menu's name, so the popup
+      -- gets a constant and closing it is written here.
+      (popR, _) <- popup' (Var isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popR) (writeVar openMenu "")
 
 plural :: Int -> Text -> Text

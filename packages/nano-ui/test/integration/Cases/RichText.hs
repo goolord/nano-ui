@@ -337,7 +337,7 @@ runRichTextScrollPopupTest _ failed = do
       -- The popup's rect and the body's result, laid out from the start.
       inPopup inner = do
         c <- newContext
-        (resp, r) <- warmup2 c inp (popupWith True cfg (fixedW 560 . maxH 420) inner)
+        (resp, r) <- warmup2 c inp (popupWith' (Var True) cfg (fixedW 560 . maxH 420) inner)
         pure (c, respRect resp, r)
       bottom r = rectY r + rectH r
   (_, columnPopup, Just (lineH, wrapped)) <- inPopup (columnWith fillW body)

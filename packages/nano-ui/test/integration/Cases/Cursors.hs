@@ -99,7 +99,7 @@ runCursorShapeIdsLayoutTest ctx failed = do
 -- declared inside the scope.
 runCursorShapeFloatingTest :: Context -> IORef Int -> IO ()
 runCursorShapeFloatingTest ctx failed = do
-  let tools = fst <$> window True "Tools" (label "Body")
+  let tools = fst <$> window' (Var True) "Tools" (label "Body")
       -- One page root: the frame lays out and paints only the first.
       over = column ((,) <$> tools <*> withCursorShape UiCursorMove (plainArea 620 380))
       within = withCursorShape UiCursorMove (tools >> plainArea 620 380)
@@ -151,9 +151,9 @@ runCursorShapeModalTest :: Context -> IORef Int -> IO ()
 runCursorShapeModalTest ctx failed = do
   let ui open anchor = do
         page <- withCursorShape UiCursorMove (plainArea 620 460)
-        (_, inner) <- modal open "Dialog" $ do
+        (_, inner) <- modal' (Var open) "Dialog" $ do
           area <- withCursorShape UiCursorCrosshair (plainArea 200 120)
-          (_, body) <- popup True (defaultPopupConfig (AnchorPoint anchor)) {cfgPlacement = PlacementBelow, cfgDismissable = False} (plainArea 60 30)
+          (_, body) <- popup' (Var True) (defaultPopupConfig (AnchorPoint anchor)) {cfgPlacement = PlacementBelow, cfgDismissable = False} (plainArea 60 30)
           pure (area, body)
         pure (page, inner)
   (page, _) <- warmup2 ctx inp (ui False (V2 0 0))
@@ -169,7 +169,7 @@ runCursorShapeModalTest ctx failed = do
 -- | A scope in a window body applies to its widgets, not the title bar.
 runCursorShapeInWindowTest :: Context -> IORef Int -> IO ()
 runCursorShapeInWindowTest ctx failed = do
-  let ui = window True "Tools" (withCursorShape UiCursorCrosshair (plainArea 160 80))
+  let ui = window' (Var True) "Tools" (withCursorShape UiCursorCrosshair (plainArea 160 80))
   (w, mInner) <- warmup2 ctx inp ui
   assertJust failed mInner $ \inner -> assertJustM failed (getPrevRect ctx (respId w)) $ \(Rect wx wy ww _) ->
     shapesAt failed ctx ui [(centerOf inner, UiCursorCrosshair), (V2 (wx + ww / 2) (wy + 12), UiCursorDefault)]
@@ -193,7 +193,7 @@ runCursorShapeSmallScopeTest :: Context -> IORef Int -> IO ()
 runCursorShapeSmallScopeTest ctx failed = do
   let ui = row $ do
         labels <- columnWith (gap 6) . forM [1 .. 30 :: Int] $ \i -> row (label' (T.pack ("row " <> show i)) <* plainArea 60 8)
-        scoped <- withCursorShape UiCursorCrosshair ((,) <$> plainArea 80 60 <*> (fst <$> window True "Tools" (label "Body")))
+        scoped <- withCursorShape UiCursorCrosshair ((,) <$> plainArea 80 60 <*> (fst <$> window' (Var True) "Tools" (label "Body")))
         pure (labels, scoped)
   (labels, (area, w)) <- warmup2 ctx inp ui
   assertJustM failed (getPrevRect ctx (respId w)) $ \wr -> do

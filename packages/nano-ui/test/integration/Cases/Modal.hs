@@ -6,6 +6,7 @@ import Data.Text qualified as T
 tests :: [Spec]
 tests =
   [ spec "modal-overlay" runModalOverlayTest
+  , spec "modal-var" runModalVarTest
   , spec "modal-fits-text" runModalFitsTextTest
   , spec "modal-no-phantom-scroll" runModalNoPhantomScrollTest
   , spec "modal-close-damage" runModalCloseDamageTest
@@ -19,11 +20,11 @@ runModalOverlayTest ctx failed = do
     inp0 = withInput 320 200
     ui = column $ do
       outside <- button' "Outside"
-      (dlg, mInside) <- modal True "Title" (button' "Inside")
+      (dlg, mInside) <- modal' (Var True) "Title" (button' "Inside")
       pure (outside, dlg, mInside)
     closedUi = column $ do
       _ <- button "Outside"
-      (dlg, mInside) <- modal False "Title" (button' "Inside")
+      (dlg, mInside) <- modal' (Var False) "Title" (button' "Inside")
       pure (dlg, mInside)
 
   (dlgClosed, mInsideClosed) <- evalUi ctx inp0 closedUi
@@ -51,16 +52,50 @@ runModalOverlayTest ctx failed = do
     _ <- runFrame ctx esc closedUi
     assert failed . not =<< overlayConsumesQuit ctx esc
 
-  let tallUi = modal True "Tall" $ do
+  let tallUi = modal' (Var True) "Tall" $ do
         forM_ [1 .. 40 :: Int] (\i -> label (T.pack ("Row " <> show i)))
         button "Close"
   (dlgTall, _) <- warmup2 ctx inp0 tallUi
   assert failed (rectH (respRect dlgTall) <= 200)
 
+-- A modal on a Var closes itself: a dismissal writes False and the view runs
+-- again, so the frame that saw Escape already draws it closed. A button in
+-- the body closes it by writing the Var, and a constant reports the request
+-- and stays open.
+runModalVarTest :: Context -> IORef Int -> IO ()
+runModalVarTest ctx failed = do
+  let inp0 = withInput 320 200
+  open <- newVar True
+  let ui = column $ do
+        _ <- button "Outside"
+        modal open "Title" (label "body")
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+  assertEq failed False =<< readVarIO open
+  assertEq failed 2 =<< lastFramePasses ctx
+  assert failed . not . hasText "Title" =<< collectOverlayTextSpans ctx inp0
+
+  writeVarIO open True
+  let withClose = column $ do
+        (_, close) <- modal' open "Title" $ do
+          r <- button' "Close"
+          r <$ when (respClicked r) (writeVar open False)
+        pure close
+  mClose <- warmup2 ctx inp0 withClose
+  assertJust failed mClose $ \close -> do
+    _ <- runClick ctx inp0 withClose (centerOf close)
+    assertEq failed False =<< readVarIO open
+
+  let fixed = fst <$> modal' (Var True) "Title" (label "body")
+  _ <- warmup2 ctx inp0 fixed
+  (dlg, _, _) <- runFrame ctx (keyInp KeyEscape inp0) fixed
+  assert failed (respClicked dlg)
+  assert failed . hasText "Title" =<< collectOverlayTextSpans ctx inp0
+
 runModalNoPhantomScrollTest :: Context -> IORef Int -> IO ()
 runModalNoPhantomScrollTest ctx failed = do
   let inp0 = withInput 400 300
-      ui = modal True "About" $ do
+      ui = modal' (Var True) "About" $ do
         _ <- label "Immediate-mode GUI for Haskell."
         rowWith fillW $ do
           _ <- spacer (Grow 1) Fit
@@ -85,7 +120,7 @@ runModalCloseDamageTest ctx failed = do
         open <- readVar openVar
         resp <- button' "Open"
         when (respClicked resp) (writeVar openVar True)
-        (dlg, _) <- modal open "Title" (label "body")
+        (dlg, _) <- modal' (Var open) "Title" (label "body")
         when (respClicked dlg) (writeVar openVar False)
         pure resp
       inp0 = withInputOff 320 240
@@ -124,8 +159,8 @@ runModalFractionalScaleNoScrollTest _ failed =
         body = columnWith (gap 10) (section >> section >> section >> button "Close")
         -- As the arena's root, and inside other content as an app opens one.
         ui
-          | nested = column (label "Behind" >> fst <$> modal True "Details" body)
-          | otherwise = fst <$> modal True "Details" body
+          | nested = column (label "Behind" >> fst <$> modal' (Var True) "Details" body)
+          | otherwise = fst <$> modal' (Var True) "Details" body
         -- Whether a wheel over the modal moves its first field.
         scrolls c i = do
           dlg <- warmup2 c i ui
@@ -145,7 +180,7 @@ runModalFitsTextTest :: Context -> IORef Int -> IO ()
 runModalFitsTextTest ctx failed = do
   let inp = withInput 800 600
       sentence = T.pack "A sentence that is wider than the smallest modal allows."
-      ui = fst <$> modal True "About" (muted sentence)
+      ui = fst <$> modal' (Var True) "About" (muted sentence)
   dlg <- warmup2 ctx inp ui
   spans <- collectOverlayTextSpans ctx inp
   let Rect _ _ dw _ = respRect dlg
@@ -171,7 +206,7 @@ runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
             flex
             _ <- button "Cancel"
             button' "Use this login"
-      ui = modal True "Hackage login" body
+      ui = modal' (Var True) "Hackage login" body
   (dlg, mOk) <- warmup2 ctx inp ui
   spans0 <- collectOverlayTextSpans ctx inp
   let wheel = inp {inputMousePos = centerOf dlg, inputScroll = V2 0 3}

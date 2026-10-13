@@ -28,7 +28,7 @@ windowScene n = columnWith (fillW . fillH) $ do
     forM_ [1 .. n] $ \i -> rowWith (tight . fillW) $ do
       label (T.pack ("row " <> show i))
       void (button (T.pack ("b" <> show i)))
-  void $ window True "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
+  window (Var True) "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
     label "a floating window"
     void (button "ok")
 

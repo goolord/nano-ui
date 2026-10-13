@@ -1,10 +1,15 @@
 -- | Modal dialogs and panels, and floating in-app windows.
 module NanoUI.Internal.Widgets.Overlay
   ( modal
+  , modal'
   , modalWith
+  , modalWith'
   , modalPanel
+  , modalPanel'
   , modalPanelWith
+  , modalPanelWith'
   , window
+  , window'
   , windowTitleBarH
   , windowChromeSepH
   )
@@ -23,7 +28,8 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), Size (..), clamp, rectNonEmpty)
 import NanoUI.Internal.WidgetText (buttonCloseTrailing, buttonFlagClose)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
-import NanoUI.Internal.Widgets.Popup (floatingOverlay)
+import NanoUI.Internal.Var.Types (Var)
+import NanoUI.Internal.Widgets.Popup (bindOpen, floatingOverlay)
 import NanoUI.Internal.Widgets.Layout hiding (panel)
 import NanoUI.Internal.Widgets.Node
 
@@ -35,11 +41,25 @@ windowTitleBarH = 28 + 10 + windowChromeSepH
 windowChromeSepH :: Float
 windowChromeSepH = 1
 
--- | Show a modal while the first argument is true, blocking interaction with
--- content behind it. Returns a close-request response and the body's result;
--- the result is 'Nothing' while closed. The caller owns the open flag.
-modal :: Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-modal = overlay True True id
+-- | A modal dialog with a title bar, shown while the Var holds 'True',
+-- blocking interaction with the content behind it. Escape, a click outside
+-- or its close button write 'False', so it closes in the same frame:
+--
+-- > asking <- useVar False
+-- > whenM (button "Delete...") (writeVar asking True)
+-- > modal asking "Delete the file?" $ do
+-- >   whenM (button "Delete") (deleteFile >> writeVar asking False)
+--
+-- For an open flag derived from other state, or a dialog that must not
+-- close until answered, pass a constant and act on the response from
+-- 'modal''.
+modal :: Var Bool -> Text -> NanoUI () -> NanoUI ()
+modal open title body = void (modalWith' id open title body)
+
+-- | 'modal' returning the body's result while open, and a 'Response' that
+-- reports a close request as a click.
+modal' :: Var Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
+modal' = modalWith' id
 
 -- | 'modal' with a layout modifier for its panel, which by default fits its
 -- body. The title bar, the rule under it and the padding are the panel's
@@ -54,27 +74,44 @@ modal = overlay True True id
 --
 -- A panel is never larger than the window, less the margin every floating
 -- panel keeps from its edge.
-modalWith :: (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-modalWith = overlay True True
+modalWith :: (Layout -> Layout) -> Var Bool -> Text -> NanoUI () -> NanoUI ()
+modalWith f open title body = void (modalWith' f open title body)
+
+-- | 'modalWith' returning the body's result and the 'Response'.
+modalWith' :: (Layout -> Layout) -> Var Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
+modalWith' f open title body = bindOpen open (\shown -> overlay True True f shown title body)
 
 -- | A modal panel without a title bar, close button or surrounding padding.
 -- The panel surface and modal backdrop remain; Escape or a click outside
--- reports a close request. The caller owns the open flag.
-modalPanel :: Bool -> NanoUI a -> NanoUI (Response, Maybe a)
+-- writes 'False'.
+modalPanel :: Var Bool -> NanoUI () -> NanoUI ()
 modalPanel = modalPanelWith id
+
+-- | 'modalPanel' returning the body's result and the 'Response'.
+modalPanel' :: Var Bool -> NanoUI a -> NanoUI (Response, Maybe a)
+modalPanel' = modalPanelWith' id
 
 -- | 'modalPanel' with a layout modifier for its panel. A fixed-size panel's
 -- body fills the panel, so a body laid out with @fillW . fillH@ takes exactly
 -- the panel's inside. Use a small amount of padding only when the body should
 -- sit clear of the panel's border.
-modalPanelWith :: (Layout -> Layout) -> Bool -> NanoUI a -> NanoUI (Response, Maybe a)
-modalPanelWith shape open = overlay True False shape open ""
+modalPanelWith :: (Layout -> Layout) -> Var Bool -> NanoUI () -> NanoUI ()
+modalPanelWith shape open body = void (modalPanelWith' shape open body)
 
--- | Show a draggable, resizable in-app window with a scrolling body. Like
--- 'modal', the response reports a close request and the caller updates the
--- open flag. Other windows and the page remain interactive outside its bounds.
-window :: Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-window = overlay False True id
+-- | 'modalPanelWith' returning the body's result and the 'Response'.
+modalPanelWith' :: (Layout -> Layout) -> Var Bool -> NanoUI a -> NanoUI (Response, Maybe a)
+modalPanelWith' shape open body = bindOpen open (\shown -> overlay True False shape shown "" body)
+
+-- | A draggable, resizable in-app window with a scrolling body, shown while
+-- the Var holds 'True'. Its close button writes 'False'. Other windows and
+-- the page remain interactive outside its bounds.
+window :: Var Bool -> Text -> NanoUI () -> NanoUI ()
+window open title body = void (window' open title body)
+
+-- | 'window' returning the body's result while open, and a 'Response' that
+-- reports a close request as a click.
+window' :: Var Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
+window' open title body = bindOpen open (\shown -> overlay False True id shown title body)
 
 -- | A modal (@isModal@) or a window.
 overlay ::

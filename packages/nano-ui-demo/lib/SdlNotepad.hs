@@ -232,25 +232,19 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     (if T.null path then "Untitled" else path) <> (if dirty then " *" else "") <> " - nano-ui Notepad"
 
   --------------------------------------------------------------- overlays ---
-  aboutShown <- readVar aboutOpen
-  (aboutResp, _) <-
-    modal aboutShown "About" $ do
-      heading "nano-ui Notepad"
-      labelWith fontMuted "A menu-bar notepad built with nano-ui on SDL3."
-      labelWith fontMuted "File, Edit, View and Help are wired to real actions."
-      rowWith fillW $ do
-        flex
-        whenM (button "Close") (writeVar aboutOpen False)
-  when (respClicked aboutResp) (writeVar aboutOpen False)
-  confirmShown <- readVar confirmExit
-  (confirmResp, _) <-
-    modal confirmShown "Unsaved changes" $ do
-      label "Discard the changes to this document and exit?"
-      rowWith fillW $ do
-        flex
-        whenM (button "Discard") quitUi
-        whenM (button "Cancel") (writeVar confirmExit False)
-  when (respClicked confirmResp) (writeVar confirmExit False)
+  modal aboutOpen "About" $ do
+    heading "nano-ui Notepad"
+    labelWith fontMuted "A menu-bar notepad built with nano-ui on SDL3."
+    labelWith fontMuted "File, Edit, View and Help are wired to real actions."
+    rowWith fillW $ do
+      flex
+      whenM (button "Close") (writeVar aboutOpen False)
+  modal confirmExit "Unsaved changes" $ do
+    label "Discard the changes to this document and exit?"
+    rowWith fillW $ do
+      flex
+      whenM (button "Discard") quitUi
+      whenM (button "Cancel") (writeVar confirmExit False)
 
 --------------------------------------------------------------------------------
 -- Local menu-bar widget
@@ -269,7 +263,9 @@ menuBar openMenu entries = do
       when (respClicked btn) (writeVar openMenu (if isOpen then "" else menuLabel))
       when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu menuLabel)
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
-      (popupResp, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
+      -- The open flag is derived from the open menu's name, so the popup
+      -- gets a constant and closing it is written here.
+      (popupResp, _) <- popup' (Var isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
     flex
 

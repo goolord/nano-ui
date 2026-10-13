@@ -297,21 +297,15 @@ demoUi st = do
         tabs activeTab [tab page (T.pack (show page)) (demoTab st page) | page <- [minBound .. maxBound]]
 
   -- Debug window: a plain draggable window opened by the toolbar toggle.
-  whenM (readVar debugOpen) $ do
-    (win, _) <- window True "Debug" (debugBody dbg)
-    when (respClicked win) (writeVar debugOpen False)
-  -- About modal: modal gives (response, _); clicking anywhere or pressing Esc
-  -- sets respClicked on the response, which closes it.
-  showAbout <- readVar aboutOpen
-  (aboutResp, _) <-
-    modal showAbout "About" $ do
-      heading "nano-ui"
-      muted "Immediate-mode GUI for Haskell."
-      muted "Esc closes this dialog, then the app."
-      rowWith (gap gapInline . fillW) $ do
-        flex
-        whenM (button "Close") (writeVar aboutOpen False)
-  when (respClicked aboutResp) (writeVar aboutOpen False)
+  window debugOpen "Debug" (debugBody dbg)
+  -- About modal: a click outside or Esc closes it, like its Close button.
+  modal aboutOpen "About" $ do
+    heading "nano-ui"
+    muted "Immediate-mode GUI for Haskell."
+    muted "Esc closes this dialog, then the app."
+    rowWith (gap gapInline . fillW) $ do
+      flex
+      whenM (button "Close") (writeVar aboutOpen False)
 
 demoTab :: DemoState -> DemoTab -> NanoUI ()
 demoTab st = \case

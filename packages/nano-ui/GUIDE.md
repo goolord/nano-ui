@@ -287,9 +287,23 @@ read the setting, so it gets `Nothing`. `setTheme` and `setUiTheme` set a
 fixed theme in place of a following one. `themeAppearance` says whether a
 theme is light or dark.
 
-Modals, floating windows, and popups return close or dismissal requests.
-The application owns their open flag and must update it. Keep calling the
-overlay with that flag so its identity and later siblings remain stable.
+Modals, floating windows, and popups take their open flag as a `Var Bool`,
+the way inputs take the Var they edit: the overlay shows while the Var holds
+`True`, and Escape, a click outside or a close button write `False`, so it
+closes in the same frame. Keep calling the overlay whether open or not, so its
+identity and later siblings remain stable:
+
+```haskell
+confirm <- useVar False
+whenM (button "Delete...") (writeVar confirm True)
+modal confirm "Delete the file?" $
+  whenM (button "Delete") (deleteFile >> writeVar confirm False)
+```
+
+For a flag derived from other state, or a dialog that must stay open until
+answered, pass a constant and act on the request yourself: the primed
+variants (`modal'`, `window'`, `popup'`) return the overlay's `Response`, whose
+`respClicked` reports a dismissal, and the body's result.
 
 Tooltips need no flag. One opens once the pointer has rested on its target
 for `tooltipDelay`, half a second by default, and shuts when the pointer
@@ -615,8 +629,7 @@ view calls `quitUi`, which ends it once that frame is drawn:
 asking <- useVar False
 whenM (winCloseRequested <$> askWindow) $
   if unsaved then writeVar asking True else quitUi
-open <- readVar asking
-_ <- modal open "Discard your changes?" $ do
+modal asking "Discard your changes?" $ do
   whenM (button "Discard") quitUi
   whenM (button "Keep editing") (writeVar asking False)
 ```

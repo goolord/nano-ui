@@ -90,7 +90,7 @@ runHoldFocusModalTest ctx failed = do
         holdFocus page
         _ <- customWidgetWithId page defaultCustomWidgetSpec {widgetLayout = fixedWH 100 30 defaultLayout}
         _ <-
-          modal True "Dialog" $
+          modal' (Var True) "Dialog" $
             customWidget defaultCustomWidgetSpec {widgetLayout = fixedWH 100 30 defaultLayout, widgetFocusable = True}
         pure page
   _ <- warmup2 ctx inp ui
@@ -369,7 +369,7 @@ runTakeEscapeTest ctx failed = do
 runModalWithTest :: Context -> IORef Int -> IO ()
 runModalWithTest ctx failed = do
   let inp = withInput 800 600
-      ui = modalWith (fixedWH 500 400) True "Sized" $ columnWith (fillW . fillH . tight) $ do
+      ui = modalWith' (fixedWH 500 400) (Var True) "Sized" $ columnWith (fillW . fillH . tight) $ do
         (resp, ()) <- customWidget defaultCustomWidgetSpec {widgetLayout = (fillW . fillH) defaultLayout}
         pure (respRect resp)
   _ <- warmup2 ctx inp ui
@@ -385,7 +385,7 @@ runModalWithTest ctx failed = do
 runModalPanelWithTest :: Context -> IORef Int -> IO ()
 runModalPanelWithTest ctx failed = do
   let inp = withInput 800 600
-      ui = modalPanelWith (fixedWH 500 400) True $ do
+      ui = modalPanelWith' (fixedWH 500 400) (Var True) $ do
         (resp, ()) <- customWidget defaultCustomWidgetSpec {widgetLayout = (fillW . fillH) defaultLayout}
         pure (respRect resp)
   _ <- warmup2 ctx inp ui

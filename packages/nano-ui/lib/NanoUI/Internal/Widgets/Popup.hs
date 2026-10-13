@@ -1,11 +1,15 @@
--- | Anchored floating panels and tooltips, with caller-owned visibility state.
+-- | Anchored floating panels, open while a Var says so, and tooltips.
 module NanoUI.Internal.Widgets.Popup
   ( PopupAnchor (..)
   , PopupPlacement (..)
   , PopupConfig (..)
   , defaultPopupConfig
   , popup
+  , popup'
   , popupWith
+  , popupWith'
+  , popupShown
+  , bindOpen
   , floatingOverlay
   , tooltipWidget
   , tooltipAt
@@ -33,6 +37,8 @@ import NanoUI.Internal.Store (deleteSlot, fieldQuiet, findSlot, insertSlot)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Tasks (holdAction)
 import NanoUI.Internal.Types
+import NanoUI.Internal.Var (Binding (..), bindVarBy)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (useDismissable)
 import NanoUI.Internal.Widgets.Layout (label)
 import NanoUI.Internal.Widgets.Node
@@ -57,26 +63,53 @@ defaultPopupConfig anchor =
     , cfgOffset = 4
     }
 
--- | A floating panel placed by the config, shown while @open@. Returns the
--- body's result while open. The 'Response' reports a dismissal (Escape, or a
--- click outside when 'cfgDismissable') as a click. A press on an
--- 'AnchorRect' is not outside, so a button that toggles its popup on
--- 'respClicked' closes it rather than closing and reopening it.
-popup ::
-  Bool ->
-  PopupConfig ->
-  NanoUI a ->
-  NanoUI (Response, Maybe a)
-popup open cfg child = popupWith open cfg id child
+-- | A floating panel placed by the config, shown while the Var holds
+-- 'True'. A dismissal (Escape, or a click outside when 'cfgDismissable')
+-- writes 'False', so the panel closes in the same frame. A press on an
+-- 'AnchorRect' is not outside, so a button that toggles the Var on
+-- 'respClicked' closes the popup rather than closing and reopening it.
+--
+-- > filterOpen <- useVar False
+-- > filterR <- button' "Filter"
+-- > when (respClicked filterR) (modifyVar filterOpen not)
+-- > popup filterOpen (defaultPopupConfig (AnchorRect (respRect filterR))) $ do
+-- >   checkbox "Fruit" showFruit
+--
+-- For an open flag derived from other state, or one the caller may refuse
+-- to clear, pass a constant and act on the response from 'popup'' instead.
+popup :: Var Bool -> PopupConfig -> NanoUI () -> NanoUI ()
+popup open cfg child = void (popupWith' open cfg id child)
+
+-- | 'popup' returning the body's result while open, and a 'Response' that
+-- reports a dismissal as a click.
+popup' :: Var Bool -> PopupConfig -> NanoUI a -> NanoUI (Response, Maybe a)
+popup' open cfg = popupWith' open cfg id
 
 -- | 'popup' with a modifier applied to its tight default layout.
-popupWith ::
+popupWith :: Var Bool -> PopupConfig -> (Layout -> Layout) -> NanoUI () -> NanoUI ()
+popupWith open cfg f child = void (popupWith' open cfg f child)
+
+-- | 'popupWith' returning the body's result and the 'Response'.
+popupWith' :: Var Bool -> PopupConfig -> (Layout -> Layout) -> NanoUI a -> NanoUI (Response, Maybe a)
+popupWith' open cfg f child = bindOpen open (\shown -> popupShown shown cfg f child)
+
+-- | Run a floating panel on the open flag in a Var, writing 'False' when
+-- the panel reports a dismissal. The panel drew itself open before the
+-- dismissal resolved, so a dismissal runs the view again.
+bindOpen :: Var Bool -> (Bool -> NanoUI (Response, Maybe a)) -> NanoUI (Response, Maybe a)
+bindOpen v run = bindVarBy (==) Conservative v $ \open -> do
+  r <- run open
+  pure (r, open && not (respClicked (fst r)))
+
+-- | 'popupWith'' on a plain open flag. The 'Response' reports a dismissal
+-- as a click, and the caller closes the popup.
+popupShown ::
   Bool ->
   PopupConfig ->
   (Layout -> Layout) ->
   NanoUI a ->
   NanoUI (Response, Maybe a)
-popupWith open cfg f child = do
+popupShown open cfg f child = do
   ctx <- askContext
   let
     layout = f (tight defaultLayout)
@@ -202,7 +235,7 @@ tooltipWidgetConfigured cfg target child = do
   let (anchor, placement)
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
-  result <- snd <$> popup open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) child
+  result <- snd <$> popupShown open ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) id child
   -- A tooltip the view stops declaring while it waits or shows forgets its
   -- time: the frame that skips it runs its cleanup ('holdAction'). Coming
   -- back, it waits out its delay again rather than opening at once or

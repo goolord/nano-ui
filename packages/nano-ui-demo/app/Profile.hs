@@ -281,7 +281,7 @@ main = do
 churnWindowUi :: Int -> NanoUI ()
 churnWindowUi k = do
   _ <- button "Outside"
-  void $ fst <$> window True "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
+  void $ fst <$> window' (Var True) "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
     void $ kvMono "value" (T.pack (replicate (1 + (k `mod` 9)) 'M'))
     label "static row"
     )

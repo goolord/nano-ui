@@ -29,6 +29,14 @@
   so a conditional widget no longer moves later state, and a slot that
   changes type resets instead of reinterpreting the old value.
 
+  Overlays take their open flag the same way: `modal`, `modalWith`,
+  `modalPanel`, `modalPanelWith`, `window`, `popup` and `popupWith` take a
+  `Var Bool` and write `False` when dismissed (Escape, a click outside, the
+  close button), closing in the same frame; their body returns `()`. The
+  primed variants (`modal'`, `window'`, `popup'`, ...) return the
+  `Response` and the body's result, for a flag derived from other state or
+  one the caller may refuse to clear, passed as a constant.
+
   | Removed | Replacement |
   | --- | --- |
   | `(t, setT) <- useText x`; `setT =<< textInput t` | `t <- useVar x`; `textInput t` |
@@ -42,6 +50,8 @@
   | `useContextMenu` | `popup` with a `Var (Maybe V2)` |
   | `x' <- slider 0 1 x` on a model value | `(_, x') <- withValue x (slider 0 1)` |
   | `ControlledTree (Maybe GridNode)` | `ControlledTree (Var (Maybe GridNode))` |
+  | `(r, _) <- modal open t b`; `when (respClicked r) close` | `modal openVar t b` |
+  | `window`, `modalWith`, `modalPanel`, `modalPanelWith`, `popup`, `popupWith` on a `Bool` | the same on a `Var Bool`; primed variants return `(Response, Maybe a)` |
 
   `table'`, `tableWith'` and `tableConfigured'` return the `TableResponse`.
   Changing tabs no longer requests an extra frame. `numericInput` adopts a

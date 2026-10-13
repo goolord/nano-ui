@@ -347,16 +347,23 @@ module NanoUI
 
     -- * Overlays
   , modal
+  , modal'
   , modalWith
+  , modalWith'
   , modalPanel
+  , modalPanel'
   , modalPanelWith
+  , modalPanelWith'
   , window
+  , window'
   , PopupAnchor (..)
   , PopupPlacement (..)
   , PopupConfig (..)
   , defaultPopupConfig
   , popup
+  , popup'
   , popupWith
+  , popupWith'
   , tooltip
   , tooltipAt
   , tooltipWidget
@@ -1090,8 +1097,7 @@ module NanoUI
     -- >   asking <- useVar False
     -- >   closing <- winCloseRequested <$> askWindow
     -- >   when closing (writeVar asking True)
-    -- >   open <- readVar asking
-    -- >   _ <- modal open "Discard your changes?" $ do
+    -- >   modal asking "Discard your changes?" $ do
     -- >     whenM (button "Discard") quitUi
     -- >     whenM (button "Keep editing") (writeVar asking False)
   , WindowSettings (..)

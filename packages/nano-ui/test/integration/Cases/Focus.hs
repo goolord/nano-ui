@@ -117,7 +117,7 @@ runFocusRequestModalTest :: Context -> IORef Int -> IO ()
 runFocusRequestModalTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column $ do
     (page, _) <- withValue "page" textInput'
-    (_, inner) <- modal True "Dialog" (fst <$> withValue "inside" textInput')
+    (_, inner) <- modal' (Var True) "Dialog" (fst <$> withValue "inside" textInput')
     (respId page, respId <$> inner) <$ req
   (page, inner) <- warmup2 ctx inp ui
   assertJust failed inner $ \r -> do
@@ -134,7 +134,7 @@ runFocusRequestBehindModalTest ctx failed = do
         (page, _) <- withValue "page" textInput'
         requestFocus (respId page)
         shown <- liftIO (readIORef open)
-        when shown $ void (modal True "Dialog" (withValue "inside" textInput'))
+        when shown $ void (modal' (Var True) "Dialog" (withValue "inside" textInput'))
         pure (respId page)
   _ <- warmup2 ctx inp ui
   replicateM_ 3 (warmup ctx inp ui)
