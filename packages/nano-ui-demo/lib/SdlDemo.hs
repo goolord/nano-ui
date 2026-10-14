@@ -177,23 +177,23 @@ data Values = Values
   }
 
 useValues :: NanoUI Values
-useValues =
-  Values
-    <$> useVar False
-    <*> useVar 50
-    <*> useVar 1
-    <*> useVar 0
-    <*> useVar "Inter"
-    <*> useVar ""
-    <*> useVar "Edit me.\nSecond line."
-    <*> useVar 12
-    <*> useVar 0xC0FF
-    <*> useVar ""
-    <*> useVar ""
-    <*> useVar ""
-    <*> useVar 0
-    <*> useVar ""
-    <*> useVar (SortCol 0 SortAsc)
+useValues = do
+  valMuted <- useVar False
+  valVolume <- useVar 50
+  valQuality <- useVar 1
+  valTheme <- useVar 0
+  valFont <- useVar "Inter"
+  valName <- useVar ""
+  valNotes <- useVar "Edit me.\nSecond line."
+  valCount <- useVar 12
+  valMask <- useVar 0xC0FF
+  valPicked <- useVar ""
+  valOpened <- useVar ""
+  valDropped <- useVar ""
+  valTreeItem <- useVar 0
+  valQuery <- useVar ""
+  valSort <- useVar (SortCol 0 SortAsc)
+  pure Values {..}
 
 -- | The whole app: a toolbar, the State pane beside the tabbed card (above
 -- it in a narrow window), the Debug window and the About modal.
