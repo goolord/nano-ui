@@ -9,10 +9,12 @@
 -- @volume@ and stores a drag in it, and @readVar volume@ reads it where it
 -- is shown. 'useVar' keeps a small value at its place in the view; anything
 -- else (a list, an image handle, a plot cache) is made once by 'newDemo'.
+-- The values the State pane shows are declared once, above the pane and the
+-- tabs, so both see the same Vars.
 --
 -- The toolbar opens an About modal (F1) and a Debug window (F12) with the
--- SDL backend's frame statistics and the layout overlay. The
--- @nano-ui-demo-test@ suite drives this demo.
+-- SDL backend's frame statistics and the layout overlay; the Diagnostics tab
+-- shows the headline numbers. The @nano-ui-demo-test@ suite drives this demo.
 module SdlDemo
   ( main
   , DemoState
@@ -156,16 +158,52 @@ loadGif path = do
 
 -- The shell -------------------------------------------------------------------
 
-data DemoTab = Controls | Graphics | Typography | List | Table | Tabs | Panes | Plots
+data DemoTab = Controls | Graphics | Typography | List | Table | Tabs | Panes | Plots | Diagnostics
   deriving (Bounded, Enum, Show)
 
--- | The whole app: a toolbar, the tabbed card, the Debug window and the
--- About modal.
+-- | The values the tabs edit and the State pane shows.
+data Values = Values
+  { valMuted :: !(Var Bool)
+  , valVolume :: !(Var Float)
+  , valQuality :: !(Var Int)
+  , valTheme :: !(Var Int)
+  , valFont, valName, valNotes :: !(Var Text)
+  , valCount, valMask :: !(Var Double)
+  , valPicked, valOpened, valDropped :: !(Var Text)
+  , valTreeItem :: !(Var Int)
+  , valQuery :: !(Var Text)
+  -- ^ The search, committed after a pause in typing.
+  , valSort :: !(Var SortCol)
+  }
+
+useValues :: NanoUI Values
+useValues =
+  Values
+    <$> useVar False
+    <*> useVar 50
+    <*> useVar 1
+    <*> useVar 0
+    <*> useVar "Inter"
+    <*> useVar ""
+    <*> useVar "Edit me.\nSecond line."
+    <*> useVar 12
+    <*> useVar 0xC0FF
+    <*> useVar ""
+    <*> useVar ""
+    <*> useVar ""
+    <*> useVar 0
+    <*> useVar ""
+    <*> useVar (SortCol 0 SortAsc)
+
+-- | The whole app: a toolbar, the State pane beside the tabbed card (above
+-- it in a narrow window), the Debug window and the About modal.
 demoUi :: DemoState -> NanoUI ()
 demoUi st = do
   aboutOpen <- useVar False
   debugOpen <- useVar (demoDebugAtStart st)
   activeTab <- useEnumVar Controls
+  vals <- useValues
+  wide <- (>= 1000) <$> windowWidth
   scrollWith (padAll 10 . grow) $
     columnWith (tight . gap 10 . fillW) $ do
       panelWith (padXY 16 12 . fillW) $
@@ -180,9 +218,12 @@ demoUi st = do
           debug <- button "Debug"
           f12 <- shortcut (key (KeyF 12))
           when (debug || f12) (modifyVar debugOpen not)
-      -- Only the selected tab's body runs.
-      panelWith (padAll 16 . gap 12 . fillW) $
-        enumTabs activeTab (tabView st)
+      responsiveRowCol 1000 (tight . gap 10 . fillW) $ do
+        panelWith (padAll 16 . gap 8 . if wide then fixedW 280 else fillW) $
+          statePane st vals wide
+        -- Only the selected tab's body runs.
+        panelWith (padAll 16 . gap 12 . fillW) $
+          enumTabs activeTab (tabView st vals)
   window debugOpen "Debug" debugBody
   modal aboutOpen "About" $ do
     heading "nano-ui"
@@ -192,16 +233,63 @@ demoUi st = do
       flex
       whenM (button "Close") (writeVar aboutOpen False)
 
-tabView :: DemoState -> DemoTab -> NanoUI ()
-tabView st = \case
-  Controls -> controlsTab st
+tabView :: DemoState -> Values -> DemoTab -> NanoUI ()
+tabView st vals = \case
+  Controls -> controlsTab st vals
   Graphics -> graphicsTab st
   Typography -> typographyTab
-  List -> listTab
-  Table -> tableTab
+  List -> listTab vals
+  Table -> tableTab (valSort vals)
   Tabs -> tabsTab (demoDocs st)
   Panes -> panesTab
   Plots -> plotsTab (demoPlotCache st)
+  Diagnostics -> diagnosticsTab
+
+-- | Every value the tabs edit, read where it is shown: edit a control and its
+-- row changes on the same frame. A narrow window folds it behind a button.
+statePane :: DemoState -> Values -> Bool -> NanoUI ()
+statePane st Values {..} wide = do
+  open <- useVar False
+  shown <- (wide ||) <$> readVar open
+  rowWith (tight . gap 12 . alignMid . fillW) $ do
+    labelWith (tight . alignMid . fontMedium) "State"
+    flex
+    unless wide $
+      whenM (button (if shown then "Hide values" else "Show values")) (modifyVar open not)
+  when shown $ do
+    let value name render var = kv name . render =<< readVar var
+    muted "Live widget values"
+    separator
+    value "Mute" (\m -> if m then "on" else "off") valMuted
+    value "Volume" (T.pack . show . (round :: Float -> Int)) valVolume
+    value "Quality" (qualities !!) valQuality
+    -- The swatch sits beside the value, so the key lines up with the rows.
+    rowWith (tight . gap 4 . alignMid . fillW) $ do
+      accent <- readVar (demoAccentColor st)
+      labelWith (tight . alignMid . fontMuted . minW 88) "Accent"
+      flex
+      box (alignMid . fixedWH 14 14) accent
+      labelWith (tight . alignMid) (colorToHexA accent)
+    separator
+    value "Theme" (fst . (themes !!)) valTheme
+    value "Font" brief valFont
+    value "Name" brief valName
+    value "Notes" brief valNotes
+    value "Count" (T.pack . show . (round :: Double -> Int)) valCount
+    value "Mask" (T.pack . printf "0x%04X" . (round :: Double -> Int)) valMask
+    separator
+    value "Picked" brief valPicked
+    value "Opened" brief valOpened
+    value "Dropped" brief valDropped
+    separator
+    value "Tree item" (T.pack . show) valTreeItem
+    value "Search" brief valQuery
+    value "Table sort" (\(SortCol col dir) -> fromMaybe "-" (columnName col) <> if dir == SortAsc then " (asc)" else " (desc)") valSort
+    separator
+    muted "Edit a control to see its value here."
+  where
+    -- The first line of a text, short enough for the pane, or a dash.
+    brief t = maybe "-" (T.take 28) (listToMaybe (filter (not . T.null) (T.lines t)))
 
 -- | A caption over a widget, as a form field has.
 field :: Text -> NanoUI a -> NanoUI a
@@ -220,55 +308,43 @@ enumLabel = T.drop 3 . T.pack . show
 
 -- Controls --------------------------------------------------------------------
 
-controlsTab :: DemoState -> NanoUI ()
-controlsTab st = do
+controlsTab :: DemoState -> Values -> NanoUI ()
+controlsTab st vals@Values {..} = do
   responsiveRowCol 760 (tight . gap 24 . fillW) $ do
     columnWith (tight . gap 10 . fillW) $ do
-      basicControls
+      basicControls vals
       separator
-      textControls
+      heading "Text input"
+      field "Name" (textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} valName)
+      field "Notes" (textArea valNotes)
       separator
-      numberControls
-    columnWith (tight . gap 10 . fillW) (appearanceControls st)
+      -- Arrow keys or the stepper step the value; Shift steps by ten.
+      heading "Numbers"
+      rowWith (tight . gap 12 . fillW) $ do
+        field "Count (0-100)" (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 100} valCount)
+        field "Mask (hex)" (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} valMask)
+    columnWith (tight . gap 10 . fillW) (appearanceControls st valTheme valFont)
   separator
-  popupsAndMenus
+  popupsAndMenus valPicked
   separator
-  fileDialog (demoOpenDialog st)
+  fileDialog (demoOpenDialog st) valOpened
   separator
-  dragAndDrop
+  dragAndDrop valDropped
 
-basicControls :: NanoUI ()
-basicControls = do
-  isMuted <- useVar False
-  volume <- useVar (50 :: Float)
-  quality <- useVar (1 :: Int)
+qualities :: [Text]
+qualities = ["Low", "Medium", "High"]
+
+basicControls :: Values -> NanoUI ()
+basicControls Values {..} = do
   heading "Controls"
-  checkbox "Mute" isMuted
-  mute <- readVar isMuted
+  checkbox "Mute" valMuted
+  mute <- readVar valMuted
   columnWith (tight . gap 4 . fillW) $ do
-    vol <- readVar volume
+    vol <- readVar valVolume
     kv "Volume" (if mute then "muted" else T.pack (show (round vol :: Int)))
     -- A disabled widget keeps its layout and value but takes no input.
-    disabledWhen mute (slider 0 100 volume)
-  field "Quality" (selectWith fillW ["Low", "Medium", "High"] quality)
-
-textControls :: NanoUI ()
-textControls = do
-  name <- useVar ""
-  notes <- useVar "Edit me.\nSecond line."
-  heading "Text input"
-  field "Name" (textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} name)
-  field "Notes" (textArea notes)
-
--- | Arrow keys or the stepper step the value; Shift steps by ten.
-numberControls :: NanoUI ()
-numberControls = do
-  count <- useVar (12 :: Double)
-  mask <- useVar (0xC0FF :: Double)
-  heading "Numbers"
-  rowWith (tight . gap 12 . fillW) $ do
-    field "Count (0-100)" (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 100} count)
-    field "Mask (hex)" (numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} mask)
+    disabledWhen mute (slider 0 100 valVolume)
+  field "Quality" (selectWith fillW qualities valQuality)
 
 -- | Themes by name, each with how to apply it. Setting the theme on every
 -- frame costs nothing while it stays the same.
@@ -281,10 +357,8 @@ themes =
   , ("Follow system", setUiTheme . defaultThemeFor =<< systemAppearance)
   ]
 
-appearanceControls :: DemoState -> NanoUI ()
-appearanceControls st = do
-  theme <- useVar (0 :: Int)
-  font <- useVar "Inter"
+appearanceControls :: DemoState -> Var Int -> Var Text -> NanoUI ()
+appearanceControls st theme font = do
   heading "Appearance"
   field "Theme" (radio (map fst themes) theme)
   snd . (themes !!) =<< readVar theme
@@ -299,9 +373,8 @@ appearanceControls st = do
   colorPickerRGBA (demoAccentColor st)
 
 -- | Tooltips, and a context menu whose rows act like buttons.
-popupsAndMenus :: NanoUI ()
-popupsAndMenus = do
-  picked <- useVar ""
+popupsAndMenus :: Var Text -> NanoUI ()
+popupsAndMenus picked = do
   heading "Popups & Menus"
   rowWith (tight . gap 12 . alignMid . fillW) $ do
     tip <- button' "Hover for Tooltip"
@@ -322,9 +395,8 @@ popupsAndMenus = do
 
 -- | A native file dialog runs outside the view: ask for one, keep its handle,
 -- and 'useFileDialog' polls it until it answers.
-fileDialog :: Var (Maybe FileDialogId) -> NanoUI ()
-fileDialog dialog = do
-  opened <- useVar ""
+fileDialog :: Var (Maybe FileDialogId) -> Var Text -> NanoUI ()
+fileDialog dialog opened = do
   useFileDialog dialog (writeVar opened . T.intercalate ", " . map T.pack)
   heading "File Dialogs"
   whenM (button "Open File…") $
@@ -333,9 +405,8 @@ fileDialog dialog = do
   kv "Opened" (if T.null paths then "-" else paths)
 
 -- | A drop zone reports the files and text dropped on it.
-dragAndDrop :: NanoUI ()
-dragAndDrop = do
-  dropped <- useVar ""
+dragAndDrop :: Var Text -> NanoUI ()
+dragAndDrop dropped = do
   heading "Drag & Drop"
   (_, _, target) <- dropZone (padXY 16 12 . gap 4 . fillW) $ do
     muted "Drop a file or highlighted text from another app here."
@@ -572,11 +643,9 @@ richTextSample = do
 
 -- List and Table --------------------------------------------------------------
 
-listTab :: NanoUI ()
-listTab = do
-  selected <- useVar (0 :: Int)
+listTab :: Values -> NanoUI ()
+listTab Values {valTreeItem = selected, valQuery = query} = do
   search <- useVar "" -- the field's text
-  query <- useVar "" -- the search, committed after a pause in typing
   heading "Tree"
   scroll2DWith (fixedH 300 . fillW) (tree "demo" demoTree selected)
   muted . ("Selected item " <>) . T.pack . show =<< readVar selected
@@ -608,9 +677,8 @@ personRow :: DemoPerson -> Text
 personRow p =
   demoPersonName p <> " - " <> demoPersonRole p <> ", " <> demoPersonCity p <> " (" <> T.pack (show (demoPersonAge p)) <> ")"
 
-tableTab :: NanoUI ()
-tableTab = do
-  sortBy <- useVar (SortCol 0 SortAsc)
+tableTab :: Var SortCol -> NanoUI ()
+tableTab sortBy = do
   heading "Table"
   muted "Click a header to sort. Drag a header to reorder."
   muted "Drag a header edge to resize. Right-click a header to hide."
@@ -622,8 +690,10 @@ tableTab = do
   kv "Hidden" $ case mapMaybe columnName (tableHiddenIndices people) of
     [] -> "none"
     hidden -> T.intercalate ", " hidden
-  where
-    columnName i = if i < 0 then Nothing else fst <$> listToMaybe (drop i peopleColumns)
+
+-- | A people column's name, by its index.
+columnName :: Int -> Maybe Text
+columnName i = if i < 0 then Nothing else fst <$> listToMaybe (drop i peopleColumns)
 
 -- Tabs and Panes --------------------------------------------------------------
 
@@ -799,7 +869,7 @@ debugSections s =
     , [ ("window", T.pack (printf "%.0f x %.0f" (dbgWinW c) (dbgWinH c)))
       , ("refresh", T.pack (printf "%d Hz" (dbgRefreshHz s)))
       , ("scale", T.pack (printf "%.2f" (dbgScale s)))
-      , ("renderer", dbgRenderer s <> if dbgVsync s then ", vsync on" else ", vsync off")
+      , ("renderer", rendererText s)
       , ("font", T.pack (dbgFontPath s))
       ]
     )
@@ -807,3 +877,29 @@ debugSections s =
   ]
   where
     c = dbgCore s
+
+rendererText :: SdlDebugSnapshot -> Text
+rendererText s = dbgRenderer s <> if dbgVsync s then ", vsync on" else ", vsync off"
+
+-- Diagnostics -----------------------------------------------------------------
+
+-- | The headline frame statistics, without opening the Debug window. Asking
+-- for them keeps the backend sampling, so only while this tab shows.
+diagnosticsTab :: NanoUI ()
+diagnosticsTab = do
+  heading "Diagnostics"
+  muted "Sampled four times a second while this tab shows. F12 opens the Debug window with the rest."
+  separator
+  askSdlDebug >>= \case
+    Nothing -> muted "No SDL session."
+    Just s -> do
+      let c = dbgCore s
+      kv "Present FPS" (T.pack (printf "%.1f fps" (dbgPresentFps c)))
+      kv "Loop FPS" (T.pack (printf "%.1f fps" (dbgLoopFps c)))
+      kv "Display" (T.pack (printf "%d Hz" (dbgRefreshHz s)))
+      kv "Frame time" (T.pack (printf "%.2f ms" (dbgFrameMs c)))
+      kv "Haskell time" (T.pack (printf "%.2f ms (UI %.2f, render %.2f)" (dbgUiMs c + dbgRenderMs c) (dbgUiMs c) (dbgRenderMs c)))
+      kv "SDL present" (T.pack (printf "%.2f ms" (dbgPresentMs c)))
+      kv "Draw calls" (T.pack (show (dbgCmds c)))
+      kv "Vertices / indices" (T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
+      kv "Renderer" (rendererText s)

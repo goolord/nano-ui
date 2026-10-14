@@ -86,6 +86,7 @@ selftest continuous = do
         expectOverlay msg needle = expectText msg needle =<< collectOverlayTextSpans ctx' base
     void (sdlDrawFrame ctx' demoUi env base True)
     spans0 <- spansWith "selftest: Controls body missing" "Mute"
+    expectText "selftest: State pane missing" "Live widget values" spans0
     -- A field value wider than the glyph atlas draws glyph by glyph, and the
     -- text drawn before and after it in the frame survives.
     nameLbl <- requireSpan "selftest: Name label" (findRightmost "Name" spans0)
@@ -99,6 +100,7 @@ selftest continuous = do
     spansTable <- spansWith "selftest: table body missing after Table tab" "David"
     clickPos =<< requireSpan "selftest: Name header" (findHeader "Name" spansTable)
     spansSorted <- spansWith "selftest: header click did not toggle sort" "descending"
+    expect "selftest: State pane did not show the new sort" "(desc)"
     dept <- requireSpan "selftest: Dept header" (findHeader "Dept" spansSorted)
     dragPos dept (V2 (v2X dept + 180) (v2Y dept))
     expect "selftest: table missing after header drag" "Sonia"
@@ -131,6 +133,8 @@ selftest continuous = do
     awaitGif 250
     drawOnce (wheelAt (-1000))
     drawOnce base
+    clickTab "Diagnostics"
+    expect "selftest: Diagnostics tab missing its frame rate" "Present FPS"
     clickTab "Panes"
     spansPane0 <- spansWith "selftest: pane grid missing after Panes tab" "Pane 1"
     -- Pane titles, left to right.
