@@ -35,7 +35,7 @@ import Data.Unique (hashUnique, newUnique)
 import GHC.Conc (labelThread)
 import NanoUI.Internal.Context (Context (ctxWakeLoop, ctxHeld), intKey, wakeFromThread)
 import NanoUI.Internal.Resource (Resource (..), newResource, Held (..), Holding (..))
-import NanoUI.Internal.Monad (NanoUI, askContext, freshWidget, liftIO)
+import NanoUI.Internal.Monad (NanoUI, askContext, freshWidget, liftIO, withContext)
 import System.Timeout (timeout)
 
 -- | Hold a resource for key @k@ in its typed owner. While the key is
@@ -46,25 +46,21 @@ import System.Timeout (timeout)
 -- when the session ends ('cancelTasks'). Holds job threads and
 -- 'NanoUI.useImageRgba' images.
 useHeld :: Eq k => Resource k a -> k -> (Context -> Maybe a -> IO (a, IO ())) -> NanoUI a
-useHeld owner k acquire = useHeldBy owner k Just (\ctx old -> (\(v, release) -> (v, v, pure () <$ release)) <$> acquire ctx old)
+useHeld owner k acquire = useHeldBy owner k (\ctx old -> fmap (pure () <$) <$> acquire ctx old)
 
--- | 'useHeld' keeping an @s@ and returning what @view@ finds in it. An entry
--- @view@ finds nothing in is replaced.
+-- | 'useHeld' whose release returns an action that waits for it to finish.
 {-# INLINE useHeldBy #-}
-useHeldBy :: Eq k => Resource k s -> k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO (IO ()))) -> NanoUI b
-useHeldBy (Resource key cell) k view acquire = do
-  ctx <- askContext
-  liftIO $ do
+useHeldBy :: Eq k => Resource k a -> k -> (Context -> Maybe a -> IO (a, IO (IO ()))) -> NanoUI a
+useHeldBy (Resource key cell) k acquire =
+  withContext $ \ctx -> do
     let registry = ctxHeld ctx
         ref = heldEntries registry
         stampedVar = heldStamped registry
         countVar = heldCount registry
     entry <- readIORef cell
     frame <- readPrimVar (heldFrame registry)
-    let valueOf (_, v, _) = view v
-        stamp = modifyPrimVar stampedVar (+ 1)
     case entry of
-      Just h@(k0, _, holding) | k0 == k, Just v <- valueOf h -> do
+      Just (k0, v, holding) | k0 == k -> do
         touch registry frame holding
         pure v
       _ -> do
@@ -77,12 +73,12 @@ useHeldBy (Resource key cell) k view acquire = do
           s <- readPrimVar (holdingSeen old)
           when (s == frame) $ modifyPrimVar stampedVar (subtract 1)
           void (holdingRelease old)
-        (stored, v, release) <- acquire ctx (valueOf =<< entry)
+        (v, release) <- acquire ctx ((\(_, v, _) -> v) <$> entry)
         seen <- newPrimVar frame
         let holding = Holding (writeIORef cell Nothing >> release) seen
-        writeIORef cell (Just (k, stored, holding))
+        writeIORef cell (Just (k, v, holding))
         modifyIORef' ref (IM.insert key holding)
-        stamp
+        modifyPrimVar stampedVar (+ 1)
         modifyPrimVar countVar (+ 1)
         pure v
 
@@ -146,12 +142,12 @@ newtype Stream k s = Stream (Resource k (IORef s))
 newStream :: IO (Stream k s)
 newStream = Stream <$> newResource
 
--- | 'useHeldBy' for a job. @start@ builds what the hook keeps, the result
--- box (given the old box when @view@ finds one) and the action to fork.
+-- | 'useHeldBy' for a job. @start@ builds the result box (given the old
+-- box) and the action to fork.
 {-# INLINE useJob #-}
-useJob :: Eq k => Resource k s -> k -> (s -> Maybe b) -> (Context -> Maybe b -> IO (s, b, IO ())) -> NanoUI b
-useJob owner k view start = useHeldBy owner k view $ \ctx old -> do
-  (stored, box, run) <- start ctx old
+useJob :: Eq k => Resource k a -> k -> (Context -> Maybe a -> IO (a, IO ())) -> NanoUI a
+useJob owner k start = useHeldBy owner k $ \ctx old -> do
+  (box, run) <- start ctx old
   done <- newEmptyMVar
   -- Masked until the handler is in place, so a job killed before it first
   -- runs still reports that it has ended.
@@ -160,7 +156,7 @@ useJob owner k view start = useHeldBy owner k view $ \ctx old -> do
   -- Kill from a separate thread: 'killThread' blocks until the job receives
   -- the exception, which masking or a foreign call can delay. Only the
   -- session's end waits for the job to end ('cancelTasks').
-  pure (stored, box, readMVar done <$ forkIO (killThread tid))
+  pure (box, readMVar done <$ forkIO (killThread tid))
 
 -- | Run an action on a worker thread and report its status: running, done,
 -- or failed with the exception it threw.
@@ -216,13 +212,12 @@ useTask owner k run = (\(Outcome _ latest) -> latest) <$> useOutcome owner k run
 -- carrying the replaced job's latest result.
 useOutcome :: Eq k => Task k a -> k -> IO a -> NanoUI (Outcome a)
 useOutcome (Task owner) k run = do
-  box <- useJob owner k Just $ \ctx old -> do
+  box <- useJob owner k $ \ctx old -> do
     prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
     box <- newIORef (Outcome (TaskRunning prev) prev)
     let finish = (>> wakeFromThread ctx) . atomicWriteIORef box
     pure
       ( box
-      , box
       , try (run >>= evaluate) >>= \case
           Right a -> finish (Outcome (TaskDone a) (Just a))
           Left e
@@ -254,9 +249,9 @@ useOutcome (Task owner) k run = do
 -- inside to show it in the state.
 useStream :: Eq k => Stream k s -> k -> s -> (((s -> s) -> IO ()) -> IO ()) -> NanoUI s
 useStream (Stream owner) k initial produce = do
-  box <- useJob owner k Just $ \ctx _ -> do
+  box <- useJob owner k $ \ctx _ -> do
     box <- newIORef initial
-    pure (box, box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
+    pure (box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
   liftIO (readIORef box)
 
 -- | An action any thread can call to rerun the view after changing something

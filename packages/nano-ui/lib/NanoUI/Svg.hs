@@ -47,7 +47,7 @@ import Graphics.NanoSvg
 import Graphics.NanoSvg qualified as NanoSvg
 import NanoUI.Internal.Path (Rings (..), buildRings, cleanRings, ringCount)
 import NanoUI.Internal.Path qualified as P
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, newZeroedPrimArray)
 
 -- | A parsed SVG document. Only 'parseSvg' makes one, so its raster cache
 -- key ('svgKey') always describes its source: an edited @nano-svg@
@@ -238,8 +238,7 @@ rasterizeView width height view@(Matrix a b c d e f) current svg
   where
     image = runST $ do
       -- Premultiplied RGBA in [0, 1].
-      acc <- newPrimArray (width * height * 4)
-      setPrimArray acc 0 (width * height * 4) (0 :: Float)
+      acc <- newZeroedPrimArray (width * height * 4)
       cov <- newPrimArray (width * height)
       forM_ (documentShapes svg) $ \(Shape segs m style) -> do
         let full = view `multiply` m
@@ -301,8 +300,7 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
               when (ay /= by && y1 > 0 && y0 < fromIntegral height) $
                 visit (max 0 (floor y0)) y0 y1 x0 ((x1 - x0) / (y1 - y0)) (if up then 1 else -1)
   -- Where each row's edges begin: counts, then running totals.
-  rowStart <- newPrimArray (height + 1)
-  setPrimArray rowStart 0 (height + 1) (0 :: Int)
+  rowStart <- newZeroedPrimArray (height + 1)
   forEdges $ \row _ _ _ _ _ -> readPrimArray rowStart (row + 1) >>= writePrimArray rowStart (row + 1) . (+ 1)
   forM_ [1 .. height] $ \row -> do
     before <- readPrimArray rowStart (row - 1)

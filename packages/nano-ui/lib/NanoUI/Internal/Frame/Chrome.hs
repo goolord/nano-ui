@@ -22,6 +22,7 @@ module NanoUI.Internal.Frame.Chrome
   ) where
 
 import Control.Monad (when)
+import Data.Bits (xor)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
@@ -220,7 +221,8 @@ paintTabChrome da theme si rect@(Rect _ _ w h) = do
       pushRect da (tabEdgeStrip orient 1 rect) (if tabStyle == 3 then styleBorder panel else themeSeparator theme)
     TabChromeTrack -> pushRoundedRect da rect (min 9 (min w h / 2)) (fadeAlpha fg 16)
     TabChromeBody -> withClip da rect $ do
-      let open = tabEdgeGrow (tabEdgeOpposite orient) 9 rect
+      -- A body below its headers opens upward: the opposite orientation.
+      let open = tabEdgeGrow (orient `xor` 1) 9 rect
       pushRoundedRect da open 8 (styleBg panel)
       pushRoundedStroke da open 8 1 (styleBorder panel)
     TabChromeNone -> pure ()
@@ -242,15 +244,6 @@ tabEdgeStrip orient t (Rect x y w h) = case orient of
   2 -> Rect (x + w - t) y t h
   3 -> Rect x y t h
   _ -> Rect x (y + h - t) w t
-
--- | The orientation whose body side is @orient@'s strip side: a body below
--- its headers opens upward.
-tabEdgeOpposite :: Int -> Int
-tabEdgeOpposite orient = case orient of
-  0 -> 1
-  1 -> 0
-  2 -> 3
-  _ -> 2
 
 paintTableHeader :: DrawArena -> Theme -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
 paintTableHeader da theme isSorted style x y w h = do

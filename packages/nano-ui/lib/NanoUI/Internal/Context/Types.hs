@@ -85,7 +85,7 @@ import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
 import Data.Primitive.Array (MutableArray, newArray)
-import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, setPrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray)
 import Data.Primitive.PrimVar (PrimVar, newPrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word32, Word64)
@@ -329,13 +329,10 @@ data PrevWalk = PrevWalk
 -- | Room for @n@ nodes, with no entries.
 newPrevWalk :: Int -> IO PrevWalk
 newPrevWalk n = do
-  keys <- newPrimArray n
-  setPrimArray keys 0 n 0
-  tags <- newPrimArray n
-  setPrimArray tags 0 n 0
+  keys <- newZeroedPrimArray n
+  tags <- newZeroedPrimArray n
   rects <- newArray n (Rect 0 0 0 0)
-  clips <- newPrimArray (4 * n)
-  setPrimArray clips 0 (4 * n) 0
+  clips <- newZeroedPrimArray (4 * n)
   texts <- newArray n mempty
   images <- newArray n noImagePaint
   PrevWalk keys tags rects clips texts images <$> newPrimVar 0 <*> newIORef IM.empty

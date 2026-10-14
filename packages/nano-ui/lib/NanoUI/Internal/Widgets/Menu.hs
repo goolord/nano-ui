@@ -18,6 +18,7 @@ where
 import Control.Monad (void, when)
 import Data.Text (Text)
 import NanoUI.Internal.Context (Context (..), getStore, intKey, modifyStore)
+import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
 import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO)
@@ -42,7 +43,7 @@ contextMenu ::
   NanoUI a ->
   NanoUI (Maybe a)
 contextMenu target child = do
-  menu <- useContextMenu
+  menu <- freshWidget
   runContextMenu menu (respRightClicked target) (const child)
 
 -- | A container whose right-click opens a context menu. The menu body
@@ -53,46 +54,35 @@ contextMenuArea ::
   (V2 -> NanoUI b) ->
   NanoUI (a, Maybe b)
 contextMenuArea f areaContent menuContent = do
-  menu <- useContextMenu
+  menu <- freshWidget
   base <- askDefaultLayout
   (areaRes, areaResp) <- containerResponse NodeContainer (f base) areaContent
   (,) areaRes <$> runContextMenu menu (respRightClicked areaResp) menuContent
 
 -- | Open the menu at the pointer on a right click, show it while open, and
--- close it once a row is picked or it is dismissed.
+-- close it once a row is picked or it is dismissed. Whether it is open, and
+-- where, is kept in the store under the menu's id.
 runContextMenu ::
-  (Bool, V2, V2 -> NanoUI (), NanoUI ()) ->
+  (WidgetId, Context) ->
   Bool ->
   (V2 -> NanoUI a) ->
   NanoUI (Maybe a)
-runContextMenu (isOpen0, pos0, openAt, close) rightClick child = do
+runContextMenu (wid, ctx) rightClick child = do
   inp <- askInput
-  let mouse = inputMousePos inp
-      pos = if rightClick then mouse else pos0
+  store <- liftIO (getStore ctx)
+  let openK = slotKey SlotMenuOpen (intKey wid)
+      posK = slotKey SlotMenuPos (intKey wid)
+      mouse@(V2 mx my) = inputMousePos inp
+      pos = if rightClick then mouse else uncurry V2 (findSlot fieldPoint (0, 0) posK store)
       cfg = (defaultPopupConfig (AnchorPoint pos)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
-  when rightClick (openAt mouse)
+  when rightClick $ liftIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK (mx, my)))
   -- A release the menu itself sees, which is one on a row, picks.
   (popupResp, mBody) <-
-    popupWith' (constVar (isOpen0 || rightClick)) cfg id $
+    popupWith' (constVar (flagSlot openK store || rightClick)) cfg id $
       (,) . releasedIn MouseLeft <$> askInput <*> columnWith (tight . gap 0) (child pos)
   let picked = respHovered popupResp && maybe False fst mBody
-  when (respClicked popupResp || picked) close
+  when (respClicked popupResp || picked) $ liftIO (modifyStore ctx (setFlagSlot openK False))
   pure (snd <$> mBody)
-
--- | Open state for a context menu you position yourself: whether it is open,
--- where it was opened, an action to open it at a point, and one to close it.
-useContextMenu ::
-  NanoUI (Bool, V2, V2 -> NanoUI (), NanoUI ())
-useContextMenu = do
-  (wid, ctx) <- freshWidget
-  let key = intKey wid
-      openK = slotKey SlotMenuOpen key
-      posK = slotKey SlotMenuPos key
-  store <- liftIO (getStore ctx)
-  let (px, py) = findSlot fieldPoint (0, 0) posK store
-      openAt (V2 x y) = liftIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK (x, y)))
-      close = liftIO (modifyStore ctx (setFlagSlot openK False))
-  pure (flagSlot openK store, V2 px py, openAt, close)
 
 -- | A menu row with an optional shortcut hint after the label. A disabled
 -- row is a muted label, not a button (hover would still light a disabled

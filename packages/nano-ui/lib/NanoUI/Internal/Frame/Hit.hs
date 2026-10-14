@@ -266,8 +266,8 @@ innermostHit ctx@Context {ctxNodeArena = na} hits idx =
   -- Depth first from the child drawn on top, past widgets that miss.
   firstHitIn i = firstChildOnTopJustM na i $ \d -> do
     nt <- getNodeType na d
-    si <- getStyleIdx na d
-    if nt == NodeContainer && hasFlag containerFlagInert si
+    inert <- pure (nt == NodeContainer) <&&> (hasFlag containerFlagInert <$> getStyleIdx na d)
+    if inert
       then pure Nothing
       else
         ifM

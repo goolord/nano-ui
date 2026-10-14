@@ -35,7 +35,7 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), alignXFraction, alignYFraction, lineAlignFraction, windowMargin)
-import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan, onGrid)
+import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan, newZeroedPrimArray, onGrid)
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Frame.Scroll.Geometry
 
@@ -111,16 +111,10 @@ data TextMeasurer = TextMeasurer
   , tmHostLine :: Text -> IO (Float, Float)
   }
 
--- | How node @idx@ measures its text: a text node or text field in its own
--- font, and any other widget's label in its font size in the default face,
--- as 'NanoUI.Internal.Frame.Node.resolveFontFor' draws them.
-textNodeMeasurer :: SolveEnv -> NodeIdx -> IO TextMeasurer
-textNodeMeasurer env@SolveEnv {seArena = na} idx = do
-  nt <- getNodeType na idx
-  si <- getStyleIdx na idx
-  nodeMeasurer env idx nt si
-
--- | 'textNodeMeasurer' for a node whose type and style index the caller has.
+-- | How node @idx@, of type @nt@ and style index @nodeSi@, measures its
+-- text: a text node or text field in its own font, and any other widget's
+-- label in its font size in the default face, as
+-- 'NanoUI.Internal.Frame.Node.resolveFontFor' draws them.
 nodeMeasurer :: SolveEnv -> NodeIdx -> NodeType -> Int -> IO TextMeasurer
 nodeMeasurer SolveEnv {seArena = na, seMs = ms} idx nt nodeSi = do
   let si = if packsNodeFont nt then nodeSi else 0
@@ -165,7 +159,7 @@ data TextBox = TextBox
 -- @shouldWrap wrapW lineW@ holds for its single-line width.
 measureTextNodeAt :: SolveEnv -> NodeIdx -> Text -> Float -> (Float -> Float -> Bool) -> IO TextBox
 measureTextNodeAt env idx txt outerW shouldWrap = do
-  measurer@TextMeasurer {tmMetrics = textFm} <- textNodeMeasurer env idx
+  measurer@TextMeasurer {tmMetrics = textFm} <- nodeMeasurer env idx NodeText =<< getStyleIdx (seArena env) idx
   (tw0, th0) <- measureFontLine measurer txt
   let wrapW = max 0 outerW
       lineH = fmLineHeight textFm
@@ -268,8 +262,7 @@ measurePass env count = case seCache env of
   Just lc -> do
     -- Per node, 1 once some child came out a different size than the
     -- capture recorded for it, so the node cannot take its captured size.
-    moved <- newPrimArray count :: IO (IOArr Word8)
-    setPrimArray moved 0 count 0
+    moved <- newZeroedPrimArray count :: IO (IOArr Word8)
     forDown $ \idx -> do
       hit <-
         if idx < lcCount lc
@@ -656,7 +649,8 @@ adornedButtonGroup measurer txt gap (AdornRows li lw ti tw _) = do
 positionAdornments :: SolveEnv -> Int -> NodeIdx -> NodeType -> Rect -> IO ()
 positionAdornments env@SolveEnv {seArena = na, seArrays = a} depth idx nt (Rect x y w h) = do
   rows@(AdornRows li lw ti tw _) <- adornRows na idx
-  measurer <- textNodeMeasurer env idx
+  si <- getStyleIdx na idx
+  measurer <- nodeMeasurer env idx nt si
   (x0, x1) <- case nt of
     NodeTextInput -> do
       let (ix, _) = widgetContentInset (tmMetrics measurer)
@@ -665,7 +659,6 @@ positionAdornments env@SolveEnv {seArena = na, seArrays = a} depth idx nt (Rect 
       gap <- readStyle a idx StyleGap
       txt <- getText na idx
       (_, groupW) <- adornedButtonGroup measurer txt gap rows
-      si <- getStyleIdx na idx
       let x0
             | nt == NodeButton && tabLabelAtStart si = x + tabHeaderPadX
             | otherwise = alignX AlignCenter x w groupW
@@ -1888,7 +1881,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
       if T.null raw
         then pure h
         else do
-          measurer@TextMeasurer {tmMetrics = fm} <- textNodeMeasurer env ci
+          measurer@TextMeasurer {tmMetrics = fm} <- nodeMeasurer env ci nt si
           rowChild <- parentIsRow na ci
           let newline = T.any (== '\n') raw
           wrapped <-

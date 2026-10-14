@@ -58,7 +58,7 @@ import Foreign.Ptr (Ptr)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.SIMD (pokeQuadSIMD)
-import NanoUI.Internal.Types (Color (..), Rect (..), foldUpTo, forUpTo_, onGrid, rectIntersect)
+import NanoUI.Internal.Types (Color (..), Rect (..), foldUpTo, forUpTo_, newZeroedPrimArray, onGrid, rectIntersect)
 
 vertexCapacity :: Int
 vertexCapacity = 4096
@@ -365,8 +365,7 @@ groupCmdsByLayer src n = do
   let
     layers = fromEnum (maxBound :: Layer) + 1
     layerAt i = fromEnum . cmdLayer <$> UM.unsafeRead src i
-  cursors <- newPrimArray layers
-  setPrimArray cursors 0 layers (0 :: Int)
+  cursors <- newZeroedPrimArray layers
   forUpTo_ n $ \i -> do
     l <- layerAt i
     readPrimArray cursors l >>= writePrimArray cursors l . (+ 1)

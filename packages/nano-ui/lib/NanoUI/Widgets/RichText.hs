@@ -217,13 +217,10 @@ richTextWithMode' selectable f pieces = do
              in [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
                   ++ highlights
                   ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
-                     | (x, Token txt runIdx Word _ _ _) <- lineTokens line
+                     | (x, runIdx, txt) <-
+                         [(x, runIdx, txt) | (x, Token txt runIdx Word _ _ _) <- lineTokens line]
+                           ++ [(x, runIdx, T.concat [tokenText tok | (_, tok) <- group]) | group@((x, Token _ runIdx _ _ _ _) : _) <- glyphGroups line]
                      , let run = indexSmallArray runs runIdx
-                     ]
-                  ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
-                      | group@((x, Token _ runIdx _ _ _ _) : _) <- glyphGroups line
-                     , let run = indexSmallArray runs runIdx
-                           txt = T.concat [tokenText tok | (_, tok) <- group]
                      ]
                   ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
                      | (run, runIdx, x1, x2) <- spans
@@ -241,7 +238,7 @@ richTextWithMode' selectable f pieces = do
           -- index, start x and end x.
           pieceSpans line =
             [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
-            | group <- groupBy (\(_, a) (_, b) -> tokenRun a == tokenRun b) (lineTokens line)
+            | group <- groupBy joinsGlyphs (lineTokens line)
             , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
             , (x1, first) : _ <- [trimmed]
             , let (lastX, lastTok) = last trimmed

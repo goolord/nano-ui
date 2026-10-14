@@ -40,7 +40,7 @@ import NanoUI.Internal.Atlas qualified as Atlas
 import NanoUI.Internal.Context (Context (..), registerImage)
 import NanoUI.Internal.Draw (getDrawSnapScale)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, askContext, nextId, liftIO, uiTheme, withContext)
+import NanoUI.Internal.Monad (NanoUI, nextId, uiTheme, withContext)
 import NanoUI.Svg (Svg, parseSvg, rasterizeSvgIn, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Image (ContentFit (..), ImageLook (..), fitRect, imageLook, turnedRect)
@@ -178,7 +178,6 @@ svgIconConfigured cfg doc = void (svgIconConfigured' cfg doc)
 -- | 'svgIconConfigured' with its 'Response'.
 svgIconConfigured' :: ImageConfig -> Svg -> NanoUI Response
 svgIconConfigured' cfg doc = do
-  ctx <- askContext
   theme <- uiTheme
   let lay0 = icLayout cfg defaultLayout
       (docW, docH) = svgSize doc
@@ -195,7 +194,7 @@ svgIconConfigured' cfg doc = do
       -- when drawn; the document is fitted inside the raster instead.
       Rect _ _ bw bh = turnedRect FitFill AlignCenter AlignMiddle (lookRotation (imageLook cfg white)) (w, h) (Rect 0 0 w h)
       Rect cx cy cw ch = fitRect (icFit cfg) (icAlignX cfg) (icAlignY cfg) (docW, docH) (Rect 0 0 bw bh)
-  iid <- liftIO $ do
+  iid <- withContext $ \ctx -> do
     scale <- getDrawSnapScale (ctxDrawArena ctx)
     let pw = max 1 (ceiling (bw * max 1 scale))
         ph = max 1 (ceiling (bh * max 1 scale))

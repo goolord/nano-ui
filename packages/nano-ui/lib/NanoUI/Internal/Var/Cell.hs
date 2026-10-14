@@ -35,11 +35,12 @@ import Control.Monad.Primitive (RealWorld)
 import Data.Bits (complement, (.&.), (.|.))
 import Data.IORef (IORef, newIORef)
 import Data.Primitive.ByteArray (MutableByteArray (..), newByteArray, writeByteArray)
-import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, sameMutablePrimArray, setPrimArray, writePrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, sameMutablePrimArray, setPrimArray, writePrimArray)
 import Data.Word (Word64)
 import GHC.Exts (Int (..), fetchAddIntArray#, (+#))
 import GHC.IO (IO (..))
 import System.IO.Unsafe (unsafePerformIO)
+import NanoUI.Internal.Types (newZeroedPrimArray)
 
 -- | A value and its stamps, in three sets of the parts of the value that
 -- were touched:
@@ -97,10 +98,7 @@ frameSlots = 5
 
 -- | @n@ zeroed stamps.
 newStamps :: Int -> IO (MutablePrimArray RealWorld Word64)
-newStamps n = do
-  stamps <- newPrimArray n
-  setPrimArray stamps 0 n 0
-  pure stamps
+newStamps = newZeroedPrimArray
 
 newCell :: s -> IO (Cell s)
 newCell s = Cell <$> newIORef s <*> newStamps stampWords

@@ -281,15 +281,8 @@ bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
     root1 <- readIORef ref
     -- While the root is the one the widget was given, the part it shows is
     -- still a0, so the comparison here is the only one needed.
-    when (ptrEq root1 root0 && not (eq a1 a0)) $ do
-      touched <-
-        if isInert cell
-          then Nothing <$ (writeIORef ref $! fst (overLensSig l (const a1) root0))
-          else atomicModifyIORef' ref $ \root ->
-            if ptrEq root root0 || not (eq a1 (viewLens l root))
-              then case overLensSig l (const a1) root of (!root', wsig) -> (root', Just wsig)
-              else (root, Nothing)
-      mapM_ (noteBound ctx cell mode sig before) touched
+    when (ptrEq root1 root0 && not (eq a1 a0)) $
+      mapM_ (noteBound ctx cell mode sig before) =<< modifyRoot cell l (const a1) eq
   pure (result x)
 
 -- | Stamp the part @sig@ of a bound cell observed, returning whether

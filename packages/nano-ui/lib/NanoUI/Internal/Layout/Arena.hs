@@ -187,7 +187,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Image (ImageLook (..), Rotation (..), defaultImageConfig, imageLook)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (AlignX (..), AlignY, Direction (..), Flow (..), Layout (..), Padding (..), PointerMode (..), Sizing (..))
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectNonEmpty)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), newZeroedPrimArray, rectNonEmpty)
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
 -- that returned it until the next 'resetNodeArena'. Where an index names an
@@ -759,11 +759,6 @@ newNodeArena = do
 
 nodeClassCount :: Int
 nodeClassCount = fromEnum (maxBound :: NodeClass) + 1
-
-newZeroedPrimArray :: (Prim a, Num a) => Int -> IO (IOArr a)
-newZeroedPrimArray n = do
-  arr <- newPrimArray n
-  arr <$ setPrimArray arr 0 n 0
 
 -- | Begin an empty frame while retaining array capacity. Invalidates node
 -- indices, width memos, and widget-id lookups, and resets paint-scope and

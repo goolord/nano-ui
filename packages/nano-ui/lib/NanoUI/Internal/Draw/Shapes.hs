@@ -167,11 +167,7 @@ pokeStripAt ::
   Float ->
   IO ()
 pokeStripAt vp ip base baseIdx vi ii x0 y0 x1 y1 bw r g b a = do
-  let !dx = x1 - x0
-      !dy = y1 - y0
-      !len = sqrt (dx * dx + dy * dy)
-      !nx = (-dy) / len
-      !ny = dx / len
+  let !(nx, ny) = segNormal x0 y0 x1 y1
       !half = bw * 0.5
       !core = max 0 (half - 0.5)
       !outer = half + 0.5

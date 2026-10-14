@@ -58,17 +58,11 @@ instance GFocus '[] (M1 S m (K1 i a)) a where
   {-# INLINE gset #-}
   gset a _ = M1 (K1 a)
 
-instance GFocus p f a => GFocus p (M1 D m f) a where
+instance GFocus p f a => GFocus p (M1 D m (M1 C c f)) a where
   {-# INLINE gget #-}
-  gget (M1 f) = gget @p f
+  gget (M1 (M1 f)) = gget @p f
   {-# INLINE gset #-}
-  gset a (M1 f) = M1 (gset @p a f)
-
-instance GFocus p f a => GFocus p (M1 C m f) a where
-  {-# INLINE gget #-}
-  gget (M1 f) = gget @p f
-  {-# INLINE gset #-}
-  gset a (M1 f) = M1 (gset @p a f)
+  gset a (M1 (M1 f)) = M1 (M1 (gset @p a f))
 
 instance GFocus p l a => GFocus ('SL ': p) (l :*: r) a where
   {-# INLINE gget #-}

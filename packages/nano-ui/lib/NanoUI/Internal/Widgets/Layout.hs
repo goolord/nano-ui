@@ -47,7 +47,7 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, nextId, styled, liftIO, windowWidth, withContext)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, nextId, styled, windowWidth, withContext)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Style qualified as Style
 import NanoUI.Internal.Types (Color (..), lerpColor)
@@ -227,27 +227,23 @@ labelEx layout txt = do
 -- | Takes up the remaining space along the parent's direction: across a row,
 -- down a column. Flexes in one container share that space equally.
 flex :: NanoUI ()
-flex = do
-  wid <- nextId
-  withContext $ \ctx ->
-    parentDirection ctx >>= \case
-      DirColumn -> addSizedLeaf ctx wid NodeSpacer Column Fit (Grow 1)
-      DirRow -> addSizedLeaf ctx wid NodeSpacer Row (Grow 1) Fit
+flex = axisLeaf NodeSpacer Fit (Grow 1)
 
 -- | A one-pixel rule: horizontal in a column, vertical in a row.
 separator :: NanoUI ()
-separator = do
-  wid <- nextId
-  withContext $ \ctx ->
-    parentDirection ctx >>= \case
-      DirColumn -> addSizedLeaf ctx wid NodeSeparator Column (Grow 1) (Fixed 1)
-      DirRow -> addSizedLeaf ctx wid NodeSeparator Row (Fixed 1) (Grow 1)
+separator = axisLeaf NodeSeparator (Grow 1) (Fixed 1)
 
--- | The direction of the current parent, a column at the root.
-parentDirection :: Context -> IO DirTag
-parentDirection ctx = do
-  parent <- currentParent ctx
-  if parent < 0 then pure DirColumn else getDirection (ctxNodeArena ctx) parent
+-- | A leaf sized @across@ and @along@ the current parent's direction (a
+-- column at the root).
+axisLeaf :: NodeType -> Sizing -> Sizing -> NanoUI ()
+axisLeaf nt across along = do
+  wid <- nextId
+  withContext $ \ctx -> do
+    parent <- currentParent ctx
+    dir <- if parent < 0 then pure DirColumn else getDirection (ctxNodeArena ctx) parent
+    case dir of
+      DirColumn -> addSizedLeaf ctx wid nt Column across along
+      DirRow -> addSizedLeaf ctx wid nt Row along across
 
 -- | Empty space with the given sizing on each axis.
 {-# INLINE spacer #-}
@@ -295,8 +291,7 @@ scrollArea = scrollAreaFrom (scrollDefault1D . layoutDirection)
 {-# INLINE scrollAreaIdConfigured #-}
 scrollAreaIdConfigured :: WidgetId -> Layout -> ScrollConfig -> NanoUI a -> NanoUI a
 scrollAreaIdConfigured wid layout cfg child = do
-  ctx <- askContext
-  idx <- liftIO $ do
+  idx <- withContext $ \ctx -> do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid

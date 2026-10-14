@@ -51,9 +51,13 @@ module NanoUI.Internal.Types
   , PopupPlacement (..)
   , foldUpTo
   , forUpTo_
+  , newZeroedPrimArray
   ) where
 
+import Control.Monad.Primitive (PrimMonad, PrimState)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, setPrimArray)
+import Data.Primitive.Types (Prim)
 import Data.Word (Word8, Word32)
 
 -- | A two-component point, offset, or vector; units depend on its use.
@@ -456,3 +460,10 @@ foldUpTo n f = go 0
 {-# INLINE forUpTo_ #-}
 forUpTo_ :: Int -> (Int -> IO ()) -> IO ()
 forUpTo_ n f = foldUpTo n (\() i -> f i) ()
+
+-- | A primitive array of @n@ zeroes.
+{-# INLINE newZeroedPrimArray #-}
+newZeroedPrimArray :: (PrimMonad m, Prim a, Num a) => Int -> m (MutablePrimArray (PrimState m) a)
+newZeroedPrimArray n = do
+  arr <- newPrimArray n
+  arr <$ setPrimArray arr 0 n 0

@@ -126,10 +126,10 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
             | otherwise = do
                 idx <- containerAt j
                 wid <- getWidgetId na idx
-                superseded <- if hashWidgetId wid == 0 then pure False else getIdSuperseded na idx
-                nt <- getNodeType na idx
-                keyless <- if hashWidgetId wid == 0 then containerPaints na idx nt else pure False
-                if superseded || (hashWidgetId wid == 0 && not keyless)
+                -- A keyless container is repainted under its own key when it paints.
+                let keyless = hashWidgetId wid == 0
+                skip <- if keyless then not <$> (containerPaints na idx =<< getNodeType na idx) else getIdSuperseded na idx
+                if skip
                   then containers (j + 1) m om foundOld foundOuter dropped
                   else do
                     k <- if keyless then containerKey na idx else pure (intKey wid)

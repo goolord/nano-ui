@@ -50,10 +50,9 @@ import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, withKey)
-import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
+import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
-import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
@@ -129,7 +128,7 @@ isNumericCell txt =
    in not (T.null digits) && T.all isDigit digits
 
 samePtr :: Opaque -> b -> Bool
-samePtr (Opaque a) b = isTrue# (reallyUnsafePtrEquality# a b)
+samePtr (Opaque a) = ptrEq a
 
 -- | The table's derived data for @rows@ under @sort@: the cached data when
 -- the rows and columns are the ones it was derived from, else derived again

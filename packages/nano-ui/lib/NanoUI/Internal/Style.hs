@@ -672,10 +672,7 @@ pattern LinesEnd = LineAlign 2
 {-# COMPLETE LinesStart, LinesCenter, LinesEnd #-}
 
 instance Show LineAlign where
-  show = \case
-    LinesStart -> "LinesStart"
-    LinesCenter -> "LinesCenter"
-    _ -> "LinesEnd"
+  show (LineAlign n) = ["LinesStart", "LinesCenter", "LinesEnd"] !! min 2 (fromIntegral n)
 
 instance Bounded LineAlign where
   minBound = LinesStart
@@ -683,10 +680,7 @@ instance Bounded LineAlign where
 
 -- | Fraction of a line's free space placed before it: 0, 0.5 or 1.
 lineAlignFraction :: LineAlign -> Float
-lineAlignFraction = \case
-  LinesStart -> 0
-  LinesCenter -> 0.5
-  _ -> 1
+lineAlignFraction (LineAlign n) = min 1 (fromIntegral n / 2)
 
 -- | Take the node out of its parent's flow and draw it over its siblings in
 -- the parent's content box. Its alignment picks the anchor corner, then it
@@ -743,10 +737,7 @@ pattern PointerPass = PointerMode 2
 {-# COMPLETE PointerAuto, PointerBlock, PointerPass #-}
 
 instance Show PointerMode where
-  show = \case
-    PointerAuto -> "PointerAuto"
-    PointerBlock -> "PointerBlock"
-    _ -> "PointerPass"
+  show (PointerMode n) = ["PointerAuto", "PointerBlock", "PointerPass"] !! min 2 (fromIntegral n)
 
 instance Bounded PointerMode where
   minBound = PointerAuto
@@ -782,9 +773,7 @@ pattern BreakAnywhere = TextBreak 1
 {-# COMPLETE BreakWords, BreakAnywhere #-}
 
 instance Show TextBreak where
-  show = \case
-    BreakWords -> "BreakWords"
-    _ -> "BreakAnywhere"
+  show b = if b == BreakWords then "BreakWords" else "BreakAnywhere"
 
 instance Bounded TextBreak where
   minBound = BreakWords

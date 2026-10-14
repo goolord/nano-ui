@@ -36,7 +36,7 @@ import NanoUI.Internal.Sensor.Types
 import NanoUI.Internal.Frame.Node (childPaintClip)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, currentId, freshWidget, liftIO)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, currentId, freshWidget, liftIO, withContext)
 import NanoUI.Internal.Style (Direction (..), Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), Size (..), rectInflate, rectIntersect)
 import NanoUI.Internal.Widgets.Node (container, tagContainer)
@@ -74,11 +74,10 @@ sensorConfigured :: SensorConfig -> NanoUI a -> NanoUI (Visibility, a)
 sensorConfigured cfg body = do
   -- The container's own id, unique to it; the sensor is keyed by it.
   wid <- currentId
-  ctx <- askContext
   base <- askDefaultLayout
   let layout = sensorLayout cfg (tight base) {layoutDirection = Column}
   a <- container NodeContainer layout (tagContainer wid >> body)
-  vis <- liftIO (watchSensor ctx wid (Watch wid cfg))
+  vis <- withContext (\ctx -> watchSensor ctx wid (Watch wid cfg))
   pure (vis, a)
 
 -- | The 'Visibility' of the widget @target@, such as @respId resp@ of an
@@ -93,8 +92,8 @@ useVisibility cfg target = do
   liftIO (watchSensor ctx wid (Watch target cfg))
 
 -- | Initial state for a new sensor: hidden, no node.
-unseen :: Seen
-unseen = Seen (Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)) 0
+unseen :: Visibility
+unseen = Visibility False Nothing (Rect 0 0 0 0) (Rect 0 0 0 0)
 
 -- | Register a watch for this pass and return the last result. Reading
 -- consumes the event, so a second view pass in the frame sees none.
@@ -111,10 +110,9 @@ watchSensor ctx wid watch = do
       when (stamp /= pass) $ writeIORef ref $! SensorState pass (cell : watched) (n + 1) cells size
       pure vis
     Nothing -> do
-      cell <- Cell k <$> newIORef (CellState pass watch unseen)
+      cell <- Cell k <$> newIORef (CellState pass watch (Seen unseen 0))
       writeIORef ref $! SensorState pass (cell : watched) (n + 1) (IM.insert k cell cells) (size + 1)
-      let Seen vis _ = unseen
-      pure vis
+      pure unseen
 
 -- | Start a pass: clear the last pass's watches before the view reruns.
 beginSensors :: Context -> IO ()
@@ -134,7 +132,7 @@ updateSensors ctx size =
       let step !event (Cell _ cref) = do
             CellState stamp watch old <- readIORef cref
             new@(Seen vis _) <- measureSensor ctx memo size old watch
-            unless (sameSeen old new) $ writeIORef cref $! CellState stamp watch new
+            unless (old == new) $ writeIORef cref $! CellState stamp watch new
             pure (event || isJust (visEvent vis))
       event <- foldM step False watched
       -- Every cell is listed at most once, so a count short of the map's
@@ -142,9 +140,6 @@ updateSensors ctx size =
       when (count /= n) $
         writeIORef ref $! SensorState pass watched n (IM.fromList [(k, c) | c@(Cell k _) <- watched]) n
       when event (markDirty ctx))
-
-sameSeen :: Seen -> Seen -> Bool
-sameSeen (Seen a since) (Seen b since') = since == since' && a == b
 
 -- | Measure one watch. While 'sensorDelay' runs, request a wake-up for when
 -- it ends, as 'NanoUI.Internal.Widgets.Popup.tooltipTimer' does.
@@ -194,15 +189,14 @@ windowClips (Size ww wh) margin = let window = Rect 0 0 ww wh in (Just window, J
 -- root or the first floating panel down. Sensors under one ancestor share
 -- them through the memo.
 clipsInside :: Context -> ClipMemo -> Size -> Float -> NodeIdx -> IO (Maybe Rect, Maybe Rect)
-clipsInside ctx@Context {ctxNodeArena = na} memo@(ClipMemo stamp entries) size margin i
+clipsInside ctx memo@(ClipMemo stamp entries) size margin i
   | i < 0 = pure (windowClips size margin)
   | otherwise = do
       entry <- readArray entries i
       case entry of
         Clips s m clips | s == stamp && m == margin -> pure clips
         _ -> do
-          floating <- isFloatingNode <$> getNodeType na i
-          outer <- if floating then pure (windowClips size margin) else getParent na i >>= clipsInside ctx memo size margin
+          outer <- paintClips ctx memo size margin i
           clips <- enterClips ctx margin outer i
           clips <$ writeArray entries i (Clips stamp margin clips)
 

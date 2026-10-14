@@ -62,6 +62,7 @@ data CellState = CellState Int Watch Seen
 data Watch = Watch WidgetId SensorConfig
 
 data Seen = Seen Visibility Double
+  deriving (Eq)
 
 -- | Reused ancestor-clip array, invalidated by a per-layout stamp.
 data ClipMemo = ClipMemo Int (MutableArray RealWorld MemoEntry)

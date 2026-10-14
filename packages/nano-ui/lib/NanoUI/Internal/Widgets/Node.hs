@@ -191,8 +191,7 @@ mkResponse wid rect hovered clicked changed =
 
 container :: NodeType -> Layout -> NanoUI a -> NanoUI a
 container nt layout child = do
-  ctx <- askContext
-  idx <- liftIO $ do
+  idx <- withContext $ \ctx -> do
     parent <- currentParent ctx
     addNodeFromLayout (ctxNodeArena ctx) nt parent layout
   withContainerNode True idx child
@@ -201,13 +200,7 @@ container nt layout child = do
 -- press passes through them to the widget they are drawn in
 -- ('NanoUI.Internal.Frame.Hit.innermostHit').
 inertContainer :: Layout -> NanoUI a -> NanoUI a
-inertContainer layout child = do
-  ctx <- askContext
-  idx <- liftIO $ do
-    parent <- currentParent ctx
-    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
-    idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagInert
-  withContainerNode True idx (inertView child)
+inertContainer layout = flaggedContainer containerFlagInert layout . inertView
 
 -- | A plain container that clips its children to its rect, drawing none of
 -- its own. It takes a fresh id, so the pointer is clipped from the frame
@@ -215,12 +208,16 @@ inertContainer layout child = do
 clipContainer :: Layout -> NanoUI a -> NanoUI a
 clipContainer layout child = do
   wid <- nextId
-  ctx <- askContext
-  idx <- liftIO $ do
+  flaggedContainer containerFlagClip layout (tagContainer wid *> child)
+
+-- | A plain container whose style index is the container flag @flag@.
+flaggedContainer :: Int -> Layout -> NanoUI a -> NanoUI a
+flaggedContainer flag layout child = do
+  idx <- withContext $ \ctx -> do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
-    idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagClip
-  withContainerNode True idx (tagContainer wid *> child)
+    idx <$ setStyleIdx (ctxNodeArena ctx) idx flag
+  withContainerNode True idx child
 
 -- | A 'container' tagged with a fresh id, and its interaction under that id.
 containerResponse :: NodeType -> Layout -> NanoUI a -> NanoUI (a, Response)
@@ -279,8 +276,7 @@ withContainerNode scoped idx child = do
 -- has no node.
 withWidgetChildren :: WidgetId -> NanoUI a -> NanoUI (Maybe a)
 withWidgetChildren wid@(WidgetId w) child = do
-  ctx <- askContext
-  mIdx <- liftIO (lookupNodeByWidgetId (ctxNodeArena ctx) wid)
+  mIdx <- withContext (\ctx -> lookupNodeByWidgetId (ctxNodeArena ctx) wid)
   forM mIdx $ \idx ->
     withContainerNode False idx (withIdFrame (\ids -> (ids, scopeIdContext (mix64 w scopeTag))) child)
 
@@ -456,7 +452,6 @@ moveSelection ctx old new members =
 -- Containers are never hot, so the id does not make it hoverable.
 tagContainer :: WidgetId -> NanoUI ()
 tagContainer wid = do
-  ctx <- askContext
-  liftIO $ do
+  withContext $ \ctx -> do
     parent <- currentParent ctx
     when (parent >= 0) $ setWidgetId (ctxNodeArena ctx) parent wid

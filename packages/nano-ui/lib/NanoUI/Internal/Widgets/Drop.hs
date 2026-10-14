@@ -27,7 +27,7 @@ import Data.Text (Text)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO, takeEscape)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, takeEscape, withContext)
 import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
@@ -67,7 +67,6 @@ newDrag = DragHandle <$> newIORef Nothing
 -- Escape, lost hold or source removal cancels; only DragReleased may commit.
 useDrag :: Eq a => DragHandle a -> [(a, Response)] -> NanoUI (Maybe (Drag a))
 useDrag (DragHandle ref) sources = do
-  ctx <- askContext
   inp <- askInput
   let pos@(V2 x y) = inputMousePos inp
   old <- liftIO (readIORef ref)
@@ -90,7 +89,7 @@ useDrag (DragHandle ref) sources = do
             retained = if cancelled || released then Nothing else Just (DragState a origin moved)
          in (retained, emitted)
       (next, result) = maybe (Nothing, Nothing) step armed
-  when (next /= old) $ liftIO $ do
+  when (next /= old) $ withContext $ \ctx -> do
     writeIORef ref next
     damageFull ctx
     markDirtyCovered ctx

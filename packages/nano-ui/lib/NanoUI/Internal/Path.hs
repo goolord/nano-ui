@@ -88,7 +88,7 @@ import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray (indexSmallArray, newSmallArray, readSmallArray, runSmallArray, smallArrayFromListN, writeSmallArray)
 import Data.Word (Word32)
 import NanoUI.Internal.Draw.Types (DrawOp (..), LineCap (..), LineJoin (..), Shade (..), defaultTextFont)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor, newZeroedPrimArray)
 
 --------------------------------------------------------------------------------
 -- Paths
@@ -455,8 +455,7 @@ ringCount (Rings _ starts _) = sizeofPrimArray starts - 1
 {-# INLINE buildRings #-}
 buildRings :: (forall s. (Float -> Float -> ST s ()) -> (Int -> ST s ()) -> ST s ()) -> Rings
 buildRings walk = runST $ do
-  counts <- newPrimArray 2
-  setPrimArray counts 0 2 (0 :: Int)
+  counts <- newZeroedPrimArray 2
   let bump k = readPrimArray counts k >>= writePrimArray counts k . (+ 1)
   walk (\_ _ -> bump 0) (\_ -> bump 1)
   nPoints <- readPrimArray counts 0
@@ -1026,8 +1025,7 @@ gridOf :: Int -> Float -> Float -> Float -> Float -> Int -> (Int -> (Float, Floa
 gridOf cells x0 y0 x1 y1 count boxOf = runST $ do
   -- Count each cell's items at the next cell's start, sum the counts into
   -- starts, then hand out the slots.
-  starts <- newPrimArray (total + 1)
-  setPrimArray starts 0 (total + 1) 0
+  starts <- newZeroedPrimArray (total + 1)
   -- Explicit loops: list ranges here are shared across iterations rather
   -- than fused, and cost a cell per step.
   let forCells f = item 0
@@ -1147,13 +1145,11 @@ fillPathOps tol t rule path paint = concatMap polygonOp (fillComponents rule rin
       , abs (ringArea pts) > 1e-6
       ]
     polygonOp (outline, holes) = case devicePaint t paint of
-      DeviceSolid col
-        | [] <- holes -> let tris = triangulate outline in [FillPolygon outline (ringStarts [outline]) tris (Flat col) | nonEmpty tris]
-        | otherwise ->
-            let pts = concatPoints (outline : holes)
-                starts = ringStarts (outline : holes)
-                tris = triangulateRings pts starts
-             in [FillPolygon pts starts tris (Flat col) | nonEmpty tris]
+      DeviceSolid col ->
+        let pts = concatPoints (outline : holes)
+            starts = ringStarts (outline : holes)
+            tris = triangulateRings pts starts
+         in [FillPolygon pts starts tris (Flat col) | nonEmpty tris]
       DeviceRamp ramp ->
         -- Split ring edges and triangles at every stop, so each piece's
         -- colour interpolates linearly between its corners.

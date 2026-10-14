@@ -26,7 +26,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrol
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
-import NanoUI.Internal.Monad (NanoUI, askContext, askInput, disabledWhen, freshWidget, nextId, liftIO, styled, uiTheme, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, nextId, liftIO, styled, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
 import NanoUI.Internal.Store (fieldFloat, findSlot, slotWrite)
@@ -140,8 +140,7 @@ tabHeaderLay vertical = (if vertical then fillW else id) . fixedH tabHeaderH . a
 -- The id tracks the container's rect, so what it paints repaints as it moves.
 tagTabChrome :: WidgetId -> TabChrome -> TabStyle -> TabOrientation -> NanoUI ()
 tagTabChrome wid part style orient = do
-  ctx <- askContext
-  liftIO $ do
+  withContext $ \ctx -> do
     parent <- currentParent ctx
     when (parent >= 0) $ do
       setWidgetId (ctxNodeArena ctx) parent wid
@@ -179,17 +178,11 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
       onEdge = if orient == TabBottom then alignTop else alignBottom
       headerBar
         | vertical = column' (contained . segmentedColumn . tight . gap barGap $ defaultLayout) $ do
-            if style == TabSegmented
-              then tagTabChrome groupId TabChromeTrack style orient
-              else tagTabChrome groupId edgeChrome style orient
-            tabResp <- headers
-            trailingView
-            pure tabResp
+            tagTabChrome groupId (if style == TabSegmented then TabChromeTrack else edgeChrome) style orient
+            headers <* trailingView
         | otherwise = row' (contained . onEdge . tight . fillW . gap 8 $ defaultLayout) $ do
             tagTabChrome groupId edgeChrome style orient
-            tabResp <- scrollableHeaders ctx style barGap cur headers
-            trailingView
-            pure tabResp
+            scrollableHeaders ctx style barGap cur headers <* trailingView
       -- A segmented column hugs its headers in its track; the others run the
       -- body's length.
       segmentedColumn = if style == TabSegmented then padAll 3 else fillH
@@ -200,10 +193,7 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
       (if vertical then rowWith (tight . fillW . grow . gap bodyGap) else columnWith (tight . fillW . gap bodyGap)) $
         if bodyFirst
           then bodyRender cur *> headerBar
-          else do
-            tabResp <- headerBar
-            bodyRender (tabActive tabResp)
-            pure tabResp
+          else headerBar >>= \r -> r <$ bodyRender (tabActive r)
   clip <- liftIO (getPrevClipRect ctx groupId)
   let bounds = tabStripRect result
       visible = maybe bounds (fromMaybe (Rect 0 0 0 0) . rectIntersect bounds) clip

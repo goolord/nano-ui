@@ -312,7 +312,7 @@ postsLayoutClick nt = nt == NodeButton || nt == NodeSelect
 -- It repeats the test of 'NanoUI.Internal.Widgets.Node.resolveInteraction': the widget
 -- is enabled, the frame routed the pointer to its layer, and the point is
 -- inside its rect from the previous frame and inside the scroll viewports
--- above it. A covered widget ('ctxPointerCovered') also passes: the view
+-- above it. A covered widget ('NanoUI.Internal.Context.Core.pointerCovered') also passes: the view
 -- already saw that release and rejected it.
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
