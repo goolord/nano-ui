@@ -25,11 +25,13 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (fieldInt, insertSlot)
 import NanoUI.Internal.Style (Layout, defaultLayout)
-import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectHit, rectNonEmpty, v2Y)
+import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectNonEmpty, v2Y)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Combinators (withBoundedIndex)
-import NanoUI.Internal.Widgets.Node (Response, addWidgetWithOptions, respRect, setChanged)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Internal.Widgets.Node (Response, addWidgetWithOptions, pointerOnWidget, respRect, setChanged)
+
 
 -- | Dropdown over @options@ in fold order, showing and editing the
 -- selected index. Indices are zero-based.
@@ -88,8 +90,11 @@ selectCore f options index = do
     finalIdx = maybe current (clamp 0 (n - 1)) picked
   -- Opening, closing or picking changes the store, which wakes the loop.
   liftIO $ do
-    -- Ignore presses where layers or a pinned node cover the widget.
-    pressed <- pure (rectHit rect mouse && pressedIn MouseLeft inp) <&&> (not <$> pointerCovered ctx wid)
+    -- Ignore presses where layers or a pinned node cover the widget, or
+    -- where it is scrolled out of its viewport.
+    pressed <-
+      pure (pressedIn MouseLeft inp)
+        <&&> (findNodeByWidgetId ctx wid >>= \mIdx -> pointerOnWidget ctx mIdx wid rect mouse)
     when pressed $ do
       modifyStore ctx (\st -> setSelectOpen st key (not open))
       writeIORef (ctxFocusId ctx) wid

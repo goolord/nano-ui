@@ -69,19 +69,25 @@ widgetIdInSubtree :: Context -> NodeIdx -> WidgetId -> IO Bool
 widgetIdInSubtree ctx root wid = withWidgetNode ctx wid False (\idx -> nodeInSubtree ctx idx root)
 
 -- | The floating panel that the pointer at @mouse@ is confined to, for
--- 'overlayHitAllowed'. While a modal is open it is the top modal. Otherwise
--- it is the topmost window or popup under the point. 'Nothing' anywhere
--- else. A caller that tests many nodes looks it up once.
+-- 'overlayHitAllowed'. While a modal is open it is the top modal, or a
+-- window or popup inside it under the point, which is painted over it.
+-- Otherwise it is the topmost window or popup under the point. 'Nothing'
+-- anywhere else. A caller that tests many nodes looks it up once.
 overlayHitRoot :: Context -> V2 -> IO (Maybe NodeIdx)
 overlayHitRoot ctx mouse = do
   -- Most frames have no floating panel, and then nothing needs looking up.
   floating <- floatingNodeCount (ctxNodeArena ctx)
   if floating <= 0
     then pure Nothing
-    else
-      runMaybeT $
-        MaybeT (topModalNode (ctxNodeArena ctx))
-          <|> MaybeT (topmostOverlayAtMouse ctx mouse)
+    else do
+      over <- topmostOverlayAtMouse ctx mouse
+      topModalNode (ctxNodeArena ctx) >>= \case
+        Nothing -> pure over
+        -- Searching the whole modal would find whatever it holds under a
+        -- popup of its own (a context menu over a row) before the popup.
+        Just modal -> case over of
+          Just o -> (\inside -> Just (if inside then o else modal)) <$> nodeInSubtree ctx o modal
+          Nothing -> pure (Just modal)
 
 -- | Whether the pointer can reach node @idx@ past the floating panels: every
 -- node can when the 'overlayHitRoot' is 'Nothing', otherwise only the nodes

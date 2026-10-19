@@ -156,9 +156,14 @@ overlayMenuOwnerAt ctx mouse =
 overlayRouteAt :: Context -> V2 -> IO (Maybe PointerRoute)
 overlayRouteAt ctx mouse = do
   mMenu <- getsInteraction ctx isTextInputMenu
-  case mMenu of
-    Just m | rectContains (textInputMenuRect m) mouse -> pure (Just RouteTextMenu)
-    _ -> do
+  -- A menu the modal state hides (its field is behind a modal opened since)
+  -- is not painted, so it takes nothing either.
+  menuShown <- case mMenu of
+    Just m | rectContains (textInputMenuRect m) mouse -> widgetOverlayAllowed ctx (textInputMenuWidget m)
+    _ -> pure False
+  if menuShown
+    then pure (Just RouteTextMenu)
+    else do
       dropdowns <- openDropdowns ctx
       let under = [ddWidget dd | dd <- reverse dropdowns, rectContains (ddRect dd) mouse]
       fmap RouteDropdown . listToMaybe <$> filterM (widgetOverlayAllowed ctx) under

@@ -27,10 +27,10 @@ import Data.List (find, minimumBy)
 import Data.Ord (comparing)
 import Data.Maybe (fromMaybe)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInSubtree, nodeInteractionHit)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Layout.Arena (getParent, getWidgetId)
+import NanoUI.Internal.Layout.Arena (getParent, getWidgetId, lookupNodeByKey)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
 import NanoUI.Internal.Store (deleteSlot, fieldInt, fieldPoint, findSlot, flagSlot, insertSlot, quietFlag, setFlagSlot, setQuietFlag)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectHit, v2X, v2Y)
@@ -65,7 +65,10 @@ useDrag1D axis owner lo hi current track = do
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
   active0 <- quietFlag dragK <$> liftIO (getStore ctx)
-  started <- pure (pressedIn MouseLeft inp && rectHit track (inputMousePos inp)) <&&> (not <$> liftIO (trackCovered ctx owner (inputMousePos inp)))
+  -- The track takes a press only where it shows: a track scrolled out of its
+  -- viewport keeps its last rect, under whatever is drawn there now.
+  let onTrack = findNodeByWidgetId ctx owner >>= maybe (pure (rectHit track (inputMousePos inp))) (\i -> nodeInteractionHit ctx i track (inputMousePos inp))
+  started <- pure (pressedIn MouseLeft inp) <&&> liftIO onTrack <&&> (not <$> liftIO (trackCovered ctx owner (inputMousePos inp)))
   let active = heldIn MouseLeft inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (active /= active0) $ liftIO (modifyStore ctx (setQuietFlag dragK active))
@@ -291,9 +294,11 @@ keyActivated wid = do
 -- which would otherwise reopen what the press just closed. Nor does a press
 -- on an open dropdown or text-edit menu, which may lie outside the panel it
 -- belongs to, or an Escape that closes one, or that something declared
--- earlier (a popup inside this one) already took.
-useDismissable :: Rect -> Rect -> NanoUI Bool
-useDismissable panel opener = do
+-- earlier (a popup inside this one) already took. Nor does a press on a
+-- floating panel inside @owner@'s (a context menu or popup declared in its
+-- body), which may lie past the panel's edge.
+useDismissable :: WidgetId -> Rect -> Rect -> NanoUI Bool
+useDismissable owner panel opener = do
   inp <- askFrameInput
   withContext $ \ctx -> do
     route <- getsInteraction ctx isPointerRoute
@@ -306,5 +311,14 @@ useDismissable panel opener = do
         esc = pressedOnceIn KeyEscape inp && not taken && null menu && not dropdown
         pressed = anyButtonPressed inp && not onMenu
         at = inputMousePos inp
+        outside = pressed && not (rectHit panel at || rectHit opener at)
     when esc (markEscapeConsumed ctx)
-    pure (esc || (pressed && not (rectHit panel at || rectHit opener at)))
+    inChild <- case route of
+      RouteLayer k | outside && k /= 0 && k /= intKey owner -> do
+        ownerNode <- findNodeByWidgetId ctx owner
+        layerNode <- lookupNodeByKey (ctxNodeArena ctx) k
+        case (layerNode, ownerNode) of
+          (Just l, Just o) -> nodeInSubtree ctx l o
+          _ -> pure False
+      _ -> pure False
+    pure (esc || (outside && not inChild))

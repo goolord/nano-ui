@@ -313,13 +313,16 @@ postsLayoutClick nt = nt == NodeButton || nt == NodeSelect
 -- is enabled, the frame routed the pointer to its layer, and the point is
 -- inside its rect from the previous frame and inside the scroll viewports
 -- above it. A covered widget ('NanoUI.Internal.Context.Core.pointerCovered') also passes: the view
--- already saw that release and rejected it.
+-- already saw that release and rejected it. So does a disabled one, which
+-- the view rejects too: a click posted to it would reach widgets (checkboxes,
+-- radio options, tree rows) that read the posted click without asking.
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
   disabled <- isDisabled ctx wid
   mrect <- getPrevRect ctx wid
   case mrect of
-    Just r | not disabled ->
+    _ | disabled -> pure True
+    Just r ->
       -- The view saw the release only if the frame routed the pointer to
       -- this node's layer.
       withWidgetNode ctx wid (rectContains r mouse) $ \idx ->

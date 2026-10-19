@@ -113,14 +113,12 @@ popupShown ::
 popupShown open cfg f child = do
   ctx <- askContext
   let
-    layout = f (tight defaultLayout)
+    -- The popup's padding and gap are defaults the caller's modifier can change.
+    layout = f ((tight defaultLayout) {layoutPadding = Padding 6 6 6 6, layoutGap = 4})
     addPopupNode wid parent = do
       registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
-      addNodeFromLayout
-        (ctxNodeArena ctx)
-        NodePopup
-        parent
-        layout {layoutPadding = Padding 6 6 6 6, layoutGap = 4}
+      addNodeFromLayout (ctxNodeArena ctx) NodePopup parent layout
+
     seedFromPrev wid = getPrevRect ctx wid >>= mapM_ (seedFloatingPanel ctx wid)
     dismiss
       | not (cfgDismissable cfg) = Nothing
@@ -156,7 +154,7 @@ floatingOverlay open dismiss addPanel enter body = do
         floatingPanel wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
       outside <- case dismiss of
-        Just opener | rectNonEmpty panel -> useDismissable panel opener
+        Just opener | rectNonEmpty panel -> useDismissable wid panel opener
         _ -> pure False
       let dismissed = closed || outside
       pure

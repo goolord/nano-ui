@@ -68,23 +68,28 @@ updateWindowDrag ctx inp =
   (isNothing <$> getsInteraction ctx isWindowResize) <&&> do
     let drag (wid, gx, gy) = do
           let V2 mx my = inputMousePos inp
-          modifyStore ctx (insertSlot fieldPoint (intKey wid) (mx - gx, my - gy))
-          pure wid
+              pos = (mx - gx, my - gy)
+          moved <- (/= Just pos) <$> lookupWindowPos ctx wid
+          when moved $ modifyStore ctx (insertSlot fieldPoint (intKey wid) pos)
+          pure (wid, moved)
     windowGesture ctx inp isWindowDrag (\s -> s {isWindowDrag = Nothing}) drag tryStartWindowDrag
 
 -- | Continue the window gesture @held@ reads while the button is down, with
--- @step@, which moves its window, and end it once the button is up. With none
--- held, a press may start one. Returns 'True' while one starts or is held.
+-- @step@, which moves its window and says whether it moved, and end it once
+-- the button is up. With none held, a press may start one. Returns 'True'
+-- while one starts or is held. A held gesture that moved nothing asks for no
+-- frame, so a still pointer idles.
 windowGesture ::
   Context -> Input -> (InteractionState -> Maybe g) -> (InteractionState -> InteractionState)
-  -> (g -> IO WidgetId) -> (Context -> V2 -> IO Bool) -> IO Bool
+  -> (g -> IO (WidgetId, Bool)) -> (Context -> V2 -> IO Bool) -> IO Bool
 windowGesture ctx inp held release step start =
   getsInteraction ctx held >>= \case
     Just g
       | heldIn MouseLeft inp -> do
-          wid <- step g
-          damageWidget ctx wid (DamageInflated haloDamageSlop)
-          markDirty ctx
+          (wid, moved) <- step g
+          when moved $ do
+            damageWidget ctx wid (DamageInflated haloDamageSlop)
+            markDirty ctx
           pure True
       | otherwise -> False <$ modifyInteraction ctx release
     Nothing
@@ -162,13 +167,17 @@ updateWindowResize ctx inp winW winH =
       let (nw, nh, nx, ny) = resizeFromEdge wrd (inputMousePos inp) winW winH
           wid = wrdWidget wrd
           key = intKey wid
-      modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
-      withWidgetNode ctx wid () $ \idx -> do
-        mpos <- lookupWindowPos ctx wid
-        Rect x y _ _ <- getNodeRect (ctxNodeArena ctx) idx
-        let ms = contextMeasurers ctx
-        placeWindowNode (ctxNodeArena ctx) ms winW winH idx nw nh (const (fromMaybe (x, y) mpos))
-      pure wid
+      size <- lookupWindowSize ctx wid
+      pos <- lookupWindowPos ctx wid
+      let moved = size /= Just (nw, nh) || pos /= Just (nx, ny)
+      when moved $ do
+        modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
+        withWidgetNode ctx wid () $ \idx -> do
+          mpos <- lookupWindowPos ctx wid
+          Rect x y _ _ <- getNodeRect (ctxNodeArena ctx) idx
+          let ms = contextMeasurers ctx
+          placeWindowNode (ctxNodeArena ctx) ms winW winH idx nw nh (const (fromMaybe (x, y) mpos))
+      pure (wid, moved)
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,
 -- unless the halo is blocked or the pointer is on one of the window's
@@ -177,6 +186,7 @@ resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge)
 resizeEdgeTarget ctx@Context {ctxNodeArena = na} mouse = runMaybeT $ do
   let inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
   idx <- MaybeT (topmostFloating ctx (== NodeWindow) inHalo)
+  guard =<< liftIO (outsideModalBlock ctx idx)
   rect <- liftIO (getNodeRect na idx)
   -- The halo covers the window interior, so find the edge first and run the
   -- hover probe and node scans only when there is one.
@@ -225,11 +235,18 @@ windowResizeCursorKind ctx inp =
       | otherwise -> pure Nothing
     Nothing -> fmap (\(_, _, edge) -> cursorForResizeEdge edge) <$> resizeEdgeTarget ctx (inputMousePos inp)
 
+-- | Whether window node @idx@ can take a drag or resize: no modal is open,
+-- or the window is inside the top one. A window behind an open modal is
+-- blocked like the rest of the content there.
+outsideModalBlock :: Context -> NodeIdx -> IO Bool
+outsideModalBlock ctx idx = maybe (pure True) (nodeInSubtree ctx idx) =<< topModalNode (ctxNodeArena ctx)
+
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
   idx <- MaybeT (topmostOverlayAtMouse ctx mouse)
   nt <- liftIO (getNodeType (ctxNodeArena ctx) idx)
   guard (nt == NodeWindow)
+  guard =<< liftIO (outsideModalBlock ctx idx)
   title <- MaybeT (windowTitleRect ctx idx)
   guard (rectContains title mouse)
   guard . not =<< liftIO (windowControlAt ctx idx mouse)
