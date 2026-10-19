@@ -28,57 +28,22 @@ counter = row $ do
 
 ## Features
 
-- Text inputs, multi-line text areas, numeric fields, sliders, knobs, selects,
-  combo boxes, sortable tables, trees, tabs, menus, context menus, modals,
-  floating windows, pane grids, colour pickers, progress bars, sparklines, and
-  drag and drop. Custom drawing and interaction are supported through
-  `customWidget` and a 2D canvas API (`NanoUI.Path`) with paths, fill rules,
-  dashed and joined strokes, gradients, clips, and transforms.
-- Row, column, grid, and layered (`layers`) layout with scrolling, wrapping
-  (`wrap`, `lineAlign`), pinned children (`pinAt`), and aspect ratios
-  (`aspect`). Layout options are `Layout -> Layout` modifiers composed with
-  `(.)`, as in `columnWith (gap 8 . padAll 12)`. Debug outlines can be enabled
-  with `explainLayout`.
-- Configurable wheel step and glide duration (`setScrollTuning`,
-  `setScrollStep`), programmatic scrolling (`scrollTo`, `scrollBy`,
-  `scrollPages`, `scrollIntoView`), viewport metrics for virtualized lists
-  (`getScrollMetrics`), and visibility detection (`sensor`).
-- Keyboard focus and navigation for every control, programmatic focus, and
-  shortcuts such as `shortcut (ctrl <> key 's')`. IME composition works in the
-  built-in text fields and is exposed for custom widgets via `useInputMethod`.
-- Per-widget mouse button queries (`respClickedWith MouseMiddle`), cursor
-  shapes, and tooltips with a hover delay.
-- Text shaping in the SDL backend, with fallback fonts for other scripts and
-  mixed left-to-right and right-to-left lines. Multi-style paragraphs and links
-  are built with `richText`, as in
-  `richText ["Read ", strong "the guide", " or ", hyperlink "faq" "the FAQ"]`.
-- Undo and redo in text fields via `TextCommand` values, which can also be
-  dispatched from code.
-- Images with content fit, crop, zoom, opacity, and rotation
-  (`imageConfigured`), scoped RGBA texture registration (`useImageRgba`), SVG
-  icons (`loadSvg`, `svgIcon`), and a `spinner`.
-- Input blocking while idle (no animation or timer is active), and per-frame
-  damage tracking so only changed regions are redrawn. Timed redraws and
-  background work are handled with `wakeAfter`, `useTask`, `useTaskStatus`,
-  `useStream`, and `askWake` (to wake the event loop from another thread).
-- State in `Var`s passed directly to input widgets (`useVar` for view-local
-  state, `newVar` for application state, `v.field` for a single field of a
-  record), or in a reducer with `NanoUI.Emit`. Writing to a `Var` that was
-  already read earlier in the frame re-runs the view automatically.
-- Eased and spring animations.
-- Themes, including Base16 schemes, scoped to part of a view with `styled` and
-  composable modifiers, as in
-  `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`. Widgets
-  can be disabled with `disabledWhen`, coloured by status with `tone` and
-  `fontTone`, and switched between light and dark themes based on the system
-  preference (`lightDark`, `followSystemTheme`).
-- One `WindowSettings` shared across backends, with `NanoUI` actions to inspect
-  the window (`askWindow`), change its title, position, or mode
-  (`setWindowTitleUi`, `moveWindowUi`, `setWindowModeUi`), take screenshots
-  (`requestScreenshot`), and close the app (`quitUi`).
-- Headless frame execution with scripted input for tests (`NanoUI.Testing`),
-  and a backend interface (`NanoUI.Backend`) containing the font, input, and
-  damage plumbing needed to implement a window backend.
+- Built-in widgets (text inputs, tables, trees, menus, modals, floating windows,
+  pane grids, charts, and more)
+- Custom widgets and a 2D canvas for vector drawing
+- Row, column, grid, and layered layout with composable modifiers, scrolling,
+  wrapping, and debug outlines
+- Rich text, bidirectional text shaping, fallback fonts, images, and SVG icons
+- Keyboard navigation, composable shortcuts, and IME input
+- Custom themes (defined directly, composed from built-in light and dark themes,
+  or generated from a Base16 palette), automatic system light/dark mode
+  switching, and composable, scoped styling
+- Animations with easing curves and spring physics
+- First-class support for background tasks and streams
+- Idle sleep and per-frame damage tracking
+- Direct mutable state or an Elm-style message/update loop
+- Headless testing with scripted input
+- Modular backends, with built-in support for SDL3 and RGFW+OpenGL
 
 ## Examples
 
