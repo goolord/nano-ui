@@ -29,7 +29,7 @@ import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
 import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, nextId, liftIO, styled, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
-import NanoUI.Internal.Store (fieldFloat, findSlot, slotWrite)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, slotWrite)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
 import NanoUI.Internal.WidgetText (TabChrome (..), buttonCloseTab, buttonFlagClose, tabChromeEncode, tabEncodeStyle)
@@ -194,6 +194,10 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
         if bodyFirst
           then bodyRender cur *> headerBar
           else headerBar >>= \r -> r <$ bodyRender (tabActive r)
+  -- The headers show the selection only through their node values, which no
+  -- diff covers, so a slot on the strip damages it when the shown tab changes,
+  -- however the change came (a click, a key, a write to the Var).
+  liftIO (writeSlot fieldInt ctx groupId (intKey groupId) (hash (if bodyFirst then cur else tabActive result)))
   clip <- liftIO (getPrevClipRect ctx groupId)
   let bounds = tabStripRect result
       visible = maybe bounds (fromMaybe (Rect 0 0 0 0) . rectIntersect bounds) clip

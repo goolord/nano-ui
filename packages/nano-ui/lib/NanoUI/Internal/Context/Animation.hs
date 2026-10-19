@@ -26,7 +26,7 @@ import NanoUI.Internal.Context.Core (damageFull, damageKey, getsDamage, markDirt
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), PrevFrame (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
-import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, rectNonEmpty)
+import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, finite, rectNonEmpty)
 
 -- | Read a projection of running and settled animations.
 {-# INLINE getsAnimation #-}
@@ -80,7 +80,10 @@ startAnimationEase ctx wid start end dur ease = startAnimationEaseDelay ctx wid 
 -- negative delay is treated as zero. Matching requests do not restart it.
 startAnimationEaseDelay :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> Float -> IO ()
 startAnimationEaseDelay ctx wid start end dur ease delay
-  | dur <= 0 || approxEq start end = settleKey ctx key end
+  -- A NaN or infinite end never compares near anything, so the tween would
+  -- restart every frame and never let the loop idle; it is ignored.
+  | not (finite end) = pure ()
+  | not (finite start) || dur <= 0 || approxEq start end = settleKey ctx key end
   | otherwise = do
       as <- readIORef (ctxAnimationState ctx)
       let req = max 0 delay
@@ -95,16 +98,22 @@ startAnimationEaseDelay ctx wid start end dur ease delay
 -- | Move toward a target, preserving an existing spring's position/velocity.
 -- With no running animation, starts at the settled value or zero.
 startSpring :: Context -> WidgetId -> SpringParams -> Float -> IO ()
-startSpring ctx wid params target = do
+startSpring ctx wid params target
+  -- A non-finite target would leave the spring NaN for good.
+  | not (finite target) = pure ()
+  | otherwise = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
   case IM.lookup key (asAnimations as) of
     Just (SpringAnim _ _ t p) | t == target && p == params -> repaintIfOrphan ctx key
     running -> do
-      let (pos, vel) = case running of
+      let (pos0, vel0) = case running of
             Just (SpringAnim p v _ _) -> (p, v)
             Just a -> (animationValue a, 0)
             Nothing -> (IM.findWithDefault 0 key (asAnimRest as), 0)
+          -- A value already poisoned starts again at the target.
+          (pos, vel) = if finite pos0 && finite vel0 then (pos0, vel0) else (target, 0)
+
       if abs (pos - target) <= springEps && abs vel <= springEps
         then settleKey ctx key target
         else do
@@ -127,13 +136,34 @@ keepAliveSec = 1e9
 
 -- | Request continuous frames while the widget calls this on every view pass.
 -- 'tickAnimations' removes the request after a frame without renewal.
+--
+-- The lease shares the widget's key with the widget's own animations (its
+-- hover): one already running there keeps frames coming and is left alone,
+-- 'tickAnimations' puts the lease back when it ends, and the lease keeps the
+-- key's resting value, which 'getAnimationValue' reads through it.
 keepAnimationAlive :: Context -> WidgetId -> IO ()
 keepAnimationAlive ctx wid = do
-  startAnimation ctx wid 0 1 keepAliveSec
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
-  unless (IS.member key (asKeepTouched as)) $
-    writeIORef (ctxAnimationState ctx) $! as {asKeepTouched = IS.insert key (asKeepTouched as)}
+  let running = IM.member key (asAnimations as)
+      touched = IS.member key (asKeepTouched as)
+  unless (running && touched) $
+    writeIORef (ctxAnimationState ctx) $!
+      as
+        { asAnimations = if running then asAnimations as else IM.insert key keepAliveAnim (asAnimations as)
+        , asKeepTouched = IS.insert key (asKeepTouched as)
+        }
+  unless running (repaintIfOrphan ctx key)
+
+-- | The perpetual animation a 'keepAnimationAlive' lease runs.
+keepAliveAnim :: Animation
+keepAliveAnim = EaseAnim 0 1 keepAliveSec 0 EaseLinear 0 0
+
+-- | Whether an animation is a 'keepAnimationAlive' lease.
+isKeepAlive :: Animation -> Bool
+isKeepAlive = \case
+  EaseAnim _ _ dur _ _ _ _ -> dur >= keepAliveSec
+  SpringAnim {} -> False
 
 -- | Stop an animation at a value and damage its widget if the value changed.
 {-# INLINE setAnimationValue #-}
@@ -152,7 +182,11 @@ tickAnimations ctx dt = do
           then if asAnimSettled as then as {asAnimSettled = False} else as
           else
             let stepped = IM.map (stepAnim dt) (asAnimations as)
-                (live, done) = IM.partition animInProgress stepped
+                (live0, done) = IM.partition animInProgress stepped
+                -- A widget's own animation that ends under a lease hands the
+                -- key back to the lease.
+                leased = IM.restrictKeys done (asKeepAlive as)
+                live = if IM.null leased then live0 else IM.union live0 (IM.map (const keepAliveAnim) leased)
                 rest' =
                   IM.foldlWithKey' (\r k a -> restAt k (animationValue a) r) (asAnimRest as) done
              in as
@@ -197,13 +231,10 @@ lapseKeepAlive as
   | IS.null (asKeepAlive as) && IS.null (asKeepTouched as) = as
   | otherwise =
       let lapsed = asKeepAlive as `IS.difference` asKeepTouched as
-          perpetual a = case a of
-            EaseAnim _ _ dur _ _ _ _ -> dur >= keepAliveSec
-            SpringAnim {} -> False
           anims
             | IS.null lapsed = asAnimations as
             | otherwise =
-                IM.filterWithKey (\k a -> not (IS.member k lapsed && perpetual a)) (asAnimations as)
+                IM.filterWithKey (\k a -> not (IS.member k lapsed && isKeepAlive a)) (asAnimations as)
        in as {asAnimations = anims, asKeepAlive = asKeepTouched as, asKeepTouched = IS.empty}
 
 -- | Repaint the whole frame for a running animation whose key names no
@@ -248,6 +279,9 @@ settleKey ctx key val = do
     -- damaged. 'animate' and 'animateTo' key a fresh id with no node, and
     -- those repaint whole through 'repaintIfOrphan' while they run.
     damageKey ctx key (DamageInflated defaultDamageSlop)
+    -- A zero-length tween on such a key settles here without running, so
+    -- this is the frame that must repaint whole.
+    repaintIfOrphan ctx key
     markDirtyCovered ctx
 
 -- | Record a settled value; one near zero is kept as no entry, which reads as zero.
@@ -261,8 +295,8 @@ getAnimationValue ctx wid = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
   case IM.lookup key (asAnimations as) of
-    Just a -> pure $! animationValue a
-    Nothing -> do
+    Just a | not (isKeepAlive a) -> pure $! animationValue a
+    _ -> do
       -- 'restAt' keeps no zero, so a nonzero value is a stored one.
       let v = IM.findWithDefault 0 key (asAnimRest as)
       when (v /= 0 && IS.notMember key (asRestHeld as)) $

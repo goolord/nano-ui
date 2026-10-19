@@ -233,7 +233,8 @@ atlasWriteLog = 64
 recordWrite :: AtlasSlot -> AtlasState -> AtlasState
 recordWrite slot st
   | n < 2 * atlasWriteLog = st {asGen = gen, asWrites = logged, asWriteCount = n}
-  | otherwise = st {asGen = gen, asWrites = take atlasWriteLog logged, asWriteCount = atlasWriteLog}
+  -- The cut is forced: left lazy, it would keep the whole log behind it.
+  | otherwise = let cut = take atlasWriteLog logged in length cut `seq` st {asGen = gen, asWrites = cut, asWriteCount = atlasWriteLog}
   where
     n = asWriteCount st + 1
     gen = asGen st + 1

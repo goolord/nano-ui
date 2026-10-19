@@ -598,11 +598,14 @@ needsFullDamage snap d =
     -- Even when the frame's only store change is in 'storeFloat', which also
     -- holds slider and knob values, not just scroll offsets.
     || fsOpaqueFollow snap
+    -- A resize, a modal opening or closing (its dim covers the window, and a
+    -- Var-bound modal writes nothing to the store) and a live window drag are
+    -- window-wide whatever scrolled in the same frame.
+    || sizeChanged
+    || fdModalFlip d
+    || fdWindowLive d
     || not (fdScrollOnly d)
-      && ( sizeChanged
-             || fdModalFlip d
-             || fdFloatingChanged d
-             || fdWindowLive d
+      && ( fdFloatingChanged d
              || (orphanAnim && fdAnimLive d)
              || keysChanged
              || layoutSettle
@@ -955,8 +958,8 @@ storeKeyOwners na wanted = do
   go (n - 1) (0 :: Int) IM.empty
 
 -- | The sub-slots whose writes repaint from the store at paint time: carets and
--- anchors in text fields, a text area's buffer (its document and caret) and
--- history, drag targets, a colour picker's opening colour, and the seen/mode
+-- anchors in text fields, a text area's buffer (its document and caret),
+-- line widths (its scrollbars) and history, drag targets, a colour picker's opening colour, and the seen/mode
 -- records a controlled edit co-writes. Shared, so resolving an owner does not
 -- build a key list per node per frame.
 ownerSlots :: [Slot]
@@ -973,6 +976,8 @@ ownerSlots =
   , SlotTextAreaChanged
   , SlotTextAreaText
   , SlotTextAreaBuffer
+  , SlotTextAreaWidths
+  , SlotTextAreaLineH
   , SlotDrop
   , SlotNumericHeld
   , SlotNumericRepeat

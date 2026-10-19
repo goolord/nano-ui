@@ -24,6 +24,7 @@ module NanoUI.Internal.Context.Drawing
   ) where
 
 import Control.Monad (mfilter, when)
+import Data.Bits (complement)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
@@ -154,7 +155,9 @@ cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
       out <- compute
       modifyIORef' (ctxDrawingCache ctx) $ \s ->
         s { dcsDrawFitCache = IM.insert k (DrawFitCache dw dh lh content incoming out) (dcsDrawFitCache s)
-          , dcsDrawOpCache = IM.delete k (dcsDrawOpCache s)
+          , -- Mark the ops stale rather than dropping them, so the damage pass
+            -- ('drawingOpsStale') still sees that this drawing changed.
+            dcsDrawOpCache = IM.adjust (\e -> e {doeContent = complement content}) k (dcsDrawOpCache s)
           }
       pure out
 

@@ -116,6 +116,8 @@ data DebugSampler = DebugSampler
   , smRatePresents :: !Word64
   , smLastDebugT :: !Double
   -- ^ When the last refresh was, or the sampler was made.
+  , smLastDueT :: !Double
+  -- ^ When 'debugCadence' last reported a refresh due.
   }
 
 -- | Session-owned sampler reference, updated atomically by sampling operations.
@@ -123,7 +125,7 @@ type DebugSamplerRef = IORef DebugSampler
 
 -- | Empty sampler with its rate interval starting at the current monotonic time.
 newDebugSampler :: IO DebugSamplerRef
-newDebugSampler = newIORef . DebugSampler emptyCoreDebugSnapshot 0 0 =<< getMonotonicTime
+newDebugSampler = newIORef . (\t -> DebugSampler emptyCoreDebugSnapshot 0 0 t 0) =<< getMonotonicTime
 
 noteCore :: DebugSamplerRef -> (CoreDebugSnapshot -> CoreDebugSnapshot) -> IO ()
 noteCore ref f = atomicModifyIORef' ref $ \s -> (s {smCore = f (smCore s)}, ())
@@ -144,12 +146,18 @@ noteDebugSkip ref = noteCore ref $ \c -> c {dbgSkips = dbgSkips c + 1}
 -- 'smLastQueryT', so the 4 Hz refresh loop only runs while a stats window is
 -- being built. An open window alone does not count as activity, or the event
 -- loop would wake every refresh period while any floating window is open.
+--
+-- A refresh is reported due at most once a period. The frame it asks for
+-- refreshes the snapshot only if the view still queries it, so once the
+-- readout is gone the snapshot stays old for the rest of the active second,
+-- and reporting it due every pass would run frames back to back.
 debugCadence :: DebugSamplerRef -> IO (Bool, Bool)
 debugCadence ref = do
   now <- getMonotonicTime
-  s <- readIORef ref
-  let active = now - smLastQueryT s < 1.0
-  pure (active, active && snapshotDue now s)
+  atomicModifyIORef' ref $ \s ->
+    let active = now - smLastQueryT s < 1.0
+        due = active && snapshotDue now s && now - smLastDueT s >= debugRefreshSec
+     in (if due then s {smLastDueT = now} else s, (active, due))
 
 snapshotDue :: Double -> DebugSampler -> Bool
 snapshotDue now s = now - smLastDebugT s >= debugRefreshSec
