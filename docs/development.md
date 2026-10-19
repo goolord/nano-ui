@@ -2,9 +2,9 @@
 
 ## Setup
 
-You need GHC 9.10 or newer and Cabal. Development uses GHC 9.14, which
-`nix develop` provides along with Cabal, SDL3, SDL3_ttf, and pkg-config. To
-check that the packages still build on 9.10, use a separate build directory:
+Requires GHC 9.10 or newer and Cabal. Development uses GHC 9.14, which is
+provided by `nix develop` along with Cabal, SDL3, SDL3_ttf, and pkg-config. To
+verify compatibility with GHC 9.10, use a separate build directory:
 
 ```sh
 cabal build all -w ghc-9.10.3 --builddir=dist-newstyle-910
@@ -17,9 +17,9 @@ cabal build -j1 all
 cabal test -j1 all
 ```
 
-Keep to one job. Several optimising GHC processes at once can exhaust memory on
-a desktop machine; if you need a hard limit, `GHCRTS=-M4G cabal build -j1 ...`
-fails the build instead of swapping.
+Run builds with `-j1`. Running multiple optimising GHC processes in parallel
+can exhaust memory on a desktop machine; if you want a hard cap,
+`GHCRTS=-M4G cabal build -j1 ...` will fail the build instead of swapping.
 
 | Test suite | Covers |
 | --- | --- |
@@ -27,130 +27,132 @@ fails the build instead of swapping.
 | `nano-ui-emit-test` | Typed emission, widget adapters, reducers, rebuilds, and queue isolation |
 | `text-buffer-spec` | The multi-line text buffer |
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
-| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite; with a display, OpenGL frames and loop wakes |
+| `nano-ui-rgfw-test` | RGFW input translation, glyph atlas, and software-rasterised frames; with a display, OpenGL frames and loop wakes |
 | `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values; with a display, `stopWaitForEvent` |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
-| `nano-ui-render-test` | SDL key and cursor translation and the theme event; native SDL readback of partial-damage triangles and clipping, images, window options, and screenshots, also on OpenGL with a display |
-| `nano-ui-sdl-pointer-test` | SDL mouse buttons, through SDL's event queue |
+| `nano-ui-render-test` | SDL key/cursor translation and theme events; native SDL readback of partial-damage triangles, clipping, images, window options, and screenshots (also on OpenGL when a display is available) |
+| `nano-ui-sdl-pointer-test` | SDL mouse buttons through the SDL event queue |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |
-| `nano-ui-markdown-test` | Markdown parsing, appending against whole-text parsing (QuickCheck), and drawing |
-| `nano-ui-demo-test` | The SDL demo, notepad, log viewer, and input-method composition, driven in hidden windows |
+| `nano-ui-markdown-test` | Markdown parsing, incremental append vs. full-text parsing (QuickCheck), and drawing |
+| `nano-ui-demo-test` | The SDL demo, notepad, log viewer, and IME composition, run in hidden windows |
 | `nano-ui-terminal-test` | The terminal demo's escape-sequence parser and PTY |
 
-Run one suite with `cabal test nano-ui-test --test-show-details=failures`.
+Run a single suite with `cabal test nano-ui-test --test-show-details=failures`.
 
-The headless suites don't exercise native presentation. After changing a
-backend, run its demo. `nano-ui-demo-test` drives the SDL demo (in both
-buffered and continuous presentation), notepad, and log viewer through real
-SDL windows, hidden:
+The headless suites do not test native window presentation. After modifying a
+backend, run its demo. `nano-ui-demo-test` runs the SDL demo (in both buffered
+and continuous presentation modes), notepad, and log viewer in hidden SDL
+windows:
 
 ```sh
 cabal test nano-ui-demo-test
 ```
 
-The RGFW backend has its own demo, `cabal run nano-ui-rgfw-demo`.
+For the RGFW backend, run `cabal run nano-ui-rgfw-demo`.
 
-`scripts/record-demo.sh [OUT]` re-records the README's tour of the SDL demo
-into `OUT/demo.mp4`. It drives the demo in a hidden window (`--record DIR`,
-in `SdlRecord`), so rerun it after changing a widget the tour visits. It
-needs ffmpeg. The video is not committed: drop it into a GitHub issue or PR
-comment box and put the `user-attachments` URL GitHub gives back in
+`scripts/record-demo.sh [OUT]` re-records the SDL demo video for the README
+into `OUT/demo.mp4` (requires `ffmpeg`). It runs the demo in a hidden window
+via `--record DIR` (`SdlRecord`), so re-run it after changing any widget shown
+in the tour. The video file is not committed to git: upload it to a GitHub
+issue or PR comment box and copy the resulting `user-attachments` URL into
 `README.md`.
 
 ### Flags
 
-`cabal.project` turns on these flags:
+`cabal.project` enables the following flags:
 
-- `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo`, `nano-ui-form` and
-  `nano-ui-markdown` have their own `sdl` flag for the executables that need it.
+- `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo`, `nano-ui-form`, and
+  `nano-ui-markdown` have matching `sdl` flags for their SDL executables.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `packages/nano-ui` | The core: widgets, layout, input handling, and the draw list |
+| `packages/nano-ui` | Core library: widgets, layout, input handling, and the draw list |
 | `packages/nano-ui-emit` | Typed emitting views, widget adapters, and reducer runners |
 | `packages/nano-ui-sdl`, `packages/nano-ui-rgfw` | Window backends |
-| `packages/nano-ui-rgfw-bindings` | RGFW bindings, with the C source |
-| `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts and diagrams, and forms |
-| `packages/nano-ui-markdown` | Markdown parsing and drawing |
+| `packages/nano-ui-rgfw-bindings` | RGFW bindings and bundled C source |
+| `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts/diagrams and validated forms |
+| `packages/nano-ui-markdown` | Markdown parsing and rendering |
 | `packages/nano-ui-demo` | Example applications |
 | `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
 
-The core's modules, under `packages/nano-ui/lib`. A module outside
-`NanoUI/Internal/` is public API. Everything else lives under
-`NanoUI/Internal/`; some of those modules are exposed for backends, tests and
-tools that need more than the API, but they can change at any time. The other
-packages follow the same rule with `NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`,
-`NanoUI.Diagrams.Internal`, `NanoUI.Form.Internal` and `NanoUI.Markdown.Internal`.
+Core modules live under `packages/nano-ui/lib`. Modules outside
+`NanoUI/Internal/` form the public API. Everything under `NanoUI/Internal/` is
+internal; some internal modules are exposed for backends, tests, and tooling,
+but may change without notice. The other packages follow the same convention
+(`NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`, `NanoUI.Diagrams.Internal`,
+`NanoUI.Form.Internal`, `NanoUI.Markdown.Internal`).
 
 | Path | Contents |
 | --- | --- |
-| `NanoUI.hs` | The public API and its documentation |
-| `NanoUI/Widgets/` | Public widget modules, for qualified imports and names `NanoUI` does not re-export |
-| `NanoUI/Internal/Widgets/` | The widget implementations |
-| `NanoUI/Internal/Monad.hs`, `NanoUI/Internal/Id.hs` | The `Ui` effect, widget ids, and keys |
-| `NanoUI/Internal/Hooks.hs`, `NanoUI/Internal/Store.hs`, `NanoUI/Internal/Context.hs`, `NanoUI/Internal/Context/` | Widget state and the frame context |
-| `NanoUI/Internal/Layout/` | Layout storage and the solver |
-| `NanoUI/Internal/Frame.hs`, `NanoUI/Internal/Frame/` | Per-frame input, focus, painting, and damage |
-| `NanoUI/Internal/Draw.hs`, `NanoUI/Internal/Draw/` | Vertex arenas and the draw list |
-| `NanoUI/Runner.hs` | The event loop the backends share |
-| `NanoUI/Testing.hs`, `NanoUI/Testing/` | The headless test harness |
+| `NanoUI.hs` | Public API re-exports and Haddock overview |
+| `NanoUI/Widgets/` | Public widget modules, for qualified imports and symbols not re-exported by `NanoUI` |
+| `NanoUI/Internal/Widgets/` | Widget implementations |
+| `NanoUI/Internal/Monad.hs`, `NanoUI/Internal/Id.hs` | The `Ui` effect, widget IDs, and keys |
+| `NanoUI/Internal/Hooks.hs`, `NanoUI/Internal/Store.hs`, `NanoUI/Internal/Context.hs`, `NanoUI/Internal/Context/` | Widget state and frame context |
+| `NanoUI/Internal/Layout/` | Layout tree storage and solver |
+| `NanoUI/Internal/Frame.hs`, `NanoUI/Internal/Frame/` | Per-frame input routing, focus, painting, and damage |
+| `NanoUI/Internal/Draw.hs`, `NanoUI/Internal/Draw/` | Vertex arenas and draw list generation |
+| `NanoUI/Runner.hs` | Shared backend event loop |
+| `NanoUI/Testing.hs`, `NanoUI/Testing/` | Headless test harness |
 
 ## How a frame works
 
-The [README's "How it works" section](../README.md#how-it-works) lists the steps of a frame, and
-[rendering-pipeline.svg](rendering-pipeline.svg) (source:
-`rendering-pipeline.d2`) draws them with the backend loop around them.
+See [How it works](../README.md#how-it-works) in the README for the per-frame
+steps, and [rendering-pipeline.svg](rendering-pipeline.svg) (source:
+`rendering-pipeline.d2`) for the full diagram including the backend event loop.
 
 ![Rendering pipeline](rendering-pipeline.svg)
 
 ## Conventions
 
-- Public widgets follow the rules in the `NanoUI` module documentation: the
-  result comes first, a primed variant adds the `Response`, inputs take the
-  `Var` they edit, and layout arguments are modifiers.
-- An input is a value-style core, `fooCore :: ... -> a -> NanoUI (Response, a)`,
-  wrapped by `bindVar` (or `bindVarBy` with a cheaper equality) from
-  `NanoUI.Widgets.Custom`. Use `RenderFinal` when the core draws the value it
-  returns, and `Conservative` when it drew something from the old value before
-  the edit resolved, which reruns the view. Inside the core, adopt the incoming
-  value with `adoptStoreInt`, `adoptStoreFloat`, or `adoptStoreText` and record
-  what it returned with the matching `recordStore*`, so edits made between
-  frames by id (menus, text commands) survive.
-- Widget state in the store is read and written through the slot functions of
+- Public widgets follow the conventions documented in `NanoUI`: the return
+  value comes first, primed variants (`button'`, `textInput'`) also return a
+  `Response`, input widgets take the `Var` to update, and layout options are
+  `Layout -> Layout` modifiers.
+- Input widgets are implemented as a value-style core
+  (`fooCore :: ... -> a -> NanoUI (Response, a)`) wrapped with `bindVar` (or
+  `bindVarBy` for a custom equality check) from `NanoUI.Widgets.Custom`. Pass
+  `RenderFinal` when the widget renders the updated value on the same pass, and
+  `Conservative` when it rendered using the old value before the edit was
+  resolved (which triggers another pass on change). Inside the core, sync with
+  the widget store using `adoptStoreInt`, `adoptStoreFloat`, or
+  `adoptStoreText` and record the returned value with the corresponding
+  `recordStore*` function so out-of-band edits by widget ID (such as menus or
+  text commands) are preserved.
+- Read and write widget store state using the slot functions in
   `NanoUI.Internal.Store` (`findSlot fieldInt 0 key store`,
-  `insertSlot fieldPoint key p . deleteSlot fieldInt key`), not through the
-  maps. They compile to the record code they stand for. A widget that
-  publishes state every frame writes it with `writeSlots`, which skips the
-  write, and the store diff behind it, when nothing changed.
-- Local state goes through `NanoUI.Internal.Var` (`useVar` keeps its own
-  per-scope counter, apart from widget ids). Keyboard handling checks
-  `NanoUI.Internal.Widgets.Behavior.keyboardFocused` first, so disabled widgets and
-  modals are respected.
-- Damage is part of correctness: a state change can need a follow-up frame
-  without any new input. Add a test when you change it.
-- Backend-independent event sequencing lives in `NanoUI.Runner`. A backend
-  supplies a `SessionDriver` for event translation and presentation.
-- `NanoUI` is the view API and `NanoUI.Backend` is what a backend is built
-  from. A name a view never uses belongs in `NanoUI.Backend`: input
-  construction, font callbacks, damage, frame metrics, id derivation. Adding
-  one to `NanoUI` instead is what makes the root module hard to read.
-- Write code inline. Add a function when it removes real duplication or names a
-  computation that isn't obvious.
-- Add tests for observable behaviour. Core cases live in
+  `insertSlot fieldPoint key p . deleteSlot fieldInt key`) rather than
+  manipulating the underlying maps directly. These inline to direct record
+  updates. For state written every frame, use `writeSlots`, which skips both
+  the write and the store diff when the value is unchanged.
+- View-local state is implemented in `NanoUI.Internal.Var` (`useVar` uses a
+  per-scope counter separate from widget IDs). Keyboard handlers should check
+  `NanoUI.Internal.Widgets.Behavior.keyboardFocused` first so disabled widgets
+  and modals block keyboard input.
+- Damage tracking is part of correctness: a state change may require a
+  follow-up frame even without new user input. Add a regression test when
+  changing damage logic.
+- Backend-independent event sequencing lives in `NanoUI.Runner`. Each backend
+  provides a `SessionDriver` to translate native events and present frames.
+- Keep `NanoUI` focused on the user-facing GUI API, and put backend plumbing in
+  `NanoUI.Backend` (input construction, font callbacks, damage types, frame
+  metrics, ID derivation).
+- Prefer writing code inline; extract a helper function only when it removes
+  real duplication or names a non-obvious computation.
+- Add tests for observable behaviour. Core integration tests live in
   `packages/nano-ui/test/integration/Cases/` and are registered in `Main.hs`
-  and the package's Cabal file. `NanoUI.Testing.Harness` builds pointer
-  frames (`pressAt`, `holdAt`, `releaseAt`, `clickPair`), finds spans
-  (`spanRect`, `spanRectOf`) and warms views up; a test that needs a rect or
-  a span to go on takes it with `assertJust`, which counts a failure when it
-  is missing.
-- Format Haskell with the repository's `fourmolu.yaml`.
+  and `nano-ui.cabal`. `NanoUI.Testing.Harness` provides helpers for pointer
+  frames (`pressAt`, `holdAt`, `releaseAt`, `clickPair`), text-span queries
+  (`spanRect`, `spanRectOf`), and warm-up passes; unwrap required rectangles or
+  spans with `assertJust` so missing geometry fails the test.
+- Format Haskell code with the repository's `fourmolu.yaml`.
 
 ## Performance
 
-Packages build at Cabal's default `-O1`. To compare an optimised build, add this to
+Packages build with `-O1` by default. To test an `-O2` build, add to
 `cabal.project.local`:
 
 ```cabal
@@ -158,150 +160,144 @@ package nano-ui
   optimization: 2
 ```
 
-- Keep `INLINE` for small bodies and helpers inside per-vertex, per-glyph, or
-  per-node loops. A large inlined body slows every importer's build for little
-  runtime gain.
-- Measure both runtime and compile time before adding optimisation flags.
-  More inlining and specialisation can increase code size without making a
-  frame faster.
-- A custom widget without a `widgetContent` key has its ops rebuilt and
-  compared every frame, since only building them shows whether what it draws
-  changed. That is right for a handful of ops and wasteful for thousands: give
-  an op-heavy drawing a key covering everything it reads, and an unchanged key
-  skips the rebuild and the repaint. `contentKey` hashes numbers into one.
+- Reserve `INLINE` pragmas for small functions and helpers inside tight
+  per-vertex, per-glyph, or per-node loops. Inlining large functions slows down
+  downstream builds for little runtime benefit.
+- Measure both runtime and compile time before adding optimisation flags; extra
+  inlining and specialisation can bloat code size without speeding up frames.
+- Without a `widgetContent` key, a custom widget's draw ops are rebuilt and
+  diffed every frame to detect visual changes. That is fine for a few ops, but
+  expensive for thousands: pass a content key (built with `contentKey`) that
+  hashes all inputs to the drawing so unchanged frames skip both rebuilding ops
+  and repainting.
 - Compare `bytes allocated` from `cabal run nano-ui-profile -- <scene> +RTS -s`
-  with the same compiler, flags, and scene. Allocation changes can reveal work
-  that timing noise hides, including thunks retained by composed store writes.
-- Compare compile times per module with
+  using the same compiler, flags, and scene. Allocation differences show
+  regressions that wall-clock timing noise can hide, such as thunks retained in
+  composed store updates.
+- Check per-module compile times with
   `cabal build <target> --ghc-options="-ddump-timings -ddump-to-file"`.
 
 ### Profilers and benchmarks
 
-[The abstraction audit](abstraction-audit.md) records the baseline, dependency
-decisions, compiler checks, and before/after measurements for the refactors.
+[The abstraction audit](abstraction-audit.md) documents the baseline metrics,
+dependency choices, inspection checks, and before/after numbers from past
+refactors.
 
 | Command | Runs |
 | --- | --- |
-| `cabal run nano-ui-profile -- <scene> +RTS -s` | Headless frames. Scenes: `widgets` (the default), `canvas` (an op-heavy unkeyed custom widget), `canvas-keyed` (the same drawing with a content key), `canvas-paths` (filled and stroked paths, turned a little every frame so they are built and painted again), `canvas-paths-build` (the same paths built without a frame), `textarea` (typing into a 100,000-line `textAreaDocument`), `textarea-text` (the same through the `Text` API, which joins the document on every edit), `richtext` (200 paragraphs, full-width and capped under their width in turn, one drawn again every frame as the pointer enters and leaves it; `richtext resize` also changes the window's width every frame), and `svg` (icon rasterization) |
-| `cabal run nano-ui-sdl-profile` | The SDL demo's UI in a hidden window: the full demo, each tab, widget microbenchmarks, and scaling |
-| `cabal run nano-ui-rgfw-profile` | The RGFW demo's frame loop on the OpenGL path in a hidden window |
-| `cabal run nano-ui-sdl-anim` | Tween and spring animations in an SDL window, for checking animation pacing by eye |
-| `cabal run nano-ui-sdl-idle -- <scene> [hidden]` | A window that should cost nothing while it is left alone. Scenes: `static`, `focus`, `wake`, `spinner`, `clock`, `type`, and `startup`. `hidden` keeps it off screen, where no pointer can disturb it |
-| `cabal bench nano-ui-id-bench` | Widget id generation; fails if a frame of ids allocates |
-| `cabal bench nano-ui-sdl-bench` | `runFrame` and SDL drawing for small, medium, and large UIs |
+| `cabal run nano-ui-profile -- <scene> +RTS -s` | Headless frames. Scenes: `widgets` (default), `canvas` (op-heavy unkeyed custom widget), `canvas-keyed` (the same drawing with a content key), `canvas-paths` (filled and stroked paths rotated slightly each frame to force rebuild and repaint), `canvas-paths-build` (path construction without running a frame), `textarea` (typing into a 100,000-line `textAreaDocument`), `textarea-text` (the same via the `Text` API, which rejoins the document on every edit), `richtext` (200 paragraphs alternating between full-width and width-capped, with one hovered/unhovered each frame; `richtext resize` also resizes the window every frame), and `svg` (icon rasterization) |
+| `cabal run nano-ui-sdl-profile` | The SDL demo UI in a hidden window: full demo, individual tabs, widget microbenchmarks, and scaling |
+| `cabal run nano-ui-rgfw-profile` | The RGFW demo frame loop on the OpenGL path in a hidden window |
+| `cabal run nano-ui-sdl-anim` | Tween and spring animations in an SDL window for visual inspection |
+| `cabal run nano-ui-sdl-idle -- <scene> [hidden]` | Idle CPU/wake test window. Scenes: `static`, `focus`, `wake`, `spinner`, `clock`, `type`, and `startup`. Pass `hidden` to keep the window off-screen so pointer events do not wake it |
+| `cabal bench nano-ui-id-bench` | Widget ID generation benchmark (fails if a frame of IDs allocates) |
+| `cabal bench nano-ui-sdl-bench` | `runFrame` and SDL rendering benchmarks for small, medium, and large UIs |
 
-`scripts/profile/` has helpers for cost-centre profiles and for timing the SDL
-demo's real event loop.
+`scripts/profile/` contains scripts for cost-centre profiling and timing the
+SDL demo's event loop.
 
-For source-reduction work, `python scripts/profile/source-budget.py BASE_REF`
-counts all maintained library Haskell and C, excluding demos and vendored RGFW.
-Changed Haskell is formatted to the same Fourmolu fixed point on both sides.
+For code-size tracking, `python scripts/profile/source-budget.py BASE_REF`
+counts maintained library Haskell and C lines (excluding demos and vendored
+RGFW), after formatting modified Haskell files with Fourmolu on both sides.
 `compare-builds.py BASE_BUILD CANDIDATE_BUILD --suite core|sdl|render|atlas|events --output FILE`
-runs already-built executables in alternating order and records raw output,
-executable hashes, allocation and timing medians. It never rebuilds the baseline.
-Use `--executables` to supply executable paths instead of build directories.
-`NANO_PROFILE_ITERATIONS` lengthens the SDL profiler's default 40-frame samples;
-`NANO_RENDER_ITERATIONS` lengthens the render probe's default 500-frame samples.
-The latter runs with `cabal test nano-ui-render-test --test-options=--bench`.
-Use `--test-options=--atlas-bench` for atlas reset/upload timing and
-`--test-options=--native` for readback on the selected native renderer instead
-of the software/dummy renderer used by the default test suite.
+runs pre-built executables in alternating order and records raw output, binary
+hashes, and allocation/timing medians without rebuilding the baseline (pass
+`--executables` to supply binary paths directly). Set `NANO_PROFILE_ITERATIONS`
+to increase the SDL profiler's default 40-frame sample count, or
+`NANO_RENDER_ITERATIONS` to increase the render probe's default 500-frame
+sample count (`cabal test nano-ui-render-test --test-options=--bench`). Pass
+`--test-options=--atlas-bench` for glyph atlas reset/upload timing, and
+`--test-options=--native` to test readback on the native renderer instead of
+the default software renderer.
 
 ### Idle cost
 
-An idle view should not schedule frames. The session loop blocks in the
-backend's event wait unless an animation, timed wake, or debug readout needs a
-frame. OS events and runtime activity can still wake the process.
+When a window is idle, no frames should run. The session loop blocks waiting for
+backend events unless an animation, timed wake, or debug overlay refresh is
+pending (though OS events may still wake the process).
 
-Set `NANO_LOOP_TRACE` to see what the loop is doing. About once a second while
-it runs, it prints to stderr the time covered, how many passes it made, how
-many drew, and why: `A` an animation, `D` a dirty context, `R` a window redraw
-request, `T` a timed wake or a debug readout refresh, and `-` for a pass
-caused by input. An idle window prints nothing, and the first line after a
-quiet spell covers all of it.
+Set `NANO_LOOP_TRACE=1` to log event-loop activity to stderr roughly once per
+second while active. Each line prints the elapsed time, pass count, draw
+count, and wake reasons: `A` (animation), `D` (dirty context), `R` (window
+redraw request), `T` (timed wake or debug readout refresh), and `-` (input
+event). Nothing is printed while the loop is blocked on input.
 
 ```sh
 NANO_LOOP_TRACE=1 cabal run nano-ui-sdl-idle -- spinner
 ```
 
-Three rules keep a view idle:
+To keep an application idle when nothing is changing:
 
-- Nothing may run frames by itself except an animation that is on screen.
-  `keepAnimating` lasts as long as it keeps being called, so call it from the
-  widget it animates and not from somewhere that is always built.
-- A view that changes on a schedule (a clock, a debounce, a held button's
-  repeat) asks for its next frame with `wakeAfter`, or `requestWakeAt` from
-  code holding a `Context`. Each frame starts with no wake pending and the
-  widgets still built ask again, so one that is gone stops costing anything.
-  Do not mark the context dirty every frame to get there: a dirty context is
-  redrawn at once, which is a busy loop.
-- Background work goes in `useTask` or `useTaskStatus`, which wake the loop
-  once, when the job finishes, or in `useStream`, which wakes it on each
-  update and costs one frame for a burst of them. Any other thread that
-  changes what the view reads wakes the loop with the action `askWake`
-  returns. Each wake runs one frame, which
-  repaints the whole window. Code holding a `Context` can wake through
-  `ctxWakeLoop` instead: that frame's damage decides what is presented, so
-  waking for a change that is not on screen is cheap, and a change damage
-  cannot see, such as new pixels under a registered image id, needs
-  `damageFull`.
+- Only call `keepAnimating` for animations that are currently on screen.
+  Because `keepAnimating` applies only to the current frame, call it inside the
+  animating widget rather than from an unconditionally executed top-level path.
+- For scheduled updates (clocks, debounces, key-repeat timers), schedule the
+  next frame with `wakeAfter` (or `requestWakeAt` when working with a
+  `Context`). Pending wakes reset at the start of each frame and must be
+  requested again on each frame that still needs them, so unmounted widgets
+  stop scheduling wakes. Never force continuous frames by marking the context
+  dirty on every pass, as that creates an unthrottled busy loop.
+- Run background tasks with `useTask` or `useTaskStatus` (which wake the loop
+  once on completion) or `useStream` (which wakes the loop on updates and
+  coalesces bursts that arrive within a single frame). If an external thread
+  mutates state read by the UI, wake the loop using the callback returned by
+  `askWake`, which schedules a full-window redraw. When waking via
+  `ctxWakeLoop` on a `Context`, normal damage tracking determines what is
+  redrawn; if the change is not tracked by damage (such as mutating pixels under
+  an existing image ID), also call `damageFull`.
 
-To measure a process, read its cycle time (`QueryProcessCycleTime` on
-Windows) and its threads' context switch counts over ten seconds or so. CPU
-time from the process table is counted in scheduler ticks of 15.6 ms and
-misses a loop of short wakes almost entirely. A percentage in Task Manager is
-of the whole machine, so 0.4% on 32 logical processors is an eighth of a
-core.
+When measuring idle CPU usage on Windows, inspect thread cycle time
+(`QueryProcessCycleTime`) and context-switch counts over a ~10-second window.
+Process-table CPU percentages are sampled on 15.6 ms scheduler ticks and can
+miss short wake loops; also note that Task Manager reports percentages across
+all logical cores (e.g. 0.4% on a 32-thread machine is 12.8% of one thread).
 
 ## Documentation
 
-Hackage can show a package's `README.md` and `CHANGELOG.md` from its source
-distribution. Every package has a regular `README.md` listed under
-`extra-doc-files`; packages with a changelog list that too. Keep these files
-inside the package directory. A symlink outside it depends on the checkout,
-and a checkout without symlink support may contain only the target path. The
-repository's top-level `README.md` is the GitHub front page, and
-`packages/nano-ui/README.md` is the core's page on Hackage, so a change to the
-introduction or the first example belongs in both. Links in a package README
-should use absolute URLs for repository content so they work on Hackage too.
+Hackage displays a package's `README.md` and `CHANGELOG.md` from its sdist
+tarball. Every package must have a regular file (not a symlink) at `README.md`
+listed under `extra-doc-files` in its `.cabal` file, along with `CHANGELOG.md`
+if present. Because the top-level `README.md` is the GitHub landing page and
+`packages/nano-ui/README.md` is the Hackage landing page for `nano-ui`, keep
+changes to the introduction and initial example synchronised between the two.
+Use absolute URLs for repository links in package READMEs so they resolve on
+Hackage.
 
-Document exported names with Haddock comments. Explain units, coordinate
-spaces, ownership, defaults, and failure cases where the type does not tell
-the reader. For a variant, link to the base operation and describe the
-difference. A module header should explain when to use the module.
+Document exported symbols with Haddock comments. State units, coordinate
+spaces, ownership, defaults, and failure modes when they are not obvious from
+the type signature. For variant functions (such as `fooWith` or `foo'`), link
+to the base function and state how the variant differs. Include a module header
+explaining when to import the module.
 
-Build a package's documentation and search index with:
+Build Haddock documentation and QuickJump indices for a single package with:
 
 ```sh
 cabal haddock -j1 <package> --disable-documentation --haddock-quickjump
 ```
 
-This omits dependency documentation. Cabal can still rebuild dependencies
-when documentation flags change the build plan. The coverage report lists
-undocumented exports; re-exports may lack documentation if the dependency's
-Haddock files are unavailable. Check the rendered output too: coverage does
-not detect incorrect prose or broken examples.
-
-Comments say what the code does and why, in the present tense. What the code
-used to do belongs in the commit message and the changelog.
+`--disable-documentation` skips building Haddock for dependencies, though Cabal
+may still rebuild dependencies if documentation flags alter the build plan
+(and re-exported symbols from dependencies without built Haddock files may
+appear undocumented in the coverage report). Check both the Haddock coverage
+output and the rendered HTML. Write code comments in the present tense
+describing what the code does and why; historical context about previous
+implementations belongs in commit messages and changelogs.
 
 ## Releasing
 
-Run `cabal check` in each package directory, then `cabal sdist all`, and build
-the archives from a clean directory. That catches files missing from
-`extra-source-files`, such as C headers and bundled fonts. Check that each
-archive's `README.md` is a regular file with the expected content. For example:
+Run `cabal check` in each package directory, run `cabal sdist all`, and test
+building the generated tarballs in a clean directory to catch files missing
+from `extra-source-files` (such as C headers or bundled fonts). Verify that
+each archive's `README.md` is a regular file with the expected contents:
 
 ```sh
 tar -tvzf dist-newstyle/sdist/nano-ui-0.1.0.1.tar.gz
 tar -xOf dist-newstyle/sdist/nano-ui-0.1.0.1.tar.gz nano-ui-0.1.0.1/README.md
 ```
 
-Repeat for all seven packages, using the versions in their Cabal files.
-Check package-page links and bundled assets from the extracted archives,
-where paths outside the package are unavailable.
+Repeat for all packages using the versions in their `.cabal` files, and check
+that links and bundled assets work when extracted outside the repository tree.
 
-`python scripts/check-sdist-docs.py` checks every package's README declaration,
-archive member types, and all listed documents against the working copy,
-including changelogs and the user guide. Run it after `cabal sdist` whenever these
-documents change.
+Run `python scripts/check-sdist-docs.py` after `cabal sdist` whenever
+documentation changes; it verifies every package's README declaration, archive
+entry types, changelogs, and user guide against the working tree.

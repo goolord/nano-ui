@@ -2,8 +2,9 @@
 
 ## Build a windowed application
 
-Use GHC 9.14 and Cabal. Save the counter from the README as `Main.hs` and
-create `counter.cabal` beside it:
+Use GHC 9.10 or newer (9.14 is used for development) and Cabal. Save the
+counter example from the README as `Main.hs` and create `counter.cabal` next to
+it:
 
 ```cabal
 cabal-version: 3.4
@@ -22,44 +23,48 @@ executable counter
     nano-ui-sdl ^>=0.2
 ```
 
-Install SDL3 and SDL3_ttf 3.2 or later, with pkg-config metadata available.
-`pkg-config --modversion sdl3 sdl3-ttf` should find both. Run the application
-with `cabal run counter`.
+Install SDL3 and SDL3_ttf 3.2 or later with `pkg-config` metadata available
+(`pkg-config --modversion sdl3 sdl3-ttf` should locate both), then run the
+application with `cabal run counter`.
 
-For a bitmap-font application, use `nano-ui-rgfw` and `runRgfwApp` instead.
-Its package README lists the native windowing libraries it needs.
+For a bitmap-font application without SDL dependencies, use `nano-ui-rgfw` and
+`runRgfwApp` instead (see `packages/nano-ui-rgfw/README.md` for its native
+windowing libraries).
 
 ## What runs each frame
 
-A view describes the current interface. Each call registers layout nodes,
-reads input, and returns a result. Layout is solved after the view runs,
-then the frame resolves interactions and paints. A write to a `Var` the
-view already read can cause an additional view pass within the same frame.
-One-shot input is removed from that pass so it does not repeat a click or key
-press.
+A `NanoUI` action describes the current interface for a frame. Each widget call
+appends layout nodes, reads the current frame's input, and returns an
+interaction result. Once the action finishes, layout is solved, pointer and
+keyboard interactions are resolved against the computed geometry, and damaged
+regions are painted. Writing to a `Var` that was already read earlier in the
+same frame triggers a second pass within the same frame, with one-shot input
+events cleared so clicks and key presses are not repeated.
 
-Code in the view can therefore run more than once. Load files and allocate
-long-lived resources before entering the backend runner. Guard one-shot IO
-with an event such as `whenM (button "Save") saveDocument`.
+Because the UI action can run more than once per frame, load files and allocate
+long-lived resources in `IO` before entering the backend runner, and guard
+side-effecting actions behind event checks such as
+`whenM (button "Save") saveDocument`.
 
-For model-driven applications, `NanoUI.Emit` in the separate `nano-ui-emit`
-package adapts ordinary widgets to emit messages in `NanoUIE msg a`. A backend
-reducer runner applies all messages in order after the view has run; the
-message type must match its update function. A changed model requests another
-frame; the drawing from the current frame still represents the model passed
-into it. Lift ordinary actions with `Emit.liftNanoUI` and wrap containers with
-`Emit.withNanoUI`, for example `Emit.withNanoUI column`.
+For Elm-style model/update applications, `NanoUI.Emit` (from `nano-ui-emit`)
+wraps standard widgets to emit typed messages in `NanoUIE msg a`. The reducer
+runner (`runSdlAppReduce`, `runRgfwAppReduce`) applies all emitted messages in
+order after the frame's UI pass completes. If the model changes, a follow-up
+frame is scheduled automatically. Lift ordinary `NanoUI` actions with
+`Emit.liftNanoUI` and wrap layout containers with `Emit.withNanoUI` (for
+example, `Emit.withNanoUI column`).
 
-Use `Emit.emitWhen (button "Save") Save` for activation,
-`Emit.emitChanged (slider 0 100) volume SetVolume` for changed values, and
-`Emit.emitEdited textArea' notes SetNotes` when the response must also report
-an edit. The same adapters accept configured and custom widgets.
+Use `Emit.emitWhen (button "Save") Save` for click activations,
+`Emit.emitChanged (slider 0 100) volume SetVolume` for value changes, and
+`Emit.emitEdited textArea' notes SetNotes` when you only want a message on user
+edits. The same adapters work with configured and custom widgets.
 
 ## Values and interaction state
 
-State lives in a `Var`. An input takes the `Var` it edits: it shows the Var's
-value and stores the user's edits in it. The widget keeps interaction details
-such as the caret, selection, drag anchor, or open dropdown.
+Mutable state is held in a `Var`. Input widgets take the `Var` to display and
+update directly, while internal interaction state (caret position, text
+selection, drag anchor, open dropdown state) is kept in the internal widget
+store.
 
 ```haskell
 nameField :: NanoUI ()
@@ -70,17 +75,18 @@ nameField = do
   label ("Hello, " <> greeting)
 ```
 
-A Var comes from one of three places:
+A `Var` can be created in three ways:
 
-- `useVar initial` keeps a Var at its position in the view and needs no setup.
-  It holds `Int`, `Double`, `Float`, `Bool`, `Text` or `SortCol`; `useEnumVar`
-  holds an enumeration. `initial` is used only while the slot has none, so
-  changing it later is not a reset: write the Var instead.
-- `newVar initial` makes a Var of any type in IO. Make it once during setup,
-  keep it in a record, and pass the record to the view. Two calls make two
-  independent Vars; passing one Var to two places shares it.
-- A `VarMap` holds one owned Var per key, for the rows of a list: `varAt`
-  finds or makes a row's Var, and `dropVar` forgets it.
+- `useVar initial` allocates a positional `Var` inside `NanoUI` without prior
+  setup. It supports `Int`, `Double`, `Float`, `Bool`, `Text`, and `SortCol`
+  (`useEnumVar` supports `Enum` types). The `initial` value is used only when
+  the slot is first initialized; to reset the value later, call `writeVar`.
+- `newVar initial` allocates a `Var` of any type in `IO`. Create it once during
+  setup, store it in an application record, and pass it into your UI action.
+  Each call to `newVar` creates an independent `Var`; passing the same `Var` to
+  multiple places shares the state.
+- `VarMap` stores one `Var` per key for dynamic lists: `varAt` looks up or
+  allocates the `Var` for a row key, and `dropVar` removes it.
 
 ```haskell
 data Editor = Editor {document :: Var TextDocument}
@@ -92,68 +98,70 @@ editorView :: Editor -> NanoUI ()
 editorView editor = textAreaDocument (document editor)
 ```
 
-`readVar` reads a Var where you show it. `writeVar` replaces the value and
-`modifyVar` applies a pure function to the latest one, so successive changes
-compose even within a frame; equal writes do nothing. Use `readVar` in event
-handlers too: reading a Var and then writing it costs at most one more view
-pass, on the frame the event happened. To know whether an input changed its
-Var, use its primed variant's `respChanged`. `peekVar` from `NanoUI.Var` reads
-without the bookkeeping below, for a value carried from one frame to the next
-and compared with the current one, which a second view pass would otherwise
-see already updated. `readVarIO` and `modifyVarIO` work from IO and other threads; after
-writing from another thread, run the action from `askWake` so the view runs.
-Allocation belongs outside the view: `liftIO (newVar initial)` inside a view
-would make a new Var on every pass.
+Use `readVar` to read the current value, `writeVar` to replace it, and
+`modifyVar` to apply a pure function to the latest value (so multiple updates
+in the same frame compose cleanly). Writes that do not change the value (`==`)
+do nothing. `readVar` can also be used inside event handlers: reading a `Var`
+and then writing to it costs at most one extra pass on that frame. To check
+whether an input widget modified its `Var` on the current frame, inspect
+`respChanged` on the widget's primed variant (e.g. `textInput'`).
 
-A record in a Var gives a Var for each field: with `OverloadedRecordDot` and a
-`Generic` instance on the record, `settings.volume` is a `Var Float` that
-reads and writes only that field, and `slider 0 100 settings.volume` edits
-it. `zoomVar` focuses with a getter and setter of your own, and `zoomVarL`
-with a van Laarhoven lens. `forEachVar key list body` runs a row per element
-of a `Var [a]`, each under `withKey`, with a Var for the element that follows
-its key when the list is reordered; `withElemVars` is the same for rows you
-filter or order yourself.
+To read a `Var` without recording a read dependency (for example, when comparing
+the previous frame's value against the current one), use `peekVar` from
+`NanoUI.Var`. From `IO` or background threads, use `readVarIO`, `writeVarIO`,
+and `modifyVarIO`, then invoke the callback returned by `askWake` to wake the
+event loop. Never call `liftIO (newVar initial)` inside a UI action, as that
+allocates a fresh `Var` on every pass.
 
-`constVar x` is a constant: the widget shows `x` and an edit is gone on the
-next frame. It suits an input that shows a value derived from other state,
-with the change handled through the primed variant's response. To give a widget a plain value and get the edit back, as a
-model or message-based view does, use `withValue value widget`, which returns
-the widget's result and the value it left.
+When a `Var` holds a record with a `Generic` instance, `OverloadedRecordDot`
+projects a `Var` for individual fields: `settings.volume` is a `Var Float` that
+reads and writes only that field (e.g. `slider 0 100 settings.volume`). Custom
+projections can be defined with `zoomVar` (getter and setter) or `zoomVarL`
+(van Laarhoven lens). For lists stored in a `Var [a]`, `forEachVar key list body`
+renders each item inside `withKey` with an element `Var` that tracks its key
+across reorders; `withElemVars` provides the same per-element `Var`s when you
+filter or sort the list yourself before rendering.
+
+`constVar x` creates a read-only `Var` where writes do nothing, which is useful
+for displaying a derived value in an input widget and handling edits through
+the primed widget's `Response`. To run a `Var`-based widget against a plain
+value and receive the updated value back, use `withValue value widget`.
 
 ### What a write costs
 
-A frame runs its view once, then solves layout and paints. A write to a Var
-that something earlier in the same view pass already read (with `readVar`, or
-a widget bound to the Var) makes what was drawn from the old value stale, so
-the frame runs the view a second time, without the one-shot input it already
-acted on, before drawing. A write that nothing read first costs nothing
-extra: read a Var below the widgets that edit it and typing into a field runs
-the view once. A widget bound to a Var that nothing else shows repaints only
-itself; a Var that other code read repaints the window, since a view can draw
-anything from a value it read.
+Each frame runs the UI action, solves layout, and paints. If a `Var` is written
+after already being read earlier in the same pass (via `readVar` or a bound
+widget), the UI action is re-run once before layout so earlier widgets reflect
+the updated value (with one-shot inputs cleared so clicks and key presses do not
+fire twice). If a `Var` is written before anything reads it, no extra pass is
+needed: placing `readVar` below the input widget that edits it keeps typing to a
+single pass. If a `Var` is only bound to an input widget and not read elsewhere
+with `readVar`, only that widget is repainted on change; if `readVar` was
+called on it, the full window is repainted.
 
-Reads and writes count by part. With a model in one Var, `m.title` and
-`m.volume` are different parts, so showing the title above a slider on the
-volume costs nothing extra. Parts go two levels deep: a field of the model, or
-an element of a list held in the Var, then a field of that. Reading the whole
-of `m`, or a part through `zoomVar`, counts as reading all of it.
-`forEachVar` reads only its list's keys and order, so a row that edits its
-own element costs nothing for the rows before it; `withElemVars` hands the
-body the elements themselves, so it counts as reading the whole list.
+Read/write tracking is granular up to two levels of nesting (a record field or
+list element, plus a nested field within it). With a record in a single `Var`,
+`m.title` and `m.volume` are tracked separately, so reading `m.title` above a
+slider bound to `m.volume` does not trigger a second pass when the slider moves.
+Reading the entire record `m` or projecting through `zoomVar` marks all fields
+as read. `forEachVar` only reads the list's keys and order, so editing a single
+row's `Var` does not invalidate earlier rows; `withElemVars` returns the
+elements directly and therefore marks the whole list as read.
 
-A primed widget returns a `Response` where the plain one returns `()`:
-`respChanged` reports an edit, `respSubmitted` reports a commit, and
-`respClicked` reports activation. `respPressed` is a held-button state, not a
-one-frame press event.
+Primed widget variants (`button'`, `textInput'`, `slider'`) return a `Response`:
+`respChanged` is `True` when the value was edited, `respSubmitted` when
+committed (such as pressing Enter in a text input), and `respClicked` when
+activated. `respPressed` is `True` while the mouse button is held down on the
+widget, rather than on a single-frame click.
 
-`searchInput'` stores its text on every keystroke but debounces `respChanged`;
-use the change flag to trigger a search.
+`searchInput'` updates its `Var` on every keystroke but debounces
+`respChanged`, so you can trigger expensive searches on `respChanged`.
 
 ## Stable identity
 
-Widgets share an id sequence within a container, and positional `useVar`s
-another. Their call order must remain stable between frames. Conditional
-content needs a scope:
+Widgets and positional `useVar` calls each use their own sequential counter
+within a container scope. Keep call order consistent across frames, and wrap
+conditional widgets or `useVar` calls in `scope`:
 
 ```haskell
 details :: Bool -> NanoUI ()
@@ -162,12 +170,13 @@ details showDetails = column $ do
   nameField
 ```
 
-Here `when` comes from `Control.Monad`. The scope consumes one sibling id
-whether its body is empty or not, so `nameField` keeps its state. Since Vars
-count apart from widgets, a widget that comes and goes never moves a
-`useVar`; a `useVar` that comes and goes needs a scope the same way.
+`scope` reserves a single slot in the parent sequence regardless of whether its
+body runs, so `nameField` keeps the same ID below it. Because `useVar` uses a
+counter separate from widget IDs, conditional widgets alone do not shift
+`useVar` slots, but conditional `useVar` calls still require `scope`.
 
-Use stable application keys for reorderable lists:
+For dynamic or reorderable lists, wrap each item in `withKey` using a unique,
+stable key (not the list index):
 
 ```haskell
 names :: [(Int, Text)] -> NanoUI ()
@@ -177,16 +186,14 @@ names entries = column $
     checkbox name checked
 ```
 
-Import `forM_` from `Control.Monad` and `Text` from `Data.Text`. Keys must be
-unique among siblings. A list position is not a stable key when items move.
-
 ## Layout and coordinates
 
-Lengths in views use logical pixels. The origin is at the top-left, x grows
-rightward, and y grows downward. Backends map logical pixels to display
-pixels. Custom widgets should not apply the display scale themselves.
+All layout dimensions use logical pixels, with `(0, 0)` at the top-left corner,
+`x` increasing to the right, and `y` increasing downward. Backends scale logical
+pixels to physical display pixels automatically; custom widgets should work in
+logical coordinates.
 
-Layout modifiers compose as functions:
+Layout modifiers are `Layout -> Layout` functions composed with `(.)`:
 
 ```haskell
 columnWith (gap 8 . padAll 12 . fillW) $ do
@@ -194,39 +201,39 @@ columnWith (gap 8 . padAll 12 . fillW) $ do
   buttonWith (fixedW 120) "Apply"
 ```
 
-The rightmost modifier runs first. When two modifiers write the same field,
-the leftmost wins. `fillW` and `fillH` share available space with other
-growing children; `minW` and `maxW` constrain width. `percent 50` requests
-half the available width. `tight` removes padding but keeps the child gap.
+When two modifiers set the same property, the leftmost modifier takes
+precedence. `fillW` and `fillH` distribute available space across growing
+siblings; `minW` and `maxW` clamp width; `percent 50` requests 50% of the
+parent's available width; `tight` zeroes padding while preserving `gap`.
 
-A container's `Flow` says how it places its children along its `Row` or
-`Column`: in one `Line`, the default; in lines that `Wrap`; or `Layered`, each
-over the whole content box. `layers` layers its children in one box as large
-as the largest, each placed by its alignment; a later child draws over the
-earlier ones. The `layered` modifier does the same for a panel or a card:
-`panelWith (layered . fixedWH 240 160)`. The `wrap` modifier flows a row onto
-a new line where the next child would not fit, as in
-`rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`, and `lineAlign
-LinesCenter` or `lineAlign LinesEnd` centres each line or moves it to the
-end; inside a container that sizes itself to its content, bound the row with
-`maxW` or `fixedW`. `pinAt x y` places a node over its siblings and out of
-their flow, at that offset from where its alignment puts it in its parent's
-content box: from the top-left corner by default, and from the bottom-right
-one with `pinAt (-16) (-16) . alignEnd . alignBottom`, as a floating button
-sits. `pinAt 0 0 . grow` is an overlay over the whole content box that does
-not size its parent, as a scrim or a drop highlight should be.
+Container flow along a `Row` or `Column` defaults to a single `Line`, and can
+be changed to `Wrap` or `Layered`:
 
-`aspect r` keeps a fit height at the width over `r`: `box (fillW . aspect
-(16 / 9)) c` fills its column's width at 16:9 whatever the width.
+- `layers` stacks its children in a shared box sized to the largest child; each
+  child is placed according to its alignment, and later children are drawn on
+  top. The `layered` modifier applies the same behaviour to a panel or card,
+  e.g. `panelWith (layered . fixedWH 240 160)`.
+- `wrap` wraps a row or column onto additional lines when children exceed the
+  available main-axis size, e.g.
+  `rowWith (wrap . gap 6 . lineGap 4) (mapM_ chip tags)`. `lineAlign LinesCenter`
+  or `lineAlign LinesEnd` aligns wrapped lines along the cross axis. Inside a
+  shrink-to-fit parent, give a wrapping row an explicit `maxW` or `fixedW`.
+- `pinAt x y` takes a child out of normal flow and positions it over its
+  siblings at offset `(x, y)` relative to its alignment anchor in the parent's
+  content box (top-left by default, or bottom-right with
+  `pinAt (-16) (-16) . alignEnd . alignBottom` for a floating action button).
+  `pinAt 0 0 . grow` covers the parent's content box without affecting the
+  parent's size, which is useful for scrims or drop-target highlights.
+- `aspect r` constrains height from width at ratio `r` (e.g.
+  `box (fillW . aspect (16 / 9)) c`).
 
-Where layers or a pinned node draw one node over another, a control on
-top (a button, field, slider or drawing) takes the pointer from whatever is
-beneath it, while a panel, label, image or container lets the pointer
-through to the controls beneath. `pointer PointerBlock` makes a node take
-the pointer over its whole box, as a card or a scrim over a list must, and
-`pointer PointerPass` makes a node and everything in it let the pointer
-through, as a decorative drawing laid over controls should. A node never
-takes the pointer from what it is inside:
+When layers or pinned nodes overlap, pointer input goes to the topmost
+interactive control (buttons, inputs, sliders, custom drawings) at the cursor,
+while panels, labels, images, and layout containers do not intercept pointer
+events. Override this behaviour with `pointer PointerBlock` (so a panel or
+overlay scrim blocks pointer events over its full rectangle) or
+`pointer PointerPass` (so a decorative drawing does not intercept pointer
+events):
 
 ```haskell
 layers $ do
@@ -234,18 +241,20 @@ layers $ do
   panelWith (pointer PointerBlock . alignEnd . fixedW 240) details
 ```
 
-Give a scroller a bounded viewport, for example
-`scrollWith (fixedH 240 . fillW) body`. `scrollArea` also returns its id for
-commands such as `scrollToEnd`. Use `getScrollMetrics` to obtain the visible
-range when building only the visible rows of a large collection.
+Scroll containers require a bounded viewport size, such as
+`scrollWith (fixedH 240 . fillW) body`. `scrollArea` also returns the scroller's
+`WidgetId` for programmatic scroll commands like `scrollToEnd`. For large
+virtualized lists, use `getScrollMetrics` to query the current scroll offset and
+viewport size so you only build the visible rows.
 
-To load something as it comes into view, wrap it in a `sensor` or watch its
-id with `useVisibility`. A sensor reports the last frame's layout, as
-`respRect` does; `becameVisible` holds once, on the frame it comes into view,
-`sensorAnticipate` reports it that many pixels early, and `sensorDelay` only
-once it has stayed in view that many seconds, so a list scrolled quickly
-past loads nothing. `visRect` is the part on screen and `visBounds` the
-whole widget. Here `load` registers an image and returns its id:
+To defer work until a widget enters the viewport, wrap it in `sensor` (or pass
+its ID to `useVisibility`). The returned visibility record contains the widget's
+previous-frame bounds (`visBounds`), its visible intersection on screen
+(`visRect`), and `becameVisible` (`True` on the frame the widget enters view).
+In `sensorConfigured`, `sensorAnticipate` expands the check by a given number of
+pixels outside the viewport, and `sensorDelay` requires the widget to stay in
+view for a given duration before `becameVisible` turns `True` (so scrolling
+quickly past a list does not trigger loads for intermediate items):
 
 ```haskell
 lazyImage :: Var (Maybe ImageId) -> NanoUI ImageId -> NanoUI ()
@@ -258,45 +267,43 @@ lazyImage pictureVar load = do
     writeVar pictureVar . Just =<< load
 ```
 
-During view construction, `respRect` uses recorded geometry from the prior
-frame. It may be empty when a widget first appears. Keep this in mind when
-anchoring popups or writing scripted pointer tests.
+Because layout is solved after the UI action completes, `respRect` returns the
+widget's rectangle from the previous frame and is empty on the first frame a
+widget appears. Keep this in mind when positioning custom popups or writing
+headless pointer tests.
 
 ## Themes, overlays, and input
 
-Use `styled` to modify the theme for a subtree and `themed` to replace it.
-These scopes affect painting, not layout. Font-size changes belong in layout
-modifiers. `disabledWhen condition` keeps widget geometry and state while
-disabling interaction and applying disabled colours.
+Use `styled` to modify the active theme for a subtree, or `themed` to replace
+it completely. Theme scopes affect colours and painting only, not layout
+metrics (font sizes are set via layout modifiers). `disabledWhen condition`
+disables interaction and applies disabled styling across a subtree while
+preserving layout geometry and widget state.
 
-Status colours are tones: `fontTone Warning` colours a label's text, in
-whatever face it has (`fontMono . fontTone Danger`), and `tone Danger`
-fills buttons; `toneColor` gives a tone's colour for your own drawing.
-`fontMuted`, `fontDanger`, `primary`, `destructive`, `success` and
-`warning` are the same tones by their old names. Each theme's success,
-warning and danger colours read on its window.
+Semantic status colours are applied with tones: `fontTone Warning` sets a
+label's text colour (combining with font faces like `fontMono . fontTone Danger`),
+`tone Danger` styles buttons, and `toneColor` retrieves the `Color` value for
+custom drawing. Legacy helpers (`fontMuted`, `fontDanger`, `primary`,
+`destructive`, `success`, `warning`) are aliases for the corresponding tones.
 
-To follow the desktop's light or dark setting, the theme is a function of
-the appearance: `lightDark light dark` takes the light theme for a light
-desktop and the dark one otherwise, including when the platform cannot tell,
-as `defaultTheme` is dark. A view can pick its theme every frame, which costs
-nothing while it stays the same:
+To follow the operating system's light or dark mode, pass a theme selector such
+as `lightDark defaultLightTheme defaultTheme` (which falls back to the dark
+theme on platforms that do not report system appearance, such as RGFW). You can
+apply it inside your UI action:
 
 ```haskell
 setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 ```
 
-Or hand the function to `followSystemTheme ctx`, or to the backend's
-`sdlAppThemeFor` or `optThemeFor`, to switch from the start. RGFW cannot
-read the setting, so it gets `Nothing`. `setTheme` and `setUiTheme` set a
-fixed theme in place of a following one. `themeAppearance` says whether a
-theme is light or dark.
+Or configure it at startup via `followSystemTheme ctx`, `sdlAppThemeFor`, or
+`optThemeFor`. Calling `setTheme` or `setUiTheme` switches to a fixed theme,
+and `themeAppearance` returns whether a `Theme` is light or dark.
 
-Modals, floating windows, and popups take their open flag as a `Var Bool`,
-the way inputs take the Var they edit: the overlay shows while the Var holds
-`True`, and Escape, a click outside or a close button write `False`, so it
-closes in the same frame. Keep calling the overlay whether open or not, so its
-identity and later siblings remain stable:
+Modals, floating windows, and popups take a `Var Bool` controlling whether they
+are open. While the `Var` is `True`, the overlay is shown; pressing Escape,
+clicking outside, or clicking the close button writes `False` to the `Var`.
+Call the overlay unconditionally every frame so sibling widget IDs remain
+stable:
 
 ```haskell
 confirm <- useVar False
@@ -305,60 +312,56 @@ modal confirm "Delete the file?" $
   whenM (button "Delete") (deleteFile >> writeVar confirm False)
 ```
 
-For a flag derived from other state, or a dialog that must stay open until
-answered, pass a constant and act on the request yourself: the primed
-variants (`modal'`, `window'`, `popup'`) return the overlay's `Response`, whose
-`respClicked` reports a dismissal, and the body's result.
+If the open state is derived or the dialog must not close until explicitly
+confirmed, pass a `constVar` and handle dismissal via `respClicked` on the
+primed variant (`modal'`, `window'`, `popup'`).
 
-Tooltips need no flag. One opens once the pointer has rested on its target
-for `tooltipDelay`, half a second by default, and shuts when the pointer
-leaves or a button goes down. A disabled widget has one too, which is where
-to say why it is off. `tooltipConfigured` sets the delay, the placement and
-the gap to the target; `PlacementAtCursor` follows the pointer, where for a
-popup or context menu it opens at the anchor point.
+Tooltips require no state variable: wrapping a widget in `tooltip` displays the
+tooltip after the pointer rests on the target for `tooltipDelay` (0.5s by
+default) and hides it when the pointer leaves or a mouse button is pressed.
+Tooltips also trigger on disabled widgets. `tooltipConfigured` customizes the
+delay, placement, and offset; `PlacementAtCursor` positions the tooltip at the
+cursor (or at the click position for popups and context menus).
 
-Ordinary widgets read routed input with `askInput`. A covered layer receives
-no pointer. `askFrameInput` is for window-wide handling, such as dismissing
-a popup after an outside click; using it for an ordinary control bypasses
-pointer routing.
+Standard widgets read layer-routed input via `askInput`, where covered layers
+receive no pointer events. `askFrameInput` returns raw window-wide input (used
+for outside-click dismissal) and should not be used by ordinary controls.
 
-To move keyboard focus from the view, name the widget by its response:
-`when findPressed (requestFocus (respId resp))` focuses a search box on
-Ctrl+F, and `requestFocus =<< currentId` just before declaring a widget
-focuses that one. `focusNext` and `focusPrevious` move the keyboard as Tab
-and Shift+Tab do, `clearFocus` takes it off whatever has it, and
-`isFocused` says whether a widget has it. Focus moves as Tab would, at the
-end of the frame: the field that had the keyboard drops its selection and
-menu, as on a click elsewhere, and a widget Tab would skip, such as one
-disabled or behind a modal, refuses it. Only text fields and selects take
-the keyboard on a click. `releaseFocus` is the exception: it takes the
-keyboard off one widget at once, in the middle of the view, and changes
-nothing else.
+To control keyboard focus programmatically, pass a widget's ID to
+`requestFocus` (e.g. `when findPressed (requestFocus (respId resp))`, or
+`requestFocus =<< currentId` immediately before the widget call). `focusNext`
+and `focusPrevious` cycle focus like Tab and Shift+Tab, `clearFocus` removes
+focus, and `isFocused` checks whether the current widget is focused. Focus
+requests take effect at the end of the frame (clearing any active selection or
+open menu on the previously focused field and skipping disabled or
+modal-blocked widgets), whereas `releaseFocus` drops focus from a specific
+widget immediately during the current pass. Clicking focuses text fields and
+selects only.
 
-`withCursorShape` sets the pointer's shape over a subtree wherever the
-widgets inside pick none, such as `UiCursorCrosshair` over a canvas,
-`UiCursorNotAllowed` around disabled widgets, or `UiCursorHidden` over a
-video. A custom widget picks its own with `widgetCursor`, from its rect and
-the pointer, so a part of it can show another shape, and keeps it through a
-drag that leaves it; its `UiCursorDefault` leaves the choice to the scope
-around it. A backend shows the nearest shape the platform has.
+`withCursorShape` sets the default cursor shape for a subtree (such as
+`UiCursorCrosshair` over a canvas, `UiCursorNotAllowed` over disabled controls,
+or `UiCursorHidden` over a video player). Custom widgets can set their own
+cursor via `widgetCursor` based on their bounds and pointer position (returning
+`UiCursorDefault` to defer to the enclosing `withCursorShape` scope), and that
+cursor is retained throughout an active drag even if the pointer leaves the
+widget's bounds.
 
-Keys arrive in `inputKeys`, `inputKeysReleased` and `inputKeysHeld`, and the
-text they type in `inputChars`. A key that types is a `KeyChar` of what it
-types unmodified, so Ctrl+S is `KeyChar 's'` with `modCtrl` set and types
-nothing. A key held down auto-repeats, and each repeat is a press in
-`inputKeys`; `inputKeysNew` has the presses that are not repeats. A frame
-does not keep the order of what came in, so the runner ends a frame after a
-command key (a named key but Space, or a chord) that text, another key or
-other modifiers follow: a frame's text comes before its one command key,
-which went down with the frame's modifiers.
-`pressedIn`, `pressedOnceIn`, `releasedIn` and `heldIn` read one key, or one
-mouse button, in an `Input`: `sdlAppShouldQuit = pressedOnceIn KeyEscape`.
-Bind a chord with `shortcut`. A chord is the modifiers `ctrl`,
-`shift`, `alt`, `super` and `cmdOrCtrl` (Command on macOS, else Ctrl) and a
-`key`, a character or a `Key`, put together with `<>`. These short names
-come from `NanoUI.Shortcut`, which `NanoUI` leaves out; import it where
-chords are written, or qualified:
+Keyboard state is exposed in `inputKeys` (pressed this frame, including key
+repeats), `inputKeysNew` (initial presses only, excluding repeats),
+`inputKeysReleased`, `inputKeysHeld`, and `inputChars` (committed text).
+Printable keys are represented as `KeyChar` with the unmodified character (so
+Ctrl+S produces `KeyChar 's'` with `modCtrl` set and no entry in `inputChars`).
+Because a single frame's `Input` does not record the relative ordering of text
+and command keys, the event runner flushes a frame whenever a command key or
+chord is followed by text, another key, or a modifier change, so any text typed
+before a shortcut is processed on the preceding frame. Helper predicates
+`pressedIn`, `pressedOnceIn`, `releasedIn`, and `heldIn` query keys or mouse
+buttons directly on an `Input` record (e.g.
+`sdlAppShouldQuit = pressedOnceIn KeyEscape`).
+
+Keyboard shortcuts are built with modifiers (`ctrl`, `shift`, `alt`, `super`,
+and `cmdOrCtrl`, which maps to Command on macOS and Ctrl elsewhere) combined
+with `key` via `<>` from `NanoUI.Shortcut`:
 
 ```haskell
 import NanoUI.Shortcut
@@ -368,44 +371,42 @@ whenM (shortcut (cmdOrCtrl <> shift <> key 'p')) (setPaletteOpen True)
 whenM (shortcut (key (KeyF 5))) refresh
 ```
 
-A chord with no key, such as `ctrl <> shift` alone, is never pressed.
-`parseShortcut` reads a chord written as text, such as one from a settings
-file: `C-s`, `M-S-p`, `A-<Enter>`, `<F5>`.
+Modifier-only chords without a key never fire. `parseShortcut` parses chords
+from configuration strings such as `"C-s"`, `"M-S-p"`, `"A-<Enter>"`, or
+`"<F5>"`.
 
-A shortcut fires once per press, auto-repeats included, for the first
-`shortcut` declared for the chord; `shortcutOnce` and `keyPressedOnce` leave
-the repeats out, for a chord that toggles. It stays quiet behind a modal,
-inside `disabledWhen`, and for keys the focused widget uses, such as a text
-field's typing and Ctrl+A, and so do `keyPressed`, `keyReleased` and
-`keyHeld`: a view hears the keys no widget took, and `askInput` has them
-all. A focused control uses the keys it acts on alone or with Shift, so
-Ctrl+Enter or Alt+Left still reaches a shortcut: a button Enter and Space,
-and a slider or a list the arrows too. A custom widget says which keys it
-uses with `widgetKeys`; a terminal takes `KeysAll`.
-`menuItemShortcut "Save" (ctrl <> key 's')` binds its chord only while its
-menu is open; for the closed menu, bind it with `shortcut` too, declared
-first.
+`shortcut` triggers on press (including key repeats) for the first matching
+`shortcut` call in the frame; `shortcutOnce` and `keyPressedOnce` ignore
+auto-repeats. Shortcuts and view-level key queries (`keyPressed`,
+`keyReleased`, `keyHeld`) are suppressed when blocked by a modal, inside
+`disabledWhen`, or when handled by the focused widget (for example, typing or
+Ctrl+A in a text input, Enter/Space on a focused button, or arrow keys on a
+focused slider or list; modified chords like Ctrl+Enter or Alt+Left still pass
+through to shortcuts). Custom widgets specify which keys they handle via
+`widgetKeys` (for example, a terminal widget sets `KeysAll`). `menuItemShortcut`
+only matches while its menu is open; to make the shortcut active while the menu
+is closed, also declare a top-level `shortcut` before the menu.
 
-Text fields and text areas work with input methods by themselves: the
-focused field draws the composition (`inputComposition`) at its caret and
-changes its value only on commit. Meanwhile the frame drops the keys, so no
-shortcut fires. A widget of your own that takes typed text, such as a
-terminal, asks for the input method with `useInputMethod` every frame it has
-the keyboard, giving its caret and what it takes (`InputNormal`,
-`InputSecure`, `InputNumeric`), and draws the composition it answers. The
-input method puts its candidate window by the caret, and a backend such as
-SDL takes text only while some widget asks, so a view that reads
-`inputChars` outside a text field asks too.
+Built-in text inputs and text areas handle IME composition automatically: the
+focused field renders the active pre-edit string (`inputComposition`) at the
+caret and updates its `Var` only when the composition is committed. While a
+composition is active, key events are suppressed so shortcuts do not trigger.
+Custom text-entry widgets (such as a terminal) can opt into IME composition by
+calling `useInputMethod` on every frame they hold focus, passing the caret
+rectangle and input purpose (`InputNormal`, `InputSecure`, or `InputNumeric`),
+and rendering the returned composition string. Backends like SDL only enable OS
+text input on frames where `useInputMethod` is called, so any UI that reads
+`inputChars` outside a built-in text field must call `useInputMethod` as well.
 
-Mouse buttons come as a `MouseButton`: `MouseLeft`, `MouseRight`,
-`MouseMiddle`, the side buttons `MouseBack` and `MouseForward`, and
-`MouseOther n` for any other. A widget's response says which went down on it
-and are still held (`respHeldWith`), and which clicked it, going down and up
-on it (`respClickedWith`); `respClicked` is its activation, a left click or
-Enter. A button that went down elsewhere and is dragged over a widget is not
-the widget's. `mousePressed`, `mouseReleased` and `mouseHeld` hear a button
-anywhere on the part of the view being declared, as `keyPressed` hears a
-key, and stay quiet behind a modal and in `disabledWhen`:
+Mouse buttons are represented by `MouseButton` (`MouseLeft`, `MouseRight`,
+`MouseMiddle`, `MouseBack`, `MouseForward`, and `MouseOther n`). On a widget's
+`Response`, `respHeldWith` lists the buttons pressed on that widget and still
+held down, and `respClickedWith` lists the buttons pressed and released on it
+(`respClicked` is `True` on standard activation via left click or Enter).
+Pressing a button outside a widget and dragging across it does not count as
+pressing or clicking that widget. For scope-wide mouse queries (suppressed
+behind modals and inside `disabledWhen`), use `mousePressed`, `mouseReleased`,
+and `mouseHeld`:
 
 ```haskell
 whenM (mousePressed MouseBack) goBack
@@ -413,10 +414,9 @@ tab <- button' "Report"
 when (respClickedWith MouseMiddle tab) closeReport
 ```
 
-`mouseArea` gives any part of a view a response of its own, as iced's
-`mouse_area` does: it is hovered while the pointer is on it or anything in
-it, and reports the buttons pressed and clicked there, except a click a
-widget inside takes for itself.
+`mouseArea` wraps a layout subtree and returns a `Response` for the combined
+region. It registers hover and mouse button clicks over the region unless an
+interactive child widget inside it handled the click:
 
 ```haskell
 (_, item) <- mouseArea (fillW . gap 6) $ do
@@ -426,17 +426,19 @@ when (respClickedWith MouseMiddle item) (openInNewTab path)
 when (respClickedWith MouseRight item) (showMenuFor path)
 ```
 
-A closable tab closes on a middle click.
+Closable tabs also close on middle-click.
 
 ## Animation and background work
 
-Backends wait for events when no frame is needed. Use `keepAnimating` while
-an on-screen widget needs continuous frames. Use `wakeAfter` for a clock,
-debounce, or delayed update; request it again on each frame that still needs
-the deadline. Repeatedly marking the context dirty creates an unpaced loop.
+Backends block waiting for events when no frame is scheduled. Call
+`keepAnimating` from any on-screen widget that needs continuous animation
+frames. For periodic or delayed updates (clocks, debounces, timers), call
+`wakeAfter` on each frame that still requires a future wake-up. Do not force
+redraws by marking the context dirty every frame, as that creates an unpaced
+busy loop.
 
-Work that should not hold up a frame, such as reading a file, runs in a hook
-on a thread of its own. Allocate `task <- newTask` once during setup:
+Long-running or blocking operations (such as file or network I/O) should run on
+a background thread via a `Task` handle allocated during setup (`task <- newTask`):
 
 ```haskell
 status <- useTaskStatus task path (T.readFile path)
@@ -446,34 +448,36 @@ case status of
   TaskFailed e _ -> danger (T.pack (displayException e))
 ```
 
-`useTaskStatus` says whether the job is running, done with its result, or
-failed with the exception it threw; `useTask` returns just the latest result
-(`Nothing` until there is one). A job runs once per key, and its end wakes the
-loop. A new key kills the job and starts another; until the new one finishes,
-both hooks still hand back the last key's result (`TaskRunning (Just old)`),
-so a list of search results does not flicker empty as the query changes. To
-run the same work again, such as a Retry button, put a count in the key:
-`useTaskStatus task (path, attempt)`. The old job is killed by an asynchronous
-exception from another thread, so it can run on for a moment beside the new
-one: give a job that writes files or holds a resource a `bracket`. Synchronous
-exceptions from the action are caught as `TaskFailed`. Results are forced only
-to weak head normal form on the job's thread. Build with `-threaded`.
+`useTaskStatus` returns whether the task is running, completed with a result,
+or failed with a synchronous exception (`TaskFailed`); `useTask` returns
+`Maybe a` (`Nothing` until the first result is produced). A task runs once per
+key and wakes the event loop when it finishes. When the key changes, the
+previous thread is cancelled with an asynchronous exception and a new thread is
+spawned; while the new key is still running, both `useTaskStatus` and `useTask`
+continue to provide the previous key's result (`TaskRunning (Just old)`) so UI
+lists do not flash empty while re-querying. To add a retry trigger, include an
+attempt counter in the key, e.g. `useTaskStatus task (path, attempt)`. Because
+cancelled tasks receive an asynchronous exception and may briefly overlap with
+the new task, use `bracket` inside tasks that open files or hold external
+resources. Task results are evaluated to WHNF on the worker thread. Compile
+applications with `-threaded`.
 
-The first frame that does not call the hook kills the job, so call it outside
-a tab or branch that should not end it. Task handles consume no widget id,
-so a conditional task call does not shift later widgets:
+Skipping a `useTask` or `useTaskStatus` call for a full frame cancels the
+running task, so place task calls outside conditional branches or tabs if the
+work should continue while hidden. Task calls do not consume widget IDs, so
+calling them conditionally does not affect sibling widget identity:
 
 ```haskell
 when previewOpen (void (useTask task path (renderPreview path)))
 ```
 
-`useStream` runs a producer that updates a state the view reads: a stream of
-readings, a download's progress, a reply arriving a token at a time. The
-producer gets an `update` function, which applies a change to the hook's
-state atomically and wakes the loop; updates that come faster than frames
-cost one frame between them. The state starts from the value given, again
-for each new key, and the producer lives as long as the view calls the hook.
-Allocate `stream <- newStream` during setup:
+For streaming data (sensor readings, download progress, token-by-token
+responses), allocate `stream <- newStream` during setup and pass a producer to
+`useStream`. The producer is passed an atomic `update` function that modifies
+the stream's state and wakes the event loop; multiple updates between frames
+coalesce into a single frame. The state resets to the initial value whenever
+the key changes, and the producer thread runs for as long as `useStream`
+continues to be called each frame:
 
 ```haskell
 sensorView stream = do
@@ -483,37 +487,38 @@ sensorView stream = do
   label (maybe "--" (T.pack . show) reading)
 ```
 
-A state that keeps every value folds each one in (`update (r :)`).
+To accumulate all emitted items into a list, fold each item into the state
+(`update (r :)`).
 
-The context and its arenas belong to the UI thread. Another thread that the
-view does not own, and that changes what the view reads, publishes the change
-where the view reads it, then calls the action `askWake` returns: the next
-frame runs the view and repaints the whole window, and wakes that come before
-it cost only that frame.
+The `Context` and its arenas must only be accessed from the UI thread. If an
+external thread managed outside `useTask`/`useStream` updates shared state, it
+should write the update and then invoke the wake callback obtained from
+`askWake`; multiple wakes before the next frame coalesce into a single frame
+with a full-window redraw.
 
-Damage requests describe pixels to repaint. They do not themselves wake the
-loop. Context operations that change stored state generally do both; for a
-manual external change, arrange a wake as well as any required damage.
+Note that low-level damage requests only mark screen regions for repainting and
+do not wake a blocked event loop on their own; external updates must trigger a
+wake as well.
 
 ## Custom drawing and large text
 
-`drawing` and `customWidget` build `DrawOp` values from solved logical bounds.
-For a cached drawing, its content key must cover every changing external
-input, including animation values. A key that stays fixed while the content
-changes can leave stale pixels. Custom widgets without a key rebuild and
-compare their operations each frame.
+`drawing` and `customWidget` construct `DrawOp` lists from solved logical
+bounds. When caching a custom drawing with a content key, include all dynamic
+inputs (including animation state) in the key so visual changes are not skipped;
+unkeyed custom widgets rebuild and diff their `DrawOp` list on every frame.
 
-Curves go through `NanoUI.Path`, imported qualified: build a path with
-`P.moveTo`, `P.lineTo`, `P.cubicTo`, `P.arc` and the rest, fill it with
-`drawPath` and stroke it with `drawStrokePath`. `drawPathWith` takes a fill
-rule and a paint: a subpath inside another is a hole in it where the rule
-leaves it unfilled, so a ring is one path, and `P.Linear` fills with a
-gradient. `drawStrokePathWith` takes a `P.Stroke`, its width with caps,
-joins, a miter limit and dashes. `withTransform` moves, turns and scales a
-block of canvas drawing, and `withClip` clips it. Run a custom widget's
-canvas with `runCanvasFor`, as `canvas` does, so curves stay smooth on a
-dense display; `canvasConfigured` adds a content key and a cursor, and
-`drawContext` gives the drawing its widget's hover and press state.
+Vector paths are constructed using `NanoUI.Path` (typically imported qualified
+as `P`): build paths with `P.moveTo`, `P.lineTo`, `P.cubicTo`, `P.arc`, etc.,
+and render them with `drawPath` / `drawPathWith` (for fills) or
+`drawStrokePath` / `drawStrokePathWith` (for strokes). `drawPathWith` takes a
+fill rule (`P.Winding` or `P.EvenOdd`, where inner subpaths can cut holes such
+as rings) and a paint (`P.Solid` or `P.Linear` gradient). `drawStrokePathWith`
+takes a `P.Stroke` specifying stroke width, line caps, joins, miter limit, and
+dash pattern. Use `withTransform` to translate, rotate, or scale canvas
+operations, and `withClip` to clip them. Within a custom widget, run canvas
+blocks via `runCanvasFor` (or use the `canvas` / `canvasConfigured` widget
+helpers) so curve tessellation adapts to the display scale; `drawContext`
+returns the current `Theme` along with the widget's hover and press state:
 
 ```haskell
 import NanoUI.Path qualified as P
@@ -531,42 +536,44 @@ gauge level =
         (P.Solid (if cdcHovered cdc then themeAccent theme else themeMuted theme))
 ```
 
-A fill does not work out where paths cross: subpaths that cross each other
-fill on their own, and one that crosses itself may fill only in part. A
-path's stroke is centred on it, where `drawStrokeRoundedRect` and
-`drawStrokeCircle` draw a border inside their shape, as a panel's is.
+Path fills do not compute self-intersections: intersecting subpaths are filled
+independently, and self-intersecting contours may not fill as expected. Path
+strokes are centred on the path geometry, whereas `drawStrokeRoundedRect` and
+`drawStrokeCircle` inset their border inside the shape bounds (matching panel
+borders).
 
-`textArea` accepts `Text` and joins the document when edits change it.
-`textAreaDocument` accepts a `TextDocument`, sharing unchanged lines across
-edits. Keep the document value in your model and call `documentText` when
-saving or otherwise needing one complete `Text` value.
+For multi-line text editing, `textArea` operates on a `Var Text` and rejoins
+lines on each edit. For large documents, use `textAreaDocument` with a
+`Var TextDocument`, which shares unchanged lines across edits; convert back to
+a single `Text` with `documentText` only when saving or exporting.
 
-Backends receive borrowed `DrawData` buffers. Draw or copy them before the
-next frame reuses the arena. Native font and renderer handles must not outlive
-their backend session.
+Backends receive borrowed `DrawData` vertex/index buffers that are reused on
+the next frame, so backends must consume or copy them during presentation.
+Native font and renderer handles must not outlive their backend session.
 
 ## Images
 
-Allocate `owner <- newImageHandle` during setup.
-`useImageRgba owner key w h pixels` registers an image's RGBA pixels the first
-frame it is called with a key and hands back its id while the view keeps
-calling it; once the view stops, the image is let go and its room in the
-image atlas goes to the next image. For an image the app keeps for its whole
-run, `registerImageRgba` registers it once under an id from `freshImageId`.
+For scoped image lifetimes, allocate `owner <- newImageHandle` during setup and
+call `useImageRgba owner key w h pixels` in your UI action. The RGBA buffer is
+uploaded on the first frame for a given key, and the texture slot in the image
+atlas is freed automatically if a frame completes without calling `useImageRgba`
+for that handle, or when the key changes. For static images kept for the entire
+session, allocate an ID with `freshImageId` and upload once with
+`registerImageRgba`.
 
-`image` stretches an image over its rect. `imageConfigured` takes an
-`ImageConfig`: a `ContentFit` like CSS's `object-fit`, an alignment, a crop to
-part of the image (`icCrop`, in its pixels), a zoom (`icScale`), an opacity,
-and a rotation (`RotateSolid` fits the turned image in its rect,
-`RotateFloating` keeps the unturned layout and crops). An axis the layout
-leaves unsized takes the image's own size, and a fit height follows the
-width in the image's shape, so `icLayout = fillW` fills the width without
-stretching it. `svgIconConfigured` draws an SVG icon the same way, fitting
-the document's own shape (`svgIcon` letterboxes, as `FitContain`), and
-`fitRect` is the placement a fit makes. A canvas draws images with
-`drawImageWith`, whose `ImageDraw` holds the rect, the part of the image,
-the turn, the tint and the opacity; `drawImage` and `drawImageUV` are its
-short forms.
+`image` stretches an image to fill its layout bounds. `imageConfigured` takes
+an `ImageConfig` supporting CSS-style `ContentFit` (`FitFill`, `FitContain`,
+`FitCover`, `FitScaleDown`, `FitNone`), alignment, pixel sub-rectangle cropping
+(`icCrop`), zoom (`icScale`), opacity, and rotation (`RotateSolid` fits the
+rotated bounding box into layout bounds; `RotateFloating` rotates in place and
+clips). Unconstrained layout axes default to the image's intrinsic dimensions,
+and setting one axis with `FitContain`/`FitCover` preserves aspect ratio on the
+other (so `icLayout = fillW` scales height proportionally). `svgIconConfigured`
+applies the same fitting rules to SVG icons (`svgIcon` defaults to
+`FitContain`), and `fitRect` computes the fitted rectangle directly. On a
+canvas, draw images with `drawImage`, `drawImageUV`, or `drawImageWith` (which
+takes an `ImageDraw` specifying destination bounds, UV crop, rotation, tint,
+and opacity).
 
 ```haskell
 thumbnail :: ImageHandle FilePath -> FilePath -> Int -> Int -> ByteString -> NanoUI ()
@@ -576,28 +583,27 @@ thumbnail owner path w h pixels = do
     imageConfigured defaultImageConfig {icLayout = fixedWH 120 90, icFit = FitCover}
 ```
 
-## Seeing the layout
+## Inspecting layout
 
-`explainLayout True` outlines every layout node, coloured by depth, and
-highlights the node under the pointer, which `explainedNode` describes: its
-widget id (the `respId` of the widget it belongs to), rect and padding, and
-what its layout asked for, the width and height `Sizing` with their limits,
-the gap, direction and `Flow`, the pin offset and the `PointerMode`.
-`explainScope body` narrows the overlay to the nodes `body` adds, for
-looking at one panel of a busy view. The overlay only paints.
-`sdlExplainLayout`, `optExplainLayout` and the SDL demo's `--explain` start
-with it on, and a debug window can toggle it:
+Calling `explainLayout True` draws depth-coloured outlines around every layout
+node and highlights the node under the cursor. `explainedNode` returns metadata
+for the hovered node: its `WidgetId`, solved rectangle, padding, width/height
+`Sizing` constraints, gap, layout direction, `Flow`, pin offset, and
+`PointerMode`. To limit the debug overlay to a specific subtree, wrap that
+subtree in `explainScope`. You can also enable the overlay at startup via
+`sdlExplainLayout`, `optExplainLayout`, or `--explain` in the SDL demo, or
+toggle it from a checkbox in a debug panel:
 
 ```haskell
 explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
 ```
 
-## The window
+## Window management
 
-A `WindowSettings` says how the window opens, the same for every backend:
-`sdlWindowSettings` in `SdlOptions`, `optWindow` in `RgfwOptions`. Its sizes
-are in layout units, the units of `windowSize`, which the backend converts at
-the scale the window opens at.
+Initial window parameters are configured with `WindowSettings` across all
+backends (`sdlWindowSettings` in `SdlOptions`, `optWindow` in `RgfwOptions`).
+Dimensions in `WindowSettings` are specified in logical layout units and scaled
+by the backend when the window opens:
 
 ```haskell
 main :: IO ()
@@ -610,25 +616,25 @@ main =
     notesView
 ```
 
-`askWindow` reads the window as this frame began: its size and scale, where
-it is, whether it has the keyboard, and whether it is maximized, minimized or
-fullscreen. A view that reads it gets a frame when it changes; one that never
-does pays nothing for it. The setters `setWindowTitleUi`, `setWindowIconUi`,
-`setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowOpacityUi` and
-`setWindowModeUi` act only when the value differs from what the window has,
-so a view can call them every frame with what it wants. The commands
-`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`,
-`maximizeWindowUi`, `restoreWindowUi` and `toggleMaximizedUi` act on every
-call, since the user moves and resizes the window too; call them from an
-event. A transparent window (`wsTransparent`, SDL only) shows the desktop,
-given a compositor, where the theme's `windowColor` is translucent. An RGFW
-window is opaque and does not fade, so `wsOpacity` and `setWindowOpacityUi`
-do nothing there.
+`askWindow` returns the window's state at the start of the frame (logical size,
+display scale, screen position, keyboard focus, and minimized/maximized/fullscreen
+mode). UI actions that call `askWindow` automatically receive a new frame when
+window state changes. Declarative setters (`setWindowTitleUi`,
+`setWindowIconUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`,
+`setWindowOpacityUi`, `setWindowModeUi`) are no-ops when the requested value
+matches the current state, so they can be called unconditionally each frame.
+Imperative window actions (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`,
+`minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`)
+apply on every call and should only be triggered from events. Transparent
+windows (`wsTransparent = True` combined with a translucent theme
+`windowColor`) are supported on the SDL backend when a desktop compositor is
+present; RGFW windows are always opaque and ignore `wsOpacity` and
+`setWindowOpacityUi`.
 
-A window closes when asked, by its close button or the platform. With
-`wsExitOnCloseRequest = False` it asks the view instead: `winCloseRequested`
-is set for the frame after the request, and the session goes on until the
-view calls `quitUi`, which ends it once that frame is drawn:
+By default, clicking the window's close button exits the session immediately.
+With `wsExitOnCloseRequest = False`, close requests are not handled
+automatically: `winCloseRequested` on `askWindow` becomes `True` on the next
+frame, and the window stays open until `quitUi` is called:
 
 ```haskell
 asking <- useVar False
@@ -639,74 +645,80 @@ modal asking "Discard your changes?" $ do
   whenM (button "Keep editing") (writeVar asking False)
 ```
 
-`requestScreenshot` hands its action a `Screenshot` once the frame is on
-screen, or `Nothing` outside a window: the frame's `RgbaPixels` and how many
-of them a layout unit is. Ask from an event, and keep the action short or
-fork it, since the next frame waits for it. `askScreenshot` gives a
-background job an action that waits for the next frame's screenshot, so a
-job can take and save one and say how that went. Allocate `task <- newTask`
-during setup:
+`requestScreenshot` registers a callback that receives a `Screenshot`
+(containing the frame's `RgbaPixels` and pixel-per-logical-unit scale, or
+`Nothing` when running headlessly) once the current frame finishes presenting.
+Call `requestScreenshot` from an event handler and keep the callback fast (or
+offload encoding to a worker thread), as it runs before the next frame starts.
+To capture and save a screenshot inside a background task, obtain a trigger
+with `askScreenshot`:
 
 ```haskell
 shoot <- askScreenshot
 saved <- useTaskStatus task shots (shoot >>= traverse_ (savePng "shot.png"))
 ```
 
-`useScreenshot task key` returns a screenshot for each key, for a view that shows
-it. Make `RgbaPixels` for an icon with `rgbaPixels`, which checks that the
-bytes are four a pixel.
+`useScreenshot task key` captures a screenshot per key for displaying directly
+in the UI. To construct `RgbaPixels` for window icons, use `rgbaPixels` (which
+validates that the buffer length is a multiple of 4 bytes).
 
 ## Writing a backend
 
-`NanoUI` is the view API. What a backend is written against is in
-`NanoUI.Backend`: `emptyInput` and the functions that fold a window's events
-into it, the `FontBackend` callbacks that measure and shape text, the `Damage`
-a frame reports so only changed rectangles are presented, and the paddings and
-widths the widgets lay themselves out by. Input carries over from frame to
-frame: pass the last frame's through `clearEphemeral`, which drops one-shot
-events and keeps held buttons, the pointer and the window size, and fold the
-new events into that rather than into a fresh `emptyInput`.
-The context from `NanoUI.Testing`'s `newContext` or `newPixelContext` holds the
-state that outlives a frame, and `NanoUI.Runner` sequences events, redraws and
-wake-ups. The two backends in this repository,
-`NanoUI.Backend.Sdl` and `NanoUI.Backend.Rgfw`, are the worked examples.
+`NanoUI` exports the user-facing GUI API, while `NanoUI.Backend` exports the
+types and functions used to implement a windowing and rendering backend:
+`emptyInput` and event-folding helpers, `FontBackend` callbacks for text
+measurement and shaping, `Damage` regions for partial presentation, and default
+widget metrics. Because held mouse buttons, modifier state, cursor position,
+and window size carry over between frames, pass the previous frame's `Input`
+through `clearEphemeral` (which clears one-shot presses and text while
+preserving held state) and fold new platform events into the result rather than
+starting from `emptyInput` each frame. `newContext` / `newPixelContext` (from
+`NanoUI.Testing`) allocate the persistent session context, and `NanoUI.Runner`
+provides the shared event-loop state machine. See `NanoUI.Backend.Sdl` and
+`NanoUI.Backend.Rgfw` for complete implementations.
 
-Fold keys in with `applyKey` (a typing key as the `KeyChar` it types
-unmodified, with its text in `inputChars` too, and every auto-repeat as a
-press) and input-method updates with `applyComposition`. After a frame,
-`textInputArea` says whether a widget takes text, where the candidate window
-goes and what the widget takes: take text input while it is there, for its
-`InputPurpose`, and stop it while it is not. Open the window from
-the `WindowSettings` with their title, size, mode, resizability and
-transparency. Before the first frame, install a `WindowHost` with
-`installWindowHost`, which applies the rest of the settings through it; build
-the host from `defaultWindowHost` with a record update, so a field added later
-does nothing on your backend rather than break it. Install a wake action any
-thread may call (`setWakeLoop`), and report the desktop's light or dark
-setting with `setSystemAppearance`, again on each change. Once a frame, before
-the view runs, report the window's scale, position, focus and mode with
-`reportWindowState`. Once a frame is on screen, call `answerScreenshots` with
-a capture of it, or `pure Nothing`. `runSessionLoop` handles close requests
-and `quitUi`; a loop of your own does with `requestWindowClose`,
-`clearWindowClose` and `quitRequested`.
+Fold keyboard events into `Input` with `applyKey` (recording printable keys as
+their unmodified `KeyChar`, appending committed text to `inputChars`, and
+treating key repeats as presses) and IME pre-edit updates with
+`applyComposition`. After each frame, inspect `textInputArea` to determine
+whether a widget is requesting text input, its `InputPurpose`, and the caret
+rectangle for positioning the IME candidate window; enable or disable OS text
+input accordingly.
+
+Initialize the native window from `WindowSettings` (title, logical size, window
+mode, resizability, transparency). Before the first frame, install a
+`WindowHost` callback record with `installWindowHost` constructed via record
+update on `defaultWindowHost` (so fields added in future versions have sensible
+defaults). Register a thread-safe wake callback with `setWakeLoop`, report OS
+light/dark appearance changes with `setSystemAppearance`, update window metrics
+before each frame with `reportWindowState`, and fulfill pending screenshot
+requests after presentation with `answerScreenshots`. `runSessionLoop` manages
+close requests and `quitUi` automatically; custom event loops can drive them
+with `requestWindowClose`, `clearWindowClose`, and `quitRequested`.
 
 ## Headless tests
 
-`NanoUI.Testing` exposes `newContext` and `runFrame`. A frame returns the view
-result, messages, draw data, and a follow-up-frame flag. Set window size and
-delta time explicitly in test input. Warm up before targeting a widget by
-its response rectangle, then send separate press and release frames.
+`NanoUI.Testing` exports `newContext` and `runFrame` for running frames without
+a window or GPU. `runFrame` returns the UI action's result, emitted messages,
+`DrawData`, and a boolean indicating whether a follow-up frame was requested.
+Provide an explicit window size and `dt` in the test `Input`. When targeting a
+widget by its `respRect`, run an initial warm-up frame so layout geometry is
+populated before sending press and release frames.
 
-`NanoUI.Testing.Harness` supplies `warmup2`, `clickPair`, `runClick`, and
-text-span queries, with `clickPairWith` for another button, as in
-`clickPairWith MouseMiddle base pos`. `held var widget` runs an input on a
-Var and returns its result with the value it left there, and `lastFramePasses`
-says whether the last frame ran its view a second time, which drops the change
-and click flags of that pass's result.
+`NanoUI.Testing.Harness` provides test helpers including `warmup2`,
+`clickPair`, `clickPairWith` (e.g. `clickPairWith MouseMiddle base pos`),
+`runClick`, and text-span lookup functions. `held var widget` runs a widget
+bound to a `Var` and returns both the widget result and the updated `Var`
+value. `lastFramePasses` returns how many passes the previous frame executed
+(note that when a backward write triggers a second pass in the same frame,
+one-shot click and change flags from the first pass are cleared on the second
+pass's return value).
 
-A tooltip's delay runs on the real clock, so a test sets `tooltipDelay = 0`.
-`newWakeSignal` lets a test wait for a background job's wake, and
-`cancelTasks` from `NanoUI.Backend` kills the jobs it leaves running.
+Because tooltip hover delays use the wall clock, set `tooltipDelay = 0` in
+tests. Use `newWakeSignal` to wait for background task wake-ups deterministically,
+and call `cancelTasks` (from `NanoUI.Backend`) during test teardown to stop any
+background threads still running.
 
-Headless tests cover layout and input behaviour. Run the native backend too
-when changing rendering, fonts, dialogs, or display scaling.
+Headless tests verify layout, state, and input logic; when modifying rendering,
+font handling, native dialogs, or DPI scaling, run the native backend test
+suites and demos as well.

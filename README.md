@@ -69,9 +69,9 @@ counter = row $ do
 - Themes, including Base16 schemes, scoped to part of a view with `styled` and
   composable modifiers, as in
   `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`. Widgets
-  can be disabled with `disabledWhen` and coloured by status with `tone` and
-  `fontTone`. The theme can follow the system light or dark preference
-  (`lightDark`, `followSystemTheme`).
+  can be disabled with `disabledWhen`, coloured by status with `tone` and
+  `fontTone`, and switched between light and dark themes based on the system
+  preference (`lightDark`, `followSystemTheme`).
 - One `WindowSettings` shared across backends, with `NanoUI` actions to inspect
   the window (`askWindow`), change its title, position, or mode
   (`setWindowTitleUi`, `moveWindowUi`, `setWindowModeUi`), take screenshots
@@ -146,11 +146,11 @@ rest of your application. Each frame:
    pointer get no pointer events.
 2. Layout is solved.
 3. Pointer, keyboard, and focus states are resolved against the new geometry.
-4. Damage is computed against the previous frame, covering geometry, state,
-   theme, and animation changes.
+4. Damage is computed against the previous frame from geometry, state, theme,
+   and animation changes.
 5. The damaged region is painted into pinned vertex and index buffers in the
-   background, content, overlay, and chrome layers, producing a draw list for
-   the backend.
+   background, content, overlay, and chrome layers to build the backend draw
+   list.
 
 See [docs/rendering-pipeline.svg](docs/rendering-pipeline.svg) for a diagram of
 the pipeline. Per-frame code is profiled for allocation, and
