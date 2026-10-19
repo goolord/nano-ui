@@ -8,9 +8,9 @@
 /* Kerning is on by default; pin it so shaping survives defaults changing.
  * Direction and script stay unset: shaping detects them per run, so
  * right-to-left and complex scripts shape as themselves. Light grid-fitting
- * snaps stems to whole pixels the way terminals (alacritty/kitty) rasterize,
- * giving crisp edges instead of soft, grey antialiased outlines. NORMAL keeps
- * fractional outlines. */
+ * snaps outlines to whole pixels only vertically and keeps each advance
+ * fractional, which spaces proportional text as designed. Monospaced text
+ * wants full hinting instead (nano_ui_ttf_hint_for_grid). */
 static TTF_Font *pin_font_rendering(TTF_Font *font)
 {
     if (font) {
@@ -18,6 +18,40 @@ static TTF_Font *pin_font_rendering(TTF_Font *font)
         TTF_SetFontHinting(font, TTF_HINTING_LIGHT);
     }
     return font;
+}
+
+/* A monospaced font is set on a grid of whole-pixel cells. Full hinting runs
+ * the font's own instructions and rounds each advance to a whole pixel, so
+ * every glyph of a shaped run starts on a pixel and the cells are evenly
+ * spaced. Light hinting keeps the fractional advance (8.25 px for Consolas at
+ * 15 px), which spaces a run's glyphs 8, 8, 8, 9 apart and leaves its stems
+ * between pixels. */
+void nano_ui_ttf_hint_for_grid(TTF_Font *font)
+{
+    if (font) {
+        TTF_SetFontHinting(font, TTF_HINTING_NORMAL);
+    }
+}
+
+/* Half the font's line gap: how far below the top of its line box the
+ * glyphs' own box starts. SDL_ttf puts the glyphs at the top of the line and
+ * the whole gap under them; splitting it, as CSS does with leading, centres
+ * the text in its line. */
+int nano_ui_ttf_half_leading(TTF_Font *font)
+{
+    int gap = TTF_GetFontLineSkip(font) - TTF_GetFontHeight(font);
+    return gap > 0 ? gap / 2 : 0;
+}
+
+/* Whether @face@ is a bold of @regular@'s family: the same family name, at
+ * semibold or heavier, and heavier than @regular@. */
+bool nano_ui_ttf_is_bold_of(TTF_Font *face, TTF_Font *regular)
+{
+    const char *family = TTF_GetFontFamilyName(face);
+    const char *want = TTF_GetFontFamilyName(regular);
+    int weight = TTF_GetFontWeight(face);
+    return family && want && SDL_strcmp(family, want) == 0 &&
+           weight >= TTF_FONT_WEIGHT_SEMI_BOLD && weight > TTF_GetFontWeight(regular);
 }
 
 TTF_Font *nano_ui_ttf_open_font(const char *path, float ptsize)
@@ -210,6 +244,7 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
             }
         }
     }
+    int lead = nano_ui_ttf_half_leading(d->font);
     int g = 0;
     for (int i = 0; i < d->num_ops; i++) {
         TTF_DrawOperation *op = &d->ops[i];
@@ -221,8 +256,9 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
         slot[1] = (int)op->copy.glyph_index;
         slot[2] = op->copy.dst.x - shift;
         /* SDL_ttf places a fallback font's glyphs from that font's own
-         * ascent; align them to the line's font's baseline instead. */
-        slot[3] = op->copy.dst.y - (TTF_GetFontAscent(op->copy.glyph_font) - TTF_GetFontAscent(d->font));
+         * ascent; align them to the line's font's baseline instead, which
+         * sits half the line gap down. */
+        slot[3] = op->copy.dst.y - (TTF_GetFontAscent(op->copy.glyph_font) - TTF_GetFontAscent(d->font)) + lead;
         slot[4] = op->copy.dst.w;
         slot[5] = op->copy.dst.h;
         slot[6] = op->copy.src.x;

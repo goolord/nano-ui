@@ -35,12 +35,13 @@ import Foreign.Marshal.Utils (with)
 import Data.Char (isPrint, isSpace, ord)
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Sdl.Internal.Font.Inter (fontInterBytes, fontInterLabel)
-import NanoUI.Sdl.Internal.Font.Search (searchFontFamilies)
+import NanoUI.Sdl.Internal.Font.Search (boldFaceCandidates, searchFontFamilies)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.IntSet as IS
+import qualified Data.Map.Strict as Map
 import Data.Primitive.SmallArray
   ( SmallArray
   , indexSmallArray
@@ -51,7 +52,7 @@ import Data.Primitive.PrimArray (PrimArray, indexPrimArray, newPrimArray, primAr
 import Data.Primitive.PrimVar (PrimVar, newPrimVar, readPrimVar, writePrimVar)
 import Control.Monad.Primitive (RealWorld)
 import Data.Int (Int32)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.ByteString.Short as SBS
@@ -66,7 +67,7 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, peekElemOff)
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
-import NanoUI (FontVariant (..), unlessM, whenM)
+import NanoUI (FontStyle (..), FontVariant (..), FontWeight (..), unlessM, whenM)
 import NanoUI.Backend
 import NanoUI.Internal.Context.Types (GenCache, cachedGen, emptyGenCache)
 import NanoUI.Testing
@@ -710,9 +711,11 @@ withTtf =
     (unlessM ttfInit (fail "TTF_Init failed"))
     (closeCoverageProbes >> ttfQuit)
 
--- | Open a font at a point size, or bundled Inter when it will not open.
-openFontSource :: FontSource -> Float -> IO SdlFont
-openFontSource source ptsize =
+-- | Open a font at a point size, or bundled Inter when it will not open. A
+-- font for a grid of cells is hinted fully, so its advances are whole pixels
+-- ('nano_ui_ttf_hint_for_grid').
+openFontSource :: Bool -> FontSource -> Float -> IO SdlFont
+openFontSource grid source ptsize =
   open source `catch` \(e :: SomeException) ->
     if source == embeddedFontSource
       then throwIO e
@@ -727,6 +730,7 @@ openFontSource source ptsize =
         FontFromMemory bs _ ->
           unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
       when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ fontSourceLabel src)
+      when grid (ttfHintForGrid font)
       readSdlFont ptsize font
 
 -- | Wrap an open TTF font.
@@ -736,7 +740,9 @@ readSdlFont sfPointSize sfFont = do
   sfAlive <- newIORef True
   sfFallbacks <- newIORef IM.empty
   sfLineSkip <- fromIntegral <$> ttfLineSkip sfFont
-  sfAscent <- fromIntegral <$> ttfAscent sfFont
+  -- The baseline sits half the line gap below SDL_ttf's, as the shaped
+  -- glyphs do ('nano_ui_ttf_half_leading').
+  sfAscent <- fromIntegral <$> ((+) <$> ttfAscent sfFont <*> ttfHalfLeading sfFont)
   sfSpaceAdvance <- realToFrac <$> ttfSpaceAdvance sfFont
   pure SdlFont {..}
 
@@ -770,6 +776,15 @@ foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetFontLineSkip"
 
 foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_GetFontAscent"
   ttfAscent :: Ptr () -> IO CInt
+
+foreign import ccall unsafe "nano_ui_ttf_half_leading"
+  ttfHalfLeading :: Ptr () -> IO CInt
+
+foreign import ccall unsafe "nano_ui_ttf_is_bold_of"
+  ttfIsBoldOf :: Ptr () -> Ptr () -> IO CBool
+
+foreign import ccall unsafe "nano_ui_ttf_hint_for_grid"
+  ttfHintForGrid :: Ptr () -> IO ()
 
 foreign import ccall unsafe "nano_ui_ttf_space_advance"
   ttfSpaceAdvance :: Ptr () -> IO CFloat
@@ -857,6 +872,9 @@ data SdlFontCache = SdlFontCache
   , sfcEvicted        :: !(IORef [SdlFont])
   -- ^ Dynamic fonts dropped from the cache but not closed yet: text caches
   -- may still hold metrics prepared from them ('closeEvictedFonts').
+  , sfcBoldFaces      :: !(IORef (Map.Map FilePath (Maybe FilePath)))
+  -- ^ The bold face found beside each font file asked for one, or that
+  -- there is none ('boldSource').
   }
 
 -- | Open the base sans and mono fonts at the pixel density, and warm them
@@ -864,21 +882,23 @@ data SdlFontCache = SdlFontCache
 newSdlFontCache :: FontSource -> FontSource -> GlyphAtlas -> Float -> IORef Float -> IO SdlFontCache
 newSdlFontCache sans mono ga basePt scaleRef = do
   scale <- readIORef scaleRef
-  base <- (,) <$> openCachedFont ga scale sans basePt <*> openCachedFont ga scale mono basePt
+  base <- (,) <$> openCachedFont ga scale False sans basePt <*> openCachedFont ga scale True mono basePt
   cache <-
     SdlFontCache ga basePt scaleRef mono
       <$> newIORef sans
       <*> newIORef base
       <*> newIORef (IM.empty, [])
       <*> newIORef []
+      <*> newIORef Map.empty
   warmBaseFonts cache
   pure cache
 
 -- | A font from a source (or bundled Inter) at a point size, rasterised at
--- the pixel density, with its glyph metrics.
-openCachedFont :: GlyphAtlas -> Float -> FontSource -> Float -> IO CachedFontEntry
-openCachedFont ga scale source pt = do
-  font <- openFontSource source (pt * scale)
+-- the pixel density, with its glyph metrics; for a grid of cells, as the
+-- mono font is set, when @grid@.
+openCachedFont :: GlyphAtlas -> Float -> Bool -> FontSource -> Float -> IO CachedFontEntry
+openCachedFont ga scale grid source pt = do
+  font <- openFontSource grid source (pt * scale)
   uncurry (CachedFontEntry font) <$> buildGlyphFontMetrics ga font scale
 
 -- | Shape printable ASCII in the base fonts, which places its glyphs, so a
@@ -947,8 +967,8 @@ reloadSdlFontCache cache source = do
   destroySdlFontCache cache
   writeIORef (sfcSansSourceRef cache) source
   scale <- readIORef (sfcScaleRef cache)
-  let open src = openCachedFont (sfcGlyphAtlas cache) scale src (sfcBasePt cache)
-  writeIORef (sfcBaseEntries cache) =<< (,) <$> open source <*> open (sfcMonoSource cache)
+  let open grid src = openCachedFont (sfcGlyphAtlas cache) scale grid src (sfcBasePt cache)
+  writeIORef (sfcBaseEntries cache) =<< (,) <$> open False source <*> open True (sfcMonoSource cache)
   resetGlyphAtlas cache
 
 -- | Install the cache's base fonts as the context's measurement and glyph
@@ -962,17 +982,56 @@ withSdlFontCache cache ctx = do
   pure $
     withFontResolver
       (wrapMeasureCache scale metrics (cfeMeasure sans))
-      (\sz _ _ var -> (\e -> (cfeFm e, False)) <$> getOrLoadCachedFont cache sz var)
-      (\sz _ _ var txt -> getOrLoadCachedFont cache sz var >>= (`cfeMeasure` txt))
+      (\sz weight style var -> (\(e, native) -> (cfeFm e, native)) <$> resolveCachedFont cache sz weight style var)
+      (\sz weight style var txt -> resolveCachedFont cache sz weight style var >>= (`cfeMeasure` txt) . fst)
 
--- | The open font for a size and variant. Weight and style pick nothing
--- here: they are drawn synthetically over the regular face, because SDL_ttf's
--- style flags change its layout boxes but not the glyph images shaped text
--- draws, so a styled face would not line up. Every variant but 'FontMono'
--- is the sans face.
-getOrLoadCachedFont :: SdlFontCache -> Float -> FontVariant -> IO CachedFontEntry
-getOrLoadCachedFont cache sz var
-  | ptKey == round (sfcBasePt cache * 2) =
+-- | The open font for a size, weight, style and variant, and whether it
+-- draws the weight itself. Upright text at semibold or heavier is set in the
+-- family's bold face when its file has one beside it ('boldSource'); any
+-- other weight or style is drawn synthetically over the regular face, because
+-- SDL_ttf's style flags change its layout boxes but not the glyph images
+-- shaped text draws, so a styled face would not line up.
+resolveCachedFont :: SdlFontCache -> Float -> FontWeight -> FontStyle -> FontVariant -> IO (CachedFontEntry, Bool)
+resolveCachedFont cache sz weight style var
+  | style == FontStyleNormal && weight `elem` [WeightSemiBold, WeightBold, WeightExtraBold, WeightBlack] =
+      boldSource cache var >>= \case
+        Just bold -> (,True) <$> getOrLoadCachedFont cache sz var (Just bold)
+        Nothing -> (,False) <$> getOrLoadCachedFont cache sz var Nothing
+  | otherwise = (,False) <$> getOrLoadCachedFont cache sz var Nothing
+
+-- | The bold face of a variant's font: a file beside it of the same family
+-- at semibold or heavier, opened to check. A font from memory, such as the
+-- bundled Inter, has none. What is found for a file is kept.
+boldSource :: SdlFontCache -> FontVariant -> IO (Maybe FontSource)
+boldSource cache var = do
+  source <- if mono then pure (sfcMonoSource cache) else readIORef (sfcSansSourceRef cache)
+  case source of
+    FontFromMemory {} -> pure Nothing
+    FontFromPath path ->
+      fmap FontFromPath <$> do
+        known <- Map.lookup path <$> readIORef (sfcBoldFaces cache)
+        case known of
+          Just found -> pure found
+          Nothing -> do
+            regular <- sfFont . cfeFont . (if mono then snd else fst) <$> readIORef (sfcBaseEntries cache)
+            found <- firstM (isBoldOf regular) =<< boldFaceCandidates path
+            found <$ modifyIORef' (sfcBoldFaces cache) (Map.insert path found)
+  where
+    mono = var == FontMono
+    isBoldOf regular candidate = do
+      enc <- sdlPathEncoding
+      face <- GHC.withCString enc candidate (`ttfOpenFont` 12)
+      if face == nullPtr
+        then pure False
+        else (/= 0) <$> ttfIsBoldOf face regular <* ttfCloseFont face
+    firstM _ [] = pure Nothing
+    firstM p (x : xs) = p x >>= \ok -> if ok then pure (Just x) else firstM p xs
+
+-- | The open font for a size and variant, in its bold face when one is
+-- given. Every variant but 'FontMono' is the sans face.
+getOrLoadCachedFont :: SdlFontCache -> Float -> FontVariant -> Maybe FontSource -> IO CachedFontEntry
+getOrLoadCachedFont cache sz var bold
+  | null bold && ptKey == round (sfcBasePt cache * 2) =
       (if mono then snd else fst) <$> readIORef (sfcBaseEntries cache)
   | otherwise = do
       (entries, order) <- readIORef (sfcDynamicCache cache)
@@ -989,9 +1048,10 @@ getOrLoadCachedFont cache sz var
           pure entry
         Nothing -> do
           scale <- readIORef (sfcScaleRef cache)
-          source <- if mono then pure (sfcMonoSource cache) else readIORef (sfcSansSourceRef cache)
+          regular <- if mono then pure (sfcMonoSource cache) else readIORef (sfcSansSourceRef cache)
+          let source = fromMaybe regular bold
           -- Dynamic fonts are not warmed: they insert only glyphs drawn.
-          entry <- openCachedFont (sfcGlyphAtlas cache) scale source (fromIntegral ptKey / 2)
+          entry <- openCachedFont (sfcGlyphAtlas cache) scale mono source (fromIntegral ptKey / 2)
           -- At most 48 dynamic sizes stay open.
           let (kept, evicted) = splitAt 48 (key : order)
           writeIORef (sfcDynamicCache cache) (foldr IM.delete (IM.insert key entry entries) evicted, kept)
@@ -1003,4 +1063,4 @@ getOrLoadCachedFont cache sz var
     -- Sizes are quantized to 0.5 pt so dragging a slider does not open
     -- hundreds of redundant TTF_Font instances.
     ptKey = round ((if sz > 0 then sz else sfcBasePt cache) * 2) :: Int
-    key = ptKey * 2 + fromEnum mono
+    key = ptKey * 4 + fromEnum (not (null bold)) * 2 + fromEnum mono

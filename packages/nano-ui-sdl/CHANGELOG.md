@@ -2,6 +2,21 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- The mono font is hinted fully, so its advances are whole pixels: a shaped
+  run's glyphs sit evenly on a grid of cells, with their stems on pixels,
+  instead of 8, 8, 8, 9 pixels apart (Consolas at 15 px under light hinting).
+  Other fonts keep light hinting.
+
+- A font's line gap is split above and below its glyphs, as CSS splits
+  leading, instead of all falling under them. Text in a font with a gap,
+  such as Consolas, is centred in its line; fonts without one, such as the
+  bundled Inter, do not move.
+
+- Upright text at semibold or heavier is set in the family's bold face when
+  the font's file has one beside it (`consolab.ttf` by `consola.ttf`,
+  `Foo-Bold.ttf` by `Foo-Regular.ttf`), checked to be the same family at a
+  bold weight, and is drawn synthetically only when there is none.
+
 - `setSdlUiFont` asks for the frame that applies the new family, as
   `setSdlUiScale` does. A family picked from a view no longer waits for the
   next input to show.

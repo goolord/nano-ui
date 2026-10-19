@@ -5,6 +5,7 @@ module NanoUI.Sdl.Internal.Font.Search
   ( searchFonts
   , searchFontFamilies
   , listFontFamilies
+  , boldFaceCandidates
   ) where
 
 import Control.Exception (IOException, catch)
@@ -18,7 +19,7 @@ import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import System.Directory (doesDirectoryExist, getHomeDirectory, listDirectory)
 import System.Environment (lookupEnv)
-import System.FilePath (takeBaseName, takeExtension, (</>))
+import System.FilePath (takeBaseName, takeDirectory, takeExtension, (</>))
 import System.Info (os)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -36,6 +37,21 @@ searchFontFamilies :: [String] -> IO [FilePath]
 searchFontFamilies names = do
   files <- fontStems
   pure (nubOrd (mapMaybe (\name -> bestMatch (normalize name) files) names))
+
+-- | Files beside a regular face that may be its bold, most likely first: the
+-- family's own @-Bold@ file, or Windows' short names, @consolab.ttf@ beside
+-- @consola.ttf@ and @courbd.ttf@ beside @cour.ttf@. Names prove nothing, so
+-- the caller opens each to check it is the family's bold.
+boldFaceCandidates :: FilePath -> IO [FilePath]
+boldFaceCandidates regular = do
+  siblings <- filter isFontFile <$> listDirectory dir `catch` \(_ :: IOException) -> pure []
+  let named = [(normalize (takeBaseName f), dir </> f) | f <- siblings]
+  pure [path | want <- wanted, (stem', path) <- named, stem' == want]
+  where
+    dir = takeDirectory regular
+    stem = normalize (takeBaseName regular)
+    families = stem : [reverse family | t <- regularTails, Just family <- [stripPrefix (reverse t) (reverse stem)], not (null family)]
+    wanted = nubOrd (map (<> "bold") families ++ [stem <> "bd", stem <> "b"])
 
 -- | Human-readable names for every installed font family, deduped and sorted.
 -- Each name is a usable 'searchFonts' token: the same normalization is applied
