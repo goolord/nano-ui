@@ -253,7 +253,8 @@ bindVar = bindVarBy eqByPtr
 -- | Run a value-in, value-out widget on a Var: give it the Var's value and
 -- store what it returns. A constant Var gets its value shown and the edit
 -- dropped. If something inside the widget (a control among its adornments,
--- a tab's body) wrote the Var while it ran, that write wins.
+-- a tab's body) wrote the Var while it ran, that write wins; a write to
+-- another part of the same Var (a sibling field) keeps the widget's edit.
 {-# INLINE bindVarBy #-}
 bindVarBy :: (a -> a -> Bool) -> Binding -> Var a -> (a -> NanoUI (r, a)) -> NanoUI r
 bindVarBy eq mode = bindWith eq mode fst snd
@@ -280,8 +281,11 @@ bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
   liftIO $ do
     root1 <- readIORef ref
     -- While the root is the one the widget was given, the part it shows is
-    -- still a0, so the comparison here is the only one needed.
-    when (ptrEq root1 root0 && not (eq a1 a0)) $
+    -- still a0. A write elsewhere in the cell (a sibling field, from a tab's
+    -- body say) leaves that part alone, so only a write to the part itself
+    -- wins over the widget's edit.
+    untouched <- if ptrEq root1 root0 then pure True else eq a0 <$> peekLens l root1
+    when (untouched && not (eq a1 a0)) $
       mapM_ (noteBound ctx cell mode sig before) =<< modifyRoot cell l (const a1) eq
   pure (result x)
 
@@ -310,7 +314,16 @@ noteBound ctx cell mode sig before wsig = do
   if p == 0
     then noteOutsidePass ctx cell wsig
     else do
-      (observed, seen) <- if wsig == sig then pure before else passHits cell p wsig
+      (observed, seen) <-
+        if wsig == sig
+          then do
+            -- A tracked read inside the widget (a tab's body reading the
+            -- tab Var) saw the value before this write, so it counts like
+            -- one before the widget. The binding's own observation is in
+            -- the obs set, so only the seen set can tell.
+            inside <- setHits cell seenSet p sig
+            pure (fst before || inside, snd before || inside)
+          else passHits cell p wsig
       noteInPass ctx cell p (observed || mode == Conservative) seen wsig
 
 -- | Ask for the view to run again this frame, or for a follow-up frame when
