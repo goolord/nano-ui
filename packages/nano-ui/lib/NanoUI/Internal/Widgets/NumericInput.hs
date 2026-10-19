@@ -11,7 +11,8 @@ module NanoUI.Internal.Widgets.NumericInput
   )
 where
 
-import Control.Monad (void, when)
+import Control.Monad (mfilter, void, when)
+import Data.Bits ((.|.))
 import Data.Char (isDigit, isHexDigit)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -26,7 +27,7 @@ import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
-import NanoUI.Internal.WidgetText (numericStepperRects, textInputFlagNumeric)
+import NanoUI.Internal.WidgetText (numericStepperRects, packTextNodeStyle, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
 import NanoUI.Widgets.TextEditor (singleLineMode)
@@ -115,16 +116,24 @@ numericInputCore cfg value = do
     adopted = isFocus && maybe False (/= given) (lookupSlot fieldDouble key store)
     -- Unfocused, the field shows the caller's value; focused, it keeps the
     -- text being typed.
-    text0 = if isFocus && not adopted then fromMaybe (formatNumber cfg given) stored else formatNumber cfg given
+    -- Stored text the field would refuse to edit (pasted from the context
+    -- menu, which skips the filter) is replaced, or every edit would be
+    -- turned back to it.
+    text0 = if isFocus && not adopted then fromMaybe (formatNumber cfg given) (mfilter (acceptsNumberText cfg) stored) else formatNumber cfg given
     s0 = loadTextInputState store key text0
     lastValue = if adopted then given else findSlot fieldDouble given key store
   mEdited <- if isFocus then liftIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
-  resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric
+  -- Its font face, weight and slant ride in the style bits, as on a label.
+  resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) (textInputFlagNumeric .|. packTextNodeStyle (nicLayout cfg) 0)
+
   let
     -- An edit that would leave text no number can start with is dropped.
     typed = maybe s0 editorTextState mEdited
     s1 = if acceptsNumberText cfg (tisText typed) then typed else s0
     current
+      -- Text that still reads as the last value formatted is that value,
+      -- which can hold more precision than the text shows.
+      | isFocus && tisText s1 == formatNumber cfg lastValue = lastValue
       | isFocus = maybe lastValue (clampNumber cfg) (parseNumber cfg (tisText s1))
       | otherwise = given
     Rect rx ry rw rh = respRect resp
@@ -210,12 +219,19 @@ roundNumber cfg v
     scale = 10 ^ nicDecimals cfg
 
 formatNumber :: NumericInputConfig -> Double -> Text
-formatNumber cfg v
+formatNumber cfg v0
+  -- A NaN or infinite value has no digits to show, and its name is text the
+  -- field would refuse; it shows empty.
+  | isNaN v0 || isInfinite v0 = T.empty
   | nicHex cfg =
       let n = round v :: Integer
        in (if n < 0 then "-" else "") <> T.toUpper (T.pack (showHex (abs n) ""))
   | nicDecimals cfg <= 0 = T.pack (show (round v :: Integer))
   | otherwise = T.pack (showFFloat (Just (nicDecimals cfg)) v "")
+  where
+    -- Negative zero would show as "-0.00", which a field that stops at zero
+    -- refuses.
+    v = v0 + 0
 
 -- | Whether @t@ can stand in the field mid-edit: an optional minus sign when
 -- the range reaches below zero, then digits (hexadecimal ones in hex mode),

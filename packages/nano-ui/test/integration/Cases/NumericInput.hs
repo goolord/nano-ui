@@ -7,7 +7,21 @@ tests :: [Spec]
 tests =
   [ spec "numeric-input" runNumericInputTest
   , spec "numeric-input-hex" runNumericInputHexTest
+  , spec "numeric-input-focus-precision" runNumericInputFocusPrecisionTest
   ]
+
+-- Focusing a field keeps a value its decimals do not show (2.5 shown with
+-- none) instead of reading the shown text back.
+runNumericInputFocusPrecisionTest :: Context -> IORef Int -> IO ()
+runNumericInputFocusPrecisionTest ctx failed = do
+  valueRef <- newVar 2.5
+  let inp = withInput 320 120
+      cfg = defaultNumericInputConfig {nicMin = 0, nicMax = 100}
+      ui = column (held valueRef (numericInputConfigured' cfg))
+      step event = (\((_, v), _, _) -> v) <$> runFrame ctx event ui
+  _ <- warmup2 ctx inp ui
+  assertEq failed 2.5 =<< step (keyInp KeyTab inp)
+  assertEq failed 2.5 =<< step inp
 
 -- A numeric field steps with the arrow keys (Shift steps ten times as far),
 -- drops typing that is not a number, clamps to its range while typing, and

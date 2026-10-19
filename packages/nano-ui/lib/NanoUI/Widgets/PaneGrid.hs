@@ -48,7 +48,7 @@ import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, requestFrame, liftIO, takeEscape, whenM, withIdFrame, withKey)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, liftIO, takeEscape, whenM, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId, scopeIdContext)
 import NanoUI.Internal.Var (bindVarOn, requestRerun)
 import NanoUI.Internal.Var.Types (Var)
@@ -754,10 +754,9 @@ runGestures wid env dividers rendered moved zone = do
               s {gsTree = treeSetRatio sid (clampRatio (geGutter env) d r0) <$> gsTree s}
       | otherwise -> setGesture True NoGesture
     Drag pid press moved0 title
-      -- The indicator follows the pointer, so keep requesting frames.
-      | down -> do
-          requestFrame
-          when (moved && not moved0) $ setGesture False (Drag pid press True title)
+      -- The indicator follows the pointer, whose moves bring their own
+      -- frames; a still, held pointer needs none.
+      | down -> when (moved && not moved0) $ setGesture False (Drag pid press True title)
       -- One write clears the gesture and stores the previewed tree, which
       -- was built with this frame's seed.
       | otherwise ->

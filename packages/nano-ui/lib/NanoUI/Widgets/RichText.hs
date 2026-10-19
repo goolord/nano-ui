@@ -19,7 +19,7 @@ module NanoUI.Widgets.RichText
   , selectableRichTextWith'
   ) where
 
-import Control.Monad (foldM, unless, when)
+import Control.Monad (forM_, foldM, unless, when)
 import Data.Char (isMark)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -259,6 +259,18 @@ richTextWithMode' selectable f pieces = do
               DecorationNone -> []
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection `hashWithSalt` focused
   liftIO $ do
+    -- A move onto or off a link inside the hovered paragraph changes no hot
+    -- widget, so no frame would show it: each link piece is a hover zone,
+    -- and crossing one's edge runs a frame.
+    when (respHovered resp) $
+      forM_
+        [ Rect (rx + x) (ry + lineTop line) (tokenWidth tok) (lineHeight line)
+        | line <- paraLines para
+        , (x, tok) <- lineTokens line
+        , tokenKind tok /= Break
+        , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
+        ]
+        (registerHoverZone ctx False)
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $ do
       ParagraphCache n bound m <- readIORef cacheRef
       let n' = if isJust cached then n else n + 1

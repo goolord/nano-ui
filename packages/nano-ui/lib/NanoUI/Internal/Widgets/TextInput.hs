@@ -279,7 +279,9 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   changed <- case mDebounceMs of
     Nothing -> pure edited
     Just ms -> liftIO (debounceSearchChanged ctx key isFocus edited ms)
-  resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout styleIdx
+  -- The layout's font face, weight and slant ride in the style bits, as on
+  -- a label; the flags sit above them.
+  resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout (styleIdx .|. packTextNodeStyle layout 0)
   pure (setSubmitted submitted (setChanged changed resp), newText)
 
 -- | Debounced change pulse for a search field. Fires when the text differs from

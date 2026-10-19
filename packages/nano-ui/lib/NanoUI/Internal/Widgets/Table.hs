@@ -43,7 +43,7 @@ import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
 import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
-import NanoUI.Internal.Var (Binding (..), bindVarOn)
+import NanoUI.Internal.Var (Binding (..), bindVarOn, useVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
@@ -401,12 +401,16 @@ tableWith = tableConfigured defaultTableConfig
 tableWith' :: Foldable f => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI TableResponse
 tableWith' = tableConfigured' defaultTableConfig
 
--- | A table of text rows under the given headers, in the order given.
+-- | A table of text rows under the given headers, sorted by the first column
+-- until a header click sorts by another. The sort is kept in a positional
+-- 'useVar'.
 simpleTable :: Foldable f => [Text] -> f [Text] -> NanoUI TableResponse
 simpleTable headers rows = do
+  sortVar <- useVar (SortCol 0 SortAsc)
   let cols = mconcat [headed h (\r -> smallAt r i "") | (i, h) <- zip [0 ..] headers]
       indexedRows = map smallArrayFromList (toList rows)
-  tableCore defaultTableConfig id "simple" cols indexedRows (SortCol 0 SortAsc)
+  tableConfigured' defaultTableConfig id "simple" cols indexedRows sortVar
+
 
 -- | 'tableWith' with column sizes, frozen rows and columns, and initially
 -- hidden columns.

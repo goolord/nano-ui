@@ -104,6 +104,9 @@ runShortcutParseTest _ failed = do
     $ \(txt, sc) -> assertEq failed (txt, Right sc) (txt, parseShortcut txt)
   -- The last key wins and modifiers accumulate; a chord without a key never fires.
   assertEq failed (shift <> ctrl <> key 'b') (ctrl <> key 'a' <> shift <> key 'b')
+  -- The space bar is a named key, whichever way the chord names it.
+  assertEq failed (ctrl <> key KeySpace) (ctrl <> key ' ')
+  assertEq failed (Right (ctrl <> key KeySpace)) (parseShortcut "C- ")
   assertEq failed "Ctrl+Shift" (shortcutLabel (ctrl <> shift))
   assertEq failed [] (filter (isRight . parseShortcut) ["", "C-", "C-S-", "X-p", "<F25>", "<F0>", "C-<Bogus>", "ab", "<Enter"])
   -- Round-trip every key under every modifier combination.

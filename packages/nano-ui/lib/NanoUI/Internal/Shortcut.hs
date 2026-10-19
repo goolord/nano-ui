@@ -48,7 +48,9 @@ instance ToKey Key where
   toKey = id
 
 instance ToKey Char where
-  toKey = KeyChar . toLower
+  -- Backends report the space bar as 'KeySpace', never as a character.
+  toKey ' ' = KeySpace
+  toKey c = KeyChar (toLower c)
 
 -- | The key of a chord: @key 's'@, @key KeyEnter@, @key (KeyF 5)@. Name a
 -- symbol by its unshifted key: on a US layout Ctrl++ is
