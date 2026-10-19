@@ -1064,24 +1064,27 @@ addNode na nt parent Layout {..} = do
     writeTree a parent TreeFirstChild idx
     cc <- readTree a parent TreeChildCount
     writeTree a parent TreeChildCount (cc + 1)
-    -- Mark ancestors, stopping at the first one already marked.
-    let markPinnedBelow p = when (p >= 0) $ do
-          marked <- readTagEnum a p TagPinnedBelow
-          unless marked $ writeTagEnum a p TagPinnedBelow True >> readTree a p TreeParent >>= markPinnedBelow
-    when pinned $ markPinnedBelow parent
+    when pinned $ markAncestorTag a TagPinnedBelow parent
   when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
   when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na BackdropNodes idx
   when (flow == Layered || pinned) $ pushClassNode na LayeredNodes idx
   when (isWidgetNode nt || isScrollNode nt || pointerMode == PointerBlock) $ do
     pushClassNode na PointerNodes idx
-    -- Mark the node and its ancestors, stopping at the first one marked.
-    let markScrollerBelow p = when (p >= 0) $ do
-          marked <- readTagEnum a p TagScrollerBelow
-          unless marked $ writeTagEnum a p TagScrollerBelow True >> readTree a p TreeParent >>= markScrollerBelow
-    when (isScrollNode nt || nt == NodeTextArea || pointerMode == PointerBlock) $ markScrollerBelow idx
+    when (isScrollNode nt || nt == NodeTextArea || pointerMode == PointerBlock) $
+      markAncestorTag a TagScrollerBelow idx
   when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
   writeIORef (naCount na) (idx + 1)
   pure idx
+
+-- | Mark a node and its ancestors with @tag@, stopping at the first one
+-- already marked. Top-level so 'addNode' allocates no closure when the
+-- branch is not taken.
+markAncestorTag :: NodeArenaArrays -> TagCol -> Int -> IO ()
+markAncestorTag a tag = go
+  where
+    go !p = when (p >= 0) $ do
+      marked <- readTagEnum a p tag
+      unless marked $ writeTagEnum a p tag True >> readTree a p TreeParent >>= go
 
 -- | Append node @idx@ to the list of class @c@. 'addNode' has made room.
 {-# INLINE pushClassNode #-}

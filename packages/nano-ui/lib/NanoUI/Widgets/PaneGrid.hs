@@ -461,49 +461,10 @@ paneGridCore cfg controlled given = do
             liftIO $ registerCustomDrawing ctx wid (contentKey [1, rectX r, rectY r, rectW r, rectH r]) $ \cdc _ ->
               runCanvasFor cdc (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
-  -- Keys for the focused grid. Escape restores a maximized pane and is
-  -- consumed, unless something earlier (such as a popup in a pane) took it
-  -- or it closes a menu or dropdown ('takeEscape').
-  focusedNow <- focusedWidget
-  when (pgFocusable cfg && focusedNow == wid) $ do
-    nav <- useKeyNav wid
-    forM_ [(knLeft, (-1, 0)), (knRight, (1, 0)), (knUp, (0, -1)), (knDown, (0, 1))] $
-      \(k, dir) -> when (k nav) (moveFocus env focused dir)
-    when (knLeft nav || knRight nav || knUp nav || knDown nav) $
-      damageWidgetNow wid (DamageInflated 0)
-    -- Unmodified letters, taken as a 'shortcutOnce': a shortcut declared
-    -- earlier for the same key keeps it from the grid, and the grid keeps it
-    -- from one declared later.
-    whenM (shortcutOnce (Shortcut.key 'm')) (maximizePane env focused)
-    whenM (shortcutOnce (Shortcut.key 'x')) (closePane env focused)
-    whenM takeEscape (restorePane env)
-
+  when (pgFocusable cfg) $ handleGridKeys wid env focused
   end <- fromMaybe gs . lookupSlot fieldGrid key <$> liftIO (getStore ctx)
-  covered <- liftIO (pointerCovered ctx wid)
-  clip <- liftIO (getPrevClipRect ctx wid)
-  let dropTarget
-        | covered || not (maybe True (`rectHit` mouse) clip) = Nothing
-        | gsGesture gs /= NoGesture || gsGesture end /= NoGesture = Nothing
-        | maxPane /= 0 || gsMax end /= 0 || gsTree end /= gsTree gs = Nothing
-        | not (rectHit baseRect mouse) = Nothing
-        | otherwise = do
-            tree <- arrangement
-            (q, r) <- find (\(_, r) -> rectHit r mouse) (M.toList regions)
-            let seed = gsSeed end
-                np = seed + 1
-                edge AxisV True = PaneLeft
-                edge AxisV False = PaneRight
-                edge AxisH True = PaneAbove
-                edge AxisH False = PaneBelow
-            (location, proposed) <- case fromMaybe (dropTargetForPane r mouse q) (topLevelDropTarget edgeBand baseRect mouse) of
-              DropSplit p ax onA -> Just (BesidePane p (edge ax onA), treeSplit p seed ax onA np tree)
-              DropTop ax onA -> Just (OutsideGrid (edge ax onA), if onA
-                then Split seed ax 0.5 (Pane np) tree
-                else Split seed ax 0.5 tree (Pane np))
-              DropSwap _ -> Nothing
-            let rect = M.findWithDefault (Rect 0 0 0 0) np (fst (layoutNode minSize gutter proposed baseRect))
-            pure (PaneGridDrop location rect q wid end proposed)
-      (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)
+  dropTarget <- liftIO (resolveExternalDrop env wid baseRect mouse end)
+  let (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)
       -- A divider drag moves the tree on the frames it is held, so the frame
       -- that lets it go compares with the ratio it was pressed at.
       resized = case gsGesture gs of
@@ -520,6 +481,64 @@ paneGridCore cfg controlled given = do
       , pgrMaximizedPane = maxEnd
       , pgrDropTarget = dropTarget
       }
+
+-- | Keys for the focused grid. Escape restores a maximized pane and is
+-- consumed, unless something earlier (such as a popup in a pane) took it
+-- or it closes a menu or dropdown ('takeEscape').
+handleGridKeys :: WidgetId -> GridEnv -> Word64 -> NanoUI ()
+handleGridKeys wid env focused = do
+  focusedNow <- focusedWidget
+  when (focusedNow == wid) $ do
+    nav <- useKeyNav wid
+    forM_ [(knLeft, (-1, 0)), (knRight, (1, 0)), (knUp, (0, -1)), (knDown, (0, 1))] $
+      \(k, dir) -> when (k nav) (moveFocus env focused dir)
+    when (knLeft nav || knRight nav || knUp nav || knDown nav) $
+      damageWidgetNow wid (DamageInflated 0)
+    -- Unmodified letters, taken as a 'shortcutOnce': a shortcut declared
+    -- earlier for the same key keeps it from the grid, and the grid keeps it
+    -- from one declared later.
+    whenM (shortcutOnce (Shortcut.key 'm')) (maximizePane env focused)
+    whenM (shortcutOnce (Shortcut.key 'x')) (closePane env focused)
+    whenM takeEscape (restorePane env)
+
+-- | External drop target over the grid when no internal gesture is active.
+resolveExternalDrop ::
+  GridEnv -> WidgetId -> Rect -> V2 -> GridState -> IO (Maybe PaneGridDrop)
+resolveExternalDrop env wid baseRect mouse end = do
+  let ctx = geCtx env
+      gs = geState env
+      edgeBand = max 0 (pgEdgeBand (geCfg env))
+  covered <- pointerCovered ctx wid
+  clip <- getPrevClipRect ctx wid
+  pure $
+    if covered
+      || not (maybe True (`rectHit` mouse) clip)
+      || gsGesture gs /= NoGesture
+      || gsGesture end /= NoGesture
+      || fst (maybe (0, 0) (`paneFocus` gs) (gsTree gs)) /= 0
+      || gsMax end /= 0
+      || gsTree end /= gsTree gs
+      || not (rectHit baseRect mouse)
+      then Nothing
+      else do
+        tree <- gsTree gs
+        (q, r) <- find (\(_, r) -> rectHit r mouse) (M.toList (geRegions env))
+        let seed = gsSeed end
+            np = seed + 1
+            edge AxisV True = PaneLeft
+            edge AxisV False = PaneRight
+            edge AxisH True = PaneAbove
+            edge AxisH False = PaneBelow
+        (location, proposed) <- case fromMaybe (dropTargetForPane r mouse q) (topLevelDropTarget edgeBand baseRect mouse) of
+          DropSplit p ax onA -> Just (BesidePane p (edge ax onA), treeSplit p seed ax onA np tree)
+          DropTop ax onA ->
+            Just
+              ( OutsideGrid (edge ax onA)
+              , if onA then Split seed ax 0.5 (Pane np) tree else Split seed ax 0.5 tree (Pane np)
+              )
+          DropSwap _ -> Nothing
+        let rect = M.findWithDefault (Rect 0 0 0 0) np (fst (layoutNode (geMinSize env) (geGutter env) proposed baseRect))
+        pure (PaneGridDrop location rect q wid end proposed)
 
 -- | A row, laid out like 'rowWith', that drags its pane: a press on it not
 -- taken by a control inside it starts a drag, and the pointer shows a grab

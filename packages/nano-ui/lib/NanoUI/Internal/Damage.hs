@@ -107,6 +107,47 @@ getNonzeroRect arena i = do
   r <- getNodeRect arena i
   pure (if rectNonEmpty r then Just r else Nothing)
 
+-- | First pass of 'updatePrevRects', over scroll containers and panels
+-- ('BackdropNodes'): record the clip each is painted in, and for a painting
+-- container with no widget id (such as a panel) record its rect under
+-- 'containerKey' so moving or resizing it repaints where it was.
+{-# INLINE scanBackdropPrevRects #-}
+scanBackdropPrevRects ::
+  NodeArena ->
+  Rect ->
+  IM.IntMap Rect ->
+  IM.IntMap Rect ->
+  IO (IM.IntMap Rect, IM.IntMap Rect, Int, Int, Bool)
+scanBackdropPrevRects na window oldRects oldOuters = do
+  (containerCount, containerAt) <- classNodes na BackdropNodes
+  let containers !j !m !om !foundOld !foundOuter !dropped
+        | j >= containerCount = pure (m, om, foundOld, foundOuter, dropped)
+        | otherwise = do
+            idx <- containerAt j
+            wid <- getWidgetId na idx
+            let keyless = hashWidgetId wid == 0
+            skip <- if keyless then not <$> (containerPaints na idx =<< getNodeType na idx) else getIdSuperseded na idx
+            if skip
+              then containers (j + 1) m om foundOld foundOuter dropped
+              else do
+                k <- if keyless then containerKey na idx else pure (intKey wid)
+                let isOld = keyless && IM.member k oldRects
+                mRect <- getNonzeroRect na idx
+                (m', om', fOld', fOuter', drop') <- case mRect of
+                  Nothing ->
+                    pure (if isOld then IM.delete k m else m, dropKey k om, foundOld, foundOuter, dropped || isOld)
+                  Just r -> do
+                    o <- outerClip na window idx
+                    pure
+                      ( if keyless then putNew k r m else m
+                      , putNew k o om
+                      , foundOld + if isOld then 1 else 0
+                      , foundOuter + if IM.member k oldOuters then 1 else 0
+                      , dropped
+                      )
+                containers (j + 1) m' om' fOld' fOuter' drop'
+  containers 0 oldRects oldOuters 0 0 False
+
 updatePrevRects :: Context -> Size -> IO ()
 updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
   PrevFrame oldRects oldClips oldOuters oldTexts oldImages <- getsDamage ctx dsPrev
@@ -115,40 +156,8 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
   if count <= 0
     then setPrev emptyPrevFrame >> forgetWalk ctx
     else do
-      -- First pass, scroll containers and panels ('BackdropNodes') only:
-      -- record the clip each is painted in. A painting container with no
-      -- widget id (such as a panel) also records its rect under
-      -- 'containerKey', so moving or resizing it repaints where it was.
-      (containerCount, containerAt) <- classNodes na BackdropNodes
-      let window = Rect 0 0 winW winH
-          containers !j !m !om !foundOld !foundOuter !dropped
-            | j >= containerCount = pure (m, om, foundOld, foundOuter, dropped)
-            | otherwise = do
-                idx <- containerAt j
-                wid <- getWidgetId na idx
-                -- A keyless container is repainted under its own key when it paints.
-                let keyless = hashWidgetId wid == 0
-                skip <- if keyless then not <$> (containerPaints na idx =<< getNodeType na idx) else getIdSuperseded na idx
-                if skip
-                  then containers (j + 1) m om foundOld foundOuter dropped
-                  else do
-                    k <- if keyless then containerKey na idx else pure (intKey wid)
-                    let isOld = keyless && IM.member k oldRects
-                    mRect <- getNonzeroRect na idx
-                    (m', om', fOld', fOuter', drop') <- case mRect of
-                      Nothing ->
-                        pure (if isOld then IM.delete k m else m, dropKey k om, foundOld, foundOuter, dropped || isOld)
-                      Just r -> do
-                        o <- outerClip na window idx
-                        pure
-                          ( if keyless then putNew k r m else m
-                          , putNew k o om
-                          , foundOld + if isOld then 1 else 0
-                          , foundOuter + if IM.member k oldOuters then 1 else 0
-                          , dropped
-                          )
-                    containers (j + 1) m' om' fOld' fOuter' drop'
-      (m0, om, foundContainers, foundOuter, droppedContainer) <- containers 0 oldRects oldOuters 0 0 False
+      (m0, om, foundContainers, foundOuter, droppedContainer) <-
+        scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters
       -- Second pass, every node with a widget id. Seeded with last frame's
       -- maps and touching only changed entries, so frames with stable rects
       -- (hover, text churn, animations) allocate nothing. The walk cannot
@@ -339,16 +348,11 @@ swapText arr i txt = do
 -- @p@ describes. A node that is no image passes id 0 and no look.
 {-# INLINE sameImage #-}
 sameImage :: ImagePaint -> Int -> Maybe ImageNode -> Bool
-sameImage (ImagePaint t look) tid node = t == tid && case (look, node) of
-  (Just l, Just n) -> l == inLook n
-  (Nothing, Nothing) -> True
-  _ -> False
+sameImage (ImagePaint t look) tid node = t == tid && look == fmap inLook node
 
 -- | What an image node drawing image @tid@ with @node@'s look draws.
 imagePaint :: Int -> Maybe ImageNode -> ImagePaint
-imagePaint tid node = ImagePaint tid (case node of
-  Just n -> Just $! inLook n
-  Nothing -> Nothing)
+imagePaint tid node = ImagePaint tid (inLook <$> node)
 
 -- | Insert, returning @m@ itself when @k@ already maps to @v@, so pointer
 -- equality survives an unchanged frame.
@@ -623,13 +627,14 @@ needsFullDamage snap d =
     -- is clipped like the rest, so a perpetual animation whose widget has
     -- left the arena (@keepAnimating@ behind a tab switch) stops repainting
     -- the window.
+    animKeys = IM.keys (fdLiveAnims d)
     firstRectless k =
       IM.notMember k newRects && (IM.member k oldRects || IS.notMember k (fsAnimKeys snap))
-    orphanAnim = any firstRectless (IM.keys (fdLiveAnims d))
+    orphanAnim = any firstRectless animKeys
     -- One with no rect last frame either is not clipped even when only a
     -- scroller moved: the retain texture may never have shown it.
     missingAnim =
-      any (\k -> k /= 0 && IM.notMember k oldRects && firstRectless k) (IM.keys (fdLiveAnims d))
+      any (\k -> k /= 0 && IM.notMember k oldRects && IM.notMember k newRects && IS.notMember k (fsAnimKeys snap)) animKeys
     keysChanged =
       not (IM.null oldRects)
         && rgAny (fdChurn d)

@@ -16,6 +16,7 @@ module NanoUI.Internal.Widgets.Adornment
   , view
   , control
   , adornWidget
+  , adornButton
   , adornmentRow
   )
 where
@@ -33,9 +34,10 @@ import NanoUI.Internal.Layout.Arena (arenaCount, getNodeType, getWidgetId, isWid
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, ifM, resolveFontUi, liftIO, uiTheme, withDefaultLayout, (<&&>))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, V2)
+import NanoUI.Internal.Widgets.Behavior (keyActivated)
 import NanoUI.Internal.Widgets.Display (svgIconWith')
 import NanoUI.Internal.Widgets.Layout (labelEx, row')
-import NanoUI.Internal.Widgets.Node (inertContainer, withWidgetChildren)
+import NanoUI.Internal.Widgets.Node
 import NanoUI.Svg (Svg)
 
 -- | An item drawn beside a widget's text in the widget's adornment colour.
@@ -122,6 +124,15 @@ control = AdornControl
 adornWidget :: WidgetId -> Layout -> (Theme -> Color) -> Adornments -> NanoUI Bool
 adornWidget _ _ _ (Adornments [] []) = pure False
 adornWidget wid lay colorOf adorns = addAdornments wid lay colorOf adorns
+
+-- | Add adornments to a button, suppressing pointer clicks on the outer button
+-- (while keeping keyboard activation) when an 'AdornControl' captures the
+-- pointer.
+{-# INLINE adornButton #-}
+adornButton :: Response -> Layout -> (Theme -> Color) -> Adornments -> NanoUI Response
+adornButton resp lay colorOf adorns = do
+  taken <- adornWidget (respId resp) lay colorOf adorns
+  if taken then (`setClicked` inertResponse resp) <$> keyActivated (respId resp) else pure resp
 
 -- | 'adornWidget' with something to draw: one row a side, the leading row
 -- aligned to the start and the trailing one to the end ('adornRows').

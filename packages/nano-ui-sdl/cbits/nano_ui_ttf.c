@@ -80,9 +80,6 @@ static Uint8 glyph_channel_max(Uint8 r, Uint8 g, Uint8 b)
 
 static void force_white_rgb(SDL_Surface *surf)
 {
-    if (!surf || !surf->pixels || surf->format != SDL_PIXELFORMAT_RGBA32) {
-        return;
-    }
     Uint8 *base = (Uint8 *)surf->pixels;
     int pitch = surf->pitch;
     for (int y = 0; y < surf->h; y++) {
@@ -98,9 +95,6 @@ static void force_white_rgb(SDL_Surface *surf)
 
 static void invert_glyph_alpha(SDL_Surface *surf)
 {
-    if (!surf || !surf->pixels || surf->format != SDL_PIXELFORMAT_RGBA32) {
-        return;
-    }
     Uint8 *base = (Uint8 *)surf->pixels;
     int pitch = surf->pitch;
     for (int y = 0; y < surf->h; y++) {
@@ -190,17 +184,13 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
 {
     NanoUIShaped *out = (NanoUIShaped *)userdata;
     TTF_TextData *d = text->internal;
-    int copies = 0;
-    for (int i = 0; i < d->num_ops; i++) {
-        if (d->ops[i].cmd == TTF_DRAW_COMMAND_COPY) {
-            copies++;
-        }
-    }
+    size_t op_cap = d->num_ops > 0 ? (size_t)d->num_ops : 1;
+    size_t cluster_cap = d->num_clusters > 0 ? (size_t)d->num_clusters : 1;
     out->w = d->w;
     out->h = d->h;
-    out->glyphs = (int *)SDL_calloc(copies > 0 ? copies : 1, 10 * sizeof(int));
-    out->glyph_fonts = (TTF_Font **)SDL_calloc(copies > 0 ? copies : 1, sizeof(TTF_Font *));
-    out->clusters = (int *)SDL_calloc(d->num_clusters > 0 ? d->num_clusters : 1, 5 * sizeof(int));
+    out->glyphs = (int *)SDL_calloc(op_cap, 10 * sizeof(int));
+    out->glyph_fonts = (TTF_Font **)SDL_calloc(op_cap, sizeof(TTF_Font *));
+    out->clusters = (int *)SDL_calloc(cluster_cap, 5 * sizeof(int));
     if (!out->glyphs || !out->glyph_fonts || !out->clusters) {
         return false;
     }

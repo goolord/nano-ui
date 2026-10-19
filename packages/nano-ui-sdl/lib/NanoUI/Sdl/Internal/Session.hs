@@ -83,17 +83,18 @@ runSdlSession options drawFn = do
     let startupFrame c inp = do
           writeIORef wakeRef False
           void (drawFn c env inp True)
-    (ctx1, inp0) <- settle ctx0 emptyInput {inputWindowSize = wsSize (sdlWindowSettings options)}
-    scale0 <- readIORef (sdlScaleRef env)
+        settleScaled c inp = do
+          (c', inp') <- settle c inp
+          s <- readIORef (sdlScaleRef env)
+          pure (c', inp', s)
+    (ctx1, inp0, scale0) <- settleScaled ctx0 emptyInput {inputWindowSize = wsSize (sdlWindowSettings options)}
     startupFrame ctx1 inp0
     -- First present can apply DPI. Prev rects are empty on that frame.
     -- Draw once more before idle or the Controls page stays stretched
     -- until the first mouse move.
-    (ctx1b, inp0b) <- settle ctx1 inp0
-    scaleSettle <- readIORef (sdlScaleRef env)
+    (ctx1b, inp0b, scaleSettle) <- settleScaled ctx1 inp0
     startupFrame ctx1b inp0b
-    (ctx2, inp1) <- settle ctx1b inp0b
-    scale1 <- readIORef (sdlScaleRef env)
+    (ctx2, inp1, scale1) <- settleScaled ctx1b inp0b
     when (inputWindowSize inp1 /= inputWindowSize inp0b || scaleMoved scale1 scaleSettle || scaleMoved scaleSettle scale0) $
       startupFrame ctx2 inp1
     writeIORef prev inp1

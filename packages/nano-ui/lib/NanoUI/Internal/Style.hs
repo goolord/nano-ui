@@ -672,7 +672,9 @@ pattern LinesEnd = LineAlign 2
 {-# COMPLETE LinesStart, LinesCenter, LinesEnd #-}
 
 instance Show LineAlign where
-  show (LineAlign n) = ["LinesStart", "LinesCenter", "LinesEnd"] !! min 2 (fromIntegral n)
+  show LinesStart = "LinesStart"
+  show LinesCenter = "LinesCenter"
+  show LinesEnd = "LinesEnd"
 
 instance Bounded LineAlign where
   minBound = LinesStart
@@ -737,7 +739,9 @@ pattern PointerPass = PointerMode 2
 {-# COMPLETE PointerAuto, PointerBlock, PointerPass #-}
 
 instance Show PointerMode where
-  show (PointerMode n) = ["PointerAuto", "PointerBlock", "PointerPass"] !! min 2 (fromIntegral n)
+  show PointerAuto = "PointerAuto"
+  show PointerBlock = "PointerBlock"
+  show PointerPass = "PointerPass"
 
 instance Bounded PointerMode where
   minBound = PointerAuto
@@ -1121,13 +1125,8 @@ disabledTheme t =
       fadeStyle s =
         let bg = fade (styleBg s)
          in s {styleBg = bg, styleFg = fade (styleFg s), styleBorder = fade (styleBorder s), styleHoverBg = bg, styleActiveBg = bg}
-   in t
-        { themePanel = fadeStyle (themePanel t)
-        , themeFloatingWindow = fadeStyle (themeFloatingWindow t)
-        , themePopup = fadeStyle (themePopup t)
-        , themeButton = fadeStyle (themeButton t)
-        , themeInput = fadeStyle (themeInput t)
-        , themeSeparator = fade (themeSeparator t)
+   in (everyStyle fadeStyle t)
+        { themeSeparator = fade (themeSeparator t)
         , themeAccent = fade (themeAccent t)
         , themeMuted = fade (themeMuted t)
         , themeRed = fade (themeRed t)

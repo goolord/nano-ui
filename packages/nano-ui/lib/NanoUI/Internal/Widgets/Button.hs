@@ -23,10 +23,9 @@ import NanoUI.Internal.Monad (NanoUI, uiTheme)
 import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Internal.WidgetText (buttonFlagContent)
-import NanoUI.Internal.Widgets.Adornment (Adornments, adornWidget, adornmentRow, icon, leading)
-import NanoUI.Internal.Widgets.Behavior (keyActivated)
+import NanoUI.Internal.Widgets.Adornment (Adornments, adornButton, adornmentRow, icon, leading)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
-import NanoUI.Internal.Widgets.Node (Response, inertResponse, respClicked, respId, setClicked, withWidgetChildren)
+import NanoUI.Internal.Widgets.Node (Response, respClicked, respId, withWidgetChildren)
 import NanoUI.Svg (Svg)
 
 -- | Button with a text label. 'True' on the frame it is clicked, by pointer
@@ -83,9 +82,7 @@ buttonConfigured cfg txt = respClicked <$> buttonConfigured' cfg txt
 buttonConfigured' :: ButtonConfig -> Text -> NanoUI Response
 buttonConfigured' (ButtonConfig lay adorns) txt = do
   resp <- buttonStyledEx True txt 0 lay 0
-  taken <- adornWidget (respId resp) lay (labelColor lay) adorns
-  -- When an adornment control captures the pointer, ignore pointer clicks on the outer button.
-  if taken then (`setClicked` inertResponse resp) <$> keyActivated (respId resp) else pure resp
+  adornButton resp lay (labelColor lay) adorns
 
 labelColor :: Layout -> Theme -> Color
 labelColor lay theme = fromMaybe (styleFg (themeButton theme)) (layoutFontColor lay)

@@ -358,6 +358,28 @@ colFloor sizes contentWs i = case smallAt sizes i ColContent of
 flatLayout :: Layout
 flatLayout = tight defaultLayout {layoutGap = 0}
 
+tableRowMinH :: Float
+tableRowMinH = 28
+
+textCellLayout, numCellLayout :: Layout
+textCellLayout =
+  (tight defaultLayout)
+    { layoutWidth = Grow 1
+    , layoutHeight = Grow 1
+    , layoutAlignX = AlignStart
+    , layoutAlignY = AlignMiddle
+    , layoutMinH = tableRowMinH
+    , layoutFontVariant = FontRegular
+    }
+numCellLayout =
+  textCellLayout
+    { layoutAlignX = AlignEnd
+    , layoutFontVariant = FontMono
+    }
+
+tableCellLayout :: Bool -> Layout
+tableCellLayout isNum = if isNum then numCellLayout else textCellLayout
+
 -- | Column @i@'s box: its stored width (never under its floor) once it has
 -- one, else a share of the spare width when the columns fill the table, else
 -- its floor. Columns stretch to the row height so every cell's background
@@ -487,7 +509,7 @@ tableCore cfg f key cols inputRows curSort =
         nRows = sizeofSmallArray encoded
         pinnedN = clamp 0 nRows (tableFreezeRows cfg)
         scrollN = nRows - pinnedN
-        rowMinH = 28
+        rowMinH = tableRowMinH
         -- Columns fill the table width when one stretches or the table
         -- grows.
         fillInner =
@@ -498,16 +520,7 @@ tableCore cfg f key cols inputRows curSort =
         colBoxes =
           smallArrayFromList (map (colBoxLayout fillInner hasStretch sizes contentWs (primArrayFromList widths1)) [0 .. n - 1])
         colBox i = smallAt colBoxes i (tight defaultLayout)
-        cellLayouts = smallArrayFromList $ flip map [0 .. n - 1] $ \i ->
-          (tight defaultLayout)
-              { layoutWidth = Grow 1
-              , layoutHeight = Grow 1
-              , layoutAlignX = if smallAt numeric i False then AlignEnd else AlignStart
-              , layoutAlignY = AlignMiddle
-              , layoutMinH = rowMinH
-              , layoutFontVariant = if smallAt numeric i False then FontMono else FontRegular
-              }
-        cellLayout i = smallAt cellLayouts i (tight defaultLayout)
+        cellLayout i = tableCellLayout (smallAt numeric i False)
         -- Cell @i@ of display row @ri@, which shows encoded row @r@.
         renderCell ri r i = do
           wid <- nextId
@@ -632,22 +645,13 @@ tableCore cfg f key cols inputRows curSort =
           useReorder vis (if resizing || isJust edgeCol then [] else headerPairs)
       let vis' = reorderOrder reorder
           mReorder = reorderDragging reorder
-          pressResize = pressedIn MouseLeft inp && isJust edgeCol
-          nextDrag
-            | pressedIn MouseLeft inp = maybe HeaderIdle HeaderResize edgeCol
-            | releasedIn MouseLeft inp || not (heldIn MouseLeft inp) = HeaderIdle
-            | otherwise = drag0
-          nextDragX
-            | pressResize = mx
-            | nextDrag == HeaderIdle = 0
-            | otherwise = dragX0
-          nextDragW
-            | pressResize = maybe 0 headerW edgeCol
-            | nextDrag == HeaderIdle = 0
-            | otherwise = dragW0
           headerW i = case lookup i headerRects of
             Just r | rectW r > 0 -> rectW r
             _ -> layoutMinW (colBox i)
+          (nextDrag, nextDragX, nextDragW)
+            | pressedIn MouseLeft inp, Just col <- edgeCol = (HeaderResize col, mx, headerW col)
+            | pressedIn MouseLeft inp || releasedIn MouseLeft inp || not (heldIn MouseLeft inp) || drag0 == HeaderIdle = (HeaderIdle, 0, 0)
+            | otherwise = (drag0, dragX0, dragW0)
           nextOrder = if vis' /= vis then rebuildOrder hidden0 vis' order0 else order0
           -- respRightClicked, not a bare release: a right press that went down
           -- elsewhere and came up over a header must not hide that column.
@@ -726,10 +730,11 @@ sortIndices dir keys = runST $ do
                   -- Reversed means every right key is strictly first, so
                   -- swapping the runs keeps the sort stable.
                   inOrder <- if mid >= hi then pure True else before <$> readPrimArray src (mid - 1) <*> readPrimArray src mid
-                  merge <- if inOrder then pure False else before <$> readPrimArray src lo <*> readPrimArray src (hi - 1)
                   if inOrder
                     then copy lo lo (hi - lo)
-                    else if merge then go lo mid lo else copy mid lo (hi - mid) >> copy lo (lo + hi - mid) (mid - lo)
+                    else do
+                      merge <- before <$> readPrimArray src lo <*> readPrimArray src (hi - 1)
+                      if merge then go lo mid lo else copy mid lo (hi - mid) >> copy lo (lo + hi - mid) (mid - lo)
                   mergeFrom hi
             mergeFrom 0
             pass dst src (2 * width)

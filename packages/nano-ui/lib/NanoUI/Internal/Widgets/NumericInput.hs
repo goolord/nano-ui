@@ -21,7 +21,7 @@ import Data.Text.Read qualified as TR
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestInputMethod, requestWakeAt, modifyStore)
 import NanoUI.Internal.Equality (sameDouble)
-import NanoUI.Internal.Input (InputPurpose (..), Key (..), MouseButton (..), Pressable (..), inputModifiers, inputMousePos, modShift)
+import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
@@ -136,42 +136,12 @@ numericInputCore cfg value = do
       | isFocus && tisText s1 == formatNumber cfg lastValue = lastValue
       | isFocus = maybe lastValue (clampNumber cfg) (parseNumber cfg (tisText s1))
       | otherwise = given
-    Rect rx ry rw rh = respRect resp
-    (upRect, downRect) = numericStepperRects rx ry rw rh
-    mouse = inputMousePos inp
-    over r dir = if respHovered resp && rectContains r mouse then dir else 0
-    pressDir
-      | pressedIn MouseLeft inp = over upRect 1 + over downRect (-1)
-      | otherwise = 0 :: Int
     heldK = slotKey SlotNumericHeld key
     repeatK = slotKey SlotNumericRepeat key
     held0 = findSlot fieldInt 0 heldK store
-    holding =
-      held0 /= 0
-        && heldIn MouseLeft inp
-        && over (if held0 > 0 then upRect else downRect) held0 /= 0
-    keyDir
-      | not isFocus = 0
-      | pressedIn KeyUp inp = 1
-      | pressedIn KeyDown inp = -1
-      | otherwise = 0
-  now <- if pressDir /= 0 || holding then liftIO getMonotonicTime else pure 0
-  let
     repeatAt0 = findSlot fieldDouble 0 repeatK store
-    repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
-    dir
-      | pressDir /= 0 = pressDir
-      | repeatDir /= 0 = repeatDir
-      | otherwise = keyDir
-    held1
-      | pressDir /= 0 = pressDir
-      | holding = held0
-      | otherwise = 0
-    repeatAt1
-      | pressDir /= 0 = now + 0.4
-      | repeatDir /= 0 = now + 0.06
-      | held1 == 0 = 0
-      | otherwise = repeatAt0
+  (dir, held1, repeatAt1) <- liftIO (stepNumericStepper resp isFocus inp held0 repeatAt0)
+  let
     scale = if modShift (inputModifiers inp) then 10 else 1
     final
       | dir /= 0 = clampNumber cfg (roundNumber cfg (current + fromIntegral dir * scale * nicStep cfg))
@@ -205,6 +175,43 @@ numericInputCore cfg value = do
   -- instead of running frames back to back until then.
   when (held1 /= 0) $ liftIO (requestWakeAt ctx repeatAt1)
   pure (setSubmitted submitted (setChanged (final /= value) resp), final)
+
+-- | Step the stepper arrows' press, auto-repeat timer, and Up/Down keys,
+-- returning @(stepDir, heldDir, nextRepeatAt)@.
+stepNumericStepper :: Response -> Bool -> Input -> Int -> Double -> IO (Int, Int, Double)
+stepNumericStepper resp isFocus inp held0 repeatAt0 = do
+  let Rect rx ry rw rh = respRect resp
+      (upRect, downRect) = numericStepperRects rx ry rw rh
+      mouse = inputMousePos inp
+      over r d = if respHovered resp && rectContains r mouse then d else 0
+      pressDir
+        | pressedIn MouseLeft inp = over upRect 1 + over downRect (-1)
+        | otherwise = 0
+      holding =
+        held0 /= 0
+          && heldIn MouseLeft inp
+          && over (if held0 > 0 then upRect else downRect) held0 /= 0
+      keyDir
+        | not isFocus = 0
+        | pressedIn KeyUp inp = 1
+        | pressedIn KeyDown inp = -1
+        | otherwise = 0
+  now <- if pressDir /= 0 || holding then getMonotonicTime else pure 0
+  let repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
+      dir
+        | pressDir /= 0 = pressDir
+        | repeatDir /= 0 = repeatDir
+        | otherwise = keyDir
+      held1
+        | pressDir /= 0 = pressDir
+        | holding = held0
+        | otherwise = 0
+      repeatAt1
+        | pressDir /= 0 = now + 0.4
+        | repeatDir /= 0 = now + 0.06
+        | held1 == 0 = 0
+        | otherwise = repeatAt0
+  pure (dir, held1, repeatAt1)
 
 clampNumber :: NumericInputConfig -> Double -> Double
 clampNumber cfg = clamp (nicMin cfg) (nicMax cfg)

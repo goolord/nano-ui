@@ -456,11 +456,12 @@ recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)
   disabled <- isDisabled ctx focus
   inert <- isInert ctx focus
-  kind <- case () of
-    _
-      | hashWidgetId focus == 0 || disabled || inert -> pure FocusNone
-      | ime -> pure FocusComposing
-      | otherwise -> withWidgetNode ctx focus FocusNone $ \idx -> do
+  kind <-
+    if hashWidgetId focus == 0 || disabled || inert
+      then pure FocusNone
+      else if ime
+        then pure FocusComposing
+        else withWidgetNode ctx focus FocusNone $ \idx -> do
           let si = getStyleIdx (ctxNodeArena ctx) idx
           getNodeType (ctxNodeArena ctx) idx >>= \case
             NodeTextInput -> si <&> \s -> if hasFlag textInputFlagSelectable s then FocusTextSelectable else FocusTextLine

@@ -333,6 +333,8 @@ shapeLine sf inv txt = do
   ensureAlive sf
   fallbacks <- IM.elems <$> readIORef (sfFallbacks sf)
   let fontList = sf : fallbacks
+      fontPtrs = map sfFont fontList
+      fontIndex ptr = maybe 0 fromIntegral (elemIndex ptr fontPtrs)
       n = T.length txt
       totalBytes = lengthWord8 txt
       runs = shapingRuns txt
@@ -369,7 +371,7 @@ shapeLine sf inv txt = do
           [] -> pure (pen, height, inkEnd, endStop)
           (start, _, _) : rest -> do
             let result = resultOf p
-                byteStart = lengthWord8 (T.take start txt)
+                byteStart = if ascii then start else lengthWord8 (T.take start txt)
             w <- fromIntegral <$> ttfShapedInt result 0
             h <- fromIntegral <$> ttfShapedInt result 1
             nGlyphs <- fromIntegral <$> ttfShapedInt result 2
@@ -379,20 +381,20 @@ shapeLine sf inv txt = do
             clusterPtr <- castPtr <$> ttfShapedPtr result 2
             let glyphInt :: Int -> IO Int32
                 glyphInt k = fromIntegral <$> peekElemOff (glyphPtr :: Ptr CInt) k
-                fontIndex ptr = maybe 0 fromIntegral (elemIndex ptr (map sfFont fontList))
                 -- SDL_ttf's ten numbers a glyph start with its text offset,
                 -- which carets take from the clusters instead.
                 copyGlyphs !i !ink
                   | i >= nGlyphs = pure ink
                   | otherwise = do
+                      let dst = (g0 + i) * 9
                       forM_ [1 .. 9] $ \k -> do
                         v <- glyphInt (i * 10 + k)
-                        writePrimArray glyphs ((g0 + i) * 9 + k - 1) (if k == 2 then v + fromIntegral pen else v)
-                      x <- glyphInt (i * 10 + 2)
-                      gw <- glyphInt (i * 10 + 4)
+                        writePrimArray glyphs (dst + k - 1) (if k == 2 then v + fromIntegral pen else v)
+                      x1 <- readPrimArray glyphs (dst + 1)
+                      gw <- readPrimArray glyphs (dst + 3)
                       ptr <- peekElemOff (fontPtr :: Ptr (Ptr ())) i
                       writePrimArray fontIndices (g0 + i) (fontIndex ptr)
-                      copyGlyphs (i + 1) (max ink (fromIntegral x + pen + fromIntegral gw))
+                      copyGlyphs (i + 1) (max ink (fromIntegral (x1 + gw) :: Int))
                 clusterInt :: Int -> IO Int
                 clusterInt k = fromIntegral <$> peekElemOff (clusterPtr :: Ptr CInt) k
                 -- A cluster's characters share its width, from its left edge
@@ -552,6 +554,30 @@ coverageFamilies =
   , "Apple SD Gothic Neo", "Apple Symbols"
   ]
 
+-- | Put a shaped line's glyphs in the atlas. A glyph the atlas has no room
+-- for draws nothing, and the atlas resets before the next frame.
+placeShapedGlyphs :: GlyphAtlas -> Float -> Shaped -> IO ShapedGlyphs
+placeShapedGlyphs ga inv (Shaped _ _ glyphs fontIndices fonts) = do
+  let !count = sizeofPrimArray fontIndices
+  out <- newPrimArray (count * 8)
+  forM_ [0 .. count - 1] $ \i -> do
+    let g k = fromIntegral (indexPrimArray glyphs (i * 9 + k)) :: Float
+        write k = writePrimArray out (i * 8 + k)
+        font = indexSmallArray fonts (fromIntegral (indexPrimArray fontIndices i))
+    mSlot <- lookupOrInsertGlyph ga font (fromIntegral (indexPrimArray glyphs (i * 9)))
+    forM_ [0 .. 3] $ \k -> write k (g (k + 1) / inv)
+    case mSlot of
+      Just slot -> do
+        -- A glyph drawn in part samples only its source rect.
+        let u0 = gsU0 slot + g 5 / glyphAtlasSize
+            v0 = gsV0 slot + g 6 / glyphAtlasSize
+        write 4 u0
+        write 5 v0
+        write 6 (if g 7 > 0 then u0 + g 7 / glyphAtlasSize else gsU1 slot)
+        write 7 (if g 8 > 0 then v0 + g 8 / glyphAtlasSize else gsV1 slot)
+      Nothing -> zipWithM_ write [4 ..] [deadU, deadV, deadU, deadV]
+  ShapedGlyphs <$> unsafeFreezePrimArray out
+
 -- | Build immutable metric snapshots and explicit IO rasterisation callbacks.
 -- Font queries happen in 'fbPrepare' and atlas insertion in 'fbDrawShaped'.
 -- Every non-empty line is shaped, so the per-character glyph fallback draws
@@ -615,30 +641,7 @@ buildGlyphFontMetrics ga sf scale = do
           -- Placing glyphs never resets the atlas (a full one resets at the
           -- next frame start), so these quads belong to this epoch.
           cachedRun ga quadRun txt $
-            Just <$> (placeGlyphs =<< shapeOf txt)
-
-    -- Put a shaped line's glyphs in the atlas. A glyph the atlas has no room
-    -- for draws nothing, and the atlas resets before the next frame.
-    placeGlyphs (Shaped _ _ glyphs fontIndices fonts) = do
-      let !count = sizeofPrimArray fontIndices
-      out <- newPrimArray (count * 8)
-      forM_ [0 .. count - 1] $ \i -> do
-        let g k = fromIntegral (indexPrimArray glyphs (i * 9 + k)) :: Float
-            write k = writePrimArray out (i * 8 + k)
-            font = indexSmallArray fonts (fromIntegral (indexPrimArray fontIndices i))
-        mSlot <- lookupOrInsertGlyph ga font (fromIntegral (indexPrimArray glyphs (i * 9)))
-        forM_ [0 .. 3] $ \k -> write k (g (k + 1) / inv)
-        case mSlot of
-          Just slot -> do
-            -- A glyph drawn in part samples only its source rect.
-            let u0 = gsU0 slot + g 5 / glyphAtlasSize
-                v0 = gsV0 slot + g 6 / glyphAtlasSize
-            write 4 u0
-            write 5 v0
-            write 6 (if g 7 > 0 then u0 + g 7 / glyphAtlasSize else gsU1 slot)
-            write 7 (if g 8 > 0 then v0 + g 8 / glyphAtlasSize else gsV1 slot)
-          Nothing -> zipWithM_ write [4 ..] [deadU, deadV, deadU, deadV]
-      ShapedGlyphs <$> unsafeFreezePrimArray out
+            Just <$> (placeShapedGlyphs ga inv =<< shapeOf txt)
 
     -- The shaped layout of a line, shared by measuring, preparing and
     -- drawing it. Fonts that cover characters this one lacks join it before

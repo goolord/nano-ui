@@ -281,6 +281,54 @@ comboBox placeholder options v = void (comboBox' placeholder options v)
 comboBox' :: Foldable f => Text -> f Text -> Var Text -> NanoUI Response
 comboBox' placeholder options v = bindVar RenderFinal v (comboBoxCore placeholder options)
 
+-- | Load the persisted combo state for @key@, defaulting committed and live
+-- text to @value@ and @text@.
+loadComboState :: WidgetStore -> Int -> Text -> Text -> ComboState
+loadComboState store key value text =
+  ComboState
+    { csHighlight = findSlot fieldInt (-1) (slotKey SlotComboHighlight key) store
+    , csWindow = findSlot fieldInt 0 (slotKey SlotComboScroll key) store
+    , csScrollX = findSlot fieldFloat 0 (slotKey SlotComboScrollX key) store
+    , csContentW = findSlot fieldFloat 0 (slotKey SlotComboContentW key) store
+    , csDrag = findSlot fieldInt 0 (slotKey SlotComboDrag key) store
+    , csDragOff = findSlot fieldFloat 0 (slotKey SlotComboDragOff key) store
+    , csCommitted = findSlot fieldText value (slotKey SlotComboCommitted key) store
+    , csLive = findSlot fieldText text (slotKey SlotComboLive key) store
+    , csFocused = flagSlot (slotKey SlotComboFocus key) store
+    , csNavPointer = V2 <$> quietFloat SlotComboHighlight <*> quietFloat SlotComboScroll
+    }
+  where
+    -- The resting pointer is bookkeeping no paint reads, so it lives in
+    -- quiet slots (as float bits), which neither damage nor wake.
+    quietFloat slot = castWord32ToFloat . fromIntegral <$> lookupSlot fieldQuiet (slotKey slot key) store
+
+-- | Persist @cs@ and option count @matchCount@ for @key@, moving the caret to
+-- the end when @picked@ is 'True'.
+saveComboState :: Int -> Int -> Bool -> ComboState -> WidgetStore -> WidgetStore
+saveComboState key matchCount picked cs =
+  caretToEnd
+    . insertSlot fieldInt (slotKey SlotComboHighlight key) (csHighlight cs)
+    . navPointerAt SlotComboHighlight v2X (csNavPointer cs)
+    . navPointerAt SlotComboScroll v2Y (csNavPointer cs)
+    . insertSlot fieldInt (slotKey SlotComboScroll key) (csWindow cs)
+    . insertSlot fieldInt (slotKey SlotComboCount key) matchCount
+    . insertSlot fieldInt (slotKey SlotComboFocus key) (boolInt (csFocused cs))
+    . insertSlot fieldInt (slotKey SlotComboDrag key) (csDrag cs)
+    . insertSlot fieldFloat (slotKey SlotComboScrollX key) (csScrollX cs)
+    . insertSlot fieldFloat (slotKey SlotComboContentW key) (csContentW cs)
+    . insertSlot fieldFloat (slotKey SlotComboDragOff key) (csDragOff cs)
+    . insertSlot fieldText (slotKey SlotComboLive key) finalText
+    . insertSlot fieldText (slotKey SlotComboCommitted key) (csCommitted cs)
+    . insertSlot fieldText key finalText
+  where
+    finalText = csLive cs
+    len = T.length finalText
+    caretToEnd = if picked then setFieldSelection key len len else id
+    navPointerAt slot coord =
+      maybe
+        (deleteSlot fieldQuiet (slotKey slot key))
+        (insertSlot fieldQuiet (slotKey slot key) . fromIntegral . castFloatToWord32 . coord)
+
 comboBoxCore :: Foldable f => Text -> f Text -> Text -> NanoUI (Response, Text)
 comboBoxCore placeholder options value = do
   (resp, text) <-
@@ -296,24 +344,7 @@ comboBoxCore placeholder options value = do
   ComboMatches opts query matches cachedW <- liftIO (comboMatches ctx key (toList options) text)
   let displayed = if isFocus then matches else []
   store <- liftIO (getStore ctx)
-  let cs0 =
-        ComboState
-          { csHighlight = findSlot fieldInt (-1) (slotKey SlotComboHighlight key) store
-          , csWindow = findSlot fieldInt 0 (slotKey SlotComboScroll key) store
-          , csScrollX = findSlot fieldFloat 0 (slotKey SlotComboScrollX key) store
-          , csContentW = findSlot fieldFloat 0 (slotKey SlotComboContentW key) store
-          , csDrag = findSlot fieldInt 0 (slotKey SlotComboDrag key) store
-          , csDragOff = findSlot fieldFloat 0 (slotKey SlotComboDragOff key) store
-          , csCommitted = findSlot fieldText value (slotKey SlotComboCommitted key) store
-          , csLive = findSlot fieldText text (slotKey SlotComboLive key) store
-          , csFocused = flagSlot (slotKey SlotComboFocus key) store
-          , csNavPointer = V2 <$> quietFloat SlotComboHighlight <*> quietFloat SlotComboScroll
-          }
-      -- The resting pointer is bookkeeping no paint reads, so it lives in
-      -- quiet slots (as float bits), which neither damage nor wake.
-      quietFloat slot = castWord32ToFloat . fromIntegral <$> lookupSlot fieldQuiet (slotKey slot key) store
-      navPointerAt slot coord =
-        maybe (deleteSlot fieldQuiet (slotKey slot key)) (insertSlot fieldQuiet (slotKey slot key) . fromIntegral . castFloatToWord32 . coord)
+  let cs0 = loadComboState store key value text
   contentW <- liftIO $
     case cachedW of
       Just w | isFocus -> pure w
@@ -338,25 +369,7 @@ comboBoxCore placeholder options value = do
       finalText = csLive cs1
   when (isFocus || stepRedraw step) $
     liftIO $ do
-      let len = T.length finalText
-          caretToEnd
-            | stepPicked step = setFieldSelection key len len
-            | otherwise = id
-      modifyStore ctx $
-        caretToEnd
-          . insertSlot fieldInt (slotKey SlotComboHighlight key) (csHighlight cs1)
-          . navPointerAt SlotComboHighlight v2X (csNavPointer cs1)
-          . navPointerAt SlotComboScroll v2Y (csNavPointer cs1)
-          . insertSlot fieldInt (slotKey SlotComboScroll key) (csWindow cs1)
-          . insertSlot fieldInt (slotKey SlotComboCount key) (length matches)
-          . insertSlot fieldInt (slotKey SlotComboFocus key) (boolInt (csFocused cs1))
-          . insertSlot fieldInt (slotKey SlotComboDrag key) (csDrag cs1)
-          . insertSlot fieldFloat (slotKey SlotComboScrollX key) (csScrollX cs1)
-          . insertSlot fieldFloat (slotKey SlotComboContentW key) (csContentW cs1)
-          . insertSlot fieldFloat (slotKey SlotComboDragOff key) (csDragOff cs1)
-          . insertSlot fieldText (slotKey SlotComboLive key) finalText
-          . insertSlot fieldText (slotKey SlotComboCommitted key) (csCommitted cs1)
-          . insertSlot fieldText key finalText
+      modifyStore ctx (saveComboState key (length matches) (stepPicked step) cs1)
       when (stepDismissed step) $ do
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         markEscapeConsumed ctx

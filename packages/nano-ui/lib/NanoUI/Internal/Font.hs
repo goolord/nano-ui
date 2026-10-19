@@ -632,23 +632,17 @@ wrapTextIO lineW txt maxW = do
           -- word at a time.
           extend fromLine lineLen acc = do
             let fits end = (<= maxW) <$> lineW (T.take end fromLine)
-                nextEnd end
-                  | T.null (T.dropWhile (== ' ') after) = Nothing
-                  | otherwise = Just (end + wordEnd after)
-                  where
-                    after = T.drop end fromLine
-                prevEnd end = T.length (T.dropWhileEnd (== ' ') (T.dropWhileEnd (/= ' ') (T.take end fromLine)))
                 guess
                   | T.compareLength fromLine perLine /= GT = T.length (T.dropWhileEnd (== ' ') fromLine)
-                  | otherwise = max lineLen (prevEnd (perLine + 1))
-                up end = case nextEnd end of
+                  | otherwise = max lineLen (prevWordEnd fromLine (perLine + 1))
+                up end = case nextWordEnd fromLine end of
                   Just end' -> fits end' >>= \ok -> if ok then up end' else pure end
                   Nothing -> pure end
                 down end
                   | end' <= lineLen = pure lineLen
                   | otherwise = fits end' >>= \ok -> if ok then pure end' else down end'
                   where
-                    end' = prevEnd end
+                    end' = prevWordEnd fromLine end
             end <-
               if guess <= lineLen
                 then up lineLen
@@ -656,10 +650,8 @@ wrapTextIO lineW txt maxW = do
             let line = T.take end fromLine
                 rest = T.dropWhile (== ' ') (T.drop end fromLine)
             lineW line >>= lineOf
-            forM_ (nextEnd end) $ \end' -> lineW (T.take end' fromLine) >>= breakAt
+            forM_ (nextWordEnd fromLine end) $ \end' -> lineW (T.take end' fromLine) >>= breakAt
             if T.null rest then pure (reverse (line : acc)) else startLine rest (line : acc)
-      -- Length of a text's leading spaces plus the word after them.
-      wordEnd t = let (spaces, rest) = T.span (== ' ') t in T.length spaces + T.length (T.takeWhile (/= ' ') rest)
       charLines perLine chunk acc
         | T.null chunk = pure acc
         | otherwise = do
@@ -677,6 +669,23 @@ wrapTextIO lineW txt maxW = do
     else do
       textLines <- concat <$> mapM wrapParagraph (T.lines txt)
       WrapResult textLines <$> readIORef widestRef <*> readIORef fitRef <*> readIORef breakRef
+
+-- | Length of a text's leading spaces plus the word after them.
+wordEnd :: Text -> Int
+wordEnd t =
+  let (spaces, rest) = T.span (== ' ') t
+   in T.length spaces + T.length (T.takeWhile (/= ' ') rest)
+
+nextWordEnd :: Text -> Int -> Maybe Int
+nextWordEnd fromLine end
+  | T.null (T.dropWhile (== ' ') after) = Nothing
+  | otherwise = Just (end + wordEnd after)
+  where
+    after = T.drop end fromLine
+
+prevWordEnd :: Text -> Int -> Int
+prevWordEnd fromLine end =
+  T.length (T.dropWhileEnd (== ' ') (T.dropWhileEnd (/= ' ') (T.take end fromLine)))
 
 -- | About how many characters of @txt@, which the host measures @w@ wide,
 -- fit in @maxW@.

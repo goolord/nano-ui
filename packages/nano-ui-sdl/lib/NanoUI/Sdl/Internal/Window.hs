@@ -486,6 +486,26 @@ askSdlEnv = askBackendSession SSdl
 withSdlEnv :: a -> (SdlEnv -> IO a) -> NanoUI a
 withSdlEnv outside k = askSdlEnv >>= maybe (pure outside) (liftIO . k)
 
+acquireWindowAndRenderer ::
+  SdlOptions -> SDL_WindowFlags -> Acquire (Ptr SDL_Window, Ptr SDL_Renderer)
+acquireWindowAndRenderer opts flags =
+  mkAcquire
+    ( withRenderDriver (sdlRenderDriver opts) $
+        TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
+          (ok, win, ren) <-
+            outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
+          unless ok $ fail "SDL_CreateWindowAndRenderer failed"
+          pure (win, ren)
+    )
+    ( \(win, ren) -> do
+        void $ setRenderScale ren 1 1
+        destroyRendererSafe ren
+        destroyWindowSafe win
+    )
+  where
+    settings = sdlWindowSettings opts
+    Size w h = wsSize settings
+
 startSdlWindow ::
   SdlOptions -> SDL_WindowFlags -> Context -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
 startSdlWindow opts flags ctx fontSource monoSource = do
@@ -493,28 +513,13 @@ startSdlWindow opts flags ctx fontSource monoSource = do
     (unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) (fail "SDL_Init(SDL_INIT_VIDEO) failed"))
     (const quitSafe)
   liftIO $ unlessM initRefreshEvent (fail "SDL_RegisterEvents failed for refresh wake")
-  let
-    settings = sdlWindowSettings opts
-    Size w h = wsSize settings
+  let settings = sdlWindowSettings opts
   -- NANO_FORCE_SCALE: debug override of the pixel density.
   sdlForcedScale <- liftIO $ mfilter (> 0) . (>>= readMaybe) <$> lookupEnv "NANO_FORCE_SCALE"
   -- Before the window, so that it is released after the window is gone: the
   -- window holds the hit test this frees.
   sdlChromeState <- mkAcquire newChromeState clearChromeState
-  (sdlWindow, sdlRenderer) <-
-    mkAcquire
-      ( withRenderDriver (sdlRenderDriver opts) $
-          TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
-            (ok, win, ren) <-
-              outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
-            unless ok $ fail "SDL_CreateWindowAndRenderer failed"
-            pure (win, ren)
-      )
-      ( \(win, ren) -> do
-          void $ setRenderScale ren 1 1
-          destroyRendererSafe ren
-          destroyWindowSafe win
-      )
+  (sdlWindow, sdlRenderer) <- acquireWindowAndRenderer opts flags
   density <- liftIO $ queryWindowPixelDensity sdlWindow
   zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)
   -- The requested size is logical, so the window grows with the zoom.

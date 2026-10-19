@@ -412,17 +412,20 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
             pokeStripAt vp ip base baseIdx viLR iiLR leftX y0 leftX (y0 + midH) ibw r g b a
             pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX y0 rightX (y0 + midH) ibw r g b a
           when corners $ do
-            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a viC iiC (px + rad) (py + rad) 0
-            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
-            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
-            pokeArcTop vp ip base baseIdx hasCore arcStride arcIndices n innerAA inner outerR outerAA r g b a (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
+            pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a viC iiC (px + rad) (py + rad) 0
+            pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
+            pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
+            pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
           commitRaw da base baseIdx needV needI
 
 -- | One corner arc of a rounded stroke, as a top-level worker so the stroke
 -- allocates no closure for it.
 {-# NOINLINE pokeArcTop #-}
-pokeArcTop :: Ptr Word8 -> Ptr Word8 -> Int -> Int -> Bool -> Int -> Int -> Int -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Float -> Int -> IO ()
-pokeArcTop !vp !ip !base !baseIdx !hasCore !arcStride !arcIndices !n !innerAA !inner !outerR !outerAA !r !g !b !a !vi !ii !ccx !ccy !q = do
+pokeArcTop :: Ptr Word8 -> Ptr Word8 -> Int -> Int -> Bool -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Float -> Int -> IO ()
+pokeArcTop !vp !ip !base !baseIdx !hasCore !innerAA !inner !outerR !outerAA !r !g !b !a !vi !ii !ccx !ccy !q = do
+  let !n = cornerSegments
+      !arcStride = if hasCore then 4 else 3
+      !arcIndices = if hasCore then 18 else 12
   forUpTo_ (n + 1) $ \i -> do
     let !(ct, st) = cornerCosSin q i
     pokeBandVerts vp ((base + vi + i * arcStride) * vertexSize) hasCore r g b a $

@@ -103,23 +103,7 @@ runFrameEff unlift ctx rawInp ui = do
     markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   focusBefore <- readIORef (ctxFocusId ctx)
-  result <- do
-    beginVarPass ctx 1
-    result0 <- unlift (runUi ctx frameInp ui)
-    -- Pending click is one-shot. Clear before a rerun so toggles do not fire twice.
-    writeIORef (ctxClickedId ctx) (WidgetId 0)
-    -- A backwards Var write means something this pass drew is stale: run
-    -- the view again without the input it already acted on.
-    rerun <- takeVarRerun ctx
-    r <-
-      if rerun
-        then do
-          resetUiBuild ctx False
-          beginVarPass ctx 2
-          unlift (runUi ctx (stripInteractionInput frameInp) ui)
-        else pure result0
-    endVarFrame ctx
-    pure r
+  result <- runViewPasses unlift ctx frameInp ui
   -- Clear the one-shot close request ('NanoUI.winCloseRequested') after the
   -- view has run.
   clearWindowClose ctx
@@ -140,29 +124,7 @@ runFrameEff unlift ctx rawInp ui = do
     layoutArena ctx size False
   persistWindowPositions ctx
   applyScrollOffsets ctx size
-  -- A press on a menu or dropdown leaves nothing active, whatever a release
-  -- that never arrived left behind.
-  when (pressedIn MouseLeft frameInp && not (pressedIn MouseLeft layerInp)) $
-    writeIORef (ctxActiveId ctx) (WidgetId 0)
-  targets <- pressTargets ctx layerInp
-  finalizePointerPress ctx targets
-  finalizePointerRelease ctx layerInp
-  disarmPointerPress ctx frameInp
-  finalizeTextInputFocus ctx layerInp targets
-  finalizeSelectFocus ctx targets
-  finalizeDrawingFocus ctx targets
-  finalizeTextFieldMouse ctx layerInp (ptFieldControl targets)
-  closeTextEditMenuOnOutsideClick ctx frameInp
-  openTextEditMenu ctx layerInp
-  finalizeTextEditMenuPick ctx menuInp
-  closeTextEditMenuOnEscape ctx frameInp
-  finalizeFocusRequest ctx
-  constrainFocusToModal ctx
-  finalizeTabFocus ctx frameInp
-  settleInputMethod ctx focusBefore
-  finalizeSelectKeyboard ctx frameInp
-  finalizeSelectPick ctx dropInp
-  closeSelectOnOutsideClick ctx frameInp
+  finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
   updatePrevRects ctx size
@@ -203,6 +165,62 @@ runFrameEff unlift ctx rawInp ui = do
   drawData <- paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse
   dirtyAfterUi <- isDirty ctx
   pure (result, drawData, dirtyAfterUi)
+
+-- | Run the view pass, and re-run without interaction input if a backwards
+-- 'Var' write invalidated what pass 1 drew.
+{-# INLINE runViewPasses #-}
+runViewPasses ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  Input ->
+  Eff (Ui : es) a ->
+  IO a
+runViewPasses unlift ctx frameInp ui = do
+  beginVarPass ctx 1
+  result0 <- unlift (runUi ctx frameInp ui)
+  -- Pending click is one-shot. Clear before a rerun so toggles do not fire twice.
+  writeIORef (ctxClickedId ctx) (WidgetId 0)
+  rerun <- takeVarRerun ctx
+  r <-
+    if rerun
+      then do
+        resetUiBuild ctx False
+        beginVarPass ctx 2
+        unlift (runUi ctx (stripInteractionInput frameInp) ui)
+      else pure result0
+  endVarFrame ctx
+  pure r
+
+-- | Settle pointer presses/releases, focus transitions, IME, text-edit menu,
+-- and select dropdowns against the solved layout.
+{-# INLINE finalizeFrameInput #-}
+finalizeFrameInput ::
+  Context -> Input -> Input -> Input -> Input -> WidgetId -> IO ()
+finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore = do
+  -- A press on a menu or dropdown leaves nothing active, whatever a release
+  -- that never arrived left behind.
+  when (pressedIn MouseLeft frameInp && not (pressedIn MouseLeft layerInp)) $
+    writeIORef (ctxActiveId ctx) (WidgetId 0)
+  targets <- pressTargets ctx layerInp
+  finalizePointerPress ctx targets
+  finalizePointerRelease ctx layerInp
+  disarmPointerPress ctx frameInp
+  finalizeTextInputFocus ctx layerInp targets
+  finalizeSelectFocus ctx targets
+  finalizeDrawingFocus ctx targets
+  finalizeTextFieldMouse ctx layerInp (ptFieldControl targets)
+  closeTextEditMenuOnOutsideClick ctx frameInp
+  openTextEditMenu ctx layerInp
+  finalizeTextEditMenuPick ctx menuInp
+  closeTextEditMenuOnEscape ctx frameInp
+  finalizeFocusRequest ctx
+  constrainFocusToModal ctx
+  finalizeTabFocus ctx frameInp
+  settleInputMethod ctx focusBefore
+  finalizeSelectKeyboard ctx frameInp
+  finalizeSelectPick ctx dropInp
+  closeSelectOnOutsideClick ctx frameInp
 
 -- | The key the frame's draw would be kept under ('drawReuseKey'), or
 -- 'Nothing' when it can be neither kept nor reused: reuse is off, the frame

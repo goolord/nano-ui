@@ -20,6 +20,7 @@ module NanoUI.Internal.Context.Overlay
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
+import Data.Maybe (isJust)
 
 import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
@@ -33,7 +34,7 @@ textInputEditActive :: Context -> IO Bool
 textInputEditActive ctx = do
   focus <- readIORef (ctxFocusId ctx)
   menu <- getsInteraction ctx isTextInputMenu
-  pure (hashWidgetId focus /= 0 || menu /= Nothing)
+  pure (hashWidgetId focus /= 0 || isJust menu)
 
 -- | Whether a modal is declared this frame or was active on the previous frame.
 modalActive :: Context -> IO Bool

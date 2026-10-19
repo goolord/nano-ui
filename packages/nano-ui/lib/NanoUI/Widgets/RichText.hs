@@ -42,7 +42,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Store (eqByPtr, ptrEq, fieldRichSelection, findSlot, insertSlot)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
@@ -188,105 +188,25 @@ richTextWithMode' selectable f pieces = do
         pure (Just current, dragged)
       else pure (Nothing, False)
   focused <- if selectable then keyboardFocused wid else pure False
-  let
-      V2 mx my = inputMousePos inp
-      hoveredRun
-        | not (respHovered resp) = Nothing
-        | otherwise =
-            listToMaybe
-              [ tokenRun tok
-              | line <- paraLines para
-              , my >= ry + lineTop line && my < ry + lineTop line + lineHeight line
-              , (x, tok) <- lineTokens line
-              , tokenKind tok /= Break
-              , mx >= rx + x && mx < rx + x + tokenWidth tok
-              , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
-              ]
-      -- Words are drawn separately, so backgrounds and decorations are drawn
-      -- once per piece per line, spanning the inner spaces. Backgrounds go
-      -- underneath.
-      draw _cdc (Rect x0 y0 w h) =
-        smallArrayFromList $
-          concatMap lineOps (linesAt w)
-            ++ [StrokeRoundedRect (Rect x0 y0 w h) 2 1 (themeFocusRing theme) | focused]
-        where
-          selected = selection >>= selectionOffsets
-          lineOps line =
-            let spans = pieceSpans line
-                highlights = maybe [] (\(lo, hi) -> selectionOps x0 y0 line lo hi (themeSelection theme)) selected
-             in [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
-                  ++ highlights
-                  ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
-                     | (x, runIdx, txt) <-
-                         [(x, runIdx, txt) | (x, Token txt runIdx Word _ _ _) <- lineTokens line]
-                           ++ [(x, runIdx, T.concat [tokenText tok | (_, tok) <- group]) | group@((x, Token _ runIdx _ _ _ _) : _) <- glyphGroups line]
-                     , let run = indexSmallArray runs runIdx
-                     ]
-                  ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
-                     | (run, runIdx, x1, x2) <- spans
-                     , let deco = decorationOf runIdx
-                           thick = max 1 (0.06 * runLineHeight run)
-                     , deco /= DecorationNone
-                     , offset <- decorationOffsets deco run
-                     ]
-          lineY line run = y0 + lineTop line + lineAscent line - runAscent run
-          isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
-          glyphGroups line =
-            groupBy joinsGlyphs [(x, tok) | (x, tok) <- lineTokens line, tokenKind tok == Glyph || tokenKind tok == GlyphSpace]
-          joinsGlyphs (_, a) (_, b) = tokenRun a == tokenRun b
-          -- Each piece's tokens on a line, trimmed of edge spaces: run, run
-          -- index, start x and end x.
-          pieceSpans line =
-            [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
-            | group <- groupBy joinsGlyphs (lineTokens line)
-            , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
-            , (x1, first) : _ <- [trimmed]
-            , let (lastX, lastTok) = last trimmed
-            ]
-      decorationOf runIdx =
-        (if Just runIdx == hoveredRun then addUnderline else id)
-          (textFontDecoration (runFont (indexSmallArray runs runIdx)))
-      -- Where underline and strikethrough sit below a line box's top, as
-      -- styled labels draw them.
-      decorationOffsets deco run =
-        let lh = runLineHeight run
-            under = runAscent run + max 1 (0.1 * lh)
-            strike = runAscent run * 0.65
-         in case deco of
-              DecorationUnderline -> [under]
-              DecorationStrikethrough -> [strike]
-              DecorationUnderlineStrike -> [under, strike]
-              DecorationNone -> []
+  let linkTokens =
+        [ (tokenRun tok, Rect (rx + x) (ry + lineTop line) (tokenWidth tok) (lineHeight line))
+        | respHovered resp
+        , line <- paraLines para
+        , (x, tok) <- lineTokens line
+        , tokenKind tok /= Break
+        , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
+        ]
+      hoveredRun =
+        listToMaybe [runIdx | (runIdx, r) <- linkTokens, rectContains r (inputMousePos inp)]
+      draw = drawParagraph runs theme hoveredRun selection focused linesAt
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection `hashWithSalt` focused
   liftIO $ do
     -- A move onto or off a link inside the hovered paragraph changes no hot
     -- widget, so no frame would show it: each link piece is a hover zone,
     -- and crossing one's edge runs a frame.
-    when (respHovered resp) $
-      forM_
-        [ Rect (rx + x) (ry + lineTop line) (tokenWidth tok) (lineHeight line)
-        | line <- paraLines para
-        , (x, tok) <- lineTokens line
-        , tokenKind tok /= Break
-        , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
-        ]
-        (registerHoverZone ctx False)
-    unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $ do
-      ParagraphCache n bound m <- readIORef cacheRef
-      let n' = if isJust cached then n else n + 1
-      writeIORef cacheRef
-        =<< if n' <= bound
-          then pure $! ParagraphCache n' bound (IM.insert (intKey wid) para m)
-          else do
-            -- Past the bound, drop paragraphs neither drawn last frame nor
-            -- yet this one, then set the bound to twice what is left. Views
-            -- with more paragraphs than the bound keep them all, and pruning
-            -- runs occasionally rather than every frame.
-            prev <- getsDamage ctx (pfRects . dsPrev)
-            now <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
-            let kept = IM.insert (intKey wid) para (IM.filterWithKey (\k _ -> IM.member k prev || IM.member k now) m)
-                size = IM.size kept
-            pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
+    forM_ linkTokens (registerHoverZone ctx False . snd)
+    unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
+      cacheParagraph ctx cacheRef wid (isJust cached) para
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
       if availW >= 1e9 then paraNatural para else measureAt (paraMeasured para) (lineBoxes . linesAt) availW
     registerCustomEntry ctx wid $
@@ -303,6 +223,83 @@ richTextWithMode' selectable f pieces = do
   pure (resp, clicked)
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
+
+-- | Words are drawn separately, so backgrounds and decorations are drawn once
+-- per piece per line, spanning the inner spaces. Backgrounds go underneath.
+drawParagraph ::
+  SmallArray Run ->
+  Theme ->
+  Maybe Int ->
+  Maybe RichSelection ->
+  Bool ->
+  (Float -> [Line]) ->
+  CustomDrawContext ->
+  Rect ->
+  SmallArray DrawOp
+drawParagraph runs theme hoveredRun selection focused linesAt _cdc (Rect x0 y0 w h) =
+  smallArrayFromList $
+    concatMap lineOps (linesAt w)
+      ++ [StrokeRoundedRect (Rect x0 y0 w h) 2 1 (themeFocusRing theme) | focused]
+  where
+    selected = selection >>= selectionOffsets
+    lineOps line =
+      let spans = pieceSpans line
+          highlights = maybe [] (\(lo, hi) -> selectionOps x0 y0 line lo hi (themeSelection theme)) selected
+       in [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
+            ++ highlights
+            ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
+               | (x, runIdx, txt) <-
+                   [(x, runIdx, txt) | (x, Token txt runIdx Word _ _ _) <- lineTokens line]
+                     ++ [(x, runIdx, T.concat [tokenText tok | (_, tok) <- group]) | group@((x, Token _ runIdx _ _ _ _) : _) <- glyphGroups line]
+               , let run = indexSmallArray runs runIdx
+               ]
+            ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
+               | (run, runIdx, x1, x2) <- spans
+               , let deco = decorationOf runIdx
+                     thick = max 1 (0.06 * runLineHeight run)
+               , deco /= DecorationNone
+               , offset <- decorationOffsets deco run
+               ]
+    lineY line run = y0 + lineTop line + lineAscent line - runAscent run
+    isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
+    glyphGroups line =
+      groupBy joinsGlyphs [(x, tok) | (x, tok) <- lineTokens line, tokenKind tok == Glyph || tokenKind tok == GlyphSpace]
+    joinsGlyphs (_, a) (_, b) = tokenRun a == tokenRun b
+    pieceSpans line =
+      [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
+      | group <- groupBy joinsGlyphs (lineTokens line)
+      , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
+      , (x1, first) : _ <- [trimmed]
+      , let (lastX, lastTok) = last trimmed
+      ]
+    decorationOf runIdx =
+      (if Just runIdx == hoveredRun then addUnderline else id)
+        (textFontDecoration (runFont (indexSmallArray runs runIdx)))
+    decorationOffsets deco run =
+      let lh = runLineHeight run
+          under = runAscent run + max 1 (0.1 * lh)
+          strike = runAscent run * 0.65
+       in case deco of
+            DecorationUnderline -> [under]
+            DecorationStrikethrough -> [strike]
+            DecorationUnderlineStrike -> [under, strike]
+            DecorationNone -> []
+
+-- | Store @para@ under @wid@, pruning entries neither drawn last frame nor yet
+-- this frame once the cache grows past its bound.
+cacheParagraph :: Context -> IORef ParagraphCache -> WidgetId -> Bool -> Paragraph -> IO ()
+cacheParagraph ctx cacheRef wid hadEntry para = do
+  ParagraphCache n bound m <- readIORef cacheRef
+  let n' = if hadEntry then n else n + 1
+  writeIORef cacheRef
+    =<< if n' <= bound
+      then pure $! ParagraphCache n' bound (IM.insert (intKey wid) para m)
+      else do
+        prev <- getsDamage ctx (pfRects . dsPrev)
+        now <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
+        let kept = IM.insert (intKey wid) para (IM.filterWithKey (\k _ -> IM.member k prev || IM.member k now) m)
+            size = IM.size kept
+        pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
 
 -- | Keep the paragraph's selection in document coordinates, so it survives
 -- rewrapping when the widget's width changes.
@@ -561,32 +558,24 @@ layoutLines runs (emptyH, emptyAscent) align width = go 0 0 [] 0 [] True
         Space ->
           let start' = if null placed && null pending && fresh then tokenStart tok else start
            in go top start' placed x (tok : pending) fresh rest
-        Glyph -> placeGlyph top start placed x pending fresh tok rest
-        GlyphSpace -> placeGlyph top start placed x pending fresh tok rest
+        Glyph -> placeGroup top start placed x pending fresh [tok] rest
+        GlyphSpace -> placeGroup top start placed x pending fresh [tok] rest
         Word ->
           let (word, rest') = span (\t -> tokenKind t == Word) toks
-              wordW = sum (map tokenWidth word)
-              spaceW = if null placed && fresh then 0 else sum (map tokenWidth pending)
-           in if not (null placed) && x + spaceW + wordW > width
-                then
-                  let line = finish start top placed x
-                   in line : go (top + lineHeight line) (tokenStart tok) [] 0 [] True toks
-                else
-                  let (placed', x') = foldl' place (placed, x) (if null placed && fresh then [] else reverse pending)
-                      (placed'', x'') = foldl' place (placed', x') word
-                      start' = if null placed && fresh then maybe start tokenStart (listToMaybe word) else start
-                   in go top start' placed'' x'' [] False rest'
-    placeGlyph top start placed x pending fresh tok rest
-      | not (null placed) && x + spaceW + tokenWidth tok > width =
+           in placeGroup top start placed x pending fresh word rest'
+    placeGroup top start placed x pending fresh group rest
+      | not (null placed) && x + spaceW + groupW > width =
           let line = finish start top placed x
-           in line : go (top + lineHeight line) (tokenStart tok) [] 0 [] True (tok : rest)
+           in line : go (top + lineHeight line) firstStart [] 0 [] True (group ++ rest)
       | otherwise =
           let (placed', x') = foldl' place (placed, x) (if null placed && fresh then [] else reverse pending)
-              (placed'', x'') = place (placed', x') tok
-              start' = if null placed && fresh then tokenStart tok else start
+              (placed'', x'') = foldl' place (placed', x') group
+              start' = if null placed && fresh then firstStart else start
            in go top start' placed'' x'' [] False rest
       where
+        groupW = sum (map tokenWidth group)
         spaceW = if null placed && fresh then 0 else sum (map tokenWidth pending)
+        firstStart = maybe start tokenStart (listToMaybe group)
     place (acc, x) tok = ((x, tok) : acc, x + tokenWidth tok)
     finish start top placed x =
       -- An overlong word's line starts at the left edge, as with

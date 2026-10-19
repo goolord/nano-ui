@@ -77,13 +77,13 @@ nodeTextFieldGeom ctx@Context {ctxFontMetrics = fm} idx x y w h = do
   opts <- getOptions (ctxNodeArena ctx) idx
   let box = Rect x y w h
       field = textInputFieldRect fm x y w h
-      geom
-        | hasFlag textInputFlagSelectable si = pure (box, box)
-        | hasFlag textInputFlagNumeric si = pure (box, numericTextClip fm x y w h)
-        | hasFlag textInputFlagSearch si =
-            pure (box, if null opts then searchInputTextClip fm x y w h else comboTextClip fm x y w h)
-        | otherwise = (field,) <$> plainFieldTextClip ctx idx field
-  geom
+  if hasFlag textInputFlagSelectable si
+    then pure (box, box)
+    else if hasFlag textInputFlagNumeric si
+      then pure (box, numericTextClip fm x y w h)
+      else if hasFlag textInputFlagSearch si
+        then pure (box, if null opts then searchInputTextClip fm x y w h else comboTextClip fm x y w h)
+        else (field,) <$> plainFieldTextClip ctx idx field
 
 -- | Whether the pointer is over the clear (×) button of a non-empty search
 -- field. Search fields reserve that slot even when empty, but the button is

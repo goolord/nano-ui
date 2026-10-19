@@ -123,18 +123,26 @@ pickerSvNode na idx = do
       si <- getStyleIdx na ci
       pure (ci <$ guard (nt == NodeColorPicker && colorPickerPartOf si == PickerSv))
 
+-- | Resolve the owning picker's widget id, the part kind, and the rectangle
+-- the part draws in (the SV square, or the part's column cut to the SV
+-- square's vertical band).
+pickerPartOwnerAndRect :: NodeArena -> NodeIdx -> Rect -> IO (WidgetId, ColorPickerPart, Rect)
+pickerPartOwnerAndRect na idx rect@(Rect x _ w _) = do
+  part <- colorPickerPartOf <$> getStyleIdx na idx
+  if part == PickerSv
+    then (,part,colorPickerSvSquare rect) <$> getWidgetId na idx
+    else do
+      svIdx <- pickerSvNode na idx
+      owner <- getWidgetId na svIdx
+      Rect sx sy0 sw sh <- getNodeRect na svIdx
+      let Rect _ sy _ side = colorPickerSvSquare (Rect sx sy0 sw sh)
+      pure (owner, part, Rect x sy w side)
+
 -- | Where the part at @idx@ (laid out at @rect@) draws: the field's square, or
 -- the part's column cut to the square's height so the bars and the preview
 -- line up with the field.
 colorPickerPartRect :: NodeArena -> NodeIdx -> Rect -> IO Rect
-colorPickerPartRect na idx rect@(Rect x _ w _) = do
-  si <- getStyleIdx na idx
-  case colorPickerPartOf si of
-    PickerSv -> pure (colorPickerSvSquare rect)
-    _ -> do
-      Rect sx sy0 sw sh <- pickerSvNode na idx >>= getNodeRect na
-      let Rect _ sy _ side = colorPickerSvSquare (Rect sx sy0 sw sh)
-      pure (Rect x sy w side)
+colorPickerPartRect na idx rect = (\(_, _, r) -> r) <$> pickerPartOwnerAndRect na idx rect
 
 -- | The preview column's rows, stacked and centered in its band: the Current
 -- label's top, its swatch, the New label's top, and its swatch.
@@ -176,9 +184,7 @@ drawChecker da (Rect x y w h) = goRows 0
 -- | Paint one part of a picker from its state in the store.
 drawColorPickerPart :: NodeArena -> NodeIdx -> FontMetrics -> DrawArena -> WidgetStore -> Style -> Rect -> IO ()
 drawColorPickerPart na idx fm da store style rect = do
-  si <- getStyleIdx na idx
-  owner <- pickerSvNode na idx >>= getWidgetId na
-  area@(Rect x y w h) <- colorPickerPartRect na idx rect
+  (owner, part, area@(Rect x y w h)) <- pickerPartOwnerAndRect na idx rect
   let
     newCol = widgetStoreColor store owner colorPickerDefaultColor
     (hue, sat, val) = widgetStoreHsv store owner colorPickerDefaultColor
@@ -191,7 +197,7 @@ drawColorPickerPart na idx fm da store style rect = do
       pushRoundedStroke da area 3 1 border
       pushRoundedRect da handle 2 white
       pushRoundedStroke da handle 2 1 handleCol
-  case colorPickerPartOf si of
+  case part of
     PickerSv -> do
       let
         hueCol = hsvToRgb hue 1 1
@@ -338,8 +344,9 @@ colorPickerWith showAlpha value = do
       alpha = alphaOf (widgetStoreColor hsvStore wid value)
     _ <- container NodeContainer colorPickerRowLayout $ do
       forM_ hsvChannels $ \(lbl, hi, shown, edit) -> do
-        n <- channelField pct lbl hi (shown hsv)
-        when (n /= shown hsv) $ do
+        let cur = shown hsv
+        n <- channelField pct lbl hi cur
+        when (n /= cur) $ do
           let hsv'@(h, s, v) = edit n hsv
           writePicker (fadeAlpha (hsvToRgb h s v) alpha) hsv'
       when showAlpha $

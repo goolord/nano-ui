@@ -33,8 +33,7 @@ import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, slotWrite)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
 import NanoUI.Internal.WidgetText (TabChrome (..), buttonCloseTab, buttonFlagClose, tabChromeEncode, tabEncodeStyle)
-import NanoUI.Internal.Widgets.Adornment (Adornments, adornWidget, control, trailing, view)
-import NanoUI.Internal.Widgets.Behavior (keyActivated)
+import NanoUI.Internal.Widgets.Adornment (Adornments, adornButton, control, trailing, view)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Layout (column', columnWith, labelEx, panel', row', rowWith, scrollAreaIdConfigured)
 import NanoUI.Internal.Widgets.Node
@@ -363,11 +362,8 @@ renderHeader style orient cur t = disabledWhen (tabDisabled t) $ do
         buttonStyledEx True "\215" 0 (tight . fixedWH 18 18 . fontColor labelCol $ defaultLayout) (buttonFlagClose .|. buttonCloseTab)
           >>= liftIO . writeIORef ref . Just
       close = foldMap (trailing . control . closeButton) closeRef
-  taken <- adornWidget (respId resp) lay (const labelCol) (tabAdornments t <> badge <> close)
+  header <- adornButton resp lay (const labelCol) (tabAdornments t <> badge <> close)
   closeResp <- maybe (pure Nothing) (liftIO . readIORef) closeRef
-  -- When an adornment control captures the pointer, ignore pointer clicks on
-  -- the tab header ('NanoUI.Internal.Widgets.Button.buttonConfigured'').
-  header <- if taken then (`setClicked` inertResponse resp) <$> keyActivated (respId resp) else pure resp
   let closed =
         tabClosable t
           && ( maybe False (\c -> respClicked c || respClickedWith MouseMiddle c) closeResp

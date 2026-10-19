@@ -243,42 +243,42 @@ runSessionLoop drv ctx0 inp0 = do
                   alignFrameStart (sdAlignSec drv) lastT
                 pure events
 
+      nextBatch ctx queued lastT pendingDirty wasAnim
+        | not (null queued) = pure (queued, False)
+        | pendingDirty = (,False) <$> waitForEvents 0 False lastT
+        | otherwise = do
+            (debugActive, dueNow) <- debugCadence (sdDebug drv)
+            animating <- anyAnimating ctx
+            dirty <- isDirty ctx
+            presentPaces <- sdPresentPaces drv
+            wakeAt <- getWakeAt ctx
+            waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
+            let paced = wasAnim || animating
+                wakeMs
+                  | wakeAt <= 0 = -1
+                  | wakeAt <= waitT = 0
+                  | otherwise = ceiling ((wakeAt - waitT) * 1000) + wakePadMs :: Int
+                idleMs
+                  | not debugActive = wakeMs
+                  | wakeMs < 0 = debugHudTimeout
+                  | otherwise = min debugHudTimeout wakeMs
+                timeout
+                  | sdContinuous drv || dueNow || dirty || (animating && presentPaces) = 0
+                  | paced = sdPacingMs drv
+                  | otherwise = idleMs
+            events <- waitForEvents timeout paced lastT
+            wakeDue <-
+              if wakeAt > 0
+                then (>= wakeAt) <$> getMonotonicTime
+                else pure False
+            -- Clear the deadline once reached so a skipped draw (when the
+            -- drawing lock is held) does not spin on an expired wakeAt.
+            when wakeDue (clearWakeAt ctx)
+            let hudDue = timeout == debugHudTimeout && debugActive && null events
+            pure (events, dueNow || wakeDue || hudDue)
+
       loop ctx inp queued lastT pendingDirty wasAnim = do
-        (pending, refreshDue) <-
-          if not (null queued)
-            then pure (queued, False)
-            else if pendingDirty
-              then (,False) <$> waitForEvents 0 False lastT
-              else do
-                (debugActive, dueNow) <- debugCadence (sdDebug drv)
-                animating <- anyAnimating ctx
-                dirty <- isDirty ctx
-                presentPaces <- sdPresentPaces drv
-                wakeAt <- getWakeAt ctx
-                waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
-                let paced = wasAnim || animating
-                    wakeMs
-                      | wakeAt <= 0 = -1
-                      | wakeAt <= waitT = 0
-                      | otherwise = ceiling ((wakeAt - waitT) * 1000) + wakePadMs :: Int
-                    idleMs
-                      | not debugActive = wakeMs
-                      | wakeMs < 0 = debugHudTimeout
-                      | otherwise = min debugHudTimeout wakeMs
-                    timeout
-                      | sdContinuous drv || dueNow || dirty || (animating && presentPaces) = 0
-                      | paced = sdPacingMs drv
-                      | otherwise = idleMs
-                events <- waitForEvents timeout paced lastT
-                wakeDue <-
-                  if wakeAt > 0
-                    then (>= wakeAt) <$> getMonotonicTime
-                    else pure False
-                -- Clear the deadline once reached so a skipped draw (when the
-                -- drawing lock is held) does not spin on an expired wakeAt.
-                when wakeDue (clearWakeAt ctx)
-                let hudDue = timeout == debugHudTimeout && debugActive && null events
-                pure (events, dueNow || wakeDue || hudDue)
+        (pending, refreshDue) <- nextBatch ctx queued lastT pendingDirty wasAnim
         -- Reset the wake latch before reading state updated by background
         -- threads, so a subsequent wake triggers the callback again.
         takeWakes ctx

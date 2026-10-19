@@ -1462,8 +1462,9 @@ splitTriangles g vs pts tris = (primArrayFromList (primArrayToList pts ++ concat
                     (_, ax, ay, ga) = a
                     (_, bx, by, gb) = b
                     u = (v - ga) / (gb - ga)
-                    c = (nx, ax + u * (bx - ax), ay + u * (by - ay), v)
-                    (_, cx, cy, _) = c
+                    cx = ax + u * (bx - ax)
+                    cy = ay + u * (by - ay)
+                    c = (nx, cx, cy, v)
                  in (nx + 1, (cx, cy) : ads, c : keepBelow p lower, c : keepAbove p upper)
             | otherwise = (nx, ads, keepBelow p lower, keepAbove p upper)
           keepBelow p@(_, _, _, gp) acc = if gp <= v then p : acc else acc

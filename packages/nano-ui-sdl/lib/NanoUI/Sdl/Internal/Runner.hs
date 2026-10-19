@@ -148,38 +148,56 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
         answerScreenshots ctx (captureFrame env tex)
       pure (atlasReset || dirtyAfterUi)
     else do
-      -- A null texture draws full-repaint sessions straight to the window.
-      unlessM ((&&) <$> setRenderTarget ren tex <*> setRenderScale ren scale scale) $
-        fail "SDL_SetRenderTarget/Scale failed"
-      theme <- readIORef (ctxTheme ctx)
-      let glyphs = glyphAtlasHandle (sdlFontCache env)
-      -- A transparent window draws atlas textures with its own blend mode.
-      -- Set it after the UI pass, which can create atlas textures.
-      for_ (sdlTransparent env) $ \(blend, _) -> do
-        textures <- (:) <$> SdlImage.lookupImage (sdlImages env) atlasTextureId <*> traverse (glyphPageTexture glyphs) [0 .. glyphAtlasPages - 1]
-        for_ (filter (/= nullPtr) textures) (`setTextureBlendMode` blend)
-      -- Full repaints clear the target, including bare backdrop regions.
-      -- Partial updates preserve the undamaged part of the retained texture.
-      -- The batch is flushed even when the pass throws, so no geometry leaks
-      -- into the next frame.
-      renderDrawDataPass (sdlBatch env) ren (themeWindow theme) drawData (sdlImages env) glyphs damage
-        `finally` flushRenderBatch (sdlBatch env)
-      t2 <- getMonotonicTime
-      unlessM (if direct then setRenderScale ren 1 1 else copyRetained env tex) $
-        fail "SDL window presentation preparation failed"
-      sendSizeLimits env
-      -- Read the direct backbuffer before present, but invoke view callbacks
-      -- only afterwards, just as for retained frames.
-      if direct
-        then answerScreenshotsAfter ctx (captureFrame env tex) (void (renderPresentSafe ren))
-        else void (renderPresentSafe ren)
-      t3 <- getMonotonicTime
-      let ms a b = (b - a) * 1000
-      noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
-        (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
-      writeIORef (sdlLastPresented env) True
-      unless direct $ answerScreenshots ctx (captureFrame env tex)
+      presentDamagedFrame ctx env tex direct scale damage drawData t0 t1
       pure dirtyAfterUi
+  where
+    ren = sdlRenderer env
+
+-- | Rasterise @drawData@ over @damage@, copy the retained texture (if used),
+-- present the backbuffer, record frame timing, and answer pending screenshots.
+presentDamagedFrame ::
+  Context ->
+  SdlEnv ->
+  Ptr SDL_Texture ->
+  Bool ->
+  Float ->
+  Damage ->
+  DrawData ->
+  Double ->
+  Double ->
+  IO ()
+presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
+  -- A null texture draws full-repaint sessions straight to the window.
+  unlessM ((&&) <$> setRenderTarget ren tex <*> setRenderScale ren scale scale) $
+    fail "SDL_SetRenderTarget/Scale failed"
+  theme <- readIORef (ctxTheme ctx)
+  let glyphs = glyphAtlasHandle (sdlFontCache env)
+  -- A transparent window draws atlas textures with its own blend mode.
+  -- Set it after the UI pass, which can create atlas textures.
+  for_ (sdlTransparent env) $ \(blend, _) -> do
+    textures <- (:) <$> SdlImage.lookupImage (sdlImages env) atlasTextureId <*> traverse (glyphPageTexture glyphs) [0 .. glyphAtlasPages - 1]
+    for_ (filter (/= nullPtr) textures) (`setTextureBlendMode` blend)
+  -- Full repaints clear the target, including bare backdrop regions.
+  -- Partial updates preserve the undamaged part of the retained texture.
+  -- The batch is flushed even when the pass throws, so no geometry leaks
+  -- into the next frame.
+  renderDrawDataPass (sdlBatch env) ren (themeWindow theme) drawData (sdlImages env) glyphs damage
+    `finally` flushRenderBatch (sdlBatch env)
+  t2 <- getMonotonicTime
+  unlessM (if direct then setRenderScale ren 1 1 else copyRetained env tex) $
+    fail "SDL window presentation preparation failed"
+  sendSizeLimits env
+  -- Read the direct backbuffer before present, but invoke view callbacks
+  -- only afterwards, just as for retained frames.
+  if direct
+    then answerScreenshotsAfter ctx (captureFrame env tex) (void (renderPresentSafe ren))
+    else void (renderPresentSafe ren)
+  t3 <- getMonotonicTime
+  let ms a b = (b - a) * 1000
+  noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
+    (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
+  writeIORef (sdlLastPresented env) True
+  unless direct $ answerScreenshots ctx (captureFrame env tex)
   where
     ren = sdlRenderer env
 

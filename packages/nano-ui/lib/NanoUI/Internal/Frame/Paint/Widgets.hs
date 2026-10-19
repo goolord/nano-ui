@@ -85,48 +85,49 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   style <- widgetVisualStyle ctx NodeTextInput idx
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
-  let paint
-        -- The box, its value clipped left of the stepper, and the stepper's up
-        -- and down arrows beside a rule.
-        | hasFlag textInputFlagNumeric si = do
-            let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
-                iconCol = lerpColor (styleFg style) (styleBg style) 0.4
-            void $ paintCaptionlessField env style idx focus rect (numericTextClip fm x y w h) False $ do
-              pushLine da ux (y + 4) ux (y + h - 4) 1 (lerpColor (styleBorder style) (styleBg style) 0.4)
-              drawStepArrow da True up iconCol
-              drawStepArrow da False down iconCol
-        | hasFlag textInputFlagSelectable si = paintSelectableText env style idx rect
-        | hasFlag textInputFlagSearch si = do
-            opts <- getOptions (peNodeArena env) idx
-            let iconCol = fieldIconColor style
-                (magRect, Rect cx cy cw ch) = searchInputIconRects fm x y w h
-                field clip = paintCaptionlessField env style idx focus rect clip True
-            if null opts
-              -- A search field: a magnifier on the left and a clear (×) on the
-              -- right while there is text.
-              then do
-                value <- field (searchInputTextClip fm x y w h) (drawSearchMagnifier da magRect iconCol)
-                unless (T.null value) $
-                  drawCloseIcon da False cx cy cw ch iconCol
-              -- A combo box: a select chevron in the right reserve that flips up
-              -- while the dropdown is open (i.e. focused).
-              else void $ field (comboTextClip fm x y w h) $
-                drawSelectChevron da focus (x + w - selectChevronReserve) y selectChevronReserve h iconCol
-        | otherwise = do
-            let field = textInputFieldRect fm x y w h
-            paintStyledRect da style field
-            fontSizeVal <- getNodeFontSize (peNodeArena env) idx
-            (ffm, _, _) <- resolveFontFor ctx NodeTextInput fontSizeVal si
-            -- Paint discards the measured text width that the span path needs,
-            -- so it takes the pen directly and skips the host measurement.
-            (txt, fx, fy, clip) <- plainFieldPen ctx idx si ffm x y w h
-            ffg <- textInputFg ctx style idx focus
-            -- 'plainFieldPen' settled the scroll, so use its pen rather than
-            -- measuring the caret again.
-            mEdit <- readFieldEdit ctx idx field fx
-            -- Glyphs in the field's own font, which placed the pen.
-            paintClippedFieldText ctx da ffm style idx mEdit clip fx fy txt ffg
-  paint
+  if hasFlag textInputFlagNumeric si
+    then do
+      -- The box, its value clipped left of the stepper, and the stepper's up
+      -- and down arrows beside a rule.
+      let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
+          iconCol = lerpColor (styleFg style) (styleBg style) 0.4
+      void $ paintCaptionlessField env style idx focus rect (numericTextClip fm x y w h) False $ do
+        pushLine da ux (y + 4) ux (y + h - 4) 1 (lerpColor (styleBorder style) (styleBg style) 0.4)
+        drawStepArrow da True up iconCol
+        drawStepArrow da False down iconCol
+    else if hasFlag textInputFlagSelectable si
+      then paintSelectableText env style idx rect
+      else if hasFlag textInputFlagSearch si
+        then do
+          opts <- getOptions (peNodeArena env) idx
+          let iconCol = fieldIconColor style
+              (magRect, Rect cx cy cw ch) = searchInputIconRects fm x y w h
+              field clip = paintCaptionlessField env style idx focus rect clip True
+          if null opts
+            -- A search field: a magnifier on the left and a clear (x) on the
+            -- right while there is text.
+            then do
+              value <- field (searchInputTextClip fm x y w h) (drawSearchMagnifier da magRect iconCol)
+              unless (T.null value) $
+                drawCloseIcon da False cx cy cw ch iconCol
+            -- A combo box: a select chevron in the right reserve that flips up
+            -- while the dropdown is open (i.e. focused).
+            else void $ field (comboTextClip fm x y w h) $
+              drawSelectChevron da focus (x + w - selectChevronReserve) y selectChevronReserve h iconCol
+        else do
+          let field = textInputFieldRect fm x y w h
+          paintStyledRect da style field
+          fontSizeVal <- getNodeFontSize (peNodeArena env) idx
+          (ffm, _, _) <- resolveFontFor ctx NodeTextInput fontSizeVal si
+          -- Paint discards the measured text width that the span path needs,
+          -- so it takes the pen directly and skips the host measurement.
+          (txt, fx, fy, clip) <- plainFieldPen ctx idx si ffm x y w h
+          ffg <- textInputFg ctx style idx focus
+          -- 'plainFieldPen' settled the scroll, so use its pen rather than
+          -- measuring the caret again.
+          mEdit <- readFieldEdit ctx idx field fx
+          -- Glyphs in the field's own font, which placed the pen.
+          paintClippedFieldText ctx da ffm style idx mEdit clip fx fy txt ffg
 
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
