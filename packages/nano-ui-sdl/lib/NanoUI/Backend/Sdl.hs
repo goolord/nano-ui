@@ -23,6 +23,7 @@ module NanoUI.Backend.Sdl
   , askOpenFolderDialog
   , pollFileDialogUi
   , peekFileDialogUi
+  , useFileDialog
     -- * Explicit sessions
 
     -- | View-side operations look up the active session from the context. For

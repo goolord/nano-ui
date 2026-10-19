@@ -1,38 +1,18 @@
--- | What the SDL demo executables and their self-tests share: file-dialog
--- polling and a hidden window to drive a UI on.
+-- | What the SDL demo executables and their self-tests share: a hidden window
+-- to drive a UI on.
 module DemoApp
-  ( useFileDialog
-  , withHiddenWindow
+  ( withHiddenWindow
   ) where
 
-import Data.Foldable (for_)
-import NanoUI (Input (..), NanoUI, Size (..), V2 (..), Var, WindowMode (..), WindowSettings (..), defaultWindowSettings, readVar, writeVar)
+import NanoUI (Input (..), Size (..), V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Backend (emptyInput)
 import NanoUI.Backend.Sdl
-  ( FileDialogId
-  , FileDialogResult (..)
-  , SdlEnv
+  ( SdlEnv
   , SdlOptions (..)
   , defaultSdlOptions
-  , pollFileDialogUi
   , withSdl
   )
 import NanoUI.Testing (Context, newPixelContext)
-
--- | Poll the dialog handle held in @dialog@; on completion clear it and hand
--- the chosen paths to the caller. Anything other than 'FileDialogPending'
--- dismisses the handle, so each result is consumed exactly once.
-useFileDialog ::
-  Var (Maybe FileDialogId) ->
-  ([FilePath] -> NanoUI ()) ->
-  NanoUI ()
-useFileDialog dialog onPaths = do
-  pending <- readVar dialog
-  for_ pending $ \did ->
-    pollFileDialogUi did >>= \case
-      FileDialogPending -> pure ()
-      FileDialogSelected paths -> onPaths paths >> writeVar dialog Nothing
-      _done -> writeVar dialog Nothing
 
 -- | Run @k@ on a hidden, fixed @w@ by @h@ SDL window over a pixel-snapped
 -- context, with @opts@ applied to the window options. @k@ also gets the

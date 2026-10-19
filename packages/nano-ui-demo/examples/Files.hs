@@ -4,8 +4,8 @@
 -- and returns a handle immediately; the view keeps the handle in state and
 -- polls it with 'pollFileDialogUi' every frame until the user picks a file or
 -- cancels. A result is delivered once, so the poll that receives it also
--- clears the handle ('pollDialog' below). The loop sleeps while the dialog is
--- open and wakes when it closes.
+-- clears the handle; 'useFileDialog' does both. The loop sleeps while the
+-- dialog is open and wakes when it closes.
 --
 -- Reading the chosen file is slow work, so it runs on a worker thread with
 -- 'useTaskStatus', keyed by the path (see Tasks.hs). The file's text then
@@ -19,7 +19,7 @@ module Main (main) where
 import Control.Exception (IOException, displayException, try)
 import Control.Monad (unless, when)
 import qualified Data.ByteString as BS
-import Data.Foldable (for_)
+import Data.Foldable (for_, traverse_)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -27,14 +27,13 @@ import qualified Data.Text.Encoding as TE
 import NanoUI
 import NanoUI.Backend.Sdl
   ( FileDialogId
-  , FileDialogResult (..)
   , SdlOptions (..)
   , askOpenFileDialog
   , askSaveFileDialog
   , defaultFileDialogOptions
   , defaultSdlOptions
-  , pollFileDialogUi
   , runSdlApp
+  , useFileDialog
   )
 import NanoUI.Shortcut (ctrl, key)
 import System.FilePath (takeFileName)
@@ -86,8 +85,8 @@ view app = do
         saved <- readVar path
         if T.null saved then askSave else writeTo (T.unpack saved)
 
-  pollDialog (appOpenDialog app) (writeVar reading . T.pack)
-  pollDialog (appSaveDialog app) writeTo
+  useFileDialog (appOpenDialog app) (traverse_ (writeVar reading . T.pack) . listToMaybe)
+  useFileDialog (appSaveDialog app) (traverse_ writeTo . listToMaybe)
 
   whenM (shortcut (ctrl <> key 'o')) askOpen
   whenM (shortcut (ctrl <> key 's')) save
@@ -132,16 +131,6 @@ view app = do
     -- respChanged reports an edit, not a caret move.
     edited <- textAreaWith' grow text
     when (respChanged edited) (writeVar dirty True)
-
--- | Poll a pending dialog once a frame. When it finishes, clear the handle
--- and pass on the first chosen path; a cancel just clears it.
-pollDialog :: Var (Maybe FileDialogId) -> (FilePath -> NanoUI ()) -> NanoUI ()
-pollDialog pending onPath =
-  readVar pending >>= \handle -> for_ handle $ \dialog ->
-    pollFileDialogUi dialog >>= \case
-      FileDialogPending -> pure ()
-      FileDialogSelected chosen -> writeVar pending Nothing >> for_ (listToMaybe chosen) onPath
-      _ -> writeVar pending Nothing
 
 -- | Read a file as UTF-8, turning malformed bytes into U+FFFD instead of
 -- failing. The decoded 'Text' is strict, so the worker does all the work.

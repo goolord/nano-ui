@@ -131,7 +131,6 @@ executable nano-ui-sdl-notepad
     build-depends:
         bytestring ^>=0.12,
         nano-ui ^>=0.2,
-        nano-ui-demo:demo-common,
         nano-ui-sdl ^>=0.2,
         text ^>=2.1
 

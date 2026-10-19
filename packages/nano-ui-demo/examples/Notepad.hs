@@ -22,7 +22,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
-import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Shortcut

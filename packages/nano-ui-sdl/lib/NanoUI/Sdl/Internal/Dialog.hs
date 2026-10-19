@@ -27,9 +27,11 @@ module NanoUI.Sdl.Internal.Dialog
   , askOpenFolderDialog
   , pollFileDialogUi
   , peekFileDialogUi
+  , useFileDialog
   ) where
 
 import Control.Monad (forM, unless, void, when, (>=>))
+import Data.Foldable (for_)
 import Data.Int (Int32)
 import Data.IORef (IORef, atomicWriteIORef, newIORef, readIORef)
 import Data.Maybe (fromMaybe)
@@ -50,6 +52,7 @@ import NanoUI.Backend (WindowState (..))
 
 import NanoUI.Internal.Monad (NanoUI, askContext)
 import NanoUI.Testing (Context, markDirty, liftIO)
+import NanoUI.Var (Var, readVar, writeVar)
 import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Dialog
@@ -167,6 +170,21 @@ pollFileDialogUi did@(FileDialogId _ ref) =
 -- that must happen only once, such as opening the selected file.
 peekFileDialogUi :: FileDialogId -> NanoUI FileDialogResult
 peekFileDialogUi (FileDialogId _ ref) = liftIO (readIORef ref)
+
+-- | Poll the dialog held in a 'Var' once a frame. When it finishes, clear the
+-- 'Var' and pass the chosen paths on; a cancel or failure just clears it. The
+-- 'Var' is cleared first, so the callback may launch another dialog into it.
+--
+-- > useFileDialog openDlg (traverse_ openFile . listToMaybe)
+-- > whenM (button "Open…") $
+-- >   writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions
+useFileDialog :: Var (Maybe FileDialogId) -> ([FilePath] -> NanoUI ()) -> NanoUI ()
+useFileDialog dialog onPaths =
+  readVar dialog >>= \pending -> for_ pending $
+    pollFileDialogUi >=> \case
+      FileDialogPending -> pure ()
+      FileDialogSelected paths -> writeVar dialog Nothing >> onPaths paths
+      _ -> writeVar dialog Nothing
 
 data DialogKind = OpenDialog | SaveDialog | FolderDialog
   deriving (Eq)

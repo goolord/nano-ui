@@ -47,7 +47,6 @@ import System.Environment (getArgs, lookupEnv)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
-import DemoApp (useFileDialog)
 import DemoData
 import SdlRecord qualified
 
