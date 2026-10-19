@@ -2,7 +2,7 @@ module Main (main) where
 
 import Control.Exception (bracket)
 import Control.Monad (unless)
-import NanoUI.Sdl.Internal.Font.Search (listFontFamilies, searchFonts)
+import NanoUI.Sdl.Internal.Font.Search (boldFaceCandidates, listFontFamilies, searchFonts)
 import System.Directory
   ( createDirectory
   , createDirectoryIfMissing
@@ -30,10 +30,14 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
       bold = fonts </> "NanoSearchFixture-Bold.ttf"
       fallback = fonts </> "NanoFallbackFixture.otf"
       boldOnly = fonts </> "NanoBoldOnlyFixture-Bold.ttf"
+      short = fonts </> "nanoshort.ttf"
+      shortBd = fonts </> "nanoshortbd.ttf"
+      shortB = fonts </> "nanoshortb.ttf"
+      shortItalic = fonts </> "nanoshortz.ttf"
     -- The font directories are walked once per process, so every fixture
     -- exists before the first search.
     createDirectoryIfMissing True fonts
-    mapM_ (`writeFile` "") [regular, bold, fallback, boldOnly]
+    mapM_ (`writeFile` "") [regular, bold, fallback, boldOnly, short, shortBd, shortB, shortItalic]
     expect "regular face" (Just regular) =<< searchFonts ["Nano Search Fixture"]
     expect "ordered fallback" (Just fallback)
       =<< searchFonts
@@ -46,6 +50,11 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
       ["Nano Search Fixture"]
       (filter (== "Nano Search Fixture") families)
     expect "non-regular fallback" (Just boldOnly) =<< searchFonts ["NanoBoldOnlyFixture"]
+    -- A bold face is looked for beside its regular face by name, the
+    -- family's own file first and Windows' short names after.
+    expect "family bold" [bold] =<< boldFaceCandidates regular
+    expect "short-name bold" [shortBd, shortB] =<< boldFaceCandidates short
+    expect "no bold" [] =<< boldFaceCandidates fallback
     putStrLn "font search: ok"
 
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()

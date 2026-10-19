@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (IOException, evaluate, try)
-import Control.Monad (forM_, unless, void)
+import Control.Monad (forM_, unless, void, when)
 import Data.List (isInfixOf)
 import Data.IORef (writeIORef)
 import Data.Word (Word32)
@@ -20,7 +20,9 @@ import NanoUI.Backend.Sdl
   )
 import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
 import NanoUI.Sdl.Internal.Window (sdlFontRequestRef)
+import System.Directory (copyFile, createDirectoryIfMissing, getTemporaryDirectory, removePathForcibly)
 import System.Environment (setEnv)
+import System.FilePath ((</>))
 import System.Mem (performGC)
 
 foreign import ccall unsafe "SDL_WasInit" wasInit :: Word32 -> IO Word32
@@ -48,6 +50,13 @@ main = do
   initialized <- wasInit 0
   unless (initialized == 0) $
     fail "failed acquisition leaked initialized SDL subsystems"
+  -- The bundled Inter twice, as a family's regular and bold files: the
+  -- "bold" is at the regular's own weight.
+  fixtures <- (</> "nano-ui-font-effects") <$> getTemporaryDirectory
+  createDirectoryIfMissing True fixtures
+  let fixtureRegular = fixtures </> "NanoFixture-Regular.ttf"
+  copyFile "data/inter.ttf" fixtureRegular
+  copyFile "data/inter.ttf" (fixtures </> "NanoFixture-Bold.ttf")
   (font, snapshot, width, quad) <- withSdlBench ctx0 $ \ctx env -> do
     (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
     let
@@ -102,6 +111,16 @@ main = do
     freshQuad <- drawShaped fresh text
     unless (abs (freshWidth - measured) < 0.01 && freshQuad /= Nothing) $
       fail "font/atlas replacement failed to restore shaped text"
+    -- A file named as the font's bold but no heavier is not its bold face:
+    -- bold text stays synthetic, and measures as it draws.
+    writeIORef (sdlFontRequestRef env) (FontFilePath fixtureRegular)
+    (fromFile, _) <- syncDisplay replacement env emptyInput
+    (boldFm, native) <- ctxResolveFont fromFile 16 WeightBold FontStyleNormal FontRegular
+    when native $ fail "a file at the regular weight was taken for the bold face"
+    (boldWidth, _) <- ctxResolveMeasure fromFile 16 WeightBold FontStyleNormal FontRegular text
+    drawnWidth <- lineWidthIO boldFm text
+    unless (abs (boldWidth - drawnWidth) < 0.01) $
+      fail ("bold text measures unlike it draws: " ++ show (boldWidth, drawnWidth))
     pure (fresh, prepared, measured, freshQuad)
   -- Pure metric and quad values are safe to evaluate after the native font,
   -- atlas and SDL session are closed; native effects fail before dereferencing.
@@ -110,6 +129,7 @@ main = do
   void (evaluate quad)
   expectClosed (prepareFontMetrics font "new text")
   expectClosed (drawShaped font "AV To fi café λ")
+  removePathForcibly fixtures
   putStrLn "font effects: ok"
 
 -- | Shaping reorders right-to-left text and gives every character a caret:

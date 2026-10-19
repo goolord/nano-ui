@@ -157,6 +157,8 @@ test-suite nano-ui-font-effects-test
     hs-source-dirs:   test
     build-depends:
         base >=4.20 && <4.23,
+        directory ^>=1.3,
+        filepath ^>=1.5,
         nano-ui,
         nano-ui-sdl,
         primitive ^>=0.9,
