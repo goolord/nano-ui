@@ -26,6 +26,9 @@ counter = row $ do
   whenM (button "+") (modifyVar n (+ 1))
 ```
 
+See [`nano-ui-demo`](packages/nano-ui-demo/README.md) for full demo
+applications and single-topic examples.
+
 ## Features
 
 - Built-in widgets (text inputs, tables, trees, menus, modals, floating windows,
