@@ -26,9 +26,6 @@ counter = row $ do
   whenM (button "+") (modifyVar n (+ 1))
 ```
 
-See [`nano-ui-demo`](packages/nano-ui-demo/README.md) for full demo
-applications and single-topic examples.
-
 ## Features
 
 - Built-in widgets (text inputs, tables, trees, menus, modals, floating windows,
@@ -50,54 +47,27 @@ applications and single-topic examples.
 
 ## Examples
 
-Create state with `useVar`, pass it to input widgets, and read the current
-value with `readVar`:
+See [`nano-ui-demo`](packages/nano-ui-demo/README.md) for full demo
+applications and single-topic examples.
 
-```haskell
-greeter :: NanoUI ()
-greeter = columnWith (gap 8 . padAll 16) $ do
-  name <- useVar "world"
-  size <- useVar 16
-  shout <- useVar False
+Running the demos Requires GHC 9.10 or newer (development uses 9.14) and Cabal. 
+The SDL backend also requires SDL3, SDL3_ttf, and pkg-config, 
+all of which are provided in the `nix develop` shell.
 
-  heading "Greeter"
-  textInput name
-  slider 10 48 size
-  checkbox "Shout" shout
-
-  greeting <- ("Hello, " <>) . (<> "!") <$> readVar name
-  loud <- readVar shout
-  px <- readVar size
-  labelWith (fontSize px) (if loud then T.toUpper greeting else greeting)
+```sh
+cabal run nano-ui-sdl-demo       # widget and chart tour
+cabal run nano-ui-sdl-notepad    # text editor with menus and file dialogs
+cabal run nano-ui-sdl-logs       # streaming log viewer
+cabal run nano-ui-sdl-terminal   # terminal on /bin/sh (Linux and macOS)
+cabal run nano-ui-rgfw-demo      # the RGFW backend
+cabal run nano-ui-markdown-example  # a Markdown chat reply streaming in
+cabal run nano-ui-example-hello  # the first of the single-topic examples
 ```
 
-For an Elm-style update loop, use `NanoUI.Emit` from `nano-ui-emit` to emit
-statically typed messages from widgets and fold them into a model with
-`runSdlAppReduce`:
-
-```haskell
-{-# LANGUAGE OverloadedStrings #-}
-
-import Data.Text qualified as T
-import NanoUI
-import NanoUI.Backend.Sdl (defaultSdlOptions, runSdlAppReduce)
-import NanoUI.Emit qualified as Emit
-
-data Msg = Increment | Decrement
-
-main :: IO ()
-main = runSdlAppReduce defaultSdlOptions update 0 view
-
-update :: Msg -> Int -> Int
-update Increment n = n + 1
-update Decrement n = n - 1
-
-view :: Int -> Emit.NanoUIE Msg ()
-view n = Emit.withNanoUI row $ do
-  Emit.emitWhen (button "-") Decrement
-  Emit.liftNanoUI (label (T.pack (show n)))
-  Emit.emitWhen (button "+") Increment
-```
+The [single-topic examples](packages/nano-ui-demo/README.md#examples) are
+short, self-contained programs, each focused on one concept: state, layout,
+form validation, background tasks, virtualized lists of 100,000 rows, and so
+on.
 
 ## How it works
 
@@ -138,27 +108,6 @@ used to check that the vertex writers compile without dictionaries or tuples.
 | `nano-ui-emit` | Statically typed emitting views, widget adapters, and reducers |
 | `nano-ui-markdown` | Markdown documents drawn with rich text, parsed incrementally for streamed chat replies |
 | `nano-ui-demo` | Example applications |
-
-## Running the demos
-
-Requires GHC 9.10 or newer (development uses 9.14) and Cabal. The SDL backend
-also requires SDL3, SDL3_ttf, and pkg-config, all of which are provided in the
-`nix develop` shell.
-
-```sh
-cabal run nano-ui-sdl-demo       # widget and chart tour
-cabal run nano-ui-sdl-notepad    # text editor with menus and file dialogs
-cabal run nano-ui-sdl-logs       # streaming log viewer
-cabal run nano-ui-sdl-terminal   # terminal on /bin/sh (Linux and macOS)
-cabal run nano-ui-rgfw-demo      # the RGFW backend
-cabal run nano-ui-markdown-example  # a Markdown chat reply streaming in
-cabal run nano-ui-example-hello  # the first of the single-topic examples
-```
-
-The [single-topic examples](packages/nano-ui-demo/README.md#examples) are
-short, self-contained programs, each focused on one concept: state, layout,
-form validation, background tasks, virtualized lists of 100,000 rows, and so
-on.
 
 ## Documentation
 
