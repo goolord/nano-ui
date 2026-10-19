@@ -15,7 +15,7 @@
 -- The toolbar opens an About modal (F1) and a Debug window (F12) with the
 -- SDL backend's frame statistics and the layout overlay; the Diagnostics tab
 -- shows the headline numbers. The @nano-ui-demo-test@ suite drives this demo.
-module SdlDemo
+module Demo
   ( main
   , DemoState
   , newDemo

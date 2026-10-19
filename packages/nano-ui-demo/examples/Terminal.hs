@@ -1,5 +1,5 @@
 -- | Minimal 80x24 PTY terminal with ANSI colors. Run with @cabal run nano-ui-sdl-terminal@.
-module SdlTerminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send, keys) where
+module Terminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send, keys) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (bracket, bracketOnError, catch, throwIO, try)

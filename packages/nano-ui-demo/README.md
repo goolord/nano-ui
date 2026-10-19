@@ -4,13 +4,13 @@ Example applications for [nano-ui](https://github.com/goolord/nano-ui), all on
 the SDL backend: a few complete apps, and short single-file examples that each
 teach one topic.
 
-| Executable | What it shows |
-| --- | --- |
-| `nano-ui-sdl-demo` | A tour of the widgets and charts |
-| `nano-ui-sdl-notepad` | A text editor with a menu bar and native file dialogs |
-| `nano-ui-sdl-logs` | A streaming log viewer with selectable lines |
-| `nano-ui-sdl-terminal` | A terminal attached to `/bin/sh` (Linux and macOS) |
-| `nano-ui-sdl-profile` | Frame timings for the demo UI |
+| File | Run | What it shows |
+| --- | --- | --- |
+| [`Demo.hs`](examples/Demo.hs) | `nano-ui-sdl-demo` | A tour of the widgets and charts |
+| [`Notepad.hs`](examples/Notepad.hs) | `nano-ui-sdl-notepad` | A text editor with a menu bar and native file dialogs |
+| [`Logs.hs`](examples/Logs.hs) | `nano-ui-sdl-logs` | A streaming log viewer with selectable lines |
+| [`Terminal.hs`](examples/Terminal.hs) | `nano-ui-sdl-terminal` | A terminal attached to `/bin/sh` (Linux and macOS) |
+| [`Profile.hs`](examples/Profile.hs) | `nano-ui-sdl-profile` | Frame timings for the demo UI |
 
 The terminal is kept small: 80 by 24 cells, UTF-8, the 16 ANSI colours with
 bold and inverse, basic cursor movement and erasing, and 2,000 lines of
@@ -20,9 +20,9 @@ composition it shows at the cursor (`useInputMethod`).
 
 ## Examples
 
-Each file in `examples/` is one short program about one topic. They import
-only the library packages, so any of them can be copied out as a starting
-point. Read them in roughly this order:
+Each single-topic example in `examples/` is one short program about one topic.
+They import only the library packages, so any of them can be copied out as a
+starting point. Read them in roughly this order:
 
 | Example | Run | Shows |
 | --- | --- | --- |
@@ -73,12 +73,12 @@ Use GHC 9.14. From an extracted source distribution, run `cabal build` and
 then the commands above. From the repository, follow the
 [development setup](https://github.com/goolord/nano-ui/blob/main/docs/development.md#setup).
 
-## Reading the examples
+## Reading the full apps
 
-- `lib/SdlDemo.hs` builds the widget tour, one function per tab; `lib/DemoData.hs` supplies its data.
-- `lib/SdlNotepad.hs` shows text-document state, menus, and asynchronous file dialogs.
-- `lib/SdlLogs.hs` shows a bounded log buffer and scroll-follow behaviour.
-- `lib/SdlTerminal.hs` contains the terminal parser and PTY integration.
+- [`examples/Demo.hs`](examples/Demo.hs) builds the widget tour, one function per tab; [`lib/DemoData.hs`](lib/DemoData.hs) supplies its data.
+- [`examples/Notepad.hs`](examples/Notepad.hs) shows text-document state, menus, and asynchronous file dialogs.
+- [`examples/Logs.hs`](examples/Logs.hs) shows a bounded log buffer and scroll-follow behaviour.
+- [`examples/Terminal.hs`](examples/Terminal.hs) contains the terminal parser and PTY integration.
 
 The terminal executable and its test are not built on Windows. The other
 examples support the platforms provided by `nano-ui-sdl`.

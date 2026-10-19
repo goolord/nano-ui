@@ -2,7 +2,7 @@
 -- view that follows new entries until you scroll up.
 --
 -- Run with @cabal run nano-ui-sdl-logs@.
-module SdlLogs
+module Logs
   ( main
   , AppState (..)
   , newAppState

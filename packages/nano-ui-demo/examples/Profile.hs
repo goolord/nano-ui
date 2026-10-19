@@ -44,7 +44,7 @@ import DemoData
   , sineCosineChart
   , weeklyBars
   )
-import SdlDemo qualified
+import Demo qualified
 
 iterations :: Int
 iterations = 40
@@ -86,9 +86,9 @@ main = do
   ctx0 <- newPixelContext
   -- The workloads repeat one scene: time their paint instead of reusing it.
   setDrawReuse ctx0 False
-  state <- SdlDemo.newDemo
+  state <- Demo.newDemo
   withSdlBench ctx0 $ \ctx sdlEnv -> do
-    let demoUi = SdlDemo.demoUi state
+    let demoUi = Demo.demoUi state
     plotCache <- newPlotCache
     (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
     (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputButtonsHeld = buttonsFromList [MouseLeft]}

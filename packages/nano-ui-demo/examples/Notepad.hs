@@ -5,7 +5,7 @@
 -- 'NanoUI' function over local state in Vars.
 --
 -- Run with @cabal run nano-ui-sdl-notepad@.
-module SdlNotepad
+module Notepad
   ( main
   , NotepadState
   , newNotepad

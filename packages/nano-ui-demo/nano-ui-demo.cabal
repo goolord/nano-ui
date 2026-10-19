@@ -66,11 +66,11 @@ common sdl-app
 common sdl-exe
     import:           sdl-app
     import:           rts-options
-    hs-source-dirs:   app
+    hs-source-dirs:   examples
     if os(windows)
         ghc-options: -optl-mconsole
 
--- Modules shared by the executables and the tests, compiled once.
+-- Internal helpers shared by the demos, profile runner, and self-tests.
 library demo-common
     import:           sdl-app
     visibility:       private
@@ -78,75 +78,98 @@ library demo-common
     exposed-modules:
         DemoApp
         DemoData
-        SdlDemo
-        SdlLogs
-        SdlNotepad
         SdlRecord
-    other-modules:    Paths_nano_ui_demo
-    autogen-modules:  Paths_nano_ui_demo
     build-depends:
         bytestring ^>=0.12,
-        diagrams-lib >=1.6 && <1.7,
         filepath ^>=1.5,
         JuicyPixels ^>=3.3,
         nano-ui ^>=0.2,
         nano-ui-diagrams ^>=0.2,
         nano-ui-sdl ^>=0.2,
-        text ^>=2.1,
-        vector ^>=0.13
-    if !os(windows)
-        exposed-modules:  SdlTerminal
-        c-sources:        cbits/terminal-size.c
-        build-depends:
-            primitive ^>=0.9,
-            streaming ^>=0.2,
-            unix ^>=2.8
+        text ^>=2.1
 
 executable nano-ui-sdl-demo
     import:           sdl-exe
     main-is:          Demo.hs
-    build-depends:    nano-ui-demo:demo-common
+    ghc-options:      -main-is Demo
+    other-modules:    Paths_nano_ui_demo
+    autogen-modules:  Paths_nano_ui_demo
+    build-depends:
+        bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
+        JuicyPixels ^>=3.3,
+        nano-ui ^>=0.2,
+        nano-ui-demo:demo-common,
+        nano-ui-diagrams ^>=0.2,
+        nano-ui-sdl ^>=0.2,
+        text ^>=2.1,
+        vector ^>=0.13
 
 executable nano-ui-sdl-profile
     import:           sdl-exe
     main-is:          Profile.hs
+    other-modules:
+        Demo
+        Paths_nano_ui_demo
+    autogen-modules:  Paths_nano_ui_demo
     build-depends:
         bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
+        JuicyPixels ^>=3.3,
         nano-ui ^>=0.2,
         nano-ui-demo:demo-common,
         nano-ui-diagrams ^>=0.2,
         nano-ui-sdl ^>=0.2,
         primitive ^>=0.9,
-        text ^>=2.1
+        text ^>=2.1,
+        vector ^>=0.13
 
 executable nano-ui-sdl-notepad
     import:           sdl-exe
     main-is:          Notepad.hs
-    build-depends:    nano-ui-demo:demo-common
+    ghc-options:      -main-is Notepad
+    build-depends:
+        bytestring ^>=0.12,
+        nano-ui ^>=0.2,
+        nano-ui-demo:demo-common,
+        nano-ui-sdl ^>=0.2,
+        text ^>=2.1
 
 executable nano-ui-sdl-logs
     import:           sdl-exe
     main-is:          Logs.hs
-    build-depends:    nano-ui-demo:demo-common
+    ghc-options:      -main-is Logs
+    build-depends:
+        nano-ui ^>=0.2,
+        nano-ui-sdl ^>=0.2,
+        text ^>=2.1,
+        vector ^>=0.13
 
 executable nano-ui-sdl-terminal
     import:           sdl-exe
     main-is:          Terminal.hs
-    build-depends:    nano-ui-demo:demo-common
+    ghc-options:      -main-is Terminal
     if os(windows)
         buildable: False
+    else
+        c-sources:        cbits/terminal-size.c
+        build-depends:
+            bytestring ^>=0.12,
+            nano-ui ^>=0.2,
+            nano-ui-sdl ^>=0.2,
+            primitive ^>=0.9,
+            streaming ^>=0.2,
+            text ^>=2.1,
+            unix ^>=2.8,
+            vector ^>=0.13
 
 -- The single-file examples. Each is about one topic and depends only on the
 -- library packages, never on demo-common, so it can be copied out whole.
 common example
-    import:           sdl-app
-    import:           rts-options
-    hs-source-dirs:   examples
+    import:           sdl-exe
     build-depends:
         nano-ui ^>=0.2,
         nano-ui-sdl ^>=0.2
-    if os(windows)
-        ghc-options: -optl-mconsole
 
 executable nano-ui-example-hello
     import:           example
@@ -241,33 +264,48 @@ test-suite nano-ui-demo-test
     import:           rts-options
     type:             exitcode-stdio-1.0
     main-is:          DemoTest.hs
-    hs-source-dirs:   test
+    hs-source-dirs:   test, examples
     other-modules:
+        Demo
+        Logs
+        Notepad
+        Paths_nano_ui_demo
         DemoSelftest
         LogsSelftest
         NotepadSelftest
         ImeSelftest
+    autogen-modules:  Paths_nano_ui_demo
     build-depends:
         bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
+        JuicyPixels ^>=3.3,
         nano-ui ^>=0.2,
         nano-ui-demo:demo-common,
+        nano-ui-diagrams ^>=0.2,
         nano-ui-sdl ^>=0.2,
         primitive ^>=0.9,
         sdl3-bindgen-sys ^>=0.0.0.2,
-        text ^>=2.1
+        text ^>=2.1,
+        vector ^>=0.13
 
 test-suite nano-ui-terminal-test
     import:           sdl-app
     import:           rts-options
     type:             exitcode-stdio-1.0
     main-is:          TerminalTest.hs
-    hs-source-dirs:   test
-    build-depends:
-        bytestring ^>=0.12,
-        nano-ui ^>=0.2,
-        nano-ui-demo:demo-common,
-        streaming ^>=0.2,
-        text ^>=2.1,
-        vector ^>=0.13
+    hs-source-dirs:   test, examples
+    other-modules:    Terminal
     if os(windows)
         buildable: False
+    else
+        c-sources:        cbits/terminal-size.c
+        build-depends:
+            bytestring ^>=0.12,
+            nano-ui ^>=0.2,
+            nano-ui-sdl ^>=0.2,
+            primitive ^>=0.9,
+            streaming ^>=0.2,
+            text ^>=2.1,
+            unix ^>=2.8,
+            vector ^>=0.13
+

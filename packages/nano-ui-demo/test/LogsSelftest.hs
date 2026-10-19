@@ -14,7 +14,7 @@ import NanoUI.Shortcut
 import NanoUI.Testing (collectTextSpans)
 import NanoUI.Testing.Harness (chordInp, clickPos, expectText, findExact, hasText, keyInp, requireSpan)
 import DemoApp (withHiddenWindow)
-import SdlLogs (appendEntries, logsApp, newAppState)
+import Logs (appendEntries, logsApp, newAppState)
 
 selftest :: IO ()
 selftest = do

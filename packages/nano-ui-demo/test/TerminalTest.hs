@@ -8,7 +8,7 @@ import Data.Text.Encoding qualified as E
 import Data.Vector.Unboxed qualified as V
 import NanoUI (Input (..), Key (..), Modifiers (..), noModifiers)
 import NanoUI.Backend (emptyInput, inputKeysFromList)
-import SdlTerminal hiding (main)
+import Terminal hiding (main)
 import Streaming (Of (..))
 import System.Timeout (timeout)
 
