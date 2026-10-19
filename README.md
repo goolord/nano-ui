@@ -1,13 +1,10 @@
 # nano-ui
 
-An immediate-mode GUI toolkit for Haskell.
-
-A view is a function that runs every frame. Each widget is an ordinary effect
-that adds a layout node, reads this frame's input, and returns a result: `Bool`
-for a button, the new value for an input. There are no widget objects to keep
-and no callbacks to register. Widget state lives in a store keyed by each
-widget's position among its siblings (or by a key you give it with `withKey`),
-or in a model you pass through the view.
+An immediate-mode GUI toolkit for Haskell. Because each frame is a monadic
+action, you can build interfaces with ordinary functions, `do` notation, and
+standard control flow (`if`, `case`, `for_`). Widgets return values directly
+(such as `Bool` from `button`), and persistent state is held in `Var`s, mutable
+variables in the `NanoUI` monad.
 
 https://github.com/user-attachments/assets/5994a348-3bc5-4a2c-80fa-c8db2be94397
 
@@ -31,65 +28,62 @@ counter = row $ do
 
 ## Features
 
-- Text inputs and a multi-line text area, numeric fields, sliders, knobs,
-  selects, combo boxes, sortable tables, trees, tabs, menus, context menus,
-  modals, floating windows, pane grids, colour pickers, progress bars,
-  sparklines, and drag and drop. `customWidget` and a canvas API, with paths,
-  fill rules, strokes with joins and dashes, gradients, clips and transforms
-  (`NanoUI.Path`), cover anything else.
+- Text inputs, multi-line text areas, numeric fields, sliders, knobs, selects,
+  combo boxes, sortable tables, trees, tabs, menus, context menus, modals,
+  floating windows, pane grids, colour pickers, progress bars, sparklines, and
+  drag and drop. Custom drawing and interaction are supported through
+  `customWidget` and a 2D canvas API (`NanoUI.Path`) with paths, fill rules,
+  dashed and joined strokes, gradients, clips, and transforms.
 - Row, column, grid, and layered (`layers`) layout with scrolling, wrapping
-  (`wrap`, `lineAlign`), pinned children (`pinAt`) and aspect ratios
-  (`aspect`). Layout options are
-  `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
-  `explainLayout` outlines every layout node.
-- Scrollers take a wheel step and a glide time (`setScrollTuning`,
-  `setScrollStep`), and move from code: `scrollTo`, `scrollBy`, `scrollPages`,
-  and `scrollIntoView`. `getScrollMetrics` gives a virtualized list the
-  viewport and offset it needs to pick its rows, and `sensor` says when a
-  widget scrolls into view.
-- Keyboard focus and navigation for every control, focus from code, and
-  shortcuts, as in `shortcut (ctrl <> key 's')`. Input methods compose in
-  the text fields, and in a widget of your own with `useInputMethod`.
-- Every mouse button, held and clicked per widget (`respClickedWith
-  MouseMiddle`), cursor shapes, and tooltips with a hover delay.
-- Shaped text in the SDL backend, with fallback fonts for other scripts and
-  mixed left-to-right and right-to-left lines. `richText` wraps a paragraph
-  of mixed styles and links, as in
+  (`wrap`, `lineAlign`), pinned children (`pinAt`), and aspect ratios
+  (`aspect`). Layout options are `Layout -> Layout` modifiers composed with
+  `(.)`, as in `columnWith (gap 8 . padAll 12)`. Debug outlines can be enabled
+  with `explainLayout`.
+- Configurable wheel step and glide duration (`setScrollTuning`,
+  `setScrollStep`), programmatic scrolling (`scrollTo`, `scrollBy`,
+  `scrollPages`, `scrollIntoView`), viewport metrics for virtualized lists
+  (`getScrollMetrics`), and visibility detection (`sensor`).
+- Keyboard focus and navigation for every control, programmatic focus, and
+  shortcuts such as `shortcut (ctrl <> key 's')`. IME composition works in the
+  built-in text fields and is exposed for custom widgets via `useInputMethod`.
+- Per-widget mouse button queries (`respClickedWith MouseMiddle`), cursor
+  shapes, and tooltips with a hover delay.
+- Text shaping in the SDL backend, with fallback fonts for other scripts and
+  mixed left-to-right and right-to-left lines. Multi-style paragraphs and links
+  are built with `richText`, as in
   `richText ["Read ", strong "the guide", " or ", hyperlink "faq" "the FAQ"]`.
-- Text fields with undo and redo, driven by `TextCommand` values that code
-  can run too, and input-method composition in the SDL backend.
-- Images with a content fit, crop, zoom, opacity and rotation
-  (`imageConfigured`), registered for as long as a view shows them
-  (`useImageRgba`), SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
-- Backends block on input when no animation or timed update needs a frame.
-  Each frame computes
-  its damage against the previous one. `wakeAfter` schedules a frame for a
-  view that changes on a timer, `useTaskStatus` and `useTask` run background
-  work, `useStream` folds a producer's updates into a view's state, and
-  `askWake` lets any thread wake the loop.
-- State in `Var`s that inputs edit directly (`useVar` for local state,
-  `newVar` for state the app owns, `v.field` for one field of a record), or in
-  a reducer with `NanoUI.Emit`. A frame reruns its view only when something
-  writes a `Var` that the view already read.
-- Eased and spring animation.
-- Themes, including ones built from Base16 schemes, changed for part of a
-  view with `styled` and composable modifiers, as in
-  `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
-  `disabledWhen` switches widgets off, `tone` and `fontTone` colour buttons
-  and text by status, and the theme can follow the desktop's light or dark
-  setting (`lightDark`, `followSystemTheme`).
-- One `WindowSettings` for every backend, a view that reads its window
-  (`askWindow`), changes it (`setWindowTitleUi`, `moveWindowUi`,
-  `setWindowModeUi`), takes screenshots (`requestScreenshot`) and decides
-  when it closes (`quitUi`).
-- `NanoUI.Testing` runs frames headlessly on scripted input, for tests, and
-  `NanoUI.Backend` has the font, input and damage plumbing a window backend
-  is written against. `NanoUI` itself is only what writing a GUI needs.
+- Undo and redo in text fields via `TextCommand` values, which can also be
+  dispatched from code.
+- Images with content fit, crop, zoom, opacity, and rotation
+  (`imageConfigured`), scoped RGBA texture registration (`useImageRgba`), SVG
+  icons (`loadSvg`, `svgIcon`), and a `spinner`.
+- Input blocking while idle (no animation or timer is active), and per-frame
+  damage tracking so only changed regions are redrawn. Timed redraws and
+  background work are handled with `wakeAfter`, `useTask`, `useTaskStatus`,
+  `useStream`, and `askWake` (to wake the event loop from another thread).
+- State in `Var`s passed directly to input widgets (`useVar` for view-local
+  state, `newVar` for application state, `v.field` for a single field of a
+  record), or in a reducer with `NanoUI.Emit`. Writing to a `Var` that was
+  already read earlier in the frame re-runs the view automatically.
+- Eased and spring animations.
+- Themes, including Base16 schemes, scoped to part of a view with `styled` and
+  composable modifiers, as in
+  `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`. Widgets
+  can be disabled with `disabledWhen` and coloured by status with `tone` and
+  `fontTone`. The theme can follow the system light or dark preference
+  (`lightDark`, `followSystemTheme`).
+- One `WindowSettings` shared across backends, with `NanoUI` actions to inspect
+  the window (`askWindow`), change its title, position, or mode
+  (`setWindowTitleUi`, `moveWindowUi`, `setWindowModeUi`), take screenshots
+  (`requestScreenshot`), and close the app (`quitUi`).
+- Headless frame execution with scripted input for tests (`NanoUI.Testing`),
+  and a backend interface (`NanoUI.Backend`) containing the font, input, and
+  damage plumbing needed to implement a window backend.
 
 ## Examples
 
-State lives in a `Var`. An input takes the `Var` it edits and stores the user's
-edits in it; `readVar` reads it where you show it.
+Create state with `useVar`, pass it to input widgets, and read the current
+value with `readVar`:
 
 ```haskell
 greeter :: NanoUI ()
@@ -109,9 +103,9 @@ greeter = columnWith (gap 8 . padAll 16) $ do
   labelWith (fontSize px) (if loud then T.toUpper greeting else greeting)
 ```
 
-For an Elm-style update function, `NanoUI.Emit` from the `nano-ui-emit` package
-adapts ordinary widgets to emit statically typed messages, and `runSdlAppReduce`
-folds them into the model:
+For an Elm-style update loop, use `NanoUI.Emit` from `nano-ui-emit` to emit
+statically typed messages from widgets and fold them into a model with
+`runSdlAppReduce`:
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -139,28 +133,29 @@ view n = Emit.withNanoUI row $ do
 
 ## How it works
 
-A view is a `NanoUI` action, which has `MonadIO`, `MonadUnliftIO` and the
-`exceptions` classes. It is built on
-[effectful](https://hackage.haskell.org/package/effectful), which a view never
-needs to know about; `NanoUI.Effectful` exposes it for programs that want their
-views to share effects with the rest of the program. A frame:
+`NanoUI` has `MonadIO` and `MonadUnliftIO` instances, and exception handling
+from `exceptions`. It is built on
+[effectful](https://hackage.haskell.org/package/effectful), with the underlying
+`Eff` stack exported in `NanoUI.Effectful` if you want to share effects with the
+rest of your application. Each frame:
 
-1. Routes the pointer to whatever was on top under it (a menu, a dropdown,
-   the floating panel in front, or the page), resets the node and vertex
-   arenas, and runs the view. Widgets add layout nodes and read and write the
-   widget store; one the pointer was not routed to sees no pointer at all.
-2. Solves layout.
-3. Resolves pointer, keyboard, and focus against the new geometry.
-4. Computes damage against the previous frame, including geometry, state,
+1. Pointer input is routed to the topmost layer at the cursor (a menu,
+   dropdown, frontmost floating panel, or the main page), the node and vertex
+   arenas are reset, and the UI action runs. Widget calls append layout nodes
+   and read from or update the widget store; layers that do not receive the
+   pointer get no pointer events.
+2. Layout is solved.
+3. Pointer, keyboard, and focus states are resolved against the new geometry.
+4. Damage is computed against the previous frame, covering geometry, state,
    theme, and animation changes.
-5. Paints the required region into pinned vertex and index buffers, in
-   background, content, overlay, and chrome layers, then hands the draw list
-   to the backend.
+5. The damaged region is painted into pinned vertex and index buffers in the
+   background, content, overlay, and chrome layers, producing a draw list for
+   the backend.
 
-[docs/rendering-pipeline.svg](docs/rendering-pipeline.svg) has the diagram.
-Per-frame code is profiled for allocation, and an
-[inspection-testing](https://hackage.haskell.org/package/inspection-testing)
-suite checks that the vertex writers compile without dictionaries or tuples.
+See [docs/rendering-pipeline.svg](docs/rendering-pipeline.svg) for a diagram of
+the pipeline. Per-frame code is profiled for allocation, and
+[inspection-testing](https://hackage.haskell.org/package/inspection-testing) is
+used to check that the vertex writers compile without dictionaries or tuples.
 
 ## Packages
 
@@ -178,8 +173,9 @@ suite checks that the vertex writers compile without dictionaries or tuples.
 
 ## Running the demos
 
-You need GHC 9.10 or newer (development uses 9.14) and Cabal. The SDL backend
-also needs SDL3, SDL3_ttf, and pkg-config. `nix develop` sets these up.
+Requires GHC 9.10 or newer (development uses 9.14) and Cabal. The SDL backend
+also requires SDL3, SDL3_ttf, and pkg-config, all of which are provided in the
+`nix develop` shell.
 
 ```sh
 cabal run nano-ui-sdl-demo       # widget and chart tour
@@ -192,22 +188,20 @@ cabal run nano-ui-example-hello  # the first of the single-topic examples
 ```
 
 The [single-topic examples](packages/nano-ui-demo/README.md#examples) are
-short programs that each answer one question: where state lives, how layout
-works, how to validate a form, run work in the background, show 100,000 rows,
-and so on.
+short, self-contained programs, each focused on one concept: state, layout,
+form validation, background tasks, virtualized lists of 100,000 rows, and so
+on.
 
 ## Documentation
 
-[State](docs/typed-state.md) explains Vars, where they come from, what a
-write costs, the handle-based resource APIs, and migration from the old hooks.
-
-The [user guide](packages/nano-ui/GUIDE.md) covers application setup, stable
-widget identity, layout, background work, custom drawing, and headless tests.
-
-Start with the `NanoUI` module documentation: it explains how widgets return
-values, how inputs keep their state, and how layout modifiers compose.
-[docs/development.md](docs/development.md) covers building, testing,
-profiling, and the layout of this repository.
+- [User guide](packages/nano-ui/GUIDE.md): application setup, stable widget
+  identity, layout, background work, custom drawing, and headless tests.
+- [State](docs/typed-state.md): `Var`s, where they come from, write costs,
+  handle-based resource APIs, and migration from the old hooks.
+- [Development guide](docs/development.md): building, testing, profiling, and
+  repository structure.
+- `NanoUI` Haddock: reference documentation for widgets, state, and layout
+  modifiers.
 
 ## License
 
