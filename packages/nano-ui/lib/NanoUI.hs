@@ -5,9 +5,9 @@
 -- License     : MIT
 -- Maintainer  : zacharyachurchill@gmail.com
 --
--- A view is a function that runs every frame. Widgets are ordinary calls:
--- each one adds a layout node, reads this frame's input, and returns what the
--- user did. There are no widget objects to keep and no callbacks to register.
+-- Views are written in the 'NanoUI' monad, and the backend re-runs the view
+-- function when events arrive. Each widget call emits a layout node, reads the
+-- current frame's input, and returns the user interaction directly.
 --
 -- > counter :: NanoUI ()
 -- > counter = row $ do
@@ -19,33 +19,30 @@
 -- Run a view with a backend: @runSdlApp@ from @nano-ui-sdl@ or @runRgfwApp@
 -- from @nano-ui-rgfw@.
 --
--- This module is the view API and nothing else. Writing a backend of your
--- own, or a harness that drives frames itself, needs "NanoUI.Backend"
--- instead: input construction, font callbacks, damage, and the metrics the
--- widgets lay themselves out by.
+-- This module re-exports the view API. For custom backends or frame harnesses
+-- (input construction, font callbacks, damage tracking, and layout metrics),
+-- see "NanoUI.Backend".
 --
 -- = Conventions
 --
--- * Widgets return what you usually need: 'Bool' for buttons and menu items,
---   and @()@ for inputs, text and decoration.
+-- * Simple widgets return 'Bool' (buttons, menu items) or @()@ (inputs, text,
+--   decoration).
 -- * A primed name returns the widget's 'Response' as well or instead, for
 --   hover state, geometry, tooltips, and change or submit flags:
 --   @button'@, @slider'@.
--- * Inputs take the 'Var' they edit: @textInput draft@ shows @draft@ and
---   stores the user's edits in it. @'constVar' x@ is a constant, shown but
---   not kept. Editing state such as the caret, a drag in progress,
---   or an open dropdown stays inside the widget.
+-- * Input widgets take a mutable 'Var' holding their state: @textInput draft@
+--   reads and mutates @draft@ in place. Pass @'constVar' x@ for a read-only
+--   value. Transient UI state such as caret position, an active drag, or an
+--   open dropdown is stored internally per widget.
 -- * Layout arguments are modifiers, as in @buttonWith (fixedW 120)@ or
 --   @columnWith (gap 8 . padAll 12)@. Widgets with more options take a
 --   configuration record: 'textInputConfigured', 'tabsConfigured'.
 --
 -- = State
 --
--- Keep state in 'Var's: 'useVar' keeps one at its place in the view, and
--- 'newVar' makes one the application owns. Read a Var with 'readVar' where
--- you show it. Or keep a model in a reducer: @nano-ui-emit@ adapts widgets to
--- emit messages, and the backends' reducer runners fold them into the model.
--- See "NanoUI.Var".
+-- Keep mutable state in 'Var's: 'useVar' allocates one tied to its call site
+-- in the view, and 'newVar' allocates one in 'IO'. Read a 'Var' with 'readVar'.
+-- Or use a pure model and reducer with @nano-ui-emit@. See "NanoUI.Var".
 module NanoUI
   ( -- * Views
     NanoUI
@@ -65,28 +62,27 @@ module NanoUI
     -- * Focus
 
     -- | Tab moves focus between focusable widgets. Clicking a text field, a
-    -- select or a focusable custom widget (a knob, a canvas with
+    -- select, or a focusable custom widget (a knob, or a canvas with
     -- 'canvasFocusable') focuses it; clicking anywhere else unfocuses the
     -- current field.
-    -- A view that routes typing itself (an editor that keeps the keyboard
-    -- while its find bar is shut) calls 'holdFocus' on each frame it wants
-    -- the keyboard, and receives that frame's Tab.
+    -- A view that handles keyboard input directly can call 'holdFocus' each
+    -- frame to claim focus and receive Tab events.
     --
-    -- 'requestFocus' focuses a widget, named by its response's 'respId' or
+    -- 'requestFocus' focuses a widget, identified by its response's 'respId' or
     -- by 'currentId' just before declaring it. 'focusNext' and
     -- 'focusPrevious' act like Tab and Shift+Tab, and 'clearFocus' unfocuses.
-    -- These moves behave like Tab: the widget shows the focus ring, a text
-    -- field keeps its old caret, the field losing focus drops its selection
-    -- and commits, and the next Tab continues from the new widget. Disabled
-    -- widgets and widgets behind an open modal refuse focus. The move applies
-    -- at the end of the frame; check it with 'isFocused' on the next frame:
+    -- Focus changes apply at the end of the frame and behave like Tab: the
+    -- target widget shows the focus ring, a text field preserves its caret,
+    -- the previously focused field drops its selection and commits, and the
+    -- next Tab continues from the newly focused widget. Disabled widgets and
+    -- widgets behind an open modal cannot be focused. Check focus state with
+    -- 'isFocused' on the next frame:
     --
     -- > resp <- searchInput' "Find" query
     -- > findPressed <- shortcut (ctrl <> key 'f')
     -- > when findPressed (requestFocus (respId resp))
     --
-    -- 'NanoUI.Monad.releaseFocus' unfocuses a widget immediately, mid-view,
-    -- and changes nothing else.
+    -- 'NanoUI.Monad.releaseFocus' clears focus immediately mid-frame.
   , holdFocus
   , requestFocus
   , focusNext
@@ -100,19 +96,19 @@ module NanoUI
 
     -- * Widget identity
 
-    -- | Every widget takes the next 'WidgetId' in its container: ids count
-    -- up in call order among siblings, and a container starts a new count
-    -- for its children. Widget state is stored under that id, so the same
-    -- widgets must run in the same order every frame. Positional 'useVar's
-    -- keep a count of their own, so widgets never move them, nor they
-    -- widgets.
+    -- | Every widget receives the next 'WidgetId' in its container: IDs count
+    -- up in call order among siblings, and each container starts a new counter
+    -- for its children. Internal widget state is keyed by 'WidgetId', so
+    -- widgets should be called in a consistent order across frames. Positional
+    -- 'useVar' calls use a separate counter so widget and 'useVar' IDs do not
+    -- affect each other.
     --
-    -- A widget (or 'useVar') that runs on some frames and not others moves
-    -- the ids of the siblings after it. Put the conditional part inside
-    -- 'scope', which takes one id whether or not its body adds anything. For
-    -- a list whose items are added, removed or reordered, run each item under
-    -- 'withKey' with a key unique among its siblings, so the item's state
-    -- follows its key instead of its position.
+    -- A widget (or 'useVar') that runs conditionally shifts the IDs of
+    -- subsequent siblings in the same container. Wrap conditional subtrees in
+    -- 'scope', which consumes a single ID regardless of whether its body adds
+    -- widgets. For dynamic lists where items are added, removed, or reordered,
+    -- wrap each item in 'withKey' with a sibling-unique key so state follows
+    -- the key rather than the index.
   , scope
   , keyedTag
   , withKey
@@ -285,21 +281,20 @@ module NanoUI
 
     -- * Text editing
 
-    -- | Text fields change their text only through 'TextCommand's. Keys run
-    -- them (Backspace is @'Delete' 'CharLeft'@, Ctrl+Z is 'Undo'), the
-    -- right-click menu runs them, and an app can run them on a field by its
-    -- id:
+    -- | Text fields apply edits through 'TextCommand's. Keyboard input
+    -- (Backspace is @'Delete' 'CharLeft'@, Ctrl+Z is 'Undo'), the right-click
+    -- context menu, and programmatic calls via 'runTextCommand' all dispatch
+    -- through the same command set:
     --
     -- > resp <- textArea' body
     -- > canUndo <- textCanUndo (respId resp)
     -- > whenM (menuItem "Undo") (runTextCommand (respId resp) Undo)
     -- > whenM (menuItem "Insert date") (runTextCommand (respId resp) (InsertText today))
     --
-    -- Every command that changes text is recorded for undo. Typing joins one
-    -- undo step per word and deleting one per run; the steps keep the edits
-    -- themselves, not copies of the document, so a long history of a large
-    -- document stays small. Replacing the value a field is passed clears its
-    -- history.
+    -- Every command that mutates text is recorded for undo. Consecutive typing
+    -- is grouped by word and deletions by run; undo entries store only the
+    -- diffs rather than full document snapshots. Modifying the 'Var' from
+    -- outside the widget clears its undo history.
   , TextCommand (..)
   , TextMotion (..)
   , Cursor (..)
@@ -376,12 +371,11 @@ module NanoUI
   , withTooltip
 
     -- | A tooltip opens after the pointer rests on its target for
-    -- 'tooltipDelay', or immediately if another tooltip was open moments
-    -- before. It closes when the pointer leaves or a button goes down; a
-    -- wheel turn restarts the delay. The delay costs no frames: the loop
-    -- sleeps until a timed wake. 'PlacementAtCursor' keeps the tooltip
-    -- 'tooltipGap' below the moving pointer. Disabled widgets show their
-    -- tooltips too, so they can say why they are off.
+    -- 'tooltipDelay', or immediately if another tooltip was recently open. It
+    -- closes when the pointer leaves or a mouse button is pressed; scrolling
+    -- restarts the delay timer via a timed wake without spinning the frame
+    -- loop. 'PlacementAtCursor' positions the tooltip 'tooltipGap' below the
+    -- cursor. Tooltips also appear on disabled widgets.
   , TooltipConfig (..)
   , defaultTooltipConfig
   , tooltipConfigured
@@ -389,9 +383,8 @@ module NanoUI
 
     -- * Window caption
 
-    -- | The minimize, maximize and close buttons of a window that draws its
-    -- own title bar, and the geometry the backend needs to make the rest of
-    -- that bar drag and resize the window.
+    -- | Minimize, maximize, and close buttons for custom title bars, along
+    -- with hit-test geometry so the backend can drag and resize the window.
   , CaptionGlyph (..)
   , CaptionAction (..)
   , CaptionConfig (..)
@@ -447,10 +440,10 @@ module NanoUI
   , drawing
   , drawingVersioned
   , drawingCached
-    -- | A drawing's ops are 'DrawOp' values in window coordinates. Build
-    -- them with a canvas ('canvas', 'runCanvasFor') rather than by hand. The
-    -- constructors after 'DrawTextStyled' are the canvas's internal encoding
-    -- of paths, clips and transforms, and may change.
+    -- | 'DrawOp' values use window coordinates. Construct them through the
+    -- canvas API ('canvas', 'runCanvasFor') rather than directly; constructors
+    -- after 'DrawTextStyled' are internal encodings of paths, clips, and
+    -- transforms and may change.
   , DrawOp (..)
   , TextFont (..)
   , defaultTextFont
@@ -459,17 +452,18 @@ module NanoUI
 
     -- * Image fit, opacity and rotation
 
-    -- | 'imageConfigured' fits an image to its rect like CSS @object-fit@
-    -- ('ContentFit'), with alignment, cropping, zoom, opacity and
-    -- 'Rotation'. Unlike 'image', an axis the layout leaves unsized takes
-    -- the image's own size, and a fit height keeps the image's aspect ratio:
+    -- | 'imageConfigured' fits an image into its layout rect (similar to CSS
+    -- @object-fit@ via 'ContentFit'), with alignment, cropping, zoom, opacity,
+    -- and 'Rotation'. Unlike 'image', an axis left at fit sizing uses the
+    -- image's natural dimension, and a fit height preserves aspect ratio:
     --
     -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120} photo
     -- > imageConfigured defaultImageConfig {icRotation = RotateSolid (pi / 2), icOpacity = 0.5} photo
     -- > imageConfigured defaultImageConfig {icLayout = fillW, icCrop = Just (Rect 0 0 64 64)} sheet
     --
-    -- 'svgIconConfigured' does the same for SVG icons. 'fitRect' computes a
-    -- fit's placement, for canvases that draw images with 'drawImageWith'.
+    -- 'svgIconConfigured' applies the same rules to SVG icons. 'fitRect'
+    -- computes the destination rectangle for canvases drawing images with
+    -- 'drawImageWith'.
   , ContentFit (..)
   , Rotation (..)
   , rotationAngle
@@ -481,17 +475,16 @@ module NanoUI
 
     -- * Custom widgets
 
-    -- | "NanoUI.Widgets.Custom" also holds the canvas-drawn widgets: toggle
-    -- switches, knobs, progress bars, spinners and sparklines.
+    -- | "NanoUI.Widgets.Custom" also provides canvas-drawn widgets: toggle
+    -- switches, knobs, progress bars, spinners, and sparklines.
     --
-    -- A measure function and 'cdcFont' hand a widget the context's
-    -- 'FontMetrics'; 'lineWidth' and 'fmLineHeight' size text with them.
-    -- 'widgetCursor' picks the pointer shown over the widget.
+    -- Measure callbacks and 'cdcFont' provide 'FontMetrics' for sizing text
+    -- via 'lineWidth' and 'fmLineHeight'. 'widgetCursor' sets the cursor shape
+    -- when hovered.
     --
-    -- Paths, transforms, fill rules, strokes and paints for 'drawPath',
-    -- 'drawStrokePath', 'drawPathWith', 'drawStrokePathWith' and
-    -- 'withTransform' come from "NanoUI.Path". Import it qualified; it
-    -- exports short names such as @circle@, @rotate@ and @stroke@.
+    -- Paths, transforms, fill rules, strokes, and paints for 'drawPath',
+    -- 'drawStrokePath', 'drawPathWith', 'drawStrokePathWith', and
+    -- 'withTransform' live in "NanoUI.Path" (designed for qualified import).
   , module NanoUI.Widgets.Custom
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth
@@ -504,17 +497,17 @@ module NanoUI
 
     -- * Cursors
 
-    -- | Widgets choose the pointer shape shown over them: a hand over a
-    -- button, an I-beam over a text field, and for a custom widget whatever
-    -- its 'widgetCursor' returns. 'withCursorShape' sets a shape over part of
-    -- a view, used where no widget inside chooses one:
+    -- | Built-in widgets set an appropriate cursor when hovered (pointer hand
+    -- on buttons, I-beam on text fields, or 'widgetCursor' on custom widgets).
+    -- 'withCursorShape' sets a fallback cursor for a subtree when no inner
+    -- widget overrides it:
     --
     -- > withCursorShape UiCursorMove (drawing (fixedWH 320 200) board)
     --
-    -- 'UiCursorDefault' means no preference from a widget, and the arrow
-    -- from 'withCursorShape'. 'UiCursorHidden' hides the pointer. Disabled
-    -- widgets show the arrow; wrap them in @withCursorShape UiCursorNotAllowed@
-    -- to show they are off.
+    -- 'UiCursorDefault' indicates no widget override (or resets to the default
+    -- arrow inside 'withCursorShape'). 'UiCursorHidden' hides the cursor.
+    -- Disabled widgets fall back to the default arrow unless wrapped in
+    -- @withCursorShape UiCursorNotAllowed@.
   , withCursorShape
 
     -- * Drag and drop
@@ -535,10 +528,7 @@ module NanoUI
 
     -- * State
 
-    -- | A 'Var' holds state a widget shows and edits: input widgets take
-    -- one and store the user's edits in it. 'useVar' keeps one at its
-    -- position in the view; 'newVar' makes one the application owns. Read a
-    -- Var with 'readVar' where you show it; see "NanoUI.Var".
+    -- | Mutable state references passed to input widgets; see "NanoUI.Var".
   , Var
   , constVar
   , newVar
@@ -564,12 +554,12 @@ module NanoUI
 
     -- ** Background work
 
-    -- | These run slow work on a background thread. 'useTaskStatus'
-    -- reports whether the job is running, done or failed; 'useTask' returns
-    -- its result once available. The loop sleeps while a job runs and wakes
-    -- when it ends. A job starts on the first frame its call sees a key,
-    -- restarts when the key changes, and is killed when the view stops
-    -- calling it. Allocate @searchTask <- newTask@ during setup:
+    -- | Run IO work on a background thread and wake the frame loop on
+    -- completion. 'useTaskStatus' reports whether the task is running, done,
+    -- or failed; 'useTask' returns the latest completed result. A task starts
+    -- on the first frame it is called with a key, restarts when the key
+    -- changes, and is cancelled if the call is omitted on a later frame.
+    -- Allocate @searchTask <- newTask@ during setup:
     --
     -- > query <- useVar ""
     -- > textInput query
@@ -577,11 +567,11 @@ module NanoUI
     -- > hits <- useTask searchTask q (searchIndex index q)
     -- > mapM_ (label . hitTitle) (fromMaybe [] hits)
     --
-    -- While a new key's job runs, 'useTask' keeps returning the previous
-    -- result, so the list above does not flash empty as the query changes.
-    -- 'useStream' runs a producer that pushes a stream of values into state
-    -- the view reads. 'askWake' returns an action any thread can call to
-    -- schedule another frame.
+    -- While a new key's task is running, 'useTask' continues returning the
+    -- previous result so the UI does not flash empty between queries.
+    -- 'useStream' runs a background producer that pushes values into state,
+    -- and 'askWake' returns an IO callback that schedules a frame from any
+    -- thread.
   , TaskStatus (..)
   , useTaskStatus
   , Task
@@ -594,29 +584,28 @@ module NanoUI
 
     -- * Scrolling
 
-    -- | A scroll container ('scroll', 'scroll2D') handles the wheel and its
-    -- own scrollbars. These move one from the outside, keyed by the
-    -- 'WidgetId' that 'scrollArea' and 'scrollArea2D' hand back.
+    -- | Scroll containers ('scroll', 'scroll2D') handle mouse wheel input and
+    -- scrollbars automatically. The functions below control scroll position
+    -- programmatically using the 'WidgetId' returned by 'scrollArea' or
+    -- 'scrollArea2D'.
     --
-    -- How far the wheel goes, and whether a scroll glides onto its target
-    -- instead of jumping, is one setting for the whole app:
+    -- 'setScrollTuning' configures wheel step distance and smooth-scroll
+    -- duration globally:
     --
     -- > setScrollTuning ctx defaultScrollTuning
     -- >   { scrollWheelStep = 3 * rowHeight  -- three rows a notch
     -- >   , scrollSmoothTime = 0.12
     -- >   }
     --
-    -- 'setScrollStep' gives one list a step of its own. With a glide time
-    -- set, every wheel notch and every 'ScrollSmooth' command eases onto its
-    -- target over that many seconds, and the frame loop keeps drawing until
-    -- it lands.
+    -- 'setScrollStep' overrides the wheel step for a single scroll container.
+    -- When 'scrollSmoothTime' is positive, wheel steps and 'ScrollSmooth'
+    -- commands ease toward the target over that duration.
     --
-    -- 'scrollIntoView' brings a widget inside the scroller into view: the row
-    -- a keyboard selection just moved to, say. A list that only builds the
-    -- rows it shows has no widget to point at for the rest, so scroll to
-    -- where the row would be with 'scrollRectIntoView', whose rectangle is in
-    -- content coordinates. 'getScrollMetrics' reports the viewport, range and
-    -- offset such a list needs to pick its visible rows in the first place.
+    -- 'scrollIntoView' scrolls a child widget into view (for example, a
+    -- keyboard-selected row). For virtualized lists that only instantiate
+    -- visible rows, use 'scrollRectIntoView' with a rectangle in content
+    -- coordinates, and 'getScrollMetrics' to read the viewport size and offset
+    -- needed to compute the visible range.
   , ScrollTuning (..)
   , defaultScrollTuning
   , getScrollTuning
@@ -643,11 +632,10 @@ module NanoUI
 
     -- ** From a view
 
-    -- | The same commands, run from inside a view rather than handed the
-    -- context. A command that should act on this frame is run before the
-    -- scroller is declared, with the id 'currentId' says it will take; the
-    -- rows a list builds for itself are worked out from 'getScrollMetricsUi'
-    -- the same way:
+    -- | View-monad variants of the scroll functions above. To apply a scroll
+    -- command on the current frame (or read metrics before building the
+    -- scroller), query 'currentId' immediately before declaring the scroll
+    -- container:
     --
     -- > sid <- currentId
     -- > when moved (scrollRectIntoViewUi sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant)
@@ -663,28 +651,24 @@ module NanoUI
 
     -- * Visibility
 
-    -- | A sensor reports whether a widget is on screen, meaning it overlaps
-    -- the window and every enclosing scroller, panel and floating panel.
-    -- 'sensor' wraps part of the view in a watched container;
-    -- 'useVisibility' watches an existing widget by id.
+    -- | A visibility sensor reports whether a widget's bounds intersect the
+    -- window and all enclosing clip rects (scroll containers, panels, and
+    -- floating windows). 'sensor' wraps a subtree in a monitored container;
+    -- 'useVisibility' monitors an existing widget by 'WidgetId'.
     --
-    -- Layout is solved after the view runs, so like 'respRect' a sensor
-    -- reports the previous frame's layout. When layout changes what a sensor
-    -- sees (a scroll, a resize, content growing above it), the loop runs one
-    -- more frame and the view reads the change in 'visEvent'. The event goes
-    -- to the first view pass that reads the sensor, not to a rerun caused by
-    -- a Var write reacting to it. Sensors cost no frames while nothing
-    -- moves. A sensor skipped on some frame (in a hidden tab, or a 'scope'
-    -- that left it out) is forgotten, and reports 'BecameVisible' again once
-    -- it is rebuilt and seen.
+    -- Because layout runs after the view pass, visibility reflects the
+    -- previous frame's layout (like 'respRect'). When layout changes a
+    -- sensor's visibility, the frame loop schedules a follow-up pass and
+    -- reports the transition in 'visEvent' on the first pass of that frame.
+    -- If a sensor call is omitted on a frame (e.g. inside an inactive tab or
+    -- skipped 'scope'), its state is cleared and it will report
+    -- 'BecameVisible' again when re-entered.
     --
-    -- 'sensorAnticipate' counts a widget as visible while it is still that
-    -- far outside, giving lazy loading a head start. 'sensorDelay' requires
-    -- it to stay in view that long, so a list flung past loads none of the
-    -- rows that flash by. 'visRect' is the on-screen part of the widget and
-    -- 'visBounds' all of it. A thumbnail that decodes its image when it
-    -- first comes within 200 pixels of the viewport (@decodeRgba@ stands for
-    -- an image decoder):
+    -- 'sensorAnticipate' expands the intersection margin outward (in pixels)
+    -- for prefetching ahead of scroll. 'sensorDelay' requires the target to
+    -- remain in view for a minimum duration before firing, avoiding work for
+    -- rows scrolled past quickly. 'visRect' is the visible intersection and
+    -- 'visBounds' is the full widget rect:
     --
     -- Make @pictureVar <- newVar Nothing@ once during component setup.
     --
@@ -727,22 +711,20 @@ module NanoUI
 
     -- * Layout
 
-    -- | A container lays its children out along a 'Row' or 'Column', either
-    -- in a single 'Line' or in lines that 'Wrap' when the next child would
-    -- overflow, like a list of tags ('wrap'; 'lineGap' spaces the lines and
-    -- 'lineAlign' aligns each). A 'Layered' container stacks its children
-    -- instead, later ones on top: 'layers' is one, and 'layered' turns a
-    -- panel or card into one. 'pinAt' takes a child out of the flow and
-    -- places it at an offset from the corner its alignment picks, over its
-    -- siblings, as for a badge or floating button; @pinAt 0 0 . grow@ covers
-    -- the parent without affecting its size. 'aspect' keeps a fit height at
-    -- a ratio to the width.
+    -- | Containers arrange children along a 'Row' or 'Column', either on a
+    -- single 'Line' or wrapping across lines with 'Wrap' ('wrap', 'lineGap',
+    -- 'lineAlign'). A 'Layered' container ('layers', or 'layered' on a panel
+    -- or card) stacks children in z-order with later children on top. 'pinAt'
+    -- removes a child from flow layout and offsets it from the corner selected
+    -- by its alignment; @pinAt 0 0 . grow@ overlays the parent's bounds
+    -- without affecting its measured size. 'aspect' constrains a fit height to
+    -- a fixed width-to-height ratio.
     --
-    -- Where nodes overlap, a control on top takes the pointer and anything
-    -- else lets it through to controls beneath. 'pointer' overrides this for
-    -- a node and its contents: 'PointerBlock' makes a card or scrim take the
-    -- pointer over its whole box, and 'PointerPass' makes a decoration let it
-    -- through.
+    -- When nodes overlap, interactive widgets capture pointer events while
+    -- non-interactive nodes pass them through to elements beneath. 'pointer'
+    -- overrides this: 'PointerBlock' captures pointer events across a
+    -- container's full rect, and 'PointerPass' makes a subtree transparent to
+    -- pointer hit-testing.
   , Layout (..)
   , LayoutModifier
   , Sizing (..)
@@ -829,23 +811,22 @@ module NanoUI
 
     -- * Styling
 
-    -- | A 'Theme' says how every kind of widget looks: a 'Style' for each
-    -- surface (buttons, inputs, panels, floating windows) and colours for
-    -- accents, text selection, links and so on. The context holds one theme
-    -- for the whole app ('setTheme'); 'styled' changes it for part of the
-    -- view. Style and theme modifiers compose with @(.)@ like layout
-    -- modifiers do:
+    -- | A 'Theme' defines surface styles ('Style' for buttons, inputs, panels,
+    -- floating windows, popups) and semantic colors (accents, text selection,
+    -- links). The context holds the active theme ('setTheme'), and 'styled'
+    -- applies a 'Theme' -> 'Theme' modifier to a subtree. Style and theme
+    -- modifiers compose with @(.)@:
     --
     -- > toolbar = styled (subtle . buttonStyle (cornerRadius 6)) $ row $ do
     -- >   whenM (button "Open") openFile
     -- >   styled primary (whenM (button "Save") save)
     --
-    -- Scopes nest, and each one modifies the theme around it, so a modifier
-    -- written once ('primary', 'destructive', or one of your own) works in any
-    -- theme. 'uiTheme' reads the theme where it is called.
+    -- Nested 'styled' calls modify the enclosing theme, so semantic modifiers
+    -- ('primary', 'destructive', etc.) adapt to whichever base theme is
+    -- active. 'uiTheme' reads the current theme in the view.
     --
-    -- 'disabledWhen' switches the widgets inside it off: they keep their
-    -- layout and state, take no input, and fade toward the window colour.
+    -- 'disabledWhen' disables all widgets in a subtree: they keep their layout
+    -- and state, ignore input, and render with dimmed colors.
   , styled
   , themed
   , disabledWhen
@@ -916,21 +897,19 @@ module NanoUI
 
     -- ** Following the system
 
-    -- | 'systemAppearance' reads whether the desktop uses light or dark
-    -- colours. The SDL backend reports it; RGFW cannot and reports 'Nothing'.
-    -- 'lightDark' maps an appearance to a theme and picks the dark one when
-    -- the appearance is unknown, matching nano-ui's dark default. Setting
-    -- the theme every frame is free while it does not change:
+    -- | 'systemAppearance' queries the OS light/dark preference (supported by
+    -- SDL; RGFW returns 'Nothing'). 'lightDark' selects a theme for an
+    -- 'Appearance', defaulting to dark when 'Nothing':
     --
     -- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
     --
-    -- Alternatively, 'followSystemTheme' makes the context track the system,
-    -- as do the backends' @sdlAppThemeFor@ and @optThemeFor@ options:
+    -- Alternatively, 'followSystemTheme' (or the backends' @sdlAppThemeFor@
+    -- and @optThemeFor@ options) updates the context theme automatically when
+    -- the OS appearance changes:
     --
     -- > followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
     --
-    -- A theme switch repaints the whole window. 'setTheme' returns to a
-    -- fixed theme.
+    -- 'setTheme' switches back to a fixed theme.
   , defaultLightTheme
   , Appearance (..)
   , lightDark
@@ -969,17 +948,15 @@ module NanoUI
 
     -- * Input
 
-    -- | The input a view reads: where the pointer is, which keys came in
-    -- this frame, and what was typed. A backend fills one of these in every
-    -- frame with the functions in "NanoUI.Backend".
+    -- | Per-frame input state populated by the backend (see "NanoUI.Backend").
     --
-    -- While an input method is composing text ('inputComposition'), the
-    -- focused text field draws the 'Composition' at its caret, and the frame
-    -- drops the keys in 'inputKeys', 'inputKeysReleased' and 'inputKeysHeld'
-    -- until the text is committed or cancelled, so no shortcut fires. A custom text
-    -- widget requests the input method with 'useInputMethod' and draws the
-    -- composition it returns. 'pressedIn', 'releasedIn' and 'heldIn' query
-    -- one key or mouse button; 'pressedOnceIn' ignores auto-repeat:
+    -- During IME text composition ('inputComposition'), the focused text field
+    -- renders the active 'Composition' at the caret, and key events in
+    -- 'inputKeys', 'inputKeysReleased', and 'inputKeysHeld' are suppressed
+    -- until composition finishes so shortcuts do not trigger mid-composition.
+    -- Custom text widgets opt into IME via 'useInputMethod'.
+    -- 'pressedIn', 'releasedIn', and 'heldIn' test a key or mouse button in an
+    -- 'Input'; 'pressedOnceIn' ignores key auto-repeat:
     --
     -- > runSdlApp defaultSdlOptions {sdlAppShouldQuit = pressedOnceIn KeyEscape} view
   , Input (..)
@@ -995,15 +972,15 @@ module NanoUI
 
     -- * Mouse buttons
 
-    -- | 'respHeldWith' and 'respClickedWith' say which buttons are held on a
-    -- widget and which clicked it. 'mousePressed', 'mouseReleased' and
-    -- 'mouseHeld' listen for a button anywhere in the part of the view being
-    -- declared, like 'keyPressed' for keys:
+    -- | 'respHeldWith' and 'respClickedWith' report which mouse buttons are
+    -- held on or clicked a widget. 'mousePressed', 'mouseReleased', and
+    -- 'mouseHeld' check mouse button state in the current view scope:
     --
     -- > whenM (mousePressed MouseBack) goBack
     --
-    -- An 'Input' stores held, pressed and released buttons as 'MouseButtons'
-    -- sets, which 'pressedIn', 'releasedIn' and 'heldIn' also read.
+    -- 'Input' stores held, pressed, and released buttons as 'MouseButtons'
+    -- sets, which can also be queried with 'pressedIn', 'releasedIn', and
+    -- 'heldIn'.
   , MouseButton (..)
   , mousePressed
   , mouseReleased
@@ -1026,35 +1003,31 @@ module NanoUI
 
     -- * Keyboard
 
-    -- | 'keyPressed', 'keyReleased' and 'keyHeld' listen for a key, and
-    -- 'shortcut' binds a command to a chord. Chords combine modifiers and a
-    -- key with '<>', using "NanoUI.Shortcut":
+    -- | 'keyPressed', 'keyReleased', and 'keyHeld' check key state, and
+    -- 'shortcut' matches a key chord built with "NanoUI.Shortcut":
     --
     -- > whenM (shortcut (ctrl <> key 's')) save
     -- > whenM (shortcut (cmdOrCtrl <> shift <> key 'p')) (setPaletteOpen True)
     --
-    -- A shortcut fires once per press, only with exactly its modifiers held,
-    -- and only for the first shortcut declared for that chord. It is silent
-    -- behind a modal and for chords the focused widget handles itself, so
-    -- Ctrl+A in a focused text field selects its text ('shortcut' has the
-    -- full rules). Key listeners skip those keys too: a view hears only keys
-    -- no widget took. A focused control takes its keys alone or with Shift,
-    -- so a chord such as Alt+Left still reaches shortcuts. A custom widget
-    -- declares the keys it takes with 'widgetKeys'. A 'menuItemShortcut' row
-    -- binds its chord the same way while its menu is open.
+    -- A shortcut matches when its exact modifiers are held, and only the first
+    -- matching 'shortcut' call in a frame fires. Shortcuts and key listeners
+    -- are suppressed behind an open modal or when the focused widget claims the
+    -- key combination (for example, Ctrl+A in a focused text field). Focused
+    -- controls only claim unmodified or Shift-modified keys, leaving chords
+    -- like Alt+Left available for shortcuts. Custom widgets declare claimed
+    -- keys via 'widgetKeys'. 'menuItemShortcut' binds its chord while its menu
+    -- is open.
     --
-    -- Auto-repeat counts as a press, so holding Ctrl+Z undoes repeatedly.
-    -- 'keyPressedOnce' and 'shortcutOnce' ignore repeats, for actions such
-    -- as toggles that should happen once per press.
+    -- Key auto-repeat counts as a press (so holding Ctrl+Z repeats undo). Use
+    -- 'keyPressedOnce' and 'shortcutOnce' to ignore auto-repeat.
   , keyPressed
   , keyPressedOnce
   , keyReleased
   , keyHeld
 
-    -- | A focused custom widget reads the keys it claims, which the
-    -- listeners above leave out, with 'focusedKeyPressed', 'useKeyNav' for
-    -- the arrows, Enter and Space, and 'keyActivated' for Enter or Space as
-    -- a click.
+    -- | Focused custom widgets read their claimed keys using
+    -- 'focusedKeyPressed', 'useKeyNav' (arrow keys, Enter, Space), or
+    -- 'keyActivated' (Enter/Space activation).
   , focusedKeyPressed
   , focusedKeyPressedOnce
   , useKeyNav
@@ -1071,12 +1044,11 @@ module NanoUI
 
     -- * Debugging
 
-    -- | 'explainLayout' outlines every layout node, coloured by depth, and
-    -- tints the node under the pointer. 'explainedNode' describes that node:
-    -- its widget id (to match a 'respId'), rect, padding, sizing, gap, flow,
-    -- pin and pointer mode. 'explainScope' limits the overlay to part of a
-    -- view. The overlay changes nothing else and costs nothing when off, so
-    -- its toggle can live in a debug panel.
+    -- | 'explainLayout' draws depth-colored outlines around layout nodes and
+    -- highlights the node under the pointer. 'explainedNode' returns that
+    -- node's 'ExplainedNode' record (widget ID, rect, padding, sizing, gap,
+    -- flow, pin, and pointer mode). 'explainScope' restricts the overlay to a
+    -- subtree.
   , explainLayout
   , explainingLayout
   , explainedNode
@@ -1085,19 +1057,19 @@ module NanoUI
 
     -- * The native window
 
-    -- | A window opens with a 'WindowSettings', shared by all backends
+    -- | Initial window configuration is passed via 'WindowSettings'
     -- (@sdlWindowSettings@ in @SdlOptions@, @optWindow@ in @RgfwOptions@).
-    -- A view reads the window with 'askWindow', changes it with the setters
-    -- and commands below, and ends the session with 'quitUi'. Backends
-    -- support what they can. Without a window, as in a test context, these
-    -- do nothing and 'requestScreenshot' returns 'Nothing'.
+    -- Inside a view, 'askWindow' reads the current 'WindowState', the setters
+    -- and commands below update the window, and 'quitUi' requests exit. In
+    -- headless test contexts, window operations are no-ops and
+    -- 'requestScreenshot' returns 'Nothing'.
     --
-    -- Setters ('setWindowTitleUi', 'setWindowModeUi', ...) act only on a
-    -- change, so they can run every frame. Commands ('moveWindowUi',
-    -- 'resizeWindowUi', 'maximizeWindowUi', ...) act on every call, so run
-    -- them from events. To confirm before closing, turn
-    -- 'wsExitOnCloseRequest' off, watch 'winCloseRequested', and call
-    -- 'quitUi' when ready:
+    -- Setters ('setWindowTitleUi', 'setWindowModeUi', ...) only issue a
+    -- backend call when the value changes, so they can be called every frame.
+    -- Action commands ('moveWindowUi', 'resizeWindowUi', 'maximizeWindowUi',
+    -- ...) run on every call and should be triggered by events. To confirm
+    -- before closing, set 'wsExitOnCloseRequest' to 'False', check
+    -- 'winCloseRequested', and call 'quitUi' when confirmed:
     --
     -- > editor :: NanoUI ()
     -- > editor = do

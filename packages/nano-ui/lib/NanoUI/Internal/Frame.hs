@@ -69,15 +69,13 @@ runFrameEff unlift ctx rawInp ui = do
   -- The focused field gets any IME composition, and while one shows, the IME
   -- owns the keys.
   (frameInp, imeKeys) <- claimComposition ctx rawInp
-  -- Decide what the pointer belongs to before anything reads it, against the
-  -- frame the user saw. The view gets its input routed layer by layer, and
-  -- each step below gets the input of what it serves, with no pointer in it
-  -- unless that is where the pointer went, so none of them has to ask:
-  -- @layerInp@ for scrolling, windows, presses, focus and text fields,
-  -- @menuInp@ for the text-edit menu, and @dropInp@ for the dropdowns, which
-  -- only that menu is drawn over. @frameInp@, the pointer whoever it belongs
-  -- to, is for what watches the whole window: a press anywhere else closing
-  -- a menu, hover, and what the overlays paint.
+  -- Route pointer input before the view runs, against the previous frame's
+  -- geometry. Each pass below receives input filtered to its target layer
+  -- ('withoutPointer' when the pointer is routed elsewhere): @layerInp@ for
+  -- scrolling, windows, presses, focus and text fields, @menuInp@ for the
+  -- text-edit menu, and @dropInp@ for dropdowns. @frameInp@ retains the
+  -- unmasked pointer for window-wide checks (outside-click dismissal, hover,
+  -- and overlay painting).
   route <- routePointer ctx frameInp
   -- A widget covered by another gets no pointer.
   recordCoveredWidgets ctx route frameInp
@@ -122,11 +120,11 @@ runFrameEff unlift ctx rawInp ui = do
         else pure result0
     endVarFrame ctx
     pure r
-  -- A close request is the view's to see once ('NanoUI.winCloseRequested'),
-  -- and only a frame that ran the view has shown it.
+  -- Clear the one-shot close request ('NanoUI.winCloseRequested') after the
+  -- view has run.
   clearWindowClose ctx
   -- Scopes only change how nodes look, which the rect and text diffs below
-  -- cannot see, and custom widgets' cached ops hold the old theme's colours.
+  -- do not track, and custom widgets' cached ops hold the old theme's colours.
   whenM (themeScopesChanged ctx) $ do
     damageFull ctx
     modifyIORef' (ctxMetricGen ctx) (+ 1)
@@ -179,10 +177,10 @@ runFrameEff unlift ctx rawInp ui = do
   tickAnimations ctx (inputDeltaTime frameInp)
   sweepHeld ctx
   pruneDrawOpCache ctx
-  -- Dropdowns and the text-edit menu are not in the arena, so nothing in the
-  -- damage pass sees their rows change under the pointer, their filter or
-  -- their scroll. Each open one repaints whole every frame, and a closed or
-  -- moved one repaints where it was.
+  -- Dropdowns and the text-edit menu are not in the arena, so the damage pass
+  -- does not track their hover, filter, or scroll changes. Each open one
+  -- repaints in full every frame, and a closed or moved one repaints its
+  -- previous rect.
   menuRects <- overlayMenuRects ctx
   prevMenuRects <- getsOverlay ctx osPrevMenuRects
   unless (null menuRects && null prevMenuRects) $ do
@@ -216,11 +214,11 @@ reuseKeyFor ctx reuse paintFull size explain =
     else pure Nothing
 
 -- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
--- (@key@) matches the last full frame's (@mayReuse@) hands paint what that
--- frame did, so it takes that frame's draw data instead of painting again:
--- an idle continuous frame paints nothing. Other frames paint, and a full
--- frame keeps what it painted for the next. Paint that reads state nano-ui
--- does not track must call 'damageFull' when that state changes.
+-- (@key@) matches the last full frame's (@mayReuse@) returns the previous
+-- frame's 'DrawData' without repainting: an idle continuous frame paints
+-- nothing. Other frames paint, and a full frame caches its output for the
+-- next. Paint that reads state nano-ui does not track must call 'damageFull'
+-- when that state changes.
 paintOrReuse :: Context -> Input -> Size -> Bool -> Bool -> DrawReuse -> Maybe DrawReuseKey -> Bool -> IO DrawData
 paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse = do
   damage <- getsDamage ctx dsDamage
@@ -362,8 +360,8 @@ paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
 -- them. A cache taken under other font metrics measured text differently, so
 -- none of it is restored. Floating panels depend on state outside the arena
 -- (window positions, popup anchors), so each is placed after the solve, or,
--- over a reused solve, given back what placing it there left when it goes
--- where it went then ('lcPlaced').
+-- over a reused solve, restores the cached placement ('lcPlaced') when its
+-- inputs are unchanged.
 layoutArena :: Context -> Size -> Bool -> IO ()
 layoutArena ctx@Context {ctxNodeArena = na} size@(Size w h) check = do
   let ms = contextMeasurers ctx

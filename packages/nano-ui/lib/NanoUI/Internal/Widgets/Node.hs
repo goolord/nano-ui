@@ -196,8 +196,8 @@ container nt layout child = do
     addNodeFromLayout (ctxNodeArena ctx) nt parent layout
   withContainerNode True idx child
 
--- | A container whose widgets are for display: they see no interaction, and a
--- press passes through them to the widget they are drawn in
+-- | A display-only container: child widgets receive no interaction, and
+-- pointer events pass through to the enclosing widget
 -- ('NanoUI.Internal.Frame.Hit.innermostHit').
 inertContainer :: Layout -> NanoUI a -> NanoUI a
 inertContainer layout = flaggedContainer containerFlagInert layout . inertView
@@ -210,7 +210,6 @@ clipContainer layout child = do
   wid <- nextId
   flaggedContainer containerFlagClip layout (tagContainer wid *> child)
 
--- | A plain container whose style index is the container flag @flag@.
 flaggedContainer :: Int -> Layout -> NanoUI a -> NanoUI a
 flaggedContainer flag layout child = do
   idx <- withContext $ \ctx -> do
@@ -400,8 +399,8 @@ resolveInteraction ctx inp idx wid = do
       mIdx <- findNodeByWidgetId ctx wid
       presses <- readIORef (ctxPressPos ctx)
       let
-        -- Whether the button went down on this widget. A press the frame
-        -- never saw (synthesized or swallowed input) rules nobody out.
+        -- Whether the button press started on this widget. If no press
+        -- position was recorded (synthesized or swallowed input), allow it.
         startedHere b = case M.lookup b presses of
           Just (_, Just owner) | b /= MouseLeft -> pure (owner == wid)
           Just (p, _) -> widgetHit ctx mIdx rect p

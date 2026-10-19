@@ -84,11 +84,9 @@ buttonConfigured' :: ButtonConfig -> Text -> NanoUI Response
 buttonConfigured' (ButtonConfig lay adorns) txt = do
   resp <- buttonStyledEx True txt 0 lay 0
   taken <- adornWidget (respId resp) lay (labelColor lay) adorns
-  -- A control among the adornments holds the pointer: its press is its own,
-  -- and only the keyboard can click the button.
+  -- When an adornment control captures the pointer, ignore pointer clicks on the outer button.
   if taken then (`setClicked` inertResponse resp) <$> keyActivated (respId resp) else pure resp
 
--- | The colour of a button's label: its layout's font colour, or the theme's.
 labelColor :: Layout -> Theme -> Color
 labelColor lay theme = fromMaybe (styleFg (themeButton theme)) (layoutFontColor lay)
 

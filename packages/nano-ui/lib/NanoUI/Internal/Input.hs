@@ -342,9 +342,9 @@ emptyInput =
 -- shapes are CSS's cursors. Where the platform lacks one, the SDL and RGFW
 -- backends show its 'cursorFallback'.
 data UiCursorKind
-  = -- | From a widget ('NanoUI.Widgets.Custom.widgetCursor'), no opinion:
-    -- the enclosing 'NanoUI.withCursorShape' scope decides, or the arrow if
-    -- there is none. As a scope's own shape, the arrow.
+  = -- | From a widget ('NanoUI.Widgets.Custom.widgetCursor'), defers to the
+    -- enclosing 'NanoUI.withCursorShape' scope, or defaults to the arrow. As a
+    -- scope's own shape, the arrow.
     UiCursorDefault
   | UiCursorPointer
   | UiCursorText
@@ -461,9 +461,9 @@ isHardQuitInput inp =
 -- A frame ends after an edge (@isEdge@, a mouse press or release), so each
 -- edge gets its own frame. It also ends when the modifiers change once it
 -- holds keys or text, and after a command key ('isCommandKey') when text or
--- another key follows. A frame loses the order of its text, keys and
--- modifiers, so its text must come before its one command key, and its
--- modifiers must be those its keys and text came with. Auto-repeats stay in
+-- another key follows. Within a single frame, text, keys and modifiers are
+-- unordered, so text must precede the single command key, and modifiers must
+-- match those active when the keys and text arrived. Auto-repeats stay in
 -- the key's frame, so only mixed bursts cost extra frames.
 takeFrame :: (Input -> e -> Input) -> (e -> Bool) -> Input -> [e] -> (Input, [e], [e])
 takeFrame apply isEdge = go []
@@ -721,10 +721,9 @@ stripInteractionInput inp =
     , inputDrops = mempty
     }
 
--- | The frame as it looks from somewhere the pointer does not reach: under a
--- menu, a dropdown or a panel in front, or outside the layer a held button
--- went down in. No buttons, no wheel, and the pointer itself far off any
--- widget, so reading the pointer there finds nothing to react to.
+-- | Clear pointer buttons and scroll and move the pointer off-screen, for
+-- layers occluded by a menu, dropdown, or panel in front, or outside the
+-- layer where a held button was pressed.
 withoutPointer :: Input -> Input
 withoutPointer inp =
   inp

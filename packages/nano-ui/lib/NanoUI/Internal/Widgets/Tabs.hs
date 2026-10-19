@@ -70,7 +70,7 @@ data TabsConfig = TabsConfig
   , tabsTrailing :: NanoUI ()
   -- ^ Drawn after the headers: at the far end of a horizontal strip, below
   -- a vertical strip's headers. For actions on the strip as a whole, such
-  -- as a button that opens a new tab. Its widgets take their own presses.
+  -- as a button that opens a new tab. Child widgets handle their own pointer events.
   }
 
 -- | The trailing view shows as @\<view\>@.
@@ -94,9 +94,9 @@ data Tab a body = Tab
   -- ^ A short count or status drawn in a pill after the title.
   , tabAdornments :: !Adornments
   -- ^ Icons, texts and views drawn in the header beside its title
-  -- ("NanoUI.Adornment"), in the header's label colour. A @control@, such
-  -- as a pin button, takes its own presses: they neither select nor close
-  -- the tab.
+  -- ("NanoUI.Adornment"), in the header's label colour. An 'AdornControl',
+  -- such as a pin button, handles its own pointer events without selecting
+  -- or closing the tab.
   , tabBody :: !body
   }
 
@@ -289,10 +289,10 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
             | Just bar <- mBarNow, scrollAxisRange (extent vx) (rectW bar) 0 == 0 = 0
             | otherwise = scrollAxisRange (extent vx) vw 0
       pure (maybe maxOff range mView, o)
-  -- After layout the strip measures itself for the next frame, which it only
-  -- asks for when the overflow or an arrow flips: a width change that keeps
-  -- them settles in the frame it happens in. Sub-pixel churn is ignored so a
-  -- parked strip never writes.
+  -- After layout, measure the strip for the next frame and request a
+  -- follow-up frame only when the overflow or arrow state changes: a width
+  -- change that keeps them settles in the frame it happens in. Sub-pixel
+  -- churn is ignored so a parked strip never writes.
   liftIO . recordLayoutRead ctx rangeKey $ do
     (maxOff', o) <- measure
     when (abs (maxOff' - maxOff) > 0.5) $
@@ -357,7 +357,6 @@ renderHeader style orient cur t = disabledWhen (tabDisabled t) $ do
       lay = tabHeaderLay (orient == TabLeft || orient == TabRight)
       labelCol = styleFg (tabHeaderVisualStyle theme packed isActive)
   resp <- buttonStyledEx (not (tabDisabled t)) (tabTitle t) (if isActive then 1 else 0) lay packed
-  -- The close button's response, which its control view leaves here.
   closeRef <- if tabClosable t then Just <$> liftIO (newIORef Nothing) else pure Nothing
   let badge = foldMap (trailing . view . tabBadgeView labelCol) (tabBadge t)
       closeButton ref =
@@ -366,8 +365,8 @@ renderHeader style orient cur t = disabledWhen (tabDisabled t) $ do
       close = foldMap (trailing . control . closeButton) closeRef
   taken <- adornWidget (respId resp) lay (const labelCol) (tabAdornments t <> badge <> close)
   closeResp <- maybe (pure Nothing) (liftIO . readIORef) closeRef
-  -- A control holding the pointer has the press; only the keyboard can
-  -- select the tab ('NanoUI.Internal.Widgets.Button.buttonConfigured'').
+  -- When an adornment control captures the pointer, ignore pointer clicks on
+  -- the tab header ('NanoUI.Internal.Widgets.Button.buttonConfigured'').
   header <- if taken then (`setClicked` inertResponse resp) <$> keyActivated (respId resp) else pure resp
   let closed =
         tabClosable t
@@ -383,9 +382,9 @@ tabBadgeView col txt =
     panel' (padXY 6 1 . tight . minH 17 . alignCenter . alignMid $ defaultLayout) $
       () <$ labelEx (tight . fontSizeScale 0.78 . fontColor col $ defaultLayout) txt
 
--- | Tab headers and the active tab's body, showing and editing the active
--- key in a Var: a click, or Enter or Space on a focused header, changes it.
--- Only the active tab's body runs.
+-- | Tab headers and the active tab's body, with the active key bound to
+-- mutable state ('Var'): a click, or Enter or Space on a focused header,
+-- updates it in place. Only the active tab's body runs.
 {-# INLINE tabs #-}
 tabs :: (Foldable f, Hashable a) => Var a -> f (Tab a (NanoUI ())) -> NanoUI ()
 tabs = tabsConfigured defaultTabsConfig
@@ -427,12 +426,11 @@ bindTabs :: Hashable a => TabsConfig -> Bool -> Var a -> (a -> NanoUI (TabRespon
 bindTabs cfg hasBody active =
   bindVarOn (if bodyAhead (tabsOrientation cfg) hasBody then Conservative else RenderFinal) tabActive active
 
--- | Whether a strip with a body lays the body out ahead of its headers.
 bodyAhead :: TabOrientation -> Bool -> Bool
 bodyAhead orient hasBody = hasBody && (orient == TabBottom || orient == TabRight)
 
--- | Tab headers only, showing and editing the active key; the caller
--- renders the body.
+-- | Tab headers only, bound to mutable state ('Var') for the active key; the
+-- caller renders the body.
 {-# INLINE tabBar #-}
 tabBar :: (Foldable f, Hashable a) => Var a -> f (Tab a body) -> NanoUI ()
 tabBar = tabBarConfigured defaultTabsConfig

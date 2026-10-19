@@ -197,11 +197,10 @@ type NodeIdx = Int
 -- | The arena's mutable unboxed arrays.
 type IOArr = MutablePrimArray RealWorld
 
--- | What kind of node this is. The solver chooses how to measure a node by
--- its type, and paint chooses how to draw it. The arena stores the type as a
--- 'Word8' ('TagNodeType') through the derived 'Enum' instance, so there can be
--- at most 256 constructors. Several types keep type-specific data in the
--- node's style index ('getStyleIdx').
+-- | Node kind, which selects how the solver measures the node and how paint
+-- draws it. Stored as a 'Word8' ('TagNodeType') through the derived 'Enum'
+-- instance, so there can be at most 256 constructors. Several types store
+-- type-specific data in the node's style index ('getStyleIdx').
 data NodeType
   = NodeContainer
   -- ^ A row, column or grid.
@@ -656,7 +655,6 @@ writeGeom a idx col = writePrimArray (naArrGeom a) (idx * geomStride + fromEnum 
 readStyle :: NodeArenaArrays -> NodeIdx -> StyleCol -> IO Float
 readStyle a idx col = readPrimArray (naArrStyle a) (idx * styleStride + fromEnum col)
 
--- | Write style column @col@ of node @idx@.
 {-# INLINE writeStyle #-}
 writeStyle :: NodeArenaArrays -> NodeIdx -> StyleCol -> Float -> IO ()
 writeStyle a idx col = writePrimArray (naArrStyle a) (idx * styleStride + fromEnum col)
@@ -1293,9 +1291,9 @@ data LayoutCache = LayoutCache
   -- ^ The input signature ('getInputSignature') the solve was captured with.
   , lcMeasures :: !(IntMap CustomMeasureRecord)
   -- ^ Per custom-measured node, what the solve's measure recorded.
-  -- Frame owns checking these: a measure may read state outside the arena,
-  -- which the input signature cannot see. Empty when no node measured
-  -- itself custom, so the common frame pays nothing.
+  -- Checked by the frame runner because a custom measure may read state
+  -- outside the arena that is not reflected in the input signature. Empty
+  -- when no node uses custom measurement.
   , lcMeasureHooks :: !IntSet
   -- ^ The widgets with a custom measure registered at capture. Frame checks
   -- the set is unchanged, since gaining a hook changes a node's size without
@@ -1737,9 +1735,9 @@ getScopeSignature na = readIORef (naScopeSig na)
 -- ('getScopeSignature'), and the paint state the input signature leaves
 -- out, mixed as it is written: node values ('setNodeValue'), font colours,
 -- the style index of boxes, images and drawings, and images' ids and looks.
--- Two frames with the same signature hand paint the same nodes; what else
--- paint reads (the layout it solves to, widget state in the store, the
--- theme) the frame's damage covers.
+-- Two frames with the same signature have identical arena paint inputs; the
+-- damage pass covers solved layout, widget state in the store, and theme
+-- changes.
 getPaintSignature :: NodeArena -> IO Word64
 getPaintSignature na = do
   input <- getInputSignature na
@@ -2147,8 +2145,7 @@ walkFloatingAncestors na idx step = do
       nt <- getNodeType na i
       if isFloatingNode nt then step i nt else pure Nothing
 
--- | What @f@ finds for the first direct child of @parentIdx@ it finds
--- anything for.
+-- | First 'Just' result of @f@ over @parentIdx@'s direct children.
 {-# INLINE firstChildJustM #-}
 firstChildJustM :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
 firstChildJustM na parentIdx f = getFirstChild na parentIdx >>= go

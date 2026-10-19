@@ -92,9 +92,9 @@ runTooltipDelayOpenTest ctx failed = do
   settles
   assert failed . hasText "Tip text" =<< collectOverlayTextSpans ctx hover
 
--- | A tooltip the view stops declaring while it waits forgets the wait:
--- declared again with the pointer still on its target, it waits out its
--- delay again instead of opening at once.
+-- | Omitting a pending tooltip for a frame resets its delay timer: when
+-- declared again with the pointer still on its target, it waits for the
+-- full delay instead of opening immediately.
 runTooltipUndeclaredTest :: Context -> IORef Int -> IO ()
 runTooltipUndeclaredTest ctx failed = do
   let cfg = defaultTooltipConfig {tooltipDelay = 0.05, tooltipGrace = 0}

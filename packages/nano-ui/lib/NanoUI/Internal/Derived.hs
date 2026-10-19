@@ -27,7 +27,6 @@ import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Vector (Vector)
 
--- | Ascending or descending text order.
 data SortDir = SortAsc | SortDesc
   deriving (Eq, Show, Enum, Bounded)
 

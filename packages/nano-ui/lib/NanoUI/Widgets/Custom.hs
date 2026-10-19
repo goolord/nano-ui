@@ -1,12 +1,13 @@
 -- | Custom widgets and the reference widgets built on them.
 --
 -- 'customWidget' takes a 'CustomWidgetSpec': a layout, optional measurement,
--- drawing that sees hover and press state, an optional content key, a cursor,
--- and damage slop.
+-- a draw function receiving hover and press state, an optional content key, a
+-- cursor, and damage slop.
 -- 'canvas' is the short form: it draws into a laid-out rectangle with
 -- 'CanvasM' (rects, circles, lines, images, text, "NanoUI.Path" paths, clips
 -- and transforms). 'canvasConfigured' adds a content key, a cursor and
--- pointer tracking; 'drawContext' gives the drawing hover and press state.
+-- pointer tracking; 'drawContext' reads the hover, press, and theme state
+-- inside 'CanvasM'.
 -- 'useDrag2DOn' and 'useWheelDeltaOn' are gesture hooks that take the
 -- widget's 'Response'; 'knob' and 'toggleSwitch' show them in use. Each
 -- reference widget follows the ordinary @x@, @x'@, @xWith@ and @xWith'@
@@ -16,8 +17,8 @@ module NanoUI.Widgets.Custom
 
     -- ** On a Var
 
-    -- | A custom input built value-in, value-out runs on a 'Var' through
-    -- 'bindVar': it gets the Var's value and stores what it returns.
+    -- | 'bindVar' adapts a pure @a -> NanoUI (Response, a)@ widget to mutate a
+    -- 'Var' in place.
     Binding (..)
   , bindVar
   , bindVarBy
@@ -196,8 +197,6 @@ defaultCustomWidgetSpec = CustomWidgetSpec
   , widgetInteract   = \resp _ _ -> (resp, ())
   }
 
--- | The default spec at a fixed @w@ by @h@, the caller's layout modifier
--- applied, as the reference widgets below are built.
 fixedSizeSpec :: (Layout -> Layout) -> Float -> Float -> CustomWidgetSpec ()
 fixedSizeSpec f w h =
   defaultCustomWidgetSpec {widgetLayout = fixedWH w h (f defaultLayout), widgetMeasure = Just $ \_ _ -> (w, h)}
@@ -223,9 +222,8 @@ contentKeyOf parts =
 -- | One value of a 'contentKeyOf' key, made by 'keyPart'.
 newtype KeyPart = KeyPart Word64
 
--- | A value's part of a content key: its 'hash', which a list, a 'Maybe' or
--- a tuple of values has as well, and a type of the app's own has by deriving
--- 'Hashable'.
+-- | Wrap any 'Hashable' value (including lists, 'Maybe', tuples, or custom
+-- types deriving 'Hashable') for 'contentKeyOf'.
 {-# INLINE keyPart #-}
 keyPart :: Hashable a => a -> KeyPart
 keyPart = KeyPart . fromIntegral . hash
@@ -364,7 +362,7 @@ drag2DFrom bounds onIt = do
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
 -- | This frame's wheel delta while the widget is hovered ('respHovered').
--- Overlays, scrolled-off parts and a disabled widget get none.
+-- Returns @(0, 0)@ when covered by an overlay, clipped out of view, or disabled.
 useWheelDeltaOn :: HasResponse r => r -> NanoUI (Float, Float)
 useWheelDeltaOn r = wheelIf (respHovered r)
 
@@ -373,7 +371,6 @@ useWheelDelta :: Rect -> NanoUI (Float, Float)
 useWheelDelta bounds = wheelIf . rectContains bounds . inputMousePos =<< askInput
 {-# DEPRECATED useWheelDelta "Use useWheelDeltaOn with the widget's Response, which respects what is drawn over it" #-}
 
--- | This frame's wheel delta when @on@, else zero.
 wheelIf :: Bool -> NanoUI (Float, Float)
 wheelIf on = do
   V2 x y <- inputScroll <$> askInput
@@ -383,8 +380,8 @@ wheelIf on = do
 -- Reference Custom Widgets
 -- -----------------------------------------------------------------------------
 
--- | Rotary knob over @[minV, maxV]@, 36 px across, showing and editing a
--- Var. Drag vertically, scroll, or use the arrow keys.
+-- | Rotary knob over @[minV, maxV]@ (36 px diameter) backed by a 'Var'.
+-- Supports vertical drag, scroll wheel, and arrow keys.
 {-# INLINE knob #-}
 knob :: Float -> Float -> Var Float -> NanoUI ()
 knob minV maxV v = void (knobWith' id 36 minV maxV v)
@@ -441,7 +438,6 @@ knobCore f diameter minV maxV value = do
             drawStrokeAA (V2 cx cy) tip 2.5 (themeAccent (cdcTheme cdc))
         }
   (resp, ()) <- customWidgetWithId wid (spec current)
-  -- A drag reports no movement while it is not held.
   drag <- useDrag2DOn resp
   (_, scrollY) <- useWheelDeltaOn resp
   nav <- useKeyNav wid
@@ -450,13 +446,12 @@ knobCore f diameter minV maxV value = do
     finalVal
       | range > 0 && deltaNorm /= 0 = clamp minV maxV (current + deltaNorm * range)
       | otherwise = current
-  -- The drawing was registered before the turn was read: draw where it
-  -- ended, so this pass shows the value it returns.
+  -- Re-register the drawing when the value changes so this frame renders the
+  -- updated position.
   when (finalVal /= current) $ liftIO (redrawCustom ctx wid (spec finalVal))
   finishInput fieldFloat ctx wid current resp finalVal
 
--- | On/off switch showing and editing a Var: a click or Space/Enter flips
--- it.
+-- | Boolean toggle switch backed by a 'Var', toggled by click or Space/Enter.
 {-# INLINE toggleSwitch #-}
 toggleSwitch :: Var Bool -> NanoUI ()
 toggleSwitch v = void (toggleSwitchWith' id v)
@@ -501,16 +496,12 @@ toggleSwitchCore f on = do
         }
   (resp, ()) <- customWidgetWithId wid (spec current)
   result@(_, value) <- finishToggle ctx wid current resp
-  -- Flipped after its drawing was registered: draw the new state.
   when (value /= current) $ liftIO (redrawCustom ctx wid (spec value))
   pure result
 
--- | Replace a custom widget's drawing for this frame, after its interaction
--- changed what it shows.
 redrawCustom :: Context -> WidgetId -> CustomWidgetSpec a -> IO ()
 redrawCustom ctx wid spec = registerCustomEntry ctx wid (specEntry spec)
 
--- | The drawing a spec registers.
 {-# INLINE specEntry #-}
 specEntry :: CustomWidgetSpec a -> CustomDrawingEntry
 specEntry spec =

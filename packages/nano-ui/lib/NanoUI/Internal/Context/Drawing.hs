@@ -69,9 +69,9 @@ lookupPopupConfig ctx wid =
     <$> lookupIn dcsPopupConfigs ctx wid
 
 -- | Request a frame when the pointer enters or leaves @rect@ this pass. Used
--- for tooltip targets, which may be labels or containers the hover probe
--- does not find. A @tracked@ rect also requests one on every move over it,
--- for an open tooltip that follows the pointer.
+-- for tooltip targets, which may be non-interactive labels or containers
+-- skipped by normal hit-testing. A @tracked@ rect also requests a frame on
+-- every pointer move inside it, for an open tooltip that follows the pointer.
 registerHoverZone :: Context -> Bool -> Rect -> IO ()
 registerHoverZone ctx tracked rect =
   modifyIORef' (ctxDrawingCache ctx) $ \dc -> dc {dcsHoverZones = HoverZone rect tracked : dcsHoverZones dc}
@@ -91,7 +91,6 @@ registerDrawing :: Context -> WidgetId -> Int -> DrawingBuild -> IO ()
 registerDrawing ctx wid content build =
   registerIn dcsDrawings (\m dc -> dc {dcsDrawings = m}) ctx wid (DrawingEntry content build)
 
--- | Current drawing registration, or 'Nothing'.
 {-# INLINE lookupDrawing #-}
 lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
 lookupDrawing = lookupIn dcsDrawings
@@ -155,8 +154,8 @@ cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
       out <- compute
       modifyIORef' (ctxDrawingCache ctx) $ \s ->
         s { dcsDrawFitCache = IM.insert k (DrawFitCache dw dh lh content incoming out) (dcsDrawFitCache s)
-          , -- Mark the ops stale rather than dropping them, so the damage pass
-            -- ('drawingOpsStale') still sees that this drawing changed.
+          , -- Mark the ops stale rather than deleting the entry so
+            -- 'drawingOpsStale' detects the change during the damage pass.
             dcsDrawOpCache = IM.adjust (\e -> e {doeContent = complement content}) k (dcsDrawOpCache s)
           }
       pure out
@@ -205,19 +204,16 @@ registerCustomDrawing :: Context -> WidgetId -> Int -> CustomDrawBuild -> IO ()
 registerCustomDrawing ctx wid content build =
   registerCustomEntry ctx wid (CustomDrawingEntry content build Nothing 0 False KeysNone)
 
--- | Register a painter together with the cursor, repaint margin and pointer
--- tracking it asks for.
 {-# INLINE registerCustomEntry #-}
 registerCustomEntry :: Context -> WidgetId -> CustomDrawingEntry -> IO ()
 registerCustomEntry = registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m})
 
--- | Current custom painter and content key, or 'Nothing'.
 {-# INLINE lookupCustomDrawing #-}
 lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawingEntry)
 lookupCustomDrawing = lookupIn dcsCustomDrawings
 
--- | Whether a cache entry was built from these inputs, leaving aside where the
--- widget sits: ops built at another origin translate rather than rebuild.
+-- | Whether a cache entry matches the given content key, size, draw context,
+-- and font generation (ignoring origin, which only translates cached ops).
 {-# INLINE customEntryMatches #-}
 customEntryMatches :: CustomDrawOpCacheEntry -> Int -> Rect -> CustomDrawContext -> Int -> Bool
 customEntryMatches e content rect cdc gen =
@@ -267,21 +263,17 @@ cachedCustomDrawingOps ctx wid content rect newCdc build = do
       storeCustomDrawingOps ctx wid content rect cdc gen ops
       pure ops
 
--- | Settle a custom widget's ops for this frame and cache them for paint,
--- returning whether what it draws changed at an unchanged rect.
+-- | Update the cached draw ops for a custom widget and return whether the
+-- output changed in place (at the same bounds).
 --
--- A widget that declares a content key is taken at its word, as a versioned
--- drawing is: an unchanged key with unchanged size, interaction state and
--- metrics neither rebuilds the ops nor repaints them, animating or not, so a
--- drawing that reads an animated value has to fold it into its key. One that
--- only moved keeps its ops too; paint translates them. Without a key (0) the
--- build can read anything (a sort flag, a fraction), and nothing but building
--- it shows that its output changed, so it is rebuilt and compared.
+-- A non-zero content key skips rebuilding when the key, size, interaction
+-- state, and font generation all match the cached entry (callers that depend
+-- on an animation value must include it in the key). A key of 0 always
+-- rebuilds and compares the resulting 'DrawOp' array.
 --
--- Whatever forced a rebuild, the ops it produced decide the damage, so a key
--- bumped without a visible change repaints nothing and a rebuild the key never
--- mentioned still repaints. A new, moved or resized widget reports no change:
--- rect damage covers it.
+-- When a rebuild runs, damage is determined by comparing the new ops against
+-- the previous ops at the same rect; new, moved, or resized widgets return
+-- 'False' because rect-diff damage already covers them.
 refreshCustomDrawingOps ::
   Context ->
   WidgetId ->
@@ -300,9 +292,6 @@ refreshCustomDrawingOps ctx wid content rect cdc build = do
     Just e | keyed && customEntryMatches e content rect cdc gen -> pure False
     _ -> do
       let ops = build cdc rect
-          -- Whatever made this frame rebuild - the key, the interaction state,
-          -- a theme or font change - the ops are built now, so ask them
-          -- directly rather than trusting the key for damage as well.
           changed = case cached of
             Just e | cdeBounds e == rect -> cdeOps e /= ops
             _ -> False

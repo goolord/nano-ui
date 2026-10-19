@@ -27,16 +27,15 @@ import NanoUI.Internal.Widgets.Combinators (finishInput, readDerived, writeDeriv
 import NanoUI.Internal.Widgets.Layout (columnWith)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
 
--- | Nodes in a subtree, its root included.
 subtreeSize :: TreeItem -> Int
 subtreeSize item = 1 + forestSize (treeItemChildren item)
 
 forestSize :: [TreeItem] -> Int
 forestSize = foldl' (\acc x -> acc + subtreeSize x) 0
 
--- | Visible rows in pre-order, skipping the children of nodes @expanded@
--- rejects. One pass: rows come out in order, and a subtree hands the next
--- pre-order index to the continuation that lists its later siblings.
+-- | Visible rows in pre-order, skipping the children of collapsed nodes.
+-- Single pass: each subtree passes the next pre-order index to the
+-- continuation for its remaining siblings.
 visibleRows :: (Int -> Bool) -> [TreeItem] -> SmallArray TreeRow
 visibleRows expanded items = smallArrayFromList (go 0 0 items (const []))
   where
@@ -100,8 +99,8 @@ treeKeyNav nav rows resps focus selected expanded
 toggle :: Int -> IS.IntSet -> IS.IntSet
 toggle idx s = if IS.member idx s then IS.delete idx s else IS.insert idx s
 
--- | One visible row, and the selection and expansion its click asks for: a
--- click on a parent's chevron toggles it and keeps the selection.
+-- | Render one visible row and return any selection or expansion change:
+-- clicking a parent's chevron toggles expansion without changing selection.
 treeRow ::
   Int -> TreeRow -> Int -> IS.IntSet -> NanoUI (Response, Maybe (Int, IS.IntSet))
 treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selected expanded = do
@@ -124,9 +123,10 @@ treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selected expanded = do
       pure . (resp,) . Just $
         if hasKids && onChevron then (selected, toggle nodeIdx expanded) else (nodeIdx, expanded)
 
--- | Collapsible tree, showing and editing the selected row in a Var. Rows
--- are numbered in pre-order; a click or the arrow keys move the selection.
--- Expansion is kept by the widget. @key@ distinguishes trees in one scope.
+-- | Collapsible tree with the selected row bound to mutable state ('Var').
+-- Rows are numbered in pre-order; a click or the arrow keys update the
+-- selection in place. Expansion state is stored internally by the widget.
+-- @key@ distinguishes trees in one scope.
 {-# INLINE tree #-}
 tree :: Foldable f => Text -> f TreeItem -> Var Int -> NanoUI ()
 tree key items v = void (tree' key items v)

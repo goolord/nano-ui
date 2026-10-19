@@ -12,8 +12,8 @@
 --
 -- Pause stops calling 'useStream', and that alone kills the producer.
 -- With nothing running and nothing changing, the loop sleeps: a paused
--- chart costs no frames at all. A stopped stream forgets its state, so the
--- view saves the last samples on Pause and hands them back as the stream's
+-- chart costs no frames at all. Stopping a stream discards its state, so the
+-- view saves the last samples on Pause and passes them as the stream's
 -- initial value on Resume.
 --
 -- Run it with @cabal run nano-ui-example-live-chart@.

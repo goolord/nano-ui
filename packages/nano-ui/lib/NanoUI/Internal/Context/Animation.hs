@@ -28,7 +28,6 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
 import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, finite, rectNonEmpty)
 
--- | Read a projection of running and settled animations.
 {-# INLINE getsAnimation #-}
 getsAnimation :: Context -> (AnimationState -> a) -> IO a
 getsAnimation ctx f = f <$> readIORef (ctxAnimationState ctx)
@@ -95,8 +94,8 @@ startAnimationEaseDelay ctx wid start end dur ease delay
   where
     key = intKey wid
 
--- | Move toward a target, preserving an existing spring's position/velocity.
--- With no running animation, starts at the settled value or zero.
+-- | Advance a spring toward a target. Keeps the position and velocity of a
+-- running spring; otherwise starts from the settled value or zero.
 startSpring :: Context -> WidgetId -> SpringParams -> Float -> IO ()
 startSpring ctx wid params target
   -- A non-finite target would leave the spring NaN for good.
@@ -155,11 +154,9 @@ keepAnimationAlive ctx wid = do
         }
   unless running (repaintIfOrphan ctx key)
 
--- | The perpetual animation a 'keepAnimationAlive' lease runs.
 keepAliveAnim :: Animation
 keepAliveAnim = EaseAnim 0 1 keepAliveSec 0 EaseLinear 0 0
 
--- | Whether an animation is a 'keepAnimationAlive' lease.
 isKeepAlive :: Animation -> Bool
 isKeepAlive = \case
   EaseAnim _ _ dur _ _ _ _ -> dur >= keepAliveSec
@@ -183,8 +180,8 @@ tickAnimations ctx dt = do
           else
             let stepped = IM.map (stepAnim dt) (asAnimations as)
                 (live0, done) = IM.partition animInProgress stepped
-                -- A widget's own animation that ends under a lease hands the
-                -- key back to the lease.
+                -- Restore the keep-alive entry when a widget animation finishes
+                -- under an active lease.
                 leased = IM.restrictKeys done (asKeepAlive as)
                 live = if IM.null leased then live0 else IM.union live0 (IM.map (const keepAliveAnim) leased)
                 rest' =
@@ -237,11 +234,11 @@ lapseKeepAlive as
                 IM.filterWithKey (\k a -> not (IS.member k lapsed && isKeepAlive a)) (asAnimations as)
        in as {asAnimations = anims, asKeepAlive = asKeepTouched as, asKeepTouched = IS.empty}
 
--- | Repaint the whole frame for a running animation whose key names no
--- widget ('NanoUI.Internal.Widgets.Animate.animate' and 'animateTo' key a
--- fresh id): no rect says what its value moves, so the frame that draws the
--- new value repaints whole. The running animation keeps frames coming at the
--- paced rate; marking the context dirty would schedule them unpaced.
+-- | Repaint the whole frame for a running animation whose key has no layout
+-- node ('NanoUI.Internal.Widgets.Animate.animate' and 'animateTo' allocate a
+-- fresh id): without a widget rect to bound its damage, the frame must repaint
+-- in full. The running animation drives frames at the paced rate; marking the
+-- context dirty would schedule them unpaced.
 repaintIfOrphan :: Context -> Int -> IO ()
 repaintIfOrphan ctx key = do
   hadRect <- getsDamage ctx (IM.member key . pfRects . dsPrev)

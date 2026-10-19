@@ -1,13 +1,11 @@
-/* The desktop's own frame under a window that draws its own chrome.
+/* Native Win32 sizing frame for windows that draw their own chrome.
  *
- * A borderless window on Windows is a popup: it has no frame, so there is
- * nothing outside its edges for the pointer to find and the application has
- * to spend its own chrome on saying where it can be resized. Answering
- * WM_NCCALCSIZE with the sizing frame left outside the client area puts the
- * frame back where it always is: invisible, outside the window you can see,
- * and what the desktop resizes the window by. Nothing is drawn in it and
- * nothing of the view gives way to it -- the window is made that much larger
- * instead.
+ * A borderless window on Windows is a popup with no non-client frame, so the
+ * application would otherwise have to reserve part of its own client area for
+ * resize handles. Answering WM_NCCALCSIZE with the sizing frame left outside
+ * the client area restores the invisible resize border outside the visible
+ * window without drawing native chrome or shrinking the client area (the outer
+ * window rectangle is expanded instead).
  *
  * The window procedure is here rather than in Haskell because Windows calls
  * it from inside SetWindowPos, DefWindowProc and the modal loop a border
@@ -59,9 +57,9 @@ static void nano_ui_frame_metrics(HWND hwnd, int *across, int *down)
 }
 
 /* Whether the window has a sizing frame at all. SDL gives a borderless
- * window one only while it is resizable and not fullscreen, so this is also
- * what leaves a fullscreen window covering the whole of its screen: there the
- * frame is not asked for and SDL answers for the client area itself. */
+ * window WS_THICKFRAME only while it is resizable and not fullscreen, so
+ * fullscreen windows skip the custom WM_NCCALCSIZE adjustment and cover the
+ * entire screen. */
 static int nano_ui_has_sizing_frame(HWND hwnd)
 {
     return (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_THICKFRAME) != 0;
@@ -71,23 +69,17 @@ static LRESULT CALLBACK nano_ui_frame_proc(HWND hwnd, UINT msg, WPARAM wparam, L
 {
     WNDPROC old = (WNDPROC)GetPropW(hwnd, NANO_UI_OLD_PROC);
 
-    /* Where the client area goes: the sizing frame's width in on every side,
-     * and nothing else. The desktop would take a caption's height off the
-     * top as well, which is a title bar this window draws for itself and has
-     * no use for; SDL, at the other extreme, answers this one itself for a
-     * borderless window and says the client covers the whole of it, frame
-     * and all, which leaves nothing outside the window to take hold of.
+    /* Inset the client area by the sizing frame on the left, right, and bottom
+     * only. The default handler also insets the top by the caption height, and
+     * Windows paints that top strip even when the window has no title bar;
+     * SDL's borderless handler instead makes the client area cover the entire
+     * window rectangle, leaving no outer resize border. Leaving the top edge at
+     * the top of the window rectangle gives the top strip to the client area
+     * while keeping native resize borders on the other three sides.
      *
-     * Three sides and not four: the sides and the bottom of the frame are
-     * left unpainted by the desktop, and the view shows through them to
-     * whatever is behind the window, but the top of one is a caption, and a
-     * caption is painted whether the window has a title bar in it or not. So
-     * the top of the client stays where the top of the window is, and the
-     * strip that would have been a caption is the view's.
-     *
-     * A maximized window is placed with its frame off the edges of the
-     * screen, so for that one case the top comes back inside, or the top of
-     * the view would go off the screen with it. */
+     * A maximized window positions its sizing frame outside the monitor bounds,
+     * so in that case the top must also be inset by the frame height to keep
+     * the client area on screen. */
     if (msg == WM_NCCALCSIZE && wparam == TRUE && nano_ui_has_sizing_frame(hwnd)) {
         NCCALCSIZE_PARAMS *params = (NCCALCSIZE_PARAMS *)lparam;
         int across = 0;
@@ -102,8 +94,8 @@ static LRESULT CALLBACK nano_ui_frame_proc(HWND hwnd, UINT msg, WPARAM wparam, L
         return 0;
     }
 
-    /* The window is going: give it back the procedure it had and take the
-     * property off, which the desktop asks of whoever put it there. */
+    /* Restore the previous window procedure and remove the window property
+     * before destruction. */
     if (msg == WM_NCDESTROY && old) {
         SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)old);
         RemovePropW(hwnd, NANO_UI_OLD_PROC);
@@ -115,10 +107,8 @@ static LRESULT CALLBACK nano_ui_frame_proc(HWND hwnd, UINT msg, WPARAM wparam, L
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
-/* Grow the window by the frame, or shrink it back, and have the desktop work
- * the frame out again either way, which is what SWP_FRAMECHANGED asks for.
- * A window with no sizing frame is given none by the procedure above, so it
- * keeps its size and only has the frame worked out again. */
+/* Expand or shrink the outer window rectangle by the frame thickness and
+ * trigger a frame recalculation via SWP_FRAMECHANGED. */
 static void nano_ui_refit(HWND hwnd, int sign)
 {
     RECT r;

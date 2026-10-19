@@ -65,10 +65,9 @@ representation is unstable.
 
 ## Windows and screenshots
 
-`sdlWindowSettings` is the core's `WindowSettings`, which the RGFW backend
-opens its window from too: the title, the size in layout units, the
-position, size limits, icon, mode, transparency, opacity, and whether a close
-request ends the session.
+`sdlWindowSettings` uses the core's `WindowSettings` (shared with the RGFW
+backend): title, size in layout units, position, size limits, icon, mode,
+transparency, opacity, and whether a close request ends the session.
 
 ```haskell
 runSdlApp
@@ -77,10 +76,10 @@ runSdlApp
   notesView
 ```
 
-A view reads the window with `askWindow` and changes it with the core's
-setters and commands (`setWindowTitleUi`, `setWindowModeUi`, `moveWindowUi`,
-`resizeWindowUi` and the rest). `sdlWindowDecorations` and `windowCaption`
-are for a window that draws its own title bar. A transparent window
+`askWindow` reads the current window state, and the core's setters and
+commands (`setWindowTitleUi`, `setWindowModeUi`, `moveWindowUi`,
+`resizeWindowUi`, and the rest) update it. `sdlWindowDecorations` and
+`windowCaption` configure custom title bars. A transparent window
 (`wsTransparent`) shows the desktop where the theme's window colour is
 translucent; the software renderer adds up the alpha where translucent
 colours overlap. `captureScreenshot` returns the last presented frame as a

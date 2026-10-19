@@ -44,22 +44,21 @@ import NanoUI.Internal.Equality (ptrEq)
 import NanoUI.Internal.Var.Cell (Cell, Sig (..), allBits)
 import NanoUI.Internal.Var.Generic (FieldPath, GFocus (..), PathIx (..))
 
--- | State a widget can show and edit: a value held in a cell, or a constant.
+-- | Mutable state handle (a cell and lens path) or read-only constant passed
+-- to widgets.
 --
--- * 'NanoUI.Var.newVar' and 'NanoUI.Var.useVar' make Vars that keep what
---   widgets write to them.
--- * @'constVar' x@ is a constant. A widget given one shows @x@, and an edit
---   to it is gone on the next frame.
+-- * 'NanoUI.Var.newVar' and 'NanoUI.Var.useVar' create mutable 'Var's that
+--   widgets mutate in place.
+-- * @'constVar' x@ is a read-only constant; widget edits to it are discarded.
 --
--- @v.field@ focuses a Var on one field of its record, for any record with
--- one constructor and a 'Generic' instance.
+-- @v.field@ focuses a 'Var' on one field of its record, for any single-constructor
+-- record with a 'Generic' instance.
 data Var a where
   VarConst :: a -> Var a
   VarRef :: {-# UNPACK #-} !(Cell s) -> !(Lens s a) -> Var a
 
--- | A Var that always holds @x@: a widget given one shows @x@ and its edits
--- go nowhere. For showing a value derived from other state in an input,
--- with the change handled through the primed variant's response:
+-- | Read-only 'Var' with constant value @x@; widget edits to it are ignored.
+-- Use with primed widget variants to handle updates manually from the response:
 --
 -- > allDone <- all todoDone <$> readVar todos
 -- > r <- checkbox' "All done" (constVar allDone)
@@ -91,11 +90,11 @@ viewLens (Field _ l g _) s = g (viewLens l s)
 viewLens (Elem _ (ElemCtx l key _ _) k snap) s =
   fromMaybe snap (find ((== k) . key) (viewLens l s))
 
--- | Change the part of @s@ a lens shows, and say which part of @s@ that
--- touched ('lensSig'): the lens's own part or, when the change gave a list
--- element a new key, the whole of the outermost such list, keys and order
--- included. Changing an element whose key has left the list changes
--- nothing. Keys are unique, so only the elements before the changed one are
+-- | Update the part of @s@ focused by the lens, returning the updated root and
+-- the modified part signature ('lensSig'): the lens's own part or, when the
+-- update changed a list element's key, the outermost affected list (including
+-- keys and order). Updating an element whose key is no longer in the list is a
+-- no-op. Keys are unique, so only the elements before the modified one are
 -- copied.
 overLensSig :: Lens s a -> (a -> a) -> s -> (s, Sig)
 overLensSig l f s = case overPath l (\a -> (f a, Nothing)) s of

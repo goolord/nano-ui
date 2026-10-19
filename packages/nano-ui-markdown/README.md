@@ -47,8 +47,8 @@ replyView cache stream client replyId = do
   void (markdown cache doc)
 ```
 
-A reply kept in a model instead takes the tokens that arrived in a frame at
-once, joined:
+When storing the document in a model instead, append all tokens received in a
+frame at once:
 
 ```haskell
 newtype Model = Model {reply :: MarkdownDoc}
@@ -77,7 +77,7 @@ or changes a definition after other blocks parses the whole reply again, as
 those blocks may link to it: definitions at the end of a reply cost a whole
 parse an append.
 
-`markdownSource` gives a document's text back. Two documents are equal when
+`markdownSource` returns a document's source text. Two documents are equal when
 their texts are, so one kept in a `Var` changes with every append. The
 widget keeps the ids of the blocks before the one that changed, so they are not
 measured, laid out or repainted again. A chat log of thousands of paragraphs
@@ -126,10 +126,9 @@ markdownConfigured
   doc
 ```
 
-`mdBlock` draws blocks your own way: it is asked of every block, in quotes
-and lists too, and given the widget's own drawing of a block, to fall back to
-or to wrap. A code block with syntax highlighting, where `highlight` stands
-for a highlighter of your own that returns rich-text pieces:
+`mdBlock` overrides block rendering for every block (including inside quotes
+and lists) and receives the default block renderer to fall back to or wrap.
+For example, a code block with custom syntax highlighting:
 
 ```haskell
 highlighted :: MarkdownConfig

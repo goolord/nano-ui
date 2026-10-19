@@ -33,9 +33,8 @@ import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 -- The backend maps this result to a native cursor shape.
 uiCursorKind :: Context -> Input -> IO UiCursorKind
 uiCursorKind ctx inp =
-  -- The first query with an opinion wins; later ones do not run. The active
-  -- widget, then the hot one, has an opinion unless it asks for the default.
-  -- 'withCursorShape' scopes apply only when nothing else has an opinion.
+  -- The first non-'UiCursorDefault' query wins; later queries do not run.
+  -- 'withCursorShape' scopes apply only as a fallback.
   fmap (fromMaybe UiCursorDefault) . runMaybeT . asum . map MaybeT $
     [ textEditMenuCursorKind ctx inp
     , selectDropdownCursorKind ctx inp
@@ -105,9 +104,9 @@ numericStepperHit ctx idx mouse = do
         (up, down) = numericStepperRects x y w h
       pure (rectContains up mouse || rectContains down mouse)
 
--- | The cursor widget @wid@ asks for with the pointer at @mouse@: the default
--- unless the pointer is on the visible part of its node, and a custom
--- widget's own choice, which also applies while it is dragged off its node.
+-- | Cursor for widget @wid@ with the pointer at @mouse@: 'UiCursorDefault'
+-- unless the pointer is on the visible part of its node (or a custom widget's
+-- callback overrides it while dragged off its node).
 cursorKindAt :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt ctx wid mouse inp
   | hashWidgetId wid == 0 = pure UiCursorDefault

@@ -72,10 +72,10 @@ import NanoUI.Internal.Widgets.SplitPane
 -- Public API
 -- -----------------------------------------------------------------------------
 
--- | Who owns the arrangement. An initial tree is read only when this widget
--- identity first appears; a controlled tree lives in a Var, which the grid
--- shows on every pass and stores its changes in. In either mode Nothing is
--- an empty workspace, including after the last close.
+-- | Ownership mode for the split tree. 'InitialTree' seeds widget-internal
+-- state on first mount; 'ControlledTree' reads the tree from a 'Var' each pass
+-- and mutates it in place when panes change. In either mode 'Nothing'
+-- represents an empty workspace, including after the last pane is closed.
 data PaneTree = InitialTree !(Maybe GridNode) | ControlledTree !(Var (Maybe GridNode))
 
 -- | Validate a persisted/application-built tree before using it. Pane and split
@@ -126,7 +126,7 @@ data PaneGridConfig = PaneGridConfig
     -- still follows the grid.
   , pgTree :: !PaneTree
     -- ^ 'InitialTree' seeds internally owned state once. 'ControlledTree'
-    -- keeps the arrangement in a Var: the grid stores each edit there, and a
+    -- keeps the arrangement in a 'Var': the grid mutates it on each edit, and a
     -- tree written to it replaces the arrangement and cancels any gesture on
     -- the old one. Both modes permit an empty grid.
     --
@@ -153,8 +153,8 @@ data PaneGridConfig = PaneGridConfig
     -- act on its panes (default 'True'). Turn it off when pane content needs
     -- those keys.
   , pgViewPane :: !(Word64 -> PaneGridCtx -> NanoUI PaneView)
-    -- ^ Renders the content of one pane. The pane keeps the size the split
-    -- gives it whatever its content needs, and clips what does not fit.
+    -- ^ Renders the content of one pane. Each pane is sized by its split ratio
+    -- regardless of content size, clipping overflow.
   }
 
 -- | Default spacing and drag margins with empty pane bodies. Set 'pgViewPane'
@@ -175,7 +175,7 @@ defaultPaneGridConfig =
     , pgViewPane = \_ _ -> pure (PaneView "" False)
     }
 
--- | Actions handed to a pane so it can mutate the grid immediately.
+-- | Per-pane context and callbacks passed to 'pgViewPane'.
 data PaneGridCtx = PaneGridCtx
   { pgcPaneId :: !Word64
   , pgcRect :: !Rect
@@ -291,7 +291,6 @@ data RenderedPane = RenderedPane
   , rpView :: !PaneView
   , rpControlHit :: !Bool
   , rpHandle :: !(Maybe Rect)
-    -- ^ Where the pane's 'paneDragHandle' was laid out last frame.
   }
 
 -- | Per-frame shared environment.
@@ -454,8 +453,8 @@ paneGridCore cfg controlled given = do
         runGestures wid env dividers rendered dragMoved dragZone
         when (lifted && rectNonEmpty baseRect) $
           drawDragOverlay env wid mouse (dpRect <$> dragZone)
-        -- Keyboard focus also rings the focused pane, so the arrow keys show
-        -- where they moved; the grid's own ring says the grid holds focus.
+        -- Draw an inner focus ring on the active pane in addition to the
+        -- grid's outer focus ring.
         ringPane <- liftIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))
         when (ringPane && not lifted) $
           forM_ (M.lookup focused visibleRegions) $ \r ->
@@ -547,7 +546,6 @@ axisLay ax s = tight . gap 0 $ case ax of
   AxisV -> defaultLayout {layoutWidth = s, layoutHeight = Grow 1}
   AxisH -> defaultLayout {layoutWidth = Grow 1, layoutHeight = s}
 
--- | Zero-gap, zero-padding, grow-to-fill layout.
 fillLay :: Layout
 fillLay = axisLay AxisV (Grow 1)
 
@@ -642,7 +640,6 @@ renderNode env dividers = \case
         b' <- container NodeContainer (minW wb (minH hb bSide)) (renderNode env dividers b)
         pure (a' <> b')
 
--- | Is this the pane being drag-and-dropped?
 draggingPane :: GridEnv -> Word64 -> Bool
 draggingPane env pid = case gsGesture (geState env) of
   Drag p _ _ _ -> p == pid

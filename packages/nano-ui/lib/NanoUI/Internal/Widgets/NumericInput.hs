@@ -66,8 +66,8 @@ defaultNumericInputConfig =
     , nicLayout = defaultLayout {layoutWidth = Grow 1, layoutMinW = 80}
     }
 
--- | Numeric field over whole numbers, showing and editing a Var: typing,
--- arrow keys and stepper clicks change it.
+-- | Numeric field over whole numbers bound to mutable state ('Var'): typing,
+-- arrow keys and stepper clicks mutate it in place.
 --
 -- Only digits, and a leading minus sign when the range reaches below zero, can
 -- be typed. Up and Down step the value, Shift steps ten times as far, and
@@ -116,9 +116,9 @@ numericInputCore cfg value = do
     adopted = isFocus && maybe False (/= given) (lookupSlot fieldDouble key store)
     -- Unfocused, the field shows the caller's value; focused, it keeps the
     -- text being typed.
-    -- Stored text the field would refuse to edit (pasted from the context
-    -- menu, which skips the filter) is replaced, or every edit would be
-    -- turned back to it.
+    -- Stored text that fails 'acceptsNumberText' (pasted from the context
+    -- menu, which skips the filter) is replaced so subsequent edits are not
+    -- rejected.
     text0 = if isFocus && not adopted then fromMaybe (formatNumber cfg given) (mfilter (acceptsNumberText cfg) stored) else formatNumber cfg given
     s0 = loadTextInputState store key text0
     lastValue = if adopted then given else findSlot fieldDouble given key store
@@ -158,7 +158,6 @@ numericInputCore cfg value = do
   now <- if pressDir /= 0 || holding then liftIO getMonotonicTime else pure 0
   let
     repeatAt0 = findSlot fieldDouble 0 repeatK store
-    -- A held arrow repeats after a pause.
     repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
     dir
       | pressDir /= 0 = pressDir
@@ -210,7 +209,6 @@ numericInputCore cfg value = do
 clampNumber :: NumericInputConfig -> Double -> Double
 clampNumber cfg = clamp (nicMin cfg) (nicMax cfg)
 
--- | The value rounded to what the field shows.
 roundNumber :: NumericInputConfig -> Double -> Double
 roundNumber cfg v
   | nicHex cfg || nicDecimals cfg <= 0 = fromInteger (round v)
@@ -220,8 +218,8 @@ roundNumber cfg v
 
 formatNumber :: NumericInputConfig -> Double -> Text
 formatNumber cfg v0
-  -- A NaN or infinite value has no digits to show, and its name is text the
-  -- field would refuse; it shows empty.
+  -- NaN and infinity format as empty text because their string representations
+  -- fail 'acceptsNumberText'.
   | isNaN v0 || isInfinite v0 = T.empty
   | nicHex cfg =
       let n = round v :: Integer
@@ -229,8 +227,8 @@ formatNumber cfg v0
   | nicDecimals cfg <= 0 = T.pack (show (round v :: Integer))
   | otherwise = T.pack (showFFloat (Just (nicDecimals cfg)) v "")
   where
-    -- Negative zero would show as "-0.00", which a field that stops at zero
-    -- refuses.
+    -- Normalize -0.0 to +0.0 so a non-negative field does not format "-0.00"
+    -- and reject it.
     v = v0 + 0
 
 -- | Whether @t@ can stand in the field mid-edit: an optional minus sign when
@@ -248,7 +246,6 @@ acceptsNumberText cfg t =
     digit = if nicHex cfg then isHexDigit else isDigit
     decimals = if nicHex cfg then 0 else nicDecimals cfg
 
--- | The value the text reads as, once it reads as one.
 parseNumber :: NumericInputConfig -> Text -> Maybe Double
 parseNumber cfg t
   | nicHex cfg = case TR.signed TR.hexadecimal t of

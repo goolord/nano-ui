@@ -38,7 +38,7 @@ type Form err a = Ditto.Form FormUI FormInput err FormView a
 -- Updating the caption leaves the form's persisted key unchanged.
 data FieldName = FieldName
   { fieldKey :: !(Maybe Text)
-  -- ^ 'Nothing' asks ditto to number the field; named keys must be unique in a form.
+  -- ^ 'Nothing' uses positional numbering; named keys must be unique in a form.
   , fieldLabel :: !(Maybe Text)
   -- ^ Optional caption, rendered above the control or beside a checkbox.
   }

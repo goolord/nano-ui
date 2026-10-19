@@ -50,8 +50,7 @@ assertGt r a b = when (a <= b) (withFrozenCallStack (failWith r (show a <> " <= 
 assertLt :: (HasCallStack, Ord a, Show a) => IORef Int -> a -> a -> IO ()
 assertLt r a b = when (a >= b) (withFrozenCallStack (failWith r (show a <> " >= " <> show b)))
 
--- | Run the rest of a test on a value it needs, or count a failure when
--- there is none.
+-- | Run the continuation if the value is 'Just', or record a failure on 'Nothing'.
 assertJust :: HasCallStack => IORef Int -> Maybe a -> (a -> IO ()) -> IO ()
 assertJust r m k = maybe (withFrozenCallStack (failWith r "Nothing")) k m
 

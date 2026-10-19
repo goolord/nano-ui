@@ -33,8 +33,8 @@ import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetWithOptions, pointerOnWidget, respRect, setChanged)
 
 
--- | Dropdown over @options@ in fold order, showing and editing the
--- selected index. Indices are zero-based.
+-- | Dropdown over @options@ in fold order, bound to mutable state ('Var')
+-- holding the zero-based selected index.
 {-# INLINE select #-}
 select :: Foldable f => f Text -> Var Int -> NanoUI ()
 select options v = void (selectWith' id options v)

@@ -49,7 +49,6 @@ peekWidgetId (IdCursor arr) = do
   s <- readPrimArray arr 1
   pure $! idContextWidgetId (IdContext p s 0)
 
--- | Take the next widget id.
 {-# INLINE takeWidgetId #-}
 takeWidgetId :: IdCursor -> IO WidgetId
 takeWidgetId (IdCursor arr) = do
@@ -58,16 +57,14 @@ takeWidgetId (IdCursor arr) = do
   writePrimArray arr 1 (s + 1)
   pure $! idContextWidgetId (IdContext p s 0)
 
--- | Skip @n@ widget positions.
 {-# INLINE skipSiblingIds #-}
 skipSiblingIds :: IdCursor -> Int -> IO ()
 skipSiblingIds (IdCursor arr) n = do
   s <- readPrimArray arr 1
   writePrimArray arr 1 (s + fromIntegral n)
 
--- | Take the next positional Var key. Var keys index their own table, so
--- they never meet widget ids or store keys; the salt keeps the numbers
--- apart as well.
+-- | Allocate the next positional 'Var' key. 'Var' keys index a separate table
+-- from widget ids and store keys, and use a distinct hash salt.
 {-# INLINE takeVarKey #-}
 takeVarKey :: IdCursor -> IO Int
 takeVarKey (IdCursor arr) = do

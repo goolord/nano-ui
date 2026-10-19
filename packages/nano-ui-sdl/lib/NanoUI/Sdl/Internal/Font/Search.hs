@@ -83,10 +83,10 @@ fontStems =
 fontStemsRef :: IORef (Maybe [(String, FilePath)])
 fontStemsRef = unsafePerformIO (newIORef Nothing)
 
--- | Every font file under a directory; none from one that cannot be read.
--- Only an entry not named like a font file is asked whether it is a
--- directory: those questions are most of the time a walk of a large font
--- folder takes.
+-- | Every font file under a directory; returns @[]@ if the directory cannot be
+-- read. Only entries that do not match 'isFontFile' are checked with
+-- 'doesDirectoryExist' to avoid redundant @stat@ calls in large font
+-- directories.
 fontFilesBelow :: FilePath -> IO [FilePath]
 fontFilesBelow dir = do
   entries <- map (dir </>) <$> listDirectory dir `catch` \(_ :: IOException) -> pure []

@@ -3,8 +3,8 @@
 -- tint over the node under the pointer with its content box outlined. Each
 -- layer's outlines are drawn in that layer, so a floating window hides the
 -- outlines of the nodes it covers. If the view marked scopes ('esScopes'),
--- only nodes in them are shown. The overlay only paints; layout and hit tests
--- never see it, and none of this runs while it is off.
+-- only nodes in them are shown. The overlay only paints; it does not affect
+-- layout or hit testing, and none of this runs while it is off.
 module NanoUI.Internal.Frame.Explain
   ( explainFrame
   , paintExplainPage

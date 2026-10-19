@@ -238,12 +238,11 @@ runWindowDragTest ctx failed = do
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
 
--- | With floating panels open the solve is reused, and over a reused solve
--- each panel gets back what placing it left while it goes where it went, or
--- is placed again when it moves. Each such frame lays out every node and
--- every scroll extent where the same frame solved and placed from scratch
--- does: still, with a popup in the window following a point, mid-drag,
--- after a resize, at another window size and with a modal open.
+-- | With floating panels open, layout cache reuse preserves each stationary
+-- panel's placement and re-places panels that moved. Every node rect and
+-- scroll extent matches a fresh solve and placement: when stationary, with
+-- an anchored popup moving inside the window, mid-drag, after a resize, at
+-- another window size, and with a modal open.
 runWindowLayoutReuseTest :: Context -> IORef Int -> IO ()
 runWindowLayoutReuseTest ctx failed = do
   let inp0 = withInput 640 400
@@ -281,7 +280,7 @@ runWindowLayoutReuseTest ctx failed = do
   placed <- maybe (pure IM.empty) (\(c, _, _) -> readIORef (lcPlaced c)) cache
   assertEq failed 2 (IM.size placed)
   _ <- sameAsFresh inp0 still
-  -- The window is given back and the popup in it placed again.
+  -- The stationary window reuses its placement while the popup inside is re-placed.
   forM_ [1 .. 3 :: Int] $ \k -> do
     let at d = ui False (V2 (100 + 7 * fromIntegral k + d) 120)
     sameAfter inp0 (at 0) inp0 (at 3)
@@ -306,10 +305,10 @@ runWindowLayoutReuseTest ctx failed = do
   _ <- sameAsFresh small (ui True (V2 100 100))
   void (sameAsFresh small (ui True (V2 100 100)))
 
--- | A custom widget in a window is asked for its height at the width the
--- window gives it. A measure whose answer there changes while its answer at
--- the solve's offered width does not keeps the solve, but the window is
--- placed again rather than given back what placing it left.
+-- | A custom widget in a window is measured at the window's inner width.
+-- When its measurement at that width changes while its measurement at the
+-- root solve width does not, the root solve is reused and the window is
+-- re-placed rather than reusing its cached placement.
 runWindowCustomMeasurePlacementTest :: Context -> IORef Int -> IO ()
 runWindowCustomMeasurePlacementTest ctx failed = do
   let inp = withInput 640 400

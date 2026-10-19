@@ -79,8 +79,7 @@ data TextBuffer = TextBuffer
   { bufferLines :: !(Seq Text)
   , bufferCursor :: {-# UNPACK #-} !Cursor
   , preferredCol :: {-# UNPACK #-} !Int
-  -- ^ The column vertical motion aims for, kept while moving through
-  -- shorter lines.
+  -- ^ Target column preserved across vertical motion through shorter lines.
   , bufferSeenHead :: {-# UNPACK #-} !Int
   , bufferSeenTail :: {-# UNPACK #-} !Int
   -- ^ Lines at the start and the end that no edit has touched since
@@ -270,10 +269,10 @@ wordRight buf (Cursor row col) =
 -- Edits
 --------------------------------------------------------------------------------
 
--- | Apply an edit and leave the cursor after the inserted text. The removed
--- text decides how far the edit reaches, so an edit recorded against this
--- document (or undone from one) is applied without reading the text it
--- removes.
+-- | Apply an edit and leave the cursor after the inserted text. The span to
+-- replace is computed from the length and line breaks of 'editRemoved' rather
+-- than inspecting the buffer, so recorded and inverted edits apply without
+-- reading the removed text.
 applyEdit :: TextEdit -> TextBuffer -> TextBuffer
 applyEdit (TextEdit at removed inserted) buf =
   let Cursor row col = clampCursor buf at
@@ -299,7 +298,7 @@ advance (Cursor row col) txt =
     0 -> Cursor row (col + T.length txt)
     breaks -> Cursor (row + breaks) (T.length (T.takeWhileEnd (/= '\n') txt))
 
--- | The edit that takes the document back.
+-- | Swap 'editRemoved' and 'editInserted' to produce the inverse edit.
 invertEdit :: TextEdit -> TextEdit
 invertEdit (TextEdit at removed inserted) = TextEdit at inserted removed
 

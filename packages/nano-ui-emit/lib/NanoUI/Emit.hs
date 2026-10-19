@@ -83,8 +83,8 @@ emit msg = NanoUIE (ask >>= lift . ($ msg))
 emitWhen :: NanoUI Bool -> msg -> NanoUIE msg ()
 emitWhen widget msg = liftNanoUI widget >>= \active -> when active (emit msg)
 
--- | Run an input on the model's value and emit only a changed value. The
--- input takes a Var, as built-in inputs do; it gets one holding @old@.
+-- | Run a 'Var'-based input widget on a temporary 'Var' initialized to @old@,
+-- and emit only when the value changes.
 --
 -- > emitChanged (slider 0 100) volume SetVolume
 {-# INLINE emitChanged #-}

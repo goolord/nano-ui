@@ -86,7 +86,6 @@ kv = kvRow fontMuted id
 kvMono :: Text -> Text -> NanoUI ()
 kvMono = kvRow id fontMono
 
--- | The row behind 'kv' and 'kvMono', given the key's and the value's font.
 kvRow :: (Layout -> Layout) -> (Layout -> Layout) -> Text -> Text -> NanoUI ()
 kvRow keyF valF k v =
   row' (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do

@@ -25,9 +25,10 @@ module NanoUI.Backend.Sdl
   , peekFileDialogUi
     -- * Explicit sessions
 
-    -- | View-side operations find the open session themselves. For the
-    -- IO-level ones above ('openFileDialog', 'pollFileDialog') and below, or
-    -- to hand the session to another thread, take it with 'askSdlEnv'.
+    -- | View-side operations look up the active session from the context. For
+    -- the IO-level operations above ('openFileDialog', 'pollFileDialog') and
+    -- below, or to pass the session to another thread, retrieve it with
+    -- 'askSdlEnv'.
   , SdlEnv
   , askSdlEnv
   , sdlDebugSnapshot
@@ -98,13 +99,13 @@ import NanoUI.Emit (NanoUIE, runFrameReduce)
 -- >   runSdlApp defaultSdlOptions (editorUi state)
 --
 -- SDL-specific view operations (file dialogs, fonts, window chrome, debug
--- data) act on this session without being handed it.
+-- data) act on this session without taking it as an explicit argument.
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = runSdlSession options (`sdlDrawFrame` ui)
 
 -- | Run a model-driven view, folding emitted messages through the update
--- function in emission order. The view's message type must match the reducer.
--- Use the adapters in "NanoUI.Emit" to emit changes from ordinary widgets.
+-- function in emission order. Use the adapters in "NanoUI.Emit" to emit
+-- changes from ordinary widgets.
 runSdlAppReduce ::
   Eq model =>
   SdlOptions

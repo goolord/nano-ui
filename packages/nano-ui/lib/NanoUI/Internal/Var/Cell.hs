@@ -1,8 +1,7 @@
 
--- | The mutable cell behind a 'NanoUI.Var.Var' and the stamps that say who
--- saw which part of it when. Stamps are ticks from one process-wide clock,
--- so a cell shared by two sessions never mistakes one session's pass for
--- another's.
+-- | Mutable cell backing a 'NanoUI.Var.Var' and its per-pass read/mutation
+-- bitmasks. Timestamps come from a single process-wide monotonic counter so
+-- cells shared across sessions keep distinct pass stamps.
 module NanoUI.Internal.Var.Cell
   ( Cell (..)
   , newCell
@@ -42,24 +41,23 @@ import GHC.IO (IO (..))
 import System.IO.Unsafe (unsafePerformIO)
 import NanoUI.Internal.Types (newZeroedPrimArray)
 
--- | A value and its stamps, in three sets of the parts of the value that
--- were touched:
+-- | Mutable state and its tracking array, containing three stamped bitsets:
 --
--- * 'obsSet': parts observed in the pass stamped there, by a tracked read
---   or a widget bound to them.
--- * 'seenSet': parts read with a tracked read in the pass stamped there.
--- * the change set at 'chgSlot': parts changed since the tick after it.
+-- * 'obsSet': parts observed in the stamped pass (by a tracked read or a
+--   bound widget).
+-- * 'seenSet': parts read via a tracked read in the stamped pass.
+-- * 'chgSlot': parts mutated since the recorded base tick.
 data Cell s = Cell {-# UNPACK #-} !(IORef s) {-# UNPACK #-} !(MutablePrimArray RealWorld Word64)
 
--- | Which part of a cell's value a path touches, as two levels of bits: the
--- record field or list key the path takes first, then the one it takes
--- next ('allBits' for all of them). A path whose steps are unknown, such as
--- one through 'NanoUI.Var.zoomVar', touches all of what it has reached,
--- and is closed: steps after it say nothing more.
+-- | Two-level bit signature of the portion of a cell addressed by a lens path:
+-- the first-level record field or list key bitmask, the second-level bitmask
+-- ('allBits' when the path stops at one level), and whether the path is closed.
+-- An opaque step such as 'NanoUI.Var.zoomVar' covers all bits beneath its
+-- prefix and marks the signature closed so further steps leave it unchanged.
 --
--- Two paths overlap when their bits meet at both levels. Bits stand for
--- many fields or keys at once, so paths that share none of a part may still
--- overlap; ones that share a part always do.
+-- Because hashes map multiple fields or keys into 64 bits, bitmask intersection
+-- is conservative: non-overlapping paths may collide, while overlapping paths
+-- always intersect.
 data Sig = Sig {-# UNPACK #-} !Word64 {-# UNPACK #-} !Word64 !Bool
   deriving (Eq)
 
@@ -96,7 +94,6 @@ flagSlot = 3
 lastPassesSlot = 4
 frameSlots = 5
 
--- | @n@ zeroed stamps.
 newStamps :: Int -> IO (MutablePrimArray RealWorld Word64)
 newStamps = newZeroedPrimArray
 
@@ -138,15 +135,13 @@ bitsHit :: Cell s -> Int -> Sig -> IO Bool
 bitsHit cell at sig =
   sigHits <$> readStamp cell at <*> readStamp cell (at + 1) <*> readStamp cell (at + 2) <*> pure sig
 
--- | Whether the obs and seen sets, stamped @p@, hold a path overlapping
--- @sig@: whether something observed the part in this pass, and whether a
--- tracked read saw it.
+-- | Check whether 'obsSet' and 'seenSet' for pass @p@ intersect @sig@.
 {-# INLINE passHits #-}
 passHits :: Cell s -> Word64 -> Sig -> IO (Bool, Bool)
 passHits cell p sig = (,) <$> setHits cell obsSet p sig <*> setHits cell seenSet p sig
 
--- | Whether the seen set, stamped @p@, already holds the whole of the part
--- a one-level path names, so a read of it again records nothing new.
+-- | Whether 'seenSet' for pass @p@ already covers all first-level bits of a
+-- single-level @sig@, so a repeat read records nothing new.
 {-# INLINE seenWhole #-}
 seenWhole :: Cell s -> Word64 -> Sig -> IO Bool
 seenWhole cell p (Sig a b _)
@@ -180,9 +175,9 @@ orWord arr i x = do
   old <- readPrimArray arr i
   when (old .|. x /= old) (writePrimArray arr i (old .|. x))
 
--- | Whether a part @sig@ overlaps changed after tick @base@. When the
--- change set starts later than @base@, as after another session's change,
--- what changed in between is unknown, so it counts as changed.
+-- | Whether a part @sig@ overlaps was mutated after tick @base@. When the
+-- change set starts later than @base@ (e.g. after a mutation in another
+-- session), intermediate changes are not retained, so this returns 'True'.
 changedSince :: Cell s -> Word64 -> Sig -> IO Bool
 changedSince cell base sig = do
   chg <- readStamp cell chgSlot
@@ -192,9 +187,9 @@ changedSince cell base sig = do
       from <- readStamp cell (chgSlot + 1)
       if from > base then pure True else bitsHit cell (chgSlot + 2) sig
 
--- | Record a change to the part @sig@ at tick @t@. A set that holds only
--- changes from before @base@, the session's frame start, starts over from
--- it. A write from IO passes 0, so its set only grows.
+-- | Record a mutation to @sig@ at tick @t@. Reset the change set when its
+-- previous mutations precede the session's frame-start tick @base@. Direct IO
+-- mutations pass @base = 0@ so existing change bits are preserved.
 addChange :: Cell s -> Word64 -> Word64 -> Sig -> IO ()
 addChange cell base t sig = do
   chg <- readStamp cell chgSlot
@@ -203,7 +198,7 @@ addChange cell base t sig = do
   when fresh (writeStamp cell (chgSlot + 1) base)
   addBits cell (chgSlot + 2) fresh sig
 
--- | The last tick handed out, in one machine word.
+-- | Process-wide monotonic tick counter stored in a single machine word.
 {-# NOINLINE tickClock #-}
 tickClock :: MutableByteArray RealWorld
 tickClock = unsafePerformIO $ do
@@ -211,8 +206,7 @@ tickClock = unsafePerformIO $ do
   writeByteArray arr 0 (1 :: Int)
   pure arr
 
--- | A tick later than every tick handed out before it. An atomic add, which
--- allocates nothing, where an 'IORef' would box every tick.
+-- | Atomically increment and return the next tick without boxing an 'IORef'.
 {-# INLINE nextTick #-}
 nextTick :: IO Word64
 nextTick = case tickClock of

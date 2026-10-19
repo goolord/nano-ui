@@ -467,10 +467,9 @@ attachFallback sf source probe = do
       forM_ attached' $ \f -> ttfAddFallback (sfFont sf) (sfFont f)
       writeIORef (sfFallbacks sf) attached'
 
--- | What the process knows about coverage fonts: the installed files, found
--- once; a probe font for each opened so far (null when it failed to open),
--- which every size copies from; and the first source drawing each character
--- asked about, if any.
+-- | Process-wide fallback font cache: discovered system font files, opened
+-- probe fonts (null if opening failed) cloned for each size, and a map from
+-- codepoint to the first font index that covers it.
 data Coverage = Coverage
   { covSources :: !(SmallArray SBS.ShortByteString)
   -- ^ Paths as the file system's bytes, kept compactly for the session and

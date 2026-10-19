@@ -113,7 +113,6 @@ window open title body = void (window' open title body)
 window' :: Var Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
 window' open title body = bindOpen open (\shown -> overlay False True id shown title body)
 
--- | A modal (@isModal@) or a window.
 overlay ::
   Bool -> Bool -> (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
 overlay isModal hasChrome shape open title child = do

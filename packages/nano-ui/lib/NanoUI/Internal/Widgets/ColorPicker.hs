@@ -64,11 +64,9 @@ colorPickerPartOf si = toEnum (si .&. 3)
 pickerStateId :: WidgetId -> WidgetId
 pickerStateId (WidgetId w) = WidgetId (mix64 w 0x434F4C5243414E56)
 
--- | The store key of a picker's state, from the field's id.
 pickerKey :: WidgetId -> Int
 pickerKey = intKey . pickerStateId
 
--- | A colour as the store's int slots hold it.
 packColor :: Color -> Int
 packColor = fromIntegral . colorToWord32
 
@@ -226,7 +224,6 @@ drawColorPickerPart na idx fm da store style rect = do
       swatch current (widgetStoreBaseColor store owner colorPickerDefaultColor)
       swatch new newCol
 
--- | The picker's column, and with 'Row' the row of its parts.
 colorPickerLayout :: Direction -> Layout
 colorPickerLayout dir = tight . fillW . gap colorPickerGap $ defaultLayout {layoutDirection = dir}
 
@@ -247,9 +244,9 @@ colorPickerFieldGroupLayout pct = percent pct colorPickerRowLayout
 colorPickerFieldLayout :: Layout
 colorPickerFieldLayout = tight . fillW . minW 40 $ defaultLayout
 
--- | RGB colour picker: a saturation/value field, a hue bar, and RGB, HSV and
--- hex fields. Pass the current colour; the result is the colour after this
--- frame's edits.
+-- | RGB colour picker bound to mutable state ('Var'): a saturation/value
+-- field, a hue bar, and RGB, HSV and hex fields. Edits mutate the 'Var' in
+-- place.
 --
 -- The field and each bar take keyboard focus in turn. On the field the arrow
 -- keys move the marker (left and right for saturation, up and down for
@@ -297,7 +294,6 @@ hsvChannels =
 colorPickerWith ::
   Bool -> Color -> NanoUI (Response, Color)
 colorPickerWith showAlpha value = do
-  -- The field's id keys the picker's state.
   (wid, ctx) <- freshWidget
   hueWid <- nextId
   alphaWid <- nextId
@@ -325,7 +321,6 @@ colorPickerWith showAlpha value = do
           if showAlpha
             then Just <$> part alphaWid PickerAlpha (column colorPickerBarW)
             else pure Nothing
-        -- The Current / New preview: a label above each swatch.
         void (part previewWid PickerPreview (column 112))
         pure (sv, hue, alphaPart)
     start <- colorPickerCanvas sv hue alphaPart value
@@ -388,7 +383,6 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
     -- bar so the handle is easy to grab.
     barHit resp =
       Rect (rectX (respRect resp) - 2) (rectY svSquare) (rectW (respRect resp) + 4) (rectH svSquare)
-  -- An idle drag hands back the value it was given.
   (s, sA, sHeld) <- withKey ("s" :: Text) (useDrag1D DragAxisX wid 0 1 s0 svSquare)
   (v, vA, vHeld) <- withKey ("v" :: Text) (useDrag1D DragAxisY wid 1 0 v0 svSquare)
   (h, hA, hHeld) <- withKey ("hue" :: Text) (useDrag1D DragAxisY hueWid 0 360 h0 (barHit hueResp))

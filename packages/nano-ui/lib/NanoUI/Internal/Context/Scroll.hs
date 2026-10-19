@@ -82,8 +82,7 @@ storedScrollOffset key s =
 getScrollOffset :: Context -> WidgetId -> IO Float
 getScrollOffset ctx wid = snapScrollOffset ctx . v2Y . storedScrollOffset (intKey wid) =<< getStore ctx
 
--- | Move a scroller to an offset along its main axis. Cancels a glide in
--- flight: whoever sets an offset outright owns it.
+-- | Set the main-axis scroll offset and cancel any active glide.
 setScrollOffset :: Context -> WidgetId -> Float -> IO ()
 setScrollOffset ctx wid off = do
   cancelScrollGlide ctx wid
@@ -119,8 +118,8 @@ writeScrollOffset2D ctx wid (V2 x y) = do
          in if k == 0 then SlotWrites (const True) id else slotWriteOr fieldFloat 0 (to k) v
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
-  -- the container slots below and its offsets are never rendered. The scroll
-  -- offset damage only knows scroll nodes, so a text area damages itself.
+  -- the container slots below and its offsets are never rendered. Scroll-offset
+  -- damage only tracks scroll containers, so a text area damages its own bounds.
   case lookupSlot fieldPoint taKey store of
     Just cur ->
       when (cur /= (x, y)) $ do
@@ -186,9 +185,9 @@ resolveScrollStep ctx wid = do
 -- Geometry
 -- =============================================================================
 
--- | What a scroller looked like on the frame it was last laid out on.
--- Offsets and ranges are in window axes: @x@ rightwards, @y@ downwards,
--- whichever way the scroller itself is built.
+-- | Scroll geometry from the most recent layout pass. Offsets and ranges use
+-- window axes (@x@ horizontal, @y@ vertical) regardless of the scroller's
+-- primary direction.
 data ScrollMetrics = ScrollMetrics
   { scrollViewport :: !Rect
   -- ^ The visible content, in window coordinates, inside padding and clear of
@@ -196,7 +195,6 @@ data ScrollMetrics = ScrollMetrics
   , scrollRange :: !V2
   -- ^ Largest offset each axis reaches. @0@ on an axis that does not scroll.
   , scrollOffset :: !V2
-  -- ^ Where the scroller is now.
   , scrollAxes :: !ScrollAxes
   }
   deriving (Eq, Show)
@@ -212,8 +210,8 @@ getScrollMetrics ctx wid = do
   recordLayoutRead ctx (slotKey SlotScrollRange (intKey wid)) ((/= m) <$> readScrollMetrics ctx wid)
   pure m
 
--- | 'getScrollMetrics' without noting the read: for commands, which act on
--- the metrics rather than build from them.
+-- | Read 'ScrollMetrics' without recording a layout dependency (used by scroll
+-- commands rather than view construction).
 readScrollMetrics :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
 readScrollMetrics ctx wid = do
   s <- getStore ctx
@@ -240,15 +238,13 @@ beginScrollMetrics ctx =
   modifyIORef' (ctxScrollState ctx) $ \st ->
     if IS.null (ssCached st) then st else st {ssCached = IS.empty}
 
--- | Record what the scroll pass measured, so the commands and the app can
--- read it between frames. Writes nothing when nothing moved, and nothing at
--- all for a second node sharing this one's widget id. A table's frozen pane
--- and its body share theirs, and letting both publish would rewrite the store
--- every frame and hand the commands a viewport that alternates between panes.
--- The write requests no frame ('publishLayoutSlots'): a view that read these
--- metrics while building this frame asked for one through
--- 'getScrollMetrics'. Answers whether this node published, so is the one
--- that owns the offset this frame.
+-- | Publish a scroll node's viewport and range to the store for the current
+-- frame. If multiple nodes share @wid@ (such as a table's frozen pane and
+-- body), only the first node to call this after 'beginScrollMetrics' writes
+-- its metrics and returns 'True'; otherwise both panes would overwrite each
+-- other's viewport every frame. Does not mark the context dirty
+-- ('publishLayoutSlots'); views that read the metrics register a layout read
+-- via 'getScrollMetrics'.
 cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO Bool
 cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
   let key = intKey wid
@@ -273,16 +269,16 @@ swapAxes :: ScrollAxes -> V2 -> V2
 swapAxes ScrollAxisX (V2 x y) = V2 y x
 swapAxes _ v = v
 
--- | Hold an offset in window axes for a scroller with no layout yet, whose
--- axes are not known: 'applyPendingScrollOffset' places it on the ones the
--- scroller turns out to own. A glide in flight is cancelled.
+-- | Queue a window-axis scroll offset for a scroller that has not been laid
+-- out yet; 'applyPendingScrollOffset' applies it once the scroller's
+-- 'ScrollAxes' are known. Cancels any active glide.
 setScrollOffsetPending :: Context -> WidgetId -> V2 -> IO ()
 setScrollOffsetPending ctx wid (V2 x y) = do
   cancelScrollGlide ctx wid
   modifyStore ctx (insertSlot fieldPoint (slotKey SlotScrollPending (intKey wid)) (x, y))
 
--- | Place an offset 'setScrollOffsetPending' held, now that the scroller's
--- axes are known.
+-- | Apply any pending offset queued by 'setScrollOffsetPending' using the
+-- scroller's resolved axes.
 applyPendingScrollOffset :: Context -> WidgetId -> ScrollAxes -> IO ()
 applyPendingScrollOffset ctx wid axes = do
   store <- getStore ctx
@@ -297,8 +293,8 @@ applyPendingScrollOffset ctx wid axes = do
 getScrollOffsetIn :: Context -> WidgetId -> ScrollAxes -> IO V2
 getScrollOffsetIn ctx wid axes = swapAxes axes <$> getScrollOffset2D ctx wid
 
--- | Move a scroller to an offset in window axes, cancelling any glide. A 1D
--- scroller ignores the axis it does not scroll on.
+-- | Set a scroller's offset in window axes and cancel any active glide. A 1D
+-- scroller ignores the inactive axis.
 setScrollOffsetIn :: Context -> WidgetId -> ScrollAxes -> V2 -> IO ()
 setScrollOffsetIn ctx wid axes off = do
   cancelScrollGlide ctx wid
@@ -334,8 +330,8 @@ data ScrollAlign
 scrollTo :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
 scrollTo ctx wid off = scrollToward ctx wid (\_ -> pure off)
 
--- | Scroll by a delta in pixels. Deltas accumulate onto a glide already in
--- flight, so repeated calls keep up rather than fighting each other.
+-- | Scroll by a pixel delta. When a glide is already in flight, adds to the
+-- glide's target offset so rapid steps accumulate.
 scrollBy :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
 scrollBy ctx wid delta = scrollToward ctx wid (\m -> headedBy ctx wid m delta)
 
@@ -381,7 +377,8 @@ scrollRectIntoView ctx wid (Rect rx ry rw rh) align = scrollToward ctx wid $ \m 
       V2 ox oy = scrollOffset m
   pure (V2 (alignAxis align vw rx rw ox) (alignAxis align vh ry rh oy))
 
--- | Offset that puts a span of the content where @align@ asks for it.
+-- | Target offset along one axis for a content span @(start, size)@ in a
+-- viewport of @viewSize@.
 alignAxis :: ScrollAlign -> Float -> Float -> Float -> Float -> Float
 alignAxis align viewSize start size cur =
   case align of
@@ -398,9 +395,9 @@ alignAxis align viewSize start size cur =
 clampScrollOffset :: V2 -> V2 -> V2
 clampScrollOffset (V2 mx my) (V2 x y) = V2 (clamp 0 mx x) (clamp 0 my y)
 
--- | Drop the axis a 1D scroller does not move on. A table's paired panes link
--- their cross offsets, so a vertical scroller can carry a horizontal offset it
--- does not own; a glide that watched it would never settle.
+-- | Zero the inactive axis of a 1D scroller. Linked table panes share
+-- cross-axis slots, so a vertical scroller can have a non-zero horizontal
+-- offset in the store that its own glide will never move.
 {-# INLINE projectAxes #-}
 projectAxes :: ScrollAxes -> V2 -> V2
 projectAxes axes (V2 x y) =
@@ -409,8 +406,8 @@ projectAxes axes (V2 x y) =
     ScrollAxisX -> V2 x 0
     ScrollAxisXY -> V2 x y
 
--- | Send the scroller to the offset @pick@ chooses from its metrics, clamped
--- to its range. Nothing happens before it has been laid out.
+-- | Move the scroller to the offset computed by @pick@ from its metrics,
+-- clamped to its range. No-op before the first layout pass.
 scrollToward :: Context -> WidgetId -> (ScrollMetrics -> IO V2) -> ScrollBehavior -> IO ()
 scrollToward ctx wid pick behavior = do
   mMetrics <- readScrollMetrics ctx wid
@@ -422,9 +419,8 @@ scrollToward ctx wid pick behavior = do
 -- Glide
 -- =============================================================================
 
--- | Send a scroller to an offset in window axes, gliding if the caller asked
--- for it and the context is tuned for it. The target must already be clamped
--- to the scroller's range.
+-- | Move a scroller to a clamped window-axis target, starting a smooth glide
+-- when @behavior@ is 'ScrollSmooth' and 'scrollSmoothTime' is positive.
 applyScrollTarget :: Context -> WidgetId -> ScrollAxes -> V2 -> ScrollBehavior -> IO ()
 applyScrollTarget ctx wid axes target0 behavior = do
   st <- readIORef (ctxScrollState ctx)
@@ -450,19 +446,17 @@ scrollGliding :: Context -> WidgetId -> IO Bool
 scrollGliding ctx wid =
   IM.member (intKey wid) . ssGlides <$> readIORef (ctxScrollState ctx)
 
--- | Hold a glide in flight inside a range that has just been measured again.
--- Without this a list filtered down mid-glide coasts past its new end and
--- stops there, showing nothing, until something else scrolls it.
+-- | Clamp an active glide's target to a newly measured range. Without this,
+-- shrinking the content mid-glide (e.g. filtering a list) leaves the glide
+-- coasting past the new end.
 clampScrollGlide :: Context -> WidgetId -> V2 -> IO ()
 clampScrollGlide ctx wid range = modifyGlides ctx (IM.adjust clampGlide (intKey wid))
   where
     clampGlide g = g {sgTarget = projectAxes (sgAxes g) (clampScrollOffset range (sgTarget g))}
 
--- | Remove the pending glide, leaving the current offset unchanged.
 cancelScrollGlide :: Context -> WidgetId -> IO ()
 cancelScrollGlide ctx wid = modifyGlides ctx (IM.delete (intKey wid))
 
--- | Edit the glides in flight, leaving the state untouched when there are none.
 modifyGlides :: Context -> (IM.IntMap ScrollGlide -> IM.IntMap ScrollGlide) -> IO ()
 modifyGlides ctx f =
   modifyIORef' (ctxScrollState ctx) $ \st ->

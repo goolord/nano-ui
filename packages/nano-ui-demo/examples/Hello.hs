@@ -5,10 +5,10 @@
 -- and reports what the user did with it this frame: 'button' returns 'True'
 -- on the frame it is clicked.
 --
--- State lives in a 'Var'. 'useVar' keeps one at its place in the view with
--- no setup. An input takes the Var it edits, so typing into 'textInput'
--- changes @name@ with nothing more to write. 'readVar' reads a Var where you
--- show it.
+-- Mutable state lives in a 'Var'. 'useVar' allocates call-site-scoped mutable
+-- state inside the view with no setup. Input widgets mutate their 'Var' in
+-- place, so typing into 'textInput' updates @name@ directly. 'readVar' reads
+-- a 'Var''s current value.
 --
 -- Next: State.hs (where state lives), Layout.hs (arranging widgets),
 -- Components.hs (your own widgets), Forms.hs (validating and submitting).

@@ -1,8 +1,7 @@
--- | The chrome a frameless window draws for itself: the three caption
--- buttons, the border around the window, and the title bar's drag regions.
--- Acting on them is the backend's ('NanoUI.Sdl.Internal.Chrome.windowCaption'
--- in @nano-ui-sdl@). The glyphs are drawn rather than typeset, mostly as
--- whole-pixel fills that stay crisp at any size.
+-- | Client-side decorations for a frameless window: caption buttons,
+-- window border, and title-bar drag regions. Window actions are handled by
+-- the backend ('NanoUI.Sdl.Internal.Chrome.windowCaption' in @nano-ui-sdl@).
+-- Glyphs are rendered as pixel-aligned geometry rather than font glyphs.
 module NanoUI.Internal.Widgets.Caption
   ( -- * Buttons
     CaptionGlyph (..)
@@ -36,16 +35,16 @@ import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Layout (panelWith)
 import NanoUI.Internal.Widgets.Node (Response, respClicked, respRect)
 
--- | Which button, which is also which glyph it draws.
+-- | Caption button kind and glyph.
 data CaptionGlyph
   = GlyphMinimize
   | GlyphMaximize
   | GlyphRestore
-  -- ^ What the middle button shows while the window fills the screen.
+  -- ^ Shown on the middle button while the window is maximized.
   | GlyphClose
   deriving (Eq, Show)
 
--- | What the caption buttons were asked to do this frame.
+-- | Window action triggered by the caption buttons this frame.
 data CaptionAction
   = CaptionMinimize
   | CaptionToggleMaximize
@@ -53,7 +52,7 @@ data CaptionAction
   | CaptionClose
   deriving (Eq, Show)
 
--- | How big the buttons are.
+-- | Dimensions and styling for caption buttons.
 data CaptionConfig = CaptionConfig
   { capButtonW :: !Float
   -- ^ One button's width.
@@ -85,9 +84,9 @@ defaultCaptionConfig =
 captionBarHeight :: Float
 captionBarHeight = 30
 
--- | One caption button. It lights up under the pointer: 'GlyphClose' in red
+-- | One caption button. Highlights on hover or press: 'GlyphClose' in red
 -- (rounded at the top right by 'capCornerRadius'), the others a step up from
--- the window's colour.
+-- the window background colour.
 captionButton :: CaptionConfig -> CaptionGlyph -> NanoUI Response
 captionButton cfg glyph = do
   (resp, _) <-
@@ -106,19 +105,18 @@ captionButton cfg glyph = do
         }
   pure resp
 
--- | A fill rounded only at its top right.
 cornerRect :: Float -> Rect -> Color -> CanvasM ()
 cornerRect radius r col
   | radius <= 0 = drawRect r col
   | otherwise = drawPath (P.roundedRectCorners r 0 radius 0 0) col
 
--- | The three buttons in a row: what they were asked to do, and the
--- rectangle they span, which the window cannot be dragged by. Pass whether
--- the window is maximized, which decides the middle button's glyph.
+-- | The three caption buttons in a row: returns the triggered action and the
+-- combined button rectangle to exclude from title-bar dragging. Pass whether
+-- the window is maximized to select the middle button's glyph.
 captionButtons :: Bool -> NanoUI (Maybe CaptionAction, Rect)
 captionButtons = captionButtonsConfigured defaultCaptionConfig
 
--- | 'captionButtons' at a size of your own.
+-- | 'captionButtons' with custom 'CaptionConfig'.
 captionButtonsConfigured :: CaptionConfig -> Bool -> NanoUI (Maybe CaptionAction, Rect)
 captionButtonsConfigured cfg maximized = do
   mini <- captionButton cfg GlyphMinimize
@@ -135,7 +133,7 @@ captionButtonsConfigured cfg maximized = do
 -- The window's border
 --------------------------------------------------------------------------------
 
--- | The border a window with no frame of its own draws around itself.
+-- | Border style for a frameless window.
 data WindowFrame = WindowFrame
   { frameWidth :: !Float
   -- ^ The line's thickness, and the view's inset. Zero draws no border.
@@ -197,21 +195,17 @@ whole v = fromIntegral (round v :: Int)
 
 drawGlyph :: CaptionGlyph -> Rect -> Color -> CanvasM ()
 drawGlyph glyph box@(Rect x y w h) col = case glyph of
-  -- A line across the middle.
   GlyphMinimize -> drawRect (Rect x (y + whole (h / 2)) w 1) col
-  -- A window: one square.
   GlyphMaximize -> strokeBox box col
-  -- Two windows; the back one shows only its top and right edges.
+  -- Two overlapping squares; the back one shows only its top and right edges.
   GlyphRestore -> do
     drawRect (Rect (x + 2) y (w - 2) 1) col
     drawRect (Rect (x + w - 1) y 1 (h - 2)) col
     strokeBox (Rect x (y + 2) (w - 2) (h - 2)) col
-  -- A cross, the one glyph drawn with smoothed lines.
   GlyphClose -> do
     drawStrokeAA (V2 (x + 0.5) (y + 0.5)) (V2 (x + w - 0.5) (y + h - 0.5)) 1.2 col
     drawStrokeAA (V2 (x + w - 0.5) (y + 0.5)) (V2 (x + 0.5) (y + h - 0.5)) 1.2 col
 
--- | A square one-pixel outline, as four fills.
 strokeBox :: Rect -> Color -> CanvasM ()
 strokeBox (Rect x y w h) col = do
   drawRect (Rect x y w 1) col

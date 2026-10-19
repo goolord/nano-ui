@@ -434,13 +434,13 @@ scrollBarGutter slot trailPad =
         ScrollBarPage -> barW + scrollBarSideGap + gap - trailPad
         ScrollBarWindow -> barW + scrollBarSideGap
 
--- | The one policy for "does this node use the ambient base font, or does it
--- need the host resolver?". Size 0 with plain weight and style and the
--- regular or mono face uses the pre-read base metrics. Anything else (a
--- heading, bold, italic, explicit size) goes to the host. Colour does not
--- matter: a tone ('NanoUI.Internal.Style.fontTone') keeps the base metrics.
--- Layout, paint, span placement and hit testing all share this so they cannot
--- pick different faces for the same node.
+-- | Whether a node uses the ambient base font metrics rather than the host
+-- font resolver: size 0 with plain weight and style and the regular or mono
+-- face uses the pre-read base metrics. Anything else (a heading, bold, italic,
+-- explicit size) goes to the host. Colour does not matter: a tone
+-- ('NanoUI.Internal.Style.fontTone') keeps the base metrics. Layout, paint,
+-- span placement and hit testing all share this so they cannot pick different
+-- faces for the same node.
 {-# INLINE isDefaultNodeFont #-}
 isDefaultNodeFont :: Float -> FontWeight -> FontStyle -> FontVariant -> Bool
 isDefaultNodeFont size weight style variant =

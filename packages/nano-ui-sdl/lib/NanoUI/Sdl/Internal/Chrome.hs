@@ -4,10 +4,10 @@
 -- 'NanoUI.toggleMaximizedUi', ...).
 --
 -- A window without the desktop's title bar ('DecorationsFrame' or
--- 'DecorationsNone') has no buttons and no title of its own. 'windowCaption'
--- is the whole of the replacement: it draws the three buttons where it is
--- called, does what the first two of them say, and tells the desktop which
--- part of the bar drags the window and whether its edges resize it.
+-- 'DecorationsNone') has no native caption buttons or drag bar. 'windowCaption'
+-- replaces them: it draws the minimize, maximize, and close buttons, handles
+-- minimize and maximize clicks directly, and registers the remaining title bar
+-- spans and window edges for native drag and resize hit testing.
 --
 -- > titleBar :: NanoUI ()
 -- > titleBar =
@@ -95,12 +95,13 @@ setWindowShadow env = applyWindowShadow (sdlWindow env)
 -- A window that draws its own chrome
 --------------------------------------------------------------------------------
 
--- | Say what the parts of a borderless window are for. The first call puts
--- the hit test on the window; later ones only change what it answers, so a
--- view may hand its regions over every frame for the cost of a write.
+-- | Register hit-test regions for a borderless window. The first call installs
+-- the SDL hit-test callback on the window; subsequent calls only update the
+-- stored regions, so a view can call this every frame for the cost of an
+-- 'IORef' write.
 --
--- The rectangles are in the coordinates a frame is laid out in, and are
--- converted here by the window's zoom, which is what the desktop asks in.
+-- The rectangles are in layout coordinates and are scaled here by the window's
+-- zoom to match the window coordinates used by the hit-test callback.
 setWindowChrome :: SdlEnv -> WindowChrome -> IO ()
 setWindowChrome env chrome = do
   zoom <- windowZoom env
@@ -176,41 +177,38 @@ edgeHit left right top bottom
 -- From a view
 --------------------------------------------------------------------------------
 
--- | The caption of a window that draws its own: the three buttons, drawn
--- where this is called, and the rest of the title bar handed to the desktop
--- as the strip that drags the window.
+-- | Draw the minimize, maximize, and close caption buttons and register the
+-- remaining title bar area as the window's drag region.
 --
--- @taken@ is the rectangles of whatever else in the bar takes a click of its
--- own (menu buttons, tabs); what is left of the bar between them drags the
--- window. The bar is taken to be as tall as the buttons and as wide as the
--- window, which is what a title bar is; a window whose edges resize it takes
--- those back at the very edge, since the desktop answers for an edge before
--- it answers for a drag. A maximized or fullscreen window, or one that
--- cannot be resized, has no edges to take hold of, and a fullscreen one has
--- no bar to drag it by either.
+-- @taken@ lists the rectangles of other interactive widgets in the title bar
+-- (such as menu buttons or tabs); the spans of the bar between them become
+-- draggable. The title bar is assumed to span the full window width at the
+-- vertical position and height of the caption buttons. On a resizable
+-- borderless window, resize hit testing takes precedence along the outer edges;
+-- when maximized, fullscreen, or non-resizable, edge resizing is disabled (and
+-- dragging is also disabled in fullscreen).
 --
--- A window that still has the desktop's title bar ('DecorationsFull') gets
--- the buttons and nothing else: the desktop answers for its bar and edges.
+-- On a natively decorated window ('DecorationsFull'), only the buttons are
+-- drawn and no custom hit-test regions are registered.
 --
--- It answers whether the window was asked to close, which is the one of the
--- three the application has to decide: the other two are the window's own
--- and are already done.
+-- Returns 'True' when the close button is clicked (minimize and maximize are
+-- handled directly).
 --
--- Outside an SDL session the buttons still draw and act through the core
--- window requests, and no drag region is handed over.
+-- Outside an SDL session, the buttons still draw and dispatch core window
+-- requests, and no drag region is registered.
 windowCaption :: [Rect] -> NanoUI Bool
 windowCaption = windowCaptionWith defaultCaptionOptions
 
--- | What the caption hands the desktop, beside the buttons themselves.
+-- | Options for 'windowCaptionWith': button styling and resize border widths.
 data CaptionOptions = CaptionOptions
   { capButtons :: !CaptionConfig
   -- ^ How the three buttons are drawn.
   , capResizeBorder :: !Float
-  -- ^ How far in from the left, right and bottom edges takes hold of one to
-  -- resize the window ('chromeResizeBorder'). Zero leaves those three to the
-  -- desktop's frame, if the window has one.
+  -- ^ Resize hit-test thickness along the left, right, and bottom edges
+  -- ('chromeResizeBorder'). Zero leaves those edges to the native sizing frame
+  -- if present.
   , capResizeTop :: !Float
-  -- ^ The same reach for the top edge ('chromeResizeTop').
+  -- ^ Resize hit-test thickness along the top edge ('chromeResizeTop').
   }
 
 -- | 'defaultCaptionConfig' buttons and 'defaultResizeBorder' edges.
@@ -222,7 +220,7 @@ defaultCaptionOptions =
     , capResizeTop = defaultResizeBorder
     }
 
--- | 'windowCaption' with buttons and edges of your own.
+-- | 'windowCaption' with custom 'CaptionOptions'.
 windowCaptionWith :: CaptionOptions -> [Rect] -> NanoUI Bool
 windowCaptionWith opts taken = do
   width <- windowWidth
@@ -257,9 +255,9 @@ windowCaptionWith opts taken = do
     _ -> pure ()
   pure (action == Just CaptionClose)
 
--- | Hand the window's chrome regions over from within a view. 'windowCaption'
--- does this for a view that draws the usual three buttons; this is for one
--- that draws something else.
+-- | Update the window's chrome hit-test regions from within a view.
+-- 'windowCaption' calls this automatically when drawing standard caption
+-- buttons; use this directly for custom title bar layouts.
 setWindowChromeUi :: WindowChrome -> NanoUI ()
 setWindowChromeUi chrome = withSdlEnv () (`setWindowChrome` chrome)
 

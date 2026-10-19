@@ -167,8 +167,8 @@ defaultTextInputConfig =
     , ticAdornments = mempty
     }
 
--- | Single-line text field showing and editing a Var: typing, pastes and
--- menu edits change it.
+-- | Single-line text field bound to mutable state ('Var'): typing, pastes and
+-- menu edits update it in place.
 --
 -- > textInput draft
 {-# INLINE textInput #-}
@@ -192,8 +192,8 @@ textInputConfigured cfg v = void (textInputConfigured' cfg v)
 -- | 'textInputConfigured' returning its 'Response'.
 textInputConfigured' :: TextInputConfig -> Var Text -> NanoUI Response
 textInputConfigured' (TextInputConfig placeholder password lay adorns) v = do
-  -- The field stores its text before its adornments run, so a control
-  -- among them that sets the text has the last word.
+  -- Write the field's text before running adornments so an adornment
+  -- control that modifies the 'Var' overwrites the field's value.
   resp <-
     bindVar RenderFinal v $ \value ->
       buildTextInput
@@ -202,11 +202,10 @@ textInputConfigured' (TextInputConfig placeholder password lay adorns) v = do
         placeholder
         value
         Nothing
-  -- A control among the adornments holds the pointer: its press is its own.
+  -- Suppress the field's response when an adornment control captures the pointer.
   taken <- adornWidget (respId resp) lay (fieldAdornmentColor lay) adorns
   pure (if taken then inertResponse resp else resp)
 
--- | The colour of a field's adornments, muted from its text colour.
 fieldAdornmentColor :: Layout -> Theme -> Color
 fieldAdornmentColor lay theme =
   let s = themeInput theme
@@ -237,8 +236,8 @@ editTextField wid mode initial unfocusedText = do
         . deleteSlot fieldInt pulseKey
         . insertSlot fieldEditorMode modeKey mode
   isFocus <- keyboardFocused wid
-  -- Password fields request 'InputSecure' so the IME neither shows nor
-  -- learns their text.
+  -- Password fields request 'InputSecure' so the IME does not display or
+  -- record their text.
   when (isFocus && modeEditable mode) $
     liftIO (requestInputMethod ctx wid Nothing (if modeCopyable mode then InputNormal else InputSecure))
   mEdited <- if isFocus then liftIO (editTextInput ctx mode inp store key s0) else pure Nothing
@@ -320,8 +319,8 @@ debounceSearchChanged ctx key focused rawChanged ms = do
     modifyStore ctx $
       (if commit || committedMissing then insertSlot fieldText committedKey current else id)
         . (if stamp then insertSlot fieldDouble ageKey now else id)
-  -- An uncommitted edit commits once typing has paused for the deadline, and
-  -- no input arrives to mark that moment. Ask for the frame that will see it.
+  -- Schedule a wake-up at the debounce deadline since no input event will
+  -- arrive when the pause expires.
   when (dirty && not commit) $
     requestWakeAt ctx ((if rawChanged then now else lastEdit) + deadline / 1000 + 0.001)
   pure commit
@@ -345,10 +344,10 @@ defaultSearchInputConfig =
     , sicLayout = searchInputLayout
     }
 
--- | Search box with a magnifier and a clear button, showing and editing a
--- Var; the first argument is the placeholder. The Var changes as the user
--- types; @respChanged@ on 'searchInput'' is debounced: it fires once typing
--- pauses, or at once when the field is cleared.
+-- | Search box with a magnifier and a clear button, bound to mutable state
+-- ('Var'); the first argument is the placeholder. The 'Var' is mutated in place
+-- as the user types; @respChanged@ on 'searchInput'' is debounced and fires
+-- once typing pauses, or immediately when the field is cleared.
 {-# INLINE searchInput #-}
 searchInput :: Text -> Var Text -> NanoUI ()
 searchInput placeholder v = void (searchInput' placeholder v)

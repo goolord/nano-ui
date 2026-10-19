@@ -85,10 +85,11 @@ import System.Timeout (timeout)
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
 
 -- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
--- six-index quad, in draw order. Span and arena queries cannot see chrome
--- (scroller wells, scrollbar lanes); this can. Use only with quad-packed
--- output, such as square-geometry test contexts. Triangle and rounded-shape
--- output is not supported. Commands with counts not divisible by six throw.
+-- six-index quad, in draw order. Unlike span and arena queries, this includes
+-- widget chrome such as scroller wells and scrollbar lanes. Use only with
+-- quad-packed output, such as square-geometry test contexts. Triangle and
+-- rounded-shape output is not supported. Commands with counts not divisible by
+-- six throw.
 drawQuads :: DrawData -> IO [(Rect, Color)]
 drawQuads dd =
   withForeignPtr (drawVertices dd) $ \vp ->
@@ -230,7 +231,6 @@ releaseAt = releaseWith MouseLeft
 releaseWith :: MouseButton -> Input -> Input
 releaseWith b = applyMouseButton b False . unpress b
 
--- | Remove the button from the frame's presses.
 unpress :: MouseButton -> Input -> Input
 unpress b inp = inp {inputButtonsPressed = buttonsDelete b (inputButtonsPressed inp)}
 
@@ -287,16 +287,15 @@ warmupDraw ctx inp ui = (\(a, draw, _) -> (a, draw)) <$> run2Frames ctx inp ui
 warmupFocused :: Context -> Input -> NanoUI a -> IO ()
 warmupFocused ctx inp ui = warmup2 ctx inp ui >> void (runFrame ctx (tabInp inp) ui)
 
--- | Run an input on a Var and return its result with the value it left in
--- the Var. The read is not recorded, so it adds no rerun of its own; a view
--- that reads the Var before the widget does make an edit rerun the view,
--- and the frame then returns that pass's result without its click or change
--- flags.
+-- | Run a widget bound to a 'Var' and pair its result with the post-frame
+-- 'Var' value. The read uses 'peekVar', so it adds no rerun of its own; a
+-- view that reads the 'Var' before the widget mutates it will still rerun,
+-- returning the second pass's result without click or change flags.
 held :: Var a -> (Var a -> NanoUI r) -> NanoUI (r, a)
 held v widget = (,) <$> widget v <*> peekVar v
 
--- | What one frame cost: the view passes it ran, the damage it produced, and
--- the frames that had to follow before the context stopped asking for one.
+-- | Per-frame test metrics: view pass count, resulting 'Damage', and number
+-- of follow-up idle frames needed until the context is no longer dirty.
 data FrameCost = FrameCost
   { fcPasses :: !Int
   , fcDamage :: !Damage
@@ -403,7 +402,7 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt = do
       forM_ (listToMaybe (spanYOf line1 spans1)) $ \b1 -> assertLt failed b1 b0
     _ -> assert failed False
 
--- | Run a frame with the pointer at @pos@ and return the cursor it asks for.
+-- | Run a frame with the pointer at @pos@ and return the resulting 'UiCursorKind'.
 cursorOver :: Context -> Input -> NanoUI a -> V2 -> IO UiCursorKind
 cursorOver ctx inp ui pos = do
   let hover = inp {inputMousePos = pos}
@@ -486,10 +485,10 @@ runDragFrom ctx inp0 ui grab dest =
 
 -- | Install a wake action on a headless context and return a wait for it.
 -- @wait us@ consumes a wake since the last wait, blocking up to @us@
--- microseconds, and says whether one came. Consuming a wake takes the wakes
--- so far ('takeWakes'), as a session loop does after its wait, so the next
--- one signals again. A frame that requests another also wakes the loop, so
--- drain those with @wait 0@ before starting the background job the test
+-- microseconds, and returns whether one arrived. Consuming a wake takes the
+-- wakes so far ('takeWakes'), as a session loop does after its wait, so the
+-- next one signals again. A frame that requests another also wakes the loop,
+-- so drain those with @wait 0@ before starting the background job the test
 -- waits on.
 newWakeSignal :: Context -> IO (Int -> IO Bool)
 newWakeSignal ctx = do

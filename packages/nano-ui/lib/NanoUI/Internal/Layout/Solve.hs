@@ -283,8 +283,8 @@ measurePass env count = case seCache env of
         when (p >= 0) $ writePrimArray moved p 1
       -- The captured solve placed the subtree as this one will when the
       -- node's key hit and it came out its captured size, as did every node
-      -- below it, and it holds no drawing, whose measure may answer
-      -- differently with nothing in the arena changed.
+      -- below it, and it holds no drawing, whose custom measure may return a
+      -- different size with nothing in the arena changed.
       forM_ (sePositions env) $ \PositionLog {plSpans} -> do
         nt <- readTagEnum (seArrays env) idx TagNodeType
         end <- if hit && same && nt /= NodeDrawing then subtreeEnd (seArrays env) plSpans idx else pure (-1)
@@ -397,9 +397,9 @@ runCustomMeasure na fm measureFn idx = do
   hAx <- getHeightSizing na idx
   pure $! snd (customMeasure fm measureFn wAx hAx)
 
--- | A custom measure run on the space it is offered ('offeredExtent').
--- Returns the size it asks for and the record of the call, forced with the
--- pair so the cache holds words rather than the closure.
+-- | Run a custom measure on the offered space ('offeredExtent'). Returns the
+-- measured size and the call record, forced with the pair so the cache holds
+-- words rather than the closure.
 {-# INLINE customMeasure #-}
 customMeasure ::
   FontMetrics -> CustomMeasureFn -> AxisSizing -> AxisSizing -> ((Float, Float), CustomMeasureRecord)
@@ -1220,7 +1220,6 @@ positionNode env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y ava
   when (hTag == SizingFit && ratio <= 0 && isContainerNode nt && not (isScrollNode nt)) $
     adjustFitHeight na idx minH maxH x y w
 
--- | A container's resolved padding and gap, and its direction.
 {-# INLINE containerFlow #-}
 containerFlow :: NodeArenaArrays -> NodeIdx -> IO (Padding, Float, DirTag)
 containerFlow a idx = do
@@ -1933,12 +1932,11 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
 -- anchor, side and gap put it ('computePopupPosition'), by default at the
 -- origin with automatic placement.
 --
--- With @placed@, what placing each node over the arena's current solve left
--- ('PlacedFloat'), a node that goes to the rect it went to then gets that
--- back instead of being laid out again, and a node laid out is recorded
--- there. Nodes go in arena order, so a node inside another floating node is
--- placed or put back after the outer one, whose record holds the inner
--- subtree as the solve left it.
+-- When @mPlaced@ is provided, a floating node whose target rect matches its
+-- cached 'PlacedFloat' restores its cached subtree geometry instead of
+-- re-running layout, and newly placed subtrees are recorded there. Nodes are
+-- visited in arena order, so a nested floating node is placed or restored
+-- after its enclosing floating node.
 placeFloatingNodes ::
   NodeArena ->
   Measurers ->
@@ -1993,10 +1991,10 @@ positionFloating env@SolveEnv {seArena = na} idx rect@(Rect x y w h) = do
       positionChildren env 0 idx dir gap pad rect
     else positionNodeA env 0 idx rect
 
--- | What placing floating node @idx@ at @rect@ left ('snapshotPlaced'), or
--- 'Nothing' when its subtree is not one index range or holds a drawing with
--- a custom measure: placement asks that measure for its height at the placed
--- width, which the layout cache does not check again.
+-- | Snapshot the placed subtree of floating node @idx@ at @rect@
+-- ('snapshotPlaced'), or return 'Nothing' when its subtree is not a contiguous
+-- index range or contains a drawing with a custom measure (whose height at
+-- the placed width is not re-verified by the layout cache).
 recordPlaced :: SolveEnv -> NodeIdx -> Rect -> IO (Maybe PlacedFloat)
 recordPlaced SolveEnv {seArena = na, seMs = ms} idx rect =
   subtreeSpan na idx >>= \case

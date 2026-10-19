@@ -67,8 +67,8 @@ data CanvasEnv = CanvasEnv
   , ceContext :: CustomDrawContext
   }
 
--- | Compile a block without knowing the display scale. Curves are flattened
--- for a 2x display, and 'drawContext' is an idle widget in 'defaultTheme'.
+-- | Compile a block at a fixed 2x display scale, with an idle 'defaultTheme'
+-- 'drawContext'.
 {-# DEPRECATED runCanvas "runCanvas guesses the display's scale; use runCanvasFor with the widget's draw context, or canvas" #-}
 {-# INLINE runCanvas #-}
 runCanvas :: CanvasM a -> SmallArray DrawOp

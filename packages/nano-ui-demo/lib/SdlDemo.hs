@@ -5,12 +5,12 @@
 -- short programs about one topic each (state, layout, forms, shortcuts,
 -- background work, ...), see this package's @examples@ directory.
 --
--- Every input takes the 'Var' it edits: @slider 0 100 volume@ draws
--- @volume@ and stores a drag in it, and @readVar volume@ reads it where it
--- is shown. 'useVar' keeps a small value at its place in the view; anything
--- else (a list, an image handle, a plot cache) is made once by 'newDemo'.
--- The values the State pane shows are declared once, above the pane and the
--- tabs, so both see the same Vars.
+-- Input widgets mutate a 'Var' in place: @slider 0 100 volume@ draws and
+-- updates @volume@, and @readVar volume@ reads its current value. 'useVar'
+-- allocates call-site-scoped mutable state inside the view; larger or shared
+-- resources (a list, an image handle, a plot cache) are allocated once in
+-- 'newDemo'. The values shown in the State pane are declared once above both
+-- the pane and the tabs so they share the same 'Var's.
 --
 -- The toolbar opens an About modal (F1) and a Debug window (F12) with the
 -- SDL backend's frame statistics and the layout overlay; the Diagnostics tab

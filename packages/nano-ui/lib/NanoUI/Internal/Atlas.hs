@@ -70,12 +70,11 @@ data AtlasState = AtlasState
   , asLastFresh :: {-# UNPACK #-} !Int
   -- ^ The last id 'freshImageId' returned.
   , asResizedGen :: {-# UNPACK #-} !Int
-  -- ^ The generation that last gave the atlas a new size.
+  -- ^ Generation of the last atlas resize.
   , asWrites :: [AtlasSlot]
   -- ^ The slot each recent generation wrote (each writes one), newest first:
   -- at least the last 'atlasWriteLog', and fewer than twice as many.
   , asWriteCount :: {-# UNPACK #-} !Int
-  -- ^ The length of 'asWrites'.
   , asFree :: [AtlasSlot]
   -- ^ Space freed by released images, including each one's trailing padding.
   -- 'takeFree' tries these before the shelves.
@@ -240,19 +239,18 @@ recordWrite slot st
     gen = asGen st + 1
     logged = slot : asWrites st
 
--- | What a texture that holds the atlas as of some generation must upload to
--- hold it as of now.
+-- | Upload required to bring a GPU texture up to the current atlas generation.
 data AtlasUpload
   = AtlasWhole
-  -- ^ All of it, into a texture of the atlas's current size: the atlas was
-  -- resized since, the writes since are forgotten, or there is no texture.
+  -- ^ Upload the full buffer at the current atlas size (no texture yet,
+  -- resized since @since@, or earlier writes were trimmed from 'asWrites').
   | AtlasRegions [(Int, Int, Int, Int)]
-  -- ^ Only these x, y, width, height pixel rects, into the same texture.
+  -- ^ Upload only these @(x, y, width, height)@ pixel rects into the existing texture.
   deriving (Eq, Show)
 
--- | The atlas's width, height, pixels and generation, and what a texture
--- uploaded at generation @since@ (0 for none) needs from them. 'Nothing'
--- when it needs nothing, or the atlas holds no image.
+-- | Current atlas dimensions, pixel buffer, generation, and the upload
+-- required since generation @since@ (0 when uninitialized). 'Nothing' when
+-- the atlas is empty or already at @since@.
 atlasChanges :: ImageAtlas -> Int -> IO (Maybe (Int, Int, ForeignPtr Word8, Int, AtlasUpload))
 atlasChanges (ImageAtlas ref) since = do
   st <- readIORef ref

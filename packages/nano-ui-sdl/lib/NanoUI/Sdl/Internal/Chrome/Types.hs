@@ -1,5 +1,5 @@
--- | What a window that draws its own chrome hands to the desktop, shared
--- between the chrome API and the SDL window lifecycle.
+-- | Hit-test regions for custom window chrome, shared between the chrome API
+-- and the SDL window lifecycle.
 module NanoUI.Sdl.Internal.Chrome.Types
   ( WindowChrome (..)
   , defaultWindowChrome
@@ -16,53 +16,48 @@ import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import NanoUI (Rect (..))
 import SDL3.Sys.Bindgen.Video (SDL_HitTestResult (..))
 
--- | What the parts of a borderless window are for. A window with a border of
--- its own needs none of this: the desktop already knows where its title bar
--- and its edges are.
+-- | Hit-test regions for a borderless window. A natively decorated window does
+-- not use this, since the window manager handles its title bar and resize
+-- borders directly.
 data WindowChrome = WindowChrome
   { chromeDrag :: ![Rect]
-  -- ^ The parts of the window that drag it, in the coordinates a frame is
-  -- laid out in. Dragging is the desktop's, so these also snap the window to
-  -- the sides of the screen, maximize it on a double click, and hang the
-  -- window menu off the right button. 'NanoUI.dragSpans' works these out
-  -- from a title bar row and the widgets in it.
+  -- ^ Client-area rectangles that act as a draggable title bar, in layout
+  -- coordinates. Because the window manager handles the drag, these regions
+  -- also support aero snap, double-click to maximize, and the system context
+  -- menu. 'NanoUI.dragSpans' computes these rectangles from a title bar row
+  -- and its interactive child widgets.
   , chromeResizeBorder :: !Float
-  -- ^ How far in from the left, right and bottom edges takes hold of one.
-  -- Zero for a window that should not resize by its edges, which includes
-  -- every maximized one.
+  -- ^ Resize hit-test thickness along the left, right, and bottom edges.
+  -- Set to zero when edge resizing is disabled (including when maximized).
   , chromeResizeTop :: !Float
-  -- ^ How far in from the top edge does, which is on its own because the
-  -- top of a window is. A window given the desktop's frame
-  -- ('NanoUI.Backend.Sdl.DecorationsFrame') has it outside its sides and
-  -- its bottom, where there is room to take hold of the window without
-  -- reaching into the view at all; the top has none, since the desktop
-  -- paints that strip as a caption, so what is inside the view is all the
-  -- top edge has and it has to be deep enough to aim at.
+  -- ^ Resize hit-test thickness along the top edge. Under
+  -- 'NanoUI.Backend.Sdl.DecorationsFrame', the native sizing frame extends
+  -- outside the left, right, and bottom edges, but not the top (because
+  -- Windows paints a top frame inset as a caption). The top resize border must
+  -- therefore live inside the client area.
   --
-  -- With both at zero the window has no edges at all: the desktop's frame
-  -- is asked about through the same test, and answered as part of the view.
+  -- When both 'chromeResizeBorder' and 'chromeResizeTop' are zero, all resize
+  -- hit testing is disabled and any outer frame area is treated as normal
+  -- client area.
   }
 
--- | No drag region and no resize border: a window that answers for nothing.
+-- | Empty chrome configuration with no drag regions and no resize borders.
 defaultWindowChrome :: WindowChrome
 defaultWindowChrome = WindowChrome [] 0 0
 
--- | Six layout units. A bordered window's sizing border is four, which is a
--- thing to aim at rather than a thing to hit.
+-- | Six layout units (wider than a standard 4px native border so it is easier
+-- to grab inside the client area).
 defaultResizeBorder :: Float
 defaultResizeBorder = 6
 
--- | @SDL_HitTest@: the window, the point being asked about (an @SDL_Point@,
--- which is two ints), and the data the callback was registered with.
+-- | @SDL_HitTest@: the window, the point being tested (an @SDL_Point@ of two
+-- @CInt@s), and the user data pointer registered with the callback.
 type HitTestCallback = Ptr () -> Ptr CInt -> Ptr () -> IO SDL_HitTestResult
 
--- | A window's chrome as the hit test reads it. The desktop asks what is
--- under the pointer from inside the event pump, before the press reaches
--- anyone, so the answer cannot be passed in at the call: the frame leaves it
--- here and the callback reads it.
---
--- The regions are kept in window coordinates, converted once when they are
--- set rather than on every question.
+-- | Active hit-test state read by the SDL hit-test callback. Because the window
+-- manager queries hit testing from inside the event pump before pointer events
+-- reach the application, each frame writes the current regions here (converted
+-- to window coordinates once when set) for the callback to read.
 data ChromeState = ChromeState
   { chromeRegions :: !(IORef WindowChrome)
   , chromeCallback :: !(IORef (Maybe (FunPtr HitTestCallback)))

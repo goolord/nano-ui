@@ -63,10 +63,9 @@ pointerBlockedByModal :: Context -> IO Bool
 pointerBlockedByModal ctx =
   getsOverlay ctx (\os -> osModalDepth os <= 0 && (osModalWasActive os || osModalActive os))
 
--- | The frame's input as the widgets being declared in @layer@ see it (0 for
--- the page, a floating panel's key otherwise): as it is when the frame routed
--- the pointer there and no modal stands in front, and with no pointer in it
--- otherwise.
+-- | Filter frame input for widgets in @layer@ (0 for the base page, or a
+-- floating panel's key): preserves pointer state only when pointer input is
+-- routed to @layer@ and not blocked by a modal.
 routedInput :: Context -> Int -> Input -> IO Input
 routedInput ctx layer inp =
   getsInteraction ctx isPointerRoute >>= \case
@@ -97,7 +96,7 @@ seedFloatingPanel ctx wid rect
           , osPrevFloatingOrder = filter (/= k) (osPrevFloatingOrder os) ++ [k]
           }
 
--- | Enter modal construction, increasing nesting depth and marking a modal active.
+-- | Increment modal nesting depth and mark a modal active for this frame.
 beginModal :: Context -> IO ()
 beginModal ctx =
   modifyOverlay ctx (\os -> os {osModalActive = True, osModalDepth = osModalDepth os + 1})

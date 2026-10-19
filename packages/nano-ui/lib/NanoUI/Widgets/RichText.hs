@@ -79,8 +79,8 @@ inlineCode = inlineWith fontMono
 inlineBackground :: Color -> Inline -> Inline
 inlineBackground c (Inline txt style target _) = Inline txt style target (Just c)
 
--- | @hyperlink target label@: text in the theme's link colour, underlined while
--- hovered, whose click the paragraph reports as @target@.
+-- | @hyperlink target label@: text styled with the theme's link colour and
+-- underlined on hover. Clicking the link returns @Just target@ from 'richText'.
 hyperlink :: Text -> Text -> Inline
 hyperlink target label = Inline label id (Just target) Nothing
 
@@ -389,8 +389,7 @@ selectionOffsets s
   | selectionStart s == selectionEnd s = Nothing
   | otherwise = Just (selectionStart s, selectionEnd s)
 
--- | Draw the selected portions of each laid-out token with the theme's native
--- selection colour, preserving the paragraph's per-run font shaping.
+-- | Highlight the selected range of each token using its per-run 'FontMetrics'.
 selectionOps :: Float -> Float -> Line -> Int -> Int -> Color -> [DrawOp]
 selectionOps x0 y0 line lo hi color = concatMap drawToken (lineTokens line)
   where
@@ -477,8 +476,8 @@ measureAt ref extentAt width = unsafeDupablePerformIO $ do
 paragraphBound :: Int
 paragraphBound = 4096
 
--- | The font a piece's layout chooses. A colour-only variant resolves to the
--- regular face ('resolveTextFont').
+-- | Extract 'TextFont' from a 'Layout'. Colour-only variants resolve to the
+-- regular face in 'resolveTextFont'.
 pieceFont :: Layout -> TextFont
 pieceFont l = TextFont (layoutFontSize l) (layoutFontVariant l) (layoutFontWeight l) (layoutFontStyle l) (layoutTextDecoration l)
 

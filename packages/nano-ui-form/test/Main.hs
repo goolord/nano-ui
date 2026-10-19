@@ -92,8 +92,8 @@ main = do
   updateFieldInput customOwner customCtx "custom" "internal-key" (FormInputBool True)
   expectErrors "Custom field decoder errors reach ditto" ((== ["Expected text"]) . map snd) . snd =<< runCustom
 
-  -- A commit-only field holds its edit back from the form, shows it to the
-  -- control, and publishes it on commit.
+  -- A commit-only field retains uncommitted edits as a draft and publishes
+  -- them only when committed.
   commitCtx <- newContext
   commitOwner <- newFormState
   commitNow <- newIORef False

@@ -6,7 +6,7 @@
 -- The view registers a watch each build ('sensorConfigured', 'useVisibility'),
 -- keyed by the sensor's widget id. After layout, 'updateSensors' measures each
 -- target and stores the result for the next build, so like
--- 'NanoUI.Internal.Widgets.Node.respRect' the view sees last frame's layout.
+-- 'NanoUI.Internal.Widgets.Node.respRect' it reflects last frame's layout.
 -- A visibility change requests a follow-up frame. Sensors not built in a
 -- pass are dropped.
 module NanoUI.Internal.Widgets.Sensor
@@ -181,7 +181,6 @@ paintClips ctx@Context {ctxNodeArena = na} memo size margin idx = do
   floating <- isFloatingNode <$> getNodeType na idx
   if floating then pure (windowClips size margin) else getParent na idx >>= clipsInside ctx memo size margin
 
--- | The clips before any node: the window, and the window grown by @margin@.
 windowClips :: Size -> Float -> (Maybe Rect, Maybe Rect)
 windowClips (Size ww wh) margin = let window = Rect 0 0 ww wh in (Just window, Just (rectInflate margin window))
 

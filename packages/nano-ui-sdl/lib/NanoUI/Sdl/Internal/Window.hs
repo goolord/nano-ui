@@ -470,14 +470,14 @@ withSdlWindow hints flags opts ctx act =
     -- between OS threads across a safe foreign call, so pin the session to one.
     inBoundThread a = if rtsSupportsBoundThreads then runInBoundThread a else a
 
--- | An SDL session keeps its environment on the context it drives, where
--- views reach it rather than being handed it.
+-- | An SDL session stores its 'SdlEnv' on the context so view-side operations
+-- can look it up without taking an explicit handle.
 type instance BackendSession 'Sdl = SdlEnv
 
--- | The environment of the SDL session driving this view, for the IO-level
--- SDL operations ('NanoUI.Sdl.Internal.Dialog.openFileDialog' and the like)
--- or to hand to a thread. 'Nothing' under a context no SDL session drives,
--- such as a test's. View-side SDL operations find it themselves.
+-- | Look up the 'SdlEnv' of the SDL session driving this view, for IO-level
+-- SDL operations ('NanoUI.Sdl.Internal.Dialog.openFileDialog' and similar) or
+-- to pass to another thread. Returns 'Nothing' when the context is not driven
+-- by an SDL session (such as in headless tests).
 askSdlEnv :: NanoUI (Maybe SdlEnv)
 askSdlEnv = askBackendSession SSdl
 

@@ -7,14 +7,13 @@
 --
 -- The rules, all shown below:
 --
--- * A job starts the first frame its hook sees a key, and restarts (killing
---   the old one) when the key changes. To rerun the same input, put an
---   attempt counter in the key.
--- * A job lives while the view keeps calling its hook. A frame that skips
---   the hook kills the job, so turning a feature off is just not calling it.
--- * The loop sleeps while a job runs and wakes when it ends (or, for a
---   stream, when it pushes a value). A running job costs no frames; only
---   what you choose to animate meanwhile, such as a spinner, does.
+-- * A task starts on the first frame its hook is called with a key, and
+--   restarts (cancelling the previous thread) when the key changes. To re-run
+--   with the same input, include an attempt counter in the key.
+-- * A task runs only while the view continues calling its hook. Omitting the
+--   call on a frame cancels the task.
+-- * The frame loop sleeps while a task runs and wakes when it completes (or
+--   when a stream pushes a value).
 --
 -- Each 'Task' or 'Stream' handle is allocated once in 'newApp', like any
 -- other state that 'useVar' cannot hold. Build with @-threaded@

@@ -22,8 +22,8 @@ import NanoUI.Internal.Widgets.Behavior (DragAxis (..), holdActiveWhile, navStep
 import NanoUI.Internal.Widgets.Combinators (finishInput)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, setWidgetValue)
 
--- | Slider over @[minV, maxV]@ that fills the available width, showing and
--- editing a Var: a drag or the arrow keys move it.
+-- | Slider over @[minV, maxV]@ that fills the available width, bound to
+-- mutable state ('Var'): a drag or the arrow keys update it in place.
 --
 -- > slider 0 100 app.volume
 {-# INLINE slider #-}
@@ -65,8 +65,7 @@ sliderCore f minV maxV value = do
   mrect <- liftIO (getPrevRect ctx wid)
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
-  -- An idle drag hands back the value it was given. Its scope follows this
-  -- slider's position, so sibling sliders keep separate drags.
+  -- Scope the drag to this slider's position so sibling sliders keep separate drag state.
   (dragged, dragging, _) <- scope (useDrag1D DragAxisX wid minV maxV current track)
   holdActiveWhile wid dragging
   nav <- useKeyNav wid

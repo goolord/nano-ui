@@ -484,10 +484,9 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
                 , sdAlignSec      = refreshSec
                 }
         -- Present the opening frame before entering the loop so the window has
-        -- content immediately; once idle the loop blocks with no redraws. The
-        -- context stays as that frame left it: if it asked for another by
-        -- marking the context dirty, the loop draws it at once instead of
-        -- blocking until some input happens along.
+        -- content immediately; once idle the loop blocks with no redraws. If
+        -- the opening frame marked the context dirty, the loop draws the
+        -- follow-up frame immediately instead of blocking for input.
         _ <- drawOne True ctx initInp
         runSessionLoop drv ctx initInp
 

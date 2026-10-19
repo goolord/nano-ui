@@ -127,7 +127,6 @@ strokeWalk w cap join miterLimit contours point end =
       quad a b c d
         | turn a b + turn b c + turn c d + turn d a < 0 = emit4 d c b a
         | otherwise = emit4 a b c d
-      -- A quad in the order given.
       emit4 a b c d = emitP a >> emitP b >> emitP c >> emitP d >> end 0
       normal (Point x0 y0) (Point x1 y1) =
         let dx = x1 - x0
@@ -344,11 +343,9 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
               add (base + ia) ((fromIntegral (ia + 1) - xa) * weight)
               forM_ [ia + 1 .. ib - 1] $ \i -> add (base + i) weight
               when (ib < width) $ add (base + ib) ((xb - fromIntegral ib) * weight)
-      -- The row's edges join the active list.
       admit !e !stop !n
         | e >= stop = pure n
         | otherwise = writePrimArray active n e >> admit (e + 1) stop (n + 1)
-      -- A crossing goes where it sorts among the @j@ before it.
       insertCrossing !j !x !d
         | j > 0 = do
             xj <- readPrimArray crossX (j - 1)

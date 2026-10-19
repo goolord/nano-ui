@@ -125,12 +125,12 @@ ensureCaretVisible state =
 textAreaLayout :: Layout
 textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 
--- | Multi-line text editor over 'Text', showing and editing a Var. Pair it
--- with a 'label' when a caption is wanted.
+-- | Multi-line text editor over 'Text' bound to mutable state ('Var'). Pair it
+-- with a 'label' when a caption is needed.
 --
--- A frame that changes the text joins the whole document into the Var's
--- 'Text'. For long documents use 'textAreaDocument', whose edits cost only
--- the lines they touch.
+-- A frame that changes the text joins the whole document and mutates the
+-- 'Var' in place. For long documents use 'textAreaDocument', whose edits cost
+-- only the lines they touch.
 {-# INLINE textArea #-}
 textArea :: Var Text -> NanoUI ()
 textArea v = void (textAreaWith' id v)
@@ -174,11 +174,11 @@ textAreaText f value = do
       liftIO $ modifyStore ctx (insertSlot fieldTextDocument textKey (out, doc))
       pure (resp, out)
 
--- | Multi-line text editor over a 'TextDocument', showing and editing a Var.
+-- | Multi-line text editor over a 'TextDocument' bound to mutable state ('Var').
 -- An edit replaces the lines it touches and shares the rest, and a frame
 -- without edits leaves the document as it was. Edits avoid joining the whole
 -- document, though their cost still depends on affected lines and tree
--- operations. Join it with 'documentText' when the whole text is wanted.
+-- operations. Join it with 'documentText' when the whole text is needed.
 {-# INLINE textAreaDocument #-}
 textAreaDocument :: Var TextDocument -> NanoUI ()
 textAreaDocument v = void (textAreaDocumentWith' id v)

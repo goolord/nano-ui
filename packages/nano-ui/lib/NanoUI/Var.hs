@@ -1,9 +1,8 @@
--- | State that outlives a frame.
+-- | Mutable state that persists across frames.
 --
--- A 'Var' holds a value the view shows and the user edits. Widgets take
--- Vars: @textInput draft@ shows @draft@ and stores the user's edits in it,
--- with no setter to call. Read a Var with 'readVar' where you show it, and
--- change it with 'writeVar' or 'modifyVar'.
+-- A 'Var' is a mutable reference passed to stateful widgets: @textInput draft@
+-- displays @draft@ and mutates it in place on user input. Read a 'Var' with
+-- 'readVar' and update it with 'writeVar' or 'modifyVar'.
 --
 -- > counter :: NanoUI ()
 -- > counter = row $ do
@@ -12,29 +11,29 @@
 -- >   label . T.pack . show =<< readVar n
 -- >   whenM (button "+") (modifyVar n (+ 1))
 --
--- = Where Vars come from
+-- = Creating Vars
 --
--- * 'useVar' keeps a Var at its position in the view, for small local state
---   of a few types: 'Int', 'Double', 'Float', 'Bool', 'Text', and an
---   enumeration through 'useEnumVar'.
--- * 'newVar' makes a Var of any type in IO, for state the application owns:
---   make it once, keep it in a record, and pass it to the view.
--- * A 'VarMap' holds one Var per key, for the rows of a list.
--- * @'constVar' x@ is a constant: the widget shows @x@ and an edit is gone
---   on the next frame, for an input showing a value derived from other
---   state, its change handled through the primed variant's response.
+-- * 'useVar' allocates view-local mutable state keyed by widget position,
+--   supporting 'Int', 'Double', 'Float', 'Bool', 'Text', and enumerations via
+--   'useEnumVar'.
+-- * 'newVar' allocates a 'Var' of any type in 'IO' for application-owned
+--   state.
+-- * 'VarMap' stores one 'Var' per key for dynamic collections.
+-- * @'constVar' x@ is a read-only 'Var' that always reads as @x@ and discards
+--   writes, useful for inputs driven by derived state whose changes are handled
+--   via the primed widget's 'NanoUI.Response'.
 --
--- @v.field@ (with @OverloadedRecordDot@) is a Var for one field of the
--- record in @v@, for a record type with one constructor and a 'Generic'
--- instance. 'forEachVar' gives each element of a list in a Var its own Var.
+-- With @OverloadedRecordDot@, @v.field@ focuses a 'Var' on a single field of a
+-- single-constructor 'Generic' record. 'forEachVar' projects a 'Var' of a list
+-- into a 'Var' per element.
 --
--- = What a change costs
+-- = Rerun semantics
 --
--- A view runs once per frame. When code writes a Var that something earlier
--- in the same run already read, what that reader drew is stale, so the view
--- runs a second time before anything is drawn. Read a Var after the widgets
--- that edit it and typing into a field costs one run. Fields count apart:
--- showing @m.title@ above a field that edits @m.name@ costs one run too.
+-- A view normally runs once per frame. Mutating a 'Var' that was already read
+-- earlier in the same pass invalidates the earlier read and triggers a second
+-- pass before rendering. Reading a 'Var' after the widget that mutates it
+-- avoids the extra pass. Record fields are tracked independently, so reading
+-- @m.title@ before a widget mutates @m.name@ also runs in a single pass.
 module NanoUI.Var
   ( -- * Vars
     Var

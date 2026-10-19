@@ -272,7 +272,7 @@ block env = \case
   Table aligns header rows -> tableBlock env aligns header rows
 
 -- | The image to draw for a paragraph holding only an image (or only a
--- linked image) that 'mdImage' knows: click target, title (else the link's),
+-- linked image) resolved by 'mdImage': click target, title (else the link's),
 -- image and size.
 soleImage :: MarkdownConfig -> [Span] -> Maybe (Text, Text, ImageId, Size)
 soleImage cfg = \case
@@ -474,8 +474,7 @@ listBlock env ty isTight items = do
 
 -- | A list marker's canvas content key: a hash of what the drawing depends on
 -- besides size, with the shape tag (1 bullet, 2 checkbox) in the low bits so
--- an item becoming a task item redraws. Never 0, which a canvas reads as no
--- key.
+-- an item becoming a task item redraws. Never 0 (uncached).
 version :: Hashable a => Int -> a -> Int
 version tag deps = hash deps * 4 + tag
 

@@ -50,8 +50,8 @@ animateTo transition target = do
         cur <- getAnimationValue ctx wid
         manim <- lookupAnimation ctx wid
         case manim of
-          -- Still running: its key names no widget, so the frame repaints
-          -- whole, as 'startAnimationEaseDelay' asks when it starts one.
+          -- Still running: its key is not attached to a widget node, so request
+          -- a full-frame repaint just as 'startAnimationEaseDelay' does.
           Just a | easeSameSpec a ease dur delay target -> repaintIfOrphan ctx (intKey wid)
           Nothing | approxEq cur target -> pure ()
           _ -> startAnimationEaseDelay ctx wid cur target dur ease delay

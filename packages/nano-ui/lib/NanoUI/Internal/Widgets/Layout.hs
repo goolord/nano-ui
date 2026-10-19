@@ -205,8 +205,8 @@ label' = labelWith' id
 --
 -- A label wider than its room wraps in a column. In a row, a single-line
 -- label with 'fillW' or 'maxW' instead ends in @...@ where it is cut, so
--- @labelWith fillW name@ beside a row's buttons gives the name what they
--- leave. 'truncateTextUi' cuts text the same way for a drawing.
+-- @labelWith fillW name@ beside a row's buttons uses the remaining width.
+-- 'truncateTextUi' cuts text the same way for a drawing.
 {-# INLINE labelWith #-}
 labelWith :: (Layout -> Layout) -> Text -> NanoUI ()
 labelWith f txt = void (labelWith' f txt)
@@ -315,8 +315,6 @@ scroll2DWith f child = snd <$> scrollArea2D f child
 scrollArea2D :: (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)
 scrollArea2D = scrollAreaFrom (const defaultScrollConfig)
 
--- | A scroll container with a fresh id over the modified defaults, configured
--- from its layout.
 {-# INLINE scrollAreaFrom #-}
 scrollAreaFrom ::
   (Layout -> ScrollConfig) -> (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)

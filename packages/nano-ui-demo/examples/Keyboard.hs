@@ -110,7 +110,7 @@ keyboardApp app = do
         -- selects it, and switching the selected one off changes nothing.
         toggleButtonWith (fixedWH 56 40) Accent (T.singleton (toEnum (fromEnum 'A' + i))) $
           zoomVar (== i) (\on cur -> if on then i else cur) sel
-    -- keyPressed hears a key only when no focused widget uses it, so the
+    -- keyPressed reports a key only when no focused widget consumes it, so the
     -- grid needs no focus check of its own.
     let dir k = fromEnum <$> keyPressed k
     dx <- (-) <$> dir KeyRight <*> dir KeyLeft

@@ -8,7 +8,7 @@ module NanoUI.Widgets.TextCommand
 import Data.Text (Text)
 import NanoUI.Widgets.TextBuffer (Cursor)
 
--- | Where a motion takes the cursor.
+-- | Cursor movement unit and direction.
 data TextMotion
   = CharLeft
   | CharRight
@@ -22,8 +22,9 @@ data TextMotion
   | DocumentEnd
   deriving (Eq, Show, Enum, Bounded)
 
--- | Something done to a text field. Commands that change text are undoable
--- and replace the selection where one exists.
+-- | Editing, navigation, selection, history, and clipboard operations on a
+-- text field. Mutating commands record an undo step and replace any active
+-- selection.
 data TextCommand
   = -- | Replace the selection with text (typing, a snippet).
     InsertText !Text

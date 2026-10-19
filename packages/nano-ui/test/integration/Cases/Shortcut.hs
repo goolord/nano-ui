@@ -148,7 +148,7 @@ runShortcutOncePerPressTest ctx failed = do
   assertEq failed ["pass"] =<< press inp0
   assertSpansHas failed "2" =<< collectTextSpans ctx
 
--- | With a modal open only its own shortcuts fire, and raw key listeners hear nothing.
+-- | With a modal open only its own shortcuts fire, and raw key queries outside it return 'False'.
 runShortcutModalTest :: Context -> IORef Int -> IO ()
 runShortcutModalTest ctx failed = do
   openRef <- newIORef True
@@ -267,8 +267,8 @@ runKeyReleaseTest ctx failed = do
   assert failed (inputInteracted holding up)
   assertEq failed [False, False, False] =<< evalUi ctx down (disabledWhen True keys)
 
--- | Key listeners hear only keys the focused widget does not claim: a text
--- field keeps Delete, F2 reaches the view. The raw input still has both.
+-- | Key queries match only keys not claimed by the focused widget: a text
+-- field claims Delete, while F2 reaches the view. The raw input still has both.
 runKeyListenersFocusTest :: Context -> IORef Int -> IO ()
 runKeyListenersFocusTest ctx failed = do
   textRef <- newVar "hello"

@@ -38,8 +38,7 @@ import NanoUI.Internal.Widgets.Layout (labelEx, row')
 import NanoUI.Internal.Widgets.Node (inertContainer, withWidgetChildren)
 import NanoUI.Svg (Svg)
 
--- | One thing drawn beside a widget's text, in the colour the widget gives
--- its adornments.
+-- | An item drawn beside a widget's text in the widget's adornment colour.
 data Adornment
   = AdornIcon !(Maybe Float) !Svg
   -- ^ An SVG icon, this many logical pixels square, or with 'Nothing' about
@@ -52,9 +51,10 @@ data Adornment
   -- frame, with the adornment colour as its default text colour. It is for
   -- display: a press on it is a press on the widget.
   | AdornControl (NanoUI ())
-  -- ^ A view whose widgets take the pointer, such as a field's clear button.
-  -- A press on one is its own: the widget around it neither reports it nor,
-  -- for a text field, takes focus or moves its caret.
+  -- ^ An interactive child view, such as a field's clear button. Pointer
+  -- events inside it are handled by the child widgets rather than the
+  -- enclosing widget (which does not report the press, take focus, or move
+  -- its caret).
 
 -- | A view shows as @AdornView \<view\>@.
 instance Show Adornment where
@@ -108,16 +108,16 @@ affix = AdornText
 view :: NanoUI () -> Adornment
 view = AdornView
 
--- | A view whose widgets take their own presses, such as a button that
--- shows a password field's text:
+-- | An interactive adornment whose widgets handle their own pointer events,
+-- such as a button that toggles password visibility:
 --
 -- > trailing (control (whenM (buttonWith tight "Show") (setShown (not shown))))
 control :: NanoUI () -> Adornment
 control = AdornControl
 
--- | Add the adornments to widget @wid@, just added with layout @lay@, in the
--- colour @colorOf@ picks; 'True' when one of its controls holds the pointer
--- ('holdsPointer'), which the widget then yields.
+-- | Add adornments to widget @wid@ using layout @lay@ and colour @colorOf@.
+-- Returns 'True' when an 'AdornControl' captures the pointer ('holdsPointer'),
+-- suppressing the enclosing widget's pointer handling.
 {-# INLINE adornWidget #-}
 adornWidget :: WidgetId -> Layout -> (Theme -> Color) -> Adornments -> NanoUI Bool
 adornWidget _ _ _ (Adornments [] []) = pure False
@@ -133,7 +133,6 @@ addAdornments wid lay colorOf (Adornments ls ts) = do
   inp <- askInput
   color <- colorOf <$> uiTheme
   let font = fontSize (layoutFontSize lay)
-      -- A control gives the node range its widgets took.
       add = \case
         AdornIcon size doc -> do
           s <- case size of
@@ -163,13 +162,12 @@ adornmentRow :: Layout -> Color -> NanoUI a -> NanoUI a
 adornmentRow lay color =
   inertContainer (adornmentRowLayout lay) . withDefaultLayout (fontSize (layoutFontSize lay) . fontColor color)
 
--- | The layout of a row inside a widget with layout @lay@.
 adornmentRowLayout :: Layout -> Layout
 adornmentRowLayout lay = tight . gap (layoutGap lay) . alignMid $ defaultLayout {layoutDirection = Row}
 
--- | Whether a control, declared in one of the node ranges, has the pointer:
--- it is pressed, or the pointer is over one of its enabled widgets as they
--- test themselves while the view runs. A press on @wid@ itself stays its own.
+-- | Whether an 'AdornControl' in one of the node ranges captures the pointer
+-- (either active or hovered over an enabled widget node). When @wid@ itself
+-- is active, it retains the pointer.
 holdsPointer :: Context -> WidgetId -> V2 -> [(Int, Int)] -> IO Bool
 holdsPointer ctx wid mouse ranges = do
   let na = ctxNodeArena ctx

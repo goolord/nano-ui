@@ -81,8 +81,8 @@ data StoredForm = StoredForm
   { sfGeneration :: !Int
   , sfState      :: !FormStateStore
   , sfDrafts     :: !(Map.Map Text (FormInput, FormInput))
-  -- ^ Edits a field holds back until it publishes: the form value the edit
-  -- started from, and the edit.
+  -- ^ Uncommitted field edits: the published form value the edit started from,
+  -- and the current draft value.
   }
   deriving (Eq)
 

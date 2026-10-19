@@ -21,9 +21,9 @@ import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 -- | Whether the key went down this frame, including auto-repeats, with any
 -- modifiers. 'False' behind an open modal, inside 'NanoUI.disabledWhen', and
 -- when the focused widget uses the key itself ('focusTakesChord'), such as
--- Delete in a focused text field. Like iced's @keyboard::listen@, a view only
--- hears keys no widget took; 'pressedIn' sees all of them. To bind a command
--- to a key, use 'shortcut'.
+-- Delete in a focused text field. Like iced's @keyboard::listen@, this only
+-- reports keys not claimed by the focused widget; 'pressedIn' checks raw frame
+-- input. To bind a command to a key, use 'shortcut'.
 keyPressed :: Key -> NanoUI Bool
 keyPressed = keyIn pressedIn
 
@@ -60,7 +60,7 @@ keyFree ctx mods k = do
 -- Auto-repeats count as presses. Only the first shortcut declared for a chord
 -- fires, and it consumes the frame's presses of that key. So a menu item and
 -- a view binding the same chord do not both act, and a view that runs twice
--- in a frame sees the press once. The chord does not fire:
+-- in a frame only matches the press once. The chord does not fire:
 --
 -- * behind an open modal, or inside 'NanoUI.disabledWhen';
 -- * when the focused widget uses the key itself ('focusTakesChord'). A
@@ -91,7 +91,6 @@ shortcut = chordShortcut False
 shortcutOnce :: Shortcut -> NanoUI Bool
 shortcutOnce = chordShortcut True
 
--- | 'shortcut', or 'shortcutOnce' when @once@ is set.
 chordShortcut :: Bool -> Shortcut -> NanoUI Bool
 chordShortcut _ (Shortcut Nothing _) = pure False
 chordShortcut once (Shortcut (Just pressedKey) mods) = do
@@ -105,8 +104,8 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
       if not ours
         then pure False
         else withContext $ \ctx -> do
-          -- Take every press of the key, auto-repeats included, so a second
-          -- binding of the chord sees none of them.
+          -- Consume every press of the key, including auto-repeats, so a second
+          -- binding of the chord does not fire.
           let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == pressedKey]
           took <- or <$> mapM (takeKeyPress ctx) presses
           when (took && pressedKey == KeyTab) (markTabConsumed ctx)

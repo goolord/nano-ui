@@ -1,5 +1,5 @@
--- | The draw context a custom widget sees, built by the widget itself
--- ("NanoUI.Widgets.Custom") and by the paint, damage and cursor passes.
+-- | 'CustomDrawContext' construction for custom widgets ("NanoUI.Widgets.Custom")
+-- and the paint, damage and cursor passes.
 module NanoUI.Internal.Widgets.Custom
   ( mkCustomDrawContext
   , customDrawContext
@@ -10,8 +10,8 @@ import NanoUI.Internal.Context (Context (..), CustomDrawContext (..), getFocusId
 import NanoUI.Internal.Font (FontMetrics)
 import NanoUI.Internal.Id (WidgetId)
 
--- | Build the draw context a custom widget sees, resolving hover/press/focus
--- state for @wid@ from the ambient context. One policy for state masking.
+-- | Build a 'CustomDrawContext' for @wid@, resolving hover, press and focus
+-- state from the 'Context'.
 mkCustomDrawContext ::Context -> FontMetrics -> WidgetId -> IO CustomDrawContext
 mkCustomDrawContext ctx fm wid = do
   hot <- getHotId ctx

@@ -65,8 +65,8 @@ useDrag1D axis owner lo hi current track = do
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
   active0 <- quietFlag dragK <$> liftIO (getStore ctx)
-  -- The track takes a press only where it shows: a track scrolled out of its
-  -- viewport keeps its last rect, under whatever is drawn there now.
+  -- Hit-test against the clipped node so a track scrolled out of its
+  -- viewport does not respond at its stale rect.
   let onTrack = findNodeByWidgetId ctx owner >>= maybe (pure (rectHit track (inputMousePos inp))) (\i -> nodeInteractionHit ctx i track (inputMousePos inp))
   started <- pure (pressedIn MouseLeft inp) <&&> liftIO onTrack <&&> (not <$> liftIO (trackCovered ctx owner (inputMousePos inp)))
   let active = heldIn MouseLeft inp && (active0 || started)
@@ -158,7 +158,6 @@ useReorder order responses = do
         dragging >= 0
           && not press
           && (flagSlot movedK store || (mx - sx) * (mx - sx) + (my - sy) * (my - sy) > dragThresholdPx * dragThresholdPx)
-      -- The slot nearest the pointer, by its distance from each rect.
       distance (Rect x y w h) =
         let dx = max 0 (max (x - mx) (mx - x - w))
             dy = max 0 (max (y - my) (my - y - h))
@@ -259,8 +258,7 @@ useKeyNav wid = do
           , knSpace = pressedOnceIn KeySpace inp
           }
 
--- | The step the arrow keys ask for along a control that grows rightwards and
--- upwards: @1@ for Right or Up, @-1@ for Left or Down.
+-- | Directional step from arrow keys: @1@ for Right or Up, @-1@ for Left or Down.
 {-# INLINE navStep #-}
 navStep :: KeyNav -> Int
 navStep nav = fromEnum (knRight nav || knUp nav) - fromEnum (knLeft nav || knDown nav)

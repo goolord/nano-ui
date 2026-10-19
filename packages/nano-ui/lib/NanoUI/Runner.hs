@@ -135,8 +135,8 @@ data SessionDriver ev = SessionDriver
     -- command key whose order relative to other input matters.
   , sdIsSessionQuit :: ev -> Bool
     -- ^ Predicate for window close requests. A request ends the session
-    -- unless 'NanoUI.wsExitOnCloseRequest' is off, in which case the next
-    -- frame sees it through 'NanoUI.winCloseRequested'.
+    -- unless 'NanoUI.wsExitOnCloseRequest' is off, in which case it is
+    -- reported on the next frame via 'NanoUI.winCloseRequested'.
   , sdSyncDisplay   :: Context -> Input -> IO (Context, Input)
     -- ^ Backend-specific display synchronization (window dimensions, DPI scale).
   , sdDebug         :: DebugSamplerRef
@@ -257,8 +257,6 @@ runSessionLoop drv ctx0 inp0 = do
                 wakeAt <- getWakeAt ctx
                 waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
                 let paced = wasAnim || animating
-                    -- Nothing moves by itself: sleep until input, or until
-                    -- the earliest frame something asked for.
                     wakeMs
                       | wakeAt <= 0 = -1
                       | wakeAt <= waitT = 0
@@ -276,15 +274,13 @@ runSessionLoop drv ctx0 inp0 = do
                   if wakeAt > 0
                     then (>= wakeAt) <$> getMonotonicTime
                     else pure False
-                -- The frame this wake is for asks again if it needs another.
-                -- Clearing it here keeps a frame that cannot run (the drawing
-                -- lock is held) from turning the deadline into a spin.
+                -- Clear the deadline once reached so a skipped draw (when the
+                -- drawing lock is held) does not spin on an expired wakeAt.
                 when wakeDue (clearWakeAt ctx)
-                -- A readout wait that timed out ends on its refresh.
                 let hudDue = timeout == debugHudTimeout && debugActive && null events
                 pure (events, dueNow || wakeDue || hudDue)
-        -- What follows reads what the wakes so far changed; a later wake runs
-        -- the wake action again.
+        -- Reset the wake latch before reading state updated by background
+        -- threads, so a subsequent wake triggers the callback again.
         takeWakes ctx
 
         now <- getMonotonicTime
@@ -294,7 +290,6 @@ runSessionLoop drv ctx0 inp0 = do
         -- Hard quit is ignored while a text editor is active.
         hardQuit <-
           if isHardQuitInput frameInp then not <$> textInputEditActive ctx else pure False
-        -- A close request ends the session, or is passed to the view.
         let closing = any (sdIsSessionQuit drv) group
         closeNow <- if closing && not hardQuit then requestWindowClose ctx else pure False
         unless (hardQuit || closeNow) $ do
@@ -318,7 +313,6 @@ runSessionLoop drv ctx0 inp0 = do
               ++ (if wasAnim || animAfter then "A" else "")
               ++ (if inputWindowRedraw inpSynced then "R" else "")
               ++ (if refreshDue then "T" else "")
-          -- Open modals/overlays consume Escape/Quit before the app sees it.
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
           quit <- quitRequested ctx'
           -- The next pass was animating if this frame was, even when this

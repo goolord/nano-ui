@@ -65,7 +65,7 @@ containerPaints na i nt = case nt of
 -- | Damage key for a painting container with no widget id: its nearest keyed
 -- ancestor's key mixed with its arena offset from that ancestor. It is stable
 -- while nothing before it in that ancestor is added or removed. Otherwise it
--- changes, and damage sees one container leave and another arrive. An
+-- changes and is treated as a removed and added container. An
 -- ancestor whose key a later node reuses ('getIdSuperseded') is passed over,
 -- or a container in each would take the same key.
 containerKey :: NodeArena -> NodeIdx -> IO Int
@@ -239,8 +239,8 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
 
 -- | The last walk's record, with room for @count@ nodes, and how many of its
 -- indices describe @oldRects@. It reads as empty until this walk completes,
--- so a walk that restarts or throws leaves nothing stale behind. Nodes past
--- @count@ let go of their entries.
+-- so a walk that restarts or throws leaves nothing stale behind. Clears
+-- entries past @count@.
 {-# INLINE prevWalkFor #-}
 prevWalkFor :: Context -> Int -> IM.IntMap Rect -> IO (PrevWalk, Int)
 prevWalkFor ctx count oldRects = do
@@ -275,8 +275,8 @@ entryClip = 1
 entryText = 2
 entryImage = 4
 
--- | Record that the walk made no entries for node @i@, letting go of any
--- text or image it held.
+-- | Record that the walk made no entries for node @i@, clearing any text or
+-- image it held.
 {-# INLINE forgetAt #-}
 forgetAt :: PrevWalk -> Int -> IO ()
 forgetAt walk i = do
@@ -287,9 +287,9 @@ forgetAt walk i = do
     writePrimArray (pwTags walk) i 0
     dropEntries walk i t0
 
--- | Record key @k@ and the kinds of entry @tag@ for node @i@, and say whether
--- the last walk recorded the same there (below @known@), so the maps hold
--- the node's entries. A kind the node no longer has lets go of its value.
+-- | Record key @k@ and entry kinds @tag@ for node @i@, returning whether the
+-- last walk recorded the same there (below @known@). Clears any entry kinds
+-- the node no longer has.
 {-# INLINE keepKeyAt #-}
 keepKeyAt :: PrevWalk -> Int -> Int -> Int -> Int -> IO Bool
 keepKeyAt walk known i k tag = do
@@ -303,14 +303,14 @@ keepKeyAt walk known i k tag = do
       dropEntries walk i (t0 .&. complement tag)
       pure False
 
--- | Let go of the text and image of the kinds in @kinds@ at node @i@.
+-- | Clear the text and image entries in @kinds@ at node @i@.
 {-# INLINE dropEntries #-}
 dropEntries :: PrevWalk -> Int -> Int -> IO ()
 dropEntries walk i kinds = do
   when (kinds .&. entryText /= 0) $ writeArray (pwTexts walk) i T.empty
   when (kinds .&. entryImage /= 0) $ writeArray (pwImages walk) i noImagePaint
 
--- | Write node @i@'s clip if it changed, and say whether it did.
+-- | Write node @i@'s clip if it changed, and return whether it changed.
 {-# INLINE swapClip #-}
 swapClip :: MutablePrimArray RealWorld Float -> Int -> Float -> Float -> Float -> Float -> IO Bool
 swapClip clips i x y w h = do
@@ -328,8 +328,7 @@ swapClip clips i x y w h = do
       writePrimArray clips (o + 3) h
       pure True
 
--- | Write node @i@'s text unless it equals what is there, and say whether it
--- did.
+-- | Write node @i@'s text if it changed, and return whether it changed.
 {-# INLINE swapText #-}
 swapText :: MutableArray RealWorld Text -> Int -> Text -> IO Bool
 swapText arr i txt = do

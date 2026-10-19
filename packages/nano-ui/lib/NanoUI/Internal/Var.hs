@@ -1,16 +1,17 @@
--- | Reading and writing 'Var's from the view, and the bookkeeping that
--- decides what a write costs.
+-- | Reading and mutating 'Var's from the view, and tracking dependencies for
+-- reruns and damage.
 --
 -- Within a pass, a tracked read ('readVar') stamps the part of the cell it
--- reads as observed and seen, and a widget bound to the Var ('bindVar')
+-- reads as observed and seen, and a widget bound to the 'Var' ('bindVar')
 -- stamps its part as observed. Parts are record fields and list elements,
--- two levels deep ('lensSig'). A write that changes a part observed
--- earlier in the same pass is a backwards write: something already drew
--- the old value. In the first pass that reruns the view; in the second it
--- asks for a follow-up frame. A write only repaints the whole window when
--- a tracked read saw the old value of its part, or reads the new one later
--- in the frame, since what a view does with a value it read is beyond any
--- diff. A widget that drew the value it wrote damages only itself.
+-- two levels deep ('lensSig'). A mutation that changes a part observed
+-- earlier in the same pass is a backwards write: an earlier widget already
+-- rendered the old value. In the first pass that reruns the view; in the
+-- second it schedules a follow-up frame. A mutation only repaints the whole
+-- window when a tracked read observed the old value of its part, or reads the
+-- new value later in the frame, since arbitrary view logic depending on
+-- 'readVar' cannot be diffed per widget. A widget bound via 'bindVar' damages
+-- only its own rect.
 module NanoUI.Internal.Var
   ( newVar
   , useVar
@@ -61,23 +62,23 @@ frameSlot ctx = readPrimArray (ctxVarFrame ctx)
 setFlag :: Context -> Word64 -> IO ()
 setFlag ctx = orWord (ctxVarFrame ctx) flagSlot
 
--- | A Var with its own cell, for state the application owns. Make it once,
--- outside the view, and pass it in; a Var made inside the view would be new
--- on every frame.
+-- | Allocate a new mutable 'Var'. Create it once outside the view and pass it
+-- in; calling 'newVar' inside the view would allocate a fresh 'Var' every
+-- frame.
 newVar :: a -> IO (Var a)
 newVar a = (\c -> VarRef c Here) <$> newCell a
 
--- | A Var kept at this position in the view, made with @initial@ the first
--- time the position is reached. Positional Vars count separately from
--- widgets, so widgets that come and go never move them; a 'useVar' that runs
--- on some frames and not others belongs in a 'NanoUI.scope'. A slot that
--- finds a value of another type starts over from @initial@.
+-- | Mutable 'Var' persisted at the current call-site slot, initialized to
+-- @initial@ on first reach. Positional 'Var' slots are indexed separately from
+-- widgets, so conditional widgets do not shift them; wrap a conditional
+-- 'useVar' in 'NanoUI.scope'. Reinitializes to @initial@ if the slot
+-- previously held a different type.
 {-# INLINE useVar #-}
 useVar :: VarSlot a => a -> NanoUI (Var a)
 useVar = slotVar slotMatch slotWrap
 
--- | 'useVar' for an enumeration, kept as its index. An index out of range
--- reads as @initial@.
+-- | 'useVar' for an enumeration, stored by its 'Enum' index. An out-of-range
+-- index decodes as @initial@.
 useEnumVar :: forall a. (Bounded a, Enum a) => a -> NanoUI (Var a)
 useEnumVar initial = do
   v <- slotVar (\case SEnum v -> Just v; _ -> Nothing) SEnum (fromEnum initial)
@@ -86,8 +87,7 @@ useEnumVar initial = do
         | otherwise = initial
   pure (zoomVar decode (\a _ -> fromEnum a) v)
 
--- | The Var at the next positional slot, if it holds the expected type, or
--- a new one holding @initial@.
+-- | Look up or initialize the 'Var' at the next positional slot.
 {-# INLINE slotVar #-}
 slotVar :: (SlotVar -> Maybe (Var b)) -> (Var b -> SlotVar) -> b -> NanoUI (Var b)
 slotVar match wrap initial = withContext $ \ctx -> do
@@ -100,9 +100,9 @@ slotVar match wrap initial = withContext $ \ctx -> do
       writeIORef (ctxVarSlots ctx) $! IM.insert key (wrap v) slots
       pure v
 
--- | The Var's current value. The view's read is recorded: a later write in
--- the same pass runs the view again so this read sees it. Read a Var where
--- you show it, after the widgets that edit it, and no rerun is needed.
+-- | Read the current value and record the read for this pass: a later mutation
+-- in the same pass triggers a rerun so this read observes the updated value.
+-- Reading a 'Var' after the widgets that mutate it avoids a rerun.
 readVar :: Var a -> NanoUI a
 readVar (VarRef cell l) = readCell (lensSig l) cell l
 readVar (VarConst a) = pure a
@@ -125,47 +125,43 @@ readCell !sig cell@(Cell ref _) l = withContext $ \ctx -> do
         when changed (setFlag ctx flagFull)
   peekLens l =<< readIORef ref
 
--- | The Var's current value, without recording the read: for a value
--- carried from one frame to the next and compared with this frame's, which
--- a second view pass would see already updated. Nothing drawn from it is
--- redrawn when the Var changes later in the frame; draw from 'readVar'.
--- Event handlers need no peek: a 'readVar' there followed by a write costs
--- at most one more pass, on the frame of the event.
+-- | Read the current value without recording a dependency. Use for
+-- frame-to-frame state comparisons where a second pass in the same frame would
+-- otherwise see the already-updated value. Do not use for rendering; use
+-- 'readVar' instead.
 peekVar :: Var a -> NanoUI a
 peekVar v = liftIO (readVarIO v)
 
--- | Replace the value. An equal value changes nothing.
+-- | Mutate the 'Var' in place to a new value. No-op if equal to the current value.
 writeVar :: Eq a => Var a -> a -> NanoUI ()
 writeVar v a = modifyVar v (const a)
 
--- | Apply a change to the latest value, so successive changes in one frame
--- all land. A change that leaves the value equal does nothing.
+-- | Mutate the 'Var' in place with a function. No-op if the result equals the
+-- current value.
 modifyVar :: Eq a => Var a -> (a -> a) -> NanoUI ()
 modifyVar (VarConst _) _ = pure ()
 modifyVar (VarRef cell l) f = withContext $ \ctx -> do
   touched <- modifyRoot cell l f eqByPtr
   mapM_ (noteWrite ctx cell) touched
 
--- | Read from any thread. Not recorded.
+-- | Read from any thread without recording a dependency.
 readVarIO :: Var a -> IO a
 readVarIO (VarConst a) = pure a
 readVarIO (VarRef (Cell ref _) l) = peekLens l =<< readIORef ref
 
--- | Write from any thread, or from setup code. Nothing is woken: after
--- writing from another thread, run the action from 'NanoUI.askWake' so the
--- view runs again.
+-- | Mutate a 'Var' from any thread or setup code. Does not wake the event
+-- loop; call the action from 'NanoUI.askWake' after background mutations.
 writeVarIO :: Eq a => Var a -> a -> IO ()
 writeVarIO v a = modifyVarIO v (const a)
 
--- | 'modifyVar' from any thread. Concurrent changes all land.
+-- | 'modifyVar' from any thread.
 modifyVarIO :: Eq a => Var a -> (a -> a) -> IO ()
 modifyVarIO (VarConst _) _ = pure ()
 modifyVarIO (VarRef cell l) f = mapM_ (stampChange 0 cell) =<< modifyRoot cell l f eqByPtr
 
--- | Run @body@ on a Var holding @a@ and return what it left there: for
--- giving a value from elsewhere (a model, a message) to a widget that takes
--- a Var. The Var is the body's alone, so it never reruns or repaints
--- anything by itself.
+-- | Run @body@ with a temporary 'Var' initialized to @a@ and return the final
+-- value. Used to adapt a widget that takes a 'Var' to external state;
+-- mutations to this temporary 'Var' do not trigger reruns or damage.
 withValue :: a -> (Var a -> NanoUI r) -> NanoUI (r, a)
 withValue a body = do
   cell@(Cell ref _) <- liftIO (newInertCell a)
@@ -173,10 +169,9 @@ withValue a body = do
   a' <- liftIO (readIORef ref)
   pure (r, a')
 
--- | Change the part of a cell a lens shows, atomically. Returns the part of
--- the cell the change touched ('overLensSig'), if it changed anything. An
--- inert cell is one body's alone: it skips the atomic update, and its
--- change concerns nothing else, so it returns 'Nothing'.
+-- | Atomically modify the part of a cell focused by a lens. Returns the
+-- modified part signature ('overLensSig') if the value changed, or 'Nothing'
+-- for unchanged or inert cells.
 {-# INLINE modifyRoot #-}
 modifyRoot :: Cell s -> Lens s a -> (a -> a) -> (a -> a -> Bool) -> IO (Maybe Sig)
 modifyRoot cell@(Cell ref _) l f eq
@@ -226,9 +221,8 @@ noteInPass ctx cell p observed seen sig = do
   base <- frameSlot ctx baseSlot
   addChange cell base p sig
 
--- | Something in this pass drew the old value: run the view again, or, in
--- its last pass, ask for another frame. @opaque@ when a tracked read saw
--- it, so that frame repaints whole.
+-- | A part observed earlier in this pass was mutated: rerun in pass 1, or
+-- schedule a follow-up frame in pass 2 (with full damage if @opaque@).
 backwards :: Context -> Bool -> IO ()
 backwards ctx opaque = do
   passNo <- frameSlot ctx passNoSlot
@@ -250,11 +244,11 @@ data Binding
 bindVar :: Eq a => Binding -> Var a -> (a -> NanoUI (r, a)) -> NanoUI r
 bindVar = bindVarBy eqByPtr
 
--- | Run a value-in, value-out widget on a Var: give it the Var's value and
--- store what it returns. A constant Var gets its value shown and the edit
--- dropped. If something inside the widget (a control among its adornments,
--- a tab's body) wrote the Var while it ran, that write wins; a write to
--- another part of the same Var (a sibling field) keeps the widget's edit.
+-- | Bind a value-in, value-out widget to a 'Var': pass the current value and
+-- write back the returned value. Edits to a 'constVar' are ignored. Direct
+-- mutations to the same part during the widget's execution take precedence
+-- over the widget's returned value, while mutations to sibling fields are
+-- preserved.
 {-# INLINE bindVarBy #-}
 bindVarBy :: (a -> a -> Bool) -> Binding -> Var a -> (a -> NanoUI (r, a)) -> NanoUI r
 bindVarBy eq mode = bindWith eq mode fst snd
@@ -326,8 +320,8 @@ noteBound ctx cell mode sig before wsig = do
           else passHits cell p wsig
       noteInPass ctx cell p (observed || mode == Conservative) seen wsig
 
--- | Ask for the view to run again this frame, or for a follow-up frame when
--- it already has. The follow-up repaints only what its diffs show.
+-- | Request a same-frame pass rerun, or a follow-up frame with localized
+-- damage if already in the second pass.
 requestRerun :: Context -> IO ()
 requestRerun ctx = do
   p <- frameSlot ctx passSlot
@@ -345,7 +339,7 @@ beginVarPass ctx n = do
   writePrimArray arr passNoSlot (fromIntegral n)
   when (n == 1) (writePrimArray arr flagSlot 0)
 
--- | Whether a write asked for the view to run again, clearing the request.
+-- | Consume and return whether a pass rerun was requested.
 takeVarRerun :: Context -> IO Bool
 takeVarRerun ctx = do
   fs <- frameSlot ctx flagSlot

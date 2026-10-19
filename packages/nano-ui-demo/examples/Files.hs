@@ -1,10 +1,10 @@
 -- | Files: open, edit and save a text file, with native dialogs and drag and drop.
 --
 -- A native file dialog does not block the view. 'askOpenFileDialog' opens it
--- and hands back a handle at once; the view keeps the handle in state and
+-- and returns a handle immediately; the view keeps the handle in state and
 -- polls it with 'pollFileDialogUi' every frame until the user picks a file or
--- cancels. A result is delivered exactly once, so the poll that sees it also
--- forgets the handle ('pollDialog' below). The loop sleeps while the dialog is
+-- cancels. A result is delivered once, so the poll that receives it also
+-- clears the handle ('pollDialog' below). The loop sleeps while the dialog is
 -- open and wakes when it closes.
 --
 -- Reading the chosen file is slow work, so it runs on a worker thread with
@@ -133,8 +133,8 @@ view app = do
     edited <- textAreaWith' grow text
     when (respChanged edited) (writeVar dirty True)
 
--- | Poll a pending dialog once a frame. When it finishes, forget the handle
--- and pass on the first chosen path; a cancel just forgets it.
+-- | Poll a pending dialog once a frame. When it finishes, clear the handle
+-- and pass on the first chosen path; a cancel just clears it.
 pollDialog :: Var (Maybe FileDialogId) -> (FilePath -> NanoUI ()) -> NanoUI ()
 pollDialog pending onPath =
   readVar pending >>= \handle -> for_ handle $ \dialog ->

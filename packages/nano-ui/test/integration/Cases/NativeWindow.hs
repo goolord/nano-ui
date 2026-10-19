@@ -49,8 +49,8 @@ runBackendSessionTest ctx failed = do
     assert failed . isNothing =<< backendSession here separate
   assert failed . isNothing =<< backendSession here ctx
 
--- | A view learns which requests the window carries out: none without a
--- host, and what the installed host declares.
+-- | 'askWindowCapabilities' returns the capabilities supported by the host:
+-- 'noWindowCapabilities' without a host, and the installed host's declaration.
 runCapabilitiesTest :: Context -> IORef Int -> IO ()
 runCapabilitiesTest ctx failed = do
   assertEq failed noWindowCapabilities =<< warmup2 ctx inp askWindowCapabilities

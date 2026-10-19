@@ -318,7 +318,7 @@ stripeColor theme s = case s of
   2 -> Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.55)
   _ -> Nothing
 
--- | The row fill a text node's style index asks for.
+-- | Row fill decoded from a text node's style index.
 tableStripeColor :: Theme -> Int -> Maybe Color
 tableStripeColor theme si = stripeColor theme ((si `shiftR` 4) .&. 0x0F)
 

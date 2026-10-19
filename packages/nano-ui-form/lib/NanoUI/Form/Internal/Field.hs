@@ -48,25 +48,27 @@ import NanoUI.Form.Widgets (defaultErrorView)
 import NanoUI.Internal.Monad (askContext)
 import Text.Read (readMaybe)
 
--- | When a field's control writes its value into the form.
+-- | Policy for committing a field's widget value into the form store.
 data Publish
-  = -- | Whenever the control returns a value other than the one it was given.
+  = -- | Commit whenever the widget mutates the 'Var' to a different value.
     OnChange
-  | -- | As 'OnChange', and also when the response reports an edit that kept
-    -- the value, such as re-picking the selected option. Built-in inputs use
+  | -- | As 'OnChange', and also when the response predicate holds (e.g.,
+    -- re-selecting the active option). Built-in inputs use
     -- @OnChangeOr respChanged@.
     OnChangeOr (Response -> Bool)
-  | -- | Only when the response says so, such as @OnlyWhen respSubmitted@ for a
-    -- text field that commits on Enter. The form keeps its last published
-    -- value in between; the field keeps the edit and shows it to the control,
-    -- until it publishes, the form value changes elsewhere, or the form resets.
+  | -- | Commit only when the response predicate holds, such as
+    -- @OnlyWhen respSubmitted@ for a text field that commits on Enter.
+    -- Uncommitted edits are retained as a draft across frames until committed,
+    -- overwritten by an external change to the field's value, or cleared by a
+    -- form reset.
     OnlyWhen (Response -> Bool)
 
--- | Adapt an input to a form. The input takes a Var, as built-in inputs do;
--- the form gives it one holding the field's value and reads the edit back.
--- 'Just' supplies a stable field name; 'Nothing' asks ditto to number it. Naming adds no visible label: include one
--- in the widget action when wanted. 'Publish' says when an edit reaches the
--- form. Decoding and validation errors follow ditto's normal path.
+-- | Adapt a 'Var'-based input widget to a form field. Each frame, the widget
+-- runs with a temporary 'Var' initialized to the current field (or draft)
+-- value, and mutations are committed according to 'Publish'.
+-- 'Just' supplies a stable field name; 'Nothing' uses positional numbering.
+-- Naming adds no visible label; include one in the widget action when needed.
+-- Decoding and validation errors follow ditto's normal path.
 inputWidget ::
   (Eq a, FormError FormInput err) =>
   Maybe Text

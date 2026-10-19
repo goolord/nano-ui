@@ -21,8 +21,8 @@ import NanoUI.Internal.WidgetText (buttonFlagChoice, buttonToneStyle)
 import NanoUI.Internal.Widgets.Combinators (choiceToggleWidget)
 import NanoUI.Internal.Widgets.Node (Response)
 
--- | Checkbox with a caption, showing and editing a Var: a click or
--- Space/Enter flips it.
+-- | Checkbox with a caption bound to mutable state ('Var'): a click or
+-- Space/Enter toggles the value in place.
 --
 -- > checkbox "Dark mode" settings.darkMode
 {-# INLINE checkbox #-}
@@ -46,8 +46,8 @@ checkboxWith' :: (Layout -> Layout) -> Text -> Var Bool -> NanoUI Response
 checkboxWith' f txt v =
   bindVar RenderFinal v (choiceToggleWidget txt (f defaultLayout) buttonFlagChoice)
 
--- | A button that stays pressed: filled in the tone's colour while on, a
--- plain button while off. A click or Space/Enter flips the Var.
+-- | Toggle button bound to mutable state ('Var'): filled in the tone's colour
+-- while on, a plain button while off. A click or Space/Enter toggles it in place.
 --
 -- > toggleButton Warning "M" muted
 {-# INLINE toggleButton #-}

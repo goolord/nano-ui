@@ -355,7 +355,6 @@ colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColFixed f -> max minColW f
   _ -> max minColW (primAt contentWs i minColW)
 
--- | A column with no gap and no padding.
 flatLayout :: Layout
 flatLayout = tight defaultLayout {layoutGap = 0}
 
@@ -376,9 +375,9 @@ colBoxLayout fillInner hasStretch sizes contentWs stored i
     box = (fillH flatLayout) {layoutMinW = max floorW saved}
     fixed w = box {layoutWidth = Fixed w, layoutMaxW = w}
 
--- | Sortable table with resizable, reorderable columns, showing and editing
--- its sort in a Var: a header click changes it. @key@ tells tables in one
--- scope apart, and the columns are a colonnade over @row@.
+-- | Sortable table with resizable, reorderable columns, with sort state bound
+-- to a 'Var': a header click updates it in place. @key@ distinguishes tables
+-- in one scope, and the columns are a colonnade over @row@.
 --
 -- > table "files" cols files app.sort
 {-# INLINE table #-}

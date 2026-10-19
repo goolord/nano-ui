@@ -335,11 +335,11 @@ measureCacheCap = 4096
 
 -- | 'wrapTextIO' through the context's wrap cache ('ctxWrapCache'). @font@
 -- names the font @lineW@ measures in ('NanoUI.Internal.WidgetText.textNodeFontKey').
--- A text keeps the results of the last few widths it was wrapped at, each
--- with the widths it holds for, so wrapping it again at a width that breaks
--- the same, as while a window or pane edge is dragged, measures nothing,
--- and the solve and the text spans share one wrap. A change of font metrics
--- ('ctxMetricGen') drops every result.
+-- Caches the last few wrapped widths per text along with the width range
+-- each result holds for, so wrapping again at a width with the same line
+-- breaks (e.g. while dragging a window or pane edge) skips measurement,
+-- and the layout solve and text spans share one wrap. A change of font metrics
+-- ('ctxMetricGen') clears the cache.
 cachedWrapText :: Context -> Int -> (Text -> IO Float) -> Text -> Float -> IO WrapResult
 cachedWrapText ctx font lineW txt maxW
   | maxW <= 0 = wrapTextIO lineW txt maxW
@@ -486,8 +486,8 @@ followSystemTheme ctx pick = do
 
 -- | Record the system's light or dark preference ('Nothing' if unknown).
 -- Backends call this on the UI thread; SDL reports at startup and on change,
--- RGFW cannot ask. A change repaints the window, wakes the loop, and updates
--- a theme set by 'followSystemTheme'. The same value again is a no-op.
+-- RGFW does not report it. A change repaints the window, wakes the loop, and
+-- updates a theme set by 'followSystemTheme'. The same value again is a no-op.
 setSystemAppearance :: Context -> Maybe Appearance -> IO ()
 setSystemAppearance ctx appearance = do
   cur <- readIORef (ctxSystemAppearance ctx)
@@ -713,8 +713,8 @@ isFocusable ctx wid = do
 
 -- | Run a backend's session with its value installed on the context, where
 -- the backend's view-side operations find it ('backendSession'). Every copy
--- of the context shares it, and a separate context has its own. The previous
--- value comes back afterwards, even on an exception.
+-- of the context shares it, and a separate context has its own. Restores the
+-- previous value on exit, including on exception.
 withBackendSession :: Context -> SBackend b -> BackendSession b -> IO a -> IO a
 withBackendSession ctx backend session act =
   bracket
@@ -729,8 +729,7 @@ withBackendSession ctx backend session act =
 backendSession :: SBackend b -> Context -> IO (Maybe (BackendSession b))
 backendSession backend ctx = (>>= sessionFor backend) <$> askHostIO (ctxBackendSession ctx)
 
--- | Which frame the context is on: it advances once a frame, and the view
--- passes of one frame share it. For caches that size themselves by what a
--- frame uses.
+-- | Current frame number: advances once per frame and is shared across passes
+-- within the same frame.
 frameNumber :: Context -> IO Int
 frameNumber = readPrimVar . heldFrame . ctxHeld

@@ -86,9 +86,9 @@ data ComboState = ComboState
     -- ^ Field text the combo last produced.
   , csFocused :: !Bool
   , csNavPointer :: !(Maybe V2)
-    -- ^ Where the pointer rested when Up/Down last moved the highlight,
-    -- while it has not moved since. Hover leaves the highlight alone until
-    -- the pointer moves or the wheel turns.
+    -- ^ Pointer position when Up/Down last moved the highlight, cleared once
+    -- the pointer moves or the wheel scrolls. Suppresses hover-highlighting
+    -- while the pointer is stationary during keyboard navigation.
   }
   deriving (Eq, Show)
 
@@ -106,10 +106,10 @@ data ComboInput = ComboInput
   , ciField :: !Rect
     -- ^ The field's rect; empty before its first layout.
   , ciInput :: !Input
-    -- ^ The pointer, wheel and keys as the dropdown sees them.
+    -- ^ Dropdown-scoped input for the frame.
   }
 
--- | What one frame of the combo decided.
+-- | Result of stepping the combo state for one frame.
 data ComboStep = ComboStep
   { stepState :: !ComboState
   , stepCommit :: !(Maybe Text)
@@ -129,7 +129,7 @@ data ComboStep = ComboStep
 -- (a field text the combo did not produce), or when the field loses focus.
 -- Escape reverts the live text to the last committed value. Hover
 -- highlights a row and makes it the Enter target; Up/Down move the highlight,
--- and a pointer resting on the list takes it back only once it moves.
+-- and a stationary pointer does not override keyboard highlight until it moves.
 comboStep :: ComboInput -> ComboState -> ComboStep
 comboStep ci cs0 =
   ComboStep
@@ -192,11 +192,8 @@ comboStep ci cs0 =
     dropRect = comboDropRect rx ry rw rh (min vis n) n contentW
     overDrop = isFocus && rectNonEmpty (ciField ci) && rectContains dropRect mouse
     itemH = menuItemRowH
-    -- Hover highlights the row under the pointer (and makes it the Enter
-    -- target); it never commits by itself. Rows on screen belong to the
-    -- previous frame's window, so the hit test maps through storedWin. After
-    -- Up/Down, a pointer that stays where it was does not take the highlight
-    -- back, or it would undo every key press.
+    -- Visible rows come from the previous frame's scroll window, so hit-testing
+    -- offsets by storedWin.
     navPointer
       | nav /= 0 = Just mouse
       | wheelDelta /= 0 = Nothing
@@ -212,7 +209,6 @@ comboStep ci cs0 =
     -- is looking at when a drag starts).
     (_, vSb, hSb, usableW) = comboScrollGeom dropRect n vis storedWin storedX contentW
     maxOffX = max 0 (contentW - usableW)
-    -- A missing scrollbar is an empty rect, which contains no point.
     (vTrackR, vThumbR) = fromMaybe (Rect 0 0 0 0, Rect 0 0 0 0) vSb
     (hTrackR, hThumbR) = fromMaybe (Rect 0 0 0 0, Rect 0 0 0 0) hSb
     onVThumb = rectContains vThumbR mouse
@@ -273,8 +269,8 @@ comboStep ci cs0 =
 -- While the field holds focus, the shared select dropdown overlay lists the
 -- options filtered by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See
--- 'comboStep' for when the value commits. The Var holds the field's text as
--- the user types; @respChanged@ on 'comboBox'' marks a commit.
+-- 'comboStep' for when the value commits. The 'Var' is mutated on every edit;
+-- @respChanged@ on 'comboBox'' fires only when a value is committed.
 {-# INLINE comboBox #-}
 comboBox :: Foldable f => Text -> f Text -> Var Text -> NanoUI ()
 comboBox placeholder options v = void (comboBox' placeholder options v)

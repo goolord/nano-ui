@@ -97,15 +97,15 @@ volume = inputWidget (Just "volume") decode (OnChangeOr UI.respChanged) FormInpu
 The arguments are the optional stable name, decoder, publication policy,
 encoder, widget, and initial value. `Nothing` selects positional naming.
 Naming does not add a visible label; compose one into the widget action if
-wanted. The policy says when an edit reaches the form:
+wanted. The policy controls when an edit is committed to the form:
 
-- `OnChange` publishes whenever the widget leaves a different value.
+- `OnChange` publishes whenever the widget mutates the `Var` to a different value.
 - `OnChangeOr p` also publishes when `p` holds for the response, for
-  controls that report an edit that kept the value.
+  controls that report an edit without changing the value.
 - `OnlyWhen p` publishes only when `p` holds, such as
-  `OnlyWhen UI.respSubmitted` for a field that commits on Enter. The field
-  holds the edit and shows it to the widget until then; an outside change to
-  the field's value, or a reset, discards it.
+  `OnlyWhen UI.respSubmitted` for a field that commits on Enter. Uncommitted
+  edits are retained in the field state across frames until committed; an
+  external change to the field's value or a reset discards them.
 
 ## Build
 

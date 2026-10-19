@@ -203,8 +203,6 @@ treeSplit targetPaneId splitId axis newOnA newPaneId = foldGrid onPane Split
       | p /= targetPaneId = Pane p
       | otherwise = splitBeside splitId axis newOnA newPaneId (Pane p)
 
--- | A new even split of @node@ and the pane @newPane@, on the A side when
--- @newOnA@.
 splitBeside :: Word64 -> GridAxis -> Bool -> Word64 -> GridNode -> GridNode
 splitBeside splitId axis newOnA newPane node
   | newOnA = Split splitId axis 0.5 (Pane newPane) node

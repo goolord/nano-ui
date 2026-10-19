@@ -76,7 +76,7 @@ runContextMenu (wid, ctx) rightClick child = do
       pos = if rightClick then mouse else uncurry V2 (findSlot fieldPoint (0, 0) posK store)
       cfg = (defaultPopupConfig (AnchorPoint pos)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
   when rightClick $ liftIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK (mx, my)))
-  -- A release the menu itself sees, which is one on a row, picks.
+  -- A left-button release inside the menu popup selects the hovered item.
   (popupResp, mBody) <-
     popupWith' (constVar (flagSlot openK store || rightClick)) cfg id $
       (,) . releasedIn MouseLeft <$> askInput <*> columnWith (tight . gap 0) (child pos)

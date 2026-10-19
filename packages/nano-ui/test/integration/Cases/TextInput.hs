@@ -707,7 +707,7 @@ runTextAreaMenuPulseTest ctx failed = do
     overlays <- collectOverlayTextSpans ctx menuOpen
     assertJust failed (spanRectOf "Cut" overlays) $ \r -> do
       -- Cut runs on the press frame; the release frame reports the change
-      -- and the emptied text, then the field goes quiet.
+      -- and the emptied text, and the next frame reports no change.
       (resp, val) <- runClick ctx inp0 ui (spanCenter r)
       assert failed (respChanged resp)
       assertEq failed val ""
@@ -807,9 +807,9 @@ runTextUndoTest ctx failed = do
   (_, stillUndoable) <- frame inp
   assert failed (not stillUndoable)
 
--- | A text area over a 'TextDocument' hands back the document it was passed
--- while nothing edits it (a cursor move included), a new one when typing
--- does, and passes undo and replacement through like the 'Text' one.
+-- | A text area over a 'TextDocument' returns the input document unchanged
+-- while nothing edits it (including on cursor movement), returns a new one
+-- on edits, and supports undo and external replacement like the 'Text' one.
 runTextAreaDocumentTest :: Context -> IORef Int -> IO ()
 runTextAreaDocumentTest ctx failed = do
   let original = T.intercalate "\n" ["line " <> T.pack (show i) | i <- [0 .. 999 :: Int]]

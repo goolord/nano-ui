@@ -1,14 +1,15 @@
 -- | State: where a view's state lives, and how widgets keep theirs.
 --
--- A view runs every frame, so anything that must outlive a frame is kept in
--- a 'Var'. An input takes the Var it edits, and you read a Var with
--- 'readVar' where you show it. Vars come from two places:
+-- A view runs every frame, so mutable state that persists across frames lives
+-- in a 'Var'. Input widgets mutate a 'Var' in place, and 'readVar' reads its
+-- current value. 'Var's come from two places:
 --
--- * 'useVar' keeps a Var at its position in the view and needs no setup.
---   It holds an 'Int', 'Double', 'Float', 'Bool' or 'Text'; 'useEnumVar'
---   holds an enumeration.
--- * 'newVar' makes a Var of any type in IO ('newApp' below). Pass it to the
---   view; the value lives in the Var, not at a position.
+-- * 'useVar' allocates call-site-scoped mutable state inside the view and
+--   needs no setup. It holds an 'Int', 'Double', 'Float', 'Bool' or 'Text';
+--   'useEnumVar' holds an enumeration.
+-- * 'newVar' allocates a 'Var' of any type in IO ('newApp' below). Pass it to
+--   the view; its identity is the reference itself rather than a call-site
+--   position.
 --
 -- A record in a Var gives a Var for each field: @state.settings.volume@
 -- reads and writes just that field. That needs @OverloadedRecordDot@ and a

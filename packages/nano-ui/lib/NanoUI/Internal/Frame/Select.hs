@@ -149,10 +149,10 @@ overlayMenuOwnerAt ctx mouse =
     Just (RouteDropdown wid) -> pure (Just wid)
     _ -> pure Nothing
 
--- | The route to what the frame draws over every layer, when that is what is
--- on top at @mouse@: the text-edit menu, then an open dropdown the modal
--- state lets receive input. They are drawn rather than laid out, so nothing
--- but this knows they cover what is under them.
+-- | Pointer route for overlays drawn above all layers at @mouse@: first the
+-- text-edit context menu, then an open dropdown allowed by the modal state.
+-- These overlays are painted directly rather than placed in the layout arena,
+-- so hit-testing checks their rects explicitly here.
 overlayRouteAt :: Context -> V2 -> IO (Maybe PointerRoute)
 overlayRouteAt ctx mouse = do
   mMenu <- getsInteraction ctx isTextInputMenu

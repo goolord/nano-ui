@@ -34,7 +34,7 @@ runDragSpansTest _ failed = do
   assertEq failed (dragSpans bar [Rect 150 40 50 20]) [bar]
   assertEq failed (dragSpans (Rect 100 0 300 30) [Rect 0 0 60 30]) [Rect 100 0 300 30]
 
--- | The three caption buttons: the rectangle they hand back spans all of
+-- | The three caption buttons: the returned rectangle spans all of
 -- them, and a click on the last one is a close.
 runCaptionButtonsTest :: Context -> IORef Int -> IO ()
 runCaptionButtonsTest ctx failed = do

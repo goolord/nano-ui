@@ -140,9 +140,8 @@ import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 -- a frame. Run IO in it with 'liftIO'; the action runs on every frame that
 -- reaches it, so guard one-shot effects with a button or another event.
 --
--- It is an @effectful@ computation in the row 'NanoUIEs'. A view never needs
--- to know that; "NanoUI.Effectful" has the constructor and the functions for
--- mixing views with other effects.
+-- "NanoUI.Effectful" exports the constructor and functions for mixing views
+-- with other @effectful@ effects in 'NanoUIEs'.
 newtype NanoUI a = NanoUI {unNanoUI :: Eff NanoUIEs a}
   deriving newtype
     ( Functor
@@ -433,14 +432,14 @@ withPaintScope enter m = do
 setUiTheme :: Theme -> NanoUI ()
 setUiTheme th = withContext (\ctx -> setThemeInView ctx th)
 
--- | Whether the system prefers light or dark colours, or 'Nothing' when the
--- backend cannot tell (RGFW never can). A change repaints the whole window.
+-- | System light or dark preference, or 'Nothing' when the backend does not
+-- report it (RGFW never does). A change repaints the whole window.
 {-# INLINE systemAppearance #-}
 systemAppearance :: NanoUI (Maybe Appearance)
 systemAppearance = withContext getSystemAppearance
 
--- | Where the pointer is, as the view being declared sees it: far off every
--- widget while something drawn in front has the pointer.
+-- | Pointer position in the current layer's routed input (moved off-screen
+-- when occluded by a layer or overlay in front).
 {-# INLINE uiMousePos #-}
 uiMousePos :: NanoUI V2
 uiMousePos = fmap inputMousePos askInput
@@ -471,11 +470,10 @@ mouseHeld b = heldIn b <$> askInput
 askInput :: NanoUI Input
 askInput = NanoUI (repInput <$!> getStaticRep)
 
--- | The frame's input before routing, pointer included whoever it belongs
--- to. For what watches the whole window rather than reacting to its own
--- events: a click anywhere outside dismissing a popup, a floating panel
--- working out its body's input. A widget that read its presses from this
--- would react through whatever is drawn over it, so widgets use 'askInput'.
+-- | Unrouted frame input, including the pointer regardless of which layer owns
+-- it. Used for window-wide checks (such as outside-click dismissal or routing
+-- input to floating panels). Widgets should read 'askInput' instead so they do
+-- not react through overlays.
 {-# INLINE askFrameInput #-}
 askFrameInput :: NanoUI Input
 askFrameInput = do
@@ -529,17 +527,15 @@ lastRect wid = withContext $ \ctx -> do
   recordLayoutRead ctx (intKey wid) ((/= r) <$> getPrevRect ctx wid)
   pure r
 
--- | Give a widget the keyboard, without the focus ring Tab would draw round
--- it. A widget that should keep the keyboard while some condition holds calls
--- this every frame the condition does; nothing happens if it already has it.
+-- | Focus a widget immediately without showing the keyboard focus ring. Call
+-- this each frame while a condition holds; no-op if already focused.
 --
--- Tab pressed that frame is the widget's: focus stays where it is, and an
--- editor reads the Tab from the input to indent. A click elsewhere still moves
--- focus off, until the next frame's call takes it back.
+-- Consumes Tab for the current frame so focus does not advance and an editor
+-- can use Tab to indent. A click elsewhere still moves focus away until the
+-- next frame's call restores it.
 --
--- An open 'NanoUI.Internal.Widgets.Overlay.modal' keeps the keyboard inside it:
--- called outside one while it is up, this does nothing, so a widget behind
--- the modal cannot take the keys typed into it.
+-- Ignored when called outside an open 'NanoUI.Internal.Widgets.Overlay.modal'
+-- or on a disabled or inert widget.
 holdFocus :: WidgetId -> NanoUI ()
 holdFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
@@ -552,29 +548,29 @@ holdFocus wid = withContext $ \ctx -> do
       writeIORef (ctxFocusId ctx) wid
       writeIORef (ctxFocusVisible ctx) False
 
--- | Take the keyboard off a widget, if it has it; nothing then has focus.
--- This takes effect immediately, so widgets declared after the call see no
--- focus. A text field keeps its selection and menu. To drop focus the way a
--- click elsewhere does, at the end of the frame, use 'clearFocus'.
+-- | Clear keyboard focus from @wid@ immediately if it is currently focused.
+-- Unlike 'clearFocus' (which applies at the end of the frame and collapses
+-- text selection and menus), this takes effect immediately for subsequent
+-- widgets in the same pass and preserves text field selection and menu state.
 releaseFocus :: WidgetId -> NanoUI ()
 releaseFocus wid = withContext $ \ctx -> do
   focus <- getFocusId ctx
   when (focus == wid) (writeIORef (ctxFocusId ctx) (WidgetId 0))
 
--- | The widget that has the keyboard, or @'WidgetId' 0@ for none.
+-- | Currently focused widget ID, or @'WidgetId' 0@ for none.
 focusedWidget :: NanoUI WidgetId
 focusedWidget = withContext getFocusId
 
--- | Whether the widget with this id has the keyboard.
+-- | Whether @wid@ currently has keyboard focus.
 isFocused :: WidgetId -> NanoUI Bool
 isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWidget
 
--- | Move the keyboard to the widget with this id, as Tab would. A text field
--- resumes with its caret where it was (at the end if never edited), the
--- widget shows the focus ring, and Tab continues from it. The previously
--- focused field drops its selection and menu, an open dropdown closes, and on
--- its next frame the field sees it lost focus (a combo box or search field
--- commits then).
+-- | Request moving keyboard focus to @wid@ at the end of the frame, as Tab
+-- would. A text field resumes with its caret where it was (at the end if never
+-- edited), the widget shows the focus ring, and Tab continues from it. The
+-- previously focused field drops its selection and menu, an open dropdown
+-- closes, and on the next frame the prior field observes focus loss (committing
+-- a combo box or search field).
 --
 -- > resp <- searchInput' "Find" query
 -- > findPressed <- shortcut (ctrl <> key 'f')
@@ -625,25 +621,17 @@ getClipboard = withContext ctxClipboardGet
 setClipboard :: Text -> NanoUI Bool
 setClipboard txt = withContext (\ctx -> ctxClipboardSet ctx txt)
 
--- | Ask for another frame after this one. For a view whose state lives
--- outside nano-ui and changed after the part showing it was declared: the
--- frame that shows the change has to be asked for, since nothing nano-ui
--- keeps says it is due.
---
--- Ask only when something did change. The frame asked for repaints the whole
--- window, since nothing nano-ui keeps says which pixels the change touched,
--- and a view that asks every frame keeps the loop from ever sleeping;
--- 'NanoUI.Internal.Widgets.Animate.wakeAfter' asks for a frame at a later time.
+-- | Schedule a full-window repaint on the next frame, for external state
+-- changes not tracked by 'NanoUI.Var.Var'. Avoid calling unconditionally every
+-- frame, as that prevents the event loop from sleeping; use
+-- 'NanoUI.Internal.Widgets.Animate.wakeAfter' for timed frames.
 requestFrame :: NanoUI ()
 requestFrame = withContext markDirty
 
--- | Whether Escape was pressed this frame and is the view's to act on, and
--- if so, take it: nothing after this sees it either. 'False' when something
--- earlier in the frame took it, while a text field's right-click menu or a
--- dropdown is open (a focused combo's included), since that Escape is for
--- closing it, and outside an open modal, whose Escape it is. A dialog that
--- Escape puts away reads it here rather than from the input, so the Escape
--- that closes a menu inside it does not close the dialog as well.
+-- | Consume an Escape press this frame and return 'True' if it was available.
+-- Returns 'False' if Escape was not pressed, was already consumed earlier in
+-- the frame, is reserved by an open text-field menu or dropdown (including a
+-- focused combo box), or is blocked by an open modal.
 takeEscape :: NanoUI Bool
 takeEscape = do
   inp <- askInput
@@ -728,17 +716,16 @@ withArenaRange record body = do
 inArenaRange :: Int -> Int -> Int -> Bool
 inArenaRange from below idx = from <= idx && idx < below
 
--- | The scroller's geometry as its last layout left it (its viewport, range
--- and offset), or 'Nothing' before it has been laid out. The id is the one a
--- 'NanoUI.scrollArea' hands back; to run a command before the scroller is
--- declared, take its id with 'currentId' first:
+-- | The scroller's geometry from the previous layout (viewport, range, and
+-- offset), or 'Nothing' before its first layout. The id is returned by
+-- 'NanoUI.scrollArea'; to query or command a scroller before it is declared,
+-- read its id with 'currentId' first:
 --
 -- > sid <- currentId
 -- > metrics <- getScrollMetricsUi sid
 -- > (_, rows) <- scrollArea (fillW . fillH) (visibleRows metrics)
 --
--- When this frame's layout changes the metrics, another frame follows, so
--- the view gets to read them again.
+-- If this frame's layout changes the metrics, a follow-up frame is scheduled.
 getScrollMetricsUi :: WidgetId -> NanoUI (Maybe ScrollMetrics)
 getScrollMetricsUi wid = withContext (`getScrollMetrics` wid)
 

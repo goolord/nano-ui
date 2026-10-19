@@ -107,9 +107,8 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
     else descend sx sy
 
 -- | Axes, content viewport and reachable offset range of the scroll container
--- at @idx@ placed at @rect@, in window axes. The wheel, the programmatic
--- commands and the transform pass all size a scroll off this, so a scroller
--- cannot disagree with itself about how far it reaches.
+-- at @idx@ placed at @rect@, in window axes. Shared by mouse wheel,
+-- programmatic scroll commands, and the scroll-offset transform pass.
 scrollNodeGeometry :: Context -> NodeIdx -> Rect -> IO (ScrollAxes, Rect, V2)
 scrollNodeGeometry ctx idx (Rect x y w h) = do
   sn@ScrollNode {snPad = pad, snContentMain = contentMain} <-
@@ -227,7 +226,7 @@ findScrollNodeUnderMouse ctx (Size w h) mouse = do
         WheelTo idx -> Just idx
         _ -> Nothing
 
--- | What a subtree does with the wheel at the pointer.
+-- | Result of wheel hit testing on a subtree.
 data WheelHit
   = WheelMiss
   -- ^ Nothing in the subtree takes the wheel here.
@@ -237,12 +236,12 @@ data WheelHit
   | WheelTo !NodeIdx
   -- ^ This scroller takes the wheel.
 
--- | The wheel target at @mouse@ in the subtree at @idx@: the topmost child's
--- answer, else @idx@ itself if it is a scroller under the pointer. Where
+-- | Wheel target at @mouse@ in the subtree at @idx@: the topmost matching
+-- child result, else @idx@ itself if it is a scroller under the pointer. Where
 -- children can overlap (@layered@ is set and this node is 'Layered' or has a
--- pinned descendant), they are asked topmost first ('firstChildOnTopJustM'),
--- so a scroller pinned over another wins. Otherwise children cannot overlap
--- and are asked in arena sibling order.
+-- pinned descendant), they are tested topmost first ('firstChildOnTopJustM')
+-- so a scroller pinned over another wins; otherwise children are tested in
+-- arena sibling order.
 queryScrollTarget :: Context -> Bool -> V2 -> Rect -> NodeIdx -> IO WheelHit
 queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx = do
   nt <- getNodeType na idx
@@ -251,8 +250,7 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
     Just clip -> do
       overlapping <-
         pure layered <&&> ((||) <$> ((== Layered) <$> getFlow na idx) <*> hasPinnedBelow na idx)
-      -- A child with no scroller, text area or 'PointerBlock' node in its
-      -- subtree can only answer 'WheelMiss', so it is not asked.
+      -- Skip subtrees that contain no scroller, text area, or 'PointerBlock' node.
       let answered c = ifM (hasScrollerBelow na c) (query c) (pure Nothing)
           query c =
             queryScrollTarget ctx layered mouse clip c <&> \case

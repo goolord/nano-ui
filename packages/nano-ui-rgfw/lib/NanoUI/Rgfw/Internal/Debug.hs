@@ -88,8 +88,8 @@ emptyRgfwDebug =
     , dbgFrame = RgfwFrameStats {fsNodes = 0, fsPhysW = 0, fsPhysH = 0, fsScale = 1, fsMonScale = 1}
     }
 
--- | Read debug data, refreshing at most four times per second. Returns
--- Queries keep the supplied session's debug refresh active.
+-- | Read debug data, refreshing at most four times per second. Queries
+-- keep the supplied session's debug refresh active.
 askRgfwDebug :: RgfwDebugSampler -> NanoUI RgfwDebugSnapshot
 askRgfwDebug s = do
   inp <- askInput

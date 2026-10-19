@@ -163,8 +163,8 @@ noWindowCapabilities = WindowCapabilities False False False False False False Fa
 allWindowCapabilities :: WindowCapabilities
 allWindowCapabilities = WindowCapabilities True True True True True True True True True
 
--- | A host that does nothing and says so ('noWindowCapabilities'). A backend
--- updates it with the operations it has and sets 'hostCapabilities' to match.
+-- | No-op host with 'noWindowCapabilities'. Backends override the operations
+-- they support and set 'hostCapabilities' to match.
 defaultWindowHost :: WindowHost
 defaultWindowHost =
   WindowHost

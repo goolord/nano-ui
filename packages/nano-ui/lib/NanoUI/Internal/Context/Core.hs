@@ -91,7 +91,6 @@ import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 -- State records
 -- =============================================================================
 
--- | Read a projection of the current pointer, drag, and text-menu state.
 {-# INLINE getsInteraction #-}
 getsInteraction :: Context -> (InteractionState -> a) -> IO a
 getsInteraction ctx f = f <$> readIORef (ctxInteractionState ctx)
@@ -101,7 +100,6 @@ getsInteraction ctx f = f <$> readIORef (ctxInteractionState ctx)
 modifyInteraction :: Context -> (InteractionState -> InteractionState) -> IO ()
 modifyInteraction ctx = modifyIORef' (ctxInteractionState ctx)
 
--- | Read a projection of modal and floating-panel state.
 {-# INLINE getsOverlay #-}
 getsOverlay :: Context -> (OverlayState -> a) -> IO a
 getsOverlay ctx f = f <$> readIORef (ctxOverlayState ctx)
@@ -111,7 +109,6 @@ getsOverlay ctx f = f <$> readIORef (ctxOverlayState ctx)
 modifyOverlay :: Context -> (OverlayState -> OverlayState) -> IO ()
 modifyOverlay ctx = modifyIORef' (ctxOverlayState ctx)
 
--- | Read a projection of pending damage and previous-frame geometry.
 {-# INLINE getsDamage #-}
 getsDamage :: Context -> (DamageState -> a) -> IO a
 getsDamage ctx f = f <$> readIORef (ctxDamageState ctx)
@@ -206,19 +203,19 @@ markDirtyCovered ctx = do
   modifyDamage ctx (\ds -> ds {dsDirty = True})
   wakeOffLoop ctx
 
--- | Note that the view read @k@ of the last frame's layout. After this
--- frame's layout, 'settleLayoutReads' runs @stale@, which answers whether the
--- read would now come out differently, and a stale read asks for a follow-up
--- frame. A layout change nothing read requests no frame. The first read of a
--- key since the last settle is the one checked.
+-- | Record a layout read for key @k@ during view construction. After layout
+-- completes, 'settleLayoutReads' runs @stale@ to check whether the newly
+-- computed layout differs from the value read, and schedules a follow-up frame
+-- if so. Unread layout changes do not schedule a frame. Only the first read
+-- of each key per settle cycle is retained.
 recordLayoutRead :: Context -> Int -> IO Bool -> IO ()
 recordLayoutRead ctx k stale =
   modifyDamage ctx (\ds -> ds {dsLayoutReads = IM.insertWith (\_ old -> old) k stale (dsLayoutReads ds)})
 
--- | Check the reads 'recordLayoutRead' noted against the layout just
--- finished, then forget them. Every check runs, so a check may also publish
--- what it measured ('publishLayoutSlots'). The follow-up frame is covered: it
--- rebuilds from the new layout, and its own rect diffs damage what that moves.
+-- | Run all pending 'recordLayoutRead' checks against the completed layout
+-- and clear the table. Every check is executed so callbacks can also publish
+-- measured geometry ('publishLayoutSlots'). Any stale read schedules a
+-- damage-covered follow-up frame.
 settleLayoutReads :: Context -> IO ()
 settleLayoutReads ctx = do
   pending <- getsDamage ctx dsLayoutReads
@@ -265,18 +262,17 @@ wakeLoop ctx = do
     unless delivered (takeWakes ctx)
 
 -- | 'wakeLoop' for a dirty mark. The thread running
--- 'NanoUI.Runner.runSessionLoop' checks the dirty flag before it waits, so
--- its own marks, made on every frame that asks for another, wake nothing.
+-- 'NanoUI.Runner.runSessionLoop' checks the dirty flag before waiting, so
+-- its own marks during a frame need not wake the event wait.
 wakeOffLoop :: Context -> IO ()
 wakeOffLoop ctx =
   readIORef (ctxLoopThread ctx) >>= \case
     Nothing -> wakeLoop ctx
     Just loop -> myThreadId >>= \me -> unless (me == loop) (wakeLoop ctx)
 
--- | The loop is about to read what the wakes so far changed, so the next
--- wake runs the wake action again. The session loop calls this after each
--- wait for events, and every frame at its start ('takeThreadWake'). A wake
--- before this is read by what follows it; one after it ends the next wait.
+-- | Clear 'ctxWakePending' so the next wake invokes the backend wake callback
+-- again. Called after each event wait and at the start of every frame
+-- ('takeThreadWake').
 {-# INLINE takeWakes #-}
 takeWakes :: Context -> IO ()
 takeWakes ctx = atomicWriteIORef (ctxWakePending ctx) False
@@ -302,11 +298,10 @@ takeThreadWake ctx = do
     atomicWriteIORef (ctxWoken ctx) False
     damageFull ctx
 
--- | Ask for a frame at a monotonic time ('getMonotonicTime') even if no input
--- arrives. The earliest request wins. Each frame starts with none pending, so
--- a widget that still needs a later frame asks again as it is built; one that
--- is gone stops asking, and the loop sleeps. Call it from the UI thread: a
--- background thread uses 'wakeFromThread' instead.
+-- | Schedule a frame at a monotonic timestamp ('getMonotonicTime') even if no
+-- input arrives. The earliest deadline wins. Cleared at the start of each
+-- frame ('clearWakeAt'), so active widgets must re-register their deadline on
+-- each view pass. UI thread only; background threads use 'wakeFromThread'.
 requestWakeAt :: Context -> Double -> IO ()
 requestWakeAt ctx t = do
   cur <- readIORef (ctxWakeAt ctx)
@@ -318,7 +313,7 @@ requestWakeAfter ctx sec = do
   now <- getMonotonicTime
   requestWakeAt ctx (now + max 0 sec)
 
--- | The pending wake time, or 0 when nothing asked for one.
+-- | Pending wake timestamp, or 0 if none.
 {-# INLINE getWakeAt #-}
 getWakeAt :: Context -> IO Double
 getWakeAt ctx = readIORef (ctxWakeAt ctx)
@@ -391,8 +386,8 @@ getStore ctx = readIORef (ctxStore ctx)
 setStore :: Context -> WidgetStore -> IO ()
 setStore ctx store = modifyStore ctx (const store)
 
--- | Replace the store with @f@ of it, damaging the keys whose values changed
--- and waking the loop when anything did.
+-- | Apply @f@ to the store, damage any keys whose values changed, and mark the
+-- context dirty.
 modifyStore :: Context -> (WidgetStore -> WidgetStore) -> IO ()
 modifyStore ctx f = do
   prev <- readIORef (ctxStore ctx)
@@ -424,11 +419,10 @@ writeSlots ctx (SlotWrites same f) = do
   st <- readIORef (ctxStore ctx)
   unless (same st) (setStore ctx (f st))
 
--- | 'writeSlots' for what a frame measured of its own layout, for the next
--- view to read (scroll geometry). No frame is requested: a view that read the
--- old values asked for one through 'recordLayoutRead' if it needed it. The
--- frame's store diff still damages what the values paint
--- ('NanoUI.Internal.Damage.writeDamage').
+-- | Write layout-derived slots (such as scroll geometry) for the next view
+-- pass without marking the context dirty; views that depend on these values
+-- schedule a follow-up frame via 'recordLayoutRead'. Store diffing in
+-- 'NanoUI.Internal.Damage.writeDamage' still records paint damage.
 publishLayoutSlots :: Context -> SlotWrites -> IO ()
 publishLayoutSlots ctx (SlotWrites same f) = do
   st <- readIORef (ctxStore ctx)
@@ -483,8 +477,8 @@ recordSlot field ctx k v = do
   when (lookupSlot field seenK st /= Just v) $
     writeIORef (ctxStore ctx) $! insertSlot field seenK v st
 
--- | Whether @wid@ was declared inside a disabled scope. A widget asks before
--- its node exists, while the scope it is declared in is still the arena's.
+-- | Whether @wid@ is in a disabled scope. Falls back to the arena's active
+-- scope when called before the widget's node is allocated.
 {-# INLINE isDisabled #-}
 isDisabled :: Context -> WidgetId -> IO Bool
 isDisabled ctx wid = do
@@ -617,7 +611,7 @@ scopeThemeIn arr ctx scope
   where
     !ti = scope `shiftR` 1
 
--- | The theme of the scope the view is declaring in.
+-- | Active theme for the current arena scope.
 {-# INLINE currentTheme #-}
 currentTheme :: Context -> IO Theme
 currentTheme ctx = getArenaScope (ctxNodeArena ctx) >>= scopeTheme ctx

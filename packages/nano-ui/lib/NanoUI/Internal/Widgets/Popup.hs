@@ -1,4 +1,4 @@
--- | Anchored floating panels, open while a Var says so, and tooltips.
+-- | Anchored floating panels controlled by mutable state ('Var'), and tooltips.
 module NanoUI.Internal.Widgets.Popup
   ( PopupAnchor (..)
   , PopupPlacement (..)
@@ -92,9 +92,9 @@ popupWith open cfg f child = void (popupWith' open cfg f child)
 popupWith' :: Var Bool -> PopupConfig -> (Layout -> Layout) -> NanoUI a -> NanoUI (Response, Maybe a)
 popupWith' open cfg f child = bindOpen open (\shown -> popupShown shown cfg f child)
 
--- | Run a floating panel on the open flag in a Var, writing 'False' when
--- the panel reports a dismissal. The panel drew itself open before the
--- dismissal resolved, so a dismissal runs the view again.
+-- | Bind a floating panel's open state to a 'Var', mutating it to 'False' when
+-- the panel reports a dismissal. Because the panel nodes were already emitted
+-- before dismissal is resolved, closing triggers a re-render.
 {-# INLINE bindOpen #-}
 bindOpen :: Var Bool -> (Bool -> NanoUI (Response, Maybe a)) -> NanoUI (Response, Maybe a)
 bindOpen v run = bindVar Conservative v $ \open -> do
@@ -148,8 +148,8 @@ floatingOverlay open dismiss addPanel enter body = do
       burstNextIds 1
       pure (mempty {rawRespId = wid}, Nothing)
     else do
-      -- Hovered is the pointer on the panel as the panel's own layer sees it,
-      -- so whatever is in front of the panel takes the hover with it.
+      -- Hover uses the pointer routed to the panel's layer, so layers in
+      -- front of the panel occlude hover.
       (mouse, (closed, r)) <-
         floatingPanel wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
@@ -200,8 +200,7 @@ tooltipWidget = tooltipWidgetConfigured defaultTooltipConfig
 
 -- | 'tooltipWidget' with a configured delay, placement and gap. The target
 -- counts as hovered when the routed pointer is on its visible, uncovered
--- part ('pointerOnWidget'), even if it takes no input, so a disabled button
--- can still explain why it is off.
+-- part ('pointerOnWidget'), even when disabled or inert.
 tooltipWidgetConfigured ::
   HasResponse r =>
   TooltipConfig ->
@@ -235,10 +234,10 @@ tooltipWidgetConfigured cfg target child = do
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
   result <- snd <$> popupWith' (constVar open) ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) id child
-  -- A tooltip the view stops declaring while it waits or shows forgets its
-  -- time: the frame that skips it runs its cleanup ('holdAction'). Coming
-  -- back, it waits out its delay again rather than opening at once or
-  -- ending other tooltips' delays. The hook takes one id either way.
+  -- Clear the stored timestamp when a tooltip is no longer declared
+  -- ('holdAction'), so if it reappears later it waits for the full delay
+  -- rather than opening immediately or ending other tooltips' delays. The
+  -- hook consumes one id on both branches.
   if armed
     then scope (holdAction (modifyStore ctx (deleteSlot fieldQuiet (slotKey SlotTooltipShow (intKey wid)))))
     else burstNextIds 1

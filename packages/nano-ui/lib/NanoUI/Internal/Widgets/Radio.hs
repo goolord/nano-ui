@@ -37,8 +37,8 @@ radioLay = tight (fillW defaultLayout)
 radioGroupLay :: Layout
 radioGroupLay = tight (gap 4 (fillW defaultLayout))
 
--- | A column of radio buttons over @options@ in fold order, showing and
--- editing the selected index: a click or the arrow keys move it.
+-- | A column of radio buttons over @options@ in fold order, bound to mutable
+-- state ('Var'): a click or the arrow keys update the zero-based selected index.
 {-# INLINE radio #-}
 radio :: Foldable f => f Text -> Var Int -> NanoUI ()
 radio options v = void (radio' options v)

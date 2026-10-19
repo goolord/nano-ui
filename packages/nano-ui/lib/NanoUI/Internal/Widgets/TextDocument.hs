@@ -73,7 +73,7 @@ documentLineCount :: TextDocument -> Int
 documentLineCount = Seq.length . documentLines
 
 -- | Whether two documents are the same value, in O(1). Equal documents built
--- separately may still answer 'False'; '==' compares their text.
+-- separately may still return 'False'; '==' compares their text.
 sameDocument :: TextDocument -> TextDocument -> Bool
 sameDocument a b = sameLines (documentLines a) (documentLines b)
 
@@ -111,7 +111,7 @@ documentBuffer = TB.fromLines . documentLines
 
 -- | Whether two line sequences are the same heap object. An edit makes new
 -- lines and a cursor move keeps them, so this tells an edited buffer from a
--- moved one without reading any text. It can answer 'False' for the same
+-- moved one without reading any text. It can return 'False' for the same
 -- lines (GHC may compare an evaluated value with a reference to it before
 -- evaluation), never 'True' for different ones; callers treat 'False' as
 -- "maybe changed". Both arguments are forced first, so neither is a thunk.

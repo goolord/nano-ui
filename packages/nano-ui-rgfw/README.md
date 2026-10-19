@@ -21,8 +21,8 @@ main = runRgfwApp defaultRgfwOptions {optScale = 2} (label "Hello")
 emission and widget adapters. `RgfwOptions` sets the window (`optWindow`, the core's
 `WindowSettings`, which the SDL backend takes too, with its size in layout
 units), the theme, the UI scale, and the refresh rate used for pacing
-animations. RGFW places a window itself, so one where the desktop would put
-it is centred. RGFW windows are opaque and do not fade: `wsTransparent`,
+animations. RGFW centres windows that use default desktop placement.
+RGFW windows are opaque and do not fade: `wsTransparent`,
 `wsOpacity` and `setWindowOpacityUi` do nothing here. The SDL backend has
 transparent and faded windows.
 

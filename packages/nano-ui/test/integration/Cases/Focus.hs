@@ -99,8 +99,8 @@ runFocusRequestNoneTest ctx failed = do
   assert failed . not =<< needsRedraw ctx inp inp
   assertEq failed 0 =<< getWakeAt ctx
 
--- | A disabled field, a label and an unknown id refuse focus without
--- requesting a frame.
+-- | Requesting focus for a disabled field, a label, or an unknown id is a
+-- no-op and does not request a frame.
 runFocusRequestRefusedTest :: Context -> IORef Int -> IO ()
 runFocusRequestRefusedTest ctx failed = do
   (ui, ask) <- asking ctx $ \req -> column $ do
@@ -125,8 +125,8 @@ runFocusRequestModalTest ctx failed = do
     assertEq failed r =<< getFocusId ctx
     assertEq failed (False, r) =<< ask [page] inp
 
--- | A view asking every frame for a field behind an open modal never focuses
--- it, and focuses it once the modal closes.
+-- | Requesting focus every frame for a field behind an open modal does not
+-- focus it until the modal closes.
 runFocusRequestBehindModalTest :: Context -> IORef Int -> IO ()
 runFocusRequestBehindModalTest ctx failed = do
   open <- newIORef True
@@ -312,9 +312,9 @@ runFocusTextCommandTest ctx failed = do
   _ <- warmup ctx inp ui
   assertEq failed (WidgetId 0) =<< getFocusId ctx
 
--- | A press on a focusable canvas focuses it without the Tab ring, and it
--- then hears the keys it claims; a press on a plain canvas focuses nothing,
--- and a focused canvas hears nothing once another press moves focus away.
+-- | Pressing a focusable canvas focuses it without showing the Tab ring so
+-- 'focusedKeyPressed' matches for that canvas; pressing a plain canvas
+-- clears focus so 'focusedKeyPressed' no longer matches.
 runCanvasFocusClickTest :: Context -> IORef Int -> IO ()
 runCanvasFocusClickTest ctx failed = do
   heard <- newIORef False

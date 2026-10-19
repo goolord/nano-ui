@@ -42,9 +42,9 @@ import NanoUI.Widgets.TextEditor
 -- from a menu or button that may not be over the field, and the caret,
 -- selection highlight and next keystroke belong to the field it edited.
 -- Focus moves at the end of the frame, as with
--- 'NanoUI.Internal.Monad.requestFocus', so a disabled field or one behind a
--- modal refuses it. A
--- change to the text pulses @respChanged@ on the field's next frame.
+-- 'NanoUI.Internal.Monad.requestFocus', so disabled fields and fields behind a
+-- modal cannot take focus. A change to the text pulses @respChanged@ on the
+-- field's next frame.
 applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
 applyTextFieldCommand ctx wid cmd =
   textFieldEditor ctx wid >>= mapM_ (\(mode, ed0, save) -> do
@@ -59,10 +59,10 @@ applyTextFieldCommand ctx wid cmd =
     writeIORef (ctxFocusRequest ctx) (Just (FocusOn wid))
     modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
 
--- | The field with this id as a command from outside its frame sees it: how
--- it edits, its stored editor, and how to store an edited one. Its mode comes
--- from its node when it has one this frame, or from what it recorded the last
--- time it was declared.
+-- | Look up a text field's 'EditorMode', stored 'Editor', and store setter by
+-- 'WidgetId' for out-of-frame commands. Uses the current frame's arena node if
+-- present, or falls back to the mode recorded when the field was last
+-- declared.
 textFieldEditor :: Context -> WidgetId -> IO (Maybe (EditorMode, Editor, Editor -> WidgetStore -> WidgetStore))
 textFieldEditor ctx wid = do
   store <- getStore ctx

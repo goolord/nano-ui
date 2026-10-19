@@ -72,7 +72,6 @@ data CoreDebugSnapshot = CoreDebugSnapshot
 emptyCoreDebugSnapshot :: CoreDebugSnapshot
 emptyCoreDebugSnapshot = CoreDebugSnapshot 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 []
 
--- | Sample the rows of 'dbgRts'.
 readRtsRows :: IO [(Text, Text)]
 readRtsRows = do
   caps <- getNumCapabilities
@@ -110,8 +109,8 @@ readRtsRows = do
 -- update it through the @noteDebug*@ functions.
 data DebugSampler = DebugSampler
   { smCore :: !CoreDebugSnapshot
-  -- ^ The next snapshot, but for what a refresh samples: the present rate,
-  -- window coordinates and runtime statistics.
+  -- ^ Accumulates frame timings and counts between refreshes; present FPS,
+  -- window coordinates, and RTS stats are filled in by 'refreshDebugSnapshot'.
   , smLastQueryT :: !Double
   , smRatePresents :: !Word64
   , smLastDebugT :: !Double
@@ -147,10 +146,11 @@ noteDebugSkip ref = noteCore ref $ \c -> c {dbgSkips = dbgSkips c + 1}
 -- being built. An open window alone does not count as activity, or the event
 -- loop would wake every refresh period while any floating window is open.
 --
--- A refresh is reported due at most once a period. The frame it asks for
+-- A refresh is reported due at most once per period. The triggered frame
 -- refreshes the snapshot only if the view still queries it, so once the
--- readout is gone the snapshot stays old for the rest of the active second,
--- and reporting it due every pass would run frames back to back.
+-- readout closes the snapshot stays older than 'debugRefreshSec' for the rest
+-- of the active second; without 'smLastDueT', every pass in that window would
+-- report due and run frames back to back.
 debugCadence :: DebugSamplerRef -> IO (Bool, Bool)
 debugCadence ref = do
   now <- getMonotonicTime

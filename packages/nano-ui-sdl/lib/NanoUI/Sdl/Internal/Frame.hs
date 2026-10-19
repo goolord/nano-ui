@@ -3,16 +3,16 @@
 -- | How much of the desktop's own decoration a window keeps, and the frame
 -- and shadow that go under a window that draws its own title bar.
 --
--- A borderless window on Windows is a popup: it has no frame, so the desktop
--- draws no shadow under it, and there is nothing outside its edges to take
--- hold of. Every pixel the pointer can reach is one the view has drawn on,
--- and a window whose edges resize it has to spend some of its own chrome on
--- saying so.
+-- A borderless window on Windows is a popup with no non-client frame, so the
+-- desktop draws no drop shadow under it and provides no outer resize border;
+-- without a native frame, a resizable window has to reserve part of its own
+-- client area for resize hit testing.
 --
--- 'DecorationsFrame' gives both back. The ordinary window frame goes back on
--- and stays outside the client area -- invisible, outside the window you can
--- see, and what the desktop resizes the window by -- and brings the
--- desktop's shadow with it.
+-- 'DecorationsFrame' restores both: it keeps the native sizing frame outside
+-- the client area (invisible, outside the visible window, and used by the
+-- window manager for edge resizing) together with the native drop shadow,
+-- expanding the outer window rectangle so the client area keeps its requested
+-- size.
 --
 -- The window procedure the frame needs is in @cbits\/nano_ui_frame.c@ rather
 -- than here: Windows calls it from inside @SetWindowPos@, @DefWindowProc@
@@ -84,12 +84,11 @@ applyDecorations win decorations = do
   when (decorations == DecorationsFrame) $ do
     flags <- SDL.getWindowFlags win
     let movable = hasFlag SDL.SDL_WINDOW_RESIZABLE flags && not (hasFlag SDL.SDL_WINDOW_FULLSCREEN flags)
-    -- A frame on a window that cannot be resized by it is only a margin
-    -- that takes clicks meant for whatever is behind the window; the shadow
-    -- is all such a window wants of it. A window with the frame has the
-    -- desktop's shadow with it, so there is nothing to ask DWM for; asking
-    -- anyway extends the frame over the topmost row of the view, which is a
-    -- row the view draws its own border on.
+    -- A non-resizable or fullscreen window should not have an outer sizing
+    -- frame that intercepts clicks outside the window, so only the drop shadow
+    -- is enabled. When the native sizing frame is enabled it already carries
+    -- the DWM shadow, and calling DwmExtendFrameIntoClientArea on top of it
+    -- would extend the frame over the top pixel row of the client area.
     if movable then applyNativeFrame win True else applyWindowShadow win True
 
 -- | Whether window flags include a flag.
@@ -173,10 +172,9 @@ withHwnd win none act = do
     getPointerProperty props (PtrConst.unsafeFromPtr name) nullPtr
   if hwnd == nullPtr then pure none else act (castPtr hwnd)
 
--- | Set one of the desktop's window attributes that takes a word. The border
--- colour and the corner preference are both Windows 11's. An older Windows
--- answers that it has never heard of them and goes on drawing what it would
--- have drawn, which is no worse than what it drew before either existed.
+-- | Set a @DWORD@ DWM window attribute. @DWMWA_BORDER_COLOR@ and
+-- @DWMWA_WINDOW_CORNER_PREFERENCE@ require Windows 11; older Windows versions
+-- ignore the call and return an error code, which is discarded.
 setWindowWord :: Ptr () -> Word32 -> Word32 -> IO ()
 setWindowWord hwnd attribute value =
   with value $ \p -> void (dwmSetWindowAttribute hwnd attribute (castPtr p) 4)

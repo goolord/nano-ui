@@ -269,9 +269,9 @@ data DamageState = DamageState
   , dsLastWindowSize :: !Size
   , dsPrev :: !PrevFrame
   , dsLayoutReads :: !(IntMap (IO Bool))
-  -- ^ What the view read of the last frame's layout, by key, each with an
-  -- action that answers after this frame's layout whether the read went
-  -- stale ('NanoUI.Internal.Context.Core.recordLayoutRead').
+  -- ^ Layout queries recorded during the frame, by key, each with an action
+  -- that checks after layout whether the read is stale
+  -- ('NanoUI.Internal.Context.Core.recordLayoutRead').
   }
 
 -- | The last finished frame's layout by widget key, for the next frame's
@@ -282,7 +282,7 @@ data PrevFrame = PrevFrame
   -- ^ Viewport clip, for keys that have one.
   , pfOuterClips :: !(IntMap Rect)
   -- ^ Scroll containers and panels: the enclosing clip they paint in.
-  -- 'pfClips' holds the inner clip they give their content.
+  -- 'pfClips' holds their inner content clip.
   , pfTexts :: !(IntMap Text)
   -- ^ Text of text nodes.
   , pfImages :: !(IntMap ImagePaint)
@@ -294,7 +294,7 @@ data PrevFrame = PrevFrame
 data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
   deriving (Eq, Show)
 
--- | What a node that is no image draws: id 0 and no look.
+-- | Empty 'ImagePaint' for non-image nodes (id 0 and no look).
 noImagePaint :: ImagePaint
 noImagePaint = ImagePaint 0 Nothing
 
@@ -381,10 +381,10 @@ initialOverlayState = OverlayState
   , osPrevMenuRects = []
   }
 
--- | The last full frame's draw data and what it was drawn from, for a full
--- frame that would draw the same to take instead of painting again
--- ('NanoUI.Internal.Frame.runFrameEff'). A reused frame hands the host the
--- same 'DrawData' buffers again, so a host reads them and never writes them.
+-- | The last full frame's draw data and what it was drawn from, reused when
+-- a full frame would draw the same output ('NanoUI.Internal.Frame.runFrameEff').
+-- A reused frame returns the same 'DrawData' buffers, so the host must treat
+-- them as read-only.
 data DrawReuse = DrawReuse
   { drOn :: !Bool
   -- ^ Whether frames may reuse a draw at all ('setDrawReuse').
@@ -651,7 +651,7 @@ data CustomDrawingEntry = CustomDrawingEntry
     -- ^ Repaint margin in logical pixels; anything but a positive value
     -- leaves the default margin in place.
   , cdrTracked :: !Bool
-    -- ^ Whether the widget wants a frame for every pointer move over it.
+    -- ^ Whether pointer motion over the widget always schedules a frame.
   , cdrKeys :: !KeyClaim
     -- ^ The widget's actual claims, rather than a lossy style-index encoding.
   }
@@ -725,12 +725,10 @@ initialDrawingCacheState = DrawingCacheState
   , dcsHoverZones = []
   }
 
--- | Where a frame's pointer events go: the press, the drag and release that
--- follow it, the wheel, and hover. The frame decides this once, before the
--- view runs, from what was on top under the pointer, and a held button keeps
--- the route it went down with. Everything else sees a frame without a pointer
--- ('NanoUI.Internal.Input.withoutPointer'), so nothing has to check whether an event
--- was meant for it.
+-- | Target layer for a frame's pointer events (press, drag, release, wheel,
+-- and hover), selected before the view runs from the topmost layer under the
+-- pointer (or retained while a button is held). Other layers receive
+-- 'NanoUI.Internal.Input.withoutPointer'.
 data PointerRoute
   = -- | The widgets of one layer: 0 is the page, anything else the key of the
     -- floating panel (window, popup or modal) on top under the pointer.
@@ -758,7 +756,7 @@ data InteractionState = InteractionState
   , isWindowDrag :: !(Maybe (WidgetId, Float, Float))
   , isWindowResize :: !(Maybe WindowResizeDrag)
   -- | A table header is resizing a column. Set by the table on the frames it
-  -- does, cleared when the pointer is let go.
+  -- does, cleared on mouse release.
   , isColumnResize :: {-# UNPACK #-} !Bool
   -- | Kind of the focused widget at frame start.
   , isFocusKind :: !FocusKind
@@ -977,7 +975,7 @@ data Context = Context
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO Bool))
-  -- ^ Ends the loop's wait for events, answering whether it did
+  -- ^ Wakes the event loop and returns whether it was sleeping
   -- ('NanoUI.Internal.Context.Core.setWakeLoopChecked').
   , ctxWoken :: !(IORef Bool)
   -- ^ Set from any thread by 'NanoUI.Internal.Context.Core.wakeFromThread'
@@ -990,10 +988,9 @@ data Context = Context
   -- ^ The thread in 'NanoUI.Runner.runSessionLoop', if one runs. Its dirty
   -- marks run no wake action: the loop checks the dirty flag before it waits.
   , ctxWakeAt :: !(IORef Double)
-  -- ^ Monotonic time ('GHC.Clock.getMonotonicTime') of the earliest frame
-  -- anything asked for without input to cause it, or 0 for none. Each frame
-  -- starts from 0 and whatever still needs a later frame asks again, so the
-  -- loop sleeps until then instead of polling.
+  -- ^ Monotonic time ('GHC.Clock.getMonotonicTime') of the earliest scheduled
+  -- wake timer, or 0 for none. Reset to 0 at the start of each frame so active
+  -- timers re-register each frame and the loop can sleep until the next timer.
   }
 
 -- | Convert a widget's hash to its store key. The representation assumes a

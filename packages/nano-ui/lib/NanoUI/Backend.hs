@@ -80,7 +80,7 @@ module NanoUI.Backend
     -- one-shot events (keys, typed text, clicks, scroll, drops) and keeps
     -- what is held (buttons, pointer, modifiers, window size), then folds the
     -- window's new events into it. Starting from 'emptyInput' every frame
-    -- instead forgets a held button and the pointer between events.
+    -- instead loses held buttons and pointer position between events.
     --
     -- Keys go through 'applyKey', which tracks presses, releases and held
     -- keys; mouse buttons through 'applyMouseButton' (numbered with
@@ -141,12 +141,11 @@ module NanoUI.Backend
     -- text field draws it at its caret. Committed text arrives as typed text
     -- in 'inputChars'.
     --
-    -- After a frame, 'textInputArea' says whether a widget takes text, where
-    -- to put the candidate window, and what kind of text it takes
-    -- ('InputPurpose'). Enable the platform's text input only while it is
-    -- 'Just', so no IME composes where nothing shows it and no on-screen
-    -- keyboard stays up. 'getFocusId' gives the focused widget; drop any
-    -- composition in progress when focus moves.
+    -- After a frame, 'textInputArea' reports whether a text widget is active,
+    -- the candidate window placement, and the 'InputPurpose'. Enable platform
+    -- text input only while it returns 'Just', so the IME and on-screen
+    -- keyboard are active only during text entry. 'getFocusId' returns the
+    -- focused widget; drop any composition in progress when focus changes.
   , Composition (..)
   , applyComposition
   , InputPurpose (..)
@@ -160,12 +159,12 @@ module NanoUI.Backend
 
     -- * Fonts
 
-    -- | A backend hands the context 'FontMetrics' whose 'fmBackend' is a
-    -- 'FontBackend', and nano-ui calls back into it to measure and shape.
-    -- 'prepareFontMetrics' asks it for a snapshot prepared for one text, so
-    -- that text is measured with shaping; without a backend the metrics come
-    -- back as they were. 'drawShaped' shapes a run into 'ShapedGlyphs', and
-    -- 'drawGlyph' gives one glyph's 'GlyphQuad' from the snapshot.
+    -- | A backend configures the context with 'FontMetrics' containing a
+    -- 'FontBackend' for text measurement and shaping. 'prepareFontMetrics'
+    -- returns a snapshot with shaped metrics for a specific 'Text' (or the
+    -- original metrics when 'fmBackend' is 'Nothing'). 'drawShaped' shapes a
+    -- run into 'ShapedGlyphs', and 'drawGlyph' looks up a single glyph's
+    -- 'GlyphQuad' from the snapshot.
   , FontMetrics (..)
   , FontBackend (..)
   , prepareFontMetrics
@@ -204,9 +203,8 @@ module NanoUI.Backend
 
     -- * Frame metrics
 
-    -- | The paddings and widths the widgets lay themselves out by. A backend
-    -- that draws its own chrome around a view, or a test that asserts where
-    -- something landed, reads them rather than repeating the numbers.
+    -- | Standard widget padding and scrollbar dimensions, exposed for backends
+    -- that draw window chrome and for layout tests.
   , widgetContentInset
   , widgetPadding
   , treeItemPadding
@@ -285,11 +283,11 @@ module NanoUI.Backend
 
     -- * The backend's session
 
-    -- | A backend names itself in the 'Backend' kind and gives its session
-    -- value's type with a 'BackendSession' instance, then runs the session
-    -- under 'withBackendSession'. Its view-side operations read the value
-    -- back with 'askBackendSession' and the backend's singleton; a view
-    -- another backend drives gets 'Nothing'.
+    -- | Each backend has a constructor in the 'Backend' kind and a
+    -- 'BackendSession' type family instance, and installs its session state
+    -- with 'withBackendSession'. Backend-specific view operations retrieve
+    -- the session with 'askBackendSession' and the 'SBackend' singleton
+    -- (returning 'Nothing' under other backends).
     --
     -- > type instance BackendSession 'Sdl = SdlEnv
     -- > askSdlEnv = askBackendSession SSdl

@@ -72,7 +72,7 @@ finishToggle ctx wid current resp = do
     recordSlot fieldInt ctx (intKey wid) (boolInt value)
   pure (setChanged clicked resp, value)
 
--- | Publish an input's result and remember it for controlled adoption. The
+-- | Publish an input's result and record it for controlled adoption. The
 -- caller chooses the comparison value: live state or the supplied model value.
 {-# INLINE finishInput #-}
 finishInput ::

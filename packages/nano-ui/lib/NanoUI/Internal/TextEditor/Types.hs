@@ -11,7 +11,7 @@ where
 import Data.Text.Short qualified as TS
 import NanoUI.Widgets.TextBuffer (Cursor)
 
--- | How a field lets its document be changed.
+-- | Editing and clipboard permissions for a text field.
 data EditorMode = EditorMode
   { modeMultiLine :: !Bool
   , modeEditable :: !Bool
@@ -21,7 +21,7 @@ data EditorMode = EditorMode
   }
   deriving (Eq, Show)
 
--- | What started a group of edits, which decides what may join it.
+-- | Classification of an edit group for coalescing consecutive edits.
 data EditKind = EditTyping | EditDeleting | EditOther
   deriving (Eq, Show)
 

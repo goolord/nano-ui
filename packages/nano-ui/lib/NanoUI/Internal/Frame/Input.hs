@@ -175,7 +175,7 @@ targetsAt ctx@Context {ctxNodeArena = na} mouse = do
   top <- overlayHitRoot ctx mouse
   let under idx = getNodeType na idx >>= \nt -> widgetUnderMouse ctx top mouse nt idx
   -- A 'PointerBlock' node on top with no widget of its own under the press
-  -- swallows it: nothing beneath is pressed or focused. Only stacks and
+  -- blocks it: nothing beneath is pressed or focused. Only stacks and
   -- pinned nodes draw one node over another.
   layered <- layeredNodeCount na
   let takerUnder idx = takesPointer na idx <&&> under idx
@@ -259,8 +259,8 @@ widgetHitRect ctx nt idx x y w h = case nt of
         else Rect x y w h
   _ -> pure (Rect x y w h)
 
--- | Resolve a left-button release against this frame's solved rects, and let
--- go of the active widget. Runs after layout.
+-- | Resolve a left-button release against this frame's solved rects, and
+-- clear the active widget. Runs after layout.
 --
 -- During the view a widget tests the pointer against its rect from the
 -- previous frame, so it misses a release when it has moved since, or when
@@ -315,7 +315,7 @@ postsLayoutClick nt = nt == NodeButton || nt == NodeSelect
 -- above it. A covered widget ('NanoUI.Internal.Context.Core.pointerCovered') also passes: the view
 -- already saw that release and rejected it. So does a disabled one, which
 -- the view rejects too: a click posted to it would reach widgets (checkboxes,
--- radio options, tree rows) that read the posted click without asking.
+-- radio options, tree rows) that read 'ctxClickedId' directly.
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
   disabled <- isDisabled ctx wid
@@ -332,7 +332,7 @@ inUiClickHit ctx wid mouse = do
 -- | Focus the enabled text field under a left press using solved geometry.
 -- A press elsewhere clears focus, collapses the prior selection, and closes
 -- its edit menu. Menu/dropdown presses are removed from the supplied layer
--- input, preserving the owning field's focus until the pick is processed.
+-- input so the owning field keeps focus until the pick is processed.
 -- A press on a control drawn inside a text field, or on a widget drawn over
 -- it, keeps the focus as it was.
 -- A press on a menu row or menu-bar title keeps the field's selection, so a
@@ -446,7 +446,7 @@ constrainFocusToModal ctx = do
     unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus)) $
       writeIORef (ctxFocusId ctx) (WidgetId 0)
 
--- | Record in 'isFocusKind' what kind of widget has the keyboard and which
+-- | Record in 'isFocusKind' what kind of widget has keyboard focus and which
 -- keys it claims ('KeyClaim'), from last frame's nodes. Runs before the
 -- view rebuilds them, so a shortcut declared before the focused widget
 -- still sees it. @ime@: an input method owns the focused field's keys this
@@ -497,8 +497,8 @@ needsRedraw ctx prev inp = do
       -- Idle: hover can only change when the pointer moved since the frame
       -- whose hover state we still hold. Skip the O(n) hot probe otherwise.
       pure moved <&&> do
-        -- A widget that tracks the pointer wants every move over it;
-        -- one that does not wants only the move that leaves it.
+        -- A pointer-tracking widget redraws on every move over it; other
+        -- widgets redraw only when hover enters or leaves.
         lastHot <- readIORef (ctxLastHotId ctx)
         tracked <-
           if hashWidgetId lastHot == 0
@@ -562,7 +562,7 @@ debugPanelOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx@Context {ctxNodeArena = na} mouse = do
-  -- A button that went down on a menu or dropdown keeps everything cold.
+  -- A press that started on a menu or dropdown suppresses widget hover.
   offLayers <- pointerHeldOffLayers ctx
   if offLayers
     then pure (WidgetId 0)
