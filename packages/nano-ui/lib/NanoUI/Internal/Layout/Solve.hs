@@ -1001,7 +1001,7 @@ recomputeFitHeightAtWidth :: SolveEnv -> NodeIdx -> Float -> IO Float
 recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
   fmap snd . memoizeWidth na (naFitMemo na) idx availW . fmap ((,) 0) $ do
     nt <- getNodeType na idx
-    wAx@(AxisSizing wTag _ minW maxW) <- getWidthSizing na idx
+    AxisSizing wTag wVal minW maxW <- getWidthSizing na idx
     hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
     Rect _ _ _ oldH <- getNodeRect na idx
     let -- The width a node takes of @avail@: fixed, a percentage, or all of it.
@@ -1009,7 +1009,10 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
           SizingPercent -> avail * val / 100
           SizingFixed -> val
           _ -> avail
-        effW' = clamp minW maxW (widthOf wAx availW)
+        -- Every caller offers this node a percentage already resolved, as
+        -- 'childH' below does, so only a fixed width replaces the offer.
+        effW' = clamp minW maxW (if wTag == SizingFixed then wVal else availW)
+
     ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
     case nt of
       -- A fit height with an aspect ratio is width / ratio.

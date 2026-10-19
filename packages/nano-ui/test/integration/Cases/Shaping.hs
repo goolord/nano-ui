@@ -23,6 +23,12 @@ runBidiRunsTest _ failed = do
   assertEq failed [BidiRun 4 7 False, BidiRun 0 4 True] (bidiRuns "\x05D0\x05D1\x05D2 abc")
   -- Numbers in Hebrew read left to right, left of the word before them.
   assertEq failed [BidiRun 5 8 False, BidiRun 0 5 True] (bidiRuns "\x05E9\x05DC\x05D5\x05DD 123")
+  -- A separator between digits and a terminator beside them stay with the
+  -- number, so 1.5 and 50% read as written.
+  assertEq failed [BidiRun 5 8 False, BidiRun 0 5 True] (bidiRuns "\x05E9\x05DC\x05D5\x05DD 1.5")
+  assertEq failed [BidiRun 5 8 False, BidiRun 0 5 True] (bidiRuns "\x05E9\x05DC\x05D5\x05DD 50%")
+  -- A byte order mark does not turn a line right to left.
+  assertEq failed [BidiRun 0 9 False] (bidiRuns "\xFEFF# Title.")
   -- Latin in the middle of an Arabic line.
   assertEq
     failed

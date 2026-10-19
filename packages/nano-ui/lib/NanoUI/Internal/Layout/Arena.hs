@@ -365,6 +365,9 @@ data NodeArenaArrays = NodeArenaArrays
   -- 'getText', which checks that the node set a text.
   , naArrOptionsStore :: !(MutableArray RealWorld [Text])
   -- ^ Each node's option list ('getOptions'), empty unless the node set one.
+  , naArrOptionsLast :: !(MutableArray RealWorld [Text])
+  -- ^ The option list each node last hashed ('setOptions'), which 'addNode'
+  -- leaves alone, so the same list next frame reuses its hash.
   , naArrFontColor :: !(IOArr Int)
   -- ^ Each node's font colour: 0 for none, and otherwise the colour's 32-bit
   -- word with bit 32 set. See 'getNodeFontColor'.
@@ -694,6 +697,7 @@ newNodeArenaArrays cap = do
   naArrTree <- newPrimArray (cap * treeStride)
   naArrTextStore <- newArray cap T.empty
   naArrOptionsStore <- newArray cap []
+  naArrOptionsLast <- newArray cap []
   naArrFontColor <- newPrimArray cap
   naArrScope <- newPrimArray cap
   naArrImageId <- newPrimArray cap
@@ -882,6 +886,7 @@ growNodeArenaArrays cap newCap a = do
   naArrTree <- growPrimArrayCopy (naArrTree a) (cap * treeStride) (newCap * treeStride) 0
   naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
   naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
+  naArrOptionsLast <- growBoxedStoreCopy [] (naArrOptionsLast a) cap newCap
   naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
   naArrScope <- growPrimArrayCopy (naArrScope a) cap newCap 0
   naArrImageId <- growPrimArrayCopy (naArrImageId a) cap newCap 0
@@ -1531,9 +1536,14 @@ getOptions na idx = arenaArrays na >>= \a -> readArray (naArrOptionsStore a) idx
 setOptions :: NodeArena -> NodeIdx -> [Text] -> IO ()
 setOptions na idx opts = do
   a <- arenaArrays na
-  old <- readArray (naArrOptionsStore a) idx
+  -- Compared with the list last hashed here, not the slot 'addNode' just
+  -- cleared: against that, every list would rehash and an empty one would
+  -- take an old list's hash.
+  old <- readArray (naArrOptionsLast a) idx
   h <- cachedHash (naOptionsHash na) idx (old `ptrEq` opts) 0x4f505453 opts
   writeArray (naArrOptionsStore a) idx opts
+  writeArray (naArrOptionsLast a) idx opts
+
   mixNodeInput na idx 0x4f50 h
 
 -- | The node's value hash from @ref@ when @same@ says the value is the

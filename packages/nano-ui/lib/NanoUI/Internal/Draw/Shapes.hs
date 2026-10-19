@@ -363,17 +363,21 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
         then pushSquareStroke da px py w h ibw col
         else do
           let !n = cornerSegments
-              -- Square corners run the sides' centre lines into each other;
-              -- rounded ones end the sides where the arcs start.
+              -- With square corners the top and bottom run the full width
+              -- and the sides fit between them, so each corner is drawn once
+              -- (sides meeting at their centre lines would leave its outer
+              -- quarter bare and draw the inner one twice); rounded ones end
+              -- the sides where the arcs start.
               !corners = rad > 0.5
               !topY = py + ibw / 2
               !leftX = px + ibw / 2
-              !x0 = if corners then px + rad else leftX
-              !y0 = if corners then py + rad else topY
-              !midW = max 0 (if corners then w - 2 * rad else w - ibw)
-              !midH = max 0 (if corners then h - 2 * rad else h - ibw)
-              !botY = if corners then py + h - ibw / 2 else topY + midH
-              !rightX = if corners then px + w - ibw / 2 else leftX + midW
+              !x0 = if corners then px + rad else px
+              !y0 = if corners then py + rad else py + ibw
+              !midW = max 0 (if corners then w - 2 * rad else w)
+              !midH = max 0 (if corners then h - 2 * rad else h - 2 * ibw)
+              !botY = py + h - ibw / 2
+              !rightX = px + w - ibw / 2
+
               !cr = max 0.25 (rad - ibw / 2)
               !doTB = midW >= 0.001
               !doLR = midH >= 0.001

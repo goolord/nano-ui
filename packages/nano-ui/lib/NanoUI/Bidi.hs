@@ -4,7 +4,8 @@
 -- This is the implicit part of the Unicode bidirectional algorithm (UAX #9)
 -- for a single line: the paragraph direction from the first strong
 -- character, European and Arabic numbers, neutrals between runs, and
--- reordering by level. Explicit embeddings, overrides, isolates and bracket
+-- the separators and terminators that keep a number whole, and reordering
+-- by level. Explicit embeddings, overrides, isolates and bracket
 -- pairs are not handled; text using them lays out as if they were absent.
 module NanoUI.Bidi
   ( BidiRun (..)
@@ -26,7 +27,7 @@ data BidiRun = BidiRun
   }
   deriving (Eq, Show)
 
-data Class = L | R | AL | EN | AN | NSM | WS | ON
+data Class = L | R | AL | EN | AN | ES | ET | CS | NSM | WS | ON
   deriving (Eq, Show)
 
 -- | Whether a line has characters that can flow right to left. A line
@@ -61,6 +62,12 @@ classify :: Char -> Class
 classify c
   | n < 0x0590 = latin
   | n <= 0x05FF = if n >= 0x0591 && n <= 0x05C7 && n /= 0x05BE && n /= 0x05C0 && n /= 0x05C3 && n /= 0x05C6 then NSM else R
+  -- Arabic number signs, comma, percent sign and decimal and thousands
+  -- separators.
+  | n >= 0x0600 && n <= 0x0605 = AN
+  | n == 0x060C = CS
+  | n == 0x066A = ET
+  | n == 0x066B || n == 0x066C = AN
   | n >= 0x0660 && n <= 0x0669 = AN
   | n >= 0x06F0 && n <= 0x06F9 = EN
   | n >= 0x064B && n <= 0x065F || n == 0x0670 || n >= 0x06D6 && n <= 0x06ED = NSM
@@ -71,6 +78,8 @@ classify c
   | n >= 0x200E && n <= 0x200F = if n == 0x200E then L else R
   | n >= 0xFB1D && n <= 0xFB4F = R
   | n >= 0xFB50 && n <= 0xFDFF = AL
+  -- A byte order mark directs nothing.
+  | n == 0xFEFF = ON
   | n >= 0xFE70 && n <= 0xFEFF = AL
   | n >= 0x2000 && n <= 0x206F = if n <= 0x200A || n == 0x2028 || n == 0x2029 then WS else ON
   | n >= 0x10800 && n <= 0x10FFF = R
@@ -81,29 +90,56 @@ classify c
     latin
       | c >= '0' && c <= '9' = EN
       | c == ' ' || c == '\t' = WS
+      | c == '+' || c == '-' = ES
+      | c == '#' || c == '$' || c == '%' = ET
+      | c == ',' || c == '.' || c == '/' || c == ':' = CS
       | n < 0x80 && not (isAsciiLetter c) = ON
+      | n == 0xA0 = CS
+      | n >= 0xA2 && n <= 0xA5 || n == 0xB0 || n == 0xB1 = ET
       | n >= 0x80 && n <= 0xBF = ON
       | n == 0xD7 || n == 0xF7 = ON
       | n >= 0x0300 && n <= 0x036F = NSM
       | otherwise = L
     isAsciiLetter ch = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
 
--- | Weak types: a mark takes the class before it, a European number after
--- Arabic letters reads as an Arabic number and one after Latin letters (or
--- at the start of a left-to-right line) as Latin.
+-- | Weak types (UAX #9 W1-W7): a mark takes the class before it; a European
+-- number after Arabic letters reads as an Arabic number; a separator between
+-- two numbers of one kind and terminators next to a European number join the
+-- number, so 1.5, 1,000 and 50% stay whole; other separators are neutral; and
+-- a European number after Latin letters (or at the start of a left-to-right
+-- line) reads as Latin.
 resolveWeak :: Bool -> [Class] -> [Class]
-resolveWeak paragraphRtl = go ON (if paragraphRtl then R else L)
+resolveWeak paragraphRtl ks0 = w7 sos (map w6 w5)
   where
+    sos = if paragraphRtl then R else L
+    -- W1-W3.
+    w13 = go sos sos ks0
     go _ _ [] = []
     go prev lastStrong (k : ks) =
       let k1 = if k == NSM then prev else k
-          k2
-            | k1 == EN && lastStrong == AL = AN
-            | k1 == EN && lastStrong == L = L
-            | otherwise = k1
+          k2 = if k1 == EN && lastStrong == AL then AN else k1
           k3 = if k2 == AL then R else k2
           lastStrong' = if k1 == L || k1 == R || k1 == AL then k1 else lastStrong
        in k3 : go k1 lastStrong' ks
+    -- W4: one separator between two numbers of one kind.
+    w4 = zipWith3 separator (Nothing : map Just w13) w13 (map Just (drop 1 w13) ++ [Nothing])
+    separator (Just EN) ES (Just EN) = EN
+    separator (Just EN) CS (Just EN) = EN
+    separator (Just AN) CS (Just AN) = AN
+    separator _ k _ = k
+    -- W5: terminators next to a European number.
+    groups = NE.groupBy (\a b -> (a == ET) == (b == ET)) w4
+    w5 = concat (zipWith3 terminators (Nothing : map (Just . NE.last) groups) groups (map (Just . NE.head) (drop 1 groups) ++ [Nothing]))
+    terminators before g after
+      | NE.head g == ET && (before == Just EN || after == Just EN) = map (const EN) (NE.toList g)
+      | otherwise = NE.toList g
+    -- W6.
+    w6 k = if k == ES || k == ET || k == CS then ON else k
+    -- W7.
+    w7 _ [] = []
+    w7 lastStrong (k : ks) =
+      (if k == EN && lastStrong == L then L else k) : w7 (if k == L || k == R then k else lastStrong) ks
+
 
 -- | Neutrals between two characters of the same direction take it (numbers
 -- count as right to left here); other neutrals take the paragraph's.

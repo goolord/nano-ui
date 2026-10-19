@@ -297,8 +297,10 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
                   y0 = if up then ay else by
                   x1 = if up then bx else ax
                   y1 = if up then by else ay
+              -- The row is tested before 'floor': an edge from far above (a
+              -- huge or infinite coordinate) floors to garbage, not a row.
               when (ay /= by && y1 > 0 && y0 < fromIntegral height) $
-                visit (max 0 (floor y0)) y0 y1 x0 ((x1 - x0) / (y1 - y0)) (if up then 1 else -1)
+                visit (if y0 <= 0 then 0 else floor y0) y0 y1 x0 ((x1 - x0) / (y1 - y0)) (if up then 1 else -1)
   -- Where each row's edges begin: counts, then running totals.
   rowStart <- newZeroedPrimArray (height + 1)
   forEdges $ \row _ _ _ _ _ -> readPrimArray rowStart (row + 1) >>= writePrimArray rowStart (row + 1) . (+ 1)
