@@ -35,7 +35,7 @@ import Data.IORef (IORef, atomicWriteIORef, newIORef, readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Foreign.C.String (newCString, peekCString)
+import qualified GHC.Foreign as GHC
 import Foreign.Marshal.Alloc (free)
 import Foreign.Marshal.Array (newArray, peekArray0)
 import Foreign.Marshal.Utils (maybePeek)
@@ -43,7 +43,11 @@ import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
 import Foreign.StablePtr (castPtrToStablePtr, castStablePtrToPtr, deRefStablePtr, freeStablePtr, newStablePtr)
 import NanoUI.Sdl.Internal.Display (pushRefreshEvent)
 import NanoUI.Sdl.Internal.DialogState
+import NanoUI.Sdl.Internal.Font (sdlPathEncoding)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), askSdlEnv)
+import NanoUI.Sdl.Internal.WindowOptions (queryWindowState)
+import NanoUI.Backend (WindowState (..))
+
 import NanoUI.Internal.Monad (NanoUI, askContext)
 import NanoUI.Testing (Context, markDirty, liftIO)
 import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
@@ -111,10 +115,12 @@ pollFileDialog env (FileDialogId owner ref)
       result <- takeResult ref
       unless (result == FileDialogPending || result == FileDialogUnknown) $ do
         -- The native dialog stole window focus; reclaim it so the app keeps
-        -- receiving hover/motion/wheel events without an extra click.
-        -- Restoration is a best-effort no-op when the window was never
-        -- minimized; only a failed raise signals a possible focus failure.
-        void (restoreWindowSafe (sdlWindow env))
+        -- receiving hover/motion/wheel events without an extra click. Only a
+        -- minimized window is restored: SDL_RestoreWindow also takes a
+        -- maximized one back to its normal size. Only a failed raise signals
+        -- a possible focus failure.
+        minimized <- winMinimized <$> queryWindowState (sdlWindow env) 1
+        when minimized $ void (restoreWindowSafe (sdlWindow env))
         raised <- raiseWindowSafe (sdlWindow env)
         unless raised $
           hPutStrLn stderr "nano-ui: dialog completed but window raise failed; input may need a click"
@@ -168,15 +174,17 @@ data DialogKind = OpenDialog | SaveDialog | FolderDialog
 launchDialog :: SdlEnv -> DialogKind -> FileDialogOptions -> IO FileDialogId
 launchDialog env kind opts = do
   -- SDL reads the filters and the location until it runs the callback, which
-  -- frees them.
+  -- frees them. Its strings are UTF-8 on Windows, not the code page
+  -- Foreign.C.String would use.
+  enc <- sdlPathEncoding
   names <-
     forM (if kind == FolderDialog then [] else dialogFilters opts) $ \(FileFilter name pattern_) ->
-      (,) <$> newCString (T.unpack name) <*> newCString (T.unpack pattern_)
+      (,) <$> GHC.newCString enc (T.unpack name) <*> GHC.newCString enc (T.unpack pattern_)
   filters <-
     if null names
       then pure nullPtr
       else newArray [SDL_DialogFileFilter (PtrConst.unsafeFromPtr n) (PtrConst.unsafeFromPtr p) | (n, p) <- names]
-  location <- traverse newCString (dialogDefaultLocation opts)
+  location <- traverse (GHC.newCString enc) (dialogDefaultLocation opts)
   result <- newIORef FileDialogPending
   let finish outcome = do
         mapM_ (\(n, p) -> free n >> free p) names
@@ -217,7 +225,8 @@ onResult userdata filelist _filterIdx = do
   let launch = castPtrToStablePtr userdata
   finish <- deRefStablePtr launch
   freeStablePtr launch
-  paths <- maybePeek (peekArray0 nullPtr >=> traverse peekCString) (castPtr filelist)
+  enc <- sdlPathEncoding
+  paths <- maybePeek (peekArray0 nullPtr >=> traverse (GHC.peekCString enc)) (castPtr filelist)
   -- A cancelled dialog's handle stays unknown.
   finish $ case paths of
     Nothing -> FileDialogFailed

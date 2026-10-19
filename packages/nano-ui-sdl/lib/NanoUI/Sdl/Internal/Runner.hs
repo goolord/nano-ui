@@ -65,7 +65,10 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- out of space during the previous frame, reset it now (re-warming the
   -- base fonts) so a reset can never wipe the texture underneath
   -- already-recorded text mid-frame.
-  prepareGlyphAtlasForFrame (sdlFontCache env)
+  freshAtlas <- prepareGlyphAtlasForFrame (sdlFontCache env)
+  -- Fonts the size cache evicted close only now, with the text caches that
+  -- can still hold their metrics dropped, before the UI pass draws.
+  whenM (closeEvictedFonts (sdlFontCache env)) (clearMeasureCache ctx)
   scale <- readIORef (sdlScaleRef env)
   let Size lw lh = inputWindowSize inp
       pw = max 1 (round (lw * scale))
@@ -101,6 +104,11 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   writeIORef (ctxDamageWanted ctx) (not presentFull)
   t0 <- getMonotonicTime
   (drawData, dirtyAfterUi) <- evaluateUi `finally` writeIORef (ctxDamageWanted ctx) True
+  -- Images registered during the view (an icon rasterized the first time it
+  -- shows, a thumbnail on view) moved or grew the atlas this frame's UVs
+  -- point into; upload them before drawing. Nothing changed costs a
+  -- generation check.
+  SdlImage.syncImageAtlas ren (sdlImages env) ctx
   t1 <- getMonotonicTime
   -- Sync SDL text input with the focus and caret every frame. A skipped
   -- frame would look like a focus change mid-composition and drop it.
@@ -122,7 +130,11 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- keeps the previous valid frame, 'damageFull' forces a full repaint, and
   -- 'prepareGlyphAtlasForFrame' resets the atlas before the next frame
   -- records any quads, so text never flickers or vanishes for a frame.
-  atlasReset <- glyphAtlasFull (sdlFontCache env)
+  -- A frame that ran out of room in an atlas reset at its start (a glyph
+  -- larger than a page, or more glyphs than the pages hold) would fail the
+  -- same way after every reset, so it is presented with those glyphs missing
+  -- instead of dropped and run again forever.
+  atlasReset <- (&& not freshAtlas) <$> glyphAtlasFull (sdlFontCache env)
   if atlasReset || damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       when atlasReset $ do

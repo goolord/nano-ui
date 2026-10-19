@@ -10,6 +10,8 @@ module NanoUI.Sdl.Internal.Input
   , waitEvent
   , applyEvent
   , isButtonEdge
+  , scaleEventPositions
+  , hasPointerEvent
   , sdlKey
   , TextInputSync
   , newTextInputSync
@@ -23,7 +25,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.ByteString qualified as BS
 import qualified Data.Text as T
 import Data.Text (Text)
-import qualified Data.Text.Foreign as TF
+import qualified Data.Text.Encoding as TE
 import Data.Word (Word32)
 import Foreign.C.Types (CChar, CFloat, CUInt)
 import Data.Foldable (for_)
@@ -310,9 +312,11 @@ dropEvent p ty = do
   payload <- fromMaybe "" <$> peekText (getField @"data'" de)
   pure (Just (EvDrop (DropEvent ty pos payload)))
 
--- | Decode an event's UTF-8 string, or 'Nothing' for a null pointer.
+-- | Decode an event's UTF-8 string, or 'Nothing' for a null pointer. Bytes
+-- that are not UTF-8 (a dropped file named in a legacy encoding) become
+-- U+FFFD rather than an exception that would end the session.
 peekText :: PtrConst.PtrConst CChar -> IO (Maybe Text)
-peekText = maybePeek TF.peekCString . PtrConst.unsafeToPtr
+peekText = maybePeek (fmap TE.decodeUtf8Lenient . BS.packCString) . PtrConst.unsafeToPtr
 
 peekModifiers :: IO Modifiers
 peekModifiers = modFromKeymod <$> getModState
@@ -347,6 +351,28 @@ applyEvent inp ev =
     EvQuit -> inp
     EvWindowChanged -> inp
     EvSystemThemeChanged -> inp
+
+-- | Events with their pointer and drop positions moved from window
+-- coordinates into layout units, which a UI zoom divides. Each event keeps
+-- its own position: a press the runner gives a frame of its own is hit-tested
+-- where it happened, not where the pointer is by the time the batch is read.
+scaleEventPositions :: Float -> [SdlEvent] -> [SdlEvent]
+scaleEventPositions zoom
+  | zoom == 1 || zoom <= 0 = id
+  | otherwise = map $ \case
+      EvMouseMotion p m -> EvMouseMotion (logical p) m
+      EvMouseButton b d p m -> EvMouseButton b d (logical p) m
+      EvDrop (DropEvent t p d) -> EvDrop (DropEvent t (logical <$> p) d)
+      e -> e
+  where
+    logical (V2 x y) = V2 (x / zoom) (y / zoom)
+
+-- | Whether a batch moved or pressed the pointer.
+hasPointerEvent :: [SdlEvent] -> Bool
+hasPointerEvent = any $ \case
+  EvMouseMotion {} -> True
+  EvMouseButton {} -> True
+  _ -> False
 
 -- | Whether an event is a button press or release and should end an input batch.
 isButtonEdge :: SdlEvent -> Bool

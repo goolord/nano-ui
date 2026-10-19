@@ -15,7 +15,7 @@ import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
-import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
+import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, windowZoom, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 
@@ -65,10 +65,15 @@ runSdlSession options drawFn = do
     -- repaint or present.
     wakeRef <- newIORef False
     let noteWake evs = evs <$ when (EvRefresh `elem` evs) (writeIORef wakeRef True)
+        -- Pointer and drop positions in layout units, as each event had them.
+        decode evs = do
+          zoom <- windowZoom env
+          when (hasPointerEvent evs) (writeIORef (sdlPointerSeen env) True)
+          noteWake (scaleEventPositions zoom evs)
     -- Take every queued event into the input, syncing the display after
     -- each batch, until none is left.
     let settle c inp = do
-          pending <- pollEvents >>= noteWake
+          pending <- pollEvents >>= decode
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
           if null pending then pure (c', inp') else settle c' inp'
     -- The opening frames are drawn here, outside the loop, so what one asks
@@ -100,12 +105,12 @@ runSdlSession options drawFn = do
     whenM (readIORef wakeRef) pushRefreshEvent
     let drv =
           SessionDriver
-            { sdPollEvents    = pollEvents >>= noteWake
+            { sdPollEvents    = pollEvents >>= decode
             , sdWaitEvents    = \t ->
                 -- Take the rest of the queue with the event that ended the
                 -- wait, so one pass sees a whole burst (a resize queues
                 -- several window events at once).
-                waitEvent t >>= maybe (pure []) (\ev -> noteWake . (ev :) =<< pollEvents)
+                waitEvent t >>= maybe (pure []) (\ev -> decode . (ev :) =<< pollEvents)
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
             , sdIsSessionQuit = (== EvQuit)

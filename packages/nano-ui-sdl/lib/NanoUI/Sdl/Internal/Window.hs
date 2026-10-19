@@ -41,8 +41,9 @@ import Text.Read (readMaybe)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Data.Text.Foreign qualified as TextForeign
-import Foreign.C.String (withCString)
+import qualified GHC.Foreign as GHC
 import Foreign.Marshal.Utils (fromBool, maybePeek, with)
 import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
@@ -78,7 +79,7 @@ import SDL3.Sys.Bindgen.Surface qualified as Surface
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags)
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
-import SDL3.Sys.Clipboard (getClipboardText, setClipboardText)
+import SDL3.Sys.Clipboard (getClipboardTextSafe, setClipboardText)
 import SDL3.Sys.Hints (resetHint, setHint)
 import SDL3.Sys.Blendmode (SDL_BlendMode, composeCustomBlendMode)
 import SDL3.Sys.Blendmode qualified as Blend
@@ -238,6 +239,9 @@ data SdlEnv = SdlEnv
   -- ^ Backbuffer pixels per layout unit: the pixel density times the zoom.
   , sdlUiScaleRef :: !(IORef Float)
   -- ^ The requested UI scale; see 'sdlAppUiScale'.
+  , sdlPointerSeen :: !(IORef Bool)
+  -- ^ Whether a pointer event has arrived, so the input's position, which
+  -- the events set in layout units, can be trusted over a query.
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: DebugSamplerRef
@@ -344,11 +348,15 @@ syncDisplay ctx env inp = do
         (Size 0 0, Size 0 0) -> wsSize defaultWindowSettings
         (Size 0 0, s) -> s
         (Size sw sh, _) -> Size (sw / zoom) (sh / zoom)
-  -- Off the window, SDL keeps the last position inside it: the input's
+  -- The events set the input's position, each its own and already in
+  -- layout units, so a press keeps the point it happened at. SDL is asked
+  -- only before any pointer event, or when the zoom moved what those units
+  -- are. Off the window, SDL keeps the last position inside it: the input's
   -- own, moved off every widget when the pointer left, stays.
   inWindow <- pointerInWindow (sdlWindow env)
+  seen <- readIORef (sdlPointerSeen env)
   mouse <-
-    if inWindow /= 0
+    if inWindow /= 0 && (not seen || scaleChanged)
       then (\(V2 mx my) -> V2 (mx / zoom) (my / zoom)) <$> queryMouseWindowPos
       else pure (inputMousePos inp)
   ctxMeasured <- readIORef (sdlCachedCtx env)
@@ -523,6 +531,7 @@ startSdlWindow opts flags ctx fontSource monoSource = do
     liftIO $ fromMaybe "unknown" <$> (maybePeek TextForeign.peekCString . PtrConst.unsafeToPtr =<< getRendererName sdlRenderer)
   sdlScaleRef <- liftIO $ newIORef scale
   sdlUiScaleRef <- liftIO $ newIORef (sdlAppUiScale opts)
+  sdlPointerSeen <- liftIO $ newIORef False
   sdlFontRequestRef <- liftIO $ newIORef (sdlAppFont opts)
   sdlFontAppliedRef <- liftIO $ newIORef (sdlAppFont opts)
   glyphAtlas <- mkAcquire (newGlyphAtlas sdlRenderer) destroyGlyphAtlas
@@ -631,11 +640,13 @@ withSdlClipboard :: Context -> Context
 withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
   where
     writeClipboard txt = TextForeign.withCString txt (setClipboardText . PtrConst.unsafeFromPtr)
+    -- The safe call: on X11 SDL pumps events while the clipboard's owner
+    -- answers, which can run this program's resize and hit-test callbacks.
+    -- Another program's text need not be valid UTF-8.
     readClipboard = do
-      ptr <- getClipboardText
-      txt <- maybePeek TextForeign.peekCString ptr
+      ptr <- getClipboardTextSafe
       -- SDL_free takes a null pointer too.
-      free (castPtr ptr)
+      txt <- maybePeek (fmap TE.decodeUtf8Lenient . BS.packCString) ptr `finally` free (castPtr ptr)
       pure (mfilter (not . T.null) txt)
 
 -- | Write the last presented frame to a BMP file. A retained session reads
@@ -644,7 +655,7 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path =
   withSurface (readFrame env . retainTexture =<< readIORef (sdlRetain env)) False $ \surface ->
-    withCString path (saveBMP surface . PtrConst.unsafeFromPtr)
+    sdlPathEncoding >>= \enc -> GHC.withCString enc path (saveBMP surface . PtrConst.unsafeFromPtr)
 
 -- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
 -- window pixels (logical size times display scale) with the drawn alpha,

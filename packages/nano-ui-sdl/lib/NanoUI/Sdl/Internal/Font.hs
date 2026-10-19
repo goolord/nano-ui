@@ -12,6 +12,8 @@ module NanoUI.Sdl.Internal.Font
   , newGlyphAtlas
   , destroyGlyphAtlas
   , prepareGlyphAtlasForFrame
+  , closeEvictedFonts
+  , sdlPathEncoding
   , glyphAtlasFull
   , glyphAtlasHandle
   , SdlFontCache
@@ -54,10 +56,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.ByteString.Short as SBS
 import qualified GHC.Foreign as GHC
-import GHC.IO.Encoding (getFileSystemEncoding)
+import GHC.IO.Encoding (TextEncoding, getFileSystemEncoding, mkTextEncoding)
+import System.Info (os)
 import Data.Text.Internal.Encoding.Utf8 (utf8Length)
 import Data.Text.Unsafe (lengthWord8)
-import Foreign.C.String (CString, withCString)
+import Foreign.C.String (CString)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, peekElemOff)
@@ -505,11 +508,18 @@ coverageSourceFor c = do
   where
     findSources = do
       files <- searchFontFamilies coverageFamilies `catch` \(_ :: SomeException) -> pure []
-      -- The file system encoding turns a path back into the bytes it was
-      -- read from, including bytes that are not valid in that encoding.
-      enc <- getFileSystemEncoding
+      enc <- sdlPathEncoding
       sources <- forM files $ \path -> GHC.withCStringLen enc path (fmap SBS.toShort . BS.packCStringLen)
       pure (Coverage (smallArrayFromList sources) IM.empty IM.empty)
+
+-- | The encoding of the paths SDL takes and gives: UTF-8 on Windows, whatever
+-- the code page, and elsewhere the file system encoding, which turns a path
+-- back into the bytes it was read from, including bytes that are not valid
+-- in that encoding.
+sdlPathEncoding :: IO TextEncoding
+sdlPathEncoding
+  | os == "mingw32" = mkTextEncoding "UTF-8"
+  | otherwise = getFileSystemEncoding
 
 -- | Close the coverage probes, before SDL_ttf shuts down. Fallbacks copied
 -- from them keep their shared streams open until they close themselves.
@@ -519,7 +529,11 @@ closeCoverageProbes =
     Nothing -> pure ()
     Just cov -> do
       forM_ (covProbes cov) $ \probe -> unless (probe == nullPtr) (ttfCloseFont probe)
-      writeIORef coverageRef (Just cov {covProbes = IM.empty})
+      -- Which source covers each character is forgotten too: the next
+      -- session opens no probe until it asks, so a remembered answer would
+      -- name a probe that is not open.
+      writeIORef coverageRef (Just cov {covProbes = IM.empty, covChars = IM.empty})
+
 
 -- | Fallback families in the order shaping tries them: broad Latin, Greek
 -- and Cyrillic first, then scripts, then symbols, across Linux, Windows and
@@ -705,7 +719,7 @@ openFontSource source ptsize =
     pt = realToFrac ptsize
     open src = do
       font <- case src of
-        FontFromPath path -> withCString path (`ttfOpenFont` pt)
+        FontFromPath path -> sdlPathEncoding >>= \enc -> GHC.withCString enc path (`ttfOpenFont` pt)
         -- SDL_ttf reads from its own copy of the bytes, so the font outlives
         -- the ByteString's pinning.
         FontFromMemory bs _ ->
@@ -838,6 +852,9 @@ data SdlFontCache = SdlFontCache
   , sfcBaseEntries    :: !(IORef (CachedFontEntry, CachedFontEntry))
   , sfcDynamicCache   :: !(IORef (IM.IntMap CachedFontEntry, [Int]))
   -- ^ Fonts at other sizes, and their keys, most recently used first.
+  , sfcEvicted        :: !(IORef [SdlFont])
+  -- ^ Dynamic fonts dropped from the cache but not closed yet: text caches
+  -- may still hold metrics prepared from them ('closeEvictedFonts').
   }
 
 -- | Open the base sans and mono fonts at the pixel density, and warm them
@@ -851,6 +868,7 @@ newSdlFontCache sans mono ga basePt scaleRef = do
       <$> newIORef sans
       <*> newIORef base
       <*> newIORef (IM.empty, [])
+      <*> newIORef []
   warmBaseFonts cache
   pure cache
 
@@ -882,11 +900,13 @@ resetGlyphAtlas cache = do
 
 -- | Frame-start atlas maintenance: count the frame, and reset the atlas if an
 -- insertion failed since the last reset. Must run before the frame's UI pass
--- records any quads.
-prepareGlyphAtlasForFrame :: SdlFontCache -> IO ()
+-- records any quads. Answers whether it reset: a frame that still runs out
+-- of room in an atlas reset at its start would only fail again after another.
+prepareGlyphAtlasForFrame :: SdlFontCache -> IO Bool
 prepareGlyphAtlasForFrame cache = do
   modifyIORef' (gaFrame (sfcGlyphAtlas cache)) (+ 1)
-  whenM (glyphAtlasFull cache) (resetGlyphAtlas cache)
+  full <- glyphAtlasFull cache
+  full <$ when full (resetGlyphAtlas cache)
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource
@@ -900,12 +920,22 @@ closeCachedFonts ga fonts = do
   mapM_ closeFont fonts
   modifyIORef' (gaIndexEntries ga) (`IM.withoutKeys` handles)
 
--- | Close every open font, base and dynamic.
+-- | Close every open font, base, dynamic and evicted.
 destroySdlFontCache :: SdlFontCache -> IO ()
 destroySdlFontCache cache = do
   (dynamic, _) <- atomicModifyIORef' (sfcDynamicCache cache) ((IM.empty, []),)
+  evicted <- atomicModifyIORef' (sfcEvicted cache) ([],)
   (sans, mono) <- readIORef (sfcBaseEntries cache)
-  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (sans : mono : IM.elems dynamic))
+  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (sans : mono : IM.elems dynamic) ++ evicted)
+
+-- | Close the fonts evicted since the last call, answering whether there
+-- were any. The caller drops the text caches first ('clearMeasureCache'),
+-- since a cached span or prepared text may still hold an evicted font's
+-- metrics, and drawing with a closed font fails.
+closeEvictedFonts :: SdlFontCache -> IO Bool
+closeEvictedFonts cache = do
+  evicted <- atomicModifyIORef' (sfcEvicted cache) ([],)
+  not (null evicted) <$ closeCachedFonts (sfcGlyphAtlas cache) evicted
 
 -- | Reopen the base fonts from @source@ at the current pixel density, close
 -- every dynamic size, and reset the glyph atlas, which re-warms the new base
@@ -950,8 +980,10 @@ getOrLoadCachedFont cache sz var
           -- fonts drawn every frame are never closed. One near the front
           -- already is safe from eviction and stays put, which spares
           -- interleaved sizes a new order on every lookup.
-          unless (key `elem` take 8 order) $
-            writeIORef (sfcDynamicCache cache) (entries, key : delete key order)
+          -- The order is forced, or each hit would leave a 'delete' behind.
+          unless (key `elem` take 8 order) $ do
+            let order' = key : delete key order
+            length order' `seq` writeIORef (sfcDynamicCache cache) (entries, order')
           pure entry
         Nothing -> do
           scale <- readIORef (sfcScaleRef cache)
@@ -961,7 +993,8 @@ getOrLoadCachedFont cache sz var
           -- At most 48 dynamic sizes stay open.
           let (kept, evicted) = splitAt 48 (key : order)
           writeIORef (sfcDynamicCache cache) (foldr IM.delete (IM.insert key entry entries) evicted, kept)
-          closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (mapMaybe (`IM.lookup` entries) evicted))
+          -- Closed at the next frame start, once the text caches let go.
+          modifyIORef' (sfcEvicted cache) (map cfeFont (mapMaybe (`IM.lookup` entries) evicted) ++)
           pure entry
   where
     mono = var == FontMono
