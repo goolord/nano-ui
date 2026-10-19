@@ -351,6 +351,9 @@ data Slot
   | SlotScrollViewSize
   | SlotScrollRange
   | SlotScrollContent
+  | -- | An offset in window axes set before the scroller's first layout
+    -- (storePoint), placed on the axes it owns once it has one.
+    SlotScrollPending
   | SlotTextAreaScroll
   | SlotTextAreaViewport
   | SlotTextAreaAnchorRow
@@ -379,7 +382,11 @@ data Slot
     -- kept in step with its lines so an edit remeasures only the lines it
     -- changed.
     SlotTextAreaWidths
+  | -- | A text area's row height as it was last painted (storeFloat), for
+    -- commands run between frames to keep the caret in view with.
+    SlotTextAreaLineH
   | SlotTextInputScroll
+
   | -- | Search-field debounce bookkeeping. Text slots on the text widget id: the last
     -- committed query and the monotonic timestamp of the last edit.
     SlotSearchCommitted

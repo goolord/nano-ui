@@ -24,6 +24,8 @@ module NanoUI.Internal.Context.Scroll
   , beginScrollMetrics
   , getScrollOffsetIn
   , setScrollOffsetIn
+  , setScrollOffsetPending
+  , applyPendingScrollOffset
     -- * Commands
   , ScrollBehavior (..)
   , ScrollAlign (..)
@@ -38,7 +40,9 @@ module NanoUI.Internal.Context.Scroll
   , applyScrollTarget
   , scrollTargetOffset
   , scrollGliding
+  , clampScrollGlide
   , clampScrollOffset
+
   , stepScrollGlides
   ) where
 
@@ -47,11 +51,11 @@ import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
-import NanoUI.Internal.Context.Core (damageWidget, getPrevRect, getStore, publishLayoutSlots, recordLayoutRead, setStore, writeSlots)
+import NanoUI.Internal.Context.Core (damageWidget, modifyStore, getPrevRect, getStore, publishLayoutSlots, recordLayoutRead, setStore, writeSlots)
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Store (Slot (..), SlotWrites (..), WidgetStore, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)
+import NanoUI.Internal.Store (Slot (..), SlotWrites (..), WidgetStore, deleteSlot, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2Add, v2X, v2Y)
 
 {-# INLINE snapScrollOffset #-}
@@ -243,12 +247,14 @@ beginScrollMetrics ctx =
 -- every frame and hand the commands a viewport that alternates between panes.
 -- The write requests no frame ('publishLayoutSlots'): a view that read these
 -- metrics while building this frame asked for one through
--- 'getScrollMetrics'.
-cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO ()
+-- 'getScrollMetrics'. Answers whether this node published, so is the one
+-- that owns the offset this frame.
+cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO Bool
 cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
   let key = intKey wid
   st <- readIORef (ctxScrollState ctx)
-  unless (IS.member key (ssCached st)) $ do
+  let fresh = not (IS.member key (ssCached st))
+  fresh <$ when fresh (do
     writeIORef (ctxScrollState ctx) $! st {ssCached = IS.insert key (ssCached st)}
     -- A range that just shrank (a filtered list, a narrower window) would
     -- leave a glide heading past the new end.
@@ -257,7 +263,7 @@ cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
       slotWrite fieldPoint (slotKey SlotScrollViewPos key) (vx, vy)
         <> slotWrite fieldPoint (slotKey SlotScrollViewSize key) (vw, vh)
         <> slotWrite fieldPoint (slotKey SlotScrollRange key) (mx, my)
-        <> slotWrite fieldInt (slotKey SlotScrollAxes key) (fromEnum axes)
+        <> slotWrite fieldInt (slotKey SlotScrollAxes key) (fromEnum axes))
 
 -- | A 1D row scroller keeps its offset in the main-axis slot, so window and
 -- stored axes are swapped for it and identical for everything else. The swap
@@ -266,6 +272,26 @@ cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
 swapAxes :: ScrollAxes -> V2 -> V2
 swapAxes ScrollAxisX (V2 x y) = V2 y x
 swapAxes _ v = v
+
+-- | Hold an offset in window axes for a scroller with no layout yet, whose
+-- axes are not known: 'applyPendingScrollOffset' places it on the ones the
+-- scroller turns out to own. A glide in flight is cancelled.
+setScrollOffsetPending :: Context -> WidgetId -> V2 -> IO ()
+setScrollOffsetPending ctx wid (V2 x y) = do
+  cancelScrollGlide ctx wid
+  modifyStore ctx (insertSlot fieldPoint (slotKey SlotScrollPending (intKey wid)) (x, y))
+
+-- | Place an offset 'setScrollOffsetPending' held, now that the scroller's
+-- axes are known.
+applyPendingScrollOffset :: Context -> WidgetId -> ScrollAxes -> IO ()
+applyPendingScrollOffset ctx wid axes = do
+  store <- getStore ctx
+  let k = slotKey SlotScrollPending (intKey wid)
+  case lookupSlot fieldPoint k store of
+    Nothing -> pure ()
+    Just (x, y) -> do
+      writeIORef (ctxStore ctx) $! deleteSlot fieldPoint k store
+      setScrollOffsetIn ctx wid axes (V2 x y)
 
 -- | This scroller's offset in window axes.
 getScrollOffsetIn :: Context -> WidgetId -> ScrollAxes -> IO V2

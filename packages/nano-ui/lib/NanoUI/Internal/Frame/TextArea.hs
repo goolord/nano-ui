@@ -344,12 +344,23 @@ syncTextAreaViewport ctx idx key fm field = do
       (sx, sy) = findSlot fieldPoint (0, 0) scrollKey store
       V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 sx sy)
       viewportKey = slotKey SlotTextAreaViewport key
+      lineKey = slotKey SlotTextAreaLineH key
+      lineH = textAreaLineHeight fm
       clampScroll
         | sx' /= sx || sy' /= sy = insertSlot fieldPoint scrollKey (sx', sy')
         | otherwise = id
-  unless (sx' == sx && sy' == sy && lookupSlot fieldPoint viewportKey store == Just (clipW, clipH)) $
-    writeIORef (ctxStore ctx) $! clampScroll (insertSlot fieldPoint viewportKey (clipW, clipH) store)
+      -- Commands run between frames keep the caret in view with this.
+      storeLine
+        | lookupSlot fieldFloat lineKey store /= Just lineH = insertSlot fieldFloat lineKey lineH
+        | otherwise = id
+  unless (sx' == sx && sy' == sy && lookupSlot fieldPoint viewportKey store == Just (clipW, clipH) && lookupSlot fieldFloat lineKey store == Just lineH) $
+    writeIORef (ctxStore ctx) $! storeLine (clampScroll (insertSlot fieldPoint viewportKey (clipW, clipH) store))
+  -- A glide aimed past a range that shrank (the text got shorter) would
+  -- never land, since the offset is clamped back here every frame.
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  clampScrollGlide ctx wid (tabRange bars)
   pure extent
+
 
 -- | A text area's scroll offset snapped to the device pixel grid, the same
 -- grid 'pushText' snaps to, so line pens and hit-testing stay in lockstep
@@ -499,6 +510,7 @@ textAreaMouse ctx inp onControl wid idx = do
     let pos = TB.Cursor row (toSource (textIndexAtX prepared line (max 0 (mouseX - (clipX - scrollXf)))))
     -- Nothing writes the store between this load and the selection write
     -- (click counting lives in the interaction state).
-    pure $ FieldDoc pos buf $ \anchor cursor -> do
+    -- modifyStore damages and wakes only when the selection changed, so a
+    -- button held still does not keep frames running.
+    pure $ FieldDoc pos buf $ \anchor cursor ->
       modifyStore ctx (TA.saveTextAreaState key (TA.setTextAreaSelection anchor cursor state))
-      markDirty ctx

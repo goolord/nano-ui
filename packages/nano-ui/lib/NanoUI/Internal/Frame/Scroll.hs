@@ -12,14 +12,12 @@ module NanoUI.Internal.Frame.Scroll
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad (forM_, join, unless, when)
-import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (find)
 import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, passesPointer, topmostFloating, topmostOverlayAtMouse)
+import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, passesPointer)
 import NanoUI.Internal.Frame.Node (childPaintClip, readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
@@ -81,18 +79,30 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
       wid <- getWidgetId na idx
       -- The only pass that sees a scroller's placed geometry. Everything
       -- that scrolls one between frames reads it back from here.
-      cacheScrollMetrics ctx wid axes viewport range
+      owner <- cacheScrollMetrics ctx wid axes viewport range
+      when owner $ applyPendingScrollOffset ctx wid axes
       -- An offset set outright before this layout, or left over from
       -- content that has since shrunk, is held to the range the content
-      -- has now, on the axes this scroller owns.
+      -- has now, on the axes this scroller owns. Only the node that owns the
+      -- id this frame holds it: another with the same id (a table's frozen
+      -- pane, whose range lacks the body's bar lane) would hold the body short
+      -- of its end.
       cur@(V2 cx cy) <- getScrollOffsetIn ctx wid axes
       let
         V2 hx hy = clampScrollOffset range cur
-        held@(V2 dx dy) = case axes of
+        held = case axes of
           ScrollAxisY -> V2 cx hy
           ScrollAxisX -> V2 hx cy
           ScrollAxisXY -> V2 hx hy
-      when (held /= cur) $ setScrollOffsetIn ctx wid axes held
+        V2 ox oy = if owner then held else cur
+        -- A 1D scroller moves its content on its own axis only: the other
+        -- slot can hold an offset for one sharing its id (a frozen pane
+        -- follows its table's body down, not across).
+        (dx, dy) = case axes of
+          ScrollAxisY -> (0, oy)
+          ScrollAxisX -> (ox, 0)
+          ScrollAxisXY -> (ox, oy)
+      when (owner && held /= cur) $ setScrollOffsetIn ctx wid axes held
       descend (sx - dx) (sy - dy)
     else descend sx sy
 
@@ -173,7 +183,12 @@ scrollOwnerNode suppressed Context {ctxNodeArena = na} wid =
 
 applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO ()
 applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = do
-  mIdx <- scrollOwnerNode scrollWheelSuppressed ctx wid
+  -- A node whose bar shows comes first: a table's frozen pane shares its
+  -- body's id with a hidden bar and a range of one axis, and would clamp the
+  -- body's horizontal wheel away.
+  mIdx <-
+    scrollOwnerNode (\cfg _ dir -> scrollChromeSuppressed cfg dir) ctx wid
+      >>= maybe (scrollOwnerNode scrollWheelSuppressed ctx wid) (pure . Just)
   forM_ mIdx $ \idx -> do
     nt <- getNodeType na idx
     (axes, range) <-
@@ -199,11 +214,10 @@ findScrollNodeUnderMouse ctx (Size w h) mouse = do
   if count <= 0
     then pure Nothing
     else do
-      -- Start at the topmost modal under the pointer, else the window or popup.
-      top <-
-        runMaybeT $
-          MaybeT (topmostFloating ctx (== NodeModal) (`rectHit` mouse))
-            <|> MaybeT (topmostOverlayAtMouse ctx mouse)
+      -- Start where the pointer is confined: the open modal (or a panel
+      -- inside it), else the window or popup under it. Off a modal's rect
+      -- the wheel then finds nothing, as the content behind it is blocked.
+      top <- overlayHitRoot ctx mouse
       -- The page root clips to the window, as 'applyScrollOffsets' clips it,
       -- so a scroller in the root's overflow takes the wheel where it is
       -- drawn; a floating panel clips to itself.

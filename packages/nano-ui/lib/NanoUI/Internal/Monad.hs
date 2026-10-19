@@ -100,7 +100,7 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bits ((.&.))
 import Data.Hashable (Hashable, hash)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
-import Data.IORef (modifyIORef', writeIORef)
+import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Monoid (Ap (..))
 import Data.Text (Text)
 import Data.Word (Word64)
@@ -130,7 +130,7 @@ import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Id.Cursor (peekWidgetId, readIdCursor, skipSiblingIds, takeWidgetId, writeIdCursor)
-import NanoUI.Internal.Layout.Arena (arenaCount, getArenaScope, setArenaScope)
+import NanoUI.Internal.Layout.Arena (NodeType (NodeTextInput), arenaCount, getArenaScope, getNodeType, getOptions, lookupNodeByWidgetId, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, Pressable (..), inputMousePos, inputWindowSize, noButtons, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
@@ -639,8 +639,9 @@ requestFrame = withContext markDirty
 
 -- | Whether Escape was pressed this frame and is the view's to act on, and
 -- if so, take it: nothing after this sees it either. 'False' when something
--- earlier in the frame took it, and while a text field's right-click menu or
--- a dropdown is open, since that Escape is for closing it. A dialog that
+-- earlier in the frame took it, while a text field's right-click menu or a
+-- dropdown is open (a focused combo's included), since that Escape is for
+-- closing it, and outside an open modal, whose Escape it is. A dialog that
 -- Escape puts away reads it here rather than from the input, so the Escape
 -- that closes a menu inside it does not close the dialog as well.
 takeEscape :: NanoUI Bool
@@ -652,9 +653,20 @@ takeEscape = do
       taken <- overlayConsumesQuit ctx inp
       menu <- getsInteraction ctx isTextInputMenu
       dropdown <- anySelectOpen <$> getStore ctx
-      let ours = not taken && null menu && not dropdown
+      combo <- focusedCombo ctx
+      blocked <- pointerBlockedByModal ctx
+      let ours = not taken && null menu && not dropdown && not combo && not blocked
       when ours (markEscapeConsumed ctx)
       pure ours
+  where
+    -- A focused combo (a text input carrying options) shows its dropdown
+    -- for as long as it holds focus.
+    focusedCombo ctx = do
+      let na = ctxNodeArena ctx
+      mIdx <- lookupNodeByWidgetId na =<< readIORef (ctxFocusId ctx)
+      case mIdx of
+        Nothing -> pure False
+        Just idx -> getNodeType na idx >>= \nt -> if nt == NodeTextInput then not . null <$> getOptions na idx else pure False
 
 -- | Turn the layout overlay on or off. It outlines every layout node one pixel
 -- inside its edge, coloured by depth and drawn in the node's layer, and tints
@@ -739,7 +751,7 @@ setScrollOffsetUi :: WidgetId -> V2 -> NanoUI ()
 setScrollOffsetUi wid off = withContext $ \ctx ->
   readScrollMetrics ctx wid >>= \case
     Just m -> setScrollOffsetIn ctx wid (scrollAxes m) off
-    Nothing -> setScrollOffset2D ctx wid off
+    Nothing -> setScrollOffsetPending ctx wid off
 
 -- | Scroll to an offset, held to the scroller's range.
 scrollToUi :: WidgetId -> V2 -> ScrollBehavior -> NanoUI ()

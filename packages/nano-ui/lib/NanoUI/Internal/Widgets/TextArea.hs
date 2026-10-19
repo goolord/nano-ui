@@ -319,7 +319,8 @@ loadTextAreaState store key =
         , selectionAnchor = TB.clampCursor buf (TB.Cursor anchorRow anchorCol)
         , scrollOffset = (realToFrac sx, realToFrac sy)
         , viewportSize = (realToFrac vw, realToFrac vh)
-        , lineHeight = 16
+        , lineHeight = realToFrac (findSlot fieldFloat 16 (slotKey SlotTextAreaLineH key) store)
+
         , -- Replacing the document drops its history, so the history is
           -- always the current document's.
           history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
