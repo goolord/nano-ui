@@ -162,6 +162,7 @@ import Data.Bits (setBit, testBit, (.|.))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
+import GHC.Enum (boundedEnumFrom, boundedEnumFromThen)
 import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
@@ -656,7 +657,7 @@ lineAlign a l = l {layoutLineAlign = a}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype LineAlign = LineAlign Word8
-  deriving newtype (Eq, Enum)
+  deriving newtype (Eq)
 
 -- | Left of a row, top of a column.
 pattern LinesStart :: LineAlign
@@ -680,6 +681,13 @@ instance Show LineAlign where
 instance Bounded LineAlign where
   minBound = LinesStart
   maxBound = LinesEnd
+
+-- | Enumerations stop at 'maxBound', not at the byte's.
+instance Enum LineAlign where
+  fromEnum (LineAlign n) = fromIntegral n
+  toEnum = LineAlign . fromIntegral
+  enumFrom = boundedEnumFrom
+  enumFromThen = boundedEnumFromThen
 
 -- | Fraction of a line's free space placed before it: 0, 0.5 or 1.
 lineAlignFraction :: LineAlign -> Float
@@ -718,7 +726,7 @@ pinAt x y l = l {layoutPin = Just (V2 x y)}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype PointerMode = PointerMode Word8
-  deriving newtype (Eq, Enum)
+  deriving newtype (Eq)
 
 -- | The default. Controls (buttons, sliders, text fields, drawings) take the
 -- pointer from what they cover; containers, labels, images and boxes pass it
@@ -748,6 +756,13 @@ instance Bounded PointerMode where
   minBound = PointerAuto
   maxBound = PointerPass
 
+-- | Enumerations stop at 'maxBound', not at the byte's.
+instance Enum PointerMode where
+  fromEnum (PointerMode n) = fromIntegral n
+  toEnum = PointerMode . fromIntegral
+  enumFrom = boundedEnumFrom
+  enumFromThen = boundedEnumFromThen
+
 -- | Set how the node handles the pointer where it overlaps others:
 --
 -- > layers $ do
@@ -763,7 +778,7 @@ pointer m l = l {layoutPointer = m}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype TextBreak = TextBreak Word8
-  deriving newtype (Eq, Enum)
+  deriving newtype (Eq)
 
 -- | Wrap at spaces and newlines; a word longer than the line gets a line of
 -- its own.
@@ -783,6 +798,13 @@ instance Show TextBreak where
 instance Bounded TextBreak where
   minBound = BreakWords
   maxBound = BreakAnywhere
+
+-- | Enumerations stop at 'maxBound', not at the byte's.
+instance Enum TextBreak where
+  fromEnum (TextBreak n) = fromIntegral n
+  toEnum = TextBreak . fromIntegral
+  enumFrom = boundedEnumFrom
+  enumFromThen = boundedEnumFromThen
 
 -- | Set where rich text may wrap its lines.
 textBreak :: TextBreak -> Layout -> Layout

@@ -15,7 +15,17 @@ tests =
   , spec "styled-damage" runStyledDamageTest
   , spec "font-size-label-fit" runFontSizeLabelFitTest
   , spec "border-left" runBorderLeftTest
+  , spec "byte-enums" runByteEnumsTest
   ]
+
+-- | The enums packed into a byte list just their own values.
+runByteEnumsTest :: Context -> IORef Int -> IO ()
+runByteEnumsTest _ failed = do
+  assertEq failed "[LinesStart,LinesCenter,LinesEnd]" (show [minBound .. maxBound :: LineAlign])
+  assertEq failed "[PointerAuto,PointerBlock,PointerPass]" (show [minBound :: PointerMode ..])
+  assertEq failed "[BreakWords,BreakAnywhere]" (show [minBound :: TextBreak ..])
+  assertEq failed "[LinesStart,LinesEnd]" (show [LinesStart, LinesEnd ..])
+  assertEq failed [0, 1, 2] (map fromEnum [PointerAuto ..])
 
 -- | A pointer press, drag and typing on a disabled widget change nothing and
 -- give it no focus.
