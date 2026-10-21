@@ -14,7 +14,28 @@ tests =
   , spec "atlas-fills-width" runAtlasFillsWidthTest
   , spec "atlas-release-reuse" runAtlasReleaseReuseTest
   , spec "atlas-release-repaints" runAtlasReleaseRepaintTest
+  , spec "atlas-release-merges" runAtlasReleaseMergeTest
   ]
+
+-- | Space a smaller image split off is whole again once that image is
+-- released too, so an image as large as the first takes its place rather
+-- than a shelf. That holds for a split that leaves a strip too thin for any
+-- image.
+runAtlasReleaseMergeTest :: Context -> IORef Int -> IO ()
+runAtlasReleaseMergeTest ctx failed = do
+  let insert tid w h = registerImage ctx (ImageId tid) w h (BS.replicate (w * h * 4) 9)
+      origin tid = do
+        (w, h, _, _) <- atlasSnapshot ctx >>= maybe (fail "missing atlas snapshot") pure
+        fmap (\(u0, v0, _, _) -> (round (u0 * fromIntegral w), round (v0 * fromIntegral h)) :: (Int, Int)) <$> lookupImageUv ctx (ImageId tid)
+  insert 1 100 100 >>= assert failed
+  first <- origin 1
+  releaseImage ctx (ImageId 1)
+  forM_ [(2, 60, 100, 3), (4, 99, 99, 5)] $ \(small, w, h, large) -> do
+    insert small w h >>= assert failed
+    releaseImage ctx (ImageId small)
+    insert large 100 100 >>= assert failed
+    origin large >>= assertEq failed first
+    releaseImage ctx (ImageId large)
 
 -- | Releasing an image still on screen requests a frame that repaints it
 -- (as the placeholder), since its node's rect does not change. Releasing an
