@@ -176,7 +176,9 @@ foreign import ccall "RGFW_window_close"
   c_RGFW_window_close :: Ptr RGFW_window -> IO ()
 
 -- | Poll into caller-owned event storage. Zero means no event was written.
-foreign import ccall unsafe "RGFW_window_checkEvent"
+-- A safe call: on Windows it dispatches the window's messages, and dragging
+-- the title bar runs the system's move loop inside it.
+foreign import ccall "RGFW_window_checkEvent"
   c_RGFW_window_checkEvent :: Ptr RGFW_window -> Ptr RGFW_event -> IO CUChar
 
 -- | Wait in milliseconds: negative blocks indefinitely; zero does not wait.
