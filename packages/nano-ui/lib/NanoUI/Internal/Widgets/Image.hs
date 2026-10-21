@@ -80,6 +80,7 @@ imageConfigured' cfg iid = do
 newtype ImageHandle k = ImageHandle (Resource k (Maybe ImageId))
   deriving newtype (Eq)
 
+-- | A handle holding no image yet. Allocate one per image during setup.
 newImageHandle :: IO (ImageHandle k)
 newImageHandle = ImageHandle <$> newResource
 
@@ -87,10 +88,10 @@ newImageHandle = ImageHandle <$> newResource
 -- @h@ pixels, on the first frame this is called with a key, and return its
 -- id on every frame while the key stays the same:
 --
--- Allocate @owner <- newImageHandle@ during setup.
---
 -- > thumb <- useImageRgba owner path w h pixels
 -- > mapM_ (image (fixedWH 96 96)) thumb
+--
+-- Allocate @owner <- newImageHandle@ during setup.
 --
 -- The image lives as long as the view keeps calling the hook, like a
 -- 'NanoUI.useTask' job. A new key registers the new image and releases the
