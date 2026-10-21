@@ -114,7 +114,6 @@ runTaskKeyChangeTest ctx failed = do
   gate <- newEmptyMVar
   keyRef <- newIORef (1 :: Int)
   let ui = liftIO (readIORef keyRef) >>= \k -> useTask job k (if k == 2 then sleep >> pure k else takeMVar gate >> pure (k * 10))
-  _ <- wait 0
   assertEq failed Nothing =<< evalUi ctx inp ui
   putMVar gate ()
   assertEq failed (Just (Just 10)) =<< frameUntil wait ctx ui isJust
@@ -245,7 +244,6 @@ runTaskStatusTest ctx failed = do
           TaskRunning prev -> ("running" :: String, prev)
           TaskDone a -> ("done", Just a)
           TaskFailed _ prev -> ("failed", prev)
-  _ <- wait 0
   assertEq failed ("running", Nothing) =<< evalUi ctx inp ui
   putMVar gate ()
   assertEq failed (Just ("done", Just "one")) =<< frameUntil wait ctx ui ((== "done") . fst)
@@ -265,7 +263,6 @@ runTaskRetryTest ctx failed = do
   let ui = do
         n <- liftIO (readIORef attempt)
         useTask job ("same input" :: String, n) (tick starts >> readIORef starts)
-  _ <- wait 0
   assertEq failed (Just (Just 1)) =<< frameUntil wait ctx ui isJust
   assertEq failed (Just 1) =<< evalUi ctx inp ui
   writeIORef attempt 1
@@ -328,7 +325,6 @@ runTaskAsyncFailureTest ctx failed = do
       isFailed = \case
         TaskFailed _ _ -> True
         _ -> False
-  _ <- wait 0
   assert failed . isJust =<< frameUntil wait ctx ui isFailed
   cancelTasks ctx
 
@@ -397,7 +393,6 @@ runStreamKeyChangeTest ctx failed = do
   let ui = do
         k <- liftIO (readIORef keyRef)
         useStream stream k [] (\update -> update (k :) >> sleep)
-  _ <- wait 0
   assertEq failed (Just [1]) =<< frameUntil wait ctx ui (not . null)
   writeIORef keyRef 2
   -- The new producer may already have run before the view reads it.

@@ -78,7 +78,6 @@ runFarLabelsDamagePiecesTest ctx failed = do
   let clipOf c = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
       inPiece c = any ((`covers` clipOf c) . rectInflate 1) pieces
   assert failed (not (null (drawCmdElems dd)) && all inPiece (drawCmdElems dd))
-  writeIORef (ctxPaintFull ctx) True
 
 -- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
 -- ops once the version moves, and nothing else damages them, so a clip frame
@@ -91,7 +90,6 @@ runVersionedDrawingDamageTest ctx failed = do
         drawingVersioned version (fixedWH 80 40) $ \r ->
           smallArrayFromList [FillRect r (colorRGBA 255 0 0 255)]
   resp <- warmup2 ctx inp (ui 1)
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp (ui 2)
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect resp))
@@ -119,24 +117,18 @@ runDamageBoundsResolutionTest _ failed = do
 runExplicitDamageWidgetTest :: Context -> IORef Int -> IO ()
 runExplicitDamageWidgetTest ctx failed = do
   let inp = withInput 400 300
-      ui = columnWith (padAll 20) $ do
+      ui mark = columnWith (padAll 20) $ do
         w1 <- button' "First"
-        w2 <- button' "Second"
-        pure (w1, w2)
+        _ <- button' "Second"
+        when mark (damageWidgetNow (respId w1) (DamageInflated sliderDamageSlop))
+        pure w1
   -- Warmup to establish solved layout rects
-  (w1, _) <- warmup2 ctx inp ui
-  _ <- takeDamage ctx
+  w1 <- warmup2 ctx inp (ui False)
 
   -- Queue explicit widget damage
-  let testUi = columnWith (padAll 20) $ do
-        w1' <- button' "First"
-        w2' <- button' "Second"
-        damageWidgetNow (respId w1') (DamageInflated sliderDamageSlop)
-        pure (w1', w2')
-  _ <- runFrame ctx inp testUi
+  _ <- runFrame ctx inp (ui True)
   dmg <- takeDamage ctx
-  let Rect x1 y1 w1Len h1Len = respRect w1
-      expected = rectInflate sliderDamageSlop (Rect x1 y1 w1Len h1Len)
+  let expected = rectInflate sliderDamageSlop (respRect w1)
       approxEq (Rect a b c d) (Rect e f g h) =
         abs (a - e) < 0.05 && abs (b - f) < 0.05 && abs (c - g) < 0.05 && abs (d - h) < 0.05
   case dmg of
@@ -146,33 +138,23 @@ runExplicitDamageWidgetTest ctx failed = do
 runDamageQueueClearedPerFrameTest :: Context -> IORef Int -> IO ()
 runDamageQueueClearedPerFrameTest ctx failed = do
   let inp = withInput 400 300
-      ui = column (label "Static content")
-  _ <- warmup2 ctx inp ui
-  _ <- takeDamage ctx
+      ui pre = column (pre >> label "Static content")
+  _ <- warmup2 ctx inp (ui (pure ()))
 
   -- Explicit damage in this frame
-  let damagedUi = column $ do
-        damageRectNow (Rect 5 5 20 20)
-        label "Static content"
-  _ <- runFrame ctx inp damagedUi
-  dmg1 <- takeDamage ctx
-  case dmg1 of
-    DamageClip r -> assertEq failed r (Rect 5 5 20 20)
-    _ -> assert failed False
+  _ <- runFrame ctx inp (ui (damageRectNow (Rect 5 5 20 20)))
+  assertEq failed (DamageClip (Rect 5 5 20 20)) =<< takeDamage ctx
 
   -- Next frame without damage requests: damage is empty
-  _ <- runFrame ctx inp ui
+  _ <- runFrame ctx inp (ui (pure ()))
   dmg2 <- takeDamage ctx
   assert failed (damageIsEmpty dmg2)
 
   -- Explicit full-window damage, again only for its own frame
-  let fullDamagedUi = column $ do
-        damageFullNow
-        label "Static content"
-  _ <- runFrame ctx inp fullDamagedUi
+  _ <- runFrame ctx inp (ui damageFullNow)
   dmg3 <- takeDamage ctx
   assertEq failed dmg3 DamageFull
-  _ <- runFrame ctx inp ui
+  _ <- runFrame ctx inp (ui (pure ()))
   dmg4 <- takeDamage ctx
   assert failed (damageIsEmpty dmg4)
 
@@ -188,7 +170,6 @@ runStateChangeDamageTest ctx failed = do
 
   -- Warm up and focus textInput via Tab
   warmupFocused ctx inp0 ui
-  _ <- takeDamage ctx
 
   -- Type a character into focused textInput
   _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
@@ -206,7 +187,6 @@ runOrphanAnimationDamageSettlesTest ctx failed = do
       withoutBar = columnWith (padAll 20) (pure ())
   -- Warm up: the bar widget occupies a nonzero 40x20 rect in the arena.
   (wid, _, _) <- runFrame ctx inp withBar
-  _ <- takeDamage ctx
   -- keepAnimating-style perpetual animation on an established widget.
   startAnimation ctx wid 0 1 1e9
   -- Widget present and animating => damage is a clip over it, not a
@@ -219,7 +199,6 @@ runOrphanAnimationDamageSettlesTest ctx failed = do
   -- Widget leaves the arena (tab switch). The first absent frame may repaint
   -- its old region.
   _ <- runFrame ctx inp withoutBar
-  _ <- takeDamage ctx
   -- The perpetual animation is still live, but it must not force the whole
   -- window to repaint forever after its widget is gone.
   _ <- runFrame ctx inp withoutBar
@@ -277,7 +256,6 @@ runTextAreaSelectAllDamageTest ctx failed = do
   area <- warmup2 ctx inp0 ui
   _ <- runClick ctx inp0 ui (centerOf area)
   _ <- warmup2 ctx inp0 ui
-  _ <- takeDamage ctx
   _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect area))
@@ -327,7 +305,6 @@ widthChange :: Int -> (Rect -> [Rect] -> Bool) -> Input -> (Float -> NanoUI a) -
 widthChange warm holds inp ui rect from to ctx failed = do
   replicateM_ warm (runFrame ctx inp (ui from))
   assert failed . holds (rect from) =<< arenaRects ctx
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp (ui to)
   assert failed . holds (rect to) =<< arenaRects ctx
   assert failed . (`damageCovers` rect (max from to)) =<< takeDamage ctx
@@ -350,7 +327,7 @@ runScrollerResizeDamageTest =
 runPanelSteadyNoDamageTest :: Context -> IORef Int -> IO ()
 runPanelSteadyNoDamageTest ctx failed = do
   let ui = column (panelWith (fixedWH 100 40) (void (buttonWith (fixedWH 30 20) "")) >> panelWith (fixedWH 80 40) (label "second"))
-  _ <- warmup2 ctx (withInputOff 300 200) ui >> takeDamage ctx
+  _ <- warmup2 ctx (withInputOff 300 200) ui
   _ <- runFrame ctx (withInputOff 300 200) ui
   assertEq failed (DamageClip (Rect 0 0 0 0)) =<< takeDamage ctx
 
@@ -371,7 +348,7 @@ runRootOverflowDamageTest :: Float -> Float -> Context -> IORef Int -> IO ()
 runRootOverflowDamageTest h dh ctx failed = do
   let inp = (withInput 200 100) {inputMousePos = V2 1 1}
       ui rootH drawH = columnWith (fixedWH 40 rootH . padAll 0) (redDrawing 40 drawH)
-  _ <- warmup2 ctx inp (ui 20 40) >> takeDamage ctx
+  _ <- warmup2 ctx inp (ui 20 40)
   _ <- runFrame ctx inp (ui h dh)
   assert failed . (`damageCovers` Rect 0 0 40 40) =<< takeDamage ctx
 
@@ -382,7 +359,7 @@ runDamageUnwantedTest :: Context -> IORef Int -> IO ()
 runDamageUnwantedTest ctx failed = do
   let inp = withInputOff 300 200
       ui n = column (labelWith (fixedWH 40 20) (T.pack (show (n :: Int))) >> void (buttonWith (fixedWH 30 20) ""))
-  _ <- warmup2 ctx inp (ui 1) >> takeDamage ctx
+  _ <- warmup2 ctx inp (ui 1)
   writeIORef (ctxDamageWanted ctx) False
   _ <- runFrame ctx inp (ui 2)
   assertEq failed DamageFull =<< takeDamage ctx
@@ -399,7 +376,7 @@ runLabelButtonSwapDamageTest :: Context -> IORef Int -> IO ()
 runLabelButtonSwapDamageTest ctx failed = do
   let inp = withInputOff 200 100
       ui asButton = column (if asButton then void (buttonWith (fixedWH 60 20) "") else labelWith (fixedWH 60 20) "")
-  _ <- warmup2 ctx inp (ui False) >> takeDamage ctx
+  _ <- warmup2 ctx inp (ui False)
   forM_ [True, False, True, False] $ \asButton -> do
     _ <- runFrame ctx inp (ui asButton)
     dmg <- takeDamage ctx

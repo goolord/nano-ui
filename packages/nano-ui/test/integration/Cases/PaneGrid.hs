@@ -47,10 +47,8 @@ runScrollBarDragTest :: Context -> IORef Int -> IO ()
 runScrollBarDragTest ctx failed = do
   scroller <- newIORef Nothing
   let inp = withInput 600 400
-      ui = paneGrid defaultPaneGridConfig
-        { pgLayout = fillW . fillH
-        , pgTree = InitialTree (Just halves)
-        , pgViewPane = \pid _ -> do
+      ui = paneGrid halvesGrid
+        { pgViewPane = \pid _ -> do
             when (pid == 10) $ do
               (wid, _) <- scrollArea (tight . grow) (box (fixedWH 100 2000) (colorRGBA 200 0 0 255))
               liftIO (writeIORef scroller (Just wid))
@@ -120,7 +118,7 @@ runEscapeTest :: Context -> IORef Int -> IO ()
 runEscapeTest ctx failed = do
   let inp = withInput 600 400
       ui = do
-        r <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)}
+        r <- paneGrid halvesGrid
         (,) r <$> takeEscape
   warmupFocused ctx inp ui
   (_, passedOn) <- evalUi ctx (keyInp KeyEscape inp) ui
@@ -157,6 +155,10 @@ runHandleOverflowTest ctx failed = do
 halves :: GridNode
 halves = Split 30 AxisV 0.5 (Pane 10) (Pane 20)
 
+-- | 'halves' filling the window.
+halvesGrid :: PaneGridConfig
+halvesGrid = defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)}
+
 runCoveredDropTest :: Context -> IORef Int -> IO ()
 runCoveredDropTest ctx failed = do
   let at = V2 5 200
@@ -175,9 +177,8 @@ runCoveredGesturesTest :: Context -> IORef Int -> IO ()
 runCoveredGesturesTest ctx failed = do
   let inp = withInputOff 600 400
       ui = columnWith (fillW . fillH) $ do
-        result <- paneGrid defaultPaneGridConfig
-          { pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)
-          , pgViewPane = \_ _ -> pure (PaneView "Pane" True)
+        result <- paneGrid halvesGrid
+          { pgViewPane = \_ _ -> pure (PaneView "Pane" True)
           }
         panelWith (pinAt 0 0 . pointer PointerBlock . fixedWH 600 400) (pure ())
         pure result
@@ -259,10 +260,8 @@ runDropDestinationTest :: Context -> IORef Int -> IO ()
 runDropDestinationTest ctx failed = do
   rendered <- newIORef []
   let inp = withInput 600 400
-      ui = paneGrid defaultPaneGridConfig
-        { pgLayout = fillW . fillH
-        , pgTree = InitialTree (Just halves)
-        , pgViewPane = \pid _ -> do
+      ui = paneGrid halvesGrid
+        { pgViewPane = \pid _ -> do
             liftIO (modifyIORef' rendered (pid :))
             pure (PaneView "Pane" False)
         }
@@ -362,11 +361,9 @@ probeGrid f body = do
   let
     cfg =
       f
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgSpacing = 4
+        halvesGrid
+          { pgSpacing = 4
           , pgLeeway = 6
-          , pgTree = InitialTree (Just halves)
           , pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' told (IM.insert (fromIntegral pid) (pgcRect pctx)))
               (_, area) <- mouseArea (fillW . fillH) (body pid)
@@ -419,7 +416,7 @@ runTreeTest ctx failed = do
   let
     inp = withInput 600 400
     ui =
-      paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)}
+      paneGrid halvesGrid
     controlled = do
       t <- liftIO (readIORef given)
       resp <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = ControlledTree (constVar t)}
@@ -462,10 +459,8 @@ runCommittedTest ctx failed = do
     ui = do
       resp <-
         paneGrid
-          defaultPaneGridConfig
-            { pgLayout = fillW . fillH
-            , pgTree = InitialTree (Just halves)
-            , pgViewPane = \pid pctx -> do
+          halvesGrid
+            { pgViewPane = \pid pctx -> do
                 wanted <- liftIO (readIORef splitNow)
                 when (wanted && pid == 10) $ do
                   liftIO (writeIORef splitNow False)
@@ -504,10 +499,8 @@ runDragHandleTest ctx failed = do
     inp = withInput 600 400
     ui =
       paneGrid
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgTree = InitialTree (Just halves)
-          , pgViewPane = \_ pctx -> do
+        halvesGrid
+          { pgViewPane = \_ pctx -> do
               paneDragHandle pctx (fillW . fixedH 40) $ do
                 flex
                 whenM (buttonWith (fixedWH 40 30) "x") (liftIO (modifyIORef' clicks (+ 1)))
@@ -546,10 +539,8 @@ runDividerColorTest ctx failed = do
     c = colorRGBA 10 20 30 255
     ui =
       paneGrid
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgTree = InitialTree (Just halves)
-          , pgDividerColor = Just c
+        halvesGrid
+          { pgDividerColor = Just c
           }
   (_, dd) <- warmupDraw ctx inp ui
   quads <- drawQuads dd
@@ -592,10 +583,8 @@ runClipTest ctx failed = do
     inp = withInput 600 400
     ui =
       paneGrid
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgTree = InitialTree (Just halves)
-          , pgViewPane = \pid _ -> do
+        halvesGrid
+          { pgViewPane = \pid _ -> do
               when (pid == 10) . rowWith (tight . gap 0) $ do
                 box (fixedWH 400 30) (colorRGBA 200 0 0 255)
                 resp <- buttonWith' (fixedWH 60 30) "Hidden"
@@ -619,15 +608,12 @@ runDividerDamageTest ctx failed = do
     inp = withInput 600 400
     ui =
       paneGrid
-        defaultPaneGridConfig
-          { pgLayout = fillW . fillH
-          , pgTree = InitialTree (Just halves)
-          , pgViewPane = \p _ -> PaneView "" False <$ label (if p == 10 then "left" else "right")
+        halvesGrid
+          { pgViewPane = \p _ -> PaneView "" False <$ label (if p == 10 then "left" else "right")
           }
     press = pressAt inp (V2 300 200)
   _ <- warmup2 ctx inp ui
   _ <- runFrame ctx press ui
-  _ <- takeDamage ctx
   _ <- runFrame ctx (holdAt press (V2 350 200)) ui
   dmg <- takeDamage ctx
   -- The right pane moved from x 308 to 358, and the left one grew.

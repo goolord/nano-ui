@@ -114,7 +114,7 @@ runSessionLoopClicksTest :: Context -> IORef Int -> IO ()
 runSessionLoopClicksTest ctx failed = do
   clicks <- newIORef []
   debug <- newDebugSampler
-  batches <- newIORef [[1, 2, 1, 2, 1, 2, 4 :: Int]]
+  waits <- batchedWaits [[1, 2, 1, 2, 1, 2, 4], [3]]
   let buttonOf = \case
         1 -> Just (MouseLeft, True)
         2 -> Just (MouseLeft, False)
@@ -122,7 +122,7 @@ runSessionLoopClicksTest ctx failed = do
         _ -> Nothing
       driver =
         (quietDriver debug)
-          { sdWaitEvents = \_ -> atomicModifyIORef' batches (\case b : rest -> (rest, b); [] -> ([], [3]))
+          { sdWaitEvents = waits
           , sdApplyEvent = \inp e -> maybe inp (\(b, down) -> applyMouseButton b down inp) (buttonOf e)
           , sdIsButtonEdge = \e -> buttonOf e /= Nothing
           , sdShouldDraw = \_ _ _ _ _ -> pure True
@@ -190,14 +190,12 @@ runSessionLoopHardQuitTest ctx failed = do
       typeC inp = inp {inputChars = inputChars inp <> "c"}
       pressC = applyKey (KeyChar 'c') True
       draws batches = do
-        queue <- newIORef batches
+        waits <- batchedWaits (batches ++ [[3]])
         drawn <- newIORef (0 :: Int)
         clearDirty ctx
         runSessionLoop
           (quietDriver debug)
-            { sdWaitEvents = \_ -> atomicModifyIORef' queue $ \bs -> case bs of
-                b : rest -> (rest, b)
-                [] -> ([], [3])
+            { sdWaitEvents = waits
             , sdApplyEvent = \inp ev -> case ev of
                 1 -> ctrl True (pressC inp)
                 2 -> ctrl False inp

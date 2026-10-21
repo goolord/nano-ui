@@ -57,7 +57,6 @@ runCapabilitiesTest ctx failed = do
   let caps = allWindowCapabilities {wcMove = False}
   installWindowHost ctx defaultWindowSettings defaultWindowHost {hostCapabilities = caps}
   assertEq failed caps =<< warmup2 ctx inp askWindowCapabilities
-  closeWindowHost ctx
 
 inp :: Input
 inp = withInput 200 100
