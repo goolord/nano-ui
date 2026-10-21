@@ -23,6 +23,7 @@ data Transition
     Tween !Ease !Float !Float
   | -- | Damped spring; retargets from its current position and velocity.
     Spring !SpringParams
+  deriving (Eq, Show)
 
 -- | Animate from @from@ to @to@. It starts over from @from@ once it has
 -- finished (a tween completes, a spring settles) or its tween changes, so
@@ -68,8 +69,10 @@ animateToA transition =
 -- | A smoothly oscillating value in @[0,1]@ driven by the real-time clock, with
 -- the given period in seconds (e.g. @pulse 6@ sweeps once every six seconds).
 -- The time is captured in 'Double' (see 'NanoUI.Internal.Monad.uiTime'), so the sweep
--- stays sub-frame smooth even on long-running processes. The value is
--- re-evaluated each frame, like 'animate'.
+-- stays sub-frame smooth even on long-running processes. Unlike 'animate', it
+-- asks for no frames: pair it with 'keepAnimating' for continuous motion, or
+-- 'wakeAfter' for stepped updates, or it changes only when something else
+-- draws a frame.
 pulse :: Float -> NanoUI Float
 pulse periodSec = do
   t <- uiTime
