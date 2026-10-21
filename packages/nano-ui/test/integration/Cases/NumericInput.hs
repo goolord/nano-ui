@@ -5,6 +5,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (intKey)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), slotKey)
+import NanoUI.Shortcut qualified as Shortcut
 
 tests :: [Spec]
 tests =
@@ -12,7 +13,25 @@ tests =
   , spec "numeric-input-hex" runNumericInputHexTest
   , spec "numeric-input-focus-precision" runNumericInputFocusPrecisionTest
   , spec "numeric-input-command" runNumericInputCommandTest
+  , spec "numeric-input-leading-point" runNumericInputLeadingPointTest
   ]
+
+-- A decimal field reads a number typed without its leading zero, so Enter
+-- keeps ".5" or "-.25" rather than going back to the old value.
+runNumericInputLeadingPointTest :: Context -> IORef Int -> IO ()
+runNumericInputLeadingPointTest ctx failed = do
+  valueRef <- newVar 0
+  let inp = withInput 320 120
+      cfg = defaultNumericInputConfig {nicDecimals = 2}
+      ui = column (held valueRef (numericInputConfigured' cfg))
+      step event = (\((_, v), _, _) -> v) <$> runFrame ctx event ui
+  _ <- warmup2 ctx inp ui
+  _ <- step (keyInp KeyTab inp)
+  forM_ [(".5", 0.5, "0.50"), ("-.25", -0.25, "-0.25")] $ \(typed, value, shown) -> do
+    _ <- step (chordInp (Shortcut.cmdOrCtrl <> Shortcut.key 'a') inp)
+    _ <- step inp {inputChars = typed}
+    assertEq failed value =<< step (keyInp KeyEnter inp)
+    assert failed =<< spanShown ctx shown
 
 -- Focusing a field keeps a value its decimals do not show (2.5 shown with
 -- none) instead of reading the shown text back.

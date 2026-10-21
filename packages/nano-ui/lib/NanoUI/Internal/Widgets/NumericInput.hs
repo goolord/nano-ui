@@ -265,6 +265,9 @@ parseNumber cfg t
   | nicHex cfg = case TR.signed TR.hexadecimal t of
       Right (n, rest) | T.null rest -> Just (fromInteger n)
       _ -> Nothing
-  | otherwise = case TR.signed TR.rational (T.dropWhileEnd (== '.') t) of
+  | otherwise = case TR.signed (TR.rational . leadingZero) (T.dropWhileEnd (== '.') t) of
       Right (v, rest) | T.null rest -> Just v
       _ -> Nothing
+  where
+    -- 'TR.rational' needs a digit before the point, which ".5" leaves out.
+    leadingZero s = if "." `T.isPrefixOf` s then "0" <> s else s
