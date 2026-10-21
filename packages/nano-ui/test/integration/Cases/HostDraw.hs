@@ -3,6 +3,7 @@ module Cases.HostDraw (tests) where
 import Spec
 import Data.List (nub, sort)
 import Data.Primitive.PrimArray (primArrayFromList)
+import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
@@ -13,6 +14,7 @@ tests :: [Spec]
 tests =
   [ spec "draw-square-geometry" runSquareGeometryTest
   , spec "draw-external-text" runExternalTextTest
+  , spec "draw-empty-clip" runEmptyClipTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
   , spec "draw-glyph-pages" runGlyphPagesTest
   , spec "draw-glyph-page-range" runGlyphPageRangeTest
@@ -162,6 +164,15 @@ runExternalTextTest ctx failed = do
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
   setDrawExternalText ctx False
+
+-- | Geometry clipped to nothing gets no command, which a host would still
+-- draw into the pixel its empty clip rounds to.
+runEmptyClipTest :: Context -> IORef Int -> IO ()
+runEmptyClipTest ctx failed = do
+  let ops r = [FillRect r (colorRGBA 255 255 255 255), PushClip (Rect 0 0 10 10), PushClip (Rect 20 20 10 10), FillRect r (colorRGBA 255 0 0 255), PopClip, PopClip]
+  (_, dd, _) <- runFrame ctx (withInput 300 200) (void (drawing (fixedWH 60 60) (smallArrayFromList . ops)))
+  assert failed (not (drawCmdNull dd))
+  assertEq failed [] [c | c <- drawCmdElems dd, cmdClipW c <= 0 || cmdClipH c <= 0]
 
 -- | Circles sharing a centre stay concentric at a fractional centre, filled
 -- or stroked, whatever their radii. Pixel snapping must preserve their shared centre.

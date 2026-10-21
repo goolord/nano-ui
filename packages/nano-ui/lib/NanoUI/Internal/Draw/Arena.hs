@@ -199,9 +199,10 @@ reserveRaw da needV needI = do
   pure (vp, ip, vCount, iCount)
 
 -- | Close the pending index run as a command. A run that continues the last
--- command's state and index range extends that command instead. Only reached
--- when the layer, clip or texture changes and from 'finishDraw', so it stays
--- out of the emitters.
+-- command's state and index range extends that command instead, and a run
+-- clipped to nothing gets none: a host would still draw it into the pixel
+-- the empty clip rounds to. Only reached when the layer, clip or texture
+-- changes and from 'finishDraw', so it stays out of the emitters.
 {-# NOINLINE flushCmd #-}
 flushCmd :: DrawArena -> IO ()
 flushCmd da = do
@@ -209,39 +210,40 @@ flushCmd da = do
   end <- getCount da indexCountSlot
   when (end > start) $ do
     Rect cx cy cw ch <- currentClip da
-    tex <- readIORef (daCurrentTexture da)
-    layer <- readIORef (daCurrentLayer da)
-    n <- getCount da cmdCountSlot
-    arr <- readIORef (daCmdStore da)
-    let
-      off = fromIntegral start :: Word32
-      cnt = fromIntegral (end - start) :: Word32
-    extended <-
-      if n <= 0
-        then pure False
-        else do
-          prev <- UM.unsafeRead arr (n - 1)
-          let
-            same =
-              cmdClipX prev == cx
-                && cmdClipY prev == cy
-                && cmdClipW prev == cw
-                && cmdClipH prev == ch
-                && cmdTextureId prev == tex
-                && cmdLayer prev == layer
-                && cmdIndexOffset prev + cmdIndexCount prev == off
-          when same $
-            UM.unsafeWrite arr (n - 1) prev {cmdIndexCount = cmdIndexCount prev + cnt}
-          pure same
-    unless extended $ do
-      arr' <-
-        if n < UM.length arr
-          then pure arr
+    when (cw > 0 && ch > 0) $ do
+      tex <- readIORef (daCurrentTexture da)
+      layer <- readIORef (daCurrentLayer da)
+      n <- getCount da cmdCountSlot
+      arr <- readIORef (daCmdStore da)
+      let
+        off = fromIntegral start :: Word32
+        cnt = fromIntegral (end - start) :: Word32
+      extended <-
+        if n <= 0
+          then pure False
           else do
-            grown <- UM.unsafeGrow arr (UM.length arr)
-            grown <$ writeIORef (daCmdStore da) grown
-      UM.unsafeWrite arr' n (DrawCmd cx cy cw ch tex off cnt layer)
-      setCount da cmdCountSlot (n + 1)
+            prev <- UM.unsafeRead arr (n - 1)
+            let
+              same =
+                cmdClipX prev == cx
+                  && cmdClipY prev == cy
+                  && cmdClipW prev == cw
+                  && cmdClipH prev == ch
+                  && cmdTextureId prev == tex
+                  && cmdLayer prev == layer
+                  && cmdIndexOffset prev + cmdIndexCount prev == off
+            when same $
+              UM.unsafeWrite arr (n - 1) prev {cmdIndexCount = cmdIndexCount prev + cnt}
+            pure same
+      unless extended $ do
+        arr' <-
+          if n < UM.length arr
+            then pure arr
+            else do
+              grown <- UM.unsafeGrow arr (UM.length arr)
+              grown <$ writeIORef (daCmdStore da) grown
+        UM.unsafeWrite arr' n (DrawCmd cx cy cw ch tex off cnt layer)
+        setCount da cmdCountSlot (n + 1)
     setCount da cmdStartSlot end
 
 {-# INLINE currentLayer #-}
