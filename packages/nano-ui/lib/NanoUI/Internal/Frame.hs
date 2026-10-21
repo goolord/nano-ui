@@ -189,6 +189,8 @@ runViewPasses unlift ctx frameInp ui = do
     if rerun
       then do
         resetUiBuild ctx False
+        -- A modal is active only if this pass builds it.
+        modifyOverlay ctx (\os -> os {osModalActive = False, osModalDepth = 0})
         beginVarPass ctx 2
         unlift (runUi ctx (stripInteractionInput frameInp) ui)
       else pure result0
