@@ -93,13 +93,13 @@ richText = richTextWith id
 -- for every piece. Horizontal alignment applies per line: with 'alignEnd'
 -- every line ends at the right edge.
 richTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
-richTextWith = richTextWithMode False
+richTextWith f = fmap snd . richTextWith' f
 
 -- | 'richTextWith' with read-only mouse selection and the standard text
 -- commands for selecting and copying text. Link clicks still return their
 -- destination.
 selectableRichTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
-selectableRichTextWith = richTextWithMode True
+selectableRichTextWith f = fmap snd . selectableRichTextWith' f
 
 -- | A selectable paragraph at its default layout.
 selectableRichText :: [Inline] -> NanoUI (Maybe Text)
@@ -112,9 +112,6 @@ selectableRichText' = selectableRichTextWith' id
 -- | 'selectableRichTextWith' with its response.
 selectableRichTextWith' :: (Layout -> Layout) -> [Inline] -> NanoUI (Response, Maybe Text)
 selectableRichTextWith' = richTextWithMode' True
-
-richTextWithMode :: Bool -> (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
-richTextWithMode selectable f pieces = snd <$> richTextWithMode' selectable f pieces
 
 -- | 'richText' returning the paragraph response and a link target clicked
 -- this frame, or 'Nothing' when no link was activated.
