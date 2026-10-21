@@ -518,7 +518,7 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   sdlForcedScale <- liftIO $ mfilter (> 0) . (>>= readMaybe) <$> lookupEnv "NANO_FORCE_SCALE"
   -- Before the window, so that it is released after the window is gone: the
   -- window holds the hit test this frees.
-  sdlChromeState <- mkAcquire newChromeState clearChromeState
+  sdlChromeState <- mkAcquire (newChromeState (sdlWindowDecorations opts)) clearChromeState
   (sdlWindow, sdlRenderer) <- acquireWindowAndRenderer opts flags
   density <- liftIO $ queryWindowPixelDensity sdlWindow
   zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)

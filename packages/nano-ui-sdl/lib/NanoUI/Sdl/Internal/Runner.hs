@@ -19,6 +19,7 @@ import NanoUI.Backend (answerScreenshots, answerScreenshotsAfter)
 import NanoUI.Testing
 import NanoUI.Internal.Context (Context (ctxDamageWanted), markDirtyCovered)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
+import NanoUI.Sdl.Internal.Chrome.Types (ChromeState (..), defaultWindowChrome)
 import NanoUI.Sdl.Internal.Debug
 import NanoUI.Sdl.Internal.Display (outPair, queryMouseWindowPos, queryWindowLogicalSize, scaleMoved, sendWaylandSizeLimits)
 import NanoUI.Sdl.Internal.Font
@@ -102,8 +103,16 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- work it out beyond what reusing its last draw takes. Frames run outside
   -- a draw still do, even when the pass throws.
   writeIORef (ctxDamageWanted ctx) (not presentFull)
+  -- Chrome regions a view handed over lapse with the first frame whose view
+  -- does not hand them over again: a title bar no longer drawn must not
+  -- leave its drag region and edges answering the desktop's hit test.
+  let chrome = sdlChromeState env
+  viewChrome <- readIORef (chromeFromView chrome)
+  writeIORef (chromeFromView chrome) False
   t0 <- getMonotonicTime
   (drawData, dirtyAfterUi) <- evaluateUi `finally` writeIORef (ctxDamageWanted ctx) True
+  when viewChrome $
+    unlessM (readIORef (chromeFromView chrome)) (writeIORef (chromeRegions chrome) defaultWindowChrome)
   -- Images registered during the view (an icon rasterized the first time it
   -- shows, a thumbnail on view) moved or grew the atlas this frame's UVs
   -- point into; upload them before drawing. Nothing changed costs a

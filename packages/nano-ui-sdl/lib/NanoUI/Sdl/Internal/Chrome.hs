@@ -43,7 +43,7 @@ module NanoUI.Sdl.Internal.Chrome
   , setWindowChromeUi
   ) where
 
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isNothing)
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
@@ -79,17 +79,33 @@ windowFlagsOf = SDL.getWindowFlags . sdlWindow
 -- whatever 'NanoUI.Backend.Sdl.sdlWindowDecorations' or an earlier call
 -- gave it. Going back to 'DecorationsFull' also takes off whatever
 -- 'setWindowChrome' put on the window: the desktop's own title bar is the
--- desktop's to answer for.
+-- desktop's to answer for. Asking for the decorations the window has does
+-- nothing, so a view may ask every frame.
 setWindowDecorations :: SdlEnv -> WindowDecorations -> IO ()
 setWindowDecorations env decorations = do
-  when (decorations == DecorationsFull) (clearWindowChrome env)
-  applyDecorations (sdlWindow env) decorations
+  old <- readIORef (chromeDecorations st)
+  unless (old == decorations) $ do
+    writeIORef (chromeDecorations st) decorations
+    when (decorations == DecorationsFull) (clearWindowChrome env)
+    applyDecorations (sdlWindow env) decorations
+    -- That set the shadow too.
+    writeIORef (chromeShadow st) Nothing
+  where
+    st = sdlChromeState env
 
 -- | Put the desktop's drop shadow under the window, or take it away: for a
 -- 'DecorationsNone' window that wants one. A 'DecorationsFrame' window has
--- the desktop's shadow already.
+-- the desktop's shadow already. Windows only: elsewhere the compositor
+-- decides, and this does nothing. Asking for the shadow last asked for does
+-- nothing either.
 setWindowShadow :: SdlEnv -> Bool -> IO ()
-setWindowShadow env = applyWindowShadow (sdlWindow env)
+setWindowShadow env on = do
+  old <- readIORef (chromeShadow st)
+  unless (old == Just on) $ do
+    writeIORef (chromeShadow st) (Just on)
+    applyWindowShadow (sdlWindow env) on
+  where
+    st = sdlChromeState env
 
 --------------------------------------------------------------------------------
 -- A window that draws its own chrome
@@ -189,7 +205,9 @@ edgeHit left right top bottom
 -- dragging is also disabled in fullscreen).
 --
 -- On a natively decorated window ('DecorationsFull'), only the buttons are
--- drawn and no custom hit-test regions are registered.
+-- drawn and no custom hit-test regions are registered. A frame that does not
+-- call this takes the drag region and the edges away again
+-- ('setWindowChromeUi').
 --
 -- Returns 'True' when the close button is clicked (minimize and maximize are
 -- handled directly).
@@ -239,7 +257,7 @@ windowCaptionWith opts taken = do
     flags <- windowFlagsOf env
     let immovable = maxed || fullscreen || not (hasFlag SDL.SDL_WINDOW_RESIZABLE flags)
     when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
-      setWindowChrome
+      setViewChrome
         env
         WindowChrome
           { chromeDrag =
@@ -257,9 +275,17 @@ windowCaptionWith opts taken = do
 
 -- | Update the window's chrome hit-test regions from within a view.
 -- 'windowCaption' calls this automatically when drawing standard caption
--- buttons; use this directly for custom title bar layouts.
+-- buttons; use this directly for custom title bar layouts. The regions hold
+-- while the view hands them over every frame: after a frame whose view does
+-- not, as when the title bar is no longer drawn, the window has none.
 setWindowChromeUi :: WindowChrome -> NanoUI ()
-setWindowChromeUi chrome = withSdlEnv () (`setWindowChrome` chrome)
+setWindowChromeUi chrome = withSdlEnv () (`setViewChrome` chrome)
+
+-- | 'setWindowChrome' for this frame's view ('setWindowChromeUi').
+setViewChrome :: SdlEnv -> WindowChrome -> IO ()
+setViewChrome env chrome = do
+  setWindowChrome env chrome
+  writeIORef (chromeFromView (sdlChromeState env)) True
 
 -- | 'clearWindowChrome' from a view.
 clearWindowChromeUi :: NanoUI ()

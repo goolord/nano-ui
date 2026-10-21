@@ -14,6 +14,7 @@ import Data.IORef (IORef, atomicModifyIORef', newIORef)
 import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import NanoUI (Rect (..))
+import NanoUI.Sdl.Internal.Frame (WindowDecorations)
 import SDL3.Sys.Bindgen.Video (SDL_HitTestResult (..))
 
 -- | Hit-test regions for a borderless window. A natively decorated window does
@@ -61,10 +62,25 @@ type HitTestCallback = Ptr () -> Ptr CInt -> Ptr () -> IO SDL_HitTestResult
 data ChromeState = ChromeState
   { chromeRegions :: !(IORef WindowChrome)
   , chromeCallback :: !(IORef (Maybe (FunPtr HitTestCallback)))
+  , chromeFromView :: !(IORef Bool)
+  -- ^ Whether a view handed the regions over in the frame being drawn, or
+  -- else in the one before: they lapse after a frame whose view did not.
+  , chromeDecorations :: !(IORef WindowDecorations)
+  -- ^ The decorations the window has, which asking for again does nothing.
+  , chromeShadow :: !(IORef (Maybe Bool))
+  -- ^ The shadow last asked for, or 'Nothing' since the decorations, which
+  -- set it, last changed.
   }
 
-newChromeState :: IO ChromeState
-newChromeState = ChromeState <$> newIORef defaultWindowChrome <*> newIORef Nothing
+-- | The state of a window opened with the given decorations.
+newChromeState :: WindowDecorations -> IO ChromeState
+newChromeState decorations =
+  ChromeState
+    <$> newIORef defaultWindowChrome
+    <*> newIORef Nothing
+    <*> newIORef False
+    <*> newIORef decorations
+    <*> newIORef Nothing
 
 -- | Release the marshalled callback. The session acquires this state before
 -- the window and so releases it after the window is destroyed: nothing can
