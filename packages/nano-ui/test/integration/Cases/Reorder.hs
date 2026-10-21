@@ -13,6 +13,7 @@ tests =
   , spec "insertion-index-bounds" runInsertionIndexTest
   , spec "drag-idle-and-abort" runDragIdleAndAbortTest
   , spec "reorder-owned-press" runReorderOwnedPressTest
+  , spec "reorder-negative-ids" runReorderNegativeIdsTest
   ]
 
 -- | Covered and clipped controls cannot start a reorder gesture.
@@ -115,6 +116,22 @@ runReorderDragTest ctx failed = do
         (reorderMoved dropped, reorderOrder dropped)
       assertEq failed (False, Nothing) (reorderMoved after, reorderDragging after)
     _ -> assertEq failed (length rs) 6
+
+-- | Item ids can be any Int: negative ones drag like the rest.
+runReorderNegativeIdsTest :: Context -> IORef Int -> IO ()
+runReorderNegativeIdsTest ctx failed = do
+  let
+    inp = withInput 400 200
+    order = [-1, -2, 0, 3, -7]
+    press = pressAt inp (V2 20 15)
+    far = holdAt press (V2 230 15)
+  rs <- drive ctx order (zip order slotsInRow) [inp, press, far, releaseAt far]
+  case rs of
+    [_, pressed, dragged, dropped] -> do
+      assertEq failed (Just (-1)) (reorderDragging pressed)
+      assertEq failed (True, Just (-1)) (reorderMoved dragged, reorderDragging dragged)
+      assertEq failed [-2, 0, 3, -7, -1] (reorderOrder dropped)
+    _ -> assertEq failed (length rs) 4
 
 -- | A press and release in place is a click: nothing moves.
 runReorderClickTest :: Context -> IORef Int -> IO ()

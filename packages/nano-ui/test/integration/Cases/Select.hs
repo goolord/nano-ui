@@ -21,6 +21,8 @@ tests =
   , spec "sliders-drag-apart" runSlidersDragApartTest
   , spec "radio-groups-apart" runRadioGroupsApartTest
   , spec "slider-out-of-range-settles" runSliderOutOfRangeSettlesTest
+  , spec "slider-bad-bounds-settle" runSliderBadBoundsSettleTest
+  , spec "slider-stale-drag" runSliderStaleDragTest
   ]
 
 -- | Sibling sliders keep separate drags: dragging the second leaves the
@@ -68,6 +70,42 @@ runSliderOutOfRangeSettlesTest ctx failed = do
   assert failed (not (respChanged resp))
   assert failed (not dirty)
 
+-- | A slider given a NaN bound, equal bounds or a reversed range settles, and
+-- a reversed range keeps a value inside it.
+runSliderBadBoundsSettleTest :: Context -> IORef Int -> IO ()
+runSliderBadBoundsSettleTest _ failed = do
+  let inp0 = withInput 300 80
+      nan = 0 / 0
+  forM_ [(nan, 1, 0.5), (0, nan, 0.5), (5, 5, 5), (100, 0, 50)] $ \(lo, hi, given) -> do
+    ctx <- newContext
+    let ui = column (withValue given (slider' lo hi))
+    _ <- warmup2 ctx inp0 ui
+    ((resp, v), _, dirty) <- runFrame ctx inp0 ui
+    assert failed (not (respChanged resp) && not dirty)
+    when (lo > hi) $ assertEq failed given v
+
+-- | A drag released while its slider is not built stays over: a later
+-- press elsewhere, held while the slider comes back, leaves its value alone.
+runSliderStaleDragTest :: Context -> IORef Int -> IO ()
+runSliderStaleDragTest ctx failed = do
+  shownRef <- newIORef True
+  let inp0 = withInput 300 120
+      ui = column $ do
+        shown <- liftIO (readIORef shownRef)
+        if shown then snd <$> withValue 50 (slider' 0 100) else pure 50
+      frameShown shown i = writeIORef shownRef shown >> evalUi ctx i ui
+  (resp, _) <- warmup2 ctx inp0 (column (withValue 50 (slider' 0 100)))
+  let V2 x y = centerOf resp
+      hold = holdAt inp0 (V2 (x + 40) y)
+      elsewhere = pressAt inp0 (V2 20 100)
+  _ <- frameShown True (pressAt inp0 (V2 x y))
+  dragged <- frameShown True hold
+  assertGt failed dragged 50
+  _ <- frameShown False hold
+  _ <- frameShown False (releaseAt hold)
+  _ <- frameShown False elsewhere
+  assertEq failed 50 =<< frameShown True (holdAt elsewhere (V2 30 100))
+
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = withInput 300 80
@@ -80,7 +118,7 @@ runSliderCursorTest ctx failed = do
   assertEq failed UiCursorGrab =<< cursorOver ctx inp0 ui trackMid
   _ <- runFrame ctx pressTrack ui
   assert failed =<< cursorKindIs ctx pressTrack UiCursorGrabbing
-  assertEq failed UiCursorGrabbing =<< cursorOver ctx pressTrack ui offPos
+  assertEq failed UiCursorGrabbing =<< cursorOver ctx (holdAt inp0 offPos) ui offPos
   assertEq failed UiCursorDefault =<< cursorOver ctx inp0 ui offPos
 
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()

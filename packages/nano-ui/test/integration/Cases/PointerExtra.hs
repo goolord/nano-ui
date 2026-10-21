@@ -24,6 +24,7 @@ tests =
   , spec "pointer-held-ownership" runHeldOwnershipTest
   , spec "pointer-mouse-listeners" runMouseListenersTest
   , spec "pointer-mouse-area" runMouseAreaTest
+  , spec "pointer-mouse-area-slider" runMouseAreaSliderTest
   ]
 
 win :: Input
@@ -259,3 +260,15 @@ runMouseAreaTest ctx failed = do
     assert failed (all (not . respClickedWith btn) released)
     _ <- warmup2 ctx win (keyed ["First", "Second"])
     pure ()
+
+-- | A slider dragged inside a mouse area keeps the release, as a button
+-- does: the area reports no click when the drag ends over it.
+runMouseAreaSliderTest :: Context -> IORef Int -> IO ()
+runMouseAreaSliderTest ctx failed = do
+  let ui = columnWith tight (mouseArea (fixedWH 300 80) (label "Volume" >> withValue 50 (slider' 0 100)))
+  ((s, _), _) <- warmup2 ctx win ui
+  let V2 x y = centerOf s
+      drag = holdAt win (V2 (x + 40) y)
+  [_, ((_, v), _), (_, released)] <- frames ctx ui [pressAt win (V2 x y), drag, releaseAt drag]
+  assert failed (v > 50)
+  assert failed (not (respClicked released || respClickedWith MouseLeft released))
