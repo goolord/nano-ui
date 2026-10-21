@@ -39,6 +39,7 @@ tests =
   , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
   , spec "slider-label-shrink-damage" runSliderLabelShrinkDamageTest
   , spec "scrolled-popup-shadow-damage" runScrolledPopupShadowDamageTest
+  , spec "off-window-damage-ignored" runOffWindowDamageTest
   ]
 
 -- | A slider drag changes only 'storeFloat', as a scroll does. A label
@@ -92,6 +93,23 @@ runScrolledPopupShadowDamageTest ctx failed = do
     forM_ before $ \(Rect x y w h) -> do
       let shadow = Rect (x + 3) (y + 3) w h
       assert failed (clipCovers dmg shadow && (null pieces || any (`covers` shadow) pieces))
+
+-- | Damage wholly off the window adds nothing to a frame's clip: it does not
+-- stretch the clip of a label that changed far from it.
+runOffWindowDamageTest :: Context -> IORef Int -> IO ()
+runOffWindowDamageTest ctx failed = do
+  let inp = withInputOff 800 600
+      ui k = columnWith (fillW . fillH) $ do
+        when (k > 1) $ damageRectNow (Rect 100 (-200) 50 50)
+        flex
+        rowWith fillW $ flex >> label' (T.pack (show (k :: Int)))
+  _ <- warmup2 ctx inp (ui 1)
+  _ <- takeDamage ctx
+  (l, _, _) <- runFrame ctx inp (ui 2)
+  dmg <- takeDamage ctx
+  case dmg of
+    DamageClip clip -> assert failed (rectY clip >= rectY (respRect l) - 10)
+    DamageFull -> assert failed False
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
 -- than four pieces or just one.

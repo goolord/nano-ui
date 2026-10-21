@@ -692,7 +692,7 @@ clipDamage ctx snap d owners = do
       addBackdrop k = unless (k == 0) $ do
         mbNode <- liftIO (lookupNodeByKey (ctxNodeArena ctx) k)
         forM_ mbNode $ \idx ->
-          liftIO (backdropRectFromNode ctx idx) >>= mapM_ (addDamageRect . clipRectToWindow winW winH)
+          liftIO (backdropRectFromNode ctx idx) >>= mapM_ addDamageRect
       hadRole wid = wid == fsHot snap || wid == fsActive snap || wid == fsFocus snap
       addInteraction wid = unless (k == 0) $ do
         slop <- fromMaybe defaultDamageSlop <$> liftIO (lookupCustomDamageSlop ctx wid)
@@ -742,11 +742,14 @@ clipDamage ctx snap d owners = do
     let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect (menuPanelBounds r)) >> rest) (pure ()) a
     addFloating (fsFloatingRects snap) (fdFloatingRects d)
     addFloating (fdFloatingRects d) (fsFloatingRects snap)
-  let clip = clipRectToWindow winW winH (rectBounds added)
+  -- Only what lands in the window counts: an empty rect, or one off the
+  -- window, would stretch the bounds over pixels nothing changed.
+  let visible = filter rectNonEmpty (map (clipRectToWindow winW winH) added)
+      clip = rectBounds visible
       winArea = winW * winH
       -- A frame with more rects than this repaints their bounds.
       pieces
-        | null (drop 64 added) = damagePieces (map (clipRectToWindow winW winH) added)
+        | null (drop 64 visible) = damagePieces visible
         | otherwise = []
       area = if null pieces then rectArea clip else sum (map rectArea pieces)
   -- A live animation with an empty clip is not DamageFull: its
