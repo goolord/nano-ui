@@ -40,6 +40,7 @@ tests =
   , spec "slider-label-shrink-damage" runSliderLabelShrinkDamageTest
   , spec "scrolled-popup-shadow-damage" runScrolledPopupShadowDamageTest
   , spec "off-window-damage-ignored" runOffWindowDamageTest
+  , spec "empty-damage-paints-nothing" runEmptyDamagePaintTest
   ]
 
 -- | A slider drag changes only 'storeFloat', as a scroll does. A label
@@ -110,6 +111,19 @@ runOffWindowDamageTest ctx failed = do
   case dmg of
     DamageClip clip -> assert failed (rectY clip >= rectY (respRect l) - 10)
     DamageFull -> assert failed False
+
+-- | A clip frame with nothing to repaint paints nothing, not even what lies
+-- at the window's corner, such as a page scroller's backdrop.
+runEmptyDamagePaintTest :: Context -> IORef Int -> IO ()
+runEmptyDamagePaintTest ctx failed = do
+  let inp = withInputOff 300 200
+      ui = scrollArea grow (column (label "Static" >> button "B"))
+  _ <- warmup2 ctx inp ui
+  writeIORef (ctxPaintFull ctx) False
+  (_, dd, _) <- runFrame ctx inp ui
+  assert failed . damageIsEmpty =<< takeDamage ctx
+  assert failed . null =<< drawQuads dd
+  writeIORef (ctxPaintFull ctx) True
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
 -- than four pieces or just one.

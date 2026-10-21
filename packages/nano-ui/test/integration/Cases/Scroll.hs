@@ -235,7 +235,9 @@ runPageScrollBackdropCoverageTest ctx failed = do
                 && abs (qx + qw - (rx + rw)) <= 0.6
                 && abs (qy + qh - (ry + rh)) <= 0.6
   writeIORef (ctxPaintFull ctx) False
-  backdrop (page id) (\sid -> setScrollOffset ctx sid 120 >> void (runFrame ctx inp0 (page id))) >>= assert failed
+  -- A clip frame after a scroll, here one that repaints a few lines: a frame
+  -- with nothing damaged paints nothing at all.
+  backdrop (page id) (\sid -> setScrollOffset ctx sid 120 >> void (runFrame ctx inp0 (page id)) >> damageRect ctx (Rect 10 10 20 20)) >>= assert failed
   writeIORef (ctxPaintFull ctx) True
   backdrop (page id) (const (pure ())) >>= assert failed . not
   backdrop (page (themed other)) (const (pure ())) >>= assert failed

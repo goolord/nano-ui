@@ -359,11 +359,12 @@ drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww w
 -- menu-bar title, draw nothing over the pixels they covered, so without the
 -- backdrop a hover that just ended would stay in the retain texture. Damage
 -- in pieces paints a backdrop over each, and every command is cut to them.
--- Each is inflated by a logical pixel to cover the runner's outward snap.
+-- Each is inflated by a logical pixel to cover the runner's outward snap. An
+-- empty clip stays empty, so a frame with nothing damaged paints nothing.
 paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
 paintDamageClip _ DamageFull _ = pure ()
 paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
-  let clip = rectInflate 1 r
+  let clip = if rectNonEmpty r then rectInflate 1 r else r
       pieceClips = map (rectInflate 1) pieces
       backdrops = if null pieces then [clip] else pieceClips
   setClip da clip
