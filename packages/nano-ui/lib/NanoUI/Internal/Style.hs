@@ -437,9 +437,10 @@ maxH n l = l {layoutMaxH = n}
 fixedH :: Float -> Layout -> Layout
 fixedH n l = l {layoutHeight = Fixed n}
 
--- | Request fixed width and height in logical pixels, retaining size limits.
+-- | Fix width and height in logical pixels: @fixedW w . fixedH h@, so the
+-- width limits become the width and the height limits are kept.
 fixedWH :: Float -> Float -> Layout -> Layout
-fixedWH w h l = l {layoutWidth = Fixed w, layoutHeight = Fixed h}
+fixedWH w h = fixedW w . fixedH h
 
 -- | Centre vertically in the available space.
 alignMid :: Layout -> Layout

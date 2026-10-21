@@ -611,10 +611,11 @@ runGrowMaxHandoffTest ctx failed = do
   ns <- map (\r -> (rectX r, rectW r)) <$> rectsAt ctx [1, 2]
   assertEq failed ns [(0, 268), (268, 32)]
 
--- | A label with a fixed width that its limits do not repeat ('fixedWH', a
--- plain 'Fixed') measures that width, so a row places what follows past it,
--- and wraps at it: paint draws as many lines as the label is tall, none
--- wider than it. The test font's glyphs are as wide as a line is tall.
+-- | A label with a fixed width ('fixedWH') measures that width, so a row
+-- places what follows past it, and one whose limits do not repeat it (a
+-- plain 'Fixed') wraps at it: paint draws as many lines as the label is
+-- tall, none wider than it. The test font's glyphs are as wide as a line is
+-- tall.
 runFixedWidthLabelTest :: Context -> IORef Int -> IO ()
 runFixedWidthLabelTest ctx failed = do
   let ui = columnWith tight $ do
@@ -652,6 +653,9 @@ runFixedOutsideLimitsTest ctx failed = do
   rs <- map respRect <$> warmup2 ctx input0 ui
   assertEq failed [160, 160] [rectW r | (i, r) <- zip [0 :: Int ..] rs, even i]
   assert failed (and (zipWith (\r next -> rectX next >= rectX r + rectW r) rs (drop 1 rs)))
+  -- 'fixedWH', like 'fixedW', sets the width limits too.
+  (fixed, _) <- warmup2 ctx input0 (withValue "" (textInputConfigured' defaultTextInputConfig {ticLayout = fixedWH 100 28 (ticLayout defaultTextInputConfig)}))
+  assertEq failed 100 (rectW (respRect fixed))
 
 -- | A percentage width is a share of the width a column, a grid cell or a
 -- row offers, and a percentage height of a row's height. A label is placed
