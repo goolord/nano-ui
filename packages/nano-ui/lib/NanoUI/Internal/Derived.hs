@@ -28,7 +28,7 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 
 data SortDir = SortAsc | SortDesc
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Source-column index, independent of display order.
 data SortCol = SortCol {sortColIndex :: !Int, sortColDir :: !SortDir}

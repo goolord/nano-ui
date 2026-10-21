@@ -178,7 +178,7 @@ data Sizing
 -- | Main axis for laying out a container's children: left to right, or top
 -- to bottom. 'Flow' decides whether they stay in one line, wrap, or layer.
 data Direction = Row | Column
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | How a container places its children ('layoutFlow'). Scroll containers
 -- and grids ignore it; put a wrapping or layered column inside them instead.
@@ -191,17 +191,17 @@ data Flow
   | -- | Every child covers the content box, placed by its own alignment and
     -- drawn over earlier siblings ('layered'). 'Direction' is ignored.
     Layered
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Horizontal alignment: left, centre, or right.
 data AlignX = AlignStart | AlignCenter | AlignEnd
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | 'AlignBaseline' lines a row's text children up on their first baseline, and
 -- sits any other child on it by its bottom edge. Outside a row it is
 -- 'AlignTop'.
 data AlignY = AlignTop | AlignMiddle | AlignBottom | AlignBaseline
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Where 'AlignX' puts content across the room left over: 0 at the left, 0.5
 -- centred, 1 at the right.
@@ -657,7 +657,7 @@ lineAlign a l = l {layoutLineAlign = a}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype LineAlign = LineAlign Word8
-  deriving newtype (Eq)
+  deriving newtype (Eq, Ord)
 
 -- | Left of a row, top of a column.
 pattern LinesStart :: LineAlign
@@ -726,7 +726,7 @@ pinAt x y l = l {layoutPin = Just (V2 x y)}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype PointerMode = PointerMode Word8
-  deriving newtype (Eq)
+  deriving newtype (Eq, Ord)
 
 -- | The default. Controls (buttons, sliders, text fields, drawings) take the
 -- pointer from what they cover; containers, labels, images and boxes pass it
@@ -778,7 +778,7 @@ pointer m l = l {layoutPointer = m}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype TextBreak = TextBreak Word8
-  deriving newtype (Eq)
+  deriving newtype (Eq, Ord)
 
 -- | Wrap at spaces and newlines; a word longer than the line gets a line of
 -- its own.
@@ -834,7 +834,7 @@ data Style = Style
 
 -- | A side of a rectangle, for 'borderSides'.
 data Side = SideLeft | SideRight | SideTop | SideBottom
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Whether the style's border is drawn on this side.
 {-# INLINE styleHasSide #-}

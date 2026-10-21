@@ -445,7 +445,7 @@ data PopupPlacement
   -- following it. For a popup or context menu: top-left corner at the
   -- anchor point, so a menu opens where it was clicked and stays there.
   | PlacementAuto
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 -- | Strict left fold over @0 .. n - 1@.
 {-# INLINE foldUpTo #-}
