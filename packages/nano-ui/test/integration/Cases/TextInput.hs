@@ -58,6 +58,7 @@ tests =
   , spec "text-input-font-inset" runTextInputFontInsetTest
   , spec "text-input-dirty" runTextInputDirtyTest
   , spec "text-input-drag-wake" runTextInputDragWakeTest
+  , spec "text-area-hold-still" runTextAreaHoldStillTest
   , spec "text-area-cut-clears-selection" runTextAreaCutClearsSelectionTest
   , pixelSpec "text-area-scroll-wheel" runTextAreaScrollWheelTest
   , pixelSpec "text-area-zoom-scroll" runTextAreaZoomScrollTest
@@ -362,6 +363,24 @@ runTextInputDragWakeTest ctx failed = do
   assert failed . (> 0) =<< getWakeAt ctx
   _ <- runFrame ctx release {inputMousePos = outside} ui
   _ <- runFrame ctx release {inputMousePos = outside, inputButtonsReleased = noButtons} ui
+  assertEq failed 0 =<< getWakeAt ctx
+
+-- | A button held still in a text area after a click selects nothing new, so
+-- its frames ask for no other frame.
+runTextAreaHoldStillTest :: Context -> IORef Int -> IO ()
+runTextAreaHoldStillTest ctx failed = do
+  let
+    ui = column (withValue "some text\nto select" textArea')
+    inp0 = (withInput 320 220) {inputMousePos = V2 300 200}
+  (resp, _) <- warmup2 ctx inp0 ui
+  let
+    Rect rx ry _ _ = respRect resp
+    press = pressAt inp0 (V2 (rx + 20) (ry + 10))
+    hold = press {inputButtonsPressed = noButtons}
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx hold ui
+  (_, _, dirty) <- runFrame ctx hold ui
+  assert failed (not dirty)
   assertEq failed 0 =<< getWakeAt ctx
 
 runTextInputFfCaretTest :: Context -> IORef Int -> IO ()

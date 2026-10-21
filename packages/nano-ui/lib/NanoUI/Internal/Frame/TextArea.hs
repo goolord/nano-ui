@@ -45,7 +45,7 @@ import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCar
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Store (collapseFieldSelection, fieldFloat, fieldPoint, fieldBuffer, fieldLineWidths, findSlot, insertSlot, lookupSlot)
+import NanoUI.Internal.Store (collapseFieldSelection, deleteSlot, fieldFloat, fieldInt, fieldPoint, fieldBuffer, fieldLineWidths, findSlot, insertSlot, lookupSlot)
 import NanoUI.Internal.Store.Types (LineWidths (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
@@ -90,9 +90,10 @@ collapseTextFieldSelection ctx wid =
   withWidgetNode ctx wid () $ \idx ->
     getNodeType (ctxNodeArena ctx) idx >>= \case
       NodeTextInput -> modifyStore ctx (collapseFieldSelection key)
-      NodeTextArea -> modifyStore ctx $ \store ->
-        let state = TA.loadTextAreaState store key
-         in TA.saveTextAreaState key state {TA.selectionAnchor = TB.getCursor (TA.buffer state)} store
+      -- An unstored anchor reads as the cursor ('TA.loadTextAreaState').
+      NodeTextArea ->
+        modifyStore ctx $
+          deleteSlot fieldInt (slotKey SlotTextAreaAnchorRow key) . deleteSlot fieldInt (slotKey SlotTextAreaAnchorCol key)
       _ -> pure ()
  where
   key = intKey wid
@@ -509,8 +510,9 @@ textAreaMouse ctx inp onControl wid idx = do
     prepared <- prepareFontMetrics fm line
     let pos = TB.Cursor row (toSource (textIndexAtX prepared line (max 0 (mouseX - (clipX - scrollXf)))))
     -- Nothing writes the store between this load and the selection write
-    -- (click counting lives in the interaction state).
-    -- modifyStore damages and wakes only when the selection changed, so a
-    -- button held still does not keep frames running.
+    -- (click counting lives in the interaction state). A selection that is
+    -- already stored is not written again: the write would damage the area
+    -- and wake the loop on every frame a button is held still.
     pure $ FieldDoc pos buf $ \anchor cursor ->
-      modifyStore ctx (TA.saveTextAreaState key (TA.setTextAreaSelection anchor cursor state))
+      unless (anchor == TA.selectionAnchor state && cursor == TB.getCursor buf && TB.cursorCol cursor == TB.preferredCol buf) $
+        modifyStore ctx (TA.saveTextAreaState key (TA.setTextAreaSelection anchor cursor state))

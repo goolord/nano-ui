@@ -297,6 +297,10 @@ spec = do
       map (TB.getCursor . emacs) "ab" `shouldBe` if onMac then [TB.Cursor 0 0, TB.Cursor 0 6] else [TB.Cursor 0 7, TB.Cursor 0 7]
       map (TB.toText . emacs) "hu" `shouldBe` if onMac then ["foo ba", ""] else ["foo bar", "foo bar"]
 
+    it "clamps a selection set past the document's end into it" $ do
+      let s = TA.setTextAreaSelection (TB.Cursor 9 9) (TB.Cursor 9 9) (TA.initTextAreaState "ab")
+      (TA.selectionAnchor s, TB.getCursor (TA.buffer s)) `shouldBe` (TB.Cursor 0 2, TB.Cursor 0 2)
+
     it "scrolls the caret into a one-line viewport" $ do
       let
         s0 =

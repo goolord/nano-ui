@@ -80,13 +80,11 @@ setTextAreaViewport :: (Double, Double) -> Double -> TextAreaState -> TextAreaSt
 setTextAreaViewport vp lh state =
   state {viewportSize = vp, lineHeight = lh}
 
--- | Set anchor and cursor, in that order, and scroll vertically to reveal the caret.
+-- | Set anchor and cursor, in that order, both clamped into the document, and
+-- scroll vertically to reveal the caret.
 setTextAreaSelection :: TB.Cursor -> TB.Cursor -> TextAreaState -> TextAreaState
 setTextAreaSelection anchor cursor state =
-  let buf =
-        let b = TB.withCursor cursor (buffer state)
-         in b {TB.preferredCol = TB.cursorCol cursor}
-   in ensureCaretVisible state {buffer = buf, selectionAnchor = anchor}
+  ensureCaretVisible state {buffer = TB.withCursor cursor (buffer state), selectionAnchor = TB.clampCursor (buffer state) anchor}
 
 -- | Extract buffer, selection, and history for the shared text-command engine.
 textAreaEditor :: TextAreaState -> Editor
