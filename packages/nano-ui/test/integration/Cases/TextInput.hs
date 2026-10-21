@@ -21,9 +21,9 @@ import NanoUI.Internal.Store
   , slotKey
   )
 import NanoUI.Internal.Widgets.TextArea
-  ( buffer
-  , loadTextAreaState
-  , selectionAnchor
+  ( loadTextAreaState
+  , tasBuffer
+  , tasSelectionAnchor
   )
 import NanoUI.Shortcut
 import NanoUI.Widgets.TextBuffer
@@ -598,7 +598,7 @@ runTextAreaScrollWheelTest ctx failed = do
     assertEq failed 0 =<< wheel ui resp r (-10)
     -- The text is untouched.
     st <- (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
-    assertEq failed (toText (buffer st)) fortyLines
+    assertEq failed (toText (tasBuffer st)) fortyLines
 
 runTextAreaZoomScrollTest :: Context -> IORef Int -> IO ()
 runTextAreaZoomScrollTest ctx failed = do
@@ -663,8 +663,8 @@ textAreaThumbDragTest horizontal ctx failed = do
       _ <- runFrame ctx (applyMouseButton MouseLeft False drag) ui
       -- Dragging the scrollbar must not start a selection or edit the text.
       st <- (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
-      assertEq failed (toText (buffer st)) txt
-      assert failed (selectionAnchor st == getCursor (buffer st))
+      assertEq failed (toText (tasBuffer st)) txt
+      assert failed (tasSelectionAnchor st == getCursor (tasBuffer st))
 
 runTextAreaCursorOnScrollBarTest :: Context -> IORef Int -> IO ()
 runTextAreaCursorOnScrollBarTest ctx failed = do
@@ -718,7 +718,7 @@ runTextAreaHScrollWheelTest ctx failed = do
       clickX = 30
     _ <- runClick ctx inp0 ui (V2 (rectX field + ix + clickX) (rectY field + iy + 5))
     store <- getStore ctx
-    let Cursor _ col = getCursor (buffer (loadTextAreaState store (intKey (respId resp))))
+    let Cursor _ col = getCursor (tasBuffer (loadTextAreaState store (intKey (respId resp))))
     assert failed (abs (fromIntegral col - (offX2 + clickX) / fmAdvance fm '0') <= 1)
     assertEq failed 0 . v2X =<< wheel (-10)
     assertJust failed (snd (textAreaBarLayouts field (textAreaBars fm field (lineWidth fm longLine) 0) 0 0)) $
@@ -815,8 +815,8 @@ caretInView ctx wid = do
         lane shown = if shown then textAreaBarLane else 0
         viewW = rectW field - 2 * ix - lane (tabVertical bars)
         viewH = rectH field - 2 * iy - lane (tabHorizontal bars)
-        Cursor caretRow caretCol = getCursor (buffer st)
-        left = lineWidth fm (T.take caretCol (lineAt caretRow (buffer st))) - sx
+        Cursor caretRow caretCol = getCursor (tasBuffer st)
+        left = lineWidth fm (T.take caretCol (lineAt caretRow (tasBuffer st))) - sx
         top = fromIntegral caretRow * lineH - sy
       pure (left >= -0.5 && left + 1 <= viewW + 0.5 && top >= -0.5 && top + lineH <= viewH + 0.5)
 
@@ -829,7 +829,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
   _ <- runFrame ctx (tabInp inp0) ui
   assertJustM failed (getPrevRect ctx (respId resp)) $ \field -> do
     let
-      caret = getCursor . buffer . (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
+      caret = getCursor . tasBuffer . (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
       offset = getScrollOffset ctx (respId resp)
     assertEq failed (Cursor 0 0) =<< caret
     assertEq failed 0 =<< offset
@@ -1102,5 +1102,5 @@ runTextAreaMenuSelectAllTest ctx failed = do
       _ <- runClick ctx inp0 ui pos
       store <- getStore ctx
       let st = loadTextAreaState store (intKey (respId resp))
-      assertEq failed (selectionAnchor st) (Cursor 0 0)
-      assertEq failed (getCursor (buffer st)) (Cursor lastRow (T.length lastLine))
+      assertEq failed (tasSelectionAnchor st) (Cursor 0 0)
+      assertEq failed (getCursor (tasBuffer st)) (Cursor lastRow (T.length lastLine))

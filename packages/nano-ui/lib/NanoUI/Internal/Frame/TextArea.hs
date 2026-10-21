@@ -138,7 +138,7 @@ textInputArea ctx@Context {ctxNodeArena = na} =
           fm <- resolveTextAreaFont ctx idx
           field <- getNodeRect na idx
           let state = TA.loadTextAreaState store key
-              buf = TA.buffer state
+              buf = TA.tasBuffer state
               TB.Cursor caretRow caretCol = TB.getCursor buf
               lineH = textAreaLineHeight fm
               Rect clipX contentTop _ _ = textAreaFieldClip fm field
@@ -390,7 +390,7 @@ syncTextAreaViewport ctx idx key fm field = do
 textAreaScrollSnapped :: DrawArena -> TA.TextAreaState -> IO (Float, Float)
 textAreaScrollSnapped da state = do
   s <- getDrawSnapScale da
-  let (scrollX, scrollY) = TA.scrollOffset state
+  let (scrollX, scrollY) = TA.tasScrollOffset state
   pure (onGrid s (realToFrac scrollX), onGrid s (realToFrac scrollY))
 
 -- | Text-area content with the node font already resolved, so a paint pass
@@ -409,7 +409,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   let lineH = textAreaLineHeight fm
       Rect clipX contentTop clipW clipH = textAreaFieldClip fm field
       fg = styleFg style
-      buf = TA.buffer state
+      buf = TA.tasBuffer state
       cursor@(TB.Cursor caretRow caretCol) = TB.getCursor buf
       contentX = clipX - scrollXf
       rowY row = contentTop + fromIntegral row * lineH - scrollYf
@@ -420,7 +420,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
       firstRow = max 0 (rowAt y)
       lastRow = min (TB.getLineCount buf - 1) (rowAt (y + h))
-      (lo, hi) = TB.selectionRange (TA.selectionAnchor state) cursor
+      (lo, hi) = TB.selectionRange (TA.tasSelectionAnchor state) cursor
   withClip da textClip $ do
     when (focus && (lo /= hi || isJust preedit)) $
       forM_ [max (TB.cursorRow lo) firstRow .. min (TB.cursorRow hi) lastRow] $ \row -> do
@@ -457,8 +457,8 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
 textAreaPreedit :: Context -> WidgetId -> TA.TextAreaState -> IO (Maybe (Int, Preedit))
 textAreaPreedit ctx wid state = do
   composition <- fieldComposition ctx wid
-  let buf = TA.buffer state
-      (lo, hi) = TB.selectionRange (TA.selectionAnchor state) (TB.getCursor buf)
+  let buf = TA.tasBuffer state
+      (lo, hi) = TB.selectionRange (TA.tasSelectionAnchor state) (TB.getCursor buf)
       row = TB.cursorRow lo
       line = TB.lineAt row buf
       endCol = if TB.cursorRow hi == row then TB.cursorCol hi else T.length line
@@ -501,7 +501,7 @@ textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
   let lineH = textAreaLineHeight fm
       clip@(Rect clipX contentTop _ _) = textAreaFieldClip fm field
       (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
-      buf = TA.buffer state
+      buf = TA.tasBuffer state
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
       rows = [max 0 (rowAt y) .. min (TB.getLineCount buf - 1) (rowAt (y + h))]
   placements <- forM [(row, line) | row <- rows, let line = fst (shownRow preedit buf row), not (T.null line)] $ \(row, line) -> do
@@ -526,7 +526,7 @@ textAreaMouse ctx inp onControl wid idx = do
         lineH = textAreaLineHeight fm
         state =
           TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) (TA.loadTextAreaState store key)
-        buf = TA.buffer state
+        buf = TA.tasBuffer state
     (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
     preedit <- textAreaPreedit ctx wid state
     let row = clamp 0 (TB.getLineCount buf - 1) (floor ((mouseY - contentTop + scrollYf) / max 1 lineH))
@@ -539,5 +539,5 @@ textAreaMouse ctx inp onControl wid idx = do
     -- already stored is not written again: the write would damage the area
     -- and wake the loop on every frame a button is held still.
     pure $ FieldDoc pos buf $ \anchor cursor ->
-      unless (anchor == TA.selectionAnchor state && cursor == TB.getCursor buf && TB.cursorCol cursor == TB.preferredCol buf) $
+      unless (anchor == TA.tasSelectionAnchor state && cursor == TB.getCursor buf && TB.cursorCol cursor == TB.preferredCol buf) $
         modifyStore ctx (TA.saveTextAreaState key (TA.setTextAreaSelection anchor cursor state))

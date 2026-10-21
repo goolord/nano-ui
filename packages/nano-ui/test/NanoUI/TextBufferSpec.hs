@@ -251,8 +251,8 @@ spec = do
         typed = foldl' (\s c -> typeArea noMods (T.singleton c) [] s) s0 ("one two" :: String)
         undone = typeArea ctrlMods "" [KeyChar 'z'] typed
         redone = typeArea (Modifiers True True False False) "" [KeyChar 'z'] undone
-      TB.toText (TA.buffer undone) `shouldBe` "one "
-      TB.toText (TA.buffer redone) `shouldBe` "one two"
+      TB.toText (TA.tasBuffer undone) `shouldBe` "one "
+      TB.toText (TA.tasBuffer redone) `shouldBe` "one two"
       -- Chords come from key events; characters typed with Ctrl held are ignored.
       TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "z\x1a" [KeyChar 'z', KeyChar 'y'])
         `shouldBe` [TE.Undo, TE.Redo]
@@ -261,7 +261,7 @@ spec = do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "ab")
         altGr = Modifiers False True True False
-      TB.toText (TA.buffer (typeArea altGr "@€" [] s0)) `shouldBe` "ab@€"
+      TB.toText (TA.tasBuffer (typeArea altGr "@€" [] s0)) `shouldBe` "ab@€"
       TE.inputTextCommands TE.singleLineMode (frameInput altGr "@" [KeyChar 'q'])
         `shouldBe` [TE.InsertText "@"]
       TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "" [KeyChar 'a', KeyLeft])
@@ -275,12 +275,12 @@ spec = do
             TA.initTextAreaState "abc\ndef"
         typed = typeArea noMods "λ" [] selected
         entered = typeArea noMods "" [KeyEnter] selected
-      TB.toText (TA.buffer typed) `shouldBe` "aλef"
-      TB.getCursor (TA.buffer typed) `shouldBe` TB.Cursor 0 2
-      TA.selectionAnchor typed `shouldBe` TB.Cursor 0 2
-      TB.toText (TA.buffer entered) `shouldBe` "a\nef"
-      TB.getCursor (TA.buffer entered) `shouldBe` TB.Cursor 1 0
-      TA.selectionAnchor entered `shouldBe` TB.Cursor 1 0
+      TB.toText (TA.tasBuffer typed) `shouldBe` "aλef"
+      TB.getCursor (TA.tasBuffer typed) `shouldBe` TB.Cursor 0 2
+      TA.tasSelectionAnchor typed `shouldBe` TB.Cursor 0 2
+      TB.toText (TA.tasBuffer entered) `shouldBe` "a\nef"
+      TB.getCursor (TA.tasBuffer entered) `shouldBe` TB.Cursor 1 0
+      TA.tasSelectionAnchor entered `shouldBe` TB.Cursor 1 0
 
     it "the word modifier edits and moves by word, the other of Ctrl and Alt by character" $ do
       let
@@ -292,7 +292,7 @@ spec = do
             deleted = typeArea mods "" [KeyDelete] s0
             right = typeArea mods "" [KeyRight] s0
             left = typeArea mods "" [KeyLeft] right
-           in (TB.toText (TA.buffer deleted), TB.getCursor (TA.buffer right), TB.getCursor (TA.buffer left))
+           in (TB.toText (TA.tasBuffer deleted), TB.getCursor (TA.tasBuffer right), TB.getCursor (TA.tasBuffer left))
       motions word `shouldBe` (" bar", TB.Cursor 0 3, TB.Cursor 0 0)
       motions other `shouldBe` ("oo bar", TB.Cursor 0 1, TB.Cursor 0 0)
 
@@ -300,21 +300,21 @@ spec = do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "foo bar\nbaz")
         line = if onMac then Modifiers False False False True else Modifiers True True False False
-      TB.toText (TA.buffer (typeArea line "" [KeyBackspace] s0)) `shouldBe` "\nbaz"
+      TB.toText (TA.tasBuffer (typeArea line "" [KeyBackspace] s0)) `shouldBe` "\nbaz"
       if onMac
-        then TB.getCursor (TA.buffer (typeArea line "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 0
-        else TB.getCursor (TA.buffer (typeArea ctrlMods "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 4
+        then TB.getCursor (TA.tasBuffer (typeArea line "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 0
+        else TB.getCursor (TA.tasBuffer (typeArea ctrlMods "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 4
 
     it "Ctrl alone moves and deletes as in Emacs on macOS, and is no command elsewhere" $ do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "foo bar")
-        emacs k = TA.buffer (typeArea ctrlMods "" [KeyChar k] s0)
+        emacs k = TA.tasBuffer (typeArea ctrlMods "" [KeyChar k] s0)
       map (TB.getCursor . emacs) "ab" `shouldBe` if onMac then [TB.Cursor 0 0, TB.Cursor 0 6] else [TB.Cursor 0 7, TB.Cursor 0 7]
       map (TB.toText . emacs) "hu" `shouldBe` if onMac then ["foo ba", ""] else ["foo bar", "foo bar"]
 
     it "clamps a selection set past the document's end into it" $ do
       let s = TA.setTextAreaSelection (TB.Cursor 9 9) (TB.Cursor 9 9) (TA.initTextAreaState "ab")
-      (TA.selectionAnchor s, TB.getCursor (TA.buffer s)) `shouldBe` (TB.Cursor 0 2, TB.Cursor 0 2)
+      (TA.tasSelectionAnchor s, TB.getCursor (TA.tasBuffer s)) `shouldBe` (TB.Cursor 0 2, TB.Cursor 0 2)
 
     it "scrolls the caret into a one-line viewport" $ do
       let
@@ -322,7 +322,7 @@ spec = do
           TA.setTextAreaViewport (80, 16) 16 $
             TA.initTextAreaState "a\nb"
         s1 = typeArea noMods "" [KeyDown] s0
-      TA.scrollOffset s1 `shouldBe` (0, 16)
+      TA.tasScrollOffset s1 `shouldBe` (0, 16)
 
     it "Ctrl+A and Ctrl+a (Command on macOS) both select all" $ do
       let
@@ -330,10 +330,10 @@ spec = do
         atEnd = typeArea noMods "" [KeyEnd] s0
         fromLower = typeArea primaryModifiers "" [KeyChar 'a'] atEnd
         fromUpper = typeArea primaryModifiers "" [KeyChar 'A'] atEnd
-      TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 5
-      TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
-      TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5
-      TA.selectionAnchor fromUpper `shouldBe` TB.Cursor 0 0
+      TB.getCursor (TA.tasBuffer fromLower) `shouldBe` TB.Cursor 0 5
+      TA.tasSelectionAnchor fromLower `shouldBe` TB.Cursor 0 0
+      TB.getCursor (TA.tasBuffer fromUpper) `shouldBe` TB.Cursor 0 5
+      TA.tasSelectionAnchor fromUpper `shouldBe` TB.Cursor 0 0
 
   describe "text word selection" $ do
     it "groups Unicode words, whitespace and punctuation by character index" $ do
