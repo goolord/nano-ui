@@ -33,6 +33,8 @@ module NanoUI.Internal.Layout.Arena
   , SizingTag (..)
   , DirTag (..)
   , NodeArena (..)
+  , WidthMemo
+  , IdIndex
   , FlexScratch (..)
   , newNodeArena
   , resetNodeArena
@@ -422,8 +424,8 @@ data NodeArena = NodeArena
   -- ^ Hash of the paint state the input signature leaves out, mixed as it is
   -- written ('getPaintSignature'). One unboxed slot, like 'naInputSig'.
   , naInputSig :: IOArr Word64
-  -- ^ The frame's input signature ('getInputSignature'). An unboxed slot, so
-  -- mixing into it allocates nothing.
+  -- ^ The frame's input signature, which 'layoutSigMatches' compares. An
+  -- unboxed slot, so mixing into it allocates nothing.
   , naTextHash :: IORef (IOArr Word64)
   -- ^ Per node, the hash of the text the last 'setNodeText' stored.
   , naOptionsHash :: IORef (IOArr Word64)
@@ -604,7 +606,7 @@ data StyleCol
 --   non-containers.
 -- * 'TagLineAlign': a wrapping container's
 --   'NanoUI.Internal.Style.LineAlign'.
--- * 'TagPinned': whether the node is pinned ('isPinnedNode'), as a 'Bool'.
+-- * 'TagPinned': whether the node is pinned, as a 'Bool'.
 -- * 'TagPinnedBelow': whether some descendant is pinned, as a 'Bool', set
 --   when that node is added ('hasPinnedBelow'). The solver, paint and hit
 --   tests look for pinned children only under such a node.
@@ -1241,7 +1243,7 @@ getNodeRect na idx = do
   a <- arenaArrays na
   Rect <$> readGeom a idx GeomX <*> readGeom a idx GeomY <*> readGeom a idx GeomW <*> readGeom a idx GeomH
 
--- | Write x, y, width, and height. Does not update the saved layout origin or clip.
+-- | Write x, y, width and height. The clip ('setClipRect') is left alone.
 {-# INLINE setRect #-}
 setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 setRect na idx x y w h = do
@@ -1292,7 +1294,7 @@ data LayoutCache = LayoutCache
   { lcCap :: !Int
   , lcCount :: !Int
   , lcSig :: !Word64
-  -- ^ The input signature ('getInputSignature') the solve was captured with.
+  -- ^ The input signature ('naInputSig') the solve was captured with.
   , lcMeasures :: !(IntMap CustomMeasureRecord)
   -- ^ Per custom-measured node, what the solve's measure recorded.
   -- Checked by the frame runner because a custom measure may read state
@@ -1684,8 +1686,9 @@ lookupNodeByKey na key = lookupNodeByWidgetId na (WidgetId (fromIntegral key))
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
 getNodeValue na idx = arenaArrays na >>= \a -> readStyle a idx StyleNodeValue
 
--- | Set the type-specific numeric value read by the solver or painter. It is
--- paint state ('getPaintSignature').
+-- | Set the type-specific numeric value paint reads. It is paint state
+-- ('getPaintSignature'), not a layout input: values the solver works out go
+-- through 'setSolvedValue'.
 {-# INLINE setNodeValue #-}
 setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
 setNodeValue na idx v = do
@@ -1735,7 +1738,7 @@ getScopeSignature :: NodeArena -> IO Word64
 getScopeSignature na = readIORef (naScopeSig na)
 
 -- | Hash over everything the view put in the arena that paint reads: the
--- input signature ('getInputSignature'), the node count, the scopes
+-- input signature ('naInputSig'), the node count, the scopes
 -- ('getScopeSignature'), and the paint state the input signature leaves
 -- out, mixed as it is written: node values ('setNodeValue'), font colours,
 -- the style index of boxes, images and drawings, and images' ids and looks.
