@@ -258,8 +258,7 @@ runMouseAreaTest ctx failed = do
     _ <- runFrame ctx (clearEphemeral down) (keyed ["Second", "First"])
     (released, _, _) <- runFrame ctx (releaseWith btn down) (keyed ["Second", "First"])
     assert failed (all (not . respClickedWith btn) released)
-    _ <- warmup2 ctx win (keyed ["First", "Second"])
-    pure ()
+    void (warmup2 ctx win (keyed ["First", "Second"]))
 
 -- | A slider dragged inside a mouse area keeps the release, as a button
 -- does: the area reports no click when the drag ends over it.

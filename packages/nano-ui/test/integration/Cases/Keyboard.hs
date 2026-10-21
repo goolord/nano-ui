@@ -145,12 +145,9 @@ runKeyboardToggleTest ctx failed = do
   assert failed v1
   ((_, v2), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (not v2)
-  let (press, release) = clickPair inp0 (centerOf resp0)
-  _ <- runFrame ctx press ui
-  ((clicked, v3), _, _) <- runFrame ctx release ui
+  (clicked, v3) <- runClick ctx inp0 ui (centerOf resp0)
   assert failed (respClicked clicked && v3)
-  _ <- runFrame ctx press ui
-  ((clicked2, v4), _, _) <- runFrame ctx release ui
+  (clicked2, v4) <- runClick ctx inp0 ui (centerOf resp0)
   assert failed (respClicked clicked2 && not v4)
 
 data KB = KBA | KBB
@@ -184,7 +181,5 @@ runKeyboardFocusRingTest ctx failed = do
   assert failed . not =<< getFocusVisible ctx
   _ <- runFrame ctx (tabInp inp) ui
   assert failed =<< getFocusVisible ctx
-  let (press, release) = clickPair inp (V2 5 150)
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
+  _ <- runClick ctx inp ui (V2 5 150)
   assert failed . not =<< getFocusVisible ctx

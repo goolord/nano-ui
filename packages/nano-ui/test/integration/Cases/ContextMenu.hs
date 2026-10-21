@@ -63,20 +63,7 @@ runContextMenuScrollPosTest ctx failed = do
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure (btn, cut)
   (sid, _) <- warmup2 ctx inp0 ui
-  assertJustM failed (getPrevRect ctx sid) $ \scrollRect@(Rect _ sy _ sh) -> do
-    let hover = inp0 {inputMousePos = spanCenter scrollRect}
-        wheel = hover {inputScroll = V2 0 1}
-        inView btn =
-          let y = rectY (respRect btn)
-              h = rectH (respRect btn)
-           in y >= sy + 4 && y + h + 8 <= sy + sh
-        pump = do
-          before <- getScrollOffset ctx sid
-          _ <- runFrame ctx wheel ui
-          after <- getScrollOffset ctx sid
-          ((_, (btn, _)), _, _) <- runFrame ctx hover ui
-          if inView btn || after <= before then pure (after, btn) else pump
-    (off, btn1) <- pump
+  assertJustM failed (wheelIntoView ctx inp0 ui (fst . snd) sid 8) $ \(off, btn1) -> do
     assert failed (off > 0)
     let menuPos = centerOf btn1
         layoutY = rectY (respRect btn1) + off

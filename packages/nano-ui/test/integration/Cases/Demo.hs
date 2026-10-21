@@ -111,10 +111,7 @@ runControlsTabHeightTest ctx failed = do
         Nothing -> pure [Nothing, Nothing, Nothing]
     spanOf lbls spans =
       let
-        match txt =
-          any
-            (\lbl -> txt == lbl || T.drop 1 txt == lbl || T.isSuffixOf lbl txt)
-            lbls
+        match txt = any (`T.isSuffixOf` txt) lbls
         ys =
           [ (y, y + h)
           | (Rect _ y _ h, txt, _, _, _) <- spans
@@ -192,7 +189,6 @@ runColorPickerPartDamageTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
-  _ <- takeDamage ctx
   _ <- runFrame ctx (keyInp KeyRight inp0) ui
   dmg <- takeDamage ctx
   let na = ctxNodeArena ctx
@@ -212,7 +208,6 @@ runColorPickerDragDamageTest ctx failed = do
   let inp0 = withInput 400 1200
       ui = held colorRef colorPickerRGBA'
   (resp, _) <- warmup2 ctx inp0 ui
-  _ <- takeDamage ctx
   let (press, release) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx press ui
   pressDmg <- takeDamage ctx

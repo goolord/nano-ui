@@ -66,20 +66,7 @@ runTooltipScrollPosTest ctx failed = do
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure btn
   (sid, _) <- warmup2 ctx inp0 ui
-  assertJustM failed (getPrevRect ctx sid) $ \scrollRect@(Rect _ sy _ sh) -> do
-    let hover = inp0 {inputMousePos = spanCenter scrollRect}
-        wheel = hover {inputScroll = V2 0 1}
-        inView btn =
-          let y = rectY (respRect btn)
-              h = rectH (respRect btn)
-           in y >= sy + 4 && y + h + 16 <= sy + sh
-        pump = do
-          before <- getScrollOffset ctx sid
-          _ <- runFrame ctx wheel ui
-          after <- getScrollOffset ctx sid
-          ((_, btn), _, _) <- runFrame ctx hover ui
-          if inView btn || after <= before then pure (after, btn) else pump
-    (off, btn1) <- pump
+  assertJustM failed (wheelIntoView ctx inp0 ui snd sid 16) $ \(off, btn1) -> do
     assert failed (off > 0)
     let hoverInp = inp0 {inputMousePos = centerOf btn1}
         visualBottom = rectY (respRect btn1) + rectH (respRect btn1)

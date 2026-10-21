@@ -108,21 +108,12 @@ runAnimationStaggerTest ctx failed = do
   let ui = do
         _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
         t <- withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1)
-        label (T.pack ("t=" ++ show t))
-      trailVal = do
-        spans <- collectTextSpans ctx
-        let shown = [txt | (_, txt, _, _, _) <- spans]
-            tagged = [T.drop 2 txt | txt <- shown, "t=" `T.isPrefixOf` txt]
-        case tagged of
-          (raw : _) -> case reads (T.unpack raw) of
-            [(n, "")] -> pure (n :: Float)
-            _ -> assert failed False >> pure 0
-          _ -> assert failed False >> pure 0
-  replicateM_ 3 (runFrame ctx inp ui)
-  early <- trailVal
+        t <$ label "trail"
+  replicateM_ 2 (runFrame ctx inp ui)
+  early <- evalUi ctx inp ui
   assert failed (early <= 0.01)
-  replicateM_ 10 (runFrame ctx inp ui)
-  late <- trailVal
+  replicateM_ 9 (runFrame ctx inp ui)
+  late <- evalUi ctx inp ui
   assert failed (late >= 0.15)
 
 runAnimationBezierTest :: Context -> IORef Int -> IO ()
@@ -203,9 +194,7 @@ runButtonHoverAnimTest ctx failed = do
   let decreases = any (uncurry (\a b -> b + 0.001 < a)) (zip vals (drop 1 vals))
   assert failed (not decreases)
   assert failed (last vals >= 0.4)
-  let (press, release) = clickPair inp0 (V2 10 10)
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
+  _ <- runClick ctx inp0 ui (V2 10 10)
   hot <- getHotId ctx
   val <- getAnimationValue ctx hot
   assert failed (hashWidgetId hot /= 0)
@@ -221,7 +210,6 @@ runSpinnerTest ctx failed = do
         spinnerWith' id 18
   _ <- runFrame ctx inp ui
   (resp, draw0, _) <- runFrame ctx inp ui
-  _ <- takeDamage ctx
   need <- needsRedraw ctx inp inp
   assert failed need
   quads0 <- drawQuads draw0
@@ -251,7 +239,6 @@ runKeepAnimatingLapseTest ctx failed = do
   _ <- runFrame ctx inp loaded
   assert failed . not =<< anyAnimating ctx
   _ <- runFrame ctx inp loaded
-  _ <- takeDamage ctx
   assert failed . not =<< needsRedraw ctx inp inp
   -- Shown again, it runs again.
   _ <- runFrame ctx inp loading

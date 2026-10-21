@@ -114,12 +114,7 @@ runRichTextLinkTest ctx failed = do
   let Rect rx ry _ rh = respRect resp
       onLink = V2 (rx + prefixW + linkW / 2) (ry + rh / 2)
       onText = V2 (rx + 2) (ry + rh / 2)
-      clickAt pos = do
-        let (press, release) = clickPair inp0 pos
-        void (runFrame ctx inp0 {inputMousePos = pos} ui)
-        void (runFrame ctx press ui)
-        ((_, clicked), _, _) <- runFrame ctx release ui
-        pure clicked
+      clickAt pos = warmup ctx inp0 {inputMousePos = pos} ui >> snd <$> runClick ctx inp0 ui pos
   linkClick <- clickAt onLink
   assertEq failed (Just "docs-target") linkClick
   handShown <- cursorKindIs ctx inp0 {inputMousePos = onLink} UiCursorPointer
@@ -135,6 +130,13 @@ runRichTextLinkTest ctx failed = do
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer
   assert failed (not plainCursor)
 
+-- | The ops the rich text @resp@ draws in its last laid-out rect.
+drawnOps :: Context -> Response -> IO [DrawOp]
+drawnOps ctx resp = do
+  Just entry <- lookupCustomDrawing ctx (respId resp)
+  cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) (respId resp)
+  pure (toList (cdrBuild entry cdc (respRect resp)))
+
 -- | Each line of a paragraph, wrapped or not, aligns within its box: flush
 -- right for 'alignEnd', centred for 'alignCenter'. A fit-width paragraph is
 -- placed in its column by the same alignment at its wrapped width, so its
@@ -147,14 +149,11 @@ runRichTextAlignTest ctx failed = do
       -- The paragraph's box and each drawn line's left and right edges.
       linesOf width align = do
         resp <- warmup2 ctx inp (columnWith (fixedW 200) (fst <$> richTextWith' (width . align) paragraph))
-        let wid = respId resp
-            r = respRect resp
-        Just entry <- lookupCustomDrawing ctx wid
-        cdc <- mkCustomDrawContext ctx fm wid
-        extents <- forM [(x, y, t) | DrawTextStyled x y _ t _ <- toList (cdrBuild entry cdc r)] $ \(x, y, t) ->
+        ops <- drawnOps ctx resp
+        extents <- forM [(x, y, t) | DrawTextStyled x y _ t _ <- ops] $ \(x, y, t) ->
           (\w -> (y, x, x + w)) <$> lineWidthIO fm t
         let lines' = groupBy (\(a, _, _) (b, _, _) -> a == b) extents
-        pure (r, [(minimum [x0 | (_, x0, _) <- l], maximum [x1 | (_, _, x1) <- l]) | l <- lines'])
+        pure (respRect resp, [(minimum [x0 | (_, x0, _) <- l], maximum [x1 | (_, _, x1) <- l]) | l <- lines'])
   forM_ [(alignEnd, 1), (alignCenter, 0.5)] $ \(align, at :: Float) -> do
     (Rect rx _ rw _, full) <- linesOf fillW align
     (_, fitted) <- linesOf id align
@@ -168,13 +167,11 @@ runRichTextAlignTest ctx failed = do
 runRichTextAlignOverlongTest :: Context -> IORef Int -> IO ()
 runRichTextAlignOverlongTest ctx failed = do
   let inp = withInput 400 400
-      fm = ctxFontMetrics ctx
   forM_ [alignEnd, alignCenter] $ \align -> do
     resp <- warmup2 ctx inp (columnWith (fixedW 40) (fst <$> richTextWith' (fillW . align) ["supercalifragilistic", " short"]))
-    let r@(Rect rx _ _ _) = respRect resp
-    Just entry <- lookupCustomDrawing ctx (respId resp)
-    cdc <- mkCustomDrawContext ctx fm (respId resp)
-    let xs = [x | DrawTextStyled x _ _ _ _ <- toList (cdrBuild entry cdc r)]
+    let Rect rx _ _ _ = respRect resp
+    ops <- drawnOps ctx resp
+    let xs = [x | DrawTextStyled x _ _ _ _ <- ops]
     assert failed (not (null xs))
     forM_ xs $ \x -> assert failed (x >= rx - 0.5)
 
@@ -208,9 +205,7 @@ runRichTextBackgroundTest ctx failed = do
       ui c = column (fst <$> richText' ["Run ", inlineBackground c (inlineCode " cabal build "), " first"])
       opsOf c = do
         resp <- warmup2 ctx inp (ui c)
-        Just entry <- lookupCustomDrawing ctx (respId resp)
-        cdc <- mkCustomDrawContext ctx fm (respId resp)
-        pure (respRect resp, toList (cdrBuild entry cdc (respRect resp)))
+        (,) (respRect resp) <$> drawnOps ctx resp
   (Rect rx ry _ rh, ops) <- opsOf tint
   prefixW <- sum <$> mapM (lineWidthIO fm) ["Run", " ", " "]
   codeW <- sum <$> mapM (lineWidthIO fm) ["cabal", " ", "build"]
@@ -303,15 +298,13 @@ runRichTextCappedTest ctx failed = do
 runRichTextSamePiecesTest :: Context -> IORef Int -> IO ()
 runRichTextSamePiecesTest ctx failed = do
   let inp = withInput 400 400
-      fm = ctxFontMetrics ctx
       pieces = ["kept ", strong "pieces", hyperlink "x" " here"]
       red = colorRGBA 200 10 10 255
       blue = colorRGBA 10 10 200 255
       colorsOf theme f = do
         resp <- warmup2 ctx inp (column (setUiTheme theme >> fst <$> richTextWith' f pieces))
-        Just entry <- lookupCustomDrawing ctx (respId resp)
-        cdc <- mkCustomDrawContext ctx fm (respId resp)
-        pure [c | DrawTextStyled _ _ _ t c <- toList (cdrBuild entry cdc (respRect resp)), t == "kept"]
+        ops <- drawnOps ctx resp
+        pure [c | DrawTextStyled _ _ _ t c <- ops, t == "kept"]
   assertEq failed [red] =<< colorsOf defaultTheme (fontColor red)
   assertEq failed [blue] =<< colorsOf defaultTheme (fontColor blue)
   dark <- colorsOf defaultTheme id

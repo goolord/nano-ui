@@ -308,7 +308,6 @@ runFocusTextCommandTest ctx failed = do
   assert failed =<< getFocusVisible ctx
   writeIORef (ctxFocusId ctx) (WidgetId 0)
   writeIORef offRef True
-  writeIORef run True
   _ <- warmup ctx inp ui
   assertEq failed (WidgetId 0) =<< getFocusId ctx
 

@@ -278,7 +278,6 @@ runVarAbortTest ctx failed = do
   _ <- warmup2 ctx inp view
   r <- try @ErrorCall (runFrame ctx inp failing)
   assert failed (either (const True) (const False) r)
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp view
   assertEq failed 1 =<< lastFramePasses ctx
   assertEq failed DamageFull =<< takeDamage ctx

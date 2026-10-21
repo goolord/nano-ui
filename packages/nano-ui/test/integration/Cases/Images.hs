@@ -226,7 +226,6 @@ runImageLookDamageTest ctx failed = do
   takeDamage ctx >>= assert failed . (`clipCovers` respRect r)
   _ <- runFrame ctx (withInput 400 400) (ui 0.5)
   takeDamage ctx >>= assert failed . damageIsEmpty
-  writeIORef (ctxPaintFull ctx) True
 
 -- | Switching the image an image node shows, at the same rect, repaints the
 -- node, plain or with a look; showing the same image again repaints nothing.
@@ -246,7 +245,6 @@ runImageIdDamageTest ctx failed = do
     takeDamage ctx >>= assert failed . (`clipCovers` respRect r)
     _ <- runFrame ctx inp (ui b)
     takeDamage ctx >>= assert failed . damageIsEmpty
-  writeIORef (ctxPaintFull ctx) True
 
 -- | An image id past what a 'Float' holds exactly still draws its own image,
 -- not a neighbour's or the placeholder.

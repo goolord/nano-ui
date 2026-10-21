@@ -8,6 +8,7 @@ module Spec
   , fillsIn
   , buttonValues
   , widgetValue
+  , wheelIntoView
   , withMonospaceFonts
   , module Control.Monad
   , module Data.IORef
@@ -72,3 +73,21 @@ buttonValues ctx = do
 -- is drawn checked.
 widgetValue :: Context -> WidgetId -> IO (Maybe Float)
 widgetValue ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= traverse (getNodeValue (ctxNodeArena ctx))
+
+-- | Wheel down over the scroller @sid@ a notch at a time until the button
+-- @pick@ takes from the view's result lies inside it, with @margin@ to spare
+-- below, or it stops scrolling. The offset reached and the button, or
+-- 'Nothing' before the scroller is laid out.
+wheelIntoView :: Context -> Input -> NanoUI a -> (a -> Response) -> WidgetId -> Float -> IO (Maybe (Float, Response))
+wheelIntoView ctx inp ui pick sid margin =
+  getPrevRect ctx sid >>= traverse (\scroller@(Rect _ sy _ sh) -> do
+    let hover = inp {inputMousePos = spanCenter scroller}
+        wheel = hover {inputScroll = V2 0 1}
+        inView (Rect _ y _ h) = y >= sy + 4 && y + h + margin <= sy + sh
+        pump = do
+          before <- getScrollOffset ctx sid
+          _ <- runFrame ctx wheel ui
+          after <- getScrollOffset ctx sid
+          btn <- pick <$> evalUi ctx hover ui
+          if inView (respRect btn) || after <= before then pure (after, btn) else pump
+    pump)

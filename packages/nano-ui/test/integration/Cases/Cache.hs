@@ -320,12 +320,11 @@ runPartialMeasureAncestorTest ctx failed = do
         parent <- addNodeFromLayout na NodeContainer (-1) (fixedWH w 200 defaultLayout)
         i <- addNodeFromLayout na NodeText parent defaultLayout
         setNodeText na i "a long label that wraps onto several lines at a narrow width"
-      rects = arenaRects
   void $ runFrame ctx inp (ui ctx 360)
-  wide <- rects ctx
+  wide <- arenaRects ctx
   void $ runFrame ctx inp (ui ctx 120)
-  narrow <- rects ctx
+  narrow <- arenaRects ctx
   assert failed (wide /= narrow)
   fresh <- newContext
   void $ runFrame fresh inp (ui fresh 120)
-  assertEq failed narrow =<< rects fresh
+  assertEq failed narrow =<< arenaRects fresh

@@ -23,7 +23,6 @@ inp = withInputOff 320 300
 runSharedKeyVanishDamageTest :: Int -> Context -> IORef Int -> IO ()
 runSharedKeyVanishDamageTest freeze ctx failed = do
   mResp <- warmup ctx inp (tableAndLabel freeze True) >> warmup2 ctx inp (tableAndLabel freeze True)
-  _ <- takeDamage ctx
   assertJust failed mResp $ \resp -> do
     let old = respRect resp
     assert failed (rectW old > 0 && rectH old > 0)
@@ -68,8 +67,6 @@ runWidgetIdIndexEpochWrapTest ctx failed = do
 -- | A table with @freeze@ frozen columns, and a label after it while @showLabel@.
 tableAndLabel :: Int -> Bool -> NanoUI (Maybe Response)
 tableAndLabel freeze showLabel = column $ do
-  sortStateVar <- useVar (SortCol 0 SortAsc)
-  sortState <- readVar sortStateVar
   let rows = [(n, n) | n <- map (T.pack . show) [1 .. 20 :: Int]]
-  _ <- tableConfigured' defaultTableConfig {tableFreezeCols = freeze} (fixedH 150) "people" (headed "Name" fst <> headed "Value" snd) rows (constVar sortState)
+  _ <- tableConfigured' defaultTableConfig {tableFreezeCols = freeze} (fixedH 150) "people" (headed "Name" fst <> headed "Value" snd) rows (constVar (SortCol 0 SortAsc))
   if showLabel then Just <$> label' "bye" else pure Nothing

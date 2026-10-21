@@ -364,15 +364,14 @@ runSelectCloseKeepsFocusTest ctx failed = do
   indexRef <- newVar 1
   let inp0 = withInput 320 200
       ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
-      listed spans = any (\(_, txt, _, _, _) -> txt == "Low") spans
   (resp, _) <- warmup2 ctx inp0 ui
   let mid = centerOf resp
       openRelease = snd (clickPair inp0 mid)
       closeRelease = snd (clickPair openRelease mid)
   _ <- runClick ctx inp0 ui mid
-  assert failed . listed =<< collectOverlayTextSpans ctx openRelease
+  assert failed . hasText "Low" =<< collectOverlayTextSpans ctx openRelease
   _ <- runClick ctx openRelease ui mid
   let idle = closeRelease {inputButtonsReleased = noButtons}
   _ <- runFrame ctx idle ui
-  assert failed . not . listed =<< collectOverlayTextSpans ctx idle
+  assert failed . not . hasText "Low" =<< collectOverlayTextSpans ctx idle
   assertEq failed (respId resp) =<< getFocusId ctx

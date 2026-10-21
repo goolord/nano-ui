@@ -35,8 +35,7 @@ runTextInputFontTest base failed = do
       big = fontSize 32
       field = void ((snd <$> withValue "Hg" (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)})))
       extent ui = do
-        _ <- runFrame ctx inp (column ui)
-        (_, dd, _) <- runFrame ctx inp (column ui)
+        (_, dd) <- warmupDraw ctx inp (column ui)
         ps <- glyphVertices dd
         let xs = map fst ps
             ys = map snd ps
@@ -123,7 +122,6 @@ runSquareGeometryTest ctx failed = do
   squareTris <- triangleAlphas dSquare
   assert failed (not (null squareTris))
   assert failed (all uniform squareTris)
-  setDrawSquareGeometry ctx False
 
 -- | External text keeps text spans but pushes no text quads, so the buffer
 -- does not grow with the label length.
@@ -137,7 +135,6 @@ runExternalTextTest ctx failed = do
   spans <- collectTextSpans ctx
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
-  setDrawExternalText ctx False
 
 -- | Circles sharing a centre stay concentric at a fractional centre, filled
 -- or stroked, whatever their radii. Pixel snapping must preserve their shared centre.
@@ -156,7 +153,6 @@ runConcentricCirclesTest ctx failed = do
         }
   setDrawSnapScale ctx 1
   (_, dd, _) <- runFrame ctx inp ui
-  setDrawSnapScale ctx 0
   verts <- vertexColours dd
   let centreOf rgb = case [(x, y) | (x, y, c) <- verts, c == rgb] of
         [] -> Nothing
