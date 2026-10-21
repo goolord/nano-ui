@@ -24,7 +24,7 @@ module NanoUI.Rgfw.Internal.Session
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket, finally, onException)
 import Control.Monad (unless, void, when)
-import Data.Bits ((.&.), (.|.))
+import Data.Bits (complement, (.&.), (.|.))
 import Data.Char (chr, isDigit, isPrint, toLower)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
@@ -68,6 +68,7 @@ import NanoUI.Backend
   , defaultWindowHost
   , defaultWindowState
   , emptyInput
+  , inputPointerHeld
   , installWindowHost
   , releaseAllKeys
   , keypadKey
@@ -204,6 +205,27 @@ keypadRgfwKeys =
 
 modsFromRgfw :: Word8 -> Modifiers
 modsFromRgfw m = modifiersFromBits m R.rgfw_modShift R.rgfw_modControl R.rgfw_modAlt R.rgfw_modSuper
+
+-- | The modifier bits of a key event, counting the key itself. On X11 and
+-- Windows RGFW reads the bits before it records the key, so a modifier key's
+-- press lacks its own bit and its release still has it. On macOS the bits
+-- are already current.
+ownModifier :: Word32 -> Bool -> Word8 -> Word8
+ownModifier k down m = case lookup k modifierRgfwKeys of
+  Just bit -> if down then m .|. bit else m .&. complement bit
+  Nothing -> m
+
+modifierRgfwKeys :: [(Word32, Word8)]
+modifierRgfwKeys =
+  [ (R.rgfw_keyShiftL, R.rgfw_modShift)
+  , (R.rgfw_keyShiftR, R.rgfw_modShift)
+  , (R.rgfw_keyControlL, R.rgfw_modControl)
+  , (R.rgfw_keyControlR, R.rgfw_modControl)
+  , (R.rgfw_keyAltL, R.rgfw_modAlt)
+  , (R.rgfw_keyAltR, R.rgfw_modAlt)
+  , (R.rgfw_keySuperL, R.rgfw_modSuper)
+  , (R.rgfw_keySuperR, R.rgfw_modSuper)
+  ]
 
 -- | The RGFW standard cursor for a cursor kind, after 'cursorFallback'.
 -- 'R.rgfw_mouseArrow' stands for the platform's default arrow.
@@ -450,25 +472,32 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
 
         let drv =
               SessionDriver
-                { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
+                { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef
                 , sdWaitEvents    = \t -> do
                     R.waitForEvent t
-                    pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
+                    pollRgfwEvents win evPtr scaleRef monScaleRef
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = \case RgfwEvButton {} -> True; _ -> False
                 , sdIsSessionQuit = \case RgfwEvClose -> True; _ -> False
                 , sdSyncDisplay   = \c inp -> do
+                    -- A minimized window reports 0x0 (on Windows): keep the
+                    -- last real size.
                     (curWinW, curWinH) <- R.windowSize win
                     (pw0, ph0) <- readIORef winSizeRef
                     let (pw, ph) = if curWinW > 0 && curWinH > 0 then (curWinW, curWinH) else (pw0, ph0)
                     writeIORef winSizeRef (pw, ph)
                     curMonScale <- readIORef monScaleRef
                     curModel <- readIORef modelRef
+                    oldScale <- readIORef scaleRef
                     let (_, userScale) = getThemeAndScale curModel
                         !newScale = resolveScale userScale curMonScale
+                        -- Motion was divided by the old scale when decoded.
+                        V2 mx my = inputMousePos inp
+                        !k = oldScale / newScale
+                        mouse = if k == 1 then inputMousePos inp else V2 (mx * k) (my * k)
                     writeIORef scaleRef newScale
                     reportWindowState c =<< rgfwWindowState win newScale
-                    pure (c, inp {inputWindowSize = logicalSize (pw, ph) newScale})
+                    pure (c, inp {inputWindowSize = logicalSize (pw, ph) newScale, inputMousePos = mouse})
                 , sdDebug         = rdsSampler debugSampler
                 , sdContinuous    = False
                   -- Presents are unthrottled (swap interval 0, no vsync), so a
@@ -519,11 +548,13 @@ data RgfwEvent
   | RgfwEvChar !Char -- ^ typed character
   | RgfwEvKey !Word32 !Word8 !Bool -- ^ key, modifiers, down (including repeats) or up
   | RgfwEvFocusLost -- ^ the window lost keyboard focus
+  | RgfwEvRedraw -- ^ the window was uncovered or restored: paint it all
 
--- | Drain the RGFW queue, recording size and scale changes for the next sync.
--- Character keys are remapped to the current layout ('layoutKey').
-pollRgfwEvents :: R.Window -> Ptr R.RGFW_event -> IORef Float -> IORef Float -> IORef (Int, Int) -> IO [RgfwEvent]
-pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
+-- | Drain the RGFW queue, recording scale changes for the next sync, which
+-- reads the window size itself. Character keys are remapped to the current
+-- layout ('layoutKey').
+pollRgfwEvents :: R.Window -> Ptr R.RGFW_event -> IORef Float -> IORef Float -> IO [RgfwEvent]
+pollRgfwEvents win evPtr scaleRef monScaleRef = do
   raw <- drain []
   scale <- readIORef scaleRef
   pure (decodeRgfwEvents scale raw)
@@ -532,9 +563,6 @@ pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
       ev <- R.pollEvent win evPtr
       case ev of
         R.EventNone -> pure (reverse acc)
-        R.EventWindowResize nw nh -> do
-          writeIORef winSizeRef (nw, nh)
-          drain (ev : acc)
         R.EventScaleUpdate sx _ -> do
           writeIORef monScaleRef (if sx > 0 then sx else 1)
           drain (ev : acc)
@@ -568,6 +596,7 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventOther t
     | t == R.rgfw_mouseLeave -> Just RgfwEvLeave
     | t == R.rgfw_windowFocusOut -> Just RgfwEvFocusLost
+    | t == R.rgfw_windowRefresh || t == R.rgfw_windowRestored -> Just RgfwEvRedraw
   R.EventKeyPress k m -> Just (RgfwEvKey k m True)
   R.EventKeyRepeat k m -> Just (RgfwEvKey k m True)
   R.EventKeyRelease k m -> Just (RgfwEvKey k m False)
@@ -584,10 +613,15 @@ applyRgfwEvent inp ev = case ev of
   -- RGFW numbers buttons from 0 in 'mouseButtonNumber' order: left, middle,
   -- right, back, forward, then the rest.
   RgfwEvButton btn down -> applyMouseButton (mouseButtonNumber (fromIntegral btn + 1)) down inp
-  RgfwEvLeave -> applyPointerLeave inp
+  -- A drag keeps its pointer: Windows sends no motion outside the window,
+  -- so leaving would drop a dragged slider or scrollbar to the far corner.
+  RgfwEvLeave
+    | inputPointerHeld inp -> inp
+    | otherwise -> applyPointerLeave inp
   RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
   RgfwEvChar c -> inp {inputChars = T.snoc (inputChars inp) c}
   -- 'applyKey' detects auto-repeat because the key is already held.
   RgfwEvKey k m down ->
-    (maybe inp (\key -> applyKey key down inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw m}
+    (maybe inp (\key -> applyKey key down inp) (mapRgfwKey k m)) {inputModifiers = modsFromRgfw (ownModifier k down m)}
   RgfwEvFocusLost -> releaseAllKeys inp
+  RgfwEvRedraw -> inp {inputWindowRedraw = True}

@@ -43,6 +43,8 @@ module RGFW.Raw
   , rgfw_mouseLeave
   , rgfw_windowMoved
   , rgfw_windowResized
+  , rgfw_windowRefresh
+  , rgfw_windowRestored
   , rgfw_windowFocusIn
   , rgfw_windowFocusOut
   , rgfw_scaleUpdated
@@ -96,6 +98,14 @@ module RGFW.Raw
   , rgfw_keyPadPlus
   , rgfw_keyPadEqual
   , rgfw_keyPadReturn
+  , rgfw_keyShiftL
+  , rgfw_keyShiftR
+  , rgfw_keyControlL
+  , rgfw_keyControlR
+  , rgfw_keyAltL
+  , rgfw_keyAltR
+  , rgfw_keySuperL
+  , rgfw_keySuperR
   -- Key modifier bits
   , rgfw_modCapsLock
   , rgfw_modNumLock
@@ -300,6 +310,9 @@ rgfw_eventNone, rgfw_keyPressed, rgfw_keyReleased, rgfw_keyChar :: Word8
 rgfw_mouseButtonPressed, rgfw_mouseButtonReleased, rgfw_mouseScroll, rgfw_mouseMotion, rgfw_mouseLeave :: Word8
 -- | Event tags for window movement, resize, focus, scale, and close requests.
 rgfw_windowMoved, rgfw_windowResized, rgfw_windowFocusIn, rgfw_windowFocusOut, rgfw_scaleUpdated, rgfw_windowClose :: Word8
+-- | Event tags for a window whose contents need drawing again (uncovered or
+-- repainted by the desktop) and for one restored from minimized or maximized.
+rgfw_windowRefresh, rgfw_windowRestored :: Word8
 
 rgfw_eventNone           = #{const RGFW_eventNone}
 rgfw_keyPressed          = #{const RGFW_keyPressed}
@@ -312,6 +325,8 @@ rgfw_mouseMotion         = #{const RGFW_mouseMotion}
 rgfw_mouseLeave          = #{const RGFW_mouseLeave}
 rgfw_windowMoved         = #{const RGFW_windowMoved}
 rgfw_windowResized       = #{const RGFW_windowResized}
+rgfw_windowRefresh       = #{const RGFW_windowRefresh}
+rgfw_windowRestored      = #{const RGFW_windowRestored}
 rgfw_windowFocusIn       = #{const RGFW_windowFocusIn}
 rgfw_windowFocusOut      = #{const RGFW_windowFocusOut}
 rgfw_scaleUpdated        = #{const RGFW_scaleUpdated}
@@ -383,6 +398,19 @@ rgfw_keyPadMinus    = #{const RGFW_keyPadMinus}
 rgfw_keyPadPlus     = #{const RGFW_keyPadPlus}
 rgfw_keyPadEqual    = #{const RGFW_keyPadEqual}
 rgfw_keyPadReturn   = #{const RGFW_keyPadReturn}
+
+-- | Left and right modifier key codes. A modifier key's own press and
+-- release events carry the modifier bits from before the event on X11 and
+-- Windows.
+rgfw_keyShiftL, rgfw_keyShiftR, rgfw_keyControlL, rgfw_keyControlR, rgfw_keyAltL, rgfw_keyAltR, rgfw_keySuperL, rgfw_keySuperR :: Word32
+rgfw_keyShiftL   = #{const RGFW_keyShiftL}
+rgfw_keyShiftR   = #{const RGFW_keyShiftR}
+rgfw_keyControlL = #{const RGFW_keyControlL}
+rgfw_keyControlR = #{const RGFW_keyControlR}
+rgfw_keyAltL     = #{const RGFW_keyAltL}
+rgfw_keyAltR     = #{const RGFW_keyAltR}
+rgfw_keySuperL   = #{const RGFW_keySuperL}
+rgfw_keySuperR   = #{const RGFW_keySuperR}
 
 -- | Independent modifier bits, combined with bitwise OR in key events.
 rgfw_modCapsLock, rgfw_modNumLock, rgfw_modControl, rgfw_modAlt, rgfw_modShift, rgfw_modSuper, rgfw_modScrollLock :: Word8

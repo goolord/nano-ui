@@ -2,6 +2,7 @@ module Main (main) where
 
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_)
+import Data.Bits ((.|.))
 import Data.ByteString qualified as BS
 import Data.Either (isLeft)
 import Data.Foldable (toList)
@@ -274,6 +275,14 @@ testRgfwTyping = do
     keys [EventKeyPress (R.rgfw_keyPad1 + 1) R.rgfw_modNumLock] == [KeyChar '2']
       && keys [EventKeyPress (R.rgfw_keyPad1 + 1) 0] == [KeyDown]
       && keys [EventKeyPress R.rgfw_keyPadReturn 0] == [KeyEnter]
+  -- On X11 and Windows a modifier key's own events carry the bits from
+  -- before them: Shift's press lacks Shift and its release still has it.
+  let mods = inputModifiers . applied
+  assert "RGFW keys: a modifier is held from its own press to its own release" $
+    mods [EventKeyPress R.rgfw_keyShiftL 0] == noModifiers {modShift = True}
+      && mods [EventKeyPress R.rgfw_keyControlR R.rgfw_modShift] == noModifiers {modShift = True, modCtrl = True}
+      && mods [EventKeyPress R.rgfw_keyShiftL 0, EventKeyRelease R.rgfw_keyShiftL R.rgfw_modShift] == noModifiers
+      && mods [EventKeyRelease R.rgfw_keyAltR (R.rgfw_modAlt .|. R.rgfw_modSuper)] == noModifiers {modSuper = True}
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
 -- RGFW's wheel is positive up and left, the input's down and right.
@@ -295,6 +304,14 @@ testRgfwPointer = do
   assert "RGFW buttons: misc 2 is forward" (pressedBy R.rgfw_mouseMisc2 == [MouseForward])
   assert "RGFW buttons: misc 3 to 5 are the next buttons" (concatMap pressedBy [R.rgfw_mouseMisc2 + 1 .. R.rgfw_mouseMisc2 + 3] == map MouseOther [6, 7, 8])
   assert "RGFW pointer: leaving the window moves the pointer off it" (let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
+  -- Windows sends no motion outside the window during a drag, so a leave
+  -- then would drop a dragged slider or scrollbar to the far corner.
+  let dragOut = applied [EventMouseButton R.rgfw_mouseLeft True, EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
+  assert "RGFW pointer: leaving with a button held keeps the pointer" (inputMousePos dragOut == V2 30 40)
+  assert "RGFW window: an uncovered or restored window repaints in full" $
+    inputWindowRedraw (applied [EventOther R.rgfw_windowRefresh])
+      && inputWindowRedraw (applied [EventOther R.rgfw_windowRestored])
+      && not (inputWindowRedraw (applied [EventMouseMotion 1 1]))
 
 -- | A rotated image reaches the rasteriser as a rotated quad, clipped to its
 -- widget. Rotated 45 degrees, a 40 by 20 image covers the top-left and
