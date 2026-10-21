@@ -14,7 +14,7 @@ tests =
   , spec "tabs-laziness" runTabsLazinessTest
   , spec "tabs-enum" runEnumTabsTest
   , spec "tabs-closable" runTabsClosableTest
-  , pixelSpec "tabs-disabled" runTabsDisabledTest
+  , spec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
   , spec "tabs-scroll-widen" runTabsScrollWidenTest
   , spec "tabs-scroll-close-button" runTabsScrollCloseButtonTest
@@ -345,7 +345,7 @@ runTabsClosableTest ctx failed = do
 -- for every header in the bar, though the scroller between the arrows would
 -- still be too narrow for them.
 runTabsScrollWidenTest :: Context -> IORef Int -> IO ()
-runTabsScrollWidenTest _ failed = do
+runTabsScrollWidenTest wide failed = do
   let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
       mkTabs = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
       nodeRect ctx l = do
@@ -355,7 +355,6 @@ runTabsScrollWidenTest _ failed = do
       hasArrows ctx = do
         spans <- collectTextSpans ctx
         pure (T.any (`elem` ['\8250', '\8249']) (T.concat [t | (_, t, _, _, _) <- spans]))
-  wide <- newContext
   _ <- warmup2 wide (withInput 900 120) mkTabs
   mFirst <- nodeRect wide "Controls"
   mLast <- nodeRect wide "LongestTabName"
@@ -377,7 +376,7 @@ runTabsScrollWidenTest _ failed = do
 -- A strip whose last close button runs past the bar overflows, though every
 -- header's main button fits: the range counts each header's close button.
 runTabsScrollCloseButtonTest :: Context -> IORef Int -> IO ()
-runTabsScrollCloseButtonTest _ failed = do
+runTabsScrollCloseButtonTest wide failed = do
   let labels = ["Controls", "Graphics", "Typography"]
       mkTabs = tabBar' (constVar (0 :: Int)) [closableTab i l () | (i, l) <- zip [0 ..] labels]
       nodeRects ctx p = do
@@ -389,7 +388,6 @@ runTabsScrollCloseButtonTest _ failed = do
       hasArrows ctx = do
         spans <- collectTextSpans ctx
         pure (T.any (`elem` ['\8250', '\8249']) (T.concat [t | (_, t, _, _, _) <- spans]))
-  wide <- newContext
   _ <- warmup2 wide (withInput 900 120) mkTabs
   firsts <- nodeRects wide (== "Controls")
   closes <- nodeRects wide (== "\215")
@@ -578,7 +576,7 @@ runTabsDamageTest ctx failed = do
 -- headers look exactly as they did before the strip could scroll (no
 -- scroller well behind them); and no scrollbar appears.
 runTabsScrollTest :: Context -> IORef Int -> IO ()
-runTabsScrollTest _ failed = do
+runTabsScrollTest wide failed = do
   let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
       mkTabs cur = tabBar' (constVar cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] labels]
       arrowRect ctx ch = do
@@ -587,7 +585,6 @@ runTabsScrollTest _ failed = do
       chevrons = ['\8250', '\8249']
 
   -- Wide bar: everything fits and no arrows are drawn.
-  wide <- newContext
   let wideInp = withInput 900 120
   _ <- runFrame wide wideInp (mkTabs 0)
   _ <- runFrame wide wideInp (mkTabs 0)

@@ -449,8 +449,7 @@ tableFirstColRows :: [(T.Text, T.Text)]
 tableFirstColRows = ("long-first-col", "short") : take 8 tableScrollRows
 
 runTableFillWidthTest :: Context -> IORef Int -> IO ()
-runTableFillWidthTest _ failed = do
-  ctx <- newContext
+runTableFillWidthTest ctx failed = do
   let inp0 = (withInput 500 200) {inputMousePos = V2 200 80}
       cfg =
         defaultTableConfig
