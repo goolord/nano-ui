@@ -41,6 +41,4 @@ data SomeBackendSession = forall b. SomeBackendSession !(SBackend b) (BackendSes
 
 -- | The session value, if it belongs to the backend asked for.
 sessionFor :: SBackend b -> SomeBackendSession -> Maybe (BackendSession b)
-sessionFor want (SomeBackendSession have session) = case testEquality want have of
-  Just Refl -> Just session
-  Nothing -> Nothing
+sessionFor want (SomeBackendSession have session) = (\Refl -> session) <$> testEquality want have

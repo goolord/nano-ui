@@ -163,7 +163,7 @@ import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
 import GHC.Enum (boundedEnumFrom, boundedEnumFromThen)
-import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, fadeAlpha, lerpColor)
+import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -1136,14 +1136,12 @@ subtle :: Theme -> Theme
 subtle =
   buttonStyle $ \s ->
     s
-      { styleBg = clear
-      , styleBorder = clear
+      { styleBg = colorTransparent
+      , styleBorder = colorTransparent
       , styleBorderWidth = 0
       , styleHoverBg = fadeAlpha (styleFg s) 30
       , styleActiveBg = fadeAlpha (styleFg s) 48
       }
-  where
-    clear = colorRGBA 0 0 0 0
 
 -- | Whichever of the theme's text colours reads best on @c@.
 readableOn :: Theme -> Color -> Color
