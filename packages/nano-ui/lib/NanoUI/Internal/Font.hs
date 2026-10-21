@@ -168,7 +168,8 @@ lineWidthIO fm txt = do
   prepared <- prepareFontMetrics fm txt
   pure $! lineWidth prepared txt
 
--- | Prepare metrics and measure logical width/height, accounting for newlines.
+-- | Prepare metrics and measure a single line's advance and the line height,
+-- in logical pixels. Split text at newlines first.
 {-# INLINE measureTextIO #-}
 measureTextIO :: FontMetrics -> Text -> IO (Float, Float)
 measureTextIO fm txt = do

@@ -130,7 +130,10 @@ walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
       | ci < 0 = pure ()
       | otherwise = do
           ns <- getNextSibling (ctxNodeArena ctx) ci
-          -- Later siblings paint under earlier ones; walk reverse then collect.
+          -- Sibling links run last to first, so recursing before collecting
+          -- yields declaration order, which is reading order. It is not
+          -- paint order ('forChildrenInPaintOrder_'), which differs where
+          -- siblings overlap.
           go ns
           collectClippedSpans ctx ci clip arena
 

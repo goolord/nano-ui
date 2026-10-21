@@ -25,7 +25,8 @@ newSpanArena = SpanArena <$> newIORef []
 resetSpanArena :: SpanArena -> IO ()
 resetSpanArena (SpanArena ref) = writeIORef ref []
 
--- | Append bounds, text, foreground, background, and clip in paint order.
+-- | Append bounds, text, foreground, background, and clip after the spans
+-- already pushed.
 pushSpans :: SpanArena -> [(Rect, Text, Color, Color, Rect)] -> IO ()
 pushSpans (SpanArena ref) spans = modifyIORef' ref (\acc -> foldl' (flip (:)) acc spans)
 

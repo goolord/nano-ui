@@ -223,7 +223,7 @@ colorToHex :: Color -> Text
 colorToHex c =
   "#" <> hexByte (colorR c) <> hexByte (colorG c) <> hexByte (colorB c)
 
--- | Eight-digit form for the alpha-aware picker: @#RRGGBBAA@.
+-- | Lowercase @#rrggbbaa@: 'colorToHex' with the alpha byte.
 colorToHexA :: Color -> Text
 colorToHexA c = colorToHex c <> hexByte (colorA c)
 
@@ -364,7 +364,7 @@ tableHeaderDisplayText txt
   | Just hdr <- T.stripPrefix tableSortReserveLead txt = tableSortBlank <> hdr
   | otherwise = txt <> tableSortBlank
 
--- Type flags live in bits 28-31 so visual style and tab index stay in the low bits.
+-- Type flags live in bits 24-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int
 buttonFlagClose = 0x20000000
 

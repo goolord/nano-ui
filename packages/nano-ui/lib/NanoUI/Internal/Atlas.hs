@@ -258,14 +258,15 @@ recordWrite slot st
 data AtlasUpload
   = AtlasWhole
   -- ^ Upload the full buffer at the current atlas size (no texture yet,
-  -- resized since @since@, or earlier writes were trimmed from 'asWrites').
+  -- resized since @since@, or written since longer ago than the atlas's
+  -- recent write log reaches).
   | AtlasRegions [(Int, Int, Int, Int)]
   -- ^ Upload only these @(x, y, width, height)@ pixel rects into the existing texture.
   deriving (Eq, Show)
 
 -- | Current atlas dimensions, pixel buffer, generation, and the upload
--- required since generation @since@ (0 when uninitialized). 'Nothing' when
--- the atlas is empty or already at @since@.
+-- required since generation @since@ (0 when uninitialized). 'Nothing' until
+-- the first image is registered, and when the atlas is already at @since@.
 atlasChanges :: ImageAtlas -> Int -> IO (Maybe (Int, Int, ForeignPtr Word8, Int, AtlasUpload))
 atlasChanges (ImageAtlas ref) since = do
   st <- readIORef ref
@@ -281,8 +282,9 @@ atlasChanges (ImageAtlas ref) since = do
       then Nothing
       else Just (asW st, asH st, asPtr st, gen, upload)
 
--- | The atlas's width, height, pinned pixels and generation; 'Nothing' while
--- it holds no image. SDL uploads the pointer; do not copy to ByteString first.
+-- | The atlas's width, height, pinned pixels and generation; 'Nothing' until
+-- the first image is registered. SDL uploads the pointer; do not copy to
+-- ByteString first.
 atlasSnapshot :: ImageAtlas -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot atlas = fmap (\(w, h, p, gen, _) -> (w, h, p, gen)) <$> atlasChanges atlas 0
 

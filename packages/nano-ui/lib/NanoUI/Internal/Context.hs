@@ -171,7 +171,8 @@ import NanoUI.Internal.Var.Cell (frameSlots, newStamps)
 
 -- | Register tightly packed RGBA8 pixels under an image id. Width and height
 -- are positive pixel counts. Returns 'False' for invalid data or atlas limits;
--- success requests a full repaint and wakes the loop.
+-- success requests a full repaint and wakes the loop. An id registered at
+-- another size is rejected; release it first.
 {-# INLINE registerImage #-}
 registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
 registerImage ctx iid w h px = do
@@ -222,7 +223,7 @@ atlasChanges :: Context -> Int -> IO (Maybe (Int, Int, ForeignPtr Word8, Int, At
 atlasChanges ctx = Atlas.atlasChanges (ctxImageAtlas ctx)
 
 -- | Atlas width, height, RGBA8 buffer, and revision for backend upload.
--- 'Nothing' means no atlas pixels have been allocated. Treat the buffer as
+-- 'Nothing' until the first image is registered. Treat the buffer as
 -- borrowed mutable storage and upload it before further image registration.
 {-# INLINE atlasSnapshot #-}
 atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
