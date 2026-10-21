@@ -62,6 +62,7 @@ module NanoUI.Internal.Draw
   ) where
 
 import Control.Monad (forM_, unless, when)
+import Data.Char (isSpace)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
@@ -247,9 +248,9 @@ pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 
 -- relies on its sub-pixel pass offsets. Every quad shares one arena
 -- reservation. A non-zero @slant@ shears glyphs around the shared baseline for
 -- synthetic oblique, so stems stay parallel and descenders lean left. A glyph
--- the font lacks draws an upright advance box on the device grid. As in
--- 'pushShapedQuads', glyphs wholly outside the clip emit nothing, and the
--- walk stops once the pen is well past it.
+-- the font lacks, other than whitespace, draws an upright advance box on the
+-- device grid. As in 'pushShapedQuads', glyphs wholly outside the clip emit
+-- nothing, and the walk stops once the pen is well past it.
 pushGlyphQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> T.Text -> Color -> IO ()
 pushGlyphQuads da fm slant px py txt col = do
   let !cap = T.length txt
@@ -272,18 +273,22 @@ pushGlyphQuads da fm slant px py txt col = do
               Just (c, rest)
                 | ox > stop -> pure q
                 | otherwise -> do
-                    let !adv = kernedAdvance fm prev c
-                        next !q' = walk q' (ox + adv) (Just c) rest
+                    -- Kerning against the character before moves this one.
+                    let !gx = case prev of
+                          Nothing -> ox
+                          Just p -> ox + fmKerning fm p c
+                        !adv = fmAdvance fm c
+                        next !q' = walk q' (gx + adv) (Just c) rest
                     case fmGlyph fm c of
                       Nothing
-                        | adv > 0 && c /= ' ' && not (outside ox adv) -> do
-                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
+                        | adv > 0 && not (isSpace c) && not (outside gx adv) -> do
+                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale gx) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
                             next (q + 1)
                         | otherwise -> next q
                       Just gq
-                        | outside (ox + gqX gq) (gqW gq) -> next q
+                        | outside (gx + gqX gq) (gqW gq) -> next q
                         | otherwise -> do
-                            pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (ox + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
+                            pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (gx + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
                             next (q + 1)
       !k <- walk 0 px Nothing txt
       commit (k * 4) (k * 6)

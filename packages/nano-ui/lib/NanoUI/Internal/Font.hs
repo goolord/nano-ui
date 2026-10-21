@@ -121,6 +121,8 @@ data FontMetrics = FontMetrics
   -- with no kerning between @'x'@ and @'M'@, is taken as monospace: text it
   -- has not shaped then measures that advance a character, unkerned.
   , fmKerning :: Char -> Char -> Float
+  -- ^ Extra space between the first character and the second, applied
+  -- before the second is drawn.
   , fmShape :: Text -> Maybe ShapedText
   -- ^ The shaped layout of a text the snapshot was prepared for, when the
   -- host shapes. Other texts fall back to 'fmAdvance' and 'fmKerning'.
@@ -296,11 +298,13 @@ textInkEnd :: FontMetrics -> Text -> Float
 textInkEnd fm txt =
   case T.unsnoc txt of
     Nothing -> 0
-    Just (prefix, c) ->
+    Just (_, c) ->
       case fmShape fm txt of
         Just st -> stInkEnd st
         Nothing ->
-          let pen = lineWidth fm prefix
+          -- The last glyph is drawn after its kerning, an advance short of
+          -- the end.
+          let pen = lineWidth fm txt - fmAdvance fm c
            in case fmGlyph fm c of
                 Just gq -> pen + gqX gq + gqW gq
                 Nothing -> pen + fmAdvance fm c
@@ -454,8 +458,9 @@ isDefaultNodeFont size weight style variant =
     && style == FontStyleNormal
     && (variant == FontRegular || variant == FontMono)
 
--- | Advance of @c@ plus its kerning against the previous character: the one
--- pen step shared by measuring, hit testing and glyph emission.
+-- | Advance of @c@ plus its kerning against the previous character: the
+-- step between two carets, shared by measuring and hit testing. Glyph
+-- emission applies the kerning before drawing @c@.
 {-# INLINE kernedAdvance #-}
 kernedAdvance :: FontMetrics -> Maybe Char -> Char -> Float
 kernedAdvance fm prev c = case prev of

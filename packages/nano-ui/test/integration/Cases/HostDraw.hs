@@ -22,7 +22,47 @@ tests =
   , spec "draw-glyph-page-range" runGlyphPageRangeTest
   , spec "draw-long-shaped-line" runLongShapedLineTest
   , spec "draw-text-input-font" runTextInputFontTest
+  , spec "draw-glyph-kerning" runGlyphKerningTest
+  , spec "draw-missing-glyph-space" runMissingGlyphSpaceTest
   ]
+
+-- | Glyphs drawn by character move a kerned pair's second glyph: "AV"
+-- kerned 2 closer draws the V 2 nearer the A, and the A after it where it
+-- would be anyway. Aligned to the end, the last V's ink meets the edge.
+runGlyphKerningTest :: Context -> IORef Int -> IO ()
+runGlyphKerningTest base failed = do
+  let uOf c = if c == 'V' then 0.6 else 0.25
+      fm =
+        (monospaceMetrics 10)
+          { fmAdvance = \c -> if c == 'M' then 12 else 10
+          , fmKerning = \a b -> if a == 'A' && b == 'V' then -2 else 0
+          , fmGlyph = \c -> Just (GlyphQuad 0 0 6 10 (uOf c) 0 (uOf c + 0.25) 1)
+          }
+      ctx = withFontMetrics base fm
+      ui = rowWith (fixedW 100 . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "AVAV")
+  (lab, dd) <- warmupDraw ctx (withInput 300 100) ui
+  xus <- withForeignPtr (drawVertices dd) $ \vp ->
+    withForeignPtr (drawIndices dd) $ \ip ->
+      fmap concat . forM [c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId] $ \cmd ->
+        forM [cmdIndexOffset cmd .. cmdIndexOffset cmd + cmdIndexCount cmd - 1] $ \i -> do
+          vi <- peekByteOff ip (fromIntegral i * indexSize) :: IO Word32
+          let at o = peekByteOff vp (fromIntegral vi * vertexSize + o) :: IO Float
+          (,) <$> at 0 <*> at 24
+  let aXs = [x | (x, u) <- xus, u < 0.55]
+      vXs = [x | (x, u) <- xus, u > 0.55]
+      Rect bx _ bw _ = respRect lab
+  if null aXs || null vXs
+    then assert failed False
+    else do
+      assertEq failed (8, 18) (minimum vXs - minimum aXs, maximum aXs - 6 - minimum aXs)
+      assert failed (abs (maximum vXs - (bx + bw)) <= 0.6)
+
+-- | A character with no glyph draws an advance box, but whitespace of any
+-- kind draws nothing.
+runMissingGlyphSpaceTest :: Context -> IORef Int -> IO ()
+runMissingGlyphSpaceTest ctx failed = do
+  (_, dd, _) <- runFrame ctx (withInput 300 100) (label "a\x00A0\&b\x3000\&c d")
+  assertEq failed (4 * 6) (sum [cmdIndexCount c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId])
 
 -- | A text field set in a larger font draws its value's glyphs in that font:
 -- they cover what a label in the same font covers, and not what the base
