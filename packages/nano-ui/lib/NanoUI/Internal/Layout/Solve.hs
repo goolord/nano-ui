@@ -172,15 +172,16 @@ measureTextNodeAt env idx txt outerW shouldWrap = do
       pure (TextBox True tw th lineH)
     else pure (TextBox False tw0 th0 lineH)
 
--- | Height of text node @idx@ at width @w@, clamped to @hAx@. Empty text is
--- zero height; text that does not wrap returns @fallback@. Text wraps at
--- newlines, and at @w@ when @allowed@ and its line overflows a positive @w@.
+-- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text that does
+-- not wrap returns @fallback@, and so does empty text, which measured one
+-- line tall. Text wraps at newlines, and at @w@ when @allowed@ and its line
+-- overflows a positive @w@.
 {-# INLINE textHeightAt #-}
 textHeightAt :: SolveEnv -> NodeIdx -> AxisSizing -> Float -> Bool -> Float -> IO Float
 textHeightAt env !idx (AxisSizing _ _ minH maxH) !w allowed !fallback = do
   txt <- getText (seArena env) idx
   if T.null txt
-    then pure (clamp minH maxH 0)
+    then pure fallback
     else do
       TextBox {tbWrapped, tbH, tbLineH} <-
         measureTextNodeAt env idx txt w (\wrapW lineW -> allowed && wrapW + 0.5 < lineW && wrapW > 0)

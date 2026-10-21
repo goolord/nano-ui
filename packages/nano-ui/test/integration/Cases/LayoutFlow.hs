@@ -36,6 +36,7 @@ tests =
   , spec "grow-max-handoff" runGrowMaxHandoffTest
   , spec "fixed-width-label" runFixedWidthLabelTest
   , spec "percent-across" runPercentAcrossTest
+  , spec "empty-label-line" runEmptyLabelLineTest
   ]
 
 red, green, blue, yellow :: Color
@@ -652,3 +653,18 @@ runPercentAcrossTest ctx failed = do
       assertEq failed (rectW cell) 100
       assertEq failed (rectH rowBox) 20
     _ -> assertEq failed (length rs) 9
+
+-- | An empty label takes a line in a column, as the column measured it and
+-- as it does in a row, so the column ends at its last child.
+runEmptyLabelLineTest :: Context -> IORef Int -> IO ()
+runEmptyLabelLineTest ctx failed = do
+  let ui = columnWith tight $ do
+        columnWith tight (label "a" >> label "" >> label "b")
+        label "after"
+  _ <- warmup2 ctx input0 ui
+  rs <- arenaRects ctx
+  case rs of
+    [_, col, a, empty, b, _] -> do
+      assertEq failed (rectH empty) (rectH a)
+      assertEq failed (rectY col + rectH col) (rectY b + rectH b)
+    _ -> assertEq failed (length rs) 6
