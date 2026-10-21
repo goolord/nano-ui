@@ -370,7 +370,10 @@
   drawn in the theme around it.
 
 - Generic `writeSlot`, `adoptSlot`, and `recordSlot` context operations for
-  controls using a typed store `Field`, alongside the existing scalar helpers.
+  controls using a typed store `Field`, in place of the per-type
+  `writeStoreInt`, `writeStoreFloat`, `adoptStoreInt`, `adoptStoreFloat`,
+  `adoptStoreText`, `recordStoreInt`, `recordStoreFloat` and
+  `recordStoreText`, which are gone.
 - `withUiResource` in `NanoUI.Monad` brackets UI-thread state acquisition and
   restoration, using the same exception/masking behavior as the existing scopes.
 
