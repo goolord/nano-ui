@@ -320,6 +320,11 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
     writePrimArray edges (e * 4 + 3) slope
     writePrimArray windings e (dir :: Int)
   totalEdges <- readPrimArray rowStart height
+  -- Above the first row an edge starts in there is nothing to cover.
+  let firstRow !r
+        | r >= height = pure height
+        | otherwise = readPrimArray rowStart (r + 1) >>= \e -> if e > 0 then pure r else firstRow (r + 1)
+  top <- firstRow 0
   active <- newPrimArray capacity
   crossX <- newPrimArray capacity
   crossDir <- newPrimArray capacity
@@ -391,20 +396,15 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
               then sample r (si + 1) kept 0 0 0
               else rows (r + 1) kept
       rows !r !n
-        | r >= height = pure height
+        | r >= height = pure (top, height)
         | otherwise = do
             from <- readPrimArray rowStart r
             to <- readPrimArray rowStart (r + 1)
             -- Past the last edge's bottom nothing is left to cover.
             if n == 0 && from >= totalEdges
-              then pure r
+              then pure (top, r)
               else admit from to n >>= \n' -> sample r 0 n' 0 0 0
-      -- Above the first row an edge starts in there is nothing to cover.
-      firstRow !r
-        | r >= height = pure height
-        | otherwise = readPrimArray rowStart (r + 1) >>= \e -> if e > 0 then pure r else firstRow (r + 1)
-  top <- firstRow 0
-  (,) top <$> rows top 0
+  rows top 0
 
 -- | Draw @col@ at @alpha@ through the coverage of rows @top@ to @end@ over
 -- the accumulated image, zeroing that coverage for the next shape.
