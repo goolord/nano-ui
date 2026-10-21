@@ -12,6 +12,7 @@ module NanoUI.Internal.Var.Types
   , Lens (..)
   , ElemCtx (..)
   , viewLens
+  , previewLens
   , overLensSig
   , peekLens
   , zoomVar
@@ -89,6 +90,13 @@ viewLens Here s = s
 viewLens (Field _ l g _) s = g (viewLens l s)
 viewLens (Elem _ (ElemCtx l key _ _) k snap) s =
   fromMaybe snap (find ((== k) . key) (viewLens l s))
+
+-- | The part of @s@ a lens shows, or 'Nothing' when its path goes through an
+-- element whose key has left the list, which a write cannot reach.
+previewLens :: Lens s a -> s -> Maybe a
+previewLens Here s = Just s
+previewLens (Field _ l g _) s = g <$> previewLens l s
+previewLens (Elem _ (ElemCtx l key _ _) k _) s = find ((== k) . key) =<< previewLens l s
 
 -- | Update the part of @s@ focused by the lens, returning the updated root and
 -- the modified part signature ('lensSig'): the lens's own part or, when the

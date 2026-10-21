@@ -171,7 +171,8 @@ withValue a body = do
 
 -- | Atomically modify the part of a cell focused by a lens. Returns the
 -- modified part signature ('overLensSig') if the value changed, or 'Nothing'
--- for unchanged or inert cells.
+-- for unchanged or inert cells, and for an element whose key has left its
+-- list, which the write leaves alone.
 {-# INLINE modifyRoot #-}
 modifyRoot :: Cell s -> Lens s a -> (a -> a) -> (a -> a -> Bool) -> IO (Maybe Sig)
 modifyRoot cell@(Cell ref _) l f eq
@@ -180,12 +181,12 @@ modifyRoot cell@(Cell ref _) l f eq
       Nothing <$ mapM_ (\_ -> writeIORef ref root') touched
   | otherwise = atomicModifyIORef' ref step
   where
-    step root =
-      let old = viewLens l root
-          new = f old
-       in if eq new old
-            then (root, Nothing)
-            else case overLensSig l (const new) root of (!root', sig) -> (root', Just sig)
+    step root = case previewLens l root of
+      Just old
+        | new <- f old
+        , not (eq new old) ->
+            case overLensSig l (const new) root of (!root', sig) -> (root', Just sig)
+      _ -> (root, Nothing)
 
 -- | Stamp the part @sig@ of a cell changed at a new tick, against the frame
 -- start @base@ (0 from IO). The next frame's tracked reads of that part see

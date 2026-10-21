@@ -206,8 +206,9 @@ data Item = Item {rowKey :: !Int, rowName :: !Text, rowDone :: !Bool}
 newtype Items = Items {rows :: [Item]}
   deriving (Eq, Show, Generic)
 
--- | Field focus and element Vars write through to the whole value, and an
--- element's Var follows its key when the list is reordered.
+-- | Field focus and element Vars write through to the whole value, an
+-- element's Var follows its key when the list is reordered, and a write
+-- through a removed element's Var changes nothing.
 runVarFocusTest :: Context -> IORef Int -> IO ()
 runVarFocusTest ctx failed = do
   model <- newVar (Items [Item 1 "one" False, Item 2 "two" False, Item 3 "three" False])
@@ -224,10 +225,13 @@ runVarFocusTest ctx failed = do
     [] -> assert failed False
   assertEq failed ["THREE", "two", "one"] . map rowName . rows =<< readVarIO model
   runNanoUI ctx inp (modifyVar model.rows (filter ((/= 3) . rowKey)))
+  clearDirty ctx
   case els of
     first : _ -> runNanoUI ctx inp (writeVar first.rowDone True)
     [] -> pure ()
   assertEq failed [False, False] . map rowDone . rows =<< readVarIO model
+  -- The write changed nothing, so it wakes nothing.
+  assertEq failed False =<< isDirty ctx
   pair <- newVar ((1 :: Int), ("a" :: Text))
   runNanoUI ctx inp (writeVar (zoomVar snd (\b (a, _) -> (a, b)) pair) "b")
   assertEq failed (1, "b") =<< readVarIO pair
