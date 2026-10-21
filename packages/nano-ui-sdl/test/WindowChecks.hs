@@ -71,6 +71,7 @@ shoot name ctx env full ui = do
   frame ctx env full (requestScreenshot (\s -> modifyIORef' shots (s :)) >> ui)
   readIORef shots >>= \case
     [Just img] -> pure img
+    [Nothing] -> fail (name ++ ": the screenshot could not be read back")
     other -> fail (name ++ ": one screenshot wanted, got " ++ show (length other))
 
 check :: String -> Bool -> IO ()

@@ -282,7 +282,6 @@ test-suite nano-ui-demo-test
         nano-ui-demo:demo-common,
         nano-ui-diagrams ^>=0.2,
         nano-ui-sdl ^>=0.2,
-        primitive ^>=0.9,
         sdl3-bindgen-sys ^>=0.0.0.2,
         text ^>=2.1,
         vector ^>=0.13

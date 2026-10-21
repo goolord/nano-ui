@@ -155,6 +155,8 @@ test-suite nano-ui-font-effects-test
     type:             exitcode-stdio-1.0
     main-is:          FontEffects.hs
     hs-source-dirs:   test
+    if os(windows)
+        ghc-options: -optl-mconsole
     build-depends:
         base >=4.20 && <4.23,
         directory ^>=1.3,
@@ -171,6 +173,8 @@ test-suite nano-ui-sdl-pointer-test
     type:             exitcode-stdio-1.0
     main-is:          Pointer.hs
     hs-source-dirs:   test
+    if os(windows)
+        ghc-options: -optl-mconsole
     build-depends:
         base >=4.20 && <4.23,
         nano-ui,
