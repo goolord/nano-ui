@@ -8,8 +8,10 @@ import Data.Text.Encoding qualified as E
 import Data.Vector.Unboxed qualified as V
 import NanoUI (Input (..), Key (..), Modifiers (..), noModifiers)
 import NanoUI.Backend (emptyInput, inputKeysFromList)
+import NanoUI.Sdl.Internal.Input (SdlEvent (..))
 import Terminal hiding (main)
 import Streaming (Of (..))
+import System.Info (os)
 import System.Timeout (timeout)
 
 check :: String -> Bool -> IO ()
@@ -51,6 +53,19 @@ main = do
   check "ESC restarts a partial CSI" $
     screen (run "abc\ESC[12\ESC[2J") == screen blank
   check "CAN cancels CSI" $ charAt 0 0 (run "\ESC[12\CANZ") == 'Z'
+  check "ESC ends an unterminated OSC" $ charAt 0 0 (run "\ESC]0;title\ESC[1mZ") == 'Z'
+  let
+    row = T.take 6 . text
+    column y0 y1 t = map (\y -> charAt 0 y t) [y0 .. y1]
+  check "insert, delete and erase characters edit the cursor row" $
+    row (run "abcd\ESC[1;3H\ESC[@X") == "abXcd "
+      && row (run "abcd\ESC[1;2H\ESC[2P") == "ad    "
+      && row (run "abcd\ESC[1;2H\ESC[2X") == "a  d  "
+      && charAt 79 0 (run "\ESC[1;80Hz\ESC[H\ESC[@") == ' '
+  check "insert and delete lines move the rows below the cursor" $
+    column 0 3 (run "A\r\nB\r\nC\ESC[2;3H\ESC[L") == "A BC"
+      && cursor (run "A\r\nB\r\nC\ESC[2;3H\ESC[L") == (0, 1)
+      && column 0 2 (run "A\r\nB\r\nC\ESC[2H\ESC[M") == "AC "
   check "oversized CSI stays consumed" $
     screen (run ("\ESC[" <> B.replicate 1000 57 <> "H")) == screen blank
   mapM_
@@ -91,6 +106,11 @@ main = do
       && pressed ctrl {modShift = True} (KeyChar '-') == "\US"
   check "a frame's text goes before its command key" $
     keys emptyInput {inputChars = "ls", inputKeys = inputKeysFromList [KeyChar 'l', KeyChar 's', KeyEnter]} == "ls\r"
+  let
+    typed = snd . foldl' typeEvent (emptyInput, B.empty)
+  check "text keeps the modifiers of the key that typed it" $
+    typed [EvKey (KeyChar 'b') True noModifiers {modAlt = True}, EvText "b"] == (if os == "darwin" then "b" else "\ESCb")
+      && typed [EvKey (KeyChar 'c') True ctrl, EvText "c"] == "\ETX"
 
   result <- timeout 8000000 $ withPty $ \fd -> do
     let
