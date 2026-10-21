@@ -571,7 +571,7 @@ data MouseButton
   deriving (Eq, Ord, Show)
 
 -- | The button for an SDL button number: 1 to 5 are left, middle, right,
--- back and forward ('MouseOther').
+-- back and forward; any other number is 'MouseOther'.
 mouseButtonNumber :: Int -> MouseButton
 mouseButtonNumber = \case
   1 -> MouseLeft

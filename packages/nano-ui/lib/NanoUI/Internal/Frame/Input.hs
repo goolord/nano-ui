@@ -1,11 +1,11 @@
 -- | The pointer and keyboard steps that 'NanoUI.Internal.Frame.runFrame' runs around
 -- the view: recording where a press landed, choosing the active and hot
--- widgets, turning a release into a click, moving keyboard focus, and copying
--- selection state from the store into the nodes that paint it. All but
--- 'armPointerPress' run after layout, so their hit tests use this frame's
--- solved rects, where the view had only the previous frame's. Also the checks
--- the backend runs between frames: whether input needs a frame, and the
--- gestures and panels in progress.
+-- widgets, turning a release into a click, and moving keyboard focus.
+-- 'armPointerPress', 'recordCoveredWidgets' and 'recordFocusKind' run before
+-- the view, against the previous frame's layout. The rest run after layout,
+-- so their hit tests use this frame's solved rects, where the view had only
+-- the previous frame's. Also the checks the backend runs between frames:
+-- whether input needs a frame, and the gestures and panels in progress.
 module NanoUI.Internal.Frame.Input
   ( finalizeTabFocus
   , refreshHover
@@ -329,7 +329,8 @@ inUiClickHit ctx wid mouse = do
 -- its edit menu. Menu/dropdown presses are removed from the supplied layer
 -- input so the owning field keeps focus until the pick is processed.
 -- A press on a control drawn inside a text field, or on a widget drawn over
--- it, keeps the focus as it was.
+-- it, keeps that field focused if it already was; otherwise the press clears
+-- focus like any press outside a field.
 -- A press on a menu row or menu-bar title keeps the field's selection, so a
 -- menu command such as Cut ('NanoUI.Widgets.TextField.runTextCommand'),
 -- which focuses the field again, acts on it.
