@@ -18,6 +18,7 @@ module NanoUI.Backend.Rgfw
   , newRgfwContext
   , applyRgfwTheme
   , RgfwDebugSnapshot (..)
+  , RgfwFrameStats (..)
   , askRgfwDebug
   , debugWindowBody
   , emptyRgfwDebug
@@ -27,6 +28,7 @@ import NanoUI (WindowMode (..), WindowPosition (..), WindowSettings (..), defaul
 import NanoUI.Rgfw.Internal.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSnapshot (..)
+  , RgfwFrameStats (..)
   , RgfwDebugSampler
   , newRgfwDebugSampler
   , askRgfwDebug

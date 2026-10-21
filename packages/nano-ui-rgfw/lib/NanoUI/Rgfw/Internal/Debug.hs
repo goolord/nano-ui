@@ -1,3 +1,9 @@
+{-# LANGUAGE TypeFamilies #-}
+-- The 'BackendSession' instance for the RGFW session is an orphan by
+-- construction: the core owns the backend kind, and this package owns its
+-- session type.
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 -- | RGFW frame statistics and the debug window body that shows them with the
 -- core debug rows and the layout overlay toggle.
 module NanoUI.Rgfw.Internal.Debug
@@ -5,6 +11,7 @@ module NanoUI.Rgfw.Internal.Debug
   , RgfwFrameStats (..)
   , RgfwDebugSampler (..)
   , newRgfwDebugSampler
+  , rgfwSession
   , emptyRgfwDebug
   , askRgfwDebug
   , debugWindowBody
@@ -14,6 +21,7 @@ import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.TypeLits (symbolSing)
 import Text.Printf (printf)
 
 import NanoUI
@@ -33,6 +41,7 @@ import NanoUI
   , liftIO
   , withValue
   )
+import NanoUI.Backend (Backend (..), BackendSession, SBackend (..), askBackendSession)
 import NanoUI.Internal.Monad (askInput)
 import NanoUI.Internal.Debug
   ( CoreDebugSnapshot (..)
@@ -71,7 +80,18 @@ data RgfwDebugSampler = RgfwDebugSampler
   , rdsRows :: !(IORef (Maybe RgfwDebugRows))
   }
 
--- | Allocate a sampler with empty timing and frame stats.
+-- | An RGFW session keeps its debug sampler on the context, so views read
+-- it without taking a handle.
+type instance BackendSession ('Custom "rgfw") = RgfwDebugSampler
+
+-- | The RGFW session's backend, for 'NanoUI.Backend.withBackendSession'.
+rgfwSession :: SBackend ('Custom "rgfw")
+rgfwSession = SCustom symbolSing
+
+-- | Allocate a sampler with empty timing and frame stats. The runners make
+-- their own and keep it on the context; a custom loop feeds this one and
+-- installs it with @'NanoUI.Backend.withBackendSession' ctx 'rgfwSession'@
+-- for 'askRgfwDebug' to find.
 newRgfwDebugSampler :: IO RgfwDebugSampler
 newRgfwDebugSampler =
   RgfwDebugSampler
@@ -88,16 +108,19 @@ emptyRgfwDebug =
     , dbgFrame = RgfwFrameStats {fsNodes = 0, fsPhysW = 0, fsPhysH = 0, fsScale = 1, fsMonScale = 1}
     }
 
--- | Read debug data, refreshing at most four times per second. Queries
--- keep the supplied session's debug refresh active.
-askRgfwDebug :: RgfwDebugSampler -> NanoUI RgfwDebugSnapshot
-askRgfwDebug s = do
-  inp <- askInput
-  liftIO $ refreshDebugSnapshot (rdsSampler s) (rdsPublished s) $ \core -> do
-    let Size lw lh = inputWindowSize inp
-        V2 mx my = inputMousePos inp
-    frame <- readIORef (rdsFrame s)
-    pure RgfwDebugSnapshot {dbgCore = core {dbgWinW = lw, dbgWinH = lh, dbgMouseX = mx, dbgMouseY = my}, dbgFrame = frame}
+-- | Read the RGFW session's debug data, refreshing at most four times per
+-- second. Queries keep the session's debug refresh active. 'Nothing' when no
+-- RGFW session drives the view, such as in headless tests.
+askRgfwDebug :: NanoUI (Maybe RgfwDebugSnapshot)
+askRgfwDebug = askBackendSession rgfwSession >>= traverse snapshot
+  where
+    snapshot s = do
+      inp <- askInput
+      liftIO $ refreshDebugSnapshot (rdsSampler s) (rdsPublished s) $ \core -> do
+        let Size lw lh = inputWindowSize inp
+            V2 mx my = inputMousePos inp
+        frame <- readIORef (rdsFrame s)
+        pure RgfwDebugSnapshot {dbgCore = core {dbgWinW = lw, dbgWinH = lh, dbgMouseX = mx, dbgMouseY = my}, dbgFrame = frame}
 
 -- | Arena nodes plus the draw buffer sizes.
 layoutRows :: RgfwDebugSnapshot -> Rows
@@ -131,15 +154,16 @@ type Rows = [(Text, Text)]
 -- | Draw timing, geometry, display, and RTS rows for a snapshot, plus a
 -- layout overlay checkbox that, when on, shows the node under the pointer.
 -- Place this inside a window or panel; it creates no container.
-debugWindowBody :: RgfwDebugSampler -> RgfwDebugSnapshot -> NanoUI ()
-debugWindowBody owner snap = do
+debugWindowBody :: RgfwDebugSnapshot -> NanoUI ()
+debugWindowBody snap = do
+  owner <- askBackendSession rgfwSession
   (fps, layout, display, rts) <- liftIO $ do
-    cached <- readIORef (rdsRows owner)
+    cached <- maybe (pure Nothing) (readIORef . rdsRows) owner
     case cached of
       Just (RgfwDebugRows shown rows) | shown == snap -> pure rows
       _ -> do
         let rows = (formatFpsRows (dbgCore snap), layoutRows snap, displayRows snap, dbgRts (dbgCore snap))
-        writeIORef (rdsRows owner) (Just (RgfwDebugRows snap rows))
+        mapM_ (\o -> writeIORef (rdsRows o) (Just (RgfwDebugRows snap rows))) owner
         pure rows
   heading "Frame"
   kvBlock fps

@@ -152,8 +152,8 @@ runSdlApp opts (editorUi state)
 ```
 
 For SDL-specific `IO` operations, use `askSdlEnv` to obtain the session
-environment. On RGFW, `runRgfwAppWith` and `runRgfwAppReduceCustomWith` accept
-a typed debug sampler.
+environment. On RGFW, `askRgfwDebug` finds the session's debug sampler the
+same way.
 
 ## Access cost
 

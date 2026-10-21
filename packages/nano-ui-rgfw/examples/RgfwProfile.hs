@@ -39,7 +39,6 @@ import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readRetainedPixel
 import qualified RGFW as R
 import RgfwDemoCommon (Model (..), currentTheme, dpiScale, initialModel, physScaleFor, themeForChoice)
 import RgfwDemoCommon qualified as Demo
-import NanoUI.Backend.Rgfw (newRgfwDebugSampler)
 
 iterations :: Int
 iterations = 500
@@ -69,8 +68,7 @@ measure name action = do
 
 main :: IO ()
 main = do
-  debug <- newRgfwDebugSampler
-  let appView = void . runNanoUIE . Demo.appView debug
+  let appView = void . runNanoUIE . Demo.appView
       m = initialModel
       theme = themeForChoice (currentTheme m)
       userScale = physScaleFor (dpiScale m)

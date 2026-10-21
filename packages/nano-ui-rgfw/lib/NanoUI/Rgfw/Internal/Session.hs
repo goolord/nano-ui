@@ -79,6 +79,7 @@ import NanoUI.Backend
   , setWakeLoop
   , sizeLimitAt
   , syncCursorKind
+  , withBackendSession
   )
 import NanoUI.Internal.Context
   ( Context (..)
@@ -107,6 +108,7 @@ import NanoUI.Rgfw.Internal.Debug
   ( RgfwDebugSampler (..)
   , RgfwFrameStats (..)
   , newRgfwDebugSampler
+  , rgfwSession
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl, retainedPixels, syncImagesGl)
@@ -258,11 +260,12 @@ mapRgfwCursor kind = case cursorFallback kind of
 runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
 runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> liftNanoUI app)
 
--- | Construct one component with the session's explicit typed debug handle.
-runRgfwAppWith :: RgfwOptions -> (RgfwDebugSampler -> IO (NanoUI ())) -> IO ()
+-- | 'runRgfwApp' with a setup action run once the window and its OpenGL
+-- context exist, before the first frame, that returns the view.
+runRgfwAppWith :: RgfwOptions -> IO (NanoUI ()) -> IO ()
 runRgfwAppWith opts setup =
-  runRgfwAppReduceCustomWith opts (\_ -> (optionsTheme opts, optScale opts)) (\() m -> m) () $ \debug ->
-    const . liftNanoUI <$> setup debug
+  runRgfwAppReduceCustomWith opts (\_ -> (optionsTheme opts, optScale opts)) (\() m -> m) () $
+    const . liftNanoUI <$> setup
 
 -- | Model-driven runner. Fold emitted messages through the update function
 -- in order, with the message type checked at compile time.
@@ -288,16 +291,17 @@ runRgfwAppReduceCustom ::
   (model -> NanoUIE msg ()) ->
   IO ()
 runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view =
-  runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel (\_ -> pure view)
+  runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel (pure view)
 
--- | Model runner with a one-time typed session setup callback.
+-- | 'runRgfwAppReduceCustom' with a setup action run once the window and its
+-- OpenGL context exist, before the first frame, that returns the view.
 runRgfwAppReduceCustomWith ::
   Eq model =>
   RgfwOptions ->
   (model -> (Theme, Float)) ->
   (msg -> model -> model) ->
   model ->
-  (RgfwDebugSampler -> IO (model -> NanoUIE msg ())) ->
+  IO (model -> NanoUIE msg ()) ->
   IO ()
 runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup = inBoundThread $ do
   -- Open hidden at the requested scale: the monitor's scale is unknown until
@@ -359,7 +363,7 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
       ctx0 <- newRgfwContext initTheme
       let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
       debugSampler <- newRgfwDebugSampler
-      view <- setup debugSampler
+      view <- setup
       setExplainLayout ctx (optExplainLayout opts)
       -- Size limits are in layout units, converted at the current scale.
       let limit set s = do
@@ -516,9 +520,11 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
         -- Present the opening frame before entering the loop so the window has
         -- content immediately; once idle the loop blocks with no redraws. If
         -- the opening frame marked the context dirty, the loop draws the
-        -- follow-up frame immediately instead of blocking for input.
-        _ <- drawOne True ctx initInp
-        runSessionLoop drv ctx initInp
+        -- follow-up frame immediately instead of blocking for input. Views
+        -- find the debug sampler on the context ('askRgfwDebug').
+        withBackendSession ctx rgfwSession debugSampler $ do
+          _ <- drawOne True ctx initInp
+          runSessionLoop drv ctx initInp
 
 -- | The window's state at a scale, from what RGFW tracks through its events,
 -- so reading it costs no round trip to the desktop.

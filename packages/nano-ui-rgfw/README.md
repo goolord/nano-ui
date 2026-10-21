@@ -26,10 +26,10 @@ RGFW windows are opaque and do not fade: `wsTransparent`,
 `wsOpacity` and `setWindowOpacityUi` do nothing here. The SDL backend has
 transparent and faded windows.
 
-`runRgfwAppWith` constructs a view once with a typed debug sampler; pass it
-to `askRgfwDebug` and `debugWindowBody`. For a reducer with model-derived theme
-and scale, `runRgfwAppReduceCustomWith` supplies the same setup phase. Debug
-data is owned by the session rather than discovered through a dynamic store.
+`askRgfwDebug` reads the session's frame timings and display facts, and
+`debugWindowBody` shows them; views take no session handle, as with the SDL
+backend's `askSdlDebug`. `runRgfwAppWith` and `runRgfwAppReduceCustomWith` run
+a setup action once the window exists and before the first frame.
 
 The theme is any core `Theme`. The backend draws it with square corners and 1px
 borders (`applyRgfwTheme`), since geometry is drawn as flat quads. The font is
