@@ -133,21 +133,29 @@ data Outcome a = Outcome !(TaskStatus a) !(Maybe a)
 -- are fixed by the handle. Skipping its hook releases its running job.
 newtype Task k a = Task (Resource k (IORef (Outcome a)))
 
+-- | A new task owner. Allocate it once during setup, outside the view, and
+-- give each 'useTask' or 'useTaskStatus' call site its own.
 newTask :: IO (Task k a)
 newTask = Task <$> newResource
 
 -- | A typed stream owner, allocated before the per-frame view.
 newtype Stream k s = Stream (Resource k (IORef s))
 
+-- | A new stream owner. Allocate it once during setup, outside the view, and
+-- give each 'useStream' call site its own.
 newStream :: IO (Stream k s)
 newStream = Stream <$> newResource
 
 -- | 'useHeldBy' for a job. @start@ builds the result box (given the old
--- box) and the action to fork.
+-- box) and the action to fork, given the job's wake. Once the job is
+-- released the wake does nothing: no view reads the box, so a wake from a
+-- job that has not unwound yet, or from a thread it started, would only
+-- repaint.
 {-# INLINE useJob #-}
-useJob :: Eq k => Resource k a -> k -> (Context -> Maybe a -> IO (a, IO ())) -> NanoUI a
+useJob :: Eq k => Resource k a -> k -> (IO () -> Maybe a -> IO (a, IO ())) -> NanoUI a
 useJob owner k start = useHeldBy owner k $ \ctx old -> do
-  (box, run) <- start ctx old
+  live <- newIORef True
+  (box, run) <- start (readIORef live >>= \l -> when l (wakeFromThread ctx)) old
   done <- newEmptyMVar
   -- Masked until the handler is in place, so a job killed before it first
   -- runs still reports that it has ended.
@@ -156,7 +164,7 @@ useJob owner k start = useHeldBy owner k $ \ctx old -> do
   -- Kill from a separate thread: 'killThread' blocks until the job receives
   -- the exception, which masking or a foreign call can delay. Only the
   -- session's end waits for the job to end ('cancelTasks').
-  pure (box, readMVar done <$ forkIO (killThread tid))
+  pure (box, writeIORef live False >> (readMVar done <$ forkIO (killThread tid)))
 
 -- | Run an action on a worker thread and report its status: running, done,
 -- or failed with the exception it threw.
@@ -212,10 +220,10 @@ useTask owner k run = (\(Outcome _ latest) -> latest) <$> useOutcome owner k run
 -- carrying the replaced job's latest result.
 useOutcome :: Eq k => Task k a -> k -> IO a -> NanoUI (Outcome a)
 useOutcome (Task owner) k run = do
-  box <- useJob owner k $ \ctx old -> do
+  box <- useJob owner k $ \wake old -> do
     prev <- maybe (pure Nothing) (fmap (\(Outcome _ latest) -> latest) . readIORef) old
     box <- newIORef (Outcome (TaskRunning prev) prev)
-    let finish = (>> wakeFromThread ctx) . atomicWriteIORef box
+    let finish = (>> wake) . atomicWriteIORef box
     pure
       ( box
       , try (run >>= evaluate) >>= \case
@@ -231,7 +239,7 @@ useOutcome (Task owner) k run = do
 -- producer gets @update@, which applies a function to the state atomically,
 -- forces the result to weak head normal form on the producer's thread, and
 -- wakes the loop. Each call returns the current state, starting from
--- @initial@:
+-- @initial@.
 --
 -- Allocate @stream <- newStream@ during setup, then read it in the view:
 --
@@ -249,9 +257,9 @@ useOutcome (Task owner) k run = do
 -- inside to show it in the state.
 useStream :: Eq k => Stream k s -> k -> s -> (((s -> s) -> IO ()) -> IO ()) -> NanoUI s
 useStream (Stream owner) k initial produce = do
-  box <- useJob owner k $ \ctx _ -> do
+  box <- useJob owner k $ \wake _ -> do
     box <- newIORef initial
-    pure (box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wakeFromThread ctx))
+    pure (box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wake))
   liftIO (readIORef box)
 
 -- | An action any thread can call to rerun the view after changing something

@@ -32,6 +32,8 @@ data TextCommand
     -- @Delete CharLeft@ is Backspace, @Delete WordRight@ Ctrl+Delete.
     Delete !TextMotion
   | -- | Move the cursor, extending the selection when the flag is set.
+    -- Without it, 'CharLeft' and 'CharRight' over a selection go to its start
+    -- and its end.
     Move !TextMotion !Bool
   | SelectAll
   | -- | Select from the first position (the anchor) to the second (the

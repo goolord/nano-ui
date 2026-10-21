@@ -277,6 +277,8 @@ logsApp state scroller = do
           rows <- forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st)
           void (ctxClipboardSet ctx (T.unlines rows))
     when (selected && chosen 'c' Copy) copyAll
+    -- With no row focused, take Ctrl+C here, so it does not close the window.
+    void (shortcut (ctrl <> key 'c'))
 
     separator
     renderStatusBar (asCount st) (asShownCount st) selected

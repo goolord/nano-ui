@@ -31,20 +31,22 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Internal.Context hiding (scrollOffset)
-import NanoUI.Internal.Font (fmLineHeight)
+import NanoUI.Internal.Context
+import NanoUI.Internal.Font (fmLineHeight, fmSnapScale)
+import NanoUI.Internal.Frame.Node (packedTextFont, resolveTextFont)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Types (TextHistory (..))
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
-import NanoUI.Internal.Types (DamageBounds (..), clamp)
+import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, fixedH, minW)
+import NanoUI.Internal.Types (DamageBounds (..), clamp, onGrid)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
+import NanoUI.Internal.WidgetText (packTextNodeStyle)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
-import NanoUI.Internal.Widgets.Node (Response, addWidget, setChanged)
+import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, setChanged)
 import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Internal.Widgets.TextDocument
@@ -54,12 +56,12 @@ import NanoUI.Widgets.TextEditor
 -- Positions use zero-based character rows/columns; viewport and scrolling use
 -- logical pixels. The widget stores this under its stable id.
 data TextAreaState = TextAreaState
-  { buffer :: !TB.TextBuffer
-  , selectionAnchor :: !TB.Cursor
-  , scrollOffset :: !(Double, Double)
-  , viewportSize :: !(Double, Double)
-  , lineHeight :: !Double
-  , history :: !EditHistory
+  { tasBuffer :: !TB.TextBuffer
+  , tasSelectionAnchor :: !TB.Cursor
+  , tasScrollOffset :: !(Double, Double)
+  , tasViewportSize :: !(Double, Double)
+  , tasLineHeight :: !Double
+  , tasHistory :: !EditHistory
   }
   deriving (Show)
 
@@ -67,34 +69,32 @@ data TextAreaState = TextAreaState
 initTextAreaState :: T.Text -> TextAreaState
 initTextAreaState initial =
   TextAreaState
-    { buffer = TB.fromText initial
-    , selectionAnchor = TB.Cursor 0 0
-    , scrollOffset = (0.0, 0.0)
-    , viewportSize = (0.0, 0.0)
-    , lineHeight = 16.0
-    , history = emptyHistory
+    { tasBuffer = TB.fromText initial
+    , tasSelectionAnchor = TB.Cursor 0 0
+    , tasScrollOffset = (0.0, 0.0)
+    , tasViewportSize = (0.0, 0.0)
+    , tasLineHeight = 16.0
+    , tasHistory = emptyHistory
     }
 
 -- | Set logical viewport width/height and line height without moving the caret.
 setTextAreaViewport :: (Double, Double) -> Double -> TextAreaState -> TextAreaState
 setTextAreaViewport vp lh state =
-  state {viewportSize = vp, lineHeight = lh}
+  state {tasViewportSize = vp, tasLineHeight = lh}
 
--- | Set anchor and cursor, in that order, and scroll vertically to reveal the caret.
+-- | Set anchor and cursor, in that order, both clamped into the document, and
+-- scroll vertically to reveal the caret.
 setTextAreaSelection :: TB.Cursor -> TB.Cursor -> TextAreaState -> TextAreaState
 setTextAreaSelection anchor cursor state =
-  let buf =
-        let b = TB.withCursor cursor (buffer state)
-         in b {TB.preferredCol = TB.cursorCol cursor}
-   in ensureCaretVisible state {buffer = buf, selectionAnchor = anchor}
+  ensureCaretVisible state {tasBuffer = TB.withCursor cursor (tasBuffer state), tasSelectionAnchor = TB.clampCursor (tasBuffer state) anchor}
 
 -- | Extract buffer, selection, and history for the shared text-command engine.
 textAreaEditor :: TextAreaState -> Editor
-textAreaEditor state = Editor (buffer state) (selectionAnchor state) (history state)
+textAreaEditor state = Editor (tasBuffer state) (tasSelectionAnchor state) (tasHistory state)
 
 withEditor :: TextAreaState -> Editor -> TextAreaState
 withEditor state ed =
-  ensureCaretVisible state {buffer = editorBuffer ed, selectionAnchor = editorAnchor ed, history = editorHistory ed}
+  ensureCaretVisible state {tasBuffer = editorBuffer ed, tasSelectionAnchor = editorAnchor ed, tasHistory = editorHistory ed}
 
 -- | Run a command that needs no clipboard, keeping the caret in view.
 runTextAreaCommand :: TextCommand -> TextAreaState -> TextAreaState
@@ -102,20 +102,20 @@ runTextAreaCommand cmd state = withEditor state (runCommand multiLineMode cmd (t
 
 ensureCaretVisible :: TextAreaState -> TextAreaState
 ensureCaretVisible state =
-  let TB.Cursor r _ = TB.getCursor (buffer state)
-      lh = lineHeight state
-      vh = snd (viewportSize state)
-      (sx, sy) = scrollOffset state
+  let TB.Cursor r _ = TB.getCursor (tasBuffer state)
+      lh = tasLineHeight state
+      vh = snd (tasViewportSize state)
+      (sx, sy) = tasScrollOffset state
       caretY = fromIntegral r * lh
       caretH = lh
-      contentH = fromIntegral (TB.getLineCount (buffer state)) * lh
+      contentH = fromIntegral (TB.getLineCount (tasBuffer state)) * lh
       maxSy = max 0 (contentH - vh)
       sy'
         | vh <= 0 = 0
         | caretY < sy = caretY
         | caretY + caretH > sy + vh = caretY + caretH - vh
         | otherwise = sy
-  in state {scrollOffset = (sx, clamp 0 maxSy sy')}
+  in state {tasScrollOffset = (sx, clamp 0 maxSy sy')}
 
 --------------------------------------------------------------------------------
 -- Widget
@@ -129,8 +129,9 @@ textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 -- with a 'label' when a caption is needed.
 --
 -- A frame that changes the text joins the whole document and mutates the
--- 'Var' in place. For long documents use 'textAreaDocument', whose edits cost
--- only the lines they touch.
+-- 'Var' in place, its Windows line ends (@\\r\\n@) written back as @\\n@.
+-- For long documents use 'textAreaDocument', whose edits cost only the lines
+-- they touch.
 {-# INLINE textArea #-}
 textArea :: Var Text -> NanoUI ()
 textArea v = void (textAreaWith' id v)
@@ -142,7 +143,8 @@ textArea' :: Var Text -> NanoUI Response
 textArea' = textAreaWith' id
 
 -- | 'textArea' with a modifier applied to 'textAreaLayout', for example
--- 'grow' to fill the parent.
+-- 'grow' to fill the parent. Font modifiers ('fontSize', 'fontMono',
+-- 'fontColor' and the like) set the text.
 {-# INLINE textAreaWith #-}
 textAreaWith :: (Layout -> Layout) -> Var Text -> NanoUI ()
 textAreaWith f v = void (textAreaWith' f v)
@@ -209,6 +211,8 @@ textAreaCore f wid value = do
   inp <- askInput
   store0 <- liftIO (getStore ctx)
   let layout = f textAreaLayout
+      -- The face, weight and slant, packed as a text field's are.
+      styleIdx = packTextNodeStyle layout 0
       key = intKey wid
       seenKey = slotKey SlotSeen key
       bufKey = slotKey SlotTextAreaBuffer key
@@ -245,19 +249,18 @@ textAreaCore f wid value = do
   (newDoc, edited) <-
     if isFocus
       then do
-        editFm <-
-          if layoutFontSize layout <= 0
-            then pure (ctxFontMetrics ctx)
-            else fst <$> liftIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
+        -- The font the rows are painted in ('resolveTextAreaFont').
+        editFm <- fst <$> liftIO (resolveTextFont ctx (packedTextFont (layoutFontSize layout) styleIdx))
         let oldState = loadTextAreaState store key
-            s1 = setTextAreaViewport (viewportSize oldState) (realToFrac (fmLineHeight editFm)) oldState
+            -- Rows sit on the device pixel grid ('textAreaLineHeight').
+            s1 = setTextAreaViewport (tasViewportSize oldState) (realToFrac (onGrid (fmSnapScale editFm) (fmLineHeight editFm))) oldState
             hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
         newState <- liftIO $ do
           when hadInput $ modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
           fieldTextCommands ctx multiLineMode inp >>= \case
             [] -> pure s1
             cmds -> withEditor s1 <$> foldM (flip (runCommandIO ctx multiLineMode)) (textAreaEditor s1) cmds
-        let newBuf = buffer newState
+        let newBuf = tasBuffer newState
             -- Edits make new lines and moves keep them, so this reads no
             -- text; the editor drops edits that would change nothing.
             textChanged = not (sameLines (TB.bufferLines newBuf) (documentLines current))
@@ -267,9 +270,9 @@ textAreaCore f wid value = do
             edited = textChanged || menuPulse
             changed =
               edited
-                || TB.getCursor newBuf /= TB.getCursor (buffer oldState)
-                || selectionAnchor newState /= selectionAnchor oldState
-                || scrollOffset newState /= scrollOffset oldState
+                || TB.getCursor newBuf /= TB.getCursor (tasBuffer oldState)
+                || tasSelectionAnchor newState /= tasSelectionAnchor oldState
+                || tasScrollOffset newState /= tasScrollOffset oldState
         -- Saving writes the new buffer, which is the document, and drops the
         -- menu pulse. The store damage is keyed on slots, not the widget, so
         -- damage the widget itself: a selection-only change (Ctrl+A) would
@@ -294,7 +297,7 @@ textAreaCore f wid value = do
       case lookupSlot fieldDocument seenKey st of
         Just seen | sameDocument seen newDoc -> st
         _ -> insertSlot fieldDocument seenKey newDoc st
-  resp <- addWidget wid NodeTextArea "" 0 layout
+  resp <- addWidgetStyled wid NodeTextArea "" 0 layout styleIdx
   -- respChanged reports an edit to the text, as on a text input; caret,
   -- selection and scroll moves only repaint the area.
   pure (setChanged edited resp, newDoc)
@@ -315,32 +318,35 @@ loadTextAreaState store key =
       (sx, sy) = findSlot fieldPoint (0, 0) (slotKey SlotTextAreaScroll key) store
       (vw, vh) = findSlot fieldPoint (200, 96) (slotKey SlotTextAreaViewport key) store
    in TextAreaState
-        { buffer = buf
-        , selectionAnchor = TB.clampCursor buf (TB.Cursor anchorRow anchorCol)
-        , scrollOffset = (realToFrac sx, realToFrac sy)
-        , viewportSize = (realToFrac vw, realToFrac vh)
-        , lineHeight = realToFrac (findSlot fieldFloat 16 (slotKey SlotTextAreaLineH key) store)
+        { tasBuffer = buf
+        , tasSelectionAnchor = TB.clampCursor buf (TB.Cursor anchorRow anchorCol)
+        , tasScrollOffset = (realToFrac sx, realToFrac sy)
+        , tasViewportSize = (realToFrac vw, realToFrac vh)
+        , tasLineHeight = realToFrac (findSlot fieldFloat 16 (slotKey SlotTextAreaLineH key) store)
 
         , -- Replacing the document drops its history, so the history is
           -- always the current document's.
-          history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
+          tasHistory = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
             Just (AreaHistory h) -> h
             _ -> emptyHistory
         }
 
--- | Store the editor state. The buffer holds the document and the caret.
+-- | Store the editor state. The buffer holds the document and the caret. The
+-- state keeps the caret in view vertically; the next paint, which has the
+-- font, brings it into view across ('SlotTextAreaReveal').
 saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state =
   insertSlot fieldPoint (slotKey SlotTextAreaScroll key) (realToFrac sx, realToFrac sy)
+    . insertSlot fieldQuiet (slotKey SlotTextAreaReveal key) 1
     . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (realToFrac vw, realToFrac vh)
-    . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (buffer state)
-    . insertSlot fieldHistory (slotKey SlotTextHistory key) (AreaHistory (history state))
+    . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (tasBuffer state)
+    . insertSlot fieldHistory (slotKey SlotTextHistory key) (AreaHistory (tasHistory state))
     . insertSlot fieldInt (slotKey SlotTextAreaAnchorRow key) anchorRow
     . insertSlot fieldInt (slotKey SlotTextAreaAnchorCol key) anchorCol
   where
-    TB.Cursor anchorRow anchorCol = selectionAnchor state
-    (sx, sy) = scrollOffset state
-    (vw, vh) = viewportSize state
+    TB.Cursor anchorRow anchorCol = tasSelectionAnchor state
+    (sx, sy) = tasScrollOffset state
+    (vw, vh) = tasViewportSize state
 
 -- | A text area's stored editor, for a command run outside its frame, and
 -- how to store the edited editor, keeping the caret in view.

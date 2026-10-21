@@ -5,7 +5,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (intKey)
 import NanoUI.Internal.Frame.TextArea
-  ( TextAreaHit (..)
+  ( TextAreaBars (..)
+  , TextAreaHit (..)
   , resolveTextAreaFont
   , textAreaContentMetrics
   , textAreaBarLane
@@ -20,14 +21,15 @@ import NanoUI.Internal.Store
   , slotKey
   )
 import NanoUI.Internal.Widgets.TextArea
-  ( buffer
-  , loadTextAreaState
-  , selectionAnchor
+  ( loadTextAreaState
+  , tasBuffer
+  , tasSelectionAnchor
   )
 import NanoUI.Shortcut
 import NanoUI.Widgets.TextBuffer
   ( fromText
   , getCursor
+  , lineAt
   , toLines
   , toText
   )
@@ -46,10 +48,14 @@ tests =
   , spec "text-input-mouse-selection" runTextInputMouseSelectionTest
   , spec "text-input-click-select" runTextInputClickSelectTest
   , spec "text-input-word-keys" runTextInputWordKeysTest
+  , spec "text-input-line-break" runTextInputLineBreakTest
+  , spec "search-empty-commit" runSearchEmptyCommitTest
+  , spec "search-clear-damage" runSearchClearDamageTest
   , spec "text-input-cut-clears-selection" runTextInputCutClearsSelectionTest
   , spec "text-input-clipboard" runTextInputClipboardTest
   , spec "text-input-password" runTextInputPasswordTest
   , spec "text-input-menu" runTextInputMenuTest
+  , spec "text-input-menu-clipboard" runTextInputMenuClipboardTest
   , spec "text-input-ff-caret" runTextInputFfCaretTest
   , pixelSpec "text-input-focus-sdl" runTextInputFocusSdlTest
   , pixelSpec "text-input-scroll" runTextInputScrollTest
@@ -58,6 +64,7 @@ tests =
   , spec "text-input-font-inset" runTextInputFontInsetTest
   , spec "text-input-dirty" runTextInputDirtyTest
   , spec "text-input-drag-wake" runTextInputDragWakeTest
+  , spec "text-area-hold-still" runTextAreaHoldStillTest
   , spec "text-area-cut-clears-selection" runTextAreaCutClearsSelectionTest
   , pixelSpec "text-area-scroll-wheel" runTextAreaScrollWheelTest
   , pixelSpec "text-area-zoom-scroll" runTextAreaZoomScrollTest
@@ -71,6 +78,10 @@ tests =
   , pixelSpec "text-area-hscroll-drag" runTextAreaHScrollDragTest
   , pixelSpec "text-area-2d-scroll" runTextArea2DScrollTest
   , pixelSpec "text-area-scroll-cursor-leaves-viewport" runTextAreaScrollCursorLeavesViewportTest
+  , pixelSpec "text-area-caret-follow" runTextAreaCaretFollowTest
+  , pixelSpec "text-area-caret-above-bar" runTextAreaCaretAboveBarTest
+  , pixelSpec "text-area-snapped-rows" runTextAreaSnappedRowsTest
+  , spec "text-area-font" runTextAreaFontTest
   ]
 
 runTextInputBatchTest :: Context -> IORef Int -> IO ()
@@ -150,6 +161,58 @@ runTextInputCutClearsSelectionTest ctx failed = do
   _ <- runFrame ctx' (chordInp (ctrl <> key 'x') inp0) ui
   assertEq failed (Just "o") =<< readIORef clipRef
   assertEq failed "hellz" . snd =<< evalUi ctx' (inp0 {inputChars = "z"}) ui
+
+-- | A field whose value holds a line break keeps its caret as an offset into
+-- the whole value: Left from the end, then typing, inserts before the last
+-- character, and Select All selects every character.
+runTextInputLineBreakTest :: Context -> IORef Int -> IO ()
+runTextInputLineBreakTest ctx failed = do
+  textRef <- newVar "ab\ncd"
+  let
+    inp0 = withInput 320 120
+    ui = column (held textRef textInput')
+  (resp, _) <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runFrame ctx (keyInp KeyLeft inp0) ui
+  assertEq failed "ab\ncXd" . snd =<< evalUi ctx (inp0 {inputChars = "X"}) ui
+  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
+  ints <- storeInt <$> getStore ctx
+  assertEq failed (Just 6) (IM.lookup (slotKey SlotCursor (intKey (respId resp))) ints)
+
+-- | Emptying a search field from the keyboard reports the change on that
+-- frame, as its clear button does, rather than after the debounce.
+runSearchEmptyCommitTest :: Context -> IORef Int -> IO ()
+runSearchEmptyCommitTest ctx failed = do
+  ref <- newVar "abc"
+  let
+    inp0 = withInput 320 120
+    ui = column (fst <$> held ref (searchInput' "Search"))
+  warmupFocused ctx inp0 ui
+  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
+  assert failed . respChanged =<< evalUi ctx (keyInp KeyBackspace inp0) ui
+  assertEq failed "" =<< readVarIO ref
+
+-- | A search field's clear button empties it, and the frame after the
+-- press repaints a clip, not the whole window.
+runSearchClearDamageTest :: Context -> IORef Int -> IO ()
+runSearchClearDamageTest ctx failed = do
+  ref <- newVar "abc"
+  let
+    inp0 = withInput 320 120
+    ui = column (fst <$> held ref (searchInput' "Search"))
+    fm = ctxFontMetrics ctx
+    (ix, _) = widgetContentInset fm
+    iconW = max 12 (min 15 (fmLineHeight fm * 0.8))
+  resp <- warmup2 ctx inp0 ui
+  let Rect x y w h = respRect resp
+  _ <- runClick ctx inp0 ui (V2 (x + w / 2) (y + h / 2))
+  _ <- warmup2 ctx inp0 ui
+  let (press, release) = clickPair inp0 (V2 (x + w - ix - iconW / 2) (y + h / 2))
+  _ <- runFrame ctx press ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx release ui
+  assert failed . (/= DamageFull) =<< takeDamage ctx
+  assertEq failed "" =<< readVarIO ref
 
 -- Word-wise editing keys (Ctrl or Alt + Backspace/Delete/Left/Right) work in
 -- the single-line text input like they do in the text area.
@@ -308,6 +371,34 @@ runTextInputMenuTest ctx failed = do
     overlaysAfter <- collectOverlayTextSpans ctx' inp0
     assert failed (null (spanYOf "Cut" overlaysAfter))
 
+-- | An open text menu paints and hovers its Paste row without reading the
+-- clipboard, which on X11 is a round trip to the program that owns it.
+runTextInputMenuClipboardTest :: Context -> IORef Int -> IO ()
+runTextInputMenuClipboardTest ctx failed = do
+  clipReads <- newIORef (0 :: Int)
+  let
+    ctx' = withClipboard ctx (Nothing <$ modifyIORef' clipReads (+ 1)) (\_ -> pure True)
+    inp0 = withInput 320 160
+    ui = column (withValue "hello" textInput')
+  _ <- warmup2 ctx' inp0 ui
+  spans <- collectTextSpans ctx'
+  assertJust failed (spanRectOf "hello" spans) $ \(Rect fx fy _ fh) -> do
+    let menuOpen = fst (rightClickPair inp0 (V2 (fx + 1) (fy + fh / 2)))
+    _ <- runFrame ctx' menuOpen ui
+    overlays <- collectOverlayTextSpans ctx' menuOpen
+    assertJust failed (spanRectOf "Paste" overlays) $ \(Rect px py pw ph) ->
+      forM_ [px + 2, px + pw / 2] $ \x -> runFrame ctx' inp0 {inputMousePos = V2 x (py + ph / 2)} ui
+    assertEq failed 0 =<< readIORef clipReads
+    -- A press on a row that cannot run (nothing to undo) closes the menu,
+    -- which the frame repaints, and asks for no full repaint after it.
+    assertJust failed (spanRectOf "Undo" overlays) $ \r -> do
+      let (press, release) = clickPair inp0 (spanCenter r)
+      _ <- runFrame ctx' press ui
+      _ <- takeDamage ctx'
+      _ <- runFrame ctx' release ui
+      assert failed . (/= DamageFull) =<< takeDamage ctx'
+      assert failed . null . spanYOf "Undo" =<< collectOverlayTextSpans ctx' inp0
+
 runTextInputFocusSdlTest :: Context -> IORef Int -> IO ()
 runTextInputFocusSdlTest ctx failed = do
   let
@@ -362,6 +453,24 @@ runTextInputDragWakeTest ctx failed = do
   assert failed . (> 0) =<< getWakeAt ctx
   _ <- runFrame ctx release {inputMousePos = outside} ui
   _ <- runFrame ctx release {inputMousePos = outside, inputButtonsReleased = noButtons} ui
+  assertEq failed 0 =<< getWakeAt ctx
+
+-- | A button held still in a text area after a click selects nothing new, so
+-- its frames ask for no other frame.
+runTextAreaHoldStillTest :: Context -> IORef Int -> IO ()
+runTextAreaHoldStillTest ctx failed = do
+  let
+    ui = column (withValue "some text\nto select" textArea')
+    inp0 = (withInput 320 220) {inputMousePos = V2 300 200}
+  (resp, _) <- warmup2 ctx inp0 ui
+  let
+    Rect rx ry _ _ = respRect resp
+    press = pressAt inp0 (V2 (rx + 20) (ry + 10))
+    hold = press {inputButtonsPressed = noButtons}
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx hold ui
+  (_, _, dirty) <- runFrame ctx hold ui
+  assert failed (not dirty)
   assertEq failed 0 =<< getWakeAt ctx
 
 runTextInputFfCaretTest :: Context -> IORef Int -> IO ()
@@ -490,7 +599,7 @@ runTextAreaScrollWheelTest ctx failed = do
     assertEq failed 0 =<< wheel ui resp r (-10)
     -- The text is untouched.
     st <- (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
-    assertEq failed (toText (buffer st)) fortyLines
+    assertEq failed (toText (tasBuffer st)) fortyLines
 
 runTextAreaZoomScrollTest :: Context -> IORef Int -> IO ()
 runTextAreaZoomScrollTest ctx failed = do
@@ -555,8 +664,8 @@ textAreaThumbDragTest horizontal ctx failed = do
       _ <- runFrame ctx (applyMouseButton MouseLeft False drag) ui
       -- Dragging the scrollbar must not start a selection or edit the text.
       st <- (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
-      assertEq failed (toText (buffer st)) txt
-      assert failed (selectionAnchor st == getCursor (buffer st))
+      assertEq failed (toText (tasBuffer st)) txt
+      assert failed (tasSelectionAnchor st == getCursor (tasBuffer st))
 
 runTextAreaCursorOnScrollBarTest :: Context -> IORef Int -> IO ()
 runTextAreaCursorOnScrollBarTest ctx failed = do
@@ -610,7 +719,7 @@ runTextAreaHScrollWheelTest ctx failed = do
       clickX = 30
     _ <- runClick ctx inp0 ui (V2 (rectX field + ix + clickX) (rectY field + iy + 5))
     store <- getStore ctx
-    let Cursor _ col = getCursor (buffer (loadTextAreaState store (intKey (respId resp))))
+    let Cursor _ col = getCursor (tasBuffer (loadTextAreaState store (intKey (respId resp))))
     assert failed (abs (fromIntegral col - (offX2 + clickX) / fmAdvance fm '0') <= 1)
     assertEq failed 0 . v2X =<< wheel (-10)
     assertJust failed (snd (textAreaBarLayouts field (textAreaBars fm field (lineWidth fm longLine) 0) 0 0)) $
@@ -644,6 +753,94 @@ runTextArea2DScrollTest ctx failed = do
       assertGt failed offX 0
       assertGt failed offY 0
 
+-- | Typing past a text area's right edge scrolls it across, keeping the caret
+-- at the end of its widest line in view, and Home scrolls back.
+runTextAreaCaretFollowTest :: Context -> IORef Int -> IO ()
+runTextAreaCaretFollowTest ctx failed = do
+  ref <- newVar ""
+  let
+    inp0 = withInput 320 220
+    ui = column (fst <$> held ref (textAreaWith' (fixedW 200)))
+  resp <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  typed <- forM [1 .. 60 :: Int] $ \_ -> runFrame ctx inp0 {inputChars = "x"} ui >> caretInView ctx (respId resp)
+  assert failed (and typed)
+  assertEq failed 60 . T.length =<< readVarIO ref
+  V2 offX _ <- getScrollOffset2D ctx (respId resp)
+  assertGt failed offX 0
+  _ <- runFrame ctx (keyInp KeyHome inp0) ui
+  assertEq failed 0 . v2X =<< getScrollOffset2D ctx (respId resp)
+
+-- | With the horizontal bar showing, the caret moved to the last row sits
+-- above the bar's lane, not under it.
+runTextAreaCaretAboveBarTest :: Context -> IORef Int -> IO ()
+runTextAreaCaretAboveBarTest ctx failed = do
+  let
+    inp0 = withInput 320 220
+    ui = column (fst <$> withValue (T.replicate 30 "wide " <> "\n" <> fortyLines) textArea')
+  resp <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx inp0 (runTextCommand (respId resp) SelectAll)
+  _ <- runFrame ctx inp0 ui
+  assert failed =<< caretInView ctx (respId resp)
+
+-- | Keys keep the caret in view by the rows as painted: on the device pixel
+-- grid, 12.8 px apart for a 13 px font at 125%, not 13.
+runTextAreaSnappedRowsTest :: Context -> IORef Int -> IO ()
+runTextAreaSnappedRowsTest base failed = do
+  ref <- newVar (T.replicate 59 "\n")
+  let
+    fm = (monospaceMetrics 13) {fmSnapScale = 1.25}
+    ctx = withFontResolver base (\_ _ _ _ -> pure (fm, False)) (\_ _ _ _ txt -> pure (13 * fromIntegral (T.length txt), 13))
+    inp0 = withInput 320 220
+    ui = column (fst <$> held ref (textAreaWith' (fontSize 13)))
+  resp <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  inView <- forM (replicate 59 KeyDown ++ replicate 20 KeyUp) $ \k -> runFrame ctx (keyInp k inp0) ui >> caretInView ctx (respId resp)
+  assert failed (and inView)
+
+-- | A text area sets its rows in the face its layout names, not only the
+-- size, and in its font colour, which the caret takes too. A change of face
+-- measures the lines again.
+runTextAreaFontTest :: Context -> IORef Int -> IO ()
+runTextAreaFontTest base failed = do
+  let
+    ctx = withMonoFontMetrics base (monospaceMetrics 20)
+    red = colorRGBA 255 0 0 255
+    inp0 = withInput 320 220
+    ui f = column (fst <$> withValue "code" (textAreaWith' f))
+    widest resp = textAreaHitForWidget ctx (respId resp) >>= traverse (fmap fst . textAreaContentMetrics ctx . tahNodeIdx)
+  resp <- warmup2 ctx inp0 (ui (fontMono . fontColor red))
+  (_, draw, _) <- runFrame ctx (tabInp inp0) (ui (fontMono . fontColor red))
+  assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
+    assertEq failed 20 (tahLineH hit)
+    assertEq failed 20 . fmLineHeight =<< resolveTextAreaFont ctx (tahNodeIdx hit)
+  assert failed . elem red . fillsIn (respRect resp) =<< drawQuads draw
+  assertEq failed (Just 80) =<< widest resp
+  assertEq failed (Just 48) =<< widest =<< warmup2 ctx inp0 (ui id)
+
+-- | Whether text area @wid@'s caret, at its stored scroll, lies inside the
+-- clip its rows are painted in: its content box, short of the lane of each
+-- scrollbar that shows.
+caretInView :: Context -> WidgetId -> IO Bool
+caretInView ctx wid = do
+  st <- (`loadTextAreaState` intKey wid) <$> getStore ctx
+  V2 sx sy <- getScrollOffset2D ctx wid
+  textAreaHitForWidget ctx wid >>= \case
+    Nothing -> pure False
+    Just (TextAreaHit idx field lineH) -> do
+      fm <- resolveTextAreaFont ctx idx
+      (contentW, contentH) <- textAreaContentMetrics ctx idx
+      let
+        bars = textAreaBars fm field contentW contentH
+        (ix, iy) = widgetContentInset fm
+        lane shown = if shown then textAreaBarLane else 0
+        viewW = rectW field - 2 * ix - lane (tabVertical bars)
+        viewH = rectH field - 2 * iy - lane (tabHorizontal bars)
+        Cursor caretRow caretCol = getCursor (tasBuffer st)
+        left = lineWidth fm (T.take caretCol (lineAt caretRow (tasBuffer st))) - sx
+        top = fromIntegral caretRow * lineH - sy
+      pure (left >= -0.5 && left + 1 <= viewW + 0.5 && top >= -0.5 && top + lineH <= viewH + 0.5)
+
 runTextAreaScrollCursorLeavesViewportTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollCursorLeavesViewportTest ctx failed = do
   let
@@ -653,7 +850,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
   _ <- runFrame ctx (tabInp inp0) ui
   assertJustM failed (getPrevRect ctx (respId resp)) $ \field -> do
     let
-      caret = getCursor . buffer . (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
+      caret = getCursor . tasBuffer . (`loadTextAreaState` intKey (respId resp)) <$> getStore ctx
       offset = getScrollOffset ctx (respId resp)
     assertEq failed (Cursor 0 0) =<< caret
     assertEq failed 0 =<< offset
@@ -926,5 +1123,5 @@ runTextAreaMenuSelectAllTest ctx failed = do
       _ <- runClick ctx inp0 ui pos
       store <- getStore ctx
       let st = loadTextAreaState store (intKey (respId resp))
-      assertEq failed (selectionAnchor st) (Cursor 0 0)
-      assertEq failed (getCursor (buffer st)) (Cursor lastRow (T.length lastLine))
+      assertEq failed (tasSelectionAnchor st) (Cursor 0 0)
+      assertEq failed (getCursor (tasBuffer st)) (Cursor lastRow (T.length lastLine))

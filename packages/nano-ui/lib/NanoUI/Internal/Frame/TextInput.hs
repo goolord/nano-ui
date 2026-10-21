@@ -14,6 +14,7 @@ module NanoUI.Internal.Frame.TextInput
   , drawTextInputCaret
   , drawLineSelection
   , drawLineCaret
+  , drawCaretAt
   , drawLinePreedit
   , searchClearHit
   , textWordBounds
@@ -29,7 +30,7 @@ module NanoUI.Internal.Frame.TextInput
   ) where
 
 import Control.Monad (forM_, mfilter, when)
-import Data.Char (isAlphaNum, isSpace)
+import Data.Char (isAlphaNum, isMark, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isJust, mapMaybe)
 import Data.Sequence qualified as Seq
@@ -101,13 +102,12 @@ searchClearHit ctx wid mouse = do
         pure (rectContains clearRect mouse)
 
 -- | Clear a search field. The debounced pulse picks the empty text up as an
--- immediate (empty) commit on the next frame.
+-- immediate (empty) commit on the next frame, which the store write wakes.
 clearSearchInput :: Context -> WidgetId -> IO ()
 clearSearchInput ctx wid = do
   let key = intKey wid
   modifyStore ctx $
     insertSlot fieldText key "" . setFieldSelection key 0 0
-  markDirty ctx
 
 -- | Clip a field's spans: its text to @fieldClip@ ('nodeTextFieldGeom'), and
 -- a caption to its first line.
@@ -136,7 +136,11 @@ drawLineSelection da fm line lo hi x y lineH color = do
 drawLineCaret :: DrawArena -> FontMetrics -> Text -> Int -> Float -> Float -> Float -> Color -> IO ()
 drawLineCaret da fm line col x y lineH fg = do
   pw <- caretXIO fm line col
-  pushRect da (Rect (x + pw) (y + 1) 1 (max 4 (lineH - 2))) fg
+  drawCaretAt da (x + pw) y lineH fg
+
+-- | A caret at @x@ on a row at @y@ of height @lineH@.
+drawCaretAt :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
+drawCaretAt da x y lineH = pushRect da (Rect x (y + 1) 1 (max 4 (lineH - 2)))
 
 -- | Underline the composition in 'preeditLine' (pen at @x@, row at @y@ of
 -- height @lineH@) and draw the input method's caret when it has no
@@ -244,9 +248,10 @@ drawTextInputCaret da (FieldEdit value cursor _ fm rowY textX preedit) fg =
 data CharClass = WordChar | SpaceChar | OtherChar
   deriving (Eq)
 
--- | The run of word characters (letters, digits, underscores), spaces or
--- other characters around character @raw@ of @text@, clamped into it.
--- Positions count characters, not UTF-8 bytes.
+-- | The run of word characters (letters, digits, underscores, combining
+-- marks and the zero-width joiners), spaces or other characters around
+-- character @raw@ of @text@, clamped into it. Positions count characters,
+-- not UTF-8 bytes.
 textWordBounds :: Text -> Int -> (Int, Int)
 textWordBounds text raw
   | T.null text = (0, 0)
@@ -261,7 +266,7 @@ textWordBounds text raw
           )
  where
   charClass c
-    | isAlphaNum c || c == '_' = WordChar
+    | isAlphaNum c || isMark c || c == '_' || c == '\x200C' || c == '\x200D' = WordChar
     | isSpace c = SpaceChar
     | otherwise = OtherChar
 

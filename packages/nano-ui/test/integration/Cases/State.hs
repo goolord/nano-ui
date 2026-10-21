@@ -26,6 +26,7 @@ tests =
   , spec "var-map" runVarMapTest
   , spec "var-shared" runVarSharedTest
   , spec "var-abort" runVarAbortTest
+  , spec "var-io-in-pass" runVarIoInPassTest
   , spec "collection-api" runCollectionApiTest
   ]
 
@@ -150,6 +151,9 @@ runVarSlotIdentityTest ctx failed = do
   assertEq failed 9 =<< asInt
   assertEq failed "five" =<< asText
   assertEq failed 5 =<< asInt
+  -- Enumerations are stored by index, but one of another type starts over.
+  _ <- runNanoUI ctx inp (withKey ("enum" :: Text) (useEnumVar LT >>= \v -> writeVar v EQ))
+  assertEq failed False =<< runNanoUI ctx inp (withKey ("enum" :: Text) (readVar =<< useEnumVar False))
   let view extra = column $ do
         when extra (void (button "extra"))
         n <- useVar (0 :: Int)
@@ -206,8 +210,9 @@ data Item = Item {rowKey :: !Int, rowName :: !Text, rowDone :: !Bool}
 newtype Items = Items {rows :: [Item]}
   deriving (Eq, Show, Generic)
 
--- | Field focus and element Vars write through to the whole value, and an
--- element's Var follows its key when the list is reordered.
+-- | Field focus and element Vars write through to the whole value, an
+-- element's Var follows its key when the list is reordered, and a write
+-- through a removed element's Var changes nothing.
 runVarFocusTest :: Context -> IORef Int -> IO ()
 runVarFocusTest ctx failed = do
   model <- newVar (Items [Item 1 "one" False, Item 2 "two" False, Item 3 "three" False])
@@ -224,10 +229,13 @@ runVarFocusTest ctx failed = do
     [] -> assert failed False
   assertEq failed ["THREE", "two", "one"] . map rowName . rows =<< readVarIO model
   runNanoUI ctx inp (modifyVar model.rows (filter ((/= 3) . rowKey)))
+  clearDirty ctx
   case els of
     first : _ -> runNanoUI ctx inp (writeVar first.rowDone True)
     [] -> pure ()
   assertEq failed [False, False] . map rowDone . rows =<< readVarIO model
+  -- The write changed nothing, so it wakes nothing.
+  assertEq failed False =<< isDirty ctx
   pair <- newVar ((1 :: Int), ("a" :: Text))
   runNanoUI ctx inp (writeVar (zoomVar snd (\b (a, _) -> (a, b)) pair) "b")
   assertEq failed (1, "b") =<< readVarIO pair
@@ -285,4 +293,24 @@ runVarAbortTest ctx failed = do
   _ <- takeDamage ctx
   _ <- runFrame ctx inp view
   assertEq failed 1 =<< lastFramePasses ctx
+  assertEq failed DamageFull =<< takeDamage ctx
+
+-- | A write from another thread that lands in a pass after the pass read
+-- the Var is new to the next frame's reads, which repaint whole, also when
+-- the pass then writes another part of the same Var.
+runVarIoInPassTest :: Context -> IORef Int -> IO ()
+runVarIoInPassTest ctx failed = do
+  item <- newVar (Item 1 "one" False)
+  let inp = withInputOff 300 100
+      view = label =<< readVar item.rowName
+      -- The thread's write, as if it landed here.
+      landing name = liftIO (writeVarIO item.rowName name)
+  _ <- warmup2 ctx inp view
+  _ <- runFrame ctx inp (view >> landing "uno")
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp view
+  assertEq failed DamageFull =<< takeDamage ctx
+  _ <- runFrame ctx inp (view >> landing "ein" >> writeVar item.rowDone True)
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp view
   assertEq failed DamageFull =<< takeDamage ctx

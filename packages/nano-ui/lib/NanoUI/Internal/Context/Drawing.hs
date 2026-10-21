@@ -36,7 +36,7 @@ import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (Layout)
-import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectH, rectHit, rectW)
+import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectContains, rectH, rectW)
 
 {-# INLINE lookupIn #-}
 lookupIn :: (DrawingCacheState -> IntMap a) -> Context -> WidgetId -> IO (Maybe a)
@@ -82,7 +82,7 @@ hoverZoneCrossed :: Context -> V2 -> V2 -> IO Bool
 hoverZoneCrossed ctx from to =
   any crossed . dcsHoverZones <$> readIORef (ctxDrawingCache ctx)
   where
-    crossed (HoverZone r tracked) = let on = rectHit r from in on /= rectHit r to || (on && tracked)
+    crossed (HoverZone r tracked) = let on = rectContains r from in on /= rectContains r to || (on && tracked)
 
 -- | Register a draw builder and content version. Change the version when
 -- captured content changes without a size change.
@@ -112,8 +112,9 @@ placeOps r rect ops store
 
 -- | Rebuild draw ops when the content version or width/height change. A move
 -- only translates. An unversioned drawing (content 0) additionally drops its
--- cache while the widget is animating, since it has no other invalidation
--- signal; versioned drawings are invalidated by their content key alone.
+-- cache while the widget is animating, and on the frame after, since it has
+-- no other invalidation signal; versioned drawings are invalidated by their
+-- content key alone.
 cachedDrawingOps :: Context -> WidgetId -> Int -> Rect -> DrawingBuild -> IO (SmallArray DrawOp)
 cachedDrawingOps ctx wid content rect build = do
   animated <-
@@ -121,8 +122,11 @@ cachedDrawingOps ctx wid content rect build = do
       then IM.member (intKey wid) <$> getLiveAnimations ctx
       else pure False
   cached <- lookupIn dcsDrawOpCache ctx wid
+  -- Ops built while animating are stale on the next frame, even one whose
+  -- animation ended before paint: its view drew the widget again.
   let store =
-        registerIn dcsDrawOpCache (\m dc -> dc {dcsDrawOpCache = m}) ctx wid . DrawOpCacheEntry content rect
+        registerIn dcsDrawOpCache (\m dc -> dc {dcsDrawOpCache = m}) ctx wid
+          . DrawOpCacheEntry (if animated then complement content else content) rect
   case cached of
     Just (DrawOpCacheEntry c r ops)
       | c == content && not animated && sameSize r rect -> placeOps r rect ops store

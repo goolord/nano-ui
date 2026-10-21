@@ -402,7 +402,7 @@ paneGridCore cfg controlled given = do
               zone = case topLevelDropTarget edgeBand baseRect mouse of
                 Just dt -> preview dt
                 Nothing
-                  | rectHit baseRect mouse ->
+                  | rectContains baseRect mouse ->
                       nearestPane targetRegions mouse >>= \(q, r) -> preview (dropTargetForPane r mouse q)
                   | otherwise -> Nothing
            in (moved, zone, rest)
@@ -512,17 +512,17 @@ resolveExternalDrop env wid baseRect mouse end = do
   clip <- getPrevClipRect ctx wid
   pure $
     if covered
-      || not (maybe True (`rectHit` mouse) clip)
+      || not (maybe True (`rectContains` mouse) clip)
       || gsGesture gs /= NoGesture
       || gsGesture end /= NoGesture
       || fst (maybe (0, 0) (`paneFocus` gs) (gsTree gs)) /= 0
       || gsMax end /= 0
       || gsTree end /= gsTree gs
-      || not (rectHit baseRect mouse)
+      || not (rectContains baseRect mouse)
       then Nothing
       else do
         tree <- gsTree gs
-        (q, r) <- find (\(_, r) -> rectHit r mouse) (M.toList (geRegions env))
+        (q, r) <- find (\(_, r) -> rectContains r mouse) (M.toList (geRegions env))
         let seed = gsSeed end
             np = seed + 1
             edge AxisV True = PaneLeft
@@ -744,15 +744,15 @@ runGestures wid env dividers rendered moved zone = do
       setGesture rerun g = void (updateGrid env rerun (\s -> s {gsGesture = g}))
       -- diBand already includes the leeway; inflating it would steal presses
       -- from neighbouring panes.
-      hitDiv = find (\d -> rectHit (diBand d) mouse) dividers
+      hitDiv = find (\d -> rectContains (diBand d) mouse) dividers
       -- The pane whose handle (or, when 'pvDraggable', whole region) is
       -- under the pointer.
       pickHit = flip find rendered $ \pane ->
         let v = rpView pane
-         in any (`rectHit` mouse) (rpHandle pane)
-              || (pvDraggable v && any (`rectHit` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
+         in any (`rectContains` mouse) (rpHandle pane)
+              || (pvDraggable v && any (`rectContains` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
   when (pressedIn MouseLeft inp && not (covered || disabled)
-      && maybe True (`rectHit` mouse) clip
+      && maybe True (`rectContains` mouse) clip
       && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
     case (hitDiv, pickHit) of
       (Just d, _) -> setGesture True (Resize (diSplitId d) (diRatio d) (mouseMain (diAxis d) mouse))

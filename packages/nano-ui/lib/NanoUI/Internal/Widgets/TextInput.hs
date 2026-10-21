@@ -36,7 +36,7 @@ where
 
 import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
-import Data.Char (isPrint)
+import Data.Char (isControl)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -89,16 +89,34 @@ saveTextInputState key s =
 -- dropped.
 textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
-  let buf = TB.withCursor (TB.Cursor 0 (tisCursor s)) (TB.fromText (tisText s))
+  let buf0 = TB.fromText (tisText s)
+      buf = TB.withCursor (fieldPosition buf0 (tisCursor s)) buf0
       history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
         Just (FieldHistory text h) | text == tisText s -> h
         _ -> emptyHistory
-   in Editor buf (TB.clampCursor buf (TB.Cursor 0 (tisAnchor s))) history
+   in Editor buf (fieldPosition buf (tisAnchor s)) history
 
 editorTextState :: Editor -> TextInputState
 editorTextState ed =
   let buf = editorBuffer ed
-   in TextInputState (TB.toText buf) (TB.cursorCol (TB.getCursor buf)) (TB.cursorCol (editorAnchor ed))
+   in TextInputState (TB.toText buf) (fieldOffset buf (TB.getCursor buf)) (fieldOffset buf (editorAnchor ed))
+
+-- | Where character @i@ of a field's value is in its editor's buffer, which
+-- holds each line of a value with line breaks as a row; a field's caret and
+-- anchor count characters of the whole value. Clamped into the value.
+fieldPosition :: TB.TextBuffer -> Int -> TB.Cursor
+fieldPosition buf = go 0
+  where
+    go row i
+      | row + 1 < TB.getLineCount buf, i > n = go (row + 1) (i - n - 1)
+      | otherwise = TB.clampCursor buf (TB.Cursor row i)
+      where
+        n = T.length (TB.lineAt row buf)
+
+-- | The character a position in a field's buffer is at in its value
+-- ('fieldPosition').
+fieldOffset :: TB.TextBuffer -> TB.Cursor -> Int
+fieldOffset buf (TB.Cursor row col) = col + sum [T.length (TB.lineAt r buf) + 1 | r <- [0 .. row - 1]]
 
 -- | Store an editor's text, selection and history.
 saveTextEditor :: Int -> Editor -> WidgetStore -> WidgetStore
@@ -122,7 +140,7 @@ fieldTextCommands ctx mode inp = do
   pure $
     if kind == FocusComposing
       then
-        [InsertText (T.singleton c) | c <- T.unpack (inputChars inp), isPrint c]
+        [InsertText (T.singleton c) | c <- T.unpack (inputChars inp), not (isControl c)]
           ++ inputTextCommands mode inp {inputChars = T.empty}
       else inputTextCommands mode inp
 
@@ -307,10 +325,8 @@ debounceSearchChanged ctx key focused rawChanged ms = do
     lastEdit = findSlot fieldDouble now ageKey store
     deadline = realToFrac ms :: Double
     idleMs = (now - lastEdit) * 1000
-    commit =
-      not rawChanged
-        && dirty
-        && (T.null current || not focused || idleMs >= deadline)
+    -- An edit this frame has not been idle for any time yet.
+    commit = dirty && (T.null current || not focused || (not rawChanged && idleMs >= deadline))
     -- Text the caller changed, in a field nobody has typed in, has no edit
     -- time to age from. Its pause starts now: left unstamped, every frame
     -- would see a fresh edit, and the commit would never come.
@@ -379,7 +395,8 @@ searchInputConfigured' cfg v =
 -- Selectable text
 -- -----------------------------------------------------------------------------
 
--- | Read-only text that can be selected with the mouse and copied with Ctrl+C.
+-- | Read-only text that can be selected with the mouse and copied with the
+-- platform's copy shortcut (Ctrl+C, Command+C on macOS) or the context menu.
 {-# INLINE selectableText #-}
 selectableText :: Text -> NanoUI ()
 selectableText = selectableTextWith id

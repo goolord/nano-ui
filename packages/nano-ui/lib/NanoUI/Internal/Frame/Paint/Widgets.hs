@@ -331,7 +331,11 @@ paintCaptionlessField :: PaintEnv -> Style -> NodeIdx -> Bool -> Rect -> Rect ->
 paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ _ _) hasPlaceholder chrome = do
   let ctx = peContext env
       da = peDrawArena env
-      fm = peFontMetrics env
+  -- Glyphs in the field's own font, which places its caret and takes its
+  -- clicks.
+  si <- getStyleIdx (peNodeArena env) idx
+  fontSizeVal <- getNodeFontSize (peNodeArena env) idx
+  (fm, _, measure) <- resolveFontFor ctx NodeTextInput fontSizeVal si
   paintStyledRect da style box
   value <- textInputValue ctx idx
   -- The value, including any input-method composition in progress.
@@ -345,7 +349,7 @@ paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ 
     if T.null display
       then pure (0, baseFg)
       else do
-        (_, th) <- ctxMeasureText ctx display
+        (_, th) <- measure display
         pure
           ( centeredTextY fm y h th
           , if T.null value && not focus then lerpColor baseFg (styleBg style) 0.5 else baseFg

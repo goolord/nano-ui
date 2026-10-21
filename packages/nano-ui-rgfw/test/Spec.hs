@@ -250,6 +250,8 @@ testRgfwTyping = do
       chord evs = chars evs == "" && keys evs == [KeyChar 'l'] && modCtrl (inputModifiers (applied evs))
       released = applied [EventKeyPress keyL 0, EventKeyRelease keyL 0]
   assert "RGFW typing: repeated key-char events all type" (chars [EventKeyChar 'l', EventKeyChar 'l'] == "ll")
+  assert "RGFW typing: a joiner types, and macOS arrow-key characters do not"
+    (chars [EventKeyChar '\x200C', EventKeyChar '\xF702'] == "\x200C")
   assert "RGFW typing: repeated keystrokes all type" (chars (plainL ++ plainL) == "ll")
   assert "RGFW typing: a keystroke is its character key as well" (keys plainL == [KeyChar 'l'])
   assert "RGFW typing: Ctrl+L queued char-first is a chord" (chord ctrlLCharFirst)

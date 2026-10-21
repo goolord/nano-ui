@@ -28,6 +28,7 @@ tests =
   , spec "wake-signal-after-drain" runWakeSignalAfterDrainTest
   , spec "stream" runStreamTest
   , spec "stream-key-change" runStreamKeyChangeTest
+  , spec "stream-released" runStreamReleasedTest
   ]
 
 inp :: Input
@@ -405,3 +406,23 @@ runStreamKeyChangeTest ctx failed = do
   assert failed =<< killedIn 2000000
   assertEq failed (Just [2]) =<< frameUntil wait ctx ui (not . null)
   cancelTasks ctx
+
+-- | An update to a stream whose hook has stopped running does not wake the
+-- loop: nothing reads the state any more, and each wake costs a frame that
+-- repaints the whole window. A thread the producer started that kept its
+-- @update@ once woke the loop for the life of the process.
+runStreamReleasedTest :: Context -> IORef Int -> IO ()
+runStreamReleasedTest ctx failed = do
+  stream <- newStream
+  wait <- newWakeSignal ctx
+  (sleep, started, killedIn) <- sleeper
+  kept <- newEmptyMVar
+  let ui shown = when shown (void (useStream stream () (0 :: Int) (\update -> putMVar kept update >> sleep)))
+  _ <- runFrame ctx inp (ui True)
+  update <- takeMVar kept
+  started
+  _ <- runFrame ctx inp (ui False)
+  assert failed =<< killedIn 2000000
+  _ <- wait 0
+  update (+ 1)
+  assert failed . not =<< wait 0

@@ -25,6 +25,7 @@ tests =
   , spec "image-large-id" runImageLargeIdTest
   , spec "svg-icon-configured" runSvgIconConfiguredTest
   , spec "use-image-rgba" runUseImageRgbaTest
+  , spec "release-image-rgba" runReleaseImageRgbaTest
   ]
 
 -- | One corner of a drawn quad: x, y, u, v and alpha.
@@ -269,6 +270,27 @@ runSvgIconConfiguredTest ctx failed = do
   quadsOf (svgIconConfigured defaultImageConfig {icLayout = fixedWH 16 16} doc) >>= assertEq failed plain
   quadsOf (svgIconConfigured defaultImageConfig {icLayout = fixedWH 16 16 . fontColor (white 255), icOpacity = 0.5} doc)
     >>= assert failed . any ((== white 128) . snd)
+
+-- | An image a view registers with 'registerImageRgba' stays until the view
+-- releases it, which frees its atlas space for the next one.
+runReleaseImageRgbaTest :: Context -> IORef Int -> IO ()
+runReleaseImageRgbaTest ctx failed = do
+  let frameOf :: NanoUI x -> IO x
+      frameOf ui = (\(a, _, _) -> a) <$> runFrame ctx (withInput 100 100) ui
+      register = do
+        iid <- freshImageId
+        ok <- registerImageRgba iid 8 8 (BS.replicate (8 * 8 * 4) 90)
+        pure (iid, ok)
+  (a, okA) <- frameOf register
+  assert failed okA
+  frameOf (pure ())
+  lookupImageSize ctx a >>= assertEq failed (Just (8, 8))
+  aAt <- lookupImageUv ctx a
+  frameOf (releaseImageRgba a)
+  lookupImageSize ctx a >>= assertEq failed Nothing
+  (b, okB) <- frameOf register
+  assert failed okB
+  lookupImageUv ctx b >>= assertEq failed aAt
 
 -- | 'useImageRgba' registers once per key and returns the same id while
 -- called. A new key registers a new image and frees the old one. A frame

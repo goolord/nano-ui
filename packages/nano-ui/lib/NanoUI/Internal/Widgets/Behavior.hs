@@ -33,7 +33,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (getParent, getWidgetId, lookupNodeByKey)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
 import NanoUI.Internal.Store (deleteSlot, fieldInt, fieldPoint, findSlot, flagSlot, insertSlot, quietFlag, setFlagSlot, setQuietFlag)
-import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectHit, v2X, v2Y)
+import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectContains, v2X, v2Y)
 import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
 
 -- | Pointer slop in pixels before a held press counts as a drag.
@@ -67,7 +67,7 @@ useDrag1D axis owner lo hi current track = do
   active0 <- quietFlag dragK <$> liftIO (getStore ctx)
   -- Hit-test against the clipped node so a track scrolled out of its
   -- viewport does not respond at its stale rect.
-  let onTrack = findNodeByWidgetId ctx owner >>= maybe (pure (rectHit track (inputMousePos inp))) (\i -> nodeInteractionHit ctx i track (inputMousePos inp))
+  let onTrack = findNodeByWidgetId ctx owner >>= maybe (pure (rectContains track (inputMousePos inp))) (\i -> nodeInteractionHit ctx i track (inputMousePos inp))
   started <- pure (pressedIn MouseLeft inp) <&&> liftIO onTrack <&&> (not <$> liftIO (trackCovered ctx owner (inputMousePos inp)))
   let active = heldIn MouseLeft inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
@@ -82,7 +82,7 @@ useDrag1D axis owner lo hi current track = do
 trackCovered :: Context -> WidgetId -> V2 -> IO Bool
 trackCovered ctx owner mouse = do
   covered <- pointerCovered ctx owner
-  inOwner <- maybe False (`rectHit` mouse) <$> getPrevRect ctx owner
+  inOwner <- maybe False (`rectContains` mouse) <$> getPrevRect ctx owner
   if not covered || inOwner
     then pure covered
     else do
@@ -309,7 +309,7 @@ useDismissable owner panel opener = do
         esc = pressedOnceIn KeyEscape inp && not taken && null menu && not dropdown
         pressed = anyButtonPressed inp && not onMenu
         at = inputMousePos inp
-        outside = pressed && not (rectHit panel at || rectHit opener at)
+        outside = pressed && not (rectContains panel at || rectContains opener at)
     when esc (markEscapeConsumed ctx)
     inChild <- case route of
       RouteLayer k | outside && k /= 0 && k /= intKey owner -> do

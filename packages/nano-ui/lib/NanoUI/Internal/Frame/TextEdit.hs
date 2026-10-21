@@ -176,7 +176,7 @@ finalizeTextEditMenuPick ctx inp =
                       modifyInteraction ctx (\s -> s {isTextEditLastAction = Just (wid, cmd)})
                       applyTextFieldCommand ctx wid cmd
                   )
-                  (closeMenu >> markDirty ctx)
+                  closeMenu
       _ -> pure ()
  where
   closeMenu = modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
@@ -242,7 +242,10 @@ collectTextEditMenuSpans ctx inp = withTextEditMenu ctx [] $ \wid menuRect theme
     | (row, Just (cmd, lbl)) <- textEditMenuLayout menuRect
     ]
 
--- | Whether @cmd@ can run on field @wid@ now.
+-- | Whether @cmd@ can run on field @wid@ now. Paste does not look at the
+-- clipboard: this runs on every paint and pointer move over the menu, a read
+-- can be a round trip to the program that owns it, and pasting an empty
+-- clipboard does nothing.
 textFieldMenuEnabled :: Context -> WidgetId -> TextCommand -> IO Bool
 textFieldMenuEnabled ctx wid cmd =
   textFieldEditor ctx wid >>= \case
@@ -252,9 +255,7 @@ textFieldMenuEnabled ctx wid cmd =
       Redo -> pure (modeEditable mode && canRedo history)
       Cut -> pure (modeEditable mode && modeCopyable mode && hasText)
       Copy -> pure (modeCopyable mode && hasText)
-      Paste
-        | modeEditable mode -> maybe False (not . T.null) <$> ctxClipboardGet ctx
-        | otherwise -> pure False
+      Paste -> pure (modeEditable mode)
       _ -> pure hasText
      where
       hasText = TB.getLineCount buf > 1 || not (T.null (TB.lineAt 0 buf))

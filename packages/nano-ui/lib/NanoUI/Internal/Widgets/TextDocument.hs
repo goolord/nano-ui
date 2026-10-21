@@ -47,7 +47,8 @@ instance Show TextDocument where
       (d > 10)
       (showString "textDocument " . showsPrec 11 (documentText doc))
 
--- | Split a text into a document. O(length of the text).
+-- | Split a text into a document. O(length of the text). A Windows line end
+-- (@\\r\\n@) is one line break, so 'documentText' ends lines with @\\n@.
 textDocument :: Text -> TextDocument
 textDocument = TextDocument . TB.splitLines
 

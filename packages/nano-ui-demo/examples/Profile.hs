@@ -25,7 +25,7 @@ import NanoUI.Testing
   ( Context
   , newPixelContext
   , collectTextSpans
-  , debugPanelOpen
+  , floatingWindowOpen
   , runFrame
   , setDrawReuse
   , takeDamage
@@ -117,9 +117,9 @@ main = do
     case findExact "Debug" spansLatest of
       Nothing -> putStrLn "  Debug button not found\n"
       Just pos -> do
-        alreadyOpen <- debugPanelOpen ctx'
+        alreadyOpen <- floatingWindowOpen ctx'
         unless alreadyOpen (Harness.clickPos drawDemo inp pos)
-        opened <- debugPanelOpen ctx'
+        opened <- floatingWindowOpen ctx'
         unless opened (fail "Debug Open workload did not open the debug window")
         measureBench "Full DemoUi (Debug Open, SDL Present)" (drawDemo inp)
         measureBench "Full DemoUi (Debug Open, runFrame)" $
@@ -167,7 +167,7 @@ main = do
           Just i -> do
             Rect x y w h <- getNodeRect arena i
             Harness.clickPos drawDemo inp (Harness.spanCenter (Rect x y w h))
-        stillOpen <- debugPanelOpen ctx'
+        stillOpen <- floatingWindowOpen ctx'
         when stillOpen (fail "Debug window did not close after profiling")
 
     putStrLn "--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---"

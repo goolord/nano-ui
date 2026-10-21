@@ -6,7 +6,7 @@ import Data.Foldable (toList)
 import Data.IntMap.Strict qualified as IM
 import Data.List (groupBy)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingCacheState (..), intKey, lookupCustomDrawing)
+import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingCacheState (..), hoverZoneCrossed, intKey, lookupCustomDrawing)
 import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Store (fieldRichSelection, lookupSlot, ptrEq)
@@ -26,8 +26,47 @@ tests =
   , spec "rich-text-same-pieces" runRichTextSamePiecesTest
   , spec "rich-text-scroll-popup" runRichTextScrollPopupTest
   , spec "rich-text-selection-persistence" runSelectionPersistenceTest
+  , spec "rich-text-selection-focus" runSelectionFocusTest
   , spec "rich-text-break-policy" runTextBreakTest
+  , spec "rich-text-leading-spaces" runLeadingSpacesTest
   ]
+
+-- | Spaces that open a paragraph indent its first line, as they do a line
+-- after a newline.
+runLeadingSpacesTest :: Context -> IORef Int -> IO ()
+runLeadingSpacesTest ctx failed = do
+  let fm = ctxFontMetrics ctx
+  resp <- warmup2 ctx (withInput 400 400) (column (fst <$> richText' ["  where\n    go = 1"]))
+  Just entry <- lookupCustomDrawing ctx (respId resp)
+  cdc <- mkCustomDrawContext ctx fm (respId resp)
+  let r@(Rect rx _ _ _) = respRect resp
+      indent word = [x - rx | DrawTextStyled x _ _ t _ <- toList (cdrBuild entry cdc r), t == word]
+  case (indent "where", indent "go") of
+    ([w], [g]) -> assert failed (w > 0 && abs (g - 2 * w) < 0.5)
+    _ -> assert failed False
+
+-- | A paragraph shows its selection only while it has focus, and draws no
+-- focus ring of its own: selecting in another paragraph leaves the first
+-- with no highlight.
+runSelectionFocusTest :: Context -> IORef Int -> IO ()
+runSelectionFocusTest ctx failed = do
+  let inp = withInputOff 500 300
+      ui = column ((,) <$> (fst <$> selectableRichText' ["first paragraph"]) <*> (fst <$> selectableRichText' ["second paragraph"]))
+      opsOf resp = do
+        Just entry <- lookupCustomDrawing ctx (respId resp)
+        cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) (respId resp)
+        pure (toList (cdrBuild entry cdc (respRect resp)))
+  theme <- readIORef (ctxTheme ctx)
+  let highlighted ops = not (null [() | FillRect _ c <- ops, c == themeSelection theme])
+  (a, b) <- warmup2 ctx inp ui
+  writeIORef (ctxFocusId ctx) (respId a)
+  _ <- evalUi ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
+  selected <- opsOf a
+  assert failed (highlighted selected)
+  assertEq failed [] [() | StrokeRoundedRect {} <- selected]
+  let (press, release) = clickPair inp (centerOf b)
+  forM_ [press, release, inp] $ \i -> evalUi ctx i ui
+  assert failed . not . highlighted =<< opsOf a
 
 -- | Wrapping follows 'textBreak', not the font: monospaced text keeps whole
 -- words, and 'breakAnywhere' wraps inside one without splitting a flag.
@@ -102,7 +141,8 @@ runRichTextWrapTest ctx failed = do
   assertEq failed 0 (round h `mod` round lineH :: Int)
 
 -- | A link reports its target when clicked and shows the pointer cursor;
--- text beside it reports nothing.
+-- text beside it reports nothing, and so does a press on that text dragged
+-- onto the link. A move along the link runs no frame, one onto it does.
 runRichTextLinkTest :: Context -> IORef Int -> IO ()
 runRichTextLinkTest ctx failed = do
   let inp0 = withInput 400 400
@@ -111,8 +151,11 @@ runRichTextLinkTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   prefixW <- sum <$> mapM (lineWidthIO fm) ["Go", " ", "to", " "]
   linkW <- sum <$> mapM (lineWidthIO fm) ["the", " ", "docs"]
+  docsW <- lineWidthIO fm "docs"
   let Rect rx ry _ rh = respRect resp
       onLink = V2 (rx + prefixW + linkW / 2) (ry + rh / 2)
+      onLinkStart = V2 (rx + prefixW + 1) (ry + rh / 2)
+      onLinkEnd = V2 (rx + prefixW + linkW - docsW / 2) (ry + rh / 2)
       onText = V2 (rx + 2) (ry + rh / 2)
       clickAt pos = do
         let (press, release) = clickPair inp0 pos
@@ -134,6 +177,14 @@ runRichTextLinkTest ctx failed = do
   assertEq failed Nothing textClick
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer
   assert failed (not plainCursor)
+  let press = pressAt inp0 onText
+      dragged = holdAt press onLink
+  mapM_ (\i -> runFrame ctx i ui) [inp0 {inputMousePos = onText}, press, dragged]
+  ((_, dragClick), _, _) <- runFrame ctx (releaseAt dragged) ui
+  assertEq failed Nothing dragClick
+  void (runFrame ctx inp0 {inputMousePos = onLinkStart} ui)
+  assert failed . not =<< hoverZoneCrossed ctx onLinkStart onLinkEnd
+  assert failed =<< hoverZoneCrossed ctx onText onLinkStart
 
 -- | Each line of a paragraph, wrapped or not, aligns within its box: flush
 -- right for 'alignEnd', centred for 'alignCenter'. A fit-width paragraph is

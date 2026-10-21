@@ -146,7 +146,10 @@ slider bound to `m.volume` does not trigger a second pass when the slider moves.
 Reading the entire record `m` or projecting through `zoomVar` marks all fields
 as read. `forEachVar` only reads the list's keys and order, so editing a single
 row's `Var` does not invalidate earlier rows; `withElemVars` returns the
-elements directly and therefore marks the whole list as read.
+elements directly and therefore marks the whole list as read. Rows are told
+apart by one of 63 bits of their key's hash, so past about 63 rows, or for keys
+that share a bit (such as `Int` keys 64 apart), a row's edit can still cost a
+second pass, and a full repaint when the rows `readVar` the field it edits.
 
 Primed widget variants (`button'`, `textInput'`, `slider'`) return a `Response`:
 `respChanged` is `True` when the value was edited, `respSubmitted` when
@@ -185,6 +188,12 @@ names entries = column $
     checked <- useVar False
     checkbox name checked
 ```
+
+State kept under a key, by `useVar` or by a widget such as a text field, lasts
+as long as the context, even once the key is no longer shown, so hidden content
+keeps its state. For a collection whose keys keep coming, such as a chat log,
+keep each row's state in a `VarMap` rather than `useVar`, and drop the rows
+that are gone with `retainVars`.
 
 ## Layout and coordinates
 
@@ -559,7 +568,7 @@ uploaded on the first frame for a given key, and the texture slot in the image
 atlas is freed automatically if a frame completes without calling `useImageRgba`
 for that handle, or when the key changes. For static images kept for the entire
 session, allocate an ID with `freshImageId` and upload once with
-`registerImageRgba`.
+`registerImageRgba`; `releaseImageRgba` frees one you no longer need.
 
 `image` stretches an image to fill its layout bounds. `imageConfigured` takes
 an `ImageConfig` supporting CSS-style `ContentFit` (`FitFill`, `FitContain`,

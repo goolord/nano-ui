@@ -4,6 +4,7 @@ import Spec
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
 import Data.Text (Text)
+import Data.Text qualified as T
 
 tests :: [Spec]
 tests =
@@ -13,6 +14,7 @@ tests =
   , spec "styled-paint" runStyledPaintTest
   , spec "styled-nesting" runStyledNestingTest
   , spec "styled-damage" runStyledDamageTest
+  , spec "styled-keeps-text-caches" runStyledKeepsTextCachesTest
   , spec "font-size-label-fit" runFontSizeLabelFitTest
   , spec "border-left" runBorderLeftTest
   , spec "byte-enums" runByteEnumsTest
@@ -140,6 +142,24 @@ runStyledDamageTest ctx failed = do
     assertEq failed DamageFull =<< takeDamage ctx
     quads <- drawQuads draw
     assert failed (any ((== c) . snd) quads)
+
+-- | A scope's theme changes only how nodes look, so a frame that changes it
+-- measures no text: the layout and the text caches stand. It once advanced
+-- the metric generation, which dropped them all at every change, and every
+-- frame for an animated colour.
+runStyledKeepsTextCachesTest :: Context -> IORef Int -> IO ()
+runStyledKeepsTextCachesTest base failed = do
+  measured <- newIORef (0 :: Int)
+  let ctx = withMeasureText base (\t -> modifyIORef' measured (+ 1) >> pure (8 * fromIntegral (T.length t), 16))
+      inp = withInputOff 300 200
+      ui c = column $ do
+        label "Some text"
+        styled (buttonStyle (background c)) (button "B")
+  _ <- warmup2 ctx inp (ui (colorRGBA 30 60 200 255))
+  writeIORef measured 0
+  _ <- runFrame ctx inp (ui (colorRGBA 30 200 60 255))
+  assertEq failed DamageFull =<< takeDamage ctx
+  assertEq failed 0 =<< readIORef measured
 
 -- | A widget with its own font size is laid out for its label in that font,
 -- which paint draws it in. With a 12 px base font and 24 px cells for the

@@ -51,7 +51,8 @@ data Cell s = Cell {-# UNPACK #-} !(IORef s) {-# UNPACK #-} !(MutablePrimArray R
 
 -- | Two-level bit signature of the portion of a cell addressed by a lens path:
 -- the first-level record field or list key bitmask, the second-level bitmask
--- ('allBits' when the path stops at one level), and whether the path is closed.
+-- ('allBits' when the path stops at one level), and whether the path is still
+-- open, so that a further step can narrow it.
 -- An opaque step such as 'NanoUI.Var.zoomVar' covers all bits beneath its
 -- prefix and marks the signature closed so further steps leave it unchanged.
 --
@@ -189,11 +190,13 @@ changedSince cell base sig = do
 
 -- | Record a mutation to @sig@ at tick @t@. Reset the change set when its
 -- previous mutations precede the session's frame-start tick @base@. Direct IO
--- mutations pass @base = 0@ so existing change bits are preserved.
+-- mutations pass @base = 0@ so existing change bits are preserved. The stamp
+-- never moves back: a pass's write, stamped with the pass's tick, can follow
+-- one from another thread with a later tick.
 addChange :: Cell s -> Word64 -> Word64 -> Sig -> IO ()
 addChange cell base t sig = do
   chg <- readStamp cell chgSlot
-  writeStamp cell chgSlot t
+  writeStamp cell chgSlot (max chg t)
   let fresh = chg < base
   when fresh (writeStamp cell (chgSlot + 1) base)
   addBits cell (chgSlot + 2) fresh sig

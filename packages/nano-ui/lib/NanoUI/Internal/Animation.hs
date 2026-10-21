@@ -57,7 +57,8 @@ solveBezierX p1 p2 targetT estimate iter
                in solveBezierX p1 p2 targetT nextEst (iter + 1)
 
 -- | Spring stiffness, damping, and mass. Time uses seconds. Integration clamps
--- stiffness/damping to non-negative values and mass to at least 1e-6.
+-- stiffness/damping to non-negative values and mass to at least 1e-6. A
+-- spring too stiff or light to follow in 32 steps a frame lands on its target.
 data SpringParams = SpringParams
   { springStiffness :: {-# UNPACK #-} !Float
   , springDamping :: {-# UNPACK #-} !Float
@@ -86,22 +87,31 @@ maxSubstep = 1 / 30
 maxSubsteps :: Int
 maxSubsteps = 32
 
--- | Advance position and velocity toward a target by elapsed seconds.
--- Non-positive time leaves both unchanged; at most 32 substeps of 1/30 s are taken.
-stepSpring :: SpringParams -> Float -> Float -> Float -> Float -> (Float, Float)
-stepSpring params x v target dt
+-- | Advance the displacement from the target and the velocity by elapsed
+-- seconds. Non-positive time leaves both unchanged. Substeps are at most
+-- 1/30 s, and short enough for the spring to stay stable; one that needs more
+-- than 32 lands on the target.
+stepSpring :: SpringParams -> Float -> Float -> Float -> (Float, Float)
+stepSpring params x v dt
   | dt <= 0 = (x, v)
   | otherwise = go x v dt 0
   where
+    k = max 0 (springStiffness params)
+    c = max 0 (springDamping params)
+    m = max 1e-6 (springMass params)
+    -- RK4 is stable while a step times the spring's fastest rate, at most
+    -- c/m + sqrt (k/m), stays under about 2.8.
+    hMax = min maxSubstep (2 / (c / m + sqrt (k / m)))
     go !pos !vel remain n
-      | remain <= 1e-8 || n >= maxSubsteps = (pos, vel)
+      | remain <= 1e-8 = (pos, vel)
+      | n >= maxSubsteps = (0, 0)
       | otherwise =
-          let h = min maxSubstep remain
-              (pos', vel') = rk4 params pos vel target h
+          let h = min hMax remain
+              (pos', vel') = rk4 k c m pos vel h
            in go pos' vel' (remain - h) (n + 1)
 
-rk4 :: SpringParams -> Float -> Float -> Float -> Float -> (Float, Float)
-rk4 params x v xTarget dt =
+rk4 :: Float -> Float -> Float -> Float -> Float -> Float -> (Float, Float)
+rk4 k c m x v dt =
   let k1v = accel x v
       k1x = v
       k2v = accel (x + 0.5 * dt * k1x) (v + 0.5 * dt * k1v)
@@ -114,10 +124,7 @@ rk4 params x v xTarget dt =
       vNext = v + (dt / 6) * (k1v + 2 * k2v + 2 * k3v + k4v)
    in (xNext, vNext)
   where
-    k = max 0 (springStiffness params)
-    c = max 0 (springDamping params)
-    m = max 1e-6 (springMass params)
-    accel pos vel = (-k * (pos - xTarget) - c * vel) / m
+    accel pos vel = (-k * pos - c * vel) / m
 
 -- | Progress curves. Cubic Bezier arguments are @x1 y1 x2 y2@ for the two
 -- control points between endpoints (0,0) and (1,1).
@@ -139,7 +146,9 @@ data Ease
 
 -- | Running scalar animation. 'EaseAnim' stores start, end, duration, elapsed
 -- time, curve, remaining delay, and requested delay (times in seconds).
--- 'SpringAnim' stores position, velocity, target, and spring parameters.
+-- 'SpringAnim' stores displacement from the target, velocity, target, and
+-- spring parameters. Integrating the displacement keeps a spring toward a
+-- large target from stalling a few float steps short of it.
 data Animation
   = EaseAnim
       {-# UNPACK #-} !Float
@@ -206,8 +215,8 @@ animInProgress (EaseAnim start end dur elapsed _ delay _) =
   not (approxEq start end)
     && dur > 0
     && (delay > 0 || elapsed < dur)
-animInProgress (SpringAnim pos vel target _) =
-  abs (pos - target) > springEps || abs vel > springEps
+animInProgress (SpringAnim d vel _ _) =
+  abs d > springEps || abs vel > springEps
 
 -- | Current interpolated value, or the target for a completed tween.
 {-# INLINE animationValue #-}
@@ -218,7 +227,7 @@ animationValue a@(EaseAnim start end dur elapsed ease delay _)
   | otherwise =
       let t = min 1 (elapsed / max 0.001 dur)
        in start + (end - start) * applyEase ease t
-animationValue (SpringAnim pos _ _ _) = pos
+animationValue (SpringAnim d _ target _) = target + d
 
 -- | Advance an animation by elapsed seconds, including its delay.
 stepAnim :: Float -> Animation -> Animation
@@ -234,8 +243,8 @@ stepAnim dt a@(EaseAnim start end dur elapsed ease delay delayReq)
        in if next >= dur
             then EaseAnim end end 0 0 ease 0 0
             else EaseAnim start end dur next ease 0 delayReq
-stepAnim dt (SpringAnim pos vel target params) =
-  let (pos', vel') = stepSpring params pos vel target dt
-   in if abs (pos' - target) <= springEps && abs vel' <= springEps
-        then SpringAnim target 0 target params
-        else SpringAnim pos' vel' target params
+stepAnim dt (SpringAnim d vel target params) =
+  let (d', vel') = stepSpring params d vel dt
+   in if abs d' <= springEps && abs vel' <= springEps
+        then SpringAnim 0 0 target params
+        else SpringAnim d' vel' target params

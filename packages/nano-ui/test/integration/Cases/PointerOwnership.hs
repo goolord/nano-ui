@@ -11,7 +11,7 @@ import Data.Text.IO qualified as TIO
 import NanoUI.Internal.Context (Context (ctxActiveId, ctxNodeArena), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
-import NanoUI.Internal.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
+import NanoUI.Internal.Widgets.TextArea (loadTextAreaState, tasBuffer, tasSelectionAnchor)
 import NanoUI.Widgets.TextBuffer (getCursor)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (makeRelative, takeExtension, (</>))
@@ -242,7 +242,7 @@ victims = do
       st <- getStore ctx
       let s = loadTextAreaState st (intKey (respId r))
       off <- getScrollOffset ctx (respId r)
-      pure (show (getCursor (buffer s), selectionAnchor s, off))
+      pure (show (getCursor (tasBuffer s), tasSelectionAnchor s, off))
     selectProbe ctx r = (\st -> show (isSelectOpen st (intKey (respId r)))) <$> getStore ctx
 
 -- | The source on top, then the widget under test pushed right and down by

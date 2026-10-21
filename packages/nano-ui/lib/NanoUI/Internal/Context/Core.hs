@@ -184,7 +184,8 @@ damagePeers ctx wids bounds =
 damageFull :: Context -> IO ()
 damageFull ctx = requestDamage ctx ReqFull
 
--- | Request another view pass and wake the event loop ('wakeOffLoop').
+-- | Request another view pass and wake the event loop, unless this is the
+-- loop's own thread, which checks the flag before it waits.
 -- Dirty state schedules work; damage determines which pixels are repainted.
 -- The request is opaque: its follow-up frame repaints the whole window.
 {-# INLINE markDirty #-}
@@ -225,9 +226,10 @@ settleLayoutReads ctx = do
     when stale (markDirtyCovered ctx)
 
 -- | Clear the follow-up-frame request without clearing queued repaint bounds.
+-- The whole-window repaint a 'markDirty' queued stays for the next frame.
 {-# INLINE clearDirty #-}
 clearDirty :: Context -> IO ()
-clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False, dsDirtyOpaque = False})
+clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False})
 
 -- | Whether state changes require another view pass.
 {-# INLINE isDirty #-}

@@ -32,9 +32,10 @@ data Gesture
     Drag !Word64 !V2 !Bool !Text
   deriving (Eq, Show)
 
--- | Font size and metric generation, measured widths, widest line and width,
--- and content height. Incremental updates remeasure only edited lines.
-data LineWidths = LineWidths !Float !Int !(Seq Float) !Int !Float !Float
+-- | Font ('NanoUI.Internal.WidgetText.textNodeFontKey') and metric
+-- generation, measured widths, widest line and width, and content height.
+-- Incremental updates remeasure only edited lines.
+data LineWidths = LineWidths !Int !Int !(Seq Float) !Int !Float !Float
 
 -- | A history slot changes kind when a widget id changes editor kind.
 data TextHistory = FieldHistory !Text !EditHistory | AreaHistory !EditHistory

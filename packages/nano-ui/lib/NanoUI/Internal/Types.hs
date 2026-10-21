@@ -31,7 +31,6 @@ module NanoUI.Internal.Types
   , ImageId (..)
   , rectContains
   , rectNonEmpty
-  , rectHit
   , rectUnion
   , rectIntersect
   , rectFullyInside
@@ -280,7 +279,8 @@ srgb ch =
   let x = fromIntegral ch / 255
    in if x <= 0.04045 then x / 12.92 else ((x + 0.055) / 1.055) ** 2.4
 
--- | Test a point against half-open rectangle bounds.
+-- | Test a point against half-open rectangle bounds. An empty or
+-- negative-size rectangle contains no point.
 {-# INLINE rectContains #-}
 rectContains :: Rect -> V2 -> Bool
 rectContains (Rect x y w h) (V2 px py) =
@@ -290,11 +290,6 @@ rectContains (Rect x y w h) (V2 px py) =
 {-# INLINE rectNonEmpty #-}
 rectNonEmpty :: Rect -> Bool
 rectNonEmpty r = rectW r > 0 && rectH r > 0
-
--- | Hit test that rejects empty and negative-size rectangles.
-{-# INLINE rectHit #-}
-rectHit :: Rect -> V2 -> Bool
-rectHit r p = rectNonEmpty r && rectContains r p
 
 -- | Smallest bounding rectangle containing both inputs. Empty inputs are
 -- still included by their coordinates; filter them first if they mean no area.

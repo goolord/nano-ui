@@ -13,9 +13,10 @@
 --
 -- = Creating Vars
 --
--- * 'useVar' allocates view-local mutable state keyed by widget position,
---   supporting 'Int', 'Double', 'Float', 'Bool', 'Text', and enumerations via
---   'useEnumVar'.
+-- * 'useVar' allocates view-local mutable state keyed by its position among
+--   the positional 'Var's of its scope (apart from widget ids), for 'Int',
+--   'Double', 'Float', 'Bool', 'Text' and 'NanoUI.SortCol', and enumerations
+--   via 'useEnumVar'.
 -- * 'newVar' allocates a 'Var' of any type in 'IO' for application-owned
 --   state.
 -- * 'VarMap' stores one 'Var' per key for dynamic collections.

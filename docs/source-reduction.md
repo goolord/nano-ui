@@ -497,7 +497,7 @@ Rejected, with the reason:
 
 - **Text area as a scroll node.** Its gutter geometry differs from a scroll
   container's, moving its offset into the float slots changes damage
-  semantics, and `TextAreaState.scrollOffset` is public. The shared
+  semantics, and `TextAreaState.tasScrollOffset` is public. The shared
   scrollbar layout (`scrollNodeBars`, `textAreaBarLayouts`) took what the
   two had in common.
 - **Deleting dead `Slot` constructors.** Slot keys come from `fromEnum`, so a

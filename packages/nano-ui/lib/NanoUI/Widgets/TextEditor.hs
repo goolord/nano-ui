@@ -30,7 +30,7 @@ module NanoUI.Widgets.TextEditor
   ) where
 
 import Control.Monad (unless, void, when)
-import Data.Char (isPrint, isSpace, toLower)
+import Data.Char (isControl, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
@@ -145,6 +145,12 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
           if hasSelection ed
             then replaceSelection EditDeleting T.empty
             else edit EditDeleting (TB.replaceEdit T.empty cursor (motionTarget motion) buf)
+    Move motion False
+      -- Left and Right without Shift collapse a selection onto its start
+      -- and end, as every platform's text field does.
+      | hasSelection ed, motion == CharLeft || motion == CharRight ->
+          let end = (if motion == CharLeft then min else max) anchor cursor
+           in Editor (TB.withCursor end buf) end (sealHistory hist)
     Move motion extend ->
       let moved = moveBuffer motion
        in Editor moved (if extend then anchor else TB.getCursor moved) (sealHistory hist)
@@ -271,7 +277,7 @@ inputTextCommands mode inp = T.foldr char keys (inputChars inp)
   where
     mods = inputModifiers inp
     char c rest
-      | isPrint c && not (chordModifiers mods) = InsertText (T.singleton c) : rest
+      | not (isControl c) && not (chordModifiers mods) = InsertText (T.singleton c) : rest
       | otherwise = rest
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 

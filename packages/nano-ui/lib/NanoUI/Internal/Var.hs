@@ -42,6 +42,8 @@ import Data.Bits (complement, (.&.))
 import Data.IORef (atomicModifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Primitive.PrimArray (readPrimArray, writePrimArray)
+import Data.Proxy (Proxy (..))
+import Data.Typeable (Typeable, typeRep)
 import Data.Word (Word64)
 import NanoUI.Internal.Context (Context (..), damageFull, markDirty, markDirtyCovered)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq)
@@ -73,15 +75,22 @@ newVar a = (\c -> VarRef c Here) <$> newCell a
 -- widgets, so conditional widgets do not shift them; wrap a conditional
 -- 'useVar' in 'NanoUI.scope'. Reinitializes to @initial@ if the slot
 -- previously held a different type.
+--
+-- A slot lasts as long as the context, so hidden content keeps its state:
+-- each 'NanoUI.withKey' key a 'useVar' ever ran under keeps one. For rows of
+-- a collection whose keys keep coming, such as a feed, hold their state in a
+-- 'NanoUI.Var.VarMap' and drop it with 'NanoUI.Var.retainVars'.
 {-# INLINE useVar #-}
 useVar :: VarSlot a => a -> NanoUI (Var a)
 useVar = slotVar slotMatch slotWrap
 
 -- | 'useVar' for an enumeration, stored by its 'Enum' index. An out-of-range
--- index decodes as @initial@.
-useEnumVar :: forall a. (Bounded a, Enum a) => a -> NanoUI (Var a)
+-- index decodes as @initial@, and a slot that held another enumeration
+-- starts over.
+useEnumVar :: forall a. (Bounded a, Enum a, Typeable a) => a -> NanoUI (Var a)
 useEnumVar initial = do
-  v <- slotVar (\case SEnum v -> Just v; _ -> Nothing) SEnum (fromEnum initial)
+  let ty = typeRep (Proxy @a)
+  v <- slotVar (\case SEnum t v | t == ty -> Just v; _ -> Nothing) (SEnum ty) (fromEnum initial)
   let decode i
         | i >= fromEnum (minBound :: a) && i <= fromEnum (maxBound :: a) = toEnum i
         | otherwise = initial
@@ -171,7 +180,8 @@ withValue a body = do
 
 -- | Atomically modify the part of a cell focused by a lens. Returns the
 -- modified part signature ('overLensSig') if the value changed, or 'Nothing'
--- for unchanged or inert cells.
+-- for unchanged or inert cells, and for an element whose key has left its
+-- list, which the write leaves alone.
 {-# INLINE modifyRoot #-}
 modifyRoot :: Cell s -> Lens s a -> (a -> a) -> (a -> a -> Bool) -> IO (Maybe Sig)
 modifyRoot cell@(Cell ref _) l f eq
@@ -180,12 +190,12 @@ modifyRoot cell@(Cell ref _) l f eq
       Nothing <$ mapM_ (\_ -> writeIORef ref root') touched
   | otherwise = atomicModifyIORef' ref step
   where
-    step root =
-      let old = viewLens l root
-          new = f old
-       in if eq new old
-            then (root, Nothing)
-            else case overLensSig l (const new) root of (!root', sig) -> (root', Just sig)
+    step root = case previewLens l root of
+      Just old
+        | new <- f old
+        , not (eq new old) ->
+            case overLensSig l (const new) root of (!root', sig) -> (root', Just sig)
+      _ -> (root, Nothing)
 
 -- | Stamp the part @sig@ of a cell changed at a new tick, against the frame
 -- start @base@ (0 from IO). The next frame's tracked reads of that part see
@@ -347,15 +357,19 @@ takeVarRerun ctx = do
   pure (fs .&. flagRerun /= 0)
 
 -- | Finish the frame's passes: queue full damage if a read needs it, and
--- start the next frame's changes from here.
+-- start the next frame's changes just after the last pass's tick. The
+-- passes' own writes are stamped with their ticks, so they are not new
+-- again; a write from another thread during the pass took a later tick, and
+-- may have missed the reads before it, so it is.
 endVarFrame :: Context -> IO ()
 endVarFrame ctx = do
   let arr = ctxVarFrame ctx
   fs <- frameSlot ctx flagSlot
+  p <- frameSlot ctx passSlot
   writePrimArray arr lastPassesSlot =<< frameSlot ctx passNoSlot
   writePrimArray arr passSlot 0
   writePrimArray arr flagSlot 0
-  writePrimArray arr baseSlot =<< nextTick
+  writePrimArray arr baseSlot (p + 1)
   when (fs .&. flagFull /= 0) (damageFull ctx)
 
 -- | How many view passes the last frame ran.

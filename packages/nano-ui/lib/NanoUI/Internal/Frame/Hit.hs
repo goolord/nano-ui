@@ -36,7 +36,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Style (PointerMode (..))
-import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
+import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, hasFlag)
 
 -- | The node that carries widget id @wid@ in this frame's arena. 'Nothing' for
@@ -101,8 +101,8 @@ overlayHitAllowed ctx top idx = maybe (pure True) (nodeInSubtree ctx idx) top
 topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostOverlayAtMouse ctx mouse =
   runMaybeT $
-    MaybeT (topmostFloating ctx (== NodePopup) (`rectHit` mouse))
-      <|> MaybeT (topmostFloating ctx (== NodeWindow) (`rectHit` mouse))
+    MaybeT (topmostFloating ctx (== NodePopup) (`rectContains` mouse))
+      <|> MaybeT (topmostFloating ctx (== NodeWindow) (`rectContains` mouse))
 
 -- | The last floating node in arena order whose type satisfies @wanted@ and
 -- whose rect satisfies @at@. The frame paints the panels of one type in arena
@@ -152,7 +152,7 @@ widgetInModal ctx top wid = maybe (pure True) (\modal -> widgetIdInSubtree ctx m
 nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
 nodePointVisible ctx idx mouse = do
   vis <- getNodeRect (ctxNodeArena ctx) idx
-  if not (rectHit vis mouse)
+  if not (rectContains vis mouse)
     then pure False
     else do
       mClip <- getClipBounds (ctxNodeArena ctx) idx
@@ -166,7 +166,7 @@ nodePointVisible ctx idx mouse = do
 {-# INLINE nodeClippedHit #-}
 nodeClippedHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
-  pure (rectHit rect mouse) <&&> do
+  pure (rectContains rect mouse) <&&> do
     mLive <- getClipBounds na idx
     mClip <- case mLive of
       Just _ -> pure mLive
@@ -187,7 +187,7 @@ nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
-  | not (rectHit rect mouse) = pure False
+  | not (rectContains rect mouse) = pure False
   | idx <= 0 = pure True
   | otherwise = getParent na idx >>= inside
  where

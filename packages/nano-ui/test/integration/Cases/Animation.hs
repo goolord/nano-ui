@@ -2,6 +2,7 @@ module Cases.Animation (tests) where
 
 import Spec
 import Control.Concurrent (threadDelay)
+import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Text qualified as T
 import GHC.Clock (getMonotonicTime)
 
@@ -14,10 +15,15 @@ tests =
   , spec "animation-bezier" runAnimationBezierTest
   , spec "animation-spring-retarget" runAnimationSpringRetargetTest
   , spec "animation-spring-dt" runAnimationSpringDtTest
+  , spec "animation-spring-far-target" runAnimationSpringFarTargetTest
+  , spec "animation-spring-light" runAnimationSpringLightTest
   , spec "composite-animation-isolation" runCompositeAnimationIsolationTest
   , spec "button-hover-anim" runButtonHoverAnimTest
   , spec "spinner" runSpinnerTest
   , spec "keep-animating-lapse" runKeepAnimatingLapseTest
+  , spec "keep-animating-rest" runKeepAnimatingRestTest
+  , spec "animate-left-out" runAnimateLeftOutTest
+  , spec "drawing-animation-end" runDrawingAnimationEndTest
   , spec "wake-after" runWakeAfterTest
   ]
 
@@ -166,6 +172,36 @@ runAnimationSpringDtTest ctx failed = do
   val <- getAnimationValue ctx wid
   assert failed (not (isNaN val || isInfinite val || val < 0 || val > 1.5))
 
+-- A spring toward a target far from zero lands on it and lets the loop
+-- sleep. Near 1500 a float moves in steps of about 1e-4, so a spring that
+-- integrated its absolute position froze a few steps short of the target
+-- with its velocity above the settle threshold, and ran for good.
+runAnimationSpringFarTargetTest :: Context -> IORef Int -> IO ()
+runAnimationSpringFarTargetTest ctx failed = do
+  let inp = withDelta 200 100 (1 / 60)
+      ui = do
+        x <- animateTo (Spring presetSmooth) 1500
+        label "far"
+        pure x
+  replicateM_ 600 (runFrame ctx inp ui)
+  assert failed . not =<< anyAnimating ctx
+  assertEq failed 1500 =<< evalUi ctx inp ui
+
+-- A light or stiff spring stays near its range at a low frame rate and
+-- settles. A fixed 1/30 s step was too long for one this fast, and the
+-- value ran off toward 1e21 and then NaN.
+runAnimationSpringLightTest :: Context -> IORef Int -> IO ()
+runAnimationSpringLightTest ctx failed = do
+  forM_ [(presetBouncy {springMass = 0.05}, 60), (SpringParams 2000 150 1, 30)] $ \(params, hz) -> do
+    let inp = withDelta 100 100 (1 / hz)
+        wid = WidgetId 404
+    setAnimationValue ctx wid 0
+    startSpring ctx wid params 1
+    vals <- replicateM 120 (runFrame ctx inp (label "light") >> getAnimationValue ctx wid)
+    assert failed (all (\v -> v >= -0.5 && v <= 1.5) vals)
+    assert failed . not =<< anyAnimating ctx
+    assertEq failed 1 (last vals)
+
 -- Each composite animation owns a scope; component indices alone are not
 -- unique when two vectors animate side by side in the same parent. Tweens
 -- and springs both settle and stop requesting redraws.
@@ -264,6 +300,70 @@ runKeepAnimatingLapseTest ctx failed = do
   -- Shown again, it runs again.
   _ <- runFrame ctx inp loading
   assert failed =<< anyAnimating ctx
+
+-- A 'keepAnimating' lease is not the widget's value. A spring on the key
+-- starts from the resting value, and setting the value keeps the lease and
+-- repaints. The lease once read as a running animation at about 0: the
+-- spring started from 0, and a set dropped the lease without a repaint, so
+-- the loop stopped.
+runKeepAnimatingRestTest :: Context -> IORef Int -> IO ()
+runKeepAnimatingRestTest ctx failed = do
+  let inp = withDelta 200 100 0.05
+      hover = inp {inputMousePos = V2 10 10}
+      ui = column $ do
+        b <- button' "Go"
+        keepAnimating b
+        pure b
+  _ <- runFrame ctx inp ui
+  bs <- replicateM 10 (evalUi ctx hover ui)
+  let wid = respId (last bs)
+  assertEq failed 1 =<< getAnimationValue ctx wid
+  startSpring ctx wid presetSmooth 0.5
+  assert failed . (> 0.99) =<< getAnimationValue ctx wid
+  replicateM_ 60 (runFrame ctx hover ui)
+  assertEq failed 0.5 =<< getAnimationValue ctx wid
+  _ <- takeDamage ctx
+  setAnimationValue ctx wid 0
+  assertEq failed 0 =<< getAnimationValue ctx wid
+  assert failed =<< anyAnimating ctx
+  assert failed =<< needsRedraw ctx hover hover
+
+-- An 'animate' or 'animateTo' the view stops calling stops drawing frames,
+-- since nothing reads it. A long tween or an undamped spring behind a tab
+-- switch once kept the loop drawing until it ended by itself, for minutes
+-- or for good. Shown again, it runs again.
+runAnimateLeftOutTest :: Context -> IORef Int -> IO ()
+runAnimateLeftOutTest ctx failed = do
+  let inp = withDelta 200 100 0.05
+      shown = do
+        _ <- animate (Tween EaseLinear 120 0) 0 1
+        _ <- animateTo (Spring (SpringParams 180 0 1)) 1
+        label "moving"
+      other = label "other"
+  replicateM_ 5 (runFrame ctx inp shown)
+  assert failed =<< anyAnimating ctx
+  _ <- runFrame ctx inp other
+  assert failed . not =<< anyAnimating ctx
+  _ <- runFrame ctx inp other
+  assert failed . not =<< needsRedraw ctx inp inp
+  _ <- runFrame ctx inp shown
+  assert failed =<< anyAnimating ctx
+
+-- A drawing without a version rebuilds while it animates, and on the frame
+-- its animation ends, whose view drew it again (here, stopped). That frame
+-- once replayed the last animated frame's ops, which then stayed on screen.
+runDrawingAnimationEndTest :: Context -> IORef Int -> IO ()
+runDrawingAnimationEndTest ctx failed = do
+  let inp = withDelta 200 100 0.016
+      running = colorRGBA 255 0 0 255
+      stopped = colorRGBA 0 0 255 255
+      ui on = column $ do
+        d <- drawing (fixedWH 40 40) (\r -> smallArrayFromList [FillRect r (if on then running else stopped)])
+        when on (keepAnimating d)
+  replicateM_ 3 (runFrame ctx inp (ui True))
+  (_, draw, _) <- runFrame ctx inp (ui False)
+  quads <- map snd <$> drawQuads draw
+  assert failed (stopped `elem` quads && running `notElem` quads)
 
 -- 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
 -- a frame that does not ask again leaves nothing pending.

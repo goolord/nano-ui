@@ -33,6 +33,8 @@ data Inline = Inline !Text (Layout -> Layout) !(Maybe Text) !(Maybe Color)
 instance IsString Inline where
   fromString = inlineText . T.pack
 
+-- | Plain text in the paragraph's style. A string literal is the same piece
+-- ('IsString').
 inlineText :: Text -> Inline
 inlineText txt = Inline txt id Nothing Nothing
 

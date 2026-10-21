@@ -66,6 +66,11 @@ spec = do
         (\t -> TB.joinLines (TB.splitLines t) `shouldBe` t)
         ["", "\n", "\n\n", "a", "a\n", "\nλ", "α\n\n猫🙂\n", "one\ntwo\nthree"]
 
+    it "reads Windows line ends as line breaks, and pastes classic Mac ones as newlines" $ do
+      TB.toLines (TB.fromText "one\r\ntwo\r\n") `shouldBe` ["one", "two", ""]
+      TB.toText (TB.fromText "one\r\ntwo") `shouldBe` "one\ntwo"
+      TB.insertableText "a\rb\r\nc" `shouldBe` "a\nb\nc"
+
     it "inserts a tab that text-zipper would otherwise drop" $ do
       let
         b = edit TE.multiLineMode [TE.InsertText "\t"] TB.empty
@@ -77,6 +82,11 @@ spec = do
         b = edit TE.multiLineMode [TE.InsertText "α\t\n猫\x01"] (TB.withCursor (TB.Cursor 0 1) (TB.fromText "ab"))
       TB.toLines b `shouldBe` ["aα\t", "猫b"]
       TB.getCursor b `shouldBe` TB.Cursor 1 1
+
+    it "keeps joiners, bidi marks and private-use characters that are typed or pasted" $ do
+      let kept = "👩\x200D💻 \x200C \x200F \xE0A0"
+      TB.insertableText kept `shouldBe` kept
+      TE.inputTextCommands TE.multiLineMode (frameInput noMods "\x200C\x7F" []) `shouldBe` [TE.InsertText "\x200C"]
 
     it "empty insertion preserves the preferred column on a short line" $ do
       let
@@ -104,6 +114,16 @@ spec = do
       TB.documentEnd (TB.fromText "α\n猫🙂") `shouldBe` TB.Cursor 1 2
       TB.documentEnd (TB.fromText "α\n") `shouldBe` TB.Cursor 1 0
       TB.documentEnd TB.empty `shouldBe` TB.Cursor 0 0
+
+    it "moves and deletes over whole flags, emoji sequences and combining marks" $ do
+      let
+        atEnd = TB.moveToEOL . TB.fromText
+        deleted motion = TB.toText . edit TE.multiLineMode [TE.Delete motion]
+      TB.getCursor (TB.moveLeft (atEnd "a🇺🇸")) `shouldBe` TB.Cursor 0 1
+      TB.getCursor (TB.moveLeft (atEnd "a👩\x200D💻")) `shouldBe` TB.Cursor 0 1
+      TB.getCursor (TB.moveRight (TB.fromText "e\x0301x")) `shouldBe` TB.Cursor 0 2
+      deleted TE.CharLeft (atEnd "a👍🏽") `shouldBe` "a"
+      deleted TE.CharRight (TB.fromText "🇺🇸🇫🇷") `shouldBe` "🇫🇷"
 
     it "deleting a word left eats trailing whitespace then the previous word" $ do
       let
@@ -212,6 +232,16 @@ spec = do
       text retyped `shouldBe` "abbc"
       TE.hasSelection retyped `shouldBe` False
 
+    it "Left and Right without Shift land on a selection's start and end" $ do
+      let
+        typed = typeText TE.singleLineMode "hello" single
+        selected = TE.runCommand TE.singleLineMode TE.SelectAll typed
+        backwards = TE.runCommand TE.singleLineMode (TE.Select (TB.Cursor 0 4) (TB.Cursor 0 1)) typed
+        moved m extend = TE.editorSelection . TE.runCommand TE.singleLineMode (TE.Move m extend)
+      moved TE.CharLeft False selected `shouldBe` (TB.Cursor 0 0, TB.Cursor 0 0)
+      moved TE.CharRight False backwards `shouldBe` (TB.Cursor 0 4, TB.Cursor 0 4)
+      moved TE.CharLeft True selected `shouldBe` (TB.Cursor 0 0, TB.Cursor 0 4)
+
     it "keeps line breaks out of single-line fields and bounds history depth" $ do
       text (TE.runCommand TE.singleLineMode (TE.InsertText "a\nb") single) `shouldBe` "ab"
       text (TE.runCommand TE.multiLineMode (TE.InsertText "a\r\nb") single) `shouldBe` "a\nb"
@@ -236,8 +266,8 @@ spec = do
         typed = foldl' (\s c -> typeArea noMods (T.singleton c) [] s) s0 ("one two" :: String)
         undone = typeArea ctrlMods "" [KeyChar 'z'] typed
         redone = typeArea (Modifiers True True False False) "" [KeyChar 'z'] undone
-      TB.toText (TA.buffer undone) `shouldBe` "one "
-      TB.toText (TA.buffer redone) `shouldBe` "one two"
+      TB.toText (TA.tasBuffer undone) `shouldBe` "one "
+      TB.toText (TA.tasBuffer redone) `shouldBe` "one two"
       -- Chords come from key events; characters typed with Ctrl held are ignored.
       TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "z\x1a" [KeyChar 'z', KeyChar 'y'])
         `shouldBe` [TE.Undo, TE.Redo]
@@ -246,7 +276,7 @@ spec = do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "ab")
         altGr = Modifiers False True True False
-      TB.toText (TA.buffer (typeArea altGr "@€" [] s0)) `shouldBe` "ab@€"
+      TB.toText (TA.tasBuffer (typeArea altGr "@€" [] s0)) `shouldBe` "ab@€"
       TE.inputTextCommands TE.singleLineMode (frameInput altGr "@" [KeyChar 'q'])
         `shouldBe` [TE.InsertText "@"]
       TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "" [KeyChar 'a', KeyLeft])
@@ -260,12 +290,12 @@ spec = do
             TA.initTextAreaState "abc\ndef"
         typed = typeArea noMods "λ" [] selected
         entered = typeArea noMods "" [KeyEnter] selected
-      TB.toText (TA.buffer typed) `shouldBe` "aλef"
-      TB.getCursor (TA.buffer typed) `shouldBe` TB.Cursor 0 2
-      TA.selectionAnchor typed `shouldBe` TB.Cursor 0 2
-      TB.toText (TA.buffer entered) `shouldBe` "a\nef"
-      TB.getCursor (TA.buffer entered) `shouldBe` TB.Cursor 1 0
-      TA.selectionAnchor entered `shouldBe` TB.Cursor 1 0
+      TB.toText (TA.tasBuffer typed) `shouldBe` "aλef"
+      TB.getCursor (TA.tasBuffer typed) `shouldBe` TB.Cursor 0 2
+      TA.tasSelectionAnchor typed `shouldBe` TB.Cursor 0 2
+      TB.toText (TA.tasBuffer entered) `shouldBe` "a\nef"
+      TB.getCursor (TA.tasBuffer entered) `shouldBe` TB.Cursor 1 0
+      TA.tasSelectionAnchor entered `shouldBe` TB.Cursor 1 0
 
     it "the word modifier edits and moves by word, the other of Ctrl and Alt by character" $ do
       let
@@ -277,7 +307,7 @@ spec = do
             deleted = typeArea mods "" [KeyDelete] s0
             right = typeArea mods "" [KeyRight] s0
             left = typeArea mods "" [KeyLeft] right
-           in (TB.toText (TA.buffer deleted), TB.getCursor (TA.buffer right), TB.getCursor (TA.buffer left))
+           in (TB.toText (TA.tasBuffer deleted), TB.getCursor (TA.tasBuffer right), TB.getCursor (TA.tasBuffer left))
       motions word `shouldBe` (" bar", TB.Cursor 0 3, TB.Cursor 0 0)
       motions other `shouldBe` ("oo bar", TB.Cursor 0 1, TB.Cursor 0 0)
 
@@ -285,17 +315,25 @@ spec = do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "foo bar\nbaz")
         line = if onMac then Modifiers False False False True else Modifiers True True False False
-      TB.toText (TA.buffer (typeArea line "" [KeyBackspace] s0)) `shouldBe` "\nbaz"
+      TB.toText (TA.tasBuffer (typeArea line "" [KeyBackspace] s0)) `shouldBe` "\nbaz"
       if onMac
-        then TB.getCursor (TA.buffer (typeArea line "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 0
-        else TB.getCursor (TA.buffer (typeArea ctrlMods "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 4
+        then TB.getCursor (TA.tasBuffer (typeArea line "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 0
+        else TB.getCursor (TA.tasBuffer (typeArea ctrlMods "" [KeyLeft] s0)) `shouldBe` TB.Cursor 0 4
 
     it "Ctrl alone moves and deletes as in Emacs on macOS, and is no command elsewhere" $ do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "foo bar")
-        emacs k = TA.buffer (typeArea ctrlMods "" [KeyChar k] s0)
+        emacs k = TA.tasBuffer (typeArea ctrlMods "" [KeyChar k] s0)
       map (TB.getCursor . emacs) "ab" `shouldBe` if onMac then [TB.Cursor 0 0, TB.Cursor 0 6] else [TB.Cursor 0 7, TB.Cursor 0 7]
       map (TB.toText . emacs) "hu" `shouldBe` if onMac then ["foo ba", ""] else ["foo bar", "foo bar"]
+
+    it "Backspace at the end of a line read with Windows line ends deletes its last character" $ do
+      let s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "one\r\ntwo")
+      TB.toText (TA.tasBuffer (typeArea noMods "" [KeyBackspace] s0)) `shouldBe` "on\ntwo"
+
+    it "clamps a selection set past the document's end into it" $ do
+      let s = TA.setTextAreaSelection (TB.Cursor 9 9) (TB.Cursor 9 9) (TA.initTextAreaState "ab")
+      (TA.tasSelectionAnchor s, TB.getCursor (TA.tasBuffer s)) `shouldBe` (TB.Cursor 0 2, TB.Cursor 0 2)
 
     it "scrolls the caret into a one-line viewport" $ do
       let
@@ -303,7 +341,7 @@ spec = do
           TA.setTextAreaViewport (80, 16) 16 $
             TA.initTextAreaState "a\nb"
         s1 = typeArea noMods "" [KeyDown] s0
-      TA.scrollOffset s1 `shouldBe` (0, 16)
+      TA.tasScrollOffset s1 `shouldBe` (0, 16)
 
     it "Ctrl+A and Ctrl+a (Command on macOS) both select all" $ do
       let
@@ -311,10 +349,10 @@ spec = do
         atEnd = typeArea noMods "" [KeyEnd] s0
         fromLower = typeArea primaryModifiers "" [KeyChar 'a'] atEnd
         fromUpper = typeArea primaryModifiers "" [KeyChar 'A'] atEnd
-      TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 5
-      TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
-      TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5
-      TA.selectionAnchor fromUpper `shouldBe` TB.Cursor 0 0
+      TB.getCursor (TA.tasBuffer fromLower) `shouldBe` TB.Cursor 0 5
+      TA.tasSelectionAnchor fromLower `shouldBe` TB.Cursor 0 0
+      TB.getCursor (TA.tasBuffer fromUpper) `shouldBe` TB.Cursor 0 5
+      TA.tasSelectionAnchor fromUpper `shouldBe` TB.Cursor 0 0
 
   describe "text word selection" $ do
     it "groups Unicode words, whitespace and punctuation by character index" $ do
@@ -322,6 +360,10 @@ spec = do
         text = "αβ_猫  🙂!?"
       map (textWordBounds text) [0 .. 8]
         `shouldBe` replicate 4 (0, 4) ++ replicate 2 (4, 6) ++ replicate 3 (6, 9)
+    it "keeps combining marks and joiners inside words" $ do
+      textWordBounds "नमस्ते जी" 0 `shouldBe` (0, 6)
+      textWordBounds "cafe\x0301 au lait" 4 `shouldBe` (0, 5)
+      textWordBounds "می\x200Cخواهم" 0 `shouldBe` (0, 8)
     it "clamps clicks outside the text and handles empty text" $ do
       textWordBounds "" 10 `shouldBe` (0, 0)
       textWordBounds "one two" (-10) `shouldBe` (0, 3)

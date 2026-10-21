@@ -15,7 +15,7 @@ import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Frame.Hit
-import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
+import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), probeScrollBarHover, scrollBarsFor)
 import NanoUI.Internal.Frame.Select (overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Frame.TextEdit
@@ -67,17 +67,18 @@ selectDropdownCursorKind ctx inp = do
       (UiCursorPointer <$) <$> overlayMenuOwnerAt ctx (inputMousePos inp)
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
-scrollThumbCursorKind ctx@Context {ctxNodeArena = na} inp = do
+scrollThumbCursorKind ctx inp = do
   mDrag <- getsInteraction ctx isScrollDrag
   if heldIn MouseLeft inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do
-      thumb <- findClassNodeM na PointerNodes $ \idx ->
-        ((\nt -> nt == NodeTextArea || isScrollNode nt) <$> getNodeType na idx) <&&> do
-          wid <- getWidgetId na idx
-          any (\(_, layout, _) -> rectContains (sbThumb layout) (inputMousePos inp))
+      -- The bar a press would grab, past modals, floating panels and clips.
+      onThumb <- probeScrollBarHover ctx inp >>= \case
+        Nothing -> pure False
+        Just (wid, dir, _) -> withWidgetNode ctx wid False $ \idx ->
+          any (\(d, layout, _) -> d == dir && rectContains (sbThumb layout) (inputMousePos inp))
             <$> scrollBarsFor ctx idx wid
-      pure (grabHoverKind True inp <$ thumb)
+      pure (if onThumb then Just (grabHoverKind True inp) else Nothing)
 
 -- Field well, not the label. Independent of focus and hot. A search field's
 -- clear button raises the pointer cursor; everywhere else over a field is text.

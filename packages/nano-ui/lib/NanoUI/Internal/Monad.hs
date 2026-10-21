@@ -285,6 +285,10 @@ scope = withIdFrame (enterScope scopeTag)
 -- | Run the action under a key so its widgets keep their ids and state when
 -- earlier siblings change. Keys must be unique among siblings in the same
 -- scope; use a stable item key for a list that can be reordered.
+--
+-- The state kept under a key, by widgets such as a text field and by
+-- 'NanoUI.Var.useVar', lasts as long as the context, also once the key is no
+-- longer shown ('NanoUI.Var.useVar' says what to use for a growing feed).
 {-# INLINE withKey #-}
 withKey :: Hashable k => k -> NanoUI a -> NanoUI a
 withKey k = keyedTag (fromIntegral (hash k))

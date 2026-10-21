@@ -55,7 +55,7 @@ where
 
 import Control.Monad (when)
 import Control.Monad.ST (runST)
-import Data.Char (isPrint, isSpace)
+import Data.Char (isControl, isSpace)
 import Data.Foldable (foldlM, toList)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq)
@@ -64,6 +64,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Array qualified as A
 import Data.Text.Internal (Text (..))
+import NanoUI.Internal.TextCluster (clusterLength)
 import NanoUI.Internal.Types (clamp)
 
 -- | Zero-indexed logical (row, column) position in the buffer. Fields are
@@ -115,8 +116,10 @@ fromLines lns
   | otherwise = TextBuffer lns (Cursor 0 0) 0 0 0
 
 -- | The lines of a text, without their newlines. There is always at least one.
+-- A Windows line end (@\\r\\n@) is one newline, so 'joinLines' gives the text
+-- back with @\\n@ line ends.
 splitLines :: Text -> Seq Text
-splitLines = Seq.fromList . T.splitOn "\n"
+splitLines t = Seq.fromList [fromMaybe l (T.stripSuffix "\r" l) | l <- T.splitOn "\n" t]
 
 -- | All lines joined with newlines, copied once into a new text.
 toText :: TextBuffer -> Text
@@ -184,27 +187,36 @@ withCursor cur buf =
 -- Navigation
 --------------------------------------------------------------------------------
 
--- | Move one character left, crossing to the preceding line at column zero.
--- Stops at the document start.
+-- | Move one user-perceived character left ('clusterLength': a flag, an
+-- emoji sequence or a letter with its marks), crossing to the preceding line
+-- at column zero. Stops at the document start.
 moveLeft :: TextBuffer -> TextBuffer
 moveLeft buf = withCursor (positionLeft buf (getCursor buf)) buf
 
--- | Move one character right, crossing to the next line at line end.
--- Stops at the document end.
+-- | Move one user-perceived character right, crossing to the next line at
+-- line end. Stops at the document end.
 moveRight :: TextBuffer -> TextBuffer
 moveRight buf = withCursor (positionRight buf (getCursor buf)) buf
 
 positionLeft :: TextBuffer -> Cursor -> Cursor
 positionLeft buf (Cursor row col)
-  | col > 0 = Cursor row (col - 1)
+  | col > 0 = Cursor row (clusterStart 0 (lineAt row buf))
   | row > 0 = Cursor (row - 1) (T.length (lineAt (row - 1) buf))
   | otherwise = Cursor 0 0
+  where
+    -- The cluster the caret ends, read from the start of the line: only
+    -- there can clusters be told apart.
+    clusterStart at t =
+      let n = max 1 (clusterLength t)
+       in if at + n >= col then at else clusterStart (at + n) (T.drop n t)
 
 positionRight :: TextBuffer -> Cursor -> Cursor
 positionRight buf (Cursor row col)
-  | col < T.length (lineAt row buf) = Cursor row (col + 1)
+  | col < T.length line = Cursor row (col + clusterLength (T.drop col line))
   | row + 1 < getLineCount buf = Cursor (row + 1) 0
   | otherwise = Cursor row col
+  where
+    line = lineAt row buf
 
 -- | Move up one row, retaining the preferred column and clamping to line length.
 moveUp :: TextBuffer -> TextBuffer
@@ -308,10 +320,13 @@ replaceEdit inserted a b buf =
   let (lo, hi) = selectionRange (clampCursor buf a) (clampCursor buf b)
    in TextEdit lo (textRange lo hi buf) inserted
 
--- | Text as it can enter the document: printable characters, tabs and line
--- breaks, with Windows line ends folded.
+-- | Text as it can enter the document: every character but the control
+-- characters, tabs and line breaks aside, with Windows (@\\r\\n@) and classic
+-- Mac (@\\r@) line ends made newlines. Format characters (joiners, bidi
+-- marks), private-use characters and those the base library's Unicode tables
+-- predate stay.
 insertableText :: Text -> Text
-insertableText = T.filter (\c -> isPrint c || c == '\t' || c == '\n') . T.replace "\r\n" "\n"
+insertableText = T.filter (\c -> not (isControl c) || c == '\t' || c == '\n') . T.replace "\r" "\n" . T.replace "\r\n" "\n"
 
 --------------------------------------------------------------------------------
 -- Selection

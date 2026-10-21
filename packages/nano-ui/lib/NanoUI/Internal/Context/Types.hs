@@ -257,7 +257,7 @@ data WindowResizeDrag = WindowResizeDrag
 data DamageState = DamageState
   { dsDirty :: !Bool
   , dsDirtyOpaque :: !Bool
-  -- ^ Some request since the last clear came through 'markDirty', whose
+  -- ^ Some request since the last frame came through 'markDirty', whose
   -- effects no diff is known to cover. 'markDirtyCovered' leaves it alone,
   -- so a covered request never downgrades an opaque one.
   , dsDamage :: !Damage
@@ -387,7 +387,8 @@ initialOverlayState = OverlayState
 -- them as read-only.
 data DrawReuse = DrawReuse
   { drOn :: !Bool
-  -- ^ Whether frames may reuse a draw at all ('setDrawReuse').
+  -- ^ Whether frames may reuse a draw at all
+  -- ('NanoUI.Internal.Context.setDrawReuse').
   , drLast :: !(Maybe (DrawReuseKey, DrawData))
   -- ^ The last frame's draw, while that frame painted in full and may be
   -- reused.
@@ -483,6 +484,12 @@ data AnimationState = AnimationState
   -- ^ The keys that asked again this frame. A held key missing from it at
   -- the end of the frame lapses: its widget is no longer built, and nothing
   -- else would ever end its animation.
+  , asViewAnims :: !IntSet
+  -- ^ Keys of the running animations a view hook (@animate@, @animateTo@)
+  -- read last frame.
+  , asViewTouched :: !IntSet
+  -- ^ Those it read this frame. One missing at the end of the frame rests at
+  -- its value: nothing reads it any more, and it may never end by itself.
   }
 
 -- | Empty animation maps with no pending animation frame.
@@ -495,6 +502,8 @@ initialAnimationState = AnimationState
   , asAnimSettled = False
   , asKeepAlive = IS.empty
   , asKeepTouched = IS.empty
+  , asViewAnims = IS.empty
+  , asViewTouched = IS.empty
   }
 
 -- | How far one wheel notch scrolls, and how long a scroll takes to settle.
@@ -502,16 +511,17 @@ initialAnimationState = AnimationState
 -- (see @setScrollStep@).
 data ScrollTuning = ScrollTuning
   { scrollWheelStep :: Float
-  -- ^ Pixels one wheel notch scrolls. The default is three text lines, which
-  -- is what Windows and most desktops send a notch as.
+  -- ^ Pixels one wheel notch scrolls. The default, 60 logical pixels, is
+  -- about three text lines, which is what Windows and most desktops send a
+  -- notch as.
   , scrollSmoothTime :: Float
   -- ^ Seconds a scroll takes to cover most of the distance to its target.
   -- @0@ (the default) lands on it in the same frame.
   }
   deriving (Eq, Show)
 
--- | Immediate scrolling by 60 logical pixels per wheel step. A backend may
--- choose a font-relative step when configuring its context.
+-- | Immediate scrolling by 60 logical pixels per wheel step. An app may set a
+-- font-relative step ('NanoUI.setScrollTuning').
 defaultScrollTuning :: ScrollTuning
 defaultScrollTuning =
   ScrollTuning
@@ -856,13 +866,14 @@ data Context = Context
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId
-  -- | Press position of each held button, updated on press and release
+  -- | Press position of each held button, and the identity of the control
+  -- it reached, updated on press and release
   -- ('NanoUI.Internal.Frame.Input.armPointerPress'). Clicks and holds belong
   -- to the widget pressed, so widgets hit-test this as well as the pointer.
   -- A button with no entry (release without a press) is judged alone.
+  -- Passive content has no owner; its containing mouse area can handle the
+  -- gesture geometrically.
   , ctxPressPos :: IORef (Map MouseButton (V2, Maybe WidgetId))
-  -- ^ Press point and the reached control's identity. Passive content has no
-  -- owner; its containing mouse area can handle the gesture geometrically.
   , ctxFocusId :: IORef WidgetId
   -- | Focus last moved by keyboard or code, so the focused widget shows its
   -- ring. A pointer press hides it.
@@ -919,9 +930,9 @@ data Context = Context
   , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Int, Int, Int, Int)) ImageId))
   -- ^ SVG rasters by document, pixel size, colour and content rect (in
   -- eighths of a raster pixel).
-  -- Whole-layout reuse cache: cached signature and solved rects,
-  -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))
+  -- ^ Whole-layout reuse cache: cached signature and solved rects,
+  -- with the window size and font/theme generation it was captured under.
   , ctxMetricGen :: !(IORef Int)
   , ctxMetricSource :: {-# NOUNPACK #-} !MetricSource
   , ctxLastMetricSource :: !(IORef (Maybe MetricSource))
@@ -975,7 +986,7 @@ data Context = Context
   , ctxClipboardSet :: Text -> IO Bool
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO Bool))
-  -- ^ Wakes the event loop and returns whether it was sleeping
+  -- ^ Wakes the event loop and returns whether the wake reached it
   -- ('NanoUI.Internal.Context.Core.setWakeLoopChecked').
   , ctxWoken :: !(IORef Bool)
   -- ^ Set from any thread by 'NanoUI.Internal.Context.Core.wakeFromThread'

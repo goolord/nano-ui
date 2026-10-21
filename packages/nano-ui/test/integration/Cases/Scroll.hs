@@ -24,6 +24,7 @@ import NanoUI.Internal.Layout.Arena
 tests :: [Spec]
 tests =
   [ spec "scroll-thumb-cursor" runScrollThumbCursorTest
+  , spec "scroll-thumb-cursor-modal" runScrollThumbCursorModalTest
   , spec "scroll-thumb-hover" runScrollThumbHoverTest
   , pixelSpec "scroll-bar-gutter" runScrollBarGutterTest
   , spec "scroll-damage" runScrollDamageTest
@@ -70,6 +71,22 @@ runScrollThumbCursorTest ctx failed = do
       _ <- runFrame ctx press ui
       grabbing <- cursorKindIs ctx press UiCursorGrabbing
       assert failed grabbing
+
+-- | A thumb behind a modal takes no press, so it shows no grab cursor.
+runScrollThumbCursorModalTest :: Context -> IORef Int -> IO ()
+runScrollThumbCursorModalTest ctx failed = do
+  dialog <- newVar False
+  let inp0 = withInput 200 120
+      ui = do
+        r <- scrollArea (fillW . fixedH 80) (column (replicateM_ 8 (label "scroll line")))
+        modal dialog "Title" (label "body")
+        pure r
+  (sid, ()) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
+    let thumbX = rx + rw - scrollBarGutter ScrollBarList 0 / 2
+    assertJustM failed (findGrabHover ctx ui inp0 thumbX [ry + rh * n / 8 | n <- [1 .. 7]]) $ \hover -> do
+      writeVarIO dialog True
+      assertEq failed UiCursorDefault =<< cursorOver ctx hover ui (inputMousePos hover)
 
 -- The pointer on a scrollbar brightens its thumb, and so does dragging it
 -- off the bar. Moving onto or off the bar wakes a frame that repaints the bar

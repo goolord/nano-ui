@@ -424,6 +424,7 @@ module NanoUI
   , image'
   , freshImageId
   , registerImageRgba
+  , releaseImageRgba
   , useImageRgba
   , ImageHandle
   , newImageHandle
@@ -682,6 +683,9 @@ module NanoUI
     -- >     (w, h, rgba) <- liftIO (decodeRgba path)
     -- >     iid <- freshImageId
     -- >     whenM (registerImageRgba iid w h rgba) (writeVar pictureVar (Just iid))
+    -- >   when (becameHidden vis) $ do
+    -- >     mapM_ releaseImageRgba picture
+    -- >     writeVar pictureVar Nothing
   , Visibility (..)
   , VisibilityEvent (..)
   , becameVisible

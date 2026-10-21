@@ -17,6 +17,7 @@ module NanoUI.Internal.Widgets.Display
   , image'
   , freshImageId
   , registerImageRgba
+  , releaseImageRgba
   , svgIcon
   , svgIconWith
   , svgIconWith'
@@ -37,7 +38,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Atlas qualified as Atlas
-import NanoUI.Internal.Context (Context (..), registerImage)
+import NanoUI.Internal.Context (Context (..), registerImage, releaseImage)
 import NanoUI.Internal.Draw (getDrawSnapScale)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, nextId, uiTheme, withContext)
@@ -133,6 +134,12 @@ freshImageId = withContext (\ctx -> Atlas.freshImageId (ctxImageAtlas ctx))
 -- atlas is full. An image of the same size is replaced.
 registerImageRgba :: ImageId -> Int -> Int -> ByteString -> NanoUI Bool
 registerImageRgba iid w h pixels = withContext (\ctx -> registerImage ctx iid w h pixels)
+
+-- | Remove an image 'registerImageRgba' registered and free its atlas space
+-- for later images. Anything still drawing the id shows the placeholder for
+-- an unknown image.
+releaseImageRgba :: ImageId -> NanoUI ()
+releaseImageRgba iid = withContext (\ctx -> releaseImage ctx iid)
 
 -- | Read and parse an SVG file.
 loadSvg :: FilePath -> IO (Either String Svg)

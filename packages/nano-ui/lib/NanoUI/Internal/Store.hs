@@ -130,9 +130,10 @@ data WidgetStore = WidgetStore
   , storeTableColumns :: !(IntMap ([Int], [Float]))
   , storeRichSelection :: !(IntMap RichSelection)
   , storeQuiet :: !(IntMap Int)
-  -- ^ Interaction bookkeeping no paint reads, such as whether a drag hook's
-  -- press is still held. Writes to it neither damage nor wake the loop: the
-  -- visible effects of the interaction go through the widget's own slots.
+  -- ^ Interaction bookkeeping that repaints nothing by itself, such as
+  -- whether a drag hook's press is still held. Writes to it neither damage
+  -- nor wake the loop: the visible effects of the interaction go through the
+  -- widget's own slots.
   }
 
 -- | One of the store's maps: how to read it, and how to put a new one back.
@@ -193,8 +194,8 @@ fieldTableColumns = Field storeTableColumns (\m st -> st {storeTableColumns = m}
 fieldRichSelection :: Field RichSelection
 fieldRichSelection = Field storeRichSelection (\m st -> st {storeRichSelection = m})
 
--- | Integer bookkeeping slots that no paint reads ('storeQuiet'). The store
--- diff that drives damage skips them.
+-- | Integer bookkeeping slots that repaint nothing by themselves
+-- ('storeQuiet'). The store diff that drives damage skips them.
 fieldQuiet :: Field Int
 fieldQuiet = Field storeQuiet (\m st -> st {storeQuiet = m})
 
@@ -367,10 +368,11 @@ data Slot
     -- returned and the document it is the text of, so a frame that edits
     -- nothing neither splits nor joins the text.
     SlotTextAreaText
-  | -- | Set (value 1) to signal that the text area's text changed through a path
-    -- that does not flow through @Input@ (e.g. a context-menu cut/paste). The
-    -- text area widget reads and clears this on its next frame, so the caller
-    -- still gets a @respChanged@ pulse for edits that carry no keys or chars.
+  | -- | Set (value 1) to signal that a text field's or text area's text changed
+    -- through a path that does not flow through @Input@ (e.g. a context-menu
+    -- cut/paste). The widget reads and clears this on its next frame, so the
+    -- caller still gets a @respChanged@ pulse for edits that carry no keys or
+    -- chars.
     SlotTextAreaChanged
   | -- | A text field's undo history with the text it was recorded against, in
     -- 'storeHistory'.
@@ -385,10 +387,16 @@ data Slot
   | -- | A text area's row height as it was last painted (storeFloat), for
     -- commands run between frames to keep the caret in view with.
     SlotTextAreaLineH
+  | -- | Set (value 1, in 'storeQuiet') when a text area's editor state is
+    -- saved: its next paint, which has the font, scrolls the caret into view
+    -- across and clears it. The saved state already keeps the caret in view
+    -- vertically, and its slots repaint the area.
+    SlotTextAreaReveal
   | SlotTextInputScroll
 
-  | -- | Search-field debounce bookkeeping. Text slots on the text widget id: the last
-    -- committed query and the monotonic timestamp of the last edit.
+  | -- | Search-field debounce bookkeeping, on the text widget id: the last
+    -- committed query (storeText) and the monotonic time of the last edit
+    -- (storeDouble).
     SlotSearchCommitted
   | SlotSearchAge
   | -- | Combo box suggestion state (storeInt/storeFloat, keyed by the field

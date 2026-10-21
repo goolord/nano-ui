@@ -20,11 +20,11 @@ module NanoUI.Widgets.RichText
   ) where
 
 import Control.Monad (forM_, foldM, unless, when)
-import Data.Char (isMark)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
+import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
@@ -42,6 +42,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Store (eqByPtr, ptrEq, fieldRichSelection, findSlot, insertSlot)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
+import NanoUI.Internal.TextCluster (clusterLength)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -93,13 +94,13 @@ richText = richTextWith id
 -- for every piece. Horizontal alignment applies per line: with 'alignEnd'
 -- every line ends at the right edge.
 richTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
-richTextWith = richTextWithMode False
+richTextWith f = fmap snd . richTextWith' f
 
 -- | 'richTextWith' with read-only mouse selection and the standard text
 -- commands for selecting and copying text. Link clicks still return their
 -- destination.
 selectableRichTextWith :: (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
-selectableRichTextWith = richTextWithMode True
+selectableRichTextWith f = fmap snd . selectableRichTextWith' f
 
 -- | A selectable paragraph at its default layout.
 selectableRichText :: [Inline] -> NanoUI (Maybe Text)
@@ -112,9 +113,6 @@ selectableRichText' = selectableRichTextWith' id
 -- | 'selectableRichTextWith' with its response.
 selectableRichTextWith' :: (Layout -> Layout) -> [Inline] -> NanoUI (Response, Maybe Text)
 selectableRichTextWith' = richTextWithMode' True
-
-richTextWithMode :: Bool -> (Layout -> Layout) -> [Inline] -> NanoUI (Maybe Text)
-richTextWithMode selectable f pieces = snd <$> richTextWithMode' selectable f pieces
 
 -- | 'richText' returning the paragraph response and a link target clicked
 -- this frame, or 'Nothing' when no link was activated.
@@ -181,30 +179,31 @@ richTextWithMode' selectable f pieces = do
       linesAt width
         | width == paraWidth para = paraLines para
         | otherwise = layoutAt width
+  focused <- if selectable then keyboardFocused wid else pure False
   (selection, dragReleased) <-
     if selectable
       then do
-        (current, dragged) <- updateSelection ctx inp wid resp plain (paraBuffer para0) (paraLines para)
-        pure (Just current, dragged)
+        (current, dragged) <- updateSelection ctx inp wid resp focused plain (paraBuffer para0) (paraLines para)
+        -- Drawn only while focused, as a text field's selection goes when
+        -- the field loses focus.
+        pure (if focused then Just current else Nothing, dragged)
       else pure (Nothing, False)
-  focused <- if selectable then keyboardFocused wid else pure False
-  let linkTokens =
-        [ (tokenRun tok, Rect (rx + x) (ry + lineTop line) (tokenWidth tok) (lineHeight line))
+  let linkPieces =
+        [ (runIdx, Rect (rx + x1) (ry + lineTop line) (x2 - x1) (lineHeight line))
         | respHovered resp
         , line <- paraLines para
-        , (x, tok) <- lineTokens line
-        , tokenKind tok /= Break
-        , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
+        , (run, runIdx, x1, x2) <- pieceSpans runs line
+        , isJust (runTarget run)
         ]
-      hoveredRun =
-        listToMaybe [runIdx | (runIdx, r) <- linkTokens, rectContains r (inputMousePos inp)]
-      draw = drawParagraph runs theme hoveredRun selection focused linesAt
-      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection `hashWithSalt` focused
+      runAt p = listToMaybe [runIdx | (runIdx, r) <- linkPieces, rectContains r p]
+      hoveredRun = runAt (inputMousePos inp)
+      draw = drawParagraph runs theme hoveredRun selection linesAt
+      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection
   liftIO $ do
     -- A move onto or off a link inside the hovered paragraph changes no hot
     -- widget, so no frame would show it: each link piece is a hover zone,
     -- and crossing one's edge runs a frame.
-    forM_ linkTokens (registerHoverZone ctx False . snd)
+    forM_ linkPieces (registerHoverZone ctx False . snd)
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
       cacheParagraph ctx cacheRef wid (isJust cached) para
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
@@ -217,9 +216,17 @@ richTextWithMode' selectable f pieces = do
         0
         False
         (if selectable then KeysReadOnly else KeysNone)
-  let clicked
-        | respClicked resp && not dragReleased = hoveredRun >>= runTarget . indexSmallArray runs
-        | otherwise = Nothing
+  clicked <-
+    if respClicked resp && not dragReleased
+      then do
+        -- The press must have gone down on the link too; its point stays
+        -- recorded through the release frame.
+        presses <- liftIO (readIORef (ctxPressPos ctx))
+        pure $
+          if maybe True ((== hoveredRun) . runAt . fst) (M.lookup MouseLeft presses)
+            then hoveredRun >>= runTarget . indexSmallArray runs
+            else Nothing
+      else pure Nothing
   pure (resp, clicked)
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
@@ -231,19 +238,17 @@ drawParagraph ::
   Theme ->
   Maybe Int ->
   Maybe RichSelection ->
-  Bool ->
   (Float -> [Line]) ->
   CustomDrawContext ->
   Rect ->
   SmallArray DrawOp
-drawParagraph runs theme hoveredRun selection focused linesAt _cdc (Rect x0 y0 w h) =
+drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
   smallArrayFromList $
     concatMap lineOps (linesAt w)
-      ++ [StrokeRoundedRect (Rect x0 y0 w h) 2 1 (themeFocusRing theme) | focused]
   where
     selected = selection >>= selectionOffsets
     lineOps line =
-      let spans = pieceSpans line
+      let spans = pieceSpans runs line
           highlights = maybe [] (\(lo, hi) -> selectionOps x0 y0 line lo hi (themeSelection theme)) selected
        in [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
             ++ highlights
@@ -261,17 +266,8 @@ drawParagraph runs theme hoveredRun selection focused linesAt _cdc (Rect x0 y0 w
                , offset <- decorationOffsets deco run
                ]
     lineY line run = y0 + lineTop line + lineAscent line - runAscent run
-    isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
     glyphGroups line =
       groupBy joinsGlyphs [(x, tok) | (x, tok) <- lineTokens line, tokenKind tok == Glyph || tokenKind tok == GlyphSpace]
-    joinsGlyphs (_, a) (_, b) = tokenRun a == tokenRun b
-    pieceSpans line =
-      [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
-      | group <- groupBy joinsGlyphs (lineTokens line)
-      , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
-      , (x1, first) : _ <- [trimmed]
-      , let (lastX, lastTok) = last trimmed
-      ]
     decorationOf runIdx =
       (if Just runIdx == hoveredRun then addUnderline else id)
         (textFontDecoration (runFont (indexSmallArray runs runIdx)))
@@ -284,6 +280,23 @@ drawParagraph runs theme hoveredRun selection focused linesAt _cdc (Rect x0 y0 w
             DecorationStrikethrough -> [strike]
             DecorationUnderlineStrike -> [under, strike]
             DecorationNone -> []
+
+-- | Each piece's stretch of a line without the spaces at its ends: its run,
+-- the run's index, and its left and right edges.
+pieceSpans :: SmallArray Run -> Line -> [(Run, Int, Float, Float)]
+pieceSpans runs line =
+  [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
+  | group <- groupBy joinsGlyphs (lineTokens line)
+  , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
+  , (x1, first) : _ <- [trimmed]
+  , let (lastX, lastTok) = last trimmed
+  ]
+  where
+    isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
+
+-- | Whether two placed tokens belong to the same piece.
+joinsGlyphs :: (Float, Token) -> (Float, Token) -> Bool
+joinsGlyphs (_, a) (_, b) = tokenRun a == tokenRun b
 
 -- | Store @para@ under @wid@, pruning entries neither drawn last frame nor yet
 -- this frame once the cache grows past its bound.
@@ -303,13 +316,12 @@ cacheParagraph ctx cacheRef wid hadEntry para = do
 
 -- | Keep the paragraph's selection in document coordinates, so it survives
 -- rewrapping when the widget's width changes.
-updateSelection :: Context -> Input -> WidgetId -> Response -> Text -> TB.TextBuffer -> [Line] -> NanoUI (RichSelection, Bool)
-updateSelection ctx inp wid resp plain buffer lines' = do
+updateSelection :: Context -> Input -> WidgetId -> Response -> Bool -> Text -> TB.TextBuffer -> [Line] -> NanoUI (RichSelection, Bool)
+updateSelection ctx inp wid resp focused plain buffer lines' = do
   let key = intKey wid
       initial = RichSelection plain (TB.Cursor 0 0) (TB.Cursor 0 0) False False 0 0
   !stored <- liftIO (findSlot fieldRichSelection initial key <$> getStore ctx)
   let synced = syncSelection plain stored
-  focused <- keyboardFocused wid
   commands <- if focused then liftIO (fieldTextCommands ctx readOnlyMode inp) else pure []
   afterKeys <-
     if null commands
@@ -511,70 +523,45 @@ measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
           token = Token part i kind w at prepared
       pure (at + T.length part, token : acc)
 
--- | Text split into user-perceived characters, closely enough for wrapping:
--- a character keeps the combining marks, variation selectors and emoji
--- modifiers after it, a zero-width joiner joins the next character on, and
--- regional indicators pair into flags. A newline is its own cluster.
+-- | Text split into user-perceived characters ('clusterLength'), closely
+-- enough for wrapping.
 clusters :: Text -> [Text]
-clusters = go
-  where
-    go t = case T.uncons t of
-      Nothing -> []
-      Just (c, rest) ->
-        let n = 1 + extend (isRegional c) rest
-         in T.take n t : go (T.drop n t)
-    -- Characters after the first that stay in its cluster.
-    extend regional t = case T.uncons t of
-      Just (c, rest)
-        | c == '\x200D' -> case T.uncons rest of
-            Just (_, rest') -> 2 + extend False rest'
-            Nothing -> 1
-        | attaches c -> 1 + extend False rest
-        | regional && isRegional c -> 1 + extend False rest
-      _ -> 0
-    attaches c =
-      isMark c
-        || (c >= '\xFE00' && c <= '\xFE0F')
-        || (c >= '\x1F3FB' && c <= '\x1F3FF')
-        || (c >= '\xE0020' && c <= '\xE007F')
-        || (c >= '\xE0100' && c <= '\xE01EF')
-    isRegional c = c >= '\x1F1E6' && c <= '\x1F1FF'
+clusters t = case clusterLength t of
+  0 -> []
+  n -> T.take n t : clusters (T.drop n t)
 
 -- | Greedy line breaking at @width@, aligned by @align@. Breaks only at
 -- spaces or newlines, drops spaces at a wrap, and gives an overlong word its
 -- own line.
 layoutLines :: SmallArray Run -> (Float, Float) -> AlignX -> Float -> [Token] -> [Line]
-layoutLines runs (emptyH, emptyAscent) align width = go 0 0 [] 0 [] True
+layoutLines runs (emptyH, emptyAscent) align width = go 0 0 [] 0 []
   where
     -- @placed@ holds the line's tokens in reverse, @pending@ the spaces since
-    -- its last word; @fresh@ whether the line starts after a wrap.
-    go top start placed x pending fresh toks = case toks of
+    -- its last word. A wrapped line starts at its first word, so it has none.
+    go top start placed x pending toks = case toks of
       [] -> [finish start top placed x]
       tok : rest -> case tokenKind tok of
         Break ->
           let line = finish start top placed x
               nextStart = tokenStart tok + T.length (tokenText tok)
-           in line : go (top + lineHeight line) nextStart [] 0 [] False rest
-        Space ->
-          let start' = if null placed && null pending && fresh then tokenStart tok else start
-           in go top start' placed x (tok : pending) fresh rest
-        Glyph -> placeGroup top start placed x pending fresh [tok] rest
-        GlyphSpace -> placeGroup top start placed x pending fresh [tok] rest
+           in line : go (top + lineHeight line) nextStart [] 0 [] rest
+        Space -> go top start placed x (tok : pending) rest
+        Glyph -> placeGroup top start placed x pending [tok] rest
+        GlyphSpace -> placeGroup top start placed x pending [tok] rest
         Word ->
           let (word, rest') = span (\t -> tokenKind t == Word) toks
-           in placeGroup top start placed x pending fresh word rest'
-    placeGroup top start placed x pending fresh group rest
+           in placeGroup top start placed x pending word rest'
+    placeGroup top start placed x pending group rest
       | not (null placed) && x + spaceW + groupW > width =
           let line = finish start top placed x
-           in line : go (top + lineHeight line) firstStart [] 0 [] True (group ++ rest)
+           in line : go (top + lineHeight line) firstStart [] 0 [] (group ++ rest)
       | otherwise =
-          let (placed', x') = foldl' place (placed, x) (if null placed && fresh then [] else reverse pending)
+          let (placed', x') = foldl' place (placed, x) (reverse pending)
               (placed'', x'') = foldl' place (placed', x') group
-              start' = if null placed && fresh then firstStart else start
-           in go top start' placed'' x'' [] False rest
+           in go top start placed'' x'' [] rest
       where
         groupW = sum (map tokenWidth group)
-        spaceW = if null placed && fresh then 0 else sum (map tokenWidth pending)
+        spaceW = sum (map tokenWidth pending)
         firstStart = maybe start tokenStart (listToMaybe group)
     place (acc, x) tok = ((x, tok) : acc, x + tokenWidth tok)
     finish start top placed x =

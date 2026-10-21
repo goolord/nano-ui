@@ -15,6 +15,7 @@ tests =
   [ spec "damage-bounds-resolution" runDamageBoundsResolutionTest
   , spec "damage-widget-explicit" runExplicitDamageWidgetTest
   , spec "damage-queue-cleared" runDamageQueueClearedPerFrameTest
+  , spec "clear-dirty-keeps-repaint" runClearDirtyKeepsRepaintTest
   , spec "damage-state-change" runStateChangeDamageTest
   , spec "damage-orphan-anim-settles" runOrphanAnimationDamageSettlesTest
   , spec "versioned-drawing-damage" runVersionedDrawingDamageTest
@@ -229,6 +230,22 @@ runExplicitDamageWidgetTest ctx failed = do
   case dmg of
     DamageFull -> assert failed False
     DamageClip r -> assert failed (approxEq r expected)
+
+-- | A host that clears the dirty flag before the frame it runs for it still
+-- gets the whole-window repaint 'markDirty' queued: no diff covers what an
+-- opaque request changed. 'clearDirty' once dropped that repaint too.
+runClearDirtyKeepsRepaintTest :: Context -> IORef Int -> IO ()
+runClearDirtyKeepsRepaintTest ctx failed = do
+  let inp = withInput 400 300
+      ui = column (label "Static content")
+  _ <- warmup2 ctx inp ui
+  markDirty ctx
+  clearDirty ctx
+  assert failed . not =<< isDirty ctx
+  _ <- runFrame ctx inp ui
+  assertEq failed DamageFull =<< takeDamage ctx
+  _ <- runFrame ctx inp ui
+  assert failed . damageIsEmpty =<< takeDamage ctx
 
 runDamageQueueClearedPerFrameTest :: Context -> IORef Int -> IO ()
 runDamageQueueClearedPerFrameTest ctx failed = do

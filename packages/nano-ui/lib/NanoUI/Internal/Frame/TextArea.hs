@@ -28,9 +28,9 @@ module NanoUI.Internal.Frame.TextArea
   , textAreaTextPlacements
   ) where
 
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (forM, forM_, guard, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -40,15 +40,16 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
-import NanoUI.Internal.Frame.Node (nodeFontMetrics)
-import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
+import NanoUI.Internal.Frame.Node (nodeFontMetrics, packedTextFont, resolveTextFont)
+import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt, drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Store (collapseFieldSelection, fieldFloat, fieldPoint, fieldBuffer, fieldLineWidths, findSlot, insertSlot, lookupSlot)
+import NanoUI.Internal.Store (collapseFieldSelection, deleteSlot, fieldFloat, fieldInt, fieldQuiet, fieldPoint, fieldBuffer, fieldLineWidths, findSlot, insertSlot, lookupSlot, memberSlot)
 import NanoUI.Internal.Store.Types (LineWidths (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
+import NanoUI.Internal.WidgetText (textNodeFontKey)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 
@@ -90,9 +91,10 @@ collapseTextFieldSelection ctx wid =
   withWidgetNode ctx wid () $ \idx ->
     getNodeType (ctxNodeArena ctx) idx >>= \case
       NodeTextInput -> modifyStore ctx (collapseFieldSelection key)
-      NodeTextArea -> modifyStore ctx $ \store ->
-        let state = TA.loadTextAreaState store key
-         in TA.saveTextAreaState key state {TA.selectionAnchor = TB.getCursor (TA.buffer state)} store
+      -- An unstored anchor reads as the cursor ('TA.loadTextAreaState').
+      NodeTextArea ->
+        modifyStore ctx $
+          deleteSlot fieldInt (slotKey SlotTextAreaAnchorRow key) . deleteSlot fieldInt (slotKey SlotTextAreaAnchorCol key)
       _ -> pure ()
  where
   key = intKey wid
@@ -137,7 +139,7 @@ textInputArea ctx@Context {ctxNodeArena = na} =
           fm <- resolveTextAreaFont ctx idx
           field <- getNodeRect na idx
           let state = TA.loadTextAreaState store key
-              buf = TA.buffer state
+              buf = TA.tasBuffer state
               TB.Cursor caretRow caretCol = TB.getCursor buf
               lineH = textAreaLineHeight fm
               Rect clipX contentTop _ _ = textAreaFieldClip fm field
@@ -179,6 +181,8 @@ textAreaBarLane = fst (scrollBarGeomFor ScrollBarList) + scrollBarSideGap
 
 -- | Which scrollbars a text area shows for its content extent, the offset
 -- each axis reaches, the paddings that place each bar's lane, and the extent.
+-- The extent across is a pixel wider than the widest line, for the caret
+-- after its last character.
 data TextAreaBars = TextAreaBars
   { tabVertical :: !Bool
   , tabHorizontal :: !Bool
@@ -190,8 +194,9 @@ data TextAreaBars = TextAreaBars
 
 {-# INLINE textAreaBars #-}
 textAreaBars :: FontMetrics -> Rect -> Float -> Float -> TextAreaBars
-textAreaBars fm (Rect _ _ fw fh) contentW contentH =
+textAreaBars fm (Rect _ _ fw fh) widestW contentH =
   let (ix, iy) = widgetContentInset fm
+      contentW = widestW + 1
       innerW = max 0 (fw - 2 * ix)
       innerH = max 0 (fh - 2 * iy)
       lane = textAreaBarLane
@@ -223,16 +228,16 @@ textAreaBarLayouts (Rect x y w h) bars scrollX scrollY =
       , layout (tabHorizontal bars) DirRow (tabPadH bars) contentW scrollX
       )
 
--- | Font the text-area content is laid out and painted in. Honors the node's
--- @layoutFontSize@ (set via 'fontSize' on the editor layout) so a single text
--- area can zoom without changing the rest of the UI. A size of 0 means the
--- base UI font.
+-- | Font the text-area content is laid out and painted in. Honors the
+-- node's font size and the face, weight and slant packed in its style (set
+-- via 'fontSize', 'fontMono' and the like on the editor layout) so a single
+-- text area can zoom or set code without changing the rest of the UI. A size
+-- of 0 means the base UI font's.
 resolveTextAreaFont :: Context -> NodeIdx -> IO FontMetrics
 resolveTextAreaFont ctx idx = do
   size <- getNodeFontSize (ctxNodeArena ctx) idx
-  if size <= 0
-    then pure (ctxFontMetrics ctx)
-    else fst <$> ctxResolveFont ctx size WeightNormal FontStyleNormal FontRegular
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  fst <$> resolveTextFont ctx (packedTextFont size si)
 
 -- | Content extent of a text area, @(contentWidth, contentHeight)@. Measuring
 -- the width scans every character of the document, so the widths are kept
@@ -243,9 +248,11 @@ textAreaContentMetrics :: Context -> NodeIdx -> IO (Float, Float)
 textAreaContentMetrics ctx idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   size <- getNodeFontSize (ctxNodeArena ctx) idx
+  si <- getStyleIdx (ctxNodeArena ctx) idx
   store <- getStore ctx
   gen <- readIORef (ctxMetricGen ctx)
   let key = intKey wid
+      face = textNodeFontKey size si
       widthsKey = slotKey SlotTextAreaWidths key
       buf = TA.textAreaBuffer store key
       lns = TB.bufferLines buf
@@ -253,13 +260,13 @@ textAreaContentMetrics ctx idx = do
       cached = lookupSlot fieldLineWidths widthsKey store
   case cached of
     Just (LineWidths font fontGen _ _ widestW contentH)
-      | font == size && fontGen == gen && seenHead >= Seq.length lns -> pure (widestW, contentH)
+      | font == face && fontGen == gen && seenHead >= Seq.length lns -> pure (widestW, contentH)
     _ -> do
       fm <- resolveTextAreaFont ctx idx
       let contentH = fromIntegral (max 1 (Seq.length lns)) * textAreaLineHeight fm
           LineWidths _ _ measured widest widestW _ = case cached of
-            Just lw@(LineWidths font fontGen _ _ _ _) | font == size && fontGen == gen -> lw
-            _ -> LineWidths size gen Seq.empty (-1) 0 0
+            Just lw@(LineWidths font fontGen _ _ _ _) | font == face && fontGen == gen -> lw
+            _ -> LineWidths face gen Seq.empty (-1) 0 0
           -- Keep the widths of the lines no edit touched since the last
           -- measurement and measure the rest.
           keepHead = min seenHead (Seq.length measured)
@@ -281,7 +288,7 @@ textAreaContentMetrics ctx idx = do
             | otherwise = widestFrom 0 widths
           pick a b = if snd b > snd a then b else a
       modifyStore ctx $
-        insertSlot fieldLineWidths widthsKey (LineWidths size gen widths widest' contentW contentH)
+        insertSlot fieldLineWidths widthsKey (LineWidths face gen widths widest' contentW contentH)
           . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf)
       pure (contentW, contentH)
 
@@ -330,36 +337,51 @@ textAreaHitForWidget ctx wid = do
         pure (Just (TextAreaHit idx field (textAreaLineHeight fm)))
 
 -- | Record the text viewport and clamp the stored scroll to the content, and
--- return the content extent. This paint already reflects both, so the write
--- marks nothing dirty: a window resize would otherwise request a second frame
--- that has nothing to repaint.
-syncTextAreaViewport :: Context -> NodeIdx -> Int -> FontMetrics -> Rect -> IO (Float, Float)
+-- return the content extent. A saved editor state ('SlotTextAreaReveal') has
+-- its caret, 1 px wide, scrolled into view across, which takes the font, as
+-- 'syncTextInputScroll' does for a field; its x is returned too, for drawing
+-- the caret. This paint already reflects all of it, so the write marks
+-- nothing dirty: a window resize would otherwise request a second frame that
+-- has nothing to repaint.
+syncTextAreaViewport :: Context -> NodeIdx -> Int -> FontMetrics -> Rect -> IO ((Float, Float), Maybe Float)
 syncTextAreaViewport ctx idx key fm field = do
   extent@(contentW, contentH) <- textAreaContentMetrics ctx idx
   -- Read after the metrics query: a cold query caches into the store.
   store <- getStore ctx
-  let Rect _ _ clipW clipH = textAreaFieldClip fm field
-      bars = textAreaBars fm field contentW contentH
+  let bars = textAreaBars fm field contentW contentH
+      Rect _ _ viewW viewH = textAreaTextClip fm field bars
       scrollKey = slotKey SlotTextAreaScroll key
+      revealKey = slotKey SlotTextAreaReveal key
       (sx, sy) = findSlot fieldPoint (0, 0) scrollKey store
-      V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 sx sy)
+      reveal = memberSlot fieldQuiet revealKey store
+  caretAt <-
+    if reveal
+      then do
+        let buf = TA.textAreaBuffer store key
+            TB.Cursor row col = TB.getCursor buf
+        Just <$> caretXIO fm (TB.lineAt row buf) col
+      else pure Nothing
+  let V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 (maybe sx (\at -> clamp (at + 1 - viewW) at sx) caretAt) sy)
       viewportKey = slotKey SlotTextAreaViewport key
       lineKey = slotKey SlotTextAreaLineH key
       lineH = textAreaLineHeight fm
-      clampScroll
-        | sx' /= sx || sy' /= sy = insertSlot fieldPoint scrollKey (sx', sy')
-        | otherwise = id
-      -- Commands run between frames keep the caret in view with this.
-      storeLine
-        | lookupSlot fieldFloat lineKey store /= Just lineH = insertSlot fieldFloat lineKey lineH
-        | otherwise = id
-  unless (sx' == sx && sy' == sy && lookupSlot fieldPoint viewportKey store == Just (clipW, clipH) && lookupSlot fieldFloat lineKey store == Just lineH) $
-    writeIORef (ctxStore ctx) $! storeLine (clampScroll (insertSlot fieldPoint viewportKey (clipW, clipH) store))
+      scrolled = sx' /= sx || sy' /= sy
+      resized = lookupSlot fieldPoint viewportKey store /= Just (viewW, viewH)
+      relined = lookupSlot fieldFloat lineKey store /= Just lineH
+  -- Commands run between frames keep the caret in view with the viewport
+  -- and the row height. Only what changed is written: every keystroke clears
+  -- the reveal flag.
+  when (reveal || scrolled || resized || relined) $
+    writeIORef (ctxStore ctx) $!
+      deleteSlot fieldQuiet revealKey
+        . (if scrolled then insertSlot fieldPoint scrollKey (sx', sy') else id)
+        . (if relined then insertSlot fieldFloat lineKey lineH else id)
+        $ (if resized then insertSlot fieldPoint viewportKey (viewW, viewH) store else store)
   -- A glide aimed past a range that shrank (the text got shorter) would
   -- never land, since the offset is clamped back here every frame.
   wid <- getWidgetId (ctxNodeArena ctx) idx
   clampScrollGlide ctx wid (tabRange bars)
-  pure extent
+  pure (extent, caretAt)
 
 
 -- | A text area's scroll offset snapped to the device pixel grid, the same
@@ -371,7 +393,7 @@ syncTextAreaViewport ctx idx key fm field = do
 textAreaScrollSnapped :: DrawArena -> TA.TextAreaState -> IO (Float, Float)
 textAreaScrollSnapped da state = do
   s <- getDrawSnapScale da
-  let (scrollX, scrollY) = TA.scrollOffset state
+  let (scrollX, scrollY) = TA.tasScrollOffset state
   pure (onGrid s (realToFrac scrollX), onGrid s (realToFrac scrollY))
 
 -- | Text-area content with the node font already resolved, so a paint pass
@@ -381,16 +403,17 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   let key = intKey wid
       field = Rect x y w h
-  (contentW, contentH) <- syncTextAreaViewport ctx idx key fm field
+  ((contentW, contentH), caretAt) <- syncTextAreaViewport ctx idx key fm field
   focus <- textInputFocused ctx idx
   theme <- nodeTheme ctx idx
   state <- (`TA.loadTextAreaState` key) <$> getStore ctx
   (scrollXf, scrollYf) <- textAreaScrollSnapped da state
   preedit <- textAreaPreedit ctx wid state
+  -- The layout's 'fontColor', as a text field's and the span path's.
+  fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
   let lineH = textAreaLineHeight fm
       Rect clipX contentTop clipW clipH = textAreaFieldClip fm field
-      fg = styleFg style
-      buf = TA.buffer state
+      buf = TA.tasBuffer state
       cursor@(TB.Cursor caretRow caretCol) = TB.getCursor buf
       contentX = clipX - scrollXf
       rowY row = contentTop + fromIntegral row * lineH - scrollYf
@@ -401,9 +424,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
       firstRow = max 0 (rowAt y)
       lastRow = min (TB.getLineCount buf - 1) (rowAt (y + h))
-      (lo, hi) = TB.selectionRange (TA.selectionAnchor state) cursor
-      -- The selection sits on the unsnapped inset, as the pointer hit test does.
-      (ix, iy) = widgetContentInset fm
+      (lo, hi) = TB.selectionRange (TA.tasSelectionAnchor state) cursor
   withClip da textClip $ do
     when (focus && (lo /= hi || isJust preedit)) $
       forM_ [max (TB.cursorRow lo) firstRow .. min (TB.cursorRow hi) lastRow] $ \row -> do
@@ -419,7 +440,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
                 , clampCol (if row == TB.cursorRow hi then TB.cursorCol hi else T.length line)
                 )
         when (startCol < endCol) $
-          drawLineSelection da fm shown startCol endCol (x + ix - scrollXf) (y + iy + fromIntegral row * lineH - scrollYf) lineH (themeSelection theme)
+          drawLineSelection da fm shown startCol endCol contentX (rowY row) lineH (themeSelection theme)
     forM_ [firstRow .. lastRow] $ \row -> do
       let line = fst (shownRow preedit buf row)
       unless (T.null line) $
@@ -427,7 +448,10 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
     when focus $
       case preedit of
         Just (row, p) -> drawLinePreedit da fm p contentX (rowY row) lineH fg
-        Nothing -> drawLineCaret da fm (TB.lineAt caretRow buf) caretCol contentX (rowY caretRow) lineH fg
+        -- Measured already when the sync scrolled it into view.
+        Nothing -> case caretAt of
+          Just at -> drawCaretAt da (contentX + at) (rowY caretRow) lineH fg
+          Nothing -> drawLineCaret da fm (TB.lineAt caretRow buf) caretCol contentX (rowY caretRow) lineH fg
   paintScrollBars ctx da theme (themePanel theme) wid mV mH
 
 -- | Text area @wid@'s composition ('fieldComposition'): its row, and that
@@ -437,8 +461,8 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
 textAreaPreedit :: Context -> WidgetId -> TA.TextAreaState -> IO (Maybe (Int, Preedit))
 textAreaPreedit ctx wid state = do
   composition <- fieldComposition ctx wid
-  let buf = TA.buffer state
-      (lo, hi) = TB.selectionRange (TA.selectionAnchor state) (TB.getCursor buf)
+  let buf = TA.tasBuffer state
+      (lo, hi) = TB.selectionRange (TA.tasSelectionAnchor state) (TB.getCursor buf)
       row = TB.cursorRow lo
       line = TB.lineAt row buf
       endCol = if TB.cursorRow hi == row then TB.cursorCol hi else T.length line
@@ -460,6 +484,12 @@ textClipBeside (Rect clipX contentTop clipW clipH) mV mH =
     (if isJust mV then max 0 (clipW - textAreaBarLane) else clipW)
     (if isJust mH then max 0 (clipH - textAreaBarLane) else clipH)
 
+-- | 'textClipBeside' for the text area at @field@ showing @bars@: the
+-- viewport the editor keeps the caret in.
+textAreaTextClip :: FontMetrics -> Rect -> TextAreaBars -> Rect
+textAreaTextClip fm field bars =
+  textClipBeside (textAreaFieldClip fm field) (guard (tabVertical bars)) (guard (tabHorizontal bars))
+
 -- | Text area @idx@'s rows in view as text placements @(text, x, y, width,
 -- height)@, and the clip they are painted in: what 'drawTextAreaContentWith'
 -- draws, for hosts that draw text themselves. Empty rows are left out.
@@ -475,7 +505,7 @@ textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
   let lineH = textAreaLineHeight fm
       clip@(Rect clipX contentTop _ _) = textAreaFieldClip fm field
       (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
-      buf = TA.buffer state
+      buf = TA.tasBuffer state
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
       rows = [max 0 (rowAt y) .. min (TB.getLineCount buf - 1) (rowAt (y + h))]
   placements <- forM [(row, line) | row <- rows, let line = fst (shownRow preedit buf row), not (T.null line)] $ \(row, line) -> do
@@ -488,29 +518,30 @@ textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
 -- inside it (@onControl@) to the control.
 textAreaMouse :: Context -> Input -> Bool -> WidgetId -> NodeIdx -> IO ()
 textAreaMouse ctx inp onControl wid idx = do
-  field@(Rect _ fieldY _ _) <- getNodeRect (ctxNodeArena ctx) idx
+  field <- getNodeRect (ctxNodeArena ctx) idx
   let mouse@(V2 mouseX mouseY) = inputMousePos inp
       key = intKey wid
   selectWithMouse ctx inp wid field (if onControl then pure True else isMouseOnTextAreaScrollBarAt ctx idx mouse) $ do
     fm <- resolveTextAreaFont ctx idx
+    (contentW, contentH) <- textAreaContentMetrics ctx idx
     store <- getStore ctx
     -- The editor keeps the caret in view, so give it the viewport it has.
-    let Rect clipX _ vpW vpH = textAreaFieldClip fm field
+    let Rect clipX contentTop vpW vpH = textAreaTextClip fm field (textAreaBars fm field contentW contentH)
         lineH = textAreaLineHeight fm
         state =
           TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) (TA.loadTextAreaState store key)
-        buf = TA.buffer state
-        (_, iy) = widgetContentInset fm
+        buf = TA.tasBuffer state
     (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
     preedit <- textAreaPreedit ctx wid state
-    let row = clamp 0 (TB.getLineCount buf - 1) (floor ((mouseY - (fieldY + iy) + scrollYf) / max 1 lineH))
+    let row = clamp 0 (TB.getLineCount buf - 1) (floor ((mouseY - contentTop + scrollYf) / max 1 lineH))
         -- Hit-test the displayed row, then map back to a document column.
         (line, toSource) = shownRow preedit buf row
     prepared <- prepareFontMetrics fm line
     let pos = TB.Cursor row (toSource (textIndexAtX prepared line (max 0 (mouseX - (clipX - scrollXf)))))
     -- Nothing writes the store between this load and the selection write
-    -- (click counting lives in the interaction state).
-    -- modifyStore damages and wakes only when the selection changed, so a
-    -- button held still does not keep frames running.
+    -- (click counting lives in the interaction state). A selection that is
+    -- already stored is not written again: the write would damage the area
+    -- and wake the loop on every frame a button is held still.
     pure $ FieldDoc pos buf $ \anchor cursor ->
-      modifyStore ctx (TA.saveTextAreaState key (TA.setTextAreaSelection anchor cursor state))
+      unless (anchor == TA.tasSelectionAnchor state && cursor == TB.getCursor buf && TB.cursorCol cursor == TB.preferredCol buf) $
+        modifyStore ctx (TA.saveTextAreaState key (TA.setTextAreaSelection anchor cursor state))

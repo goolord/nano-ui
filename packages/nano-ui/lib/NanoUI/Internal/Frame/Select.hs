@@ -14,6 +14,7 @@ module NanoUI.Internal.Frame.Select
   , comboDropPickIndex
   , comboScrollGeom
   , focusedComboNode
+  , openSelectNode
   ) where
 
 import Control.Monad (filterM, forM, forM_, unless, when)
@@ -29,10 +30,11 @@ import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
+import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains)
+import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains)
 
 -- | An open dropdown: a select with its open flag set, or a combo box (a
 -- search field carrying options) exactly while it holds focus.
@@ -77,6 +79,9 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
     build store idx wid combo = do
       opts <- getOptions na idx
       Rect x y w h <- getNodeRect na idx
+      -- The window size of the frame painted last, so that a pick lands
+      -- where the dropdown was drawn.
+      size <- getsDamage ctx dsLastWindowSize
       let key = intKey wid
           slotInt slot def = findSlot fieldInt def (slotKey slot key) store
           slotFloat slot = findSlot fieldFloat 0 (slotKey slot key) store
@@ -86,8 +91,8 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
           scrollX = slotFloat SlotComboScrollX
           contentW = slotFloat SlotComboContentW
           rect
-            | combo = comboDropRect x y w h nOpts rows contentW
-            | otherwise = selectDropRect x y w h nOpts
+            | combo = comboDropRect size x y w h nOpts rows contentW
+            | otherwise = selectDropRect size x y w h nOpts
       pure
         Dropdown
           { ddWidget = wid
@@ -209,20 +214,24 @@ closeSelectOnOutsideClick ctx inp =
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
+  -- Strict, so that a frame without these keys allocates no thunks for them.
   let has k = pressedIn k inp
-      wantNext = has KeyDown || has KeyRight
-      wantStep = wantNext || has KeyUp || has KeyLeft
-      wantEsc = pressedOnceIn KeyEscape inp
-      wantEnter = pressedOnceIn KeyEnter inp
-  -- With Ctrl, Alt or Super held, arrows and Enter are left to shortcuts.
+      !wantNext = has KeyDown || has KeyRight
+      !wantFirst = has KeyHome || has KeyPageUp
+      !wantLast = has KeyEnd || has KeyPageDown
+      !wantStep = wantNext || wantFirst || wantLast || has KeyUp || has KeyLeft
+      !wantEsc = pressedOnceIn KeyEscape inp
+      -- Enter or Space opens or closes the dropdown, as it presses a button.
+      !wantEnter = pressedOnceIn KeyEnter inp || pressedOnceIn KeySpace inp
+  -- With Ctrl, Alt or Super held, the keys are left to shortcuts.
   when (wantEsc || ((wantStep || wantEnter) && shiftAtMost (inputModifiers inp))) $ do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
-    -- Arrows step the focused enabled select, open or not. Otherwise the keys
-    -- go to the open select.
+    -- These keys act on the focused enabled select, open or not. Otherwise
+    -- they go to the open select.
     let enabledSelect idx = ((== NodeSelect) <$> getNodeType na idx) <&&> (not <$> isDisabled ctx focus)
     focused <-
-      if wantStep then keepNode enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
+      if wantStep || wantEnter then keepNode enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
     target <- case focused of
       Just idx -> pure (Just (idx, isSelectOpen store (intKey focus)))
       Nothing -> fmap (,True) <$> openSelectNode ctx store
@@ -230,8 +239,8 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
       wid <- getWidgetId na idx
       whenM (widgetOverlayAllowed ctx wid) $
         if wantEsc || wantEnter
-          then when open $ do
-            setStore ctx (setSelectOpen store (intKey wid) False)
+          then when (open || not wantEsc) $ do
+            setStore ctx (setSelectOpen store (intKey wid) (not open))
             when wantEsc $ markEscapeConsumed ctx
             markDirty ctx
           else do
@@ -239,7 +248,10 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
             when (n > 0) $ do
               let key = intKey wid
                   cur = findSlot fieldInt 0 key store
-                  next = clamp 0 (n - 1) (cur + if wantNext then 1 else -1)
+                  next
+                    | wantFirst = 0
+                    | wantLast = n - 1
+                    | otherwise = clamp 0 (n - 1) (cur + if wantNext then 1 else -1)
               when (next /= cur) $ do
                 setStore ctx (insertSlot fieldInt key next store)
                 markDirty ctx
@@ -300,9 +312,19 @@ finalizeSelectPick ctx inp =
 selectDropGap :: Float
 selectDropGap = 4
 
-selectDropRect :: Float -> Float -> Float -> Float -> Int -> Rect
-selectDropRect x y w h nOpts =
-  Rect x (y + h + selectDropGap) w (menuItemRowH * fromIntegral nOpts + 2 * menuOuterPad)
+-- | Select dropdown rect for the field at @x y w h@ in a window of @size@
+-- ('dropRect').
+selectDropRect :: Size -> Float -> Float -> Float -> Float -> Int -> Rect
+selectDropRect size x y w h nOpts =
+  dropRect size x y w h (menuItemRowH * fromIntegral nOpts + 2 * menuOuterPad)
+
+-- | A dropdown @dropH@ tall and as wide as the field at @x y w h@: below the
+-- field, or above it when it does not fit below and there is more room
+-- above, and kept inside the window of @size@ ('computePopupPosition').
+dropRect :: Size -> Float -> Float -> Float -> Float -> Float -> Rect
+dropRect (Size winW winH) x y w h dropH =
+  let (dx, dy) = computePopupPosition winW winH 0 w dropH (AnchorRect (Rect x y w h)) PlacementAuto selectDropGap
+   in Rect dx dy w dropH
 
 -- | Row index at @mouseY@ for a select dropdown, whose rows sit centred in
 -- the drop rect.
@@ -361,11 +383,11 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
 -- scrollbar lane when the widest row overflows, so the horizontal bar never
 -- covers the bottommost row. Must agree with 'comboScrollGeom' on when lanes
 -- appear (same inputs, same formulas).
-comboDropRect :: Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
-comboDropRect x y w h nRows nTotal contentW =
+comboDropRect :: Size -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
+comboDropRect size x y w h nRows nTotal contentW =
   let vLaneW = if nTotal > nRows then comboSbW else 0
       hScroll = contentW > max 0 (w - vLaneW) && contentW > 0
-   in Rect x (y + h + selectDropGap) w (fromIntegral nRows * menuItemRowH + (if hScroll then comboSbW else 0))
+   in dropRect size x y w h (fromIntegral nRows * menuItemRowH + (if hScroll then comboSbW else 0))
 
 -- | Row index at @mouseY@ for a combo dropdown, whose rows start flush at the
 -- drop rect's top (unlike 'selectDropPickIndex', which centers them).

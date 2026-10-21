@@ -25,7 +25,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (inArenaRange)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themeSeries)
-import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectHit, rectIntersect)
+import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectIntersect)
 
 -- | Compute what the overlay draws this frame and damage what changed: every
 -- layer's outlines and the hover highlight. The frame's rect diffs track only
@@ -57,7 +57,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
       atPointer (!depth, clip) idx = do
         rect <- getNodeRect na idx
         inner <- childClip ctx idx clip rect
-        pure (inScope idx && rectHit rect mouse && rectContains clip mouse, (depth + 1,) <$> inner)
+        pure (inScope idx && rectContains rect mouse && rectContains clip mouse, (depth + 1,) <$> inner)
   count <- arenaCount na
   -- Layers in paint order: the page, then windows, modals and popups, each
   -- kind in arena order. The page root is node 0, unless the view has no
@@ -72,7 +72,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
   route <- getsInteraction ctx isPointerRoute
   hover <- case route of
     RouteLayer _ | count > 0 -> do
-      let panelAt nt rest = topmostFloating ctx (== nt) (`rectHit` mouse) >>= maybe rest (pure . Just)
+      let panelAt nt rest = topmostFloating ctx (== nt) (`rectContains` mouse) >>= maybe rest (pure . Just)
       top <- foldr panelAt (pure Nothing) [NodePopup, NodeModal, NodeWindow]
       found <- innermostNodeAt ctx top atPointer (0 :: Int, window)
       traverse (\(idx, (depth, clip)) -> (,clip) <$> describeNode na depth idx) found

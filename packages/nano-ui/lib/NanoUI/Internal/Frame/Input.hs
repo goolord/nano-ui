@@ -1,11 +1,11 @@
 -- | The pointer and keyboard steps that 'NanoUI.Internal.Frame.runFrame' runs around
 -- the view: recording where a press landed, choosing the active and hot
--- widgets, turning a release into a click, moving keyboard focus, and copying
--- selection state from the store into the nodes that paint it. All but
--- 'armPointerPress' run after layout, so their hit tests use this frame's
--- solved rects, where the view had only the previous frame's. Also the checks
--- the backend runs between frames: whether input needs a frame, and the
--- gestures and panels in progress.
+-- widgets, turning a release into a click, and moving keyboard focus.
+-- 'armPointerPress', 'recordCoveredWidgets' and 'recordFocusKind' run before
+-- the view, against the previous frame's layout. The rest run after layout,
+-- so their hit tests use this frame's solved rects, where the view had only
+-- the previous frame's. Also the checks the backend runs between frames:
+-- whether input needs a frame, and the gestures and panels in progress.
 module NanoUI.Internal.Frame.Input
   ( finalizeTabFocus
   , refreshHover
@@ -26,6 +26,7 @@ module NanoUI.Internal.Frame.Input
   , pointerDragActive
   , textFieldActive
   , floatingPanelActive
+  , floatingWindowOpen
   , debugPanelOpen
   , probeHotId
   , recordCoveredWidgets
@@ -42,7 +43,7 @@ import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Scroll (probeScrollBarHover)
-import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
+import NanoUI.Internal.Frame.Select (focusedComboNode, openSelectNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -50,10 +51,11 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
 
 -- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
--- and show the focus ring. A Tab consumed by the focused widget
+-- and show the focus ring. Moving focus blurs the old widget
+-- ('blurFocus'). A Tab consumed by the focused widget
 -- ('NanoUI.Internal.Context.markTabConsumed') moves nothing.
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
@@ -66,6 +68,7 @@ finalizeTabFocus ctx inp =
       wasVisible <- readIORef (ctxFocusVisible ctx)
       when (next == cur && not wasVisible) $
         damageWidget ctx next (DamageInflated defaultDamageSlop)
+      when (next /= cur) (blurFocus ctx cur)
       writeIORef (ctxFocusId ctx) next
       writeIORef (ctxFocusVisible ctx) True
       markDirty ctx
@@ -245,18 +248,10 @@ widgetUnderMouse ctx top mouse nt idx = do
     <&&> (not <$> passesPointer (ctxNodeArena ctx) idx)
 
 -- | The rect a press on node @idx@ must land in: a text field's box
--- ('nodeTextFieldGeom'), a close button's padded target, or the node rect.
+-- ('nodeTextFieldGeom'), else the node rect.
 widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 widgetHitRect ctx nt idx x y w h = case nt of
   NodeTextInput -> fst <$> nodeTextFieldGeom ctx idx x y w h
-  NodeButton -> do
-    si <- getStyleIdx (ctxNodeArena ctx) idx
-    -- Close buttons get a padded target that stays inside the title bar, so
-    -- the inner east resize still works below the control.
-    pure $
-      if hasFlag buttonFlagClose si
-        then Rect (x - 8) (y - 4) (w + 10) (h + 4)
-        else Rect x y w h
   _ -> pure (Rect x y w h)
 
 -- | Resolve a left-button release against this frame's solved rects, and
@@ -334,7 +329,8 @@ inUiClickHit ctx wid mouse = do
 -- its edit menu. Menu/dropdown presses are removed from the supplied layer
 -- input so the owning field keeps focus until the pick is processed.
 -- A press on a control drawn inside a text field, or on a widget drawn over
--- it, keeps the focus as it was.
+-- it, keeps that field focused if it already was; otherwise the press clears
+-- focus like any press outside a field.
 -- A press on a menu row or menu-bar title keeps the field's selection, so a
 -- menu command such as Cut ('NanoUI.Widgets.TextField.runTextCommand'),
 -- which focuses the field again, acts on it.
@@ -384,8 +380,7 @@ finalizeDrawingFocus ctx targets =
 -- 'FocusNowhere' clears focus, and 'FocusNext' and 'FocusPrevious' go where
 -- Tab would ('tabTarget'). 'FocusOn' succeeds only for one of the
 -- 'tabStops', never a disabled widget; otherwise the request is dropped.
--- Moving focus behaves like a press elsewhere: the old field collapses its
--- selection, and the text-field menu and any open dropdown close. The new
+-- Moving focus behaves like a press elsewhere ('blurFocus'). The new
 -- widget shows the focus ring. Requesting the focused widget changes
 -- nothing, including the ring.
 finalizeFocusRequest :: Context -> IO ()
@@ -404,14 +399,21 @@ finalizeFocusRequest ctx =
       FocusNext -> step False
       FocusPrevious -> step True
     for_ (mfilter (/= prev) target) $ \wid -> do
-      collapseTextFieldSelection ctx prev
-      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
-      store <- getStore ctx
-      when (anySelectOpen store) $ setStore ctx (closeSelects store)
+      blurFocus ctx prev
       -- The damage pass repaints both widgets, since the focused id moved.
       writeIORef (ctxFocusId ctx) wid
       when (hashWidgetId wid /= 0) $ writeIORef (ctxFocusVisible ctx) True
       markDirty ctx)
+
+-- | What moving focus off @prev@ does, as a press elsewhere would: the old
+-- field collapses its selection, and the text-field menu and any open
+-- dropdown close.
+blurFocus :: Context -> WidgetId -> IO ()
+blurFocus ctx prev = do
+  collapseTextFieldSelection ctx prev
+  modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+  store <- getStore ctx
+  when (anySelectOpen store) $ setStore ctx (closeSelects store)
 
 -- | Give @wid@ keyboard focus, repainting when focus moved.
 focusWidget :: Context -> WidgetId -> IO ()
@@ -427,24 +429,31 @@ enabledTarget :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
 enabledTarget ctx = fmap listToMaybe . filterM (fmap not . isDisabled ctx) . maybeToList
 
 -- | Next focus id, or previous with Shift, wrapping at both ends. An unknown
--- current id selects the first entry; an empty list returns @WidgetId 0@.
+-- current id selects the first entry, or the last going backwards; an empty
+-- list returns @WidgetId 0@.
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
 tabNext cur ids shift =
   fromMaybe (WidgetId 0) . listToMaybe $ case break (== cur) ids of
-    (_, []) -> ids
+    (_, []) -> if shift then reverse ids else ids
     (before, _ : after)
       | shift -> reverse (if null before then ids else before)
       | otherwise -> after ++ ids
 
 -- | Take keyboard focus away from display-only content or a widget outside
--- the top modal. The frame runs this after the pointer steps, which can move
--- focus, and before 'finalizeTabFocus'.
+-- the top modal, and close a select's dropdown the top modal hides, which
+-- would otherwise keep Escape from the modal. The frame runs this after the
+-- pointer steps, which can move focus, and before 'finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus)) $
       writeIORef (ctxFocusId ctx) (WidgetId 0)
+  store <- getStore ctx
+  when (anySelectOpen store) $
+    openSelectNode ctx store >>= mapM_ (\idx -> do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      unlessM (widgetOverlayAllowed ctx wid) $ setStore ctx (closeSelects store))
 
 -- | Record in 'isFocusKind' what kind of widget has keyboard focus and which
 -- keys it claims ('KeyClaim'), from last frame's nodes. Runs before the
@@ -556,10 +565,14 @@ floatingPanelActive :: Context -> IO Bool
 floatingPanelActive ctx =
   (||) <$> modalActive ctx <*> ((> 0) <$> floatingNodeCount (ctxNodeArena ctx))
 
--- | Whether the arena contains any floating window. The name does not imply
--- that its contents are a debug readout.
+-- | Whether the arena contains any floating window.
+floatingWindowOpen :: Context -> IO Bool
+floatingWindowOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
+
+-- | 'floatingWindowOpen' under its old name.
 debugPanelOpen :: Context -> IO Bool
-debugPanelOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
+debugPanelOpen = floatingWindowOpen
+{-# DEPRECATED debugPanelOpen "Use floatingWindowOpen" #-}
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx@Context {ctxNodeArena = na} mouse = do

@@ -24,7 +24,7 @@ import NanoUI.Internal.Equality (sameDouble)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
-import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
+import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldEditorMode, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, memberSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, packTextNodeStyle, textInputFlagNumeric)
@@ -44,13 +44,15 @@ data NumericInputConfig = NumericInputConfig
     -- ^ Largest value (default: no limit).
   , nicStep :: !Double
     -- ^ What one arrow key or stepper click adds (default 1). Shift steps ten
-    -- times as far.
+    -- times as far. A step is rounded to 'nicDecimals' places, so those must
+    -- show it: a step of 0.1 needs at least one decimal.
   , nicDecimals :: !Int
     -- ^ Digits after the decimal point, both shown and accepted (default 0).
   , nicHex :: !Bool
     -- ^ Show and accept the value as a whole hexadecimal number (default
     -- 'False'). 'nicDecimals' is ignored in this mode.
   , nicLayout :: !Layout
+    -- ^ The field's layout (default: grows to fill, at least 80 wide).
   }
   deriving (Eq, Show)
 
@@ -153,12 +155,14 @@ numericInputCore cfg value = do
           let t = formatNumber cfg final
            in TextInputState t (T.length t) (T.length t)
       | otherwise = s1
+    pulseK = slotKey SlotTextAreaChanged key
     dirty =
       stored /= Just (tisText s2)
         || s2 /= s0
         || lookupSlot fieldDouble key store /= Just final
         || held1 /= held0
         || repeatAt1 /= repeatAt0
+        || memberSlot fieldInt pulseK store
   when dirty $
     liftIO $ do
       -- An accepted edit keeps its undo history; a rejected one or a step
@@ -166,10 +170,15 @@ numericInputCore cfg value = do
       let save = case mEdited of
             Just ed | editorTextState ed == s2 -> saveTextEditor key ed
             _ -> saveTextInputState key s2
+      -- Commands sent between frames read the mode ('runTextCommand'); the
+      -- change pulse an edit of theirs leaves is reported as the value's
+      -- change.
       modifyStore ctx $
         (if held1 == 0 then deleteSlot fieldInt heldK else insertSlot fieldInt heldK held1)
           . insertSlot fieldDouble key final
           . insertSlot fieldDouble repeatK repeatAt1
+          . insertSlot fieldEditorMode (slotKey SlotTextMode key) singleLineMode
+          . deleteSlot fieldInt pulseK
           . save
   -- A held arrow repeats on a schedule: ask for the frame of its next step
   -- instead of running frames back to back until then.
@@ -258,6 +267,9 @@ parseNumber cfg t
   | nicHex cfg = case TR.signed TR.hexadecimal t of
       Right (n, rest) | T.null rest -> Just (fromInteger n)
       _ -> Nothing
-  | otherwise = case TR.signed TR.rational (T.dropWhileEnd (== '.') t) of
+  | otherwise = case TR.signed (TR.rational . leadingZero) (T.dropWhileEnd (== '.') t) of
       Right (v, rest) | T.null rest -> Just v
       _ -> Nothing
+  where
+    -- 'TR.rational' needs a digit before the point, which ".5" leaves out.
+    leadingZero s = if "." `T.isPrefixOf` s then "0" <> s else s
