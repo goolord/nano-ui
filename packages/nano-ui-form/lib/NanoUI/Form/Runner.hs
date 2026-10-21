@@ -6,6 +6,7 @@ module NanoUI.Form.Runner
   , nanoFormSubmit
   , nanoFormEx
   , resetForm
+  , markSubmitted
   ) where
 
 import Control.Monad (when)
@@ -110,7 +111,8 @@ nanoFormSubmit owner prefix submitLabel form = do
       _                                  -> Nothing
 
 -- | Render with configured error visibility and an optional submit button.
--- Returns current validity every frame, not a one-frame submission event.
+-- Returns current validity every frame, not a one-frame submission event;
+-- to act on a submission, use the app's own button and 'markSubmitted'.
 nanoFormEx :: FormState -> FormConfig -> Text -> Form Text a -> NanoUI (FormStatus a)
 nanoFormEx owner cfg prefix form = do
   ctx <- askContext
@@ -139,3 +141,9 @@ renderResult showErrors view result =
 -- Re-evaluate the form on the next frame to render its defaults.
 resetForm :: FormState -> Text -> NanoUI ()
 resetForm owner prefix = withContext (\ctx -> resetFormState owner ctx prefix)
+
+-- | Count a form as submitted, as its submit button does, so a 'FormOnSubmit'
+-- form shows its errors from the next frame. Call it from the app's own
+-- submit button. 'resetForm' clears it.
+markSubmitted :: FormState -> Text -> NanoUI ()
+markSubmitted owner prefix = withContext (\ctx -> markFormSubmitted owner ctx prefix True)

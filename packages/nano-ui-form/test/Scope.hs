@@ -43,8 +43,8 @@ import NanoUI.Internal.Layout.Arena
   , getNodeRect
   , getWidgetId
   )
-import NanoUI.Testing (Context, clearDirty, isDirty, newPixelContext, runFrame)
-import NanoUI.Testing.Harness (keyInp, runClick, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing (Context, clearDirty, collectTextSpans, isDirty, newPixelContext, runFrame)
+import NanoUI.Testing.Harness (hasText, keyInp, runClick, spanCenter, warmup2, withInputOff)
 
 check :: String -> Bool -> IO ()
 check message ok = unless ok (fail message)
@@ -59,6 +59,7 @@ runScopeTests = do
   testSubmitSameFrameEdit
   testSubmitSkipsTextArea
   testColorKeepsAlpha
+  testMarkSubmitted
   testResetWidgets
   testResetTextArea
 
@@ -256,6 +257,23 @@ testColorKeepsAlpha = do
       check "Up did not brighten the colour" (edited /= Just overlay)
       check "a colour field dropped its alpha" (fmap colorA edited == Just 128)
     _ -> fail "expected a colour picker"
+
+-- | The app's own button submits a 'FormOnSubmit' form through
+-- 'markSubmitted', and the form then shows its errors.
+testMarkSubmitted :: IO ()
+testMarkSubmitted = do
+  ctx <- newPixelContext
+  owner <- newFormState
+  let
+    form = withFieldErrors (inputText "name" "" `prove` notEmpty "Name is required")
+    ui = nanoFormEx owner defaultFormConfig {fcMode = FormOnSubmit} "on-submit" form
+    -- The message wraps, so look for its last word.
+    errorShown = hasText "required" <$> collectTextSpans ctx
+  _ <- warmup2 ctx input ui
+  check "a FormOnSubmit form showed errors before submission" . not =<< errorShown
+  runNanoUI ctx input (markSubmitted owner "on-submit")
+  _ <- warmup2 ctx input ui
+  check "markSubmitted did not show the form's errors" =<< errorShown
 
 testResetWidgets :: IO ()
 testResetWidgets = do

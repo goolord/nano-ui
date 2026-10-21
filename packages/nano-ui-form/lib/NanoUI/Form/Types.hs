@@ -64,7 +64,9 @@ data FormStatus a
 -- | Validation mode for a form.
 data FormMode
   = FormLive
-  | FormOnSubmit
+  | -- | Show errors once the form is submitted: by 'fcSubmitButton', or by
+    -- @markSubmitted@ from the app's own button.
+    FormOnSubmit
   deriving stock (Eq, Show)
 
 -- | Configuration options for form execution.

@@ -52,6 +52,7 @@ module NanoUI.Form
   , nanoFormSubmit
   , nanoFormEx
   , resetForm
+  , markSubmitted
 
     -- * Re-exports from Ditto
   , Ditto.FormRange (..)
@@ -93,7 +94,8 @@ import NanoUI.Form.Input
   , withFieldErrors
   )
 import NanoUI.Form.Runner
-  ( nanoFormEx
+  ( markSubmitted
+  , nanoFormEx
   , nanoFormLive
   , nanoFormSubmit
   , resetForm
