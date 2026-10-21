@@ -175,7 +175,7 @@ data DrawOp
   -- with the current clip.
   | PopClip
   -- ^ End the innermost open 'PushClip'.
-  deriving (Eq)
+  deriving (Eq, Show)
 
 -- | An unrotated 'DrawImage': destination rectangle, texture id,
 -- u0/v0/u1/v1, and tint colour. As a pattern it matches only angle 0.
