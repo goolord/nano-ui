@@ -18,7 +18,14 @@ import NanoUI.Internal.Var.Types (Lens (..), Var (..), newElemCtx, stepBit, stru
 -- unique.
 --
 -- The outer pass records only the list's keys and order, so mutating a single
--- element in place does not invalidate sibling rows.
+-- element in place does not invalidate sibling rows. Rows are told apart by
+-- one of 63 bits of their key's hash, though: past about 63 rows, or for keys
+-- that share a bit (such as 'Int' keys 64 apart), a row's edit also counts as
+-- one to the earlier rows that share its bit. That reruns the view, and
+-- repaints it whole when those rows 'readVar' the field it edits.
+--
+-- As under 'NanoUI.withKey', what a row keeps with 'NanoUI.Var.useVar' or in
+-- its widgets stays after its key leaves the list.
 --
 -- > forEachVar todoId app.todos $ \todo -> checkbox "" todo.done
 forEachVar :: Hashable k => (a -> k) -> Var [a] -> (Var a -> NanoUI ()) -> NanoUI ()

@@ -75,6 +75,11 @@ newVar a = (\c -> VarRef c Here) <$> newCell a
 -- widgets, so conditional widgets do not shift them; wrap a conditional
 -- 'useVar' in 'NanoUI.scope'. Reinitializes to @initial@ if the slot
 -- previously held a different type.
+--
+-- A slot lasts as long as the context, so hidden content keeps its state:
+-- each 'NanoUI.withKey' key a 'useVar' ever ran under keeps one. For rows of
+-- a collection whose keys keep coming, such as a feed, hold their state in a
+-- 'NanoUI.Var.VarMap' and drop it with 'NanoUI.Var.retainVars'.
 {-# INLINE useVar #-}
 useVar :: VarSlot a => a -> NanoUI (Var a)
 useVar = slotVar slotMatch slotWrap

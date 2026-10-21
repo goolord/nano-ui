@@ -102,6 +102,14 @@ runPassesTest _ failed = do
         when (respClicked r) (modifyVar v (+ (1 :: Int)))
         unless above (label . T.pack . show =<< readVar v)
         pure r
+      -- A list in one Var, a checkbox per row and the row's name after it.
+      checkRows xs = do
+        v <- newVar xs
+        hits <- newIORef []
+        clickOn . fourth hits . column . forEachVar rowId v $ \r -> row $ do
+          resp <- checkbox' "" r.rowDone
+          label =<< readVar r.rowName
+          liftIO (modifyIORef hits (resp :))
   rows <-
     sequence
       [ ("field", (1, Clip, 1),) <$> fresh "" (\v -> typeInto (column (textInput' v)))
@@ -121,14 +129,11 @@ runPassesTest _ failed = do
       , ("model: field above field", (1, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do label =<< readVar m.title; textInput' m.name)))
       , ("model: whole read above field", (2, Full, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do x <- readVar m; label x.title; textInput' m.name)))
       , ("model: zoomVar part above field", (2, Full, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do label =<< readVar (zoomVar (.title) (\t x -> x {title = t}) m); textInput' m.name)))
-      , -- A list in one Var, a checkbox per row and the row's name after it.
-        ("forEachVar rows: click row 3", (1, Clip, 1),) <$> do
-          v <- newVar rows20
-          hits <- newIORef []
-          clickOn . fourth hits . column . forEachVar rowId v $ \r -> row $ do
-            resp <- checkbox' "" r.rowDone
-            label =<< readVar r.rowName
-            liftIO (modifyIORef hits (resp :))
+      , ("forEachVar rows: click row 3", (1, Clip, 1),) <$> checkRows rows20
+      , -- Rows are told apart by one of 63 bits of their key's hash, so
+        -- keys 64 apart, as from the 64th row on, share it: the earlier
+        -- rows' checkboxes count as showing the one clicked.
+        ("forEachVar rows, keys 64 apart: click row 3", (2, Clip, 1),) <$> checkRows (map (\e -> e {rowId = e.rowId * 64}) rows20)
       , ("withElemVars rows: click row 3", (2, Full, 1),) <$> do
           v <- newVar rows20
           hits <- newIORef []
