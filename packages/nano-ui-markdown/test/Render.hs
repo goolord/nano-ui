@@ -438,7 +438,9 @@ spec = before newMarkdownCache $ do
       drawn 600 600 . columnWith (fixedW 500) . markdownConfigured cache customCode . parseMarkdown $
         "```hs\ntop\n```\n\n> ```hs\n> quoted\n> ```\n\n- item\n\n  ```hs\n  listed\n  ```\n\n```py\nother\n```\n\nafter"
     spans <- collectTextSpans ctx
-    map (`hasText` spans) ["custom top", "custom quoted", "custom listed", "py"] `shouldBe` replicate 4 True
+    map (`hasText` spans) ["custom top", "custom quoted", "custom listed"] `shouldBe` replicate 3 True
+    -- The language label exactly: the block's "Copy" button contains "py".
+    isJust (spanRectOf "py" spans) `shouldBe` True
     map wText <$> drawnWords ctx `shouldReturn` ["item", "other", "after"]
     -- Only the Python block uses the default widget, with its copy button.
     length [() | (_, "Copy", _, _, _) <- spans] `shouldBe` 1
