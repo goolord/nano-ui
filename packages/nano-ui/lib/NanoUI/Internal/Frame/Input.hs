@@ -42,7 +42,7 @@ import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Scroll (probeScrollBarHover)
-import NanoUI.Internal.Frame.Select (focusedComboNode, overlayMenuOwnerAt)
+import NanoUI.Internal.Frame.Select (focusedComboNode, openSelectNode, overlayMenuOwnerAt)
 import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -446,14 +446,20 @@ tabNext cur ids shift =
       | otherwise -> after ++ ids
 
 -- | Take keyboard focus away from display-only content or a widget outside
--- the top modal. The frame runs this after the pointer steps, which can move
--- focus, and before 'finalizeTabFocus'.
+-- the top modal, and close a select's dropdown the top modal hides, which
+-- would otherwise keep Escape from the modal. The frame runs this after the
+-- pointer steps, which can move focus, and before 'finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus)) $
       writeIORef (ctxFocusId ctx) (WidgetId 0)
+  store <- getStore ctx
+  when (anySelectOpen store) $
+    openSelectNode ctx store >>= mapM_ (\idx -> do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      unlessM (widgetOverlayAllowed ctx wid) $ setStore ctx (closeSelects store))
 
 -- | Record in 'isFocusKind' what kind of widget has keyboard focus and which
 -- keys it claims ('KeyClaim'), from last frame's nodes. Runs before the

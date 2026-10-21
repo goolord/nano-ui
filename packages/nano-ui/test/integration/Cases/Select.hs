@@ -2,12 +2,15 @@ module Cases.Select (tests) where
 
 import Spec
 import Data.Primitive.SmallArray qualified as SA
+import NanoUI.Internal.Store (anySelectOpen)
 
 tests :: [Spec]
 tests =
   [ pixelSpec "slider-cursor" runSliderCursorTest
   , spec "select-drag-to-select" runSelectDragToSelectTest
   , spec "select-keyboard" runSelectKeyboardTest
+  , spec "select-keyboard-jumps" runSelectKeyboardJumpsTest
+  , spec "select-closes-under-modal" runSelectClosesUnderModalTest
   , spec "select-change-once" runSelectChangeOnceTest
   , spec "select-close-keeps-focus" runSelectCloseKeepsFocusTest
   , spec "select-overlay-damage" runSelectOverlayDamageTest
@@ -254,6 +257,41 @@ runSelectKeyboardTest ctx failed = do
   assert failed (not (any (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"]) closedOverlays))
   _ <- runFrame ctx (keyInp KeyLeft inp0) ui
   assertEq failed 1 . snd =<< evalUi ctx inp0 ui
+
+-- | A focused select acts on every key it keeps from shortcuts: Home and
+-- Page Up pick the first option, End and Page Down the last, and Space or
+-- Enter opens the dropdown and closes it again.
+runSelectKeyboardJumpsTest :: Context -> IORef Int -> IO ()
+runSelectKeyboardJumpsTest ctx failed = do
+  indexRef <- newVar 1
+  let inp0 = withInput 320 200
+      ui = column (held indexRef (select' ["Low", "Medium", "High"]))
+  warmupFocused ctx inp0 ui
+  forM_ [(KeyEnd, 2), (KeyHome, 0), (KeyPageDown, 2), (KeyPageUp, 0)] $ \(k, want) -> do
+    _ <- runFrame ctx (keyInp k inp0) ui
+    assertEq failed (k, want) . (k,) . snd =<< evalUi ctx inp0 ui
+  forM_ [(KeySpace, True), (KeySpace, False), (KeyEnter, True), (KeyEnter, False)] $ \(k, open) -> do
+    _ <- runFrame ctx (keyInp k inp0) ui
+    assertEq failed (k, open) . (k,) . anySelectOpen =<< getStore ctx
+
+-- | A modal opened over an open select closes its dropdown, which the modal
+-- hides, so Escape then reaches the modal.
+runSelectClosesUnderModalTest :: Context -> IORef Int -> IO ()
+runSelectClosesUnderModalTest ctx failed = do
+  dialog <- newVar False
+  let inp0 = withInput 320 200
+      ui = column $ do
+        (resp, _) <- withValue 0 (select' ["Low", "Medium", "High"])
+        modal dialog "Title" (label "body")
+        pure resp
+  resp <- warmup2 ctx inp0 ui
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  assert failed . anySelectOpen =<< getStore ctx
+  writeVarIO dialog True
+  _ <- runFrame ctx inp0 ui
+  assert failed . not . anySelectOpen =<< getStore ctx
+  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+  assertEq failed False =<< readVarIO dialog
 
 -- Clicking an open select's own field closes the dropdown and keeps the
 -- select focused.
