@@ -103,7 +103,7 @@ flatten (Matrix a b c d e f) segs =
 --------------------------------------------------------------------------------
 
 -- | Polygons covering a stroke of width @w@ along the contours, each wound
--- counter-clockwise so a non-zero fill of all of them is their union.
+-- clockwise on screen so a non-zero fill of all of them is their union.
 strokePolygons :: Float -> LineCap -> LineJoin -> Float -> Rings -> Rings
 strokePolygons w cap join miterLimit contours = buildRings (strokeWalk w cap join miterLimit (cleanRings False contours))
 
@@ -115,10 +115,10 @@ strokeWalk w cap join miterLimit contours point end =
   let hw = w / 2
       emitP (Point x y) = point x y
       -- Twice the signed area of a polygon's corners, positive when they
-      -- wind counter-clockwise.
+      -- wind clockwise on screen, as 'P.shoelace' counts.
       turn (Point x0 y0) (Point x1 y1) = x0 * y1 - x1 * y0
       -- A triangle or quad in the order given, or reversed when that winds
-      -- clockwise.
+      -- anticlockwise on screen.
       triangle a b c = do
         if turn a b + turn b c + turn c a < 0
           then emitP c >> emitP b >> emitP a
@@ -195,7 +195,9 @@ strokeWalk w cap join miterLimit contours point end =
 
 -- | Render the document into a @width@ by @height@ RGBA image (rows top to
 -- bottom), scaled to fit and centred as SVG's default @xMidYMid meet@ does.
--- @current@ is what @currentColor@, and an unspecified fill, paint with.
+-- @current@ is what @currentColor@ paints with, and an unspecified fill too
+-- when the document is one colour ('svgMonochrome'); otherwise an
+-- unspecified fill is black, as in SVG.
 rasterizeSvg :: Int -> Int -> Color -> Svg -> ByteString
 rasterizeSvg width height current (Svg svg) =
   rasterizeView width height (meet (documentViewBox svg) (fromIntegral width) (fromIntegral height)) current svg
