@@ -9,17 +9,17 @@ module NanoUI.Sdl.Internal.Font.Search
   ) where
 
 import Control.Exception (IOException, catch)
-import Control.Monad (filterM)
+import Control.Monad (filterM, mfilter)
 import Data.Containers.ListUtils (nubOrd)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
-import Data.List (isInfixOf, partition, sort, sortOn, stripPrefix)
+import Data.List (elemIndex, isInfixOf, partition, sort, sortOn, stripPrefix)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import System.Directory (doesDirectoryExist, getHomeDirectory, listDirectory)
 import System.Environment (lookupEnv)
-import System.FilePath (takeBaseName, takeDirectory, takeExtension, (</>))
+import System.FilePath (splitSearchPath, takeBaseName, takeDirectory, takeExtension, (</>))
 import System.Info (os)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -120,7 +120,13 @@ defaultFontDirs =
       pure $
         [local </> "Microsoft" </> "Windows" </> "Fonts" | Just local <- [mLocal]]
           ++ [fromMaybe "C:\\Windows" mRoot </> "Fonts"]
-    _ -> inHome ".local/share/fonts" ["/usr/local/share/fonts", "/usr/share/fonts"]
+    -- fontconfig's roots: @fonts@ in each XDG data directory, and ~/.fonts.
+    _ -> do
+      home <- getHomeDirectory
+      let env name = mfilter (not . null) <$> lookupEnv name
+      dataHome <- fromMaybe (home </> ".local/share") <$> env "XDG_DATA_HOME"
+      dataDirs <- maybe ["/usr/local/share", "/usr/share"] splitSearchPath <$> env "XDG_DATA_DIRS"
+      pure ([dataHome </> "fonts", home </> ".fonts"] ++ map (</> "fonts") dataDirs)
   where
     inHome dir system = (: system) . (</> dir) <$> getHomeDirectory
 
@@ -146,14 +152,15 @@ matchScore norm stem = score <$> stripPrefix norm stem
   where
     score t
       | null t = 100
-      | t `elem` regularTails = 90
+      | Just i <- elemIndex t regularTails = 90 - i
       | t `elem` otherTails = 70
-      | "variable" `isInfixOf` t = 20
+      | "variable" `isInfixOf` t = if "italic" `isInfixOf` t then 19 else 20
       | otherwise = 60
 
--- | Style tails that indicate the regular weight of a family.
+-- | Style tails that indicate the regular weight of a family, the likeliest
+-- first: of a family's files, the one whose tail comes first wins.
 regularTails :: [String]
-regularTails = ["regular", "r", "normal", "medium", "text"]
+regularTails = ["regular", "normal", "r", "book", "roman", "text", "medium"]
 
 -- | Style tails for non-regular weights; still worth preferring over an
 -- unrelated font, but a regular (or exact) match wins.
@@ -173,12 +180,22 @@ otherTails =
   , "oblique"
   ]
 
--- | Windows ships @Consolas@ as @consola.ttf@ and @Courier New@ as
--- @cour.ttf@, so those families need filename aliases that prefix-match
--- differently than their family names.
+-- | Windows ships @Consolas@ as @consola.ttf@ and @Segoe UI Symbol@ as
+-- @seguisym.ttf@, and macOS @PingFang SC@ as @PingFang.ttc@, so those
+-- families need filename aliases that prefix-match differently than their
+-- family names.
 familyAliases :: String -> [String]
 familyAliases "consolas" = ["consola"]
 familyAliases "couriernew" = ["cour"]
+familyAliases "segoeuisymbol" = ["seguisym"]
+familyAliases "nirmalaui" = ["nirmala"]
+familyAliases "leelawadeeui" = ["leelawui"]
+familyAliases "microsoftyahei" = ["msyh"]
+familyAliases "yugothic" = ["yugothr"]
+familyAliases "malgungothic" = ["malgun"]
+familyAliases "arialunicodems" = ["arialuni"]
+familyAliases "pingfangsc" = ["pingfang"]
+familyAliases "kohinoordevanagari" = ["kohinoor"]
 familyAliases _ = []
 
 -- | Expand a generic CSS family into concrete families to search in order.

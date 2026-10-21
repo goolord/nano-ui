@@ -539,7 +539,9 @@ closeCoverageProbes =
 
 -- | Fallback families in the order shaping tries them: broad Latin, Greek
 -- and Cyrillic first, then scripts, then symbols, across Linux, Windows and
--- macOS names.
+-- macOS names. The search matches file names, so a family whose files are
+-- named otherwise (@seguisym.ttf@, @msyh.ttc@) is found through its alias in
+-- "NanoUI.Sdl.Internal.Font.Search".
 coverageFamilies :: [String]
 coverageFamilies =
   [ "Noto Sans", "DejaVu Sans"
