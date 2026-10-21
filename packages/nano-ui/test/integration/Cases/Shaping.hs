@@ -8,7 +8,17 @@ tests :: [Spec]
 tests =
   [ spec "bidi-runs" runBidiRunsTest
   , spec "shaped-carets" runShapedCaretTest
+  , spec "unshaped-metrics" runUnshapedMetricsTest
   ]
+
+-- | Without shaping, a font taken as monospace places carets and finds them
+-- by whole advances alike.
+runUnshapedMetricsTest :: Context -> IORef Int -> IO ()
+runUnshapedMetricsTest _ failed = do
+  -- ' ', 'x' and 'M' share an advance, so the font is taken as monospace.
+  let fm = (monospaceMetrics 10) {fmAdvance = \c -> if c == 'i' then 4 else 10}
+  assertEq failed 20 (caretX fm "iiii" 2)
+  assertEq failed 2 (textIndexAtX fm "iiii" 20)
 
 -- | Direction runs come out in visual order, with numbers and spaces
 -- resolved against their neighbours.

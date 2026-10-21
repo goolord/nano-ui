@@ -33,6 +33,8 @@ module NanoUI.Internal.Layout.Arena
   , SizingTag (..)
   , DirTag (..)
   , NodeArena (..)
+  , WidthMemo
+  , IdIndex
   , FlexScratch (..)
   , newNodeArena
   , resetNodeArena
@@ -422,8 +424,8 @@ data NodeArena = NodeArena
   -- ^ Hash of the paint state the input signature leaves out, mixed as it is
   -- written ('getPaintSignature'). One unboxed slot, like 'naInputSig'.
   , naInputSig :: IOArr Word64
-  -- ^ The frame's input signature ('getInputSignature'). An unboxed slot, so
-  -- mixing into it allocates nothing.
+  -- ^ The frame's input signature, which 'layoutSigMatches' compares. An
+  -- unboxed slot, so mixing into it allocates nothing.
   , naTextHash :: IORef (IOArr Word64)
   -- ^ Per node, the hash of the text the last 'setNodeText' stored.
   , naOptionsHash :: IORef (IOArr Word64)
@@ -575,7 +577,7 @@ data GeomCol
 -- * 'StylePinX', 'StylePinY': a pinned node's offset from its parent's
 --   content box.
 -- * 'StyleAspect': width over height for a fit height
---   ('NanoUI.Internal.Style.aspect'), or 0 for none.
+--   ('NanoUI.aspect'), or 0 for none.
 --
 -- The layout cache does not compare 'StyleScrollContentW' and
 -- 'StyleNodeValue', which are not layout inputs.
@@ -603,8 +605,8 @@ data StyleCol
 -- * 'TagFlow': the 'Flow'. Always 'Line' for scroll containers, grids and
 --   non-containers.
 -- * 'TagLineAlign': a wrapping container's
---   'NanoUI.Internal.Style.LineAlign'.
--- * 'TagPinned': whether the node is pinned ('isPinnedNode'), as a 'Bool'.
+--   'NanoUI.LineAlign'.
+-- * 'TagPinned': whether the node is pinned, as a 'Bool'.
 -- * 'TagPinnedBelow': whether some descendant is pinned, as a 'Bool', set
 --   when that node is added ('hasPinnedBelow'). The solver, paint and hit
 --   tests look for pinned children only under such a node.
@@ -774,9 +776,14 @@ resetNodeArena na = do
   writePrimArray (naPaintSig na) 0 0
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
   writePrimArray (naImageCount na) 0 0
-  -- 0 marks a memo entry that was never written, so the tag wraps to 1.
+  -- 0 marks a memo entry that was never written, so the tag wraps to 1. On
+  -- wrap-around, entries from the previous use of tag 1 would read as live,
+  -- so untag them all.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
+  when (ft == maxBound) $ forM_ [naWrapMemo na, naFitMemo na] $ \ref -> do
+    WidthMemo tags _ <- readIORef ref
+    getSizeofMutablePrimArray tags >>= \c -> setPrimArray tags 0 c 0
   -- Bumping the epoch empties the id index. On wrap-around, stale entries
   -- from the previous use of that epoch would read as live, so clear it.
   !ep <- readIORef (naEpoch na)
@@ -853,8 +860,11 @@ ensureCapacity na needed = do
   when (needed >= cap) $ do
     let newCap = cap * 2
     newA <- readIORef (naArrays na) >>= growNodeArenaArrays cap newCap
-    growWidthMemo (naWrapMemo na) cap newCap
-    growWidthMemo (naFitMemo na) cap newCap
+    forM_ [naWrapMemo na, naFitMemo na] $ \ref -> do
+      WidthMemo tags slots <- readIORef ref
+      wmTags <- growPrimArrayCopy tags cap newCap 0
+      wmSlots <- growPrimArrayCopy slots (cap * memoStride) (newCap * memoStride) 0
+      writeIORef ref WidthMemo {..}
     writeIORef (naArrays na) newA
     let growRef r old new = readIORef r >>= \a -> writeIORef r =<< growPrimArrayCopy a old new 0
     growRef (naTextHash na) cap newCap
@@ -896,13 +906,6 @@ growPrimArrayCopy oldArr cap newCap defVal = do
   newArr <- resizeMutablePrimArray oldArr newCap
   setPrimArray newArr cap (newCap - cap) defVal
   pure newArr
-
-growWidthMemo :: IORef WidthMemo -> Int -> Int -> IO ()
-growWidthMemo ref cap newCap = do
-  WidthMemo tags slots <- readIORef ref
-  wmTags <- growPrimArrayCopy tags cap newCap 0
-  wmSlots <- growPrimArrayCopy slots (cap * memoStride) (newCap * memoStride) 0
-  writeIORef ref WidthMemo {..}
 
 {-# NOINLINE growBoxedStoreCopy #-}
 growBoxedStoreCopy :: a -> MutableArray RealWorld a -> Int -> Int -> IO (MutableArray RealWorld a)
@@ -1240,7 +1243,7 @@ getNodeRect na idx = do
   a <- arenaArrays na
   Rect <$> readGeom a idx GeomX <*> readGeom a idx GeomY <*> readGeom a idx GeomW <*> readGeom a idx GeomH
 
--- | Write x, y, width, and height. Does not update the saved layout origin or clip.
+-- | Write x, y, width and height. The clip ('setClipRect') is left alone.
 {-# INLINE setRect #-}
 setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 setRect na idx x y w h = do
@@ -1291,7 +1294,7 @@ data LayoutCache = LayoutCache
   { lcCap :: !Int
   , lcCount :: !Int
   , lcSig :: !Word64
-  -- ^ The input signature ('getInputSignature') the solve was captured with.
+  -- ^ The input signature ('naInputSig') the solve was captured with.
   , lcMeasures :: !(IntMap CustomMeasureRecord)
   -- ^ Per custom-measured node, what the solve's measure recorded.
   -- Checked by the frame runner because a custom measure may read state
@@ -1393,9 +1396,9 @@ restoreLayoutCache na lc = do
   let !n = lcCount lc
   copyMutablePrimArray (naArrGeom a) 0 (lcGeom lc) 0 (n * geomStride)
   -- Scroll content width, node value (the content height) and scrollbar
-  -- slot. Scroll containers are pointer nodes, so walk that class, not the
+  -- slot. Scroll containers are backdrop nodes, so walk that class, not the
   -- whole arena.
-  forClassNodes_ na PointerNodes $ \i -> do
+  forClassNodes_ na BackdropNodes $ \i -> do
     nt <- readTagEnum a i TagNodeType
     when (isScrollNode nt) $ do
       let !slotOff = i * tagStride + fromEnum TagScrollBarSlot
@@ -1507,7 +1510,7 @@ getImageNode na idx = do
   si <- arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
   if si <= 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (si - 1))
 
--- | Set image node @idx@'s image id: the 'NanoUI.Internal.Types.ImageId'
+-- | Set image node @idx@'s image id: the 'NanoUI.ImageId'
 -- it draws, or 0 for none. Layout does not read it, so it is paint state
 -- ('getPaintSignature').
 {-# INLINE setImageId #-}
@@ -1683,8 +1686,9 @@ lookupNodeByKey na key = lookupNodeByWidgetId na (WidgetId (fromIntegral key))
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
 getNodeValue na idx = arenaArrays na >>= \a -> readStyle a idx StyleNodeValue
 
--- | Set the type-specific numeric value read by the solver or painter. It is
--- paint state ('getPaintSignature').
+-- | Set the type-specific numeric value paint reads. It is paint state
+-- ('getPaintSignature'), not a layout input: values the solver works out go
+-- through 'setSolvedValue'.
 {-# INLINE setNodeValue #-}
 setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
 setNodeValue na idx v = do
@@ -1734,7 +1738,7 @@ getScopeSignature :: NodeArena -> IO Word64
 getScopeSignature na = readIORef (naScopeSig na)
 
 -- | Hash over everything the view put in the arena that paint reads: the
--- input signature ('getInputSignature'), the node count, the scopes
+-- input signature ('naInputSig'), the node count, the scopes
 -- ('getScopeSignature'), and the paint state the input signature leaves
 -- out, mixed as it is written: node values ('setNodeValue'), font colours,
 -- the style index of boxes, images and drawings, and images' ids and looks.
@@ -1884,11 +1888,10 @@ memoizeWidth na ref idx key compute = do
     then (,) <$> readPrimArray slots (base + 1) <*> readPrimArray slots (base + 2)
     else do
       r@(x, y) <- compute
-      WidthMemo tags' slots' <- readIORef ref
-      writePrimArray tags' idx ft
-      writePrimArray slots' base key
-      writePrimArray slots' (base + 1) x
-      writePrimArray slots' (base + 2) y
+      writePrimArray tags idx ft
+      writePrimArray slots base key
+      writePrimArray slots (base + 1) x
+      writePrimArray slots (base + 2) y
       pure r
 
 -- | The flex scratch, with room for at least @needed@ entries. Growing it

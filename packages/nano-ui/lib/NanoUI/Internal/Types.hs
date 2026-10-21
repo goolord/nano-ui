@@ -246,7 +246,7 @@ hsvToRgb h s v =
 -- | WCAG 2 relative-luminance contrast. 4.5 is AA for normal text.
 --
 -- Alpha is ignored, so both colours must be opaque. Passing a translucent
--- colour such as 'NanoUI.Internal.Style.themeOverlayDim' gives a meaningless ratio;
+-- colour such as 'NanoUI.themeOverlayDim' gives a meaningless ratio;
 -- composite it over its backdrop first.
 contrastRatio :: Color -> Color -> Double
 contrastRatio a b =
@@ -351,7 +351,7 @@ rectArea (Rect _ _ w h) = w * h
 -- An empty 'DamageClip' means no repaint is needed.
 data Damage
   = DamageFull
-  | DamageClip Rect
+  | DamageClip !Rect
   deriving (Eq, Show)
 
 -- | Whether damage is a clip with non-positive width or height.
@@ -379,6 +379,8 @@ instance Show DamageBounds where
   show (DamageUnion a b) = "DamageUnion (" ++ show a ++ ") (" ++ show b ++ ")"
   show DamageNone = "DamageNone"
 
+-- | Functions cannot be compared, so a 'DamageCustom' equals nothing, not
+-- even itself.
 instance Eq DamageBounds where
   DamageSelf == DamageSelf = True
   DamageInflated a == DamageInflated b = a == b
@@ -445,7 +447,7 @@ data PopupPlacement
   -- following it. For a popup or context menu: top-left corner at the
   -- anchor point, so a menu opens where it was clicked and stays there.
   | PlacementAuto
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 -- | Strict left fold over @0 .. n - 1@.
 {-# INLINE foldUpTo #-}

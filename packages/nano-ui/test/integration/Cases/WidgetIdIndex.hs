@@ -13,6 +13,7 @@ tests =
   , spec "shared-key-steady-prev-rects" runSharedKeySteadyPrevRectsTest
   , spec "widget-id-index-lookups" runWidgetIdIndexLookupsTest
   , spec "widget-id-index-epoch-wrap" runWidgetIdIndexEpochWrapTest
+  , spec "width-memo-frame-tag-wrap" runWidthMemoFrameTagWrapTest
   ]
 
 inp :: Input
@@ -64,6 +65,18 @@ runWidgetIdIndexEpochWrapTest ctx failed = do
   _ <- runFrame ctx inp (withKey (2 :: Int) (label "other"))
   assertEq failed 1 =<< readIORef (naEpoch na)
   assertEq failed Nothing =<< lookupNodeByWidgetId na (respId gone)
+
+-- | A wrapping frame tag does not revive width memo entries from the
+-- previous lap: text at the same node and width measures afresh.
+runWidthMemoFrameTagWrapTest :: Context -> IORef Int -> IO ()
+runWidthMemoFrameTagWrapTest ctx failed = do
+  let ui = columnWith tight . labelWith (\l -> l {layoutWidth = Fixed 100})
+      lapFrame txt = writeIORef (naFrameTag (ctxNodeArena ctx)) maxBound >> runFrame ctx inp (ui txt) >> arenaRects ctx
+  _ <- lapFrame "a long label that wraps onto several lines"
+  lapped <- lapFrame "a\nb"
+  fresh <- newContext
+  expected <- runFrame fresh inp (ui "a\nb") >> arenaRects fresh
+  assertEq failed expected lapped
 
 -- | A table with @freeze@ frozen columns, and a label after it while @showLabel@.
 tableAndLabel :: Int -> Bool -> NanoUI (Maybe Response)

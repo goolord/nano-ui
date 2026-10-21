@@ -9,6 +9,7 @@ tests =
   , spec "context-menu-scroll-pos" runContextMenuScrollPosTest
   , spec "context-menu-disabled-row" runContextMenuDisabledRowTest
   , spec "menu-button-popup-toggle" runMenuButtonPopupToggleTest
+  , spec "popup-point-flip" runPopupPointFlipTest
   ]
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
@@ -155,3 +156,20 @@ runMenuButtonPopupToggleTest ctx failed = do
   assertEq failed True reopened
   outside <- clickAt (V2 380 280)
   assertEq failed False outside
+
+-- | A popup placed before or after a point flips to the other side when it
+-- would run off the window there and fits on the other side, and it always
+-- stays within the window margin.
+runPopupPointFlipTest :: Context -> IORef Int -> IO ()
+runPopupPointFlipTest _ failed = do
+  -- A 100 by 80 popup in an 800 wide window, with a margin of 14.
+  let place winH px py = computePopupPosition 800 winH 14 100 80 (AnchorPoint (V2 px py))
+  -- Above a point near the top: no room there, so below it.
+  assertEq failed (snd (place 600 400 30 PlacementAbove 4)) 34
+  -- Left of a point near the left edge: no room there, so right of it.
+  assertEq failed (fst (place 600 30 300 PlacementLeft 4)) 34
+  -- Below a point near the bottom: above it, the offset clear of it.
+  assertEq failed (snd (place 600 400 590 PlacementBelow 20)) 490
+  -- Neither side has room for the popup and its offset: it keeps within
+  -- the margin rather than flipping into it.
+  assertEq failed (snd (place 200 400 110 PlacementBelow 20)) (200 - 80 - 14)

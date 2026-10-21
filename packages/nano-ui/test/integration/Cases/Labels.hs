@@ -1,6 +1,7 @@
 -- | Labels cut to their room, toggle buttons, and the colour helpers.
 module Cases.Labels (tests) where
 
+import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Text qualified as T
 import Spec
 
@@ -8,6 +9,8 @@ tests :: [Spec]
 tests =
   [ spec "button-label-truncates" runButtonTruncateTest
   , spec "select-label-truncates" runSelectTruncateTest
+  , spec "truncated-label-shaped" runTruncatedLabelShapedTest
+  , spec "label-width-slack" runLabelWidthSlackTest
   , spec "truncate-text-ui" runTruncateTextUiTest
   , spec "toggle-button" runToggleButtonTest
   , spec "color-helpers" runColorHelpersTest
@@ -57,6 +60,35 @@ runSelectTruncateTest ctx failed = do
       -- Clear of the chevron at the right end.
       assert failed (rectX r + rectW r <= x + w - 16)
     _ -> assertEq failed (length cut) 1
+
+-- | A button's label cut short is placed by its own shaped width, not by
+-- the advances of what is left of the whole label.
+runTruncatedLabelShapedTest :: Context -> IORef Int -> IO ()
+runTruncatedLabelShapedTest base failed = do
+  let
+    -- Shaping sets a text 8 a character; unshaped advances are 10.
+    shaped t =
+      let n = T.length t
+       in ShapedText (8 * fromIntegral n) (8 * fromIntegral n) (primArrayFromList [8 * fromIntegral i | i <- [0 .. n]])
+    fm = (monospaceMetrics 10) {fmBackend = Just (FontBackend prepare (\_ -> pure Nothing))}
+    prepare t = pure fm {fmShape = \t' -> if t' == t then Just (shaped t) else Nothing}
+    ctx = withFontMetrics base fm
+  resp <- warmup2 ctx (withInputOff 400 200) (column (buttonWith' (fixedW 90) "A label much longer than the button"))
+  cut <- spansIn ctx (respRect resp)
+  case cut of
+    [(r, t)] -> do
+      assert failed ("..." `T.isSuffixOf` t)
+      assertEq failed (8 * fromIntegral (T.length t)) (rectW r)
+    _ -> assertEq failed (length cut) 1
+
+-- | A label that layout keeps on one line, less than half a pixel wider
+-- than its room, shows whole rather than cut short.
+runLabelWidthSlackTest :: Context -> IORef Int -> IO ()
+runLabelWidthSlackTest base failed = do
+  let
+    ctx = withFontMetrics base (monospaceMetrics 10.04)
+  warmup ctx (withInputOff 400 200) (column (labelWith (maxW 80) "12345678"))
+  assertEq failed ["12345678"] . map snd =<< spansIn ctx (Rect 0 0 400 200)
 
 -- | 'truncateTextUi' fits text to a width with dots and leaves text that
 -- fits alone.

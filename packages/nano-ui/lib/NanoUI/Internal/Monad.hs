@@ -316,8 +316,8 @@ uiFontMetrics :: NanoUI FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
 
 -- | The backend's default font size, used when a layout sets none. To scale
--- text relative to it, pass a multiple to 'NanoUI.Internal.Style.fontSize';
--- 'NanoUI.Internal.Style.fontSizeScale' alone scales from 16.
+-- text relative to it, pass a multiple to 'NanoUI.fontSize';
+-- 'NanoUI.fontSizeScale' alone scales from 16.
 {-# INLINE uiFontSize #-}
 uiFontSize :: NanoUI Float
 uiFontSize = fmap ctxFontSize askContext
@@ -534,7 +534,7 @@ lastRect wid = withContext $ \ctx -> do
 -- can use Tab to indent. A click elsewhere still moves focus away until the
 -- next frame's call restores it.
 --
--- Ignored when called outside an open 'NanoUI.Internal.Widgets.Overlay.modal'
+-- Ignored when called outside an open 'NanoUI.modal'
 -- or on a disabled or inert widget.
 holdFocus :: WidgetId -> NanoUI ()
 holdFocus wid = withContext $ \ctx -> do
@@ -587,7 +587,7 @@ isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWid
 -- request in a frame wins ('focusNext', 'focusPrevious' and 'clearFocus' are
 -- requests too). The request is ignored for a widget Tab would not stop at
 -- this frame: one that is disabled, behind an open
--- 'NanoUI.Internal.Widgets.Overlay.modal', or not declared this frame. A radio
+-- 'NanoUI.modal', or not declared this frame. A radio
 -- group's response names its last option, which is not a Tab stop.
 -- Requesting the widget that already has focus is a no-op, so a view can
 -- request it every frame. @'WidgetId' 0@ means 'clearFocus'.
@@ -624,7 +624,7 @@ setClipboard txt = withContext (\ctx -> ctxClipboardSet ctx txt)
 -- | Schedule a full-window repaint on the next frame, for external state
 -- changes not tracked by 'NanoUI.Var.Var'. Avoid calling unconditionally every
 -- frame, as that prevents the event loop from sleeping; use
--- 'NanoUI.Internal.Widgets.Animate.wakeAfter' for timed frames.
+-- 'NanoUI.wakeAfter' for timed frames.
 requestFrame :: NanoUI ()
 requestFrame = withContext markDirty
 

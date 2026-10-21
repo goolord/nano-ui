@@ -4,7 +4,6 @@ module NanoUI.Internal.Animatable
   )
 where
 
-import Data.Word (Word8)
 import NanoUI.Internal.Types (Color, V2 (..), clamp01, colorA, colorB, colorG, colorR, colorRGBA)
 
 -- | Visit each scalar channel once, in stable index order starting at zero.
@@ -37,10 +36,4 @@ instance Animatable Color where
       <*> channel 2 (colorB c)
       <*> channel 3 (colorA c)
    where
-    channel i w = byte <$> f i (chan w)
-
-chan :: Word8 -> Float
-chan w = fromIntegral w / 255
-
-byte :: Float -> Word8
-byte x = fromIntegral (round (clamp01 x * 255) :: Int)
+    channel i w = (\x -> fromIntegral (round (clamp01 x * 255) :: Int)) <$> f i (fromIntegral w / 255)

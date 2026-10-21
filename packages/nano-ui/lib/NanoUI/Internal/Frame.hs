@@ -109,9 +109,11 @@ runFrameEff unlift ctx rawInp ui = do
   clearWindowClose ctx
   -- Scopes only change how nodes look, which the rect and text diffs below
   -- do not track, and custom widgets' cached ops hold the old theme's colours.
+  -- Nothing measured depends on a theme, so the caches that follow the font
+  -- metrics ('ctxMetricGen') stand.
   whenM (themeScopesChanged ctx) $ do
     damageFull ctx
-    modifyIORef' (ctxMetricGen ctx) (+ 1)
+    modifyIORef' (ctxDrawingCache ctx) (\dc -> dc {dcsCustomDrawOpCache = IM.empty})
   settleViewTheme ctx themeBefore
   let
     size@(Size w h) = inputWindowSize frameInp
@@ -131,9 +133,12 @@ runFrameEff unlift ctx rawInp ui = do
   -- With the layout recorded, what the view read of the last one is checked
   -- against it. A check that publishes a float it measured (a tab strip's
   -- range) marks the frame as a layout change, not a scroll, for its damage.
-  floatsBefore <- storeFloat <$> getStore ctx
+  -- Both maps are forced: 'ptrEq' on an unforced selection compares a fresh
+  -- thunk, which never matches, and every frame would be a layout change.
+  !floatsBefore <- storeFloat <$> getStore ctx
   settleLayoutReads ctx
-  !layoutFloats <- not . ptrEq floatsBefore . storeFloat <$> getStore ctx
+  !floatsAfter <- storeFloat <$> getStore ctx
+  let !layoutFloats = not (ptrEq floatsBefore floatsAfter)
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)
@@ -154,10 +159,11 @@ runFrameEff unlift ctx rawInp ui = do
   when explain (explainFrame ctx frameInp)
   -- The draw this frame may reuse is decided before its damage: a frame
   -- that may reuse it needs its damage worked out even for a host that does
-  -- not read it ('ctxDamageWanted').
+  -- not read it ('ctxDamageWanted'). A frame that paints only a clip, or
+  -- shows the layout overlay, can neither keep its draw nor reuse one.
   reuse <- readIORef (ctxDrawReuse ctx)
   paintFull <- readIORef (ctxPaintFull ctx)
-  key <- reuseKeyFor ctx reuse paintFull size explain
+  key <- if drOn reuse && paintFull && not explain then drawReuseKey ctx size else pure Nothing
   let !mayReuse = case (key, drLast reuse) of
         (Just k, Just (lastKey, _)) -> k == lastKey
         _ -> False
@@ -186,6 +192,8 @@ runViewPasses unlift ctx frameInp ui = do
     if rerun
       then do
         resetUiBuild ctx False
+        -- A modal is active only if this pass builds it.
+        modifyOverlay ctx (\os -> os {osModalActive = False, osModalDepth = 0})
         beginVarPass ctx 2
         unlift (runUi ctx (stripInteractionInput frameInp) ui)
       else pure result0
@@ -221,15 +229,6 @@ finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore = do
   finalizeSelectKeyboard ctx frameInp
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
-
--- | The key the frame's draw would be kept under ('drawReuseKey'), or
--- 'Nothing' when it can be neither kept nor reused: reuse is off, the frame
--- paints only a clip, or the layout overlay is on.
-reuseKeyFor :: Context -> DrawReuse -> Bool -> Size -> Bool -> IO (Maybe DrawReuseKey)
-reuseKeyFor ctx reuse paintFull size explain =
-  if drOn reuse && paintFull && not explain
-    then drawReuseKey ctx size
-    else pure Nothing
 
 -- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
 -- (@key@) matches the last full frame's (@mayReuse@) returns the previous
@@ -356,11 +355,12 @@ drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww w
 -- menu-bar title, draw nothing over the pixels they covered, so without the
 -- backdrop a hover that just ended would stay in the retain texture. Damage
 -- in pieces paints a backdrop over each, and every command is cut to them.
--- Each is inflated by a logical pixel to cover the runner's outward snap.
+-- Each is inflated by a logical pixel to cover the runner's outward snap. An
+-- empty clip stays empty, so a frame with nothing damaged paints nothing.
 paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
 paintDamageClip _ DamageFull _ = pure ()
 paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
-  let clip = rectInflate 1 r
+  let clip = if rectNonEmpty r then rectInflate 1 r else r
       pieceClips = map (rectInflate 1) pieces
       backdrops = if null pieces then [clip] else pieceClips
   setClip da clip

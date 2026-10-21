@@ -13,7 +13,7 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad (filterM, forM_, unless, void, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
 import Data.Bits (complement, xor, (.&.), (.|.))
@@ -35,6 +35,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Frame.Chrome (menuPanelBounds)
 import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types
@@ -154,7 +155,7 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
-    then setPrev emptyPrevFrame >> forgetWalk ctx
+    then setPrev emptyPrevFrame >> void (prevWalkFor ctx 0 IM.empty)
     else do
       (m0, om, foundContainers, foundOuter, droppedContainer) <-
         scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters
@@ -265,14 +266,6 @@ prevWalkFor ctx count oldRects = do
       walk <- newPrevWalk (max 64 (2 * count))
       writeIORef (ctxPrevWalk ctx) walk
       pure (walk, 0)
-
--- | Empty the last walk's record, for an empty arena.
-forgetWalk :: Context -> IO ()
-forgetWalk ctx = do
-  walk <- readIORef (ctxPrevWalk ctx)
-  valid <- readPrimVar (pwValid walk)
-  writePrimVar (pwValid walk) 0
-  forgetFrom walk 0 valid
 
 -- | 'forgetAt' each node from @i@ up to @n@.
 forgetFrom :: PrevWalk -> Int -> Int -> IO ()
@@ -541,9 +534,10 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
   unless (null panels && prevEmpty) $
     modifyOverlay ctx $ \os ->
       os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels}
-  -- The follow-up frames these request only settle placement: the flip and
-  -- floating change each made this frame repaint whole already, so their
-  -- pixels are not waiting on the next frame.
+  -- The follow-up frames these request only settle placement: the flip made
+  -- this frame repaint whole, and a floating change did too or, on a frame
+  -- that only scrolled, damaged each moved panel where it was and is, so
+  -- their pixels are not waiting on the next frame.
   when modalFlip (markDirtyCovered ctx)
   when (floatingChanged && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirtyCovered ctx
@@ -690,7 +684,7 @@ clipDamage ctx snap d owners = do
       addBackdrop k = unless (k == 0) $ do
         mbNode <- liftIO (lookupNodeByKey (ctxNodeArena ctx) k)
         forM_ mbNode $ \idx ->
-          liftIO (backdropRectFromNode ctx idx) >>= mapM_ (addDamageRect . clipRectToWindow winW winH)
+          liftIO (backdropRectFromNode ctx idx) >>= mapM_ addDamageRect
       hadRole wid = wid == fsHot snap || wid == fsActive snap || wid == fsFocus snap
       addInteraction wid = unless (k == 0) $ do
         slop <- fromMaybe defaultDamageSlop <$> liftIO (lookupCustomDamageSlop ctx wid)
@@ -731,16 +725,23 @@ clipDamage ctx snap d owners = do
     unless (ptrEq newImages oldImages) $
       forM_ (IM.keys (IM.mergeWithKey (\_ n o -> if n /= o then Just n else Nothing) id id newImages oldImages)) addText
     forM_ (fdRedrawn d) $ \k -> addDamageKeyGrow new k id
-    unless (fdScrollOnly d) $ addDamageGroup (fdSettledMoved d)
+    -- Also on a scroll-only frame: 'storeFloat' holds slider values too, and
+    -- a label showing one can shrink or move what follows it. A scroll's own
+    -- moves are clipped to the viewport its offset damage already covers.
+    addDamageGroup (fdSettledMoved d)
     addDamageGroup (fdChurn d)
-    let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect r) >> rest) (pure ()) a
+    -- A panel paints its offset shadow past its rect ('menuPanelBounds').
+    let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect (menuPanelBounds r)) >> rest) (pure ()) a
     addFloating (fsFloatingRects snap) (fdFloatingRects d)
     addFloating (fdFloatingRects d) (fsFloatingRects snap)
-  let clip = clipRectToWindow winW winH (rectBounds added)
+  -- Only what lands in the window counts: an empty rect, or one off the
+  -- window, would stretch the bounds over pixels nothing changed.
+  let visible = filter rectNonEmpty (map (clipRectToWindow winW winH) added)
+      clip = rectBounds visible
       winArea = winW * winH
       -- A frame with more rects than this repaints their bounds.
       pieces
-        | null (drop 64 added) = damagePieces (map (clipRectToWindow winW winH) added)
+        | null (drop 64 visible) = damagePieces visible
         | otherwise = []
       area = if null pieces then rectArea clip else sum (map rectArea pieces)
   -- A live animation with an empty clip is not DamageFull: its

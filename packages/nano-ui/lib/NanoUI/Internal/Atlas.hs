@@ -148,23 +148,38 @@ releaseImage (ImageAtlas ref) (ImageId tid) = do
         ref
         st
           { asSlots = IM.delete tid (asSlots st)
-          , asFree = AtlasSlot x y (w + atlasPad) (h + atlasPad) : asFree st
+          , asFree = mergeFree (AtlasSlot x y (w + atlasPad) (h + atlasPad)) (asFree st)
           , asLastFresh = max tid (asLastFresh st)
           }
       pure True
 
+-- | Put @slot@ on the free list joined with the free slots it shares a whole
+-- edge with, so space split up for smaller images is whole again once they
+-- are all released.
+mergeFree :: AtlasSlot -> [AtlasSlot] -> [AtlasSlot]
+mergeFree slot@(AtlasSlot x y w h) frees = case break beside frees of
+  (before, AtlasSlot fx fy fw fh : after)
+    | fy == y -> mergeFree (AtlasSlot (min x fx) y (w + fw) h) (before ++ after)
+    | otherwise -> mergeFree (AtlasSlot x (min y fy) w (h + fh)) (before ++ after)
+  _ -> slot : frees
+  where
+    beside (AtlasSlot fx fy fw fh) =
+      (fy == y && fh == h && (fx + fw == x || x + w == fx))
+        || (fx == x && fw == w && (fy + fh == y || y + h == fy))
+
 -- | Find the first free slot that fits a @w@ x @h@ image plus padding, and
 -- return the image position and the updated state. The leftover space is
 -- split into a strip to the right (image height plus padding) and a strip
--- below (full slot width). Strips too thin for any image are dropped.
+-- below (full slot width). A strip too thin for any image is kept for
+-- 'mergeFree' to join back.
 takeFree :: AtlasState -> Int -> Int -> Maybe (Int, Int, AtlasState)
 takeFree st w h = go [] (asFree st)
   where
     go _ [] = Nothing
     go seen (slot@(AtlasSlot fx fy fw fh) : rest)
       | w + atlasPad <= fw && h + atlasPad <= fh =
-          let right = [AtlasSlot (fx + w + atlasPad) fy (fw - w - atlasPad) (h + atlasPad) | fw - w - atlasPad > atlasPad]
-              below = [AtlasSlot fx (fy + h + atlasPad) fw (fh - h - atlasPad) | fh - h - atlasPad > atlasPad]
+          let right = [AtlasSlot (fx + w + atlasPad) fy (fw - w - atlasPad) (h + atlasPad) | fw - w - atlasPad > 0]
+              below = [AtlasSlot fx (fy + h + atlasPad) fw (fh - h - atlasPad) | fh - h - atlasPad > 0]
            in Just (fx, fy, st {asFree = foldl' (flip (:)) (right ++ below ++ rest) seen})
       | otherwise = go (slot : seen) rest
 
@@ -243,14 +258,15 @@ recordWrite slot st
 data AtlasUpload
   = AtlasWhole
   -- ^ Upload the full buffer at the current atlas size (no texture yet,
-  -- resized since @since@, or earlier writes were trimmed from 'asWrites').
+  -- resized since @since@, or written since longer ago than the atlas's
+  -- recent write log reaches).
   | AtlasRegions [(Int, Int, Int, Int)]
   -- ^ Upload only these @(x, y, width, height)@ pixel rects into the existing texture.
   deriving (Eq, Show)
 
 -- | Current atlas dimensions, pixel buffer, generation, and the upload
--- required since generation @since@ (0 when uninitialized). 'Nothing' when
--- the atlas is empty or already at @since@.
+-- required since generation @since@ (0 when uninitialized). 'Nothing' until
+-- the first image is registered, and when the atlas is already at @since@.
 atlasChanges :: ImageAtlas -> Int -> IO (Maybe (Int, Int, ForeignPtr Word8, Int, AtlasUpload))
 atlasChanges (ImageAtlas ref) since = do
   st <- readIORef ref
@@ -266,8 +282,9 @@ atlasChanges (ImageAtlas ref) since = do
       then Nothing
       else Just (asW st, asH st, asPtr st, gen, upload)
 
--- | The atlas's width, height, pinned pixels and generation; 'Nothing' while
--- it holds no image. SDL uploads the pointer; do not copy to ByteString first.
+-- | The atlas's width, height, pinned pixels and generation; 'Nothing' until
+-- the first image is registered. SDL uploads the pointer; do not copy to
+-- ByteString first.
 atlasSnapshot :: ImageAtlas -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot atlas = fmap (\(w, h, p, gen, _) -> (w, h, p, gen)) <$> atlasChanges atlas 0
 

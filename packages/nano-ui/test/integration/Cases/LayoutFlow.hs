@@ -3,6 +3,7 @@ module Cases.LayoutFlow (tests) where
 import Spec
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.List (findIndex)
+import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (GeomCol, StyleCol, TagCol, TreeCol, geomStride, getClipRect, styleStride, tagStride, treeStride)
@@ -33,6 +34,10 @@ tests =
   , spec "center-body" runCenterTest
   , spec "flex-direction" runFlexDirectionTest
   , spec "grow-max-handoff" runGrowMaxHandoffTest
+  , spec "fixed-width-label" runFixedWidthLabelTest
+  , spec "fixed-outside-limits" runFixedOutsideLimitsTest
+  , spec "percent-across" runPercentAcrossTest
+  , spec "empty-label-line" runEmptyLabelLineTest
   ]
 
 red, green, blue, yellow :: Color
@@ -598,3 +603,98 @@ runGrowMaxHandoffTest ctx failed = do
   _ <- warmup2 ctx input0 col
   cs <- map (\r -> (rectY r, rectH r)) <$> rectsAt ctx [1, 2]
   assertEq failed cs [(0, 50), (50, 250)]
+  -- A negative weight grows nothing and takes nothing from the others.
+  let negative = rowWith (tight . gap 0 . fixedW 300 . fixedH 20) $ do
+        box fillW red
+        box (\l -> l {layoutWidth = Grow (-1)}) green
+  _ <- warmup2 ctx input0 negative
+  ns <- map (\r -> (rectX r, rectW r)) <$> rectsAt ctx [1, 2]
+  assertEq failed ns [(0, 268), (268, 32)]
+
+-- | A label with a fixed width ('fixedWH') measures that width, so a row
+-- places what follows past it, and one whose limits do not repeat it (a
+-- plain 'Fixed') wraps at it: paint draws as many lines as the label is
+-- tall, none wider than it. The test font's glyphs are as wide as a line is
+-- tall.
+runFixedWidthLabelTest :: Context -> IORef Int -> IO ()
+runFixedWidthLabelTest ctx failed = do
+  let ui = columnWith tight $ do
+        rowWith tight $ do
+          labelWith (fixedWH 100 20 . alignEnd) "Name"
+          void (button "Go")
+        labelWith (\l -> l {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap"
+  _ <- warmup2 ctx input0 ui
+  rs <- arenaRects ctx
+  lns <- (\spans -> [t | (_, t, _, _, _) <- spans, t `notElem` ["Name", "Go"]]) <$> collectTextSpans ctx
+  case rs of
+    [_, line, name, go, wrapped] -> do
+      assertEq failed (rectW name) 100
+      assert failed (rectX go >= rectX name + rectW name)
+      assertEq failed (rectX line + rectW line) (rectX go + rectW go)
+      assertEq failed (rectW wrapped) 100
+      assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
+      forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
+    _ -> assertEq failed (length rs) 5
+
+-- | A fixed size outside a node's limits takes the limit when measured, as
+-- when placed, so a row places what follows past it: a text field fixed 100
+-- wide keeps its 160 minimum, and so does a measured custom widget.
+runFixedOutsideLimitsTest :: Context -> IORef Int -> IO ()
+runFixedOutsideLimitsTest ctx failed = do
+  let narrow l = l {layoutWidth = Fixed 100, layoutHeight = Fixed 28}
+      field = defaultTextInputConfig {ticLayout = narrow (ticLayout defaultTextInputConfig)}
+      custom = defaultCustomWidgetSpec {widgetLayout = narrow (minW 160 defaultLayout), widgetMeasure = Just (\_ _ -> (100, 28))}
+      ui = rowWith tight $ do
+        (a, _) <- withValue "" (textInputConfigured' field)
+        b <- button' "Go"
+        (c, ()) <- customWidget custom
+        d <- button' "End"
+        pure [a, b, c, d]
+  rs <- map respRect <$> warmup2 ctx input0 ui
+  assertEq failed [160, 160] [rectW r | (i, r) <- zip [0 :: Int ..] rs, even i]
+  assert failed (and (zipWith (\r next -> rectX next >= rectX r + rectW r) rs (drop 1 rs)))
+  -- 'fixedWH', like 'fixedW', sets the width limits too.
+  (fixed, _) <- warmup2 ctx input0 (withValue "" (textInputConfigured' defaultTextInputConfig {ticLayout = fixedWH 100 28 (ticLayout defaultTextInputConfig)}))
+  assertEq failed 100 (rectW (respRect fixed))
+
+-- | A percentage width is a share of the width a column, a grid cell or a
+-- row offers, and a percentage height of a row's height. A label is placed
+-- and painted at its share, wrapped to as many lines as it is tall.
+runPercentAcrossTest :: Context -> IORef Int -> IO ()
+runPercentAcrossTest ctx failed = do
+  let ui = columnWith tight $ do
+        columnWith (tight . fixedW 400) $ do
+          box (percent 50 . alignEnd . fixedH 10) red
+          labelWith (percent 50) "percent sized text wraps at its own width"
+        gridWith 2 (tight . fixedW 401 . gap 1) $ do
+          box (percent 50 . fixedH 10) red
+          box (fixedH 10) blue
+        rowWith (tight . fixedH 40) $
+          box (\l -> l {layoutWidth = Fixed 10, layoutHeight = Percent 50}) red
+  _ <- warmup2 ctx input0 ui
+  rs <- arenaRects ctx
+  lns <- (\spans -> [t | (_, t, _, _, _) <- spans]) <$> collectTextSpans ctx
+  case rs of
+    [_, _, box1, wrapped, _, cell, _, _, rowBox] -> do
+      assertEq failed (rectX box1, rectW box1) (200, 200)
+      assertEq failed (rectW wrapped) 200
+      assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
+      forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
+      assertEq failed (rectW cell) 100
+      assertEq failed (rectH rowBox) 20
+    _ -> assertEq failed (length rs) 9
+
+-- | An empty label takes a line in a column, as the column measured it and
+-- as it does in a row, so the column ends at its last child.
+runEmptyLabelLineTest :: Context -> IORef Int -> IO ()
+runEmptyLabelLineTest ctx failed = do
+  let ui = columnWith tight $ do
+        columnWith tight (label "a" >> label "" >> label "b")
+        label "after"
+  _ <- warmup2 ctx input0 ui
+  rs <- arenaRects ctx
+  case rs of
+    [_, col, a, empty, b, _] -> do
+      assertEq failed (rectH empty) (rectH a)
+      assertEq failed (rectY col + rectH col) (rectY b + rectH b)
+    _ -> assertEq failed (length rs) 6

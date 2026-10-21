@@ -24,6 +24,7 @@ import NanoUI.Internal.Layout.Arena
   , getNodeRect
   , getScrollContentW
   , getStyleIdx
+  , getText
   , getWidgetId
   )
 import Text.Read (readMaybe)
@@ -37,6 +38,7 @@ tests =
   , pixelSpec "table-shared-scroll-metrics" runTableSharedScrollMetricsTest
   , pixelSpec "page-wheel-above-table" runPageWheelAboveTableTest
   , pixelSpec "table-wrap-row-stretch" runTableWrapRowStretchTest
+  , spec "table-wrap-cell-lines" runTableWrapCellLinesTest
   , spec "table-first-col" runTableFirstColWidthTest
   , spec "table-fill-width" runTableFillWidthTest
   , pixelSpec "table-cell-pad" runTableCellPadTest
@@ -258,6 +260,24 @@ runTableWrapRowStretchTest ctx failed = do
   assert failed (minimum (map fst rowBands) < 40)
   where
     dedup = foldr (\x acc -> if x `elem` acc then acc else x : acc) []
+
+-- | A body cell that wraps is as tall as the lines paint draws in it: the
+-- solve wraps the text inside the cell's inset, as paint does. Two words
+-- fit on a line of the 90px cell, but not inside its inset.
+runTableWrapCellLinesTest :: Context -> IORef Int -> IO ()
+runTableWrapCellLinesTest ctx failed = do
+  let cfg = defaultTableConfig {tableColSizes = [ColFixed 120, ColFixed 90]}
+      notes = T.unwords (replicate 12 "abc")
+      ui = sortedTable (tableConfigured cfg id "wrap-lines" (headed "Name" fst <> headed "Notes" snd) [("row", notes)])
+  _ <- warmup2 ctx (withInputOff 400 400) ui
+  let na = ctxNodeArena ctx
+  mCell <- findNodeM na (\i -> (== notes) <$> getText na i)
+  spans <- collectTextSpans ctx
+  assertJust failed mCell $ \cell -> do
+    Rect cx cy cw ch <- getNodeRect na cell
+    let lns = [r | (r, t, _, _, _) <- spans, "abc" `T.isPrefixOf` t, rectX r >= cx, rectX r < cx + cw, rectY r >= cy]
+    assertEq failed (length lns) 12
+    assert failed (sum (map rectH lns) <= ch)
 
 -- Resizing a column past the pane's right edge overflows the body. On every
 -- drag frame the header row must stay inside the row scroller's clip, with

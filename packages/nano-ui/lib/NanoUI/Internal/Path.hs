@@ -225,7 +225,8 @@ roundedRectCorners box@(Rect x0 y0 w h) tl0 tr0 br0 bl0
         , SegClose
         ]
   where
-    positive r = if r > 0 then r else 0
+    -- Capped, so an infinite radius shrinks to fit like a huge one, not to NaN.
+    positive r = if r > 0 then min r 1e30 else 0
     x = min x0 (x0 + w)
     y = min y0 (y0 + h)
     aw = abs w
@@ -495,7 +496,8 @@ curveTolerance s
 -- 'SegClose' ended it. Curves are subdivided until they are within @tol@ of
 -- their chords after transforming, so scaled-up curves get more points. An
 -- arc gets @steps r sweep@ chords, where @r@ is its larger transformed
--- radius (the canvas passes 'arcSteps'). Segments with a NaN or infinite
+-- radius (the canvas passes a count that keeps chords within @tol@ of the
+-- arc). Segments with a NaN or infinite
 -- coordinate are skipped; a transform with one yields no rings.
 flattenPath :: Float -> (Float -> Float -> Int) -> Transform -> Path -> Rings
 flattenPath tol steps t (Path segs)
@@ -1162,7 +1164,7 @@ fillPathOps tol t rule path paint = concatMap polygonOp (fillComponents rule rin
 
 -- | Draw ops that stroke a path, flattened through @t@ within @tol@: one
 -- 'StrokePolyline' per subpath or per dash. Width and dash lengths scale by
--- the transform's 'averageStretch'.
+-- the square root of the transform's area scale.
 strokePathOps :: Float -> Transform -> Stroke -> Path -> Paint -> [DrawOp]
 strokePathOps tol t st path paint
   | not (width > 0) = []
@@ -1177,7 +1179,7 @@ strokePathOps tol t st path paint
       | n == 1 = [line False (strokeCap st) (dot pts) | strokeCap st /= ButtCap]
       | n < 2 = []
       | not (null (strokeDash st))
-      , Just pieces <- dashes (strokeCap st /= ButtCap) (map (* k) (strokeDash st)) (strokeDashOffset st * k) (closed && n > 2) pts =
+      , Just pieces <- dashes (strokeCap st /= ButtCap) (map (* k) (strokeDash st)) (strokeDashOffset st * k) closed pts =
           map (line False (strokeCap st)) pieces
       -- A closed subpath of two points is a line that turns back on itself
       -- at each end: a round join rounds the ends, and a miter (past any
@@ -1305,7 +1307,8 @@ fillComponents rule rs =
     boxInside (ax0, ay0, ax1, ay1) (bx0, by0, bx1, by1) = ax0 >= bx0 && ay0 >= by0 && ax1 <= bx1 && ay1 <= by1
 
 -- | Whether every point of ring @q@ is inside ring @r@, by ray crossing
--- parity.
+-- parity. A point on @r@'s outline may count either way: on a rect's left or
+-- top edge it is inside, on its right or bottom edge outside.
 encloses :: PrimArray Float -> PrimArray Float -> Bool
 encloses r q = every 0
   where
@@ -1582,8 +1585,8 @@ maxDashes = 4096
 -- Rects keep their op under transforms that keep sides axis-aligned (scale,
 -- flip, quarter turn). Rounded rects also need a uniform scale, and circles
 -- a transform that keeps them round. Otherwise they become polygons. Lines,
--- polygons and triangles transform their points, with widths scaled by
--- 'averageStretch'.
+-- polygons and triangles transform their points, with widths scaled by the
+-- square root of the transform's area scale.
 --
 -- A quad gradient under an axis-aligned transform fills the transformed
 -- rect, each corner taking the colour of the nearest transformed corner,
@@ -1592,13 +1595,14 @@ maxDashes = 4096
 -- colours, triangulated as the untransformed quad is.
 --
 -- An unrotated image stays a rect under a transform without rotation or
--- skew, flipping its UVs for a flip. Otherwise it is rotated: its centre
--- moves and it scales and turns with the transform. Text moves its anchor
--- and scales its font by 'averageStretch'; glyphs are not rotated. A clip
+-- skew, flipping its UVs for a flip or a negative size. Otherwise it is
+-- rotated: its centre moves and it scales and turns with the transform. Text
+-- moves its anchor and scales its font as widths scale; glyphs are not
+-- rotated. A clip
 -- becomes the bounding box of its transformed rect.
 --
 -- A transform with a NaN or infinite entry draws nothing, as does an empty
--- rounded rect or circle.
+-- rounded rect, quad gradient or circle.
 transformOp :: Float -> Transform -> DrawOp -> [DrawOp]
 transformOp tol t@(Transform a b c d _ _) op
   | not (transformFinite t) = []
@@ -1639,6 +1643,7 @@ transformOp tol t@(Transform a b c d _ _) op
       FillPolygon pts rings tris sh -> [FillPolygon (points pts) rings tris sh]
       StrokePolyline pts w closed cap join limit sh -> [StrokePolyline (points pts) (w * k) closed cap join limit sh]
       FillQuadGradient r tl tr br bl
+        | empty r -> []
         -- A quad blends over two triangles split from its top left to its
         -- bottom right. When the old top left lands on another corner that
         -- diagonal changes, which changes the blend unless the corner
@@ -1672,8 +1677,11 @@ transformOp tol t@(Transform a b c d _ _) op
           channel sh (Color w) = fromIntegral (w `div` sh `mod` 256) :: Int
       DrawImage r angle tex u0 v0 u1 v1 col
         | angle == 0 && levelAxes ->
-            let (u0', u1') = if a < 0 then (u1, u0) else (u0, u1)
-                (v0', v1') = if d < 0 then (v1, v0) else (v0, v1)
+            -- The box runs left to right and top to bottom, so a flip, or a
+            -- negative width or height (drawn mirrored), flips the UVs.
+            let Rect _ _ rw rh = r
+                (u0', u1') = if (a < 0) /= (rw < 0) then (u1, u0) else (u0, u1)
+                (v0', v1') = if (d < 0) /= (rh < 0) then (v1, v0) else (v0, v1)
              in [DrawImage (box r) 0 tex u0' v0' u1' v1' col]
         | otherwise -> [turnedImage r angle tex u0 v0 u1 v1 col]
       DrawText x y ax ay txt col

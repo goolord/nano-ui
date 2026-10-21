@@ -17,7 +17,26 @@ tests =
   , spec "grid-in-column-height" runGridInColumnHeightTest
   , spec "grid-wrapped-row-height" runGridWrappedRowHeightTest
   , spec "adaptive-grid-in-column-height" runAdaptiveGridInColumnHeightTest
+  , spec "grid-cell-align" runGridCellAlignTest
   ]
+
+-- | A fit panel aligned to the middle or the bottom of its grid row keeps
+-- its own height there, so it stays inside the row.
+runGridCellAlignTest :: Context -> IORef Int -> IO ()
+runGridCellAlignTest ctx failed =
+  forM_ [(alignMid, 0.5), (alignBottom, 1)] $ \(align, frac) -> do
+    let ui = columnWith tight $ gridWith 2 (tight . gap 0) $ do
+          panelWith align (label "a")
+          panelWith id (replicateM_ 4 (label "x"))
+          label "next"
+    _ <- warmup2 ctx (withInput 400 400) ui
+    rs <- arenaRects ctx
+    case rs of
+      [_, _, short, _, tall, _, _, _, _, next] -> do
+        assert failed (rectH short < rectH tall)
+        assertEq failed (rectY short - rectY tall) ((rectH tall - rectH short) * frac)
+        assert failed (rectY next >= rectY short + rectH short)
+      _ -> assertEq failed (length rs) 10
 
 runGridWrappedRowHeightTest :: Context -> IORef Int -> IO ()
 runGridWrappedRowHeightTest ctx failed = do
@@ -31,6 +50,8 @@ runGridWrappedRowHeightTest ctx failed = do
   forM_ [240, 600, 180, 240, 240] $ \width -> do
     _ <- runFrame ctx (withInput 800 1200) (ui width)
     rs <- arenaRects ctx
+    spans <- collectTextSpans ctx
+    let wrappedLines = [t | (_, t, _, _, _) <- spans, t `notElem` ["short", "next", "after"]]
     case rs of
       [_, gridRect, short, wrapped, next, after] -> do
         assert failed (rectH wrapped > rectH after)
@@ -38,6 +59,11 @@ runGridWrappedRowHeightTest ctx failed = do
         assert failed (rectY next >= rectY wrapped + rectH wrapped)
         assert failed (rectY after >= rectY next + rectH next)
         assertEq failed (rectY gridRect + rectH gridRect) (rectY next + rectH next)
+        -- Paint wraps the text where the solve did: in as many lines as its
+        -- cell is tall, none wider than the cell. The test font's glyphs
+        -- are as wide as a line is tall.
+        assertEq failed (rectH wrapped) (rectH after * fromIntegral (length wrappedLines))
+        forM_ wrappedLines $ \t -> assert failed (fromIntegral (T.length t) * rectH after <= rectW wrapped)
       _ -> assertEq failed (length rs) 6
 
 -- | A fill-width grid inside a column is as tall as its rows, not as all of

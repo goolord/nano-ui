@@ -10,6 +10,7 @@ tests =
   , spec "modal-fits-text" runModalFitsTextTest
   , spec "modal-no-phantom-scroll" runModalNoPhantomScrollTest
   , spec "modal-close-damage" runModalCloseDamageTest
+  , spec "modal-closed-by-rerun" runModalClosedByRerunTest
   , spec "modal-fractional-scale-no-scroll" runModalFractionalScaleNoScrollTest
   , spec "modal-fill-label-fits" runModalFillLabelFitsTest
   ]
@@ -140,6 +141,22 @@ runModalCloseDamageTest ctx failed = do
   -- Closing: the escape frame removes the modal and repaints the whole window.
   _ <- runFrame ctx esc ui
   assertEq failed DamageFull =<< takeDamage ctx
+
+-- | A modal its Var closes is gone from the frame that closed it, whose
+-- second view pass no longer builds it: the next frame does not repaint the
+-- whole window for it a second time.
+runModalClosedByRerunTest :: Context -> IORef Int -> IO ()
+runModalClosedByRerunTest ctx failed = do
+  let inp0 = withInputOff 320 240
+  open <- newVar True
+  let ui = column $ do
+        _ <- button "Outside"
+        modal open "Title" (label "body")
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+  assertEq failed 2 =<< lastFramePasses ctx
+  _ <- runFrame ctx inp0 ui
+  assert failed . (/= DamageFull) =<< takeDamage ctx
 
 -- At fractional display scales, fixed-size content must fit a content-sized
 -- modal without accumulating rounding error through nested containers.

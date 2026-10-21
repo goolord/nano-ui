@@ -45,6 +45,13 @@ drawingVersioned version f build = do
 -- | Like 'drawingVersioned', but the layout itself comes from @compute@, which
 -- only reruns when the envelope, line height, content key, or modifier result
 -- change.
+--
+-- > drawingCached w h lineH content f compute build
+--
+-- @w@ and @h@ are the envelope, the drawing's natural size; @lineH@ is the
+-- line height its text is measured with; @content@ is the content version, as
+-- in 'drawingVersioned' (0 is unversioned); and @f@ is the layout modifier,
+-- whose result on 'defaultLayout' is compared but not used.
 drawingCached ::
   Double ->
   Double ->

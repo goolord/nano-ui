@@ -44,13 +44,10 @@ module NanoUI.Internal.Draw
   , pushRect
   , pushQuadGradient
   , pushImage
-  , pushImageRotated
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
-  , pushCircle
   , pushLine
-  , pushStrokeAA
   , pushFilledTriangle
   , pushPolylineAA
   , points3
@@ -65,6 +62,7 @@ module NanoUI.Internal.Draw
   ) where
 
 import Control.Monad (forM_, unless, when)
+import Data.Char (isSpace)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
@@ -80,8 +78,8 @@ import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg)
 import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect)
 
--- | Pixel box for a 'DrawText' using host advances. diagrams text has no
--- envelope, so plot sizing uses this instead of `fontSizeL`.
+-- | The line box, in logical pixels, that a 'DrawText' of the text anchored
+-- at @(x, y)@ by @ax@ and @ay@ occupies, measured with @fm@'s advances.
 drawTextBox :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
 drawTextBox fm x y ax ay t =
   let tw = lineWidth fm t
@@ -144,11 +142,11 @@ glyphSlackLines = 4
 -- | A shaped line's glyph quads from pen @(px, py)@, sheared by @slant@
 -- around the baseline like 'pushGlyphQuads'. Glyphs wholly left or right of
 -- the current clip emit nothing. Glyph x offsets rise in visual order, to
--- within 'glyphSlackLines', so a binary search finds the first glyph that
--- can reach the clip and the walk stops at the first one that starts well
--- past it: a long line in a narrow view costs the glyphs it shows plus a
--- search. Glyphs on another atlas page than the one before them start a new
--- draw command on that page's texture.
+-- within 'glyphSlackLines', so binary searches find the first glyph that
+-- can reach the clip and the first that starts well past it: a long line in
+-- a narrow view costs, and reserves buffer room for, the glyphs it shows
+-- plus two searches. Glyphs on another atlas page than the one before them
+-- start a new draw command on that page's texture.
 pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> ShapedGlyphs -> Color -> IO ()
 pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
   let !count = sizeofPrimArray quads `div` 8
@@ -161,39 +159,42 @@ pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
         !right = cx + cw + lean
         !slack = glyphSlackLines * fmLineHeight fm
         at k = indexPrimArray quads k
-        -- The first glyph in [lo, hi) whose x reaches @left - slack@. Every
-        -- glyph before it ends left of the clip.
-        firstReaching !lo !hi
+        -- The first glyph in [lo, hi) whose x reaches @thr@.
+        firstReaching !thr !lo !hi
           | lo >= hi = lo
           | otherwise =
               let !mid = (lo + hi) `div` 2
-               in if px + at (mid * 8) < left - slack
-                    then firstReaching (mid + 1) hi
-                    else firstReaching lo mid
-        !start = firstReaching 0 count
+               in if px + at (mid * 8) < thr
+                    then firstReaching thr (mid + 1) hi
+                    else firstReaching thr lo mid
+        -- Every glyph before @start@ ends left of the clip, and every glyph
+        -- from @end@ on starts right of it.
+        !start = firstReaching (left - slack) 0 count
+        !end = firstReaching (right + slack) start count
         !(r, g, b, a) = unpackColorF col
         !baselineY = py + fmAscent fm
         -- The glyphs from @q0@ on that are on atlas page @page@, until one
         -- that is not.
         drawPage !q0 !page = do
           setTexture da (glyphPageTextureId page)
-          let !shown = count - q0
+          let !shown = end - q0
               !pageU = fromIntegral page
           withVertsReserve da (shown * 4) (shown * 6) $ \vp ip base baseIdx commit -> do
             let go !q !m
-                  | q >= count = commit (m * 4) (m * 6)
+                  | q >= end = commit (m * 4) (m * 6)
                   | otherwise = do
                       let !o = q * 8
                           !gx = px + at o
                           !gw = at (o + 2)
                           !u0 = at (o + 4)
-                      if gx > right + slack
-                        -- This glyph and every later one start right of the clip.
-                        then commit (m * 4) (m * 6)
-                        else if gx + gw < left || gx > right
+                      if gx + gw < left || gx > right
                         then go (q + 1) m
                         else if u0 < pageU || u0 >= pageU + 1
-                        then commit (m * 4) (m * 6) >> drawPage q (truncate u0)
+                        then
+                          -- A glyph whose u is on no page is skipped.
+                          if u0 < 0 || u0 >= fromIntegral glyphAtlasPages
+                            then go (q + 1) m
+                            else commit (m * 4) (m * 6) >> drawPage q (truncate u0)
                         else do
                           let !gy = py + at (o + 1)
                               !gh = at (o + 3)
@@ -247,9 +248,9 @@ pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 
 -- relies on its sub-pixel pass offsets. Every quad shares one arena
 -- reservation. A non-zero @slant@ shears glyphs around the shared baseline for
 -- synthetic oblique, so stems stay parallel and descenders lean left. A glyph
--- the font lacks draws an upright advance box on the device grid. As in
--- 'pushShapedQuads', glyphs wholly outside the clip emit nothing, and the
--- walk stops once the pen is well past it.
+-- the font lacks, other than whitespace, draws an upright advance box on the
+-- device grid. As in 'pushShapedQuads', glyphs wholly outside the clip emit
+-- nothing, and the walk stops once the pen is well past it.
 pushGlyphQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> T.Text -> Color -> IO ()
 pushGlyphQuads da fm slant px py txt col = do
   let !cap = T.length txt
@@ -272,18 +273,22 @@ pushGlyphQuads da fm slant px py txt col = do
               Just (c, rest)
                 | ox > stop -> pure q
                 | otherwise -> do
-                    let !adv = kernedAdvance fm prev c
-                        next !q' = walk q' (ox + adv) (Just c) rest
+                    -- Kerning against the character before moves this one.
+                    let !gx = case prev of
+                          Nothing -> ox
+                          Just p -> ox + fmKerning fm p c
+                        !adv = fmAdvance fm c
+                        next !q' = walk q' (gx + adv) (Just c) rest
                     case fmGlyph fm c of
                       Nothing
-                        | adv > 0 && c /= ' ' && not (outside ox adv) -> do
-                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale ox) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
+                        | adv > 0 && not (isSpace c) && not (outside gx adv) -> do
+                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale gx) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
                             next (q + 1)
                         | otherwise -> next q
                       Just gq
-                        | outside (ox + gqX gq) (gqW gq) -> next q
+                        | outside (gx + gqX gq) (gqW gq) -> next q
                         | otherwise -> do
-                            pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (ox + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
+                            pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (gx + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
                             next (q + 1)
       !k <- walk 0 px Nothing txt
       commit (k * 4) (k * 6)
@@ -365,20 +370,24 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
       let font'
             | k == 1 = font
             | otherwise = font {textFontSize = k * (if textFontSize font > 0 then textFontSize font else size)}
-      (styledFm, _) <- resolve font'
+      (styledFm, native) <- resolve font'
       unlessOffClip styledFm (textBoxTop styledFm y ay) $ do
         prepared <- prepareFontMetrics styledFm t
         let Rect px py _ _ = drawTextBox prepared x y ax ay t
-        styled px py font' t c
+        pushStyled prepared native font' px py t c
     emitOne op = pushShapeOp da op
     -- Styled text with its line box's top-left corner at (x, y).
     styled x y font t c = do
       (styledFm, native) <- resolve font
-      let weight = if native then WeightNormal else textFontWeight font
-          fstyle = if native then FontStyleNormal else textFontStyle font
       unlessOffClip styledFm y $ do
         prepared <- prepareFontMetrics styledFm t
-        pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+        pushStyled prepared native font x y t c
+    -- Text in @font@, with metrics prepared for it, synthesizing the font's
+    -- weight and slant unless the host renders them natively.
+    pushStyled prepared native font x y t c =
+      let weight = if native then WeightNormal else textFontWeight font
+          fstyle = if native then FontStyleNormal else textFontStyle font
+       in pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
     -- Text whose line box, from @top@, lies wholly above or below the clip
     -- by more than the glyph slack draws nothing ('pushShapedQuads' culls
     -- only across), so it is skipped before it is shaped: a long paragraph

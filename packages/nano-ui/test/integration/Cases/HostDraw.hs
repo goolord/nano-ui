@@ -3,6 +3,7 @@ module Cases.HostDraw (tests) where
 import Spec
 import Data.List (nub, sort)
 import Data.Primitive.PrimArray (primArrayFromList)
+import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
@@ -12,11 +13,56 @@ import NanoUI.Internal.Context (setDrawExternalText, setDrawSnapScale, setDrawSq
 tests :: [Spec]
 tests =
   [ spec "draw-square-geometry" runSquareGeometryTest
+  , spec "draw-thick-rounded-stroke" runThickRoundedStrokeTest
   , spec "draw-external-text" runExternalTextTest
+  , spec "draw-empty-clip" runEmptyClipTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
+  , spec "draw-polygon-bad-index" runPolygonBadIndexTest
   , spec "draw-glyph-pages" runGlyphPagesTest
+  , spec "draw-glyph-page-range" runGlyphPageRangeTest
+  , spec "draw-long-shaped-line" runLongShapedLineTest
   , spec "draw-text-input-font" runTextInputFontTest
+  , spec "draw-glyph-kerning" runGlyphKerningTest
+  , spec "draw-missing-glyph-space" runMissingGlyphSpaceTest
   ]
+
+-- | Glyphs drawn by character move a kerned pair's second glyph: "AV"
+-- kerned 2 closer draws the V 2 nearer the A, and the A after it where it
+-- would be anyway. Aligned to the end, the last V's ink meets the edge.
+runGlyphKerningTest :: Context -> IORef Int -> IO ()
+runGlyphKerningTest base failed = do
+  let uOf c = if c == 'V' then 0.6 else 0.25
+      fm =
+        (monospaceMetrics 10)
+          { fmAdvance = \c -> if c == 'M' then 12 else 10
+          , fmKerning = \a b -> if a == 'A' && b == 'V' then -2 else 0
+          , fmGlyph = \c -> Just (GlyphQuad 0 0 6 10 (uOf c) 0 (uOf c + 0.25) 1)
+          }
+      ctx = withFontMetrics base fm
+      ui = rowWith (fixedW 100 . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "AVAV")
+  (lab, dd) <- warmupDraw ctx (withInput 300 100) ui
+  xus <- withForeignPtr (drawVertices dd) $ \vp ->
+    withForeignPtr (drawIndices dd) $ \ip ->
+      fmap concat . forM [c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId] $ \cmd ->
+        forM [cmdIndexOffset cmd .. cmdIndexOffset cmd + cmdIndexCount cmd - 1] $ \i -> do
+          vi <- peekByteOff ip (fromIntegral i * indexSize) :: IO Word32
+          let at o = peekByteOff vp (fromIntegral vi * vertexSize + o) :: IO Float
+          (,) <$> at 0 <*> at 24
+  let aXs = [x | (x, u) <- xus, u < 0.55]
+      vXs = [x | (x, u) <- xus, u > 0.55]
+      Rect bx _ bw _ = respRect lab
+  if null aXs || null vXs
+    then assert failed False
+    else do
+      assertEq failed (8, 18) (minimum vXs - minimum aXs, maximum aXs - 6 - minimum aXs)
+      assert failed (abs (maximum vXs - (bx + bw)) <= 0.6)
+
+-- | A character with no glyph draws an advance box, but whitespace of any
+-- kind draws nothing.
+runMissingGlyphSpaceTest :: Context -> IORef Int -> IO ()
+runMissingGlyphSpaceTest ctx failed = do
+  (_, dd, _) <- runFrame ctx (withInput 300 100) (label "a\x00A0\&b\x3000\&c d")
+  assertEq failed (4 * 6) (sum [cmdIndexCount c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId])
 
 -- | A text field set in a larger font draws its value's glyphs in that font:
 -- they cover what a label in the same font covers, and not what the base
@@ -85,6 +131,28 @@ runGlyphPagesTest ctx failed = do
   firstUs <- concat <$> mapM vertexUs (onPage 0)
   assert failed (0.25 `elem` firstUs && 0.5 `elem` firstUs)
 
+-- | A shaped glyph whose u lies outside every atlas page is skipped: the
+-- run binds no texture past the pages and ends, even for a u just below 0.
+runGlyphPageRangeTest :: Context -> IORef Int -> IO ()
+runGlyphPageRangeTest ctx failed = do
+  let glyph x u = [x, 0, 6, 10, u, 0.5, u + 0.25, 0.75]
+      glyphs = ShapedGlyphs (primArrayFromList (concat [glyph 0 0.25, glyph 8 (-0.25), glyph 16 4.25, glyph 24 (-1)]))
+      fm = (monospaceMetrics 12) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just glyphs)))}
+  (_, dd, _) <- runFrame (withFontMetrics ctx fm) (withInput 300 200) (label "abcd")
+  assertEq failed [glyphAtlasTextureId] (nub [cmdTextureId c | c <- drawCmdElems dd, cmdIndexCount c > 0])
+
+-- | A shaped line far longer than its clip is wide reserves room only for
+-- the glyphs that can show, so it does not grow the draw buffers.
+runLongShapedLineTest :: Context -> IORef Int -> IO ()
+runLongShapedLineTest ctx failed = do
+  let glyphs = ShapedGlyphs (primArrayFromList (concat [[fromIntegral k * 6, 0, 6, 10, 0.25, 0.5, 0.5, 0.75] | k <- [0 .. 9999 :: Int]]))
+      fm = (monospaceMetrics 12) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just glyphs)))}
+      inp = withInput 300 200
+      ui = void (scrollArea (fixedWH 120 40) (label "abc"))
+  (_, before, _) <- runFrame ctx inp ui
+  (_, after, _) <- runFrame (withFontMetrics ctx fm) inp ui
+  assert failed (drawVertices before == drawVertices after)
+
 -- | Alpha of every vertex of every indexed triangle.
 triangleAlphas :: DrawData -> IO [(Float, Float, Float)]
 triangleAlphas dd =
@@ -125,6 +193,22 @@ runSquareGeometryTest ctx failed = do
   assert failed (all uniform squareTris)
   setDrawSquareGeometry ctx False
 
+-- | A rounded border wider than twice its radius keeps its ink inside its
+-- box: the corner arcs end on the corner radius.
+runThickRoundedStrokeTest :: Context -> IORef Int -> IO ()
+runThickRoundedStrokeTest ctx failed = do
+  let blue = colorRGBA 0 0 255 255
+      ops (Rect x y _ _) = [StrokeRoundedRect (Rect (x + 10) (y + 10) 40 40) 1 8 blue]
+  (_, dd, _) <- runFrame ctx (withInput 300 200) (void (drawing (fixedWH 60 60) (smallArrayFromList . ops)))
+  inked <- withForeignPtr (drawVertices dd) $ \vp ->
+    fmap concat . forM [0 .. drawVertexCount dd - 1] $ \i -> do
+      let at o = peekByteOff vp (i * vertexSize + o) :: IO Float
+      (x, y, rgb, a) <- (,,,) <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16) <*> at 20
+      pure [(x, y) | rgb == (0, 0, 1), a > 0]
+  let extent f = maximum (map f inked) - minimum (map f inked)
+  assert failed (not (null inked))
+  assert failed (extent fst <= 40 && extent snd <= 40)
+
 -- | External text keeps text spans but pushes no text quads, so the buffer
 -- does not grow with the label length.
 runExternalTextTest :: Context -> IORef Int -> IO ()
@@ -138,6 +222,15 @@ runExternalTextTest ctx failed = do
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
   setDrawExternalText ctx False
+
+-- | Geometry clipped to nothing gets no command, which a host would still
+-- draw into the pixel its empty clip rounds to.
+runEmptyClipTest :: Context -> IORef Int -> IO ()
+runEmptyClipTest ctx failed = do
+  let ops r = [FillRect r (colorRGBA 255 255 255 255), PushClip (Rect 0 0 10 10), PushClip (Rect 20 20 10 10), FillRect r (colorRGBA 255 0 0 255), PopClip, PopClip]
+  (_, dd, _) <- runFrame ctx (withInput 300 200) (void (drawing (fixedWH 60 60) (smallArrayFromList . ops)))
+  assert failed (not (drawCmdNull dd))
+  assertEq failed [] [c | c <- drawCmdElems dd, cmdClipW c <= 0 || cmdClipH c <= 0]
 
 -- | Circles sharing a centre stay concentric at a fractional centre, filled
 -- or stroked, whatever their radii. Pixel snapping must preserve their shared centre.
@@ -177,3 +270,14 @@ vertexColours dd =
     forM [0 .. drawVertexCount dd - 1] $ \i -> do
       let at o = peekByteOff vp (i * vertexSize + o) :: IO Float
       (,,) <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16)
+
+-- | A polygon whose triangles index past its points draws nothing, rather
+-- than triangles into other geometry or past the frame's vertices.
+runPolygonBadIndexTest :: Context -> IORef Int -> IO ()
+runPolygonBadIndexTest ctx failed = do
+  let tri = primArrayFromList [0, 0, 40, 0, 0, 40]
+      ops = [FillPolygon tri (primArrayFromList [0, 3]) (primArrayFromList [0, 1, 100]) (Flat (colorRGBA 255 0 0 255))]
+  (_, dd, _) <- runFrame ctx (withInput 300 200) (void (drawing (fixedWH 60 60) (const (smallArrayFromList ops))))
+  indices <- withForeignPtr (drawIndices dd) $ \ip ->
+    forM [0 .. drawIndexCount dd - 1] $ \i -> peekByteOff ip (i * indexSize) :: IO Word32
+  assert failed (all ((< drawVertexCount dd) . fromIntegral) indices)

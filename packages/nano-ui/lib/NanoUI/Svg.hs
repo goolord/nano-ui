@@ -16,14 +16,14 @@ module NanoUI.Svg
   , rasterizeSvgIn
   ) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Maybe (fromMaybe)
 import Data.Foldable (toList)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word8)
 import Foreign.Storable (pokeByteOff)
@@ -103,7 +103,7 @@ flatten (Matrix a b c d e f) segs =
 --------------------------------------------------------------------------------
 
 -- | Polygons covering a stroke of width @w@ along the contours, each wound
--- counter-clockwise so a non-zero fill of all of them is their union.
+-- clockwise on screen so a non-zero fill of all of them is their union.
 strokePolygons :: Float -> LineCap -> LineJoin -> Float -> Rings -> Rings
 strokePolygons w cap join miterLimit contours = buildRings (strokeWalk w cap join miterLimit (cleanRings False contours))
 
@@ -115,10 +115,10 @@ strokeWalk w cap join miterLimit contours point end =
   let hw = w / 2
       emitP (Point x y) = point x y
       -- Twice the signed area of a polygon's corners, positive when they
-      -- wind counter-clockwise.
+      -- wind clockwise on screen, as 'P.shoelace' counts.
       turn (Point x0 y0) (Point x1 y1) = x0 * y1 - x1 * y0
       -- A triangle or quad in the order given, or reversed when that winds
-      -- clockwise.
+      -- anticlockwise on screen.
       triangle a b c = do
         if turn a b + turn b c + turn c a < 0
           then emitP c >> emitP b >> emitP a
@@ -180,13 +180,12 @@ strokeWalk w cap join miterLimit contours point end =
             CapSquare -> square (pt 0)
           _ -> do
             forM_ [0 .. n - 2] $ \i -> segmentQuad (pt i) (pt (i + 1))
-            when closed $ segmentQuad (pt (n - 1)) (pt 0)
             if closed
-              then forM_ [0 .. n - 1] cornerAt
-              else forM_ [1 .. n - 2] cornerAt
-            unless closed $ do
-              endCap (pt 1) (pt 0)
-              endCap (pt (n - 2)) (pt (n - 1))
+              then segmentQuad (pt (n - 1)) (pt 0) >> forM_ [0 .. n - 1] cornerAt
+              else do
+                forM_ [1 .. n - 2] cornerAt
+                endCap (pt 1) (pt 0)
+                endCap (pt (n - 2)) (pt (n - 1))
    in mapM_ contour contours
 
 --------------------------------------------------------------------------------
@@ -195,7 +194,9 @@ strokeWalk w cap join miterLimit contours point end =
 
 -- | Render the document into a @width@ by @height@ RGBA image (rows top to
 -- bottom), scaled to fit and centred as SVG's default @xMidYMid meet@ does.
--- @current@ is what @currentColor@, and an unspecified fill, paint with.
+-- @current@ is what @currentColor@ paints with, and an unspecified fill too
+-- when the document is one colour ('svgMonochrome'); otherwise an
+-- unspecified fill is black, as in SVG.
 rasterizeSvg :: Int -> Int -> Color -> Svg -> ByteString
 rasterizeSvg width height current (Svg svg) =
   rasterizeView width height (meet (documentViewBox svg) (fromIntegral width) (fromIntegral height)) current svg
@@ -230,15 +231,13 @@ rasterizeView width height view@(Matrix a b c d e f) current svg
         let al = indexPrimArray image (i * 4 + 3)
             byte x = fromIntegral (clamp 0 255 (round (x * 255) :: Int)) :: Word8
             unpremul k = pokeByteOff out (i * 4 + k) (if al <= 0 then 0 else byte (indexPrimArray image (i * 4 + k) / al))
-        unpremul 0
-        unpremul 1
-        unpremul 2
+        mapM_ unpremul [0, 1, 2]
         pokeByteOff out (i * 4 + 3) (byte al)
   where
     image = runST $ do
       -- Premultiplied RGBA in [0, 1].
       acc <- newZeroedPrimArray (width * height * 4)
-      cov <- newPrimArray (width * height)
+      cov <- newZeroedPrimArray (width * height)
       forM_ (documentShapes svg) $ \(Shape segs m style) -> do
         let full = view `multiply` m
             contours = flatten full segs
@@ -252,29 +251,29 @@ rasterizeView width height view@(Matrix a b c d e f) current svg
             -- monochrome document, so an icon without paints tints.
             fill = fromMaybe (if documentMonochrome svg then PaintCurrent else PaintColor black) (styleFill style)
         forM_ (paintColor fill) $ \col -> do
-          coverPolygons width height cov (styleFillRule style) contours
-          composite width height acc cov col (opacity * styleFillOpacity style)
+          rows <- coverPolygons width height cov (styleFillRule style) contours
+          composite width acc cov rows col (opacity * styleFillOpacity style)
         forM_ (paintColor (fromMaybe PaintNone (styleStroke style))) $ \col ->
           when (styleStrokeWidth style > 0) $ do
             let wanted = styleStrokeWidth style * scaleOf
                 w = max 1 wanted
                 polys = strokePolygons w (styleCap style) (styleJoin style) (styleMiterLimit style) contours
-            coverPolygons width height cov NonZero polys
+            rows <- coverPolygons width height cov NonZero polys
             -- A hairline thinner than a pixel keeps its weight as opacity.
-            composite width height acc cov col (opacity * styleStrokeOpacity style * min 1 (wanted / w))
+            composite width acc cov rows col (opacity * styleStrokeOpacity style * min 1 (wanted / w))
       unsafeFreezePrimArray acc
 
--- | Coverage of the rings with at least three points in @cov@ (cleared
--- first): five sample rows a pixel, each span's coverage split exactly
--- across the pixels it crosses.
+-- | Coverage of the rings with at least three points, added to @cov@, which
+-- must be zero: five sample rows a pixel, each span's coverage split exactly
+-- across the pixels it crosses. Returns the rows covered, as the first and
+-- one past the last.
 --
 -- Edges are counted per pixel row they start in and then written in row
 -- order, so the sweep down the rows admits each row's edges as a block,
 -- drops an edge past its bottom, and insertion sorts a row's few crossings
 -- in a scratch array.
-coverPolygons :: Int -> Int -> MutablePrimArray s Float -> FillRule -> Rings -> ST s ()
+coverPolygons :: Int -> Int -> MutablePrimArray s Float -> FillRule -> Rings -> ST s (Int, Int)
 coverPolygons width height cov rule rings@(Rings pts starts _) = do
-  setPrimArray cov 0 (width * height) 0
   let capacity = sizeofPrimArray pts `div` 2
       -- Each edge that can cover a row: its first row, top, bottom, x at the
       -- top, slope and winding.
@@ -321,6 +320,11 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
     writePrimArray edges (e * 4 + 3) slope
     writePrimArray windings e (dir :: Int)
   totalEdges <- readPrimArray rowStart height
+  -- Above the first row an edge starts in there is nothing to cover.
+  let firstRow !r
+        | r >= height = pure height
+        | otherwise = readPrimArray rowStart (r + 1) >>= \e -> if e > 0 then pure r else firstRow (r + 1)
+  top <- firstRow 0
   active <- newPrimArray capacity
   crossX <- newPrimArray capacity
   crossDir <- newPrimArray capacity
@@ -392,21 +396,23 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
               then sample r (si + 1) kept 0 0 0
               else rows (r + 1) kept
       rows !r !n
-        | r >= height = pure ()
+        | r >= height = pure (top, height)
         | otherwise = do
             from <- readPrimArray rowStart r
             to <- readPrimArray rowStart (r + 1)
             -- Past the last edge's bottom nothing is left to cover.
             if n == 0 && from >= totalEdges
-              then pure ()
+              then pure (top, r)
               else admit from to n >>= \n' -> sample r 0 n' 0 0 0
-  rows 0 0
+  rows top 0
 
--- | Draw @col@ at @alpha@ through the coverage over the accumulated image.
-composite :: Int -> Int -> MutablePrimArray s Float -> MutablePrimArray s Float -> Color -> Float -> ST s ()
-composite width height acc cov col alpha =
-  forM_ [0 .. width * height - 1] $ \i -> do
+-- | Draw @col@ at @alpha@ through the coverage of rows @top@ to @end@ over
+-- the accumulated image, zeroing that coverage for the next shape.
+composite :: Int -> MutablePrimArray s Float -> MutablePrimArray s Float -> (Int, Int) -> Color -> Float -> ST s ()
+composite width acc cov (top, end) col alpha =
+  forM_ [top * width .. end * width - 1] $ \i -> do
     c <- readPrimArray cov i
+    writePrimArray cov i 0
     when (c > 0) $ do
       let sa = min 1 c * alpha * fromIntegral (colorA col) / 255
           blend k src = do

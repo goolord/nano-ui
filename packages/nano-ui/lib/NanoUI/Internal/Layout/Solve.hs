@@ -155,30 +155,33 @@ data TextBox = TextBox
   }
 
 -- | Measure a text node's content for the width @outerW@. The text wraps at
--- @outerW@ minus its label inset when it has explicit newlines, or when
--- @shouldWrap wrapW lineW@ holds for its single-line width.
+-- @outerW@ minus its label inset ('tableStripeInset'), as paint wraps it,
+-- when it has explicit newlines, or when @shouldWrap outerW lineW@ holds for
+-- its single-line width.
 measureTextNodeAt :: SolveEnv -> NodeIdx -> Text -> Float -> (Float -> Float -> Bool) -> IO TextBox
 measureTextNodeAt env idx txt outerW shouldWrap = do
-  measurer@TextMeasurer {tmMetrics = textFm} <- nodeMeasurer env idx NodeText =<< getStyleIdx (seArena env) idx
+  si <- getStyleIdx (seArena env) idx
+  measurer@TextMeasurer {tmMetrics = textFm} <- nodeMeasurer env idx NodeText si
   (tw0, th0) <- measureFontLine measurer txt
-  let wrapW = max 0 outerW
+  let wrapW = max 0 (outerW - 2 * tableStripeInset si)
       lineH = fmLineHeight textFm
       na = seArena env
-  if T.any (== '\n') txt || shouldWrap wrapW tw0
+  if T.any (== '\n') txt || shouldWrap (max 0 outerW) tw0
     then do
       (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped env measurer txt wrapW)
       pure (TextBox True tw th lineH)
     else pure (TextBox False tw0 th0 lineH)
 
--- | Height of text node @idx@ at width @w@, clamped to @hAx@. Empty text is
--- zero height; text that does not wrap returns @fallback@. Text wraps at
--- newlines, and at @w@ when @allowed@ and its line overflows a positive @w@.
+-- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text that does
+-- not wrap returns @fallback@, and so does empty text, which measured one
+-- line tall. Text wraps at newlines, and at @w@ when @allowed@ and its line
+-- overflows a positive @w@.
 {-# INLINE textHeightAt #-}
 textHeightAt :: SolveEnv -> NodeIdx -> AxisSizing -> Float -> Bool -> Float -> IO Float
 textHeightAt env !idx (AxisSizing _ _ minH maxH) !w allowed !fallback = do
   txt <- getText (seArena env) idx
   if T.null txt
-    then pure (clamp minH maxH 0)
+    then pure fallback
     else do
       TextBox {tbWrapped, tbH, tbLineH} <-
         measureTextNodeAt env idx txt w (\wrapW lineW -> allowed && wrapW + 0.5 < lineW && wrapW > 0)
@@ -366,7 +369,8 @@ measureContent env@SolveEnv {seArena = na} idx = do
   nt <- readTagEnum (seArrays env) idx TagNodeType
   case nt of
     NodeText -> measureTextNode env idx
-    NodeSpacer -> measureSpacer na idx
+    -- Non-fixed spacers reserve the default 8px extent.
+    NodeSpacer -> measureImage na idx (Just (8, 8))
     NodeSeparator -> measureSeparator na idx
     NodeScrollContainer -> measureScrollContainer env idx
     NodeImage -> getImageNode na idx >>= measureImage na idx . fmap (\n -> (inWidth n, inHeight n))
@@ -386,7 +390,7 @@ measureCustomNode env@SolveEnv {seArena = na} measureFn idx = do
   hAx <- getHeightSizing na idx
   let ((mw, mh), record) = customMeasure (msFm (seMs env)) measureFn wAx hAx
   forM_ (seMeasureLog env) $ \ref -> modifyIORef' ref (IM.insert idx record)
-  setRect na idx 0 0 (fixedOr wAx mw) (fixedOr hAx mh)
+  setRect na idx 0 0 (sizeWithin wAx mw) (sizeWithin hAx mh)
 
 -- | Run a node's custom measure again, as the solve ran it, and return the
 -- record the layout cache keeps of the call. Layout-reuse validation compares
@@ -421,11 +425,6 @@ offeredExtent (AxisSizing tag val _ m)
   | tag == SizingFixed = val
   | otherwise = if m < 1e8 then m else 1e9
 
--- | The axis's fixed size, or else @content@ within its limits.
-{-# INLINE fixedOr #-}
-fixedOr :: AxisSizing -> Float -> Float
-fixedOr (AxisSizing tag val lo hi) content = if tag == SizingFixed then val else clamp lo hi content
-
 -- | The axis's fixed size or else @content@, within its limits.
 {-# INLINE sizeWithin #-}
 sizeWithin :: AxisSizing -> Float -> Float
@@ -443,12 +442,13 @@ drawingHeightAt SolveEnv {seArena = na, seMs = ms} idx w hAx fallback = do
 
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
--- nothing caps it (@textNodeSpanEntry@ in the text-span collector).
+-- nothing caps it (@textNodeSpanEntry@ in the text-span collector). Text
+-- whose width is not fit wraps at the width it was assigned, as
+-- 'positionNode' wraps it; fit text wraps where it was measured.
 textWrapCap :: Float -> SizingTag -> Float -> Float
 textWrapCap effMaxW wTag w
-  | effMaxW < 1e8 = max 0 effMaxW
-  | wTag == SizingGrow && w > 0 = w
-  | otherwise = effMaxW
+  | wTag /= SizingFit && w > 0 = w
+  | otherwise = max 0 effMaxW
 
 -- | Find the nearest ancestor's fixed or finite maximum width, subtracting
 -- accumulated horizontal padding. Returns 1e9 when none constrains the node.
@@ -471,19 +471,22 @@ findAncestorMaxW na idx = go idx 0
 
 measureTextNode :: SolveEnv -> NodeIdx -> IO ()
 measureTextNode env@SolveEnv {seArena = na} idx = do
-  AxisSizing wTag _ minW maxW <- getWidthSizing na idx
+  wAx@(AxisSizing wTag wVal _ maxW) <- getWidthSizing na idx
   hAx <- getHeightSizing na idx
   parentAssigns <- growParent na idx
   txt <- getText na idx
   isRowChild <- parentIsRow na idx
+  -- A fixed width wraps at itself, as placement does ('textWrapCap').
   effMaxW <-
-    if maxW < 1e8
-      then pure maxW
-      else findAncestorMaxW na idx
+    if wTag == SizingFixed
+      then pure wVal
+      else if maxW < 1e8
+        then pure maxW
+        else findAncestorMaxW na idx
   let canWrap = not isRowChild && effMaxW < 1e8
   TextBox {tbW = tw, tbH = th, tbLineH = lineH} <-
     measureTextNodeAt env idx txt effMaxW (\_ lineW -> canWrap && effMaxW + 0.5 < lineW)
-  let reportedW = clamp minW maxW (if wTag == SizingGrow && parentAssigns then 0 else tw)
+  let reportedW = sizeWithin wAx (if wTag == SizingGrow && parentAssigns then 0 else tw)
   setRect na idx 0 0 reportedW (sizeWithin hAx (max lineH th))
 
 -- | Whether a grow-width node's width is assigned from above rather than
@@ -505,9 +508,10 @@ growParent na idx = getParent na idx >>= go True
               then pure False
               else (/= NodeModal) <$> getNodeType na p
 
--- | Measure a node with no measurable content: an image, a box, or a
--- drawing without its own measure. Unless fixed, it takes @natural@ (an
--- image's own size), else its minimum, else 32, within its limits.
+-- | Measure a node with no measurable content: an image, a box, a spacer,
+-- or a drawing without its own measure. Unless fixed, it takes @natural@
+-- (an image's own size, a spacer's default), else its minimum, else 32,
+-- within its limits.
 measureImage :: NodeArena -> NodeIdx -> Maybe (Float, Float) -> IO ()
 measureImage na idx natural = do
   wAx <- getWidthSizing na idx
@@ -515,15 +519,6 @@ measureImage na idx natural = do
   let orMin ax = if axMin ax > 0 then axMin ax else 32
       (nw, nh) = fromMaybe (orMin wAx, orMin hAx) natural
   setRect na idx 0 0 (sizeWithin wAx nw) (sizeWithin hAx nh)
-
-measureSpacer :: NodeArena -> NodeIdx -> IO ()
-measureSpacer na idx = do
-  AxisSizing wTag wVal _ _ <- getWidthSizing na idx
-  AxisSizing hTag hVal _ _ <- getHeightSizing na idx
-  -- Non-fixed spacers reserve the default 8px extent.
-  let w = if wTag == SizingFixed then wVal else 8
-      h = if hTag == SizingFixed then hVal else 8
-  setRect na idx 0 0 w h
 
 measureSeparator :: NodeArena -> NodeIdx -> IO ()
 measureSeparator na idx = do
@@ -558,7 +553,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
   -- The content with its padding and whatever sits beside the label.
   (rawW, rawH) <-
     case nt of
-      NodeSlider -> pure (60, max sliderHandleDiameter (sliderTrackHeight + 2 * sliderHandleSlack))
+      NodeSlider -> pure (60, sliderHandleDiameter)
       NodeSelect -> do
         opts <- getOptions na idx
         let choices = if null opts then [""] else opts
@@ -612,7 +607,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
   -- A widget's children are its adornments ('measureAdorned').
   kids <- readTree a idx TreeFirstChild
   (w, h) <- if kids < 0 then pure (rawW, rawH) else measureAdorned env measurer idx nt si txt rawW rawH
-  setRect na idx 0 0 (fixedOr wAx w) (fixedOr hAx h)
+  setRect na idx 0 0 (sizeWithin wAx w) (sizeWithin hAx h)
 
 -- | The size of a button or text field with adornments ('adornRows'), from
 -- its size without them, @rawW@ by @rawH@. A field widens by each row and a
@@ -807,17 +802,16 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
         let capH = (if hTag == SizingFixed then hVal else hMax) - padY
             narrowed = viewAt (scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) fullH capH)
         if narrowed /= viewAt 0 then stackAt narrowed else pure full
-  let assignedInnerH =
-        case hTag of
-          SizingFixed -> max 0 (hVal - padY)
-          _ -> contentH
+  -- A width fit to the content makes room for the bar when the content
+  -- overflows the scroller's own height, fixed or capped.
+  let h = sizeWithin hAx (contentH + padY)
       fitGutterW
         | not vertical || wTag == SizingGrow || wTag == SizingFixed = 0
-        | otherwise = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH assignedInnerH
+        | otherwise = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH (h - padY)
   if isScrollStyle2D si
     then setSolvedValue na idx contentH >> setScrollContentW na idx contentW
     else setSolvedValue na idx (if dir == DirColumn then contentH else contentW)
-  setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) (sizeWithin hAx (contentH + padY))
+  setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) h
 
 foldChildDimsFromParent :: SolveEnv -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
@@ -825,13 +819,13 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
   FlowAcc count along across <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
   let gaps = gap * fromIntegral (max 0 (count - 1))
   case dir of
-    DirColumn -> pure (if count <= 0 then 0 else across, along + gaps)
+    DirColumn -> pure (across, along + gaps)
     DirRow -> do
       -- A row's baseline-aligned children stand on one line, so together they
       -- are as tall as the most room any takes above it plus the most any takes
       -- below.
       FlowAcc _ above below <- foldFlowChildrenM na idx baselineStep (FlowAcc 0 0 0)
-      pure (along + gaps, if count <= 0 then 0 else max across (above + below))
+      pure (along + gaps, max across (above + below))
   where
     step (FlowAcc count along across) ci = do
       Rect _ _ w h <- getNodeRect na ci
@@ -1269,15 +1263,21 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
           -- Keep measured content. Shrinking to the clip wraps table columns.
           layoutW = max contentW viewW
           layoutH = max contentSize viewH
-      -- cx/cy and the layout box are already inside the padding.
-      positionChildren env depth idx DirColumn gap (Padding 0 0 0 0) (Rect cx cy layoutW layoutH)
+          -- cx/cy and the layout box are already inside the padding.
+          box = Rect cx cy layoutW layoutH
+      -- The children line up along the scroller's direction, as they
+      -- measured, and as in a 1D scroller a grid layout makes no grid.
+      case dir of
+        DirRow -> positionRowFromParent env depth idx gap box
+        DirColumn -> positionColumn env depth idx gap False Nothing cx layoutW box
+      positionLayered env depth idx False box
     else do
       let gutterCol = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentSize innerH
           gutterRow = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentSize innerW
       box <- case dir of
         DirRow -> do
           wTag <- axTag <$> getWidthSizing na idx
-          let rowMain = if wTag == SizingGrow then max contentSize (innerW - gutterRow) else contentSize
+          let rowMain = if wTag == SizingGrow then max contentSize innerW else contentSize
               b = Rect cx cy rowMain (innerH - gutterRow)
           b <$ positionRowFromParent env depth idx gap b
         DirColumn -> do
@@ -1324,21 +1324,24 @@ hasPanelAncestor na p =
     nt <- getNodeType na i
     pure (if nt == NodePanel then Just True else if isFloatingNode nt then Just False else Nothing)
 
--- | Left edge of column child @ci@ in a column of width @cw@ at @cx@. Grow and
--- percent children already take the full width; alignment is for content
+-- | Left edge of column child @ci@ in a column of width @cw@ at @cx@, and the
+-- width the column offers it: all of @cw@, or a percentage's share of it.
+-- Grow children already take the full width; alignment is for content
 -- narrower than the column, not for shifting a full-width box past it. A
 -- child is aligned at its resolved width, so text measured wider than the
 -- column wraps to it instead of being pushed past the edge.
 {-# INLINE columnChildX #-}
-columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO Float
+columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO (Float, Float)
 columnChildX na ci cx cw = do
   wAx <- getWidthSizing na ci
-  if axTag wAx == SizingGrow || axTag wAx == SizingPercent
-    then pure cx
+  if axTag wAx == SizingGrow
+    then pure (cx, cw)
     else do
       Rect _ _ iw _ <- getNodeRect na ci
       ax <- getAlignX na ci
-      pure $! alignX ax cx cw (resolveSize wAx iw cw)
+      let !offer = percentOr wAx cw cw
+          !x = alignX ax cx cw (resolveSize wAx iw offer)
+      pure (x, offer)
 
 -- | The size a node takes along an axis where @avail@ is offered, from its
 -- sizing, its measured size @intrinsic@ and its limits.
@@ -1388,17 +1391,7 @@ childRowCrossSize na ci availCross = do
       -- or row slot as availH: that stretches every child when leftover
       -- leaks into scratch `fh`.
       then max minH intrinsic
-      else resolveSize hAx intrinsic availCross
-
--- Column leftover must not change Fixed step height.
-columnChildHeight :: NodeArena -> NodeIdx -> Float -> IO Float
-columnChildHeight na ci scratchH = do
-  AxisSizing hTag _ minH maxH <- getHeightSizing na ci
-  case hTag of
-    SizingFixed -> do
-      Rect _ _ _ ih <- getNodeRect na ci
-      pure (clamp minH maxH ih)
-    _ -> pure (clamp minH maxH scratchH)
+      else resolveSize hAx intrinsic (percentOr hAx availCross availCross)
 
 -- | Copy the first @n@ scratch child indices, and beside them the scratch
 -- array @sizes@ picks, to the snapshot for nesting depth @depth@, and run
@@ -1491,15 +1484,21 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx
               ci <- readPrimArray idxArr (r * cols + j)
               wAx <- getWidthSizing na ci
               hAx <- getHeightSizing na ci
-              Rect _ _ iw ih <- getNodeRect na ci
-              let childW = resolveSize wAx iw colW
-                  childH = resolveSize hAx ih rowH
+              Rect _ _ iw _ <- getNodeRect na ci
+              fh <- readPrimArray hArr (r * cols + j)
+              -- A cell is offered its own height, refit at the column width,
+              -- where its alignment puts it, as a row places its children
+              -- ('placeRowLine'). Offered the whole row there, a fit
+              -- container would take all of it and overrun the row.
+              let offerW = percentOr wAx colW colW
+                  childW = resolveSize wAx iw offerW
+                  childH = resolveSize hAx fh rowH
                   itemX = cx + fromIntegral j * (colW + gap)
               ax <- getAlignX na ci
               ay <- getAlignY na ci
               let fx = alignX ax itemX colW childW
                   fy = alignY ay curY rowH childH
-              positionNodeA env (depth + 1) ci (Rect fx fy colW rowH)
+              positionNodeA env (depth + 1) ci (Rect fx fy offerW childH)
             goRows (r + 1) (curY + rowH + gap)
       goRows 0 cy
 
@@ -1624,10 +1623,10 @@ placeColumnLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap chrom
       (fx, nodeW) <-
         if chrome && nt == NodeSeparator
           then pure (px, pw)
-          else (,cw) <$> columnChildX na ci cx cw
-      childH <- case scrollContent of
-        Just _ -> pure (if isScrollNode nt then min fh (max 0 (ch - (y - cy))) else fh)
-        Nothing -> columnChildHeight na ci fh
+          else columnChildX na ci cx cw
+      let childH = case scrollContent of
+            Just _ | isScrollNode nt -> min fh (max 0 (ch - (y - cy)))
+            _ -> fh
       positionNodeA env (depth + 1) ci (Rect fx y nodeW childH)
       Rect _ _ _ placedH <- getNodeRect na ci
       gapAfter <-
@@ -1668,8 +1667,8 @@ distributeScratch na n avail gapSum horizontal = do
       -- keeps the exact content size until the shares are handed out.
       FlowAcc capped growTotal _ <- foldUpTo n (\(FlowAcc c acc _) i -> do
         AxisSizing tag val _ hi <- sizingAt i
-        let gf = if tag == SizingGrow then val else 0
-        writePrimArray gfArr i (if gf > 0 then gf else 0)
+        let gf = if tag == SizingGrow && val > 0 then val else 0
+        writePrimArray gfArr i gf
         pure (FlowAcc (if gf > 0 && hi < 1e8 then c + 1 else c) (acc + gf) 0)) (FlowAcc 0 0 0)
       when (growTotal > 0) $ do
         (free, gfSum) <-
@@ -2013,8 +2012,9 @@ placeWindowNode na ms winW winH idx w0 h0 originFor = do
   positionFloating env idx =<< windowRect na winW winH idx w0 h0 originFor
 
 -- | Window @idx@'s rect at size @w0 h0@, clamped to its min and max size and
--- the screen, with its origin, given that size, clamped on screen. Fit sizing
--- caps at intrinsic size; floating windows use an explicit frame size.
+-- the screen, with its origin, given that size, clamped on screen. The
+-- caller picks @w0 h0@: 'placeFloatingNodes' passes the saved size, or else
+-- the measured size capped at the screen.
 windowRect :: NodeArena -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO Rect
 windowRect na winW winH idx w0 h0 originFor = do
   AxisSizing _ _ minW maxW <- getWidthSizing na idx
@@ -2049,18 +2049,16 @@ computePopupPosition ::
 computePopupPosition winW winH margin iw ih anchor placement offset =
   case anchor of
     AnchorPoint (V2 px py) ->
-      -- On each axis the popup goes before, after or at the point, flipping
-      -- to the other side if it would overflow and fits there.
-      let onAxis p size lim isBefore isAfter =
-            let p0
-                  | isBefore = p - size - offset
-                  | isAfter = p + offset
-                  | otherwise = p
-             in if p0 + size > lim - margin && p - size - margin >= 0
-                  then p - size - offset
-                  else clamp margin (lim - size - margin) p0
-       in ( onAxis px iw winW (placement == PlacementLeft) (placement == PlacementRight)
-          , onAxis py ih winH (placement == PlacementAbove) (placement == PlacementBelow)
+      -- On each axis the popup goes before or after the point, as beside an
+      -- anchor span of no length, or at it, flipping to the other side if it
+      -- would overflow and fits there. Either way it keeps within the margins.
+      let onAxis p size lim isBefore isAfter
+            | isBefore = before p 0 lim size
+            | isAfter = after p 0 lim size
+            | p + size > lim - margin && p - size - margin >= 0 = p - size - offset
+            | otherwise = p
+       in ( clamp margin (winW - iw - margin) (onAxis px iw winW (placement == PlacementLeft) (placement == PlacementRight))
+          , clampY (onAxis py ih winH (placement == PlacementAbove) (placement == PlacementBelow))
           )
     AnchorRect (Rect rx ry rw rh) ->
       case placement of

@@ -228,7 +228,6 @@ pushRoundedRect da rect radius col =
 pushRoundedRectRaw :: DrawArena -> Rect -> Float -> Color -> IO ()
 pushRoundedRectRaw da (Rect x y w h) radius col
   | w <= 0 || h <= 0 = pure ()
-  | radius <= 0.5 = pushRect da (Rect x y w h) col
   | otherwise = do
       square <- readIORef (daSquareGeometry da)
       let !rad = min radius (min (w * 0.5) (h * 0.5))
@@ -378,7 +377,7 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !botY = py + h - ibw / 2
               !rightX = px + w - ibw / 2
 
-              !cr = max 0.25 (rad - ibw / 2)
+              !cr = rad - ibw / 2
               !doTB = midW >= 0.001
               !doLR = midH >= 0.001
               !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)
@@ -466,8 +465,8 @@ pushLine da x1 y1 x2 y2 thickness col = do
           cap x1 y1
           cap x2 y2
 
--- Coverage-AA strip for a straight segment. Same weight as pushCornerArcStroke,
--- without round caps that blob at rounded-rect corners.
+-- Coverage-AA strip for a straight segment, the strip a rounded stroke's
+-- sides use, without the round caps 'pushLine' adds.
 {-# INLINE pushStrokeAA #-}
 pushStrokeAA :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushStrokeAA da x0 y0 x1 y1 bw col
@@ -622,7 +621,7 @@ pushPolygonAA da pts rings tris
 {-# NOINLINE polygonAAFrom #-}
 polygonAAFrom :: DrawArena -> Float -> Float -> PrimArray Float -> PrimArray Int -> PrimArray Int -> Shade -> IO ()
 polygonAAFrom da rx ry pts rings tris shade
-  | n < 3 || nt < 3 || not ringsValid || area == 0 || not (shadeCovers shade n) = pure ()
+  | n < 3 || nt < 3 || not ringsValid || not trisValid || area == 0 || not (shadeCovers shade n) = pure ()
   | otherwise = do
       s <- readIORef (daSnapScale da)
       square <- readIORef (daSquareGeometry da)
@@ -682,6 +681,7 @@ polygonAAFrom da rx ry pts rings tris shade
     -- First interior (non-ring) point.
     !nOut = if nr >= 1 then ringAt nr else 0
     ringsValid = nr >= 1 && ringAt 0 == 0 && nOut <= n && and [ringAt r < ringAt (r + 1) | r <- [0 .. nr - 1]]
+    trisValid = and [t >= 0 && t < n | k <- [0 .. nt - 1], let t = indexPrimArray tris k]
     forRings body = forUpTo_ nr $ \r -> body (ringAt r) (ringAt (r + 1))
     px i = indexPrimArray pts (2 * i)
     py i = indexPrimArray pts (2 * i + 1)
@@ -823,7 +823,7 @@ pushPolylineAA da pts w closed cap join limit shade
                       -- Turning the way the corner turns: at a half turn
                       -- the cross product is a signed zero, and atan2 would
                       -- follow its sign back through the stroke instead.
-                      !turned = abs (atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by))
+                      !turned = abs (atan2 (ax * by - ay * bx) (ax * bx + ay * by))
                       !sweep = if turnsPositive then turned else negate turned
                       !chords = if join == RoundJoin then arcChords s outer turned else 1
                   if turnsPositive

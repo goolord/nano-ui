@@ -25,7 +25,18 @@ tests =
   , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   , spec "wrap-width-bounds" runWrapBoundsTest
   , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
+  , spec "wrap-keeps-clusters" runWrapClustersTest
   ]
+
+-- | Breaking a word by character, or cutting text short, keeps a character
+-- with the marks after it and a joined emoji whole: a cut that would part
+-- them moves back before the character, or past it when it is the first.
+runWrapClustersTest :: Context -> IORef Int -> IO ()
+runWrapClustersTest ctx failed = do
+  let lineW t = pure (10 * fromIntegral (T.length t))
+  assertEq failed ["a", "e\x0301", "b"] =<< wrapTextLinesIO lineW "ae\x0301\&b" 20
+  assertEq failed ["\x1F469\x200D\x1F4BB", "x"] =<< wrapTextLinesIO lineW "\x1F469\x200D\x1F4BBx" 20
+  assertEq failed "a..." =<< evalUi ctx (withInput 100 100) (truncateTextUi (monospaceMetrics 10) 55 "ae\x0301\&bcd")
 
 -- | Wrapping drops the run of spaces at a line break but keeps indentation
 -- and runs of spaces inside a line, which code needs.
@@ -57,6 +68,7 @@ runWrapBoundsTest _ failed = do
         , "nospacesatalljustonelongrunoflettersWWWmmm"
         , "  leading and  double spaced  words  "
         , "    indented    code  = aligned   -- and a comment"
+        , "cafe\x0301 nai\x0308ve e\x0301\&e\x0301\&e\x0301\&e\x0301 \x0928\x092E\x0938\x094D\x0924\x0947 \x1F469\x200D\x1F4BB\x1F469\x200D\x1F4BB"
         ]
   forM_ texts $ \txt -> forM_ [1, 3 .. 320 :: Float] $ \w -> do
     r <- wrapTextIO lineW txt w

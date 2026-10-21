@@ -36,6 +36,8 @@ tests =
   , spec "scroll-scrolled-out" runScrolledOutImmunityTest
   , spec "scroll-lockstep-probe" runScrollLockstepProbeTest
   , spec "scroll-2d-grow-min-width" runScroll2DGrowMinWidthTest
+  , spec "fit-scroll-max-gutter" runFitScrollMaxGutterTest
+  , spec "scroll-2d-direction" runScroll2DDirectionTest
   , spec "page-scroll-backdrop-coverage" runPageScrollBackdropCoverageTest
   , spec "scroll-tall-label-cull" runTallLabelCullTest
   , pixelSpec "scroll-2d-pad-fill-overflow" run2DPadFillOverflowTest
@@ -233,7 +235,9 @@ runPageScrollBackdropCoverageTest ctx failed = do
                 && abs (qx + qw - (rx + rw)) <= 0.6
                 && abs (qy + qh - (ry + rh)) <= 0.6
   writeIORef (ctxPaintFull ctx) False
-  backdrop (page id) (\sid -> setScrollOffset ctx sid 120 >> void (runFrame ctx inp0 (page id))) >>= assert failed
+  -- A clip frame after a scroll, here one that repaints a few lines: a frame
+  -- with nothing damaged paints nothing at all.
+  backdrop (page id) (\sid -> setScrollOffset ctx sid 120 >> void (runFrame ctx inp0 (page id)) >> damageRect ctx (Rect 10 10 20 20)) >>= assert failed
   writeIORef (ctxPaintFull ctx) True
   backdrop (page id) (const (pure ())) >>= assert failed . not
   backdrop (page (themed other)) (const (pure ())) >>= assert failed
@@ -782,6 +786,32 @@ runScroll2DGrowMinWidthTest ctx failed = do
   assertGt failed narrow 0
   wrapped <- rangeX (withInput 400 200) (rows (columnWith (grow . tight) (rowWith (fixedW 600 . tight) (label (T.pack "wide")))))
   assertGt failed wrapped 0
+
+-- | A scroller that fits its width to its content, with its height capped by
+-- 'maxH', makes room for the bar its overflow brings, so its widest labels
+-- keep their width rather than running under the bar.
+runFitScrollMaxGutterTest :: Context -> IORef Int -> IO ()
+runFitScrollMaxGutterTest ctx failed = do
+  let items = [T.pack ("item " <> show i) | i <- [10 .. 59 :: Int]]
+  _ <- warmup2 ctx (withInput 400 300) (columnWith tight (scrollWith (maxH 200) (mapM_ label items)))
+  rs <- drop 2 <$> arenaRects ctx
+  assertEq failed (length rs) 50
+  -- Seven glyphs of the test font, as wide as its lines are tall.
+  forM_ rs $ \r -> assertEq failed (rectW r) (7 * 12)
+
+-- | A 2D scroller lines its children up along its direction, where it
+-- measured them, and scrolls over them: a row sideways, and a layout that
+-- asks for a grid, which a scroller does not make, down.
+runScroll2DDirectionTest :: Context -> IORef Int -> IO ()
+runScroll2DDirectionTest ctx failed =
+  forM_ [(\l -> l {layoutDirection = Row}, V2 300 0), (gridCols 3, V2 0 40)] $ \(lay, range) -> do
+    (sid, ()) <-
+      warmup2 ctx (withInput 400 300) . columnWith tight . scrollArea2D (lay . tight . gap 0 . fixedWH 300 200) $
+        replicateM_ 6 (box (fixedWH 100 40) (colorRGBA 255 0 0 255))
+    rs <- drop 2 <$> arenaRects ctx
+    let along = if v2X range > 0 then map rectX rs else map rectY rs
+    assertEq failed along (if v2X range > 0 then [0, 100 .. 500] else [0, 40 .. 200])
+    assertJustM failed (getScrollMetrics ctx sid) $ \m -> assertEq failed (scrollRange m) range
 
 -- | A scroller below its parent's fold has an empty viewport, so its content
 -- takes no pointer input even where it has scrolled into the outer

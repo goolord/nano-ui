@@ -229,6 +229,13 @@ runCustomWidgetContentKeyTest ctx failed = do
   ctx3 <- withTheme ctx theme0 {themeAccent = accent3}
   assert failed . any ((== accent3) . snd) =<< frameQuads ctx3 inp themedUi
   setTheme ctx theme0
+  -- So does a scope's theme, which leaves the font metrics' generation, and
+  -- the text and layout caches that follow it, as they were.
+  let scoped c = styled (accentColor c) themedUi
+  _ <- warmup2 ctx inp (scoped accent2)
+  gen <- readIORef (ctxMetricGen ctx)
+  assert failed . any ((== accent3) . snd) =<< frameQuads ctx inp (scoped accent3)
+  assertEq failed gen =<< readIORef (ctxMetricGen ctx)
 
 -- | Verifies the reference rotary knob widget.
 runReferenceKnobTest :: Context -> IORef Int -> IO ()

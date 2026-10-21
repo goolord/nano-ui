@@ -34,8 +34,9 @@
 -- A nested subpath is a hole when the rule leaves it unfilled: with
 -- 'EvenOdd', or with 'NonZero' when the two subpaths wind in opposite
 -- directions. Intersections are not resolved: crossing subpaths fill
--- independently, and a self-intersecting one (a pentagram in one line) may
--- fill only partly.
+-- independently, as may a subpath that touches the one around it along an
+-- edge or at a corner, and a self-intersecting one (a pentagram in one line)
+-- may fill only partly.
 --
 -- A stroke is centred on its path; 'Stroke' sets its width, caps, joins and
 -- dashes.

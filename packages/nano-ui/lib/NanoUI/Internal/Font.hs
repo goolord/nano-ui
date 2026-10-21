@@ -56,12 +56,11 @@ module NanoUI.Internal.Font
   , classifyScrollBar
   , sliderHitBounds
   , sliderTrackBounds
-  , sliderTrackHeight
   , sliderHandleDiameter
-  , sliderHandleSlack
   ) where
 
 import Control.Monad (forM_, unless)
+import Data.Char (isMark)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
@@ -100,7 +99,10 @@ data ShapedText = ShapedText
 
 -- | The glyph quads that draw a shaped line: eight numbers a glyph (x, y,
 -- width and height from the pen, then the atlas UVs u0 v0 u1 v1), in logical
--- pixels. Valid until the host's glyph atlas next resets.
+-- pixels. Valid until the host's glyph atlas next resets. The whole part of
+-- a glyph's u is its atlas page, at least 0 and below
+-- 'NanoUI.Backend.glyphAtlasPages', and the fraction is its u on that page;
+-- a glyph whose u0 is on no page is not drawn.
 newtype ShapedGlyphs = ShapedGlyphs (PrimArray Float)
   deriving (Eq, Show)
 
@@ -115,7 +117,12 @@ data FontMetrics = FontMetrics
   -- whole device pixels.
   , fmSnapScale :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float
+  -- ^ A character's advance. A font whose @' '@, @'x'@ and @'M'@ share one,
+  -- with no kerning between @'x'@ and @'M'@, is taken as monospace: text it
+  -- has not shaped then measures that advance a character, unkerned.
   , fmKerning :: Char -> Char -> Float
+  -- ^ Extra space between the first character and the second, applied
+  -- before the second is drawn.
   , fmShape :: Text -> Maybe ShapedText
   -- ^ The shaped layout of a text the snapshot was prepared for, when the
   -- host shapes. Other texts fall back to 'fmAdvance' and 'fmKerning'.
@@ -161,7 +168,8 @@ lineWidthIO fm txt = do
   prepared <- prepareFontMetrics fm txt
   pure $! lineWidth prepared txt
 
--- | Prepare metrics and measure logical width/height, accounting for newlines.
+-- | Prepare metrics and measure a single line's advance and the line height,
+-- in logical pixels. Split text at newlines first.
 {-# INLINE measureTextIO #-}
 measureTextIO :: FontMetrics -> Text -> IO (Float, Float)
 measureTextIO fm txt = do
@@ -291,11 +299,13 @@ textInkEnd :: FontMetrics -> Text -> Float
 textInkEnd fm txt =
   case T.unsnoc txt of
     Nothing -> 0
-    Just (prefix, c) ->
+    Just (_, c) ->
       case fmShape fm txt of
         Just st -> stInkEnd st
         Nothing ->
-          let pen = lineWidth fm prefix
+          -- The last glyph is drawn after its kerning, an advance short of
+          -- the end.
+          let pen = lineWidth fm txt - fmAdvance fm c
            in case fmGlyph fm c of
                 Just gq -> pen + gqX gq + gqW gq
                 Nothing -> pen + fmAdvance fm c
@@ -449,8 +459,9 @@ isDefaultNodeFont size weight style variant =
     && style == FontStyleNormal
     && (variant == FontRegular || variant == FontMono)
 
--- | Advance of @c@ plus its kerning against the previous character: the one
--- pen step shared by measuring, hit testing and glyph emission.
+-- | Advance of @c@ plus its kerning against the previous character: the
+-- step between two carets, shared by measuring and hit testing. Glyph
+-- emission applies the kerning before drawing @c@.
 {-# INLINE kernedAdvance #-}
 kernedAdvance :: FontMetrics -> Maybe Char -> Char -> Float
 kernedAdvance fm prev c = case prev of
@@ -475,6 +486,8 @@ textIndexAtX fm txt x
                  in if d < bestD then nearest i d (i + 1) else nearest best bestD (i + 1)
        in nearest 0 (1 / 0) 0
   | x <= 0 = 0
+  -- Counted in whole advances, as 'lineWidth' measures the carets.
+  | Just adv <- monospaceAdvance fm, adv > 0 = clamp 0 (T.length txt) (floor (x / adv + 0.5))
   | otherwise = go 0 0.0 Nothing txt
   where
     go !i !acc prev t =
@@ -529,18 +542,25 @@ lineWidth fm line
   | otherwise =
       case fmShape fm line of
         Just st -> stAdvance st
-        Nothing ->
-          let !spaceAdv = fmAdvance fm ' '
-              !xAdv = fmAdvance fm 'x'
-              !mAdv = fmAdvance fm 'M'
-           in if spaceAdv == xAdv && xAdv == mAdv && fmKerning fm 'x' 'M' == 0
-                then fromIntegral (T.length line) * spaceAdv
-                else case T.uncons line of
-                  Just (c0, rest) ->
-                    fst (T.foldl' step (fmAdvance fm c0, c0) rest)
-                  Nothing -> 0
+        Nothing -> case monospaceAdvance fm of
+          Just adv -> fromIntegral (T.length line) * adv
+          Nothing -> case T.uncons line of
+            Just (c0, rest) ->
+              fst (T.foldl' step (fmAdvance fm c0, c0) rest)
+            Nothing -> 0
   where
     step (!w, !prev) c = (w + kernedAdvance fm (Just prev) c, c)
+
+-- | The advance of every character of a font taken as monospace: one whose
+-- @' '@, @'x'@ and @'M'@ share it, with no kerning between @'x'@ and @'M'@
+-- ('fmAdvance'). Unshaped widths and hit tests then count characters.
+{-# INLINE monospaceAdvance #-}
+monospaceAdvance :: FontMetrics -> Maybe Float
+monospaceAdvance fm =
+  let !spaceAdv = fmAdvance fm ' '
+   in if spaceAdv == fmAdvance fm 'x' && spaceAdv == fmAdvance fm 'M' && fmKerning fm 'x' 'M' == 0
+        then Just spaceAdv
+        else Nothing
 
 -- | The size of text wrapped to @maxW@ into the lines of @wrap@.
 wrapMeasure :: FontMetrics -> Float -> WrapResult -> (Float, Float)
@@ -661,7 +681,7 @@ wrapTextIO lineW txt maxW = do
               else do
                 lineW line >>= lineOf
                 unless (T.null rest) $
-                  lineW (T.take (T.length line + 1) chunk) >>= breakAt
+                  lineW (T.take (clusterEnd chunk (T.length line + 1)) chunk) >>= breakAt
                 charLines perLine rest (line : acc)
   if maxW <= 0
     -- Nothing fits, and no other width wraps to nothing.
@@ -729,18 +749,44 @@ largestFitting fits lo0 hi0 guess
           if ok then bisect mid hi else bisect lo mid
 
 -- | Split off the longest prefix that fits @maxW@, starting the search at
--- @guess@ characters. Always consume at least one character from non-empty
--- text, even when a single glyph exceeds the available width, so wrapping
--- makes progress.
+-- @guess@ characters, and ending where a user-perceived character ends.
+-- Always consume at least one such character from non-empty text, even when
+-- it exceeds the available width, so wrapping makes progress.
 takeWidth :: Int -> (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
 takeWidth guess lineW maxW txt
   | T.null txt = pure (txt, T.empty)
-  | otherwise = (`T.splitAt` txt) <$> largestFitting fits 1 maxBound guess
+  | otherwise = do
+      k <- largestFitting fits 1 maxBound guess
+      -- Back to the start of the character the fit ends inside, or on to
+      -- its end when it is the first.
+      let start = until (not . splitsCluster txt) (subtract 1) k
+      pure (T.splitAt (if start > 0 then start else clusterEnd txt k) txt)
   where
     -- A count past the end does not fit, so the search needs no length.
     fits k
       | T.compareLength txt k == LT = pure False
       | otherwise = (<= maxW) <$> lineW (T.take k txt)
+
+-- | Whether cutting @t@ after @k@ characters splits a user-perceived
+-- character: parts one from the combining marks, variation selectors, emoji
+-- modifiers or zero-width joiner after it, or a joiner from the character it
+-- joins on.
+splitsCluster :: Text -> Int -> Bool
+splitsCluster t k = case T.uncons (T.drop k t) of
+  Just (c, _) ->
+    k > 0
+      && ( isMark c
+             || c == '\x200D'
+             || (c >= '\xFE00' && c <= '\xFE0F')
+             || (c >= '\x1F3FB' && c <= '\x1F3FF')
+             || T.index t (k - 1) == '\x200D'
+         )
+  Nothing -> False
+
+-- | The first place from @k@ characters into @t@ on that ends a
+-- user-perceived character.
+clusterEnd :: Text -> Int -> Int
+clusterEnd t = until (not . splitsCluster t) (+ 1)
 
 truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
 truncateTextIO lineW maxW txt

@@ -54,6 +54,7 @@ data Rotation
     RotateSolid !Float
   deriving (Eq, Show)
 
+-- | The angle of either rotation, in radians.
 rotationAngle :: Rotation -> Float
 rotationAngle (RotateFloating a) = a
 rotationAngle (RotateSolid a) = a
@@ -76,6 +77,7 @@ data ImageConfig = ImageConfig
   , icOpacity :: !Float
   -- ^ 0 (invisible) to 1 (opaque).
   , icRotation :: !Rotation
+  -- ^ Rotation about the drawn image's centre; see 'Rotation'.
   , icCrop :: !(Maybe Rect)
   -- ^ Sub-rectangle to draw, in image pixels from the top-left, clamped to
   -- the image. Size, fit, alignment and rotation apply to this part only.

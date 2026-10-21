@@ -27,8 +27,9 @@ import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Vector (Vector)
 
+-- | A table column's sort direction: ascending or descending.
 data SortDir = SortAsc | SortDesc
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Source-column index, independent of display order.
 data SortCol = SortCol {sortColIndex :: !Int, sortColDir :: !SortDir}

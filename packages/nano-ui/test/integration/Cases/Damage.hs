@@ -3,6 +3,7 @@ module Cases.Damage (tests) where
 import Spec
 import NanoUI.Shortcut
 import Data.ByteString qualified as BS
+import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (smallArrayFromList)
@@ -36,7 +37,93 @@ tests =
   , spec "damage-unwanted" runDamageUnwantedTest
   , spec "label-button-swap-damage" runLabelButtonSwapDamageTest
   , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
+  , spec "slider-label-shrink-damage" runSliderLabelShrinkDamageTest
+  , spec "scrolled-popup-shadow-damage" runScrolledPopupShadowDamageTest
+  , spec "off-window-damage-ignored" runOffWindowDamageTest
+  , spec "empty-damage-paints-nothing" runEmptyDamagePaintTest
   ]
+
+-- | A slider drag changes only 'storeFloat', as a scroll does. A label
+-- showing the value that shrank from "100" repaints where its old text was.
+runSliderLabelShrinkDamageTest :: Context -> IORef Int -> IO ()
+runSliderLabelShrinkDamageTest ctx failed = do
+  ref <- newIORef (50 :: Float)
+  let inp = withInputOff 400 100
+      ui = row $ do
+        v <- liftIO (readIORef ref)
+        (s, v') <- withValue v (sliderWith' (fixedW 200) 0 100)
+        liftIO (writeIORef ref v')
+        l <- label' (T.pack (show (round v' :: Int)))
+        pure (s, l)
+  (s, _) <- warmup2 ctx inp ui
+  let Rect sx sy sw sh = respRect s
+      at x = V2 x (sy + sh / 2)
+  _ <- runFrame ctx (pressAt inp (at (sx + sw / 2))) ui
+  _ <- runFrame ctx (holdAt inp (at (sx + sw + 50))) ui
+  assertEq failed 100 =<< readIORef ref
+  (_, wide) <- evalUi ctx (holdAt inp (at (sx + sw / 2))) ui
+  dmg <- takeDamage ctx
+  assert failed (clipCovers dmg (respRect wide))
+
+-- | A popup that follows a row of a scroller moves on a frame that only
+-- scrolls. That frame repaints the popup's old shadow, which lies past its
+-- rect.
+runScrolledPopupShadowDamageTest :: Context -> IORef Int -> IO ()
+runScrolledPopupShadowDamageTest ctx failed = do
+  let inp = withInputOff 640 400
+      rows = mapM_ (\i -> label (T.pack ("row " <> show (i :: Int))))
+      ui = do
+        (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
+          rows [1 .. 4]
+          anchor <- labelWith' fillW "anchor"
+          rows [5 .. 30]
+          pure anchor
+        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
+        pure sc
+  sc <- warmup2 ctx inp ui
+  mRect <- getPrevRect ctx sc
+  assertJust failed mRect $ \r -> do
+    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 20), inputScroll = V2 0 1}
+    _ <- runFrame ctx wheel ui
+    before <- IM.elems <$> floatingPanelRects ctx
+    _ <- runFrame ctx wheel ui
+    after <- IM.elems <$> floatingPanelRects ctx
+    dmg <- takeDamage ctx
+    pieces <- takeDamagePieces ctx
+    assert failed (before /= after)
+    forM_ before $ \(Rect x y w h) -> do
+      let shadow = Rect (x + 3) (y + 3) w h
+      assert failed (clipCovers dmg shadow && (null pieces || any (`covers` shadow) pieces))
+
+-- | Damage wholly off the window adds nothing to a frame's clip: it does not
+-- stretch the clip of a label that changed far from it.
+runOffWindowDamageTest :: Context -> IORef Int -> IO ()
+runOffWindowDamageTest ctx failed = do
+  let inp = withInputOff 800 600
+      ui k = columnWith (fillW . fillH) $ do
+        when (k > 1) $ damageRectNow (Rect 100 (-200) 50 50)
+        flex
+        rowWith fillW $ flex >> label' (T.pack (show (k :: Int)))
+  _ <- warmup2 ctx inp (ui 1)
+  _ <- takeDamage ctx
+  (l, _, _) <- runFrame ctx inp (ui 2)
+  dmg <- takeDamage ctx
+  case dmg of
+    DamageClip clip -> assert failed (rectY clip >= rectY (respRect l) - 10)
+    DamageFull -> assert failed False
+
+-- | A clip frame with nothing to repaint paints nothing, not even what lies
+-- at the window's corner, such as a page scroller's backdrop.
+runEmptyDamagePaintTest :: Context -> IORef Int -> IO ()
+runEmptyDamagePaintTest ctx failed = do
+  let inp = withInputOff 300 200
+      ui = scrollArea grow (column (label "Static" >> button "B"))
+  _ <- warmup2 ctx inp ui
+  writeIORef (ctxPaintFull ctx) False
+  (_, dd, _) <- runFrame ctx inp ui
+  assert failed . damageIsEmpty =<< takeDamage ctx
+  assert failed . null =<< drawQuads dd
+  writeIORef (ctxPaintFull ctx) True
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
 -- than four pieces or just one.

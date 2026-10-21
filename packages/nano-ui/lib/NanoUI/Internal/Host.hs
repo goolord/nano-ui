@@ -7,9 +7,11 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 -- | A single-session, UI-thread slot. An uninstalled host is absent.
 newtype Host a = Host (IORef (Maybe a))
 
+-- | A new slot with no value installed.
 newHost :: IO (Host a)
 newHost = Host <$> newIORef Nothing
 
+-- | Install a value in the slot, replacing any already there.
 {-# INLINE setHost #-}
 setHost :: Host a -> a -> IO ()
 setHost (Host ref) value = writeIORef ref (Just value)

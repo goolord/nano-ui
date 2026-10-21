@@ -14,7 +14,7 @@ module NanoUI.Internal.Frame.Spans
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (floatingPanelRects)
@@ -90,7 +90,7 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
       spans <-
         if nt == NodeText
           then sceSpans <$> textNodeSpanEntry ctx idx x y w h
-          else if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
+          else if isWidgetNode nt && nt /= NodeTextArea then widgetTextSpans ctx nt idx x y w h else pure []
       here <-
         case nt of
           -- A select's label shares one clip, short of its chevron.
@@ -109,10 +109,12 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
                   if hasFlag textInputFlagNumeric si
                     then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere fieldClip)
                     else tagTextInputClippedSpans clipHere fieldClip x y w fm spans
-          -- Rows are clipped as paint clips them, short of the scrollbars.
+          -- The document lives in the text area's buffer: its rows in view,
+          -- clipped as paint clips them, short of the scrollbars.
           NodeTextArea -> do
-            (textClip, _) <- textAreaTextPlacements ctx idx (Rect x y w h)
-            pure (maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere textClip))
+            (textClip, rows) <- textAreaTextPlacements ctx idx (Rect x y w h)
+            rowSpans <- placedTextSpans ctx nt idx rows
+            pure (maybe [] (`tagClippedSpans` rowSpans) (rectIntersect clipHere textClip))
           _ -> pure (tagClippedSpans clipHere spans)
       pushSpans arena here
       kids <- getFirstChild (ctxNodeArena ctx) idx
@@ -128,7 +130,10 @@ walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
       | ci < 0 = pure ()
       | otherwise = do
           ns <- getNextSibling (ctxNodeArena ctx) ci
-          -- Later siblings paint under earlier ones; walk reverse then collect.
+          -- Sibling links run last to first, so recursing before collecting
+          -- yields declaration order, which is reading order. It is not
+          -- paint order ('forChildrenInPaintOrder_'), which differs where
+          -- siblings overlap.
           go ns
           collectClippedSpans ctx ci clip arena
 
@@ -143,19 +148,22 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
   mCustomCol <- getNodeFontColor arena idx
   fontSize <- getNodeFontSize arena idx
   ax <- getAlignX arena idx
-  AxisSizing wTag _ _ maxW <- getWidthSizing arena idx
+  AxisSizing wTag wVal _ maxW <- getWidthSizing arena idx
   isRowChild <- parentIsRow arena idx
   -- 'nodeTextLines' wraps a row child only at its own newlines, so
-  -- only then does the ancestor cap matter; skip the walk to the root.
+  -- only then does the ancestor cap matter; skip the walk to the root. A
+  -- fixed width caps itself, as the solve measures it.
   effMaxW <-
-    if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
-      then pure maxW
-      else findAncestorMaxW arena idx
+    if wTag == SizingFixed
+      then pure wVal
+      else if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
+        then pure maxW
+        else findAncestorMaxW arena idx
   let rect = Rect x y w h
       mStripe = tableStripeColor theme si
       fg = fromMaybe (textToneColor theme (textNodeFontVariant si) (textNodeFontTone si)) mCustomCol
       bg = fromMaybe (styleBg (themePanel theme)) mStripe
-      !ix = if isJust mStripe then tableCellInset else 0
+      !ix = tableStripeInset si
       -- What the lines depend on: everything but where the node is and
       -- how tall, and the colours. Inlined at both uses, so a cache hit
       -- allocates no closure for it.
@@ -215,7 +223,8 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
       (fm, _, measure) <- resolveFontFor ctx NodeText fontSize si
       let measureW = fmap fst . measure
           contentW = max 0 (w - 2 * ix)
-          wrapCap = textWrapCap effMaxW wTag w
+          -- A row child wraps only at its newlines, where it was measured.
+          wrapCap = if isRowChild then effMaxW else textWrapCap effMaxW wTag w
       tw <- measureW raw
       if T.any (== '\n') raw || (not isRowChild && wrapCap < 1e8 && wrapCap + 0.5 < tw)
         then do
@@ -223,8 +232,10 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
           prepared <- forM (wrLines wrap) $ \line -> (,) line <$> prepareFontMetrics fm line
           pure (fm, SpanWrapped prepared)
         else do
+          -- Half a pixel over the width is no reason to cut, as it is none
+          -- to wrap.
           shown <-
-            if tw > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
+            if tw > contentW + 0.5 && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
               then truncateTextIO measureW contentW raw
               else pure raw
           (,) fm . SpanSingle shown <$> prepareFontMetrics fm shown
@@ -247,7 +258,6 @@ placeSpanLines ax fm ix x y w h = \case
 widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
-  style <- widgetVisualStyle ctx nt idx
   placements <-
     -- A centred label's placement depends on its text, style, font, alignment
     -- and size but not its origin, so it is cached. Field, picker and slider
@@ -258,6 +268,12 @@ widgetTextSpans ctx nt idx x y w h = do
         placement <- cachedWidgetLabel ctx nt idx ax lw h
         pure [(txt, lx + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
       else computeWidgetTextPlacements ctx nt idx x y w h
+  placedTextSpans ctx nt idx placements
+
+-- | Widget @idx@'s text placements as spans in its text colour.
+placedTextSpans :: Context -> NodeType -> NodeIdx -> [(T.Text, Float, Float, Float, Float)] -> IO [(Rect, T.Text, Color, Color)]
+placedTextSpans ctx nt idx placements = do
+  style <- widgetVisualStyle ctx nt idx
   let bg = styleBg style
   case nt of
     NodeTextInput -> do
@@ -350,9 +366,8 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
   | nt == NodeButton && hasFlag buttonFlagClose si = pure Nothing
   | otherwise = do
       (source, _, measure) <- resolveFontFor ctx nt fontSizeVal si
-      fm <- prepareFontMetrics source txt
       (tw0, th) <- measure txt
-      let (ix, _) = widgetContentInset fm
+      let (ix, _) = widgetContentInset source
           plain = nt == NodeButton && not (any (`hasFlag` si) [buttonFlagChoice, buttonFlagRow, buttonFlagTable, buttonFlagMenu])
           -- The room a plain button's or a select's label has: inside the
           -- padding layout gave a centred label, all of the box beside
@@ -361,7 +376,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
             | nt == NodeSelect = w - ix - selectChevronReserve
             | ax /= AlignCenter = w
             | hasFlag buttonFlagTab si = w - 2 * tabHeaderPadX
-            | otherwise = w - fst (buttonPadding fm)
+            | otherwise = w - fst (buttonPadding source)
       -- A label longer than that ends in an ellipsis.
       (label, tw) <-
         if (plain || nt == NodeSelect) && tw0 > room + 0.5
@@ -369,6 +384,8 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
             cut <- truncateTextIO (fmap fst . measure) room txt
             (cut,) . fst <$> measure cut
           else pure (txt, tw0)
+      -- Metrics for the label as it is shown, which places it.
+      fm <- prepareFontMetrics source label
       let (tx, used) = case nt of
             NodeButton
               | hasFlag buttonFlagChoice si -> (checkboxLeading fm, tw)
@@ -435,10 +452,9 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fieldTxt, penX, penY, _) <- plainFieldPen ctx idx si fm x y w h
           (fw, _) <- measureTxt fieldTxt
           pure [(fieldTxt, penX, penY, fw, lineH)]
-    -- The document lives in the text area's buffer: its rows in view.
-    NodeTextArea -> snd <$> textAreaTextPlacements ctx idx (Rect x y w h)
-    -- Sliders, drawings and plain widgets carry no text; the other widgets
-    -- have centred labels ('cachedWidgetLabel').
+    -- Sliders, drawings and plain widgets carry no text; text areas place
+    -- their rows with their clip ('textAreaTextPlacements'), and the other
+    -- widgets have centred labels ('cachedWidgetLabel').
     _ -> pure []
 
 -- | Spans inside every floating panel of one kind, clipped to its content box.

@@ -14,7 +14,7 @@ import Control.Monad (guard, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.IORef (modifyIORef', newIORef, readIORef)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (isJust, isNothing)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Frame.Hit
@@ -27,7 +27,7 @@ import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBody
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot, ptrEq)
 import NanoUI.Internal.Style (Padding (..))
-import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), clamp, rectContains, rectInflate, rectNonEmpty)
 
 -- | Saved floating-window x/y in logical pixels, or 'Nothing' before placement.
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
@@ -68,10 +68,14 @@ updateWindowDrag ctx inp =
   (isNothing <$> getsInteraction ctx isWindowResize) <&&> do
     let drag (wid, gx, gy) = do
           let V2 mx my = inputMousePos inp
-              pos = (mx - gx, my - gy)
+              Size winW winH = inputWindowSize inp
+          -- Kept on screen as placement keeps it ('windowRect'), so a pointer
+          -- held past an edge stores what the window shows and moves nothing.
+          Rect _ _ w h <- withWidgetNode ctx wid (Rect 0 0 0 0) (getNodeRect (ctxNodeArena ctx))
+          let pos = (clamp 0 (max 0 (winW - w)) (mx - gx), clamp 0 (max 0 (winH - h)) (my - gy))
           moved <- (/= Just pos) <$> lookupWindowPos ctx wid
           when moved $ modifyStore ctx (insertSlot fieldPoint (intKey wid) pos)
-          pure (wid, moved)
+          pure moved
     windowGesture ctx inp isWindowDrag (\s -> s {isWindowDrag = Nothing}) drag tryStartWindowDrag
 
 -- | Continue the window gesture @held@ reads while the button is down, with
@@ -81,15 +85,13 @@ updateWindowDrag ctx inp =
 -- frame, so a still pointer idles.
 windowGesture ::
   Context -> Input -> (InteractionState -> Maybe g) -> (InteractionState -> InteractionState)
-  -> (g -> IO (WidgetId, Bool)) -> (Context -> V2 -> IO Bool) -> IO Bool
+  -> (g -> IO Bool) -> (Context -> V2 -> IO Bool) -> IO Bool
 windowGesture ctx inp held release step start =
   getsInteraction ctx held >>= \case
     Just g
       | heldIn MouseLeft inp -> do
-          (wid, moved) <- step g
-          when moved $ do
-            damageWidget ctx wid (DamageInflated haloDamageSlop)
-            markDirty ctx
+          moved <- step g
+          when moved (markDirty ctx)
           pure True
       | otherwise -> False <$ modifyInteraction ctx release
     Nothing
@@ -172,12 +174,9 @@ updateWindowResize ctx inp winW winH =
       let moved = size /= Just (nw, nh) || pos /= Just (nx, ny)
       when moved $ do
         modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
-        withWidgetNode ctx wid () $ \idx -> do
-          mpos <- lookupWindowPos ctx wid
-          Rect x y _ _ <- getNodeRect (ctxNodeArena ctx) idx
-          let ms = contextMeasurers ctx
-          placeWindowNode (ctxNodeArena ctx) ms winW winH idx nw nh (const (fromMaybe (x, y) mpos))
-      pure (wid, moved)
+        withWidgetNode ctx wid () $ \idx ->
+          placeWindowNode (ctxNodeArena ctx) (contextMeasurers ctx) winW winH idx nw nh (const (nx, ny))
+      pure moved
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,
 -- unless the halo is blocked or the pointer is on one of the window's

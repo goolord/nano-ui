@@ -162,7 +162,8 @@ import Data.Bits (setBit, testBit, (.|.))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
-import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, contrastRatio, fadeAlpha, lerpColor)
+import GHC.Enum (boundedEnumFrom, boundedEnumFromThen)
+import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -177,7 +178,7 @@ data Sizing
 -- | Main axis for laying out a container's children: left to right, or top
 -- to bottom. 'Flow' decides whether they stay in one line, wrap, or layer.
 data Direction = Row | Column
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | How a container places its children ('layoutFlow'). Scroll containers
 -- and grids ignore it; put a wrapping or layered column inside them instead.
@@ -190,17 +191,17 @@ data Flow
   | -- | Every child covers the content box, placed by its own alignment and
     -- drawn over earlier siblings ('layered'). 'Direction' is ignored.
     Layered
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Horizontal alignment: left, centre, or right.
 data AlignX = AlignStart | AlignCenter | AlignEnd
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | 'AlignBaseline' lines a row's text children up on their first baseline, and
 -- sits any other child on it by its bottom edge. Outside a row it is
 -- 'AlignTop'.
 data AlignY = AlignTop | AlignMiddle | AlignBottom | AlignBaseline
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Where 'AlignX' puts content across the room left over: 0 at the left, 0.5
 -- centred, 1 at the right.
@@ -230,7 +231,7 @@ data Padding = Padding
 
 -- | Floating window padding. The body sits one side-pad below the chrome and one
 -- side-pad above the window's bottom edge (the window's own column gap fills
--- the top; see 'NanoUI.Internal.Widgets.Overlay').
+-- the top; see 'NanoUI.window').
 windowPad :: Padding
 windowPad = Padding 10 10 0 10
 
@@ -387,9 +388,11 @@ padTop n l = l {layoutPadding = (layoutPadding l) {padT = n}}
 padBottom :: Float -> Layout -> Layout
 padBottom n l = l {layoutPadding = (layoutPadding l) {padB = n}}
 
+-- | Set the left padding in logical pixels, keeping the other three edges.
 padLeft :: Float -> Layout -> Layout
 padLeft n l = l {layoutPadding = (layoutPadding l) {padL = n}}
 
+-- | Set the right padding in logical pixels, keeping the other three edges.
 padRight :: Float -> Layout -> Layout
 padRight n l = l {layoutPadding = (layoutPadding l) {padR = n}}
 
@@ -437,9 +440,10 @@ maxH n l = l {layoutMaxH = n}
 fixedH :: Float -> Layout -> Layout
 fixedH n l = l {layoutHeight = Fixed n}
 
--- | Request fixed width and height in logical pixels, retaining size limits.
+-- | Fix width and height in logical pixels: @fixedW w . fixedH h@, so the
+-- width limits become the width and the height limits are kept.
 fixedWH :: Float -> Float -> Layout -> Layout
-fixedWH w h l = l {layoutWidth = Fixed w, layoutHeight = Fixed h}
+fixedWH w h = fixedW w . fixedH h
 
 -- | Centre vertically in the available space.
 alignMid :: Layout -> Layout
@@ -524,7 +528,7 @@ fontSize sz l = l {layoutFontSize = max 0 sz}
 
 -- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
 -- It does not query the backend default; to scale that, apply 'fontSize'
--- with 'NanoUI.Internal.Monad.uiFontSize' first.
+-- with 'NanoUI.uiFontSize' first.
 fontSizeScale :: Float -> Layout -> Layout
 fontSizeScale s l = fontSize ((if layoutFontSize l > 0 then layoutFontSize l else 16) * s) l
 
@@ -655,7 +659,7 @@ lineAlign a l = l {layoutLineAlign = a}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype LineAlign = LineAlign Word8
-  deriving newtype (Eq, Enum)
+  deriving newtype (Eq, Ord)
 
 -- | Left of a row, top of a column.
 pattern LinesStart :: LineAlign
@@ -679,6 +683,13 @@ instance Show LineAlign where
 instance Bounded LineAlign where
   minBound = LinesStart
   maxBound = LinesEnd
+
+-- | Enumerations stop at 'maxBound', not at the byte's.
+instance Enum LineAlign where
+  fromEnum (LineAlign n) = fromIntegral n
+  toEnum = LineAlign . fromIntegral
+  enumFrom = boundedEnumFrom
+  enumFromThen = boundedEnumFromThen
 
 -- | Fraction of a line's free space placed before it: 0, 0.5 or 1.
 lineAlignFraction :: LineAlign -> Float
@@ -717,7 +728,7 @@ pinAt x y l = l {layoutPin = Just (V2 x y)}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype PointerMode = PointerMode Word8
-  deriving newtype (Eq, Enum)
+  deriving newtype (Eq, Ord)
 
 -- | The default. Controls (buttons, sliders, text fields, drawings) take the
 -- pointer from what they cover; containers, labels, images and boxes pass it
@@ -747,6 +758,13 @@ instance Bounded PointerMode where
   minBound = PointerAuto
   maxBound = PointerPass
 
+-- | Enumerations stop at 'maxBound', not at the byte's.
+instance Enum PointerMode where
+  fromEnum (PointerMode n) = fromIntegral n
+  toEnum = PointerMode . fromIntegral
+  enumFrom = boundedEnumFrom
+  enumFromThen = boundedEnumFromThen
+
 -- | Set how the node handles the pointer where it overlaps others:
 --
 -- > layers $ do
@@ -762,7 +780,7 @@ pointer m l = l {layoutPointer = m}
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype TextBreak = TextBreak Word8
-  deriving newtype (Eq, Enum)
+  deriving newtype (Eq, Ord)
 
 -- | Wrap at spaces and newlines; a word longer than the line gets a line of
 -- its own.
@@ -782,6 +800,13 @@ instance Show TextBreak where
 instance Bounded TextBreak where
   minBound = BreakWords
   maxBound = BreakAnywhere
+
+-- | Enumerations stop at 'maxBound', not at the byte's.
+instance Enum TextBreak where
+  fromEnum (TextBreak n) = fromIntegral n
+  toEnum = TextBreak . fromIntegral
+  enumFrom = boundedEnumFrom
+  enumFromThen = boundedEnumFromThen
 
 -- | Set where rich text may wrap its lines.
 textBreak :: TextBreak -> Layout -> Layout
@@ -811,7 +836,7 @@ data Style = Style
 
 -- | A side of a rectangle, for 'borderSides'.
 data Side = SideLeft | SideRight | SideTop | SideBottom
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Whether the style's border is drawn on this side.
 {-# INLINE styleHasSide #-}
@@ -822,17 +847,27 @@ styleHasSide side s = testBit (styleBorderSides s) (fromEnum side)
 -- @styled@ for a subtree or @setUiTheme@ to change the session's base theme.
 data Theme = Theme
   { themeWindow :: {-# UNPACK #-} !Color
+  -- ^ The window's background, under everything drawn.
   , themePanel :: !Style
+  -- ^ Panels, and text drawn on them or on the window ('styleFg').
   , themeFloatingWindow :: !Style
+  -- ^ In-app windows ('NanoUI.window').
   , themePopup :: !Style
   -- ^ Popups, modals, dropdowns and menus: their fill, border, corner and
   -- the hover of their rows. Panels inside them keep 'themePanel'.
   , themeButton :: !Style
+  -- ^ Buttons and other controls that are pressed.
   , themeInput :: !Style
+  -- ^ Text fields, text areas, dropdowns and other input fields.
   , themeSeparator :: {-# UNPACK #-} !Color
+  -- ^ Separator lines.
   , themeAccent :: {-# UNPACK #-} !Color
+  -- ^ The 'Accent' tone: primary buttons, checked boxes, active tabs and
+  -- focused fields.
   , themeMuted :: {-# UNPACK #-} !Color
+  -- ^ The 'Muted' tone, for secondary text.
   , themeRed :: {-# UNPACK #-} !Color
+  -- ^ A palette colour, as are the next four: see 'themeSeries'.
   , themeOrange :: {-# UNPACK #-} !Color
   , themeYellow :: {-# UNPACK #-} !Color
   , themeGreen :: {-# UNPACK #-} !Color
@@ -845,13 +880,16 @@ data Theme = Theme
   -- ^ 'Danger' tone: a red readable on 'themeWindow', used by 'danger',
   -- 'fontDanger' and 'destructive'.
   , themeOverlayDim :: {-# UNPACK #-} !Color
+  -- ^ Translucent backdrop drawn over the page behind an open modal.
   , themeOnAccent :: {-# UNPACK #-} !Color
   -- ^ Text and marks drawn on an accent fill: a checked box, an active tab,
   -- a primary button.
   , themeSelection :: {-# UNPACK #-} !Color
   -- ^ Selected text's highlight, drawn under the text. Usually translucent.
   , themeFocusRing :: {-# UNPACK #-} !Color
+  -- ^ The ring around the widget with keyboard focus.
   , themeLink :: {-# UNPACK #-} !Color
+  -- ^ Links in rich text.
   , themeShadow :: {-# UNPACK #-} !Color
   -- ^ Offset shadow under menus, dropdowns and floating windows. A zero alpha
   -- draws none.
@@ -1098,14 +1136,12 @@ subtle :: Theme -> Theme
 subtle =
   buttonStyle $ \s ->
     s
-      { styleBg = clear
-      , styleBorder = clear
+      { styleBg = colorTransparent
+      , styleBorder = colorTransparent
       , styleBorderWidth = 0
       , styleHoverBg = fadeAlpha (styleFg s) 30
       , styleActiveBg = fadeAlpha (styleFg s) 48
       }
-  where
-    clear = colorRGBA 0 0 0 0
 
 -- | Whichever of the theme's text colours reads best on @c@.
 readableOn :: Theme -> Color -> Color
@@ -1114,8 +1150,9 @@ readableOn t c =
       best a b = if contrastRatio a c >= contrastRatio b c then a else b
    in foldr1 best candidates
 
--- | The theme disabled widgets are drawn with: every colour faded toward the
--- window colour by 'themeDisabledFade', and no hover or press feedback.
+-- | The theme disabled widgets are drawn with: every colour but the
+-- selection highlight, overlay dim and shadow faded toward the window colour
+-- by 'themeDisabledFade', and no hover or press feedback.
 disabledTheme :: Theme -> Theme
 disabledTheme t =
   let f = themeDisabledFade t
@@ -1499,7 +1536,6 @@ themeFromBase16Mode dark b =
         edgeCol
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
-    -- Warning uses orange on light schemes, where yellow rarely reads.
     readable = readableTone (base00 b)
    in
     (accentColor (base0D b) defaultTheme)
@@ -1529,6 +1565,7 @@ themeFromBase16Mode dark b =
       , themeGreen = base0B b
       , themePurple = base0E b
       , themeSuccess = readable (base0B b)
+      -- Warning uses orange on light schemes, where yellow rarely reads.
       , themeWarning = readable (pick (base0A b) (base09 b))
       , themeDanger = readable (base08 b)
       , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
