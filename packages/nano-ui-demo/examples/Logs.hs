@@ -21,7 +21,6 @@ import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Context
   ( Context (..)
-  , getPrevRect
   , takeTextEditLastAction
   )
 import NanoUI.Internal.Monad (askContext)
@@ -258,7 +257,7 @@ logsApp state scroller = do
   -- for gutter grabs and only an actual row press clears.
   when (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp) $ do
     active <- liftIO $ readIORef (ctxActiveId ctx)
-    mRect <- liftIO . maybe (pure Nothing) (getPrevRect ctx) =<< peekVar scroller
+    mRect <- maybe (pure Nothing) lastRect =<< peekVar scroller
     when (active /= WidgetId 0 && maybe False (`rectContains` inputMousePos inp) mRect) $
       writeVar allSelected False
 
@@ -274,9 +273,9 @@ logsApp state scroller = do
     -- Copy after the scroller pass: a focused row's own Ctrl+C runs inside
     -- selectableTextWith during the scroller pass and would otherwise overwrite
     -- the clipboard with a single row.
-    let copyAll = liftIO $ do
-          rows <- forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st)
-          void (ctxClipboardSet ctx (T.unlines rows))
+    let copyAll = do
+          rows <- liftIO (forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st))
+          void (setClipboard (T.unlines rows))
     when (selected && chosen 'c' Copy) copyAll
 
     separator
