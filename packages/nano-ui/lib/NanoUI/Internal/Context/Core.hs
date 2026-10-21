@@ -225,9 +225,10 @@ settleLayoutReads ctx = do
     when stale (markDirtyCovered ctx)
 
 -- | Clear the follow-up-frame request without clearing queued repaint bounds.
+-- The whole-window repaint a 'markDirty' queued stays for the next frame.
 {-# INLINE clearDirty #-}
 clearDirty :: Context -> IO ()
-clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False, dsDirtyOpaque = False})
+clearDirty ctx = modifyDamage ctx (\ds -> ds {dsDirty = False})
 
 -- | Whether state changes require another view pass.
 {-# INLINE isDirty #-}

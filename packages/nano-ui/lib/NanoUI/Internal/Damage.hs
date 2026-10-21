@@ -408,8 +408,8 @@ data FrameSnapshot = FrameSnapshot
   , fsAnimKeys :: !IS.IntSet
   }
 
--- | Read the 'FrameSnapshot' before the UI pass, ahead of 'clearDirty'
--- (which resets 'dsDirtyOpaque').
+-- | Read the 'FrameSnapshot' before the UI pass, ahead of the frame's reset
+-- of the dirty flags, 'dsDirtyOpaque' among them.
 captureFrameSnapshot :: Context -> IO FrameSnapshot
 captureFrameSnapshot ctx = do
   ds <- readIORef (ctxDamageState ctx)

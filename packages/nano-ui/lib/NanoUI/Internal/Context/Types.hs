@@ -257,7 +257,7 @@ data WindowResizeDrag = WindowResizeDrag
 data DamageState = DamageState
   { dsDirty :: !Bool
   , dsDirtyOpaque :: !Bool
-  -- ^ Some request since the last clear came through 'markDirty', whose
+  -- ^ Some request since the last frame came through 'markDirty', whose
   -- effects no diff is known to cover. 'markDirtyCovered' leaves it alone,
   -- so a covered request never downgrades an opaque one.
   , dsDamage :: !Damage
