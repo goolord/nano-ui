@@ -336,7 +336,8 @@ main = do
                 go k = do (_, d) <- frame idle; when d (go (k - 1 :: Int))
             when dirty (go 8)
             pure r
-      (slider0, check0) <- settle inp
+      -- The first frame has laid nothing out yet, so its rects are empty.
+      (slider0, check0) <- settle inp >> settle inp
       _ <- settle inp {inputKeys = inputKeysFromList [KeyTab], inputKeysNew = inputKeysFromList [KeyTab]}
       writeIORef passes 0 >> writeIORef frames 0
       forM_ (take 500 (cycle "typing ")) $ \c -> settle inp {inputChars = T.singleton c}
