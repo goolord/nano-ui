@@ -1398,9 +1398,9 @@ restoreLayoutCache na lc = do
   let !n = lcCount lc
   copyMutablePrimArray (naArrGeom a) 0 (lcGeom lc) 0 (n * geomStride)
   -- Scroll content width, node value (the content height) and scrollbar
-  -- slot. Scroll containers are pointer nodes, so walk that class, not the
+  -- slot. Scroll containers are backdrop nodes, so walk that class, not the
   -- whole arena.
-  forClassNodes_ na PointerNodes $ \i -> do
+  forClassNodes_ na BackdropNodes $ \i -> do
     nt <- readTagEnum a i TagNodeType
     when (isScrollNode nt) $ do
       let !slotOff = i * tagStride + fromEnum TagScrollBarSlot
