@@ -622,7 +622,7 @@ pushPolygonAA da pts rings tris
 {-# NOINLINE polygonAAFrom #-}
 polygonAAFrom :: DrawArena -> Float -> Float -> PrimArray Float -> PrimArray Int -> PrimArray Int -> Shade -> IO ()
 polygonAAFrom da rx ry pts rings tris shade
-  | n < 3 || nt < 3 || not ringsValid || area == 0 || not (shadeCovers shade n) = pure ()
+  | n < 3 || nt < 3 || not ringsValid || not trisValid || area == 0 || not (shadeCovers shade n) = pure ()
   | otherwise = do
       s <- readIORef (daSnapScale da)
       square <- readIORef (daSquareGeometry da)
@@ -682,6 +682,7 @@ polygonAAFrom da rx ry pts rings tris shade
     -- First interior (non-ring) point.
     !nOut = if nr >= 1 then ringAt nr else 0
     ringsValid = nr >= 1 && ringAt 0 == 0 && nOut <= n && and [ringAt r < ringAt (r + 1) | r <- [0 .. nr - 1]]
+    trisValid = and [t >= 0 && t < n | k <- [0 .. nt - 1], let t = indexPrimArray tris k]
     forRings body = forUpTo_ nr $ \r -> body (ringAt r) (ringAt (r + 1))
     px i = indexPrimArray pts (2 * i)
     py i = indexPrimArray pts (2 * i + 1)

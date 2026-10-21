@@ -17,6 +17,7 @@ tests =
   , spec "draw-external-text" runExternalTextTest
   , spec "draw-empty-clip" runEmptyClipTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
+  , spec "draw-polygon-bad-index" runPolygonBadIndexTest
   , spec "draw-glyph-pages" runGlyphPagesTest
   , spec "draw-glyph-page-range" runGlyphPageRangeTest
   , spec "draw-long-shaped-line" runLongShapedLineTest
@@ -229,3 +230,14 @@ vertexColours dd =
     forM [0 .. drawVertexCount dd - 1] $ \i -> do
       let at o = peekByteOff vp (i * vertexSize + o) :: IO Float
       (,,) <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16)
+
+-- | A polygon whose triangles index past its points draws nothing, rather
+-- than triangles into other geometry or past the frame's vertices.
+runPolygonBadIndexTest :: Context -> IORef Int -> IO ()
+runPolygonBadIndexTest ctx failed = do
+  let tri = primArrayFromList [0, 0, 40, 0, 0, 40]
+      ops = [FillPolygon tri (primArrayFromList [0, 3]) (primArrayFromList [0, 1, 100]) (Flat (colorRGBA 255 0 0 255))]
+  (_, dd, _) <- runFrame ctx (withInput 300 200) (void (drawing (fixedWH 60 60) (const (smallArrayFromList ops))))
+  indices <- withForeignPtr (drawIndices dd) $ \ip ->
+    forM [0 .. drawIndexCount dd - 1] $ \i -> peekByteOff ip (i * indexSize) :: IO Word32
+  assert failed (all ((< drawVertexCount dd) . fromIntegral) indices)
