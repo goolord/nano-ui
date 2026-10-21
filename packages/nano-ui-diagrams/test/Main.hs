@@ -83,7 +83,7 @@ main = hspec $ do
     it "reuses cached chart content within one context" testChartCache
   describe "tessellation" $ do
     it "triangulates indexed polygons with full coverage" testIndexedTriangulation
-    it "covers polyline strokes end to end" testStrokeCoversMidpoint
+    it "keeps a polyline's points, dropping repeats and the closing point" testStrokePolylinePoints
     it "fills a level rectangle with a rect op" testRectFill
     it "cuts a loop inside another out by the fill rule" testFillRule
     it "strokes with the style's caps, joins and dashes" testStrokeStyle
@@ -205,8 +205,8 @@ testIndexedTriangulation = do
               ++ show (n, length tris, areaSum, polygonArea)
           )
 
-testStrokeCoversMidpoint :: IO ()
-testStrokeCoversMidpoint = do
+testStrokePolylinePoints :: IO ()
+testStrokePolylinePoints = do
   let
     col = themeRed defaultTheme
     stroke w path = strokePathOps 0.5 mempty (P.stroke w) path (Solid col)
@@ -368,13 +368,13 @@ testLabelFit fm = do
         or [rectsOverlap a b | (a, t) <- ts, picks a t, (b, t') <- ts, tickText t']
     overlapTitleTick c w h =
       overlapsTicks $ \(Rect bx by _ _) t ->
-        (chartXTitle c == Just t && by < h * 0.45) || (chartYTitle c == Just t && bx < w * 0.4)
+        (chartXTitle c == Just t && by > h * 0.55) || (chartYTitle c == Just t && bx < w * 0.4)
     overlapLegendTick c w h =
       overlapsTicks $ \(Rect bx by _ _) t ->
         t `elem` map seriesName (chartSeries c)
           && case chartLegend c of
             LegendRight -> bx > w * 0.55
-            LegendBottom -> by < h * 0.45
+            LegendBottom -> by > h * 0.55
             _ -> False
   check "axis titles overlap ticks" (not (overlapTitleTick sleepChart 400 240 legendOps))
   check "legend overlaps ticks" (not (overlapLegendTick sleepChart 400 240 legendOps))
