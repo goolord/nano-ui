@@ -465,8 +465,8 @@ pushLine da x1 y1 x2 y2 thickness col = do
           cap x1 y1
           cap x2 y2
 
--- Coverage-AA strip for a straight segment. Same weight as pushCornerArcStroke,
--- without round caps that blob at rounded-rect corners.
+-- Coverage-AA strip for a straight segment, the strip a rounded stroke's
+-- sides use, without the round caps 'pushLine' adds.
 {-# INLINE pushStrokeAA #-}
 pushStrokeAA :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushStrokeAA da x0 y0 x1 y1 bw col

@@ -77,8 +77,8 @@ import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg)
 import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect)
 
--- | Pixel box for a 'DrawText' using host advances. diagrams text has no
--- envelope, so plot sizing uses this instead of `fontSizeL`.
+-- | The line box, in logical pixels, that a 'DrawText' of the text anchored
+-- at @(x, y)@ by @ax@ and @ay@ occupies, measured with @fm@'s advances.
 drawTextBox :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
 drawTextBox fm x y ax ay t =
   let tw = lineWidth fm t

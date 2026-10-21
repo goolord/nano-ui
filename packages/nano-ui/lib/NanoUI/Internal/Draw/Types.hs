@@ -141,7 +141,8 @@ data DrawOp
       !Color
   -- ^ Text in a font of its own, its line box's top left corner at (x, y).
   | FillPolygon !(PrimArray Float) !(PrimArray Int) !(PrimArray Int) !Shade
-  -- ^ A polygon with holes, anti-aliased along its outline only. Fields:
+  -- ^ A polygon with holes, anti-aliased along its rings (outline and
+  -- holes), not along the edges between its triangles. Fields:
   -- points as x/y pairs, ring after ring, then any interior points the
   -- triangles need; each ring's start offset plus the last ring's end;
   -- index triples into the points; and the shade. The first ring is the
@@ -355,7 +356,9 @@ data DrawArena = DrawArena
   -- one copy per rect it meets; empty for none.
   }
 
--- | Packed vertex stride in bytes: 32.
+-- | Packed vertex stride in bytes: 32. A vertex is eight 32-bit floats: x
+-- and y in logical pixels, red, green, blue and alpha from 0 to 1 with
+-- straight (not premultiplied) alpha, then the texture's u and v.
 vertexSize :: Int
 vertexSize = 32
 
@@ -363,19 +366,22 @@ vertexSize = 32
 indexSize :: Int
 indexSize = 4
 
--- | Reserved texture id. These quads act as a backdrop dim, not a solid fill.
--- Mix comes from the vertex color alpha.
+-- | Reserved texture id. nano-ui emits no command with it: a modal's
+-- backdrop dim is a plain translucent fill.
 backdropDimTextureId :: Int
 backdropDimTextureId = 0x7ffffffe
 
--- | Reserved texture id for the per-glyph SDL_ttf atlas. The renderer binds
--- the glyph atlas SDL_Texture when it sees this id. Glyphs are cached as
--- white-on-alpha so vertex color tints them at draw time.
+-- | Reserved texture id for page 0 of the host's glyph atlas
+-- ('glyphPageTextureId'). The renderer binds its atlas texture when it sees
+-- this id. Glyphs are cached as white-on-alpha so vertex color tints them at
+-- draw time. Solid shapes (rects, rounded shapes, strokes, polygons) draw
+-- with this id too and sample u = v = 1.5/1024, so a host that samples the
+-- atlas for them keeps that point opaque white.
 glyphAtlasTextureId :: Int
 glyphAtlasTextureId = 0x7ffffffd
 
 -- | Pages a glyph atlas can have. A glyph's page is the whole part of its
--- u coordinates ('NanoUI.Internal.Font.ShapedGlyphs'), so page 0's UVs are
+-- u coordinates ('NanoUI.Backend.ShapedGlyphs'), so page 0's UVs are
 -- the plain ones.
 glyphAtlasPages :: Int
 glyphAtlasPages = 4

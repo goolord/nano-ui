@@ -460,7 +460,8 @@ snapRectOrigin da (Rect x y w h) = do
   s <- readIORef (daSnapScale da)
   pure (Rect (onGrid s x) (onGrid s y) w h)
 
--- | The u and v of the center of the 4x4 white pixel patch in the 1024x1024
--- font atlas.
+-- | The u and v at which solid shapes sample glyph atlas page 0
+-- ('glyphAtlasTextureId'): three texels in on the SDL host's 2048-texel
+-- atlas, inside the 4x4 opaque white patch at its corner.
 whitePixel :: Float
 whitePixel = 1.5 / 1024.0
