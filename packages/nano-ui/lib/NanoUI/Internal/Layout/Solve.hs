@@ -813,17 +813,16 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
         let capH = (if hTag == SizingFixed then hVal else hMax) - padY
             narrowed = viewAt (scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) fullH capH)
         if narrowed /= viewAt 0 then stackAt narrowed else pure full
-  let assignedInnerH =
-        case hTag of
-          SizingFixed -> max 0 (hVal - padY)
-          _ -> contentH
+  -- A width fit to the content makes room for the bar when the content
+  -- overflows the scroller's own height, fixed or capped.
+  let h = sizeWithin hAx (contentH + padY)
       fitGutterW
         | not vertical || wTag == SizingGrow || wTag == SizingFixed = 0
-        | otherwise = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH assignedInnerH
+        | otherwise = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH (h - padY)
   if isScrollStyle2D si
     then setSolvedValue na idx contentH >> setScrollContentW na idx contentW
     else setSolvedValue na idx (if dir == DirColumn then contentH else contentW)
-  setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) (sizeWithin hAx (contentH + padY))
+  setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) h
 
 foldChildDimsFromParent :: SolveEnv -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
