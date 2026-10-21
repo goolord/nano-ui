@@ -59,6 +59,9 @@ module NanoUI.Monad
   , setClipboard
 
     -- * Host
+
+    -- | A 'Host' is a typed slot that holds one value or none, for the UI
+    -- thread: 'setHost' installs the value and 'askHost' reads it in a view.
   , Host
   , newHost
   , setHost

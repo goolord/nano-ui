@@ -388,9 +388,11 @@ padTop n l = l {layoutPadding = (layoutPadding l) {padT = n}}
 padBottom :: Float -> Layout -> Layout
 padBottom n l = l {layoutPadding = (layoutPadding l) {padB = n}}
 
+-- | Set the left padding in logical pixels, keeping the other three edges.
 padLeft :: Float -> Layout -> Layout
 padLeft n l = l {layoutPadding = (layoutPadding l) {padL = n}}
 
+-- | Set the right padding in logical pixels, keeping the other three edges.
 padRight :: Float -> Layout -> Layout
 padRight n l = l {layoutPadding = (layoutPadding l) {padR = n}}
 
@@ -845,17 +847,27 @@ styleHasSide side s = testBit (styleBorderSides s) (fromEnum side)
 -- @styled@ for a subtree or @setUiTheme@ to change the session's base theme.
 data Theme = Theme
   { themeWindow :: {-# UNPACK #-} !Color
+  -- ^ The window's background, under everything drawn.
   , themePanel :: !Style
+  -- ^ Panels, and text drawn on them or on the window ('styleFg').
   , themeFloatingWindow :: !Style
+  -- ^ In-app windows ('NanoUI.window').
   , themePopup :: !Style
   -- ^ Popups, modals, dropdowns and menus: their fill, border, corner and
   -- the hover of their rows. Panels inside them keep 'themePanel'.
   , themeButton :: !Style
+  -- ^ Buttons and other controls that are pressed.
   , themeInput :: !Style
+  -- ^ Text fields, text areas, dropdowns and other input fields.
   , themeSeparator :: {-# UNPACK #-} !Color
+  -- ^ Separator lines.
   , themeAccent :: {-# UNPACK #-} !Color
+  -- ^ The 'Accent' tone: primary buttons, checked boxes, active tabs and
+  -- focused fields.
   , themeMuted :: {-# UNPACK #-} !Color
+  -- ^ The 'Muted' tone, for secondary text.
   , themeRed :: {-# UNPACK #-} !Color
+  -- ^ A palette colour, as are the next four: see 'themeSeries'.
   , themeOrange :: {-# UNPACK #-} !Color
   , themeYellow :: {-# UNPACK #-} !Color
   , themeGreen :: {-# UNPACK #-} !Color
@@ -868,13 +880,16 @@ data Theme = Theme
   -- ^ 'Danger' tone: a red readable on 'themeWindow', used by 'danger',
   -- 'fontDanger' and 'destructive'.
   , themeOverlayDim :: {-# UNPACK #-} !Color
+  -- ^ Translucent backdrop drawn over the page behind an open modal.
   , themeOnAccent :: {-# UNPACK #-} !Color
   -- ^ Text and marks drawn on an accent fill: a checked box, an active tab,
   -- a primary button.
   , themeSelection :: {-# UNPACK #-} !Color
   -- ^ Selected text's highlight, drawn under the text. Usually translucent.
   , themeFocusRing :: {-# UNPACK #-} !Color
+  -- ^ The ring around the widget with keyboard focus.
   , themeLink :: {-# UNPACK #-} !Color
+  -- ^ Links in rich text.
   , themeShadow :: {-# UNPACK #-} !Color
   -- ^ Offset shadow under menus, dropdowns and floating windows. A zero alpha
   -- draws none.
@@ -1137,8 +1152,9 @@ readableOn t c =
       best a b = if contrastRatio a c >= contrastRatio b c then a else b
    in foldr1 best candidates
 
--- | The theme disabled widgets are drawn with: every colour faded toward the
--- window colour by 'themeDisabledFade', and no hover or press feedback.
+-- | The theme disabled widgets are drawn with: every colour but the
+-- selection highlight, overlay dim and shadow faded toward the window colour
+-- by 'themeDisabledFade', and no hover or press feedback.
 disabledTheme :: Theme -> Theme
 disabledTheme t =
   let f = themeDisabledFade t
@@ -1522,7 +1538,6 @@ themeFromBase16Mode dark b =
         edgeCol
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
-    -- Warning uses orange on light schemes, where yellow rarely reads.
     readable = readableTone (base00 b)
    in
     (accentColor (base0D b) defaultTheme)
@@ -1552,6 +1567,7 @@ themeFromBase16Mode dark b =
       , themeGreen = base0B b
       , themePurple = base0E b
       , themeSuccess = readable (base0B b)
+      -- Warning uses orange on light schemes, where yellow rarely reads.
       , themeWarning = readable (pick (base0A b) (base09 b))
       , themeDanger = readable (base08 b)
       , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)

@@ -379,6 +379,8 @@ instance Show DamageBounds where
   show (DamageUnion a b) = "DamageUnion (" ++ show a ++ ") (" ++ show b ++ ")"
   show DamageNone = "DamageNone"
 
+-- | Functions cannot be compared, so a 'DamageCustom' equals nothing, not
+-- even itself.
 instance Eq DamageBounds where
   DamageSelf == DamageSelf = True
   DamageInflated a == DamageInflated b = a == b
