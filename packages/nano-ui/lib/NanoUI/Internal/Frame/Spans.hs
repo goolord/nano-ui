@@ -90,7 +90,7 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
       spans <-
         if nt == NodeText
           then sceSpans <$> textNodeSpanEntry ctx idx x y w h
-          else if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
+          else if isWidgetNode nt && nt /= NodeTextArea then widgetTextSpans ctx nt idx x y w h else pure []
       here <-
         case nt of
           -- A select's label shares one clip, short of its chevron.
@@ -109,10 +109,12 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
                   if hasFlag textInputFlagNumeric si
                     then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere fieldClip)
                     else tagTextInputClippedSpans clipHere fieldClip x y w fm spans
-          -- Rows are clipped as paint clips them, short of the scrollbars.
+          -- The document lives in the text area's buffer: its rows in view,
+          -- clipped as paint clips them, short of the scrollbars.
           NodeTextArea -> do
-            (textClip, _) <- textAreaTextPlacements ctx idx (Rect x y w h)
-            pure (maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere textClip))
+            (textClip, rows) <- textAreaTextPlacements ctx idx (Rect x y w h)
+            rowSpans <- placedTextSpans ctx nt idx rows
+            pure (maybe [] (`tagClippedSpans` rowSpans) (rectIntersect clipHere textClip))
           _ -> pure (tagClippedSpans clipHere spans)
       pushSpans arena here
       kids <- getFirstChild (ctxNodeArena ctx) idx
@@ -253,7 +255,6 @@ placeSpanLines ax fm ix x y w h = \case
 widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
-  style <- widgetVisualStyle ctx nt idx
   placements <-
     -- A centred label's placement depends on its text, style, font, alignment
     -- and size but not its origin, so it is cached. Field, picker and slider
@@ -264,6 +265,12 @@ widgetTextSpans ctx nt idx x y w h = do
         placement <- cachedWidgetLabel ctx nt idx ax lw h
         pure [(txt, lx + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
       else computeWidgetTextPlacements ctx nt idx x y w h
+  placedTextSpans ctx nt idx placements
+
+-- | Widget @idx@'s text placements as spans in its text colour.
+placedTextSpans :: Context -> NodeType -> NodeIdx -> [(T.Text, Float, Float, Float, Float)] -> IO [(Rect, T.Text, Color, Color)]
+placedTextSpans ctx nt idx placements = do
+  style <- widgetVisualStyle ctx nt idx
   let bg = styleBg style
   case nt of
     NodeTextInput -> do
@@ -442,10 +449,9 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fieldTxt, penX, penY, _) <- plainFieldPen ctx idx si fm x y w h
           (fw, _) <- measureTxt fieldTxt
           pure [(fieldTxt, penX, penY, fw, lineH)]
-    -- The document lives in the text area's buffer: its rows in view.
-    NodeTextArea -> snd <$> textAreaTextPlacements ctx idx (Rect x y w h)
-    -- Sliders, drawings and plain widgets carry no text; the other widgets
-    -- have centred labels ('cachedWidgetLabel').
+    -- Sliders, drawings and plain widgets carry no text; text areas place
+    -- their rows with their clip ('textAreaTextPlacements'), and the other
+    -- widgets have centred labels ('cachedWidgetLabel').
     _ -> pure []
 
 -- | Spans inside every floating panel of one kind, clipped to its content box.
