@@ -159,12 +159,12 @@ runComboScrollbarDragTest ctx failed = do
       -- flush at the drop rect's top (no outer margin).
       dropY = ry + rh + 4
       trackX = rx + rw - 5
-      press = pressAt inp0 (V2 trackX (dropY + 200))
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx press {inputButtonsPressed = noButtons} ui
+      -- From the thumb at the lane's top down to the list's bottom.
+      drag = holdAt inp0 (V2 trackX (dropY + 200))
+  _ <- runFrame ctx (pressAt inp0 (V2 trackX (dropY + 10))) ui
+  _ <- runFrame ctx drag ui
   -- Release over a row position (bottom of the list): must not pick.
-  let release = applyMouseButton MouseLeft False press
-  ((r, t), _, _) <- runFrame ctx release ui
+  ((r, t), _, _) <- runFrame ctx (releaseAt drag) ui
   assert failed (T.null t && not (respChanged r))
   overlays1 <- collectOverlayTextSpans ctx inp0
   assert failed (not (hasText "Fam 01" overlays1))

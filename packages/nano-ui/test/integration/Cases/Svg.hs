@@ -114,11 +114,14 @@ runSvgIconTest ctx failed = do
       ui = column $ do
         svgIcon 24 doc
         svgIconWith (fixedWH 16 16 . fontColor red) doc
+      rasters = map fst . Map.elems <$> readIORef (ctxSvgRasters ctx)
   (_, draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw
   let colors = map snd quads
   assert failed (styleFg (themePanel theme) `elem` colors)
   assert failed (red `elem` colors)
+  shown <- rasters
   (_, draw2) <- warmupDraw ctx inp ui
   quads2 <- drawQuads draw2
   assertEq failed (length quads) (length quads2)
+  assertEq failed shown =<< rasters

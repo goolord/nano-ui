@@ -168,13 +168,9 @@ runVarSlotIdentityTest ctx failed = do
 runVarLifecycleTest :: Context -> IORef Int -> IO ()
 runVarLifecycleTest ctx failed = do
   left <- newVar (0 :: Int)
-  right <- newVar (0 :: Int)
   let inp = withInputOff 300 100
-      item :: Text -> Var Int -> NanoUI Int
-      item name v = withKey name $ do
-        n <- readVar v
-        label (T.pack (show n))
-        pure n
+      item :: Text -> NanoUI (Var Int)
+      item name = withKey name (useVar 0)
       view = do
         n <- readVar left
         label (T.pack (show n))
@@ -194,12 +190,11 @@ runVarLifecycleTest ctx failed = do
   assert failed . damageIsEmpty =<< takeDamage ctx
   runNanoUI ctx inp (modifyVar left (+ 3) >> writeVar left 0)
   assertEq failed 0 =<< readVarIO left
-  writeVarIO left 7
-  (before, _, _) <- runFrame ctx inp ((,) <$> item "left" left <*> item "right" right)
-  _ <- runFrame ctx inp (item "right" right)
-  (after, _, _) <- runFrame ctx inp ((,) <$> item "right" right <*> item "left" left)
-  assertEq failed (7, 0) before
-  assertEq failed (0, 7) after
+  (owned, _) <- evalUi ctx inp ((,) <$> item "left" <*> item "right")
+  writeVarIO owned 7
+  _ <- runFrame ctx inp (item "right")
+  (right, left') <- evalUi ctx inp ((,) <$> item "right" <*> item "left")
+  assertEq failed (0, 7) =<< ((,) <$> readVarIO right <*> readVarIO left')
 
 data Item = Item {rowKey :: !Int, rowName :: !Text, rowDone :: !Bool}
   deriving (Eq, Show, Generic)

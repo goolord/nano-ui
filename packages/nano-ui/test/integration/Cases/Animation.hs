@@ -67,35 +67,27 @@ runAnimateToStaysSettledTest ctx failed = do
   replicateM_ 700 (runFrame ctx inp (ui False))
   assert failed . near 0 =<< evalUi ctx inp (ui True)
 
+-- | A tween that moves a label repaints where the label was and where it went,
+-- also when the tween starts and finishes within one frame. At rest it
+-- repaints nothing of its own.
 runAnimationDamageTest :: Context -> IORef Int -> IO ()
-runAnimationDamageTest _ failed = do
-  ctx <- newContext
-  let idleInp = withDelta 200 100 0
-      idle = label "anim"
-      tweenInp = idleInp {inputDeltaTime = 0.05}
-      ui = do
-        t <- animateTo (Tween EaseLinear 0.4 0) 1
-        void (spacer (Fixed (20 + 80 * t)) Fit)
-        label "anim"
-      hasMove dmg = case dmg of
-        DamageFull -> True
-        DamageClip r -> rectW r > 0 && rectH r > 0
-  _ <- warmup2 ctx idleInp idle
-  dIdle <- takeDamage ctx
-  assert failed (dIdle /= DamageFull)
-  _ <- runFrame ctx tweenInp ui
-  dMid <- takeDamage ctx
-  assert failed (hasMove dMid)
-  ctx2 <- newContext
-  let fastInp = idleInp {inputDeltaTime = 0.5}
-      uiFast = do
-        t <- animateTo (Tween EaseLinear 0.2 0) 1
-        void (spacer (Fixed (20 + 80 * t)) Fit)
-        label "anim"
-  _ <- warmup2 ctx2 idleInp idle
-  _ <- runFrame ctx2 fastInp uiFast
-  dFast <- takeDamage ctx2
-  assert failed (hasMove dFast)
+runAnimationDamageTest ctx0 failed = do
+  ctx1 <- newContext
+  forM_ [(ctx0, 0.4, 0.05), (ctx1, 0.2, 0.5)] $ \(ctx, dur, dt) -> do
+    let inp = withDelta 200 100 dt
+        ui target = do
+          t <- animateTo (Tween EaseLinear dur 0) target
+          row (spacer (Fixed (20 + 80 * t)) Fit >> label' "anim")
+    lbl <- respId <$> warmup2 ctx inp (ui 0)
+    assert failed . (/= DamageFull) =<< takeDamage ctx
+    -- The frame that starts the tween, then one it moves the label on.
+    _ <- runFrame ctx inp (ui 1)
+    assertJustM failed (getPrevRect ctx lbl) $ \old -> do
+      _ <- runFrame ctx inp (ui 1)
+      dmg <- takeDamage ctx
+      assertJustM failed (getPrevRect ctx lbl) $ \new -> do
+        assertGt failed (rectX new) (rectX old)
+        assert failed (damageCovers dmg old && damageCovers dmg new)
 
 -- A delayed tween holds its start value until the delay elapses and then
 -- eases from there; declarative tweens stagger the same way per key.

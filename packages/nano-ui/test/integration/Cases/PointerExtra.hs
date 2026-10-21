@@ -228,7 +228,7 @@ runMouseAreaTest ctx failed = do
         pure (l, b, area)
       at p = win {inputMousePos = p}
   (l0, _, area0) <- warmup2 ctx win ui
-  [(_, _, areaMid)] <- frames ctx ui [snd (clickPairWith MouseMiddle win (centerOf l0))]
+  [_, (_, _, areaMid)] <- middleAt ctx ui (centerOf l0)
   assert failed (respClickedWith MouseMiddle areaMid && not (respClicked areaMid))
   [(_, _, areaRight)] <- frames ctx ui [fst (clickPairWith MouseRight win (centerOf l0))]
   assert failed (respHeldWith MouseRight areaRight && respHovered areaRight)

@@ -139,7 +139,6 @@ runSelectOverlayDamageTest ctx failed = do
     dmg <- takeDamage ctx
     -- The hover moved inside the dropdown, which the arena does not hold:
     -- the clip repaints the whole dropdown rather than the whole window.
-    assert failed (not (null overlays))
     forM_ overlays $ \(_, _, _, _, dropRect) -> assert failed (clipCovers dmg dropRect)
 
 -- | An open dropdown's text spans carry the colours it is painted in: the

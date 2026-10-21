@@ -212,7 +212,9 @@ runDrawReuseTest ctx failed = do
             registerCustomDrawing ctx (WidgetId 777) 0 $ \_ r ->
               smallArrayFromList [FillRect r (colorRGBA stray 0 0 255)]
       base = (red, 0.2, red, 1, 1, 0)
-      frame s = (\(_, dd, _) -> dd) <$> runFrame ctx inp (ui s)
+      -- The case returns the field itself: a selector thunk from fmap would
+      -- make two reads of one draw data unequal under 'ptrEq' unoptimised.
+      frame s = runFrame ctx inp (ui s) >>= \(_, dd, _) -> pure dd
       -- Two frames of @s@ after @from@: the first paints @s@, and the second
       -- returns the first's draw data when @reused@.
       check from s reused = do
