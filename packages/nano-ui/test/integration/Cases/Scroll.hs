@@ -49,6 +49,8 @@ tests =
   , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
   , spec "scroll-wheel-paint-order" runWheelPaintOrderTest
   , spec "scroll-wheel-cross-inside" runWheelCrossInsideTest
+  , spec "scroll-wheel-cross-popup" runWheelCrossPopupTest
+  , spec "scroll-wheel-cross-2d" runWheelCross2DTest
   , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
   ]
 
@@ -885,6 +887,66 @@ runWheelCrossInsideTest ctx failed = do
     _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
     assert failed . (> 0) =<< getScrollOffset ctx inner
     assertEq failed 0 =<< getScrollOffset ctx outer
+
+-- | The unused wheel axis stops at a popup: a vertical wheel over a
+-- horizontal strip in a popup leaves the page scroller that declared the
+-- popup, and a sideways wheel on that page leaves the strip.
+runWheelCrossPopupTest :: Context -> IORef Int -> IO ()
+runWheelCrossPopupTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      across l = (fixedWH 150 40 l) {layoutDirection = Row}
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        replicateM_ 30 (label "row")
+        snd <$> popup' (constVar True) (defaultPopupConfig (AnchorPoint (V2 200 20))) (fst <$> scrollArea across (replicateM_ 30 (label "wide cell")))
+      wheel p d = do
+        warmup ctx inp0 {inputMousePos = p} ui
+        void (runFrame ctx inp0 {inputMousePos = p, inputScroll = d} ui)
+  (page, mStrip) <- warmup2 ctx inp0 ui
+  assertJust failed mStrip $ \strip ->
+    assertJustM failed (getPrevRect ctx strip) $ \r -> do
+      wheel (spanCenter r) (V2 0 1)
+      assertEq failed 0 =<< getScrollOffset ctx page
+      wheel (V2 20 150) (V2 1 0)
+      assertEq failed 0 =<< getScrollOffset ctx strip
+      -- The page itself still scrolls there.
+      wheel (V2 20 150) (V2 0 1)
+      assert failed . (> 0) =<< getScrollOffset ctx page
+
+-- | A 2D scroller pairs with a 1D one either way, and each takes only the
+-- wheel axis the scroller under the pointer cannot move: a sideways wheel
+-- over a 2D scroller in a horizontal one moves the 2D one alone, and over a
+-- vertical list in a 2D scroller moves the 2D one across.
+runWheelCross2DTest :: Context -> IORef Int -> IO ()
+runWheelCross2DTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      wide = box (fixedWH 600 10) (colorRGBA 90 90 90 255)
+      rows n = column (replicateM_ n (label "row"))
+      across l = (fixedWH 300 200 l) {layoutDirection = Row}
+      wheelOver c ui sid d = assertJustM failed (getPrevRect c sid) $ \r -> do
+        warmup c inp0 {inputMousePos = spanCenter r} ui
+        void (runFrame c inp0 {inputMousePos = spanCenter r, inputScroll = d} ui)
+      inRow = scrollArea across $ do
+        (inner, ()) <- scrollArea2D (fixedWH 150 100) (column (wide >> rows 30))
+        replicateM_ 30 (label "outer cell")
+        pure inner
+  (outer, inner) <- warmup2 ctx inp0 inRow
+  wheelOver ctx inRow inner (V2 1 0)
+  assert failed . (\(V2 x _) -> x > 0) =<< getScrollOffset2D ctx inner
+  assertEq failed 0 =<< getScrollOffset ctx outer
+  -- A fresh context, so the outer scroller does not inherit the offset kept
+  -- under the same id.
+  ctx2 <- newContext
+  let in2D = scrollArea2D (fixedWH 300 200) . column $ do
+        (list, ()) <- scrollArea (fixedWH 100 80) (rows 30)
+        wide
+        rows 30
+        pure list
+  (outer2D, list) <- warmup2 ctx2 inp0 in2D
+  wheelOver ctx2 in2D list (V2 0 1)
+  assert failed . (> 0) =<< getScrollOffset ctx2 list
+  assertEq failed (V2 0 0) =<< getScrollOffset2D ctx2 outer2D
+  wheelOver ctx2 in2D list (V2 1 0)
+  assert failed . (\(V2 x _) -> x > 0) =<< getScrollOffset2D ctx2 outer2D
 
 -- | The wheel goes to the topmost scroller under the pointer, even one pinned
 -- over another but declared first. A pinned panel over the lower scroller
