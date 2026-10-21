@@ -50,7 +50,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
+import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
 
 -- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
 -- and show the focus ring. Moving focus blurs the old widget
@@ -247,18 +247,10 @@ widgetUnderMouse ctx top mouse nt idx = do
     <&&> (not <$> passesPointer (ctxNodeArena ctx) idx)
 
 -- | The rect a press on node @idx@ must land in: a text field's box
--- ('nodeTextFieldGeom'), a close button's padded target, or the node rect.
+-- ('nodeTextFieldGeom'), else the node rect.
 widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 widgetHitRect ctx nt idx x y w h = case nt of
   NodeTextInput -> fst <$> nodeTextFieldGeom ctx idx x y w h
-  NodeButton -> do
-    si <- getStyleIdx (ctxNodeArena ctx) idx
-    -- Close buttons get a padded target that stays inside the title bar, so
-    -- the inner east resize still works below the control.
-    pure $
-      if hasFlag buttonFlagClose si
-        then Rect (x - 8) (y - 4) (w + 10) (h + 4)
-        else Rect x y w h
   _ -> pure (Rect x y w h)
 
 -- | Resolve a left-button release against this frame's solved rects, and

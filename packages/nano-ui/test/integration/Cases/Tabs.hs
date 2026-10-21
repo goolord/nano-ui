@@ -14,6 +14,7 @@ tests =
   , spec "tabs-laziness" runTabsLazinessTest
   , spec "tabs-enum" runEnumTabsTest
   , spec "tabs-closable" runTabsClosableTest
+  , spec "tabs-close-margin" runTabsCloseMarginTest
   , pixelSpec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
   , spec "tabs-scroll-widen" runTabsScrollWidenTest
@@ -273,6 +274,18 @@ runTabsClosableTest ctx failed = do
     tResp <- runClick ctx inp0 (ui TabA) (spanCenter r)
     assertEq failed (tabClosed tResp) (Just TabA)
     assertEq failed (tabActive tResp) TabA
+
+-- | A click on a header just left of its close button selects the tab: the
+-- close button does not take the press there and then lose the release.
+runTabsCloseMarginTest :: Context -> IORef Int -> IO ()
+runTabsCloseMarginTest ctx failed = do
+  let inp0 = withInput 300 100
+      ui = tabs' (constVar TabA) [tab TabA "Alpha" (label "Body A"), closableTab TabB "Beta" (label "Body B")]
+  _ <- warmup2 ctx inp0 ui
+  assertJustM failed (findCloseButtonRect ctx) $ \(Rect x y _ h) -> do
+    tResp <- runClick ctx inp0 ui (V2 (x - 3) (y + h / 2))
+    assertEq failed (tabClosed tResp) Nothing
+    assertEq failed (tabActive tResp) TabB
 
 -- A strip that overflowed drops its arrows once the window grows wide enough
 -- for every header in the bar, though the scroller between the arrows would
