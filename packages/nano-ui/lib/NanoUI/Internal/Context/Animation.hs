@@ -15,7 +15,7 @@ module NanoUI.Internal.Context.Animation
   , getAnimationValue
   ) where
 
-import Control.Monad (unless, when)
+import Control.Monad (mfilter, unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
@@ -103,7 +103,8 @@ startSpring ctx wid params target
   | otherwise = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
-  case IM.lookup key (asAnimations as) of
+  -- A 'keepAnimationAlive' lease is no value: the resting one stands.
+  case mfilter (not . isKeepAlive) (IM.lookup key (asAnimations as)) of
     Just (SpringAnim _ _ t p) | t == target && p == params -> repaintIfOrphan ctx key
     running -> do
       let (pos0, vel0) = case running of
@@ -255,7 +256,9 @@ settleKey ctx key val = do
   as <- readIORef (ctxAnimationState ctx)
   let rest = asAnimRest as
       prevRest = IM.findWithDefault 0 key rest
-      prevLive = IM.lookup key (asAnimations as)
+      -- A 'keepAnimationAlive' lease stays, and the value it keeps is the
+      -- resting one.
+      prevLive = mfilter (not . isKeepAlive) (IM.lookup key (asAnimations as))
       restChanged
         | approxEq val 0 = IM.member key rest
         | otherwise = prevRest /= val

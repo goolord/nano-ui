@@ -20,6 +20,7 @@ tests =
   , spec "button-hover-anim" runButtonHoverAnimTest
   , spec "spinner" runSpinnerTest
   , spec "keep-animating-lapse" runKeepAnimatingLapseTest
+  , spec "keep-animating-rest" runKeepAnimatingRestTest
   , spec "wake-after" runWakeAfterTest
   ]
 
@@ -296,6 +297,33 @@ runKeepAnimatingLapseTest ctx failed = do
   -- Shown again, it runs again.
   _ <- runFrame ctx inp loading
   assert failed =<< anyAnimating ctx
+
+-- A 'keepAnimating' lease is not the widget's value. A spring on the key
+-- starts from the resting value, and setting the value keeps the lease and
+-- repaints. The lease once read as a running animation at about 0: the
+-- spring started from 0, and a set dropped the lease without a repaint, so
+-- the loop stopped.
+runKeepAnimatingRestTest :: Context -> IORef Int -> IO ()
+runKeepAnimatingRestTest ctx failed = do
+  let inp = withDelta 200 100 0.05
+      hover = inp {inputMousePos = V2 10 10}
+      ui = column $ do
+        b <- button' "Go"
+        keepAnimating b
+        pure b
+  _ <- runFrame ctx inp ui
+  bs <- replicateM 10 (evalUi ctx hover ui)
+  let wid = respId (last bs)
+  assertEq failed 1 =<< getAnimationValue ctx wid
+  startSpring ctx wid presetSmooth 0.5
+  assert failed . (> 0.99) =<< getAnimationValue ctx wid
+  replicateM_ 60 (runFrame ctx hover ui)
+  assertEq failed 0.5 =<< getAnimationValue ctx wid
+  _ <- takeDamage ctx
+  setAnimationValue ctx wid 0
+  assertEq failed 0 =<< getAnimationValue ctx wid
+  assert failed =<< anyAnimating ctx
+  assert failed =<< needsRedraw ctx hover hover
 
 -- 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
 -- a frame that does not ask again leaves nothing pending.
