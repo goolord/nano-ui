@@ -35,6 +35,7 @@ tests =
   , spec "flex-direction" runFlexDirectionTest
   , spec "grow-max-handoff" runGrowMaxHandoffTest
   , spec "fixed-width-label" runFixedWidthLabelTest
+  , spec "percent-across" runPercentAcrossTest
   ]
 
 red, green, blue, yellow :: Color
@@ -624,3 +625,30 @@ runFixedWidthLabelTest ctx failed = do
       assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
       forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
     _ -> assertEq failed (length rs) 5
+
+-- | A percentage width is a share of the width a column, a grid cell or a
+-- row offers, and a percentage height of a row's height. A label is placed
+-- and painted at its share, wrapped to as many lines as it is tall.
+runPercentAcrossTest :: Context -> IORef Int -> IO ()
+runPercentAcrossTest ctx failed = do
+  let ui = columnWith tight $ do
+        columnWith (tight . fixedW 400) $ do
+          box (percent 50 . alignEnd . fixedH 10) red
+          labelWith (percent 50) "percent sized text wraps at its own width"
+        gridWith 2 (tight . fixedW 401 . gap 1) $ do
+          box (percent 50 . fixedH 10) red
+          box (fixedH 10) blue
+        rowWith (tight . fixedH 40) $
+          box (\l -> l {layoutWidth = Fixed 10, layoutHeight = Percent 50}) red
+  _ <- warmup2 ctx input0 ui
+  rs <- arenaRects ctx
+  lns <- (\spans -> [t | (_, t, _, _, _) <- spans]) <$> collectTextSpans ctx
+  case rs of
+    [_, _, box1, wrapped, _, cell, _, _, rowBox] -> do
+      assertEq failed (rectX box1, rectW box1) (200, 200)
+      assertEq failed (rectW wrapped) 200
+      assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
+      forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
+      assertEq failed (rectW cell) 100
+      assertEq failed (rectH rowBox) 20
+    _ -> assertEq failed (length rs) 9

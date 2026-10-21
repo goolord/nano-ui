@@ -1330,21 +1330,24 @@ hasPanelAncestor na p =
     nt <- getNodeType na i
     pure (if nt == NodePanel then Just True else if isFloatingNode nt then Just False else Nothing)
 
--- | Left edge of column child @ci@ in a column of width @cw@ at @cx@. Grow and
--- percent children already take the full width; alignment is for content
+-- | Left edge of column child @ci@ in a column of width @cw@ at @cx@, and the
+-- width the column offers it: all of @cw@, or a percentage's share of it.
+-- Grow children already take the full width; alignment is for content
 -- narrower than the column, not for shifting a full-width box past it. A
 -- child is aligned at its resolved width, so text measured wider than the
 -- column wraps to it instead of being pushed past the edge.
 {-# INLINE columnChildX #-}
-columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO Float
+columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO (Float, Float)
 columnChildX na ci cx cw = do
   wAx <- getWidthSizing na ci
-  if axTag wAx == SizingGrow || axTag wAx == SizingPercent
-    then pure cx
+  if axTag wAx == SizingGrow
+    then pure (cx, cw)
     else do
       Rect _ _ iw _ <- getNodeRect na ci
       ax <- getAlignX na ci
-      pure $! alignX ax cx cw (resolveSize wAx iw cw)
+      let !offer = percentOr wAx cw cw
+          !x = alignX ax cx cw (resolveSize wAx iw offer)
+      pure (x, offer)
 
 -- | The size a node takes along an axis where @avail@ is offered, from its
 -- sizing, its measured size @intrinsic@ and its limits.
@@ -1394,17 +1397,7 @@ childRowCrossSize na ci availCross = do
       -- or row slot as availH: that stretches every child when leftover
       -- leaks into scratch `fh`.
       then max minH intrinsic
-      else resolveSize hAx intrinsic availCross
-
--- Column leftover must not change Fixed step height.
-columnChildHeight :: NodeArena -> NodeIdx -> Float -> IO Float
-columnChildHeight na ci scratchH = do
-  AxisSizing hTag _ minH maxH <- getHeightSizing na ci
-  case hTag of
-    SizingFixed -> do
-      Rect _ _ _ ih <- getNodeRect na ci
-      pure (clamp minH maxH ih)
-    _ -> pure (clamp minH maxH scratchH)
+      else resolveSize hAx intrinsic (percentOr hAx availCross availCross)
 
 -- | Copy the first @n@ scratch child indices, and beside them the scratch
 -- array @sizes@ picks, to the snapshot for nesting depth @depth@, and run
@@ -1497,15 +1490,21 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx
               ci <- readPrimArray idxArr (r * cols + j)
               wAx <- getWidthSizing na ci
               hAx <- getHeightSizing na ci
-              Rect _ _ iw ih <- getNodeRect na ci
-              let childW = resolveSize wAx iw colW
-                  childH = resolveSize hAx ih rowH
+              Rect _ _ iw _ <- getNodeRect na ci
+              fh <- readPrimArray hArr (r * cols + j)
+              -- A cell is offered its own height, refit at the column width,
+              -- where its alignment puts it, as a row places its children
+              -- ('placeRowLine'). Offered the whole row there, a fit
+              -- container would take all of it and overrun the row.
+              let offerW = percentOr wAx colW colW
+                  childW = resolveSize wAx iw offerW
+                  childH = resolveSize hAx fh rowH
                   itemX = cx + fromIntegral j * (colW + gap)
               ax <- getAlignX na ci
               ay <- getAlignY na ci
               let fx = alignX ax itemX colW childW
                   fy = alignY ay curY rowH childH
-              positionNodeA env (depth + 1) ci (Rect fx fy colW rowH)
+              positionNodeA env (depth + 1) ci (Rect fx fy offerW childH)
             goRows (r + 1) (curY + rowH + gap)
       goRows 0 cy
 
@@ -1630,10 +1629,10 @@ placeColumnLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap chrom
       (fx, nodeW) <-
         if chrome && nt == NodeSeparator
           then pure (px, pw)
-          else (,cw) <$> columnChildX na ci cx cw
-      childH <- case scrollContent of
-        Just _ -> pure (if isScrollNode nt then min fh (max 0 (ch - (y - cy))) else fh)
-        Nothing -> columnChildHeight na ci fh
+          else columnChildX na ci cx cw
+      let childH = case scrollContent of
+            Just _ | isScrollNode nt -> min fh (max 0 (ch - (y - cy)))
+            _ -> fh
       positionNodeA env (depth + 1) ci (Rect fx y nodeW childH)
       Rect _ _ _ placedH <- getNodeRect na ci
       gapAfter <-

@@ -17,7 +17,26 @@ tests =
   , spec "grid-in-column-height" runGridInColumnHeightTest
   , spec "grid-wrapped-row-height" runGridWrappedRowHeightTest
   , spec "adaptive-grid-in-column-height" runAdaptiveGridInColumnHeightTest
+  , spec "grid-cell-align" runGridCellAlignTest
   ]
+
+-- | A fit panel aligned to the middle or the bottom of its grid row keeps
+-- its own height there, so it stays inside the row.
+runGridCellAlignTest :: Context -> IORef Int -> IO ()
+runGridCellAlignTest ctx failed =
+  forM_ [(alignMid, 0.5), (alignBottom, 1)] $ \(align, frac) -> do
+    let ui = columnWith tight $ gridWith 2 (tight . gap 0) $ do
+          panelWith align (label "a")
+          panelWith id (replicateM_ 4 (label "x"))
+          label "next"
+    _ <- warmup2 ctx (withInput 400 400) ui
+    rs <- arenaRects ctx
+    case rs of
+      [_, _, short, _, tall, _, _, _, _, next] -> do
+        assert failed (rectH short < rectH tall)
+        assertEq failed (rectY short - rectY tall) ((rectH tall - rectH short) * frac)
+        assert failed (rectY next >= rectY short + rectH short)
+      _ -> assertEq failed (length rs) 10
 
 runGridWrappedRowHeightTest :: Context -> IORef Int -> IO ()
 runGridWrappedRowHeightTest ctx failed = do
