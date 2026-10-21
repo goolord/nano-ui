@@ -30,10 +30,11 @@ import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
+import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), clamp, rectContains)
+import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains)
 
 -- | An open dropdown: a select with its open flag set, or a combo box (a
 -- search field carrying options) exactly while it holds focus.
@@ -78,6 +79,9 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
     build store idx wid combo = do
       opts <- getOptions na idx
       Rect x y w h <- getNodeRect na idx
+      -- The window size of the frame painted last, so that a pick lands
+      -- where the dropdown was drawn.
+      size <- getsDamage ctx dsLastWindowSize
       let key = intKey wid
           slotInt slot def = findSlot fieldInt def (slotKey slot key) store
           slotFloat slot = findSlot fieldFloat 0 (slotKey slot key) store
@@ -87,8 +91,8 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
           scrollX = slotFloat SlotComboScrollX
           contentW = slotFloat SlotComboContentW
           rect
-            | combo = comboDropRect x y w h nOpts rows contentW
-            | otherwise = selectDropRect x y w h nOpts
+            | combo = comboDropRect size x y w h nOpts rows contentW
+            | otherwise = selectDropRect size x y w h nOpts
       pure
         Dropdown
           { ddWidget = wid
@@ -308,9 +312,19 @@ finalizeSelectPick ctx inp =
 selectDropGap :: Float
 selectDropGap = 4
 
-selectDropRect :: Float -> Float -> Float -> Float -> Int -> Rect
-selectDropRect x y w h nOpts =
-  Rect x (y + h + selectDropGap) w (menuItemRowH * fromIntegral nOpts + 2 * menuOuterPad)
+-- | Select dropdown rect for the field at @x y w h@ in a window of @size@
+-- ('dropRect').
+selectDropRect :: Size -> Float -> Float -> Float -> Float -> Int -> Rect
+selectDropRect size x y w h nOpts =
+  dropRect size x y w h (menuItemRowH * fromIntegral nOpts + 2 * menuOuterPad)
+
+-- | A dropdown @dropH@ tall and as wide as the field at @x y w h@: below the
+-- field, or above it when it does not fit below and there is more room
+-- above, and kept inside the window of @size@ ('computePopupPosition').
+dropRect :: Size -> Float -> Float -> Float -> Float -> Float -> Rect
+dropRect (Size winW winH) x y w h dropH =
+  let (dx, dy) = computePopupPosition winW winH 0 w dropH (AnchorRect (Rect x y w h)) PlacementAuto selectDropGap
+   in Rect dx dy w dropH
 
 -- | Row index at @mouseY@ for a select dropdown, whose rows sit centred in
 -- the drop rect.
@@ -369,11 +383,11 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
 -- scrollbar lane when the widest row overflows, so the horizontal bar never
 -- covers the bottommost row. Must agree with 'comboScrollGeom' on when lanes
 -- appear (same inputs, same formulas).
-comboDropRect :: Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
-comboDropRect x y w h nRows nTotal contentW =
+comboDropRect :: Size -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
+comboDropRect size x y w h nRows nTotal contentW =
   let vLaneW = if nTotal > nRows then comboSbW else 0
       hScroll = contentW > max 0 (w - vLaneW) && contentW > 0
-   in Rect x (y + h + selectDropGap) w (fromIntegral nRows * menuItemRowH + (if hScroll then comboSbW else 0))
+   in dropRect size x y w h (fromIntegral nRows * menuItemRowH + (if hScroll then comboSbW else 0))
 
 -- | Row index at @mouseY@ for a combo dropdown, whose rows start flush at the
 -- drop rect's top (unlike 'selectDropPickIndex', which centers them).

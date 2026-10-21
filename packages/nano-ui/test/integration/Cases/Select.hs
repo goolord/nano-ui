@@ -15,6 +15,7 @@ tests =
   , spec "select-close-keeps-focus" runSelectCloseKeepsFocusTest
   , spec "select-overlay-damage" runSelectOverlayDamageTest
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
+  , spec "select-dropdown-flips" runSelectDropdownFlipsTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
   , spec "radio-click-marks" runRadioClickMarksTest
@@ -121,6 +122,20 @@ runSelectDropdownSpanColorsTest ctx failed = do
   assertEq failed (fgOf "Low") [themeAccent theme]
   assertEq failed (length (fgOf "Medium")) 1
   assert failed (themeAccent theme `notElem` fgOf "Medium")
+
+-- | A select near the window's bottom edge opens its dropdown above itself,
+-- where it fits, and a click there picks the row under it.
+runSelectDropdownFlipsTest :: Context -> IORef Int -> IO ()
+runSelectDropdownFlipsTest ctx failed = do
+  let inp0 = withInput 320 140
+      ui = column (replicateM_ 4 (label "line") >> withValue 1 (select' ["Low", "Medium", "High"]))
+  (resp, _) <- warmup2 ctx inp0 ui
+  let open = snd (clickPair inp0 (centerOf resp))
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  overlays <- collectOverlayTextSpans ctx open
+  assertJust failed (spanRect "Low" overlays) $ \low -> do
+    assert failed (rectY low + rectH low <= rectY (respRect resp))
+    assertEq failed 0 . snd =<< runClick ctx open ui (spanCenter low)
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do

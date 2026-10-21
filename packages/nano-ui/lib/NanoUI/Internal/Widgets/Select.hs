@@ -20,7 +20,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Equality (sameEnum)
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Select (selectDropPickIndex, selectDropRect)
-import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos)
+import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos, inputWindowSize)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (fieldInt, insertSlot)
@@ -82,7 +82,7 @@ selectCore f options index = do
   let
     rect@(Rect rx ry rw rh) = respRect resp
     mouse = inputMousePos inp
-    dropRect = selectDropRect rx ry rw rh n
+    dropRect = selectDropRect (inputWindowSize inp) rx ry rw rh n
     picked
       | open && rectNonEmpty rect && rectContains dropRect mouse && releasedIn MouseLeft inp =
           selectDropPickIndex dropRect menuItemRowH n (v2Y mouse)

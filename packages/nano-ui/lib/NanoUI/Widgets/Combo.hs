@@ -23,7 +23,7 @@ import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Internal.Id (WidgetId (..))
-import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), inputMousePos, inputScroll)
+import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), inputMousePos, inputScroll, inputWindowSize)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
 import NanoUI.Internal.Store (boolInt, ptrEq, deleteSlot, fieldFloat, fieldInt, fieldQuiet, fieldText, findSlot, flagSlot, insertSlot, lookupSlot, setFieldSelection)
@@ -189,7 +189,7 @@ comboStep ci cs0 =
       | otherwise = clampWin v
     Rect rx ry rw rh = ciField ci
     mouse = inputMousePos inp
-    dropRect = comboDropRect rx ry rw rh (min vis n) n contentW
+    dropRect = comboDropRect (inputWindowSize inp) rx ry rw rh (min vis n) n contentW
     overDrop = isFocus && rectNonEmpty (ciField ci) && rectContains dropRect mouse
     itemH = menuItemRowH
     -- Visible rows come from the previous frame's scroll window, so hit-testing

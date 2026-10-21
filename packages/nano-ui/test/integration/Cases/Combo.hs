@@ -9,6 +9,7 @@ tests =
   [ spec "combo-filter" runComboFilterTest
   , spec "combo-keyboard-pick" runComboKeyboardPickTest
   , spec "combo-mouse-pick" runComboMousePickTest
+  , spec "combo-dropdown-flips" runComboDropdownFlipsTest
   , spec "combo-blur-commit" runComboBlurCommitTest
   , spec "combo-escape-revert" runComboEscapeRevertTest
   , spec "combo-hover-highlight" runComboHoverHighlightTest
@@ -75,6 +76,19 @@ runComboMousePickTest ctx failed = do
     assertEq failed (WidgetId 0) =<< getFocusId ctx
     overlaysClosed <- collectOverlayTextSpans ctx release
     assert failed (not (hasText "Alpha Sans" overlaysClosed))
+
+-- | A combo near the window's bottom edge lists its options above itself,
+-- where they fit, and a click there picks the row under it.
+runComboDropdownFlipsTest :: Context -> IORef Int -> IO ()
+runComboDropdownFlipsTest ctx failed = do
+  let inp0 = withInput 320 200
+      ui = column (replicateM_ 6 (label "line") >> withValue "" (comboBox' "Font" comboOpts))
+  warmupFocused ctx inp0 ui
+  (resp, _) <- evalUi ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
+    assert failed (rectY rowRect + rectH rowRect <= rectY (respRect resp))
+    assertEq failed "Beta Serif" . snd =<< runClick ctx inp0 ui (spanCenter rowRect)
 
 -- Hovering a suggestion row highlights it (hover paint, becomes the Enter
 -- target) but never commits by itself; Enter then commits the hovered row.
