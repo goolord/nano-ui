@@ -1,7 +1,7 @@
 # nano-ui-emit
 
-Typed messages and reducers for [nano-ui](../nano-ui). Add `nano-ui-emit` to
-your Cabal dependencies and import `NanoUI.Emit`.
+Typed messages and reducers for [nano-ui](https://github.com/goolord/nano-ui).
+Add `nano-ui-emit` to your Cabal dependencies and import `NanoUI.Emit`.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
