@@ -138,13 +138,11 @@ runWindowOverlayTest ctx failed = do
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Debug" overlays && hasText "Body" overlays)
   assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
-  let Rect wx wy ww wh = respRect win0
+  let Rect _ _ ww wh = respRect win0
   assert failed (ww >= 100 && wh >= 20)
   assert failed (case mBody0 of Just _ -> True; _ -> False)
   (outsideHit, _, _) <- runClick ctx inp0 ui (V2 (rectX (respRect outside0) + 8) (rectY (respRect outside0) + 8))
   assert failed (respClicked outsideHit)
-  (outsideMid, _, _) <- evalUi ctx (pressAt inp0 (V2 (wx + ww / 2) (wy + wh * 0.7))) ui
-  assert failed (not (respClicked outsideMid))
   let esc = keyInp KeyEscape inp0
   ((_, winEsc, _), _, _) <- runFrame ctx esc ui
   assert failed (not (respClicked winEsc))

@@ -318,7 +318,8 @@ runScrollUiTest ctx failed = do
   -- Past the end: held to the range.
   writeIORef command (Just (\sid -> setScrollOffsetUi sid (V2 0 5000)))
   settle
-  assertJustM failed offsetNow $ \y -> assert failed (y <= 1000 - 150)
+  assertJustM failed (snd <$> evalUi ctx inp ui) $ \m ->
+    assertEq failed (v2Y (scrollRange m)) (v2Y (scrollOffset m))
   -- Half a page back up.
   before <- offsetNow
   writeIORef command (Just (\sid -> scrollPagesUi sid (V2 0 (-0.5)) ScrollInstant))
