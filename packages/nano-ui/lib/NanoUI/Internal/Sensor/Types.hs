@@ -38,9 +38,11 @@ data Visibility = Visibility
   }
   deriving (Eq, Show)
 
+-- | A change of 'visVisible', reported once in 'visEvent'.
 data VisibilityEvent = BecameVisible | BecameHidden
   deriving (Eq, Show)
 
+-- | Options for 'NanoUI.sensorConfigured' and 'NanoUI.useVisibility'.
 data SensorConfig = SensorConfig
   { sensorAnticipate :: Float
   -- ^ Grow the window and clips by this many logical pixels; negatives act as 0.

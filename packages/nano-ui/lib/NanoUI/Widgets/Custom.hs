@@ -142,6 +142,7 @@ import NanoUI.Internal.Widgets.Custom (customDrawContext)
 data CustomWidgetSpec a = CustomWidgetSpec
   { widgetLayout     :: !Layout
     -- ^ Flex layout constraints (width/height sizing, min/max, alignment, padding).
+    -- A whole 'Layout', not a modifier: @fixedWH 120 24 defaultLayout@.
   , widgetMeasure    :: !(Maybe CustomMeasureFn)
     -- ^ Optional intrinsic measurement hook for 'Fit' or dynamic sizing.
   , widgetDraw       :: !CustomDrawBuild
@@ -256,7 +257,7 @@ canvas f = canvasConfigured defaultCanvasConfig {canvasLayout = f defaultLayout}
 -- | Options for 'canvasConfigured'.
 data CanvasConfig = CanvasConfig
   { canvasLayout :: !Layout
-    -- ^ As 'widgetLayout' (default 'defaultLayout').
+    -- ^ As 'widgetLayout', a whole 'Layout' (default 'defaultLayout').
   , canvasContent :: !Int
     -- ^ As 'widgetContent'; build it with 'contentKey' or 'contentKeyOf'.
     -- Default 0 (no key): the drawing runs every frame.
@@ -363,6 +364,8 @@ drag2DFrom bounds onIt = do
 
 -- | This frame's wheel delta while the widget is hovered ('respHovered').
 -- Returns @(0, 0)@ when covered by an overlay, clipped out of view, or disabled.
+-- The widget does not take the wheel from a scroller around it: one that can
+-- still scroll that way moves by the same notches on the same frame.
 useWheelDeltaOn :: HasResponse r => r -> NanoUI (Float, Float)
 useWheelDeltaOn r = wheelIf (respHovered r)
 
@@ -381,7 +384,9 @@ wheelIf on = do
 -- -----------------------------------------------------------------------------
 
 -- | Rotary knob over @[minV, maxV]@ (36 px diameter) backed by a 'Var'.
--- Supports vertical drag, scroll wheel, and arrow keys.
+-- Supports vertical drag, scroll wheel, and arrow keys. In a scroller that
+-- can still scroll, the wheel turns the knob and scrolls too
+-- ('useWheelDeltaOn').
 {-# INLINE knob #-}
 knob :: Float -> Float -> Var Float -> NanoUI ()
 knob minV maxV v = void (knobWith' id 36 minV maxV v)

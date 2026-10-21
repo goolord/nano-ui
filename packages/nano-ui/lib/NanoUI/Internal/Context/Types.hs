@@ -626,10 +626,19 @@ data WidgetTextCacheEntry = WidgetTextCacheEntry
 -- Theme includes scoped/disabled styling; font metrics describe its text.
 data CustomDrawContext = CustomDrawContext
   { cdcHovered  :: {-# UNPACK #-} !Bool
+    -- ^ The pointer is over the widget, which is enabled.
   , cdcPressed  :: {-# UNPACK #-} !Bool
+    -- ^ The left button went down on the widget, which is enabled, and is
+    -- still held. When drawing, this holds wherever the pointer goes; in
+    -- 'NanoUI.Widgets.Custom.widgetInteract', only while it is over the widget.
   , cdcFocused  :: {-# UNPACK #-} !Bool
+    -- ^ The widget has keyboard focus.
   , cdcActive   :: {-# UNPACK #-} !Bool
+    -- ^ The widget holds the left press wherever the pointer goes, even when
+    -- disabled. In 'NanoUI.Widgets.Custom.widgetInteract' it is set from the
+    -- frame after the press.
   , cdcDisabled :: {-# UNPACK #-} !Bool
+    -- ^ The widget is in a disabled scope.
   , cdcTheme    :: !Theme
   , cdcFont     :: !FontMetrics
   }

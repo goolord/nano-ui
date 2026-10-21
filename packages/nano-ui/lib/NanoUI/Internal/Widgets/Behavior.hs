@@ -43,6 +43,7 @@ import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
 dragThresholdPx :: Float
 dragThresholdPx = 8
 
+-- | The axis a drag or an insertion index measures along.
 data DragAxis = DragAxisX | DragAxisY
   deriving (Eq, Show)
 
@@ -203,6 +204,8 @@ useReorder order responses = do
       , reorderMoved = moved
       }
 
+-- | The navigation keys pressed this frame ('useKeyNav'). The arrows count
+-- key auto-repeats; Enter and Space only the initial press.
 data KeyNav = KeyNav
   { knUp :: !Bool
   , knDown :: !Bool
