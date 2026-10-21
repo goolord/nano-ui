@@ -459,6 +459,17 @@ testLabelFit fm = do
   check "bar axis titles overlap ticks on a small plot" (not (overlapTitleTick barChartSample 220 150 barTightOps))
   check "axis titles overlap ticks with bottom legend" (not (overlapTitleTick botChart 400 240 botOps))
   check "bottom legend overlaps ticks" (not (overlapLegendTick botChart 400 240 botOps))
+  -- A top legend has a row of its own, under the title and inside the
+  -- drawing, also where the drawing is as tall as its box.
+  let
+    topChart = (bareChart [line "in" [(0, 20), (1, 22)], line "out" [(0, 8), (1, 14)]]) {chartLegend = LegendTop}
+    topBoxes c w h = [(t, drawTextBox fm x y ax ay t) | DrawText x y ax ay t _ <- toList (diagramOps w h (chartDia fm c))]
+    titled = topChart {chartTitle = Just "Temperature"}
+    entries c w h = [b | (t, b) <- topBoxes c w h, t == "in" || t == "out"]
+  check "top legend overlaps the title" $
+    not (or [rectsOverlap a b | (t, a) <- topBoxes titled 400 240, t == "Temperature", b <- entries titled 400 240])
+  check "top legend spills above the drawing" $
+    all (\(Rect _ y _ _) -> y >= 0) (entries topChart 400 150 ++ entries titled 400 150)
   let
     shortTitles =
       (bareChart [line "sin(x)" [(0, 0), (1, 1)]])

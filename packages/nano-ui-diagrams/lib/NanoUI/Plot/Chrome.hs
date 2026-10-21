@@ -99,6 +99,7 @@ data ChartChrome = ChartChrome
   , ccYTitleX :: !Double
   , ccXTitleY :: !Double
   , ccLegendW :: !Float
+  , ccTopLegend :: !Double
   }
 
 -- | Space needed for titles, ticks, and legend with the supplied font metrics.
@@ -134,10 +135,16 @@ chartChrome fm yDom chart =
       xTitleY = -xTickPad - tickH - titleGap
       leftTick = tickPad + tickW + px 4
       botTick = xTickPad + tickH + px 4
+      -- A top legend takes a row of its own, under the title.
+      topLegend =
+        case chartLegend chart of
+          LegendTop -> px lh + px 6
+          _ -> 0
       topM =
-        if chartTitle chart /= Nothing
-          then px lh + px 8
-          else px 4
+        topLegend
+          + if chartTitle chart /= Nothing
+            then px lh + px 8
+            else px 4
       rightM =
         case chartLegend chart of
           LegendRight -> px legendW + 0.22
@@ -166,6 +173,7 @@ chartChrome fm yDom chart =
         , ccYTitleX = yTitleX
         , ccXTitleY = xTitleY
         , ccLegendW = legendW
+        , ccTopLegend = topLegend
         }
 
 textWidth :: FontMetrics -> T.Text -> Float
@@ -235,7 +243,7 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
           [ plotLbl ps 1 0.5 (T.unpack t) # moveTo (p2 (-tickPad, toY y))
           | (y, t) <- yTicks
           ]
-      title = foldMap (\t -> plotLbl ps 0.5 0 (T.unpack t) # moveTo (p2 (0.5, 1.03))) (chartTitle chart)
+      title = foldMap (\t -> plotLbl ps 0.5 0 (T.unpack t) # moveTo (p2 (0.5, 1.03 + ccTopLegend chrome))) (chartTitle chart)
       xt = foldMap (\t -> plotLbl ps 0.5 1 (T.unpack t) # moveTo (p2 (0.5, ccXTitleY chrome))) (chartXTitle chart)
       yt = foldMap (\t -> plotLbl ps 1 0.5 (T.unpack t) # moveTo (p2 (ccYTitleX chrome, 0.5))) (chartYTitle chart)
       coloredSeries =
@@ -383,7 +391,7 @@ renderLegend fm ps coloredSeries chart chrome =
       position i = case chartLegend chart of
         LegendRight -> (1.04, 0.98 - i * row)
         LegendBottom -> (i * col, botLegendY)
-        LegendTop -> (i * col, 1.12)
+        LegendTop -> (i * col, 1 + px 4 + px (fmLineHeight fm) / 2)
         LegendInside -> (0.02, 0.98 - i * row)
         LegendNone -> (0, 0)
    in mconcat
