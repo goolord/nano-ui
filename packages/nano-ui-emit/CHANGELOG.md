@@ -4,8 +4,7 @@
 
 - `emitChanged` and `emitEdited` take an input of type `Var a -> NanoUI r`,
   such as `slider 0 100`, with the current value; they run it on a temporary
-  `Var` and emit the value it leaves. Call sites written against the
-  value-style widgets compile unchanged.
+  `Var` and emit the value it leaves.
 
 - `mapMessages` embeds child components' messages in a parent's message type.
 

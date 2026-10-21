@@ -30,11 +30,12 @@ keyboardTranslation = do
   check "keypad Enter and plus" (key sDLK_KP_ENTER == Just KeyEnter && keypad sDLK_KP_PLUS == Just (KeyChar '+'))
   check "a modifier key is no key" (key sDLK_LSHIFT == Nothing)
   let ctrl = noModifiers {modCtrl = True}
+      shift = noModifiers {modShift = True}
       chord = foldl' applyEvent emptyInput [EvModifiers ctrl, EvKey (KeyChar 's') True ctrl]
       letGo = foldl' applyEvent emptyInput [EvKey (KeyChar 's') True ctrl, EvKey (KeyChar 's') False ctrl, EvModifiers noModifiers]
       enterHeld = foldl' applyEvent emptyInput [EvKey KeyEnter True noModifiers, EvKey KeyEnter True noModifiers]
       blurred = applyEvent chord EvFocusLost
-      typed = foldl' applyEvent emptyInput [EvKey (KeyChar 'x') True noModifiers, EvText "x"]
+      typed = foldl' applyEvent emptyInput [EvKey (KeyChar 'x') True shift, EvText "X"]
   check "a chord is a key with its modifiers and types nothing" $
     toList (inputKeys chord) == [KeyChar 's'] && inputModifiers chord == ctrl && inputChars chord == ""
   check "a pressed key is held" (toList (inputKeysHeld chord) == [KeyChar 's'])
@@ -45,5 +46,5 @@ keyboardTranslation = do
   check "losing the keyboard lets go of the keys and modifiers held" $
     null (inputKeysHeld blurred) && toList (inputKeysReleased blurred) == [KeyChar 's'] && inputModifiers blurred == noModifiers
   check "typed text keeps the modifiers of the key that typed it" $
-    inputChars typed == "x" && inputModifiers typed == noModifiers
+    inputChars typed == "X" && inputModifiers typed == shift
   putStrLn "SDL keyboard translation: ok"

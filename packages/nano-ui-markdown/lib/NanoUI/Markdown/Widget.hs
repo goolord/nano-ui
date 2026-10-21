@@ -184,7 +184,8 @@ defaultMarkdownConfig =
 --
 -- Each top-level block is keyed by its position and kind, so appending to a
 -- document keeps the ids, and the cached text layout, of earlier blocks.
--- Text is not selectable; code blocks have a copy button.
+-- Text in paragraphs, headings, table cells and code blocks can be selected
+-- and copied; code blocks also have a copy button.
 markdown :: MarkdownCache -> MarkdownDoc -> NanoUI (Maybe Text)
 markdown cache = markdownConfigured cache defaultMarkdownConfig
 

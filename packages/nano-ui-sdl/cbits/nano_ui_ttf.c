@@ -100,18 +100,6 @@ float nano_ui_ttf_space_advance(TTF_Font *font)
     return 0.f;
 }
 
-static Uint8 glyph_channel_max(Uint8 r, Uint8 g, Uint8 b)
-{
-    Uint8 m = r;
-    if (g > m) {
-        m = g;
-    }
-    if (b > m) {
-        m = b;
-    }
-    return m;
-}
-
 static void force_white_rgb(SDL_Surface *surf)
 {
     Uint8 *base = (Uint8 *)surf->pixels;
@@ -127,57 +115,18 @@ static void force_white_rgb(SDL_Surface *surf)
     }
 }
 
-static void invert_glyph_alpha(SDL_Surface *surf)
-{
-    Uint8 *base = (Uint8 *)surf->pixels;
-    int pitch = surf->pitch;
-    for (int y = 0; y < surf->h; y++) {
-        Uint8 *row = base + y * pitch;
-        for (int x = 0; x < surf->w; x++) {
-            row[x * 4 + 3] = (Uint8)(255 - row[x * 4 + 3]);
-        }
-    }
-}
-
-static SDL_Surface *glyph_image_to_rgba(SDL_Surface *raw, TTF_ImageType image_type)
+/* A glyph image as coverage: white, with the image's alpha. Text is drawn in
+ * one colour, so a colour glyph (an emoji) keeps its silhouette, tinted like
+ * the rest. Its alpha is zero outside the glyph, like any other image's. */
+static SDL_Surface *glyph_image_to_rgba(SDL_Surface *raw)
 {
     if (!raw) {
         return NULL;
     }
 
     SDL_Surface *out = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
-    if (!out) {
-        return NULL;
-    }
-
-    if (image_type == TTF_IMAGE_ALPHA || image_type == TTF_IMAGE_SDF) {
-        /* Spec: color channels are white, alpha is coverage. Transparent
-         * white (a=0, rgb=255) must stay transparent. Do not use luma. */
+    if (out) {
         force_white_rgb(out);
-        return out;
-    }
-
-    Uint8 *base = (Uint8 *)out->pixels;
-    int pitch = out->pitch;
-    Uint32 opaque_sum = 0;
-    Uint32 count = 0;
-    for (int y = 0; y < out->h; y++) {
-        Uint8 *row = base + y * pitch;
-        for (int x = 0; x < out->w; x++) {
-            Uint8 *px = row + x * 4;
-            Uint8 luma = glyph_channel_max(px[0], px[1], px[2]);
-            Uint8 a = px[3];
-            Uint8 cov = a > luma ? a : luma;
-            px[0] = 255;
-            px[1] = 255;
-            px[2] = 255;
-            px[3] = cov;
-            opaque_sum += cov;
-            count += 1;
-        }
-    }
-    if (count > 0 && opaque_sum > (255u * count) / 2u) {
-        invert_glyph_alpha(out);
     }
     return out;
 }
@@ -406,12 +355,11 @@ bool nano_ui_ttf_render_glyph_index_surface(TTF_Font *font, Uint32 glyph_index, 
     if (!font || !out_surface) {
         return false;
     }
-    TTF_ImageType image_type = TTF_IMAGE_INVALID;
-    SDL_Surface *raw = TTF_GetGlyphImageForIndex(font, glyph_index, &image_type);
+    SDL_Surface *raw = TTF_GetGlyphImageForIndex(font, glyph_index, NULL);
     if (!raw) {
         return false;
     }
-    SDL_Surface *converted = glyph_image_to_rgba(raw, image_type);
+    SDL_Surface *converted = glyph_image_to_rgba(raw);
     SDL_DestroySurface(raw);
     if (!converted) {
         return false;

@@ -50,9 +50,9 @@ counter = row $ do
 See [`nano-ui-demo`](packages/nano-ui-demo/README.md) for full demo
 applications and single-topic examples.
 
-Running the demos Requires GHC 9.10 or newer (development uses 9.14) and Cabal. 
-The SDL backend also requires SDL3, SDL3_ttf, and pkg-config, 
-all of which are provided in the `nix develop` shell.
+Running the demos requires GHC 9.10 through 9.14 (development uses 9.14) and
+Cabal. The SDL backend also requires SDL3, SDL3_ttf, and pkg-config, all of
+which are provided in the `nix develop` shell.
 
 ```sh
 cabal run nano-ui-sdl-demo       # widget and chart tour
@@ -122,4 +122,8 @@ used to check that the vertex writers compile without dictionaries or tuples.
 
 ## License
 
-MIT
+MIT, except the bundled Inter font (SIL Open Font License 1.1,
+[`LICENSE-Inter`](packages/nano-ui-sdl/LICENSE-Inter)), the bundled Cozette
+font (MIT by its author,
+[`LICENSE-Cozette`](packages/nano-ui-rgfw/LICENSE-Cozette)) and the bundled
+RGFW (zlib, [`LICENSE-RGFW`](packages/nano-ui-rgfw-bindings/LICENSE-RGFW)).

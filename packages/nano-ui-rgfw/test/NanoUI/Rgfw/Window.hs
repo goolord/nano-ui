@@ -1,14 +1,17 @@
--- | Window tests, skipped without a display. The OpenGL renderer draws into
--- a hidden window and the frame is read back as a screenshot: the window
--- stays opaque even where a translucent window colour is painted twice, and
--- rows run top to bottom. A session window is sized in layout units.
+-- | Window tests, skipped without a display or an OpenGL 3.2 window. The
+-- OpenGL renderer draws into a hidden window and the frame is read back as a
+-- screenshot: the window stays opaque even where a translucent window colour
+-- is painted twice, and rows run top to bottom. A session window is sized in
+-- layout units.
 module NanoUI.Rgfw.Window (testGlWindow, testSessionWindow) where
 
-import Control.Exception (bracket)
+import Control.Exception (IOException, bracket, try)
 import Control.Monad (void)
 import Data.ByteString qualified as BS
 import Control.Monad.IO.Class (liftIO)
+import Data.Either (isRight)
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Maybe (isJust)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import NanoUI
   ( DrawOp (..), Size (..), Theme (..), WindowMode (..), WindowSettings (..), WindowState (..), askWindow, defaultWindowSettings
@@ -25,12 +28,18 @@ import NanoUI.Testing (collectRasterSpans, runFrame)
 import NanoUI.Testing.Assert (withInput)
 import RGFW qualified as R
 import System.Environment (lookupEnv)
+import System.Info (os)
+
+-- | Whether to try a window: on Linux only with an X display. Elsewhere the
+-- tests try one and skip when it does not open.
+hasDisplay :: IO Bool
+hasDisplay = if os == "linux" then isJust <$> lookupEnv "DISPLAY" else pure True
 
 testGlWindow :: (String -> Bool -> IO ()) -> IO ()
 testGlWindow assert =
-  lookupEnv "DISPLAY" >>= \case
-    Nothing -> putStrLn "[SKIP] OpenGL window frames: no display"
-    Just _ -> bracket (R.createWindowGL "nano-ui-rgfw-test" 0 0 w h R.rgfw_windowHide 3 2) (mapM_ R.closeWindow) $ \case
+  hasDisplay >>= \case
+    False -> putStrLn "[SKIP] OpenGL window frames: no display"
+    True -> bracket (R.createWindowGL "nano-ui-rgfw-test" 0 0 w h R.rgfw_windowHide 3 2) (mapM_ R.closeWindow) $ \case
       Nothing -> putStrLn "[SKIP] OpenGL window frames: no OpenGL 3.2 window"
       Just _ -> bracket newGlRenderer freeGlRenderer $ \renderer -> do
         let theme = windowColor backdrop tomorrowNightMinDarkTheme
@@ -73,9 +82,9 @@ testGlWindow assert =
 -- view quits.
 testSessionWindow :: (String -> Bool -> IO ()) -> IO ()
 testSessionWindow assert =
-  lookupEnv "DISPLAY" >>= \case
-    Nothing -> putStrLn "[SKIP] RGFW session window: no display"
-    Just _ -> do
+  hasDisplay >>= \case
+    False -> putStrLn "[SKIP] RGFW session window: no display"
+    True -> do
       seen <- newIORef Nothing
       let view = do
             size <- windowSize
@@ -83,7 +92,9 @@ testSessionWindow assert =
             setWindowTitleUi "renamed"
             liftIO (writeIORef seen (Just (size, winScale st)))
             quitUi
-      runRgfwApp defaultRgfwOptions {optScale = 2, optWindow = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}} view
+      opened <- try (runRgfwApp defaultRgfwOptions {optScale = 2, optWindow = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}} view)
       readIORef seen >>= \case
         Nothing -> putStrLn "[SKIP] RGFW session window: no OpenGL 3.2 window"
-        Just got -> assert "RGFW session window: its size in layout units at its scale" (got == (Size 200 150, 2))
+        Just got ->
+          assert "RGFW session window: its size in layout units at its scale"
+            (got == (Size 200 150, 2) && isRight (opened :: Either IOException ()))

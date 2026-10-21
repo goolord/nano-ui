@@ -9,6 +9,12 @@ import SDL3.Sys.Misc qualified as SDL
 
 -- | Open a URL with the platform's default application, such as a browser or
 -- mail client. Call from the application's main thread.
+--
+-- The string goes to the platform unchecked: a @file:@ URL opens a local
+-- file, and on Windows a path to a program runs it. Before opening a URL
+-- from content the application does not control, such as a link in a
+-- Markdown document, check that its scheme is one it means to allow
+-- (@http@, @https@, @mailto@).
 openUrl :: Text -> IO Bool
 openUrl url = BS.useAsCString (encodeUtf8 url) $ \cUrl ->
   SDL.openURL (PtrConst.unsafeFromPtr cUrl)

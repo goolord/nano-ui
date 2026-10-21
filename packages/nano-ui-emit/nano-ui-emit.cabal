@@ -11,6 +11,7 @@ homepage:           https://github.com/goolord/nano-ui
 bug-reports:        https://github.com/goolord/nano-ui/issues
 category:           Graphics
 build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:    README.md CHANGELOG.md
 extra-source-files: test/compile-fail/WrongMessage.hs
 
@@ -24,9 +25,11 @@ library
     ghc-options:      -Wall -Wcompat -Wredundant-constraints
     exposed-modules:  NanoUI.Emit
     hs-source-dirs:   lib
+    -- The library imports NanoUI.Internal modules, which change without
+    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
-        nano-ui ^>=0.2,
+        nano-ui >=0.2.0 && <0.2.1,
         transformers ^>=0.6
 
 test-suite nano-ui-emit-test
@@ -35,6 +38,7 @@ test-suite nano-ui-emit-test
     default-extensions: OverloadedStrings
     ghc-options:      -Wall -Wcompat -Wredundant-constraints
     main-is:          Main.hs
+    other-modules:    DeferredWrongMessage
     hs-source-dirs:   test
     build-depends:
         base >=4.20 && <4.23,

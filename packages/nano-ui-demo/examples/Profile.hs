@@ -16,7 +16,6 @@ import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend (Damage (..), applyMouseButton, emptyInput)
 import NanoUI.Backend.Sdl (sdlDrawFrame, syncDisplay, withSdlBench)
-import NanoUI.Internal.Debug (debugCadence, newDebugSampler, refreshDebugSnapshot)
 import NanoUI.Diagrams
 import NanoUI.Internal.Context (ctxNodeArena)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getNodeRect, getText)
@@ -25,6 +24,7 @@ import NanoUI.Testing
   ( Context
   , newPixelContext
   , collectTextSpans
+  , collectOverlayTextSpans
   , floatingWindowOpen
   , runFrame
   , setDrawReuse
@@ -52,7 +52,7 @@ iterations = 40
 profileInput :: Input
 profileInput =
   emptyInput
-    { inputWindowSize = Size 1280 800
+    { inputWindowSize = Size 800 600
     , inputMousePos = V2 640 400
     }
 
@@ -140,21 +140,14 @@ main = do
         printf "  -> Churn damage over %d frames: Full=%d Clip=%d Empty=%d\n"
           iterations f0 c0 e0
         measureBench "Win content churn (text 1..9ch)" churnFrame
+        -- The pointer moves down the debug window's rows from its first
+        -- heading.
+        overlay <- collectOverlayTextSpans ctx' inp
+        Rect fx fy _ _ <- maybe (fail "Debug window rows missing during profiling") pure (Harness.spanRectOf "Frame" overlay)
         nextSweep <- newCounter 0
         measureBench "Debug Open, hover sweep" $ do
           i <- nextSweep
-          void (sdlDrawFrame ctx' demoUi sdlEnv inp {inputMousePos = V2 1130 (110 + fromIntegral (i `mod` 300))} False)
-        putStrLn "--- 5b. IDLE CADENCE (debug gating) ---"
-        cadRef <- newDebugSampler
-        cadPublished <- newIORef Nothing
-        let cadence = do
-              (active, due) <- debugCadence cadRef
-              pure (show active, if due then 0 :: Int else if active then 250 else -1)
-        (active0, wait0) <- cadence
-        printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" active0 wait0
-        _ <- refreshDebugSnapshot cadRef cadPublished pure
-        (active1, wait1) <- cadence
-        printf "  stats window queried         : active=%-5s waitTimeout=%-3d (4 Hz HUD refresh sustained)\n" active1 wait1
+          void (sdlDrawFrame ctx' demoUi sdlEnv inp {inputMousePos = V2 (fx + 100) (fy + fromIntegral (i `mod` 300))} False)
         putStrLn ""
         -- The floating debug window can occlude the toolbar after it grows.
         -- Its title-bar close button is the unlabelled NodeButton in this UI.

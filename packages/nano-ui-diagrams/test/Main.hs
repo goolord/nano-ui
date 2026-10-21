@@ -1,10 +1,11 @@
 module Main (main) where
 
 import Control.Monad (forM_, unless)
-import Data.Colour.Names (coral, steelblue)
+import Data.Colour (withOpacity)
+import Data.Colour.Names (coral, red, steelblue)
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
-import Data.List (tails)
+import Data.List (nub, sortOn, tails)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArray)
 import Data.Text qualified as T
@@ -46,12 +47,13 @@ import NanoUI.Plot.Chrome
 import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
 import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Hit (nearestPlotHover)
-import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
+import NanoUI.Plot.Scale (domainToPlot, formatTick, mergeDomains, niceTickLabels, niceTicks)
 import NanoUI.Plot.Series
   ( area
   , bar
   , line
   , scatter
+  , step
   , withColor
   , withMarker
   )
@@ -83,21 +85,29 @@ main = hspec $ do
     it "reuses cached chart content within one context" testChartCache
   describe "tessellation" $ do
     it "triangulates indexed polygons with full coverage" testIndexedTriangulation
-    it "covers polyline strokes end to end" testStrokeCoversMidpoint
+    it "keeps a polyline's points, dropping repeats and the closing point" testStrokePolylinePoints
     it "fills a level rectangle with a rect op" testRectFill
+    it "keeps a translucent colour's own alpha and the opacity" testTranslucentFill
     it "cuts a loop inside another out by the fill rule" testFillRule
     it "strokes with the style's caps, joins and dashes" testStrokeStyle
   describe "scales and domains" $ do
     it "picks and formats nice ticks" testNiceTicks
+    it "labels ticks with the digits their step needs" (testTickLabels fm)
     it "shares bounds across series" testMultiSeriesDomains
+    it "leaves out values that are not finite" (testNonFinite fm)
+    it "settles on a chart holding NaN" testNaNChartIdle
   describe "decimation" $ do
     it "keeps LTTB extrema and endpoints" testLttb
     it "keeps min/max extrema" testMinMaxDecimate
+    it "thins connected series but not scatter markers" testDecimateKinds
   describe "chart chrome" $ do
     it "keeps labels, titles and legends apart" (testLabelFit fm)
     it "colors legend entries like their series" (testLegendColors fm)
     it "picks the nearest hover point" testPlotHover
     it "fills closed series and markers" (testClosedSeriesFills fm)
+    it "draws a step series to its last point" (testStepLastPoint fm)
+    it "stands bars on zero under their category names" (testBars fm)
+    it "marks a line's points with its marker" (testLineMarkers fm)
     it "fills an area a ring per side of its baseline" (testAreaRings fm)
     it "places filled series where their data is" (testFillPlacement fm)
     it "caps the height of growing plots" (testGrowPlotHeight fm)
@@ -205,8 +215,8 @@ testIndexedTriangulation = do
               ++ show (n, length tris, areaSum, polygonArea)
           )
 
-testStrokeCoversMidpoint :: IO ()
-testStrokeCoversMidpoint = do
+testStrokePolylinePoints :: IO ()
+testStrokePolylinePoints = do
   let
     col = themeRed defaultTheme
     stroke w path = strokePathOps 0.5 mempty (P.stroke w) path (Solid col)
@@ -231,6 +241,15 @@ testRectFill = do
   check "a turned rectangle is not one polygon" $ case fills (rect 4 2 # rotateBy (1 / 8)) of
     [FillPolygon {}] -> True
     _ -> False
+
+-- | Colours are straight alpha: half-opaque red keeps its full red channel,
+-- whether the alpha is the colour's or the diagram's opacity.
+testTranslucentFill :: IO ()
+testTranslucentFill = do
+  let fillsOf d = mapMaybe inkColor (toList (diagramOps 100 100 (d # lw none)))
+      halfRed = colorRGBA 255 0 0 128
+  check "a translucent fill was darkened" (fillsOf (circle 1 # D.fcA (red `withOpacity` 0.5)) == [halfRed])
+  check "opacity did not reach the fill" (fillsOf (circle 1 # fc red # D.opacity 0.5) == [halfRed])
 
 testFillRule :: IO ()
 testFillRule = do
@@ -273,6 +292,22 @@ testNiceTicks = do
       && niceTicks 6 (Domain 1e308 1e308) == [1e308]
       && niceTicks 0 (Domain 0 100) == []
 
+-- | Neighbouring tick labels differ however fine the step or large the
+-- values' common offset, as for Unix time over one day.
+testTickLabels :: FontMetrics -> IO ()
+testTickLabels fm = do
+  let
+    yLabels pts = [t | DrawText _ _ 1 _ t _ <- toList (diagramOps 400 240 (chartDia fm (bareChart [line "s" pts])))]
+    distinct ts = length ts >= 3 && length (nub ts) == length ts
+  check "fine ticks lost their digits" (distinct (yLabels [(0, 1), (1, 1.0000004)]))
+  check "a large offset hid the ticks' step" (distinct (yLabels [(0, 1700000000), (1, 1700086400)]))
+  check "formatTick snapped a small value before choosing its form" (formatTick 1.5e-10 == "1.500e-10")
+  let labels d = map snd (niceTickLabels 6 d)
+  check "tick labels carry noise or spare digits" $
+    labels (Domain 0 1) == ["0", "0.2", "0.4", "0.6", "0.8", "1"]
+      && labels (Domain 1e-8 5e-8) == ["1e-8", "2e-8", "3e-8", "4e-8", "5e-8"]
+      && labels (Domain 1700000000 1700086400) == ["1.7e9", "1.70002e9", "1.70004e9", "1.70006e9", "1.70008e9"]
+
 testMultiSeriesDomains :: IO ()
 testMultiSeriesDomains = do
   let
@@ -284,6 +319,47 @@ testMultiSeriesDomains = do
   let
     (Domain fitXLo _, Domain fitYLo _) = seriesDomains (bareChart [scatter "s" [(4, 3), (9, 8)]])
   check "seriesDomains seeded with 0..1" (fitXLo > 2 && fitYLo > 1)
+  -- A flat target line or a series still loading leaves the others' span.
+  let
+    (_, Domain flatLo flatHi) = seriesDomains (bareChart [line "p" [(0, 0.10), (1, 0.15)], line "target" [(0, 0.12), (1, 0.12)]])
+    (Domain loadingXLo _, Domain loadingYLo _) = seriesDomains (bareChart [line "a" [(1000, 1000), (2000, 2000)], line "b" []])
+  check "a constant series widened the shared domain" (flatLo > 0.09 && flatHi < 0.16)
+  check "an empty series pulled the shared domain to zero" (loadingXLo > 900 && loadingYLo > 900)
+
+-- | Values that are not finite are left out of the domains, the drawing and
+-- hover, instead of corrupting them.
+testNonFinite :: FontMetrics -> IO ()
+testNonFinite fm = do
+  let
+    nan = 0 / 0
+    finite x = not (isNaN x || isInfinite x)
+    (_, Domain afterNaNLo _) = seriesDomains (bareChart [line "s" [(0, -100), (1, nan), (2, 5), (3, 6)]])
+    (Domain xLo xHi, Domain yLo yHi) = seriesDomains (bareChart [line "s" [(0, 1), (1, 1 / 0), (2, 3)]])
+    holes = bareChart [line "s" [(0, 0), (1, nan), (2, 10)]]
+    hovered = nearestPlotHover (seriesDomains holes) (map (seriesPoints holes) (chartSeries holes)) 0.05 0.05
+    strokes = [primArrayToList p | StrokePolyline p _ _ _ _ _ _ <- toList (diagramOps 200 120 (chartDia fm holes))]
+  check "a NaN dropped the domain's earlier minimum" (afterNaNLo <= -100)
+  check "an infinite value made the domain infinite" (all finite [xLo, xHi, yLo, yHi] && yHi >= 3)
+  check "hover picked a point past a NaN" (fmap hoverDataX hovered == Just 0)
+  check "a NaN point reached the drawing" (all (all finite) strokes)
+
+-- | A chart holding NaN equals a rebuilt copy of itself, so a plot built
+-- from it every frame settles instead of rebuilding and asking for another
+-- frame forever.
+testNaNChartIdle :: IO ()
+testNaNChartIdle = do
+  base <- newPixelContext
+  owner <- Plot.newPlotCache
+  let
+    nan = 0 / 0
+    held = bareChart [line "l" [(0, nan)], bar "b" [("x", nan)]]
+    ctx = withFontMetrics base (monospaceMetrics 16)
+    -- The points depend on the frame, so each frame builds a new chart.
+    frame k = runFrame ctx (emptyInput {inputWindowSize = Size 400 240}) $
+      Plot.lineChart owner (fixedWH 360 200) [(0, 0), (1, nan * fromIntegral (k :: Int)), (2, 1)]
+  check "a chart holding NaN differs from itself" (held == held)
+  again <- mapM frame [1 .. 4]
+  check "a plot of a chart holding NaN asks for frames forever" (not (or [more | (_, _, more) <- drop 2 again]))
 
 testLttb :: IO ()
 testLttb = do
@@ -328,6 +404,16 @@ testMinMaxDecimate = do
                && V.maximum (V.map snd input) == V.maximum (V.map snd sampled)
            )
 
+-- | Default decimation thins a long line, but every scatter marker stays:
+-- unconnected markers that are dropped are simply missing.
+testDecimateKinds :: IO ()
+testDecimateKinds = do
+  let
+    pts = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. 99 :: Int]]
+    thinned s = seriesPoints (Builder.chart [s]) s /= seriesPoints (bareChart [s]) s
+  check "decimation did not thin a long line" (thinned (line "l" pts))
+  check "decimation thinned a scatter series" (not (thinned (scatter "s" pts)))
+
 orderedPoints :: V.Vector (Double, Double) -> Bool
 orderedPoints points = V.and (V.zipWith (\a b -> fst a < fst b) points (V.drop 1 points))
 
@@ -335,7 +421,9 @@ testLabelFit :: FontMetrics -> IO ()
 testLabelFit fm = do
   let
     dump = chartDia fm barChartSample
-    fitted = fitLayout fm (fixedH 180 defaultLayout) dump
+    -- Tall enough for the fit, at most twice the size, to part five
+    -- three-letter days in glyphs as wide as they are high.
+    fitted = fitLayout fm (fixedH 200 defaultLayout) dump
     ops =
       case (layoutWidth fitted, layoutHeight fitted) of
         (Fixed bw, Fixed bh) -> diagramOps (realToFrac bw) (realToFrac bh) dump
@@ -368,13 +456,13 @@ testLabelFit fm = do
         or [rectsOverlap a b | (a, t) <- ts, picks a t, (b, t') <- ts, tickText t']
     overlapTitleTick c w h =
       overlapsTicks $ \(Rect bx by _ _) t ->
-        (chartXTitle c == Just t && by < h * 0.45) || (chartYTitle c == Just t && bx < w * 0.4)
+        (chartXTitle c == Just t && by > h * 0.55) || (chartYTitle c == Just t && bx < w * 0.4)
     overlapLegendTick c w h =
       overlapsTicks $ \(Rect bx by _ _) t ->
         t `elem` map seriesName (chartSeries c)
           && case chartLegend c of
             LegendRight -> bx > w * 0.55
-            LegendBottom -> by < h * 0.45
+            LegendBottom -> by > h * 0.55
             _ -> False
   check "axis titles overlap ticks" (not (overlapTitleTick sleepChart 400 240 legendOps))
   check "legend overlaps ticks" (not (overlapLegendTick sleepChart 400 240 legendOps))
@@ -382,6 +470,17 @@ testLabelFit fm = do
   check "bar axis titles overlap ticks on a small plot" (not (overlapTitleTick barChartSample 220 150 barTightOps))
   check "axis titles overlap ticks with bottom legend" (not (overlapTitleTick botChart 400 240 botOps))
   check "bottom legend overlaps ticks" (not (overlapLegendTick botChart 400 240 botOps))
+  -- A top legend has a row of its own, under the title and inside the
+  -- drawing, also where the drawing is as tall as its box.
+  let
+    topChart = (bareChart [line "in" [(0, 20), (1, 22)], line "out" [(0, 8), (1, 14)]]) {chartLegend = LegendTop}
+    topBoxes c w h = [(t, drawTextBox fm x y ax ay t) | DrawText x y ax ay t _ <- toList (diagramOps w h (chartDia fm c))]
+    titled = topChart {chartTitle = Just "Temperature"}
+    entries c w h = [b | (t, b) <- topBoxes c w h, t == "in" || t == "out"]
+  check "top legend overlaps the title" $
+    not (or [rectsOverlap a b | (t, a) <- topBoxes titled 400 240, t == "Temperature", b <- entries titled 400 240])
+  check "top legend spills above the drawing" $
+    all (\(Rect _ y _ _) -> y >= 0) (entries topChart 400 150 ++ entries titled 400 150)
   let
     shortTitles =
       (bareChart [line "sin(x)" [(0, 0), (1, 1)]])
@@ -419,6 +518,13 @@ testPlotHover = do
           && hoverPointIdx h == 1
           && hoverDataX h == 1
           && hoverDataY h == 1
+  -- Just above the first point, the second is far off on screen but nearer
+  -- in data units, where y spans a thousand times x.
+  let
+    spread = bareChart [scatter "s" [(0.1, 500), (0.9, 505), (0, 0), (1, 1000)]]
+    (xDom, yDom) = seriesDomains spread
+    hovered = nearestPlotHover (xDom, yDom) (map (seriesPoints spread) (chartSeries spread)) (domainToPlot xDom 0.1) (domainToPlot yDom 510)
+  check "hover picked a point far away on screen" (fmap hoverPointIdx hovered == Just 0)
 
 -- Empty series isolate the legend strokes from data geometry. Every placement
 -- must retain the labels and use the same color overrides as the series.
@@ -473,12 +579,47 @@ testClosedSeriesFills fm = do
     diamondOps = seriesOps (withMarker MarkDiamond (scatter "d" [(1, 1), (2, 3)]))
     triOps = seriesOps (withMarker MarkTriangle (scatter "t" [(1, 1)]))
     crossOps = seriesOps (withMarker MarkCross (scatter "x" [(8, 8)]))
-    ink = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
-    inkXs = inkXsOf ink crossOps
+    inkXs = inkXsOf seriesInk crossOps
   check "area series produced no fill triangles" (fillTriCount areaOps >= 2)
   check "diamond marker produced no fill" (fillTriCount diamondOps >= 2)
   check "triangle marker produced no fill" (fillTriCount triOps >= 1)
   check "MarkCross arm left at origin" (not (null inkXs) && maximum inkXs - minimum inkXs < 40)
+
+-- | The first theme series colour.
+seriesInk :: Color
+seriesInk = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
+
+-- | A step series ends with the riser to its last point, the highest here.
+testStepLastPoint :: FontMetrics -> IO ()
+testStepLastPoint fm = do
+  let
+    ops = diagramOps 200 120 (chartDia fm (bareChart [step "s" [(0, 0), (1, 1), (2, 5)]]))
+    ys = [[indexPrimArray p k | k <- [1, 3 .. sizeofPrimArray p - 1]] | op@(StrokePolyline p _ _ _ _ _ _) <- toList ops, inkColor op == Just seriesInk]
+  check "step series stopped short of its last point" $ case ys of
+    [path] -> length path == 5 && last path == minimum path
+    _ -> False
+
+-- | Bars rise from the y axis' zero to their values on it, and the x axis
+-- names their categories.
+testBars :: FontMetrics -> IO ()
+testBars fm = do
+  let
+    ops = toList (diagramOps 400 240 (chartDia fm (bareChart [bar "count" [("Mon", 2), ("Tue", 5), ("Wed", 4), ("Thu", 7), ("Fri", 3)]])))
+    -- A y tick label is right-aligned, level with its tick.
+    tickY t = listToMaybe [y | DrawText _ y 1 _ t' _ <- ops, t' == t]
+    bars = map snd (sortOn fst [(rectX r, (rectY r, rectY r + rectH r)) | FillRect r c <- ops, c == seriesInk])
+    near a b = abs (a - b) < 0.5
+  check "bar categories are not on the x axis" (all (`elem` [t | DrawText _ _ _ _ t _ <- ops]) ["Mon", "Tue", "Wed", "Thu", "Fri"])
+  check "bars disagree with the y axis" $ case (tickY "0", tickY "2", tickY "4", bars) of
+    (Just y0, Just y2, Just y4, [(top2, _), _, (top4, _), _, _]) -> all (near y0 . snd) bars && near top2 y2 && near top4 y4
+    _ -> False
+
+testLineMarkers :: FontMetrics -> IO ()
+testLineMarkers fm = do
+  let
+    ops = diagramOps 200 120 (chartDia fm (bareChart [withMarker MarkDiamond (line "l" [(0, 0), (1, 1), (2, 0)])]))
+    diamonds = [() | op@(FillPolygon p _ _ _) <- toList ops, inkColor op == Just seriesInk, sizeofPrimArray p == 8]
+  check "line markers were not drawn" (length diamonds == 3)
 
 -- | An area series fills a ring per run of samples on one side of its
 -- baseline, split where the data crosses it: the samples and the baseline's
@@ -528,5 +669,13 @@ testFillPlacement fm = do
 testGrowPlotHeight :: FontMetrics -> IO ()
 testGrowPlotHeight fm = do
   let
-    fitted = fitLayout fm (fillW defaultLayout) (chartDia fm barChartSample)
+    fittedWith f = fitLayout fm (f defaultLayout) (chartDia fm barChartSample)
+    fitted = fittedWith fillW
+    fixed400 = fittedWith (fillW . fixedH 400)
   check "plot grow height ballooned" (layoutMinH fitted <= 260 && layoutMaxH fitted <= 260)
+  -- The caller's own height holds: a taller minimum, a fixed height, or growing.
+  check "a growing plot capped a taller minimum" (layoutMinH (fittedWith (fillW . minH 300)) >= 300)
+  check "a growing plot lost its fixed height" (layoutMinH fixed400 == 400 && layoutMaxH fixed400 == 400)
+  check "a growing plot stopped growing in height" $ case layoutHeight (fittedWith grow) of
+    Grow _ -> True
+    _ -> False

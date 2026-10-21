@@ -56,9 +56,10 @@ they do for a dialog asked for outside an SDL session. `askSdlDebug`,
 setters likewise act on the open session, and do nothing without one.
 
 To opt into the session explicitly, for the IO-level operations
-(`openFileDialog`, `pollFileDialog`, `setWindowChrome`, `saveScreenshot`) or
-to hand it to another thread, take it with `askSdlEnv`. `SdlEnv` is an opaque
-session capability. Its mutable caches and native pointers are not
+(`openFileDialog`, `pollFileDialog`, `setWindowChrome`, `saveScreenshot`),
+take it with `askSdlEnv`. They call SDL, so call them on the session's
+display thread; only `cancelFileDialog` is safe from another. `SdlEnv` is
+an opaque session capability. Its mutable caches and native pointers are not
 application API. Low-level render integrations and native tests that need
 those details explicitly import `NanoUI.Sdl.Internal.Window`, whose record
 representation is unstable.
@@ -87,7 +88,7 @@ colours overlap. `captureScreenshot` returns the last presented frame as a
 
 ## Add to an application
 
-Use GHC 9.14 and include `nano-ui` and `nano-ui-sdl` in `build-depends`.
+Use GHC 9.10 through 9.14 and include `nano-ui` and `nano-ui-sdl` in `build-depends`.
 Set `default-language: GHC2024`; the example enables `OverloadedStrings`
 for text literals. Build the executable with `-threaded` for SDL callbacks.
 
@@ -124,8 +125,12 @@ it does not require AVX2.
 
 From this package's source directory, run `cabal build` after installing the
 native libraries. Check discovery with `pkg-config --modversion sdl3 sdl3-ttf`.
-The repository's `cabal.project` enables SIMD; the published package defaults
-to the scalar culler.
 
 See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
 for tests, profiling, and building the complete repository.
+
+## License
+
+MIT, except the bundled Inter font, which is under the SIL Open Font License
+1.1 (`LICENSE-Inter`). Every application built with this package embeds the
+font, so ship that notice with it.

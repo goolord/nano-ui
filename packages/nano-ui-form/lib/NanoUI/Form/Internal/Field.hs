@@ -54,7 +54,7 @@ data Publish
     OnChange
   | -- | As 'OnChange', and also when the response predicate holds (e.g.,
     -- re-selecting the active option). Built-in inputs use
-    -- @OnChangeOr respChanged@.
+    -- @OnChangeOr respChanged@ (the checkbox, @OnChangeOr respClicked@).
     OnChangeOr (Response -> Bool)
   | -- | Commit only when the response predicate holds, such as
     -- @OnlyWhen respSubmitted@ for a text field that commits on Enter.

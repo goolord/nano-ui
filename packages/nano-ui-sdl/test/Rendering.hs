@@ -292,9 +292,11 @@ systemThemeChecks env ctx = do
       Video.SDL_SYSTEM_THEME_LIGHT -> Just AppearanceLight
       Video.SDL_SYSTEM_THEME_DARK -> Just AppearanceDark
       _ -> Nothing
-  -- Start the context with the opposite appearance, so a sync that did not
-  -- report would leave the appearance and theme stale.
-  setSystemAppearance ctx (Just (if want == Just AppearanceDark then AppearanceLight else AppearanceDark))
+  -- Start the context with an appearance whose theme is not SDL's, so a
+  -- sync that did not report would leave the appearance and theme stale.
+  -- When SDL reports none, as the dummy driver does, the theme is the dark
+  -- one, so the context starts light.
+  setSystemAppearance ctx (Just (if want == Just AppearanceLight then AppearanceDark else AppearanceLight))
   followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
   (synced, _) <- syncDisplay ctx env emptyInput
   got <- getSystemAppearance synced

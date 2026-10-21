@@ -188,13 +188,16 @@ diagramFrame ps bw (Rect x y w h) =
     , Stroke x (y + h) x y bw (plotFrameBorder ps)
     ]
 
--- Grow plots cap here unless the caller set a tighter layoutMaxH.
+-- Grow plots cap here unless the caller set a tighter layoutMaxH, or a
+-- larger fixed height or minimum.
 growPlotCapH :: Float
 growPlotCapH = 260
 
 -- | Choose diagram dimensions from its aspect ratio and measured labels.
--- Growing widths retain flexibility; other widths become fixed. Prepare font
--- metrics for all labels before calling this pure sizing operation.
+-- Growing widths retain flexibility, with a height of at most 260 unless the
+-- layout fixes a height, sets a larger minimum or grows in height; other
+-- widths become fixed. Prepare font metrics for all labels before calling
+-- this pure sizing operation.
 fitLayout :: FontMetrics -> Layout -> Diagram B -> Layout
 fitLayout fm layout d =
   let V2 dw dh = size d
@@ -224,12 +227,20 @@ fitLayout fm layout d =
       clampSize x = realToFrac (max 8 x) :: Float
    in if growW
         then
-          let capH = min growPlotCapH (layoutMaxH layout)
-              floorH = if layoutMinH layout > 0 then layoutMinH layout else 180
+          let -- The caller's fixed height or minimum, which may raise the
+              -- cap; a growing height keeps growing above the measured minimum.
+              callerH = case layoutHeight layout of
+                Fixed h -> h
+                _ -> layoutMinH layout
+              growH = case layoutHeight layout of
+                Grow _ -> True
+                _ -> False
+              capH = min (max growPlotCapH callerH) (layoutMaxH layout)
+              floorH = if callerH > 0 then callerH else 180
               probeH0 =
                 realToFrac
-                  ( if layoutMinH layout > 0
-                      then layoutMinH layout
+                  ( if callerH > 0
+                      then callerH
                       else 200
                   ) ::
                   Double
@@ -239,10 +250,10 @@ fitLayout fm layout d =
               needW = clampSize (probeW * k)
               needH = min capH (max floorH (clampSize (probeH * k)))
            in layout
-                { layoutHeight = Fit
+                { layoutHeight = if growH then layoutHeight layout else Fit
                 , layoutMinW = max (layoutMinW layout) needW
                 , layoutMinH = needH
-                , layoutMaxH = max needH capH
+                , layoutMaxH = if growH then layoutMaxH layout else max needH capH
                 }
         else
           let k = labelFitScale fm (diagramTextOps baseW baseH d)
@@ -269,7 +280,10 @@ diagramWithKeyAndEnvelope ::
 diagramWithKeyAndEnvelope userKey dw dh f =
   framedDiagram (\t -> hash (userKey, themePlotKey t)) dw dh (f defaultLayout)
 
--- | 'diagram' with an explicit envelope width and height.
+-- | 'diagram' with an explicit envelope width and height. The drawing is
+-- cached per theme and redrawn when the envelope or the widget's size
+-- changes, not when other content does: for a diagram that changes, use
+-- 'diagramWithKeyAndEnvelope'.
 diagramWithEnvelope ::
   Double ->
   Double ->
@@ -311,14 +325,16 @@ frameInner (Rect x y w h) =
 
 fitLayoutIO :: FontMetrics -> Layout -> Diagram B -> IO Layout
 fitLayoutIO fm layout d = do
-  let texts = foldr (\op rest -> case op of
-        DrawText _ _ _ _ t _ -> t : rest
-        _ -> rest) [] (diagramTextOps 100 100 d)
+  let texts = foldMap (\case DrawText _ _ _ _ t _ -> [t]; _ -> []) (diagramTextOps 100 100 d)
   prepared <- prepareFontMetricsMany fm texts
   pure (fitLayout prepared layout d)
 
 -- | Draw a diagram inside a framed box sized by the layout modifier. Text in
--- the diagram is measured with the current font so labels fit.
+-- the diagram is measured with the current font so labels fit. The drawing
+-- and its envelope are cached, and redrawn when the theme, the font's line
+-- height, the layout or the widget's size changes, not when the diagram
+-- does: for a diagram that changes, such as a gauge's needle, use
+-- 'diagramWithKeyAndEnvelope' with a key that changes with it.
 diagram :: (Layout -> Layout) -> QDiagram NanoUIBackend V2 Double Any -> NanoUI Response
 diagram f d = do
   ctx <- askContext

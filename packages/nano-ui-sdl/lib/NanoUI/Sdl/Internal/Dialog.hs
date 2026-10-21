@@ -38,6 +38,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC.Foreign as GHC
+import GHC.IO.Encoding (utf8)
 import Foreign.Marshal.Alloc (free)
 import Foreign.Marshal.Array (newArray, peekArray0)
 import Foreign.Marshal.Utils (maybePeek)
@@ -93,19 +94,23 @@ defaultFileDialogOptions = FileDialogOptions [] Nothing False
 data FileDialogId = FileDialogId !(IORef Context) !(IORef FileDialogResult)
   deriving (Eq)
 
--- | Launch an open-file dialog. Returns a handle to poll for completion.
+-- | Launch an open-file dialog, on the display thread. Returns a handle to
+-- poll for completion.
 openFileDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
 openFileDialog env = launchDialog env OpenDialog
 
--- | Launch a save-file dialog. Returns a handle to poll for completion.
+-- | Launch a save-file dialog, on the display thread. Returns a handle to
+-- poll for completion.
 saveFileDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
 saveFileDialog env = launchDialog env SaveDialog
 
--- | Launch a folder-selection dialog. Returns a handle to poll for completion.
+-- | Launch a folder-selection dialog, on the display thread. Returns a
+-- handle to poll for completion.
 openFolderDialog :: SdlEnv -> FileDialogOptions -> IO FileDialogId
 openFolderDialog env = launchDialog env FolderDialog
 
--- | Poll a previously launched dialog without blocking.
+-- | Poll a previously launched dialog without blocking, on the display
+-- thread, since a finished dialog hands the window its focus back.
 --
 -- Each result is delivered exactly once: after the dialog completes, the
 -- first poll that observes the finished state returns it and forgets the
@@ -133,7 +138,7 @@ pollFileDialog env (FileDialogId owner ref)
 -- | Stop tracking a dialog handle without waiting for the native dialog to
 -- finish. The handle returns 'FileDialogUnknown' if polled afterwards.
 -- The native dialog keeps running until the user dismisses it; its result is
--- discarded.
+-- discarded. Unlike the other operations here, this is safe from any thread.
 cancelFileDialog :: SdlEnv -> FileDialogId -> IO ()
 cancelFileDialog env (FileDialogId owner ref) =
   when (owner == sdlCachedCtx env) (atomicWriteIORef ref FileDialogUnknown)
@@ -192,12 +197,13 @@ data DialogKind = OpenDialog | SaveDialog | FolderDialog
 launchDialog :: SdlEnv -> DialogKind -> FileDialogOptions -> IO FileDialogId
 launchDialog env kind opts = do
   -- SDL reads the filters and the location until it runs the callback, which
-  -- frees them. Its strings are UTF-8 on Windows, not the code page
+  -- frees them. It takes the filters as UTF-8 everywhere, and the location
+  -- as a path ('sdlPathEncoding'): UTF-8 on Windows too, not the code page
   -- Foreign.C.String would use.
   enc <- sdlPathEncoding
   names <-
     forM (if kind == FolderDialog then [] else dialogFilters opts) $ \(FileFilter name pattern_) ->
-      (,) <$> GHC.newCString enc (T.unpack name) <*> GHC.newCString enc (T.unpack pattern_)
+      (,) <$> GHC.newCString utf8 (T.unpack name) <*> GHC.newCString utf8 (T.unpack pattern_)
   filters <-
     if null names
       then pure nullPtr
@@ -245,7 +251,8 @@ onResult userdata filelist _filterIdx = do
   freeStablePtr launch
   enc <- sdlPathEncoding
   paths <- maybePeek (peekArray0 nullPtr >=> traverse (GHC.peekCString enc)) (castPtr filelist)
-  -- A cancelled dialog's handle stays unknown.
+  -- A handle abandoned with 'cancelFileDialog' keeps 'FileDialogUnknown'
+  -- ('completeResult').
   finish $ case paths of
     Nothing -> FileDialogFailed
     Just [] -> FileDialogCancelled

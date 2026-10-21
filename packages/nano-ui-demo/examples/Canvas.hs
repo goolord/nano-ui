@@ -20,7 +20,7 @@
 -- very large picture could split the finished strokes and the live one into
 -- two canvases with their own keys.
 --
--- Ctrl+Z undoes, like the Undo button, through 'shortcut'.
+-- Ctrl+Z (Cmd+Z on macOS) undoes, like the Undo button, through 'shortcut'.
 --
 -- Run it with @cabal run nano-ui-example-canvas@.
 module Main (main) where
@@ -29,7 +29,7 @@ import Control.Monad (forM_, unless, when)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import qualified NanoUI.Path as P
-import NanoUI.Shortcut (ctrl, key)
+import NanoUI.Shortcut (cmdOrCtrl, key)
 
 main :: IO ()
 main = do
@@ -107,7 +107,7 @@ view st = do
       disabledWhen (null strokes) $ whenM (button "Undo") undo
       disabledWhen (null strokes) $
         whenM (button "Clear") (modifyVar (sketchVar st) (edit (const [])))
-    whenM (shortcut (ctrl <> key 'z')) undo
+    whenM (shortcut (cmdOrCtrl <> key 'z')) undo
 
     -- Everything the drawing reads: the finished strokes (by revision) and
     -- the live stroke's shape. The paper colour is a constant.

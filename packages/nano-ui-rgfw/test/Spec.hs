@@ -2,9 +2,11 @@ module Main (main) where
 
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_)
+import Data.Bits ((.|.))
 import Data.ByteString qualified as BS
 import Data.Either (isLeft)
 import Data.Foldable (toList)
+import Data.IORef (readIORef)
 import Data.List (nub)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word32)
@@ -17,9 +19,9 @@ import NanoUI
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
-import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
+import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
-import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont (..), charToGlyphId, cozetteGlyphBit, getCozetteFont, renderGlyphScaledToBuffer)
+import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont (..), charToGlyphId, cozetteGlyphBit, cozetteGlyphFootprint, getCozetteFont, renderGlyphScaledToBuffer)
 import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
 import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCursor)
 import NanoUI.Rgfw.Render (renderArena)
@@ -28,7 +30,7 @@ import NanoUI.Rgfw.Wake (testRgfwWake)
 import NanoUI.Rgfw.Window (testGlWindow, testSessionWindow)
 import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, registerImage, runFrame)
 import NanoUI.Testing.Assert (run2Frames, withInput)
-import NanoUI.Testing.Harness (DemoSpan, withInputOff)
+import NanoUI.Testing.Harness (DemoSpan, nodesOfType, withInputOff)
 import RGFW (Event (..))
 import RGFW.Raw qualified as R
 import System.Exit (exitFailure)
@@ -48,13 +50,6 @@ raster ctx w h bg ui k = do
     clearScreen surf bg
     renderArena surf getCozetteFont 1 draw base overlay
     k a (base, overlay) (\x y -> peekElemOff (sBuffer surf) (y * w + x))
-
--- | Rects of the frame's nodes of one type, in arena order.
-nodesOf :: NodeType -> Context -> IO [Rect]
-nodesOf t ctx = do
-  let na = ctxNodeArena ctx
-  n <- arenaCount na
-  map snd . filter ((== t) . fst) <$> mapM (\i -> (,) <$> getNodeType na i <*> getNodeRect na i) [0 .. n - 1]
 
 -- | Fold a batch of RGFW events into one 'Input'.
 applied :: [Event] -> Input
@@ -124,17 +119,27 @@ testFractionalDpiCalculations = do
 -- pixel.
 testZOrderRenderArena :: IO ()
 testZOrderRenderArena = do
-  ctx <- newPixelContext
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  theme <- readIORef (ctxTheme ctx)
   let boxCol = colorRGBA 0x11 0x22 0x33 255
   raster ctx 100 100 0 (box grow boxCol >> window' (constVar True) "Z" (label "hi")) $ \_ (_, overlay) px -> do
     assert "Overlay text spans collected for floating window chrome" (not (null overlay))
-    nodesOf NodeWindow ctx >>= \case
-      Rect wx wy ww _ : _ -> do
+    nodesOfType NodeWindow ctx >>= \case
+      (_, Rect wx wy ww _) : _ -> do
         cWin <- px (round (wx + ww / 2)) (round wy + 4)
-        assert "Window paints above in-flow content" (cWin /= 0 && cWin /= packColor boxCol)
+        assert "Window paints above in-flow content" (cWin == packColor (styleBg (themeFloatingWindow theme)))
       [] -> assert "Floating window node present in arena" False
     cBox <- px 5 95
     assert "In-flow box painted beneath the window layer" (cBox == packColor boxCol)
+
+-- | A translucent fill blends over what is beneath it: half-transparent
+-- black over the backdrop halves each channel.
+testTranslucentRaster :: IO ()
+testTranslucentRaster = do
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  raster ctx 20 20 (packColor (colorRGBA 0x11 0x22 0x33 255)) (box grow (colorRGBA 0 0 0 128)) $ \_ _ px -> do
+    c <- px 10 10
+    assert "Translucent fill blends over the backdrop" (c == packColor (colorRGBA 8 17 25 255))
 
 -- Check coverage and clipping pixel-for-pixel, including empty iteration
 -- bounds and reversed winding in the numeric raster loops. Square geometry
@@ -173,8 +178,8 @@ testSquareThemedRaster = do
   let theme = tomorrowNightMinDarkTheme
   ctx <- newRgfwContext theme
   raster ctx 240 120 (packColor (themeWindow theme)) (column (button "Button" >> checkbox "Checkbox label" (constVar True))) $ \_ (base, _) px -> do
-    nodesOf NodeButton ctx >>= \case
-      Rect bx by bw bh : _ -> do
+    nodesOfType NodeButton ctx >>= \case
+      (_, Rect bx by bw bh) : _ -> do
         let (x0, y0, x1, y1) = (round bx, round by, round (bx + bw) - 1, round (by + bh) - 1)
         corners <- mapM (uncurry px) [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
         assert "Button corners are square (border colour)" (all (== packColor (styleBorder (themeButton theme))) corners)
@@ -194,7 +199,9 @@ testSquareThemedRaster = do
 testGlyphAtlas :: IO ()
 testGlyphAtlas = do
   let font = getCozetteFont
-  forM_ [1.0, 1.5, 2.0, 3.0, 4.0] $ \scale -> do
+  -- Below 1x the pens close up, so the glyphs must shrink with them.
+  assert "glyphs below 1x shrink with the pen grid" (map cozetteGlyphFootprint [0.5, 0.75, 1.0] == [(4, 6), (5, 10), (7, 13)])
+  forM_ [0.5, 1.0, 1.5, 2.0, 3.0, 4.0] $ \scale -> do
     let ga = glyphAtlasFor font scale
         cw = gaCellW ga
         ch = gaCellH ga
@@ -276,6 +283,14 @@ testRgfwTyping = do
     keys [EventKeyPress (R.rgfw_keyPad1 + 1) R.rgfw_modNumLock] == [KeyChar '2']
       && keys [EventKeyPress (R.rgfw_keyPad1 + 1) 0] == [KeyDown]
       && keys [EventKeyPress R.rgfw_keyPadReturn 0] == [KeyEnter]
+  -- On X11 and Windows a modifier key's own events carry the bits from
+  -- before them: Shift's press lacks Shift and its release still has it.
+  let mods = inputModifiers . applied
+  assert "RGFW keys: a modifier is held from its own press to its own release" $
+    mods [EventKeyPress R.rgfw_keyShiftL 0] == noModifiers {modShift = True}
+      && mods [EventKeyPress R.rgfw_keyControlR R.rgfw_modShift] == noModifiers {modShift = True, modCtrl = True}
+      && mods [EventKeyPress R.rgfw_keyShiftL 0, EventKeyRelease R.rgfw_keyShiftL R.rgfw_modShift] == noModifiers
+      && mods [EventKeyRelease R.rgfw_keyAltR (R.rgfw_modAlt .|. R.rgfw_modSuper)] == noModifiers {modSuper = True}
 
 -- | Wheel events queued in one batch add up rather than keeping the last.
 -- RGFW's wheel is positive up and left, the input's down and right.
@@ -297,6 +312,14 @@ testRgfwPointer = do
   assert "RGFW buttons: misc 2 is forward" (pressedBy R.rgfw_mouseMisc2 == [MouseForward])
   assert "RGFW buttons: misc 3 to 5 are the next buttons" (concatMap pressedBy [R.rgfw_mouseMisc2 + 1 .. R.rgfw_mouseMisc2 + 3] == map MouseOther [6, 7, 8])
   assert "RGFW pointer: leaving the window moves the pointer off it" (let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
+  -- Windows sends no motion outside the window during a drag, so a leave
+  -- then would drop a dragged slider or scrollbar to the far corner.
+  let dragOut = applied [EventMouseButton R.rgfw_mouseLeft True, EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
+  assert "RGFW pointer: leaving with a button held keeps the pointer" (inputMousePos dragOut == V2 30 40)
+  assert "RGFW window: an uncovered or restored window repaints in full" $
+    inputWindowRedraw (applied [EventOther R.rgfw_windowRefresh])
+      && inputWindowRedraw (applied [EventOther R.rgfw_windowRestored])
+      && not (inputWindowRedraw (applied [EventMouseMotion 1 1]))
 
 -- | A rotated image reaches the rasteriser as a rotated quad, clipped to its
 -- widget. Rotated 45 degrees, a 40 by 20 image covers the top-left and
@@ -355,6 +378,7 @@ main = do
   testScale2xGlyphTables
   testFractionalDpiCalculations
   testZOrderRenderArena
+  testTranslucentRaster
   testTriangleRaster
   testSquareThemedRaster
   testGlyphAtlas

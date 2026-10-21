@@ -1,9 +1,9 @@
 -- | Minimal 80x24 PTY terminal with ANSI colors. Run with @cabal run nano-ui-sdl-terminal@.
-module Terminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send, keys) where
+module Terminal (main, Term (..), blank, feed, scrollBy, viewport, withPty, drain, send, keys, typeEvent) where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (forkIO, killThread, newEmptyMVar, takeMVar, threadWaitRead, tryPutMVar)
 import Control.Exception (bracket, bracketOnError, catch, throwIO, try)
-import Control.Monad (foldM, forM_, void, when)
+import Control.Monad (foldM, forM_, forever, void, when)
 import Control.Monad.ST (ST, runST)
 import Data.ByteString qualified as B
 import Data.Char (chr, isAsciiLower, isPrint, ord)
@@ -27,13 +27,13 @@ import Foreign.C.Error
 import Foreign.C.Types (CInt (..))
 import GHC.IO.Exception (IOException (..))
 import NanoUI hiding (scrollBy)
-import NanoUI.Backend (clearEphemeral, emptyInput)
+import NanoUI.Backend (clearEphemeral, emptyInput, newPixelContext, runNanoUI)
 import NanoUI.Backend.Sdl
-import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
-import NanoUI.Testing (newPixelContext)
+import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents, waitEvent)
 import Streaming (Of (..))
 import Streaming.Prelude qualified as S
 import System.Environment (setEnv)
+import System.Info (os)
 import System.Posix hiding (setEnv)
 import System.Posix.IO.ByteString qualified as P
 import Text.Read (readMaybe)
@@ -44,7 +44,7 @@ type Cell = (Char, Word32, Word32)
 -- | Foreground and background palette indices, bold, and inverse video.
 type Pen = (Word8, Word8, Bool, Bool)
 
-data Esc = Normal | Esc | Csi String | Osc | St | Cs | Discard deriving Eq
+data Esc = Normal | Esc | Csi String | Osc | Cs | Discard deriving Eq
 
 data Term = Term
   { screen :: V.Vector Cell
@@ -182,16 +182,12 @@ navigate t inp@(Input {inputScroll = V2 _ dy})
 
 step :: Grid s -> Term -> Char -> ST s Term
 step g@(Grid cells pushed) t c
-  | c == '\ESC' && escape t `notElem` [Osc, St] = pure (setEsc Esc)
+  -- ESC ends an OSC too: ESC \ is the string terminator, and any other
+  -- sequence after it runs.
+  | c == '\ESC' = pure (setEsc Esc)
   | c == '\CAN' || c == '\SUB' = pure done
   | otherwise = case escape t of
-      Osc ->
-        pure (setEsc (if c == '\BEL' then Normal else if c == '\ESC' then St else Osc))
-      St ->
-        pure
-          ( setEsc
-              (if c `elem` ['\\', '\BEL'] then Normal else if c == '\ESC' then St else Osc)
-          )
+      Osc -> pure (setEsc (if c == '\BEL' then Normal else Osc))
       Cs -> pure done
       Esc -> case c of
         '[' -> pure (setEsc (Csi ""))
@@ -245,6 +241,13 @@ csi (Grid cells pushed) raw cmd t = case cmd of
     pure t {history = V.empty, back = 0}
   'J' -> erase 0 1919
   'K' -> erase (y * 80) (y * 80 + 79)
+  -- Insert, delete and erase characters in the cursor row, and insert and
+  -- delete lines from it down, which also moves the cursor to column 0.
+  '@' -> shift (i + chars) i (end - i - chars) >> wipe i (i + chars - 1)
+  'P' -> shift i (i + chars) (end - i - chars) >> wipe (end - chars) (end - 1)
+  'X' -> wipe i (i + chars - 1)
+  'L' -> shift (top + rows) top (1920 - top - rows) >> move 0 y <$> wipe top (top + rows - 1)
+  'M' -> shift top (top + rows) (1920 - top - rows) >> move 0 y <$> wipe (1920 - rows) 1919
   'm' -> pure t {pen = sgr (pen t) codes}
   _ -> pure t
  where
@@ -256,6 +259,13 @@ csi (Grid cells pushed) raw cmd t = case cmd of
   (col, y) = cursor t
   x = min 79 col
   i = y * 80 + x
+  -- The cursor row's first cell and the cell after its last.
+  top = y * 80
+  end = top + 80
+  chars = min n (80 - x)
+  -- The cells in the lines moved or blanked.
+  rows = 80 * min n (24 - y)
+  shift to from len = MV.move (MV.slice to len cells) (MV.slice from len cells)
   -- Mode 0 erases from the cursor to the end, 1 from the start to the
   -- cursor, and 2 everything.
   erase a b = case p of
@@ -351,7 +361,9 @@ keys inp = E.encodeUtf8 (prefix <> text <> foldMap key (inputKeys inp))
     | isAsciiLower c = T.singleton (chr (ord c - 96))
     | otherwise = maybe "" T.singleton (lookup c controlKeys)
   text = if ctrl then "" else inputChars inp
-  prefix = if modAlt mods && not (T.null text) then "\ESC" else ""
+  -- Alt sends ESC before its text, as xterm does. On macOS Option types
+  -- characters of its own (@ on a German layout), sent as they are.
+  prefix = if modAlt mods && os /= "darwin" && not (T.null text) then "\ESC" else ""
   key = \case
     -- Keys arrive unshifted: Ctrl+_ is Ctrl+Shift+- on a US layout.
     KeyChar '-' | ctrl && modShift mods -> "\US"
@@ -374,6 +386,17 @@ keys inp = E.encodeUtf8 (prefix <> text <> foldMap key (inputKeys inp))
     KeyInsert -> "\ESC[2~"
     KeyF n -> fromMaybe "" (lookup n functionKeys)
     _ -> ""
+
+-- | Fold an event into the frame's input and the bytes sent to the shell.
+-- Each event is translated with the modifiers held so far, which typed text
+-- keeps from the key before it, so Alt adds its ESC and Ctrl drops the text.
+-- While the input method is composing, it owns the keys and only committed
+-- text is sent.
+typeEvent :: (Input, B.ByteString) -> SdlEvent -> (Input, B.ByteString)
+typeEvent (i, out) ev =
+  (applyEvent i ev, out <> if isJust (inputComposition i) then E.encodeUtf8 (inputChars one) else keys one)
+ where
+  one = applyEvent emptyInput {inputModifiers = inputModifiers i} ev
 
 -- | The control code xterm sends for Ctrl and a key other than a letter.
 -- Keys arrive unshifted, so the digits stand in for the symbols above them
@@ -404,17 +427,18 @@ main = withPty $ \fd -> do
       }
     ctx0
     $ \ctx env -> do
+      -- Output from the shell wakes the event wait. The reader then waits
+      -- for a pass of the loop to read it before it looks at the PTY again.
+      wake <- runNanoUI ctx emptyInput askWake
+      passed <- newEmptyMVar
       let
         advance (t, pending, inp, _, _) = do
-          threadDelay 16000
-          events <- pollEvents
+          -- Bytes the PTY did not take yet are sent again 16 ms later.
+          first <- waitEvent (if B.null pending then -1 else 16)
+          events <- maybe id (:) first <$> pollEvents
           let
             inputs = fmap (applyEvent emptyInput) events
-            -- Each event's bytes, in order. While the input method is
-            -- composing, it owns the keys and only committed text is sent.
-            (inp', typed) = foldl' typeEvent (clearEphemeral inp, B.empty) (zip events inputs)
-            typeEvent (i, out) (ev, one) =
-              (applyEvent i ev, out <> if isJust (inputComposition i) then E.encodeUtf8 (inputChars one) else keys one)
+            (inp', typed) = foldl' typeEvent (clearEphemeral inp, B.empty) events
           rest <- send fd (pending <> typed)
           next :> ended <- drain fd (foldl' navigate t inputs)
           let
@@ -424,11 +448,17 @@ main = withPty $ \fd -> do
                 || back next /= back t
                 || screen next /= screen t
           pure (next, rest, inp', ended || any (== EvQuit) events, changed)
-      S.mapM_
-        ( \(t, _, inp, _, changed) -> when changed (void (sdlDrawFrame ctx (view t) env inp True))
-        )
-        . S.takeWhile (\(_, _, _, ended, _) -> not ended)
-        $ S.iterateM advance (pure (blank, B.empty, emptyInput, False, True))
+        -- The token goes back after the frame, which takes the wakes before
+        -- it, so output that comes later wakes the wait again.
+        draw (t, _, inp, _, changed) = do
+          when changed $ do
+            (ctx', sized) <- syncDisplay ctx env inp
+            void (sdlDrawFrame ctx' (view t) env sized True)
+          void (tryPutMVar passed ())
+      bracket (forkIO (forever (threadWaitRead fd >> wake >> takeMVar passed))) killThread $ \_ ->
+        S.mapM_ draw
+          . S.takeWhile (\(_, _, _, ended, _) -> not ended)
+          $ S.iterateM advance (pure (blank, B.empty, emptyInput, False, True))
 
 -- | The terminal claims every key and takes typed text from the input
 -- method. It draws the composition at the cursor and places the candidate

@@ -1,7 +1,7 @@
 module Scope (check, runScopeTests) where
 
 import Control.Exception (IOException, try)
-import Control.Monad (filterM, forM, forM_, unless, void)
+import Control.Monad (forM_, unless, void)
 import Data.IORef (writeIORef)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -9,15 +9,19 @@ import Ditto.Core qualified as Ditto
 import Ditto.Types qualified as Ditto
 import NanoUI
   ( Input (..)
-  , Key (KeyEnter)
+  , Key (KeyEnter, KeyUp)
   , NanoUI
   , Rect (..)
+  , colorA
+  , colorRGBA
   , columnWith
   , fillW
   , liftIO
+  , respSubmitted
+  , textInput'
   )
 import NanoUI.Backend (runNanoUI)
-import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena)
+import NanoUI.Internal.Context (ctxFocusId)
 import NanoUI.Form
 import NanoUI.Form.Internal.Backend
   ( FormStateStore (..)
@@ -33,14 +37,10 @@ import NanoUI.Form.Internal.Backend
   )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (NodeButton, NodeTextArea)
-  , arenaCount
-  , getNodeType
-  , getNodeRect
-  , getWidgetId
+  ( NodeType (NodeButton, NodeColorPicker, NodeTextArea, NodeTextInput)
   )
-import NanoUI.Testing (Context, clearDirty, isDirty, newPixelContext, runFrame)
-import NanoUI.Testing.Harness (keyInp, runClick, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing (Context, clearDirty, collectTextSpans, isDirty, newPixelContext, runFrame)
+import NanoUI.Testing.Harness (hasText, keyInp, nodesOfType, runClick, spanCenter, warmup2, withInputOff)
 
 check :: String -> Bool -> IO ()
 check message ok = unless ok (fail message)
@@ -52,24 +52,16 @@ runScopeTests = do
   testPrefixRestoration
   testFormInvalidation
   testSubmitPulse
+  testSubmitSameFrameEdit
   testSubmitSkipsTextArea
+  testColorKeepsAlpha
+  testMarkSubmitted
   testResetWidgets
   testResetTextArea
 
 -- | A checkbox is a button, and these forms have no other buttons.
 checkboxes :: Context -> IO [(WidgetId, Rect)]
-checkboxes = controlsOf NodeButton
-
-controlsOf :: NodeType -> Context -> IO [(WidgetId, Rect)]
-controlsOf wanted ctx = do
-  let
-    arena = ctxNodeArena ctx
-  count <- arenaCount arena
-  matching <- filterM (fmap (== wanted) . getNodeType arena) [0 .. count - 1]
-  forM matching $ \index -> do
-    wid <- getWidgetId arena index
-    Rect x y w h <- getNodeRect arena index
-    pure (wid, Rect x y w h)
+checkboxes = nodesOfType NodeButton
 
 -- | Event-free input for a 400 by 240 window.
 input :: Input
@@ -181,6 +173,37 @@ testSubmitPulse = do
   idle <- warmup2 ctx input ui
   check "a submitted form kept emitting values on idle frames" (idle == Nothing)
 
+-- | Text typed in the frame that presses Enter is part of the submission,
+-- both for a field that publishes each edit and one that publishes on Enter.
+testSubmitSameFrameEdit :: IO ()
+testSubmitSameFrameEdit =
+  forM_
+    [ ("submit-typed", inputText "query" "")
+    , ( "submit-on-enter"
+      , inputWidget (Just "query") decodeText (OnlyWhen respSubmitted) FormInputText textInput' ""
+      )
+    ]
+    $ \(prefix, field) -> do
+      ctx <- newPixelContext
+      owner <- newFormState
+      let
+        ui = nanoFormSubmit owner prefix "Save" (field `prove` notEmpty "Required")
+      _ <- warmup2 ctx input ui
+      controls <- nodesOfType NodeTextInput ctx
+      case controls of
+        [(wid, _)] -> do
+          writeIORef (ctxFocusId ctx) wid
+          _ <- warmup2 ctx input ui
+          (submitted, _, _) <-
+            runFrame ctx (keyInp KeyEnter input {inputChars = "abc"}) ui
+          check
+            ("Enter submitted the text from before its frame's typing: " <> show prefix)
+            (submitted == Just "abc")
+        _ -> fail "expected one submit-test text input"
+ where
+  decodeText (FormInputText t) = Right t
+  decodeText _ = Left ("Expected text" :: Text)
+
 -- | Enter in a focused text area inserts a newline; it does not submit.
 testSubmitSkipsTextArea :: IO ()
 testSubmitSkipsTextArea = do
@@ -189,7 +212,7 @@ testSubmitSkipsTextArea = do
   let
     ui = nanoFormSubmit owner "submit-notes" "Save" (inputTextArea "notes" "")
   _ <- warmup2 ctx input ui
-  controls <- controlsOf NodeTextArea ctx
+  controls <- nodesOfType NodeTextArea ctx
   case controls of
     [(wid, _)] -> do
       writeIORef (ctxFocusId ctx) wid
@@ -198,6 +221,44 @@ testSubmitSkipsTextArea = do
         runFrame ctx (keyInp KeyEnter input) ui
       check "Enter in a focused text area submitted the form" (submitted == Nothing)
     _ -> fail "expected one submit-test text area"
+
+-- | Brightening a translucent colour field keeps its alpha.
+testColorKeepsAlpha :: IO ()
+testColorKeepsAlpha = do
+  ctx <- newPixelContext
+  owner <- newFormState
+  let
+    overlay = colorRGBA 0 0 0 128
+    ui = nanoFormLive owner "colour" (inputColor "Overlay" overlay)
+  _ <- warmup2 ctx input ui
+  -- The picker's first part is its saturation / value field.
+  controls <- nodesOfType NodeColorPicker ctx
+  case controls of
+    (wid, _) : _ -> do
+      writeIORef (ctxFocusId ctx) wid
+      _ <- warmup2 ctx input ui
+      void (runFrame ctx (keyInp KeyUp input) ui)
+      edited <- warmup2 ctx input ui
+      check "Up did not brighten the colour" (edited /= Just overlay)
+      check "a colour field dropped its alpha" (fmap colorA edited == Just 128)
+    _ -> fail "expected a colour picker"
+
+-- | The app's own button submits a 'FormOnSubmit' form through
+-- 'markSubmitted', and the form then shows its errors.
+testMarkSubmitted :: IO ()
+testMarkSubmitted = do
+  ctx <- newPixelContext
+  owner <- newFormState
+  let
+    form = withFieldErrors (inputText "name" "" `prove` notEmpty "Name is required")
+    ui = nanoFormEx owner defaultFormConfig {fcMode = FormOnSubmit} "on-submit" form
+    -- The message wraps, so look for its last word.
+    errorShown = hasText "required" <$> collectTextSpans ctx
+  _ <- warmup2 ctx input ui
+  check "a FormOnSubmit form showed errors before submission" . not =<< errorShown
+  runNanoUI ctx input (markSubmitted owner "on-submit")
+  _ <- warmup2 ctx input ui
+  check "markSubmitted did not show the form's errors" =<< errorShown
 
 testResetWidgets :: IO ()
 testResetWidgets = do
@@ -239,7 +300,7 @@ testResetTextArea = do
   let
     ui = nanoFormLive owner "reset-editor" (inputTextArea "notes" "initial")
   _ <- warmup2 ctx input ui
-  controls <- controlsOf NodeTextArea ctx
+  controls <- nodesOfType NodeTextArea ctx
   case controls of
     [(wid, _)] -> do
       writeIORef (ctxFocusId ctx) wid

@@ -88,10 +88,8 @@ library demo-common
         nano-ui-sdl ^>=0.2,
         text ^>=2.1
 
-executable nano-ui-sdl-demo
-    import:           sdl-exe
-    main-is:          Demo.hs
-    ghc-options:      -main-is Demo
+-- What examples/Demo.hs needs, for each component that compiles it.
+common demo-module
     other-modules:    Paths_nano_ui_demo
     autogen-modules:  Paths_nano_ui_demo
     build-depends:
@@ -105,24 +103,34 @@ executable nano-ui-sdl-demo
         text ^>=2.1,
         vector ^>=0.13
 
+-- The PTY terminal and its test, which need a POSIX system.
+common terminal
+    if os(windows)
+        buildable: False
+    else
+        c-sources:        cbits/terminal-size.c
+        build-depends:
+            bytestring ^>=0.12,
+            nano-ui ^>=0.2,
+            nano-ui-sdl ^>=0.2,
+            primitive ^>=0.9,
+            streaming ^>=0.2,
+            text ^>=2.1,
+            unix ^>=2.8,
+            vector ^>=0.13
+
+executable nano-ui-sdl-demo
+    import:           sdl-exe
+    import:           demo-module
+    main-is:          Demo.hs
+    ghc-options:      -main-is Demo
+
 executable nano-ui-sdl-profile
     import:           sdl-exe
+    import:           demo-module
     main-is:          Profile.hs
-    other-modules:
-        Demo
-        Paths_nano_ui_demo
-    autogen-modules:  Paths_nano_ui_demo
-    build-depends:
-        bytestring ^>=0.12,
-        diagrams-lib >=1.6 && <1.7,
-        JuicyPixels ^>=3.3,
-        nano-ui ^>=0.2,
-        nano-ui-demo:demo-common,
-        nano-ui-diagrams ^>=0.2,
-        nano-ui-sdl ^>=0.2,
-        primitive ^>=0.9,
-        text ^>=2.1,
-        vector ^>=0.13
+    other-modules:    Demo
+    build-depends:    primitive ^>=0.9
 
 executable nano-ui-sdl-notepad
     import:           sdl-exe
@@ -146,21 +154,9 @@ executable nano-ui-sdl-logs
 
 executable nano-ui-sdl-terminal
     import:           sdl-exe
+    import:           terminal
     main-is:          Terminal.hs
     ghc-options:      -main-is Terminal
-    if os(windows)
-        buildable: False
-    else
-        c-sources:        cbits/terminal-size.c
-        build-depends:
-            bytestring ^>=0.12,
-            nano-ui ^>=0.2,
-            nano-ui-sdl ^>=0.2,
-            primitive ^>=0.9,
-            streaming ^>=0.2,
-            text ^>=2.1,
-            unix ^>=2.8,
-            vector ^>=0.13
 
 -- The single-file examples. Each is about one topic and depends only on the
 -- library packages, never on demo-common, so it can be copied out whole.
@@ -261,6 +257,7 @@ executable nano-ui-example-live-chart
 test-suite nano-ui-demo-test
     import:           sdl-app
     import:           rts-options
+    import:           demo-module
     type:             exitcode-stdio-1.0
     main-is:          DemoTest.hs
     hs-source-dirs:   test, examples
@@ -268,43 +265,24 @@ test-suite nano-ui-demo-test
         Demo
         Logs
         Notepad
-        Paths_nano_ui_demo
         DemoSelftest
         LogsSelftest
         NotepadSelftest
         ImeSelftest
-    autogen-modules:  Paths_nano_ui_demo
     build-depends:
-        bytestring ^>=0.12,
-        diagrams-lib >=1.6 && <1.7,
-        JuicyPixels ^>=3.3,
-        nano-ui ^>=0.2,
-        nano-ui-demo:demo-common,
-        nano-ui-diagrams ^>=0.2,
-        nano-ui-sdl ^>=0.2,
-        primitive ^>=0.9,
-        sdl3-bindgen-sys ^>=0.0.0.2,
-        text ^>=2.1,
-        vector ^>=0.13
+        directory ^>=1.3,
+        sdl3-bindgen-sys ^>=0.0.0.2
+    -- A console program, as the executables are: a Windows GUI program
+    -- drops the message of the check that failed.
+    if os(windows)
+        ghc-options: -optl-mconsole
 
 test-suite nano-ui-terminal-test
     import:           sdl-app
     import:           rts-options
+    import:           terminal
     type:             exitcode-stdio-1.0
     main-is:          TerminalTest.hs
     hs-source-dirs:   test, examples
     other-modules:    Terminal
-    if os(windows)
-        buildable: False
-    else
-        c-sources:        cbits/terminal-size.c
-        build-depends:
-            bytestring ^>=0.12,
-            nano-ui ^>=0.2,
-            nano-ui-sdl ^>=0.2,
-            primitive ^>=0.9,
-            streaming ^>=0.2,
-            text ^>=2.1,
-            unix ^>=2.8,
-            vector ^>=0.13
 

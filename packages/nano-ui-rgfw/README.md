@@ -26,10 +26,10 @@ RGFW windows are opaque and do not fade: `wsTransparent`,
 `wsOpacity` and `setWindowOpacityUi` do nothing here. The SDL backend has
 transparent and faded windows.
 
-`runRgfwAppWith` constructs a view once with a typed debug sampler; pass it
-to `askRgfwDebug` and `debugWindowBody`. For a reducer with model-derived theme
-and scale, `runRgfwAppReduceCustomWith` supplies the same setup phase. Debug
-data is owned by the session rather than discovered through a dynamic store.
+`askRgfwDebug` reads the session's frame timings and display facts, and
+`debugWindowBody` shows them; views take no session handle, as with the SDL
+backend's `askSdlDebug`. `runRgfwAppWith` and `runRgfwAppReduceCustomWith` run
+a setup action once the window exists and before the first frame.
 
 The theme is any core `Theme`. The backend draws it with square corners and 1px
 borders (`applyRgfwTheme`), since geometry is drawn as flat quads. The font is
@@ -48,8 +48,11 @@ cabal run nano-ui-rgfw-profile  # demo frame loop in a hidden window, for +RTS -
 X11, Xcursor, Xrandr, and Xi on Linux; Cocoa on macOS; gdi32, user32, and
 shell32 on Windows. All need OpenGL 3.2.
 
-Use GHC 9.14 and add `nano-ui` and `nano-ui-rgfw` to your application's
-`build-depends`. The example uses `GHC2024` and `OverloadedStrings`.
+Use GHC 9.10 through 9.14 (development uses 9.14) and add `nano-ui` and
+`nano-ui-rgfw` to your application's `build-depends`. Build the executable
+with `-threaded`: otherwise the idle wait for events blocks the whole
+runtime, and background tasks make no progress until input arrives. The
+example uses `GHC2024` and `OverloadedStrings`.
 On Linux, install the development packages for the listed X11 libraries;
 RGFW itself is bundled by `nano-ui-rgfw-bindings`.
 
@@ -60,14 +63,24 @@ RGFW itself is bundled by `nano-ui-rgfw-bindings`.
 For a custom event loop, the internal modules `NanoUI.Rgfw.Internal.Context`
 and `NanoUI.Rgfw.Internal.Gl`, with the RGFW bindings, expose context setup and
 rendering. OpenGL operations must run on the OS thread where the context is
-current, and native resources must be closed on that thread.
+current, and native resources must be closed on that thread. Run every
+session on the OS thread that opened the first one, such as the main thread
+under `-threaded`: on Windows, a background task's wake reaches only that
+thread.
 
 Layout and input use logical coordinates; `optScale` controls their mapping
 to physical pixels. RGFW reports no input-method composition: an input
-method draws its own composition.
+method draws its own composition. Files dropped on the window are not
+reported, so `dropZone` and `useDrop` see no drops under this backend.
 The bitmap font does not provide the SDL backend's installed-font lookup or
 HarfBuzz shaping. Choose the SDL backend when those text features are
 required.
 
 See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
 for headless tests and native rendering checks.
+
+## License
+
+MIT. The bundled Cozette font is MIT-licensed by its author
+(`LICENSE-Cozette`); every application built with this package embeds it, so
+ship that notice with it.

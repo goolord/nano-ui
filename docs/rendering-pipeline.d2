@@ -73,12 +73,12 @@ frame: runFrameEff {
     style.fill: "#f4f7fb"
     style.stroke: "#3d5a80"
   }
-  build: "2  Build view\nwidgets add nodes, messages, state writes" {
+  build: "2  Build view\nwidgets add nodes, read and write Vars" {
     class: box
     style.fill: "#f4f7fb"
     style.stroke: "#3d5a80"
   }
-  mirror: "Local hook state\nchanged?" {
+  mirror: "Var read earlier\nthen written?" {
     class: gate
   }
   layout: "3  Layout solve\nflex measure/place, windows, scroll" {

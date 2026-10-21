@@ -37,7 +37,7 @@ import NanoUI
   , checkbox'
   , colorFromHex
   , colorPicker'
-  , colorToHex
+  , colorToHexA
   , defaultTextInputConfig
   , radio'
   , respChanged
@@ -134,7 +134,7 @@ inputEnumRadio name = enumField (inputRadio name)
 
 -- | Color picker input.
 inputColor :: FormError FormInput err => FieldName -> Color -> Form err Color
-inputColor name initial = captioned name decode (FormInputText . colorToHex) colorPicker' initial
+inputColor name initial = captioned name decode (FormInputText . colorToHexA) colorPicker' initial
   where
     decode = \case
       FormInputText t -> fromMaybe initial (colorFromHex t)

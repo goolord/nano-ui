@@ -20,35 +20,20 @@
         haskell-flake.flakeModule
       ];
 
-      perSystem = { config, pkgs, lib, ... }: {
+      perSystem = { config, pkgs, ... }: {
         formatter = pkgs.nixpkgs-fmt;
 
         haskellProjects.default = {
           projectRoot = self;
 
           # Match the GHC 9.14 toolchain used in local cabal builds.
-          compiler = "ghc914";
           basePackages = pkgs.haskell.packages.ghc914;
 
-          defaults.settings = {
-            imports = [ haskell-flake.modules.haskellProjects.default ];
-            nano-ui-sdl.flags.sdl = lib.mkDefault true;
-          };
-
-          devShell = {
-            tools = {
-              cabal = "recommended";
-              haskell-language-server = "recommended";
-            };
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-            ];
-            shellFor = {
-              extraPackages = _hpkgs: with pkgs; [
-                SDL3
-                SDL3_ttf
-              ];
-            };
+          # haskell-flake's default tools include cabal-install and
+          # haskell-language-server.
+          devShell.mkShellArgs = {
+            nativeBuildInputs = with pkgs; [ pkg-config ];
+            buildInputs = with pkgs; [ sdl3 sdl3-ttf ];
           };
 
           # packages, apps (demos), and checks (test suite)

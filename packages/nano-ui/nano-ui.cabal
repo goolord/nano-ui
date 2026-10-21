@@ -14,6 +14,7 @@ homepage:           https://github.com/goolord/nano-ui
 bug-reports:        https://github.com/goolord/nano-ui/issues
 category:           Graphics
 build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:
     CHANGELOG.md
     GUIDE.md
@@ -302,13 +303,13 @@ test-suite nano-ui-test
         Cases.NativeWindow
         Cases.Tasks
     build-depends:
-        bytestring,
-        containers,
-        directory,
+        bytestring ^>=0.12,
+        containers >=0.7 && <0.9,
+        directory ^>=1.3,
         effectful ^>=2.6,
         hashable ^>=1.5,
-        filepath,
-        nothunks,
+        filepath ^>=1.5,
+        nothunks ^>=0.3,
         primitive ^>=0.9,
         vector ^>=0.13,
         text ^>=2.1
@@ -333,8 +334,8 @@ test-suite nano-ui-inspection
     main-is:          Inspection.hs
     ghc-options:      -fplugin=Test.Inspection.Plugin
     build-depends:
-        containers,
-        inspection-testing,
+        containers >=0.7 && <0.9,
+        inspection-testing ^>=0.6,
         primitive ^>=0.9,
         vector ^>=0.13,
         text ^>=2.1

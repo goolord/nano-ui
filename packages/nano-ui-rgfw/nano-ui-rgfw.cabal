@@ -6,13 +6,16 @@ description:
     Runs nano-ui views in a native window through RGFW and OpenGL 3.2, with
     the Cozette bitmap font bundled for text.
 license:            MIT
-license-file:       LICENSE
+license-files:
+    LICENSE
+    LICENSE-Cozette
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 homepage:           https://github.com/goolord/nano-ui
 bug-reports:        https://github.com/goolord/nano-ui/issues
 category:           Graphics
 build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:
     CHANGELOG.md
     README.md
@@ -54,12 +57,14 @@ library
         NanoUI.Rgfw.Internal.Gl
         NanoUI.Rgfw.Internal.Session
     c-sources:        cbits/nano_ui_gl.c
+    -- The library imports NanoUI.Internal modules, which change without
+    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
         file-embed ^>=0.0.16,
         nano-ui-rgfw-bindings ^>=0.1,
-        nano-ui ^>=0.2,
+        nano-ui >=0.2.0 && <0.2.1,
         nano-ui-emit ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1
@@ -70,6 +75,8 @@ executable nano-ui-rgfw-demo
     import:           warnings
     main-is:          RgfwDemo.hs
     other-modules:    RgfwDemoCommon
+    -- Threaded, so background tasks run while the loop waits for events.
+    ghc-options:      -threaded
     build-depends:
         base >=4.20 && <4.23,
         hashable ^>=1.5,
@@ -87,7 +94,7 @@ executable nano-ui-rgfw-profile
     ghc-options:      -rtsopts "-with-rtsopts=-A64m -T -I0"
     build-depends:
         base >=4.20 && <4.23,
-        bytestring,
+        bytestring ^>=0.12,
         hashable ^>=1.5,
         nano-ui,
         nano-ui-emit,

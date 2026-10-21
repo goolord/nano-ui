@@ -33,7 +33,7 @@ import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (diagramWithKeyAndEnvelope, themePlotStyle)
 import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Chrome (chartDiagram, seriesDomains, seriesPoints)
-import NanoUI.Plot.Scale (formatTick, niceTicks)
+import NanoUI.Plot.Scale (niceTickLabels)
 import NanoUI.Plot.Hit (hitTestChartCached)
 import NanoUI.Plot.Series (area, bar, line, scatter)
 import NanoUI.Plot.Types
@@ -47,8 +47,13 @@ import NanoUI.Internal.Store (eqByPtr)
 
 -- | Typed chart cache owned by a component in one session. Allocate once
 -- during setup; multiple plots in that component are distinguished by widget id.
+-- Entries are not evicted: the cache keeps a chart and its drawing for every
+-- plot id it has drawn, so plots whose ids keep changing, such as one per
+-- item of a list that grows, grow it for as long as it lives.
 newtype PlotCache = PlotCache (IORef (IM.IntMap CachedChart))
 
+-- | An empty cache. Allocate it once, during setup, and pass it to the
+-- component's plots: a cache made each frame rebuilds every chart each frame.
 newPlotCache :: IO PlotCache
 newPlotCache = PlotCache <$> newIORef IM.empty
 
@@ -84,7 +89,7 @@ cachedChartDiagram (PlotCache ref) ctx wid fm theme chart = do
           points = map (seriesPoints chart) (chartSeries chart)
           labels = catMaybes [chartTitle chart, chartXTitle chart, chartYTitle chart]
             ++ map seriesName (chartSeries chart)
-            ++ map formatTick (niceTicks 6 xDom ++ niceTicks 6 yDom)
+            ++ map snd (niceTickLabels 6 xDom ++ niceTickLabels 6 yDom)
       prepared <- prepareFontMetricsMany fm labels
       let !d = chartDiagram prepared theme ps domains points chart
           !(V2 dw dh) = size d

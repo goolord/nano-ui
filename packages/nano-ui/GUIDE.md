@@ -2,7 +2,7 @@
 
 ## Build a windowed application
 
-Use GHC 9.10 or newer (9.14 is used for development) and Cabal. Save the
+Use GHC 9.10 through 9.14 (9.14 is used for development) and Cabal. Save the
 counter example from the README as `Main.hs` and create `counter.cabal` next to
 it:
 
@@ -17,7 +17,7 @@ executable counter
   default-language: GHC2024
   ghc-options: -threaded
   build-depends:
-    base ^>=4.22,
+    base >=4.20 && <4.23,
     text ^>=2.1,
     nano-ui ^>=0.2,
     nano-ui-sdl ^>=0.2
@@ -28,8 +28,9 @@ Install SDL3 and SDL3_ttf 3.2 or later with `pkg-config` metadata available
 application with `cabal run counter`.
 
 For a bitmap-font application without SDL dependencies, use `nano-ui-rgfw` and
-`runRgfwApp` instead (see `packages/nano-ui-rgfw/README.md` for its native
-windowing libraries).
+`runRgfwApp` instead (see
+[its README](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-rgfw/README.md)
+for its native windowing libraries).
 
 ## What runs each frame
 
@@ -311,7 +312,8 @@ and `themeAppearance` returns whether a `Theme` is light or dark.
 
 Modals, floating windows, and popups take a `Var Bool` controlling whether they
 are open. While the `Var` is `True`, the overlay is shown; pressing Escape,
-clicking outside, or clicking the close button writes `False` to the `Var`.
+clicking outside, or clicking the close button writes `False` to the `Var`. A
+floating `window` closes only by its close button.
 Call the overlay unconditionally every frame so sibling widget IDs remain
 stable:
 
@@ -326,9 +328,11 @@ If the open state is derived or the dialog must not close until explicitly
 confirmed, pass a `constVar` and handle dismissal via `respClicked` on the
 primed variant (`modal'`, `window'`, `popup'`).
 
-Tooltips require no state variable: wrapping a widget in `tooltip` displays the
-tooltip after the pointer rests on the target for `tooltipDelay` (0.5s by
-default) and hides it when the pointer leaves or a mouse button is pressed.
+Tooltips require no state variable: passing a widget's response to `tooltip`
+(or wrapping the widget with `withTooltip`, for a tooltip built from widgets)
+displays the tooltip after the pointer rests on the target for `tooltipDelay`
+(0.5s by default) and hides it when the pointer leaves or a mouse button is
+pressed.
 Tooltips also trigger on disabled widgets. `tooltipConfigured` customizes the
 delay, placement, and offset; `PlacementAtCursor` positions the tooltip at the
 cursor (or at the click position for popups and context menus).
@@ -341,12 +345,13 @@ To control keyboard focus programmatically, pass a widget's ID to
 `requestFocus` (e.g. `when findPressed (requestFocus (respId resp))`, or
 `requestFocus =<< currentId` immediately before the widget call). `focusNext`
 and `focusPrevious` cycle focus like Tab and Shift+Tab, `clearFocus` removes
-focus, and `isFocused` checks whether the current widget is focused. Focus
+focus, and `isFocused wid` checks whether that widget is focused. Focus
 requests take effect at the end of the frame (clearing any active selection or
 open menu on the previously focused field and skipping disabled or
 modal-blocked widgets), whereas `releaseFocus` drops focus from a specific
-widget immediately during the current pass. Clicking focuses text fields and
-selects only.
+widget immediately during the current pass. Clicking focuses text fields,
+selects, and focusable custom widgets (such as a knob, or a canvas with
+`canvasFocusable`).
 
 `withCursorShape` sets the default cursor shape for a subtree (such as
 `UiCursorCrosshair` over a canvas, `UiCursorNotAllowed` over disabled controls,
@@ -521,7 +526,7 @@ Vector paths are constructed using `NanoUI.Path` (typically imported qualified
 as `P`): build paths with `P.moveTo`, `P.lineTo`, `P.cubicTo`, `P.arc`, etc.,
 and render them with `drawPath` / `drawPathWith` (for fills) or
 `drawStrokePath` / `drawStrokePathWith` (for strokes). `drawPathWith` takes a
-fill rule (`P.Winding` or `P.EvenOdd`, where inner subpaths can cut holes such
+fill rule (`P.NonZero` or `P.EvenOdd`, where inner subpaths can cut holes such
 as rings) and a paint (`P.Solid` or `P.Linear` gradient). `drawStrokePathWith`
 takes a `P.Stroke` specifying stroke width, line caps, joins, miter limit, and
 dash pattern. Use `withTransform` to translate, rotate, or scale canvas
@@ -605,7 +610,9 @@ subtree in `explainScope`. You can also enable the overlay at startup via
 toggle it from a checkbox in a debug panel:
 
 ```haskell
-explainLayout =<< checkbox "Outline layout nodes" =<< explainingLayout
+on <- explainingLayout
+(_, on') <- withValue on (checkbox "Outline layout nodes")
+explainLayout on'
 ```
 
 ## Window management
@@ -670,7 +677,8 @@ saved <- useTaskStatus task shots (shoot >>= traverse_ (savePng "shot.png"))
 
 `useScreenshot task key` captures a screenshot per key for displaying directly
 in the UI. To construct `RgbaPixels` for window icons, use `rgbaPixels` (which
-validates that the buffer length is a multiple of 4 bytes).
+checks that the width and height are positive and the buffer is exactly
+`w * h * 4` bytes, and returns `Nothing` otherwise).
 
 ## Writing a backend
 
@@ -683,7 +691,7 @@ and window size carry over between frames, pass the previous frame's `Input`
 through `clearEphemeral` (which clears one-shot presses and text while
 preserving held state) and fold new platform events into the result rather than
 starting from `emptyInput` each frame. `newContext` / `newPixelContext` (from
-`NanoUI.Testing`) allocate the persistent session context, and `NanoUI.Runner`
+`NanoUI.Backend`) allocate the persistent session context, and `NanoUI.Runner`
 provides the shared event-loop state machine. See `NanoUI.Backend.Sdl` and
 `NanoUI.Backend.Rgfw` for complete implementations.
 
@@ -709,8 +717,9 @@ with `requestWindowClose`, `clearWindowClose`, and `quitRequested`.
 ## Headless tests
 
 `NanoUI.Testing` exports `newContext` and `runFrame` for running frames without
-a window or GPU. `runFrame` returns the UI action's result, emitted messages,
-`DrawData`, and a boolean indicating whether a follow-up frame was requested.
+a window or GPU. `runFrame` returns the UI action's result, the frame's
+`DrawData`, and whether a follow-up frame was requested; for `NanoUIE` views,
+`runFrameE` from `nano-ui-emit` also returns the emitted messages.
 Provide an explicit window size and `dt` in the test `Input`. When targeting a
 widget by its `respRect`, run an initial warm-up frame so layout geometry is
 populated before sending press and release frames.

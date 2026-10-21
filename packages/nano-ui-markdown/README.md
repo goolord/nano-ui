@@ -84,8 +84,9 @@ measured, laid out or repainted again. A chat log of thousands of paragraphs
 should draw only the messages in view, using `getScrollMetricsUi`.
 
 `cabal run nano-ui-markdown-example` streams a reply into a chat view with
-`useStream`. It needs `nano-ui-sdl`, behind this package's `sdl` flag (on by
-default); the library itself does not depend on a backend.
+`useStream`. It needs `nano-ui-sdl`, behind this package's `sdl` flag (off by
+default; the repository's `cabal.project` turns it on); the library itself
+does not depend on a backend.
 
 ## What it parses
 

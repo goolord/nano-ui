@@ -7,6 +7,12 @@
 #ifndef RGFW_OPENGL
 #define RGFW_OPENGL
 #endif
+/* One poll queues every pending native event, and a full queue is dropped
+   whole: 32 events, a few milliseconds of a fast mouse, lost button and key
+   releases. Only this file reads RGFW_info, so the size stays local. */
+#ifndef RGFW_MAX_EVENTS
+#define RGFW_MAX_EVENTS 1024
+#endif
 #include "RGFW.h"
 
 static RGFW_info s_rgfw_info;
@@ -54,6 +60,9 @@ RGFW_window* rgfw_create_window_gl(const char* name, int32_t x, int32_t y, int32
         RGFW_window_close(win);
         return NULL;
     }
+    /* RGFW turns vsync off on X11, Wayland and macOS, but leaves WGL at its
+       default of on. */
+    if (win != NULL) RGFW_window_swapInterval_OpenGL(win, 0);
     return win;
 }
 
@@ -89,6 +98,12 @@ uint8_t rgfw_window_set_mouse_default(RGFW_window* win) {
    *len 0 when the clipboard holds no text; *len leaves out RGFW's NUL
    terminator. */
 const char* rgfw_read_clipboard_text(size_t* len) {
+    /* RGFW answers a failed read with the text of the last read that worked,
+       so forget that text first. */
+    if (_RGFW->clipboard != NULL) {
+        RGFW_FREE(_RGFW->clipboard);
+        _RGFW->clipboard = NULL;
+    }
     const RGFW_dataTransfer* data = RGFW_readClipboardString();
     if (data == NULL || data->data == NULL) {
         *len = 0;
@@ -102,6 +117,8 @@ const char* rgfw_read_clipboard_text(size_t* len) {
     return data->data;
 }
 
+/* text ends in a NUL that len counts: RGFW's Windows and macOS writers read
+   up to it, X11 and Wayland go by the length. */
 uint8_t rgfw_write_clipboard_text(const char* text, size_t len) {
     /* RGFW inspects data[length - 1], so empty text goes out as a lone NUL. */
     RGFW_dataTransfer data = { len > 0 ? text : "", len > 0 ? len : 1, RGFW_dataText };

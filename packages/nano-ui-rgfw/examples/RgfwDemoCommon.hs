@@ -8,6 +8,7 @@ module RgfwDemoCommon
   ) where
 
 import Control.Monad (void, when)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI
@@ -59,8 +60,8 @@ import NanoUI.Backend.Rgfw
   , debugWindowBody
   , defaultRgfwOptions
   , defaultWindowSettings
-  , runRgfwAppReduceCustomWith
-  , RgfwDebugSampler
+  , emptyRgfwDebug
+  , runRgfwAppReduceCustom
   )
 import NanoUI.Emit qualified as Emit
 import Data.Hashable (Hashable (..))
@@ -188,8 +189,8 @@ update msg m =
         ClearNotes       -> m' {notesVal = ""}
         ToggleDebug b    -> m' {debugOpen = b}
 
-appView :: RgfwDebugSampler -> Model -> Emit.NanoUIE Msg ()
-appView debug m = Emit.withRunInNanoUIE $ \run -> do
+appView :: Model -> Emit.NanoUIE Msg ()
+appView m = Emit.withRunInNanoUIE $ \run -> do
   panelWith (padAll 12 . gap 8 . fillW . fillH) $ do
     rowWith (gap 8 . fixedH 24 . fillW) $ do
       label "nano-ui on RGFW"
@@ -233,8 +234,8 @@ appView debug m = Emit.withRunInNanoUIE $ \run -> do
       TabDiagnostics -> run (viewDiagnosticsTab m)
 
     when (debugOpen m) $ do
-      snap <- askRgfwDebug debug
-      (win, _) <- window' (constVar True) "Debug" (debugWindowBody debug snap)
+      snap <- fromMaybe emptyRgfwDebug <$> askRgfwDebug
+      (win, _) <- window' (constVar True) "Debug" (debugWindowBody snap)
       when (respClicked win) (run (Emit.emit (ToggleDebug False)))
 
 viewControlsTab :: Model -> Emit.NanoUIE Msg ()
@@ -457,4 +458,4 @@ main = do
           , optTheme  = tomorrowNightMinDarkTheme
           , optScale  = 0.0 -- 0.0 uses the DPI reported by the OS by default
           }
-  runRgfwAppReduceCustomWith opts (\m -> (themeForChoice (currentTheme m), physScaleFor (dpiScale m))) update initialModel (pure . appView)
+  runRgfwAppReduceCustom opts (\m -> (themeForChoice (currentTheme m), physScaleFor (dpiScale m))) update initialModel appView

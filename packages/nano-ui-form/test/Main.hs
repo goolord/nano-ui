@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Data.Either (isLeft)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int8)
 import Data.Sequence qualified as Seq
@@ -179,6 +180,13 @@ main = do
       check "Caught Must be at least 18" ("Must be at least 18" `elem` errorMsgs)
     Ditto.Ok _ ->
       fail "Expected validation failure, but form succeeded"
+  inRangeNaN <- proofFunction (inRange 0 1 (const ("Out of range" :: Text))) (0 / 0 :: Double)
+  check "inRange rejects NaN" (isLeft inRangeNaN)
+  -- ditto's number proofs read a String, as NanoUI.Form.Validation shows.
+  (_, ageResult) <-
+    runNanoUI ctx inp . runNanoForm owner "age" $
+      (T.unpack <$> inputText "age" "42") `prove` decimal (const "Not a number") (0 :: Int)
+  expectOk "A number proof parses a text field" (== 42) ageResult
 
   let
     enumForm :: Form Text (Int8, Int8, Int8)

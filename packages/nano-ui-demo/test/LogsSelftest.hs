@@ -5,7 +5,7 @@ module LogsSelftest
   ( selftest
   ) where
 
-import Control.Monad (unless, void)
+import Control.Monad (unless, void, when)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend.Sdl
@@ -35,7 +35,8 @@ selftest = do
       drawFrame baseInput
 
       spans0 <- spansWith "selftest: title 'Log Viewer' not found in spans" "Log Viewer"
-      expectText "selftest: initial state should be PINNED to bottom" "PINNED" spans0
+      -- "● PINNED", as "⏸ UNPINNED" holds "PINNED" too.
+      expectText "selftest: initial state should be PINNED to bottom" "● PINNED" spans0
 
       -- A row is one selectable span: id, timestamp, level, service and message.
       let hasFullLogSpan = any (\(_, txt, _, _, _) -> "#00" `T.isPrefixOf` txt && " [" `T.isInfixOf` txt) spans0
@@ -45,7 +46,7 @@ selftest = do
       append 40
       drawFrame baseInput
       drawFrame baseInput
-      expect "selftest: sticky scroll failed to stay PINNED after appending logs" "PINNED"
+      expect "selftest: sticky scroll failed to stay PINNED after appending logs" "● PINNED"
 
       -- Pinned is the scroller's own end, so the last row clears the
       -- horizontal bar.
@@ -65,17 +66,20 @@ selftest = do
 
       click =<< requireSpan "selftest: Jump to Bottom button" (findExact "Jump to Bottom" spans3)
       drawFrame baseInput
-      spans4 <- spansWith "selftest: Jump to Bottom button failed to restore PINNED status" "PINNED"
+      spans4 <- spansWith "selftest: Jump to Bottom button failed to restore PINNED status" "● PINNED"
 
       -- A filter applies in the frame that clicks it, and the view clamps so
-      -- the fewer rows stay visible.
+      -- the fewer rows stay visible. The header counts the rows it hides; the
+      -- status bar's "Filtered:" count shows either way.
       click =<< requireSpan "selftest: WARN filter button" (findExact "WARN" spans4)
       spansWarn <- collectTextSpans ctx
-      unless (hasText "filtered" spansWarn || hasText "Filtered:" spansWarn) $
+      unless (hasText " filtered]" spansWarn) $
         fail "selftest: filter button did not update view immediately"
-      let hasWarnLogs = any (\(_, txt, _, _, _) -> "WARN" `T.isInfixOf` txt && "#" `T.isInfixOf` txt) spansWarn
-      unless hasWarnLogs $
+      let rows = [txt | (_, txt, _, _, _) <- spansWarn, "#00" `T.isPrefixOf` txt]
+      when (null rows) $
         fail "selftest: filtered log lines were blank after filtering from bottom of list"
+      unless (all ("[WARN ]" `T.isInfixOf`) rows) $
+        fail "selftest: the WARN filter left rows of other levels"
 
       click =<< requireSpan "selftest: ALL filter button" (findExact "ALL" spansWarn)
 
@@ -91,7 +95,7 @@ selftest = do
       unless (hasText "ALL LOGS SELECTED" spansSelected || hasText "Deselect All" spansSelected) $
         fail "selftest: Select All failed to select all logs"
 
-      drawFrame (chordInp (ctrl <> key 'c') baseInput)
+      drawFrame (chordInp (cmdOrCtrl <> key 'c') baseInput)
       mClip <- ctxClipboardGet ctx
       case mClip of
         Nothing -> fail "selftest: Ctrl+C after Select All failed to copy to clipboard"

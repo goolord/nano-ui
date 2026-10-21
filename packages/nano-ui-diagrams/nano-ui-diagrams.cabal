@@ -13,6 +13,7 @@ homepage:           https://github.com/goolord/nano-ui
 bug-reports:        https://github.com/goolord/nano-ui/issues
 category:           Graphics
 build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:
     CHANGELOG.md
     README.md
@@ -59,6 +60,8 @@ library
         NanoUI.Plot.Builder
         NanoUI.Plot.Hit
         NanoUI.Plot.Widget
+    -- The library imports NanoUI.Internal modules, which change without
+    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
         colour >=2.3.2 && <2.4,
@@ -68,7 +71,7 @@ library
         dlist ^>=1.0,
         hashable ^>=1.5,
         lens >=5.2 && <5.4,
-        nano-ui ^>=0.2,
+        nano-ui >=0.2.0 && <0.2.1,
         primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13

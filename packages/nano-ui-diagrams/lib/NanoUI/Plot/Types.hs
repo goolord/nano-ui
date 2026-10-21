@@ -13,10 +13,11 @@ module NanoUI.Plot.Types
   , emptyChart
   ) where
 
-import Data.Primitive.PrimArray (PrimArray)
+import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Vector.Unboxed qualified as U
+import GHC.Float (castDoubleToWord64)
 import NanoUI (Color, Response)
 
 -- | Lower and upper axis bounds. Use finite, increasing bounds for plotting.
@@ -25,6 +26,7 @@ data Domain = Domain !Double !Double
 
 -- | Numeric x/y pairs or category labels with y values. Category arrays must
 -- have equal lengths; use the constructors in "NanoUI.Plot.Series" to build them.
+-- Points and values that are not finite (NaN, infinities) are not drawn.
 data SeriesData
   = PointsXY !(U.Vector (Double, Double))
   | -- | Bar labels and their values, in order.
@@ -33,15 +35,24 @@ data SeriesData
 
 -- Points compare pair by pair, as the vector's own instance does, without
 -- boxing each pair: charts are compared every frame to reuse their drawing.
+-- A NaN equals the same NaN, or a chart holding one would be new every
+-- frame, rebuilt and repainted forever.
 instance Eq SeriesData where
   PointsXY a == PointsXY b = U.length a == U.length b && go 0
     where
       go !i
         | i >= U.length a = True
         | otherwise = case (U.unsafeIndex a i, U.unsafeIndex b i) of
-            ((x, y), (x', y')) -> x == x' && y == y' && go (i + 1)
-  CategoryY labels values == CategoryY labels' values' = labels == labels' && values == values'
+            ((x, y), (x', y')) -> same x x' && same y y' && go (i + 1)
+  CategoryY labels values == CategoryY labels' values' =
+    labels == labels' && n == sizeofPrimArray values' && go 0
+    where
+      n = sizeofPrimArray values
+      go !i = i >= n || (same (indexPrimArray values i) (indexPrimArray values' i) && go (i + 1))
   _ == _ = False
+
+same :: Double -> Double -> Bool
+same a b = a == b || castDoubleToWord64 a == castDoubleToWord64 b
 
 -- | Shape of a plotted point marker.
 data MarkShape = MarkCircle | MarkSquare | MarkDiamond | MarkTriangle | MarkCross
@@ -75,8 +86,9 @@ data LegendPos = LegendRight | LegendBottom | LegendTop | LegendInside | LegendN
 data GridMode = GridBoth | GridHorizontal | GridVertical | GridNone
   deriving (Eq, Show)
 
--- | Series and chart decoration. Decimation reduces numeric series before
--- drawing and hit testing; it does not alter the stored data.
+-- | Series and chart decoration. Decimation reduces line, area and step
+-- series before drawing and hit testing; it does not alter the stored data,
+-- and scatter series are never thinned.
 data Chart = Chart
   { chartTitle :: !(Maybe Text)
   , chartXTitle :: !(Maybe Text)
@@ -89,7 +101,8 @@ data Chart = Chart
   deriving (Eq, Show)
 
 -- | Nearest drawn point in data coordinates. Both indices are zero-based;
--- the point index addresses the decimated series when decimation is enabled.
+-- the point index addresses the drawn points, which leave out those that are
+-- not finite and are decimated when decimation is enabled.
 data PlotHover = PlotHover
   { hoverDataX :: !Double
   , hoverDataY :: !Double

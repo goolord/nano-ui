@@ -1,9 +1,10 @@
 module Main (main) where
 
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, TypeError (..), evaluate, try)
 import Control.Monad (unless, void, when)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text qualified as T
+import DeferredWrongMessage (wrongMessage)
 import NanoUI
 import NanoUI.Emit
 import NanoUI.Internal.Context (ctxFocusId)
@@ -45,6 +46,7 @@ main = do
   testScopes
   testMapMessages
   testIsolation
+  testWrongMessage
   putStrLn "Typed emission tests passed."
 
 testReduce :: IO ()
@@ -230,3 +232,15 @@ testIsolation = do
   check "failed frame cannot leak messages" (msgs == [2])
   (_, empty, _, _) <- runFrameE ctx inp (pure () :: NanoUIE Int ())
   check "queues are per invocation" (null empty)
+
+-- | The message type is part of the view: emitting a Bool from an Int view
+-- does not typecheck, so its deferred type error fires.
+testWrongMessage :: IO ()
+testWrongMessage = do
+  ctx <- newContext
+  result <- try $ do
+    (_, msgs, _, _) <- runFrameE ctx (withInput 80 80) wrongMessage
+    evaluate (sum msgs)
+  case result of
+    Left (TypeError _) -> pure ()
+    Right _ -> fail "a view emitted a message of another type"

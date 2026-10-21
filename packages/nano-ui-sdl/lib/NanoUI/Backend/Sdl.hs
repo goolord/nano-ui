@@ -1,40 +1,40 @@
 -- | SDL3 backend: event loop, rendering, and application runners.
 module NanoUI.Backend.Sdl
-  ( RgbaImage (..)
-  , SdlDebugSnapshot (..)
+  ( -- * Running
+    runSdlApp
+  , runSdlAppReduce
   , SdlOptions (..)
+  , defaultSdlOptions
   , RenderDriver (..)
-  , askSdlDebug
+  , RgbaImage (..)
+
+    -- * Fonts and scale
+  , NanoUIFont (..)
+  , listFontFamilies
   , setSdlUiFont
   , setSdlUiScale
-  , defaultSdlOptions
+
+    -- * File dialogs
   , FileFilter (..)
   , FileDialogOptions (..)
   , FileDialogId
   , FileDialogResult (..)
   , defaultFileDialogOptions
-  , openFileDialog
-  , saveFileDialog
-  , openFolderDialog
-  , pollFileDialog
-  , cancelFileDialog
   , askOpenFileDialog
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
   , peekFileDialogUi
   , useFileDialog
-    -- * Explicit sessions
+  , openFileDialog
+  , saveFileDialog
+  , openFolderDialog
+  , pollFileDialog
+  , cancelFileDialog
 
-    -- | View-side operations look up the active session from the context. For
-    -- the IO-level operations above ('openFileDialog', 'pollFileDialog') and
-    -- below, or to pass the session to another thread, retrieve it with
-    -- 'askSdlEnv'.
-  , SdlEnv
-  , askSdlEnv
-  , sdlDebugSnapshot
     -- * External URLs
   , openUrl
+
     -- * The window
 
     -- | 'WindowSettings' and the view-side window functions come from the
@@ -65,20 +65,38 @@ module NanoUI.Backend.Sdl
   , windowCaption
   , windowCaptionWith
   , setWindowChromeUi
-  , NanoUIFont (..)
-  , listFontFamilies
-  , runSdlApp
-  , runSdlAppReduce
-  , sdlDrawFrame
-  , syncDisplay
-  , withSdl
-  , withSdlBench
+
+    -- * Debugging
+  , SdlDebugSnapshot (..)
+  , CoreDebugSnapshot (..)
+  , askSdlDebug
+  , sdlDebugSnapshot
+  , formatFpsRows
+  , formatDrawRows
+  , formatExplainRows
+
+    -- * Screenshots
   , saveScreenshot
   , captureScreenshot
+
+    -- * Explicit sessions
+
+    -- | View-side operations look up the active session from the context.
+    -- For the IO-level operations above ('openFileDialog', 'pollFileDialog',
+    -- 'setWindowChrome', 'saveScreenshot' and others), retrieve it with
+    -- 'askSdlEnv'. They call SDL, so call them on the session's display
+    -- thread; only 'cancelFileDialog' is safe from another thread.
+  , SdlEnv
+  , askSdlEnv
+  , withSdl
+  , withSdlBench
+  , syncDisplay
+  , sdlDrawFrame
   ) where
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDebugSnapshot, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))

@@ -38,7 +38,6 @@ import NanoUI
 import NanoUI.Adornment qualified as A
 import NanoUI.Backend.Sdl
 import NanoUI.Diagrams
-import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
 import NanoUI.Path qualified as P
 import NanoUI.Shortcut
 import Paths_nano_ui_demo (getDataFileName)
@@ -59,11 +58,11 @@ main = do
   args <- getArgs
   case dropWhile (/= "--record") args of
     _ : dir : _ -> SdlRecord.record dir . demoUi =<< newDemo
-    _ -> do
-      let (updates, _, _) = getOpt Permute options args
-      case sequence updates of
-        Nothing -> putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
-        Just fs -> runSdlApp (foldl' (flip id) demoOptions fs) . demoUi =<< newDemo
+    _ -> case getOpt Permute options args of
+      (updates, [], []) | Just fs <- sequence updates -> runSdlApp (foldl' (flip id) demoOptions fs) . demoUi =<< newDemo
+      (_, _, errors) -> putStr (concat errors <> usageInfo usage options)
+  where
+    usage = "Usage: nano-ui-sdl-demo [OPTIONS]\n       nano-ui-sdl-demo --record DIR  (record the README video's frames)"
 
 demoOptions :: SdlOptions
 demoOptions =
@@ -73,7 +72,8 @@ demoOptions =
     , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1280 800, wsMinSize = Just (Size 480 360)}
     }
 
--- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text.
+-- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text,
+-- as does a size that is not a number.
 options :: [OptDescr (Maybe (SdlOptions -> SdlOptions))]
 options =
   [ Option "v" ["vsync"] (ReqArg (\s -> Just (\o -> o {sdlAppVsync = s `elem` ["true", "True", "1"]})) "BOOL")
@@ -90,7 +90,7 @@ options =
   ]
   where
     onWindow f o = o {sdlWindowSettings = f (sdlWindowSettings o)}
-    resize f s = Just (maybe id (\px -> onWindow (\w -> w {wsSize = f px (wsSize w)})) (readMaybe s))
+    resize f s = (\px -> onWindow (\w -> w {wsSize = f px (wsSize w)})) <$> readMaybe s
 
 -- State -----------------------------------------------------------------------
 
@@ -718,7 +718,9 @@ tabsTab docsVar = do
         writeVar active fresh
       docTab d = closableTab d (docName d) (muted ("The body of " <> docName d <> ", which runs only while its tab is selected."))
       problems = (tab 0 "Problems" (muted "Three problems.")) {tabBadge = Just "3"}
-  cfg <- TabsConfig <$> readVar look <*> readVar place <*> pure newDoc
+  style <- readVar look
+  orientation <- readVar place
+  let cfg = defaultTabsConfig {tabsStyle = style, tabsOrientation = orientation, tabsTrailing = newDoc}
   tabResp <- tabsConfigured' cfg active (problems : map docTab docs)
   -- Closing the selected document selects the one before it.
   for_ (tabClosed tabResp) $ \d -> do

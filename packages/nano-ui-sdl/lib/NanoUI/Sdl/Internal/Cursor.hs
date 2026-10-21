@@ -10,6 +10,7 @@ module NanoUI.Sdl.Internal.Cursor
 
 import Control.Monad (void, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Maybe (isJust)
 import Foreign.Ptr (Ptr, nullPtr)
 import NanoUI (Input (..))
 import NanoUI.Backend (cursorFallback, syncCursorKind)
@@ -44,8 +45,8 @@ initCursors =
     <*> newIORef []
     <*> newIORef UiCursorDefault
     -- Debug aid, read once here so cursor changes stay allocation-free:
-    -- NANO_CURSOR_TRACE=1 logs every cursor change to stderr.
-    <*> ((== Just "1") <$> lookupEnv "NANO_CURSOR_TRACE")
+    -- NANO_CURSOR_TRACE, set to anything, logs every cursor change to stderr.
+    <*> (isJust <$> lookupEnv "NANO_CURSOR_TRACE")
 
 -- | Destroy the cursors this session created. SDL owns the default one.
 destroyCursors :: SdlCursors -> IO ()

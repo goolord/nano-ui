@@ -260,9 +260,9 @@ blendPixelWord :: Word32 -> RGBA -> Word32
 blendPixelWord !dst (r, g, b, a) =
   let !t = max 0 (min 1 a)
       !inv = 1 - t
-      !dr = fromIntegral ((dst `shiftR` 16) .&. 0xFF) :: Float
-      !dg = fromIntegral ((dst `shiftR` 8) .&. 0xFF) :: Float
-      !db = fromIntegral (dst .&. 0xFF) :: Float
+      !dr = fromIntegral ((dst `shiftR` 16) .&. 0xFF) / 255 :: Float
+      !dg = fromIntegral ((dst `shiftR` 8) .&. 0xFF) / 255 :: Float
+      !db = fromIntegral (dst .&. 0xFF) / 255 :: Float
       !orC = r * t + dr * inv
       !ogC = g * t + dg * inv
       !obC = b * t + db * inv

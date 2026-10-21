@@ -70,7 +70,8 @@ configureBenchIO = do
 -- a per-draw allocation on the text hot path.
 --
 -- The probe walks a shared list of lines so selecting one allocates nothing.
-glyphLookupAlloc :: Context -> IO Integer
+-- It answers the bytes allocated per lookup.
+glyphLookupAlloc :: Context -> IO Double
 glyphLookupAlloc ctx = do
   (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
   let sample = ["The quick brown fox", "jumps over", "the lazy dog", "0123456789!?.,;:"]
@@ -95,7 +96,7 @@ glyphLookupAlloc ctx = do
   before <- getAllocationCounter
   _ <- step lookups 0
   after <- getAllocationCounter
-  pure (fromIntegral before - fromIntegral after)
+  pure (fromIntegral (before - after) / fromIntegral lookups)
 
 -- | Bytes per warm lookup tolerated before the gate trips. The cached path
 -- should be zero; a reintroduced per-hit record would cost tens of bytes.
@@ -104,9 +105,7 @@ glyphLookupAllocBudget = 1.0
 
 glyphLookupGate :: Context -> IO ()
 glyphLookupGate ctx = do
-  bytes <- glyphLookupAlloc ctx
-  let lookups = 20000 :: Int
-      perLookup = fromIntegral bytes / fromIntegral lookups :: Double
+  perLookup <- glyphLookupAlloc ctx
   printf "glyph-lookup: %.3f B/lookup (budget %.1f)\n" perLookup glyphLookupAllocBudget
   when (perLookup > glyphLookupAllocBudget) $ do
     putStrLn "FAIL: warm shaped lookups allocate; expected the cached quads to be shared"

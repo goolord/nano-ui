@@ -1,5 +1,11 @@
 -- | Proofs that parse and validate field values: numbers, text length,
 -- ranges, email addresses, and custom predicates.
+--
+-- The number proofs from ditto ('decimal', 'signedDecimal', 'realFrac' and
+-- 'realFracSigned') read a 'String', and 'notNullProof' takes a list, but
+-- text inputs yield 'Text'. Apply them after @fmap T.unpack@:
+--
+-- > (T.unpack <$> inputText "Age" "") `prove` decimal (const "Not a number") 0
 module NanoUI.Form.Validation
   ( -- * Proof combinators
     Proof (..)
@@ -62,7 +68,7 @@ maxLength maxLen mkErr = validate ((<= maxLen) . T.length) (mkErr . T.length)
 
 -- | Validate that a value falls within the inclusive range @[minVal, maxVal]@.
 inRange :: (Applicative m, Ord a) => a -> a -> (a -> err) -> Proof m err a a
-inRange minVal maxVal = validate (\x -> not (x < minVal || x > maxVal))
+inRange minVal maxVal = validate (\x -> minVal <= x && x <= maxVal)
 
 -- | Check for one @\@@, a nonempty local part, and a dot inside the domain.
 -- This is a small input check, not full email-syntax or deliverability validation.

@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Exception (IOException, evaluate, try)
+import Control.Exception (IOException, evaluate, finally, try)
 import Control.Monad (forM_, unless, void, when)
 import Data.List (isInfixOf)
 import Data.IORef (writeIORef)
@@ -12,17 +12,20 @@ import NanoUI.Backend
 import NanoUI.Testing (textIndexAtX)
 import NanoUI.Backend.Sdl
   ( NanoUIFont (..)
+  , SdlDebugSnapshot (..)
   , SdlOptions (..)
   , defaultSdlOptions
+  , sdlDebugSnapshot
   , syncDisplay
   , withSdl
   , withSdlBench
   )
 import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
 import NanoUI.Sdl.Internal.Window (sdlFontRequestRef)
-import System.Directory (copyFile, createDirectoryIfMissing, getTemporaryDirectory, removePathForcibly)
+import System.Directory (copyFile, createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Environment (setEnv)
 import System.FilePath ((</>))
+import System.IO (hClose, openTempFile)
 import System.Mem (performGC)
 
 foreign import ccall unsafe "SDL_WasInit" wasInit :: Word32 -> IO Word32
@@ -51,13 +54,17 @@ main = do
   unless (initialized == 0) $
     fail "failed acquisition leaked initialized SDL subsystems"
   -- The bundled Inter twice, as a family's regular and bold files: the
-  -- "bold" is at the regular's own weight.
-  fixtures <- (</> "nano-ui-font-effects") <$> getTemporaryDirectory
-  createDirectoryIfMissing True fixtures
+  -- "bold" is at the regular's own weight. The directory is this run's own,
+  -- since another run may hold its files open.
+  fixtures <- do
+    tmp <- getTemporaryDirectory
+    (path, handle) <- openTempFile tmp "nano-ui-font-effects"
+    hClose handle >> removeFile path >> createDirectory path
+    pure path
   let fixtureRegular = fixtures </> "NanoFixture-Regular.ttf"
   copyFile "data/inter.ttf" fixtureRegular
   copyFile "data/inter.ttf" (fixtures </> "NanoFixture-Bold.ttf")
-  (font, snapshot, width, quad) <- withSdlBench ctx0 $ \ctx env -> do
+  (font, snapshot, width, quad) <- (`finally` removePathForcibly fixtures) . withSdlBench ctx0 $ \ctx env -> do
     (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
     let
       text = "AV To fi café λ"
@@ -73,6 +80,12 @@ main = do
     scaled <- lineWidthIO (scaleFontMetrics 1.5 fm) text
     unless (abs (scaled - measured * 1.5) < 0.01) $
       fail "effectful font scaling lost its metric scale"
+    -- Synthetic italic shapes as SDL measures it too.
+    (italicFm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleItalic FontRegular
+    (italicHost, _) <- ctxResolveMeasure ctx 16 WeightNormal FontStyleItalic FontRegular text
+    italicWidth <- lineWidthIO italicFm text
+    unless (abs (italicHost - italicWidth) < 0.01) $
+      fail ("italic shaped width differs from SDL measurement: " ++ show (italicHost, italicWidth))
     before <- drawShaped fm text
     unless (maybe False (\(ShapedGlyphs q) -> sizeofPrimArray q >= 8 * 10) before) $
       fail "shaped drawing returned no glyph quads"
@@ -121,6 +134,13 @@ main = do
     drawnWidth <- lineWidthIO boldFm text
     unless (abs (boldWidth - drawnWidth) < 0.01) $
       fail ("bold text measures unlike it draws: " ++ show (boldWidth, drawnWidth))
+    -- A file that will not open draws in bundled Inter, and the debug
+    -- readout names the font drawn, not the one asked for.
+    let missing = fixtures </> "NanoMissing.ttf"
+    writeIORef (sdlFontRequestRef env) (FontFilePath missing)
+    _ <- syncDisplay fromFile env emptyInput
+    shown <- dbgFontPath <$> sdlDebugSnapshot env
+    when (shown == missing) $ fail "the debug readout names a font that did not open"
     pure (fresh, prepared, measured, freshQuad)
   -- Pure metric and quad values are safe to evaluate after the native font,
   -- atlas and SDL session are closed; native effects fail before dereferencing.
@@ -129,7 +149,6 @@ main = do
   void (evaluate quad)
   expectClosed (prepareFontMetrics font "new text")
   expectClosed (drawShaped font "AV To fi café λ")
-  removePathForcibly fixtures
   putStrLn "font effects: ok"
 
 -- | Shaping reorders right-to-left text and gives every character a caret:

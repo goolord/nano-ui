@@ -1,14 +1,14 @@
 -- | The RGFW session's wake: another thread can interrupt the loop's event wait.
 module NanoUI.Rgfw.Wake (testRgfwWake) where
 
-import Control.Concurrent (forkIO, getNumCapabilities, newEmptyMVar, setNumCapabilities, takeMVar, threadDelay, tryPutMVar, yield)
+import Control.Concurrent (forkIO, getNumCapabilities, killThread, newEmptyMVar, setNumCapabilities, takeMVar, threadDelay, tryPutMVar, yield)
 import Control.Exception (SomeException, try)
 import Control.Monad (join, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
 import Foreign.C.Types (CInt (..))
 import GHC.Clock (getMonotonicTime)
-import NanoUI (Size (..), WindowSettings (..), askWake, defaultWindowSettings, label, quitUi, useTask, newTask)
+import NanoUI (Size (..), WindowMode (..), WindowSettings (..), askWake, defaultWindowSettings, label, quitUi, useTask, newTask)
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
 import System.CPUTime (getCPUTime)
 import System.Environment (lookupEnv)
@@ -20,8 +20,9 @@ foreign import ccall "exit" c_exit :: CInt -> IO ()
 
 -- | A background job's wake shows its result while the loop waits for
 -- events; after a stream faster than frames stops, the loop idles instead of
--- spinning; 'quitUi' ends the session. Skipped without an X display. A missed
--- wake would block forever, so a failed check exits the process.
+-- spinning; 'quitUi' ends the session. Skipped without an X display or an
+-- OpenGL 3.2 window. A missed wake would block forever, so a failed check
+-- exits the process.
 testRgfwWake :: IO ()
 testRgfwWake = do
   display <- lookupEnv "DISPLAY"
@@ -67,7 +68,7 @@ testRgfwWake = do
                 when (v == -1) (liftIO (void (tryPutMVar streamed ())))
                 label "stream"
               _ -> quitUi
-      _ <- forkIO $ do
+      watcher <- forkIO $ do
         await "the job's result" shown
         next 1
         await "the stream's last value" streamed
@@ -81,7 +82,11 @@ testRgfwWake = do
         when (cpu > 0.3 || f1 /= f0) $
           failNow ("after the stream the loop used " ++ show cpu ++ " s of CPU and ran " ++ show (f1 - f0) ++ " passes in a second")
         next 2
-      try (runRgfwApp defaultRgfwOptions {optWindow = defaultWindowSettings {wsSize = Size 200 150}} view) >>= \case
+      -- Hidden, so pointer motion over it cannot run passes while it idles.
+      result <- try (runRgfwApp defaultRgfwOptions {optWindow = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}} view)
+      ran <- readIORef passes
+      case result of
+        _ | ran == 0 -> killThread watcher >> putStrLn "[SKIP] RGFW wake: no OpenGL 3.2 window"
         Right () ->
           readIORef phase >>= \case
             2 -> putStrLn "[PASS] RGFW wake: a job's result and a stream show, the loop idles after, and quitUi ends it"

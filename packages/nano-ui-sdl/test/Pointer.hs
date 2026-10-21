@@ -1,8 +1,8 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 
 -- | SDL pointer translation: middle, side and extra buttons, mouse motion,
--- and the pointer leaving the window. Events go through SDL's own queue on
--- the dummy video driver.
+-- the pointer leaving the window, and lost render targets. Events go through
+-- SDL's own queue on the dummy video driver.
 module Main (main) where
 
 import Control.Monad (forM_, unless)
@@ -13,7 +13,7 @@ import Foreign.Storable (Storable, poke)
 import NanoUI (Pressable (..), V2 (..))
 import NanoUI.Backend
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents)
-import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (..), SDL_MouseMotionEvent (..), SDL_WindowEvent (..))
+import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (..), SDL_MouseMotionEvent (..), SDL_RenderEvent (..), SDL_WindowEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1, sDL_BUTTON_X2)
@@ -72,12 +72,21 @@ main = do
         { type' = Events.SDL_EVENT_WINDOW_MOUSE_LEAVE, reserved = 0, timestamp = 0, windowID = 0, data1 = 0, data2 = 0
         }
   check "the pointer leaves the window" (left == [EvMouseLeave])
+  reset <-
+    through
+      SDL_RenderEvent {type' = Events.SDL_EVENT_RENDER_TARGETS_RESET, reserved = 0, timestamp = 0, windowID = 0}
+  check "lost render targets repaint the whole window" (reset == [EvWindowRedraw])
   quitSafe
   let button b isDown inp = applyEvent inp (EvMouseButton b isDown (V2 5 5) (inputModifiers emptyInput))
       pressed = button MouseMiddle True emptyInput
       side = button MouseBack False (clearEphemeral (button MouseBack True emptyInput))
       gone = applyEvent pressed EvMouseLeave
+      ctrl = noModifiers {modCtrl = True}
+      -- A click is read with the modifiers of the whole batch, which may
+      -- already have let go of a key released just after it.
+      ctrlClick = button MouseLeft True (applyEvent emptyInput (EvModifiers ctrl))
   check "a middle press is held" (heldIn MouseMiddle pressed && pressedIn MouseMiddle pressed)
   check "a side button is released" (releasedIn MouseBack side && not (heldIn MouseBack side))
   check "leaving moves the pointer off the window and keeps the button" $
     let V2 x y = inputMousePos gone in x < -1000 && y < -1000 && heldIn MouseMiddle gone
+  check "a click keeps the modifiers of the keys before it" (inputModifiers ctrlClick == ctrl)

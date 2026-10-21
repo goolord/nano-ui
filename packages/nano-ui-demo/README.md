@@ -20,8 +20,8 @@ The package is split into two parts:
 | --- | --- | --- |
 | `nano-ui-sdl-demo` | [`examples/Demo.hs`](examples/Demo.hs), [`lib/DemoData.hs`](lib/DemoData.hs) | Multi-tab showcase of built-in widgets, layout containers, custom 2D vector graphics, animated GIFs, rich text, trees, sortable tables, dynamic tabs, split panes, and `nano-ui-diagrams` charts. Includes a live state sidebar showing current `Var` values across tabs, an `About` modal (`F1`), and a `Debug` window (`F12`) with frame timings, damage statistics, and an interactive layout overlay. |
 | `nano-ui-sdl-notepad` | [`examples/Notepad.hs`](examples/Notepad.hs) | Plain-text editor with a menu bar built on `popup`, keyboard shortcuts, unsaved-change tracking in the window title, and asynchronous native open/save file dialogs. |
-| `nano-ui-sdl-logs` | [`examples/Logs.hs`](examples/Logs.hs) | Streaming log viewer backed by a bounded ring buffer, with severity filtering, text search, selectable log lines, and auto-scroll that pauses when the user scrolls up. |
-| `nano-ui-sdl-terminal` | [`examples/Terminal.hs`](examples/Terminal.hs) | 80×24 terminal emulator attached to `/bin/sh` over a PTY (Linux and macOS only). Supports UTF-8, 16 ANSI colors with bold and inverse attributes, basic cursor movement and screen erasing, 2,000 lines of scrollback, and inline IME composition at the cursor via `useInputMethod` (`TERM=ansi`). |
+| `nano-ui-sdl-logs` | [`examples/Logs.hs`](examples/Logs.hs) | Streaming log viewer backed by a bounded ring buffer, with severity filtering, selectable log lines, Select All / Copy All, and auto-scroll that pauses when the user scrolls up. |
+| `nano-ui-sdl-terminal` | [`examples/Terminal.hs`](examples/Terminal.hs) | 80×24 terminal emulator attached to `/bin/sh` over a PTY (Linux and macOS only). Supports UTF-8, 16 ANSI colors with bold and inverse attributes, cursor movement, screen erasing, inserting and deleting characters and lines, 2,000 lines of scrollback, and inline IME composition at the cursor via `useInputMethod` (`TERM=ansi`). |
 | `nano-ui-sdl-profile` | [`examples/Profile.hs`](examples/Profile.hs) | Frame-time and allocation benchmark runner for the demo UI. |
 
 Run any application with `cabal run`:
@@ -65,8 +65,8 @@ They are listed in roughly the order you would read them as a tutorial:
 | [`Overlays.hs`](examples/Overlays.hs) | `nano-ui-example-overlays` | Menu bars, filter popovers (`popup`), right-click context menus (`contextMenu`), hover tooltips (`tooltip`, `withTooltip`), modal dialogs (`modal`), draggable/resizable floating windows (`window`), and intercepting window close requests (`wsExitOnCloseRequest`). |
 | [`Theming.hs`](examples/Theming.hs) | `nano-ui-example-theming` | Switching between built-in and Base16 themes (`setUiTheme`), following system light/dark mode (`systemAppearance`, `lightDark`), scoped style overrides (`styled`), and reading theme colors for custom drawing (`uiTheme`). |
 | [`Animation.hs`](examples/Animation.hs) | `nano-ui-example-animation` | Eased tweens (`Tween`) and spring physics (`Spring`) with `animateTo` and `animateToA`, smooth mid-flight retargeting, animated colors, continuous animations (`pulse`, `keepAnimating`), and idle loop sleep once animations settle. |
-| [`Images.hs`](examples/Images.hs) | `nano-ui-example-images` | Leasing procedural RGBA textures in the backend atlas (`useImageRgba`), lazy regeneration via cache keys, content fit/crop/zoom/rotation (`imageConfigured`), and tinted SVG icons (`parseSvg`, `loadSvg`, `iconButton`). |
-| [`Canvas.hs`](examples/Canvas.hs) | `nano-ui-example-canvas` | Interactive 2D vector drawing with `NanoUI.Path` (`canvas`, `customWidget`), pointer capture for freehand strokes, and path caching via `canvasContent`. |
+| [`Images.hs`](examples/Images.hs) | `nano-ui-example-images` | Leasing procedural RGBA textures in the backend atlas (`useImageRgba`), lazy regeneration via cache keys, content fit modes (`imageConfigured`), and tinted SVG icons (`parseSvg`, `svgIcon`, `iconButton`). |
+| [`Canvas.hs`](examples/Canvas.hs) | `nano-ui-example-canvas` | Interactive 2D vector drawing with `NanoUI.Path` (`canvasConfigured`, `useDrag2DOn`), pointer capture for freehand strokes, and path caching via `canvasContent`. |
 | [`Tasks.hs`](examples/Tasks.hs) | `nano-ui-example-tasks` | Running blocking IO on background worker threads (`useTask`, `useTaskStatus`), key-driven cancellation and restarts, error handling and retries, and incremental streams (`useStream`). |
 | [`Files.hs`](examples/Files.hs) | `nano-ui-example-files` | Non-blocking native open/save file dialogs (`useFileDialog`), loading file contents asynchronously with `useTaskStatus`, drag-and-drop file paths, and dynamic window titles (`setWindowTitleUi`). |
 | [`LongList.hs`](examples/LongList.hs) | `nano-ui-example-long-list` | Viewport virtualization for a 100,000-row list using `getScrollMetricsUi`, top/bottom spacer nodes, and programmatic scrolling by content rectangle (`scrollRectIntoViewUi`). |
@@ -82,7 +82,7 @@ cabal run nano-ui-example-layout
 
 ## Building and testing
 
-Requires GHC 9.10 or newer (development uses GHC 9.14), Cabal, SDL3,
+Requires GHC 9.10 through 9.14 (development uses GHC 9.14), Cabal, SDL3,
 SDL3_ttf 3.2+, and `pkg-config`. In a repository checkout, `nix develop`
 provides the full toolchain and native dependencies; see the
 [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md#setup)

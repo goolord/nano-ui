@@ -152,12 +152,15 @@ animUi = do
 settled :: Float -> Bool
 settled x = abs x < 0.001
 
+-- | The throw the pull-down cycle runs at: while exposed, the one it had
+-- when exposure began, so dragging the slider does not restart the cycle.
 lockThrow :: Bool -> Float -> NanoUI Float
-lockThrow exposed throwSec =
-  withKey ("cycleThrow" :: String) $
-    if exposed
-      then pure throwSec
-      else animateTo (Tween EaseLinear 0.35 0) 0 >> pure throwSec
+lockThrow exposed throwSec = do
+  locked <- useVar (0 :: Float)
+  held <- readVar locked
+  if not exposed
+    then throwSec <$ writeVar locked 0
+    else if held > 0 then pure held else throwSec <$ writeVar locked throwSec
 
 transport :: Bool -> Bool -> Float -> Float -> Float -> Float -> NanoUI [Float]
 transport exposed rewinding throwSec time wash glow = do

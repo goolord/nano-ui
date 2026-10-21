@@ -9,6 +9,7 @@ module NanoUI.Plot.Chrome
   ) where
 
 import Data.Colour (Colour)
+import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
@@ -49,12 +50,12 @@ import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle (..), colourOf)
 import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Scale
-  ( domainExtentBy
+  ( domainBoundsBy
   , domainToPlot
-  , formatTick
   , mergeDomains
-  , niceTicks
+  , niceTickLabels
   , padDomain
+  , settleDomain
   )
 import NanoUI.Plot.Types
   ( Chart (..)
@@ -98,6 +99,7 @@ data ChartChrome = ChartChrome
   , ccYTitleX :: !Double
   , ccXTitleY :: !Double
   , ccLegendW :: !Float
+  , ccTopLegend :: !Double
   }
 
 -- | Space needed for titles, ticks, and legend with the supplied font metrics.
@@ -108,7 +110,7 @@ chartMargins fm chart = ccMargins (chartChrome fm (snd (seriesDomains chart)) ch
 -- | Chrome for a chart whose y domain the caller has already computed.
 chartChrome :: FontMetrics -> Domain -> Chart -> ChartChrome
 chartChrome fm yDom chart =
-  let yLabels = map formatTick (niceTicks 6 yDom)
+  let yLabels = map snd (niceTickLabels 6 yDom)
       maxYW = maximum (0 : map (textWidth fm) yLabels)
       lh = fmLineHeight fm
       yTitleW = maybe 0 (textWidth fm) (chartYTitle chart)
@@ -133,10 +135,16 @@ chartChrome fm yDom chart =
       xTitleY = -xTickPad - tickH - titleGap
       leftTick = tickPad + tickW + px 4
       botTick = xTickPad + tickH + px 4
+      -- A top legend takes a row of its own, under the title.
+      topLegend =
+        case chartLegend chart of
+          LegendTop -> px lh + px 6
+          _ -> 0
       topM =
-        if chartTitle chart /= Nothing
-          then px lh + px 8
-          else px 4
+        topLegend
+          + if chartTitle chart /= Nothing
+            then px lh + px 8
+            else px 4
       rightM =
         case chartLegend chart of
           LegendRight -> px legendW + 0.22
@@ -165,47 +173,51 @@ chartChrome fm yDom chart =
         , ccYTitleX = yTitleX
         , ccXTitleY = xTitleY
         , ccLegendW = legendW
+        , ccTopLegend = topLegend
         }
 
 textWidth :: FontMetrics -> T.Text -> Float
 textWidth fm s = rectW (drawTextBox fm 0 0 0 (-1) s)
 
--- | Combined x/y extents, with 5% numeric padding. Categories use zero-based
--- positions with half a slot at each end. An empty chart uses 0-1 on both axes.
+-- | Combined x/y extents of the series' finite values, with 5% numeric
+-- padding. Categories use zero-based positions with half a slot at each
+-- end, and their bars' y extent includes zero. An axis with no values spans
+-- 0-1 before the padding, and one with a single value half a unit each side
+-- of it.
 seriesDomains :: Chart -> (Domain, Domain)
-seriesDomains chart =
-  case map seriesExtent (chartSeries chart) of
-    [] -> (Domain 0 1, Domain 0 1)
-    d : ds -> foldl' mergePair d ds
+seriesDomains chart = (xDom, fit yBounds)
   where
-    mergePair (dx, dy) (xd, yd) = (mergeDomains dx xd, mergeDomains dy yd)
-
-seriesExtent :: Series -> (Domain, Domain)
-seriesExtent s =
-  case seriesData s of
-    PointsXY pts ->
-      (padDomain 0.05 (domainExtentBy fst pts), padDomain 0.05 (domainExtentBy snd pts))
-    CategoryY _ values ->
-      let n = sizeofPrimArray values
-       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtentBy (indexPrimArray values) (U.enumFromN 0 n)))
+    -- Series merge their bounds before the fallbacks and padding, so an
+    -- empty or constant one does not widen the others' span.
+    fit = padDomain 0.05 . settleDomain
+    (xBounds, yBounds, slots) = foldl' add (Domain (1 / 0) (-1 / 0), Domain (1 / 0) (-1 / 0), 0) (chartSeries chart)
+    add (!bx, !by, !n) s = case seriesData s of
+      PointsXY pts -> (mergeDomains bx (domainBoundsBy fst pts), mergeDomains by (domainBoundsBy snd pts), n)
+      CategoryY _ values ->
+        let k = sizeofPrimArray values
+         in (bx, mergeDomains by (mergeDomains (Domain 0 0) (domainBoundsBy (indexPrimArray values) (U.enumFromN 0 k))), max n k)
+    slotDom = Domain (-0.5) (fromIntegral slots - 0.5)
+    xDom
+      | slots == 0 = fit xBounds
+      | Domain lo hi <- xBounds, lo > hi = slotDom
+      | otherwise = mergeDomains slotDom (fit xBounds)
 
 -- | Draw a chart from its 'seriesDomains' and each series' 'seriesPoints'.
 chartDiagram :: FontMetrics -> Theme -> PlotStyle -> (Domain, Domain) -> [U.Vector (Double, Double)] -> Chart -> Diagram B
 chartDiagram fm theme ps (xDom, yDom) points chart =
   let chrome = chartChrome fm yDom chart
-      margins = ccMargins chrome
-      leftM = marginLeft margins
-      rightM = marginRight margins
-      botM = marginBottom margins
-      topM = marginTop margins
-      xTicks = niceTicks 6 xDom
-      yTicks = niceTicks 6 yDom
+      m = ccMargins chrome
+      -- A category series names its slots; other x axes are numbered.
+      xTicks = case [labels | Series {seriesData = CategoryY labels _} <- chartSeries chart] of
+        labels : _ -> zip [0 ..] (toList labels)
+        [] -> niceTickLabels 6 xDom
+      yTicks = niceTickLabels 6 yDom
       tickPad = ccTickPad chrome
       xTickPad = ccXTickPad chrome
       toX = domainToPlot xDom
       toY = domainToPlot yDom
-      horizontalGrid = mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | y <- yTicks]
-      verticalGrid = mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | x <- xTicks]
+      horizontalGrid = mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | (y, _) <- yTicks]
+      verticalGrid = mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | (x, _) <- xTicks]
       grid =
         case chartGrid chart of
           GridNone -> mempty
@@ -215,19 +227,19 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
       axes =
         fromVertices [p2 (0, 0), p2 (1, 0)]
           <> fromVertices [p2 (0, 0), p2 (0, 1)]
-          <> mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 0.03)] | x <- xTicks]
-          <> mconcat [fromVertices [p2 (0, toY y), p2 (0.03, toY y)] | y <- yTicks]
+          <> mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 0.03)] | (x, _) <- xTicks]
+          <> mconcat [fromVertices [p2 (0, toY y), p2 (0.03, toY y)] | (y, _) <- yTicks]
       xLabs =
         mconcat
-          [ plotLbl ps 0.5 1 (T.unpack (formatTick x)) # moveTo (p2 (toX x, -xTickPad))
-          | x <- xTicks
+          [ plotLbl ps 0.5 1 (T.unpack t) # moveTo (p2 (toX x, -xTickPad))
+          | (x, t) <- xTicks
           ]
       yLabs =
         mconcat
-          [ plotLbl ps 1 0.5 (T.unpack (formatTick y)) # moveTo (p2 (-tickPad, toY y))
-          | y <- yTicks
+          [ plotLbl ps 1 0.5 (T.unpack t) # moveTo (p2 (-tickPad, toY y))
+          | (y, t) <- yTicks
           ]
-      title = foldMap (\t -> plotLbl ps 0.5 0 (T.unpack t) # moveTo (p2 (0.5, 1.03))) (chartTitle chart)
+      title = foldMap (\t -> plotLbl ps 0.5 0 (T.unpack t) # moveTo (p2 (0.5, 1.03 + ccTopLegend chrome))) (chartTitle chart)
       xt = foldMap (\t -> plotLbl ps 0.5 1 (T.unpack t) # moveTo (p2 (0.5, ccXTitleY chrome))) (chartXTitle chart)
       yt = foldMap (\t -> plotLbl ps 1 0.5 (T.unpack t) # moveTo (p2 (ccYTitleX chrome, 0.5))) (chartYTitle chart)
       coloredSeries =
@@ -242,9 +254,9 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
       legend = renderLegend fm ps coloredSeries chart chrome
       marginBox :: Diagram B
       marginBox =
-        rect (1 + leftM + rightM) (1 + botM + topM)
+        rect (1 + marginLeft m + marginRight m) (1 + marginBottom m + marginTop m)
           # alignBL
-          # moveTo (p2 (-leftM, -botM))
+          # moveTo (p2 (-marginLeft m, -marginBottom m))
       gridDia = grid # lc (plotGrid ps) # lwO (plotStroke 1)
       axesDia = axes # lc (plotMuted ps) # lwO (plotStroke 1)
       -- Diagrams composes front-to-back: keep the grid behind the data.
@@ -259,18 +271,21 @@ renderSeries ps c xDom yDom s pts =
   let ink = colourOf c
       toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
    in case seriesKind s of
-        LineSeries w _ ->
-          fromVertices (U.foldr (\p acc -> toP p : acc) [] pts) # lc ink # lwO (plotStroke w)
+        -- Markers are twice the line's width, a default scatter marker's
+        -- size on a default line.
+        LineSeries w mark ->
+          (fromVertices (U.foldr (\p acc -> toP p : acc) [] pts) # lc ink # lwO (plotStroke w))
+            <> foldMap (\mk -> U.foldl' (\acc p -> acc <> markShape mk (2 * w) ink (toP p)) mempty pts) mark
         ScatterSeries w mk ->
           U.foldl' (\acc p -> acc <> markShape mk w ink (toP p)) mempty pts
         BarSeries frac ->
-          renderBars ink frac pts
+          renderBars ink frac xDom yDom pts
         AreaSeries baseline ->
           mconcat [closedPoly (map toP ring) | ring <- areaRings baseline pts]
             # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18))
             # lw none
         StepSeries w ->
-          let steps = U.foldr (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc) [] (U.zip pts (U.drop 1 pts))
+          let steps = U.foldr (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc) [toP (U.last pts) | not (U.null pts)] (U.zip pts (U.drop 1 pts))
            in fromVertices steps # lc ink # lwO (plotStroke w)
 
 -- | An area series' fill polygons: for each run of points on one side of
@@ -300,31 +315,42 @@ areaRings baseline = map closeRun . runs . U.toList
       where
         sq = side q
 
--- | Points used for drawing and hit tests. Numeric data may be decimated;
--- categories become zero-based x positions paired with their values.
+-- | Points used for drawing and hit tests, without those that are not
+-- finite. Line, area and step data may be decimated; categories become
+-- zero-based x positions paired with their values.
 seriesPoints :: Chart -> Series -> U.Vector (Double, Double)
 seriesPoints chart s =
   case seriesData s of
-    PointsXY pts ->
-      let k = decimateK (U.length pts)
-       in if chartDecimate chart && U.length pts > k then lttb k pts else pts
+    PointsXY raw ->
+      let pts = finitePoints raw
+          k = decimateK (U.length pts)
+          -- Markers are not joined, so a dropped one is simply missing.
+          thins = case seriesKind s of
+            ScatterSeries {} -> False
+            _ -> True
+       in if chartDecimate chart && thins && U.length pts > k then lttb k pts else pts
     CategoryY _ values ->
-       U.generate (sizeofPrimArray values) (\i -> (fromIntegral i, indexPrimArray values i))
+       finitePoints (U.generate (sizeofPrimArray values) (\i -> (fromIntegral i, indexPrimArray values i)))
+  where
+    -- Finite data, the usual case, is not copied.
+    finitePoints pts = if U.all ok pts then pts else U.filter ok pts
+    ok (x, y) = not (isNaN x || isInfinite x || isNaN y || isInfinite y)
 
 decimateK :: Int -> Int
 decimateK n = min n (max 64 (min 2000 (n `div` 2)))
 
-renderBars :: Colour Double -> Float -> U.Vector (Double, Double) -> Diagram B
-renderBars fill frac pts
-  | U.null pts = mempty
-  | otherwise = U.foldl' (\acc p -> acc <> drawBar p) mempty pts
+-- | Bars a fraction of their category slot wide, from zero to each value on
+-- the chart's axes.
+renderBars :: Colour Double -> Float -> Domain -> Domain -> U.Vector (Double, Double) -> Diagram B
+renderBars fill frac xDom yDom = U.foldl' (\acc p -> acc <> drawBar p) mempty
   where
-    n = fromIntegral (U.length pts) :: Double
-    invN = 1.0 / n
-    invMaxY = 1.0 / U.foldl' (\acc (_, y) -> max acc (abs y)) 1e-9 pts
+    half = realToFrac frac / 2
+    base = domainToPlot yDom 0
     drawBar (x, y) =
-      let h = abs y * invMaxY
-       in rect (realToFrac frac / n) h # fc fill # lw none # translate ((x * invN + 0.5 * invN) ^& (signum y * h * 0.5))
+      let x0 = domainToPlot xDom (x - half)
+          x1 = domainToPlot xDom (x + half)
+          top = domainToPlot yDom y
+       in rect (x1 - x0) (abs (top - base)) # fc fill # lw none # translate (((x0 + x1) / 2) ^& ((base + top) / 2))
 
 -- | A closed polygon through the points. The trail keeps its location: a
 -- bare trail would be drawn from the origin rather than its first point.
@@ -361,7 +387,7 @@ renderLegend fm ps coloredSeries chart chrome =
       position i = case chartLegend chart of
         LegendRight -> (1.04, 0.98 - i * row)
         LegendBottom -> (i * col, botLegendY)
-        LegendTop -> (i * col, 1.12)
+        LegendTop -> (i * col, 1 + px 4 + px (fmLineHeight fm) / 2)
         LegendInside -> (0.02, 0.98 - i * row)
         LegendNone -> (0, 0)
    in mconcat

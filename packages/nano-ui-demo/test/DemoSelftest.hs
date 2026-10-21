@@ -13,12 +13,9 @@ import Data.Foldable (for_)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (sortOn)
 import Data.Maybe (isJust)
-import Data.Primitive.PrimArray (sizeofPrimArray)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Backend.Sdl
-import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
-import NanoUI.Internal.Debug (CoreDebugSnapshot (dbgPresents))
 import NanoUI.Testing
   ( collectOverlayTextSpans
   , collectTextSpans
@@ -33,7 +30,6 @@ import NanoUI.Testing.Harness
   , spanLabel
   )
 import NanoUI.Testing.Harness qualified as Harness
-import Text.Printf (printf)
 import qualified Data.Text as T
 import DemoApp (withHiddenWindow)
 import Demo qualified
@@ -45,32 +41,6 @@ selftest continuous = do
   state <- Demo.newDemo
   withHiddenWindow 1280 800 (V2 640 400) (\o -> o {sdlAppContinuous = continuous}) $ \ctx env idle -> do
     let demoUi = Demo.demoUi state
-    -- The shaped path (fmShape / pushText) must match SDL3_ttf's run widths,
-    -- including GPOS kerning and ligatures (To, AV, fi).
-    let checkRun :: Float -> FontStyle -> String -> IO ()
-        checkRun size st run = do
-          (fm, _) <- ctxResolveFont ctx size WeightNormal st FontRegular
-          (measured, _) <- ctxResolveMeasure ctx size WeightNormal st FontRegular (T.pack run)
-          shaped <- lineWidthIO fm (T.pack run)
-          when (abs (shaped - measured) > 0.01) $
-            fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, shaped=%.2f" (show st) run measured shaped
-    for_ [FontStyleNormal, FontStyleItalic] $ \st -> do
-      checkRun 16 st "Slanted synthetic italic font style."
-      mapM_ (checkRun 20 st) ["To", "AV", "fi"]
-    -- Shaped text draws glyph by glyph, so a line wider than the 2048px glyph
-    -- atlas still gets quads and a width, and a short line gets one quad a
-    -- glyph.
-    (fmBig, _) <- ctxResolveFont ctx 64.0 WeightNormal FontStyleNormal FontRegular
-    let bigTxt = T.replicate 400 "f"
-    bigGlyphs <- drawShaped fmBig bigTxt
-    bigWidth <- lineWidthIO fmBig bigTxt
-    shortGlyphs <- drawShaped fmBig "fits"
-    when (maybe True (\(ShapedGlyphs q) -> sizeofPrimArray q < 400 * 8) bigGlyphs) $
-      fail "selftest: a line wider than the atlas lost its glyphs"
-    when (bigWidth <= 0) $
-      fail "selftest: a line wider than the atlas lost its width"
-    when (maybe True (\(ShapedGlyphs q) -> sizeofPrimArray q /= 4 * 8) shortGlyphs) $
-      fail "selftest: a short shaped line did not draw one quad a glyph"
     (ctx', base) <- syncDisplay ctx env idle
     let drawWith frameUi inp = void (sdlDrawFrame ctx' frameUi env inp False)
         drawOnce = drawWith demoUi

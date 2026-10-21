@@ -128,8 +128,12 @@ data SdlEvent
   -- text events carry none, and the state when the batch is read may have
   -- a modifier pressed after the key that typed it.
   | EvMouseMotion V2 Modifiers
+  -- ^ The pointer moved to a point. The modifiers are SDL's state when the
+  -- event was read, which may already count keys queued after it, so
+  -- 'applyEvent' keeps those the key events left instead.
   | EvMouseButton MouseButton Bool V2 Modifiers
-  -- ^ A button went down ('True') or up at a point.
+  -- ^ A button went down ('True') or up at a point, with the modifiers as
+  -- for 'EvMouseMotion'.
   | EvMouseLeave
   -- ^ The pointer left the window.
   | EvScroll V2
@@ -185,6 +189,10 @@ decodeEvent refreshTy p = do
       -- must be full or stale regions flash.
       Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
+      -- The renderer's targets lost their contents, the retained frame's
+      -- among them. (A device reset loses every texture, the atlases too,
+      -- which a repaint does not bring back; that is not handled.)
+      Events.SDL_EVENT_RENDER_TARGETS_RESET -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_KEY_DOWN -> Just . keyEvent True <$> peek p.key
       Events.SDL_EVENT_KEY_UP -> Just . keyEvent False <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
@@ -215,15 +223,11 @@ v2 x y = V2 (realToFrac x) (realToFrac y)
 -- | A key going down ('True') or up. Auto-repeats arrive as presses;
 -- 'applyKey' tells them apart because the key is already held.
 keyEvent :: Bool -> SDL_KeyboardEvent -> SdlEvent
-keyEvent down ke = maybe (EvModifiers mods) (\k -> EvKey k down mods) (sdlKey (keyCode ke) (keyMods ke))
+keyEvent down ke = maybe (EvModifiers mods) (\k -> EvKey k down mods) (sdlKey code km)
   where
-    mods = modFromKeymod (keyMods ke)
-
-keyCode :: SDL_KeyboardEvent -> CUInt
-keyCode ke = fromIntegral (getField @"key" ke :: SDL_Keycode)
-
-keyMods :: SDL_KeyboardEvent -> SDL_Keymod
-keyMods ke = getField @"mod" ke
+    code = fromIntegral (getField @"key" ke :: SDL_Keycode)
+    km = getField @"mod" ke
+    mods = modFromKeymod km
 
 -- | The 'Key' for an SDL keycode and its modifier state. For character keys
 -- SDL reports the unmodified character in the current layout (Latin letters
@@ -335,10 +339,9 @@ applyEvent inp ev =
     EvKey k down mods -> (applyKey k down inp) {inputModifiers = mods}
     EvModifiers mods -> inp {inputModifiers = mods}
     EvText txt -> inp {inputChars = inputChars inp <> txt}
-    EvMouseMotion pos mods ->
-      inp {inputMousePos = pos, inputModifiers = mods}
-    EvMouseButton btn down pos mods ->
-      (applyMouseButton btn down inp) {inputMousePos = pos, inputModifiers = mods}
+    -- SDL's modifiers change only with key events, which carry their own.
+    EvMouseMotion pos _ -> inp {inputMousePos = pos}
+    EvMouseButton btn down pos _ -> (applyMouseButton btn down inp) {inputMousePos = pos}
     EvMouseLeave -> applyPointerLeave inp
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}

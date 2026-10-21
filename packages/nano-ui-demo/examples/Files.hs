@@ -35,7 +35,7 @@ import NanoUI.Backend.Sdl
   , runSdlApp
   , useFileDialog
   )
-import NanoUI.Shortcut (ctrl, key)
+import NanoUI.Shortcut (cmdOrCtrl, key)
 import System.FilePath (takeFileName)
 
 -- | State the view needs beyond what positional Vars hold: the two pending
@@ -88,8 +88,8 @@ view app = do
   useFileDialog (appOpenDialog app) (traverse_ (writeVar reading . T.pack) . listToMaybe)
   useFileDialog (appSaveDialog app) (traverse_ writeTo . listToMaybe)
 
-  whenM (shortcut (ctrl <> key 'o')) askOpen
-  whenM (shortcut (ctrl <> key 's')) save
+  whenM (shortcut (cmdOrCtrl <> key 'o')) askOpen
+  whenM (shortcut (cmdOrCtrl <> key 's')) save
 
   -- The read job runs only while there is a file to read. Once it finishes,
   -- clearing 'reading' stops calling 'useTaskStatus', which releases the job.

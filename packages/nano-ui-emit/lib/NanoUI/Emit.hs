@@ -67,9 +67,14 @@ mapMessages f (NanoUIE body) = NanoUIE $ ReaderT $ \sink ->
 -- | Collect messages from one UI action, in emission order. For complete
 -- frames use 'runFrameE', which also retains messages across rebuilds.
 runNanoUIE :: NanoUIE msg a -> NanoUI (a, [msg])
-runNanoUIE (NanoUIE view) = do
+runNanoUIE (NanoUIE view) = collectMessages (runReaderT view)
+
+-- | Run a body with a sink that queues its messages, and return them in
+-- emission order.
+collectMessages :: MonadIO m => ((msg -> NanoUI ()) -> m a) -> m (a, [msg])
+collectMessages body = do
   messages <- liftIO (newIORef [])
-  a <- runReaderT view (\msg -> liftIO (modifyIORef' messages (msg :)))
+  a <- body (\msg -> liftIO (modifyIORef' messages (msg :)))
   msgs <- liftIO (reverse <$> readIORef messages)
   pure (a, msgs)
 
@@ -107,13 +112,7 @@ emitEdited widget old toMsg = do
 -- into a later frame, nor can another runner consume them.
 runFrameE :: Context -> Input -> NanoUIE msg a -> IO (a, [msg], DrawData, Bool)
 runFrameE ctx inp (NanoUIE view) = do
-  messages <- newIORef []
-  (a, draw, dirty) <-
-    runFrame
-      ctx
-      inp
-      (runReaderT view (\msg -> liftIO (modifyIORef' messages (msg :))))
-  msgs <- reverse <$> readIORef messages
+  ((a, draw, dirty), msgs) <- collectMessages (runFrame ctx inp . runReaderT view)
   pure (a, msgs, draw, dirty)
 
 -- | View the model, then reduce all messages at frame end. The drawing is

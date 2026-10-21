@@ -1,15 +1,6 @@
 # Changelog
 
-## Unreleased
-
-- **Breaking:** `markdown` and `markdownConfigured` take a `MarkdownCache`
-  allocated with `newMarkdownCache`. Inline caches have explicit ownership.
-  Reference definitions enter CommonMark through its typed insertion API;
-  this package no longer imports `Data.Dynamic`.
-- A `MarkdownCache` sizes itself from the blocks one pass draws, not from
-  its history: keys that churn (a document redrawn under new keys) no longer
-  double its capacity each time it fills. `markdownCacheSize` reports what it
-  holds.
+## 0.1.0.0 -- Unreleased
 
 ### Added
 
@@ -37,5 +28,9 @@
   the last frame, so a long document costs little a frame while a reply
   streams into its last block: its paragraphs are neither rebuilt nor
   hashed again.
+- `markdown` and `markdownConfigured` keep those pieces in a `MarkdownCache`,
+  allocated once with `newMarkdownCache`. It sizes itself from the blocks one
+  pass draws, not from its history, so keys that churn (a document redrawn
+  under new keys) do not grow it. `markdownCacheSize` reports what it holds.
 - The example streams its reply with nano-ui's `useStream`, appending tokens
   on the producer's thread.

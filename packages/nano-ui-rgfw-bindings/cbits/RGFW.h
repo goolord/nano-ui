@@ -4268,6 +4268,10 @@ void RGFW_window_closePtr(RGFW_window* win) {
 
 	RGFW_window_closePlatform(win);
 
+	/* nano-ui: forget a closed root window, so the next window becomes the
+	   root and monitor events no longer read the freed one. */
+	if (_RGFW->root == win) _RGFW->root = NULL;
+
 	if (_RGFW->clipboard != NULL)
 		RGFW_FREE(_RGFW->clipboard);
 	_RGFW->clipboard = NULL;
@@ -11394,6 +11398,10 @@ LRESULT CALLBACK WndProcW(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		case WM_MOUSEMOVE: {
 			if (win->internal.mouseInside == RGFW_FALSE) {
+				/* nano-ui: ask for the WM_MOUSELEAVE handled above, which
+				   Windows sends only once asked, for each entry. */
+				TRACKMOUSEEVENT track = { sizeof(track), TME_LEAVE, hWnd, 0 };
+				TrackMouseEvent(&track);
 				RGFW_mouseNotifyCallback(win, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), RGFW_TRUE);
 			}
 
@@ -14271,8 +14279,13 @@ void RGFW_waitForEvent(i32 waitMS) {
 	id eventPool = objc_msgSend_class(objc_getClass("NSAutoreleasePool"), sel_registerName("alloc"));
 	eventPool = objc_msgSend_id(eventPool, sel_registerName("init"));
 
-	void* date = (void*) ((id(*)(Class, SEL, double))objc_msgSend)
-				(objc_getClass("NSDate"), sel_registerName("dateWithTimeIntervalSinceNow:"), waitMS);
+	/* nano-ui: NSDate counts seconds, and a negative wait blocks, as on the
+	   other platforms. Passed through as is, the idle wait (-1) returned at
+	   once and a 14 ms wait lasted 14 s. */
+	void* date = waitMS < 0
+		? (void*) objc_msgSend_class(objc_getClass("NSDate"), sel_registerName("distantFuture"))
+		: (void*) ((id(*)(Class, SEL, double))objc_msgSend)
+				(objc_getClass("NSDate"), sel_registerName("dateWithTimeIntervalSinceNow:"), (double)waitMS / 1000.0);
 
 	SEL eventFunc = sel_registerName("nextEventMatchingMask:untilDate:inMode:dequeue:");
 	id e = (id) ((id(*)(id, SEL, NSEventMask, void*, id, bool))objc_msgSend)

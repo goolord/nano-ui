@@ -21,7 +21,6 @@ import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Context
   ( Context (..)
-  , getPrevRect
   , takeTextEditLastAction
   )
 import NanoUI.Monad (askContext)
@@ -242,10 +241,11 @@ logsApp state scroller = do
 
   allSelected <- useVar False
 
-  -- Ctrl+A / Ctrl+C, or Select All / Copy from a row's context menu. Uses
-  -- 'shortcutIn' because 'shortcut' would yield to a focused row.
+  -- Ctrl+A / Ctrl+C (Cmd on macOS), or Select All / Copy from a row's
+  -- context menu. Uses 'shortcutIn' because 'shortcut' would yield to a
+  -- focused row.
   menuAction <- fmap snd <$> liftIO (takeTextEditLastAction ctx)
-  let chosen c cmd = menuAction == Just cmd || shortcutIn (ctrl <> key c) inp
+  let chosen c cmd = menuAction == Just cmd || shortcutIn (cmdOrCtrl <> key c) inp
 
   when (chosen 'a' SelectAll) $ writeVar allSelected True
 
@@ -257,7 +257,7 @@ logsApp state scroller = do
   -- for gutter grabs and only an actual row press clears.
   when (pressedIn MouseLeft inp || heldIn MouseLeft inp || releasedIn MouseLeft inp) $ do
     active <- liftIO $ readIORef (ctxActiveId ctx)
-    mRect <- liftIO . maybe (pure Nothing) (getPrevRect ctx) =<< peekVar scroller
+    mRect <- maybe (pure Nothing) lastRect =<< peekVar scroller
     when (active /= WidgetId 0 && maybe False (`rectContains` inputMousePos inp) mRect) $
       writeVar allSelected False
 
@@ -273,9 +273,9 @@ logsApp state scroller = do
     -- Copy after the scroller pass: a focused row's own Ctrl+C runs inside
     -- selectableTextWith during the scroller pass and would otherwise overwrite
     -- the clipboard with a single row.
-    let copyAll = liftIO $ do
-          rows <- forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st)
-          void (ctxClipboardSet ctx (T.unlines rows))
+    let copyAll = do
+          rows <- liftIO (forM [0 .. asShownCount st - 1] (fmap leLine . shownEntry st))
+          void (setClipboard (T.unlines rows))
     when (selected && chosen 'c' Copy) copyAll
     -- With no row focused, take Ctrl+C here, so it does not close the window.
     void (shortcut (ctrl <> key 'c'))
@@ -421,10 +421,10 @@ renderStatusBar totalCount filteredCount allSelected = do
       labelWith (fontMono . fontMuted . tight)
         ("Total: " <> T.pack (show totalCount) <> " logs | Filtered: " <> T.pack (show filteredCount))
       if allSelected
-        then status amber "ALL LOGS SELECTED | Ctrl+C to copy all | ESC to clear"
+        then status amber ("ALL LOGS SELECTED | " <> shortcutLabel (cmdOrCtrl <> key 'c') <> " to copy all | ESC to clear")
         else
           labelWith (fontMuted . tight)
-            "Tip: Click & drag to select | Right-click for Copy/Select All | 2D Scroll | Ctrl+Q to quit"
+            ("Tip: Click & drag to select | Right-click for Copy/Select All | 2D Scroll | " <> shortcutLabel (cmdOrCtrl <> key 'q') <> " to quit")
 
 main :: IO ()
 main = do
@@ -434,7 +434,8 @@ main = do
     defaultSdlOptions
       { sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Log Viewer", wsSize = Size 1050 720}
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
-      -- ESC clears the selection (handled in logsApp); quit is Ctrl+Q.
-      , sdlAppShouldQuit = shortcutIn (ctrl <> key 'q')
+      -- ESC clears the selection (handled in logsApp); quit is Ctrl+Q, or
+      -- Cmd+Q on macOS.
+      , sdlAppShouldQuit = shortcutIn (cmdOrCtrl <> key 'q')
       }
     (logsApp state scroller)
