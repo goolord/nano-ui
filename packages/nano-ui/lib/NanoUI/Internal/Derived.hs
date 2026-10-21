@@ -64,8 +64,9 @@ type TreeRow = (Int, Int, Bool, Text)
 -- | The input container is retained only to compare identity.
 data TreeRows = forall f. TreeRows !(f TreeItem) !IntSet !Int !(SmallArray TreeRow)
 
--- | Options, query, matches, and the widest match once measured.
-data ComboMatches = ComboMatches ![Text] !Text [Text] !(Maybe Float)
+-- | Options, query, matches, and the widest match once measured. The options
+-- container is retained only to compare identity.
+data ComboMatches = forall f. ComboMatches !(f Text) !Text [Text] !(Maybe Float)
 
 data DerivedCache = DerivedCache
   { derivedTables :: !(IntMap TableDerived)

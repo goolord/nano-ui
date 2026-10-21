@@ -50,16 +50,18 @@ comboFiltered :: Foldable f => f Text -> Text -> [Text]
 comboFiltered options q
   | T.null q = opts
   | otherwise =
-      let needle = T.toLower q
-        in filter (T.isInfixOf needle . T.toLower) opts
+      let needle = T.toCaseFold q
+        in filter (T.isInfixOf needle . T.toCaseFold) opts
   where
     opts = toList options
 
 -- | 'comboFiltered', kept in 'ctxDerivedCache' under the combo's key while the
--- options are the same list and the query the same text. A combo filters its
--- options on every frame, focused or not, and a long list (a font picker's
--- families) would otherwise lowercase every option each time.
-comboMatches :: Context -> Int -> [Text] -> Text -> IO ComboMatches
+-- options are the same container and the query the same text. A combo
+-- filters its options on every frame, focused or not, and a long list (a
+-- font picker's families) would otherwise fold every option each time. The
+-- caller's container is compared, not a list made from it, so a vector or
+-- sequence hits too.
+comboMatches :: Foldable f => Context -> Int -> f Text -> Text -> IO ComboMatches
 comboMatches ctx key !opts q =
   readDerived comboCache ctx key >>= \case
     Just m@(ComboMatches o q' _ _) | ptrEq o opts && q' == q -> pure m
@@ -74,17 +76,23 @@ data ComboState = ComboState
   , csWindow :: !Int
     -- ^ First visible row.
   , csScrollX :: !Float
+    -- ^ How far the rows are scrolled left, in pixels, when the widest
+    -- overflows the dropdown.
   , csContentW :: !Float
     -- ^ Widest matching row, measured while focused.
   , csDrag :: !Int
     -- ^ Scrollbar thumb drag: 0 none, 1 vertical, 2 horizontal.
   , csDragOff :: !Float
     -- ^ Pointer offset into the dragged thumb.
+  , csWheelRem :: !Float
+    -- ^ Rows the wheel moved short of a whole row, carried to the next
+    -- frame, so a trackpad's small steps add up.
   , csCommitted :: !Text
     -- ^ Last committed value.
   , csLive :: !Text
     -- ^ Field text the combo last produced.
   , csFocused :: !Bool
+    -- ^ The field held focus; the frame that finds it lost commits.
   , csNavPointer :: !(Maybe V2)
     -- ^ Pointer position when Up/Down last moved the highlight, cleared once
     -- the pointer moves or the wheel scrolls. Suppresses hover-highlighting
@@ -95,6 +103,7 @@ data ComboState = ComboState
 -- | One frame's inputs to 'comboStep'.
 data ComboInput = ComboInput
   { ciFocused :: !Bool
+    -- ^ The field holds keyboard focus, so the dropdown is open.
   , ciEdited :: !Bool
     -- ^ Typing changed the field text this frame.
   , ciText :: !Text
@@ -141,6 +150,7 @@ comboStep ci cs0 =
           , csContentW = contentW
           , csDrag = dragKind'
           , csDragOff = dragOff'
+          , csWheelRem = wheelRows - fromIntegral wheelDelta
           , csCommitted = fromMaybe committed0 commitText
           , csLive = finalText
           , csFocused = isFocus
@@ -150,7 +160,9 @@ comboStep ci cs0 =
     , stepPicked = picked
     , stepDismissed = escDismiss
     , stepRedraw =
-        picked || nav /= 0 || escDismiss || wheelDelta /= 0 || xWheel /= 0
+        -- What navigation and the wheel show moves the window, the x offset
+        -- or the highlight; a press at the end of the list moves nothing.
+        picked || escDismiss
           || win /= storedWin || xOff /= storedX || hi' /= storedHi
           || dragKind' /= drag0 || commitPulse || csFocused cs0 /= isFocus
     }
@@ -230,10 +242,14 @@ comboStep ci cs0 =
     -- the window to the click immediately.
     draggingV = down && drag1 == 1 && ((drag0 == 1 && not startV) || (startV && not onVThumb))
     draggingH = down && drag1 == 2 && ((drag0 == 2 && not startH) || (startH && not onHThumb))
-    dragWin = clampWin (round ((v2Y mouse - rectY vTrackR - dragOff0) / max 1 (rectH vTrackR - rectH vThumbR) * fromIntegral (n - vis)))
-    dragX = clamp 0 maxOffX ((v2X mouse - rectX hTrackR - dragOff0) / max 1 (rectW hTrackR - rectW hThumbR) * maxOffX)
-    wheelRows = round (v2Y (inputScroll inp) * comboBoxRowsPerNotch) :: Int
-    wheelDelta = if overDrop then wheelRows else 0
+    -- This frame's grab offset: a track press jumps by the one its drag
+    -- goes on with.
+    dragWin = clampWin (round ((v2Y mouse - rectY vTrackR - dragOff') / max 1 (rectH vTrackR - rectH vThumbR) * fromIntegral (n - vis)))
+    dragX = clamp 0 maxOffX ((v2X mouse - rectX hTrackR - dragOff') / max 1 (rectW hTrackR - rectW hThumbR) * maxOffX)
+    -- Off the dropdown the wheel scrolls something else, and the carried
+    -- fraction is dropped.
+    wheelRows = if overDrop then v2Y (inputScroll inp) * comboBoxRowsPerNotch + csWheelRem cs0 else 0
+    wheelDelta = truncate wheelRows :: Int
     xWheel = if overDrop then v2X (inputScroll inp) * 20 else 0
     win
       | draggingV = dragWin
@@ -270,7 +286,8 @@ comboStep ci cs0 =
 -- options filtered by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See
 -- 'comboStep' for when the value commits. The 'Var' is mutated on every edit;
--- @respChanged@ on 'comboBox'' fires only when a value is committed.
+-- @respChanged@ on 'comboBox'' fires only when the user commits a value, not
+-- when the application writes one.
 {-# INLINE comboBox #-}
 comboBox :: Foldable f => Text -> f Text -> Var Text -> NanoUI ()
 comboBox placeholder options v = void (comboBox' placeholder options v)
@@ -292,14 +309,16 @@ loadComboState store key value text =
     , csContentW = findSlot fieldFloat 0 (slotKey SlotComboContentW key) store
     , csDrag = findSlot fieldInt 0 (slotKey SlotComboDrag key) store
     , csDragOff = findSlot fieldFloat 0 (slotKey SlotComboDragOff key) store
+    , csWheelRem = fromMaybe 0 (quietFloat SlotComboScrollX)
     , csCommitted = findSlot fieldText value (slotKey SlotComboCommitted key) store
     , csLive = findSlot fieldText text (slotKey SlotComboLive key) store
     , csFocused = flagSlot (slotKey SlotComboFocus key) store
     , csNavPointer = V2 <$> quietFloat SlotComboHighlight <*> quietFloat SlotComboScroll
     }
   where
-    -- The resting pointer is bookkeeping no paint reads, so it lives in
-    -- quiet slots (as float bits), which neither damage nor wake.
+    -- The resting pointer and the wheel's leftover are bookkeeping no paint
+    -- reads, so they live in quiet slots (as float bits), which neither
+    -- damage nor wake.
     quietFloat slot = castWord32ToFloat . fromIntegral <$> lookupSlot fieldQuiet (slotKey slot key) store
 
 -- | Persist @cs@ and option count @matchCount@ for @key@, moving the caret to
@@ -310,6 +329,7 @@ saveComboState key matchCount picked cs =
     . insertSlot fieldInt (slotKey SlotComboHighlight key) (csHighlight cs)
     . navPointerAt SlotComboHighlight v2X (csNavPointer cs)
     . navPointerAt SlotComboScroll v2Y (csNavPointer cs)
+    . insertSlot fieldQuiet (slotKey SlotComboScrollX key) (fromIntegral (castFloatToWord32 (csWheelRem cs)))
     . insertSlot fieldInt (slotKey SlotComboScroll key) (csWindow cs)
     . insertSlot fieldInt (slotKey SlotComboCount key) matchCount
     . insertSlot fieldInt (slotKey SlotComboFocus key) (boolInt (csFocused cs))
@@ -341,7 +361,7 @@ comboBoxCore placeholder options value = do
   -- The dropdown only shows while the field is focused, so an unfocused
   -- combo steps with no rows. The matches stay lazy: the option window below
   -- forces only its rows, and the count is forced only on frames that store it.
-  ComboMatches opts query matches cachedW <- liftIO (comboMatches ctx key (toList options) text)
+  ComboMatches opts query matches cachedW <- liftIO (comboMatches ctx key options text)
   let displayed = if isFocus then matches else []
   store <- liftIO (getStore ctx)
   let cs0 = loadComboState store key value text
@@ -381,4 +401,8 @@ comboBoxCore placeholder options value = do
     findNodeByWidgetId ctx wid
       >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx (take comboBoxMaxVisible (drop (csWindow cs1) matches)))
     recordSlot fieldText ctx key finalText
-  pure (setChanged (isJust (stepCommit step)) resp, finalText)
+  -- A value the application wrote reaches the field as a text the combo did
+  -- not produce, as a row click does, and becomes the committed value; but
+  -- it is not the user's commit.
+  let appWrote = value /= csLive cs0 && stepCommit step == Just value
+  pure (setChanged (isJust (stepCommit step) && not appWrote) resp, finalText)
