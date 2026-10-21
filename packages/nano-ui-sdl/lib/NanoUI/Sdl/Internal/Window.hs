@@ -475,9 +475,9 @@ withSdlWindow hints flags opts ctx act =
 type instance BackendSession 'Sdl = SdlEnv
 
 -- | Look up the 'SdlEnv' of the SDL session driving this view, for IO-level
--- SDL operations ('NanoUI.Sdl.Internal.Dialog.openFileDialog' and similar) or
--- to pass to another thread. Returns 'Nothing' when the context is not driven
--- by an SDL session (such as in headless tests).
+-- SDL operations ('NanoUI.Sdl.Internal.Dialog.openFileDialog' and similar),
+-- which run on the display thread like the view. Returns 'Nothing' when the
+-- context is not driven by an SDL session (such as in headless tests).
 askSdlEnv :: NanoUI (Maybe SdlEnv)
 askSdlEnv = askBackendSession SSdl
 
@@ -654,9 +654,10 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
       txt <- maybePeek (fmap TE.decodeUtf8Lenient . BS.packCString) ptr `finally` free (castPtr ptr)
       pure (mfilter (not . T.null) txt)
 
--- | Write the last presented frame to a BMP file. A retained session reads
--- its retained texture, since SDL leaves the window backbuffer undefined
--- after a present; a direct-to-window session reads the backbuffer.
+-- | Write the last presented frame to a BMP file, on the display thread. A
+-- retained session reads its retained texture, since SDL leaves the window
+-- backbuffer undefined after a present; a direct-to-window session reads the
+-- backbuffer.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path =
   withSurface (readFrame env . retainTexture =<< readIORef (sdlRetain env)) False $ \surface ->
@@ -665,7 +666,7 @@ saveScreenshot env path =
 -- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
 -- window pixels (logical size times display scale) with the drawn alpha,
 -- which is the theme's window colour's alpha where nothing covers it.
--- 'Nothing' when SDL cannot read the frame back.
+-- 'Nothing' when SDL cannot read the frame back. Call on the display thread.
 --
 -- A direct-to-window session ('sdlAppContinuous') has a readable frame only
 -- between drawing and presenting, so from a view use

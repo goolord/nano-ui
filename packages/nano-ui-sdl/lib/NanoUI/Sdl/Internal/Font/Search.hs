@@ -53,12 +53,16 @@ boldFaceCandidates regular = do
     families = stem : [reverse family | t <- regularTails, Just family <- [stripPrefix (reverse t) (reverse stem)], not (null family)]
     wanted = nubOrd (map (<> "bold") families ++ [stem <> "bd", stem <> "b"])
 
--- | Human-readable names for every installed font family, deduped and sorted.
+-- | Human-readable names for the installed font files, deduped and sorted.
+-- Each is made from a file name, up to its first @-@, so a family whose files
+-- are named like @NotoSans-Bold.ttf@ appears once, but one with a short name
+-- per style, as on Windows, appears once per style (@arial@, @arialbd@).
 -- Each name is a usable 'searchFonts' token: the same normalization is applied
 -- to both the requested family and the file stem, so a listed name always
 -- resolves back to (at least) the file it came from. Non-text faces (icons,
 -- colour emoji) are included; callers that need sans families can filter the
--- result themselves.
+-- result themselves. The font directories are read once per process, so a
+-- font installed later is not listed.
 listFontFamilies :: IO [String]
 listFontFamilies = do
   files <- fontStems
