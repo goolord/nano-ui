@@ -229,9 +229,8 @@ resume doc rest = do
 -- from.
 tailOf :: Text -> [Node] -> Tail
 tailOf input nodes = case unsnoc nodes of
-  Just (_, Node {nodeLines = (first, end), nodeBlock = Just (Paragraph _), nodeRefs = defs, nodeShape = Para})
-    | M.null defs
-    , T.take 1 (T.dropWhile isBlank (snd (splitLines (first - 1) input))) /= "[" ->
+  Just (_, Node {nodeLines = (first, end), nodeBlock = Just (Paragraph _), nodeShape = Para})
+    | T.take 1 (T.dropWhile isBlank (snd (splitLines (first - 1) input))) /= "[" ->
         TailPara (first == end)
   _ -> NoTail
 
