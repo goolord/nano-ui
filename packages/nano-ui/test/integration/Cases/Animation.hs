@@ -14,6 +14,8 @@ tests =
   , spec "animation-bezier" runAnimationBezierTest
   , spec "animation-spring-retarget" runAnimationSpringRetargetTest
   , spec "animation-spring-dt" runAnimationSpringDtTest
+  , spec "animation-spring-far-target" runAnimationSpringFarTargetTest
+  , spec "animation-spring-light" runAnimationSpringLightTest
   , spec "composite-animation-isolation" runCompositeAnimationIsolationTest
   , spec "button-hover-anim" runButtonHoverAnimTest
   , spec "spinner" runSpinnerTest
@@ -165,6 +167,36 @@ runAnimationSpringDtTest ctx failed = do
   _ <- runFrame ctx inp (label "dt")
   val <- getAnimationValue ctx wid
   assert failed (not (isNaN val || isInfinite val || val < 0 || val > 1.5))
+
+-- A spring toward a target far from zero lands on it and lets the loop
+-- sleep. Near 1500 a float moves in steps of about 1e-4, so a spring that
+-- integrated its absolute position froze a few steps short of the target
+-- with its velocity above the settle threshold, and ran for good.
+runAnimationSpringFarTargetTest :: Context -> IORef Int -> IO ()
+runAnimationSpringFarTargetTest ctx failed = do
+  let inp = withDelta 200 100 (1 / 60)
+      ui = do
+        x <- animateTo (Spring presetSmooth) 1500
+        label "far"
+        pure x
+  replicateM_ 600 (runFrame ctx inp ui)
+  assert failed . not =<< anyAnimating ctx
+  assertEq failed 1500 =<< evalUi ctx inp ui
+
+-- A light or stiff spring stays near its range at a low frame rate and
+-- settles. A fixed 1/30 s step was too long for one this fast, and the
+-- value ran off toward 1e21 and then NaN.
+runAnimationSpringLightTest :: Context -> IORef Int -> IO ()
+runAnimationSpringLightTest ctx failed = do
+  forM_ [(presetBouncy {springMass = 0.05}, 60), (SpringParams 2000 150 1, 30)] $ \(params, hz) -> do
+    let inp = withDelta 100 100 (1 / hz)
+        wid = WidgetId 404
+    setAnimationValue ctx wid 0
+    startSpring ctx wid params 1
+    vals <- replicateM 120 (runFrame ctx inp (label "light") >> getAnimationValue ctx wid)
+    assert failed (all (\v -> v >= -0.5 && v <= 1.5) vals)
+    assert failed . not =<< anyAnimating ctx
+    assertEq failed 1 (last vals)
 
 -- Each composite animation owns a scope; component indices alone are not
 -- unique when two vectors animate side by side in the same parent. Tweens

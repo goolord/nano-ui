@@ -107,7 +107,7 @@ startSpring ctx wid params target
     Just (SpringAnim _ _ t p) | t == target && p == params -> repaintIfOrphan ctx key
     running -> do
       let (pos0, vel0) = case running of
-            Just (SpringAnim p v _ _) -> (p, v)
+            Just (SpringAnim d v t _) -> (t + d, v)
             Just a -> (animationValue a, 0)
             Nothing -> (IM.findWithDefault 0 key (asAnimRest as), 0)
           -- A value already poisoned starts again at the target.
@@ -116,7 +116,7 @@ startSpring ctx wid params target
       if abs (pos - target) <= springEps && abs vel <= springEps
         then settleKey ctx key target
         else do
-          writeIORef (ctxAnimationState ctx) $! insertRunning key (SpringAnim pos vel target params) as
+          writeIORef (ctxAnimationState ctx) $! insertRunning key (SpringAnim (pos - target) vel target params) as
           repaintIfOrphan ctx key
 
 -- | Run @anim@ at @key@ in place of the key's resting value, if any.
