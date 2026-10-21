@@ -658,5 +658,13 @@ testFillPlacement fm = do
 testGrowPlotHeight :: FontMetrics -> IO ()
 testGrowPlotHeight fm = do
   let
-    fitted = fitLayout fm (fillW defaultLayout) (chartDia fm barChartSample)
+    fittedWith f = fitLayout fm (f defaultLayout) (chartDia fm barChartSample)
+    fitted = fittedWith fillW
+    fixed400 = fittedWith (fillW . fixedH 400)
   check "plot grow height ballooned" (layoutMinH fitted <= 260 && layoutMaxH fitted <= 260)
+  -- The caller's own height holds: a taller minimum, a fixed height, or growing.
+  check "a growing plot capped a taller minimum" (layoutMinH (fittedWith (fillW . minH 300)) >= 300)
+  check "a growing plot lost its fixed height" (layoutMinH fixed400 == 400 && layoutMaxH fixed400 == 400)
+  check "a growing plot stopped growing in height" $ case layoutHeight (fittedWith grow) of
+    Grow _ -> True
+    _ -> False
