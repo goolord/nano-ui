@@ -25,7 +25,7 @@ import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket, finally, onException)
 import Control.Monad (unless, void, when)
 import Data.Bits ((.&.), (.|.))
-import Data.Char (chr, isDigit, isPrint, toLower)
+import Data.Char (chr, isControl, isDigit, toLower)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -571,7 +571,10 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventKeyPress k m -> Just (RgfwEvKey k m True)
   R.EventKeyRepeat k m -> Just (RgfwEvKey k m True)
   R.EventKeyRelease k m -> Just (RgfwEvKey k m False)
-  R.EventKeyChar ch | isPrint ch -> Just (RgfwEvChar ch)
+  -- Every character but the controls types, joiners and bidi marks included.
+  -- On macOS, RGFW passes on the private-use characters AppKit gives arrow
+  -- and function keys (U+F700 to U+F8FF), which type nothing.
+  R.EventKeyChar ch | not (isControl ch) && not (ch >= '\xF700' && ch <= '\xF8FF') -> Just (RgfwEvChar ch)
   _ -> Nothing
 
 -- | Accumulate a decoded event into frame input. The caller handles close

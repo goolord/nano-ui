@@ -55,7 +55,7 @@ where
 
 import Control.Monad (when)
 import Control.Monad.ST (runST)
-import Data.Char (isPrint, isSpace)
+import Data.Char (isControl, isSpace)
 import Data.Foldable (foldlM, toList)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq)
@@ -308,10 +308,12 @@ replaceEdit inserted a b buf =
   let (lo, hi) = selectionRange (clampCursor buf a) (clampCursor buf b)
    in TextEdit lo (textRange lo hi buf) inserted
 
--- | Text as it can enter the document: printable characters, tabs and line
--- breaks, with Windows line ends folded.
+-- | Text as it can enter the document: every character but the control
+-- characters, tabs and line breaks aside, with Windows line ends folded.
+-- Format characters (joiners, bidi marks), private-use characters and those
+-- the base library's Unicode tables predate stay.
 insertableText :: Text -> Text
-insertableText = T.filter (\c -> isPrint c || c == '\t' || c == '\n') . T.replace "\r\n" "\n"
+insertableText = T.filter (\c -> not (isControl c) || c == '\t' || c == '\n') . T.replace "\r\n" "\n"
 
 --------------------------------------------------------------------------------
 -- Selection

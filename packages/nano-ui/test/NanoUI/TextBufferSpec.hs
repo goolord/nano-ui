@@ -78,6 +78,11 @@ spec = do
       TB.toLines b `shouldBe` ["aα\t", "猫b"]
       TB.getCursor b `shouldBe` TB.Cursor 1 1
 
+    it "keeps joiners, bidi marks and private-use characters that are typed or pasted" $ do
+      let kept = "👩\x200D💻 \x200C \x200F \xE0A0"
+      TB.insertableText kept `shouldBe` kept
+      TE.inputTextCommands TE.multiLineMode (frameInput noMods "\x200C\x7F" []) `shouldBe` [TE.InsertText "\x200C"]
+
     it "empty insertion preserves the preferred column on a short line" $ do
       let
         b = TB.moveDown (TB.withCursor (TB.Cursor 0 4) (TB.fromText "12345\nx\n12345"))

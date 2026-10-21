@@ -30,7 +30,7 @@ module NanoUI.Widgets.TextEditor
   ) where
 
 import Control.Monad (unless, void, when)
-import Data.Char (isPrint, isSpace, toLower)
+import Data.Char (isControl, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
@@ -271,7 +271,7 @@ inputTextCommands mode inp = T.foldr char keys (inputChars inp)
   where
     mods = inputModifiers inp
     char c rest
-      | isPrint c && not (chordModifiers mods) = InsertText (T.singleton c) : rest
+      | not (isControl c) && not (chordModifiers mods) = InsertText (T.singleton c) : rest
       | otherwise = rest
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 

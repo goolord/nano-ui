@@ -36,7 +36,7 @@ where
 
 import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
-import Data.Char (isPrint)
+import Data.Char (isControl)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -122,7 +122,7 @@ fieldTextCommands ctx mode inp = do
   pure $
     if kind == FocusComposing
       then
-        [InsertText (T.singleton c) | c <- T.unpack (inputChars inp), isPrint c]
+        [InsertText (T.singleton c) | c <- T.unpack (inputChars inp), not (isControl c)]
           ++ inputTextCommands mode inp {inputChars = T.empty}
       else inputTextCommands mode inp
 
