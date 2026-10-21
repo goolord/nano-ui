@@ -718,7 +718,9 @@ tabsTab docsVar = do
         writeVar active fresh
       docTab d = closableTab d (docName d) (muted ("The body of " <> docName d <> ", which runs only while its tab is selected."))
       problems = (tab 0 "Problems" (muted "Three problems.")) {tabBadge = Just "3"}
-  cfg <- TabsConfig <$> readVar look <*> readVar place <*> pure newDoc
+  style <- readVar look
+  orientation <- readVar place
+  let cfg = defaultTabsConfig {tabsStyle = style, tabsOrientation = orientation, tabsTrailing = newDoc}
   tabResp <- tabsConfigured' cfg active (problems : map docTab docs)
   -- Closing the selected document selects the one before it.
   for_ (tabClosed tabResp) $ \d -> do
