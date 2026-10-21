@@ -33,8 +33,10 @@ def main():
         "GSUB",
         "kern",
     ]
-    # Keep the full name table. Filtering name_IDs can drop every record
-    # and produces a TTF Windows and SDL_ttf reject.
+    # Keep the full name table, the licence records (IDs 13 and 14) among
+    # it. Filtering name_IDs can drop every record and produces a TTF
+    # Windows and SDL_ttf reject.
+    options.name_IDs = ["*"]
 
     font = subset.load_font(str(src), options)
     subsetter = subset.Subsetter(options)

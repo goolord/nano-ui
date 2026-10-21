@@ -122,4 +122,8 @@ used to check that the vertex writers compile without dictionaries or tuples.
 
 ## License
 
-MIT
+MIT, except the bundled Inter font (SIL Open Font License 1.1,
+[`LICENSE-Inter`](packages/nano-ui-sdl/LICENSE-Inter)), the bundled Cozette
+font (MIT by its author,
+[`LICENSE-Cozette`](packages/nano-ui-rgfw/LICENSE-Cozette)) and the bundled
+RGFW (zlib, [`LICENSE-RGFW`](packages/nano-ui-rgfw-bindings/LICENSE-RGFW)).

@@ -4,9 +4,12 @@ version:            0.1.0.0
 synopsis:           Haskell bindings to RGFW
 description:
     Bindings to RGFW, a single-header C library for windows, input, and
-    OpenGL contexts. The C source is bundled with the package.
-license:            MIT
-license-file:       LICENSE
+    OpenGL contexts. The C source is bundled with the package, under RGFW's
+    zlib licence.
+license:            MIT AND Zlib
+license-files:
+    LICENSE
+    LICENSE-RGFW
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 homepage:           https://github.com/goolord/nano-ui

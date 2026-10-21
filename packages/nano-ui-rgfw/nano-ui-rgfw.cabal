@@ -6,7 +6,9 @@ description:
     Runs nano-ui views in a native window through RGFW and OpenGL 3.2, with
     the Cozette bitmap font bundled for text.
 license:            MIT
-license-file:       LICENSE
+license-files:
+    LICENSE
+    LICENSE-Cozette
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 homepage:           https://github.com/goolord/nano-ui

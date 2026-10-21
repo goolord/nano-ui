@@ -128,3 +128,9 @@ native libraries. Check discovery with `pkg-config --modversion sdl3 sdl3-ttf`.
 
 See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
 for tests, profiling, and building the complete repository.
+
+## License
+
+MIT, except the bundled Inter font, which is under the SIL Open Font License
+1.1 (`LICENSE-Inter`). Every application built with this package embeds the
+font, so ship that notice with it.

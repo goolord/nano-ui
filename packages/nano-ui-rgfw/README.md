@@ -78,3 +78,9 @@ required.
 
 See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
 for headless tests and native rendering checks.
+
+## License
+
+MIT. The bundled Cozette font is MIT-licensed by its author
+(`LICENSE-Cozette`); every application built with this package embeds it, so
+ship that notice with it.

@@ -4,9 +4,12 @@ version:            0.2.0.0
 synopsis:           SDL3 window backend for nano-ui
 description:
     Runs nano-ui views in an SDL3 window with TrueType text and native file
-    dialogs. Requires SDL3, SDL3_ttf, and pkg-config.
-license:            MIT
-license-file:       LICENSE
+    dialogs. Requires SDL3, SDL3_ttf, and pkg-config. The bundled Inter font,
+    which applications embed, is under the SIL Open Font License 1.1.
+license:            MIT AND OFL-1.1
+license-files:
+    LICENSE
+    LICENSE-Inter
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 homepage:           https://github.com/goolord/nano-ui
