@@ -12,6 +12,7 @@ tests =
   , spec "select-close-keeps-focus" runSelectCloseKeepsFocusTest
   , spec "select-overlay-damage" runSelectOverlayDamageTest
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
+  , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
   , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
@@ -120,6 +121,28 @@ runSelectDropdownSpanColorsTest ctx failed = do
   assertEq failed (fgOf "Low") [themeAccent theme]
   assertEq failed (length (fgOf "Medium")) 1
   assert failed (themeAccent theme `notElem` fgOf "Medium")
+
+-- | A select's dropdown is as wide as the select, and an option wider than
+-- that is clipped to the dropdown rather than drawn over the page, where
+-- closing the dropdown would not repaint it.
+runSelectDropdownClipsRowsTest :: Context -> IORef Int -> IO ()
+runSelectDropdownClipsRowsTest ctx failed = do
+  let long = "A rather long option label"
+      ui = column (withValue 0 (selectWith' (fixedW 80) [long, "Short"]))
+      inp0 = (withInput 640 480) {inputMousePos = V2 600 400}
+  (resp, _) <- warmup2 ctx inp0 ui
+  let open = snd (clickPair inp0 (centerOf resp))
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  let away = open {inputButtonsReleased = noButtons}
+  (_, dd, _) <- runFrame ctx away ui
+  overlays <- collectOverlayTextSpans ctx away
+  case [(r, dropRect) | (r, txt, _, _, dropRect) <- overlays, txt == long] of
+    (r, dropRect) : _ -> do
+      assertGt failed (rectX r + rectW r) (rectX dropRect + rectW dropRect)
+      let clipOf c = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
+          overlayCmds = [c | c <- drawCmdElems dd, cmdLayer c == LayerOverlay, cmdIndexCount c > 0]
+      assert failed (any ((rectInflate 1 dropRect `covers`) . clipOf) overlayCmds)
+    [] -> assert failed False
 
 -- | A select, a radio group and a tree given an index their options do not
 -- reach show it clamped but leave the caller's index alone, so a choice

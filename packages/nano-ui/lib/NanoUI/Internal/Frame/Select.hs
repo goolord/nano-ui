@@ -379,7 +379,8 @@ comboDropPickIndex (Rect _ dy _ _) itemH nOpts mouseY =
 -- | Paint each open dropdown (select or combo). The combo list clips to its
 -- inner area (so x-shifted text and row fills stop at the scrollbar lanes)
 -- and gets vertical / horizontal scrollbars when the filtered rows or the
--- widest row overflow the window.
+-- widest row overflow the window. A select's rows clip to its dropdown, as
+-- closing one repaints only where its panel was.
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx@Context {ctxDrawArena = da, ctxFontMetrics = fm} inp = do
   dropdowns <- allowedDropdowns ctx
@@ -411,7 +412,7 @@ drawSelectOverlays ctx@Context {ctxDrawArena = da, ctxFontMetrics = fm} inp = do
         withClip da inner paintRows
         mapM_ (drawBar 1) vSb
         mapM_ (drawBar 2) hSb
-      else paintRows
+      else withClip da (ddRect dd) paintRows
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectSelectDropdownSpans ctx@Context {ctxFontMetrics = fm} inp = do
