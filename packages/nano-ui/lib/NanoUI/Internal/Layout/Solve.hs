@@ -1274,8 +1274,14 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
           -- Keep measured content. Shrinking to the clip wraps table columns.
           layoutW = max contentW viewW
           layoutH = max contentSize viewH
-      -- cx/cy and the layout box are already inside the padding.
-      positionChildren env depth idx DirColumn gap (Padding 0 0 0 0) (Rect cx cy layoutW layoutH)
+          -- cx/cy and the layout box are already inside the padding.
+          box = Rect cx cy layoutW layoutH
+      -- The children line up along the scroller's direction, as they
+      -- measured, and as in a 1D scroller a grid layout makes no grid.
+      case dir of
+        DirRow -> positionRowFromParent env depth idx gap box
+        DirColumn -> positionColumn env depth idx gap False Nothing cx layoutW box
+      positionLayered env depth idx False box
     else do
       let gutterCol = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentSize innerH
           gutterRow = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentSize innerW
