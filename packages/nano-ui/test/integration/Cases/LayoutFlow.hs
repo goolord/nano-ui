@@ -35,6 +35,7 @@ tests =
   , spec "flex-direction" runFlexDirectionTest
   , spec "grow-max-handoff" runGrowMaxHandoffTest
   , spec "fixed-width-label" runFixedWidthLabelTest
+  , spec "fixed-outside-limits" runFixedOutsideLimitsTest
   , spec "percent-across" runPercentAcrossTest
   , spec "empty-label-line" runEmptyLabelLineTest
   ]
@@ -633,6 +634,24 @@ runFixedWidthLabelTest ctx failed = do
       assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
       forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
     _ -> assertEq failed (length rs) 5
+
+-- | A fixed size outside a node's limits takes the limit when measured, as
+-- when placed, so a row places what follows past it: a text field fixed 100
+-- wide keeps its 160 minimum, and so does a measured custom widget.
+runFixedOutsideLimitsTest :: Context -> IORef Int -> IO ()
+runFixedOutsideLimitsTest ctx failed = do
+  let narrow l = l {layoutWidth = Fixed 100, layoutHeight = Fixed 28}
+      field = defaultTextInputConfig {ticLayout = narrow (ticLayout defaultTextInputConfig)}
+      custom = defaultCustomWidgetSpec {widgetLayout = narrow (minW 160 defaultLayout), widgetMeasure = Just (\_ _ -> (100, 28))}
+      ui = rowWith tight $ do
+        (a, _) <- withValue "" (textInputConfigured' field)
+        b <- button' "Go"
+        (c, ()) <- customWidget custom
+        d <- button' "End"
+        pure [a, b, c, d]
+  rs <- map respRect <$> warmup2 ctx input0 ui
+  assertEq failed [160, 160] [rectW r | (i, r) <- zip [0 :: Int ..] rs, even i]
+  assert failed (and (zipWith (\r next -> rectX next >= rectX r + rectW r) rs (drop 1 rs)))
 
 -- | A percentage width is a share of the width a column, a grid cell or a
 -- row offers, and a percentage height of a row's height. A label is placed

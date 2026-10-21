@@ -390,7 +390,7 @@ measureCustomNode env@SolveEnv {seArena = na} measureFn idx = do
   hAx <- getHeightSizing na idx
   let ((mw, mh), record) = customMeasure (msFm (seMs env)) measureFn wAx hAx
   forM_ (seMeasureLog env) $ \ref -> modifyIORef' ref (IM.insert idx record)
-  setRect na idx 0 0 (fixedOr wAx mw) (fixedOr hAx mh)
+  setRect na idx 0 0 (sizeWithin wAx mw) (sizeWithin hAx mh)
 
 -- | Run a node's custom measure again, as the solve ran it, and return the
 -- record the layout cache keeps of the call. Layout-reuse validation compares
@@ -424,11 +424,6 @@ offeredExtent :: AxisSizing -> Float
 offeredExtent (AxisSizing tag val _ m)
   | tag == SizingFixed = val
   | otherwise = if m < 1e8 then m else 1e9
-
--- | The axis's fixed size, or else @content@ within its limits.
-{-# INLINE fixedOr #-}
-fixedOr :: AxisSizing -> Float -> Float
-fixedOr (AxisSizing tag val lo hi) content = if tag == SizingFixed then val else clamp lo hi content
 
 -- | The axis's fixed size or else @content@, within its limits.
 {-# INLINE sizeWithin #-}
@@ -612,7 +607,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
   -- A widget's children are its adornments ('measureAdorned').
   kids <- readTree a idx TreeFirstChild
   (w, h) <- if kids < 0 then pure (rawW, rawH) else measureAdorned env measurer idx nt si txt rawW rawH
-  setRect na idx 0 0 (fixedOr wAx w) (fixedOr hAx h)
+  setRect na idx 0 0 (sizeWithin wAx w) (sizeWithin hAx h)
 
 -- | The size of a button or text field with adornments ('adornRows'), from
 -- its size without them, @rawW@ by @rawH@. A field widens by each row and a
