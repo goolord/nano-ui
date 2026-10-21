@@ -24,6 +24,7 @@ import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
+import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
@@ -187,23 +188,22 @@ richTextWithMode' selectable f pieces = do
         -- the field loses focus.
         pure (if focused then Just current else Nothing, dragged)
       else pure (Nothing, False)
-  let linkTokens =
-        [ (tokenRun tok, Rect (rx + x) (ry + lineTop line) (tokenWidth tok) (lineHeight line))
+  let linkPieces =
+        [ (runIdx, Rect (rx + x1) (ry + lineTop line) (x2 - x1) (lineHeight line))
         | respHovered resp
         , line <- paraLines para
-        , (x, tok) <- lineTokens line
-        , tokenKind tok /= Break
-        , isJust (runTarget (indexSmallArray runs (tokenRun tok)))
+        , (run, runIdx, x1, x2) <- pieceSpans runs line
+        , isJust (runTarget run)
         ]
-      hoveredRun =
-        listToMaybe [runIdx | (runIdx, r) <- linkTokens, rectContains r (inputMousePos inp)]
+      runAt p = listToMaybe [runIdx | (runIdx, r) <- linkPieces, rectContains r p]
+      hoveredRun = runAt (inputMousePos inp)
       draw = drawParagraph runs theme hoveredRun selection linesAt
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection
   liftIO $ do
     -- A move onto or off a link inside the hovered paragraph changes no hot
     -- widget, so no frame would show it: each link piece is a hover zone,
     -- and crossing one's edge runs a frame.
-    forM_ linkTokens (registerHoverZone ctx False . snd)
+    forM_ linkPieces (registerHoverZone ctx False . snd)
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
       cacheParagraph ctx cacheRef wid (isJust cached) para
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
@@ -216,9 +216,17 @@ richTextWithMode' selectable f pieces = do
         0
         False
         (if selectable then KeysReadOnly else KeysNone)
-  let clicked
-        | respClicked resp && not dragReleased = hoveredRun >>= runTarget . indexSmallArray runs
-        | otherwise = Nothing
+  clicked <-
+    if respClicked resp && not dragReleased
+      then do
+        -- The press must have gone down on the link too; its point stays
+        -- recorded through the release frame.
+        presses <- liftIO (readIORef (ctxPressPos ctx))
+        pure $
+          if maybe True ((== hoveredRun) . runAt . fst) (M.lookup MouseLeft presses)
+            then hoveredRun >>= runTarget . indexSmallArray runs
+            else Nothing
+      else pure Nothing
   pure (resp, clicked)
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
@@ -240,7 +248,7 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
   where
     selected = selection >>= selectionOffsets
     lineOps line =
-      let spans = pieceSpans line
+      let spans = pieceSpans runs line
           highlights = maybe [] (\(lo, hi) -> selectionOps x0 y0 line lo hi (themeSelection theme)) selected
        in [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
             ++ highlights
@@ -258,17 +266,8 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
                , offset <- decorationOffsets deco run
                ]
     lineY line run = y0 + lineTop line + lineAscent line - runAscent run
-    isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
     glyphGroups line =
       groupBy joinsGlyphs [(x, tok) | (x, tok) <- lineTokens line, tokenKind tok == Glyph || tokenKind tok == GlyphSpace]
-    joinsGlyphs (_, a) (_, b) = tokenRun a == tokenRun b
-    pieceSpans line =
-      [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
-      | group <- groupBy joinsGlyphs (lineTokens line)
-      , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
-      , (x1, first) : _ <- [trimmed]
-      , let (lastX, lastTok) = last trimmed
-      ]
     decorationOf runIdx =
       (if Just runIdx == hoveredRun then addUnderline else id)
         (textFontDecoration (runFont (indexSmallArray runs runIdx)))
@@ -281,6 +280,23 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
             DecorationStrikethrough -> [strike]
             DecorationUnderlineStrike -> [under, strike]
             DecorationNone -> []
+
+-- | Each piece's stretch of a line without the spaces at its ends: its run,
+-- the run's index, and its left and right edges.
+pieceSpans :: SmallArray Run -> Line -> [(Run, Int, Float, Float)]
+pieceSpans runs line =
+  [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
+  | group <- groupBy joinsGlyphs (lineTokens line)
+  , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
+  , (x1, first) : _ <- [trimmed]
+  , let (lastX, lastTok) = last trimmed
+  ]
+  where
+    isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
+
+-- | Whether two placed tokens belong to the same piece.
+joinsGlyphs :: (Float, Token) -> (Float, Token) -> Bool
+joinsGlyphs (_, a) (_, b) = tokenRun a == tokenRun b
 
 -- | Store @para@ under @wid@, pruning entries neither drawn last frame nor yet
 -- this frame once the cache grows past its bound.

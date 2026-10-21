@@ -6,7 +6,7 @@ import Data.Foldable (toList)
 import Data.IntMap.Strict qualified as IM
 import Data.List (groupBy)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingCacheState (..), intKey, lookupCustomDrawing)
+import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingCacheState (..), hoverZoneCrossed, intKey, lookupCustomDrawing)
 import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Store (fieldRichSelection, lookupSlot, ptrEq)
@@ -141,7 +141,8 @@ runRichTextWrapTest ctx failed = do
   assertEq failed 0 (round h `mod` round lineH :: Int)
 
 -- | A link reports its target when clicked and shows the pointer cursor;
--- text beside it reports nothing.
+-- text beside it reports nothing, and so does a press on that text dragged
+-- onto the link. A move along the link runs no frame, one onto it does.
 runRichTextLinkTest :: Context -> IORef Int -> IO ()
 runRichTextLinkTest ctx failed = do
   let inp0 = withInput 400 400
@@ -150,8 +151,11 @@ runRichTextLinkTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   prefixW <- sum <$> mapM (lineWidthIO fm) ["Go", " ", "to", " "]
   linkW <- sum <$> mapM (lineWidthIO fm) ["the", " ", "docs"]
+  docsW <- lineWidthIO fm "docs"
   let Rect rx ry _ rh = respRect resp
       onLink = V2 (rx + prefixW + linkW / 2) (ry + rh / 2)
+      onLinkStart = V2 (rx + prefixW + 1) (ry + rh / 2)
+      onLinkEnd = V2 (rx + prefixW + linkW - docsW / 2) (ry + rh / 2)
       onText = V2 (rx + 2) (ry + rh / 2)
       clickAt pos = do
         let (press, release) = clickPair inp0 pos
@@ -173,6 +177,14 @@ runRichTextLinkTest ctx failed = do
   assertEq failed Nothing textClick
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer
   assert failed (not plainCursor)
+  let press = pressAt inp0 onText
+      dragged = holdAt press onLink
+  mapM_ (\i -> runFrame ctx i ui) [inp0 {inputMousePos = onText}, press, dragged]
+  ((_, dragClick), _, _) <- runFrame ctx (releaseAt dragged) ui
+  assertEq failed Nothing dragClick
+  void (runFrame ctx inp0 {inputMousePos = onLinkStart} ui)
+  assert failed . not =<< hoverZoneCrossed ctx onLinkStart onLinkEnd
+  assert failed =<< hoverZoneCrossed ctx onText onLinkStart
 
 -- | Each line of a paragraph, wrapped or not, aligns within its box: flush
 -- right for 'alignEnd', centred for 'alignCenter'. A fit-width paragraph is
