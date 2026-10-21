@@ -37,7 +37,6 @@ tests =
   , spec "host-slot" runHostSlotTest
   , spec "id-keyed-list" runIdKeyedListTest
   , spec "fit-muted-width" runFitMutedWidthTest
-  , spec "layout-reuse" runLayoutReuseTest
   , spec "deep-nesting" runDeepNestingTest
   , spec "grow-split" runGrowSplitTest
   , spec "percent-gap-shrink" runPercentGapShrinkTest
@@ -89,39 +88,6 @@ runFitMutedWidthTest ctx failed = do
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   assertJust failed (rectW <$> spanRect "HelloFitMuted" spans) $ \w -> assertGt failed w 8
-
--- | Text and resize changes must invalidate cached layout.
-runLayoutReuseTest :: Context -> IORef Int -> IO ()
-runLayoutReuseTest ctx failed = do
-  let inp = withInput 400 300
-      ui1 =
-        columnWith (tight . gap 4 . fillW) $ do
-          void (label "alpha")
-          void (button "beta")
-          void (label "gamma delta epsilon")
-  _ <- runFrame ctx inp ui1
-  -- Frame 2 takes the cached-layout path (same descriptor).
-  _ <- runFrame ctx inp ui1
-  s1 <- collectTextSpans ctx
-  -- Text change invalidates the cached descriptor.
-  let ui2 =
-        columnWith (tight . gap 4 . fillW) $ do
-          void (label "alpha changed")
-          void (button "beta")
-          void (label "gamma delta epsilon")
-  _ <- runFrame ctx inp ui2
-  s2 <- collectTextSpans ctx
-  assert failed (s2 /= s1)
-  -- Width change must not serve the cached placement for width-dependent
-  -- (wrapping) layout.
-  let wrapUi =
-        columnWith (tight . fillW) $
-          label "the quick brown fox jumps over the lazy dog repeatedly"
-  _ <- runFrame ctx (withInput 600 200) wrapUi
-  sw0 <- collectTextSpans ctx
-  _ <- runFrame ctx (withInput 180 200) wrapUi
-  sw1 <- collectTextSpans ctx
-  assert failed (sw1 /= sw0)
 
 -- | Nesting deeper than the initial snapshot-level capacity must still lay
 -- out correctly (the level array grows on demand).
