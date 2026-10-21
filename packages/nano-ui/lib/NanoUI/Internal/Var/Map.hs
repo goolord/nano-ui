@@ -42,7 +42,9 @@ varAt (VarMap ref) k initial = liftIO $ do
 dropVar :: Hashable k => VarMap k a -> k -> NanoUI ()
 dropVar (VarMap ref) k = forgetWhere ref (HM.member k) (HM.delete k)
 
--- | Retain only entries whose keys satisfy the predicate.
+-- | Retain only entries whose keys satisfy the predicate. Dropping anything
+-- schedules a rerun and a full repaint, as 'dropVar' does; a call that drops
+-- nothing does neither.
 retainVars :: (k -> Bool) -> VarMap k a -> NanoUI ()
 retainVars keep (VarMap ref) = forgetWhere ref (any (not . keep) . HM.keys) (HM.filterWithKey (\k _ -> keep k))
 

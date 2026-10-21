@@ -51,7 +51,8 @@ data Cell s = Cell {-# UNPACK #-} !(IORef s) {-# UNPACK #-} !(MutablePrimArray R
 
 -- | Two-level bit signature of the portion of a cell addressed by a lens path:
 -- the first-level record field or list key bitmask, the second-level bitmask
--- ('allBits' when the path stops at one level), and whether the path is closed.
+-- ('allBits' when the path stops at one level), and whether the path is still
+-- open, so that a further step can narrow it.
 -- An opaque step such as 'NanoUI.Var.zoomVar' covers all bits beneath its
 -- prefix and marks the signature closed so further steps leave it unchanged.
 --
