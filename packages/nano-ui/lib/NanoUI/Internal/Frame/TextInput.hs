@@ -102,13 +102,12 @@ searchClearHit ctx wid mouse = do
         pure (rectContains clearRect mouse)
 
 -- | Clear a search field. The debounced pulse picks the empty text up as an
--- immediate (empty) commit on the next frame.
+-- immediate (empty) commit on the next frame, which the store write wakes.
 clearSearchInput :: Context -> WidgetId -> IO ()
 clearSearchInput ctx wid = do
   let key = intKey wid
   modifyStore ctx $
     insertSlot fieldText key "" . setFieldSelection key 0 0
-  markDirty ctx
 
 -- | Clip a field's spans: its text to @fieldClip@ ('nodeTextFieldGeom'), and
 -- a caption to its first line.

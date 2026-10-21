@@ -50,10 +50,12 @@ tests =
   , spec "text-input-word-keys" runTextInputWordKeysTest
   , spec "text-input-line-break" runTextInputLineBreakTest
   , spec "search-empty-commit" runSearchEmptyCommitTest
+  , spec "search-clear-damage" runSearchClearDamageTest
   , spec "text-input-cut-clears-selection" runTextInputCutClearsSelectionTest
   , spec "text-input-clipboard" runTextInputClipboardTest
   , spec "text-input-password" runTextInputPasswordTest
   , spec "text-input-menu" runTextInputMenuTest
+  , spec "text-input-menu-clipboard" runTextInputMenuClipboardTest
   , spec "text-input-ff-caret" runTextInputFfCaretTest
   , pixelSpec "text-input-focus-sdl" runTextInputFocusSdlTest
   , pixelSpec "text-input-scroll" runTextInputScrollTest
@@ -187,6 +189,28 @@ runSearchEmptyCommitTest ctx failed = do
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
   assert failed . respChanged =<< evalUi ctx (keyInp KeyBackspace inp0) ui
+  assertEq failed "" =<< readVarIO ref
+
+-- | A search field's clear button empties it, and the frame after the
+-- press repaints a clip, not the whole window.
+runSearchClearDamageTest :: Context -> IORef Int -> IO ()
+runSearchClearDamageTest ctx failed = do
+  ref <- newVar "abc"
+  let
+    inp0 = withInput 320 120
+    ui = column (fst <$> held ref (searchInput' "Search"))
+    fm = ctxFontMetrics ctx
+    (ix, _) = widgetContentInset fm
+    iconW = max 12 (min 15 (fmLineHeight fm * 0.8))
+  resp <- warmup2 ctx inp0 ui
+  let Rect x y w h = respRect resp
+  _ <- runClick ctx inp0 ui (V2 (x + w / 2) (y + h / 2))
+  _ <- warmup2 ctx inp0 ui
+  let (press, release) = clickPair inp0 (V2 (x + w - ix - iconW / 2) (y + h / 2))
+  _ <- runFrame ctx press ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx release ui
+  assert failed . (/= DamageFull) =<< takeDamage ctx
   assertEq failed "" =<< readVarIO ref
 
 -- Word-wise editing keys (Ctrl or Alt + Backspace/Delete/Left/Right) work in
@@ -345,6 +369,34 @@ runTextInputMenuTest ctx failed = do
     assertEq failed cut (Just "")
     overlaysAfter <- collectOverlayTextSpans ctx' inp0
     assert failed (null (spanYOf "Cut" overlaysAfter))
+
+-- | An open text menu paints and hovers its Paste row without reading the
+-- clipboard, which on X11 is a round trip to the program that owns it.
+runTextInputMenuClipboardTest :: Context -> IORef Int -> IO ()
+runTextInputMenuClipboardTest ctx failed = do
+  clipReads <- newIORef (0 :: Int)
+  let
+    ctx' = withClipboard ctx (Nothing <$ modifyIORef' clipReads (+ 1)) (\_ -> pure True)
+    inp0 = withInput 320 160
+    ui = column (withValue "hello" textInput')
+  _ <- warmup2 ctx' inp0 ui
+  spans <- collectTextSpans ctx'
+  assertJust failed (spanRectOf "hello" spans) $ \(Rect fx fy _ fh) -> do
+    let menuOpen = fst (rightClickPair inp0 (V2 (fx + 1) (fy + fh / 2)))
+    _ <- runFrame ctx' menuOpen ui
+    overlays <- collectOverlayTextSpans ctx' menuOpen
+    assertJust failed (spanRectOf "Paste" overlays) $ \(Rect px py pw ph) ->
+      forM_ [px + 2, px + pw / 2] $ \x -> runFrame ctx' inp0 {inputMousePos = V2 x (py + ph / 2)} ui
+    assertEq failed 0 =<< readIORef clipReads
+    -- A press on a row that cannot run (nothing to undo) closes the menu,
+    -- which the frame repaints, and asks for no full repaint after it.
+    assertJust failed (spanRectOf "Undo" overlays) $ \r -> do
+      let (press, release) = clickPair inp0 (spanCenter r)
+      _ <- runFrame ctx' press ui
+      _ <- takeDamage ctx'
+      _ <- runFrame ctx' release ui
+      assert failed . (/= DamageFull) =<< takeDamage ctx'
+      assert failed . null . spanYOf "Undo" =<< collectOverlayTextSpans ctx' inp0
 
 runTextInputFocusSdlTest :: Context -> IORef Int -> IO ()
 runTextInputFocusSdlTest ctx failed = do
