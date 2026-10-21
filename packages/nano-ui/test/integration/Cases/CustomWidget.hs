@@ -319,10 +319,13 @@ runDropTargetTest ctx failed = do
           ]
   (tgtOrigin, _, _) <- runFrame ctx originDrop ui
   assert failed (dropFiles tgtOrigin == ["/tmp/origin.txt"])
+  -- The frame the payload lands on still reports where it landed.
+  assertEq failed (Just dropPoint) (dropPosition tgtOrigin)
 
-  -- The completing drop clears hover state.
+  -- The completing drop clears hover state and the position.
   (tgtDone, _, _) <- runFrame ctx inp0 ui
   assert failed (not (dropHovered tgtDone))
+  assertEq failed Nothing (dropPosition tgtDone)
 
   -- A fresh drag that moves outside the target no longer delivers to it.
   _ <- runFrame ctx (dropsInp [DropEvent DropBegin Nothing ""]) ui
