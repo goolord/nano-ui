@@ -18,6 +18,7 @@ tests =
   , spec "overlay-click-through" runOverlayClickThroughTest
   , spec "overlay-panel-live" runOverlayPanelLiveTest
   , spec "window-drag" runWindowDragTest
+  , spec "window-drag-past-edge-idles" runWindowDragPastEdgeTest
   , spec "window-layout-reuse" runWindowLayoutReuseTest
   , spec "window-custom-measure-placement" runWindowCustomMeasurePlacementTest
   , spec "window-close-damage" runWindowCloseDamageTest
@@ -237,6 +238,21 @@ runWindowDragTest ctx failed = do
   let Rect x1 y1 _ _ = respRect win1
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
+
+-- | A drag held still past the left edge leaves the window at the edge, and
+-- asks for no more frames there.
+runWindowDragPastEdgeTest :: Context -> IORef Int -> IO ()
+runWindowDragPastEdgeTest ctx failed = do
+  let inp0 = withInput 640 400
+      ui = fmap fst (window' (constVar True) "Debug" (label "Body"))
+  win0 <- warmup2 ctx inp0 ui
+  let grab@(V2 gx gy) = windowTitleGrab (respRect win0)
+      dest = V2 (gx - rectX (respRect win0) - 50) gy
+  runDragFrom ctx inp0 ui grab dest
+  _ <- runFrame ctx (holdAt inp0 dest) ui
+  (win1, _, dirty) <- runFrame ctx (holdAt inp0 dest) ui
+  assertEq failed 0 (rectX (respRect win1))
+  assert failed (not dirty)
 
 -- | With floating panels open, layout cache reuse preserves each stationary
 -- panel's placement and re-places panels that moved. Every node rect and

@@ -27,7 +27,7 @@ import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBody
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot, ptrEq)
 import NanoUI.Internal.Style (Padding (..))
-import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (DamageBounds (..), Rect (..), Size (..), V2 (..), clamp, haloDamageSlop, rectContains, rectInflate, rectNonEmpty)
 
 -- | Saved floating-window x/y in logical pixels, or 'Nothing' before placement.
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
@@ -68,7 +68,11 @@ updateWindowDrag ctx inp =
   (isNothing <$> getsInteraction ctx isWindowResize) <&&> do
     let drag (wid, gx, gy) = do
           let V2 mx my = inputMousePos inp
-              pos = (mx - gx, my - gy)
+              Size winW winH = inputWindowSize inp
+          -- Kept on screen as placement keeps it ('windowRect'), so a pointer
+          -- held past an edge stores what the window shows and moves nothing.
+          Rect _ _ w h <- withWidgetNode ctx wid (Rect 0 0 0 0) (getNodeRect (ctxNodeArena ctx))
+          let pos = (clamp 0 (max 0 (winW - w)) (mx - gx), clamp 0 (max 0 (winH - h)) (my - gy))
           moved <- (/= Just pos) <$> lookupWindowPos ctx wid
           when moved $ modifyStore ctx (insertSlot fieldPoint (intKey wid) pos)
           pure (wid, moved)
