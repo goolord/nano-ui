@@ -263,6 +263,8 @@ withFontResolver ::
 withFontResolver ctx rf rm = trackMetricSource ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
 
 -- | Replace base metrics and rebuild default measurement/resolution callbacks.
+-- These replace any installed with 'withFontResolver', and the measurement is
+-- uncached ('enableMeasureCache').
 -- Returns a configured context sharing the original session state. The
 -- default resolver treats a font size as a line height, so the default size
 -- becomes the metrics' line height ('withFontSize').
@@ -288,7 +290,9 @@ withDefaultResolvers ctx =
     }
 
 -- | Replace proportional text measurement, returning logical width/height.
--- The callback must agree with the font used for painting.
+-- The callback must agree with the font used for painting. Sized, bold and
+-- italic text goes back to the default measurement, scaled from this one,
+-- while a 'withFontResolver' font resolver stays: install that after this.
 withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
 withMeasureText ctx fn =
   let ctx' = ctx {ctxMeasureText = fn}
@@ -508,7 +512,11 @@ withClipboard :: Context -> IO (Maybe Text) -> (Text -> IO Bool) -> Context
 withClipboard ctx getter setter = ctx {ctxClipboardGet = getter, ctxClipboardSet = setter}
 
 -- | Enable memoised text measurement, or return an already cached context.
--- Use the returned context for subsequent frames.
+-- Use the returned context for subsequent frames. It wraps the measurement
+-- installed so far, which a later 'withFontMetrics' or 'withMeasureText'
+-- replaces with an uncached one; a context that has a cache already (from
+-- 'newPixelContext') is returned unchanged, so install measurement on it
+-- with 'wrapMeasureCache'.
 enableMeasureCache :: Context -> IO Context
 enableMeasureCache ctx =
   case ctxMeasureCache ctx of
@@ -622,8 +630,10 @@ newContext = do
         }
   pure ctx
 
--- | Headless context with 16-unit monospace metrics, cached measurement and
--- the default theme: for tests, and the starting point of pixel-based hosts.
+-- | Headless context with 16-unit monospace metrics, a measure cache for
+-- 'wrapMeasureCache' to install measurement through (the monospace
+-- measurement itself is not cached), and the default theme: for tests, and
+-- the starting point of pixel-based hosts.
 newPixelContext :: IO Context
 newPixelContext = do
   ctx <- enableMeasureCache =<< newContext
