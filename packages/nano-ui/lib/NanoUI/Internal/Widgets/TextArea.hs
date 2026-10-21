@@ -129,8 +129,9 @@ textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 -- with a 'label' when a caption is needed.
 --
 -- A frame that changes the text joins the whole document and mutates the
--- 'Var' in place. For long documents use 'textAreaDocument', whose edits cost
--- only the lines they touch.
+-- 'Var' in place, its Windows line ends (@\\r\\n@) written back as @\\n@.
+-- For long documents use 'textAreaDocument', whose edits cost only the lines
+-- they touch.
 {-# INLINE textArea #-}
 textArea :: Var Text -> NanoUI ()
 textArea v = void (textAreaWith' id v)

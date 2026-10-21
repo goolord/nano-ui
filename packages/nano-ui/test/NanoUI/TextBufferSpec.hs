@@ -66,6 +66,11 @@ spec = do
         (\t -> TB.joinLines (TB.splitLines t) `shouldBe` t)
         ["", "\n", "\n\n", "a", "a\n", "\nλ", "α\n\n猫🙂\n", "one\ntwo\nthree"]
 
+    it "reads Windows line ends as line breaks, and pastes classic Mac ones as newlines" $ do
+      TB.toLines (TB.fromText "one\r\ntwo\r\n") `shouldBe` ["one", "two", ""]
+      TB.toText (TB.fromText "one\r\ntwo") `shouldBe` "one\ntwo"
+      TB.insertableText "a\rb\r\nc" `shouldBe` "a\nb\nc"
+
     it "inserts a tab that text-zipper would otherwise drop" $ do
       let
         b = edit TE.multiLineMode [TE.InsertText "\t"] TB.empty
@@ -311,6 +316,10 @@ spec = do
         emacs k = TA.tasBuffer (typeArea ctrlMods "" [KeyChar k] s0)
       map (TB.getCursor . emacs) "ab" `shouldBe` if onMac then [TB.Cursor 0 0, TB.Cursor 0 6] else [TB.Cursor 0 7, TB.Cursor 0 7]
       map (TB.toText . emacs) "hu" `shouldBe` if onMac then ["foo ba", ""] else ["foo bar", "foo bar"]
+
+    it "Backspace at the end of a line read with Windows line ends deletes its last character" $ do
+      let s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "one\r\ntwo")
+      TB.toText (TA.tasBuffer (typeArea noMods "" [KeyBackspace] s0)) `shouldBe` "on\ntwo"
 
     it "clamps a selection set past the document's end into it" $ do
       let s = TA.setTextAreaSelection (TB.Cursor 9 9) (TB.Cursor 9 9) (TA.initTextAreaState "ab")

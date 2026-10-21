@@ -116,8 +116,10 @@ fromLines lns
   | otherwise = TextBuffer lns (Cursor 0 0) 0 0 0
 
 -- | The lines of a text, without their newlines. There is always at least one.
+-- A Windows line end (@\\r\\n@) is one newline, so 'joinLines' gives the text
+-- back with @\\n@ line ends.
 splitLines :: Text -> Seq Text
-splitLines = Seq.fromList . T.splitOn "\n"
+splitLines t = Seq.fromList [fromMaybe l (T.stripSuffix "\r" l) | l <- T.splitOn "\n" t]
 
 -- | All lines joined with newlines, copied once into a new text.
 toText :: TextBuffer -> Text
@@ -319,11 +321,12 @@ replaceEdit inserted a b buf =
    in TextEdit lo (textRange lo hi buf) inserted
 
 -- | Text as it can enter the document: every character but the control
--- characters, tabs and line breaks aside, with Windows line ends folded.
--- Format characters (joiners, bidi marks), private-use characters and those
--- the base library's Unicode tables predate stay.
+-- characters, tabs and line breaks aside, with Windows (@\\r\\n@) and classic
+-- Mac (@\\r@) line ends made newlines. Format characters (joiners, bidi
+-- marks), private-use characters and those the base library's Unicode tables
+-- predate stay.
 insertableText :: Text -> Text
-insertableText = T.filter (\c -> not (isControl c) || c == '\t' || c == '\n') . T.replace "\r\n" "\n"
+insertableText = T.filter (\c -> not (isControl c) || c == '\t' || c == '\n') . T.replace "\r" "\n" . T.replace "\r\n" "\n"
 
 --------------------------------------------------------------------------------
 -- Selection
