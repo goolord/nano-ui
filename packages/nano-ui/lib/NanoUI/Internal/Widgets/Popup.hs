@@ -42,17 +42,18 @@ import NanoUI.Internal.Widgets.Behavior (useDismissable)
 import NanoUI.Internal.Widgets.Layout (label)
 import NanoUI.Internal.Widgets.Node
 
--- | Anchor, preferred side, outside-click dismissal, and gap in logical pixels.
+-- | Anchor, preferred side, dismissal, and gap in logical pixels.
 -- Anchors use logical window coordinates.
 data PopupConfig = PopupConfig
   { cfgAnchor :: !PopupAnchor
   , cfgPlacement :: !PopupPlacement
   , cfgDismissable :: !Bool
+  -- ^ Close on Escape and on a press outside the panel and an 'AnchorRect'.
   , cfgOffset :: !Float
   }
   deriving (Eq, Show)
 
--- | Automatic placement with a 4-pixel gap and outside-click dismissal enabled.
+-- | Automatic placement with a 4-pixel gap and dismissal enabled.
 defaultPopupConfig :: PopupAnchor -> PopupConfig
 defaultPopupConfig anchor =
   PopupConfig
@@ -63,10 +64,13 @@ defaultPopupConfig anchor =
     }
 
 -- | A floating panel placed by the config, shown while the Var holds
--- 'True'. A dismissal (Escape, or a click outside when 'cfgDismissable')
+-- 'True'. A dismissal (Escape or a click outside, when 'cfgDismissable')
 -- writes 'False', so the panel closes in the same frame. A press on an
 -- 'AnchorRect' is not outside, so a button that toggles the Var on
--- 'respClicked' closes the popup rather than closing and reopening it.
+-- 'respClicked' closes the popup rather than closing and reopening it. The
+-- panel fits its body, however tall: for a body that could outgrow the
+-- window, cap the panel through 'popupWith' ('NanoUI.maxH') and scroll the
+-- body in a 'NanoUI.scrollWith' that 'NanoUI.grow's.
 --
 -- > filterOpen <- useVar False
 -- > filterR <- button' "Filter"

@@ -54,6 +54,12 @@ windowChromeSepH = 1
 -- For an open flag derived from other state, or a dialog that must not
 -- close until answered, pass a constant and act on the response from
 -- 'modal''.
+--
+-- Open a dialog from a modal by declaring it inside that modal's body:
+-- Escape, or a click on the outer modal, then closes only the inner one.
+-- Modals declared side by side close in declaration order: Escape closes
+-- the first even when the second is on top, and so does a click on the
+-- second outside the first.
 modal :: Var Bool -> Text -> NanoUI () -> NanoUI ()
 modal open title body = void (modalWith' id open title body)
 

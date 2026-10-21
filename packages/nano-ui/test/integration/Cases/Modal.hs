@@ -15,7 +15,31 @@ tests =
   , spec "modal-fractional-scale-no-scroll" runModalFractionalScaleNoScrollTest
   , spec "modal-fill-label-fits" runModalFillLabelFitsTest
   , spec "modal-tree-selection" runModalTreeSelectionTest
+  , spec "modal-nested-dismiss" runModalNestedDismissTest
   ]
+
+-- | A modal declared inside another's body closes first: Escape, then a
+-- click on the outer modal, each close only the inner one.
+runModalNestedDismissTest :: Context -> IORef Int -> IO ()
+runModalNestedDismissTest ctx failed = do
+  outer <- newVar True
+  inner <- newVar True
+  let inp0 = withInput 640 480
+      ui = column $ do
+        _ <- button "Behind"
+        (dlg, _) <- modal' outer "Settings" $ do
+          forM_ [1 .. 10 :: Int] (\i -> label (T.pack ("Setting " <> show i)))
+          modal inner "Confirm" (label "confirm body")
+        pure dlg
+      reopen = writeVarIO inner True >> warmup ctx inp0 ui
+      states = (,) <$> readVarIO outer <*> readVarIO inner
+  reopen
+  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+  assertEq failed (True, False) =<< states
+  reopen
+  Rect dx dy dw _ <- respRect <$> evalUi ctx inp0 ui
+  _ <- runClick ctx inp0 ui (V2 (dx + dw / 2) (dy + 8))
+  assertEq failed (True, False) =<< states
 
 runModalOverlayTest :: Context -> IORef Int -> IO ()
 runModalOverlayTest ctx failed = do

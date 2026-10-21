@@ -315,8 +315,8 @@ setOpacity nw = setting wsOpacity (\v s -> s {wsOpacity = v}) hostSetOpacity nw 
 
 -- | Set the window title ('wsTitle').
 --
--- This and the setters below do nothing when the value matches what the
--- window already has, so calling them every frame costs only a comparison.
+-- This and the setters below do nothing when the value matches the last one
+-- set, so calling them every frame costs only a comparison.
 setWindowTitleUi :: Text -> NanoUI ()
 setWindowTitleUi t = withNativeWindow (\nw -> setting wsTitle (\v s -> s {wsTitle = v}) hostSetTitle nw t)
 
@@ -343,7 +343,10 @@ setWindowMaxSizeUi s = withNativeWindow (`setMaxSize` s)
 setWindowOpacityUi :: Float -> NanoUI ()
 setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
 
--- | Make the window windowed, fullscreen or hidden ('wsMode').
+-- | Make the window windowed, fullscreen or hidden ('wsMode'). The desktop
+-- can change the mode too (with its own fullscreen control, say), which
+-- 'winFullscreen' in 'askWindow' then shows; asking again for the mode last
+-- set still does nothing.
 --
 -- > fullscreen <- useVar False
 -- > whenM (shortcut (key (KeyF 11))) (modifyVar fullscreen not)
