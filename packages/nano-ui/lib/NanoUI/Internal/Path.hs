@@ -1593,13 +1593,14 @@ maxDashes = 4096
 -- colours, triangulated as the untransformed quad is.
 --
 -- An unrotated image stays a rect under a transform without rotation or
--- skew, flipping its UVs for a flip. Otherwise it is rotated: its centre
--- moves and it scales and turns with the transform. Text moves its anchor
--- and scales its font by 'averageStretch'; glyphs are not rotated. A clip
+-- skew, flipping its UVs for a flip or a negative size. Otherwise it is
+-- rotated: its centre moves and it scales and turns with the transform. Text
+-- moves its anchor and scales its font as widths scale; glyphs are not
+-- rotated. A clip
 -- becomes the bounding box of its transformed rect.
 --
 -- A transform with a NaN or infinite entry draws nothing, as does an empty
--- rounded rect or circle.
+-- rounded rect, quad gradient or circle.
 transformOp :: Float -> Transform -> DrawOp -> [DrawOp]
 transformOp tol t@(Transform a b c d _ _) op
   | not (transformFinite t) = []
@@ -1640,6 +1641,7 @@ transformOp tol t@(Transform a b c d _ _) op
       FillPolygon pts rings tris sh -> [FillPolygon (points pts) rings tris sh]
       StrokePolyline pts w closed cap join limit sh -> [StrokePolyline (points pts) (w * k) closed cap join limit sh]
       FillQuadGradient r tl tr br bl
+        | empty r -> []
         -- A quad blends over two triangles split from its top left to its
         -- bottom right. When the old top left lands on another corner that
         -- diagonal changes, which changes the blend unless the corner
@@ -1673,8 +1675,11 @@ transformOp tol t@(Transform a b c d _ _) op
           channel sh (Color w) = fromIntegral (w `div` sh `mod` 256) :: Int
       DrawImage r angle tex u0 v0 u1 v1 col
         | angle == 0 && levelAxes ->
-            let (u0', u1') = if a < 0 then (u1, u0) else (u0, u1)
-                (v0', v1') = if d < 0 then (v1, v0) else (v0, v1)
+            -- The box runs left to right and top to bottom, so a flip, or a
+            -- negative width or height (drawn mirrored), flips the UVs.
+            let Rect _ _ rw rh = r
+                (u0', u1') = if (a < 0) /= (rw < 0) then (u1, u0) else (u0, u1)
+                (v0', v1') = if (d < 0) /= (rh < 0) then (v1, v0) else (v0, v1)
              in [DrawImage (box r) 0 tex u0' v0' u1' v1' col]
         | otherwise -> [turnedImage r angle tex u0 v0 u1 v1 col]
       DrawText x y ax ay txt col

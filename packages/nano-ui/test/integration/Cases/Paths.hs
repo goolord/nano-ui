@@ -304,6 +304,11 @@ runTransformOpsTest _ failed = do
     , [FillQuadGradient (Rect (-10) 0 10 10) blue red red blue] == under (P.scale (-1) 1) (drawLinearGradientH (Rect 0 0 10 10) red blue)
     , [FillQuadGradient (Rect 0 (-10) 10 10) blue blue red red] == under (P.scale 1 (-1)) (drawLinearGradientV (Rect 0 0 10 10) red blue)
     , [DrawImageRect (Rect (-10) 0 10 10) 7 1 0 0 1 red] == under (P.scale (-1) 1) (drawImage (Rect 0 0 10 10) (ImageId 7) red)
+      -- A rect of negative size draws as it does untransformed: a quad
+      -- gradient not at all, an image mirrored.
+    , null (under (P.translate 5 0) (drawQuadGradient (Rect 50 0 (-20) 10) red green blue white))
+    , [DrawImageRect (Rect 25 0 40 40) 7 1 0 0 1 red] == under (P.translate 5 0) (drawImage (Rect 60 0 (-40) 40) (ImageId 7) red)
+    , [DrawImageRect (Rect (-60) 0 40 40) 7 0 0 1 1 red] == under (P.scale (-1) 1) (drawImage (Rect 60 0 (-40) 40) (ImageId 7) red)
     ]
   -- A quarter turn keeps rects as rects. A half turn rotates a gradient's
   -- corner colours, and so does a quarter turn of a linear gradient.
