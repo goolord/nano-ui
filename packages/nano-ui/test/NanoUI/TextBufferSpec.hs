@@ -232,6 +232,16 @@ spec = do
       text retyped `shouldBe` "abbc"
       TE.hasSelection retyped `shouldBe` False
 
+    it "Left and Right without Shift land on a selection's start and end" $ do
+      let
+        typed = typeText TE.singleLineMode "hello" single
+        selected = TE.runCommand TE.singleLineMode TE.SelectAll typed
+        backwards = TE.runCommand TE.singleLineMode (TE.Select (TB.Cursor 0 4) (TB.Cursor 0 1)) typed
+        moved m extend = TE.editorSelection . TE.runCommand TE.singleLineMode (TE.Move m extend)
+      moved TE.CharLeft False selected `shouldBe` (TB.Cursor 0 0, TB.Cursor 0 0)
+      moved TE.CharRight False backwards `shouldBe` (TB.Cursor 0 4, TB.Cursor 0 4)
+      moved TE.CharLeft True selected `shouldBe` (TB.Cursor 0 0, TB.Cursor 0 4)
+
     it "keeps line breaks out of single-line fields and bounds history depth" $ do
       text (TE.runCommand TE.singleLineMode (TE.InsertText "a\nb") single) `shouldBe` "ab"
       text (TE.runCommand TE.multiLineMode (TE.InsertText "a\r\nb") single) `shouldBe` "a\nb"
