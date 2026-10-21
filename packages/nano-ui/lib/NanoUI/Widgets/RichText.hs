@@ -178,13 +178,15 @@ richTextWithMode' selectable f pieces = do
       linesAt width
         | width == paraWidth para = paraLines para
         | otherwise = layoutAt width
+  focused <- if selectable then keyboardFocused wid else pure False
   (selection, dragReleased) <-
     if selectable
       then do
-        (current, dragged) <- updateSelection ctx inp wid resp plain (paraBuffer para0) (paraLines para)
-        pure (Just current, dragged)
+        (current, dragged) <- updateSelection ctx inp wid resp focused plain (paraBuffer para0) (paraLines para)
+        -- Drawn only while focused, as a text field's selection goes when
+        -- the field loses focus.
+        pure (if focused then Just current else Nothing, dragged)
       else pure (Nothing, False)
-  focused <- if selectable then keyboardFocused wid else pure False
   let linkTokens =
         [ (tokenRun tok, Rect (rx + x) (ry + lineTop line) (tokenWidth tok) (lineHeight line))
         | respHovered resp
@@ -195,8 +197,8 @@ richTextWithMode' selectable f pieces = do
         ]
       hoveredRun =
         listToMaybe [runIdx | (runIdx, r) <- linkTokens, rectContains r (inputMousePos inp)]
-      draw = drawParagraph runs theme hoveredRun selection focused linesAt
-      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection `hashWithSalt` focused
+      draw = drawParagraph runs theme hoveredRun selection linesAt
+      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection
   liftIO $ do
     -- A move onto or off a link inside the hovered paragraph changes no hot
     -- widget, so no frame would show it: each link piece is a hover zone,
@@ -228,15 +230,13 @@ drawParagraph ::
   Theme ->
   Maybe Int ->
   Maybe RichSelection ->
-  Bool ->
   (Float -> [Line]) ->
   CustomDrawContext ->
   Rect ->
   SmallArray DrawOp
-drawParagraph runs theme hoveredRun selection focused linesAt _cdc (Rect x0 y0 w h) =
+drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
   smallArrayFromList $
     concatMap lineOps (linesAt w)
-      ++ [StrokeRoundedRect (Rect x0 y0 w h) 2 1 (themeFocusRing theme) | focused]
   where
     selected = selection >>= selectionOffsets
     lineOps line =
@@ -300,13 +300,12 @@ cacheParagraph ctx cacheRef wid hadEntry para = do
 
 -- | Keep the paragraph's selection in document coordinates, so it survives
 -- rewrapping when the widget's width changes.
-updateSelection :: Context -> Input -> WidgetId -> Response -> Text -> TB.TextBuffer -> [Line] -> NanoUI (RichSelection, Bool)
-updateSelection ctx inp wid resp plain buffer lines' = do
+updateSelection :: Context -> Input -> WidgetId -> Response -> Bool -> Text -> TB.TextBuffer -> [Line] -> NanoUI (RichSelection, Bool)
+updateSelection ctx inp wid resp focused plain buffer lines' = do
   let key = intKey wid
       initial = RichSelection plain (TB.Cursor 0 0) (TB.Cursor 0 0) False False 0 0
   !stored <- liftIO (findSlot fieldRichSelection initial key <$> getStore ctx)
   let synced = syncSelection plain stored
-  focused <- keyboardFocused wid
   commands <- if focused then liftIO (fieldTextCommands ctx readOnlyMode inp) else pure []
   afterKeys <-
     if null commands

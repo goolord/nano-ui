@@ -26,6 +26,7 @@ tests =
   , spec "rich-text-same-pieces" runRichTextSamePiecesTest
   , spec "rich-text-scroll-popup" runRichTextScrollPopupTest
   , spec "rich-text-selection-persistence" runSelectionPersistenceTest
+  , spec "rich-text-selection-focus" runSelectionFocusTest
   , spec "rich-text-break-policy" runTextBreakTest
   , spec "rich-text-leading-spaces" runLeadingSpacesTest
   ]
@@ -43,6 +44,29 @@ runLeadingSpacesTest ctx failed = do
   case (indent "where", indent "go") of
     ([w], [g]) -> assert failed (w > 0 && abs (g - 2 * w) < 0.5)
     _ -> assert failed False
+
+-- | A paragraph shows its selection only while it has focus, and draws no
+-- focus ring of its own: selecting in another paragraph leaves the first
+-- with no highlight.
+runSelectionFocusTest :: Context -> IORef Int -> IO ()
+runSelectionFocusTest ctx failed = do
+  let inp = withInputOff 500 300
+      ui = column ((,) <$> (fst <$> selectableRichText' ["first paragraph"]) <*> (fst <$> selectableRichText' ["second paragraph"]))
+      opsOf resp = do
+        Just entry <- lookupCustomDrawing ctx (respId resp)
+        cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) (respId resp)
+        pure (toList (cdrBuild entry cdc (respRect resp)))
+  theme <- readIORef (ctxTheme ctx)
+  let highlighted ops = not (null [() | FillRect _ c <- ops, c == themeSelection theme])
+  (a, b) <- warmup2 ctx inp ui
+  writeIORef (ctxFocusId ctx) (respId a)
+  _ <- evalUi ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
+  selected <- opsOf a
+  assert failed (highlighted selected)
+  assertEq failed [] [() | StrokeRoundedRect {} <- selected]
+  let (press, release) = clickPair inp (centerOf b)
+  forM_ [press, release, inp] $ \i -> evalUi ctx i ui
+  assert failed . not . highlighted =<< opsOf a
 
 -- | Wrapping follows 'textBreak', not the font: monospaced text keeps whole
 -- words, and 'breakAnywhere' wraps inside one without splitting a flag.
