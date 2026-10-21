@@ -24,7 +24,7 @@ import NanoUI.Internal.Equality (sameDouble)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
-import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, slotKey)
+import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldEditorMode, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, memberSlot, slotKey)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, packTextNodeStyle, textInputFlagNumeric)
@@ -153,12 +153,14 @@ numericInputCore cfg value = do
           let t = formatNumber cfg final
            in TextInputState t (T.length t) (T.length t)
       | otherwise = s1
+    pulseK = slotKey SlotTextAreaChanged key
     dirty =
       stored /= Just (tisText s2)
         || s2 /= s0
         || lookupSlot fieldDouble key store /= Just final
         || held1 /= held0
         || repeatAt1 /= repeatAt0
+        || memberSlot fieldInt pulseK store
   when dirty $
     liftIO $ do
       -- An accepted edit keeps its undo history; a rejected one or a step
@@ -166,10 +168,15 @@ numericInputCore cfg value = do
       let save = case mEdited of
             Just ed | editorTextState ed == s2 -> saveTextEditor key ed
             _ -> saveTextInputState key s2
+      -- Commands sent between frames read the mode ('runTextCommand'); the
+      -- change pulse an edit of theirs leaves is reported as the value's
+      -- change.
       modifyStore ctx $
         (if held1 == 0 then deleteSlot fieldInt heldK else insertSlot fieldInt heldK held1)
           . insertSlot fieldDouble key final
           . insertSlot fieldDouble repeatK repeatAt1
+          . insertSlot fieldEditorMode (slotKey SlotTextMode key) singleLineMode
+          . deleteSlot fieldInt pulseK
           . save
   -- A held arrow repeats on a schedule: ask for the frame of its next step
   -- instead of running frames back to back until then.
