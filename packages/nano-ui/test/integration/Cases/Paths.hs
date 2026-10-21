@@ -539,6 +539,8 @@ runDashTest _ failed = do
   assertEq failed [[V2 0 0, V2 10 0, V2 10 5]] (map fst (dashed [15, 100] 0 (P.polyline [V2 0 0, V2 10 0, V2 10 10])))
   -- Dashes on a closed subpath run around it.
   assertEq failed [[V2 0 0, V2 5 0], [V2 10 0, V2 10 5], [V2 10 10, V2 5 10], [V2 0 10, V2 0 5]] (map fst (dashed [5, 5] 0 (square 0 0 10)))
+  -- A closed two-point subpath runs there and back, dashed both ways.
+  assertEq failed [[V2 0 0, V2 5 0], [V2 10 0, V2 5 0]] (map fst (dashed [5, 5] 0 (P.moveTo (V2 0 0) <> P.lineTo (V2 10 0) <> P.close)))
   -- Zero-length dashes become very short dots.
   let dots = dashed [0, 10] 0 line
   assertEq failed 11 (length dots)

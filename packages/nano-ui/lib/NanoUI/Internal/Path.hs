@@ -1178,7 +1178,7 @@ strokePathOps tol t st path paint
       | n == 1 = [line False (strokeCap st) (dot pts) | strokeCap st /= ButtCap]
       | n < 2 = []
       | not (null (strokeDash st))
-      , Just pieces <- dashes (strokeCap st /= ButtCap) (map (* k) (strokeDash st)) (strokeDashOffset st * k) (closed && n > 2) pts =
+      , Just pieces <- dashes (strokeCap st /= ButtCap) (map (* k) (strokeDash st)) (strokeDashOffset st * k) closed pts =
           map (line False (strokeCap st)) pieces
       -- A closed subpath of two points is a line that turns back on itself
       -- at each end: a round join rounds the ends, and a miter (past any
