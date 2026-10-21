@@ -21,6 +21,7 @@ tests =
   , spec "spinner" runSpinnerTest
   , spec "keep-animating-lapse" runKeepAnimatingLapseTest
   , spec "keep-animating-rest" runKeepAnimatingRestTest
+  , spec "animate-left-out" runAnimateLeftOutTest
   , spec "wake-after" runWakeAfterTest
   ]
 
@@ -324,6 +325,27 @@ runKeepAnimatingRestTest ctx failed = do
   assertEq failed 0 =<< getAnimationValue ctx wid
   assert failed =<< anyAnimating ctx
   assert failed =<< needsRedraw ctx hover hover
+
+-- An 'animate' or 'animateTo' the view stops calling stops drawing frames,
+-- since nothing reads it. A long tween or an undamped spring behind a tab
+-- switch once kept the loop drawing until it ended by itself, for minutes
+-- or for good. Shown again, it runs again.
+runAnimateLeftOutTest :: Context -> IORef Int -> IO ()
+runAnimateLeftOutTest ctx failed = do
+  let inp = withDelta 200 100 0.05
+      shown = do
+        _ <- animate (Tween EaseLinear 120 0) 0 1
+        _ <- animateTo (Spring (SpringParams 180 0 1)) 1
+        label "moving"
+      other = label "other"
+  replicateM_ 5 (runFrame ctx inp shown)
+  assert failed =<< anyAnimating ctx
+  _ <- runFrame ctx inp other
+  assert failed . not =<< anyAnimating ctx
+  _ <- runFrame ctx inp other
+  assert failed . not =<< needsRedraw ctx inp inp
+  _ <- runFrame ctx inp shown
+  assert failed =<< anyAnimating ctx
 
 -- 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
 -- a frame that does not ask again leaves nothing pending.

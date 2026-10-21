@@ -26,7 +26,7 @@ data Transition
 
 -- | Animate from @from@ to @to@. It starts over from @from@ once it has
 -- finished (a tween completes, a spring settles) or its tween changes, so
--- calling it every frame cycles.
+-- calling it every frame cycles. A frame that leaves it out stops it.
 animate :: Transition -> Float -> Float -> NanoUI Float
 animate transition from to = do
   wid <- nextId
@@ -37,10 +37,11 @@ animate transition from to = do
         running <- lookupAnimation ctx wid
         when (isNothing running) (setAnimationValue ctx wid from)
         startSpring ctx wid params to
-    getAnimationValue ctx wid
+    getViewAnimationValue ctx wid
 
 -- | Animate from the current value toward @target@. An unchanged target keeps
--- the running animation; a new one retargets from wherever the value is.
+-- the running animation; a new one retargets from wherever the value is. A
+-- frame that leaves it out stops it where it is.
 animateTo :: Transition -> Float -> NanoUI Float
 animateTo transition target = do
   wid <- nextId
@@ -56,7 +57,7 @@ animateTo transition target = do
           Nothing | approxEq cur target -> pure ()
           _ -> startAnimationEaseDelay ctx wid cur target dur ease delay
       Spring params -> startSpring ctx wid params target
-    getAnimationValue ctx wid
+    getViewAnimationValue ctx wid
 
 -- | 'animateTo' for every component of a composite value. Component keys are
 -- local to the value, not its parent widget.

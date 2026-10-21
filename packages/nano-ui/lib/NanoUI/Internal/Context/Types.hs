@@ -483,6 +483,12 @@ data AnimationState = AnimationState
   -- ^ The keys that asked again this frame. A held key missing from it at
   -- the end of the frame lapses: its widget is no longer built, and nothing
   -- else would ever end its animation.
+  , asViewAnims :: !IntSet
+  -- ^ Keys of the running animations a view hook (@animate@, @animateTo@)
+  -- read last frame.
+  , asViewTouched :: !IntSet
+  -- ^ Those it read this frame. One missing at the end of the frame rests at
+  -- its value: nothing reads it any more, and it may never end by itself.
   }
 
 -- | Empty animation maps with no pending animation frame.
@@ -495,6 +501,8 @@ initialAnimationState = AnimationState
   , asAnimSettled = False
   , asKeepAlive = IS.empty
   , asKeepTouched = IS.empty
+  , asViewAnims = IS.empty
+  , asViewTouched = IS.empty
   }
 
 -- | How far one wheel notch scrolls, and how long a scroll takes to settle.

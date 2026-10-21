@@ -13,6 +13,7 @@ module NanoUI.Internal.Context.Animation
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
+  , getViewAnimationValue
   ) where
 
 import Control.Monad (mfilter, unless, when)
@@ -169,13 +170,13 @@ setAnimationValue :: Context -> WidgetId -> Float -> IO ()
 setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
 
 -- | Advance animations by elapsed seconds, retain settled values, and expire
--- keep-alive requests that were not renewed in the view and resting values
--- that nothing held.
+-- keep-alive requests and view hooks' animations that were not renewed in the
+-- view and resting values that nothing held.
 tickAnimations :: Context -> Float -> IO ()
 tickAnimations ctx dt = do
   rects <- getsDamage ctx (pfRects . dsPrev)
   modifyIORef' (ctxAnimationState ctx) $ \as0 ->
-    let as = lapseRest rects (lapseKeepAlive as0)
+    let as = lapseViewAnims (lapseRest rects (lapseKeepAlive as0))
      in if IM.null (asAnimations as)
           then if asAnimSettled as then as {asAnimSettled = False} else as
           else
@@ -234,6 +235,22 @@ lapseKeepAlive as
             | otherwise =
                 IM.filterWithKey (\k a -> not (IS.member k lapsed && isKeepAlive a)) (asAnimations as)
        in as {asAnimations = anims, asKeepAlive = asKeepTouched as, asKeepTouched = IS.empty}
+
+-- | Rest, at their current values, the view hooks' animations that the view
+-- left out this frame ('getViewAnimationValue'), and start the next frame's
+-- lease.
+lapseViewAnims :: AnimationState -> AnimationState
+lapseViewAnims as
+  | IS.null (asViewAnims as) && IS.null (asViewTouched as) = as
+  | otherwise =
+      let lapsed = asViewAnims as `IS.difference` asViewTouched as
+          gone = IM.restrictKeys (asAnimations as) lapsed
+       in as
+            { asAnimations = if IM.null gone then asAnimations as else IM.withoutKeys (asAnimations as) lapsed
+            , asAnimRest = IM.foldlWithKey' (\r k a -> restAt k (animationValue a) r) (asAnimRest as) gone
+            , asViewAnims = asViewTouched as
+            , asViewTouched = IS.empty
+            }
 
 -- | Repaint the whole frame for a running animation whose key has no layout
 -- node ('NanoUI.Internal.Widgets.Animate.animate' and 'animateTo' allocate a
@@ -302,3 +319,17 @@ getAnimationValue ctx wid = do
       when (v /= 0 && IS.notMember key (asRestHeld as)) $
         writeIORef (ctxAnimationState ctx) $! as {asRestHeld = IS.insert key (asRestHeld as)}
       pure v
+
+-- | 'getAnimationValue' for a key a view hook owns ('animate', 'animateTo').
+-- An animation running there lasts while the view reads it: on the first
+-- frame without a read, 'tickAnimations' rests it at its value.
+getViewAnimationValue :: Context -> WidgetId -> IO Float
+getViewAnimationValue ctx wid = do
+  let key = intKey wid
+  as <- readIORef (ctxAnimationState ctx)
+  case IM.lookup key (asAnimations as) of
+    Just a | not (isKeepAlive a) -> do
+      unless (IS.member key (asViewTouched as)) $
+        writeIORef (ctxAnimationState ctx) $! as {asViewTouched = IS.insert key (asViewTouched as)}
+      pure $! animationValue a
+    _ -> getAnimationValue ctx wid
