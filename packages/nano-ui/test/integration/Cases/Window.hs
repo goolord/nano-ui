@@ -30,7 +30,27 @@ tests =
   , spec "window-resize-halo-hit" runWindowResizeHaloHitTest
   , spec "heading-mono-truncate" runHeadingMonoTruncateTest
   , spec "window-fit-scroll-gutter" runWindowFitScrollGutterTest
+  , spec "span-beside-window" runSpanBesideWindowTest
   ]
+
+-- | A span the window does not cover is kept whether or not the window is
+-- open: an empty field's span, which has no width, as well.
+runSpanBesideWindowTest :: Context -> IORef Int -> IO ()
+runSpanBesideWindowTest ctx failed = do
+  let inp = withInput 640 400
+      ui open = do
+        columnWith (padXY 20 320) (void (withValue "" textInput))
+        void (window' (constVar open) "Elsewhere" (label "Body"))
+      emptySpans = do
+        spans <- collectTextSpans ctx
+        pure [(r, clip) | (r, t, _, _, clip) <- spans, T.null t]
+  _ <- warmup2 ctx inp (ui False)
+  closed <- emptySpans
+  _ <- warmup2 ctx inp (ui True)
+  panels <- IM.elems <$> floatingPanelRects ctx
+  assertEq failed 1 (length closed)
+  assert failed (not (null panels) && and [rectIntersect p clip == Nothing | p <- panels, (_, clip) <- closed])
+  assertEq failed closed =<< emptySpans
 
 runWindowScrollGutterTest :: Context -> IORef Int -> IO ()
 runWindowScrollGutterTest ctx failed = do

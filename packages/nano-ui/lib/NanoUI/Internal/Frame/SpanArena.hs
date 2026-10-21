@@ -12,7 +12,7 @@ module NanoUI.Internal.Frame.SpanArena
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Text (Text)
-import NanoUI.Internal.Types (Color, Rect, rectFullyInside, rectIntersect)
+import NanoUI.Internal.Types (Color, Rect, rectFullyInside)
 
 -- | One frame's text spans, newest first. Each holds logical bounds, text,
 -- foreground and background colours, and clip.
@@ -33,22 +33,17 @@ pushSpans (SpanArena ref) spans = modifyIORef' ref (\acc -> foldl' (flip (:)) ac
 spanArenaCount :: SpanArena -> IO Int
 spanArenaCount (SpanArena ref) = length <$> readIORef ref
 
--- | Spans in push order, dropping those hidden behind @panels@.
+-- | Spans in push order, dropping those hidden behind @panels@: a span's
+-- clip is where it can show, its ink overhang included.
 spanArenaToList :: IM.IntMap Rect -> SpanArena -> IO [(Rect, Text, Color, Color, Rect)]
 spanArenaToList panels (SpanArena ref) = foldl' keep [] <$> readIORef ref
   where
     panelRects = IM.elems panels
-    keep acc s@(rect, _, _, _, clip)
-      | not (null panelRects) && spanOccluded panelRects rect clip = acc
+    keep acc s@(_, _, _, _, clip)
+      | any (rectFullyInside clip) panelRects = acc
       | otherwise = s : acc
 
 -- | Visit spans in push order.
 foldSpanArena :: SpanArena -> (Rect -> Text -> Color -> Color -> Rect -> IO ()) -> IO ()
 foldSpanArena (SpanArena ref) f =
   readIORef ref >>= mapM_ (\(r, t, fg, bg, c) -> f r t fg bg c) . reverse
-
-spanOccluded :: [Rect] -> Rect -> Rect -> Bool
-spanOccluded panelRects rect clip =
-  case rectIntersect rect clip of
-    Nothing -> True
-    Just visible -> any (rectFullyInside visible) panelRects
