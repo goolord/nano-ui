@@ -6,7 +6,7 @@ import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeRect, getParent, getText, getWidgetId)
+import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeFontSize, getNodeRect, getParent, getText, getWidgetId)
 
 tests :: [Spec]
 tests =
@@ -31,7 +31,73 @@ tests =
   , spec "tabs-drag-reorder" runTabDragReorderTest
   , spec "tabs-vertical-drop-bounds" runVerticalDropBoundsTest
   , spec "tabs-clipped-drop-bounds" runClippedDropBoundsTest
+  , spec "tabs-scroll-follow-var" runTabsFollowVarTest
+  , spec "tabs-missing-key" runTabsMissingKeyTest
+  , spec "tabs-wheel-in-page" runTabsWheelInPageTest
+  , spec "tabs-badge-size" runTabsBadgeSizeTest
   ]
+
+-- | Headers that overflow a 240px strip.
+overflowLabels :: [T.Text]
+overflowLabels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
+
+-- A tab selected through the Var, not by a click, is brought into view,
+-- and so is one appended and selected in the same frame.
+runTabsFollowVarTest :: Context -> IORef Int -> IO ()
+runTabsFollowVarTest ctx failed = do
+  active <- newVar (0 :: Int)
+  let inp = withInput 240 120
+      ui labels = tabBar' active [tab i l () | (i, l) <- zip [0 ..] labels]
+      shows' needle = hasText needle <$> collectTextSpans ctx
+  replicateM_ 3 (runFrame ctx inp (ui overflowLabels))
+  assert failed . not =<< shows' "LongestTabName"
+  writeVarIO active 4
+  replicateM_ 2 (runFrame ctx inp (ui overflowLabels))
+  assert failed =<< shows' "LongestTabName"
+  writeVarIO active 0
+  replicateM_ 2 (runFrame ctx inp (ui overflowLabels))
+  assert failed =<< shows' "Controls"
+  writeVarIO active 5
+  replicateM_ 3 (runFrame ctx inp (ui (overflowLabels ++ ["Appended"])))
+  assert failed =<< shows' "Appended"
+
+-- An active key no tab has shows the first tab, its header and body alike,
+-- and reports it.
+runTabsMissingKeyTest :: Context -> IORef Int -> IO ()
+runTabsMissingKeyTest ctx failed = do
+  active <- newVar (3 :: Int)
+  let ui = tabs' active [tab 1 "One" (label "Body one"), tab 2 "Two" (label "Body two")]
+  r <- warmup2 ctx (withInputOff 300 100) ui
+  assertEq failed 1 (tabActive r)
+  assertEq failed 1 =<< readVarIO active
+  assertEq failed [1, 0] =<< buttonValues ctx
+  assert failed . hasText "Body one" =<< collectTextSpans ctx
+
+-- The vertical wheel over an overflowing strip pages the strip alone, not
+-- the page scroller round it too.
+runTabsWheelInPageTest :: Context -> IORef Int -> IO ()
+runTabsWheelInPageTest ctx failed = do
+  let inp = withInput 240 120
+      ui = scrollArea (tight . grow) $ do
+        _ <- tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
+        replicateM_ 20 (label "line")
+  (pageWid, _) <- warmup2 ctx inp ui
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  assertJust failed (spanRect "Controls" spans) $ \r -> do
+    _ <- runFrame ctx inp {inputMousePos = spanCenter r, inputScroll = V2 0 20} ui
+    _ <- runFrame ctx inp ui
+    assertEq failed 0 =<< getScrollOffset ctx pageWid
+    assert failed . not . hasText "Controls" =<< collectTextSpans ctx
+
+-- A badge is smaller than its header's text, whatever the base font size.
+runTabsBadgeSizeTest :: Context -> IORef Int -> IO ()
+runTabsBadgeSizeTest ctx0 failed = do
+  let ctx = withFontSize ctx0 10
+      na = ctxNodeArena ctx
+  _ <- warmup2 ctx (withInputOff 300 100) (tabBar' (constVar (1 :: Int)) [(tab 1 "Inbox" ()) {tabBadge = Just "3"}])
+  badge <- findNodeM na (fmap (== "3") . getText na)
+  assertJust failed badge $ \i -> assertEq failed (10 * 0.78) =<< getNodeFontSize na i
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show, Enum, Bounded)

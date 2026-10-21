@@ -136,8 +136,12 @@ updateScrollWheel ctx inp = do
     forM_ mNode $ \idx -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       V2 rangeX rangeY <- applyScrollWheelDelta ctx wid scroll
-      -- Pass on only the axes this scroller cannot move.
-      applyCrossAxisScroll ctx idx (V2 (if rangeX > 0 then 0 else wheelX) (if rangeY > 0 then 0 else wheelY))
+      -- Pass on only the axes this scroller cannot move. A bare one, a tab
+      -- strip, pages on the vertical wheel itself and passes on nothing.
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      bare <- if isScrollNode nt then scrollBare . snConfig <$> readScrollNode (ctxNodeArena ctx) idx else pure False
+      unless bare $
+        applyCrossAxisScroll ctx idx (V2 (if rangeX > 0 then 0 else wheelX) (if rangeY > 0 then 0 else wheelY))
 
 -- Nested 2D: apply the unused axis to a paired scroller that runs the other
 -- way, or either way when one of the two is 2D: the nearest one above in the
