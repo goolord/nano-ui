@@ -266,20 +266,22 @@ pushGlyphQuads da fm slant px py txt col = do
           !left = cx - lean
           !right = cx + cw + lean
           !stop = right + glyphSlackLines * fmLineHeight fm
+          -- A pen this far left of the clip draws nothing, whatever its glyph.
+          !before = left - glyphSlackLines * fmLineHeight fm
           outside gx gw = gx + gw < left || gx > right
-          walk !q !ox !prev !t =
+          -- @first@ marks the line's first character, which has nothing
+          -- before it to kern against.
+          walk !q !ox !first !prev !t =
             case T.uncons t of
               Nothing -> pure q
               Just (c, rest)
                 | ox > stop -> pure q
                 | otherwise -> do
                     -- Kerning against the character before moves this one.
-                    let !gx = case prev of
-                          Nothing -> ox
-                          Just p -> ox + fmKerning fm p c
+                    let !gx = if first then ox else ox + fmKerning fm prev c
                         !adv = fmAdvance fm c
-                        next !q' = walk q' (gx + adv) (Just c) rest
-                    case fmGlyph fm c of
+                        next !q' = walk q' (gx + adv) False c rest
+                    if gx < before then next q else case fmGlyph fm c of
                       Nothing
                         | adv > 0 && not (isSpace c) && not (outside gx adv) -> do
                             pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale gx) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
@@ -290,7 +292,7 @@ pushGlyphQuads da fm slant px py txt col = do
                         | otherwise -> do
                             pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (gx + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
                             next (q + 1)
-      !k <- walk 0 px Nothing txt
+      !k <- walk 0 px True ' ' txt
       commit (k * 4) (k * 6)
 
 -- | Synthetic weight, slant and decoration over the plain text path. Upright
