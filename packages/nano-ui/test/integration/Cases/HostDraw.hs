@@ -20,7 +20,8 @@ tests =
 
 -- | A text field set in a larger font draws its value's glyphs in that font:
 -- they cover what a label in the same font covers, and not what the base
--- font's glyph covers.
+-- font's glyph covers. The field's caret, selection and clicks go by that
+-- font too.
 runTextInputFontTest :: Context -> IORef Int -> IO ()
 runTextInputFontTest base failed = do
   let inp = withInput 400 200
@@ -45,6 +46,9 @@ runTextInputFontTest base failed = do
   (labelW, labelH) <- extent (labelWith big "Hg")
   assertEq failed (16, 26) (labelW, labelH)
   assertEq failed (labelW, labelH) (fieldW, fieldH)
+  -- Search and numeric fields too, which paint without a caption.
+  assertEq failed (labelW, labelH) =<< extent (void (withValue "Hg" (searchInputConfigured defaultSearchInputConfig {sicLayout = big (sicLayout defaultSearchInputConfig)})))
+  assertEq failed (labelW, labelH) =<< extent (void (withValue 7 (numericInputConfigured defaultNumericInputConfig {nicLayout = big (nicLayout defaultNumericInputConfig)})))
 
 -- | Position of every vertex of the glyph quads the fonts of
 -- 'runTextInputFontTest' draw: atlas vertices at that glyph's UV corners.
