@@ -49,7 +49,7 @@ import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), So
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
@@ -430,7 +430,8 @@ simpleTable headers rows = do
   sortVar <- useVar (SortCol 0 SortAsc)
   let cols = mconcat [headed h (\r -> smallAt r i "") | (i, h) <- zip [0 ..] headers]
       indexedRows = map smallArrayFromList (toList rows)
-  tableConfigured' defaultTableConfig id "simple" cols indexedRows sortVar
+  -- A positional scope, like the sort, so sibling simple tables keep apart.
+  scope (tableConfigured' defaultTableConfig id "simple" cols indexedRows sortVar)
 
 
 -- | 'tableWith' with column sizes, frozen rows and columns, and initially
@@ -501,7 +502,7 @@ tableCore cfg f key cols inputRows curSort =
                 setAt c (max (colFloor sizes contentWs c) (dragW0 + mx - dragX0)) widths0
           _ -> widths0
     let outerLayout = f (fillW flatLayout)
-        hasStretch = any (== ColStretch) (take n (tableColSizes cfg))
+        hasStretch = any (\i -> smallAt sizes i ColContent == ColStretch) vis
         vis = filter (`IS.notMember` hidden0) order0
         freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
         frozenIdx = take freezeN vis
@@ -628,21 +629,27 @@ tableCore cfg f key cols inputRows curSort =
       covered <- liftIO (pointerCovered ctx tableWid)
       clip <- liftIO (getPrevClipRect ctx tableWid)
       disabled <- liftIO (isDisabled ctx tableWid)
+      headerClips <- liftIO (mapM (getPrevClipRect ctx . rawRespId . snd) headerPairs)
       let mouse = inputMousePos inp
           reachable = not (covered || disabled) && maybe True (`rectContains` mouse) clip
           headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
+          -- Only edges in view: a header scrolled under the frozen pane or
+          -- past the body's right edge has its edge outside its clip.
+          shownEdges = [h | (h@(_, Rect x _ w _), Just (Rect cx _ cw _)) <- zip headerRects headerClips, x + w >= cx, x + w <= cx + cw + 0.5]
           -- Also used as the resize cursor's zones.
-          edgeZones = headerEdgeZones 4 mBodyRect headerRects
+          edgeZones = headerEdgeZones 4 mBodyRect shownEdges
           hitCol zones = fst <$> find (\(_, r) -> rectContains r mouse) zones
           edgeCol = if reachable then hitCol edgeZones else Nothing
           isResize = drag0 /= HeaderIdle
-          resizing = isResize && heldIn MouseLeft inp
-      when (reachable && not (null edgeZones)) . liftIO $
-        -- Strict in the spine and the rects, so no thunk waits in the IORef.
-        modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
+      -- A press on an edge resizes and arms no reorder, but a column already
+      -- held can still be dropped by an edge.
       reorder <-
         withKey ("reorder" :: Text) $
-          useReorder vis (if resizing || isJust edgeCol then [] else headerPairs)
+          useReorder vis (if pressedIn MouseLeft inp && isJust edgeCol then [] else headerPairs)
+      -- No resize arrow over the edges while a column is held.
+      when (reachable && isNothing (reorderDragging reorder) && not (null edgeZones)) . liftIO $
+        -- Strict in the spine and the rects, so no thunk waits in the IORef.
+        modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
       let vis' = reorderOrder reorder
           mReorder = reorderDragging reorder
           headerW i = case lookup i headerRects of
@@ -659,7 +666,7 @@ tableCore cfg f key cols inputRows curSort =
           nextHidden = case showAllResp of
             Just r | respClicked r -> IS.empty
             _ -> case hideClicked of
-              (i : _) | IS.size hidden0 + 1 < n -> IS.insert i hidden0
+              (i : _) | length vis > 1 -> IS.insert i hidden0
               _ -> hidden0
           sortClick =
             if reorderMoved reorder || isJust mReorder || isResize || (isJust edgeCol && (heldIn MouseLeft inp || releasedIn MouseLeft inp))

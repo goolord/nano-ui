@@ -3,6 +3,7 @@ module Cases.Table (tests) where
 import Spec
 import Data.Bits ((.&.))
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 import Data.List (sortOn, tails)
 import Data.Ord (Down (..))
 import Data.Maybe (isJust, listToMaybe)
@@ -32,6 +33,10 @@ tests :: [Spec]
 tests =
   [ spec "table-sort" runTableSortTest
   , pixelSpec "table-reorder" runTableReorderTest
+  , pixelSpec "table-reorder-edge" runTableReorderEdgeTest
+  , spec "simple-table-siblings" runSimpleTableSiblingsTest
+  , spec "table-hide-columns" runTableHideColumnsTest
+  , spec "table-hidden-edge" runTableHiddenEdgeTest
   , pixelSpec "table-covered-gestures" runTableCoveredGesturesTest
   , pixelSpec "table-scroll-reveal" runTableScrollRevealTest
   , pixelSpec "table-shared-scroll-metrics" runTableSharedScrollMetricsTest
@@ -138,6 +143,93 @@ runTableReorderTest ctx failed = do
   draw input {inputMousePos = first}
   settled <- warmup2 ctx input ui
   assertEq failed [1, 2, 0] (tableColOrder settled)
+
+-- A column dragged onto a column boundary, inside its resize zone, still
+-- moves, and the zone shows no resize arrow while the column is held.
+runTableReorderEdgeTest :: Context -> IORef Int -> IO ()
+runTableReorderEdgeTest ctx failed = do
+  let input = withInputOff 500 240
+      ui = simpleTable ["First", "Second", "Third"] [["a", "b", "c"]]
+  _ <- warmup2 ctx input ui
+  hdrs <- headerButtonRects ctx
+  case hdrs of
+    [first, Rect sx sy sw sh, _] -> do
+      let down = pressAt input (spanCenter first)
+          edge = holdAt down (V2 (sx + sw - 1) (sy + sh / 2))
+      _ <- runFrame ctx down ui
+      _ <- runFrame ctx edge ui
+      _ <- runFrame ctx edge ui
+      cursor <- uiCursorKind ctx edge
+      assert failed (cursor /= UiCursorEwResize)
+      _ <- runFrame ctx (releaseAt edge) ui
+      moved <- warmup2 ctx input ui
+      assertEq failed [1, 0, 2] (tableColOrder moved)
+    _ -> assert failed False
+
+-- Two simple tables side by side keep their own state: hiding a column of
+-- one leaves the other's columns alone.
+runSimpleTableSiblingsTest :: Context -> IORef Int -> IO ()
+runSimpleTableSiblingsTest ctx failed = do
+  let input = withInputOff 500 300
+      ui = columnWith fillW $
+        (,) <$> simpleTable ["A", "B"] [["a1", "b1"]] <*> simpleTable ["X", "Y"] [["x1", "y1"]]
+  _ <- warmup2 ctx input ui
+  hdrs <- sortOn (\r -> (rectY r, rectX r)) <$> headerButtonRects ctx
+  assertJust failed (listToMaybe hdrs) $ \first -> do
+    let (press, release) = rightClickPair input (spanCenter first)
+    _ <- runFrame ctx press ui
+    _ <- runFrame ctx release ui
+    (a, x) <- warmup2 ctx input ui
+    assertEq failed ([0], []) (tableHiddenIndices a, tableHiddenIndices x)
+
+-- A right-click hides a column while another stays visible, whatever
+-- out-of-range indices the hidden set holds, and with the stretching column
+-- hidden the others share its space.
+runTableHideColumnsTest :: Context -> IORef Int -> IO ()
+runTableHideColumnsTest ctx failed = do
+  let input = withInputOff 500 240
+      cfg = defaultTableConfig {tableColSizes = [ColStretch, ColContent, ColContent], tableHidden = IS.singleton 5}
+      ui = tableConfigured' cfg id "hide" threeCols tableFillRows =<< useVar (SortCol 0 SortAsc)
+      rightEdge = maybe 0 (\r -> rectX r + rectW r) . listToMaybe . reverse
+      hideFirst = do
+        hdrs <- headerButtonRects ctx
+        forM_ (listToMaybe hdrs) $ \first -> do
+          let (press, release) = rightClickPair input (spanCenter first)
+          _ <- runFrame ctx press ui
+          void (runFrame ctx release ui)
+        tableHiddenIndices <$> warmup2 ctx input ui
+  _ <- warmup2 ctx input ui
+  filled <- rightEdge <$> headerButtonRects ctx
+  assertEq failed [0, 5] =<< hideFirst
+  shared <- rightEdge <$> headerButtonRects ctx
+  assertGt failed shared (filled - 1)
+  assertEq failed [0, 1, 5] =<< hideFirst
+  -- The last column stays.
+  assertEq failed [0, 1, 5] =<< hideFirst
+
+-- | The first three of 'demoPeopleCols'.
+threeCols :: Colonnade Headed (T.Text, T.Text, T.Text, T.Text, T.Text) T.Text
+threeCols = mconcat [headed "Name" (\(a, _, _, _, _) -> a), headed "Dept" (\(_, b, _, _, _) -> b), headed "Age" (\(_, _, c, _, _) -> c)]
+
+-- Only edges in view resize: an unfrozen column scrolled under the frozen
+-- one has no resize zone there.
+runTableHiddenEdgeTest :: Context -> IORef Int -> IO ()
+runTableHiddenEdgeTest ctx failed = do
+  let input = withInputOff 400 240
+      cfg = defaultTableConfig {tableFreezeCols = 1, tableColSizes = [ColFixed 150, ColFixed 100, ColFixed 500]}
+      ui = sortedTable (tableConfigured cfg (fixedH 200) "frozen-edges" threeCols tableFillRows)
+  _ <- warmup2 ctx input ui
+  assertJustM failed (tableBodyScrollWid ctx) $ \wid -> do
+    setScrollOffset2D ctx wid (V2 120 0)
+    _ <- warmup2 ctx input ui
+    hdrs <- headerButtonRects ctx
+    case hdrs of
+      [Rect fx _ fw _, Rect hx hy hw hh, _] -> do
+        -- The second column's edge lies under the frozen first one.
+        assert failed (hx + hw < fx + fw)
+        cursor <- cursorOver ctx input ui (V2 (hx + hw - 1) (hy + hh / 2))
+        assert failed (cursor /= UiCursorEwResize)
+      _ -> assert failed False
 
 -- A same-layer scrim blocks both header reordering and resize edges.
 runTableCoveredGesturesTest :: Context -> IORef Int -> IO ()
