@@ -117,6 +117,9 @@ data FontMetrics = FontMetrics
   -- whole device pixels.
   , fmSnapScale :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float
+  -- ^ A character's advance. A font whose @' '@, @'x'@ and @'M'@ share one,
+  -- with no kerning between @'x'@ and @'M'@, is taken as monospace: text it
+  -- has not shaped then measures that advance a character, unkerned.
   , fmKerning :: Char -> Char -> Float
   , fmShape :: Text -> Maybe ShapedText
   -- ^ The shaped layout of a text the snapshot was prepared for, when the
@@ -477,6 +480,8 @@ textIndexAtX fm txt x
                  in if d < bestD then nearest i d (i + 1) else nearest best bestD (i + 1)
        in nearest 0 (1 / 0) 0
   | x <= 0 = 0
+  -- Counted in whole advances, as 'lineWidth' measures the carets.
+  | Just adv <- monospaceAdvance fm, adv > 0 = clamp 0 (T.length txt) (floor (x / adv + 0.5))
   | otherwise = go 0 0.0 Nothing txt
   where
     go !i !acc prev t =
@@ -531,18 +536,25 @@ lineWidth fm line
   | otherwise =
       case fmShape fm line of
         Just st -> stAdvance st
-        Nothing ->
-          let !spaceAdv = fmAdvance fm ' '
-              !xAdv = fmAdvance fm 'x'
-              !mAdv = fmAdvance fm 'M'
-           in if spaceAdv == xAdv && xAdv == mAdv && fmKerning fm 'x' 'M' == 0
-                then fromIntegral (T.length line) * spaceAdv
-                else case T.uncons line of
-                  Just (c0, rest) ->
-                    fst (T.foldl' step (fmAdvance fm c0, c0) rest)
-                  Nothing -> 0
+        Nothing -> case monospaceAdvance fm of
+          Just adv -> fromIntegral (T.length line) * adv
+          Nothing -> case T.uncons line of
+            Just (c0, rest) ->
+              fst (T.foldl' step (fmAdvance fm c0, c0) rest)
+            Nothing -> 0
   where
     step (!w, !prev) c = (w + kernedAdvance fm (Just prev) c, c)
+
+-- | The advance of every character of a font taken as monospace: one whose
+-- @' '@, @'x'@ and @'M'@ share it, with no kerning between @'x'@ and @'M'@
+-- ('fmAdvance'). Unshaped widths and hit tests then count characters.
+{-# INLINE monospaceAdvance #-}
+monospaceAdvance :: FontMetrics -> Maybe Float
+monospaceAdvance fm =
+  let !spaceAdv = fmAdvance fm ' '
+   in if spaceAdv == fmAdvance fm 'x' && spaceAdv == fmAdvance fm 'M' && fmKerning fm 'x' 'M' == 0
+        then Just spaceAdv
+        else Nothing
 
 -- | The size of text wrapped to @maxW@ into the lines of @wrap@.
 wrapMeasure :: FontMetrics -> Float -> WrapResult -> (Float, Float)

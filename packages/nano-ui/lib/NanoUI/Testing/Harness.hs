@@ -462,11 +462,12 @@ checkLabelAlignEndInk failed =
     when (abs (tx + textInkEnd fm txt - boxW) > 0.01) $ bump failed
   where
     boxW = 100
-    -- Narrow 'i' and '.' advances, with ink offset inside each glyph box.
+    -- Narrow 'i', '.' and space advances, so the font is not taken as
+    -- monospace, with ink offset inside each glyph box.
     glyph xoff gw = Just (GlyphQuad xoff 0 gw 10 0 0 1 1)
     fm =
       (monospaceMetrics 10)
-        { fmAdvance = \c -> if c == 'i' || c == '.' then 4 else 10
+        { fmAdvance = \c -> if c == 'i' || c == '.' || c == ' ' then 4 else 10
         , fmGlyph = \c -> case c of
             'i' -> glyph 0.5 3
             '.' -> glyph 1 1
