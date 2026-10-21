@@ -49,6 +49,7 @@ tests =
   , spec "text-input-click-select" runTextInputClickSelectTest
   , spec "text-input-word-keys" runTextInputWordKeysTest
   , spec "text-input-line-break" runTextInputLineBreakTest
+  , spec "search-empty-commit" runSearchEmptyCommitTest
   , spec "text-input-cut-clears-selection" runTextInputCutClearsSelectionTest
   , spec "text-input-clipboard" runTextInputClipboardTest
   , spec "text-input-password" runTextInputPasswordTest
@@ -174,6 +175,19 @@ runTextInputLineBreakTest ctx failed = do
   _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
   ints <- storeInt <$> getStore ctx
   assertEq failed (Just 6) (IM.lookup (slotKey SlotCursor (intKey (respId resp))) ints)
+
+-- | Emptying a search field from the keyboard reports the change on that
+-- frame, as its clear button does, rather than after the debounce.
+runSearchEmptyCommitTest :: Context -> IORef Int -> IO ()
+runSearchEmptyCommitTest ctx failed = do
+  ref <- newVar "abc"
+  let
+    inp0 = withInput 320 120
+    ui = column (fst <$> held ref (searchInput' "Search"))
+  warmupFocused ctx inp0 ui
+  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
+  assert failed . respChanged =<< evalUi ctx (keyInp KeyBackspace inp0) ui
+  assertEq failed "" =<< readVarIO ref
 
 -- Word-wise editing keys (Ctrl or Alt + Backspace/Delete/Left/Right) work in
 -- the single-line text input like they do in the text area.

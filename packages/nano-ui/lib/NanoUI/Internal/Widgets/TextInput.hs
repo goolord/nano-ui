@@ -325,10 +325,8 @@ debounceSearchChanged ctx key focused rawChanged ms = do
     lastEdit = findSlot fieldDouble now ageKey store
     deadline = realToFrac ms :: Double
     idleMs = (now - lastEdit) * 1000
-    commit =
-      not rawChanged
-        && dirty
-        && (T.null current || not focused || idleMs >= deadline)
+    -- An edit this frame has not been idle for any time yet.
+    commit = dirty && (T.null current || not focused || (not rawChanged && idleMs >= deadline))
     -- Text the caller changed, in a field nobody has typed in, has no edit
     -- time to age from. Its pause starts now: left unstamped, every frame
     -- would see a fresh edit, and the commit would never come.
