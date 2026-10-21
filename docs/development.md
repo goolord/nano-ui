@@ -226,6 +226,12 @@ event). Nothing is printed while the loop is blocked on input.
 NANO_LOOP_TRACE=1 cabal run nano-ui-sdl-idle -- spinner
 ```
 
+The SDL backend reads three more variables when a session opens.
+`NANO_FRAME_TRACE` prints a timing line each time the debug readout refreshes,
+so only while a view reads `askSdlDebug`. `NANO_CURSOR_TRACE` logs each cursor
+change, and `NANO_FORCE_SCALE=2` replaces the display's pixel density. The
+traces take any value.
+
 To keep an application idle when nothing is changing:
 
 - Only call `keepAnimating` for animations that are currently on screen.

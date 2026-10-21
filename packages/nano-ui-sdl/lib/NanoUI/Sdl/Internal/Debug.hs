@@ -21,7 +21,9 @@ data SdlDebugSnapshot = SdlDebugSnapshot
   deriving (Eq, Show)
 
 -- | Per-refresh timing trace (NANO_FRAME_TRACE). Prints the snapshot's phase
--- EMAs so live-loop costs can be compared across builds.
+-- EMAs so live-loop costs can be compared across builds. The snapshot
+-- refreshes only while a view reads 'NanoUI.Backend.Sdl.askSdlDebug', so
+-- nothing is printed otherwise.
 traceFrame :: SdlDebugSnapshot -> IO ()
 traceFrame s =
   printf
