@@ -24,7 +24,7 @@ import NanoUI.Internal.Context
   , getPrevRect
   , takeTextEditLastAction
   )
-import NanoUI.Internal.Monad (askContext)
+import NanoUI.Monad (askContext)
 import NanoUI.Shortcut
 import NanoUI.Var (peekVar)
 import Text.Printf (printf)

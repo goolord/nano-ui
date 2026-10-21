@@ -9,6 +9,11 @@ module NanoUI.Monad
   , liftIO
   , withUiResource
 
+    -- | The functions of "NanoUI" that take a 'Context' (scrolling, themes)
+    -- take the view's from 'askContext'.
+  , Context
+  , askContext
+
     -- * Widget ids
   , withKey
   , keyedTag
@@ -89,5 +94,6 @@ module NanoUI.Monad
   )
 where
 
+import NanoUI.Internal.Context (Context)
 import NanoUI.Internal.Monad
 import NanoUI.Internal.Host (Host, newHost, setHost)
