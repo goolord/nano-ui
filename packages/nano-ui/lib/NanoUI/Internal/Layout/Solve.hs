@@ -2060,18 +2060,16 @@ computePopupPosition ::
 computePopupPosition winW winH margin iw ih anchor placement offset =
   case anchor of
     AnchorPoint (V2 px py) ->
-      -- On each axis the popup goes before, after or at the point, flipping
-      -- to the other side if it would overflow and fits there.
-      let onAxis p size lim isBefore isAfter =
-            let p0
-                  | isBefore = p - size - offset
-                  | isAfter = p + offset
-                  | otherwise = p
-             in if p0 + size > lim - margin && p - size - margin >= 0
-                  then p - size - offset
-                  else clamp margin (lim - size - margin) p0
-       in ( onAxis px iw winW (placement == PlacementLeft) (placement == PlacementRight)
-          , onAxis py ih winH (placement == PlacementAbove) (placement == PlacementBelow)
+      -- On each axis the popup goes before or after the point, as beside an
+      -- anchor span of no length, or at it, flipping to the other side if it
+      -- would overflow and fits there. Either way it keeps within the margins.
+      let onAxis p size lim isBefore isAfter
+            | isBefore = before p 0 lim size
+            | isAfter = after p 0 lim size
+            | p + size > lim - margin && p - size - margin >= 0 = p - size - offset
+            | otherwise = p
+       in ( clamp margin (winW - iw - margin) (onAxis px iw winW (placement == PlacementLeft) (placement == PlacementRight))
+          , clampY (onAxis py ih winH (placement == PlacementAbove) (placement == PlacementBelow))
           )
     AnchorRect (Rect rx ry rw rh) ->
       case placement of
