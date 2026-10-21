@@ -227,8 +227,10 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
           prepared <- forM (wrLines wrap) $ \line -> (,) line <$> prepareFontMetrics fm line
           pure (fm, SpanWrapped prepared)
         else do
+          -- Half a pixel over the width is no reason to cut, as it is none
+          -- to wrap.
           shown <-
-            if tw > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
+            if tw > contentW + 0.5 && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
               then truncateTextIO measureW contentW raw
               else pure raw
           (,) fm . SpanSingle shown <$> prepareFontMetrics fm shown
@@ -354,9 +356,8 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
   | nt == NodeButton && hasFlag buttonFlagClose si = pure Nothing
   | otherwise = do
       (source, _, measure) <- resolveFontFor ctx nt fontSizeVal si
-      fm <- prepareFontMetrics source txt
       (tw0, th) <- measure txt
-      let (ix, _) = widgetContentInset fm
+      let (ix, _) = widgetContentInset source
           plain = nt == NodeButton && not (any (`hasFlag` si) [buttonFlagChoice, buttonFlagRow, buttonFlagTable, buttonFlagMenu])
           -- The room a plain button's or a select's label has: inside the
           -- padding layout gave a centred label, all of the box beside
@@ -365,7 +366,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
             | nt == NodeSelect = w - ix - selectChevronReserve
             | ax /= AlignCenter = w
             | hasFlag buttonFlagTab si = w - 2 * tabHeaderPadX
-            | otherwise = w - fst (buttonPadding fm)
+            | otherwise = w - fst (buttonPadding source)
       -- A label longer than that ends in an ellipsis.
       (label, tw) <-
         if (plain || nt == NodeSelect) && tw0 > room + 0.5
@@ -373,6 +374,8 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
             cut <- truncateTextIO (fmap fst . measure) room txt
             (cut,) . fst <$> measure cut
           else pure (txt, tw0)
+      -- Metrics for the label as it is shown, which places it.
+      fm <- prepareFontMetrics source label
       let (tx, used) = case nt of
             NodeButton
               | hasFlag buttonFlagChoice si -> (checkboxLeading fm, tw)
