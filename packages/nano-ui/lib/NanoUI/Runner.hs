@@ -254,10 +254,12 @@ runSessionLoop drv ctx0 inp0 = do
             wakeAt <- getWakeAt ctx
             waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
             let paced = wasAnim || animating
+                -- An hour at most: the backends take a 32-bit timeout, and
+                -- the loop waits again when it runs out.
                 wakeMs
                   | wakeAt <= 0 = -1
                   | wakeAt <= waitT = 0
-                  | otherwise = ceiling ((wakeAt - waitT) * 1000) + wakePadMs :: Int
+                  | otherwise = ceiling (min 3600 (wakeAt - waitT) * 1000) + wakePadMs :: Int
                 idleMs
                   | not debugActive = wakeMs
                   | wakeMs < 0 = debugHudTimeout

@@ -17,6 +17,7 @@ tests :: [Spec]
 tests =
   [ spec "session-loop" runSessionLoopTest
   , spec "session-loop-wake" runSessionLoopWakeTest
+  , spec "session-loop-far-wake" runSessionLoopFarWakeTest
   , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
   , spec "session-loop-key-order" runSessionLoopKeyOrderTest
   , spec "session-loop-close-request" runSessionLoopCloseTest
@@ -165,6 +166,19 @@ runSessionLoopWakeTest ctx failed = do
   runSessionLoop driver ctx emptyInput
   assertEq failed ["timed wait", "due True", "draw", "wait -1"] =<< readIORef logRef
   assertEq failed 0 =<< getWakeAt ctx
+
+-- A wake a month away waits no longer than the 32-bit millisecond timeout
+-- the backends take; the loop waits again when it runs out.
+runSessionLoopFarWakeTest :: Context -> IORef Int -> IO ()
+runSessionLoopFarWakeTest ctx failed = do
+  timeouts <- newIORef []
+  debug <- newDebugSampler
+  let driver = (quietDriver debug) {sdWaitEvents = \timeout -> [3] <$ modifyIORef' timeouts (timeout :)}
+  clearDirty ctx
+  requestWakeAfter ctx (30 * 86400)
+  runSessionLoop driver ctx emptyInput
+  ts <- readIORef timeouts
+  assert failed (not (null ts) && all (\t -> t > 0 && t <= 2147483647) ts)
 
 -- Ctrl+C quits without a frame, even when a later event in the same batch
 -- releases Ctrl; typing c without Ctrl does not. Event 1 presses C holding
