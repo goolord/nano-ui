@@ -255,7 +255,7 @@ charToGlyphId font c =
 
 -- | How a glyph is drawn at a scale.
 data CozetteScalePath
-  = ScaleExact1x   -- ^ at or below 1x: the 7x13 bitmap
+  = ScaleExact1x   -- ^ within 0.05 of 1x: the 7x13 bitmap
   | ScaleExact2x   -- ^ within 0.05 of 2x: the EPX 14x26 bitmap
   | ScaleExact4x   -- ^ within 0.05 of 4x: the double-EPX 28x52 bitmap
   | ScaleBoxFrom2x -- ^ other scales below 2x: the 14x26 bitmap, box-averaged
@@ -263,9 +263,10 @@ data CozetteScalePath
   deriving (Eq, Show)
 
 -- | Choose native, EPX-expanded, or box-averaged glyphs for a display scale.
+-- Below 1x the glyphs shrink with the pen grid, box-averaged from 2x.
 cozetteScalePath :: Float -> CozetteScalePath
 cozetteScalePath s
-  | s <= 1.0 = ScaleExact1x
+  | abs (s - 1.0) < 0.05 = ScaleExact1x
   | abs (s - 2.0) < 0.05 = ScaleExact2x
   | abs (s - 4.0) < 0.05 = ScaleExact4x
   | s < 2.0 = ScaleBoxFrom2x

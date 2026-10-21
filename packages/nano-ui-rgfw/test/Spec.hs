@@ -20,7 +20,7 @@ import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pre
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
-import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont (..), charToGlyphId, cozetteGlyphBit, getCozetteFont, renderGlyphScaledToBuffer)
+import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont (..), charToGlyphId, cozetteGlyphBit, cozetteGlyphFootprint, getCozetteFont, renderGlyphScaledToBuffer)
 import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
 import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCursor)
 import NanoUI.Rgfw.Render (renderArena)
@@ -195,7 +195,9 @@ testSquareThemedRaster = do
 testGlyphAtlas :: IO ()
 testGlyphAtlas = do
   let font = getCozetteFont
-  forM_ [1.0, 1.5, 2.0, 3.0, 4.0] $ \scale -> do
+  -- Below 1x the pens close up, so the glyphs must shrink with them.
+  assert "glyphs below 1x shrink with the pen grid" (map cozetteGlyphFootprint [0.5, 0.75, 1.0] == [(4, 6), (5, 10), (7, 13)])
+  forM_ [0.5, 1.0, 1.5, 2.0, 3.0, 4.0] $ \scale -> do
     let ga = glyphAtlasFor font scale
         cw = gaCellW ga
         ch = gaCellH ga
