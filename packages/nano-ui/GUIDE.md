@@ -568,7 +568,7 @@ uploaded on the first frame for a given key, and the texture slot in the image
 atlas is freed automatically if a frame completes without calling `useImageRgba`
 for that handle, or when the key changes. For static images kept for the entire
 session, allocate an ID with `freshImageId` and upload once with
-`registerImageRgba`.
+`registerImageRgba`; `releaseImageRgba` frees one you no longer need.
 
 `image` stretches an image to fill its layout bounds. `imageConfigured` takes
 an `ImageConfig` supporting CSS-style `ContentFit` (`FitFill`, `FitContain`,

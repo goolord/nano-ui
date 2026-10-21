@@ -63,6 +63,7 @@ module NanoUI.Backend
   , damageIsEmpty
   , registerImage
   , registerImages
+  , releaseImage
   , atlasTextureId
   , atlasSnapshot
   , atlasChanges
@@ -339,7 +340,7 @@ import NanoUI.Internal.Context
   ( Context, newContext, newPixelContext, withFontMetrics, withMonoFontMetrics
   , withMeasureText, withFontResolver, withFontSize, withClipboard
   , markDirty, clearDirty, isDirty, requestWakeAt, requestWakeAfter, getWakeAt
-  , takeDamage, takeDamagePieces, registerImage, registerImages
+  , takeDamage, takeDamagePieces, registerImage, registerImages, releaseImage
   , atlasTextureId, atlasSnapshot, atlasChanges, AtlasUpload (..)
   , getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance
   , setExplainLayout, setSystemAppearance, setWakeLoop, setWakeLoopChecked

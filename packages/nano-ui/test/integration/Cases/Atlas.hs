@@ -5,7 +5,7 @@ import Data.ByteString qualified as BS
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Ptr (plusPtr)
-import NanoUI.Internal.Context (lookupImageUv, releaseImage)
+import NanoUI.Internal.Context (lookupImageUv)
 
 tests :: [Spec]
 tests =
