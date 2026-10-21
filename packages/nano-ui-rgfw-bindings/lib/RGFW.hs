@@ -226,13 +226,14 @@ readClipboardText =
       then pure Nothing
       else do
         txt <- decodeUtf8Lenient <$> unsafePackCStringLen (ptr, fromIntegral len)
-        pure (if T.null txt then Nothing else Just txt)
+        -- Decode, and so copy, now: the next read frees RGFW's buffer.
+        pure $! if T.null txt then Nothing else Just txt
 
 -- | Replace the system clipboard with text (UTF-8); 'False' if refused.
 writeClipboardText :: Text -> IO Bool
 writeClipboardText txt =
-  TF.withCStringLen txt $ \(ptr, len) ->
-    (/= 0) <$> c_rgfw_write_clipboard_text ptr (fromIntegral len)
+  TF.withCString txt $ \ptr ->
+    (/= 0) <$> c_rgfw_write_clipboard_text ptr (fromIntegral (TF.lengthWord8 txt) + 1)
 
 -- | Set the window and taskbar icon from @w@ by @h@ tightly packed RGBA
 -- pixels, top row first. RGFW copies the data. 'False' for a non-positive

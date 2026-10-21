@@ -284,8 +284,10 @@ c_rgfw_event_scale_y = #{peek RGFW_event, scale.y}
 foreign import ccall "rgfw_read_clipboard_text"
   c_rgfw_read_clipboard_text :: Ptr CSize -> IO CString
 
--- | Copy UTF-8 bytes to the clipboard. Length is in bytes; zero is allowed.
--- Returns zero on failure. The buffer only needs to live through the call.
+-- | Copy NUL-terminated UTF-8 to the clipboard. The length is in bytes and
+-- counts the NUL, which RGFW's Windows and macOS writers read up to; zero
+-- writes empty text. Returns zero on failure. The buffer only needs to live
+-- through the call.
 foreign import ccall "rgfw_write_clipboard_text"
   c_rgfw_write_clipboard_text :: CString -> CSize -> IO CUChar
 
