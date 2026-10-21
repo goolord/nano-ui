@@ -96,10 +96,9 @@ scrollAxisGutter ::
   Float
 scrollAxisGutter policy slot trailPad contentSize innerMain =
   case policy of
-    ScrollNone -> 0
-    ScrollHidden -> 0
     ScrollAuto -> if scrollOverflows contentSize innerMain then scrollBarGutter slot trailPad else 0
     ScrollAlways -> scrollBarGutter slot trailPad
+    _ -> 0
 
 -- Vertical bar takes width. Horizontal bar takes height. Second pass
 -- covers the corner case where one bar makes the other axis overflow.
@@ -134,10 +133,7 @@ scrollPolicyFor cfg = \case
 -- | Whether the bar along @dir@ is never painted or grabbed.
 scrollChromeSuppressed :: ScrollConfig -> DirTag -> Bool
 scrollChromeSuppressed cfg dir =
-  case scrollPolicyFor cfg dir of
-    ScrollAuto -> False
-    ScrollAlways -> False
-    _ -> True
+  let p = scrollPolicyFor cfg dir in p /= ScrollAuto && p /= ScrollAlways
 
 -- | Wheel eligibility is wider than chrome eligibility: a hidden bar never
 -- paints or drags, but it still scrolls. Only a dead axis ('ScrollNone')
