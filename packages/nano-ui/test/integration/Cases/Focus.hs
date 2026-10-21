@@ -160,7 +160,7 @@ runFocusRequestBlursPreviousTest ctx failed = do
   (typed, _) <- evalUi ctx inp {inputChars = "abc"} ui
   assertEq failed "abc" =<< readVarIO queryRef
   assert failed (not (respChanged typed))
-  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
+  _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
   assertEq failed (0, 3) =<< selection
   _ <- ask [other] inp
   assertEq failed (3, 3) =<< selection
@@ -341,7 +341,6 @@ runFocusTextCommandTest ctx failed = do
   assert failed =<< getFocusVisible ctx
   writeIORef (ctxFocusId ctx) (WidgetId 0)
   writeIORef offRef True
-  writeIORef run True
   _ <- warmup ctx inp ui
   assertEq failed (WidgetId 0) =<< getFocusId ctx
 

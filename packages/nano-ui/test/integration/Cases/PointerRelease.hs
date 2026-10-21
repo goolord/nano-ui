@@ -148,7 +148,6 @@ runReleaseReturnsTest ctx failed = do
   _ <- runFrame ctx (moveTo a (pressOn b)) ui
   ((_, bBack), _, _) <- runFrame ctx (releaseOn b (pressOn b)) ui
   assert failed (respClicked bBack)
-  void (runFrame ctx inp0 ui)
 
 -- | Where two widgets overlap, a held press belongs to the one hover lights
 -- up: the earlier sibling, which paints on top.
@@ -170,5 +169,3 @@ runOverlapPressTest ctx failed = do
   _ <- runFrame ctx press ui
   ((aHeld, bHeld), _, _) <- runFrame ctx held' ui
   assert failed (respPressed aHeld && not (respPressed bHeld))
-  void (runFrame ctx (applyMouseButton MouseLeft False overlap) ui)
-  void (runFrame ctx inp0 ui)

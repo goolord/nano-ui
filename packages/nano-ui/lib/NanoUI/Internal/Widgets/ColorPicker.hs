@@ -362,6 +362,8 @@ colorPickerWith showAlpha value = do
       forM_ (colorPickerParseHex thex) $ \(r, g, b, ma) ->
         writeColor (colorRGBA r g b (if showAlpha then fromMaybe (colorA hex) ma else 255))
     final <- readColor
+    -- A field edit commits the "current" swatch at once, as a key step does.
+    when (final /= rgb) $ liftIO (commitColorPickerCurrent ctx wid final)
     pure (start, final, snd sv)
   liftIO $ recordSlot fieldInt ctx key (packColor final)
   pure (setChanged (final /= start) svResp, final)
@@ -410,7 +412,7 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
   alphaFocus <- maybe (pure False) (keyboardFocused . fst) alphaPart
   keyMoved <-
     pure (svFocus || hueFocus || alphaFocus)
-      <&&> liftIO (applyColorPickerKeys ctx wid initial inp svFocus hueFocus)
+      <&&> liftIO (applyColorPickerKeys ctx wid initial inp (isJust alphaPart) svFocus hueFocus)
   let releasedDrag = (sHeld || vHeld || hHeld || aHeld) && not dragging
   when (releasedDrag || keyMoved) $
     liftIO $ do
@@ -456,10 +458,11 @@ commitColorPickerCurrent ctx wid col =
 -- | Arrow, Home and End keys on the focused part: the field when @svFocus@,
 -- the hue bar when @hueFocus@, otherwise the alpha bar. Arrows move a part
 -- the way it is drawn: the marker right for more saturation and up for more
--- value, a bar's handle down (or right) towards its bottom end. Returns
--- whether the colour moved.
-applyColorPickerKeys :: Context -> WidgetId -> Color -> Input -> Bool -> Bool -> IO Bool
-applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
+-- value, a bar's handle down (or right) towards its bottom end. Without an
+-- alpha bar (@hasAlpha@), the colour comes out opaque. Returns whether the
+-- colour moved.
+applyColorPickerKeys :: Context -> WidgetId -> Color -> Input -> Bool -> Bool -> Bool -> IO Bool
+applyColorPickerKeys ctx wid fallback inp hasAlpha svFocus hueFocus = do
   store <- getStore ctx
   let
     -- Arrows with Ctrl, Alt or Super are left to shortcuts.
@@ -469,6 +472,7 @@ applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
     dx = along KeyLeft KeyRight
     dy = along KeyUp KeyDown
     current = widgetStoreColor store wid fallback
+    alpha = if hasAlpha then colorA current else 255
     hsv@(h, s, v) = widgetStoreHsv store wid fallback
     bar lo hi cur
       | down KeyHome = lo
@@ -478,10 +482,10 @@ applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
       | svFocus =
           let sat = clamp01 (s + dx * step / 100)
               val = clamp01 (v - dy * step / 100)
-           in (fadeAlpha (hsvToRgb h sat val) (colorA current), (h, sat, val))
+           in (fadeAlpha (hsvToRgb h sat val) alpha, (h, sat, val))
       | hueFocus =
           let hue = bar 0 360 h
-           in (fadeAlpha (hsvToRgb hue s v) (colorA current), (hue, s, v))
+           in (fadeAlpha (hsvToRgb hue s v) alpha, (hue, s, v))
       | otherwise = (fadeAlpha current (round (bar 0 255 (fromIntegral (colorA current)))), hsv)
     moved = col' /= current || hsv' /= hsv
   when moved $

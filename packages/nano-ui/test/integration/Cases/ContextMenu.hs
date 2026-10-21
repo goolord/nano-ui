@@ -8,6 +8,8 @@ tests =
   [ spec "context-menu-open" runContextMenuOpenTest
   , spec "context-menu-scroll-pos" runContextMenuScrollPosTest
   , spec "context-menu-disabled-row" runContextMenuDisabledRowTest
+  , spec "context-menu-inert-click" runContextMenuInertClickTest
+  , spec "context-menu-taller-than-window" runContextMenuTallTest
   , spec "menu-button-popup-toggle" runMenuButtonPopupToggleTest
   , spec "popup-point-flip" runPopupPointFlipTest
   ]
@@ -62,20 +64,7 @@ runContextMenuScrollPosTest ctx failed = do
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure (btn, cut)
   (sid, _) <- warmup2 ctx inp0 ui
-  assertJustM failed (getPrevRect ctx sid) $ \scrollRect@(Rect _ sy _ sh) -> do
-    let hover = inp0 {inputMousePos = spanCenter scrollRect}
-        wheel = hover {inputScroll = V2 0 1}
-        inView btn =
-          let y = rectY (respRect btn)
-              h = rectH (respRect btn)
-           in y >= sy + 4 && y + h + 8 <= sy + sh
-        pump = do
-          before <- getScrollOffset ctx sid
-          _ <- runFrame ctx wheel ui
-          after <- getScrollOffset ctx sid
-          ((_, (btn, _)), _, _) <- runFrame ctx hover ui
-          if inView btn || after <= before then pure (after, btn) else pump
-    (off, btn1) <- pump
+  assertJustM failed (wheelIntoView ctx inp0 ui (fst . snd) sid 8) $ \(off, btn1) -> do
     assert failed (off > 0)
     let menuPos = centerOf btn1
         layoutY = rectY (respRect btn1) + off
@@ -125,6 +114,63 @@ runContextMenuDisabledRowTest ctx failed = do
       assert failed (abs (rectX paste - rectX cut) < 0.5)
       assert failed (abs ((rectY paste - rectY cut) - (rectY undo - rectY paste)) < 0.5)
     _ -> assert failed False
+
+-- | A click on a header, a disabled row or a separator keeps the menu open,
+-- and a click on a row closes it.
+runContextMenuInertClickTest :: Context -> IORef Int -> IO ()
+runContextMenuInertClickTest ctx failed = do
+  let inp0 = withInput 640 480
+      ui = column $ do
+        btn <- button' "Target Button"
+        _ <- contextMenu btn $ do
+          menuHeader "Row Header"
+          menuItemDisabled "Row Paste"
+          menuSeparator
+          menuItem "Row Cut"
+        pure btn
+  btn <- warmup2 ctx inp0 ui
+  let (down, up) = rightClickPair inp0 (centerOf btn)
+      open = do
+        mapM_ (\i -> runFrame ctx i ui) [down, up, inp0]
+        collectOverlayTextSpans ctx inp0
+      -- Whether the menu, opened afresh, is still open after a click at @p@.
+      clickShows p = do
+        _ <- open
+        _ <- runClick ctx inp0 ui p
+        _ <- runFrame ctx inp0 ui
+        hasText "Row Cut" <$> collectOverlayTextSpans ctx inp0
+  spans <- open
+  case (spanRectOf "Row Header" spans, spanRectOf "Row Paste" spans, spanRectOf "Row Cut" spans) of
+    (Just header, Just paste, Just cut) -> do
+      assert failed =<< clickShows (spanCenter header)
+      assert failed =<< clickShows (spanCenter paste)
+      -- The separator's band lies between the two rows around it.
+      assert failed =<< clickShows (V2 (rectX cut + 2) ((rectY paste + rectH paste + rectY cut) / 2))
+      assert failed . not =<< clickShows (spanCenter cut)
+    _ -> assert failed False
+
+-- | A context menu taller than the window stays inside it and scrolls, so
+-- its last row can be reached and picked.
+runContextMenuTallTest :: Context -> IORef Int -> IO ()
+runContextMenuTallTest ctx failed = do
+  let inp0 = withInput 400 300
+      ui = column $ do
+        btn <- button' "Target Button"
+        lastPicked <- contextMenu btn (last <$> mapM (\i -> menuItem (T.pack ("Recent " <> show i))) [1 .. 40 :: Int])
+        pure (btn, lastPicked)
+  (btn, _) <- warmup2 ctx inp0 ui
+  let (down, up) = rightClickPair inp0 (centerOf btn)
+  mapM_ (\i -> runFrame ctx i ui) [down, up, inp0]
+  spans0 <- collectOverlayTextSpans ctx inp0
+  assertJust failed (spanRectOf "Recent 1" spans0) $ \first -> do
+    let over = inp0 {inputMousePos = spanCenter first}
+    replicateM_ 20 (runFrame ctx over {inputScroll = V2 0 3} ui)
+    _ <- runFrame ctx over ui
+    spans <- collectOverlayTextSpans ctx over
+    assertJust failed (spanRectOf "Recent 40" spans) $ \lastRow -> do
+      assert failed (rectY lastRow + rectH lastRow <= 300)
+      (_, picked) <- runClick ctx over ui (spanCenter lastRow)
+      assertEq failed (Just True) picked
 
 -- | A menu title toggling its drop-down on 'respClicked'. Returns the title
 -- and whether the drop-down was open going into the frame.

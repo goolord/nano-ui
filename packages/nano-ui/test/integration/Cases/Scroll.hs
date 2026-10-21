@@ -9,7 +9,8 @@ import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..)
+  ( DirTag (..)
+  , NodeType (..)
   , findNodeM
   , getClipBounds
   , getClipRect
@@ -52,7 +53,10 @@ tests =
   , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
   , spec "scroll-wheel-paint-order" runWheelPaintOrderTest
   , spec "scroll-wheel-cross-inside" runWheelCrossInsideTest
+  , spec "scroll-wheel-cross-popup" runWheelCrossPopupTest
+  , spec "scroll-wheel-cross-2d" runWheelCross2DTest
   , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
+  , spec "scroll-bar-short-track" runScrollBarShortTrackTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -60,7 +64,7 @@ runScrollThumbCursorTest ctx failed = do
   let inp0 = withInput 200 120
       ui = scrollArea (fillW . fixedH 80)
              (column (replicateM 8 (label "scroll line") >> pure ()))
-  ((sid, ()), _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
+  (sid, ()) <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
     let thumbX = rx + rw - scrollBarGutter ScrollBarList 0 / 2
         tryYs = [ry + rh * n / 8 | n <- [1 .. 7]]
@@ -115,7 +119,7 @@ runScrollThumbHoverTest ctx failed = do
     thumbIs off rest
     -- A drag keeps its thumb bright wherever the pointer goes.
     thumbIs (applyMouseButton MouseLeft True over) hovered
-    thumbIs off {inputMousePos = V2 20 (ry + rh / 2), inputButtonsHeld = buttonsFromList [MouseLeft]} hovered
+    thumbIs (holdAt off (V2 20 (ry + rh / 2))) hovered
     thumbIs (applyMouseButton MouseLeft False off) rest
 
 -- The scroll content's right edge stops at the scrollbar gutter, one gap
@@ -200,7 +204,6 @@ runScrollTextDamageTest ctx failed = do
               label lastLine
       inp0 = withInputOff 200 120
   sid <- warmup2 ctx inp0 (scrollUi "count 1" "last")
-  _ <- takeDamage ctx
   assertJustM failed (getPrevRect ctx sid) $ \(Rect sx sy sw sh) -> do
     let lane = V2 (sx + sw - 2) (sy + sh / 2)
     -- Same size: the first line's text only.
@@ -215,7 +218,6 @@ runScrollTextDamageTest ctx failed = do
     let inWindow firstLine lastLine = snd <$> window' (constVar True) "Lines" (scrollUi firstLine lastLine)
         winInp = withInputOff 640 400
     mWsid <- warmup2 ctx winInp (inWindow "count 1" "last")
-    _ <- takeDamage ctx
     assertJust failed mWsid $ \wsid -> assertJustM failed (getPrevRect ctx wsid) $ \(Rect wx wy ww wh) -> do
       _ <- runFrame ctx winInp (inWindow "count 1" "last\nmore\nmore")
       dTaller <- takeDamage ctx
@@ -285,28 +287,25 @@ runTallLabelCullTest ctx failed = do
 
 runScrollTopClipTest :: Context -> IORef Int -> IO ()
 runScrollTopClipTest ctx failed = do
-  cbRef <- newIORef Nothing
   let inp0 = withInputOff 400 160
-      ui = do
+      ui =
         scrollWith (tight . grow) $
           columnWith (padAll 8 . gap 8 . fillW) $
             card $ do
               heading "Controls"
               (cb, _) <- withValue False (checkbox' "Feature")
-              _ <- (snd <$> withValue 50 (slider 0 100))
+              void (withValue 50 (slider 0 100))
               mapM_ (\i -> void (label (T.pack ("pad line " <> show (i :: Int))))) [1 .. 16]
-              liftIO $ writeIORef cbRef (Just cb)
-              pure ()
+              pure cb
       clipFits dmg = case dmg of
         DamageFull -> True
         DamageClip (Rect _ y _ h) -> y >= -1 && y + h <= 160 + 1
-  _ <- warmup2 ctx inp0 ui
-  assertJustM failed (readIORef cbRef) $ \cb -> do
-    assertJustM failed (getPrevRect ctx (respId cb)) $ \r -> do
-      let hover = inp0 {inputMousePos = spanCenter r}
-      _ <- runFrame ctx hover ui
-      dHover <- takeDamage ctx
-      assert failed (clipFits dHover)
+  cb <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx (respId cb)) $ \r -> do
+    let hover = inp0 {inputMousePos = spanCenter r}
+    _ <- runFrame ctx hover ui
+    dHover <- takeDamage ctx
+    assert failed (clipFits dHover)
 
 runNestedScrollTest :: Context -> IORef Int -> IO ()
 runNestedScrollTest ctx failed = do
@@ -355,7 +354,7 @@ runNestedScrollTest ctx failed = do
 
 runScrollHoverClipTest :: Context -> IORef Int -> IO ()
 runScrollHoverClipTest ctx failed = do
-  let inp0 = withInput 200 200
+  let inp0 = withInput 200 400
       ui = scrollArea (fillW . fixedH 80) $
              column $ do
                 mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 10]
@@ -366,7 +365,11 @@ runScrollHoverClipTest ctx failed = do
   mInner <- getPrevRect ctx inner
   case mInner of
     Just r@(Rect _ _ iw ih) | iw > 0 && ih > 0 -> do
-      let hoverHidden = inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1}
+      -- In the window but below the outer viewport: only the outer
+      -- scroller's clip can turn the wheel away.
+      let pos@(V2 _ cy) = spanCenter r
+          hoverHidden = inp0 {inputMousePos = pos, inputScroll = V2 0 1}
+      assert failed (cy > 80 && cy < 400)
       offI0 <- getScrollOffset ctx inner
       _ <- runFrame ctx hoverHidden ui
       offI1 <- getScrollOffset ctx inner
@@ -501,11 +504,13 @@ runScrollLockstepProbeTest ctx failed = do
     let fillTops =
           [ qy1
           | (qx1, qy1, qx2, _, u, v) <- quads
-          , abs (u - whitePixelU) < 1.0e-6
-          , abs (v - whitePixelV) < 1.0e-6
+          , abs (u - whitePixelUV) < 1.0e-6
+          , abs (v - whitePixelUV) < 1.0e-6
           , qx2 - qx1 > 60.0
           ]
     pure (keyYs, fillTops)
+  -- The probe found rows and separators to compare at every step.
+  assert failed (all (\(ks, fs) -> any isJust ks && not (null fs)) yss)
   forM_ (zip yss (drop 1 yss)) $ \((keyA, fillA), (keyB, fillB)) -> do
     let sKeyA = sort [y | Just y <- keyA]
         sKeyB = sort [y | Just y <- keyB]
@@ -552,11 +557,10 @@ decodeQuads dd =
               [] -> (0, 0)
       pure (x1, y1, x2, y2, _u, _v)
 
-whitePixelU :: Float
-whitePixelU = 1.5 / 1024.0
-
-whitePixelV :: Float
-whitePixelV = 1.5 / 1024.0
+-- The u and v of the atlas texel that solid fills sample: a copy of
+-- 'NanoUI.Internal.Draw.Arena.whitePixel', which tests cannot import.
+whitePixelUV :: Float
+whitePixelUV = 1.5 / 1024.0
 
 -- A padded 2D scroller whose fill-width child fits the viewport must not
 -- report horizontal overflow: content size is measured from the content
@@ -575,8 +579,9 @@ run2DPadFillOverflowTest ctx failed = do
             mapM_ (void . label) (map T.pack ["alpha", "beta", "gamma"])
   (wid, ()) <- warmup2 ctx inp0 ui
   assertJustM failed (scrollNodeState ctx wid True) $ \(contentW, innerW) -> assert failed (contentW <= innerW + overflowEps)
-  -- No phantom scroll range: wheeling must not move either axis.
-  let wheel = inp0 {inputScroll = V2 5 5}
+  -- No phantom scroll range: wheeling over the scroller must not move
+  -- either axis.
+  let wheel = inp0 {inputMousePos = V2 100 100, inputScroll = V2 5 5}
   _ <- runFrame ctx wheel ui
   V2 offX offY <- getScrollOffset2D ctx wid
   assert failed (offX == 0 && offY == 0)
@@ -850,8 +855,8 @@ runDisjointViewportHitTest ctx failed = do
   (sid, _) <- warmup2 ctx inp0 ui
   setScrollOffset ctx sid 100
   (_, deep) <- warmup2 ctx inp0 ui
-  let Rect bx by bw bh = respRect deep
-      centre = V2 (bx + bw / 2) (by + bh / 2)
+  let Rect _ by _ bh = respRect deep
+      centre = centerOf deep
       hover = inp0 {inputMousePos = centre}
   -- The button is inside the outer viewport's rect, and its clip is empty
   -- rather than unset.
@@ -932,6 +937,76 @@ runWheelCrossInsideTest ctx failed = do
     _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
     assert failed . (> 0) =<< getScrollOffset ctx inner
     assertEq failed 0 =<< getScrollOffset ctx outer
+
+-- | A scroller whose track is shorter than the smallest thumb shows no bar,
+-- rather than a thumb that overruns the track and moves against the offset.
+runScrollBarShortTrackTest :: Context -> IORef Int -> IO ()
+runScrollBarShortTrackTest _ failed = do
+  let bar h = scrollBarLayout ScrollBarList DirColumn 0 0 100 h (Padding 0 0 0 0) 500
+  assert failed (isNothing (bar 20 0))
+  -- A track as long as the smallest thumb still shows one.
+  assertJust failed (bar 22 100) $ \layout ->
+    assert failed (covers (sbTrack layout) (sbThumb layout))
+
+-- | The unused wheel axis stops at a popup: a vertical wheel over a
+-- horizontal strip in a popup leaves the page scroller that declared the
+-- popup, and a sideways wheel on that page leaves the strip.
+runWheelCrossPopupTest :: Context -> IORef Int -> IO ()
+runWheelCrossPopupTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      across l = (fixedWH 150 40 l) {layoutDirection = Row}
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        replicateM_ 30 (label "row")
+        snd <$> popup' (constVar True) (defaultPopupConfig (AnchorPoint (V2 200 20))) (fst <$> scrollArea across (replicateM_ 30 (label "wide cell")))
+      wheel p d = do
+        warmup ctx inp0 {inputMousePos = p} ui
+        void (runFrame ctx inp0 {inputMousePos = p, inputScroll = d} ui)
+  (page, mStrip) <- warmup2 ctx inp0 ui
+  assertJust failed mStrip $ \strip ->
+    assertJustM failed (getPrevRect ctx strip) $ \r -> do
+      wheel (spanCenter r) (V2 0 1)
+      assertEq failed 0 =<< getScrollOffset ctx page
+      wheel (V2 20 150) (V2 1 0)
+      assertEq failed 0 =<< getScrollOffset ctx strip
+      -- The page itself still scrolls there.
+      wheel (V2 20 150) (V2 0 1)
+      assert failed . (> 0) =<< getScrollOffset ctx page
+
+-- | A 2D scroller pairs with a 1D one either way, and each takes only the
+-- wheel axis the scroller under the pointer cannot move: a sideways wheel
+-- over a 2D scroller in a horizontal one moves the 2D one alone, and over a
+-- vertical list in a 2D scroller moves the 2D one across.
+runWheelCross2DTest :: Context -> IORef Int -> IO ()
+runWheelCross2DTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      wide = box (fixedWH 600 10) (colorRGBA 90 90 90 255)
+      rows n = column (replicateM_ n (label "row"))
+      across l = (fixedWH 300 200 l) {layoutDirection = Row}
+      wheelOver c ui sid d = assertJustM failed (getPrevRect c sid) $ \r -> do
+        warmup c inp0 {inputMousePos = spanCenter r} ui
+        void (runFrame c inp0 {inputMousePos = spanCenter r, inputScroll = d} ui)
+      inRow = scrollArea across $ do
+        (inner, ()) <- scrollArea2D (fixedWH 150 100) (column (wide >> rows 30))
+        replicateM_ 30 (label "outer cell")
+        pure inner
+  (outer, inner) <- warmup2 ctx inp0 inRow
+  wheelOver ctx inRow inner (V2 1 0)
+  assert failed . (\(V2 x _) -> x > 0) =<< getScrollOffset2D ctx inner
+  assertEq failed 0 =<< getScrollOffset ctx outer
+  -- A fresh context, so the outer scroller does not inherit the offset kept
+  -- under the same id.
+  ctx2 <- newContext
+  let in2D = scrollArea2D (fixedWH 300 200) . column $ do
+        (list, ()) <- scrollArea (fixedWH 100 80) (rows 30)
+        wide
+        rows 30
+        pure list
+  (outer2D, list) <- warmup2 ctx2 inp0 in2D
+  wheelOver ctx2 in2D list (V2 0 1)
+  assert failed . (> 0) =<< getScrollOffset ctx2 list
+  assertEq failed (V2 0 0) =<< getScrollOffset2D ctx2 outer2D
+  wheelOver ctx2 in2D list (V2 1 0)
+  assert failed . (\(V2 x _) -> x > 0) =<< getScrollOffset2D ctx2 outer2D
 
 -- | The wheel goes to the topmost scroller under the pointer, even one pinned
 -- over another but declared first. A pinned panel over the lower scroller

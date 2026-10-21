@@ -252,9 +252,10 @@ layers $ do
 
 Scroll containers require a bounded viewport size, such as
 `scrollWith (fixedH 240 . fillW) body`. `scrollArea` also returns the scroller's
-`WidgetId` for programmatic scroll commands like `scrollToEnd`. For large
-virtualized lists, use `getScrollMetrics` to query the current scroll offset and
-viewport size so you only build the visible rows.
+`WidgetId` for programmatic scroll commands like `scrollToUi`, or `scrollToEnd`
+with the context from `askContext` (in `NanoUI.Monad`). For large virtualized
+lists, use `getScrollMetricsUi` to query the current scroll offset and viewport
+size so you only build the visible rows.
 
 To defer work until a widget enters the viewport, wrap it in `sensor` (or pass
 its ID to `useVisibility`). The returned visibility record contains the widget's
@@ -304,8 +305,8 @@ apply it inside your UI action:
 setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 ```
 
-Or configure it at startup via `followSystemTheme ctx`, `sdlAppThemeFor`, or
-`optThemeFor`. Calling `setTheme` or `setUiTheme` switches to a fixed theme,
+Or configure it via `followSystemTheme ctx` (a view gets `ctx` from
+`askContext`), or at startup via `sdlAppThemeFor` or `optThemeFor`. Calling `setTheme` or `setUiTheme` switches to a fixed theme,
 and `themeAppearance` returns whether a `Theme` is light or dark.
 
 Modals, floating windows, and popups take a `Var Bool` controlling whether they

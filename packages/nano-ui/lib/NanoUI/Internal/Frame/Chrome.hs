@@ -287,7 +287,8 @@ widgetVisualStyle ctx nt idx = do
             | isRow ->
                 let btn = themeButton theme
                     accent = themeAccent theme
-                    unselectedBg = fromMaybe (styleBg (themePanel theme)) (stripeColor theme (treeDecodeStripe styleIdx))
+                    surface = if mFloat == Just NodeModal then overlayMenuStyle theme else themePanel theme
+                    unselectedBg = fromMaybe (styleBg surface) (stripeColor theme (treeDecodeStripe styleIdx))
                     rowStyle fill hoverT activeT =
                       btn
                         { styleBg = fill
@@ -316,7 +317,8 @@ widgetVisualStyle ctx nt idx = do
           _ -> themeButton theme
       widgetBase =
         case mFloat of
-          Just NodeModal | modalAware -> overlayMenuStyle theme
+          -- Rows keep their selection and stripes, on the modal's surface.
+          Just NodeModal | modalAware && not isRow -> overlayMenuStyle theme
           _ -> base
       bg
         | isFocus, nt == NodeTextInput || nt == NodeTextArea = styleActiveBg widgetBase

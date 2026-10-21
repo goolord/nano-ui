@@ -58,6 +58,8 @@ data DragState a = DragState !a !V2 !Bool
 -- the UI thread in one session; each independent gesture needs its own handle.
 newtype DragHandle a = DragHandle (IORef (Maybe (DragState a)))
 
+-- | A handle for 'useDrag'. Allocate it once during setup, outside the view:
+-- a handle made every frame never tracks a drag.
 newDrag :: IO (DragHandle a)
 newDrag = DragHandle <$> newIORef Nothing
 
@@ -142,7 +144,7 @@ useDrop bounds = do
       step (active, pos, fs, ts) ev = case dropEventType ev of
         DropBegin -> (True, pos, fs, ts)
         DropPosition -> (active, dropEventPos ev <|> pos, fs, ts)
-        DropComplete -> (False, Nothing, fs, ts)
+        DropComplete -> (False, pos, fs, ts)
         DropFile | posInside bounds pos -> (active, pos, dropEventData ev : fs, ts)
         DropText | posInside bounds pos -> (active, pos, fs, dropEventData ev : ts)
         _ -> (active, pos, fs, ts)
@@ -151,10 +153,13 @@ useDrop bounds = do
       files = reverse filesRev
       texts = reverse textsRev
       hovered = active1 && posInside bounds lastPos1
-  when (active1 /= active0 || lastPos1 /= lastPos0) $
+      -- The payloads and 'DropComplete' arrive in one frame, which still
+      -- reports where they landed; only an active drag keeps the position.
+      stored1 = if active1 then lastPos1 else Nothing
+  when (active1 /= active0 || stored1 /= lastPos0) $
     liftIO . modifyStore ctx $
       setFlagSlot activeK active1
-        . maybe (deleteSlot fieldPoint posK) (\(V2 x y) -> insertSlot fieldPoint posK (x, y)) lastPos1
+        . maybe (deleteSlot fieldPoint posK) (\(V2 x y) -> insertSlot fieldPoint posK (x, y)) stored1
   pure
     DropTarget
       { dropHovered = hovered

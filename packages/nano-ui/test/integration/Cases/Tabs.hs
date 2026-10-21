@@ -6,7 +6,7 @@ import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Sequence qualified as Seq
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeRect, getParent, getText, getWidgetId)
+import NanoUI.Internal.Layout.Arena (arenaCount, findNodeM, getNodeFontSize, getNodeRect, getParent, getText, getWidgetId)
 
 tests :: [Spec]
 tests =
@@ -15,7 +15,7 @@ tests =
   , spec "tabs-enum" runEnumTabsTest
   , spec "tabs-closable" runTabsClosableTest
   , spec "tabs-close-margin" runTabsCloseMarginTest
-  , pixelSpec "tabs-disabled" runTabsDisabledTest
+  , spec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-scroll" runTabsScrollTest
   , spec "tabs-scroll-widen" runTabsScrollWidenTest
   , spec "tabs-scroll-close-button" runTabsScrollCloseButtonTest
@@ -32,7 +32,73 @@ tests =
   , spec "tabs-drag-reorder" runTabDragReorderTest
   , spec "tabs-vertical-drop-bounds" runVerticalDropBoundsTest
   , spec "tabs-clipped-drop-bounds" runClippedDropBoundsTest
+  , spec "tabs-scroll-follow-var" runTabsFollowVarTest
+  , spec "tabs-missing-key" runTabsMissingKeyTest
+  , spec "tabs-wheel-in-page" runTabsWheelInPageTest
+  , spec "tabs-badge-size" runTabsBadgeSizeTest
   ]
+
+-- | Headers that overflow a 240px strip.
+overflowLabels :: [T.Text]
+overflowLabels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
+
+-- A tab selected through the Var, not by a click, is brought into view,
+-- and so is one appended and selected in the same frame.
+runTabsFollowVarTest :: Context -> IORef Int -> IO ()
+runTabsFollowVarTest ctx failed = do
+  active <- newVar (0 :: Int)
+  let inp = withInput 240 120
+      ui labels = tabBar' active [tab i l () | (i, l) <- zip [0 ..] labels]
+      shows' needle = hasText needle <$> collectTextSpans ctx
+  replicateM_ 3 (runFrame ctx inp (ui overflowLabels))
+  assert failed . not =<< shows' "LongestTabName"
+  writeVarIO active 4
+  replicateM_ 2 (runFrame ctx inp (ui overflowLabels))
+  assert failed =<< shows' "LongestTabName"
+  writeVarIO active 0
+  replicateM_ 2 (runFrame ctx inp (ui overflowLabels))
+  assert failed =<< shows' "Controls"
+  writeVarIO active 5
+  replicateM_ 3 (runFrame ctx inp (ui (overflowLabels ++ ["Appended"])))
+  assert failed =<< shows' "Appended"
+
+-- An active key no tab has shows the first tab, its header and body alike,
+-- and reports it.
+runTabsMissingKeyTest :: Context -> IORef Int -> IO ()
+runTabsMissingKeyTest ctx failed = do
+  active <- newVar (3 :: Int)
+  let ui = tabs' active [tab 1 "One" (label "Body one"), tab 2 "Two" (label "Body two")]
+  r <- warmup2 ctx (withInputOff 300 100) ui
+  assertEq failed 1 (tabActive r)
+  assertEq failed 1 =<< readVarIO active
+  assertEq failed [1, 0] =<< buttonValues ctx
+  assert failed . hasText "Body one" =<< collectTextSpans ctx
+
+-- The vertical wheel over an overflowing strip pages the strip alone, not
+-- the page scroller round it too.
+runTabsWheelInPageTest :: Context -> IORef Int -> IO ()
+runTabsWheelInPageTest ctx failed = do
+  let inp = withInput 240 120
+      ui = scrollArea (tight . grow) $ do
+        _ <- tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
+        replicateM_ 20 (label "line")
+  (pageWid, _) <- warmup2 ctx inp ui
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  assertJust failed (spanRect "Controls" spans) $ \r -> do
+    _ <- runFrame ctx inp {inputMousePos = spanCenter r, inputScroll = V2 0 20} ui
+    _ <- runFrame ctx inp ui
+    assertEq failed 0 =<< getScrollOffset ctx pageWid
+    assert failed . not . hasText "Controls" =<< collectTextSpans ctx
+
+-- A badge is smaller than its header's text, whatever the base font size.
+runTabsBadgeSizeTest :: Context -> IORef Int -> IO ()
+runTabsBadgeSizeTest ctx0 failed = do
+  let ctx = withFontSize ctx0 10
+      na = ctxNodeArena ctx
+  _ <- warmup2 ctx (withInputOff 300 100) (tabBar' (constVar (1 :: Int)) [(tab 1 "Inbox" ()) {tabBadge = Just "3"}])
+  badge <- findNodeM na (fmap (== "3") . getText na)
+  assertJust failed badge $ \i -> assertEq failed (10 * 0.78) =<< getNodeFontSize na i
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show, Enum, Bounded)
@@ -51,7 +117,7 @@ runTabsKeyedReorderTest ctx failed = do
         (field, _) <- withValue (T.pack (show key)) textInput'
         liftIO (writeIORef seen (Just (n, nVar, respId field)))
       ui active order = tabs' (constVar active) [tab key (T.pack (show key)) (body key) | key <- order]
-      readBody = readIORef seen >>= maybe (fail "tab body did not run") pure
+      readBody = atomicModifyIORef' seen (\s -> (Nothing, s)) >>= maybe (fail "tab body did not run") pure
   original <- warmup2 ctx inp (ui TabB [TabA, TabB, TabC])
   (_, nVar, fieldId) <- readBody
   runNanoUI ctx inp (writeVar nVar 7)
@@ -94,6 +160,7 @@ runClippedDropBoundsTest ctx failed = do
             pure (PaneView "Tabs" False)
         }
   forM_ [TabTop, TabLeft] $ \orientation -> do
+    writeIORef result (Rect 0 0 0 0)
     void (warmup2 ctx (withInput 400 200) (ui orientation))
     bounds <- readIORef result
     assert failed (rectW bounds > 0 && rectW bounds <= 200)
@@ -230,7 +297,6 @@ runPanelBodySwapDamageTest ctx failed = do
       uiB = window' (constVar True) "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
   _ <- warmup2 ctx inp0 uiA
   _ <- runFrame ctx inp0 uiA
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp0 uiB
   dmg <- takeDamage ctx
   assert failed (not (damageIsEmpty dmg))
@@ -291,7 +357,7 @@ runTabsCloseMarginTest ctx failed = do
 -- for every header in the bar, though the scroller between the arrows would
 -- still be too narrow for them.
 runTabsScrollWidenTest :: Context -> IORef Int -> IO ()
-runTabsScrollWidenTest _ failed = do
+runTabsScrollWidenTest wide failed = do
   let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
       mkTabs = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
       nodeRect ctx l = do
@@ -301,7 +367,6 @@ runTabsScrollWidenTest _ failed = do
       hasArrows ctx = do
         spans <- collectTextSpans ctx
         pure (T.any (`elem` ['\8250', '\8249']) (T.concat [t | (_, t, _, _, _) <- spans]))
-  wide <- newContext
   _ <- warmup2 wide (withInput 900 120) mkTabs
   mFirst <- nodeRect wide "Controls"
   mLast <- nodeRect wide "LongestTabName"
@@ -323,7 +388,7 @@ runTabsScrollWidenTest _ failed = do
 -- A strip whose last close button runs past the bar overflows, though every
 -- header's main button fits: the range counts each header's close button.
 runTabsScrollCloseButtonTest :: Context -> IORef Int -> IO ()
-runTabsScrollCloseButtonTest _ failed = do
+runTabsScrollCloseButtonTest wide failed = do
   let labels = ["Controls", "Graphics", "Typography"]
       mkTabs = tabBar' (constVar (0 :: Int)) [closableTab i l () | (i, l) <- zip [0 ..] labels]
       nodeRects ctx p = do
@@ -335,7 +400,6 @@ runTabsScrollCloseButtonTest _ failed = do
       hasArrows ctx = do
         spans <- collectTextSpans ctx
         pure (T.any (`elem` ['\8250', '\8249']) (T.concat [t | (_, t, _, _, _) <- spans]))
-  wide <- newContext
   _ <- warmup2 wide (withInput 900 120) mkTabs
   firsts <- nodeRects wide (== "Controls")
   closes <- nodeRects wide (== "\215")
@@ -360,7 +424,6 @@ runTabsRangeDamageTest ctx failed = do
         label "Below"
   _ <- warmup2 ctx (withInput 900 120) ui
   _ <- runFrame ctx (withInput 900 120) ui
-  _ <- takeDamage ctx
   _ <- runFrame ctx (withInput 240 120) ui
   dmg <- takeDamage ctx
   assert failed (dmg == DamageFull)
@@ -487,15 +550,13 @@ runTabsDamageTest ctx failed = do
         , tab TabB "Beta" (label "Body B different widgets")
         ]
   _ <- runFrame ctx inp0 (ui TabA)
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp0 (ui TabA)
   dIdle <- takeDamage ctx
   assert failed (dIdle /= DamageFull)
   spansIdle <- collectTextSpans ctx
   assertSpansHas failed "Body A" spansIdle
 
-  spans <- collectTextSpans ctx
-  assertJust failed (spanRect "Beta" spans) $ \beta -> do
+  assertJust failed (spanRect "Beta" spansIdle) $ \beta -> do
     resp <- runClick ctx inp0 (ui TabA) (spanCenter beta)
     assert failed (respChanged resp && tabActive resp == TabB)
     spansSwitch <- collectTextSpans ctx
@@ -524,7 +585,7 @@ runTabsDamageTest ctx failed = do
 -- headers look exactly as they did before the strip could scroll (no
 -- scroller well behind them); and no scrollbar appears.
 runTabsScrollTest :: Context -> IORef Int -> IO ()
-runTabsScrollTest _ failed = do
+runTabsScrollTest wide failed = do
   let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
       mkTabs cur = tabBar' (constVar cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] labels]
       arrowRect ctx ch = do
@@ -533,16 +594,17 @@ runTabsScrollTest _ failed = do
       chevrons = ['\8250', '\8249']
 
   -- Wide bar: everything fits and no arrows are drawn.
-  wide <- newContext
   let wideInp = withInput 900 120
-  _ <- runFrame wide wideInp (mkTabs 0)
-  _ <- runFrame wide wideInp (mkTabs 0)
+  _ <- run2Frames wide wideInp (mkTabs 0)
   wideSpans <- collectTextSpans wide
   forM_ labels $ \l -> assert failed (hasText l wideSpans)
   assert failed (not (T.any (`elem` chevrons) (T.concat [t | (_, t, _, _, _) <- wideSpans])))
 
   ctx <- newContext
   let inp = withInput 240 120
+      -- Whether the first header shows once @act@ and a settling frame ran.
+      controlsAfter :: IO a -> IO Bool
+      controlsAfter act = act >> runFrame ctx inp (mkTabs 0) >> hasText "Controls" <$> collectTextSpans ctx
   _ <- warmup2 ctx inp (mkTabs 0)
   -- The strip only pulls in its scroller once it has measured an overflow,
   -- after the first frame's layout, so the arrow buttons show from the second
@@ -578,26 +640,17 @@ runTabsScrollTest _ failed = do
   mRight <- arrowRect ctx '\8250'
   assertJust failed (listToMaybe mRight) $ \r -> do
     assert failed (rectX r + rectW r > 200)
-    _ <- runClick ctx inp (mkTabs 0) (spanCenter r)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans1 <- collectTextSpans ctx
-    assert failed (not (hasText "Controls" spans1))
+    assert failed . not =<< controlsAfter (runClick ctx inp (mkTabs 0) (spanCenter r))
     mLeft <- arrowRect ctx '\8249'
-    assertJust failed (listToMaybe mLeft) $ \left -> do
-      _ <- runClick ctx inp (mkTabs 0) (spanCenter left)
-      _ <- runFrame ctx inp (mkTabs 0)
-      spans2 <- collectTextSpans ctx
-      assert failed (hasText "Controls" spans2)
+    assertJust failed (listToMaybe mLeft) $ \left ->
+      assert failed =<< controlsAfter (runClick ctx inp (mkTabs 0) (spanCenter left))
 
   -- Wheel up/down over the bar pages the window too (the strip maps the
   -- notches onto the horizontal offset).
   spans3 <- collectTextSpans ctx
-  assertJust failed (spanRect "Controls" spans3) $ \(Rect cx cy cw ch) -> do
-    let wheelDown = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 0 20}
-    _ <- runFrame ctx wheelDown (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans4 <- collectTextSpans ctx
-    assert failed (not (hasText "Controls" spans4))
+  assertJust failed (spanRect "Controls" spans3) $ \c -> do
+    let wheelDown = inp {inputMousePos = spanCenter c, inputScroll = V2 0 20}
+    assert failed . not =<< controlsAfter (runFrame ctx wheelDown (mkTabs 0))
 
     -- Left+right wheel over the bar scrolls the same offset through the
     -- framework scroller. The vertical wheel pinned the offset at max, so
@@ -607,19 +660,10 @@ runTabsScrollTest _ failed = do
     -- coupled to the framework wheel step (scrollWheelStep, 60px per notch
     -- by default): V2 0 20 saturates at max, and +/-100 notches
     -- crosses the whole range regardless of the exact step.
-    let wheelX d = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 d 0}
-    _ <- runFrame ctx (wheelX 10) (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans5 <- collectTextSpans ctx
-    assert failed (not (hasText "Controls" spans5))
-    _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans6 <- collectTextSpans ctx
-    assert failed (hasText "Controls" spans6)
-    _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans7 <- collectTextSpans ctx
-    assert failed (hasText "Controls" spans7)
+    let wheelX d = inp {inputMousePos = spanCenter c, inputScroll = V2 d 0}
+    assert failed . not =<< controlsAfter (runFrame ctx (wheelX 10) (mkTabs 0))
+    assert failed =<< controlsAfter (runFrame ctx (wheelX (-100)) (mkTabs 0))
+    assert failed =<< controlsAfter (runFrame ctx (wheelX (-100)) (mkTabs 0))
 
   -- Tab-list changes recompute the reachable range: shrinking back under
   -- the width drops the scroller and both arrows; growing past it again
@@ -658,7 +702,6 @@ runTabsContainedBodyDamageTest ctx failed = do
         traverse (getNodeRect na <=< getParent na) found
   _ <- warmup2 ctx inp0 (ui long)
   _ <- runFrame ctx inp0 (ui long)
-  _ <- takeDamage ctx
   mTall <- bodyRect
   _ <- runFrame ctx inp0 (ui "body")
   dShrink <- takeDamage ctx

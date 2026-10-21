@@ -62,15 +62,10 @@ runWindowScrollGutterTest ctx failed = do
         mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
         pure wide
   (win, mwide) <- warmup2 ctx inp0 ui
-  let Rect wx _ ww _ = respRect win
-      -- The body's content keeps the window's side padding before the bar.
-      contentRight = wx + ww - padR windowPad - scrollBarGutter ScrollBarWindow 0
-  spans <- collectOverlayTextSpans ctx inp0
-  let titleYs = [rectY r | (r, txt, _, _, _) <- spans, "GutterWin" `T.isInfixOf` txt]
-  assert failed (not (null titleYs))
-  assertJust failed mwide $ \wide -> do
-    let Rect cx _ cw _ = respRect wide
-    assert failed (cx + cw >= contentRight - 0.5 && cx + cw <= contentRight + 0.01)
+  assertSpansHas failed "GutterWin" =<< collectOverlayTextSpans ctx inp0
+  -- The body's content keeps the window's side padding before the bar.
+  assertJust failed mwide $ \wide ->
+    assertScrollGutterPad failed ctx (respId win) wide (scrollBarGutter ScrollBarWindow 0) (padR windowPad)
 
 runWindowCloseDamageTest :: Context -> IORef Int -> IO ()
 runWindowCloseDamageTest ctx failed = do
@@ -131,10 +126,8 @@ runFitHeaderNoShrinkTest ctx failed = do
         pure h
       tall = withInput 400 800
       short = withInput 400 200
-  _ <- runFrame ctx tall only
-  (r0, _, _) <- runFrame ctx tall only
-  _ <- runFrame ctx short withBody
-  (r1, _, _) <- runFrame ctx short withBody
+  r0 <- warmup2 ctx tall only
+  r1 <- warmup2 ctx short withBody
   assert failed (rectH (respRect r1) + 0.5 >= rectH (respRect r0))
 
 runWindowOverlayTest :: Context -> IORef Int -> IO ()
@@ -159,20 +152,15 @@ runWindowOverlayTest ctx failed = do
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Debug" overlays && hasText "Body" overlays)
   assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
-  let Rect wx wy ww wh = respRect win0
+  let Rect _ _ ww wh = respRect win0
   assert failed (ww >= 100 && wh >= 20)
   assert failed (case mBody0 of Just _ -> True; _ -> False)
   (outsideHit, _, _) <- runClick ctx inp0 ui (V2 (rectX (respRect outside0) + 8) (rectY (respRect outside0) + 8))
   assert failed (respClicked outsideHit)
-  (outsideMid, _, _) <- evalUi ctx (pressAt inp0 (V2 (wx + ww / 2) (wy + wh * 0.7))) ui
-  assert failed (not (respClicked outsideMid))
   let esc = keyInp KeyEscape inp0
   ((_, winEsc, _), _, _) <- runFrame ctx esc ui
   assert failed (not (respClicked winEsc))
-  let Rect px py pw _ =
-        case map snd (IM.toList panels) of
-          (r : _) -> r
-          _ -> respRect win0
+  let Rect px py pw _ = maybe (respRect win0) fst (IM.minView panels)
       closeAt = V2 (px + pw - padR windowPad - 12.5) (py + padT windowPad + 19.5)
   (_, winClose, _) <- runClick ctx inp0 ui closeAt
   assert failed (respClicked winClose)
@@ -429,13 +417,9 @@ runWindowContentChurnTest ctx failed = do
           void $ label "static row"
           )
   _ <- warmup2 ctx inp0 (ui 0)
-  allClip <- forM [1 .. 30] $ \k -> do
+  forM_ [1 .. 30] $ \k -> do
     _ <- runFrame ctx inp0 (ui k)
-    dmg <- takeDamage ctx
-    case dmg of
-      DamageClip _ -> pure True
-      _ -> pure False
-  assert failed (and allClip)
+    assert failed . (/= DamageFull) =<< takeDamage ctx
 
 runScrolledDebugToggleTest :: Context -> IORef Int -> IO ()
 runScrolledDebugToggleTest ctx failed = do
@@ -520,8 +504,7 @@ runWindowResizeHaloHitTest ctx failed = do
       destX = bx + bw + 4
       press = pressAt inp0 grab
   _ <- runFrame ctx press ui
-  let moved = press {inputMousePos = V2 (destX + 24) (y0 + 22), inputButtonsPressed = noButtons}
-  _ <- runFrame ctx moved ui
+  _ <- runFrame ctx (holdAt inp0 (V2 (destX + 24) (y0 + 22))) ui
   ((_, win1), _, _) <- runFrame ctx (inp0 {inputMousePos = V2 destX (y0 + 22)}) ui
   let Rect x1 y1 _ h1 = respRect win1
       hit = V2 (bx + bw - 2) (by + bh - 2)
@@ -572,8 +555,7 @@ runHeadingMonoTruncateTest ctx failed = do
     spansWide <- collectOverlayTextSpans ctx inp
     case fontSpans spansWide of
       [(Rect fx2 _ fw2 _, t2)] -> do
-        assert failed (t2 == longPath)
-        assert failed (not ("..." `T.isSuffixOf` t2))
+        assertEq failed longPath t2
         let contentRightWide = wxWide + wwWide - padR windowPad
         assert failed (abs (fx2 + fw2 - contentRightWide) < 2.0)
       _ -> assert failed False

@@ -312,8 +312,7 @@ runAdornmentKeyboardInertTest ctx failed = do
   forM_ (resps ++ take 1 resps) $ \expected -> do
     _ <- runFrame ctx (tabInp inp) ui
     assertEq failed (respId expected) =<< getFocusId ctx
-    _ <- runFrame ctx (keyInp KeyEnter inp) ui
-    pure ()
+    void (runFrame ctx (keyInp KeyEnter inp) ui)
   assertEq failed 0 =<< readIORef clicks
   -- Retained/programmatically assigned focus cannot request IME for decoration.
   writeIORef (ctxFocusId ctx) =<< readIORef childId

@@ -100,9 +100,8 @@ runStyledPaintTest ctx failed = do
         pure (inside, outside)
   ((inside, outside), draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw
-  let fills r = [c | (q, c) <- quads, rectIntersect q (respRect r) /= Nothing]
-  assert failed (red `elem` fills inside)
-  assert failed (red `notElem` fills outside)
+  assert failed (red `elem` fillsIn (respRect inside) quads)
+  assert failed (red `notElem` fillsIn (respRect outside) quads)
 
 -- | Nested scopes modify the theme around them, and 'uiTheme' reads it.
 runStyledNestingTest :: Context -> IORef Int -> IO ()
@@ -136,7 +135,6 @@ runStyledDamageTest ctx failed = do
       blue = colorRGBA 30 60 200 255
       green = colorRGBA 30 200 60 255
   _ <- warmup2 ctx inp (ui blue)
-  _ <- takeDamage ctx
   forM_ [green, blue] $ \c -> do
     (_, draw, _) <- runFrame ctx inp (ui c)
     assertEq failed DamageFull =<< takeDamage ctx

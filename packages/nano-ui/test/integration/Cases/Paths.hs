@@ -9,9 +9,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList, primArrayToList, sizeofPrimArray)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
-import NanoUI.Internal.Context (setDrawSnapScale)
 import GHC.Stack (HasCallStack)
-import NanoUI.Internal.Context (Context (..), DrawingCacheState (..))
+import NanoUI.Internal.Context (Context (..), DrawingCacheState (..), setDrawSnapScale)
 import NanoUI.Internal.Canvas (emitOp)
 import NanoUI.Internal.Path (fillPathOps)
 import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
@@ -101,6 +100,10 @@ covered ps tris = (sum (map area (triples tris)), all (\i -> i >= 0 && i < lengt
     triples (a : b : c : rest) = (ps !! a, ps !! b, ps !! c) : triples rest
     triples _ = []
     area (V2 x0 y0, V2 x1 y1, V2 x2 y2) = abs ((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)) / 2
+
+-- | Deterministic pseudo-random number in [0, 1).
+rnd :: Int -> Float
+rnd k = let v = sin (fromIntegral k * 12.9898) * 43758.5453 in v - fromIntegral (floor v :: Int)
 
 -- | Evaluate the Bezier curve with these control points at @t@.
 bezier :: [V2] -> Float -> V2
@@ -216,9 +219,6 @@ runFillTriangulationTest _ failed = do
       star = ring 10 (\i -> if even i then 50 else 20)
       ell = [V2 0 0, V2 60 0, V2 60 20, V2 20 20, V2 20 60, V2 0 60]
       comb = [V2 0 0, V2 100 0, V2 100 40, V2 80 40, V2 80 10, V2 60 10, V2 60 40, V2 40 40, V2 40 10, V2 20 10, V2 20 40, V2 0 40]
-      -- Deterministic pseudo-random number in [0, 1).
-      rnd :: Int -> Float
-      rnd k = let v = sin (fromIntegral k * 12.9898) * 43758.5453 in v - fromIntegral (floor v :: Int)
       shapes =
         [ ("circle", P.circle c 50), ("ellipse", P.ellipse c (V2 50 20)), ("rounded rect", P.roundedRect (Rect 0 0 100 60) 12)
         , ("hexagon", P.polygon (ring 6 (const 40))), ("star", P.polygon star), ("star anticlockwise", P.polygon (reverse star))
@@ -504,13 +504,10 @@ runFillHolesTest _ failed = do
     assertEq failed 3 (length rings)
     assert failed (not (coversPoint poly c) && coversPoint poly (V2 60 20))
   -- Many holes in a row, each a random convex polygon.
-  let rnd :: Int -> Float
-      rnd k = let v = sin (fromIntegral k * 12.9898) * 43758.5453 in v - fromIntegral (floor v :: Int)
-      blob i = [V2 (25 + 50 * fromIntegral i + 12 * cos a) (50 + 12 * sin a) | k <- [0 .. 7 :: Int], let a = 2 * pi * (fromIntegral k + 0.4 * rnd (i * 10 + k)) / 8]
+  let blob i = [V2 (25 + 50 * fromIntegral i + 12 * cos a) (50 + 12 * sin a) | k <- [0 .. 7 :: Int], let a = 2 * pi * (fromIntegral k + 0.4 * rnd (i * 10 + k)) / 8]
       blobs = map blob [0 .. 7 :: Int]
-      shoelace ps = abs (sum [x0 * y1 - x1 * y0 | (V2 x0 y0, V2 x1 y1) <- zip ps (drop 1 ps ++ take 1 ps)]) / 2
   single failed (polygons P.EvenOdd (square 0 0 400 <> foldMap P.polygon blobs)) $ \poly ->
-    assertLt failed (abs (maybe 0 id (coverage poly) - (160000 - sum (map shoelace blobs)))) 1
+    assertLt failed (abs (maybe 0 id (coverage poly) - (160000 - sum (map (abs . polyArea) blobs)))) 1
   -- Many subpaths, each finding its parent among the others: nested squares
   -- are filled bands and holes in turn, and a grid of squares is 100
   -- polygons, or 100 holes inside a larger square.
@@ -581,7 +578,7 @@ runJoinGeometryTest ctx failed = do
       outward = V2 (sqrt 0.5) (negate (sqrt 0.5))
       reach st = do
         vs <- canvasVertices ctx (\r -> drawStrokePathWith st (path r) (P.Solid black))
-        pure (maximum [v2Dot (v2Sub p corner) outward | (p, _) <- vs, v2Dist p corner < 30])
+        pure (maximum [v2Dot (v2Sub p corner) outward | (p, _) <- vs, dist p corner < 30])
       hw = 5
       edge = hw + 0.5
   miter <- reach (P.stroke 10)
@@ -600,7 +597,7 @@ runJoinGeometryTest ctx failed = do
         dir = V2 (dx / len) (dy / len)
         tip = V2 (40 + dx) (100 + dy)
     vs <- canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith (P.stroke 10) {P.strokeJoin = P.RoundJoin} (P.polyline [V2 (x + 40) (y + 100), V2 (x + 40 + dx) (y + 100 + dy), V2 (x + 40) (y + 100)]) (P.Solid black))
-    let tipReach = maximum [v2Dot (v2Sub q tip) dir | (q, _) <- vs, v2Dist q tip < 30]
+    let tipReach = maximum [v2Dot (v2Sub q tip) dir | (q, _) <- vs, dist q tip < 30]
     assert failed (tipReach > edge * 0.95 && tipReach < edge + 0.01)
   -- Each cap extends past the line end by its expected amount.
   let capReach cap = do
@@ -620,7 +617,6 @@ runJoinGeometryTest ctx failed = do
   assertLt failed (abs (maximum [40 - px | V2 px _ <- near100] - 5)) 0.01
   where
     v2Dot (V2 a b) (V2 c d) = a * c + b * d
-    v2Dist a b = let V2 dx dy = v2Sub a b in sqrt (dx * dx + dy * dy)
 
 -- | A linear gradient colours points by position, splits geometry at its
 -- stops, and follows transforms.
@@ -663,6 +659,7 @@ runGradientTest _ failed = do
   -- A zero-length gradient, or one with a single stop, is a flat fill.
   assert failed (null (gradient (V2 5 5) (V2 5 5) [(0, red), (1, blue)] bar))
   assertEq failed [1] [1 :: Int | FillPolygon _ _ _ (Flat c) <- opsAt 1 (drawPathWith P.NonZero bar (P.Linear (V2 5 5) (V2 5 5) [(0, red), (1, blue)])), c == blue]
+  assertEq failed [1] [1 :: Int | FillPolygon _ _ _ (Flat c) <- opsAt 1 (drawPathWith P.NonZero bar (P.Linear (V2 0 0) (V2 100 0) [(0, red)])), c == red]
   -- A stroke takes the colours along its centre line.
   assertEq failed [[red, blue]] [map Color (primArrayToList cs) | StrokePolyline _ _ _ _ _ _ (Shaded cs) <- opsAt 1 (drawStrokePathWith (P.stroke 4) (P.polyline [V2 0 0, V2 100 0]) (P.Linear (V2 0 0) (V2 100 0) [(0, red), (1, blue)]))]
   -- A four-corner gradient at a non-quarter angle becomes a shaded polygon
@@ -727,7 +724,7 @@ runCanvasConfiguredTest ctx failed = do
         cdc <- drawContext
         drawRect r (if cdcHovered cdc then red else black)
         pure ()
-      hoverAt resp = let Rect x y w h = respRect resp in (withInput 300 300) {inputMousePos = V2 (x + w / 2) (y + h / 2)}
+      hoverAt resp = (withInput 300 300) {inputMousePos = centerOf resp}
   resp <- warmup2 ctx (withInput 300 300) (ui 1)
   _ <- run2Frames ctx (hoverAt resp) (ui 1)
   dc <- readIORef (ctxDrawingCache ctx)

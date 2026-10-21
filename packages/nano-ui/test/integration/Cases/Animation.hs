@@ -73,35 +73,27 @@ runAnimateToStaysSettledTest ctx failed = do
   replicateM_ 700 (runFrame ctx inp (ui False))
   assert failed . near 0 =<< evalUi ctx inp (ui True)
 
+-- | A tween that moves a label repaints where the label was and where it went,
+-- also when the tween starts and finishes within one frame. At rest it
+-- repaints nothing of its own.
 runAnimationDamageTest :: Context -> IORef Int -> IO ()
-runAnimationDamageTest _ failed = do
-  ctx <- newContext
-  let idleInp = withDelta 200 100 0
-      idle = label "anim"
-      tweenInp = idleInp {inputDeltaTime = 0.05}
-      ui = do
-        t <- animateTo (Tween EaseLinear 0.4 0) 1
-        void (spacer (Fixed (20 + 80 * t)) Fit)
-        label "anim"
-      hasMove dmg = case dmg of
-        DamageFull -> True
-        DamageClip r -> rectW r > 0 && rectH r > 0
-  _ <- warmup2 ctx idleInp idle
-  dIdle <- takeDamage ctx
-  assert failed (dIdle /= DamageFull)
-  _ <- runFrame ctx tweenInp ui
-  dMid <- takeDamage ctx
-  assert failed (hasMove dMid)
-  ctx2 <- newContext
-  let fastInp = idleInp {inputDeltaTime = 0.5}
-      uiFast = do
-        t <- animateTo (Tween EaseLinear 0.2 0) 1
-        void (spacer (Fixed (20 + 80 * t)) Fit)
-        label "anim"
-  _ <- warmup2 ctx2 idleInp idle
-  _ <- runFrame ctx2 fastInp uiFast
-  dFast <- takeDamage ctx2
-  assert failed (hasMove dFast)
+runAnimationDamageTest ctx0 failed = do
+  ctx1 <- newContext
+  forM_ [(ctx0, 0.4, 0.05), (ctx1, 0.2, 0.5)] $ \(ctx, dur, dt) -> do
+    let inp = withDelta 200 100 dt
+        ui target = do
+          t <- animateTo (Tween EaseLinear dur 0) target
+          row (spacer (Fixed (20 + 80 * t)) Fit >> label' "anim")
+    lbl <- respId <$> warmup2 ctx inp (ui 0)
+    assert failed . (/= DamageFull) =<< takeDamage ctx
+    -- The frame that starts the tween, then one it moves the label on.
+    _ <- runFrame ctx inp (ui 1)
+    assertJustM failed (getPrevRect ctx lbl) $ \old -> do
+      _ <- runFrame ctx inp (ui 1)
+      dmg <- takeDamage ctx
+      assertJustM failed (getPrevRect ctx lbl) $ \new -> do
+        assertGt failed (rectX new) (rectX old)
+        assert failed (damageCovers dmg old && damageCovers dmg new)
 
 -- A delayed tween holds its start value until the delay elapses and then
 -- eases from there; declarative tweens stagger the same way per key.
@@ -122,21 +114,12 @@ runAnimationStaggerTest ctx failed = do
   let ui = do
         _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
         t <- withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1)
-        label (T.pack ("t=" ++ show t))
-      trailVal = do
-        spans <- collectTextSpans ctx
-        let shown = [txt | (_, txt, _, _, _) <- spans]
-            tagged = [T.drop 2 txt | txt <- shown, "t=" `T.isPrefixOf` txt]
-        case tagged of
-          (raw : _) -> case reads (T.unpack raw) of
-            [(n, "")] -> pure (n :: Float)
-            _ -> assert failed False >> pure 0
-          _ -> assert failed False >> pure 0
-  replicateM_ 3 (runFrame ctx inp ui)
-  early <- trailVal
+        t <$ label "trail"
+  replicateM_ 2 (runFrame ctx inp ui)
+  early <- evalUi ctx inp ui
   assert failed (early <= 0.01)
-  replicateM_ 10 (runFrame ctx inp ui)
-  late <- trailVal
+  replicateM_ 9 (runFrame ctx inp ui)
+  late <- evalUi ctx inp ui
   assert failed (late >= 0.15)
 
 runAnimationBezierTest :: Context -> IORef Int -> IO ()
@@ -247,9 +230,7 @@ runButtonHoverAnimTest ctx failed = do
   let decreases = any (uncurry (\a b -> b + 0.001 < a)) (zip vals (drop 1 vals))
   assert failed (not decreases)
   assert failed (last vals >= 0.4)
-  let (press, release) = clickPair inp0 (V2 10 10)
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
+  _ <- runClick ctx inp0 ui (V2 10 10)
   hot <- getHotId ctx
   val <- getAnimationValue ctx hot
   assert failed (hashWidgetId hot /= 0)
@@ -265,7 +246,6 @@ runSpinnerTest ctx failed = do
         spinnerWith' id 18
   _ <- runFrame ctx inp ui
   (resp, draw0, _) <- runFrame ctx inp ui
-  _ <- takeDamage ctx
   need <- needsRedraw ctx inp inp
   assert failed need
   quads0 <- drawQuads draw0
@@ -295,7 +275,6 @@ runKeepAnimatingLapseTest ctx failed = do
   _ <- runFrame ctx inp loaded
   assert failed . not =<< anyAnimating ctx
   _ <- runFrame ctx inp loaded
-  _ <- takeDamage ctx
   assert failed . not =<< needsRedraw ctx inp inp
   -- Shown again, it runs again.
   _ <- runFrame ctx inp loading

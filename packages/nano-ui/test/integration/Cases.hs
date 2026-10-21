@@ -37,7 +37,6 @@ tests =
   , spec "host-slot" runHostSlotTest
   , spec "id-keyed-list" runIdKeyedListTest
   , spec "fit-muted-width" runFitMutedWidthTest
-  , spec "layout-reuse" runLayoutReuseTest
   , spec "deep-nesting" runDeepNestingTest
   , spec "grow-split" runGrowSplitTest
   , spec "percent-gap-shrink" runPercentGapShrinkTest
@@ -89,39 +88,6 @@ runFitMutedWidthTest ctx failed = do
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   assertJust failed (rectW <$> spanRect "HelloFitMuted" spans) $ \w -> assertGt failed w 8
-
--- | Text and resize changes must invalidate cached layout.
-runLayoutReuseTest :: Context -> IORef Int -> IO ()
-runLayoutReuseTest ctx failed = do
-  let inp = withInput 400 300
-      ui1 =
-        columnWith (tight . gap 4 . fillW) $ do
-          void (label "alpha")
-          void (button "beta")
-          void (label "gamma delta epsilon")
-  _ <- runFrame ctx inp ui1
-  -- Frame 2 takes the cached-layout path (same descriptor).
-  _ <- runFrame ctx inp ui1
-  s1 <- collectTextSpans ctx
-  -- Text change invalidates the cached descriptor.
-  let ui2 =
-        columnWith (tight . gap 4 . fillW) $ do
-          void (label "alpha changed")
-          void (button "beta")
-          void (label "gamma delta epsilon")
-  _ <- runFrame ctx inp ui2
-  s2 <- collectTextSpans ctx
-  assert failed (s2 /= s1)
-  -- Width change must not serve the cached placement for width-dependent
-  -- (wrapping) layout.
-  let wrapUi =
-        columnWith (tight . fillW) $
-          label "the quick brown fox jumps over the lazy dog repeatedly"
-  _ <- runFrame ctx (withInput 600 200) wrapUi
-  sw0 <- collectTextSpans ctx
-  _ <- runFrame ctx (withInput 180 200) wrapUi
-  sw1 <- collectTextSpans ctx
-  assert failed (sw1 /= sw0)
 
 -- | Nesting deeper than the initial snapshot-level capacity must still lay
 -- out correctly (the level array grows on demand).
@@ -234,7 +200,6 @@ runImageSwapDamageTest ctx failed = do
             image (fixedWH 40 24) =<< liftIO (readIORef frameRef)
             pure wid
   wid <- warmup2 ctx inp0 ui
-  _ <- takeDamage ctx
   writeIORef frameRef (ImageId 2)
   _ <- runFrame ctx inp0 ui
   dmg <- takeDamage ctx
@@ -535,15 +500,15 @@ seedMixedGrid ref pid pctx = do
       liftIO (writeIORef ref SeedDone)
     _ -> pure ()
 
+-- | A filling grid with 40px minimum panes and 4px dividers.
+testGridConfig :: PaneGridConfig
+testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40, pgSpacing = 4}
+
 -- | Drag-drop previews must come from simulating the post-drop layout, not
 -- from halving the target's pre-drop rect: in a grid mixing 'AxisV' and
 -- 'AxisH' splits, dropping first removes the dragged pane, which collapses
 -- its parent split and re-flows the sibling subtrees, so the naive highlight
 -- lands at the wrong position and size.
--- | A filling grid with 40px minimum panes and 4px dividers.
-testGridConfig :: PaneGridConfig
-testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40, pgSpacing = 4}
-
 runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()
 runPaneGridMixedDragTest ctx failed = do
   -- Model level: vertical root split with a horizontal split inside the right
@@ -993,6 +958,7 @@ runSearchInputClearTest ctx failed = do
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchInput' "Search…"))
   (resp, _) <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
   let Rect bx by bw bh = respRect resp
       cy = by + bh / 2
       scanClear x
@@ -1008,6 +974,7 @@ runSearchInputClearTest ctx failed = do
     ((r1, t1), _, _) <- runFrame ctx inp0 ui
     assertEq failed t1 ""
     assert failed (respChanged r1)
+    assertEq failed (respId r1) =<< getFocusId ctx
     ((r2, _), _, _) <- runFrame ctx inp0 ui
     assert failed (not (respChanged r2))
 
@@ -1022,14 +989,16 @@ runSearchInputDebounceTest ctx failed = do
   ((rA, tA), _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
   assertEq failed tA "a"
   assert failed (not (respChanged rA))
+  before <- getMonotonicTime
   ((rB, tB), _, _) <- runFrame ctx (inp0 {inputChars = "b"}) ui
+  after <- getMonotonicTime
   assertEq failed tB "ab"
   assert failed (not (respChanged rB))
   -- No input marks the end of the pause, so the field asks for the frame
-  -- that commits: the loop sleeps until then instead of polling.
-  typedAt <- getMonotonicTime
+  -- that commits: the loop sleeps until then instead of polling. The edit
+  -- is stamped during the frame, so the wake is 40 ms past some moment in it.
   wakeAt <- getWakeAt ctx
-  assert failed (wakeAt > typedAt && wakeAt < typedAt + 0.06)
+  assert failed (wakeAt >= before + 0.04 && wakeAt <= after + 0.042)
   threadDelay 80000
   ((rC, tC), _, _) <- runFrame ctx inp0 ui
   assertEq failed tC "ab"

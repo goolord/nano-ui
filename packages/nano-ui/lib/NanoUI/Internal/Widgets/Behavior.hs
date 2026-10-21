@@ -21,18 +21,21 @@ module NanoUI.Internal.Widgets.Behavior
 where
 
 import Control.Monad (when, (>=>))
+import Data.Bits (shiftL, (.|.))
 import Data.IORef (readIORef, writeIORef)
 import Data.IntSet qualified as IS
 import Data.List (find, minimumBy)
+import Data.Map.Strict qualified as M
 import Data.Ord (comparing)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (isJust)
+import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInSubtree, nodeInteractionHit)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (getParent, getWidgetId, lookupNodeByKey)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
-import NanoUI.Internal.Store (deleteSlot, fieldInt, fieldPoint, findSlot, flagSlot, insertSlot, quietFlag, setFlagSlot, setQuietFlag)
+import NanoUI.Internal.Store (deleteSlot, fieldInt, fieldPoint, fieldQuiet, findSlot, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectContains, v2X, v2Y)
 import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
 
@@ -40,6 +43,7 @@ import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
 dragThresholdPx :: Float
 dragThresholdPx = 8
 
+-- | The axis a drag or an insertion index measures along.
 data DragAxis = DragAxisX | DragAxisY
   deriving (Eq, Show)
 
@@ -64,15 +68,26 @@ useDrag1D axis owner lo hi current track = do
       (origin, trackLen, mouse) = case axis of
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
-  active0 <- quietFlag dragK <$> liftIO (getStore ctx)
+  -- The drag keeps the point of the press that started it in a quiet slot
+  -- (0 for none), and lasts only under that press: one released while this
+  -- hook did not run does not come back with a later press.
+  held <- findSlot fieldQuiet 0 dragK <$> liftIO (getStore ctx)
+  active0 <- if held == 0 then pure False else (== held) <$> liftIO (leftPress ctx)
   -- Hit-test against the clipped node so a track scrolled out of its
   -- viewport does not respond at its stale rect.
   let onTrack = findNodeByWidgetId ctx owner >>= maybe (pure (rectContains track (inputMousePos inp))) (\i -> nodeInteractionHit ctx i track (inputMousePos inp))
   started <- pure (pressedIn MouseLeft inp) <&&> liftIO onTrack <&&> (not <$> liftIO (trackCovered ctx owner (inputMousePos inp)))
   let active = heldIn MouseLeft inp && (active0 || started)
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
-  when (active /= active0) $ liftIO (modifyStore ctx (setQuietFlag dragK active))
+  when (if active then not active0 else held /= 0) . liftIO $
+    if active
+      then leftPress ctx >>= modifyStore ctx . insertSlot fieldQuiet dragK
+      else modifyStore ctx (deleteSlot fieldQuiet dragK)
   pure (if active then lo + frac * (hi - lo) else current, active, active0)
+  where
+    -- The left button's press point as one nonzero Int, exact in both
+    -- coordinates; 0 while it is up.
+    leftPress ctx = maybe 0 (\(V2 x y, _) -> (fromIntegral (castFloatToWord32 x) `shiftL` 32 .|. fromIntegral (castFloatToWord32 y)) + 1) . M.lookup MouseLeft <$> readIORef (ctxPressPos ctx)
 
 -- | Whether a press at @mouse@ on a track of widget @owner@ is covered
 -- ('pointerCovered'). A track wider than its owner (a colour picker's bar)
@@ -99,11 +114,16 @@ trackCovered ctx owner mouse = do
 
 -- | Hold the active id for @wid@ while its drag lasts and let it go after, so
 -- the widget paints and takes the cursor as pressed wherever the pointer goes.
+-- On the release frame the id stays until the frame lets it go after the
+-- view, so a container around the widget does not take the release as its
+-- click.
 holdActiveWhile :: WidgetId -> Bool -> NanoUI ()
-holdActiveWhile wid dragging = withContext $ \ctx -> do
-  active <- readIORef (ctxActiveId ctx)
-  when (dragging /= (active == wid)) $
-    writeIORef (ctxActiveId ctx) (if dragging then wid else WidgetId 0)
+holdActiveWhile wid dragging = do
+  inp <- askInput
+  withContext $ \ctx -> do
+    active <- readIORef (ctxActiveId ctx)
+    when (dragging /= (active == wid) && (dragging || not (releasedIn MouseLeft inp))) $
+      writeIORef (ctxActiveId ctx) (if dragging then wid else WidgetId 0)
 
 -- | Where a drag-and-drop reorder stands after this frame ('useReorder').
 data Reorder = Reorder
@@ -152,10 +172,10 @@ useReorder order responses = do
       hit = fst <$> find (respPressed . snd) responses
       items = [(i, respRect r) | (i, r) <- responses]
   store <- liftIO (getStore ctx)
-  let dragging = if press then fromMaybe (-1) hit else findSlot fieldInt (-1) dragK store
+  let dragging = if press then hit else lookupSlot fieldInt dragK store
       (sx, sy) = if press then (mx, my) else findSlot fieldPoint (mx, my) startK store
       moved =
-        dragging >= 0
+        isJust dragging
           && not press
           && (flagSlot movedK store || (mx - sx) * (mx - sx) + (my - sy) * (my - sy) > dragThresholdPx * dragThresholdPx)
       distance (Rect x y w h) =
@@ -163,27 +183,29 @@ useReorder order responses = do
             dy = max 0 (max (y - my) (my - y - h))
          in dx * dx + dy * dy
       target = if null items then Nothing else Just (fst (minimumBy (comparing (distance . snd . snd)) (zip [0 :: Int ..] items)))
-      preview = case target of
-        Just t | moved, dragging `elem` order ->
-          let (before, after) = splitAt t (filter (/= dragging) order)
-           in before ++ dragging : after
+      preview = case (target, dragging) of
+        (Just t, Just d) | moved, d `elem` order ->
+          let (before, after) = splitAt t (filter (/= d) order)
+           in before ++ d : after
         _ -> order
       released = releasedIn MouseLeft inp
       ended = released || not (heldIn MouseLeft inp)
-      next = if ended then -1 else dragging
-  when (next /= findSlot fieldInt (-1) dragK store || (press && dragging >= 0) || moved /= flagSlot movedK store) $
+      next = if ended then Nothing else dragging
+  when (next /= lookupSlot fieldInt dragK store || (press && isJust dragging) || moved /= flagSlot movedK store) $
     liftIO . modifyStore ctx $
-      if next < 0
-        then deleteSlot fieldInt dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
-        else insertSlot fieldInt dragK next . insertSlot fieldPoint startK (sx, sy) . setFlagSlot movedK moved
+      case next of
+        Nothing -> deleteSlot fieldInt dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
+        Just d -> insertSlot fieldInt dragK d . insertSlot fieldPoint startK (sx, sy) . setFlagSlot movedK moved
   pure
     Reorder
       { reorderOrder = if released && moved then preview else order
       , reorderPreview = if ended then order else preview
-      , reorderDragging = if dragging >= 0 && not ended then Just dragging else Nothing
+      , reorderDragging = next
       , reorderMoved = moved
       }
 
+-- | The navigation keys pressed this frame ('useKeyNav'). The arrows count
+-- key auto-repeats; Enter and Space only the initial press.
 data KeyNav = KeyNav
   { knUp :: !Bool
   , knDown :: !Bool

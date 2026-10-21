@@ -69,7 +69,7 @@ module NanoUI.Internal.Context.Types
 
 import Control.Concurrent (ThreadId)
 import NanoUI.Internal.Derived (DerivedCache)
-import NanoUI.Internal.Resource (Held)
+import NanoUI.Internal.Resource (Held, Holding)
 import NanoUI.Internal.Host (Host)
 import NanoUI.Internal.BackendSession (SomeBackendSession)
 import NanoUI.Internal.NativeWindow.Types (NativeWindow)
@@ -636,10 +636,19 @@ data WidgetTextCacheEntry = WidgetTextCacheEntry
 -- Theme includes scoped/disabled styling; font metrics describe its text.
 data CustomDrawContext = CustomDrawContext
   { cdcHovered  :: {-# UNPACK #-} !Bool
+    -- ^ The pointer is over the widget, which is enabled.
   , cdcPressed  :: {-# UNPACK #-} !Bool
+    -- ^ The left button went down on the widget, which is enabled, and is
+    -- still held. When drawing, this holds wherever the pointer goes; in
+    -- 'NanoUI.Widgets.Custom.widgetInteract', only while it is over the widget.
   , cdcFocused  :: {-# UNPACK #-} !Bool
+    -- ^ The widget has keyboard focus.
   , cdcActive   :: {-# UNPACK #-} !Bool
+    -- ^ The widget holds the left press wherever the pointer goes, even when
+    -- disabled. In 'NanoUI.Widgets.Custom.widgetInteract' it is set from the
+    -- frame after the press.
   , cdcDisabled :: {-# UNPACK #-} !Bool
+    -- ^ The widget is in a disabled scope.
   , cdcTheme    :: !Theme
   , cdcFont     :: !FontMetrics
   }
@@ -927,9 +936,10 @@ data Context = Context
   -- ('NanoUI.Internal.Context.withBackendSession').
   , ctxSensors :: !(Host Sensors)
   , ctxParagraphs :: !(Host Paragraphs)
-  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Int, Int, Int, Int)) ImageId))
+  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Int, Int, Int, Int)) (ImageId, Holding)))
   -- ^ SVG rasters by document, pixel size, colour and content rect (in
-  -- eighths of a raster pixel).
+  -- eighths of a raster pixel), each leased in 'ctxHeld' to the frames that
+  -- draw it. A raster the atlas had no room for is kept as id 0.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))
   -- ^ Whole-layout reuse cache: cached signature and solved rects,
   -- with the window size and font/theme generation it was captured under.

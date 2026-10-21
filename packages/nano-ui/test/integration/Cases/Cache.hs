@@ -230,7 +230,9 @@ runDrawReuseTest ctx failed = do
             registerCustomDrawing ctx (WidgetId 777) 0 $ \_ r ->
               smallArrayFromList [FillRect r (colorRGBA stray 0 0 255)]
       base = (red, 0.2, red, 1, 1, 0)
-      frame s = (\(_, dd, _) -> dd) <$> runFrame ctx inp (ui s)
+      -- The case returns the field itself: a selector thunk from fmap would
+      -- make two reads of one draw data unequal under 'ptrEq' unoptimised.
+      frame s = runFrame ctx inp (ui s) >>= \(_, dd, _) -> pure dd
       -- Two frames of @s@ after @from@: the first paints @s@, and the second
       -- returns the first's draw data when @reused@.
       check from s reused = do
@@ -336,12 +338,11 @@ runPartialMeasureAncestorTest ctx failed = do
         parent <- addNodeFromLayout na NodeContainer (-1) (fixedWH w 200 defaultLayout)
         i <- addNodeFromLayout na NodeText parent defaultLayout
         setNodeText na i "a long label that wraps onto several lines at a narrow width"
-      rects = arenaRects
   void $ runFrame ctx inp (ui ctx 360)
-  wide <- rects ctx
+  wide <- arenaRects ctx
   void $ runFrame ctx inp (ui ctx 120)
-  narrow <- rects ctx
+  narrow <- arenaRects ctx
   assert failed (wide /= narrow)
   fresh <- newContext
   void $ runFrame fresh inp (ui fresh 120)
-  assertEq failed narrow =<< rects fresh
+  assertEq failed narrow =<< arenaRects fresh

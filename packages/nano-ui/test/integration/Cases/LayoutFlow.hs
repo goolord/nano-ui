@@ -181,7 +181,6 @@ runWrapRefitInColumnTest ctx failed = do
         box (fixedWH 10 10) blue
   _ <- warmup2 ctx (withInputOff 220 300) ui
   rectsAt ctx [1, 11, 12] >>= assertEq failed [Rect 0 0 220 30, Rect 50 20 50 10, Rect 0 30 10 10]
-  _ <- takeDamage ctx
   warmup ctx (withInputOff 600 300) ui
   takeDamage ctx >>= \d -> assert failed (case d of DamageFull -> True; DamageClip _ -> False)
   rectsAt ctx [1, 12] >>= assertEq failed [Rect 0 0 500 10, Rect 0 10 10 10]
@@ -248,11 +247,9 @@ runPinOutsideParentPaintTest ctx failed = do
   (_, full) <- warmupDraw ctx input0 (ui 1)
   forM_ [green, red] $ \col -> assert failed =<< drawn col full
   writeIORef (ctxPaintFull ctx) False
-  _ <- takeDamage ctx
   (_, draw, _) <- runFrame ctx input0 (ui 2)
   takeDamage ctx >>= \d -> assert failed (case d of DamageClip _ -> True; DamageFull -> False)
   assert failed =<< drawn blue draw
-  writeIORef (ctxPaintFull ctx) True
 
 -- | The topmost button gets the pointer: a later layer, a pinned child (also
 -- among layers when declared first), and each button in pinned layers. Next
@@ -364,12 +361,10 @@ runLayoutFlowDamageTest ctx failed = do
         forM_ repainted $ assert failed . damageCovers dmg
   _ <- warmup2 ctx input0 (ui 10 False 0)
   writeIORef (ctxPaintFull ctx) False
-  _ <- takeDamage ctx
   step (ui 120 False 0) [(3, Rect 120 10 20 20)] [Rect 10 10 20 20, Rect 120 10 20 20]
   -- The yellow box moves onto its own line.
   step (ui 120 True 0) [(4, Rect 0 60 100 20), (6, Rect 0 70 40 10)] [Rect 70 60 40 10, Rect 0 70 40 10]
   step (ui 120 True 5) [(4, Rect 0 60 100 25), (6, Rect 0 75 40 10)] [Rect 0 75 40 10]
-  writeIORef (ctxPaintFull ctx) True
 
 -- | A scroll container stacks its children in sequence even when its layout
 -- asks for layers or wrapping, and scrolls over all of them.
@@ -501,8 +496,7 @@ runPointerModesTest ctx failed = do
     cursorOver ctx input0 (field mode) p >>= assertEq failed focused . (== UiCursorText)
     _ <- runClick ctx (at p) (field mode) p
     getFocusId ctx >>= assertEq failed (if focused then respId f0 else WidgetId 0)
-    _ <- runClick ctx (at (V2 390 290)) (field mode) (V2 390 290)
-    pure ()
+    void (runClick ctx (at (V2 390 290)) (field mode) (V2 390 290))
   -- A drawing over a button takes the pointer or passes it through.
   let drawn mode = columnWith tight $ do
         b <- buttonWith' (fixedWH 200 100) "under"

@@ -4,8 +4,10 @@ module NanoUI.Testing.Runner
   ( runTests
   ) where
 
+import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
 import Control.Monad (forM, unless, when)
-import Data.IORef (IORef, newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Maybe (isJust)
 import NanoUI.Testing (Context)
 import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
@@ -13,7 +15,8 @@ import System.IO (hFlush, stdout)
 -- | Run the given specs. Each entry is a test name, a context maker, and the
 -- test body (which receives the context and a shared failure counter). Names
 -- passed as program arguments select which tests run; with no arguments
--- everything runs. A test counts as failed when it incremented the counter.
+-- everything runs. A test counts as failed when it incremented the counter
+-- or threw.
 runTests :: [(String, IO Context, Context -> IORef Int -> IO ())] -> IO ()
 runTests specs = do
   args <- getArgs
@@ -27,7 +30,11 @@ runTests specs = do
       hFlush stdout
       before <- readIORef failed
       ctx <- mkCtx
-      run ctx failed
+      -- A test that throws fails on its own, and the specs after it still run.
+      run ctx failed `catch` \(e :: SomeException) -> do
+        when (isJust (fromException @SomeAsyncException e)) (throwIO e)
+        putStrLn ("EXCEPTION: " ++ displayException e)
+        modifyIORef' failed (+ 1)
       after <- readIORef failed
       when (after > before) $ putStrLn ("FAIL: " ++ name)
       pure (after > before)

@@ -10,7 +10,6 @@ module NanoUI.Internal.Widgets.Tabs
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad (void, when)
 import Data.Bits ((.|.))
 import Data.Foldable (toList)
@@ -26,7 +25,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrol
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
-import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, nextId, liftIO, styled, uiTheme, withContext, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, slotWrite)
@@ -181,7 +180,7 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
             headers <* trailingView
         | otherwise = row' (contained . onEdge . tight . fillW . gap 8 $ defaultLayout) $ do
             tagTabChrome groupId edgeChrome style orient
-            scrollableHeaders ctx style barGap cur headers <* trailingView
+            scrollableHeaders ctx style barGap headers <* trailingView
       -- A segmented column hugs its headers in its track; the others run the
       -- body's length.
       segmentedColumn = if style == TabSegmented then padAll 3 else fillH
@@ -205,17 +204,16 @@ tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
 -- | Horizontal headers that page with chevron buttons when they overflow,
 -- in a row that takes the strip's width less its trailing view. Overflowing
 -- headers move into a bare horizontal scroller that grows between the two
--- arrows; the vertical wheel pages it too. Segmented headers sit in their
--- track, which scrolls with them.
+-- arrows; the vertical wheel over it pages it too, and scrolls nothing
+-- round it. Segmented headers sit in their track, which scrolls with them.
 scrollableHeaders ::
-  Eq a =>
+  Hashable a =>
   Context ->
   TabStyle ->
   Float ->
-  a ->
   NanoUI (TabResponse a) ->
   NanoUI (TabResponse a)
-scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text) $ do
+scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ do
   groupId <- nextId
   scrollWid <- nextId
   trackId <- nextId
@@ -233,7 +231,11 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
   -- The reachable range measured after last frame's layout decides whether
   -- the strip needs the scroller. It is a float slot so a pure scroll frame
   -- keeps its clip damage (`onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
-  maxOff <- max 0 . findSlot fieldFloat 0 rangeKey <$> liftIO (getStore ctx)
+  store <- liftIO (getStore ctx)
+  let maxOff = max 0 (findSlot fieldFloat 0 rangeKey store)
+      -- The hash of the tab the strip last brought into view.
+      followKey = intKey groupId
+      followed = findSlot fieldInt 0 followKey store
   off <- liftIO (getScrollOffset ctx scrollWid)
   let (overflow, canLeft, canRight) = paging maxOff off
   wheelStep <- liftIO (resolveScrollStep ctx scrollWid)
@@ -242,8 +244,10 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
   mBar <- liftIO (getPrevRect ctx groupId)
   mScr <- liftIO (getPrevRect ctx scrollWid)
   inp <- askInput
-  let overBar = maybe False (\r -> rectContains r (inputMousePos inp)) mBar
-      notches = if overBar then round (v2Y (inputScroll inp)) else 0 :: Int
+  -- Over the scroller only: it keeps the vertical wheel from the scrollers
+  -- round it, which the arrows do not.
+  let overStrip = maybe False (\r -> rectContains r (inputMousePos inp)) mScr
+      notches = if overStrip then round (v2Y (inputScroll inp)) else 0 :: Int
       -- A paging arrow while the bar overflows, muted at its end.
       arrow k enabled glyph
         | overflow = withKey (k :: Text) $ do
@@ -297,8 +301,21 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
     when (abs (maxOff' - maxOff) > 0.5) $
       publishLayoutSlots ctx (slotWrite fieldFloat rangeKey maxOff')
     pure (paging maxOff' o /= paging maxOff off)
-  -- One offset per frame: arrow pages, wheel notches and the end clamp, or,
-  -- when the active tab changed, whatever brings it into view.
+  -- While the shown tab is not the one last brought into view, however it
+  -- came to be shown (a click, a key, a write to the Var), its header's rect
+  -- and the scroller's. Each is last frame's, or, for one laid out for the
+  -- first time this frame, a read that brings another frame once it is.
+  let shown = tabActive tabResp
+      laidOut w = liftIO (getPrevRect ctx w) >>= maybe (lastRect w) (pure . Just)
+  target <-
+    if overflow && hash shown /= followed
+      then do
+        scroller <- laidOut scrollWid
+        header <- maybe (pure Nothing) (laidOut . respId) (lookup shown hdrs)
+        pure (scroller *> header)
+      else pure Nothing
+  -- One offset per frame: arrow pages, wheel notches and the end clamp, or
+  -- whatever brings that header into view.
   let pagedOff
         | leftClicked, canLeft = max 0 (off - page)
         | rightClicked, canRight = min maxOff (off + page)
@@ -311,12 +328,12 @@ scrollableHeaders ctx style barGap cur headers = withKey ("tab-headers" :: Text)
         | rectX hr + rectW hr > viewX + viewW =
             min maxOff (off + (rectX hr + rectW hr - viewX - viewW))
         | otherwise = pagedOff
-      finalOff
-        | overflow, tabActive tabResp /= cur =
-            maybe pagedOff (follow . respRect) (lookup (tabActive tabResp) hdrs)
-        | otherwise = pagedOff
+      finalOff = maybe pagedOff follow target
   when (finalOff /= off) $
     liftIO (setScrollOffset ctx scrollWid finalOff)
+  -- Compared first, so a parked strip writes nothing.
+  when (isJust target) $
+    liftIO (publishLayoutSlots ctx (slotWrite fieldInt followKey (hash shown)))
   pure tabResp {tabStripRect = viewport}
 
 -- | The headers and the selection after this frame's clicks, with each
@@ -373,14 +390,17 @@ renderHeader style orient cur t = disabledWhen (tabDisabled t) $ do
 
 -- | A badge: its text, smaller, in a pill of the label colour @col@.
 tabBadgeView :: Color -> Text -> NanoUI ()
-tabBadgeView col txt =
+tabBadgeView col txt = do
+  -- Scaled from the base size the title is drawn at.
+  size <- uiFontSize
   styled (panelStyle (\s -> s {styleBg = fadeAlpha col 44, styleBorderWidth = 0, styleCornerRadius = 8})) $
     panel' (padXY 6 1 . tight . minH 17 . alignCenter . alignMid $ defaultLayout) $
-      () <$ labelEx (tight . fontSizeScale 0.78 . fontColor col $ defaultLayout) txt
+      () <$ labelEx (tight . fontSize (size * 0.78) . fontColor col $ defaultLayout) txt
 
 -- | Tab headers and the active tab's body, with the active key bound to
 -- mutable state ('Var'): a click, or Enter or Space on a focused header,
--- updates it in place. Only the active tab's body runs.
+-- updates it in place. Only the active tab's body runs. A key no tab has,
+-- such as a removed tab's, selects the first tab, and the 'Var' is set to it.
 {-# INLINE tabs #-}
 tabs :: (Foldable f, Hashable a) => Var a -> f (Tab a (NanoUI ())) -> NanoUI ()
 tabs = tabsConfigured defaultTabsConfig
@@ -397,13 +417,16 @@ tabsConfigured cfg active ts = void (tabsConfigured' cfg active ts)
 
 -- | 'tabsConfigured' with selection, close requests, and header interaction details.
 tabsConfigured' :: (Foldable f, Hashable a) => TabsConfig -> Var a -> f (Tab a (NanoUI ())) -> NanoUI (TabResponse a)
-tabsConfigured' cfg active inputTabs = bindTabs cfg True active (\cur -> tabStrip cfg cur ts (Just body))
+tabsConfigured' cfg active inputTabs = bindTabs cfg True active (\cur -> tabStrip cfg (shown cur) ts (Just body))
   where
     ts = toList inputTabs
-    -- Only the active tab's body runs, or the first tab's when none matches.
-    -- Both bodies and headers use the semantic key: their widget state and
-    -- focus follow the tab through reordering and removal of neighbours.
-    -- A contained body is a bordered surface the selected header opens onto.
+    -- A key no tab has shows the first tab, its header as well as its body,
+    -- and the binding writes that tab's key back.
+    shown k = if any ((== k) . tabKey) ts then k else maybe k tabKey (listToMaybe ts)
+    -- Only the active tab's body runs. Both bodies and headers use the
+    -- semantic key: their widget state and focus follow the tab through
+    -- reordering and removal of neighbours. A contained body is a bordered
+    -- surface the selected header opens onto.
     body k = do
       let contained = tabsStyle cfg == TabContained
           vertical = tabsOrientation cfg `elem` [TabLeft, TabRight]
@@ -413,7 +436,7 @@ tabsConfigured' cfg active inputTabs = bindTabs cfg True active (\cur -> tabStri
         mapM_ (\wid -> tagTabChrome wid TabChromeBody (tabsStyle cfg) (tabsOrientation cfg)) bodyId
         mapM_
           (\t -> withKey (tabKey t) (tabBody t))
-          (find ((== k) . tabKey) ts <|> listToMaybe ts)
+          (find ((== k) . tabKey) ts)
 
 -- | Run a tab strip on the active key in a Var. A body placed ahead of the
 -- headers has already run for the old key when a header is clicked, so a

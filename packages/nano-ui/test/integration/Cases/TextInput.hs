@@ -77,6 +77,7 @@ tests =
   , pixelSpec "text-area-hscroll-wheel" runTextAreaHScrollWheelTest
   , pixelSpec "text-area-hscroll-drag" runTextAreaHScrollDragTest
   , pixelSpec "text-area-2d-scroll" runTextArea2DScrollTest
+  , pixelSpec "text-area-bar-range" runTextAreaBarRangeTest
   , pixelSpec "text-area-scroll-cursor-leaves-viewport" runTextAreaScrollCursorLeavesViewportTest
   , pixelSpec "text-area-caret-follow" runTextAreaCaretFollowTest
   , pixelSpec "text-area-caret-above-bar" runTextAreaCaretAboveBarTest
@@ -269,7 +270,8 @@ runTextInputSelectionTest ctx failed = do
     ui = column (button "Other" >> held textRef textInput')
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
-  _ <- warmup2 ctx (chordInp (shift <> key KeyLeft) inp0) ui
+  -- Shift+Left on two frames selects "lo", back from the caret at the end.
+  replicateM_ 2 (runFrame ctx (chordInp (shift <> key KeyLeft) inp0) ui)
   assertEq failed "helX" . snd =<< evalUi ctx (inp0 {inputChars = "X"}) ui
   -- Ctrl+A selects all and types nothing, even when the backend also sends
   -- the letter as text.
@@ -444,8 +446,9 @@ runTextInputDragWakeTest ctx failed = do
   let
     Rect rx ry rw _ = respRect resp
     outside = V2 (rx + rw + 40) (ry + 4)
-    (press, release) = clickPair inp0 (V2 (rx + 4) (ry + 4))
-    hold = press {inputButtonsPressed = noButtons}
+    grab = V2 (rx + 4) (ry + 4)
+    (press, release) = clickPair inp0 grab
+    hold = holdAt inp0 grab
   _ <- runFrame ctx press ui
   _ <- runFrame ctx hold ui
   assertEq failed 0 =<< getWakeAt ctx
@@ -519,12 +522,7 @@ fieldScrollX ctx resp =
 runTextInputFontScrollTest :: Context -> IORef Int -> IO ()
 runTextInputFontScrollTest base failed = do
   let
-    large = monospaceMetrics 32
-    ctx =
-      withFontResolver
-        (withFontMetrics base (monospaceMetrics 12))
-        (\_ _ _ _ -> pure (large, False))
-        (\_ _ _ _ txt -> pure (32 * fromIntegral (T.length txt), 32))
+    ctx = withMonospaceFonts 12 32 base
     inp0 = withInput 400 200
     cfg = defaultTextInputConfig {ticLayout = fontSize 32 (fixedW 200 (ticLayout defaultTextInputConfig))}
     ui = column (withValue "HgHgHgHgHg" (textInputConfigured' cfg))
@@ -724,6 +722,26 @@ runTextAreaHScrollWheelTest ctx failed = do
     assertEq failed 0 . v2X =<< wheel (-10)
     assertJust failed (snd (textAreaBarLayouts field (textAreaBars fm field (lineWidth fm longLine) 0) 0 0)) $
       checkThumbGrab failed ctx inp0 ui
+
+-- | A text area's bar spans the text's own range, not its insets: scrolled
+-- to the end, the thumb meets the end of its track, with the other bar shown
+-- or not.
+runTextAreaBarRangeTest :: Context -> IORef Int -> IO ()
+runTextAreaBarRangeTest ctx failed = do
+  let
+    fm = ctxFontMetrics ctx
+    field = Rect 0 0 200 100
+    atEnd contentW = do
+      let
+        bars = textAreaBars fm field contentW (10 * textAreaLineHeight fm)
+        V2 _ rangeY = tabRange bars
+      assertJust failed (fst (textAreaBarLayouts field bars 0 rangeY)) $ \layout -> do
+        let Rect _ ty _ th = sbTrack layout
+            Rect _ my _ mh = sbThumb layout
+        assertEq failed rangeY (sbMaxOff layout)
+        assert failed (abs (ty + th - (my + mh)) < 0.01)
+  atEnd 0
+  atEnd 1000
 
 runTextArea2DScrollTest :: Context -> IORef Int -> IO ()
 runTextArea2DScrollTest ctx failed = do

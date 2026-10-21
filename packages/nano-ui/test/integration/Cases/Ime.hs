@@ -162,7 +162,6 @@ runImeAreaPaintTest ctx failed = do
       ui = column (held ref textInput' <* held areaRef textArea')
       near a b = abs (a - b) <= 1
       paint step = do
-        writeIORef (ctxPaintFull ctx) True
         (_, draw, _) <- runFrame ctx step ui
         (,) <$> drawQuads draw <*> collectTextSpans ctx
       carets quads cx = [r | (r@(Rect x _ w h), _) <- quads, near x cx, w <= 1.5, h >= cell / 2]

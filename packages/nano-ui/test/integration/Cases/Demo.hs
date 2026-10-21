@@ -17,6 +17,8 @@ tests =
   , pixelSpec "color-picker-change-once" runColorPickerChangeOnceTest
   , pixelSpec "color-picker-bar-keys" runColorPickerBarKeysTest
   , pixelSpec "color-picker-drag-after-field" runColorPickerDragAfterFieldTest
+  , pixelSpec "color-picker-keys-opaque" runColorPickerKeysOpaqueTest
+  , pixelSpec "color-picker-field-commits" runColorPickerFieldCommitsTest
   , pixelSpec "controls-tab-height" runControlsTabHeightTest
   , pixelSpec "bounded-radio-offset" runBoundedRadioTest
   ]
@@ -109,10 +111,7 @@ runControlsTabHeightTest ctx failed = do
         Nothing -> pure [Nothing, Nothing, Nothing]
     spanOf lbls spans =
       let
-        match txt =
-          any
-            (\lbl -> txt == lbl || T.drop 1 txt == lbl || T.isSuffixOf lbl txt)
-            lbls
+        match txt = any (`T.isSuffixOf` txt) lbls
         ys =
           [ (y, y + h)
           | (Rect _ y _ h, txt, _, _, _) <- spans
@@ -190,7 +189,6 @@ runColorPickerPartDamageTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
-  _ <- takeDamage ctx
   _ <- runFrame ctx (keyInp KeyRight inp0) ui
   dmg <- takeDamage ctx
   let na = ctxNodeArena ctx
@@ -210,7 +208,6 @@ runColorPickerDragDamageTest ctx failed = do
   let inp0 = withInput 400 1200
       ui = held colorRef colorPickerRGBA'
   (resp, _) <- warmup2 ctx inp0 ui
-  _ <- takeDamage ctx
   let (press, release) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx press ui
   pressDmg <- takeDamage ctx
@@ -285,6 +282,35 @@ runColorPickerChangeOnceTest ctx failed = do
   assert failed (neu /= initial)
   assertEq failed (widgetStoreBaseColor store (respId resp) initial) neu
   assertEq failed [False, False] =<< mapM changed [inp0, inp0]
+
+-- | Without an alpha bar the colour is opaque however it moves: an arrow
+-- key on the field drops a translucent alpha, as a drag or a field does.
+runColorPickerKeysOpaqueTest :: Context -> IORef Int -> IO ()
+runColorPickerKeysOpaqueTest ctx failed = do
+  colorRef <- newVar (colorRGBA 204 102 102 128)
+  let inp0 = withInput 400 420
+      ui = held colorRef colorPicker'
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runFrame ctx (keyInp KeyRight inp0) ui
+  assertEq failed 255 . colorA =<< readVarIO colorRef
+
+-- | An edit in a channel field commits the "current" swatch, as a key step
+-- does, so the next drag compares with the colour it starts from.
+runColorPickerFieldCommitsTest :: Context -> IORef Int -> IO ()
+runColorPickerFieldCommitsTest ctx failed = do
+  let initial = colorRGBA 204 102 102 255
+  colorRef <- newVar initial
+  let inp0 = withInput 400 460
+      ui = held colorRef colorPicker'
+  (resp, _) <- warmup2 ctx inp0 ui
+  -- Tab past the field and the hue bar to the R field, and step it up.
+  replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
+  _ <- runFrame ctx (keyInp KeyUp inp0) ui
+  store <- getStore ctx
+  let neu = widgetStoreColor store (respId resp) initial
+  assertEq failed 205 (colorR neu)
+  assertEq failed neu (widgetStoreBaseColor store (respId resp) initial)
 
 -- The hue and alpha bars are focus stops after the field. An arrow moves a
 -- bar's handle the way it is drawn (down raises the hue, up lowers the alpha),

@@ -82,8 +82,7 @@ runTextInputFontTest base failed = do
       big = fontSize 32
       field = void ((snd <$> withValue "Hg" (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)})))
       extent ui = do
-        _ <- runFrame ctx inp (column ui)
-        (_, dd, _) <- runFrame ctx inp (column ui)
+        (_, dd) <- warmupDraw ctx inp (column ui)
         ps <- glyphVertices dd
         let xs = map fst ps
             ys = map snd ps
@@ -195,7 +194,6 @@ runSquareGeometryTest ctx failed = do
   squareTris <- triangleAlphas dSquare
   assert failed (not (null squareTris))
   assert failed (all uniform squareTris)
-  setDrawSquareGeometry ctx False
 
 -- | A rounded border wider than twice its radius keeps its ink inside its
 -- box: the corner arcs end on the corner radius.
@@ -225,7 +223,6 @@ runExternalTextTest ctx failed = do
   spans <- collectTextSpans ctx
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
-  setDrawExternalText ctx False
 
 -- | Geometry clipped to nothing gets no command, which a host would still
 -- draw into the pixel its empty clip rounds to.
@@ -253,7 +250,6 @@ runConcentricCirclesTest ctx failed = do
         }
   setDrawSnapScale ctx 1
   (_, dd, _) <- runFrame ctx inp ui
-  setDrawSnapScale ctx 0
   verts <- vertexColours dd
   let centreOf rgb = case [(x, y) | (x, y, c) <- verts, c == rgb] of
         [] -> Nothing

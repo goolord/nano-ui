@@ -7,7 +7,7 @@ import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
+import Data.Text.IO.Utf8 qualified as TIO
 import NanoUI.Internal.Context (Context (ctxActiveId, ctxNodeArena), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
@@ -262,9 +262,8 @@ page mOv vc (V2 dx dy) =
 open :: Maybe Overlay -> Victim -> V2 -> V2 -> IO (Context, V2, Maybe Rect)
 open mOv vc (V2 offX offY) shift = do
   ctx <- newPixelContext
-  let frame inp = (\(a, _, _) -> a) <$> runFrame ctx inp (page mOv vc shift)
-  _ <- frame win
-  (src, (resp, _)) <- frame win
+  let frame inp = evalUi ctx inp (page mOv vc shift)
+  (src, (resp, _)) <- warmup2 ctx win (page mOv vc shift)
   let hot = V2 (rectX (respRect resp) + offX) (rectY (respRect resp) + offY)
   forM_ (maybe [] (\ov -> ovOpen ov src hot win) mOv) frame
   (src', _) <- frame win {inputMousePos = hot}
@@ -278,14 +277,13 @@ runPointerOwnershipTest _ failed = do
   vcs <- victims
   let report name msgs = forM_ msgs $ \msg -> do
         putStrLn ("  " <> name <> ": " <> msg)
-        modifyIORef' failed (+ 1)
+        bump failed
   forM_ vcs $ \vc -> do
     -- The hot point is found with nothing on top (an overlay hides the spans
     -- some widgets are located by) and carried as an offset into the widget.
     offset <- do
       ctx <- newPixelContext
-      _ <- runFrame ctx win (page Nothing vc (V2 0 0))
-      ((_, (resp, _)), _, _) <- runFrame ctx win (page Nothing vc (V2 0 0))
+      (_, (resp, _)) <- warmup2 ctx win (page Nothing vc (V2 0 0))
       V2 hx hy <- vcHot vc ctx resp
       pure (V2 (hx - rectX (respRect resp)) (hy - rectY (respRect resp)))
     -- The control: with no overlay the widget does notice, so staying quiet
@@ -311,7 +309,7 @@ scenario mOv vc offset shift gesture = do
   (ctx, hot, mRect) <- open mOv vc offset shift
   case mRect of
     Just r | rectContains r hot -> do
-      let frame inp = (\((_, v), _, _) -> v) <$> runFrame ctx inp (page mOv vc shift)
+      let frame inp = snd <$> evalUi ctx inp (page mOv vc shift)
           at p = win {inputMousePos = p}
       (resp0, value0) <- frame (at hot)
       probe0 <- vcProbe vc ctx resp0
@@ -386,7 +384,7 @@ runPointerRoutingLintTest _ failed = do
       , "NanoUI/Internal/Widgets/Behavior.hs" -- useDismissable: a press anywhere else dismisses
       , "NanoUI/Internal/Widgets/Popup.hs" -- tooltips: a press anywhere shuts one, and one covering its target stays
       ]
-    complain msg = putStrLn ("  " <> msg) >> modifyIORef' failed (+ 1)
+    complain msg = putStrLn ("  " <> msg) >> bump failed
     haskellFiles dir = do
       entries <- map (dir </>) <$> listDirectory dir
       dirs <- filterM doesDirectoryExist entries
@@ -401,11 +399,10 @@ runPointerCaptureTest ctx failed = do
         s <- columnWith (fixedW 320) (withValue 50 (slider' 0 100))
         (_, b) <- window' (constVar True) "Capture window" (columnWith (fixedWH 300 200) (button' "inside"))
         pure (s, b)
-      frame inp = (\(a, _, _) -> a) <$> runFrame ctx inp ui
+      frame inp = evalUi ctx inp ui
       at p = win {inputMousePos = p}
       hold = holdAt win
-  _ <- frame win
-  ((slider0, _), mInside) <- frame win
+  ((slider0, _), mInside) <- warmup2 ctx win ui
   assertJust failed mInside $ \inside0 -> do
     let Rect sx sy sw sh = respRect slider0
         onTrack = V2 (sx + sw * 0.25) (sy + sh / 2)

@@ -51,6 +51,12 @@ sliderWith' f minV maxV v = bindVarBy sameFloat RenderFinal v (sliderCore f minV
 -- frame's drag or arrow keys.
 sliderCore ::
   (Layout -> Layout) -> Float -> Float -> Float -> NanoUI (Response, Float)
+sliderCore f minV maxV value
+  -- A NaN bound gives way to 0 or the other bound, and a reversed range
+  -- reads low to high, so neither leaves the value NaN or pinned to a bound.
+  | isNaN minV = sliderCore f 0 maxV value
+  | isNaN maxV = sliderCore f minV minV value
+  | minV > maxV = sliderCore f maxV minV value
 sliderCore f minV maxV value = do
   (wid, ctx) <- freshWidget
   liftIO $ registerFocusable ctx wid

@@ -42,8 +42,9 @@ runCollectionApiTest ctx failed = do
       radioIndex <- (snd <$> withValue (-1) (radio (Seq.empty :: Seq.Seq Text)))
       comboValue <- (snd <$> withValue "Beta" (comboBox "Choose" (Seq.fromList ["Alpha", "Beta"])))
       pure (selectIndex, radioIndex, comboValue)
-  assertEq failed 0 emptySelect
-  assertEq failed 0 emptyRadio
+  -- No options reach the index, so it stays the caller's.
+  assertEq failed 5 emptySelect
+  assertEq failed (-1) emptyRadio
   assertEq failed "Beta" combo
   -- A failed image must not prevent later registrations in traversal order.
   assertEq failed False =<< registerImages ctx (Seq.fromList [(ImageId 0, 1, 1, BS.replicate 4 255), (ImageId 42, 1, 1, BS.replicate 4 255)])
@@ -171,13 +172,9 @@ runVarSlotIdentityTest ctx failed = do
 runVarLifecycleTest :: Context -> IORef Int -> IO ()
 runVarLifecycleTest ctx failed = do
   left <- newVar (0 :: Int)
-  right <- newVar (0 :: Int)
   let inp = withInputOff 300 100
-      item :: Text -> Var Int -> NanoUI Int
-      item name v = withKey name $ do
-        n <- readVar v
-        label (T.pack (show n))
-        pure n
+      item :: Text -> NanoUI (Var Int)
+      item name = withKey name (useVar 0)
       view = do
         n <- readVar left
         label (T.pack (show n))
@@ -197,12 +194,11 @@ runVarLifecycleTest ctx failed = do
   assert failed . damageIsEmpty =<< takeDamage ctx
   runNanoUI ctx inp (modifyVar left (+ 3) >> writeVar left 0)
   assertEq failed 0 =<< readVarIO left
-  writeVarIO left 7
-  (before, _, _) <- runFrame ctx inp ((,) <$> item "left" left <*> item "right" right)
-  _ <- runFrame ctx inp (item "right" right)
-  (after, _, _) <- runFrame ctx inp ((,) <$> item "right" right <*> item "left" left)
-  assertEq failed (7, 0) before
-  assertEq failed (0, 7) after
+  (owned, _) <- evalUi ctx inp ((,) <$> item "left" <*> item "right")
+  writeVarIO owned 7
+  _ <- runFrame ctx inp (item "right")
+  (right, left') <- evalUi ctx inp ((,) <$> item "right" <*> item "left")
+  assertEq failed (0, 7) =<< ((,) <$> readVarIO right <*> readVarIO left')
 
 data Item = Item {rowKey :: !Int, rowName :: !Text, rowDone :: !Bool}
   deriving (Eq, Show, Generic)
@@ -290,7 +286,6 @@ runVarAbortTest ctx failed = do
   _ <- warmup2 ctx inp view
   r <- try @ErrorCall (runFrame ctx inp failing)
   assert failed (either (const True) (const False) r)
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp view
   assertEq failed 1 =<< lastFramePasses ctx
   assertEq failed DamageFull =<< takeDamage ctx

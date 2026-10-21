@@ -218,8 +218,10 @@ module NanoUI.Backend
     -- * Widget ids
 
     -- | How a @WidgetId@ is derived. A view uses @scope@, @withKey@ and
-    -- @nextId@ from "NanoUI" instead; this is for code that keeps its own id
-    -- context, or hashes one the same way nano-ui does.
+    -- @nextId@ from "NanoUI" instead; this is for code that hashes ids the
+    -- same way nano-ui does. The operations on an 'IdContext' (the next
+    -- sibling's id, entering a scope or a key) are in "NanoUI.Internal.Id",
+    -- which can change without notice.
   , IdContext
   , initialIdContext
   , widgetId
@@ -284,14 +286,18 @@ module NanoUI.Backend
 
     -- * The backend's session
 
-    -- | Each backend has a constructor in the 'Backend' kind and a
+    -- | Each backend names itself in the 'Backend' kind, gives a
     -- 'BackendSession' type family instance, and installs its session state
-    -- with 'withBackendSession'. Backend-specific view operations retrieve
+    -- with 'withBackendSession'. A backend outside this repository uses
+    -- @'Custom "name"@. Backend-specific view operations retrieve
     -- the session with 'askBackendSession' and the 'SBackend' singleton
     -- (returning 'Nothing' under other backends).
     --
     -- > type instance BackendSession 'Sdl = SdlEnv
     -- > askSdlEnv = askBackendSession SSdl
+    -- >
+    -- > type instance BackendSession ('Custom "mine") = MyEnv
+    -- > askMyEnv = askBackendSession (SCustom (SSymbol @"mine"))
   , Backend (..)
   , SBackend (..)
   , BackendSession

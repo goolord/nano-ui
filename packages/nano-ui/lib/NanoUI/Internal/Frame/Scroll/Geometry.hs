@@ -8,6 +8,7 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , scrollNodeBars
   , scrollChromeLane
   , scrollBarLayout
+  , scrollBarLayoutIn
   , scrollAxisRange
   , scrollOffsetFromThumb
   , onScrollBar
@@ -95,10 +96,9 @@ scrollAxisGutter ::
   Float
 scrollAxisGutter policy slot trailPad contentSize innerMain =
   case policy of
-    ScrollNone -> 0
-    ScrollHidden -> 0
     ScrollAuto -> if scrollOverflows contentSize innerMain then scrollBarGutter slot trailPad else 0
     ScrollAlways -> scrollBarGutter slot trailPad
+    _ -> 0
 
 -- Vertical bar takes width. Horizontal bar takes height. Second pass
 -- covers the corner case where one bar makes the other axis overflow.
@@ -133,10 +133,7 @@ scrollPolicyFor cfg = \case
 -- | Whether the bar along @dir@ is never painted or grabbed.
 scrollChromeSuppressed :: ScrollConfig -> DirTag -> Bool
 scrollChromeSuppressed cfg dir =
-  case scrollPolicyFor cfg dir of
-    ScrollAuto -> False
-    ScrollAlways -> False
-    _ -> True
+  let p = scrollPolicyFor cfg dir in p /= ScrollAuto && p /= ScrollAlways
 
 -- | Wheel eligibility is wider than chrome eligibility: a hidden bar never
 -- paints or drags, but it still scrolls. Only a dead axis ('ScrollNone')
@@ -229,8 +226,8 @@ scrollChromeLane slot dir x y w h pad =
           Rect (x + padL pad) (max y (y + h - inset (padB pad) - barW)) (max 0 (w - padL pad - padR pad)) barW
 
 -- | Track and thumb from slot, axis, x/y/width/height, padding, content extent,
--- and current offset. Lengths use logical pixels; 'Nothing' means no usable
--- scrollbar is needed or fits. Use 'scrollBarLayoutIn' for a reduced viewport.
+-- and current offset. Lengths use logical pixels; 'Nothing' when the content
+-- does not overflow or the track is too short for the smallest thumb.
 scrollBarLayout ::
   ScrollBarSlot ->
   DirTag ->
@@ -242,16 +239,17 @@ scrollBarLayout ::
   Float ->
   Float ->
   Maybe ScrollBarLayout
-scrollBarLayout slot dir x y w h pad =
-  scrollBarLayoutIn slot dir (Rect x y w h) pad $ case dir of
-    DirColumn -> h - padT pad - padB pad
-    DirRow -> w - padL pad - padR pad
+scrollBarLayout slot dir x y w h pad = case dir of
+  DirColumn -> scrollBarLayoutIn slot dir (Rect x y w h) pad (h - padT pad - padB pad) (padB pad)
+  DirRow -> scrollBarLayoutIn slot dir (Rect x y w h) pad (w - padL pad - padR pad) (padR pad)
 
--- | 'scrollBarLayout' with an explicit visible main extent. A native 2D
--- scroller passes the padding box minus the cross-axis lane (see
--- 'scrollGutters2D'), so its reachable range and thumb reflect the viewport
--- that is actually visible rather than the lane-underlapped padding box. On a
--- one-dimensional scroller @viewMain@ is just the padding box on that axis.
+-- | 'scrollBarLayout' with an explicit visible main extent and the trailing
+-- padding the content scrolls past. A native 2D scroller passes the padding
+-- box minus the cross-axis lane (see 'scrollGutters2D'), so its reachable
+-- range and thumb reflect the viewport that is actually visible rather than
+-- the lane-underlapped padding box. On a one-dimensional scroller @viewMain@
+-- is just the padding box on that axis. A text area's padding only places
+-- its bars, so it passes no trailing padding.
 scrollBarLayoutIn ::
   ScrollBarSlot
   -> DirTag
@@ -260,15 +258,16 @@ scrollBarLayoutIn ::
   -> Float
   -> Float
   -> Float
+  -> Float
   -> Maybe ScrollBarLayout
-scrollBarLayoutIn slot dir (Rect x y w h) pad viewMain contentSize off =
+scrollBarLayoutIn slot dir (Rect x y w h) pad viewMain trailing contentSize off =
   let
     (barW, barMargin) = scrollBarGeomFor slot
     minThumb = 16
     lane = scrollChromeLane slot dir x y w h pad
-    (origin, trailing) = case dir of
-      DirColumn -> (y + padT pad, padB pad)
-      DirRow -> (x + padL pad, padR pad)
+    origin = case dir of
+      DirColumn -> y + padT pad
+      DirRow -> x + padL pad
     maxOff = scrollAxisRange contentSize viewMain trailing
     trackStart = origin + barMargin
     trackSize = max 0 (viewMain - 2 * barMargin)
@@ -278,7 +277,7 @@ scrollBarLayoutIn slot dir (Rect x y w h) pad viewMain contentSize off =
       DirColumn -> Rect (rectX lane) start barW size
       DirRow -> Rect start (rectY lane) size barW
    in
-    if maxOff <= 0
+    if maxOff <= 0 || trackSize < minThumb
       then Nothing
       else
         Just
@@ -295,8 +294,8 @@ scrollNodeBars ::
 scrollNodeBars sn@(ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h offX offY
   | native2D =
       let Rect _ _ viewW viewH = scrollNodeViewport sn x y w h
-       in ( shown DirColumn (scrollBarLayoutIn slot DirColumn (Rect x y w h) pad viewH contentMain offY)
-          , shown DirRow (scrollBarLayoutIn slot DirRow (Rect x y w h) pad viewW contentW offX)
+       in ( shown DirColumn (scrollBarLayoutIn slot DirColumn (Rect x y w h) pad viewH (padB pad) contentMain offY)
+          , shown DirRow (scrollBarLayoutIn slot DirRow (Rect x y w h) pad viewW (padR pad) contentW offX)
           )
   | dir == DirColumn = (shown dir bar, Nothing)
   | otherwise = (Nothing, shown dir bar)

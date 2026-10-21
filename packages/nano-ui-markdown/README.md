@@ -81,7 +81,7 @@ parse an append.
 their texts are, so one kept in a `Var` changes with every append. The
 widget keeps the ids of the blocks before the one that changed, so they are not
 measured, laid out or repainted again. A chat log of thousands of paragraphs
-should draw only the messages in view, using `getScrollMetrics`.
+should draw only the messages in view, using `getScrollMetricsUi`.
 
 `cabal run nano-ui-markdown-example` streams a reply into a chat view with
 `useStream`. It needs `nano-ui-sdl`, behind this package's `sdl` flag (on by

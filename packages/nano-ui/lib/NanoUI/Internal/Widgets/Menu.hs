@@ -16,19 +16,22 @@ module NanoUI.Internal.Widgets.Menu
 where
 
 import Control.Monad (void, when)
+import Data.IORef (readIORef)
+import Data.Map.Strict qualified as M
 import Data.Text (Text)
 import NanoUI.Internal.Context (Context (..), getStore, intKey, modifyStore)
+import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
-import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos)
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO)
+import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos, inputWindowSize)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO, (<&&>))
 import NanoUI.Internal.Store (Slot (..), fieldPoint, findSlot, flagSlot, insertSlot, setFlagSlot, slotKey)
-import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
-import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
-import NanoUI.Internal.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
+import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, grow, maxH, minW, padXY, tight, windowMargin)
+import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Size (..), V2 (..))
+import NanoUI.Internal.WidgetText (buttonFlagMenu, buttonFlagMenuBar, hasFlag)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
-import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, separator)
-import NanoUI.Internal.Layout.Arena (NodeType (..))
+import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, scrollWith, separator)
+import NanoUI.Internal.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
 import NanoUI.Internal.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
 import NanoUI.Internal.Var.Types (constVar)
 import NanoUI.Internal.Widgets.Popup (PopupConfig (..), defaultPopupConfig, popupWith')
@@ -36,7 +39,8 @@ import NanoUI.Internal.Widgets.Shortcut (shortcut)
 import NanoUI.Internal.Shortcut (Shortcut, shortcutLabel)
 
 -- | A context menu for any widget response, opened by right-clicking it.
--- Returns the menu body's result while the menu is open.
+-- Returns the menu body's result while the menu is open. A click on a row
+-- closes it, and a menu taller than the window scrolls.
 contextMenu ::
   HasResponse r =>
   r ->
@@ -75,14 +79,33 @@ runContextMenu (wid, ctx) rightClick child = do
       mouse@(V2 mx my) = inputMousePos inp
       pos = if rightClick then mouse else uncurry V2 (findSlot fieldPoint (0, 0) posK store)
       cfg = (defaultPopupConfig (AnchorPoint pos)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
+      -- A menu taller than the window is held inside it, as a modal is, and
+      -- its rows scroll.
+      Size _ winH = inputWindowSize inp
+      fitWindow = maxH (max 1 (winH - 2 * windowMargin))
   when rightClick $ liftIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK (mx, my)))
-  -- A left-button release inside the menu popup selects the hovered item.
+  -- A left-button release inside the menu popup picks the row the press went
+  -- down on. One on a disabled row, a header, a separator or the padding
+  -- picks nothing.
   (popupResp, mBody) <-
-    popupWith' (constVar (flagSlot openK store || rightClick)) cfg id $
-      (,) . releasedIn MouseLeft <$> askInput <*> columnWith (tight . gap 0) (child pos)
+    popupWith' (constVar (flagSlot openK store || rightClick)) cfg fitWindow $ do
+      r <- scrollWith (tight . gap 0 . grow) (child pos)
+      onRow <- (releasedIn MouseLeft <$> askInput) <&&> liftIO (pressedMenuRow ctx)
+      pure (onRow, r)
   let picked = respHovered popupResp && maybe False fst mBody
   when (respClicked popupResp || picked) $ liftIO (modifyStore ctx (setFlagSlot openK False))
   pure (snd <$> mBody)
+
+-- | Whether the left button went down on a menu row, added this frame.
+pressedMenuRow :: Context -> IO Bool
+pressedMenuRow ctx = do
+  let na = ctxNodeArena ctx
+  presses <- readIORef (ctxPressPos ctx)
+  case M.lookup MouseLeft presses of
+    Just (_, Just row) ->
+      withWidgetNode ctx row False $ \idx ->
+        ((== NodeButton) <$> getNodeType na idx) <&&> (hasFlag buttonFlagMenu <$> getStyleIdx na idx)
+    _ -> pure False
 
 -- | A menu row with an optional shortcut hint after the label. A disabled
 -- row is a muted label, not a button (hover would still light a disabled
@@ -117,8 +140,9 @@ menuItem' txt = menuItemWith txt Nothing True
 
 -- | Menu row bound to a shortcut, showing the chord's 'shortcutLabel' after
 -- the label. 'True' on the frame it is clicked, or when its chord is pressed
--- while the menu is open ('shortcut'). For the chord to work while the menu
--- is closed, also bind it with 'shortcut' outside the menu.
+-- while the menu is open ('shortcut'); a click closes the menu, the chord
+-- leaves it open. For the chord to work while the menu is closed, also bind
+-- it with 'shortcut' outside the menu.
 --
 -- > whenM (menuItemShortcut "Save" (ctrl <> key 's')) saveFile
 menuItemShortcut :: Text -> Shortcut -> NanoUI Bool

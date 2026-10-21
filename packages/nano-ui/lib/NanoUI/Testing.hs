@@ -96,7 +96,6 @@ module NanoUI.Testing
   , atlasSnapshot
   , atlasChanges
   , AtlasUpload (..)
-    -- * Messages
     -- * Draw
   , DrawData (..)
   , DrawCmd (..)

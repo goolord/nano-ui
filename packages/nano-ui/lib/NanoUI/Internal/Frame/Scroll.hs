@@ -12,7 +12,7 @@ module NanoUI.Internal.Frame.Scroll
   )
 where
 
-import Control.Monad (forM_, join, unless, when)
+import Control.Monad (forM, forM_, join, unless, when)
 import Data.Foldable (find)
 import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, isJust)
@@ -107,8 +107,9 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
     else descend sx sy
 
 -- | Axes, content viewport and reachable offset range of the scroll container
--- at @idx@ placed at @rect@, in window axes. Shared by mouse wheel,
--- programmatic scroll commands, and the scroll-offset transform pass.
+-- at @idx@ placed at @rect@, in window axes. Shared by the mouse wheel and
+-- the scroll-offset transform pass; scroll commands read what the latter
+-- publishes ('cacheScrollMetrics').
 scrollNodeGeometry :: Context -> NodeIdx -> Rect -> IO (ScrollAxes, Rect, V2)
 scrollNodeGeometry ctx idx (Rect x y w h) = do
   sn@ScrollNode {snPad = pad, snContentMain = contentMain} <-
@@ -134,28 +135,43 @@ updateScrollWheel ctx inp = do
     mNode <- findScrollNodeUnderMouse ctx (inputWindowSize inp) (inputMousePos inp)
     forM_ mNode $ \idx -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
-      applyScrollWheelDelta ctx wid scroll
-      applyCrossAxisScroll ctx idx scroll
+      V2 rangeX rangeY <- applyScrollWheelDelta ctx wid scroll
+      -- Pass on only the axes this scroller cannot move. A bare one, a tab
+      -- strip, pages on the vertical wheel itself and passes on nothing.
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      bare <- if isScrollNode nt then scrollBare . snConfig <$> readScrollNode (ctxNodeArena ctx) idx else pure False
+      unless bare $
+        applyCrossAxisScroll ctx idx (V2 (if rangeX > 0 then 0 else wheelX) (if rangeY > 0 then 0 else wheelY))
 
 -- Nested 2D: apply the unused axis to a paired scroller that runs the other
--- way: the nearest one above in the same panel, else the first one inside.
--- Do not walk past panel/window/modal into the page scroller.
+-- way, or either way when one of the two is 2D: the nearest one above in the
+-- same panel, else the first one inside. Do not walk past a panel or a
+-- floating node (window, modal, popup) into the page scroller.
 applyCrossAxisScroll :: Context -> NodeIdx -> V2 -> IO ()
 applyCrossAxisScroll ctx@Context {ctxNodeArena = na} idx scroll = do
   dir <- getDirection na idx
+  let is2D i = isScrollStyle2D <$> getStyleIdx na i
+  self2D <- getNodeType na idx >>= \nt -> if nt == NodeTextArea then pure True else is2D idx
   let
+    crosses i
+      | self2D = pure True
+      | otherwise = (||) <$> is2D i <*> ((/= dir) <$> getDirection na i)
     crossWid i = do
       nt <- getNodeType na i
-      hit <- pure (isScrollNode nt) <&&> ((/= dir) <$> getDirection na i)
+      hit <- pure (isScrollNode nt) <&&> crosses i
       if hit then Just <$> getWidgetId na i else pure Nothing
     above i = do
       nt <- getNodeType na i
-      if nt == NodePanel || nt == NodeWindow || nt == NodeModal
+      if nt == NodePanel || isFloatingNode nt
         then pure (Just Nothing)
         else fmap Just <$> crossWid i
-    -- Only subtrees holding a scroller can hold a cross one.
+    -- Only subtrees holding a scroller can hold a cross one, and a floating
+    -- node's scrollers are its own.
     inside i = firstChildJustM na i $ \ci ->
-      ifM (hasScrollerBelow na ci) (crossWid ci >>= maybe (inside ci) (pure . Just)) (pure Nothing)
+      ifM
+        ((not . isFloatingNode <$> getNodeType na ci) <&&> hasScrollerBelow na ci)
+        (crossWid ci >>= maybe (inside ci) (pure . Just))
+        (pure Nothing)
   parent <- getParent na idx
   up <- join <$> walkAncestors na parent above
   target <- maybe (inside idx) (pure . Just) up
@@ -180,7 +196,9 @@ scrollOwnerNode suppressed Context {ctxNodeArena = na} wid =
         then pure True
         else (\sn -> not (suppressed (snConfig sn) (sn2D sn) (snDir sn))) <$> readScrollNode na idx
 
-applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO ()
+-- | Scroll @wid@ by the wheel and return its offset range, zero when it has
+-- no node.
+applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO V2
 applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = do
   -- A node whose bar shows comes first: a table's frozen pane shares its
   -- body's id with a hidden bar and a range of one axis, and would clamp the
@@ -188,7 +206,7 @@ applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = d
   mIdx <-
     scrollOwnerNode (\cfg _ dir -> scrollChromeSuppressed cfg dir) ctx wid
       >>= maybe (scrollOwnerNode scrollWheelSuppressed ctx wid) (pure . Just)
-  forM_ mIdx $ \idx -> do
+  fmap (fromMaybe (V2 0 0)) . forM mIdx $ \idx -> do
     nt <- getNodeType na idx
     (axes, range) <-
       if nt == NodeTextArea
@@ -206,6 +224,7 @@ applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = d
       next = clampScrollOffset range (V2 (baseX + wheelX * step) (baseY + wheelY * step))
     unless (next == base && next == cur) $
       applyScrollTarget ctx wid axes next ScrollSmooth
+    pure range
 
 findScrollNodeUnderMouse :: Context -> Size -> V2 -> IO (Maybe NodeIdx)
 findScrollNodeUnderMouse ctx (Size w h) mouse = do

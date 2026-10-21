@@ -229,10 +229,11 @@ containerResponse nt layout child = do
 
 -- | An unpadded column that reports pointer activity over itself and its
 -- contents, like iced's @mouse_area@: 'respHovered', 'respHeldWith',
--- 'respClickedWith' and 'respClicked'. Children keep the input they handle
--- (a click on an inner button belongs to the button); other buttons and
--- clicks between children go to the area. Children do not cover the area,
--- so hover stays true while the pointer is over them:
+-- 'respClickedWith' and 'respClicked'. A press on an interactive child (a
+-- button, field or slider) belongs to that child, whichever mouse button it
+-- is; presses on passive content such as labels, and between children, go
+-- to the area. Children do not cover the area, so hover stays true while the
+-- pointer is over them:
 --
 -- > hovered <- useVar False
 -- > (_, item) <- mouseArea (fillW . gap 6) $ do

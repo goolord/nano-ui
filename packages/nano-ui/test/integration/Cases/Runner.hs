@@ -18,6 +18,7 @@ tests :: [Spec]
 tests =
   [ spec "session-loop" runSessionLoopTest
   , spec "session-loop-wake" runSessionLoopWakeTest
+  , spec "session-loop-far-wake" runSessionLoopFarWakeTest
   , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
   , spec "session-loop-hard-quit-used" runSessionLoopHardQuitUsedTest
   , spec "session-loop-key-order" runSessionLoopKeyOrderTest
@@ -115,7 +116,7 @@ runSessionLoopClicksTest :: Context -> IORef Int -> IO ()
 runSessionLoopClicksTest ctx failed = do
   clicks <- newIORef []
   debug <- newDebugSampler
-  batches <- newIORef [[1, 2, 1, 2, 1, 2, 4 :: Int]]
+  waits <- batchedWaits [[1, 2, 1, 2, 1, 2, 4], [3]]
   let buttonOf = \case
         1 -> Just (MouseLeft, True)
         2 -> Just (MouseLeft, False)
@@ -123,7 +124,7 @@ runSessionLoopClicksTest ctx failed = do
         _ -> Nothing
       driver =
         (quietDriver debug)
-          { sdWaitEvents = \_ -> atomicModifyIORef' batches (\case b : rest -> (rest, b); [] -> ([], [3]))
+          { sdWaitEvents = waits
           , sdApplyEvent = \inp e -> maybe inp (\(b, down) -> applyMouseButton b down inp) (buttonOf e)
           , sdIsButtonEdge = \e -> buttonOf e /= Nothing
           , sdShouldDraw = \_ _ _ _ _ -> pure True
@@ -168,6 +169,19 @@ runSessionLoopWakeTest ctx failed = do
   assertEq failed ["timed wait", "due True", "draw", "wait -1"] =<< readIORef logRef
   assertEq failed 0 =<< getWakeAt ctx
 
+-- A wake a month away waits no longer than the 32-bit millisecond timeout
+-- the backends take; the loop waits again when it runs out.
+runSessionLoopFarWakeTest :: Context -> IORef Int -> IO ()
+runSessionLoopFarWakeTest ctx failed = do
+  timeouts <- newIORef []
+  debug <- newDebugSampler
+  let driver = (quietDriver debug) {sdWaitEvents = \timeout -> [3] <$ modifyIORef' timeouts (timeout :)}
+  clearDirty ctx
+  requestWakeAfter ctx (30 * 86400)
+  runSessionLoop driver ctx emptyInput
+  ts <- readIORef timeouts
+  assert failed (not (null ts) && all (\t -> t > 0 && t <= 2147483647) ts)
+
 -- Ctrl+C quits after its frame, even when a later event in the same batch
 -- releases Ctrl; typing c without Ctrl does not. Event 1 presses C holding
 -- Ctrl, 2 releases Ctrl, 4 types c alone, and 5 changes nothing.
@@ -178,14 +192,12 @@ runSessionLoopHardQuitTest ctx failed = do
       typeC inp = inp {inputChars = inputChars inp <> "c"}
       pressC = applyKey (KeyChar 'c') True
       draws batches = do
-        queue <- newIORef batches
+        waits <- batchedWaits (batches ++ [[3]])
         drawn <- newIORef (0 :: Int)
         clearDirty ctx
         runSessionLoop
           (quietDriver debug)
-            { sdWaitEvents = \_ -> atomicModifyIORef' queue $ \bs -> case bs of
-                b : rest -> (rest, b)
-                [] -> ([], [3])
+            { sdWaitEvents = waits
             , sdApplyEvent = \inp ev -> case ev of
                 1 -> holdCtrl True (pressC inp)
                 2 -> holdCtrl False inp

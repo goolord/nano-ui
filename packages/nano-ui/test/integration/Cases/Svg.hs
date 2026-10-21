@@ -3,7 +3,8 @@ module Cases.Svg (tests) where
 import Spec
 import Data.ByteString qualified as BS
 import Data.Map.Strict qualified as Map
-import NanoUI.Internal.Context (Context (..))
+import Data.Maybe (isJust)
+import NanoUI.Internal.Context (Context (..), lookupImageSize)
 import NanoUI.Svg (rasterizeSvg, rasterizeSvgIn, svgMonochrome)
 
 tests :: [Spec]
@@ -11,7 +12,28 @@ tests =
   [ spec "svg-raster" runSvgRasterTest
   , spec "svg-icon" runSvgIconTest
   , spec "svg-fit-content" runSvgFitContentTest
+  , spec "svg-raster-lease" runSvgRasterLeaseTest
   ]
+
+-- | A raster stays in the atlas while frames draw it: a size the icon no
+-- longer has, or an icon no longer shown, gives its space back. A raster too
+-- big for the atlas is remembered too, rather than made again every frame.
+runSvgRasterLeaseTest :: Context -> IORef Int -> IO ()
+runSvgRasterLeaseTest ctx failed = do
+  doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
+  let inp = withInputOff 200 120
+      rasters = map fst . Map.elems <$> readIORef (ctxSvgRasters ctx)
+      registered iid = isJust <$> lookupImageSize ctx iid
+  _ <- warmup2 ctx inp (column (svgIcon 16 doc))
+  small <- rasters
+  assertEq failed [True] =<< mapM registered small
+  _ <- warmup2 ctx inp (column (svgIcon 20 doc))
+  assertEq failed 1 . length =<< rasters
+  assertEq failed [False] =<< mapM registered small
+  _ <- warmup2 ctx inp (column (svgIconWith (fixedWH 5000 10) doc))
+  assertEq failed [ImageId 0] =<< rasters
+  _ <- warmup2 ctx inp (column (pure ()))
+  assertEq failed [] =<< rasters
 
 -- | Fit and alignment place the document's own 2:1 shape, not a square raster
 -- it was first letterboxed into.
@@ -27,8 +49,8 @@ runSvgFitContentTest ctx failed = do
   assert failed (all (== 0) (alphas (rasterizeSvgIn 10 10 (Rect 0 0 0 0) white doc)))
   let inp = withInputOff 200 200
       icon fit ax = svgIconConfigured defaultImageConfig {icLayout = fixedWH 20 20, icFit = fit, icAlignX = ax} doc
+      -- The frames without the last icon release its raster.
       contentOf ui = do
-        writeIORef (ctxSvgRasters ctx) Map.empty
         _ <- warmupDraw ctx inp ui
         -- The key holds the content rect in eighths of a raster pixel.
         let pixels v = fromIntegral v / 8 :: Float
@@ -92,11 +114,14 @@ runSvgIconTest ctx failed = do
       ui = column $ do
         svgIcon 24 doc
         svgIconWith (fixedWH 16 16 . fontColor red) doc
+      rasters = map fst . Map.elems <$> readIORef (ctxSvgRasters ctx)
   (_, draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw
   let colors = map snd quads
   assert failed (styleFg (themePanel theme) `elem` colors)
   assert failed (red `elem` colors)
+  shown <- rasters
   (_, draw2) <- warmupDraw ctx inp ui
   quads2 <- drawQuads draw2
   assertEq failed (length quads) (length quads2)
+  assertEq failed shown =<< rasters

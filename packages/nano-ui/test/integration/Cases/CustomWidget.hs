@@ -15,8 +15,19 @@ tests =
   , spec "custom-widget-content-key" runCustomWidgetContentKeyTest
   , spec "custom-widget-knob" runReferenceKnobTest
   , spec "custom-widget-knob-covered" runKnobCoveredTest
+  , spec "progress-bar-width" runProgressBarWidthTest
   , spec "drop-target" runDropTargetTest
   ]
+
+-- | A progress bar takes the caller's width mode over the fill it has by
+-- default, as a slider does; its height stays the one given.
+runProgressBarWidthTest :: Context -> IORef Int -> IO ()
+runProgressBarWidthTest ctx failed = do
+  let inp = withInputOff 400 300
+      bar f = rowWith (fixedW 300 . tight) (progressBarWith' f 12 0.3)
+  full <- warmup2 ctx inp (bar id)
+  half <- warmup2 ctx inp (bar (percent 50))
+  assertEq failed (rectW (respRect full) / 2, 12) (rectW (respRect half), rectH (respRect half))
 
 -- | Verifies custom intrinsic layout measurement via widgetMeasure hook, and
 -- that the measurement reverts once the hook is gone.
@@ -54,14 +65,13 @@ runCustomWidgetMeasureParentTest ctx failed = do
             }
         void $ label "after"
         pure resp
-      rects = arenaRects
   void $ warmup2 ctx inp (ui 120)
   resp <- warmup2 ctx inp (ui 240)
   assertEq failed (rectW (respRect resp)) 240
   fresh <- newContext
   void $ warmup2 fresh inp (ui 240)
-  grown <- rects ctx
-  assertEq failed grown =<< rects fresh
+  grown <- arenaRects ctx
+  assertEq failed grown =<< arenaRects fresh
 
 -- | Verifies dynamic cursor resolution on custom widgets.
 runCustomWidgetCursorTest :: Context -> IORef Int -> IO ()
@@ -143,7 +153,6 @@ runCustomWidgetContentDamageTest ctx failed = do
   let inp = withInputOff 400 300
       ui on = afterLabel 0 (\cdc r -> runCanvasFor cdc (drawRect r (if on then red else blue)))
   resp <- warmup2 ctx inp (ui False)
-  _ <- takeDamage ctx
   quads <- frameQuads ctx inp (ui True)
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect resp))
@@ -152,7 +161,6 @@ runCustomWidgetContentDamageTest ctx failed = do
   -- The built-in progress bar captures its fraction the same way.
   let bar frac = column (progressBarWith' id 12 frac)
   barResp <- warmup2 ctx inp (bar 0.2)
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp (bar 0.8)
   barDmg <- takeDamage ctx
   assert failed (clipCovers barDmg (respRect barResp))
@@ -166,15 +174,12 @@ runCustomWidgetContentKeyTest ctx failed = do
   let inp = withInputOff 400 300
       ui key on = afterLabel key (\cdc r -> runCanvasFor cdc (drawRect r (if on then red else blue)))
   resp <- warmup2 ctx inp (ui 1 False)
-  _ <- takeDamage ctx
 
   -- Same key, different captured state: the ops it already has stand.
   keptQuads <- frameQuads ctx inp (ui 1 True)
   keptDmg <- takeDamage ctx
   assert failed (any ((== blue) . snd) keptQuads)
-  case keptDmg of
-    DamageClip clip -> assert failed (not (covers clip (respRect resp)))
-    DamageFull -> assert failed False
+  assert failed (not (damageCovers keptDmg (respRect resp)))
 
   -- A new key rebuilds and repaints.
   freshQuads <- frameQuads ctx inp (ui 2 True)
@@ -194,13 +199,10 @@ runCustomWidgetContentKeyTest ctx failed = do
           }
   disabledCtx <- newContext
   dresp <- warmup2 disabledCtx inp (dimmable False)
-  _ <- takeDamage disabledCtx
   disabledQuads <- frameQuads disabledCtx inp (dimmable True)
   disabledDmg <- takeDamage disabledCtx
   assert failed (any ((== grey) . snd) disabledQuads)
-  case disabledDmg of
-    DamageClip clip -> assert failed (covers clip (respRect dresp))
-    DamageFull -> pure ()
+  assert failed (damageCovers disabledDmg (respRect dresp))
 
   -- A keyed widget that only moved still draws at its new place: paint
   -- translates the ops it kept.
@@ -252,7 +254,6 @@ runReferenceKnobTest ctx failed = do
   (respDragged, valDragged) <- evalUi ctx dragUp ui
   assert failed (valDragged > 25)
   assert failed (respChanged respDragged)
-  void $ runFrame ctx (releaseAt dragUp) ui
 
 -- | Under a pinned button a knob neither drags nor scrolls, because
 -- 'useDrag2DOn' and 'useWheelDeltaOn' use the knob's response, not its rect.
@@ -326,10 +327,13 @@ runDropTargetTest ctx failed = do
           ]
   (tgtOrigin, _, _) <- runFrame ctx originDrop ui
   assert failed (dropFiles tgtOrigin == ["/tmp/origin.txt"])
+  -- The frame the payload lands on still reports where it landed.
+  assertEq failed (Just dropPoint) (dropPosition tgtOrigin)
 
-  -- The completing drop clears hover state.
+  -- The completing drop clears hover state and the position.
   (tgtDone, _, _) <- runFrame ctx inp0 ui
   assert failed (not (dropHovered tgtDone))
+  assertEq failed Nothing (dropPosition tgtDone)
 
   -- A fresh drag that moves outside the target no longer delivers to it.
   _ <- runFrame ctx (dropsInp [DropEvent DropBegin Nothing ""]) ui

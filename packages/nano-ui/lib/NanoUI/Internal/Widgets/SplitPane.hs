@@ -102,14 +102,10 @@ paneExist t p = foldGrid (== p) (\_ _ _ a b -> a || b) t
 -- | Minimum (width, height) that must be reserved for a subtree under a
 -- @minSize@ per-pane floor and @spacing@ between every split level.
 subtreeMin :: Float -> Float -> GridNode -> (Float, Float)
-subtreeMin minSize spacing = \case
-  Pane _ -> (minSize, minSize)
-  Split _ axis _ a b ->
-    let (wa, ha) = subtreeMin minSize spacing a
-        (wb, hb) = subtreeMin minSize spacing b
-     in case axis of
-          AxisV -> (wa + spacing + wb, max ha hb)
-          AxisH -> (max wa wb, ha + spacing + hb)
+subtreeMin minSize spacing = foldGrid (const (minSize, minSize)) $ \_ axis _ (wa, ha) (wb, hb) ->
+  case axis of
+    AxisV -> (wa + spacing + wb, max ha hb)
+    AxisH -> (max wa wb, ha + spacing + hb)
 
 -- | A rect seen along a split's main axis: as it is for 'AxisV', with x and y
 -- (and width and height) swapped for 'AxisH', so per-axis geometry is written
@@ -263,8 +259,9 @@ reflowFixed isFixed minSize spacing = go
         (oldA, oldB, _) = splitBounds axis spacing oldR dOld
         (newA, newB, _) = splitBounds axis spacing newR (splitLength spacing newAvail mA mB ratio')
 
--- | Remove a pane. The sibling subtree absorbs its space. @Nothing@ if the
--- pane does not exist or removing it would empty the tree.
+-- | Remove a pane. The sibling subtree absorbs its space. The tree comes back
+-- unchanged if the pane does not exist, and @Nothing@ when removing it would
+-- empty the tree.
 treeRemovePane :: Word64 -> GridNode -> Maybe GridNode
 treeRemovePane pid = foldGrid onPane onSplit
   where

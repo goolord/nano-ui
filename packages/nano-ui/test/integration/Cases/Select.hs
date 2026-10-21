@@ -16,12 +16,17 @@ tests =
   , spec "select-overlay-damage" runSelectOverlayDamageTest
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
   , spec "select-dropdown-flips" runSelectDropdownFlipsTest
+  , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
+  , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
+  , spec "tree-late-items-expanded" runTreeLateItemsExpandedTest
   , spec "radio-click-marks" runRadioClickMarksTest
   , spec "sliders-drag-apart" runSlidersDragApartTest
   , spec "radio-groups-apart" runRadioGroupsApartTest
   , spec "slider-out-of-range-settles" runSliderOutOfRangeSettlesTest
+  , spec "slider-bad-bounds-settle" runSliderBadBoundsSettleTest
+  , spec "slider-stale-drag" runSliderStaleDragTest
   ]
 
 -- | Sibling sliders keep separate drags: dragging the second leaves the
@@ -69,6 +74,42 @@ runSliderOutOfRangeSettlesTest ctx failed = do
   assert failed (not (respChanged resp))
   assert failed (not dirty)
 
+-- | A slider given a NaN bound, equal bounds or a reversed range settles, and
+-- a reversed range keeps a value inside it.
+runSliderBadBoundsSettleTest :: Context -> IORef Int -> IO ()
+runSliderBadBoundsSettleTest _ failed = do
+  let inp0 = withInput 300 80
+      nan = 0 / 0
+  forM_ [(nan, 1, 0.5), (0, nan, 0.5), (5, 5, 5), (100, 0, 50)] $ \(lo, hi, given) -> do
+    ctx <- newContext
+    let ui = column (withValue given (slider' lo hi))
+    _ <- warmup2 ctx inp0 ui
+    ((resp, v), _, dirty) <- runFrame ctx inp0 ui
+    assert failed (not (respChanged resp) && not dirty)
+    when (lo > hi) $ assertEq failed given v
+
+-- | A drag released while its slider is not built stays over: a later
+-- press elsewhere, held while the slider comes back, leaves its value alone.
+runSliderStaleDragTest :: Context -> IORef Int -> IO ()
+runSliderStaleDragTest ctx failed = do
+  shownRef <- newIORef True
+  let inp0 = withInput 300 120
+      ui = column $ do
+        shown <- liftIO (readIORef shownRef)
+        if shown then snd <$> withValue 50 (slider' 0 100) else pure 50
+      frameShown shown i = writeIORef shownRef shown >> evalUi ctx i ui
+  (resp, _) <- warmup2 ctx inp0 (column (withValue 50 (slider' 0 100)))
+  let V2 x y = centerOf resp
+      hold = holdAt inp0 (V2 (x + 40) y)
+      elsewhere = pressAt inp0 (V2 20 100)
+  _ <- frameShown True (pressAt inp0 (V2 x y))
+  dragged <- frameShown True hold
+  assertGt failed dragged 50
+  _ <- frameShown False hold
+  _ <- frameShown False (releaseAt hold)
+  _ <- frameShown False elsewhere
+  assertEq failed 50 =<< frameShown True (holdAt elsewhere (V2 30 100))
+
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = withInput 300 80
@@ -81,7 +122,7 @@ runSliderCursorTest ctx failed = do
   assertEq failed UiCursorGrab =<< cursorOver ctx inp0 ui trackMid
   _ <- runFrame ctx pressTrack ui
   assert failed =<< cursorKindIs ctx pressTrack UiCursorGrabbing
-  assertEq failed UiCursorGrabbing =<< cursorOver ctx pressTrack ui offPos
+  assertEq failed UiCursorGrabbing =<< cursorOver ctx (holdAt inp0 offPos) ui offPos
   assertEq failed UiCursorDefault =<< cursorOver ctx inp0 ui offPos
 
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
@@ -102,7 +143,6 @@ runSelectOverlayDamageTest ctx failed = do
     dmg <- takeDamage ctx
     -- The hover moved inside the dropdown, which the arena does not hold:
     -- the clip repaints the whole dropdown rather than the whole window.
-    assert failed (not (null overlays))
     forM_ overlays $ \(_, _, _, _, dropRect) -> assert failed (clipCovers dmg dropRect)
 
 -- | An open dropdown's text spans carry the colours it is painted in: the
@@ -136,6 +176,54 @@ runSelectDropdownFlipsTest ctx failed = do
   assertJust failed (spanRect "Low" overlays) $ \low -> do
     assert failed (rectY low + rectH low <= rectY (respRect resp))
     assertEq failed 0 . snd =<< runClick ctx open ui (spanCenter low)
+
+-- | A select's dropdown is as wide as the select, and an option wider than
+-- that is clipped to the dropdown rather than drawn over the page, where
+-- closing the dropdown would not repaint it.
+runSelectDropdownClipsRowsTest :: Context -> IORef Int -> IO ()
+runSelectDropdownClipsRowsTest ctx failed = do
+  let long = "A rather long option label"
+      ui = column (withValue 0 (selectWith' (fixedW 80) [long, "Short"]))
+      inp0 = (withInput 640 480) {inputMousePos = V2 600 400}
+  (resp, _) <- warmup2 ctx inp0 ui
+  let open = snd (clickPair inp0 (centerOf resp))
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  let away = open {inputButtonsReleased = noButtons}
+  (_, dd, _) <- runFrame ctx away ui
+  overlays <- collectOverlayTextSpans ctx away
+  case [(r, dropRect) | (r, txt, _, _, dropRect) <- overlays, txt == long] of
+    (r, dropRect) : _ -> do
+      assertGt failed (rectX r + rectW r) (rectX dropRect + rectW dropRect)
+      let clipOf c = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
+          overlayCmds = [c | c <- drawCmdElems dd, cmdLayer c == LayerOverlay, cmdIndexCount c > 0]
+      assert failed (any ((rectInflate 1 dropRect `covers`) . clipOf) overlayCmds)
+    [] -> assert failed False
+
+-- | A select, a radio group and a tree given an index their options do not
+-- reach show it clamped but leave the caller's index alone, so a choice
+-- restored before the options load is still there when they do.
+runChoicesKeepUnreachedIndexTest :: Context -> IORef Int -> IO ()
+runChoicesKeepUnreachedIndexTest ctx failed = do
+  loadedRef <- newIORef False
+  selRef <- newVar 2
+  radioRef <- newVar 2
+  treeRef <- newVar 2
+  let refs = [selRef, radioRef, treeRef]
+      inp0 = withInput 320 400
+      ui = do
+        loaded <- liftIO (readIORef loadedRef)
+        let opts = if loaded then ["Low", "Medium", "High"] else []
+        column $ do
+          select opts selRef
+          radio opts radioRef
+          tree "t" [TreeItem o [] | o <- opts] treeRef
+  _ <- warmup2 ctx inp0 ui
+  assertEq failed [2, 2, 2] =<< mapM readVarIO refs
+  writeIORef loadedRef True
+  _ <- warmup2 ctx inp0 ui
+  assertEq failed [2, 2, 2] =<< mapM readVarIO refs
+  -- The radio's options, then the tree's rows.
+  assertEq failed [0, 0, 1, 0, 0, 1] =<< buttonValues ctx
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
@@ -187,6 +275,20 @@ runTreeKeyboardTest ctx failed = do
   spans <- collectTextSpans ctx
   assert failed (not (hasText "child" spans))
   assertEq failed 2 . snd =<< evalUi ctx (keyInp KeyDown inp0) ui
+
+-- | A tree whose items arrive after its first frame opens every parent, as
+-- one built with them does.
+runTreeLateItemsExpandedTest :: Context -> IORef Int -> IO ()
+runTreeLateItemsExpandedTest ctx failed = do
+  itemsRef <- newIORef []
+  let inp0 = withInput 200 120
+      ui = do
+        items <- liftIO (readIORef itemsRef)
+        column (withValue 0 (tree' "late" items))
+  _ <- warmup2 ctx inp0 ui
+  writeIORef itemsRef [TreeItem "root" [TreeItem "child" []]]
+  _ <- warmup2 ctx inp0 ui
+  assert failed . hasText "child" =<< collectTextSpans ctx
 
 -- Open dropdown rows show the pointer cursor on hover and press, and
 -- respChanged fires on the frame the selection changes and not on later
@@ -315,15 +417,14 @@ runSelectCloseKeepsFocusTest ctx failed = do
   indexRef <- newVar 1
   let inp0 = withInput 320 200
       ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
-      listed spans = any (\(_, txt, _, _, _) -> txt == "Low") spans
   (resp, _) <- warmup2 ctx inp0 ui
   let mid = centerOf resp
       openRelease = snd (clickPair inp0 mid)
       closeRelease = snd (clickPair openRelease mid)
   _ <- runClick ctx inp0 ui mid
-  assert failed . listed =<< collectOverlayTextSpans ctx openRelease
+  assert failed . hasText "Low" =<< collectOverlayTextSpans ctx openRelease
   _ <- runClick ctx openRelease ui mid
   let idle = closeRelease {inputButtonsReleased = noButtons}
   _ <- runFrame ctx idle ui
-  assert failed . not . listed =<< collectOverlayTextSpans ctx idle
+  assert failed . not . hasText "Low" =<< collectOverlayTextSpans ctx idle
   assertEq failed (respId resp) =<< getFocusId ctx

@@ -588,12 +588,14 @@ module NanoUI
     -- | Scroll containers ('scroll', 'scroll2D') handle mouse wheel input and
     -- scrollbars automatically. The functions below control scroll position
     -- programmatically using the 'WidgetId' returned by 'scrollArea' or
-    -- 'scrollArea2D'.
+    -- 'scrollArea2D'. They take the 'NanoUI.Monad.Context', which a view gets
+    -- from 'NanoUI.Monad.askContext'.
     --
     -- 'setScrollTuning' configures wheel step distance and smooth-scroll
     -- duration globally:
     --
-    -- > setScrollTuning ctx defaultScrollTuning
+    -- > ctx <- askContext
+    -- > liftIO $ setScrollTuning ctx defaultScrollTuning
     -- >   { scrollWheelStep = 3 * rowHeight  -- three rows a notch
     -- >   , scrollSmoothTime = 0.12
     -- >   }
@@ -909,7 +911,8 @@ module NanoUI
     --
     -- Alternatively, 'followSystemTheme' (or the backends' @sdlAppThemeFor@
     -- and @optThemeFor@ options) updates the context theme automatically when
-    -- the OS appearance changes:
+    -- the OS appearance changes. Like 'setTheme', it takes the context, which
+    -- a view gets from 'NanoUI.Monad.askContext':
     --
     -- > followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
     --
@@ -1066,7 +1069,8 @@ module NanoUI
     -- Inside a view, 'askWindow' reads the current 'WindowState', the setters
     -- and commands below update the window, and 'quitUi' requests exit. In
     -- headless test contexts, window operations are no-ops and
-    -- 'requestScreenshot' returns 'Nothing'.
+    -- 'requestScreenshot' answers its callback with 'Nothing' (as
+    -- 'askScreenshot' does).
     --
     -- Setters ('setWindowTitleUi', 'setWindowModeUi', ...) only issue a
     -- backend call when the value changes, so they can be called every frame.

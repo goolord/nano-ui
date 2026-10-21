@@ -150,8 +150,7 @@ runAnticipateTest ctx failed = do
         sensed <- rowWith (tight . gap 0 . fillW) . forM [40, 0] $ \margin ->
           fst <$> sensorConfigured defaultSensorConfig {sensorAnticipate = margin, sensorLayout = fillW} bar
         (marker : sensed) <$ replicateM_ 10 bar
-  (sid, _) <- evalUi ctx inp ui
-  (_, vs@[_, near, _]) <- evalUi ctx inp ui
+  (sid, vs@[_, near, _]) <- warmup2 ctx inp ui
   expectVis failed [cameIn, cameIn, off] vs
   assertEq failed (visRect near) (Rect 0 0 0 0)
   setScrollOffset ctx sid 30 >> settle ctx inp ui 1
