@@ -229,6 +229,14 @@ runCustomWidgetContentKeyTest ctx failed = do
   ctx3 <- withTheme ctx theme0 {themeAccent = accent3}
   assert failed . any ((== accent3) . snd) =<< frameQuads ctx3 inp themedUi
   setTheme ctx theme0
+  -- So does a new theme for the scope it sits in.
+  let scoped c = column . styled (accentColor c) $ fst <$> customWidget defaultCustomWidgetSpec
+        { widgetLayout = fixedWH 80 40 defaultLayout
+        , widgetContent = 6
+        , widgetDraw = \cdc r -> runCanvasFor cdc (drawRect r (themeAccent (cdcTheme cdc)))
+        }
+  _ <- warmup2 ctx inp (scoped accent2)
+  assert failed . any ((== accent3) . snd) =<< frameQuads ctx inp (scoped accent3)
 
 -- | Verifies the reference rotary knob widget.
 runReferenceKnobTest :: Context -> IORef Int -> IO ()
