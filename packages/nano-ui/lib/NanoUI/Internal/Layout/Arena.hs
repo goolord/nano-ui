@@ -774,9 +774,14 @@ resetNodeArena na = do
   writePrimArray (naPaintSig na) 0 0
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
   writePrimArray (naImageCount na) 0 0
-  -- 0 marks a memo entry that was never written, so the tag wraps to 1.
+  -- 0 marks a memo entry that was never written, so the tag wraps to 1. On
+  -- wrap-around, entries from the previous use of tag 1 would read as live,
+  -- so untag them all.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
+  when (ft == maxBound) $ forM_ [naWrapMemo na, naFitMemo na] $ \ref -> do
+    WidthMemo tags _ <- readIORef ref
+    getSizeofMutablePrimArray tags >>= \c -> setPrimArray tags 0 c 0
   -- Bumping the epoch empties the id index. On wrap-around, stale entries
   -- from the previous use of that epoch would read as live, so clear it.
   !ep <- readIORef (naEpoch na)
