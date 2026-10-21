@@ -2,7 +2,7 @@
 
 ## Setup
 
-Requires GHC 9.10 or newer and Cabal. Development uses GHC 9.14, which is
+Requires GHC 9.10 through 9.14 and Cabal. Development uses GHC 9.14, which is
 provided by `nix develop` along with Cabal, SDL3, SDL3_ttf, and pkg-config. To
 verify compatibility with GHC 9.10, use a separate build directory:
 

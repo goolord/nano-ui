@@ -37,8 +37,15 @@ package nano-ui-demo
 package nano-ui-diagrams
   ghc-options: -Werror
 
+package nano-ui-rgfw-bindings
+  ghc-options: -Werror
+
+package nano-ui-rgfw
+  ghc-options: -Werror
+
 package nano-ui-form
   flags: +sdl
+  ghc-options: -Werror
 
 package nano-ui-markdown
   flags: +sdl

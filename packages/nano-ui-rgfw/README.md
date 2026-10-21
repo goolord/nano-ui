@@ -48,7 +48,7 @@ cabal run nano-ui-rgfw-profile  # demo frame loop in a hidden window, for +RTS -
 X11, Xcursor, Xrandr, and Xi on Linux; Cocoa on macOS; gdi32, user32, and
 shell32 on Windows. All need OpenGL 3.2.
 
-Use GHC 9.10 or newer (development uses 9.14) and add `nano-ui` and
+Use GHC 9.10 through 9.14 (development uses 9.14) and add `nano-ui` and
 `nano-ui-rgfw` to your application's `build-depends`. Build the executable
 with `-threaded`: otherwise the idle wait for events blocks the whole
 runtime, and background tasks make no progress until input arrives. The

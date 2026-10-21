@@ -2,7 +2,7 @@
 
 ## Build a windowed application
 
-Use GHC 9.10 or newer (9.14 is used for development) and Cabal. Save the
+Use GHC 9.10 through 9.14 (9.14 is used for development) and Cabal. Save the
 counter example from the README as `Main.hs` and create `counter.cabal` next to
 it:
 

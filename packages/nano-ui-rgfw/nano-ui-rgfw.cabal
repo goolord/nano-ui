@@ -15,6 +15,7 @@ homepage:           https://github.com/goolord/nano-ui
 bug-reports:        https://github.com/goolord/nano-ui/issues
 category:           Graphics
 build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:
     CHANGELOG.md
     README.md
@@ -93,7 +94,7 @@ executable nano-ui-rgfw-profile
     ghc-options:      -rtsopts "-with-rtsopts=-A64m -T -I0"
     build-depends:
         base >=4.20 && <4.23,
-        bytestring,
+        bytestring ^>=0.12,
         hashable ^>=1.5,
         nano-ui,
         nano-ui-emit,

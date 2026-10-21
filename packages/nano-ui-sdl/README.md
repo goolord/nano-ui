@@ -88,7 +88,7 @@ colours overlap. `captureScreenshot` returns the last presented frame as a
 
 ## Add to an application
 
-Use GHC 9.10 or later and include `nano-ui` and `nano-ui-sdl` in `build-depends`.
+Use GHC 9.10 through 9.14 and include `nano-ui` and `nano-ui-sdl` in `build-depends`.
 Set `default-language: GHC2024`; the example enables `OverloadedStrings`
 for text literals. Build the executable with `-threaded` for SDL callbacks.
 
