@@ -9,7 +9,8 @@ import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..)
+  ( DirTag (..)
+  , NodeType (..)
   , findNodeM
   , getClipBounds
   , getClipRect
@@ -52,6 +53,7 @@ tests =
   , spec "scroll-wheel-cross-popup" runWheelCrossPopupTest
   , spec "scroll-wheel-cross-2d" runWheelCross2DTest
   , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
+  , spec "scroll-bar-short-track" runScrollBarShortTrackTest
   ]
 
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
@@ -887,6 +889,16 @@ runWheelCrossInsideTest ctx failed = do
     _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
     assert failed . (> 0) =<< getScrollOffset ctx inner
     assertEq failed 0 =<< getScrollOffset ctx outer
+
+-- | A scroller whose track is shorter than the smallest thumb shows no bar,
+-- rather than a thumb that overruns the track and moves against the offset.
+runScrollBarShortTrackTest :: Context -> IORef Int -> IO ()
+runScrollBarShortTrackTest _ failed = do
+  let bar h = scrollBarLayout ScrollBarList DirColumn 0 0 100 h (Padding 0 0 0 0) 500
+  assert failed (isNothing (bar 20 0))
+  -- A track as long as the smallest thumb still shows one.
+  assertJust failed (bar 22 100) $ \layout ->
+    assert failed (covers (sbTrack layout) (sbThumb layout))
 
 -- | The unused wheel axis stops at a popup: a vertical wheel over a
 -- horizontal strip in a popup leaves the page scroller that declared the

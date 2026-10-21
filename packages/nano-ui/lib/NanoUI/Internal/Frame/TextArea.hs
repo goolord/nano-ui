@@ -39,7 +39,7 @@ import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
-import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
+import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayoutIn, scrollChromeLane)
 import NanoUI.Internal.Frame.Node (nodeFontMetrics)
 import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
@@ -216,11 +216,15 @@ textAreaBars fm (Rect _ _ fw fh) contentW contentH =
 textAreaBarLayouts :: Rect -> TextAreaBars -> Float -> Float -> (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
 textAreaBarLayouts (Rect x y w h) bars scrollX scrollY =
   let V2 contentW contentH = tabContent bars
-      layout shown dir pad content off
-        | shown = scrollBarLayout ScrollBarList dir x y w h pad content off
+      padV = tabPadV bars
+      padH = tabPadH bars
+      -- The pads only place the bars: the text has no trailing padding to
+      -- scroll past, so each bar's range is its axis's 'tabRange'.
+      layout shown dir pad view content off
+        | shown = scrollBarLayoutIn ScrollBarList dir (Rect x y w h) pad view 0 content off
         | otherwise = Nothing
-   in ( layout (tabVertical bars) DirColumn (tabPadV bars) contentH scrollY
-      , layout (tabHorizontal bars) DirRow (tabPadH bars) contentW scrollX
+   in ( layout (tabVertical bars) DirColumn padV (h - padT padV - padB padV) contentH scrollY
+      , layout (tabHorizontal bars) DirRow padH (w - padL padH - padR padH) contentW scrollX
       )
 
 -- | Font the text-area content is laid out and painted in. Honors the node's

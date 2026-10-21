@@ -5,7 +5,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (intKey)
 import NanoUI.Internal.Frame.TextArea
-  ( TextAreaHit (..)
+  ( TextAreaBars (..)
+  , TextAreaHit (..)
   , resolveTextAreaFont
   , textAreaContentMetrics
   , textAreaBarLane
@@ -70,6 +71,7 @@ tests =
   , pixelSpec "text-area-hscroll-wheel" runTextAreaHScrollWheelTest
   , pixelSpec "text-area-hscroll-drag" runTextAreaHScrollDragTest
   , pixelSpec "text-area-2d-scroll" runTextArea2DScrollTest
+  , pixelSpec "text-area-bar-range" runTextAreaBarRangeTest
   , pixelSpec "text-area-scroll-cursor-leaves-viewport" runTextAreaScrollCursorLeavesViewportTest
   ]
 
@@ -615,6 +617,26 @@ runTextAreaHScrollWheelTest ctx failed = do
     assertEq failed 0 . v2X =<< wheel (-10)
     assertJust failed (snd (textAreaBarLayouts field (textAreaBars fm field (lineWidth fm longLine) 0) 0 0)) $
       checkThumbGrab failed ctx inp0 ui
+
+-- | A text area's bar spans the text's own range, not its insets: scrolled
+-- to the end, the thumb meets the end of its track, with the other bar shown
+-- or not.
+runTextAreaBarRangeTest :: Context -> IORef Int -> IO ()
+runTextAreaBarRangeTest ctx failed = do
+  let
+    fm = ctxFontMetrics ctx
+    field = Rect 0 0 200 100
+    atEnd contentW = do
+      let
+        bars = textAreaBars fm field contentW (10 * textAreaLineHeight fm)
+        V2 _ rangeY = tabRange bars
+      assertJust failed (fst (textAreaBarLayouts field bars 0 rangeY)) $ \layout -> do
+        let Rect _ ty _ th = sbTrack layout
+            Rect _ my _ mh = sbThumb layout
+        assertEq failed rangeY (sbMaxOff layout)
+        assert failed (abs (ty + th - (my + mh)) < 0.01)
+  atEnd 0
+  atEnd 1000
 
 runTextArea2DScrollTest :: Context -> IORef Int -> IO ()
 runTextArea2DScrollTest ctx failed = do
