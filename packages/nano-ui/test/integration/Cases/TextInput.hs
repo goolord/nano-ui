@@ -5,7 +5,8 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI.Internal.Context (intKey)
 import NanoUI.Internal.Frame.TextArea
-  ( TextAreaHit (..)
+  ( TextAreaBars (..)
+  , TextAreaHit (..)
   , resolveTextAreaFont
   , textAreaContentMetrics
   , textAreaBarLane
@@ -28,6 +29,7 @@ import NanoUI.Shortcut
 import NanoUI.Widgets.TextBuffer
   ( fromText
   , getCursor
+  , lineAt
   , toLines
   , toText
   )
@@ -72,6 +74,9 @@ tests =
   , pixelSpec "text-area-hscroll-drag" runTextAreaHScrollDragTest
   , pixelSpec "text-area-2d-scroll" runTextArea2DScrollTest
   , pixelSpec "text-area-scroll-cursor-leaves-viewport" runTextAreaScrollCursorLeavesViewportTest
+  , pixelSpec "text-area-caret-follow" runTextAreaCaretFollowTest
+  , pixelSpec "text-area-caret-above-bar" runTextAreaCaretAboveBarTest
+  , pixelSpec "text-area-snapped-rows" runTextAreaSnappedRowsTest
   ]
 
 runTextInputBatchTest :: Context -> IORef Int -> IO ()
@@ -662,6 +667,74 @@ runTextArea2DScrollTest ctx failed = do
       V2 offX offY <- getScrollOffset2D ctx (respId resp)
       assertGt failed offX 0
       assertGt failed offY 0
+
+-- | Typing past a text area's right edge scrolls it across, keeping the caret
+-- at the end of its widest line in view, and Home scrolls back.
+runTextAreaCaretFollowTest :: Context -> IORef Int -> IO ()
+runTextAreaCaretFollowTest ctx failed = do
+  ref <- newVar ""
+  let
+    inp0 = withInput 320 220
+    ui = column (fst <$> held ref (textAreaWith' (fixedW 200)))
+  resp <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  typed <- forM [1 .. 60 :: Int] $ \_ -> runFrame ctx inp0 {inputChars = "x"} ui >> caretInView ctx (respId resp)
+  assert failed (and typed)
+  assertEq failed 60 . T.length =<< readVarIO ref
+  V2 offX _ <- getScrollOffset2D ctx (respId resp)
+  assertGt failed offX 0
+  _ <- runFrame ctx (keyInp KeyHome inp0) ui
+  assertEq failed 0 . v2X =<< getScrollOffset2D ctx (respId resp)
+
+-- | With the horizontal bar showing, the caret moved to the last row sits
+-- above the bar's lane, not under it.
+runTextAreaCaretAboveBarTest :: Context -> IORef Int -> IO ()
+runTextAreaCaretAboveBarTest ctx failed = do
+  let
+    inp0 = withInput 320 220
+    ui = column (fst <$> withValue (T.replicate 30 "wide " <> "\n" <> fortyLines) textArea')
+  resp <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx inp0 (runTextCommand (respId resp) SelectAll)
+  _ <- runFrame ctx inp0 ui
+  assert failed =<< caretInView ctx (respId resp)
+
+-- | Keys keep the caret in view by the rows as painted: on the device pixel
+-- grid, 12.8 px apart for a 13 px font at 125%, not 13.
+runTextAreaSnappedRowsTest :: Context -> IORef Int -> IO ()
+runTextAreaSnappedRowsTest base failed = do
+  ref <- newVar (T.replicate 59 "\n")
+  let
+    fm = (monospaceMetrics 13) {fmSnapScale = 1.25}
+    ctx = withFontResolver base (\_ _ _ _ -> pure (fm, False)) (\_ _ _ _ txt -> pure (13 * fromIntegral (T.length txt), 13))
+    inp0 = withInput 320 220
+    ui = column (fst <$> held ref (textAreaWith' (fontSize 13)))
+  resp <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  inView <- forM (replicate 59 KeyDown ++ replicate 20 KeyUp) $ \k -> runFrame ctx (keyInp k inp0) ui >> caretInView ctx (respId resp)
+  assert failed (and inView)
+
+-- | Whether text area @wid@'s caret, at its stored scroll, lies inside the
+-- clip its rows are painted in: its content box, short of the lane of each
+-- scrollbar that shows.
+caretInView :: Context -> WidgetId -> IO Bool
+caretInView ctx wid = do
+  st <- (`loadTextAreaState` intKey wid) <$> getStore ctx
+  V2 sx sy <- getScrollOffset2D ctx wid
+  textAreaHitForWidget ctx wid >>= \case
+    Nothing -> pure False
+    Just (TextAreaHit idx field lineH) -> do
+      fm <- resolveTextAreaFont ctx idx
+      (contentW, contentH) <- textAreaContentMetrics ctx idx
+      let
+        bars = textAreaBars fm field contentW contentH
+        (ix, iy) = widgetContentInset fm
+        lane shown = if shown then textAreaBarLane else 0
+        viewW = rectW field - 2 * ix - lane (tabVertical bars)
+        viewH = rectH field - 2 * iy - lane (tabHorizontal bars)
+        Cursor caretRow caretCol = getCursor (buffer st)
+        left = lineWidth fm (T.take caretCol (lineAt caretRow (buffer st))) - sx
+        top = fromIntegral caretRow * lineH - sy
+      pure (left >= -0.5 && left + 1 <= viewW + 0.5 && top >= -0.5 && top + lineH <= viewH + 0.5)
 
 runTextAreaScrollCursorLeavesViewportTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollCursorLeavesViewportTest ctx failed = do

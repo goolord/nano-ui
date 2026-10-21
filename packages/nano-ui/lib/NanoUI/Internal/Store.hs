@@ -130,9 +130,10 @@ data WidgetStore = WidgetStore
   , storeTableColumns :: !(IntMap ([Int], [Float]))
   , storeRichSelection :: !(IntMap RichSelection)
   , storeQuiet :: !(IntMap Int)
-  -- ^ Interaction bookkeeping no paint reads, such as whether a drag hook's
-  -- press is still held. Writes to it neither damage nor wake the loop: the
-  -- visible effects of the interaction go through the widget's own slots.
+  -- ^ Interaction bookkeeping that repaints nothing by itself, such as
+  -- whether a drag hook's press is still held. Writes to it neither damage
+  -- nor wake the loop: the visible effects of the interaction go through the
+  -- widget's own slots.
   }
 
 -- | One of the store's maps: how to read it, and how to put a new one back.
@@ -193,8 +194,8 @@ fieldTableColumns = Field storeTableColumns (\m st -> st {storeTableColumns = m}
 fieldRichSelection :: Field RichSelection
 fieldRichSelection = Field storeRichSelection (\m st -> st {storeRichSelection = m})
 
--- | Integer bookkeeping slots that no paint reads ('storeQuiet'). The store
--- diff that drives damage skips them.
+-- | Integer bookkeeping slots that repaint nothing by themselves
+-- ('storeQuiet'). The store diff that drives damage skips them.
 fieldQuiet :: Field Int
 fieldQuiet = Field storeQuiet (\m st -> st {storeQuiet = m})
 
@@ -385,6 +386,11 @@ data Slot
   | -- | A text area's row height as it was last painted (storeFloat), for
     -- commands run between frames to keep the caret in view with.
     SlotTextAreaLineH
+  | -- | Set (value 1, in 'storeQuiet') when a text area's editor state is
+    -- saved: its next paint, which has the font, scrolls the caret into view
+    -- across and clears it. The saved state already keeps the caret in view
+    -- vertically, and its slots repaint the area.
+    SlotTextAreaReveal
   | SlotTextInputScroll
 
   | -- | Search-field debounce bookkeeping. Text slots on the text widget id: the last

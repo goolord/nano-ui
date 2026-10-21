@@ -32,7 +32,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Internal.Context hiding (scrollOffset)
-import NanoUI.Internal.Font (fmLineHeight)
+import NanoUI.Internal.Font (fmLineHeight, fmSnapScale)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -40,7 +40,7 @@ import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId,
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
-import NanoUI.Internal.Types (DamageBounds (..), clamp)
+import NanoUI.Internal.Types (DamageBounds (..), clamp, onGrid)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -248,7 +248,8 @@ textAreaCore f wid value = do
             then pure (ctxFontMetrics ctx)
             else fst <$> liftIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
         let oldState = loadTextAreaState store key
-            s1 = setTextAreaViewport (viewportSize oldState) (realToFrac (fmLineHeight editFm)) oldState
+            -- Rows sit on the device pixel grid ('textAreaLineHeight').
+            s1 = setTextAreaViewport (viewportSize oldState) (realToFrac (onGrid (fmSnapScale editFm) (fmLineHeight editFm))) oldState
             hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
         newState <- liftIO $ do
           when hadInput $ modifyInteraction ctx (\s -> s {isTextInputDrag = Nothing})
@@ -326,10 +327,13 @@ loadTextAreaState store key =
             _ -> emptyHistory
         }
 
--- | Store the editor state. The buffer holds the document and the caret.
+-- | Store the editor state. The buffer holds the document and the caret. The
+-- state keeps the caret in view vertically; the next paint, which has the
+-- font, brings it into view across ('SlotTextAreaReveal').
 saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state =
   insertSlot fieldPoint (slotKey SlotTextAreaScroll key) (realToFrac sx, realToFrac sy)
+    . insertSlot fieldQuiet (slotKey SlotTextAreaReveal key) 1
     . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (realToFrac vw, realToFrac vh)
     . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (buffer state)
     . insertSlot fieldHistory (slotKey SlotTextHistory key) (AreaHistory (history state))

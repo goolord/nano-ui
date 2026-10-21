@@ -14,6 +14,7 @@ module NanoUI.Internal.Frame.TextInput
   , drawTextInputCaret
   , drawLineSelection
   , drawLineCaret
+  , drawCaretAt
   , drawLinePreedit
   , searchClearHit
   , textWordBounds
@@ -136,7 +137,11 @@ drawLineSelection da fm line lo hi x y lineH color = do
 drawLineCaret :: DrawArena -> FontMetrics -> Text -> Int -> Float -> Float -> Float -> Color -> IO ()
 drawLineCaret da fm line col x y lineH fg = do
   pw <- caretXIO fm line col
-  pushRect da (Rect (x + pw) (y + 1) 1 (max 4 (lineH - 2))) fg
+  drawCaretAt da (x + pw) y lineH fg
+
+-- | A caret at @x@ on a row at @y@ of height @lineH@.
+drawCaretAt :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
+drawCaretAt da x y lineH = pushRect da (Rect x (y + 1) 1 (max 4 (lineH - 2)))
 
 -- | Underline the composition in 'preeditLine' (pen at @x@, row at @y@ of
 -- height @lineH@) and draw the input method's caret when it has no
