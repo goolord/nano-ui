@@ -35,6 +35,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Frame.Chrome (menuPanelBounds)
 import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types
@@ -541,9 +542,10 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
   unless (null panels && prevEmpty) $
     modifyOverlay ctx $ \os ->
       os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels}
-  -- The follow-up frames these request only settle placement: the flip and
-  -- floating change each made this frame repaint whole already, so their
-  -- pixels are not waiting on the next frame.
+  -- The follow-up frames these request only settle placement: the flip made
+  -- this frame repaint whole, and a floating change did too or, on a frame
+  -- that only scrolled, damaged each moved panel where it was and is, so
+  -- their pixels are not waiting on the next frame.
   when modalFlip (markDirtyCovered ctx)
   when (floatingChanged && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirtyCovered ctx
@@ -731,9 +733,13 @@ clipDamage ctx snap d owners = do
     unless (ptrEq newImages oldImages) $
       forM_ (IM.keys (IM.mergeWithKey (\_ n o -> if n /= o then Just n else Nothing) id id newImages oldImages)) addText
     forM_ (fdRedrawn d) $ \k -> addDamageKeyGrow new k id
-    unless (fdScrollOnly d) $ addDamageGroup (fdSettledMoved d)
+    -- Also on a scroll-only frame: 'storeFloat' holds slider values too, and
+    -- a label showing one can shrink or move what follows it. A scroll's own
+    -- moves are clipped to the viewport its offset damage already covers.
+    addDamageGroup (fdSettledMoved d)
     addDamageGroup (fdChurn d)
-    let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect r) >> rest) (pure ()) a
+    -- A panel paints its offset shadow past its rect ('menuPanelBounds').
+    let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect (menuPanelBounds r)) >> rest) (pure ()) a
     addFloating (fsFloatingRects snap) (fdFloatingRects d)
     addFloating (fdFloatingRects d) (fsFloatingRects snap)
   let clip = clipRectToWindow winW winH (rectBounds added)

@@ -131,9 +131,12 @@ runFrameEff unlift ctx rawInp ui = do
   -- With the layout recorded, what the view read of the last one is checked
   -- against it. A check that publishes a float it measured (a tab strip's
   -- range) marks the frame as a layout change, not a scroll, for its damage.
-  floatsBefore <- storeFloat <$> getStore ctx
+  -- Both maps are forced: 'ptrEq' on an unforced selection compares a fresh
+  -- thunk, which never matches, and every frame would be a layout change.
+  !floatsBefore <- storeFloat <$> getStore ctx
   settleLayoutReads ctx
-  !layoutFloats <- not . ptrEq floatsBefore . storeFloat <$> getStore ctx
+  !floatsAfter <- storeFloat <$> getStore ctx
+  let !layoutFloats = not (ptrEq floatsBefore floatsAfter)
   refreshHover ctx frameInp
   refreshScrollBarHover ctx layerInp
   tickAnimations ctx (inputDeltaTime frameInp)

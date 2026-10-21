@@ -3,6 +3,7 @@ module Cases.Damage (tests) where
 import Spec
 import NanoUI.Shortcut
 import Data.ByteString qualified as BS
+import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (smallArrayFromList)
@@ -36,7 +37,61 @@ tests =
   , spec "damage-unwanted" runDamageUnwantedTest
   , spec "label-button-swap-damage" runLabelButtonSwapDamageTest
   , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
+  , spec "slider-label-shrink-damage" runSliderLabelShrinkDamageTest
+  , spec "scrolled-popup-shadow-damage" runScrolledPopupShadowDamageTest
   ]
+
+-- | A slider drag changes only 'storeFloat', as a scroll does. A label
+-- showing the value that shrank from "100" repaints where its old text was.
+runSliderLabelShrinkDamageTest :: Context -> IORef Int -> IO ()
+runSliderLabelShrinkDamageTest ctx failed = do
+  ref <- newIORef (50 :: Float)
+  let inp = withInputOff 400 100
+      ui = row $ do
+        v <- liftIO (readIORef ref)
+        (s, v') <- withValue v (sliderWith' (fixedW 200) 0 100)
+        liftIO (writeIORef ref v')
+        l <- label' (T.pack (show (round v' :: Int)))
+        pure (s, l)
+  (s, _) <- warmup2 ctx inp ui
+  let Rect sx sy sw sh = respRect s
+      at x = V2 x (sy + sh / 2)
+  _ <- runFrame ctx (pressAt inp (at (sx + sw / 2))) ui
+  _ <- runFrame ctx (holdAt inp (at (sx + sw + 50))) ui
+  assertEq failed 100 =<< readIORef ref
+  (_, wide) <- evalUi ctx (holdAt inp (at (sx + sw / 2))) ui
+  dmg <- takeDamage ctx
+  assert failed (clipCovers dmg (respRect wide))
+
+-- | A popup that follows a row of a scroller moves on a frame that only
+-- scrolls. That frame repaints the popup's old shadow, which lies past its
+-- rect.
+runScrolledPopupShadowDamageTest :: Context -> IORef Int -> IO ()
+runScrolledPopupShadowDamageTest ctx failed = do
+  let inp = withInputOff 640 400
+      rows = mapM_ (\i -> label (T.pack ("row " <> show (i :: Int))))
+      ui = do
+        (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
+          rows [1 .. 4]
+          anchor <- labelWith' fillW "anchor"
+          rows [5 .. 30]
+          pure anchor
+        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
+        pure sc
+  sc <- warmup2 ctx inp ui
+  mRect <- getPrevRect ctx sc
+  assertJust failed mRect $ \r -> do
+    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 20), inputScroll = V2 0 1}
+    _ <- runFrame ctx wheel ui
+    before <- IM.elems <$> floatingPanelRects ctx
+    _ <- runFrame ctx wheel ui
+    after <- IM.elems <$> floatingPanelRects ctx
+    dmg <- takeDamage ctx
+    pieces <- takeDamagePieces ctx
+    assert failed (before /= after)
+    forM_ before $ \(Rect x y w h) -> do
+      let shadow = Rect (x + 3) (y + 3) w h
+      assert failed (clipCovers dmg shadow && (null pieces || any (`covers` shadow) pieces))
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
 -- than four pieces or just one.
