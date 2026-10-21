@@ -23,7 +23,7 @@ Below the threshold, the result is `Nothing`. Otherwise it is a `Drag` whose
 
 Terminal phases are transient. Consume them in the view that calls the hook,
 and do not retain an old gesture as though it were current input. As with
-other interaction responses, a mirror rebuild may strip the interaction.
+other interaction responses, a second view pass may strip the interaction.
 Ignore ordinary pointer-click selection while handling a drag response.
 
 ## Reorder or transfer between strips
@@ -57,9 +57,9 @@ also avoids making target priority depend on pane rendering order.
 ## Create a pane
 
 Choose ownership explicitly: `pgTree = InitialTree (Just layout)` seeds the
-grid once, while `pgTree = ControlledTree arrangement` uses the caller's value
-on every view pass. Feed back `pgrTree` to accept edits, including divider
-motion; keep the old value to reject them. `Nothing` means an empty grid in
+grid once, while `pgTree = ControlledTree arrangement` keeps the tree in your
+`Var`, and the grid writes each edit to it, including divider motion. To
+reject an edit, write the previous tree back. `Nothing` means an empty grid in
 either mode. Closing the last pane does not create a replacement pane.
 Use `validateGridTree` on restored layouts to report invalid IDs/ratios before
 rendering; the widget also rejects invalid trees when adopting them.

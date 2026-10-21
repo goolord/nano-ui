@@ -82,8 +82,8 @@ Core modules live under `packages/nano-ui/lib`. Modules outside
 `NanoUI/Internal/` form the public API. Everything under `NanoUI/Internal/` is
 internal; some internal modules are exposed for backends, tests, and tooling,
 but may change without notice. The other packages follow the same convention
-(`NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`, `NanoUI.Diagrams.Internal`,
-`NanoUI.Form.Internal`, `NanoUI.Markdown.Internal`).
+(`NanoUI.Sdl.Internal`, `NanoUI.Rgfw.Internal`, `NanoUI.Form.Internal`,
+`NanoUI.Markdown.Internal`).
 
 | Path | Contents |
 | --- | --- |
@@ -91,7 +91,7 @@ but may change without notice. The other packages follow the same convention
 | `NanoUI/Widgets/` | Public widget modules, for qualified imports and symbols not re-exported by `NanoUI` |
 | `NanoUI/Internal/Widgets/` | Widget implementations |
 | `NanoUI/Internal/Monad.hs`, `NanoUI/Internal/Id.hs` | The `Ui` effect, widget IDs, and keys |
-| `NanoUI/Internal/Hooks.hs`, `NanoUI/Internal/Store.hs`, `NanoUI/Internal/Context.hs`, `NanoUI/Internal/Context/` | Widget state and frame context |
+| `NanoUI/Internal/Var.hs`, `NanoUI/Internal/Store.hs`, `NanoUI/Internal/Context.hs`, `NanoUI/Internal/Context/` | Widget state and frame context |
 | `NanoUI/Internal/Layout/` | Layout tree storage and solver |
 | `NanoUI/Internal/Frame.hs`, `NanoUI/Internal/Frame/` | Per-frame input routing, focus, painting, and damage |
 | `NanoUI/Internal/Draw.hs`, `NanoUI/Internal/Draw/` | Vertex arenas and draw list generation |
@@ -118,10 +118,10 @@ steps, and [rendering-pipeline.svg](rendering-pipeline.svg) (source:
   `RenderFinal` when the widget renders the updated value on the same pass, and
   `Conservative` when it rendered using the old value before the edit was
   resolved (which triggers another pass on change). Inside the core, sync with
-  the widget store using `adoptStoreInt`, `adoptStoreFloat`, or
-  `adoptStoreText` and record the returned value with the corresponding
-  `recordStore*` function so out-of-band edits by widget ID (such as menus or
-  text commands) are preserved.
+  the widget store using `adoptSlot` (`adoptSlot fieldInt ctx wid v`) and
+  record the returned value with `recordSlot` on the same `Field`, so
+  out-of-band edits by widget ID (such as menus or text commands) are
+  preserved.
 - Read and write widget store state using the slot functions in
   `NanoUI.Internal.Store` (`findSlot fieldInt 0 key store`,
   `insertSlot fieldPoint key p . deleteSlot fieldInt key`) rather than
@@ -297,13 +297,11 @@ from `extra-source-files` (such as C headers or bundled fonts). Verify that
 each archive's `README.md` is a regular file with the expected contents:
 
 ```sh
-tar -tvzf dist-newstyle/sdist/nano-ui-0.1.0.1.tar.gz
-tar -xOf dist-newstyle/sdist/nano-ui-0.1.0.1.tar.gz nano-ui-0.1.0.1/README.md
+tar -tvzf dist-newstyle/sdist/<pkg>-<version>.tar.gz
+tar -xOf dist-newstyle/sdist/<pkg>-<version>.tar.gz <pkg>-<version>/README.md
 ```
 
-Repeat for all packages using the versions in their `.cabal` files, and check
-that links and bundled assets work when extracted outside the repository tree.
-
-Run `python scripts/check-sdist-docs.py` after `cabal sdist` whenever
-documentation changes; it verifies every package's README declaration, archive
-entry types, changelogs, and user guide against the working tree.
+Repeat for all packages using the versions in their `.cabal` files: in each
+listing, `README.md` and `CHANGELOG.md` (and `GUIDE.md` for `nano-ui`) must be
+regular files (`-` in the first column, not `l`). Check that links and bundled
+assets work when extracted outside the repository tree.

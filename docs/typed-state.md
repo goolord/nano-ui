@@ -73,10 +73,14 @@ depends on whether the `Var` was already read during the current pass:
   on the value. If a `Var` is only bound to an input widget and never read with
   `readVar`, only that widget's bounds are marked damaged.
 
-Writes that do not change the value (`==`) are no-ops. `Text` equality checks
-the pointer before comparing characters, `TextDocument` equality compares
-pointers only, and floating-point equality treats `NaN` as equal to itself so
-`NaN` values do not cause continuous redraws.
+Writes that do not change the value are no-ops. A write compares the new value
+with the old one by pointer first and then with `==`: writing back the same
+`Text` compares no characters, and `TextDocument`'s `==` compares only the
+lines two documents do not share. Text areas compare their documents by
+`sameDocument`. The built-in float inputs (`slider`, `knob` and
+`numericInput`) treat a `NaN` as equal to itself, but `writeVar` of a newly
+computed `NaN` is a change every time, since `NaN /= NaN`: guard such writes,
+or a view that writes one after reading the `Var` redraws continuously.
 
 Read/write tracking operates at up to two levels of sub-part granularity (such
 as a record field or list element, plus a nested field within it). Writing
@@ -230,6 +234,5 @@ internal store update rather than the `Var` write.
 Additional tests in the suite cover positional stability across conditional
 widgets and `scope`, slot type changes, keyed list reordering, `VarMap`
 lifetimes, sharing a `Var` across two window sessions, the two-pass cap on
-backward writes, `IO` writes from background threads, and compile-time type
-errors on invalid field projections.
+backward writes, and `IO` writes from background threads.
 
