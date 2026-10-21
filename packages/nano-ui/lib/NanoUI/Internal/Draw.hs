@@ -44,13 +44,10 @@ module NanoUI.Internal.Draw
   , pushRect
   , pushQuadGradient
   , pushImage
-  , pushImageRotated
   , pushRoundedRect
   , pushRoundedRectRaw
   , pushRoundedStroke
-  , pushCircle
   , pushLine
-  , pushStrokeAA
   , pushFilledTriangle
   , pushPolylineAA
   , points3

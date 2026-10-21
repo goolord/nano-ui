@@ -256,7 +256,6 @@ beginLayer da layer = do
   when (cur /= layer) $ do
     flushCmd da
     writeIORef (daCurrentLayer da) layer
-    getCount da indexCountSlot >>= setCount da cmdStartSlot
 
 setClip :: DrawArena -> Rect -> IO ()
 setClip da (Rect x y w h) = do

@@ -228,7 +228,6 @@ pushRoundedRect da rect radius col =
 pushRoundedRectRaw :: DrawArena -> Rect -> Float -> Color -> IO ()
 pushRoundedRectRaw da (Rect x y w h) radius col
   | w <= 0 || h <= 0 = pure ()
-  | radius <= 0.5 = pushRect da (Rect x y w h) col
   | otherwise = do
       square <- readIORef (daSquareGeometry da)
       let !rad = min radius (min (w * 0.5) (h * 0.5))
@@ -824,7 +823,7 @@ pushPolylineAA da pts w closed cap join limit shade
                       -- Turning the way the corner turns: at a half turn
                       -- the cross product is a signed zero, and atan2 would
                       -- follow its sign back through the stroke instead.
-                      !turned = abs (atan2 (ux * outSign * by - uy * outSign * bx) (ux * outSign * bx + uy * outSign * by))
+                      !turned = abs (atan2 (ax * by - ay * bx) (ax * bx + ay * by))
                       !sweep = if turnsPositive then turned else negate turned
                       !chords = if join == RoundJoin then arcChords s outer turned else 1
                   if turnsPositive
