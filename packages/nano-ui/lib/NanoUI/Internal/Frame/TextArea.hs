@@ -30,7 +30,7 @@ module NanoUI.Internal.Frame.TextArea
 
 import Control.Monad (forM, forM_, guard, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -40,7 +40,7 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
-import NanoUI.Internal.Frame.Node (nodeFontMetrics)
+import NanoUI.Internal.Frame.Node (nodeFontMetrics, packedTextFont, resolveTextFont)
 import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt, drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
@@ -49,6 +49,7 @@ import NanoUI.Internal.Store (collapseFieldSelection, deleteSlot, fieldFloat, fi
 import NanoUI.Internal.Store.Types (LineWidths (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
+import NanoUI.Internal.WidgetText (textNodeFontKey)
 import qualified NanoUI.Internal.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 
@@ -227,16 +228,16 @@ textAreaBarLayouts (Rect x y w h) bars scrollX scrollY =
       , layout (tabHorizontal bars) DirRow (tabPadH bars) contentW scrollX
       )
 
--- | Font the text-area content is laid out and painted in. Honors the node's
--- @layoutFontSize@ (set via 'fontSize' on the editor layout) so a single text
--- area can zoom without changing the rest of the UI. A size of 0 means the
--- base UI font.
+-- | Font the text-area content is laid out and painted in. Honors the
+-- node's font size and the face, weight and slant packed in its style (set
+-- via 'fontSize', 'fontMono' and the like on the editor layout) so a single
+-- text area can zoom or set code without changing the rest of the UI. A size
+-- of 0 means the base UI font's.
 resolveTextAreaFont :: Context -> NodeIdx -> IO FontMetrics
 resolveTextAreaFont ctx idx = do
   size <- getNodeFontSize (ctxNodeArena ctx) idx
-  if size <= 0
-    then pure (ctxFontMetrics ctx)
-    else fst <$> ctxResolveFont ctx size WeightNormal FontStyleNormal FontRegular
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  fst <$> resolveTextFont ctx (packedTextFont size si)
 
 -- | Content extent of a text area, @(contentWidth, contentHeight)@. Measuring
 -- the width scans every character of the document, so the widths are kept
@@ -247,9 +248,11 @@ textAreaContentMetrics :: Context -> NodeIdx -> IO (Float, Float)
 textAreaContentMetrics ctx idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   size <- getNodeFontSize (ctxNodeArena ctx) idx
+  si <- getStyleIdx (ctxNodeArena ctx) idx
   store <- getStore ctx
   gen <- readIORef (ctxMetricGen ctx)
   let key = intKey wid
+      face = textNodeFontKey size si
       widthsKey = slotKey SlotTextAreaWidths key
       buf = TA.textAreaBuffer store key
       lns = TB.bufferLines buf
@@ -257,13 +260,13 @@ textAreaContentMetrics ctx idx = do
       cached = lookupSlot fieldLineWidths widthsKey store
   case cached of
     Just (LineWidths font fontGen _ _ widestW contentH)
-      | font == size && fontGen == gen && seenHead >= Seq.length lns -> pure (widestW, contentH)
+      | font == face && fontGen == gen && seenHead >= Seq.length lns -> pure (widestW, contentH)
     _ -> do
       fm <- resolveTextAreaFont ctx idx
       let contentH = fromIntegral (max 1 (Seq.length lns)) * textAreaLineHeight fm
           LineWidths _ _ measured widest widestW _ = case cached of
-            Just lw@(LineWidths font fontGen _ _ _ _) | font == size && fontGen == gen -> lw
-            _ -> LineWidths size gen Seq.empty (-1) 0 0
+            Just lw@(LineWidths font fontGen _ _ _ _) | font == face && fontGen == gen -> lw
+            _ -> LineWidths face gen Seq.empty (-1) 0 0
           -- Keep the widths of the lines no edit touched since the last
           -- measurement and measure the rest.
           keepHead = min seenHead (Seq.length measured)
@@ -285,7 +288,7 @@ textAreaContentMetrics ctx idx = do
             | otherwise = widestFrom 0 widths
           pick a b = if snd b > snd a then b else a
       modifyStore ctx $
-        insertSlot fieldLineWidths widthsKey (LineWidths size gen widths widest' contentW contentH)
+        insertSlot fieldLineWidths widthsKey (LineWidths face gen widths widest' contentW contentH)
           . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf)
       pure (contentW, contentH)
 
@@ -406,9 +409,10 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   state <- (`TA.loadTextAreaState` key) <$> getStore ctx
   (scrollXf, scrollYf) <- textAreaScrollSnapped da state
   preedit <- textAreaPreedit ctx wid state
+  -- The layout's 'fontColor', as a text field's and the span path's.
+  fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
   let lineH = textAreaLineHeight fm
       Rect clipX contentTop clipW clipH = textAreaFieldClip fm field
-      fg = styleFg style
       buf = TA.tasBuffer state
       cursor@(TB.Cursor caretRow caretCol) = TB.getCursor buf
       contentX = clipX - scrollXf

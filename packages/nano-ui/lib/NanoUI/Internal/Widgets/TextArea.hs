@@ -33,18 +33,20 @@ import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (fmLineHeight, fmSnapScale)
+import NanoUI.Internal.Frame.Node (packedTextFont, resolveTextFont)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Types (TextHistory (..))
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), defaultLayout, fillW, fixedH, minW)
+import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), clamp, onGrid)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
+import NanoUI.Internal.WidgetText (packTextNodeStyle)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
-import NanoUI.Internal.Widgets.Node (Response, addWidget, setChanged)
+import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, setChanged)
 import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Internal.Widgets.TextDocument
@@ -140,7 +142,8 @@ textArea' :: Var Text -> NanoUI Response
 textArea' = textAreaWith' id
 
 -- | 'textArea' with a modifier applied to 'textAreaLayout', for example
--- 'grow' to fill the parent.
+-- 'grow' to fill the parent. Font modifiers ('fontSize', 'fontMono',
+-- 'fontColor' and the like) set the text.
 {-# INLINE textAreaWith #-}
 textAreaWith :: (Layout -> Layout) -> Var Text -> NanoUI ()
 textAreaWith f v = void (textAreaWith' f v)
@@ -207,6 +210,8 @@ textAreaCore f wid value = do
   inp <- askInput
   store0 <- liftIO (getStore ctx)
   let layout = f textAreaLayout
+      -- The face, weight and slant, packed as a text field's are.
+      styleIdx = packTextNodeStyle layout 0
       key = intKey wid
       seenKey = slotKey SlotSeen key
       bufKey = slotKey SlotTextAreaBuffer key
@@ -243,10 +248,8 @@ textAreaCore f wid value = do
   (newDoc, edited) <-
     if isFocus
       then do
-        editFm <-
-          if layoutFontSize layout <= 0
-            then pure (ctxFontMetrics ctx)
-            else fst <$> liftIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
+        -- The font the rows are painted in ('resolveTextAreaFont').
+        editFm <- fst <$> liftIO (resolveTextFont ctx (packedTextFont (layoutFontSize layout) styleIdx))
         let oldState = loadTextAreaState store key
             -- Rows sit on the device pixel grid ('textAreaLineHeight').
             s1 = setTextAreaViewport (tasViewportSize oldState) (realToFrac (onGrid (fmSnapScale editFm) (fmLineHeight editFm))) oldState
@@ -293,7 +296,7 @@ textAreaCore f wid value = do
       case lookupSlot fieldDocument seenKey st of
         Just seen | sameDocument seen newDoc -> st
         _ -> insertSlot fieldDocument seenKey newDoc st
-  resp <- addWidget wid NodeTextArea "" 0 layout
+  resp <- addWidgetStyled wid NodeTextArea "" 0 layout styleIdx
   -- respChanged reports an edit to the text, as on a text input; caret,
   -- selection and scroll moves only repaint the area.
   pure (setChanged edited resp, newDoc)

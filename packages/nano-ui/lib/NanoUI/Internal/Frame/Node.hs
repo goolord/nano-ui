@@ -4,6 +4,7 @@
 module NanoUI.Internal.Frame.Node
   ( resolveFontFor
   , nodeFontNative
+  , packedTextFont
   , resolveTextFont
   , nodeFontMetrics
   , readScrollNode

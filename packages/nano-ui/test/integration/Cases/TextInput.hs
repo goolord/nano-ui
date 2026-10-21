@@ -81,6 +81,7 @@ tests =
   , pixelSpec "text-area-caret-follow" runTextAreaCaretFollowTest
   , pixelSpec "text-area-caret-above-bar" runTextAreaCaretAboveBarTest
   , pixelSpec "text-area-snapped-rows" runTextAreaSnappedRowsTest
+  , spec "text-area-font" runTextAreaFontTest
   ]
 
 runTextInputBatchTest :: Context -> IORef Int -> IO ()
@@ -796,6 +797,26 @@ runTextAreaSnappedRowsTest base failed = do
   _ <- runFrame ctx (tabInp inp0) ui
   inView <- forM (replicate 59 KeyDown ++ replicate 20 KeyUp) $ \k -> runFrame ctx (keyInp k inp0) ui >> caretInView ctx (respId resp)
   assert failed (and inView)
+
+-- | A text area sets its rows in the face its layout names, not only the
+-- size, and in its font colour, which the caret takes too. A change of face
+-- measures the lines again.
+runTextAreaFontTest :: Context -> IORef Int -> IO ()
+runTextAreaFontTest base failed = do
+  let
+    ctx = withMonoFontMetrics base (monospaceMetrics 20)
+    red = colorRGBA 255 0 0 255
+    inp0 = withInput 320 220
+    ui f = column (fst <$> withValue "code" (textAreaWith' f))
+    widest resp = textAreaHitForWidget ctx (respId resp) >>= traverse (fmap fst . textAreaContentMetrics ctx . tahNodeIdx)
+  resp <- warmup2 ctx inp0 (ui (fontMono . fontColor red))
+  (_, draw, _) <- runFrame ctx (tabInp inp0) (ui (fontMono . fontColor red))
+  assertJustM failed (textAreaHitForWidget ctx (respId resp)) $ \hit -> do
+    assertEq failed 20 (tahLineH hit)
+    assertEq failed 20 . fmLineHeight =<< resolveTextAreaFont ctx (tahNodeIdx hit)
+  assert failed . elem red . fillsIn (respRect resp) =<< drawQuads draw
+  assertEq failed (Just 80) =<< widest resp
+  assertEq failed (Just 48) =<< widest =<< warmup2 ctx inp0 (ui id)
 
 -- | Whether text area @wid@'s caret, at its stored scroll, lies inside the
 -- clip its rows are painted in: its content box, short of the lane of each
