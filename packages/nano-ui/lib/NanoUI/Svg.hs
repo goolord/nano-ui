@@ -16,7 +16,7 @@ module NanoUI.Svg
   , rasterizeSvgIn
   ) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -180,13 +180,12 @@ strokeWalk w cap join miterLimit contours point end =
             CapSquare -> square (pt 0)
           _ -> do
             forM_ [0 .. n - 2] $ \i -> segmentQuad (pt i) (pt (i + 1))
-            when closed $ segmentQuad (pt (n - 1)) (pt 0)
             if closed
-              then forM_ [0 .. n - 1] cornerAt
-              else forM_ [1 .. n - 2] cornerAt
-            unless closed $ do
-              endCap (pt 1) (pt 0)
-              endCap (pt (n - 2)) (pt (n - 1))
+              then segmentQuad (pt (n - 1)) (pt 0) >> forM_ [0 .. n - 1] cornerAt
+              else do
+                forM_ [1 .. n - 2] cornerAt
+                endCap (pt 1) (pt 0)
+                endCap (pt (n - 2)) (pt (n - 1))
    in mapM_ contour contours
 
 --------------------------------------------------------------------------------
@@ -232,9 +231,7 @@ rasterizeView width height view@(Matrix a b c d e f) current svg
         let al = indexPrimArray image (i * 4 + 3)
             byte x = fromIntegral (clamp 0 255 (round (x * 255) :: Int)) :: Word8
             unpremul k = pokeByteOff out (i * 4 + k) (if al <= 0 then 0 else byte (indexPrimArray image (i * 4 + k) / al))
-        unpremul 0
-        unpremul 1
-        unpremul 2
+        mapM_ unpremul [0, 1, 2]
         pokeByteOff out (i * 4 + 3) (byte al)
   where
     image = runST $ do
