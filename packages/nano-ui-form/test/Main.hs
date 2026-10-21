@@ -182,6 +182,11 @@ main = do
       fail "Expected validation failure, but form succeeded"
   inRangeNaN <- proofFunction (inRange 0 1 (const ("Out of range" :: Text))) (0 / 0 :: Double)
   check "inRange rejects NaN" (isLeft inRangeNaN)
+  -- ditto's number proofs read a String, as NanoUI.Form.Validation shows.
+  (_, ageResult) <-
+    runNanoUI ctx inp . runNanoForm owner "age" $
+      (T.unpack <$> inputText "age" "42") `prove` decimal (const "Not a number") (0 :: Int)
+  expectOk "A number proof parses a text field" (== 42) ageResult
 
   let
     enumForm :: Form Text (Int8, Int8, Int8)

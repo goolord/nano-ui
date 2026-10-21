@@ -33,7 +33,8 @@ view owner = do
 `nanoFormSubmit` adds a submit button and yields the value on the frame the form
 is submitted. `nanoFormLive` yields the value whenever the form is valid,
 `nanoFormEx` takes a `FormConfig`, and `runNanoForm` returns the form's view and
-result separately.
+result separately. A `FormOnSubmit` form shows its errors once submitted; call
+`markSubmitted` from your own submit button.
 
 ## Running
 
@@ -50,8 +51,8 @@ Give each form a stable key, such as `"signup"`, and use different keys for
 independent forms in the same view. Allocate `newFormState` once per component
 or session and pass it as the first argument to each runner and `resetForm`.
 The typed owner keeps field values and
-validation state between frames under that identity. Use the reset operations
-in `NanoUI.Form.Runner` when starting a new entry with the same form.
+validation state between frames under that identity. Call `resetForm` when
+starting a new entry with the same form.
 
 Deferred field views capture their owner during evaluation. Rendering them
 later or inside another form still updates the original form; there is no
@@ -109,8 +110,6 @@ wanted. The policy controls when an edit is committed to the form:
 
 ## Build
 
-Use GHC 9.14 and add `nano-ui`, `nano-ui-form`, and `text` to your application's
-`build-depends`. The form library requires ditto 0.5. The repository builds it
-from a sibling checkout, as described in the
-[development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md).
+Use GHC 9.10 through 9.14 and add `nano-ui`, `nano-ui-form`, and `text` to your
+application's `build-depends`. The form library requires ditto 0.5 from Hackage.
 To build only the form library without SDL, use `cabal build lib:nano-ui-form`.

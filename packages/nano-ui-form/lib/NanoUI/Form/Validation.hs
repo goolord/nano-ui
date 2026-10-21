@@ -1,5 +1,11 @@
 -- | Proofs that parse and validate field values: numbers, text length,
 -- ranges, email addresses, and custom predicates.
+--
+-- The number proofs from ditto ('decimal', 'signedDecimal', 'realFrac' and
+-- 'realFracSigned') read a 'String', and 'notNullProof' takes a list, but
+-- text inputs yield 'Text'. Apply them after @fmap T.unpack@:
+--
+-- > (T.unpack <$> inputText "Age" "") `prove` decimal (const "Not a number") 0
 module NanoUI.Form.Validation
   ( -- * Proof combinators
     Proof (..)
