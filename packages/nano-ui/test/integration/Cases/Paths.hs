@@ -656,6 +656,7 @@ runGradientTest _ failed = do
   -- A zero-length gradient, or one with a single stop, is a flat fill.
   assert failed (null (gradient (V2 5 5) (V2 5 5) [(0, red), (1, blue)] bar))
   assertEq failed [1] [1 :: Int | FillPolygon _ _ _ (Flat c) <- opsAt 1 (drawPathWith P.NonZero bar (P.Linear (V2 5 5) (V2 5 5) [(0, red), (1, blue)])), c == blue]
+  assertEq failed [1] [1 :: Int | FillPolygon _ _ _ (Flat c) <- opsAt 1 (drawPathWith P.NonZero bar (P.Linear (V2 0 0) (V2 100 0) [(0, red)])), c == red]
   -- A stroke takes the colours along its centre line.
   assertEq failed [[red, blue]] [map Color (primArrayToList cs) | StrokePolyline _ _ _ _ _ _ (Shaded cs) <- opsAt 1 (drawStrokePathWith (P.stroke 4) (P.polyline [V2 0 0, V2 100 0]) (P.Linear (V2 0 0) (V2 100 0) [(0, red), (1, blue)]))]
   -- A four-corner gradient at a non-quarter angle becomes a shaded polygon

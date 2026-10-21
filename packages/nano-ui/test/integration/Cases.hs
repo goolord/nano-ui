@@ -959,6 +959,7 @@ runSearchInputClearTest ctx failed = do
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchInput' "Search…"))
   (resp, _) <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
   let Rect bx by bw bh = respRect resp
       cy = by + bh / 2
       scanClear x
@@ -974,6 +975,7 @@ runSearchInputClearTest ctx failed = do
     ((r1, t1), _, _) <- runFrame ctx inp0 ui
     assertEq failed t1 ""
     assert failed (respChanged r1)
+    assertEq failed (respId r1) =<< getFocusId ctx
     ((r2, _), _, _) <- runFrame ctx inp0 ui
     assert failed (not (respChanged r2))
 
@@ -988,14 +990,16 @@ runSearchInputDebounceTest ctx failed = do
   ((rA, tA), _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
   assertEq failed tA "a"
   assert failed (not (respChanged rA))
+  before <- getMonotonicTime
   ((rB, tB), _, _) <- runFrame ctx (inp0 {inputChars = "b"}) ui
+  after <- getMonotonicTime
   assertEq failed tB "ab"
   assert failed (not (respChanged rB))
   -- No input marks the end of the pause, so the field asks for the frame
-  -- that commits: the loop sleeps until then instead of polling.
-  typedAt <- getMonotonicTime
+  -- that commits: the loop sleeps until then instead of polling. The edit
+  -- is stamped during the frame, so the wake is 40 ms past some moment in it.
   wakeAt <- getWakeAt ctx
-  assert failed (wakeAt > typedAt && wakeAt < typedAt + 0.06)
+  assert failed (wakeAt >= before + 0.04 && wakeAt <= after + 0.042)
   threadDelay 80000
   ((rC, tC), _, _) <- runFrame ctx inp0 ui
   assertEq failed tC "ab"

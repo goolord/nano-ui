@@ -208,7 +208,8 @@ runTextInputSelectionTest ctx failed = do
     ui = column (button "Other" >> held textRef textInput')
   warmupFocused ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
-  _ <- warmup2 ctx (chordInp (shift <> key KeyLeft) inp0) ui
+  -- Shift+Left on two frames selects "lo", back from the caret at the end.
+  replicateM_ 2 (runFrame ctx (chordInp (shift <> key KeyLeft) inp0) ui)
   assertEq failed "helX" . snd =<< evalUi ctx (inp0 {inputChars = "X"}) ui
   -- Ctrl+A selects all and types nothing, even when the backend also sends
   -- the letter as text.

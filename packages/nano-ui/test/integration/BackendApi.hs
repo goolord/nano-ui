@@ -10,7 +10,7 @@ backendApiCheck :: IO ()
 backendApiCheck = do
   ctx <- newPixelContext
   (_, drawing, _) <- runFrame ctx emptyInput (label "backend")
-  unless (drawCmdCount drawing >= 0) (fail "invalid draw commands")
+  unless (drawCmdCount drawing > 0) (fail "label drew no commands")
   _ <- takeDamage ctx
   _ <- takeDamagePieces ctx
   _ <- collectRasterSpans ctx emptyInput

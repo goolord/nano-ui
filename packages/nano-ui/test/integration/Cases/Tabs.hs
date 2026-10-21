@@ -116,7 +116,7 @@ runTabsKeyedReorderTest ctx failed = do
         (field, _) <- withValue (T.pack (show key)) textInput'
         liftIO (writeIORef seen (Just (n, nVar, respId field)))
       ui active order = tabs' (constVar active) [tab key (T.pack (show key)) (body key) | key <- order]
-      readBody = readIORef seen >>= maybe (fail "tab body did not run") pure
+      readBody = atomicModifyIORef' seen (\s -> (Nothing, s)) >>= maybe (fail "tab body did not run") pure
   original <- warmup2 ctx inp (ui TabB [TabA, TabB, TabC])
   (_, nVar, fieldId) <- readBody
   runNanoUI ctx inp (writeVar nVar 7)
@@ -159,6 +159,7 @@ runClippedDropBoundsTest ctx failed = do
             pure (PaneView "Tabs" False)
         }
   forM_ [TabTop, TabLeft] $ \orientation -> do
+    writeIORef result (Rect 0 0 0 0)
     void (warmup2 ctx (withInput 400 200) (ui orientation))
     bounds <- readIORef result
     assert failed (rectW bounds > 0 && rectW bounds <= 200)
