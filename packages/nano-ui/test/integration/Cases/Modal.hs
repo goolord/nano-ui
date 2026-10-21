@@ -1,7 +1,9 @@
 module Cases.Modal (tests) where
 
 import Spec
+import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
+import NanoUI.Internal.Context (setDrawSquareGeometry)
 
 tests :: [Spec]
 tests =
@@ -12,6 +14,7 @@ tests =
   , spec "modal-close-damage" runModalCloseDamageTest
   , spec "modal-fractional-scale-no-scroll" runModalFractionalScaleNoScrollTest
   , spec "modal-fill-label-fits" runModalFillLabelFitsTest
+  , spec "modal-tree-selection" runModalTreeSelectionTest
   ]
 
 runModalOverlayTest :: Context -> IORef Int -> IO ()
@@ -218,3 +221,22 @@ runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
     let Rect _ dy _ dh = respRect dlg
         Rect _ by _ bh = respRect ok
     assertGt failed (dy + dh + 0.5) (by + bh)
+
+-- | A tree in a modal draws its selected row apart from the others, as one
+-- on the page does.
+runModalTreeSelectionTest :: Context -> IORef Int -> IO ()
+runModalTreeSelectionTest ctx failed = do
+  setDrawSquareGeometry ctx True
+  let inp0 = withInput 320 200
+      items = [TreeItem "alpha" [], TreeItem "beta" []]
+      -- The last fill under a row's whole label is that row's background.
+      rowFills sel = do
+        (_, draw) <- warmupDraw ctx inp0 (modal' (constVar True) "Pick" (tree' "t" items (constVar sel)))
+        quads <- drawQuads draw
+        spans <- collectOverlayTextSpans ctx inp0
+        let under lbl = spanRectOf lbl spans >>= \r -> listToMaybe (reverse [c | (q, c) <- quads, covers q r])
+        pure (under "alpha", under "beta")
+  (alpha0, beta0) <- rowFills 0
+  (alpha1, beta1) <- rowFills 1
+  assert failed (isJust alpha0 && isJust beta0)
+  assert failed (alpha0 /= alpha1 && beta0 /= beta1)
