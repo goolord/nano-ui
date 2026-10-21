@@ -114,7 +114,10 @@ library
         NanoUI.Internal.Path
         NanoUI.Internal.SIMD
         NanoUI.Internal.Store
+        NanoUI.Internal.Store.Types
         NanoUI.Internal.Var
+        NanoUI.Internal.Var.Cell
+        NanoUI.Internal.Var.Generic
         NanoUI.Internal.Var.Types
         NanoUI.Internal.Widgets.Custom
         NanoUI.Internal.Widgets.SplitPane
@@ -122,8 +125,6 @@ library
         NanoUI.Internal.Widgets.TextDocument
     other-modules:
         NanoUI.Internal.Equality
-        NanoUI.Internal.Var.Cell
-        NanoUI.Internal.Var.Generic
         NanoUI.Internal.Var.List
         NanoUI.Internal.Var.Map
         NanoUI.Internal.Derived
@@ -133,7 +134,6 @@ library
         NanoUI.Internal.NativeWindow.Types
         NanoUI.Internal.Sensor.Types
         NanoUI.Internal.RichText.Types
-        NanoUI.Internal.Store.Types
         NanoUI.Internal.TextEditor.Types
         NanoUI.Internal.TextCluster
         NanoUI.Internal.Animatable
