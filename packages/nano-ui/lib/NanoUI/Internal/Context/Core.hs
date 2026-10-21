@@ -184,7 +184,8 @@ damagePeers ctx wids bounds =
 damageFull :: Context -> IO ()
 damageFull ctx = requestDamage ctx ReqFull
 
--- | Request another view pass and wake the event loop ('wakeOffLoop').
+-- | Request another view pass and wake the event loop, unless this is the
+-- loop's own thread, which checks the flag before it waits.
 -- Dirty state schedules work; damage determines which pixels are repainted.
 -- The request is opaque: its follow-up frame repaints the whole window.
 {-# INLINE markDirty #-}
