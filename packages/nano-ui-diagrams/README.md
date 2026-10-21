@@ -36,14 +36,16 @@ diagram.
 
 ## Build and use
 
-Use GHC 9.14 and add `nano-ui`, `nano-ui-diagrams`, and `text` to your
-application's `build-depends`. Add `diagrams-lib` if you construct diagrams
-directly. The example uses `GHC2024` and `OverloadedStrings`. This package
-does not open a window; run the view with a nano-ui backend.
+Use GHC 9.10 through 9.14 and add `nano-ui`, `nano-ui-diagrams`, and `text`
+to your application's `build-depends`. Add `diagrams-lib` if you construct
+diagrams directly. The example uses `GHC2024` and `OverloadedStrings`. This
+package does not open a window; run the view with a nano-ui backend.
 
 Start with `NanoUI.Plot` for charts and `NanoUI.Diagrams` for drawings.
 `NanoUI.Plot.Types` describes series, axis options, and hover results.
-The scale and tessellation modules expose lower-level geometry operations.
+`NanoUI.Plot.Scale` and `NanoUI.Plot.Decimate` expose the lower-level domain,
+tick and thinning operations, and nano-ui's `NanoUI.Path` fills and strokes
+the diagrams' paths.
 
 Chart data uses axis coordinates. The layout modifier passed to `plot`
 sets its size in logical pixels. `plotHover` is `Nothing` when there is no
