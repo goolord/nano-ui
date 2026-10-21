@@ -1,10 +1,10 @@
 module Main (main) where
 
 import Control.Monad (forM_, replicateM_, void, when)
-import GHC.Stats (RTSStats (..), getRTSStats)
+import GHC.Conc (getAllocationCounter)
 import NanoUI
 import NanoUI.Backend (burstNextIds, emptyInput)
-import NanoUI.Testing (newContext, runFrame)
+import NanoUI.Testing (Context, newContext, runFrame)
 import System.Exit (exitFailure)
 import System.Mem (performGC)
 import Test.Tasty.Bench
@@ -17,36 +17,51 @@ idBurst :: NanoUI ()
 idBurst = column (burstNextIds 4096)
 
 scopedWidgets :: NanoUI ()
-scopedWidgets =
+scopedWidgets = rows (void nextId)
+
+-- | 32 rows of 32 @cell@s.
+rows :: NanoUI () -> NanoUI ()
+rows cell =
   columnWith (gap 2)
     $ replicateM_ 32
     $ rowWith (gap 2)
-    $ replicateM_ 32 (void nextId)
+    $ replicateM_ 32 cell
 
-measureFrameAlloc :: NanoUI a -> IO Integer
-measureFrameAlloc ui = do
+-- | A context that has run @ui@, so its next frame is warm.
+warmContext :: NanoUI a -> IO Context
+warmContext ui = do
   ctx <- newContext
-  _ <- runFrame ctx benchInput (column (void nextId))
+  replicateM_ 2 (runFrame ctx benchInput ui)
+  pure ctx
+
+-- | Bytes a warm frame of @ui@ allocates.
+frameAlloc :: NanoUI a -> IO Integer
+frameAlloc ui = do
+  ctx <- warmContext ui
   performGC
-  before <- getRTSStats
+  -- The thread's allocation counter is current even if the frame never
+  -- fills the nursery; RTSStats.allocated_bytes only catches up at a GC.
+  before <- getAllocationCounter
   _ <- runFrame ctx benchInput ui
-  after <- getRTSStats
-  pure (fromIntegral (allocated_bytes after - allocated_bytes before) :: Integer)
+  after <- getAllocationCounter
+  pure (fromIntegral (before - after))
 
 main :: IO ()
 main = do
-  let scenes = [("burst4096", idBurst), ("scopedWidgets", scopedWidgets)]
-  forM_ scenes $ \(name, ui) -> do
-    alloc <- measureFrameAlloc ui
-    when (alloc > 0) $ do
-      putStrLn ("FAIL: " ++ name ++ " allocated " ++ show alloc ++ " bytes during runFrame")
+  -- Each scene against the same nodes without the ids: issuing ids
+  -- allocates nothing, so a boxed id cursor (16 bytes or more an id) trips
+  -- this.
+  let scenes = [("burst4096", idBurst, column (pure ())), ("scopedWidgets", scopedWidgets, rows (pure ()))]
+  forM_ scenes $ \(name, ui, base) -> do
+    extra <- (-) <$> frameAlloc ui <*> frameAlloc base
+    when (extra > 1024) $ do
+      putStrLn ("FAIL: " ++ name ++ " allocated " ++ show extra ++ " bytes more than the same nodes without ids")
       exitFailure
+  ctxs <- mapM (\(_, ui, _) -> warmContext ui) scenes
   defaultMain
     [ bgroup
         "id/nextId"
-        [ bench name $ whnfIO $ do
-            ctx <- newContext
-            void (runFrame ctx benchInput ui)
-        | (name, ui) <- scenes
+        [ bench name $ whnfIO (void (runFrame ctx benchInput ui))
+        | ((name, ui, _), ctx) <- zip scenes ctxs
         ]
     ]
