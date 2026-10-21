@@ -9,12 +9,16 @@ import Ditto.Core qualified as Ditto
 import Ditto.Types qualified as Ditto
 import NanoUI
   ( Input (..)
-  , Key (KeyEnter)
+  , Key (KeyEnter, KeyUp)
   , NanoUI
   , Rect (..)
+  , colorA
+  , colorRGBA
   , columnWith
   , fillW
   , liftIO
+  , respSubmitted
+  , textInput'
   )
 import NanoUI.Backend (runNanoUI)
 import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena)
@@ -33,7 +37,7 @@ import NanoUI.Form.Internal.Backend
   )
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (NodeButton, NodeTextArea)
+  ( NodeType (NodeButton, NodeColorPicker, NodeTextArea, NodeTextInput)
   , arenaCount
   , getNodeType
   , getNodeRect
@@ -52,7 +56,9 @@ runScopeTests = do
   testPrefixRestoration
   testFormInvalidation
   testSubmitPulse
+  testSubmitSameFrameEdit
   testSubmitSkipsTextArea
+  testColorKeepsAlpha
   testResetWidgets
   testResetTextArea
 
@@ -181,6 +187,37 @@ testSubmitPulse = do
   idle <- warmup2 ctx input ui
   check "a submitted form kept emitting values on idle frames" (idle == Nothing)
 
+-- | Text typed in the frame that presses Enter is part of the submission,
+-- both for a field that publishes each edit and one that publishes on Enter.
+testSubmitSameFrameEdit :: IO ()
+testSubmitSameFrameEdit =
+  forM_
+    [ ("submit-typed", inputText "query" "")
+    , ( "submit-on-enter"
+      , inputWidget (Just "query") decodeText (OnlyWhen respSubmitted) FormInputText textInput' ""
+      )
+    ]
+    $ \(prefix, field) -> do
+      ctx <- newPixelContext
+      owner <- newFormState
+      let
+        ui = nanoFormSubmit owner prefix "Save" (field `prove` notEmpty "Required")
+      _ <- warmup2 ctx input ui
+      controls <- controlsOf NodeTextInput ctx
+      case controls of
+        [(wid, _)] -> do
+          writeIORef (ctxFocusId ctx) wid
+          _ <- warmup2 ctx input ui
+          (submitted, _, _) <-
+            runFrame ctx (keyInp KeyEnter input {inputChars = "abc"}) ui
+          check
+            ("Enter submitted the text from before its frame's typing: " <> show prefix)
+            (submitted == Just "abc")
+        _ -> fail "expected one submit-test text input"
+ where
+  decodeText (FormInputText t) = Right t
+  decodeText _ = Left ("Expected text" :: Text)
+
 -- | Enter in a focused text area inserts a newline; it does not submit.
 testSubmitSkipsTextArea :: IO ()
 testSubmitSkipsTextArea = do
@@ -198,6 +235,27 @@ testSubmitSkipsTextArea = do
         runFrame ctx (keyInp KeyEnter input) ui
       check "Enter in a focused text area submitted the form" (submitted == Nothing)
     _ -> fail "expected one submit-test text area"
+
+-- | Brightening a translucent colour field keeps its alpha.
+testColorKeepsAlpha :: IO ()
+testColorKeepsAlpha = do
+  ctx <- newPixelContext
+  owner <- newFormState
+  let
+    overlay = colorRGBA 0 0 0 128
+    ui = nanoFormLive owner "colour" (inputColor "Overlay" overlay)
+  _ <- warmup2 ctx input ui
+  -- The picker's first part is its saturation / value field.
+  controls <- controlsOf NodeColorPicker ctx
+  case controls of
+    (wid, _) : _ -> do
+      writeIORef (ctxFocusId ctx) wid
+      _ <- warmup2 ctx input ui
+      void (runFrame ctx (keyInp KeyUp input) ui)
+      edited <- warmup2 ctx input ui
+      check "Up did not brighten the colour" (edited /= Just overlay)
+      check "a colour field dropped its alpha" (fmap colorA edited == Just 128)
+    _ -> fail "expected a colour picker"
 
 testResetWidgets :: IO ()
 testResetWidgets = do

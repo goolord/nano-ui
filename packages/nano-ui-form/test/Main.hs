@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Data.Either (isLeft)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int8)
 import Data.Sequence qualified as Seq
@@ -179,6 +180,8 @@ main = do
       check "Caught Must be at least 18" ("Must be at least 18" `elem` errorMsgs)
     Ditto.Ok _ ->
       fail "Expected validation failure, but form succeeded"
+  inRangeNaN <- proofFunction (inRange 0 1 (const ("Out of range" :: Text))) (0 / 0 :: Double)
+  check "inRange rejects NaN" (isLeft inRangeNaN)
 
   let
     enumForm :: Form Text (Int8, Int8, Int8)

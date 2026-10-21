@@ -62,7 +62,7 @@ maxLength maxLen mkErr = validate ((<= maxLen) . T.length) (mkErr . T.length)
 
 -- | Validate that a value falls within the inclusive range @[minVal, maxVal]@.
 inRange :: (Applicative m, Ord a) => a -> a -> (a -> err) -> Proof m err a a
-inRange minVal maxVal = validate (\x -> not (x < minVal || x > maxVal))
+inRange minVal maxVal = validate (\x -> minVal <= x && x <= maxVal)
 
 -- | Check for one @\@@, a nonempty local part, and a dot inside the domain.
 -- This is a small input check, not full email-syntax or deliverability validation.

@@ -102,7 +102,10 @@ nanoFormSubmit owner prefix submitLabel form = do
     let clickedSubmit = btnClicked || enterPressed
     when clickedSubmit $
       liftIO (markFormSubmitted owner ctx prefix True)
-    pure $ case (clickedSubmit, res) of
+    -- The fields published this frame's edits while rendering, after 'res'
+    -- was evaluated, so a submission evaluates the form again.
+    submitted <- if clickedSubmit then snd <$> runNanoForm owner prefix form else pure res
+    pure $ case (clickedSubmit, submitted) of
       (True, Ditto.Ok (Ditto.Proved _ a)) -> Just a
       _                                  -> Nothing
 
