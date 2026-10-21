@@ -53,7 +53,8 @@ import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDama
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagClose, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
 
 -- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
--- and show the focus ring. A Tab consumed by the focused widget
+-- and show the focus ring. Moving focus blurs the old widget
+-- ('blurFocus'). A Tab consumed by the focused widget
 -- ('NanoUI.Internal.Context.markTabConsumed') moves nothing.
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
@@ -66,6 +67,7 @@ finalizeTabFocus ctx inp =
       wasVisible <- readIORef (ctxFocusVisible ctx)
       when (next == cur && not wasVisible) $
         damageWidget ctx next (DamageInflated defaultDamageSlop)
+      when (next /= cur) (blurFocus ctx cur)
       writeIORef (ctxFocusId ctx) next
       writeIORef (ctxFocusVisible ctx) True
       markDirty ctx
@@ -384,8 +386,7 @@ finalizeDrawingFocus ctx targets =
 -- 'FocusNowhere' clears focus, and 'FocusNext' and 'FocusPrevious' go where
 -- Tab would ('tabTarget'). 'FocusOn' succeeds only for one of the
 -- 'tabStops', never a disabled widget; otherwise the request is dropped.
--- Moving focus behaves like a press elsewhere: the old field collapses its
--- selection, and the text-field menu and any open dropdown close. The new
+-- Moving focus behaves like a press elsewhere ('blurFocus'). The new
 -- widget shows the focus ring. Requesting the focused widget changes
 -- nothing, including the ring.
 finalizeFocusRequest :: Context -> IO ()
@@ -404,14 +405,21 @@ finalizeFocusRequest ctx =
       FocusNext -> step False
       FocusPrevious -> step True
     for_ (mfilter (/= prev) target) $ \wid -> do
-      collapseTextFieldSelection ctx prev
-      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
-      store <- getStore ctx
-      when (anySelectOpen store) $ setStore ctx (closeSelects store)
+      blurFocus ctx prev
       -- The damage pass repaints both widgets, since the focused id moved.
       writeIORef (ctxFocusId ctx) wid
       when (hashWidgetId wid /= 0) $ writeIORef (ctxFocusVisible ctx) True
       markDirty ctx)
+
+-- | What moving focus off @prev@ does, as a press elsewhere would: the old
+-- field collapses its selection, and the text-field menu and any open
+-- dropdown close.
+blurFocus :: Context -> WidgetId -> IO ()
+blurFocus ctx prev = do
+  collapseTextFieldSelection ctx prev
+  modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+  store <- getStore ctx
+  when (anySelectOpen store) $ setStore ctx (closeSelects store)
 
 -- | Give @wid@ keyboard focus, repainting when focus moved.
 focusWidget :: Context -> WidgetId -> IO ()
@@ -427,11 +435,12 @@ enabledTarget :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
 enabledTarget ctx = fmap listToMaybe . filterM (fmap not . isDisabled ctx) . maybeToList
 
 -- | Next focus id, or previous with Shift, wrapping at both ends. An unknown
--- current id selects the first entry; an empty list returns @WidgetId 0@.
+-- current id selects the first entry, or the last going backwards; an empty
+-- list returns @WidgetId 0@.
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
 tabNext cur ids shift =
   fromMaybe (WidgetId 0) . listToMaybe $ case break (== cur) ids of
-    (_, []) -> ids
+    (_, []) -> if shift then reverse ids else ids
     (before, _ : after)
       | shift -> reverse (if null before then ids else before)
       | otherwise -> after ++ ids

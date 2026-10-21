@@ -24,6 +24,8 @@ tests =
   , spec "focus-request-idle" runFocusRequestIdleTest
   , spec "focus-request-order" runFocusRequestOrderTest
   , spec "focus-request-closes-menus" runFocusRequestClosesMenusTest
+  , spec "focus-tab-closes-menus" runFocusTabClosesMenusTest
+  , spec "focus-back-tab-from-none" runFocusBackTabFromNoneTest
   , spec "focus-next-previous" runFocusNextPreviousTest
   , spec "focus-clear-release" runFocusClearReleaseTest
   , spec "focus-text-command" runFocusTextCommandTest
@@ -240,6 +242,37 @@ runFocusRequestClosesMenusTest ctx failed = do
   mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
   assertEq failed (respId field) =<< getFocusId ctx
   closes (isJust <$> getsInteraction ctx isTextInputMenu)
+
+-- | Tab away from an open select or a field's edit menu closes it, as a
+-- focus request does, so the arrows then move the caret of the field Tab
+-- focused and leave the select's value alone.
+runFocusTabClosesMenusTest :: Context -> IORef Int -> IO ()
+runFocusTabClosesMenusTest ctx failed = do
+  index <- newVar (0 :: Int)
+  let ui = column ((,) <$> (fst <$> held index (select' ["One", "Two", "Three"])) <*> (fst <$> withValue "text" textInput'))
+  (sel, field) <- warmup2 ctx inp ui
+  _ <- runClick ctx inp ui (centerOf sel)
+  assert failed . anySelectOpen =<< getStore ctx
+  _ <- runFrame ctx (tabInp inp) ui
+  assertEq failed (respId field) =<< getFocusId ctx
+  assert failed . not . anySelectOpen =<< getStore ctx
+  _ <- runFrame ctx (keyInp KeyRight inp) ui
+  _ <- runFrame ctx inp ui
+  assertEq failed 0 =<< readVarIO index
+  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
+  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  assert failed . isJust =<< getsInteraction ctx isTextInputMenu
+  _ <- runFrame ctx (tabInp inp) ui
+  assertEq failed (respId sel) =<< getFocusId ctx
+  assert failed . not . isJust =<< getsInteraction ctx isTextInputMenu
+
+-- | Shift+Tab with nothing focused goes to the last Tab stop.
+runFocusBackTabFromNoneTest :: Context -> IORef Int -> IO ()
+runFocusBackTabFromNoneTest ctx failed = do
+  let ui = column (mapM (fmap respId . button') ["A", "B", "C"])
+  [_, _, c] <- warmup2 ctx inp ui
+  _ <- runFrame ctx (chordInp (shift <> key KeyTab) inp) ui
+  assertEq failed c =<< getFocusId ctx
 
 -- | 'focusNext' and 'focusPrevious' act like Tab and Shift+Tab at the end of
 -- the frame, wrapping at both ends; 'isFocused' reports the focused widget.
