@@ -29,10 +29,6 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
 import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, finite, rectNonEmpty)
 
-{-# INLINE getsAnimation #-}
-getsAnimation :: Context -> (AnimationState -> a) -> IO a
-getsAnimation ctx f = f <$> readIORef (ctxAnimationState ctx)
-
 -- | Whether the frame loop has to keep drawing: an animation is running, or a
 -- scroller is still gliding onto its target.
 {-# INLINE anyAnimating #-}
@@ -48,7 +44,7 @@ anyAnimating ctx = do
 -- entries to the resting values.
 {-# INLINE getLiveAnimations #-}
 getLiveAnimations :: Context -> IO (IntMap Animation)
-getLiveAnimations ctx = getsAnimation ctx asAnimations
+getLiveAnimations ctx = asAnimations <$> readIORef (ctxAnimationState ctx)
 
 -- | Read and clear the flag indicating an animation settled during the last tick.
 takeAnimSettled :: Context -> IO Bool
@@ -260,13 +256,10 @@ lapseViewAnims as
 repaintIfOrphan :: Context -> Int -> IO ()
 repaintIfOrphan ctx key = do
   hadRect <- getsDamage ctx (IM.member key . pfRects . dsPrev)
-  hasNow <- nodeHasKey ctx key
-  unless (hadRect || hasNow) (damageFull ctx)
-
-nodeHasKey :: Context -> Int -> IO Bool
-nodeHasKey ctx key =
-  maybe (pure False) (fmap rectNonEmpty . getNodeRect (ctxNodeArena ctx))
-    =<< lookupNodeByKey (ctxNodeArena ctx) key
+  unless hadRect $ do
+    let na = ctxNodeArena ctx
+    hasNow <- maybe (pure False) (fmap rectNonEmpty . getNodeRect na) =<< lookupNodeByKey na key
+    unless hasNow (damageFull ctx)
 
 settleKey :: Context -> Int -> Float -> IO ()
 settleKey ctx key val = do
