@@ -2,6 +2,7 @@ module Cases.Animation (tests) where
 
 import Spec
 import Control.Concurrent (threadDelay)
+import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Text qualified as T
 import GHC.Clock (getMonotonicTime)
 
@@ -22,6 +23,7 @@ tests =
   , spec "keep-animating-lapse" runKeepAnimatingLapseTest
   , spec "keep-animating-rest" runKeepAnimatingRestTest
   , spec "animate-left-out" runAnimateLeftOutTest
+  , spec "drawing-animation-end" runDrawingAnimationEndTest
   , spec "wake-after" runWakeAfterTest
   ]
 
@@ -346,6 +348,22 @@ runAnimateLeftOutTest ctx failed = do
   assert failed . not =<< needsRedraw ctx inp inp
   _ <- runFrame ctx inp shown
   assert failed =<< anyAnimating ctx
+
+-- A drawing without a version rebuilds while it animates, and on the frame
+-- its animation ends, whose view drew it again (here, stopped). That frame
+-- once replayed the last animated frame's ops, which then stayed on screen.
+runDrawingAnimationEndTest :: Context -> IORef Int -> IO ()
+runDrawingAnimationEndTest ctx failed = do
+  let inp = withDelta 200 100 0.016
+      running = colorRGBA 255 0 0 255
+      stopped = colorRGBA 0 0 255 255
+      ui on = column $ do
+        d <- drawing (fixedWH 40 40) (\r -> smallArrayFromList [FillRect r (if on then running else stopped)])
+        when on (keepAnimating d)
+  replicateM_ 3 (runFrame ctx inp (ui True))
+  (_, draw, _) <- runFrame ctx inp (ui False)
+  quads <- map snd <$> drawQuads draw
+  assert failed (stopped `elem` quads && running `notElem` quads)
 
 -- 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
 -- a frame that does not ask again leaves nothing pending.
