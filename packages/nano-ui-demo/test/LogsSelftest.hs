@@ -91,7 +91,7 @@ selftest = do
       unless (hasText "ALL LOGS SELECTED" spansSelected || hasText "Deselect All" spansSelected) $
         fail "selftest: Select All failed to select all logs"
 
-      drawFrame (chordInp (ctrl <> key 'c') baseInput)
+      drawFrame (chordInp (cmdOrCtrl <> key 'c') baseInput)
       mClip <- ctxClipboardGet ctx
       case mClip of
         Nothing -> fail "selftest: Ctrl+C after Select All failed to copy to clipboard"
