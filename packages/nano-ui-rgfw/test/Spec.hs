@@ -19,7 +19,7 @@ import NanoUI
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
-import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
+import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (CozetteFont (..), charToGlyphId, cozetteGlyphBit, cozetteGlyphFootprint, getCozetteFont, renderGlyphScaledToBuffer)
 import NanoUI.Rgfw.Internal.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
@@ -30,7 +30,7 @@ import NanoUI.Rgfw.Wake (testRgfwWake)
 import NanoUI.Rgfw.Window (testGlWindow, testSessionWindow)
 import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, registerImage, runFrame)
 import NanoUI.Testing.Assert (run2Frames, withInput)
-import NanoUI.Testing.Harness (DemoSpan, withInputOff)
+import NanoUI.Testing.Harness (DemoSpan, nodesOfType, withInputOff)
 import RGFW (Event (..))
 import RGFW.Raw qualified as R
 import System.Exit (exitFailure)
@@ -50,13 +50,6 @@ raster ctx w h bg ui k = do
     clearScreen surf bg
     renderArena surf getCozetteFont 1 draw base overlay
     k a (base, overlay) (\x y -> peekElemOff (sBuffer surf) (y * w + x))
-
--- | Rects of the frame's nodes of one type, in arena order.
-nodesOf :: NodeType -> Context -> IO [Rect]
-nodesOf t ctx = do
-  let na = ctxNodeArena ctx
-  n <- arenaCount na
-  map snd . filter ((== t) . fst) <$> mapM (\i -> (,) <$> getNodeType na i <*> getNodeRect na i) [0 .. n - 1]
 
 -- | Fold a batch of RGFW events into one 'Input'.
 applied :: [Event] -> Input
@@ -131,8 +124,8 @@ testZOrderRenderArena = do
   let boxCol = colorRGBA 0x11 0x22 0x33 255
   raster ctx 100 100 0 (box grow boxCol >> window' (constVar True) "Z" (label "hi")) $ \_ (_, overlay) px -> do
     assert "Overlay text spans collected for floating window chrome" (not (null overlay))
-    nodesOf NodeWindow ctx >>= \case
-      Rect wx wy ww _ : _ -> do
+    nodesOfType NodeWindow ctx >>= \case
+      (_, Rect wx wy ww _) : _ -> do
         cWin <- px (round (wx + ww / 2)) (round wy + 4)
         assert "Window paints above in-flow content" (cWin == packColor (styleBg (themeFloatingWindow theme)))
       [] -> assert "Floating window node present in arena" False
@@ -185,8 +178,8 @@ testSquareThemedRaster = do
   let theme = tomorrowNightMinDarkTheme
   ctx <- newRgfwContext theme
   raster ctx 240 120 (packColor (themeWindow theme)) (column (button "Button" >> checkbox "Checkbox label" (constVar True))) $ \_ (base, _) px -> do
-    nodesOf NodeButton ctx >>= \case
-      Rect bx by bw bh : _ -> do
+    nodesOfType NodeButton ctx >>= \case
+      (_, Rect bx by bw bh) : _ -> do
         let (x0, y0, x1, y1) = (round bx, round by, round (bx + bw) - 1, round (by + bh) - 1)
         corners <- mapM (uncurry px) [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
         assert "Button corners are square (border colour)" (all (== packColor (styleBorder (themeButton theme))) corners)

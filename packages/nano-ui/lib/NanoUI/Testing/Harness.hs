@@ -55,12 +55,13 @@ module NanoUI.Testing.Harness
   , clickTab
   , dragPos
   , drawQuads
+  , nodesOfType
   , newWakeSignal
   ) where
 
 import Control.Applicative ((<|>))
 import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
-import Control.Monad (forM, forM_, unless, void, when)
+import Control.Monad (filterM, forM, forM_, unless, void, when)
 import Data.IORef (IORef)
 import Data.List (maximumBy)
 import Data.Maybe (isJust, listToMaybe)
@@ -72,8 +73,9 @@ import Foreign.Storable (peekByteOff)
 import GHC.Stack (HasCallStack)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Internal.Context (takeWakes)
+import NanoUI.Internal.Context (ctxNodeArena, takeWakes)
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
+import NanoUI.Internal.Layout.Arena (NodeType, arenaCount, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Shortcut (Shortcut (..))
 import NanoUI.Var (peekVar)
@@ -115,6 +117,14 @@ drawQuads dd =
                 , colorRGBA (toW8 r) (toW8 g) (toW8 b) (toW8 a)
                 )
               _ -> (Rect 0 0 0 0, colorRGBA 0 0 0 0)
+
+-- | Ids and rects of the frame's nodes of one type, in arena order.
+nodesOfType :: NodeType -> Context -> IO [(WidgetId, Rect)]
+nodesOfType wanted ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  matching <- filterM (fmap (== wanted) . getNodeType na) [0 .. n - 1]
+  forM matching $ \i -> (,) <$> getWidgetId na i <*> getNodeRect na i
 
 -- | Midpoint of a logical rectangle, without clipping it.
 spanCenter :: Rect -> V2

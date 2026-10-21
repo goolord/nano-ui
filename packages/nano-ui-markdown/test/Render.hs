@@ -2,7 +2,7 @@
 module Render (spec) where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (filterM, forM, forM_, replicateM_, void, when)
+import Control.Monad (forM, forM_, replicateM_, void, when)
 import Data.Foldable (toList)
 import Data.Function (on)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
@@ -20,7 +20,7 @@ import NanoUI
   )
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), getTheme, lookupCustomDrawing)
-import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Markdown
 import NanoUI.Testing
@@ -28,7 +28,7 @@ import NanoUI.Testing
   , lineWidth, withFontMetrics
   )
 import NanoUI.Testing.Assert (withInput)
-import NanoUI.Testing.Harness (chordInp, hasText, holdAt, pressAt, releaseAt, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
+import NanoUI.Testing.Harness (chordInp, hasText, holdAt, nodesOfType, pressAt, releaseAt, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
 import NanoUI.Shortcut (ctrl, key)
 import Test.Hspec
 
@@ -37,19 +37,11 @@ import Test.Hspec
 data Word' = Word' {wWidget :: WidgetId, wPos :: V2, wSize :: Float, wText :: Text, wColor :: Color}
   deriving (Show)
 
--- | Ids and rects of the frame's nodes of one type, in document order.
-nodesOf :: NodeType -> Context -> IO [(WidgetId, Rect)]
-nodesOf wanted ctx = do
-  let na = ctxNodeArena ctx
-  n <- arenaCount na
-  matching <- filterM (fmap (== wanted) . getNodeType na) [0 .. n - 1]
-  forM matching $ \i -> (,) <$> getWidgetId na i <*> getNodeRect na i
-
 -- | The frame's custom drawings (rich text and canvases) as id, content key
 -- and ops, in document order.
 drawings :: Context -> IO [(WidgetId, Int, [DrawOp])]
 drawings ctx = do
-  nodes <- nodesOf NodeDrawing ctx
+  nodes <- nodesOfType NodeDrawing ctx
   fmap concat . forM nodes $ \(wid, r) -> do
     entry <- lookupCustomDrawing ctx wid
     cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
@@ -322,7 +314,7 @@ spec = before newMarkdownCache $ do
   it "draws a resolved image, which returns its source when clicked" $ \cache -> do
     let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "![a cat](cat.png)\n\n![a dog](dog.png)"))
     ctx <- drawn 600 400 ui
-    images <- map snd <$> nodesOf NodeImage ctx
+    images <- map snd <$> nodesOfType NodeImage ctx
     case images of
       [r@(Rect _ _ w h)] -> do
         (w, h) `shouldBe` (40, 30)
@@ -337,7 +329,7 @@ spec = before newMarkdownCache $ do
     let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "[![a cat](cat.png)](https://cats.example \"All about cats\")"))
         inp = withInput 600 400
     ctx <- drawn 600 400 ui
-    [r] <- map snd <$> nodesOf NodeImage ctx
+    [r] <- map snd <$> nodesOfType NodeImage ctx
     let over = inp {inputMousePos = spanCenter r}
     warmup ctx over ui
     hasText "All about cats" <$> collectOverlayTextSpans ctx over `shouldReturn` False
@@ -353,7 +345,7 @@ spec = before newMarkdownCache $ do
     ctx <- drawn 600 400 (ui unfinished)
     textIds <- nub . map wWidget <$> drawnWords ctx
     _ <- warmup2 ctx (withInput 600 400) (ui (appendMarkdown ")" unfinished))
-    imageIds <- map fst <$> nodesOf NodeImage ctx
+    imageIds <- map fst <$> nodesOfType NodeImage ctx
     (length textIds, length imageIds) `shouldBe` (1, 1)
     imageIds `shouldNotBe` textIds
 
@@ -383,7 +375,7 @@ spec = before newMarkdownCache $ do
     ctx <- newContext
     forM_ [400, 800, 280, 400, 400] $ \width -> do
       _ <- runFrame ctx (withInput width 1200) ui
-      panels <- map snd <$> nodesOf NodePanel ctx
+      panels <- map snd <$> nodesOfType NodePanel ctx
       ws <- drawnWords ctx
       case panels of
         [table, h1, h2, m1, m2, o1, o2] -> do

@@ -1,7 +1,7 @@
 module Scope (check, runScopeTests) where
 
 import Control.Exception (IOException, try)
-import Control.Monad (filterM, forM, forM_, unless, void)
+import Control.Monad (forM_, unless, void)
 import Data.IORef (writeIORef)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -21,7 +21,7 @@ import NanoUI
   , textInput'
   )
 import NanoUI.Backend (runNanoUI)
-import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena)
+import NanoUI.Internal.Context (ctxFocusId)
 import NanoUI.Form
 import NanoUI.Form.Internal.Backend
   ( FormStateStore (..)
@@ -38,13 +38,9 @@ import NanoUI.Form.Internal.Backend
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
   ( NodeType (NodeButton, NodeColorPicker, NodeTextArea, NodeTextInput)
-  , arenaCount
-  , getNodeType
-  , getNodeRect
-  , getWidgetId
   )
 import NanoUI.Testing (Context, clearDirty, collectTextSpans, isDirty, newPixelContext, runFrame)
-import NanoUI.Testing.Harness (hasText, keyInp, runClick, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing.Harness (hasText, keyInp, nodesOfType, runClick, spanCenter, warmup2, withInputOff)
 
 check :: String -> Bool -> IO ()
 check message ok = unless ok (fail message)
@@ -65,18 +61,7 @@ runScopeTests = do
 
 -- | A checkbox is a button, and these forms have no other buttons.
 checkboxes :: Context -> IO [(WidgetId, Rect)]
-checkboxes = controlsOf NodeButton
-
-controlsOf :: NodeType -> Context -> IO [(WidgetId, Rect)]
-controlsOf wanted ctx = do
-  let
-    arena = ctxNodeArena ctx
-  count <- arenaCount arena
-  matching <- filterM (fmap (== wanted) . getNodeType arena) [0 .. count - 1]
-  forM matching $ \index -> do
-    wid <- getWidgetId arena index
-    Rect x y w h <- getNodeRect arena index
-    pure (wid, Rect x y w h)
+checkboxes = nodesOfType NodeButton
 
 -- | Event-free input for a 400 by 240 window.
 input :: Input
@@ -204,7 +189,7 @@ testSubmitSameFrameEdit =
       let
         ui = nanoFormSubmit owner prefix "Save" (field `prove` notEmpty "Required")
       _ <- warmup2 ctx input ui
-      controls <- controlsOf NodeTextInput ctx
+      controls <- nodesOfType NodeTextInput ctx
       case controls of
         [(wid, _)] -> do
           writeIORef (ctxFocusId ctx) wid
@@ -227,7 +212,7 @@ testSubmitSkipsTextArea = do
   let
     ui = nanoFormSubmit owner "submit-notes" "Save" (inputTextArea "notes" "")
   _ <- warmup2 ctx input ui
-  controls <- controlsOf NodeTextArea ctx
+  controls <- nodesOfType NodeTextArea ctx
   case controls of
     [(wid, _)] -> do
       writeIORef (ctxFocusId ctx) wid
@@ -247,7 +232,7 @@ testColorKeepsAlpha = do
     ui = nanoFormLive owner "colour" (inputColor "Overlay" overlay)
   _ <- warmup2 ctx input ui
   -- The picker's first part is its saturation / value field.
-  controls <- controlsOf NodeColorPicker ctx
+  controls <- nodesOfType NodeColorPicker ctx
   case controls of
     (wid, _) : _ -> do
       writeIORef (ctxFocusId ctx) wid
@@ -315,7 +300,7 @@ testResetTextArea = do
   let
     ui = nanoFormLive owner "reset-editor" (inputTextArea "notes" "initial")
   _ <- warmup2 ctx input ui
-  controls <- controlsOf NodeTextArea ctx
+  controls <- nodesOfType NodeTextArea ctx
   case controls of
     [(wid, _)] -> do
       writeIORef (ctxFocusId ctx) wid
