@@ -159,10 +159,11 @@ runFrameEff unlift ctx rawInp ui = do
   when explain (explainFrame ctx frameInp)
   -- The draw this frame may reuse is decided before its damage: a frame
   -- that may reuse it needs its damage worked out even for a host that does
-  -- not read it ('ctxDamageWanted').
+  -- not read it ('ctxDamageWanted'). A frame that paints only a clip, or
+  -- shows the layout overlay, can neither keep its draw nor reuse one.
   reuse <- readIORef (ctxDrawReuse ctx)
   paintFull <- readIORef (ctxPaintFull ctx)
-  key <- reuseKeyFor ctx reuse paintFull size explain
+  key <- if drOn reuse && paintFull && not explain then drawReuseKey ctx size else pure Nothing
   let !mayReuse = case (key, drLast reuse) of
         (Just k, Just (lastKey, _)) -> k == lastKey
         _ -> False
@@ -228,15 +229,6 @@ finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore = do
   finalizeSelectKeyboard ctx frameInp
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
-
--- | The key the frame's draw would be kept under ('drawReuseKey'), or
--- 'Nothing' when it can be neither kept nor reused: reuse is off, the frame
--- paints only a clip, or the layout overlay is on.
-reuseKeyFor :: Context -> DrawReuse -> Bool -> Size -> Bool -> IO (Maybe DrawReuseKey)
-reuseKeyFor ctx reuse paintFull size explain =
-  if drOn reuse && paintFull && not explain
-    then drawReuseKey ctx size
-    else pure Nothing
 
 -- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
 -- (@key@) matches the last full frame's (@mayReuse@) returns the previous

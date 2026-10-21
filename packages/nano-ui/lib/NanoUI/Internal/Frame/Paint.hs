@@ -67,11 +67,9 @@ collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
       shrinkMutablePrimArray buf (n * 4)
       unsafeFreezePrimArray buf
   where
-    isOpaque s = colorA (styleBg s) == 255
-    occludes theme nt = (nt == NodeWindow || nt == NodeModal || nt == NodePopup) && isOpaque (floatingSurface theme nt)
     addOccluder buf !n idx = do
       nt <- getNodeType na idx
-      opaque <- (`occludes` nt) <$> nodeTheme ctx idx
+      opaque <- (\theme -> colorA (styleBg (floatingSurface theme nt)) == 255) <$> nodeTheme ctx idx
       if not opaque
         then pure n
         else do

@@ -13,7 +13,7 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad (filterM, forM_, unless, void, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
 import Data.Bits (complement, xor, (.&.), (.|.))
@@ -155,7 +155,7 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
-    then setPrev emptyPrevFrame >> forgetWalk ctx
+    then setPrev emptyPrevFrame >> void (prevWalkFor ctx 0 IM.empty)
     else do
       (m0, om, foundContainers, foundOuter, droppedContainer) <-
         scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters
@@ -266,14 +266,6 @@ prevWalkFor ctx count oldRects = do
       walk <- newPrevWalk (max 64 (2 * count))
       writeIORef (ctxPrevWalk ctx) walk
       pure (walk, 0)
-
--- | Empty the last walk's record, for an empty arena.
-forgetWalk :: Context -> IO ()
-forgetWalk ctx = do
-  walk <- readIORef (ctxPrevWalk ctx)
-  valid <- readPrimVar (pwValid walk)
-  writePrimVar (pwValid walk) 0
-  forgetFrom walk 0 valid
 
 -- | 'forgetAt' each node from @i@ up to @n@.
 forgetFrom :: PrevWalk -> Int -> Int -> IO ()
