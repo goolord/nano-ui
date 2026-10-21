@@ -269,7 +269,9 @@ test-suite nano-ui-demo-test
         LogsSelftest
         NotepadSelftest
         ImeSelftest
-    build-depends:    sdl3-bindgen-sys ^>=0.0.0.2
+    build-depends:
+        directory ^>=1.3,
+        sdl3-bindgen-sys ^>=0.0.0.2
 
 test-suite nano-ui-terminal-test
     import:           sdl-app

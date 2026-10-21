@@ -10,6 +10,7 @@ module Notepad
   , NotepadState
   , newNotepad
   , notepadUi
+  , writeDocument
   ) where
 
 import Control.Exception (SomeException, try)
@@ -21,7 +22,6 @@ import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Text.IO qualified as TIO
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Shortcut
@@ -77,8 +77,6 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
   ----------------------------------------------------------- file dialogs ---
   useFileDialog openDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
-      writeVar openMenu ""
-      modifyVar docGen (+ 1)
       loaded <-
         liftIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
       case loaded of
@@ -86,12 +84,13 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
         Right raw -> do
           -- Lenient decode: malformed bytes become U+FFFD instead of throwing.
           writeVar doc (textDocument (TE.decodeUtf8With (\_ _ -> Just '\xFFFD') raw))
+          -- A new editor, without the old document's caret and undo history.
+          modifyVar docGen (+ 1)
           writeVar docPath (T.pack filePath)
           writeVar docDirty False
           writeVar statusMsg ("Opened " <> T.pack filePath)
   useFileDialog saveDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
-      writeVar openMenu ""
       saved <- writeDocument filePath =<< readVar doc
       if saved
         then do
@@ -131,18 +130,19 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
 
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
-    newCmd = ("New", ctrl <> key 'n', newDocument)
-    openCmd = ("Open...", ctrl <> key 'o', writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions)
-    saveCmd = ("Save", ctrl <> key 's', saveDocument False)
-    saveAsCmd = ("Save As...", ctrl <> shift <> key 's', saveDocument True)
-    -- Quit, or ask first when there are unsaved changes.
+    newCmd = ("New", cmdOrCtrl <> key 'n', newDocument)
+    openCmd = ("Open...", cmdOrCtrl <> key 'o', writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions)
+    saveCmd = ("Save", cmdOrCtrl <> key 's', saveDocument False)
+    saveAsCmd = ("Save As...", cmdOrCtrl <> shift <> key 's', saveDocument True)
+    -- Quit, or ask first when there are unsaved changes. The question puts
+    -- the About dialog away, so one modal shows at a time.
     exitApp = do
       dirty <- readVar docDirty
-      if dirty then writeVar confirmExit True else quitUi
-    exitCmd = ("Exit", ctrl <> key 'q', exitApp)
-    zoomInCmd = ("Zoom In", ctrl <> key '=', zoomIn)
-    zoomOutCmd = ("Zoom Out", ctrl <> key '-', zoomOut)
-    resetZoomCmd = ("Reset Zoom", ctrl <> key '0', writeVar zoom 1.0)
+      if dirty then writeVar aboutOpen False >> writeVar confirmExit True else quitUi
+    exitCmd = ("Exit", cmdOrCtrl <> key 'q', exitApp)
+    zoomInCmd = ("Zoom In", cmdOrCtrl <> key '=', zoomIn)
+    zoomOutCmd = ("Zoom Out", cmdOrCtrl <> key '-', zoomOut)
+    resetZoomCmd = ("Reset Zoom", cmdOrCtrl <> key '0', writeVar zoom 1.0)
     commandItem (name, chord, action) = item (menuItemShortcut name chord) action
 
     fileMenu = do
@@ -157,14 +157,14 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
       editor <- readVar editorId
       canUndo <- textCanUndo editor
       canRedo <- textCanRedo editor
-      if canUndo then editItem "Undo" (ctrl <> key 'z') Undo else menuItemDisabled "Undo"
-      if canRedo then editItem "Redo" (ctrl <> shift <> key 'z') Redo else menuItemDisabled "Redo"
+      if canUndo then editItem "Undo" (cmdOrCtrl <> key 'z') Undo else menuItemDisabled "Undo"
+      if canRedo then editItem "Redo" (cmdOrCtrl <> shift <> key 'z') Redo else menuItemDisabled "Redo"
       menuSeparator
-      editItem "Cut" (ctrl <> key 'x') Cut
-      editItem "Copy" (ctrl <> key 'c') Copy
-      editItem "Paste" (ctrl <> key 'v') Paste
+      editItem "Cut" (cmdOrCtrl <> key 'x') Cut
+      editItem "Copy" (cmdOrCtrl <> key 'c') Copy
+      editItem "Paste" (cmdOrCtrl <> key 'v') Paste
       menuSeparator
-      editItem "Select All" (ctrl <> key 'a') SelectAll
+      editItem "Select All" (cmdOrCtrl <> key 'a') SelectAll
 
     viewMenu = do
       statusShown <- readVar showStatus
@@ -182,11 +182,12 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
 
   ------------------------------------------------------------- shortcuts ---
   -- A menu row's chord works only while its menu is open, so the commands'
-  -- chords are also bound here, ahead of the rows. The editor handles its own
-  -- editing chords. Ctrl++ is Ctrl+Shift+= on a US layout, or keypad plus.
+  -- chords are also bound here, ahead of the rows, and close an open menu as
+  -- the rows do. The editor handles its own editing chords. Ctrl++ is
+  -- Ctrl+Shift+= on a US layout, or keypad plus.
   for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
-    \(_, chord, action) -> whenM (shortcut chord) action
-  whenM (or <$> traverse shortcut [ctrl <> shift <> key '=', ctrl <> key '+']) zoomIn
+    \(_, chord, action) -> item (shortcut chord) action
+  whenM (or <$> traverse shortcut [cmdOrCtrl <> shift <> key '=', cmdOrCtrl <> key '+']) zoomIn
   whenM (winCloseRequested <$> askWindow) exitApp
 
   --------------------------------------------------------------- layout ---
@@ -253,7 +254,8 @@ menuBar openMenu entries = do
   rowWith (tight . fillW . fixedH 28) $ do
     for_ entries $ \(menuLabel, body) -> do
       let isOpen = current == menuLabel
-      btn <- menuButton' menuLabel isOpen
+      -- Each title covers the bar's height, its text in the middle.
+      btn <- menuButtonWith' fillH menuLabel isOpen
       when (respClicked btn) (writeVar openMenu (if isOpen then "" else menuLabel))
       when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu menuLabel)
       let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
@@ -261,16 +263,17 @@ menuBar openMenu entries = do
       -- gets a constant and closing it is written here.
       (popupResp, _) <- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
-    flex
 
 --------------------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------------------
 
+-- | Write the document as UTF-8 with its own line ends, the bytes the editor
+-- reads back.
 writeDocument :: FilePath -> TextDocument -> NanoUI Bool
 writeDocument filePath doc = do
   result <-
-    liftIO (try (TIO.writeFile filePath (documentText doc)) :: IO (Either SomeException ()))
+    liftIO (try (BS.writeFile filePath (TE.encodeUtf8 (documentText doc))) :: IO (Either SomeException ()))
   pure (isRight result)
 
 -- | The status bar. It shows the line count, which the document keeps; the
