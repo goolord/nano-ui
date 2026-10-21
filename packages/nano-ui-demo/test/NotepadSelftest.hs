@@ -73,7 +73,7 @@ selftest = do
       drawFrame base {inputChars = "Z"}
       drawFrame base
       spansReplaced <- collectTextSpans ctx
-      expectText "selftest: Select All did not keep focus" "Z" spansReplaced
+      void (requireSpan "selftest: Select All did not keep focus" (findExact "Z" spansReplaced))
       when (hasText "abc" spansReplaced) $
         fail "selftest: typed text was not replaced"
 
