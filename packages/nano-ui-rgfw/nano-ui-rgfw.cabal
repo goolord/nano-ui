@@ -54,12 +54,14 @@ library
         NanoUI.Rgfw.Internal.Gl
         NanoUI.Rgfw.Internal.Session
     c-sources:        cbits/nano_ui_gl.c
+    -- The library imports NanoUI.Internal modules, which change without
+    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
         file-embed ^>=0.0.16,
         nano-ui-rgfw-bindings ^>=0.1,
-        nano-ui ^>=0.2,
+        nano-ui >=0.2.0 && <0.2.1,
         nano-ui-emit ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1

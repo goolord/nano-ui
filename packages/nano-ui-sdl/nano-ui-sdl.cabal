@@ -87,6 +87,8 @@ library
         NanoUI.Sdl.Internal.Url
         NanoUI.Sdl.Internal.Render
         NanoUI.Sdl.Internal.WindowOptions
+    -- The library imports NanoUI.Internal modules, which change without
+    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -94,7 +96,7 @@ library
         directory ^>=1.3,
         filepath ^>=1.5,
         file-embed ^>=0.0.16,
-        nano-ui ^>=0.2,
+        nano-ui >=0.2.0 && <0.2.1,
         nano-ui-emit ^>=0.1,
         primitive ^>=0.9,
         vector ^>=0.13,
