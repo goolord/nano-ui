@@ -4,7 +4,7 @@ import Control.Monad (forM_, unless)
 import Data.Colour.Names (coral, steelblue)
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
-import Data.List (sortOn, tails)
+import Data.List (nub, sortOn, tails)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArray)
 import Data.Text qualified as T
@@ -46,7 +46,7 @@ import NanoUI.Plot.Chrome
 import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
 import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Hit (nearestPlotHover)
-import NanoUI.Plot.Scale (domainToPlot, formatTick, mergeDomains, niceTicks)
+import NanoUI.Plot.Scale (domainToPlot, formatTick, mergeDomains, niceTickLabels, niceTicks)
 import NanoUI.Plot.Series
   ( area
   , bar
@@ -90,6 +90,7 @@ main = hspec $ do
     it "strokes with the style's caps, joins and dashes" testStrokeStyle
   describe "scales and domains" $ do
     it "picks and formats nice ticks" testNiceTicks
+    it "labels ticks with the digits their step needs" (testTickLabels fm)
     it "shares bounds across series" testMultiSeriesDomains
     it "leaves out values that are not finite" (testNonFinite fm)
     it "settles on a chart holding NaN" testNaNChartIdle
@@ -279,6 +280,22 @@ testNiceTicks = do
     niceTicks 6 (Domain (-1e308) 1e308) == []
       && niceTicks 6 (Domain 1e308 1e308) == [1e308]
       && niceTicks 0 (Domain 0 100) == []
+
+-- | Neighbouring tick labels differ however fine the step or large the
+-- values' common offset, as for Unix time over one day.
+testTickLabels :: FontMetrics -> IO ()
+testTickLabels fm = do
+  let
+    yLabels pts = [t | DrawText _ _ 1 _ t _ <- toList (diagramOps 400 240 (chartDia fm (bareChart [line "s" pts])))]
+    distinct ts = length ts >= 3 && length (nub ts) == length ts
+  check "fine ticks lost their digits" (distinct (yLabels [(0, 1), (1, 1.0000004)]))
+  check "a large offset hid the ticks' step" (distinct (yLabels [(0, 1700000000), (1, 1700086400)]))
+  check "formatTick snapped a small value before choosing its form" (formatTick 1.5e-10 == "1.500e-10")
+  let labels d = map snd (niceTickLabels 6 d)
+  check "tick labels carry noise or spare digits" $
+    labels (Domain 0 1) == ["0", "0.2", "0.4", "0.6", "0.8", "1"]
+      && labels (Domain 1e-8 5e-8) == ["1e-8", "2e-8", "3e-8", "4e-8", "5e-8"]
+      && labels (Domain 1700000000 1700086400) == ["1.7e9", "1.70002e9", "1.70004e9", "1.70006e9", "1.70008e9"]
 
 testMultiSeriesDomains :: IO ()
 testMultiSeriesDomains = do

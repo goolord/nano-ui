@@ -33,7 +33,7 @@ import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (diagramWithKeyAndEnvelope, themePlotStyle)
 import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Chrome (chartDiagram, seriesDomains, seriesPoints)
-import NanoUI.Plot.Scale (formatTick, niceTicks)
+import NanoUI.Plot.Scale (niceTickLabels)
 import NanoUI.Plot.Hit (hitTestChartCached)
 import NanoUI.Plot.Series (area, bar, line, scatter)
 import NanoUI.Plot.Types
@@ -84,7 +84,7 @@ cachedChartDiagram (PlotCache ref) ctx wid fm theme chart = do
           points = map (seriesPoints chart) (chartSeries chart)
           labels = catMaybes [chartTitle chart, chartXTitle chart, chartYTitle chart]
             ++ map seriesName (chartSeries chart)
-            ++ map formatTick (niceTicks 6 xDom ++ niceTicks 6 yDom)
+            ++ map snd (niceTickLabels 6 xDom ++ niceTickLabels 6 yDom)
       prepared <- prepareFontMetricsMany fm labels
       let !d = chartDiagram prepared theme ps domains points chart
           !(V2 dw dh) = size d

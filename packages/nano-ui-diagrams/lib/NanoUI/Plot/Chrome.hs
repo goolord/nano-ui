@@ -52,9 +52,8 @@ import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Scale
   ( domainBoundsBy
   , domainToPlot
-  , formatTick
   , mergeDomains
-  , niceTicks
+  , niceTickLabels
   , padDomain
   , settleDomain
   )
@@ -110,7 +109,7 @@ chartMargins fm chart = ccMargins (chartChrome fm (snd (seriesDomains chart)) ch
 -- | Chrome for a chart whose y domain the caller has already computed.
 chartChrome :: FontMetrics -> Domain -> Chart -> ChartChrome
 chartChrome fm yDom chart =
-  let yLabels = map formatTick (niceTicks 6 yDom)
+  let yLabels = map snd (niceTickLabels 6 yDom)
       maxYW = maximum (0 : map (textWidth fm) yLabels)
       lh = fmLineHeight fm
       yTitleW = maybe 0 (textWidth fm) (chartYTitle chart)
@@ -207,13 +206,13 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
       -- A category series names its slots; other x axes are numbered.
       xTicks = case [labels | Series {seriesData = CategoryY labels _} <- chartSeries chart] of
         labels : _ -> zip [0 ..] (toList labels)
-        [] -> [(x, formatTick x) | x <- niceTicks 6 xDom]
-      yTicks = niceTicks 6 yDom
+        [] -> niceTickLabels 6 xDom
+      yTicks = niceTickLabels 6 yDom
       tickPad = ccTickPad chrome
       xTickPad = ccXTickPad chrome
       toX = domainToPlot xDom
       toY = domainToPlot yDom
-      horizontalGrid = mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | y <- yTicks]
+      horizontalGrid = mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | (y, _) <- yTicks]
       verticalGrid = mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | (x, _) <- xTicks]
       grid =
         case chartGrid chart of
@@ -225,7 +224,7 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
         fromVertices [p2 (0, 0), p2 (1, 0)]
           <> fromVertices [p2 (0, 0), p2 (0, 1)]
           <> mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 0.03)] | (x, _) <- xTicks]
-          <> mconcat [fromVertices [p2 (0, toY y), p2 (0.03, toY y)] | y <- yTicks]
+          <> mconcat [fromVertices [p2 (0, toY y), p2 (0.03, toY y)] | (y, _) <- yTicks]
       xLabs =
         mconcat
           [ plotLbl ps 0.5 1 (T.unpack t) # moveTo (p2 (toX x, -xTickPad))
@@ -233,8 +232,8 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
           ]
       yLabs =
         mconcat
-          [ plotLbl ps 1 0.5 (T.unpack (formatTick y)) # moveTo (p2 (-tickPad, toY y))
-          | y <- yTicks
+          [ plotLbl ps 1 0.5 (T.unpack t) # moveTo (p2 (-tickPad, toY y))
+          | (y, t) <- yTicks
           ]
       title = foldMap (\t -> plotLbl ps 0.5 0 (T.unpack t) # moveTo (p2 (0.5, 1.03))) (chartTitle chart)
       xt = foldMap (\t -> plotLbl ps 0.5 1 (T.unpack t) # moveTo (p2 (0.5, ccXTitleY chrome))) (chartXTitle chart)

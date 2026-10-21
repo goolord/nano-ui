@@ -4,6 +4,7 @@ module NanoUI.Plot.Scale
   ( domainToPlot
   , plotToDomain
   , niceTicks
+  , niceTickLabels
   , formatTick
   , domainExtent
   , domainExtentBy
@@ -100,33 +101,57 @@ niceTicks maxTicks (Domain lo hi)
   where
     dSpan = max 1e-9 (hi - lo)
     step = niceStep (dSpan / fromIntegral (max 2 maxTicks))
-    start = fromIntegral (ceiling (lo / step - 1e-9) :: Integer) * step
-    go !v !count acc
+    -- Each tick is its index times the step, so zero is exact and rounding
+    -- does not build up along the axis.
+    start = ceiling (lo / step - 1e-9) :: Integer
+    go !i !count acc
       | not (finite v) || v > hi + step * 0.001 = reverse acc
       | otherwise =
           let !accepted = v >= lo - step * 0.001
               acc' = if accepted then v : acc else acc
-              !next = v + step
+              !next = fromIntegral (i + 1) * step
            in if count >= maxTicks || next <= v
                 then reverse acc'
-                else go next (count + 1) acc'
+                else go (i + 1) (count + 1) acc'
+      where
+        !v = fromIntegral i * step
+
+-- | 'niceTicks' with their labels, which have the digits that tell
+-- neighbouring ticks apart and no more.
+niceTickLabels :: Int -> Domain -> [(Double, Text)]
+niceTickLabels maxTicks d = case niceTicks maxTicks d of
+  ts@(a : b : _) -> [(t, formatStep (b - a) t) | t <- ts]
+  ts -> [(t, formatTick t) | t <- ts]
 
 -- | Format a finite tick with trailing zeros removed, using scientific notation
 -- for very small or large magnitudes. Non-finite values produce empty text.
 formatTick :: Double -> Text
 formatTick v
   | not (finite v) = T.empty
+  | abs v >= 1e6 || (abs v > 0 && abs v < 1e-6) = render (TB.formatRealFloat TB.Exponent (Just 3) v)
   | otherwise =
       let snapped = snapNoise v
-       in if abs snapped >= 1e6 || (abs snapped > 0 && abs snapped < 1e-6)
-            then render (TB.formatRealFloat TB.Exponent (Just 3) snapped)
-            else
-              let n = round snapped :: Integer
-               in if abs (snapped - fromIntegral n) < 1e-6
-                    then render (TB.decimal n)
-                    else stripZeros (render (TB.formatRealFloat TB.Fixed (Just 6) snapped))
+          n = round snapped :: Integer
+       in if abs (snapped - fromIntegral n) < 1e-6
+            then render (TB.decimal n)
+            else stripZeros (render (TB.formatRealFloat TB.Fixed (Just 6) snapped))
+
+-- A tick on an axis whose ticks are @step@ apart, in 'formatTick''s forms
+-- with the step's last digit as its last.
+formatStep :: Double -> Double -> Text
+formatStep step v
+  | not (finite v) = T.empty
+  | v /= 0 && (abs v >= 1e6 || abs v < 1e-6) =
+      let (mantissa, e) = T.breakOn "e" (render (TB.formatRealFloat TB.Exponent (Just (max 0 (mag v - mag step))) v))
+       in stripZeros mantissa <> e
+  | decimals == 0 = render (TB.decimal (round v :: Integer))
+  | otherwise = stripZeros (render (TB.formatRealFloat TB.Fixed (Just decimals) v))
   where
-    render = TL.toStrict . TB.toLazyText
+    decimals = max 0 (negate (mag step))
+    mag x = floor (logBase 10 (abs x) + 1e-9) :: Int
+
+render :: TB.Builder -> Text
+render = TL.toStrict . TB.toLazyText
 
 snapNoise :: Double -> Double
 snapNoise v =
