@@ -192,8 +192,11 @@ data PaneGridCtx = PaneGridCtx
   , pgcSplit :: !(GridAxis -> NanoUI Word64)
     -- ^ Split this pane along the axis; returns the new pane id.
   , pgcClose :: !(NanoUI ())
+    -- ^ Close this pane; its sibling takes its space.
   , pgcMaximize :: !(NanoUI ())
+    -- ^ Make this pane fill the grid, or restore it if it already does.
   , pgcRestore :: !(NanoUI ())
+    -- ^ Restore the maximized pane, if any, to its place in the grid.
   , pgcHandle :: !(IORef (Maybe Rect))
     -- ^ Where the pane's 'paneDragHandle' was laid out last frame.
   }
@@ -238,6 +241,7 @@ data PaneGridResponse = PaneGridResponse
   }
   deriving (Eq, Show)
 
+-- | The side of a pane, or of the whole grid, that a new pane goes on.
 data PaneEdge = PaneLeft | PaneRight | PaneAbove | PaneBelow
   deriving (Eq, Show)
 
@@ -253,6 +257,7 @@ data PaneDropLocation
 data PaneGridDrop = PaneGridDrop !PaneDropLocation Rect !Word64 !WidgetId !GridState GridNode
   deriving (Eq, Show)
 
+-- | Where the new pane would go: beside a pane, or around the whole grid.
 pgdLocation :: PaneGridDrop -> PaneDropLocation
 pgdLocation (PaneGridDrop location _ _ _ _ _) = location
 

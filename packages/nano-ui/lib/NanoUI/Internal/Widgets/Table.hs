@@ -72,6 +72,9 @@ data TableConfig = TableConfig
   , tableFreezeRows :: {-# UNPACK #-} !Int
   , tableColSizes :: ![ColSize]
   , tableHidden :: !IntSet
+  -- ^ The columns hidden on the table's first frame. From then on the table
+  -- keeps its own set, which a right-click on a header changes, and a later
+  -- change here is ignored.
   }
   deriving (Eq, Show)
 
@@ -381,7 +384,9 @@ colBoxLayout fillInner hasStretch sizes contentWs stored i
 
 -- | Sortable table with resizable, reorderable columns, with sort state bound
 -- to a 'Var': a header click updates it in place. @key@ distinguishes tables
--- in one scope, and the columns are a colonnade over @row@.
+-- in one scope, and the columns are a colonnade over @row@. A right-click on
+-- a header hides its column while another column stays in view, and a "Show
+-- all columns" button above the table then brings them all back.
 --
 -- > table "files" cols files app.sort
 {-# INLINE table #-}

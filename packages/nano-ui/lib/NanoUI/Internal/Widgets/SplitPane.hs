@@ -263,8 +263,9 @@ reflowFixed isFixed minSize spacing = go
         (oldA, oldB, _) = splitBounds axis spacing oldR dOld
         (newA, newB, _) = splitBounds axis spacing newR (splitLength spacing newAvail mA mB ratio')
 
--- | Remove a pane. The sibling subtree absorbs its space. @Nothing@ if the
--- pane does not exist or removing it would empty the tree.
+-- | Remove a pane. The sibling subtree absorbs its space. The tree comes back
+-- unchanged if the pane does not exist, and @Nothing@ when removing it would
+-- empty the tree.
 treeRemovePane :: Word64 -> GridNode -> Maybe GridNode
 treeRemovePane pid = foldGrid onPane onSplit
   where
