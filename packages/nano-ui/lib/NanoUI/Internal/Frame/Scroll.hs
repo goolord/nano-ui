@@ -26,7 +26,7 @@ import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..))
-import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectHit, rectInflate, rectIntersect, rectUnion)
+import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectInflate, rectIntersect, rectUnion)
 
 -- | Offset every node by its enclosing scrollers and set its clip. The root
 -- clips to the window, as in paint, so a root smaller than its content still
@@ -264,8 +264,8 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
           blocks <-
             pure layered
               <&&> ((== PointerBlock) <$> getPointerMode na idx)
-              <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
-              <&&> pure (rectHit clip mouse)
+              <&&> (rectContains <$> getNodeRect na idx <*> pure mouse)
+              <&&> pure (rectContains clip mouse)
           pure (if blocks then WheelBlocked else inner)
 
 -- | Whether node @idx@ takes the wheel at @mouse@: a scroll container whose
@@ -276,8 +276,8 @@ scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
   | nt == NodeTextArea =
       takes <&&> do
         (field, bars) <- textAreaScrollGeom ctx idx
-        pure (rectHit clip mouse && rectHit field mouse && (tabVertical bars || tabHorizontal bars))
-  | isScrollNode nt = pure (rectHit clip mouse) <&&> takes
+        pure (rectContains clip mouse && rectContains field mouse && (tabVertical bars || tabHorizontal bars))
+  | isScrollNode nt = pure (rectContains clip mouse) <&&> takes
   | otherwise = pure False
  where
   takes = not <$> passesPointer na idx
@@ -379,7 +379,7 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
           let candidate idx = do
                 nt <- getNodeType na idx
                 pure (nt == NodeTextArea || isScrollNode nt)
-                  <&&> (rectHit <$> getNodeRect na idx <*> pure mouse)
+                  <&&> (rectContains <$> getNodeRect na idx <*> pure mouse)
                   <&&> do
                     -- A scroller's own clip is its viewport, short of its
                     -- bars; the clip around it is its parent's.

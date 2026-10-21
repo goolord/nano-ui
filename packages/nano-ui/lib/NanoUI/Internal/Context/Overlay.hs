@@ -26,7 +26,7 @@ import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input, Key (KeyEscape), Pressable (..), withoutPointer)
-import NanoUI.Internal.Types (Rect, V2, rectHit, rectNonEmpty)
+import NanoUI.Internal.Types (Rect, V2, rectContains, rectNonEmpty)
 
 -- | Whether any widget has keyboard focus or a text-edit menu is open.
 -- This checks the focus id, not the focused node's type.
@@ -81,7 +81,7 @@ floatingLayerAt :: Context -> V2 -> IO Int
 floatingLayerAt ctx mouse = do
   os <- readIORef (ctxOverlayState ctx)
   let rects = osPrevFloatingRects os
-      hit k = maybe False (`rectHit` mouse) (IM.lookup k rects)
+      hit k = maybe False (`rectContains` mouse) (IM.lookup k rects)
   pure (foldl' (\acc k -> if hit k then k else acc) 0 (osPrevFloatingOrder os))
 
 -- | Record known panel bounds at the front of the floating hit order before

@@ -36,7 +36,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Word (Word64)
-import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, clamp01, rectH, rectHit, rectNonEmpty, rectW, rectX, rectY)
+import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, clamp01, rectContains, rectH, rectNonEmpty, rectW, rectX, rectY)
 
 -- | Divider orientation. 'AxisV' draws a vertical divider (panes left/right),
 -- 'AxisH' draws a horizontal divider (panes stacked top/bottom).
@@ -333,7 +333,7 @@ bestPane score regions =
 -- the grid is no target at all, so releasing there cancels the drag.
 topLevelDropTarget :: Float -> Rect -> V2 -> Maybe PaneDrop
 topLevelDropTarget band r@(Rect l t w h) p@(V2 x y)
-  | not (rectHit r p) = Nothing
+  | not (rectContains r p) = Nothing
   | x <= l + band = Just (DropTop AxisV True)
   | x >= l + w - band = Just (DropTop AxisV False)
   | y <= t + band = Just (DropTop AxisH True)

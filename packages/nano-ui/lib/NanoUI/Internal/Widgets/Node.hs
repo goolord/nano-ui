@@ -52,7 +52,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, inertView, localInput, nextId, liftIO, withContext, withIdFrame)
 import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..), tight)
-import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectHit, rectUnion, rectW)
+import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, passesPointer, withWidgetNode)
 
 -- | The innermost open container, or @-1@ at the root.
@@ -392,7 +392,7 @@ resolveInteraction ctx inp idx wid = do
   pending <- readIORef (ctxClickedId ctx)
   let
     mouse = inputMousePos inp
-  if not (rectHit rect mouse || pending == wid)
+  if not (rectContains rect mouse || pending == wid)
     then pure $! mkResponse wid rect False False False
     else do
       disabled <- isDisabled ctx wid

@@ -30,7 +30,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, takeEscape, withContext)
 import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
-import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectHit)
+import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Node (Response, containerResponse, respRect, respPressed)
 import NanoUI.Internal.Widgets.Behavior (DragAxis (..), dragThresholdPx)
@@ -101,7 +101,7 @@ useDrag (DragHandle ref) sources = do
 -- when scrolled; their centers still determine the original list index.
 insertionIndex :: DragAxis -> Rect -> [Rect] -> V2 -> Maybe Int
 insertionIndex axis bounds items pos@(V2 x y)
-  | not (rectHit bounds pos) = Nothing
+  | not (rectContains bounds pos) = Nothing
   | otherwise = Just (length (takeWhile before items))
   where
     before (Rect rx ry rw rh) = case axis of

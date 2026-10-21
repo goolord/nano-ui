@@ -158,7 +158,7 @@ floatingOverlay open dismiss addPanel enter body = do
         _ -> pure False
       let dismissed = closed || outside
       pure
-        ( mkResponse wid panel (rectHit panel mouse) dismissed dismissed
+        ( mkResponse wid panel (rectContains panel mouse) dismissed dismissed
         , Just r
         )
 
@@ -219,13 +219,13 @@ tooltipWidgetConfigured cfg target child = do
       rect = respRect target
       tid = respId target
   onTarget <-
-    if rectHit rect routed
+    if rectContains rect routed
       then liftIO (findNodeByWidgetId ctx tid >>= \mIdx -> pointerOnWidget ctx mIdx tid rect routed)
       else pure False
   -- The tooltip covering the target still counts as hovering it, as when a
   -- pointer-following tooltip lags one frame behind the pointer.
   onTip <- liftIO ((== RouteLayer (intKey wid)) <$> getsInteraction ctx isPointerRoute)
-  let hovered = onTarget || (onTip && rectHit rect mouse)
+  let hovered = onTarget || (onTip && rectContains rect mouse)
   (open, armed) <- liftIO (tooltipTimer ctx cfg (intKey wid) hovered frame)
   -- Request a frame when the pointer enters or leaves the target, even a
   -- label or container, and on every move while a following tooltip is open.

@@ -36,7 +36,7 @@ import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Style (Layout)
-import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectH, rectHit, rectW)
+import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectContains, rectH, rectW)
 
 {-# INLINE lookupIn #-}
 lookupIn :: (DrawingCacheState -> IntMap a) -> Context -> WidgetId -> IO (Maybe a)
@@ -82,7 +82,7 @@ hoverZoneCrossed :: Context -> V2 -> V2 -> IO Bool
 hoverZoneCrossed ctx from to =
   any crossed . dcsHoverZones <$> readIORef (ctxDrawingCache ctx)
   where
-    crossed (HoverZone r tracked) = let on = rectHit r from in on /= rectHit r to || (on && tracked)
+    crossed (HoverZone r tracked) = let on = rectContains r from in on /= rectContains r to || (on && tracked)
 
 -- | Register a draw builder and content version. Change the version when
 -- captured content changes without a size change.
