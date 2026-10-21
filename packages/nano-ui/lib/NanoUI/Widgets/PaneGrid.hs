@@ -42,7 +42,7 @@ import Data.List (find)
 import Data.Set qualified as S
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Word (Word64)
@@ -127,8 +127,8 @@ data PaneGridConfig = PaneGridConfig
   , pgTree :: !PaneTree
     -- ^ 'InitialTree' seeds internally owned state once. 'ControlledTree'
     -- keeps the arrangement in a 'Var': the grid mutates it on each edit, and a
-    -- tree written to it replaces the arrangement and cancels any gesture on
-    -- the old one. Both modes permit an empty grid.
+    -- tree written to it replaces the arrangement, restores a maximized pane
+    -- and cancels any gesture on the old one. Both modes permit an empty grid.
     --
     -- Allocate @arrangement <- newVar (Just startLayout)@ during setup, then:
     --
@@ -207,9 +207,9 @@ data PaneView = PaneView
   { pvTitle :: !Text
     -- ^ Label shown (abbreviated to fit) on the compact drag indicator.
   , pvDraggable :: !Bool
-    -- ^ A press anywhere in the pane not taken by an interactive child starts
-    -- a drag. Without it, only a press on the pane's 'paneDragHandle' does,
-    -- and a pane with neither cannot be moved.
+    -- ^ A press anywhere in the pane not taken by an interactive child or a
+    -- scrollbar starts a drag. Without it, only a press on the pane's
+    -- 'paneDragHandle' does, and a pane with neither cannot be moved.
   }
   deriving (Eq, Show)
 
@@ -372,8 +372,10 @@ paneGridCore cfg controlled given = do
       -- The panes share the grid's content box, inside its padding.
       baseRect = padContentClip ox oy ow oh (layoutPadding lay)
       st = fromMaybe (GridState Nothing 1 0 0 Nothing NoGesture) stored
+      -- An adopted tree replaces the old one whole: neither its maximized
+      -- pane nor its gesture carries over.
       started
-        | adopt = st {gsTree = given, gsSeed = max (gsSeed st) (maybe 1 ((+ 1) . treeMaxId) given), gsGesture = NoGesture}
+        | adopt = st {gsTree = given, gsSeed = max (gsSeed st) (maybe 1 ((+ 1) . treeMaxId) given), gsMax = 0, gsGesture = NoGesture}
         | otherwise = st
       curSpan = (rectW baseRect, rectH baseRect)
       -- On a size change, re-ratio pinned panes' splits before layout. A move
@@ -466,7 +468,7 @@ paneGridCore cfg controlled given = do
             liftIO $ registerCustomDrawing ctx wid (contentKey [1, rectX r, rectY r, rectW r, rectH r]) $ \cdc _ ->
               runCanvasFor cdc (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
-  when (pgFocusable cfg) $ handleGridKeys wid env focused
+  when (pgFocusable cfg) $ handleGridKeys wid env maxPane focused
   end <- fromMaybe gs . lookupSlot fieldGrid key <$> liftIO (getStore ctx)
   dropTarget <- liftIO (resolveExternalDrop env wid baseRect mouse end)
   let (maxEnd, focusEnd) = maybe (0, 0) (`paneFocus` end) (gsTree end)
@@ -489,9 +491,10 @@ paneGridCore cfg controlled given = do
 
 -- | Keys for the focused grid. Escape restores a maximized pane and is
 -- consumed, unless something earlier (such as a popup in a pane) took it
--- or it closes a menu or dropdown ('takeEscape').
-handleGridKeys :: WidgetId -> GridEnv -> Word64 -> NanoUI ()
-handleGridKeys wid env focused = do
+-- or it closes a menu or dropdown ('takeEscape'). With no pane maximized,
+-- Escape is left for others.
+handleGridKeys :: WidgetId -> GridEnv -> Word64 -> Word64 -> NanoUI ()
+handleGridKeys wid env maxPane focused = do
   focusedNow <- focusedWidget
   when (focusedNow == wid) $ do
     nav <- useKeyNav wid
@@ -504,7 +507,7 @@ handleGridKeys wid env focused = do
     -- from one declared later.
     whenM (shortcutOnce (Shortcut.key 'm')) (maximizePane env focused)
     whenM (shortcutOnce (Shortcut.key 'x')) (closePane env focused)
-    whenM takeEscape (restorePane env)
+    when (maxPane /= 0) $ whenM takeEscape (restorePane env)
 
 -- | External drop target over the grid when no internal gesture is active.
 resolveExternalDrop ::
@@ -744,6 +747,8 @@ runGestures wid env dividers rendered moved zone = do
   covered <- liftIO (pointerCovered (geCtx env) wid)
   clip <- liftIO (getPrevClipRect (geCtx env) wid)
   disabled <- liftIO (isDisabled (geCtx env) wid)
+  -- A press that grabbed a scrollbar, before the view ran, is the bar's.
+  barDrag <- liftIO (getsInteraction (geCtx env) (isJust . isScrollDrag))
   let mouse = inputMousePos inp
       down = heldIn MouseLeft inp
       setGesture rerun g = void (updateGrid env rerun (\s -> s {gsGesture = g}))
@@ -751,16 +756,18 @@ runGestures wid env dividers rendered moved zone = do
       -- from neighbouring panes.
       hitDiv = find (\d -> rectHit (diBand d) mouse) dividers
       -- The pane whose handle (or, when 'pvDraggable', whole region) is
-      -- under the pointer.
+      -- under the pointer. A handle wider than its pane counts only inside
+      -- the pane.
       pickHit = flip find rendered $ \pane ->
-        let v = rpView pane
-         in any (`rectHit` mouse) (rpHandle pane)
-              || (pvDraggable v && any (`rectHit` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
-  when (pressedIn MouseLeft inp && not (covered || disabled)
+        any (`rectHit` mouse) (M.lookup (rpPaneId pane) (geRegions env))
+          && (pvDraggable (rpView pane) || any (`rectHit` mouse) (rpHandle pane))
+  when (pressedIn MouseLeft inp && not (covered || disabled || barDrag)
       && maybe True (`rectHit` mouse) clip
       && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
     case (hitDiv, pickHit) of
-      (Just d, _) -> setGesture True (Resize (diSplitId d) (diRatio d) (mouseMain (diAxis d) mouse))
+      -- From the ratio the divider is drawn at, which the panes' minima may
+      -- have clamped, so it moves with the pointer from the start.
+      (Just d, _) -> setGesture True (Resize (diSplitId d) (clampRatio (geGutter env) d (diRatio d)) (mouseMain (diAxis d) mouse))
       (_, Just pane) -> setGesture True (Drag (rpPaneId pane) mouse False (pvTitle (rpView pane)))
       _ -> pure ()
   case gsGesture (geState env) of

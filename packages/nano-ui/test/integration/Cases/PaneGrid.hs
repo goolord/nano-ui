@@ -7,6 +7,7 @@ import Control.Exception (IOException, try)
 import Data.Either (isLeft)
 import Data.Maybe (listToMaybe)
 import Data.Word (Word64)
+import NanoUI.Shortcut (key)
 import Spec
 
 tests :: [Spec]
@@ -28,7 +29,128 @@ tests =
   , spec "pane-grid-empty" runEmptyTest
   , spec "pane-grid-validation" runValidationTest
   , spec "pane-grid-divider-damage" runDividerDamageTest
+  , spec "pane-grid-scrollbar-drag" runScrollBarDragTest
+  , spec "pane-grid-clamped-ratio" runClampedRatioTest
+  , spec "pane-grid-adopt-restores" runAdoptRestoresTest
+  , spec "pane-grid-escape" runEscapeTest
+  , spec "pane-grid-handle-overflow" runHandleOverflowTest
   ]
+
+-- | The left pane at its 40px minimum, its ratio below it; the gutter runs
+-- from 40 to 56.
+narrowLeft :: GridNode
+narrowLeft = Split 30 AxisV 0 (Pane 10) (Pane 20)
+
+-- | Dragging a scrollbar in a pane that drags from anywhere scrolls the pane
+-- and leaves it where it is.
+runScrollBarDragTest :: Context -> IORef Int -> IO ()
+runScrollBarDragTest ctx failed = do
+  scroller <- newIORef Nothing
+  let inp = withInput 600 400
+      ui = paneGrid defaultPaneGridConfig
+        { pgLayout = fillW . fillH
+        , pgTree = InitialTree (Just halves)
+        , pgViewPane = \pid _ -> do
+            when (pid == 10) $ do
+              (wid, _) <- scrollArea (tight . grow) (box (fixedWH 100 2000) (colorRGBA 200 0 0 255))
+              liftIO (writeIORef scroller (Just wid))
+            pure (PaneView "P" True)
+        }
+  _ <- warmup2 ctx inp ui
+  assertJustM failed (readIORef scroller) $ \wid ->
+    assertJustM failed (getPrevRect ctx wid) $ \(Rect x y w _) -> do
+      -- The thumb, at the top of the bar along the scroller's right edge.
+      hovers <- mapM (\bx -> findGrabHover ctx ui inp bx [y + 10]) [x + w - d | d <- [1 .. 16]]
+      assertJust failed (msum hovers) $ \onThumb -> do
+        let V2 tx ty = inputMousePos onThumb
+            press = pressAt inp (V2 tx ty)
+            moved = holdAt press (V2 tx (ty + 50))
+        mapM_ (\i -> runFrame ctx i ui) [press, moved, moved]
+        after <- evalUi ctx (releaseAt moved) ui
+        assertEq failed (Just halves) (pgrTree after)
+        scrolled <- getScrollOffset ctx wid
+        assertGt failed scrolled 0
+
+-- | A divider drawn at a minimum its ratio lies below follows the pointer
+-- from its first pixel of movement.
+runClampedRatioTest :: Context -> IORef Int -> IO ()
+runClampedRatioTest ctx failed = do
+  let inp = withInput 600 400
+      ui = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just narrowLeft)}
+      press = pressAt inp (V2 48 200)
+      moved = holdAt press (V2 78 200)
+  _ <- warmup2 ctx inp ui
+  mapM_ (\i -> runFrame ctx i ui) [press, moved]
+  after <- evalUi ctx (releaseAt moved) ui
+  -- The left pane is 70px wide: 40 and the 30 the pointer moved.
+  assertJust failed (rootRatio (pgrTree after)) $ \r -> assert failed (abs (r - 70 / 584) < 1.0e-4)
+
+-- | A tree written over a maximized pane's tree shows unmaximized, so it
+-- takes external drops, and stays so when the pane comes back.
+runAdoptRestoresTest :: Context -> IORef Int -> IO ()
+runAdoptRestoresTest ctx failed = do
+  maximize <- newIORef False
+  arrangement <- newVar (Just halves)
+  let inp = withInput 600 400
+      edge = inp {inputMousePos = V2 5 200}
+      ui = paneGrid defaultPaneGridConfig
+        { pgLayout = fillW . fillH
+        , pgTree = ControlledTree arrangement
+        , pgViewPane = \pid pctx -> do
+            wanted <- liftIO (readIORef maximize)
+            when (wanted && pid == 20) $ do
+              liftIO (writeIORef maximize False)
+              pgcMaximize pctx
+            pure (PaneView "P" False)
+        }
+  _ <- warmup2 ctx inp ui
+  writeIORef maximize True
+  maximized <- warmup2 ctx inp ui
+  assertEq failed 20 (pgrMaximizedPane maximized)
+  writeVarIO arrangement (Just (Split 5 AxisV 0.5 (Pane 1) (Pane 2)))
+  replaced <- warmup2 ctx edge ui
+  assertEq failed (Just (OutsideGrid PaneLeft)) (pgdLocation <$> pgrDropTarget replaced)
+  writeVarIO arrangement (Just halves)
+  back <- warmup2 ctx inp ui
+  assertEq failed 0 (pgrMaximizedPane back)
+
+-- | A focused grid takes Escape only to restore a maximized pane; otherwise
+-- the key goes on to a handler after it.
+runEscapeTest :: Context -> IORef Int -> IO ()
+runEscapeTest ctx failed = do
+  let inp = withInput 600 400
+      ui = do
+        r <- paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just halves)}
+        (,) r <$> takeEscape
+  warmupFocused ctx inp ui
+  (_, passedOn) <- evalUi ctx (keyInp KeyEscape inp) ui
+  assert failed passedOn
+  _ <- runFrame ctx (chordInp (key 'm') inp) ui
+  (maximized, _) <- warmup2 ctx inp ui
+  assert failed (pgrMaximizedPane maximized /= 0)
+  (_, taken) <- evalUi ctx (keyInp KeyEscape inp) ui
+  assert failed (not taken)
+  (restored, _) <- warmup2 ctx inp ui
+  assertEq failed 0 (pgrMaximizedPane restored)
+
+-- | A handle wider than its pane drags the pane only from inside it: a press
+-- where the handle runs on into the next pane drags nothing.
+runHandleOverflowTest :: Context -> IORef Int -> IO ()
+runHandleOverflowTest ctx failed = do
+  let inp = withInput 600 400
+      ui = paneGrid defaultPaneGridConfig
+        { pgLayout = fillW . fillH
+        , pgTree = InitialTree (Just narrowLeft)
+        , pgViewPane = \pid pctx -> do
+            when (pid == 10) $ paneDragHandle pctx (fixedWH 200 30) (pure ())
+            pure (PaneView "P" False)
+        }
+      press = pressAt inp (V2 100 15)
+      moved = holdAt press (V2 300 200)
+  _ <- warmup2 ctx inp ui
+  mapM_ (\i -> runFrame ctx i ui) [press, holdAt press (V2 120 15), moved, moved]
+  after <- evalUi ctx (releaseAt moved) ui
+  assertEq failed (Just narrowLeft) (pgrTree after)
 
 -- | Two panes side by side in a 600 by 400 grid: a 16px gutter from 292 to
 -- 308, down the middle.
