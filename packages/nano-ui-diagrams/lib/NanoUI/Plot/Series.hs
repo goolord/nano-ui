@@ -69,9 +69,8 @@ withStrokeWidth w s =
     StepSeries _ -> s {seriesKind = StepSeries w}
     _ -> s
 
--- | Set the marker option on line or scatter series; leave other kinds unchanged.
--- The renderer draws scatter markers; the line marker option is stored but
--- does not add markers to line geometry.
+-- | Mark each point of a line or scatter series with a shape; leave other
+-- kinds unchanged. A line's markers are sized at twice its stroke width.
 withMarker :: MarkShape -> Series -> Series
 withMarker mk s =
   case seriesKind s of

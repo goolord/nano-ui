@@ -75,8 +75,9 @@ data LegendPos = LegendRight | LegendBottom | LegendTop | LegendInside | LegendN
 data GridMode = GridBoth | GridHorizontal | GridVertical | GridNone
   deriving (Eq, Show)
 
--- | Series and chart decoration. Decimation reduces numeric series before
--- drawing and hit testing; it does not alter the stored data.
+-- | Series and chart decoration. Decimation reduces line, area and step
+-- series before drawing and hit testing; it does not alter the stored data,
+-- and scatter series are never thinned.
 data Chart = Chart
   { chartTitle :: !(Maybe Text)
   , chartXTitle :: !(Maybe Text)

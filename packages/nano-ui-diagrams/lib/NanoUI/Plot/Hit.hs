@@ -7,7 +7,7 @@ module NanoUI.Plot.Hit
 import NanoUI (Rect (..), V2, rectContains, v2X, v2Y)
 import NanoUI.Diagrams.Backend (letterbox)
 import NanoUI.Diagrams.Widget (frameInner)
-import NanoUI.Plot.Scale (plotToDomain)
+import NanoUI.Plot.Scale (domainToPlot)
 import NanoUI.Plot.Types (Domain, PlotHover (..))
 import qualified Data.Vector.Unboxed as U
 
@@ -41,7 +41,8 @@ hitTestChartCached dw dh (x0, x1) (y0, y1) domains points widgetRect mouse
   ly = realToFrac (v2Y mouse - rectY inner)
 
 -- | The nearest drawn point to a position in the unit plot box. Distance is
--- measured in data coordinates, not screen pixels, with no distance cutoff.
+-- measured in that box, which a chart draws square, so the nearest point on
+-- screen wins whatever the axes' units; there is no distance cutoff.
 -- Ties keep the earlier series/point. Returns 'Nothing' outside the unit box
 -- or when every series is empty.
 nearestPlotHover :: (Domain, Domain) -> [U.Vector (Double, Double)] -> Double -> Double -> Maybe PlotHover
@@ -49,15 +50,13 @@ nearestPlotHover (xDom, yDom) points gx gy
   | gx < 0 || gx > 1 || gy < 0 || gy > 1 = Nothing
   | otherwise = snd <$> scanSeries 0 Nothing points
  where
-  dataX = plotToDomain xDom gx
-  dataY = plotToDomain yDom gy
   -- The best hover carries its squared distance, so each point computes only
   -- its own and a point that loses allocates nothing.
   scanSeries !_ !best [] = best
   scanSeries !si !best (pts : rest) =
     let pick current !ptIdx (!x, !y) =
-          let !dx = x - dataX
-              !dy = y - dataY
+          let !dx = domainToPlot xDom x - gx
+              !dy = domainToPlot yDom y - gy
               !d = dx * dx + dy * dy
            in case current of
                 Just (bestD, _) | bestD <= d -> current

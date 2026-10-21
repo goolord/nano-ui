@@ -46,12 +46,13 @@ import NanoUI.Plot.Chrome
 import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
 import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Hit (nearestPlotHover)
-import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
+import NanoUI.Plot.Scale (domainToPlot, formatTick, mergeDomains, niceTicks)
 import NanoUI.Plot.Series
   ( area
   , bar
   , line
   , scatter
+  , step
   , withColor
   , withMarker
   )
@@ -93,11 +94,14 @@ main = hspec $ do
   describe "decimation" $ do
     it "keeps LTTB extrema and endpoints" testLttb
     it "keeps min/max extrema" testMinMaxDecimate
+    it "thins connected series but not scatter markers" testDecimateKinds
   describe "chart chrome" $ do
     it "keeps labels, titles and legends apart" (testLabelFit fm)
     it "colors legend entries like their series" (testLegendColors fm)
     it "picks the nearest hover point" testPlotHover
     it "fills closed series and markers" (testClosedSeriesFills fm)
+    it "draws a step series to its last point" (testStepLastPoint fm)
+    it "marks a line's points with its marker" (testLineMarkers fm)
     it "fills an area a ring per side of its baseline" (testAreaRings fm)
     it "places filled series where their data is" (testFillPlacement fm)
     it "caps the height of growing plots" (testGrowPlotHeight fm)
@@ -328,6 +332,16 @@ testMinMaxDecimate = do
                && V.maximum (V.map snd input) == V.maximum (V.map snd sampled)
            )
 
+-- | Default decimation thins a long line, but every scatter marker stays:
+-- unconnected markers that are dropped are simply missing.
+testDecimateKinds :: IO ()
+testDecimateKinds = do
+  let
+    pts = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. 99 :: Int]]
+    thinned s = seriesPoints (Builder.chart [s]) s /= seriesPoints (bareChart [s]) s
+  check "decimation did not thin a long line" (thinned (line "l" pts))
+  check "decimation thinned a scatter series" (not (thinned (scatter "s" pts)))
+
 orderedPoints :: V.Vector (Double, Double) -> Bool
 orderedPoints points = V.and (V.zipWith (\a b -> fst a < fst b) points (V.drop 1 points))
 
@@ -419,6 +433,13 @@ testPlotHover = do
           && hoverPointIdx h == 1
           && hoverDataX h == 1
           && hoverDataY h == 1
+  -- Just above the first point, the second is far off on screen but nearer
+  -- in data units, where y spans a thousand times x.
+  let
+    spread = bareChart [scatter "s" [(0.1, 500), (0.9, 505), (0, 0), (1, 1000)]]
+    (xDom, yDom) = seriesDomains spread
+    hovered = nearestPlotHover (xDom, yDom) (map (seriesPoints spread) (chartSeries spread)) (domainToPlot xDom 0.1) (domainToPlot yDom 510)
+  check "hover picked a point far away on screen" (fmap hoverPointIdx hovered == Just 0)
 
 -- Empty series isolate the legend strokes from data geometry. Every placement
 -- must retain the labels and use the same color overrides as the series.
@@ -473,12 +494,32 @@ testClosedSeriesFills fm = do
     diamondOps = seriesOps (withMarker MarkDiamond (scatter "d" [(1, 1), (2, 3)]))
     triOps = seriesOps (withMarker MarkTriangle (scatter "t" [(1, 1)]))
     crossOps = seriesOps (withMarker MarkCross (scatter "x" [(8, 8)]))
-    ink = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
-    inkXs = inkXsOf ink crossOps
+    inkXs = inkXsOf seriesInk crossOps
   check "area series produced no fill triangles" (fillTriCount areaOps >= 2)
   check "diamond marker produced no fill" (fillTriCount diamondOps >= 2)
   check "triangle marker produced no fill" (fillTriCount triOps >= 1)
   check "MarkCross arm left at origin" (not (null inkXs) && maximum inkXs - minimum inkXs < 40)
+
+-- | The first theme series colour.
+seriesInk :: Color
+seriesInk = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
+
+-- | A step series ends with the riser to its last point, the highest here.
+testStepLastPoint :: FontMetrics -> IO ()
+testStepLastPoint fm = do
+  let
+    ops = diagramOps 200 120 (chartDia fm (bareChart [step "s" [(0, 0), (1, 1), (2, 5)]]))
+    ys = [[indexPrimArray p k | k <- [1, 3 .. sizeofPrimArray p - 1]] | op@(StrokePolyline p _ _ _ _ _ _) <- toList ops, inkColor op == Just seriesInk]
+  check "step series stopped short of its last point" $ case ys of
+    [path] -> length path == 5 && last path == minimum path
+    _ -> False
+
+testLineMarkers :: FontMetrics -> IO ()
+testLineMarkers fm = do
+  let
+    ops = diagramOps 200 120 (chartDia fm (bareChart [withMarker MarkDiamond (line "l" [(0, 0), (1, 1), (2, 0)])]))
+    diamonds = [() | op@(FillPolygon p _ _ _) <- toList ops, inkColor op == Just seriesInk, sizeofPrimArray p == 8]
+  check "line markers were not drawn" (length diamonds == 3)
 
 -- | An area series fills a ring per run of samples on one side of its
 -- baseline, split where the data crosses it: the samples and the baseline's

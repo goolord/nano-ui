@@ -259,8 +259,11 @@ renderSeries ps c xDom yDom s pts =
   let ink = colourOf c
       toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
    in case seriesKind s of
-        LineSeries w _ ->
-          fromVertices (U.foldr (\p acc -> toP p : acc) [] pts) # lc ink # lwO (plotStroke w)
+        -- Markers are twice the line's width, a default scatter marker's
+        -- size on a default line.
+        LineSeries w mark ->
+          (fromVertices (U.foldr (\p acc -> toP p : acc) [] pts) # lc ink # lwO (plotStroke w))
+            <> foldMap (\mk -> U.foldl' (\acc p -> acc <> markShape mk (2 * w) ink (toP p)) mempty pts) mark
         ScatterSeries w mk ->
           U.foldl' (\acc p -> acc <> markShape mk w ink (toP p)) mempty pts
         BarSeries frac ->
@@ -270,7 +273,7 @@ renderSeries ps c xDom yDom s pts =
             # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18))
             # lw none
         StepSeries w ->
-          let steps = U.foldr (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc) [] (U.zip pts (U.drop 1 pts))
+          let steps = U.foldr (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc) [toP (U.last pts) | not (U.null pts)] (U.zip pts (U.drop 1 pts))
            in fromVertices steps # lc ink # lwO (plotStroke w)
 
 -- | An area series' fill polygons: for each run of points on one side of
@@ -300,14 +303,18 @@ areaRings baseline = map closeRun . runs . U.toList
       where
         sq = side q
 
--- | Points used for drawing and hit tests. Numeric data may be decimated;
--- categories become zero-based x positions paired with their values.
+-- | Points used for drawing and hit tests. Line, area and step data may be
+-- decimated; categories become zero-based x positions paired with their values.
 seriesPoints :: Chart -> Series -> U.Vector (Double, Double)
 seriesPoints chart s =
   case seriesData s of
     PointsXY pts ->
       let k = decimateK (U.length pts)
-       in if chartDecimate chart && U.length pts > k then lttb k pts else pts
+          -- Markers are not joined, so a dropped one is simply missing.
+          thins = case seriesKind s of
+            ScatterSeries {} -> False
+            _ -> True
+       in if chartDecimate chart && thins && U.length pts > k then lttb k pts else pts
     CategoryY _ values ->
        U.generate (sizeofPrimArray values) (\i -> (fromIntegral i, indexPrimArray values i))
 
