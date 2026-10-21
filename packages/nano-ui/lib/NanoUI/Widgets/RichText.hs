@@ -519,37 +519,34 @@ clusters t = case clusterLength t of
 -- spaces or newlines, drops spaces at a wrap, and gives an overlong word its
 -- own line.
 layoutLines :: SmallArray Run -> (Float, Float) -> AlignX -> Float -> [Token] -> [Line]
-layoutLines runs (emptyH, emptyAscent) align width = go 0 0 [] 0 [] True
+layoutLines runs (emptyH, emptyAscent) align width = go 0 0 [] 0 []
   where
     -- @placed@ holds the line's tokens in reverse, @pending@ the spaces since
-    -- its last word; @fresh@ whether the line starts after a wrap.
-    go top start placed x pending fresh toks = case toks of
+    -- its last word. A wrapped line starts at its first word, so it has none.
+    go top start placed x pending toks = case toks of
       [] -> [finish start top placed x]
       tok : rest -> case tokenKind tok of
         Break ->
           let line = finish start top placed x
               nextStart = tokenStart tok + T.length (tokenText tok)
-           in line : go (top + lineHeight line) nextStart [] 0 [] False rest
-        Space ->
-          let start' = if null placed && null pending && fresh then tokenStart tok else start
-           in go top start' placed x (tok : pending) fresh rest
-        Glyph -> placeGroup top start placed x pending fresh [tok] rest
-        GlyphSpace -> placeGroup top start placed x pending fresh [tok] rest
+           in line : go (top + lineHeight line) nextStart [] 0 [] rest
+        Space -> go top start placed x (tok : pending) rest
+        Glyph -> placeGroup top start placed x pending [tok] rest
+        GlyphSpace -> placeGroup top start placed x pending [tok] rest
         Word ->
           let (word, rest') = span (\t -> tokenKind t == Word) toks
-           in placeGroup top start placed x pending fresh word rest'
-    placeGroup top start placed x pending fresh group rest
+           in placeGroup top start placed x pending word rest'
+    placeGroup top start placed x pending group rest
       | not (null placed) && x + spaceW + groupW > width =
           let line = finish start top placed x
-           in line : go (top + lineHeight line) firstStart [] 0 [] True (group ++ rest)
+           in line : go (top + lineHeight line) firstStart [] 0 [] (group ++ rest)
       | otherwise =
-          let (placed', x') = foldl' place (placed, x) (if null placed && fresh then [] else reverse pending)
+          let (placed', x') = foldl' place (placed, x) (reverse pending)
               (placed'', x'') = foldl' place (placed', x') group
-              start' = if null placed && fresh then firstStart else start
-           in go top start' placed'' x'' [] False rest
+           in go top start placed'' x'' [] rest
       where
         groupW = sum (map tokenWidth group)
-        spaceW = if null placed && fresh then 0 else sum (map tokenWidth pending)
+        spaceW = sum (map tokenWidth pending)
         firstStart = maybe start tokenStart (listToMaybe group)
     place (acc, x) tok = ((x, tok) : acc, x + tokenWidth tok)
     finish start top placed x =

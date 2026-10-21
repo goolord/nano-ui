@@ -27,7 +27,22 @@ tests =
   , spec "rich-text-scroll-popup" runRichTextScrollPopupTest
   , spec "rich-text-selection-persistence" runSelectionPersistenceTest
   , spec "rich-text-break-policy" runTextBreakTest
+  , spec "rich-text-leading-spaces" runLeadingSpacesTest
   ]
+
+-- | Spaces that open a paragraph indent its first line, as they do a line
+-- after a newline.
+runLeadingSpacesTest :: Context -> IORef Int -> IO ()
+runLeadingSpacesTest ctx failed = do
+  let fm = ctxFontMetrics ctx
+  resp <- warmup2 ctx (withInput 400 400) (column (fst <$> richText' ["  where\n    go = 1"]))
+  Just entry <- lookupCustomDrawing ctx (respId resp)
+  cdc <- mkCustomDrawContext ctx fm (respId resp)
+  let r@(Rect rx _ _ _) = respRect resp
+      indent word = [x - rx | DrawTextStyled x _ _ t _ <- toList (cdrBuild entry cdc r), t == word]
+  case (indent "where", indent "go") of
+    ([w], [g]) -> assert failed (w > 0 && abs (g - 2 * w) < 0.5)
+    _ -> assert failed False
 
 -- | Wrapping follows 'textBreak', not the font: monospaced text keeps whole
 -- words, and 'breakAnywhere' wraps inside one without splitting a flag.
