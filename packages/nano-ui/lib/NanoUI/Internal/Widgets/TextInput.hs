@@ -395,7 +395,8 @@ searchInputConfigured' cfg v =
 -- Selectable text
 -- -----------------------------------------------------------------------------
 
--- | Read-only text that can be selected with the mouse and copied with Ctrl+C.
+-- | Read-only text that can be selected with the mouse and copied with the
+-- platform's copy shortcut (Ctrl+C, Command+C on macOS) or the context menu.
 {-# INLINE selectableText #-}
 selectableText :: Text -> NanoUI ()
 selectableText = selectableTextWith id
