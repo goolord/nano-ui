@@ -20,7 +20,6 @@ module NanoUI.Widgets.RichText
   ) where
 
 import Control.Monad (forM_, foldM, unless, when)
-import Data.Char (isMark)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -42,6 +41,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Store (eqByPtr, ptrEq, fieldRichSelection, findSlot, insertSlot)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
+import NanoUI.Internal.TextCluster (clusterLength)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
@@ -511,34 +511,12 @@ measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
           token = Token part i kind w at prepared
       pure (at + T.length part, token : acc)
 
--- | Text split into user-perceived characters, closely enough for wrapping:
--- a character keeps the combining marks, variation selectors and emoji
--- modifiers after it, a zero-width joiner joins the next character on, and
--- regional indicators pair into flags. A newline is its own cluster.
+-- | Text split into user-perceived characters ('clusterLength'), closely
+-- enough for wrapping.
 clusters :: Text -> [Text]
-clusters = go
-  where
-    go t = case T.uncons t of
-      Nothing -> []
-      Just (c, rest) ->
-        let n = 1 + extend (isRegional c) rest
-         in T.take n t : go (T.drop n t)
-    -- Characters after the first that stay in its cluster.
-    extend regional t = case T.uncons t of
-      Just (c, rest)
-        | c == '\x200D' -> case T.uncons rest of
-            Just (_, rest') -> 2 + extend False rest'
-            Nothing -> 1
-        | attaches c -> 1 + extend False rest
-        | regional && isRegional c -> 1 + extend False rest
-      _ -> 0
-    attaches c =
-      isMark c
-        || (c >= '\xFE00' && c <= '\xFE0F')
-        || (c >= '\x1F3FB' && c <= '\x1F3FF')
-        || (c >= '\xE0020' && c <= '\xE007F')
-        || (c >= '\xE0100' && c <= '\xE01EF')
-    isRegional c = c >= '\x1F1E6' && c <= '\x1F1FF'
+clusters t = case clusterLength t of
+  0 -> []
+  n -> T.take n t : clusters (T.drop n t)
 
 -- | Greedy line breaking at @width@, aligned by @align@. Breaks only at
 -- spaces or newlines, drops spaces at a wrap, and gives an overlong word its

@@ -135,6 +135,7 @@ library
         NanoUI.Internal.RichText.Types
         NanoUI.Internal.Store.Types
         NanoUI.Internal.TextEditor.Types
+        NanoUI.Internal.TextCluster
         NanoUI.Internal.Animatable
         NanoUI.Internal.Animation
         NanoUI.Internal.Atlas

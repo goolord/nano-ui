@@ -64,6 +64,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Array qualified as A
 import Data.Text.Internal (Text (..))
+import NanoUI.Internal.TextCluster (clusterLength)
 import NanoUI.Internal.Types (clamp)
 
 -- | Zero-indexed logical (row, column) position in the buffer. Fields are
@@ -184,27 +185,36 @@ withCursor cur buf =
 -- Navigation
 --------------------------------------------------------------------------------
 
--- | Move one character left, crossing to the preceding line at column zero.
--- Stops at the document start.
+-- | Move one user-perceived character left ('clusterLength': a flag, an
+-- emoji sequence or a letter with its marks), crossing to the preceding line
+-- at column zero. Stops at the document start.
 moveLeft :: TextBuffer -> TextBuffer
 moveLeft buf = withCursor (positionLeft buf (getCursor buf)) buf
 
--- | Move one character right, crossing to the next line at line end.
--- Stops at the document end.
+-- | Move one user-perceived character right, crossing to the next line at
+-- line end. Stops at the document end.
 moveRight :: TextBuffer -> TextBuffer
 moveRight buf = withCursor (positionRight buf (getCursor buf)) buf
 
 positionLeft :: TextBuffer -> Cursor -> Cursor
 positionLeft buf (Cursor row col)
-  | col > 0 = Cursor row (col - 1)
+  | col > 0 = Cursor row (clusterStart 0 (lineAt row buf))
   | row > 0 = Cursor (row - 1) (T.length (lineAt (row - 1) buf))
   | otherwise = Cursor 0 0
+  where
+    -- The cluster the caret ends, read from the start of the line: only
+    -- there can clusters be told apart.
+    clusterStart at t =
+      let n = max 1 (clusterLength t)
+       in if at + n >= col then at else clusterStart (at + n) (T.drop n t)
 
 positionRight :: TextBuffer -> Cursor -> Cursor
 positionRight buf (Cursor row col)
-  | col < T.length (lineAt row buf) = Cursor row (col + 1)
+  | col < T.length line = Cursor row (col + clusterLength (T.drop col line))
   | row + 1 < getLineCount buf = Cursor (row + 1) 0
   | otherwise = Cursor row col
+  where
+    line = lineAt row buf
 
 -- | Move up one row, retaining the preferred column and clamping to line length.
 moveUp :: TextBuffer -> TextBuffer

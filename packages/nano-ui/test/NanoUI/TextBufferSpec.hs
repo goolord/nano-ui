@@ -110,6 +110,16 @@ spec = do
       TB.documentEnd (TB.fromText "α\n") `shouldBe` TB.Cursor 1 0
       TB.documentEnd TB.empty `shouldBe` TB.Cursor 0 0
 
+    it "moves and deletes over whole flags, emoji sequences and combining marks" $ do
+      let
+        atEnd = TB.moveToEOL . TB.fromText
+        deleted motion = TB.toText . edit TE.multiLineMode [TE.Delete motion]
+      TB.getCursor (TB.moveLeft (atEnd "a🇺🇸")) `shouldBe` TB.Cursor 0 1
+      TB.getCursor (TB.moveLeft (atEnd "a👩\x200D💻")) `shouldBe` TB.Cursor 0 1
+      TB.getCursor (TB.moveRight (TB.fromText "e\x0301x")) `shouldBe` TB.Cursor 0 2
+      deleted TE.CharLeft (atEnd "a👍🏽") `shouldBe` "a"
+      deleted TE.CharRight (TB.fromText "🇺🇸🇫🇷") `shouldBe` "🇫🇷"
+
     it "deleting a word left eats trailing whitespace then the previous word" $ do
       let
         deleteWordLeft = TB.toText . edit TE.multiLineMode [TE.Delete TE.WordLeft] . TB.moveToEOL . TB.fromText
@@ -331,6 +341,10 @@ spec = do
         text = "αβ_猫  🙂!?"
       map (textWordBounds text) [0 .. 8]
         `shouldBe` replicate 4 (0, 4) ++ replicate 2 (4, 6) ++ replicate 3 (6, 9)
+    it "keeps combining marks and joiners inside words" $ do
+      textWordBounds "नमस्ते जी" 0 `shouldBe` (0, 6)
+      textWordBounds "cafe\x0301 au lait" 4 `shouldBe` (0, 5)
+      textWordBounds "می\x200Cخواهم" 0 `shouldBe` (0, 8)
     it "clamps clicks outside the text and handles empty text" $ do
       textWordBounds "" 10 `shouldBe` (0, 0)
       textWordBounds "one two" (-10) `shouldBe` (0, 3)

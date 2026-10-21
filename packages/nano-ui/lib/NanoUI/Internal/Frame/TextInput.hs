@@ -30,7 +30,7 @@ module NanoUI.Internal.Frame.TextInput
   ) where
 
 import Control.Monad (forM_, mfilter, when)
-import Data.Char (isAlphaNum, isSpace)
+import Data.Char (isAlphaNum, isMark, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isJust, mapMaybe)
 import Data.Sequence qualified as Seq
@@ -249,9 +249,10 @@ drawTextInputCaret da (FieldEdit value cursor _ fm rowY textX preedit) fg =
 data CharClass = WordChar | SpaceChar | OtherChar
   deriving (Eq)
 
--- | The run of word characters (letters, digits, underscores), spaces or
--- other characters around character @raw@ of @text@, clamped into it.
--- Positions count characters, not UTF-8 bytes.
+-- | The run of word characters (letters, digits, underscores, combining
+-- marks and the zero-width joiners), spaces or other characters around
+-- character @raw@ of @text@, clamped into it. Positions count characters,
+-- not UTF-8 bytes.
 textWordBounds :: Text -> Int -> (Int, Int)
 textWordBounds text raw
   | T.null text = (0, 0)
@@ -266,7 +267,7 @@ textWordBounds text raw
           )
  where
   charClass c
-    | isAlphaNum c || c == '_' = WordChar
+    | isAlphaNum c || isMark c || c == '_' || c == '\x200C' || c == '\x200D' = WordChar
     | isSpace c = SpaceChar
     | otherwise = OtherChar
 
