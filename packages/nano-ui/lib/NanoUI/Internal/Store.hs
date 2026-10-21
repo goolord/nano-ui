@@ -368,10 +368,11 @@ data Slot
     -- returned and the document it is the text of, so a frame that edits
     -- nothing neither splits nor joins the text.
     SlotTextAreaText
-  | -- | Set (value 1) to signal that the text area's text changed through a path
-    -- that does not flow through @Input@ (e.g. a context-menu cut/paste). The
-    -- text area widget reads and clears this on its next frame, so the caller
-    -- still gets a @respChanged@ pulse for edits that carry no keys or chars.
+  | -- | Set (value 1) to signal that a text field's or text area's text changed
+    -- through a path that does not flow through @Input@ (e.g. a context-menu
+    -- cut/paste). The widget reads and clears this on its next frame, so the
+    -- caller still gets a @respChanged@ pulse for edits that carry no keys or
+    -- chars.
     SlotTextAreaChanged
   | -- | A text field's undo history with the text it was recorded against, in
     -- 'storeHistory'.
@@ -393,8 +394,9 @@ data Slot
     SlotTextAreaReveal
   | SlotTextInputScroll
 
-  | -- | Search-field debounce bookkeeping. Text slots on the text widget id: the last
-    -- committed query and the monotonic timestamp of the last edit.
+  | -- | Search-field debounce bookkeeping, on the text widget id: the last
+    -- committed query (storeText) and the monotonic time of the last edit
+    -- (storeDouble).
     SlotSearchCommitted
   | SlotSearchAge
   | -- | Combo box suggestion state (storeInt/storeFloat, keyed by the field
