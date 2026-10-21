@@ -15,8 +15,19 @@ tests =
   , spec "custom-widget-content-key" runCustomWidgetContentKeyTest
   , spec "custom-widget-knob" runReferenceKnobTest
   , spec "custom-widget-knob-covered" runKnobCoveredTest
+  , spec "progress-bar-width" runProgressBarWidthTest
   , spec "drop-target" runDropTargetTest
   ]
+
+-- | A progress bar takes the caller's width mode over the fill it has by
+-- default, as a slider does; its height stays the one given.
+runProgressBarWidthTest :: Context -> IORef Int -> IO ()
+runProgressBarWidthTest ctx failed = do
+  let inp = withInputOff 400 300
+      bar f = rowWith (fixedW 300 . tight) (progressBarWith' f 12 0.3)
+  full <- warmup2 ctx inp (bar id)
+  half <- warmup2 ctx inp (bar (percent 50))
+  assertEq failed (rectW (respRect full) / 2, 12) (rectW (respRect half), rectH (respRect half))
 
 -- | Verifies custom intrinsic layout measurement via widgetMeasure hook, and
 -- that the measurement reverts once the hook is gone.

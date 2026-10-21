@@ -601,7 +601,7 @@ progressBarWith' :: (Layout -> Layout) -> Float -> Float -> NanoUI Response
 progressBarWith' f height frac =
   let !barH = max 0 height
    in fst <$> customWidget defaultCustomWidgetSpec
-        { widgetLayout = fillW (fixedH barH (f defaultLayout))
+        { widgetLayout = fixedH barH (f (fillW defaultLayout))
         , widgetMeasure = Just $ \_ _ -> (progressBarDefaultWidth, barH)
         , widgetContent = contentKey [clamp01 frac]
         , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
