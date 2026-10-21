@@ -42,6 +42,8 @@ import Data.Bits (complement, (.&.))
 import Data.IORef (atomicModifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Primitive.PrimArray (readPrimArray, writePrimArray)
+import Data.Proxy (Proxy (..))
+import Data.Typeable (Typeable, typeRep)
 import Data.Word (Word64)
 import NanoUI.Internal.Context (Context (..), damageFull, markDirty, markDirtyCovered)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq)
@@ -78,10 +80,12 @@ useVar :: VarSlot a => a -> NanoUI (Var a)
 useVar = slotVar slotMatch slotWrap
 
 -- | 'useVar' for an enumeration, stored by its 'Enum' index. An out-of-range
--- index decodes as @initial@.
-useEnumVar :: forall a. (Bounded a, Enum a) => a -> NanoUI (Var a)
+-- index decodes as @initial@, and a slot that held another enumeration
+-- starts over.
+useEnumVar :: forall a. (Bounded a, Enum a, Typeable a) => a -> NanoUI (Var a)
 useEnumVar initial = do
-  v <- slotVar (\case SEnum v -> Just v; _ -> Nothing) SEnum (fromEnum initial)
+  let ty = typeRep (Proxy @a)
+  v <- slotVar (\case SEnum t v | t == ty -> Just v; _ -> Nothing) (SEnum ty) (fromEnum initial)
   let decode i
         | i >= fromEnum (minBound :: a) && i <= fromEnum (maxBound :: a) = toEnum i
         | otherwise = initial

@@ -36,6 +36,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import Data.Typeable (TypeRep)
 import Data.Word (Word64)
 import GHC.Generics (Generic (..))
 import GHC.Records (HasField (..))
@@ -218,7 +219,8 @@ data SlotVar
   | SFloat !(Var Float)
   | SBool !(Var Bool)
   | SText !(Var Text)
-  | SEnum !(Var Int)
+  | -- | An enumeration's index, with the enumeration's type.
+    SEnum !TypeRep !(Var Int)
   | SSort !(Var SortCol)
 
 -- | Types a positional 'NanoUI.Var.useVar' can hold. For an enumeration,

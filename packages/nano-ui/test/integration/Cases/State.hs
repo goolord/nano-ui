@@ -151,6 +151,9 @@ runVarSlotIdentityTest ctx failed = do
   assertEq failed 9 =<< asInt
   assertEq failed "five" =<< asText
   assertEq failed 5 =<< asInt
+  -- Enumerations are stored by index, but one of another type starts over.
+  _ <- runNanoUI ctx inp (withKey ("enum" :: Text) (useEnumVar LT >>= \v -> writeVar v EQ))
+  assertEq failed False =<< runNanoUI ctx inp (withKey ("enum" :: Text) (readVar =<< useEnumVar False))
   let view extra = column $ do
         when extra (void (button "extra"))
         n <- useVar (0 :: Int)
