@@ -9,6 +9,7 @@ module NanoUI.Plot.Chrome
   ) where
 
 import Data.Colour (Colour)
+import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
@@ -173,8 +174,9 @@ textWidth fm s = rectW (drawTextBox fm 0 0 0 (-1) s)
 
 -- | Combined x/y extents of the series' finite values, with 5% numeric
 -- padding. Categories use zero-based positions with half a slot at each
--- end. An axis with no values spans 0-1 before the padding, and one with a
--- single value half a unit each side of it.
+-- end, and their bars' y extent includes zero. An axis with no values spans
+-- 0-1 before the padding, and one with a single value half a unit each side
+-- of it.
 seriesDomains :: Chart -> (Domain, Domain)
 seriesDomains chart = (xDom, fit yBounds)
   where
@@ -186,7 +188,7 @@ seriesDomains chart = (xDom, fit yBounds)
       PointsXY pts -> (mergeDomains bx (domainBoundsBy fst pts), mergeDomains by (domainBoundsBy snd pts), n)
       CategoryY _ values ->
         let k = sizeofPrimArray values
-         in (bx, mergeDomains by (domainBoundsBy (indexPrimArray values) (U.enumFromN 0 k)), max n k)
+         in (bx, mergeDomains by (mergeDomains (Domain 0 0) (domainBoundsBy (indexPrimArray values) (U.enumFromN 0 k))), max n k)
     slotDom = Domain (-0.5) (fromIntegral slots - 0.5)
     xDom
       | slots == 0 = fit xBounds
@@ -202,14 +204,17 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
       rightM = marginRight margins
       botM = marginBottom margins
       topM = marginTop margins
-      xTicks = niceTicks 6 xDom
+      -- A category series names its slots; other x axes are numbered.
+      xTicks = case [labels | Series {seriesData = CategoryY labels _} <- chartSeries chart] of
+        labels : _ -> zip [0 ..] (toList labels)
+        [] -> [(x, formatTick x) | x <- niceTicks 6 xDom]
       yTicks = niceTicks 6 yDom
       tickPad = ccTickPad chrome
       xTickPad = ccXTickPad chrome
       toX = domainToPlot xDom
       toY = domainToPlot yDom
       horizontalGrid = mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | y <- yTicks]
-      verticalGrid = mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | x <- xTicks]
+      verticalGrid = mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | (x, _) <- xTicks]
       grid =
         case chartGrid chart of
           GridNone -> mempty
@@ -219,12 +224,12 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
       axes =
         fromVertices [p2 (0, 0), p2 (1, 0)]
           <> fromVertices [p2 (0, 0), p2 (0, 1)]
-          <> mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 0.03)] | x <- xTicks]
+          <> mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 0.03)] | (x, _) <- xTicks]
           <> mconcat [fromVertices [p2 (0, toY y), p2 (0.03, toY y)] | y <- yTicks]
       xLabs =
         mconcat
-          [ plotLbl ps 0.5 1 (T.unpack (formatTick x)) # moveTo (p2 (toX x, -xTickPad))
-          | x <- xTicks
+          [ plotLbl ps 0.5 1 (T.unpack t) # moveTo (p2 (toX x, -xTickPad))
+          | (x, t) <- xTicks
           ]
       yLabs =
         mconcat
@@ -271,7 +276,7 @@ renderSeries ps c xDom yDom s pts =
         ScatterSeries w mk ->
           U.foldl' (\acc p -> acc <> markShape mk w ink (toP p)) mempty pts
         BarSeries frac ->
-          renderBars ink frac pts
+          renderBars ink frac xDom yDom pts
         AreaSeries baseline ->
           mconcat [closedPoly (map toP ring) | ring <- areaRings baseline pts]
             # fc (colourOf (lerpColor c (plotFrameBg ps) 0.18))
@@ -331,17 +336,18 @@ seriesPoints chart s =
 decimateK :: Int -> Int
 decimateK n = min n (max 64 (min 2000 (n `div` 2)))
 
-renderBars :: Colour Double -> Float -> U.Vector (Double, Double) -> Diagram B
-renderBars fill frac pts
-  | U.null pts = mempty
-  | otherwise = U.foldl' (\acc p -> acc <> drawBar p) mempty pts
+-- | Bars a fraction of their category slot wide, from zero to each value on
+-- the chart's axes.
+renderBars :: Colour Double -> Float -> Domain -> Domain -> U.Vector (Double, Double) -> Diagram B
+renderBars fill frac xDom yDom = U.foldl' (\acc p -> acc <> drawBar p) mempty
   where
-    n = fromIntegral (U.length pts) :: Double
-    invN = 1.0 / n
-    invMaxY = 1.0 / U.foldl' (\acc (_, y) -> max acc (abs y)) 1e-9 pts
+    half = realToFrac frac / 2
+    base = domainToPlot yDom 0
     drawBar (x, y) =
-      let h = abs y * invMaxY
-       in rect (realToFrac frac / n) h # fc fill # lw none # translate ((x * invN + 0.5 * invN) ^& (signum y * h * 0.5))
+      let x0 = domainToPlot xDom (x - half)
+          x1 = domainToPlot xDom (x + half)
+          top = domainToPlot yDom y
+       in rect (x1 - x0) (abs (top - base)) # fc fill # lw none # translate (((x0 + x1) / 2) ^& ((base + top) / 2))
 
 -- | A closed polygon through the points. The trail keeps its location: a
 -- bare trail would be drawn from the origin rather than its first point.

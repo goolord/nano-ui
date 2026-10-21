@@ -4,7 +4,7 @@ import Control.Monad (forM_, unless)
 import Data.Colour.Names (coral, steelblue)
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
-import Data.List (tails)
+import Data.List (sortOn, tails)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArray)
 import Data.Text qualified as T
@@ -103,6 +103,7 @@ main = hspec $ do
     it "picks the nearest hover point" testPlotHover
     it "fills closed series and markers" (testClosedSeriesFills fm)
     it "draws a step series to its last point" (testStepLastPoint fm)
+    it "stands bars on zero under their category names" (testBars fm)
     it "marks a line's points with its marker" (testLineMarkers fm)
     it "fills an area a ring per side of its baseline" (testAreaRings fm)
     it "places filled series where their data is" (testFillPlacement fm)
@@ -392,7 +393,9 @@ testLabelFit :: FontMetrics -> IO ()
 testLabelFit fm = do
   let
     dump = chartDia fm barChartSample
-    fitted = fitLayout fm (fixedH 180 defaultLayout) dump
+    -- Tall enough for the fit, at most twice the size, to part five
+    -- three-letter days in glyphs as wide as they are high.
+    fitted = fitLayout fm (fixedH 200 defaultLayout) dump
     ops =
       case (layoutWidth fitted, layoutHeight fitted) of
         (Fixed bw, Fixed bh) -> diagramOps (realToFrac bw) (realToFrac bh) dump
@@ -555,6 +558,21 @@ testStepLastPoint fm = do
     ys = [[indexPrimArray p k | k <- [1, 3 .. sizeofPrimArray p - 1]] | op@(StrokePolyline p _ _ _ _ _ _) <- toList ops, inkColor op == Just seriesInk]
   check "step series stopped short of its last point" $ case ys of
     [path] -> length path == 5 && last path == minimum path
+    _ -> False
+
+-- | Bars rise from the y axis' zero to their values on it, and the x axis
+-- names their categories.
+testBars :: FontMetrics -> IO ()
+testBars fm = do
+  let
+    ops = toList (diagramOps 400 240 (chartDia fm (bareChart [bar "count" [("Mon", 2), ("Tue", 5), ("Wed", 4), ("Thu", 7), ("Fri", 3)]])))
+    -- A y tick label is right-aligned, level with its tick.
+    tickY t = listToMaybe [y | DrawText _ y 1 _ t' _ <- ops, t' == t]
+    bars = map snd (sortOn fst [(rectX r, (rectY r, rectY r + rectH r)) | FillRect r c <- ops, c == seriesInk])
+    near a b = abs (a - b) < 0.5
+  check "bar categories are not on the x axis" (all (`elem` [t | DrawText _ _ _ _ t _ <- ops]) ["Mon", "Tue", "Wed", "Thu", "Fri"])
+  check "bars disagree with the y axis" $ case (tickY "0", tickY "2", tickY "4", bars) of
+    (Just y0, Just y2, Just y4, [(top2, _), _, (top4, _), _, _]) -> all (near y0 . snd) bars && near top2 y2 && near top4 y4
     _ -> False
 
 testLineMarkers :: FontMetrics -> IO ()
