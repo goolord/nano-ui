@@ -109,9 +109,11 @@ runFrameEff unlift ctx rawInp ui = do
   clearWindowClose ctx
   -- Scopes only change how nodes look, which the rect and text diffs below
   -- do not track, and custom widgets' cached ops hold the old theme's colours.
+  -- Nothing measured depends on a theme, so the caches that follow the font
+  -- metrics ('ctxMetricGen') stand.
   whenM (themeScopesChanged ctx) $ do
     damageFull ctx
-    modifyIORef' (ctxMetricGen ctx) (+ 1)
+    modifyIORef' (ctxDrawingCache ctx) (\dc -> dc {dcsCustomDrawOpCache = IM.empty})
   settleViewTheme ctx themeBefore
   let
     size@(Size w h) = inputWindowSize frameInp
