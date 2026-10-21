@@ -47,8 +47,13 @@ import NanoUI.Internal.Store (eqByPtr)
 
 -- | Typed chart cache owned by a component in one session. Allocate once
 -- during setup; multiple plots in that component are distinguished by widget id.
+-- Entries are not evicted: the cache keeps a chart and its drawing for every
+-- plot id it has drawn, so plots whose ids keep changing, such as one per
+-- item of a list that grows, grow it for as long as it lives.
 newtype PlotCache = PlotCache (IORef (IM.IntMap CachedChart))
 
+-- | An empty cache. Allocate it once, during setup, and pass it to the
+-- component's plots: a cache made each frame rebuilds every chart each frame.
 newPlotCache :: IO PlotCache
 newPlotCache = PlotCache <$> newIORef IM.empty
 

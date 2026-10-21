@@ -280,7 +280,10 @@ diagramWithKeyAndEnvelope ::
 diagramWithKeyAndEnvelope userKey dw dh f =
   framedDiagram (\t -> hash (userKey, themePlotKey t)) dw dh (f defaultLayout)
 
--- | 'diagram' with an explicit envelope width and height.
+-- | 'diagram' with an explicit envelope width and height. The drawing is
+-- cached per theme and redrawn when the envelope or the widget's size
+-- changes, not when other content does: for a diagram that changes, use
+-- 'diagramWithKeyAndEnvelope'.
 diagramWithEnvelope ::
   Double ->
   Double ->
@@ -329,7 +332,11 @@ fitLayoutIO fm layout d = do
   pure (fitLayout prepared layout d)
 
 -- | Draw a diagram inside a framed box sized by the layout modifier. Text in
--- the diagram is measured with the current font so labels fit.
+-- the diagram is measured with the current font so labels fit. The drawing
+-- and its envelope are cached, and redrawn when the theme, the font's line
+-- height, the layout or the widget's size changes, not when the diagram
+-- does: for a diagram that changes, such as a gauge's needle, use
+-- 'diagramWithKeyAndEnvelope' with a key that changes with it.
 diagram :: (Layout -> Layout) -> QDiagram NanoUIBackend V2 Double Any -> NanoUI Response
 diagram f d = do
   ctx <- askContext
