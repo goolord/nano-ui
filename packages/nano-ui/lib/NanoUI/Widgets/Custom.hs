@@ -448,7 +448,7 @@ knobCore f diameter minV maxV value = do
       | otherwise = current
   -- Re-register the drawing when the value changes so this frame renders the
   -- updated position.
-  when (finalVal /= current) $ liftIO (redrawCustom ctx wid (spec finalVal))
+  when (finalVal /= current) $ liftIO (registerCustomEntry ctx wid (specEntry (spec finalVal)))
   finishInput fieldFloat ctx wid current resp finalVal
 
 -- | Boolean toggle switch backed by a 'Var', toggled by click or Space/Enter.
@@ -496,11 +496,8 @@ toggleSwitchCore f on = do
         }
   (resp, ()) <- customWidgetWithId wid (spec current)
   result@(_, value) <- finishToggle ctx wid current resp
-  when (value /= current) $ liftIO (redrawCustom ctx wid (spec value))
+  when (value /= current) $ liftIO (registerCustomEntry ctx wid (specEntry (spec value)))
   pure result
-
-redrawCustom :: Context -> WidgetId -> CustomWidgetSpec a -> IO ()
-redrawCustom ctx wid spec = registerCustomEntry ctx wid (specEntry spec)
 
 {-# INLINE specEntry #-}
 specEntry :: CustomWidgetSpec a -> CustomDrawingEntry
