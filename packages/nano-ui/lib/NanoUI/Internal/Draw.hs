@@ -368,20 +368,24 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
       let font'
             | k == 1 = font
             | otherwise = font {textFontSize = k * (if textFontSize font > 0 then textFontSize font else size)}
-      (styledFm, _) <- resolve font'
+      (styledFm, native) <- resolve font'
       unlessOffClip styledFm (textBoxTop styledFm y ay) $ do
         prepared <- prepareFontMetrics styledFm t
         let Rect px py _ _ = drawTextBox prepared x y ax ay t
-        styled px py font' t c
+        pushStyled prepared native font' px py t c
     emitOne op = pushShapeOp da op
     -- Styled text with its line box's top-left corner at (x, y).
     styled x y font t c = do
       (styledFm, native) <- resolve font
-      let weight = if native then WeightNormal else textFontWeight font
-          fstyle = if native then FontStyleNormal else textFontStyle font
       unlessOffClip styledFm y $ do
         prepared <- prepareFontMetrics styledFm t
-        pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+        pushStyled prepared native font x y t c
+    -- Text in @font@, with metrics prepared for it, synthesizing the font's
+    -- weight and slant unless the host renders them natively.
+    pushStyled prepared native font x y t c =
+      let weight = if native then WeightNormal else textFontWeight font
+          fstyle = if native then FontStyleNormal else textFontStyle font
+       in pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
     -- Text whose line box, from @top@, lies wholly above or below the clip
     -- by more than the glyph slack draws nothing ('pushShapedQuads' culls
     -- only across), so it is skipped before it is shaped: a long paragraph
