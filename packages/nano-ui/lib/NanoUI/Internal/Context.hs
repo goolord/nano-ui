@@ -273,7 +273,7 @@ withFontMetrics ctx fm =
 -- | Set the default text size, in the font resolver's units. Backends whose
 -- base font size differs from its line height call this.
 withFontSize :: Context -> Float -> Context
-withFontSize ctx size = ctx {ctxFontSize = size}
+withFontSize ctx size = trackMetricSource ctx {ctxFontSize = size}
 
 -- | Replace monospace metrics and rebuild default font-resolution callbacks.
 withMonoFontMetrics :: Context -> FontMetrics -> Context

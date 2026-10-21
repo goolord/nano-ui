@@ -113,6 +113,12 @@ runMetricCacheInvalidationTest ctx failed = do
       (_, coldDraw, _) <- runFrame fresh inp ui
       assertEq failed actual =<< snapshotDraw coldDraw
       assertEq failed spans =<< collectTextSpans fresh
+  -- A new default size changes how text with no size of its own is drawn,
+  -- which no diff sees, so the next frame repaints whole.
+  sized <- newContext
+  _ <- warmup2 sized inp (label "ABC")
+  _ <- runFrame (withFontSize sized 24) inp (label "ABC")
+  assertEq failed DamageFull =<< takeDamage sized
 
 -- A table header's width and style stay fixed while alignment and its parent
 -- origin change independently. This exercises the placement cache's key.
