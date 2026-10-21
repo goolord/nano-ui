@@ -155,16 +155,18 @@ data TextBox = TextBox
   }
 
 -- | Measure a text node's content for the width @outerW@. The text wraps at
--- @outerW@ minus its label inset when it has explicit newlines, or when
--- @shouldWrap wrapW lineW@ holds for its single-line width.
+-- @outerW@ minus its label inset ('tableStripeInset'), as paint wraps it,
+-- when it has explicit newlines, or when @shouldWrap outerW lineW@ holds for
+-- its single-line width.
 measureTextNodeAt :: SolveEnv -> NodeIdx -> Text -> Float -> (Float -> Float -> Bool) -> IO TextBox
 measureTextNodeAt env idx txt outerW shouldWrap = do
-  measurer@TextMeasurer {tmMetrics = textFm} <- nodeMeasurer env idx NodeText =<< getStyleIdx (seArena env) idx
+  si <- getStyleIdx (seArena env) idx
+  measurer@TextMeasurer {tmMetrics = textFm} <- nodeMeasurer env idx NodeText si
   (tw0, th0) <- measureFontLine measurer txt
-  let wrapW = max 0 outerW
+  let wrapW = max 0 (outerW - 2 * tableStripeInset si)
       lineH = fmLineHeight textFm
       na = seArena env
-  if T.any (== '\n') txt || shouldWrap wrapW tw0
+  if T.any (== '\n') txt || shouldWrap (max 0 outerW) tw0
     then do
       (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped env measurer txt wrapW)
       pure (TextBox True tw th lineH)
@@ -443,12 +445,13 @@ drawingHeightAt SolveEnv {seArena = na, seMs = ms} idx w hAx fallback = do
 
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
--- nothing caps it (@textNodeSpanEntry@ in the text-span collector).
+-- nothing caps it (@textNodeSpanEntry@ in the text-span collector). Text
+-- whose width is not fit wraps at the width it was assigned, as
+-- 'positionNode' wraps it; fit text wraps where it was measured.
 textWrapCap :: Float -> SizingTag -> Float -> Float
 textWrapCap effMaxW wTag w
-  | effMaxW < 1e8 = max 0 effMaxW
-  | wTag == SizingGrow && w > 0 = w
-  | otherwise = effMaxW
+  | wTag /= SizingFit && w > 0 = w
+  | otherwise = max 0 effMaxW
 
 -- | Find the nearest ancestor's fixed or finite maximum width, subtracting
 -- accumulated horizontal padding. Returns 1e9 when none constrains the node.

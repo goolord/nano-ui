@@ -43,6 +43,7 @@ module NanoUI.Internal.WidgetText
   , hasFlag
   , tableSortReserve
   , tableStripeColor
+  , tableStripeInset
   , stripeColor
   , packTextNodeStyle
   , textNodeFontKey
@@ -75,7 +76,7 @@ import Data.Text (Text)
 import Data.Word (Word8)
 import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
-import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
+import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, tableCellInset, widgetContentInset)
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), TextDecoration (..), Theme (..), Tone (..), styleBg, variantFace, variantTone)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
@@ -321,6 +322,15 @@ stripeColor theme s = case s of
 -- | Row fill decoded from a text node's style index.
 tableStripeColor :: Theme -> Int -> Maybe Color
 tableStripeColor theme si = stripeColor theme ((si `shiftR` 4) .&. 0x0F)
+
+-- | How far the lines of a text node with style index @si@ keep from each
+-- side: a table cell's inset when it has a row fill ('tableStripeColor').
+{-# INLINE tableStripeInset #-}
+tableStripeInset :: Int -> Float
+tableStripeInset si = case (si `shiftR` 4) .&. 0x0F of
+  1 -> tableCellInset
+  2 -> tableCellInset
+  _ -> 0
 
 -- | Slot reserved in every header so the sort mark never changes column
 -- width: trailing, or leading ('tableSortReserveLead') in a right-aligned

@@ -14,7 +14,7 @@ module NanoUI.Internal.Frame.Spans
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (floatingPanelRects)
@@ -155,7 +155,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
       mStripe = tableStripeColor theme si
       fg = fromMaybe (textToneColor theme (textNodeFontVariant si) (textNodeFontTone si)) mCustomCol
       bg = fromMaybe (styleBg (themePanel theme)) mStripe
-      !ix = if isJust mStripe then tableCellInset else 0
+      !ix = tableStripeInset si
       -- What the lines depend on: everything but where the node is and
       -- how tall, and the colours. Inlined at both uses, so a cache hit
       -- allocates no closure for it.
@@ -215,7 +215,8 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
       (fm, _, measure) <- resolveFontFor ctx NodeText fontSize si
       let measureW = fmap fst . measure
           contentW = max 0 (w - 2 * ix)
-          wrapCap = textWrapCap effMaxW wTag w
+          -- A row child wraps only at its newlines, where it was measured.
+          wrapCap = if isRowChild then effMaxW else textWrapCap effMaxW wTag w
       tw <- measureW raw
       if T.any (== '\n') raw || (not isRowChild && wrapCap < 1e8 && wrapCap + 0.5 < tw)
         then do
