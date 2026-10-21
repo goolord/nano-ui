@@ -474,7 +474,7 @@ getExplainedNode :: Context -> IO (Maybe ExplainedNode)
 getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
 
 -- | Derive the base theme from the system appearance ('Nothing' when the
--- backend cannot tell), e.g. with @'NanoUI.Internal.Style.lightDark' light
+-- backend cannot tell), e.g. with @'NanoUI.lightDark' light
 -- dark@. Applies now and on every 'setSystemAppearance' change, until
 -- 'setTheme' sets a fixed theme. A view can instead pick the theme itself
 -- each frame:

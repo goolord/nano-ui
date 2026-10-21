@@ -577,7 +577,7 @@ data GeomCol
 -- * 'StylePinX', 'StylePinY': a pinned node's offset from its parent's
 --   content box.
 -- * 'StyleAspect': width over height for a fit height
---   ('NanoUI.Internal.Style.aspect'), or 0 for none.
+--   ('NanoUI.aspect'), or 0 for none.
 --
 -- The layout cache does not compare 'StyleScrollContentW' and
 -- 'StyleNodeValue', which are not layout inputs.
@@ -605,7 +605,7 @@ data StyleCol
 -- * 'TagFlow': the 'Flow'. Always 'Line' for scroll containers, grids and
 --   non-containers.
 -- * 'TagLineAlign': a wrapping container's
---   'NanoUI.Internal.Style.LineAlign'.
+--   'NanoUI.LineAlign'.
 -- * 'TagPinned': whether the node is pinned, as a 'Bool'.
 -- * 'TagPinnedBelow': whether some descendant is pinned, as a 'Bool', set
 --   when that node is added ('hasPinnedBelow'). The solver, paint and hit
@@ -1510,7 +1510,7 @@ getImageNode na idx = do
   si <- arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
   if si <= 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (si - 1))
 
--- | Set image node @idx@'s image id: the 'NanoUI.Internal.Types.ImageId'
+-- | Set image node @idx@'s image id: the 'NanoUI.ImageId'
 -- it draws, or 0 for none. Layout does not read it, so it is paint state
 -- ('getPaintSignature').
 {-# INLINE setImageId #-}

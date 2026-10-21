@@ -231,7 +231,7 @@ data Padding = Padding
 
 -- | Floating window padding. The body sits one side-pad below the chrome and one
 -- side-pad above the window's bottom edge (the window's own column gap fills
--- the top; see 'NanoUI.Internal.Widgets.Overlay').
+-- the top; see 'NanoUI.window').
 windowPad :: Padding
 windowPad = Padding 10 10 0 10
 
@@ -526,7 +526,7 @@ fontSize sz l = l {layoutFontSize = max 0 sz}
 
 -- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
 -- It does not query the backend default; to scale that, apply 'fontSize'
--- with 'NanoUI.Internal.Monad.uiFontSize' first.
+-- with 'NanoUI.uiFontSize' first.
 fontSizeScale :: Float -> Layout -> Layout
 fontSizeScale s l = fontSize ((if layoutFontSize l > 0 then layoutFontSize l else 16) * s) l
 

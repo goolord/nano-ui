@@ -246,7 +246,7 @@ hsvToRgb h s v =
 -- | WCAG 2 relative-luminance contrast. 4.5 is AA for normal text.
 --
 -- Alpha is ignored, so both colours must be opaque. Passing a translucent
--- colour such as 'NanoUI.Internal.Style.themeOverlayDim' gives a meaningless ratio;
+-- colour such as 'NanoUI.themeOverlayDim' gives a meaningless ratio;
 -- composite it over its backdrop first.
 contrastRatio :: Color -> Color -> Double
 contrastRatio a b =

@@ -895,7 +895,7 @@ data Context = Context
   , ctxMonoFontMetrics :: FontMetrics
   , ctxFontSize :: !Float
   -- ^ Backend default text size, used when a layout sets none. Same units
-  -- as 'NanoUI.Internal.Style.fontSize'.
+  -- as 'NanoUI.fontSize'.
   , ctxMeasureText :: Text -> IO (Float, Float)
   , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
@@ -929,7 +929,7 @@ data Context = Context
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region. A backend
   -- that sets it clears the target to the
-  -- 'NanoUI.Internal.Style.themeWindow' of 'ctxTheme', as
+  -- 'NanoUI.themeWindow' of 'ctxTheme', as
   -- it is after the frame, before it draws the frame: paint leaves out a
   -- page scroller's backdrop that would only repeat that clear.
   , ctxPaintFull :: !(IORef Bool)
@@ -967,7 +967,7 @@ data Context = Context
   -- column edges. Each build starts empty.
   , ctxCursorZones :: !(IORef [(Rect, UiCursorKind)])
   -- | Node ranges [from, below) of this build's
-  -- 'NanoUI.Internal.Widgets.Cursor.withCursorShape' scopes, newest first.
+  -- 'NanoUI.withCursorShape' scopes, newest first.
   -- Scopes are pushed when they end, so an outer scope precedes its inner
   -- ones. Each build starts empty.
   , ctxCursorRegions :: !(IORef [(Int, Int, UiCursorKind)])
