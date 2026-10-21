@@ -7,10 +7,12 @@ module NanoUI.Internal.Widgets.Shortcut
   , keyHeld
   , shortcut
   , shortcutOnce
+  , hardQuitUsed
   ) where
 
 import Control.Monad (when)
 import Data.Foldable (toList)
+import Data.IntSet qualified as IS
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
@@ -73,7 +75,9 @@ keyFree ctx mods k = do
 -- * for Escape, when 'NanoUI.takeEscape' fails. Otherwise the shortcut
 --   consumes the Escape.
 --
--- A Tab chord does not move focus.
+-- A Tab chord does not move focus. A Ctrl+C that no shortcut takes, and that
+-- the focused widget does not use, closes the window
+-- ('NanoUI.Runner.runSessionLoop').
 --
 -- > whenM (shortcut (ctrl <> key 's')) save
 -- > whenM (shortcut (cmdOrCtrl <> shift <> key 'p')) (setPaletteOpen True)
@@ -110,6 +114,18 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
           took <- or <$> mapM (takeKeyPress ctx) presses
           when (took && pressedKey == KeyTab) (markTabConsumed ctx)
           pure took
+
+-- | Whether the frame just run used its Ctrl+C ('isHardQuitInput'): a
+-- shortcut took the press, the focused widget uses the chord itself
+-- ('focusTakesChord'), as a text field does to copy, or a text-edit menu is
+-- open. The session loop quits only on a Ctrl+C that nothing used.
+hardQuitUsed :: Context -> Input -> IO Bool
+hardQuitUsed ctx inp = do
+  kind <- getsInteraction ctx isFocusKind
+  menu <- getsInteraction ctx isTextInputMenu
+  let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == KeyChar 'c']
+  taken <- getsOverlay ctx (\os -> any (`IS.member` osKeysTaken os) presses)
+  pure (taken || isJust menu || focusTakesChord kind (inputModifiers inp) (KeyChar 'c'))
 
 -- | Whether the focused widget uses this key and modifier combination
 -- itself. If so, shortcuts and key listeners ignore it.

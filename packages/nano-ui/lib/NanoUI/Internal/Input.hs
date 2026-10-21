@@ -445,7 +445,8 @@ clearEphemeral :: Input -> Input
 clearEphemeral inp = (stripInteractionInput inp) {inputMouseClicks = 1, inputWindowRedraw = False}
 
 -- | Whether Ctrl+C was pressed (the C key, or a typed @c@ or ETX), which
--- requests an unconditional quit. Ctrl alone: Ctrl+Alt is AltGr on many
+-- closes the window when nothing in the frame uses it
+-- ('NanoUI.Runner.runSessionLoop'). Ctrl alone: Ctrl+Alt is AltGr on many
 -- layouts, and Ctrl+Shift+C is a shortcut of its own.
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =

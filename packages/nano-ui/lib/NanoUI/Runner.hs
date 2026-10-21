@@ -36,6 +36,7 @@ import NanoUI.Internal.Frame.Input (needsRedraw)
 import NanoUI.Internal.Input
 import NanoUI.Internal.NativeWindow (closeWindowSlot, quitRequested, requestWindowClose)
 import NanoUI.Internal.Tasks (cancelTasksOf)
+import NanoUI.Internal.Widgets.Shortcut (hardQuitUsed)
 import NanoUI.Internal.Types (V2 (..))
 
 -- | Standard upper bound for single-frame delta-time (50ms).
@@ -214,10 +215,11 @@ wakePadMs = 2
 debugHudTimeout :: Int
 debugHudTimeout = round (debugRefreshSec * 1000)
 
--- | Run an event-driven session loop until the window is closed, Ctrl+C is
--- pressed outside a text field, a view calls 'NanoUI.quitUi', or
--- 'sdShouldQuit' returns 'True'. Background tasks started by the view are
--- cancelled on exit.
+-- | Run an event-driven session loop until the window is closed, a view
+-- calls 'NanoUI.quitUi', or 'sdShouldQuit' returns 'True'. Ctrl+C closes the
+-- window too, after its frame, unless a shortcut took it or the focused
+-- widget uses it, as a text field does to copy. Background tasks started by
+-- the view are cancelled on exit.
 runSessionLoop ::
   SessionDriver ev ->
   Context ->
@@ -287,12 +289,9 @@ runSessionLoop drv ctx0 inp0 = do
         let !dt = min maxFrameDt (realToFrac (now - lastT))
             (frameInp, group, rest) =
               takeFrame (sdApplyEvent drv) (sdIsButtonEdge drv) (clearEphemeral inp {inputDeltaTime = dt}) pending
-        -- Hard quit is ignored while a text editor is active.
-        hardQuit <-
-          if isHardQuitInput frameInp then not <$> textInputEditActive ctx else pure False
         let closing = any (sdIsSessionQuit drv) group
-        closeNow <- if closing && not hardQuit then requestWindowClose ctx else pure False
-        unless (hardQuit || closeNow) $ do
+        closeNow <- if closing then requestWindowClose ctx else pure False
+        unless closeNow $ do
           noteDebugLoop (sdDebug drv) dt
           inpStamped <- stampClicks clickTracker frameInp
           (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
@@ -313,12 +312,16 @@ runSessionLoop drv ctx0 inp0 = do
               ++ (if wasAnim || animAfter then "A" else "")
               ++ (if inputWindowRedraw inpSynced then "R" else "")
               ++ (if refreshDue then "T" else "")
+          -- Ctrl+C closes the window as its close button does, once the frame
+          -- has shown that nothing in the view used it.
+          used <- if isHardQuitInput frameInp then hardQuitUsed ctx' inpSynced else pure True
+          hardQuit <- if used then pure False else requestWindowClose ctx'
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
           quit <- quitRequested ctx'
           -- The next pass was animating if this frame was, even when this
           -- frame's tick finished the animation: its view read the value
           -- before that tick, so one more (settle) frame draws the end value.
-          unless (quit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
+          unless (quit || hardQuit || (sdShouldQuit drv inpSynced && not overlayQuit)) $
             loop ctx' inpSynced rest now dirtyOut animNow
 
   -- The session's end needs only refs that every copy of the context shares.

@@ -12,12 +12,14 @@ import Control.Exception
   )
 import NanoUI.Internal.Context (wakeFromThread)
 import NanoUI.Runner
+import NanoUI.Shortcut (ctrl, key)
 
 tests :: [Spec]
 tests =
   [ spec "session-loop" runSessionLoopTest
   , spec "session-loop-wake" runSessionLoopWakeTest
   , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
+  , spec "session-loop-hard-quit-used" runSessionLoopHardQuitUsedTest
   , spec "session-loop-key-order" runSessionLoopKeyOrderTest
   , spec "session-loop-close-request" runSessionLoopCloseTest
   , spec "session-loop-close-asks-the-view" runSessionLoopCloseAskTest
@@ -166,13 +168,13 @@ runSessionLoopWakeTest ctx failed = do
   assertEq failed ["timed wait", "due True", "draw", "wait -1"] =<< readIORef logRef
   assertEq failed 0 =<< getWakeAt ctx
 
--- Ctrl+C quits without a frame, even when a later event in the same batch
+-- Ctrl+C quits after its frame, even when a later event in the same batch
 -- releases Ctrl; typing c without Ctrl does not. Event 1 presses C holding
--- Ctrl, 2 releases Ctrl, and 4 types c alone.
+-- Ctrl, 2 releases Ctrl, 4 types c alone, and 5 changes nothing.
 runSessionLoopHardQuitTest :: Context -> IORef Int -> IO ()
 runSessionLoopHardQuitTest ctx failed = do
   debug <- newDebugSampler
-  let ctrl on inp = inp {inputModifiers = (inputModifiers inp) {modCtrl = on}}
+  let holdCtrl on inp = inp {inputModifiers = (inputModifiers inp) {modCtrl = on}}
       typeC inp = inp {inputChars = inputChars inp <> "c"}
       pressC = applyKey (KeyChar 'c') True
       draws batches = do
@@ -185,8 +187,8 @@ runSessionLoopHardQuitTest ctx failed = do
                 b : rest -> (rest, b)
                 [] -> ([], [3])
             , sdApplyEvent = \inp ev -> case ev of
-                1 -> ctrl True (pressC inp)
-                2 -> ctrl False inp
+                1 -> holdCtrl True (pressC inp)
+                2 -> holdCtrl False inp
                 4 -> typeC inp
                 _ -> inp
             , sdShouldDraw = \_ _ _ _ _ -> pure True
@@ -195,9 +197,51 @@ runSessionLoopHardQuitTest ctx failed = do
           ctx
           emptyInput
         readIORef drawn
-  assertEq failed 0 =<< draws [[1, 2]]
-  assertEq failed 0 =<< draws [[1]]
-  assertEq failed 1 =<< draws [[4, 2]]
+  assertEq failed 1 =<< draws [[1, 2], [5]]
+  assertEq failed 1 =<< draws [[1], [5]]
+  assertEq failed 2 =<< draws [[4, 2], [5]]
+
+-- | Ctrl+C is not a quit when a shortcut takes it or the focused widget uses
+-- it, as a text field does to copy; a focused button does not. Otherwise it
+-- asks to close the window like its close button: with
+-- 'wsExitOnCloseRequest' off, the next frame sees 'winCloseRequested'.
+-- Event 1 presses Ctrl+C, 5 presses Tab, and 6 changes nothing.
+runSessionLoopHardQuitUsedTest :: Context -> IORef Int -> IO ()
+runSessionLoopHardQuitUsedTest ctx failed = do
+  debug <- newDebugSampler
+  copies <- newIORef (0 :: Int)
+  let frames view batches = do
+        waits <- batchedWaits batches
+        drawn <- newIORef (0 :: Int)
+        clearDirty ctx
+        runSessionLoop
+          (quietDriver debug)
+            { sdWaitEvents = waits
+            , sdApplyEvent = \inp ev -> case ev of
+                1 -> chordInp (ctrl <> key 'c') inp
+                5 -> chordInp (key KeyTab) inp
+                _ -> inp
+            , sdShouldDraw = \_ _ _ _ _ -> pure True
+            , sdDraw = \c inp _ -> False <$ (evalUi c inp view >> modifyIORef' drawn (+ 1))
+            }
+          ctx
+          emptyInput
+        readIORef drawn
+      copyKey = whenM (shortcut (ctrl <> key 'c')) (liftIO (modifyIORef' copies (+ 1)))
+      fields = button "b" >> void (withValue "" textInput')
+  assertEq failed 2 =<< frames copyKey [[1], [6], [3]]
+  assertEq failed 1 =<< readIORef copies
+  -- Two Tabs focus the field; one more wraps round to the button.
+  assertEq failed 4 =<< frames fields [[5], [5], [1], [6], [3]]
+  assertEq failed 2 =<< frames fields [[5], [1]]
+  installWindowHost ctx defaultWindowSettings {wsExitOnCloseRequest = False} defaultWindowHost
+  seen <- newIORef []
+  let asked = do
+        closing <- winCloseRequested <$> askWindow
+        liftIO (modifyIORef' seen (<> [closing]))
+        when closing quitUi
+  assertEq failed 2 =<< frames asked [[1], [6]]
+  assertEq failed [False, True] =<< readIORef seen
 
 -- | A batch keeps its text, keys and modifiers in order. A frame ends after
 -- a command key followed by text, another key or a modifier change, and on
