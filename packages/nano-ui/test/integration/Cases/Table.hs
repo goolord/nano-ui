@@ -4,7 +4,7 @@ import Spec
 import Data.Bits ((.&.))
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.List (sortOn, tails)
+import Data.List (nub, sortOn, tails)
 import Data.Ord (Down (..))
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
@@ -254,7 +254,7 @@ runTableCoveredGesturesTest ctx failed = do
       assertEq failed [0, 1, 2] (tableColOrder result)
       assertEq failed before =<< headerButtonRects ctx
 
--- Row label nearest the bottom edge of the body viewport.
+-- The N of a "row-N" label.
 rowLabelIndex :: T.Text -> Maybe Int
 rowLabelIndex t = readMaybe (T.unpack (T.takeWhile (/= ' ') (T.drop 4 t)))
 
@@ -280,6 +280,7 @@ runPageWheelAboveTableTest ctx failed = do
   where
     sndOfSpan (_, t, _, _, _) = t
 
+-- Row label nearest the bottom edge of the body viewport.
 bottomRowIndex :: [(Rect, T.Text, a, b, c)] -> Maybe Int
 bottomRowIndex spans =
   listToMaybe [n | (_, t) <- sortOn (Down . fst) [(rectY r, t) | (r, t, _, _, _) <- spans], "row-" `T.isPrefixOf` t, Just n <- [rowLabelIndex t]]
@@ -341,15 +342,13 @@ runTableWrapRowStretchTest ctx failed = do
   -- Cells of one row share the same top y; every row group must be uniform
   -- (all cells stretch to the row height).
   let rowBands = IM.toAscList (IM.fromListWith (++) [(round y, hs) | (y, hs) <- cells])
-  forM_ rowBands $ \(_, hs) -> assert failed (length (dedup hs) == 1)
+  forM_ rowBands $ \(_, hs) -> assert failed (length (nub hs) == 1)
   -- And at least one row is actually wrapped (taller than the 28px minimum),
   -- otherwise the test asserts nothing.
   assert failed (any (\hs -> maximum hs > 40) (map snd rowBands))
   -- The body must start right below the header: an unconditional scrollbar
   -- lane reserve (shown even with no horizontal overflow) opens a dead gap.
   assert failed (minimum (map fst rowBands) < 40)
-  where
-    dedup = foldr (\x acc -> if x `elem` acc then acc else x : acc) []
 
 -- Resizing a column past the pane's right edge overflows the body. On every
 -- drag frame the header row must stay inside the row scroller's clip, with
@@ -369,7 +368,7 @@ runTableResizeOverflowTest ctx failed = do
     let edgeX = hx + hw
         headerY = hy + hh / 2
         pressInp = pressAt inp0 (V2 (edgeX - 2) headerY)
-        dragInp x = inp0 {inputMousePos = V2 x headerY, inputButtonsHeld = buttonsFromList [MouseLeft]}
+        dragInp x = holdAt inp0 (V2 x headerY)
         -- First drag well past the pane's right edge (lane + v-bar appear),
         -- then settle back inside the vertical-bar gutter band so the
         -- scroller viewport and the stale lane flag disagree across frames.
@@ -387,7 +386,7 @@ runTableResizeOverflowTest ctx failed = do
     assertJustM failed (bodyScrollerRect ctx) $ \(Rect bx by bw bh) -> do
       let barY = by + bh - scrollBarWidth / 2
           barPress = pressAt inp0 (V2 (bx + bw * 0.3) barY)
-          barDrag x = inp0 {inputMousePos = V2 x barY, inputButtonsHeld = buttonsFromList [MouseLeft]}
+          barDrag x = holdAt inp0 (V2 x barY)
       _ <- runFrame ctx barPress ui
       V2 off1 _ <- bodyOffset ctx
       _ <- runFrame ctx (barDrag (bx + bw * 0.95)) ui
@@ -536,19 +535,17 @@ runTableColResizeDemoReproTest _ failed =
         midKind <- uiCursorKind ctx inp0 {inputMousePos = V2 (hx + hw / 2) grabY}
         assert failed (midKind /= UiCursorEwResize)
         let pressInp = applyMouseButton MouseLeft True hoverInp
-            dragInp x = inp0 {inputMousePos = V2 x grabY, inputButtonsHeld = buttonsFromList [MouseLeft]}
+            dragInp x = holdAt inp0 (V2 x grabY)
         before <- headerButtonRects ctx
         _ <- runFrame ctx pressInp ui
-        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
-        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
-        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+        replicateM_ 3 (runFrame ctx (dragInp (edgeX + 60)) ui)
         after <- headerButtonRects ctx
         case (drop k before, drop k after) of
           (Rect _ _ wb _ : _, Rect _ _ wa _ : _) -> assertGt failed wa (wb + 30)
           _ -> assert failed False
         -- The arrow stays for the whole drag, off the edge too, and goes
         -- once the button is let go.
-        let offInp = inp0 {inputMousePos = V2 (edgeX + 60) 490, inputButtonsHeld = buttonsFromList [MouseLeft]}
+        let offInp = holdAt inp0 (V2 (edgeX + 60) 490)
         assertEq failed UiCursorEwResize =<< uiCursorKind ctx offInp
         _ <- runFrame ctx (applyMouseButton MouseLeft False offInp) ui
         released <- uiCursorKind ctx offInp

@@ -356,8 +356,9 @@ runTextInputDragWakeTest ctx failed = do
   let
     Rect rx ry rw _ = respRect resp
     outside = V2 (rx + rw + 40) (ry + 4)
-    (press, release) = clickPair inp0 (V2 (rx + 4) (ry + 4))
-    hold = press {inputButtonsPressed = noButtons}
+    grab = V2 (rx + 4) (ry + 4)
+    (press, release) = clickPair inp0 grab
+    hold = holdAt inp0 grab
   _ <- runFrame ctx press ui
   _ <- runFrame ctx hold ui
   assertEq failed 0 =<< getWakeAt ctx
@@ -413,12 +414,7 @@ fieldScrollX ctx resp =
 runTextInputFontScrollTest :: Context -> IORef Int -> IO ()
 runTextInputFontScrollTest base failed = do
   let
-    large = monospaceMetrics 32
-    ctx =
-      withFontResolver
-        (withFontMetrics base (monospaceMetrics 12))
-        (\_ _ _ _ -> pure (large, False))
-        (\_ _ _ _ txt -> pure (32 * fromIntegral (T.length txt), 32))
+    ctx = withMonospaceFonts 12 32 base
     inp0 = withInput 400 200
     cfg = defaultTextInputConfig {ticLayout = fontSize 32 (fixedW 200 (ticLayout defaultTextInputConfig))}
     ui = column (withValue "HgHgHgHgHg" (textInputConfigured' cfg))

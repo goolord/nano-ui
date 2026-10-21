@@ -296,7 +296,6 @@ runPanelBodySwapDamageTest ctx failed = do
       uiB = window' (constVar True) "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
   _ <- warmup2 ctx inp0 uiA
   _ <- runFrame ctx inp0 uiA
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp0 uiB
   dmg <- takeDamage ctx
   assert failed (not (damageIsEmpty dmg))
@@ -412,7 +411,6 @@ runTabsRangeDamageTest ctx failed = do
         label "Below"
   _ <- warmup2 ctx (withInput 900 120) ui
   _ <- runFrame ctx (withInput 900 120) ui
-  _ <- takeDamage ctx
   _ <- runFrame ctx (withInput 240 120) ui
   dmg <- takeDamage ctx
   assert failed (dmg == DamageFull)
@@ -539,15 +537,13 @@ runTabsDamageTest ctx failed = do
         , tab TabB "Beta" (label "Body B different widgets")
         ]
   _ <- runFrame ctx inp0 (ui TabA)
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp0 (ui TabA)
   dIdle <- takeDamage ctx
   assert failed (dIdle /= DamageFull)
   spansIdle <- collectTextSpans ctx
   assertSpansHas failed "Body A" spansIdle
 
-  spans <- collectTextSpans ctx
-  assertJust failed (spanRect "Beta" spans) $ \beta -> do
+  assertJust failed (spanRect "Beta" spansIdle) $ \beta -> do
     resp <- runClick ctx inp0 (ui TabA) (spanCenter beta)
     assert failed (respChanged resp && tabActive resp == TabB)
     spansSwitch <- collectTextSpans ctx
@@ -586,14 +582,16 @@ runTabsScrollTest wide failed = do
 
   -- Wide bar: everything fits and no arrows are drawn.
   let wideInp = withInput 900 120
-  _ <- runFrame wide wideInp (mkTabs 0)
-  _ <- runFrame wide wideInp (mkTabs 0)
+  _ <- run2Frames wide wideInp (mkTabs 0)
   wideSpans <- collectTextSpans wide
   forM_ labels $ \l -> assert failed (hasText l wideSpans)
   assert failed (not (T.any (`elem` chevrons) (T.concat [t | (_, t, _, _, _) <- wideSpans])))
 
   ctx <- newContext
   let inp = withInput 240 120
+      -- Whether the first header shows once @act@ and a settling frame ran.
+      controlsAfter :: IO a -> IO Bool
+      controlsAfter act = act >> runFrame ctx inp (mkTabs 0) >> hasText "Controls" <$> collectTextSpans ctx
   _ <- warmup2 ctx inp (mkTabs 0)
   -- The strip only pulls in its scroller once it has measured an overflow,
   -- after the first frame's layout, so the arrow buttons show from the second
@@ -629,26 +627,17 @@ runTabsScrollTest wide failed = do
   mRight <- arrowRect ctx '\8250'
   assertJust failed (listToMaybe mRight) $ \r -> do
     assert failed (rectX r + rectW r > 200)
-    _ <- runClick ctx inp (mkTabs 0) (spanCenter r)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans1 <- collectTextSpans ctx
-    assert failed (not (hasText "Controls" spans1))
+    assert failed . not =<< controlsAfter (runClick ctx inp (mkTabs 0) (spanCenter r))
     mLeft <- arrowRect ctx '\8249'
-    assertJust failed (listToMaybe mLeft) $ \left -> do
-      _ <- runClick ctx inp (mkTabs 0) (spanCenter left)
-      _ <- runFrame ctx inp (mkTabs 0)
-      spans2 <- collectTextSpans ctx
-      assert failed (hasText "Controls" spans2)
+    assertJust failed (listToMaybe mLeft) $ \left ->
+      assert failed =<< controlsAfter (runClick ctx inp (mkTabs 0) (spanCenter left))
 
   -- Wheel up/down over the bar pages the window too (the strip maps the
   -- notches onto the horizontal offset).
   spans3 <- collectTextSpans ctx
-  assertJust failed (spanRect "Controls" spans3) $ \(Rect cx cy cw ch) -> do
-    let wheelDown = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 0 20}
-    _ <- runFrame ctx wheelDown (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans4 <- collectTextSpans ctx
-    assert failed (not (hasText "Controls" spans4))
+  assertJust failed (spanRect "Controls" spans3) $ \c -> do
+    let wheelDown = inp {inputMousePos = spanCenter c, inputScroll = V2 0 20}
+    assert failed . not =<< controlsAfter (runFrame ctx wheelDown (mkTabs 0))
 
     -- Left+right wheel over the bar scrolls the same offset through the
     -- framework scroller. The vertical wheel pinned the offset at max, so
@@ -658,19 +647,10 @@ runTabsScrollTest wide failed = do
     -- coupled to the framework wheel step (scrollWheelStep, 60px per notch
     -- by default): V2 0 20 saturates at max, and +/-100 notches
     -- crosses the whole range regardless of the exact step.
-    let wheelX d = inp {inputMousePos = spanCenter (Rect cx cy cw ch), inputScroll = V2 d 0}
-    _ <- runFrame ctx (wheelX 10) (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans5 <- collectTextSpans ctx
-    assert failed (not (hasText "Controls" spans5))
-    _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans6 <- collectTextSpans ctx
-    assert failed (hasText "Controls" spans6)
-    _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
-    _ <- runFrame ctx inp (mkTabs 0)
-    spans7 <- collectTextSpans ctx
-    assert failed (hasText "Controls" spans7)
+    let wheelX d = inp {inputMousePos = spanCenter c, inputScroll = V2 d 0}
+    assert failed . not =<< controlsAfter (runFrame ctx (wheelX 10) (mkTabs 0))
+    assert failed =<< controlsAfter (runFrame ctx (wheelX (-100)) (mkTabs 0))
+    assert failed =<< controlsAfter (runFrame ctx (wheelX (-100)) (mkTabs 0))
 
   -- Tab-list changes recompute the reachable range: shrinking back under
   -- the width drops the scroller and both arrows; growing past it again
@@ -709,7 +689,6 @@ runTabsContainedBodyDamageTest ctx failed = do
         traverse (getNodeRect na <=< getParent na) found
   _ <- warmup2 ctx inp0 (ui long)
   _ <- runFrame ctx inp0 (ui long)
-  _ <- takeDamage ctx
   mTall <- bodyRect
   _ <- runFrame ctx inp0 (ui "body")
   dShrink <- takeDamage ctx

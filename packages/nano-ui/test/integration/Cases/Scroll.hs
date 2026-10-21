@@ -61,7 +61,7 @@ runScrollThumbCursorTest ctx failed = do
   let inp0 = withInput 200 120
       ui = scrollArea (fillW . fixedH 80)
              (column (replicateM 8 (label "scroll line") >> pure ()))
-  ((sid, ()), _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
+  (sid, ()) <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
     let thumbX = rx + rw - scrollBarGutter ScrollBarList 0 / 2
         tryYs = [ry + rh * n / 8 | n <- [1 .. 7]]
@@ -100,7 +100,7 @@ runScrollThumbHoverTest ctx failed = do
     thumbIs off rest
     -- A drag keeps its thumb bright wherever the pointer goes.
     thumbIs (applyMouseButton MouseLeft True over) hovered
-    thumbIs off {inputMousePos = V2 20 (ry + rh / 2), inputButtonsHeld = buttonsFromList [MouseLeft]} hovered
+    thumbIs (holdAt off (V2 20 (ry + rh / 2))) hovered
     thumbIs (applyMouseButton MouseLeft False off) rest
 
 -- The scroll content's right edge stops at the scrollbar gutter, one gap
@@ -185,7 +185,6 @@ runScrollTextDamageTest ctx failed = do
               label lastLine
       inp0 = withInputOff 200 120
   sid <- warmup2 ctx inp0 (scrollUi "count 1" "last")
-  _ <- takeDamage ctx
   assertJustM failed (getPrevRect ctx sid) $ \(Rect sx sy sw sh) -> do
     let lane = V2 (sx + sw - 2) (sy + sh / 2)
     -- Same size: the first line's text only.
@@ -200,7 +199,6 @@ runScrollTextDamageTest ctx failed = do
     let inWindow firstLine lastLine = snd <$> window' (constVar True) "Lines" (scrollUi firstLine lastLine)
         winInp = withInputOff 640 400
     mWsid <- warmup2 ctx winInp (inWindow "count 1" "last")
-    _ <- takeDamage ctx
     assertJust failed mWsid $ \wsid -> assertJustM failed (getPrevRect ctx wsid) $ \(Rect wx wy ww wh) -> do
       _ <- runFrame ctx winInp (inWindow "count 1" "last\nmore\nmore")
       dTaller <- takeDamage ctx
@@ -268,28 +266,25 @@ runTallLabelCullTest ctx failed = do
 
 runScrollTopClipTest :: Context -> IORef Int -> IO ()
 runScrollTopClipTest ctx failed = do
-  cbRef <- newIORef Nothing
   let inp0 = withInputOff 400 160
-      ui = do
+      ui =
         scrollWith (tight . grow) $
           columnWith (padAll 8 . gap 8 . fillW) $
             card $ do
               heading "Controls"
               (cb, _) <- withValue False (checkbox' "Feature")
-              _ <- (snd <$> withValue 50 (slider 0 100))
+              void (withValue 50 (slider 0 100))
               mapM_ (\i -> void (label (T.pack ("pad line " <> show (i :: Int))))) [1 .. 16]
-              liftIO $ writeIORef cbRef (Just cb)
-              pure ()
+              pure cb
       clipFits dmg = case dmg of
         DamageFull -> True
         DamageClip (Rect _ y _ h) -> y >= -1 && y + h <= 160 + 1
-  _ <- warmup2 ctx inp0 ui
-  assertJustM failed (readIORef cbRef) $ \cb -> do
-    assertJustM failed (getPrevRect ctx (respId cb)) $ \r -> do
-      let hover = inp0 {inputMousePos = spanCenter r}
-      _ <- runFrame ctx hover ui
-      dHover <- takeDamage ctx
-      assert failed (clipFits dHover)
+  cb <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx (respId cb)) $ \r -> do
+    let hover = inp0 {inputMousePos = spanCenter r}
+    _ <- runFrame ctx hover ui
+    dHover <- takeDamage ctx
+    assert failed (clipFits dHover)
 
 runNestedScrollTest :: Context -> IORef Int -> IO ()
 runNestedScrollTest ctx failed = do
@@ -813,8 +808,8 @@ runDisjointViewportHitTest ctx failed = do
   (sid, _) <- warmup2 ctx inp0 ui
   setScrollOffset ctx sid 100
   (_, deep) <- warmup2 ctx inp0 ui
-  let Rect bx by bw bh = respRect deep
-      centre = V2 (bx + bw / 2) (by + bh / 2)
+  let Rect _ by _ bh = respRect deep
+      centre = centerOf deep
       hover = inp0 {inputMousePos = centre}
   -- The button is inside the outer viewport's rect, and its clip is empty
   -- rather than unset.

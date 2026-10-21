@@ -200,7 +200,6 @@ runImageSwapDamageTest ctx failed = do
             image (fixedWH 40 24) =<< liftIO (readIORef frameRef)
             pure wid
   wid <- warmup2 ctx inp0 ui
-  _ <- takeDamage ctx
   writeIORef frameRef (ImageId 2)
   _ <- runFrame ctx inp0 ui
   dmg <- takeDamage ctx
@@ -501,15 +500,15 @@ seedMixedGrid ref pid pctx = do
       liftIO (writeIORef ref SeedDone)
     _ -> pure ()
 
+-- | A filling grid with 40px minimum panes and 4px dividers.
+testGridConfig :: PaneGridConfig
+testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40, pgSpacing = 4}
+
 -- | Drag-drop previews must come from simulating the post-drop layout, not
 -- from halving the target's pre-drop rect: in a grid mixing 'AxisV' and
 -- 'AxisH' splits, dropping first removes the dragged pane, which collapses
 -- its parent split and re-flows the sibling subtrees, so the naive highlight
 -- lands at the wrong position and size.
--- | A filling grid with 40px minimum panes and 4px dividers.
-testGridConfig :: PaneGridConfig
-testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40, pgSpacing = 4}
-
 runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()
 runPaneGridMixedDragTest ctx failed = do
   -- Model level: vertical root split with a horizontal split inside the right
