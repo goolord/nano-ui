@@ -67,9 +67,10 @@ library
     hs-source-dirs:   lib
 
 flag sdl
-    description: Build the SDL3 window example
+    description: Build the SDL3 window example. Off by default, so that
+                 depending on the library does not need nano-ui-sdl and SDL3.
     manual: True
-    default: True
+    default: False
 
 executable nano-ui-markdown-example
     import:           extensions

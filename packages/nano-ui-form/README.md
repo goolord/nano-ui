@@ -42,8 +42,9 @@ result separately. A `FormOnSubmit` form shows its errors once submitted; call
 cabal run nano-ui-form-example
 ```
 
-The example needs `nano-ui-sdl`, behind this package's `sdl` flag (on by
-default). The library itself does not depend on a backend.
+The example needs `nano-ui-sdl`, behind this package's `sdl` flag (off by
+default; the repository's `cabal.project` turns it on). The library itself
+does not depend on a backend.
 
 ## Form identity and results
 
