@@ -48,8 +48,11 @@ cabal run nano-ui-rgfw-profile  # demo frame loop in a hidden window, for +RTS -
 X11, Xcursor, Xrandr, and Xi on Linux; Cocoa on macOS; gdi32, user32, and
 shell32 on Windows. All need OpenGL 3.2.
 
-Use GHC 9.14 and add `nano-ui` and `nano-ui-rgfw` to your application's
-`build-depends`. The example uses `GHC2024` and `OverloadedStrings`.
+Use GHC 9.10 or newer (development uses 9.14) and add `nano-ui` and
+`nano-ui-rgfw` to your application's `build-depends`. Build the executable
+with `-threaded`: otherwise the idle wait for events blocks the whole
+runtime, and background tasks make no progress until input arrives. The
+example uses `GHC2024` and `OverloadedStrings`.
 On Linux, install the development packages for the listed X11 libraries;
 RGFW itself is bundled by `nano-ui-rgfw-bindings`.
 
@@ -60,11 +63,15 @@ RGFW itself is bundled by `nano-ui-rgfw-bindings`.
 For a custom event loop, the internal modules `NanoUI.Rgfw.Internal.Context`
 and `NanoUI.Rgfw.Internal.Gl`, with the RGFW bindings, expose context setup and
 rendering. OpenGL operations must run on the OS thread where the context is
-current, and native resources must be closed on that thread.
+current, and native resources must be closed on that thread. Run every
+session on the OS thread that opened the first one, such as the main thread
+under `-threaded`: on Windows, a background task's wake reaches only that
+thread.
 
 Layout and input use logical coordinates; `optScale` controls their mapping
 to physical pixels. RGFW reports no input-method composition: an input
-method draws its own composition.
+method draws its own composition. Files dropped on the window are not
+reported, so `dropZone` and `useDrop` see no drops under this backend.
 The bitmap font does not provide the SDL backend's installed-font lookup or
 HarfBuzz shaping. Choose the SDL backend when those text features are
 required.

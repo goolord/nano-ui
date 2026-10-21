@@ -5,6 +5,9 @@
 -- leaves drawing the composition to the input method, and committed text
 -- arrives as key-char events. So 'NanoUI.Input.inputComposition' stays
 -- 'Nothing', and fields receive committed text as typing.
+--
+-- Files dropped on the window are not reported: 'NanoUI.Input.inputDrops'
+-- stays empty, so drop zones see no drops.
 module NanoUI.Rgfw.Internal.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
@@ -123,12 +126,13 @@ data RgfwOptions = RgfwOptions
   -- 'wsOpacity' do nothing: RGFW windows are always opaque.
   , optTheme  :: !Theme
   -- ^ Any core theme; the backend draws it square ('NanoUI.Rgfw.Internal.Context.applyRgfwTheme').
+  -- The @Custom@ runners take the theme from the model instead.
   , optThemeFor :: !(Maybe (Maybe Appearance -> Theme))
   -- ^ Pick the theme from the desktop's light or dark setting, such as
   -- @'NanoUI.lightDark' light dark@, like SDL's @sdlAppThemeFor@ (default:
   -- 'Nothing'). When set it replaces 'optTheme'. RGFW cannot read the
   -- setting, so the function gets 'Nothing' and 'NanoUI.lightDark' picks
-  -- dark.
+  -- dark. The @Custom@ runners take the theme from the model instead.
   , optScale  :: !Float
   -- ^ UI scale. @0@ follows the monitor's scale.
   , optRefreshHz :: !Int
@@ -280,8 +284,10 @@ runRgfwAppReduce opts =
   runRgfwAppReduceCustom opts (\_ -> (optionsTheme opts, optScale opts))
 
 -- | Reducer runner whose theme and UI scale are derived from the current
--- model. A non-positive scale follows the monitor. OpenGL calls remain on
--- the creating OS thread; native resources are released on exit.
+-- model. A non-positive scale falls back to 'optScale', then the monitor's.
+-- 'optTheme' and 'optThemeFor' are not used; the model supplies the theme.
+-- OpenGL calls remain on the creating OS thread; native resources are
+-- released on exit.
 runRgfwAppReduceCustom ::
   Eq model =>
   RgfwOptions ->
