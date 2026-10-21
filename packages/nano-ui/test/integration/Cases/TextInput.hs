@@ -48,6 +48,7 @@ tests =
   , spec "text-input-mouse-selection" runTextInputMouseSelectionTest
   , spec "text-input-click-select" runTextInputClickSelectTest
   , spec "text-input-word-keys" runTextInputWordKeysTest
+  , spec "text-input-line-break" runTextInputLineBreakTest
   , spec "text-input-cut-clears-selection" runTextInputCutClearsSelectionTest
   , spec "text-input-clipboard" runTextInputClipboardTest
   , spec "text-input-password" runTextInputPasswordTest
@@ -156,6 +157,23 @@ runTextInputCutClearsSelectionTest ctx failed = do
   _ <- runFrame ctx' (chordInp (ctrl <> key 'x') inp0) ui
   assertEq failed (Just "o") =<< readIORef clipRef
   assertEq failed "hellz" . snd =<< evalUi ctx' (inp0 {inputChars = "z"}) ui
+
+-- | A field whose value holds a line break keeps its caret as an offset into
+-- the whole value: Left from the end, then typing, inserts before the last
+-- character, and Select All selects every character.
+runTextInputLineBreakTest :: Context -> IORef Int -> IO ()
+runTextInputLineBreakTest ctx failed = do
+  textRef <- newVar "ab\ncd"
+  let
+    inp0 = withInput 320 120
+    ui = column (held textRef textInput')
+  (resp, _) <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runFrame ctx (keyInp KeyLeft inp0) ui
+  assertEq failed "ab\ncXd" . snd =<< evalUi ctx (inp0 {inputChars = "X"}) ui
+  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
+  ints <- storeInt <$> getStore ctx
+  assertEq failed (Just 6) (IM.lookup (slotKey SlotCursor (intKey (respId resp))) ints)
 
 -- Word-wise editing keys (Ctrl or Alt + Backspace/Delete/Left/Right) work in
 -- the single-line text input like they do in the text area.

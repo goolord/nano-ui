@@ -89,16 +89,34 @@ saveTextInputState key s =
 -- dropped.
 textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
-  let buf = TB.withCursor (TB.Cursor 0 (tisCursor s)) (TB.fromText (tisText s))
+  let buf0 = TB.fromText (tisText s)
+      buf = TB.withCursor (fieldPosition buf0 (tisCursor s)) buf0
       history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
         Just (FieldHistory text h) | text == tisText s -> h
         _ -> emptyHistory
-   in Editor buf (TB.clampCursor buf (TB.Cursor 0 (tisAnchor s))) history
+   in Editor buf (fieldPosition buf (tisAnchor s)) history
 
 editorTextState :: Editor -> TextInputState
 editorTextState ed =
   let buf = editorBuffer ed
-   in TextInputState (TB.toText buf) (TB.cursorCol (TB.getCursor buf)) (TB.cursorCol (editorAnchor ed))
+   in TextInputState (TB.toText buf) (fieldOffset buf (TB.getCursor buf)) (fieldOffset buf (editorAnchor ed))
+
+-- | Where character @i@ of a field's value is in its editor's buffer, which
+-- holds each line of a value with line breaks as a row; a field's caret and
+-- anchor count characters of the whole value. Clamped into the value.
+fieldPosition :: TB.TextBuffer -> Int -> TB.Cursor
+fieldPosition buf = go 0
+  where
+    go row i
+      | row + 1 < TB.getLineCount buf, i > n = go (row + 1) (i - n - 1)
+      | otherwise = TB.clampCursor buf (TB.Cursor row i)
+      where
+        n = T.length (TB.lineAt row buf)
+
+-- | The character a position in a field's buffer is at in its value
+-- ('fieldPosition').
+fieldOffset :: TB.TextBuffer -> TB.Cursor -> Int
+fieldOffset buf (TB.Cursor row col) = col + sum [T.length (TB.lineAt r buf) + 1 | r <- [0 .. row - 1]]
 
 -- | Store an editor's text, selection and history.
 saveTextEditor :: Int -> Editor -> WidgetStore -> WidgetStore
