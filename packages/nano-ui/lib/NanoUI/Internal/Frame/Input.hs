@@ -26,6 +26,7 @@ module NanoUI.Internal.Frame.Input
   , pointerDragActive
   , textFieldActive
   , floatingPanelActive
+  , floatingWindowOpen
   , debugPanelOpen
   , probeHotId
   , recordCoveredWidgets
@@ -563,10 +564,14 @@ floatingPanelActive :: Context -> IO Bool
 floatingPanelActive ctx =
   (||) <$> modalActive ctx <*> ((> 0) <$> floatingNodeCount (ctxNodeArena ctx))
 
--- | Whether the arena contains any floating window. The name does not imply
--- that its contents are a debug readout.
+-- | Whether the arena contains any floating window.
+floatingWindowOpen :: Context -> IO Bool
+floatingWindowOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
+
+-- | 'floatingWindowOpen' under its old name.
 debugPanelOpen :: Context -> IO Bool
-debugPanelOpen ctx = isJust <$> topmostFloating ctx (== NodeWindow) (const True)
+debugPanelOpen = floatingWindowOpen
+{-# DEPRECATED debugPanelOpen "Use floatingWindowOpen" #-}
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx@Context {ctxNodeArena = na} mouse = do

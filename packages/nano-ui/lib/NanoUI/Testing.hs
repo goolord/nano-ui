@@ -11,6 +11,7 @@ module NanoUI.Testing
   , TextInputArea (..)
   , floatingPanelActive
   , floatingPanelRects
+  , floatingWindowOpen
   , debugPanelOpen
   , widgetNodeCount
   , pointerCursorWanted
