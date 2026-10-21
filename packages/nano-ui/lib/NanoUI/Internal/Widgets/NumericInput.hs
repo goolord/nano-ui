@@ -44,13 +44,15 @@ data NumericInputConfig = NumericInputConfig
     -- ^ Largest value (default: no limit).
   , nicStep :: !Double
     -- ^ What one arrow key or stepper click adds (default 1). Shift steps ten
-    -- times as far.
+    -- times as far. A step is rounded to 'nicDecimals' places, so those must
+    -- show it: a step of 0.1 needs at least one decimal.
   , nicDecimals :: !Int
     -- ^ Digits after the decimal point, both shown and accepted (default 0).
   , nicHex :: !Bool
     -- ^ Show and accept the value as a whole hexadecimal number (default
     -- 'False'). 'nicDecimals' is ignored in this mode.
   , nicLayout :: !Layout
+    -- ^ The field's layout (default: grows to fill, at least 80 wide).
   }
   deriving (Eq, Show)
 
