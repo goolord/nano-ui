@@ -602,6 +602,13 @@ runGrowMaxHandoffTest ctx failed = do
   _ <- warmup2 ctx input0 col
   cs <- map (\r -> (rectY r, rectH r)) <$> rectsAt ctx [1, 2]
   assertEq failed cs [(0, 50), (50, 250)]
+  -- A negative weight grows nothing and takes nothing from the others.
+  let negative = rowWith (tight . gap 0 . fixedW 300 . fixedH 20) $ do
+        box fillW red
+        box (\l -> l {layoutWidth = Grow (-1)}) green
+  _ <- warmup2 ctx input0 negative
+  ns <- map (\r -> (rectX r, rectW r)) <$> rectsAt ctx [1, 2]
+  assertEq failed ns [(0, 268), (268, 32)]
 
 -- | A label with a fixed width that its limits do not repeat ('fixedWH', a
 -- plain 'Fixed') measures that width, so a row places what follows past it,

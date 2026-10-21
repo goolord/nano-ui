@@ -1679,8 +1679,8 @@ distributeScratch na n avail gapSum horizontal = do
       -- keeps the exact content size until the shares are handed out.
       FlowAcc capped growTotal _ <- foldUpTo n (\(FlowAcc c acc _) i -> do
         AxisSizing tag val _ hi <- sizingAt i
-        let gf = if tag == SizingGrow then val else 0
-        writePrimArray gfArr i (if gf > 0 then gf else 0)
+        let gf = if tag == SizingGrow && val > 0 then val else 0
+        writePrimArray gfArr i gf
         pure (FlowAcc (if gf > 0 && hi < 1e8 then c + 1 else c) (acc + gf) 0)) (FlowAcc 0 0 0)
       when (growTotal > 0) $ do
         (free, gfSum) <-
