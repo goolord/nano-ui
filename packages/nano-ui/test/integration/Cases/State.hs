@@ -41,8 +41,9 @@ runCollectionApiTest ctx failed = do
       radioIndex <- (snd <$> withValue (-1) (radio (Seq.empty :: Seq.Seq Text)))
       comboValue <- (snd <$> withValue "Beta" (comboBox "Choose" (Seq.fromList ["Alpha", "Beta"])))
       pure (selectIndex, radioIndex, comboValue)
-  assertEq failed 0 emptySelect
-  assertEq failed 0 emptyRadio
+  -- No options reach the index, so it stays the caller's.
+  assertEq failed 5 emptySelect
+  assertEq failed (-1) emptyRadio
   assertEq failed "Beta" combo
   -- A failed image must not prevent later registrations in traversal order.
   assertEq failed False =<< registerImages ctx (Seq.fromList [(ImageId 0, 1, 1, BS.replicate 4 255), (ImageId 42, 1, 1, BS.replicate 4 255)])

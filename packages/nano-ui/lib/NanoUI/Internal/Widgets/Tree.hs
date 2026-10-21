@@ -2,7 +2,7 @@
 -- row is a button in the row look ('buttonFlagRow').
 module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 
-import Control.Monad (void, zipWithM)
+import Control.Monad (void, when, zipWithM)
 import Data.IORef (writeIORef)
 import Data.Foldable (asum, find, fold, toList)
 import Data.Maybe (fromMaybe)
@@ -163,6 +163,9 @@ treeCore key inputItems index =
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus clickSel clickExp
       liftIO (moveSelection ctx selected keySel [(i, r) | ((i, _, _, _), (r, _)) <- zip (toList rows) results])
       result <- finishInput fieldInt ctx groupId selected (fold resps) keySel
-      liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
+      -- Items that arrive after an empty first frame start expanded too.
+      when (total > 0) $ liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
       mapM_ (liftIO . writeIORef (ctxFocusId ctx)) mFocus
-      pure result
+      -- An index the items do not reach yet stays the caller's until the
+      -- user moves the selection.
+      pure (fmap (\s -> if s == clamped then index else s) result)

@@ -104,7 +104,8 @@ selectCore f options index = do
     recordSlot fieldInt ctx key finalIdx
   -- Compare with the caller's index, not 'current': a dropdown or keyboard
   -- pick lands in the store between frames and must still report a change.
-  pure (setChanged (finalIdx /= given) resp, finalIdx)
+  -- An index the options do not reach yet stays the caller's until a pick.
+  pure (setChanged (finalIdx /= given) resp, if finalIdx == given then index else finalIdx)
 
 -- | Select over every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedSelect #-}

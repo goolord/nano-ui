@@ -79,8 +79,10 @@ radioCore options index =
       let final = fromMaybe selNav (findIndex rawRespClicked resps)
       liftIO (moveSelection ctx selNav final (zip [0 ..] resps))
       -- Compare with the caller's index, as 'NanoUI.Internal.Widgets.Select' does, so a
-      -- selection stored between frames still reports a change.
-      finishInput fieldInt ctx gid given (mconcat resps) final
+      -- selection stored between frames still reports a change. An index the
+      -- options do not reach yet stays the caller's until the user moves it.
+      fmap (\s -> if s == given then index else s)
+        <$> finishInput fieldInt ctx gid given (mconcat resps) final
 
 -- | Radio buttons for every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedRadio #-}

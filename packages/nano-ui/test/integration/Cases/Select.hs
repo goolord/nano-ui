@@ -12,8 +12,10 @@ tests =
   , spec "select-close-keeps-focus" runSelectCloseKeepsFocusTest
   , spec "select-overlay-damage" runSelectOverlayDamageTest
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
+  , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
+  , spec "tree-late-items-expanded" runTreeLateItemsExpandedTest
   , spec "radio-click-marks" runRadioClickMarksTest
   , spec "sliders-drag-apart" runSlidersDragApartTest
   , spec "radio-groups-apart" runRadioGroupsApartTest
@@ -119,6 +121,32 @@ runSelectDropdownSpanColorsTest ctx failed = do
   assertEq failed (length (fgOf "Medium")) 1
   assert failed (themeAccent theme `notElem` fgOf "Medium")
 
+-- | A select, a radio group and a tree given an index their options do not
+-- reach show it clamped but leave the caller's index alone, so a choice
+-- restored before the options load is still there when they do.
+runChoicesKeepUnreachedIndexTest :: Context -> IORef Int -> IO ()
+runChoicesKeepUnreachedIndexTest ctx failed = do
+  loadedRef <- newIORef False
+  selRef <- newVar 2
+  radioRef <- newVar 2
+  treeRef <- newVar 2
+  let refs = [selRef, radioRef, treeRef]
+      inp0 = withInput 320 400
+      ui = do
+        loaded <- liftIO (readIORef loadedRef)
+        let opts = if loaded then ["Low", "Medium", "High"] else []
+        column $ do
+          select opts selRef
+          radio opts radioRef
+          tree "t" [TreeItem o [] | o <- opts] treeRef
+  _ <- warmup2 ctx inp0 ui
+  assertEq failed [2, 2, 2] =<< mapM readVarIO refs
+  writeIORef loadedRef True
+  _ <- warmup2 ctx inp0 ui
+  assertEq failed [2, 2, 2] =<< mapM readVarIO refs
+  -- The radio's options, then the tree's rows.
+  assertEq failed [0, 0, 1, 0, 0, 1] =<< buttonValues ctx
+
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
   let inp0 = withInput 40 12
@@ -169,6 +197,20 @@ runTreeKeyboardTest ctx failed = do
   spans <- collectTextSpans ctx
   assert failed (not (hasText "child" spans))
   assertEq failed 2 . snd =<< evalUi ctx (keyInp KeyDown inp0) ui
+
+-- | A tree whose items arrive after its first frame opens every parent, as
+-- one built with them does.
+runTreeLateItemsExpandedTest :: Context -> IORef Int -> IO ()
+runTreeLateItemsExpandedTest ctx failed = do
+  itemsRef <- newIORef []
+  let inp0 = withInput 200 120
+      ui = do
+        items <- liftIO (readIORef itemsRef)
+        column (withValue 0 (tree' "late" items))
+  _ <- warmup2 ctx inp0 ui
+  writeIORef itemsRef [TreeItem "root" [TreeItem "child" []]]
+  _ <- warmup2 ctx inp0 ui
+  assert failed . hasText "child" =<< collectTextSpans ctx
 
 -- Open dropdown rows show the pointer cursor on hover and press, and
 -- respChanged fires on the frame the selection changes and not on later
