@@ -91,6 +91,8 @@ main = hspec $ do
   describe "scales and domains" $ do
     it "picks and formats nice ticks" testNiceTicks
     it "shares bounds across series" testMultiSeriesDomains
+    it "leaves out values that are not finite" (testNonFinite fm)
+    it "settles on a chart holding NaN" testNaNChartIdle
   describe "decimation" $ do
     it "keeps LTTB extrema and endpoints" testLttb
     it "keeps min/max extrema" testMinMaxDecimate
@@ -288,6 +290,47 @@ testMultiSeriesDomains = do
   let
     (Domain fitXLo _, Domain fitYLo _) = seriesDomains (bareChart [scatter "s" [(4, 3), (9, 8)]])
   check "seriesDomains seeded with 0..1" (fitXLo > 2 && fitYLo > 1)
+  -- A flat target line or a series still loading leaves the others' span.
+  let
+    (_, Domain flatLo flatHi) = seriesDomains (bareChart [line "p" [(0, 0.10), (1, 0.15)], line "target" [(0, 0.12), (1, 0.12)]])
+    (Domain loadingXLo _, Domain loadingYLo _) = seriesDomains (bareChart [line "a" [(1000, 1000), (2000, 2000)], line "b" []])
+  check "a constant series widened the shared domain" (flatLo > 0.09 && flatHi < 0.16)
+  check "an empty series pulled the shared domain to zero" (loadingXLo > 900 && loadingYLo > 900)
+
+-- | Values that are not finite are left out of the domains, the drawing and
+-- hover, instead of corrupting them.
+testNonFinite :: FontMetrics -> IO ()
+testNonFinite fm = do
+  let
+    nan = 0 / 0
+    finite x = not (isNaN x || isInfinite x)
+    (_, Domain afterNaNLo _) = seriesDomains (bareChart [line "s" [(0, -100), (1, nan), (2, 5), (3, 6)]])
+    (Domain xLo xHi, Domain yLo yHi) = seriesDomains (bareChart [line "s" [(0, 1), (1, 1 / 0), (2, 3)]])
+    holes = bareChart [line "s" [(0, 0), (1, nan), (2, 10)]]
+    hovered = nearestPlotHover (seriesDomains holes) (map (seriesPoints holes) (chartSeries holes)) 0.05 0.05
+    strokes = [primArrayToList p | StrokePolyline p _ _ _ _ _ _ <- toList (diagramOps 200 120 (chartDia fm holes))]
+  check "a NaN dropped the domain's earlier minimum" (afterNaNLo <= -100)
+  check "an infinite value made the domain infinite" (all finite [xLo, xHi, yLo, yHi] && yHi >= 3)
+  check "hover picked a point past a NaN" (fmap hoverDataX hovered == Just 0)
+  check "a NaN point reached the drawing" (all (all finite) strokes)
+
+-- | A chart holding NaN equals a rebuilt copy of itself, so a plot built
+-- from it every frame settles instead of rebuilding and asking for another
+-- frame forever.
+testNaNChartIdle :: IO ()
+testNaNChartIdle = do
+  base <- newPixelContext
+  owner <- Plot.newPlotCache
+  let
+    nan = 0 / 0
+    held = bareChart [line "l" [(0, nan)], bar "b" [("x", nan)]]
+    ctx = withFontMetrics base (monospaceMetrics 16)
+    -- The points depend on the frame, so each frame builds a new chart.
+    frame k = runFrame ctx (emptyInput {inputWindowSize = Size 400 240}) $
+      Plot.lineChart owner (fixedWH 360 200) [(0, 0), (1, nan * fromIntegral (k :: Int)), (2, 1)]
+  check "a chart holding NaN differs from itself" (held == held)
+  again <- mapM frame [1 .. 4]
+  check "a plot of a chart holding NaN asks for frames forever" (not (or [more | (_, _, more) <- drop 2 again]))
 
 testLttb :: IO ()
 testLttb = do

@@ -7,6 +7,8 @@ module NanoUI.Plot.Scale
   , formatTick
   , domainExtent
   , domainExtentBy
+  , domainBoundsBy
+  , settleDomain
   , mergeDomains
   , padDomain
   ) where
@@ -31,21 +33,32 @@ plotToDomain :: Domain -> Double -> Double
 plotToDomain (Domain lo hi) v = lo + v * max 1e-9 (hi - lo)
 
 -- | Bounds of a numeric vector. Empty input gives 0-1; constant input gets
--- half a unit of padding on each side. Values must be finite.
+-- half a unit of padding on each side. Values that are not finite are skipped.
 domainExtent :: (GV.Vector v Double) => v Double -> Domain
 domainExtent = domainExtentBy id
 {-# INLINE domainExtent #-}
 
 -- | 'domainExtent' after a projection, without allocating a mapped vector.
 domainExtentBy :: GV.Vector v a => (a -> Double) -> v a -> Domain
-domainExtentBy project xs
+domainExtentBy project = settleDomain . domainBoundsBy project
+{-# INLINE domainExtentBy #-}
+
+-- | The least and greatest finite values after a projection, without
+-- 'domainExtent''s fallbacks: no finite values give the empty domain from
+-- infinity down to minus infinity, which 'mergeDomains' leaves out. Merge
+-- the bounds of several series, then 'settleDomain' the result.
+domainBoundsBy :: GV.Vector v a => (a -> Double) -> v a -> Domain
+domainBoundsBy project =
+  GV.foldl' (\d@(Domain mn mx) value -> let !x = project value in if finite x then Domain (min mn x) (max mx x) else d) (Domain (1 / 0) (-1 / 0))
+{-# INLINE domainBoundsBy #-}
+
+-- | Bounds made usable as an axis: empty bounds become 0-1, and a single
+-- value gets half a unit on each side.
+settleDomain :: Domain -> Domain
+settleDomain d@(Domain lo hi)
   | lo > hi = Domain 0 1
   | lo == hi = Domain (lo - 0.5) (hi + 0.5)
-  | otherwise = extent
-  where
-    extent@(Domain lo hi) =
-      GV.foldl' (\(Domain mn mx) value -> let !x = project value in Domain (min mn x) (max mx x)) (Domain (1 / 0) (-1 / 0)) xs
-{-# INLINE domainExtentBy #-}
+  | otherwise = d
 
 -- | Smallest domain containing both inputs.
 mergeDomains :: Domain -> Domain -> Domain

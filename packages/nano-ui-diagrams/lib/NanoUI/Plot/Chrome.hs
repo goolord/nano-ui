@@ -49,12 +49,13 @@ import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle (..), colourOf)
 import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Scale
-  ( domainExtentBy
+  ( domainBoundsBy
   , domainToPlot
   , formatTick
   , mergeDomains
   , niceTicks
   , padDomain
+  , settleDomain
   )
 import NanoUI.Plot.Types
   ( Chart (..)
@@ -170,24 +171,27 @@ chartChrome fm yDom chart =
 textWidth :: FontMetrics -> T.Text -> Float
 textWidth fm s = rectW (drawTextBox fm 0 0 0 (-1) s)
 
--- | Combined x/y extents, with 5% numeric padding. Categories use zero-based
--- positions with half a slot at each end. An empty chart uses 0-1 on both axes.
+-- | Combined x/y extents of the series' finite values, with 5% numeric
+-- padding. Categories use zero-based positions with half a slot at each
+-- end. An axis with no values spans 0-1 before the padding, and one with a
+-- single value half a unit each side of it.
 seriesDomains :: Chart -> (Domain, Domain)
-seriesDomains chart =
-  case map seriesExtent (chartSeries chart) of
-    [] -> (Domain 0 1, Domain 0 1)
-    d : ds -> foldl' mergePair d ds
+seriesDomains chart = (xDom, fit yBounds)
   where
-    mergePair (dx, dy) (xd, yd) = (mergeDomains dx xd, mergeDomains dy yd)
-
-seriesExtent :: Series -> (Domain, Domain)
-seriesExtent s =
-  case seriesData s of
-    PointsXY pts ->
-      (padDomain 0.05 (domainExtentBy fst pts), padDomain 0.05 (domainExtentBy snd pts))
-    CategoryY _ values ->
-      let n = sizeofPrimArray values
-       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtentBy (indexPrimArray values) (U.enumFromN 0 n)))
+    -- Series merge their bounds before the fallbacks and padding, so an
+    -- empty or constant one does not widen the others' span.
+    fit = padDomain 0.05 . settleDomain
+    (xBounds, yBounds, slots) = foldl' add (Domain (1 / 0) (-1 / 0), Domain (1 / 0) (-1 / 0), 0) (chartSeries chart)
+    add (!bx, !by, !n) s = case seriesData s of
+      PointsXY pts -> (mergeDomains bx (domainBoundsBy fst pts), mergeDomains by (domainBoundsBy snd pts), n)
+      CategoryY _ values ->
+        let k = sizeofPrimArray values
+         in (bx, mergeDomains by (domainBoundsBy (indexPrimArray values) (U.enumFromN 0 k)), max n k)
+    slotDom = Domain (-0.5) (fromIntegral slots - 0.5)
+    xDom
+      | slots == 0 = fit xBounds
+      | Domain lo hi <- xBounds, lo > hi = slotDom
+      | otherwise = mergeDomains slotDom (fit xBounds)
 
 -- | Draw a chart from its 'seriesDomains' and each series' 'seriesPoints'.
 chartDiagram :: FontMetrics -> Theme -> PlotStyle -> (Domain, Domain) -> [U.Vector (Double, Double)] -> Chart -> Diagram B
@@ -303,20 +307,26 @@ areaRings baseline = map closeRun . runs . U.toList
       where
         sq = side q
 
--- | Points used for drawing and hit tests. Line, area and step data may be
--- decimated; categories become zero-based x positions paired with their values.
+-- | Points used for drawing and hit tests, without those that are not
+-- finite. Line, area and step data may be decimated; categories become
+-- zero-based x positions paired with their values.
 seriesPoints :: Chart -> Series -> U.Vector (Double, Double)
 seriesPoints chart s =
   case seriesData s of
-    PointsXY pts ->
-      let k = decimateK (U.length pts)
+    PointsXY raw ->
+      let pts = finitePoints raw
+          k = decimateK (U.length pts)
           -- Markers are not joined, so a dropped one is simply missing.
           thins = case seriesKind s of
             ScatterSeries {} -> False
             _ -> True
        in if chartDecimate chart && thins && U.length pts > k then lttb k pts else pts
     CategoryY _ values ->
-       U.generate (sizeofPrimArray values) (\i -> (fromIntegral i, indexPrimArray values i))
+       finitePoints (U.generate (sizeofPrimArray values) (\i -> (fromIntegral i, indexPrimArray values i)))
+  where
+    -- Finite data, the usual case, is not copied.
+    finitePoints pts = if U.all ok pts then pts else U.filter ok pts
+    ok (x, y) = not (isNaN x || isInfinite x || isNaN y || isInfinite y)
 
 decimateK :: Int -> Int
 decimateK n = min n (max 64 (min 2000 (n `div` 2)))
