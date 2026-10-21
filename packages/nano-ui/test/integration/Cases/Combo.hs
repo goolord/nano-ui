@@ -2,6 +2,7 @@ module Cases.Combo (tests) where
 
 import Spec
 import NanoUI.Shortcut
+import NanoUI.Internal.Input (onMac)
 import NanoUI.Widgets.Combo (ComboInput (..), ComboState (..), ComboStep (..), comboStep)
 import Data.Text qualified as T
 
@@ -208,8 +209,8 @@ runComboTrackPressHoldsTest _ failed = do
   assertEq failed (csWindow pressed) (csWindow stillHeld)
 
 -- Typing edits the live text without committing, word-wise editing keys
--- (Ctrl+Backspace) work like in the plain text input, and losing focus
--- commits the text.
+-- (Ctrl+Backspace, Option+Backspace on macOS) work like in the plain text
+-- input, and losing focus commits the text.
 runComboBlurCommitTest :: Context -> IORef Int -> IO ()
 runComboBlurCommitTest ctx failed = do
   textRef <- newVar ""
@@ -223,7 +224,7 @@ runComboBlurCommitTest ctx failed = do
   assertEq failed tB "No"
   assert failed (not (respChanged rB))
   _ <- runFrame ctx (inp0 {inputChars = " bar"}) ui
-  _ <- runFrame ctx (chordInp (ctrl <> key KeyBackspace) inp0) ui
+  _ <- runFrame ctx (chordInp ((if onMac then alt else ctrl) <> key KeyBackspace) inp0) ui
   ((rW, tW), _, _) <- runFrame ctx inp0 ui
   assertEq failed tW "No "
   assert failed (not (respChanged rW))

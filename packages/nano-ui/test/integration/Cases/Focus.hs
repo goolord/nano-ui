@@ -158,7 +158,7 @@ runFocusRequestBlursPreviousTest ctx failed = do
   (typed, _) <- evalUi ctx inp {inputChars = "abc"} ui
   assertEq failed "abc" =<< readVarIO queryRef
   assert failed (not (respChanged typed))
-  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
+  _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
   assertEq failed (0, 3) =<< selection
   _ <- ask [other] inp
   assertEq failed (3, 3) =<< selection

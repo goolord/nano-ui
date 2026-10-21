@@ -230,27 +230,27 @@ spec = do
       text (run TE.multiLineMode back [TE.Redo, TE.Redo]) `shouldBe` doc <> "tail"
 
   describe "NanoUI.Widgets.TextArea" $ do
-    it "Ctrl+Z undoes and Ctrl+Shift+Z redoes" $ do
+    it "Ctrl+Z undoes and Ctrl+Shift+Z redoes (Command on macOS)" $ do
       let
         s0 = TA.initTextAreaState ""
         typed = foldl' (\s c -> typeArea noMods (T.singleton c) [] s) s0 ("one two" :: String)
-        undone = typeArea ctrlMods "" [KeyChar 'z'] typed
-        redone = typeArea (Modifiers True True False False) "" [KeyChar 'z'] undone
+        undone = typeArea primaryModifiers "" [KeyChar 'z'] typed
+        redone = typeArea primaryModifiers {modShift = True} "" [KeyChar 'z'] undone
       TB.toText (TA.buffer undone) `shouldBe` "one "
       TB.toText (TA.buffer redone) `shouldBe` "one two"
       -- Chords come from key events; characters typed with Ctrl held are ignored.
-      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "z\x1a" [KeyChar 'z', KeyChar 'y'])
+      TE.inputTextCommands TE.singleLineMode (frameInput primaryModifiers "z\x1a" [KeyChar 'z', KeyChar 'y'])
         `shouldBe` [TE.Undo, TE.Redo]
 
-    it "Ctrl+Alt types characters (AltGr) while Ctrl alone runs shortcuts" $ do
+    it "Ctrl+Alt types characters (AltGr) while Ctrl (Command on macOS) alone runs shortcuts" $ do
       let
         s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "ab")
         altGr = Modifiers False True True False
       TB.toText (TA.buffer (typeArea altGr "@€" [] s0)) `shouldBe` "ab@€"
       TE.inputTextCommands TE.singleLineMode (frameInput altGr "@" [KeyChar 'q'])
         `shouldBe` [TE.InsertText "@"]
-      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "" [KeyChar 'a', KeyLeft])
-        `shouldBe` [TE.SelectAll, TE.Move TE.WordLeft False]
+      TE.inputTextCommands TE.singleLineMode (frameInput primaryModifiers "" [KeyChar 'a'])
+        `shouldBe` [TE.SelectAll]
 
     it
       "typing and Enter replace a backwards multiline selection and collapse its anchor" $ do

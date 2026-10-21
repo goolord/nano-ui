@@ -7,7 +7,7 @@ import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
+import Data.Text.IO.Utf8 qualified as TIO
 import NanoUI.Internal.Context (Context (ctxActiveId, ctxNodeArena), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)

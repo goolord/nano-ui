@@ -243,8 +243,8 @@ runClipFrameBackdropTest ctx failed = do
         assertEq failed c (themeWindow theme)
     DamageFull -> assert failed False
 
--- | Ctrl+A repaints the text area on the frame that selects, rather than
--- leaving the highlight to a follow-up frame.
+-- | Select all (Ctrl+A, Command+A on macOS) repaints the text area on the
+-- frame that selects, rather than leaving the highlight to a follow-up frame.
 runTextAreaSelectAllDamageTest :: Context -> IORef Int -> IO ()
 runTextAreaSelectAllDamageTest ctx failed = do
   -- Frame time lets the hover fade from the click finish; a live fade would
@@ -256,7 +256,7 @@ runTextAreaSelectAllDamageTest ctx failed = do
   area <- warmup2 ctx inp0 ui
   _ <- runClick ctx inp0 ui (centerOf area)
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
+  _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp0) ui
   dmg <- takeDamage ctx
   assert failed (clipCovers dmg (respRect area))
 
