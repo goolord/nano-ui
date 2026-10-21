@@ -68,8 +68,12 @@ module NanoUI.Backend.Sdl
 
     -- * Debugging
   , SdlDebugSnapshot (..)
+  , CoreDebugSnapshot (..)
   , askSdlDebug
   , sdlDebugSnapshot
+  , formatFpsRows
+  , formatDrawRows
+  , formatExplainRows
 
     -- * Screenshots
   , saveScreenshot
@@ -92,6 +96,7 @@ module NanoUI.Backend.Sdl
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDebugSnapshot, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))

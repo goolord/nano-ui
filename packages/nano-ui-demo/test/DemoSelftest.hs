@@ -16,7 +16,6 @@ import Data.Maybe (isJust)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Backend.Sdl
-import NanoUI.Internal.Debug (CoreDebugSnapshot (dbgPresents))
 import NanoUI.Testing
   ( collectOverlayTextSpans
   , collectTextSpans

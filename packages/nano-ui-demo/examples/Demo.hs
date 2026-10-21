@@ -38,7 +38,6 @@ import NanoUI
 import NanoUI.Adornment qualified as A
 import NanoUI.Backend.Sdl
 import NanoUI.Diagrams
-import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
 import NanoUI.Path qualified as P
 import NanoUI.Shortcut
 import Paths_nano_ui_demo (getDataFileName)
