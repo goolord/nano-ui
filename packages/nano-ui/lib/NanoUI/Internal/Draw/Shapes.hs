@@ -378,7 +378,7 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !botY = py + h - ibw / 2
               !rightX = px + w - ibw / 2
 
-              !cr = max 0.25 (rad - ibw / 2)
+              !cr = rad - ibw / 2
               !doTB = midW >= 0.001
               !doLR = midH >= 0.001
               !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)

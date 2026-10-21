@@ -13,6 +13,7 @@ import NanoUI.Internal.Context (setDrawExternalText, setDrawSnapScale, setDrawSq
 tests :: [Spec]
 tests =
   [ spec "draw-square-geometry" runSquareGeometryTest
+  , spec "draw-thick-rounded-stroke" runThickRoundedStrokeTest
   , spec "draw-external-text" runExternalTextTest
   , spec "draw-empty-clip" runEmptyClipTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
@@ -150,6 +151,22 @@ runSquareGeometryTest ctx failed = do
   assert failed (not (null squareTris))
   assert failed (all uniform squareTris)
   setDrawSquareGeometry ctx False
+
+-- | A rounded border wider than twice its radius keeps its ink inside its
+-- box: the corner arcs end on the corner radius.
+runThickRoundedStrokeTest :: Context -> IORef Int -> IO ()
+runThickRoundedStrokeTest ctx failed = do
+  let blue = colorRGBA 0 0 255 255
+      ops (Rect x y _ _) = [StrokeRoundedRect (Rect (x + 10) (y + 10) 40 40) 1 8 blue]
+  (_, dd, _) <- runFrame ctx (withInput 300 200) (void (drawing (fixedWH 60 60) (smallArrayFromList . ops)))
+  inked <- withForeignPtr (drawVertices dd) $ \vp ->
+    fmap concat . forM [0 .. drawVertexCount dd - 1] $ \i -> do
+      let at o = peekByteOff vp (i * vertexSize + o) :: IO Float
+      (x, y, rgb, a) <- (,,,) <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16) <*> at 20
+      pure [(x, y) | rgb == (0, 0, 1), a > 0]
+  let extent f = maximum (map f inked) - minimum (map f inked)
+  assert failed (not (null inked))
+  assert failed (extent fst <= 40 && extent snd <= 40)
 
 -- | External text keeps text spans but pushes no text quads, so the buffer
 -- does not grow with the label length.
