@@ -69,7 +69,7 @@ module NanoUI.Internal.Context.Types
 
 import Control.Concurrent (ThreadId)
 import NanoUI.Internal.Derived (DerivedCache)
-import NanoUI.Internal.Resource (Held)
+import NanoUI.Internal.Resource (Held, Holding)
 import NanoUI.Internal.Host (Host)
 import NanoUI.Internal.BackendSession (SomeBackendSession)
 import NanoUI.Internal.NativeWindow.Types (NativeWindow)
@@ -916,9 +916,10 @@ data Context = Context
   -- ('NanoUI.Internal.Context.withBackendSession').
   , ctxSensors :: !(Host Sensors)
   , ctxParagraphs :: !(Host Paragraphs)
-  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Int, Int, Int, Int)) ImageId))
+  , ctxSvgRasters :: !(IORef (Map (Int, Int, Int, Word32, (Int, Int, Int, Int)) (ImageId, Holding)))
   -- ^ SVG rasters by document, pixel size, colour and content rect (in
-  -- eighths of a raster pixel).
+  -- eighths of a raster pixel), each leased in 'ctxHeld' to the frames that
+  -- draw it. A raster the atlas had no room for is kept as id 0.
   -- Whole-layout reuse cache: cached signature and solved rects,
   -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))

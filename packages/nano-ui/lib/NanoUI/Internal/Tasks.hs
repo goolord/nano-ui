@@ -18,6 +18,8 @@ module NanoUI.Internal.Tasks
   , askWake
   , useHeld
   , holdAction
+  , leaseHeld
+  , touchHeld
   , sweepHeld
   , cancelTasks
   , cancelTasksOf
@@ -113,6 +115,26 @@ holdAction release = do
         modifyIORef' (heldEntries registry) (IM.insert key (Holding cleanup seen))
         modifyPrimVar (heldStamped registry) (+ 1)
         modifyPrimVar (heldCount registry) (+ 1)
+
+-- | Lease a resource that a cache of its own keeps, such as an SVG raster
+-- shared by every icon drawing it. @release@ runs at the end of the first
+-- frame that does not 'touchHeld' the returned holding, or at session end.
+leaseHeld :: Context -> IO () -> IO Holding
+leaseHeld ctx release = do
+  let registry = ctxHeld ctx
+  key <- hashUnique <$> newUnique
+  seen <- newPrimVar =<< readPrimVar (heldFrame registry)
+  let holding = Holding (pure () <$ release) seen
+  modifyIORef' (heldEntries registry) (IM.insert key holding)
+  modifyPrimVar (heldStamped registry) (+ 1)
+  modifyPrimVar (heldCount registry) (+ 1)
+  pure holding
+
+-- | Keep a 'leaseHeld' resource through this frame.
+touchHeld :: Context -> Holding -> IO ()
+touchHeld ctx holding = do
+  frame <- readPrimVar (heldFrame (ctxHeld ctx))
+  touch (ctxHeld ctx) frame holding
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
 -- earlier key, so the view can keep showing it instead of flickering.

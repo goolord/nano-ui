@@ -28,7 +28,7 @@ module NanoUI.Internal.Widgets.Display
 where
 
 import Control.Exception (IOException, try)
-import Control.Monad (void, when)
+import Control.Monad (void)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.IORef (modifyIORef', readIORef)
@@ -43,6 +43,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, nextId, uiTheme, withContext)
 import NanoUI.Svg (Svg, parseSvg, rasterizeSvgIn, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
+import NanoUI.Internal.Tasks (leaseHeld, touchHeld)
 import NanoUI.Internal.Image (ContentFit (..), ImageLook (..), fitRect, imageLook, turnedRect)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), colorRGBA, colorToWord32)
 import NanoUI.Internal.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
@@ -155,7 +156,8 @@ svgIconWith :: (Layout -> Layout) -> Svg -> NanoUI ()
 svgIconWith f doc = void (svgIconWith' f doc)
 
 -- | The document is rasterized once per pixel size and colour, at the
--- display's scale, and kept in the image atlas for as long as the app runs.
+-- display's scale, and kept in the image atlas while frames draw it at that
+-- size and colour; the first frame that does not frees its space.
 -- A rect of another shape than the document's letterboxes it, centred, as
 -- SVG's default @xMidYMid meet@ does.
 svgIconWith' :: (Layout -> Layout) -> Svg -> NanoUI Response
@@ -211,13 +213,21 @@ svgIconConfigured' cfg doc = do
     let cache = ctxSvgRasters ctx
     known <- Map.lookup key <$> readIORef cache
     case known of
-      Just iid -> pure iid
+      Just (iid, lease) -> iid <$ touchHeld ctx lease
       Nothing -> do
         iid <- Atlas.freshImageId (ctxImageAtlas ctx)
         let placed = Rect (fromIntegral qx / 8) (fromIntegral qy / 8) (fromIntegral qw / 8) (fromIntegral qh / 8)
         ok <- registerImage ctx iid pw ph (rasterizeSvgIn pw ph placed rasterColor doc)
-        when ok $ modifyIORef' cache (Map.insert key iid)
-        pure (if ok then iid else ImageId 0)
+        -- A raster the atlas has no room for is kept too, as id 0, so it is
+        -- not made again on every pass while drawn. Nothing on screen shows
+        -- a raster once a frame has not drawn it, so its release needs no
+        -- repaint.
+        let shown = if ok then iid else ImageId 0
+        lease <- leaseHeld ctx $ do
+          modifyIORef' cache (Map.delete key)
+          void (Atlas.releaseImage (ctxImageAtlas ctx) shown)
+        modifyIORef' cache (Map.insert key (shown, lease))
+        pure shown
   imageConfigured' cfg {icLayout = const lay, icFit = FitFill, icAlignX = AlignCenter, icAlignY = AlignMiddle} iid
 
 -- | A solid rectangle sized by the layout modifier.
