@@ -98,7 +98,10 @@ data ShapedText = ShapedText
 
 -- | The glyph quads that draw a shaped line: eight numbers a glyph (x, y,
 -- width and height from the pen, then the atlas UVs u0 v0 u1 v1), in logical
--- pixels. Valid until the host's glyph atlas next resets.
+-- pixels. Valid until the host's glyph atlas next resets. The whole part of
+-- a glyph's u is its atlas page, at least 0 and below
+-- 'NanoUI.Backend.glyphAtlasPages', and the fraction is its u on that page;
+-- a glyph whose u0 is on no page is not drawn.
 newtype ShapedGlyphs = ShapedGlyphs (PrimArray Float)
   deriving (Eq, Show)
 

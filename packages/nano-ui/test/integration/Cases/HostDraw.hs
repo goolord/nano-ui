@@ -15,6 +15,8 @@ tests =
   , spec "draw-external-text" runExternalTextTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
   , spec "draw-glyph-pages" runGlyphPagesTest
+  , spec "draw-glyph-page-range" runGlyphPageRangeTest
+  , spec "draw-long-shaped-line" runLongShapedLineTest
   , spec "draw-text-input-font" runTextInputFontTest
   ]
 
@@ -84,6 +86,28 @@ runGlyphPagesTest ctx failed = do
   -- The first glyph stays on page 0, drawn before the others.
   firstUs <- concat <$> mapM vertexUs (onPage 0)
   assert failed (0.25 `elem` firstUs && 0.5 `elem` firstUs)
+
+-- | A shaped glyph whose u lies outside every atlas page is skipped: the
+-- run binds no texture past the pages and ends, even for a u just below 0.
+runGlyphPageRangeTest :: Context -> IORef Int -> IO ()
+runGlyphPageRangeTest ctx failed = do
+  let glyph x u = [x, 0, 6, 10, u, 0.5, u + 0.25, 0.75]
+      glyphs = ShapedGlyphs (primArrayFromList (concat [glyph 0 0.25, glyph 8 (-0.25), glyph 16 4.25, glyph 24 (-1)]))
+      fm = (monospaceMetrics 12) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just glyphs)))}
+  (_, dd, _) <- runFrame (withFontMetrics ctx fm) (withInput 300 200) (label "abcd")
+  assertEq failed [glyphAtlasTextureId] (nub [cmdTextureId c | c <- drawCmdElems dd, cmdIndexCount c > 0])
+
+-- | A shaped line far longer than its clip is wide reserves room only for
+-- the glyphs that can show, so it does not grow the draw buffers.
+runLongShapedLineTest :: Context -> IORef Int -> IO ()
+runLongShapedLineTest ctx failed = do
+  let glyphs = ShapedGlyphs (primArrayFromList (concat [[fromIntegral k * 6, 0, 6, 10, 0.25, 0.5, 0.5, 0.75] | k <- [0 .. 9999 :: Int]]))
+      fm = (monospaceMetrics 12) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just glyphs)))}
+      inp = withInput 300 200
+      ui = void (scrollArea (fixedWH 120 40) (label "abc"))
+  (_, before, _) <- runFrame ctx inp ui
+  (_, after, _) <- runFrame (withFontMetrics ctx fm) inp ui
+  assert failed (drawVertices before == drawVertices after)
 
 -- | Alpha of every vertex of every indexed triangle.
 triangleAlphas :: DrawData -> IO [(Float, Float, Float)]

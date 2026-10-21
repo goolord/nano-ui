@@ -144,11 +144,11 @@ glyphSlackLines = 4
 -- | A shaped line's glyph quads from pen @(px, py)@, sheared by @slant@
 -- around the baseline like 'pushGlyphQuads'. Glyphs wholly left or right of
 -- the current clip emit nothing. Glyph x offsets rise in visual order, to
--- within 'glyphSlackLines', so a binary search finds the first glyph that
--- can reach the clip and the walk stops at the first one that starts well
--- past it: a long line in a narrow view costs the glyphs it shows plus a
--- search. Glyphs on another atlas page than the one before them start a new
--- draw command on that page's texture.
+-- within 'glyphSlackLines', so binary searches find the first glyph that
+-- can reach the clip and the first that starts well past it: a long line in
+-- a narrow view costs, and reserves buffer room for, the glyphs it shows
+-- plus two searches. Glyphs on another atlas page than the one before them
+-- start a new draw command on that page's texture.
 pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> ShapedGlyphs -> Color -> IO ()
 pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
   let !count = sizeofPrimArray quads `div` 8
@@ -161,39 +161,42 @@ pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
         !right = cx + cw + lean
         !slack = glyphSlackLines * fmLineHeight fm
         at k = indexPrimArray quads k
-        -- The first glyph in [lo, hi) whose x reaches @left - slack@. Every
-        -- glyph before it ends left of the clip.
-        firstReaching !lo !hi
+        -- The first glyph in [lo, hi) whose x reaches @thr@.
+        firstReaching !thr !lo !hi
           | lo >= hi = lo
           | otherwise =
               let !mid = (lo + hi) `div` 2
-               in if px + at (mid * 8) < left - slack
-                    then firstReaching (mid + 1) hi
-                    else firstReaching lo mid
-        !start = firstReaching 0 count
+               in if px + at (mid * 8) < thr
+                    then firstReaching thr (mid + 1) hi
+                    else firstReaching thr lo mid
+        -- Every glyph before @start@ ends left of the clip, and every glyph
+        -- from @end@ on starts right of it.
+        !start = firstReaching (left - slack) 0 count
+        !end = firstReaching (right + slack) start count
         !(r, g, b, a) = unpackColorF col
         !baselineY = py + fmAscent fm
         -- The glyphs from @q0@ on that are on atlas page @page@, until one
         -- that is not.
         drawPage !q0 !page = do
           setTexture da (glyphPageTextureId page)
-          let !shown = count - q0
+          let !shown = end - q0
               !pageU = fromIntegral page
           withVertsReserve da (shown * 4) (shown * 6) $ \vp ip base baseIdx commit -> do
             let go !q !m
-                  | q >= count = commit (m * 4) (m * 6)
+                  | q >= end = commit (m * 4) (m * 6)
                   | otherwise = do
                       let !o = q * 8
                           !gx = px + at o
                           !gw = at (o + 2)
                           !u0 = at (o + 4)
-                      if gx > right + slack
-                        -- This glyph and every later one start right of the clip.
-                        then commit (m * 4) (m * 6)
-                        else if gx + gw < left || gx > right
+                      if gx + gw < left || gx > right
                         then go (q + 1) m
                         else if u0 < pageU || u0 >= pageU + 1
-                        then commit (m * 4) (m * 6) >> drawPage q (truncate u0)
+                        then
+                          -- A glyph whose u is on no page is skipped.
+                          if u0 < 0 || u0 >= fromIntegral glyphAtlasPages
+                            then go (q + 1) m
+                            else commit (m * 4) (m * 6) >> drawPage q (truncate u0)
                         else do
                           let !gy = py + at (o + 1)
                               !gh = at (o + 3)
