@@ -24,7 +24,7 @@ module NanoUI.Sdl.Internal.Font
   , withSdlFontCache
   ) where
 
-import Control.Exception (SomeException, bracket_, catch, throwIO)
+import Control.Exception (IOException, bracket_, catch, throwIO)
 import Control.Monad (foldM_, forM, forM_, unless, when, zipWithM_)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Data.Foldable (traverse_)
@@ -509,7 +509,7 @@ coverageSourceFor c = do
   pure (source >>= \i -> (i,) <$> IM.lookup i probes)
   where
     findSources = do
-      files <- searchFontFamilies coverageFamilies `catch` \(_ :: SomeException) -> pure []
+      files <- searchFontFamilies coverageFamilies `catch` \(_ :: IOException) -> pure []
       enc <- sdlPathEncoding
       sources <- forM files $ \path -> GHC.withCStringLen enc path (fmap SBS.toShort . BS.packCStringLen)
       pure (Coverage (smallArrayFromList sources) IM.empty IM.empty)
@@ -713,15 +713,15 @@ withTtf =
     (unlessM ttfInit (fail "TTF_Init failed"))
     (closeCoverageProbes >> ttfQuit)
 
--- | Open a font at a point size, or bundled Inter when it will not open. A
--- font for a grid of cells is hinted fully, so its advances are whole pixels
--- ('nano_ui_ttf_hint_for_grid').
-openFontSource :: Bool -> FontSource -> Float -> IO SdlFont
+-- | Open a font at a point size, or bundled Inter when it will not open, and
+-- answer the source it opened. A font for a grid of cells is hinted fully,
+-- so its advances are whole pixels ('nano_ui_ttf_hint_for_grid').
+openFontSource :: Bool -> FontSource -> Float -> IO (FontSource, SdlFont)
 openFontSource grid source ptsize =
-  open source `catch` \(e :: SomeException) ->
+  open source `catch` \(e :: IOException) ->
     if source == embeddedFontSource
       then throwIO e
-      else open embeddedFontSource `catch` \(_ :: SomeException) -> throwIO e
+      else open embeddedFontSource `catch` \(_ :: IOException) -> throwIO e
   where
     pt = realToFrac ptsize
     open src = do
@@ -733,7 +733,7 @@ openFontSource grid source ptsize =
           unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
       when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ fontSourceLabel src)
       when grid (ttfHintForGrid font)
-      readSdlFont ptsize font
+      (src,) <$> readSdlFont ptsize font
 
 -- | Open a font file at a point size, its path encoded as SDL expects.
 openFontPath :: FilePath -> CFloat -> IO (Ptr ())
@@ -888,11 +888,14 @@ data SdlFontCache = SdlFontCache
 newSdlFontCache :: FontSource -> FontSource -> GlyphAtlas -> Float -> IORef Float -> IO SdlFontCache
 newSdlFontCache sans mono ga basePt scaleRef = do
   scale <- readIORef scaleRef
-  base <- (,) <$> openCachedFont ga scale False sans basePt <*> openCachedFont ga scale True mono basePt
+  -- A font that would not open is Inter from here on: the debug readout
+  -- names it, and other sizes open it without trying the font again.
+  (sans', sansEntry) <- openCachedFont ga scale False sans basePt
+  (mono', monoEntry) <- openCachedFont ga scale True mono basePt
   cache <-
-    SdlFontCache ga basePt scaleRef mono
-      <$> newIORef sans
-      <*> newIORef base
+    SdlFontCache ga basePt scaleRef mono'
+      <$> newIORef sans'
+      <*> newIORef (sansEntry, monoEntry)
       <*> newIORef (IM.empty, [])
       <*> newIORef []
       <*> newIORef Map.empty
@@ -901,11 +904,11 @@ newSdlFontCache sans mono ga basePt scaleRef = do
 
 -- | A font from a source (or bundled Inter) at a point size, rasterised at
 -- the pixel density, with its glyph metrics; for a grid of cells, as the
--- mono font is set, when @grid@.
-openCachedFont :: GlyphAtlas -> Float -> Bool -> FontSource -> Float -> IO CachedFontEntry
+-- mono font is set, when @grid@. Also the source it opened.
+openCachedFont :: GlyphAtlas -> Float -> Bool -> FontSource -> Float -> IO (FontSource, CachedFontEntry)
 openCachedFont ga scale grid source pt = do
-  font <- openFontSource grid source (pt * scale)
-  uncurry (CachedFontEntry font) <$> buildGlyphFontMetrics ga font scale
+  (opened, font) <- openFontSource grid source (pt * scale)
+  (opened,) . uncurry (CachedFontEntry font) <$> buildGlyphFontMetrics ga font scale
 
 -- | Shape printable ASCII in the base fonts, which places its glyphs, so a
 -- frame after an atlas reset pays no cold glyph misses. The base entries are
@@ -971,10 +974,11 @@ closeEvictedFonts cache = do
 reloadSdlFontCache :: SdlFontCache -> FontSource -> IO ()
 reloadSdlFontCache cache source = do
   destroySdlFontCache cache
-  writeIORef (sfcSansSourceRef cache) source
   scale <- readIORef (sfcScaleRef cache)
   let open grid src = openCachedFont (sfcGlyphAtlas cache) scale grid src (sfcBasePt cache)
-  writeIORef (sfcBaseEntries cache) =<< (,) <$> open False source <*> open True (sfcMonoSource cache)
+  (opened, sans) <- open False source
+  writeIORef (sfcSansSourceRef cache) opened
+  writeIORef (sfcBaseEntries cache) . (sans,) . snd =<< open True (sfcMonoSource cache)
   resetGlyphAtlas cache
 
 -- | Install the cache's base fonts as the context's measurement and glyph
@@ -1061,9 +1065,12 @@ getOrLoadCachedFont cache sz var bold
           scale <- readIORef (sfcScaleRef cache)
           source <- maybe (variantSource cache var) pure bold
           -- Dynamic fonts are not warmed: they insert only glyphs drawn.
-          entry <- openCachedFont (sfcGlyphAtlas cache) scale mono source (fromIntegral ptKey / 2)
-          -- At most 48 dynamic sizes stay open.
-          let (kept, evicted) = splitAt 48 (key : order)
+          entry <- snd <$> openCachedFont (sfcGlyphAtlas cache) scale mono source (fromIntegral ptKey / 2)
+          -- At most 48 dynamic sizes stay open; past that, the 32 used most
+          -- recently. An eviction drops every text cache, so a run of new
+          -- sizes (an animated font size) pays it once per 17, not each.
+          let opened = key : order
+              (kept, evicted) = if length opened > 48 then splitAt 32 opened else (opened, [])
           writeIORef (sfcDynamicCache cache) (foldr IM.delete (IM.insert key entry entries) evicted, kept)
           -- Closed at the next frame start, once the text caches let go.
           modifyIORef' (sfcEvicted cache) (map cfeFont (mapMaybe (`IM.lookup` entries) evicted) ++)

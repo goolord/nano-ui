@@ -12,8 +12,10 @@ import NanoUI.Backend
 import NanoUI.Testing (textIndexAtX)
 import NanoUI.Backend.Sdl
   ( NanoUIFont (..)
+  , SdlDebugSnapshot (..)
   , SdlOptions (..)
   , defaultSdlOptions
+  , sdlDebugSnapshot
   , syncDisplay
   , withSdl
   , withSdlBench
@@ -121,6 +123,13 @@ main = do
     drawnWidth <- lineWidthIO boldFm text
     unless (abs (boldWidth - drawnWidth) < 0.01) $
       fail ("bold text measures unlike it draws: " ++ show (boldWidth, drawnWidth))
+    -- A file that will not open draws in bundled Inter, and the debug
+    -- readout names the font drawn, not the one asked for.
+    let missing = fixtures </> "NanoMissing.ttf"
+    writeIORef (sdlFontRequestRef env) (FontFilePath missing)
+    _ <- syncDisplay fromFile env emptyInput
+    shown <- dbgFontPath <$> sdlDebugSnapshot env
+    when (shown == missing) $ fail "the debug readout names a font that did not open"
     pure (fresh, prepared, measured, freshQuad)
   -- Pure metric and quad values are safe to evaluate after the native font,
   -- atlas and SDL session are closed; native effects fail before dereferencing.
