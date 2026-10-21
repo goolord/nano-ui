@@ -35,6 +35,7 @@ test-suite nano-ui-emit-test
     default-extensions: OverloadedStrings
     ghc-options:      -Wall -Wcompat -Wredundant-constraints
     main-is:          Main.hs
+    other-modules:    DeferredWrongMessage
     hs-source-dirs:   test
     build-depends:
         base >=4.20 && <4.23,
