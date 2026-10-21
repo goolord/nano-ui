@@ -56,9 +56,7 @@ module NanoUI.Internal.Font
   , classifyScrollBar
   , sliderHitBounds
   , sliderTrackBounds
-  , sliderTrackHeight
   , sliderHandleDiameter
-  , sliderHandleSlack
   ) where
 
 import Control.Monad (forM_, unless)

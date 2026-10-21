@@ -369,7 +369,8 @@ measureContent env@SolveEnv {seArena = na} idx = do
   nt <- readTagEnum (seArrays env) idx TagNodeType
   case nt of
     NodeText -> measureTextNode env idx
-    NodeSpacer -> measureSpacer na idx
+    -- Non-fixed spacers reserve the default 8px extent.
+    NodeSpacer -> measureImage na idx (Just (8, 8))
     NodeSeparator -> measureSeparator na idx
     NodeScrollContainer -> measureScrollContainer env idx
     NodeImage -> getImageNode na idx >>= measureImage na idx . fmap (\n -> (inWidth n, inHeight n))
@@ -512,9 +513,10 @@ growParent na idx = getParent na idx >>= go True
               then pure False
               else (/= NodeModal) <$> getNodeType na p
 
--- | Measure a node with no measurable content: an image, a box, or a
--- drawing without its own measure. Unless fixed, it takes @natural@ (an
--- image's own size), else its minimum, else 32, within its limits.
+-- | Measure a node with no measurable content: an image, a box, a spacer,
+-- or a drawing without its own measure. Unless fixed, it takes @natural@
+-- (an image's own size, a spacer's default), else its minimum, else 32,
+-- within its limits.
 measureImage :: NodeArena -> NodeIdx -> Maybe (Float, Float) -> IO ()
 measureImage na idx natural = do
   wAx <- getWidthSizing na idx
@@ -522,15 +524,6 @@ measureImage na idx natural = do
   let orMin ax = if axMin ax > 0 then axMin ax else 32
       (nw, nh) = fromMaybe (orMin wAx, orMin hAx) natural
   setRect na idx 0 0 (sizeWithin wAx nw) (sizeWithin hAx nh)
-
-measureSpacer :: NodeArena -> NodeIdx -> IO ()
-measureSpacer na idx = do
-  AxisSizing wTag wVal _ _ <- getWidthSizing na idx
-  AxisSizing hTag hVal _ _ <- getHeightSizing na idx
-  -- Non-fixed spacers reserve the default 8px extent.
-  let w = if wTag == SizingFixed then wVal else 8
-      h = if hTag == SizingFixed then hVal else 8
-  setRect na idx 0 0 w h
 
 measureSeparator :: NodeArena -> NodeIdx -> IO ()
 measureSeparator na idx = do
@@ -565,7 +558,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
   -- The content with its padding and whatever sits beside the label.
   (rawW, rawH) <-
     case nt of
-      NodeSlider -> pure (60, max sliderHandleDiameter (sliderTrackHeight + 2 * sliderHandleSlack))
+      NodeSlider -> pure (60, sliderHandleDiameter)
       NodeSelect -> do
         opts <- getOptions na idx
         let choices = if null opts then [""] else opts
@@ -831,13 +824,13 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
   FlowAcc count along across <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
   let gaps = gap * fromIntegral (max 0 (count - 1))
   case dir of
-    DirColumn -> pure (if count <= 0 then 0 else across, along + gaps)
+    DirColumn -> pure (across, along + gaps)
     DirRow -> do
       -- A row's baseline-aligned children stand on one line, so together they
       -- are as tall as the most room any takes above it plus the most any takes
       -- below.
       FlowAcc _ above below <- foldFlowChildrenM na idx baselineStep (FlowAcc 0 0 0)
-      pure (along + gaps, if count <= 0 then 0 else max across (above + below))
+      pure (along + gaps, max across (above + below))
   where
     step (FlowAcc count along across) ci = do
       Rect _ _ w h <- getNodeRect na ci
@@ -1289,7 +1282,7 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
       box <- case dir of
         DirRow -> do
           wTag <- axTag <$> getWidthSizing na idx
-          let rowMain = if wTag == SizingGrow then max contentSize (innerW - gutterRow) else contentSize
+          let rowMain = if wTag == SizingGrow then max contentSize innerW else contentSize
               b = Rect cx cy rowMain (innerH - gutterRow)
           b <$ positionRowFromParent env depth idx gap b
         DirColumn -> do
