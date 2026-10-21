@@ -348,15 +348,19 @@ takeVarRerun ctx = do
   pure (fs .&. flagRerun /= 0)
 
 -- | Finish the frame's passes: queue full damage if a read needs it, and
--- start the next frame's changes from here.
+-- start the next frame's changes just after the last pass's tick. The
+-- passes' own writes are stamped with their ticks, so they are not new
+-- again; a write from another thread during the pass took a later tick, and
+-- may have missed the reads before it, so it is.
 endVarFrame :: Context -> IO ()
 endVarFrame ctx = do
   let arr = ctxVarFrame ctx
   fs <- frameSlot ctx flagSlot
+  p <- frameSlot ctx passSlot
   writePrimArray arr lastPassesSlot =<< frameSlot ctx passNoSlot
   writePrimArray arr passSlot 0
   writePrimArray arr flagSlot 0
-  writePrimArray arr baseSlot =<< nextTick
+  writePrimArray arr baseSlot (p + 1)
   when (fs .&. flagFull /= 0) (damageFull ctx)
 
 -- | How many view passes the last frame ran.

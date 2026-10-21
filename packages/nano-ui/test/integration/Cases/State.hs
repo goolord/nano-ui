@@ -26,6 +26,7 @@ tests =
   , spec "var-map" runVarMapTest
   , spec "var-shared" runVarSharedTest
   , spec "var-abort" runVarAbortTest
+  , spec "var-io-in-pass" runVarIoInPassTest
   , spec "collection-api" runCollectionApiTest
   ]
 
@@ -289,4 +290,24 @@ runVarAbortTest ctx failed = do
   _ <- takeDamage ctx
   _ <- runFrame ctx inp view
   assertEq failed 1 =<< lastFramePasses ctx
+  assertEq failed DamageFull =<< takeDamage ctx
+
+-- | A write from another thread that lands in a pass after the pass read
+-- the Var is new to the next frame's reads, which repaint whole, also when
+-- the pass then writes another part of the same Var.
+runVarIoInPassTest :: Context -> IORef Int -> IO ()
+runVarIoInPassTest ctx failed = do
+  item <- newVar (Item 1 "one" False)
+  let inp = withInputOff 300 100
+      view = label =<< readVar item.rowName
+      -- The thread's write, as if it landed here.
+      landing name = liftIO (writeVarIO item.rowName name)
+  _ <- warmup2 ctx inp view
+  _ <- runFrame ctx inp (view >> landing "uno")
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp view
+  assertEq failed DamageFull =<< takeDamage ctx
+  _ <- runFrame ctx inp (view >> landing "ein" >> writeVar item.rowDone True)
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp view
   assertEq failed DamageFull =<< takeDamage ctx

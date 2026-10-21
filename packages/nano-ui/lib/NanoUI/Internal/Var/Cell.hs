@@ -189,11 +189,13 @@ changedSince cell base sig = do
 
 -- | Record a mutation to @sig@ at tick @t@. Reset the change set when its
 -- previous mutations precede the session's frame-start tick @base@. Direct IO
--- mutations pass @base = 0@ so existing change bits are preserved.
+-- mutations pass @base = 0@ so existing change bits are preserved. The stamp
+-- never moves back: a pass's write, stamped with the pass's tick, can follow
+-- one from another thread with a later tick.
 addChange :: Cell s -> Word64 -> Word64 -> Sig -> IO ()
 addChange cell base t sig = do
   chg <- readStamp cell chgSlot
-  writeStamp cell chgSlot t
+  writeStamp cell chgSlot (max chg t)
   let fresh = chg < base
   when fresh (writeStamp cell (chgSlot + 1) base)
   addBits cell (chgSlot + 2) fresh sig
