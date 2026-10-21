@@ -858,8 +858,11 @@ ensureCapacity na needed = do
   when (needed >= cap) $ do
     let newCap = cap * 2
     newA <- readIORef (naArrays na) >>= growNodeArenaArrays cap newCap
-    growWidthMemo (naWrapMemo na) cap newCap
-    growWidthMemo (naFitMemo na) cap newCap
+    forM_ [naWrapMemo na, naFitMemo na] $ \ref -> do
+      WidthMemo tags slots <- readIORef ref
+      wmTags <- growPrimArrayCopy tags cap newCap 0
+      wmSlots <- growPrimArrayCopy slots (cap * memoStride) (newCap * memoStride) 0
+      writeIORef ref WidthMemo {..}
     writeIORef (naArrays na) newA
     let growRef r old new = readIORef r >>= \a -> writeIORef r =<< growPrimArrayCopy a old new 0
     growRef (naTextHash na) cap newCap
@@ -901,13 +904,6 @@ growPrimArrayCopy oldArr cap newCap defVal = do
   newArr <- resizeMutablePrimArray oldArr newCap
   setPrimArray newArr cap (newCap - cap) defVal
   pure newArr
-
-growWidthMemo :: IORef WidthMemo -> Int -> Int -> IO ()
-growWidthMemo ref cap newCap = do
-  WidthMemo tags slots <- readIORef ref
-  wmTags <- growPrimArrayCopy tags cap newCap 0
-  wmSlots <- growPrimArrayCopy slots (cap * memoStride) (newCap * memoStride) 0
-  writeIORef ref WidthMemo {..}
 
 {-# NOINLINE growBoxedStoreCopy #-}
 growBoxedStoreCopy :: a -> MutableArray RealWorld a -> Int -> Int -> IO (MutableArray RealWorld a)
@@ -1889,11 +1885,10 @@ memoizeWidth na ref idx key compute = do
     then (,) <$> readPrimArray slots (base + 1) <*> readPrimArray slots (base + 2)
     else do
       r@(x, y) <- compute
-      WidthMemo tags' slots' <- readIORef ref
-      writePrimArray tags' idx ft
-      writePrimArray slots' base key
-      writePrimArray slots' (base + 1) x
-      writePrimArray slots' (base + 2) y
+      writePrimArray tags idx ft
+      writePrimArray slots base key
+      writePrimArray slots (base + 1) x
+      writePrimArray slots (base + 2) y
       pure r
 
 -- | The flex scratch, with room for at least @needed@ entries. Growing it
