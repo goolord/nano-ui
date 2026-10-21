@@ -23,7 +23,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Maybe (fromMaybe)
 import Data.Foldable (toList)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word8)
 import Foreign.Storable (pokeByteOff)
@@ -238,7 +238,7 @@ rasterizeView width height view@(Matrix a b c d e f) current svg
     image = runST $ do
       -- Premultiplied RGBA in [0, 1].
       acc <- newZeroedPrimArray (width * height * 4)
-      cov <- newPrimArray (width * height)
+      cov <- newZeroedPrimArray (width * height)
       forM_ (documentShapes svg) $ \(Shape segs m style) -> do
         let full = view `multiply` m
             contours = flatten full segs
@@ -252,29 +252,29 @@ rasterizeView width height view@(Matrix a b c d e f) current svg
             -- monochrome document, so an icon without paints tints.
             fill = fromMaybe (if documentMonochrome svg then PaintCurrent else PaintColor black) (styleFill style)
         forM_ (paintColor fill) $ \col -> do
-          coverPolygons width height cov (styleFillRule style) contours
-          composite width height acc cov col (opacity * styleFillOpacity style)
+          rows <- coverPolygons width height cov (styleFillRule style) contours
+          composite width acc cov rows col (opacity * styleFillOpacity style)
         forM_ (paintColor (fromMaybe PaintNone (styleStroke style))) $ \col ->
           when (styleStrokeWidth style > 0) $ do
             let wanted = styleStrokeWidth style * scaleOf
                 w = max 1 wanted
                 polys = strokePolygons w (styleCap style) (styleJoin style) (styleMiterLimit style) contours
-            coverPolygons width height cov NonZero polys
+            rows <- coverPolygons width height cov NonZero polys
             -- A hairline thinner than a pixel keeps its weight as opacity.
-            composite width height acc cov col (opacity * styleStrokeOpacity style * min 1 (wanted / w))
+            composite width acc cov rows col (opacity * styleStrokeOpacity style * min 1 (wanted / w))
       unsafeFreezePrimArray acc
 
--- | Coverage of the rings with at least three points in @cov@ (cleared
--- first): five sample rows a pixel, each span's coverage split exactly
--- across the pixels it crosses.
+-- | Coverage of the rings with at least three points, added to @cov@, which
+-- must be zero: five sample rows a pixel, each span's coverage split exactly
+-- across the pixels it crosses. Returns the rows covered, as the first and
+-- one past the last.
 --
 -- Edges are counted per pixel row they start in and then written in row
 -- order, so the sweep down the rows admits each row's edges as a block,
 -- drops an edge past its bottom, and insertion sorts a row's few crossings
 -- in a scratch array.
-coverPolygons :: Int -> Int -> MutablePrimArray s Float -> FillRule -> Rings -> ST s ()
+coverPolygons :: Int -> Int -> MutablePrimArray s Float -> FillRule -> Rings -> ST s (Int, Int)
 coverPolygons width height cov rule rings@(Rings pts starts _) = do
-  setPrimArray cov 0 (width * height) 0
   let capacity = sizeofPrimArray pts `div` 2
       -- Each edge that can cover a row: its first row, top, bottom, x at the
       -- top, slope and winding.
@@ -392,21 +392,28 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
               then sample r (si + 1) kept 0 0 0
               else rows (r + 1) kept
       rows !r !n
-        | r >= height = pure ()
+        | r >= height = pure height
         | otherwise = do
             from <- readPrimArray rowStart r
             to <- readPrimArray rowStart (r + 1)
             -- Past the last edge's bottom nothing is left to cover.
             if n == 0 && from >= totalEdges
-              then pure ()
+              then pure r
               else admit from to n >>= \n' -> sample r 0 n' 0 0 0
-  rows 0 0
+      -- Above the first row an edge starts in there is nothing to cover.
+      firstRow !r
+        | r >= height = pure height
+        | otherwise = readPrimArray rowStart (r + 1) >>= \e -> if e > 0 then pure r else firstRow (r + 1)
+  top <- firstRow 0
+  (,) top <$> rows top 0
 
--- | Draw @col@ at @alpha@ through the coverage over the accumulated image.
-composite :: Int -> Int -> MutablePrimArray s Float -> MutablePrimArray s Float -> Color -> Float -> ST s ()
-composite width height acc cov col alpha =
-  forM_ [0 .. width * height - 1] $ \i -> do
+-- | Draw @col@ at @alpha@ through the coverage of rows @top@ to @end@ over
+-- the accumulated image, zeroing that coverage for the next shape.
+composite :: Int -> MutablePrimArray s Float -> MutablePrimArray s Float -> (Int, Int) -> Color -> Float -> ST s ()
+composite width acc cov (top, end) col alpha =
+  forM_ [top * width .. end * width - 1] $ \i -> do
     c <- readPrimArray cov i
+    writePrimArray cov i 0
     when (c > 0) $ do
       let sa = min 1 c * alpha * fromIntegral (colorA col) / 255
           blend k src = do
