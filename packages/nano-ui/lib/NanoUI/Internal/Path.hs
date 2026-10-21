@@ -496,7 +496,8 @@ curveTolerance s
 -- 'SegClose' ended it. Curves are subdivided until they are within @tol@ of
 -- their chords after transforming, so scaled-up curves get more points. An
 -- arc gets @steps r sweep@ chords, where @r@ is its larger transformed
--- radius (the canvas passes 'arcSteps'). Segments with a NaN or infinite
+-- radius (the canvas passes a count that keeps chords within @tol@ of the
+-- arc). Segments with a NaN or infinite
 -- coordinate are skipped; a transform with one yields no rings.
 flattenPath :: Float -> (Float -> Float -> Int) -> Transform -> Path -> Rings
 flattenPath tol steps t (Path segs)
@@ -1163,7 +1164,7 @@ fillPathOps tol t rule path paint = concatMap polygonOp (fillComponents rule rin
 
 -- | Draw ops that stroke a path, flattened through @t@ within @tol@: one
 -- 'StrokePolyline' per subpath or per dash. Width and dash lengths scale by
--- the transform's 'averageStretch'.
+-- the square root of the transform's area scale.
 strokePathOps :: Float -> Transform -> Stroke -> Path -> Paint -> [DrawOp]
 strokePathOps tol t st path paint
   | not (width > 0) = []
@@ -1306,7 +1307,8 @@ fillComponents rule rs =
     boxInside (ax0, ay0, ax1, ay1) (bx0, by0, bx1, by1) = ax0 >= bx0 && ay0 >= by0 && ax1 <= bx1 && ay1 <= by1
 
 -- | Whether every point of ring @q@ is inside ring @r@, by ray crossing
--- parity.
+-- parity. A point on @r@'s outline may count either way: on a rect's left or
+-- top edge it is inside, on its right or bottom edge outside.
 encloses :: PrimArray Float -> PrimArray Float -> Bool
 encloses r q = every 0
   where
@@ -1583,8 +1585,8 @@ maxDashes = 4096
 -- Rects keep their op under transforms that keep sides axis-aligned (scale,
 -- flip, quarter turn). Rounded rects also need a uniform scale, and circles
 -- a transform that keeps them round. Otherwise they become polygons. Lines,
--- polygons and triangles transform their points, with widths scaled by
--- 'averageStretch'.
+-- polygons and triangles transform their points, with widths scaled by the
+-- square root of the transform's area scale.
 --
 -- A quad gradient under an axis-aligned transform fills the transformed
 -- rect, each corner taking the colour of the nearest transformed corner,
