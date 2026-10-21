@@ -338,7 +338,7 @@ runNestedScrollTest ctx failed = do
 
 runScrollHoverClipTest :: Context -> IORef Int -> IO ()
 runScrollHoverClipTest ctx failed = do
-  let inp0 = withInput 200 200
+  let inp0 = withInput 200 400
       ui = scrollArea (fillW . fixedH 80) $
              column $ do
                 mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 10]
@@ -349,7 +349,11 @@ runScrollHoverClipTest ctx failed = do
   mInner <- getPrevRect ctx inner
   case mInner of
     Just r@(Rect _ _ iw ih) | iw > 0 && ih > 0 -> do
-      let hoverHidden = inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1}
+      -- In the window but below the outer viewport: only the outer
+      -- scroller's clip can turn the wheel away.
+      let pos@(V2 _ cy) = spanCenter r
+          hoverHidden = inp0 {inputMousePos = pos, inputScroll = V2 0 1}
+      assert failed (cy > 80 && cy < 400)
       offI0 <- getScrollOffset ctx inner
       _ <- runFrame ctx hoverHidden ui
       offI1 <- getScrollOffset ctx inner
@@ -484,11 +488,13 @@ runScrollLockstepProbeTest ctx failed = do
     let fillTops =
           [ qy1
           | (qx1, qy1, qx2, _, u, v) <- quads
-          , abs (u - whitePixelU) < 1.0e-6
-          , abs (v - whitePixelV) < 1.0e-6
+          , abs (u - whitePixelUV) < 1.0e-6
+          , abs (v - whitePixelUV) < 1.0e-6
           , qx2 - qx1 > 60.0
           ]
     pure (keyYs, fillTops)
+  -- The probe found rows and separators to compare at every step.
+  assert failed (all (\(ks, fs) -> any isJust ks && not (null fs)) yss)
   forM_ (zip yss (drop 1 yss)) $ \((keyA, fillA), (keyB, fillB)) -> do
     let sKeyA = sort [y | Just y <- keyA]
         sKeyB = sort [y | Just y <- keyB]
@@ -535,11 +541,10 @@ decodeQuads dd =
               [] -> (0, 0)
       pure (x1, y1, x2, y2, _u, _v)
 
-whitePixelU :: Float
-whitePixelU = 1.5 / 1024.0
-
-whitePixelV :: Float
-whitePixelV = 1.5 / 1024.0
+-- The u and v of the atlas texel that solid fills sample: a copy of
+-- 'NanoUI.Internal.Draw.Arena.whitePixel', which tests cannot import.
+whitePixelUV :: Float
+whitePixelUV = 1.5 / 1024.0
 
 -- A padded 2D scroller whose fill-width child fits the viewport must not
 -- report horizontal overflow: content size is measured from the content
@@ -558,8 +563,9 @@ run2DPadFillOverflowTest ctx failed = do
             mapM_ (void . label) (map T.pack ["alpha", "beta", "gamma"])
   (wid, ()) <- warmup2 ctx inp0 ui
   assertJustM failed (scrollNodeState ctx wid True) $ \(contentW, innerW) -> assert failed (contentW <= innerW + overflowEps)
-  -- No phantom scroll range: wheeling must not move either axis.
-  let wheel = inp0 {inputScroll = V2 5 5}
+  -- No phantom scroll range: wheeling over the scroller must not move
+  -- either axis.
+  let wheel = inp0 {inputMousePos = V2 100 100, inputScroll = V2 5 5}
   _ <- runFrame ctx wheel ui
   V2 offX offY <- getScrollOffset2D ctx wid
   assert failed (offX == 0 && offY == 0)
