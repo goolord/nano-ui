@@ -7,6 +7,12 @@
 #ifndef RGFW_OPENGL
 #define RGFW_OPENGL
 #endif
+/* One poll queues every pending native event, and a full queue is dropped
+   whole: 32 events, a few milliseconds of a fast mouse, lost button and key
+   releases. Only this file reads RGFW_info, so the size stays local. */
+#ifndef RGFW_MAX_EVENTS
+#define RGFW_MAX_EVENTS 1024
+#endif
 #include "RGFW.h"
 
 static RGFW_info s_rgfw_info;
@@ -54,6 +60,9 @@ RGFW_window* rgfw_create_window_gl(const char* name, int32_t x, int32_t y, int32
         RGFW_window_close(win);
         return NULL;
     }
+    /* RGFW turns vsync off on X11, Wayland and macOS, but leaves WGL at its
+       default of on. */
+    if (win != NULL) RGFW_window_swapInterval_OpenGL(win, 0);
     return win;
 }
 

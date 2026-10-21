@@ -116,7 +116,10 @@ waitForEvent :: Int -> IO ()
 waitForEvent t = c_RGFW_waitForEvent (fromIntegral t)
 
 -- | Wake a blocked 'waitForEvent', or make the next one return at once. Safe
--- to call from any thread once a window exists.
+-- to call from any thread once a window exists. On Windows the wake is a
+-- message to a helper window made with the first window, which reaches only
+-- the OS thread that made it and dies with that thread: wait on that thread,
+-- such as the main thread under @-threaded@.
 stopWaitForEvent :: IO ()
 stopWaitForEvent = c_RGFW_stopCheckEvents
 
