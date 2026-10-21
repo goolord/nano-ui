@@ -695,6 +695,10 @@ runShapesAndInverseTest _ failed = do
   assertLt failed (abs (areaOf (P.roundedRectCorners (Rect 0 0 100 60) 0 20 0 10) - (6000 - quarterCut 20 - quarterCut 10))) (flat 20 + flat 10)
   -- Oversized radii scale down together until they fit, as in CSS.
   assertLt failed (abs (areaOf (P.roundedRectCorners (Rect 0 0 100 60) 60 60 0 0) - (6000 - 2 * quarterCut 50))) (2 * flat 50)
+  -- An infinite radius is as large as the corners allow: a pill, or a lone
+  -- corner as wide as the shorter side.
+  assertLt failed (abs (areaOf (P.roundedRect (Rect 10 10 80 40) (1 / 0)) - (3200 - 4 * quarterCut 20))) (4 * flat 20)
+  assertLt failed (abs (areaOf (P.roundedRectCorners (Rect 10 10 80 40) (1 / 0) 0 0 0) - (3200 - quarterCut 40))) (flat 40)
   assert failed (filled (P.roundedRectCorners (Rect 0 0 10 10) 0 0 (-3) 0) == filled (P.rect (Rect 0 0 10 10)))
   assert failed (filled (P.roundedRect (Rect 0 0 40 20) 6) == filled (P.roundedRectCorners (Rect 0 0 40 20) 6 6 6 6))
   -- A negative width or height spans the same rectangle.

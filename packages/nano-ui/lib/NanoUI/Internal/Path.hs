@@ -225,7 +225,8 @@ roundedRectCorners box@(Rect x0 y0 w h) tl0 tr0 br0 bl0
         , SegClose
         ]
   where
-    positive r = if r > 0 then r else 0
+    -- Capped, so an infinite radius shrinks to fit like a huge one, not to NaN.
+    positive r = if r > 0 then min r 1e30 else 0
     x = min x0 (x0 + w)
     y = min y0 (y0 + h)
     aw = abs w
