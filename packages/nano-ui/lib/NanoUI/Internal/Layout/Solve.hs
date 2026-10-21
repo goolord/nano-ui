@@ -2017,8 +2017,9 @@ placeWindowNode na ms winW winH idx w0 h0 originFor = do
   positionFloating env idx =<< windowRect na winW winH idx w0 h0 originFor
 
 -- | Window @idx@'s rect at size @w0 h0@, clamped to its min and max size and
--- the screen, with its origin, given that size, clamped on screen. Fit sizing
--- caps at intrinsic size; floating windows use an explicit frame size.
+-- the screen, with its origin, given that size, clamped on screen. The
+-- caller picks @w0 h0@: 'placeFloatingNodes' passes the saved size, or else
+-- the measured size capped at the screen.
 windowRect :: NodeArena -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO Rect
 windowRect na winW winH idx w0 h0 originFor = do
   AxisSizing _ _ minW maxW <- getWidthSizing na idx
