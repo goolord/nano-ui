@@ -133,12 +133,16 @@ data Outcome a = Outcome !(TaskStatus a) !(Maybe a)
 -- are fixed by the handle. Skipping its hook releases its running job.
 newtype Task k a = Task (Resource k (IORef (Outcome a)))
 
+-- | A new task owner. Allocate it once during setup, outside the view, and
+-- give each 'useTask' or 'useTaskStatus' call site its own.
 newTask :: IO (Task k a)
 newTask = Task <$> newResource
 
 -- | A typed stream owner, allocated before the per-frame view.
 newtype Stream k s = Stream (Resource k (IORef s))
 
+-- | A new stream owner. Allocate it once during setup, outside the view, and
+-- give each 'useStream' call site its own.
 newStream :: IO (Stream k s)
 newStream = Stream <$> newResource
 
@@ -235,7 +239,7 @@ useOutcome (Task owner) k run = do
 -- producer gets @update@, which applies a function to the state atomically,
 -- forces the result to weak head normal form on the producer's thread, and
 -- wakes the loop. Each call returns the current state, starting from
--- @initial@:
+-- @initial@.
 --
 -- Allocate @stream <- newStream@ during setup, then read it in the view:
 --
