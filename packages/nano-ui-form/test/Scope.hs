@@ -54,7 +54,7 @@ runScopeTests = do
   testSubmitPulse
   testSubmitSameFrameEdit
   testSubmitSkipsTextArea
-  testColorKeepsAlpha
+  testColorEdit
   testMarkSubmitted
   testResetWidgets
   testResetTextArea
@@ -222,9 +222,11 @@ testSubmitSkipsTextArea = do
       check "Enter in a focused text area submitted the form" (submitted == Nothing)
     _ -> fail "expected one submit-test text area"
 
--- | Brightening a translucent colour field keeps its alpha.
-testColorKeepsAlpha :: IO ()
-testColorKeepsAlpha = do
+-- | A colour field's value is the colour its picker shows: a picker without
+-- an alpha bar makes an edited translucent colour opaque, and the field's
+-- stored text keeps that.
+testColorEdit :: IO ()
+testColorEdit = do
   ctx <- newPixelContext
   owner <- newFormState
   let
@@ -240,7 +242,7 @@ testColorKeepsAlpha = do
       void (runFrame ctx (keyInp KeyUp input) ui)
       edited <- warmup2 ctx input ui
       check "Up did not brighten the colour" (edited /= Just overlay)
-      check "a colour field dropped its alpha" (fmap colorA edited == Just 128)
+      check "the field's colour is not the opaque one its picker shows" (fmap colorA edited == Just 255)
     _ -> fail "expected a colour picker"
 
 -- | The app's own button submits a 'FormOnSubmit' form through
