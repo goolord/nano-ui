@@ -206,11 +206,7 @@ seriesDomains chart = (xDom, fit yBounds)
 chartDiagram :: FontMetrics -> Theme -> PlotStyle -> (Domain, Domain) -> [U.Vector (Double, Double)] -> Chart -> Diagram B
 chartDiagram fm theme ps (xDom, yDom) points chart =
   let chrome = chartChrome fm yDom chart
-      margins = ccMargins chrome
-      leftM = marginLeft margins
-      rightM = marginRight margins
-      botM = marginBottom margins
-      topM = marginTop margins
+      m = ccMargins chrome
       -- A category series names its slots; other x axes are numbered.
       xTicks = case [labels | Series {seriesData = CategoryY labels _} <- chartSeries chart] of
         labels : _ -> zip [0 ..] (toList labels)
@@ -258,9 +254,9 @@ chartDiagram fm theme ps (xDom, yDom) points chart =
       legend = renderLegend fm ps coloredSeries chart chrome
       marginBox :: Diagram B
       marginBox =
-        rect (1 + leftM + rightM) (1 + botM + topM)
+        rect (1 + marginLeft m + marginRight m) (1 + marginBottom m + marginTop m)
           # alignBL
-          # moveTo (p2 (-leftM, -botM))
+          # moveTo (p2 (-marginLeft m, -marginBottom m))
       gridDia = grid # lc (plotGrid ps) # lwO (plotStroke 1)
       axesDia = axes # lc (plotMuted ps) # lwO (plotStroke 1)
       -- Diagrams composes front-to-back: keep the grid behind the data.

@@ -325,9 +325,7 @@ frameInner (Rect x y w h) =
 
 fitLayoutIO :: FontMetrics -> Layout -> Diagram B -> IO Layout
 fitLayoutIO fm layout d = do
-  let texts = foldr (\op rest -> case op of
-        DrawText _ _ _ _ t _ -> t : rest
-        _ -> rest) [] (diagramTextOps 100 100 d)
+  let texts = foldMap (\case DrawText _ _ _ _ t _ -> [t]; _ -> []) (diagramTextOps 100 100 d)
   prepared <- prepareFontMetricsMany fm texts
   pure (fitLayout prepared layout d)
 
