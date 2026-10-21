@@ -6,6 +6,7 @@ import Data.Bits ((.|.))
 import Data.ByteString qualified as BS
 import Data.Either (isLeft)
 import Data.Foldable (toList)
+import Data.IORef (readIORef)
 import Data.List (nub)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word32)
@@ -125,17 +126,27 @@ testFractionalDpiCalculations = do
 -- pixel.
 testZOrderRenderArena :: IO ()
 testZOrderRenderArena = do
-  ctx <- newPixelContext
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  theme <- readIORef (ctxTheme ctx)
   let boxCol = colorRGBA 0x11 0x22 0x33 255
   raster ctx 100 100 0 (box grow boxCol >> window' (constVar True) "Z" (label "hi")) $ \_ (_, overlay) px -> do
     assert "Overlay text spans collected for floating window chrome" (not (null overlay))
     nodesOf NodeWindow ctx >>= \case
       Rect wx wy ww _ : _ -> do
         cWin <- px (round (wx + ww / 2)) (round wy + 4)
-        assert "Window paints above in-flow content" (cWin /= 0 && cWin /= packColor boxCol)
+        assert "Window paints above in-flow content" (cWin == packColor (styleBg (themeFloatingWindow theme)))
       [] -> assert "Floating window node present in arena" False
     cBox <- px 5 95
     assert "In-flow box painted beneath the window layer" (cBox == packColor boxCol)
+
+-- | A translucent fill blends over what is beneath it: half-transparent
+-- black over the backdrop halves each channel.
+testTranslucentRaster :: IO ()
+testTranslucentRaster = do
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  raster ctx 20 20 (packColor (colorRGBA 0x11 0x22 0x33 255)) (box grow (colorRGBA 0 0 0 128)) $ \_ _ px -> do
+    c <- px 10 10
+    assert "Translucent fill blends over the backdrop" (c == packColor (colorRGBA 8 17 25 255))
 
 -- Check coverage and clipping pixel-for-pixel, including empty iteration
 -- bounds and reversed winding in the numeric raster loops. Square geometry
@@ -372,6 +383,7 @@ main = do
   testScale2xGlyphTables
   testFractionalDpiCalculations
   testZOrderRenderArena
+  testTranslucentRaster
   testTriangleRaster
   testSquareThemedRaster
   testGlyphAtlas
