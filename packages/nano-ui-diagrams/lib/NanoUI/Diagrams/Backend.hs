@@ -11,8 +11,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Lens (Lens', (^.), (^?))
-import Data.Colour (AlphaColour, alphaChannel, black, over)
-import Data.Colour.SRGB (RGB (..), toSRGB)
+import Data.Colour (AlphaColour)
 import Data.DList (DList)
 import Data.DList qualified as DL
 import Data.Maybe (fromMaybe)
@@ -21,7 +20,7 @@ import Data.Tree (Tree (Node))
 import Data.Typeable (Typeable)
 import Data.Primitive.PrimArray (primArrayToList)
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, mapSmallArray', smallArrayFromList)
-import Diagrams.Attributes (Dashing (..), LineCap (..), LineJoin (..), _dashingU, _lineCap, _lineJoin, _lineMiterLimit, _lineWidthU)
+import Diagrams.Attributes (Dashing (..), LineCap (..), LineJoin (..), colorToSRGBA, _dashingU, _fillOpacity, _lineCap, _lineJoin, _lineMiterLimit, _lineWidthU, _opacity, _strokeOpacity)
 import Diagrams.Core
   ( Backend (..)
   , N
@@ -208,21 +207,24 @@ rectOp op = op
 pointFloats :: Real n => P2 n -> (Float, Float)
 pointFloats p = let (x, y) = unp2 p in (toF x, toF y)
 
--- | A style's solid fill and line colours, if they are visible.
+-- | A style's solid fill and line colours, if they are visible, with the
+-- style's opacity and its fill or stroke opacity applied.
 fillColour, lineColour :: (Typeable n, Floating n) => DiaCore.Style V2 n -> Maybe Color
-fillColour sty = solidColour (sty ^? (_fillTexture . _AC))
-lineColour sty = solidColour (sty ^? (_lineTexture . _AC))
+fillColour sty = solidColour (sty ^. _opacity * sty ^. _fillOpacity) (sty ^? (_fillTexture . _AC))
+lineColour sty = solidColour (sty ^. _opacity * sty ^. _strokeOpacity) (sty ^? (_lineTexture . _AC))
 
-solidColour :: Maybe (AlphaColour Double) -> Maybe Color
-solidColour mc = do
+-- | A straight-alpha colour: diagrams' channels without its alpha
+-- premultiplied, which the renderer would apply a second time.
+solidColour :: Double -> Maybe (AlphaColour Double) -> Maybe Color
+solidColour opacity mc = do
   ac <- mc
   let
-    a = alphaChannel ac
+    (r, g, b, a0) = colorToSRGBA ac
+    a = a0 * opacity
   if a <= 0
     then Nothing
     else
       let
-        RGB r g b = toSRGB (ac `over` black)
         q x = round (clamp01 x * 255)
        in
         Just (colorRGBA (q r) (q g) (q b) (q a))

@@ -1,7 +1,8 @@
 module Main (main) where
 
 import Control.Monad (forM_, unless)
-import Data.Colour.Names (coral, steelblue)
+import Data.Colour (withOpacity)
+import Data.Colour.Names (coral, red, steelblue)
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.List (nub, sortOn, tails)
@@ -86,6 +87,7 @@ main = hspec $ do
     it "triangulates indexed polygons with full coverage" testIndexedTriangulation
     it "keeps a polyline's points, dropping repeats and the closing point" testStrokePolylinePoints
     it "fills a level rectangle with a rect op" testRectFill
+    it "keeps a translucent colour's own alpha and the opacity" testTranslucentFill
     it "cuts a loop inside another out by the fill rule" testFillRule
     it "strokes with the style's caps, joins and dashes" testStrokeStyle
   describe "scales and domains" $ do
@@ -239,6 +241,15 @@ testRectFill = do
   check "a turned rectangle is not one polygon" $ case fills (rect 4 2 # rotateBy (1 / 8)) of
     [FillPolygon {}] -> True
     _ -> False
+
+-- | Colours are straight alpha: half-opaque red keeps its full red channel,
+-- whether the alpha is the colour's or the diagram's opacity.
+testTranslucentFill :: IO ()
+testTranslucentFill = do
+  let fillsOf d = mapMaybe inkColor (toList (diagramOps 100 100 (d # lw none)))
+      halfRed = colorRGBA 255 0 0 128
+  check "a translucent fill was darkened" (fillsOf (circle 1 # D.fcA (red `withOpacity` 0.5)) == [halfRed])
+  check "opacity did not reach the fill" (fillsOf (circle 1 # fc red # D.opacity 0.5) == [halfRed])
 
 testFillRule :: IO ()
 testFillRule = do
