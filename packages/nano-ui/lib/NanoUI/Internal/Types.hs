@@ -351,7 +351,7 @@ rectArea (Rect _ _ w h) = w * h
 -- An empty 'DamageClip' means no repaint is needed.
 data Damage
   = DamageFull
-  | DamageClip Rect
+  | DamageClip !Rect
   deriving (Eq, Show)
 
 -- | Whether damage is a clip with non-positive width or height.
