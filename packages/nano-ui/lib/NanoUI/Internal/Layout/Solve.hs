@@ -474,19 +474,22 @@ findAncestorMaxW na idx = go idx 0
 
 measureTextNode :: SolveEnv -> NodeIdx -> IO ()
 measureTextNode env@SolveEnv {seArena = na} idx = do
-  AxisSizing wTag _ minW maxW <- getWidthSizing na idx
+  wAx@(AxisSizing wTag wVal _ maxW) <- getWidthSizing na idx
   hAx <- getHeightSizing na idx
   parentAssigns <- growParent na idx
   txt <- getText na idx
   isRowChild <- parentIsRow na idx
+  -- A fixed width wraps at itself, as placement does ('textWrapCap').
   effMaxW <-
-    if maxW < 1e8
-      then pure maxW
-      else findAncestorMaxW na idx
+    if wTag == SizingFixed
+      then pure wVal
+      else if maxW < 1e8
+        then pure maxW
+        else findAncestorMaxW na idx
   let canWrap = not isRowChild && effMaxW < 1e8
   TextBox {tbW = tw, tbH = th, tbLineH = lineH} <-
     measureTextNodeAt env idx txt effMaxW (\_ lineW -> canWrap && effMaxW + 0.5 < lineW)
-  let reportedW = clamp minW maxW (if wTag == SizingGrow && parentAssigns then 0 else tw)
+  let reportedW = sizeWithin wAx (if wTag == SizingGrow && parentAssigns then 0 else tw)
   setRect na idx 0 0 reportedW (sizeWithin hAx (max lineH th))
 
 -- | Whether a grow-width node's width is assigned from above rather than

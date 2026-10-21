@@ -3,6 +3,7 @@ module Cases.LayoutFlow (tests) where
 import Spec
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.List (findIndex)
+import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (GeomCol, StyleCol, TagCol, TreeCol, geomStride, getClipRect, styleStride, tagStride, treeStride)
@@ -33,6 +34,7 @@ tests =
   , spec "center-body" runCenterTest
   , spec "flex-direction" runFlexDirectionTest
   , spec "grow-max-handoff" runGrowMaxHandoffTest
+  , spec "fixed-width-label" runFixedWidthLabelTest
   ]
 
 red, green, blue, yellow :: Color
@@ -598,3 +600,27 @@ runGrowMaxHandoffTest ctx failed = do
   _ <- warmup2 ctx input0 col
   cs <- map (\r -> (rectY r, rectH r)) <$> rectsAt ctx [1, 2]
   assertEq failed cs [(0, 50), (50, 250)]
+
+-- | A label with a fixed width that its limits do not repeat ('fixedWH', a
+-- plain 'Fixed') measures that width, so a row places what follows past it,
+-- and wraps at it: paint draws as many lines as the label is tall, none
+-- wider than it. The test font's glyphs are as wide as a line is tall.
+runFixedWidthLabelTest :: Context -> IORef Int -> IO ()
+runFixedWidthLabelTest ctx failed = do
+  let ui = columnWith tight $ do
+        rowWith tight $ do
+          labelWith (fixedWH 100 20 . alignEnd) "Name"
+          void (button "Go")
+        labelWith (\l -> l {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap"
+  _ <- warmup2 ctx input0 ui
+  rs <- arenaRects ctx
+  lns <- (\spans -> [t | (_, t, _, _, _) <- spans, t `notElem` ["Name", "Go"]]) <$> collectTextSpans ctx
+  case rs of
+    [_, line, name, go, wrapped] -> do
+      assertEq failed (rectW name) 100
+      assert failed (rectX go >= rectX name + rectW name)
+      assertEq failed (rectX line + rectW line) (rectX go + rectW go)
+      assertEq failed (rectW wrapped) 100
+      assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
+      forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
+    _ -> assertEq failed (length rs) 5

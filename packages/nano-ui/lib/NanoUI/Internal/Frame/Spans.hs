@@ -143,14 +143,17 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
   mCustomCol <- getNodeFontColor arena idx
   fontSize <- getNodeFontSize arena idx
   ax <- getAlignX arena idx
-  AxisSizing wTag _ _ maxW <- getWidthSizing arena idx
+  AxisSizing wTag wVal _ maxW <- getWidthSizing arena idx
   isRowChild <- parentIsRow arena idx
   -- 'nodeTextLines' wraps a row child only at its own newlines, so
-  -- only then does the ancestor cap matter; skip the walk to the root.
+  -- only then does the ancestor cap matter; skip the walk to the root. A
+  -- fixed width caps itself, as the solve measures it.
   effMaxW <-
-    if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
-      then pure maxW
-      else findAncestorMaxW arena idx
+    if wTag == SizingFixed
+      then pure wVal
+      else if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
+        then pure maxW
+        else findAncestorMaxW arena idx
   let rect = Rect x y w h
       mStripe = tableStripeColor theme si
       fg = fromMaybe (textToneColor theme (textNodeFontVariant si) (textNodeFontTone si)) mCustomCol
