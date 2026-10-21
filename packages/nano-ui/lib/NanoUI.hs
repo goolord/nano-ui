@@ -1065,7 +1065,8 @@ module NanoUI
     -- Inside a view, 'askWindow' reads the current 'WindowState', the setters
     -- and commands below update the window, and 'quitUi' requests exit. In
     -- headless test contexts, window operations are no-ops and
-    -- 'requestScreenshot' returns 'Nothing'.
+    -- 'requestScreenshot' answers its callback with 'Nothing' (as
+    -- 'askScreenshot' does).
     --
     -- Setters ('setWindowTitleUi', 'setWindowModeUi', ...) only issue a
     -- backend call when the value changes, so they can be called every frame.
