@@ -2,11 +2,6 @@
 
 ## 0.2.0.0 -- Unreleased
 
-- **Breaking:** `inputWidget` takes an input of
-  type `Var a -> NanoUI Response`, such as `UI.knob' 0 100`, following
-  nano-ui's inputs; the form runs it on a temporary `Var` holding the
-  field's value.
-
 - **Breaking:** runners and `resetForm` take a `FormState` allocated with
   `newFormState`. `FormUI` has a typed lexical owner; field views capture it
   during evaluation, preserving deferred/nested views without dynamic slots
@@ -24,7 +19,9 @@
 - `inputWidget` adapts custom controlled widgets to named or positional fields,
   with explicit decoding, encoding, and a `Publish` policy: `OnChange`,
   `OnChangeOr` a response predicate, or `OnlyWhen` one, which holds edits
-  back until, for example, a commit.
+  back until, for example, a commit. It takes an input of type
+  `Var a -> NanoUI Response`, such as `UI.knob' 0 100`, as nano-ui's inputs
+  are, and runs it on a temporary `Var` holding the field's value.
 - `NanoUI.Form.Input` replaces the parallel `Named` and `Unnamed` modules.
   Built-in inputs take `FieldName`, separating the optional key from the optional
   caption. String literals retain the usual syntax with `OverloadedStrings`;

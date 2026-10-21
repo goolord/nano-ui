@@ -15,19 +15,6 @@
   `FillTriangle`s whose corners each snapped to the pixel grid, so lines
   and markers no longer come out jagged. Strokes take the style's line cap,
   join, miter limit and dashing.
-- Draw ops are a `SmallArray DrawOp` from `primitive` instead of a boxed
-  `Vector` in `diagramOps`, `diagramTextOps`, `diagramFrame` and
-  `labelFitScale`.
-- `CategoryY` holds its labels and values apart, as
-  `CategoryY (SmallArray Text) (PrimArray Double)`. `bar` and `barVec` build
-  it as before. Plot series stay unboxed vectors.
-- `chartDiagram`, `hitTestChartCached` and `nearestPlotHover` take the
-  chart's domains and decimated points, computed once per chart
-  (`seriesDomains`, `seriesPoints`), instead of recomputing them from the
-  `Chart`. Hover lookup reuses what the chart was drawn from.
-- `uniformHeight` is replaced by `letterbox`, which returns the drawn size
-  and offset of a diagram fitted into a box.
-- `NanoUI.Diagrams.Widget` exports `frameInner`.
 - Paths are filled and stroked by the core's canvas path code
   (`NanoUI.Path`): a convex fill is fanned, every chord of a flattened curve
   stays within half a unit of it, and a level rectangle is one rect op.
@@ -56,8 +43,6 @@
 
 ### Removed
 
-- `chartXDomain` and `chartYDomain` from `NanoUI.Plot.Chrome` (use
-  `seriesDomains`), and `diagramPointAtWithExtents` from `NanoUI.Plot.Hit`.
 - **Breaking:** the public `NanoUI.Diagrams.Tessellation` module
   (`triangulatePolygon`, `fillPolygon`, `strokePolyline`, `flattenCubic`).
   The backend fills and strokes through nano-ui's paths; build shapes with
