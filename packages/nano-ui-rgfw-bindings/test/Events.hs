@@ -70,7 +70,7 @@ main = withEventBuffer $ \event -> do
 -- | A stop from another thread ends a wait, and a stop issued before a wait
 -- makes it return at once. Stops that pile up while nothing waits are
 -- drained by the next wait, so later waits block again instead of returning
--- immediately forever. Skipped without an X display.
+-- immediately forever. Skipped without an X display or an OpenGL 3.2 window.
 stopWaitCheck :: Ptr RGFW_event -> IO ()
 stopWaitCheck event = do
   display <- lookupEnv "DISPLAY"
@@ -78,7 +78,7 @@ stopWaitCheck event = do
     then putStrLn "RGFW stop wait: skipped (no X display)"
     else
       createWindowGL "stop wait" 0 0 64 64 rgfw_windowHide 3 2 >>= \case
-        Nothing -> fail "RGFW stop wait: no window"
+        Nothing -> putStrLn "RGFW stop wait: skipped (no OpenGL 3.2 window)"
         Just win -> do
           let drain = pollEvent win event >>= \case
                 EventNone -> pure ()

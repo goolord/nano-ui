@@ -253,7 +253,8 @@ mapRgfwCursor kind = case cursorFallback kind of
   _                  -> R.rgfw_mouseArrow
 
 -- | Run a view in an owned RGFW/OpenGL window until quit. Native resources are
--- released on exit. Window creation failure prints a message and returns.
+-- released on exit. Throws an 'IOError' when the window or its OpenGL 3.2
+-- context cannot be created.
 runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
 runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> liftNanoUI app)
 
@@ -309,7 +310,7 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
   bracket
     (R.createWindowGL (T.unpack (wsTitle settings)) 0 0 openW openH flags 3 2)
     (mapM_ R.closeWindow) $ \mWin -> case mWin of
-      Nothing -> putStrLn "Failed to create RGFW window with an OpenGL 3.2 context."
+      Nothing -> fail "nano-ui-rgfw: could not create a window with an OpenGL 3.2 core context"
       Just win -> runWindow win
   where
     settings = optWindow opts
