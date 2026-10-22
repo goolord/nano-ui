@@ -79,12 +79,6 @@ the latter only returns the final pass's messages if the view rebuilds.
 
 ## Verification
 
-Run `cabal test nano-ui-emit-test`. The suite compiles the negative
-typechecking fixture's binding with its type error deferred, and checks that
-the error fires. The fixture itself is checked from the repository root with:
-
-```sh
-cabal exec -- ghc -fno-code -package nano-ui-emit packages/nano-ui-emit/test/compile-fail/WrongMessage.hs
-```
-
-This command must fail with an `Int`/`Bool` mismatch at `emit True`.
+Run `cabal test nano-ui-emit-test`. The suite compiles a view that emits a
+`Bool` from an `Int` view with its type error deferred, and checks that the
+error fires with an `Int`/`Bool` mismatch.

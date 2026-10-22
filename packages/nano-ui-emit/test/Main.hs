@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Exception (IOException, TypeError (..), evaluate, try)
 import Control.Monad (unless, void, when)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.List (isInfixOf)
 import Data.Text qualified as T
 import DeferredWrongMessage (wrongMessage)
 import NanoUI
@@ -242,5 +243,7 @@ testWrongMessage = do
     (_, msgs, _, _) <- runFrameE ctx (withInput 80 80) wrongMessage
     evaluate (sum msgs)
   case result of
-    Left (TypeError _) -> pure ()
+    Left (TypeError err)
+      | "Int" `isInfixOf` err && "Bool" `isInfixOf` err -> pure ()
+      | otherwise -> fail ("the type error was not the Int/Bool mismatch: " <> err)
     Right _ -> fail "a view emitted a message of another type"

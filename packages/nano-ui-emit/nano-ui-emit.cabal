@@ -13,7 +13,6 @@ category:           Graphics
 build-type:         Simple
 tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:    README.md CHANGELOG.md
-extra-source-files: test/compile-fail/WrongMessage.hs
 
 source-repository head
     type:           git
