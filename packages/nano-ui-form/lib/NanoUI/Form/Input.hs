@@ -57,7 +57,6 @@ import NanoUI.Form.Internal.Field
   , enumField
   , fieldErrors
   , inputWidget
-  , labelled
   , Publish (..)
   )
 import NanoUI.Form.Types (FieldName (..), Form, FormView (..), named, unnamed)
@@ -147,7 +146,8 @@ captioned ::
   (Eq a, FormError FormInput err) =>
   FieldName -> (FormInput -> a) -> (a -> FormInput) -> (NUI.Var a -> NUI.NanoUI NUI.Response) -> a -> Form err a
 captioned name decode encode widget =
-  inputWidget (fieldKey name) (Right . decode) (OnChangeOr respChanged) encode (labelled (fieldLabel name) widget)
+  inputWidget (fieldKey name) (Right . decode) (OnChangeOr respChanged) encode $ \value ->
+    mapM_ NUI.label (fieldLabel name) >> widget value
 
 -- | Static label inside a form.
 label :: Text -> Form err ()
