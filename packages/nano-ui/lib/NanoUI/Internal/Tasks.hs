@@ -95,14 +95,24 @@ holdAction :: IO () -> NanoUI ()
 holdAction release = do
   (wid, ctx) <- freshWidget
   liftIO $ do
-    let widgets = heldWidgets (ctxHeld ctx)
+    let registry = ctxHeld ctx
         widget = intKey wid
-    -- The lease's release drops the widget's entry, so an entry is live.
-    IM.lookup widget <$> readIORef widgets >>= \case
-      Just holding -> touchHeld ctx holding
-      Nothing ->
-        leaseHeld ctx (modifyIORef' widgets (IM.delete widget) >> release)
-          >>= modifyIORef' widgets . IM.insert widget
+    frame <- readPrimVar (heldFrame registry)
+    widgets <- readIORef (heldWidgets registry)
+    entries <- readIORef (heldEntries registry)
+    case IM.lookup widget widgets >>= (`IM.lookup` entries) of
+      Just holding -> touch registry frame holding
+      Nothing -> do
+        key <- hashUnique <$> newUnique
+        seen <- newPrimVar frame
+        let cleanup = do
+              modifyIORef' (heldWidgets registry) (IM.delete widget)
+              release
+              pure (pure ())
+        modifyIORef' (heldWidgets registry) (IM.insert widget key)
+        modifyIORef' (heldEntries registry) (IM.insert key (Holding cleanup seen))
+        modifyPrimVar (heldStamped registry) (+ 1)
+        modifyPrimVar (heldCount registry) (+ 1)
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
 -- earlier key, so the view can keep showing it instead of flickering.
