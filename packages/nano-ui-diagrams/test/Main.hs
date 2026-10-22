@@ -11,6 +11,7 @@ import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArra
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray)
 import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude qualified as D
 import Diagrams.Prelude
   ( Diagram
@@ -101,7 +102,7 @@ main = hspec $ do
   describe "decimation" $ do
     it "keeps LTTB extrema and endpoints" testLttb
     it "keeps min/max extrema" testMinMaxDecimate
-    it "thins connected series but not scatter markers" testDecimateKinds
+    it "thins connected series, and markers only past 2000" testDecimateKinds
   describe "chart chrome" $ do
     it "keeps labels, titles and legends apart" (testLabelFit fm)
     it "colors legend entries like their series" (testLegendColors fm)
@@ -411,15 +412,18 @@ testMinMaxDecimate = do
                && V.maximum (V.map snd input) == V.maximum (V.map snd sampled)
            )
 
--- | Default decimation thins a long line, but every scatter marker stays:
--- unconnected markers that are dropped are simply missing.
+-- | Default decimation thins a long line, but every marker of a scatter or a
+-- marked line stays up to 2000: unconnected markers that are dropped are
+-- simply missing.
 testDecimateKinds :: IO ()
 testDecimateKinds = do
   let
-    pts = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. 99 :: Int]]
-    thinned s = seriesPoints (Builder.chart [s]) s /= seriesPoints (bareChart [s]) s
-  check "decimation did not thin a long line" (thinned (line "l" pts))
-  check "decimation thinned a scatter series" (not (thinned (scatter "s" pts)))
+    pts n = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. n - 1 :: Int]]
+    drawn s = U.length (seriesPoints (Builder.chart [s]) s)
+  check "decimation did not thin a long line" (drawn (line "l" (pts 100)) < 100)
+  check "decimation thinned a scatter series" (drawn (scatter "s" (pts 100)) == 100)
+  check "decimation thinned a marked line" (drawn (withMarker MarkCircle (line "l" (pts 100))) == 100)
+  check "decimation kept every point of a huge scatter" (drawn (scatter "s" (pts 5000)) == 2000)
 
 orderedPoints :: V.Vector (Double, Double) -> Bool
 orderedPoints points = V.and (V.zipWith (\a b -> fst a < fst b) points (V.drop 1 points))

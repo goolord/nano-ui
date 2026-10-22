@@ -99,8 +99,8 @@ data GridMode = GridBoth | GridHorizontal | GridVertical | GridNone
   deriving (Eq, Show)
 
 -- | Series and chart decoration. Decimation reduces line, area and step
--- series before drawing and hit testing; it does not alter the stored data,
--- and scatter series are never thinned.
+-- series before drawing and hit testing; it does not alter the stored data.
+-- Scatter series and lines with markers are thinned only past 2000 points.
 data Chart = Chart
   { chartTitle :: !(Maybe Text)
   , chartXTitle :: !(Maybe Text)
