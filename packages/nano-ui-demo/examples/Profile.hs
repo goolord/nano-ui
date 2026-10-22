@@ -326,9 +326,9 @@ tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
     btnMenu <- button' "Right-click Menu"
     void $ contextMenu btnMenu $ do
       menuHeader "Context Menu"
-      void $ menuItemShortcut "Cut" (ctrl <> key 'x')
-      void $ menuItemShortcut "Copy" (ctrl <> key 'c')
-      void $ menuItemShortcut "Paste" (ctrl <> key 'v')
+      void $ menuItemShortcut "Cut" (cmdOrCtrl <> key 'x')
+      void $ menuItemShortcut "Copy" (cmdOrCtrl <> key 'c')
+      void $ menuItemShortcut "Paste" (cmdOrCtrl <> key 'v')
 
 tabListUi :: NanoUI ()
 tabListUi = columnWith (tight . gap 8 . fillW) $ do
