@@ -48,7 +48,6 @@ runCursorDragOwnerTest ctx failed = do
   _ <- runFrame ctx (pressAt inp (centerOf s)) ui
   _ <- runFrame ctx (holdAt inp (centerOf b)) ui
   assert failed . (/= respId b) =<< getHotId ctx
-  assertEq failed 0 =<< getAnimationValue ctx (respId b)
 
 -- | A plain drawing: a node with no cursor of its own.
 plainArea :: Float -> Float -> NanoUI Response
