@@ -408,7 +408,9 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
       -- or the next one if none is under way.
       setWakeLoop ctx R.stopWaitForEvent
       let font = getCozetteFont
-          initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
+          -- The pointer is off the window until an entry or a motion says
+          -- where it is, not on the widget in the top-left corner.
+          initInp = applyPointerLeave emptyInput {inputWindowSize = logicalSize initPhys initScale}
           -- Touch the platform cursor only when the wanted kind changes.
           -- 'UiCursorHidden' hides the pointer.
           syncCursor c inp = uiCursorKind c inp >>= syncCursorKind cursorRef (R.showMouse win) (setIcon . mapRgfwCursor)
@@ -615,8 +617,9 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventKeyRelease k m -> Just (RgfwEvKey k m False)
   -- Every character but the controls types, joiners and bidi marks included.
   -- On macOS, RGFW passes on the private-use characters AppKit gives arrow
-  -- and function keys (U+F700 to U+F8FF), which type nothing.
-  R.EventKeyChar ch | not (isControl ch) && not (ch >= '\xF700' && ch <= '\xF8FF') -> Just (RgfwEvChar ch)
+  -- and function keys (U+F700 to U+F747), which type nothing. The rest of
+  -- the private-use area types, the Apple logo (U+F8FF) among it.
+  R.EventKeyChar ch | not (isControl ch) && not (ch >= '\xF700' && ch <= '\xF747') -> Just (RgfwEvChar ch)
   _ -> Nothing
 
 -- | Accumulate a decoded event into frame input. The caller handles close
@@ -629,8 +632,9 @@ applyRgfwEvent inp ev = case ev of
   -- RGFW numbers buttons from 0 in 'mouseButtonNumber' order: left, middle,
   -- right, back, forward, then the rest.
   RgfwEvButton btn down -> applyMouseButton (mouseButtonNumber (fromIntegral btn + 1)) down inp
-  -- A drag keeps its pointer: Windows sends no motion outside the window,
-  -- so leaving would drop a dragged slider or scrollbar to the far corner.
+  -- A drag keeps its pointer: its motion outside the window still comes
+  -- (X11's grab, Windows' capture), and a leave after the last of it would
+  -- drop a dragged slider or scrollbar to the far corner.
   RgfwEvLeave
     | inputPointerHeld inp -> inp
     | otherwise -> applyPointerLeave inp

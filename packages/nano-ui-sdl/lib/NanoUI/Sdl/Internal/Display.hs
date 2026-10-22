@@ -23,7 +23,7 @@ module NanoUI.Sdl.Internal.Display
   ) where
 
 import Control.Monad (void)
-import Foreign.C.Types (CBool (..), CInt (..))
+import Foreign.C.Types (CBool (..), CFloat (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
@@ -49,8 +49,14 @@ import System.IO.Unsafe (unsafePerformIO)
 -- scaling the display scale is 1.25 while the density is 1; sizing the
 -- framebuffer by the display scale rendered 1.56x the window's pixels and
 -- squeezed them back down on every present.
+--
+-- SDL works the density out from the width alone, as pixels over window
+-- coordinates, so at a fractional scale it wanders with the width: between
+-- neighbouring widths under several hundred, by more than 'scaleMoved'
+-- tolerates, and each step of a resize would reload the fonts. It is taken
+-- to the nearest 120th, the steps Wayland's fractional scales come in.
 queryWindowPixelDensity :: Ptr SDL_Window -> IO Float
-queryWindowPixelDensity win = (\s -> if s > 0 then s else 1) <$> getWindowPixelDensity win
+queryWindowPixelDensity win = (\s -> if s > 0 then fromIntegral (round (s * 120) :: Int) / 120 else 1) <$> getWindowPixelDensity win
 
 -- | Whether a scale or zoom moved by more than float rounding does.
 scaleMoved :: Float -> Float -> Bool
@@ -140,9 +146,9 @@ foreign import ccall unsafe "nano_ui_window_position"
   queryWindowPosition :: Ptr SDL_Window -> Ptr CInt -> Ptr CInt -> IO CBool
 
 -- | Vertical refresh rate of the window's current display mode, in Hz
--- (0 when unavailable).
+-- (0 when unavailable), fractions kept: 59.94 Hz is not 59.
 foreign import ccall unsafe "nano_ui_window_refresh_rate"
-  queryWindowRefreshHz :: Ptr SDL_Window -> IO CInt
+  queryWindowRefreshHz :: Ptr SDL_Window -> IO CFloat
 
 -- | Whether the window is a shown Wayland toplevel SDL made itself (not
 -- libdecor's), whose size limits nano-ui sends rather than SDL: SDL would

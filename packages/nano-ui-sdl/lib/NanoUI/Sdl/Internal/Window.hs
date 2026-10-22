@@ -53,7 +53,7 @@ import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, withClipboard)
 import NanoUI.Sdl.Internal.Display
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
-import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations)
+import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
@@ -138,7 +138,8 @@ data SdlOptions = SdlOptions
   -- ^ Which SDL render driver to ask for (default: 'RenderDriverAuto').
   -- An @SDL_RENDER_DRIVER@ in the environment wins over this.
   , sdlAppContinuous :: !Bool
-  -- ^ Continuous unthrottled rendering without waiting for events (default: 'False').
+  -- ^ Redraw on every pass without waiting for events, paced by vsync when
+  -- 'sdlAppVsync' is on (default: 'False').
   , sdlExplainLayout :: !Bool
   -- ^ Start with the layout overlay on (default: 'False'). A view toggles
   -- it with @explainLayout@.
@@ -380,12 +381,14 @@ withSdl opts = withSdlWindow hints (windowFlags opts) opts
       -- scale-2 (or fractional) output that the compositor upscales, so
       -- text looks blurred. Native Wayland with
       -- SDL_WINDOW_HIGH_PIXEL_DENSITY rasterizes at the real output scale.
-      -- An explicit SDL_VIDEO_DRIVER wins, and pure X11 sessions are left
-      -- alone.
+      -- X11 follows in the list, for an SDL that cannot start Wayland (built
+      -- without it, or the compositor out of reach) where XWayland runs: a
+      -- driver named alone is the only one SDL tries. An explicit
+      -- SDL_VIDEO_DRIVER wins, and pure X11 sessions are left alone.
       wayland <- lookupEnv "WAYLAND_DISPLAY"
       driver <- lookupEnv "SDL_VIDEO_DRIVER"
       when (isJust wayland && isNothing driver) $
-        setSdlHint sDL_HINT_VIDEO_DRIVER "wayland"
+        setSdlHint sDL_HINT_VIDEO_DRIVER "wayland,x11"
 
 -- | 'withSdl' for measurements: a hidden 800x600 window, bundled fonts,
 -- scale 1, continuous drawing, and no vsync. The window is hidden only: on
@@ -518,7 +521,7 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   sdlForcedScale <- liftIO $ mfilter (> 0) . (>>= readMaybe) <$> lookupEnv "NANO_FORCE_SCALE"
   -- Before the window, so that it is released after the window is gone: the
   -- window holds the hit test this frees.
-  sdlChromeState <- mkAcquire (newChromeState (sdlWindowDecorations opts)) clearChromeState
+  sdlChromeState <- mkAcquire (newChromeState (sdlWindowDecorations opts) (framedWindow flags)) clearChromeState
   (sdlWindow, sdlRenderer) <- acquireWindowAndRenderer opts flags
   density <- liftIO $ queryWindowPixelDensity sdlWindow
   zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)
@@ -555,7 +558,7 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   sdlCachedCtx <-
     liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache sdlFontCache ctx
   let
-    sdlRefreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
+    sdlRefreshPeriod = if refreshHz > 0 then 1 / realToFrac refreshHz else 1 / 60
     sdlVsync = sdlAppVsync opts
     sdlContinuous = sdlAppContinuous opts
   sdlTransparent <-
@@ -656,16 +659,20 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
 
 -- | Write the last presented frame to a BMP file, on the display thread. A
 -- retained session reads its retained texture, since SDL leaves the window
--- backbuffer undefined after a present; a direct-to-window session reads the
--- backbuffer.
+-- backbuffer undefined after a present.
+--
+-- A direct-to-window session ('sdlAppContinuous') has no retained frame and
+-- a readable one only between drawing and presenting, so from a view use
+-- 'NanoUI.requestScreenshot', which reads it at that point.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path =
   withSurface (readFrame env . retainTexture =<< readIORef (sdlRetain env)) False $ \surface ->
     sdlPathEncoding >>= \enc -> GHC.withCString enc path (saveBMP surface . PtrConst.unsafeFromPtr)
 
 -- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
--- window pixels (logical size times display scale) with the drawn alpha,
--- which is the theme's window colour's alpha where nothing covers it.
+-- window pixels (the backbuffer's size, about the logical size times the
+-- pixel density and UI zoom) with the drawn alpha, which is the theme's
+-- window colour's alpha where nothing covers it.
 -- 'Nothing' when SDL cannot read the frame back. Call on the display thread.
 --
 -- A direct-to-window session ('sdlAppContinuous') has a readable frame only

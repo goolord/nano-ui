@@ -27,4 +27,8 @@ bool nano_ui_text_atlas_insert_surface(
 
 void nano_ui_text_atlas_reset(NanoUiTextAtlas *atlas);
 
+/* Destroy every page's texture and empty the atlas, after a render device
+ * reset emptied the textures; pages are made again as glyphs reach them. */
+void nano_ui_text_atlas_drop_textures(NanoUiTextAtlas *atlas);
+
 #endif

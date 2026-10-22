@@ -91,7 +91,8 @@ rgfwSession = SCustom symbolSing
 -- | Allocate a sampler with empty timing and frame stats. The runners make
 -- their own and keep it on the context; a custom loop feeds this one and
 -- installs it with @'NanoUI.Backend.withBackendSession' ctx 'rgfwSession'@
--- for 'askRgfwDebug' to find.
+-- for 'askRgfwDebug' to find. The sampler's fields and 'rgfwSession' are
+-- in "NanoUI.Rgfw.Internal.Debug".
 newRgfwDebugSampler :: IO RgfwDebugSampler
 newRgfwDebugSampler =
   RgfwDebugSampler

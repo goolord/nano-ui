@@ -65,21 +65,24 @@ data ChromeState = ChromeState
   , chromeFromView :: !(IORef Bool)
   -- ^ Whether a view handed the regions over in the frame being drawn, or
   -- else in the one before: they lapse after a frame whose view did not.
-  , chromeDecorations :: !(IORef WindowDecorations)
-  -- ^ The decorations the window has, which asking for again does nothing.
+  , chromeDecorations :: !(IORef (WindowDecorations, Bool))
+  -- ^ The decorations the window has, and whether it could have the sizing
+  -- frame when they were put on ('NanoUI.Sdl.Internal.Frame.framedWindow'):
+  -- asking for the same again does nothing.
   , chromeShadow :: !(IORef (Maybe Bool))
   -- ^ The shadow last asked for, or 'Nothing' since the decorations, which
   -- set it, last changed.
   }
 
--- | The state of a window opened with the given decorations.
-newChromeState :: WindowDecorations -> IO ChromeState
-newChromeState decorations =
+-- | The state of a window opened with the given decorations, and whether it
+-- opened able to have the sizing frame.
+newChromeState :: WindowDecorations -> Bool -> IO ChromeState
+newChromeState decorations framed =
   ChromeState
     <$> newIORef defaultWindowChrome
     <*> newIORef Nothing
     <*> newIORef False
-    <*> newIORef decorations
+    <*> newIORef (decorations, framed)
     <*> newIORef Nothing
 
 -- | Release the marshalled callback. The session acquires this state before

@@ -240,6 +240,8 @@ appView m = Emit.withRunInNanoUIE $ \run -> do
 
 viewControlsTab :: Model -> Emit.NanoUIE Msg ()
 viewControlsTab m = Emit.withRunInNanoUIE $ \run -> do
+  let volPct = round (volumeVal m * 100) :: Int
+      opPct = round (opacityVal m * 100) :: Int
   gridWith 2 (gap 12 . fillW . fillH) $ do
     panelWith (padAll 10 . gap 6 . fixedW 380 . fillH) $ do
       label "Controls"
@@ -275,14 +277,10 @@ viewControlsTab m = Emit.withRunInNanoUIE $ \run -> do
           menuItemDisabled "Disabled Command"
 
       gridWith 1 (gap 2) $ do
-        let
-          volPct = round (volumeVal m * 100) :: Int
         label ("Master Volume: " <> T.pack (show volPct) <> "%")
         run $ Emit.emitChanged (slider 0 1) (volumeVal m) SetVolume
 
       gridWith 1 (gap 2) $ do
-        let
-          opPct = round (opacityVal m * 100) :: Int
         label ("Surface Opacity: " <> T.pack (show opPct) <> "%")
         run $ Emit.emitChanged (slider 0 1) (opacityVal m) SetOpacity
 
@@ -328,9 +326,9 @@ viewControlsTab m = Emit.withRunInNanoUIE $ \run -> do
         label "Turbo Mode:"
         label (if turboOn m then "[ENABLED]" else "[DISABLED]")
         label "Volume Slider:"
-        label (T.pack (show (round (volumeVal m * 100) :: Int)) <> "%")
+        label (T.pack (show volPct) <> "%")
         label "Opacity Slider:"
-        label (T.pack (show (round (opacityVal m * 100) :: Int)) <> "%")
+        label (T.pack (show opPct) <> "%")
         label "Profile Selected:"
         label (T.pack (show (profileOpt m)))
         label "Text Input:"
@@ -349,8 +347,6 @@ viewControlsTab m = Emit.withRunInNanoUIE $ \run -> do
               empty = 20 - filled
              in
               T.replicate filled "█" <> T.replicate empty "░"
-          volPct = round (volumeVal m * 100) :: Int
-          opPct = round (opacityVal m * 100) :: Int
         label "Master Volume:"
         label ("[" <> makeBar volPct <> "] " <> T.pack (show volPct) <> "%")
         label "Surface Opacity:"
@@ -455,7 +451,5 @@ main = do
   let opts =
         defaultRgfwOptions
           { optWindow = defaultWindowSettings {wsTitle = "nano-ui RGFW demo"}
-          , optTheme  = tomorrowNightMinDarkTheme
-          , optScale  = 0.0 -- 0.0 uses the DPI reported by the OS by default
           }
   runRgfwAppReduceCustom opts (\m -> (themeForChoice (currentTheme m), physScaleFor (dpiScale m))) update initialModel appView

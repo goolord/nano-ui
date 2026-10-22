@@ -44,6 +44,7 @@ module NanoUI.Sdl.Internal.Chrome
   ) where
 
 import Control.Monad (unless, void, when)
+import Data.IntMap.Strict qualified as IM
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isNothing)
 -- The constructor under 'SDL_HitTestResult', which the callback returns.
@@ -51,6 +52,8 @@ import Foreign.C.Types (CUInt (..))
 import Foreign.Ptr (FunPtr, castFunPtr, castPtr, nullFunPtr, nullPtr)
 import Foreign.Storable (peekElemOff)
 import NanoUI
+import NanoUI.Internal.Context (OverlayState (osPrevFloatingRects), getsOverlay)
+import NanoUI.Monad (askContext)
 import NanoUI.Sdl.Internal.Chrome.Types
 import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Frame
@@ -80,12 +83,16 @@ windowFlagsOf = SDL.getWindowFlags . sdlWindow
 -- gave it. Going back to 'DecorationsFull' also takes off whatever
 -- 'setWindowChrome' put on the window: the desktop's own title bar is the
 -- desktop's to answer for. Asking for the decorations the window has does
--- nothing, so a view may ask every frame.
+-- nothing, so a view may ask every frame. The sizing frame of
+-- 'DecorationsFrame' goes only on a window that can be resized and is not
+-- fullscreen, so asking for it again after either changed puts it on, or
+-- takes it off, to suit.
 setWindowDecorations :: SdlEnv -> WindowDecorations -> IO ()
 setWindowDecorations env decorations = do
-  old <- readIORef (chromeDecorations st)
-  unless (old == decorations) $ do
-    writeIORef (chromeDecorations st) decorations
+  framed <- framedWindow <$> windowFlagsOf env
+  (old, oldFramed) <- readIORef (chromeDecorations st)
+  unless (old == decorations && (decorations /= DecorationsFrame || oldFramed == framed)) $ do
+    writeIORef (chromeDecorations st) (decorations, framed)
     when (decorations == DecorationsFull) (clearWindowChrome env)
     applyDecorations (sdlWindow env) decorations
     -- That set the shadow too.
@@ -197,9 +204,10 @@ edgeHit left right top bottom
 -- remaining title bar area as the window's drag region.
 --
 -- @taken@ lists the rectangles of other interactive widgets in the title bar
--- (such as menu buttons or tabs); the spans of the bar between them become
--- draggable. The title bar is assumed to span the full window width at the
--- vertical position and height of the caption buttons. On a resizable
+-- (such as menu buttons or tabs); the spans of the bar between them, and
+-- outside the floating panels over it, become draggable. The title bar is
+-- assumed to span the full window width at the vertical position and height
+-- of the caption buttons. On a resizable
 -- borderless window, resize hit testing takes precedence along the outer edges;
 -- when maximized, fullscreen, or non-resizable, edge resizing is disabled (and
 -- dragging is also disabled in fullscreen).
@@ -253,8 +261,13 @@ windowCaptionWith opts taken = do
         | maxed || fullscreen = (capButtons opts) {capCornerRadius = 0}
         | otherwise = capButtons opts
   (action, buttons) <- captionButtonsConfigured cfg maxed
+  ctx <- askContext
   withSdlEnv () $ \env -> do
     flags <- windowFlagsOf env
+    -- Floating panels over the bar (a window placed at the top, a tall
+    -- modal), where they were last frame like the buttons: a press on one
+    -- is the panel's, not a drag of the window.
+    floats <- getsOverlay ctx (IM.elems . osPrevFloatingRects)
     let immovable = maxed || fullscreen || not (hasFlag SDL.SDL_WINDOW_RESIZABLE flags)
     when (hasFlag SDL.SDL_WINDOW_BORDERLESS flags) $
       setViewChrome
@@ -263,7 +276,7 @@ windowCaptionWith opts taken = do
           { chromeDrag =
               if fullscreen
                 then []
-                else dragSpans (Rect 0 (rectY buttons) width (rectH buttons)) (buttons : taken)
+                else dragSpans (Rect 0 (rectY buttons) width (rectH buttons)) (buttons : taken ++ floats)
           , chromeResizeBorder = if immovable then 0 else capResizeBorder opts
           , chromeResizeTop = if immovable then 0 else capResizeTop opts
           }
@@ -277,7 +290,9 @@ windowCaptionWith opts taken = do
 -- 'windowCaption' calls this automatically when drawing standard caption
 -- buttons; use this directly for custom title bar layouts. The regions hold
 -- while the view hands them over every frame: after a frame whose view does
--- not, as when the title bar is no longer drawn, the window has none.
+-- not, as when the title bar is no longer drawn, the window has none. A drag
+-- region drags the window from under whatever is drawn over it, so leave out
+-- floating panels and popups that can cover the title bar.
 setWindowChromeUi :: WindowChrome -> NanoUI ()
 setWindowChromeUi chrome = withSdlEnv () (`setViewChrome` chrome)
 

@@ -12,6 +12,7 @@ module NanoUI.Sdl.Internal.Font
   , newGlyphAtlas
   , destroyGlyphAtlas
   , prepareGlyphAtlasForFrame
+  , dropGlyphTextures
   , closeEvictedFonts
   , sdlPathEncoding
   , glyphAtlasFull
@@ -804,6 +805,9 @@ foreign import ccall unsafe "nano_ui_text_atlas_destroy"
 foreign import ccall unsafe "nano_ui_text_atlas_reset"
   textAtlasReset :: Ptr () -> IO ()
 
+foreign import ccall unsafe "nano_ui_text_atlas_drop_textures"
+  textAtlasDropTextures :: Ptr () -> IO ()
+
 foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
   textAtlasInsertSurface ::
     Ptr () ->
@@ -938,6 +942,14 @@ prepareGlyphAtlasForFrame cache = do
   modifyIORef' (gaFrame (sfcGlyphAtlas cache)) (+ 1)
   full <- glyphAtlasFull cache
   full <$ when full (resetGlyphAtlas cache)
+
+-- | Destroy the glyph pages' textures, which a render device reset emptied,
+-- and reset the atlas at the next frame start, which makes them again.
+dropGlyphTextures :: SdlFontCache -> IO ()
+dropGlyphTextures cache = do
+  let ga = sfcGlyphAtlas cache
+  textAtlasDropTextures (gaAtlas ga)
+  writeIORef (gaFull ga) True
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource

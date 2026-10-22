@@ -1,31 +1,43 @@
 {-# LANGUAGE PackageImports #-}
 
 -- | Window options as SDL reports them, screenshots from retained and
--- continuous sessions, and transparent-window alpha.
+-- continuous sessions, transparent-window alpha, and the session's opening
+-- frames, resize-watch frames and render device resets.
 module WindowChecks (windowChecks) where
 
-import Control.Monad (unless, void, when)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Exception (IOException, try)
+import Control.Monad (replicateM_, unless, void, when)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Foldable (for_)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
+import Data.List (isInfixOf, nub)
 import Data.Maybe (fromJust, isNothing)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Foreign.C.String (peekCString)
+import Foreign.C.Types (CBool (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (castPtr)
-import Foreign.Storable (peek)
+import Foreign.Storable (Storable, peek, poke)
+import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (emptyInput, runNanoUI)
 import NanoUI.Emit (emit, liftNanoUI)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
+import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent), SDL_RenderEvent (SDL_RenderEvent), SDL_WindowEvent (SDL_WindowEvent))
+import SDL3.Sys.Bindgen.Events qualified as Events
+import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
+import SDL3.Sys.Events (pushEventSafe)
 import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
 import SDL3.Sys.Video qualified as SDL
+import System.Environment (lookupEnv)
 import System.Timeout (timeout)
 import "nano-ui-sdl" NanoUI.Backend.Sdl
-import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlWindow, sdlTransparent)
+import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlUiScaleRef, sdlWindow, sdlTransparent)
 
 -- | Run all checks. @gpu@ means a real display with a GPU renderer, which
 -- adds checks the dummy driver cannot support: icon, opacity, position, and
@@ -36,6 +48,11 @@ windowChecks drivers gpu = do
   mapM_ screenshotChecks [False, True]
   transparencyChecks gpu
   reducerEnvironmentCheck
+  openingInputCheck
+  openingCloseCheck
+  resizeFailureCheck
+  deviceResetCheck
+  uiScaleNaNCheck
   dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
@@ -99,6 +116,114 @@ reducerEnvironmentCheck = do
     (,) <$> askSdlEnv <*> (pollFileDialogUi =<< askOpenFileDialog defaultFileDialogOptions)
   check "a closed session is out of reach" (isNothing closed)
   expect "a dialog outside a session fails" FileDialogFailed dialog
+
+-- | Put an event on SDL's queue, as the desktop would.
+push :: Storable e => e -> IO ()
+push ev = alloca $ \p -> do
+  poke (castPtr p) ev
+  pushEventSafe p >>= check "SDL takes the event"
+
+-- | A mouse button going down at (30, 40).
+pushPress :: Integral b => b -> IO ()
+pushPress b =
+  push (SDL_MouseButtonEvent Events.SDL_EVENT_MOUSE_BUTTON_DOWN 0 0 0 1 (fromIntegral b) (CBool 1) 1 0 30 40)
+
+-- | Count the view's passes: the first is 1.
+countPass :: IORef Int -> NanoUI Int
+countPass ref = liftIO (atomicModifyIORef' ref (\n -> (n + 1, n + 1)))
+
+-- | The opening frames are drawn before the loop starts. A press taken while
+-- the first draws is seen by one frame, not replayed by the next; one taken
+-- while the second draws is seen too, not dropped. A wake a second after
+-- each pass draws a frame should the loop wait for input that never comes.
+openingInputCheck :: IO ()
+openingInputCheck = do
+  passes <- newIORef 0
+  seen <- newIORef []
+  runSdlApp options $ do
+    wakeAfter 1
+    n <- countPass passes
+    inp <- askInput
+    liftIO $ modifyIORef' seen ([b | b <- [MouseMiddle, MouseBack], pressedIn b inp] ++)
+    when (n == 1) $ liftIO (pushPress sDL_BUTTON_MIDDLE)
+    when (n == 2) $ liftIO (pushPress sDL_BUTTON_X1)
+    when (n >= 3) quitUi
+  readIORef seen >>= expect "presses during the opening frames, each seen once" [MouseBack, MouseMiddle]
+
+-- | A close request taken during the opening frames closes the window, as
+-- one in the loop does.
+openingCloseCheck :: IO ()
+openingCloseCheck = do
+  firstAt <- newIORef Nothing
+  lost <- newIORef False
+  runSdlApp options $ do
+    wakeAfter 1
+    now <- liftIO getMonotonicTime
+    liftIO (readIORef firstAt) >>= \case
+      Nothing -> liftIO $ do
+        writeIORef firstAt (Just now)
+        push (SDL_QuitEvent Events.SDL_EVENT_QUIT 0 0)
+      Just t0 -> when (now > t0 + 0.5) $ liftIO (writeIORef lost True) >> quitUi
+  readIORef lost >>= check "a close request during the opening frames closes the window" . not
+
+-- | A frame the resize watch draws (a live resize) that throws ends the
+-- session with the exception, as a frame of the loop's own does, rather
+-- than the process. The watch runs where SDL sends the event: here a thread
+-- of the test's, which only the software renderer may draw from.
+resizeFailureCheck :: IO ()
+resizeFailureCheck = do
+  software <- (== Just "software") <$> lookupEnv "SDL_RENDER_DRIVER"
+  when software $ do
+    passes <- newIORef 0
+    outcome <- try $ runSdlApp options $ do
+      wakeAfter 2
+      n <- countPass passes
+      width <- windowWidth
+      when (width < 150) $ liftIO (ioError (userError "too narrow"))
+      -- Once the loop waits, double the UI scale behind the session's back
+      -- and send the event a resize would.
+      live <- askSdlEnv
+      when (n == 1) $ liftIO $ for_ live $ \env -> void $ forkIO $ do
+        threadDelay 300000
+        writeIORef (sdlUiScaleRef env) 2
+        push (SDL_WindowEvent Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED 0 0 0 200 100)
+      -- The wake's frame: nothing drew the resize.
+      when (n >= 3) quitUi
+    case outcome of
+      Left (e :: IOException) -> check "the resize frame's exception leaves the session" ("too narrow" `isInfixOf` show e)
+      Right () -> fail "a session whose resize frame threw ended normally"
+
+-- | After a render device reset, which empties every texture, the next frame
+-- repaints in full with the textures made again, text included.
+deviceResetCheck :: IO ()
+deviceResetCheck = do
+  passes <- newIORef 0
+  shots <- newIORef []
+  redrawn <- newIORef False
+  runSdlApp options $ do
+    wakeAfter 1
+    n <- countPass passes
+    inp <- askInput
+    label "Text after a reset"
+    let shot = requestScreenshot (\s -> modifyIORef' shots (s :))
+    when (n == 2) $ shot >> liftIO (push (SDL_RenderEvent Events.SDL_EVENT_RENDER_DEVICE_RESET 0 0 0))
+    when (n == 3) $ shot >> liftIO (writeIORef redrawn (inputWindowRedraw inp)) >> quitUi
+  readIORef redrawn >>= check "a device reset repaints the window"
+  readIORef shots >>= \case
+    [Just after, Just before] -> do
+      check "text before the reset" (length (nub (pixels before)) > 1)
+      check "text drawn from the remade textures" (after == before)
+    other -> fail ("two screenshots wanted, got " ++ show (length other))
+  where
+    pixels s = let img = screenshotPixels s in [pixelAt s x y | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1]]
+
+-- | A UI scale that is not a number follows the display, as zero does, and
+-- asking for it again asks for no frame.
+uiScaleNaNCheck :: IO ()
+uiScaleNaNCheck =
+  session options (colorRGBA 0 0 0 255) $ \ctx env -> do
+    replicateM_ 3 (frame ctx env True (setSdlUiScale (0 / 0)))
+    isDirty ctx >>= check "asking again for a UI scale that is not a number asks for no frame" . not
 
 dialogStateChecks :: IO ()
 dialogStateChecks = do

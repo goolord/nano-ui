@@ -134,10 +134,10 @@ animUi = do
           then withKey ("pulldown" :: String) (animate (Tween EaseLinear cycleLen 0) 0 1)
           else pure 0
       let time = pullPhase * cycleLen
-      tossRail tossT
+      trackRow "Spring" tossT ruby
       laneTs <- transport exposed rewinding cycleThrow time wash lampGlow
       when
-        (rewinding && not exposed && abs clock < 0.001 && all settled laneTs)
+        (rewinding && not exposed && abs clock < 0.001 && all ((< 0.001) . abs) laneTs)
         (writeVar rewind False)
       panelWith (padXY 12 10 . gap 8 . fixedW (220 + 180 * bellowsT)) $ do
         rowWith (tight . gap 10 . alignMid . fillW) $ do
@@ -148,9 +148,6 @@ animUi = do
           let iris = 12 + 22 * bellowsT
               irisCol = lerpColor film (lerpColor paper ruby 0.18) bellowsT
           box (fixedWH iris iris) irisCol
-
-settled :: Float -> Bool
-settled x = abs x < 0.001
 
 -- | The throw the pull-down cycle runs at: while exposed, the one it had
 -- when exposure began, so dragging the slider does not restart the cycle.
@@ -200,25 +197,17 @@ pullCycleLen :: Float -> Float
 pullCycleLen throwSec = 3 * pullHoldSec + 2 * throwSec
 
 laneT :: Ease -> Float -> Float -> Float
-laneT ease throwSec time =
-  let hold = pullHoldSec
-      out0 = hold
-      out1 = out0 + throwSec
-      topHold1 = out1 + hold
-      in0 = topHold1
-      in1 = in0 + throwSec
-   in if time < out0
-        then 0
-        else if time < out1
-          then applyEase ease ((time - out0) / throwSec)
-          else if time < in0
-            then 1
-            else if time < in1
-              then 1 - applyEase ease ((time - in0) / throwSec)
-              else 0
-
-tossRail :: Float -> NanoUI ()
-tossRail t = trackRow "Spring" t ruby
+laneT ease throwSec time
+  | time < out0 = 0
+  | time < out1 = applyEase ease ((time - out0) / throwSec)
+  | time < in0 = 1
+  | time < in1 = 1 - applyEase ease ((time - in0) / throwSec)
+  | otherwise = 0
+  where
+    out0 = pullHoldSec
+    out1 = out0 + throwSec
+    in0 = out1 + pullHoldSec
+    in1 = in0 + throwSec
 
 lane :: Bool -> Bool -> Float -> Float -> T.Text -> Ease -> NanoUI Float
 lane exposed rewinding throwSec time name ease = do

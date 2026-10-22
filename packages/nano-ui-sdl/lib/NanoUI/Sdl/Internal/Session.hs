@@ -3,18 +3,21 @@ module NanoUI.Sdl.Internal.Session
   ( runSdlSession
   ) where
 
-import Control.Exception (bracket)
+import Control.Exception (SomeException, bracket, handle, throwIO)
 import Control.Monad (forM_, unless, void, when)
+import Data.Foldable (traverse_)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
+import GHC.Clock (getMonotonicTime)
 import NanoUI (WindowSettings (..), followSystemTheme, unlessM, whenM)
-import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, setExplainLayout)
+import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
+import NanoUI.Sdl.Internal.Runner (resetRenderTextures)
 import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, windowZoom, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
@@ -47,8 +50,18 @@ runSdlSession options drawFn = do
     -- decided whether to draw. That frame already covers the size change and
     -- expose events the loop is about to see.
     resizePresented <- newIORef Nothing
+    -- An exception from a frame drawn here cannot unwind past the C that
+    -- called the watch: GHC would end the process there, past every handler
+    -- and release. It waits for the loop's next pass to throw it, and the
+    -- watch draws nothing more.
+    resizeFailure <- newIORef Nothing
+    -- When the watch last drew, or 0 when the loop has drawn since. A watch
+    -- frame after another ticks animations by the time between them, not by
+    -- the loop's last delta, and the loop's next frame ticks only the time
+    -- after the watch's.
+    watchDrawnAt <- newIORef 0
     -- The live context is the session's: 'syncDisplay' answers it.
-    let onResize = void $ tryWithDrawingLock drawing $ do
+    let resizeFrame = void $ tryWithDrawingLock drawing $ do
           liveCtx <- readIORef (sdlCachedCtx env)
           inp <- readIORef prev
           scale0 <- readIORef (sdlScaleRef env)
@@ -57,8 +70,15 @@ runSdlSession options drawFn = do
           scale1 <- readIORef (sdlScaleRef env)
           unless (inputWindowSize inpSynced == inputWindowSize inp && scale1 == scale0) $ do
             pauseVsync True
-            _ <- drawFn ctx' env inpSynced True
+            now <- getMonotonicTime
+            t <- readIORef watchDrawnAt
+            writeIORef watchDrawnAt now
+            -- At most the 50 ms the loop ticks a frame by.
+            let dt = if t > 0 then min 0.05 (realToFrac (now - t)) else inputDeltaTime inpSynced
+            _ <- drawFn ctx' env inpSynced {inputDeltaTime = dt} True
             writeIORef resizePresented (Just (inputWindowSize inpSynced))
+        onResize = whenM (isNothing <$> readIORef resizeFailure) $
+          handle (\(e :: SomeException) -> writeIORef resizeFailure (Just e)) resizeFrame
     -- A wake (a background thread changed what the view reads, a file dialog
     -- finished) asks for a frame. What that frame presents is up to its
     -- damage: a wake that changed nothing on screen costs the UI pass and no
@@ -69,11 +89,16 @@ runSdlSession options drawFn = do
         decode evs = do
           zoom <- windowZoom env
           when (hasPointerEvent evs) (writeIORef (sdlPointerSeen env) True)
+          -- The frame the reset asks for makes the textures again.
+          when (EvRenderDeviceReset `elem` evs) (resetRenderTextures env)
           noteWake (scaleEventPositions zoom evs)
     -- Take every queued event into the input, syncing the display after
-    -- each batch, until none is left.
+    -- each batch, until none is left. SDL asks to quit once, so a request
+    -- taken here is kept for the loop.
+    quitTaken <- newIORef False
     let settle c inp = do
           pending <- pollEvents >>= decode
+          when (EvQuit `elem` pending) (writeIORef quitTaken True)
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
           if null pending then pure (c', inp') else settle c' inp'
     -- The opening frames are drawn here, outside the loop, so what one asks
@@ -91,11 +116,14 @@ runSdlSession options drawFn = do
     startupFrame ctx1 inp0
     -- First present can apply DPI. Prev rects are empty on that frame.
     -- Draw once more before idle or the Controls page stays stretched
-    -- until the first mouse move.
-    (ctx1b, inp0b, scaleSettle) <- settleScaled ctx1 inp0
+    -- until the first mouse move. Each frame's one-shot input (presses,
+    -- keys, text) is only what came after the frame before.
+    (ctx1b, inp0b, scaleSettle) <- settleScaled ctx1 (clearEphemeral inp0)
     startupFrame ctx1b inp0b
-    (ctx2, inp1, scale1) <- settleScaled ctx1b inp0b
-    when (inputWindowSize inp1 /= inputWindowSize inp0b || scaleMoved scale1 scaleSettle || scaleMoved scaleSettle scale0) $
+    (ctx2, inp1, scale1) <- settleScaled ctx1b (clearEphemeral inp0b)
+    -- Once more for a size or scale the second frame did not have, or for
+    -- one-shot input it did not see, which the loop's first pass clears.
+    when (inputWindowSize inp1 /= inputWindowSize inp0b || scaleMoved scale1 scaleSettle || scaleMoved scaleSettle scale0 || inp1 /= clearEphemeral inp1) $
       startupFrame ctx2 inp1
     writeIORef prev inp1
     -- The last opening frame may have asked for another: it marked the
@@ -116,6 +144,7 @@ runSdlSession options drawFn = do
             , sdIsButtonEdge  = isButtonEdge
             , sdIsSessionQuit = (== EvQuit)
             , sdSyncDisplay   = \c inp -> do
+                readIORef resizeFailure >>= traverse_ throwIO
                 pauseVsync False
                 synced@(_, inp') <- syncDisplay c env inp
                 synced <$ writeIORef prev inp'
@@ -146,7 +175,13 @@ runSdlSession options drawFn = do
                 -- Only a frame that runs answers a wake.
                 drawn <- tryWithDrawingLock drawing $ do
                   writeIORef wakeRef False
-                  drawFn c env inpSynced forceFull
+                  t <- readIORef watchDrawnAt
+                  if t > 0
+                    then do
+                      now <- getMonotonicTime
+                      writeIORef watchDrawnAt 0
+                      drawFn c env inpSynced {inputDeltaTime = min (inputDeltaTime inpSynced) (realToFrac (now - t))} forceFull
+                    else drawFn c env inpSynced forceFull
                 -- A frame the lock turned away leaves its wake's event off
                 -- the queue: queue it again for the pass after the lock is
                 -- free.
@@ -156,5 +191,11 @@ runSdlSession options drawFn = do
             , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = sdlAppShouldQuit options
             }
-    bracket (installResizeWatch onResize) id $ \_ ->
-      runSessionLoop drv ctx2 inp1
+    -- A close request the opening frames took, which the loop would not see:
+    -- it ends the session here, or with exits off the loop's first frame
+    -- reports it.
+    quit <- readIORef quitTaken
+    closeNow <- if quit then requestWindowClose ctx2 else pure False
+    unless closeNow $
+      bracket (installResizeWatch onResize) id $ \_ ->
+        runSessionLoop drv ctx2 inp1

@@ -182,6 +182,20 @@ bool nano_ui_text_atlas_insert_surface(
     return true;
 }
 
+void nano_ui_text_atlas_drop_textures(NanoUiTextAtlas *atlas)
+{
+    if (!atlas) {
+        return;
+    }
+    for (int i = 0; i < NANO_UI_TEXT_ATLAS_PAGES; i++) {
+        if (atlas->tex[i]) {
+            SDL_DestroyTexture(atlas->tex[i]);
+            atlas->tex[i] = NULL;
+        }
+    }
+    atlas->pages = 0;
+}
+
 void nano_ui_text_atlas_reset(NanoUiTextAtlas *atlas)
 {
     if (!atlas) {

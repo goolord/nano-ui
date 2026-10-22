@@ -35,6 +35,8 @@ The theme is any core `Theme`. The backend draws it with square corners and 1px
 borders (`applyRgfwTheme`), since geometry is drawn as flat quads. The font is
 drawn from its 7x13 bitmap at 1x, from EPX-scaled bitmaps at 2x and 4x, and
 box-averaged from those at other scales. A scale of `0` follows the monitor.
+Text has that one size: `fontSize` and `fontMono` change nothing here, and
+text of every size is laid out as it is drawn.
 
 ## Running
 

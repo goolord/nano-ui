@@ -6,13 +6,14 @@ module NanoUI.Sdl.Internal.Runner
   , sdlDebugSnapshot
   , setSdlUiFont
   , setSdlUiScale
+  , resetRenderTextures
   ) where
 
 import Control.Exception (finally, mask_)
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
 import Data.IORef (IORef, readIORef, writeIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (answerScreenshots, answerScreenshotsAfter)
@@ -49,8 +50,11 @@ import SDL3.Sys.Render
   )
 
 -- | Build, draw, and present one frame on the display thread. The final flag
--- forces a full repaint. Returns whether another frame is needed. Use the
--- context/input returned by @syncDisplay@.
+-- forces a full repaint. Returns whether the frame left the context dirty
+-- ('NanoUI.Backend.isDirty'); a host that draws frames itself also draws
+-- while 'NanoUI.Testing.anyAnimating' holds, and at
+-- 'NanoUI.Backend.getWakeAt'. Use the context/input returned by
+-- @syncDisplay@.
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO Bool
 sdlDrawFrame ctx ui env inp forceFull =
   drawFrameWith ctx env inp forceFull ((\(_, drawData, dirty) -> (drawData, dirty)) <$> runFrame ctx inp ui)
@@ -67,13 +71,22 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- base fonts) so a reset can never wipe the texture underneath
   -- already-recorded text mid-frame.
   freshAtlas <- prepareGlyphAtlasForFrame (sdlFontCache env)
+  -- The reset emptied the glyph slots a kept draw's text points at, so the
+  -- frame paints rather than reuse one.
+  when freshAtlas (damageFull ctx)
   -- Fonts the size cache evicted close only now, with the text caches that
   -- can still hold their metrics dropped, before the UI pass draws.
   whenM (closeEvictedFonts (sdlFontCache env)) (clearMeasureCache ctx)
   scale <- readIORef (sdlScaleRef env)
+  -- The frame is the backbuffer's size. One worked out from the scale can be
+  -- a pixel off it at a fractional scale, where each axis rounds apart, and
+  -- the copy to the window would stretch it. A NANO_FORCE_SCALE frame is
+  -- drawn at a scale the window does not have, and the copy fits it.
+  (outputOk, ow, oh) <- outPair (getRenderOutputSize ren)
   let Size lw lh = inputWindowSize inp
-      pw = max 1 (round (lw * scale))
-      ph = max 1 (round (lh * scale))
+      fromOutput = outputOk && ow > 0 && oh > 0 && isNothing (sdlForcedScale env)
+      pw = if fromOutput then fromIntegral ow else max 1 (round (lw * scale))
+      ph = if fromOutput then fromIntegral oh else max 1 (round (lh * scale))
       -- A transparent window repaints in full on any change: a clip frame
       -- blends its backdrop over the old pixels, which would show through a
       -- translucent window colour.
@@ -87,15 +100,12 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- equivalent to the retained blit only at the same pixel dimensions;
   -- content scale and window pixel density can differ. A transparent window
   -- always draws retained: the copy to the window premultiplies its alpha.
-  direct <-
-    if sdlContinuous env && not transparent
-      then do
-        (ok, ow, oh) <- outPair (getRenderOutputSize ren)
-        pure (ok && fromIntegral ow == pw && fromIntegral oh == ph)
-      else pure False
+  -- A retained texture left from an earlier frame goes, so nothing reads
+  -- that older frame from it as the last one.
+  let direct = sdlContinuous env && not transparent && outputOk && fromIntegral ow == pw && fromIntegral oh == ph
   (tex, retainNew) <-
     if direct
-      then pure (nullPtr, False)
+      then (nullPtr, False) <$ dropRetain env
       else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
   writeIORef (ctxPaintFull ctx) (presentFull || transparent)
@@ -269,6 +279,25 @@ ensureRetain env w h scale = do
   where
     roundUp n = max retainBlock (((n + retainBlock - 1) `div` retainBlock) * retainBlock)
 
+-- | Destroy the retained texture, if there is one; the next retained frame
+-- makes a new one.
+dropRetain :: SdlEnv -> IO ()
+dropRetain env = do
+  tex <- retainTexture <$> readIORef (sdlRetain env)
+  unless (tex == nullPtr) $ do
+    writeIORef (sdlRetain env) (Retain nullPtr 0 0 0 0 0)
+    destroyTexture tex
+
+-- | After a render device reset, which emptied every texture: drop the
+-- retained frame, the image atlas and the glyph pages, so the next frame
+-- makes and fills them again. That frame repaints whole
+-- ('NanoUI.Sdl.Internal.Input.EvRenderDeviceReset' asks for it).
+resetRenderTextures :: SdlEnv -> IO ()
+resetRenderTextures env = do
+  dropRetain env
+  SdlImage.destroyImageAtlas (sdlImages env)
+  dropGlyphTextures (sdlFontCache env)
+
 -- | Read the open session's debug information, refreshing at most four
 -- times per second; 'Nothing' outside a session. Repeated queries keep the
 -- debug sampler active and can schedule periodic frames.
@@ -307,7 +336,9 @@ setSdlUiFont = requestDisplay sdlFontRequestRef
 -- of the pixel density, or zero or less to follow the display. The display
 -- thread applies it before the next frame, which this asks for.
 setSdlUiScale :: Float -> NanoUI ()
-setSdlUiScale = requestDisplay sdlUiScaleRef
+-- Not a number follows the display too, and is kept as zero: it is unequal
+-- even to itself, so asking for it again would ask for a frame every time.
+setSdlUiScale s = requestDisplay sdlUiScaleRef (if isNaN s then 0 else s)
 
 -- | Hand the display thread a new setting and ask for the frame it is
 -- applied before. Asking for the setting already asked for asks for nothing.

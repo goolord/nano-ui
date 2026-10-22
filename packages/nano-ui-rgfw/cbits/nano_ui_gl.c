@@ -469,23 +469,25 @@ int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, f
   return 1;
 }
 
-/* Read the retained frame as RGBA rows, bottom row first, into out, which
- * holds fbW * fbH * 4 bytes of the last frame's size. */
-void nano_ui_gl_read_retained(nano_ui_gl* r, uint8_t* out) {
+/* Read the bottom-left w x h of the retained frame as RGBA rows, bottom row
+ * first, into out, which holds w * h * 4 bytes. Pixels past the last frame's
+ * size are undefined. */
+void nano_ui_gl_read_retained(nano_ui_gl* r, int32_t w, int32_t h, uint8_t* out) {
   ngl_api* gl = &r->gl;
   gl->BindFramebuffer(GL_READ_FRAMEBUFFER, r->retainFbo);
   gl->PixelStorei(GL_PACK_ALIGNMENT, 1);
-  gl->ReadPixels(0, 0, r->fbW, r->fbH, GL_RGBA, GL_UNSIGNED_BYTE, out);
+  gl->ReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out);
   gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 /* Read the window's back buffer after present and before the swap, which
- * leaves it undefined. Used by tests of the present. */
-void nano_ui_gl_read_window(nano_ui_gl* r, uint8_t* out) {
+ * leaves it undefined, as nano_ui_gl_read_retained does. Used by tests of
+ * the present. */
+void nano_ui_gl_read_window(nano_ui_gl* r, int32_t w, int32_t h, uint8_t* out) {
   ngl_api* gl = &r->gl;
   gl->BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
   gl->PixelStorei(GL_PACK_ALIGNMENT, 1);
-  gl->ReadPixels(0, 0, r->fbW, r->fbH, GL_RGBA, GL_UNSIGNED_BYTE, out);
+  gl->ReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out);
   gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 

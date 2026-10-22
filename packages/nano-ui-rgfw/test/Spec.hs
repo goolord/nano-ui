@@ -15,7 +15,7 @@ import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
   , UiCursorKind (..), V2 (..), box, constVar, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
-  , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window'
+  , fixedWH, fontMono, fontSize, grow, imageConfigured', label, labelWith, respRect, tomorrowNightMinDarkTheme, window'
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
@@ -193,6 +193,18 @@ testSquareThemedRaster = do
         assert "Checkbox label is glyphs, not solid boxes" (lit > 0 && lit * 2 < length ps)
       [] -> assert "Checkbox label span collected" False
 
+-- | Cozette stamps every span from its one 6x13 cell, so sized and
+-- monospace text is laid out in that cell too: each span is as wide as the
+-- glyphs drawn in it.
+testCozetteEverySize :: IO ()
+testCozetteEverySize = do
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  let inp = withInputOff 240 120
+  _ <- run2Frames ctx inp (column (labelWith (fontSize 26) "Title" >> labelWith fontMono "1234"))
+  (base, _) <- collectRasterSpans ctx inp
+  assert "Sized and monospace text spans measure the Cozette cell"
+    ([(t, w, h) | (Rect _ _ w h, t, _, _, _) <- base] == [("Title", 30, 13), ("1234", 24, 13)])
+
 -- | The OpenGL glyph atlas holds every glyph exactly as the software blitter
 -- stamps it at that scale: the grid fits the font, and a cell equals a
 -- standalone render with nothing bleeding in from its neighbours.
@@ -259,6 +271,8 @@ testRgfwTyping = do
   assert "RGFW typing: repeated key-char events all type" (chars [EventKeyChar 'l', EventKeyChar 'l'] == "ll")
   assert "RGFW typing: a joiner types, and macOS arrow-key characters do not"
     (chars [EventKeyChar '\x200C', EventKeyChar '\xF702'] == "\x200C")
+  assert "RGFW typing: private-use characters past the macOS function keys type"
+    (chars [EventKeyChar '\xF747', EventKeyChar '\xF748', EventKeyChar '\xF8FF'] == "\xF748\xF8FF")
   assert "RGFW typing: repeated keystrokes all type" (chars (plainL ++ plainL) == "ll")
   assert "RGFW typing: a keystroke is its character key as well" (keys plainL == [KeyChar 'l'])
   assert "RGFW typing: Ctrl+L queued char-first is a chord" (chord ctrlLCharFirst)
@@ -312,8 +326,8 @@ testRgfwPointer = do
   assert "RGFW buttons: misc 2 is forward" (pressedBy R.rgfw_mouseMisc2 == [MouseForward])
   assert "RGFW buttons: misc 3 to 5 are the next buttons" (concatMap pressedBy [R.rgfw_mouseMisc2 + 1 .. R.rgfw_mouseMisc2 + 3] == map MouseOther [6, 7, 8])
   assert "RGFW pointer: leaving the window moves the pointer off it" (let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
-  -- Windows sends no motion outside the window during a drag, so a leave
-  -- then would drop a dragged slider or scrollbar to the far corner.
+  -- A drag's motion outside the window still comes, so a leave then would
+  -- drop a dragged slider or scrollbar to the far corner.
   let dragOut = applied [EventMouseButton R.rgfw_mouseLeft True, EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
   assert "RGFW pointer: leaving with a button held keeps the pointer" (inputMousePos dragOut == V2 30 40)
   assert "RGFW window: an uncovered or restored window repaints in full" $
@@ -381,6 +395,7 @@ main = do
   testTranslucentRaster
   testTriangleRaster
   testSquareThemedRaster
+  testCozetteEverySize
   testGlyphAtlas
   testSpanQuads
   testTurnedImageRaster

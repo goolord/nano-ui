@@ -3728,9 +3728,9 @@ void RGFW_windowFocusCallback(RGFW_window* win, RGFW_bool inFocus) {
 
 		event.type = RGFW_windowFocusIn;
 	} else if (inFocus == RGFW_FALSE) {
-		if ((win->internal.flags & RGFW_windowFullscreen))
-			RGFW_window_minimize(win);
-
+		/* nano-ui: a fullscreen window losing focus stays, as SDL's desktop
+		   fullscreen does, rather than minimizing: clicking another monitor
+		   no longer hides it. */
 		size_t key;
 		for (key = 0; key < RGFW_keyLast; key++) {
 			if (RGFW_isKeyDown((u8)key) == RGFW_FALSE) continue;
@@ -11210,6 +11210,17 @@ LRESULT CALLBACK WndProcW(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 win->src.actionFrame = RGFW_FALSE;
             }
 
+			/* nano-ui: the capture taken below for a press went elsewhere
+			   (another window took it, or this one was deactivated), so the
+			   releases of the buttons still down will not come here:
+			   release them now. */
+			if ((HWND)lParam != hWnd) {
+				u8 button;
+				for (button = 0; button < RGFW_mouseFinal; button++)
+					if (_RGFW->mouseButtons[button].current)
+						RGFW_mouseButtonCallback(win, (RGFW_mouseButton)button, 0);
+			}
+
             break;
         }
 		#ifndef RGFW_NO_DPI
@@ -11457,6 +11468,11 @@ LRESULT CALLBACK WndProcW(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			else value = (message == WM_LBUTTONDOWN) ? (u8)RGFW_mouseLeft :
 									 (message == WM_RBUTTONDOWN) ? (u8)RGFW_mouseRight : (u8)RGFW_mouseMiddle;
 
+			/* nano-ui: capture the mouse while a button is down, as SDL and
+			   GLFW do, so a drag's motion outside the window and its release
+			   come here, not to the window under the pointer. */
+			if (GetCapture() != hWnd)
+				SetCapture(hWnd);
 			RGFW_mouseButtonCallback(win, value, 1);
 			break;
 		}
@@ -11468,6 +11484,16 @@ LRESULT CALLBACK WndProcW(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 									 (message == WM_RBUTTONUP) ? (u8)RGFW_mouseRight : (u8)RGFW_mouseMiddle;
 
 			RGFW_mouseButtonCallback(win, value, 0);
+			/* nano-ui: the last button up ends the capture. Released outside
+			   the window, the pointer has left it. */
+			if (!(wParam & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2)) && GetCapture() == hWnd) {
+				RECT area;
+				i32 x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
+				ReleaseCapture();
+				GetClientRect(hWnd, &area);
+				if (x < area.left || y < area.top || x >= area.right || y >= area.bottom)
+					RGFW_mouseNotifyCallback(win, x, y, RGFW_FALSE);
+			}
 			break;
 		}
 		case WM_MOUSEWHEEL: {
@@ -11896,8 +11922,8 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 	RGFW_monitor* mon  = RGFW_window_getMonitor(win);
 
 	if (fullscreen == RGFW_FALSE) {
-		RGFW_monitor_setMode(mon, &win->internal.oldMode);
-
+		/* nano-ui: no display mode to restore, as fullscreen keeps the
+		   monitor's own (below). */
 		RGFW_window_setBorder(win, 1);
 
 		RECT rect = { 0, 0, win->internal.oldW, win->internal.oldH};
@@ -11923,12 +11949,18 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 
 	RGFW_window_setBorder(win, 0);
 
-    SetWindowPos(win->src.window, HWND_TOPMOST, (i32)mon->x, (i32)mon->y, 0, 0, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOSIZE);
+	/* nano-ui: on top, not topmost. Losing focus no longer minimizes the
+	   window, and a topmost one would stay over the app switched to, and
+	   over everything once it left fullscreen. */
+    SetWindowPos(win->src.window, HWND_TOP, (i32)mon->x, (i32)mon->y, 0, 0, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOSIZE);
 	win->x = mon->x;
 	win->y = mon->y;
 
-	RGFW_monitor_scaleToWindow(mon, win);
-    SetWindowPos(win->src.window, HWND_TOPMOST, 0, 0, (i32)mon->mode.w, (i32)mon->mode.h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOMOVE);
+	/* nano-ui: cover the monitor at its own display mode, as SDL's desktop
+	   fullscreen does. RGFW_monitor_scaleToWindow switched the monitor to
+	   the window's size and saved that to the registry, and nothing put it
+	   back when the app quit or lost focus. */
+    SetWindowPos(win->src.window, HWND_TOP, 0, 0, (i32)mon->mode.w, (i32)mon->mode.h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOMOVE);
 	win->w = mon->mode.w;
 	win->h = mon->mode.h;
 }
@@ -11961,12 +11993,20 @@ RGFW_bool RGFW_window_isFloating(RGFW_window* win) {
 	return (GetWindowLongPtr(win->src.window, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 }
 
+/* nano-ui: a stop stays pending until a wait takes it, as X11's stop pipe
+   does. The posted message alone is taken by any event poll, so a stop made
+   between a poll and the next wait did not end that wait. */
+static volatile LONG RGFW_win32_stopPending = 0;
+
 void RGFW_stopCheckEvents(void) {
+	InterlockedExchange(&RGFW_win32_stopPending, 1);
 	PostMessageW(_RGFW->helperWindow, WM_NULL, 0, 0);
 }
 
 void RGFW_waitForEvent(i32 waitMS) {
+	if (InterlockedExchange(&RGFW_win32_stopPending, 0)) return;
 	MsgWaitForMultipleObjects(0, NULL, FALSE, (DWORD)waitMS, QS_ALLINPUT);
+	InterlockedExchange(&RGFW_win32_stopPending, 0);
 }
 
 RGFW_key RGFW_physicalToMappedKey(RGFW_key key) {
@@ -14261,7 +14301,13 @@ RGFW_bool RGFW_getGlobalMouse(i32* x, i32* y) {
 	return RGFW_TRUE;
 }
 
+/* nano-ui: a stop stays pending until a wait takes it, as X11's stop pipe
+   does. The posted event alone is taken by any event poll, so a stop made
+   between a poll and the next wait did not end that wait. */
+static volatile int RGFW_osx_stopPending = 0;
+
 void RGFW_stopCheckEvents(void) {
+	__atomic_store_n(&RGFW_osx_stopPending, 1, __ATOMIC_SEQ_CST);
 	id eventPool = objc_msgSend_class(objc_getClass("NSAutoreleasePool"), sel_registerName("alloc"));
 	eventPool = objc_msgSend_id(eventPool, sel_registerName("init"));
 
@@ -14276,6 +14322,7 @@ void RGFW_stopCheckEvents(void) {
 }
 
 void RGFW_waitForEvent(i32 waitMS) {
+	if (__atomic_exchange_n(&RGFW_osx_stopPending, 0, __ATOMIC_SEQ_CST)) return;
 	id eventPool = objc_msgSend_class(objc_getClass("NSAutoreleasePool"), sel_registerName("alloc"));
 	eventPool = objc_msgSend_id(eventPool, sel_registerName("init"));
 
@@ -14298,6 +14345,7 @@ void RGFW_waitForEvent(i32 waitMS) {
 	}
 
 	objc_msgSend_bool_void(eventPool, sel_registerName("drain"));
+	__atomic_store_n(&RGFW_osx_stopPending, 0, __ATOMIC_SEQ_CST);
 }
 
 RGFW_key RGFW_physicalToMappedKey(RGFW_key key) {
@@ -14414,8 +14462,10 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 
 		win->internal.flags |= RGFW_windowFullscreen;
 
+		/* nano-ui: cover the monitor at its own display mode rather than
+		   switching it to the window's size, which leaving fullscreen never
+		   undid. */
 		RGFW_monitor* mon = RGFW_window_getMonitor(win);
-		RGFW_monitor_scaleToWindow(mon, win);
 
 		RGFW_window_setBorder(win, RGFW_FALSE);
 

@@ -140,6 +140,9 @@ data SdlEvent
   | EvDrop DropEvent
   | EvRefresh
   | EvWindowRedraw
+  | EvRenderDeviceReset
+  -- ^ The render device was reset, which emptied every texture. The session
+  -- makes its textures again and repaints the whole window.
   | EvEditing Text Int Int
   -- ^ The input method's composition changed: its text, then the start and
   -- length of its caret or selection ('applyComposition'). Empty text ends
@@ -172,7 +175,8 @@ waitEvent ms =
     if got then refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
 
 -- | Translate one SDL event, given the refresh event type; 'Nothing' for
--- events the UI ignores.
+-- events the UI ignores. A lost render device, which ends the session,
+-- throws.
 decodeEvent :: Word32 -> Ptr SDL_Event -> IO (Maybe SdlEvent)
 decodeEvent refreshTy p = do
   Uint32 w <- peek p.type'
@@ -190,9 +194,12 @@ decodeEvent refreshTy p = do
       Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
       Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
       -- The renderer's targets lost their contents, the retained frame's
-      -- among them. (A device reset loses every texture, the atlases too,
-      -- which a repaint does not bring back; that is not handled.)
+      -- among them.
       Events.SDL_EVENT_RENDER_TARGETS_RESET -> pure (Just EvWindowRedraw)
+      -- Every texture lost its contents, the atlases too (a Direct3D device
+      -- removed by a driver update or a remote desktop reconnecting).
+      Events.SDL_EVENT_RENDER_DEVICE_RESET -> pure (Just EvRenderDeviceReset)
+      Events.SDL_EVENT_RENDER_DEVICE_LOST -> ioError (userError "SDL lost the render device, and with it the renderer")
       Events.SDL_EVENT_KEY_DOWN -> Just . keyEvent True <$> peek p.key
       Events.SDL_EVENT_KEY_UP -> Just . keyEvent False <$> peek p.key
       Events.SDL_EVENT_TEXT_INPUT -> textInput p
@@ -348,6 +355,7 @@ applyEvent inp ev =
     EvEditing txt start len -> applyComposition txt start len inp
     EvFocusLost -> releaseAllKeys (applyComposition "" 0 0 inp)
     EvWindowRedraw -> inp {inputWindowRedraw = True}
+    EvRenderDeviceReset -> inp {inputWindowRedraw = True}
     -- A wake asks for a frame, not a repaint: the session runs one, and its
     -- damage decides what is presented, if anything.
     EvRefresh -> inp

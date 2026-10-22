@@ -19,7 +19,7 @@ import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import System.Directory (doesDirectoryExist, getHomeDirectory, listDirectory)
 import System.Environment (lookupEnv)
-import System.FilePath (splitSearchPath, takeBaseName, takeDirectory, takeExtension, (</>))
+import System.FilePath (isAbsolute, splitSearchPath, takeBaseName, takeDirectory, takeExtension, (</>))
 import System.Info (os)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -124,13 +124,16 @@ defaultFontDirs =
       pure $
         [local </> "Microsoft" </> "Windows" </> "Fonts" | Just local <- [mLocal]]
           ++ [fromMaybe "C:\\Windows" mRoot </> "Fonts"]
-    -- fontconfig's roots: @fonts@ in each XDG data directory, and ~/.fonts.
+    -- @fonts@ in the XDG data home and ~/.fonts, then in each XDG data
+    -- directory (NixOS keeps its fonts there) and in the system data
+    -- directories, which fontconfig reads whatever XDG_DATA_DIRS says. The
+    -- XDG spec ignores relative entries, an empty one among them.
     _ -> do
       home <- getHomeDirectory
       let env name = mfilter (not . null) <$> lookupEnv name
       dataHome <- fromMaybe (home </> ".local/share") <$> env "XDG_DATA_HOME"
-      dataDirs <- maybe ["/usr/local/share", "/usr/share"] splitSearchPath <$> env "XDG_DATA_DIRS"
-      pure ([dataHome </> "fonts", home </> ".fonts"] ++ map (</> "fonts") dataDirs)
+      dataDirs <- maybe [] (filter isAbsolute . splitSearchPath) <$> env "XDG_DATA_DIRS"
+      pure (nubOrd ([dataHome </> "fonts", home </> ".fonts"] ++ map (</> "fonts") (dataDirs ++ ["/usr/local/share", "/usr/share"])))
   where
     inHome dir system = (: system) . (</> dir) <$> getHomeDirectory
 
@@ -154,11 +157,14 @@ matchScore :: String -> String -> Maybe Int
 matchScore "" _ = Nothing
 matchScore norm stem = score <$> stripPrefix norm stem
   where
-    score t
+    -- A slanted file ranks just below its upright twin, which by name can
+    -- sort after it (@X-Italic[wght]@ before @X[wght]@).
+    score t = base t - fromEnum ("italic" `isInfixOf` t || "oblique" `isInfixOf` t)
+    base t
       | null t = 100
       | Just i <- elemIndex t regularTails = 90 - i
       | t `elem` otherTails = 70
-      | "variable" `isInfixOf` t = if "italic" `isInfixOf` t then 19 else 20
+      | "variable" `isInfixOf` t = 20
       | otherwise = 60
 
 -- | Style tails that indicate the regular weight of a family, the likeliest
@@ -191,6 +197,7 @@ otherTails =
 familyAliases :: String -> [String]
 familyAliases "consolas" = ["consola"]
 familyAliases "couriernew" = ["cour"]
+familyAliases "timesnewroman" = ["times"]
 familyAliases "segoeuisymbol" = ["seguisym"]
 familyAliases "nirmalaui" = ["nirmala"]
 familyAliases "leelawadeeui" = ["leelawui"]
