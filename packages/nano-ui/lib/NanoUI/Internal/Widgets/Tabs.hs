@@ -229,8 +229,9 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
       -- range @r@ and offset @o@.
       paging r o = (r > 0.5, r > 0.5 && o > 0.5, o < r - 0.5)
   -- The reachable range measured after last frame's layout decides whether
-  -- the strip needs the scroller. It is a float slot so a pure scroll frame
-  -- keeps its clip damage (`onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
+  -- the strip needs the scroller. It is a float slot published after layout,
+  -- so the frame that changes it counts as a layout change, not a scroll
+  -- ('NanoUI.Internal.Damage.writeDamage').
   store <- liftIO (getStore ctx)
   let maxOff = max 0 (findSlot fieldFloat 0 rangeKey store)
       -- The hash of the tab the strip last brought into view.
@@ -248,13 +249,17 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   -- round it, which the arrows do not.
   let overStrip = maybe False (\r -> rectContains r (inputMousePos inp)) mScr
       notches = if overStrip then round (v2Y (inputScroll inp)) else 0 :: Int
-      -- A paging arrow while the bar overflows, muted at its end.
+      -- A paging arrow while the bar overflows, muted at its end. The muted
+      -- look is a font colour, which no diff covers, so a slot at the arrow
+      -- repaints it when it turns.
       arrow k enabled glyph
         | overflow = withKey (k :: Text) $ do
             theme <- uiTheme
             let muted = if enabled then Nothing else Just (themeMuted theme)
                 lay = (fixedWH 26 stripH . alignCenter . alignMid $ defaultLayout) {layoutFontColor = muted}
-            respClicked <$> styled subtle (buttonStyledEx enabled glyph 0 lay 0)
+            resp <- styled subtle (buttonStyledEx enabled glyph 0 lay 0)
+            liftIO (writeSlot fieldInt ctx (respId resp) (intKey (respId resp)) (fromEnum enabled))
+            pure (respClicked resp)
         | otherwise = pure False
   (leftClicked, tabResp, rightClicked) <-
     row' (tight . grow . alignMid . fixedH stripH $ defaultLayout) $ do

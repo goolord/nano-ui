@@ -35,6 +35,7 @@ tests =
   , spec "tabs-scroll-follow-var" runTabsFollowVarTest
   , spec "tabs-missing-key" runTabsMissingKeyTest
   , spec "tabs-wheel-in-page" runTabsWheelInPageTest
+  , spec "tabs-arrow-damage" runTabsArrowDamageTest
   , spec "tabs-badge-size" runTabsBadgeSizeTest
   ]
 
@@ -90,6 +91,23 @@ runTabsWheelInPageTest ctx failed = do
     _ <- runFrame ctx inp ui
     assertEq failed 0 =<< getScrollOffset ctx pageWid
     assert failed . not . hasText "Controls" =<< collectTextSpans ctx
+
+-- Paging the strip repaints the arrow that turns usable, whose muted look is
+-- a colour no rect or text change covers.
+runTabsArrowDamageTest :: Context -> IORef Int -> IO ()
+runTabsArrowDamageTest ctx failed = do
+  let inp = withInput 240 120
+      ui = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
+      arrow ch = (\spans -> listToMaybe [r | (r, t, _, _, _) <- spans, T.any (== ch) t]) <$> collectTextSpans ctx
+  replicateM_ 3 (runFrame ctx inp ui)
+  assertJustM failed (arrow '\8249') $ \left ->
+    assertJustM failed (arrow '\8250') $ \right -> do
+      let (press, release) = clickPair inp (spanCenter right)
+      _ <- runFrame ctx press ui
+      _ <- runFrame ctx release ui
+      _ <- runFrame ctx release {inputButtonsReleased = noButtons} ui
+      dmg <- takeDamage ctx
+      assert failed (damageCovers dmg left)
 
 -- A badge is smaller than its header's text, whatever the base font size.
 runTabsBadgeSizeTest :: Context -> IORef Int -> IO ()
