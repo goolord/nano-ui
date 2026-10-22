@@ -44,13 +44,7 @@ runGlyphKerningTest base failed = do
       ctx = withFontMetrics base fm
       ui = rowWith (fixedW 100 . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "AVAV")
   (lab, dd) <- warmupDraw ctx (withInput 300 100) ui
-  xus <- withForeignPtr (drawVertices dd) $ \vp ->
-    withForeignPtr (drawIndices dd) $ \ip ->
-      fmap concat . forM [c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId] $ \cmd ->
-        forM [cmdIndexOffset cmd .. cmdIndexOffset cmd + cmdIndexCount cmd - 1] $ \i -> do
-          vi <- peekByteOff ip (fromIntegral i * indexSize) :: IO Word32
-          let at o = peekByteOff vp (fromIntegral vi * vertexSize + o) :: IO Float
-          (,) <$> at 0 <*> at 24
+  xus <- map (\(x, _, u, _) -> (x, u)) <$> glyphVertices dd
   let aXs = [x | (x, u) <- xus, u < 0.55]
       vXs = [x | (x, u) <- xus, u > 0.55]
       Rect bx _ bw _ = respRect lab
@@ -86,7 +80,8 @@ runTextInputFontTest base failed = do
       field = void ((snd <$> withValue "Hg" (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)})))
       extent ui = do
         (_, dd) <- warmupDraw ctx inp (column ui)
-        ps <- glyphVertices dd
+        -- The glyph's own quad: atlas vertices at its UV corners.
+        ps <- (\vs -> [(x, y) | (x, y, u, v) <- vs, u `elem` [0.25, 0.5], v `elem` [0.5, 0.75]]) <$> glyphVertices dd
         let xs = map fst ps
             ys = map snd ps
         pure (if null ps then (0, 0) else (maximum xs - minimum xs, maximum ys - minimum ys))
@@ -123,20 +118,16 @@ runFieldFontStyleTest ctx failed = do
     assertEq failed 1 =<< ((-) <$> quadsIn red (fontUnderline . fontColor red) ui <*> quadsIn red (fontColor red) ui)
     assertEq failed 3 =<< ((-) <$> quadsIn mutedFg fontMuted ui <*> quadsIn mutedFg id ui)
 
--- | Position of every vertex of the glyph quads the fonts of
--- 'runTextInputFontTest' draw: atlas vertices at that glyph's UV corners.
-glyphVertices :: DrawData -> IO [(Float, Float)]
+-- | Position and UV of every indexed vertex drawn from the glyph atlas.
+glyphVertices :: DrawData -> IO [(Float, Float, Float, Float)]
 glyphVertices dd =
   withForeignPtr (drawVertices dd) $ \vp ->
     withForeignPtr (drawIndices dd) $ \ip ->
-      fmap concat . forM glyphCmds $ \cmd ->
-        fmap concat . forM [cmdIndexOffset cmd .. cmdIndexOffset cmd + cmdIndexCount cmd - 1] $ \i -> do
+      fmap concat . forM [c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId] $ \cmd ->
+        forM [cmdIndexOffset cmd .. cmdIndexOffset cmd + cmdIndexCount cmd - 1] $ \i -> do
           vi <- peekByteOff ip (fromIntegral i * indexSize) :: IO Word32
           let at o = peekByteOff vp (fromIntegral vi * vertexSize + o) :: IO Float
-          (x, y, u, v) <- (,,,) <$> at 0 <*> at 4 <*> at 24 <*> at 28
-          pure [(x, y) | u `elem` [0.25, 0.5], v `elem` [0.5, 0.75]]
-  where
-    glyphCmds = [c | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId, cmdIndexCount c > 0]
+          (,,,) <$> at 0 <*> at 4 <*> at 24 <*> at 28
 
 -- | A shaped run with glyphs on two atlas pages draws each page's glyphs
 -- under that page's texture, with the page taken out of their u.
@@ -184,22 +175,6 @@ runLongShapedLineTest ctx failed = do
   (_, after, _) <- runFrame (withFontMetrics ctx fm) inp ui
   assert failed (drawVertices before == drawVertices after)
 
--- | Alpha of every vertex of every indexed triangle.
-triangleAlphas :: DrawData -> IO [(Float, Float, Float)]
-triangleAlphas dd =
-  withForeignPtr (drawVertices dd) $ \vp ->
-    withForeignPtr (drawIndices dd) $ \ip ->
-      forM [0, 3 .. drawIndexCount dd - 3] $ \i -> do
-        a <- alphaAt vp ip i
-        b <- alphaAt vp ip (i + 1)
-        c <- alphaAt vp ip (i + 2)
-        pure (a, b, c)
-  where
-    alphaAt :: Ptr Word8 -> Ptr Word8 -> Int -> IO Float
-    alphaAt vp ip i = do
-      vi <- peekByteOff ip (i * indexSize) :: IO Word32
-      peekByteOff vp (fromIntegral vi * vertexSize + 20)
-
 controls :: NanoUI ()
 controls = column $ do
   void (button "ok")
@@ -213,13 +188,13 @@ controls = column $ do
 runSquareGeometryTest :: Context -> IORef Int -> IO ()
 runSquareGeometryTest ctx failed = do
   let inp = withInput 300 200
-      uniform (a, b, c) = a == b && b == c
+      uniform ((_, _, a), (_, _, b), (_, _, c)) = a == b && b == c
   (_, dRound, _) <- runFrame ctx inp controls
-  roundTris <- triangleAlphas dRound
+  roundTris <- triangles dRound
   assert failed (not (all uniform roundTris))
   setDrawSquareGeometry ctx True
   (_, dSquare, _) <- runFrame ctx inp controls
-  squareTris <- triangleAlphas dSquare
+  squareTris <- triangles dSquare
   assert failed (not (null squareTris))
   assert failed (all uniform squareTris)
 
@@ -230,11 +205,7 @@ runThickRoundedStrokeTest ctx failed = do
   let blue = colorRGBA 0 0 255 255
       ops (Rect x y _ _) = [StrokeRoundedRect (Rect (x + 10) (y + 10) 40 40) 1 8 blue]
   (_, dd, _) <- runFrame ctx (withInput 300 200) (void (drawing (fixedWH 60 60) (smallArrayFromList . ops)))
-  inked <- withForeignPtr (drawVertices dd) $ \vp ->
-    fmap concat . forM [0 .. drawVertexCount dd - 1] $ \i -> do
-      let at o = peekByteOff vp (i * vertexSize + o) :: IO Float
-      (x, y, rgb, a) <- (,,,) <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16) <*> at 20
-      pure [(x, y) | rgb == (0, 0, 1), a > 0]
+  inked <- (\vs -> [(x, y) | (x, y, rgb, a) <- vs, rgb == (0, 0, 1), a > 0]) <$> vertexColours dd
   let extent f = maximum (map f inked) - minimum (map f inked)
   assert failed (not (null inked))
   assert failed (extent fst <= 40 && extent snd <= 40)
@@ -333,7 +304,7 @@ runConcentricCirclesTest ctx failed = do
   setDrawSnapScale ctx 1
   (_, dd, _) <- runFrame ctx inp ui
   verts <- vertexColours dd
-  let centreOf rgb = case [(x, y) | (x, y, c) <- verts, c == rgb] of
+  let centreOf rgb = case [(x, y) | (x, y, c, _) <- verts, c == rgb] of
         [] -> Nothing
         ps ->
           let xs = map fst ps
@@ -345,13 +316,13 @@ runConcentricCirclesTest ctx failed = do
   assert failed (concentric (1, 0, 0) (0, 1, 0))
   assert failed (concentric (0, 0, 1) (1, 1, 0))
 
--- | Position and colour, without alpha, of every vertex.
-vertexColours :: DrawData -> IO [(Float, Float, (Float, Float, Float))]
+-- | Position, colour and alpha of every vertex.
+vertexColours :: DrawData -> IO [(Float, Float, (Float, Float, Float), Float)]
 vertexColours dd =
   withForeignPtr (drawVertices dd) $ \vp ->
     forM [0 .. drawVertexCount dd - 1] $ \i -> do
       let at o = peekByteOff vp (i * vertexSize + o) :: IO Float
-      (,,) <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16)
+      (,,,) <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16) <*> at 20
 
 -- | A polygon whose triangles index past its points draws nothing, rather
 -- than triangles into other geometry or past the frame's vertices.

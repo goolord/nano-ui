@@ -39,8 +39,8 @@ tests =
   , spec "label-button-swap-damage" runLabelButtonSwapDamageTest
   , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
   , spec "slider-label-shrink-damage" runSliderLabelShrinkDamageTest
-  , spec "scrolled-popup-shadow-damage" runScrolledPopupShadowDamageTest
-  , spec "scrolled-nested-popup-damage" runScrolledNestedPopupDamageTest
+  , spec "scrolled-popup-shadow-damage" (runScrolledPopupDamageTest False)
+  , spec "scrolled-nested-popup-damage" (runScrolledPopupDamageTest True)
   , spec "off-window-damage-ignored" runOffWindowDamageTest
   , spec "empty-damage-paints-nothing" runEmptyDamagePaintTest
   ]
@@ -60,8 +60,7 @@ runSliderLabelShrinkDamageTest ctx failed = do
   (s, _) <- warmup2 ctx inp ui
   let Rect sx sy sw sh = respRect s
       at x = V2 x (sy + sh / 2)
-  _ <- runFrame ctx (pressAt inp (at (sx + sw / 2))) ui
-  _ <- runFrame ctx (holdAt inp (at (sx + sw + 50))) ui
+  runDragFrom ctx inp ui (at (sx + sw / 2)) (at (sx + sw + 50))
   assertEq failed 100 =<< readIORef ref
   (_, wide) <- evalUi ctx (holdAt inp (at (sx + sw / 2))) ui
   dmg <- takeDamage ctx
@@ -69,23 +68,24 @@ runSliderLabelShrinkDamageTest ctx failed = do
 
 -- | A popup that follows a row of a scroller moves on a frame that only
 -- scrolls. That frame repaints the popup's old shadow, which lies past its
--- rect.
-runScrolledPopupShadowDamageTest :: Context -> IORef Int -> IO ()
-runScrolledPopupShadowDamageTest ctx failed = do
+-- rect, and only a clip, also with a scroller nested in the page, whose
+-- viewport moves with it.
+runScrolledPopupDamageTest :: Bool -> Context -> IORef Int -> IO ()
+runScrolledPopupDamageTest nested ctx failed = do
   let inp = withInputOff 640 400
       rows = mapM_ (\i -> label (T.pack ("row " <> show (i :: Int))))
       ui = do
         (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
-          rows [1 .. 4]
+          if nested then void (scrollArea (fillW . fixedH 40) (rows [1 .. 6])) else rows [1 .. 4]
           anchor <- labelWith' fillW "anchor"
-          rows [5 .. 30]
+          rows [(if nested then 7 else 5) .. 30]
           pure anchor
         popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
         pure sc
   sc <- warmup2 ctx inp ui
-  mRect <- getPrevRect ctx sc
-  assertJust failed mRect $ \r -> do
-    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 20), inputScroll = V2 0 1}
+  assertJustM failed (getPrevRect ctx sc) $ \r -> do
+    -- Below the nested scroller, over the page's own rows.
+    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 120), inputScroll = V2 0 1}
     _ <- runFrame ctx wheel ui
     before <- IM.elems <$> floatingPanelRects ctx
     _ <- runFrame ctx wheel ui
@@ -96,30 +96,6 @@ runScrolledPopupShadowDamageTest ctx failed = do
     forM_ before $ \(Rect x y w h) -> do
       let shadow = Rect (x + 3) (y + 3) w h
       assert failed (clipCovers dmg shadow && (null pieces || any (`covers` shadow) pieces))
-
--- | That frame stays a scroll with a scroller nested in the page, whose
--- viewport moves with it: it repaints a clip, not the whole window.
-runScrolledNestedPopupDamageTest :: Context -> IORef Int -> IO ()
-runScrolledNestedPopupDamageTest ctx failed = do
-  let inp = withInputOff 640 400
-      rows = mapM_ (\i -> label (T.pack ("row " <> show (i :: Int))))
-      ui = do
-        (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
-          _ <- scrollArea (fillW . fixedH 40) (rows [1 .. 6])
-          anchor <- labelWith' fillW "anchor"
-          rows [7 .. 30]
-          pure anchor
-        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
-        pure sc
-  sc <- warmup2 ctx inp ui
-  assertJustM failed (getPrevRect ctx sc) $ \r -> do
-    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 120), inputScroll = V2 0 1}
-    _ <- runFrame ctx wheel ui
-    before <- floatingPanelRects ctx
-    _ <- runFrame ctx wheel ui
-    after <- floatingPanelRects ctx
-    assert failed (before /= after)
-    assert failed . (/= DamageFull) =<< takeDamage ctx
 
 -- | Damage wholly off the window adds nothing to a frame's clip: it does not
 -- stretch the clip of a label that changed far from it.
@@ -274,16 +250,13 @@ runDamageQueueClearedPerFrameTest ctx failed = do
 
   -- Next frame without damage requests: damage is empty
   _ <- runFrame ctx inp (ui (pure ()))
-  dmg2 <- takeDamage ctx
-  assert failed (damageIsEmpty dmg2)
+  assert failed . damageIsEmpty =<< takeDamage ctx
 
   -- Explicit full-window damage, again only for its own frame
   _ <- runFrame ctx inp (ui damageFullNow)
-  dmg3 <- takeDamage ctx
-  assertEq failed dmg3 DamageFull
+  assertEq failed DamageFull =<< takeDamage ctx
   _ <- runFrame ctx inp (ui (pure ()))
-  dmg4 <- takeDamage ctx
-  assert failed (damageIsEmpty dmg4)
+  assert failed . damageIsEmpty =<< takeDamage ctx
 
 runStateChangeDamageTest :: Context -> IORef Int -> IO ()
 runStateChangeDamageTest ctx failed = do

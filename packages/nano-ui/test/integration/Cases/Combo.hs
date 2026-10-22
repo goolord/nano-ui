@@ -39,6 +39,15 @@ comboLongOpts =
   | i <- [1 .. 12 :: Int]
   ]
 
+-- | Focus the combo in @ui@, which opens its list, and run @k@ with the
+-- input that rests the pointer on the row showing @name@.
+onComboRow :: Context -> IORef Int -> Input -> NanoUI a -> T.Text -> (Input -> IO ()) -> IO ()
+onComboRow ctx failed inp0 ui name k = do
+  warmupFocused ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  assertJust failed (spanRect name overlays) $ \rowRect -> k inp0 {inputMousePos = spanCenter rowRect}
+
 -- Typing filters the suggestion list case-insensitively and never selects
 -- anything on its own: Enter with no highlight leaves the typed text alone.
 runComboFilterTest :: Context -> IORef Int -> IO ()
@@ -150,11 +159,7 @@ runComboHoverHighlightTest :: Context -> IORef Int -> IO ()
 runComboHoverHighlightTest ctx failed = do
   let inp0 = withInput 320 200
       ui = withValue "" (comboBox' "Font" comboOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Delta Round" overlays) $ \rowRect -> do
-    let hover = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Delta Round" $ \hover -> do
     _ <- runFrame ctx hover ui
     -- Hover alone must not commit anything.
     ((r0, t0), _, _) <- runFrame ctx hover ui
@@ -179,11 +184,7 @@ runComboKeysOverStillPointerTest :: Context -> IORef Int -> IO ()
 runComboKeysOverStillPointerTest ctx failed = do
   let inp0 = withInput 320 200
       ui = withValue "" (comboBox' "Font" comboOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
-    let hover = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Beta Serif" $ \hover -> do
     _ <- runFrame ctx hover ui
     _ <- runFrame ctx hover ui
     _ <- runFrame ctx (keyInp KeyDown hover) ui
@@ -209,11 +210,10 @@ runComboScrollbarDragTest ctx failed = do
       dropY = ry + rh + 4
       trackX = rx + rw - 5
       -- From the thumb at the lane's top down to the list's bottom.
-      drag = holdAt inp0 (V2 trackX (dropY + 200))
-  _ <- runFrame ctx (pressAt inp0 (V2 trackX (dropY + 10))) ui
-  _ <- runFrame ctx drag ui
+      dest = V2 trackX (dropY + 200)
+  runDragFrom ctx inp0 ui (V2 trackX (dropY + 10)) dest
   -- Release over a row position (bottom of the list): must not pick.
-  ((r, t), _, _) <- runFrame ctx (releaseAt drag) ui
+  ((r, t), _, _) <- runFrame ctx (releaseAt (holdAt inp0 dest)) ui
   assert failed (T.null t && not (respChanged r))
   overlays1 <- collectOverlayTextSpans ctx inp0
   assert failed (not (hasText "Fam 01" overlays1))
@@ -399,11 +399,7 @@ runComboSlowWheelScrollTest :: Context -> IORef Int -> IO ()
 runComboSlowWheelScrollTest ctx failed = do
   let inp0 = withInput 200 360
       ui = withValue "" (comboBox' "Fonts" comboLongOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays0 <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Fam 01" overlays0) $ \rowRect -> do
-    let overList = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Fam 01" $ \overList -> do
     replicateM_ 8 (runFrame ctx overList {inputScroll = V2 0 0.125} ui)
     overlays1 <- collectOverlayTextSpans ctx overList
     assert failed (not (hasText "Fam 03" overlays1))
@@ -415,11 +411,7 @@ runComboWheelAtEndIdleTest :: Context -> IORef Int -> IO ()
 runComboWheelAtEndIdleTest ctx failed = do
   let inp0 = withInput 200 360
       ui = withValue "" (comboBox' "Fonts" comboLongOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays0 <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Fam 01" overlays0) $ \rowRect -> do
-    let overList = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Fam 01" $ \overList -> do
     _ <- runFrame ctx overList {inputScroll = V2 0 10} ui
     _ <- runFrame ctx overList ui
     (_, _, dirty) <- runFrame ctx overList {inputScroll = V2 0 1} ui

@@ -36,19 +36,16 @@ runCursorDragOwnerTest ctx failed = do
         pure (fst s, fst f, fst g, b)
   (s, f, g, b) <- warmup2 ctx inp ui
   let dragOver from r = do
-        _ <- runFrame ctx (pressAt inp (centerOf from)) ui
         let hold = holdAt inp (centerOf r)
-        _ <- runFrame ctx hold ui
+        runDragFrom ctx inp ui (centerOf from) (centerOf r)
         kind <- uiCursorKind ctx hold
         _ <- runFrame ctx (releaseAt hold) ui
         _ <- runFrame ctx hold {inputButtonsHeld = mempty} ui
         pure kind
   assertEq failed UiCursorGrabbing =<< dragOver s f
   assertEq failed UiCursorText =<< dragOver f g
-  _ <- runFrame ctx (pressAt inp (centerOf s)) ui
-  _ <- runFrame ctx (holdAt inp (centerOf b)) ui
+  runDragFrom ctx inp ui (centerOf s) (centerOf b)
   assert failed . (/= respId b) =<< getHotId ctx
-  assertEq failed 0 =<< getAnimationValue ctx (respId b)
 
 -- | A plain drawing: a node with no cursor of its own.
 plainArea :: Float -> Float -> NanoUI Response

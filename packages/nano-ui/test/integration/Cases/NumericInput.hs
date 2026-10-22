@@ -24,9 +24,8 @@ runNumericInputLeadingPointTest ctx failed = do
   let inp = withInput 320 120
       cfg = defaultNumericInputConfig {nicDecimals = 2}
       ui = column (held valueRef (numericInputConfigured' cfg))
-      step event = (\((_, v), _, _) -> v) <$> runFrame ctx event ui
-  _ <- warmup2 ctx inp ui
-  _ <- step (keyInp KeyTab inp)
+      step event = snd <$> evalUi ctx event ui
+  warmupFocused ctx inp ui
   forM_ [(".5", 0.5, "0.50"), ("-.25", -0.25, "-0.25")] $ \(typed, value, shown) -> do
     _ <- step (chordInp (Shortcut.cmdOrCtrl <> Shortcut.key 'a') inp)
     _ <- step inp {inputChars = typed}
@@ -104,8 +103,7 @@ runNumericInputCommandTest ctx failed = do
         forM_ target $ \wid -> mapM_ (runTextCommand wid) cmds
         (resp, _) <- held valueRef numericInput'
         liftIO (writeIORef field (Just (respId resp)))
-  _ <- warmup2 ctx inp ui
-  _ <- runFrame ctx (keyInp KeyTab inp) ui
+  warmupFocused ctx inp ui
   writeIORef pending [ReplaceAll "42"]
   _ <- runFrame ctx inp ui
   _ <- runFrame ctx inp ui

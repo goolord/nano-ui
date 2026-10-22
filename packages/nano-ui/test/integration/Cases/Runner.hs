@@ -188,28 +188,15 @@ runSessionLoopFarWakeTest ctx failed = do
 -- Ctrl, 2 releases Ctrl, 4 types c alone, and 5 changes nothing.
 runSessionLoopHardQuitTest :: Context -> IORef Int -> IO ()
 runSessionLoopHardQuitTest ctx failed = do
-  debug <- newDebugSampler
   let holdCtrl on inp = inp {inputModifiers = (inputModifiers inp) {modCtrl = on}}
       typeC inp = inp {inputChars = inputChars inp <> "c"}
       pressC = applyKey (KeyChar 'c') True
-      draws batches = do
-        waits <- batchedWaits (batches ++ [[3]])
-        drawn <- newIORef (0 :: Int)
-        clearDirty ctx
-        runSessionLoop
-          (quietDriver debug)
-            { sdWaitEvents = waits
-            , sdApplyEvent = \inp ev -> case ev of
-                1 -> holdCtrl True (pressC inp)
-                2 -> holdCtrl False inp
-                4 -> typeC inp
-                _ -> inp
-            , sdShouldDraw = \_ _ _ _ _ -> pure True
-            , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
-            }
-          ctx
-          emptyInput
-        readIORef drawn
+      apply inp ev = case ev of
+        1 -> holdCtrl True (pressC inp)
+        2 -> holdCtrl False inp
+        4 -> typeC inp
+        _ -> inp
+      draws batches = drawCount ctx (\d -> d {sdApplyEvent = apply}) (batches ++ [[3]])
   assertEq failed 1 =<< draws [[1, 2], [5]]
   assertEq failed 1 =<< draws [[1], [5]]
   assertEq failed 2 =<< draws [[4, 2], [5]]
@@ -221,25 +208,16 @@ runSessionLoopHardQuitTest ctx failed = do
 -- Event 1 presses Ctrl+C, 5 presses Tab, and 6 changes nothing.
 runSessionLoopHardQuitUsedTest :: Context -> IORef Int -> IO ()
 runSessionLoopHardQuitUsedTest ctx failed = do
-  debug <- newDebugSampler
   copies <- newIORef (0 :: Int)
-  let frames view batches = do
-        waits <- batchedWaits batches
-        drawn <- newIORef (0 :: Int)
-        clearDirty ctx
-        runSessionLoop
-          (quietDriver debug)
-            { sdWaitEvents = waits
-            , sdApplyEvent = \inp ev -> case ev of
+  let frames view =
+        drawCount ctx $ \d ->
+          d
+            { sdApplyEvent = \inp ev -> case ev of
                 1 -> chordInp (ctrl <> key 'c') inp
                 5 -> chordInp (key KeyTab) inp
                 _ -> inp
-            , sdShouldDraw = \_ _ _ _ _ -> pure True
-            , sdDraw = \c inp _ -> False <$ (evalUi c inp view >> modifyIORef' drawn (+ 1))
+            , sdDraw = \c inp _ -> False <$ evalUi c inp view
             }
-          ctx
-          emptyInput
-        readIORef drawn
       copyKey = whenM (shortcut (ctrl <> key 'c')) (liftIO (modifyIORef' copies (+ 1)))
       fields = button "b" >> void (withValue "" textInput')
   assertEq failed 2 =<< frames copyKey [[1], [6], [3]]
@@ -303,25 +281,17 @@ runSessionLoopKeyOrderTest ctx failed = do
 -- presses Down (a repeat while it is held), 2 releases it, and 4 types "a".
 runSessionLoopKeyRepeatTest :: Context -> IORef Int -> IO ()
 runSessionLoopKeyRepeatTest ctx failed = do
-  debug <- newDebugSampler
-  waits <- batchedWaits [[1], [1], [1], [1], [2], [4], [4], [3]]
-  drawn <- newIORef (0 :: Int)
   let typeA inp = applyKey (KeyChar 'a') False (applyKey (KeyChar 'a') True inp) {inputChars = inputChars inp <> "a"}
-  clearDirty ctx
-  runSessionLoop
-    (quietDriver debug)
-      { sdWaitEvents = waits
-      , sdApplyEvent = \inp -> \case
-          1 -> applyKey KeyDown True inp
-          2 -> applyKey KeyDown False inp
-          4 -> typeA inp
-          _ -> inp
-      , sdShouldDraw = \c prev cur anim due -> shouldRedrawFrame c prev cur anim False due
-      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
-      }
-    ctx
-    emptyInput
-  assertEq failed 7 =<< readIORef drawn
+      edit d =
+        d
+          { sdApplyEvent = \inp -> \case
+              1 -> applyKey KeyDown True inp
+              2 -> applyKey KeyDown False inp
+              4 -> typeA inp
+              _ -> inp
+          , sdShouldDraw = \c prev cur anim due -> shouldRedrawFrame c prev cur anim False due
+          }
+  assertEq failed 7 =<< drawCount ctx edit [[1], [1], [1], [1], [2], [4], [4], [3]]
 
 -- | One batch of events per driver wait. A wait past the last batch throws,
 -- so a runaway loop fails the test instead of hanging.
@@ -331,24 +301,25 @@ batchedWaits batches = do
   pure $ \_ -> atomicModifyIORef' queue (\case b : rest -> (rest, Just b); [] -> ([], Nothing))
     >>= maybe (throwIO (userError "the loop went on past its last events")) pure
 
+-- | Run the session loop over @batches@ ('batchedWaits'), drawing on every
+-- pass, and count the frames drawn. @edit@ adjusts the driver, whose
+-- 'sdDraw' still runs on each counted frame.
+drawCount :: Context -> (SessionDriver Int -> SessionDriver Int) -> [[Int]] -> IO Int
+drawCount ctx edit batches = do
+  debug <- newDebugSampler
+  waits <- batchedWaits batches
+  drawn <- newIORef (0 :: Int)
+  clearDirty ctx
+  let driver = edit (quietDriver debug) {sdWaitEvents = waits, sdShouldDraw = \_ _ _ _ _ -> pure True}
+  runSessionLoop driver {sdDraw = \c inp dbg -> modifyIORef' drawn (+ 1) >> sdDraw driver c inp dbg} ctx emptyInput
+  readIORef drawn
+
 -- | With 'wsExitOnCloseRequest' on, a close request ends the session
 -- without another frame.
 runSessionLoopCloseTest :: Context -> IORef Int -> IO ()
 runSessionLoopCloseTest ctx failed = do
-  debug <- newDebugSampler
   installWindowHost ctx defaultWindowSettings defaultWindowHost
-  waits <- batchedWaits [[], [3]]
-  drawn <- newIORef (0 :: Int)
-  clearDirty ctx
-  runSessionLoop
-    (quietDriver debug)
-      { sdWaitEvents = waits
-      , sdShouldDraw = \_ _ _ _ _ -> pure True
-      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
-      }
-    ctx
-    emptyInput
-  assertEq failed 1 =<< readIORef drawn
+  assertEq failed 1 =<< drawCount ctx id [[], [3]]
 
 -- | With 'wsExitOnCloseRequest' off, each close request is visible to the
 -- next frame only, and the session ends after the frame that calls 'quitUi'.
@@ -378,43 +349,24 @@ runSessionLoopCloseAskTest ctx failed = do
 -- wake asks for.
 runSessionLoopThreadWakeTest :: Context -> IORef Int -> IO ()
 runSessionLoopThreadWakeTest ctx failed = do
-  debug <- newDebugSampler
-  waits <- batchedWaits [[], [3]]
-  drawn <- newIORef (0 :: Int)
-  clearDirty ctx
-  runSessionLoop
-    (quietDriver debug)
-      { sdWaitEvents = \t -> do
-          events <- waits t
-          -- A job finishing ends the wait with no event of its own.
-          when (null events) (wakeFromThread ctx)
-          pure events
-      , sdShouldDraw = \c prev cur wasAnim due -> shouldRedrawFrame c prev cur wasAnim False due
-      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
-      }
-    ctx
-    emptyInput
-  assertEq failed 1 =<< readIORef drawn
+  let edit d =
+        d
+          { sdWaitEvents = \t -> do
+              events <- sdWaitEvents d t
+              -- A job finishing ends the wait with no event of its own.
+              when (null events) (wakeFromThread ctx)
+              pure events
+          , sdShouldDraw = \c prev cur wasAnim due -> shouldRedrawFrame c prev cur wasAnim False due
+          }
+  assertEq failed 1 =<< drawCount ctx edit [[], [3]]
 
 -- | A view that called 'quitUi' in an opening frame the backend drew before
 -- the loop ends the session without a wait.
 runSessionLoopQuitFirstTest :: Context -> IORef Int -> IO ()
 runSessionLoopQuitFirstTest ctx failed = do
-  debug <- newDebugSampler
   installWindowHost ctx defaultWindowSettings defaultWindowHost
   evalUi ctx emptyInput quitUi
-  clearDirty ctx
-  waits <- batchedWaits []
-  drawn <- newIORef (0 :: Int)
-  runSessionLoop
-    (quietDriver debug)
-      { sdWaitEvents = waits
-      , sdShouldDraw = \_ _ _ _ _ -> pure True
-      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
-      }
-    ctx
-    emptyInput
-  assertEq failed 0 =<< readIORef drawn
+  assertEq failed 0 =<< drawCount ctx id []
 
 -- | With 'wsExitOnCloseRequest' off, a close request outlives a pass that
 -- runs no frame, so the next frame's view still sees it.

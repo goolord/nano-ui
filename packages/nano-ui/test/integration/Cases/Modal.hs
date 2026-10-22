@@ -34,8 +34,7 @@ runModalHidesTextMenuTest ctx failed = do
         modal open "Error" (label "Something failed")
         pure field
   field <- warmup2 ctx inp0 ui
-  let (rightPress, rightRelease) = rightClickPair inp0 (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  _ <- runRightClick ctx inp0 ui (centerOf field)
   assert failed . isJust =<< getsInteraction ctx isTextInputMenu
   writeVarIO open True
   warmup ctx inp0 ui
@@ -75,12 +74,9 @@ runModalOverInnerWindowTest ctx failed = do
         (_, hidden) <- window' (constVar True) "Inspector" (buttonWith' (fixedWH 380 300) "Hidden")
         ok <- button' "OK"
         pure (ok, hidden)
-  mr <- warmup2 ctx inp0 ui
-  assertJust failed mr $ \(ok, mHidden) -> assertJust failed mHidden $ \hidden -> do
+  assertJustM failed (warmup2 ctx inp0 ui) $ \(ok, mHidden) -> assertJust failed mHidden $ \hidden -> do
     assert failed (isJust (rectIntersect (respRect hidden) (respRect ok)))
-    let (press, release) = clickPair inp0 (centerOf ok)
-    _ <- runFrame ctx press ui
-    assertJustM failed (evalUi ctx release ui) $ \(ok', hidden') -> do
+    assertJustM failed (runClick ctx inp0 ui (centerOf ok)) $ \(ok', hidden') -> do
       assert failed (respClicked ok')
       assert failed (not (any respClicked hidden'))
 
@@ -93,9 +89,7 @@ runModalOverInnerWindowDragTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   before <- map snd <$> nodesOfType NodeWindow ctx
   assertJust failed (listToMaybe before) $ \(Rect x y w _) -> do
-    let press = pressAt inp0 (V2 (x + w / 2) (y + 10))
-        moved = holdAt press (V2 (x + w / 2 - 40) (y + 40))
-    mapM_ (\i -> runFrame ctx i ui) [press, moved, releaseAt moved]
+    dragPos (\i -> void (runFrame ctx i ui)) inp0 (V2 (x + w / 2) (y + 10)) (V2 (x + w / 2 - 40) (y + 40))
     assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
 
 -- | Nor does an edge of that window, where the modal panel covers it, show

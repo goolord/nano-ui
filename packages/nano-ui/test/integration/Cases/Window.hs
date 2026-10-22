@@ -537,11 +537,7 @@ runWindowResizeHaloScrolledTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   before <- map snd <$> nodesOfType NodeWindow ctx
   assertJust failed (listToMaybe before) $ \(Rect x y _ h) -> do
-    let at = V2 (x - 6) (y + h / 2)
-        press = pressAt inp0 at
-    _ <- runFrame ctx press ui
-    _ <- runFrame ctx (holdAt press (V2 (x - 60) (y + h / 2))) ui
-    _ <- runFrame ctx (releaseAt (holdAt press (V2 (x - 60) (y + h / 2)))) ui
+    dragPos (\i -> void (runFrame ctx i ui)) inp0 (V2 (x - 6) (y + h / 2)) (V2 (x - 60) (y + h / 2))
     assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
 
 runSeparatorSpanTest :: Context -> IORef Int -> IO ()

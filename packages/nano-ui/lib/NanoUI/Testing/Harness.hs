@@ -24,6 +24,7 @@ module NanoUI.Testing.Harness
   , FrameCost (..)
   , frameCost
   , runClick
+  , runRightClick
   , assertSpansHas
   , spanYOf
   , spanXOf
@@ -341,6 +342,11 @@ frameCost ctx inp idle ui = do
 -- the release frame's result.
 runClick :: Context -> Input -> NanoUI a -> V2 -> IO a
 runClick ctx inp0 ui pos = let (press, release) = clickPair inp0 pos in warmup ctx press ui >> evalUi ctx release ui
+
+-- | 'runClick' with the right button ('rightClickPair'), as opens a context
+-- or edit menu.
+runRightClick :: Context -> Input -> NanoUI a -> V2 -> IO a
+runRightClick ctx inp0 ui pos = let (press, release) = rightClickPair inp0 pos in warmup ctx press ui >> evalUi ctx release ui
 
 -- | Count a failure unless some span contains the substring.
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()

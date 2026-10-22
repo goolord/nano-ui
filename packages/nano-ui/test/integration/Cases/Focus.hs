@@ -25,7 +25,6 @@ tests =
   , spec "focus-request-order" runFocusRequestOrderTest
   , spec "focus-request-closes-menus" runFocusRequestClosesMenusTest
   , spec "focus-tab-closes-menus" runFocusTabClosesMenusTest
-  , spec "focus-right-click-closes-dropdown" runFocusRightClickClosesDropdownTest
   , spec "focus-back-tab-from-none" runFocusBackTabFromNoneTest
   , spec "focus-tab-claimed" runFocusTabClaimedTest
   , spec "focus-reveals" runFocusRevealsTest
@@ -241,51 +240,34 @@ runFocusRequestClosesMenusTest ctx failed = do
         assert failed . not =<< open
   _ <- runClick ctx inp ui (centerOf sel)
   closes (anySelectOpen <$> getStore ctx)
-  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  _ <- runRightClick ctx inp ui (centerOf field)
   assertEq failed (respId field) =<< getFocusId ctx
   closes (isJust <$> getsInteraction ctx isTextInputMenu)
 
 -- | Tab away from an open select or a field's edit menu closes it, as a
--- focus request does, so the arrows then move the caret of the field Tab
--- focused and leave the select's value alone.
+-- focus request does, and so does a right press on the field, which
+-- focuses it and opens its edit menu. The arrows then move the caret of the
+-- field and leave the select's value alone.
 runFocusTabClosesMenusTest :: Context -> IORef Int -> IO ()
 runFocusTabClosesMenusTest ctx failed = do
   index <- newVar (0 :: Int)
-  let ui = column ((,) <$> (fst <$> held index (select' ["One", "Two", "Three"])) <*> (fst <$> withValue "text" textInput'))
-  (sel, field) <- warmup2 ctx inp ui
-  _ <- runClick ctx inp ui (centerOf sel)
-  assert failed . anySelectOpen =<< getStore ctx
-  _ <- runFrame ctx (tabInp inp) ui
-  assertEq failed (respId field) =<< getFocusId ctx
-  assert failed . not . anySelectOpen =<< getStore ctx
-  _ <- runFrame ctx (keyInp KeyRight inp) ui
-  _ <- runFrame ctx inp ui
-  assertEq failed 0 =<< readVarIO index
-  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  -- The field above the select, where the dropdown does not cover it.
+  let ui = column ((,) <$> (fst <$> withValue "text" textInput') <*> (fst <$> held index (select' ["One", "Two", "Three"])))
+  (field, sel) <- warmup2 ctx inp ui
+  forM_ [warmup ctx (tabInp inp) ui, void (runRightClick ctx inp ui (centerOf field))] $ \leave -> do
+    _ <- runClick ctx inp ui (centerOf sel)
+    assert failed . anySelectOpen =<< getStore ctx
+    leave
+    assertEq failed (respId field) =<< getFocusId ctx
+    assert failed . not . anySelectOpen =<< getStore ctx
+    _ <- runFrame ctx (keyInp KeyRight inp) ui
+    _ <- runFrame ctx inp ui
+    assertEq failed 0 =<< readVarIO index
+  -- The right press left the field's edit menu open.
   assert failed . isJust =<< getsInteraction ctx isTextInputMenu
   _ <- runFrame ctx (tabInp inp) ui
   assertEq failed (respId sel) =<< getFocusId ctx
   assert failed . not . isJust =<< getsInteraction ctx isTextInputMenu
-
--- | A right press on a field, which focuses it and opens its edit menu,
--- closes an open dropdown, so the arrows then move the field's caret and
--- leave the select's value alone.
-runFocusRightClickClosesDropdownTest :: Context -> IORef Int -> IO ()
-runFocusRightClickClosesDropdownTest ctx failed = do
-  index <- newVar (0 :: Int)
-  let ui = column ((,) <$> (fst <$> withValue "text" textInput') <*> (fst <$> held index (select' ["One", "Two", "Three"])))
-  (field, sel) <- warmup2 ctx inp ui
-  _ <- runClick ctx inp ui (centerOf sel)
-  assert failed . anySelectOpen =<< getStore ctx
-  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
-  assertEq failed (respId field) =<< getFocusId ctx
-  assert failed . not . anySelectOpen =<< getStore ctx
-  _ <- runFrame ctx (keyInp KeyRight inp) ui
-  _ <- runFrame ctx inp ui
-  assertEq failed 0 =<< readVarIO index
 
 -- | Shift+Tab with nothing focused goes to the last Tab stop.
 runFocusBackTabFromNoneTest :: Context -> IORef Int -> IO ()

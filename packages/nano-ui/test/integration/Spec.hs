@@ -9,6 +9,8 @@ module Spec
   , buttonValues
   , widgetValue
   , wheelIntoView
+  , hoverWheel
+  , assertPaintedLines
   , withMonospaceFonts
   , module Control.Monad
   , module Data.IORef
@@ -91,3 +93,18 @@ wheelIntoView ctx inp ui pick sid margin =
           btn <- pick <$> evalUi ctx hover ui
           if inView (respRect btn) || after <= before then pure (after, btn) else pump
     pump)
+
+-- | Hover @p@ for a frame, then turn the wheel by @d@ there, as a pointer
+-- that moves before it scrolls does.
+hoverWheel :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
+hoverWheel ctx inp ui p d = warmup ctx inp {inputMousePos = p} ui >> void (runFrame ctx inp {inputMousePos = p, inputScroll = d} ui)
+
+-- | Check that paint wrapped a label's text where the solve placed it: the
+-- frame's text spans other than @others@ are as many lines as the label's
+-- rect @r@ is tall, none wider than it. The headless font's glyphs are as
+-- wide as its 12 px line is tall.
+assertPaintedLines :: IORef Int -> Context -> [T.Text] -> Rect -> IO ()
+assertPaintedLines failed ctx others r = do
+  lns <- (\spans -> [t | (_, t, _, _, _) <- spans, t `notElem` others]) <$> collectTextSpans ctx
+  assertEq failed (rectH r) (12 * fromIntegral (length lns))
+  forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW r)

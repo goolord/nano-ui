@@ -7,7 +7,6 @@ import Control.Exception (IOException, try)
 import Data.Either (isLeft)
 import Data.Maybe (listToMaybe)
 import Data.Word (Word64)
-import NanoUI.Shortcut (key)
 import Spec
 
 tests :: [Spec]
@@ -137,11 +136,10 @@ runClampedRatioTest :: Context -> IORef Int -> IO ()
 runClampedRatioTest ctx failed = do
   let inp = withInput 600 400
       ui = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgTree = InitialTree (Just narrowLeft)}
-      press = pressAt inp (V2 48 200)
-      moved = holdAt press (V2 78 200)
+      to = V2 78 200
   _ <- warmup2 ctx inp ui
-  mapM_ (\i -> runFrame ctx i ui) [press, moved]
-  after <- evalUi ctx (releaseAt moved) ui
+  runDragFrom ctx inp ui (V2 48 200) to
+  after <- evalUi ctx (releaseAt (holdAt inp to)) ui
   -- The left pane is 70px wide: 40 and the 30 the pointer moved.
   assertJust failed (rootRatio (pgrTree after)) $ \r -> assert failed (abs (r - 70 / 584) < 1.0e-4)
 
@@ -185,7 +183,7 @@ runEscapeTest ctx failed = do
   warmupFocused ctx inp ui
   (_, passedOn) <- evalUi ctx (keyInp KeyEscape inp) ui
   assert failed passedOn
-  _ <- runFrame ctx (chordInp (key 'm') inp) ui
+  _ <- runFrame ctx (keyInp (KeyChar 'm') inp) ui
   (maximized, _) <- warmup2 ctx inp ui
   assert failed (pgrMaximizedPane maximized /= 0)
   (_, taken) <- evalUi ctx (keyInp KeyEscape inp) ui

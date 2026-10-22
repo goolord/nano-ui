@@ -31,8 +31,8 @@ tests =
   , spec "radio-groups-apart" runRadioGroupsApartTest
   , spec "slider-out-of-range-settles" runSliderOutOfRangeSettlesTest
   , spec "slider-bad-bounds-settle" runSliderBadBoundsSettleTest
-  , spec "slider-stale-drag" runSliderStaleDragTest
-  , spec "knob-stale-drag" runKnobStaleDragTest
+  , spec "slider-stale-drag" (runStaleDragTest (slider' 0 100) (40, 0))
+  , spec "knob-stale-drag" (runStaleDragTest (knob' 0 100) (0, -30))
   ]
 
 -- | Sibling sliders keep separate drags: dragging the second leaves the
@@ -94,45 +94,25 @@ runSliderBadBoundsSettleTest _ failed = do
     assert failed (not (respChanged resp) && not dirty)
     when (lo > hi) $ assertEq failed given v
 
--- | A drag released while its slider is not built stays over: a later
--- press elsewhere, held while the slider comes back, leaves its value alone.
-runSliderStaleDragTest :: Context -> IORef Int -> IO ()
-runSliderStaleDragTest ctx failed = do
-  shownRef <- newIORef True
-  let inp0 = withInput 300 120
-      ui = column $ do
-        shown <- liftIO (readIORef shownRef)
-        if shown then snd <$> withValue 50 (slider' 0 100) else pure 50
-      frameShown shown i = writeIORef shownRef shown >> evalUi ctx i ui
-  (resp, _) <- warmup2 ctx inp0 (column (withValue 50 (slider' 0 100)))
-  let V2 x y = centerOf resp
-      hold = holdAt inp0 (V2 (x + 40) y)
-      elsewhere = pressAt inp0 (V2 20 100)
-  _ <- frameShown True (pressAt inp0 (V2 x y))
-  dragged <- frameShown True hold
-  assertGt failed dragged 50
-  _ <- frameShown False hold
-  _ <- frameShown False (releaseAt hold)
-  _ <- frameShown False elsewhere
-  assertEq failed 50 =<< frameShown True (holdAt elsewhere (V2 30 100))
-
--- | A knob, whose drag 'useDrag2DOn' runs, drops a drag released while it
--- was not built, as a slider does: a later press elsewhere turns nothing.
-runKnobStaleDragTest :: Context -> IORef Int -> IO ()
-runKnobStaleDragTest ctx failed = do
+-- | A drag released while its slider, or its knob (whose drag 'useDrag2DOn'
+-- runs), is not built stays over: a later press elsewhere, held while the
+-- widget comes back, leaves its value alone. The drag moves the pointer by
+-- @(dx, dy)@.
+runStaleDragTest :: (Var Float -> NanoUI Response) -> (Float, Float) -> Context -> IORef Int -> IO ()
+runStaleDragTest widget (dx, dy) ctx failed = do
   shownRef <- newIORef True
   let inp0 = withInput 300 200
       ui = column $ do
         shown <- liftIO (readIORef shownRef)
-        if shown then snd <$> withValue 50 (knob' 0 100) else pure 50
+        if shown then snd <$> withValue 50 widget else pure 50
       frameShown shown i = writeIORef shownRef shown >> evalUi ctx i ui
-  (resp, _) <- warmup2 ctx inp0 (column (withValue 50 (knob' 0 100)))
+  (resp, _) <- warmup2 ctx inp0 (column (withValue 50 widget))
   let V2 x y = centerOf resp
-      hold = holdAt inp0 (V2 x (y - 30))
+      hold = holdAt inp0 (V2 (x + dx) (y + dy))
       elsewhere = pressAt inp0 (V2 200 150)
   _ <- frameShown True (pressAt inp0 (V2 x y))
-  turned <- frameShown True hold
-  assertGt failed turned 50
+  dragged <- frameShown True hold
+  assertGt failed dragged 50
   _ <- frameShown False hold
   _ <- frameShown False (releaseAt hold)
   _ <- frameShown False elsewhere
@@ -267,9 +247,7 @@ runSelectKeysAfterFocusMovesTest ctx failed = do
         pure (s, t, v)
   (s, t, _) <- warmup2 ctx inp0 ui
   _ <- runClick ctx inp0 ui (centerOf s)
-  let (rPress, rRelease) = rightClickPair inp0 (centerOf t)
-  _ <- runFrame ctx rPress ui
-  _ <- runFrame ctx rRelease ui
+  _ <- runRightClick ctx inp0 ui (centerOf t)
   assert failed . not . anySelectOpen =<< getStore ctx
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed 0 . (\(_, _, v) -> v) =<< evalUi ctx inp0 ui

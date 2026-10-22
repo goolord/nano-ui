@@ -960,9 +960,7 @@ runWheelCrossInsideTest ctx failed = do
         pure inner
   (outer, inner) <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx outer) $ \(Rect ox oy _ _) -> do
-    let onPlain = inp0 {inputMousePos = V2 (ox + 10) (oy + 5)}
-    warmup ctx onPlain ui
-    _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
+    hoverWheel ctx inp0 ui (V2 (ox + 10) (oy + 5)) (V2 1 0)
     assert failed . (> 0) =<< getScrollOffset ctx inner
     assertEq failed 0 =<< getScrollOffset ctx outer
 
@@ -996,9 +994,7 @@ runWheelFittingInnerTest ctx failed = do
         pure inner
   (page, inner) <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx inner) $ \r -> do
-    let over = inp0 {inputMousePos = spanCenter r}
-    warmup ctx over ui
-    _ <- runFrame ctx over {inputScroll = V2 0 1} ui
+    hoverWheel ctx inp0 ui (spanCenter r) (V2 0 1)
     assert failed . (> 0) =<< getScrollOffset ctx page
 
 -- | An inner scroller wider than the page it sits in runs on under the
@@ -1013,12 +1009,11 @@ runWheelUnderBarLaneTest ctx failed = do
         pure inner
   (page, inner) <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx page) $ \(Rect px py pw _) -> do
-    let lane = inp0 {inputMousePos = V2 (px + pw - scrollBarGutter ScrollBarList 0 / 2) (py + 10)}
-    warmup ctx lane ui
-    _ <- runFrame ctx lane {inputScroll = V2 0 1} ui
+    let lane = V2 (px + pw - scrollBarGutter ScrollBarList 0 / 2) (py + 10)
+    hoverWheel ctx inp0 ui lane (V2 0 1)
     assert failed . (> 0) =<< getScrollOffset ctx page
     assertEq failed 0 =<< getScrollOffset ctx inner
-    _ <- runFrame ctx (pressAt lane (inputMousePos lane)) ui
+    _ <- runFrame ctx (pressAt inp0 lane) ui
     assert failed . isJust =<< getsInteraction ctx isScrollDrag
 
 -- | A scroller whose track is shorter than the smallest thumb shows no bar,
@@ -1041,9 +1036,7 @@ runWheelCrossPopupTest ctx failed = do
       ui = scrollArea (fixedWH 300 200) . column $ do
         replicateM_ 30 (label "row")
         snd <$> popup' (constVar True) (defaultPopupConfig (AnchorPoint (V2 200 20))) (fst <$> scrollArea across (replicateM_ 30 (label "wide cell")))
-      wheel p d = do
-        warmup ctx inp0 {inputMousePos = p} ui
-        void (runFrame ctx inp0 {inputMousePos = p, inputScroll = d} ui)
+      wheel = hoverWheel ctx inp0 ui
   (page, mStrip) <- warmup2 ctx inp0 ui
   assertJust failed mStrip $ \strip ->
     assertJustM failed (getPrevRect ctx strip) $ \r -> do
@@ -1065,9 +1058,7 @@ runWheelCross2DTest ctx failed = do
       wide = box (fixedWH 600 10) (colorRGBA 90 90 90 255)
       rows n = column (replicateM_ n (label "row"))
       across l = (fixedWH 300 200 l) {layoutDirection = Row}
-      wheelOver c ui sid d = assertJustM failed (getPrevRect c sid) $ \r -> do
-        warmup c inp0 {inputMousePos = spanCenter r} ui
-        void (runFrame c inp0 {inputMousePos = spanCenter r, inputScroll = d} ui)
+      wheelOver c ui sid d = assertJustM failed (getPrevRect c sid) $ \r -> hoverWheel c inp0 ui (spanCenter r) d
       inRow = scrollArea across $ do
         (inner, ()) <- scrollArea2D (fixedWH 150 100) (column (wide >> rows 30))
         replicateM_ 30 (label "outer cell")
@@ -1109,8 +1100,7 @@ runWheelPaintOrderTest ctx failed = do
         (top, under) <- warmup2 ctx inp0 (ui mode)
         setScrollOffset ctx top 0
         setScrollOffset ctx under 0
-        warmup ctx inp0 {inputMousePos = p} (ui mode)
-        _ <- runFrame ctx inp0 {inputMousePos = p, inputScroll = V2 0 1} (ui mode)
+        hoverWheel ctx inp0 (ui mode) p (V2 0 1)
         (,) <$> ((> 0) <$> getScrollOffset ctx top) <*> ((> 0) <$> getScrollOffset ctx under)
   moved PointerAuto (V2 60 60) >>= assertEq failed (True, False)
   moved PointerAuto (V2 250 60) >>= assertEq failed (False, True)
@@ -1126,8 +1116,7 @@ runWheelPaintOrderTest ctx failed = do
         pure sid
   sid <- warmup2 ctx inp0 inside
   let onCard = V2 60 30
-  warmup ctx inp0 {inputMousePos = onCard} inside
-  _ <- runFrame ctx inp0 {inputMousePos = onCard, inputScroll = V2 0 1} inside
+  hoverWheel ctx inp0 inside onCard (V2 0 1)
   assert failed . (> 0) =<< getScrollOffset ctx sid
 
 -- | A scroller drawn in the overflow of a root shorter than the window takes
@@ -1141,7 +1130,5 @@ runWheelRootOverflowTest ctx failed = do
   sid <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx sid) $ \r@(Rect _ y _ _) -> do
     assertGt failed y 100
-    let over = inp0 {inputMousePos = spanCenter r}
-    warmup ctx over ui
-    _ <- runFrame ctx over {inputScroll = V2 0 1} ui
+    hoverWheel ctx inp0 ui (spanCenter r) (V2 0 1)
     assert failed . (> 0) =<< getScrollOffset ctx sid
