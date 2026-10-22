@@ -247,10 +247,9 @@ To keep an application idle when nothing is changing:
   once on completion) or `useStream` (which wakes the loop on updates and
   coalesces bursts that arrive within a single frame). If an external thread
   mutates state read by the UI, wake the loop using the callback returned by
-  `askWake`, which schedules a full-window redraw. When waking via
-  `ctxWakeLoop` on a `Context`, normal damage tracking determines what is
-  redrawn; if the change is not tracked by damage (such as mutating pixels under
-  an existing image ID), also call `damageFull`.
+  `askWake` (or `wakeFromThread` with a `Context`), which schedules a
+  full-window redraw on every backend. Don't call `ctxWakeLoop` or `damageFull`
+  from that thread: the `Context` and its damage state belong to the UI thread.
 
 When measuring idle CPU usage on Windows, inspect thread cycle time
 (`QueryProcessCycleTime`) and context-switch counts over a ~10-second window.
