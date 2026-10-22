@@ -210,7 +210,6 @@ runSearchClearDamageTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   let (press, release) = clickPair inp0 (V2 (x + w - ix - iconW / 2) (y + h / 2))
   _ <- runFrame ctx press ui
-  _ <- takeDamage ctx
   _ <- runFrame ctx release ui
   assert failed . (/= DamageFull) =<< takeDamage ctx
   assertEq failed "" =<< readVarIO ref
@@ -396,7 +395,6 @@ runTextInputMenuClipboardTest ctx failed = do
     assertJust failed (spanRectOf "Undo" overlays) $ \r -> do
       let (press, release) = clickPair inp0 (spanCenter r)
       _ <- runFrame ctx' press ui
-      _ <- takeDamage ctx'
       _ <- runFrame ctx' release ui
       assert failed . (/= DamageFull) =<< takeDamage ctx'
       assert failed . null . spanYOf "Undo" =<< collectOverlayTextSpans ctx' inp0
@@ -469,7 +467,7 @@ runTextAreaHoldStillTest ctx failed = do
   let
     Rect rx ry _ _ = respRect resp
     press = pressAt inp0 (V2 (rx + 20) (ry + 10))
-    hold = press {inputButtonsPressed = noButtons}
+    hold = holdAt inp0 (V2 (rx + 20) (ry + 10))
   _ <- runFrame ctx press ui
   _ <- runFrame ctx hold ui
   (_, _, dirty) <- runFrame ctx hold ui

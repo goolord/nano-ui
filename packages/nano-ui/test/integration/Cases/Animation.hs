@@ -301,7 +301,6 @@ runKeepAnimatingRestTest ctx failed = do
   assert failed . (> 0.99) =<< getAnimationValue ctx wid
   replicateM_ 60 (runFrame ctx hover ui)
   assertEq failed 0.5 =<< getAnimationValue ctx wid
-  _ <- takeDamage ctx
   setAnimationValue ctx wid 0
   assertEq failed 0 =<< getAnimationValue ctx wid
   assert failed =<< anyAnimating ctx

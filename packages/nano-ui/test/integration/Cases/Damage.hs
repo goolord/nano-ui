@@ -106,7 +106,6 @@ runOffWindowDamageTest ctx failed = do
         flex
         rowWith fillW $ flex >> label' (T.pack (show (k :: Int)))
   _ <- warmup2 ctx inp (ui 1)
-  _ <- takeDamage ctx
   (l, _, _) <- runFrame ctx inp (ui 2)
   dmg <- takeDamage ctx
   case dmg of
@@ -124,7 +123,6 @@ runEmptyDamagePaintTest ctx failed = do
   (_, dd, _) <- runFrame ctx inp ui
   assert failed . damageIsEmpty =<< takeDamage ctx
   assert failed . null =<< drawQuads dd
-  writeIORef (ctxPaintFull ctx) True
 
 -- | Far-apart rects stay apart, near ones merge, and a frame never has more
 -- than four pieces or just one.
