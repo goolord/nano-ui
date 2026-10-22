@@ -473,15 +473,16 @@ findAncestorMaxW na idx = go idx 0
 
 measureTextNode :: SolveEnv -> NodeIdx -> IO ()
 measureTextNode env@SolveEnv {seArena = na} idx = do
-  wAx@(AxisSizing wTag wVal _ maxW) <- getWidthSizing na idx
+  wAx@(AxisSizing wTag wVal minW maxW) <- getWidthSizing na idx
   hAx <- getHeightSizing na idx
   parentAssigns <- growParent na idx
   txt <- getText na idx
   isRowChild <- parentIsRow na idx
-  -- A fixed width wraps at itself, as placement does ('textWrapCap').
+  -- A fixed width wraps at itself within its limits, as placement does
+  -- ('textWrapCap').
   effMaxW <-
     if wTag == SizingFixed
-      then pure wVal
+      then pure (clamp minW maxW wVal)
       else if maxW < 1e8
         then pure maxW
         else findAncestorMaxW na idx

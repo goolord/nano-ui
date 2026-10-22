@@ -31,7 +31,7 @@ import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
 import NanoUI.Internal.Style (AlignX (..), Style (..), Theme (..), textToneColor)
-import NanoUI.Internal.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, lerpColor, onGrid, rectIntersect)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
 
@@ -148,14 +148,14 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
   mCustomCol <- getNodeFontColor arena idx
   fontSize <- getNodeFontSize arena idx
   ax <- getAlignX arena idx
-  AxisSizing wTag wVal _ maxW <- getWidthSizing arena idx
+  AxisSizing wTag wVal minW maxW <- getWidthSizing arena idx
   isRowChild <- parentIsRow arena idx
   -- 'nodeTextLines' wraps a row child only at its own newlines, so
   -- only then does the ancestor cap matter; skip the walk to the root. A
-  -- fixed width caps itself, as the solve measures it.
+  -- fixed width caps itself within its limits, as the solve measures it.
   effMaxW <-
     if wTag == SizingFixed
-      then pure wVal
+      then pure (clamp minW maxW wVal)
       else if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
         then pure maxW
         else findAncestorMaxW arena idx
