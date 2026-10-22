@@ -202,9 +202,12 @@ routePointer ctx inp = do
         }
   pure route
 
+-- | Close open dropdowns on a press of any button, or a left release, away
+-- from them and their selects. A right press on a field focuses it, so a
+-- dropdown left open would take its arrows and Enter.
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
-  when (pressedIn MouseLeft inp || releasedIn MouseLeft inp) $ do
+  when (anyButtonPressed inp || releasedIn MouseLeft inp) $ do
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp

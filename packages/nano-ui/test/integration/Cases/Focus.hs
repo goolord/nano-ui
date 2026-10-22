@@ -25,6 +25,7 @@ tests =
   , spec "focus-request-order" runFocusRequestOrderTest
   , spec "focus-request-closes-menus" runFocusRequestClosesMenusTest
   , spec "focus-tab-closes-menus" runFocusTabClosesMenusTest
+  , spec "focus-right-click-closes-dropdown" runFocusRightClickClosesDropdownTest
   , spec "focus-back-tab-from-none" runFocusBackTabFromNoneTest
   , spec "focus-tab-claimed" runFocusTabClaimedTest
   , spec "focus-reveals" runFocusRevealsTest
@@ -267,6 +268,24 @@ runFocusTabClosesMenusTest ctx failed = do
   _ <- runFrame ctx (tabInp inp) ui
   assertEq failed (respId sel) =<< getFocusId ctx
   assert failed . not . isJust =<< getsInteraction ctx isTextInputMenu
+
+-- | A right press on a field, which focuses it and opens its edit menu,
+-- closes an open dropdown, so the arrows then move the field's caret and
+-- leave the select's value alone.
+runFocusRightClickClosesDropdownTest :: Context -> IORef Int -> IO ()
+runFocusRightClickClosesDropdownTest ctx failed = do
+  index <- newVar (0 :: Int)
+  let ui = column ((,) <$> (fst <$> withValue "text" textInput') <*> (fst <$> held index (select' ["One", "Two", "Three"])))
+  (field, sel) <- warmup2 ctx inp ui
+  _ <- runClick ctx inp ui (centerOf sel)
+  assert failed . anySelectOpen =<< getStore ctx
+  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
+  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  assertEq failed (respId field) =<< getFocusId ctx
+  assert failed . not . anySelectOpen =<< getStore ctx
+  _ <- runFrame ctx (keyInp KeyRight inp) ui
+  _ <- runFrame ctx inp ui
+  assertEq failed 0 =<< readVarIO index
 
 -- | Shift+Tab with nothing focused goes to the last Tab stop.
 runFocusBackTabFromNoneTest :: Context -> IORef Int -> IO ()
