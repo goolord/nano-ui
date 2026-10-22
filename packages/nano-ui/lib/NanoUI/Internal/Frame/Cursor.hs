@@ -82,11 +82,19 @@ scrollThumbCursorKind ctx inp = do
 
 -- Field well, not the label. Independent of focus and hot. A search field's
 -- clear button raises the pointer cursor; everywhere else over a field is text.
+-- A drag that another kind of widget holds (a slider's, a divider's) keeps
+-- its own cursor over a field; a text selection drag keeps the text cursor.
 textFieldHoverCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 textFieldHoverCursorKind ctx inp = do
   let
     mouse = inputMousePos inp
-  mWid <- textFieldWidgetAtMouse ctx mouse
+  active <- readIORef (ctxActiveId ctx)
+  othersDrag <-
+    if heldIn MouseLeft inp && hashWidgetId active /= 0
+      then withWidgetNode ctx active False $ \idx ->
+        (\nt -> nt /= NodeTextInput && nt /= NodeTextArea) <$> getNodeType (ctxNodeArena ctx) idx
+      else pure False
+  mWid <- if othersDrag then pure Nothing else textFieldWidgetAtMouse ctx mouse
   forM mWid $ \wid -> do
     onClear <- searchClearHit ctx wid mouse
     onStepper <- withWidgetNode ctx wid False $ \idx -> numericStepperHit ctx idx mouse

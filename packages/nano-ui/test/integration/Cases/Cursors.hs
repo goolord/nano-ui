@@ -20,7 +20,35 @@ tests =
   , spec "cursor-shape-in-window" runCursorShapeInWindowTest
   , spec "cursor-shape-layers-and-pin" runCursorShapeLayersAndPinTest
   , spec "cursor-shape-small-scope" runCursorShapeSmallScopeTest
+  , spec "cursor-drag-owner" runCursorDragOwnerTest
   ]
+
+-- | A slider drag keeps the grabbing hand over a text field, and lights up
+-- no button it crosses. A field's own selection drag keeps the I-beam over
+-- another field.
+runCursorDragOwnerTest :: Context -> IORef Int -> IO ()
+runCursorDragOwnerTest ctx failed = do
+  let ui = row $ do
+        s <- withValue 5 (slider' 0 10)
+        f <- withValue "text" textInput'
+        g <- withValue "more" textInput'
+        b <- button' "Go"
+        pure (fst s, fst f, fst g, b)
+  (s, f, g, b) <- warmup2 ctx inp ui
+  let dragOver from r = do
+        _ <- runFrame ctx (pressAt inp (centerOf from)) ui
+        let hold = holdAt inp (centerOf r)
+        _ <- runFrame ctx hold ui
+        kind <- uiCursorKind ctx hold
+        _ <- runFrame ctx (releaseAt hold) ui
+        _ <- runFrame ctx hold {inputButtonsHeld = mempty} ui
+        pure kind
+  assertEq failed UiCursorGrabbing =<< dragOver s f
+  assertEq failed UiCursorText =<< dragOver f g
+  _ <- runFrame ctx (pressAt inp (centerOf s)) ui
+  _ <- runFrame ctx (holdAt inp (centerOf b)) ui
+  assert failed . (/= respId b) =<< getHotId ctx
+  assertEq failed 0 =<< getAnimationValue ctx (respId b)
 
 -- | A plain drawing: a node with no cursor of its own.
 plainArea :: Float -> Float -> NanoUI Response

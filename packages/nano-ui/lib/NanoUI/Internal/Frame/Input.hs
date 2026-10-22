@@ -113,11 +113,18 @@ isMenuButtonWidget ctx wid =
 -- 'ctxLastHotId'. Runs after layout and before painting. When the hot widget
 -- changes, the hover animation of the widget that lost the pointer runs from
 -- 1 to 0, and that of the widget that gained it from 0 to 1, each over 0.12
--- seconds. The painter blends a widget's hover colour by that value.
+-- seconds. The painter blends a widget's hover colour by that value. While a
+-- widget holds the left button, no other one is hot, as no other is hovered
+-- ('NanoUI.Internal.Widgets.Node.resolveInteraction'), so a drag lights up
+-- nothing it crosses.
 refreshHover :: Context -> Input -> IO ()
 refreshHover ctx inp = do
   prevHot <- readIORef (ctxLastHotId ctx)
-  newHot <- probeHotId ctx (inputMousePos inp)
+  probed <- probeHotId ctx (inputMousePos inp)
+  active <- readIORef (ctxActiveId ctx)
+  let newHot
+        | heldIn MouseLeft inp && hashWidgetId active /= 0 && probed /= active = WidgetId 0
+        | otherwise = probed
   writeIORef (ctxHotId ctx) newHot
   writeIORef (ctxLastHotId ctx) newHot
   when (prevHot /= newHot) $ do
