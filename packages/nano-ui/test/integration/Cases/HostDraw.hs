@@ -15,6 +15,7 @@ tests =
   [ spec "draw-square-geometry" runSquareGeometryTest
   , spec "draw-thick-rounded-stroke" runThickRoundedStrokeTest
   , spec "draw-external-text" runExternalTextTest
+  , spec "draw-external-drawing-text" runExternalDrawingTextTest
   , spec "draw-empty-clip" runEmptyClipTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
   , spec "draw-polygon-bad-index" runPolygonBadIndexTest
@@ -223,6 +224,24 @@ runExternalTextTest ctx failed = do
   spans <- collectTextSpans ctx
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
+
+-- | External text leaves out drawing text too, plain, styled or aligned, so
+-- a host that draws only spans shows no box for each character.
+runExternalDrawingTextTest :: Context -> IORef Int -> IO ()
+runExternalDrawingTextTest ctx failed = do
+  let inp = withInput 400 100
+      ink = colorRGBA 255 255 255 255
+      heavy = defaultTextFont {textFontWeight = WeightBold}
+      ops txt (Rect x y _ _) =
+        [ DrawText x y 0 1 txt ink
+        , DrawTextStyled x (y + 20) heavy txt ink
+        , DrawTextAligned x (y + 40) 0 1 2 defaultTextFont txt ink
+        ]
+      ui txt = void (drawing (fixedWH 300 80) (smallArrayFromList . ops txt))
+  setDrawExternalText ctx True
+  (_, dShort, _) <- runFrame ctx inp (ui "ab")
+  (_, dLong, _) <- runFrame ctx inp (ui "abcdefghijklmnop")
+  assertEq failed (drawVertexCount dShort) (drawVertexCount dLong)
 
 -- | Geometry clipped to nothing gets no command, which a host would still
 -- draw into the pixel its empty clip rounds to.
