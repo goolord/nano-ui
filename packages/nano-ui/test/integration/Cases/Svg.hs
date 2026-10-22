@@ -13,27 +13,59 @@ tests =
   , spec "svg-icon" runSvgIconTest
   , spec "svg-fit-content" runSvgFitContentTest
   , spec "svg-raster-lease" runSvgRasterLeaseTest
+  , spec "svg-raster-retry" runSvgRasterRetryTest
   ]
 
--- | A raster stays in the atlas while frames draw it: a size the icon no
--- longer has, or an icon no longer shown, gives its space back. A raster too
--- big for the atlas is remembered too, rather than made again every frame.
+-- | The ids of the cached rasters, in key order.
+svgRasters :: Context -> IO [ImageId]
+svgRasters ctx = map (\(iid, _, _) -> iid) . Map.elems <$> readIORef (ctxSvgRasters ctx)
+
+-- | A raster stays in the atlas while frames draw it, and an icon hidden and
+-- shown again keeps it. The next raster made takes the space of those no
+-- frame drew since the one before: a size the icon no longer has, or an icon
+-- no longer shown. A raster too big for the atlas is remembered too, rather
+-- than made again every frame.
 runSvgRasterLeaseTest :: Context -> IORef Int -> IO ()
 runSvgRasterLeaseTest ctx failed = do
   doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
   let inp = withInputOff 200 120
-      rasters = map fst . Map.elems <$> readIORef (ctxSvgRasters ctx)
       registered iid = isJust <$> lookupImageSize ctx iid
+      hidden = warmup2 ctx inp (column (pure ()))
   _ <- warmup2 ctx inp (column (svgIcon 16 doc))
-  small <- rasters
+  small <- svgRasters ctx
   assertEq failed [True] =<< mapM registered small
+  hidden
+  _ <- warmup2 ctx inp (column (svgIcon 16 doc))
+  assertEq failed small =<< svgRasters ctx
+  hidden
   _ <- warmup2 ctx inp (column (svgIcon 20 doc))
-  assertEq failed 1 . length =<< rasters
+  assertEq failed 1 . length =<< svgRasters ctx
   assertEq failed [False] =<< mapM registered small
   _ <- warmup2 ctx inp (column (svgIconWith (fixedWH 5000 10) doc))
-  assertEq failed [ImageId 0] =<< rasters
-  _ <- warmup2 ctx inp (column (pure ()))
-  assertEq failed [] =<< rasters
+  assert failed . elem (ImageId 0) =<< svgRasters ctx
+  hidden
+  _ <- warmup2 ctx inp (column (svgIcon 16 doc))
+  assertEq failed [True] =<< mapM registered =<< svgRasters ctx
+
+-- | A raster the atlas had no room for is made again once an image leaves
+-- the atlas, while the icon is still drawn.
+runSvgRasterRetryTest :: Context -> IORef Int -> IO ()
+runSvgRasterRetryTest ctx failed = do
+  doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
+  let inp = withInputOff 200 120
+      ui = column (svgIcon 16 doc)
+      fill iid w h = registerImage ctx (ImageId iid) w h (BS.replicate (w * h * 4) 255)
+  -- A shelf as tall as the atlas, then an image across the rest of its
+  -- width, leave no room for another.
+  assert failed =<< fill 1 1 4094
+  assert failed =<< fill 2 4092 17
+  _ <- warmup2 ctx inp ui
+  assertEq failed [ImageId 0] =<< svgRasters ctx
+  releaseImage ctx (ImageId 2)
+  _ <- warmup2 ctx inp ui
+  shown <- svgRasters ctx
+  assert failed (ImageId 0 `notElem` shown)
+  assertEq failed [True] =<< mapM (fmap isJust . lookupImageSize ctx) shown
 
 -- | Fit and alignment place the document's own 2:1 shape, not a square raster
 -- it was first letterboxed into.
@@ -49,8 +81,10 @@ runSvgFitContentTest ctx failed = do
   assert failed (all (== 0) (alphas (rasterizeSvgIn 10 10 (Rect 0 0 0 0) white doc)))
   let inp = withInputOff 200 200
       icon fit ax = svgIconConfigured defaultImageConfig {icLayout = fixedWH 20 20, icFit = fit, icAlignX = ax} doc
-      -- The frames without the last icon release its raster.
+      -- After a frame without an icon, the next raster made takes the place
+      -- of the last one.
       contentOf ui = do
+        warmup ctx inp (column (pure ()))
         _ <- warmupDraw ctx inp ui
         -- The key holds the content rect in eighths of a raster pixel.
         let pixels v = fromIntegral v / 8 :: Float
@@ -114,7 +148,7 @@ runSvgIconTest ctx failed = do
       ui = column $ do
         svgIcon 24 doc
         svgIconWith (fixedWH 16 16 . fontColor red) doc
-      rasters = map fst . Map.elems <$> readIORef (ctxSvgRasters ctx)
+      rasters = svgRasters ctx
   (_, draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw
   let colors = map snd quads

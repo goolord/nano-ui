@@ -12,6 +12,7 @@ module NanoUI.Internal.Atlas
   , withImageSlot
   , AtlasToken
   , atlasToken
+  , atlasReleases
   , atlasSnapshot
   , AtlasUpload (..)
   , atlasChanges
@@ -78,6 +79,8 @@ data AtlasState = AtlasState
   , asFree :: [AtlasSlot]
   -- ^ Space freed by released images, including each one's trailing padding.
   -- 'takeFree' tries these before the shelves.
+  , asReleased :: {-# UNPACK #-} !Int
+  -- ^ How many images 'releaseImage' has removed ('atlasReleases').
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)
@@ -92,6 +95,11 @@ instance Eq AtlasToken where
 
 atlasToken :: ImageAtlas -> IO AtlasToken
 atlasToken (ImageAtlas ref) = AtlasToken <$> readIORef ref
+
+-- | How many images have been released, so one that did not fit can be tried
+-- again once room may have come free.
+atlasReleases :: ImageAtlas -> IO Int
+atlasReleases (ImageAtlas ref) = asReleased <$> readIORef ref
 
 newImageAtlas :: IO ImageAtlas
 newImageAtlas = do
@@ -112,6 +120,7 @@ newImageAtlas = do
         , asWrites = []
         , asWriteCount = 0
         , asFree = []
+        , asReleased = 0
         }
 
 registerImage :: ImageAtlas -> ImageId -> Int -> Int -> ByteString -> IO Bool
@@ -150,6 +159,7 @@ releaseImage (ImageAtlas ref) (ImageId tid) = do
           { asSlots = IM.delete tid (asSlots st)
           , asFree = mergeFree (AtlasSlot x y (w + atlasPad) (h + atlasPad)) (asFree st)
           , asLastFresh = max tid (asLastFresh st)
+          , asReleased = asReleased st + 1
           }
       pure True
 

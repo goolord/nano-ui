@@ -29,22 +29,22 @@ module NanoUI.Internal.Widgets.Display
 where
 
 import Control.Exception (IOException, try)
-import Control.Monad (void)
+import Control.Monad (filterM, void)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
-import Data.IORef (modifyIORef', readIORef)
+import Data.IORef (readIORef, writeIORef)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
+import Data.Primitive.PrimVar (newPrimVar, readPrimVar, writePrimVar)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Atlas qualified as Atlas
-import NanoUI.Internal.Context (Context (..), registerImage, releaseImage)
+import NanoUI.Internal.Context (Context (..), frameNumber, registerImage, releaseImage)
 import NanoUI.Internal.Draw (getDrawSnapScale)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, nextId, uiTheme, withContext)
 import NanoUI.Svg (Svg, parseSvg, rasterizeSvgIn, svgKey, svgMonochrome, svgSize)
 import NanoUI.Internal.Style
-import NanoUI.Internal.Tasks (leaseHeld, touchHeld)
 import NanoUI.Internal.Image (ContentFit (..), ImageLook (..), fitRect, imageLook, turnedRect)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), colorRGBA, colorToWord32)
 import NanoUI.Internal.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
@@ -218,22 +218,33 @@ svgIconConfigured' cfg doc = do
         rasterColor = if oneColour then white else color
         key = (svgKey doc, pw, ph, colorToWord32 rasterColor, content)
     let cache = ctxSvgRasters ctx
+        atlas = ctxImageAtlas ctx
+    frame <- frameNumber ctx
     known <- Map.lookup key <$> readIORef cache
+    make <- case known of
+      -- A raster the atlas had no room for is made again once an image has
+      -- left the atlas.
+      Just (ImageId 0, freed, _) -> (/= freed) <$> Atlas.atlasReleases atlas
+      Just _ -> pure False
+      Nothing -> pure True
     case known of
-      Just (iid, lease) -> iid <$ touchHeld ctx lease
-      Nothing -> do
-        iid <- Atlas.freshImageId (ctxImageAtlas ctx)
+      Just (iid, _, drawn) | not make -> iid <$ writePrimVar drawn frame
+      _ -> do
+        -- Rasters no frame drew since the one before give their room to this
+        -- one: nothing on screen shows them, so their release needs no
+        -- repaint. Until then, an icon hidden and shown again keeps its own.
+        rasters <- readIORef cache
+        stale <- filterM (\(_, (_, _, drawn)) -> (< frame - 1) <$> readPrimVar drawn) (Map.toList rasters)
+        mapM_ (\(_, (old, _, _)) -> Atlas.releaseImage atlas old) stale
+        iid <- Atlas.freshImageId atlas
         let placed = Rect (fromIntegral qx / 8) (fromIntegral qy / 8) (fromIntegral qw / 8) (fromIntegral qh / 8)
         ok <- registerImage ctx iid pw ph (rasterizeSvgIn pw ph placed rasterColor doc)
         -- A raster the atlas has no room for is kept too, as id 0, so it is
-        -- not made again on every pass while drawn. Nothing on screen shows
-        -- a raster once a frame has not drawn it, so its release needs no
-        -- repaint.
+        -- not made again on every pass while drawn.
         let shown = if ok then iid else ImageId 0
-        lease <- leaseHeld ctx $ do
-          modifyIORef' cache (Map.delete key)
-          void (Atlas.releaseImage (ctxImageAtlas ctx) shown)
-        modifyIORef' cache (Map.insert key (shown, lease))
+        freed <- Atlas.atlasReleases atlas
+        drawn <- newPrimVar frame
+        writeIORef cache $! Map.insert key (shown, freed, drawn) (foldr (Map.delete . fst) rasters stale)
         pure shown
   imageConfigured' cfg {icLayout = const lay, icFit = FitFill, icAlignX = AlignCenter, icAlignY = AlignMiddle} iid
 
