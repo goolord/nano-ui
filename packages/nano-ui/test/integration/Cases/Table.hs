@@ -195,9 +195,7 @@ runSimpleTableSiblingsTest ctx failed = do
   _ <- warmup2 ctx input ui
   hdrs <- sortOn (\r -> (rectY r, rectX r)) <$> headerButtonRects ctx
   assertJust failed (listToMaybe hdrs) $ \first -> do
-    let (press, release) = rightClickPair input (spanCenter first)
-    _ <- runFrame ctx press ui
-    _ <- runFrame ctx release ui
+    _ <- runRightClick ctx input ui (spanCenter first)
     (a, x) <- warmup2 ctx input ui
     assertEq failed ([0], []) (tableHiddenIndices a, tableHiddenIndices x)
 
@@ -212,10 +210,7 @@ runTableHideColumnsTest ctx failed = do
       rightEdge = maybe 0 (\r -> rectX r + rectW r) . listToMaybe . reverse
       hideFirst = do
         hdrs <- headerButtonRects ctx
-        forM_ (listToMaybe hdrs) $ \first -> do
-          let (press, release) = rightClickPair input (spanCenter first)
-          _ <- runFrame ctx press ui
-          void (runFrame ctx release ui)
+        forM_ (listToMaybe hdrs) (runRightClick ctx input ui . spanCenter)
         tableHiddenIndices <$> warmup2 ctx input ui
   _ <- warmup2 ctx input ui
   filled <- rightEdge <$> headerButtonRects ctx

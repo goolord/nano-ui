@@ -135,9 +135,7 @@ runContextMenuDisabledRowTest ctx failed = do
           menuItem "Row Undo"
         pure (btn, ())
   (btnWarm, _) <- warmup2 ctx inp0 ui
-  let (inpRightDown, inpRightUp) = rightClickPair inp0 (centerOf btnWarm)
-  _ <- runFrame ctx inpRightDown ui
-  _ <- runFrame ctx inpRightUp ui
+  _ <- runRightClick ctx inp0 ui (centerOf btnWarm)
   _ <- runFrame ctx inp0 ui
   spans <- collectOverlayTextSpans ctx inp0
   let find t = [r | (r, txt, _, _, _) <- spans, txt == t]

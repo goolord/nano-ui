@@ -241,8 +241,7 @@ runFocusRequestClosesMenusTest ctx failed = do
         assert failed . not =<< open
   _ <- runClick ctx inp ui (centerOf sel)
   closes (anySelectOpen <$> getStore ctx)
-  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  _ <- runRightClick ctx inp ui (centerOf field)
   assertEq failed (respId field) =<< getFocusId ctx
   closes (isJust <$> getsInteraction ctx isTextInputMenu)
 
@@ -262,8 +261,7 @@ runFocusTabClosesMenusTest ctx failed = do
   _ <- runFrame ctx (keyInp KeyRight inp) ui
   _ <- runFrame ctx inp ui
   assertEq failed 0 =<< readVarIO index
-  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  _ <- runRightClick ctx inp ui (centerOf field)
   assert failed . isJust =<< getsInteraction ctx isTextInputMenu
   _ <- runFrame ctx (tabInp inp) ui
   assertEq failed (respId sel) =<< getFocusId ctx
@@ -279,8 +277,7 @@ runFocusRightClickClosesDropdownTest ctx failed = do
   (field, sel) <- warmup2 ctx inp ui
   _ <- runClick ctx inp ui (centerOf sel)
   assert failed . anySelectOpen =<< getStore ctx
-  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  _ <- runRightClick ctx inp ui (centerOf field)
   assertEq failed (respId field) =<< getFocusId ctx
   assert failed . not . anySelectOpen =<< getStore ctx
   _ <- runFrame ctx (keyInp KeyRight inp) ui

@@ -33,8 +33,7 @@ runModalHidesTextMenuTest ctx failed = do
         modal open "Error" (label "Something failed")
         pure field
   field <- warmup2 ctx inp0 ui
-  let (rightPress, rightRelease) = rightClickPair inp0 (centerOf field)
-  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  _ <- runRightClick ctx inp0 ui (centerOf field)
   assert failed . isJust =<< getsInteraction ctx isTextInputMenu
   writeVarIO open True
   warmup ctx inp0 ui

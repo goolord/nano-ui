@@ -253,9 +253,7 @@ runSelectKeysAfterFocusMovesTest ctx failed = do
         pure (s, t, v)
   (s, t, _) <- warmup2 ctx inp0 ui
   _ <- runClick ctx inp0 ui (centerOf s)
-  let (rPress, rRelease) = rightClickPair inp0 (centerOf t)
-  _ <- runFrame ctx rPress ui
-  _ <- runFrame ctx rRelease ui
+  _ <- runRightClick ctx inp0 ui (centerOf t)
   assert failed . not . anySelectOpen =<< getStore ctx
   _ <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed 0 . (\(_, _, v) -> v) =<< evalUi ctx inp0 ui
