@@ -15,7 +15,7 @@ import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
   , UiCursorKind (..), V2 (..), box, constVar, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
-  , fixedWH, grow, imageConfigured', label, respRect, tomorrowNightMinDarkTheme, window'
+  , fixedWH, fontMono, fontSize, grow, imageConfigured', label, labelWith, respRect, tomorrowNightMinDarkTheme, window'
   )
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
@@ -192,6 +192,18 @@ testSquareThemedRaster = do
         let lit = length (filter (== packColor fg) ps)
         assert "Checkbox label is glyphs, not solid boxes" (lit > 0 && lit * 2 < length ps)
       [] -> assert "Checkbox label span collected" False
+
+-- | Cozette stamps every span from its one 6x13 cell, so sized and
+-- monospace text is laid out in that cell too: each span is as wide as the
+-- glyphs drawn in it.
+testCozetteEverySize :: IO ()
+testCozetteEverySize = do
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  let inp = withInputOff 240 120
+  _ <- run2Frames ctx inp (column (labelWith (fontSize 26) "Title" >> labelWith fontMono "1234"))
+  (base, _) <- collectRasterSpans ctx inp
+  assert "Sized and monospace text spans measure the Cozette cell"
+    ([(t, w, h) | (Rect _ _ w h, t, _, _, _) <- base] == [("Title", 30, 13), ("1234", 24, 13)])
 
 -- | The OpenGL glyph atlas holds every glyph exactly as the software blitter
 -- stamps it at that scale: the grid fits the font, and a cell equals a
@@ -381,6 +393,7 @@ main = do
   testTranslucentRaster
   testTriangleRaster
   testSquareThemedRaster
+  testCozetteEverySize
   testGlyphAtlas
   testSpanQuads
   testTurnedImageRaster

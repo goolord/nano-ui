@@ -9,12 +9,15 @@ module NanoUI.Rgfw.Internal.Context
 
 import Data.Text (Text)
 import NanoUI (Color, Rect, Theme, borderWidth, cornerRadius, everyStyle)
+import NanoUI.Backend (measureTextIO)
 import NanoUI.Internal.Context
   ( Context
   , setDrawExternalText
   , setDrawSquareGeometry
   , setTheme
   , withFontMetrics
+  , withFontResolver
+  , withMonoFontMetrics
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (cozetteMetrics)
 import NanoUI.Testing (Layer (..), newPixelContext)
@@ -24,10 +27,20 @@ import NanoUI.Testing (Layer (..), newPixelContext)
 -- left to the span stamper, and the given theme made square
 -- ('applyRgfwTheme'). Sessions, tests and profiles share it so they render
 -- the same frame.
+--
+-- The span stamper draws every span in Cozette's one 6x13 cell, so text of
+-- every size and face, monospace included, is laid out in that cell: font
+-- sizes change nothing here.
 newRgfwContext :: Theme -> IO Context
 newRgfwContext theme = do
   ctx0 <- newPixelContext
-  let ctx = withFontMetrics ctx0 cozetteMetrics
+  -- The resolver goes last: the metric setters reinstall the default one,
+  -- which scales the metrics to the size asked for.
+  let ctx =
+        withFontResolver
+          (withMonoFontMetrics (withFontMetrics ctx0 cozetteMetrics) cozetteMetrics)
+          (\_ _ _ _ -> pure (cozetteMetrics, False))
+          (\_ _ _ _ -> measureTextIO cozetteMetrics)
   setDrawSquareGeometry ctx True
   setDrawExternalText ctx True
   applyRgfwTheme ctx theme
