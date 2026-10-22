@@ -418,9 +418,20 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
                   <&&> (rectContains <$> getNodeRect na idx <*> pure mouse)
                   <&&> do
                     -- A scroller's own clip is its viewport, short of its
-                    -- bars; the clip around it is its parent's.
+                    -- bars; the clip around it is its parent's, cut to what
+                    -- the parent gives its children (a clip container's
+                    -- rect), which only a scroller or panel parent records.
                     owner <- if isScrollNode nt then getParent na idx else pure idx
-                    if owner < 0 then pure True else maybe True (`rectContains` mouse) <$> getClipBounds na owner
+                    let inside = maybe True (`rectContains` mouse)
+                    if owner < 0
+                      then pure True
+                      else
+                        (inside <$> getClipBounds na owner)
+                          <&&> if owner == idx
+                            then pure True
+                            else do
+                              ont <- getNodeType na owner
+                              inside <$> (childPaintClip ctx owner ont =<< getNodeRect na owner)
                   <&&> (isJust <$> barAt idx)
                   <&&> overlayHitAllowed ctx top idx
               barAt idx = do
