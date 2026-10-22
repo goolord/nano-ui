@@ -10,25 +10,23 @@ import Foreign.C.Types (CInt (..))
 import GHC.Clock (getMonotonicTime)
 import NanoUI (Size (..), WindowMode (..), WindowSettings (..), askWake, defaultWindowSettings, label, quitUi, useTask, newTask)
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
+import NanoUI.Rgfw.Window (hasDisplay)
 import System.CPUTime (getCPUTime)
-import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
-import System.Info (os)
 import System.Timeout (timeout)
 
 foreign import ccall "exit" c_exit :: CInt -> IO ()
 
 -- | A background job's wake shows its result while the loop waits for
 -- events; after a stream faster than frames stops, the loop idles instead of
--- spinning; 'quitUi' ends the session. Skipped without an X display or an
--- OpenGL 3.2 window. A missed wake would block forever, so a failed check
--- exits the process.
+-- spinning; 'quitUi' ends the session. Skipped on Linux without an X
+-- display, and without an OpenGL 3.2 window. A missed wake would block
+-- forever, so a failed check exits the process.
 testRgfwWake :: IO ()
-testRgfwWake = do
-  display <- lookupEnv "DISPLAY"
-  if os /= "linux" || maybe True null display
-    then putStrLn "[SKIP] RGFW wake: no X display"
-    else do
+testRgfwWake =
+  hasDisplay >>= \case
+    False -> putStrLn "[SKIP] RGFW wake: no X display"
+    True -> do
       -- Two capabilities let the producer wake the loop while it is drawing,
       -- not only while it waits.
       caps <- getNumCapabilities

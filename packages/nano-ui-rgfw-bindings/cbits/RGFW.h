@@ -11987,12 +11987,20 @@ RGFW_bool RGFW_window_isFloating(RGFW_window* win) {
 	return (GetWindowLongPtr(win->src.window, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 }
 
+/* nano-ui: a stop stays pending until a wait takes it, as X11's stop pipe
+   does. The posted message alone is taken by any event poll, so a stop made
+   between a poll and the next wait did not end that wait. */
+static volatile LONG RGFW_win32_stopPending = 0;
+
 void RGFW_stopCheckEvents(void) {
+	InterlockedExchange(&RGFW_win32_stopPending, 1);
 	PostMessageW(_RGFW->helperWindow, WM_NULL, 0, 0);
 }
 
 void RGFW_waitForEvent(i32 waitMS) {
+	if (InterlockedExchange(&RGFW_win32_stopPending, 0)) return;
 	MsgWaitForMultipleObjects(0, NULL, FALSE, (DWORD)waitMS, QS_ALLINPUT);
+	InterlockedExchange(&RGFW_win32_stopPending, 0);
 }
 
 RGFW_key RGFW_physicalToMappedKey(RGFW_key key) {
@@ -14287,7 +14295,13 @@ RGFW_bool RGFW_getGlobalMouse(i32* x, i32* y) {
 	return RGFW_TRUE;
 }
 
+/* nano-ui: a stop stays pending until a wait takes it, as X11's stop pipe
+   does. The posted event alone is taken by any event poll, so a stop made
+   between a poll and the next wait did not end that wait. */
+static volatile int RGFW_osx_stopPending = 0;
+
 void RGFW_stopCheckEvents(void) {
+	__atomic_store_n(&RGFW_osx_stopPending, 1, __ATOMIC_SEQ_CST);
 	id eventPool = objc_msgSend_class(objc_getClass("NSAutoreleasePool"), sel_registerName("alloc"));
 	eventPool = objc_msgSend_id(eventPool, sel_registerName("init"));
 
@@ -14302,6 +14316,7 @@ void RGFW_stopCheckEvents(void) {
 }
 
 void RGFW_waitForEvent(i32 waitMS) {
+	if (__atomic_exchange_n(&RGFW_osx_stopPending, 0, __ATOMIC_SEQ_CST)) return;
 	id eventPool = objc_msgSend_class(objc_getClass("NSAutoreleasePool"), sel_registerName("alloc"));
 	eventPool = objc_msgSend_id(eventPool, sel_registerName("init"));
 
@@ -14324,6 +14339,7 @@ void RGFW_waitForEvent(i32 waitMS) {
 	}
 
 	objc_msgSend_bool_void(eventPool, sel_registerName("drain"));
+	__atomic_store_n(&RGFW_osx_stopPending, 0, __ATOMIC_SEQ_CST);
 }
 
 RGFW_key RGFW_physicalToMappedKey(RGFW_key key) {

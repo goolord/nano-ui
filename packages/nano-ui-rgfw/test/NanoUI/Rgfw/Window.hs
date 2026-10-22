@@ -3,7 +3,7 @@
 -- screenshot: the window stays opaque even where a translucent window colour
 -- is painted twice, and rows run top to bottom. A session window is sized in
 -- layout units.
-module NanoUI.Rgfw.Window (testGlWindow, testSessionWindow) where
+module NanoUI.Rgfw.Window (hasDisplay, testGlWindow, testSessionWindow) where
 
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (void)
