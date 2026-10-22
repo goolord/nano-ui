@@ -242,7 +242,8 @@ outsideModalBlock ctx idx = maybe (pure True) (nodeInSubtree ctx idx) =<< topMod
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
-  idx <- MaybeT (topmostOverlayAtMouse ctx mouse)
+  -- Not a window under its modal's panel ('overlayHitRoot').
+  idx <- MaybeT (overlayHitRoot ctx mouse)
   nt <- liftIO (getNodeType (ctxNodeArena ctx) idx)
   guard (nt == NodeWindow)
   guard =<< liftIO (outsideModalBlock ctx idx)
