@@ -398,7 +398,8 @@ auto-repeats. Shortcuts and view-level key queries (`keyPressed`,
 Ctrl+A in a text input, Enter/Space on a focused button, or arrow keys on a
 focused slider or list; modified chords like Ctrl+Enter or Alt+Left still pass
 through to shortcuts). An Escape that closes an open dropdown, a focused combo
-box's list or a text field's edit menu reaches neither. Custom widgets specify
+box's list or a text field's edit menu reaches neither, and nor do its repeats
+and release (`keyHeld`, `keyReleased`). Custom widgets specify
 which keys they handle via `widgetKeys` (for example, a terminal widget sets
 `KeysAll`); one that claims Tab this way keeps focus when Tab is pressed.
 `menuItemShortcut` only matches while its menu is open; to make the shortcut

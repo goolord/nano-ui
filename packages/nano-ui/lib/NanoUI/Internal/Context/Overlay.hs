@@ -49,13 +49,14 @@ overlayConsumesQuit ctx inp = do
   pure (pressedOnceIn KeyEscape inp && consumed)
 
 -- | Whether this frame's Escape is spoken for: something took it already
--- ('overlayConsumesQuit'), or an open text-edit menu, an open dropdown or a
--- focused combo box's list ('isFocusCombo') closes on it. The view's Escape
--- consumers ask this, so none acts on the Escape such a menu takes, wherever
--- it is declared.
+-- ('markEscapeConsumed'), or took its press and it is still down or just
+-- released, or an open text-edit menu, an open dropdown or a focused combo
+-- box's list ('isFocusCombo') closes on it. The view's Escape consumers ask
+-- this, so none acts on the Escape such a menu takes, wherever it is
+-- declared.
 escapeReserved :: Context -> Input -> IO Bool
-escapeReserved ctx inp = do
-  taken <- overlayConsumesQuit ctx inp
+escapeReserved ctx _ = do
+  taken <- getsOverlay ctx osEscapeConsumed
   menuOrCombo <- getsInteraction ctx (\s -> isJust (isTextInputMenu s) || isFocusCombo s)
   dropdown <- anySelectOpen <$> getStore ctx
   pure (taken || menuOrCombo || dropdown)

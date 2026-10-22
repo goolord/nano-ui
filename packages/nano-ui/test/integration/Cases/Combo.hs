@@ -307,27 +307,34 @@ runComboEscapeRevertTest ctx failed = do
 
 -- | Escape on a focused combo showing its list cancels the combo and nothing
 -- else, wherever another Escape consumer is declared: a popup's dismiss, a
--- shortcut or a key listener, before it or after it, leaves it alone.
+-- shortcut or a key listener, before it or after it, leaves it alone. So do
+-- the listeners while the Escape is held, repeating, and on its release.
 runComboEscapeOwnedTest :: Context -> IORef Int -> IO ()
 runComboEscapeOwnedTest _ failed =
-  forM_ [(which, before) | which <- ["popup", "shortcut", "keyPressed"], before <- [True, False]] $ \(which, before) -> do
+  forM_ [(which, before) | which <- ["popup", "shortcut", "keyPressed", "keyReleased", "keyHeld"], before <- [True, False]] $ \(which, before) -> do
     ctx <- newContext
     fired <- newIORef False
     popupOpen <- newVar True
     let inp0 = withInput 320 200
+        listen k = whenM (k KeyEscape) (liftIO (writeIORef fired True))
         other :: NanoUI ()
         other = case which of
           "popup" -> popup popupOpen (defaultPopupConfig (AnchorPoint (V2 300 180))) (label "Panel")
           "shortcut" -> whenM (shortcut (key KeyEscape)) (liftIO (writeIORef fired True))
-          _ -> whenM (keyPressed KeyEscape) (liftIO (writeIORef fired True))
+          "keyPressed" -> listen keyPressed
+          "keyReleased" -> listen keyReleased
+          _ -> listen keyHeld
         ui = column $ do
           when before other
           r <- withValue "" (comboBox' "Font" comboOpts)
           unless before other
           pure r
+        down = chordInp (key KeyEscape) inp0
     warmupFocused ctx inp0 ui
     _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
-    _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+    _ <- runFrame ctx down ui
+    _ <- runFrame ctx (keyRepeatInp KeyEscape down) ui
+    _ <- runFrame ctx (keyUpInp KeyEscape down) ui
     open <- readVarIO popupOpen
     acted <- readIORef fired
     assertEq failed (which :: T.Text, before, False) (which, before, acted || not open)

@@ -98,9 +98,14 @@ runFrameEff unlift ctx rawInp ui = do
   recordFocusKind ctx imeKeys
   armPointerPress ctx frameInp
   resetUiBuild ctx True
+  escTaken <- getsOverlay ctx osEscapeConsumed
   beginFrameModal ctx
   -- An Escape the IME consumed must not also quit the app.
   when (inputKeysNull (inputKeys frameInp) && pressedIn KeyEscape rawInp) $
+    markEscapeConsumed ctx
+  -- One whose press was taken stays taken while it repeats and on its
+  -- release, so no key listener acts on the rest of it.
+  when (escTaken && not (pressedOnceIn KeyEscape rawInp) && (heldIn KeyEscape rawInp || releasedIn KeyEscape rawInp)) $
     markEscapeConsumed ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   focusBefore <- readIORef (ctxFocusId ctx)
