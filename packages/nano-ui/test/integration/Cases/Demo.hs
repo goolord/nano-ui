@@ -184,8 +184,7 @@ runColorPickerPartDamageTest ctx failed = do
   colorRef <- newVar (colorRGBA 204 102 102 255)
   let inp0 = withInput 400 1200
       ui = held colorRef colorPickerRGBA'
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx (keyInp KeyRight inp0) ui
   dmg <- takeDamage ctx
@@ -286,8 +285,7 @@ runColorPickerKeysOpaqueTest ctx failed = do
   colorRef <- newVar (colorRGBA 204 102 102 128)
   let inp0 = withInput 400 420
       ui = held colorRef colorPicker'
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
+  warmupFocused ctx inp0 ui
   _ <- runFrame ctx (keyInp KeyRight inp0) ui
   assertEq failed 255 . colorA =<< readVarIO colorRef
 

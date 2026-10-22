@@ -126,10 +126,8 @@ runTabsArrowDamageTest ctx failed = do
   replicateM_ 3 (runFrame ctx inp ui)
   assertJustM failed (arrow '\8249') $ \left ->
     assertJustM failed (arrow '\8250') $ \right -> do
-      let (press, release) = clickPair inp (spanCenter right)
-      _ <- runFrame ctx press ui
-      _ <- runFrame ctx release ui
-      _ <- runFrame ctx release {inputButtonsReleased = noButtons} ui
+      _ <- runClick ctx inp ui (spanCenter right)
+      _ <- runFrame ctx inp {inputMousePos = spanCenter right} ui
       dmg <- takeDamage ctx
       assert failed (damageCovers dmg left)
 

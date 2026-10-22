@@ -186,8 +186,7 @@ runTextInputLineBreakTest ctx failed = do
   crlf <- newContext
   crlfRef <- newVar "ab\r\ncd"
   let crlfUi = column (held crlfRef textInput')
-  _ <- warmup2 crlf inp0 crlfUi
-  _ <- runFrame crlf (tabInp inp0) crlfUi
+  warmupFocused crlf inp0 crlfUi
   assertEq failed (False, "ab\r\ncd") . (\(r, v) -> (respChanged r, v)) =<< evalUi crlf (keyInp KeyLeft inp0) crlfUi
   assertEq failed "ab\r\ncXd" . snd =<< evalUi crlf (inp0 {inputChars = "X"}) crlfUi
 
@@ -233,9 +232,7 @@ runSearchClearDamageTest ctx failed = do
   let Rect x y w h = respRect resp
   _ <- runClick ctx inp0 ui (V2 (x + w / 2) (y + h / 2))
   _ <- warmup2 ctx inp0 ui
-  let (press, release) = clickPair inp0 (V2 (x + w - ix - iconW / 2) (y + h / 2))
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
+  _ <- runClick ctx inp0 ui (V2 (x + w - ix - iconW / 2) (y + h / 2))
   assert failed . (/= DamageFull) =<< takeDamage ctx
   assertEq failed "" =<< readVarIO ref
 
@@ -418,9 +415,7 @@ runTextInputMenuClipboardTest ctx failed = do
     -- A press on a row that cannot run (nothing to undo) closes the menu,
     -- which the frame repaints, and asks for no full repaint after it.
     assertJust failed (spanRectOf "Undo" overlays) $ \r -> do
-      let (press, release) = clickPair inp0 (spanCenter r)
-      _ <- runFrame ctx' press ui
-      _ <- runFrame ctx' release ui
+      _ <- runClick ctx' inp0 ui (spanCenter r)
       assert failed . (/= DamageFull) =<< takeDamage ctx'
       assert failed . null . spanYOf "Undo" =<< collectOverlayTextSpans ctx' inp0
 
@@ -491,11 +486,9 @@ runTextAreaHoldStillTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let
     Rect rx ry _ _ = respRect resp
-    press = pressAt inp0 (V2 (rx + 20) (ry + 10))
-    hold = holdAt inp0 (V2 (rx + 20) (ry + 10))
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx hold ui
-  (_, _, dirty) <- runFrame ctx hold ui
+    grab = V2 (rx + 20) (ry + 10)
+  runDragFrom ctx inp0 ui grab grab
+  (_, _, dirty) <- runFrame ctx (holdAt inp0 grab) ui
   assert failed (not dirty)
   assertEq failed 0 =<< getWakeAt ctx
 

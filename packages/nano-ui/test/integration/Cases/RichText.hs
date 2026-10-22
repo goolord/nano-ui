@@ -68,8 +68,7 @@ runSelectionFocusTest ctx failed = do
   selected <- opsOf a
   assert failed (highlighted selected)
   assertEq failed [] [() | StrokeRoundedRect {} <- selected]
-  let (press, release) = clickPair inp (centerOf b)
-  forM_ [press, release, inp] $ \i -> evalUi ctx i ui
+  runClick ctx inp ui (centerOf b) >> warmup ctx inp ui
   assert failed . not . highlighted =<< opsOf a
 
 -- | Wrapping follows 'textBreak', not the font: monospaced text keeps whole
@@ -210,10 +209,9 @@ runRichTextLinkTest ctx failed = do
   assertEq failed Nothing textClick
   plainCursor <- cursorKindIs ctx inp0 {inputMousePos = onText} UiCursorPointer
   assert failed (not plainCursor)
-  let press = pressAt inp0 onText
-      dragged = holdAt press onLink
-  mapM_ (\i -> runFrame ctx i ui) [inp0 {inputMousePos = onText}, press, dragged]
-  ((_, dragClick), _, _) <- runFrame ctx (releaseAt dragged) ui
+  warmup ctx inp0 {inputMousePos = onText} ui
+  runDragFrom ctx inp0 ui onText onLink
+  ((_, dragClick), _, _) <- runFrame ctx (releaseAt (holdAt inp0 onLink)) ui
   assertEq failed Nothing dragClick
   void (runFrame ctx inp0 {inputMousePos = onLinkStart} ui)
   assert failed . not =<< hoverZoneCrossed ctx onLinkStart onLinkEnd

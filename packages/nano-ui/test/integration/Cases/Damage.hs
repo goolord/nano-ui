@@ -60,8 +60,7 @@ runSliderLabelShrinkDamageTest ctx failed = do
   (s, _) <- warmup2 ctx inp ui
   let Rect sx sy sw sh = respRect s
       at x = V2 x (sy + sh / 2)
-  _ <- runFrame ctx (pressAt inp (at (sx + sw / 2))) ui
-  _ <- runFrame ctx (holdAt inp (at (sx + sw + 50))) ui
+  runDragFrom ctx inp ui (at (sx + sw / 2)) (at (sx + sw + 50))
   assertEq failed 100 =<< readIORef ref
   (_, wide) <- evalUi ctx (holdAt inp (at (sx + sw / 2))) ui
   dmg <- takeDamage ctx
@@ -274,16 +273,13 @@ runDamageQueueClearedPerFrameTest ctx failed = do
 
   -- Next frame without damage requests: damage is empty
   _ <- runFrame ctx inp (ui (pure ()))
-  dmg2 <- takeDamage ctx
-  assert failed (damageIsEmpty dmg2)
+  assert failed . damageIsEmpty =<< takeDamage ctx
 
   -- Explicit full-window damage, again only for its own frame
   _ <- runFrame ctx inp (ui damageFullNow)
-  dmg3 <- takeDamage ctx
-  assertEq failed dmg3 DamageFull
+  assertEq failed DamageFull =<< takeDamage ctx
   _ <- runFrame ctx inp (ui (pure ()))
-  dmg4 <- takeDamage ctx
-  assert failed (damageIsEmpty dmg4)
+  assert failed . damageIsEmpty =<< takeDamage ctx
 
 runStateChangeDamageTest :: Context -> IORef Int -> IO ()
 runStateChangeDamageTest ctx failed = do
