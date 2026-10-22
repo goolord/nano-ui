@@ -450,15 +450,19 @@ tabNext cur ids shift =
       | otherwise -> after ++ ids
 
 -- | Take keyboard focus away from display-only content or a widget outside
--- the top modal, and close a select's dropdown the top modal hides, which
--- would otherwise keep Escape from the modal. The frame runs this after the
--- pointer steps, which can move focus, and before 'finalizeTabFocus'.
+-- the top modal, and close a select's dropdown or a field's edit menu the top
+-- modal hides, which would otherwise keep Escape from the modal. The frame
+-- runs this after the pointer steps, which can move focus, and before
+-- 'finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus)) $
       writeIORef (ctxFocusId ctx) (WidgetId 0)
+  getsInteraction ctx isTextInputMenu >>= mapM_ (\m ->
+    unlessM (widgetOverlayAllowed ctx (textInputMenuWidget m)) $
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
   store <- getStore ctx
   when (anySelectOpen store) $
     openSelectNode ctx store >>= mapM_ (\idx -> do
