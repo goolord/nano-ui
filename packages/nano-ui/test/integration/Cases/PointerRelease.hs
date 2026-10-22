@@ -14,7 +14,27 @@ tests =
   , spec "overlap-press" runOverlapPressTest
   , spec "release-moved-radio" runReleaseMovedRadioTest
   , spec "release-moved-tab" runReleaseMovedTabTest
+  , spec "tap-clicks-once" runTapClicksOnceTest
   ]
+
+-- | A press and release in one frame (a tap, or a click while frames are
+-- slow) clicks the button the user saw under the pointer. The button the
+-- click moves there, keyed by its item, is not clicked on the next frame.
+runTapClicksOnceTest :: Context -> IORef Int -> IO ()
+runTapClicksOnceTest ctx failed = do
+  items <- newVar [1 .. 5 :: Int]
+  let inp0 = withInput 320 240
+      ui = column $ do
+        xs <- readVar items
+        forM_ xs $ \i -> withKey i $
+          whenM (button (T.pack ("Delete " <> show i))) (modifyVar items (filter (/= i)))
+  _ <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  assertJust failed (spanRectOf "Delete 3" spans) $ \r -> do
+    let at = spanCenter r
+    _ <- runFrame ctx (applyMouseButton MouseLeft False (pressAt inp0 at)) ui
+    replicateM_ 2 (runFrame ctx inp0 {inputMousePos = at} ui)
+    assertEq failed [1, 2, 4, 5] =<< readVarIO items
 
 -- | Press a control, then release where it moved to on the same frame. The
 -- view tests the release against the rect it had before the move and misses

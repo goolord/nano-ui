@@ -269,7 +269,10 @@ widgetHitRect ctx nt idx x y w h = case nt of
 -- the widget's id goes into 'ctxClickedId', and the widget reports the click
 -- on the next frame, which this asks for. Only the node types in
 -- 'postsLayoutClick' get one. A radio option, tree row or tab header reports
--- it like any other click, and its group picks it on that frame.
+-- it like any other click, and its group picks it on that frame. A release
+-- in its press's frame gets none: the view judged both against the layout
+-- the user saw, and the widget under the pointer now may be one that a
+-- scroll or the click itself moved there.
 --
 -- A release on the widget also sets its hover animation to 1, so it paints as
 -- fully hovered at once.
@@ -291,7 +294,7 @@ finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
                 nt <- getNodeType na idx
                 rect <- getNodeRect na idx
                 visible <- nodeClippedHit ctx idx rect mouse
-                when (visible && postsLayoutClick nt && releasedClicked /= active) $
+                when (visible && postsLayoutClick nt && releasedClicked /= active && not (pressedIn MouseLeft inp)) $
                   unlessM (inUiClickHit ctx active mouse) $ do
                     writeIORef (ctxClickedId ctx) active
                     -- Covered: whatever the click changes is damaged on the
