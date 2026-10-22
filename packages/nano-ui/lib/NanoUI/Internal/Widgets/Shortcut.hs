@@ -8,6 +8,7 @@ module NanoUI.Internal.Widgets.Shortcut
   , shortcut
   , shortcutOnce
   , hardQuitUsed
+  , focusTakesChord
   ) where
 
 import Control.Monad (when)
@@ -16,16 +17,19 @@ import Data.IntSet qualified as IS
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, askInput, takeEscape, withContext)
+import NanoUI.Internal.Monad (NanoUI, askInput, takeEscape, withContext, (<&&>))
 import NanoUI.Internal.Shortcut
 import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 
 -- | Whether the key went down this frame, including auto-repeats, with any
 -- modifiers. 'False' behind an open modal, inside 'NanoUI.disabledWhen', and
 -- when the focused widget uses the key itself ('focusTakesChord'), such as
--- Delete in a focused text field. Like iced's @keyboard::listen@, this only
--- reports keys not claimed by the focused widget; 'pressedIn' checks raw frame
--- input. To bind a command to a key, use 'shortcut'.
+-- Delete in a focused text field. Also 'False' for an Escape that closes an
+-- open dropdown, a focused combo box's list or a text-edit menu, or that
+-- something earlier in the view took ('NanoUI.takeEscape'). Like iced's
+-- @keyboard::listen@, this only reports keys not claimed by the focused
+-- widget; 'pressedIn' checks raw frame input. To bind a command to a key,
+-- use 'shortcut'.
 keyPressed :: Key -> NanoUI Bool
 keyPressed = keyIn pressedIn
 
@@ -45,7 +49,8 @@ keyIn :: (Key -> Input -> Bool) -> Key -> NanoUI Bool
 keyIn happened k = do
   inp <- askInput
   if happened k inp
-    then withContext (\ctx -> keyFree ctx (inputModifiers inp) k)
+    then withContext $ \ctx ->
+      keyFree ctx (inputModifiers inp) k <&&> (if k == KeyEscape then not <$> escapeReserved ctx inp else pure True)
     else pure False
 
 -- | Whether the view may handle this key: no modal is open and the focused
@@ -117,15 +122,19 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
 
 -- | Whether the frame just run used its Ctrl+C ('isHardQuitInput'): a
 -- shortcut took the press, the focused widget uses the chord itself
--- ('focusTakesChord'), as a text field does to copy, or a text-edit menu is
--- open. The session loop quits only on a Ctrl+C that nothing used.
+-- ('focusTakesChord') or copies with the platform's copy chord, as a text
+-- field does, or a text-edit menu is open. The session loop quits only on a
+-- Ctrl+C that nothing used.
 hardQuitUsed :: Context -> Input -> IO Bool
 hardQuitUsed ctx inp = do
   kind <- getsInteraction ctx isFocusKind
   menu <- getsInteraction ctx isTextInputMenu
   let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == KeyChar 'c']
+      -- On macOS a field copies with Cmd+C and leaves Ctrl+C alone, but a
+      -- Ctrl+C typed there out of habit must not close the window either.
+      takes mods = focusTakesChord kind mods (KeyChar 'c')
   taken <- getsOverlay ctx (\os -> any (`IS.member` osKeysTaken os) presses)
-  pure (taken || isJust menu || focusTakesChord kind (inputModifiers inp) (KeyChar 'c'))
+  pure (taken || isJust menu || takes (inputModifiers inp) || takes primaryModifiers)
 
 -- | Whether the focused widget uses this key and modifier combination
 -- itself. If so, shortcuts and key listeners ignore it.

@@ -24,10 +24,10 @@ module NanoUI.Internal.Tasks
   )
 where
 
-import Control.Concurrent (forkIO, forkIOWithUnmask, killThread, newEmptyMVar, putMVar, readMVar)
+import Control.Concurrent (forkIO, forkIOWithUnmask, killThread, newEmptyMVar, newMVar, putMVar, readMVar, withMVar)
 import Control.Exception (AsyncException (ThreadKilled), SomeException, evaluate, finally, fromException, mask_, throwIO, try)
 import Control.Monad (filterM, forM_, unless, void, when)
-import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicWriteIORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.Primitive.PrimVar (modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
@@ -95,24 +95,14 @@ holdAction :: IO () -> NanoUI ()
 holdAction release = do
   (wid, ctx) <- freshWidget
   liftIO $ do
-    let registry = ctxHeld ctx
+    let widgets = heldWidgets (ctxHeld ctx)
         widget = intKey wid
-    frame <- readPrimVar (heldFrame registry)
-    widgets <- readIORef (heldWidgets registry)
-    entries <- readIORef (heldEntries registry)
-    case IM.lookup widget widgets >>= (`IM.lookup` entries) of
-      Just holding -> touch registry frame holding
-      Nothing -> do
-        key <- hashUnique <$> newUnique
-        seen <- newPrimVar frame
-        let cleanup = do
-              modifyIORef' (heldWidgets registry) (IM.delete widget)
-              release
-              pure (pure ())
-        modifyIORef' (heldWidgets registry) (IM.insert widget key)
-        modifyIORef' (heldEntries registry) (IM.insert key (Holding cleanup seen))
-        modifyPrimVar (heldStamped registry) (+ 1)
-        modifyPrimVar (heldCount registry) (+ 1)
+    -- The lease's release drops the widget's entry, so an entry is live.
+    IM.lookup widget <$> readIORef widgets >>= \case
+      Just holding -> touchHeld ctx holding
+      Nothing ->
+        leaseHeld ctx (modifyIORef' widgets (IM.delete widget) >> release)
+          >>= modifyIORef' widgets . IM.insert widget
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
 -- earlier key, so the view can keep showing it instead of flickering.
@@ -254,12 +244,18 @@ useOutcome (Task owner) k run = do
 -- kills the producer and restarts from @initial@, and a frame that skips the
 -- hook kills it. A producer that returns leaves the state as it last set it.
 -- An uncaught exception ends the producer like any 'forkIO' thread; catch it
--- inside to show it in the state.
+-- inside to show it in the state. An update whose function throws leaves the
+-- state as it was and throws to its caller.
 useStream :: Eq k => Stream k s -> k -> s -> (((s -> s) -> IO ()) -> IO ()) -> NanoUI s
 useStream (Stream owner) k initial produce = do
   box <- useJob owner k $ \wake _ -> do
     box <- newIORef initial
-    pure (box, produce (\f -> atomicModifyIORef' box (\s -> (f s, ())) >> wake))
+    -- The new state is forced before it is published, so a function that
+    -- throws leaves nothing in the box for the view to raise. Updates from
+    -- threads the producer starts take turns.
+    lock <- newMVar ()
+    let update f = withMVar lock (\_ -> readIORef box >>= evaluate . f >>= atomicWriteIORef box) >> wake
+    pure (box, produce update)
   liftIO (readIORef box)
 
 -- | An action any thread can call to rerun the view after changing something

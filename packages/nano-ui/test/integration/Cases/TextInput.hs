@@ -15,6 +15,7 @@ import NanoUI.Internal.Frame.TextArea
   , textAreaLineHeight
   , textAreaHitForWidget
   )
+import NanoUI.Internal.Input (onMac)
 import NanoUI.Internal.Store
   ( Slot (..)
   , WidgetStore (..)
@@ -49,6 +50,7 @@ tests =
   , spec "text-input-click-select" runTextInputClickSelectTest
   , spec "text-input-word-keys" runTextInputWordKeysTest
   , spec "text-input-line-break" runTextInputLineBreakTest
+  , spec "text-input-command-char" runTextInputCommandCharTest
   , spec "search-empty-commit" runSearchEmptyCommitTest
   , spec "search-clear-damage" runSearchClearDamageTest
   , spec "text-input-cut-clears-selection" runTextInputCutClearsSelectionTest
@@ -159,7 +161,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
     ui = column (held textRef textInput')
   warmupFocused ctx' inp0 ui
   _ <- runFrame ctx' (chordInp (shift <> key KeyLeft) inp0) ui
-  _ <- runFrame ctx' (chordInp (ctrl <> key 'x') inp0) ui
+  _ <- runFrame ctx' (chordInp (cmdOrCtrl <> key 'x') inp0) ui
   assertEq failed (Just "o") =<< readIORef clipRef
   assertEq failed "hellz" . snd =<< evalUi ctx' (inp0 {inputChars = "z"}) ui
 
@@ -176,9 +178,32 @@ runTextInputLineBreakTest ctx failed = do
   _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx (keyInp KeyLeft inp0) ui
   assertEq failed "ab\ncXd" . snd =<< evalUi ctx (inp0 {inputChars = "X"}) ui
-  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
+  _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp0) ui
   ints <- storeInt <$> getStore ctx
   assertEq failed (Just 6) (IM.lookup (slotKey SlotCursor (intKey (respId resp))) ints)
+  -- A Windows line end stays two characters of the value: a key that edits
+  -- nothing leaves the value as it is and reports no change.
+  crlf <- newContext
+  crlfRef <- newVar "ab\r\ncd"
+  let crlfUi = column (held crlfRef textInput')
+  _ <- warmup2 crlf inp0 crlfUi
+  _ <- runFrame crlf (tabInp inp0) crlfUi
+  assertEq failed (False, "ab\r\ncd") . (\(r, v) -> (respChanged r, v)) =<< evalUi crlf (keyInp KeyLeft inp0) crlfUi
+  assertEq failed "ab\r\ncXd" . snd =<< evalUi crlf (inp0 {inputChars = "X"}) crlfUi
+
+-- | A character typed with a modifier that makes its key a command, Alt
+-- (Command with Option on macOS), is the shortcut's, so the field does not
+-- type it. AltGr (Ctrl+Alt) and Option on macOS still type.
+runTextInputCommandCharTest :: Context -> IORef Int -> IO ()
+runTextInputCommandCharTest ctx failed = do
+  ref <- newVar "ab"
+  let
+    inp0 = withInput 320 120
+    ui = column (held ref textInput')
+    typed mods c = snd <$> evalUi ctx ((chordInp (mods <> key 'f') inp0) {inputChars = c}) ui
+  warmupFocused ctx inp0 ui
+  assertEq failed "ab" =<< typed (if onMac then super <> alt else alt) "f"
+  assertEq failed "ab@" =<< typed (if onMac then alt else ctrl <> alt) "@"
 
 -- | Emptying a search field from the keyboard reports the change on that
 -- frame, as its clear button does, rather than after the debounce.
@@ -189,7 +214,7 @@ runSearchEmptyCommitTest ctx failed = do
     inp0 = withInput 320 120
     ui = column (fst <$> held ref (searchInput' "Search"))
   warmupFocused ctx inp0 ui
-  _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
+  _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp0) ui
   assert failed . respChanged =<< evalUi ctx (keyInp KeyBackspace inp0) ui
   assertEq failed "" =<< readVarIO ref
 
@@ -242,8 +267,8 @@ runTextAreaCutClearsSelectionTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (label "Notes" >> held textRef textArea')
   warmupFocused ctx' inp0 ui
-  _ <- runFrame ctx' (chordInp (ctrl <> key 'a') inp0) ui
-  (_, cutVal) <- evalUi ctx' (chordInp (ctrl <> key 'x') inp0) ui
+  _ <- runFrame ctx' (chordInp (cmdOrCtrl <> key 'a') inp0) ui
+  (_, cutVal) <- evalUi ctx' (chordInp (cmdOrCtrl <> key 'x') inp0) ui
   assertEq failed (Just "hello") =<< readIORef clipRef
   assertEq failed cutVal ""
   assertEq failed "z" . snd =<< evalUi ctx' (inp0 {inputChars = "z"}) ui
@@ -257,7 +282,7 @@ runTextAreaChangedTest ctx failed = do
       ui = column (fst <$> held textRef textArea')
   warmupFocused ctx inp0 ui
   assert failed . not . respChanged =<< evalUi ctx (keyInp KeyLeft inp0) ui
-  assert failed . not . respChanged =<< evalUi ctx (chordInp (ctrl <> key 'a') inp0) ui
+  assert failed . not . respChanged =<< evalUi ctx (chordInp (cmdOrCtrl <> key 'a') inp0) ui
   assert failed . respChanged =<< evalUi ctx (inp0 {inputChars = "z"}) ui
   assertEq failed "z" =<< readVarIO textRef
 
@@ -275,7 +300,7 @@ runTextInputSelectionTest ctx failed = do
   -- Ctrl+A selects all and types nothing, even when the backend also sends
   -- the letter as text.
   _ <- runFrame ctx (inp0 {inputChars = "abc"}) ui
-  _ <- runFrame ctx ((chordInp (ctrl <> key 'a') inp0) {inputChars = "a"}) ui
+  _ <- runFrame ctx ((chordInp (cmdOrCtrl <> key 'a') inp0) {inputChars = "a"}) ui
   assertEq failed "" . snd =<< evalUi ctx (keyInp KeyBackspace inp0) ui
 
 runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
@@ -320,10 +345,10 @@ runTextInputClipboardTest ctx failed = do
     ui = column (held textRef textInput')
   warmupFocused ctx' inp0 ui
   let chord c = runFrame ctx' (chordInp c inp0) ui
-  _ <- chord (ctrl <> key 'a') >> chord (ctrl <> key 'c')
+  _ <- chord (cmdOrCtrl <> key 'a') >> chord (cmdOrCtrl <> key 'c')
   assertEq failed (Just "hello") =<< readIORef clipRef
-  _ <- chord (ctrl <> key 'a') >> runFrame ctx' (keyInp KeyBackspace inp0) ui
-  assertEq failed "hello" . snd =<< evalUi ctx' (chordInp (ctrl <> key 'v') inp0) ui
+  _ <- chord (cmdOrCtrl <> key 'a') >> runFrame ctx' (keyInp KeyBackspace inp0) ui
+  assertEq failed "hello" . snd =<< evalUi ctx' (chordInp (cmdOrCtrl <> key 'v') inp0) ui
 
 -- A password field displays one mask character per character, and Ctrl+C
 -- leaves the clipboard untouched while the field keeps its real value.
@@ -338,8 +363,8 @@ runTextInputPasswordTest ctx failed = do
   assert failed (not (hasText "hunter2" spans))
   assertSpansHas failed "*******" spans
   _ <- runFrame ctx' (tabInp inp0) ui
-  _ <- runFrame ctx' (chordInp (ctrl <> key 'a') inp0) ui
-  (_, val) <- evalUi ctx' (chordInp (ctrl <> key 'c') inp0) ui
+  _ <- runFrame ctx' (chordInp (cmdOrCtrl <> key 'a') inp0) ui
+  (_, val) <- evalUi ctx' (chordInp (cmdOrCtrl <> key 'c') inp0) ui
   assertEq failed Nothing =<< readIORef clipRef
   assertEq failed val "hunter2"
 
@@ -993,13 +1018,13 @@ runTextUndoTest ctx failed = do
   assertEq failed "red fox" =<< readVarIO ref
   (_, canUndo) <- frame inp
   assert failed canUndo
-  _ <- frame (chordInp (ctrl <> key 'z') inp)
+  _ <- frame (chordInp (cmdOrCtrl <> key 'z') inp)
   assertEq failed "red " =<< readVarIO ref
-  _ <- frame (chordInp (ctrl <> key 'z') inp)
+  _ <- frame (chordInp (cmdOrCtrl <> key 'z') inp)
   assertEq failed "" =<< readVarIO ref
   _ <- frame (chordInp (ctrl <> shift <> key 'z') inp)
   assertEq failed "red " =<< readVarIO ref
-  _ <- frame (chordInp (ctrl <> key 'y') inp)
+  _ <- frame (chordInp (cmdOrCtrl <> key 'y') inp)
   assertEq failed "red fox" =<< readVarIO ref
   -- A command from outside the field's frame edits it and pulses it once.
   writeIORef commands [InsertText "!"]
@@ -1052,7 +1077,7 @@ runTextAreaDocumentTest ctx failed = do
   assert failed undoable
   (againIn, _, againOut, _) <- frame inp
   assert failed (sameDocument againIn againOut)
-  _ <- frame (chordInp (ctrl <> key 'z') inp)
+  _ <- frame (chordInp (cmdOrCtrl <> key 'z') inp)
   undone <- readVarIO ref
   assertEq failed (documentText undone) original
   -- Replacing the document drops the history recorded against the old one.
@@ -1105,7 +1130,7 @@ runTextAreaWidthTrackingTest ctx failed = do
   _ <- frame (keyInp KeyBackspace inp)
   check
   -- Undo brings it back.
-  _ <- frame (chordInp (ctrl <> key 'z') inp)
+  _ <- frame (chordInp (cmdOrCtrl <> key 'z') inp)
   check
 
 -- | The context with a clipboard kept in memory, starting with @initial@, and

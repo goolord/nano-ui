@@ -28,20 +28,20 @@ module NanoUI.Internal.Frame.TextArea
   , textAreaTextPlacements
   ) where
 
-import Control.Monad (forM, forM_, guard, unless, when)
+import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
+import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, withClip)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayoutIn, scrollChromeLane)
-import NanoUI.Internal.Frame.Node (nodeFontMetrics, packedTextFont, resolveTextFont)
-import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt, drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
+import NanoUI.Internal.Frame.Node (nodeFontMetrics, nodeFontNative, packedTextFont, resolveTextFont)
+import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt, drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, fieldTextColor, nodeTextFieldGeom, preeditSourceIndex, pushFieldText, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
@@ -389,10 +389,10 @@ syncTextAreaViewport ctx idx key fm field = do
 
 
 -- | A text area's scroll offset snapped to the device pixel grid, the same
--- grid 'pushText' snaps to, so line pens and hit-testing stay in lockstep
--- (and in agreement with each other) while the text area scrolls. The raw
--- 'Double' offset keeps sub-pixel wheel deltas; only the applied value is
--- quantized.
+-- grid 'NanoUI.Internal.Draw.pushText' snaps to, so line pens and
+-- hit-testing stay in lockstep (and in agreement with each other) while the
+-- text area scrolls. The raw 'Double' offset keeps sub-pixel wheel deltas;
+-- only the applied value is quantized.
 {-# INLINE textAreaScrollSnapped #-}
 textAreaScrollSnapped :: DrawArena -> TA.TextAreaState -> IO (Float, Float)
 textAreaScrollSnapped da state = do
@@ -413,16 +413,20 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   state <- (`TA.loadTextAreaState` key) <$> getStore ctx
   (scrollXf, scrollYf) <- textAreaScrollSnapped da state
   preedit <- textAreaPreedit ctx wid state
-  -- The layout's 'fontColor', as a text field's and the span path's.
-  fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
+  -- The layout's colour or tone, and the weight, slant and decoration the
+  -- font gives no face for, as a text field's.
+  fg <- fieldTextColor ctx idx (styleFg style)
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  size <- getNodeFontSize (ctxNodeArena ctx) idx
+  native <- nodeFontNative ctx size si
   let lineH = textAreaLineHeight fm
-      Rect clipX contentTop clipW clipH = textAreaFieldClip fm field
+      bars = textAreaBars fm field contentW contentH
+      textClip@(Rect clipX contentTop _ _) = textAreaTextClip fm field bars
       buf = TA.tasBuffer state
       cursor@(TB.Cursor caretRow caretCol) = TB.getCursor buf
       contentX = clipX - scrollXf
       rowY row = contentTop + fromIntegral row * lineH - scrollYf
-      (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
-      textClip = textClipBeside (Rect clipX contentTop clipW clipH) mV mH
+      (mV, mH) = textAreaBarLayouts field bars scrollXf scrollYf
       -- Only the rows in view are read, so painting costs the same however
       -- long the document is.
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
@@ -448,7 +452,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
     forM_ [firstRow .. lastRow] $ \row -> do
       let line = fst (shownRow preedit buf row)
       unless (T.null line) $
-        pushText da fm contentX (rowY row) line fg
+        pushFieldText da fm native si contentX (rowY row) line fg
     when focus $
       case preedit of
         Just (row, p) -> drawLinePreedit da fm p contentX (rowY row) lineH fg
@@ -478,21 +482,14 @@ shownRow :: Maybe (Int, Preedit) -> TB.TextBuffer -> Int -> (T.Text, Int -> Int)
 shownRow (Just (prow, p)) _ row | prow == row = (preeditLine p, preeditSourceIndex p)
 shownRow _ buf row = (TB.lineAt row buf, id)
 
--- | The clip a text area's rows are painted in: its content clip, short of
--- the lane of each scrollbar that shows.
-textClipBeside :: Rect -> Maybe a -> Maybe b -> Rect
-textClipBeside (Rect clipX contentTop clipW clipH) mV mH =
-  Rect
-    clipX
-    contentTop
-    (if isJust mV then max 0 (clipW - textAreaBarLane) else clipW)
-    (if isJust mH then max 0 (clipH - textAreaBarLane) else clipH)
-
--- | 'textClipBeside' for the text area at @field@ showing @bars@: the
--- viewport the editor keeps the caret in.
+-- | The clip the rows of the text area at @field@ showing @bars@ are painted
+-- in, which is the viewport the editor keeps the caret in: its content clip,
+-- short of the lane of each scrollbar it shows.
 textAreaTextClip :: FontMetrics -> Rect -> TextAreaBars -> Rect
 textAreaTextClip fm field bars =
-  textClipBeside (textAreaFieldClip fm field) (guard (tabVertical bars)) (guard (tabHorizontal bars))
+  let Rect x y w h = textAreaFieldClip fm field
+      short shown d = if shown then max 0 (d - textAreaBarLane) else d
+   in Rect x y (short (tabVertical bars) w) (short (tabHorizontal bars) h)
 
 -- | Text area @idx@'s rows in view as text placements @(text, x, y, width,
 -- height)@, and the clip they are painted in: what 'drawTextAreaContentWith'
@@ -507,15 +504,14 @@ textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
   (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
   preedit <- textAreaPreedit ctx wid state
   let lineH = textAreaLineHeight fm
-      clip@(Rect clipX contentTop _ _) = textAreaFieldClip fm field
-      (mV, mH) = textAreaBarLayouts field (textAreaBars fm field contentW contentH) scrollXf scrollYf
+      clip@(Rect clipX contentTop _ _) = textAreaTextClip fm field (textAreaBars fm field contentW contentH)
       buf = TA.tasBuffer state
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
       rows = [max 0 (rowAt y) .. min (TB.getLineCount buf - 1) (rowAt (y + h))]
   placements <- forM [(row, line) | row <- rows, let line = fst (shownRow preedit buf row), not (T.null line)] $ \(row, line) -> do
     lw <- lineWidthIO fm line
     pure (line, clipX - scrollXf, contentTop + fromIntegral row * lineH - scrollYf, lw, lineH)
-  pure (textClipBeside clip mV mH, placements)
+  pure (clip, placements)
 
 -- | Mouse selection in text area @wid@ at @idx@ ('selectWithMouse'). Presses
 -- on its scrollbars are left to the scroller, and a press on a control drawn

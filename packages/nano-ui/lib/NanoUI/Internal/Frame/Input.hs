@@ -50,16 +50,20 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
-import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
+import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains, rectFullyInside)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
+import NanoUI.Internal.Widgets.Shortcut (focusTakesChord)
 
--- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
--- and show the focus ring. Moving focus blurs the old widget
+-- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget',
+-- show the focus ring and scroll the widget into view ('revealWidget').
+-- Moving focus blurs the old widget
 -- ('blurFocus'). A Tab consumed by the focused widget
--- ('NanoUI.Internal.Context.markTabConsumed') moves nothing.
+-- ('NanoUI.Internal.Context.markTabConsumed'), or one it claims
+-- ('focusTakesChord': 'KeysAll', or 'KeysOnly' naming the chord), moves
+-- nothing.
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
-  whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx)) $ do
+  whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx) <&&> (not . claimed <$> getsInteraction ctx isFocusKind)) $ do
     cur <- readIORef (ctxFocusId ctx)
     next <- tabTarget ctx cur (modShift (inputModifiers inp))
     when (hashWidgetId next /= 0) $ do
@@ -71,7 +75,36 @@ finalizeTabFocus ctx inp =
       when (next /= cur) (blurFocus ctx cur)
       writeIORef (ctxFocusId ctx) next
       writeIORef (ctxFocusVisible ctx) True
+      revealWidget ctx next
       markDirty ctx
+  where
+    claimed kind = focusTakesChord kind (inputModifiers inp) KeyTab
+
+-- | Scroll each scroller around widget @wid@, innermost first, just far
+-- enough to show it whole ('ScrollNearest'), as when Tab moves focus there.
+-- Reads this frame's placed rects and the metrics the offset pass published,
+-- so the scroll shows on the next frame.
+revealWidget :: Context -> WidgetId -> IO ()
+revealWidget ctx@Context {ctxNodeArena = na} wid =
+  withWidgetNode ctx wid () $ \idx -> do
+    r <- getNodeRect na idx
+    getParent na idx >>= reveal r
+  where
+    reveal r@(Rect rx ry rw rh) i = when (i >= 0) $ do
+      nt <- getNodeType na i
+      -- A floating panel does not move with the scrollers it is declared in.
+      unless (isFloatingNode nt) $ do
+        sid <- getWidgetId na i
+        metrics <- if isScrollNode nt then readScrollMetrics ctx sid else pure Nothing
+        r' <- case metrics of
+          Just ScrollMetrics {scrollViewport = view@(Rect vx vy _ _), scrollOffset = V2 ox oy}
+            | not (rectFullyInside r view) -> do
+                scrollRectIntoView ctx sid (Rect (rx - vx + ox) (ry - vy + oy) rw rh) ScrollNearest ScrollInstant
+                -- An outer scroller shows the widget where this one moved it.
+                V2 nx ny <- maybe (V2 ox oy) scrollOffset <$> readScrollMetrics ctx sid
+                pure (Rect (rx + ox - nx) (ry + oy - ny) rw rh)
+          _ -> pure r
+        getParent na i >>= reveal r'
 
 -- | Where Tab moves focus from @cur@ (backwards when @back@), stepping
 -- through 'tabStops' and wrapping at both ends. @WidgetId 0@ if there are
@@ -108,11 +141,18 @@ isMenuButtonWidget ctx wid =
 -- 'ctxLastHotId'. Runs after layout and before painting. When the hot widget
 -- changes, the hover animation of the widget that lost the pointer runs from
 -- 1 to 0, and that of the widget that gained it from 0 to 1, each over 0.12
--- seconds. The painter blends a widget's hover colour by that value.
+-- seconds. The painter blends a widget's hover colour by that value. While a
+-- widget holds the left button, no other one is hot, as no other is hovered
+-- ('NanoUI.Internal.Widgets.Node.resolveInteraction'), so a drag lights up
+-- nothing it crosses.
 refreshHover :: Context -> Input -> IO ()
 refreshHover ctx inp = do
   prevHot <- readIORef (ctxLastHotId ctx)
-  newHot <- probeHotId ctx (inputMousePos inp)
+  probed <- probeHotId ctx (inputMousePos inp)
+  active <- readIORef (ctxActiveId ctx)
+  let newHot
+        | heldIn MouseLeft inp && hashWidgetId active /= 0 && probed /= active = WidgetId 0
+        | otherwise = probed
   writeIORef (ctxHotId ctx) newHot
   writeIORef (ctxLastHotId ctx) newHot
   when (prevHot /= newHot) $ do
@@ -264,7 +304,11 @@ widgetHitRect ctx nt idx x y w h = case nt of
 -- the widget's id goes into 'ctxClickedId', and the widget reports the click
 -- on the next frame, which this asks for. Only the node types in
 -- 'postsLayoutClick' get one. A radio option, tree row or tab header reports
--- it like any other click, and its group picks it on that frame.
+-- it like any other click, and its group picks it on that frame. A release
+-- in its press's frame gets none: the view judged both against the layout
+-- the user saw, and the widget under the pointer now may be one that a
+-- scroll or the click itself moved there. Nor does a widget that a modal
+-- opened since the press hides ('nodePastModals').
 --
 -- A release on the widget also sets its hover animation to 1, so it paints as
 -- fully hovered at once.
@@ -286,7 +330,8 @@ finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
                 nt <- getNodeType na idx
                 rect <- getNodeRect na idx
                 visible <- nodeClippedHit ctx idx rect mouse
-                when (visible && postsLayoutClick nt && releasedClicked /= active) $
+                let posts = visible && postsLayoutClick nt && releasedClicked /= active && not (pressedIn MouseLeft inp)
+                whenM (pure posts <&&> nodePastModals ctx idx) $
                   unlessM (inUiClickHit ctx active mouse) $ do
                     writeIORef (ctxClickedId ctx) active
                     -- Covered: whatever the click changes is damaged on the
@@ -381,7 +426,8 @@ finalizeDrawingFocus ctx targets =
 -- Tab would ('tabTarget'). 'FocusOn' succeeds only for one of the
 -- 'tabStops', never a disabled widget; otherwise the request is dropped.
 -- Moving focus behaves like a press elsewhere ('blurFocus'). The new
--- widget shows the focus ring. Requesting the focused widget changes
+-- widget shows the focus ring and scrolls into view ('revealWidget').
+-- Requesting the focused widget changes
 -- nothing, including the ring.
 finalizeFocusRequest :: Context -> IO ()
 finalizeFocusRequest ctx =
@@ -402,7 +448,9 @@ finalizeFocusRequest ctx =
       blurFocus ctx prev
       -- The damage pass repaints both widgets, since the focused id moved.
       writeIORef (ctxFocusId ctx) wid
-      when (hashWidgetId wid /= 0) $ writeIORef (ctxFocusVisible ctx) True
+      when (hashWidgetId wid /= 0) $ do
+        writeIORef (ctxFocusVisible ctx) True
+        revealWidget ctx wid
       markDirty ctx)
 
 -- | What moving focus off @prev@ does, as a press elsewhere would: the old
@@ -440,15 +488,19 @@ tabNext cur ids shift =
       | otherwise -> after ++ ids
 
 -- | Take keyboard focus away from display-only content or a widget outside
--- the top modal, and close a select's dropdown the top modal hides, which
--- would otherwise keep Escape from the modal. The frame runs this after the
--- pointer steps, which can move focus, and before 'finalizeTabFocus'.
+-- the top modal, and close a select's dropdown or a field's edit menu the top
+-- modal hides, which would otherwise keep Escape from the modal. The frame
+-- runs this after the pointer steps, which can move focus, and before
+-- 'finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
     unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus)) $
       writeIORef (ctxFocusId ctx) (WidgetId 0)
+  getsInteraction ctx isTextInputMenu >>= mapM_ (\m ->
+    unlessM (widgetOverlayAllowed ctx (textInputMenuWidget m)) $
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
   store <- getStore ctx
   when (anySelectOpen store) $
     openSelectNode ctx store >>= mapM_ (\idx -> do
@@ -456,10 +508,11 @@ constrainFocusToModal ctx = do
       unlessM (widgetOverlayAllowed ctx wid) $ setStore ctx (closeSelects store))
 
 -- | Record in 'isFocusKind' what kind of widget has keyboard focus and which
--- keys it claims ('KeyClaim'), from last frame's nodes. Runs before the
--- view rebuilds them, so a shortcut declared before the focused widget
--- still sees it. @ime@: an input method owns the focused field's keys this
--- frame ('NanoUI.Internal.Frame.TextInput.claimComposition').
+-- keys it claims ('KeyClaim'), and in 'isFocusCombo' whether it is a combo
+-- box showing its list, from last frame's nodes. Runs before the view
+-- rebuilds them, so a shortcut declared before the focused widget still sees
+-- it. @ime@: an input method owns the focused field's keys this frame
+-- ('NanoUI.Internal.Frame.TextInput.claimComposition').
 recordFocusKind :: Context -> Bool -> IO ()
 recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)
@@ -479,8 +532,10 @@ recordFocusKind ctx ime = do
             NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
             NodeDrawing -> FocusControl . maybe KeysNone cdrKeys <$> lookupCustomDrawing ctx focus
             _ -> pure (FocusControl KeysNavigate)
+  combo <- if kind == FocusTextLine then isJust <$> focusedComboNode ctx else pure False
   was <- getsInteraction ctx isFocusKind
-  when (kind /= was) $ modifyInteraction ctx (\s -> s {isFocusKind = kind})
+  wasCombo <- getsInteraction ctx isFocusCombo
+  when (kind /= was || combo /= wasCombo) $ modifyInteraction ctx (\s -> s {isFocusKind = kind, isFocusCombo = combo})
 
 -- | Whether state or input changes require a frame. Arguments are previous
 -- and current input. Tests hover only after pointer motion; timed wake

@@ -3,7 +3,7 @@ module Cases.Modal (tests) where
 import Spec
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (setDrawSquareGeometry)
+import NanoUI.Internal.Context (InteractionState (..), getsInteraction, setDrawSquareGeometry)
 
 tests :: [Spec]
 tests =
@@ -19,7 +19,27 @@ tests =
   , spec "modal-nested-dismiss" runModalNestedDismissTest
   , spec "modal-over-inner-window" runModalOverInnerWindowTest
   , spec "modal-over-inner-window-drag" runModalOverInnerWindowDragTest
+  , spec "modal-hides-text-menu" runModalHidesTextMenuTest
   ]
+
+-- | A field's edit menu that a newly opened modal hides closes, so the first
+-- Escape closes the modal.
+runModalHidesTextMenuTest :: Context -> IORef Int -> IO ()
+runModalHidesTextMenuTest ctx failed = do
+  open <- newVar False
+  let inp0 = withInput 640 480
+      ui = column $ do
+        (field, _) <- withValue "text" textInput'
+        modal open "Error" (label "Something failed")
+        pure field
+  field <- warmup2 ctx inp0 ui
+  let (rightPress, rightRelease) = rightClickPair inp0 (centerOf field)
+  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  assert failed . isJust =<< getsInteraction ctx isTextInputMenu
+  writeVarIO open True
+  warmup ctx inp0 ui
+  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+  assertEq failed False =<< readVarIO open
 
 -- | A modal declared inside another's body closes first: Escape, then a
 -- click on the outer modal, each close only the inner one.

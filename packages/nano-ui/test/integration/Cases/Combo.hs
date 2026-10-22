@@ -17,6 +17,7 @@ tests =
   , spec "combo-blur-commit" runComboBlurCommitTest
   , spec "combo-app-write-no-commit" runComboAppWriteNoCommitTest
   , spec "combo-escape-revert" runComboEscapeRevertTest
+  , spec "combo-escape-owned" runComboEscapeOwnedTest
   , spec "combo-hover-highlight" runComboHoverHighlightTest
   , spec "combo-keys-over-still-pointer" runComboKeysOverStillPointerTest
   , spec "combo-scrollbar-drag" runComboScrollbarDragTest
@@ -303,6 +304,34 @@ runComboEscapeRevertTest ctx failed = do
   assertEq failed (WidgetId 0) =<< getFocusId ctx
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (not (hasText "Alpha Sans" overlays))
+
+-- | Escape on a focused combo showing its list cancels the combo and nothing
+-- else, wherever another Escape consumer is declared: a popup's dismiss, a
+-- shortcut or a key listener, before it or after it, leaves it alone.
+runComboEscapeOwnedTest :: Context -> IORef Int -> IO ()
+runComboEscapeOwnedTest _ failed =
+  forM_ [(which, before) | which <- ["popup", "shortcut", "keyPressed"], before <- [True, False]] $ \(which, before) -> do
+    ctx <- newContext
+    fired <- newIORef False
+    popupOpen <- newVar True
+    let inp0 = withInput 320 200
+        other :: NanoUI ()
+        other = case which of
+          "popup" -> popup popupOpen (defaultPopupConfig (AnchorPoint (V2 300 180))) (label "Panel")
+          "shortcut" -> whenM (shortcut (key KeyEscape)) (liftIO (writeIORef fired True))
+          _ -> whenM (keyPressed KeyEscape) (liftIO (writeIORef fired True))
+        ui = column $ do
+          when before other
+          r <- withValue "" (comboBox' "Font" comboOpts)
+          unless before other
+          pure r
+    warmupFocused ctx inp0 ui
+    _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
+    _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+    open <- readVarIO popupOpen
+    acted <- readIORef fired
+    assertEq failed (which :: T.Text, before, False) (which, before, acted || not open)
+    assertEq failed (WidgetId 0) =<< getFocusId ctx
 
 -- The wheel scrolls the suggestion list while the pointer is over the open
 -- dropdown: a horizontal wheel shifts rows that overflow the dropdown width

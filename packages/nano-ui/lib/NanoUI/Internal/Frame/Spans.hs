@@ -26,7 +26,7 @@ import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
 import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
-import NanoUI.Internal.Frame.TextInput (fieldEditLine, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
+import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
@@ -281,15 +281,17 @@ placedTextSpans ctx nt idx placements = do
       fg <- textInputFg ctx style idx =<< textInputFocused ctx idx
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements]
     _ -> do
-      fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
+      fg <-
+        if nt == NodeTextArea
+          then fieldTextColor ctx idx (styleFg style)
+          else fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
 
--- | The colour of a text input's text: the node's font colour, else the
--- style's, faded toward the background while the field is empty and
--- unfocused.
+-- | The colour of a text input's text ('fieldTextColor'), faded toward the
+-- background while the field is empty and unfocused.
 textInputFg :: Context -> Style -> NodeIdx -> Bool -> IO Color
 textInputFg ctx style idx focus = do
-  fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
+  fg <- fieldTextColor ctx idx (styleFg style)
   value <- textInputValue ctx idx
   pure (if T.null value && not focus then lerpColor fg (styleBg style) 0.40 else fg)
 

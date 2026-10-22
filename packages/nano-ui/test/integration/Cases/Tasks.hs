@@ -2,7 +2,7 @@ module Cases.Tasks (tests) where
 
 import Spec
 import Control.Concurrent (newEmptyMVar, putMVar, readMVar, takeMVar, threadDelay, tryPutMVar)
-import Control.Exception (AsyncException (StackOverflow), displayException, finally, onException, throwIO)
+import Control.Exception (AsyncException (StackOverflow), ErrorCall, displayException, finally, onException, throwIO, try)
 import Data.List (isInfixOf)
 import Data.Function (fix)
 import Data.Maybe (isJust)
@@ -29,6 +29,7 @@ tests =
   , spec "stream" runStreamTest
   , spec "stream-key-change" runStreamKeyChangeTest
   , spec "stream-released" runStreamReleasedTest
+  , spec "stream-update-throws" runStreamUpdateThrowsTest
   ]
 
 inp :: Input
@@ -400,6 +401,22 @@ runStreamKeyChangeTest ctx failed = do
   assert failed . (`elem` [[], [2]]) =<< evalUi ctx inp ui
   assert failed =<< killedIn 2000000
   assertEq failed (Just [2]) =<< frameUntil wait ctx ui (not . null)
+  cancelTasks ctx
+
+-- | An update whose function throws leaves the state as it was: the
+-- producer gets the exception and goes on, and the view never sees it.
+runStreamUpdateThrowsTest :: Context -> IORef Int -> IO ()
+runStreamUpdateThrowsTest ctx failed = do
+  stream <- newStream
+  wait <- newWakeSignal ctx
+  (sleep, _, _) <- sleeper
+  let produce update = do
+        update (const 1)
+        _ <- try @ErrorCall (update (\_ -> error "boom"))
+        _ <- try @ErrorCall (update (+ 10))
+        sleep
+      ui = useStream stream () (0 :: Int) produce
+  assertEq failed (Just 11) =<< frameUntil wait ctx ui (>= 10)
   cancelTasks ctx
 
 -- | An update to a stream whose hook has stopped running does not wake the

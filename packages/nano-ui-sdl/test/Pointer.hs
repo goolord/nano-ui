@@ -90,13 +90,16 @@ main = do
   let button b isDown inp = applyEvent inp (EvMouseButton b isDown (V2 5 5) (inputModifiers emptyInput))
       pressed = button MouseMiddle True emptyInput
       side = button MouseBack False (clearEphemeral (button MouseBack True emptyInput))
-      gone = applyEvent pressed EvMouseLeave
+      dragOut = applyEvent pressed EvMouseLeave
+      gone = applyEvent (button MouseMiddle False pressed) EvMouseLeave
       ctrl = noModifiers {modCtrl = True}
       -- A click is read with the modifiers of the whole batch, which may
       -- already have let go of a key released just after it.
       ctrlClick = button MouseLeft True (applyEvent emptyInput (EvModifiers ctrl))
   check "a middle press is held" (heldIn MouseMiddle pressed && pressedIn MouseMiddle pressed)
   check "a side button is released" (releasedIn MouseBack side && not (heldIn MouseBack side))
-  check "leaving moves the pointer off the window and keeps the button" $
-    let V2 x y = inputMousePos gone in x < -1000 && y < -1000 && heldIn MouseMiddle gone
+  check "leaving moves the pointer off the window" $
+    let V2 x y = inputMousePos gone in x < -1000 && y < -1000
+  check "leaving during a drag keeps the pointer and the button" $
+    inputMousePos dragOut == V2 5 5 && heldIn MouseMiddle dragOut
   check "a click keeps the modifiers of the keys before it" (inputModifiers ctrlClick == ctrl)

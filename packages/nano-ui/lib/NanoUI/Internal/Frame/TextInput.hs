@@ -12,6 +12,8 @@ module NanoUI.Internal.Frame.TextInput
   , fieldEditLine
   , drawTextInputSelection
   , drawTextInputCaret
+  , pushFieldText
+  , fieldTextColor
   , drawLineSelection
   , drawLineCaret
   , drawCaretAt
@@ -37,7 +39,7 @@ import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-import NanoUI.Internal.Draw (DrawArena, pushRect)
+import NanoUI.Internal.Draw (DrawArena, pushPreparedTextStyled, pushRect)
 import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (maskPassword, textInputFocused, textInputValue)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
@@ -45,10 +47,10 @@ import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId)
 import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldSelection, fieldSelectionWrite, fieldText, findSlot, insertSlot, setFieldSelection)
-import NanoUI.Internal.Style (themeSelection)
+import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), themeSelection, toneColor)
 import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.Internal.WidgetText
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -121,6 +123,30 @@ tagTextInputClippedSpans parentClip fieldClip x y w fm spans =
             area = if isField then fieldClip else labelClip
          in (rect, txt, fg, bg,) <$> (rectIntersect area clipRect >>= rectIntersect parentClip)
    in mapMaybe tagOne spans
+
+-- | A field's or text area's text with its pen at @(x, y)@, in the weight,
+-- slant and decoration packed in its style @si@, as a label draws them. The
+-- weight and slant are synthesized unless the host drew the face natively
+-- (@native@, from 'NanoUI.Internal.Frame.Node.resolveFontFor').
+{-# INLINE pushFieldText #-}
+pushFieldText :: DrawArena -> FontMetrics -> Bool -> Int -> Float -> Float -> Text -> Color -> IO ()
+pushFieldText da fm native si x y txt col = do
+  prepared <- prepareFontMetrics fm txt
+  let !weight = if native then WeightNormal else textNodeFontWeight si
+      !slant = if native then FontStyleNormal else textNodeFontStyle si
+  pushPreparedTextStyled da prepared weight slant (textNodeTextDecoration si) x y txt col
+
+-- | The colour of field or text area @idx@'s text: the layout's
+-- 'fontColor', else its tone's ('fontTone', 'fontMuted' and the like), else
+-- @fg@.
+{-# INLINE fieldTextColor #-}
+fieldTextColor :: Context -> NodeIdx -> Color -> IO Color
+fieldTextColor ctx idx fg =
+  getNodeFontColor (ctxNodeArena ctx) idx >>= \case
+    Just c -> pure c
+    Nothing -> do
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      maybe (pure fg) (\t -> (`toneColor` t) <$> nodeTheme ctx idx) (textNodeFontTone si)
 
 -- | The selection highlight behind characters @lo@ to @hi@ of @line@, whose
 -- pen starts at @x@, on a row at @y@ of height @lineH@.
@@ -345,9 +371,11 @@ textInputMouse ctx inp onControl wid idx = do
 -- Returns the frame's input and whether the input method owns the focused
 -- widget's keys ('FocusComposing'). While a composition shows, all key
 -- state is dropped so nothing edits the field or fires a shortcut; the
--- commit still arrives as typed text. On the commit frame, keys the input
--- method passes on (an arrow after a Korean syllable) reach the field but
--- fire no shortcut.
+-- commit still arrives as typed text. So it is on the frame a composition
+-- ends with nothing committed, whose key the input method took (an Escape
+-- that cancels it, a Backspace on its last character). On the commit frame,
+-- keys the input method passes on (an arrow after a Korean syllable) reach
+-- the field but fire no shortcut.
 --
 -- Inlined into its single caller so the result pair is never allocated.
 {-# INLINE claimComposition #-}
@@ -368,9 +396,10 @@ claimComposition ctx !inp = do
     modifyInteraction ctx (\s -> s {isComposition = next})
     mapM_ (\(_, old) -> damageWidget ctx old DamageSelf) held
     damageWidget ctx owner DamageSelf
-  let !committing = showing held && not (T.null (inputChars inp))
+  let !ended = showing held && not (showing next)
+      !committing = ended && not (T.null (inputChars inp))
   pure $
-    if showing next
+    if showing next || (ended && not committing)
       then (inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty, inputKeysHeld = mempty}, True)
       else (inp, committing)
 

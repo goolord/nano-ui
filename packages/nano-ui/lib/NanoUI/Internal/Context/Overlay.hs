@@ -3,6 +3,7 @@ module NanoUI.Internal.Context.Overlay
   ( textInputEditActive
   , modalActive
   , overlayConsumesQuit
+  , escapeReserved
   , markEscapeConsumed
   , markTabConsumed
   , tabConsumed
@@ -25,7 +26,8 @@ import Data.Maybe (isJust)
 import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Internal.Input (Input, Key (KeyEscape), Pressable (..), withoutPointer)
+import NanoUI.Internal.Input (DropEvent (..), DropType (..), Input (..), Key (KeyEscape), Pressable (..), offWindow, withoutPointer)
+import NanoUI.Internal.Store (anySelectOpen)
 import NanoUI.Internal.Types (Rect, V2, rectContains, rectNonEmpty)
 
 -- | Whether any widget has keyboard focus or a text-edit menu is open.
@@ -45,6 +47,18 @@ overlayConsumesQuit :: Context -> Input -> IO Bool
 overlayConsumesQuit ctx inp = do
   consumed <- getsOverlay ctx osEscapeConsumed
   pure (pressedOnceIn KeyEscape inp && consumed)
+
+-- | Whether this frame's Escape is spoken for: something took it already
+-- ('overlayConsumesQuit'), or an open text-edit menu, an open dropdown or a
+-- focused combo box's list ('isFocusCombo') closes on it. The view's Escape
+-- consumers ask this, so none acts on the Escape such a menu takes, wherever
+-- it is declared.
+escapeReserved :: Context -> Input -> IO Bool
+escapeReserved ctx inp = do
+  taken <- overlayConsumesQuit ctx inp
+  menuOrCombo <- getsInteraction ctx (\s -> isJust (isTextInputMenu s) || isFocusCombo s)
+  dropdown <- anySelectOpen <$> getStore ctx
+  pure (taken || menuOrCombo || dropdown)
 
 -- | Mark Escape as handled so closing an overlay does not also quit the app.
 markEscapeConsumed :: Context -> IO ()
@@ -66,14 +80,28 @@ pointerBlockedByModal ctx =
 
 -- | Filter frame input for widgets in @layer@ (0 for the base page, or a
 -- floating panel's key): preserves pointer state only when pointer input is
--- routed to @layer@ and not blocked by a modal.
+-- routed to @layer@ and not blocked by a modal. An OS drag moves no pointer,
+-- so its drops go by where they land: a layer that is not on top there, or
+-- that a modal blocks, sees the drag off the window.
 routedInput :: Context -> Int -> Input -> IO Input
-routedInput ctx layer inp =
-  getsInteraction ctx isPointerRoute >>= \case
-    RouteLayer routed | routed == layer -> do
+routedInput ctx layer inp = do
+  routed <-
+    getsInteraction ctx isPointerRoute >>= \case
+      RouteLayer routed | routed == layer -> do
+        blocked <- pointerBlockedByModal ctx
+        pure (if blocked then withoutPointer inp else inp)
+      _ -> pure (withoutPointer inp)
+  if null (inputDrops inp)
+    then pure routed
+    else do
       blocked <- pointerBlockedByModal ctx
-      pure (if blocked then withoutPointer inp else inp)
-    _ -> pure (withoutPointer inp)
+      let own ev = case dropEventPos ev of
+            Just p | dropEventType ev == DropPosition -> do
+              top <- floatingLayerAt ctx p
+              pure (if blocked || top /= layer then ev {dropEventPos = Just offWindow} else ev)
+            _ -> pure ev
+      drops <- traverse own (inputDrops inp)
+      pure routed {inputDrops = drops}
 
 -- | The layer on top at @mouse@, going by where the floating panels were last
 -- frame: the last panel declared that holds the point, or the page.

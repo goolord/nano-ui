@@ -125,6 +125,11 @@ runImeKeysTest ctx failed = do
     assertEq failed (respId resp) =<< getFocusId ctx
   shown ctx failed ["abxyzcd"] []
   assert failed =<< escape comp
+  -- The key that ends a composition with nothing committed, an Escape that
+  -- cancels it or a Backspace on its last character, is the IME's too.
+  assert failed =<< escape (commit "" comp)
+  _ <- runFrame ctx comp ui
+  assertEq failed "abcd" . snd =<< evalUi ctx (keyInp KeyBackspace (commit "" comp)) ui
   _ <- runFrame ctx (commit "" inp) ui
   assert failed . not =<< escape inp
   assertEq failed "acd" . snd =<< evalUi ctx (keyInp KeyBackspace inp {inputComposition = Just (Composition "" 0 0)}) ui

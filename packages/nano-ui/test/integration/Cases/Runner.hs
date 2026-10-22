@@ -22,6 +22,7 @@ tests =
   , spec "session-loop-hard-quit" runSessionLoopHardQuitTest
   , spec "session-loop-hard-quit-used" runSessionLoopHardQuitUsedTest
   , spec "session-loop-key-order" runSessionLoopKeyOrderTest
+  , spec "session-loop-key-repeat" runSessionLoopKeyRepeatTest
   , spec "session-loop-close-request" runSessionLoopCloseTest
   , spec "session-loop-close-asks-the-view" runSessionLoopCloseAskTest
   , spec "session-loop-clicks" runSessionLoopClicksTest
@@ -295,6 +296,32 @@ runSessionLoopKeyOrderTest ctx failed = do
     =<< run [[1, 1, 2, 2, 3, 4, 5, 6, 7]]
   -- One event per batch, as in steady typing, adds no frames.
   assertEq failed 7 . length =<< run (map pure [1, 2, 3, 4, 5, 6, 7])
+
+-- | Each auto-repeat of a held key draws a frame, as does a character typed
+-- again, though each input equals the one before: a view that only writes a
+-- 'Var' on the key leaves nothing dirty to ask for the frame. Event 1
+-- presses Down (a repeat while it is held), 2 releases it, and 4 types "a".
+runSessionLoopKeyRepeatTest :: Context -> IORef Int -> IO ()
+runSessionLoopKeyRepeatTest ctx failed = do
+  debug <- newDebugSampler
+  waits <- batchedWaits [[1], [1], [1], [1], [2], [4], [4], [3]]
+  drawn <- newIORef (0 :: Int)
+  let typeA inp = applyKey (KeyChar 'a') False (applyKey (KeyChar 'a') True inp) {inputChars = inputChars inp <> "a"}
+  clearDirty ctx
+  runSessionLoop
+    (quietDriver debug)
+      { sdWaitEvents = waits
+      , sdApplyEvent = \inp -> \case
+          1 -> applyKey KeyDown True inp
+          2 -> applyKey KeyDown False inp
+          4 -> typeA inp
+          _ -> inp
+      , sdShouldDraw = \c prev cur anim due -> shouldRedrawFrame c prev cur anim False due
+      , sdDraw = \_ _ _ -> False <$ modifyIORef' drawn (+ 1)
+      }
+    ctx
+    emptyInput
+  assertEq failed 7 =<< readIORef drawn
 
 -- | One batch of events per driver wait. A wait past the last batch throws,
 -- so a runaway loop fails the test instead of hanging.

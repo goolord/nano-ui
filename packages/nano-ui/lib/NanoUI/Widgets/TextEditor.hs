@@ -30,12 +30,12 @@ module NanoUI.Widgets.TextEditor
   ) where
 
 import Control.Monad (unless, void, when)
-import Data.Char (isControl, isSpace, toLower)
+import Data.Char (isControl, isMark, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.TextEditor.Types
-import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), chordModifiers, modJump, modMacCommand, modPrimary, noModifiers, onMac)
+import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), chordModifiers, isCommandKey, modJump, modMacCommand, modPrimary, noModifiers, onMac)
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -190,6 +190,13 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
       -- Deleting to the end of a line from its end takes the line break, so
       -- Ctrl+K keeps making progress.
       LineEnd | T.length (TB.lineAt (cursorRow cursor) buf) == cursorCol cursor -> TB.getCursor (TB.moveRight buf)
+      -- Backspace takes a combining mark off the letter it sits on, as text
+      -- fields do, so a mistyped vowel sign or accent costs only itself. A
+      -- variation selector or an emoji keycap still goes with its character.
+      CharLeft
+        | Just (_, c) <- T.unsnoc (T.take (cursorCol cursor) (TB.lineAt (cursorRow cursor) buf))
+        , isMark c && c /= '\x20E3' && not (c >= '\xFE00' && c <= '\xFE0F') && not (c >= '\xE0100' && c <= '\xE01EF') ->
+            cursor {cursorCol = cursorCol cursor - 1}
       motion -> TB.getCursor (moveBuffer motion)
     moveBuffer = \case
       CharLeft -> TB.moveLeft buf
@@ -269,15 +276,17 @@ keyCommand mode mods key =
     move m = Just (Move m (modShift mods))
 
 -- | This frame's typing and keys as commands, typed characters first.
--- Characters typed under a shortcut modifier ('chordModifiers') are dropped,
--- since those keystrokes arrive as key commands. Ctrl+Alt is AltGr on many
--- layouts, so its characters are typed normally.
+-- Characters typed under modifiers that make their key a command
+-- ('isCommandKey': Ctrl, or Alt alone, outside macOS) are dropped, since
+-- those keystrokes arrive as key commands or go to shortcuts. Ctrl+Alt is
+-- AltGr on many layouts, and Option types on macOS, so their characters are
+-- typed normally.
 inputTextCommands :: EditorMode -> Input -> [TextCommand]
 inputTextCommands mode inp = T.foldr char keys (inputChars inp)
   where
     mods = inputModifiers inp
     char c rest
-      | not (isControl c) && not (chordModifiers mods) = InsertText (T.singleton c) : rest
+      | not (isControl c) && not (isCommandKey mods (KeyChar c)) = InsertText (T.singleton c) : rest
       | otherwise = rest
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 

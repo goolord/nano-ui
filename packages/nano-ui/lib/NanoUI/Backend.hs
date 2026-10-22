@@ -87,8 +87,11 @@ module NanoUI.Backend
     -- keys; mouse buttons through 'applyMouseButton' (numbered with
     -- 'mouseButtonNumber'); dropped files through 'appendDropEvent'. When the
     -- pointer leaves the window, 'applyPointerLeave' moves it off every
-    -- widget. When the window loses keyboard focus, 'releaseAllKeys' releases
-    -- the held keys, whose release events go elsewhere.
+    -- widget, unless a button is held. While one is, the backend keeps
+    -- delivering motion and the release from outside the window (capturing
+    -- the mouse where the platform allows), so a drag follows the pointer out
+    -- and back. When the window loses keyboard focus, 'releaseAllKeys'
+    -- releases the held keys, whose release events go elsewhere.
     --
     -- Every key goes in as a 'Key' whatever the modifiers; a key that types a
     -- character is the 'KeyChar' it types with no modifier held. The typed
@@ -330,6 +333,11 @@ module NanoUI.Backend
     -- the loop takes them, and not for dirty marks made on the thread running
     -- @runSessionLoop@, so it needs no filtering of its own. Without it, a
     -- blocking loop shows a job's result only when other input arrives.
+    --
+    -- 'markDirty' belongs to the thread that runs frames, or to a callback
+    -- that thread is blocked on, such as a resize watch. Any other thread
+    -- publishes its change and then calls the action from @askWake@, which
+    -- is safe from every thread.
     --
     -- Jobs run until their hooks stop being called. @runSessionLoop@ in
     -- "NanoUI.Runner" cancels the rest when it returns; a host that runs

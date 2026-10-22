@@ -173,17 +173,17 @@ runShortcutFocusedFieldTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedFieldTest ctx failed = do
   textRef <- newVar "hello"
   (ui, press) <- noting ctx $ \note -> column $ do
-    binds note [ctrl <> key 'a', ctrl <> key 's', key 'j', shift <> key 'j', alt <> key 'j', key KeyEnter, ctrl <> key KeyLeft, key (KeyF 2), ctrl <> key KeySpace]
+    binds note [cmdOrCtrl <> key 'a', ctrl <> key 's', key 'j', shift <> key 'j', alt <> key 'j', key KeyEnter, ctrl <> key KeyLeft, key (KeyF 2), ctrl <> key KeySpace]
     held textRef textInput'
   warmupFocused ctx inp0 ui
-  fires failed press False [ctrl <> key 'a']
+  fires failed press False [cmdOrCtrl <> key 'a']
   _ <- runFrame ctx (keyInp KeyBackspace inp0) ui
   assertEq failed "" =<< readVarIO textRef
   fires failed press False [key 'j', shift <> key 'j', key KeyEnter, ctrl <> key KeyLeft]
   -- Alt with a letter types on macOS (Option).
   fires failed press True ([ctrl <> key 's', key (KeyF 2), ctrl <> key KeySpace] ++ [alt <> key 'j' | os /= "darwin"])
   writeIORef (ctxFocusId ctx) (WidgetId 0)
-  fires failed press True [ctrl <> key 'a', key 'j', key KeyEnter]
+  fires failed press True [cmdOrCtrl <> key 'a', key 'j', key KeyEnter]
 
 -- | A focused button keeps Enter and Space (plain or with Shift), a slider
 -- also the arrows. Ctrl+Enter, Alt+Left and similar go to shortcuts instead.

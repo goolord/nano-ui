@@ -128,7 +128,9 @@ data DropTarget = DropTarget
 -- | The drop state for a rectangle from this frame's drop events. Hover
 -- persists while the OS drag is still; payloads are reported on the frame
 -- they arrive. A payload lands at the last 'DropPosition', not its own
--- coordinates, which SDL reports as (0,0) when it has none.
+-- coordinates, which SDL reports as (0,0) when it has none. Only the layer
+-- on top where the drag is sees it there: a target behind a modal, or under
+-- a floating window, sees it off the window.
 useDrop :: Rect -> NanoUI DropTarget
 useDrop bounds = do
   (wid, ctx) <- freshWidget

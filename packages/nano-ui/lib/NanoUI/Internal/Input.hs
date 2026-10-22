@@ -54,6 +54,7 @@ module NanoUI.Internal.Input
   , inputKeysFromList
   , stripInteractionInput
   , withoutPointer
+  , offWindow
   , UiCursorKind (..)
   , cursorFallback
   , syncCursorKind
@@ -665,10 +666,15 @@ applyMouseButton b False inp =
   inp {inputButtonsHeld = buttonsDelete b (inputButtonsHeld inp), inputButtonsReleased = buttonsInsert b (inputButtonsReleased inp)}
 
 -- | The pointer left the window: move it off every widget, as
--- 'withoutPointer' does, so nothing stays hovered. Held buttons stay held
--- until their releases arrive.
+-- 'withoutPointer' does, so nothing stays hovered. While a button is held
+-- the pointer stays put: the drag goes on, and where no motion arrives from
+-- outside the window (Windows), leaving would drop a dragged slider or
+-- scrollbar to the far corner. The release and later motion move it. Held
+-- buttons stay held until their releases arrive.
 applyPointerLeave :: Input -> Input
-applyPointerLeave inp = inp {inputMousePos = offWindow}
+applyPointerLeave inp
+  | inputPointerHeld inp = inp
+  | otherwise = inp {inputMousePos = offWindow}
 
 -- | A point far outside any window.
 offWindow :: V2

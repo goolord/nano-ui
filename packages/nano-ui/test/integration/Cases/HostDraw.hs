@@ -24,6 +24,7 @@ tests =
   , spec "draw-glyph-page-range" runGlyphPageRangeTest
   , spec "draw-long-shaped-line" runLongShapedLineTest
   , spec "draw-text-input-font" runTextInputFontTest
+  , spec "draw-field-font-style" runFieldFontStyleTest
   , spec "draw-glyph-kerning" runGlyphKerningTest
   , spec "draw-missing-glyph-space" runMissingGlyphSpaceTest
   ]
@@ -96,6 +97,29 @@ runTextInputFontTest base failed = do
   -- Search and numeric fields too, which paint without a caption.
   assertEq failed (labelW, labelH) =<< extent (void (withValue "Hg" (searchInputConfigured defaultSearchInputConfig {sicLayout = big (sicLayout defaultSearchInputConfig)})))
   assertEq failed (labelW, labelH) =<< extent (void (withValue 7 (numericInputConfigured defaultNumericInputConfig {nicLayout = big (nicLayout defaultNumericInputConfig)})))
+
+-- | Text fields, selectable text and text areas draw the layout's weight,
+-- decoration and tone as a label does, though the font gives no face for
+-- them: bold draws each of the three glyphs twice (the headless font's
+-- advance boxes), an underline adds a rule in the text's colour, and a muted
+-- tone takes the theme's muted colour.
+runFieldFontStyleTest :: Context -> IORef Int -> IO ()
+runFieldFontStyleTest ctx failed = do
+  mutedFg <- themeMuted <$> getTheme ctx
+  let red = colorRGBA 255 0 0 255
+      drawn ui = snd <$> warmupDraw ctx (withInput 400 300) (column ui)
+      quadsIn col f ui = length . filter ((== col) . snd) <$> (drawQuads =<< drawn (ui f))
+      atlasQuads f ui = (\dd -> sum [cmdIndexCount c `div` 6 | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId]) <$> drawn (ui f)
+      kinds :: [(Layout -> Layout) -> NanoUI ()]
+      kinds =
+        [ \f -> void (withValue "abc" (textInputConfigured defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}))
+        , \f -> selectableTextWith f "abc"
+        , \f -> void (withValue "abc" (textAreaWith' f))
+        ]
+  forM_ kinds $ \ui -> do
+    assertEq failed 3 =<< ((-) <$> atlasQuads fontBold ui <*> atlasQuads id ui)
+    assertEq failed 1 =<< ((-) <$> quadsIn red (fontUnderline . fontColor red) ui <*> quadsIn red (fontColor red) ui)
+    assertEq failed 3 =<< ((-) <$> quadsIn mutedFg fontMuted ui <*> quadsIn mutedFg id ui)
 
 -- | Position of every vertex of the glyph quads the fonts of
 -- 'runTextInputFontTest' draw: atlas vertices at that glyph's UV corners.

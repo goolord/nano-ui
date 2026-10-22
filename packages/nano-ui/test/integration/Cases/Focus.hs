@@ -25,7 +25,10 @@ tests =
   , spec "focus-request-order" runFocusRequestOrderTest
   , spec "focus-request-closes-menus" runFocusRequestClosesMenusTest
   , spec "focus-tab-closes-menus" runFocusTabClosesMenusTest
+  , spec "focus-right-click-closes-dropdown" runFocusRightClickClosesDropdownTest
   , spec "focus-back-tab-from-none" runFocusBackTabFromNoneTest
+  , spec "focus-tab-claimed" runFocusTabClaimedTest
+  , spec "focus-reveals" runFocusRevealsTest
   , spec "focus-next-previous" runFocusNextPreviousTest
   , spec "focus-clear-release" runFocusClearReleaseTest
   , spec "focus-text-command" runFocusTextCommandTest
@@ -266,6 +269,24 @@ runFocusTabClosesMenusTest ctx failed = do
   assertEq failed (respId sel) =<< getFocusId ctx
   assert failed . not . isJust =<< getsInteraction ctx isTextInputMenu
 
+-- | A right press on a field, which focuses it and opens its edit menu,
+-- closes an open dropdown, so the arrows then move the field's caret and
+-- leave the select's value alone.
+runFocusRightClickClosesDropdownTest :: Context -> IORef Int -> IO ()
+runFocusRightClickClosesDropdownTest ctx failed = do
+  index <- newVar (0 :: Int)
+  let ui = column ((,) <$> (fst <$> withValue "text" textInput') <*> (fst <$> held index (select' ["One", "Two", "Three"])))
+  (field, sel) <- warmup2 ctx inp ui
+  _ <- runClick ctx inp ui (centerOf sel)
+  assert failed . anySelectOpen =<< getStore ctx
+  let (rightPress, rightRelease) = rightClickPair inp (centerOf field)
+  mapM_ (\i -> warmup ctx i ui) [rightPress, rightRelease]
+  assertEq failed (respId field) =<< getFocusId ctx
+  assert failed . not . anySelectOpen =<< getStore ctx
+  _ <- runFrame ctx (keyInp KeyRight inp) ui
+  _ <- runFrame ctx inp ui
+  assertEq failed 0 =<< readVarIO index
+
 -- | Shift+Tab with nothing focused goes to the last Tab stop.
 runFocusBackTabFromNoneTest :: Context -> IORef Int -> IO ()
 runFocusBackTabFromNoneTest ctx failed = do
@@ -273,6 +294,62 @@ runFocusBackTabFromNoneTest ctx failed = do
   [_, _, c] <- warmup2 ctx inp ui
   _ <- runFrame ctx (chordInp (shift <> key KeyTab) inp) ui
   assertEq failed c =<< getFocusId ctx
+
+-- | Tab, Shift+Tab and a focus request scroll the widget they focus into
+-- its scroller's view, from below the fold, back up when Tab wraps, and
+-- from above. Around nested scrollers, the outer one shows the widget where
+-- the inner one moved it.
+runFocusRevealsTest :: Context -> IORef Int -> IO ()
+runFocusRevealsTest ctx failed = do
+  target <- newIORef Nothing
+  let buttons = scrollArea (fixedH 100 . fillW) (column (mapM (fmap respId . button' . T.singleton) ['A' .. 'J']))
+      ui = do
+        mapM_ requestFocus =<< liftIO (readIORef target)
+        buttons
+      showsIn c sid = do
+        rect <- getPrevRect c =<< getFocusId c
+        metrics <- getScrollMetrics c sid
+        pure $ case (rect, scrollViewport <$> metrics) of
+          (Just (Rect _ y _ h), Just (Rect _ vy _ vh)) -> y >= vy - 0.5 && y + h <= vy + vh + 0.5
+          _ -> False
+      shown = do
+        writeIORef target Nothing
+        (sid, _) <- evalUi ctx inp ui
+        showsIn ctx sid
+  nested <- newContext
+  let filler = columnWith (fixedH 150 . fillW) (pure ())
+      outerUi = scrollArea (fixedH 120 . fillW) (column (filler *> buttons <* filler <* filler))
+  _ <- warmup2 nested inp outerUi
+  replicateM_ 10 (runFrame nested (tabInp inp) outerUi)
+  (outer, (inner, _)) <- evalUi nested inp outerUi
+  assert failed =<< ((&&) <$> showsIn nested outer <*> showsIn nested inner)
+  (_, ids) <- warmup2 ctx inp ui
+  forM_ [1 .. 11 :: Int] $ \i -> runFrame ctx (tabInp inp) ui >> (assertEq failed (i, True) . (i,) =<< shown)
+  _ <- runFrame ctx (chordInp (shift <> key KeyTab) inp) ui
+  assert failed =<< shown
+  writeIORef target (Just (ids !! 4))
+  _ <- runFrame ctx inp ui
+  assertEq failed (ids !! 4) =<< getFocusId ctx
+  assert failed =<< shown
+
+-- | A focused custom widget that claims Tab ('KeysAll', or 'KeysOnly'
+-- naming the chord) reads it and keeps focus; one claiming other keys lets
+-- Tab move focus on.
+runFocusTabClaimedTest :: Context -> IORef Int -> IO ()
+runFocusTabClaimedTest _ failed =
+  forM_ [(KeysAll, True), (KeysOnly [key KeyTab], True), (KeysOnly [shift <> key KeyTab], False), (KeysNavigate, False)] $ \(claim, keeps) -> do
+    ctx <- newContext
+    let ui = column $ do
+          (r, _) <- customWidget defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = claim, widgetLayout = fixedWH 100 30 defaultLayout}
+          tabbed <- focusedKeyPressed (respId r) KeyTab
+          _ <- button' "Next"
+          pure (respId r, tabbed)
+    warmupFocused ctx inp ui
+    (w, _) <- evalUi ctx inp ui
+    assertEq failed w =<< getFocusId ctx
+    (_, tabbed) <- evalUi ctx (tabInp inp) ui
+    assert failed tabbed
+    assertEq failed (claim, keeps) . (claim,) . (== w) =<< getFocusId ctx
 
 -- | 'focusNext' and 'focusPrevious' act like Tab and Shift+Tab at the end of
 -- the frame, wrapping at both ends; 'isFocused' reports the focused widget.

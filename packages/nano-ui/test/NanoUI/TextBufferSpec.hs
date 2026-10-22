@@ -124,6 +124,13 @@ spec = do
       TB.getCursor (TB.moveRight (TB.fromText "e\x0301x")) `shouldBe` TB.Cursor 0 2
       deleted TE.CharLeft (atEnd "a👍🏽") `shouldBe` "a"
       deleted TE.CharRight (TB.fromText "🇺🇸🇫🇷") `shouldBe` "🇫🇷"
+      -- Backspace takes a combining mark off the letter it sits on, and a
+      -- variation selector or a keycap with its character.
+      deleted TE.CharLeft (atEnd "a\x0915\x093F") `shouldBe` "a\x0915"
+      deleted TE.CharLeft (atEnd "e\x0301") `shouldBe` "e"
+      deleted TE.CharLeft (atEnd "a\x2764\xFE0F") `shouldBe` "a"
+      deleted TE.CharLeft (atEnd "a#\xFE0F\x20E3") `shouldBe` "a"
+      deleted TE.CharRight (TB.fromText "e\x0301x") `shouldBe` "x"
 
     it "deleting a word left eats trailing whitespace then the previous word" $ do
       let

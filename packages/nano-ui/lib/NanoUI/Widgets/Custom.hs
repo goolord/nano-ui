@@ -169,7 +169,8 @@ data CustomWidgetSpec a = CustomWidgetSpec
   , widgetKeys       :: !KeyClaim
     -- ^ Keys the widget handles itself while focused; shortcuts and
     -- 'NanoUI.keyPressed' ignore them. Default 'KeysNavigate'. A terminal or
-    -- an editor with its own chords uses 'KeysAll'.
+    -- an editor with its own chords uses 'KeysAll'. A widget that claims Tab
+    -- ('KeysAll', or 'KeysOnly' naming it) keeps focus when it is pressed.
     -- Use 'KeysOnly' with "NanoUI.Shortcut" chords for precise ownership,
     -- 'KeysNone' to reserve none, or 'KeysReadOnly' for selectable text.
   , widgetDamageSlop :: !Float
