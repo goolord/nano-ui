@@ -397,7 +397,7 @@ data UiCursorKind
   | UiCursorNwResize
   | -- | No pointer shown, as over a video or a canvas that draws its own.
     UiCursorHidden
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | The closest shape among the cursors SDL and RGFW have. Kinds they have
 -- map to themselves.
@@ -766,4 +766,4 @@ applyComposition txt start len inp
 -- @input_method::Purpose@): normal text, a secret the IME should neither
 -- show nor learn, or a number. On-screen keyboards pick their keys from it.
 data InputPurpose = InputNormal | InputSecure | InputNumeric
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)

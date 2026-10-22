@@ -40,7 +40,7 @@ data ContentFit
     FitNone
   | -- | 'FitNone' when the image fits, else 'FitContain'.
     FitScaleDown
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Clockwise rotation in radians about the centre of the drawn image, and
 -- whether the rotation affects layout.

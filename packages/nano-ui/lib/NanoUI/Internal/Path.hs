@@ -322,7 +322,7 @@ data FillRule
   | EvenOdd
   -- ^ Points with an odd winding number. A subpath inside another is cut
   -- out, and one inside that is filled again.
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Whether a point with winding number @w@ is inside the fill. Used by
 -- canvas fills and the SVG rasterizer.
