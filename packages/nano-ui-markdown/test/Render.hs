@@ -29,7 +29,7 @@ import NanoUI.Testing
   )
 import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness (chordInp, hasText, holdAt, nodesOfType, pressAt, releaseAt, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
-import NanoUI.Shortcut (ctrl, key)
+import NanoUI.Shortcut (cmdOrCtrl, key)
 import Test.Hspec
 
 -- | A drawn rich-text word: widget, line box origin, font size, text and
@@ -200,10 +200,10 @@ spec = before newMarkdownCache $ do
     selectionColor <- themeSelection <$> getTheme ctx
     fills <- drawnFills selectionColor ctx
     fills `shouldNotBe` []
-    _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
+    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'c') inp) ui
     readIORef clipboard `shouldReturn` Just "Select these"
-    _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
-    _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
+    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
+    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'c') inp) ui
     readIORef clipboard `shouldReturn` Just "Select these words"
 
   it "selects and copies code blocks without losing whitespace" $ \cache -> do
@@ -216,8 +216,8 @@ spec = before newMarkdownCache $ do
     let V2 x y = wPos code
         pos = V2 (x + 1) (y + fmLineHeight (ctxFontMetrics ctx) / 2)
     _ <- runClick ctx inp ui pos
-    _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp) ui
-    _ <- runFrame ctx (chordInp (ctrl <> key 'c') inp) ui
+    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
+    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'c') inp) ui
     readIORef clipboard `shouldReturn` Just "  let x = 1"
 
   it "keeps earlier blocks' ids while text streams in" $ \_ ->
