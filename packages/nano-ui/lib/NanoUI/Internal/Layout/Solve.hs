@@ -172,20 +172,22 @@ measureTextNodeAt env idx txt outerW shouldWrap = do
       pure (TextBox True tw th lineH)
     else pure (TextBox False tw0 th0 lineH)
 
--- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text that does
--- not wrap returns @fallback@, and so does empty text, which measured one
--- line tall. Text wraps at newlines, and at @w@ when @allowed@ and its line
--- overflows a positive @w@.
+-- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text wraps at
+-- newlines, and at @w@ when @allowed@ and its line overflows a positive @w@.
+-- Text that does not wrap returns @fallback@, unless its height is fit and
+-- it may wrap at a positive @w@, where paint wraps it ('textWrapCap'): the
+-- measure may have wrapped it narrower, at an ancestor's cap. Empty text,
+-- which measured one line tall, returns @fallback@.
 {-# INLINE textHeightAt #-}
 textHeightAt :: SolveEnv -> NodeIdx -> AxisSizing -> Float -> Bool -> Float -> IO Float
-textHeightAt env !idx (AxisSizing _ _ minH maxH) !w allowed !fallback = do
+textHeightAt env !idx (AxisSizing hTag _ minH maxH) !w allowed !fallback = do
   txt <- getText (seArena env) idx
   if T.null txt
     then pure fallback
     else do
       TextBox {tbWrapped, tbH, tbLineH} <-
         measureTextNodeAt env idx txt w (\wrapW lineW -> allowed && wrapW + 0.5 < lineW && wrapW > 0)
-      pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else fallback)
+      pure (if tbWrapped || (allowed && hTag == SizingFit && w > 0) then clamp minH maxH (max tbLineH tbH) else fallback)
 
 -- | Measure nodes and place the page within the supplied logical width/height.
 -- The view must have finished adding nodes, and 'computeSubtreeHashes' must
