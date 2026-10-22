@@ -97,6 +97,7 @@ main = hspec $ do
     it "picks and formats nice ticks" testNiceTicks
     it "labels ticks with the digits their step needs" (testTickLabels fm)
     it "shares bounds across series" testMultiSeriesDomains
+    it "reaches an area's baseline" testAreaBaselineDomain
     it "leaves out values that are not finite" (testNonFinite fm)
     it "settles on a chart holding NaN" testNaNChartIdle
   describe "decimation" $ do
@@ -329,6 +330,21 @@ testMultiSeriesDomains = do
     (Domain loadingXLo _, Domain loadingYLo _) = seriesDomains (bareChart [line "a" [(1000, 1000), (2000, 2000)], line "b" []])
   check "a constant series widened the shared domain" (flatLo > 0.09 && flatHi < 0.16)
   check "an empty series pulled the shared domain to zero" (loadingXLo > 900 && loadingYLo > 900)
+
+-- | An area's fill reaches its baseline, so its y domain does too, and the
+-- fill stays in the plot. An empty area or a baseline that is not finite
+-- leaves the domain alone.
+testAreaBaselineDomain :: IO ()
+testAreaBaselineDomain = do
+  let
+    yDom ss = snd (seriesDomains (bareChart ss))
+    Domain lo hi = yDom [area "a" [(0, 50), (1, 55), (2, 60)]]
+    Domain _ aboveHi = yDom [withBaseline 80 (area "a" [(0, 50), (1, 60)])]
+    Domain loadingLo _ = yDom [line "a" [(0, 1000), (1, 2000)], area "b" []]
+    Domain nanLo nanHi = yDom [withBaseline (0 / 0) (area "a" [(0, 50), (1, 60)])]
+  check "an area's baseline is outside its y domain" (lo <= 0 && hi >= 60 && aboveHi >= 80)
+  check "an empty area pulled the shared domain to its baseline" (loadingLo > 900)
+  check "a NaN baseline reached the y domain" (nanLo > 40 && nanHi < 70)
 
 -- | Values that are not finite are left out of the domains, the drawing and
 -- hover, instead of corrupting them.

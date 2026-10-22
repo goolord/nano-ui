@@ -181,9 +181,10 @@ textWidth fm s = rectW (drawTextBox fm 0 0 0 (-1) s)
 
 -- | Combined x/y extents of the series' finite values, with 5% numeric
 -- padding. Categories use zero-based positions with half a slot at each
--- end, and their bars' y extent includes zero. An axis with no values spans
--- 0-1 before the padding, and one with a single value half a unit each side
--- of it.
+-- end, and their bars' y extent includes zero. An area's y extent includes
+-- its baseline, which its fill reaches. An axis with no values spans 0-1
+-- before the padding, and one with a single value half a unit each side of
+-- it.
 seriesDomains :: Chart -> (Domain, Domain)
 seriesDomains chart = (xDom, fit yBounds)
   where
@@ -192,10 +193,14 @@ seriesDomains chart = (xDom, fit yBounds)
     fit = padDomain 0.05 . settleDomain
     (xBounds, yBounds, slots) = foldl' add (Domain (1 / 0) (-1 / 0), Domain (1 / 0) (-1 / 0), 0) (chartSeries chart)
     add (!bx, !by, !n) s = case seriesData s of
-      PointsXY pts -> (mergeDomains bx (domainBoundsBy fst pts), mergeDomains by (domainBoundsBy snd pts), n)
+      PointsXY pts -> (mergeDomains bx (domainBoundsBy fst pts), mergeDomains by (reach s (domainBoundsBy snd pts)), n)
       CategoryY _ values ->
         let k = sizeofPrimArray values
          in (bx, mergeDomains by (mergeDomains (Domain 0 0) (domainBoundsBy (indexPrimArray values) (U.enumFromN 0 k))), max n k)
+    -- An area with values reaches its baseline, when that is finite.
+    reach s d@(Domain lo hi) = case seriesKind s of
+      AreaSeries b | lo <= hi && not (isNaN b || isInfinite b) -> mergeDomains (Domain b b) d
+      _ -> d
     slotDom = Domain (-0.5) (fromIntegral slots - 0.5)
     xDom
       | slots == 0 = fit xBounds
