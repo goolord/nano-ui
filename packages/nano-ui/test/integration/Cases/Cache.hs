@@ -26,6 +26,7 @@ tests =
   , spec "wrap-width-bounds" runWrapBoundsTest
   , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
   , spec "wrap-keeps-clusters" runWrapClustersTest
+  , spec "truncate-first-character" runTruncateFirstCharTest
   ]
 
 -- | Breaking a word by character, or cutting text short, keeps a character
@@ -43,6 +44,14 @@ runWrapClustersTest ctx failed = do
   assertEq failed ["a", england] =<< wrapTextLinesIO lineW ("a" <> england) 30
   assertEq failed "a..." =<< evalUi ctx (withInput 100 100) (truncateTextUi (monospaceMetrics 10) 55 "ae\x0301\&bcd")
   assertEq failed "\x1F1FA\x1F1F8..." =<< evalUi ctx (withInput 100 100) (truncateTextUi (monospaceMetrics 10) 65 (flags <> "xyz"))
+
+-- | Cutting text short never makes it wider than the room: a first
+-- character that leaves no room for the dots is cut to without them.
+runTruncateFirstCharTest :: Context -> IORef Int -> IO ()
+runTruncateFirstCharTest ctx failed = do
+  let fm = (monospaceMetrics 10) {fmAdvance = \c -> case c of 'W' -> 14; '.' -> 4; ' ' -> 5; _ -> 10}
+  assertEq failed "W" =<< evalUi ctx (withInput 100 100) (truncateTextUi fm 16 "Wide")
+  assertEq failed "Wi..." =<< evalUi ctx (withInput 100 100) (truncateTextUi fm 36 "Wide")
 
 -- | Wrapping drops the run of spaces at a line break but keeps indentation
 -- and runs of spaces inside a line, which code needs.

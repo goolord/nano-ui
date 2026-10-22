@@ -65,7 +65,7 @@ import qualified Data.Map.Strict as Map
 import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Internal.TextCluster (clusterBounds)
+import NanoUI.Internal.TextCluster (clusterBounds, clusterLength)
 import NanoUI.Internal.Types (Rect (..), clamp, onGrid)
 import NanoUI.Internal.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..))
 
@@ -780,4 +780,10 @@ truncateTextIO lineW maxW txt
             then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
             else do
               (fit, _) <- takeWidth (charsPerWidth w txt (maxW - ellW)) lineW (maxW - ellW) txt
-              pure (T.dropWhileEnd (== '.') fit <> "...")
+              let dotted = T.dropWhileEnd (== '.') fit <> "..."
+              -- The cut keeps a first character that leaves no room for the
+              -- dots; then it is cut to without them.
+              tooWide <- if clusterLength fit == T.length fit then (> maxW) <$> lineW dotted else pure False
+              if tooWide
+                then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
+                else pure dotted
