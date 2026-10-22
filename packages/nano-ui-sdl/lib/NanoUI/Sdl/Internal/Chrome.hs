@@ -80,12 +80,16 @@ windowFlagsOf = SDL.getWindowFlags . sdlWindow
 -- gave it. Going back to 'DecorationsFull' also takes off whatever
 -- 'setWindowChrome' put on the window: the desktop's own title bar is the
 -- desktop's to answer for. Asking for the decorations the window has does
--- nothing, so a view may ask every frame.
+-- nothing, so a view may ask every frame. The sizing frame of
+-- 'DecorationsFrame' goes only on a window that can be resized and is not
+-- fullscreen, so asking for it again after either changed puts it on, or
+-- takes it off, to suit.
 setWindowDecorations :: SdlEnv -> WindowDecorations -> IO ()
 setWindowDecorations env decorations = do
-  old <- readIORef (chromeDecorations st)
-  unless (old == decorations) $ do
-    writeIORef (chromeDecorations st) decorations
+  framed <- framedWindow <$> windowFlagsOf env
+  (old, oldFramed) <- readIORef (chromeDecorations st)
+  unless (old == decorations && (decorations /= DecorationsFrame || oldFramed == framed)) $ do
+    writeIORef (chromeDecorations st) (decorations, framed)
     when (decorations == DecorationsFull) (clearWindowChrome env)
     applyDecorations (sdlWindow env) decorations
     -- That set the shadow too.

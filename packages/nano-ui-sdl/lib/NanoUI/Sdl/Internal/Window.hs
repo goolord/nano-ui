@@ -53,7 +53,7 @@ import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, withClipboard)
 import NanoUI.Sdl.Internal.Display
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
-import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations)
+import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Font.Search (searchFonts)
@@ -518,7 +518,7 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   sdlForcedScale <- liftIO $ mfilter (> 0) . (>>= readMaybe) <$> lookupEnv "NANO_FORCE_SCALE"
   -- Before the window, so that it is released after the window is gone: the
   -- window holds the hit test this frees.
-  sdlChromeState <- mkAcquire (newChromeState (sdlWindowDecorations opts)) clearChromeState
+  sdlChromeState <- mkAcquire (newChromeState (sdlWindowDecorations opts) (framedWindow flags)) clearChromeState
   (sdlWindow, sdlRenderer) <- acquireWindowAndRenderer opts flags
   density <- liftIO $ queryWindowPixelDensity sdlWindow
   zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)

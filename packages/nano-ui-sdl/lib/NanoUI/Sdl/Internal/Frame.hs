@@ -25,6 +25,7 @@
 module NanoUI.Sdl.Internal.Frame
   ( WindowDecorations (..)
   , applyDecorations
+  , framedWindow
   , applyWindowShadow
   , nativeFrameOutset
   , hasFlag
@@ -82,14 +83,18 @@ applyDecorations win decorations = do
   applyWindowShadow win False
   void (SDL.setWindowBorderedSafe win (decorations == DecorationsFull))
   when (decorations == DecorationsFrame) $ do
-    flags <- SDL.getWindowFlags win
-    let movable = hasFlag SDL.SDL_WINDOW_RESIZABLE flags && not (hasFlag SDL.SDL_WINDOW_FULLSCREEN flags)
-    -- A non-resizable or fullscreen window should not have an outer sizing
-    -- frame that intercepts clicks outside the window, so only the drop shadow
-    -- is enabled. When the native sizing frame is enabled it already carries
-    -- the DWM shadow, and calling DwmExtendFrameIntoClientArea on top of it
-    -- would extend the frame over the top pixel row of the client area.
-    if movable then applyNativeFrame win True else applyWindowShadow win True
+    framed <- framedWindow <$> SDL.getWindowFlags win
+    -- When the native sizing frame is enabled it already carries the DWM
+    -- shadow, and calling DwmExtendFrameIntoClientArea on top of it would
+    -- extend the frame over the top pixel row of the client area.
+    if framed then applyNativeFrame win True else applyWindowShadow win True
+
+-- | Whether 'DecorationsFrame' gives a window with these flags the desktop's
+-- sizing frame, rather than only its shadow. A non-resizable or fullscreen
+-- window should not have an outer sizing frame that intercepts clicks
+-- outside the window.
+framedWindow :: SDL_WindowFlags -> Bool
+framedWindow flags = hasFlag SDL.SDL_WINDOW_RESIZABLE flags && not (hasFlag SDL.SDL_WINDOW_FULLSCREEN flags)
 
 -- | Whether window flags include a flag.
 hasFlag :: SDL_WindowFlags -> SDL_WindowFlags -> Bool
