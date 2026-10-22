@@ -290,6 +290,8 @@ runSizeLimitAtTest _ failed = do
   assertEq failed (0, 908) (sizeLimitAt 1 (8, 8) (Just (Size (1 / 0) 900)))
   assertEq failed (0, 900) (sizeLimitAt 1 (0, 0) (Just (Size (0 / 0) 900)))
   assertEq failed (0x7FFFFFFF, 0) (sizeLimitAt 1 (8, 0) (Just (Size 3e9 0)))
+  -- Past Int's range too, or past Float's once scaled.
+  assertEq failed (0x7FFFFFFF, 0x7FFFFFFF) (sizeLimitAt 2 (16, 39) (Just (Size 1e20 3.4e38)))
 
 -- | Commands act on every call; toggling maximizes or restores based on the
 -- window state the backend last reported.
