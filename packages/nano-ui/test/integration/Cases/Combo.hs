@@ -38,6 +38,15 @@ comboLongOpts =
   | i <- [1 .. 12 :: Int]
   ]
 
+-- | Focus the combo in @ui@, which opens its list, and run @k@ with the
+-- input that rests the pointer on the row showing @name@.
+onComboRow :: Context -> IORef Int -> Input -> NanoUI a -> T.Text -> (Input -> IO ()) -> IO ()
+onComboRow ctx failed inp0 ui name k = do
+  warmupFocused ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  assertJust failed (spanRect name overlays) $ \rowRect -> k inp0 {inputMousePos = spanCenter rowRect}
+
 -- Typing filters the suggestion list case-insensitively and never selects
 -- anything on its own: Enter with no highlight leaves the typed text alone.
 runComboFilterTest :: Context -> IORef Int -> IO ()
@@ -127,11 +136,7 @@ runComboHoverHighlightTest :: Context -> IORef Int -> IO ()
 runComboHoverHighlightTest ctx failed = do
   let inp0 = withInput 320 200
       ui = withValue "" (comboBox' "Font" comboOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Delta Round" overlays) $ \rowRect -> do
-    let hover = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Delta Round" $ \hover -> do
     _ <- runFrame ctx hover ui
     -- Hover alone must not commit anything.
     ((r0, t0), _, _) <- runFrame ctx hover ui
@@ -156,11 +161,7 @@ runComboKeysOverStillPointerTest :: Context -> IORef Int -> IO ()
 runComboKeysOverStillPointerTest ctx failed = do
   let inp0 = withInput 320 200
       ui = withValue "" (comboBox' "Font" comboOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
-    let hover = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Beta Serif" $ \hover -> do
     _ <- runFrame ctx hover ui
     _ <- runFrame ctx hover ui
     _ <- runFrame ctx (keyInp KeyDown hover) ui
@@ -368,11 +369,7 @@ runComboSlowWheelScrollTest :: Context -> IORef Int -> IO ()
 runComboSlowWheelScrollTest ctx failed = do
   let inp0 = withInput 200 360
       ui = withValue "" (comboBox' "Fonts" comboLongOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays0 <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Fam 01" overlays0) $ \rowRect -> do
-    let overList = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Fam 01" $ \overList -> do
     replicateM_ 8 (runFrame ctx overList {inputScroll = V2 0 0.125} ui)
     overlays1 <- collectOverlayTextSpans ctx overList
     assert failed (not (hasText "Fam 03" overlays1))
@@ -384,11 +381,7 @@ runComboWheelAtEndIdleTest :: Context -> IORef Int -> IO ()
 runComboWheelAtEndIdleTest ctx failed = do
   let inp0 = withInput 200 360
       ui = withValue "" (comboBox' "Fonts" comboLongOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays0 <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Fam 01" overlays0) $ \rowRect -> do
-    let overList = inp0 {inputMousePos = spanCenter rowRect}
+  onComboRow ctx failed inp0 ui "Fam 01" $ \overList -> do
     _ <- runFrame ctx overList {inputScroll = V2 0 10} ui
     _ <- runFrame ctx overList ui
     (_, _, dirty) <- runFrame ctx overList {inputScroll = V2 0 1} ui
