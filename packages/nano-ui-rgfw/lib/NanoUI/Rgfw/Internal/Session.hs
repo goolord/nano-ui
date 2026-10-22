@@ -629,8 +629,9 @@ applyRgfwEvent inp ev = case ev of
   -- RGFW numbers buttons from 0 in 'mouseButtonNumber' order: left, middle,
   -- right, back, forward, then the rest.
   RgfwEvButton btn down -> applyMouseButton (mouseButtonNumber (fromIntegral btn + 1)) down inp
-  -- A drag keeps its pointer: Windows sends no motion outside the window,
-  -- so leaving would drop a dragged slider or scrollbar to the far corner.
+  -- A drag keeps its pointer: its motion outside the window still comes
+  -- (X11's grab, Windows' capture), and a leave after the last of it would
+  -- drop a dragged slider or scrollbar to the far corner.
   RgfwEvLeave
     | inputPointerHeld inp -> inp
     | otherwise -> applyPointerLeave inp

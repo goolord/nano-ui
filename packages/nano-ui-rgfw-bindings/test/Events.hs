@@ -7,7 +7,7 @@ import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime, getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
-import RGFW (Event (..), closeWindow, createWindowGL, pollEvent, stopWaitForEvent, waitForEvent, withEventBuffer)
+import RGFW (Event (..), Window (..), closeWindow, createWindowGL, pollEvent, stopWaitForEvent, waitForEvent, withEventBuffer)
 import RGFW.Raw
 import System.Environment (getArgs, lookupEnv)
 import System.Info (os)
@@ -17,6 +17,9 @@ foreign import ccall unsafe "rgfw_test_event_size" nativeSize :: IO CSize
 
 foreign import ccall unsafe "rgfw_test_event"
   writeEvent :: Ptr RGFW_event -> CInt -> IO ()
+
+foreign import ccall unsafe "rgfw_test_win32_drag"
+  win32Drag :: Ptr RGFW_window -> CInt -> CInt -> CInt -> IO CInt
 
 check :: (Eq a, Show a) => String -> a -> IO a -> IO ()
 check label expected action = action >>= \actual -> unless (actual == expected) (fail (label ++ ": " ++ show actual))
@@ -66,6 +69,7 @@ main = withEventBuffer $ \event -> do
     else do
       putStrLn "RGFW native event ABI: ok"
       stopWaitCheck event
+      captureCheck event
 
 -- | A stop from another thread ends a wait, and a stop issued before a wait
 -- makes it return at once. Stops that pile up while nothing waits are
@@ -101,3 +105,30 @@ stopWaitCheck event = do
           unless (any (>= 0.15) waited) (fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited))
           closeWindow win
           putStrLn "RGFW stop wait: ok"
+
+-- | On Windows a press captures the mouse until the last button comes up, so
+-- a release outside the window still arrives, and the pointer leaves with
+-- it. A capture taken away mid-drag releases the button. Windows only, and
+-- skipped without an OpenGL 3.2 window.
+captureCheck :: Ptr RGFW_event -> IO ()
+captureCheck event
+  | os /= "mingw32" = pure ()
+  | otherwise =
+      createWindowGL "capture" 0 0 64 64 rgfw_windowHide 3 2 >>= \case
+        Nothing -> putStrLn "RGFW mouse capture: skipped (no OpenGL 3.2 window)"
+        Just win@(Window ptr) -> do
+          let mouse = pollEvent win event >>= \case
+                EventNone -> pure []
+                ev@(EventMouseButton _ _) -> (ev :) <$> mouse
+                ev@(EventOther t) | t == rgfw_mouseLeave -> (ev :) <$> mouse
+                _ -> mouse
+              left = EventMouseButton rgfw_mouseLeft
+              drag what lose expected = do
+                _ <- mouse
+                captured <- win32Drag ptr (-20) (-20) lose
+                got <- mouse
+                unless (captured == 1 && got == expected) (fail ("RGFW mouse capture: " ++ what ++ ": " ++ show (captured, got)))
+          drag "a release outside the window" 0 [left True, left False, EventOther rgfw_mouseLeave]
+          drag "a capture taken away" 1 [left True, left False]
+          closeWindow win
+          putStrLn "RGFW mouse capture: ok"

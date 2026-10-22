@@ -1,7 +1,33 @@
+/* RGFW's functions are defined in RGFW.c: declare them plain, not inline. */
+#define RGFWDEF
 #include "RGFW.h"
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 size_t rgfw_test_event_size(void) { return sizeof(RGFW_event); }
+
+/* Press the left button at (5, 5) through the window procedure, as Windows
+   delivers it, then either release it at (x, y) or, when lose is set, take
+   the capture away as another window would. 1 when the press captured the
+   mouse and nothing holds it after, 0 when not, -1 off Windows. */
+int rgfw_test_win32_drag(RGFW_window *win, int x, int y, int lose)
+{
+#ifdef _WIN32
+    HWND hwnd = (HWND)RGFW_window_getHWND(win);
+    SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(5, 5));
+    int captured = GetCapture() == hwnd;
+    if (lose)
+        ReleaseCapture();
+    else
+        SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
+    return captured && GetCapture() == NULL;
+#else
+    (void)win; (void)x; (void)y; (void)lose;
+    return -1;
+#endif
+}
 
 /* Write through the native types, independently of the Haskell offsets. */
 void rgfw_test_event(RGFW_event *e, int kind)

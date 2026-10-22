@@ -324,8 +324,8 @@ testRgfwPointer = do
   assert "RGFW buttons: misc 2 is forward" (pressedBy R.rgfw_mouseMisc2 == [MouseForward])
   assert "RGFW buttons: misc 3 to 5 are the next buttons" (concatMap pressedBy [R.rgfw_mouseMisc2 + 1 .. R.rgfw_mouseMisc2 + 3] == map MouseOther [6, 7, 8])
   assert "RGFW pointer: leaving the window moves the pointer off it" (let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
-  -- Windows sends no motion outside the window during a drag, so a leave
-  -- then would drop a dragged slider or scrollbar to the far corner.
+  -- A drag's motion outside the window still comes, so a leave then would
+  -- drop a dragged slider or scrollbar to the far corner.
   let dragOut = applied [EventMouseButton R.rgfw_mouseLeft True, EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
   assert "RGFW pointer: leaving with a button held keeps the pointer" (inputMousePos dragOut == V2 30 40)
   assert "RGFW window: an uncovered or restored window repaints in full" $

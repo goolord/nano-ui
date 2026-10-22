@@ -11210,6 +11210,17 @@ LRESULT CALLBACK WndProcW(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 win->src.actionFrame = RGFW_FALSE;
             }
 
+			/* nano-ui: the capture taken below for a press went elsewhere
+			   (another window took it, or this one was deactivated), so the
+			   releases of the buttons still down will not come here:
+			   release them now. */
+			if ((HWND)lParam != hWnd) {
+				u8 button;
+				for (button = 0; button < RGFW_mouseFinal; button++)
+					if (_RGFW->mouseButtons[button].current)
+						RGFW_mouseButtonCallback(win, (RGFW_mouseButton)button, 0);
+			}
+
             break;
         }
 		#ifndef RGFW_NO_DPI
@@ -11457,6 +11468,11 @@ LRESULT CALLBACK WndProcW(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			else value = (message == WM_LBUTTONDOWN) ? (u8)RGFW_mouseLeft :
 									 (message == WM_RBUTTONDOWN) ? (u8)RGFW_mouseRight : (u8)RGFW_mouseMiddle;
 
+			/* nano-ui: capture the mouse while a button is down, as SDL and
+			   GLFW do, so a drag's motion outside the window and its release
+			   come here, not to the window under the pointer. */
+			if (GetCapture() != hWnd)
+				SetCapture(hWnd);
 			RGFW_mouseButtonCallback(win, value, 1);
 			break;
 		}
@@ -11468,6 +11484,16 @@ LRESULT CALLBACK WndProcW(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 									 (message == WM_RBUTTONUP) ? (u8)RGFW_mouseRight : (u8)RGFW_mouseMiddle;
 
 			RGFW_mouseButtonCallback(win, value, 0);
+			/* nano-ui: the last button up ends the capture. Released outside
+			   the window, the pointer has left it. */
+			if (!(wParam & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2)) && GetCapture() == hWnd) {
+				RECT area;
+				i32 x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
+				ReleaseCapture();
+				GetClientRect(hWnd, &area);
+				if (x < area.left || y < area.top || x >= area.right || y >= area.bottom)
+					RGFW_mouseNotifyCallback(win, x, y, RGFW_FALSE);
+			}
 			break;
 		}
 		case WM_MOUSEWHEEL: {
