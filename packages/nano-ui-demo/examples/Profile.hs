@@ -18,7 +18,7 @@ import NanoUI.Backend (Damage (..), applyMouseButton, emptyInput)
 import NanoUI.Backend.Sdl (sdlDrawFrame, syncDisplay, withSdlBench)
 import NanoUI.Diagrams
 import NanoUI.Internal.Context (ctxNodeArena)
-import NanoUI.Internal.Layout.Arena (findNodeRevM, getNodeType, getNodeRect, getText)
+import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getNodeRect, getText)
 import NanoUI.Shortcut
 import NanoUI.Testing
   ( Context
