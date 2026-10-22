@@ -41,6 +41,7 @@ data WindowChrome = WindowChrome
   -- hit testing is disabled and any outer frame area is treated as normal
   -- client area.
   }
+  deriving (Eq, Show)
 
 -- | Empty chrome configuration with no drag regions and no resize borders.
 defaultWindowChrome :: WindowChrome

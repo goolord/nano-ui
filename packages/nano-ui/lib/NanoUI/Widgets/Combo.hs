@@ -117,6 +117,7 @@ data ComboInput = ComboInput
   , ciInput :: !Input
     -- ^ Dropdown-scoped input for the frame.
   }
+  deriving (Eq, Show)
 
 -- | Result of stepping the combo state for one frame.
 data ComboStep = ComboStep
@@ -130,6 +131,7 @@ data ComboStep = ComboStep
   , stepRedraw :: !Bool
     -- ^ Something visible moved.
   }
+  deriving (Eq, Show)
 
 -- | One frame of the combo: highlight, scrolling, thumb drags, and commits.
 --
