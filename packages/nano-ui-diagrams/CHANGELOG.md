@@ -67,6 +67,9 @@
 
 ### Fixed
 
+- An area series' y domain includes its baseline, so the fill no longer
+  runs below the axis or squeezes the data, and a growing-width plot keeps
+  a fixed height below 260 px exactly, as it did above.
 - Values that are not finite (NaN, infinities) are left out of chart
   domains, drawing and hover, and `domainExtent` and `domainExtentBy` skip
   them. A NaN dropped the domain's earlier minimum, and an infinity made

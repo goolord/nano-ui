@@ -4,6 +4,8 @@
 
 ### Added
 
+- `isKeyDown` (`RGFW`) and `c_RGFW_isKeyDown` (`RGFW.Raw`) say whether a
+  key is held.
 - First release: `RGFW`, the wrapped API over the bundled RGFW that
   `nano-ui-rgfw` uses, and `RGFW.Raw`, its direct bindings. Event fields and
   constants are read from the bundled header with `hsc2hs`. Builds with GHC

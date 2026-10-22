@@ -613,8 +613,9 @@
   `True` on the repeats, for a chord that toggles. The key listeners hear
   only the keys the focused widget leaves too, as iced's `keyboard::listen`
   hears what no widget captured: `keyPressed KeyDelete` is `False` while a
-  focused field deletes with it, and `keyPressed KeyEscape` when Escape
-  closes a dropdown, a focused combo box's list or a text-edit menu, or
+  focused field deletes with it, and `keyPressed`, `keyHeld` and
+  `keyReleased` on `KeyEscape`, through its repeats and its release, when
+  Escape closes a dropdown, a focused combo box's list or a text-edit menu, or
   something earlier took it. A focused control takes the keys it acts
   on alone or with Shift, so a chord of them is a shortcut's: a button or
   a checkbox Enter and Space, and a slider, select, radio group, tree or
@@ -739,6 +740,8 @@
 - `nodesOfType` in `NanoUI.Testing.Harness` lists the ids and rects of a
   frame's nodes of one type, and `measureRuns` times an action and prints
   its mean time and allocation, as the SDL and RGFW profilers do.
+  `runRightClick` runs a right-button click at a point as `runClick` does
+  with the left button.
 - `NanoUI.Monad` exports `DamageBounds`, which its damage requests take,
   and `NanoUI.Testing` exports `NodeType`, `ScrollBarSlot`, `DirTag` and
   `WidgetStore`, which its functions use. `NanoUI.Internal.Var.Cell`,
@@ -1183,7 +1186,7 @@
   (`fontMuted`, `fontDanger`, ...), even where the font has no face for that
   weight or slant. `textAreaWith` takes `fontMono`, `fontWeight`,
   `fontStyle` and `fontColor`, not only `fontSize`, and search, combo and
-  numeric fields draw their text in their layout's font.
+  numeric fields draw their text in their layout's font and colour.
 - While a widget holds the left button, as a dragged slider, knob or
   divider does, no other widget is hot: the cursor stays the dragged
   widget's over text fields, the buttons it crosses do not light up, and a
@@ -1223,6 +1226,12 @@
 
 ### Fixed
 
+- A select or combo box whose field is scrolled out of view no longer
+  highlights, scrolls or picks rows of its hidden list, and a window
+  declared inside a modal can no longer be resized from an edge the
+  modal's panel covers.
+- `wsMinSize` and `wsMaxSize` values past `Int`'s range reach the host as
+  the largest 32-bit size instead of a negative one.
 - A vertical scroll area measures what it holds at the width it lays it out
   at, its own or the most its nearest bounded ancestor leaves it. Rich text
   that wraps there counted at its unwrapped height, so a scroll area in a

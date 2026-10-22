@@ -329,7 +329,9 @@
   glyph-atlas reset no longer leaves continuous or transparent sessions
   drawing blank text. A render device reset (Direct3D) makes the session's
   textures again and repaints, where text and images went blank or corrupt;
-  it decodes as the new `EvRenderDeviceReset` of `NanoUI.Sdl.Internal.Input`.
+  it decodes as the new `EvRenderDeviceReset` of `NanoUI.Sdl.Internal.Input`,
+  and a host that polls SDL events itself calls the new
+  `resetRenderTextures` from `NanoUI.Backend.Sdl` when it reads one.
   A lost render device ends the session with an `IOError`.
 - Retained frames take the backbuffer's own size, so a fractional scale on
   Wayland no longer draws a frame a pixel off and stretches it, which blurred
