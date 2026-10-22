@@ -112,12 +112,13 @@ defaultWindowSettings =
 -- | A size limit in layout units ('wsMinSize', 'wsMaxSize') in whole native
 -- units at @scale@ per layout unit, plus @outset@ on each axis, such as a
 -- desktop frame the native limit includes. A missing limit, or an axis of
--- zero or less, is 0 on that axis: no limit.
+-- zero or less, NaN or infinity, is 0 on that axis: no limit. A limit stops
+-- at the largest 32-bit size, which is what hosts take.
 sizeLimitAt :: Float -> (Int, Int) -> Maybe Size -> (Int, Int)
 sizeLimitAt scale (outW, outH) limit = (axis w outW, axis h outH)
   where
     Size w h = fromMaybe (Size 0 0) limit
-    axis v outset = if v <= 0 then 0 else round (v * scale) + outset
+    axis v outset = if not (v > 0) || isInfinite v then 0 else min 0x7FFFFFFF (round (v * scale) + outset)
 
 -- | The state without a window, as under a test context: focused, scale 1,
 -- unknown position, no special mode. 'askWindow' fills in the frame's size.

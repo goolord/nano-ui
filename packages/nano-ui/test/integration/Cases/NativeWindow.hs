@@ -20,6 +20,7 @@ tests =
   , spec "native-window-settings-at-install" runInstallTest
   , spec "native-window-setters" runSettersTest
   , spec "native-window-size-limits-cross" runSizeLimitsCrossTest
+  , spec "native-window-size-limit-units" runSizeLimitAtTest
   , spec "native-window-commands" runCommandsTest
   , spec "native-window-state" runStateTest
   , spec "native-window-state-repaints" runStateRepaintTest
@@ -280,6 +281,15 @@ runSizeLimitsCrossTest ctx failed = do
     , (setWindowMinSizeUi (Just (Size 500 500)), ["min " ++ sz 500 500])
     ]
     $ \(v, expect) -> assertEq failed expect =<< asked ctx calls v
+
+-- | A limit in native units is scaled, rounded and outset. An axis of zero
+-- or less, NaN or infinity is no limit, and a huge one stops at Int32's top.
+runSizeLimitAtTest :: Context -> IORef Int -> IO ()
+runSizeLimitAtTest _ failed = do
+  assertEq failed (302, 0) (sizeLimitAt 1.5 (2, 3) (Just (Size 200 (-1))))
+  assertEq failed (0, 908) (sizeLimitAt 1 (8, 8) (Just (Size (1 / 0) 900)))
+  assertEq failed (0, 900) (sizeLimitAt 1 (0, 0) (Just (Size (0 / 0) 900)))
+  assertEq failed (0x7FFFFFFF, 0) (sizeLimitAt 1 (8, 0) (Just (Size 3e9 0)))
 
 -- | Commands act on every call; toggling maximizes or restores based on the
 -- window state the backend last reported.
