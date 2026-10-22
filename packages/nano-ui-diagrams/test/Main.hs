@@ -114,6 +114,7 @@ main = hspec $ do
     it "fills an area a ring per side of its baseline" (testAreaRings fm)
     it "places filled series where their data is" (testFillPlacement fm)
     it "caps the height of growing plots" (testGrowPlotHeight fm)
+    it "sizes a diagram without width by the caller's box" (testDegenerateFit fm)
 
 -- | A chart of the given series with no legend, grid or decimation.
 bareChart :: [Series] -> Chart
@@ -690,3 +691,15 @@ testGrowPlotHeight fm = do
   check "a growing plot stopped growing in height" $ case layoutHeight (fittedWith grow) of
     Grow _ -> True
     _ -> False
+
+-- | A diagram with no width, such as a vertical rule, takes the caller's
+-- box: a fixed width does not make it infinitely tall, and a fixed box keeps
+-- its width.
+testDegenerateFit :: FontMetrics -> IO ()
+testDegenerateFit fm = do
+  let
+    rule = D.vrule 50 :: Diagram B
+    tall = fitLayout fm (fixedW 200 defaultLayout) rule
+    boxed = fitLayout fm (fixedWH 200 100 defaultLayout) rule
+  check "a fixed width made a rule infinitely tall" (layoutMaxH tall < 1e6)
+  check "a fixed box lost its width for a rule" (layoutMinW boxed == 200 && layoutMaxW boxed == 200)

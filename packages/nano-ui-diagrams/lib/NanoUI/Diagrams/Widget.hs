@@ -201,7 +201,7 @@ growPlotCapH = 260
 fitLayout :: FontMetrics -> Layout -> Diagram B -> Layout
 fitLayout fm layout d =
   let V2 dw dh = size d
-      ar = if dh <= 1e-9 then 1 else dw / dh
+      ar = if dh <= 1e-9 || dw <= 1e-9 then 1 else dw / dh
       growW =
         case layoutWidth layout of
           Grow _ -> True
@@ -212,6 +212,7 @@ fitLayout fm layout d =
             | dw > 1e-9 && dh > 1e-9 ->
                 let s = min (realToFrac bw / dw) (realToFrac bh / dh)
                  in (dw * s, dh * s)
+            | otherwise -> (realToFrac bw, realToFrac bh)
           (_, Fixed bh) ->
             let h = realToFrac bh :: Double
              in (h * ar, h)
