@@ -5,6 +5,7 @@ module NotepadSelftest
   ( selftest
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad (unless, void, when)
 import Data.ByteString qualified as BS
 import Data.Text qualified as T
@@ -24,9 +25,10 @@ import NanoUI.Testing.Harness
   , requireSpan
   )
 import DemoApp (withHiddenWindow)
+import GHC.IO.Encoding (getLocaleEncoding, setLocaleEncoding)
 import Notepad qualified
 import System.Directory (getTemporaryDirectory, removeFile)
-import System.IO (hClose, openTempFile)
+import System.IO (hClose, latin1, openTempFile)
 
 selftest :: IO ()
 selftest = do
@@ -116,11 +118,14 @@ selftest = do
       expectText "selftest: About modal did not open" "built with nano-ui" =<< overlay
 
       -- Save writes the document's UTF-8 bytes with its own line ends, which
-      -- Open reads back unchanged.
+      -- Open reads back unchanged, whatever the locale: under Latin-1 a
+      -- text-mode write cannot encode the arrow.
       (file, h) <- (`openTempFile` "notepad.txt") =<< getTemporaryDirectory
       hClose h
       let contents = "caf\233\n\8594 \26085\n"
-      saved <- runNanoUI ctx base (Notepad.writeDocument file (textDocument contents))
+      saved <-
+        bracket (getLocaleEncoding <* setLocaleEncoding latin1) setLocaleEncoding $ \_ ->
+          runNanoUI ctx base (Notepad.writeDocument file (textDocument contents))
       bytes <- BS.readFile file
       removeFile file
       unless (saved && bytes == TE.encodeUtf8 contents) $
