@@ -200,10 +200,17 @@ runTextInputCommandCharTest ctx failed = do
   let
     inp0 = withInput 320 120
     ui = column (held ref textInput')
-    typed mods c = snd <$> evalUi ctx ((chordInp (mods <> key 'f') inp0) {inputChars = c}) ui
+    command = if onMac then super <> alt else alt
+    chord mods k c = (chordInp (mods <> key k) inp0) {inputChars = c}
+    typed inp = snd <$> evalUi ctx inp ui
   warmupFocused ctx inp0 ui
-  assertEq failed "ab" =<< typed (if onMac then super <> alt else alt) "f"
-  assertEq failed "ab@" =<< typed (if onMac then alt else ctrl <> alt) "@"
+  assertEq failed "ab" =<< typed (chord command 'f' "f")
+  -- Its text a frame after the press, the key still held.
+  assertEq failed "ab" =<< typed ((chord command 'f' "f") {inputKeys = mempty, inputKeysNew = mempty})
+  assertEq failed "ab@" =<< typed (chord (if onMac then alt else ctrl <> alt) 'f' "@")
+  -- X11 and Wayland report AltGr as Alt alone: a character other than its
+  -- key's types.
+  assertEq failed "ab@@" =<< typed (chord alt 'q' "@")
 
 -- | Emptying a search field from the keyboard reports the change on that
 -- frame, as its clear button does, rather than after the debounce.
