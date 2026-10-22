@@ -39,12 +39,10 @@ tests =
 -- after a newline.
 runLeadingSpacesTest :: Context -> IORef Int -> IO ()
 runLeadingSpacesTest ctx failed = do
-  let fm = ctxFontMetrics ctx
   resp <- warmup2 ctx (withInput 400 400) (column (fst <$> richText' ["  where\n    go = 1"]))
-  Just entry <- lookupCustomDrawing ctx (respId resp)
-  cdc <- mkCustomDrawContext ctx fm (respId resp)
-  let r@(Rect rx _ _ _) = respRect resp
-      indent word = [x - rx | DrawTextStyled x _ _ t _ <- toList (cdrBuild entry cdc r), t == word]
+  ops <- drawnOps ctx resp
+  let Rect rx _ _ _ = respRect resp
+      indent word = [x - rx | DrawTextStyled x _ _ t _ <- ops, t == word]
   case (indent "where", indent "go") of
     ([w], [g]) -> assert failed (w > 0 && abs (g - 2 * w) < 0.5)
     _ -> assert failed False
@@ -56,20 +54,16 @@ runSelectionFocusTest :: Context -> IORef Int -> IO ()
 runSelectionFocusTest ctx failed = do
   let inp = withInputOff 500 300
       ui = column ((,) <$> (fst <$> selectableRichText' ["first paragraph"]) <*> (fst <$> selectableRichText' ["second paragraph"]))
-      opsOf resp = do
-        Just entry <- lookupCustomDrawing ctx (respId resp)
-        cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) (respId resp)
-        pure (toList (cdrBuild entry cdc (respRect resp)))
   theme <- readIORef (ctxTheme ctx)
   let highlighted ops = not (null [() | FillRect _ c <- ops, c == themeSelection theme])
   (a, b) <- warmup2 ctx inp ui
   writeIORef (ctxFocusId ctx) (respId a)
   _ <- evalUi ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
-  selected <- opsOf a
+  selected <- drawnOps ctx a
   assert failed (highlighted selected)
   assertEq failed [] [() | StrokeRoundedRect {} <- selected]
   runClick ctx inp ui (centerOf b) >> warmup ctx inp ui
-  assert failed . not . highlighted =<< opsOf a
+  assert failed . not . highlighted =<< drawnOps ctx a
 
 -- | Wrapping follows 'textBreak', not the font: monospaced text keeps whole
 -- words, and 'breakAnywhere' wraps inside one without splitting a flag.
