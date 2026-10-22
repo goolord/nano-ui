@@ -186,7 +186,7 @@ overlay isModal hasChrome shape open title child = do
           , layoutMaxW = min availW (layoutMaxW panel)
           , layoutMaxH = min availH (layoutMaxH panel)
           }
-    enter _ = when isModal (beginModal ctx)
+    enter = when isModal (beginModal ctx)
     titleLayout =
       (fixedH barH . alignMid . tight) defaultLayout {layoutMinH = barH, layoutMaxH = barH}
   floatingOverlay open (if isModal then Just (Rect 0 0 0 0) else Nothing) addOverlayNode enter $ do

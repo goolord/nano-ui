@@ -127,11 +127,11 @@ popupShown open cfg f child = do
       | not (cfgDismissable cfg) = Nothing
       | AnchorRect r <- cfgAnchor cfg = Just r
       | otherwise = Just (Rect 0 0 0 0)
-  floatingOverlay open dismiss addPopupNode (\_ -> pure ()) ((,) False <$> child)
+  floatingOverlay open dismiss addPopupNode (pure ()) ((,) False <$> child)
 
 -- | The floating panel behind popups, modals and windows, shown while @open@
--- with its body in its own id scope. @addPanel@ and @enter@ are those of
--- 'floatingPanel', given the panel's id. The body returns whether it closed
+-- with its body in its own id scope. @addPanel@, given the panel's id, and
+-- @enter@ are those of 'floatingPanel'. The body returns whether it closed
 -- the panel along with its result. The 'Response' reports a dismissal (the
 -- body's close, Escape, or a click outside when @dismiss@ is 'Just' the rect
 -- of what opened the panel, where a press is not outside) as a click. A
@@ -141,7 +141,7 @@ floatingOverlay ::
   Bool ->
   Maybe Rect ->
   (WidgetId -> Int -> IO NodeIdx) ->
-  (WidgetId -> IO ()) ->
+  IO () ->
   NanoUI (Bool, a) ->
   NanoUI (Response, Maybe a)
 floatingOverlay open dismiss addPanel enter body = do
@@ -154,7 +154,7 @@ floatingOverlay open dismiss addPanel enter body = do
       -- Hover uses the pointer routed to the panel's layer, so layers in
       -- front of the panel occlude hover.
       (mouse, (closed, r)) <-
-        floatingPanel wid (addPanel wid) (enter wid) ((,) <$> uiMousePos <*> body)
+        floatingPanel wid (addPanel wid) enter ((,) <$> uiMousePos <*> body)
       panel <- fromMaybe (Rect 0 0 0 0) <$> lastRect wid
       outside <- case dismiss of
         Just opener | rectNonEmpty panel -> useDismissable wid panel opener
