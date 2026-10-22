@@ -469,27 +469,34 @@ kernedAdvance fm prev c = case prev of
   Just p -> fmAdvance fm c + fmKerning fm p c
 
 -- | The character index whose caret is nearest @x@: from the shaped carets
--- when the text was prepared by a shaping host, which handles clusters and
--- right-to-left runs, and otherwise from the same advances and kerning as
--- 'NanoUI.Internal.Draw.pushText', so the caret lands where the glyph to its left was
--- drawn.
+-- when the text was prepared by a shaping host, which handles right-to-left
+-- runs, and otherwise as 'lineWidth' measures the carets, from each
+-- character's advance and kerning, or in whole advances for a font taken as
+-- monospace (see 'fmAdvance'). The caret stays between user-perceived
+-- characters: an @x@ inside a flag, or a letter with its marks, lands on
+-- whichever side of it is nearer.
 textIndexAtX :: FontMetrics -> Text -> Float -> Int
 textIndexAtX fm txt x
-  | T.null txt = 0
-  | Just st <- fmShape fm txt =
-      let carets = stCarets st
-          n = sizeofPrimArray carets
-          nearest !best !bestD !i
-            | i >= n = best
-            | otherwise =
-                let d = abs (indexPrimArray carets i - x)
-                 in if d < bestD then nearest i d (i + 1) else nearest best bestD (i + 1)
-       in nearest 0 (1 / 0) 0
-  | x <= 0 = 0
-  -- Counted in whole advances, as 'lineWidth' measures the carets.
-  | Just adv <- monospaceAdvance fm, adv > 0 = clamp 0 (T.length txt) (floor (x / adv + 0.5))
-  | otherwise = go 0 0.0 Nothing txt
+  | s == e = nearestIdx
+  | abs (caretX fm txt s - x) <= abs (caretX fm txt e - x) = s
+  | otherwise = e
   where
+    (s, e) = clusterBounds txt nearestIdx
+    nearestIdx
+      | T.null txt = 0
+      | Just st <- fmShape fm txt =
+          let carets = stCarets st
+              n = sizeofPrimArray carets
+              nearest !best !bestD !i
+                | i >= n = best
+                | otherwise =
+                    let d = abs (indexPrimArray carets i - x)
+                     in if d < bestD then nearest i d (i + 1) else nearest best bestD (i + 1)
+           in nearest 0 (1 / 0) 0
+      | x <= 0 = 0
+      -- Counted in whole advances, as 'lineWidth' measures the carets.
+      | Just adv <- monospaceAdvance fm, adv > 0 = clamp 0 (T.length txt) (floor (x / adv + 0.5))
+      | otherwise = go 0 0.0 Nothing txt
     go !i !acc prev t =
       case T.uncons t of
         Nothing -> i

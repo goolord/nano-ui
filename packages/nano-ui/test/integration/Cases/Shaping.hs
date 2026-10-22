@@ -9,7 +9,25 @@ tests =
   [ spec "bidi-runs" runBidiRunsTest
   , spec "shaped-carets" runShapedCaretTest
   , spec "unshaped-metrics" runUnshapedMetricsTest
+  , spec "hit-test-clusters" runHitTestClustersTest
   ]
+
+-- | A click lands between user-perceived characters, on whichever side of
+-- one is nearer, never inside a flag or between a letter and its accent,
+-- shaped or not.
+runHitTestClustersTest :: Context -> IORef Int -> IO ()
+runHitTestClustersTest _ failed = do
+  let flag = "\x1F1EC\x1F1E7"
+      -- The flag is one glyph, which its two characters share.
+      shape t = if t == flag then Just (ShapedText 16 16 (primArrayFromList [0, 8, 16])) else Nothing
+      fm = (monospaceMetrics 10) {fmShape = shape}
+  assertEq failed 2 (textIndexAtX fm flag 10)
+  assertEq failed 0 (textIndexAtX fm flag 6)
+  -- Unshaped, the accent takes an advance of its own, as 'lineWidth'
+  -- measures it.
+  assertEq failed 1 (textIndexAtX fm "ae\x0301\&b" 17)
+  assertEq failed 3 (textIndexAtX fm "ae\x0301\&b" 23)
+  assertEq failed 4 (textIndexAtX fm "ae\x0301\&b" 37)
 
 -- | Without shaping, a font taken as monospace places carets and finds them
 -- by whole advances alike.
