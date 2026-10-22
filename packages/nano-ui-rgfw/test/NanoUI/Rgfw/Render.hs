@@ -24,7 +24,6 @@ import NanoUI.Rgfw.Surface
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
-  , backdropDimTextureId
   , forDrawCmdsInLayer_
   , indexSize
   , vertexSize
@@ -66,11 +65,10 @@ applyCmd surf !scale dd cmd
         withForeignPtr (drawIndices dd) $ \ip ->
           case physClip scale (sWidth surf) (sHeight surf) (Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)) of
             Nothing -> pure ()
-            Just clip -> walkPrims surf scale dd vp ip isDim clip start (start + count)
+            Just clip -> walkPrims surf scale dd vp ip clip start (start + count)
   where
     start = fromIntegral (cmdIndexOffset cmd)
     count = fromIntegral (cmdIndexCount cmd)
-    isDim = cmdTextureId cmd == backdropDimTextureId
 
 -- | Walk a cmd's index range. The draw buffer holds two primitive shapes:
 -- quads (6 indices, @a b c a c d@, vertices @a..d@ contiguous) and filled
@@ -82,12 +80,11 @@ walkPrims ::
   DrawData ->
   Ptr Word8 ->
   Ptr Word8 ->
-  Bool ->
   (Int, Int, Int, Int) ->
   Int ->
   Int ->
   IO ()
-walkPrims surf scale dd vp ip isDim clip !i !end
+walkPrims surf scale dd vp ip clip !i !end
   | i + 3 > end = pure ()
   | otherwise = do
       ia <- indexAt dd ip i
@@ -103,32 +100,30 @@ walkPrims surf scale dd vp ip isDim clip !i !end
       if isQuad
         then do
           idv <- indexAt dd ip (i + 5)
-          stampQuad surf scale dd vp isDim clip ia ib ic idv
-          walkPrims surf scale dd vp ip isDim clip (i + 6) end
+          stampQuad surf scale dd vp clip ia ib ic idv
+          walkPrims surf scale dd vp ip clip (i + 6) end
         else do
           stampTriangle surf scale dd vp clip ia ib ic
-          walkPrims surf scale dd vp ip isDim clip (i + 3) end
+          walkPrims surf scale dd vp ip clip (i + 3) end
 
 -- | Fill one quad. Axis-aligned quads are filled as pixel rects; rotated ones
 -- (diagonal strokes such as check marks and close crosses) are scan converted.
 -- 4-corner gradient quads have no gradient support on the software surface and
 -- take the average of their corner colours, which is exact for the
 -- equal-corner quads the core emits for plain rects. Translucent fills (drop
--- shadows, modal backdrop dims) alpha-blend instead of overwriting;
--- 'backdropDimTextureId' cmds blend uniformly (mix taken from vertex alpha).
+-- shadows, modal backdrop dims) alpha-blend instead of overwriting.
 stampQuad ::
   RgfwSurface ->
   Float ->
   DrawData ->
   Ptr Word8 ->
-  Bool ->
   (Int, Int, Int, Int) ->
   Int ->
   Int ->
   Int ->
   Int ->
   IO ()
-stampQuad surf scale dd vp isDim clip ia ib ic idv = do
+stampQuad surf scale dd vp clip ia ib ic idv = do
   mvs <- mapM (vertexAt dd vp) [ia, ib, ic, idv]
   case mvs of
     [Just (x0, y0, c0), Just (x1, y1, c1), Just (x2, y2, c2), Just (x3, y3, c3)] -> do
@@ -148,7 +143,7 @@ stampQuad surf scale dd vp isDim clip ia ib ic idv = do
             case clipRect clip px py pw ph of
               Nothing -> pure ()
               Just (fx, fy, fw, fh) ->
-                if isDim || alpha8 col < 255
+                if alpha8 col < 255
                   then blendRectPx surf fx fy fw fh col
                   else fillRect surf fx fy fw fh (surfaceWord col)
           else
