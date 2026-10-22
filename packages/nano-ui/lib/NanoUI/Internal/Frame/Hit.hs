@@ -181,7 +181,10 @@ nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
 
 -- | The hit test widgets use while the view runs, when this frame's layout is
 -- not solved. @rect@ is the widget's rect from the previous frame
--- ('NanoUI.Internal.Context.getPrevRect'). The point must be inside it, and inside the previous
+-- ('NanoUI.Internal.Context.getPrevRect'). The point must be inside it, and
+-- inside the clip the widget was painted in on the previous frame
+-- ('NanoUI.Internal.Context.getPrevClipRect'), so a widget a panel cut away
+-- takes no input there. It must also be inside the previous
 -- frame's viewport of every scroll container above node @idx@, so content
 -- scrolled out of view takes no input, nor does content of a scroller whose
 -- viewport was empty; a scroll container with no recorded viewport does not
@@ -195,7 +198,9 @@ nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
   | not (rectContains rect mouse) = pure False
   | idx <= 0 = pure True
-  | otherwise = getParent na idx >>= inside
+  | otherwise =
+      (maybe True (`rectContains` mouse) <$> (getPrevClipRect ctx =<< getWidgetId na idx))
+        <&&> (getParent na idx >>= inside)
  where
   -- Whether the mouse is inside the recorded viewport of every scroll
   -- container, and the previous rect of every widget and clipping container

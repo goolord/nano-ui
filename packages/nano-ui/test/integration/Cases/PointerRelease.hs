@@ -14,7 +14,28 @@ tests =
   , spec "overlap-press" runOverlapPressTest
   , spec "release-moved-radio" runReleaseMovedRadioTest
   , spec "release-moved-tab" runReleaseMovedTabTest
+  , spec "panel-clipped-click" runPanelClippedClickTest
   ]
+
+-- | A button laid out past its panel's edge is clipped away: a click where it
+-- would be neither hovers nor clicks it.
+runPanelClippedClickTest :: Context -> IORef Int -> IO ()
+runPanelClippedClickTest ctx failed = do
+  let inp0 = withInputOff 300 300
+      ui = column $ do
+        rs <- panelWith (fixedWH 200 60) (column (mapM button' ["One", "Two", "Three"]))
+        label "below"
+        pure rs
+  rs <- warmup2 ctx inp0 ui
+  panels <- map snd <$> nodesOfType NodePanel ctx
+  case (rs, panels) of
+    ([_, _, three], [p]) -> do
+      let at = centerOf three
+          (press, release) = clickPair inp0 at
+      assert failed (not (rectContains p at))
+      after <- mapM (\i -> evalUi ctx i ui) [press, release]
+      assert failed (not (or [respHovered t || respClicked t | [_, _, t] <- after]))
+    _ -> assert failed False
 
 -- | Press a control, then release where it moved to on the same frame. The
 -- view tests the release against the rect it had before the move and misses
