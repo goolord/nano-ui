@@ -333,7 +333,9 @@ setSdlUiFont = requestDisplay sdlFontRequestRef
 -- of the pixel density, or zero or less to follow the display. The display
 -- thread applies it before the next frame, which this asks for.
 setSdlUiScale :: Float -> NanoUI ()
-setSdlUiScale = requestDisplay sdlUiScaleRef
+-- Not a number follows the display too, and is kept as zero: it is unequal
+-- even to itself, so asking for it again would ask for a frame every time.
+setSdlUiScale s = requestDisplay sdlUiScaleRef (if isNaN s then 0 else s)
 
 -- | Hand the display thread a new setting and ask for the frame it is
 -- applied before. Asking for the setting already asked for asks for nothing.

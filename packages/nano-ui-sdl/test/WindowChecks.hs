@@ -7,7 +7,7 @@ module WindowChecks (windowChecks) where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception (IOException, try)
-import Control.Monad (unless, void, when)
+import Control.Monad (replicateM_, unless, void, when)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
@@ -52,6 +52,7 @@ windowChecks drivers gpu = do
   openingCloseCheck
   resizeFailureCheck
   deviceResetCheck
+  uiScaleNaNCheck
   dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
@@ -215,6 +216,14 @@ deviceResetCheck = do
     other -> fail ("two screenshots wanted, got " ++ show (length other))
   where
     pixels s = let img = screenshotPixels s in [pixelAt s x y | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1]]
+
+-- | A UI scale that is not a number follows the display, as zero does, and
+-- asking for it again asks for no frame.
+uiScaleNaNCheck :: IO ()
+uiScaleNaNCheck =
+  session options (colorRGBA 0 0 0 255) $ \ctx env -> do
+    replicateM_ 3 (frame ctx env True (setSdlUiScale (0 / 0)))
+    isDirty ctx >>= check "asking again for a UI scale that is not a number asks for no frame" . not
 
 dialogStateChecks :: IO ()
 dialogStateChecks = do
