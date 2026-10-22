@@ -345,9 +345,11 @@ textInputMouse ctx inp onControl wid idx = do
 -- Returns the frame's input and whether the input method owns the focused
 -- widget's keys ('FocusComposing'). While a composition shows, all key
 -- state is dropped so nothing edits the field or fires a shortcut; the
--- commit still arrives as typed text. On the commit frame, keys the input
--- method passes on (an arrow after a Korean syllable) reach the field but
--- fire no shortcut.
+-- commit still arrives as typed text. So it is on the frame a composition
+-- ends with nothing committed, whose key the input method took (an Escape
+-- that cancels it, a Backspace on its last character). On the commit frame,
+-- keys the input method passes on (an arrow after a Korean syllable) reach
+-- the field but fire no shortcut.
 --
 -- Inlined into its single caller so the result pair is never allocated.
 {-# INLINE claimComposition #-}
@@ -368,9 +370,10 @@ claimComposition ctx !inp = do
     modifyInteraction ctx (\s -> s {isComposition = next})
     mapM_ (\(_, old) -> damageWidget ctx old DamageSelf) held
     damageWidget ctx owner DamageSelf
-  let !committing = showing held && not (T.null (inputChars inp))
+  let !ended = showing held && not (showing next)
+      !committing = ended && not (T.null (inputChars inp))
   pure $
-    if showing next
+    if showing next || (ended && not committing)
       then (inp {inputKeys = mempty, inputKeysNew = mempty, inputKeysReleased = mempty, inputKeysHeld = mempty}, True)
       else (inp, committing)
 
