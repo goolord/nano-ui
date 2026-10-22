@@ -95,13 +95,18 @@ writeScrollOffset ctx wid off = do
   writeScrollOffset2D ctx wid (V2 x off)
 
 -- | Pixel-snapped x/y offset for text areas and 2D scrollers. For a 1D
--- scroller, the fallback stores cross-axis in x and main-axis in y.
+-- scroller, the fallback stores cross-axis in x and main-axis in y, so a row
+-- scroller's offset reads @(cross, main)@: its horizontal offset is in y.
+-- 'getScrollMetrics' and the scroll commands use window axes for every
+-- scroller.
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
   V2 x y <- storedScrollOffset (intKey wid) <$> getStore ctx
   V2 <$> snapScrollOffset ctx x <*> snapScrollOffset ctx y
 
--- | Move a scroller to an offset on both axes. Cancels a glide in flight.
+-- | Move a scroller to an offset on both axes, in the order
+-- 'getScrollOffset2D' reads them: @(cross, main)@ for a 1D row scroller.
+-- Cancels a glide in flight. 'scrollTo' takes window axes for every scroller.
 setScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
 setScrollOffset2D ctx wid off = do
   cancelScrollGlide ctx wid

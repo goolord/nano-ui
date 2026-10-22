@@ -734,7 +734,8 @@ getScrollMetricsUi :: WidgetId -> NanoUI (Maybe ScrollMetrics)
 getScrollMetricsUi wid = withContext (`getScrollMetrics` wid)
 
 -- | Put a scroller at an offset in window axes, cancelling a glide; a 1D
--- scroller ignores the axis it does not scroll on. Unlike
+-- scroller ignores the axis it does not scroll on, and unlike
+-- 'NanoUI.setScrollOffset2D' a row scroller takes its offset in x. Unlike
 -- 'scrollToUi' the offset is not held to the range the last layout found,
 -- so it can place content this frame is about to lay out; the layout holds
 -- it to the content's real range.

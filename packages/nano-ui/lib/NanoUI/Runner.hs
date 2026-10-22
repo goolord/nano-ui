@@ -157,7 +157,9 @@ data SessionDriver ev = SessionDriver
     -- timer granularity.
   , sdShouldDraw    :: Context -> Input -> Input -> Bool -> Bool -> IO Bool
     -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating, refreshDue) ->
-    -- should this frame be rendered? Usually 'shouldRedrawFrame'.
+    -- should this frame be rendered? Usually 'shouldRedrawFrame' with the
+    -- driver's 'sdContinuous' as its continuous flag:
+    -- @\\c p i a r -> shouldRedrawFrame c p i a continuous r@.
   , sdDraw          :: Context -> Input -> Bool -> IO Bool
     -- ^ Render frame: (ctx, curInp, forceFull) -> dirtyAfterRender.
   , sdOnCursor      :: Context -> Input -> IO ()
