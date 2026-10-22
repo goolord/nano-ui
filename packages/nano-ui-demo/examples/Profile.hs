@@ -3,12 +3,7 @@ module Main (main) where
 import Control.Monad (forM, forM_, replicateM_, unless, void, when)
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray, smallArrayFromList)
-import GHC.Clock (getMonotonicTimeNSec)
-import GHC.Stats (RTSStats (..), getRTSStats)
 import System.IO (hSetBuffering, stdout, BufferMode(LineBuffering))
-import System.Mem (performGC)
-import System.Environment (lookupEnv)
-import Text.Read (readMaybe)
 import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -56,25 +51,9 @@ profileInput =
     , inputMousePos = V2 640 400
     }
 
--- | Mean wall time and allocation per run after a short warmup. The clock
--- stops before the second GC, which only brings the allocation counter current.
+-- | Mean wall time and allocation per run after a short warmup.
 measureBench :: String -> IO () -> IO ()
-measureBench name action = do
-  requested <- lookupEnv "NANO_PROFILE_ITERATIONS"
-  let runs = max 1 (maybe iterations id (requested >>= readMaybe))
-  replicateM_ 5 action
-  performGC
-  s0 <- getRTSStats
-  t0 <- getMonotonicTimeNSec
-  replicateM_ runs action
-  t1 <- getMonotonicTimeNSec
-  performGC
-  s1 <- getRTSStats
-  let perIter :: Double -> Double
-      perIter total = total / fromIntegral runs
-  printf "%-32s : %11.6f ms/frame  |  %11.3f KB alloc/frame\n" name
-    (perIter (fromIntegral (t1 - t0) / 1e6))
-    (perIter (fromIntegral (allocated_bytes s1 - allocated_bytes s0) / 1024))
+measureBench = Harness.measureRuns 5 iterations
 
 main :: IO ()
 main = do
@@ -326,9 +305,9 @@ tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
     btnMenu <- button' "Right-click Menu"
     void $ contextMenu btnMenu $ do
       menuHeader "Context Menu"
-      void $ menuItemShortcut "Cut" (ctrl <> key 'x')
-      void $ menuItemShortcut "Copy" (ctrl <> key 'c')
-      void $ menuItemShortcut "Paste" (ctrl <> key 'v')
+      void $ menuItemShortcut "Cut" (cmdOrCtrl <> key 'x')
+      void $ menuItemShortcut "Copy" (cmdOrCtrl <> key 'c')
+      void $ menuItemShortcut "Paste" (cmdOrCtrl <> key 'v')
 
 tabListUi :: NanoUI ()
 tabListUi = columnWith (tight . gap 8 . fillW) $ do

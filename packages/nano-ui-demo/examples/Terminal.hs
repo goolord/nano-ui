@@ -54,6 +54,8 @@ data Term = Term
   , utf8 :: B.ByteString
   , history :: V.Vector Cell
   , back :: Float
+  , glyph :: Char
+  -- ^ The last character printed, which REP repeats.
   }
   deriving (Eq)
 
@@ -74,6 +76,7 @@ blank =
     B.empty
     V.empty
     0
+    ' '
 
 -- | Nord colors by pen index: 0 is the default foreground, 1-8 the ANSI
 -- colors and 9-16 their bright variants.
@@ -218,7 +221,7 @@ step g@(Grid cells pushed) t c
               let
                 (cx, cy) = cursor u
               MV.write cells (cy * 80 + cx) (cell (pen t) c)
-              pure u {cursor = (cx + 1, cy)}
+              pure u {cursor = (cx + 1, cy), glyph = c}
           | otherwise -> pure t
  where
   (x, y) = cursor t
@@ -228,7 +231,7 @@ step g@(Grid cells pushed) t c
 
 csi :: Grid s -> String -> Char -> Term -> ST s Term
 csi _ raw _ t | any (\c -> c /= ';' && (c < '0' || c > '9')) raw = pure t
-csi (Grid cells pushed) raw cmd t = case cmd of
+csi g@(Grid cells pushed) raw cmd t = case cmd of
   'A' -> pure (move x (y - n) t)
   'B' -> pure (move x (y + n) t)
   'C' -> pure (move (x + n) y t)
@@ -248,6 +251,10 @@ csi (Grid cells pushed) raw cmd t = case cmd of
   'X' -> wipe i (i + chars - 1)
   'L' -> shift (top + rows) top (1920 - top - rows) >> move 0 y <$> wipe top (top + rows - 1)
   'M' -> shift top (top + rows) (1920 - top - rows) >> move 0 y <$> wipe (1920 - rows) 1919
+  -- Scroll the whole screen up or down, and repeat the last character.
+  'S' -> shift 0 scrolled (1920 - scrolled) >> wipe (1920 - scrolled) 1919
+  'T' -> shift scrolled 0 (1920 - scrolled) >> wipe 0 (scrolled - 1)
+  'b' -> foldM (step g) t (replicate n (glyph t))
   'm' -> pure t {pen = sgr (pen t) codes}
   _ -> pure t
  where
@@ -265,6 +272,7 @@ csi (Grid cells pushed) raw cmd t = case cmd of
   chars = min n (80 - x)
   -- The cells in the lines moved or blanked.
   rows = 80 * min n (24 - y)
+  scrolled = 80 * min n 24
   shift to from len = MV.move (MV.slice to len cells) (MV.slice from len cells)
   -- Mode 0 erases from the cursor to the end, 1 from the start to the
   -- cursor, and 2 everything.

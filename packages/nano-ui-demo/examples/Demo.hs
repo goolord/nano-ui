@@ -384,9 +384,9 @@ popupsAndMenus picked = do
     void $ contextMenu menuBtn $ do
       menuHeader "Context Menu"
       menuSeparator
-      whenM (menuItemShortcut "Cut" (ctrl <> key 'x')) (writeVar picked "Cut")
-      whenM (menuItemShortcut "Copy" (ctrl <> key 'c')) (writeVar picked "Copy")
-      whenM (menuItemShortcut "Paste" (ctrl <> key 'v')) (writeVar picked "Paste")
+      whenM (menuItemShortcut "Cut" (cmdOrCtrl <> key 'x')) (writeVar picked "Cut")
+      whenM (menuItemShortcut "Copy" (cmdOrCtrl <> key 'c')) (writeVar picked "Copy")
+      whenM (menuItemShortcut "Paste" (cmdOrCtrl <> key 'v')) (writeVar picked "Paste")
       menuSeparator
       menuItemDisabled "Disabled Option"
     choice <- readVar picked
@@ -650,9 +650,10 @@ listTab Values {valTreeItem = selected, valQuery = query} = do
   muted . ("Selected item " <>) . T.pack . show =<< readVar selected
   separator
   heading "Searchable list"
-  muted "Type to filter, or press Ctrl+F to jump here. The search commits after a pause in typing."
+  let findChord = cmdOrCtrl <> key 'f'
+  muted ("Type to filter, or press " <> shortcutLabel findChord <> " to jump here. The search commits after a pause in typing.")
   searchResp <- searchInput' "Filter people (name, role, city…)" search
-  whenM (shortcut (ctrl <> key 'f')) (requestFocus (respId searchResp))
+  whenM (shortcut findChord) (requestFocus (respId searchResp))
   when (respChanged searchResp) (writeVar query =<< readVar search)
   committed <- readVar query
   let matches = filter (matchesQuery committed) demoPeople

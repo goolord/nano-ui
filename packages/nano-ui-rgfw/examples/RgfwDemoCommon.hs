@@ -52,7 +52,7 @@ import NanoUI
   , window'
   )
 import NanoUI.Monad (askInput)
-import NanoUI.Shortcut (ctrl, key)
+import NanoUI.Shortcut (cmdOrCtrl, key)
 import NanoUI.Backend.Rgfw
   ( RgfwOptions (..)
   , WindowSettings (..)
@@ -261,13 +261,13 @@ viewControlsTab m = Emit.withRunInNanoUIE $ \run -> do
           menuHeader "Edit Actions"
           menuSeparator
           whenM
-            (menuItemShortcut "Cut" (ctrl <> key 'x'))
+            (menuItemShortcut "Cut" (cmdOrCtrl <> key 'x'))
             (run (Emit.emit (SetNotesText "Cut text to clipboard")))
           whenM
-            (menuItemShortcut "Copy" (ctrl <> key 'c'))
+            (menuItemShortcut "Copy" (cmdOrCtrl <> key 'c'))
             (run (Emit.emit (SetNotesText "Copied text to clipboard")))
           whenM
-            (menuItemShortcut "Paste" (ctrl <> key 'v'))
+            (menuItemShortcut "Paste" (cmdOrCtrl <> key 'v'))
             (run (Emit.emit (SetNotesText "Pasted text from clipboard")))
           menuSeparator
           menuHeader "System"

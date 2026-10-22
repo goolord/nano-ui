@@ -35,6 +35,9 @@ tests =
   , spec "tabs-scroll-follow-var" runTabsFollowVarTest
   , spec "tabs-missing-key" runTabsMissingKeyTest
   , spec "tabs-wheel-in-page" runTabsWheelInPageTest
+  , spec "tabs-wheel-fraction" runTabsWheelFractionTest
+  , spec "tabs-follow-key-zero" runTabsFollowKeyZeroTest
+  , spec "tabs-arrow-damage" runTabsArrowDamageTest
   , spec "tabs-badge-size" runTabsBadgeSizeTest
   ]
 
@@ -90,6 +93,45 @@ runTabsWheelInPageTest ctx failed = do
     _ <- runFrame ctx inp ui
     assertEq failed 0 =<< getScrollOffset ctx pageWid
     assert failed . not . hasText "Controls" =<< collectTextSpans ctx
+
+-- A trackpad's fraction of a notch over an overflowing strip pages it by that
+-- fraction: rounded to whole notches, a slow swipe would move nothing.
+runTabsWheelFractionTest :: Context -> IORef Int -> IO ()
+runTabsWheelFractionTest ctx failed = do
+  let inp = withInput 240 120
+      ui = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
+      controls = spanRect "Controls" <$> collectTextSpans ctx
+  replicateM_ 3 (runFrame ctx inp ui)
+  assertJustM failed controls $ \r -> do
+    _ <- runFrame ctx inp {inputMousePos = spanCenter r, inputScroll = V2 0 0.3} ui
+    _ <- runFrame ctx inp ui
+    assertJustM failed controls $ \r' -> assertLt failed (rectX r') (rectX r)
+
+-- A strip brings its active tab into view whatever the tab's key, 0 too:
+-- here the last of headers keyed newest first.
+runTabsFollowKeyZeroTest :: Context -> IORef Int -> IO ()
+runTabsFollowKeyZeroTest ctx failed = do
+  let inp = withInput 240 120
+      ui = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [4, 3 .. 0] overflowLabels]
+  replicateM_ 4 (runFrame ctx inp ui)
+  assert failed . hasText "LongestTabName" =<< collectTextSpans ctx
+
+-- Paging the strip repaints the arrow that turns usable, whose muted look is
+-- a colour no rect or text change covers.
+runTabsArrowDamageTest :: Context -> IORef Int -> IO ()
+runTabsArrowDamageTest ctx failed = do
+  let inp = withInput 240 120
+      ui = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
+      arrow ch = (\spans -> listToMaybe [r | (r, t, _, _, _) <- spans, T.any (== ch) t]) <$> collectTextSpans ctx
+  replicateM_ 3 (runFrame ctx inp ui)
+  assertJustM failed (arrow '\8249') $ \left ->
+    assertJustM failed (arrow '\8250') $ \right -> do
+      let (press, release) = clickPair inp (spanCenter right)
+      _ <- runFrame ctx press ui
+      _ <- runFrame ctx release ui
+      _ <- runFrame ctx release {inputButtonsReleased = noButtons} ui
+      dmg <- takeDamage ctx
+      assert failed (damageCovers dmg left)
 
 -- A badge is smaller than its header's text, whatever the base font size.
 runTabsBadgeSizeTest :: Context -> IORef Int -> IO ()

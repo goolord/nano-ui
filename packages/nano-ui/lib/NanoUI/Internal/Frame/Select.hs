@@ -20,21 +20,21 @@ module NanoUI.Internal.Frame.Select
 import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (sortOn)
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe, maybeToList)
+import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, maybeToList)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
-import NanoUI.Internal.Id (WidgetId (..))
+import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getClipBounds, getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
-import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains)
+import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains, rectIntersect)
 
 -- | An open dropdown: a select with its open flag set, or a combo box (a
 -- search field carrying options) exactly while it holds focus.
@@ -72,9 +72,13 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
   -- so at most two nodes hold a dropdown, and both are looked up directly.
   sel <- openSelectNode ctx store
   combo <- focusedComboNode ctx
-  forM (sortOn fst (catMaybes [(,False) <$> sel, (,True) <$> combo])) $ \(idx, isCombo) -> do
+  dropdowns <- forM (sortOn fst (catMaybes [(,False) <$> sel, (,True) <$> combo])) $ \(idx, isCombo) -> do
     wid <- getWidgetId na idx
-    build store idx wid isCombo
+    -- A field scrolled out of its viewport hangs no dropdown in its place.
+    shown <- (\r -> maybe True (isJust . rectIntersect r)) <$> getNodeRect na idx <*> getClipBounds na idx
+    if shown then Just <$> build store idx wid isCombo else pure Nothing
+  -- Forced, so a frame with none allocates nothing for them.
+  pure $! catMaybes dropdowns
   where
     build store idx wid combo = do
       opts <- getOptions na idx
@@ -103,7 +107,7 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
           , ddPicked =
               if combo
                 then slotInt SlotComboHighlight (-1) - window
-                else findSlot fieldInt 0 key store
+                else clamp 0 (nOpts - 1) (findSlot fieldInt 0 key store)
           , ddComboScrollX = scrollX
           , ddComboGeom = comboScrollGeom rect rows nOpts window scrollX contentW
           , ddComboDrag = slotInt SlotComboDrag 0
@@ -204,7 +208,7 @@ routePointer ctx inp = do
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
-  when (pressedIn MouseLeft inp || releasedIn MouseLeft inp) $ do
+  when (anyButtonPressed inp || releasedIn MouseLeft inp) $ do
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
@@ -228,13 +232,16 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
     -- These keys act on the focused enabled select, open or not. Otherwise
-    -- they go to the open select.
+    -- Escape, or any of them while nothing has focus, goes to the open
+    -- select: a field that took focus without closing it keeps its keys.
     let enabledSelect idx = ((== NodeSelect) <$> getNodeType na idx) <&&> (not <$> isDisabled ctx focus)
     focused <-
       if wantStep || wantEnter then keepNode enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
     target <- case focused of
       Just idx -> pure (Just (idx, isSelectOpen store (intKey focus)))
-      Nothing -> fmap (,True) <$> openSelectNode ctx store
+      Nothing
+        | wantEsc || hashWidgetId focus == 0 -> fmap (,True) <$> openSelectNode ctx store
+        | otherwise -> pure Nothing
     forM_ target $ \(idx, open) -> do
       wid <- getWidgetId na idx
       whenM (widgetOverlayAllowed ctx wid) $
@@ -246,13 +253,16 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
           else do
             n <- length <$> getOptions na idx
             when (n > 0) $ do
+              -- The stored index can be one the options do not reach; they
+              -- show it clamped, and a key that lands there still picks.
               let key = intKey wid
-                  cur = findSlot fieldInt 0 key store
+                  stored = findSlot fieldInt 0 key store
+                  cur = clamp 0 (n - 1) stored
                   next
                     | wantFirst = 0
                     | wantLast = n - 1
                     | otherwise = clamp 0 (n - 1) (cur + if wantNext then 1 else -1)
-              when (next /= cur) $ do
+              when (next /= stored) $ do
                 setStore ctx (insertSlot fieldInt key next store)
                 markDirty ctx
 
@@ -320,11 +330,17 @@ selectDropRect size x y w h nOpts =
 
 -- | A dropdown @dropH@ tall and as wide as the field at @x y w h@: below the
 -- field, or above it when it does not fit below and there is more room
--- above, and kept inside the window of @size@ ('computePopupPosition').
+-- above, and kept inside the window of @size@ ('computePopupPosition'). A
+-- list that fits on neither side runs past the window edge on the roomier
+-- one rather than over its field, where the press that opens it would pick.
 dropRect :: Size -> Float -> Float -> Float -> Float -> Float -> Rect
 dropRect (Size winW winH) x y w h dropH =
   let (dx, dy) = computePopupPosition winW winH 0 w dropH (AnchorRect (Rect x y w h)) PlacementAuto selectDropGap
-   in Rect dx dy w dropH
+      dy'
+        | dy >= y + h || dy + dropH <= y = dy
+        | winH - y - h >= y = y + h + selectDropGap
+        | otherwise = y - dropH - selectDropGap
+   in Rect dx dy' w dropH
 
 -- | Row index at @mouseY@ for a select dropdown, whose rows sit centred in
 -- the drop rect.

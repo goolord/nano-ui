@@ -316,19 +316,21 @@ areaRings baseline = map closeRun . runs . U.toList
         sq = side q
 
 -- | Points used for drawing and hit tests, without those that are not
--- finite. Line, area and step data may be decimated; categories become
--- zero-based x positions paired with their values.
+-- finite. Line, area and step data may be decimated, and scatter series and
+-- lines with markers past 2000 points; categories become zero-based x
+-- positions paired with their values.
 seriesPoints :: Chart -> Series -> U.Vector (Double, Double)
 seriesPoints chart s =
   case seriesData s of
     PointsXY raw ->
       let pts = finitePoints raw
-          k = decimateK (U.length pts)
-          -- Markers are not joined, so a dropped one is simply missing.
-          thins = case seriesKind s of
-            ScatterSeries {} -> False
-            _ -> True
-       in if chartDecimate chart && thins && U.length pts > k then lttb k pts else pts
+          -- Markers are not joined, so a dropped one is simply missing:
+          -- marked series keep every point up to the cap.
+          k = case seriesKind s of
+            ScatterSeries {} -> 2000
+            LineSeries _ (Just _) -> 2000
+            _ -> decimateK (U.length pts)
+       in if chartDecimate chart && U.length pts > k then lttb k pts else pts
     CategoryY _ values ->
        finitePoints (U.generate (sizeofPrimArray values) (\i -> (fromIntegral i, indexPrimArray values i)))
   where

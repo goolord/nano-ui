@@ -42,7 +42,7 @@ import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, 
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
-import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
 import NanoUI.Internal.Var (Binding (..), bindVarOn, useVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
@@ -54,7 +54,7 @@ import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldF
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
+import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderDisplayText, tableHeaderLabel)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
@@ -288,7 +288,8 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
                   remeasure (j + 1)
             remeasure 0
           _ -> mapM_ measure [0 .. n - 1]
-        writePrimArray hdrWM i . (+ cellPadX) =<< lineWidthIO fm (hdrs V.! i <> tableSortReserve)
+        -- As the header shows it: the sort mark is drawn over a blank slot.
+        writePrimArray hdrWM i . (+ cellPadX) =<< lineWidthIO fm (tableHeaderDisplayText (tableHeaderLabel False (hdrs V.! i)))
       cellWs <- unsafeFreezePrimArray cellWM
       hdrWs <- unsafeFreezePrimArray hdrWM
       let widest i !r !w = if r >= n then w else widest i (r + 1) (max w (indexPrimArray cellWs (i * n + r)))
@@ -672,6 +673,10 @@ tableCore cfg f key cols inputRows curSort =
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (nextDrag + 1)
           <> slotWrite fieldFloat stateKey nextDragX
           <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
+      -- The headers show the sort only through their style, which no diff
+      -- covers, so a slot on the table repaints it when the sort shown
+      -- changes, however it came (a header click or a write to the Var).
+      liftIO (writeSlot fieldInt ctx tableWid (intKey tableWid) (2 * sortColIndex sort0 + fromEnum (sortColDir sort0 == SortDesc)))
       -- Keep the resize cursor for the whole drag, wherever the pointer is.
       when (nextDrag >= 0 && heldIn MouseLeft inp) $
         liftIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))

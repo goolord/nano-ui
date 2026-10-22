@@ -28,7 +28,7 @@ import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
 import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
-import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, slotWrite)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, lookupSlot, slotWrite)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
 import NanoUI.Internal.WidgetText (TabChrome (..), buttonCloseTab, buttonFlagClose, tabChromeEncode, tabEncodeStyle)
@@ -229,13 +229,15 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
       -- range @r@ and offset @o@.
       paging r o = (r > 0.5, r > 0.5 && o > 0.5, o < r - 0.5)
   -- The reachable range measured after last frame's layout decides whether
-  -- the strip needs the scroller. It is a float slot so a pure scroll frame
-  -- keeps its clip damage (`onlyScrollFloatsChanged` in NanoUI.Internal.Damage).
+  -- the strip needs the scroller. It is a float slot published after layout,
+  -- so the frame that changes it counts as a layout change, not a scroll
+  -- ('NanoUI.Internal.Damage.writeDamage').
   store <- liftIO (getStore ctx)
   let maxOff = max 0 (findSlot fieldFloat 0 rangeKey store)
-      -- The hash of the tab the strip last brought into view.
+      -- The hash of the tab the strip last brought into view, if any: a key
+      -- that hashes to 0 is followed too.
       followKey = intKey groupId
-      followed = findSlot fieldInt 0 followKey store
+      followed = lookupSlot fieldInt followKey store
   off <- liftIO (getScrollOffset ctx scrollWid)
   let (overflow, canLeft, canRight) = paging maxOff off
   wheelStep <- liftIO (resolveScrollStep ctx scrollWid)
@@ -245,16 +247,21 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   mScr <- liftIO (getPrevRect ctx scrollWid)
   inp <- askInput
   -- Over the scroller only: it keeps the vertical wheel from the scrollers
-  -- round it, which the arrows do not.
+  -- round it, which the arrows do not. The wheel counts as a scroller takes
+  -- it, fractions of a notch from a trackpad too.
   let overStrip = maybe False (\r -> rectContains r (inputMousePos inp)) mScr
-      notches = if overStrip then round (v2Y (inputScroll inp)) else 0 :: Int
-      -- A paging arrow while the bar overflows, muted at its end.
+      wheelY = if overStrip then v2Y (inputScroll inp) else 0
+      -- A paging arrow while the bar overflows, muted at its end. The muted
+      -- look is a font colour, which no diff covers, so a slot at the arrow
+      -- repaints it when it turns.
       arrow k enabled glyph
         | overflow = withKey (k :: Text) $ do
             theme <- uiTheme
             let muted = if enabled then Nothing else Just (themeMuted theme)
                 lay = (fixedWH 26 stripH . alignCenter . alignMid $ defaultLayout) {layoutFontColor = muted}
-            respClicked <$> styled subtle (buttonStyledEx enabled glyph 0 lay 0)
+            resp <- styled subtle (buttonStyledEx enabled glyph 0 lay 0)
+            liftIO (writeSlot fieldInt ctx (respId resp) (intKey (respId resp)) (fromEnum enabled))
+            pure (respClicked resp)
         | otherwise = pure False
   (leftClicked, tabResp, rightClicked) <-
     row' (tight . grow . alignMid . fixedH stripH $ defaultLayout) $ do
@@ -308,19 +315,19 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   let shown = tabActive tabResp
       laidOut w = liftIO (getPrevRect ctx w) >>= maybe (lastRect w) (pure . Just)
   target <-
-    if overflow && hash shown /= followed
+    if overflow && Just (hash shown) /= followed
       then do
         scroller <- laidOut scrollWid
         header <- maybe (pure Nothing) (laidOut . respId) (lookup shown hdrs)
         pure (scroller *> header)
       else pure Nothing
-  -- One offset per frame: arrow pages, wheel notches and the end clamp, or
+  -- One offset per frame: arrow pages, the wheel and the end clamp, or
   -- whatever brings that header into view.
   let pagedOff
         | leftClicked, canLeft = max 0 (off - page)
         | rightClicked, canRight = min maxOff (off + page)
-        | overflow, notches /= 0, maxOff > 0 =
-            clamp 0 maxOff (off + fromIntegral notches * wheelStep)
+        | overflow, wheelY /= 0, maxOff > 0 =
+            clamp 0 maxOff (off + wheelY * wheelStep)
         | overflow, off > maxOff + 0.5 = maxOff
         | otherwise = off
       follow hr

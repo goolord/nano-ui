@@ -11,6 +11,7 @@ import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArra
 import Data.Text qualified as T
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray)
 import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude qualified as D
 import Diagrams.Prelude
   ( Diagram
@@ -54,8 +55,10 @@ import NanoUI.Plot.Series
   , line
   , scatter
   , step
+  , withBaseline
   , withColor
   , withMarker
+  , withStrokeWidth
   )
 import NanoUI.Plot.Types
   ( Chart (..)
@@ -99,7 +102,7 @@ main = hspec $ do
   describe "decimation" $ do
     it "keeps LTTB extrema and endpoints" testLttb
     it "keeps min/max extrema" testMinMaxDecimate
-    it "thins connected series but not scatter markers" testDecimateKinds
+    it "thins connected series, and markers only past 2000" testDecimateKinds
   describe "chart chrome" $ do
     it "keeps labels, titles and legends apart" (testLabelFit fm)
     it "colors legend entries like their series" (testLegendColors fm)
@@ -111,6 +114,7 @@ main = hspec $ do
     it "fills an area a ring per side of its baseline" (testAreaRings fm)
     it "places filled series where their data is" (testFillPlacement fm)
     it "caps the height of growing plots" (testGrowPlotHeight fm)
+    it "sizes a diagram without width by the caller's box" (testDegenerateFit fm)
 
 -- | A chart of the given series with no legend, grid or decimation.
 bareChart :: [Series] -> Chart
@@ -352,12 +356,17 @@ testNaNChartIdle = do
   owner <- Plot.newPlotCache
   let
     nan = 0 / 0
+    nanF = 0 / 0 :: Float
     held = bareChart [line "l" [(0, nan)], bar "b" [("x", nan)]]
+    -- A NaN in a series' own parameters, not its data.
+    params = bareChart [withBaseline nan (area "a" [(0, 1)]), withStrokeWidth nanF (line "l" [(0, 1)])]
     ctx = withFontMetrics base (monospaceMetrics 16)
     -- The points depend on the frame, so each frame builds a new chart.
-    frame k = runFrame ctx (emptyInput {inputWindowSize = Size 400 240}) $
-      Plot.lineChart owner (fixedWH 360 200) [(0, 0), (1, nan * fromIntegral (k :: Int)), (2, 1)]
+    frame k = runFrame ctx (emptyInput {inputWindowSize = Size 400 240}) $ do
+      _ <- Plot.lineChart owner (fixedWH 360 100) [(0, 0), (1, nan * fromIntegral (k :: Int)), (2, 1)]
+      Plot.plot owner (fixedWH 360 100) (bareChart [withBaseline (nan * fromIntegral k) (area "a" [(0, 0), (1, 1)])])
   check "a chart holding NaN differs from itself" (held == held)
+  check "a chart with a NaN baseline or width differs from itself" (params == params)
   again <- mapM frame [1 .. 4]
   check "a plot of a chart holding NaN asks for frames forever" (not (or [more | (_, _, more) <- drop 2 again]))
 
@@ -404,15 +413,18 @@ testMinMaxDecimate = do
                && V.maximum (V.map snd input) == V.maximum (V.map snd sampled)
            )
 
--- | Default decimation thins a long line, but every scatter marker stays:
--- unconnected markers that are dropped are simply missing.
+-- | Default decimation thins a long line, but every marker of a scatter or a
+-- marked line stays up to 2000: unconnected markers that are dropped are
+-- simply missing.
 testDecimateKinds :: IO ()
 testDecimateKinds = do
   let
-    pts = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. 99 :: Int]]
-    thinned s = seriesPoints (Builder.chart [s]) s /= seriesPoints (bareChart [s]) s
-  check "decimation did not thin a long line" (thinned (line "l" pts))
-  check "decimation thinned a scatter series" (not (thinned (scatter "s" pts)))
+    pts n = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. n - 1 :: Int]]
+    drawn s = U.length (seriesPoints (Builder.chart [s]) s)
+  check "decimation did not thin a long line" (drawn (line "l" (pts 100)) < 100)
+  check "decimation thinned a scatter series" (drawn (scatter "s" (pts 100)) == 100)
+  check "decimation thinned a marked line" (drawn (withMarker MarkCircle (line "l" (pts 100))) == 100)
+  check "decimation kept every point of a huge scatter" (drawn (scatter "s" (pts 5000)) == 2000)
 
 orderedPoints :: V.Vector (Double, Double) -> Bool
 orderedPoints points = V.and (V.zipWith (\a b -> fst a < fst b) points (V.drop 1 points))
@@ -679,3 +691,15 @@ testGrowPlotHeight fm = do
   check "a growing plot stopped growing in height" $ case layoutHeight (fittedWith grow) of
     Grow _ -> True
     _ -> False
+
+-- | A diagram with no width, such as a vertical rule, takes the caller's
+-- box: a fixed width does not make it infinitely tall, and a fixed box keeps
+-- its width.
+testDegenerateFit :: FontMetrics -> IO ()
+testDegenerateFit fm = do
+  let
+    rule = D.vrule 50 :: Diagram B
+    tall = fitLayout fm (fixedW 200 defaultLayout) rule
+    boxed = fitLayout fm (fixedWH 200 100 defaultLayout) rule
+  check "a fixed width made a rule infinitely tall" (layoutMaxH tall < 1e6)
+  check "a fixed box lost its width for a rule" (layoutMinW boxed == 200 && layoutMaxW boxed == 200)

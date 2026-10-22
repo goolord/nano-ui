@@ -4,6 +4,7 @@
 module NanoUI.Internal.Widgets.Behavior
   ( DragAxis (..)
   , useDrag1D
+  , leftPress
   , holdActiveWhile
   , Reorder (..)
   , useReorder
@@ -84,10 +85,12 @@ useDrag1D axis owner lo hi current track = do
       then leftPress ctx >>= modifyStore ctx . insertSlot fieldQuiet dragK
       else modifyStore ctx (deleteSlot fieldQuiet dragK)
   pure (if active then lo + frac * (hi - lo) else current, active, active0)
-  where
-    -- The left button's press point as one nonzero Int, exact in both
-    -- coordinates; 0 while it is up.
-    leftPress ctx = maybe 0 (\(V2 x y, _) -> (fromIntegral (castFloatToWord32 x) `shiftL` 32 .|. fromIntegral (castFloatToWord32 y)) + 1) . M.lookup MouseLeft <$> readIORef (ctxPressPos ctx)
+
+-- | The left button's press point as one nonzero Int, exact in both
+-- coordinates; 0 while it is up. A drag that keeps the one it started under
+-- lasts only under that press.
+leftPress :: Context -> IO Int
+leftPress ctx = maybe 0 (\(V2 x y, _) -> (fromIntegral (castFloatToWord32 x) `shiftL` 32 .|. fromIntegral (castFloatToWord32 y)) + 1) . M.lookup MouseLeft <$> readIORef (ctxPressPos ctx)
 
 -- | Whether a press at @mouse@ on a track of widget @owner@ is covered
 -- ('pointerCovered'). A track wider than its owner (a colour picker's bar)
@@ -172,7 +175,14 @@ useReorder order responses = do
       hit = fst <$> find (respPressed . snd) responses
       items = [(i, respRect r) | (i, r) <- responses]
   store <- liftIO (getStore ctx)
-  let dragging = if press then hit else lookupSlot fieldInt dragK store
+  -- The drag keeps the press that started it ('leftPress') and lasts only
+  -- under it: one released while this hook did not run does not come back.
+  let stored = lookupSlot fieldInt dragK store
+  token <- if press || isJust stored then liftIO (leftPress ctx) else pure 0
+  let dragging
+        | press = hit
+        | token == findSlot fieldQuiet 0 dragK store = stored
+        | otherwise = Nothing
       (sx, sy) = if press then (mx, my) else findSlot fieldPoint (mx, my) startK store
       moved =
         isJust dragging
@@ -191,11 +201,11 @@ useReorder order responses = do
       released = releasedIn MouseLeft inp
       ended = released || not (heldIn MouseLeft inp)
       next = if ended then Nothing else dragging
-  when (next /= lookupSlot fieldInt dragK store || (press && isJust dragging) || moved /= flagSlot movedK store) $
+  when (next /= stored || (press && isJust dragging) || moved /= flagSlot movedK store) $
     liftIO . modifyStore ctx $
       case next of
-        Nothing -> deleteSlot fieldInt dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
-        Just d -> insertSlot fieldInt dragK d . insertSlot fieldPoint startK (sx, sy) . setFlagSlot movedK moved
+        Nothing -> deleteSlot fieldInt dragK . deleteSlot fieldQuiet dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
+        Just d -> insertSlot fieldInt dragK d . insertSlot fieldQuiet dragK token . insertSlot fieldPoint startK (sx, sy) . setFlagSlot movedK moved
   pure
     Reorder
       { reorderOrder = if released && moved then preview else order

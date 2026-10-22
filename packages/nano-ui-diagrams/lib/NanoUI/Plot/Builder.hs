@@ -45,7 +45,7 @@ withGrid :: GridMode -> Chart -> Chart
 withGrid g c = c {chartGrid = g}
 
 -- | Enable or disable thinning numeric series before drawing and hit testing.
--- Scatter series are never thinned.
+-- Scatter series and lines with markers are thinned only past 2000 points.
 withDecimate :: Bool -> Chart -> Chart
 withDecimate b c = c {chartDecimate = b}
 

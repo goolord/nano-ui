@@ -14,7 +14,29 @@ tests =
   , spec "drag-idle-and-abort" runDragIdleAndAbortTest
   , spec "reorder-owned-press" runReorderOwnedPressTest
   , spec "reorder-negative-ids" runReorderNegativeIdsTest
+  , spec "reorder-stale-drag" runReorderStaleDragTest
   ]
+
+-- | A drag released while the hook did not run is over: a press elsewhere,
+-- still held when the hook runs again, carries no item and drops none.
+runReorderStaleDragTest :: Context -> IORef Int -> IO ()
+runReorderStaleDragTest ctx failed = do
+  let inp = withInput 400 200
+      order = [0 .. 4]
+      reorderAt i = evalUi ctx i (useReorder order (responses i (zip order slotsInRow)))
+      skip i = evalUi ctx i (pure ())
+      press = pressAt inp (V2 20 15)
+      far = holdAt press (V2 230 15)
+      elsewhere = pressAt inp (V2 300 150)
+      later = holdAt elsewhere (V2 230 160)
+  _ <- reorderAt inp
+  _ <- reorderAt press
+  dragged <- reorderAt far
+  assertEq failed (Just 0) (reorderDragging dragged)
+  skip (releaseAt far)
+  skip elsewhere
+  assertEq failed Nothing . reorderDragging =<< reorderAt later
+  assertEq failed order . reorderOrder =<< reorderAt (releaseAt later)
 
 -- | Covered and clipped controls cannot start a reorder gesture.
 runReorderOwnedPressTest :: Context -> IORef Int -> IO ()

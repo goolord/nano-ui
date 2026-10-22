@@ -183,15 +183,15 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
   ------------------------------------------------------------- shortcuts ---
   -- A menu row's chord works only while its menu is open, so the commands'
   -- chords are also bound here, ahead of the rows, and close an open menu as
-  -- the rows do. The editor handles its own editing chords. Ctrl++ is
-  -- Ctrl+Shift+= on a US layout, or keypad plus.
+  -- the rows do; so does a close request. The editor handles its own editing
+  -- chords. Ctrl++ is Ctrl+Shift+= on a US layout, or keypad plus.
   for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
     \(_, chord, action) -> item (shortcut chord) action
-  whenM (or <$> traverse shortcut [cmdOrCtrl <> shift <> key '=', cmdOrCtrl <> key '+']) zoomIn
-  whenM (winCloseRequested <$> askWindow) exitApp
+  item (or <$> traverse shortcut [cmdOrCtrl <> shift <> key '=', cmdOrCtrl <> key '+']) zoomIn
+  item (winCloseRequested <$> askWindow) exitApp
 
   --------------------------------------------------------------- layout ---
-  columnWith (grow . gap 0) $ do
+  docName <- columnWith (grow . gap 0) $ do
     menuBar
       openMenu
       [ ("File", fileMenu)
@@ -214,17 +214,18 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     when (respChanged editorResp) (writeVar docDirty True)
     writeVar editorId (respId editorResp)
 
+    -- Read after the editor, which marks the document changed.
+    path <- readVar docPath
+    dirty <- readVar docDirty
+    let name = (if T.null path then "Untitled" else path) <> (if dirty then " *" else "")
     whenM (readVar showStatus) $ do
       separator
-      statusBar docPath docDirty doc statusMsg zoomVal
+      statusBar name doc statusMsg zoomVal
+    pure name
 
   -------------------------------------------------------------- the window ---
   -- Cheap to set every frame: the window updates only when the title changes.
-  -- Set after the editor, which marks the document changed.
-  path <- readVar docPath
-  dirty <- readVar docDirty
-  setWindowTitleUi $
-    (if T.null path then "Untitled" else path) <> (if dirty then " *" else "") <> " - nano-ui Notepad"
+  setWindowTitleUi (docName <> " - nano-ui Notepad")
 
   --------------------------------------------------------------- overlays ---
   modal aboutOpen "About" $ do
@@ -279,17 +280,14 @@ writeDocument filePath doc = do
 -- | The status bar. It shows the line count, which the document keeps; the
 -- word and character counts read the whole text, so View > Document
 -- Statistics computes them when asked.
-statusBar :: Var Text -> Var Bool -> Var TextDocument -> Var Text -> Float -> NanoUI ()
-statusBar docPath docDirty docVar statusMsg zoomVal = do
-  path <- readVar docPath
-  dirty <- readVar docDirty
+statusBar :: Text -> Var TextDocument -> Var Text -> Float -> NanoUI ()
+statusBar docName docVar statusMsg zoomVal = do
   doc <- readVar docVar
   message <- readVar statusMsg
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
     labelWith (tight . fontMuted) message
     flex
-    labelWith (tight . fontMuted)
-      ((if T.null path then "Untitled" else path) <> (if dirty then " *" else ""))
+    labelWith (tight . fontMuted) docName
     labelWith (tight . fontMuted) ("Lines: " <> T.pack (show (documentLineCount doc)))
     labelWith (tight . fontMuted)
       ("Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%")

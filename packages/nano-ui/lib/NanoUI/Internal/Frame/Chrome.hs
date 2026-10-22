@@ -57,7 +57,8 @@ selectCurrentOption ctx idx = do
   store <- getStore ctx
   opts <- getOptions (ctxNodeArena ctx) idx
   wid <- getWidgetId (ctxNodeArena ctx) idx
-  let picked = findSlot fieldInt 0 (intKey wid) store
+  -- An index the options do not reach shows clamped, as the select reads it.
+  let picked = clamp 0 (length opts - 1) (findSlot fieldInt 0 (intKey wid) store)
   pure (fromMaybe "" (listToMaybe (drop picked opts)))
 
 -- | The text a field displays: its stored value, masked one character per

@@ -16,8 +16,13 @@ tests =
   , spec "select-overlay-damage" runSelectOverlayDamageTest
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
   , spec "select-dropdown-flips" runSelectDropdownFlipsTest
+  , spec "select-dropdown-off-field" runSelectDropdownOffFieldTest
+  , spec "select-dropdown-scrolled-away" runSelectDropdownScrolledAwayTest
+  , spec "select-keys-after-focus-moves" runSelectKeysAfterFocusMovesTest
   , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
   , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
+  , spec "choices-adopt-shown-pick" runChoicesAdoptShownPickTest
+  , spec "select-end-adopts-shown" runSelectEndAdoptsShownTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
   , spec "tree-late-items-expanded" runTreeLateItemsExpandedTest
@@ -27,6 +32,7 @@ tests =
   , spec "slider-out-of-range-settles" runSliderOutOfRangeSettlesTest
   , spec "slider-bad-bounds-settle" runSliderBadBoundsSettleTest
   , spec "slider-stale-drag" runSliderStaleDragTest
+  , spec "knob-stale-drag" runKnobStaleDragTest
   ]
 
 -- | Sibling sliders keep separate drags: dragging the second leaves the
@@ -110,6 +116,28 @@ runSliderStaleDragTest ctx failed = do
   _ <- frameShown False elsewhere
   assertEq failed 50 =<< frameShown True (holdAt elsewhere (V2 30 100))
 
+-- | A knob, whose drag 'useDrag2DOn' runs, drops a drag released while it
+-- was not built, as a slider does: a later press elsewhere turns nothing.
+runKnobStaleDragTest :: Context -> IORef Int -> IO ()
+runKnobStaleDragTest ctx failed = do
+  shownRef <- newIORef True
+  let inp0 = withInput 300 200
+      ui = column $ do
+        shown <- liftIO (readIORef shownRef)
+        if shown then snd <$> withValue 50 (knob' 0 100) else pure 50
+      frameShown shown i = writeIORef shownRef shown >> evalUi ctx i ui
+  (resp, _) <- warmup2 ctx inp0 (column (withValue 50 (knob' 0 100)))
+  let V2 x y = centerOf resp
+      hold = holdAt inp0 (V2 x (y - 30))
+      elsewhere = pressAt inp0 (V2 200 150)
+  _ <- frameShown True (pressAt inp0 (V2 x y))
+  turned <- frameShown True hold
+  assertGt failed turned 50
+  _ <- frameShown False hold
+  _ <- frameShown False (releaseAt hold)
+  _ <- frameShown False elsewhere
+  assertEq failed 50 =<< frameShown True (holdAt elsewhere (V2 200 100))
+
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = withInput 300 80
@@ -177,6 +205,68 @@ runSelectDropdownFlipsTest ctx failed = do
     assert failed (rectY low + rectH low <= rectY (respRect resp))
     assertEq failed 0 . snd =<< runClick ctx open ui (spanCenter low)
 
+-- | A dropdown that fits on neither side of its select is not slid back over
+-- the field, so the click that opens it leaves the value alone.
+runSelectDropdownOffFieldTest :: Context -> IORef Int -> IO ()
+runSelectDropdownOffFieldTest ctx failed = do
+  let inp0 = withInput 320 300
+      opts = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
+      ui = column (replicateM_ 4 (label "line") >> withValue 3 (select' opts))
+  (resp, _) <- warmup2 ctx inp0 ui
+  assertEq failed 3 . snd =<< runClick ctx inp0 ui (centerOf resp)
+  assert failed . anySelectOpen =<< getStore ctx
+
+-- | A dropdown goes with its field when the field scrolls out of view: it is
+-- not drawn, and a press where it would be picks nothing.
+runSelectDropdownScrolledAwayTest :: Context -> IORef Int -> IO ()
+runSelectDropdownScrolledAwayTest ctx failed = do
+  let inp0 = withInput 320 300
+      ui = column $ do
+        label "toolbar"
+        snd <$> scrollArea (fixedWH 300 120) (withValue 0 (selectWith' (fixedW 100) ["Low", "Medium", "High"]) <* replicateM_ 30 (label "line"))
+  (resp, _) <- warmup2 ctx inp0 ui
+  let open = snd (clickPair inp0 (centerOf resp))
+      -- Over the scroller, beside the dropdown.
+      wheel = open {inputButtonsReleased = noButtons, inputMousePos = V2 250 (rectY (respRect resp) + 10), inputScroll = V2 0 5}
+      idle = wheel {inputScroll = V2 0 0}
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  assert failed . hasText "Medium" =<< collectOverlayTextSpans ctx open
+  _ <- runFrame ctx wheel ui
+  replicateM_ 3 (runFrame ctx idle ui)
+  after <- collectOverlayTextSpans ctx idle
+  assert failed (not (hasText "Medium" after))
+  assertEq failed 0 . snd =<< runClick ctx idle ui (maybe (V2 20 40) spanCenter (spanRect "Medium" after))
+
+-- | Keys reach an open select only while it has focus: a right-click on a
+-- text field closes it, and a field that takes focus by 'holdFocus' keeps
+-- the arrows to itself.
+runSelectKeysAfterFocusMovesTest :: Context -> IORef Int -> IO ()
+runSelectKeysAfterFocusMovesTest ctx failed = do
+  grabRef <- newIORef False
+  let inp0 = withInput 320 300
+      -- The field above the select, clear of its dropdown.
+      ui = column $ do
+        (t, _) <- withValue "text" textInput'
+        (s, v) <- withValue 0 (select' ["Low", "Medium", "High"])
+        grab <- liftIO (readIORef grabRef)
+        when grab (holdFocus (respId t))
+        pure (s, t, v)
+  (s, t, _) <- warmup2 ctx inp0 ui
+  _ <- runClick ctx inp0 ui (centerOf s)
+  let (rPress, rRelease) = rightClickPair inp0 (centerOf t)
+  _ <- runFrame ctx rPress ui
+  _ <- runFrame ctx rRelease ui
+  assert failed . not . anySelectOpen =<< getStore ctx
+  _ <- runFrame ctx (keyInp KeyDown inp0) ui
+  assertEq failed 0 . (\(_, _, v) -> v) =<< evalUi ctx inp0 ui
+  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+  _ <- runClick ctx inp0 ui (centerOf s)
+  writeIORef grabRef True
+  _ <- runFrame ctx inp0 ui
+  assertEq failed (respId t) =<< getFocusId ctx
+  _ <- runFrame ctx (keyInp KeyDown inp0) ui
+  assertEq failed 0 . (\(_, _, v) -> v) =<< evalUi ctx inp0 ui
+
 -- | A select's dropdown is as wide as the select, and an option wider than
 -- that is clipped to the dropdown rather than drawn over the page, where
 -- closing the dropdown would not repaint it.
@@ -224,6 +314,41 @@ runChoicesKeepUnreachedIndexTest ctx failed = do
   assertEq failed [2, 2, 2] =<< mapM readVarIO refs
   -- The radio's options, then the tree's rows.
   assertEq failed [0, 0, 1, 0, 0, 1] =<< buttonValues ctx
+
+-- | Picking the option an unreached index shows is still a pick: the
+-- select, the radio group and the tree each hand that option back.
+runChoicesAdoptShownPickTest :: Context -> IORef Int -> IO ()
+runChoicesAdoptShownPickTest ctx failed = do
+  selRef <- newVar 5
+  radioRef <- newVar 5
+  treeRef <- newVar 5
+  let inp0 = withInput 320 400
+      ui = column $ do
+        resp <- select' ["Low", "Medium", "High"] selRef
+        radio ["One", "Two", "Three"] radioRef
+        tree "t" [TreeItem o [] | o <- ["Red", "Green", "Blue"]] treeRef
+        pure resp
+  resp <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  forM_ ["Three", "Blue"] $ \lbl ->
+    assertJust failed (spanRectOf lbl spans) (void . runClick ctx inp0 ui . spanCenter)
+  let open = snd (clickPair inp0 (centerOf resp))
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  overlays <- collectOverlayTextSpans ctx open
+  assertJust failed (spanRectOf "High" overlays) (void . runClick ctx open ui . spanCenter)
+  assertEq failed [2, 2, 2] =<< mapM readVarIO [selRef, radioRef, treeRef]
+
+-- | End on a select whose index its options do not reach picks the last
+-- option, the one it shows, and reports the change.
+runSelectEndAdoptsShownTest :: Context -> IORef Int -> IO ()
+runSelectEndAdoptsShownTest ctx failed = do
+  selRef <- newVar 5
+  let inp0 = withInput 320 200
+      ui = column (select' ["Low", "Medium", "High"] selRef)
+  warmupFocused ctx inp0 ui
+  _ <- runFrame ctx (keyInp KeyEnd inp0) ui
+  assert failed . respChanged =<< evalUi ctx inp0 ui
+  assertEq failed 2 =<< readVarIO selRef
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
@@ -276,8 +401,8 @@ runTreeKeyboardTest ctx failed = do
   assert failed (not (hasText "child" spans))
   assertEq failed 2 . snd =<< evalUi ctx (keyInp KeyDown inp0) ui
 
--- | A tree whose items arrive after its first frame opens every parent, as
--- one built with them does.
+-- | A tree whose parents arrive after its first frame, empty or holding a
+-- placeholder leaf, opens every parent, as one built with them does.
 runTreeLateItemsExpandedTest :: Context -> IORef Int -> IO ()
 runTreeLateItemsExpandedTest ctx failed = do
   itemsRef <- newIORef []
@@ -285,6 +410,8 @@ runTreeLateItemsExpandedTest ctx failed = do
       ui = do
         items <- liftIO (readIORef itemsRef)
         column (withValue 0 (tree' "late" items))
+  _ <- warmup2 ctx inp0 ui
+  writeIORef itemsRef [TreeItem "Loading" []]
   _ <- warmup2 ctx inp0 ui
   writeIORef itemsRef [TreeItem "root" [TreeItem "child" []]]
   _ <- warmup2 ctx inp0 ui

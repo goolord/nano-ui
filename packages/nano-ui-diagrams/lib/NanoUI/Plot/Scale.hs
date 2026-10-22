@@ -123,8 +123,9 @@ niceTickLabels maxTicks d = case niceTicks maxTicks d of
   ts@(a : b : _) -> [(t, formatStep (b - a) t) | t <- ts]
   ts -> [(t, formatTick t) | t <- ts]
 
--- | Format a finite tick with trailing zeros removed, using scientific notation
--- for very small or large magnitudes. Non-finite values produce empty text.
+-- | Format a finite tick in fixed point with trailing zeros removed, or, for
+-- very small or large magnitudes, in scientific notation with three decimals
+-- (@1.500e-10@). Non-finite values produce empty text.
 formatTick :: Double -> Text
 formatTick v
   | not (finite v) = T.empty

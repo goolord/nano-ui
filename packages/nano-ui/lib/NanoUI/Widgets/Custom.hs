@@ -128,7 +128,7 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Widgets.Behavior (navStep, useKeyNav)
+import NanoUI.Internal.Widgets.Behavior (leftPress, navStep, useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle)
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Widgets.Animate (keepAnimating)
@@ -343,23 +343,28 @@ drag2DFrom :: Rect -> Bool -> NanoUI Drag2D
 drag2DFrom bounds onIt = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  -- The drag flag is quiet bookkeeping (it causes no damage); the last
-  -- pointer position goes in a point slot.
+  -- The press that started the drag is quiet bookkeeping (it causes no
+  -- damage); the last pointer position goes in a point slot. As in
+  -- 'useDrag1D', the drag lasts only under that press, so one released while
+  -- this hook did not run does not come back.
   let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
   store <- liftIO (getStore ctx)
-  let active0 = quietFlag dragK store
-      active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
+  let held = findSlot fieldQuiet 0 dragK store
+  active0 <- if held == 0 then pure False else (== held) <$> liftIO (leftPress ctx)
+  let active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
       prev = uncurry V2 (findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store)
       delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =
         V2
           (clamp (rectX bounds) (rectX bounds + rectW bounds) (v2X mouse))
           (clamp (rectY bounds) (rectY bounds + rectH bounds) (v2Y mouse))
-  when (active || active0) $
-    liftIO . modifyStore ctx $
-      setQuietFlag dragK active
-        . (if active then insertSlot fieldPoint dragK (v2X mouse, v2Y mouse) else deleteSlot fieldPoint dragK)
+  when (active || held /= 0) . liftIO $ do
+    press <- if active && not active0 then leftPress ctx else pure held
+    modifyStore ctx $
+      if active
+        then insertSlot fieldQuiet dragK press . insertSlot fieldPoint dragK (v2X mouse, v2Y mouse)
+        else deleteSlot fieldQuiet dragK . deleteSlot fieldPoint dragK
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
 -- | This frame's wheel delta while the widget is hovered ('respHovered').

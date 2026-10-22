@@ -5,7 +5,7 @@ module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 import Control.Monad (void, when, zipWithM)
 import Data.IORef (writeIORef)
 import Data.Foldable (asum, find, fold, toList)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import qualified Data.IntSet as IS
@@ -25,7 +25,7 @@ import NanoUI.Internal.WidgetText (treeEncodeStyle)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (columnWith)
-import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
+import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, setChanged, tagContainer)
 
 subtreeSize :: TreeItem -> Int
 subtreeSize item = 1 + forestSize (treeItemChildren item)
@@ -143,9 +143,14 @@ treeCore key inputItems index =
   withKey ("tree:" <> key) $ do
     (groupId, ctx) <- freshWidget
     let groupKey = intKey groupId
-        -- Every parent starts expanded.
-        allParents = IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) (toList inputItems))]
-    expandedSet <- fromMaybe allParents . lookupSlot fieldIntSet groupKey <$> liftIO (getStore ctx)
+        -- Every parent starts expanded. Any parent sits under one at the top
+        -- level, so the top level alone tells a forest that has none.
+        allParents
+          | any (not . null . treeItemChildren) inputItems =
+              IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) (toList inputItems))]
+          | otherwise = IS.empty
+    storedExp <- lookupSlot fieldIntSet groupKey <$> liftIO (getStore ctx)
+    let expandedSet = fromMaybe allParents storedExp
     (total, rows) <- liftIO (cachedRows ctx groupKey inputItems expandedSet)
     let clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
     selected <- liftIO $ adoptSlot fieldInt ctx groupId clamped
@@ -157,15 +162,24 @@ treeCore key inputItems index =
           [0 ..]
           (toList rows)
       let resps = smallArrayFromList (map fst results)
-          (clickSel, clickExp) = fromMaybe (selected, expandedSet) (asum (map snd results))
+          clicked = asum (map snd results)
+          (clickSel, clickExp) = fromMaybe (selected, expandedSet) clicked
       focus <- focusedWidget
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus clickSel clickExp
+          -- A click on a row picks it, and one on a chevron only expands; the
+          -- arrow keys pick the row they move focus to.
+          picked = isJust mFocus || maybe False ((== expandedSet) . snd) clicked
       liftIO (moveSelection ctx selected keySel [(i, r) | ((i, _, _, _), (r, _)) <- zip (toList rows) results])
-      result <- finishInput fieldInt ctx groupId selected (fold resps) keySel
-      -- Items that arrive after an empty first frame start expanded too.
-      when (total > 0) $ liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
+      (resp, s) <- finishInput fieldInt ctx groupId selected (fold resps) keySel
+      -- Items that arrive after a first frame without parents start expanded
+      -- too: nothing is stored until there is something to expand.
+      when (isJust storedExp || not (IS.null keyExp)) $
+        liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
       mapM_ (liftIO . writeIORef (ctxFocusId ctx)) mFocus
       -- An index the items do not reach yet stays the caller's until the
-      -- user moves the selection.
-      pure (fmap (\s -> if s == clamped then index else s) result)
+      -- user picks a row, even the one it shows.
+      pure $
+        if not picked && s == clamped
+          then (resp, index)
+          else (setChanged (s /= index) resp, s)

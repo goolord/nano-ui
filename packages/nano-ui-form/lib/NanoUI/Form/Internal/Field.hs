@@ -3,8 +3,6 @@
 module NanoUI.Form.Internal.Field
   ( inputWidget
   , Publish (..)
-  , labelled
-  , fieldView
   , decodeBool
   , decodeFloatInput
   , decodeInt
@@ -34,7 +32,6 @@ import NanoUI
   , withKey
   , withValue
   )
-import NanoUI qualified as NUI
 import NanoUI.Form.Internal.Backend
   ( FormInput (..)
    , FormScope (..)
@@ -82,9 +79,6 @@ inputWidget name decode publish encode widget initial = do
   owner <- Ditto.liftForm askFormScope
   let draftValue = either (const Nothing) Just . decode
   maybe Unnamed.input Named.input name decode (fieldView owner draftValue publish encode widget) initial
-
-labelled :: Maybe Text -> (Var a -> NanoUI b) -> Var a -> NanoUI b
-labelled caption widget value = mapM_ NUI.label caption >> widget value
 
 -- | Keep the label and control in the same stable field scope, and publish
 -- edits by the field's policy.

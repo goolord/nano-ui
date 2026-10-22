@@ -404,7 +404,10 @@ data Slot
     -- the start of the visible window slice (keyboard / wheel / scrollbar
     -- scrolling), and the scrollbar bookkeeping the overlay painter and the
     -- widget's thumb-drag gesture share (total filtered count, widest row, x
-    -- offset, drag axis + grab offset).
+    -- offset, drag axis + grab offset). In 'storeQuiet', as float bits: the
+    -- pointer when Up or Down last moved the highlight (x under
+    -- 'SlotComboHighlight', y under 'SlotComboScroll') and the wheel's
+    -- leftover rows (under 'SlotComboScrollX').
     SlotComboHighlight
   | SlotComboScroll
   | SlotComboCount
