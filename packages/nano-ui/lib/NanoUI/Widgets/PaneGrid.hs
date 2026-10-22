@@ -55,11 +55,11 @@ import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip)
 import NanoUI.Internal.Shortcut qualified as Shortcut
-import NanoUI.Internal.Store (fieldGrid, insertSlot, lookupSlot)
+import NanoUI.Internal.Store (fieldGrid, fieldQuiet, findSlot, insertSlot, lookupSlot)
 import NanoUI.Internal.Store.Types (GridState (..), Gesture (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
-import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
+import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, leftPress, useKeyNav)
 import NanoUI.Internal.Widgets.Cursor (withCursorShape)
 import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Layout (column', row', rowWith')
@@ -361,7 +361,13 @@ paneGridCore cfg controlled given = do
       leeway = max 0 (pgLeeway cfg)
       edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
-  stored <- lookupSlot fieldGrid key <$> liftIO (getStore ctx)
+  store0 <- liftIO (getStore ctx)
+  let stored = lookupSlot fieldGrid key store0
+  -- A gesture lasts only under the press it started with ('runGestures'),
+  -- so one whose release the grid did not see is over.
+  live <- case stored of
+    Just s | gsGesture s /= NoGesture -> (== findSlot fieldQuiet 0 (slotKey SlotDrag key) store0) <$> liftIO (leftPress ctx)
+    _ -> pure True
   let adopt
         | controlled = maybe True ((/= given) . gsTree) stored
         | otherwise = maybe True (const False) stored
@@ -376,6 +382,7 @@ paneGridCore cfg controlled given = do
       -- pane nor its gesture carries over.
       started
         | adopt = st {gsTree = given, gsSeed = max (gsSeed st) (maybe 1 ((+ 1) . treeMaxId) given), gsMax = 0, gsGesture = NoGesture}
+        | not live = st {gsGesture = NoGesture}
         | otherwise = st
       curSpan = (rectW baseRect, rectH baseRect)
       -- On a size change, re-ratio pinned panes' splits before layout. A move
@@ -752,6 +759,11 @@ runGestures wid env dividers rendered moved zone = do
   let mouse = inputMousePos inp
       down = heldIn MouseLeft inp
       setGesture rerun g = void (updateGrid env rerun (\s -> s {gsGesture = g}))
+      -- A gesture keeps the press it starts with, for 'paneGridCore' to end
+      -- it once that press is gone.
+      start g = do
+        liftIO (leftPress (geCtx env) >>= modifyStore (geCtx env) . insertSlot fieldQuiet (slotKey SlotDrag (geKey env)))
+        setGesture True g
       -- diBand already includes the leeway; inflating it would steal presses
       -- from neighbouring panes.
       hitDiv = find (\d -> rectContains (diBand d) mouse) dividers
@@ -767,8 +779,8 @@ runGestures wid env dividers rendered moved zone = do
     case (hitDiv, pickHit) of
       -- From the ratio the divider is drawn at, which the panes' minima may
       -- have clamped, so it moves with the pointer from the start.
-      (Just d, _) -> setGesture True (Resize (diSplitId d) (clampRatio (geGutter env) d (diRatio d)) (mouseMain (diAxis d) mouse))
-      (_, Just pane) -> setGesture True (Drag (rpPaneId pane) mouse False (pvTitle (rpView pane)))
+      (Just d, _) -> start (Resize (diSplitId d) (clampRatio (geGutter env) d (diRatio d)) (mouseMain (diAxis d) mouse))
+      (_, Just pane) -> start (Drag (rpPaneId pane) mouse False (pvTitle (rpView pane)))
       _ -> pure ()
   case gsGesture (geState env) of
     NoGesture -> pure ()

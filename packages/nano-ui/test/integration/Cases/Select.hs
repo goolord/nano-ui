@@ -32,6 +32,7 @@ tests =
   , spec "slider-out-of-range-settles" runSliderOutOfRangeSettlesTest
   , spec "slider-bad-bounds-settle" runSliderBadBoundsSettleTest
   , spec "slider-stale-drag" runSliderStaleDragTest
+  , spec "knob-stale-drag" runKnobStaleDragTest
   ]
 
 -- | Sibling sliders keep separate drags: dragging the second leaves the
@@ -114,6 +115,28 @@ runSliderStaleDragTest ctx failed = do
   _ <- frameShown False (releaseAt hold)
   _ <- frameShown False elsewhere
   assertEq failed 50 =<< frameShown True (holdAt elsewhere (V2 30 100))
+
+-- | A knob, whose drag 'useDrag2DOn' runs, drops a drag released while it
+-- was not built, as a slider does: a later press elsewhere turns nothing.
+runKnobStaleDragTest :: Context -> IORef Int -> IO ()
+runKnobStaleDragTest ctx failed = do
+  shownRef <- newIORef True
+  let inp0 = withInput 300 200
+      ui = column $ do
+        shown <- liftIO (readIORef shownRef)
+        if shown then snd <$> withValue 50 (knob' 0 100) else pure 50
+      frameShown shown i = writeIORef shownRef shown >> evalUi ctx i ui
+  (resp, _) <- warmup2 ctx inp0 (column (withValue 50 (knob' 0 100)))
+  let V2 x y = centerOf resp
+      hold = holdAt inp0 (V2 x (y - 30))
+      elsewhere = pressAt inp0 (V2 200 150)
+  _ <- frameShown True (pressAt inp0 (V2 x y))
+  turned <- frameShown True hold
+  assertGt failed turned 50
+  _ <- frameShown False hold
+  _ <- frameShown False (releaseAt hold)
+  _ <- frameShown False elsewhere
+  assertEq failed 50 =<< frameShown True (holdAt elsewhere (V2 200 100))
 
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do

@@ -34,7 +34,32 @@ tests =
   , spec "pane-grid-adopt-restores" runAdoptRestoresTest
   , spec "pane-grid-escape" runEscapeTest
   , spec "pane-grid-handle-overflow" runHandleOverflowTest
+  , spec "pane-grid-stale-gesture" runStaleGestureTest
   ]
+
+-- | A divider drag released while the grid was not built is over: a press
+-- elsewhere, still held when the grid is back, leaves the divider alone.
+runStaleGestureTest :: Context -> IORef Int -> IO ()
+runStaleGestureTest ctx failed = do
+  shownRef <- newIORef True
+  let inp = withInput 600 400
+      ui = do
+        shown <- liftIO (readIORef shownRef)
+        if shown then pgrTree <$> paneGrid halvesGrid else pure Nothing
+      frameShown shown i = writeIORef shownRef shown >> evalUi ctx i ui
+      press = pressAt inp (V2 300 200)
+      moved = holdAt press (V2 350 200)
+      elsewhere = pressAt inp (V2 100 100)
+      later = holdAt elsewhere (V2 150 100)
+  _ <- warmup2 ctx inp ui
+  _ <- frameShown True press
+  dragged <- frameShown True moved
+  assert failed (dragged /= Just halves)
+  _ <- frameShown False (releaseAt moved)
+  _ <- frameShown False elsewhere
+  -- The first frame back lays the grid out; the next has its rect to drag in.
+  replicateM_ 2 (assertEq failed dragged =<< frameShown True later)
+  assertEq failed dragged =<< frameShown True (releaseAt later)
 
 -- | The left pane at its 40px minimum, its ratio below it; the gutter runs
 -- from 40 to 56.
