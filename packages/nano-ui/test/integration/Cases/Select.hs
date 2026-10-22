@@ -341,8 +341,8 @@ runTreeKeyboardTest ctx failed = do
   assert failed (not (hasText "child" spans))
   assertEq failed 2 . snd =<< evalUi ctx (keyInp KeyDown inp0) ui
 
--- | A tree whose items arrive after its first frame opens every parent, as
--- one built with them does.
+-- | A tree whose parents arrive after its first frame, empty or holding a
+-- placeholder leaf, opens every parent, as one built with them does.
 runTreeLateItemsExpandedTest :: Context -> IORef Int -> IO ()
 runTreeLateItemsExpandedTest ctx failed = do
   itemsRef <- newIORef []
@@ -350,6 +350,8 @@ runTreeLateItemsExpandedTest ctx failed = do
       ui = do
         items <- liftIO (readIORef itemsRef)
         column (withValue 0 (tree' "late" items))
+  _ <- warmup2 ctx inp0 ui
+  writeIORef itemsRef [TreeItem "Loading" []]
   _ <- warmup2 ctx inp0 ui
   writeIORef itemsRef [TreeItem "root" [TreeItem "child" []]]
   _ <- warmup2 ctx inp0 ui

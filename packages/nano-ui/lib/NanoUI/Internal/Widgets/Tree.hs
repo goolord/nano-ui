@@ -5,7 +5,7 @@ module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 import Control.Monad (void, when, zipWithM)
 import Data.IORef (writeIORef)
 import Data.Foldable (asum, find, fold, toList)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import qualified Data.IntSet as IS
@@ -143,9 +143,14 @@ treeCore key inputItems index =
   withKey ("tree:" <> key) $ do
     (groupId, ctx) <- freshWidget
     let groupKey = intKey groupId
-        -- Every parent starts expanded.
-        allParents = IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) (toList inputItems))]
-    expandedSet <- fromMaybe allParents . lookupSlot fieldIntSet groupKey <$> liftIO (getStore ctx)
+        -- Every parent starts expanded. Any parent sits under one at the top
+        -- level, so the top level alone tells a forest that has none.
+        allParents
+          | any (not . null . treeItemChildren) inputItems =
+              IS.fromList [i | (i, _, True, _) <- toList (visibleRows (const True) (toList inputItems))]
+          | otherwise = IS.empty
+    storedExp <- lookupSlot fieldIntSet groupKey <$> liftIO (getStore ctx)
+    let expandedSet = fromMaybe allParents storedExp
     (total, rows) <- liftIO (cachedRows ctx groupKey inputItems expandedSet)
     let clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
     selected <- liftIO $ adoptSlot fieldInt ctx groupId clamped
@@ -163,8 +168,10 @@ treeCore key inputItems index =
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus clickSel clickExp
       liftIO (moveSelection ctx selected keySel [(i, r) | ((i, _, _, _), (r, _)) <- zip (toList rows) results])
       result <- finishInput fieldInt ctx groupId selected (fold resps) keySel
-      -- Items that arrive after an empty first frame start expanded too.
-      when (total > 0) $ liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
+      -- Items that arrive after a first frame without parents start expanded
+      -- too: nothing is stored until there is something to expand.
+      when (isJust storedExp || not (IS.null keyExp)) $
+        liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
       mapM_ (liftIO . writeIORef (ctxFocusId ctx)) mFocus
       -- An index the items do not reach yet stays the caller's until the
       -- user moves the selection.
