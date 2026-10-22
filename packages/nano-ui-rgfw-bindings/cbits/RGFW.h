@@ -3728,9 +3728,9 @@ void RGFW_windowFocusCallback(RGFW_window* win, RGFW_bool inFocus) {
 
 		event.type = RGFW_windowFocusIn;
 	} else if (inFocus == RGFW_FALSE) {
-		if ((win->internal.flags & RGFW_windowFullscreen))
-			RGFW_window_minimize(win);
-
+		/* nano-ui: a fullscreen window losing focus stays, as SDL's desktop
+		   fullscreen does, rather than minimizing: clicking another monitor
+		   no longer hides it. */
 		size_t key;
 		for (key = 0; key < RGFW_keyLast; key++) {
 			if (RGFW_isKeyDown((u8)key) == RGFW_FALSE) continue;
@@ -11922,8 +11922,8 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 	RGFW_monitor* mon  = RGFW_window_getMonitor(win);
 
 	if (fullscreen == RGFW_FALSE) {
-		RGFW_monitor_setMode(mon, &win->internal.oldMode);
-
+		/* nano-ui: no display mode to restore, as fullscreen keeps the
+		   monitor's own (below). */
 		RGFW_window_setBorder(win, 1);
 
 		RECT rect = { 0, 0, win->internal.oldW, win->internal.oldH};
@@ -11953,7 +11953,10 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 	win->x = mon->x;
 	win->y = mon->y;
 
-	RGFW_monitor_scaleToWindow(mon, win);
+	/* nano-ui: cover the monitor at its own display mode, as SDL's desktop
+	   fullscreen does. RGFW_monitor_scaleToWindow switched the monitor to
+	   the window's size and saved that to the registry, and nothing put it
+	   back when the app quit or lost focus. */
     SetWindowPos(win->src.window, HWND_TOPMOST, 0, 0, (i32)mon->mode.w, (i32)mon->mode.h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOMOVE);
 	win->w = mon->mode.w;
 	win->h = mon->mode.h;
@@ -14456,8 +14459,10 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 
 		win->internal.flags |= RGFW_windowFullscreen;
 
+		/* nano-ui: cover the monitor at its own display mode rather than
+		   switching it to the window's size, which leaving fullscreen never
+		   undid. */
 		RGFW_monitor* mon = RGFW_window_getMonitor(win);
-		RGFW_monitor_scaleToWindow(mon, win);
 
 		RGFW_window_setBorder(win, RGFW_FALSE);
 
