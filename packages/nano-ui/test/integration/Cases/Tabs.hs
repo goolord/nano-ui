@@ -398,8 +398,7 @@ runTabsCloseMarginTest ctx failed = do
 -- still be too narrow for them.
 runTabsScrollWidenTest :: Context -> IORef Int -> IO ()
 runTabsScrollWidenTest wide failed = do
-  let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
-      mkTabs = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
+  let mkTabs = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
       nodeRect ctx l = do
         let na = ctxNodeArena ctx
         found <- findNodeM na (fmap (== l) . getText na)
@@ -421,7 +420,7 @@ runTabsScrollWidenTest wide failed = do
       assert failed =<< hasArrows ctx
       replicateM_ 3 (runFrame ctx (withInput fitW 120) mkTabs)
       spans <- collectTextSpans ctx
-      forM_ labels $ \l -> assert failed (hasText l spans)
+      forM_ overflowLabels $ \l -> assert failed (hasText l spans)
       assert failed . not =<< hasArrows ctx
     _ -> assert failed False
 
@@ -458,9 +457,8 @@ runTabsScrollCloseButtonTest wide failed = do
 -- still repaints the whole window.
 runTabsRangeDamageTest :: Context -> IORef Int -> IO ()
 runTabsRangeDamageTest ctx failed = do
-  let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
-      ui = column $ do
-        _ <- tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] labels]
+  let ui = column $ do
+        _ <- tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
         label "Below"
   _ <- warmup2 ctx (withInput 900 120) ui
   _ <- runFrame ctx (withInput 900 120) ui
@@ -626,8 +624,7 @@ runTabsDamageTest ctx failed = do
 -- scroller well behind them); and no scrollbar appears.
 runTabsScrollTest :: Context -> IORef Int -> IO ()
 runTabsScrollTest wide failed = do
-  let labels = ["Controls", "Graphics", "Typography", "Diagnostics", "LongestTabName"]
-      mkTabs cur = tabBar' (constVar cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] labels]
+  let mkTabs cur = tabBar' (constVar cur) [tab (i :: Int) l () | (i, l) <- zip [0 ..] overflowLabels]
       arrowRect ctx ch = do
         spans <- collectTextSpans ctx
         pure [r | (r, t, _, _, _) <- spans, T.any (== ch) t]
@@ -637,7 +634,7 @@ runTabsScrollTest wide failed = do
   let wideInp = withInput 900 120
   _ <- run2Frames wide wideInp (mkTabs 0)
   wideSpans <- collectTextSpans wide
-  forM_ labels $ \l -> assert failed (hasText l wideSpans)
+  forM_ overflowLabels $ \l -> assert failed (hasText l wideSpans)
   assert failed (not (T.any (`elem` chevrons) (T.concat [t | (_, t, _, _, _) <- wideSpans])))
 
   ctx <- newContext
