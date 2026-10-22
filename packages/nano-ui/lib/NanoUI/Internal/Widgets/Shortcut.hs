@@ -17,16 +17,19 @@ import Data.IntSet qualified as IS
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, askInput, takeEscape, withContext)
+import NanoUI.Internal.Monad (NanoUI, askInput, takeEscape, withContext, (<&&>))
 import NanoUI.Internal.Shortcut
 import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 
 -- | Whether the key went down this frame, including auto-repeats, with any
 -- modifiers. 'False' behind an open modal, inside 'NanoUI.disabledWhen', and
 -- when the focused widget uses the key itself ('focusTakesChord'), such as
--- Delete in a focused text field. Like iced's @keyboard::listen@, this only
--- reports keys not claimed by the focused widget; 'pressedIn' checks raw frame
--- input. To bind a command to a key, use 'shortcut'.
+-- Delete in a focused text field. Also 'False' for an Escape that closes an
+-- open dropdown, a focused combo box's list or a text-edit menu, or that
+-- something earlier in the view took ('NanoUI.takeEscape'). Like iced's
+-- @keyboard::listen@, this only reports keys not claimed by the focused
+-- widget; 'pressedIn' checks raw frame input. To bind a command to a key,
+-- use 'shortcut'.
 keyPressed :: Key -> NanoUI Bool
 keyPressed = keyIn pressedIn
 
@@ -46,7 +49,8 @@ keyIn :: (Key -> Input -> Bool) -> Key -> NanoUI Bool
 keyIn happened k = do
   inp <- askInput
   if happened k inp
-    then withContext (\ctx -> keyFree ctx (inputModifiers inp) k)
+    then withContext $ \ctx ->
+      keyFree ctx (inputModifiers inp) k <&&> (if k == KeyEscape then not <$> escapeReserved ctx inp else pure True)
     else pure False
 
 -- | Whether the view may handle this key: no modal is open and the focused

@@ -313,8 +313,9 @@ keyActivated wid = do
 -- does not: the widget that opened the panel toggles it on its own click,
 -- which would otherwise reopen what the press just closed. Nor does a press
 -- on an open dropdown or text-edit menu, which may lie outside the panel it
--- belongs to, or an Escape that closes one, or that something declared
--- earlier (a popup inside this one) already took. Nor does a press on a
+-- belongs to, or an Escape that closes one or a focused combo box's list, or
+-- that something declared earlier (a popup inside this one) already took
+-- ('escapeReserved'). Nor does a press on a
 -- floating panel inside @owner@'s (a context menu or popup declared in its
 -- body), which may lie past the panel's edge.
 useDismissable :: WidgetId -> Rect -> Rect -> NanoUI Bool
@@ -322,13 +323,11 @@ useDismissable owner panel opener = do
   inp <- askFrameInput
   withContext $ \ctx -> do
     route <- getsInteraction ctx isPointerRoute
-    menu <- getsInteraction ctx isTextInputMenu
-    dropdown <- anySelectOpen <$> getStore ctx
-    taken <- overlayConsumesQuit ctx inp
+    reserved <- escapeReserved ctx inp
     let onMenu = case route of
           RouteLayer _ -> False
           _ -> True
-        esc = pressedOnceIn KeyEscape inp && not taken && null menu && not dropdown
+        esc = pressedOnceIn KeyEscape inp && not reserved
         pressed = anyButtonPressed inp && not onMenu
         at = inputMousePos inp
         outside = pressed && not (rectContains panel at || rectContains opener at)

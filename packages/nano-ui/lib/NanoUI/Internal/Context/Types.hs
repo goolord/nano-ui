@@ -779,6 +779,11 @@ data InteractionState = InteractionState
   , isColumnResize :: {-# UNPACK #-} !Bool
   -- | Kind of the focused widget at frame start.
   , isFocusKind :: !FocusKind
+  -- | The focused widget at frame start is a combo box showing its list (a
+  -- text input carrying options), which closes on Escape. Read from last
+  -- frame's nodes, like 'isFocusKind', so the view can ask before the combo
+  -- is declared.
+  , isFocusCombo :: !Bool
   -- | This frame's IME composition and the text field showing it (widget id
   -- 0 when unclaimed). See 'NanoUI.Internal.Frame.TextInput.claimComposition'.
   , isComposition :: !(Maybe (Composition, WidgetId))
@@ -855,6 +860,7 @@ initialInteractionState = InteractionState
   , isWindowResize = Nothing
   , isColumnResize = False
   , isFocusKind = FocusNone
+  , isFocusCombo = False
   , isComposition = Nothing
   }
 

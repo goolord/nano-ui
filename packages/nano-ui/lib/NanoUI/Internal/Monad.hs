@@ -100,7 +100,7 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bits ((.&.))
 import Data.Hashable (Hashable, hash)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
-import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.IORef (modifyIORef', writeIORef)
 import Data.Monoid (Ap (..))
 import Data.Text (Text)
 import Data.Word (Word64)
@@ -130,7 +130,7 @@ import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id hiding (currentId)
 import NanoUI.Internal.Id.Cursor (peekWidgetId, readIdCursor, skipSiblingIds, takeWidgetId, writeIdCursor)
-import NanoUI.Internal.Layout.Arena (NodeType (NodeTextInput), arenaCount, getArenaScope, getNodeType, getOptions, lookupNodeByWidgetId, setArenaScope)
+import NanoUI.Internal.Layout.Arena (arenaCount, getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
 import NanoUI.Internal.Input (Input (..), Key (KeyEscape), MouseButton, Pressable (..), inputMousePos, inputWindowSize, noButtons, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
@@ -642,23 +642,11 @@ takeEscape = do
   if not (pressedOnceIn KeyEscape inp)
     then pure False
     else withContext $ \ctx -> do
-      taken <- overlayConsumesQuit ctx inp
-      menu <- getsInteraction ctx isTextInputMenu
-      dropdown <- anySelectOpen <$> getStore ctx
-      combo <- focusedCombo ctx
+      reserved <- escapeReserved ctx inp
       blocked <- pointerBlockedByModal ctx
-      let ours = not taken && null menu && not dropdown && not combo && not blocked
+      let ours = not reserved && not blocked
       when ours (markEscapeConsumed ctx)
       pure ours
-  where
-    -- A focused combo (a text input carrying options) shows its dropdown
-    -- for as long as it holds focus.
-    focusedCombo ctx = do
-      let na = ctxNodeArena ctx
-      mIdx <- lookupNodeByWidgetId na =<< readIORef (ctxFocusId ctx)
-      case mIdx of
-        Nothing -> pure False
-        Just idx -> getNodeType na idx >>= \nt -> if nt == NodeTextInput then not . null <$> getOptions na idx else pure False
 
 -- | Turn the layout overlay on or off. It outlines every layout node one pixel
 -- inside its edge, coloured by depth and drawn in the node's layer, and tints

@@ -3,6 +3,7 @@ module NanoUI.Internal.Context.Overlay
   ( textInputEditActive
   , modalActive
   , overlayConsumesQuit
+  , escapeReserved
   , markEscapeConsumed
   , markTabConsumed
   , tabConsumed
@@ -26,6 +27,7 @@ import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input, Key (KeyEscape), Pressable (..), withoutPointer)
+import NanoUI.Internal.Store (anySelectOpen)
 import NanoUI.Internal.Types (Rect, V2, rectContains, rectNonEmpty)
 
 -- | Whether any widget has keyboard focus or a text-edit menu is open.
@@ -45,6 +47,18 @@ overlayConsumesQuit :: Context -> Input -> IO Bool
 overlayConsumesQuit ctx inp = do
   consumed <- getsOverlay ctx osEscapeConsumed
   pure (pressedOnceIn KeyEscape inp && consumed)
+
+-- | Whether this frame's Escape is spoken for: something took it already
+-- ('overlayConsumesQuit'), or an open text-edit menu, an open dropdown or a
+-- focused combo box's list ('isFocusCombo') closes on it. The view's Escape
+-- consumers ask this, so none acts on the Escape such a menu takes, wherever
+-- it is declared.
+escapeReserved :: Context -> Input -> IO Bool
+escapeReserved ctx inp = do
+  taken <- overlayConsumesQuit ctx inp
+  menuOrCombo <- getsInteraction ctx (\s -> isJust (isTextInputMenu s) || isFocusCombo s)
+  dropdown <- anySelectOpen <$> getStore ctx
+  pure (taken || menuOrCombo || dropdown)
 
 -- | Mark Escape as handled so closing an overlay does not also quit the app.
 markEscapeConsumed :: Context -> IO ()

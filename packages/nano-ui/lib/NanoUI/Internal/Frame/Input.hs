@@ -470,10 +470,11 @@ constrainFocusToModal ctx = do
       unlessM (widgetOverlayAllowed ctx wid) $ setStore ctx (closeSelects store))
 
 -- | Record in 'isFocusKind' what kind of widget has keyboard focus and which
--- keys it claims ('KeyClaim'), from last frame's nodes. Runs before the
--- view rebuilds them, so a shortcut declared before the focused widget
--- still sees it. @ime@: an input method owns the focused field's keys this
--- frame ('NanoUI.Internal.Frame.TextInput.claimComposition').
+-- keys it claims ('KeyClaim'), and in 'isFocusCombo' whether it is a combo
+-- box showing its list, from last frame's nodes. Runs before the view
+-- rebuilds them, so a shortcut declared before the focused widget still sees
+-- it. @ime@: an input method owns the focused field's keys this frame
+-- ('NanoUI.Internal.Frame.TextInput.claimComposition').
 recordFocusKind :: Context -> Bool -> IO ()
 recordFocusKind ctx ime = do
   focus <- readIORef (ctxFocusId ctx)
@@ -493,8 +494,10 @@ recordFocusKind ctx ime = do
             NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
             NodeDrawing -> FocusControl . maybe KeysNone cdrKeys <$> lookupCustomDrawing ctx focus
             _ -> pure (FocusControl KeysNavigate)
+  combo <- if kind == FocusTextLine then isJust <$> focusedComboNode ctx else pure False
   was <- getsInteraction ctx isFocusKind
-  when (kind /= was) $ modifyInteraction ctx (\s -> s {isFocusKind = kind})
+  wasCombo <- getsInteraction ctx isFocusCombo
+  when (kind /= was || combo /= wasCombo) $ modifyInteraction ctx (\s -> s {isFocusKind = kind, isFocusCombo = combo})
 
 -- | Whether state or input changes require a frame. Arguments are previous
 -- and current input. Tests hover only after pointer motion; timed wake
