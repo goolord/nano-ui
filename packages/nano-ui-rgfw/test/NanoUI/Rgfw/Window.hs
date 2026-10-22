@@ -14,8 +14,8 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import NanoUI
-  ( DrawOp (..), Size (..), Theme (..), WindowMode (..), WindowSettings (..), WindowState (..), askWindow, defaultWindowSettings
-  , quitUi, rgbaBytes, rgbaHeight, rgbaWidth, setWindowTitleUi, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
+  ( DrawOp (..), Size (..), Theme (..), V2 (..), WindowMode (..), WindowSettings (..), WindowState (..), askInput, askWindow
+  , defaultWindowSettings, inputMousePos, quitUi, rgbaBytes, rgbaHeight, rgbaWidth, setWindowTitleUi, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
   , tomorrowNightMinDarkTheme, windowColor
   )
 import NanoUI.Backend (Damage (..))
@@ -79,7 +79,8 @@ testGlWindow assert =
 
 -- | A session window opens at its layout-unit size and requested scale (both
 -- visible to the view), accepts a title from the view, and closes when the
--- view quits.
+-- view quits. Until the pointer comes, it is off the window, not on the
+-- widget in the top-left corner.
 testSessionWindow :: (String -> Bool -> IO ()) -> IO ()
 testSessionWindow assert =
   hasDisplay >>= \case
@@ -89,12 +90,14 @@ testSessionWindow assert =
       let view = do
             size <- windowSize
             st <- askWindow
+            V2 mx my <- inputMousePos <$> askInput
             setWindowTitleUi "renamed"
-            liftIO (writeIORef seen (Just (size, winScale st)))
+            liftIO (writeIORef seen (Just (size, winScale st, mx < -1000 && my < -1000)))
             quitUi
       opened <- try (runRgfwApp defaultRgfwOptions {optScale = 2, optWindow = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}} view)
       readIORef seen >>= \case
         Nothing -> putStrLn "[SKIP] RGFW session window: no OpenGL 3.2 window"
-        Just got ->
+        Just (size, scale, offWindow) -> do
           assert "RGFW session window: its size in layout units at its scale"
-            (got == (Size 200 150, 2) && isRight (opened :: Either IOException ()))
+            ((size, scale) == (Size 200 150, 2) && isRight (opened :: Either IOException ()))
+          assert "RGFW session window: the pointer starts off the window" offWindow

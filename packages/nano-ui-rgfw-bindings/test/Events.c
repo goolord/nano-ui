@@ -8,6 +8,12 @@
 
 size_t rgfw_test_event_size(void) { return sizeof(RGFW_event); }
 
+/* RGFW.c defines it; RGFW.h declares it only for its implementation. */
+void RGFW_mouseNotifyCallback(RGFW_window *win, i32 x, i32 y, RGFW_bool status);
+
+/* Queue the pointer entering the window at (x, y), as the platforms do. */
+void rgfw_test_enter(RGFW_window *win, int x, int y) { RGFW_mouseNotifyCallback(win, x, y, RGFW_TRUE); }
+
 /* Press the left button at (5, 5) through the window procedure, as Windows
    delivers it, then either release it at (x, y) or, when lose is set, take
    the capture away as another window would. 1 when the press captured the

@@ -65,6 +65,7 @@ newtype Window = Window (Ptr RGFW_window)
 -- | A copied native event. Key events carry RGFW key codes of physical keys
 -- ('physicalToMappedKey' maps them to the layout) and modifier bits;
 -- motion/resize coordinates are native window pixels, not nano-ui logical units.
+-- The pointer entering the window comes as motion to where it entered.
 data Event
   = EventNone
   | EventKeyPress !Word32 !Word8
@@ -161,7 +162,7 @@ pollEvent (Window win) evPtr = do
           | t == rgfw_mouseButtonPressed || t == rgfw_mouseButtonReleased -> do
               CUChar b <- c_rgfw_event_button_value evPtr
               pure (EventMouseButton b (t == rgfw_mouseButtonPressed))
-          | t == rgfw_mouseMotion ->
+          | t == rgfw_mouseMotion || t == rgfw_mouseEnter ->
               liftA2
                 (EventMouseMotion `on` fromIntegral)
                 (c_rgfw_event_mouse_x evPtr)

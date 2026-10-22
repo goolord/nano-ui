@@ -408,7 +408,9 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
       -- or the next one if none is under way.
       setWakeLoop ctx R.stopWaitForEvent
       let font = getCozetteFont
-          initInp = emptyInput {inputWindowSize = logicalSize initPhys initScale}
+          -- The pointer is off the window until an entry or a motion says
+          -- where it is, not on the widget in the top-left corner.
+          initInp = applyPointerLeave emptyInput {inputWindowSize = logicalSize initPhys initScale}
           -- Touch the platform cursor only when the wanted kind changes.
           -- 'UiCursorHidden' hides the pointer.
           syncCursor c inp = uiCursorKind c inp >>= syncCursorKind cursorRef (R.showMouse win) (setIcon . mapRgfwCursor)
