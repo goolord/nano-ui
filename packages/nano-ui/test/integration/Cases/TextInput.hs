@@ -179,6 +179,15 @@ runTextInputLineBreakTest ctx failed = do
   _ <- runFrame ctx (chordInp (ctrl <> key 'a') inp0) ui
   ints <- storeInt <$> getStore ctx
   assertEq failed (Just 6) (IM.lookup (slotKey SlotCursor (intKey (respId resp))) ints)
+  -- A Windows line end stays two characters of the value: a key that edits
+  -- nothing leaves the value as it is and reports no change.
+  crlf <- newContext
+  crlfRef <- newVar "ab\r\ncd"
+  let crlfUi = column (held crlfRef textInput')
+  _ <- warmup2 crlf inp0 crlfUi
+  _ <- runFrame crlf (tabInp inp0) crlfUi
+  assertEq failed (False, "ab\r\ncd") . (\(r, v) -> (respChanged r, v)) =<< evalUi crlf (keyInp KeyLeft inp0) crlfUi
+  assertEq failed "ab\r\ncXd" . snd =<< evalUi crlf (inp0 {inputChars = "X"}) crlfUi
 
 -- | Emptying a search field from the keyboard reports the change on that
 -- frame, as its clear button does, rather than after the debounce.

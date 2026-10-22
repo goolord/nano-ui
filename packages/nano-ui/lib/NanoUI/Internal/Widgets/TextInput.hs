@@ -38,6 +38,7 @@ import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
 import Data.Char (isControl)
 import Data.Maybe (fromMaybe, isNothing)
+import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Clock (getMonotonicTime)
@@ -86,10 +87,12 @@ saveTextInputState key s =
 
 -- | The editor for a field's state, with the undo history stored for it. A
 -- history recorded against other text (the caller replaced the value) is
--- dropped.
+-- dropped. The rows keep a Windows line end's @\\r@ ('TB.fromText' would drop
+-- it), so the value comes back as it was and its offsets count every
+-- character.
 textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
-  let buf0 = TB.fromText (tisText s)
+  let buf0 = TB.fromLines (Seq.fromList (T.splitOn "\n" (tisText s)))
       buf = TB.withCursor (fieldPosition buf0 (tisCursor s)) buf0
       history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
         Just (FieldHistory text h) | text == tisText s -> h
