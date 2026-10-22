@@ -8,6 +8,7 @@ module NanoUI.Internal.Widgets.Shortcut
   , shortcut
   , shortcutOnce
   , hardQuitUsed
+  , focusTakesChord
   ) where
 
 import Control.Monad (when)

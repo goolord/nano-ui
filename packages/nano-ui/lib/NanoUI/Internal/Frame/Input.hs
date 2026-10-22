@@ -52,14 +52,17 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
+import NanoUI.Internal.Widgets.Shortcut (focusTakesChord)
 
 -- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
 -- and show the focus ring. Moving focus blurs the old widget
 -- ('blurFocus'). A Tab consumed by the focused widget
--- ('NanoUI.Internal.Context.markTabConsumed') moves nothing.
+-- ('NanoUI.Internal.Context.markTabConsumed'), or one it claims
+-- ('focusTakesChord': 'KeysAll', or 'KeysOnly' naming the chord), moves
+-- nothing.
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
-  whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx)) $ do
+  whenM (pure (inputKeysElem KeyTab (inputKeys inp)) <&&> (not <$> tabConsumed ctx) <&&> (not . claimed <$> getsInteraction ctx isFocusKind)) $ do
     cur <- readIORef (ctxFocusId ctx)
     next <- tabTarget ctx cur (modShift (inputModifiers inp))
     when (hashWidgetId next /= 0) $ do
@@ -72,6 +75,8 @@ finalizeTabFocus ctx inp =
       writeIORef (ctxFocusId ctx) next
       writeIORef (ctxFocusVisible ctx) True
       markDirty ctx
+  where
+    claimed kind = focusTakesChord kind (inputModifiers inp) KeyTab
 
 -- | Where Tab moves focus from @cur@ (backwards when @back@), stepping
 -- through 'tabStops' and wrapping at both ends. @WidgetId 0@ if there are

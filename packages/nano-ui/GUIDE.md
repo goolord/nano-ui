@@ -398,7 +398,8 @@ auto-repeats. Shortcuts and view-level key queries (`keyPressed`,
 Ctrl+A in a text input, Enter/Space on a focused button, or arrow keys on a
 focused slider or list; modified chords like Ctrl+Enter or Alt+Left still pass
 through to shortcuts). Custom widgets specify which keys they handle via
-`widgetKeys` (for example, a terminal widget sets `KeysAll`). `menuItemShortcut`
+`widgetKeys` (for example, a terminal widget sets `KeysAll`); one that claims
+Tab this way keeps focus when Tab is pressed. `menuItemShortcut`
 only matches while its menu is open; to make the shortcut active while the menu
 is closed, also declare a top-level `shortcut` before the menu.
 

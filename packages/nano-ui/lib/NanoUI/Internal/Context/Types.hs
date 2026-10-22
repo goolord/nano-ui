@@ -828,7 +828,8 @@ data KeyClaim
   | -- | Multi-line text field: typing keys plus editing keys and shortcuts,
     -- under any modifiers.
     KeysType
-  | -- | Every key: a terminal, or an editor with its own chords.
+  | -- | Every key: a terminal, or an editor with its own chords. Tab too,
+    -- which then does not move focus off the widget.
     KeysAll
   | -- | No keys: focus alone does not reserve application shortcuts.
     KeysNone

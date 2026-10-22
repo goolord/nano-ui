@@ -26,6 +26,7 @@ tests =
   , spec "focus-request-closes-menus" runFocusRequestClosesMenusTest
   , spec "focus-tab-closes-menus" runFocusTabClosesMenusTest
   , spec "focus-back-tab-from-none" runFocusBackTabFromNoneTest
+  , spec "focus-tab-claimed" runFocusTabClaimedTest
   , spec "focus-next-previous" runFocusNextPreviousTest
   , spec "focus-clear-release" runFocusClearReleaseTest
   , spec "focus-text-command" runFocusTextCommandTest
@@ -273,6 +274,25 @@ runFocusBackTabFromNoneTest ctx failed = do
   [_, _, c] <- warmup2 ctx inp ui
   _ <- runFrame ctx (chordInp (shift <> key KeyTab) inp) ui
   assertEq failed c =<< getFocusId ctx
+
+-- | A focused custom widget that claims Tab ('KeysAll', or 'KeysOnly'
+-- naming the chord) reads it and keeps focus; one claiming other keys lets
+-- Tab move focus on.
+runFocusTabClaimedTest :: Context -> IORef Int -> IO ()
+runFocusTabClaimedTest _ failed =
+  forM_ [(KeysAll, True), (KeysOnly [key KeyTab], True), (KeysOnly [shift <> key KeyTab], False), (KeysNavigate, False)] $ \(claim, keeps) -> do
+    ctx <- newContext
+    let ui = column $ do
+          (r, _) <- customWidget defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = claim, widgetLayout = fixedWH 100 30 defaultLayout}
+          tabbed <- focusedKeyPressed (respId r) KeyTab
+          _ <- button' "Next"
+          pure (respId r, tabbed)
+    warmupFocused ctx inp ui
+    (w, _) <- evalUi ctx inp ui
+    assertEq failed w =<< getFocusId ctx
+    (_, tabbed) <- evalUi ctx (tabInp inp) ui
+    assert failed tabbed
+    assertEq failed (claim, keeps) . (claim,) . (== w) =<< getFocusId ctx
 
 -- | 'focusNext' and 'focusPrevious' act like Tab and Shift+Tab at the end of
 -- the frame, wrapping at both ends; 'isFocused' reports the focused widget.
