@@ -12,9 +12,7 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray qualified as SA
 import NanoUI.Internal.Context (ctxNodeArena)
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeIdx
-  , NodeType (..)
+  ( NodeIdx
   , NodeArena
   , findNodeM
   , foldNodesM

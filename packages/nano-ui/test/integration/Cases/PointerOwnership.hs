@@ -9,7 +9,6 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Text.IO.Utf8 qualified as TIO
 import NanoUI.Internal.Context (Context (ctxActiveId), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
-import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
 import NanoUI.Internal.Widgets.TextArea (loadTextAreaState, tasBuffer, tasSelectionAnchor)
 import NanoUI.Widgets.TextBuffer (getCursor)

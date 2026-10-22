@@ -3,7 +3,6 @@ module Cases.Demo (tests) where
 import Spec
 import Data.Hashable (Hashable (..))
 import Data.Text qualified as T
-import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Shortcut
 
 tests :: [Spec]

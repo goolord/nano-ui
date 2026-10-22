@@ -9,9 +9,7 @@ import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeType (..)
-  , findNodeM
+  ( findNodeM
   , getClipBounds
   , getClipRect
   , getNodeValue

@@ -9,7 +9,7 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray (smallArrayFromList)
 import NanoUI.Internal.Context (Context (..), registerCustomDrawing)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..), addNodeFromLayout, getNodeRect, setNodeText
+  ( addNodeFromLayout, getNodeRect, setNodeText
   , setNodeValue, setStyleIdx, setWidgetId
   )
 import NanoUI.Internal.Store (ptrEq)
