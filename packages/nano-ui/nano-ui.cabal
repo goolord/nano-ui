@@ -113,6 +113,7 @@ library
         NanoUI.Internal.Layout.Solve
         NanoUI.Internal.Monad
         NanoUI.Internal.Path
+        NanoUI.Internal.RichText.Types
         NanoUI.Internal.SIMD
         NanoUI.Internal.Store
         NanoUI.Internal.Store.Types
@@ -134,7 +135,6 @@ library
         NanoUI.Internal.BackendSession
         NanoUI.Internal.NativeWindow.Types
         NanoUI.Internal.Sensor.Types
-        NanoUI.Internal.RichText.Types
         NanoUI.Internal.TextEditor.Types
         NanoUI.Internal.TextCluster
         NanoUI.Internal.Animatable
