@@ -138,7 +138,8 @@ data SdlOptions = SdlOptions
   -- ^ Which SDL render driver to ask for (default: 'RenderDriverAuto').
   -- An @SDL_RENDER_DRIVER@ in the environment wins over this.
   , sdlAppContinuous :: !Bool
-  -- ^ Continuous unthrottled rendering without waiting for events (default: 'False').
+  -- ^ Redraw on every pass without waiting for events, paced by vsync when
+  -- 'sdlAppVsync' is on (default: 'False').
   , sdlExplainLayout :: !Bool
   -- ^ Start with the layout overlay on (default: 'False'). A view toggles
   -- it with @explainLayout@.

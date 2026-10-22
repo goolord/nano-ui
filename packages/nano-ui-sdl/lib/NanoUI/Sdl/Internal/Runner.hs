@@ -50,8 +50,11 @@ import SDL3.Sys.Render
   )
 
 -- | Build, draw, and present one frame on the display thread. The final flag
--- forces a full repaint. Returns whether another frame is needed. Use the
--- context/input returned by @syncDisplay@.
+-- forces a full repaint. Returns whether the frame left the context dirty
+-- ('NanoUI.Backend.isDirty'); a host that draws frames itself also draws
+-- while 'NanoUI.Testing.anyAnimating' holds, and at
+-- 'NanoUI.Backend.getWakeAt'. Use the context/input returned by
+-- @syncDisplay@.
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO Bool
 sdlDrawFrame ctx ui env inp forceFull =
   drawFrameWith ctx env inp forceFull ((\(_, drawData, dirty) -> (drawData, dirty)) <$> runFrame ctx inp ui)
