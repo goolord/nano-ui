@@ -445,8 +445,8 @@ drawingHeightAt SolveEnv {seArena = na, seMs = ms} idx w hAx fallback = do
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
 -- nothing caps it (@textNodeSpanEntry@ in the text-span collector). Text
--- whose width is not fit wraps at the width it was assigned, as
--- 'positionNode' wraps it; fit text wraps where it was measured.
+-- whose width is not fit wraps at the width it was assigned, as the solve's
+-- position pass wraps it; fit text wraps where it was measured.
 textWrapCap :: Float -> SizingTag -> Float -> Float
 textWrapCap effMaxW wTag w
   | wTag /= SizingFit && w > 0 = w
