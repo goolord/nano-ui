@@ -1,6 +1,7 @@
 module Cases.Styling (tests) where
 
 import Spec
+import Control.Exception (ErrorCall, evaluate, try)
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
 import Data.Text (Text)
@@ -28,6 +29,12 @@ runByteEnumsTest _ failed = do
   assertEq failed "[BreakWords,BreakAnywhere]" (show [minBound :: TextBreak ..])
   assertEq failed "[LinesStart,LinesEnd]" (show [LinesStart, LinesEnd ..])
   assertEq failed [0, 1, 2] (map fromEnum [PointerAuto ..])
+  -- 'succ' and 'pred' stop at the bounds, as a derived enum's do.
+  assertEq failed (LinesCenter, PointerBlock) (succ LinesStart, pred PointerPass)
+  past <-
+    forM [fromEnum (succ LinesEnd), fromEnum (pred PointerAuto), fromEnum (succ BreakAnywhere)] $ \n ->
+      either (const True) (const False) <$> try @ErrorCall (evaluate n)
+  assertEq failed [True, True, True] past
 
 -- | A pointer press, drag and typing on a disabled widget change nothing and
 -- give it no focus.

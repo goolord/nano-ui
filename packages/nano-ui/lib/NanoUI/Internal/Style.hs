@@ -162,7 +162,7 @@ import Data.Bits (setBit, testBit, (.|.))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
-import GHC.Enum (boundedEnumFrom, boundedEnumFromThen)
+import GHC.Enum (boundedEnumFrom, boundedEnumFromThen, predError, succError)
 import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
@@ -684,10 +684,13 @@ instance Bounded LineAlign where
   minBound = LinesStart
   maxBound = LinesEnd
 
--- | Enumerations stop at 'maxBound', not at the byte's.
+-- | Enumerations, 'succ' and 'pred' stop at the bounds, not at the byte's.
+-- 'toEnum' does not check its argument.
 instance Enum LineAlign where
   fromEnum (LineAlign n) = fromIntegral n
   toEnum = LineAlign . fromIntegral
+  succ a = if a >= maxBound then succError "LineAlign" else toEnum (fromEnum a + 1)
+  pred a = if a <= minBound then predError "LineAlign" else toEnum (fromEnum a - 1)
   enumFrom = boundedEnumFrom
   enumFromThen = boundedEnumFromThen
 
@@ -758,10 +761,13 @@ instance Bounded PointerMode where
   minBound = PointerAuto
   maxBound = PointerPass
 
--- | Enumerations stop at 'maxBound', not at the byte's.
+-- | Enumerations, 'succ' and 'pred' stop at the bounds, not at the byte's.
+-- 'toEnum' does not check its argument.
 instance Enum PointerMode where
   fromEnum (PointerMode n) = fromIntegral n
   toEnum = PointerMode . fromIntegral
+  succ a = if a >= maxBound then succError "PointerMode" else toEnum (fromEnum a + 1)
+  pred a = if a <= minBound then predError "PointerMode" else toEnum (fromEnum a - 1)
   enumFrom = boundedEnumFrom
   enumFromThen = boundedEnumFromThen
 
@@ -801,10 +807,13 @@ instance Bounded TextBreak where
   minBound = BreakWords
   maxBound = BreakAnywhere
 
--- | Enumerations stop at 'maxBound', not at the byte's.
+-- | Enumerations, 'succ' and 'pred' stop at the bounds, not at the byte's.
+-- 'toEnum' does not check its argument.
 instance Enum TextBreak where
   fromEnum (TextBreak n) = fromIntegral n
   toEnum = TextBreak . fromIntegral
+  succ a = if a >= maxBound then succError "TextBreak" else toEnum (fromEnum a + 1)
+  pred a = if a <= minBound then predError "TextBreak" else toEnum (fromEnum a - 1)
   enumFrom = boundedEnumFrom
   enumFromThen = boundedEnumFromThen
 
