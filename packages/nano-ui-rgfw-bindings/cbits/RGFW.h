@@ -11949,7 +11949,10 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 
 	RGFW_window_setBorder(win, 0);
 
-    SetWindowPos(win->src.window, HWND_TOPMOST, (i32)mon->x, (i32)mon->y, 0, 0, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOSIZE);
+	/* nano-ui: on top, not topmost. Losing focus no longer minimizes the
+	   window, and a topmost one would stay over the app switched to, and
+	   over everything once it left fullscreen. */
+    SetWindowPos(win->src.window, HWND_TOP, (i32)mon->x, (i32)mon->y, 0, 0, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOSIZE);
 	win->x = mon->x;
 	win->y = mon->y;
 
@@ -11957,7 +11960,7 @@ void RGFW_window_setFullscreen(RGFW_window* win, RGFW_bool fullscreen) {
 	   fullscreen does. RGFW_monitor_scaleToWindow switched the monitor to
 	   the window's size and saved that to the registry, and nothing put it
 	   back when the app quit or lost focus. */
-    SetWindowPos(win->src.window, HWND_TOPMOST, 0, 0, (i32)mon->mode.w, (i32)mon->mode.h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOMOVE);
+    SetWindowPos(win->src.window, HWND_TOP, 0, 0, (i32)mon->mode.w, (i32)mon->mode.h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOMOVE);
 	win->w = mon->mode.w;
 	win->h = mon->mode.h;
 }
