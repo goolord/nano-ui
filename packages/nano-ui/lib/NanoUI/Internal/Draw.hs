@@ -365,7 +365,12 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
         prepared <- prepareFontMetrics fm t
         let Rect px py _ _ = drawTextBox prepared x y ax ay t
         pushPreparedTextQuads da prepared px py t c
-    emitOne (DrawTextStyled x y font t c) = styled x y font t c
+    -- Styled text with its line box's top-left corner at (x, y).
+    emitOne (DrawTextStyled x y font t c) = do
+      (styledFm, native) <- resolve font
+      unlessOffClip styledFm y $ do
+        prepared <- prepareFontMetrics styledFm t
+        pushStyled prepared native font x y t c
     emitOne (DrawTextAligned x y ax ay k font t c) = do
       let font'
             | k == 1 = font
@@ -376,12 +381,6 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
         let Rect px py _ _ = drawTextBox prepared x y ax ay t
         pushStyled prepared native font' px py t c
     emitOne op = pushShapeOp da op
-    -- Styled text with its line box's top-left corner at (x, y).
-    styled x y font t c = do
-      (styledFm, native) <- resolve font
-      unlessOffClip styledFm y $ do
-        prepared <- prepareFontMetrics styledFm t
-        pushStyled prepared native font x y t c
     -- Text in @font@, with metrics prepared for it, synthesizing the font's
     -- weight and slant unless the host renders them natively.
     pushStyled prepared native font x y t c =
