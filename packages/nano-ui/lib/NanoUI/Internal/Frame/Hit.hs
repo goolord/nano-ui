@@ -38,7 +38,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Style (PointerMode (..))
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, hasFlag)
+import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 
 -- | The node that carries widget id @wid@ in this frame's arena. 'Nothing' for
 -- @WidgetId 0@ and for a widget the view has not declared this frame. When
@@ -197,41 +197,18 @@ nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
 -- not solved. @rect@ is the widget's rect from the previous frame
 -- ('NanoUI.Internal.Context.getPrevRect'). The point must be inside it, and
 -- inside the clip the widget was painted in on the previous frame
--- ('NanoUI.Internal.Context.getPrevClipRect'), so a widget a panel cut away
--- takes no input there. It must also be inside the previous
--- frame's viewport of every scroll container above node @idx@, so content
--- scrolled out of view takes no input, nor does content of a scroller whose
--- viewport was empty; a scroll container with no recorded viewport does not
--- constrain the point. A widget drawn inside another widget
--- takes no input outside that widget's previous rect either. The walk stops
--- at a floating panel, which is drawn and clipped by itself: nothing it is
--- declared in bounds it. The node's own clip rect is not read: it is not set
--- until 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
+-- ('NanoUI.Internal.Context.getPrevClipRect'). That clip already holds every
+-- scroll viewport, clipping container, panel and enclosing widget up to the
+-- widget's floating panel, so content scrolled or cut out of view takes no
+-- input there. A widget with no recorded clip is not constrained by one. The
+-- node's own clip rect is not read: it is not set until
+-- 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' runs.
 {-# INLINE nodeInteractionHit #-}
 nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
   | not (rectContains rect mouse) = pure False
   | idx <= 0 = pure True
-  | otherwise =
-      (maybe True (`rectContains` mouse) <$> (getPrevClipRect ctx =<< getWidgetId na idx))
-        <&&> (getParent na idx >>= inside)
- where
-  -- Whether the mouse is inside the recorded viewport of every scroll
-  -- container, and the previous rect of every widget and clipping container
-  -- ('containerFlagClip'), from node @i@ up to the first floating panel.
-  inside i
-    | i < 0 = pure True
-    | otherwise = do
-        nt <- getNodeType na i
-        bounds <- case nt of
-          NodeScrollContainer -> getPrevClipRect ctx =<< getWidgetId na i
-          _ | isWidgetNode nt -> getPrevRect ctx =<< getWidgetId na i
-          NodeContainer -> ifM (hasFlag containerFlagClip <$> getStyleIdx na i) (getPrevRect ctx =<< getWidgetId na i) (pure Nothing)
-          _ -> pure Nothing
-        case bounds of
-          Just r | not (rectContains r mouse) -> pure False
-          _ | isFloatingNode nt -> pure True
-            | otherwise -> getParent na i >>= inside
+  | otherwise = maybe True (`rectContains` mouse) <$> (getPrevClipRect ctx =<< getWidgetId na idx)
 
 -- | Whether node @idx@ takes the pointer when drawn on top ('PointerMode'):
 -- widgets do by default, 'PointerBlock' nodes always, 'PointerPass' nodes
