@@ -87,8 +87,11 @@ module NanoUI.Backend
     -- keys; mouse buttons through 'applyMouseButton' (numbered with
     -- 'mouseButtonNumber'); dropped files through 'appendDropEvent'. When the
     -- pointer leaves the window, 'applyPointerLeave' moves it off every
-    -- widget. When the window loses keyboard focus, 'releaseAllKeys' releases
-    -- the held keys, whose release events go elsewhere.
+    -- widget, unless a button is held. While one is, the backend keeps
+    -- delivering motion and the release from outside the window (capturing
+    -- the mouse where the platform allows), so a drag follows the pointer out
+    -- and back. When the window loses keyboard focus, 'releaseAllKeys'
+    -- releases the held keys, whose release events go elsewhere.
     --
     -- Every key goes in as a 'Key' whatever the modifiers; a key that types a
     -- character is the 'KeyChar' it types with no modifier held. The typed
