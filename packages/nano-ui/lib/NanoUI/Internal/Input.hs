@@ -54,6 +54,7 @@ module NanoUI.Internal.Input
   , inputKeysFromList
   , stripInteractionInput
   , withoutPointer
+  , offWindow
   , UiCursorKind (..)
   , cursorFallback
   , syncCursorKind

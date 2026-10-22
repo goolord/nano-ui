@@ -17,6 +17,7 @@ tests =
   , spec "custom-widget-knob-covered" runKnobCoveredTest
   , spec "progress-bar-width" runProgressBarWidthTest
   , spec "drop-target" runDropTargetTest
+  , spec "drop-layers" runDropLayersTest
   ]
 
 -- | A progress bar takes the caller's width mode over the fill it has by
@@ -346,3 +347,31 @@ runDropTargetTest ctx failed = do
   (tgtOut, _, _) <- runFrame ctx outInp ui
   assert failed (not (dropReceived tgtOut))
   assert failed (null (dropFiles tgtOut))
+
+-- | An OS drop goes to the layer on top where it lands: a page zone gets
+-- nothing while a modal is up, wherever the drop lands, nor under a
+-- floating window, whose own zone takes the file.
+runDropLayersTest :: Context -> IORef Int -> IO ()
+runDropLayersTest ctx failed = do
+  open <- newVar True
+  let inp0 = withInput 400 400
+      whole = Rect 0 0 400 400
+      dropAt p =
+        inp0
+          { inputDrops =
+              SA.smallArrayFromList
+                [DropEvent DropBegin Nothing "", DropEvent DropPosition (Just p) "", DropEvent DropFile (Just p) "a.txt", DropEvent DropComplete Nothing ""]
+          }
+      ui overlay = do
+        page <- useDrop whole
+        (resp, inner) <- overlay open (useDrop whole)
+        pure (page, resp, inner)
+      files c overlay p = do
+        ((page, _, inner), _, _) <- runFrame c (dropAt p) (ui overlay)
+        pure (dropFiles page, dropFiles <$> inner)
+  (_, onModal, _) <- warmup2 ctx inp0 (ui (`modal'` "Modal"))
+  assertEq failed ([], Just ["a.txt"]) =<< files ctx (`modal'` "Modal") (centerOf onModal)
+  assertEq failed ([], Just []) =<< files ctx (`modal'` "Modal") (V2 2 2)
+  c <- newContext
+  (_, onWindow, _) <- warmup2 c inp0 (ui (`window'` "Window"))
+  assertEq failed ([], Just ["a.txt"]) =<< files c (`window'` "Window") (centerOf onWindow)

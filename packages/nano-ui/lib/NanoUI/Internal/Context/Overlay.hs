@@ -26,7 +26,7 @@ import Data.Maybe (isJust)
 import NanoUI.Internal.Context.Core
 import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Internal.Input (Input, Key (KeyEscape), Pressable (..), withoutPointer)
+import NanoUI.Internal.Input (DropEvent (..), DropType (..), Input (..), Key (KeyEscape), Pressable (..), offWindow, withoutPointer)
 import NanoUI.Internal.Store (anySelectOpen)
 import NanoUI.Internal.Types (Rect, V2, rectContains, rectNonEmpty)
 
@@ -80,14 +80,28 @@ pointerBlockedByModal ctx =
 
 -- | Filter frame input for widgets in @layer@ (0 for the base page, or a
 -- floating panel's key): preserves pointer state only when pointer input is
--- routed to @layer@ and not blocked by a modal.
+-- routed to @layer@ and not blocked by a modal. An OS drag moves no pointer,
+-- so its drops go by where they land: a layer that is not on top there, or
+-- that a modal blocks, sees the drag off the window.
 routedInput :: Context -> Int -> Input -> IO Input
-routedInput ctx layer inp =
-  getsInteraction ctx isPointerRoute >>= \case
-    RouteLayer routed | routed == layer -> do
+routedInput ctx layer inp = do
+  routed <-
+    getsInteraction ctx isPointerRoute >>= \case
+      RouteLayer routed | routed == layer -> do
+        blocked <- pointerBlockedByModal ctx
+        pure (if blocked then withoutPointer inp else inp)
+      _ -> pure (withoutPointer inp)
+  if null (inputDrops inp)
+    then pure routed
+    else do
       blocked <- pointerBlockedByModal ctx
-      pure (if blocked then withoutPointer inp else inp)
-    _ -> pure (withoutPointer inp)
+      let own ev = case dropEventPos ev of
+            Just p | dropEventType ev == DropPosition -> do
+              top <- floatingLayerAt ctx p
+              pure (if blocked || top /= layer then ev {dropEventPos = Just offWindow} else ev)
+            _ -> pure ev
+      drops <- traverse own (inputDrops inp)
+      pure routed {inputDrops = drops}
 
 -- | The layer on top at @mouse@, going by where the floating panels were last
 -- frame: the last panel declared that holds the point, or the page.
