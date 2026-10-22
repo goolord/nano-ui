@@ -465,8 +465,11 @@ paneGridCore cfg controlled given = do
       else do
         rendered <- maybe (pure []) (renderNode env (M.fromList [(diSplitId d, d) | d <- visibleDividers])) visibleTree
         runGestures wid env dividers rendered dragMoved dragZone
-        when (lifted && rectNonEmpty baseRect) $
+        -- The indicator follows the pointer on the grid's own drawing, which
+        -- nothing else damages, so the grid repaints while a pane is lifted.
+        when (lifted && rectNonEmpty baseRect) $ do
           drawDragOverlay env wid mouse (dpRect <$> dragZone)
+          damageWidgetNow wid DamageSelf
         -- Draw an inner focus ring on the active pane in addition to the
         -- grid's outer focus ring.
         ringPane <- liftIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))

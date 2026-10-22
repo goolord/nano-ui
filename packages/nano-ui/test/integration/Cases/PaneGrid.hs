@@ -35,6 +35,7 @@ tests =
   , spec "pane-grid-escape" runEscapeTest
   , spec "pane-grid-handle-overflow" runHandleOverflowTest
   , spec "pane-grid-stale-gesture" runStaleGestureTest
+  , spec "pane-grid-ghost-damage" runGhostDamageTest
   ]
 
 -- | A divider drag released while the grid was not built is over: a press
@@ -60,6 +61,21 @@ runStaleGestureTest ctx failed = do
   -- The first frame back lays the grid out; the next has its rect to drag in.
   replicateM_ 2 (assertEq failed dragged =<< frameShown True later)
   assertEq failed dragged =<< frameShown True (releaseAt later)
+
+-- | The indicator a lifted pane follows the pointer with repaints where it
+-- was and where it is, though the drop zone stays the same.
+runGhostDamageTest :: Context -> IORef Int -> IO ()
+runGhostDamageTest ctx failed = do
+  let inp = withInput 600 400
+      ui = paneGrid halvesGrid {pgViewPane = \_ _ -> pure (PaneView "P" True)}
+      press = pressAt inp (V2 100 200)
+      at x = holdAt press (V2 x 200)
+  _ <- warmup2 ctx inp ui
+  mapM_ (\i -> runFrame ctx i ui) [press, at 300, at 305]
+  _ <- runFrame ctx (at 310) ui
+  dmg <- takeDamage ctx
+  -- The indicator sits 12px right of and below the pointer.
+  assert failed (damageCovers dmg (Rect 317 212 117 28))
 
 -- | The left pane at its 40px minimum, its ratio below it; the gutter runs
 -- from 40 to 56.
