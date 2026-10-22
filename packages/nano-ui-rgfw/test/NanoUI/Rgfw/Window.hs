@@ -23,7 +23,7 @@ import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readWindowPixels, renderArenaGl, retainedPixels)
+import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readRetainedPixels, readWindowPixels, renderArenaGl, retainedPixels)
 import NanoUI.Testing (collectRasterSpans, runFrame)
 import NanoUI.Testing.Assert (withInput)
 import RGFW qualified as R
@@ -62,6 +62,10 @@ testGlWindow assert =
         assert (name "the window colour, opaque") (at (w - 1) (h - 1) == rgb backdrop ++ [255])
         assert (name "the window colour stays opaque, painted twice") (and [p !! 3 == 255 | (_, p) <- pixels, take 3 p == rgb backdrop])
         assert (name "an opaque box") (length reds == 800 && all (< 20) reds)
+        -- A read smaller than the frame fills only its own buffer.
+        corner <- readRetainedPixels renderer 2 1
+        full <- readRetainedPixels renderer w h
+        assert (name "a smaller read is the bottom-left corner") (corner == BS.take 8 full)
         -- The present copies the retained frame; read it from the back
         -- buffer before any swap. Compare colour only, since the window's
         -- visual may have no alpha.

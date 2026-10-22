@@ -91,10 +91,10 @@ foreign import ccall unsafe "nano_ui_gl_present"
   c_present :: Ptr NanoUiGl -> IO ()
 
 foreign import ccall unsafe "nano_ui_gl_read_retained"
-  c_readRetained :: Ptr NanoUiGl -> Ptr Word8 -> IO ()
+  c_readRetained :: Ptr NanoUiGl -> Int32 -> Int32 -> Ptr Word8 -> IO ()
 
 foreign import ccall unsafe "nano_ui_gl_read_window"
-  c_readWindow :: Ptr NanoUiGl -> Ptr Word8 -> IO ()
+  c_readWindow :: Ptr NanoUiGl -> Int32 -> Int32 -> Ptr Word8 -> IO ()
 
 foreign import ccall unsafe "nano_ui_gl_upload_geometry"
   c_uploadGeometry :: Ptr NanoUiGl -> Ptr Word8 -> Int32 -> Ptr Word8 -> Int32 -> IO ()
@@ -196,17 +196,18 @@ syncImagesGl r ctx = do
     writeIORef (glImages r) (if ok then gen else 0)
 
 -- | The retained frame's pixels, for checking what frames drew: RGBA rows,
--- bottom row first, of a w x h frame, which must be the last frame's size.
+-- bottom row first, of its bottom-left w x h. Pixels past the last frame's
+-- size are undefined.
 readRetainedPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readRetainedPixels r w h =
-  BSI.create (w * h * 4) (c_readRetained (glHandle r))
+  BSI.create (w * h * 4) (c_readRetained (glHandle r) (fromIntegral w) (fromIntegral h))
 
 -- | The window back buffer after the last present, in the same layout as
 -- 'readRetainedPixels'. For tests; read before the swap, after which the
 -- back buffer is undefined.
 readWindowPixels :: GlRenderer -> Int -> Int -> IO BS.ByteString
 readWindowPixels r w h =
-  BSI.create (w * h * 4) (c_readWindow (glHandle r))
+  BSI.create (w * h * 4) (c_readWindow (glHandle r) (fromIntegral w) (fromIntegral h))
 
 -- | The retained frame as a top-down screenshot. @w@ x @h@ must be the last
 -- frame's size; each is clamped to at least 1.
