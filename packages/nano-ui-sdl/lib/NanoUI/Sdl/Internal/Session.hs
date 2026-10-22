@@ -9,6 +9,7 @@ import Data.Foldable (traverse_)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
+import GHC.Clock (getMonotonicTime)
 import NanoUI (WindowSettings (..), followSystemTheme, unlessM, whenM)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
 import NanoUI.Runner
@@ -53,6 +54,11 @@ runSdlSession options drawFn = do
     -- and release. It waits for the loop's next pass to throw it, and the
     -- watch draws nothing more.
     resizeFailure <- newIORef Nothing
+    -- When the watch last drew, or 0 when the loop has drawn since. A watch
+    -- frame after another ticks animations by the time between them, not by
+    -- the loop's last delta, and the loop's next frame ticks only the time
+    -- after the watch's.
+    watchDrawnAt <- newIORef 0
     -- The live context is the session's: 'syncDisplay' answers it.
     let resizeFrame = void $ tryWithDrawingLock drawing $ do
           liveCtx <- readIORef (sdlCachedCtx env)
@@ -63,7 +69,12 @@ runSdlSession options drawFn = do
           scale1 <- readIORef (sdlScaleRef env)
           unless (inputWindowSize inpSynced == inputWindowSize inp && scale1 == scale0) $ do
             pauseVsync True
-            _ <- drawFn ctx' env inpSynced True
+            now <- getMonotonicTime
+            t <- readIORef watchDrawnAt
+            writeIORef watchDrawnAt now
+            -- At most the 50 ms the loop ticks a frame by.
+            let dt = if t > 0 then min 0.05 (realToFrac (now - t)) else inputDeltaTime inpSynced
+            _ <- drawFn ctx' env inpSynced {inputDeltaTime = dt} True
             writeIORef resizePresented (Just (inputWindowSize inpSynced))
         onResize = whenM (isNothing <$> readIORef resizeFailure) $
           handle (\(e :: SomeException) -> writeIORef resizeFailure (Just e)) resizeFrame
@@ -161,7 +172,13 @@ runSdlSession options drawFn = do
                 -- Only a frame that runs answers a wake.
                 drawn <- tryWithDrawingLock drawing $ do
                   writeIORef wakeRef False
-                  drawFn c env inpSynced forceFull
+                  t <- readIORef watchDrawnAt
+                  if t > 0
+                    then do
+                      now <- getMonotonicTime
+                      writeIORef watchDrawnAt 0
+                      drawFn c env inpSynced {inputDeltaTime = min (inputDeltaTime inpSynced) (realToFrac (now - t))} forceFull
+                    else drawFn c env inpSynced forceFull
                 -- A frame the lock turned away leaves its wake's event off
                 -- the queue: queue it again for the pass after the lock is
                 -- free.
