@@ -71,6 +71,13 @@ input = withInputOff 400 240
 clickOn :: Context -> NanoUI a -> Rect -> IO ()
 clickOn ctx ui rect = void (runClick ctx input ui (spanCenter rect))
 
+-- | Focus the frame's one control of a type.
+focusOnly :: NodeType -> String -> Context -> IO ()
+focusOnly ty what ctx =
+  nodesOfType ty ctx >>= \case
+    [(wid, _)] -> writeIORef (ctxFocusId ctx) wid
+    _ -> fail ("expected one " <> what)
+
 enabledForm :: Form Text Bool
 enabledForm = inputCheckbox "enabled" False
 
@@ -189,17 +196,13 @@ testSubmitSameFrameEdit =
       let
         ui = nanoFormSubmit owner prefix "Save" (field `prove` notEmpty "Required")
       _ <- warmup2 ctx input ui
-      controls <- nodesOfType NodeTextInput ctx
-      case controls of
-        [(wid, _)] -> do
-          writeIORef (ctxFocusId ctx) wid
-          _ <- warmup2 ctx input ui
-          (submitted, _, _) <-
-            runFrame ctx (keyInp KeyEnter input {inputChars = "abc"}) ui
-          check
-            ("Enter submitted the text from before its frame's typing: " <> show prefix)
-            (submitted == Just "abc")
-        _ -> fail "expected one submit-test text input"
+      focusOnly NodeTextInput "submit-test text input" ctx
+      _ <- warmup2 ctx input ui
+      (submitted, _, _) <-
+        runFrame ctx (keyInp KeyEnter input {inputChars = "abc"}) ui
+      check
+        ("Enter submitted the text from before its frame's typing: " <> show prefix)
+        (submitted == Just "abc")
  where
   decodeText (FormInputText t) = Right t
   decodeText _ = Left ("Expected text" :: Text)
@@ -212,15 +215,11 @@ testSubmitSkipsTextArea = do
   let
     ui = nanoFormSubmit owner "submit-notes" "Save" (inputTextArea "notes" "")
   _ <- warmup2 ctx input ui
-  controls <- nodesOfType NodeTextArea ctx
-  case controls of
-    [(wid, _)] -> do
-      writeIORef (ctxFocusId ctx) wid
-      _ <- warmup2 ctx input ui
-      (submitted, _, _) <-
-        runFrame ctx (keyInp KeyEnter input) ui
-      check "Enter in a focused text area submitted the form" (submitted == Nothing)
-    _ -> fail "expected one submit-test text area"
+  focusOnly NodeTextArea "submit-test text area" ctx
+  _ <- warmup2 ctx input ui
+  (submitted, _, _) <-
+    runFrame ctx (keyInp KeyEnter input) ui
+  check "Enter in a focused text area submitted the form" (submitted == Nothing)
 
 -- | A colour field's value is the colour its picker shows: a picker without
 -- an alpha bar makes an edited translucent colour opaque, and the field's
@@ -302,14 +301,10 @@ testResetTextArea = do
   let
     ui = nanoFormLive owner "reset-editor" (inputTextArea "notes" "initial")
   _ <- warmup2 ctx input ui
-  controls <- nodesOfType NodeTextArea ctx
-  case controls of
-    [(wid, _)] -> do
-      writeIORef (ctxFocusId ctx) wid
-      void (runFrame ctx input {inputChars = "edited"} ui)
-      edited <- warmup2 ctx input ui
-      check "text area did not retain its edit" (edited == Just "editedinitial")
-      runNanoUI ctx input (resetForm owner "reset-editor")
-      reset <- warmup2 ctx input ui
-      check "reset retained the text area's cached buffer" (reset == Just "initial")
-    _ -> fail "expected one reset-test text area"
+  focusOnly NodeTextArea "reset-test text area" ctx
+  void (runFrame ctx input {inputChars = "edited"} ui)
+  edited <- warmup2 ctx input ui
+  check "text area did not retain its edit" (edited == Just "editedinitial")
+  runNanoUI ctx input (resetForm owner "reset-editor")
+  reset <- warmup2 ctx input ui
+  check "reset retained the text area's cached buffer" (reset == Just "initial")
