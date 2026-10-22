@@ -18,6 +18,7 @@ tests =
   , spec "select-dropdown-flips" runSelectDropdownFlipsTest
   , spec "select-dropdown-off-field" runSelectDropdownOffFieldTest
   , spec "select-dropdown-scrolled-away" runSelectDropdownScrolledAwayTest
+  , spec "select-keys-after-focus-moves" runSelectKeysAfterFocusMovesTest
   , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
   , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
   , spec "tree-select" runTreeSelectTest
@@ -210,6 +211,36 @@ runSelectDropdownScrolledAwayTest ctx failed = do
   after <- collectOverlayTextSpans ctx idle
   assert failed (not (hasText "Medium" after))
   assertEq failed 0 . snd =<< runClick ctx idle ui (maybe (V2 20 40) spanCenter (spanRect "Medium" after))
+
+-- | Keys reach an open select only while it has focus: a right-click on a
+-- text field closes it, and a field that takes focus by 'holdFocus' keeps
+-- the arrows to itself.
+runSelectKeysAfterFocusMovesTest :: Context -> IORef Int -> IO ()
+runSelectKeysAfterFocusMovesTest ctx failed = do
+  grabRef <- newIORef False
+  let inp0 = withInput 320 300
+      -- The field above the select, clear of its dropdown.
+      ui = column $ do
+        (t, _) <- withValue "text" textInput'
+        (s, v) <- withValue 0 (select' ["Low", "Medium", "High"])
+        grab <- liftIO (readIORef grabRef)
+        when grab (holdFocus (respId t))
+        pure (s, t, v)
+  (s, t, _) <- warmup2 ctx inp0 ui
+  _ <- runClick ctx inp0 ui (centerOf s)
+  let (rPress, rRelease) = rightClickPair inp0 (centerOf t)
+  _ <- runFrame ctx rPress ui
+  _ <- runFrame ctx rRelease ui
+  assert failed . not . anySelectOpen =<< getStore ctx
+  _ <- runFrame ctx (keyInp KeyDown inp0) ui
+  assertEq failed 0 . (\(_, _, v) -> v) =<< evalUi ctx inp0 ui
+  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+  _ <- runClick ctx inp0 ui (centerOf s)
+  writeIORef grabRef True
+  _ <- runFrame ctx inp0 ui
+  assertEq failed (respId t) =<< getFocusId ctx
+  _ <- runFrame ctx (keyInp KeyDown inp0) ui
+  assertEq failed 0 . (\(_, _, v) -> v) =<< evalUi ctx inp0 ui
 
 -- | A select's dropdown is as wide as the select, and an option wider than
 -- that is clipped to the dropdown rather than drawn over the page, where

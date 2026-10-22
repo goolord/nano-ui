@@ -27,7 +27,7 @@ import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
-import NanoUI.Internal.Id (WidgetId (..))
+import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getClipBounds, getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
@@ -208,7 +208,7 @@ routePointer ctx inp = do
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
-  when (pressedIn MouseLeft inp || releasedIn MouseLeft inp) $ do
+  when (anyButtonPressed inp || releasedIn MouseLeft inp) $ do
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
@@ -232,13 +232,16 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
     -- These keys act on the focused enabled select, open or not. Otherwise
-    -- they go to the open select.
+    -- Escape, or any of them while nothing has focus, goes to the open
+    -- select: a field that took focus without closing it keeps its keys.
     let enabledSelect idx = ((== NodeSelect) <$> getNodeType na idx) <&&> (not <$> isDisabled ctx focus)
     focused <-
       if wantStep || wantEnter then keepNode enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
     target <- case focused of
       Just idx -> pure (Just (idx, isSelectOpen store (intKey focus)))
-      Nothing -> fmap (,True) <$> openSelectNode ctx store
+      Nothing
+        | wantEsc || hashWidgetId focus == 0 -> fmap (,True) <$> openSelectNode ctx store
+        | otherwise -> pure Nothing
     forM_ target $ \(idx, open) -> do
       wid <- getWidgetId na idx
       whenM (widgetOverlayAllowed ctx wid) $
