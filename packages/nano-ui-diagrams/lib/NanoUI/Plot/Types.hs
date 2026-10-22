@@ -17,8 +17,8 @@ import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Vector.Unboxed qualified as U
-import GHC.Float (castDoubleToWord64, castFloatToWord32)
 import NanoUI (Color, HasResponse (..), Response)
+import NanoUI.Internal.Store (sameDouble, sameFloat)
 
 -- | Lower and upper axis bounds. Use finite, increasing bounds for plotting.
 data Domain = Domain !Double !Double
@@ -43,16 +43,13 @@ instance Eq SeriesData where
       go !i
         | i >= U.length a = True
         | otherwise = case (U.unsafeIndex a i, U.unsafeIndex b i) of
-            ((x, y), (x', y')) -> same x x' && same y y' && go (i + 1)
+            ((x, y), (x', y')) -> sameDouble x x' && sameDouble y y' && go (i + 1)
   CategoryY labels values == CategoryY labels' values' =
     labels == labels' && n == sizeofPrimArray values' && go 0
     where
       n = sizeofPrimArray values
-      go !i = i >= n || (same (indexPrimArray values i) (indexPrimArray values' i) && go (i + 1))
+      go !i = i >= n || (sameDouble (indexPrimArray values i) (indexPrimArray values' i) && go (i + 1))
   _ == _ = False
-
-same :: Double -> Double -> Bool
-same a b = a == b || castDoubleToWord64 a == castDoubleToWord64 b
 
 -- | Shape of a plotted point marker.
 data MarkShape = MarkCircle | MarkSquare | MarkDiamond | MarkTriangle | MarkCross
@@ -70,15 +67,12 @@ data SeriesKind
 
 -- A NaN parameter equals the same NaN, as in 'SeriesData'.
 instance Eq SeriesKind where
-  LineSeries w m == LineSeries w' m' = sameF w w' && m == m'
-  ScatterSeries w m == ScatterSeries w' m' = sameF w w' && m == m'
-  BarSeries f == BarSeries f' = sameF f f'
-  AreaSeries b == AreaSeries b' = same b b'
-  StepSeries w == StepSeries w' = sameF w w'
+  LineSeries w m == LineSeries w' m' = sameFloat w w' && m == m'
+  ScatterSeries w m == ScatterSeries w' m' = sameFloat w w' && m == m'
+  BarSeries f == BarSeries f' = sameFloat f f'
+  AreaSeries b == AreaSeries b' = sameDouble b b'
+  StepSeries w == StepSeries w' = sameFloat w w'
   _ == _ = False
-
-sameF :: Float -> Float -> Bool
-sameF a b = a == b || castFloatToWord32 a == castFloatToWord32 b
 
 -- | Named data and rendering options. An absent colour selects the chart's
 -- theme palette by series index.

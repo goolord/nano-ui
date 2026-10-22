@@ -116,7 +116,6 @@ import NanoUI.Internal.Context
 import Data.Word (Word64)
 import Data.Hashable (Hashable, hash)
 import GHC.Float (castFloatToWord32)
-import NanoUI.Internal.Equality (sameFloat)
 import NanoUI.Internal.Font (checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
