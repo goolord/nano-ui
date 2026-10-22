@@ -19,6 +19,7 @@ import Control.Concurrent (myThreadId, threadDelay)
 import Control.Exception (finally, mask)
 import Control.Monad (forM_, unless, when)
 import Data.Maybe (isJust)
+import Data.Text qualified as T
 import Numeric (showFFloat)
 import System.Environment (lookupEnv)
 import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, stderr)
@@ -120,7 +121,12 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous refreshDue = do
       woken <- readIORef (ctxWoken ctx)
       let pointerEdge = anyButtonPressed curInp || anyButtonReleased curInp
           scrollEdge = inputScroll curInp /= V2 0 0
-      pure (need || woken || wasAnim || pointerEdge || scrollEdge)
+          -- Two auto-repeats of a held key, or one character typed twice,
+          -- arrive as equal inputs, which 'needsRedraw' cannot tell apart.
+          keyEdge =
+            not (inputKeysNull (inputKeys curInp) && inputKeysNull (inputKeysReleased curInp))
+              || not (T.null (inputChars curInp) && null (inputDrops curInp))
+      pure (need || woken || wasAnim || pointerEdge || scrollEdge || keyEdge)
 
 -- | What a backend provides to 'runSessionLoop'.
 data SessionDriver ev = SessionDriver
