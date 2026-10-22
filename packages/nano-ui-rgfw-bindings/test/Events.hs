@@ -81,57 +81,39 @@ main = withEventBuffer $ \event -> do
 -- immediately forever. Skipped on Linux without an X display, and without
 -- an OpenGL 3.2 window.
 stopWaitCheck :: Ptr RGFW_event -> IO ()
-stopWaitCheck event = do
-  display <- lookupEnv "DISPLAY"
-  if os == "linux" && maybe True null display
-    then putStrLn "RGFW stop wait: skipped (no X display)"
-    else
-      createWindowGL "stop wait" 0 0 64 64 rgfw_windowHide 3 2 >>= \case
-        Nothing -> putStrLn "RGFW stop wait: skipped (no OpenGL 3.2 window)"
-        Just win -> do
-          let drain = pollEvent win event >>= \case
-                EventNone -> pure ()
-                _ -> drain
-              -- Seconds a wait of up to @ms@ took, starting with an empty queue.
-              timedWait ms = do
-                drain
-                t0 <- getMonotonicTime
-                waitForEvent ms
-                subtract t0 <$> getMonotonicTime
-              endsWithin limit what stop = do
-                stop
-                took <- timedWait 5000
-                unless (took < limit) (fail ("RGFW stop wait: " ++ what ++ " ended the wait after " ++ show took ++ " s"))
-          endsWithin 2 "a stop from another thread" (void (forkIO (threadDelay 100000 >> stopWaitForEvent)))
-          endsWithin 1 "a stop before the wait" stopWaitForEvent
-          endsWithin 1 "piled-up stops" (replicateM_ 100 stopWaitForEvent)
-          -- A stray event can end a wait early, so one full wait in three suffices.
-          waited <- mapM (const (timedWait 200)) [1 .. 3 :: Int]
-          unless (any (>= 0.15) waited) (fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited))
-          closeWindow win
-          putStrLn "RGFW stop wait: ok"
+stopWaitCheck event = withTestWindow "stop wait" $ \win -> do
+  let drain = pollEvent win event >>= \case
+        EventNone -> pure ()
+        _ -> drain
+      -- Seconds a wait of up to @ms@ took, starting with an empty queue.
+      timedWait ms = do
+        drain
+        t0 <- getMonotonicTime
+        waitForEvent ms
+        subtract t0 <$> getMonotonicTime
+      endsWithin limit what stop = do
+        stop
+        took <- timedWait 5000
+        unless (took < limit) (fail ("RGFW stop wait: " ++ what ++ " ended the wait after " ++ show took ++ " s"))
+  endsWithin 2 "a stop from another thread" (void (forkIO (threadDelay 100000 >> stopWaitForEvent)))
+  endsWithin 1 "a stop before the wait" stopWaitForEvent
+  endsWithin 1 "piled-up stops" (replicateM_ 100 stopWaitForEvent)
+  -- A stray event can end a wait early, so one full wait in three suffices.
+  waited <- mapM (const (timedWait 200)) [1 .. 3 :: Int]
+  unless (any (>= 0.15) waited) (fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited))
 
 -- | The pointer entering the window comes as motion to where it entered:
 -- until it moves, nothing else reports where it is. Skipped on Linux
 -- without an X display, and without an OpenGL 3.2 window.
 enterCheck :: Ptr RGFW_event -> IO ()
-enterCheck event = do
-  display <- lookupEnv "DISPLAY"
-  if os == "linux" && maybe True null display
-    then putStrLn "RGFW enter: skipped (no X display)"
-    else
-      createWindowGL "enter" 0 0 64 64 rgfw_windowHide 3 2 >>= \case
-        Nothing -> putStrLn "RGFW enter: skipped (no OpenGL 3.2 window)"
-        Just win@(Window ptr) -> do
-          let events = pollEvent win event >>= \case
-                EventNone -> pure []
-                ev -> (ev :) <$> events
-          _ <- events
-          queueEnter ptr 7 9
-          got <- events
-          unless (EventMouseMotion 7 9 `elem` got) (fail ("RGFW enter: " ++ show got))
-          closeWindow win
-          putStrLn "RGFW enter: ok"
+enterCheck event = withTestWindow "enter" $ \win@(Window ptr) -> do
+  let events = pollEvent win event >>= \case
+        EventNone -> pure []
+        ev -> (ev :) <$> events
+  _ <- events
+  queueEnter ptr 7 9
+  got <- events
+  unless (EventMouseMotion 7 9 `elem` got) (fail ("RGFW enter: " ++ show got))
 
 -- | On Windows a press captures the mouse until the last button comes up, so
 -- a release outside the window still arrives, and the pointer leaves with
@@ -140,22 +122,30 @@ enterCheck event = do
 captureCheck :: Ptr RGFW_event -> IO ()
 captureCheck event
   | os /= "mingw32" = pure ()
-  | otherwise =
-      createWindowGL "capture" 0 0 64 64 rgfw_windowHide 3 2 >>= \case
-        Nothing -> putStrLn "RGFW mouse capture: skipped (no OpenGL 3.2 window)"
-        Just win@(Window ptr) -> do
-          let mouse = pollEvent win event >>= \case
-                EventNone -> pure []
-                ev@(EventMouseButton _ _) -> (ev :) <$> mouse
-                ev@(EventOther t) | t == rgfw_mouseLeave -> (ev :) <$> mouse
-                _ -> mouse
-              left = EventMouseButton rgfw_mouseLeft
-              drag what lose expected = do
-                _ <- mouse
-                captured <- win32Drag ptr (-20) (-20) lose
-                got <- mouse
-                unless (captured == 1 && got == expected) (fail ("RGFW mouse capture: " ++ what ++ ": " ++ show (captured, got)))
-          drag "a release outside the window" 0 [left True, left False, EventOther rgfw_mouseLeave]
-          drag "a capture taken away" 1 [left True, left False]
-          closeWindow win
-          putStrLn "RGFW mouse capture: ok"
+  | otherwise = withTestWindow "mouse capture" $ \win@(Window ptr) -> do
+      let mouse = pollEvent win event >>= \case
+            EventNone -> pure []
+            ev@(EventMouseButton _ _) -> (ev :) <$> mouse
+            ev@(EventOther t) | t == rgfw_mouseLeave -> (ev :) <$> mouse
+            _ -> mouse
+          left = EventMouseButton rgfw_mouseLeft
+          drag what lose expected = do
+            _ <- mouse
+            captured <- win32Drag ptr (-20) (-20) lose
+            got <- mouse
+            unless (captured == 1 && got == expected) (fail ("RGFW mouse capture: " ++ what ++ ": " ++ show (captured, got)))
+      drag "a release outside the window" 0 [left True, left False, EventOther rgfw_mouseLeave]
+      drag "a capture taken away" 1 [left True, left False]
+
+-- | Run @body@ on a hidden 64x64 OpenGL 3.2 window titled @name@, then
+-- close it and report "RGFW <name>: ok". Skipped on Linux without an X
+-- display, and without such a window.
+withTestWindow :: String -> (Window -> IO ()) -> IO ()
+withTestWindow name body = do
+  display <- lookupEnv "DISPLAY"
+  if os == "linux" && maybe True null display
+    then putStrLn ("RGFW " ++ name ++ ": skipped (no X display)")
+    else
+      createWindowGL name 0 0 64 64 rgfw_windowHide 3 2 >>= \case
+        Nothing -> putStrLn ("RGFW " ++ name ++ ": skipped (no OpenGL 3.2 window)")
+        Just win -> body win >> closeWindow win >> putStrLn ("RGFW " ++ name ++ ": ok")
