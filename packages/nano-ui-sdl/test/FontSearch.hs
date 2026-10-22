@@ -2,6 +2,7 @@ module Main (main) where
 
 import Control.Exception (bracket)
 import Control.Monad (unless)
+import Data.Maybe (isJust)
 import NanoUI.Sdl.Internal.Font.Search (boldFaceCandidates, listFontFamilies, searchFonts)
 import System.Directory
   ( createDirectory
@@ -42,6 +43,11 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
       bookBold = fonts </> "NanoBookFixture-Bold.ttf"
       italicVariable = fonts </> "NanoVariableFixture-Italic-VariableFont_wght.ttf"
       variable = fonts </> "NanoVariableFixture-VariableFont_wght.ttf"
+      -- The google/fonts names, whose italic sorts first.
+      axesItalic = fonts </> "NanoBracketFixture-Italic[wght].ttf"
+      axesUpright = fonts </> "NanoBracketFixture[wght].ttf"
+      -- Windows' file for Times New Roman.
+      times = fonts </> "times.ttf"
       -- Only the Linux search reads the XDG data directories.
       xdg = root </> "xdg" </> "fonts" </> "NanoXdgFixture.ttf"
     setEnv "XDG_DATA_DIRS" (root </> "xdg")
@@ -51,12 +57,15 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
     mapM_ (createDirectoryIfMissing True) [fonts, takeDirectory xdg]
     mapM_
       (`writeFile` "")
-      [regular, bold, fallback, boldOnly, short, shortBd, shortB, shortItalic, symbols, medium, weightRegular, book, bookBold, italicVariable, variable, xdg]
+      [regular, bold, fallback, boldOnly, short, shortBd, shortB, shortItalic, symbols, medium, weightRegular, book, bookBold, italicVariable, variable, axesItalic, axesUpright, times, xdg]
     expect "regular face" (Just regular) =<< searchFonts ["Nano Search Fixture"]
     expect "family by file name" (Just symbols) =<< searchFonts ["Segoe UI Symbol"]
     expect "regular over medium" (Just weightRegular) =<< searchFonts ["NanoWeightFixture"]
     expect "book over bold" (Just book) =<< searchFonts ["NanoBookFixture"]
     expect "upright variable font" (Just variable) =<< searchFonts ["NanoVariableFixture"]
+    expect "upright font named by its axes" (Just axesUpright) =<< searchFonts ["NanoBracketFixture"]
+    -- An installed Times New Roman named in full may win over the fixture.
+    expect "Times New Roman by its short file name" True . isJust =<< searchFonts ["Times New Roman"]
     expect "XDG data directory" (if os `elem` ["mingw32", "darwin"] then Nothing else Just xdg)
       =<< searchFonts ["NanoXdgFixture"]
     expect "ordered fallback" (Just fallback)

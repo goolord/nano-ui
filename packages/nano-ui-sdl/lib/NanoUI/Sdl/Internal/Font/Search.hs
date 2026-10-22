@@ -154,11 +154,14 @@ matchScore :: String -> String -> Maybe Int
 matchScore "" _ = Nothing
 matchScore norm stem = score <$> stripPrefix norm stem
   where
-    score t
+    -- A slanted file ranks just below its upright twin, which by name can
+    -- sort after it (@X-Italic[wght]@ before @X[wght]@).
+    score t = base t - fromEnum ("italic" `isInfixOf` t || "oblique" `isInfixOf` t)
+    base t
       | null t = 100
       | Just i <- elemIndex t regularTails = 90 - i
       | t `elem` otherTails = 70
-      | "variable" `isInfixOf` t = if "italic" `isInfixOf` t then 19 else 20
+      | "variable" `isInfixOf` t = 20
       | otherwise = 60
 
 -- | Style tails that indicate the regular weight of a family, the likeliest
@@ -191,6 +194,7 @@ otherTails =
 familyAliases :: String -> [String]
 familyAliases "consolas" = ["consola"]
 familyAliases "couriernew" = ["cour"]
+familyAliases "timesnewroman" = ["times"]
 familyAliases "segoeuisymbol" = ["seguisym"]
 familyAliases "nirmalaui" = ["nirmala"]
 familyAliases "leelawadeeui" = ["leelawui"]
