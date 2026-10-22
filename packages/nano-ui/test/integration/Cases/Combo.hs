@@ -13,6 +13,7 @@ tests =
   , spec "combo-keyboard-pick" runComboKeyboardPickTest
   , spec "combo-mouse-pick" runComboMousePickTest
   , spec "combo-dropdown-flips" runComboDropdownFlipsTest
+  , spec "combo-dropdown-off-field" runComboDropdownOffFieldTest
   , spec "combo-blur-commit" runComboBlurCommitTest
   , spec "combo-app-write-no-commit" runComboAppWriteNoCommitTest
   , spec "combo-escape-revert" runComboEscapeRevertTest
@@ -108,6 +109,16 @@ runComboDropdownFlipsTest ctx failed = do
   assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
     assert failed (rectY rowRect + rectH rowRect <= rectY (respRect resp))
     assertEq failed "Beta Serif" . snd =<< runClick ctx inp0 ui (spanCenter rowRect)
+
+-- | A list that fits on neither side of its combo is not slid back over the
+-- field, so the click that focuses the combo commits no suggestion.
+runComboDropdownOffFieldTest :: Context -> IORef Int -> IO ()
+runComboDropdownOffFieldTest ctx failed = do
+  let inp0 = withInput 320 300
+      ui = column (replicateM_ 4 (label "line") >> withValue "" (comboBox' "Font" comboLongOpts))
+  (resp, _) <- warmup2 ctx inp0 ui
+  assertEq failed "" . snd =<< runClick ctx inp0 ui (centerOf resp)
+  assertEq failed (respId resp) =<< getFocusId ctx
 
 -- Hovering a suggestion row highlights it (hover paint, becomes the Enter
 -- target) but never commits by itself; Enter then commits the hovered row.

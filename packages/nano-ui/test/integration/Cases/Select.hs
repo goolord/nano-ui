@@ -16,6 +16,7 @@ tests =
   , spec "select-overlay-damage" runSelectOverlayDamageTest
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
   , spec "select-dropdown-flips" runSelectDropdownFlipsTest
+  , spec "select-dropdown-off-field" runSelectDropdownOffFieldTest
   , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
   , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
   , spec "tree-select" runTreeSelectTest
@@ -176,6 +177,17 @@ runSelectDropdownFlipsTest ctx failed = do
   assertJust failed (spanRect "Low" overlays) $ \low -> do
     assert failed (rectY low + rectH low <= rectY (respRect resp))
     assertEq failed 0 . snd =<< runClick ctx open ui (spanCenter low)
+
+-- | A dropdown that fits on neither side of its select is not slid back over
+-- the field, so the click that opens it leaves the value alone.
+runSelectDropdownOffFieldTest :: Context -> IORef Int -> IO ()
+runSelectDropdownOffFieldTest ctx failed = do
+  let inp0 = withInput 320 300
+      opts = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
+      ui = column (replicateM_ 4 (label "line") >> withValue 3 (select' opts))
+  (resp, _) <- warmup2 ctx inp0 ui
+  assertEq failed 3 . snd =<< runClick ctx inp0 ui (centerOf resp)
+  assert failed . anySelectOpen =<< getStore ctx
 
 -- | A select's dropdown is as wide as the select, and an option wider than
 -- that is clipped to the dropdown rather than drawn over the page, where

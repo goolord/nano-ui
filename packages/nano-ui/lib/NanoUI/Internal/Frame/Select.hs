@@ -320,11 +320,17 @@ selectDropRect size x y w h nOpts =
 
 -- | A dropdown @dropH@ tall and as wide as the field at @x y w h@: below the
 -- field, or above it when it does not fit below and there is more room
--- above, and kept inside the window of @size@ ('computePopupPosition').
+-- above, and kept inside the window of @size@ ('computePopupPosition'). A
+-- list that fits on neither side runs past the window edge on the roomier
+-- one rather than over its field, where the press that opens it would pick.
 dropRect :: Size -> Float -> Float -> Float -> Float -> Float -> Rect
 dropRect (Size winW winH) x y w h dropH =
   let (dx, dy) = computePopupPosition winW winH 0 w dropH (AnchorRect (Rect x y w h)) PlacementAuto selectDropGap
-   in Rect dx dy w dropH
+      dy'
+        | dy >= y + h || dy + dropH <= y = dy
+        | winH - y - h >= y = y + h + selectDropGap
+        | otherwise = y - dropH - selectDropGap
+   in Rect dx dy' w dropH
 
 -- | Row index at @mouseY@ for a select dropdown, whose rows sit centred in
 -- the drop rect.
