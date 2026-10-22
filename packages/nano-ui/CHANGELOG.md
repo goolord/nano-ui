@@ -22,13 +22,18 @@
   fields and list elements, two levels deep: with a model in one Var,
   showing `m.title` above a slider on `m.volume` costs nothing extra, and
   `forEachVar` lays rows out by their keys alone, so a row that edits its
-  own element reruns nothing for the rows above it. Typing into a field
-  nothing else reads now costs one view pass and repaints the field, where
-  every changed hook write cost two passes and a full repaint.
+  own element reruns nothing for the rows above it. Rows are told apart by
+  one of 63 bits of their key's hash, though: past about 63 rows, or with
+  keys that share a bit, a row's edit can cost a second pass, and a full
+  repaint when the rows sharing its bit read the field it edits. Typing
+  into a field nothing else reads now costs one view pass and repaints the
+  field, where every changed hook write cost two passes and a full repaint.
 
   Positional Vars have their own per-scope counter, apart from widget ids,
   so a conditional widget no longer moves later state, and a slot that
-  changes type resets instead of reinterpreting the old value.
+  changes type resets instead of reinterpreting the old value. `useEnumVar`
+  takes a `Typeable` enumeration, so a slot that held another enumeration
+  starts over too.
 
   Overlays take their open flag the same way: `modal`, `modalWith`,
   `modalPanel`, `modalPanelWith`, `window`, `popup` and `popupWith` take a
@@ -86,6 +91,29 @@
   `gridMinColW` no longer leaves a gap below it the height of all its cells
   stacked. A grow child its `maxW` or `maxH` caps gives the rest of its
   share to its grow siblings instead of leaving a hole at the row's end.
+  `percent` widths take their share of the width in columns and grid cells,
+  where they took all of it, and `Percent` heights in a row their share of
+  its height. Text wraps at the width it is placed at: a `fillW` label in a
+  grid cell no longer runs into the next cell, and a label with a fixed or
+  percent width (`fixedWH`, `fixedAspectW`, `fixedAspectH`, ...) measures
+  and wraps at that width, clamped to its limits, instead of drawing one
+  long line or letting the next widget in its row overlap it. A widget or
+  custom-measured node whose fixed size lies outside its limits is measured
+  at the clamped size it is placed at. Fit-height text placed wider than it
+  was measured at, such as in a 2D scroller, and a wrapped cell of a
+  striped table are as tall as the lines drawn. An empty label keeps a
+  line of height in a column, as in a row, and a negative `Grow` weight no
+  longer stops its grow siblings from growing.
+
+- **Breaking:** layout changes that move existing views. `fixedWH w h` is
+  `fixedW w . fixedH h`, so it sets the width limits to `w` too:
+  `fixedWH 100 28` on a text field is 100 wide rather than the field's 160
+  minimum, and `fillW . fixedWH w h` stays `w` wide. A fit container or
+  panel in a grid row keeps its own height, as it does in rows and layers,
+  instead of stretching to the row's height; give the cells `fillH` for
+  equal heights. `scroll2D` lays its children out along its layout's `Direction`,
+  so one set to `Row` scrolls a row sideways, and like the one-axis
+  scrollers it ignores `gridCols`: put a grid inside the scroller.
 
 - **Breaking:** `pgTree` takes `InitialTree (Maybe GridNode)` or
   `ControlledTree (Var (Maybe GridNode))`. Initial trees seed once; a
@@ -101,8 +129,10 @@
 
 - `KeysOnly` claims an exact list of shortcut chords; `KeysNone` reserves no
   keys and `KeysReadOnly` claims selection/copy without destructive edits.
-  Selectable rich text uses the read-only policy. **Breaking:** `KeyClaim`
-  no longer derives `Enum` or `Bounded`; custom registrations carry it directly.
+  Selectable rich text uses the read-only policy. A focused widget whose
+  claim covers Tab (`KeysAll`, or `KeysOnly` naming it) keeps the focus when
+  Tab is pressed. **Breaking:** `KeyClaim` no longer derives `Enum` or
+  `Bounded`; custom registrations carry it directly.
 - Local drag cancellation uses Escape arbitration, so cancelling a drag does
   not also dismiss its enclosing modal or run a later Escape handler.
 
@@ -134,6 +164,7 @@
   appended text and cache eviction no longer clear it, and idle passes reuse
   the paragraph's plain text instead of rebuilding a text buffer. Added
   `selectableRichText`, `selectableRichText'` and `selectableRichTextWith'`.
+  A selectable paragraph shows its selection only while it has focus.
 
 - Middle, right and extra mouse-button gestures retain the pressed control's
   identity. A containing mouse area cannot also handle that control's click,
@@ -380,9 +411,9 @@
 - `wakeAfter` asks for a frame after a number of seconds with no input to
   cause it, and the loop sleeps until then: a clock label ticks with one
   frame a second where `keepAnimating` would run one for every display
-  refresh. `requestWakeAt` and `requestWakeAfter` in `NanoUI.Context` are
-  the same for code that holds a `Context`, and `getWakeAt` reads the
-  pending time.
+  refresh. `requestWakeAt` and `requestWakeAfter` in `NanoUI.Backend` (and
+  `NanoUI.Testing`) are the same for code that holds a `Context`, and
+  `getWakeAt` reads the pending time.
 - `NANO_LOOP_TRACE` prints, about once a second while the session loop runs,
   the time covered, how many passes it made, how many drew, and why. An idle
   window prints nothing, so what prints steadily is what keeps the process
@@ -398,7 +429,7 @@
   edit. Typing 1,000 characters into a
   100,000-line document takes 0.14 s instead of 1.5 s through `textArea`,
   and allocates 248 MB instead of 7.1 GB.
-- `NanoUI.Store` names the store's maps as `Field`s (`fieldInt`,
+- `NanoUI.Internal.Store` names the store's maps as `Field`s (`fieldInt`,
   `fieldFloat`, `fieldPoint`, `fieldText`, ...) and reads and writes slots
   through them: `lookupSlot`, `findSlot`, `memberSlot`, `insertSlot`,
   `deleteSlot`, `flagSlot` and `setFlagSlot`. Writes are
@@ -410,8 +441,8 @@
   each frame.
 - `withContext` runs an `IO` action on the view's `Context`, and `<&&>` is a
   short-circuiting `&&` over effectful tests.
-- `NanoUI.Frame.Hit.withWidgetNode`, and `walkAncestors` and `getNodeRect`
-  in `NanoUI.Layout.Arena`.
+- `withWidgetNode` in `NanoUI.Internal.Frame.Hit`, and `walkAncestors` and
+  `getNodeRect` in `NanoUI.Internal.Layout.Arena`.
 - `NanoUI.Testing.Assert` and `NanoUI.Testing.Harness`: `assertJust` and
   `assertJustM` carry a test on with a value it needs or count a failure,
   `spanRect` and `spanRectOf` find a span by its text, `clipCovers` checks a
@@ -582,7 +613,9 @@
   `True` on the repeats, for a chord that toggles. The key listeners hear
   only the keys the focused widget leaves too, as iced's `keyboard::listen`
   hears what no widget captured: `keyPressed KeyDelete` is `False` while a
-  focused field deletes with it. A focused control takes the keys it acts
+  focused field deletes with it, and `keyPressed KeyEscape` when Escape
+  closes a dropdown, a focused combo box's list or a text-edit menu, or
+  something earlier took it. A focused control takes the keys it acts
   on alone or with Shift, so a chord of them is a shortcut's: a button or
   a checkbox Enter and Space, and a slider, select, radio group, tree or
   pane grid the arrows, Home, End and the paging keys as well.
@@ -621,7 +654,9 @@
   it covers it, so what it shows while hovered stays shown.
 - The pointer leaving the window moves it off every widget
   (`applyPointerLeave`, on SDL's window-leave and RGFW's mouse-leave
-  events), so nothing stays hovered.
+  events), so nothing stays hovered, unless a button is held: a drag keeps
+  its pointer until the release or a motion moves it, so a backend keeps
+  sending both while a button is held.
 - Tones: `Tone` (`Accent`, `Muted`, `Success`, `Warning`, `Danger`) names a
   status colour, `toneColor` gives a theme's, `fontTone` colours text in any
   face (`fontMono . fontTone Warning`), and `tone` fills buttons with it.
@@ -693,6 +728,32 @@
   whether it reached the loop. After one that did not, the next wake runs it
   again rather than waiting for the loop to take the lost one. The SDL
   backend's push onto its event queue is one.
+- `releaseImageRgba` frees an image `registerImageRgba` registered, giving
+  its atlas room to later images; `NanoUI.Backend` exports `releaseImage`,
+  which does the same for code that holds a `Context`.
+- A focused `select` picks its first option with Home or Page Up and its
+  last with End or Page Down, and Enter or Space opens or closes its
+  dropdown.
+- `floatingWindowOpen` in `NanoUI.Testing` says whether a floating window
+  is open; `debugPanelOpen`, its old name, is deprecated.
+- `nodesOfType` in `NanoUI.Testing.Harness` lists the ids and rects of a
+  frame's nodes of one type, and `measureRuns` times an action and prints
+  its mean time and allocation, as the SDL and RGFW profilers do.
+- `NanoUI.Monad` exports `DamageBounds`, which its damage requests take,
+  and `NanoUI.Testing` exports `NodeType`, `ScrollBarSlot`, `DirTag` and
+  `WidgetStore`, which its functions use. `NanoUI.Internal.Var.Cell`,
+  `NanoUI.Internal.Var.Generic`, `NanoUI.Internal.Store.Types` and
+  `NanoUI.Internal.RichText.Types` are exposed, so the types the other
+  exposed internal modules use can be named. `NanoUI.Internal.Layout.Arena`
+  exports `WidthMemo` and `IdIndex` as abstract types, and
+  `NanoUI.Internal.Input` exports `offWindow`.
+- `Ord` instances for `Direction`, `Flow`, `AlignX`, `AlignY`, `Side`,
+  `LineAlign`, `PointerMode`, `TextBreak`, `SortDir`, `PopupPlacement`,
+  `Layer`, `LineCap`, `LineJoin`, `FillRule`, `ContentFit`, `WindowMode`,
+  `UiCursorKind`, `InputPurpose`, `TabStyle`, `TabOrientation`,
+  `TextMotion` and `ScrollBarSlot`; `Eq` and `Show` for `Transition`,
+  `CaptionConfig`, `WindowFrame`, `ComboInput` and `ComboStep`; and `Show`
+  for `DrawOp`.
 
 ### Changed
 
@@ -722,7 +783,8 @@
   running `runSessionLoop`, so a backend's action needs no coalescing or
   thread check of its own.
 - `ComboState` gains `csNavPointer`, where the pointer was when Up or Down
-  last moved the highlight.
+  last moved the highlight, and `csWheelRem`, the part of a row the wheel
+  moved, carried to the next frame so a trackpad's small steps add up.
 - `atlasTextureId` is `0x7ffffff9`, next to the glyph page ids. As 1 it
   matched the first image's `ImageId`, so a stale image id drew the atlas.
 - `NanoUI` is a newtype over `Eff '[Ui, IOE]` with `MonadIO`,
@@ -743,9 +805,10 @@
   asked through a drag that went down on the widget wherever the pointer
   goes: a `knob` keeps its resize arrows while dragged off it.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
-- `comboBox` filters its options only when the options list or the field
-  text changes, rather than on every frame, open or closed. It also measures
-  the matches' width only then. Pass the same list each frame to benefit.
+- `comboBox` filters its options only when the options container or the
+  field text changes, rather than on every frame, open or closed. It also
+  measures the matches' width only then. Pass the same container each frame
+  (a list, `Seq` or `Vector` kept outside the view) to benefit.
 - `TextInputConfig` has a field `ticAdornments`, and is no longer `Eq`.
 - Checkboxes, radio options and tree rows are `NodeButton`s with a look of
   their own, as tab headers are; they look and behave as before.
@@ -754,8 +817,8 @@
   group moves its selection to the click or key read after its members were
   added, so the frame no longer copies selection state from the store into
   the nodes after the view.
-- `SessionDriver` in `NanoUI.Runner`: the session loop checks every event for
-  Ctrl+C itself, so `sdIsHardQuit` is gone, and `sdDraw` returns only whether
+- `SessionDriver` in `NanoUI.Runner`: the session loop handles Ctrl+C
+  itself, so `sdIsHardQuit` is gone, and `sdDraw` returns only whether
   another frame is due (`IO Bool`); no backend changed the input it was given.
 - `ComboInput` in `NanoUI.Widgets.Combo` carries the dropdown's `Input` as
   `ciInput`, in place of the eight fields (`ciMouse`, `ciPressed`, `ciDown`,
@@ -831,14 +894,15 @@
   are still exposed, as `NanoUI.Internal.*`, and the hidden modules moved
   there too. `NanoUI.Frame.TextEdit` is not exposed (see Removed).
 - `NanoUI.Monad` and `NanoUI.Input` keep what a view or custom widget uses.
-  `runUi`, `runNanoUI`, `askContext`, `withContext`, `withIdFrame`,
-  `burstNextIds`, `stripInteractionInput`, `withoutPointer` and
-  `isHardQuitInput` moved to `NanoUI.Internal.Monad` and
-  `NanoUI.Internal.Input`. `NanoUI.Backend` also exports `runNanoUI` and
-  `burstNextIds`, `NanoUI.Testing` `askContext`, and `NanoUI.Effectful`
-  `runUi`. `splitFrame` gave way to `NanoUI.Internal.Input`'s `takeFrame`,
-  which folds a batch of events into a frame as far as the frame may take
-  them.
+  `runUi`, `runNanoUI`, `withContext`, `withIdFrame`, `burstNextIds`,
+  `stripInteractionInput`, `withoutPointer` and `isHardQuitInput` moved to
+  `NanoUI.Internal.Monad` and `NanoUI.Internal.Input`. `NanoUI.Backend`
+  also exports `runNanoUI` and `burstNextIds`, and `NanoUI.Effectful`
+  `runUi`. `NanoUI.Monad` keeps `askContext` and exports the abstract
+  `Context` it returns, for the functions of `NanoUI` that take a context
+  (scrolling, themes). `splitFrame` gave way to `NanoUI.Internal.Input`'s
+  `takeFrame`, which folds a batch of events into a frame as far as the
+  frame may take them.
 - `NanoUI.Widgets.Custom`, `.TextArea`, `.TextEditor` and `.TextField` no
   longer export the helpers the frame uses. `mkCustomDrawContext`,
   `loadTextAreaState` and `saveTextAreaState` are in the matching
@@ -971,7 +1035,7 @@
   Enter typed within one frame reach a text field or a terminal as "ls" and
   then Enter, and Ctrl+S released within the frame still fires its
   shortcut. A burst of typing takes a frame more for each such key, and
-  steady typing or a key's auto-repeats none. The Ctrl+C quit reads the
+  steady typing or a key's auto-repeats none. Ctrl+C is read from the
   frame, with no checks of its own for a Ctrl let go later.
 - A key chord is a key, not typed text: Ctrl+C is `KeyChar 'c'` with `modCtrl`
   in `inputKeys` and nothing in `inputChars`, so look for it with `shortcut`
@@ -1064,6 +1128,98 @@
   its id up in a map, which missed the cache in large views. The API is
   unchanged.
 - Builds with `nano-svg` 0.2.
+- **Breaking:** `TextAreaState`'s fields take a `tas` prefix (`tasBuffer`,
+  `tasSelectionAnchor`, `tasScrollOffset`, `tasViewportSize`,
+  `tasLineHeight`, `tasHistory`): `scrollOffset` clashed with the field of
+  `ScrollMetrics`, which `NanoUI` exports.
+- Ctrl+C runs its frame first, then closes the window through the close
+  request, as the close button does: with `wsExitOnCloseRequest` off the
+  view sees `winCloseRequested` instead of the session ending. A `shortcut`
+  or menu item bound to Ctrl+C fires instead, and nothing closes while the
+  focused widget uses the chord (a text field copying, or on macOS a text
+  field, text area or selectable text) or a text-edit menu is open. A
+  focused button, select or slider no longer stops it, and a view that
+  reads Ctrl+C raw (`pressedIn`, `shortcutIn`) runs its action and then the
+  window closes.
+- Tab, Shift+Tab, `focusNext`, `focusPrevious` and `requestFocus` scroll the
+  newly focused widget into view in the scrollers around it. Tab also
+  closes an open select dropdown or text-field menu and collapses the
+  selection of the field it leaves, as a click elsewhere does, and
+  Shift+Tab with nothing focused goes to the last Tab stop.
+- A select's or combo box's dropdown opens above its field when it does not
+  fit below, and never covers the field, so the click that opens a select
+  no longer picks a row and the click into a combo no longer commits a
+  suggestion. It hides while its field is scrolled out of view. A press of
+  any mouse button outside an open select closes it, and keys reach an open
+  select only while it, or nothing, has focus.
+- `select`, `radio` and `tree` no longer write a clamped index back to their
+  `Var`. An index the options do not reach shows clamped but stays the
+  caller's until the user picks, and picking the option shown sets the Var
+  and reports a change.
+- `tabs` and `tabsConfigured'` show and select the first tab when their Var
+  names no tab, and write its key back; `tabBar` does not.
+- A context menu closes on a release only when the press went down on one
+  of its rows: a click on a disabled row, a header, a separator or the
+  padding, or on a button or checkbox in its body, leaves it open. A menu
+  taller than the window stays inside it and scrolls.
+- Text fields step by user-perceived character. Left, Right and Delete move
+  over a whole flag, emoji sequence or letter with its combining marks, and
+  a click or drag puts the caret between characters, never inside one.
+  Backspace removes one combining mark (an Indic vowel sign, a decomposed
+  accent) but a whole emoji, keycap or variation sequence, and a
+  double-click selects a word with its marks and joiners. Left and Right
+  without Shift go to the start or end of a selection instead of moving
+  from the caret.
+- Text buffers, documents, text fields and text areas read a Windows line
+  end (`\r\n`) as one line break and write text back with `\n`; a pasted
+  lone `\r` becomes a line break rather than joining lines. A field holding
+  `\r\n` keeps the caller's text until a key edits it, and its caret and
+  selection land where they should.
+- Alt with a letter, and Super with one outside macOS, no longer types the
+  letter into a focused field when the backend delivers the character too
+  (RGFW on Windows and X11); AltGr and macOS Option still type.
+- Text inputs, selectable text and text areas draw their layout's font as
+  labels do: its weight, slant, underline, strikethrough and tone
+  (`fontMuted`, `fontDanger`, ...), even where the font has no face for that
+  weight or slant. `textAreaWith` takes `fontMono`, `fontWeight`,
+  `fontStyle` and `fontColor`, not only `fontSize`, and search, combo and
+  numeric fields draw their text in their layout's font.
+- While a widget holds the left button, as a dragged slider, knob or
+  divider does, no other widget is hot: the cursor stays the dragged
+  widget's over text fields, the buttons it crosses do not light up, and a
+  custom widget's `cdcHovered` is `False`.
+- File and text dropped from the OS go only to the layer on top where they
+  land: a drop target behind a modal or under a floating window no longer
+  reports `dropHovered` or receives them.
+- The wheel goes only where it can scroll. A scroller whose content fits
+  takes none, and 2D scrollers and text areas pass on the axes they cannot
+  use, so the scroller around them scrolls: a sideways wheel no longer
+  scrolls a 2D scroller and an enclosing horizontal one together, and a
+  vertical list inside a 2D scroller hands a sideways swipe to it. The
+  unused axis no longer scrolls through a popup into the page behind it,
+  and content running under a scroller's bars no longer takes the wheel or
+  the thumb press meant for them.
+- A scrollbar whose track is shorter than the smallest thumb is hidden
+  rather than drawn past its track; the wheel still scrolls. A scroller no
+  longer writes its viewport to the widget store: `SlotScrollViewPos` and
+  `SlotScrollViewSize` stay empty, and `getScrollMetrics` reads it.
+- `animate` and `animateTo` stop asking for frames once the view stops
+  calling them, such as behind a tab switch; the value rests where it was.
+- Without an alpha bar, every `colorPicker` edit makes the colour opaque,
+  arrow keys included, as drags and fields already did; `colorPickerRGBA`
+  keeps alpha. An edit in a channel or hex field also commits the Current
+  swatch.
+- Under a backend that draws text itself (RGFW), text in a drawing (rich
+  text, Markdown, chart labels, canvas `drawText`) is left out rather than
+  drawn as one box per character.
+- SVG rasterizing composites only the rows each shape covers, about 13
+  times faster for 300 small shapes at 512 px. When an SVG icon needs a new
+  raster, rasters no icon drew this frame or the one before give up their
+  atlas room, so icons drawn at many sizes or colours no longer fill the
+  image atlas,
+  and an icon hidden and shown again keeps its raster until then. A raster
+  the atlas had no room for is made again once an image leaves the atlas,
+  rather than every frame.
 
 ### Fixed
 
@@ -1113,8 +1269,8 @@
   so the next key no longer replaces it.
 - A key typed just before Ctrl in one batch of events stays typed text. It
   was read as a Ctrl chord, so typing "x" then Ctrl could cut the text.
-- Ctrl+C quits only without Alt or Shift, so AltGr+C (Ctrl+Alt on Windows)
-  types its character.
+- Ctrl+C closes the window only without Alt or Shift, so AltGr+C (Ctrl+Alt
+  on Windows) types its character.
 - A focused `selectableText` claims only caret motion, select-all and copy,
   so shortcuts on letters, Space and Delete keep working.
 - Ctrl or Alt with Up or Down reaches shortcuts from a focused text area.
@@ -1135,9 +1291,9 @@
 - A text field with its own font size draws its value in that font when the
   draw arena draws text (RGFW, headless). Its pen and caret were placed in
   that font, but the glyphs came from the base font.
-- Ctrl+C quits a session even when Ctrl is released later in the same batch
-  of events. The loop looked only at the last event's modifiers, so RGFW
-  missed it during a busy frame.
+- Ctrl+C closes the window even when Ctrl is released later in the same
+  batch of events. The loop looked only at the last event's modifiers, so
+  RGFW missed it during a busy frame.
 - Grow children of a column with a gap share the height left after the gaps,
   as a row's do. They shared the whole height, so the column's children ran
   past its bottom by the gaps between them.
@@ -1234,8 +1390,8 @@
   on the grid's outer edge squeezes every pane into one half. Once dividers
   had been dragged off centre, the highlight lined up with nothing on screen.
   While a pane hovers over a drop target the grid lays out the post-drop tree
-  (`dropPreviewTree`), the dragged pane's slot empty under the highlight, and
-  the release stores that same tree. A pointer in a gutter targets the nearer
+  (`dropPreviewTreeSized`), the dragged pane's slot empty under the
+  highlight, and the release stores that same tree. A pointer in a gutter targets the nearer
   pane (`nearestPane`), so the preview holds while it crosses. A pointer
   outside the grid has no target and releasing there cancels the drag;
   `topLevelDropTarget` used to read a point beyond an edge as that edge.
@@ -1275,6 +1431,131 @@
   paragraph's horizontal alignment says.
 - Past 4096 paragraphs, rich text keeps the paragraphs drawn lately instead of
   emptying its layout cache on every frame.
+- Wrapping text by character and truncating it keep user-perceived
+  characters whole: a letter with its combining marks, variation selectors
+  or skin-tone modifiers, a zero-width-joined emoji, and a flag. Truncation
+  with no room for a wide first character and `...` cuts without the dots
+  instead of overflowing the label, and text at most half a pixel wider
+  than its box is no longer cut.
+- Rich text wrapped between characters (Markdown code blocks, inline code)
+  measures each character as the shaped line draws it, so CJK, emoji and
+  decomposed accents no longer overflow, wrap late or misplace the
+  selection, and a mark or joiner beside a line break no longer drops the
+  break or the character after it. A paragraph keeps the leading spaces of
+  its first line, and a link clicks only when the press went down on it
+  too; moving the pointer along a link no longer runs a frame at every word.
+- Without shaping, a font whose space, `x` and `M` share an advance counts
+  as monospace when placing a click as when measuring, so a click and its
+  caret agree; a kerning pair's kerning goes before its second glyph; and
+  whitespace with no glyph (a tab, a no-break space) no longer draws a
+  box. Under a shaping host, a button or select label cut to an ellipsis is
+  centred and sized for the cut text.
+- Typed, pasted and composed text keeps zero-width joiners, bidi marks,
+  private-use and newer characters; only control characters are dropped.
+  `runTextCommand` and `textCanUndo` reach a `numericInput` declared later
+  in the view, numeric fields accept a number typed without its leading
+  zero (`.5`, `-.25`), which Enter used to revert, and a search field
+  emptied from the keyboard reports the change at once.
+- Text areas scroll sideways to keep the caret in view, keep the caret's
+  row above the horizontal scrollbar, and follow the caret at fractional
+  scales. Their scrollbar thumb reaches the end of its track, holding the
+  mouse button still in one no longer repaints it every frame, and
+  `setTextAreaSelection` clamps the anchor into the document.
+- `collectTextSpans` hides a span only when a floating panel covers its
+  clip, so an empty field's zero-width span no longer goes missing while
+  any panel is open.
+- A popup anchored at a point with `PlacementAbove` or `PlacementLeft`
+  flips to the other side when there is no room, and a flipped popup stays
+  within the window margin. A popup anchored with `AnchorRect` to a
+  widget's rect follows the widget when it moves on an otherwise idle
+  frame.
+- A fit-width scroller capped with `maxH` leaves room for its scrollbar,
+  which covered its widest content.
+- `scrollIntoView` lands on its target on a frame where the wheel or a
+  glide already moved the scroller.
+- Presses go where things are drawn. A window declared inside a modal takes
+  no press, hover, wheel or title-bar drag where the modal's panel covers
+  it; a widget laid out past its panel's edge reports no hover, click or
+  tooltip there; and starting a window resize from its halo leaves a
+  visible page widget there its press. A release over a page button after
+  a modal opened during the press no longer clicks it, and a press and
+  release in one frame (a tap, or a click while frames are slow) no longer
+  also clicks the button the click or a scroll moved under the pointer.
+- The scroll-thumb grab cursor no longer shows over a thumb behind a modal
+  or floating panel, or clipped off by a scroller or clip container around
+  it, and such a thumb does not light up.
+- A select or a text field's edit menu left open under a newly opened modal
+  closes, so the first Escape reaches the modal, and Escape on a focused
+  combo box no longer also fires a shortcut or dismisses a popup declared
+  before it.
+- The close buttons of closable tabs and floating windows no longer take
+  presses in a padded target that could never become clicks.
+- Each auto-repeat of a held key, and the second of a character typed
+  twice, draws its frame even when the view only writes state; two equal
+  inputs in a row used to draw only the first.
+- A select's dropdown rows are clipped to the dropdown, so long options
+  leave no text on the page after it closes. A combo box's list moves with
+  slow trackpad scrolling, a press on its scrollbar track no longer jumps
+  by a stale grab offset, `comboBox'` sets `respChanged` only when the user
+  commits, not when the app writes the Var, and the filter folds case
+  ("STRASSE" finds "Straße").
+- A `tree` whose parents arrive after a frame without any, such as an
+  empty or "Loading" first frame, starts with them expanded.
+- Tables: a column released over a column boundary moves; resize zones
+  exist only for column edges in view; sibling `simpleTable`s no longer
+  share state; hiding a stretch column lets the visible ones fill the
+  table, and hiding is refused only for the last visible column; the sort
+  glyph no longer widens a column, and the sort mark repaints when the sort
+  Var changes from outside the table.
+- Pane grids: dragging a scrollbar in a `pvDraggable` pane no longer drags
+  the pane, nor does a drag handle wider than its pane drag it from the
+  neighbouring pane; a divider whose ratio pane minima clamp follows the
+  pointer from the start; the drag indicator repaints as it follows the
+  pointer; a tree written to a `ControlledTree` restores a maximized pane;
+  and a focused grid takes Escape only while a pane is maximized.
+- Tab strips: an overflowing strip scrolls the selected tab into view
+  however the selection changed (a Var write, an appended tab, a tab keyed
+  0), pages by fractional trackpad wheel steps, and repaints its paging
+  arrows as they turn on or off. The vertical wheel pages the strip only
+  over its tabs, not its arrows, and no longer also scrolls the scroller
+  around it. Tab badges scale with the app's base font size instead of
+  from 16.
+- A slider, colour picker, `knob`, `useDrag2D` or `useDrag2DOn` widget,
+  `useReorder` list or pane grid whose drag was released while it was not
+  built no longer resumes the drag on a later press. A slider or colour
+  picker dragged inside a `mouseArea`, `rowWith'` or `columnWith'` no
+  longer makes the container report a click on release.
+- A slider with a NaN bound no longer redraws every frame, and a reversed
+  range (`slider 100 0`) reads from low to high instead of pinning its
+  value to a bound. `useReorder` drags items with negative ids.
+  `progressBarWith` and `progressBarWith'` honour the caller's width
+  (`percent`, `fixedWH`, ...) instead of always filling. `useDrop` reports
+  `dropPosition` on the frame the payloads land, where it was `Nothing`.
+- Springs toward targets above about 1000 settle instead of animating
+  forever a few steps short, and stiff or light springs no longer diverge
+  to huge values or NaN at low frame rates: one too fast to follow within a
+  frame lands on its target. An unversioned drawing repaints what the view
+  drew on the frame its animation ends, not the frame before's ops.
+- A rounded border wider than about twice its corner radius no longer
+  draws blobs outside its corners, and a translucent one wider than its
+  radius no longer blends twice at the inner corners. Geometry clipped to
+  an empty rect is not drawn; SDL drew it into the window's top-left pixel.
+- A glyph from a host's `ShapedGlyphs` whose page coordinate is on no
+  atlas page is skipped, where one just below 0 kept the frame from
+  finishing, and a long shaped line, such as a minified file in a text
+  area, reserves draw-buffer room only for the glyphs that can show,
+  instead of growing the buffers for good by the whole line.
+- The image atlas merges the room released images leave, so registering
+  and releasing images of varied sizes no longer fills it until
+  registration fails.
+- In frames that only scroll, a slider's value label that shrinks during a
+  drag and a popup moving with the scroll repaint what they leave behind
+  (old text, the panel's shadow). A floating window dragged past a screen
+  edge and held still no longer repaints the whole window every frame.
+- `clearDirty` no longer drops a whole-window repaint that `markDirty`
+  queued.
+- `runTests` in `NanoUI.Testing.Runner` counts a spec that throws as
+  failed, prints the exception and runs the remaining specs.
 
 ### Removed
 
