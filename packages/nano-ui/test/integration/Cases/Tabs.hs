@@ -36,6 +36,7 @@ tests =
   , spec "tabs-missing-key" runTabsMissingKeyTest
   , spec "tabs-wheel-in-page" runTabsWheelInPageTest
   , spec "tabs-wheel-fraction" runTabsWheelFractionTest
+  , spec "tabs-follow-key-zero" runTabsFollowKeyZeroTest
   , spec "tabs-arrow-damage" runTabsArrowDamageTest
   , spec "tabs-badge-size" runTabsBadgeSizeTest
   ]
@@ -105,6 +106,15 @@ runTabsWheelFractionTest ctx failed = do
     _ <- runFrame ctx inp {inputMousePos = spanCenter r, inputScroll = V2 0 0.3} ui
     _ <- runFrame ctx inp ui
     assertJustM failed controls $ \r' -> assertLt failed (rectX r') (rectX r)
+
+-- A strip brings its active tab into view whatever the tab's key, 0 too:
+-- here the last of headers keyed newest first.
+runTabsFollowKeyZeroTest :: Context -> IORef Int -> IO ()
+runTabsFollowKeyZeroTest ctx failed = do
+  let inp = withInput 240 120
+      ui = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [4, 3 .. 0] overflowLabels]
+  replicateM_ 4 (runFrame ctx inp ui)
+  assert failed . hasText "LongestTabName" =<< collectTextSpans ctx
 
 -- Paging the strip repaints the arrow that turns usable, whose muted look is
 -- a colour no rect or text change covers.

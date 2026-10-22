@@ -28,7 +28,7 @@ import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
 import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
-import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, slotWrite)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, lookupSlot, slotWrite)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
 import NanoUI.Internal.WidgetText (TabChrome (..), buttonCloseTab, buttonFlagClose, tabChromeEncode, tabEncodeStyle)
@@ -234,9 +234,10 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   -- ('NanoUI.Internal.Damage.writeDamage').
   store <- liftIO (getStore ctx)
   let maxOff = max 0 (findSlot fieldFloat 0 rangeKey store)
-      -- The hash of the tab the strip last brought into view.
+      -- The hash of the tab the strip last brought into view, if any: a key
+      -- that hashes to 0 is followed too.
       followKey = intKey groupId
-      followed = findSlot fieldInt 0 followKey store
+      followed = lookupSlot fieldInt followKey store
   off <- liftIO (getScrollOffset ctx scrollWid)
   let (overflow, canLeft, canRight) = paging maxOff off
   wheelStep <- liftIO (resolveScrollStep ctx scrollWid)
@@ -314,7 +315,7 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   let shown = tabActive tabResp
       laidOut w = liftIO (getPrevRect ctx w) >>= maybe (lastRect w) (pure . Just)
   target <-
-    if overflow && hash shown /= followed
+    if overflow && Just (hash shown) /= followed
       then do
         scroller <- laidOut scrollWid
         header <- maybe (pure Nothing) (laidOut . respId) (lookup shown hdrs)
