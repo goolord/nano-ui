@@ -117,15 +117,19 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
 
 -- | Whether the frame just run used its Ctrl+C ('isHardQuitInput'): a
 -- shortcut took the press, the focused widget uses the chord itself
--- ('focusTakesChord'), as a text field does to copy, or a text-edit menu is
--- open. The session loop quits only on a Ctrl+C that nothing used.
+-- ('focusTakesChord') or copies with the platform's copy chord, as a text
+-- field does, or a text-edit menu is open. The session loop quits only on a
+-- Ctrl+C that nothing used.
 hardQuitUsed :: Context -> Input -> IO Bool
 hardQuitUsed ctx inp = do
   kind <- getsInteraction ctx isFocusKind
   menu <- getsInteraction ctx isTextInputMenu
   let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == KeyChar 'c']
+      -- On macOS a field copies with Cmd+C and leaves Ctrl+C alone, but a
+      -- Ctrl+C typed there out of habit must not close the window either.
+      takes mods = focusTakesChord kind mods (KeyChar 'c')
   taken <- getsOverlay ctx (\os -> any (`IS.member` osKeysTaken os) presses)
-  pure (taken || isJust menu || focusTakesChord kind (inputModifiers inp) (KeyChar 'c'))
+  pure (taken || isJust menu || takes (inputModifiers inp) || takes primaryModifiers)
 
 -- | Whether the focused widget uses this key and modifier combination
 -- itself. If so, shortcuts and key listeners ignore it.
