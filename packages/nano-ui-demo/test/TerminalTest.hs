@@ -66,6 +66,11 @@ main = do
     column 0 3 (run "A\r\nB\r\nC\ESC[2;3H\ESC[L") == "A BC"
       && cursor (run "A\r\nB\r\nC\ESC[2;3H\ESC[L") == (0, 1)
       && column 0 2 (run "A\r\nB\r\nC\ESC[2H\ESC[M") == "AC "
+  check "scroll up and down move the whole screen, and REP repeats the last glyph" $
+    column 0 2 (run "A\r\nB\r\nC\ESC[S") == "BC "
+      && cursor (run "A\r\nB\r\nC\ESC[S") == (1, 2)
+      && column 0 4 (run "A\r\nB\r\nC\ESC[2T") == "  ABC"
+      && row (run "-\ESC[4b") == "----- "
   check "oversized CSI stays consumed" $
     screen (run ("\ESC[" <> B.replicate 1000 57 <> "H")) == screen blank
   mapM_
