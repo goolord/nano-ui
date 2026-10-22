@@ -57,20 +57,23 @@ module NanoUI.Testing.Harness
   , drawQuads
   , nodesOfType
   , newWakeSignal
+  , measureRuns
   ) where
 
 import Control.Applicative ((<|>))
 import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
-import Control.Monad (filterM, forM, forM_, unless, void, when)
+import Control.Monad (filterM, forM, forM_, replicateM_, unless, void, when)
 import Data.IORef (IORef)
 import Data.List (maximumBy)
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text qualified as T
 import Data.Word (Word32)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
+import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stack (HasCallStack)
+import GHC.Stats (RTSStats (..), getRTSStats)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Context (ctxNodeArena, takeWakes)
@@ -81,7 +84,11 @@ import NanoUI.Shortcut (Shortcut (..))
 import NanoUI.Var (peekVar)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertJustM, assertLt, bump, evalUi, run2Frames, withInput)
+import System.Environment (lookupEnv)
+import System.Mem (performGC)
 import System.Timeout (timeout)
+import Text.Printf (printf)
+import Text.Read (readMaybe)
 
 -- | Text bounds, text, foreground, background, and clip in logical window coordinates.
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
@@ -512,3 +519,25 @@ newWakeSignal ctx = do
         else isJust <$> timeout us (takeMVar signal)
     when woke (takeWakes ctx)
     pure woke
+
+-- | Run @action@ @warmups@ times, then time it over @NANO_PROFILE_ITERATIONS@
+-- runs (@runs@ when unset) and print its mean wall time and allocation per
+-- run under @name@. The clock stops before the second GC, which only brings
+-- the allocation counter current. Needs the RTS's statistics (@+RTS -T@).
+measureRuns :: Int -> Int -> String -> IO () -> IO ()
+measureRuns warmups runs0 name action = do
+  requested <- lookupEnv "NANO_PROFILE_ITERATIONS"
+  let runs = max 1 (fromMaybe runs0 (requested >>= readMaybe))
+  replicateM_ warmups action
+  performGC
+  s0 <- getRTSStats
+  t0 <- getMonotonicTimeNSec
+  replicateM_ runs action
+  t1 <- getMonotonicTimeNSec
+  performGC
+  s1 <- getRTSStats
+  let perIter :: Double -> Double
+      perIter total = total / fromIntegral runs
+  printf "%-34s : %11.6f ms/frame  |  %11.3f KB alloc/frame\n" name
+    (perIter (fromIntegral (t1 - t0) / 1e6))
+    (perIter (fromIntegral (allocated_bytes s1 - allocated_bytes s0) / 1024))

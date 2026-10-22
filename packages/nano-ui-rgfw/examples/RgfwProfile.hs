@@ -4,16 +4,9 @@
 module Main (main) where
 
 import Control.Exception (bracket)
-import Control.Monad (forM_, replicateM_, unless, void, when)
+import Control.Monad (forM_, unless, void, when)
 import qualified Data.ByteString as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.Maybe (fromMaybe)
-import GHC.Clock (getMonotonicTimeNSec)
-import GHC.Stats (RTSStats (..), getRTSStats)
-import System.Environment (lookupEnv)
-import System.Mem (performGC)
-import Text.Printf (printf)
-import Text.Read (readMaybe)
 import qualified Data.Text as T
 import NanoUI
   ( Input (..)
@@ -32,6 +25,7 @@ import NanoUI
   )
 import NanoUI.Backend (Damage (..), emptyInput)
 import NanoUI.Testing (ctxPaintFull, collectRasterSpans, damageIsEmpty, runFrame, takeDamage, takeDamagePieces)
+import NanoUI.Testing.Harness (measureRuns)
 import NanoUI.Emit (runNanoUIE)
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
@@ -49,22 +43,7 @@ physH = 1040
 
 -- | Mean wall time and allocation per run after a short warmup.
 measure :: String -> IO () -> IO ()
-measure name action = do
-  requested <- lookupEnv "NANO_PROFILE_ITERATIONS"
-  let runs = max 1 (fromMaybe iterations (requested >>= readMaybe))
-  replicateM_ 20 action
-  performGC
-  s0 <- getRTSStats
-  t0 <- getMonotonicTimeNSec
-  replicateM_ runs action
-  t1 <- getMonotonicTimeNSec
-  performGC
-  s1 <- getRTSStats
-  let perIter :: Double -> Double
-      perIter total = total / fromIntegral runs
-  printf "%-34s : %9.4f ms/frame  |  %10.2f KB alloc/frame\n" name
-    (perIter (fromIntegral (t1 - t0) / 1e6))
-    (perIter (fromIntegral (allocated_bytes s1 - allocated_bytes s0) / 1024))
+measure = measureRuns 20 iterations
 
 main :: IO ()
 main = do
