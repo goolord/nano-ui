@@ -271,6 +271,8 @@ testRgfwTyping = do
   assert "RGFW typing: repeated key-char events all type" (chars [EventKeyChar 'l', EventKeyChar 'l'] == "ll")
   assert "RGFW typing: a joiner types, and macOS arrow-key characters do not"
     (chars [EventKeyChar '\x200C', EventKeyChar '\xF702'] == "\x200C")
+  assert "RGFW typing: private-use characters past the macOS function keys type"
+    (chars [EventKeyChar '\xF747', EventKeyChar '\xF748', EventKeyChar '\xF8FF'] == "\xF748\xF8FF")
   assert "RGFW typing: repeated keystrokes all type" (chars (plainL ++ plainL) == "ll")
   assert "RGFW typing: a keystroke is its character key as well" (keys plainL == [KeyChar 'l'])
   assert "RGFW typing: Ctrl+L queued char-first is a chord" (chord ctrlLCharFirst)

@@ -617,8 +617,9 @@ decodeRgfwEvents scale = mapMaybe $ \case
   R.EventKeyRelease k m -> Just (RgfwEvKey k m False)
   -- Every character but the controls types, joiners and bidi marks included.
   -- On macOS, RGFW passes on the private-use characters AppKit gives arrow
-  -- and function keys (U+F700 to U+F8FF), which type nothing.
-  R.EventKeyChar ch | not (isControl ch) && not (ch >= '\xF700' && ch <= '\xF8FF') -> Just (RgfwEvChar ch)
+  -- and function keys (U+F700 to U+F747), which type nothing. The rest of
+  -- the private-use area types, the Apple logo (U+F8FF) among it.
+  R.EventKeyChar ch | not (isControl ch) && not (ch >= '\xF700' && ch <= '\xF747') -> Just (RgfwEvChar ch)
   _ -> Nothing
 
 -- | Accumulate a decoded event into frame input. The caller handles close
