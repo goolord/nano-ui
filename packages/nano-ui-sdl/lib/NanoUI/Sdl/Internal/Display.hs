@@ -23,7 +23,7 @@ module NanoUI.Sdl.Internal.Display
   ) where
 
 import Control.Monad (void)
-import Foreign.C.Types (CBool (..), CInt (..))
+import Foreign.C.Types (CBool (..), CFloat (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
@@ -140,9 +140,9 @@ foreign import ccall unsafe "nano_ui_window_position"
   queryWindowPosition :: Ptr SDL_Window -> Ptr CInt -> Ptr CInt -> IO CBool
 
 -- | Vertical refresh rate of the window's current display mode, in Hz
--- (0 when unavailable).
+-- (0 when unavailable), fractions kept: 59.94 Hz is not 59.
 foreign import ccall unsafe "nano_ui_window_refresh_rate"
-  queryWindowRefreshHz :: Ptr SDL_Window -> IO CInt
+  queryWindowRefreshHz :: Ptr SDL_Window -> IO CFloat
 
 -- | Whether the window is a shown Wayland toplevel SDL made itself (not
 -- libdecor's), whose size limits nano-ui sends rather than SDL: SDL would

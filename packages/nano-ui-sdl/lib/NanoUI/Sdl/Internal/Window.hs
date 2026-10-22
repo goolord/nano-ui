@@ -557,7 +557,7 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   sdlCachedCtx <-
     liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache sdlFontCache ctx
   let
-    sdlRefreshPeriod = if refreshHz > 0 then 1 / fromIntegral refreshHz else 1 / 60
+    sdlRefreshPeriod = if refreshHz > 0 then 1 / realToFrac refreshHz else 1 / 60
     sdlVsync = sdlAppVsync opts
     sdlContinuous = sdlAppContinuous opts
   sdlTransparent <-

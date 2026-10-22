@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 #endif
 
-int nano_ui_window_refresh_rate(SDL_Window *window)
+float nano_ui_window_refresh_rate(SDL_Window *window)
 {
     if (!window) {
         return 0;
@@ -23,7 +23,7 @@ int nano_ui_window_refresh_rate(SDL_Window *window)
      * panels, compositors that report a base rate). Fall back to the highest
      * refresh among display modes at the current size so pacing still
      * targets the panel's real cadence instead of the 60 Hz default. */
-    int best = 0;
+    float best = 0;
     int cw = current ? current->w : 0;
     int ch = current ? current->h : 0;
     if (cw <= 0 || ch <= 0) {
