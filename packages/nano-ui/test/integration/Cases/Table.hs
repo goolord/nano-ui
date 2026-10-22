@@ -52,7 +52,25 @@ tests =
   , spec "table-col-resize-body" runTableColResizeDemoReproTest
   , pixelSpec "table-hbar-reach" runTableHBarReachTest
   , spec "table-live-rows" runTableLiveRowsTest
+  , spec "table-sort-mark-damage" runTableSortMarkDamageTest
   ]
+
+-- | A sort set from outside the table moves its header mark, and the frame
+-- repaints the headers that lose and gain it: no rect or text change covers
+-- the mark, and an empty table has no rows to re-sort.
+runTableSortMarkDamageTest :: Context -> IORef Int -> IO ()
+runTableSortMarkDamageTest ctx failed = do
+  sortV <- newVar (SortCol 0 SortAsc)
+  let inp = withInputOff 400 240
+      ui = table "marks" threeCols ([] :: [(T.Text, T.Text, T.Text, T.Text, T.Text)]) sortV
+  _ <- warmup2 ctx inp ui
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  writeVarIO sortV (SortCol 1 SortAsc)
+  _ <- runFrame ctx inp ui
+  dmg <- takeDamage ctx
+  forM_ ["Name", "Dept"] $ \h ->
+    assertJust failed (findHeader h spans) $ \(V2 x y) -> assert failed (damageCovers dmg (Rect x y 1 1))
 
 -- | A row of 'runTableLiveRowsTest'; its middle column starts numeric.
 data LiveRow = LiveRow Text Text Text

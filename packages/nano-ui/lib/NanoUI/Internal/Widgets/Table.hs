@@ -42,7 +42,7 @@ import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, 
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
-import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
 import NanoUI.Internal.Var (Binding (..), bindVarOn, useVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
@@ -673,6 +673,10 @@ tableCore cfg f key cols inputRows curSort =
           <> slotWrite fieldInt (slotKey SlotDrag stateKey) (nextDrag + 1)
           <> slotWrite fieldFloat stateKey nextDragX
           <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
+      -- The headers show the sort only through their style, which no diff
+      -- covers, so a slot on the table repaints it when the sort shown
+      -- changes, however it came (a header click or a write to the Var).
+      liftIO (writeSlot fieldInt ctx tableWid (intKey tableWid) (2 * sortColIndex sort0 + fromEnum (sortColDir sort0 == SortDesc)))
       -- Keep the resize cursor for the whole drag, wherever the pointer is.
       when (nextDrag >= 0 && heldIn MouseLeft inp) $
         liftIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
