@@ -56,6 +56,7 @@ tests =
   , spec "scroll-wheel-cross-2d" runWheelCross2DTest
   , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
   , spec "scroll-wheel-fitting-inner" runWheelFittingInnerTest
+  , spec "scroll-wheel-cross-under-pointer" runWheelCrossUnderPointerTest
   , spec "scroll-wheel-under-bar-lane" runWheelUnderBarLaneTest
   , spec "scroll-bar-short-track" runScrollBarShortTrackTest
   ]
@@ -964,6 +965,25 @@ runWheelCrossInsideTest ctx failed = do
     _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
     assert failed . (> 0) =<< getScrollOffset ctx inner
     assertEq failed 0 =<< getScrollOffset ctx outer
+
+-- | That search prefers the horizontal scroller under the pointer: a
+-- sideways wheel over one whose content fits moves no other one.
+runWheelCrossUnderPointerTest :: Context -> IORef Int -> IO ()
+runWheelCrossUnderPointerTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      across l = (fixedWH 200 40 l) {layoutDirection = Row}
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        (strip, ()) <- scrollArea across (label "fits")
+        replicateM_ 3 (label "row")
+        (carousel, ()) <- scrollArea across (replicateM_ 30 (label "wide cell"))
+        replicateM_ 20 (label "row")
+        pure (strip, carousel)
+  (_, (strip, carousel)) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx strip) $ \r -> do
+    let over = inp0 {inputMousePos = spanCenter r}
+    warmup ctx over ui
+    _ <- runFrame ctx over {inputScroll = V2 1 0} ui
+    assertEq failed 0 =<< getScrollOffset ctx carousel
 
 -- | A nested scroller whose content fits takes no wheel: the page around it
 -- scrolls with the pointer over it.
