@@ -96,7 +96,7 @@ frame r f = do
   prev <- readIORef (recLast r)
   pos <- readIORef (recMouse r)
   down <- readIORef (recDown r)
-  let inp = f (recBase r) {inputMousePos = pos, inputButtonsHeld = if down then left else noButtons, inputDeltaTime = realToFrac (t - prev)}
+  let inp = f (recBase r) {inputMousePos = pos, inputButtonsHeld = buttonsFromList [MouseLeft | down], inputDeltaTime = realToFrac (t - prev)}
   recDraw r inp
   ok <- saveScreenshot (recEnv r) (recDir r </> frameName n)
   unless ok $ fail "record: could not read back the frame"
@@ -116,26 +116,20 @@ moveTo r to secs = do
   from <- readIORef (recMouse r)
   let n = frames secs
   forM_ [1 .. n] $ \i -> do
-    let s = ease (fromIntegral i / fromIntegral n)
+    let s = applyEase EaseInOutCubic (fromIntegral i / fromIntegral n)
     writeIORef (recMouse r) (lerpV from to s)
     frame r id
-
-ease :: Float -> Float
-ease s = if s < 0.5 then 4 * s * s * s else 1 - (-2 * s + 2) ** 3 / 2
 
 lerpV :: V2 -> V2 -> Float -> V2
 lerpV (V2 ax ay) (V2 bx by) s = V2 (ax + (bx - ax) * s) (ay + (by - ay) * s)
 
-left :: MouseButtons
-left = buttonsFromList [MouseLeft]
-
 press, release :: Rec -> IO ()
 press r = do
   writeIORef (recDown r) True
-  frame r (\i -> i {inputButtonsPressed = left})
+  frame r (applyMouseButton MouseLeft True)
 release r = do
   writeIORef (recDown r) False
-  frame r (\i -> i {inputButtonsReleased = left})
+  frame r (applyMouseButton MouseLeft False)
 
 click :: Rec -> IO ()
 click r = press r >> frame r id >> release r >> wait r 0.2
