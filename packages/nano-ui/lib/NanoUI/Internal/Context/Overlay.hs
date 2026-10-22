@@ -84,8 +84,10 @@ floatingLayerAt ctx mouse = do
       hit k = maybe False (`rectContains` mouse) (IM.lookup k rects)
   pure (foldl' (\acc k -> if hit k then k else acc) 0 (osPrevFloatingOrder os))
 
--- | Record known panel bounds at the front of the floating hit order before
--- the next layout pass. Empty bounds are ignored.
+-- | Record panel bounds at the front of the floating hit order
+-- ('floatingLayerAt'). Empty bounds are ignored. The frame's damage pass
+-- replaces the order with the panels it laid out, which the next frame
+-- routes by, so a seed made while a view runs routes nothing.
 seedFloatingPanel :: Context -> WidgetId -> Rect -> IO ()
 seedFloatingPanel ctx wid rect
   | not (rectNonEmpty rect) = pure ()
