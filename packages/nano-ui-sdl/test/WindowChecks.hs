@@ -1,26 +1,33 @@
 {-# LANGUAGE PackageImports #-}
 
 -- | Window options as SDL reports them, screenshots from retained and
--- continuous sessions, and transparent-window alpha.
+-- continuous sessions, transparent-window alpha, and the session's opening
+-- frames, resize-watch frames and render device resets.
 module WindowChecks (windowChecks) where
 
 import Control.Monad (unless, void, when)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (fromJust, isNothing)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Foreign.C.String (peekCString)
+import Foreign.C.Types (CBool (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (castPtr)
-import Foreign.Storable (peek)
+import Foreign.Storable (Storable, peek, poke)
+import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (emptyInput, runNanoUI)
 import NanoUI.Emit (emit, liftNanoUI)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
+import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent))
+import SDL3.Sys.Bindgen.Events qualified as Events
+import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
+import SDL3.Sys.Events (pushEventSafe)
 import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
 import SDL3.Sys.Video qualified as SDL
 import System.Timeout (timeout)
@@ -36,6 +43,8 @@ windowChecks drivers gpu = do
   mapM_ screenshotChecks [False, True]
   transparencyChecks gpu
   reducerEnvironmentCheck
+  openingInputCheck
+  openingCloseCheck
   dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
@@ -99,6 +108,55 @@ reducerEnvironmentCheck = do
     (,) <$> askSdlEnv <*> (pollFileDialogUi =<< askOpenFileDialog defaultFileDialogOptions)
   check "a closed session is out of reach" (isNothing closed)
   expect "a dialog outside a session fails" FileDialogFailed dialog
+
+-- | Put an event on SDL's queue, as the desktop would.
+push :: Storable e => e -> IO ()
+push ev = alloca $ \p -> do
+  poke (castPtr p) ev
+  pushEventSafe p >>= check "SDL takes the event"
+
+-- | A mouse button going down at (30, 40).
+pushPress :: Integral b => b -> IO ()
+pushPress b =
+  push (SDL_MouseButtonEvent Events.SDL_EVENT_MOUSE_BUTTON_DOWN 0 0 0 1 (fromIntegral b) (CBool 1) 1 0 30 40)
+
+-- | Count the view's passes: the first is 1.
+countPass :: IORef Int -> NanoUI Int
+countPass ref = liftIO (atomicModifyIORef' ref (\n -> (n + 1, n + 1)))
+
+-- | The opening frames are drawn before the loop starts. A press taken while
+-- the first draws is seen by one frame, not replayed by the next; one taken
+-- while the second draws is seen too, not dropped. A wake a second after
+-- each pass draws a frame should the loop wait for input that never comes.
+openingInputCheck :: IO ()
+openingInputCheck = do
+  passes <- newIORef 0
+  seen <- newIORef []
+  runSdlApp options $ do
+    wakeAfter 1
+    n <- countPass passes
+    inp <- askInput
+    liftIO $ modifyIORef' seen ([b | b <- [MouseMiddle, MouseBack], pressedIn b inp] ++)
+    when (n == 1) $ liftIO (pushPress sDL_BUTTON_MIDDLE)
+    when (n == 2) $ liftIO (pushPress sDL_BUTTON_X1)
+    when (n >= 3) quitUi
+  readIORef seen >>= expect "presses during the opening frames, each seen once" [MouseBack, MouseMiddle]
+
+-- | A close request taken during the opening frames closes the window, as
+-- one in the loop does.
+openingCloseCheck :: IO ()
+openingCloseCheck = do
+  firstAt <- newIORef Nothing
+  lost <- newIORef False
+  runSdlApp options $ do
+    wakeAfter 1
+    now <- liftIO getMonotonicTime
+    liftIO (readIORef firstAt) >>= \case
+      Nothing -> liftIO $ do
+        writeIORef firstAt (Just now)
+        push (SDL_QuitEvent Events.SDL_EVENT_QUIT 0 0)
+      Just t0 -> when (now > t0 + 0.5) $ liftIO (writeIORef lost True) >> quitUi
+  readIORef lost >>= check "a close request during the opening frames closes the window" . not
 
 dialogStateChecks :: IO ()
 dialogStateChecks = do

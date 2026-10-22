@@ -9,7 +9,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
 import NanoUI (WindowSettings (..), followSystemTheme, unlessM, whenM)
-import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, setExplainLayout)
+import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
@@ -71,9 +71,12 @@ runSdlSession options drawFn = do
           when (hasPointerEvent evs) (writeIORef (sdlPointerSeen env) True)
           noteWake (scaleEventPositions zoom evs)
     -- Take every queued event into the input, syncing the display after
-    -- each batch, until none is left.
+    -- each batch, until none is left. SDL asks to quit once, so a request
+    -- taken here is kept for the loop.
+    quitTaken <- newIORef False
     let settle c inp = do
           pending <- pollEvents >>= decode
+          when (EvQuit `elem` pending) (writeIORef quitTaken True)
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
           if null pending then pure (c', inp') else settle c' inp'
     -- The opening frames are drawn here, outside the loop, so what one asks
@@ -91,11 +94,14 @@ runSdlSession options drawFn = do
     startupFrame ctx1 inp0
     -- First present can apply DPI. Prev rects are empty on that frame.
     -- Draw once more before idle or the Controls page stays stretched
-    -- until the first mouse move.
-    (ctx1b, inp0b, scaleSettle) <- settleScaled ctx1 inp0
+    -- until the first mouse move. Each frame's one-shot input (presses,
+    -- keys, text) is only what came after the frame before.
+    (ctx1b, inp0b, scaleSettle) <- settleScaled ctx1 (clearEphemeral inp0)
     startupFrame ctx1b inp0b
-    (ctx2, inp1, scale1) <- settleScaled ctx1b inp0b
-    when (inputWindowSize inp1 /= inputWindowSize inp0b || scaleMoved scale1 scaleSettle || scaleMoved scaleSettle scale0) $
+    (ctx2, inp1, scale1) <- settleScaled ctx1b (clearEphemeral inp0b)
+    -- Once more for a size or scale the second frame did not have, or for
+    -- one-shot input it did not see, which the loop's first pass clears.
+    when (inputWindowSize inp1 /= inputWindowSize inp0b || scaleMoved scale1 scaleSettle || scaleMoved scaleSettle scale0 || inp1 /= clearEphemeral inp1) $
       startupFrame ctx2 inp1
     writeIORef prev inp1
     -- The last opening frame may have asked for another: it marked the
@@ -156,5 +162,11 @@ runSdlSession options drawFn = do
             , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = sdlAppShouldQuit options
             }
-    bracket (installResizeWatch onResize) id $ \_ ->
-      runSessionLoop drv ctx2 inp1
+    -- A close request the opening frames took, which the loop would not see:
+    -- it ends the session here, or with exits off the loop's first frame
+    -- reports it.
+    quit <- readIORef quitTaken
+    closeNow <- if quit then requestWindowClose ctx2 else pure False
+    unless closeNow $
+      bracket (installResizeWatch onResize) id $ \_ ->
+        runSessionLoop drv ctx2 inp1
