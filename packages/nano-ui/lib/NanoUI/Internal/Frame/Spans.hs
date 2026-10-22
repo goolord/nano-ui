@@ -150,13 +150,14 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
   ax <- getAlignX arena idx
   AxisSizing wTag wVal minW maxW <- getWidthSizing arena idx
   isRowChild <- parentIsRow arena idx
-  -- 'nodeTextLines' wraps a row child only at its own newlines, so
-  -- only then does the ancestor cap matter; skip the walk to the root. A
+  -- 'nodeTextLines' wraps a row child only at its own newlines, and other
+  -- text that is not fit at the width it was given ('textWrapCap'), so only
+  -- otherwise does the ancestor cap matter; skip the walk to the root. A
   -- fixed width caps itself within its limits, as the solve measures it.
   effMaxW <-
     if wTag == SizingFixed
       then pure (clamp minW maxW wVal)
-      else if maxW < 1e8 || (isRowChild && not (T.any (== '\n') raw))
+      else if maxW < 1e8 || (if isRowChild then not (T.any (== '\n') raw) else wTag /= SizingFit && w > 0)
         then pure maxW
         else findAncestorMaxW arena idx
   let rect = Rect x y w h

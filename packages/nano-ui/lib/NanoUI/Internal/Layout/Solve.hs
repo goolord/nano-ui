@@ -1894,7 +1894,8 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
               else do
                 AxisSizing wTag _ _ maxW <- getWidthSizing na ci
                 Rect _ _ w _ <- getNodeRect na ci
-                effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW na ci
+                -- Only fit text wraps at the ancestor cap ('textWrapCap').
+                effMaxW <- if maxW < 1e8 || (wTag /= SizingFit && w > 0) then pure maxW else findAncestorMaxW na ci
                 let cap = textWrapCap effMaxW wTag w
                 (tw, _) <- measureFontLine measurer raw
                 pure (cap < 1e8 && cap + 0.5 < tw)
