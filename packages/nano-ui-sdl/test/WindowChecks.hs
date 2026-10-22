@@ -5,10 +5,14 @@
 -- frames, resize-watch frames and render device resets.
 module WindowChecks (windowChecks) where
 
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Exception (IOException, try)
 import Control.Monad (unless, void, when)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
+import Data.Foldable (for_)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
+import Data.List (isInfixOf)
 import Data.Maybe (fromJust, isNothing)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Foreign.C.String (peekCString)
@@ -23,16 +27,17 @@ import NanoUI.Emit (emit, liftNanoUI)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
-import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent))
+import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent), SDL_WindowEvent (SDL_WindowEvent))
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Events (pushEventSafe)
 import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
 import SDL3.Sys.Video qualified as SDL
+import System.Environment (lookupEnv)
 import System.Timeout (timeout)
 import "nano-ui-sdl" NanoUI.Backend.Sdl
-import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlWindow, sdlTransparent)
+import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlUiScaleRef, sdlWindow, sdlTransparent)
 
 -- | Run all checks. @gpu@ means a real display with a GPU renderer, which
 -- adds checks the dummy driver cannot support: icon, opacity, position, and
@@ -45,6 +50,7 @@ windowChecks drivers gpu = do
   reducerEnvironmentCheck
   openingInputCheck
   openingCloseCheck
+  resizeFailureCheck
   dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
@@ -157,6 +163,33 @@ openingCloseCheck = do
         push (SDL_QuitEvent Events.SDL_EVENT_QUIT 0 0)
       Just t0 -> when (now > t0 + 0.5) $ liftIO (writeIORef lost True) >> quitUi
   readIORef lost >>= check "a close request during the opening frames closes the window" . not
+
+-- | A frame the resize watch draws (a live resize) that throws ends the
+-- session with the exception, as a frame of the loop's own does, rather
+-- than the process. The watch runs where SDL sends the event: here a thread
+-- of the test's, which only the software renderer may draw from.
+resizeFailureCheck :: IO ()
+resizeFailureCheck = do
+  software <- (== Just "software") <$> lookupEnv "SDL_RENDER_DRIVER"
+  when software $ do
+    passes <- newIORef 0
+    outcome <- try $ runSdlApp options $ do
+      wakeAfter 2
+      n <- countPass passes
+      width <- windowWidth
+      when (width < 150) $ liftIO (ioError (userError "too narrow"))
+      -- Once the loop waits, double the UI scale behind the session's back
+      -- and send the event a resize would.
+      live <- askSdlEnv
+      when (n == 1) $ liftIO $ for_ live $ \env -> void $ forkIO $ do
+        threadDelay 300000
+        writeIORef (sdlUiScaleRef env) 2
+        push (SDL_WindowEvent Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED 0 0 0 200 100)
+      -- The wake's frame: nothing drew the resize.
+      when (n >= 3) quitUi
+    case outcome of
+      Left (e :: IOException) -> check "the resize frame's exception leaves the session" ("too narrow" `isInfixOf` show e)
+      Right () -> fail "a session whose resize frame threw ended normally"
 
 dialogStateChecks :: IO ()
 dialogStateChecks = do

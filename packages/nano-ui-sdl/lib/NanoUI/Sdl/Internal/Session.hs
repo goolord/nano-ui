@@ -3,8 +3,9 @@ module NanoUI.Sdl.Internal.Session
   ( runSdlSession
   ) where
 
-import Control.Exception (bracket)
+import Control.Exception (SomeException, bracket, handle, throwIO)
 import Control.Monad (forM_, unless, void, when)
+import Data.Foldable (traverse_)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
@@ -47,8 +48,13 @@ runSdlSession options drawFn = do
     -- decided whether to draw. That frame already covers the size change and
     -- expose events the loop is about to see.
     resizePresented <- newIORef Nothing
+    -- An exception from a frame drawn here cannot unwind past the C that
+    -- called the watch: GHC would end the process there, past every handler
+    -- and release. It waits for the loop's next pass to throw it, and the
+    -- watch draws nothing more.
+    resizeFailure <- newIORef Nothing
     -- The live context is the session's: 'syncDisplay' answers it.
-    let onResize = void $ tryWithDrawingLock drawing $ do
+    let resizeFrame = void $ tryWithDrawingLock drawing $ do
           liveCtx <- readIORef (sdlCachedCtx env)
           inp <- readIORef prev
           scale0 <- readIORef (sdlScaleRef env)
@@ -59,6 +65,8 @@ runSdlSession options drawFn = do
             pauseVsync True
             _ <- drawFn ctx' env inpSynced True
             writeIORef resizePresented (Just (inputWindowSize inpSynced))
+        onResize = whenM (isNothing <$> readIORef resizeFailure) $
+          handle (\(e :: SomeException) -> writeIORef resizeFailure (Just e)) resizeFrame
     -- A wake (a background thread changed what the view reads, a file dialog
     -- finished) asks for a frame. What that frame presents is up to its
     -- damage: a wake that changed nothing on screen costs the UI pass and no
@@ -122,6 +130,7 @@ runSdlSession options drawFn = do
             , sdIsButtonEdge  = isButtonEdge
             , sdIsSessionQuit = (== EvQuit)
             , sdSyncDisplay   = \c inp -> do
+                readIORef resizeFailure >>= traverse_ throwIO
                 pauseVsync False
                 synced@(_, inp') <- syncDisplay c env inp
                 synced <$ writeIORef prev inp'
