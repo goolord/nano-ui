@@ -17,6 +17,7 @@ import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
+import NanoUI.Sdl.Internal.Runner (resetRenderTextures)
 import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, windowZoom, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
@@ -88,6 +89,8 @@ runSdlSession options drawFn = do
         decode evs = do
           zoom <- windowZoom env
           when (hasPointerEvent evs) (writeIORef (sdlPointerSeen env) True)
+          -- The frame the reset asks for makes the textures again.
+          when (EvRenderDeviceReset `elem` evs) (resetRenderTextures env)
           noteWake (scaleEventPositions zoom evs)
     -- Take every queued event into the input, syncing the display after
     -- each batch, until none is left. SDL asks to quit once, so a request

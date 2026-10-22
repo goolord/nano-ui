@@ -12,7 +12,7 @@ import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, nub)
 import Data.Maybe (fromJust, isNothing)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Foreign.C.String (peekCString)
@@ -27,7 +27,7 @@ import NanoUI.Emit (emit, liftNanoUI)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
-import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent), SDL_WindowEvent (SDL_WindowEvent))
+import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent), SDL_RenderEvent (SDL_RenderEvent), SDL_WindowEvent (SDL_WindowEvent))
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -51,6 +51,7 @@ windowChecks drivers gpu = do
   openingInputCheck
   openingCloseCheck
   resizeFailureCheck
+  deviceResetCheck
   dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
 
@@ -190,6 +191,30 @@ resizeFailureCheck = do
     case outcome of
       Left (e :: IOException) -> check "the resize frame's exception leaves the session" ("too narrow" `isInfixOf` show e)
       Right () -> fail "a session whose resize frame threw ended normally"
+
+-- | After a render device reset, which empties every texture, the next frame
+-- repaints in full with the textures made again, text included.
+deviceResetCheck :: IO ()
+deviceResetCheck = do
+  passes <- newIORef 0
+  shots <- newIORef []
+  redrawn <- newIORef False
+  runSdlApp options $ do
+    wakeAfter 1
+    n <- countPass passes
+    inp <- askInput
+    label "Text after a reset"
+    let shot = requestScreenshot (\s -> modifyIORef' shots (s :))
+    when (n == 2) $ shot >> liftIO (push (SDL_RenderEvent Events.SDL_EVENT_RENDER_DEVICE_RESET 0 0 0))
+    when (n == 3) $ shot >> liftIO (writeIORef redrawn (inputWindowRedraw inp)) >> quitUi
+  readIORef redrawn >>= check "a device reset repaints the window"
+  readIORef shots >>= \case
+    [Just after, Just before] -> do
+      check "text before the reset" (length (nub (pixels before)) > 1)
+      check "text drawn from the remade textures" (after == before)
+    other -> fail ("two screenshots wanted, got " ++ show (length other))
+  where
+    pixels s = let img = screenshotPixels s in [pixelAt s x y | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1]]
 
 dialogStateChecks :: IO ()
 dialogStateChecks = do

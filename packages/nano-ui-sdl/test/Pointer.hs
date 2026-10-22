@@ -1,10 +1,11 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 
 -- | SDL pointer translation: middle, side and extra buttons, mouse motion,
--- the pointer leaving the window, and lost render targets. Events go through
--- SDL's own queue on the dummy video driver.
+-- the pointer leaving the window, and lost render targets and devices.
+-- Events go through SDL's own queue on the dummy video driver.
 module Main (main) where
 
+import Control.Exception (IOException, try)
 import Control.Monad (forM_, unless)
 import Foreign.C.Types (CBool (..))
 import Foreign.Marshal.Alloc (alloca)
@@ -76,6 +77,15 @@ main = do
     through
       SDL_RenderEvent {type' = Events.SDL_EVENT_RENDER_TARGETS_RESET, reserved = 0, timestamp = 0, windowID = 0}
   check "lost render targets repaint the whole window" (reset == [EvWindowRedraw])
+  deviceReset <-
+    through
+      SDL_RenderEvent {type' = Events.SDL_EVENT_RENDER_DEVICE_RESET, reserved = 0, timestamp = 0, windowID = 0}
+  check "a render device reset is told from lost render targets" (deviceReset == [EvRenderDeviceReset])
+  deviceLost <-
+    try (through SDL_RenderEvent {type' = Events.SDL_EVENT_RENDER_DEVICE_LOST, reserved = 0, timestamp = 0, windowID = 0})
+  check "a lost render device ends the session" $ case deviceLost of
+    Left (_ :: IOException) -> True
+    Right _ -> False
   quitSafe
   let button b isDown inp = applyEvent inp (EvMouseButton b isDown (V2 5 5) (inputModifiers emptyInput))
       pressed = button MouseMiddle True emptyInput

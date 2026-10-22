@@ -108,6 +108,11 @@ Views use logical pixels. The backend converts input and drawing to the
 window's display scale, including changes when the window moves to another
 monitor. Custom widgets should use the logical rectangle supplied by nano-ui.
 
+A render device reset (a Direct3D device lost to a driver update or a remote
+desktop reconnecting) makes the session's textures again and repaints the
+window. A device SDL reports lost for good ends the session with an
+`IOError`.
+
 ## Running
 
 ```sh

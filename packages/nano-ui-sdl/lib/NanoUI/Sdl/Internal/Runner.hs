@@ -6,6 +6,7 @@ module NanoUI.Sdl.Internal.Runner
   , sdlDebugSnapshot
   , setSdlUiFont
   , setSdlUiScale
+  , resetRenderTextures
   ) where
 
 import Control.Exception (finally, mask_)
@@ -271,6 +272,25 @@ ensureRetain env w h scale = do
       pure (tex', True)
   where
     roundUp n = max retainBlock (((n + retainBlock - 1) `div` retainBlock) * retainBlock)
+
+-- | Destroy the retained texture, if there is one; the next retained frame
+-- makes a new one.
+dropRetain :: SdlEnv -> IO ()
+dropRetain env = do
+  tex <- retainTexture <$> readIORef (sdlRetain env)
+  unless (tex == nullPtr) $ do
+    writeIORef (sdlRetain env) (Retain nullPtr 0 0 0 0 0)
+    destroyTexture tex
+
+-- | After a render device reset, which emptied every texture: drop the
+-- retained frame, the image atlas and the glyph pages, so the next frame
+-- makes and fills them again. That frame repaints whole
+-- ('NanoUI.Sdl.Internal.Input.EvRenderDeviceReset' asks for it).
+resetRenderTextures :: SdlEnv -> IO ()
+resetRenderTextures env = do
+  dropRetain env
+  SdlImage.destroyImageAtlas (sdlImages env)
+  dropGlyphTextures (sdlFontCache env)
 
 -- | Read the open session's debug information, refreshing at most four
 -- times per second; 'Nothing' outside a session. Repeated queries keep the
