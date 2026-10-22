@@ -334,6 +334,11 @@ module NanoUI.Backend
     -- @runSessionLoop@, so it needs no filtering of its own. Without it, a
     -- blocking loop shows a job's result only when other input arrives.
     --
+    -- 'markDirty' belongs to the thread that runs frames, or to a callback
+    -- that thread is blocked on, such as a resize watch. Any other thread
+    -- publishes its change and then calls the action from @askWake@, which
+    -- is safe from every thread.
+    --
     -- Jobs run until their hooks stop being called. @runSessionLoop@ in
     -- "NanoUI.Runner" cancels the rest when it returns; a host that runs
     -- frames itself calls 'cancelTasks' when it closes the session.

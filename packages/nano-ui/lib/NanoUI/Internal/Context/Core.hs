@@ -188,6 +188,11 @@ damageFull ctx = requestDamage ctx ReqFull
 -- loop's own thread, which checks the flag before it waits.
 -- Dirty state schedules work; damage determines which pixels are repainted.
 -- The request is opaque: its follow-up frame repaints the whole window.
+--
+-- Call it on the thread that runs frames, or on one that thread is blocked
+-- on (as SDL's resize watch is): the flag shares a plain 'IORef' with the
+-- frame's damage bookkeeping. Other threads publish their change and call
+-- 'wakeFromThread' (the action from 'NanoUI.askWake'), which is atomic.
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
@@ -197,7 +202,8 @@ markDirty ctx = do
 -- | 'markDirty' for a request whose visible effects the frame's own damage
 -- machinery already covers: store writes are damaged per key ('modifyStore',
 -- 'writeSlot', 'adoptSlot'). The follow-up frame these request clips instead
--- of repainting the whole window.
+-- of repainting the whole window. The same threads may call it as
+-- 'markDirty'.
 {-# INLINE markDirtyCovered #-}
 markDirtyCovered :: Context -> IO ()
 markDirtyCovered ctx = do
