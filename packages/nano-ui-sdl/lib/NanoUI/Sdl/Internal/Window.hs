@@ -658,16 +658,20 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
 
 -- | Write the last presented frame to a BMP file, on the display thread. A
 -- retained session reads its retained texture, since SDL leaves the window
--- backbuffer undefined after a present; a direct-to-window session reads the
--- backbuffer.
+-- backbuffer undefined after a present.
+--
+-- A direct-to-window session ('sdlAppContinuous') has no retained frame and
+-- a readable one only between drawing and presenting, so from a view use
+-- 'NanoUI.requestScreenshot', which reads it at that point.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path =
   withSurface (readFrame env . retainTexture =<< readIORef (sdlRetain env)) False $ \surface ->
     sdlPathEncoding >>= \enc -> GHC.withCString enc path (saveBMP surface . PtrConst.unsafeFromPtr)
 
 -- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
--- window pixels (logical size times display scale) with the drawn alpha,
--- which is the theme's window colour's alpha where nothing covers it.
+-- window pixels (the backbuffer's size, about the logical size times the
+-- pixel density and UI zoom) with the drawn alpha, which is the theme's
+-- window colour's alpha where nothing covers it.
 -- 'Nothing' when SDL cannot read the frame back. Call on the display thread.
 --
 -- A direct-to-window session ('sdlAppContinuous') has a readable frame only

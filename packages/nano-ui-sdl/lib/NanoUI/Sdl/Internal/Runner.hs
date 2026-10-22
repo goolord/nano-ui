@@ -13,7 +13,7 @@ import Control.Exception (finally, mask_)
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
 import Data.IORef (IORef, readIORef, writeIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (answerScreenshots, answerScreenshotsAfter)
@@ -75,9 +75,15 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- can still hold their metrics dropped, before the UI pass draws.
   whenM (closeEvictedFonts (sdlFontCache env)) (clearMeasureCache ctx)
   scale <- readIORef (sdlScaleRef env)
+  -- The frame is the backbuffer's size. One worked out from the scale can be
+  -- a pixel off it at a fractional scale, where each axis rounds apart, and
+  -- the copy to the window would stretch it. A NANO_FORCE_SCALE frame is
+  -- drawn at a scale the window does not have, and the copy fits it.
+  (outputOk, ow, oh) <- outPair (getRenderOutputSize ren)
   let Size lw lh = inputWindowSize inp
-      pw = max 1 (round (lw * scale))
-      ph = max 1 (round (lh * scale))
+      fromOutput = outputOk && ow > 0 && oh > 0 && isNothing (sdlForcedScale env)
+      pw = if fromOutput then fromIntegral ow else max 1 (round (lw * scale))
+      ph = if fromOutput then fromIntegral oh else max 1 (round (lh * scale))
       -- A transparent window repaints in full on any change: a clip frame
       -- blends its backdrop over the old pixels, which would show through a
       -- translucent window colour.
@@ -91,15 +97,12 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- equivalent to the retained blit only at the same pixel dimensions;
   -- content scale and window pixel density can differ. A transparent window
   -- always draws retained: the copy to the window premultiplies its alpha.
-  direct <-
-    if sdlContinuous env && not transparent
-      then do
-        (ok, ow, oh) <- outPair (getRenderOutputSize ren)
-        pure (ok && fromIntegral ow == pw && fromIntegral oh == ph)
-      else pure False
+  -- A retained texture left from an earlier frame goes, so nothing reads
+  -- that older frame from it as the last one.
+  let direct = sdlContinuous env && not transparent && outputOk && fromIntegral ow == pw && fromIntegral oh == ph
   (tex, retainNew) <-
     if direct
-      then pure (nullPtr, False)
+      then (nullPtr, False) <$ dropRetain env
       else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
   writeIORef (ctxPaintFull ctx) (presentFull || transparent)
