@@ -93,6 +93,14 @@ selftest = do
       expectText "selftest: Ctrl+= did not zoom in" "Zoom: 110%" =<< collectTextSpans ctx
       chord (cmdOrCtrl <> key '-')
       expectText "selftest: Ctrl+- did not zoom out" "Zoom: 100%" =<< collectTextSpans ctx
+      -- Ctrl++ (Ctrl+Shift+=), bound apart from the rows, closes an open menu
+      -- as they do.
+      clickOn "View" =<< collectTextSpans ctx
+      chord (cmdOrCtrl <> shift <> key '=')
+      overlaySpansZoom <- overlay
+      when (hasText "Zoom In" overlaySpansZoom) $
+        fail "selftest: the Ctrl++ chord left the View menu open"
+      expectText "selftest: Ctrl++ did not zoom in" "Zoom: 110%" =<< collectTextSpans ctx
 
       -- The File menu offers Exit; activating it ends the session (via
       -- 'quitUi', after confirming unsaved changes), so the selftest only

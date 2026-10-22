@@ -183,12 +183,12 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
   ------------------------------------------------------------- shortcuts ---
   -- A menu row's chord works only while its menu is open, so the commands'
   -- chords are also bound here, ahead of the rows, and close an open menu as
-  -- the rows do. The editor handles its own editing chords. Ctrl++ is
-  -- Ctrl+Shift+= on a US layout, or keypad plus.
+  -- the rows do; so does a close request. The editor handles its own editing
+  -- chords. Ctrl++ is Ctrl+Shift+= on a US layout, or keypad plus.
   for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
     \(_, chord, action) -> item (shortcut chord) action
-  whenM (or <$> traverse shortcut [cmdOrCtrl <> shift <> key '=', cmdOrCtrl <> key '+']) zoomIn
-  whenM (winCloseRequested <$> askWindow) exitApp
+  item (or <$> traverse shortcut [cmdOrCtrl <> shift <> key '=', cmdOrCtrl <> key '+']) zoomIn
+  item (winCloseRequested <$> askWindow) exitApp
 
   --------------------------------------------------------------- layout ---
   columnWith (grow . gap 0) $ do
