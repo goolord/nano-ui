@@ -252,7 +252,8 @@ colorPickerFieldLayout = tight . fillW . minW 40 $ defaultLayout
 
 -- | RGB colour picker bound to mutable state ('Var'): a saturation/value
 -- field, a hue bar, and RGB, HSV and hex fields. Edits mutate the 'Var' in
--- place.
+-- place. Without an alpha bar, any edit makes the colour opaque; use
+-- 'colorPickerRGBA' to keep its alpha.
 --
 -- The field and each bar take keyboard focus in turn. On the field the arrow
 -- keys move the marker (left and right for saturation, up and down for

@@ -132,7 +132,8 @@ inputEnumRadio ::
   FieldName -> a -> Form err a
 inputEnumRadio name = enumField (inputRadio name)
 
--- | Color picker input.
+-- | Color picker input. As with 'colorPicker'', an edit makes the colour
+-- opaque.
 inputColor :: FormError FormInput err => FieldName -> Color -> Form err Color
 inputColor name initial = captioned name decode (FormInputText . colorToHexA) colorPicker' initial
   where
