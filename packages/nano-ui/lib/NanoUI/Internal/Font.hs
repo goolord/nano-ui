@@ -60,12 +60,12 @@ module NanoUI.Internal.Font
   ) where
 
 import Control.Monad (forM_, unless)
-import Data.Char (isMark)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
 import Data.Text (Text)
 import qualified Data.Text as T
+import NanoUI.Internal.TextCluster (clusterBounds)
 import NanoUI.Internal.Types (Rect (..), clamp, onGrid)
 import NanoUI.Internal.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..))
 
@@ -681,7 +681,7 @@ wrapTextIO lineW txt maxW = do
               else do
                 lineW line >>= lineOf
                 unless (T.null rest) $
-                  lineW (T.take (clusterEnd chunk (T.length line + 1)) chunk) >>= breakAt
+                  lineW (T.take (snd (clusterBounds chunk (T.length line + 1))) chunk) >>= breakAt
                 charLines perLine rest (line : acc)
   if maxW <= 0
     -- Nothing fits, and no other width wraps to nothing.
@@ -759,34 +759,13 @@ takeWidth guess lineW maxW txt
       k <- largestFitting fits 1 maxBound guess
       -- Back to the start of the character the fit ends inside, or on to
       -- its end when it is the first.
-      let start = until (not . splitsCluster txt) (subtract 1) k
-      pure (T.splitAt (if start > 0 then start else clusterEnd txt k) txt)
+      let (start, end) = clusterBounds txt k
+      pure (T.splitAt (if start > 0 then start else end) txt)
   where
     -- A count past the end does not fit, so the search needs no length.
     fits k
       | T.compareLength txt k == LT = pure False
       | otherwise = (<= maxW) <$> lineW (T.take k txt)
-
--- | Whether cutting @t@ after @k@ characters splits a user-perceived
--- character: parts one from the combining marks, variation selectors, emoji
--- modifiers or zero-width joiner after it, or a joiner from the character it
--- joins on.
-splitsCluster :: Text -> Int -> Bool
-splitsCluster t k = case T.uncons (T.drop k t) of
-  Just (c, _) ->
-    k > 0
-      && ( isMark c
-             || c == '\x200D'
-             || (c >= '\xFE00' && c <= '\xFE0F')
-             || (c >= '\x1F3FB' && c <= '\x1F3FF')
-             || T.index t (k - 1) == '\x200D'
-         )
-  Nothing -> False
-
--- | The first place from @k@ characters into @t@ on that ends a
--- user-perceived character.
-clusterEnd :: Text -> Int -> Int
-clusterEnd t = until (not . splitsCluster t) (+ 1)
 
 truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
 truncateTextIO lineW maxW txt

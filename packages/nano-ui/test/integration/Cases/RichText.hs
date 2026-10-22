@@ -28,6 +28,7 @@ tests =
   , spec "rich-text-selection-persistence" runSelectionPersistenceTest
   , spec "rich-text-selection-focus" runSelectionFocusTest
   , spec "rich-text-break-policy" runTextBreakTest
+  , spec "rich-text-break-anywhere-newline" runBreakAnywhereNewlineTest
   , spec "rich-text-leading-spaces" runLeadingSpacesTest
   ]
 
@@ -89,6 +90,16 @@ runTextBreakTest ctx failed = do
   flags <- heightOf (breakAnywhere . fixedW (1.5 * advFlag)) [inlineText (T.replicate 3 flag)]
   lineFlag <- heightOf id [inlineText flag]
   assertEq failed (3 * lineFlag) flags
+
+-- | A newline breaks a 'breakAnywhere' line whatever joiner or mark is
+-- beside it, and every other character is still drawn.
+runBreakAnywhereNewlineTest :: Context -> IORef Int -> IO ()
+runBreakAnywhereNewlineTest ctx failed =
+  forM_ ["one\n\x200Dtwo", "one\x200D\ntwo", "one\n\x0301two"] $ \txt -> do
+    resp <- warmup2 ctx (withInput 400 400) (column (fst <$> richTextWith' breakAnywhere [inlineText txt]))
+    drawn <- (\ops -> [(y, t) | DrawTextStyled _ y _ t _ <- ops]) <$> drawnOps ctx resp
+    assertEq failed (txt, 2) (txt, length (groupBy (\a b -> fst a == fst b) drawn))
+    assertEq failed (txt, T.filter (/= '\n') txt) (txt, T.concat (map snd drawn))
 
 -- | Selection is widget state; styling, streaming and cache eviction preserve it.
 runSelectionPersistenceTest :: Context -> IORef Int -> IO ()
