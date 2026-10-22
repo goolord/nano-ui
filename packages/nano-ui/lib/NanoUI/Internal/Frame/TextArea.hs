@@ -30,18 +30,18 @@ module NanoUI.Internal.Frame.TextArea
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import NanoUI.Internal.Context
-import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
+import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, withClip)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayoutIn, scrollChromeLane)
-import NanoUI.Internal.Frame.Node (nodeFontMetrics, packedTextFont, resolveTextFont)
-import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt, drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, nodeTextFieldGeom, preeditSourceIndex, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
+import NanoUI.Internal.Frame.Node (nodeFontMetrics, nodeFontNative, packedTextFont, resolveTextFont)
+import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt, drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, fieldTextColor, nodeTextFieldGeom, preeditSourceIndex, pushFieldText, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
@@ -389,10 +389,10 @@ syncTextAreaViewport ctx idx key fm field = do
 
 
 -- | A text area's scroll offset snapped to the device pixel grid, the same
--- grid 'pushText' snaps to, so line pens and hit-testing stay in lockstep
--- (and in agreement with each other) while the text area scrolls. The raw
--- 'Double' offset keeps sub-pixel wheel deltas; only the applied value is
--- quantized.
+-- grid 'NanoUI.Internal.Draw.pushText' snaps to, so line pens and
+-- hit-testing stay in lockstep (and in agreement with each other) while the
+-- text area scrolls. The raw 'Double' offset keeps sub-pixel wheel deltas;
+-- only the applied value is quantized.
 {-# INLINE textAreaScrollSnapped #-}
 textAreaScrollSnapped :: DrawArena -> TA.TextAreaState -> IO (Float, Float)
 textAreaScrollSnapped da state = do
@@ -413,8 +413,12 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   state <- (`TA.loadTextAreaState` key) <$> getStore ctx
   (scrollXf, scrollYf) <- textAreaScrollSnapped da state
   preedit <- textAreaPreedit ctx wid state
-  -- The layout's 'fontColor', as a text field's and the span path's.
-  fg <- fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
+  -- The layout's colour or tone, and the weight, slant and decoration the
+  -- font gives no face for, as a text field's.
+  fg <- fieldTextColor ctx idx (styleFg style)
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  size <- getNodeFontSize (ctxNodeArena ctx) idx
+  native <- nodeFontNative ctx size si
   let lineH = textAreaLineHeight fm
       bars = textAreaBars fm field contentW contentH
       textClip@(Rect clipX contentTop _ _) = textAreaTextClip fm field bars
@@ -448,7 +452,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
     forM_ [firstRow .. lastRow] $ \row -> do
       let line = fst (shownRow preedit buf row)
       unless (T.null line) $
-        pushText da fm contentX (rowY row) line fg
+        pushFieldText da fm native si contentX (rowY row) line fg
     when focus $
       case preedit of
         Just (row, p) -> drawLinePreedit da fm p contentX (rowY row) lineH fg

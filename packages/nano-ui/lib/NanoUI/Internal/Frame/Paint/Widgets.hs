@@ -20,7 +20,7 @@ import NanoUI.Internal.Context (Context (..), getAnimationValue, getStore)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome
-import NanoUI.Internal.Frame.Node (nodeFontMetrics, resolveFontFor)
+import NanoUI.Internal.Frame.Node (resolveFontFor)
 import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith, resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
@@ -118,7 +118,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
           let field = textInputFieldRect fm x y w h
           paintStyledRect da style field
           fontSizeVal <- getNodeFontSize (peNodeArena env) idx
-          (ffm, _, _) <- resolveFontFor ctx NodeTextInput fontSizeVal si
+          (ffm, native, _) <- resolveFontFor ctx NodeTextInput fontSizeVal si
           -- Paint discards the measured text width that the span path needs,
           -- so it takes the pen directly and skips the host measurement.
           (txt, fx, fy, clip) <- plainFieldPen ctx idx si ffm x y w h
@@ -127,7 +127,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
           -- measuring the caret again.
           mEdit <- readFieldEdit ctx idx field fx
           -- Glyphs in the field's own font, which placed the pen.
-          paintClippedFieldText ctx da ffm style idx mEdit clip fx fy txt ffg
+          paintClippedFieldText ctx da ffm native si style idx mEdit clip fx fy txt ffg
 
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
@@ -302,12 +302,15 @@ drawSortTriangle da cx cy down =
    in pushFilledTriangle da (cx - 5) (cy - tip) (cx + 5) (cy - tip) cx (cy + tip)
 
 -- | Draw a single-line field's text, and its selection and caret while it is
--- being edited, inside @clip@. @penX/penY@ locate @txt@ (absolute).
+-- being edited, inside @clip@. @penX/penY@ locate @txt@ (absolute), drawn in
+-- the font style packed in @si@ ('pushFieldText').
 {-# INLINE paintClippedFieldText #-}
 paintClippedFieldText ::
   Context ->
   DrawArena ->
   FontMetrics ->
+  Bool ->
+  Int ->
   Style ->
   NodeIdx ->
   Maybe FieldEdit ->
@@ -317,11 +320,11 @@ paintClippedFieldText ::
   T.Text ->
   Color ->
   IO ()
-paintClippedFieldText ctx da fm style idx mEdit clip penX penY txt fg =
+paintClippedFieldText ctx da fm native si style idx mEdit clip penX penY txt fg =
   withClip da clip $ do
     mapM_ (drawTextInputSelection da ctx idx) mEdit
     unless (T.null txt) $
-      pushText da fm penX penY txt fg
+      pushFieldText da fm native si penX penY txt fg
     mapM_ (\edit -> drawTextInputCaret da edit (styleFg style)) mEdit
 
 -- | A caption-less field filling @box@: the box, @chrome@, then its value,
@@ -335,7 +338,7 @@ paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ 
   -- clicks.
   si <- getStyleIdx (peNodeArena env) idx
   fontSizeVal <- getNodeFontSize (peNodeArena env) idx
-  (fm, _, measure) <- resolveFontFor ctx NodeTextInput fontSizeVal si
+  (fm, native, measure) <- resolveFontFor ctx NodeTextInput fontSizeVal si
   paintStyledRect da style box
   value <- textInputValue ctx idx
   -- The value, including any input-method composition in progress.
@@ -355,7 +358,7 @@ paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ 
           , if T.null value && not focus then lerpColor baseFg (styleBg style) 0.5 else baseFg
           )
   mEdit <- readFieldEdit ctx idx box (clipX - scrollX)
-  paintClippedFieldText ctx da fm style idx mEdit clip (clipX - scrollX) ty display fg
+  paintClippedFieldText ctx da fm native si style idx mEdit clip (clipX - scrollX) ty display fg
   pure value
 
 -- | A stepper arrow in its half of the stepper, nudged toward the other half so
@@ -380,15 +383,17 @@ paintSelectableText :: PaintEnv -> Style -> NodeIdx -> Rect -> IO ()
 paintSelectableText env style idx rect@(Rect x y _ h) = do
   let ctx = peContext env
       da = peDrawArena env
-  mFontColor <- getNodeFontColor (peNodeArena env) idx
-  fm <- nodeFontMetrics ctx idx
+  fg <- fieldTextColor ctx idx (styleFg style)
+  si <- getStyleIdx (peNodeArena env) idx
+  size <- getNodeFontSize (peNodeArena env) idx
+  (fm, native, _) <- resolveFontFor ctx NodeTextInput size si
   value <- textInputValue ctx idx
   let (penX, ty, _) = selectableTextGeometry fm x y h
   mEdit <- readFieldEdit ctx idx rect penX
   withClip da rect $ do
     mapM_ (drawTextInputSelection da ctx idx) mEdit
     unless (T.null value) $
-      pushText da fm penX ty value (fromMaybe (styleFg style) mFontColor)
+      pushFieldText da fm native si penX ty value fg
 
 drawSearchMagnifier :: DrawArena -> Rect -> Color -> IO ()
 drawSearchMagnifier da (Rect x y w h) col = do
