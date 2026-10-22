@@ -17,6 +17,7 @@ tests =
   , spec "select-dropdown-span-colors" runSelectDropdownSpanColorsTest
   , spec "select-dropdown-flips" runSelectDropdownFlipsTest
   , spec "select-dropdown-off-field" runSelectDropdownOffFieldTest
+  , spec "select-dropdown-scrolled-away" runSelectDropdownScrolledAwayTest
   , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
   , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
   , spec "tree-select" runTreeSelectTest
@@ -188,6 +189,27 @@ runSelectDropdownOffFieldTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   assertEq failed 3 . snd =<< runClick ctx inp0 ui (centerOf resp)
   assert failed . anySelectOpen =<< getStore ctx
+
+-- | A dropdown goes with its field when the field scrolls out of view: it is
+-- not drawn, and a press where it would be picks nothing.
+runSelectDropdownScrolledAwayTest :: Context -> IORef Int -> IO ()
+runSelectDropdownScrolledAwayTest ctx failed = do
+  let inp0 = withInput 320 300
+      ui = column $ do
+        label "toolbar"
+        snd <$> scrollArea (fixedWH 300 120) (withValue 0 (selectWith' (fixedW 100) ["Low", "Medium", "High"]) <* replicateM_ 30 (label "line"))
+  (resp, _) <- warmup2 ctx inp0 ui
+  let open = snd (clickPair inp0 (centerOf resp))
+      -- Over the scroller, beside the dropdown.
+      wheel = open {inputButtonsReleased = noButtons, inputMousePos = V2 250 (rectY (respRect resp) + 10), inputScroll = V2 0 5}
+      idle = wheel {inputScroll = V2 0 0}
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  assert failed . hasText "Medium" =<< collectOverlayTextSpans ctx open
+  _ <- runFrame ctx wheel ui
+  replicateM_ 3 (runFrame ctx idle ui)
+  after <- collectOverlayTextSpans ctx idle
+  assert failed (not (hasText "Medium" after))
+  assertEq failed 0 . snd =<< runClick ctx idle ui (maybe (V2 20 40) spanCenter (spanRect "Medium" after))
 
 -- | A select's dropdown is as wide as the select, and an option wider than
 -- that is clipped to the dropdown rather than drawn over the page, where

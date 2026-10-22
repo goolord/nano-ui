@@ -20,7 +20,7 @@ module NanoUI.Internal.Frame.Select
 import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (sortOn)
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe, maybeToList)
+import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, maybeToList)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
@@ -29,12 +29,12 @@ import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMen
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getClipBounds, getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (whenM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
-import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains)
+import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains, rectIntersect)
 
 -- | An open dropdown: a select with its open flag set, or a combo box (a
 -- search field carrying options) exactly while it holds focus.
@@ -72,9 +72,13 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
   -- so at most two nodes hold a dropdown, and both are looked up directly.
   sel <- openSelectNode ctx store
   combo <- focusedComboNode ctx
-  forM (sortOn fst (catMaybes [(,False) <$> sel, (,True) <$> combo])) $ \(idx, isCombo) -> do
+  dropdowns <- forM (sortOn fst (catMaybes [(,False) <$> sel, (,True) <$> combo])) $ \(idx, isCombo) -> do
     wid <- getWidgetId na idx
-    build store idx wid isCombo
+    -- A field scrolled out of its viewport hangs no dropdown in its place.
+    shown <- (\r -> maybe True (isJust . rectIntersect r)) <$> getNodeRect na idx <*> getClipBounds na idx
+    if shown then Just <$> build store idx wid isCombo else pure Nothing
+  -- Forced, so a frame with none allocates nothing for them.
+  pure $! catMaybes dropdowns
   where
     build store idx wid combo = do
       opts <- getOptions na idx
