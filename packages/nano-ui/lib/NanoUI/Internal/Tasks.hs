@@ -97,24 +97,14 @@ holdAction :: IO () -> NanoUI ()
 holdAction release = do
   (wid, ctx) <- freshWidget
   liftIO $ do
-    let registry = ctxHeld ctx
+    let widgets = heldWidgets (ctxHeld ctx)
         widget = intKey wid
-    frame <- readPrimVar (heldFrame registry)
-    widgets <- readIORef (heldWidgets registry)
-    entries <- readIORef (heldEntries registry)
-    case IM.lookup widget widgets >>= (`IM.lookup` entries) of
-      Just holding -> touch registry frame holding
-      Nothing -> do
-        key <- hashUnique <$> newUnique
-        seen <- newPrimVar frame
-        let cleanup = do
-              modifyIORef' (heldWidgets registry) (IM.delete widget)
-              release
-              pure (pure ())
-        modifyIORef' (heldWidgets registry) (IM.insert widget key)
-        modifyIORef' (heldEntries registry) (IM.insert key (Holding cleanup seen))
-        modifyPrimVar (heldStamped registry) (+ 1)
-        modifyPrimVar (heldCount registry) (+ 1)
+    -- The lease's release drops the widget's entry, so an entry is live.
+    IM.lookup widget <$> readIORef widgets >>= \case
+      Just holding -> touchHeld ctx holding
+      Nothing ->
+        leaseHeld ctx (modifyIORef' widgets (IM.delete widget) >> release)
+          >>= modifyIORef' widgets . IM.insert widget
 
 -- | Lease a resource that a cache of its own keeps, such as an SVG raster
 -- shared by every icon drawing it. @release@ runs at the end of the first

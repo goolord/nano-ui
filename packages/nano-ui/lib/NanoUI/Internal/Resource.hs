@@ -31,11 +31,11 @@ data Holding = Holding
   , holdingSeen :: !(PrimVar RealWorld Int)
   }
 
--- | Session registry and frame stamps. Built-in callback-only leases use a
--- widget-to-resource-id index; arbitrary values live in typed owners instead.
+-- | Session registry and frame stamps. Built-in callback-only leases are
+-- indexed by widget id; arbitrary values live in typed owners instead.
 data Held = Held
   { heldEntries :: !(IORef (IntMap Holding))
-  , heldWidgets :: !(IORef (IntMap Int))
+  , heldWidgets :: !(IORef (IntMap Holding))
   , heldFrame :: !(PrimVar RealWorld Int)
   , heldStamped :: !(PrimVar RealWorld Int)
   , heldCount :: !(PrimVar RealWorld Int)
