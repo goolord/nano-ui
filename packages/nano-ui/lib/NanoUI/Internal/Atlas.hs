@@ -22,6 +22,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (forM_)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Unsafe qualified as BSU
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Word (Word8)
@@ -359,7 +360,7 @@ blitPixels ::
   ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> ByteString -> IO ()
 blitPixels dest destW destX destY w h pixels =
   withForeignPtr dest $ \dp ->
-    BS.useAsCStringLen pixels $ \(sp, _) ->
+    BSU.unsafeUseAsCString pixels $ \sp ->
       copyRows dp destW (destY * destW + destX) sp w w h
 
 -- | Copy @rows@ rows of @w@ RGBA pixels from @src@, @srcW@ pixels a row, to
