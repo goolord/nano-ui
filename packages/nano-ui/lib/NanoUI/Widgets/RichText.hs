@@ -47,7 +47,7 @@ import NanoUI.Internal.TextCluster (clusterLength)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
-import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
+import NanoUI.Internal.Widgets.TextInput (cursorAtOffset, cursorOffset, fieldTextCommands)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor (Editor (..), EditorMode (..), editorSelection, emptyHistory, multiLineMode, runCommandIO)
 import System.IO.Unsafe (unsafeDupablePerformIO)
@@ -455,21 +455,6 @@ tokenIndexAtX line x = go (lineTokens line)
             + if kind == Glyph || kind == GlyphSpace
               then (if x - tokenX < tokenWidth tok / 2 then 0 else T.length txt)
               else textIndexAtX (tokenMetrics tok) txt (x - tokenX)
-
-cursorOffset :: Text -> TB.Cursor -> Int
-cursorOffset txt (TB.Cursor row col) =
-  let ls = T.splitOn "\n" txt
-      row' = max 0 (min row (length ls - 1))
-      before = sum (map T.length (take row' ls)) + row'
-      line = fromMaybe "" (listToMaybe (drop row' ls))
-   in before + max 0 (min col (T.length line))
-
-cursorAtOffset :: Text -> Int -> TB.Cursor
-cursorAtOffset txt offset =
-  let prefix = T.take (max 0 (min offset (T.length txt))) txt
-      row = T.count "\n" prefix
-      col = T.length (T.takeWhileEnd (/= '\n') prefix)
-   in TB.Cursor row col
 
 -- | @measureAt ref extentAt width@ is @extentAt width@, reused from @ref@
 -- when it holds the extent at that width, and otherwise computed and left

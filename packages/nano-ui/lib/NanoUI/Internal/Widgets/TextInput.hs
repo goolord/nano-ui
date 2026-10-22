@@ -6,6 +6,8 @@ module NanoUI.Internal.Widgets.TextInput
   , saveTextInputState
   , searchInputLayout
   , editorTextState
+  , cursorOffset
+  , cursorAtOffset
   , saveTextEditor
   , editTextInput
   , fieldTextCommands
@@ -37,7 +39,7 @@ where
 import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
 import Data.Char (isControl)
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isNothing, listToMaybe)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -93,33 +95,36 @@ saveTextInputState key s =
 textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
   let buf0 = TB.fromLines (Seq.fromList (T.splitOn "\n" (tisText s)))
-      buf = TB.withCursor (fieldPosition buf0 (tisCursor s)) buf0
+      buf = TB.withCursor (cursorAtOffset (tisText s) (tisCursor s)) buf0
       history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
         Just (FieldHistory text h) | text == tisText s -> h
         _ -> emptyHistory
-   in Editor buf (fieldPosition buf (tisAnchor s)) history
+   in Editor buf (cursorAtOffset (tisText s) (tisAnchor s)) history
 
 editorTextState :: Editor -> TextInputState
 editorTextState ed =
   let buf = editorBuffer ed
-   in TextInputState (TB.toText buf) (fieldOffset buf (TB.getCursor buf)) (fieldOffset buf (editorAnchor ed))
+      txt = TB.toText buf
+   in TextInputState txt (cursorOffset txt (TB.getCursor buf)) (cursorOffset txt (editorAnchor ed))
 
--- | Where character @i@ of a field's value is in its editor's buffer, which
--- holds each line of a value with line breaks as a row; a field's caret and
--- anchor count characters of the whole value. Clamped into the value.
-fieldPosition :: TB.TextBuffer -> Int -> TB.Cursor
-fieldPosition buf = go 0
-  where
-    go row i
-      | row + 1 < TB.getLineCount buf, i > n = go (row + 1) (i - n - 1)
-      | otherwise = TB.clampCursor buf (TB.Cursor row i)
-      where
-        n = T.length (TB.lineAt row buf)
+-- | The character a row and column of @txt@'s lines (split at @\\n@) is at,
+-- clamped into the text.
+cursorOffset :: Text -> TB.Cursor -> Int
+cursorOffset txt (TB.Cursor row col) =
+  let ls = T.splitOn "\n" txt
+      row' = max 0 (min row (length ls - 1))
+      before = sum (map T.length (take row' ls)) + row'
+      line = fromMaybe "" (listToMaybe (drop row' ls))
+   in before + max 0 (min col (T.length line))
 
--- | The character a position in a field's buffer is at in its value
--- ('fieldPosition').
-fieldOffset :: TB.TextBuffer -> TB.Cursor -> Int
-fieldOffset buf (TB.Cursor row col) = col + sum [T.length (TB.lineAt r buf) + 1 | r <- [0 .. row - 1]]
+-- | The row and column of character @offset@ of @txt@ ('cursorOffset'),
+-- clamped into the text.
+cursorAtOffset :: Text -> Int -> TB.Cursor
+cursorAtOffset txt offset =
+  let prefix = T.take (max 0 (min offset (T.length txt))) txt
+      row = T.count "\n" prefix
+      col = T.length (T.takeWhileEnd (/= '\n') prefix)
+   in TB.Cursor row col
 
 -- | Store an editor's text, selection and history.
 saveTextEditor :: Int -> Editor -> WidgetStore -> WidgetStore
