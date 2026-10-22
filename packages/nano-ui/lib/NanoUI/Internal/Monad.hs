@@ -587,7 +587,8 @@ isFocused wid = (\focus -> hashWidgetId wid /= 0 && focus == wid) <$> focusedWid
 -- > whenM (shortcut (ctrl <> key 'l')) (requestFocus =<< currentId)
 -- > textInput address
 --
--- Focus moves on the next frame, which the request schedules. The last
+-- Focus moves on the next frame, which the request schedules, and the
+-- scrollers around the widget scroll it into view, as for Tab. The last
 -- request in a frame wins ('focusNext', 'focusPrevious' and 'clearFocus' are
 -- requests too). The request is ignored for a widget Tab would not stop at
 -- this frame: one that is disabled, behind an open

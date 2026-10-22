@@ -604,11 +604,12 @@ module NanoUI
     -- When 'scrollSmoothTime' is positive, wheel steps and 'ScrollSmooth'
     -- commands ease toward the target over that duration.
     --
-    -- 'scrollIntoView' scrolls a child widget into view (for example, a
-    -- keyboard-selected row). For virtualized lists that only instantiate
-    -- visible rows, use 'scrollRectIntoView' with a rectangle in content
-    -- coordinates, and 'getScrollMetrics' to read the viewport size and offset
-    -- needed to compute the visible range.
+    -- Tab and 'requestFocus' scroll the widget they focus into view on
+    -- their own. 'scrollIntoView' scrolls any child widget into view (for
+    -- example, a keyboard-selected row). For virtualized lists that only
+    -- instantiate visible rows, use 'scrollRectIntoView' with a rectangle in
+    -- content coordinates, and 'getScrollMetrics' to read the viewport size
+    -- and offset needed to compute the visible range.
   , ScrollTuning (..)
   , defaultScrollTuning
   , getScrollTuning
