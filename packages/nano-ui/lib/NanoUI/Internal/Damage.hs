@@ -541,6 +541,23 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
   when modalFlip (markDirtyCovered ctx)
   when (floatingChanged && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirtyCovered ctx
+  -- A popup placed by its anchor's last rect ('NanoUI.respRect') is a frame
+  -- behind an anchor this frame moved (a widget last had the anchor's rect
+  -- and now has another), and nothing else may ask for the frame that
+  -- catches it up.
+  -- Forced: 'ptrEq' on a selector thunk never matches.
+  let !oldRects = pfRects (fsPrev snap)
+      !newRects = pfRects new
+      moved a = IM.foldrWithKey (\k r rest -> (r == a && IM.lookup k newRects /= Just a) || rest) False oldRects
+      anchorMoved idx =
+        getNodeType (ctxNodeArena ctx) idx >>= \case
+          NodePopup ->
+            (\case Just (AnchorRect a, _, _) -> moved a; _ -> False)
+              <$> (lookupPopupConfig ctx =<< getWidgetId (ctxNodeArena ctx) idx)
+          _ -> pure False
+  unless (ptrEq oldRects newRects) $
+    findClassNodeM (ctxNodeArena ctx) FloatingNodes anchorMoved >>= \found ->
+      when (isJust found) (markDirtyCovered ctx)
 
 -- | Whether 'updatePrevRects' left every map of @old@ as it was. Compared by
 -- map, not by record: GHC may rebuild a record passed unboxed.

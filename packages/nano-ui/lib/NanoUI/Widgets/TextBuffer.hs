@@ -64,7 +64,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Array qualified as A
 import Data.Text.Internal (Text (..))
-import NanoUI.Internal.TextCluster (clusterLength)
+import NanoUI.Internal.TextCluster (clusterBounds, clusterLength)
 import NanoUI.Internal.Types (clamp)
 
 -- | Zero-indexed logical (row, column) position in the buffer. Fields are
@@ -200,15 +200,11 @@ moveRight buf = withCursor (positionRight buf (getCursor buf)) buf
 
 positionLeft :: TextBuffer -> Cursor -> Cursor
 positionLeft buf (Cursor row col)
-  | col > 0 = Cursor row (clusterStart 0 (lineAt row buf))
+  -- The start of the cluster the caret ends, read from the start of the
+  -- line: only there can clusters be told apart.
+  | col > 0 = Cursor row (fst (clusterBounds (lineAt row buf) (col - 1)))
   | row > 0 = Cursor (row - 1) (T.length (lineAt (row - 1) buf))
   | otherwise = Cursor 0 0
-  where
-    -- The cluster the caret ends, read from the start of the line: only
-    -- there can clusters be told apart.
-    clusterStart at t =
-      let n = max 1 (clusterLength t)
-       in if at + n >= col then at else clusterStart (at + n) (T.drop n t)
 
 positionRight :: TextBuffer -> Cursor -> Cursor
 positionRight buf (Cursor row col)

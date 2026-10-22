@@ -4,7 +4,7 @@ import Spec
 import Data.Text (Text)
 import Data.Maybe (isNothing)
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (NodeType (NodeText), arenaCount, getNodeType, getStyleIdx)
+import NanoUI.Internal.Layout.Arena (arenaCount, getNodeType, getStyleIdx)
 
 tests :: [Spec]
 tests =

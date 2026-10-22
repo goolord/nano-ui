@@ -73,7 +73,7 @@ data WindowPosition
   deriving (Eq, Show)
 
 data WindowMode = Windowed | Fullscreen | Hidden
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | The window as reported at frame start.
 data WindowState = WindowState

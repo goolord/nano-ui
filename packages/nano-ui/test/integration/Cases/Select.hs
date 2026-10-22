@@ -352,7 +352,9 @@ runSelectEndAdoptsShownTest ctx failed = do
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
-  let inp0 = withInput 40 12
+  -- Tall enough to show the clicked row: one past the window's edge is
+  -- clipped away and takes no click.
+  let inp0 = withInput 200 120
       items = [TreeItem "alpha" [], TreeItem "beta" []]
       ui = column (withValue 0 (tree' "t" items))
   (resp, sel0) <- warmup2 ctx inp0 ui

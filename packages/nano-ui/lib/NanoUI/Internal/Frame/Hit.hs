@@ -69,31 +69,46 @@ widgetIdInSubtree :: Context -> NodeIdx -> WidgetId -> IO Bool
 widgetIdInSubtree ctx root wid = withWidgetNode ctx wid False (\idx -> nodeInSubtree ctx idx root)
 
 -- | The floating panel that the pointer at @mouse@ is confined to, for
--- 'overlayHitAllowed'. While a modal is open it is the top modal, or a
--- window or popup inside it under the point, which is painted over it.
--- Otherwise it is the topmost window or popup under the point. 'Nothing'
--- anywhere else. A caller that tests many nodes looks it up once.
+-- 'overlayHitAllowed'. While a modal is open it is the top modal, or a panel
+-- inside it under the point that is painted over it there: a popup, or a
+-- window off the modal's rect (paint puts windows under modals). Otherwise
+-- it is the topmost window or popup under the point. 'Nothing' anywhere
+-- else. A caller that tests many nodes looks it up once.
 overlayHitRoot :: Context -> V2 -> IO (Maybe NodeIdx)
-overlayHitRoot ctx mouse = do
+overlayHitRoot ctx@Context {ctxNodeArena = na} mouse = do
   -- Most frames have no floating panel, and then nothing needs looking up.
-  floating <- floatingNodeCount (ctxNodeArena ctx)
+  floating <- floatingNodeCount na
   if floating <= 0
     then pure Nothing
     else do
       over <- topmostOverlayAtMouse ctx mouse
-      topModalNode (ctxNodeArena ctx) >>= \case
+      topModalNode na >>= \case
         Nothing -> pure over
         -- Searching the whole modal would find whatever it holds under a
         -- popup of its own (a context menu over a row) before the popup.
         Just modal -> case over of
-          Just o -> (\inside -> Just (if inside then o else modal)) <$> nodeInSubtree ctx o modal
+          Just o -> do
+            inside <- nodeInSubtree ctx o modal
+            under <- ((/= NodePopup) <$> getNodeType na o) <&&> (rectContains <$> getNodeRect na modal <*> pure mouse)
+            pure (Just (if inside && not under then o else modal))
           Nothing -> pure (Just modal)
 
 -- | Whether the pointer can reach node @idx@ past the floating panels: every
 -- node can when the 'overlayHitRoot' is 'Nothing', otherwise only the nodes
--- inside it.
+-- inside it and not inside another panel declared in it (a window in a
+-- modal, painted under the modal). Strict in the index, which the per-node hit
+-- loops then pass unboxed: boxed, it cost every pointer node an allocation a
+-- frame.
 overlayHitAllowed :: Context -> Maybe NodeIdx -> NodeIdx -> IO Bool
-overlayHitAllowed ctx top idx = maybe (pure True) (nodeInSubtree ctx idx) top
+overlayHitAllowed ctx top !idx = maybe (pure True) (nodeInPanel ctx idx) top
+
+-- | Whether node @idx@ is floating panel @panel@ or inside it, and not inside
+-- another panel declared in it.
+nodeInPanel :: Context -> NodeIdx -> NodeIdx -> IO Bool
+nodeInPanel Context {ctxNodeArena = na} idx panel =
+  (== Just True) <$> walkAncestors na idx (\i -> if i == panel then pure (Just True) else stop <$> getNodeType na i)
+ where
+  stop nt = if isFloatingNode nt then Just False else Nothing
 
 -- | The window or popup on top at @mouse@. The frame paints every popup over
 -- every window, so a popup whose rect holds the point wins; among panels of
@@ -175,7 +190,10 @@ nodeClippedHit ctx@Context {ctxNodeArena = na} idx rect mouse =
 
 -- | The hit test widgets use while the view runs, when this frame's layout is
 -- not solved. @rect@ is the widget's rect from the previous frame
--- ('NanoUI.Internal.Context.getPrevRect'). The point must be inside it, and inside the previous
+-- ('NanoUI.Internal.Context.getPrevRect'). The point must be inside it, and
+-- inside the clip the widget was painted in on the previous frame
+-- ('NanoUI.Internal.Context.getPrevClipRect'), so a widget a panel cut away
+-- takes no input there. It must also be inside the previous
 -- frame's viewport of every scroll container above node @idx@, so content
 -- scrolled out of view takes no input, nor does content of a scroller whose
 -- viewport was empty; a scroll container with no recorded viewport does not
@@ -189,7 +207,9 @@ nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 nodeInteractionHit ctx@Context {ctxNodeArena = na} idx rect mouse
   | not (rectContains rect mouse) = pure False
   | idx <= 0 = pure True
-  | otherwise = getParent na idx >>= inside
+  | otherwise =
+      (maybe True (`rectContains` mouse) <$> (getPrevClipRect ctx =<< getWidgetId na idx))
+        <&&> (getParent na idx >>= inside)
  where
   -- Whether the mouse is inside the recorded viewport of every scroll
   -- container, and the previous rect of every widget and clipping container

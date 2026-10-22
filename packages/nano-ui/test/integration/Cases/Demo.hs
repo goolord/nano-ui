@@ -3,8 +3,6 @@ module Cases.Demo (tests) where
 import Spec
 import Data.Hashable (Hashable (..))
 import Data.Text qualified as T
-import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
 import NanoUI.Shortcut
 
 tests :: [Spec]
@@ -191,9 +189,7 @@ runColorPickerPartDamageTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx (keyInp KeyRight inp0) ui
   dmg <- takeDamage ctx
-  let na = ctxNodeArena ctx
-  n <- arenaCount na
-  parts <- mapM (getNodeRect na) =<< filterM (fmap (== NodeColorPicker) . getNodeType na) [0 .. n - 1]
+  parts <- map snd <$> nodesOfType NodeColorPicker ctx
   -- The field, hue bar, alpha bar and preview.
   assertEq failed (length parts) 4
   assert failed (all (clipCovers dmg) parts)

@@ -366,14 +366,17 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               -- and the sides fit between them, so each corner is drawn once
               -- (sides meeting at their centre lines would leave its outer
               -- quarter bare and draw the inner one twice); rounded ones end
-              -- the sides where the arcs start.
+              -- the sides where the arcs start. A border wider than the
+              -- radius fits its sides between the top and bottom too, and a
+              -- quad fills the band this leaves beside each arc.
               !corners = rad > 0.5
+              !bands = corners && ibw > rad
               !topY = py + ibw / 2
               !leftX = px + ibw / 2
               !x0 = if corners then px + rad else px
-              !y0 = if corners then py + rad else py + ibw
+              !y0 = if corners && not bands then py + rad else py + ibw
               !midW = max 0 (if corners then w - 2 * rad else w)
-              !midH = max 0 (if corners then h - 2 * rad else h - 2 * ibw)
+              !midH = max 0 (if corners && not bands then h - 2 * rad else h - 2 * ibw)
               !botY = py + h - ibw / 2
               !rightX = px + w - ibw / 2
 
@@ -392,8 +395,8 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !arcIndices = if hasCore then 18 else 12
               !arcV = (n + 1) * arcStride
               !arcI = n * arcIndices
-              !needV = stripCount * 8 + (if corners then 4 * arcV else 0)
-              !needI = stripCount * 18 + (if corners then 4 * arcI else 0)
+              !needV = stripCount * 8 + (if corners then 4 * arcV else 0) + (if bands then 16 else 0)
+              !needI = stripCount * 18 + (if corners then 4 * arcI else 0) + (if bands then 24 else 0)
           (!vp, !ip, !base, !baseIdx) <- reserveRaw da needV needI
           let !(r, g, b, a) = unpackColorF col
               !viLR = if doTB then 16 else 0
@@ -415,6 +418,14 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
             pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
             pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
             pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
+          when bands $ do
+            let band !k !bx !by =
+                  let !vi = base + viC + 4 * arcV + 4 * k
+                   in pokeQuadSIMD vp (vi * vertexSize) ip ((baseIdx + iiC + 4 * arcI + 6 * k) * indexSize) bx by rad (ibw - rad) whitePixel whitePixel whitePixel whitePixel r g b a (fromIntegral vi)
+            band 0 px (py + rad)
+            band 1 (px + w - rad) (py + rad)
+            band 2 (px + w - rad) (py + h - ibw)
+            band 3 px (py + h - ibw)
           commitRaw da base baseIdx needV needI
 
 -- | One corner arc of a rounded stroke, as a top-level worker so the stroke

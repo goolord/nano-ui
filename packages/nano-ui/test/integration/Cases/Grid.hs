@@ -16,6 +16,7 @@ tests =
   , spec "column-gap-grow" runColumnGapGrowTest
   , spec "grid-in-column-height" runGridInColumnHeightTest
   , spec "grid-wrapped-row-height" runGridWrappedRowHeightTest
+  , spec "wide-scroll-text-height" runWideScrollTextHeightTest
   , spec "adaptive-grid-in-column-height" runAdaptiveGridInColumnHeightTest
   , spec "grid-cell-align" runGridCellAlignTest
   ]
@@ -65,6 +66,25 @@ runGridWrappedRowHeightTest ctx failed = do
         assertEq failed (rectH wrapped) (rectH after * fromIntegral (length wrappedLines))
         forM_ wrappedLines $ \t -> assert failed (fromIntegral (T.length t) * rectH after <= rectW wrapped)
       _ -> assertEq failed (length rs) 6
+
+-- | Text placed wider than the scroller it measured against, in a 2D
+-- scroller's wider content, is as many lines tall as paint draws it in.
+runWideScrollTextHeightTest :: Context -> IORef Int -> IO ()
+runWideScrollTextHeightTest ctx failed = do
+  let text = "a label wider than its scroller but not its content"
+      ui = void . scrollArea2D (fixedWH 300 200) $ do
+        spacer (Fixed 800) (Fixed 20)
+        labelWith fillW text
+        label "after"
+  _ <- warmup2 ctx (withInput 1000 400) ui
+  rs <- arenaRects ctx
+  spans <- collectTextSpans ctx
+  let textLines = [t | (_, t, _, _, _) <- spans, t /= "after"]
+  case rs of
+    [_, _, wide, after] -> do
+      assert failed (rectW wide > 300)
+      assertEq failed (rectH after * fromIntegral (length textLines)) (rectH wide)
+    _ -> assertEq failed 4 (length rs)
 
 -- | A fill-width grid inside a column is as tall as its rows, not as all of
 -- its cells stacked: the column's refit at the offered width knows grids.

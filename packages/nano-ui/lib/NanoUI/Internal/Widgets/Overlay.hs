@@ -20,13 +20,11 @@ import Data.Bits ((.|.))
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
-import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
-import NanoUI.Internal.Store (fieldPoint, lookupSlot)
 import NanoUI.Internal.Style
-import NanoUI.Internal.Types (Rect (..), Size (..), clamp, rectNonEmpty)
+import NanoUI.Internal.Types (Rect (..), Size (..), clamp)
 import NanoUI.Internal.WidgetText (buttonCloseTrailing, buttonFlagClose)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Var.Types (Var)
@@ -175,10 +173,6 @@ overlay isModal hasChrome shape open title child = do
       sz -> sz
     panelW = within availW (layoutWidth panel)
     panelH = within availH (layoutHeight panel)
-    -- A panel of a fixed size is seeded at that size, so its first frame is
-    -- already where it stays.
-    seedW = case panelW of Fixed v -> v; _ -> minWidth
-    seedH = case panelH of Fixed v -> v; _ -> minHeight
     addOverlayNode _ parent =
       addNodeFromLayout
         (ctxNodeArena ctx)
@@ -192,9 +186,7 @@ overlay isModal hasChrome shape open title child = do
           , layoutMaxW = min availW (layoutMaxW panel)
           , layoutMaxH = min availH (layoutMaxH panel)
           }
-    enter wid = do
-      when isModal (beginModal ctx)
-      seedFloatingPanel ctx wid =<< seedOverlayRect ctx isModal winW winH margin seedW seedH wid
+    enter _ = when isModal (beginModal ctx)
     titleLayout =
       (fixedH barH . alignMid . tight) defaultLayout {layoutMinH = barH, layoutMaxH = barH}
   floatingOverlay open (if isModal then Just (Rect 0 0 0 0) else Nothing) addOverlayNode enter $ do
@@ -220,25 +212,3 @@ overlay isModal hasChrome shape open title child = do
       _ -> scrollWith (tight . grow) child
     when isModal (liftIO (endModal ctx))
     pure (closed, r)
-
--- | Last frame's rect, else the stored position and size, else centred
--- (modal) or at the window's top-right corner.
-seedOverlayRect ::
-  Context -> Bool -> Float -> Float -> Float -> Float -> Float -> WidgetId -> IO Rect
-seedOverlayRect ctx isModal winW winH margin seedW seedH wid = do
-  mPrev <- getPrevRect ctx wid
-  case mPrev of
-    Just r | rectNonEmpty r -> pure r
-    _ -> do
-      store <- getStore ctx
-      let k = intKey wid
-          pos = lookupSlot fieldPoint k store
-          sz = lookupSlot fieldPoint (slotKey SlotWinSize k) store
-          h1 = max seedH 1
-      pure $
-        case (pos, sz) of
-          (Just (x, y), Just (w, h)) | w > 0 && h > 0 -> Rect x y w h
-          (Just (x, y), _) -> Rect x y seedW h1
-          _
-            | isModal -> Rect ((winW - seedW) / 2) ((winH - h1) / 2) seedW h1
-            | otherwise -> Rect (max 0 (winW - seedW - margin)) margin seedW h1

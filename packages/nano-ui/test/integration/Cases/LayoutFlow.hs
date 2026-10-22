@@ -36,6 +36,7 @@ tests =
   , spec "grow-max-handoff" runGrowMaxHandoffTest
   , spec "fixed-width-label" runFixedWidthLabelTest
   , spec "fixed-outside-limits" runFixedOutsideLimitsTest
+  , spec "fixed-label-outside-limits" runFixedLabelOutsideLimitsTest
   , spec "percent-across" runPercentAcrossTest
   , spec "empty-label-line" runEmptyLabelLineTest
   ]
@@ -629,6 +630,23 @@ runFixedWidthLabelTest ctx failed = do
       assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
       forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
     _ -> assertEq failed (length rs) 5
+
+-- | A label fixed narrower than its minimum width wraps at that minimum when
+-- measured, as when placed, so the column it sits in ends at what follows.
+runFixedLabelOutsideLimitsTest :: Context -> IORef Int -> IO ()
+runFixedLabelOutsideLimitsTest ctx failed = do
+  let ui = columnWith tight . columnWith tight $ do
+        labelWith (\l -> (minW 200 l) {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap twice over"
+        label "after"
+  _ <- warmup2 ctx input0 ui
+  rs <- arenaRects ctx
+  lns <- (\spans -> [t | (_, t, _, _, _) <- spans, t /= "after"]) <$> collectTextSpans ctx
+  case rs of
+    [_, col, wrapped, after] -> do
+      assertEq failed 200 (rectW wrapped)
+      assertEq failed (12 * fromIntegral (length lns)) (rectH wrapped)
+      assertEq failed (rectY col + rectH col) (rectY after + rectH after)
+    _ -> assertEq failed 4 (length rs)
 
 -- | A fixed size outside a node's limits takes the limit when measured, as
 -- when placed, so a row places what follows past it: a text field fixed 100

@@ -30,6 +30,7 @@ tests =
   , spec "pane-grid-validation" runValidationTest
   , spec "pane-grid-divider-damage" runDividerDamageTest
   , spec "pane-grid-scrollbar-drag" runScrollBarDragTest
+  , spec "pane-grid-clipped-scrollbar" runClippedScrollBarTest
   , spec "pane-grid-clamped-ratio" runClampedRatioTest
   , spec "pane-grid-adopt-restores" runAdoptRestoresTest
   , spec "pane-grid-escape" runEscapeTest
@@ -109,6 +110,26 @@ runScrollBarDragTest ctx failed = do
         assertEq failed (Just halves) (pgrTree after)
         scrolled <- getScrollOffset ctx wid
         assertGt failed scrolled 0
+
+-- | A scroller wider than its pane is cut to the pane, bars and all: its
+-- vertical bar, clipped off over the next pane, shows no grab cursor there.
+runClippedScrollBarTest :: Context -> IORef Int -> IO ()
+runClippedScrollBarTest ctx failed = do
+  scroller <- newIORef Nothing
+  let inp = withInput 600 400
+      ui = paneGrid halvesGrid
+        { pgViewPane = \pid _ -> do
+            when (pid == 10) $ do
+              (wid, _) <- scrollArea (fixedWH 450 300) (box (fixedWH 100 2000) (colorRGBA 200 0 0 255))
+              liftIO (writeIORef scroller (Just wid))
+            pure (PaneView "P" True)
+        }
+  _ <- warmup2 ctx inp ui
+  assertJustM failed (readIORef scroller) $ \wid ->
+    assertJustM failed (getPrevRect ctx wid) $ \(Rect x y w _) -> do
+      assertGt failed (x + w) 320
+      kinds <- mapM (\d -> cursorOver ctx inp ui (V2 (x + w - d) (y + 10))) [1 .. 16]
+      assert failed (UiCursorGrab `notElem` kinds)
 
 -- | A divider drawn at a minimum its ratio lies below follows the pointer
 -- from its first pixel of movement.

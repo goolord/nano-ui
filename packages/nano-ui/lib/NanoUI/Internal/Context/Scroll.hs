@@ -21,6 +21,7 @@ module NanoUI.Internal.Context.Scroll
   , getScrollMetrics
   , readScrollMetrics
   , cacheScrollMetrics
+  , placeScrollContent
   , beginScrollMetrics
   , getScrollOffsetIn
   , setScrollOffsetIn
@@ -94,13 +95,18 @@ writeScrollOffset ctx wid off = do
   writeScrollOffset2D ctx wid (V2 x off)
 
 -- | Pixel-snapped x/y offset for text areas and 2D scrollers. For a 1D
--- scroller, the fallback stores cross-axis in x and main-axis in y.
+-- scroller, the fallback stores cross-axis in x and main-axis in y, so a row
+-- scroller's offset reads @(cross, main)@: its horizontal offset is in y.
+-- 'getScrollMetrics' and the scroll commands use window axes for every
+-- scroller.
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
   V2 x y <- storedScrollOffset (intKey wid) <$> getStore ctx
   V2 <$> snapScrollOffset ctx x <*> snapScrollOffset ctx y
 
--- | Move a scroller to an offset on both axes. Cancels a glide in flight.
+-- | Move a scroller to an offset on both axes, in the order
+-- 'getScrollOffset2D' reads them: @(cross, main)@ for a 1D row scroller.
+-- Cancels a glide in flight. 'scrollTo' takes window axes for every scroller.
 setScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
 setScrollOffset2D ctx wid off = do
   cancelScrollGlide ctx wid
@@ -195,6 +201,8 @@ data ScrollMetrics = ScrollMetrics
   , scrollRange :: !V2
   -- ^ Largest offset each axis reaches. @0@ on an axis that does not scroll.
   , scrollOffset :: !V2
+  -- ^ The current offset, which the wheel, a glide or a command may have
+  -- moved since that layout.
   , scrollAxes :: !ScrollAxes
   }
   deriving (Eq, Show)
@@ -215,16 +223,16 @@ getScrollMetrics ctx wid = do
 readScrollMetrics :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
 readScrollMetrics ctx wid = do
   s <- getStore ctx
+  views <- ssViews <$> readIORef (ctxScrollState ctx)
   let key = intKey wid
-      point slot = lookupSlot fieldPoint (slotKey slot key) s
-  case (point SlotScrollViewPos, point SlotScrollViewSize, point SlotScrollRange) of
-    (Just (vx, vy), Just (vw, vh), Just (mx, my)) -> do
+  case (IM.lookup key views, lookupSlot fieldPoint (slotKey SlotScrollRange key) s) of
+    (Just view, Just (mx, my)) -> do
       let axes = toEnum (findSlot fieldInt 0 (slotKey SlotScrollAxes key) s)
       off <- getScrollOffsetIn ctx wid axes
       pure $
         Just
           ScrollMetrics
-            { scrollViewport = Rect vx vy vw vh
+            { scrollViewport = svViewport view
             , scrollRange = V2 mx my
             , scrollOffset = off
             , scrollAxes = axes
@@ -238,28 +246,44 @@ beginScrollMetrics ctx =
   modifyIORef' (ctxScrollState ctx) $ \st ->
     if IS.null (ssCached st) then st else st {ssCached = IS.empty}
 
--- | Publish a scroll node's viewport and range to the store for the current
--- frame. If multiple nodes share @wid@ (such as a table's frozen pane and
--- body), only the first node to call this after 'beginScrollMetrics' writes
--- its metrics and returns 'True'; otherwise both panes would overwrite each
--- other's viewport every frame. Does not mark the context dirty
--- ('publishLayoutSlots'); views that read the metrics register a layout read
--- via 'getScrollMetrics'.
+-- | Publish a scroll node's viewport ('ssViews') and its range (to the store)
+-- for the current frame. If multiple nodes share @wid@ (such as a table's
+-- frozen pane and body), only the first node to call this after
+-- 'beginScrollMetrics' writes its metrics and returns 'True'; otherwise both
+-- panes would overwrite each other's viewport every frame. Does not mark the
+-- context dirty ('publishLayoutSlots'); views that read the metrics register
+-- a layout read via 'getScrollMetrics'.
 cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO Bool
-cacheScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
+cacheScrollMetrics ctx wid axes viewport range@(V2 mx my) = do
   let key = intKey wid
   st <- readIORef (ctxScrollState ctx)
   let fresh = not (IS.member key (ssCached st))
+      -- The content keeps the offset it was placed at until
+      -- 'placeScrollContent' records this layout's.
+      views = case IM.lookup key (ssViews st) of
+        Just view | svViewport view == viewport -> ssViews st
+        old -> IM.insert key (ScrollView viewport (maybe (V2 0 0) svPlaced old)) (ssViews st)
   fresh <$ when fresh (do
-    writeIORef (ctxScrollState ctx) $! st {ssCached = IS.insert key (ssCached st)}
+    writeIORef (ctxScrollState ctx) $! st {ssCached = IS.insert key (ssCached st), ssViews = views}
     -- A range that just shrank (a filtered list, a narrower window) would
     -- leave a glide heading past the new end.
     clampScrollGlide ctx wid range
     publishLayoutSlots ctx $
-      slotWrite fieldPoint (slotKey SlotScrollViewPos key) (vx, vy)
-        <> slotWrite fieldPoint (slotKey SlotScrollViewSize key) (vw, vh)
-        <> slotWrite fieldPoint (slotKey SlotScrollRange key) (mx, my)
+      slotWrite fieldPoint (slotKey SlotScrollRange key) (mx, my)
         <> slotWrite fieldInt (slotKey SlotScrollAxes key) (fromEnum axes))
+
+-- | Record the offset, in window axes, that this layout placed scroller
+-- @wid@'s content at, once 'cacheScrollMetrics' has published its viewport.
+-- 'scrollIntoView' reads it with the last frame's rects.
+placeScrollContent :: Context -> WidgetId -> Float -> Float -> IO ()
+placeScrollContent ctx wid ox oy = do
+  st <- readIORef (ctxScrollState ctx)
+  let key = intKey wid
+  case IM.lookup key (ssViews st) of
+    Just view
+      | svPlaced view /= V2 ox oy ->
+          writeIORef (ctxScrollState ctx) $! st {ssViews = IM.insert key view {svPlaced = V2 ox oy} (ssViews st)}
+    _ -> pure ()
 
 -- | A 1D row scroller keeps its offset in the main-axis slot, so window and
 -- stored axes are swapped for it and identical for everything else. The swap
@@ -359,12 +383,12 @@ scrollToEnd ctx wid = scrollTo ctx wid (V2 (1 / 0) (1 / 0)) -- clamped to the ra
 -- be found; scroll to its content rectangle with 'scrollRectIntoView' instead.
 scrollIntoView :: Context -> WidgetId -> WidgetId -> ScrollAlign -> ScrollBehavior -> IO ()
 scrollIntoView ctx wid target align behavior = do
-  mMetrics <- readScrollMetrics ctx wid
+  mView <- IM.lookup (intKey wid) . ssViews <$> readIORef (ctxScrollState ctx)
   mRect <- getPrevRect ctx target
-  case (mMetrics, mRect) of
-    (Just m, Just (Rect rx ry rw rh)) -> do
-      let Rect vx vy _ _ = scrollViewport m
-          V2 ox oy = scrollOffset m
+  case (mView, mRect) of
+    -- The offset the last layout placed the content at, not the live one,
+    -- which the wheel or a glide may have moved since the rects were taken.
+    (Just (ScrollView (Rect vx vy _ _) (V2 ox oy)), Just (Rect rx ry rw rh)) ->
       scrollRectIntoView ctx wid (Rect (rx - vx + ox) (ry - vy + oy) rw rh) align behavior
     _ -> pure ()
 

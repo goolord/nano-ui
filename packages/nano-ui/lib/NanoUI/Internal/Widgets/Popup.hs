@@ -123,12 +123,11 @@ popupShown open cfg f child = do
       registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
       addNodeFromLayout (ctxNodeArena ctx) NodePopup parent layout
 
-    seedFromPrev wid = getPrevRect ctx wid >>= mapM_ (seedFloatingPanel ctx wid)
     dismiss
       | not (cfgDismissable cfg) = Nothing
       | AnchorRect r <- cfgAnchor cfg = Just r
       | otherwise = Just (Rect 0 0 0 0)
-  floatingOverlay open dismiss addPopupNode seedFromPrev ((,) False <$> child)
+  floatingOverlay open dismiss addPopupNode (\_ -> pure ()) ((,) False <$> child)
 
 -- | The floating panel behind popups, modals and windows, shown while @open@
 -- with its body in its own id scope. @addPanel@ and @enter@ are those of

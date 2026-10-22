@@ -7,11 +7,9 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
+import NanoUI.Internal.Context (InteractionState (isScrollDrag), ctxNodeArena, getsInteraction, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
-  ( DirTag (..)
-  , NodeType (..)
-  , findNodeM
+  ( findNodeM
   , getClipBounds
   , getClipRect
   , getNodeValue
@@ -48,6 +46,7 @@ tests =
   , pixelSpec "scroll-smooth" runScrollSmoothTest
   , pixelSpec "scroll-metrics" runScrollMetricsTest
   , pixelSpec "scroll-into-view" runScrollIntoViewTest
+  , pixelSpec "scroll-into-view-wheel" runScrollIntoViewWheelTest
   , pixelSpec "scroll-glide-clamp" runScrollGlideClampTest
   , spec "scroll-disjoint-viewport-hit" runDisjointViewportHitTest
   , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
@@ -56,6 +55,8 @@ tests =
   , spec "scroll-wheel-cross-popup" runWheelCrossPopupTest
   , spec "scroll-wheel-cross-2d" runWheelCross2DTest
   , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
+  , spec "scroll-wheel-fitting-inner" runWheelFittingInnerTest
+  , spec "scroll-wheel-under-bar-lane" runWheelUnderBarLaneTest
   , spec "scroll-bar-short-track" runScrollBarShortTrackTest
   ]
 
@@ -758,6 +759,32 @@ runScrollIntoViewTest ctx failed = do
       off <- getScrollOffset ctx sid
       assert failed (abs (off - rowH * 8) < 1.5)
 
+-- | A view that scrolls a row into view on a frame the wheel already moved
+-- lands it where asked: the last frame's rects go with the offset they were
+-- placed at, not with the one the wheel left.
+runScrollIntoViewWheelTest :: Context -> IORef Int -> IO ()
+runScrollIntoViewWheelTest ctx failed = do
+  setScrollTuning ctx defaultScrollTuning {scrollSmoothTime = 0}
+  jump <- newIORef False
+  let inp0 = withInput 200 160
+      ui = do
+        (sid, rows) <-
+          scrollArea (fillW . fixedH 80) $
+            column (forM [1 .. 16 :: Int] (\i -> label' (T.pack ("line " <> show i))))
+        go <- liftIO (readIORef jump)
+        when go $ liftIO (scrollIntoView ctx sid (respId (rows !! 11)) ScrollStart ScrollInstant)
+        pure (sid, rows)
+  (sid, rows) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx sid) $ \r -> do
+    writeIORef jump True
+    _ <- runFrame ctx inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1} ui
+    writeIORef jump False
+    _ <- runFrame ctx inp0 ui
+    mAfter <- getScrollMetrics ctx sid
+    mRow <- getPrevRect ctx (respId (rows !! 11))
+    assertJust failed ((,) <$> mAfter <*> mRow) $ \(m, rr) ->
+      assert failed (abs (rectY rr - rectY (scrollViewport m)) < 1.5)
+
 -- Content that shrinks under a glide pulls the glide back with it: the
 -- scroller must not coast to an offset the shorter content cannot reach and
 -- sit there showing nothing.
@@ -937,6 +964,42 @@ runWheelCrossInsideTest ctx failed = do
     _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
     assert failed . (> 0) =<< getScrollOffset ctx inner
     assertEq failed 0 =<< getScrollOffset ctx outer
+
+-- | A nested scroller whose content fits takes no wheel: the page around it
+-- scrolls with the pointer over it.
+runWheelFittingInnerTest :: Context -> IORef Int -> IO ()
+runWheelFittingInnerTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        (inner, ()) <- scrollArea (fillW . fixedH 100) (replicateM_ 2 (label "fits"))
+        replicateM_ 30 (label "row")
+        pure inner
+  (page, inner) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx inner) $ \r -> do
+    let over = inp0 {inputMousePos = spanCenter r}
+    warmup ctx over ui
+    _ <- runFrame ctx over {inputScroll = V2 0 1} ui
+    assert failed . (> 0) =<< getScrollOffset ctx page
+
+-- | An inner scroller wider than the page it sits in runs on under the
+-- page's bar lane, where paint clips it away. The wheel there scrolls the
+-- page, whose bar is drawn there, and a press on the page's thumb grabs it.
+runWheelUnderBarLaneTest :: Context -> IORef Int -> IO ()
+runWheelUnderBarLaneTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        (inner, ()) <- scrollArea (fixedWH 400 150) (replicateM_ 30 (label "inner row"))
+        replicateM_ 30 (label "row")
+        pure inner
+  (page, inner) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx page) $ \(Rect px py pw _) -> do
+    let lane = inp0 {inputMousePos = V2 (px + pw - scrollBarGutter ScrollBarList 0 / 2) (py + 10)}
+    warmup ctx lane ui
+    _ <- runFrame ctx lane {inputScroll = V2 0 1} ui
+    assert failed . (> 0) =<< getScrollOffset ctx page
+    assertEq failed 0 =<< getScrollOffset ctx inner
+    _ <- runFrame ctx (pressAt lane (inputMousePos lane)) ui
+    assert failed . isJust =<< getsInteraction ctx isScrollDrag
 
 -- | A scroller whose track is shorter than the smallest thumb shows no bar,
 -- rather than a thumb that overruns the track and moves against the offset.

@@ -8,8 +8,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Text.IO.Utf8 qualified as TIO
-import NanoUI.Internal.Context (Context (ctxActiveId, ctxNodeArena), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
-import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeRect, getNodeType)
+import NanoUI.Internal.Context (Context (ctxActiveId), InteractionState (..), getsInteraction, intKey, textInputMenuWidget)
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
 import NanoUI.Internal.Widgets.TextArea (loadTextAreaState, tasBuffer, tasSelectionAnchor)
 import NanoUI.Widgets.TextBuffer (getCursor)
@@ -35,11 +34,7 @@ runColorPickerBarSlackTest ctx failed = do
         _ <- buttonWith' (pinAt 500 400 . fixedWH 30 30) "x"
         columnWith (pointer PointerBlock . tight) (held ref colorPicker')
   _ <- warmup2 ctx inp0 ui
-  let na = ctxNodeArena ctx
-  n <- arenaCount na
-  pickers <- fmap concat . forM [0 .. n - 1] $ \i -> do
-    nt <- getNodeType na i
-    if nt == NodeColorPicker then pure <$> getNodeRect na i else pure []
+  pickers <- map snd <$> nodesOfType NodeColorPicker ctx
   case pickers of
     -- The field, then the hue bar.
     _ : Rect hx hy _ hh : _ -> do

@@ -28,7 +28,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert
 import NanoUI.Testing.Harness
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), arenaCount, getNodeRect, getNodeType, getNodeValue, lookupNodeByWidgetId)
+import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getNodeValue, lookupNodeByWidgetId)
 
 -- | A test's name, the context it runs on, and the test, which bumps the
 -- failure counter for each failed check.

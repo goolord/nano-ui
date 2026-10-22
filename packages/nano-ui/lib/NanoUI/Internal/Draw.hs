@@ -364,10 +364,13 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
       unlessOffClip fm (textBoxTop fm y ay) $ do
         prepared <- prepareFontMetrics fm t
         let Rect px py _ _ = drawTextBox prepared x y ax ay t
-        -- Drawing text has no collected text span, so it keeps its quads even
-        -- when the host rasterizes widget text externally.
         pushPreparedTextQuads da prepared px py t c
-    emitOne (DrawTextStyled x y font t c) = styled x y font t c
+    -- Styled text with its line box's top-left corner at (x, y).
+    emitOne (DrawTextStyled x y font t c) = do
+      (styledFm, native) <- resolve font
+      unlessOffClip styledFm y $ do
+        prepared <- prepareFontMetrics styledFm t
+        pushStyled prepared native font x y t c
     emitOne (DrawTextAligned x y ax ay k font t c) = do
       let font'
             | k == 1 = font
@@ -378,12 +381,6 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
         let Rect px py _ _ = drawTextBox prepared x y ax ay t
         pushStyled prepared native font' px py t c
     emitOne op = pushShapeOp da op
-    -- Styled text with its line box's top-left corner at (x, y).
-    styled x y font t c = do
-      (styledFm, native) <- resolve font
-      unlessOffClip styledFm y $ do
-        prepared <- prepareFontMetrics styledFm t
-        pushStyled prepared native font x y t c
     -- Text in @font@, with metrics prepared for it, synthesizing the font's
     -- weight and slant unless the host renders them natively.
     pushStyled prepared native font x y t c =
@@ -393,12 +390,15 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
     -- Text whose line box, from @top@, lies wholly above or below the clip
     -- by more than the glyph slack draws nothing ('pushShapedQuads' culls
     -- only across), so it is skipped before it is shaped: a long paragraph
-    -- or code block costs the lines in view.
+    -- or code block costs the lines in view. A host that draws text from the
+    -- collected spans gets no drawing text: it has no span, and a font
+    -- without glyphs would leave a box per character.
     unlessOffClip lineFm top act = do
+      external <- readIORef (daExternalText da)
       Rect _ cy _ ch <- currentClip da
       let !lh = fmLineHeight lineFm
           !slack = glyphSlackLines * lh
-      unless (top + lh + slack < cy || top - slack > cy + ch) act
+      unless (external || top + lh + slack < cy || top - slack > cy + ch) act
 
 -- | Paint a 'DrawImage' op; other ops paint nothing. @imageUv@ is as for
 -- 'emitDrawOps', and the op's UVs span 0 to 1 over the image. Unrotated

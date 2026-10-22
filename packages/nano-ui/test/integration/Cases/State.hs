@@ -302,10 +302,8 @@ runVarIoInPassTest ctx failed = do
       landing name = liftIO (writeVarIO item.rowName name)
   _ <- warmup2 ctx inp view
   _ <- runFrame ctx inp (view >> landing "uno")
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp view
   assertEq failed DamageFull =<< takeDamage ctx
   _ <- runFrame ctx inp (view >> landing "ein" >> writeVar item.rowDone True)
-  _ <- takeDamage ctx
   _ <- runFrame ctx inp view
   assertEq failed DamageFull =<< takeDamage ctx

@@ -14,8 +14,7 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Monad (localInput)
 import NanoUI.Effectful (Ui, embedNanoUI, runFrameEff, withRunInNanoUI)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..)
-  , arenaArrays
+  ( arenaArrays
   , TagCol (..)
   , TreeCol (..)
   , writeTagEnum

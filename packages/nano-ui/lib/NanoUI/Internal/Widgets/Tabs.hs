@@ -49,14 +49,14 @@ data TabStyle
   | TabContained
   -- ^ Folder tabs: the selected header opens onto a bordered body, which
   -- 'tabs' draws round the tab's content.
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance Hashable TabStyle where
   hashWithSalt salt = hashWithSalt salt . fromEnum
 
 -- | Header strip position relative to the selected tab's body.
 data TabOrientation = TabTop | TabBottom | TabLeft | TabRight
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance Hashable TabOrientation where
   hashWithSalt salt = hashWithSalt salt . fromEnum

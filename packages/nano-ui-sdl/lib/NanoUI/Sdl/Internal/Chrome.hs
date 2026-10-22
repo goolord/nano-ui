@@ -236,6 +236,7 @@ data CaptionOptions = CaptionOptions
   , capResizeTop :: !Float
   -- ^ Resize hit-test thickness along the top edge ('chromeResizeTop').
   }
+  deriving (Eq, Show)
 
 -- | 'defaultCaptionConfig' buttons and 'defaultResizeBorder' edges.
 defaultCaptionOptions :: CaptionOptions

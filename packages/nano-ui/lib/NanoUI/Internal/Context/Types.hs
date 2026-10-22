@@ -38,6 +38,7 @@ module NanoUI.Internal.Context.Types
   , defaultScrollTuning
   , ScrollAxes (..)
   , ScrollGlide (..)
+  , ScrollView (..)
   , ScrollState (..)
   , initialScrollState
   , DrawFitCache (..)
@@ -548,6 +549,14 @@ data ScrollGlide = ScrollGlide
   }
   deriving (Eq, Show)
 
+-- | Where the last layout placed a scroller: its viewport in window
+-- coordinates, and the offset, in window axes, its content was placed at.
+data ScrollView = ScrollView
+  { svViewport :: !Rect
+  , svPlaced :: !V2
+  }
+  deriving (Eq, Show)
+
 -- | Context-wide scroll tuning, active glides, and geometry-publication keys.
 data ScrollState = ScrollState
   { ssTuning :: !ScrollTuning
@@ -557,6 +566,10 @@ data ScrollState = ScrollState
   -- nodes can share a widget id (a table's frozen pane and its body), and
   -- without this the second would overwrite the first every frame, churning
   -- the store and flipping the geometry the commands read.
+  , ssViews :: !(IntMap ScrollView)
+  -- ^ Each scroller's last placement. Kept out of the store: a nested
+  -- scroller's viewport moves whenever one around it scrolls, and a store
+  -- change would keep that frame from repainting as a scroll.
   }
 
 -- | Default tuning with no glides or published scroller geometry.
@@ -566,6 +579,7 @@ initialScrollState =
     { ssTuning = defaultScrollTuning
     , ssGlides = IM.empty
     , ssCached = IS.empty
+    , ssViews = IM.empty
     }
 
 -- | Drawing's fitted layout keyed by envelope size, line height, content key,
@@ -716,10 +730,10 @@ data DrawOpCacheEntry = DrawOpCacheEntry
   , doeOps :: !(SmallArray DrawOp)
   }
 
--- | Strict cache entry for a custom drawing's compiled draw ops. Every input
--- the ops can depend on is part of the key: the content key, the rect, the
--- interaction state the draw context exposes, and the metric generation, which
--- a theme or font change bumps.
+-- | Strict cache entry for a custom drawing's compiled draw ops. The key is
+-- the content key, the rect, the interaction state the draw context exposes,
+-- and the metric generation, which a base theme or font change bumps. A theme
+-- scope change bumps nothing: the frame empties the cache instead.
 data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
   { cdeContent :: {-# UNPACK #-} !Int
   , cdeBounds :: !Rect

@@ -172,20 +172,22 @@ measureTextNodeAt env idx txt outerW shouldWrap = do
       pure (TextBox True tw th lineH)
     else pure (TextBox False tw0 th0 lineH)
 
--- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text that does
--- not wrap returns @fallback@, and so does empty text, which measured one
--- line tall. Text wraps at newlines, and at @w@ when @allowed@ and its line
--- overflows a positive @w@.
+-- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text wraps at
+-- newlines, and at @w@ when @allowed@ and its line overflows a positive @w@.
+-- Text that does not wrap returns @fallback@, unless its height is fit and
+-- it may wrap at a positive @w@, where paint wraps it ('textWrapCap'): the
+-- measure may have wrapped it narrower, at an ancestor's cap. Empty text,
+-- which measured one line tall, returns @fallback@.
 {-# INLINE textHeightAt #-}
 textHeightAt :: SolveEnv -> NodeIdx -> AxisSizing -> Float -> Bool -> Float -> IO Float
-textHeightAt env !idx (AxisSizing _ _ minH maxH) !w allowed !fallback = do
+textHeightAt env !idx (AxisSizing hTag _ minH maxH) !w allowed !fallback = do
   txt <- getText (seArena env) idx
   if T.null txt
     then pure fallback
     else do
       TextBox {tbWrapped, tbH, tbLineH} <-
         measureTextNodeAt env idx txt w (\wrapW lineW -> allowed && wrapW + 0.5 < lineW && wrapW > 0)
-      pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else fallback)
+      pure (if tbWrapped || (allowed && hTag == SizingFit && w > 0) then clamp minH maxH (max tbLineH tbH) else fallback)
 
 -- | Measure nodes and place the page within the supplied logical width/height.
 -- The view must have finished adding nodes, and 'computeSubtreeHashes' must
@@ -443,8 +445,8 @@ drawingHeightAt SolveEnv {seArena = na, seMs = ms} idx w hAx fallback = do
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
 -- nothing caps it (@textNodeSpanEntry@ in the text-span collector). Text
--- whose width is not fit wraps at the width it was assigned, as
--- 'positionNode' wraps it; fit text wraps where it was measured.
+-- whose width is not fit wraps at the width it was assigned, as the solve's
+-- position pass wraps it; fit text wraps where it was measured.
 textWrapCap :: Float -> SizingTag -> Float -> Float
 textWrapCap effMaxW wTag w
   | wTag /= SizingFit && w > 0 = w
@@ -471,15 +473,16 @@ findAncestorMaxW na idx = go idx 0
 
 measureTextNode :: SolveEnv -> NodeIdx -> IO ()
 measureTextNode env@SolveEnv {seArena = na} idx = do
-  wAx@(AxisSizing wTag wVal _ maxW) <- getWidthSizing na idx
+  wAx@(AxisSizing wTag wVal minW maxW) <- getWidthSizing na idx
   hAx <- getHeightSizing na idx
   parentAssigns <- growParent na idx
   txt <- getText na idx
   isRowChild <- parentIsRow na idx
-  -- A fixed width wraps at itself, as placement does ('textWrapCap').
+  -- A fixed width wraps at itself within its limits, as placement does
+  -- ('textWrapCap').
   effMaxW <-
     if wTag == SizingFixed
-      then pure wVal
+      then pure (clamp minW maxW wVal)
       else if maxW < 1e8
         then pure maxW
         else findAncestorMaxW na idx
@@ -1891,7 +1894,8 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
               else do
                 AxisSizing wTag _ _ maxW <- getWidthSizing na ci
                 Rect _ _ w _ <- getNodeRect na ci
-                effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW na ci
+                -- Only fit text wraps at the ancestor cap ('textWrapCap').
+                effMaxW <- if maxW < 1e8 || (wTag /= SizingFit && w > 0) then pure maxW else findAncestorMaxW na ci
                 let cap = textWrapCap effMaxW wTag w
                 (tw, _) <- measureFontLine measurer raw
                 pure (cap < 1e8 && cap + 0.5 < tw)

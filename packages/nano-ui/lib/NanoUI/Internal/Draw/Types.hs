@@ -48,7 +48,7 @@ import NanoUI.Internal.Types (Color (..), Rect (..))
 
 -- | Painting order from background through content and overlays to chrome.
 data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Vector drawing operations in logical pixels. Builders receive a solved
 -- window-space rectangle and should place operations within it. Circles use
@@ -191,7 +191,7 @@ data LineCap
   -- ^ Flat, half the width past the end point.
   | RoundCap
   -- ^ A half disc past the end point.
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | How a stroke turns a corner.
 data LineJoin
@@ -202,7 +202,7 @@ data LineJoin
   -- ^ A circular arc around the corner.
   | BevelJoin
   -- ^ Corner cut straight across.
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Colour of a 'FillPolygon' or 'StrokePolyline': one for the whole shape,
 -- or one per point, blended across the triangles. A stroke uses each

@@ -14,7 +14,9 @@ tests :: [Spec]
 tests =
   [ spec "draw-square-geometry" runSquareGeometryTest
   , spec "draw-thick-rounded-stroke" runThickRoundedStrokeTest
+  , spec "draw-thick-rounded-stroke-alpha" runThickRoundedStrokeAlphaTest
   , spec "draw-external-text" runExternalTextTest
+  , spec "draw-external-drawing-text" runExternalDrawingTextTest
   , spec "draw-empty-clip" runEmptyClipTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
   , spec "draw-polygon-bad-index" runPolygonBadIndexTest
@@ -211,6 +213,42 @@ runThickRoundedStrokeTest ctx failed = do
   assert failed (not (null inked))
   assert failed (extent fst <= 40 && extent snd <= 40)
 
+-- | A translucent rounded border wider than its radius covers each point of
+-- its band once: at the inner corners, beside the arcs and along the sides.
+runThickRoundedStrokeAlphaTest :: Context -> IORef Int -> IO ()
+runThickRoundedStrokeAlphaTest ctx failed = do
+  let ink = colorRGBA 0 0 255 128
+      ops (Rect x y _ _) = [StrokeRoundedRect (Rect (x + 10) (y + 10) 40 40) 1 8 ink]
+  (resp, dd, _) <- runFrame ctx (withInput 300 200) (drawing (fixedWH 60 60) (smallArrayFromList . ops))
+  tris <- triangles dd
+  let Rect rx ry _ _ = respRect resp
+      alphaAt (px, py) = sum [a | ((x0, y0, a0), (x1, y1, a1), (x2, y2, a2)) <- tris, Just (l0, l1, l2) <- [barycentric (x0, y0) (x1, y1) (x2, y2)], let a = l0 * a0 + l1 * a1 + l2 * a2]
+        where
+          barycentric (x0, y0) (x1, y1) (x2, y2) =
+            let d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+                l0 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / d
+                l1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / d
+                l2 = 1 - l0 - l1
+             in if d /= 0 && l0 >= 0 && l1 >= 0 && l2 >= 0 then Just (l0, l1, l2) else Nothing
+      -- Off the triangles' shared edges, which both would count.
+      points = [(4.3, 4.6), (0.8, 4.3), (4.3, 0.8), (35.7, 4.6), (4.3, 35.4), (35.7, 35.4), (39.2, 35.7), (4.3, 20.7), (20.7, 4.3), (35.7, 20.3), (20.3, 35.7)]
+  forM_ points $ \(dx, dy) ->
+    assert failed (abs (alphaAt (rx + 10 + dx, ry + 10 + dy) - 128 / 255) < 0.01)
+
+-- | Every indexed triangle's vertices: position and alpha.
+triangles :: DrawData -> IO [((Float, Float, Float), (Float, Float, Float), (Float, Float, Float))]
+triangles dd =
+  withForeignPtr (drawVertices dd) $ \vp ->
+    withForeignPtr (drawIndices dd) $ \ip ->
+      forM [0, 3 .. drawIndexCount dd - 3] $ \i ->
+        (,,) <$> vertexAt vp ip i <*> vertexAt vp ip (i + 1) <*> vertexAt vp ip (i + 2)
+  where
+    vertexAt :: Ptr Word8 -> Ptr Word8 -> Int -> IO (Float, Float, Float)
+    vertexAt vp ip i = do
+      vi <- peekByteOff ip (i * indexSize) :: IO Word32
+      let at o = peekByteOff vp (fromIntegral vi * vertexSize + o) :: IO Float
+      (,,) <$> at 0 <*> at 4 <*> at 20
+
 -- | External text keeps text spans but pushes no text quads, so the buffer
 -- does not grow with the label length.
 runExternalTextTest :: Context -> IORef Int -> IO ()
@@ -223,6 +261,24 @@ runExternalTextTest ctx failed = do
   spans <- collectTextSpans ctx
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
+
+-- | External text leaves out drawing text too, plain, styled or aligned, so
+-- a host that draws only spans shows no box for each character.
+runExternalDrawingTextTest :: Context -> IORef Int -> IO ()
+runExternalDrawingTextTest ctx failed = do
+  let inp = withInput 400 100
+      ink = colorRGBA 255 255 255 255
+      heavy = defaultTextFont {textFontWeight = WeightBold}
+      ops txt (Rect x y _ _) =
+        [ DrawText x y 0 1 txt ink
+        , DrawTextStyled x (y + 20) heavy txt ink
+        , DrawTextAligned x (y + 40) 0 1 2 defaultTextFont txt ink
+        ]
+      ui txt = void (drawing (fixedWH 300 80) (smallArrayFromList . ops txt))
+  setDrawExternalText ctx True
+  (_, dShort, _) <- runFrame ctx inp (ui "ab")
+  (_, dLong, _) <- runFrame ctx inp (ui "abcdefghijklmnop")
+  assertEq failed (drawVertexCount dShort) (drawVertexCount dLong)
 
 -- | Geometry clipped to nothing gets no command, which a host would still
 -- draw into the pixel its empty clip rounds to.

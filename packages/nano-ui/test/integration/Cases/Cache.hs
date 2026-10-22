@@ -9,7 +9,7 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray (smallArrayFromList)
 import NanoUI.Internal.Context (Context (..), registerCustomDrawing)
 import NanoUI.Internal.Layout.Arena
-  ( NodeType (..), addNodeFromLayout, getNodeRect, setNodeText
+  ( addNodeFromLayout, getNodeRect, setNodeText
   , setNodeValue, setStyleIdx, setWidgetId
   )
 import NanoUI.Internal.Store (ptrEq)
@@ -26,17 +26,32 @@ tests =
   , spec "wrap-width-bounds" runWrapBoundsTest
   , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
   , spec "wrap-keeps-clusters" runWrapClustersTest
+  , spec "truncate-first-character" runTruncateFirstCharTest
   ]
 
 -- | Breaking a word by character, or cutting text short, keeps a character
--- with the marks after it and a joined emoji whole: a cut that would part
--- them moves back before the character, or past it when it is the first.
+-- with the marks after it, a joined emoji and a flag whole: a cut that would
+-- part them moves back before the character, or past it when it is the
+-- first.
 runWrapClustersTest :: Context -> IORef Int -> IO ()
 runWrapClustersTest ctx failed = do
   let lineW t = pure (10 * fromIntegral (T.length t))
+      flags = "\x1F1FA\x1F1F8\x1F1EB\x1F1F7"
+      england = "\x1F3F4\xE0067\xE0062\xE0065\xE006E\xE0067\xE007F"
   assertEq failed ["a", "e\x0301", "b"] =<< wrapTextLinesIO lineW "ae\x0301\&b" 20
   assertEq failed ["\x1F469\x200D\x1F4BB", "x"] =<< wrapTextLinesIO lineW "\x1F469\x200D\x1F4BBx" 20
+  assertEq failed ["\x1F1FA\x1F1F8", "\x1F1EB\x1F1F7"] =<< wrapTextLinesIO lineW flags 30
+  assertEq failed ["a", england] =<< wrapTextLinesIO lineW ("a" <> england) 30
   assertEq failed "a..." =<< evalUi ctx (withInput 100 100) (truncateTextUi (monospaceMetrics 10) 55 "ae\x0301\&bcd")
+  assertEq failed "\x1F1FA\x1F1F8..." =<< evalUi ctx (withInput 100 100) (truncateTextUi (monospaceMetrics 10) 65 (flags <> "xyz"))
+
+-- | Cutting text short never makes it wider than the room: a first
+-- character that leaves no room for the dots is cut to without them.
+runTruncateFirstCharTest :: Context -> IORef Int -> IO ()
+runTruncateFirstCharTest ctx failed = do
+  let fm = (monospaceMetrics 10) {fmAdvance = \c -> case c of 'W' -> 14; '.' -> 4; ' ' -> 5; _ -> 10}
+  assertEq failed "W" =<< evalUi ctx (withInput 100 100) (truncateTextUi fm 16 "Wide")
+  assertEq failed "Wi..." =<< evalUi ctx (withInput 100 100) (truncateTextUi fm 36 "Wide")
 
 -- | Wrapping drops the run of spaces at a line break but keeps indentation
 -- and runs of spaces inside a line, which code needs.

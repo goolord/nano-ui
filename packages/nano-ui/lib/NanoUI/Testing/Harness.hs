@@ -78,7 +78,7 @@ import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Context (ctxNodeArena, takeWakes)
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
-import NanoUI.Internal.Layout.Arena (NodeType, arenaCount, getNodeRect, getNodeType, getWidgetId)
+import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Shortcut (Shortcut (..))
 import NanoUI.Var (peekVar)

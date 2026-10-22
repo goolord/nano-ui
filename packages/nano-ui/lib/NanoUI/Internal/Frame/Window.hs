@@ -23,7 +23,7 @@ import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Layout.Solve (Measurers (..), placeWindowNode, windowBodyScroller)
+import NanoUI.Internal.Layout.Solve (Measurers (..), windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot, ptrEq)
 import NanoUI.Internal.Style (Padding (..))
@@ -160,7 +160,8 @@ resizeFromEdge wrd (V2 mx my) winW winH = (w, h, x, y)
        in (clamp 0 (max 0 (limit - len')) pos, len')
 
 -- | Start or continue a resize within logical window width/height. Updates
--- stored bounds and places the window again. Returns 'True' while starting or held.
+-- stored bounds, which the frame places the window at once this returns.
+-- Returns 'True' while starting or held.
 updateWindowResize :: Context -> Input -> Float -> Float -> IO Bool
 updateWindowResize ctx inp winW winH =
   windowGesture ctx inp isWindowResize (\s -> s {isWindowResize = Nothing}) resize tryStartWindowResize
@@ -172,10 +173,8 @@ updateWindowResize ctx inp winW winH =
       size <- lookupWindowSize ctx wid
       pos <- lookupWindowPos ctx wid
       let moved = size /= Just (nw, nh) || pos /= Just (nx, ny)
-      when moved $ do
+      when moved $
         modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
-        withWidgetNode ctx wid () $ \idx ->
-          placeWindowNode (ctxNodeArena ctx) (contextMeasurers ctx) winW winH idx nw nh (const (nx, ny))
       pure moved
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,
@@ -242,7 +241,8 @@ outsideModalBlock ctx idx = maybe (pure True) (nodeInSubtree ctx idx) =<< topMod
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
-  idx <- MaybeT (topmostOverlayAtMouse ctx mouse)
+  -- Not a window under its modal's panel ('overlayHitRoot').
+  idx <- MaybeT (overlayHitRoot ctx mouse)
   nt <- liftIO (getNodeType (ctxNodeArena ctx) idx)
   guard (nt == NodeWindow)
   guard =<< liftIO (outsideModalBlock ctx idx)

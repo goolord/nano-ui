@@ -103,6 +103,7 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
           ScrollAxisX -> (ox, 0)
           ScrollAxisXY -> (ox, oy)
       when (owner && held /= cur) $ setScrollOffsetIn ctx wid axes held
+      when owner $ placeScrollContent ctx wid dx dy
       descend (sx - dx) (sy - dy)
     else descend sx sy
 
@@ -196,25 +197,31 @@ scrollOwnerNode suppressed Context {ctxNodeArena = na} wid =
         then pure True
         else (\sn -> not (suppressed (snConfig sn) (sn2D sn) (snDir sn))) <$> readScrollNode na idx
 
--- | Scroll @wid@ by the wheel and return its offset range, zero when it has
--- no node.
-applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO V2
-applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = do
+-- | Axes and offset range of the node the wheel moves for scroller @wid@,
+-- 'Nothing' when it has no node.
+wheelAxesRange :: Context -> WidgetId -> IO (Maybe (ScrollAxes, V2))
+wheelAxesRange ctx@Context {ctxNodeArena = na} wid = do
   -- A node whose bar shows comes first: a table's frozen pane shares its
   -- body's id with a hidden bar and a range of one axis, and would clamp the
   -- body's horizontal wheel away.
   mIdx <-
     scrollOwnerNode (\cfg _ dir -> scrollChromeSuppressed cfg dir) ctx wid
       >>= maybe (scrollOwnerNode scrollWheelSuppressed ctx wid) (pure . Just)
-  fmap (fromMaybe (V2 0 0)) . forM mIdx $ \idx -> do
+  forM mIdx $ \idx -> do
     nt <- getNodeType na idx
-    (axes, range) <-
-      if nt == NodeTextArea
-        then (ScrollAxisXY,) . tabRange . snd <$> textAreaScrollGeom ctx idx
-        else do
-          rect <- getNodeRect na idx
-          (axes, _, range) <- scrollNodeGeometry ctx idx rect
-          pure (axes, range)
+    if nt == NodeTextArea
+      then (ScrollAxisXY,) . tabRange . snd <$> textAreaScrollGeom ctx idx
+      else do
+        rect <- getNodeRect na idx
+        (axes, _, range) <- scrollNodeGeometry ctx idx rect
+        pure (axes, range)
+
+-- | Scroll @wid@ by the wheel and return its offset range, zero when it has
+-- no node.
+applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO V2
+applyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
+  mGeom <- wheelAxesRange ctx wid
+  fmap (fromMaybe (V2 0 0)) . forM mGeom $ \(axes, range) -> do
     step <- resolveScrollStep ctx wid
     cur <- getScrollOffsetIn ctx wid axes
     -- Notches land on where the scroller is headed, not on where it is, so
@@ -266,13 +273,13 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
   nt <- getNodeType na idx
   scrollHitClip ctx idx nt parentClip >>= \case
     Nothing -> pure WheelMiss
-    Just clip -> do
+    Just (clip, kidsClip) -> do
       overlapping <-
         pure layered <&&> ((||) <$> ((== Layered) <$> getFlow na idx) <*> hasPinnedBelow na idx)
       -- Skip subtrees that contain no scroller, text area, or 'PointerBlock' node.
       let answered c = ifM (hasScrollerBelow na c) (query c) (pure Nothing)
           query c =
-            queryScrollTarget ctx layered mouse clip c <&> \case
+            queryScrollTarget ctx layered mouse kidsClip c <&> \case
               WheelMiss -> Nothing
               hit -> Just hit
       inner <-
@@ -288,22 +295,34 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
           pure (if blocks then WheelBlocked else inner)
 
 -- | Whether node @idx@ takes the wheel at @mouse@: a scroll container whose
--- viewport or bar lanes contain it, or a text area with something to scroll.
--- A 'PointerPass' node never does.
+-- viewport or bar lanes contain it, or a text area, with something to scroll.
+-- A scroller whose content fits leaves the wheel to the one around it. A
+-- 'PointerPass' node never takes it.
 scrollHitSelf :: Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO Bool
 scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
   | nt == NodeTextArea =
       takes <&&> do
         (field, bars) <- textAreaScrollGeom ctx idx
         pure (rectContains clip mouse && rectContains field mouse && (tabVertical bars || tabHorizontal bars))
-  | isScrollNode nt = pure (rectContains clip mouse) <&&> takes
+  | isScrollNode nt =
+      pure (rectContains clip mouse) <&&> takes <&&> do
+        (_, _, V2 rx ry) <- scrollNodeGeometry ctx idx =<< getNodeRect na idx
+        -- Without a range of its own, the range the wheel moves: a table's
+        -- frozen pane has none, and its body, which shares its id, does.
+        if rx > 0 || ry > 0
+          then pure True
+          else do
+            wid <- getWidgetId na idx
+            maybe False (\(_, V2 wx wy) -> wx > 0 || wy > 0) <$> wheelAxesRange ctx wid
   | otherwise = pure False
  where
   takes = not <$> passesPointer na idx
 
--- Same clip stack as the span walk: scroll viewport (plus its bar lanes),
--- then the clip other containers give their children ('childPaintClip').
-scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
+-- The clip node @idx@ takes the wheel in, and the one its children do, as
+-- paint clips them: a scroller takes it over its viewport and bar lanes, and
+-- its children over the viewport alone; other containers give their children
+-- the clip 'childPaintClip' says.
+scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe (Rect, Rect))
 scrollHitClip ctx@Context {ctxNodeArena = na} idx nt parentClip
   | isScrollNode nt = do
       Rect x y w h <- getNodeRect na idx
@@ -314,9 +333,13 @@ scrollHitClip ctx@Context {ctxNodeArena = na} idx nt parentClip
         hit
           | sn2D sn = rectUnion viewport (rectUnion (lane DirColumn) (lane DirRow))
           | otherwise = rectUnion viewport (lane (snDir sn))
-      pure (rectIntersect parentClip hit)
-  | isContainerNode nt = maybe (Just parentClip) (rectIntersect parentClip) <$> (childPaintClip ctx idx nt =<< getNodeRect na idx)
-  | otherwise = pure (Just parentClip)
+        -- Empty when the viewport is clipped away, so no child takes it.
+        kids = fromMaybe (Rect x y 0 0) (rectIntersect parentClip viewport)
+      pure ((,kids) <$> rectIntersect parentClip hit)
+  | isContainerNode nt =
+      fmap (\c -> (c, c)) . maybe (Just parentClip) (rectIntersect parentClip)
+        <$> (childPaintClip ctx idx nt =<< getNodeRect na idx)
+  | otherwise = pure (Just (parentClip, parentClip))
 
 -- | Scrollbar layouts of the scroller at @idx@ (id @wid@), each paired with a
 -- setter for that axis's offset that skips unchanged values. Covers text
@@ -384,8 +407,8 @@ tryStartScrollDrag ctx inp = do
 
 -- | The scrollbar whose thumb is being dragged, else the one under the
 -- pointer, as 'isScrollHover' holds it. While the button is down for any
--- other gesture there is none. The search visits only the pointer nodes, as
--- the cursor's thumb test does, so a frame pays no walk of the whole tree.
+-- other gesture there is none. The search visits only the pointer nodes, so
+-- a frame pays no walk of the whole tree.
 probeScrollBarHover :: Context -> Input -> IO (Maybe (WidgetId, DirTag, Rect))
 probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
   mDrag <- getsInteraction ctx isScrollDrag
@@ -401,9 +424,20 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
                   <&&> (rectContains <$> getNodeRect na idx <*> pure mouse)
                   <&&> do
                     -- A scroller's own clip is its viewport, short of its
-                    -- bars; the clip around it is its parent's.
+                    -- bars; the clip around it is its parent's, cut to what
+                    -- the parent gives its children (a clip container's
+                    -- rect), which only a scroller or panel parent records.
                     owner <- if isScrollNode nt then getParent na idx else pure idx
-                    if owner < 0 then pure True else maybe True (`rectContains` mouse) <$> getClipBounds na owner
+                    let inside = maybe True (`rectContains` mouse)
+                    if owner < 0
+                      then pure True
+                      else
+                        (inside <$> getClipBounds na owner)
+                          <&&> if owner == idx
+                            then pure True
+                            else do
+                              ont <- getNodeType na owner
+                              inside <$> (childPaintClip ctx owner ont =<< getNodeRect na owner)
                   <&&> (isJust <$> barAt idx)
                   <&&> overlayHitAllowed ctx top idx
               barAt idx = do

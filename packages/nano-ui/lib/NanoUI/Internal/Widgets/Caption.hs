@@ -66,6 +66,7 @@ data CaptionConfig = CaptionConfig
   -- ^ Rounding of the close button's top-right corner, which is also the
   -- window's corner.
   }
+  deriving (Eq, Show)
 
 -- | 44 by 'captionBarHeight' buttons, a ten-pixel glyph, and an 8-pixel
 -- corner matching the desktop's window rounding.
@@ -141,6 +142,7 @@ data WindowFrame = WindowFrame
   -- ^ Corner rounding, which should match the desktop's for the window.
   , frameColor :: !Color
   }
+  deriving (Eq, Show)
 
 -- | A one-pixel border rounded by eight.
 defaultWindowFrame :: Color -> WindowFrame

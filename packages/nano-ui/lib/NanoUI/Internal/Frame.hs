@@ -119,14 +119,17 @@ runFrameEff unlift ctx rawInp ui = do
   let
     size@(Size w h) = inputWindowSize frameInp
   layoutArena ctx size True
+  -- A press that starts a window gesture hit-tests the page where it is
+  -- drawn, scrolled and clipped.
+  applyScrollOffsets ctx size
   movedResize <- updateWindowResize ctx layerInp w h
   movedWindow <- updateWindowDrag ctx layerInp
   -- A window moved or resized changes only where the floating panels go:
   -- the solve before placement stands, so place them again over it.
-  when (movedResize || movedWindow) $
+  when (movedResize || movedWindow) $ do
     layoutArena ctx size False
+    applyScrollOffsets ctx size
   persistWindowPositions ctx
-  applyScrollOffsets ctx size
   finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size

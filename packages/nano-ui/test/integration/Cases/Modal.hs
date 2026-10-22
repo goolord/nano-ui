@@ -17,6 +17,8 @@ tests =
   , spec "modal-fill-label-fits" runModalFillLabelFitsTest
   , spec "modal-tree-selection" runModalTreeSelectionTest
   , spec "modal-nested-dismiss" runModalNestedDismissTest
+  , spec "modal-over-inner-window" runModalOverInnerWindowTest
+  , spec "modal-over-inner-window-drag" runModalOverInnerWindowDragTest
   ]
 
 -- | A modal declared inside another's body closes first: Escape, then a
@@ -41,6 +43,39 @@ runModalNestedDismissTest ctx failed = do
   Rect dx dy dw _ <- respRect <$> evalUi ctx inp0 ui
   _ <- runClick ctx inp0 ui (V2 (dx + dw / 2) (dy + 8))
   assertEq failed (True, False) =<< states
+
+-- | A window declared in a modal's body is painted under the modal panel.
+-- Where they overlap, a click goes to the modal's button, not to the
+-- window's button under it.
+runModalOverInnerWindowTest :: Context -> IORef Int -> IO ()
+runModalOverInnerWindowTest ctx failed = do
+  let inp0 = withInputOff 500 400
+      ui = fmap snd . modal' (constVar True) "Settings" $ do
+        (_, hidden) <- window' (constVar True) "Inspector" (buttonWith' (fixedWH 380 300) "Hidden")
+        ok <- button' "OK"
+        pure (ok, hidden)
+  mr <- warmup2 ctx inp0 ui
+  assertJust failed mr $ \(ok, mHidden) -> assertJust failed mHidden $ \hidden -> do
+    assert failed (isJust (rectIntersect (respRect hidden) (respRect ok)))
+    let (press, release) = clickPair inp0 (centerOf ok)
+    _ <- runFrame ctx press ui
+    assertJustM failed (evalUi ctx release ui) $ \(ok', hidden') -> do
+      assert failed (respClicked ok')
+      assert failed (not (any respClicked hidden'))
+
+-- | Nor does a drag on that window's title bar, where the modal panel covers
+-- it, move the window.
+runModalOverInnerWindowDragTest :: Context -> IORef Int -> IO ()
+runModalOverInnerWindowDragTest ctx failed = do
+  let inp0 = withInputOff 500 400
+      ui = modalWith (fixedWH 460 380) (constVar True) "Settings" (window (constVar True) "Inspector" (label "body"))
+  _ <- warmup2 ctx inp0 ui
+  before <- map snd <$> nodesOfType NodeWindow ctx
+  assertJust failed (listToMaybe before) $ \(Rect x y w _) -> do
+    let press = pressAt inp0 (V2 (x + w / 2) (y + 10))
+        moved = holdAt press (V2 (x + w / 2 - 40) (y + 40))
+    mapM_ (\i -> runFrame ctx i ui) [press, moved, releaseAt moved]
+    assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
 
 runModalOverlayTest :: Context -> IORef Int -> IO ()
 runModalOverlayTest ctx failed = do

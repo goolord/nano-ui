@@ -83,6 +83,7 @@ module NanoUI.Monad
 
     -- * Redraw and damage
   , requestFrame
+  , DamageBounds (..)
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow
@@ -100,3 +101,4 @@ where
 import NanoUI.Internal.Context (Context)
 import NanoUI.Internal.Monad
 import NanoUI.Internal.Host (Host, newHost, setHost)
+import NanoUI.Internal.Types (DamageBounds (..))

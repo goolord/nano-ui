@@ -20,7 +20,7 @@ data TextMotion
   | LineDown
   | DocumentStart
   | DocumentEnd
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Editing, navigation, selection, history, and clipboard operations on a
 -- text field. Mutating commands record an undo step and replace any active

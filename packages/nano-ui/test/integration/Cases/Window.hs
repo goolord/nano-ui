@@ -4,6 +4,7 @@ import Spec
 import Control.Exception (evaluate)
 import System.Mem.StableName (makeStableName)
 import Data.IntMap.Strict qualified as IM
+import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (LayoutCache (..), arenaCount, getNodeRect, getNodeType, getNodeValue, getScrollContentW, isScrollNode)
@@ -28,6 +29,7 @@ tests =
   , spec "scrolled-debug-toggle" runScrolledDebugToggleTest
   , spec "window-resize" runWindowResizeTest
   , spec "window-resize-halo-hit" runWindowResizeHaloHitTest
+  , spec "window-resize-halo-scrolled" runWindowResizeHaloScrolledTest
   , spec "heading-mono-truncate" runHeadingMonoTruncateTest
   , spec "window-fit-scroll-gutter" runWindowFitScrollGutterTest
   , spec "span-beside-window" runSpanBesideWindowTest
@@ -517,6 +519,30 @@ runWindowResizeHaloHitTest ctx failed = do
   assert failed (abs (x1 - destX) <= 8)
   assert failed inHalo
   assert failed (not (isResize kind))
+
+-- | A page button beside a window, where the page is scrolled, keeps a press
+-- in the window's halo: the press hit-tests the page where it is drawn, not
+-- where it was laid out before the scroll.
+runWindowResizeHaloScrolledTest :: Context -> IORef Int -> IO ()
+runWindowResizeHaloScrolledTest ctx failed = do
+  let inp0 = withInputOff 640 400
+      ui = do
+        (page, ()) <- scrollArea (fillW . fillH) . columnWith fillW $ do
+          spacer Fit (Fixed 400)
+          replicateM_ 10 (buttonWith (fillW . fixedH 100) "Page")
+        window (constVar True) "Tool" (label "Body")
+        pure page
+  page <- warmup2 ctx inp0 ui
+  setScrollOffset ctx page 400
+  _ <- warmup2 ctx inp0 ui
+  before <- map snd <$> nodesOfType NodeWindow ctx
+  assertJust failed (listToMaybe before) $ \(Rect x y _ h) -> do
+    let at = V2 (x - 6) (y + h / 2)
+        press = pressAt inp0 at
+    _ <- runFrame ctx press ui
+    _ <- runFrame ctx (holdAt press (V2 (x - 60) (y + h / 2))) ui
+    _ <- runFrame ctx (releaseAt (holdAt press (V2 (x - 60) (y + h / 2)))) ui
+    assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
 
 runSeparatorSpanTest :: Context -> IORef Int -> IO ()
 runSeparatorSpanTest ctx failed = do
