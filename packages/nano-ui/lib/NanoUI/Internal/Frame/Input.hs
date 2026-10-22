@@ -54,8 +54,9 @@ import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDama
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Shortcut (focusTakesChord)
 
--- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget'
--- and show the focus ring. Moving focus blurs the old widget
+-- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget',
+-- show the focus ring and scroll the widget into view ('revealWidget').
+-- Moving focus blurs the old widget
 -- ('blurFocus'). A Tab consumed by the focused widget
 -- ('NanoUI.Internal.Context.markTabConsumed'), or one it claims
 -- ('focusTakesChord': 'KeysAll', or 'KeysOnly' naming the chord), moves
@@ -425,7 +426,8 @@ finalizeDrawingFocus ctx targets =
 -- Tab would ('tabTarget'). 'FocusOn' succeeds only for one of the
 -- 'tabStops', never a disabled widget; otherwise the request is dropped.
 -- Moving focus behaves like a press elsewhere ('blurFocus'). The new
--- widget shows the focus ring. Requesting the focused widget changes
+-- widget shows the focus ring and scrolls into view ('revealWidget').
+-- Requesting the focused widget changes
 -- nothing, including the ring.
 finalizeFocusRequest :: Context -> IO ()
 finalizeFocusRequest ctx =
