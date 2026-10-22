@@ -9,6 +9,18 @@
 
 - No longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
+- The library imports `NanoUI.Internal` modules, which change without
+  notice, so it allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`).
+- The `sdl` flag, which builds the SDL example, is off by default, so
+  depending on the library no longer needs nano-ui-sdl or SDL3.
+- `markSubmitted` counts a form as submitted from the app's own button, so a
+  `FormOnSubmit` form shows its errors.
+- `nanoFormSubmit` includes edits made in the same frame as Enter or the
+  submit click. It submitted the value from before them, and an
+  `OnlyWhen respSubmitted` text field never submitted its text.
+- `inputColor` stores its colour as `#rrggbbaa`, not `#rrggbb`. An edit makes
+  the colour opaque, as `colorPicker'`, which has no alpha bar, does.
+- `inRange` rejects NaN.
 - `defaultErrorView`'s callout takes the theme's danger colour, which its
   messages are drawn in, rather than its red.
 - `NanoUI.Form.Backend` is now `NanoUI.Form.Internal.Backend`. `NanoUI.Form`

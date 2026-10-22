@@ -58,6 +58,10 @@
 
 - `clearWindowChromeUi`, `setWindowDecorationsUi` and `setWindowShadowUi`
   from a view, and `sdlDebugSnapshot` for an explicit session from IO.
+- `CoreDebugSnapshot`, the type of `SdlDebugSnapshot`'s `dbgCore`, and the
+  row formatters `formatFpsRows`, `formatDrawRows` and `formatExplainRows`,
+  so a view reads `askSdlDebug`'s frame timings without
+  `NanoUI.Internal.Debug`.
 
 - Everything a window without the desktop's title bar has to do for itself.
   `windowCaption` is the whole of it in one call from a view -- it draws the
@@ -68,7 +72,8 @@
   takes hold of one to resize it. The top edge has a reach of its own, since
   it is the one edge with no frame outside it to take hold of instead. A
   window that still has the desktop's title bar gets the buttons and nothing
-  else, and a fullscreen one has no bar to drag and no edges to resize.
+  else, and a fullscreen one has no bar to drag and no edges to resize. The
+  drag region leaves out floating panels drawn over the bar.
 - `WindowChrome`, `setWindowChrome` and `clearWindowChrome` for a window that
   draws chrome of another shape. The regions are given in layout units and
   converted by the window's zoom, and they go to an `SDL_SetWindowHitTest`,
@@ -76,9 +81,14 @@
   maximizes it on a double click, and hangs the window menu off the right
   button.
 - `windowResizable`, and `setWindowChromeUi` for handing over chrome regions
-  from a view. The title, size, mode, maximizing and minimizing are the
-  core's, for any backend (`setWindowTitleUi`, `resizeWindowUi`,
-  `toggleMaximizedUi` and the rest); `windowCaption`'s buttons use them.
+  from a view. Regions handed over from a view, by `windowCaption` or
+  `setWindowChromeUi`, lapse after the first frame whose view does not hand
+  them over again, so a view hands them over every frame; regions set with
+  `setWindowChrome` from IO stay. The title, size, mode, maximizing and
+  minimizing are the core's, for any backend (`setWindowTitleUi`,
+  `resizeWindowUi`, `toggleMaximizedUi` and the rest); `windowCaption`'s
+  buttons use them.
+- `CaptionOptions` and `WindowChrome` derive `Eq` and `Show`.
 - `WindowDecorations`: `DecorationsFull`, `DecorationsFrame` or
   `DecorationsNone`, how much of the desktop's title bar and frame a window
   keeps. `sdlWindowDecorations` picks it when the window opens and
@@ -101,7 +111,11 @@
   shadow and no frame. Elsewhere it is a borderless window and the
   compositor decides.
   `DecorationsNone` keeps nothing of the desktop's; `setWindowShadow` puts
-  DWM's shadow under one that wants it.
+  DWM's shadow under one that wants it. `setWindowDecorations`,
+  `setWindowShadow` and their `Ui` forms do nothing when asked for what the
+  window already has, so a view can ask every frame without flicker, except
+  that `DecorationsFrame` asked again puts the sizing frame on once the window
+  has become resizable or left fullscreen.
 - `windowZoom`, the window coordinates a layout unit is worth.
 
 - `nano-ui-sdl-idle`, a window for measuring what an app costs while nobody
@@ -136,7 +150,9 @@
 - The middle mouse button, the side buttons as back and forward, and any
   further button as a `MouseOther` of its SDL number. The pointer leaving
   the window (`EvMouseLeave`) moves it off every widget, so nothing stays
-  hovered. `UiCursorHidden` hides the pointer.
+  hovered, unless a button is held: a drag keeps its pointer, so a dragged
+  slider no longer drops to its minimum (with `SDL_MOUSE_AUTO_CAPTURE=0`,
+  say). `UiCursorHidden` hides the pointer.
 - The desktop's light or dark setting reaches `systemAppearance`, and a change
   arrives as `EvSystemThemeChanged`. `sdlAppThemeFor` takes the theme for
   each setting, such as `lightDark light dark`, and follows it as it
@@ -158,6 +174,17 @@
 - Widgets and view functions have `NanoUI` types instead of
   `Ui :> es => Eff es`, and the package no longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
+- The licence is `MIT AND OFL-1.1`. The bundled Inter is under the SIL Open
+  Font License 1.1, whose text ships in `LICENSE-Inter`; an application that
+  embeds the font ships it too.
+- The library imports `NanoUI.Internal` modules, which change without
+  notice, so it allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`).
+- On Linux and other Unix systems fonts are searched where fontconfig looks:
+  `fonts` under `$XDG_DATA_HOME` and each absolute `$XDG_DATA_DIRS` entry,
+  `~/.fonts`, and `/usr/local/share/fonts` and `/usr/share/fonts` whatever
+  `XDG_DATA_DIRS` holds. Nix profiles, Guix and older installs are found.
+- `NANO_CURSOR_TRACE` turns on for any value, as the other traces do, not
+  only for `1`.
 - With SDL 3.4 or later, the renderer's texture address mode is set to clamp
   when the session starts. Left on auto, SDL scans every UV in the frame's
   vertex buffer on each draw call, which cost more than a quarter of a
@@ -264,6 +291,52 @@
   them made by the loop's own thread in the middle of a frame.
 - The grab hands show the move arrows. The backend asked SDL 3.2 for cursors
   it does not have, which showed the arrow on X11.
+- Font search, for `FontSearch` and for fallback fonts, finds the Windows and
+  macOS families whose files are not named after them: Segoe UI Symbol,
+  Nirmala UI, Leelawadee UI, Microsoft YaHei, Yu Gothic, Malgun Gothic, Arial
+  Unicode MS, PingFang SC, Kohinoor Devanagari and Times New Roman. On a
+  stock Windows non-Latin text drew as boxes, and the serif generic found
+  nothing.
+- Of a family's files, font search prefers `-Regular` over `-Medium`, counts
+  `-Book` and `-Roman` as regular, and ranks an upright face above its
+  italic however the files are named (`NotoSans[wght].ttf` over
+  `NotoSans-Italic[wght].ttf`). The UI could come out in Roboto Medium or in
+  an italic face.
+- A `FontFilePath` that will not open is recorded as the bundled Inter it
+  draws in, so the debug readout names Inter and other sizes no longer try
+  the file again. Animating a font size clears the text caches once per 17
+  new sizes instead of on every frame.
+- Colour glyphs (emoji) draw as a tinted silhouette, not a tinted box with the
+  glyph cut out of it.
+- A quick Ctrl+click, whose Ctrl is let go just after the click, no longer
+  arrives as a plain click: a frame's modifiers come only from key events.
+- File-dialog filter names and patterns go to SDL as UTF-8 on every platform.
+  A non-ASCII filter name threw under a C locale, and the dialog never opened.
+- On a Wayland desktop with no `SDL_VIDEO_DRIVER` set, SDL falls back to X11
+  when the Wayland video driver cannot start, instead of failing to
+  initialize.
+- Frame pacing keeps a fractional refresh rate: 59.94 Hz paced as 59 Hz,
+  and with vsync off a frame repeated about once a second.
+- Input taken while the window opens is seen exactly once, neither replayed
+  by the next opening frame (flipping a toggle back) nor dropped, and a close
+  request taken then closes the window.
+- During a live window resize, animations advance by the time that passed
+  (on Windows a spinner or transition ran several times too fast), and an
+  exception thrown by a frame propagates out of `runSdlApp`, through the
+  session's releases and the application's own handlers, instead of ending
+  the process.
+- The window repaints in full when SDL resets its render targets, and a
+  glyph-atlas reset no longer leaves continuous or transparent sessions
+  drawing blank text. A render device reset (Direct3D) makes the session's
+  textures again and repaints, where text and images went blank or corrupt;
+  it decodes as the new `EvRenderDeviceReset` of `NanoUI.Sdl.Internal.Input`.
+  A lost render device ends the session with an `IOError`.
+- Retained frames take the backbuffer's own size, so a fractional scale on
+  Wayland no longer draws a frame a pixel off and stretches it, which blurred
+  all text. The pixel density is rounded to the nearest 1/120, so a resize
+  no longer reloads the fonts at each step.
+- `setSdlUiScale` with NaN no longer asks for a frame on every call, which
+  kept the loop spinning.
 
 ### Removed
 

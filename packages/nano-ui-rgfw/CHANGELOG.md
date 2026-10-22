@@ -5,16 +5,30 @@
 ### Added
 
 - First release: `NanoUI.Backend.Rgfw` runs nano-ui views in a native window
-  through RGFW and OpenGL 3.2, with the bundled Cozette bitmap font. Builds
-  with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
+  through RGFW and OpenGL 3.2, with the bundled Cozette bitmap font, whose
+  MIT notice ships in `LICENSE-Cozette`. Builds with GHC 9.10 through 9.14
+  (`base >=4.20 && <4.23`). It imports `NanoUI.Internal` modules, so it
+  allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`). The runners throw an
+  `IOError` when the window or its OpenGL 3.2 context cannot be created.
+- Text of every size and face is laid out in the Cozette cell it is drawn
+  in: `fontSize` and `fontMono` change nothing under this backend. Only
+  widget text is drawn; text in a `drawing` or canvas, which includes
+  `richText`, Markdown and chart labels, does not appear.
 - Reducer runners take `model -> NanoUIE msg ()` from the `nano-ui-emit`
   package, so message types are checked statically.
+- `askRgfwDebug` reads the session's `RgfwDebugSnapshot` from a view
+  (`Nothing` outside an RGFW session, as SDL's `askSdlDebug`), and
+  `debugWindowBody` shows it. `CoreDebugSnapshot` and `RgfwFrameStats`, the
+  types of its `dbgCore` and `dbgFrame`, are exported with it. A custom loop
+  makes a sampler with `newRgfwDebugSampler` and installs it with
+  `withBackendSession` and `rgfwSession`, from `NanoUI.Rgfw.Internal.Debug`.
 - `optExplainLayout` opens a window with the layout overlay on, and
   `debugWindowBody` has a checkbox for it.
 - The middle mouse button, the side buttons as back and forward, and the
   misc buttons past them as `MouseOther 6` to `MouseOther 8`.
 - The pointer leaving the window moves it off every widget, so nothing stays
-  hovered.
+  hovered, unless a button is held: a drag keeps its pointer. The pointer
+  starts off the window until RGFW reports where it is.
 - Cursor shapes show RGFW's standard cursors or the nearest it has, the grab
   hands show the move arrows, and `UiCursorHidden` hides the pointer.
 - `optTheme`, `newRgfwContext` and `applyRgfwTheme` take a core `Theme`,
@@ -36,7 +50,9 @@
   typed text. Every key RGFW reports comes in as a `Key`, with its release
   and held state, and each auto-repeat of a held key as a press, which
   `inputKeysNew` leaves out. Losing the keyboard (RGFW's focus-out event)
-  lets go of the keys held.
+  lets go of the keys held. Typed text keeps format and private-use
+  characters, the Apple logo included, but for the range AppKit sends for its
+  arrow and function keys (U+F700 to U+F747).
 - A frame repaints only its damage. Frames draw into a retained offscreen
   framebuffer, which each present copies to the window, and a frame that is
   not forced, resized or rescaled paints and uploads only the widgets and

@@ -13,3 +13,5 @@
 - Widget adapters, UI lifting/scopes, typed frame and reducer runners, and
   reducer testing helpers.
 - Ordered per-frame messages survive rebuilds and are isolated on exceptions.
+- The library imports `NanoUI.Internal` modules, which change without
+  notice, so it allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`).

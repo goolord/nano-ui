@@ -33,4 +33,7 @@
   pass draws, not from its history, so keys that churn (a document redrawn
   under new keys) do not grow it. `markdownCacheSize` reports what it holds.
 - The example streams its reply with nano-ui's `useStream`, appending tokens
-  on the producer's thread.
+  on the producer's thread. The `sdl` flag that builds it is off by default,
+  so depending on the library needs neither nano-ui-sdl nor SDL3.
+- The library imports `NanoUI.Internal` modules, which change without
+  notice, so it allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`).
