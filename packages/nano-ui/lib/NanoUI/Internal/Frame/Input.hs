@@ -272,7 +272,8 @@ widgetHitRect ctx nt idx x y w h = case nt of
 -- it like any other click, and its group picks it on that frame. A release
 -- in its press's frame gets none: the view judged both against the layout
 -- the user saw, and the widget under the pointer now may be one that a
--- scroll or the click itself moved there.
+-- scroll or the click itself moved there. Nor does a widget that a modal
+-- opened since the press hides ('nodePastModals').
 --
 -- A release on the widget also sets its hover animation to 1, so it paints as
 -- fully hovered at once.
@@ -294,7 +295,8 @@ finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
                 nt <- getNodeType na idx
                 rect <- getNodeRect na idx
                 visible <- nodeClippedHit ctx idx rect mouse
-                when (visible && postsLayoutClick nt && releasedClicked /= active && not (pressedIn MouseLeft inp)) $
+                let posts = visible && postsLayoutClick nt && releasedClicked /= active && not (pressedIn MouseLeft inp)
+                whenM (pure posts <&&> nodePastModals ctx idx) $
                   unlessM (inUiClickHit ctx active mouse) $ do
                     writeIORef (ctxClickedId ctx) active
                     -- Covered: whatever the click changes is damaged on the

@@ -15,7 +15,28 @@ tests =
   , spec "release-moved-radio" runReleaseMovedRadioTest
   , spec "release-moved-tab" runReleaseMovedTabTest
   , spec "tap-clicks-once" runTapClicksOnceTest
+  , spec "release-behind-modal" runReleaseBehindModalTest
   ]
+
+-- | A modal that opens while a page button is held hides the button from
+-- the release: it is not clicked, that frame or the next.
+runReleaseBehindModalTest :: Context -> IORef Int -> IO ()
+runReleaseBehindModalTest ctx failed = do
+  open <- newVar False
+  clicks <- newIORef (0 :: Int)
+  let inp0 = withInput 320 240
+      ui = column $ do
+        r <- button' "Delete"
+        when (respClicked r) (liftIO (modifyIORef' clicks (+ 1)))
+        modal open "Error" (label "Something failed")
+        pure r
+  at <- centerOf <$> warmup2 ctx inp0 ui
+  _ <- runFrame ctx (pressAt inp0 at) ui
+  writeVarIO open True
+  _ <- runFrame ctx (holdAt inp0 at) ui
+  _ <- runFrame ctx (releaseAt (holdAt inp0 at)) ui
+  replicateM_ 2 (runFrame ctx inp0 {inputMousePos = at} ui)
+  assertEq failed 0 =<< readIORef clicks
 
 -- | A press and release in one frame (a tap, or a click while frames are
 -- slow) clicks the button the user saw under the pointer. The button the

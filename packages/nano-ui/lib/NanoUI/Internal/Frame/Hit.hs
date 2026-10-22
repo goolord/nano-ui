@@ -13,6 +13,7 @@ module NanoUI.Internal.Frame.Hit
   , widgetOverlayAllowed
   , widgetInModal
   , nodeOwnsPointer
+  , nodePastModals
   , nodePointVisible
   , nodeClippedHit
   , nodeInteractionHit
@@ -115,20 +116,24 @@ topmostFloating ctx wanted at =
 -- | Whether the frame routed the pointer to node @idx@, which decides whether
 -- its widget saw the pointer while the view ran. The route must be the node's
 -- layer: the key of the nearest floating panel at or above the node, or 0 for
--- the page. While a modal is open, the node must also be inside the top
--- modal. With no modal in the arena, one that was open on the previous frame
--- blocks every node, as it did while the view ran
--- ('NanoUI.Internal.Context.pointerBlockedByModal').
+-- the page. The modals must also leave the node reachable
+-- ('nodePastModals').
 nodeOwnsPointer :: Context -> NodeIdx -> IO Bool
 nodeOwnsPointer ctx@Context {ctxNodeArena = na} idx =
   getsInteraction ctx isPointerRoute >>= \case
     RouteLayer routed -> do
       layer <- layerOf idx
-      pure (layer == routed)
-        <&&> (maybe (not <$> modalActive ctx) (nodeInSubtree ctx idx) =<< topModalNode na)
+      pure (layer == routed) <&&> nodePastModals ctx idx
     _ -> pure False
  where
   layerOf i = maybe 0 intKey <$> walkFloatingAncestors na i (\j _ -> Just <$> getWidgetId na j)
+
+-- | Whether the modals leave node @idx@ to the pointer: always with no modal
+-- open, otherwise only inside the top modal. With no modal in the arena, one
+-- that was open on the previous frame blocks every node, as it did while the
+-- view ran ('NanoUI.Internal.Context.pointerBlockedByModal').
+nodePastModals :: Context -> NodeIdx -> IO Bool
+nodePastModals ctx idx = maybe (not <$> modalActive ctx) (nodeInSubtree ctx idx) =<< topModalNode (ctxNodeArena ctx)
 
 -- | Whether widget @wid@ is reachable past modals: always with no modal
 -- open, otherwise only inside the top modal. Only a reachable widget shows
