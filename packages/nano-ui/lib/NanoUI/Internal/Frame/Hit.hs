@@ -96,10 +96,19 @@ overlayHitRoot ctx@Context {ctxNodeArena = na} mouse = do
 -- | Whether the pointer can reach node @idx@ past the floating panels: every
 -- node can when the 'overlayHitRoot' is 'Nothing', otherwise only the nodes
 -- inside it and not inside another panel declared in it (a window in a
--- modal, painted under the modal).
+-- modal, painted under the modal). Strict in the index, which the per-node hit
+-- loops then pass unboxed: boxed, it cost every pointer node an allocation a
+-- frame.
 overlayHitAllowed :: Context -> Maybe NodeIdx -> NodeIdx -> IO Bool
-overlayHitAllowed ctx top idx =
-  maybe (pure True) (\t -> (== Just t) <$> walkFloatingAncestors (ctxNodeArena ctx) idx (\i _ -> pure (Just i))) top
+overlayHitAllowed ctx top !idx = maybe (pure True) (nodeInPanel ctx idx) top
+
+-- | Whether node @idx@ is floating panel @panel@ or inside it, and not inside
+-- another panel declared in it.
+nodeInPanel :: Context -> NodeIdx -> NodeIdx -> IO Bool
+nodeInPanel Context {ctxNodeArena = na} idx panel =
+  (== Just True) <$> walkAncestors na idx (\i -> if i == panel then pure (Just True) else stop <$> getNodeType na i)
+ where
+  stop nt = if isFloatingNode nt then Just False else Nothing
 
 -- | The window or popup on top at @mouse@. The frame paints every popup over
 -- every window, so a popup whose rect holds the point wins; among panels of

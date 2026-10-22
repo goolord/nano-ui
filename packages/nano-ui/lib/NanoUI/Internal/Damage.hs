@@ -545,8 +545,9 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
   -- behind an anchor this frame moved (a widget last had the anchor's rect
   -- and now has another), and nothing else may ask for the frame that
   -- catches it up.
-  let oldRects = pfRects (fsPrev snap)
-      newRects = pfRects new
+  -- Forced: 'ptrEq' on a selector thunk never matches.
+  let !oldRects = pfRects (fsPrev snap)
+      !newRects = pfRects new
       moved a = IM.foldrWithKey (\k r rest -> (r == a && IM.lookup k newRects /= Just a) || rest) False oldRects
       anchorMoved idx =
         getNodeType (ctxNodeArena ctx) idx >>= \case

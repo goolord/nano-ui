@@ -305,10 +305,15 @@ scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
         (field, bars) <- textAreaScrollGeom ctx idx
         pure (rectContains clip mouse && rectContains field mouse && (tabVertical bars || tabHorizontal bars))
   | isScrollNode nt =
-      -- The range the wheel moves: a table's frozen pane has none of its own.
       pure (rectContains clip mouse) <&&> takes <&&> do
-        wid <- getWidgetId na idx
-        maybe False (\(_, V2 rx ry) -> rx > 0 || ry > 0) <$> wheelAxesRange ctx wid
+        (_, _, V2 rx ry) <- scrollNodeGeometry ctx idx =<< getNodeRect na idx
+        -- Without a range of its own, the range the wheel moves: a table's
+        -- frozen pane has none, and its body, which shares its id, does.
+        if rx > 0 || ry > 0
+          then pure True
+          else do
+            wid <- getWidgetId na idx
+            maybe False (\(_, V2 wx wy) -> wx > 0 || wy > 0) <$> wheelAxesRange ctx wid
   | otherwise = pure False
  where
   takes = not <$> passesPointer na idx
