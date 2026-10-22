@@ -994,9 +994,9 @@ runTextAreaRemountScrollTest ctx failed = do
     dmg <- takeDamage ctx
     assert failed (not (damageIsEmpty dmg))
 
--- | Ctrl+Z and Ctrl+Shift+Z undo and redo typing in a field; commands run from
--- outside the frame edit it and pulse 'respChanged'; replacing the value the
--- field is passed clears its history.
+-- | Ctrl+Z and Ctrl+Shift+Z (Command on macOS) undo and redo typing in a
+-- field; commands run from outside the frame edit it and pulse
+-- 'respChanged'; replacing the value the field is passed clears its history.
 runTextUndoTest :: Context -> IORef Int -> IO ()
 runTextUndoTest ctx failed = do
   ref <- newVar ""
@@ -1022,7 +1022,7 @@ runTextUndoTest ctx failed = do
   assertEq failed "red " =<< readVarIO ref
   _ <- frame (chordInp (cmdOrCtrl <> key 'z') inp)
   assertEq failed "" =<< readVarIO ref
-  _ <- frame (chordInp (ctrl <> shift <> key 'z') inp)
+  _ <- frame (chordInp (cmdOrCtrl <> shift <> key 'z') inp)
   assertEq failed "red " =<< readVarIO ref
   _ <- frame (chordInp (cmdOrCtrl <> key 'y') inp)
   assertEq failed "red fox" =<< readVarIO ref
