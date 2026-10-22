@@ -380,12 +380,14 @@ withSdl opts = withSdlWindow hints (windowFlags opts) opts
       -- scale-2 (or fractional) output that the compositor upscales, so
       -- text looks blurred. Native Wayland with
       -- SDL_WINDOW_HIGH_PIXEL_DENSITY rasterizes at the real output scale.
-      -- An explicit SDL_VIDEO_DRIVER wins, and pure X11 sessions are left
-      -- alone.
+      -- X11 follows in the list, for an SDL that cannot start Wayland (built
+      -- without it, or the compositor out of reach) where XWayland runs: a
+      -- driver named alone is the only one SDL tries. An explicit
+      -- SDL_VIDEO_DRIVER wins, and pure X11 sessions are left alone.
       wayland <- lookupEnv "WAYLAND_DISPLAY"
       driver <- lookupEnv "SDL_VIDEO_DRIVER"
       when (isJust wayland && isNothing driver) $
-        setSdlHint sDL_HINT_VIDEO_DRIVER "wayland"
+        setSdlHint sDL_HINT_VIDEO_DRIVER "wayland,x11"
 
 -- | 'withSdl' for measurements: a hidden 800x600 window, bundled fonts,
 -- scale 1, continuous drawing, and no vsync. The window is hidden only: on
