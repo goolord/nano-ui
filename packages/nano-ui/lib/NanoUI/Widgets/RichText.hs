@@ -26,6 +26,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Primitive.PrimArray (indexPrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -33,7 +34,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Host qualified as Host
 import NanoUI.Internal.RichText.Types
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
-import NanoUI.Internal.Font (FontMetrics (..), prepareFontMetrics, selectionSpans, textIndexAtX)
+import NanoUI.Internal.Font (FontMetrics (..), ShapedText (..), prepareFontMetrics, selectionSpans, textIndexAtX)
 import NanoUI.Internal.Font qualified as Font
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id (WidgetId)
@@ -403,7 +404,7 @@ selectionOps :: Float -> Float -> Line -> Int -> Int -> Color -> [DrawOp]
 selectionOps x0 y0 line lo hi color = concatMap drawToken (lineTokens line)
   where
     drawToken (x, tok) =
-      let Token txt _ _ _ start fm = tok
+      let Token txt _ kind w start fm = tok
           end = start + T.length txt
           a = max lo start
           b = min hi end
@@ -413,7 +414,10 @@ selectionOps x0 y0 line lo hi color = concatMap drawToken (lineTokens line)
               [ FillRect
                   (Rect (x0 + x + sx) (y0 + lineTop line) (ex - sx) (lineHeight line))
                   color
-              | (sx, ex) <- selectionSpans fm txt (a - start) (b - start)
+              | (sx, ex) <-
+                  -- A token that may break anywhere is one cluster, as wide
+                  -- as the shaped line draws it.
+                  if kind == Glyph || kind == GlyphSpace then [(0, w)] else selectionSpans fm txt (a - start) (b - start)
               ]
 
 -- | The position under a point, and its document offset.
@@ -446,7 +450,11 @@ tokenIndexAtX line x = go (lineTokens line)
       | otherwise = go rest
     indexWithin tokenX tok =
       let txt = tokenText tok
-       in tokenStart tok + textIndexAtX (tokenMetrics tok) txt (x - tokenX)
+          kind = tokenKind tok
+       in tokenStart tok
+            + if kind == Glyph || kind == GlyphSpace
+              then (if x - tokenX < tokenWidth tok / 2 then 0 else T.length txt)
+              else textIndexAtX (tokenMetrics tok) txt (x - tokenX)
 
 cursorOffset :: Text -> TB.Cursor -> Int
 cursorOffset txt (TB.Cursor row col) =
@@ -507,7 +515,11 @@ measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
         | anywhere = clusters txt
         | otherwise = T.groupBy (\a b -> kindOf False a == kindOf False b && kindOf False a /= Break) txt
   wholeMetrics <- if anywhere then prepareFontMetrics fm txt else pure fm
-  tokens <- reverse . snd <$> foldM (measure fm anywhere wholeMetrics) (start, []) parts
+  -- A cluster is as wide as its share of the shaped piece, as the line
+  -- holding it is drawn: alone it would miss the kerning, the fallback font
+  -- and a mark drawn over the letter before it.
+  let carets = if anywhere then stCarets <$> fmShape wholeMetrics txt else Nothing
+  tokens <- reverse . snd <$> foldM (measure fm anywhere wholeMetrics carets) (start, []) parts
   pure (Run font color (fmLineHeight fm) (fmAscent fm) target bg, tokens)
   where
     kindOf anywhere c
@@ -516,10 +528,13 @@ measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
       | anywhere = Glyph
       | c == ' ' || c == '\t' = Space
       | otherwise = Word
-    measure fm anywhere wholeMetrics (at, acc) part = do
+    measure fm anywhere wholeMetrics carets (at, acc) part = do
       let kind = kindOf anywhere (T.head part)
       prepared <- if anywhere then pure wholeMetrics else prepareFontMetrics fm part
-      let w = if kind == Break then 0 else Font.lineWidth prepared part
+      let w = case carets of
+            _ | kind == Break -> 0
+            Just cs -> abs (indexPrimArray cs (at - start + T.length part) - indexPrimArray cs (at - start))
+            Nothing -> Font.lineWidth prepared part
           token = Token part i kind w at prepared
       pure (at + T.length part, token : acc)
 

@@ -4,7 +4,9 @@ import Spec
 import Control.Exception (evaluate)
 import Data.Foldable (toList)
 import Data.IntMap.Strict qualified as IM
-import Data.List (groupBy)
+import Data.List (groupBy, sortOn)
+import Data.Maybe (listToMaybe)
+import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), DrawingCacheState (..), hoverZoneCrossed, intKey, lookupCustomDrawing)
 import NanoUI.Internal.Context.Types (CustomDrawOpCacheEntry (..))
@@ -29,6 +31,7 @@ tests =
   , spec "rich-text-selection-focus" runSelectionFocusTest
   , spec "rich-text-break-policy" runTextBreakTest
   , spec "rich-text-break-anywhere-newline" runBreakAnywhereNewlineTest
+  , spec "rich-text-break-anywhere-shaped" runBreakAnywhereShapedTest
   , spec "rich-text-leading-spaces" runLeadingSpacesTest
   ]
 
@@ -90,6 +93,30 @@ runTextBreakTest ctx failed = do
   flags <- heightOf (breakAnywhere . fixedW (1.5 * advFlag)) [inlineText (T.replicate 3 flag)]
   lineFlag <- heightOf id [inlineText flag]
   assertEq failed (3 * lineFlag) flags
+
+-- | 'breakAnywhere' places each character where the shaper put it, as the
+-- line is drawn: a wide character the font falls back for, and an accent set
+-- over its letter. Selecting it all highlights the line without a gap.
+runBreakAnywhereShapedTest :: Context -> IORef Int -> IO ()
+runBreakAnywhereShapedTest base failed = do
+  let txt = "a\x65E5\&e\x0301\&b"
+      fm = monospaceMetrics 10
+      shaped = ShapedText 47 47 (primArrayFromList [0, 10, 27, 32, 37, 47])
+      prepare t = pure fm {fmShape = \t' -> if t' == t && t == txt then Just shaped else Nothing}
+      inp = withInputOff 400 400
+      ui = column (fst <$> selectableRichTextWith' breakAnywhere [inlineText txt])
+  ctx <- evaluate (withFontMetrics base fm {fmBackend = Just (FontBackend prepare (const (pure Nothing)))})
+  theme <- readIORef (ctxTheme ctx)
+  resp <- warmup2 ctx inp ui
+  let Rect rx _ rw _ = respRect resp
+  assertEq failed 47 rw
+  writeIORef (ctxFocusId ctx) (respId resp)
+  _ <- evalUi ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
+  ops <- drawnOps ctx resp
+  let spans = sortOn fst [(x - rx, x - rx + w) | FillRect (Rect x _ w _) c <- ops, c == themeSelection theme]
+  assertEq failed (Just 0) (fst <$> listToMaybe spans)
+  assertEq failed 47 (maximum (0 : map snd spans))
+  assert failed (and (zipWith (\(_, e) (s, _) -> s <= e + 0.01) spans (drop 1 spans)))
 
 -- | A newline breaks a 'breakAnywhere' line whatever joiner or mark is
 -- beside it, and every other character is still drawn.
