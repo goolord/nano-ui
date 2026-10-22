@@ -3,7 +3,6 @@ module Cases.LayoutFlow (tests) where
 import Spec
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.List (findIndex)
-import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (GeomCol, StyleCol, TagCol, TreeCol, geomStride, getClipRect, styleStride, tagStride, treeStride)
@@ -620,15 +619,13 @@ runFixedWidthLabelTest ctx failed = do
         labelWith (\l -> l {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap"
   _ <- warmup2 ctx input0 ui
   rs <- arenaRects ctx
-  lns <- (\spans -> [t | (_, t, _, _, _) <- spans, t `notElem` ["Name", "Go"]]) <$> collectTextSpans ctx
   case rs of
     [_, line, name, go, wrapped] -> do
       assertEq failed (rectW name) 100
       assert failed (rectX go >= rectX name + rectW name)
       assertEq failed (rectX line + rectW line) (rectX go + rectW go)
       assertEq failed (rectW wrapped) 100
-      assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
-      forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
+      assertPaintedLines failed ctx ["Name", "Go"] wrapped
     _ -> assertEq failed (length rs) 5
 
 -- | A label fixed narrower than its minimum width wraps at that minimum when
@@ -640,11 +637,10 @@ runFixedLabelOutsideLimitsTest ctx failed = do
         label "after"
   _ <- warmup2 ctx input0 ui
   rs <- arenaRects ctx
-  lns <- (\spans -> [t | (_, t, _, _, _) <- spans, t /= "after"]) <$> collectTextSpans ctx
   case rs of
     [_, col, wrapped, after] -> do
       assertEq failed 200 (rectW wrapped)
-      assertEq failed (12 * fromIntegral (length lns)) (rectH wrapped)
+      assertPaintedLines failed ctx ["after"] wrapped
       assertEq failed (rectY col + rectH col) (rectY after + rectH after)
     _ -> assertEq failed 4 (length rs)
 
@@ -685,13 +681,11 @@ runPercentAcrossTest ctx failed = do
           box (\l -> l {layoutWidth = Fixed 10, layoutHeight = Percent 50}) red
   _ <- warmup2 ctx input0 ui
   rs <- arenaRects ctx
-  lns <- (\spans -> [t | (_, t, _, _, _) <- spans]) <$> collectTextSpans ctx
   case rs of
     [_, _, box1, wrapped, _, cell, _, _, rowBox] -> do
       assertEq failed (rectX box1, rectW box1) (200, 200)
       assertEq failed (rectW wrapped) 200
-      assertEq failed (rectH wrapped) (12 * fromIntegral (length lns))
-      forM_ lns $ \t -> assert failed (12 * fromIntegral (T.length t) <= rectW wrapped)
+      assertPaintedLines failed ctx [] wrapped
       assertEq failed (rectW cell) 100
       assertEq failed (rectH rowBox) 20
     _ -> assertEq failed (length rs) 9

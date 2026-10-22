@@ -51,8 +51,6 @@ runGridWrappedRowHeightTest ctx failed = do
   forM_ [240, 600, 180, 240, 240] $ \width -> do
     _ <- runFrame ctx (withInput 800 1200) (ui width)
     rs <- arenaRects ctx
-    spans <- collectTextSpans ctx
-    let wrappedLines = [t | (_, t, _, _, _) <- spans, t `notElem` ["short", "next", "after"]]
     case rs of
       [_, gridRect, short, wrapped, next, after] -> do
         assert failed (rectH wrapped > rectH after)
@@ -60,11 +58,7 @@ runGridWrappedRowHeightTest ctx failed = do
         assert failed (rectY next >= rectY wrapped + rectH wrapped)
         assert failed (rectY after >= rectY next + rectH next)
         assertEq failed (rectY gridRect + rectH gridRect) (rectY next + rectH next)
-        -- Paint wraps the text where the solve did: in as many lines as its
-        -- cell is tall, none wider than the cell. The test font's glyphs
-        -- are as wide as a line is tall.
-        assertEq failed (rectH wrapped) (rectH after * fromIntegral (length wrappedLines))
-        forM_ wrappedLines $ \t -> assert failed (fromIntegral (T.length t) * rectH after <= rectW wrapped)
+        assertPaintedLines failed ctx ["short", "next", "after"] wrapped
       _ -> assertEq failed (length rs) 6
 
 -- | Text placed wider than the scroller it measured against, in a 2D
@@ -78,12 +72,10 @@ runWideScrollTextHeightTest ctx failed = do
         label "after"
   _ <- warmup2 ctx (withInput 1000 400) ui
   rs <- arenaRects ctx
-  spans <- collectTextSpans ctx
-  let textLines = [t | (_, t, _, _, _) <- spans, t /= "after"]
   case rs of
-    [_, _, wide, after] -> do
+    [_, _, wide, _] -> do
       assert failed (rectW wide > 300)
-      assertEq failed (rectH after * fromIntegral (length textLines)) (rectH wide)
+      assertPaintedLines failed ctx ["after"] wide
     _ -> assertEq failed 4 (length rs)
 
 -- | A fill-width grid inside a column is as tall as its rows, not as all of

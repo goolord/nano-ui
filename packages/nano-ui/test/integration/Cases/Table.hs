@@ -256,9 +256,7 @@ runTableFrozenWheelTest ctx failed = do
   _ <- warmup2 ctx input ui
   hdrs <- headerButtonRects ctx
   assertJust failed (listToMaybe hdrs) $ \(Rect fx fy fw fh) -> do
-    let over = input {inputMousePos = V2 (fx + fw / 2) (fy + fh + 10)}
-    warmup ctx over ui
-    _ <- runFrame ctx over {inputScroll = V2 1 0} ui
+    hoverWheel ctx input ui (V2 (fx + fw / 2) (fy + fh + 10)) (V2 1 0)
     V2 offX _ <- bodyOffset ctx
     assertGt failed offX 0
 
@@ -746,10 +744,7 @@ runTableSharedScrollMetricsTest ctx failed = do
 -- container the arena holds that another scroll container repeats.
 tableBodyScrollWid :: Context -> IO (Maybe WidgetId)
 tableBodyScrollWid ctx = do
-  let na = ctxNodeArena ctx
-  wids <- reverse <$> foldNodesM na (\acc i -> do
-    nt <- getNodeType na i
-    if nt == NodeScrollContainer then (: acc) <$> getWidgetId na i else pure acc) []
+  wids <- map fst <$> nodesOfType NodeScrollContainer ctx
   pure (listToMaybe [w | w : rest <- tails wids, w `elem` rest])
 
 

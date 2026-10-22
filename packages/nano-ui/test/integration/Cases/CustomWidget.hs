@@ -277,8 +277,7 @@ runKnobCoveredTest ctx failed = do
         readVarIO valueRef
       wheelAt p = do
         writeVarIO valueRef 50
-        warmup ctx inp0 {inputMousePos = p} ui
-        _ <- runFrame ctx inp0 {inputMousePos = p, inputScroll = V2 0 3} ui
+        hoverWheel ctx inp0 ui p (V2 0 3)
         readVarIO valueRef
   (k0, _) <- warmup2 ctx inp0 ui
   let Rect kx ky _ kh = respRect k0
