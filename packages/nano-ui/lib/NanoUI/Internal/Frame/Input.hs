@@ -50,7 +50,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
-import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains)
+import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains, rectFullyInside)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Shortcut (focusTakesChord)
 
@@ -74,9 +74,36 @@ finalizeTabFocus ctx inp =
       when (next /= cur) (blurFocus ctx cur)
       writeIORef (ctxFocusId ctx) next
       writeIORef (ctxFocusVisible ctx) True
+      revealWidget ctx next
       markDirty ctx
   where
     claimed kind = focusTakesChord kind (inputModifiers inp) KeyTab
+
+-- | Scroll each scroller around widget @wid@, innermost first, just far
+-- enough to show it whole ('ScrollNearest'), as when Tab moves focus there.
+-- Reads this frame's placed rects and the metrics the offset pass published,
+-- so the scroll shows on the next frame.
+revealWidget :: Context -> WidgetId -> IO ()
+revealWidget ctx@Context {ctxNodeArena = na} wid =
+  withWidgetNode ctx wid () $ \idx -> do
+    r <- getNodeRect na idx
+    getParent na idx >>= reveal r
+  where
+    reveal r@(Rect rx ry rw rh) i = when (i >= 0) $ do
+      nt <- getNodeType na i
+      -- A floating panel does not move with the scrollers it is declared in.
+      unless (isFloatingNode nt) $ do
+        sid <- getWidgetId na i
+        metrics <- if isScrollNode nt then readScrollMetrics ctx sid else pure Nothing
+        r' <- case metrics of
+          Just ScrollMetrics {scrollViewport = view@(Rect vx vy _ _), scrollOffset = V2 ox oy}
+            | not (rectFullyInside r view) -> do
+                scrollRectIntoView ctx sid (Rect (rx - vx + ox) (ry - vy + oy) rw rh) ScrollNearest ScrollInstant
+                -- An outer scroller shows the widget where this one moved it.
+                V2 nx ny <- maybe (V2 ox oy) scrollOffset <$> readScrollMetrics ctx sid
+                pure (Rect (rx + ox - nx) (ry + oy - ny) rw rh)
+          _ -> pure r
+        getParent na i >>= reveal r'
 
 -- | Where Tab moves focus from @cur@ (backwards when @back@), stepping
 -- through 'tabStops' and wrapping at both ends. @WidgetId 0@ if there are
@@ -419,7 +446,9 @@ finalizeFocusRequest ctx =
       blurFocus ctx prev
       -- The damage pass repaints both widgets, since the focused id moved.
       writeIORef (ctxFocusId ctx) wid
-      when (hashWidgetId wid /= 0) $ writeIORef (ctxFocusVisible ctx) True
+      when (hashWidgetId wid /= 0) $ do
+        writeIORef (ctxFocusVisible ctx) True
+        revealWidget ctx wid
       markDirty ctx)
 
 -- | What moving focus off @prev@ does, as a press elsewhere would: the old

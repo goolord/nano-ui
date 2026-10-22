@@ -27,6 +27,7 @@ tests =
   , spec "focus-tab-closes-menus" runFocusTabClosesMenusTest
   , spec "focus-back-tab-from-none" runFocusBackTabFromNoneTest
   , spec "focus-tab-claimed" runFocusTabClaimedTest
+  , spec "focus-reveals" runFocusRevealsTest
   , spec "focus-next-previous" runFocusNextPreviousTest
   , spec "focus-clear-release" runFocusClearReleaseTest
   , spec "focus-text-command" runFocusTextCommandTest
@@ -274,6 +275,43 @@ runFocusBackTabFromNoneTest ctx failed = do
   [_, _, c] <- warmup2 ctx inp ui
   _ <- runFrame ctx (chordInp (shift <> key KeyTab) inp) ui
   assertEq failed c =<< getFocusId ctx
+
+-- | Tab, Shift+Tab and a focus request scroll the widget they focus into
+-- its scroller's view, from below the fold, back up when Tab wraps, and
+-- from above. Around nested scrollers, the outer one shows the widget where
+-- the inner one moved it.
+runFocusRevealsTest :: Context -> IORef Int -> IO ()
+runFocusRevealsTest ctx failed = do
+  target <- newIORef Nothing
+  let buttons = scrollArea (fixedH 100 . fillW) (column (mapM (fmap respId . button' . T.singleton) ['A' .. 'J']))
+      ui = do
+        mapM_ requestFocus =<< liftIO (readIORef target)
+        buttons
+      showsIn c sid = do
+        rect <- getPrevRect c =<< getFocusId c
+        metrics <- getScrollMetrics c sid
+        pure $ case (rect, scrollViewport <$> metrics) of
+          (Just (Rect _ y _ h), Just (Rect _ vy _ vh)) -> y >= vy - 0.5 && y + h <= vy + vh + 0.5
+          _ -> False
+      shown = do
+        writeIORef target Nothing
+        (sid, _) <- evalUi ctx inp ui
+        showsIn ctx sid
+  nested <- newContext
+  let filler = columnWith (fixedH 150 . fillW) (pure ())
+      outerUi = scrollArea (fixedH 120 . fillW) (column (filler *> buttons <* filler <* filler))
+  _ <- warmup2 nested inp outerUi
+  replicateM_ 10 (runFrame nested (tabInp inp) outerUi)
+  (outer, (inner, _)) <- evalUi nested inp outerUi
+  assert failed =<< ((&&) <$> showsIn nested outer <*> showsIn nested inner)
+  (_, ids) <- warmup2 ctx inp ui
+  forM_ [1 .. 11 :: Int] $ \i -> runFrame ctx (tabInp inp) ui >> (assertEq failed (i, True) . (i,) =<< shown)
+  _ <- runFrame ctx (chordInp (shift <> key KeyTab) inp) ui
+  assert failed =<< shown
+  writeIORef target (Just (ids !! 4))
+  _ <- runFrame ctx inp ui
+  assertEq failed (ids !! 4) =<< getFocusId ctx
+  assert failed =<< shown
 
 -- | A focused custom widget that claims Tab ('KeysAll', or 'KeysOnly'
 -- naming the chord) reads it and keeps focus; one claiming other keys lets
