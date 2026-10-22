@@ -119,7 +119,9 @@ main = do
   setDrawReuse ctx0 False
   withSdlBench ctx0 $ \ctx sdlEnv -> do
     (ctx', inp) <- syncDisplay ctx sdlEnv benchInput
-    warmup ctx' sdlEnv inp
+    replicateM_ 2 $ do
+      void (runFrame ctx' inp mediumUi)
+      void (sdlDrawFrame ctx' mediumUi sdlEnv inp False)
     glyphLookupGate ctx'
     configureBenchIO
     defaultMain
@@ -136,13 +138,6 @@ main = do
           , benchDraw ctx' sdlEnv inp largeUi "large"
           ]
       ]
-
-warmup :: Context -> SdlEnv -> Input -> IO ()
-warmup ctx sdlEnv inp = do
-  void (runFrame ctx inp mediumUi)
-  void (sdlDrawFrame ctx mediumUi sdlEnv inp False)
-  void (runFrame ctx inp mediumUi)
-  void (sdlDrawFrame ctx mediumUi sdlEnv inp False)
 
 benchRunFrame :: Context -> Input -> NanoUI () -> String -> Benchmark
 benchRunFrame ctx inp ui name =
