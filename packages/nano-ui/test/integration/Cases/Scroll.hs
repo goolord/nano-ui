@@ -46,6 +46,7 @@ tests =
   , pixelSpec "scroll-smooth" runScrollSmoothTest
   , pixelSpec "scroll-metrics" runScrollMetricsTest
   , pixelSpec "scroll-into-view" runScrollIntoViewTest
+  , pixelSpec "scroll-into-view-wheel" runScrollIntoViewWheelTest
   , pixelSpec "scroll-glide-clamp" runScrollGlideClampTest
   , spec "scroll-disjoint-viewport-hit" runDisjointViewportHitTest
   , spec "scroll-disjoint-viewport-layers" runDisjointViewportLayersTest
@@ -757,6 +758,32 @@ runScrollIntoViewTest ctx failed = do
       _ <- runFrame ctx inp0 ui
       off <- getScrollOffset ctx sid
       assert failed (abs (off - rowH * 8) < 1.5)
+
+-- | A view that scrolls a row into view on a frame the wheel already moved
+-- lands it where asked: the last frame's rects go with the offset they were
+-- placed at, not with the one the wheel left.
+runScrollIntoViewWheelTest :: Context -> IORef Int -> IO ()
+runScrollIntoViewWheelTest ctx failed = do
+  setScrollTuning ctx defaultScrollTuning {scrollSmoothTime = 0}
+  jump <- newIORef False
+  let inp0 = withInput 200 160
+      ui = do
+        (sid, rows) <-
+          scrollArea (fillW . fixedH 80) $
+            column (forM [1 .. 16 :: Int] (\i -> label' (T.pack ("line " <> show i))))
+        go <- liftIO (readIORef jump)
+        when go $ liftIO (scrollIntoView ctx sid (respId (rows !! 11)) ScrollStart ScrollInstant)
+        pure (sid, rows)
+  (sid, rows) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx sid) $ \r -> do
+    writeIORef jump True
+    _ <- runFrame ctx inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1} ui
+    writeIORef jump False
+    _ <- runFrame ctx inp0 ui
+    mAfter <- getScrollMetrics ctx sid
+    mRow <- getPrevRect ctx (respId (rows !! 11))
+    assertJust failed ((,) <$> mAfter <*> mRow) $ \(m, rr) ->
+      assert failed (abs (rectY rr - rectY (scrollViewport m)) < 1.5)
 
 -- Content that shrinks under a glide pulls the glide back with it: the
 -- scroller must not coast to an offset the shorter content cannot reach and

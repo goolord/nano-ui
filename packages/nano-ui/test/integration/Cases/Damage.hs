@@ -40,6 +40,7 @@ tests =
   , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
   , spec "slider-label-shrink-damage" runSliderLabelShrinkDamageTest
   , spec "scrolled-popup-shadow-damage" runScrolledPopupShadowDamageTest
+  , spec "scrolled-nested-popup-damage" runScrolledNestedPopupDamageTest
   , spec "off-window-damage-ignored" runOffWindowDamageTest
   , spec "empty-damage-paints-nothing" runEmptyDamagePaintTest
   ]
@@ -95,6 +96,30 @@ runScrolledPopupShadowDamageTest ctx failed = do
     forM_ before $ \(Rect x y w h) -> do
       let shadow = Rect (x + 3) (y + 3) w h
       assert failed (clipCovers dmg shadow && (null pieces || any (`covers` shadow) pieces))
+
+-- | That frame stays a scroll with a scroller nested in the page, whose
+-- viewport moves with it: it repaints a clip, not the whole window.
+runScrolledNestedPopupDamageTest :: Context -> IORef Int -> IO ()
+runScrolledNestedPopupDamageTest ctx failed = do
+  let inp = withInputOff 640 400
+      rows = mapM_ (\i -> label (T.pack ("row " <> show (i :: Int))))
+      ui = do
+        (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
+          _ <- scrollArea (fillW . fixedH 40) (rows [1 .. 6])
+          anchor <- labelWith' fillW "anchor"
+          rows [7 .. 30]
+          pure anchor
+        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
+        pure sc
+  sc <- warmup2 ctx inp ui
+  assertJustM failed (getPrevRect ctx sc) $ \r -> do
+    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 120), inputScroll = V2 0 1}
+    _ <- runFrame ctx wheel ui
+    before <- floatingPanelRects ctx
+    _ <- runFrame ctx wheel ui
+    after <- floatingPanelRects ctx
+    assert failed (before /= after)
+    assert failed . (/= DamageFull) =<< takeDamage ctx
 
 -- | Damage wholly off the window adds nothing to a frame's clip: it does not
 -- stretch the clip of a label that changed far from it.

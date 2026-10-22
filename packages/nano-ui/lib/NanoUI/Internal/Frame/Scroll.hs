@@ -103,6 +103,7 @@ transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip 
           ScrollAxisX -> (ox, 0)
           ScrollAxisXY -> (ox, oy)
       when (owner && held /= cur) $ setScrollOffsetIn ctx wid axes held
+      when owner $ placeScrollContent ctx wid dx dy
       descend (sx - dx) (sy - dy)
     else descend sx sy
 
