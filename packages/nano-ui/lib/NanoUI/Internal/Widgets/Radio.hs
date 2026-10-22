@@ -13,7 +13,7 @@ where
 import Control.Monad (void, zipWithM)
 import Data.Foldable (toList)
 import Data.List (findIndex)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (adoptSlot, registerFocusable)
@@ -29,7 +29,7 @@ import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Combinators (finishInput, withBoundedIndex)
 import NanoUI.Internal.Widgets.Layout (column')
-import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
+import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, setChanged, tagContainer)
 
 radioLay :: Layout
 radioLay = tight (fillW defaultLayout)
@@ -76,13 +76,18 @@ radioCore options index =
     column' radioGroupLay $ do
       tagContainer gid
       resps <- zipWithM option [0 ..] opts
-      let final = fromMaybe selNav (findIndex rawRespClicked resps)
+      let clicked = findIndex rawRespClicked resps
+          final = fromMaybe selNav clicked
       liftIO (moveSelection ctx selNav final (zip [0 ..] resps))
       -- Compare with the caller's index, as 'NanoUI.Internal.Widgets.Select' does, so a
       -- selection stored between frames still reports a change. An index the
-      -- options do not reach yet stays the caller's until the user moves it.
-      fmap (\s -> if s == given then index else s)
-        <$> finishInput fieldInt ctx gid given (mconcat resps) final
+      -- options do not reach yet stays the caller's until the user picks,
+      -- even the option it shows.
+      (resp, s) <- finishInput fieldInt ctx gid given (mconcat resps) final
+      pure $
+        if isNothing clicked && navDelta == 0 && s == given
+          then (resp, index)
+          else (setChanged (s /= index) resp, s)
 
 -- | Radio buttons for every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedRadio #-}

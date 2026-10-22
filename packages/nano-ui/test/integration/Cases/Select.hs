@@ -21,6 +21,8 @@ tests =
   , spec "select-keys-after-focus-moves" runSelectKeysAfterFocusMovesTest
   , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
   , spec "choices-keep-unreached-index" runChoicesKeepUnreachedIndexTest
+  , spec "choices-adopt-shown-pick" runChoicesAdoptShownPickTest
+  , spec "select-end-adopts-shown" runSelectEndAdoptsShownTest
   , spec "tree-select" runTreeSelectTest
   , spec "tree-keyboard" runTreeKeyboardTest
   , spec "tree-late-items-expanded" runTreeLateItemsExpandedTest
@@ -289,6 +291,41 @@ runChoicesKeepUnreachedIndexTest ctx failed = do
   assertEq failed [2, 2, 2] =<< mapM readVarIO refs
   -- The radio's options, then the tree's rows.
   assertEq failed [0, 0, 1, 0, 0, 1] =<< buttonValues ctx
+
+-- | Picking the option an unreached index shows is still a pick: the
+-- select, the radio group and the tree each hand that option back.
+runChoicesAdoptShownPickTest :: Context -> IORef Int -> IO ()
+runChoicesAdoptShownPickTest ctx failed = do
+  selRef <- newVar 5
+  radioRef <- newVar 5
+  treeRef <- newVar 5
+  let inp0 = withInput 320 400
+      ui = column $ do
+        resp <- select' ["Low", "Medium", "High"] selRef
+        radio ["One", "Two", "Three"] radioRef
+        tree "t" [TreeItem o [] | o <- ["Red", "Green", "Blue"]] treeRef
+        pure resp
+  resp <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  forM_ ["Three", "Blue"] $ \lbl ->
+    assertJust failed (spanRectOf lbl spans) (void . runClick ctx inp0 ui . spanCenter)
+  let open = snd (clickPair inp0 (centerOf resp))
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  overlays <- collectOverlayTextSpans ctx open
+  assertJust failed (spanRectOf "High" overlays) (void . runClick ctx open ui . spanCenter)
+  assertEq failed [2, 2, 2] =<< mapM readVarIO [selRef, radioRef, treeRef]
+
+-- | End on a select whose index its options do not reach picks the last
+-- option, the one it shows, and reports the change.
+runSelectEndAdoptsShownTest :: Context -> IORef Int -> IO ()
+runSelectEndAdoptsShownTest ctx failed = do
+  selRef <- newVar 5
+  let inp0 = withInput 320 200
+      ui = column (select' ["Low", "Medium", "High"] selRef)
+  warmupFocused ctx inp0 ui
+  _ <- runFrame ctx (keyInp KeyEnd inp0) ui
+  assert failed . respChanged =<< evalUi ctx inp0 ui
+  assertEq failed 2 =<< readVarIO selRef
 
 runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do

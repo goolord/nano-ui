@@ -25,7 +25,7 @@ import NanoUI.Internal.WidgetText (treeEncodeStyle)
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (columnWith)
-import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, tagContainer)
+import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, moveSelection, setChanged, tagContainer)
 
 subtreeSize :: TreeItem -> Int
 subtreeSize item = 1 + forestSize (treeItemChildren item)
@@ -162,17 +162,24 @@ treeCore key inputItems index =
           [0 ..]
           (toList rows)
       let resps = smallArrayFromList (map fst results)
-          (clickSel, clickExp) = fromMaybe (selected, expandedSet) (asum (map snd results))
+          clicked = asum (map snd results)
+          (clickSel, clickExp) = fromMaybe (selected, expandedSet) clicked
       focus <- focusedWidget
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus clickSel clickExp
+          -- A click on a row picks it, and one on a chevron only expands; the
+          -- arrow keys pick the row they move focus to.
+          picked = isJust mFocus || maybe False ((== expandedSet) . snd) clicked
       liftIO (moveSelection ctx selected keySel [(i, r) | ((i, _, _, _), (r, _)) <- zip (toList rows) results])
-      result <- finishInput fieldInt ctx groupId selected (fold resps) keySel
+      (resp, s) <- finishInput fieldInt ctx groupId selected (fold resps) keySel
       -- Items that arrive after a first frame without parents start expanded
       -- too: nothing is stored until there is something to expand.
       when (isJust storedExp || not (IS.null keyExp)) $
         liftIO (writeSlots ctx (slotWrite fieldIntSet groupKey keyExp))
       mapM_ (liftIO . writeIORef (ctxFocusId ctx)) mFocus
       -- An index the items do not reach yet stays the caller's until the
-      -- user moves the selection.
-      pure (fmap (\s -> if s == clamped then index else s) result)
+      -- user picks a row, even the one it shows.
+      pure $
+        if not picked && s == clamped
+          then (resp, index)
+          else (setChanged (s /= index) resp, s)

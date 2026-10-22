@@ -107,7 +107,7 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
           , ddPicked =
               if combo
                 then slotInt SlotComboHighlight (-1) - window
-                else findSlot fieldInt 0 key store
+                else clamp 0 (nOpts - 1) (findSlot fieldInt 0 key store)
           , ddComboScrollX = scrollX
           , ddComboGeom = comboScrollGeom rect rows nOpts window scrollX contentW
           , ddComboDrag = slotInt SlotComboDrag 0
@@ -253,13 +253,16 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
           else do
             n <- length <$> getOptions na idx
             when (n > 0) $ do
+              -- The stored index can be one the options do not reach; they
+              -- show it clamped, and a key that lands there still picks.
               let key = intKey wid
-                  cur = findSlot fieldInt 0 key store
+                  stored = findSlot fieldInt 0 key store
+                  cur = clamp 0 (n - 1) stored
                   next
                     | wantFirst = 0
                     | wantLast = n - 1
                     | otherwise = clamp 0 (n - 1) (cur + if wantNext then 1 else -1)
-              when (next /= cur) $ do
+              when (next /= stored) $ do
                 setStore ctx (insertSlot fieldInt key next store)
                 markDirty ctx
 

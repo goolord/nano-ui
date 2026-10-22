@@ -14,6 +14,7 @@ where
 import Control.Monad (forM_, void, when)
 import Data.Foldable (toList)
 import Data.IORef (writeIORef)
+import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
@@ -71,8 +72,9 @@ selectCore f options index = do
       xs -> xs
     n = length opts
     key = intKey wid
-    given = clamp 0 (n - 1) index
-  stored <- liftIO $ adoptSlot fieldInt ctx wid given
+  -- The store holds the caller's index until a pick replaces it, even one
+  -- the options do not reach: a pick of the option it shows is a change.
+  stored <- liftIO $ adoptSlot fieldInt ctx wid index
   store0 <- liftIO (getStore ctx)
   let
     current = clamp 0 (n - 1) stored
@@ -88,6 +90,8 @@ selectCore f options index = do
           selectDropPickIndex dropRect menuItemRowH n (v2Y mouse)
       | otherwise = Nothing
     finalIdx = maybe current (clamp 0 (n - 1)) picked
+    -- An index the options do not reach yet stays the caller's until a pick.
+    result = if isNothing picked && stored == index then index else finalIdx
   -- Opening, closing or picking changes the store, which wakes the loop.
   liftIO $ do
     -- Ignore presses where layers or a pinned node cover the widget, or
@@ -101,11 +105,10 @@ selectCore f options index = do
     forM_ picked $ \i -> do
       modifyStore ctx (\st -> setSelectOpen (insertSlot fieldInt key i st) key False)
       writeIORef (ctxFocusId ctx) wid
-    recordSlot fieldInt ctx key finalIdx
+    recordSlot fieldInt ctx key result
   -- Compare with the caller's index, not 'current': a dropdown or keyboard
   -- pick lands in the store between frames and must still report a change.
-  -- An index the options do not reach yet stays the caller's until a pick.
-  pure (setChanged (finalIdx /= given) resp, if finalIdx == given then index else finalIdx)
+  pure (setChanged (result /= index) resp, result)
 
 -- | Select over every value of a bounded enum, labelled by @encode@.
 {-# INLINE boundedSelect #-}
