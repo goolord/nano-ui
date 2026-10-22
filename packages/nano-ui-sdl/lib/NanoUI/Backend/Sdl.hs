@@ -92,12 +92,13 @@ module NanoUI.Backend.Sdl
   , withSdlBench
   , syncDisplay
   , sdlDrawFrame
+  , resetRenderTextures
   ) where
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
-import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, sdlDebugSnapshot, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
+import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, resetRenderTextures, sdlDebugSnapshot, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
 import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv, SdlOptions (..), askSdlEnv, captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
