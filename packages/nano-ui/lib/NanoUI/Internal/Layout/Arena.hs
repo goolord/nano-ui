@@ -265,9 +265,11 @@ isWidgetNode nt =
     NodeDrawing -> True
     _ -> False
 
--- | Whether the node packs a font into its style index: a label or a text
--- field. Every other type keeps its own data there (a colour picker part, a
--- tab's look), so its style must not be read as a font.
+-- | Whether the node packs a font into its style index that the solver and
+-- @resolveFontFor@ read: a label or a text field. A text area packs one too,
+-- read only through 'NanoUI.Internal.Frame.TextArea.resolveTextAreaFont'.
+-- Every other type keeps its own data there (a colour picker part, a tab's
+-- look), so its style must not be read as a font.
 {-# INLINE packsNodeFont #-}
 packsNodeFont :: NodeType -> Bool
 packsNodeFont nt = nt == NodeText || nt == NodeTextInput

@@ -17,8 +17,9 @@ import Data.Kind (Type)
 import Data.Type.Equality (TestEquality (..), (:~:) (..))
 import GHC.TypeLits (SSymbol, Symbol)
 
--- | The backends that keep a session on the context, as a kind. A backend
--- outside this repository names itself with 'Custom'.
+-- | The backends that keep a session on the context, as a kind. SDL has its
+-- own constructor; every other backend, RGFW included, names itself with
+-- 'Custom'.
 data Backend = Sdl | Custom Symbol
 
 -- | The singleton of a 'Backend'.

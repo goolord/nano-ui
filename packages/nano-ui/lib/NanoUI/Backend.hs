@@ -288,10 +288,10 @@ module NanoUI.Backend
 
     -- | Each backend names itself in the 'Backend' kind, gives a
     -- 'BackendSession' type family instance, and installs its session state
-    -- with 'withBackendSession'. A backend outside this repository uses
-    -- @'Custom "name"@. Backend-specific view operations retrieve
-    -- the session with 'askBackendSession' and the 'SBackend' singleton
-    -- (returning 'Nothing' under other backends).
+    -- with 'withBackendSession'. SDL has its own constructor; every other
+    -- backend, RGFW included, uses @'Custom "name"@. Backend-specific view
+    -- operations retrieve the session with 'askBackendSession' and the
+    -- 'SBackend' singleton (returning 'Nothing' under other backends).
     --
     -- > type instance BackendSession 'Sdl = SdlEnv
     -- > askSdlEnv = askBackendSession SSdl

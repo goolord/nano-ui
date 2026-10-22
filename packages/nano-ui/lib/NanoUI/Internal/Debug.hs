@@ -229,9 +229,9 @@ formatDrawRows s =
   ]
 
 -- | Label/value rows describing the node under the pointer while the layout
--- overlay is on ('NanoUI.Internal.Context.getExplainedNode'). Padding is
--- printed left, right, top, bottom. The pin and pointer rows appear only when
--- they differ from the defaults.
+-- overlay is on ('NanoUI.explainedNode'). Padding is printed left, right,
+-- top, bottom. The pin and pointer rows appear only when they differ from the
+-- defaults.
 formatExplainRows :: Maybe ExplainedNode -> [(Text, Text)]
 formatExplainRows Nothing = [("node", "none under the pointer")]
 formatExplainRows (Just node) =

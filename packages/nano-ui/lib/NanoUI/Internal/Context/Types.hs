@@ -716,10 +716,10 @@ data DrawOpCacheEntry = DrawOpCacheEntry
   , doeOps :: !(SmallArray DrawOp)
   }
 
--- | Strict cache entry for a custom drawing's compiled draw ops. Every input
--- the ops can depend on is part of the key: the content key, the rect, the
--- interaction state the draw context exposes, and the metric generation, which
--- a theme or font change bumps.
+-- | Strict cache entry for a custom drawing's compiled draw ops. The key is
+-- the content key, the rect, the interaction state the draw context exposes,
+-- and the metric generation, which a base theme or font change bumps. A theme
+-- scope change bumps nothing: the frame empties the cache instead.
 data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
   { cdeContent :: {-# UNPACK #-} !Int
   , cdeBounds :: !Rect

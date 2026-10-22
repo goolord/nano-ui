@@ -384,8 +384,8 @@ tryStartScrollDrag ctx inp = do
 
 -- | The scrollbar whose thumb is being dragged, else the one under the
 -- pointer, as 'isScrollHover' holds it. While the button is down for any
--- other gesture there is none. The search visits only the pointer nodes, as
--- the cursor's thumb test does, so a frame pays no walk of the whole tree.
+-- other gesture there is none. The search visits only the pointer nodes, so
+-- a frame pays no walk of the whole tree.
 probeScrollBarHover :: Context -> Input -> IO (Maybe (WidgetId, DirTag, Rect))
 probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
   mDrag <- getsInteraction ctx isScrollDrag
