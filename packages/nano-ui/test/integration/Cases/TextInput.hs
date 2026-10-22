@@ -15,6 +15,7 @@ import NanoUI.Internal.Frame.TextArea
   , textAreaLineHeight
   , textAreaHitForWidget
   )
+import NanoUI.Internal.Input (onMac)
 import NanoUI.Internal.Store
   ( Slot (..)
   , WidgetStore (..)
@@ -49,6 +50,7 @@ tests =
   , spec "text-input-click-select" runTextInputClickSelectTest
   , spec "text-input-word-keys" runTextInputWordKeysTest
   , spec "text-input-line-break" runTextInputLineBreakTest
+  , spec "text-input-command-char" runTextInputCommandCharTest
   , spec "search-empty-commit" runSearchEmptyCommitTest
   , spec "search-clear-damage" runSearchClearDamageTest
   , spec "text-input-cut-clears-selection" runTextInputCutClearsSelectionTest
@@ -188,6 +190,20 @@ runTextInputLineBreakTest ctx failed = do
   _ <- runFrame crlf (tabInp inp0) crlfUi
   assertEq failed (False, "ab\r\ncd") . (\(r, v) -> (respChanged r, v)) =<< evalUi crlf (keyInp KeyLeft inp0) crlfUi
   assertEq failed "ab\r\ncXd" . snd =<< evalUi crlf (inp0 {inputChars = "X"}) crlfUi
+
+-- | A character typed with a modifier that makes its key a command, Alt
+-- (Command with Option on macOS), is the shortcut's, so the field does not
+-- type it. AltGr (Ctrl+Alt) and Option on macOS still type.
+runTextInputCommandCharTest :: Context -> IORef Int -> IO ()
+runTextInputCommandCharTest ctx failed = do
+  ref <- newVar "ab"
+  let
+    inp0 = withInput 320 120
+    ui = column (held ref textInput')
+    typed mods c = snd <$> evalUi ctx ((chordInp (mods <> key 'f') inp0) {inputChars = c}) ui
+  warmupFocused ctx inp0 ui
+  assertEq failed "ab" =<< typed (if onMac then super <> alt else alt) "f"
+  assertEq failed "ab@" =<< typed (if onMac then alt else ctrl <> alt) "@"
 
 -- | Emptying a search field from the keyboard reports the change on that
 -- frame, as its clear button does, rather than after the debounce.
