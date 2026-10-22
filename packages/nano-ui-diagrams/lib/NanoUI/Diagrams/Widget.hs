@@ -230,12 +230,10 @@ fitLayout fm layout d =
         then
           let -- The caller's fixed height or minimum, which may raise the
               -- cap; a growing height keeps growing above the measured minimum.
-              callerH = case layoutHeight layout of
-                Fixed h -> h
-                _ -> layoutMinH layout
-              growH = case layoutHeight layout of
-                Grow _ -> True
-                _ -> False
+              (callerH, growH) = case layoutHeight layout of
+                Fixed h -> (h, False)
+                Grow _ -> (layoutMinH layout, True)
+                _ -> (layoutMinH layout, False)
               capH = min (max growPlotCapH callerH) (layoutMaxH layout)
               floorH = if callerH > 0 then callerH else 180
               probeH0 =
