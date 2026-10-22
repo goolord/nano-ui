@@ -51,7 +51,9 @@ data ScrollConfig = ScrollConfig
   { scrollPolicyX :: !ScrollPolicy
   , scrollPolicyY :: !ScrollPolicy
   -- | Paint only clipped children, without a background or border. Scrollbar
-  -- policies still apply; combine with 'ScrollHidden' to omit all chrome.
+  -- policies still apply; combine with 'ScrollHidden' to omit all chrome. A
+  -- bare scroller also keeps the wheel: an axis it cannot move passes to no
+  -- scroller around or inside it.
   , scrollBare :: !Bool
   }
   deriving (Eq, Show)

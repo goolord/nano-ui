@@ -36,6 +36,7 @@ tests =
   , spec "simple-table-siblings" runSimpleTableSiblingsTest
   , spec "table-hide-columns" runTableHideColumnsTest
   , spec "table-hidden-edge" runTableHiddenEdgeTest
+  , spec "table-frozen-wheel" runTableFrozenWheelTest
   , pixelSpec "table-covered-gestures" runTableCoveredGesturesTest
   , pixelSpec "table-scroll-reveal" runTableScrollRevealTest
   , pixelSpec "table-shared-scroll-metrics" runTableSharedScrollMetricsTest
@@ -230,6 +231,23 @@ runTableHiddenEdgeTest ctx failed = do
         cursor <- cursorOver ctx input ui (V2 (hx + hw - 1) (hy + hh / 2))
         assert failed (cursor /= UiCursorEwResize)
       _ -> assert failed False
+
+-- A sideways wheel over a frozen column scrolls the body across, also when
+-- the rows fit and the frozen pane, which shares the body's id, has nothing
+-- of its own to scroll.
+runTableFrozenWheelTest :: Context -> IORef Int -> IO ()
+runTableFrozenWheelTest ctx failed = do
+  let input = withInputOff 400 240
+      cfg = defaultTableConfig {tableFreezeCols = 1, tableColSizes = [ColFixed 150, ColFixed 100, ColFixed 500]}
+      ui = sortedTable (tableConfigured cfg (fixedH 200) "frozen-wheel" threeCols tableFillRows)
+  _ <- warmup2 ctx input ui
+  hdrs <- headerButtonRects ctx
+  assertJust failed (listToMaybe hdrs) $ \(Rect fx fy fw fh) -> do
+    let over = input {inputMousePos = V2 (fx + fw / 2) (fy + fh + 10)}
+    warmup ctx over ui
+    _ <- runFrame ctx over {inputScroll = V2 1 0} ui
+    V2 offX _ <- bodyOffset ctx
+    assertGt failed offX 0
 
 -- A same-layer scrim blocks both header reordering and resize edges.
 runTableCoveredGesturesTest :: Context -> IORef Int -> IO ()

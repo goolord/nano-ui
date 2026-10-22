@@ -196,25 +196,31 @@ scrollOwnerNode suppressed Context {ctxNodeArena = na} wid =
         then pure True
         else (\sn -> not (suppressed (snConfig sn) (sn2D sn) (snDir sn))) <$> readScrollNode na idx
 
--- | Scroll @wid@ by the wheel and return its offset range, zero when it has
--- no node.
-applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO V2
-applyScrollWheelDelta ctx@Context {ctxNodeArena = na} wid (V2 wheelX wheelY) = do
+-- | Axes and offset range of the node the wheel moves for scroller @wid@,
+-- 'Nothing' when it has no node.
+wheelAxesRange :: Context -> WidgetId -> IO (Maybe (ScrollAxes, V2))
+wheelAxesRange ctx@Context {ctxNodeArena = na} wid = do
   -- A node whose bar shows comes first: a table's frozen pane shares its
   -- body's id with a hidden bar and a range of one axis, and would clamp the
   -- body's horizontal wheel away.
   mIdx <-
     scrollOwnerNode (\cfg _ dir -> scrollChromeSuppressed cfg dir) ctx wid
       >>= maybe (scrollOwnerNode scrollWheelSuppressed ctx wid) (pure . Just)
-  fmap (fromMaybe (V2 0 0)) . forM mIdx $ \idx -> do
+  forM mIdx $ \idx -> do
     nt <- getNodeType na idx
-    (axes, range) <-
-      if nt == NodeTextArea
-        then (ScrollAxisXY,) . tabRange . snd <$> textAreaScrollGeom ctx idx
-        else do
-          rect <- getNodeRect na idx
-          (axes, _, range) <- scrollNodeGeometry ctx idx rect
-          pure (axes, range)
+    if nt == NodeTextArea
+      then (ScrollAxisXY,) . tabRange . snd <$> textAreaScrollGeom ctx idx
+      else do
+        rect <- getNodeRect na idx
+        (axes, _, range) <- scrollNodeGeometry ctx idx rect
+        pure (axes, range)
+
+-- | Scroll @wid@ by the wheel and return its offset range, zero when it has
+-- no node.
+applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO V2
+applyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
+  mGeom <- wheelAxesRange ctx wid
+  fmap (fromMaybe (V2 0 0)) . forM mGeom $ \(axes, range) -> do
     step <- resolveScrollStep ctx wid
     cur <- getScrollOffsetIn ctx wid axes
     -- Notches land on where the scroller is headed, not on where it is, so
@@ -288,15 +294,20 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
           pure (if blocks then WheelBlocked else inner)
 
 -- | Whether node @idx@ takes the wheel at @mouse@: a scroll container whose
--- viewport or bar lanes contain it, or a text area with something to scroll.
--- A 'PointerPass' node never does.
+-- viewport or bar lanes contain it, or a text area, with something to scroll.
+-- A scroller whose content fits leaves the wheel to the one around it. A
+-- 'PointerPass' node never takes it.
 scrollHitSelf :: Context -> NodeIdx -> NodeType -> V2 -> Rect -> IO Bool
 scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
   | nt == NodeTextArea =
       takes <&&> do
         (field, bars) <- textAreaScrollGeom ctx idx
         pure (rectContains clip mouse && rectContains field mouse && (tabVertical bars || tabHorizontal bars))
-  | isScrollNode nt = pure (rectContains clip mouse) <&&> takes
+  | isScrollNode nt =
+      -- The range the wheel moves: a table's frozen pane has none of its own.
+      pure (rectContains clip mouse) <&&> takes <&&> do
+        wid <- getWidgetId na idx
+        maybe False (\(_, V2 rx ry) -> rx > 0 || ry > 0) <$> wheelAxesRange ctx wid
   | otherwise = pure False
  where
   takes = not <$> passesPointer na idx

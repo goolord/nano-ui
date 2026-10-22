@@ -54,6 +54,7 @@ tests =
   , spec "scroll-wheel-cross-popup" runWheelCrossPopupTest
   , spec "scroll-wheel-cross-2d" runWheelCross2DTest
   , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
+  , spec "scroll-wheel-fitting-inner" runWheelFittingInnerTest
   , spec "scroll-bar-short-track" runScrollBarShortTrackTest
   ]
 
@@ -935,6 +936,22 @@ runWheelCrossInsideTest ctx failed = do
     _ <- runFrame ctx onPlain {inputScroll = V2 1 0} ui
     assert failed . (> 0) =<< getScrollOffset ctx inner
     assertEq failed 0 =<< getScrollOffset ctx outer
+
+-- | A nested scroller whose content fits takes no wheel: the page around it
+-- scrolls with the pointer over it.
+runWheelFittingInnerTest :: Context -> IORef Int -> IO ()
+runWheelFittingInnerTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        (inner, ()) <- scrollArea (fillW . fixedH 100) (replicateM_ 2 (label "fits"))
+        replicateM_ 30 (label "row")
+        pure inner
+  (page, inner) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx inner) $ \r -> do
+    let over = inp0 {inputMousePos = spanCenter r}
+    warmup ctx over ui
+    _ <- runFrame ctx over {inputScroll = V2 0 1} ui
+    assert failed . (> 0) =<< getScrollOffset ctx page
 
 -- | A scroller whose track is shorter than the smallest thumb shows no bar,
 -- rather than a thumb that overruns the track and moves against the offset.
