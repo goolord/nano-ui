@@ -129,11 +129,7 @@ void nano_ui_text_atlas_destroy(NanoUiTextAtlas *atlas)
     if (!atlas) {
         return;
     }
-    for (int i = 0; i < NANO_UI_TEXT_ATLAS_PAGES; i++) {
-        if (atlas->tex[i]) {
-            SDL_DestroyTexture(atlas->tex[i]);
-        }
-    }
+    nano_ui_text_atlas_drop_textures(atlas);
     free(atlas);
 }
 

@@ -117,7 +117,7 @@ fontFilesBelow dir = do
 defaultFontDirs :: IO [FilePath]
 defaultFontDirs =
   case os of
-    "darwin" -> inHome "Library/Fonts" ["/Library/Fonts", "/System/Library/Fonts"]
+    "darwin" -> (\home -> [home </> "Library/Fonts", "/Library/Fonts", "/System/Library/Fonts"]) <$> getHomeDirectory
     "mingw32" -> do
       mRoot <- lookupEnv "SystemRoot"
       mLocal <- lookupEnv "LOCALAPPDATA"
@@ -134,8 +134,6 @@ defaultFontDirs =
       dataHome <- fromMaybe (home </> ".local/share") <$> env "XDG_DATA_HOME"
       dataDirs <- maybe [] (filter isAbsolute . splitSearchPath) <$> env "XDG_DATA_DIRS"
       pure (nubOrd ([dataHome </> "fonts", home </> ".fonts"] ++ map (</> "fonts") (dataDirs ++ ["/usr/local/share", "/usr/share"])))
-  where
-    inHome dir system = (: system) . (</> dir) <$> getHomeDirectory
 
 isFontFile :: FilePath -> Bool
 isFontFile path =
