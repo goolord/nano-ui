@@ -7,7 +7,7 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
+import NanoUI.Internal.Context (InteractionState (isScrollDrag), ctxNodeArena, getsInteraction, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
   ( findNodeM
   , getClipBounds
@@ -55,6 +55,7 @@ tests =
   , spec "scroll-wheel-cross-2d" runWheelCross2DTest
   , spec "scroll-wheel-root-overflow" runWheelRootOverflowTest
   , spec "scroll-wheel-fitting-inner" runWheelFittingInnerTest
+  , spec "scroll-wheel-under-bar-lane" runWheelUnderBarLaneTest
   , spec "scroll-bar-short-track" runScrollBarShortTrackTest
   ]
 
@@ -952,6 +953,26 @@ runWheelFittingInnerTest ctx failed = do
     warmup ctx over ui
     _ <- runFrame ctx over {inputScroll = V2 0 1} ui
     assert failed . (> 0) =<< getScrollOffset ctx page
+
+-- | An inner scroller wider than the page it sits in runs on under the
+-- page's bar lane, where paint clips it away. The wheel there scrolls the
+-- page, whose bar is drawn there, and a press on the page's thumb grabs it.
+runWheelUnderBarLaneTest :: Context -> IORef Int -> IO ()
+runWheelUnderBarLaneTest ctx failed = do
+  let inp0 = withInputOff 400 300
+      ui = scrollArea (fixedWH 300 200) . column $ do
+        (inner, ()) <- scrollArea (fixedWH 400 150) (replicateM_ 30 (label "inner row"))
+        replicateM_ 30 (label "row")
+        pure inner
+  (page, inner) <- warmup2 ctx inp0 ui
+  assertJustM failed (getPrevRect ctx page) $ \(Rect px py pw _) -> do
+    let lane = inp0 {inputMousePos = V2 (px + pw - scrollBarGutter ScrollBarList 0 / 2) (py + 10)}
+    warmup ctx lane ui
+    _ <- runFrame ctx lane {inputScroll = V2 0 1} ui
+    assert failed . (> 0) =<< getScrollOffset ctx page
+    assertEq failed 0 =<< getScrollOffset ctx inner
+    _ <- runFrame ctx (pressAt lane (inputMousePos lane)) ui
+    assert failed . isJust =<< getsInteraction ctx isScrollDrag
 
 -- | A scroller whose track is shorter than the smallest thumb shows no bar,
 -- rather than a thumb that overruns the track and moves against the offset.

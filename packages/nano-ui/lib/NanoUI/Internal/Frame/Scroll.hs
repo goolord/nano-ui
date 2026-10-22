@@ -272,13 +272,13 @@ queryScrollTarget ctx@Context {ctxNodeArena = na} layered mouse parentClip idx =
   nt <- getNodeType na idx
   scrollHitClip ctx idx nt parentClip >>= \case
     Nothing -> pure WheelMiss
-    Just clip -> do
+    Just (clip, kidsClip) -> do
       overlapping <-
         pure layered <&&> ((||) <$> ((== Layered) <$> getFlow na idx) <*> hasPinnedBelow na idx)
       -- Skip subtrees that contain no scroller, text area, or 'PointerBlock' node.
       let answered c = ifM (hasScrollerBelow na c) (query c) (pure Nothing)
           query c =
-            queryScrollTarget ctx layered mouse clip c <&> \case
+            queryScrollTarget ctx layered mouse kidsClip c <&> \case
               WheelMiss -> Nothing
               hit -> Just hit
       inner <-
@@ -312,9 +312,11 @@ scrollHitSelf ctx@Context {ctxNodeArena = na} idx nt mouse clip
  where
   takes = not <$> passesPointer na idx
 
--- Same clip stack as the span walk: scroll viewport (plus its bar lanes),
--- then the clip other containers give their children ('childPaintClip').
-scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
+-- The clip node @idx@ takes the wheel in, and the one its children do, as
+-- paint clips them: a scroller takes it over its viewport and bar lanes, and
+-- its children over the viewport alone; other containers give their children
+-- the clip 'childPaintClip' says.
+scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe (Rect, Rect))
 scrollHitClip ctx@Context {ctxNodeArena = na} idx nt parentClip
   | isScrollNode nt = do
       Rect x y w h <- getNodeRect na idx
@@ -325,9 +327,13 @@ scrollHitClip ctx@Context {ctxNodeArena = na} idx nt parentClip
         hit
           | sn2D sn = rectUnion viewport (rectUnion (lane DirColumn) (lane DirRow))
           | otherwise = rectUnion viewport (lane (snDir sn))
-      pure (rectIntersect parentClip hit)
-  | isContainerNode nt = maybe (Just parentClip) (rectIntersect parentClip) <$> (childPaintClip ctx idx nt =<< getNodeRect na idx)
-  | otherwise = pure (Just parentClip)
+        -- Empty when the viewport is clipped away, so no child takes it.
+        kids = fromMaybe (Rect x y 0 0) (rectIntersect parentClip viewport)
+      pure ((,kids) <$> rectIntersect parentClip hit)
+  | isContainerNode nt =
+      fmap (\c -> (c, c)) . maybe (Just parentClip) (rectIntersect parentClip)
+        <$> (childPaintClip ctx idx nt =<< getNodeRect na idx)
+  | otherwise = pure (Just (parentClip, parentClip))
 
 -- | Scrollbar layouts of the scroller at @idx@ (id @wid@), each paired with a
 -- setter for that axis's offset that skips unchanged values. Covers text
