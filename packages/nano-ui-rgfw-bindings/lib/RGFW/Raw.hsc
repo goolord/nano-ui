@@ -20,6 +20,7 @@ module RGFW.Raw
   , c_rgfw_event_key_mod
   , c_rgfw_event_key_repeat
   , c_RGFW_physicalToMappedKey
+  , c_RGFW_isKeyDown
   , c_rgfw_event_keyChar_value
   , c_rgfw_event_update_w
   , c_rgfw_event_update_h
@@ -254,6 +255,11 @@ c_rgfw_event_key_repeat p = fromIntegral <$> (#{peek RGFW_event, key.repeat} p :
 -- layout, or 0 (@RGFW_keyNULL@) if none. Needs an open window.
 foreign import ccall unsafe "RGFW_physicalToMappedKey"
   c_RGFW_physicalToMappedKey :: CUChar -> IO CUChar
+
+-- | Nonzero while a key is down, by the key events RGFW has read so far.
+-- Needs an open window.
+foreign import ccall unsafe "RGFW_isKeyDown"
+  c_RGFW_isKeyDown :: CUChar -> IO CUChar
 
 -- | Code point from a character event. Validate it before converting to 'Char'.
 c_rgfw_event_keyChar_value :: Ptr RGFW_event -> IO CUInt

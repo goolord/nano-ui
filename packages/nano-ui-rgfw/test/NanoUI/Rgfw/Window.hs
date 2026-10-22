@@ -3,7 +3,7 @@
 -- screenshot: the window stays opaque even where a translucent window colour
 -- is painted twice, and rows run top to bottom. A session window is sized in
 -- layout units.
-module NanoUI.Rgfw.Window (hasDisplay, testGlWindow, testSessionWindow) where
+module NanoUI.Rgfw.Window (hasDisplay, testGlWindow, testSessionWindow, testSessionModifiers) where
 
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (void)
@@ -13,9 +13,11 @@ import Data.Either (isRight)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
 import Data.Primitive.SmallArray (smallArrayFromList)
+import Foreign.C.Types (CUChar (..))
+import Foreign.Ptr (Ptr)
 import NanoUI
-  ( DrawOp (..), Size (..), Theme (..), V2 (..), WindowMode (..), WindowSettings (..), WindowState (..), askInput, askWindow
-  , defaultWindowSettings, inputMousePos, quitUi, rgbaBytes, rgbaHeight, rgbaWidth, setWindowTitleUi, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
+  ( DrawOp (..), Input (..), Modifiers (..), MouseButton (..), Pressable (..), Size (..), Theme (..), V2 (..), WindowMode (..), WindowSettings (..), WindowState (..), askInput, askWindow
+  , defaultWindowSettings, quitUi, requestFrame, rgbaBytes, rgbaHeight, rgbaWidth, setWindowTitleUi, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
   , tomorrowNightMinDarkTheme, windowColor
   )
 import NanoUI.Backend (Damage (..))
@@ -29,6 +31,16 @@ import NanoUI.Testing.Assert (withInput)
 import RGFW qualified as R
 import System.Environment (lookupEnv)
 import System.Info (os)
+
+-- RGFW's own entry points for a key or button event: they record the key or
+-- button and queue the event, as the platform code does.
+foreign import ccall "RGFW_getRootWindow" c_RGFW_getRootWindow :: IO (Ptr R.RGFW_window)
+
+foreign import ccall "RGFW_keyCallback"
+  c_RGFW_keyCallback :: Ptr R.RGFW_window -> CUChar -> CUChar -> CUChar -> CUChar -> IO ()
+
+foreign import ccall "RGFW_mouseButtonCallback"
+  c_RGFW_mouseButtonCallback :: Ptr R.RGFW_window -> CUChar -> CUChar -> IO ()
 
 -- | Whether to try a window: on Linux only with an X display. Elsewhere the
 -- tests try one and skip when it does not open.
@@ -105,3 +117,43 @@ testSessionWindow assert =
           assert "RGFW session window: its size in layout units at its scale"
             ((size, scale) == (Size 200 150, 2) && isRight (opened :: Either IOException ()))
           assert "RGFW session window: the pointer starts off the window" offWindow
+
+-- | Letting go of one Shift while the other is down leaves Shift held, so a
+-- click after it is a Shift-click. The keys come with the modifier bits from
+-- before each, as RGFW reads them on X11 and Windows.
+testSessionModifiers :: (String -> Bool -> IO ()) -> IO ()
+testSessionModifiers assert =
+  hasDisplay >>= \case
+    False -> putStrLn "[SKIP] RGFW session modifiers: no display"
+    True -> do
+      frames <- newIORef (0 :: Int)
+      clicked <- newIORef Nothing
+      let key k m down = c_RGFW_getRootWindow >>= \win -> c_RGFW_keyCallback win (CUChar (fromIntegral k)) (CUChar m) 0 (flag down)
+          click down = c_RGFW_getRootWindow >>= \win -> c_RGFW_mouseButtonCallback win (CUChar R.rgfw_mouseLeft) (flag down)
+          flag down = if down then 1 else 0 :: CUChar
+          view = do
+            inp <- askInput
+            n <- liftIO (readIORef frames)
+            liftIO (writeIORef frames (n + 1))
+            case n of
+              -- RGFW queues events only once the session has polled.
+              0 -> requestFrame
+              1 -> do
+                liftIO $ do
+                  key R.rgfw_keyShiftR 0 True
+                  key R.rgfw_keyShiftL R.rgfw_modShift True
+                  key R.rgfw_keyShiftL R.rgfw_modShift False
+                  click True
+                requestFrame
+              _
+                | heldIn MouseLeft inp || n > 20 -> do
+                    liftIO $ do
+                      writeIORef clicked (Just (heldIn MouseLeft inp && modShift (inputModifiers inp)))
+                      click False
+                      key R.rgfw_keyShiftR R.rgfw_modShift False
+                    quitUi
+                | otherwise -> requestFrame
+      _ <- try (runRgfwApp defaultRgfwOptions {optWindow = defaultWindowSettings {wsSize = Size 100 100, wsMode = Hidden}} view) :: IO (Either IOException ())
+      readIORef clicked >>= \case
+        Nothing -> putStrLn "[SKIP] RGFW session modifiers: no OpenGL 3.2 window"
+        Just shiftClick -> assert "RGFW session: one Shift let go while the other is down keeps Shift" shiftClick

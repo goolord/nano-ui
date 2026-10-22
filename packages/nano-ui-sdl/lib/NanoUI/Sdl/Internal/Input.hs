@@ -142,7 +142,9 @@ data SdlEvent
   | EvWindowRedraw
   | EvRenderDeviceReset
   -- ^ The render device was reset, which emptied every texture. The session
-  -- makes its textures again and repaints the whole window.
+  -- makes its textures again and repaints the whole window. A host that
+  -- polls events itself calls 'NanoUI.Backend.Sdl.resetRenderTextures'
+  -- before its next frame.
   | EvEditing Text Int Int
   -- ^ The input method's composition changed: its text, then the start and
   -- length of its caret or selection ('applyComposition'). Empty text ends

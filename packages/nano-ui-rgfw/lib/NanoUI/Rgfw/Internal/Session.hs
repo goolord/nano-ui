@@ -217,19 +217,20 @@ modsFromRgfw m = modifiersFromBits m R.rgfw_modShift R.rgfw_modControl R.rgfw_mo
 -- are already current.
 ownModifier :: Word32 -> Bool -> Word8 -> Word8
 ownModifier k down m = case lookup k modifierRgfwKeys of
-  Just bit -> if down then m .|. bit else m .&. complement bit
+  Just (bit, _) -> if down then m .|. bit else m .&. complement bit
   Nothing -> m
 
-modifierRgfwKeys :: [(Word32, Word8)]
+-- | Modifier keys, with their bit and the key on the other side.
+modifierRgfwKeys :: [(Word32, (Word8, Word32))]
 modifierRgfwKeys =
-  [ (R.rgfw_keyShiftL, R.rgfw_modShift)
-  , (R.rgfw_keyShiftR, R.rgfw_modShift)
-  , (R.rgfw_keyControlL, R.rgfw_modControl)
-  , (R.rgfw_keyControlR, R.rgfw_modControl)
-  , (R.rgfw_keyAltL, R.rgfw_modAlt)
-  , (R.rgfw_keyAltR, R.rgfw_modAlt)
-  , (R.rgfw_keySuperL, R.rgfw_modSuper)
-  , (R.rgfw_keySuperR, R.rgfw_modSuper)
+  [ (R.rgfw_keyShiftL, (R.rgfw_modShift, R.rgfw_keyShiftR))
+  , (R.rgfw_keyShiftR, (R.rgfw_modShift, R.rgfw_keyShiftL))
+  , (R.rgfw_keyControlL, (R.rgfw_modControl, R.rgfw_keyControlR))
+  , (R.rgfw_keyControlR, (R.rgfw_modControl, R.rgfw_keyControlL))
+  , (R.rgfw_keyAltL, (R.rgfw_modAlt, R.rgfw_keyAltR))
+  , (R.rgfw_keyAltR, (R.rgfw_modAlt, R.rgfw_keyAltL))
+  , (R.rgfw_keySuperL, (R.rgfw_modSuper, R.rgfw_keySuperR))
+  , (R.rgfw_keySuperR, (R.rgfw_modSuper, R.rgfw_keySuperL))
   ]
 
 -- | The RGFW standard cursor for a cursor kind, after 'cursorFallback'.
@@ -582,7 +583,12 @@ pollRgfwEvents win evPtr scaleRef monScaleRef = do
           drain (ev : acc)
         R.EventKeyPress k m -> relayout R.EventKeyPress k m
         R.EventKeyRepeat k m -> relayout R.EventKeyRepeat k m
-        R.EventKeyRelease k m -> relayout R.EventKeyRelease k m
+        -- A modifier key let go while the one on the other side is down
+        -- leaves the modifier held, as that key's repeat would.
+        R.EventKeyRelease k m
+          | Just (_, twin) <- lookup k modifierRgfwKeys ->
+              R.isKeyDown twin >>= \held -> drain ((if held then R.EventKeyRepeat twin m else ev) : acc)
+          | otherwise -> relayout R.EventKeyRelease k m
         _ -> drain (ev : acc)
       where
         relayout event k m = layoutKey k >>= \k' -> drain (event k' m : acc)

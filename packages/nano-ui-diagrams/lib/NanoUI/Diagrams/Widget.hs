@@ -188,15 +188,15 @@ diagramFrame ps bw (Rect x y w h) =
     , Stroke x (y + h) x y bw (plotFrameBorder ps)
     ]
 
--- Grow plots cap here unless the caller set a tighter layoutMaxH, or a
--- larger fixed height or minimum.
+-- Grow plots cap here unless the caller set a tighter layoutMaxH, a fixed
+-- height, or a larger minimum.
 growPlotCapH :: Float
 growPlotCapH = 260
 
 -- | Choose diagram dimensions from its aspect ratio and measured labels.
--- Growing widths retain flexibility, with a height of at most 260 unless the
--- layout fixes a height, sets a larger minimum or grows in height; other
--- widths become fixed. Prepare font metrics for all labels before calling
+-- Growing widths retain flexibility and keep a fixed height; any other
+-- height is at most 260 unless the layout sets a larger minimum or grows in
+-- height. Other widths become fixed. Prepare font metrics for all labels before calling
 -- this pure sizing operation.
 fitLayout :: FontMetrics -> Layout -> Diagram B -> Layout
 fitLayout fm layout d =
@@ -228,15 +228,14 @@ fitLayout fm layout d =
       clampSize x = realToFrac (max 8 x) :: Float
    in if growW
         then
-          let -- The caller's fixed height or minimum, which may raise the
-              -- cap; a growing height keeps growing above the measured minimum.
-              callerH = case layoutHeight layout of
-                Fixed h -> h
-                _ -> layoutMinH layout
-              growH = case layoutHeight layout of
-                Grow _ -> True
-                _ -> False
-              capH = min (max growPlotCapH callerH) (layoutMaxH layout)
+          let -- The caller's fixed height, which is also the cap, or its
+              -- minimum, which may raise the cap; a growing height keeps
+              -- growing above the measured minimum.
+              (callerH, cap, growH) = case layoutHeight layout of
+                Fixed h -> (h, h, False)
+                Grow _ -> (layoutMinH layout, growPlotCapH, True)
+                _ -> (layoutMinH layout, growPlotCapH, False)
+              capH = min (max cap callerH) (layoutMaxH layout)
               floorH = if callerH > 0 then callerH else 180
               probeH0 =
                 realToFrac

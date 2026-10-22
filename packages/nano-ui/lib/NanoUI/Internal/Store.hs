@@ -47,6 +47,8 @@ module NanoUI.Internal.Store
   , closeSelects
   , ptrEq
   , eqByPtr
+  , sameFloat
+  , sameDouble
   , diffKeys
   , slotChangedKeys
   )
@@ -59,7 +61,7 @@ import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Internal.Id (mix64)
-import NanoUI.Internal.Equality (eqByPtr, ptrEq)
+import NanoUI.Internal.Equality (eqByPtr, ptrEq, sameDouble, sameFloat)
 import NanoUI.Internal.Store.Types (GridState, LineWidths, TextHistory)
 import NanoUI.Internal.RichText.Types (RichSelection)
 import NanoUI.Internal.TextEditor.Types (EditorMode)

@@ -12,6 +12,7 @@ module RGFW
   , stopWaitForEvent
   , withEventBuffer
   , physicalToMappedKey
+  , isKeyDown
   , windowSize
   , windowScale
   , setMouseStandard
@@ -197,6 +198,14 @@ physicalToMappedKey key
   | otherwise = do
       CUChar mapped <- c_RGFW_physicalToMappedKey (CUChar (fromIntegral key))
       pure (if mapped == 0 then Nothing else Just (fromIntegral mapped))
+
+-- | Whether a key, by its RGFW key code, is down after the key events RGFW
+-- has read so far, which can be ahead of the events still queued. Needs an
+-- open window.
+isKeyDown :: Word32 -> IO Bool
+isKeyDown key
+  | key > 0xFF = pure False
+  | otherwise = (/= 0) <$> c_RGFW_isKeyDown (CUChar (fromIntegral key))
 
 -- | Current native window width and height in pixels.
 windowSize :: Window -> IO (Int, Int)

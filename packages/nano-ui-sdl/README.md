@@ -112,8 +112,9 @@ rectangle supplied by nano-ui.
 
 A render device reset (a Direct3D device lost to a driver update or a remote
 desktop reconnecting) makes the session's textures again and repaints the
-window. A device SDL reports lost for good ends the session with an
-`IOError`.
+window; an existing event loop calls `resetRenderTextures` when it reads
+`EvRenderDeviceReset`. A device SDL reports lost for good ends the session
+with an `IOError`.
 
 ## Running
 

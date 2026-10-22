@@ -141,7 +141,6 @@ formatTick v
 -- with the step's last digit as its last.
 formatStep :: Double -> Double -> Text
 formatStep step v
-  | not (finite v) = T.empty
   | v /= 0 && (abs v >= 1e6 || abs v < 1e-6) =
       let (mantissa, e) = T.breakOn "e" (render (TB.formatRealFloat TB.Exponent (Just (max 0 (mag v - mag step))) v))
        in stripZeros mantissa <> e
