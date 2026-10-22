@@ -54,7 +54,7 @@ import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldF
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderDisplayText, tableHeaderLabel)
+import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortBlank)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
@@ -289,7 +289,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
             remeasure 0
           _ -> mapM_ measure [0 .. n - 1]
         -- As the header shows it: the sort mark is drawn over a blank slot.
-        writePrimArray hdrWM i . (+ cellPadX) =<< lineWidthIO fm (tableHeaderDisplayText (tableHeaderLabel False (hdrs V.! i)))
+        writePrimArray hdrWM i . (+ cellPadX) =<< lineWidthIO fm (hdrs V.! i <> tableSortBlank)
       cellWs <- unsafeFreezePrimArray cellWM
       hdrWs <- unsafeFreezePrimArray hdrWM
       let widest i !r !w = if r >= n then w else widest i (r + 1) (max w (indexPrimArray cellWs (i * n + r)))

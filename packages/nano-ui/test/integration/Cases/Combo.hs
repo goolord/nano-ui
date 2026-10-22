@@ -14,6 +14,7 @@ tests =
   , spec "combo-mouse-pick" runComboMousePickTest
   , spec "combo-dropdown-flips" runComboDropdownFlipsTest
   , spec "combo-dropdown-off-field" runComboDropdownOffFieldTest
+  , spec "combo-dropdown-scrolled-away" runComboDropdownScrolledAwayTest
   , spec "combo-blur-commit" runComboBlurCommitTest
   , spec "combo-app-write-no-commit" runComboAppWriteNoCommitTest
   , spec "combo-escape-revert" runComboEscapeRevertTest
@@ -120,6 +121,28 @@ runComboDropdownOffFieldTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   assertEq failed "" . snd =<< runClick ctx inp0 ui (centerOf resp)
   assertEq failed (respId resp) =<< getFocusId ctx
+
+-- | A focused combo whose field scrolls out of view shows no list, and the
+-- pointer where the list would be highlights no row for Enter to commit.
+runComboDropdownScrolledAwayTest :: Context -> IORef Int -> IO ()
+runComboDropdownScrolledAwayTest ctx failed = do
+  let inp0 = withInput 320 300
+      ui = column $ do
+        label "toolbar"
+        scrollArea (fixedWH 300 120) (withValue "" (comboBox' "Font" comboOpts) <* replicateM_ 30 (label "line"))
+  (sid, (resp, _)) <- warmup2 ctx inp0 ui
+  _ <- runClick ctx inp0 ui (centerOf resp)
+  shown <- collectOverlayTextSpans ctx inp0
+  -- Scrolled just past its field, the list would lie in the window.
+  let past = rectH (respRect resp) + 20
+  setScrollOffset ctx sid past
+  replicateM_ 2 (runFrame ctx inp0 ui)
+  assert failed . not . hasText "Beta Serif" =<< collectOverlayTextSpans ctx inp0
+  assertJust failed (spanRect "Beta Serif" shown) $ \item -> do
+    let V2 cx cy = spanCenter item
+        hover = inp0 {inputMousePos = V2 cx (cy - past)}
+    _ <- runFrame ctx hover ui
+    assertEq failed "" . snd . snd =<< evalUi ctx (keyInp KeyEnter hover) ui
 
 -- Hovering a suggestion row highlights it (hover paint, becomes the Enter
 -- target) but never commits by itself; Enter then commits the hovered row.
@@ -307,27 +330,34 @@ runComboEscapeRevertTest ctx failed = do
 
 -- | Escape on a focused combo showing its list cancels the combo and nothing
 -- else, wherever another Escape consumer is declared: a popup's dismiss, a
--- shortcut or a key listener, before it or after it, leaves it alone.
+-- shortcut or a key listener, before it or after it, leaves it alone. So do
+-- the listeners while the Escape is held, repeating, and on its release.
 runComboEscapeOwnedTest :: Context -> IORef Int -> IO ()
 runComboEscapeOwnedTest _ failed =
-  forM_ [(which, before) | which <- ["popup", "shortcut", "keyPressed"], before <- [True, False]] $ \(which, before) -> do
+  forM_ [(which, before) | which <- ["popup", "shortcut", "keyPressed", "keyReleased", "keyHeld"], before <- [True, False]] $ \(which, before) -> do
     ctx <- newContext
     fired <- newIORef False
     popupOpen <- newVar True
     let inp0 = withInput 320 200
+        listen k = whenM (k KeyEscape) (liftIO (writeIORef fired True))
         other :: NanoUI ()
         other = case which of
           "popup" -> popup popupOpen (defaultPopupConfig (AnchorPoint (V2 300 180))) (label "Panel")
           "shortcut" -> whenM (shortcut (key KeyEscape)) (liftIO (writeIORef fired True))
-          _ -> whenM (keyPressed KeyEscape) (liftIO (writeIORef fired True))
+          "keyPressed" -> listen keyPressed
+          "keyReleased" -> listen keyReleased
+          _ -> listen keyHeld
         ui = column $ do
           when before other
           r <- withValue "" (comboBox' "Font" comboOpts)
           unless before other
           pure r
+        down = chordInp (key KeyEscape) inp0
     warmupFocused ctx inp0 ui
     _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
-    _ <- runFrame ctx (keyInp KeyEscape inp0) ui
+    _ <- runFrame ctx down ui
+    _ <- runFrame ctx (keyRepeatInp KeyEscape down) ui
+    _ <- runFrame ctx (keyUpInp KeyEscape down) ui
     open <- readVarIO popupOpen
     acted <- readIORef fired
     assertEq failed (which :: T.Text, before, False) (which, before, acted || not open)

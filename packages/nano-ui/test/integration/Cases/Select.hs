@@ -223,19 +223,33 @@ runSelectDropdownScrolledAwayTest ctx failed = do
   let inp0 = withInput 320 300
       ui = column $ do
         label "toolbar"
-        snd <$> scrollArea (fixedWH 300 120) (withValue 0 (selectWith' (fixedW 100) ["Low", "Medium", "High"]) <* replicateM_ 30 (label "line"))
-  (resp, _) <- warmup2 ctx inp0 ui
+        scrollArea (fixedWH 300 120) (withValue 0 (selectWith' (fixedW 100) ["Low", "Medium", "High"]) <* replicateM_ 30 (label "line"))
+  (sid, (resp, _)) <- warmup2 ctx inp0 ui
   let open = snd (clickPair inp0 (centerOf resp))
       -- Over the scroller, beside the dropdown.
       wheel = open {inputButtonsReleased = noButtons, inputMousePos = V2 250 (rectY (respRect resp) + 10), inputScroll = V2 0 5}
       idle = wheel {inputScroll = V2 0 0}
   _ <- runClick ctx inp0 ui (centerOf resp)
-  assert failed . hasText "Medium" =<< collectOverlayTextSpans ctx open
+  shown <- collectOverlayTextSpans ctx open
+  assert failed (hasText "Medium" shown)
   _ <- runFrame ctx wheel ui
   replicateM_ 3 (runFrame ctx idle ui)
   after <- collectOverlayTextSpans ctx idle
   assert failed (not (hasText "Medium" after))
-  assertEq failed 0 . snd =<< runClick ctx idle ui (maybe (V2 20 40) spanCenter (spanRect "Medium" after))
+  -- Pressed open and held while its field scrolls just past the top, the
+  -- dropdown would lie in the window: a release on its middle row there
+  -- picks nothing.
+  let past = rectH (respRect resp) + 20
+  setScrollOffset ctx sid 0
+  _ <- runClick ctx inp0 ui (V2 250 280)
+  _ <- runFrame ctx (pressAt inp0 (centerOf resp)) ui
+  assert failed . anySelectOpen =<< getStore ctx
+  setScrollOffset ctx sid past
+  assertJust failed (spanRect "Medium" shown) $ \item -> do
+    let V2 cx cy = spanCenter item
+        holding = holdAt inp0 (V2 cx (cy - past))
+    _ <- runFrame ctx holding ui
+    assertEq failed 0 . snd . snd =<< evalUi ctx (releaseAt holding) ui
 
 -- | Keys reach an open select only while it has focus: a right-click on a
 -- text field closes it, and a field that takes focus by 'holdFocus' keeps

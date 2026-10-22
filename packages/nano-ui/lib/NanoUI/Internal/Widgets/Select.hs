@@ -14,7 +14,7 @@ where
 import Control.Monad (forM_, void, when)
 import Data.Foldable (toList)
 import Data.IORef (writeIORef)
-import Data.Maybe (isNothing)
+import Data.Maybe (isJust, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
@@ -26,7 +26,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (fieldInt, insertSlot)
 import NanoUI.Internal.Style (Layout, defaultLayout)
-import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectNonEmpty, v2Y)
+import NanoUI.Internal.Types (Rect (..), clamp, rectContains, rectIntersect, rectNonEmpty, v2Y)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Combinators (withBoundedIndex)
@@ -81,12 +81,14 @@ selectCore f options index = do
     open = isSelectOpen store0 key
   resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (f defaultLayout)
   inp <- askInput
+  let rect@(Rect rx ry rw rh) = respRect resp
+  -- A field scrolled out of its viewport hangs no dropdown ('openDropdowns').
+  shown <- if open then liftIO (maybe True (isJust . rectIntersect rect) <$> getPrevClipRect ctx wid) else pure False
   let
-    rect@(Rect rx ry rw rh) = respRect resp
     mouse = inputMousePos inp
     dropRect = selectDropRect (inputWindowSize inp) rx ry rw rh n
     picked
-      | open && rectNonEmpty rect && rectContains dropRect mouse && releasedIn MouseLeft inp =
+      | shown && rectNonEmpty rect && rectContains dropRect mouse && releasedIn MouseLeft inp =
           selectDropPickIndex dropRect menuItemRowH n (v2Y mouse)
       | otherwise = Nothing
     finalIdx = maybe current (clamp 0 (n - 1)) picked

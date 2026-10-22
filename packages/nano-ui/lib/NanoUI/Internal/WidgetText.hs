@@ -41,7 +41,7 @@ module NanoUI.Internal.WidgetText
   , containerFlagInert
   , containerFlagClip
   , hasFlag
-  , tableSortReserve
+  , tableSortBlank
   , tableStripeColor
   , tableStripeInset
   , stripeColor

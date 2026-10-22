@@ -35,7 +35,7 @@ import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.TextEditor.Types
-import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), chordModifiers, isCommandKey, modJump, modMacCommand, modPrimary, noModifiers, onMac)
+import NanoUI.Internal.Input (Input (..), Key (..), Modifiers (..), chordModifiers, inputKeysElem, isCommandKey, modJump, modMacCommand, modPrimary, noModifiers, onMac)
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -280,14 +280,20 @@ keyCommand mode mods key =
 -- ('isCommandKey': Ctrl, or Alt alone, outside macOS) are dropped, since
 -- those keystrokes arrive as key commands or go to shortcuts. Ctrl+Alt is
 -- AltGr on many layouts, and Option types on macOS, so their characters are
--- typed normally.
+-- typed normally. X11 and Wayland report AltGr as Alt alone, so Alt alone
+-- drops only its key's own character: the @f@ of Alt+F, but not the \@ of
+-- AltGr+Q on a German layout.
 inputTextCommands :: EditorMode -> Input -> [TextCommand]
 inputTextCommands mode inp = T.foldr char keys (inputChars inp)
   where
     mods = inputModifiers inp
     char c rest
-      | not (isControl c) && not (isCommandKey mods (KeyChar c)) = InsertText (T.singleton c) : rest
+      | not (isControl c) && not (isCommandKey mods (KeyChar c) && (modCtrl mods || modSuper mods || ownKey c)) =
+          InsertText (T.singleton c) : rest
       | otherwise = rest
+    -- The key's press can end the frame before its text, so the key is
+    -- looked for among those held or released.
+    ownKey c = any (inputKeysElem (KeyChar (toLower c))) [inputKeysHeld inp, inputKeysReleased inp]
     keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 
 chordCommand :: Modifiers -> Char -> Maybe TextCommand

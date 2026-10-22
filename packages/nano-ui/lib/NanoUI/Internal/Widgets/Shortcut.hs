@@ -26,7 +26,8 @@ import NanoUI.Widgets.TextEditor (keyCommand, multiLineMode, singleLineMode)
 -- when the focused widget uses the key itself ('focusTakesChord'), such as
 -- Delete in a focused text field. Also 'False' for an Escape that closes an
 -- open dropdown, a focused combo box's list or a text-edit menu, or that
--- something earlier in the view took ('NanoUI.takeEscape'). Like iced's
+-- something earlier in the view took ('NanoUI.takeEscape'), and for its
+-- repeats and its release ('keyReleased', 'keyHeld'). Like iced's
 -- @keyboard::listen@, this only reports keys not claimed by the focused
 -- widget; 'pressedIn' checks raw frame input. To bind a command to a key,
 -- use 'shortcut'.

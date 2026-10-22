@@ -10,7 +10,7 @@ module NanoUI.Internal.Frame.Window
   , windowResizeCursorKind
   ) where
 
-import Control.Monad (guard, unless, when)
+import Control.Monad (forM_, guard, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -184,7 +184,12 @@ resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge)
 resizeEdgeTarget ctx@Context {ctxNodeArena = na} mouse = runMaybeT $ do
   let inHalo r = rectNonEmpty r && rectContains (rectInflate windowResizeHandleFor r) mouse
   idx <- MaybeT (topmostFloating ctx (== NodeWindow) inHalo)
-  guard =<< liftIO (outsideModalBlock ctx idx)
+  -- While a modal is open, only a window inside it resizes, and only off the
+  -- modal's panel, which paint puts over it ('overlayHitRoot').
+  modal <- liftIO (topModalNode na)
+  forM_ modal $ \m -> do
+    guard =<< liftIO (nodeInSubtree ctx idx m)
+    guard . not . (`rectContains` mouse) =<< liftIO (getNodeRect na m)
   rect <- liftIO (getNodeRect na idx)
   -- The halo covers the window interior, so find the edge first and run the
   -- hover probe and node scans only when there is one.
@@ -233,19 +238,12 @@ windowResizeCursorKind ctx inp =
       | otherwise -> pure Nothing
     Nothing -> fmap (\(_, _, edge) -> cursorForResizeEdge edge) <$> resizeEdgeTarget ctx (inputMousePos inp)
 
--- | Whether window node @idx@ can take a drag or resize: no modal is open,
--- or the window is inside the top one. A window behind an open modal is
--- blocked like the rest of the content there.
-outsideModalBlock :: Context -> NodeIdx -> IO Bool
-outsideModalBlock ctx idx = maybe (pure True) (nodeInSubtree ctx idx) =<< topModalNode (ctxNodeArena ctx)
-
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse@(V2 mx my) = fmap isJust . runMaybeT $ do
   -- Not a window under its modal's panel ('overlayHitRoot').
   idx <- MaybeT (overlayHitRoot ctx mouse)
   nt <- liftIO (getNodeType (ctxNodeArena ctx) idx)
   guard (nt == NodeWindow)
-  guard =<< liftIO (outsideModalBlock ctx idx)
   title <- MaybeT (windowTitleRect ctx idx)
   guard (rectContains title mouse)
   guard . not =<< liftIO (windowControlAt ctx idx mouse)

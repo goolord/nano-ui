@@ -29,7 +29,7 @@ import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
 import NanoUI.Internal.Store (boolInt, ptrEq, deleteSlot, fieldFloat, fieldInt, fieldQuiet, fieldText, findSlot, flagSlot, insertSlot, lookupSlot, setFieldSelection)
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectNonEmpty, v2X, v2Y)
+import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Combinators (readDerived, writeDerived)
@@ -113,7 +113,8 @@ data ComboInput = ComboInput
   , ciContentW :: !Float
     -- ^ Width of the widest matching row.
   , ciField :: !Rect
-    -- ^ The field's rect; empty before its first layout.
+    -- ^ The field's rect; empty before its first layout and while the field
+    -- is clipped out of view, when no row takes the pointer.
   , ciInput :: !Input
     -- ^ Dropdown-scoped input for the frame.
   }
@@ -360,6 +361,9 @@ comboBoxCore placeholder options value = do
   let wid = rawRespId resp
       key = intKey wid
   isFocus <- keyboardFocused wid
+  -- A field scrolled out of its viewport hangs no list ('openDropdowns'), so
+  -- no row of it takes the pointer.
+  shown <- if isFocus then liftIO (maybe True (isJust . rectIntersect (rawRespRect resp)) <$> getPrevClipRect ctx wid) else pure True
   -- The dropdown only shows while the field is focused, so an unfocused
   -- combo steps with no rows. The matches stay lazy: the option window below
   -- forces only its rows, and the count is forced only on frames that store it.
@@ -383,7 +387,7 @@ comboBoxCore placeholder options value = do
             , ciText = text
             , ciRows = displayed
             , ciContentW = contentW
-            , ciField = rawRespRect resp
+            , ciField = if shown then rawRespRect resp else Rect 0 0 0 0
             , ciInput = inp
             }
           cs0

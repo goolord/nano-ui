@@ -19,6 +19,7 @@ tests =
   , spec "modal-nested-dismiss" runModalNestedDismissTest
   , spec "modal-over-inner-window" runModalOverInnerWindowTest
   , spec "modal-over-inner-window-drag" runModalOverInnerWindowDragTest
+  , spec "modal-over-inner-window-resize" runModalOverInnerWindowResizeTest
   , spec "modal-hides-text-menu" runModalHidesTextMenuTest
   ]
 
@@ -94,6 +95,22 @@ runModalOverInnerWindowDragTest ctx failed = do
   assertJust failed (listToMaybe before) $ \(Rect x y w _) -> do
     let press = pressAt inp0 (V2 (x + w / 2) (y + 10))
         moved = holdAt press (V2 (x + w / 2 - 40) (y + 40))
+    mapM_ (\i -> runFrame ctx i ui) [press, moved, releaseAt moved]
+    assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
+
+-- | Nor does an edge of that window, where the modal panel covers it, show
+-- the resize cursor or resize the window.
+runModalOverInnerWindowResizeTest :: Context -> IORef Int -> IO ()
+runModalOverInnerWindowResizeTest ctx failed = do
+  let inp0 = withInputOff 500 400
+      ui = modalWith (fixedWH 460 380) (constVar True) "Settings" (window (constVar True) "Inspector" (label "body"))
+  _ <- warmup2 ctx inp0 ui
+  before <- map snd <$> nodesOfType NodeWindow ctx
+  assertJust failed (listToMaybe before) $ \(Rect x y _ h) -> do
+    let edge = V2 (x + 3) (y + h / 2)
+        press = pressAt inp0 edge
+        moved = holdAt press (V2 (x - 37) (y + h / 2))
+    assert failed . (/= UiCursorEwResize) =<< uiCursorKind ctx (inp0 {inputMousePos = edge})
     mapM_ (\i -> runFrame ctx i ui) [press, moved, releaseAt moved]
     assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
 

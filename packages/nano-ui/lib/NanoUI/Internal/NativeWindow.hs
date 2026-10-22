@@ -118,7 +118,7 @@ sizeLimitAt :: Float -> (Int, Int) -> Maybe Size -> (Int, Int)
 sizeLimitAt scale (outW, outH) limit = (axis w outW, axis h outH)
   where
     Size w h = fromMaybe (Size 0 0) limit
-    axis v outset = if not (v > 0) || isInfinite v then 0 else min 0x7FFFFFFF (round (v * scale) + outset)
+    axis v outset = if not (v > 0) || isInfinite v then 0 else min 0x7FFFFFFF (round (min 3.0e9 (v * scale)) + outset)
 
 -- | The state without a window, as under a test context: focused, scale 1,
 -- unknown position, no special mode. 'askWindow' fills in the frame's size.

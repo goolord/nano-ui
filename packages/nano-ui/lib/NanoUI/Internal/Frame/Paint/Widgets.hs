@@ -346,17 +346,10 @@ paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ 
   placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
   chrome
   let display = textInputFieldText placeholder shown focus
-      baseFg = styleFg style
   scrollX <- syncTextInputScroll ctx idx x y w h
-  (ty, fg) <-
-    if T.null display
-      then pure (0, baseFg)
-      else do
-        (_, th) <- measure display
-        pure
-          ( centeredTextY fm y h th
-          , if T.null value && not focus then lerpColor baseFg (styleBg style) 0.5 else baseFg
-          )
+  -- Its colour or tone, dimmed while empty and unfocused, as its spans take it.
+  fg <- textInputFg ctx style idx focus
+  ty <- if T.null display then pure 0 else centeredTextY fm y h . snd <$> measure display
   mEdit <- readFieldEdit ctx idx box (clipX - scrollX)
   paintClippedFieldText ctx da fm native si style idx mEdit clip (clipX - scrollX) ty display fg
   pure value

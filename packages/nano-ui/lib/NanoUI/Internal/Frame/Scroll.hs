@@ -142,14 +142,14 @@ updateScrollWheel ctx inp = do
       nt <- getNodeType (ctxNodeArena ctx) idx
       bare <- if isScrollNode nt then scrollBare . snConfig <$> readScrollNode (ctxNodeArena ctx) idx else pure False
       unless bare $
-        applyCrossAxisScroll ctx idx (V2 (if rangeX > 0 then 0 else wheelX) (if rangeY > 0 then 0 else wheelY))
+        applyCrossAxisScroll ctx idx (inputMousePos inp) (V2 (if rangeX > 0 then 0 else wheelX) (if rangeY > 0 then 0 else wheelY))
 
 -- Nested 2D: apply the unused axis to a paired scroller that runs the other
 -- way, or either way when one of the two is 2D: the nearest one above in the
--- same panel, else the first one inside. Do not walk past a panel or a
--- floating node (window, modal, popup) into the page scroller.
-applyCrossAxisScroll :: Context -> NodeIdx -> V2 -> IO ()
-applyCrossAxisScroll ctx@Context {ctxNodeArena = na} idx scroll = do
+-- same panel, else one inside, under @mouse@ if one is. Do not walk past a
+-- panel or a floating node (window, modal, popup) into the page scroller.
+applyCrossAxisScroll :: Context -> NodeIdx -> V2 -> V2 -> IO ()
+applyCrossAxisScroll ctx@Context {ctxNodeArena = na} idx mouse scroll = do
   dir <- getDirection na idx
   let is2D i = isScrollStyle2D <$> getStyleIdx na i
   self2D <- getNodeType na idx >>= \nt -> if nt == NodeTextArea then pure True else is2D idx
@@ -157,25 +157,27 @@ applyCrossAxisScroll ctx@Context {ctxNodeArena = na} idx scroll = do
     crosses i
       | self2D = pure True
       | otherwise = (||) <$> is2D i <*> ((/= dir) <$> getDirection na i)
-    crossWid i = do
+    crossWid under i = do
       nt <- getNodeType na i
-      hit <- pure (isScrollNode nt) <&&> crosses i
+      hit <- pure (isScrollNode nt) <&&> crosses i <&&> (if under then rectContains <$> getNodeRect na i <*> pure mouse else pure True)
       if hit then Just <$> getWidgetId na i else pure Nothing
     above i = do
       nt <- getNodeType na i
       if nt == NodePanel || isFloatingNode nt
         then pure (Just Nothing)
-        else fmap Just <$> crossWid i
+        else fmap Just <$> crossWid False i
     -- Only subtrees holding a scroller can hold a cross one, and a floating
     -- node's scrollers are its own.
-    inside i = firstChildJustM na i $ \ci ->
+    inside under i = firstChildJustM na i $ \ci ->
       ifM
         ((not . isFloatingNode <$> getNodeType na ci) <&&> hasScrollerBelow na ci)
-        (crossWid ci >>= maybe (inside ci) (pure . Just))
+        (crossWid under ci >>= maybe (inside under ci) (pure . Just))
         (pure Nothing)
   parent <- getParent na idx
   up <- join <$> walkAncestors na parent above
-  target <- maybe (inside idx) (pure . Just) up
+  -- One under the pointer whose content fits takes the axis as a no-op,
+  -- rather than one elsewhere on the page.
+  target <- maybe (inside True idx >>= maybe (inside False idx) (pure . Just)) (pure . Just) up
   forM_ target $ \wid -> applyScrollWheelDelta ctx wid scroll
 
 -- | Node owning scroller @wid@: its text area, or the first scroll container

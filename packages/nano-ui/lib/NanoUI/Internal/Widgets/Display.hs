@@ -221,14 +221,13 @@ svgIconConfigured' cfg doc = do
         atlas = ctxImageAtlas ctx
     frame <- frameNumber ctx
     known <- Map.lookup key <$> readIORef cache
-    make <- case known of
+    retry <- case known of
       -- A raster the atlas had no room for is made again once an image has
       -- left the atlas.
       Just (ImageId 0, freed, _) -> (/= freed) <$> Atlas.atlasReleases atlas
-      Just _ -> pure False
-      Nothing -> pure True
+      _ -> pure False
     case known of
-      Just (iid, _, drawn) | not make -> iid <$ writePrimVar drawn frame
+      Just (iid, _, drawn) | not retry -> iid <$ writePrimVar drawn frame
       _ -> do
         -- Rasters no frame drew since the one before give their room to this
         -- one: nothing on screen shows them, so their release needs no
