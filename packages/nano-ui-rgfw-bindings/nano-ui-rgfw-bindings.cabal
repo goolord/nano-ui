@@ -20,6 +20,9 @@ tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:
     CHANGELOG.md
     README.md
+-- Listed so cabal rebuilds RGFW.c and the test's Events.c when the header
+-- changes; install-includes alone is not tracked.
+extra-source-files: cbits/RGFW.h
 
 source-repository head
     type:     git
