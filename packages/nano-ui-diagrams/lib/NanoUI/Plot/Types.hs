@@ -18,7 +18,7 @@ import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Vector.Unboxed qualified as U
 import GHC.Float (castDoubleToWord64, castFloatToWord32)
-import NanoUI (Color, Response)
+import NanoUI (Color, HasResponse (..), Response)
 
 -- | Lower and upper axis bounds. Use finite, increasing bounds for plotting.
 data Domain = Domain !Double !Double
@@ -130,6 +130,10 @@ data PlotResponse = PlotResponse
   , plotHover :: !(Maybe PlotHover)
   }
   deriving (Eq, Show)
+
+instance HasResponse PlotResponse where
+  {-# INLINE toResponse #-}
+  toResponse = plotResponse
 
 -- | No series or titles, a right-hand legend, both grid directions, and decimation.
 emptyChart :: Chart
