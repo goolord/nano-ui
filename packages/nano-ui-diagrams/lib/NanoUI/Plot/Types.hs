@@ -17,7 +17,7 @@ import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Vector.Unboxed qualified as U
-import GHC.Float (castDoubleToWord64)
+import GHC.Float (castDoubleToWord64, castFloatToWord32)
 import NanoUI (Color, Response)
 
 -- | Lower and upper axis bounds. Use finite, increasing bounds for plotting.
@@ -66,7 +66,19 @@ data SeriesKind
   | BarSeries !Float
   | AreaSeries !Double
   | StepSeries !Float
-  deriving (Eq, Show)
+  deriving (Show)
+
+-- A NaN parameter equals the same NaN, as in 'SeriesData'.
+instance Eq SeriesKind where
+  LineSeries w m == LineSeries w' m' = sameF w w' && m == m'
+  ScatterSeries w m == ScatterSeries w' m' = sameF w w' && m == m'
+  BarSeries f == BarSeries f' = sameF f f'
+  AreaSeries b == AreaSeries b' = same b b'
+  StepSeries w == StepSeries w' = sameF w w'
+  _ == _ = False
+
+sameF :: Float -> Float -> Bool
+sameF a b = a == b || castFloatToWord32 a == castFloatToWord32 b
 
 -- | Named data and rendering options. An absent colour selects the chart's
 -- theme palette by series index.

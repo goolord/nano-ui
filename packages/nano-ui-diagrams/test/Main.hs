@@ -54,8 +54,10 @@ import NanoUI.Plot.Series
   , line
   , scatter
   , step
+  , withBaseline
   , withColor
   , withMarker
+  , withStrokeWidth
   )
 import NanoUI.Plot.Types
   ( Chart (..)
@@ -352,12 +354,17 @@ testNaNChartIdle = do
   owner <- Plot.newPlotCache
   let
     nan = 0 / 0
+    nanF = 0 / 0 :: Float
     held = bareChart [line "l" [(0, nan)], bar "b" [("x", nan)]]
+    -- A NaN in a series' own parameters, not its data.
+    params = bareChart [withBaseline nan (area "a" [(0, 1)]), withStrokeWidth nanF (line "l" [(0, 1)])]
     ctx = withFontMetrics base (monospaceMetrics 16)
     -- The points depend on the frame, so each frame builds a new chart.
-    frame k = runFrame ctx (emptyInput {inputWindowSize = Size 400 240}) $
-      Plot.lineChart owner (fixedWH 360 200) [(0, 0), (1, nan * fromIntegral (k :: Int)), (2, 1)]
+    frame k = runFrame ctx (emptyInput {inputWindowSize = Size 400 240}) $ do
+      _ <- Plot.lineChart owner (fixedWH 360 100) [(0, 0), (1, nan * fromIntegral (k :: Int)), (2, 1)]
+      Plot.plot owner (fixedWH 360 100) (bareChart [withBaseline (nan * fromIntegral k) (area "a" [(0, 0), (1, 1)])])
   check "a chart holding NaN differs from itself" (held == held)
+  check "a chart with a NaN baseline or width differs from itself" (params == params)
   again <- mapM frame [1 .. 4]
   check "a plot of a chart holding NaN asks for frames forever" (not (or [more | (_, _, more) <- drop 2 again]))
 
