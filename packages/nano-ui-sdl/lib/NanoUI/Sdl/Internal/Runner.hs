@@ -67,6 +67,9 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- base fonts) so a reset can never wipe the texture underneath
   -- already-recorded text mid-frame.
   freshAtlas <- prepareGlyphAtlasForFrame (sdlFontCache env)
+  -- The reset emptied the glyph slots a kept draw's text points at, so the
+  -- frame paints rather than reuse one.
+  when freshAtlas (damageFull ctx)
   -- Fonts the size cache evicted close only now, with the text caches that
   -- can still hold their metrics dropped, before the UI pass draws.
   whenM (closeEvictedFonts (sdlFontCache env)) (clearMeasureCache ctx)
