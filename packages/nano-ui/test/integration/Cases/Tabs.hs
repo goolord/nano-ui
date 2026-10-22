@@ -35,6 +35,7 @@ tests =
   , spec "tabs-scroll-follow-var" runTabsFollowVarTest
   , spec "tabs-missing-key" runTabsMissingKeyTest
   , spec "tabs-wheel-in-page" runTabsWheelInPageTest
+  , spec "tabs-wheel-fraction" runTabsWheelFractionTest
   , spec "tabs-arrow-damage" runTabsArrowDamageTest
   , spec "tabs-badge-size" runTabsBadgeSizeTest
   ]
@@ -91,6 +92,19 @@ runTabsWheelInPageTest ctx failed = do
     _ <- runFrame ctx inp ui
     assertEq failed 0 =<< getScrollOffset ctx pageWid
     assert failed . not . hasText "Controls" =<< collectTextSpans ctx
+
+-- A trackpad's fraction of a notch over an overflowing strip pages it by that
+-- fraction: rounded to whole notches, a slow swipe would move nothing.
+runTabsWheelFractionTest :: Context -> IORef Int -> IO ()
+runTabsWheelFractionTest ctx failed = do
+  let inp = withInput 240 120
+      ui = tabBar' (constVar (0 :: Int)) [tab i l () | (i, l) <- zip [0 ..] overflowLabels]
+      controls = spanRect "Controls" <$> collectTextSpans ctx
+  replicateM_ 3 (runFrame ctx inp ui)
+  assertJustM failed controls $ \r -> do
+    _ <- runFrame ctx inp {inputMousePos = spanCenter r, inputScroll = V2 0 0.3} ui
+    _ <- runFrame ctx inp ui
+    assertJustM failed controls $ \r' -> assertLt failed (rectX r') (rectX r)
 
 -- Paging the strip repaints the arrow that turns usable, whose muted look is
 -- a colour no rect or text change covers.

@@ -246,9 +246,10 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   mScr <- liftIO (getPrevRect ctx scrollWid)
   inp <- askInput
   -- Over the scroller only: it keeps the vertical wheel from the scrollers
-  -- round it, which the arrows do not.
+  -- round it, which the arrows do not. The wheel counts as a scroller takes
+  -- it, fractions of a notch from a trackpad too.
   let overStrip = maybe False (\r -> rectContains r (inputMousePos inp)) mScr
-      notches = if overStrip then round (v2Y (inputScroll inp)) else 0 :: Int
+      wheelY = if overStrip then v2Y (inputScroll inp) else 0
       -- A paging arrow while the bar overflows, muted at its end. The muted
       -- look is a font colour, which no diff covers, so a slot at the arrow
       -- repaints it when it turns.
@@ -319,13 +320,13 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
         header <- maybe (pure Nothing) (laidOut . respId) (lookup shown hdrs)
         pure (scroller *> header)
       else pure Nothing
-  -- One offset per frame: arrow pages, wheel notches and the end clamp, or
+  -- One offset per frame: arrow pages, the wheel and the end clamp, or
   -- whatever brings that header into view.
   let pagedOff
         | leftClicked, canLeft = max 0 (off - page)
         | rightClicked, canRight = min maxOff (off + page)
-        | overflow, notches /= 0, maxOff > 0 =
-            clamp 0 maxOff (off + fromIntegral notches * wheelStep)
+        | overflow, wheelY /= 0, maxOff > 0 =
+            clamp 0 maxOff (off + wheelY * wheelStep)
         | overflow, off > maxOff + 0.5 = maxOff
         | otherwise = off
       follow hr
