@@ -306,7 +306,9 @@ framedDiagram contentKey dw dh layout d = do
   fm <- uiFontMetrics
   theme <- uiTheme
   let ps = themePlotStyle theme
-  drawingCached dw dh (fmLineHeight fm) (contentKey theme) (const layout) (fitLayoutIO fm layout d) $ \rectBox ->
+      texts = foldMap (\case DrawText _ _ _ _ t _ -> [t]; _ -> []) (diagramTextOps 100 100 d)
+      fit = (\prepared -> fitLayout prepared layout d) <$> prepareFontMetricsMany fm texts
+  drawingCached dw dh (fmLineHeight fm) (contentKey theme) (const layout) fit $ \rectBox ->
     let inner = frameInner rectBox
         w = realToFrac (rectW inner) :: Double
         h = realToFrac (rectH inner)
@@ -323,12 +325,6 @@ frameBorder = 1
 frameInner :: Rect -> Rect
 frameInner (Rect x y w h) =
   Rect (x + frameBorder) (y + frameBorder) (max 0 (w - 2 * frameBorder)) (max 0 (h - 2 * frameBorder))
-
-fitLayoutIO :: FontMetrics -> Layout -> Diagram B -> IO Layout
-fitLayoutIO fm layout d = do
-  let texts = foldMap (\case DrawText _ _ _ _ t _ -> [t]; _ -> []) (diagramTextOps 100 100 d)
-  prepared <- prepareFontMetricsMany fm texts
-  pure (fitLayout prepared layout d)
 
 -- | Draw a diagram inside a framed box sized by the layout modifier. Text in
 -- the diagram is measured with the current font so labels fit. The drawing
