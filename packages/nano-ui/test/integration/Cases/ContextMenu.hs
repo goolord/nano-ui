@@ -1,6 +1,8 @@
 module Cases.ContextMenu (tests) where
 
 import Spec
+import Data.IntMap.Strict qualified as IM
+import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 
 tests :: [Spec]
@@ -12,7 +14,37 @@ tests =
   , spec "context-menu-taller-than-window" runContextMenuTallTest
   , spec "menu-button-popup-toggle" runMenuButtonPopupToggleTest
   , spec "popup-point-flip" runPopupPointFlipTest
+  , spec "popup-anchor-moved" runPopupAnchorMovedTest
   ]
+
+-- | A popup anchored to a button follows it when a label beside the button
+-- grows on a frame nothing else follows up: that frame asks for the one that
+-- places the popup at the button's new rect.
+runPopupAnchorMovedTest :: Context -> IORef Int -> IO ()
+runPopupAnchorMovedTest ctx failed = do
+  status <- newIORef ("Loading" :: T.Text)
+  let inp0 = withInputOff 640 300
+      ui = do
+        r <- row $ do
+          label =<< liftIO (readIORef status)
+          button' "Filter"
+        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect r))) {cfgDismissable = False} (label "menu")
+        pure r
+      popupX = maybe 0 rectX . listToMaybe . IM.elems <$> floatingPanelRects ctx
+      settle n = do
+        (r, _, again) <- runFrame ctx inp0 ui
+        if again && n > (0 :: Int) then settle (n - 1) else pure r
+  before <- settle 4
+  x0 <- popupX
+  writeIORef status "Loaded 1,234 items"
+  (_, _, again) <- runFrame ctx inp0 ui
+  assert failed again
+  after <- settle 4
+  (_, _, more) <- runFrame ctx inp0 ui
+  assert failed (not more)
+  x1 <- popupX
+  assertGt failed (rectX (respRect after)) (rectX (respRect before))
+  assertEq failed (rectX (respRect after) - rectX (respRect before)) (x1 - x0)
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
 menuUi = column $ do
