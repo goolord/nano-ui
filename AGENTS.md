@@ -47,8 +47,9 @@ there when working in a consumer repo.
 Requires GHC 9.10–9.14 (dev uses 9.14), `default-language: GHC2024`,
 `OverloadedStrings` for text literals, and `-threaded` on executables.
 The SDL backend needs SDL3 + SDL3_ttf 3.2+ + pkg-config (`nix develop` in this
-repo provides them; on Windows install via MSYS2 UCRT64 and point
-`PKG_CONFIG_PATH` at `C:\msys64\ucrt64\lib\pkgconfig`). Build this repository
+repo provides them; on Windows install them through MSYS2 UCRT64 and point
+`PKG_CONFIG_PATH` at its `ucrt64\lib\pkgconfig` — `C:\msys64\ucrt64\lib\pkgconfig`
+on a default install). Build this repository
 with `cabal build -j1 all`.
 
 ## The frame model (read this first)
@@ -661,6 +662,9 @@ Quick one-liners; the section above has the full story and real fixes.
   `Theming`, `Animation`, `Images`, `Canvas`, `Tasks`, `Files`, `LongList`,
   `LiveChart`), copyable as starting points. Full apps: `Demo.hs` (widget
   tour), `Notepad.hs` (menus + dialogs), `Logs.hs` (streaming), `Terminal.hs`.
-- Real consumers: `~/Dev/ned`, `~/Dev/stronghead`, `~/Dev/winget-gui`.
+- Real consumers: [ned](https://github.com/goolord/ned) (editor),
+  [stronghead](https://github.com/goolord/stronghead) (GHC diagnostics GUI),
+  [winget-gui](https://github.com/goolord/winget-gui) (Windows package
+  manager front end).
 - In consumer repos, the pinned library source is under
   `dist-newstyle/src/nano-ui-<hash>/`.
