@@ -1,22 +1,25 @@
 module Main (main) where
 
 import Control.Exception (IOException, bracket, try)
-import Control.Monad (forM_)
+import Control.Monad (filterM, forM_, void)
 import Data.Bits ((.|.))
 import Data.ByteString qualified as BS
 import Data.Either (isLeft)
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.List (nub)
+import Data.Text qualified as T
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word32)
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
-  ( DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
-  , UiCursorKind (..), V2 (..), box, constVar, button, checkbox, colorRGBA, column, defaultImageConfig, drawing
-  , fixedWH, fontMono, fontSize, grow, imageConfigured', label, labelWith, respRect, tomorrowNightMinDarkTheme, window'
+  ( AlignX (..), AlignY (..), DrawOp (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..), Theme (..)
+  , UiCursorKind (..), V2 (..), box, canvas, constVar, button, checkbox, colorRGBA, column, defaultImageConfig, drawing, drawText
+  , fixedWH, fontColor, fontMono, fontSize, grow, imageConfigured', inlineWith, label, labelWith, rectIntersect, respRect, richText
+  , roundHalfUp, tomorrowNightMinDarkTheme, window', withClip, withTransform
   )
+import NanoUI.Path qualified as P
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList, emptyInput, noModifiers)
 import NanoUI.Internal.Context (Context (..), setDrawSquareGeometry)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -27,7 +30,7 @@ import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCu
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, fillRect, freeRgfwSurface, newOffscreenRgfwSurface, packColor, sBuffer, sHeight, sWidth)
 import NanoUI.Rgfw.Wake (testRgfwWake)
-import NanoUI.Rgfw.Window (testGlWindow, testSessionModifiers, testSessionWindow)
+import NanoUI.Rgfw.Window (testGlDrawingText, testGlWindow, testSessionModifiers, testSessionWindow)
 import NanoUI.Testing (DrawCmd (..), DrawData (..), collectRasterSpans, newPixelContext, registerImage, runFrame)
 import NanoUI.Testing.Assert (run2Frames, withInput)
 import NanoUI.Testing.Harness (DemoSpan, nodesOfType, withInputOff)
@@ -204,6 +207,86 @@ testCozetteEverySize = do
   (base, _) <- collectRasterSpans ctx inp
   assert "Sized and monospace text spans measure the Cozette cell"
     ([(t, w, h) | (Rect _ _ w h, t, _, _, _) <- base] == [("Title", 30, 13), ("1234", 24, 13)])
+
+-- | Text in a canvas and in rich text is stamped from the spans its
+-- drawings record, as glyphs, as widget text is: some but not most of each
+-- line's box is in the ink, and no ink lands outside the drawings.
+testDrawingTextRaster :: IO ()
+testDrawingTextRaster = do
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  let ink = colorRGBA 0x12 0xEE 0x34 255
+      ui = column $ do
+        _ <- canvas (fixedWH 200 20) (\(Rect x y _ _) -> drawText (V2 x y) AlignStart AlignTop "Label" ink)
+        richText [inlineWith (fontColor ink) "a rich text paragraph"]
+  raster ctx 240 80 0 ui $ \_ (base, _) px -> do
+    drawings <- map snd <$> nodesOfType NodeDrawing ctx
+    inked <- filterM (\(x, y) -> (== packColor ink) <$> px x y) [(x, y) | y <- [0 .. 79], x <- [0 .. 239]]
+    let spans = [r | (r, _, fg, _, _) <- base, fg == ink]
+        inside (Rect rx ry rw rh) (x, y) = fromIntegral x >= rx && fromIntegral x < rx + rw && fromIntegral y >= ry && fromIntegral y < ry + rh
+        glyphs r = let lit = length (filter (inside r) inked) in lit > 0 && lit * 2 < round (rectW r * rectH r)
+    assert "Canvas and rich text spans collected" (length spans >= 2)
+    assert "Canvas and rich text are glyphs, not solid boxes" (all glyphs spans)
+    assert "No drawing text outside its drawing" (all (\p -> any (`inside` p) drawings) inked)
+
+-- | Drawing text paints in its drawing's layer: text on the page is hidden
+-- under a floating window, and text in the window shows over the window's
+-- background.
+testDrawingTextZOrder :: IO ()
+testDrawingTextZOrder = do
+  let theme = tomorrowNightMinDarkTheme
+      under = colorRGBA 0x12 0xEE 0x34 255
+      over = colorRGBA 0xEE 0x12 0x34 255
+      page = void $ canvas (fixedWH 240 120) $ \(Rect x y _ _) ->
+        forM_ [0 .. 8 :: Int] $ \i -> drawText (V2 x (y + 13 * fromIntegral i)) AlignStart AlignTop (T.replicate 40 "#") under
+      win = window' (constVar True) "Z" (canvas (fixedWH 60 20) (\(Rect x y _ _) -> drawText (V2 x y) AlignStart AlignTop "over" over))
+      inkAt col px = filterM (\(x, y) -> (== packColor col) <$> px x y)
+      everywhere = [(x, y) | y <- [0 .. 119], x <- [0 .. 239 :: Int]]
+  alone <- newRgfwContext theme
+  pageInk <- raster alone 240 120 0 page $ \_ _ px -> inkAt under px everywhere
+  ctx <- newRgfwContext theme
+  raster ctx 240 120 0 (page >> win) $ \_ (_, overlay) px ->
+    nodesOfType NodeWindow ctx >>= \case
+      (_, Rect wx wy ww wh) : _ -> do
+        -- A pixel in from the window's edges, which may be fractional.
+        let inWindow (x, y) = fromIntegral x >= wx + 1 && fromIntegral x < wx + ww - 1 && fromIntegral y >= wy + 1 && fromIntegral y < wy + wh - 1
+            covered = filter inWindow pageInk
+        shown <- inkAt under px covered
+        assert "A floating window covers the page's drawing text" (not (null covered) && null shown)
+        case [r | (r, _, fg, _, _) <- overlay, fg == over] of
+          [Rect sx sy sw sh] -> do
+            let box' = [(x, y) | y <- [round sy .. round (sy + sh) - 1], x <- [round sx .. round (sx + sw) - 1]]
+            lit <- length <$> inkAt over px box'
+            assert "Drawing text in a floating window shows over its background" (lit > 0 && lit * 2 < length box')
+          _ -> assert "Drawing text in a floating window is overlay text" False
+      [] -> assert "Floating window node present in arena" False
+
+-- | A canvas transform moves its text's span, and a canvas clip clips it:
+-- translated by (30, 10), the span is the plain one moved that far, and its
+-- clip is the clip rect cut to the canvas. At 1.5x its first glyph quad
+-- starts at the span's origin scaled and rounded half up.
+testDrawingTextTransform :: IO ()
+testDrawingTextTransform = do
+  ctx <- newRgfwContext tomorrowNightMinDarkTheme
+  let ink = colorRGBA 0x12 0xEE 0x34 255
+      inp = withInputOff 240 80
+      clipR = Rect 20 5 300 30
+      at (Rect x y _ _) = V2 (x + 5) (y + 4)
+      ui = canvas (fixedWH 200 60) $ \r -> do
+        drawText (at r) AlignStart AlignTop "plain" ink
+        withClip clipR (withTransform (P.translate 30 10) (drawText (at r) AlignStart AlignTop "moved" ink))
+  (resp, _, _) <- run2Frames ctx inp ui
+  (base, _) <- collectRasterSpans ctx inp
+  case ([(r, c) | (r, "plain", _, _, c) <- base], [(r, c) | (r, "moved", _, _, c) <- base]) of
+    ([(Rect px py _ _, _)], [(moved@(Rect mx my _ _), clip)]) -> do
+      assert "A canvas transform moves drawing text" ((mx, my) == (px + 30, py + 10))
+      assert "A canvas clip clips drawing text" (Just clip == rectIntersect clipR (respRect resp))
+      let ga = glyphAtlasFor getCozetteFont 1.5
+      first <- allocaBytes (64 * 32) $ \buf -> do
+        n <- writeSpanQuads ga getCozetteFont (0, 0, 400, 200) buf 0 (moved, "moved", ink, ink, clip)
+        if n > 0 then Just <$> mapM (peekByteOff buf) [0, 4] else pure Nothing
+      assert "Drawing text's first glyph lands on its rounded pen at 1.5x"
+        (first == Just [fromIntegral (roundHalfUp (mx * 1.5)), fromIntegral (roundHalfUp (my * 1.5)) :: Float])
+    _ -> assert "Transformed and plain drawing text spans collected" False
 
 -- | The OpenGL glyph atlas holds every glyph exactly as the software blitter
 -- stamps it at that scale: the grid fits the font, and a cell equals a
@@ -396,10 +479,14 @@ main = do
   testTriangleRaster
   testSquareThemedRaster
   testCozetteEverySize
+  testDrawingTextRaster
+  testDrawingTextZOrder
+  testDrawingTextTransform
   testGlyphAtlas
   testSpanQuads
   testTurnedImageRaster
   testGlWindow assert
+  testGlDrawingText assert
   testSessionWindow assert
   testSessionModifiers assert
   testRgfwWake

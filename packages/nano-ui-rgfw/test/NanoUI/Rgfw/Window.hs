@@ -3,21 +3,23 @@
 -- screenshot: the window stays opaque even where a translucent window colour
 -- is painted twice, and rows run top to bottom. A session window is sized in
 -- layout units.
-module NanoUI.Rgfw.Window (hasDisplay, testGlWindow, testSessionWindow, testSessionModifiers) where
+module NanoUI.Rgfw.Window (hasDisplay, testGlWindow, testGlDrawingText, testSessionWindow, testSessionModifiers) where
 
 import Control.Exception (IOException, bracket, try)
-import Control.Monad (void)
+import Control.Monad (forM, void, when)
 import Data.ByteString qualified as BS
 import Control.Monad.IO.Class (liftIO)
 import Data.Either (isRight)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
 import Data.Primitive.SmallArray (smallArrayFromList)
+import Data.Text qualified as T
 import Foreign.C.Types (CUChar (..))
 import Foreign.Ptr (Ptr)
 import NanoUI
-  ( DrawOp (..), Input (..), Modifiers (..), MouseButton (..), Pressable (..), Size (..), Theme (..), V2 (..), WindowMode (..), WindowSettings (..), WindowState (..), askInput, askWindow
-  , defaultWindowSettings, quitUi, requestFrame, rgbaBytes, rgbaHeight, rgbaWidth, setWindowTitleUi, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
+  ( AlignX (..), AlignY (..), DrawOp (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..), Rect (..), Response, Size (..), Theme (..), V2 (..), WindowMode (..)
+  , WindowSettings (..), WindowState (..), askInput, askWindow, button', canvas, column, defaultWindowSettings, drawText, inlineText, quitUi, requestFrame, respRect
+  , rgbaBytes, rgbaHeight, rgbaWidth, richText, setWindowTitleUi, strong, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
   , tomorrowNightMinDarkTheme, windowColor
   )
 import NanoUI.Backend (Damage (..))
@@ -26,8 +28,9 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, readRetainedPixels, readWindowPixels, renderArenaGl, retainedPixels)
-import NanoUI.Testing (collectRasterSpans, runFrame)
+import NanoUI.Testing (collectRasterSpans, damageIsEmpty, runFrame, takeDamage, takeDamagePieces)
 import NanoUI.Testing.Assert (withInput)
+import NanoUI.Testing.Harness (withInputOff)
 import RGFW qualified as R
 import System.Environment (lookupEnv)
 import System.Info (os)
@@ -92,6 +95,62 @@ testGlWindow assert =
     backdrop = colorRGBA 10 20 30 128
     red = colorRGBA 200 30 60 255
     rgb c = map fromIntegral [colorR c, colorG c, colorB c] :: [Int]
+
+-- | Text in drawings repaints with them: a page of rich text and canvas
+-- text, settled through partial frames while the pointer hovers a button
+-- and a counter changes, has the pixels a full repaint of that state draws,
+-- and the canvas text is in them.
+testGlDrawingText :: (String -> Bool -> IO ()) -> IO ()
+testGlDrawingText assert =
+  hasDisplay >>= \case
+    False -> putStrLn "[SKIP] OpenGL drawing text: no display"
+    True -> bracket (R.createWindowGL "nano-ui-rgfw-test" 0 0 w h R.rgfw_windowHide 3 2) (mapM_ R.closeWindow) $ \case
+      Nothing -> putStrLn "[SKIP] OpenGL drawing text: no OpenGL 3.2 window"
+      Just _ -> bracket newGlRenderer freeGlRenderer $ \renderer -> do
+        ctx <- newRgfwContext theme
+        btn <- newIORef (V2 0 0)
+        let inp = withInputOff (fromIntegral w) (fromIntegral h)
+            view k = column $ do
+              b <- button' "hover"
+              liftIO (writeIORef btn (centre (respRect b)))
+              void (richText [inlineText "rich text beside ", strong "a counter", inlineText (T.pack (" at " ++ show k))])
+              canvas (fixedWH 160 20) (\(Rect x y _ _) -> drawText (V2 x y) AlignStart AlignTop (T.pack ("canvas " ++ show k)) ink)
+            centre (Rect x y bw bh) = V2 (x + bw / 2) (y + bh / 2)
+            -- As the session draws a frame: a forced one in full, any other
+            -- only its damage. Returns whether it drew.
+            present force frameInp ui = do
+              writeIORef (ctxPaintFull ctx) force
+              (_, draw, _) <- runFrame ctx frameInp ui
+              damage <- takeDamage ctx
+              let drawn = force || not (damageIsEmpty damage)
+              when drawn $ do
+                (base, overlay) <- collectRasterSpans ctx frameInp
+                pieces <- if force then pure [] else takeDamagePieces ctx
+                renderArenaGl renderer getCozetteFont 1 w h (themeWindow theme) (if force then DamageFull else damage) pieces draw base overlay
+              pure drawn
+            settle :: Int -> Input -> NanoUI Response -> IO ()
+            settle n frameInp ui = do
+              drawn <- present False frameInp {inputDeltaTime = 0.016} ui
+              when (drawn && n < 200) (settle (n + 1) frameInp ui)
+            -- Partial frames until nothing changes, then the same state in full.
+            same frameInp ui = do
+              settle 0 frameInp ui
+              partial <- readRetainedPixels renderer w h
+              _ <- present True frameInp ui
+              (partial ==) <$> readRetainedPixels renderer w h
+        _ <- present True inp (view 0)
+        over <- readIORef btn
+        results <- forM [(1, inp {inputMousePos = over}), (2, inp {inputMousePos = over}), (3, inp), (4, inp {inputMousePos = over})] $ \(k, frameInp) ->
+          same frameInp (view (k :: Int))
+        full <- readRetainedPixels renderer w h
+        let inked = length [() | i <- [0, 4 .. BS.length full - 4], [BS.index full (i + c) | c <- [0 .. 2]] == [colorR ink, colorG ink, colorB ink]]
+        assert "OpenGL drawing text: partial repaints match full ones" (and results)
+        assert "OpenGL drawing text: the canvas text is drawn" (inked > 0)
+  where
+    w = 240
+    h = 120
+    theme = tomorrowNightMinDarkTheme
+    ink = colorRGBA 0x12 0xEE 0x34 255
 
 -- | A session window opens at its layout-unit size and requested scale (both
 -- visible to the view), accepts a title from the view, and closes when the
