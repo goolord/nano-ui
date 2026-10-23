@@ -8,6 +8,7 @@ packages:
   packages/nano-ui-rgfw
   packages/nano-ui-form
   packages/nano-ui-markdown
+  packages/nano-ui-svg
 
 tests: True
 benchmarks: True
@@ -49,4 +50,7 @@ package nano-ui-form
 
 package nano-ui-markdown
   flags: +sdl
+  ghc-options: -Werror
+
+package nano-ui-svg
   ghc-options: -Werror

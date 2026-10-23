@@ -1,0 +1,72 @@
+cabal-version:      3.4
+name:               nano-ui-svg
+version:            0.1.0.0
+synopsis:           SVG export for nano-ui DrawOp arrays
+description:
+    Renders nano-ui DrawOp sequences (from canvases, custom widgets, paths,
+    and diagrams) into standalone SVG documents or <g> fragments with zero
+    extra dependencies.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
+category:           Graphics
+build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
+extra-doc-files:
+    CHANGELOG.md
+    README.md
+
+source-repository head
+    type:     git
+    location: https://github.com/goolord/nano-ui.git
+    subdir:   packages/nano-ui-svg
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wextra
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wunused-packages
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Draw.Svg
+    -- The library imports NanoUI.Internal.Path, which changes without
+    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui >=0.2.0 && <0.2.1,
+        primitive ^>=0.9,
+        text ^>=2.1
+    hs-source-dirs:   lib
+
+test-suite nano-ui-svg-test
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui-svg,
+        primitive ^>=0.9,
+        text ^>=2.1
+    hs-source-dirs:   test

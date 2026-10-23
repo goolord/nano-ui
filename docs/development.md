@@ -26,6 +26,7 @@ can exhaust memory on a desktop machine; if you want a hard cap,
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and drawing, run headlessly frame by frame |
 | `nano-ui-emit-test` | Typed emission, widget adapters, reducers, rebuilds, and queue isolation |
 | `text-buffer-spec` | The multi-line text buffer |
+| `nano-ui-svg-test` | `DrawOp`-to-SVG rendering: element emission, precision, clips, gradients, escaping, and round-trip rasterization |
 | `nano-ui-inspection` | Compiler checks for SIMD writers, typed store slots, animation channels, unboxed commands, and canvas construction |
 | `nano-ui-rgfw-test` | RGFW input translation, glyph atlas, and software-rasterised frames; with a display, OpenGL frames and loop wakes |
 | `nano-ui-rgfw-bindings-test` | Native event union layouts, key width, modifiers, and constant values; with a display, `stopWaitForEvent` |
@@ -75,6 +76,7 @@ issue or PR comment box and copy the resulting `user-attachments` URL into
 | `packages/nano-ui-rgfw-bindings` | RGFW bindings and bundled C source |
 | `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts/diagrams and validated forms |
 | `packages/nano-ui-markdown` | Markdown parsing and rendering |
+| `packages/nano-ui-svg` | `DrawOp`-to-SVG export for canvases, custom widgets, and diagrams |
 | `packages/nano-ui-demo` | Example applications |
 | `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
 
