@@ -9,18 +9,32 @@ import qualified Data.ByteString as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import NanoUI
-  ( Input (..)
+  ( AlignX (..)
+  , AlignY (..)
+  , FontWeight (..)
+  , Input (..)
   , NanoUI
+  , Rect (..)
   , Size (..)
+  , TextFont (..)
   , Theme (..)
   , V2 (..)
+  , canvas
+  , colorRGBA
   , columnWith
+  , defaultTextFont
+  , drawText
+  , drawTextWith
   , fillH
   , fillW
+  , fixedH
   , flex
   , gap
+  , inlineText
   , label
+  , richText
   , rowWith
+  , strong
   , tight
   )
 import NanoUI.Backend (Damage (..), emptyInput)
@@ -133,6 +147,14 @@ main = do
         measure "Text wall, corner counters" $ do
           k <- tick cornersRef
           void (present ctxCorners False inp (textCorners k))
+        -- Text in drawings, which the paint records as spans.
+        ctxDrawn <- newRgfwContext theme
+        _ <- present ctxDrawn True inp (drawingText 0)
+        measure "Drawing text, forced full" (void (present ctxDrawn True inp (drawingText 0)))
+        drawnRef <- newIORef (0 :: Int)
+        measure "Drawing text, counter changes" $ do
+          k <- tick drawnRef
+          void (present ctxDrawn False inp (drawingText k))
         ctxCheck <- fresh
         forM_ [60, 90 .. 700 :: Int] $ \y ->
           check ("hover at y=" ++ show y) ctxCheck inp {inputMousePos = V2 120 (fromIntegral y)} (appView m)
@@ -140,6 +162,11 @@ main = do
           check ("counter " ++ show k) ctxCheck inp (appView m {counter = k})
         forM_ [1 .. 3 :: Int] $ \k -> check ("text wall " ++ show k) ctxWall inp (textWall k)
         forM_ [1 .. 3 :: Int] $ \k -> check ("corners " ++ show k) ctxCorners inp (textCorners k)
+        -- Other contexts drew since: start from this one's own pixels.
+        _ <- present ctxDrawn True inp (drawingText 0)
+        forM_ [1 .. 3 :: Int] $ \k -> check ("drawing text " ++ show k) ctxDrawn inp (drawingText k)
+        forM_ [40, 140 .. 440 :: Int] $ \y ->
+          check ("drawing text, hover at y=" ++ show y) ctxDrawn inp {inputMousePos = V2 120 (fromIntegral y)} (drawingText 3)
         putStrLn "partial repaints match full ones"
         putStrLn ("profiled RGFW demo frames at " ++ show physW ++ "x" ++ show physH)
   where
@@ -160,6 +187,21 @@ textCorners k = columnWith (tight . gap 4 . fillW . fillH) $ do
   rowWith (tight . fillW) $ do
     flex
     label (T.pack ("frame " <> show k))
+
+-- | A counter in a canvas of labels, plain and bold, over rich text
+-- paragraphs: all of it drawing text.
+drawingText :: Int -> NanoUI ()
+drawingText k = columnWith (tight . gap 4 . fillW) $ do
+  void $ canvas (fillW . fixedH 200) $ \(Rect x y w _) ->
+    forM_ [0 .. 11 :: Int] $ \r -> forM_ [0 .. 5 :: Int] $ \c -> do
+      let at = V2 (x + fromIntegral c * w / 6) (y + fromIntegral r * 16)
+          txt = T.pack (if r + c == 0 then "frame " <> show k else "cell " <> show (r * 6 + c))
+      if even (r + c)
+        then drawText at AlignStart AlignTop txt ink
+        else drawTextWith defaultTextFont {textFontWeight = WeightBold} at AlignStart AlignTop txt ink
+  forM_ (take 8 paragraphs) $ \p -> richText [inlineText p, strong " and bold"]
+  where
+    ink = colorRGBA 0xC5 0xC8 0xC6 255
 
 paragraphs :: [T.Text]
 paragraphs =
