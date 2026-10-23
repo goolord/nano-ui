@@ -6,7 +6,7 @@ standard control flow (`if`, `case`, `for_`). Widgets return values directly
 (such as `Bool` from `button`), and persistent state is held in `Var`s, mutable
 variables in the `NanoUI` monad.
 
-https://github.com/user-attachments/assets/5994a348-3bc5-4a2c-80fa-c8db2be94397
+https://github.com/user-attachments/assets/92436ce7-1202-4e51-8df7-b34ee0a31d93
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
