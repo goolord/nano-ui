@@ -132,6 +132,19 @@ executable nano-ui-sdl-profile
     other-modules:    Demo
     build-depends:    primitive ^>=0.9
 
+-- Renders the demo's Plots tab to an SVG file, headlessly. Widget chrome
+-- comes from the frame's vertex buffer, vector drawings from their cached
+-- draw ops through nano-ui-svg, and text from the raster spans.
+executable nano-ui-demo-svg
+    import:           sdl-exe
+    import:           demo-module
+    main-is:          DemoSvg.hs
+    other-modules:    Demo
+    build-depends:
+        containers >=0.7 && <0.9,
+        nano-ui-svg ^>=0.1,
+        primitive ^>=0.9
+
 executable nano-ui-sdl-notepad
     import:           sdl-exe
     main-is:          Notepad.hs

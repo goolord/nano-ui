@@ -23,6 +23,7 @@ The package is split into two parts:
 | `nano-ui-sdl-logs` | [`examples/Logs.hs`](examples/Logs.hs) | Streaming log viewer backed by a bounded ring buffer, with severity filtering, selectable log lines, Select All / Copy All, and auto-scroll that pauses when the user scrolls up. |
 | `nano-ui-sdl-terminal` | [`examples/Terminal.hs`](examples/Terminal.hs) | 80×24 terminal emulator attached to `/bin/sh` over a PTY (Linux and macOS only). Supports UTF-8, 16 ANSI colors with bold and inverse attributes, cursor movement, screen erasing, inserting and deleting characters and lines, scrolling, repeated characters, 2,000 lines of scrollback, and inline IME composition at the cursor via `useInputMethod` (`TERM=ansi`). |
 | `nano-ui-sdl-profile` | [`examples/Profile.hs`](examples/Profile.hs) | Frame-time and allocation benchmark runner for the demo UI. |
+| `nano-ui-demo-svg` | [`examples/DemoSvg.hs`](examples/DemoSvg.hs) | Renders the demo's Plots tab headlessly to an SVG file: widget chrome from the frame's vertex buffer, plots and canvas drawings from their cached draw ops via `nano-ui-svg`, and text from the raster spans. Run `cabal run nano-ui-demo-svg -- out.svg`. |
 
 Run any application with `cabal run`:
 
