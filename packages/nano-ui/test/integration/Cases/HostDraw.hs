@@ -4,11 +4,13 @@ import Spec
 import Data.List (nub, sort)
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Primitive.SmallArray (smallArrayFromList)
+import Data.Text qualified as T
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import NanoUI.Internal.Context (setDrawExternalText, setDrawSnapScale, setDrawSquareGeometry)
+import NanoUI.Internal.Store (ptrEq)
 
 tests :: [Spec]
 tests =
@@ -17,6 +19,11 @@ tests =
   , spec "draw-thick-rounded-stroke-alpha" runThickRoundedStrokeAlphaTest
   , spec "draw-external-text" runExternalTextTest
   , spec "draw-external-drawing-text" runExternalDrawingTextTest
+  , spec "draw-external-drawing-text-overlay" runExternalDrawingTextOverlayTest
+  , spec "draw-external-drawing-text-reuse" runExternalDrawingTextReuseTest
+  , spec "draw-external-drawing-text-cull" runExternalDrawingTextCullTest
+  , spec "draw-external-drawing-text-damage" runExternalDrawingTextDamageTest
+  , spec "draw-internal-drawing-text" runInternalDrawingTextTest
   , spec "draw-empty-clip" runEmptyClipTest
   , spec "draw-concentric-circles" runConcentricCirclesTest
   , spec "draw-polygon-bad-index" runPolygonBadIndexTest
@@ -259,23 +266,156 @@ runExternalTextTest ctx failed = do
   assertEq failed (drawVertexCount dLong) (drawVertexCount dShort)
   assert failed (any (\(_, t, _, _, _) -> t == "abcdefghijklmnop") spans)
 
--- | External text leaves out drawing text too, plain, styled or aligned, so
--- a host that draws only spans shows no box for each character.
+-- | A drawing with @txt@ in each kind of text op: plain from its top-left,
+-- bold, at twice the size, and centred under a clip that cuts it.
+drawingText :: T.Text -> NanoUI Response
+drawingText txt = drawing (fixedWH 300 80) $ \(Rect x y _ _) ->
+  smallArrayFromList
+    [ DrawText x y 0 1 txt drawingInk
+    , DrawTextStyled x (y + 20) defaultTextFont {textFontWeight = WeightBold} txt drawingInk
+    , DrawTextAligned x (y + 40) 0 1 2 defaultTextFont txt drawingInk
+    , PushClip (Rect (x + 140) (y + 60) 20 20)
+    , DrawText (x + 150) (y + 70) 0.5 0.5 txt drawingInk
+    , PopClip
+    ]
+
+drawingInk :: Color
+drawingInk = colorRGBA 200 40 40 255
+
+-- | The spans 'collectRasterSpans' adds for drawing text: those past the
+-- node spans, base then overlay.
+drawnSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
+drawnSpans ctx inp = do
+  (base, overlay) <- collectRasterSpans ctx inp
+  nodeBase <- collectTextSpans ctx
+  nodeOverlay <- collectOverlayTextSpans ctx inp
+  pure (drop (length nodeBase) base, drop (length nodeOverlay) overlay)
+
+-- | External text pushes no quads for drawing text, plain, styled or
+-- aligned, so a host that draws only spans shows no box per character.
+-- It records each line as a span instead, after the node spans of the base
+-- list and in op order: its line box, the ink on a transparent background,
+-- and the drawing's clip, cut by a 'PushClip'.
 runExternalDrawingTextTest :: Context -> IORef Int -> IO ()
 runExternalDrawingTextTest ctx failed = do
   let inp = withInput 400 100
-      ink = colorRGBA 255 255 255 255
-      heavy = defaultTextFont {textFontWeight = WeightBold}
-      ops txt (Rect x y _ _) =
-        [ DrawText x y 0 1 txt ink
-        , DrawTextStyled x (y + 20) heavy txt ink
-        , DrawTextAligned x (y + 40) 0 1 2 defaultTextFont txt ink
-        ]
-      ui txt = void (drawing (fixedWH 300 80) (smallArrayFromList . ops txt))
+      txt = "abcdefghijklmnop"
   setDrawExternalText ctx True
-  (_, dShort, _) <- runFrame ctx inp (ui "ab")
-  (_, dLong, _) <- runFrame ctx inp (ui "abcdefghijklmnop")
+  (_, dShort) <- warmupDraw ctx inp (drawingText "ab")
+  (resp, dLong) <- warmupDraw ctx inp (drawingText txt)
   assertEq failed (drawVertexCount dShort) (drawVertexCount dLong)
+  (base, overlay) <- collectRasterSpans ctx inp
+  (drawn, drawnOverlay) <- drawnSpans ctx inp
+  let r@(Rect x y _ _) = respRect resp
+      Rect cx cy _ _ = drawTextBox (ctxFontMetrics ctx) (x + 150) (y + 70) 0.5 0.5 txt
+  assertEq failed [txt, txt, txt, txt] [t | (_, t, _, _, _) <- drawn]
+  assertEq failed [(x, y), (x, y + 20), (x, y + 40), (cx, cy)] [(bx, by) | (Rect bx by _ _, _, _, _, _) <- drawn]
+  assertEq failed [r, r, r, Rect (x + 140) (y + 60) 20 20] [clip | (_, _, _, _, clip) <- drawn]
+  assert failed (all (\(_, _, fg, bg, _) -> fg == drawingInk && bg == Color 0) drawn)
+  -- Twice the size: the aligned line is twice as tall as the plain one.
+  assertEq failed [12, 12, 24, 12] [h | (Rect _ _ _ h, _, _, _, _) <- drawn]
+  assertEq failed drawn (drop (length base - 4) base)
+  assertEq failed [] drawnOverlay
+  assert failed (not (hasText txt overlay))
+
+-- | Drawing text in a floating window is overlay text: its spans end the
+-- overlay list, clipped inside the window, and none is in the base list.
+runExternalDrawingTextOverlayTest :: Context -> IORef Int -> IO ()
+runExternalDrawingTextOverlayTest ctx failed = do
+  let inp = withInput 600 300
+  setDrawExternalText ctx True
+  _ <- warmup2 ctx inp (window' (constVar True) "W" (drawingText "floating"))
+  (base, overlay) <- drawnSpans ctx inp
+  assertEq failed [] base
+  assertEq failed ["floating", "floating", "floating", "floating"] [t | (_, t, _, _, _) <- overlay]
+  nodesOfType NodeWindow ctx >>= \case
+    (_, win) : _ -> assert failed (all (\(_, _, _, _, clip) -> covers win clip) overlay)
+    [] -> assert failed False
+
+-- | A full frame reused from the last paint keeps that paint's drawing
+-- spans, however often they are collected, and so does a frame painted with
+-- reuse off.
+runExternalDrawingTextReuseTest :: Context -> IORef Int -> IO ()
+runExternalDrawingTextReuseTest ctx failed = do
+  let inp = withInputOff 400 100
+      -- The case returns the field itself, as Cases.Cache does for 'ptrEq'.
+      frame = runFrame ctx inp (drawingText "reused") >>= \(_, dd, _) -> pure dd
+      texts = (\(base, _) -> [t | (_, t, _, _, _) <- base]) <$> drawnSpans ctx inp
+      four = ["reused", "reused", "reused", "reused"]
+  setDrawExternalText ctx True
+  replicateM_ 2 frame
+  d1 <- frame
+  assertEq failed four =<< texts
+  d2 <- frame
+  assert failed (ptrEq d1 d2)
+  assertEq failed four =<< texts
+  setDrawReuse ctx False
+  _ <- frame
+  assertEq failed four =<< texts
+
+-- | A drawing far taller than its scroller records only the lines within
+-- the glyph slack of the viewport, all of those in view among them, each
+-- clipped to the viewport.
+runExternalDrawingTextCullTest :: Context -> IORef Int -> IO ()
+runExternalDrawingTextCullTest ctx failed = do
+  let inp = withInputOff 400 300
+      line i = T.pack ("line " ++ show i)
+      lines' = [0 .. 149 :: Int]
+      ops (Rect x y _ _) = smallArrayFromList [DrawText x (y + 13 * fromIntegral i) 0 1 (line i) drawingInk | i <- lines']
+      ui = scrollArea (fixedWH 300 200) (drawing (fixedWH 280 2000) ops)
+  setDrawExternalText ctx True
+  (sid, _) <- warmup2 ctx inp ui
+  setScrollOffset ctx sid 900
+  (_, resp) <- warmup2 ctx inp ui
+  (drawn, _) <- drawnSpans ctx inp
+  assertJustM failed (getScrollMetrics ctx sid) $ \m -> do
+    let view@(Rect _ vy _ vh) = scrollViewport m
+        dr@(Rect _ dy _ _) = respRect resp
+        lh = fmLineHeight (ctxFontMetrics ctx)
+        -- 'NanoUI.Internal.Draw.glyphSlackLines' line heights.
+        slack = 4 * lh
+        texts = [t | (_, t, _, _, _) <- drawn]
+        inView i = let top = dy + 13 * fromIntegral i in top + lh > vy && top < vy + vh
+    assert failed (length drawn > 10 && length drawn < 40)
+    assert failed (all (\(Rect _ top _ _, _, _, _, _) -> top + lh + slack >= vy && top - slack <= vy + vh) drawn)
+    assert failed (all ((`elem` texts) . line) (filter inView lines'))
+    assert failed (all (\(_, _, _, _, clip) -> Just clip == rectIntersect view dr) drawn)
+
+-- | A clip frame records no span for a drawing it does not repaint, and
+-- records the spans of one it does, inside the damage.
+runExternalDrawingTextDamageTest :: Context -> IORef Int -> IO ()
+runExternalDrawingTextDamageTest ctx failed = do
+  let inp = withInputOff 400 300
+      ui version txt = column $ do
+        _ <- drawingVersioned version (fixedWH 200 40) $ \(Rect x y _ _) ->
+          smallArrayFromList [DrawText x y 0 1 txt drawingInk]
+        box (fixedWH 10 80) (colorRGBA 0 0 0 0)
+        button' "far"
+      hover b = inp {inputMousePos = centerOf b}
+  setDrawExternalText ctx True
+  b <- warmup2 ctx inp (ui 1 "before")
+  writeIORef (ctxPaintFull ctx) False
+  _ <- runFrame ctx (hover b) (ui 1 "before")
+  assert failed . (\case DamageClip _ -> True; DamageFull -> False) =<< takeDamage ctx
+  assertEq failed ([], []) =<< drawnSpans ctx (hover b)
+  _ <- runFrame ctx (hover b) (ui 2 "after")
+  dmg <- takeDamage ctx
+  (drawn, _) <- drawnSpans ctx (hover b)
+  assertEq failed ["after"] [t | (_, t, _, _, _) <- drawn]
+  case dmg of
+    DamageClip d -> assert failed (all (\(_, _, _, _, clip) -> covers (rectInflate 1 d) clip) drawn)
+    DamageFull -> assert failed False
+
+-- | Without external text (the SDL host), drawing text draws quads as
+-- before: the buffer grows with the text, and 'collectRasterSpans' has the
+-- node spans alone.
+runInternalDrawingTextTest :: Context -> IORef Int -> IO ()
+runInternalDrawingTextTest ctx failed = do
+  let inp = withInput 400 100
+  (_, dShort) <- warmupDraw ctx inp (drawingText "ab")
+  (_, dLong) <- warmupDraw ctx inp (drawingText "abcdefghijklmnop")
+  assert failed (drawVertexCount dLong > drawVertexCount dShort)
+  assertEq failed ([], []) =<< drawnSpans ctx inp
 
 -- | Geometry clipped to nothing gets no command, which a host would still
 -- draw into the pixel its empty clip rounds to.
