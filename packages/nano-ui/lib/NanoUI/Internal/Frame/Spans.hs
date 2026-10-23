@@ -69,8 +69,11 @@ collectRasterSpans ctx inp = do
   overlay <- collectOverlayTextSpans ctx inp
   (drawnBase, drawnOverlay) <- readIORef (daTextSpans (ctxDrawArena ctx))
   -- Without drawing spans the node lists are returned as they are, uncopied.
+  -- Strict, so the pair holds no thunks.
   let withDrawn xs ys = if null ys then xs else xs ++ reverse ys
-  pure (withDrawn base drawnBase, withDrawn overlay drawnOverlay)
+      !base' = withDrawn base drawnBase
+      !overlay' = withDrawn overlay drawnOverlay
+  pure (base', overlay')
 
 -- | Total live arena nodes, including containers and decorative nodes.
 widgetNodeCount :: Context -> IO Int
