@@ -11,9 +11,11 @@
   allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`). The runners throw an
   `IOError` when the window or its OpenGL 3.2 context cannot be created.
 - Text of every size and face is laid out in the Cozette cell it is drawn
-  in: `fontSize` and `fontMono` change nothing under this backend. Only
-  widget text is drawn; text in a `drawing` or canvas, which includes
-  `richText`, Markdown and chart labels, does not appear.
+  in: `fontSize` and `fontMono` change nothing under this backend. Text in
+  a `drawing` or canvas (`richText`, Markdown, chart labels, canvas
+  `drawText`, the pane grid's drag title) is drawn in that cell like widget
+  text, above the shapes of its layer; its font size, scale, weight, slant
+  and decoration are not rendered.
 - Reducer runners take `model -> NanoUIE msg ()` from the `nano-ui-emit`
   package, so message types are checked statically.
 - `askRgfwDebug` reads the session's `RgfwDebugSnapshot` from a view

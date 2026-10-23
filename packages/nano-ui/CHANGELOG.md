@@ -1212,9 +1212,12 @@
   arrow keys included, as drags and fields already did; `colorPickerRGBA`
   keeps alpha. An edit in a channel or hex field also commits the Current
   swatch.
-- Under a backend that draws text itself (RGFW), text in a drawing (rich
-  text, Markdown, chart labels, canvas `drawText`) is left out rather than
-  drawn as one box per character.
+- Under a backend that draws text itself (RGFW, `setDrawExternalText`),
+  text in a drawing (`DrawText`, `DrawTextStyled` and `DrawTextAligned`:
+  rich text, Markdown, chart labels, canvas `drawText`) is returned by
+  `collectRasterSpans`, one span per line after the widget text of its
+  base or overlay list, rather than drawn as one box per character.
+  `collectTextSpans` and `collectOverlayTextSpans` leave it out.
 - SVG rasterizing composites only the rows each shape covers, about 13
   times faster for 300 small shapes at 512 px. When an SVG icon needs a new
   raster, rasters no icon drew this frame or the one before give up their

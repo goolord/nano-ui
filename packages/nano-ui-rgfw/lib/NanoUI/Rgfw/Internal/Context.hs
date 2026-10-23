@@ -30,7 +30,9 @@ import NanoUI.Testing (Layer (..), newPixelContext)
 --
 -- The span stamper draws every span in Cozette's one 6x13 cell, so text of
 -- every size and face, monospace included, is laid out in that cell: font
--- sizes change nothing here.
+-- sizes change nothing here. Text in drawings and canvases (rich text,
+-- Markdown, chart labels) reaches it as spans too, one per line, which
+-- 'NanoUI.Testing.collectRasterSpans' returns after the widget text.
 newRgfwContext :: Theme -> IO Context
 newRgfwContext theme = do
   ctx0 <- newPixelContext
@@ -60,7 +62,9 @@ type TextSpan = (Rect, Text, Color, Color, Rect)
 -- rasteriser follow: background and content
 -- geometry, base text spans (after content, so scroll tracks cannot erase box
 -- rules), overlay geometry, floating chrome (window scrollbars), then overlay
--- text spans.
+-- text spans. Each text list holds drawing text too, the page's in the base
+-- spans and floating panels' in the overlay ones, so it is drawn above
+-- every shape of its layer, including its own drawing's later shapes.
 paintInLayerOrder :: (Layer -> IO ()) -> IO () -> IO () -> IO ()
 paintInLayerOrder geometry baseText overlayText = do
   geometry LayerBackground

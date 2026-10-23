@@ -75,9 +75,13 @@ to physical pixels. RGFW reports no input-method composition: an input
 method draws its own composition. Files dropped on the window are not
 reported, so `dropZone` and `useDrop` see no drops under this backend.
 The bitmap font does not provide the SDL backend's installed-font lookup or
-HarfBuzz shaping. Only widget text is drawn: text in a `drawing` or canvas,
-which includes `richText`, Markdown and chart labels, does not appear. Choose
-the SDL backend when those text features are required.
+HarfBuzz shaping. Text in a `drawing` or canvas (`richText`, Markdown, chart
+labels, canvas `drawText`, the pane grid's drag title) is drawn in the
+Cozette cell like widget text, above every shape of its layer, including
+shapes its own drawing draws later. Font size, scale, weight, slant and font
+decoration are not rendered; `richText` and Markdown draw their underlines
+and strikes as shapes, so those show. Choose the SDL backend when those text
+features are required.
 
 See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
 for headless tests and native rendering checks.
