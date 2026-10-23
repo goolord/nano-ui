@@ -7,17 +7,21 @@ import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import NanoUI
-import NanoUI.Backend (monospaceMetrics)
+import NanoUI.Backend (monospaceMetrics, runFrame)
+import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
 import NanoUI.Draw.Svg
   ( SvgConfig (..)
   , defaultSvgConfig
   , drawOpsToSvg
   , renderDrawOpsSvg
   )
+import NanoUI.Internal.Context (setDrawExternalText, setDrawSquareGeometry)
 import NanoUI.Internal.Path (Shade (Shaded))
 import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
 import NanoUI.Svg (rasterizeSvg)
+import NanoUI.Testing (newPixelContext)
+import NanoUI.Testing.Assert (withInput)
 
 check :: String -> Bool -> IO ()
 check msg ok = unless ok (fail msg)
@@ -32,6 +36,7 @@ main = do
   testImages
   testDegenerateOps
   testRoundTripRaster
+  testFrameToSvg
   putStrLn "nano-ui-svg tests passed."
 
 cdc :: CustomDrawContext
@@ -405,3 +410,34 @@ testRoundTripRaster = do
       check "outer ring pixel" (pixelAt 20 px 1 1 == [255, 0, 0, 255])
       check "hole pixel is transparent" (pixelAt 20 px 7 7 == [0, 0, 0, 0])
       check "circle pixel" (pixelAt 20 px 17 3 == [0, 0, 255, 255])
+
+-- | A whole frame of ordinary widgets renders through 'frameToSvg': chrome
+-- as rects, the canvas drawing as vectors, and labels as text.
+testFrameToSvg :: IO ()
+testFrameToSvg = do
+  ctx <- newPixelContext
+  setDrawSquareGeometry ctx True
+  setDrawExternalText ctx True
+  let
+    inp = withInput 240 120
+    ui = column $ do
+      label "Frame label"
+      _ <- button "Go"
+      _ <- canvas (fixedWH 60 60) $ \_ -> drawCircle (V2 30 30) 12 red
+      pure ()
+  _ <- runFrame ctx inp ui
+  (_, dd, _) <- runFrame ctx inp ui
+  svg <- frameToSvg defaultFrameSvgConfig ctx inp dd
+  check
+    "frame svg header"
+    ( T.isPrefixOf
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"120\""
+        svg
+    )
+  check
+    "window background"
+    (T.isInfixOf ("fill=\"" <> colorToHex (themeWindow defaultTheme) <> "\"") svg)
+  check "button chrome as a rect" (T.isInfixOf "<rect " svg)
+  check "label text from spans" (T.isInfixOf ">Frame label</text>" svg)
+  check "button label text" (T.isInfixOf ">Go</text>" svg)
+  check "canvas circle from draw ops" (T.isInfixOf "<circle " svg)

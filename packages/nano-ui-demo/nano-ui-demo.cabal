@@ -140,10 +140,7 @@ executable nano-ui-demo-svg
     import:           demo-module
     main-is:          DemoSvg.hs
     other-modules:    Demo
-    build-depends:
-        containers >=0.7 && <0.9,
-        nano-ui-svg ^>=0.1,
-        primitive ^>=0.9
+    build-depends:    nano-ui-svg ^>=0.1
 
 executable nano-ui-sdl-notepad
     import:           sdl-exe
