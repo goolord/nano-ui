@@ -86,6 +86,7 @@ newDrawArena = do
   daSquareGeometry <- newIORef False
   daExternalText <- newIORef False
   daClipPieces <- newIORef emptyPrimArray
+  daTextSpans <- newIORef ([], [])
   let
     da = DrawArena {..}
   resetDrawArena da
@@ -98,6 +99,8 @@ resetDrawArena da = do
   setClip da (Rect 0 0 1e9 1e9)
   writeIORef (daCurrentTexture da) glyphAtlasTextureId
   writeIORef (daClipPieces da) emptyPrimArray
+  -- Only here: a reused frame paints nothing and keeps the last paint's.
+  writeIORef (daTextSpans da) ([], [])
 
 -- 'daCounts' slots.
 vertexCountSlot, indexCountSlot, cmdCountSlot, cmdStartSlot, countSlots :: Int
@@ -151,7 +154,8 @@ setDrawSquareGeometry da = writeIORef (daSquareGeometry da)
 
 -- | External text for hosts that rasterize text themselves from the collected
 -- text spans. Text emitters push no quads, so fonts without a glyph atlas do
--- not leave per-character advance boxes in the buffer. Persists across
+-- not leave per-character advance boxes in the buffer; drawing text ops are
+-- recorded as spans ('daTextSpans') instead. Persists across
 -- 'resetDrawArena'.
 {-# INLINE setDrawExternalText #-}
 setDrawExternalText :: DrawArena -> Bool -> IO ()

@@ -354,6 +354,13 @@ data DrawArena = DrawArena
   , daClipPieces :: !(IORef (PrimArray Float))
   -- ^ Disjoint rects as @x0, y0, x1, y1@ runs that every command is cut to,
   -- one copy per rect it meets; empty for none.
+  , daTextSpans :: !(IORef ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)]))
+  -- ^ Under external text, the drawing text this paint recorded as host
+  -- spans (bounds, text, foreground, transparent background, clip), newest
+  -- first: base layers, then overlay layers. Read by
+  -- 'NanoUI.Internal.Frame.Spans.collectRasterSpans' and emptied only by
+  -- 'NanoUI.Internal.Draw.Arena.resetDrawArena', so a reused frame keeps
+  -- the spans of the paint that drew it.
   }
 
 -- | Packed vertex stride in bytes: 32. A vertex is eight 32-bit floats: x

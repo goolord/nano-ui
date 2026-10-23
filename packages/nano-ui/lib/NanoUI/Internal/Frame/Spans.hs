@@ -18,6 +18,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (floatingPanelRects)
+import NanoUI.Internal.Draw (DrawArena (..))
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
 import NanoUI.Internal.Frame.Node (childPaintClip, nodeAdornmentInsets, readScrollNode, resolveFontFor)
@@ -58,8 +59,18 @@ collectOverlayTextSpans ctx@Context {ctxSpanOverlay = arena} inp = do
   spanArenaToList IM.empty arena
 
 -- | Collect base and overlay text separately for a host that rasterises text itself.
+-- Under external text, each list ends with the drawing text of the last
+-- painted (or reused) frame, in paint order, as line boxes with a
+-- transparent background and the drawing's clip. 'collectTextSpans' and
+-- 'collectOverlayTextSpans' leave those spans out.
 collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
-collectRasterSpans ctx inp = (,) <$> collectTextSpans ctx <*> collectOverlayTextSpans ctx inp
+collectRasterSpans ctx inp = do
+  base <- collectTextSpans ctx
+  overlay <- collectOverlayTextSpans ctx inp
+  (drawnBase, drawnOverlay) <- readIORef (daTextSpans (ctxDrawArena ctx))
+  -- Without drawing spans the node lists are returned as they are, uncopied.
+  let withDrawn xs ys = if null ys then xs else xs ++ reverse ys
+  pure (withDrawn base drawnBase, withDrawn overlay drawnOverlay)
 
 -- | Total live arena nodes, including containers and decorative nodes.
 widgetNodeCount :: Context -> IO Int

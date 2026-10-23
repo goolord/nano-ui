@@ -539,7 +539,8 @@ setDrawSquareGeometry :: Context -> Bool -> IO ()
 setDrawSquareGeometry ctx = Draw.setDrawSquareGeometry (ctxDrawArena ctx)
 
 -- | Skip text quads in the draw buffer. Hosts that rasterize text from the
--- collected text spans enable this.
+-- collected text spans enable this; drawing text ops are then returned by
+-- 'NanoUI.Internal.Frame.Spans.collectRasterSpans' instead of drawn as quads.
 {-# INLINE setDrawExternalText #-}
 setDrawExternalText :: Context -> Bool -> IO ()
 setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)

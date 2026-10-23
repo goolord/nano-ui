@@ -63,7 +63,7 @@ module NanoUI.Internal.Draw
 
 import Control.Monad (forM_, unless, when)
 import Data.Char (isSpace)
-import Data.IORef (readIORef)
+import Data.IORef (modifyIORef', readIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
@@ -336,6 +336,8 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
 -- @imageUv@ maps an image op's id to an atlas texture and UV bounds, or
 -- 'Nothing' when the id is itself a texture. A 'PushClip' intersects the
 -- current clip until its 'PopClip'; an unclosed one ends with the ops.
+-- Under external text, text ops push no quads: each line is recorded as a
+-- span ('pushTextSpan') with the current clip, filed by layer.
 emitDrawOps ::
   DrawArena
   -> FontMetrics
@@ -363,8 +365,14 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
     emitOne (DrawText x y ax ay t c) =
       unlessOffClip fm (textBoxTop fm y ay) $ do
         prepared <- prepareFontMetrics fm t
-        let Rect px py _ _ = drawTextBox prepared x y ax ay t
-        pushPreparedTextQuads da prepared px py t c
+        external <- readIORef (daExternalText da)
+        -- Each branch builds the box: shared, it would be allocated for the
+        -- quads too.
+        if external
+          then pushTextSpan da (drawTextBox prepared x y ax ay t) t c
+          else
+            let Rect px py _ _ = drawTextBox prepared x y ax ay t
+             in pushPreparedTextQuads da prepared px py t c
     -- Styled text with its line box's top-left corner at (x, y).
     emitOne (DrawTextStyled x y font t c) = do
       (styledFm, native) <- resolve font
@@ -381,24 +389,44 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
         let Rect px py _ _ = drawTextBox prepared x y ax ay t
         pushStyled prepared native font' px py t c
     emitOne op = pushShapeOp da op
-    -- Text in @font@, with metrics prepared for it, synthesizing the font's
-    -- weight and slant unless the host renders them natively.
-    pushStyled prepared native font x y t c =
-      let weight = if native then WeightNormal else textFontWeight font
-          fstyle = if native then FontStyleNormal else textFontStyle font
-       in pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
+    -- Text in @font@, with metrics prepared for it and its line box's
+    -- top-left at (x, y), synthesizing the font's weight and slant unless
+    -- the host renders them natively. Inlined, or each call of
+    -- 'emitDrawOps' would allocate it as a closure over @da@.
+    {-# INLINE pushStyled #-}
+    pushStyled prepared native font x y t c = do
+      external <- readIORef (daExternalText da)
+      if external
+        then pushTextSpan da (Rect x y (lineWidth prepared t) (fmLineHeight prepared)) t c
+        else
+          let weight = if native then WeightNormal else textFontWeight font
+              fstyle = if native then FontStyleNormal else textFontStyle font
+           in pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c
     -- Text whose line box, from @top@, lies wholly above or below the clip
     -- by more than the glyph slack draws nothing ('pushShapedQuads' culls
     -- only across), so it is skipped before it is shaped: a long paragraph
-    -- or code block costs the lines in view. A host that draws text from the
-    -- collected spans gets no drawing text: it has no span, and a font
-    -- without glyphs would leave a box per character.
+    -- or code block costs the lines in view, and under external text
+    -- records only those lines' spans.
     unlessOffClip lineFm top act = do
-      external <- readIORef (daExternalText da)
       Rect _ cy _ ch <- currentClip da
       let !lh = fmLineHeight lineFm
           !slack = glyphSlackLines * lh
-      unless (external || top + lh + slack < cy || top - slack > cy + ch) act
+      unless (top + lh + slack < cy || top - slack > cy + ch) act
+
+-- | Record drawing text as a host span with its line box: under external
+-- text a drawing's text has no quads and no node span, so the host draws it
+-- from this one ('daTextSpans'), in the current clip and filed by layer. An
+-- empty clip records nothing, as it gets no command. Top level and out of
+-- line so 'emitDrawOps'' local closures capture nothing more for it.
+{-# NOINLINE pushTextSpan #-}
+pushTextSpan :: DrawArena -> Rect -> T.Text -> Color -> IO ()
+pushTextSpan da !box t c = unless (T.null t) $ do
+  clip@(Rect _ _ cw ch) <- currentClip da
+  when (cw > 0 && ch > 0) $ do
+    layer <- currentLayer da
+    let entry = (box, t, c, Color 0, clip)
+    modifyIORef' (daTextSpans da) $ \(base, overlay) ->
+      if layer >= LayerOverlay then (base, entry : overlay) else (entry : base, overlay)
 
 -- | Paint a 'DrawImage' op; other ops paint nothing. @imageUv@ is as for
 -- 'emitDrawOps', and the op's UVs span 0 to 1 over the image. Unrotated
