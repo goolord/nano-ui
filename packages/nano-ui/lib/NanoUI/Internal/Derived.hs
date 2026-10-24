@@ -47,6 +47,8 @@ data TableDerived = TableDerived
   , tdRowObjs :: !(SmallArray Opaque)
   , tdHeaders :: !(Vector Text)
   , tdEncoded :: !(SmallArray (Vector Text))
+  , tdKeys :: !(SmallArray (Vector Text))
+  , tdSortable :: !(SmallArray Bool)
   , tdCellW :: !(PrimArray Float)
   , tdTextRow :: !(PrimArray Int)
   , tdWidths :: !(PrimArray Float)

@@ -20,6 +20,14 @@ module NanoUI.Internal.Widgets.Table
   , Headed (..)
   , headed
   , headless
+  , ToCell (..)
+  , Cell (..)
+  , textCell
+  , cellWidget
+  , widgetCell
+  , cellSort
+  , cellSortKey
+  , withText
   )
 where
 
@@ -32,7 +40,8 @@ import Data.Foldable (toList)
 import Data.IORef (modifyIORef')
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.List (find, sortOn)
+import Data.List (find)
+import Data.List qualified as L
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
@@ -49,12 +58,14 @@ import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), So
 import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, styled, uiTheme, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), Style (..), Theme (..), defaultLayout, fillH, fillW, minW, panelStyle, tight)
 import Data.Bits ((.|.), shiftL)
-import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortBlank)
+import Data.String (IsString (..))
+import NanoUI.Internal.Types (Color, Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
+import NanoUI.Internal.WidgetText (buttonFlagContent, buttonFlagTable, stripeColor, tableHeaderLabel, tableSortBlank)
+import NanoUI.Internal.Widgets.Adornment (adornmentRow)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
@@ -110,17 +121,85 @@ sortMarkStyle sort idx
   | sortColDir sort == SortDesc = 2 `shiftL` 16
   | otherwise = 1 `shiftL` 16
 
--- | Stable sort by the selected column's rendered text, not numeric value.
--- Out-of-range column indices are clamped; with no columns, input order is retained.
-sortRows :: Foldable f => Colonnade Headed row Text -> SortCol -> f row -> [row]
+minColW :: Float
+minColW = 40
+
+-- | What one table cell (or header) shows.
+data Cell = Cell
+  { cellKey  :: !(Maybe Text)
+  -- ^ Sort key; 'Nothing' = unsortable by this cell.
+  , cellText :: !Text
+  -- ^ Measured for width; drawn when there is no widget view.
+  , cellView :: Maybe (NanoUI ())
+  -- ^ Replaces drawn text when present. Built only for visible rows.
+  }
+
+-- | Anything a 'Colonnade' column can encode to. Pure and user-implementable.
+class ToCell c where
+  toCell :: c -> Cell
+
+instance ToCell Text where
+  {-# INLINE toCell #-}
+  toCell t = Cell (Just t) t Nothing
+
+instance ToCell Cell where
+  {-# INLINE toCell #-}
+  toCell = id
+
+instance ToCell (NanoUI ()) where
+  {-# INLINE toCell #-}
+  toCell w = Cell Nothing T.empty (Just w)
+
+instance IsString Cell where
+  {-# INLINE fromString #-}
+  fromString s = let !t = T.pack s in Cell (Just t) t Nothing
+
+-- | Plain text cell (sortable by its text).
+textCell :: Text -> Cell
+textCell t = Cell (Just t) t Nothing
+
+-- | Arbitrary interactive widget cell (unsortable by default).
+cellWidget :: NanoUI () -> Cell
+cellWidget w = Cell Nothing T.empty (Just w)
+
+-- | Encode a function @a -> NanoUI ()@ into a table cell.
+widgetCell :: (a -> NanoUI ()) -> a -> Cell
+widgetCell f = cellWidget . f
+
+-- | Attach a text sort key to a cell. If the cell's 'cellText' is empty,
+-- also populates 'cellText' with the key so column width can be estimated.
+cellSort :: Text -> Cell -> Cell
+cellSort k c = c { cellKey = Just k, cellText = if T.null (cellText c) then k else cellText c }
+
+-- | Alias for 'cellSort'.
+cellSortKey :: Text -> Cell -> Cell
+cellSortKey = cellSort
+
+-- | Attach an explicit text label for column width estimation.
+withText :: Text -> Cell -> Cell
+withText t c = c { cellText = t }
+
+labelColor :: Layout -> Theme -> Color
+labelColor lay theme = fromMaybe (styleFg (themeButton theme)) (layoutFontColor lay)
+
+-- | Stable sort by the selected column's sort key (or text).
+-- Out-of-range or unsortable column indices retain input order.
+sortRows :: (Foldable f, ToCell c) => Colonnade Headed row c -> SortCol -> f row -> [row]
 sortRows cols sort inputRows =
   let rows = toList inputRows
       n = V.length (Encode.getColonnade cols)
       idx = sortColIndex (clampSortCol n sort)
-      enc = maybe (const T.empty) Encode.oneColonnadeEncode (Encode.getColonnade cols V.!? idx)
-   in case sortColDir sort of
-        SortAsc -> sortOn enc rows
-        SortDesc -> sortOn (Down . enc) rows
+   in case Encode.getColonnade cols V.!? idx of
+        Nothing -> rows
+        Just col ->
+          let enc r = toCell (Encode.oneColonnadeEncode col r)
+              key r = fromMaybe (cellText (enc r)) (cellKey (enc r))
+              hasAnyKey = any (isJust . cellKey . enc) rows || any (not . T.null . cellText . enc) rows
+           in if not hasAnyKey
+                then rows
+                else case sortColDir sort of
+                  SortAsc -> L.sortOn key rows
+                  SortDesc -> L.sortOn (Down . key) rows
 
 isNumericCell :: Text -> Bool
 isNumericCell txt =
@@ -138,39 +217,58 @@ samePtr (Opaque a) = ptrEq a
 -- from what it holds. The rows and columns are evaluated first, so the
 -- pointers kept and compared are their values, whether or not the code that
 -- derives the data evaluates them before keeping them.
-tableDerived :: Foldable f => Context -> Int -> Colonnade Headed row Text -> f row -> SortCol -> IO TableDerived
+tableDerived :: (Foldable f, ToCell c) => Context -> Int -> Colonnade Headed row c -> f row -> SortCol -> IO TableDerived
 tableDerived ctx key !cols !rows sort = do
   cached <- readDerived tableCache ctx key
-  let hdrs = Encode.header id cols
+  let encoders = Encode.getColonnade cols
+      hdrs = V.map (cellText . toCell . getHeaded . Encode.oneColonnadeHead) encoders
   derived <- case cached of
     Just d | samePtr (tdRows d) rows && samePtr (tdCols d) cols -> pure d
     _ -> rederive ctx cols rows sort hdrs (mfilter ((== hdrs) . tdHeaders) cached)
   let !resorted
         | tdSort derived == sort = derived
-        | otherwise = derived {tdSort = sort, tdOrder = orderFor sort (tdEncoded derived)}
+        | otherwise = derived {tdSort = sort, tdOrder = orderFor sort (tdSortable derived) (tdKeys derived)}
   case cached of
     Just d | samePtr (Opaque d) resorted -> pure ()
     _ -> writeDerived tableCache ctx key resorted
   pure resorted
 
--- | Row indices sorted by the sort column's text.
-orderFor :: SortCol -> SmallArray (V.Vector Text) -> PrimArray Int
-orderFor sort cells = sortIndices (sortColDir sort) (mapSmallArray' (sortKey sort) cells)
+-- | Row indices sorted by the sort column's key or text.
+-- Falls back to input order if the column is unsortable.
+orderFor :: SortCol -> SmallArray Bool -> SmallArray (V.Vector Text) -> PrimArray Int
+orderFor sort sortable keys
+  | not (smallAt sortable (sortColIndex sort) False) =
+      generatePrimArray (sizeofSmallArray keys) id
+  | otherwise =
+      sortIndices (sortColDir sort) (mapSmallArray' (sortKey sort) keys)
 
 sortKey :: SortCol -> V.Vector Text -> Text
 sortKey sort row = fromMaybe T.empty (row V.!? sortColIndex sort)
 
--- | A row's cells, each evaluated. Every cell of an encoded row is compared
--- or measured, so none is left as a thunk.
-encodeRow :: V.Vector (Encode.OneColonnade Headed row Text) -> row -> V.Vector Text
-encodeRow encoders r = V.create $ do
+-- | A row's cells, each evaluated.
+encodeRow :: ToCell c => V.Vector (Encode.OneColonnade Headed row c) -> row -> (V.Vector Text, V.Vector Text, V.Vector Bool)
+encodeRow encoders r = runST $ do
   let k = V.length encoders
-  cells <- MV.unsafeNew k
+  txts <- MV.unsafeNew k
+  keys <- MV.unsafeNew k
+  hasKey <- MV.unsafeNew k
   let fill !j = when (j < k) $ do
-        MV.unsafeWrite cells j $! Encode.oneColonnadeEncode (V.unsafeIndex encoders j) r
+        let !c = toCell (Encode.oneColonnadeEncode (V.unsafeIndex encoders j) r)
+            !t = cellText c
+        MV.unsafeWrite txts j t
+        case cellKey c of
+          Just sk -> do
+            MV.unsafeWrite keys j sk
+            MV.unsafeWrite hasKey j True
+          Nothing -> do
+            MV.unsafeWrite keys j t
+            MV.unsafeWrite hasKey j (not (T.null t))
         fill (j + 1)
   fill 0
-  pure cells
+  !vTxts <- V.unsafeFreeze txts
+  !vKeys <- V.unsafeFreeze keys
+  !vHasKey <- V.unsafeFreeze hasKey
+  pure (vTxts, vKeys, vHasKey)
 
 -- | The first cell at which two rows differ, or -1 when they are the same.
 firstDiff :: V.Vector Text -> V.Vector Text -> Int
@@ -187,7 +285,7 @@ firstDiff a b = go 0
 -- each cell whose text is unchanged keeps its width, and the order stands
 -- while no sort key changed. Widths measured with other fonts are kept only
 -- while no text changed.
-rederive :: Foldable f => Context -> Colonnade Headed row Text -> f row -> SortCol -> V.Vector Text -> Maybe TableDerived -> IO TableDerived
+rederive :: (Foldable f, ToCell c) => Context -> Colonnade Headed row c -> f row -> SortCol -> V.Vector Text -> Maybe TableDerived -> IO TableDerived
 rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort hdrs old = do
   -- Bound evaluated, so the loops below do not enter them again.
   let !n = length rows
@@ -195,14 +293,20 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
       !oldN = maybe 0 (sizeofSmallArray . tdEncoded) old
       !oldObjs = maybe emptySmallArray tdRowObjs old
       !oldEnc = maybe emptySmallArray tdEncoded old
+      !oldKeys = maybe emptySmallArray tdKeys old
       !sameCols = any (\d -> samePtr (tdCols d) cols) old
       !encoders = Encode.getColonnade cols
   objsM <- newSmallArray n (Opaque ())
   encM <- newSmallArray n V.empty
+  keysM <- newSmallArray n V.empty
   changedM <- newPrimArray n
   diffM <- newPrimArray n
   countM <- newPrimArray 1
-  let store i o e = writeSmallArray objsM i o >> writeSmallArray encM i e
+  sortableM <- newSmallArray c False
+  case old of
+    Just d -> forM_ [0 .. c - 1] $ \j -> writeSmallArray sortableM j (smallAt (tdSortable d) j False)
+    Nothing -> pure ()
+  let store i o e k = writeSmallArray objsM i o >> writeSmallArray encM i e >> writeSmallArray keysM i k
       note k i d = writePrimArray changedM k i >> writePrimArray diffM k d
       -- Lists the rows whose text changed or is new, each with its first
       -- changed cell (0 for a new row), and stores their count in countM,
@@ -215,15 +319,22 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
         | i < oldN = do
             let !o = indexSmallArray oldObjs i
                 !e = indexSmallArray oldEnc i
+                !ky = indexSmallArray oldKeys i
             if sameCols && samePtr o r
-              then store i o e >> walk (i + 1) k rs
+              then store i o e ky >> walk (i + 1) k rs
               else do
-                let !e' = encodeRow encoders r
-                    !d = firstDiff e' e
+                let (!e', !ky', !hasKeys) = encodeRow encoders r
+                forM_ [0 .. c - 1] $ \j ->
+                  when (hasKeys V.! j) (writeSmallArray sortableM j True)
+                let !d = firstDiff e' e
                 if d < 0
-                  then store i (Opaque r) e >> walk (i + 1) k rs
-                  else store i (Opaque r) e' >> note k i d >> walk (i + 1) (k + 1) rs
-        | otherwise = store i (Opaque r) (encodeRow encoders r) >> note k i 0 >> walk (i + 1) (k + 1) rs
+                  then store i (Opaque r) e ky >> walk (i + 1) k rs
+                  else store i (Opaque r) e' ky' >> note k i d >> walk (i + 1) (k + 1) rs
+        | otherwise = do
+            let (!e', !ky', !hasKeys) = encodeRow encoders r
+            forM_ [0 .. c - 1] $ \j ->
+              when (hasKeys V.! j) (writeSmallArray sortableM j True)
+            store i (Opaque r) e' ky' >> note k i 0 >> walk (i + 1) (k + 1) rs
   walk (0 :: Int) (0 :: Int) (toList rows)
   nChanged <- readPrimArray countM 0
   objs <- unsafeFreezeSmallArray objsM
@@ -231,6 +342,8 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
     Just d | n == oldN && nChanged == 0 -> pure d {tdRows = Opaque rows, tdCols = Opaque cols, tdRowObjs = objs}
     _ -> do
       encoded <- unsafeFreezeSmallArray encM
+      keys <- unsafeFreezeSmallArray keysM
+      sortable <- unsafeFreezeSmallArray sortableM
       changedRows <- unsafeFreezePrimArray changedM
       firstDiffs <- unsafeFreezePrimArray diffM
       let !cellPadX = 2 * tableCellInset
@@ -299,11 +412,11 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
       let keysKept d =
             let key = sortKey (tdSort d)
                 s = sortColIndex (tdSort d)
-                keyChanged r f = s == f || (s > f && not (eqByPtr (key (indexSmallArray oldEnc r)) (key (indexSmallArray encoded r))))
+                keyChanged r f = s == f || (s > f && not (eqByPtr (key (indexSmallArray oldKeys r)) (key (indexSmallArray keys r))))
              in n == oldN && findChanged keyChanged < 0
           (sort', order) = case old of
             Just d | keysKept d -> (tdSort d, tdOrder d)
-            _ -> (sort, orderFor sort encoded)
+            _ -> (sort, orderFor sort sortable keys)
       pure
         TableDerived
           { tdRows = Opaque rows
@@ -313,6 +426,8 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
           , tdRowObjs = objs
           , tdHeaders = hdrs
           , tdEncoded = encoded
+          , tdKeys = keys
+          , tdSortable = sortable
           , tdCellW = cellWs
           , tdTextRow = textRows
           , tdWidths = widths
@@ -391,23 +506,23 @@ colBoxLayout fillInner hasStretch sizes contentWs stored i
 --
 -- > table "files" cols files app.sort
 {-# INLINE table #-}
-table :: Foldable f => Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI ()
+table :: (Foldable f, ToCell c) => Text -> Colonnade Headed row c -> f row -> Var SortCol -> NanoUI ()
 table = tableConfigured defaultTableConfig id
 
 -- | 'table' returning the 'TableResponse': the column order and hidden
 -- columns along with the response.
 {-# INLINE table' #-}
-table' :: Foldable f => Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI TableResponse
+table' :: (Foldable f, ToCell c) => Text -> Colonnade Headed row c -> f row -> Var SortCol -> NanoUI TableResponse
 table' = tableConfigured' defaultTableConfig id
 
 -- | 'table' with a layout modifier.
 {-# INLINE tableWith #-}
-tableWith :: Foldable f => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI ()
+tableWith :: (Foldable f, ToCell c) => (Layout -> Layout) -> Text -> Colonnade Headed row c -> f row -> Var SortCol -> NanoUI ()
 tableWith = tableConfigured defaultTableConfig
 
 -- | 'tableWith' returning the 'TableResponse'.
 {-# INLINE tableWith' #-}
-tableWith' :: Foldable f => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> Var SortCol -> NanoUI TableResponse
+tableWith' :: (Foldable f, ToCell c) => (Layout -> Layout) -> Text -> Colonnade Headed row c -> f row -> Var SortCol -> NanoUI TableResponse
 tableWith' = tableConfigured' defaultTableConfig
 
 -- | A table of text rows under the given headers, sorted by the first column
@@ -427,11 +542,11 @@ simpleTable headers rows = do
 -- hidden columns.
 {-# INLINE tableConfigured #-}
 tableConfigured ::
-  Foldable f =>
+  (Foldable f, ToCell c) =>
   TableConfig ->
   (Layout -> Layout) ->
   Text ->
-  Colonnade Headed row Text ->
+  Colonnade Headed row c ->
   f row ->
   Var SortCol ->
   NanoUI ()
@@ -441,11 +556,11 @@ tableConfigured cfg f key cols rows v = void (tableConfigured' cfg f key cols ro
 -- before a header click is read, so a click that changes the sort runs the
 -- view again to show them in the new order.
 tableConfigured' ::
-  Foldable f =>
+  (Foldable f, ToCell c) =>
   TableConfig ->
   (Layout -> Layout) ->
   Text ->
-  Colonnade Headed row Text ->
+  Colonnade Headed row c ->
   f row ->
   Var SortCol ->
   NanoUI TableResponse
@@ -454,26 +569,38 @@ tableConfigured' cfg f key cols rows v =
 
 -- | 'tableConfigured' on a plain sort.
 tableCore ::
-  Foldable f =>
+  (Foldable f, ToCell c) =>
   TableConfig ->
   (Layout -> Layout) ->
   Text ->
-  Colonnade Headed row Text ->
+  Colonnade Headed row c ->
   f row ->
   SortCol ->
   NanoUI TableResponse
 tableCore cfg f key cols inputRows curSort =
-  withKey ("table:" <> key) $ do
+  let encoders = Encode.getColonnade cols
+      n = V.length encoders
+      rowsList = toList inputRows
+      rowsVec = V.fromList rowsList
+      nRows = V.length rowsVec
+  in withKey ("table:" <> key) $ do
     (stateWid, ctx) <- freshWidget
     vWid <- nextId
     hWid <- nextId
     tableWid <- nextId
-    let n = V.length (Encode.getColonnade cols)
-        sort0 = clampSortCol n curSort
+    let sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
     inp <- askInput
     st0 <- liftIO (getStore ctx)
-    TableDerived {tdHeaders = hdrs, tdEncoded = encoded, tdWidths = contentWs, tdNumeric = numeric, tdOrder = sorted} <-
+    TableDerived
+      { tdHeaders = _hdrs
+      , tdEncoded = _encoded
+      , tdKeys = _keys
+      , tdSortable = sortable
+      , tdWidths = contentWs
+      , tdNumeric = numeric
+      , tdOrder = sorted
+      } <-
       liftIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
         -- The column order and the widths columns were dragged to.
@@ -497,7 +624,6 @@ tableCore cfg f key cols inputRows curSort =
         freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
         frozenIdx = take freezeN vis
         unfrozenIdx = drop freezeN vis
-        nRows = sizeofSmallArray encoded
         pinnedN = clamp 0 nRows (tableFreezeRows cfg)
         scrollN = nRows - pinnedN
         -- Columns fill the table width when one stretches or the table
@@ -511,10 +637,33 @@ tableCore cfg f key cols inputRows curSort =
           smallArrayFromList (map (colBoxLayout fillInner hasStretch sizes contentWs (primArrayFromList widths1)) [0 .. n - 1])
         colBox i = smallAt colBoxes i (tight defaultLayout)
         cellLayout i = if smallAt numeric i False then numCellLayout else textCellLayout
-        -- Cell @i@ of display row @ri@, which shows encoded row @r@.
+        isSortable i = smallAt sortable i False
+        renderHeader i active cellLay flags = do
+          let oneCol = encoders V.! i
+              hdrCell = toCell (getHeaded (Encode.oneColonnadeHead oneCol))
+          case cellView hdrCell of
+            Nothing ->
+              buttonStyledEx True (tableHeaderLabel (smallAt numeric i False) (cellText hdrCell)) (if active then 1 else 0) cellLay flags
+            Just hdrAct -> do
+              resp <- buttonStyledEx True "" (if active then 1 else 0) cellLay (flags .|. buttonFlagContent)
+              theme <- uiTheme
+              _ <- withWidgetChildren (respId resp) (adornmentRow cellLay (labelColor cellLay theme) hdrAct)
+              pure resp
         renderCell ri r i = do
-          wid <- nextId
-          void (addWidgetStyled wid NodeText (indexSmallArray encoded r V.! i) 0 (cellLayout i) (if even ri then 1 else 2))
+          let rowVal = rowsVec V.! r
+              col = V.unsafeIndex encoders i
+              cell = toCell (Encode.oneColonnadeEncode col rowVal)
+          case cellView cell of
+            Nothing -> do
+              wid <- nextId
+              void (addWidgetStyled wid NodeText (cellText cell) 0 (cellLayout i) (if even ri then 1 else 2))
+            Just widgetAct -> do
+              theme <- uiTheme
+              let mBg = stripeColor theme (if even ri then 1 else 2)
+                  cellStyle = case mBg of
+                    Just bg -> styled (panelStyle (\s -> s {styleBg = bg, styleBorderWidth = 0, styleCornerRadius = 0}))
+                    Nothing -> id
+              cellStyle (panel' (cellLayout i) widgetAct)
         rowCells rowLay idxs colLays ri =
           gridColumnsLay rowLay idxs colLays [renderCell ri (indexPrimArray sorted ri) i | i <- idxs]
         paneRoot = fillIf fillInner (tight (fillH defaultLayout))
@@ -528,14 +677,18 @@ tableCore cfg f key cols inputRows curSort =
           hs <- row' (gridRowLay idxs) $
             forM (zip [0 :: Int ..] idxs) $ \(k, i) -> do
               when (k > 0) $ void separator
+              let isSort = isSortable i
+                  isActive = sortColIndex sort0 == i && isSort
+                  flags = (if isSort then sortMarkStyle sort0 i else 0) .|. buttonFlagTable
               withKey i $
                 column' (colBox i) $
-                  buttonStyledEx True (tableHeaderLabel (smallAt numeric i False) (fromMaybe T.empty (hdrs V.!? i))) (if sortColIndex sort0 == i then 1 else 0) (cellLayout i) (sortMarkStyle sort0 i .|. buttonFlagTable)
+                  renderHeader i isActive (cellLayout i) flags
           void separator
           let !rowLay = gridRowLay idxs
               !colLays = map colBox idxs
-          forM_ [0 .. pinnedN - 1] $ \ri ->
-            withKey ("pin" :: Text, ri) $ do
+          forM_ [0 .. pinnedN - 1] $ \ri -> do
+            let !sourceIdx = indexPrimArray sorted ri
+            withKey ("pin" :: Text, sourceIdx) $ do
               when (ri > 0) $ void separator
               rowCells rowLay idxs colLays ri
           when (pinnedN > 0 && scrollN > 0) $ void separator
@@ -554,10 +707,12 @@ tableCore cfg f key cols inputRows curSort =
               botH = fromIntegral (max 0 (scrollN - hi - 1)) * tableRowMinH
           column' rowLay $ do
             when (topH > 0) $ void (spacer Fit (Fixed topH))
-            forM_ [lo .. hi] $ \rowIdx ->
-              withKey rowIdx $ do
+            forM_ [lo .. hi] $ \rowIdx -> do
+              let !ri = rowIdx + pinnedN
+                  !sourceIdx = indexPrimArray sorted ri
+              withKey sourceIdx $ do
                 when (rowIdx > 0) $ void separator
-                rowCells rowLay idxs colLays (rowIdx + pinnedN)
+                rowCells rowLay idxs colLays ri
             when (botH > 0) $ void (spacer Fit (Fixed botH))
         frozenPane =
           column' (paneLay False frozenIdx) $ do
@@ -660,7 +815,7 @@ tableCore cfg f key cols inputRows curSort =
           sortClick =
             if reorderMoved reorder || isJust mReorder || isResize || (isJust edgeCol && (heldIn MouseLeft inp || releasedIn MouseLeft inp))
               then Nothing
-              else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
+              else listToMaybe [i | (i, r) <- headerPairs, respClicked r, isSortable i]
           nextSort = maybe sort0 (nextSortCol sort0) sortClick
           hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
           widgetResp =
@@ -768,9 +923,6 @@ rebuildOrder hidden newVis old =
             (v : vs') -> v : go is vs'
             [] -> i : is
    in go old newVis
-
-minColW :: Float
-minColW = 40
 
 -- | Each column's resize zone: @pad@ either side of its header's right edge,
 -- from the top of the header band to the bottom of the body's last-frame

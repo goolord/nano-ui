@@ -345,6 +345,14 @@ module NanoUI
   , Headed (..)
   , headed
   , headless
+  , ToCell (..)
+  , Cell (..)
+  , textCell
+  , cellWidget
+  , widgetCell
+  , cellSort
+  , cellSortKey
+  , withText
 
     -- * Overlays
   , modal

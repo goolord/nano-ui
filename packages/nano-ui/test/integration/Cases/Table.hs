@@ -52,6 +52,9 @@ tests =
   , pixelSpec "table-hbar-reach" runTableHBarReachTest
   , spec "table-live-rows" runTableLiveRowsTest
   , spec "table-sort-mark-damage" runTableSortMarkDamageTest
+  , spec "table-widget-cells" runTableWidgetCellsTest
+  , spec "table-cell-mixed" runTableCellMixedTest
+  , spec "table-widget-sort-state" runTableWidgetSortStateTest
   ]
 
 -- | A sort set from outside the table moves its header mark, and the frame
@@ -70,6 +73,86 @@ runTableSortMarkDamageTest ctx failed = do
   dmg <- takeDamage ctx
   forM_ ["Name", "Dept"] $ \h ->
     assertJust failed (findHeader h spans) $ \(V2 x y) -> assert failed (damageCovers dmg (Rect x y 1 1))
+
+-- | A row of 'runTableWidgetCellsTest'.
+data WidgetRow = WidgetRow Text (Var Bool)
+
+runTableWidgetCellsTest :: Context -> IORef Int -> IO ()
+runTableWidgetCellsTest ctx failed = do
+  sortV <- newVar (SortCol 0 SortAsc)
+  clicked1 <- newVar False
+  clicked2 <- newVar False
+  let rows = [WidgetRow "Alpha" clicked1, WidgetRow "Beta" clicked2]
+      cols :: Colonnade Headed WidgetRow (NanoUI ())
+      cols = mconcat
+        [ headed (label "Name") (\(WidgetRow name _) -> label name)
+        , headed (label "Action") (\(WidgetRow name clk) -> whenM (button ("Click " <> name)) (writeVar clk True))
+        ]
+      inp0 = withInputOff 500 300
+      ui = table "widgets" cols rows sortV
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  assert failed (isJust (findHeader "Name" spans))
+  assert failed (isJust (findHeader "Action" spans))
+  assert failed (isJust (findExact "Alpha" spans))
+  assert failed (isJust (findExact "Beta" spans))
+  assertJust failed (findExact "Click Alpha" spans) $ \btnPos -> do
+    _ <- runClick ctx inp0 ui btnPos
+    c1 <- readVarIO clicked1
+    assert failed c1
+
+runTableCellMixedTest :: Context -> IORef Int -> IO ()
+runTableCellMixedTest ctx failed = do
+  sortV <- newVar (SortCol 0 SortAsc)
+  let rows = [("banana", 2 :: Int), ("apple", 1), ("cherry", 3)]
+      cols :: Colonnade Headed (Text, Int) Cell
+      cols = mconcat
+        [ headed "Fruit" (textCell . fst)
+        , headed "Count" (\(_, n) -> cellSort (T.pack (show n)) (cellWidget (label (T.pack (show n)))))
+        , headed "Button" (widgetCell (\(f, _) -> void (button ("Eat " <> f))))
+        ]
+      inp0 = withInputOff 500 300
+      ui = table "mixed" cols rows sortV
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  assert failed (isJust (findHeader "Fruit" spans))
+  assert failed (isJust (findHeader "Count" spans))
+  assert failed (isJust (findHeader "Button" spans))
+  assert failed (isJust (findExact "banana" spans))
+  assert failed (isJust (findExact "Eat apple" spans))
+  let sortedAsc = sortRows cols (SortCol 1 SortAsc) rows
+  assertEq failed [("apple", 1), ("banana", 2), ("cherry", 3)] sortedAsc
+  let sortedDesc = sortRows cols (SortCol 1 SortDesc) rows
+  assertEq failed [("cherry", 3), ("banana", 2), ("apple", 1)] sortedDesc
+
+runTableWidgetSortStateTest :: Context -> IORef Int -> IO ()
+runTableWidgetSortStateTest ctx failed = do
+  sortV <- newVar (SortCol 0 SortAsc)
+  clickedAlpha <- newVar False
+  clickedBeta <- newVar False
+  let rows = [WidgetRow "Alpha" clickedAlpha, WidgetRow "Beta" clickedBeta]
+      cols :: Colonnade Headed WidgetRow Cell
+      cols = mconcat
+        [ headed "Name" (\(WidgetRow name _) -> textCell name)
+        , headed "Action" (\(WidgetRow name clk) -> widgetCell (\_ -> whenM (button ("Click " <> name)) (writeVar clk True)) ())
+        ]
+      inp0 = withInputOff 500 300
+      ui = table "sort-state" cols rows sortV
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  -- Change sort to descending (Beta then Alpha)
+  writeVarIO sortV (SortCol 0 SortDesc)
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  -- Find "Click Alpha" at its new position and click it
+  assertJust failed (findExact "Click Alpha" spans) $ \btnPos -> do
+    _ <- runClick ctx inp0 ui btnPos
+    ca <- readVarIO clickedAlpha
+    cb <- readVarIO clickedBeta
+    assert failed ca
+    assert failed (not cb)
 
 -- | A row of 'runTableLiveRowsTest'; its middle column starts numeric.
 data LiveRow = LiveRow Text Text Text
@@ -134,8 +217,8 @@ runTableSortTest _ failed = do
     failed
     [1, 3, 2, 4]
     (map snd (sortRows columns (SortCol 0 SortDesc) rows))
-  assertEq failed rows (sortRows mempty (SortCol 0 SortAsc) rows)
-  assertEq failed rows (sortRows mempty (SortCol 0 SortDesc) rows)
+  assertEq failed rows (sortRows (mempty :: Colonnade Headed (Text, Int) Text) (SortCol 0 SortAsc) rows)
+  assertEq failed rows (sortRows (mempty :: Colonnade Headed (Text, Int) Text) (SortCol 0 SortDesc) rows)
 
 runTableReorderTest :: Context -> IORef Int -> IO ()
 runTableReorderTest ctx failed = do
