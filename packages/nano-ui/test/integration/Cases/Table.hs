@@ -57,6 +57,7 @@ tests =
   , spec "table-widget-sort-state" runTableWidgetSortStateTest
   , spec "table-header-truncate" runTableHeaderTruncateTest
   , spec "table-col-stretch-floor" runTableColStretchFloorTest
+  , spec "table-stretch-vbar-lane" runTableStretchAbsorbsVLaneTest
   ]
 
 -- | A sort set from outside the table moves its header mark, and the frame
@@ -905,4 +906,46 @@ runTableColStretchFloorTest ctx failed = do
       Just sm -> v2X (scrollRange sm) > 0
       Nothing -> False
   assert failed (not (or horzOverflows))
+
+-- | A stretch column absorbs the vertical bar's lane (stronghead's leak
+-- suspects table): with more rows than the fixed height shows, the body's
+-- vertical bar narrows the viewport by its lane's width. The table's fixed
+-- columns still fit that narrowed viewport, so the stretch column — the
+-- table's slack — must compress rather than surface a horizontal bar for the
+-- lane, and the last column must sit clear of the vertical bar's lane.
+runTableStretchAbsorbsVLaneTest :: Context -> IORef Int -> IO ()
+runTableStretchAbsorbsVLaneTest ctx failed = do
+  let cfg = defaultTableConfig { tableColSizes = [ColStretch, ColFixed 100, ColFixed 100, ColFixed 200] }
+      cols :: Colonnade Headed (Text, Text, Text, Text) Text
+      cols =
+        mconcat
+          [ headed "leak suspect" (\(a, _, _, _) -> a)
+          , headed "peak before" (\(_, b, _, _) -> b)
+          , headed "peak now" (\(_, _, c_, _) -> c_)
+          , headed "status" (\(_, _, _, d) -> d)
+          ]
+      rows :: [(Text, Text, Text, Text)]
+      rows = [(T.pack ("suspect-" <> show i), "19.1 MB", "20.0 MB", "still there") | i <- [1 .. 10 :: Int]]
+      -- Fixed columns plus rules (403) fit the narrowed viewport; the stretch
+      -- column's old 40px floor (443 total) did not, which surfaced the bar.
+      tableH = fromIntegral (min 8 (length rows) + 1) * 29 + 6
+      ui = sortedTable (tableConfigured cfg (fixedH tableH) "wereSuspects" cols rows)
+      inp0 = (withInput 455 240) {inputMousePos = V2 200 120}
+  _ <- warmup2 ctx inp0 ui
+  assertJustM failed (findNodeM (ctxNodeArena ctx) (isBodyScroller ctx)) $ \i -> do
+    let na = ctxNodeArena ctx
+    wid <- getWidgetId na i
+    assertJustM failed (getScrollMetrics ctx wid) $ \sm -> do
+      -- The rows overflow vertically, so the vertical bar and its lane exist.
+      assertGt failed (v2Y (scrollRange sm)) 0
+      assertGt failed (rectW (scrollViewport sm)) 0
+      -- But the table fits the narrowed viewport: no horizontal range.
+      assertEq failed (v2X (scrollRange sm)) 0
+      -- And its last column clears the vertical bar's lane: the status
+      -- header's right edge sits inside the viewport, not under the lane.
+      Rect bx _ bw _ <- getNodeRect na i
+      hdrs <- headerButtonRects ctx
+      assertJust failed (listToMaybe (reverse hdrs)) $ \(Rect hx _ hw _) -> do
+        assert failed (hx + hw <= bx + rectW (scrollViewport sm) + 0.5)
+        assertGt failed (hx + hw) (bx + bw - 24)
 

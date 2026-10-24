@@ -486,10 +486,17 @@ numCellLayout =
 -- one, else a share of the spare width when the columns fill the table, else
 -- its floor. Columns stretch to the row height so every cell's background
 -- and borders span the full row even when one cell wraps.
+--
+-- A stretch column keeps no minimum of its own: it is the table's slack, so
+-- it compresses to nothing — under a vertical scrollbar's lane, say, which
+-- narrows the viewport by the lane's width — rather than reporting a minimum
+-- that surfaces a horizontal bar under a table that fits the scroller's full
+-- width. Its drag floor ('colFloor') still binds once the column has been
+-- resized to a stored width.
 colBoxLayout :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
 colBoxLayout fillInner hasStretch sizes contentWs stored i
   | saved > 0 = fixed (max floorW saved)
-  | ColStretch <- size, fillInner = box {layoutWidth = Grow 1}
+  | ColStretch <- size, fillInner = stretchBox {layoutWidth = Grow 1}
   | ColContent <- size, fillInner && not hasStretch = box {layoutWidth = Grow 1}
   | otherwise = fixed floorW
   where
@@ -497,6 +504,7 @@ colBoxLayout fillInner hasStretch sizes contentWs stored i
     floorW = colFloor sizes contentWs i
     size = smallAt sizes i ColContent
     box = (fillH flatLayout) {layoutMinW = max floorW saved}
+    stretchBox = (fillH flatLayout) {layoutMinW = saved}
     fixed w = box {layoutWidth = Fixed w, layoutMaxW = w}
 
 -- | Sortable table with resizable, reorderable columns, with sort state bound
