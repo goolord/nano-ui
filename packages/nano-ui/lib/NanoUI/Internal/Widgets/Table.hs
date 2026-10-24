@@ -457,7 +457,8 @@ smallAt xs i fallback = if i >= 0 && i < sizeofSmallArray xs then indexSmallArra
 colFloor :: SmallArray ColSize -> PrimArray Float -> Int -> Float
 colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColFixed f -> max minColW f
-  _ -> max minColW (primAt contentWs i minColW)
+  ColStretch -> minColW
+  ColContent -> max minColW (primAt contentWs i minColW)
 
 flatLayout :: Layout
 flatLayout = tight defaultLayout {layoutGap = 0}
@@ -680,9 +681,10 @@ tableCore cfg f key cols inputRows curSort =
               let isSort = isSortable i
                   isActive = sortColIndex sort0 == i && isSort
                   flags = (if isSort then sortMarkStyle sort0 i else 0) .|. buttonFlagTable
+                  hdrLay = (cellLayout i) {layoutFontVariant = FontRegular}
               withKey i $
                 column' (colBox i) $
-                  renderHeader i isActive (cellLayout i) flags
+                  renderHeader i isActive hdrLay flags
           void separator
           let !rowLay = gridRowLay idxs
               !colLays = map colBox idxs

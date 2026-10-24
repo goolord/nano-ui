@@ -376,6 +376,20 @@ cachedWidgetLabel ctx nt idx labelAlign w h = do
         (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt w h (fromEnum ax) placement) cache)
       pure placement
 
+truncateTableHeader :: (T.Text -> IO Float) -> Float -> T.Text -> IO T.Text
+truncateTableHeader lineW room txt
+  | Just hdr <- T.stripPrefix tableSortBlank txt = do
+      blankW <- lineW tableSortBlank
+      let avail = max 0 (room - blankW)
+      cut <- truncateTextIO lineW avail hdr
+      pure (tableSortBlank <> cut)
+  | Just hdr <- T.stripSuffix tableSortBlank txt = do
+      blankW <- lineW tableSortBlank
+      let avail = max 0 (room - blankW)
+      cut <- truncateTextIO lineW avail hdr
+      pure (cut <> tableSortBlank)
+  | otherwise = truncateTextIO lineW room txt
+
 -- All coordinates here are local. centeredTextY snaps the baseline offset,
 -- not the origin; final device-pixel snapping stays in the draw backend.
 computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
@@ -385,20 +399,24 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
       (source, _, measure) <- resolveFontFor ctx nt fontSizeVal si
       (tw0, th) <- measure txt
       let (ix, _) = widgetContentInset source
+          isTable = nt == NodeButton && hasFlag buttonFlagTable si
           plain = nt == NodeButton && not (any (`hasFlag` si) [buttonFlagChoice, buttonFlagRow, buttonFlagTable, buttonFlagMenu])
           -- The room a plain button's or a select's label has: inside the
           -- padding layout gave a centred label, all of the box beside
           -- adornments, and short of a select's chevron.
           room
+            | isTable = max 0 (w - 2 * tableCellInset)
             | nt == NodeSelect = w - ix - selectChevronReserve
             | ax /= AlignCenter = w
             | hasFlag buttonFlagTab si = w - 2 * tabHeaderPadX
             | otherwise = w - fst (buttonPadding source)
       -- A label longer than that ends in an ellipsis.
       (label, tw) <-
-        if (plain || nt == NodeSelect) && tw0 > room + 0.5
+        if (plain || isTable || nt == NodeSelect) && tw0 > room + 0.5
           then do
-            cut <- truncateTextIO (fmap fst . measure) room txt
+            cut <- if isTable
+              then truncateTableHeader (fmap fst . measure) room txt
+              else truncateTextIO (fmap fst . measure) room txt
             (cut,) . fst <$> measure cut
           else pure (txt, tw0)
       -- Metrics for the label as it is shown, which places it.

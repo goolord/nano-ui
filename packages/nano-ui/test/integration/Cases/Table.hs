@@ -55,6 +55,8 @@ tests =
   , spec "table-widget-cells" runTableWidgetCellsTest
   , spec "table-cell-mixed" runTableCellMixedTest
   , spec "table-widget-sort-state" runTableWidgetSortStateTest
+  , spec "table-header-truncate" runTableHeaderTruncateTest
+  , spec "table-col-stretch-floor" runTableColStretchFloorTest
   ]
 
 -- | A sort set from outside the table moves its header mark, and the frame
@@ -861,3 +863,46 @@ runTableRulesTileTest _ failed =
           let edges = sortOn fst (maybe [] snd (IM.lookup rowIdx byParent))
               overlaps = [(x0, w0, x1) | ((x0, w0), (x1, _)) <- zip edges (drop 1 edges), abs (x0 + w0 - x1) > 1.0e-3]
           assertEq failed [] overlaps
+
+-- | A header narrower than its text truncates with an ellipsis and does not overflow into next column.
+runTableHeaderTruncateTest :: Context -> IORef Int -> IO ()
+runTableHeaderTruncateTest ctx failed = do
+  let cfg = defaultTableConfig { tableColSizes = [ColFixed 140, ColFixed 100] }
+      cols :: Colonnade Headed (Text, Text) Text
+      cols = mconcat
+        [ headed "Long Column Title" fst
+        , headed "Next" snd
+        ]
+      rows :: [(Text, Text)]
+      rows = [("val1", "val2")]
+      ui = sortedTable (tableConfigured cfg id "trunc" cols rows)
+  warmup2 ctx (withInputOff 400 200) ui
+  spans <- collectTextSpans ctx
+  let texts = [t | (_, t, _, _, _) <- spans]
+  assert failed (any (\t -> "..." `T.isInfixOf` t) texts)
+  case ([r | (r, t, _, _, _) <- spans, "Long" `T.isPrefixOf` t], [r | (r, t, _, _, _) <- spans, "Next" `T.isPrefixOf` t]) of
+    (Rect hx _ hw _ : _, Rect nx _ _ _ : _) -> do
+      assert failed (hx + hw <= nx)
+    _ -> assert failed False
+
+-- | ColStretch column flexes down to minColW without forcing horizontal scroll even with long text.
+runTableColStretchFloorTest :: Context -> IORef Int -> IO ()
+runTableColStretchFloorTest ctx failed = do
+  let cfg = defaultTableConfig { tableColSizes = [ColStretch, ColFixed 60] }
+      cols :: Colonnade Headed (Text, Text) Text
+      cols = mconcat
+        [ headed "Stretch" fst
+        , headed "Fixed" snd
+        ]
+      rows :: [(Text, Text)]
+      rows = [(T.replicate 100 "verylongtext", "123")]
+      ui = sortedTable (tableConfigured cfg id "stretch" cols rows)
+  warmup2 ctx (withInputOff 300 200) ui
+  scrolls <- nodesOfType NodeScrollContainer ctx
+  horzOverflows <- forM scrolls $ \(wid, _) -> do
+    mMetrics <- getScrollMetrics ctx wid
+    pure $ case mMetrics of
+      Just sm -> v2X (scrollRange sm) > 0
+      Nothing -> False
+  assert failed (not (or horzOverflows))
+
