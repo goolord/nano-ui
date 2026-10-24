@@ -58,6 +58,7 @@ tests =
   , spec "table-header-truncate" runTableHeaderTruncateTest
   , spec "table-col-stretch-floor" runTableColStretchFloorTest
   , spec "table-stretch-vbar-lane" runTableStretchAbsorbsVLaneTest
+  , spec "table-squeeze" runTableSqueezeTest
   ]
 
 -- | A sort set from outside the table moves its header mark, and the frame
@@ -948,4 +949,38 @@ runTableStretchAbsorbsVLaneTest ctx failed = do
       assertJust failed (listToMaybe (reverse hdrs)) $ \(Rect hx _ hw _) -> do
         assert failed (hx + hw <= bx + rectW (scrollViewport sm) + 0.5)
         assertGt failed (hx + hw) (bx + bw - 24)
+
+-- | @tableSqueeze@: pinned columns too wide for the body compress
+-- proportionally, none under minColW, instead of scrolling sideways; below
+-- twice minColW plus the rule even that is exhausted and the table keeps its
+-- horizontal scroll. Without the flag the same table still scrolls (see
+-- 'runTableHBarReachTest').
+runTableSqueezeTest :: Context -> IORef Int -> IO ()
+runTableSqueezeTest ctx failed = do
+  let cfg = defaultTableConfig {tableColSizes = [ColFixed 500, ColFixed 500], tableSqueeze = True}
+      ui = sortedTable (tableConfigured cfg (fixedH 200) "squeeze" tableScrollCols tableScrollRows)
+      inp0 = (withInput 700 320) {inputMousePos = V2 300 160}
+  _ <- warmup2 ctx inp0 ui
+  assertJustM failed (bodyScrollerRect ctx) $ \(Rect _ _ bw _) -> do
+    assertJustM failed (findNodeM (ctxNodeArena ctx) (isBodyScroller ctx)) $ \i -> do
+      wid <- getWidgetId (ctxNodeArena ctx) i
+      assertJustM failed (getScrollMetrics ctx wid) $ \sm ->
+        -- The two 500px columns squeezed into the 700px body: no sideways
+        -- range, and the columns split the width between them.
+        assertEq failed (v2X (scrollRange sm)) 0
+    hdrs <- headerButtonRects ctx
+    assertEq failed (length hdrs) 2
+    forM_ hdrs $ \r -> do
+      -- The split leaves room for the vertical bar's lane (the rows
+      -- overflow), so each half is a little under half the body.
+      assertGt failed (rectW r) (bw / 2 - 12)
+      assert failed (rectW r <= bw / 2 + 1)
+  -- A body narrower than two floors plus the rule cannot squeeze any
+  -- further, and the table goes back to scrolling sideways.
+  tiny <- newContext
+  _ <- warmup2 tiny ((withInput 74 120) {inputMousePos = V2 30 60}) ui
+  assertJustM failed (findNodeM (ctxNodeArena tiny) (isBodyScroller tiny)) $ \i -> do
+    wid <- getWidgetId (ctxNodeArena tiny) i
+    assertJustM failed (getScrollMetrics tiny wid) $ \sm ->
+      assertGt failed (v2X (scrollRange sm)) 0
 

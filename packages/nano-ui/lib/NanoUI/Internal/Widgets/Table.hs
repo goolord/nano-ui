@@ -86,12 +86,19 @@ data TableConfig = TableConfig
   -- ^ The columns hidden on the table's first frame. From then on the table
   -- keeps its own set, which a right-click on a header changes, and a later
   -- change here is ignored.
+  , tableSqueeze :: !Bool
+  -- ^ Squeeze instead of scroll: when the table is narrower than the sum of
+  -- its pinned widths (fixed columns, content floors, dragged widths), scale
+  -- them all down proportionally, none under 'minColW', rather than surfacing
+  -- a horizontal scrollbar. A stretch column is never pinned (it has no
+  -- width of its own), and the scrollbar's own lane is budgeted for. Off by
+  -- default: a table too wide for its pane keeps its sideways scroll.
   }
   deriving (Eq, Show)
 
 -- | No frozen or hidden rows/columns and content-sized columns.
 defaultTableConfig :: TableConfig
-defaultTableConfig = TableConfig 0 0 [] IS.empty
+defaultTableConfig = TableConfig 0 0 [] IS.empty False
 
 -- | Widget interaction plus updated sort, display order, and hidden-column set.
 -- Indices refer to the original column definitions.
@@ -460,6 +467,24 @@ colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColStretch -> minColW
   ColContent -> max minColW (primAt contentWs i minColW)
 
+-- | Scale pinned column widths down to @budget@ so a squeezing table fits its
+-- viewport in place of scrolling sideways. Each pass rescales what is left in
+-- proportion and floors every width at 'minColW', so columns that reach the
+-- floor stop contributing and the others absorb the rest of the shortfall;
+-- when everything sits at the floor the widths no longer shrink, and the
+-- table keeps whatever scroll is left. A width of zero or less (an unfilled
+-- stretch column) stays there: it pins nothing, so it gives nothing.
+fitWidthsTo :: Float -> [Float] -> [Float]
+fitWidthsTo budget0 = go
+  where
+    budget = max 0 budget0
+    go ws
+      | sum ws <= budget + 0.5 = ws
+      | otherwise =
+          let total = sum ws
+              ws' = map (\w -> if w <= 0 then 0 else max minColW (w * budget / total)) ws
+           in if ws' == ws then ws else go ws'
+
 flatLayout :: Layout
 flatLayout = tight defaultLayout {layoutGap = 0}
 
@@ -627,7 +652,12 @@ tableCore cfg f key cols inputRows curSort =
           | drag0 >= 0 && heldIn MouseLeft inp =
               setAt drag0 (max (colFloor sizes contentWs drag0) (dragW0 + mx - dragX0)) widths0
           | otherwise = widths0
-    let outerLayout = f (fillW flatLayout)
+    -- Last frame's body rect, for the squeeze budget and (below) the header's
+    -- vertical-bar spacer: a resize settles one frame later, as that spacer
+    -- already does.
+    mPrevBody <- lastRect vWid
+    let widths1Arr = primArrayFromList widths1
+        outerLayout = f (fillW flatLayout)
         hasStretch = any (\i -> smallAt sizes i ColContent == ColStretch) vis
         vis = filter (`IS.notMember` hidden0) order0
         freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
@@ -642,8 +672,39 @@ tableCore cfg f key cols inputRows curSort =
             Grow _ -> True
             _ -> False
         fillIf b = if b then fillW else id
+        -- What column i cannot shrink below as laid out: its dragged width
+        -- once it has one, else its floor; a stretch column filling the
+        -- table has no width of its own (colBoxLayout keeps no minimum for
+        -- it), so nothing is pinned.
+        pinnedW i
+          | primAt widths1Arr i 0 > 0 = max (colFloor sizes contentWs i) (primAt widths1Arr i 0)
+          | fillInner && smallAt sizes i ColContent == ColStretch = 0
+          | otherwise = colFloor sizes contentWs i
+        -- Squeeze: with the flag set and the body narrower than the pinned
+        -- widths plus rules, scale every pinned width down to fit, none
+        -- under minColW. The vertical bar's lane, when the rows overflow,
+        -- comes off the budget first, so a squeezed table does not surface a
+        -- horizontal bar for the lane either.
+        rulesW = fromIntegral (max 0 (length vis - 1))
+        rowsOverrun = case mPrevBody of
+          Just r -> fromIntegral scrollN * tableRowMinH > rectH r
+          Nothing -> fromIntegral scrollN * tableRowMinH > 100
+        squeezeBudget =
+          if tableSqueeze cfg
+            then fmap (\r -> max 0 (rectW r - (if rowsOverrun then scrollBarGutter ScrollBarList 0 else 0))) mPrevBody
+            else Nothing
+        pinned0 = map pinnedW vis
+        fitted0 = maybe pinned0 (\budget -> fitWidthsTo (budget - rulesW) pinned0) squeezeBudget
+        -- Per-column layout scale: the ratio of fitted to pinned, 1 outside
+        -- the squeeze.
+        scaleOf i = case lookup i (zip vis fitted0) of
+          Just w -> w / max 1.0e-3 (pinnedW i)
+          Nothing -> 1
+        sizesLay = smallArrayFromListN n [case smallAt sizes i ColContent of ColFixed w -> ColFixed (w * scaleOf i); s -> s | i <- [0 .. n - 1]]
+        contentWsLay = primArrayFromList [primAt contentWs i minColW * scaleOf i | i <- [0 .. n - 1]]
+        widthsLay = [primAt widths1Arr i 0 * scaleOf i | i <- [0 .. n - 1]]
         colBoxes =
-          smallArrayFromList (map (colBoxLayout fillInner hasStretch sizes contentWs (primArrayFromList widths1)) [0 .. n - 1])
+          smallArrayFromList (map (colBoxLayout fillInner hasStretch sizesLay contentWsLay (primArrayFromList widthsLay)) [0 .. n - 1])
         colBox i = smallAt colBoxes i (tight defaultLayout)
         cellLayout i = if smallAt numeric i False then numCellLayout else textCellLayout
         isSortable i = smallAt sortable i False
@@ -734,11 +795,10 @@ tableCore cfg f key cols inputRows curSort =
               (bodyBlock frozenIdx)
             pure hs
         unfrozenPane = do
-          mPrevV <- lastRect vWid
           let totalH = fromIntegral scrollN * tableRowMinH
               -- Uses last frame's rect, so the header's spacer lags the body's
               -- vertical bar by one frame when the bar appears or disappears.
-              hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
+              hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevBody
           column' (paneLay fillInner unfrozenIdx) $ do
             hs <-
               row' (fillIf fillInner flatLayout) $ do
