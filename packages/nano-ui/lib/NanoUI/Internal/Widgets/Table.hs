@@ -55,7 +55,7 @@ import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect
 import NanoUI.Internal.Var (Binding (..), bindVarOn, useVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
-import NanoUI.Internal.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
+import NanoUI.Internal.Font (FontMetrics (..), ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, styled, uiTheme, withKey)
@@ -518,8 +518,8 @@ numCellLayout =
 -- that surfaces a horizontal bar under a table that fits the scroller's full
 -- width. Its drag floor ('colFloor') still binds once the column has been
 -- resized to a stored width.
-colBoxLayout :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
-colBoxLayout fillInner hasStretch sizes contentWs stored i
+colBoxLayout :: Bool -> Bool -> Float -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
+colBoxLayout fillInner hasStretch stretchMinW sizes contentWs stored i
   | saved > 0 = fixed (max floorW saved)
   | ColStretch <- size, fillInner = stretchBox {layoutWidth = Grow 1}
   | ColContent <- size, fillInner && not hasStretch = box {layoutWidth = Grow 1}
@@ -529,7 +529,7 @@ colBoxLayout fillInner hasStretch sizes contentWs stored i
     floorW = colFloor sizes contentWs i
     size = smallAt sizes i ColContent
     box = (fillH flatLayout) {layoutMinW = max floorW saved}
-    stretchBox = (fillH flatLayout) {layoutMinW = saved}
+    stretchBox = (fillH flatLayout) {layoutMinW = max stretchMinW saved}
     fixed w = box {layoutWidth = Fixed w, layoutMaxW = w}
 
 -- | Sortable table with resizable, reorderable columns, with sort state bound
@@ -675,10 +675,12 @@ tableCore cfg f key cols inputRows curSort =
         -- What column i cannot shrink below as laid out: its dragged width
         -- once it has one, else its floor; a stretch column filling the
         -- table has no width of its own (colBoxLayout keeps no minimum for
-        -- it), so nothing is pinned.
+        -- it), unless squeezing is active, where it participates with a
+        -- bounded share so fixed columns do not crush it to zero.
         pinnedW i
           | primAt widths1Arr i 0 > 0 = max (colFloor sizes contentWs i) (primAt widths1Arr i 0)
-          | fillInner && smallAt sizes i ColContent == ColStretch = 0
+          | fillInner && smallAt sizes i ColContent == ColStretch =
+              if tableSqueeze cfg then max minColW (min 120 (primAt contentWs i minColW)) else 0
           | otherwise = colFloor sizes contentWs i
         -- Squeeze: with the flag set and the body narrower than the pinned
         -- widths plus rules, scale every pinned width down to fit, none
@@ -686,9 +688,16 @@ tableCore cfg f key cols inputRows curSort =
         -- comes off the budget first, so a squeezed table does not surface a
         -- horizontal bar for the lane either.
         rulesW = fromIntegral (max 0 (length vis - 1))
-        rowsOverrun = case mPrevBody of
-          Just r -> fromIntegral scrollN * tableRowMinH > rectH r
-          Nothing -> fromIntegral scrollN * tableRowMinH > 100
+        rowH = max tableRowMinH (fmLineHeight (ctxFontMetrics ctx) + 6)
+        rowStep = rowH + 1
+        totalH = if scrollN <= 0 then 0 else fromIntegral scrollN * rowH + fromIntegral (scrollN - 1)
+        firstFrameCapH = case layoutHeight outerLayout of
+          Fixed h -> max 0 (min h (layoutMaxH outerLayout) - rowStep)
+          Fit
+            | layoutMaxH outerLayout < 1e8 -> max 0 (layoutMaxH outerLayout - rowStep)
+            | otherwise -> totalH
+          _ -> 100
+        rowsOverrun = totalH > maybe firstFrameCapH rectH mPrevBody + 0.5
         squeezeBudget =
           if tableSqueeze cfg
             then fmap (\r -> max 0 (rectW r - (if rowsOverrun then scrollBarGutter ScrollBarList 0 else 0))) mPrevBody
@@ -703,8 +712,9 @@ tableCore cfg f key cols inputRows curSort =
         sizesLay = smallArrayFromListN n [case smallAt sizes i ColContent of ColFixed w -> ColFixed (w * scaleOf i); s -> s | i <- [0 .. n - 1]]
         contentWsLay = primArrayFromList [primAt contentWs i minColW * scaleOf i | i <- [0 .. n - 1]]
         widthsLay = [primAt widths1Arr i 0 * scaleOf i | i <- [0 .. n - 1]]
+        stretchMinW = if isJust squeezeBudget then minColW else 1.0e-3
         colBoxes =
-          smallArrayFromList (map (colBoxLayout fillInner hasStretch sizesLay contentWsLay (primArrayFromList widthsLay)) [0 .. n - 1])
+          smallArrayFromList (map (colBoxLayout fillInner hasStretch stretchMinW sizesLay contentWsLay (primArrayFromList widthsLay)) [0 .. n - 1])
         colBox i = smallAt colBoxes i (tight defaultLayout)
         cellLayout i = if smallAt numeric i False then numCellLayout else textCellLayout
         isSortable i = smallAt sortable i False
@@ -770,12 +780,12 @@ tableCore cfg f key cols inputRows curSort =
               then pure (0, -1)
               else liftIO $ do
                 V2 _ scrollY <- getScrollOffset2D ctx vWid
-                viewH <- maybe (tableRowMinH * 8) rectH <$> getPrevRect ctx vWid
-                pure (listClipper scrollN scrollY viewH tableRowMinH)
+                viewH <- maybe (rowStep * 8) rectH <$> getPrevRect ctx vWid
+                pure (listClipper scrollN scrollY viewH rowStep)
           let !rowLay = gridRowLay idxs
               !colLays = map colBox idxs
-              topH = fromIntegral lo * tableRowMinH
-              botH = fromIntegral (max 0 (scrollN - hi - 1)) * tableRowMinH
+              topH = if lo <= 0 then 0 else fromIntegral lo * rowH + fromIntegral (lo - 1)
+              botH = fromIntegral (max 0 (scrollN - hi - 1)) * rowStep
           column' rowLay $ do
             when (topH > 0) $ void (spacer Fit (Fixed topH))
             forM_ [lo .. hi] $ \rowIdx -> do
@@ -795,10 +805,9 @@ tableCore cfg f key cols inputRows curSort =
               (bodyBlock frozenIdx)
             pure hs
         unfrozenPane = do
-          let totalH = fromIntegral scrollN * tableRowMinH
-              -- Uses last frame's rect, so the header's spacer lags the body's
-              -- vertical bar by one frame when the bar appears or disappears.
-              hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevBody
+          -- Uses last frame's rect, so the header's spacer lags the body's
+          -- vertical bar by one frame when the bar appears or disappears.
+          let hasVertBar = rowsOverrun
           column' (paneLay fillInner unfrozenIdx) $ do
             hs <-
               row' (fillIf fillInner flatLayout) $ do

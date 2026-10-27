@@ -219,13 +219,13 @@ solveLayout na ms rootW rootH mCache = do
         let copyCol col k = readGeom (seArrays env) i col >>= writePrimArray unsnapped (i * 4 + k)
         copyCol GeomX 0 >> copyCol GeomY 1 >> copyCol GeomW 2 >> copyCol GeomH 3
       floatingCount <- floatingNodeCount na
-      quantizeResultsA (seArrays env) count floatingCount (fmSnapScale (msFm ms))
+      quantizeResultsA na (seArrays env) count floatingCount (fmSnapScale (msFm ms))
       readIORef measureLog
 
 -- | Snap the solved geometry of the @count@ nodes to the device pixel grid of
 -- scale @s@. @floatingCount@ is the arena's floating node count.
-quantizeResultsA :: NodeArenaArrays -> Int -> Int -> Float -> IO ()
-quantizeResultsA a count floatingCount s
+quantizeResultsA :: NodeArena -> NodeArenaArrays -> Int -> Int -> Float -> IO ()
+quantizeResultsA na a count floatingCount s
   | s <= 0 = pure ()
   -- Nothing floats, so every node snaps and none needs marking.
   | floatingCount <= 0 = forUpTo_ count snapNode
@@ -260,6 +260,21 @@ quantizeResultsA a count floatingCount s
     writeGeom a i GeomY (onGrid s y)
     writeGeom a i GeomW (max 0 (gridSpan s x (x + w)))
     writeGeom a i GeomH (max 0 (gridSpan s y (y + h)))
+    nt <- readTagEnum a i TagNodeType
+    when (nt == NodeScrollContainer) $ do
+      si <- readTree a i TreeStyleIdx
+      dir <- readTagEnum a i TagDirection
+      padL <- readStyle a i StylePadL
+      padT <- readStyle a i StylePadT
+      val <- getNodeValue na i
+      if isScrollStyle2D si
+        then do
+          cw <- getScrollContentW na i
+          setScrollContentW na i (max 0 (gridSpan s (x + padL) (x + padL + cw)))
+          setSolvedValue na i (max 0 (gridSpan s (y + padT) (y + padT + val)))
+        else do
+          let start = if dir == DirRow then x + padL else y + padT
+          setSolvedValue na i (max 0 (gridSpan s start (start + val)))
 
 measurePass :: SolveEnv -> Int -> IO ()
 measurePass env count = case seCache env of
@@ -505,7 +520,7 @@ growParent na idx = getParent na idx >>= go True
       | p < 0 = pure (not isParent)
       | otherwise = do
           pwTag <- axTag <$> getWidthSizing na p
-          if pwTag == SizingGrow
+          if pwTag == SizingGrow || pwTag == SizingPercent
             then getParent na p >>= go False
             else if isParent
               then pure False
@@ -674,9 +689,11 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   minColW <- readStyle a idx StyleGridMinColW
   flow <- readTagEnum a idx TagFlow
   wAx@(AxisSizing wTag _ minW _) <- readAxisSizing a idx True
-  hAx <- readAxisSizing a idx False
+  hAx@(AxisSizing hTag _ _ _) <- readAxisSizing a idx False
   nt <- readTagEnum a idx TagNodeType
+  si <- readTree a idx TreeStyleIdx
   let chrome = isChromeColumn nt dir
+      clipped = nt == NodeContainer && hasFlag containerFlagClip si
       padX = padL pad + padR pad
       padY = padT pad + padB pad
       -- The room inside the fixed size, or else inside the maximum.
@@ -709,10 +726,12 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   -- would have fit. Without a minimum the content still counts, so a grow
   -- wrapper around a wide table keeps its sideways scroll.
   minAssigned <-
-    if wTag == SizingGrow && minW > 0 && not (isFloatingNode nt)
-      then growParent na idx
-      else pure False
-  let h = sizeWithin hAx (contentH + padY)
+    if clipped && wTag == SizingGrow
+      then pure True
+      else if wTag == SizingGrow && minW > 0 && not (isFloatingNode nt)
+        then growParent na idx
+        else pure False
+  let h = sizeWithin hAx (if clipped && hTag == SizingGrow then 0 else contentH + padY)
   -- A window or modal that fits its width to its content leaves room for its
   -- body's scrollbar when the body will scroll, or the bar's gutter narrows
   -- the content below its measured width and clips its right edge.
@@ -1027,52 +1046,56 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
         | otherwise -> pure oldH
 
       _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
-            (pad, gap, dir) <- containerFlow a idx
-            gCols <- readTree a idx TreeGridCols
-            minColW <- readStyle a idx StyleGridMinColW
-            let innerW = max 0 (effW' - padL pad - padR pad)
-                -- A child's height when @w@ is offered to it, kept to its max width.
-                childH w ci = do
-                  subAx <- getWidthSizing na ci
-                  let subW = widthOf subAx w
-                  recomputeFitHeightAtWidth env ci (if axMax subAx < 1e8 then min subW (axMax subAx) else subW)
-                padded h = pure (clamp minH maxH (h + padT pad + padB pad))
-            if gCols > 0 || minColW > 0
-              then do
-                -- A grid stacks rows, each as tall as its tallest cell at the
-                -- column width, not every cell.
-                let cols = gridColumnCount gCols minColW innerW gap
-                    colW = max 0 ((innerW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
-                    rows [] = []
-                    rows hs = let (r, rest) = splitAt cols hs in r : rows rest
-                hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
-                let rowHs = map (foldl' max 0) (rows hs)
-                padded (if null rowHs then 0 else sum rowHs + gap * fromIntegral (length rowHs - 1))
+            si <- readTree a idx TreeStyleIdx
+            if nt == NodeContainer && hasFlag containerFlagClip si && hTag == SizingGrow
+              then pure oldH
               else do
-                flow <- readTagEnum a idx TagFlow
-                case flow of
-                  -- Layers are as tall as the tallest child at this width.
-                  Layered -> padded . foldl' max 0 =<< mapM (childH innerW) =<< flowChildrenInOrder na idx
-                  -- A wrapping row is as tall as the lines this width breaks
-                  -- it into, with percentages resolved against the width. A
-                  -- wrapping column's height does not depend on its width.
-                  Wrap
-                    | dir == DirRow -> do
-                        let sized ci = do
-                              subAx <- getWidthSizing na ci
-                              Rect _ _ w h <- getNodeRect na ci
-                              pure (ci, (percentOr subAx innerW w, h))
-                        kids <- mapM sized =<< flowChildrenInOrder na idx
-                        padded . snd =<< wrapExtent env idx dir gap innerW kids
-                    | otherwise -> pure oldH
-                  Line
-                    | dir == DirRow -> pure oldH
-                    | otherwise -> do
-                        let step (FlowAcc count contentH _) ci = do
-                              subH <- childH innerW ci
-                              pure (FlowAcc (count + 1) (contentH + subH) 0)
-                        FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-                        padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
+                (pad, gap, dir) <- containerFlow a idx
+                gCols <- readTree a idx TreeGridCols
+                minColW <- readStyle a idx StyleGridMinColW
+                let innerW = max 0 (effW' - padL pad - padR pad)
+                    -- A child's height when @w@ is offered to it, kept to its max width.
+                    childH w ci = do
+                      subAx <- getWidthSizing na ci
+                      let subW = widthOf subAx w
+                      recomputeFitHeightAtWidth env ci (if axMax subAx < 1e8 then min subW (axMax subAx) else subW)
+                    padded h = pure (clamp minH maxH (h + padT pad + padB pad))
+                if gCols > 0 || minColW > 0
+                  then do
+                    -- A grid stacks rows, each as tall as its tallest cell at the
+                    -- column width, not every cell.
+                    let cols = gridColumnCount gCols minColW innerW gap
+                        colW = max 0 ((innerW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+                        rows [] = []
+                        rows hs = let (r, rest) = splitAt cols hs in r : rows rest
+                    hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
+                    let rowHs = map (foldl' max 0) (rows hs)
+                    padded (if null rowHs then 0 else sum rowHs + gap * fromIntegral (length rowHs - 1))
+                  else do
+                    flow <- readTagEnum a idx TagFlow
+                    case flow of
+                      -- Layers are as tall as the tallest child at this width.
+                      Layered -> padded . foldl' max 0 =<< mapM (childH innerW) =<< flowChildrenInOrder na idx
+                      -- A wrapping row is as tall as the lines this width breaks
+                      -- it into, with percentages resolved against the width. A
+                      -- wrapping column's height does not depend on its width.
+                      Wrap
+                        | dir == DirRow -> do
+                            let sized ci = do
+                                  subAx <- getWidthSizing na ci
+                                  Rect _ _ w h <- getNodeRect na ci
+                                  pure (ci, (percentOr subAx innerW w, h))
+                            kids <- mapM sized =<< flowChildrenInOrder na idx
+                            padded . snd =<< wrapExtent env idx dir gap innerW kids
+                        | otherwise -> pure oldH
+                      Line
+                        | dir == DirRow -> pure oldH
+                        | otherwise -> do
+                            let step (FlowAcc count contentH _) ci = do
+                                  subH <- childH innerW ci
+                                  pure (FlowAcc (count + 1) (contentH + subH) 0)
+                            FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+                            padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
 
       _ -> pure oldH
 

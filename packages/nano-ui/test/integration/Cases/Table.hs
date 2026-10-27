@@ -983,4 +983,85 @@ runTableSqueezeTest ctx failed = do
     wid <- getWidgetId (ctxNodeArena tiny) i
     assertJustM failed (getScrollMetrics tiny wid) $ \sm ->
       assertGt failed (v2X (scrollRange sm)) 0
+  -- A squeezed table with a leading ColStretch column (stronghead's
+  -- wereSuspects) keeps the stretch column visible (>= minColW) when the
+  -- pane is narrower than the fixed columns' sum, and hides the vertical
+  -- scrollbar when all rows fit inside maxH.
+  let suspectCfg = defaultTableConfig {tableColSizes = [ColStretch, ColFixed 100, ColFixed 100, ColFixed 200], tableSqueeze = True}
+      cell txt = cellSort txt (cellWidget (rowWith (tight . fillW . fillH . alignMid) (labelWith fillW txt)))
+      suspectCols :: Colonnade Headed (Text, Text, Text, Text) Cell
+      suspectCols =
+        mconcat
+          [ headed "leak suspect" (\(a, _, _, _) -> cell a)
+          , headed "peak before" (\(_, b, _, _) -> cell b)
+          , headed "peak now" (\(_, _, c_, _) -> cell c_)
+          , headed "status" (\(_, _, _, d) -> cell d)
+          ]
+      suspectRows n = [(T.pack ("suspect-" <> show k), "19.1 MB", "20.0 MB", "still there") | k <- [1 .. n :: Int]]
+      suspectUi rows =
+        columnWith (fillW . gap 8) $ do
+          labelWith (fontSizeScale 0.92) "Header above table"
+          sortedTable (tableConfigured suspectCfg (maxH (9 * 29 + 6)) "wereSuspects" suspectCols rows)
+  forM_ [300, 380, 440] $ \winW -> do
+    c <- newContext
+    let c15 = withFontMetrics c ((ctxFontMetrics c) {fmLineHeight = 20, fmAscent = 15})
+    _ <- warmup2 c15 ((withInput winW 360) {inputMousePos = V2 100 100}) (suspectUi (suspectRows 4))
+    hdrs <- headerButtonRects c15
+    assertEq failed (length hdrs) 4
+    forM_ hdrs $ \r -> assertGt failed (rectW r) 39.5
+    assertJustM failed (findNodeM (ctxNodeArena c15) (isBodyScroller c15)) $ \i -> do
+      wid <- getWidgetId (ctxNodeArena c15) i
+      assertJustM failed (getScrollMetrics c15 wid) $ \sm -> do
+        assertEq failed (v2X (scrollRange sm)) 0
+        assertEq failed (v2Y (scrollRange sm)) 0
+  -- Inside a PaneGrid split (like stronghead's heap analysis pane), a tall
+  -- squeezed table clips to its pane so both horizontal and vertical
+  -- dividers remain grabbable and smoothly resize the pane and table.
+  pgCtx <- newContext
+  gridSeed <- newIORef (0 :: Int)
+  targetPaneRef <- newIORef 0
+  let gridInp = (withInput 800 600) {inputMousePos = V2 100 100}
+      gridUi =
+        columnWith (tight . fillW . fillH) $
+          paneGrid
+            defaultPaneGridConfig
+              { pgLayout = tight . fillW . fillH
+              , pgMinSize = 40
+              , pgSpacing = 4
+              , pgViewPane = \pid pctx -> do
+                  step <- liftIO (readIORef gridSeed)
+                  targetPid <- liftIO (readIORef targetPaneRef)
+                  case step of
+                    0 -> do
+                      nb <- pgcSplit pctx AxisH
+                      liftIO (writeIORef targetPaneRef nb)
+                      liftIO (writeIORef gridSeed 1)
+                    1 | pid == targetPid -> do
+                      _ <- pgcSplit pctx AxisV
+                      liftIO (writeIORef gridSeed 2)
+                    _ -> pure ()
+                  PaneView "P" True <$
+                    if pid == targetPid && targetPid /= 0
+                      then sortedTable (tableConfigured suspectCfg (grow . tight) "paneTable" suspectCols (suspectRows 30))
+                      else label "other"
+              }
+      drawGrid inp = void (runFrame pgCtx inp gridUi)
+  replicateM_ 5 (drawGrid gridInp)
+  hdrsBefore <- headerButtonRects pgCtx
+  assertEq failed (length hdrsBefore) 4
+  assertJust failed (listToMaybe hdrsBefore) $ \(Rect _ hy0 _ _) ->
+    assertEq failed (round hy0 :: Int) 308
+  -- Drag the vertical divider (at x=400, y=450) left to x=300, and the
+  -- horizontal divider (at x=400, y=300) down to y=400.
+  dragPos drawGrid gridInp (V2 400 450) (V2 300 450)
+  replicateM_ 2 (drawGrid gridInp)
+  dragPos drawGrid gridInp (V2 400 300) (V2 400 400)
+  replicateM_ 2 (drawGrid gridInp)
+  hdrsAfter <- headerButtonRects pgCtx
+  assertEq failed (length hdrsAfter) 4
+  forM_ hdrsAfter $ \r -> assertGt failed (rectW r) 39.5
+  assertJust failed (listToMaybe hdrsAfter) $ \(Rect _ hy1 _ _) ->
+    assertEq failed (round hy1 :: Int) 408
+  assertJust failed (listToMaybe (reverse hdrsAfter)) $ \(Rect hx1 _ hw1 _) ->
+    assert failed (hx1 + hw1 <= 300 + 2)
 
