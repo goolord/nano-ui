@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -191,7 +191,7 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
 <pre><code class="language-haskell">whenM (button "Save Document") (liftIO saveFile)
 </code></pre>
 <p>The <code>whenM</code> guard is essential: the view runs every frame, so an unguarded side effect would run forever.</p>
-<p>Use the primed form when you need the response — hover state, a rectangle for an anchored popup, or a tooltip:</p>
+<p>Use the primed form when you need the response: hover state, a rectangle for an anchored popup, or a tooltip.</p>
 <pre><code class="language-haskell">resp &lt;- button' "Refresh"
 tooltip resp "Poll the remote server for updates"
 when (respClicked resp) refresh

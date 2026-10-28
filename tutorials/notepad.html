@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="tutorial-2-build-a-notepad"><a class="header" href="#tutorial-2-build-a-notepad">Tutorial 2: Build a Notepad</a></h1>
-<p>A menu bar, file dialogs, a real text document with undo, a status bar, and a prompt before losing unsaved work. This is the shape of most desktop tools, and it exercises the parts of nano-ui that a todo list does not.</p>
+<p>A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work. It covers menus, dialogs, and close confirmation.</p>
 <p>The complete program is <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Notepad.hs"><code>packages/nano-ui-demo/examples/Notepad.hs</code></a>. Run it with:</p>
 <pre><code class="language-sh">cabal run nano-ui-sdl-notepad
 </code></pre>
@@ -200,7 +200,7 @@ newNotepad =
     &lt;*&gt; newVar Nothing
 </code></pre>
 <p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. The rule of thumb: allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
-<h2 id="2-the-window-that-asks-before-closing"><a class="header" href="#2-the-window-that-asks-before-closing">2. The window that asks before closing</a></h2>
+<h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
 <p>By default the window closes as soon as the close button is pressed. A notepad needs to intercept that and ask about unsaved changes, so the window is created with <code>wsExitOnCloseRequest = False</code>:</p>
 <pre><code class="language-haskell">main :: IO ()
 main = do
@@ -243,7 +243,7 @@ menuBar openMenu entries = do
       (popupResp, _) &lt;- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
 </code></pre>
-<p>Why <code>constVar</code> for the popup? <code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the truth is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> gives it a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
+<p><code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the state is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> supplies a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
 <p>Call overlays unconditionally. <code>popup'</code> is called for every title on every frame, even when closed; it draws nothing while closed. Wrapping it in <code>when isOpen</code> would change the widget ids of later siblings each time a menu opens.</p>
@@ -377,7 +377,7 @@ modal confirmExit "Unsaved changes" $ do
     labelWith (tight . fontMuted) ("Lines: " &lt;&gt; T.pack (show (documentLineCount d)))
     labelWith (tight . fontMuted) ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
 </code></pre>
-<p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional — the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="../troubleshooting/recurring-bugs.html">Recurring Bugs</a>).</p>
+<p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="../troubleshooting/recurring-bugs.html">Recurring Bugs</a>).</p>
 <h2 id="10-try-it"><a class="header" href="#10-try-it">10. Try it</a></h2>
 <ul>
 <li>Add a recent-files list persisted between runs.</li>

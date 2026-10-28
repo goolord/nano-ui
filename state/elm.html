@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -200,7 +200,7 @@ update (SetName n) m = m {name = n}
 main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </code></pre>
-<p>Everything else about nano-ui — widgets, layout, focus, and keys — is unchanged. The state-management style is what differs.</p>
+<p>Widgets, layout, focus, and keys are unchanged. Only the state model differs.</p>
 <h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
 <p><code>NanoUIE msg a</code> is a <code>NanoUI</code> action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting the wrong type is a compile error.</p>
 <div class="table-wrapper">

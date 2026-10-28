@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -206,7 +206,7 @@ label (fromMaybe "Loading..." contents)
 <p>Rules:</p>
 <ul>
 <li><strong>The key identifies the job.</strong> A new key starts a worker and cancels the old job with an asynchronous exception.</li>
-<li><strong>A skipped hook cancels the job.</strong> If the view does not call <code>useTask</code> for a full frame — because the pane is in an inactive tab or inside a branch — the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
+<li><strong>A skipped hook cancels the job.</strong> If the view does not call <code>useTask</code> for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
 <li><strong>To retrigger the same input, put a counter in the key.</strong> A Retry button must change the key or the job never reruns.</li>
 <li><strong>Cancellation is an async exception.</strong> Use <code>bracket</code> or <code>withFile</code> inside the job so resources are released when the user changes the query.</li>
 <li><strong>The result is forced on the worker.</strong> Return a value in weak head normal form; force a list’s spine with <code>length found \</code>seq` pure found`.</li>
@@ -228,7 +228,7 @@ progressBar (fromIntegral pct / 100)
 <ul>
 <li><strong>Stop by not calling the hook.</strong> <code>when isRunning (useStream ...)</code> releases the producer.</li>
 <li><strong>Stopping discards the accumulated state.</strong> Save it outside and pass it as the next initial value to resume.</li>
-<li><strong>The producer owns no UI.</strong> It may call <code>update</code> from its thread or threads it starts; never touch the UI <code>Context</code>.</li>
+<li><strong>Producers must not touch the UI.</strong> They may call <code>update</code> from their thread or threads they start; never touch the UI <code>Context</code>.</li>
 </ul>
 <h2 id="threads-outside-those-handles"><a class="header" href="#threads-outside-those-handles">Threads outside those handles</a></h2>
 <pre><code class="language-haskell">wake &lt;- askWake        -- in the view, once
@@ -250,7 +250,7 @@ forkIO $ do
 </ul>
 <pre><code class="language-haskell">pos &lt;- animateToA (Spring presetSmooth) (V2 targetX targetY)
 </code></pre>
-<p>Springs retarget mid-flight from their current position and velocity. <code>animateToA</code> animates any <code>Animatable</code> value — <code>Float</code>, <code>Double</code>, <code>V2</code>, or <code>Color</code> — channel by channel.</p>
+<p>Springs retarget mid-flight from their current position and velocity. <code>animateToA</code> animates any <code>Animatable</code> value (<code>Float</code>, <code>Double</code>, <code>V2</code>, or <code>Color</code>) channel by channel.</p>
 <h3 id="continuous-animation"><a class="header" href="#continuous-animation">Continuous animation</a></h3>
 <p><code>pulse</code> returns a value oscillating in <code>[0, 1]</code> with the given period in seconds:</p>
 <pre><code class="language-haskell">opacity &lt;- pulse 1.2

@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -189,7 +189,7 @@ cabal run nano-ui-example-live-chart
 <p>Compile with <code>-threaded</code>. The frame loop sleeps while a job runs, and the job runs on a Haskell thread while the loop is blocked.</p>
 </blockquote>
 <h2 id="1-allocate-handles-once"><a class="header" href="#1-allocate-handles-once">1. Allocate handles once</a></h2>
-<p>A <code>Task</code> owns one typed job; a <code>Stream</code> owns one typed push channel. Both are created during setup, exactly like a <code>Var</code>:</p>
+<p>A <code>Task</code> runs one typed job; a <code>Stream</code> carries one typed push channel. Both are created during setup, like a <code>Var</code>:</p>
 <pre><code class="language-haskell">data App = App
   { appSearch   :: Task Text [Text]
   , appFlaky    :: Task Int Text
@@ -352,7 +352,7 @@ walkChart points =
 <li><code>chart</code> takes the list of series; <code>withGrid</code>, <code>withLegend</code>, <code>withXAxis</code>, <code>withYAxis</code>, and <code>withTitle</code> decorate it.</li>
 <li><code>plot cache layout theChart</code> draws it and returns a <code>PlotResponse</code> whose <code>plotHover</code> is the nearest data point under the pointer.</li>
 </ul>
-<p>Building the <code>Chart</code> value every frame is fine — it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the <em>diagram</em>; the <code>PlotCache</code> is what prevents that.</p>
+<p>Building the <code>Chart</code> value every frame is fine: it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the <em>diagram</em>; the <code>PlotCache</code> is what prevents that.</p>
 <h2 id="6-the-rules-collected"><a class="header" href="#6-the-rules-collected">6. The rules, collected</a></h2>
 <div class="table-wrapper">
 <table>

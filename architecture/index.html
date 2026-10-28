@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="architecture--internals"><a class="header" href="#architecture--internals">Architecture &amp; Internals</a></h1>
-<p>This is the reference for how a frame executes and how real applications are structured around it. You do not need it to write a view, but it explains the cost model behind <code>readVar</code>, focus, and damage.</p>
+<p>Reference for how a frame executes and how applications are structured around it. It explains the cost model behind <code>readVar</code>, focus, and damage; a view does not need any of it to work.</p>
 <h2 id="the-frame-lifecycle"><a class="header" href="#the-frame-lifecycle">The frame lifecycle</a></h2>
 <p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"><span class="img-wrapper"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"></span></label></p>
 <p>Each frame:</p>
@@ -239,7 +239,7 @@ wake
 newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1.0 &lt;*&gt; newVar False
 </code></pre>
 <p>Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.</p>
-<h3 id="pattern-c-the-application-owns-the-state"><a class="header" href="#pattern-c-the-application-owns-the-state">Pattern C: the application owns the state</a></h3>
+<h3 id="pattern-c-application-owned-state"><a class="header" href="#pattern-c-application-owned-state">Pattern C: application-owned state</a></h3>
 <p><code>ned</code> keeps a plain <code>IORef App</code>; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:</p>
 <pre><code class="language-haskell">editorView (Editor ref) = do
   app &lt;- liftIO (readIORef ref)
@@ -255,9 +255,9 @@ newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1
 <tr><th>The application…</th><th>Pattern</th></tr>
 </thead>
 <tbody>
-<tr><td>Owns one domain state, uses worker threads, runs commands</td><td>A — <code>IORef</code> + <code>askWake</code></td></tr>
-<tr><td>Is a large set of interactive panes and tools</td><td>B — record of <code>Var</code>s</td></tr>
-<tr><td>Has a model that predates the UI or is shared with a library</td><td>C — app-owned <code>IORef</code> + <code>requestFrame</code></td></tr>
+<tr><td>Has one domain state, uses worker threads, runs commands</td><td>A: <code>IORef</code> + <code>askWake</code></td></tr>
+<tr><td>Is a large set of interactive panes and tools</td><td>B: record of <code>Var</code>s</td></tr>
+<tr><td>Has a model that predates the UI or is shared with a library</td><td>C: app-owned <code>IORef</code> + <code>requestFrame</code></td></tr>
 <tr><td>Is a state machine with explicit transitions</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
 <tr><td>Is a small tool</td><td>Whatever is simplest; a handful of <code>useVar</code>s is fine</td></tr>
 </tbody>

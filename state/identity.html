@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,9 +179,9 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="widget-identity--keys"><a class="header" href="#widget-identity--keys">Widget Identity &amp; Keys</a></h1>
-<p>Widget state — caret position, text selection, an open drop-down, a scroll offset, per-row local <code>Var</code>s — is not stored in the widget. It is stored under the widget’s <strong>id</strong>, and ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This chapter is about keeping the order stable.</p>
+<p>Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local <code>Var</code>s) is stored under the widget’s <strong>id</strong>, not in the widget. Ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This section explains how to keep the order stable.</p>
 <h2 id="how-ids-are-assigned"><a class="header" href="#how-ids-are-assigned">How ids are assigned</a></h2>
-<p>Every container gives its children ids counting up from the start of that container. A <code>column</code> with three labels has children 0, 1, and 2; a nested <code>row</code> starts its own count. The useful mental model is “the nth call at this level”, not a global counter.</p>
+<p>Each container assigns ids to its children counting from zero. A <code>column</code> with three labels has children 0, 1, and 2; a nested <code>row</code> starts its own count. Ids are per container, not global.</p>
 <p>Two separate id spaces exist:</p>
 <ul>
 <li><strong>Widget ids</strong> for layout nodes, focus, input state, and scroll state.</li>
@@ -211,7 +211,7 @@ scope $
 </code></pre>
 <p><code>scope</code> is cheap and local. Use it around anything that may not run on every frame: a conditional block, a case whose branches declare different widgets, a placeholder that appears while loading. Overlays are the exception with a simpler rule: call them unconditionally (see Rule 4).</p>
 <h2 id="rule-3-key-dynamic-lists-with-withkey"><a class="header" href="#rule-3-key-dynamic-lists-with-withkey">Rule 3: key dynamic lists with <code>withKey</code></a></h2>
-<p>Never key a list item by its index. Wrap each item in <code>withKey</code> with a stable, sibling-unique key — an item id, a UUID, a file path:</p>
+<p>Never key a list item by its index. Wrap each item in <code>withKey</code> with a stable, sibling-unique key: an item id, a UUID, a file path.</p>
 <pre><code class="language-haskell">column $ for_ items $ \todo -&gt;
   withKey (todoId todo) $ do
     row $ do
@@ -242,7 +242,7 @@ modal confirm "Delete the file?" $
 </code></pre>
 <p>Wrapping the call in <code>when (readVar confirm)</code> shifts every later sibling’s id when the dialog opens and closes, which is exactly the jump <code>scope</code> and keys exist to prevent. For derived open state, pass <code>constVar</code> and use the primed variants.</p>
 <h2 id="rule-5-retain-state-for-dynamic-collections"><a class="header" href="#rule-5-retain-state-for-dynamic-collections">Rule 5: retain state for dynamic collections</a></h2>
-<p>Widget and <code>Var</code> state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection — a chat log, a set of tabs, a streaming table — keep the per-row state in a <code>VarMap</code> and prune it periodically:</p>
+<p>Widget and <code>Var</code> state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection (a chat log, a set of tabs, a streaming table), keep the per-row state in a <code>VarMap</code> and prune it periodically:</p>
 <pre><code class="language-haskell">retainVars (`elem` liveIds) rowVars
 </code></pre>
 <p>Without pruning, a long-running application accumulates state for rows that no longer exist. With aggressive pruning, state disappears the moment a row is filtered out; choose the policy per collection. A todo row can keep its draft while hidden; a row from a 100,000-row log cannot.</p>
@@ -261,7 +261,7 @@ modal confirm "Delete the file?" $
 </tbody>
 </table>
 </div>
-<p>For the <code>Var</code> side of this — allocation, projections, and write costs — read <a href="index.html">State &amp; <code>Var</code></a>. For the lifecycle that makes ids reset, read <a href="../architecture/index.html">Architecture &amp; Internals</a>.</p>
+<p>For allocation, projections, and write costs, read <a href="index.html">State &amp; <code>Var</code></a>. For the lifecycle that makes ids reset, read <a href="../architecture/index.html">Architecture &amp; Internals</a>.</p>
 
                     </main>
 

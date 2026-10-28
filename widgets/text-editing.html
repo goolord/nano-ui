@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -196,7 +196,7 @@ editorView docVar = do
   when (respChanged resp) markDirty
   writeVar editorId (respId resp)
 </code></pre>
-<p>Only the edited lines are copied; unchanged lines are shared. <code>documentText</code> materializes the whole text — call it when saving, not on every edit:</p>
+<p>Only the edited lines are copied; unchanged lines are shared. <code>documentText</code> materializes the whole text; call it when saving, not on every edit.</p>
 <pre><code class="language-haskell">save = liftIO (BS.writeFile path (TE.encodeUtf8 (documentText doc)))
 </code></pre>
 <p><code>documentLineCount</code> is cheap and is the right way to show a line count in a status bar.</p>
@@ -238,8 +238,9 @@ canRedo &lt;- textCanRedo editor
 <li><code>respId</code> identifies the editor for commands and focus.</li>
 </ul>
 <p>For a single-line field, <code>textInput</code> and <code>textInput'</code> are the equivalents; <code>searchInput'</code> adds debounced change reporting and a clear button.</p>
-<h2 id="related"><a class="header" href="#related">Related</a></h2>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
+<li>Widget inventory: <a href="index.html">Widget Gallery</a>.</li>
 <li>Input widgets and their signatures: <a href="controls.html">Buttons, Menus &amp; Inputs</a>.</li>
 <li>Working with the document in an application: <a href="../tutorials/notepad.html">Build a Notepad</a>.</li>
 <li>Theming and typography: <a href="../styling/index.html">Styling &amp; Theming</a>.</li>

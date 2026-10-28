@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -204,7 +204,7 @@ key (KeyF 5)                    -- F5
 <ul>
 <li>behind an open modal;</li>
 <li>inside <code>disabledWhen True</code>;</li>
-<li>when the focused widget claims the key — a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;</li>
+<li>when the focused widget claims the key: a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;</li>
 <li>for Escape when <code>takeEscape</code> fails, or when an open overlay takes it first.</li>
 </ul>
 <p>Focused widgets claim only their own unmodified or Shift-modified keys, so modified chords such as <code>Ctrl+Enter</code>, <code>Alt+Left</code>, or <code>Ctrl+S</code> still reach the application while a field is focused. The matching low-level functions are filtered the same way: <code>keyPressed</code>, <code>keyPressedOnce</code>, <code>keyReleased</code>, and <code>keyHeld</code>. Use raw <code>pressedIn</code> only when implementing a custom widget.</p>
@@ -215,7 +215,7 @@ whenM (shortcut saveChord) saveDocument
 </code></pre>
 <p>The open menu’s row is declared first, so it wins. Define the action once and connect both triggers to it.</p>
 <h2 id="escape"><a class="header" href="#escape">Escape</a></h2>
-<p>Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition — do not share the “a field is editing” guard used for Ctrl+A or Delete.</p>
+<p>Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition. Do not share the “a field is editing” guard used for Ctrl+A or Delete.</p>
 <p><code>takeEscape</code> claims a press for the current handler:</p>
 <pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
 whenM takeEscape clearFocus

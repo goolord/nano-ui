@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -221,10 +221,10 @@ whenM (styled quiet (button "Skip")) skip
 <h2 id="interaction-states"><a class="header" href="#interaction-states">Interaction states</a></h2>
 <p>Widgets move through four states:</p>
 <ol>
-<li><strong>Default</strong> — <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>.</li>
-<li><strong>Hover</strong> — <code>styleHoverBg</code>.</li>
-<li><strong>Pressed</strong> — <code>styleActiveBg</code>, while the primary button is held inside the widget.</li>
-<li><strong>Disabled</strong> — dimmed and non-interactive.</li>
+<li><strong>Default</strong>: <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>.</li>
+<li><strong>Hover</strong>: <code>styleHoverBg</code>.</li>
+<li><strong>Pressed</strong>: <code>styleActiveBg</code>, while the primary button is held inside the widget.</li>
+<li><strong>Disabled</strong>: dimmed and non-interactive.</li>
 </ol>
 <p><code>disabledWhen cond subtree</code> disables interaction and dims rendering while preserving layout and state:</p>
 <pre><code class="language-haskell">disabledWhen isSaving $ row $ do

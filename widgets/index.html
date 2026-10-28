@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,11 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="widget-gallery"><a class="header" href="#widget-gallery">Widget Gallery</a></h1>
-<p>This is the single place to start when you need a widget. Every widget is an ordinary function in <code>NanoUI</code>; the family pages below cover the API, and the styling pages cover how it looks.</p>
+<p>Start here for widgets. Every widget is an ordinary function in <code>NanoUI</code>; the family pages cover the API, and the styling pages cover appearance.</p>
+<figure class="nano-figure">
+<img src="../images/gallery-controls.svg" alt="Buttons, a checkbox, text field, select, slider, switch, knob, spinner, progress bar, and sparkline in one nano-ui row.">
+<figcaption>Buttons, inputs, and canvas controls in one frame. Rendered with nano-ui-svg.</figcaption>
+</figure>
 <h2 id="find-a-widget-by-task"><a class="header" href="#find-a-widget-by-task">Find a widget by task</a></h2>
 <div class="table-wrapper">
 <table>
@@ -235,20 +239,9 @@
 </table>
 </div>
 <p>Anything with a <code>Response</code> can be passed to <code>tooltip</code>, <code>contextMenu</code>, and the focus helpers.</p>
-<h2 id="the-one-input-rule"><a class="header" href="#the-one-input-rule">The one input rule</a></h2>
+<h2 id="input-widgets"><a class="header" href="#input-widgets">Input widgets</a></h2>
 <p>Input widgets take the <code>Var</code> they display and mutate it directly; there is no callback and no on-change handler. To react to an edit, use the primed form’s <code>Response</code>. The full set of controls and their examples is in <a href="controls.html">Buttons, Menus &amp; Inputs</a>.</p>
-<p>Containers and modifiers are not repeated here: see <a href="../layout/index.html">Layout &amp; Scrolling</a> for <code>row</code>, <code>column</code>, <code>grid</code>, padding, alignment, and scrolling.</p>
-<h2 id="reading-order"><a class="header" href="#reading-order">Reading order</a></h2>
-<p>If you are new to the toolkit, the shortest route through this section is:</p>
-<ol>
-<li><a href="controls.html">Buttons, Menus &amp; Inputs</a> — the controls most applications need.</li>
-<li><a href="text-editing.html">Text Editing</a> — the moment a field becomes a document.</li>
-<li><a href="data-views.html">Tabs, Tables &amp; Trees</a> — showing collections.</li>
-<li><a href="overlays.html">Overlays &amp; Windows</a> — dialogs and menus that float.</li>
-<li><a href="drag-and-drop.html">Drag &amp; Drop</a> and <a href="custom-drawing.html">Custom Drawing &amp; Controls</a> when the built-in widgets are not enough.</li>
-<li><a href="../styling/index.html">Styling &amp; Theming</a>, then the <a href="../styling/lab.html">lab</a> and <a href="../styling/gotchas.html">gotchas</a>.</li>
-</ol>
-<p>Every family page has a “See also” block back to this guide and across to the styling pages.</p>
+<p>Containers and modifiers are covered once in <a href="../layout/index.html">Layout &amp; Scrolling</a>.</p>
 
                     </main>
 

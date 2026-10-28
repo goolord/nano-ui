@@ -29,7 +29,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -190,13 +190,13 @@ counter = row $ do
   whenM (button "+") (modifyVar n (+ 1))
 </code></pre>
 <h2 id="how-this-book-is-organized"><a class="header" href="#how-this-book-is-organized">How this book is organized</a></h2>
-<p>The book is a learning path first, a reference second:</p>
+<p>Chapters follow this order:</p>
 <ol>
 <li><strong><a href="#quick-start">Quick Start</a></strong> installs the toolchain and gets a window on screen.</li>
 <li><strong><a href="#tutorials">Tutorials</a></strong> build three small applications end to end: a todo list, a notepad, and a live data view.</li>
 <li><strong><a href="#state--var">State &amp; <code>Var</code></a></strong> explains where state lives, what writes cost, and the <a href="#elm-style-state">Elm-style alternative</a>.</li>
 <li><strong><a href="#layout--scrolling">Layout &amp; Scrolling</a></strong> covers containers, modifiers, and large lists.</li>
-<li>The <strong><a href="#widget-gallery">Widget Gallery</a></strong> is the single entry point for controls, data views, overlays, and custom drawing. <strong><a href="#styling--theming">Styling &amp; Theming</a></strong> lives next to it, with a <a href="#interactive-styling-lab">live lab</a> and <a href="#styling-gotchas">gotchas</a>.</li>
+<li>The <strong><a href="#widget-gallery">Widget Gallery</a></strong> is the entry point for controls, data views, overlays, and custom drawing. <strong><a href="#styling--theming">Styling &amp; Theming</a></strong> is next to it, with a <a href="#interactive-styling-lab">live lab</a> and <a href="#styling-gotchas">gotchas</a>.</li>
 <li><strong><a href="#keyboard-focus--ime">Keyboard, Focus &amp; IME</a></strong> covers chords, focus, and text input.</li>
 <li><strong><a href="#async-work--animation">Async Work &amp; Animation</a></strong>, <strong><a href="#window-chrome--screenshots">Desktop Windows</a></strong>, and <strong><a href="#ecosystem-packages">Ecosystem Packages</a></strong> go further.</li>
 <li><strong><a href="#recurring-bugs--fixes">Troubleshooting</a></strong>, <strong><a href="#development-setup">Development Setup</a></strong>, and <strong><a href="#architecture--internals">Architecture &amp; Internals</a></strong> are the reference material.</li>
@@ -221,10 +221,10 @@ counter = row $ do
 </tbody>
 </table>
 </div>
-<h2 id="interactive-styling-laboratory"><a class="header" href="#interactive-styling-laboratory">Interactive styling laboratory</a></h2>
-<p>This documentation includes interactive, headlessly rendered SVG workbenches embedded directly in the chapters. You can toggle styling modifiers, themes, and interaction states live:</p>
+<h2 id="styling-workbenches"><a class="header" href="#styling-workbenches">Styling workbenches</a></h2>
+<p>Interactive SVG workbenches are embedded in the styling chapters. Toggle modifiers, themes, and interaction states live:</p>
 <p><nano-ui-hero></nano-ui-hero></p>
-<p>Every code sample assumes <code>import NanoUI</code> and <code>OverloadedStrings</code>; examples that use anything else import it explicitly. The complete, runnable source for each tutorial lives in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>.</p>
+<p>Code samples assume <code>import NanoUI</code> and <code>OverloadedStrings</code>. The runnable source for each tutorial is in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h1>
 <p>This guide sets up a project and builds a small windowed application. It should take about ten minutes. The <a href="#tutorials">tutorials</a> take it from there.</p>
@@ -331,7 +331,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tutorials"><a class="header" href="#tutorials">Tutorials</a></h1>
-<p>Three applications, built one feature at a time. Each chapter is a guided tour of a runnable program; the full source is in <code>packages/nano-ui-demo/examples/</code>, so you can run it, change it, and break it while you read.</p>
+<p>Three applications, built one feature at a time. Each chapter walks through a runnable program; the full source is in <code>packages/nano-ui-demo/examples/</code>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -425,7 +425,7 @@ todoApp app = do
     filterRow items filt
     todoList items filt
 </code></pre>
-<p>The view’s local state — the draft text and the current filter — is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
+<p>The view’s local state (the draft text and the current filter) is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
 <p><code>columnWith (padAll 20 . gap 12 . fillW . fillH)</code> is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.</p>
 <h2 id="3-adding-an-item"><a class="header" href="#3-adding-an-item">3. Adding an item</a></h2>
 <p>The input row has three jobs: draw the field, draw the button, and decide whether this frame is an “add” frame.</p>
@@ -439,7 +439,7 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
     writeVar draft ""
     requestFocus (respId inputR)
 </code></pre>
-<p>Several things are worth pausing on:</p>
+<p>Details:</p>
 <ul>
 <li><strong>The primed widget returns a <code>Response</code>.</strong> <code>textInputConfigured'</code> reports the widget’s identity, rectangle, hover and click state, and whether Enter was submitted (<code>respSubmitted</code>). <code>button</code> already returns the one <code>Bool</code> this row needs.</li>
 <li><strong><code>readVar draft</code> sits below the field that edits it.</strong> The field’s write lands first, then the read sees the new text in the same pass. Reading <em>above</em> an editing widget forces a second pass.</li>
@@ -473,7 +473,7 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
 </code></pre>
 <p><code>boundedTabBarConfigured</code> draws a segmented control over every constructor of <code>Filter</code>; the label function is <code>show</code>. The count is <em>derived</em>: it is computed from the list every frame, never stored in a second <code>Var</code> that could drift. <code>disabledWhen</code> dims the clear button and blocks its events without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
-<p>Now the interesting part. Each row has local state — whether it is being edited and the draft of its text — but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row’s position on screen.</p>
+<p>Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row’s position on screen.</p>
 <pre><code class="language-haskell">todoList :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
 todoList items filt = do
   shownFilter &lt;- readVar filt
@@ -545,8 +545,8 @@ swapIds a b xs = map pick xs
 <p>Enter in the new-item field adds an item because <code>respSubmitted</code> reports it. Escape cancels an edit:</p>
 <pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
 </code></pre>
-<p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view — an open popup or a second <code>takeEscape</code> — do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
-<p>For the full shortcut model — <code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys — see <a href="#keyboard-focus--ime">Keyboard, Focus &amp; IME</a>.</p>
+<p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view (an open popup or a second <code>takeEscape</code>) do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
+<p>For the full shortcut model (<code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys), see <a href="#keyboard-focus--ime">Keyboard, Focus &amp; IME</a>.</p>
 <h2 id="8-try-it"><a class="header" href="#8-try-it">8. Try it</a></h2>
 <p>Start from the runnable source and change one thing at a time:</p>
 <ul>
@@ -558,7 +558,7 @@ swapIds a b xs = map pick xs
 <p>Next: <a href="#tutorial-2-build-a-notepad">Tutorial 2: Build a Notepad</a> adds menus, dialogs, and a real text document.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tutorial-2-build-a-notepad"><a class="header" href="#tutorial-2-build-a-notepad">Tutorial 2: Build a Notepad</a></h1>
-<p>A menu bar, file dialogs, a real text document with undo, a status bar, and a prompt before losing unsaved work. This is the shape of most desktop tools, and it exercises the parts of nano-ui that a todo list does not.</p>
+<p>A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work. It covers menus, dialogs, and close confirmation.</p>
 <p>The complete program is <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Notepad.hs"><code>packages/nano-ui-demo/examples/Notepad.hs</code></a>. Run it with:</p>
 <pre><code class="language-sh">cabal run nano-ui-sdl-notepad
 </code></pre>
@@ -579,7 +579,7 @@ newNotepad =
     &lt;*&gt; newVar Nothing
 </code></pre>
 <p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. The rule of thumb: allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
-<h2 id="2-the-window-that-asks-before-closing"><a class="header" href="#2-the-window-that-asks-before-closing">2. The window that asks before closing</a></h2>
+<h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
 <p>By default the window closes as soon as the close button is pressed. A notepad needs to intercept that and ask about unsaved changes, so the window is created with <code>wsExitOnCloseRequest = False</code>:</p>
 <pre><code class="language-haskell">main :: IO ()
 main = do
@@ -622,7 +622,7 @@ menuBar openMenu entries = do
       (popupResp, _) &lt;- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
 </code></pre>
-<p>Why <code>constVar</code> for the popup? <code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the truth is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> gives it a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
+<p><code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the state is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> supplies a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
 <p>Call overlays unconditionally. <code>popup'</code> is called for every title on every frame, even when closed; it draws nothing while closed. Wrapping it in <code>when isOpen</code> would change the widget ids of later siblings each time a menu opens.</p>
@@ -756,7 +756,7 @@ modal confirmExit "Unsaved changes" $ do
     labelWith (tight . fontMuted) ("Lines: " &lt;&gt; T.pack (show (documentLineCount d)))
     labelWith (tight . fontMuted) ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
 </code></pre>
-<p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional — the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="#recurring-bugs--fixes">Recurring Bugs</a>).</p>
+<p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="#recurring-bugs--fixes">Recurring Bugs</a>).</p>
 <h2 id="10-try-it"><a class="header" href="#10-try-it">10. Try it</a></h2>
 <ul>
 <li>Add a recent-files list persisted between runs.</li>
@@ -777,7 +777,7 @@ cabal run nano-ui-example-live-chart
 <p>Compile with <code>-threaded</code>. The frame loop sleeps while a job runs, and the job runs on a Haskell thread while the loop is blocked.</p>
 </blockquote>
 <h2 id="1-allocate-handles-once"><a class="header" href="#1-allocate-handles-once">1. Allocate handles once</a></h2>
-<p>A <code>Task</code> owns one typed job; a <code>Stream</code> owns one typed push channel. Both are created during setup, exactly like a <code>Var</code>:</p>
+<p>A <code>Task</code> runs one typed job; a <code>Stream</code> carries one typed push channel. Both are created during setup, like a <code>Var</code>:</p>
 <pre><code class="language-haskell">data App = App
   { appSearch   :: Task Text [Text]
   , appFlaky    :: Task Int Text
@@ -940,7 +940,7 @@ walkChart points =
 <li><code>chart</code> takes the list of series; <code>withGrid</code>, <code>withLegend</code>, <code>withXAxis</code>, <code>withYAxis</code>, and <code>withTitle</code> decorate it.</li>
 <li><code>plot cache layout theChart</code> draws it and returns a <code>PlotResponse</code> whose <code>plotHover</code> is the nearest data point under the pointer.</li>
 </ul>
-<p>Building the <code>Chart</code> value every frame is fine — it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the <em>diagram</em>; the <code>PlotCache</code> is what prevents that.</p>
+<p>Building the <code>Chart</code> value every frame is fine: it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the <em>diagram</em>; the <code>PlotCache</code> is what prevents that.</p>
 <h2 id="6-the-rules-collected"><a class="header" href="#6-the-rules-collected">6. The rules, collected</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1111,9 +1111,9 @@ textInput settings.nickname
 <p>Next: <a href="#widget-identity--keys">Widget Identity &amp; Keys</a> for keyed lists and conditional UI, or <a href="#elm-style-state">Elm-Style State</a> for the reducer alternative.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="widget-identity--keys"><a class="header" href="#widget-identity--keys">Widget Identity &amp; Keys</a></h1>
-<p>Widget state — caret position, text selection, an open drop-down, a scroll offset, per-row local <code>Var</code>s — is not stored in the widget. It is stored under the widget’s <strong>id</strong>, and ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This chapter is about keeping the order stable.</p>
+<p>Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local <code>Var</code>s) is stored under the widget’s <strong>id</strong>, not in the widget. Ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This section explains how to keep the order stable.</p>
 <h2 id="how-ids-are-assigned"><a class="header" href="#how-ids-are-assigned">How ids are assigned</a></h2>
-<p>Every container gives its children ids counting up from the start of that container. A <code>column</code> with three labels has children 0, 1, and 2; a nested <code>row</code> starts its own count. The useful mental model is “the nth call at this level”, not a global counter.</p>
+<p>Each container assigns ids to its children counting from zero. A <code>column</code> with three labels has children 0, 1, and 2; a nested <code>row</code> starts its own count. Ids are per container, not global.</p>
 <p>Two separate id spaces exist:</p>
 <ul>
 <li><strong>Widget ids</strong> for layout nodes, focus, input state, and scroll state.</li>
@@ -1143,7 +1143,7 @@ scope $
 </code></pre>
 <p><code>scope</code> is cheap and local. Use it around anything that may not run on every frame: a conditional block, a case whose branches declare different widgets, a placeholder that appears while loading. Overlays are the exception with a simpler rule: call them unconditionally (see Rule 4).</p>
 <h2 id="rule-3-key-dynamic-lists-with-withkey"><a class="header" href="#rule-3-key-dynamic-lists-with-withkey">Rule 3: key dynamic lists with <code>withKey</code></a></h2>
-<p>Never key a list item by its index. Wrap each item in <code>withKey</code> with a stable, sibling-unique key — an item id, a UUID, a file path:</p>
+<p>Never key a list item by its index. Wrap each item in <code>withKey</code> with a stable, sibling-unique key: an item id, a UUID, a file path.</p>
 <pre><code class="language-haskell">column $ for_ items $ \todo -&gt;
   withKey (todoId todo) $ do
     row $ do
@@ -1174,7 +1174,7 @@ modal confirm "Delete the file?" $
 </code></pre>
 <p>Wrapping the call in <code>when (readVar confirm)</code> shifts every later sibling’s id when the dialog opens and closes, which is exactly the jump <code>scope</code> and keys exist to prevent. For derived open state, pass <code>constVar</code> and use the primed variants.</p>
 <h2 id="rule-5-retain-state-for-dynamic-collections"><a class="header" href="#rule-5-retain-state-for-dynamic-collections">Rule 5: retain state for dynamic collections</a></h2>
-<p>Widget and <code>Var</code> state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection — a chat log, a set of tabs, a streaming table — keep the per-row state in a <code>VarMap</code> and prune it periodically:</p>
+<p>Widget and <code>Var</code> state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection (a chat log, a set of tabs, a streaming table), keep the per-row state in a <code>VarMap</code> and prune it periodically:</p>
 <pre><code class="language-haskell">retainVars (`elem` liveIds) rowVars
 </code></pre>
 <p>Without pruning, a long-running application accumulates state for rows that no longer exist. With aggressive pruning, state disappears the moment a row is filtered out; choose the policy per collection. A todo row can keep its draft while hidden; a row from a 100,000-row log cannot.</p>
@@ -1193,7 +1193,7 @@ modal confirm "Delete the file?" $
 </tbody>
 </table>
 </div>
-<p>For the <code>Var</code> side of this — allocation, projections, and write costs — read <a href="#state--var">State &amp; <code>Var</code></a>. For the lifecycle that makes ids reset, read <a href="#architecture--internals">Architecture &amp; Internals</a>.</p>
+<p>For allocation, projections, and write costs, read <a href="#state--var">State &amp; <code>Var</code></a>. For the lifecycle that makes ids reset, read <a href="#architecture--internals">Architecture &amp; Internals</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="elm-style-state"><a class="header" href="#elm-style-state">Elm-Style State</a></h1>
 <p><code>nano-ui-emit</code> is the reducer-based alternative to <code>Var</code>: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model.</p>
@@ -1217,7 +1217,7 @@ update (SetName n) m = m {name = n}
 main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </code></pre>
-<p>Everything else about nano-ui — widgets, layout, focus, and keys — is unchanged. The state-management style is what differs.</p>
+<p>Widgets, layout, focus, and keys are unchanged. Only the state model differs.</p>
 <h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
 <p><code>NanoUIE msg a</code> is a <code>NanoUI</code> action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting the wrong type is a compile error.</p>
 <div class="table-wrapper">
@@ -1324,6 +1324,10 @@ parentView n = Emit.withNanoUI column $ do
   buttonWith (fixedW 120) "Apply"
 </code></pre>
 <p>Logical pixels, origin top-left, <code>y</code> downward. Backends handle DPI scaling.</p>
+<figure class="nano-figure">
+<img src="images/layout-overview.svg" alt="A nano-ui window with a toolbar, sidebar, three metric panels, and a deployments table.">
+<figcaption>A frame built from a row, a sidebar panel, stat panels, and a table. Rendered with nano-ui-svg.</figcaption>
+</figure>
 <h2 id="containers"><a class="header" href="#containers">Containers</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1360,28 +1364,28 @@ layers $ do
 <h2 id="modifiers"><a class="header" href="#modifiers">Modifiers</a></h2>
 <p><strong>Sizing</strong></p>
 <ul>
-<li><code>fillW</code> / <code>fillH</code> — take all available space on an axis; <code>grow</code> is both.</li>
-<li><code>fixedW w</code>, <code>fixedH h</code>, <code>fixedWH w h</code> — explicit logical pixels.</li>
-<li><code>minW w</code>, <code>maxW w</code>, <code>minH h</code>, <code>maxH h</code> — bounds.</li>
-<li><code>percent p</code> — a percentage of the parent.</li>
-<li><code>aspect r</code> — width/height ratio.</li>
+<li><code>fillW</code> / <code>fillH</code>: take all available space on an axis; <code>grow</code> is both.</li>
+<li><code>fixedW w</code>, <code>fixedH h</code>, <code>fixedWH w h</code>: explicit logical pixels.</li>
+<li><code>minW w</code>, <code>maxW w</code>, <code>minH h</code>, <code>maxH h</code>: bounds.</li>
+<li><code>percent p</code>: a percentage of the parent.</li>
+<li><code>aspect r</code>: width/height ratio.</li>
 </ul>
 <p><strong>Spacing</strong></p>
 <ul>
 <li><code>padAll p</code>, <code>padXY x y</code>, <code>padLeft</code>, <code>padRight</code>, <code>padTop</code>, <code>padBottom</code>, <code>padLRTB l r t b</code>.</li>
-<li><code>gap g</code> — space between children.</li>
-<li><code>tight</code> — remove internal padding but keep the gap.</li>
+<li><code>gap g</code>: space between children.</li>
+<li><code>tight</code>: remove internal padding but keep the gap.</li>
 </ul>
 <p><strong>Alignment and wrapping</strong></p>
 <ul>
 <li><code>alignMid</code>, <code>alignStart</code>, <code>alignEnd</code>, <code>alignCenter</code>, <code>alignTop</code>, <code>alignBottom</code>, <code>alignBaseline</code>.</li>
-<li><code>wrap</code> — wrap onto new lines; add <code>lineGap</code> and <code>lineAlign</code>.</li>
+<li><code>wrap</code>: wrap onto new lines; add <code>lineGap</code> and <code>lineAlign</code>.</li>
 </ul>
 <p><strong>Positioning and pointer behavior</strong></p>
 <ul>
-<li><code>pinAt x y</code> — position absolutely within the parent. <code>pinAt 0 0 . grow</code> covers it for a scrim.</li>
-<li><code>pointer PointerBlock</code> — consume pointer events (a scrim).</li>
-<li><code>pointer PointerPass</code> — do not consume them (decorative drawing).</li>
+<li><code>pinAt x y</code>: position absolutely within the parent. <code>pinAt 0 0 . grow</code> covers it for a scrim.</li>
+<li><code>pointer PointerBlock</code>: consume pointer events (a scrim).</li>
+<li><code>pointer PointerPass</code>: do not consume them (decorative drawing).</li>
 </ul>
 <p><code>alignMid</code> on a row positions the row itself in its parent. To centre the row’s <em>contents</em>, apply it to each child or use <code>alignCenter</code> inside the row.</p>
 <h2 id="scrolling"><a class="header" href="#scrolling">Scrolling</a></h2>
@@ -1444,7 +1448,11 @@ liftIO $ setScrollTuning ctx defaultScrollTuning
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="widget-gallery"><a class="header" href="#widget-gallery">Widget Gallery</a></h1>
-<p>This is the single place to start when you need a widget. Every widget is an ordinary function in <code>NanoUI</code>; the family pages below cover the API, and the styling pages cover how it looks.</p>
+<p>Start here for widgets. Every widget is an ordinary function in <code>NanoUI</code>; the family pages cover the API, and the styling pages cover appearance.</p>
+<figure class="nano-figure">
+<img src="images/gallery-controls.svg" alt="Buttons, a checkbox, text field, select, slider, switch, knob, spinner, progress bar, and sparkline in one nano-ui row.">
+<figcaption>Buttons, inputs, and canvas controls in one frame. Rendered with nano-ui-svg.</figcaption>
+</figure>
 <h2 id="find-a-widget-by-task"><a class="header" href="#find-a-widget-by-task">Find a widget by task</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1500,20 +1508,9 @@ liftIO $ setScrollTuning ctx defaultScrollTuning
 </table>
 </div>
 <p>Anything with a <code>Response</code> can be passed to <code>tooltip</code>, <code>contextMenu</code>, and the focus helpers.</p>
-<h2 id="the-one-input-rule"><a class="header" href="#the-one-input-rule">The one input rule</a></h2>
+<h2 id="input-widgets"><a class="header" href="#input-widgets">Input widgets</a></h2>
 <p>Input widgets take the <code>Var</code> they display and mutate it directly; there is no callback and no on-change handler. To react to an edit, use the primed form’s <code>Response</code>. The full set of controls and their examples is in <a href="#buttons-menus--inputs">Buttons, Menus &amp; Inputs</a>.</p>
-<p>Containers and modifiers are not repeated here: see <a href="#layout--scrolling">Layout &amp; Scrolling</a> for <code>row</code>, <code>column</code>, <code>grid</code>, padding, alignment, and scrolling.</p>
-<h2 id="reading-order"><a class="header" href="#reading-order">Reading order</a></h2>
-<p>If you are new to the toolkit, the shortest route through this section is:</p>
-<ol>
-<li><a href="#buttons-menus--inputs">Buttons, Menus &amp; Inputs</a> — the controls most applications need.</li>
-<li><a href="#text-editing">Text Editing</a> — the moment a field becomes a document.</li>
-<li><a href="#tabs-tables--trees">Tabs, Tables &amp; Trees</a> — showing collections.</li>
-<li><a href="#overlays--windows">Overlays &amp; Windows</a> — dialogs and menus that float.</li>
-<li><a href="#drag-and-drop">Drag &amp; Drop</a> and <a href="#custom-drawing--controls">Custom Drawing &amp; Controls</a> when the built-in widgets are not enough.</li>
-<li><a href="#styling--theming">Styling &amp; Theming</a>, then the <a href="#interactive-styling-lab">lab</a> and <a href="#styling-gotchas">gotchas</a>.</li>
-</ol>
-<p>Every family page has a “See also” block back to this guide and across to the styling pages.</p>
+<p>Containers and modifiers are covered once in <a href="#layout--scrolling">Layout &amp; Scrolling</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="buttons-menus--inputs"><a class="header" href="#buttons-menus--inputs">Buttons, Menus &amp; Inputs</a></h1>
 <p>The controls most applications need: buttons, menus, and the widgets that edit a <code>Var</code>.</p>
@@ -1528,7 +1525,7 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
 <pre><code class="language-haskell">whenM (button "Save Document") (liftIO saveFile)
 </code></pre>
 <p>The <code>whenM</code> guard is essential: the view runs every frame, so an unguarded side effect would run forever.</p>
-<p>Use the primed form when you need the response — hover state, a rectangle for an anchored popup, or a tooltip:</p>
+<p>Use the primed form when you need the response: hover state, a rectangle for an anchored popup, or a tooltip.</p>
 <pre><code class="language-haskell">resp &lt;- button' "Refresh"
 tooltip resp "Poll the remote server for updates"
 when (respClicked resp) refresh
@@ -1574,7 +1571,7 @@ _ &lt;- contextMenu rowResp $ do
   whenM (menuItem "Inspect") inspectRow
   whenM (menuItem "Copy") copyRow
 </code></pre>
-<h2 id="input-widgets"><a class="header" href="#input-widgets">Input widgets</a></h2>
+<h2 id="input-widgets-1"><a class="header" href="#input-widgets-1">Input widgets</a></h2>
 <p>Input widgets take the mutable <code>Var</code> they display and edit. They manage caret, selection, focus, and keyboard routing themselves.</p>
 <div class="table-wrapper">
 <table>
@@ -1668,7 +1665,7 @@ editorView docVar = do
   when (respChanged resp) markDirty
   writeVar editorId (respId resp)
 </code></pre>
-<p>Only the edited lines are copied; unchanged lines are shared. <code>documentText</code> materializes the whole text — call it when saving, not on every edit:</p>
+<p>Only the edited lines are copied; unchanged lines are shared. <code>documentText</code> materializes the whole text; call it when saving, not on every edit.</p>
 <pre><code class="language-haskell">save = liftIO (BS.writeFile path (TE.encodeUtf8 (documentText doc)))
 </code></pre>
 <p><code>documentLineCount</code> is cheap and is the right way to show a line count in a status bar.</p>
@@ -1710,8 +1707,9 @@ canRedo &lt;- textCanRedo editor
 <li><code>respId</code> identifies the editor for commands and focus.</li>
 </ul>
 <p>For a single-line field, <code>textInput</code> and <code>textInput'</code> are the equivalents; <code>searchInput'</code> adds debounced change reporting and a clear button.</p>
-<h2 id="related-1"><a class="header" href="#related-1">Related</a></h2>
+<h2 id="see-also-1"><a class="header" href="#see-also-1">See also</a></h2>
 <ul>
+<li>Widget inventory: <a href="#widget-gallery">Widget Gallery</a>.</li>
 <li>Input widgets and their signatures: <a href="#buttons-menus--inputs">Buttons, Menus &amp; Inputs</a>.</li>
 <li>Working with the document in an application: <a href="#tutorial-2-build-a-notepad">Build a Notepad</a>.</li>
 <li>Theming and typography: <a href="#styling--theming">Styling &amp; Theming</a>.</li>
@@ -1719,6 +1717,10 @@ canRedo &lt;- textCanRedo editor
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tabs-tables--trees"><a class="header" href="#tabs-tables--trees">Tabs, Tables &amp; Trees</a></h1>
 <p>Widgets that show collections: tab strips, sortable tables, and hierarchical trees.</p>
+<figure class="nano-figure">
+<img src="images/gallery-data.svg" alt="A nano-ui frame with a tab strip, a sortable service table, and a file tree.">
+<figcaption>A tab strip, sortable table, and tree in one frame. Rendered with nano-ui-svg.</figcaption>
+</figure>
 <h2 id="tabs"><a class="header" href="#tabs">Tabs</a></h2>
 <p>A tab strip binds the active key to a <code>Var</code>; only the selected tab’s body runs:</p>
 <pre><code class="language-haskell">data Page = Overview | Logs | Settings
@@ -1739,8 +1741,8 @@ resp &lt;- tabs' active
 for_ (tabClosed resp) closeTab
 let activeKey = tabActive resp
 </code></pre>
-<p>The caller owns removal: <code>tabs'</code> reports <code>tabClosed</code>, it does not remove the tab. A key no tab has selects the first tab and writes that key back to the <code>Var</code>.</p>
-<p><code>tabBar</code> / <code>tabBar'</code> draw headers only and leave the body to the caller — useful for pane layouts and custom bodies. <code>tabsConfigured</code> / <code>tabBarConfigured</code> take a <code>TabsConfig</code>:</p>
+<p>The caller must remove the tab: <code>tabs'</code> reports <code>tabClosed</code>, it does not remove it. A key no tab has selects the first tab and writes that key back to the <code>Var</code>.</p>
+<p><code>tabBar</code> / <code>tabBar'</code> draw headers only and leave the body to the caller, which is useful for pane layouts and custom bodies. <code>tabsConfigured</code> / <code>tabBarConfigured</code> take a <code>TabsConfig</code>:</p>
 <pre><code class="language-haskell">let cfg = defaultTabsConfig
       {tabsStyle = TabSegmented, tabsOrientation = TabTop, tabsTrailing = newTabButton}
 tabsConfigured cfg active tabs
@@ -1777,8 +1779,8 @@ fileTree :: [TreeItem] -&gt; Var Int -&gt; NanoUI ()
 fileTree = tree "file-tree"
 </code></pre>
 <p><code>TreeItem</code> is the library type (<code>treeItemLabel</code>, <code>treeItemChildren</code>), not an app-defined record. <code>tree</code> reports the selected <strong>pre-order index</strong> through the <code>Var Int</code>, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.</p>
-<p>For very large trees, keep the expansion set in a <code>VarMap</code> keyed by a stable path, and rebuild the visible items before calling <code>tree</code>.</p>
-<h2 id="see-also-1"><a class="header" href="#see-also-1">See also</a></h2>
+<p>For large trees, keep the expansion set in a <code>VarMap</code> keyed by a stable path, and rebuild the visible items before calling <code>tree</code>.</p>
+<h2 id="see-also-2"><a class="header" href="#see-also-2">See also</a></h2>
 <ul>
 <li>The rest of the widget family: <a href="#widget-gallery">Widget Gallery</a>.</li>
 <li>Styling tables and tabs: <a href="#styling--theming">Styling &amp; Theming</a> and the <a href="#interactive-styling-lab">lab</a>.</li>
@@ -1867,7 +1869,7 @@ tooltipConfigured defaultTooltipConfig
 <li><strong>Confirm destructive actions in a modal</strong>, not a popup: a popup can be dismissed by a click outside, which is the wrong default for a destructive action.</li>
 </ul>
 <p>The notepad tutorial wires a modal to the window’s close request and builds a menu bar from <code>popup'</code>: <a href="#tutorial-2-build-a-notepad">Build a Notepad</a>.</p>
-<h2 id="see-also-2"><a class="header" href="#see-also-2">See also</a></h2>
+<h2 id="see-also-3"><a class="header" href="#see-also-3">See also</a></h2>
 <ul>
 <li>Widget inventory: <a href="#widget-gallery">Widget Gallery</a>.</li>
 <li>Styling dialogs and popups: <a href="#styling--theming">Styling &amp; Theming</a>.</li>
@@ -1912,7 +1914,7 @@ case (gesture, pgrDropTarget grid) of
   _ -&gt; pure ()
 </code></pre>
 <p>The destination provides <code>pgdLocation</code> (<code>BesidePane paneId edge</code> or <code>OutsideGrid edge</code>), <code>pgdRect</code>, and <code>pgdPane</code> for custom drop validation.</p>
-<h2 id="see-also-3"><a class="header" href="#see-also-3">See also</a></h2>
+<h2 id="see-also-4"><a class="header" href="#see-also-4">See also</a></h2>
 <ul>
 <li>Widget inventory: <a href="#widget-gallery">Widget Gallery</a>.</li>
 <li>Tabs and tables that drag reordering is usually paired with: <a href="#tabs-tables--trees">Tabs, Tables &amp; Trees</a>.</li>
@@ -1960,7 +1962,7 @@ settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
 <pre><code class="language-haskell">import NanoUI.Path qualified as P
 
 badge :: NanoUI ()
-badge = canvas (fixedWH 120 40) $ \_dc -&gt; do
+badge = canvas (fixedWH 120 40) $ \_rect -&gt; do
   drawRoundedRect (Rect 0 0 120 40) 8 (colorRGBA 37 99 235 255)
   drawStrokePath (P.circle (V2 20 20) 8) 2 colorWhite
   drawText (V2 68 20) AlignCenter AlignMiddle "Ready" colorWhite
@@ -1985,20 +1987,20 @@ badge = canvas (fixedWH 120 40) $ \_dc -&gt; do
 <li><code>drawRoundedRect</code> and <code>drawStrokeRoundedRect</code> draw a bordered box; the stroke is inset inside the bounds, unlike a centred path stroke.</li>
 </ul>
 <h3 id="content-keys-and-caching"><a class="header" href="#content-keys-and-caching">Content keys and caching</a></h3>
-<p>Without <code>widgetContent</code>, a custom widget’s draw ops are rebuilt and diffed every frame. With a key, unchanged frames skip rebuild and repaint — but the key must cover <strong>everything the drawing reads</strong>:</p>
+<p>Without <code>widgetContent</code>, a custom widget’s draw ops are rebuilt and diffed every frame. With a key, unchanged frames skip rebuild and repaint, but the key must cover <strong>everything the drawing reads</strong>:</p>
 <pre><code class="language-haskell">(resp, ()) &lt;- customWidget defaultCustomWidgetSpec
   { widgetLayout = fixedWH 48 48
   , widgetContent = contentKey [angle, volume, fromIntegral (round scrollY)]
   , widgetDraw = \cdc rect -&gt; runCanvasFor cdc (drawGauge rect)
   }
 </code></pre>
-<p>A key that misses an input shows stale pixels. This is the most common custom-drawing bug; see <a href="#styling-gotchas">Styling Gotchas</a>.</p>
-<p>A drawing whose layout rectangle never changes — a drag ghost pinned under the pointer with <code>pinAt</code> — gets no layout change when it moves. Give it an explicit version that includes what moves it:</p>
+<p>A key that misses an input shows stale pixels. See <a href="#styling-gotchas">Styling Gotchas</a>.</p>
+<p>A drawing whose layout rectangle never changes (a drag ghost pinned under the pointer with <code>pinAt</code>) gets no layout change when it moves. Give it an explicit version that includes what moves it:</p>
 <pre><code class="language-haskell">-- dragGhostOps :: Rect -&gt; SmallArray DrawOp
 drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) dragGhostOps
 </code></pre>
 <p>Otherwise it keeps the ops of the frame it first appeared in.</p>
-<h2 id="see-also-4"><a class="header" href="#see-also-4">See also</a></h2>
+<h2 id="see-also-5"><a class="header" href="#see-also-5">See also</a></h2>
 <ul>
 <li>Widget inventory: <a href="#widget-gallery">Widget Gallery</a>.</li>
 <li>Drawing styles, colors, and themes: <a href="#styling--theming">Styling &amp; Theming</a>.</li>
@@ -2048,10 +2050,10 @@ whenM (styled quiet (button "Skip")) skip
 <h2 id="interaction-states"><a class="header" href="#interaction-states">Interaction states</a></h2>
 <p>Widgets move through four states:</p>
 <ol>
-<li><strong>Default</strong> — <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>.</li>
-<li><strong>Hover</strong> — <code>styleHoverBg</code>.</li>
-<li><strong>Pressed</strong> — <code>styleActiveBg</code>, while the primary button is held inside the widget.</li>
-<li><strong>Disabled</strong> — dimmed and non-interactive.</li>
+<li><strong>Default</strong>: <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>.</li>
+<li><strong>Hover</strong>: <code>styleHoverBg</code>.</li>
+<li><strong>Pressed</strong>: <code>styleActiveBg</code>, while the primary button is held inside the widget.</li>
+<li><strong>Disabled</strong>: dimmed and non-interactive.</li>
 </ol>
 <p><code>disabledWhen cond subtree</code> disables interaction and dims rendering while preserving layout and state:</p>
 <pre><code class="language-haskell">disabledWhen isSaving $ row $ do
@@ -2079,7 +2081,7 @@ whenM (styled quiet (button "Skip")) skip
 <p><code>setSdlUiFont</code> changes fonts mid-session. <code>sdlAppUiScale = 0</code> follows the desktop scale on Windows. For exact font metrics and text measurement, use <code>lineWidth</code>, <code>fmLineHeight</code>, and <code>fmSnapScale</code> from the drawing API rather than summing per-glyph advances.</p>
 <p>The typography laboratory shows the modifiers side by side:</p>
 <p><nano-ui-typo-lab></nano-ui-typo-lab></p>
-<h2 id="see-also-5"><a class="header" href="#see-also-5">See also</a></h2>
+<h2 id="see-also-6"><a class="header" href="#see-also-6">See also</a></h2>
 <ul>
 <li>Widgets: <a href="#widget-gallery">Widget Gallery</a>.</li>
 <li>Live modifier workbenches: <a href="#interactive-styling-lab">Interactive Styling Lab</a>.</li>
@@ -2153,7 +2155,7 @@ whenM (styled quiet (button "Skip")) skip
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="styling-gotchas"><a class="header" href="#styling-gotchas">Styling Gotchas</a></h1>
 <p>Twelve non-obvious styling interactions, edge cases, and gotchas discovered in <code>nano-ui</code>’s layout, theming, and rendering pipelines. Start with <a href="#styling--theming">Styling &amp; Theming</a> for the concepts and the <a href="#interactive-styling-lab">Interactive Styling Lab</a> for live examples; come here when the result is not what you expected.</p>
-<p>Each interaction includes an explanation of <strong>why it happens</strong> under the hood, the <strong>recommended idiom or fix</strong>, code comparisons, and interactive headless SVG specimens showing the trap vs the fix.</p>
+<p>Each interaction includes an explanation of <strong>why it happens</strong>, the <strong>recommended fix</strong>, code comparisons, and headless SVG specimens showing the trap and the fix.</p>
 <hr>
 <h2 id="1-buttonwith-drops-font-flags"><a class="header" href="#1-buttonwith-drops-font-flags">1. <code>buttonWith</code> Drops Font Flags</a></h2>
 <p><code>buttonWith</code> drops font flags like <code>fontBold</code>, <code>fontItalic</code>, <code>fontUnderline</code>, and <code>fontTone</code>.</p>
@@ -2229,7 +2231,7 @@ key (KeyF 5)                    -- F5
 <ul>
 <li>behind an open modal;</li>
 <li>inside <code>disabledWhen True</code>;</li>
-<li>when the focused widget claims the key — a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;</li>
+<li>when the focused widget claims the key: a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;</li>
 <li>for Escape when <code>takeEscape</code> fails, or when an open overlay takes it first.</li>
 </ul>
 <p>Focused widgets claim only their own unmodified or Shift-modified keys, so modified chords such as <code>Ctrl+Enter</code>, <code>Alt+Left</code>, or <code>Ctrl+S</code> still reach the application while a field is focused. The matching low-level functions are filtered the same way: <code>keyPressed</code>, <code>keyPressedOnce</code>, <code>keyReleased</code>, and <code>keyHeld</code>. Use raw <code>pressedIn</code> only when implementing a custom widget.</p>
@@ -2240,7 +2242,7 @@ whenM (shortcut saveChord) saveDocument
 </code></pre>
 <p>The open menu’s row is declared first, so it wins. Define the action once and connect both triggers to it.</p>
 <h2 id="escape"><a class="header" href="#escape">Escape</a></h2>
-<p>Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition — do not share the “a field is editing” guard used for Ctrl+A or Delete.</p>
+<p>Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition. Do not share the “a field is editing” guard used for Ctrl+A or Delete.</p>
 <p><code>takeEscape</code> claims a press for the current handler:</p>
 <pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
 whenM takeEscape clearFocus
@@ -2305,7 +2307,7 @@ for_ preedit drawCompositionAtCaret
 (_, _, _) &lt;- runFrame ctx input2 view
 </code></pre>
 <p>Warm up with <code>warmup2</code> before targeting a widget by <code>respRect</code>. For shortcut tests, build input with <code>keyInp</code> / <code>chordInp</code> from <code>NanoUI.Testing.Harness</code>.</p>
-<h2 id="see-also-6"><a class="header" href="#see-also-6">See also</a></h2>
+<h2 id="see-also-7"><a class="header" href="#see-also-7">See also</a></h2>
 <ul>
 <li>Widgets that take keys: <a href="#buttons-menus--inputs">Buttons, Menus &amp; Inputs</a>.</li>
 <li>Focus-dependent shortcut bugs: <a href="#recurring-bugs--fixes">Troubleshooting</a>.</li>
@@ -2340,7 +2342,7 @@ label (fromMaybe "Loading..." contents)
 <p>Rules:</p>
 <ul>
 <li><strong>The key identifies the job.</strong> A new key starts a worker and cancels the old job with an asynchronous exception.</li>
-<li><strong>A skipped hook cancels the job.</strong> If the view does not call <code>useTask</code> for a full frame — because the pane is in an inactive tab or inside a branch — the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
+<li><strong>A skipped hook cancels the job.</strong> If the view does not call <code>useTask</code> for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
 <li><strong>To retrigger the same input, put a counter in the key.</strong> A Retry button must change the key or the job never reruns.</li>
 <li><strong>Cancellation is an async exception.</strong> Use <code>bracket</code> or <code>withFile</code> inside the job so resources are released when the user changes the query.</li>
 <li><strong>The result is forced on the worker.</strong> Return a value in weak head normal form; force a list’s spine with <code>length found \</code>seq` pure found`.</li>
@@ -2362,7 +2364,7 @@ progressBar (fromIntegral pct / 100)
 <ul>
 <li><strong>Stop by not calling the hook.</strong> <code>when isRunning (useStream ...)</code> releases the producer.</li>
 <li><strong>Stopping discards the accumulated state.</strong> Save it outside and pass it as the next initial value to resume.</li>
-<li><strong>The producer owns no UI.</strong> It may call <code>update</code> from its thread or threads it starts; never touch the UI <code>Context</code>.</li>
+<li><strong>Producers must not touch the UI.</strong> They may call <code>update</code> from their thread or threads they start; never touch the UI <code>Context</code>.</li>
 </ul>
 <h2 id="threads-outside-those-handles"><a class="header" href="#threads-outside-those-handles">Threads outside those handles</a></h2>
 <pre><code class="language-haskell">wake &lt;- askWake        -- in the view, once
@@ -2384,7 +2386,7 @@ forkIO $ do
 </ul>
 <pre><code class="language-haskell">pos &lt;- animateToA (Spring presetSmooth) (V2 targetX targetY)
 </code></pre>
-<p>Springs retarget mid-flight from their current position and velocity. <code>animateToA</code> animates any <code>Animatable</code> value — <code>Float</code>, <code>Double</code>, <code>V2</code>, or <code>Color</code> — channel by channel.</p>
+<p>Springs retarget mid-flight from their current position and velocity. <code>animateToA</code> animates any <code>Animatable</code> value (<code>Float</code>, <code>Double</code>, <code>V2</code>, or <code>Color</code>) channel by channel.</p>
 <h3 id="continuous-animation"><a class="header" href="#continuous-animation">Continuous animation</a></h3>
 <p><code>pulse</code> returns a value oscillating in <code>[0, 1]</code> with the given period in seconds:</p>
 <pre><code class="language-haskell">opacity &lt;- pulse 1.2
@@ -2427,7 +2429,7 @@ keepAnimating resp
 </table>
 </div>
 <p>The runnable versions are in <a href="#tutorial-3-live-data--background-work">Live Data &amp; Background Work</a>, <code>Tasks.hs</code>, and <code>LiveChart.hs</code>.</p>
-<h2 id="see-also-7"><a class="header" href="#see-also-7">See also</a></h2>
+<h2 id="see-also-8"><a class="header" href="#see-also-8">See also</a></h2>
 <ul>
 <li>Background work in a full application: <a href="#tutorial-3-live-data--background-work">Live Data &amp; Background Work</a>.</li>
 <li>Custom animation drawing: <a href="#custom-drawing--controls">Custom Drawing &amp; Controls</a>.</li>
@@ -2639,7 +2641,7 @@ exportViewToSvg view = do
   frameToSvg defaultFrameSvgConfig ctx inp drawData
 </code></pre>
 <p><code>setDrawSquareGeometry</code> makes widget edges axis-aligned; <code>setDrawExternalText</code> moves text onto the raster spans the exporter reads. Without them the export still renders, but rounded edges approximate and drawing text is missing. This is the path used for the interactive specimens in this book and for visual regression tests.</p>
-<h2 id="see-also-8"><a class="header" href="#see-also-8">See also</a></h2>
+<h2 id="see-also-9"><a class="header" href="#see-also-9">See also</a></h2>
 <ul>
 <li>Building an application: <a href="#quick-start">Quick Start</a> and <a href="#tutorials">Tutorials</a>.</li>
 <li>Windows and screenshots: <a href="#window-chrome--screenshots">Desktop Windows</a>.</li>
@@ -2647,7 +2649,7 @@ exportViewToSvg view = do
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="recurring-bugs--fixes"><a class="header" href="#recurring-bugs--fixes">Recurring Bugs &amp; Fixes</a></h1>
-<p>A field guide mined from the git histories of real nano-ui applications (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Each entry states the symptom first, because that is what you have when you arrive here.</p>
+<p>Bugs and fixes from the git histories of nano-ui applications (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Each entry starts with the symptom.</p>
 <h2 id="symptom-index"><a class="header" href="#symptom-index">Symptom index</a></h2>
 <div class="table-wrapper">
 <table>
@@ -2706,7 +2708,7 @@ selectWith (fixedW w) options selectedVar
 <li>A dialog has two concentric borders.</li>
 <li>A pane with a panel inside a card looks recessed twice.</li>
 </ul>
-<p><strong>Fix:</strong> exactly one level owns the chrome.</p>
+<p><strong>Fix:</strong> one level supplies the chrome.</p>
 <ul>
 <li>
 <p>Give the outer dialog <code>padAll 0</code> and move the padding to the inner <code>columnWith (fillW . padAll 12 ...)</code>.</p>
@@ -2720,7 +2722,7 @@ selectWith (fixedW w) options selectedVar
 <p>Set <code>themeFloatingWindow</code> and <code>themePopup</code> to the panel surface, so a padded body does not show a panel box inside the dialog.</p>
 </li>
 <li>
-<p>Between two chrome regions, draw one <code>separator</code> at the seam — not a border on the bottom of one and the top of the other.</p>
+<p>Between two chrome regions, draw one <code>separator</code> at the seam, not a border on the bottom of one and the top of the other.</p>
 </li>
 </ul>
 <p>The <code>stronghead</code> fix was named “Remove duplicate borders from workspace popovers and notifications”; the same change appears in <code>winget-gui</code>’s dialogs.</p>
@@ -2744,10 +2746,10 @@ selectWith (fixedW w) options selectedVar
 <p><code>alignMid</code> on a row positions the row itself in its parent. Centring the row’s <em>contents</em> takes the modifier on each child (or <code>alignMid</code> in the child’s layout). This is the “header dead space” fix in <code>stronghead</code>.</p>
 <hr>
 <h2 id="4-stale-cached-drawings"><a class="header" href="#4-stale-cached-drawings">4. Stale cached drawings</a></h2>
-<p>A custom-drawn widget has no text spans and no automatic diff of its inputs. Without a content key, its ops are rebuilt and diffed every frame. With a key, unchanged frames skip both — and a key that misses an input shows stale pixels.</p>
+<p>A custom-drawn widget has no text spans and no automatic diff of its inputs. Without a content key, its ops are rebuilt and diffed every frame. With a key, unchanged frames skip both, and a key that misses an input shows stale pixels.</p>
 <h3 id="the-drawing-freezes-on-an-input-the-key-missed"><a class="header" href="#the-drawing-freezes-on-an-input-the-key-missed">The drawing freezes on an input the key missed</a></h3>
 <p><code>winget-gui</code>’s sort arrow stayed on the old column until the key covered everything the drawing read.</p>
-<p><strong>Fix:</strong> include every input in the key — values, colors, text, theme, scroll viewport width, animation state:</p>
+<p><strong>Fix:</strong> include every input in the key: values, colors, text, theme, scroll viewport width, animation state.</p>
 <pre><code class="language-haskell">drawingVersioned (contentKey [round sortCol, round scrollY, fromEnum theme]) $ \dc -&gt; ...
 </code></pre>
 <p>If a keyed drawing shows stale pixels, the key is missing an input; the widget is not broken.</p>
@@ -2809,25 +2811,25 @@ for_ preedit drawCompositionAtCaret
 <hr>
 <h2 id="quick-checklist"><a class="header" href="#quick-checklist">Quick checklist</a></h2>
 <ul>
-<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside a view — allocates every pass. Move it to setup.</li>
-<li><input disabled="" type="checkbox"> Unguarded side effects — the view re-runs. Wrap them in <code>whenM (button ...)</code>.</li>
+<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside a view: allocates every pass. Move it to setup.</li>
+<li><input disabled="" type="checkbox"> Unguarded side effects: the view re-runs. Wrap them in <code>whenM (button ...)</code>.</li>
 <li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code>s without <code>scope</code>; keyed lists using indices.</li>
 <li><input disabled="" type="checkbox"> Overlays called conditionally instead of unconditionally with a <code>Var Bool</code>.</li>
-<li><input disabled="" type="checkbox"> <code>useTask</code> inside a tab or branch — the task is cancelled when hidden.</li>
-<li><input disabled="" type="checkbox"> <code>keepAnimating</code> at an always-run top level — a busy loop. Call it in the animating widget; use <code>wakeAfter</code> for timers.</li>
-<li><input disabled="" type="checkbox"> Writing a freshly computed <code>NaN</code> to a <code>Var Float</code> — <code>NaN /= NaN</code>, so it redraws forever. Guard the write.</li>
-<li><input disabled="" type="checkbox"> A custom widget’s content key missing an input — stale pixels or a frozen drawing.</li>
-<li><input disabled="" type="checkbox"> A changing label without <code>fixedW</code> — its siblings shift every frame.</li>
-<li><input disabled="" type="checkbox"> A wide cell in a scrolling list without <code>fillW</code> — the list scrolls sideways.</li>
-<li><input disabled="" type="checkbox"> A <code>scrollArea</code> / <code>panel</code> / <code>card</code> nested in a popup — a box inside a box.</li>
-<li><input disabled="" type="checkbox"> Focus queries at the top of the view — the arena was reset; read them at the end.</li>
-<li><input disabled="" type="checkbox"> Escape behind the same guard as Ctrl+A/Delete — text inputs do not claim Escape.</li>
-<li><input disabled="" type="checkbox"> A focused widget reading <code>inputChars</code> without <code>useInputMethod</code> — typed text never arrives.</li>
-<li><input disabled="" type="checkbox"> Per-glyph advance × count for a long run — use <code>lineWidth</code>.</li>
-<li><input disabled="" type="checkbox"> Parsing or rebuilding documents per frame — parse once and keep the result outside the view.</li>
-<li><input disabled="" type="checkbox"> <code>readVar</code> above the widget that edits the <code>Var</code> — an extra pass per change.</li>
+<li><input disabled="" type="checkbox"> <code>useTask</code> inside a tab or branch: the task is cancelled when hidden.</li>
+<li><input disabled="" type="checkbox"> <code>keepAnimating</code> at an always-run top level: a busy loop. Call it in the animating widget; use <code>wakeAfter</code> for timers.</li>
+<li><input disabled="" type="checkbox"> Writing a freshly computed <code>NaN</code> to a <code>Var Float</code>: <code>NaN /= NaN</code>, so it redraws forever. Guard the write.</li>
+<li><input disabled="" type="checkbox"> A custom widget’s content key missing an input: stale pixels or a frozen drawing.</li>
+<li><input disabled="" type="checkbox"> A changing label without <code>fixedW</code>: its siblings shift every frame.</li>
+<li><input disabled="" type="checkbox"> A wide cell in a scrolling list without <code>fillW</code>: the list scrolls sideways.</li>
+<li><input disabled="" type="checkbox"> A <code>scrollArea</code> / <code>panel</code> / <code>card</code> nested in a popup: a box inside a box.</li>
+<li><input disabled="" type="checkbox"> Focus queries at the top of the view: the arena was reset; read them at the end.</li>
+<li><input disabled="" type="checkbox"> Escape behind the same guard as Ctrl+A/Delete: text inputs do not claim Escape.</li>
+<li><input disabled="" type="checkbox"> A focused widget reading <code>inputChars</code> without <code>useInputMethod</code>: typed text never arrives.</li>
+<li><input disabled="" type="checkbox"> Per-glyph advance × count for a long run: use <code>lineWidth</code>.</li>
+<li><input disabled="" type="checkbox"> Parsing or rebuilding documents per frame: parse once and keep the result outside the view.</li>
+<li><input disabled="" type="checkbox"> <code>readVar</code> above the widget that edits the <code>Var</code>: an extra pass per change.</li>
 <li><input disabled="" type="checkbox"> Missing <code>-threaded</code>.</li>
-<li><input disabled="" type="checkbox"> Touching <code>Context</code> from a worker thread — wake with <code>askWake</code> instead.</li>
+<li><input disabled="" type="checkbox"> Touching <code>Context</code> from a worker thread: wake with <code>askWake</code> instead.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="development-setup"><a class="header" href="#development-setup">Development Setup</a></h1>
@@ -2887,7 +2889,7 @@ cabal test -j1 all
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture--internals"><a class="header" href="#architecture--internals">Architecture &amp; Internals</a></h1>
-<p>This is the reference for how a frame executes and how real applications are structured around it. You do not need it to write a view, but it explains the cost model behind <code>readVar</code>, focus, and damage.</p>
+<p>Reference for how a frame executes and how applications are structured around it. It explains the cost model behind <code>readVar</code>, focus, and damage; a view does not need any of it to work.</p>
 <h2 id="the-frame-lifecycle"><a class="header" href="#the-frame-lifecycle">The frame lifecycle</a></h2>
 <p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="images/rendering-pipeline.svg" alt="Rendering Pipeline"><span class="img-wrapper"><img src="images/rendering-pipeline.svg" alt="Rendering Pipeline"></span></label></p>
 <p>Each frame:</p>
@@ -2947,7 +2949,7 @@ wake
 newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1.0 &lt;*&gt; newVar False
 </code></pre>
 <p>Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.</p>
-<h3 id="pattern-c-the-application-owns-the-state"><a class="header" href="#pattern-c-the-application-owns-the-state">Pattern C: the application owns the state</a></h3>
+<h3 id="pattern-c-application-owned-state"><a class="header" href="#pattern-c-application-owned-state">Pattern C: application-owned state</a></h3>
 <p><code>ned</code> keeps a plain <code>IORef App</code>; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:</p>
 <pre><code class="language-haskell">editorView (Editor ref) = do
   app &lt;- liftIO (readIORef ref)
@@ -2963,9 +2965,9 @@ newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1
 <tr><th>The application…</th><th>Pattern</th></tr>
 </thead>
 <tbody>
-<tr><td>Owns one domain state, uses worker threads, runs commands</td><td>A — <code>IORef</code> + <code>askWake</code></td></tr>
-<tr><td>Is a large set of interactive panes and tools</td><td>B — record of <code>Var</code>s</td></tr>
-<tr><td>Has a model that predates the UI or is shared with a library</td><td>C — app-owned <code>IORef</code> + <code>requestFrame</code></td></tr>
+<tr><td>Has one domain state, uses worker threads, runs commands</td><td>A: <code>IORef</code> + <code>askWake</code></td></tr>
+<tr><td>Is a large set of interactive panes and tools</td><td>B: record of <code>Var</code>s</td></tr>
+<tr><td>Has a model that predates the UI or is shared with a library</td><td>C: app-owned <code>IORef</code> + <code>requestFrame</code></td></tr>
 <tr><td>Is a state machine with explicit transitions</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
 <tr><td>Is a small tool</td><td>Whatever is simplest; a handful of <code>useVar</code>s is fine</td></tr>
 </tbody>
@@ -3003,7 +3005,7 @@ newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1
 </table>
 </div>
 <p>Validation gates for these changes: <code>cabal build -j1 all</code> with <code>-Werror</code>, the full test suite (including <code>nano-ui-inspection</code>), hidden-window SDL demos, the RGFW profile test, and the per-frame id benchmark. The detailed audits live in the git history rather than the reading path.</p>
-<h2 id="see-also-9"><a class="header" href="#see-also-9">See also</a></h2>
+<h2 id="see-also-10"><a class="header" href="#see-also-10">See also</a></h2>
 <ul>
 <li>State and <code>Var</code>: <a href="#state--var">State &amp; <code>Var</code></a>.</li>
 <li>Keys and ids: <a href="#widget-identity--keys">Widget Identity &amp; Keys</a>.</li>

@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -240,7 +240,7 @@ todoApp app = do
     filterRow items filt
     todoList items filt
 </code></pre>
-<p>The view’s local state — the draft text and the current filter — is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
+<p>The view’s local state (the draft text and the current filter) is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
 <p><code>columnWith (padAll 20 . gap 12 . fillW . fillH)</code> is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.</p>
 <h2 id="3-adding-an-item"><a class="header" href="#3-adding-an-item">3. Adding an item</a></h2>
 <p>The input row has three jobs: draw the field, draw the button, and decide whether this frame is an “add” frame.</p>
@@ -254,7 +254,7 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
     writeVar draft ""
     requestFocus (respId inputR)
 </code></pre>
-<p>Several things are worth pausing on:</p>
+<p>Details:</p>
 <ul>
 <li><strong>The primed widget returns a <code>Response</code>.</strong> <code>textInputConfigured'</code> reports the widget’s identity, rectangle, hover and click state, and whether Enter was submitted (<code>respSubmitted</code>). <code>button</code> already returns the one <code>Bool</code> this row needs.</li>
 <li><strong><code>readVar draft</code> sits below the field that edits it.</strong> The field’s write lands first, then the read sees the new text in the same pass. Reading <em>above</em> an editing widget forces a second pass.</li>
@@ -288,7 +288,7 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
 </code></pre>
 <p><code>boundedTabBarConfigured</code> draws a segmented control over every constructor of <code>Filter</code>; the label function is <code>show</code>. The count is <em>derived</em>: it is computed from the list every frame, never stored in a second <code>Var</code> that could drift. <code>disabledWhen</code> dims the clear button and blocks its events without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
-<p>Now the interesting part. Each row has local state — whether it is being edited and the draft of its text — but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row’s position on screen.</p>
+<p>Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row’s position on screen.</p>
 <pre><code class="language-haskell">todoList :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
 todoList items filt = do
   shownFilter &lt;- readVar filt
@@ -360,8 +360,8 @@ swapIds a b xs = map pick xs
 <p>Enter in the new-item field adds an item because <code>respSubmitted</code> reports it. Escape cancels an edit:</p>
 <pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
 </code></pre>
-<p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view — an open popup or a second <code>takeEscape</code> — do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
-<p>For the full shortcut model — <code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys — see <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>
+<p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view (an open popup or a second <code>takeEscape</code>) do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
+<p>For the full shortcut model (<code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys), see <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>
 <h2 id="8-try-it"><a class="header" href="#8-try-it">8. Try it</a></h2>
 <p>Start from the runnable source and change one thing at a time:</p>
 <ul>

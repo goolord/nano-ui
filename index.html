@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -189,13 +189,13 @@ counter = row $ do
   whenM (button "+") (modifyVar n (+ 1))
 </code></pre>
 <h2 id="how-this-book-is-organized"><a class="header" href="#how-this-book-is-organized">How this book is organized</a></h2>
-<p>The book is a learning path first, a reference second:</p>
+<p>Chapters follow this order:</p>
 <ol>
 <li><strong><a href="getting-started/quickstart.html">Quick Start</a></strong> installs the toolchain and gets a window on screen.</li>
 <li><strong><a href="tutorials/index.html">Tutorials</a></strong> build three small applications end to end: a todo list, a notepad, and a live data view.</li>
 <li><strong><a href="state/index.html">State &amp; <code>Var</code></a></strong> explains where state lives, what writes cost, and the <a href="state/elm.html">Elm-style alternative</a>.</li>
 <li><strong><a href="layout/index.html">Layout &amp; Scrolling</a></strong> covers containers, modifiers, and large lists.</li>
-<li>The <strong><a href="widgets/index.html">Widget Gallery</a></strong> is the single entry point for controls, data views, overlays, and custom drawing. <strong><a href="styling/index.html">Styling &amp; Theming</a></strong> lives next to it, with a <a href="styling/lab.html">live lab</a> and <a href="styling/gotchas.html">gotchas</a>.</li>
+<li>The <strong><a href="widgets/index.html">Widget Gallery</a></strong> is the entry point for controls, data views, overlays, and custom drawing. <strong><a href="styling/index.html">Styling &amp; Theming</a></strong> is next to it, with a <a href="styling/lab.html">live lab</a> and <a href="styling/gotchas.html">gotchas</a>.</li>
 <li><strong><a href="input/index.html">Keyboard, Focus &amp; IME</a></strong> covers chords, focus, and text input.</li>
 <li><strong><a href="advanced/async.html">Async Work &amp; Animation</a></strong>, <strong><a href="advanced/window-management.html">Desktop Windows</a></strong>, and <strong><a href="packages/index.html">Ecosystem Packages</a></strong> go further.</li>
 <li><strong><a href="troubleshooting/recurring-bugs.html">Troubleshooting</a></strong>, <strong><a href="getting-started/development.html">Development Setup</a></strong>, and <strong><a href="architecture/index.html">Architecture &amp; Internals</a></strong> are the reference material.</li>
@@ -220,10 +220,10 @@ counter = row $ do
 </tbody>
 </table>
 </div>
-<h2 id="interactive-styling-laboratory"><a class="header" href="#interactive-styling-laboratory">Interactive styling laboratory</a></h2>
-<p>This documentation includes interactive, headlessly rendered SVG workbenches embedded directly in the chapters. You can toggle styling modifiers, themes, and interaction states live:</p>
+<h2 id="styling-workbenches"><a class="header" href="#styling-workbenches">Styling workbenches</a></h2>
+<p>Interactive SVG workbenches are embedded in the styling chapters. Toggle modifiers, themes, and interaction states live:</p>
 <p><nano-ui-hero></nano-ui-hero></p>
-<p>Every code sample assumes <code>import NanoUI</code> and <code>OverloadedStrings</code>; examples that use anything else import it explicitly. The complete, runnable source for each tutorial lives in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>.</p>
+<p>Code samples assume <code>import NanoUI</code> and <code>OverloadedStrings</code>. The runnable source for each tutorial is in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>.</p>
 
                     </main>
 

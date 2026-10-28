@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -185,6 +185,10 @@
   buttonWith (fixedW 120) "Apply"
 </code></pre>
 <p>Logical pixels, origin top-left, <code>y</code> downward. Backends handle DPI scaling.</p>
+<figure class="nano-figure">
+<img src="../images/layout-overview.svg" alt="A nano-ui window with a toolbar, sidebar, three metric panels, and a deployments table.">
+<figcaption>A frame built from a row, a sidebar panel, stat panels, and a table. Rendered with nano-ui-svg.</figcaption>
+</figure>
 <h2 id="containers"><a class="header" href="#containers">Containers</a></h2>
 <div class="table-wrapper">
 <table>
@@ -221,28 +225,28 @@ layers $ do
 <h2 id="modifiers"><a class="header" href="#modifiers">Modifiers</a></h2>
 <p><strong>Sizing</strong></p>
 <ul>
-<li><code>fillW</code> / <code>fillH</code> — take all available space on an axis; <code>grow</code> is both.</li>
-<li><code>fixedW w</code>, <code>fixedH h</code>, <code>fixedWH w h</code> — explicit logical pixels.</li>
-<li><code>minW w</code>, <code>maxW w</code>, <code>minH h</code>, <code>maxH h</code> — bounds.</li>
-<li><code>percent p</code> — a percentage of the parent.</li>
-<li><code>aspect r</code> — width/height ratio.</li>
+<li><code>fillW</code> / <code>fillH</code>: take all available space on an axis; <code>grow</code> is both.</li>
+<li><code>fixedW w</code>, <code>fixedH h</code>, <code>fixedWH w h</code>: explicit logical pixels.</li>
+<li><code>minW w</code>, <code>maxW w</code>, <code>minH h</code>, <code>maxH h</code>: bounds.</li>
+<li><code>percent p</code>: a percentage of the parent.</li>
+<li><code>aspect r</code>: width/height ratio.</li>
 </ul>
 <p><strong>Spacing</strong></p>
 <ul>
 <li><code>padAll p</code>, <code>padXY x y</code>, <code>padLeft</code>, <code>padRight</code>, <code>padTop</code>, <code>padBottom</code>, <code>padLRTB l r t b</code>.</li>
-<li><code>gap g</code> — space between children.</li>
-<li><code>tight</code> — remove internal padding but keep the gap.</li>
+<li><code>gap g</code>: space between children.</li>
+<li><code>tight</code>: remove internal padding but keep the gap.</li>
 </ul>
 <p><strong>Alignment and wrapping</strong></p>
 <ul>
 <li><code>alignMid</code>, <code>alignStart</code>, <code>alignEnd</code>, <code>alignCenter</code>, <code>alignTop</code>, <code>alignBottom</code>, <code>alignBaseline</code>.</li>
-<li><code>wrap</code> — wrap onto new lines; add <code>lineGap</code> and <code>lineAlign</code>.</li>
+<li><code>wrap</code>: wrap onto new lines; add <code>lineGap</code> and <code>lineAlign</code>.</li>
 </ul>
 <p><strong>Positioning and pointer behavior</strong></p>
 <ul>
-<li><code>pinAt x y</code> — position absolutely within the parent. <code>pinAt 0 0 . grow</code> covers it for a scrim.</li>
-<li><code>pointer PointerBlock</code> — consume pointer events (a scrim).</li>
-<li><code>pointer PointerPass</code> — do not consume them (decorative drawing).</li>
+<li><code>pinAt x y</code>: position absolutely within the parent. <code>pinAt 0 0 . grow</code> covers it for a scrim.</li>
+<li><code>pointer PointerBlock</code>: consume pointer events (a scrim).</li>
+<li><code>pointer PointerPass</code>: do not consume them (decorative drawing).</li>
 </ul>
 <p><code>alignMid</code> on a row positions the row itself in its parent. To centre the row’s <em>contents</em>, apply it to each child or use <code>alignCenter</code> inside the row.</p>
 <h2 id="scrolling"><a class="header" href="#scrolling">Scrolling</a></h2>

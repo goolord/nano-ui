@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-13c624fb.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
+            window.path_to_searchindex_js = "../searchindex-5449b033.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="recurring-bugs--fixes"><a class="header" href="#recurring-bugs--fixes">Recurring Bugs &amp; Fixes</a></h1>
-<p>A field guide mined from the git histories of real nano-ui applications (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Each entry states the symptom first, because that is what you have when you arrive here.</p>
+<p>Bugs and fixes from the git histories of nano-ui applications (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Each entry starts with the symptom.</p>
 <h2 id="symptom-index"><a class="header" href="#symptom-index">Symptom index</a></h2>
 <div class="table-wrapper">
 <table>
@@ -238,7 +238,7 @@ selectWith (fixedW w) options selectedVar
 <li>A dialog has two concentric borders.</li>
 <li>A pane with a panel inside a card looks recessed twice.</li>
 </ul>
-<p><strong>Fix:</strong> exactly one level owns the chrome.</p>
+<p><strong>Fix:</strong> one level supplies the chrome.</p>
 <ul>
 <li>
 <p>Give the outer dialog <code>padAll 0</code> and move the padding to the inner <code>columnWith (fillW . padAll 12 ...)</code>.</p>
@@ -252,7 +252,7 @@ selectWith (fixedW w) options selectedVar
 <p>Set <code>themeFloatingWindow</code> and <code>themePopup</code> to the panel surface, so a padded body does not show a panel box inside the dialog.</p>
 </li>
 <li>
-<p>Between two chrome regions, draw one <code>separator</code> at the seam — not a border on the bottom of one and the top of the other.</p>
+<p>Between two chrome regions, draw one <code>separator</code> at the seam, not a border on the bottom of one and the top of the other.</p>
 </li>
 </ul>
 <p>The <code>stronghead</code> fix was named “Remove duplicate borders from workspace popovers and notifications”; the same change appears in <code>winget-gui</code>’s dialogs.</p>
@@ -276,10 +276,10 @@ selectWith (fixedW w) options selectedVar
 <p><code>alignMid</code> on a row positions the row itself in its parent. Centring the row’s <em>contents</em> takes the modifier on each child (or <code>alignMid</code> in the child’s layout). This is the “header dead space” fix in <code>stronghead</code>.</p>
 <hr>
 <h2 id="4-stale-cached-drawings"><a class="header" href="#4-stale-cached-drawings">4. Stale cached drawings</a></h2>
-<p>A custom-drawn widget has no text spans and no automatic diff of its inputs. Without a content key, its ops are rebuilt and diffed every frame. With a key, unchanged frames skip both — and a key that misses an input shows stale pixels.</p>
+<p>A custom-drawn widget has no text spans and no automatic diff of its inputs. Without a content key, its ops are rebuilt and diffed every frame. With a key, unchanged frames skip both, and a key that misses an input shows stale pixels.</p>
 <h3 id="the-drawing-freezes-on-an-input-the-key-missed"><a class="header" href="#the-drawing-freezes-on-an-input-the-key-missed">The drawing freezes on an input the key missed</a></h3>
 <p><code>winget-gui</code>’s sort arrow stayed on the old column until the key covered everything the drawing read.</p>
-<p><strong>Fix:</strong> include every input in the key — values, colors, text, theme, scroll viewport width, animation state:</p>
+<p><strong>Fix:</strong> include every input in the key: values, colors, text, theme, scroll viewport width, animation state.</p>
 <pre><code class="language-haskell">drawingVersioned (contentKey [round sortCol, round scrollY, fromEnum theme]) $ \dc -&gt; ...
 </code></pre>
 <p>If a keyed drawing shows stale pixels, the key is missing an input; the widget is not broken.</p>
@@ -341,25 +341,25 @@ for_ preedit drawCompositionAtCaret
 <hr>
 <h2 id="quick-checklist"><a class="header" href="#quick-checklist">Quick checklist</a></h2>
 <ul>
-<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside a view — allocates every pass. Move it to setup.</li>
-<li><input disabled="" type="checkbox"> Unguarded side effects — the view re-runs. Wrap them in <code>whenM (button ...)</code>.</li>
+<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside a view: allocates every pass. Move it to setup.</li>
+<li><input disabled="" type="checkbox"> Unguarded side effects: the view re-runs. Wrap them in <code>whenM (button ...)</code>.</li>
 <li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code>s without <code>scope</code>; keyed lists using indices.</li>
 <li><input disabled="" type="checkbox"> Overlays called conditionally instead of unconditionally with a <code>Var Bool</code>.</li>
-<li><input disabled="" type="checkbox"> <code>useTask</code> inside a tab or branch — the task is cancelled when hidden.</li>
-<li><input disabled="" type="checkbox"> <code>keepAnimating</code> at an always-run top level — a busy loop. Call it in the animating widget; use <code>wakeAfter</code> for timers.</li>
-<li><input disabled="" type="checkbox"> Writing a freshly computed <code>NaN</code> to a <code>Var Float</code> — <code>NaN /= NaN</code>, so it redraws forever. Guard the write.</li>
-<li><input disabled="" type="checkbox"> A custom widget’s content key missing an input — stale pixels or a frozen drawing.</li>
-<li><input disabled="" type="checkbox"> A changing label without <code>fixedW</code> — its siblings shift every frame.</li>
-<li><input disabled="" type="checkbox"> A wide cell in a scrolling list without <code>fillW</code> — the list scrolls sideways.</li>
-<li><input disabled="" type="checkbox"> A <code>scrollArea</code> / <code>panel</code> / <code>card</code> nested in a popup — a box inside a box.</li>
-<li><input disabled="" type="checkbox"> Focus queries at the top of the view — the arena was reset; read them at the end.</li>
-<li><input disabled="" type="checkbox"> Escape behind the same guard as Ctrl+A/Delete — text inputs do not claim Escape.</li>
-<li><input disabled="" type="checkbox"> A focused widget reading <code>inputChars</code> without <code>useInputMethod</code> — typed text never arrives.</li>
-<li><input disabled="" type="checkbox"> Per-glyph advance × count for a long run — use <code>lineWidth</code>.</li>
-<li><input disabled="" type="checkbox"> Parsing or rebuilding documents per frame — parse once and keep the result outside the view.</li>
-<li><input disabled="" type="checkbox"> <code>readVar</code> above the widget that edits the <code>Var</code> — an extra pass per change.</li>
+<li><input disabled="" type="checkbox"> <code>useTask</code> inside a tab or branch: the task is cancelled when hidden.</li>
+<li><input disabled="" type="checkbox"> <code>keepAnimating</code> at an always-run top level: a busy loop. Call it in the animating widget; use <code>wakeAfter</code> for timers.</li>
+<li><input disabled="" type="checkbox"> Writing a freshly computed <code>NaN</code> to a <code>Var Float</code>: <code>NaN /= NaN</code>, so it redraws forever. Guard the write.</li>
+<li><input disabled="" type="checkbox"> A custom widget’s content key missing an input: stale pixels or a frozen drawing.</li>
+<li><input disabled="" type="checkbox"> A changing label without <code>fixedW</code>: its siblings shift every frame.</li>
+<li><input disabled="" type="checkbox"> A wide cell in a scrolling list without <code>fillW</code>: the list scrolls sideways.</li>
+<li><input disabled="" type="checkbox"> A <code>scrollArea</code> / <code>panel</code> / <code>card</code> nested in a popup: a box inside a box.</li>
+<li><input disabled="" type="checkbox"> Focus queries at the top of the view: the arena was reset; read them at the end.</li>
+<li><input disabled="" type="checkbox"> Escape behind the same guard as Ctrl+A/Delete: text inputs do not claim Escape.</li>
+<li><input disabled="" type="checkbox"> A focused widget reading <code>inputChars</code> without <code>useInputMethod</code>: typed text never arrives.</li>
+<li><input disabled="" type="checkbox"> Per-glyph advance × count for a long run: use <code>lineWidth</code>.</li>
+<li><input disabled="" type="checkbox"> Parsing or rebuilding documents per frame: parse once and keep the result outside the view.</li>
+<li><input disabled="" type="checkbox"> <code>readVar</code> above the widget that edits the <code>Var</code>: an extra pass per change.</li>
 <li><input disabled="" type="checkbox"> Missing <code>-threaded</code>.</li>
-<li><input disabled="" type="checkbox"> Touching <code>Context</code> from a worker thread — wake with <code>askWake</code> instead.</li>
+<li><input disabled="" type="checkbox"> Touching <code>Context</code> from a worker thread: wake with <code>askWake</code> instead.</li>
 </ul>
 
                     </main>
