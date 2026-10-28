@@ -1,6 +1,6 @@
 # Elm-Style Views
 
-`nano-ui-emit` adds a second way to write a view: instead of mutating `Var`s directly, the view emits typed messages, and a pure reducer folds them into a model. The shape will be familiar if you have used Elm, Redux, or `brick`'s state machines.
+`nano-ui-emit` is the reducer-based alternative to the `Var` pages before it: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model. The shape will be familiar if you have used Elm, Redux, or `brick`'s state machines. Everything else about nano-ui — widgets, layout, focus, and keys — is unchanged.
 
 ```haskell
 data Model = Model {counter :: Int, name :: Text}
@@ -64,7 +64,7 @@ Messages from every pass of a frame are collected in order, including passes cau
 
 The two styles are not exclusive. An emitting view can allocate and read `Var`s for transient UI state (a draft, an open dropdown), while the durable model stays in `NanoUIE`. A `Var`-based view can call `runNanoUIE` on a small emitting component and act on the returned messages.
 
-If you want the `Var` style, read [Introduction to State](../state/introduction.md). If you want the reducer style, continue with [Messages, Reducers & Components](messages.md).
+If you want the direct-mutation style, read [Introduction to State](introduction.md) and [`Var` in Depth](var.md). If you want the reducer style, continue with [Messages, Reducers & Components](elm-messages.md).
 
 ## Trade-offs in practice
 

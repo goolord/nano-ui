@@ -15,10 +15,8 @@
 - [Introduction to State](state/introduction.md)
 - [`Var` in Depth](state/var.md)
 - [Widget Identity & Keys](state/identity.md)
-
-# The Elm Architecture
-- [Elm-Style Views](elm/overview.md)
-- [Messages, Reducers & Components](elm/messages.md)
+- [Elm-Style Views](state/elm-overview.md)
+- [Messages, Reducers & Components](state/elm-messages.md)
 
 # Keyboard & Focus
 - [Keyboard Shortcuts](input/shortcuts.md)

@@ -151,4 +151,4 @@ Independent of where state lives, the view has the same shape:
 - **Using `requestFrame` to force animation.** Use `keepAnimating` inside the animating widget, and `wakeAfter` for timers.
 - **Rebuilding caches every frame.** Compare first (a revision counter, a pointer, a small key) and rebuild only when it changes.
 
-For the frame that makes these patterns necessary, read [The Frame Model](frame-model.md). For pure reducers, read [Elm-Style Views](../elm/overview.md).
+For the frame that makes these patterns necessary, read [The Frame Model](frame-model.md). For pure reducers, read [Elm-Style Views](../state/elm-overview.md).

@@ -135,4 +135,4 @@ for_ msgs handleToolbarMessage
 - **The keyboard and focus rules are unchanged.** Shortcuts are read in the view (or adapter); focus queries still belong at the end of the view.
 - **Component keys are required for lists.** Two instances of the same component in a reorderable list need distinct `withKey` keys, exactly as two `Var`-based rows do.
 
-See [Elm-Style Views](overview.md) for when this style is the right choice, and [The Frame Model](../architecture/frame-model.md) for what a follow-up frame costs.
+See [Elm-Style Views](elm-overview.md) for when this style is the right choice, and [The Frame Model](../architecture/frame-model.md) for what a follow-up frame costs.

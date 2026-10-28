@@ -116,7 +116,7 @@ Comprehensive documentation is available at **[goolord.github.io/nano-ui](https:
 - **[Quick Start](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
 - **[Tutorials](https://goolord.github.io/nano-ui/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.
 - **[Introduction to State](https://goolord.github.io/nano-ui/state/introduction.html)** and **[`Var` in Depth](https://goolord.github.io/nano-ui/state/var.html)**: Where state lives, `Var` semantics, write costs, and `VarMap`.
-- **[Elm Architecture](https://goolord.github.io/nano-ui/elm/overview.html)**: Typed messages and pure reducers with `nano-ui-emit`.
+- **[Elm-Style State](https://goolord.github.io/nano-ui/state/elm-overview.html)**: Typed messages and pure reducers with `nano-ui-emit`, as a state-management alternative to `Var`.
 - **[Keyboard & Focus](https://goolord.github.io/nano-ui/input/shortcuts.html)**: Shortcuts, focus, and IME.
 - **[Layout](https://goolord.github.io/nano-ui/layout/containers.html)**: Containers, layout modifiers, and 100,000-row list virtualization.
 - **[Widget Gallery](https://goolord.github.io/nano-ui/widgets/index.html)**: Buttons, inputs, text editors, overlays, tables, charts, and custom controls.

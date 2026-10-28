@@ -653,7 +653,7 @@ Quick one-liners; the section above has the full story and real fixes.
 
 - `packages/nano-ui/lib/NanoUI.hs` — the entire public API, grouped and
   documented (Haddock overview). First place to find what exists.
-- `book/src/` (or [online](https://goolord.github.io/nano-ui/)) — full documentation book: quick start, tutorials, state, Elm architecture, keyboard/focus, layout, widget gallery, styling, troubleshooting, and architecture notes.
+- `book/src/` (or [online](https://goolord.github.io/nano-ui/)) — full documentation book: quick start, tutorials, state (including the Elm-style reducer), keyboard/focus, layout, widget gallery, styling, troubleshooting, and architecture notes.
 - `book/src/state/var.md` — `Var` semantics, write costs, resource handles.
 - `book/src/state/identity.md` — widget ids, `scope`, `withKey`, and keyed lists.
 - `book/src/getting-started/development.md` — building, testing, profiling, conventions.

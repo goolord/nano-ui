@@ -19,12 +19,11 @@ The book is a learning path first, a reference second:
 
 1. **[Quick Start](getting-started/quickstart.md)** installs the toolchain and gets a window on screen.
 2. **[Tutorials](tutorials/index.md)** build three small applications end to end: a todo list, a notepad, and a live data view.
-3. **[State](state/introduction.md)** explains where state lives, what a `Var` is, and what writes cost.
-4. **[The Elm Architecture](elm/overview.md)** covers the alternative typed-message style in `nano-ui-emit`.
-5. **[Keyboard & Focus](input/shortcuts.md)** covers chords, focus, and IME.
-6. **[Layout](layout/containers.md)** and the **[Widget Gallery](widgets/index.md)** are the API tour.
-7. **[Styling](styling/overview.md)** and the **[Advanced Guides](advanced/background-work.md)** go deeper.
-8. **[Ecosystem Packages](packages/nano-ui-sdl.md)**, **[Troubleshooting](troubleshooting/recurring-bugs.md)**, and **[Architecture Notes](architecture/frame-model.md)** are the reference material for when an application grows.
+3. **[State](state/introduction.md)** explains where state lives, what a `Var` is, what writes cost, and the typed-message [Elm-style alternative](state/elm-overview.md).
+4. **[Keyboard & Focus](input/shortcuts.md)** covers chords, focus, and IME.
+5. **[Layout](layout/containers.md)** and the **[Widget Gallery](widgets/index.md)** are the API tour.
+6. **[Styling](styling/overview.md)** and the **[Advanced Guides](advanced/background-work.md)** go deeper.
+7. **[Ecosystem Packages](packages/nano-ui-sdl.md)**, **[Troubleshooting](troubleshooting/recurring-bugs.md)**, and **[Architecture Notes](architecture/frame-model.md)** are the reference material for when an application grows.
 
 If you already know immediate-mode UI, skim the Quick Start and start with [Introduction to State](state/introduction.md).
 
@@ -35,7 +34,7 @@ If you already know immediate-mode UI, skim the Quick Start and start with [Intr
 | `packages/nano-ui` | Core toolkit: widgets, layout, input, theming, draw list, text arena. | [State](state/introduction.md), [Layout](layout/containers.md), [Widget Gallery](widgets/index.md) |
 | `packages/nano-ui-sdl` | SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars. | [SDL3 Backend](packages/nano-ui-sdl.md) |
 | `packages/nano-ui-rgfw` | Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies. | [RGFW Backend](packages/nano-ui-rgfw.md) |
-| `packages/nano-ui-emit` | Elm-style typed messages and update reducers (`NanoUIE msg a`). | [Elm Architecture](elm/overview.md) |
+| `packages/nano-ui-emit` | Elm-style typed messages and update reducers (`NanoUIE msg a`). | [Elm-Style Views](state/elm-overview.md) |
 | `packages/nano-ui-diagrams` | Line, bar, scatter, and area charts (`NanoUI.Plot`) with diagrams-lib integration. | [Charts & Diagrams](packages/nano-ui-diagrams.md) |
 | `packages/nano-ui-form` | Validated applicative forms built on ditto. | [Validated Forms](packages/nano-ui-form.md) |
 | `packages/nano-ui-markdown` | Markdown rendering, incrementally appendable for streamed replies. | [Markdown Rendering](packages/nano-ui-markdown.md) |

@@ -2,7 +2,7 @@
 
 The view runs every frame. Nothing is retained between frames except the state you keep explicitly, so the first design question in a nano-ui application is not "which widget?" but "where does this value live?"
 
-This chapter is the map. It covers the three ways to keep state and the frame-model facts that make them behave the way they do. The details are in [`Var` in Depth](var.md), [Widget Identity & Keys](identity.md), and [Elm-Style Views](../elm/overview.md).
+This chapter is the map. It covers the three ways to keep state and the frame-model facts that make them behave the way they do. The direct-mutation details are in [`Var` in Depth](var.md) and [Widget Identity & Keys](identity.md); the typed-message alternative is in [Elm-Style Views](elm-overview.md).
 
 ## State you keep, state you derive
 
@@ -130,7 +130,7 @@ The second rule is why the counter above reads `n` in a `label` — the label mu
 | Belongs to one row of a dynamic list | A `Var` addressed by a stable key (`withElemVars`, `VarMap`) |
 | Must survive reordering or filtering | A keyed `Var`, plus `withKey` for widget state |
 | Already lives outside the UI (a database handle, a worker's state) | Keep it in `IORef` or a record, wake the UI with `askWake` |
-| Is a pure state machine with a clear `msg -> model -> model` | The Elm-style reducer in `nano-ui-emit` |
+| Is a pure state machine with a clear `msg -> model -> model` | The [Elm-style reducer](elm-overview.md) in `nano-ui-emit` |
 
 The last two are escape hatches, not the default. Most applications mix them: a `winget-gui`-style app keeps domain state in an `IORef` and its view state in `Var`s; `stronghead` keeps a large record of `Var`s; `ned` keeps its editor state in an `IORef` and re-reads it each frame.
 
@@ -149,4 +149,4 @@ A few ordering rules matter enough to repeat here:
 
 - [`Var` in Depth](var.md) — projections, `VarMap`, `constVar`, thread-safe reads and writes.
 - [Widget Identity & Keys](identity.md) — why call order matters and how to keep state attached to the right row.
-- [Elm-Style Views](../elm/overview.md) — a pure model and reducer instead of direct mutation.
+- [Elm-Style Views](elm-overview.md) — a pure model and reducer instead of direct mutation.
