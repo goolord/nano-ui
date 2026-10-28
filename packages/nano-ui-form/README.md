@@ -114,3 +114,8 @@ wanted. The policy controls when an edit is committed to the form:
 Use GHC 9.10 through 9.14 and add `nano-ui`, `nano-ui-form`, and `text` to your
 application's `build-depends`. The form library requires ditto 0.5 from Hackage.
 To build only the form library without SDL, use `cabal build lib:nano-ui-form`.
+
+## Documentation
+
+- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+  online guide, tutorials, and form documentation.

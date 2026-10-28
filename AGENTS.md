@@ -134,8 +134,9 @@ buttons and menus (`button`, `iconButton`, `buttonContent`, `menuButton`,
 `popup`, `tooltip`, `contextMenu`), pane grids (`paneGrid`), rich text
 (`NanoUI.Widgets.RichText`), images and SVG icons, drag and drop (`useDrag`,
 `useDrop`, `dropZone`, `useReorder`, `insertionIndex`), and canvas-drawn
-extras in `NanoUI.Widgets.Custom` (switches, knobs, progress bars, spinners,
-sparklines).
+reference widgets in `NanoUI.Widgets.Custom` (switches, knobs, progress bars,
+spinners, sparklines — which serve as reference implementations for custom
+widgets users may want to implement themselves to accompany the canvas API).
 
 ## State: `Var`
 
@@ -365,7 +366,9 @@ dirtying the context every frame — that's an unpaced busy loop.
 `widgetCursor`, `widgetContent` key) or the `canvas`/`canvasConfigured`
 helpers; `drawing` for pure `DrawOp` lists. Inside, use `runCanvasFor dc` so
 tessellation adapts to display scale; `drawContext` gives theme, font,
-hover, and press state.
+hover, and press state. Reference widgets in `NanoUI.Widgets.Custom` (knobs,
+switches, progress rings/bars, spinners, sparklines) accompany this canvas
+API as reference implementations for users building their own custom controls.
 
 Vector paths via `NanoUI.Path` imported qualified as `P`: `P.moveTo`,
 `P.lineTo`, `P.cubicTo`, `P.arc`, `P.circle`; render with `drawPath` /

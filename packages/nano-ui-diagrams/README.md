@@ -55,3 +55,8 @@ and options do not change.
 
 Run `cabal test nano-ui-diagrams-test` for diagram conversion, tessellation,
 and chart tests. These tests do not require a window.
+
+## Documentation
+
+- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+  online guide, tutorials, and ecosystem overview.

@@ -113,7 +113,7 @@ used to check that the vertex writers compile without dictionaries or tuples.
 
 ## Documentation
 
-Comprehensive documentation is available at **[goolord.github.io/nano-ui](https://goolord.github.io/nano-ui/)** (and offline in the [`book/`](book/) directory):
+Comprehensive documentation is available in **[The nano-ui Book](https://goolord.github.io/nano-ui/index.html)** (and offline in the [`book/`](book/) directory):
 
 - **[Quick Start](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
 - **[Tutorials](https://goolord.github.io/nano-ui/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.

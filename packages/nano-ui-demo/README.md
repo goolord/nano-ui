@@ -96,3 +96,10 @@ Two test suites exercise the demo applications:
 cabal test nano-ui-demo-test      # runs the widget demo, notepad, log viewer, and IME checks in hidden SDL windows
 cabal test nano-ui-terminal-test  # tests the terminal emulator's ANSI parser and PTY integration (Linux and macOS)
 ```
+
+## Documentation
+
+- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+  online guide, tutorials, and widget gallery.
+- [Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html#setup):
+  toolchain setup, build instructions, and testing.

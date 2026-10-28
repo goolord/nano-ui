@@ -1,5 +1,13 @@
 -- | Custom widgets and the reference widgets built on them.
 --
+-- The widgets provided in this module ('knob', 'toggleSwitch', 'circularProgress',
+-- 'progressBar', 'spinner', 'sparkline') serve as reference implementations for
+-- custom widgets that users may want to implement themselves. This API is meant
+-- to accompany the canvas API ('CanvasM', 'customWidget', 'customWidgetWithId'),
+-- demonstrating how 2D vector drawing, layout sizing, gesture hooks ('useDrag2DOn',
+-- 'useWheelDeltaOn'), keyboard navigation, and responsive state binding ('bindVar')
+-- integrate into cohesive, interactive controls.
+--
 -- 'customWidget' takes a 'CustomWidgetSpec': a layout, optional measurement,
 -- a draw function receiving hover and press state, an optional content key, a
 -- cursor, and damage slop.

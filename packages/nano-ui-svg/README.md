@@ -41,3 +41,8 @@ svg <- frameToSvg defaultFrameSvgConfig ctx inp drawData
 ```
 
 Square geometry makes every widget shape a flat axis-aligned quad and external text moves all text onto the spans; without them the export still renders, but anti-aliased edges approximate and drawing text is missing. The `nano-ui-demo-svg` executable in `nano-ui-demo` uses this to export the demo's Plots tab.
+
+## Documentation
+
+- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+  online guide, tutorials, and SVG export documentation.

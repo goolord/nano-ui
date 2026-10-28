@@ -88,6 +88,11 @@ the latter only returns the final pass's messages if the view rebuilds.
 - The old runtime-typed `runFrameReduceEff` has been removed. Ordinary
   effectful views still use `NanoUI.Effectful` and `runFrameEff`.
 
+## Documentation
+
+- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+  online guide, tutorials, and Elm-style state documentation.
+
 ## Verification
 
 Run `cabal test nano-ui-emit-test`. The suite compiles a view that emits a

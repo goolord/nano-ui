@@ -168,3 +168,8 @@ lazyImages taskFor =
 Add `nano-ui`, `nano-ui-markdown` and `text` to your application's
 `build-depends`. `cabal build lib:nano-ui-markdown` builds the library without
 SDL.
+
+## Documentation
+
+- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+  online guide, tutorials, and markdown documentation.

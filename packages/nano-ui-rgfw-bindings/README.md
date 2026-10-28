@@ -53,6 +53,11 @@ are retained, including widening RGFW's byte-sized physical key to `CUInt`.
 Linked system libraries: X11, Xcursor, Xrandr, and Xi on Linux; Cocoa on
 macOS; gdi32, user32, and shell32 on Windows.
 
+## Documentation
+
+- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+  online guide, tutorials, and ecosystem overview.
+
 ## License
 
 MIT, except the bundled RGFW, which is under the zlib licence
