@@ -36,3 +36,7 @@ File dialogs are non-blocking so the GUI never freezes:
 useFileDialog fileDialogVar $ \selectedPath -> do
   liftIO $ loadFile selectedPath
 ```
+
+## Window chrome and screenshots
+
+`windowCaption` draws the caption buttons, registers the drag region, and reports a close click for a custom title bar; `sdlWindowDecorations = DecorationsNone` removes the platform frame. `saveScreenshot` and `captureScreenshot` are the SDL-specific pixel helpers. See [Windows & Screenshots](../advanced/window-management.md) for the full pattern, including `wsExitOnCloseRequest` and the confirm-on-close modal.

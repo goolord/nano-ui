@@ -1,40 +1,89 @@
 # Animations & Timers
 
-`nano-ui` includes continuous animation channels, tweening curves, physical spring simulations, and timed wakes.
+Animation in nano-ui is driven by the frame loop, not by a separate clock thread. A tween or spring advances only while the view keeps drawing it, and the loop sleeps when nothing is animating.
 
-## Springs and Tweens
+## Tweens and springs
 
-- **`animateTo`**: Tweens a value toward a target using an easing curve (`EaseInOut`, `EaseOutQuad`, etc.).
-- **`animateToA`**: Drives physical spring animations (`presetSmooth`, `presetBouncy`, `presetStiff`). Supports mid-flight retargeting without velocity hitches.
+`animateTo` moves a value toward a target and returns the current value:
 
 ```haskell
--- Smoothly animate sidebar width toward target
-currentWidth <- animateTo (Tween 0.25 EaseOutQuad) targetWidth
+import NanoUI
+
+currentWidth <- animateTo (Tween EaseOutQuad 0.25 0) targetWidth
 ```
 
-## Continuous Animations & `keepAnimating`
+A `Transition` is either:
 
-When drawing continuous animations (such as spinners or pulsing badges), call `keepAnimating` **inside the animating widget**:
+- **`Tween ease duration delay`**, in seconds. `EaseOutQuad`, `EaseInOutCubic`, `EaseOutBack`, and `EaseCubicBezier` are some of the available curves.
+- **`Spring params`**, a damped spring. `presetSmooth`, `presetBouncy`, and `presetStiff` are the standard presets:
+
+  ```haskell
+  currentX <- animateTo (Spring presetSmooth) targetX
+  ```
+
+Springs retarget mid-flight from their current position and velocity, so a moving target does not cause a hitch. `animateToA` does the same for any `Animatable` value — a `V2`, a `Color`, or a numeric type — channel by channel:
+
+```haskell
+pos <- animateToA (Spring presetSmooth) (V2 targetX targetY)
+```
+
+`animate` (without `To`) animates from one value to another and restarts when it completes, which is useful for a one-shot demonstration but rarely for UI state. Most UI animation is `animateTo`.
+
+## Continuous animation and `keepAnimating`
+
+`pulse` returns a value oscillating in `[0, 1]` with the given period in seconds:
+
+```haskell
+opacity <- pulse 1.2       -- one full sweep every 1.2 s
+```
+
+Clock-driven values (`pulse`, or anything read from `uiTime`) do not, by themselves, keep the frame loop awake. A widget that draws from them must call `keepAnimating` **with its own response**, every frame it is on screen:
 
 ```haskell
 pulsingBadge :: NanoUI ()
 pulsingBadge = do
-  t <- pulse 1.0  -- Oscillates between 0.0 and 1.0
-  keepAnimating   -- Requests a frame next tick only while on screen
-  drawCircleWithRadius t
+  t <- pulse 1.0
+  (resp, ()) <- customWidget defaultCustomWidgetSpec
+    { widgetLayout = fixedWH 24 24
+    , widgetContent = contentKey [t * 100]
+    , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $
+        drawCircle (V2 (x + w / 2) (y + h / 2)) (6 + 3 * t) (themeAccent (cdcTheme cdc))
+    }
+  keepAnimating resp
 ```
+
+The loop goes back to sleep on the first frame that leaves out `keepAnimating`.
 
 > [!CAUTION]
-> Never force continuous redraws by marking the entire context dirty every frame. That creates an unpaced busy loop that drains batteries and pins CPUs.
+> Never force continuous redraws by marking the context dirty every frame. That creates an unpaced busy loop that pins a CPU and drains a laptop battery. Call `keepAnimating` only in the widget that is actually moving.
 
----
+## Timers with `wakeAfter`
 
-## Timers and Debounces with `wakeAfter`
-
-To schedule future redraws (e.g. for clocks, timers, or tooltips):
+`wakeAfter` requests one frame after a delay in **seconds**:
 
 ```haskell
--- Schedules a frame in 500 milliseconds
-wakeAfter 500
+clock :: NanoUI ()
+clock = do
+  label =<< currentTimeText
+  wakeAfter 1          -- next tick in one second
 ```
-Call `wakeAfter` on every frame that still requires a wake; pending wakes reset at the end of each frame.
+
+Call it on every frame that still needs the future wake; pending wakes are reset each frame. Use `wakeAfter` for clocks, debounces, and polling on a schedule; use `keepAnimating` for continuous motion. `wakeAfter` costs one frame per interval; `keepAnimating` runs a frame per display refresh.
+
+## What starts and stops an animation
+
+- **`animateTo`** runs while the value differs from the target, and requests frames itself.
+- **`pulse`** and other clock-driven drawing need explicit `keepAnimating` (or a `wakeAfter` for a lower frame rate).
+- **Leaving the widget out of the view** stops it. A conditional widget that disappears and reappears starts from its stored value, not from a new animation, unless the transition is recreated.
+- **Idle means idle.** If nothing animates, no timed wake is pending, and no input arrives, the loop blocks in the OS event queue and uses no CPU.
+
+## Testing animation deterministically
+
+`NanoUI.Testing.runFrame` takes an explicit `inputDeltaTime`, so a test can step animation time without waiting:
+
+```haskell
+(_, _, _) <- runFrame ctx (inp {inputDeltaTime = 0.016}) view
+(_, _, _) <- runFrame ctx (inp {inputDeltaTime = 0.016}) view
+```
+
+Drive the same sequence of frames in the test and the app; do not use real sleeps. For task and stream wake-ups, `newWakeSignal` from `NanoUI.Testing.Harness` makes the timing deterministic.

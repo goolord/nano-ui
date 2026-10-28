@@ -1,44 +1,105 @@
 # Input Controls
 
-Input widgets in `nano-ui` take the mutable `Var` they display and edit. They manage their own caret, selection, and keyboard event routing internally.
+Input widgets take the mutable `Var` they display and edit. They manage their own caret, selection, focus, and keyboard routing; the application reads the result when it needs it.
 
-## Input Widget Overview
+## Signatures
 
 | Widget | Signature | Description |
 | --- | --- | --- |
-| `checkbox` | `Text -> Var Bool -> NanoUI ()` | Two-state toggle box with label. |
-| `toggleButton` | `Text -> Var Bool -> NanoUI ()` | Two-state push button with active fill. |
-| `radio` | `Eq a => Text -> a -> Var a -> NanoUI ()` | Single choice radio button for value `a`. |
-| `enumRadio` | `(Enum a, Bounded a, Show a) => Var a -> NanoUI ()` | Radio button group for all enum values. |
-| `select` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Dropdown select by index. |
-| `comboBox` | `Foldable f => f Text -> Var Text -> NanoUI ()` | Editable text field with dropdown suggestions. |
-| `slider` | `Float -> Float -> Var Float -> NanoUI ()` | Slider with track and thumb (min, max). |
-| `textInput` | `Var Text -> NanoUI ()` | Single-line editable text input. |
-| `searchInput` | `Var Text -> NanoUI ()` | Search field with clear button. |
-| `numericInput` | `(Num a, Ord a) => a -> a -> Var a -> NanoUI ()` | Numeric stepper field with increment/decrement buttons. |
+| `checkbox` | `Text -> Var Bool -> NanoUI ()` | Two-state box with a label. |
+| `toggleButton` | `Tone -> Text -> Var Bool -> NanoUI ()` | Two-state button, filled in the tone's color while on. |
+| `radio` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Radio group over indexed options. |
+| `boundedRadio` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Radio group over every enum value. |
+| `enumRadio` | `(Bounded a, Enum a, Show a) => Var a -> NanoUI ()` | `boundedRadio` labelled with `show`. |
+| `select` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Drop-down select by index. |
+| `boundedSelect` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Drop-down over every enum value. |
+| `enumSelect` | `(Bounded a, Enum a, Show a) => Var a -> NanoUI ()` | `boundedSelect` labelled with `show`. |
+| `comboBox` | `Foldable f => Text -> f Text -> Var Text -> NanoUI ()` | Placeholder, suggestions, free-text value. |
+| `slider` | `Float -> Float -> Var Float -> NanoUI ()` | Min, max, value. |
+| `textInput` | `Var Text -> NanoUI ()` | Single-line editable text. |
+| `searchInput` | `Text -> Var Text -> NanoUI ()` | Placeholder + search field with a clear button. |
+| `numericInput` | `Var Double -> NanoUI ()` | Numeric field with steppers (configure for range/step). |
+| `colorPicker` | `Var Color -> NanoUI ()` | Saturation/value field and hue bar. |
 
----
-
-## Examples
-
-### Text Input with Response
-
-Use the primed variant `textInput'` to react to submission (Enter) or changes:
+Every widget has the usual variants: primed (`...'`) returns a `Response`, `...With` takes a layout modifier, and `...Configured` takes a config record. For example, `numericInputConfigured` sets the range, step, decimals, and hexadecimal mode:
 
 ```haskell
-queryVar <- useVar ""
-resp <- textInput' queryVar
-when (respSubmitted resp) $ do
-  performSearch =<< readVar queryVar
+numericInputConfigured defaultNumericInputConfig
+  {nicMin = 0, nicMax = 255, nicHex = True} byte
 ```
 
-### Debounced Search with `searchInput'`
-
-`searchInput'` fires `respChanged` only after a typing pause, saving expensive queries:
+## Text input and response
 
 ```haskell
-searchVar <- useVar ""
-resp <- searchInput' searchVar
-when (respChanged resp) $ do
-  triggerBackendQuery =<< readVar searchVar
+query <- useVar ""
+resp <- textInput' query
+when (respSubmitted resp) (search =<< readVar query)
+when (respChanged resp) (preview =<< readVar query)
 ```
+
+`respChanged` fires on every edit; `respSubmitted` fires on Enter. For expensive work, use `searchInput'`, whose `respChanged` is debounced (300 ms by default) and fires immediately when the field is cleared:
+
+```haskell
+resp <- searchInput' "Find a package" query
+when (respChanged resp) (refreshResults =<< readVar query)
+```
+
+The debounce means a fast typist starts one search, not one per keystroke. The `Var` itself is still updated on every keystroke, so a cheap label can show the live query.
+
+## Choices
+
+```haskell
+enabled <- useVar True
+checkbox "Enable notifications" enabled
+
+bold <- useVar False
+toggleButton Accent "B" bold
+
+data Pace = Walk | Jog | Sprint
+  deriving (Eq, Show, Enum, Bounded)
+
+pace <- useEnumVar Jog
+enumRadio pace                    -- radio group over Walk / Jog / Sprint
+
+mode <- useEnumVar Jog
+enumSelect mode                   -- drop-down over the same values
+```
+
+`select` is index-based and is the right choice when the options come from data:
+
+```haskell
+choice <- useVar 0
+select ["Small", "Medium", "Large"] choice
+```
+
+`comboBox` takes free text plus suggestions; its `respChanged` fires on commit, not on every model write. `select` and `comboBox` route through different theme surfaces (`themeButton` versus `themeInput`), which is one of the [unexpected styling interactions](../styling/unexpected-interactions.md).
+
+## Sliders and numbers
+
+```haskell
+volume <- useVar (40 :: Float)
+slider 0 100 volume
+
+count <- useVar (0 :: Double)
+numericInput count
+```
+
+`numericInput` accepts digits, a leading minus when the range allows it, and arrow-key steps; `Shift` steps ten times as far. The configured `nicDecimals` controls both display and accepted precision, and a step is rounded to that precision.
+
+## Color
+
+```haskell
+accent <- newVar (colorHex "#38bdf8")
+colorPicker accent
+```
+
+`colorPickerRGBA` adds an alpha bar and an `#RRGGBBAA` field.
+
+## Reading and resetting
+
+All input widgets mutate the `Var` directly and return `()`. To reset a field, write the `Var`; to react, use the primed response. Two rules keep behavior predictable:
+
+- **Read below the widget that edits it** when something else displays the value, so the change lands in one pass.
+- **Do not read a value just to pass it back** into the same widget; pass the `Var`.
+
+For multi-line editing, see [Text Editing](text-editing.md). For the full response record, see the [Widget Gallery](index.md).

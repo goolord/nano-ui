@@ -113,12 +113,16 @@ used to check that the vertex writers compile without dictionaries or tuples.
 
 Comprehensive documentation is available at **[goolord.github.io/nano-ui](https://goolord.github.io/nano-ui/)** (and offline in the [`book/`](book/) directory):
 
-- **[Quickstart & Setup](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
-- **[Core Architecture](https://goolord.github.io/nano-ui/core/frame-model.html)**: Frame lifecycle, arena allocation, and rendering pipeline.
-- **[State & `Var`](https://goolord.github.io/nano-ui/core/state-var.html)**: `Var` semantics, write costs, handle-based resource APIs, and `VarMap`.
-- **[Interactive Styling](https://goolord.github.io/nano-ui/styling/widget-surfaces.html)**: Interactive widget workbenches, live style combination previews, and Haskell code generator.
-- **[Layout System](https://goolord.github.io/nano-ui/layout/containers.html)**: Containers, layout modifiers, and 100,000-row list virtualization.
-- **[Widgets & Packages](https://goolord.github.io/nano-ui/widgets/buttons-menus.html)**: Buttons, inputs, text editors, overlays, charts, and backends (`SDL3`, `RGFW`).
+- **[Quick Start](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
+- **[Tutorials](https://goolord.github.io/nano-ui/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.
+- **[Introduction to State](https://goolord.github.io/nano-ui/state/introduction.html)** and **[`Var` in Depth](https://goolord.github.io/nano-ui/state/var.html)**: Where state lives, `Var` semantics, write costs, and `VarMap`.
+- **[Elm Architecture](https://goolord.github.io/nano-ui/elm/overview.html)**: Typed messages and pure reducers with `nano-ui-emit`.
+- **[Keyboard & Focus](https://goolord.github.io/nano-ui/input/shortcuts.html)**: Shortcuts, focus, and IME.
+- **[Layout](https://goolord.github.io/nano-ui/layout/containers.html)**: Containers, layout modifiers, and 100,000-row list virtualization.
+- **[Widget Gallery](https://goolord.github.io/nano-ui/widgets/index.html)**: Buttons, inputs, text editors, overlays, tables, charts, and custom controls.
+- **[Styling](https://goolord.github.io/nano-ui/styling/overview.html)**: Theming, interaction states, typography, and live workbenches.
+- **[Troubleshooting](https://goolord.github.io/nano-ui/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and their fixes.
+- **[Architecture Notes](https://goolord.github.io/nano-ui/architecture/frame-model.html)**: Frame lifecycle, application patterns, and internals.
 - **[Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html)**: Building, testing, profiling, and repository conventions.
 - `NanoUI` Haddock: Reference documentation for widgets, state, and layout modifiers.
 

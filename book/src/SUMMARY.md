@@ -3,52 +3,71 @@
 [Introduction](README.md)
 
 # Getting Started
-- [Quickstart](getting-started/quickstart.md)
-- [Development Setup](getting-started/development.md)
+- [Quick Start](getting-started/quickstart.md)
 
-# Core Concepts
-- [The Frame Model](core/frame-model.md)
-- [State Management & Var](core/state-var.md)
-- [Widget Identity & Scoping](core/identity.md)
-- [Architecture & Application Patterns](core/patterns.md)
+# Tutorials
+- [Tutorials](tutorials/index.md)
+- [Build a Todo List](tutorials/todo-list.md)
+- [Build a Notepad](tutorials/notepad.md)
+- [Live Data & Background Work](tutorials/live-data.md)
 
-# Layout System
+# State
+- [Introduction to State](state/introduction.md)
+- [`Var` in Depth](state/var.md)
+- [Widget Identity & Keys](state/identity.md)
+
+# The Elm Architecture
+- [Elm-Style Views](elm/overview.md)
+- [Messages, Reducers & Components](elm/messages.md)
+
+# Keyboard & Focus
+- [Keyboard Shortcuts](input/shortcuts.md)
+- [Focus, Navigation & IME](input/focus.md)
+
+# Layout
 - [Containers](layout/containers.md)
 - [Layout Modifiers](layout/modifiers.md)
 - [Scrolling & Virtualization](layout/scrolling.md)
 
-# Styling & Visual Lab
-- [Theming & Surface Architecture](styling/overview.md)
-- [Interaction States](styling/interaction-states.md)
-- [Interactive Widget Workbenches](styling/widget-surfaces.md)
-- [Typography & Fonts](styling/typography.md)
-- [Unexpected Styling Interactions](styling/unexpected-interactions.md)
-
-# Widget Catalog
+# Widget Gallery
+- [Widget Gallery](widgets/index.md)
 - [Buttons & Menus](widgets/buttons-menus.md)
 - [Input Controls](widgets/inputs.md)
 - [Text Editing](widgets/text-editing.md)
-- [Overlays, Windows & Modals](widgets/overlays.md)
+- [Overlays & Windows](widgets/overlays.md)
 - [Tables & Trees](widgets/tables-trees.md)
-- [Drag and Drop](widgets/drag-and-drop.md)
-- [Custom Canvas Drawing](widgets/canvas-custom.md)
+- [Drag & Drop](widgets/drag-and-drop.md)
+- [Custom Controls](widgets/custom-controls.md)
+- [Canvas Drawing](widgets/canvas-custom.md)
 
-# Ecosystem Packages
-- [nano-ui-emit: Elm-style Architecture](packages/nano-ui-emit.md)
-- [nano-ui-sdl: SDL3 Backend](packages/nano-ui-sdl.md)
-- [nano-ui-rgfw: RGFW Backend](packages/nano-ui-rgfw.md)
-- [nano-ui-diagrams: Charts & Plots](packages/nano-ui-diagrams.md)
-- [nano-ui-form: Validated Forms](packages/nano-ui-form.md)
-- [nano-ui-markdown: Markdown Rendering](packages/nano-ui-markdown.md)
-- [nano-ui-svg: Headless SVG Export](packages/nano-ui-svg.md)
+# Styling
+- [Theming & Surfaces](styling/overview.md)
+- [Interaction States](styling/interaction-states.md)
+- [Interactive Workbenches](styling/widget-surfaces.md)
+- [Typography & Fonts](styling/typography.md)
+- [Unexpected Styling Interactions](styling/unexpected-interactions.md)
 
-# Advanced Topics
-- [Keyboard Navigation & Focus](advanced/keyboard-focus.md)
+# Advanced Guides
 - [Asynchronous Work & Streams](advanced/background-work.md)
 - [Animations & Timers](advanced/animation.md)
-- [Window Chrome & Screenshots](advanced/window-management.md)
+- [Windows & Screenshots](advanced/window-management.md)
 
-# Production & Architecture
-- [Recurring Bugs & Fixes](production/recurring-bugs.md)
-- [Abstraction Audit](production/abstraction-audit.md)
-- [Source Code Reduction](production/source-reduction.md)
+# Ecosystem Packages
+- [SDL3 Backend](packages/nano-ui-sdl.md)
+- [RGFW Backend](packages/nano-ui-rgfw.md)
+- [Charts & Diagrams](packages/nano-ui-diagrams.md)
+- [Validated Forms](packages/nano-ui-form.md)
+- [Markdown Rendering](packages/nano-ui-markdown.md)
+- [Headless SVG Export](packages/nano-ui-svg.md)
+
+# Troubleshooting
+- [Recurring Bugs & Fixes](troubleshooting/recurring-bugs.md)
+
+# Contributing
+- [Development Setup](getting-started/development.md)
+
+# Architecture Notes
+- [The Frame Model](architecture/frame-model.md)
+- [Application Patterns](architecture/patterns.md)
+- [Abstraction Audit](architecture/abstraction-audit.md)
+- [Source Code Reduction](architecture/source-reduction.md)

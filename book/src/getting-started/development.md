@@ -1,6 +1,10 @@
 # Development Setup
 
-Guidance for building, testing, and developing within the `nano-ui` monorepo.
+Guidance for building, testing, and developing within the `nano-ui` monorepo. If you only want to *use* nano-ui in an application, the [Quick Start](quickstart.md) is the shorter path.
+
+## Setup
+
+This repository's `nix develop` shell provides GHC 9.14, Cabal, SDL3, SDL3_ttf, and pkg-config. Outside it, install the same tools listed under [Quick Start prerequisites](quickstart.md#prerequisites).
 
 ## Building and Testing
 
