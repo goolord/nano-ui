@@ -166,11 +166,12 @@ Typed mutable references; no `Dynamic`, no runtime type lookup.
   `writeVarIO`, `modifyVarIO`, then call the `askWake` callback to schedule a
   frame.
 
-Elm-style alternative: `nano-ui-emit`'s `NanoUIE msg a` — all core widgets
-are wrapped directly in `NanoUI.Emit` (`column`, `row`, `label`, `button`, etc.),
-plus `emitWhenE (button "Save") Save`, `emitChangedE (slider 0 100) v SetV`
-(or `emitWhen`/`emitChanged` for raw `NanoUI` actions), and `Emit.liftNanoUI` /
-`Emit.withNanoUI` for custom widgets. Run with `runSdlAppReduce view update`.
+Elm-style alternative: `nano-ui-emit`'s `NanoUIE msg a`, a `NanoUI` action
+with the view's message sink in scope as the implicit parameter `?emit`. Core
+widgets run in it unchanged (`NanoUI.Emit` re-exports `NanoUI`); emit with
+`emit`, `emitWhen (button "Save") Save`, `emitChanged (slider 0 100) v SetV`,
+and `mapMessages` for child components. Give views a `Model -> NanoUIE Msg ()`
+signature. Run with `runSdlAppReduce options update model view`.
 
 ## Stable widget identity
 

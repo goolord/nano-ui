@@ -61,7 +61,7 @@ measure = measureRuns 20 iterations
 
 main :: IO ()
 main = do
-  let appView = void . runNanoUIE . Demo.appView
+  let appView model = void (runNanoUIE (Demo.appView model))
       m = initialModel
       theme = themeForChoice (currentTheme m)
       userScale = physScaleFor (dpiScale m)

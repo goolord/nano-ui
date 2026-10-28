@@ -2,22 +2,11 @@ module Main (main) where
 
 import Control.Exception (IOException, TypeError (..), evaluate, try)
 import Control.Monad (unless, void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import DeferredWrongMessage (wrongMessage)
 import NanoUI qualified as UI
-import NanoUI
-  ( Key (KeyEnter)
-  , Response (..)
-  , becameVisible
-  , newVar
-  , respClicked
-  , tab
-  , visEvent
-  , visVisible
-  )
 import NanoUI.Emit
 import NanoUI.Internal.Context (ctxFocusId)
 import NanoUI.Testing (Context, collectTextSpans, newContext)
@@ -67,13 +56,15 @@ testReduce = do
   ctx <- newContext
   let
     inp = withInput 80 80
-    view _ = withNanoUI UI.column (emit Inc >> emit Dec >> emit Inc)
+    view :: Int -> NanoUIE Msg ()
+    view _ = UI.column (emit Inc >> emit Dec >> emit Inc)
   ((), model, msgs, _, dirty) <- runFrameReduce update ctx inp 0 view
   check
     "reducer messages and dirty"
     (msgs == [Inc, Dec, Inc] && model == 1 && dirty)
   let
-    identity _ = withNanoUI UI.column (emit Inc >> emit Dec)
+    identity :: Int -> NanoUIE Msg ()
+    identity _ = UI.column (emit Inc >> emit Dec)
   ((), model2, msgs2, _, dirty2) <- runFrameReduce update ctx inp 0 identity
   check
     "unchanged model stays clean"
@@ -90,6 +81,7 @@ testAdapters = do
   calls <- newIORef (0 :: Int)
   let
     control v = liftIO (modifyIORef' calls (+ 1)) >> UI.modifyVar v (+ 1)
+    adapters :: NanoUIE Int ()
     adapters = do
       emitWhen (pure False) (1 :: Int)
       emitWhen (pure True) 2
@@ -107,6 +99,7 @@ testClick = do
   ctx <- newContext
   let
     inp = withInput 240 120
+    view :: Int -> NanoUIE Msg Response
     view m = do
       resp <- button' "Go"
       when (respClicked resp) (emit Inc)
@@ -119,9 +112,10 @@ testClick = do
   check "click reduces once" (msgs == [Inc] && modelR == 1 && dirty)
   (_, model1, idle, _, _) <- runFrameReduce update ctx inp modelR view
   check "idle after click" (model1 == 1 && null idle)
-  -- Lifting an ordinary button cannot produce implicit messages.
+  -- An ordinary button in an emitting view produces no messages of its own.
   let
-    buttonUi = liftNanoUI (UI.button' "Go") :: NanoUIE Msg Response
+    buttonUi :: NanoUIE Msg Response
+    buttonUi = UI.button' "Go"
   (target, _, _, _) <- runFrameE ctx inp buttonUi
   let
     (press, release) = clickPair inp (centerOf target)
@@ -134,6 +128,7 @@ testKeyboard = do
   ctx <- newContext
   let
     inp = withInputOff 200 100
+    ui :: NanoUIE Bool WidgetId
     ui = do
       wid <- currentId
       emitChanged (UI.checkbox "Emit") False id
@@ -148,6 +143,7 @@ testTabs = do
   ctx <- newContext
   let
     inp = withInput 300 100
+    ui :: NanoUIE Bool ()
     ui =
       emitChanged
         ( \active ->
@@ -172,13 +168,14 @@ testRebuild = do
   seenRef <- newIORef (0 :: Int)
   let
     inp = withInputOff 300 200
-    view _ = withRunInNanoUIE $ \run -> UI.column $ do
+    view :: Int -> NanoUIE Int (Bool, (Bool, Maybe VisibilityEvent))
+    view _ = UI.column $ do
       loadedVar <- UI.useVar False
       loaded <- UI.readVar loadedVar
       (vis, _) <- UI.sensor (UI.label (if loaded then "loaded" else "loading"))
       when (becameVisible vis) $ do
         liftIO (modifyIORef' seenRef (+ 1))
-        run (emit (1 :: Int))
+        emit 1
         UI.writeVar loadedVar True
       pure (loaded, (visVisible vis, visEvent vis))
     frame model =
@@ -195,17 +192,18 @@ testScopes = do
   ctx <- newContext
   let
     inp = withInput 120 80
-    ui = withRunInNanoUIE $ \run -> UI.column $ do
-      run (emit (1 :: Int))
-      UI.disabledWhen True $ run $ do
+    ui :: NanoUIE Int ()
+    ui = UI.column $ do
+      emit 1
+      UI.disabledWhen True $ do
         emitWhen (pure True) 2
         emitWhen (UI.button "Disabled") 99
-      run (withNanoUI UI.row (emit 3))
+      UI.row (emit 3)
   (_, msgs, _, _) <- runFrameE ctx (keyInp KeyEnter inp) ui
   check "nested scopes share the sink" (msgs == [1, 2, 3])
   (((), inner), outer, _, _) <- runFrameE ctx inp $ do
     emit (4 :: Int)
-    liftNanoUI (runNanoUIE (emit True))
+    runNanoUIE (emit True)
   check
     "nested collectors have independent message types"
     (inner == [True] && outer == [4])
@@ -213,10 +211,12 @@ testScopes = do
 testMapMessages :: IO ()
 testMapMessages = do
   ctx <- newContext
-  let child = withRunInNanoUIE $ \run -> UI.column $ do
-        run (emit True)
-        run (withNanoUI UI.row (emit False))
-        pure (42 :: Int)
+  let child :: NanoUIE Bool Int
+      child = UI.column $ do
+        emit True
+        UI.row (emit False)
+        pure 42
+      ui :: NanoUIE (Either String Int) Int
       ui = do
         emit (Left "before" :: Either String Int)
         result <- mapMessages Right (mapMessages (\b -> if b then 1 else 2) child)
@@ -265,10 +265,11 @@ testWrappedWidgets = do
   ctx <- newContext
   let
     inp = withInput 240 120
+    view :: Int -> NanoUIE Msg Response
     view m = column $ do
       heading "Counter"
       row $ do
-        emitWhenE (button "-") Dec
+        emitWhen (button "-") Dec
         label (T.pack (show m))
         b <- button' "+"
         when (respClicked b) (emit Inc)
@@ -277,6 +278,6 @@ testWrappedWidgets = do
   -- the click targets the second's.
   _ <- runFrameReduce update ctx inp 0 view
   (resp, model, msgs, _, dirty) <- runFrameReduce update ctx inp 0 view
-  check "initial wrapped view" (msgs == [] && model == 0 && not dirty)
+  check "initial view" (msgs == [] && model == 0 && not dirty)
   (model1, msgs1, dirty1) <- runClickReduce update ctx inp 0 view (centerOf resp)
-  check "wrapped button emits and reduces" (msgs1 == [Inc] && model1 == 1 && dirty1)
+  check "core button emits and reduces" (msgs1 == [Inc] && model1 == 1 && dirty1)

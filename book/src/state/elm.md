@@ -12,38 +12,26 @@ Widgets, layout, focus, and keys are unchanged. Only the state model differs.
 
 `NanoUIE msg a` is a UI action that can emit only `msg`. There is no `Typeable` constraint and no runtime type test: emitting the wrong type is a compile error.
 
-Every widget exported by `nano-ui` is directly available in `NanoUI.Emit` as a `NanoUIE msg` action: containers (`column`, `row`, `panel`, `scroll`, etc.), controls (`button`, `slider`, `textInput`, `checkbox`, etc.), text (`label`, `heading`, etc.), overlays, and scopes (`withKey`, `styled`, `disabledWhen`, etc.). Views use standard `do` notation without manual lifting.
+A `NanoUIE` view is an ordinary `NanoUI` action with the view's message sink in scope (an implicit parameter, `?emit`). Every core widget runs in it unchanged, so `NanoUI.Emit` re-exports `NanoUI` and adds the functions below. An `emit` inside a container, an overlay body, a tab or a menu callback goes to the sink of the view around it.
 
 | Function | Emits when |
 | --- | --- |
 | `emit msg` | Immediately |
-| `emitWhenE widget msg` | The wrapped widget returns `True` (button click, submitted field) |
-| `emitWhen widget msg` | An unwrapped `NanoUI Bool` widget returns `True` |
-| `emitChangedE widget old toMsg` | The wrapped widget's final value differs from `old` |
-| `emitChanged widget old toMsg` | An unwrapped `Var a -> NanoUI r` widget's final value differs from `old` |
-| `emitEditedE widget old toMsg` | The wrapped widget's value changed **and** `respChanged` is true |
-| `emitEdited widget old toMsg` | An unwrapped widget's value changed **and** `respChanged` is true |
-
-`liftNanoUI` and `withNanoUI` are available for wrapping custom widgets or external `NanoUI` actions:
+| `emitWhen widget msg` | The widget returns `True` (button click, submitted field) |
+| `emitChanged widget old toMsg` | A `Var a -> NanoUI r` widget's final value differs from `old` |
+| `emitEdited widget old toMsg` | The widget's value changed **and** `respChanged` is true |
 
 ```haskell
 column $ do
   label "Settings"
   withKey "form" $ do
-    emitChangedE (slider 0 100) volume SetVolume
-    emitWhenE (button "Save") Save
+    emitChanged (slider 0 100) volume SetVolume
+    emitWhen (button "Save") Save
 ```
 
-`withRunInNanoUIE` supplies a runner when embedding typed actions inside external widgets taking callbacks or untyped bodies:
+`emitChanged` runs the widget against a temporary `Var` seeded with the model value and emits the new value only if it differs. `emitEdited` is its stricter form for text fields, where programmatic writes should not look like edits.
 
-```haskell
-view model = withRunInNanoUIE $ \run -> customContainer $ do
-  label "Settings"
-  run (emitChangedE (slider 0 100) model.volume SetVolume)
-  run (emitWhenE (button "Save") SaveDocument)
-```
-
-`emitChangedE` runs the widget against a temporary `Var` seeded with the model value and emits the new value only if it differs. `emitEditedE` is its stricter form for text fields, where programmatic writes should not look like edits.
+Give each view a signature in its own message type, `view :: Model -> NanoUIE Msg ()`. The runners take a view of that shape, and a local helper defined outside a view needs the signature too, or GHC finds no sink for its `emit`.
 
 > [!CAUTION]
 > Emit only inside an event branch. `emit Save` at the top level of a view emits on every pass, and the reducer runs every message. The adapters above already guard on the widget's event.

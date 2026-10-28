@@ -2,12 +2,14 @@
 
 ## 0.1.0.0 -- Unreleased
 
-- Complete wrapped widget API in `NanoUI.Emit.Widgets` (re-exported by `NanoUI.Emit`),
-  providing direct `NanoUIE msg` actions for all containers, inputs, buttons,
-  text, overlays, and scopes exported by core `nano-ui`. Views no longer need
-  to manually `liftNanoUI` or wrap with `withNanoUI`.
-- Added `emitWhenE`, `emitChangedE`, and `emitEditedE` adapters operating directly
-  on wrapped `NanoUIE` widgets.
+- `NanoUIE msg a` is now a `NanoUI a` action with the view's message sink in
+  scope as the implicit parameter `?emit`, so every core widget, container,
+  overlay and callback-taking widget runs in an emitting view unchanged.
+  `NanoUI.Emit` re-exports `NanoUI`; `NanoUI.Emit.Widgets` is a deprecated
+  re-export of it. `liftNanoUI`, `withNanoUI`, `withRunInNanoUIE`,
+  `emitWhenE`, `emitChangedE` and `emitEditedE` are deprecated identities or
+  aliases. Views passed to the runners need a `model -> NanoUIE msg ()`
+  signature.
 
 - `emitChanged` and `emitEdited` take an input of type `Var a -> NanoUI r`,
   such as `slider 0 100`, with the current value; they run it on a temporary

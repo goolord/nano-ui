@@ -48,12 +48,11 @@ side-effecting actions behind event checks such as
 `whenM (button "Save") saveDocument`.
 
 For Elm-style model/update applications, `NanoUI.Emit` (from `nano-ui-emit`)
-wraps standard widgets to emit typed messages in `NanoUIE msg a`. The reducer
-runner (`runSdlAppReduce`, `runRgfwAppReduce`) applies all emitted messages in
-order after the frame's UI pass completes. If the model changes, a follow-up
-frame is scheduled automatically. Lift ordinary `NanoUI` actions with
-`Emit.liftNanoUI` and wrap layout containers with `Emit.withNanoUI` (for
-example, `Emit.withNanoUI column`).
+emits typed messages from `NanoUIE msg a` views, which are ordinary `NanoUI`
+actions with the view's message sink in scope, so standard widgets run in them
+unchanged. The reducer runner (`runSdlAppReduce`, `runRgfwAppReduce`) applies
+all emitted messages in order after the frame's UI pass completes. If the
+model changes, a follow-up frame is scheduled automatically.
 
 Use `Emit.emitWhen (button "Save") Save` for click activations,
 `Emit.emitChanged (slider 0 100) volume SetVolume` for value changes, and

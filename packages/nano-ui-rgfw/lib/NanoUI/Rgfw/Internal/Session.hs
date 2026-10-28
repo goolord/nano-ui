@@ -98,7 +98,7 @@ import NanoUI.Testing
   , uiCursorKind
   )
 import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
-import NanoUI.Emit (NanoUIE, liftNanoUI, runFrameReduce)
+import NanoUI.Emit (NanoUIE, runFrameReduce)
 import NanoUI.Runner
   ( SessionDriver (..)
   , runSessionLoop
@@ -262,14 +262,13 @@ mapRgfwCursor kind = case cursorFallback kind of
 -- released on exit. Throws an 'IOError' when the window or its OpenGL 3.2
 -- context cannot be created.
 runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
-runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> liftNanoUI app)
+runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> app)
 
 -- | 'runRgfwApp' with a setup action run once the window and its OpenGL
 -- context exist, before the first frame, that returns the view.
 runRgfwAppWith :: RgfwOptions -> IO (NanoUI ()) -> IO ()
 runRgfwAppWith opts setup =
-  runRgfwAppReduceCustomWith opts (\_ -> (optionsTheme opts, optScale opts)) (\() m -> m) () $
-    const . liftNanoUI <$> setup
+  runRgfwAppReduceCustomWith opts (\_ -> (optionsTheme opts, optScale opts)) (\() m -> m) () setup (\app _ -> app)
 
 -- | Model-driven runner. Fold emitted messages through the update function
 -- in order, with the message type checked at compile time.
@@ -297,19 +296,20 @@ runRgfwAppReduceCustom ::
   (model -> NanoUIE msg ()) ->
   IO ()
 runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view =
-  runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel (pure view)
+  runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel (pure ()) (\_ -> view)
 
 -- | 'runRgfwAppReduceCustom' with a setup action run once the window and its
--- OpenGL context exist, before the first frame, that returns the view.
+-- OpenGL context exist, before the first frame, whose result the view takes.
 runRgfwAppReduceCustomWith ::
   Eq model =>
   RgfwOptions ->
   (model -> (Theme, Float)) ->
   (msg -> model -> model) ->
   model ->
-  IO (model -> NanoUIE msg ()) ->
+  IO env ->
+  (env -> model -> NanoUIE msg ()) ->
   IO ()
-runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup = inBoundThread $ do
+runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup appView = inBoundThread $ do
   -- Open hidden at the requested scale: the monitor's scale is unknown until
   -- the window exists. Resize, place and show it once that scale is known.
   let flags =
@@ -369,7 +369,7 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
       ctx0 <- newRgfwContext initTheme
       let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
       debugSampler <- newRgfwDebugSampler
-      view <- setup
+      env <- setup
       setExplainLayout ctx (optExplainLayout opts)
       -- Size limits are in layout units, converted at the current scale.
       let limit set s = do
@@ -439,7 +439,7 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
                 writeIORef themeRef frameTheme
                 applyRgfwTheme c frameTheme
               (_, newModel, _, drawData, dirtyAfterUi) <-
-                runFrameReduce updateModel c curInp curModel view
+                runFrameReduce updateModel c curInp curModel (appView env)
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
               damage <- takeDamage c

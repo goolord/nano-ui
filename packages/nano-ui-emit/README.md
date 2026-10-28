@@ -13,46 +13,33 @@ data Msg = Save | SetVolume Float
 view :: Float -> NanoUIE Msg ()
 view volume = column $ do
   label "Settings"
-  emitChangedE (slider 0 100) volume SetVolume
-  emitWhenE (button "Save") Save
+  emitChanged (slider 0 100) volume SetVolume
+  emitWhen (button "Save") Save
 ```
 
-`NanoUIE msg a` fixes the message type for a view. `emit :: msg -> NanoUIE msg ()`
-needs no `Typeable` constraint: emitting a different type is a compile error.
-Function-valued messages and polymorphic message types work too.
+`NanoUIE msg a` fixes the message type for a view. It is an ordinary
+`NanoUI a` action with the view's message sink in scope as the implicit
+parameter `?emit`, so every widget exported by `nano-ui` runs in it unchanged:
+containers, controls, overlays, scopes, and widgets that take callbacks or
+several bodies. `NanoUI.Emit` re-exports `NanoUI`. `emit :: msg -> NanoUIE
+msg ()` needs no `Typeable` constraint: emitting a different type is a compile
+error. Function-valued messages and polymorphic message types work too.
 
 Use `mapMessages ChildMessage childView` to embed a reusable component's
 message type in a parent message type. It preserves the result and sends
 messages directly to the parent in order, without a nested collection queue.
 
-Every widget exported by `nano-ui` is wrapped and re-exported by `NanoUI.Emit`
-(via `NanoUI.Emit.Widgets`) to run directly in `NanoUIE msg`: containers
-(`column`, `row`, `grid`, `panel`, `scroll`, etc.), text (`label`, `heading`,
-`mono`, etc.), controls (`button`, `checkbox`, `slider`, `textInput`, `select`,
-etc.), overlays (`modal`, `popup`, `window`, `tooltip`), and scopes (`withKey`,
-`styled`, `disabledWhen`, etc.). Views write ordinary `do`-notation directly in
-`NanoUIE` without manual widget lifting.
+- `emitWhen` emits when a widget such as `button` activates.
+- `emitChanged` runs a `Var`-based widget on a temporary `Var` initialized to
+  the current model value and emits only when the value differs.
+- `emitEdited` additionally requires `respChanged`.
 
-- `emitWhenE` emits on activation of a wrapped widget (`button`, etc.), while
-  `emitWhen` works on an unwrapped `NanoUI Bool` action.
-- `emitChangedE` runs a wrapped `Var`-based widget on a temporary `Var` initialized
-  to the current model value and emits only when the value differs. `emitChanged`
-  is the equivalent for an unwrapped `Var a -> NanoUI r` widget.
-- `emitEditedE` and `emitEdited` additionally require `respChanged`.
-- `liftNanoUI` and `withNanoUI` remain available for custom `NanoUI` actions or
-  third-party container combinators.
-- `withRunInNanoUIE` supplies a runner for widgets taking callbacks or multiple
-  untyped bodies:
+Each adapter runs its widget once per view pass.
 
-  ```haskell
-  view volume = withRunInNanoUIE $ \run -> customContainer $ do
-    run (label "Settings")
-    run (emitWhenE (button "Save") Save)
-  ```
-
-`emitWhen` emits on activation, `emitChanged` only when the returned value
-differs, and `emitEdited` additionally requires `respChanged`. Each adapter
-runs its ordinary widget once per view pass.
+Give views a signature, `view :: Model -> NanoUIE Msg ()`: the runners take
+views of that shape, and a binding outside any view has no sink for its
+`emit` without one. A widget that emits itself, passed by name to
+`emitChanged`, needs a lambda (`emitChanged (\v -> myInput v) old SetValue`).
 
 ## Running
 

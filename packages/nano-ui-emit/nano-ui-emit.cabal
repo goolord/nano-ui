@@ -32,12 +32,7 @@ library
     -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
-        bytestring ^>=0.12,
-        colonnade ^>=1.2,
-        hashable ^>=1.5,
-        nano-ui >=0.2.0 && <0.2.1,
-        text ^>=2.1,
-        transformers ^>=0.6
+        nano-ui >=0.2.0 && <0.2.1
 
 test-suite nano-ui-emit-test
     type:             exitcode-stdio-1.0

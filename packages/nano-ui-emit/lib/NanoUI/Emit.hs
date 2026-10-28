@@ -1,43 +1,47 @@
+{-# LANGUAGE ImplicitParams #-}
+
 -- | Reducer-style views with one statically checked message type.
 --
--- All widgets exported by core "NanoUI" are wrapped and exported here,
--- operating directly in 'NanoUIE', so you do not have to manually lift or
--- wrap ordinary widgets.
---
--- Ordinary 'NanoUI' actions can still be lifted with 'liftNanoUI' or wrapped
--- with 'withNanoUI'.
+-- A 'NanoUIE' view is an ordinary 'NanoUI' action with the view's message
+-- sink in scope, so every widget exported by core "NanoUI" (re-exported
+-- here) runs in it unchanged, including containers, overlays and widgets
+-- taking callbacks or several bodies. 'emit' and the adapters below send
+-- messages of the view's type; emitting another type is a compile error.
 module NanoUI.Emit
   ( NanoUIE
-  , liftNanoUI
-  , withNanoUI
-  , withRunInNanoUIE
-  , mapMessages
-  , runNanoUIE
   , emit
   , emitWhen
-  , emitWhenE
   , emitChanged
-  , emitChangedE
   , emitEdited
-  , emitEditedE
+  , mapMessages
+  , runNanoUIE
   , runFrameE
   , runFrameReduce
   , runClickReduce
   , reduceMessages
   , reduceUpdates
-  , module NanoUI.Emit.Widgets
+
+    -- * Deprecated
+  , emitWhenE
+  , emitChangedE
+  , emitEditedE
+  , liftNanoUI
+  , withNanoUI
+  , withRunInNanoUIE
+
+    -- * Core widgets
+  , module NanoUI
   )
 where
 
 import Control.Monad (when)
-import Control.Monad.Trans.Reader (runReaderT)
-import NanoUI (HasResponse (..), Input, NanoUI, Response, V2, Var, respChanged, withValue)
+import NanoUI
 import NanoUI.Internal.Context (isDirty, markDirty)
 import NanoUI.Testing (Context, DrawData, runFrame)
 import NanoUI.Testing.Harness (clickPair)
 
 import NanoUI.Emit.Internal
-  ( NanoUIE (..)
+  ( NanoUIE
   , collectMessages
   , emit
   , liftNanoUI
@@ -45,37 +49,25 @@ import NanoUI.Emit.Internal
   , runNanoUIE
   , withNanoUI
   , withRunInNanoUIE
+  , withSink
   )
-import NanoUI.Emit.Widgets
 
--- | Emit when an ordinary 'NanoUI' widget activates.
+-- | Emit when a widget activates.
+--
+-- > emitWhen (button "Save") Save
 {-# INLINE emitWhen #-}
 emitWhen :: NanoUI Bool -> msg -> NanoUIE msg ()
-emitWhen widget = emitWhenE (liftNanoUI widget)
-
--- | Emit when a wrapped 'NanoUIE' widget activates.
---
--- > emitWhenE (button "Save") Save
-{-# INLINE emitWhenE #-}
-emitWhenE :: NanoUIE msg Bool -> msg -> NanoUIE msg ()
-emitWhenE widget msg = widget >>= \active -> when active (emit msg)
+emitWhen widget msg = widget >>= \active -> when active (emit msg)
 
 -- | Run a 'Var'-based input widget on a temporary 'Var' initialized to @old@,
--- and emit only when the value changes.
+-- and emit only when the value changes. A widget that emits itself, given by
+-- name, needs a lambda: @emitChanged (\\v -> myInput v) old SetValue@.
 --
 -- > emitChanged (slider 0 100) volume SetVolume
 {-# INLINE emitChanged #-}
 emitChanged :: Eq a => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitChanged widget = emitChangedE (liftNanoUI . widget)
-
--- | Run a wrapped 'Var'-based input widget on a temporary 'Var' initialized to
--- @old@, and emit only when the value changes.
---
--- > emitChangedE (slider 0 100) volume SetVolume
-{-# INLINE emitChangedE #-}
-emitChangedE :: Eq a => (Var a -> NanoUIE msg r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitChangedE widget old toMsg = do
-  (_, new) <- withRunInNanoUIE (\run -> withValue old (run . widget))
+emitChanged widget old toMsg = do
+  (_, new) <- withValue old widget
   when (new /= old) (emit (toMsg new))
 
 -- | Emit a changed value only when the input's response also reports an
@@ -83,23 +75,35 @@ emitChangedE widget old toMsg = do
 {-# INLINE emitEdited #-}
 emitEdited ::
   (Eq a, HasResponse r) => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitEdited widget = emitEditedE (liftNanoUI . widget)
+emitEdited widget old toMsg = do
+  (r, new) <- withValue old widget
+  when (respChanged (toResponse r) && new /= old) (emit (toMsg new))
 
--- | Emit a changed value only when the wrapped input's response also reports
--- an edit.
+-- | 'emitWhen', from when widgets needed wrapping.
+{-# DEPRECATED emitWhenE "Use emitWhen" #-}
+{-# INLINE emitWhenE #-}
+emitWhenE :: NanoUI Bool -> msg -> NanoUIE msg ()
+emitWhenE = emitWhen
+
+-- | 'emitChanged', from when widgets needed wrapping.
+{-# DEPRECATED emitChangedE "Use emitChanged" #-}
+{-# INLINE emitChangedE #-}
+emitChangedE :: Eq a => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
+emitChangedE = emitChanged
+
+-- | 'emitEdited', from when widgets needed wrapping.
+{-# DEPRECATED emitEditedE "Use emitEdited" #-}
 {-# INLINE emitEditedE #-}
 emitEditedE ::
-  (Eq a, HasResponse r) => (Var a -> NanoUIE msg r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitEditedE widget old toMsg = do
-  (r, new) <- withRunInNanoUIE (\run -> withValue old (run . widget))
-  when (respChanged (toResponse r) && new /= old) (emit (toMsg new))
+  (Eq a, HasResponse r) => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
+emitEditedE = emitEdited
 
 -- | Run a complete frame and collect messages from all its passes in order.
 -- The queue belongs to this invocation: an exception cannot leak messages
 -- into a later frame, nor can another runner consume them.
 runFrameE :: Context -> Input -> NanoUIE msg a -> IO (a, [msg], DrawData, Bool)
-runFrameE ctx inp (NanoUIE view) = do
-  ((a, draw, dirty), msgs) <- collectMessages (runFrame ctx inp . runReaderT view)
+runFrameE ctx inp view = do
+  ((a, draw, dirty), msgs) <- collectMessages (\sink -> runFrame ctx inp (withSink sink view))
   pure (a, msgs, draw, dirty)
 
 -- | View the model, then reduce all messages at frame end. The drawing is

@@ -27,10 +27,10 @@ view :: Model -> NanoUIE Msg ()
 view m = column $ do
   heading "Profile"
   row $ do
-    emitWhenE (button "-") Decrement
+    emitWhen (button "-") Decrement
     label (T.pack (show m.counter))
-    emitWhenE (button "+") Increment
-  emitChangedE textInput m.name SetName
+    emitWhen (button "+") Increment
+  emitChanged textInput m.name SetName
 
 update :: Msg -> Model -> Model
 update Increment m = m {counter = m.counter + 1}
@@ -49,13 +49,13 @@ data ParentMsg = Child ChildMsg | SaveAll
 
 childView :: Int -> NanoUIE ChildMsg ()
 childView n = row $ do
-  emitWhenE (button "+") ChildIncrement
+  emitWhen (button "+") ChildIncrement
   label (T.pack (show n))
-  emitWhenE (button "Reset") ChildReset
+  emitWhen (button "Reset") ChildReset
 
 parentView :: Int -> NanoUIE ParentMsg ()
 parentView n = column $ do
   mapMessages Child (childView n)
-  emitWhenE (button "Save All") SaveAll
+  emitWhen (button "Save All") SaveAll
 
 -- ANCHOR_END: components

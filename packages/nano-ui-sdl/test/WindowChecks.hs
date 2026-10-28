@@ -23,7 +23,7 @@ import Foreign.Storable (Storable, peek, poke)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (emptyInput, runNanoUI)
-import NanoUI.Emit (emit, liftNanoUI)
+import NanoUI.Emit (emit)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
@@ -103,10 +103,10 @@ reducerEnvironmentCheck = do
   observed <- newIORef []
   completed <- timeout 10000000 $
     runSdlAppReduce options (+) (0 :: Int) $ \model -> do
-      live <- liftNanoUI askSdlEnv
+      live <- askSdlEnv
       title <- liftIO (traverse (\env -> getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr) live)
       liftIO (modifyIORef' observed ((model, title) :))
-      if model == 0 then emit 1 else liftNanoUI quitUi
+      if model == 0 then emit 1 else quitUi
   check "reducer terminates" (completed == Just ())
   seen <- readIORef observed
   check "reducer sees both models and its session's native title"
