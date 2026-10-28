@@ -6,16 +6,15 @@ Add `nano-ui-emit` to your Cabal dependencies and import `NanoUI.Emit`.
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
 
-import NanoUI
-import NanoUI.Emit qualified as Emit
+import NanoUI.Emit
 
 data Msg = Save | SetVolume Float
 
-view :: Float -> Emit.NanoUIE Msg ()
-view volume = Emit.withNanoUI column $ do
-  Emit.liftNanoUI (label "Settings")
-  Emit.emitChanged (slider 0 100) volume SetVolume
-  Emit.emitWhen (button "Save") Save
+view :: Float -> NanoUIE Msg ()
+view volume = column $ do
+  label "Settings"
+  emitChangedE (slider 0 100) volume SetVolume
+  emitWhenE (button "Save") Save
 ```
 
 `NanoUIE msg a` fixes the message type for a view. `emit :: msg -> NanoUIE msg ()`
@@ -26,17 +25,29 @@ Use `mapMessages ChildMessage childView` to embed a reusable component's
 message type in a parent message type. It preserves the result and sends
 messages directly to the parent in order, without a nested collection queue.
 
-- `liftNanoUI` runs an ordinary widget or UI operation.
-- `withNanoUI` wraps a typed body in an ordinary layout or scope, such as
-  `column`, `rowWith layout`, `withKey key`, or `disabledWhen True`.
-- `withRunInNanoUIE` supplies a function for running typed actions inside
-  ordinary widgets with callbacks or multiple bodies:
+Every widget exported by `nano-ui` is wrapped and re-exported by `NanoUI.Emit`
+(via `NanoUI.Emit.Widgets`) to run directly in `NanoUIE msg`: containers
+(`column`, `row`, `grid`, `panel`, `scroll`, etc.), text (`label`, `heading`,
+`mono`, etc.), controls (`button`, `checkbox`, `slider`, `textInput`, `select`,
+etc.), overlays (`modal`, `popup`, `window`, `tooltip`), and scopes (`withKey`,
+`styled`, `disabledWhen`, etc.). Views write ordinary `do`-notation directly in
+`NanoUIE` without manual widget lifting.
+
+- `emitWhenE` emits on activation of a wrapped widget (`button`, etc.), while
+  `emitWhen` works on an unwrapped `NanoUI Bool` action.
+- `emitChangedE` runs a wrapped `Var`-based widget on a temporary `Var` initialized
+  to the current model value and emits only when the value differs. `emitChanged`
+  is the equivalent for an unwrapped `Var a -> NanoUI r` widget.
+- `emitEditedE` and `emitEdited` additionally require `respChanged`.
+- `liftNanoUI` and `withNanoUI` remain available for custom `NanoUI` actions or
+  third-party container combinators.
+- `withRunInNanoUIE` supplies a runner for widgets taking callbacks or multiple
+  untyped bodies:
 
   ```haskell
-  view volume = Emit.withRunInNanoUIE $ \run -> column $ do
-    label "Settings"
-    run (Emit.emitChanged (slider 0 100) volume SetVolume)
-    run (Emit.emitWhen (button "Save") Save)
+  view volume = withRunInNanoUIE $ \run -> customContainer $ do
+    run (label "Settings")
+    run (emitWhenE (button "Save") Save)
   ```
 
 `emitWhen` emits on activation, `emitChanged` only when the returned value

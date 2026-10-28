@@ -6,14 +6,14 @@
 data Model = Model {counter :: Int, name :: Text}
 data Msg = Increment | Decrement | SetName Text
 
-view :: Model -> Emit.NanoUIE Msg ()
-view m = Emit.withNanoUI column $ do
-  Emit.liftNanoUI (heading "Profile")
-  Emit.withNanoUI row $ do
-    Emit.emitWhen (button "-") Decrement
-    Emit.liftNanoUI (label (T.pack (show m.counter)))
-    Emit.emitWhen (button "+") Increment
-  Emit.emitChanged textInput m.name SetName
+view :: Model -> NanoUIE Msg ()
+view m = column $ do
+  heading "Profile"
+  row $ do
+    emitWhenE (button "-") Decrement
+    label (T.pack (show m.counter))
+    emitWhenE (button "+") Increment
+  emitChangedE textInput m.name SetName
 
 update :: Msg -> Model -> Model
 update Increment m = m {counter = m.counter + 1}
@@ -28,35 +28,40 @@ Widgets, layout, focus, and keys are unchanged. Only the state model differs.
 
 ## Emitting
 
-`NanoUIE msg a` is a `NanoUI` action that can emit only `msg`. There is no `Typeable` constraint and no runtime type test: emitting the wrong type is a compile error.
+`NanoUIE msg a` is a UI action that can emit only `msg`. There is no `Typeable` constraint and no runtime type test: emitting the wrong type is a compile error.
+
+Every widget exported by `nano-ui` is directly available in `NanoUI.Emit` as a `NanoUIE msg` action: containers (`column`, `row`, `panel`, `scroll`, etc.), controls (`button`, `slider`, `textInput`, `checkbox`, etc.), text (`label`, `heading`, etc.), overlays, and scopes (`withKey`, `styled`, `disabledWhen`, etc.). Views use standard `do` notation without manual lifting.
 
 | Function | Emits when |
 | --- | --- |
 | `emit msg` | Immediately |
-| `emitWhen widget msg` | The widget returns `True` (button click, submitted field) |
-| `emitChanged widget old toMsg` | The widget's final value differs from `old` |
-| `emitEdited widget old toMsg` | The value changed **and** `respChanged` is true |
+| `emitWhenE widget msg` | The wrapped widget returns `True` (button click, submitted field) |
+| `emitWhen widget msg` | An unwrapped `NanoUI Bool` widget returns `True` |
+| `emitChangedE widget old toMsg` | The wrapped widget's final value differs from `old` |
+| `emitChanged widget old toMsg` | An unwrapped `Var a -> NanoUI r` widget's final value differs from `old` |
+| `emitEditedE widget old toMsg` | The wrapped widget's value changed **and** `respChanged` is true |
+| `emitEdited widget old toMsg` | An unwrapped widget's value changed **and** `respChanged` is true |
 
-`liftNanoUI` runs an ordinary widget or action. `withNanoUI` wraps a typed body in an ordinary layout, key, or scope:
-
-```haskell
-Emit.withNanoUI column $ do
-  Emit.liftNanoUI (label "Settings")
-  Emit.withNanoUI (withKey "form") $ do
-    Emit.emitChanged (slider 0 100) volume SetVolume
-    Emit.emitWhen (button "Save") Save
-```
-
-`withRunInNanoUIE` supplies a runner for ordinary widgets that take callbacks or multiple bodies:
+`liftNanoUI` and `withNanoUI` are available for wrapping custom widgets or external `NanoUI` actions:
 
 ```haskell
-view model = Emit.withRunInNanoUIE $ \run -> column $ do
+column $ do
   label "Settings"
-  run (Emit.emitChanged (slider 0 100) model.volume SetVolume)
-  run (Emit.emitWhen (button "Save") SaveDocument)
+  withKey "form" $ do
+    emitChangedE (slider 0 100) volume SetVolume
+    emitWhenE (button "Save") Save
 ```
 
-`emitChanged` runs the widget against a temporary `Var` seeded with the model value and emits the new value only if it differs. `emitEdited` is its stricter form for text fields, where programmatic writes should not look like edits.
+`withRunInNanoUIE` supplies a runner when embedding typed actions inside external widgets taking callbacks or untyped bodies:
+
+```haskell
+view model = withRunInNanoUIE $ \run -> customContainer $ do
+  label "Settings"
+  run (emitChangedE (slider 0 100) model.volume SetVolume)
+  run (emitWhenE (button "Save") SaveDocument)
+```
+
+`emitChangedE` runs the widget against a temporary `Var` seeded with the model value and emits the new value only if it differs. `emitEditedE` is its stricter form for text fields, where programmatic writes should not look like edits.
 
 > [!CAUTION]
 > Emit only inside an event branch. `emit Save` at the top level of a view emits on every pass, and the reducer runs every message. The adapters above already guard on the widget's event.
@@ -71,16 +76,16 @@ Messages are collected across every pass of a frame, including local-`Var` rebui
 data ChildMsg = ChildIncrement | ChildReset
 data ParentMsg = Child ChildMsg | SaveAll
 
-childView :: Int -> Emit.NanoUIE ChildMsg ()
-childView n = Emit.withNanoUI row $ do
-  Emit.emitWhen (button "+") ChildIncrement
-  Emit.liftNanoUI (label (T.pack (show n)))
-  Emit.emitWhen (button "Reset") ChildReset
+childView :: Int -> NanoUIE ChildMsg ()
+childView n = row $ do
+  emitWhenE (button "+") ChildIncrement
+  label (T.pack (show n))
+  emitWhenE (button "Reset") ChildReset
 
-parentView :: Int -> Emit.NanoUIE ParentMsg ()
-parentView n = Emit.withNanoUI column $ do
-  Emit.mapMessages Child (childView n)
-  Emit.emitWhen (button "Save All") SaveAll
+parentView :: Int -> NanoUIE ParentMsg ()
+parentView n = column $ do
+  mapMessages Child (childView n)
+  emitWhenE (button "Save All") SaveAll
 ```
 
 Messages go straight to the parent's sink in traversal order, with no intermediate queue. `mapMessages` changes the message type, not widget identity: a list still needs `withKey` around each component, exactly as a `Var`-based row does.
