@@ -676,6 +676,52 @@ nano-ui-trap {
   line-height: 1.4;
 }
 
+/* Collapsible layout examples: code and rendered frame behind a summary. */
+details.nano-example {
+  margin: 0.65rem 0;
+  background: var(--nano-card-bg);
+  border: 1px solid var(--nano-well-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+details.nano-example > summary {
+  cursor: pointer;
+  padding: 9px 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--fg);
+  transition: background 0.12s ease;
+}
+
+details.nano-example > summary:hover {
+  background: var(--theme-hover);
+}
+
+details.nano-example[open] > summary {
+  background: rgba(0, 0, 0, 0.12);
+  border-bottom: 1px solid var(--nano-well-border);
+}
+
+details.nano-example > p {
+  margin: 12px 14px 0;
+}
+
+details.nano-example > pre {
+  margin: 12px;
+}
+
+img.nano-example-shot {
+  display: block;
+  width: auto;
+  max-width: calc(100% - 28px);
+  height: auto;
+  margin: 12px 14px;
+  border: 1px solid var(--nano-well-border);
+  border-radius: 6px;
+  background: var(--nano-well-bg);
+}
+
 .svg-well {
   background: var(--nano-well-bg);
   border: 1px solid var(--nano-well-border);
