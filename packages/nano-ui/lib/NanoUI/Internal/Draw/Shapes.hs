@@ -28,7 +28,7 @@ import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
 import NanoUI.Internal.Draw.Arena
-import NanoUI.Internal.Draw.Types (DrawArena (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, vertexSize)
+import NanoUI.Internal.Draw.Types (DrawArena (..), DrawOp (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, shiftDrawOp, vertexSize)
 import NanoUI.Internal.Path (idealArcSteps, miterOffset, shoelace)
 import NanoUI.Internal.SIMD
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, forUpTo_, onGrid)
@@ -37,6 +37,7 @@ import NanoUI.Internal.Types (Color (..), Rect (..), clamp, forUpTo_, onGrid)
 pushRect :: DrawArena -> Rect -> Color -> IO ()
 pushRect da rect col = do
   r <- snapRectOrigin da rect
+  recordOp da (FillRect r col)
   setTexture da glyphAtlasTextureId
   pushQuad da r whitePixel whitePixel whitePixel whitePixel col
 
@@ -47,6 +48,7 @@ pushQuadGradient da rect@(Rect _ _ w h) tl tr br bl
   | w <= 0 || h <= 0 = pure ()
   | otherwise = do
       Rect px py _ _ <- snapRectOrigin da rect
+      recordOp da (FillQuadGradient (Rect px py w h) tl tr br bl)
       setTexture da glyphAtlasTextureId
       let !c0 = unpackColorF tl
           !c1 = unpackColorF tr
@@ -82,6 +84,14 @@ pushImageRotated da (Rect x y w h) angle tex0 u0 v0 u1 v1 col = do
       -- Rotated corner at offset (dx, dy) from the centre.
       cornerX dx dy = cx + dx * c - dy * s
       cornerY dx dy = cy + dx * s + dy * c
+  -- A solid quad is a shape; an image is not.
+  when (tex0 <= 0) $
+    recordOp da $
+      FillPolygon
+        (primArrayFromListN 8 [cornerX (-hw) (-hh), cornerY (-hw) (-hh), cornerX hw (-hh), cornerY hw (-hh), cornerX hw hh, cornerY hw hh, cornerX (-hw) hh, cornerY (-hw) hh])
+        (primArrayFromListN 2 [0, 4])
+        (primArrayFromListN 6 [0, 1, 2, 0, 2, 3])
+        (Flat col)
   setTexture da tex
   withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
     pokeQuadCornersSIMD
@@ -234,6 +244,7 @@ pushRoundedRectRaw da (Rect x y w h) radius col
       if square || rad <= 0.5
         then pushRect da (Rect x y w h) col
         else do
+          recordOp da (FillRoundedRect (Rect x y w h) rad col)
           setTexture da glyphAtlasTextureId
           let !segs = cornerSegments
               !ring = segs + 1
@@ -361,6 +372,7 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
       if square
         then pushSquareStroke da px py w h ibw col
         else do
+          recordOp da (StrokeRoundedRect (Rect px py w h) rad ibw col)
           let !n = cornerSegments
               -- With square corners the top and bottom run the full width
               -- and the sides fit between them, so each corner is drawn once
@@ -449,7 +461,8 @@ pokeArcTop !vp !ip !base !baseIdx !hasCore !innerAA !inner !outerR !outerAA !r !
 pushSquareStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushSquareStroke da x y w h t col = do
   let edge qx qy qw qh =
-        when (qw > 0 && qh > 0) $
+        when (qw > 0 && qh > 0) $ do
+          recordOp da (FillRect (Rect qx qy qw qh) col)
           pushQuad da (Rect qx qy qw qh) whitePixel whitePixel whitePixel whitePixel col
       !innerH = h - 2 * t
   edge x y w t
@@ -495,6 +508,7 @@ pushStrokeAARaw da x0 y0 x1 y1 bw col = do
     else case strokeAxes x0 y0 x1 y1 of
       Nothing -> pure ()
       Just _ -> do
+        recordOp da (StrokeLineAA x0 y0 x1 y1 bw col)
         setTexture da glyphAtlasTextureId
         let !(r, g, b, a) = unpackColorF col
         withVertsRaw da 8 18 $ \vp ip base baseIdx ->
@@ -520,6 +534,7 @@ pushStroke da x1 y1 x2 y2 thickness col
       case strokeAxes px1 py1 px2 py2 of
         Nothing -> pure ()
         Just (dx, dy, len) -> do
+          recordOp da (Stroke px1 py1 px2 py2 thickness col)
           setTexture da glyphAtlasTextureId
           let !invLen = (thickness * 0.5) / len
               !hx = (-dy) * invLen
@@ -639,7 +654,8 @@ polygonAAFrom da rx ry pts rings tris shade
       setTexture da glyphAtlasTextureId
       let !ox = onGrid s rx - rx
           !oy = onGrid s ry - ry
-          !f = if square then 0 else edgeFeather s
+      recordOp da (shiftDrawOp ox oy (FillPolygon pts rings tris shade))
+      let !f = if square then 0 else edgeFeather s
           -- 'segNormal' points into a positive-area ring. Holes wind the
           -- other way, so their normals point out of the fill.
           !out = if area > 0 then -1 else 1
@@ -723,7 +739,8 @@ pushPolylineAA da pts w closed cap join limit shade
       let !hw = w * 0.5
           !ox = onGrid s (px 0 - hw) + hw - px 0
           !oy = onGrid s (py 0 - hw) + hw - py 0
-          !f = if square then 0 else edgeFeather s
+      recordOp da (shiftDrawOp ox oy (StrokePolyline pts w closed cap join limit shade))
+      let !f = if square then 0 else edgeFeather s
           !core = max 0 (hw - f)
           !outer = hw + f
           !thin = if core > 0 then 1 else min 1 (w / outer)

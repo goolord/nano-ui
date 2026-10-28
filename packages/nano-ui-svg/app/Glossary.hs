@@ -35,8 +35,8 @@ import Lucid.Base (makeAttributes)
 import NanoUI
 import NanoUI.Backend (DrawData (..), FontMetrics (..), collectRasterSpans, damageFullNow, monospaceMetrics, vertexSize)
 import NanoUI.Backend.Sdl (NanoUIFont (..), SdlOptions (..), defaultSdlOptions, withSdl)
-import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
-import NanoUI.Internal.Context (Context (..), setDrawExternalText, setDrawSquareGeometry)
+import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, frameToSvg)
+import NanoUI.Internal.Context (Context (..), setDrawExternalText, setDrawRecordOps, setDrawSquareGeometry)
 import NanoUI.Testing (newPixelContext, runFrame, withFontMetrics, withMonoFontMetrics)
 import NanoUI.Testing.Harness (clickPair, pressAt, withInputOff)
 import Paths_nano_ui_svg (getDataFileName)
@@ -95,6 +95,7 @@ newSvgContext squareGeo = do
             }
         Nothing ->
           withMonoFontMetrics (withFontMetrics ctx0 svgProportionalMetrics) svgMonoMetrics
+  setDrawRecordOps ctx True
   setDrawSquareGeometry ctx squareGeo
   setDrawExternalText ctx True
   pure ctx
@@ -192,9 +193,6 @@ loadAssets = do
       ok <- doesFileExist p
       if ok then pure (Just p) else findFirst ps
 
--- | Painted extent of one frame in logical pixels, as @(x0, y0, x1, y1)@.
-type Bounds = (Float, Float, Float, Float)
-
 -- | Extra canvas height given to specimens. Widgets can lay out past the
 -- nominal height (a tab strip's last row, an overlay's shadow), and the crop
 -- recovers it; width is left exact so fill-width demos keep their measure.
@@ -204,17 +202,14 @@ canvasSlack = 72
 -- | Union of a frame's solid geometry (vertex positions) and text line boxes.
 -- The full-window backdrop that 'frameToSvg' paints is in neither, so this is
 -- the ink a reader sees.
-frameInkBounds :: Context -> Input -> DrawData -> IO (Maybe Bounds)
+frameInkBounds :: Context -> Input -> DrawData -> IO (Maybe Rect)
 frameInkBounds ctx inp dd = do
   verts <- vertexPoints dd
   (pageSpans, overlaySpans) <- collectRasterSpans ctx inp
-  let pts = verts <> concatMap spanPts (pageSpans <> overlaySpans)
-  pure $ case pts of
-    ((x, y) : rest) -> Just (foldl' growPoint (x, y, x, y) rest)
+  let boxes = [Rect x y 0 0 | (x, y) <- verts] <> [r | (r, _, _, _, _) <- pageSpans <> overlaySpans]
+  pure $ case boxes of
+    (b : rest) -> Just (foldl' rectUnion b rest)
     [] -> Nothing
-  where
-    spanPts (Rect x y w h, _, _, _, _) = [(x, y), (x + w, y + h)]
-    growPoint (x0, y0, x1, y1) (x, y) = (min x0 x, min y0 y, max x1 x, max y1 y)
 
 -- | Every vertex position in the frame's solid-geometry buffer.
 vertexPoints :: DrawData -> IO [(Float, Float)]
@@ -225,29 +220,25 @@ vertexPoints dd =
       y <- peekByteOff vp (i * vertexSize + 4) :: IO Float
       pure (x, y)
 
-growBounds :: Bounds -> Bounds -> Bounds
-growBounds (ax0, ay0, ax1, ay1) (bx0, by0, bx1, by1) =
-  (min ax0 bx0, min ay0 by0, max ax1 bx1, max ay1 by1)
-
 -- | Crop a rendered SVG to its painted bounds (plus padding), rewriting the
 -- root @<svg>@ tag's @width@, @height@, and @viewBox@. Height tightens to the
 -- content but never past the canvas (whose backdrop is the frame's only
 -- background); width stays at @canvasW@ unless content overhangs it. Scale
 -- stays 1:1.
-cropSvg :: Float -> Float -> Maybe Bounds -> Text -> Text
+cropSvg :: Float -> Float -> Maybe Rect -> Text -> Text
 cropSvg _ _ Nothing svg = svg
-cropSvg canvasW canvasH (Just (_, by0, bx1, by1)) svg
+cropSvg canvasW canvasH (Just (Rect bx by bw bh)) svg
   | not ("<svg" `T.isPrefixOf` open) || T.null rest = svg
   | otherwise = header <> rest
   where
     (open, rest) = T.breakOn ">" svg
     pad = 8
-    minY = max 0 (floor (by0 - pad) :: Int)
-    maxY = min (ceiling canvasH) (ceiling (by1 + pad))
+    minY = max 0 (floor (by - pad) :: Int)
+    maxY = min (ceiling canvasH) (ceiling (by + bh + pad))
     h = max 1 (maxY - minY)
     w =
-      if bx1 > canvasW + 0.5
-        then ceiling (bx1 + pad)
+      if bx + bw > canvasW + 0.5
+        then ceiling (bx + bw + pad)
         else round canvasW
     header =
       "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\""
@@ -263,22 +254,9 @@ cropSvg canvasW canvasH (Just (_, by0, bx1, by1)) svg
         <> "\""
     tshow = T.pack . show
 
--- | Prefix SVG internal @id="tclip_N"@, @id="clip_N"@, and @id="grad_N"@
--- attributes so multiple inline @<svg>@ documents embedded on the same HTML
--- page never collide in the browser DOM.
-namespaceSvg :: Text -> Text -> Text
-namespaceSvg prefix =
-  T.replace "id=\"tclip_" ("id=\"" <> prefix <> "-tclip_")
-    . T.replace "url(#tclip_" ("url(#" <> prefix <> "-tclip_")
-    . T.replace "id=\"sclip_" ("id=\"" <> prefix <> "-sclip_")
-    . T.replace "url(#sclip_" ("url(#" <> prefix <> "-sclip_")
-    . T.replace "id=\"clip_" ("id=\"" <> prefix <> "-clip_")
-    . T.replace "url(#clip_" ("url(#" <> prefix <> "-clip_")
-    . T.replace "id=\"grad_" ("id=\"" <> prefix <> "-grad_")
-    . T.replace "url(#grad_" ("url(#" <> prefix <> "-grad_")
-
 -- | Warm a view over zero or more frames, then run one final frame with
--- 'damageFullNow' and export it as a namespaced inline @<svg>@ element.
+-- 'damageFullNow' and export it as an inline @<svg>@ element whose ids
+-- carry @tag@, so the documents on one page never collide.
 --
 -- 'squareGeo' selects between flat square geometry (@True@) and rounded vector
 -- geometry (@False@) for 'frameToSvg'. Every frame in 'warmInputs' is run once
@@ -288,14 +266,14 @@ captureSvg :: Text -> Bool -> [Input] -> Input -> NanoUI () -> IO Text
 captureSvg tag squareGeo warmInputs captureInput ui = do
   ctx <- newSvgContext squareGeo
   mapM_ (\inp -> runFrame ctx inp ui) warmInputs
-  namespaceSvg tag . fst <$> exportFrame ctx captureInput ui
+  fst <$> exportFrame tag ctx captureInput ui
 
--- | Run one frame of @ui@ with 'damageFullNow' and export it, returning the
--- SVG and the frame's draw data.
-exportFrame :: Context -> Input -> NanoUI () -> IO (Text, DrawData)
-exportFrame ctx inp ui = do
+-- | Run one frame of @ui@ with 'damageFullNow' and export it with its ids
+-- prefixed by @tag@, returning the SVG and the frame's draw data.
+exportFrame :: Text -> Context -> Input -> NanoUI () -> IO (Text, DrawData)
+exportFrame tag ctx inp ui = do
   (_, dd, _) <- runFrame ctx inp (ui >> damageFullNow)
-  svg <- frameToSvg defaultFrameSvgConfig ctx inp dd
+  svg <- frameToSvg defaultFrameSvgConfig {fsIdPrefix = tag <> "-"} ctx inp dd
   pure (svg, dd)
 
 -- | Render a two-frame warmed-up view with rounded geometry and external text
@@ -466,12 +444,12 @@ renderStyleBank bankId w h isOverlay view = do
       nsTag = "wb-" <> bankId
   _ <- runFrame ctx inp view
   caps <- forM [0 .. 127] $ \mask -> do
-    (svg, dd) <- exportFrame ctx inp (applyStyleMask isOverlay mask view)
+    (svg, dd) <- exportFrame nsTag ctx inp (applyStyleMask isOverlay mask view)
     bounds <- frameInkBounds ctx inp dd
-    pure (namespaceSvg nsTag svg, bounds)
+    pure (svg, bounds)
   let boxes = [b | (_, Just b) <- caps]
       cropBox = case boxes of
-        (b0 : bs) -> Just (foldl' growBounds b0 bs)
+        (b0 : bs) -> Just (foldl' rectUnion b0 bs)
         [] -> Nothing
       svgs = [cropSvg w h cropBox svg | (svg, _) <- caps]
       baseSvg = case svgs of
@@ -1005,7 +983,7 @@ generateTypoDemos = do
                     labelWith m "Hamburgefonstiv 0123"
   _ <- runFrame ctx inp (viewFor 0)
   typoSvgs <- forM [0 .. 63] $ \mask -> do
-    namespaceSvg "wb-typo" . fst <$> exportFrame ctx inp (viewFor mask)
+    fst <$> exportFrame "wb-typo" ctx inp (viewFor mask)
   let typoBaseSvg = case typoSvgs of
         (s0 : _) -> s0
         [] -> ""
@@ -1448,10 +1426,10 @@ generateInteractions = do
         "framesvg"
         "frameToSvg quirks"
         "NanoUI.Draw.FrameSvg (frameToSvg), NanoUI.Backend.Sdl (withSdl), NanoUI.Testing (newPixelContext)"
-        "Three things matter for `frameToSvg`. `setDrawSquareGeometry ctx True` makes rounded rects and strokes emit 0-radius quads, flattening `cornerRadius` on `button`, `panel` and `textInput`; `NodeDrawing` widgets still render smooth rects and circles from cached ops. `newPixelContext` defaults to 16px monospace metrics, so load `inter.ttf` through `withSdl` and embed it with `@font-face` for matching `textLength`. Every document reuses clip and gradient IDs (`tclip_1`, `sclip_1`, `clip_1`, `grad_1`), so namespace them when inlining several SVGs."
-        "Use `setDrawSquareGeometry ctx False`, render inside `withSdl` with `DefaultFont` and `@font-face`, and prefix clip and gradient IDs per document."
+        "A few things matter for `frameToSvg`. Widget shapes export only from a context with `setDrawRecordOps ctx True`. `setDrawSquareGeometry ctx True` makes rounded rects and strokes draw as 0-radius quads, flattening `cornerRadius` on `button`, `panel` and `textInput`; `NodeDrawing` widgets still render smooth rects and circles from cached ops. `newPixelContext` defaults to 16px monospace metrics, so load `inter.ttf` through `withSdl` and embed it with `@font-face` for matching `textLength`. Every document numbers its clip and gradient IDs from 1 (`tclip_1`, `sclip_1`, `grad_1`), so give each its own `fsIdPrefix` when inlining several SVGs."
+        "Use `setDrawRecordOps ctx True` and `setDrawSquareGeometry ctx False`, render inside `withSdl` with `DefaultFont` and `@font-face`, and set `fsIdPrefix` per document."
         "setDrawSquareGeometry ctx True -- flattens button and panel radius to 0\n-- newPixelContext's 16px monospace metrics distort textLength"
-        "-- Render inside withSdl with DefaultFont and @font-face\nctx <- newContext\nsetDrawExternalText ctx True"
+        "-- Render inside withSdl with DefaultFont and @font-face\nctx <- newContext\nsetDrawRecordOps ctx True\nsetDrawExternalText ctx True"
         "square geometry on: rounded corners flattened"
         i12Bad
         "square geometry off: rounded corners preserved"
@@ -2290,9 +2268,9 @@ layoutSvg tag w h hoverPos ui = do
         Nothing -> [base]
         Just _ -> [base, capture]
   mapM_ (\inp -> runFrame ctx inp ui) warm
-  (svg, dd) <- exportFrame ctx capture ui
+  (svg, dd) <- exportFrame tag ctx capture ui
   bounds <- frameInkBounds ctx capture dd
-  pure (namespaceSvg tag (cropSvg w h bounds svg))
+  pure (cropSvg w h bounds svg)
 
 layoutRowDemo :: NanoUI ()
 layoutRowDemo =

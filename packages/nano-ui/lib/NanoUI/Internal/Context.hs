@@ -86,6 +86,9 @@ module NanoUI.Internal.Context
   , setDrawSnapScale
   , setDrawSquareGeometry
   , setDrawExternalText
+  , setDrawRecordOps
+  , drawRecordedOps
+  , RecordedOp (..)
   , askHostIO
   , hostOrInit
   -- Constructors
@@ -156,7 +159,7 @@ import NanoUI.Internal.Context.Drawing
 import NanoUI.Internal.Context.Overlay
 import NanoUI.Internal.Context.Scroll
 import NanoUI.Internal.Context.Types
-import NanoUI.Internal.Draw (newDrawArena)
+import NanoUI.Internal.Draw (RecordedOp (..), newDrawArena)
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics, wrapTextIO)
 import NanoUI.Internal.Frame.SpanArena (newSpanArena)
@@ -544,6 +547,17 @@ setDrawSquareGeometry ctx = Draw.setDrawSquareGeometry (ctxDrawArena ctx)
 {-# INLINE setDrawExternalText #-}
 setDrawExternalText :: Context -> Bool -> IO ()
 setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
+
+-- | Record the solid shapes each paint draws, as ops, for exporters that
+-- redraw a frame as vectors ('drawRecordedOps').
+{-# INLINE setDrawRecordOps #-}
+setDrawRecordOps :: Context -> Bool -> IO ()
+setDrawRecordOps ctx = Draw.setDrawRecordOps (ctxDrawArena ctx)
+
+-- | The solid shapes the last paint drew while 'setDrawRecordOps' was on, in
+-- paint order, each with its layer and clip.
+drawRecordedOps :: Context -> IO [RecordedOp]
+drawRecordedOps ctx = Draw.recordedOps (ctxDrawArena ctx)
 
 -- =============================================================================
 -- Constructors

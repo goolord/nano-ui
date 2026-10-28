@@ -15,7 +15,7 @@ import NanoUI.Draw.Svg
   , drawOpsToSvg
   , renderDrawOpsSvg
   )
-import NanoUI.Internal.Context (setDrawExternalText, setDrawSquareGeometry)
+import NanoUI.Internal.Context (setDrawExternalText, setDrawRecordOps, setDrawSquareGeometry)
 import NanoUI.Internal.Path (Shade (Shaded))
 import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
@@ -416,6 +416,7 @@ testRoundTripRaster = do
 testFrameToSvg :: IO ()
 testFrameToSvg = do
   ctx <- newPixelContext
+  setDrawRecordOps ctx True
   setDrawSquareGeometry ctx True
   setDrawExternalText ctx True
   let

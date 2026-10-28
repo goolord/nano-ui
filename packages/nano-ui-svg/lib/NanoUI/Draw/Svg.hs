@@ -80,15 +80,20 @@ data SvgConfig = SvgConfig
   , svgImageUri :: !(Int -> Maybe Text)
   -- ^ Resolve an image or texture id to an @href@ or data URI for 'DrawImage'.
   -- When it returns 'Nothing', the image op is omitted.
+  , svgIdPrefix :: !Text
+  -- ^ Prepended to every @clip_N@ and @grad_N@ id, so several renders placed
+  -- in one document, or one page, keep their ids apart.
   }
 
--- | Standalone SVG with 2 decimal places and no image resolver.
+-- | Standalone SVG with 2 decimal places, no image resolver, and no id
+-- prefix.
 defaultSvgConfig :: SvgConfig
 defaultSvgConfig =
   SvgConfig
     { svgStandalone = True
     , svgPrecision = 2
     , svgImageUri = const Nothing
+    , svgIdPrefix = T.empty
     }
 
 -- | Render draw ops over the given viewport rectangle as an SVG document
@@ -115,6 +120,7 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
       else "<g>" <> defsBlock <> body <> "</g>"
  where
   !p = max 0 (min 6 (svgPrecision cfg))
+  !pfx = TB.fromText (svgIdPrefix cfg)
   !vx = if finite vx0 then vx0 else 0
   !vy = if finite vy0 then vy0 else 0
   !vw = if finite vw0 && vw0 > 0 then vw0 else 0
@@ -136,12 +142,12 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
           PushClip (Rect x y w h) ->
             let
               !cid = nextClip + 1
-              !cidStr = TB.fromString (show cid)
+              !cidStr = pfx <> "clip_" <> TB.fromString (show cid)
               !(cx, cy, cw, ch)
                 | all finite [x, y, w, h] && w > 0 && h > 0 = (x, y, w, h)
                 | otherwise = (0, 0, 0, 0)
               clipDef =
-                "<clipPath id=\"clip_"
+                "<clipPath id=\""
                   <> cidStr
                   <> "\"><rect"
                   <> numAttr p "x" cx
@@ -149,7 +155,7 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
                   <> numAttr p "width" cw
                   <> numAttr p "height" ch
                   <> "/></clipPath>"
-              clipOpen = "<g clip-path=\"url(#clip_" <> cidStr <> ")\">"
+              clipOpen = "<g clip-path=\"url(#" <> cidStr <> ")\">"
              in
               walk (i + 1) (clips + 1) cid nextGrad (dAcc <> clipDef) (bAcc <> clipOpen)
           PopClip
@@ -165,7 +171,7 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
             | otherwise ->
                 let
                   !gid = nextGrad + 1
-                  !gidStr = TB.fromString (show gid)
+                  !gidStr = pfx <> "grad_" <> TB.fromString (show gid)
                   !(coords, stops)
                     | tl == bl && tr == br =
                         ( attr "x1" "0%" <> attr "y1" "0%" <> attr "x2" "100%" <> attr "y2" "0%"
@@ -182,7 +188,7 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
                             <> stopElem p "100%" br
                         )
                   gradDef =
-                    "<linearGradient id=\"grad_"
+                    "<linearGradient id=\""
                       <> gidStr
                       <> "\""
                       <> coords
@@ -195,7 +201,7 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
                       <> numAttr p "y" y
                       <> numAttr p "width" w
                       <> numAttr p "height" h
-                      <> attr "fill" ("url(#grad_" <> gidStr <> ")")
+                      <> attr "fill" ("url(#" <> gidStr <> ")")
                       <> "/>"
                  in
                   walk (i + 1) clips nextClip gid (dAcc <> gradDef) (bAcc <> gradRect)

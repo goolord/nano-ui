@@ -12,6 +12,9 @@ module NanoUI.Internal.Draw.Arena
   , setDrawSquareGeometry
   , setDrawExternalText
   , setDrawBackground
+  , setDrawRecordOps
+  , recordOp
+  , recordedOps
   , beginLayer
   , currentLayer
   , currentClip
@@ -35,7 +38,7 @@ module NanoUI.Internal.Draw.Arena
 
 import Control.Monad (unless, when)
 import Data.Bits (shiftR, (.&.))
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray
   ( PrimArray
@@ -89,6 +92,8 @@ newDrawArena = do
   daClipPieces <- newIORef emptyPrimArray
   daTextSpans <- newIORef ([], [])
   daBackground <- newIORef Nothing
+  daRecordOps <- newIORef False
+  daRecordedOps <- newIORef []
   let
     da = DrawArena {..}
   resetDrawArena da
@@ -104,6 +109,7 @@ resetDrawArena da = do
   writeIORef (daBackground da) Nothing
   -- Only here: a reused frame paints nothing and keeps the last paint's.
   writeIORef (daTextSpans da) ([], [])
+  writeIORef (daRecordedOps da) []
 
 -- 'daCounts' slots.
 vertexCountSlot, indexCountSlot, cmdCountSlot, cmdStartSlot, countSlots :: Int
@@ -161,6 +167,31 @@ setDrawSquareGeometry da = writeIORef (daSquareGeometry da)
 {-# INLINE setDrawBackground #-}
 setDrawBackground :: DrawArena -> Maybe Color -> IO ()
 setDrawBackground da = writeIORef (daBackground da)
+
+-- | Record every solid shape the emitters draw ('recordedOps'), for
+-- exporters that redraw a frame as vectors. Off, each emitter pays one flag
+-- read. Persists across 'resetDrawArena'.
+{-# INLINE setDrawRecordOps #-}
+setDrawRecordOps :: DrawArena -> Bool -> IO ()
+setDrawRecordOps da = writeIORef (daRecordOps da)
+
+-- | Record @op@ under the current layer and clip while recording is on.
+{-# INLINE recordOp #-}
+recordOp :: DrawArena -> DrawOp -> IO ()
+recordOp da op = do
+  on <- readIORef (daRecordOps da)
+  when on (recordOpOn da op)
+
+{-# NOINLINE recordOpOn #-}
+recordOpOn :: DrawArena -> DrawOp -> IO ()
+recordOpOn da op = do
+  layer <- currentLayer da
+  clip <- currentClip da
+  modifyIORef' (daRecordedOps da) (RecordedOp layer clip op :)
+
+-- | The shapes the last paint recorded, in paint order.
+recordedOps :: DrawArena -> IO [RecordedOp]
+recordedOps da = reverse <$> readIORef (daRecordedOps da)
 
 -- | External text for hosts that rasterize text themselves from the collected
 -- text spans. Text emitters push no quads, so fonts without a glyph atlas do

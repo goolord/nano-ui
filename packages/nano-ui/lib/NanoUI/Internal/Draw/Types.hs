@@ -23,6 +23,7 @@ module NanoUI.Internal.Draw.Types
   , forDrawCmdsInLayer_
   , drawCmdElems
   , DrawArena (..)
+  , RecordedOp (..)
   , vertexSize
   , indexSize
   , backdropDimTextureId
@@ -369,7 +370,19 @@ data DrawArena = DrawArena
   , daBackground :: !(IORef (Maybe Color))
   -- ^ The page surface this paint leaves for the backend to clear to; see
   -- 'drawBackground'.
+  , daRecordOps :: !(IORef Bool)
+  -- ^ Whether the shape emitters record what they draw ('daRecordedOps').
+  -- Persists across 'NanoUI.Internal.Draw.Arena.resetDrawArena'.
+  , daRecordedOps :: !(IORef [RecordedOp])
+  -- ^ While 'daRecordOps' is on, the solid shapes this paint drew, newest
+  -- first. Emptied only by 'NanoUI.Internal.Draw.Arena.resetDrawArena', so
+  -- a reused frame keeps the shapes of the paint that drew it.
   }
+
+-- | A solid shape as an emitter drew it: its layer, the clip it drew under,
+-- and the shape as the op that draws it. Exporters read these in place of
+-- the tessellated vertices ('NanoUI.Internal.Draw.Arena.setDrawRecordOps').
+data RecordedOp = RecordedOp !Layer !Rect !DrawOp
 
 -- | Packed vertex stride in bytes: 32. A vertex is eight 32-bit floats: x
 -- and y in logical pixels, red, green, blue and alpha from 0 to 1 with

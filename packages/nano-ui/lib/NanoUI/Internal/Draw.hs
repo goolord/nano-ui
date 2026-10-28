@@ -7,6 +7,7 @@ module NanoUI.Internal.Draw
   , DrawCmd (..)
   , DrawData (..)
   , DrawArena (..)
+  , RecordedOp (..)
   , DrawOp (..)
   , LineCap (..)
   , LineJoin (..)
@@ -22,6 +23,8 @@ module NanoUI.Internal.Draw
   , setDrawSquareGeometry
   , setDrawBackground
   , setDrawExternalText
+  , setDrawRecordOps
+  , recordedOps
   , beginLayer
   , currentLayer
   , currentClip
