@@ -44,30 +44,93 @@ It links RGFW statically, bundles a bitmap font, and produces small standalone b
 
 ## Charts and diagrams
 
-`nano-ui-diagrams` provides `NanoUI.Plot` and the diagrams-lib widget:
+`nano-ui-diagrams` provides `NanoUI.Plot` and the diagrams-lib widget. `import NanoUI.Diagrams` brings in both. A chart is a plain `Chart` value; `plot` draws it, sized by a layout modifier:
 
 ```haskell
-import NanoUI
-import NanoUI.Plot
-
-cpuChart app samples =
-  void $ plot (appPlots app) (fillW . fixedH 220) $
-    withGrid GridBoth
-      . withXAxis "time (s)"
-      . withYAxis "CPU %"
-      . withLegend LegendNone
-      $ chart [line "cpu" samples]
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:cpu_chart}}
 ```
 
-Series constructors are `line`, `scatter`, `bar`, `area`, and `step`; `withColor`, `withStrokeWidth`, `withMarker`, and `withBaseline` style them. `lineChart`, `barChart`, `scatterChart`, and `areaChart` are one-series shortcuts. `plot` returns a `PlotResponse` whose `plotHover` is the nearest data point under the pointer:
+<img src="../images/charts/cpu-chart.svg" alt="A framed line chart of CPU load over sixty seconds, with a grid, numbered axes, and the titles time (s) and CPU %.">
+
+Allocate the `PlotCache` once in `IO` with `newPlotCache` and keep it in the application record. It rebuilds a chart's drawing only when the chart or the theme changes, so building the `Chart` value every frame is cheap.
+
+A chart keeps its drawing's proportions. With `fillW` the frame fills the width and the chart is centred in it; with only `fixedH` the widget takes the width the proportions give. A chart whose labels would overlap at the requested size is drawn larger, up to twice the size.
+
+The images below are compiled from [`ChartExamples.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs), and `nano-ui-svg-glossary` renders the same definitions to the images. They share this data:
 
 ```haskell
-case plotHover resp of
-  Nothing -> muted "Hover a point"
-  Just h  -> kv "value" (T.pack (show (round (hoverDataY h) :: Int)))
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:data}}
 ```
 
-Allocate `newPlotCache` once in `IO`; it rebuilds a chart's diagram only when the chart or theme changes. `diagram (fixedWH 320 200)` places arbitrary diagrams-lib content. The live chart tutorial uses a `Stream` for the data: [Live Data & Background Work](../tutorials/live-data.md).
+### Series
+
+Series constructors take a name and the points: `(x, y)` pairs, or `(label, value)` pairs for `bar`. Each cell below plots `withLegend LegendNone (chart [s])`.
+
+<img src="../images/charts/series.svg" alt="Five small charts: a line through a wave, the same wave as dots, the wave filled down to zero, a staircase through eight counts, and four bars labelled Q1 to Q4.">
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:series}}
+```
+
+Lines and steps join the points in the order given, so sort them first if they are not already in x order. An area fills down to zero. Bars sit in category order, each taking 72% of its slot. `lineChart`, `barChart`, `scatterChart`, and `areaChart` are one-series shortcuts that plot a list with a grid and no legend.
+
+Series without a colour take the theme's series colours in order. The modifiers override the colour and size:
+
+<img src="../images/charts/styles.svg" alt="Four charts: a teal line, a thick line, a line with a dot on every point, and an area filled up and down to the line y equals 3.">
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:styles}}
+```
+
+`withStrokeWidth` means the line width for a line or step, the marker size for a scatter, and the slot fraction for a bar. `withBaseline` sets where an area fills to, in data units, so values below it fill downward. A line's markers are twice its stroke width; a scatter's markers are its stroke width, 3 by default:
+
+<img src="../images/charts/markers.svg" alt="Five scatter charts of the same counts drawn with circles, squares, diamonds, triangles, and crosses.">
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:markers}}
+```
+
+### Grid, titles, and legend
+
+`withGrid` picks the grid lines drawn through the data box. Ticks and their labels stay either way.
+
+<img src="../images/charts/grids.svg" alt="The same wave four times: with horizontal and vertical grid lines, horizontal only, vertical only, and no grid.">
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:grids}}
+```
+
+`withTitle`, `withXAxis`, and `withYAxis` add titles. `withLegend` places the legend, which is on the right by default. At this height the bottom and inside legends would overlap other labels, so those two charts are drawn larger.
+
+<img src="../images/charts/legends.svg" alt="Five charts titled Latency with lines p50 and p99: the legend on the right, along the top, absent, along the bottom of a larger chart, and inside the top left corner of a larger chart.">
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:legends}}
+```
+
+### Hover
+
+`plot` returns a `PlotResponse`. Its `plotHover` is the point nearest the pointer, in data units, while the pointer is inside the data box:
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:hover}}
+```
+
+<img src="../images/charts/hover.svg" alt="A line chart of eight request counts with the pointer by the seventh point; below it the readout value 240.">
+
+The pointer rests by the seventh point, so the readout shows its 240. `hoverSeriesIdx` and `hoverPointIdx` say which series and point it is. Wrap the chart in `withCursorShape UiCursorCrosshair` to give the pointer a crosshair.
+
+### Diagrams
+
+`diagram` places any diagrams-lib `Diagram B` in the layout, framed like a chart and scaled to fit the layout modifier with its proportions kept. Colour it from the theme with `colourOf`, or take the chart colours from `uiPlotStyle`:
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:diagram}}
+```
+
+<img src="../images/charts/diagram.svg" alt="Three blue rounded boxes labelled view, layout, and paint, joined left to right by white arrows.">
+
+Text in a diagram is measured with the current font so labels fit. The drawing is cached per theme and size, not per content: for a diagram that changes, use `diagramWithKeyAndEnvelope` with a key that changes with it. The live chart tutorial feeds a chart from a `Stream`: [Live Data & Background Work](../tutorials/live-data.md).
 
 ## Validated forms
 

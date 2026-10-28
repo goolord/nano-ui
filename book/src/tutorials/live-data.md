@@ -104,6 +104,10 @@ The view pauses by not calling the stream, and resumes from the saved feed:
 {{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:walk_chart}}
 ```
 
+This is the chart after its first 200 samples, when the window is full:
+
+<img src="../images/charts/live-chart.svg" alt="A line chart of a 200-sample random walk with a grid, the x axis titled sample and the y axis titled value.">
+
 The chart API is small:
 
 - `line`, `scatter`, `bar`, `area`, and `step` build series from points (or category/value pairs for bars).

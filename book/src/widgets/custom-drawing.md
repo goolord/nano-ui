@@ -27,6 +27,16 @@ progressBarWith fillW 6 progress
 sparklineWith (fixedWH 120 32) 120 32 samples
 ```
 
+`sparkline` scales the values to their own range, so it shows the shape of a series, not its size. At its default size and with `sparklineWith`:
+
+```haskell
+{{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:sparkline}}
+```
+
+<img src="../images/charts/sparkline.svg" alt="Two small boxed blue line graphs of the same wavy series, the second wider and taller.">
+
+For a chart with axes, a legend, and hover, use `plot` from `nano-ui-diagrams` (see [Ecosystem Packages](../packages/index.md#charts-and-diagrams)).
+
 A settings row:
 
 ```haskell

@@ -16,6 +16,7 @@ module Main (main) where
 
 import Control.Monad (forM, forM_, void, when)
 import CanvasExamples (canvasExamples)
+import ChartExamples (chartExamples)
 import Data.Aeson.Micro (ToJSON (..), Value, encode, object, (.=))
 import Data.Bits (shiftL, shiftR, testBit, (.&.))
 import Data.ByteString (ByteString)
@@ -38,6 +39,7 @@ import NanoUI.Backend (DrawData (..), FontMetrics (..), collectRasterSpans, dama
 import NanoUI.Backend.Sdl (NanoUIFont (..), SdlOptions (..), defaultSdlOptions, withSdl)
 import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Plot (PlotCache, newPlotCache)
 import NanoUI.Testing (newPixelContext, runFrame, withFontMetrics, withMonoFontMetrics)
 import NanoUI.Testing.Harness (clickPair, pressAt, withInputOff)
 import Paths_nano_ui_svg (getDataFileName)
@@ -2123,19 +2125,46 @@ layoutDemo = columnWith (fillW . fillH . padAll 14 . gap 10)
 -- | Render one layout example, cropped to its painted height. @hoverPos@
 -- parks the pointer on a control for the hover and pointer-mode examples.
 layoutSvg :: Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO Text
-layoutSvg tag w h hoverPos ui = do
+layoutSvg = settledSvg 1
+
+-- | 'layoutSvg' after @n@ warm-up frames. A chart sizes itself from the
+-- envelope of the drawing it made the frame before, so it takes more than
+-- one frame to settle.
+settledSvg :: Int -> Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO Text
+settledSvg n tag w h hoverPos ui = do
+  (svg, bounds) <- settledFrame n tag w h hoverPos ui
+  pure (cropSvg w h bounds svg)
+
+-- | The uncropped SVG of 'settledSvg' and the bounds of what it painted.
+settledFrame :: Int -> Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO (Text, Maybe Rect)
+settledFrame n tag w h hoverPos ui = do
   ctx <- newSvgContext
   let base = withInputOff w h
       capture = case hoverPos of
         Nothing -> base
         Just pos -> base {inputMousePos = pos}
-      warm = case hoverPos of
-        Nothing -> [base]
-        Just _ -> [base, capture]
+      warm = replicate n base <> maybe [] (const [capture]) hoverPos
   mapM_ (\inp -> runFrame ctx inp ui) warm
   (svg, dd) <- exportFrame tag ctx capture ui
   bounds <- frameInkBounds ctx capture dd
-  pure (cropSvg w h bounds svg)
+  pure (svg, bounds)
+
+-- | A chart example narrowed to what it draws. A chart's width comes from
+-- its drawing's proportions, so the view is rendered once at the widest
+-- width @w@ to find its right edge, then again at that edge plus the 12 px
+-- padding. Each render gets a fresh 'PlotCache', as an application
+-- allocates one during setup.
+chartSvg :: Text -> Float -> Maybe V2 -> (PlotCache -> NanoUI ()) -> IO Text
+chartSvg tag w pointerPos ui = do
+  (_, ink) <- render w
+  let fitW = maybe w (\(Rect bx _ bw _) -> min w (fromIntegral (ceiling (bx + bw) :: Int) + 12)) ink
+  (svg, ink') <- render fitW
+  pure (cropSvg fitW h ink' svg)
+  where
+    h = 1200
+    render width = do
+      cache <- newPlotCache
+      settledFrame 3 tag width h pointerPos (ui cache)
 
 layoutRowDemo :: NanoUI ()
 layoutRowDemo =
@@ -2607,7 +2636,7 @@ tabStylesSpecimen =
         , tab 2 "Settings" (muted "Settings")
         ]
 
--- | Write the layout, canvas and gallery specimens to the book's images directory.
+-- | Write the layout, canvas, chart and gallery specimens to the book's images directory.
 generateBookVisuals :: IO ()
 generateBookVisuals = do
   createDirectoryIfMissing True "book/src/images"
@@ -2621,6 +2650,12 @@ generateBookVisuals = do
   forM_ canvasExamples $ \(name, w, ui) -> do
     svg <- layoutSvg ("book-canvas-" <> name) w 600 Nothing ui
     let path = "book/src/images/canvas/" <> T.unpack name <> ".svg"
+    TIO.writeFile path svg
+    putStrLn ("wrote " <> path)
+  createDirectoryIfMissing True "book/src/images/charts"
+  forM_ chartExamples $ \(name, w, pointerPos, ui) -> do
+    svg <- chartSvg ("book-chart-" <> name) w pointerPos ui
+    let path = "book/src/images/charts/" <> T.unpack name <> ".svg"
     TIO.writeFile path svg
     putStrLn ("wrote " <> path)
   writeSvg "gallery-controls" 880 260 galleryControlsSpecimen
