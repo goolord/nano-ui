@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Focus, Navigation &amp; IME - nano-ui Documentation</title>
+        <title>Ecosystem Packages - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,112 +178,131 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="focus-navigation--ime"><a class="header" href="#focus-navigation--ime">Focus, Navigation &amp; IME</a></h1>
-<p>Focus decides which widget receives keyboard input. nano-ui tracks one focused widget per window and resolves it against the frame’s layout, after the view has run.</p>
-<h2 id="moving-focus-with-the-keyboard-and-mouse"><a class="header" href="#moving-focus-with-the-keyboard-and-mouse">Moving focus with the keyboard and mouse</a></h2>
-<ul>
-<li>
-<p><strong>Click</strong> a text field, select, slider, or focusable custom widget to focus it. Clicking elsewhere unfocuses the current field.</p>
-</li>
-<li>
-<p><strong>Tab</strong> moves to the next focusable widget; <strong>Shift+Tab</strong> moves to the previous one.</p>
-</li>
-<li>
-<p><strong>Programmatic focus</strong> uses the widget’s id:</p>
-<pre><code class="language-haskell">resp &lt;- searchInput' "Find" query
-whenM (shortcut (cmdOrCtrl &lt;&gt; key 'f')) (requestFocus (respId resp))
-</code></pre>
-</li>
-<li>
-<p><strong><code>focusNext</code> / <code>focusPrevious</code></strong> behave like Tab. <strong><code>clearFocus</code></strong> drops focus at the end of the frame. <strong><code>holdFocus wid</code></strong> claims focus every frame for a view that handles input itself (it also consumes Tab, so an editor can indent with it).</p>
-</li>
-<li>
-<p><strong><code>releaseFocus wid</code></strong> (from <code>NanoUI.Monad</code>) clears focus immediately, mid-frame, preserving text selection and menu state. Most applications want <code>clearFocus</code> instead.</p>
-</li>
-</ul>
-<p><code>requestFocus</code>, <code>focusNext</code>, <code>focusPrevious</code>, and <code>clearFocus</code> are <strong>requests applied at the end of the frame</strong>, against that frame’s layout. The last request wins.</p>
-<h2 id="focus-timing"><a class="header" href="#focus-timing">Focus timing</a></h2>
-<p>Because focus is applied at frame end, a focus move is visible on the next frame:</p>
-<pre><code class="language-haskell">-- Frame N: the click or shortcut requests focus.
-resp &lt;- textInput' draft
-whenM (shortcut (cmdOrCtrl &lt;&gt; key 'l')) (requestFocus (respId resp))
+                        <h1 id="ecosystem-packages"><a class="header" href="#ecosystem-packages">Ecosystem Packages</a></h1>
+<p>The core toolkit is <code>nano-ui</code>; the other packages add a backend or a focused capability. Add only what the application uses.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Package</th><th>What it adds</th></tr>
+</thead>
+<tbody>
+<tr><td><code>nano-ui-sdl</code></td><td>SDL3 window backend, TrueType fonts, native file dialogs, custom chrome</td></tr>
+<tr><td><code>nano-ui-rgfw</code></td><td>RGFW + OpenGL 3.2 backend with a bundled bitmap font</td></tr>
+<tr><td><code>nano-ui-diagrams</code></td><td>Line/bar/scatter/area charts and diagrams-lib content</td></tr>
+<tr><td><code>nano-ui-form</code></td><td>Validated applicative forms built on ditto</td></tr>
+<tr><td><code>nano-ui-markdown</code></td><td>CommonMark rendering, appendable for streamed replies</td></tr>
+<tr><td><code>nano-ui-svg</code></td><td><code>DrawOp</code>-to-SVG and whole-frame SVG export</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
+<p><code>nano-ui-sdl</code> is the primary desktop backend:</p>
+<pre><code class="language-haskell">import NanoUI.Backend.Sdl
 
--- Frame N+1: the focus ring is drawn and isFocused answers True.
+main = runSdlApp
+  defaultSdlOptions
+    { sdlWindowSettings = defaultWindowSettings {wsTitle = "My App", wsSize = Size 1024 768}
+    , sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Inter"]
+    , sdlAppFontSize = 14
+    , sdlAppTheme = Just defaultTheme
+    }
+  appView
 </code></pre>
-<p>The request can name a widget declared later in the same pass — for example, <code>currentId</code> just before the widget:</p>
-<pre><code class="language-haskell">whenM (shortcut (cmdOrCtrl &lt;&gt; key 'l')) (requestFocus =&lt;&lt; currentId)
-textInput address
-</code></pre>
-<p>But it <strong>cannot</strong> name a widget that is not declared on this pass at all. A widget that appears only after a state change needs a delayed request:</p>
-<pre><code class="language-haskell">editing &lt;- useVar False
-focusPending &lt;- useVar False
+<p>It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (<code>useFileDialog</code>), custom title bars (<code>windowCaption</code>), and screenshots (<code>saveScreenshot</code>, <code>captureScreenshot</code>). See <a href="../advanced/window-management.html">Desktop Windows</a> for the window side.</p>
+<p><code>nano-ui-rgfw</code> is the zero-system-dependency alternative:</p>
+<pre><code class="language-haskell">import NanoUI.Backend.Rgfw
 
-showField &lt;- readVar editing
-scope $
-  if showField
-    then do
-      fieldR &lt;- textInput' draft
-      whenM (readVar focusPending) $ do
-        requestFocus (respId fieldR)
-        writeVar focusPending False
-    else label "Not editing"
+main = runRgfwApp defaultRgfwOptions appView
+</code></pre>
+<p>It links RGFW statically, bundles a bitmap font, and produces small standalone binaries. Use it for tools, overlays, or environments where SDL3 is not available.</p>
+<h2 id="charts-and-diagrams"><a class="header" href="#charts-and-diagrams">Charts and diagrams</a></h2>
+<p><code>nano-ui-diagrams</code> provides <code>NanoUI.Plot</code> and the diagrams-lib widget:</p>
+<pre><code class="language-haskell">import NanoUI
+import NanoUI.Plot
 
-whenM (button "Edit") $ do
-  writeVar editing True
-  writeVar focusPending True      -- request it on the pass that declares the field
+cpuChart app samples =
+  void $ plot (appPlots app) (fillW . fixedH 220) $
+    withGrid GridBoth
+      . withXAxis "time (s)"
+      . withYAxis "CPU %"
+      . withLegend LegendNone
+      $ chart [line "cpu" samples]
 </code></pre>
-<p>The same pattern appears in <a href="../tutorials/todo-list.html">Build a Todo List</a>.</p>
-<blockquote class="blockquote-tag blockquote-tag-warning">
-<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
-<p>Query focus at the <strong>end</strong> of the view, not the top. The node arena is reset before the view runs, so <code>isFocused</code> at the top always answers <code>False</code>. Keyboard shortcuts that depend on focus belong after the widgets have executed. This one mistake caused real bugs in <code>winget-gui</code> (Ctrl+A select-all firing while typing) and <code>ned</code>.</p>
-</blockquote>
-<h2 id="what-cannot-be-focused"><a class="header" href="#what-cannot-be-focused">What cannot be focused</a></h2>
-<p>A focus request is ignored for a widget that Tab would not stop at on that frame:</p>
+<p>Series constructors are <code>line</code>, <code>scatter</code>, <code>bar</code>, <code>area</code>, and <code>step</code>; <code>withColor</code>, <code>withStrokeWidth</code>, <code>withMarker</code>, and <code>withBaseline</code> style them. <code>lineChart</code>, <code>barChart</code>, <code>scatterChart</code>, and <code>areaChart</code> are one-series shortcuts. <code>plot</code> returns a <code>PlotResponse</code> whose <code>plotHover</code> is the nearest data point under the pointer:</p>
+<pre><code class="language-haskell">case plotHover resp of
+  Nothing -&gt; muted "Hover a point"
+  Just h  -&gt; kv "value" (T.pack (show (round (hoverDataY h) :: Int)))
+</code></pre>
+<p>Allocate <code>newPlotCache</code> once in <code>IO</code>; it rebuilds a chart’s diagram only when the chart or theme changes. <code>diagram (fixedWH 320 200)</code> places arbitrary diagrams-lib content. The live chart tutorial uses a <code>Stream</code> for the data: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</p>
+<h2 id="validated-forms"><a class="header" href="#validated-forms">Validated forms</a></h2>
+<p><code>nano-ui-form</code> builds applicative forms on ditto. A <code>Form Text a</code> has <code>Text</code> errors and returns <code>a</code>:</p>
+<pre><code class="language-haskell">data Signup = Signup Text Text
+
+signup :: Form Text Signup
+signup =
+  Signup
+    &lt;$&gt; withFieldErrors (inputText "Name" "" `prove` notEmpty "Name is required")
+    &lt;*&gt; withFieldErrors (inputText "Email" "" `prove` validEmail (const "Not an email address"))
+</code></pre>
+<p>Allocate <code>owner &lt;- newFormState</code> once, then run it with a stable prefix:</p>
+<pre><code class="language-haskell">submitted &lt;- nanoFormSubmit owner "signup" "Sign up" signup
+case submitted of
+  Just (Signup name _) -&gt; label ("Welcome, " &lt;&gt; name)
+  Nothing              -&gt; pure ()
+</code></pre>
+<p><code>nanoFormLive</code> returns <code>Just a</code> whenever the form is valid; <code>nanoFormEx</code> takes a <code>FormConfig</code>; <code>runNanoForm</code> returns the view and result separately. Inputs include <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputRadio</code>, and <code>inputColor</code>. Validation includes <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. <code>inputWidget</code> adapts any <code>Var a -&gt; NanoUI Response</code> widget, with a publication policy (<code>OnChange</code>, <code>OnChangeOr</code>, <code>OnlyWhen</code>).</p>
+<h2 id="markdown"><a class="header" href="#markdown">Markdown</a></h2>
+<p><code>nano-ui-markdown</code> parses with commonmark and draws with rich text:</p>
+<pre><code class="language-haskell">import NanoUI.Markdown
+
+doc = parseMarkdown "# Hello\n\nSome *emphasis* and `code`."
+
+view cache = do
+  clicked &lt;- markdown cache doc
+  for_ clicked $ \url -&gt; openUrl url
+</code></pre>
+<p>Allocate <code>cache &lt;- newMarkdownCache</code> once. <code>markdown</code> returns the link clicked this frame. For streaming, append without reparsing the whole document:</p>
+<pre><code class="language-haskell">doc &lt;- useStream stream replyId emptyMarkdown $ \update -&gt;
+  onToken client (\token -&gt; update (appendMarkdown token))
+void (markdown cache doc)
+</code></pre>
+<p>When appending on the UI thread, append a frame’s tokens in one call. The parser reparses only the tail block, with a few documented exceptions (a long unsplittable final block, or a link-reference definition). <code>MarkdownConfig.mdBlock</code> overrides block drawing, for example to syntax-highlight code.</p>
+<h2 id="svg-export"><a class="header" href="#svg-export">SVG export</a></h2>
+<p><code>nano-ui-svg</code> has two levels:</p>
 <ul>
-<li>a disabled widget (inside <code>disabledWhen</code>);</li>
-<li>a widget behind an open <code>modal</code>;</li>
-<li>a widget that is not declared on this pass;</li>
-<li>a group response that is not itself a Tab stop (for example, a radio group’s response names its last option, not the group).</li>
+<li><strong><code>NanoUI.Draw.Svg</code></strong> exports <code>DrawOp</code> sequences: <code>drawOpsToSvg bounds ops</code> or <code>renderDrawOpsSvg config</code>.</li>
+<li><strong><code>NanoUI.Draw.FrameSvg</code></strong> re-renders a whole frame: <code>frameToSvg config ctx input drawData</code>.</li>
 </ul>
-<p>Focus is not preserved for a widget that stops being declared. A widget in an inactive tab is not called on that frame, so it cannot keep focus; give the tab’s editable state a <code>Var</code> or <code>VarMap</code> entry if it must survive, and request focus again when the tab is shown.</p>
-<h2 id="focus-rings-and-reachability"><a class="header" href="#focus-rings-and-reachability">Focus rings and reachability</a></h2>
-<p>The focus ring is themed by <code>themeFocusRing</code>. Built-in widgets draw it themselves; custom widgets that are focusable (<code>widgetFocusable = True</code> in <code>CustomWidgetSpec</code>) should draw their own or use the standard helpers.</p>
-<p><code>disabledWhen cond subtree</code> dims the subtree and blocks interaction without changing layout or state. A disabled widget can still be visible and can still hold state; it cannot be clicked, focused, or activated by a shortcut.</p>
-<h2 id="ime-composition"><a class="header" href="#ime-composition">IME composition</a></h2>
-<p>Input method editors (Japanese, Chinese, Korean, and others) compose text before committing it. Built-in text fields handle the whole cycle: they display the active composition at the caret, accept the commit, and suppress key events until composition finishes, so shortcuts do not fire mid-composition.</p>
-<p>A custom widget that reads committed characters from <code>inputChars</code> must opt in every frame it accepts text:</p>
-<pre><code class="language-haskell">-- wid: the widget's id; caretRect: where the candidate window should open.
-preedit &lt;- useInputMethod wid InputNormal caretRect
-for_ preedit drawCompositionAtCaret
+<pre><code class="language-haskell">import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
+import NanoUI.Internal.Context (setDrawExternalText, setDrawSquareGeometry)
+import NanoUI.Testing (newPixelContext, runFrame)
+import NanoUI.Testing.Harness (withInputOff)
+
+exportViewToSvg view = do
+  ctx &lt;- newPixelContext
+  let inp = withInputOff 1280 800
+  setDrawSquareGeometry ctx True
+  setDrawExternalText ctx True
+  (_, drawData, _) &lt;- runFrame ctx inp view
+  frameToSvg defaultFrameSvgConfig ctx inp drawData
 </code></pre>
-<p>The signature is <code>useInputMethod :: WidgetId -&gt; InputPurpose -&gt; Rect -&gt; NanoUI (Maybe Composition)</code>. Pass the caret’s rectangle, not the whole widget; the backend places the OS candidate window there. The returned <code>Composition</code> is the in-progress text the widget should draw at its caret (typically underlined). <code>useInputMethod</code> checks focus itself, so a separate <code>isFocused</code> guard is unnecessary. Without the call, composed text may appear at the wrong place, the candidate window may not follow the caret, and the IME’s keys are not routed to the widget.</p>
-<p>When reading raw input for a custom text widget:</p>
+<p><code>setDrawSquareGeometry</code> makes widget edges axis-aligned; <code>setDrawExternalText</code> moves text onto the raster spans the exporter reads. Without them the export still renders, but rounded edges approximate and drawing text is missing. This is the path used for the interactive specimens in this book and for visual regression tests.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><code>inputChars</code> — committed text for this frame;</li>
-<li><code>inputKeys</code> — pressed keys, including repeats (suppressed during composition);</li>
-<li><code>inputKeysNew</code> — initial presses only;</li>
-<li><code>inputKeysHeld</code> / <code>inputKeysReleased</code> — held and released keys;</li>
-<li><code>inputComposition</code> — the active composition, if any.</li>
+<li>Building an application: <a href="../getting-started/quickstart.html">Quick Start</a> and <a href="../tutorials/index.html">Tutorials</a>.</li>
+<li>Windows and screenshots: <a href="../advanced/window-management.html">Desktop Windows</a>.</li>
+<li>Rendering internals and the frame: <a href="../architecture/index.html">Architecture &amp; Internals</a>.</li>
 </ul>
-<p>A custom text widget that implements its own focus handling should call <code>holdFocus wid</code> each frame while it is active. The terminal demo in <code>packages/nano-ui-demo/examples/Terminal.hs</code> is a complete example of a custom widget that owns text input.</p>
-<h2 id="testing-focus"><a class="header" href="#testing-focus">Testing focus</a></h2>
-<p>Headless frame tests can drive Tab and clicks like a user:</p>
-<pre><code class="language-haskell">ctx &lt;- newContext
-(_, _, _) &lt;- runFrame ctx input1 view
-(_, _, _) &lt;- runFrame ctx input2 view      -- focus changes apply on the next frame
-</code></pre>
-<p>Use <code>warmup2</code> from <code>NanoUI.Testing.Harness</code> before targeting a widget by <code>respRect</code>; geometry is from the previous frame. Focus is part of the frame result, so assert on the second frame, not the frame that requested the move.</p>
-<p>For the keyboard side — chords, suppression, and menu bindings — see <a href="shortcuts.html">Keyboard Shortcuts</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../input/shortcuts.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../advanced/window-management.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../layout/containers.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../troubleshooting/recurring-bugs.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -293,11 +312,11 @@ for_ preedit drawCompositionAtCaret
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../input/shortcuts.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../advanced/window-management.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../layout/containers.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../troubleshooting/recurring-bugs.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-27a189cc.js"></script>
+        <script src="toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -193,13 +193,14 @@ counter = row $ do
 <ol>
 <li><strong><a href="getting-started/quickstart.html">Quick Start</a></strong> installs the toolchain and gets a window on screen.</li>
 <li><strong><a href="tutorials/index.html">Tutorials</a></strong> build three small applications end to end: a todo list, a notepad, and a live data view.</li>
-<li><strong><a href="state/introduction.html">State</a></strong> explains where state lives, what a <code>Var</code> is, what writes cost, and the typed-message <a href="state/elm-overview.html">Elm-style alternative</a>.</li>
-<li><strong><a href="input/shortcuts.html">Keyboard &amp; Focus</a></strong> covers chords, focus, and IME.</li>
-<li><strong><a href="layout/containers.html">Layout</a></strong> and the <strong><a href="widgets/index.html">Widget Gallery</a></strong> are the API tour.</li>
-<li><strong><a href="styling/overview.html">Styling</a></strong> and the <strong><a href="advanced/background-work.html">Advanced Guides</a></strong> go deeper.</li>
-<li><strong><a href="packages/nano-ui-sdl.html">Ecosystem Packages</a></strong>, <strong><a href="troubleshooting/recurring-bugs.html">Troubleshooting</a></strong>, and <strong><a href="architecture/frame-model.html">Architecture Notes</a></strong> are the reference material for when an application grows.</li>
+<li><strong><a href="state/index.html">State &amp; <code>Var</code></a></strong> explains where state lives, what writes cost, and the <a href="state/elm.html">Elm-style alternative</a>.</li>
+<li><strong><a href="layout/index.html">Layout &amp; Scrolling</a></strong> covers containers, modifiers, and large lists.</li>
+<li>The <strong><a href="widgets/index.html">Widget Gallery</a></strong> is the single entry point for controls, data views, overlays, and custom drawing. <strong><a href="styling/index.html">Styling &amp; Theming</a></strong> lives next to it, with a <a href="styling/lab.html">live lab</a> and <a href="styling/gotchas.html">gotchas</a>.</li>
+<li><strong><a href="input/index.html">Keyboard, Focus &amp; IME</a></strong> covers chords, focus, and text input.</li>
+<li><strong><a href="advanced/async.html">Async Work &amp; Animation</a></strong>, <strong><a href="advanced/window-management.html">Desktop Windows</a></strong>, and <strong><a href="packages/index.html">Ecosystem Packages</a></strong> go further.</li>
+<li><strong><a href="troubleshooting/recurring-bugs.html">Troubleshooting</a></strong>, <strong><a href="getting-started/development.html">Development Setup</a></strong>, and <strong><a href="architecture/index.html">Architecture &amp; Internals</a></strong> are the reference material.</li>
 </ol>
-<p>If you already know immediate-mode UI, skim the Quick Start and start with <a href="state/introduction.html">Introduction to State</a>.</p>
+<p>If you already know immediate-mode UI, skim the Quick Start and start with <a href="state/index.html">State &amp; <code>Var</code></a>.</p>
 <h2 id="packages-in-the-monorepo"><a class="header" href="#packages-in-the-monorepo">Packages in the monorepo</a></h2>
 <div class="table-wrapper">
 <table>
@@ -207,14 +208,14 @@ counter = row $ do
 <tr><th>Package</th><th>What it is</th><th>Read</th></tr>
 </thead>
 <tbody>
-<tr><td><code>packages/nano-ui</code></td><td>Core toolkit: widgets, layout, input, theming, draw list, text arena.</td><td><a href="state/introduction.html">State</a>, <a href="layout/containers.html">Layout</a>, <a href="widgets/index.html">Widget Gallery</a></td></tr>
-<tr><td><code>packages/nano-ui-sdl</code></td><td>SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars.</td><td><a href="packages/nano-ui-sdl.html">SDL3 Backend</a></td></tr>
-<tr><td><code>packages/nano-ui-rgfw</code></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies.</td><td><a href="packages/nano-ui-rgfw.html">RGFW Backend</a></td></tr>
-<tr><td><code>packages/nano-ui-emit</code></td><td>Elm-style typed messages and update reducers (<code>NanoUIE msg a</code>).</td><td><a href="state/elm-overview.html">Elm-Style Views</a></td></tr>
-<tr><td><code>packages/nano-ui-diagrams</code></td><td>Line, bar, scatter, and area charts (<code>NanoUI.Plot</code>) with diagrams-lib integration.</td><td><a href="packages/nano-ui-diagrams.html">Charts &amp; Diagrams</a></td></tr>
-<tr><td><code>packages/nano-ui-form</code></td><td>Validated applicative forms built on ditto.</td><td><a href="packages/nano-ui-form.html">Validated Forms</a></td></tr>
-<tr><td><code>packages/nano-ui-markdown</code></td><td>Markdown rendering, incrementally appendable for streamed replies.</td><td><a href="packages/nano-ui-markdown.html">Markdown Rendering</a></td></tr>
-<tr><td><code>packages/nano-ui-svg</code></td><td>Headless <code>DrawOp</code>-to-SVG export and visual regression testing.</td><td><a href="packages/nano-ui-svg.html">Headless SVG Export</a></td></tr>
+<tr><td><code>packages/nano-ui</code></td><td>Core toolkit: widgets, layout, input, theming, draw list, text arena.</td><td><a href="state/index.html">State</a>, <a href="layout/index.html">Layout</a>, <a href="widgets/index.html">Widget Gallery</a></td></tr>
+<tr><td><code>packages/nano-ui-sdl</code></td><td>SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars.</td><td><a href="packages/index.html">Ecosystem Packages</a>, <a href="advanced/window-management.html">Desktop Windows</a></td></tr>
+<tr><td><code>packages/nano-ui-rgfw</code></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
+<tr><td><code>packages/nano-ui-emit</code></td><td>Elm-style typed messages and update reducers (<code>NanoUIE msg a</code>).</td><td><a href="state/elm.html">Elm-Style State</a></td></tr>
+<tr><td><code>packages/nano-ui-diagrams</code></td><td>Line, bar, scatter, and area charts (<code>NanoUI.Plot</code>) with diagrams-lib integration.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
+<tr><td><code>packages/nano-ui-form</code></td><td>Validated applicative forms built on ditto.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
+<tr><td><code>packages/nano-ui-markdown</code></td><td>Markdown rendering, incrementally appendable for streamed replies.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
+<tr><td><code>packages/nano-ui-svg</code></td><td>Headless <code>DrawOp</code>-to-SVG export and visual regression testing.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
 <tr><td><code>packages/nano-ui-demo</code></td><td>Runnable example applications and single-topic tutorials.</td><td><a href="tutorials/index.html">Tutorials</a></td></tr>
 </tbody>
 </table>

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Recurring Bugs &amp; Fixes - nano-ui Documentation</title>
+        <title>Troubleshooting - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -328,7 +328,7 @@ for_ preedit drawCompositionAtCaret
 <h3 id="a-slow-leftward-drag-selects-one-character"><a class="header" href="#a-slow-leftward-drag-selects-one-character">A slow leftward drag selects one character</a></h3>
 <p>The drag anchor must be taken from the press, not re-derived from the selection each frame. A one-character selection’s anchor sits on its left, so re-deriving it carries the anchor along and selects one character (<code>ned</code>’s “slow leftward drags”).</p>
 <h3 id="a-widget-that-appears-next-frame-cannot-be-focused-this-frame"><a class="header" href="#a-widget-that-appears-next-frame-cannot-be-focused-this-frame">A widget that appears next frame cannot be focused this frame</a></h3>
-<p><code>requestFocus</code> resolves after layout, but only for widgets declared on that pass. If a field appears because of a state change, request focus on the pass that declares it (store a <code>focusPending</code> flag). See <a href="../input/focus.html">Focus, Navigation &amp; IME</a>.</p>
+<p><code>requestFocus</code> resolves after layout, but only for widgets declared on that pass. If a field appears because of a state change, request focus on the pass that declares it (store a <code>focusPending</code> flag). See <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>
 <h3 id="conditional-widgets-shift-ids"><a class="header" href="#conditional-widgets-shift-ids">Conditional widgets shift ids</a></h3>
 <p>A branch that declares different widgets than its alternative changes the id count for everything after it; widgets appear to swap caret state. Wrap the branch in <code>scope</code>, and keep overlays unconditional. See <a href="../state/identity.html">Widget Identity &amp; Keys</a>.</p>
 <hr>
@@ -366,7 +366,7 @@ for_ preedit drawCompositionAtCaret
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../packages/nano-ui-svg.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../packages/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -380,7 +380,7 @@ for_ preedit drawCompositionAtCaret
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../packages/nano-ui-svg.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../packages/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

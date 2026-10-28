@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Headless SVG Export - nano-ui Documentation</title>
+        <title>Tabs, Tables &amp; Trees - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,79 +178,83 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="headless-svg-export-nano-ui-svg"><a class="header" href="#headless-svg-export-nano-ui-svg">Headless SVG Export (<code>nano-ui-svg</code>)</a></h1>
-<p><code>nano-ui-svg</code> turns nano-ui drawing into SVG. It has two levels:</p>
-<ul>
-<li><strong><code>NanoUI.Draw.Svg</code></strong> exports <code>DrawOp</code> sequences from canvases, custom widgets, and <code>nano-ui-diagrams</code>.</li>
-<li><strong><code>NanoUI.Draw.FrameSvg</code></strong> re-renders a whole painted frame: widget geometry, vector drawings, and text.</li>
-</ul>
-<h2 id="drawing-operations"><a class="header" href="#drawing-operations">Drawing operations</a></h2>
-<pre><code class="language-haskell">import NanoUI
-import NanoUI.Draw.Svg (drawOpsToSvg)
-import NanoUI.Path qualified as P
+                        <h1 id="tabs-tables--trees"><a class="header" href="#tabs-tables--trees">Tabs, Tables &amp; Trees</a></h1>
+<p>Widgets that show collections: tab strips, sortable tables, and hierarchical trees.</p>
+<h2 id="tabs"><a class="header" href="#tabs">Tabs</a></h2>
+<p>A tab strip binds the active key to a <code>Var</code>; only the selected tab’s body runs:</p>
+<pre><code class="language-haskell">data Page = Overview | Logs | Settings
+  deriving (Eq, Show, Enum, Bounded)
 
-exportBadge :: CustomDrawContext -&gt; IO ()
-exportBadge cdc = do
-  let bounds = Rect 0 0 120 40
-      ops = runCanvasFor cdc $ do
-        drawRoundedRect bounds 8 (colorRGBA 37 99 235 255)
-        drawStrokePath (P.circle (V2 20 20) 8) 2 colorWhite
-        drawText (V2 68 20) AlignCenter AlignMiddle "Ready" colorWhite
-  TIO.writeFile "badge.svg" (drawOpsToSvg bounds ops)
+page &lt;- useEnumVar Overview
+boundedTabs (T.pack . show) page $ \case
+  Overview -&gt; overviewView
+  Logs     -&gt; logsView
+  Settings -&gt; settingsView
 </code></pre>
-<p><code>renderDrawOpsSvg</code> with an <code>SvgConfig</code> emits an inner <code>&lt;g&gt;</code> fragment (<code>svgStandalone = False</code>), adjusts coordinate precision (<code>svgPrecision</code>), or supplies an image URI resolver (<code>svgImageUri</code>).</p>
-<h2 id="whole-frames"><a class="header" href="#whole-frames">Whole frames</a></h2>
-<p>Widget chrome is not represented as <code>DrawOp</code>s — paint lowers widgets directly to the GPU vertex buffer. <code>frameToSvg</code> rebuilds a frame from what the host sees: solid geometry from <code>DrawData</code>, vector drawings from their draw-op caches, and text from the raster spans.</p>
-<pre><code class="language-haskell">import NanoUI
-import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
-import NanoUI.Internal.Context (setDrawExternalText, setDrawSquareGeometry)
-import NanoUI.Testing (newPixelContext, runFrame)
-import NanoUI.Testing.Harness (withInputOff)
+<p><code>tab</code> creates a plain header; <code>closableTab</code> adds a close button and reports the close through the primed response:</p>
+<pre><code class="language-haskell">active &lt;- useVar ("overview" :: Text)
+resp &lt;- tabs' active
+  [ closableTab "overview" "Overview" overviewView
+  , closableTab "logs" "Logs" logsView
+  ]
+for_ (tabClosed resp) closeTab
+let activeKey = tabActive resp
+</code></pre>
+<p>The caller owns removal: <code>tabs'</code> reports <code>tabClosed</code>, it does not remove the tab. A key no tab has selects the first tab and writes that key back to the <code>Var</code>.</p>
+<p><code>tabBar</code> / <code>tabBar'</code> draw headers only and leave the body to the caller — useful for pane layouts and custom bodies. <code>tabsConfigured</code> / <code>tabBarConfigured</code> take a <code>TabsConfig</code>:</p>
+<pre><code class="language-haskell">let cfg = defaultTabsConfig
+      {tabsStyle = TabSegmented, tabsOrientation = TabTop, tabsTrailing = newTabButton}
+tabsConfigured cfg active tabs
+</code></pre>
+<p>Styles: <code>TabUnderline</code>, <code>TabPill</code>, <code>TabSegmented</code>, <code>TabContained</code>. Placements: <code>TabTop</code>, <code>TabBottom</code>, <code>TabLeft</code>, <code>TabRight</code>. <code>boundedTabs</code> / <code>boundedTabBar</code> generate a tab per enum value.</p>
+<h2 id="tables"><a class="header" href="#tables">Tables</a></h2>
+<p><code>table</code> renders Colonnade columns. Header clicks sort through a <code>Var SortCol</code>:</p>
+<pre><code class="language-haskell">data Process = Process
+  { pid :: Int
+  , name :: Text
+  , mem :: Int
+  }
 
-exportViewToSvg :: NanoUI () -&gt; IO Text
-exportViewToSvg view = do
-  ctx &lt;- newPixelContext
-  let inp = withInputOff 1280 800
-  -- Once, before running frames:
-  setDrawSquareGeometry ctx True
-  setDrawExternalText ctx True
-  (_, drawData, _) &lt;- runFrame ctx inp view
-  frameToSvg defaultFrameSvgConfig ctx inp drawData
+processTable :: [Process] -&gt; Var SortCol -&gt; NanoUI ()
+processTable procs sortVar =
+  table "procs" cols procs sortVar
+  where
+    cols = mconcat
+      [ headed "PID" (\p -&gt; label (T.pack (show (pid p))))
+      , headed "Name" (\p -&gt; label (name p))
+      , headed "Memory (MB)" (\p -&gt; label (T.pack (show (mem p))))
+      ]
 </code></pre>
-<p>The two <code>setDraw...</code> switches matter:</p>
+<p><code>SortCol</code> holds the active column and direction. <code>simpleTable headers rows</code> renders a table of text rows. <code>table'</code> returns a <code>TableResponse</code> with the updated sort, column order, and hidden columns; <code>tableConfigured</code> adds frozen rows/columns, fixed column widths, and hidden columns through <code>TableConfig</code>. Rows are virtualized internally.</p>
+<p>Cell helpers: <code>textCell</code>, <code>cellWidget</code>, <code>widgetCell</code>, and <code>Cell</code> with an explicit sort key (<code>cellKey</code>). A cell with a widget view still needs <code>cellText</code> if its natural width should be measured.</p>
+<h2 id="trees"><a class="header" href="#trees">Trees</a></h2>
+<pre><code class="language-haskell">items :: [TreeItem]
+items =
+  [ TreeItem "src" [TreeItem "Main.hs" [], TreeItem "Widgets" []]
+  , TreeItem "README.md" []
+  ]
+
+fileTree :: [TreeItem] -&gt; Var Int -&gt; NanoUI ()
+fileTree = tree "file-tree"
+</code></pre>
+<p><code>TreeItem</code> is the library type (<code>treeItemLabel</code>, <code>treeItemChildren</code>), not an app-defined record. <code>tree</code> reports the selected <strong>pre-order index</strong> through the <code>Var Int</code>, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.</p>
+<p>For very large trees, keep the expansion set in a <code>VarMap</code> keyed by a stable path, and rebuild the visible items before calling <code>tree</code>.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><strong><code>setDrawSquareGeometry</code></strong> makes every widget shape a flat axis-aligned quad. Without it, anti-aliased edges are approximations of the rounded shapes.</li>
-<li><strong><code>setDrawExternalText</code></strong> moves all text onto the spans the exporter reads. Without it, drawing text is missing from the export.</li>
-</ul>
-<p>The export includes proper <code>clip-path</code> masks, linear gradients, rounded rectangles, and font metrics. The interactive specimens and workbenches in this book are generated with this path, and the <code>nano-ui-demo-svg</code> executable exports the demo’s Plots tab.</p>
-<h2 id="use-cases"><a class="header" href="#use-cases">Use cases</a></h2>
-<ul>
-<li><strong>Documentation</strong>: render a view or widget to an SVG for a static page.</li>
-<li><strong>Visual regression testing</strong>: run frames headlessly in CI (no X11, Wayland, or Windows desktop) and diff against golden SVGs.</li>
-<li><strong>Diagram export</strong>: write charts and canvases to standalone <code>.svg</code> files for reports.</li>
-</ul>
-<h2 id="pitfalls"><a class="header" href="#pitfalls">Pitfalls</a></h2>
-<ul>
-<li>Several canvas drawings in one frame can emit colliding <code>clip_</code>/<code>grad_</code> element ids. Scope them per drawing, for example by prefixing each <code>&lt;g&gt;&lt;defs&gt;</code> block with an index.</li>
-<li>Right-aligned numerals can lose their anchor: <code>text-anchor</code>/<code>textLength</code> may need post-processing. Use tabular numbers (<code>font-variant-numeric: tabular-nums</code>) for readouts.</li>
-<li>Widget chrome comes from the frame’s vertex data, not from <code>DrawOp</code>s; a custom widget must draw through the canvas API to appear in the vector output.</li>
-</ul>
-<h2 id="related"><a class="header" href="#related">Related</a></h2>
-<ul>
-<li>Custom drawing: <a href="../widgets/canvas-custom.html">Canvas Drawing</a>.</li>
-<li>Charts: <a href="nano-ui-diagrams.html">Charts &amp; Diagrams</a>.</li>
-<li>Headless testing: <code>NanoUI.Testing</code> and <code>NanoUI.Testing.Harness</code>.</li>
+<li>The rest of the widget family: <a href="index.html">Widget Gallery</a>.</li>
+<li>Styling tables and tabs: <a href="../styling/index.html">Styling &amp; Theming</a> and the <a href="../styling/lab.html">lab</a>.</li>
+<li>Drag-and-drop tab reordering: <a href="drag-and-drop.html">Drag &amp; Drop</a>.</li>
 </ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../packages/nano-ui-markdown.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../widgets/text-editing.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../troubleshooting/recurring-bugs.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../widgets/overlays.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -260,11 +264,11 @@ exportViewToSvg view = do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../packages/nano-ui-markdown.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../widgets/text-editing.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../troubleshooting/recurring-bugs.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../widgets/overlays.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -361,14 +361,14 @@ swapIds a b xs = map pick xs
 <pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
 </code></pre>
 <p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view — an open popup or a second <code>takeEscape</code> — do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
-<p>For the full shortcut model — <code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys — see <a href="../input/shortcuts.html">Keyboard Shortcuts</a>.</p>
+<p>For the full shortcut model — <code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys — see <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>
 <h2 id="8-try-it"><a class="header" href="#8-try-it">8. Try it</a></h2>
 <p>Start from the runnable source and change one thing at a time:</p>
 <ul>
 <li>Replace the Up/Down buttons with <code>useReorder</code> for drag-and-drop reordering (see <a href="../widgets/drag-and-drop.html">Drag &amp; Drop</a>).</li>
 <li>Add a “hide completed” filter persistence setting with <code>newVar</code> and a <code>Settings</code> record.</li>
 <li>Show an empty state when <code>shown</code> is empty, for example <code>muted "Nothing here yet."</code></li>
-<li>Validate the draft length with the techniques in <a href="../packages/nano-ui-form.html">Validated Forms</a>.</li>
+<li>Validate the draft length with the techniques in <a href="../packages/index.html">Ecosystem Packages</a>.</li>
 </ul>
 <p>Next: <a href="notepad.html">Tutorial 2: Build a Notepad</a> adds menus, dialogs, and a real text document.</p>
 

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Theming &amp; Surfaces - nano-ui Documentation</title>
+        <title>Keyboard, Focus &amp; IME - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,51 +178,124 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="theming--surface-architecture"><a class="header" href="#theming--surface-architecture">Theming &amp; Surface Architecture</a></h1>
-<p><code>nano-ui</code> uses a structured surface routing architecture rather than individual per-widget CSS rules.</p>
-<h2 id="the-five-surfaces-of-a-theme"><a class="header" href="#the-five-surfaces-of-a-theme">The Five Surfaces of a <code>Theme</code></a></h2>
-<p>A <code>Theme</code> holds five distinct <code>Style</code> records corresponding to semantic surfaces:</p>
-<ol>
-<li><strong><code>themeButton</code></strong>: Interactive controls, buttons, toggles, and dropdown triggers.</li>
-<li><strong><code>themeInput</code></strong>: Editable text fields, search boxes, numeric inputs, and sliders.</li>
-<li><strong><code>themePanel</code></strong>: Cards, containers, sidebars, toolbars, and background chrome.</li>
-<li><strong><code>themePopup</code></strong>: Dropdown menus, context menus, and select popouts.</li>
-<li><strong><code>themeFloatingWindow</code></strong>: Modals, draggable windows, and inspector dialogs.</li>
-</ol>
-<p>In addition, a <code>Theme</code> defines semantic color roles:</p>
-<ul>
-<li><code>themeAccent</code> &amp; <code>themeOnAccent</code>: Primary brand actions and focus rings.</li>
-<li><code>themeMuted</code>: Secondary labels, placeholders, and subtle borders.</li>
-<li><code>themeSelection</code>: Highlighted text and selected list rows.</li>
-<li><code>themeFocusRing</code>: Keyboard focus outlines.</li>
-<li>Semantic Tones: <code>themeSuccess</code>, <code>themeWarning</code>, <code>themeDanger</code>.</li>
-</ul>
-<hr>
-<h2 id="interactive-surface-overview"><a class="header" href="#interactive-surface-overview">Interactive Surface Overview</a></h2>
-<p>Toggle surfaces below to observe how each surface category routes across composite controls:</p>
-<p><nano-ui-hero></nano-ui-hero></p>
-<hr>
-<h2 id="scoped-theming-with-styled-and-themed"><a class="header" href="#scoped-theming-with-styled-and-themed">Scoped Theming with <code>styled</code> and <code>themed</code></a></h2>
-<p>Themes are composable and scoped lexically using standard Haskell combinators:</p>
-<pre><code class="language-haskell">-- Switch base theme for a subtree
-themed defaultLightTheme $ do
-  mainContent
+                        <h1 id="keyboard-focus--ime"><a class="header" href="#keyboard-focus--ime">Keyboard, Focus &amp; IME</a></h1>
+<p>Keyboard input is read during the frame, not registered with the window. A focused widget claims the keys it uses; shortcuts and key listeners are filtered automatically.</p>
+<h2 id="shortcuts"><a class="header" href="#shortcuts">Shortcuts</a></h2>
+<pre><code class="language-haskell">import NanoUI.Shortcut
 
--- Scope a theme transformation
-styled (primary . rounded 999) $ do
-  button "Submit Order"
+saveChord = cmdOrCtrl &lt;&gt; key 's'
+
+saveCommand = whenM (shortcut saveChord) saveDocument
 </code></pre>
-<p>Modifiers compose cleanly with <code>(.)</code>. Nested scopes inherit modifications made by outer scopes.</p>
+<p><code>&lt;&gt;</code> unions modifiers and keeps the right-hand key. <code>key</code> accepts a <code>Key</code> or a <code>Char</code>; letters are case-insensitive, and space maps to <code>KeySpace</code>:</p>
+<pre><code class="language-haskell">ctrl &lt;&gt; key 's'                 -- Ctrl+S
+cmdOrCtrl &lt;&gt; shift &lt;&gt; key 'p'   -- Cmd+Shift+P on macOS, Ctrl+Shift+P elsewhere
+alt &lt;&gt; key KeyEnter             -- Alt+Enter
+key (KeyF 5)                    -- F5
+</code></pre>
+<p>Use <code>cmdOrCtrl</code> for application commands. <code>ctrl</code>, <code>shift</code>, <code>alt</code>, and <code>super</code> are exact: <code>ctrl &lt;&gt; key 's'</code> does <strong>not</strong> match Ctrl+Shift+S.</p>
+<ul>
+<li><strong><code>shortcut</code></strong> fires on the frame the chord goes down, including auto-repeat (holding Ctrl+Z repeats undo).</li>
+<li><strong><code>shortcutOnce</code></strong> ignores auto-repeat. Use it for toggles and one-shot commands.</li>
+</ul>
+<p>Only the <strong>first</strong> matching <code>shortcut</code> call in a frame fires. It consumes that key’s presses for the frame, so two bindings of the same chord never both run. Declaration order is priority order.</p>
+<h2 id="what-suppresses-a-shortcut"><a class="header" href="#what-suppresses-a-shortcut">What suppresses a shortcut</a></h2>
+<p>A chord does not fire:</p>
+<ul>
+<li>behind an open modal;</li>
+<li>inside <code>disabledWhen True</code>;</li>
+<li>when the focused widget claims the key — a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;</li>
+<li>for Escape when <code>takeEscape</code> fails, or when an open overlay takes it first.</li>
+</ul>
+<p>Focused widgets claim only their own unmodified or Shift-modified keys, so modified chords such as <code>Ctrl+Enter</code>, <code>Alt+Left</code>, or <code>Ctrl+S</code> still reach the application while a field is focused. The matching low-level functions are filtered the same way: <code>keyPressed</code>, <code>keyPressedOnce</code>, <code>keyReleased</code>, and <code>keyHeld</code>. Use raw <code>pressedIn</code> only when implementing a custom widget.</p>
+<h2 id="menus-and-shortcuts"><a class="header" href="#menus-and-shortcuts">Menus and shortcuts</a></h2>
+<p><code>menuItemShortcut</code> shows a chord beside a menu row and binds it <strong>while the menu is open</strong>. Bind the same chord outside the menu for when it is closed:</p>
+<pre><code class="language-haskell">whenM (menuItemShortcut "Save" saveChord) saveDocument
+whenM (shortcut saveChord) saveDocument
+</code></pre>
+<p>The open menu’s row is declared first, so it wins. Define the action once and connect both triggers to it.</p>
+<h2 id="escape"><a class="header" href="#escape">Escape</a></h2>
+<p>Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition — do not share the “a field is editing” guard used for Ctrl+A or Delete.</p>
+<p><code>takeEscape</code> claims a press for the current handler:</p>
+<pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
+whenM takeEscape clearFocus
+</code></pre>
+<p>The first call that succeeds wins. An open popup, dropdown, or text-edit menu reserves Escape before the view sees it.</p>
+<h2 id="user-configurable-chords"><a class="header" href="#user-configurable-chords">User-configurable chords</a></h2>
+<p><code>parseShortcut</code> reads a chord from text, for a settings file or keymap editor:</p>
+<pre><code class="language-haskell">case parseShortcut "C-S-s" of
+  Right chord -&gt; ...
+  Left err    -&gt; showError err
+</code></pre>
+<p>The syntax is modifier prefixes followed by a key: <code>C-</code> Ctrl, <code>S-</code> Shift, <code>A-</code> Alt/Option, <code>s-</code> Super, <code>M-</code> Command on macOS and Ctrl elsewhere. A key is one character as typed without Shift, or a named key in angle brackets: <code>C-s</code>, <code>M-S-p</code>, <code>A-&lt;Enter&gt;</code>, <code>&lt;F5&gt;</code>, <code>C--</code>, <code>C-S-=</code>. Name a symbol by its unshifted key, so Ctrl++ on a US layout is <code>C-S-=</code>.</p>
+<p><code>shortcutLabel</code> renders a chord for menus and tooltips.</p>
+<h2 id="focus"><a class="header" href="#focus">Focus</a></h2>
+<ul>
+<li><strong>Click</strong> a text field, select, slider, or focusable custom widget to focus it. Clicking elsewhere unfocuses the current field.</li>
+<li><strong>Tab</strong> moves to the next focusable widget; <strong>Shift+Tab</strong> to the previous.</li>
+<li><strong><code>requestFocus (respId resp)</code></strong> focuses a widget. <strong><code>focusNext</code> / <code>focusPrevious</code></strong> behave like Tab. <strong><code>clearFocus</code></strong> drops focus at the end of the frame.</li>
+<li><strong><code>holdFocus wid</code></strong> claims focus every frame for a view that handles input itself; it also consumes Tab so an editor can indent with it.</li>
+</ul>
+<p>Focus requests are applied <strong>at the end of the frame</strong>, against that frame’s layout. A focus move is visible on the next frame:</p>
+<pre><code class="language-haskell">resp &lt;- searchInput' "Find" query
+whenM (shortcut (cmdOrCtrl &lt;&gt; key 'f')) (requestFocus (respId resp))
+-- next frame: the focus ring is drawn and isFocused answers True
+</code></pre>
+<p>A request can name a widget declared later in the same pass (for example with <code>currentId</code> just before it), but not one that is not declared on this pass at all. A widget that appears after a state change needs a delayed request:</p>
+<pre><code class="language-haskell">editing &lt;- useVar False
+focusPending &lt;- useVar False
+
+showField &lt;- readVar editing
+scope $
+  if showField
+    then do
+      fieldR &lt;- textInput' draft
+      whenM (readVar focusPending) $ do
+        requestFocus (respId fieldR)
+        writeVar focusPending False
+    else label "Not editing"
+
+whenM (button "Edit") $ do
+  writeVar editing True
+  writeVar focusPending True
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-warning">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
+<p>Query focus at the <strong>end</strong> of the view. The node arena is reset before the view runs, so <code>isFocused</code> at the top always answers <code>False</code>. Keyboard shortcuts that depend on focus belong after the widgets have run.</p>
+</blockquote>
+<p>A focus request is ignored for a disabled widget, a widget behind an open modal, one not declared this pass, or a group response that is not itself a Tab stop. A widget in an inactive tab is not declared, so it cannot keep focus; request focus again when the tab is shown.</p>
+<p><code>disabledWhen</code> dims a subtree and blocks interaction without changing layout or state. The focus ring is themed by <code>themeFocusRing</code>.</p>
+<h2 id="ime"><a class="header" href="#ime">IME</a></h2>
+<p>Input method editors compose text before committing it. Built-in text fields handle the whole cycle, including caret rendering and suppressing shortcuts mid-composition.</p>
+<p>A custom widget that reads committed characters from <code>inputChars</code> must opt in every frame it accepts text:</p>
+<pre><code class="language-haskell">preedit &lt;- useInputMethod wid InputNormal caretRect
+for_ preedit drawCompositionAtCaret
+</code></pre>
+<p><code>useInputMethod :: WidgetId -&gt; InputPurpose -&gt; Rect -&gt; NanoUI (Maybe Composition)</code> places the candidate window at the caret and returns the in-progress composition to draw. Pass the caret rectangle, not the whole widget. It checks focus itself, so a separate <code>isFocused</code> guard is unnecessary.</p>
+<p>Raw input fields: <code>inputChars</code> (committed text), <code>inputKeys</code> (pressed, including repeats), <code>inputKeysNew</code> (initial presses), <code>inputKeysHeld</code>, <code>inputKeysReleased</code>, and <code>inputComposition</code>. The terminal demo in <code>packages/nano-ui-demo/examples/Terminal.hs</code> is a complete custom text widget.</p>
+<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
+<p>Focus changes apply on the next frame, so drive at least two frames:</p>
+<pre><code class="language-haskell">ctx &lt;- newContext
+(_, _, _) &lt;- runFrame ctx input1 view
+(_, _, _) &lt;- runFrame ctx input2 view
+</code></pre>
+<p>Warm up with <code>warmup2</code> before targeting a widget by <code>respRect</code>. For shortcut tests, build input with <code>keyInp</code> / <code>chordInp</code> from <code>NanoUI.Testing.Harness</code>.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
+<ul>
+<li>Widgets that take keys: <a href="../widgets/controls.html">Buttons, Menus &amp; Inputs</a>.</li>
+<li>Focus-dependent shortcut bugs: <a href="../troubleshooting/recurring-bugs.html">Troubleshooting</a>.</li>
+<li>Frame timing: <a href="../architecture/index.html">Architecture &amp; Internals</a>.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../widgets/canvas-custom.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../styling/gotchas.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../styling/interaction-states.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../advanced/async.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -232,11 +305,11 @@ styled (primary . rounded 999) $ do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../widgets/canvas-custom.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../styling/gotchas.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../styling/interaction-states.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../advanced/async.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

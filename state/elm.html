@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Custom Controls - nano-ui Documentation</title>
+        <title>Elm-Style State - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,81 +178,137 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="custom-controls"><a class="header" href="#custom-controls">Custom Controls</a></h1>
-<p>Some controls have no platform widget behind them: a rotary knob, a toggle switch, a progress ring. They are drawn with the canvas primitives in <code>NanoUI.Widgets.Custom</code>, behave like built-in widgets (focus, hover, press, theme), and return the same <code>Response</code> from their primed forms.</p>
-<pre><code class="language-haskell">import NanoUI.Widgets.Custom
+                        <h1 id="elm-style-state"><a class="header" href="#elm-style-state">Elm-Style State</a></h1>
+<p><code>nano-ui-emit</code> is the reducer-based alternative to <code>Var</code>: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model.</p>
+<pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
+data Msg = Increment | Decrement | SetName Text
+
+view :: Model -&gt; Emit.NanoUIE Msg ()
+view m = Emit.withNanoUI column $ do
+  Emit.liftNanoUI (heading "Profile")
+  Emit.withNanoUI row $ do
+    Emit.emitWhen (button "-") Decrement
+    Emit.liftNanoUI (label (T.pack (show m.counter)))
+    Emit.emitWhen (button "+") Increment
+  Emit.emitChanged textInput m.name SetName
+
+update :: Msg -&gt; Model -&gt; Model
+update Increment m = m {counter = m.counter + 1}
+update Decrement m = m {counter = m.counter - 1}
+update (SetName n) m = m {name = n}
+
+main :: IO ()
+main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </code></pre>
+<p>Everything else about nano-ui — widgets, layout, focus, and keys — is unchanged. The state-management style is what differs.</p>
+<h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
+<p><code>NanoUIE msg a</code> is a <code>NanoUI</code> action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting the wrong type is a compile error.</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Control</th><th>Signature</th><th>Default size</th><th>Notes</th></tr>
+<tr><th>Function</th><th>Emits when</th></tr>
 </thead>
 <tbody>
-<tr><td><code>knob</code></td><td><code>Float -&gt; Float -&gt; Var Float -&gt; NanoUI ()</code></td><td>36×36</td><td>Min, max, value. Vertical drag, wheel, arrow keys.</td></tr>
-<tr><td><code>toggleSwitch</code></td><td><code>Var Bool -&gt; NanoUI ()</code></td><td>44×24</td><td>Click, Space, or Enter toggles.</td></tr>
-<tr><td><code>circularProgress</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>32×32</td><td>Fraction in <code>[0, 1]</code>; rings on the accent color.</td></tr>
-<tr><td><code>progressBar</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>fills width, 12 high</td><td>Fraction in <code>[0, 1]</code>; minimum content width 120.</td></tr>
-<tr><td><code>spinner</code></td><td><code>NanoUI ()</code></td><td>18×18</td><td>Indeterminate; requests animation frames while declared.</td></tr>
-<tr><td><code>sparkline</code></td><td><code>[Float] -&gt; NanoUI ()</code></td><td>80×24</td><td>Scales to the values’ range.</td></tr>
+<tr><td><code>emit msg</code></td><td>Immediately</td></tr>
+<tr><td><code>emitWhen widget msg</code></td><td>The widget returns <code>True</code> (button click, submitted field)</td></tr>
+<tr><td><code>emitChanged widget old toMsg</code></td><td>The widget’s final value differs from <code>old</code></td></tr>
+<tr><td><code>emitEdited widget old toMsg</code></td><td>The value changed <strong>and</strong> <code>respChanged</code> is true</td></tr>
 </tbody>
 </table>
 </div>
-<p>Every control follows the naming conventions:</p>
+<p><code>liftNanoUI</code> runs an ordinary widget or action. <code>withNanoUI</code> wraps a typed body in an ordinary layout, key, or scope:</p>
+<pre><code class="language-haskell">Emit.withNanoUI column $ do
+  Emit.liftNanoUI (label "Settings")
+  Emit.withNanoUI (withKey "form") $ do
+    Emit.emitChanged (slider 0 100) volume SetVolume
+    Emit.emitWhen (button "Save") Save
+</code></pre>
+<p><code>withRunInNanoUIE</code> supplies a runner for ordinary widgets that take callbacks or multiple bodies:</p>
+<pre><code class="language-haskell">view model = Emit.withRunInNanoUIE $ \run -&gt; column $ do
+  label "Settings"
+  run (Emit.emitChanged (slider 0 100) model.volume SetVolume)
+  run (Emit.emitWhen (button "Save") SaveDocument)
+</code></pre>
+<p><code>emitChanged</code> runs the widget against a temporary <code>Var</code> seeded with the model value and emits the new value only if it differs. <code>emitEdited</code> is its stricter form for text fields, where programmatic writes should not look like edits.</p>
+<blockquote class="blockquote-tag blockquote-tag-caution">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
+<p>Emit only inside an event branch. <code>emit Save</code> at the top level of a view emits on every pass, and the reducer runs every message. The adapters above already guard on the widget’s event.</p>
+</blockquote>
+<p>Messages are collected across every pass of a frame, including local-<code>Var</code> rebuilds, and reduced at frame end in emission order.</p>
+<h2 id="components"><a class="header" href="#components">Components</a></h2>
+<p><code>mapMessages</code> embeds a child view whose message type is smaller than its parent’s:</p>
+<pre><code class="language-haskell">data ChildMsg = ChildIncrement | ChildReset
+data ParentMsg = Child ChildMsg | SaveAll
+
+childView :: Int -&gt; Emit.NanoUIE ChildMsg ()
+childView n = Emit.withNanoUI row $ do
+  Emit.emitWhen (button "+") ChildIncrement
+  Emit.liftNanoUI (label (T.pack (show n)))
+  Emit.emitWhen (button "Reset") ChildReset
+
+parentView :: Int -&gt; Emit.NanoUIE ParentMsg ()
+parentView n = Emit.withNanoUI column $ do
+  Emit.mapMessages Child (childView n)
+  Emit.emitWhen (button "Save All") SaveAll
+</code></pre>
+<p>Messages go straight to the parent’s sink in traversal order, with no intermediate queue. <code>mapMessages</code> changes the message type, not widget identity: a list still needs <code>withKey</code> around each component, exactly as a <code>Var</code>-based row does.</p>
+<p>For local UI state, keep using <code>Var</code> inside the component; the durable model stays in <code>NanoUIE</code>.</p>
+<h2 id="running-and-testing"><a class="header" href="#running-and-testing">Running and testing</a></h2>
+<p><code>runSdlAppReduce</code> and <code>runRgfwAppReduce</code> take an update function, an initial model, and a view:</p>
+<pre><code class="language-haskell">runSdlAppReduce defaultSdlOptions update initialModel view
+</code></pre>
+<p>The view runs with the current model, messages are reduced at frame end, and the drawing shown for that frame is from <strong>before</strong> the reduction. If the model changed, another frame is requested to draw it. That follow-up frame is intentional.</p>
+<p>For tests and embedded uses:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Function</th><th>Returns</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runNanoUIE view</code></td><td><code>NanoUI (result, [msg])</code></td></tr>
+<tr><td><code>runFrameE ctx input view</code></td><td><code>IO (result, [msg], DrawData, Bool)</code></td></tr>
+<tr><td><code>runFrameReduce update ctx input model view</code></td><td><code>IO (result, model, [msg], DrawData, Bool)</code></td></tr>
+<tr><td><code>runClickReduce update ctx input model view pos</code></td><td><code>IO (model, [msg], Bool)</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>runFrameReduce</code> requests a follow-up frame when the reduced model differs. <code>reduceMessages</code> and <code>reduceUpdates</code> fold message lists.</p>
+<h2 id="when-to-use-it"><a class="header" href="#when-to-use-it">When to use it</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th><code>Var</code>-first</th><th>Elm-style</th></tr>
+</thead>
+<tbody>
+<tr><td>State shape</td><td>Distributed through the view and app record</td><td>One model value</td></tr>
+<tr><td>Transitions</td><td>Direct mutation</td><td>Explicit <code>Msg</code> and one <code>update</code></td></tr>
+<tr><td>Testing</td><td>Widget-level with <code>NanoUI.Testing</code></td><td>Pure <code>update</code> tests plus frame tests</td></tr>
+<tr><td>Local widget state</td><td>Natural</td><td>Still use <code>Var</code> for drafts and open flags</td></tr>
+<tr><td>Best for</td><td>Tools and editors with external state</td><td>State machines, wizards, undo/history, small apps with a clear model</td></tr>
+</tbody>
+</table>
+</div>
+<p>The styles mix. An emitting view can keep <code>Var</code>s for transient UI state; a <code>Var</code>-based view can run a small component with <code>runNanoUIE</code> and act on the returned messages.</p>
+<h2 id="rules-and-pitfalls"><a class="header" href="#rules-and-pitfalls">Rules and pitfalls</a></h2>
 <ul>
-<li><strong>Primed</strong> (<code>knob'</code>, <code>toggleSwitch'</code>, <code>circularProgress'</code>, <code>progressBar'</code>, <code>spinner'</code>, <code>sparkline'</code>) returns <code>Response</code>.</li>
-<li><strong><code>...With</code></strong> takes a <code>Layout -&gt; Layout</code> modifier and the control’s size parameters first: <code>knobWith (alignMid) 48 0 100 volume</code>, <code>progressBarWith fillW 6 progress</code>, <code>sparklineWith (fixedWH 120 32) 120 32 samples</code>.</li>
+<li><strong>Keep <code>update</code> pure.</strong> File and network I/O belong in the view’s event branch or in an effect queue interpreted outside the reducer.</li>
+<li><strong>Do not duplicate model state in <code>Var</code>s.</strong> Local UI state is fine; durable state should have one home.</li>
+<li><strong>Guard every emission.</strong> Unconditional emissions run on every pass.</li>
+<li><strong>Component keys are required in lists.</strong> Give each instance a distinct <code>withKey</code>.</li>
+<li><strong>Keyboard and focus rules are unchanged.</strong> Focus queries still belong at the end of the view.</li>
+<li><strong>Model changes draw on the next frame.</strong> Do not compensate by writing the model into a <code>Var</code> mid-frame.</li>
 </ul>
-<h2 id="a-settings-row"><a class="header" href="#a-settings-row">A settings row</a></h2>
-<pre><code class="language-haskell">settingsRow :: Var Bool -&gt; Var Float -&gt; NanoUI ()
-settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
-  toggleSwitch enabled
-  labelWith (alignMid . fixedW 64) "Enabled"
-  knob 0 100 volume
-  v &lt;- readVar volume
-  labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
-</code></pre>
-<p>The <code>fixedW</code> on the changing label keeps the controls from shifting as the number’s width changes. The knob reads its <code>Var</code> directly; the label reads it <em>below</em> the knob, so a drag resolves in the same pass.</p>
-<h2 id="progress-and-busy-states"><a class="header" href="#progress-and-busy-states">Progress and busy states</a></h2>
-<p><code>progressBar</code> and <code>circularProgress</code> take a fraction, not a percentage:</p>
-<pre><code class="language-haskell">progressSection :: Float -&gt; Bool -&gt; NanoUI ()
-progressSection frac running = columnWith (gap 8) $ do
-  rowWith (gap 12 . alignMid) $ do
-    -- The spinner comes and goes; the label keeps its id either way.
-    scope (when running spinner)
-    label (if running then "Working..." else "Idle")
-  progressBar frac
-  muted (T.pack (show (round (frac * 100) :: Int)) &lt;&gt; "%")
-  circularProgressWith (fixedWH 40 40) 40 frac
-</code></pre>
-<p><code>spinner</code> calls <code>keepAnimating</code> internally for as long as it is drawn. Do not add a global <code>keepAnimating</code>; that would keep the frame loop running when the spinner is not visible.</p>
-<h2 id="sparklines-in-a-table"><a class="header" href="#sparklines-in-a-table">Sparklines in a table</a></h2>
-<p><code>sparkline</code> is a pure drawing of a list of values, which makes it useful in dashboards and table cells:</p>
-<pre><code class="language-haskell">cpuCell :: [Float] -&gt; NanoUI ()
-cpuCell samples = rowWith (gap 8 . alignMid) $ do
-  sparklineWith (fixedWH 80 24) 80 24 samples
-  let latest = if null samples then 0 else last samples
-  labelWith (fontMono . fixedW 40) (T.pack (show (round latest :: Int)) &lt;&gt; "%")
-</code></pre>
-<p>The sparkline scales each list to its own min and max, so a flat series draws a flat line rather than a zero baseline. It does not smooth or resample; feed it the samples you want drawn.</p>
-<h2 id="customizing-further"><a class="header" href="#customizing-further">Customizing further</a></h2>
-<p>These controls are reference implementations of <code>customWidget</code>: each has a <code>CustomWidgetSpec</code> with a layout, a draw function, a cursor, and a content key. When the keyed content changes, only that widget repaints.</p>
-<p>To build your own control, read <a href="canvas-custom.html">Canvas Drawing</a>. The important rules carry over:</p>
-<ul>
-<li><strong>Include everything the drawing reads in the content key</strong> — values, colors, text, and animation state. A key that misses an input shows stale pixels.</li>
-<li><strong>Pin moving overlays with a version</strong> when their layout rectangle does not change (a drag ghost pinned at the cursor).</li>
-<li><strong>Use the theme</strong> (<code>themeAccent</code>, <code>themeButton</code>, <code>themeMuted</code>) rather than literal colors, so the control follows light/dark and per-subtree styling.</li>
-</ul>
-<p>The <a href="../styling/widget-surfaces.html">workbenches</a> render these custom controls with every styling modifier applied, which is the fastest way to see what <code>buttonStyle</code> or <code>accentColor</code> does to them.</p>
+<p>The <code>Var</code> style is covered in <a href="index.html">State &amp; <code>Var</code></a>; the frame consequences are in <a href="../architecture/index.html">Architecture &amp; Internals</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../widgets/drag-and-drop.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../state/identity.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../widgets/canvas-custom.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../layout/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -262,11 +318,11 @@ cpuCell samples = rowWith (gap 8 . alignMid) $ do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../widgets/drag-and-drop.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../state/identity.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../widgets/canvas-custom.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../layout/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Abstraction Audit - nano-ui Documentation</title>
+        <title>Styling &amp; Theming - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,45 +178,97 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="abstraction-audit"><a class="header" href="#abstraction-audit">Abstraction Audit</a></h1>
-<p>An audit of architectural refinements, source simplifications, and zero-cost abstractions across <code>nano-ui</code>.</p>
-<h2 id="summary-of-refinements"><a class="header" href="#summary-of-refinements">Summary of Refinements</a></h2>
+                        <h1 id="styling--theming"><a class="header" href="#styling--theming">Styling &amp; Theming</a></h1>
+<p>Styling in nano-ui is scoped: a <code>Theme</code> holds a <code>Style</code> per surface kind, and <code>styled</code>/<code>themed</code> modify that theme for a subtree. There is no per-widget CSS and no global mutable stylesheet.</p>
+<p>For a live tour of the modifiers, see the <a href="lab.html">Interactive Styling Lab</a>. For non-obvious behavior, see <a href="gotchas.html">Styling Gotchas</a>.</p>
+<h2 id="the-themes-five-surfaces"><a class="header" href="#the-themes-five-surfaces">The theme’s five surfaces</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Subsystem</th><th>Optimization / Abstraction</th><th>Impact</th></tr>
+<tr><th>Field</th><th>Used by</th></tr>
 </thead>
 <tbody>
-<tr><td><strong>Widget Construction</strong></td><td>Inlined leaf node initializers with text-style packing kept strictly on the styled path.</td><td>Eliminates branch overhead during traversal.</td></tr>
-<tr><td><strong>Controlled Inputs</strong></td><td>Shared boolean activation and completion policies with live-versus-caller comparison.</td><td>Unifies input event lifecycle.</td></tr>
-<tr><td><strong>UI Scopes</strong></td><td>Shared bridge for bracketed ID allocation and paint scopes.</td><td>Prevents ID drift across frame rebuilds.</td></tr>
-<tr><td><strong>Forms</strong></td><td>Named/positional input families, independent field captions, and <code>inputWidget</code> adapters.</td><td>Zero-allocation applicative forms.</td></tr>
-<tr><td><strong>Reducers</strong></td><td>Three generic adapters replacing dozens of per-widget <code>NanoUI.Emit</code> wrappers.</td><td>Massive code reduction in <code>nano-ui-emit</code>.</td></tr>
-<tr><td><strong>Scrollbars</strong></td><td>Unified scalar calculation for vertical and horizontal orientations with inverse thumb positioning.</td><td>Eliminates duplicate layout code.</td></tr>
-<tr><td><strong>Themes</strong></td><td>Shared Base16 palette construction with dark/light adaptive transforms.</td><td>Instant theme switching.</td></tr>
-<tr><td><strong>Animation</strong></td><td>Indexed applicative channel traversal replacing lists and partial reconstructions.</td><td>Constant-time channel updates.</td></tr>
-<tr><td><strong>Draw Commands</strong></td><td>Vector’s <code>IsoUnbox</code>/<code>As</code> deriving replacing handwritten <code>Prim</code> instances.</td><td>Compile-time SIMD unboxing.</td></tr>
-<tr><td><strong>Canvas</strong></td><td>Strict standard <code>State</code> monad replacing custom handwritten monad instances.</td><td>Inlines directly into draw-op arrays.</td></tr>
+<tr><td><code>themeButton</code></td><td>Buttons, toggles, dropdown triggers</td></tr>
+<tr><td><code>themeInput</code></td><td>Text fields, search boxes, numeric inputs, sliders</td></tr>
+<tr><td><code>themePanel</code></td><td>Cards, containers, sidebars, toolbars</td></tr>
+<tr><td><code>themePopup</code></td><td>Dropdowns, context menus, select popouts</td></tr>
+<tr><td><code>themeFloatingWindow</code></td><td>Modals, floating windows, inspectors</td></tr>
 </tbody>
 </table>
 </div>
-<h2 id="verification-suite"><a class="header" href="#verification-suite">Verification Suite</a></h2>
-<p>The <code>nano-ui-inspection</code> test suite includes 21 formal assertions verifying that:</p>
+<p>A <code>Style</code> is <code>bg</code>, <code>fg</code>, <code>border</code>, <code>borderWidth</code>, <code>cornerRadius</code>, <code>hoverBg</code>, and <code>activeBg</code>. A <code>Theme</code> also defines semantic colors: <code>themeAccent</code> / <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success/warning/danger tones.</p>
+<p>Built-in themes: <code>defaultTheme</code> (dark), <code>defaultLightTheme</code>, the Tomorrow variants, and <code>themeFromBase16</code> / <code>themeFromBase16Dark</code> / <code>themeFromBase16Light</code>. Set one at startup with <code>sdlAppTheme = Just appTheme</code>, switch per frame with <code>setUiTheme</code>, or follow the OS with <code>followSystemTheme</code> / <code>lightDark</code>.</p>
+<h2 id="scoped-styling"><a class="header" href="#scoped-styling">Scoped styling</a></h2>
+<pre><code class="language-haskell">-- Replace the base theme for a subtree.
+themed defaultLightTheme mainContent
+
+-- Modify the active theme for a subtree.
+styled (primary . rounded 999) $ button "Continue"
+</code></pre>
+<p>Modifiers compose with <code>(.)</code>; nested scopes inherit the outer modification. Theme scopes affect painting only, never layout metrics.</p>
+<p>Useful modifiers:</p>
+<ul>
+<li><strong>Style fields:</strong> <code>background</code>, <code>foreground</code>, <code>borderColor</code>, <code>borderWidth</code>, <code>borderSides</code>, <code>cornerRadius</code>, <code>hoverBackground</code>, <code>pressBackground</code>, <code>fillColor</code>.</li>
+<li><strong>Theme-level:</strong> <code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>everyStyle</code>, <code>accentColor</code>, <code>textColor</code>, <code>rounded</code>, <code>subtle</code>, <code>tinted</code>, <code>readableOn</code>.</li>
+<li><strong>Semantic shortcuts:</strong> <code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, <code>toneColor Warning</code>.</li>
+</ul>
+<p>A common local helper is a quiet button:</p>
+<pre><code class="language-haskell">quiet = subtle . buttonStyle (foreground muted)
+
+whenM (styled quiet (button "Skip")) skip
+</code></pre>
+<p>For a fully custom look, define a palette record, build a <code>Theme</code> from it, and derive scoped helpers. Keep three surface levels (well, shelf, controls) and reserve color for meaning.</p>
+<h2 id="interaction-states"><a class="header" href="#interaction-states">Interaction states</a></h2>
+<p>Widgets move through four states:</p>
 <ol>
-<li>Vector animation traversal equals handwritten scalar arithmetic.</li>
-<li>Command reads/writes compile without typeclass dictionaries or box allocations.</li>
-<li>Canvas construction matches direct array emission.</li>
+<li><strong>Default</strong> — <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>.</li>
+<li><strong>Hover</strong> — <code>styleHoverBg</code>.</li>
+<li><strong>Pressed</strong> — <code>styleActiveBg</code>, while the primary button is held inside the widget.</li>
+<li><strong>Disabled</strong> — dimmed and non-interactive.</li>
 </ol>
+<p><code>disabledWhen cond subtree</code> disables interaction and dims rendering while preserving layout and state:</p>
+<pre><code class="language-haskell">disabledWhen isSaving $ row $ do
+  button "Cancel"
+  button "Confirm"
+</code></pre>
+<p>Shortcuts and pointer events inside a disabled subtree are suppressed automatically.</p>
+<p>The interactive state laboratory renders all four states across controls in both light and dark mode:</p>
+<p><nano-ui-state-lab></nano-ui-state-lab></p>
+<h2 id="typography-and-fonts"><a class="header" href="#typography-and-fonts">Typography and fonts</a></h2>
+<p>Font modifiers apply to any text-capable widget (<code>labelWith</code>, <code>headingWith</code>, <code>textInputWith</code>, <code>buttonWith</code>, …):</p>
+<ul>
+<li><code>fontSize px</code>, <code>fontMono</code>, <code>fontBold</code> (<code>fontWeight</code>), <code>fontItalic</code>, <code>fontUnderline</code>, <code>fontStrike</code>.</li>
+<li><code>fontTone Warning</code>, <code>fontColor color</code>.</li>
+</ul>
+<pre><code class="language-haskell">labelWith (fontMono . fontSize 15 . fontTone Warning) "warning: low disk"
+</code></pre>
+<p>The SDL backend bundles Inter and uses installed fonts by family name:</p>
+<pre><code class="language-haskell">defaultSdlOptions
+  { sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Helvetica Neue"]
+  , sdlAppMonoFont = FontSearch ["Cascadia Mono", "JetBrains Mono", "Consolas"]
+  , sdlAppFontSize = 14
+  }
+</code></pre>
+<p><code>setSdlUiFont</code> changes fonts mid-session. <code>sdlAppUiScale = 0</code> follows the desktop scale on Windows. For exact font metrics and text measurement, use <code>lineWidth</code>, <code>fmLineHeight</code>, and <code>fmSnapScale</code> from the drawing API rather than summing per-glyph advances.</p>
+<p>The typography laboratory shows the modifiers side by side:</p>
+<p><nano-ui-typo-lab></nano-ui-typo-lab></p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
+<ul>
+<li>Widgets: <a href="../widgets/index.html">Widget Gallery</a>.</li>
+<li>Live modifier workbenches: <a href="lab.html">Interactive Styling Lab</a>.</li>
+<li>Behavior that surprises people: <a href="gotchas.html">Styling Gotchas</a>.</li>
+<li>Layout spacing and sizing: <a href="../layout/index.html">Layout &amp; Scrolling</a>.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../architecture/patterns.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../widgets/custom-drawing.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../architecture/source-reduction.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../styling/lab.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -226,11 +278,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../architecture/patterns.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../widgets/custom-drawing.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../architecture/source-reduction.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../styling/lab.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

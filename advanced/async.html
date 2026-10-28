@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Charts &amp; Diagrams - nano-ui Documentation</title>
+        <title>Async Work &amp; Animation - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,107 +178,137 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="charts--diagrams-nano-ui-diagrams"><a class="header" href="#charts--diagrams-nano-ui-diagrams">Charts &amp; Diagrams (<code>nano-ui-diagrams</code>)</a></h1>
-<p><code>nano-ui-diagrams</code> brings two things into a nano-ui layout:</p>
-<ul>
-<li><strong><code>NanoUI.Plot</code></strong> — line, bar, scatter, area, and step charts with axes, grid, legend, hover readout, and decimation.</li>
-<li><strong><code>NanoUI.Diagrams</code></strong> — the diagrams-lib backend and widget, for arbitrary vector drawings.</li>
-</ul>
-<pre><code class="language-haskell">import NanoUI
-import NanoUI.Plot
-</code></pre>
-<h2 id="a-first-chart"><a class="header" href="#a-first-chart">A first chart</a></h2>
-<pre><code class="language-haskell">data App = App {appPlots :: PlotCache}
-
-newApp :: IO App
-newApp = App &lt;$&gt; newPlotCache
-
-cpuChart :: App -&gt; Seq (Double, Double) -&gt; NanoUI ()
-cpuChart app samples =
-  void $ plot (appPlots app) (fillW . fixedH 220) $
-    withGrid GridBoth
-      . withXAxis "time (s)"
-      . withYAxis "CPU %"
-      . withLegend LegendNone
-      $ chart [line "cpu" samples]
-</code></pre>
-<p><code>plot</code> takes the cache, a layout modifier, and the <code>Chart</code>, and returns a <code>PlotResponse</code>. The cache is what makes it cheap: the <code>Chart</code> value can be rebuilt every frame, but the diagram behind it is rebuilt only when the chart or theme actually changes.</p>
-<p><code>lineChart</code>, <code>barChart</code>, <code>scatterChart</code>, and <code>areaChart</code> are the one-series shortcuts:</p>
-<pre><code class="language-haskell">resp &lt;- lineChart cache (fillW . fixedH 200) samples
-</code></pre>
-<h2 id="series"><a class="header" href="#series">Series</a></h2>
-<pre><code class="language-haskell">line    "cpu"   points     -- (x, y) pairs, connected in input order
-scatter "load"  points
-area    "mem"   points     -- filled to a baseline
-step    "state" points     -- horizontal/vertical steps
-bar     "disk"  [(label, value)]
-</code></pre>
-<p>Style modifiers compose on a series (<code>&amp;</code> is from <code>Diagrams.Prelude</code>):</p>
-<pre><code class="language-haskell">import Diagrams.Prelude ((&amp;))
-
-chart
-  [ line "cpu" cpuPoints
-      &amp; withColor (colorHex "#38bdf8")
-      &amp; withStrokeWidth 2
-      &amp; withMarker MarkCircle
-  , area "memory" memPoints
-  ]
-</code></pre>
-<p>Charts have a <code>Domain</code> per axis; <code>emptyChart</code> defaults to the data’s extent. <code>withTitle</code>, <code>withXAxis</code>, <code>withYAxis</code>, <code>withGrid</code>, <code>withLegend</code>, and <code>withDecimate</code> decorate the chart. <code>addSeries</code> appends a series while preserving order.</p>
-<p>Decimation is on by default for line, area, and step series; it thins the drawing and hit testing without changing the stored data. Scatter series and marked lines are thinned only past 2,000 points.</p>
-<h2 id="hover-and-live-readouts"><a class="header" href="#hover-and-live-readouts">Hover and live readouts</a></h2>
-<p><code>plot</code> returns <code>PlotResponse {plotResponse, plotHover}</code>. Hover is <code>Nothing</code> outside the data box:</p>
-<pre><code class="language-haskell">resp &lt;- plot cache (fillW . fixedH 260) theChart
-case plotHover resp of
-  Nothing -&gt; muted "Hover the chart to inspect a point"
-  Just h  -&gt; kv "value"
-               (T.pack (show (round (hoverDataY h) :: Int)) &lt;&gt; " at sample "
-                  &lt;&gt; T.pack (show (round (hoverDataX h) :: Int)))
-</code></pre>
-<p>For a crosshair cursor over the chart, wrap the call:</p>
-<pre><code class="language-haskell">withCursorShape UiCursorCrosshair (plot cache layout theChart)
-</code></pre>
-<h2 id="theme-awareness"><a class="header" href="#theme-awareness">Theme awareness</a></h2>
-<p>Charts read the active theme for the frame, grid, axes, labels, and the series palette. A chart inside <code>styled</code> or <code>themed</code> picks up that scope automatically. There is no separate chart theme to configure; <code>themeAccent</code>, <code>themeMuted</code>, and the palette fields do the work.</p>
-<h2 id="cache-lifetime"><a class="header" href="#cache-lifetime">Cache lifetime</a></h2>
-<p>A <code>PlotCache</code> belongs to one component and one session:</p>
+                        <h1 id="async-work--animation"><a class="header" href="#async-work--animation">Async Work &amp; Animation</a></h1>
+<p>The view must never block, and it should not redraw when nothing is moving. nano-ui handles both with the same idea: work is scheduled on a worker or a timed wake, and the frame loop sleeps until there is something to draw.</p>
+<p>Compile with <code>-threaded</code>; the loop sleeps while a job runs and the job runs on a Haskell thread while it is blocked.</p>
+<h2 id="task-one-job-per-key"><a class="header" href="#task-one-job-per-key"><code>Task</code>: one job per key</a></h2>
+<p>Allocate the handle once in <code>IO</code>:</p>
 <pre><code class="language-haskell">data App = App
-  { appPlots :: PlotCache
-  , appSeries :: Var [Point]
+  { appSearch :: Task Text [Text]
+  , appFlaky  :: Task Int Text
   }
 
 newApp :: IO App
-newApp = App &lt;$&gt; newPlotCache &lt;*&gt; newVar []
+newApp = App &lt;$&gt; newTask &lt;*&gt; newTask
 </code></pre>
-<p>Do not allocate a cache inside the view; it would discard the comparison state every frame. The cache keeps an entry per plot widget id and does not evict entries, so avoid creating plots whose ids change constantly (for example, one per item of an unbounded list). For a scrolling list of charts, reuse a fixed window of plot ids instead.</p>
-<h2 id="diagrams-lib-content"><a class="header" href="#diagrams-lib-content">Diagrams-lib content</a></h2>
-<p><code>diagram</code> places any <code>QDiagram</code> in the layout:</p>
-<pre><code class="language-haskell">import Diagrams.Prelude
-import NanoUI.Diagrams
+<p>Use it from the view:</p>
+<pre><code class="language-haskell">status &lt;- useTaskStatus (appSearch app) queryKey (fetchSearchResults queryKey)
 
-myDiagram :: NanoUI Response
-myDiagram = diagram (fixedWH 320 200) $ circle 80 # fc blue
+case status of
+  TaskRunning previous -&gt; showPreviousOrSpinner previous
+  TaskDone results     -&gt; renderResults results
+  TaskFailed err prev  -&gt; showError (displayException err)
 </code></pre>
-<p><code>diagramWithEnvelope</code> sets an explicit envelope; <code>diagramWithKeyAndEnvelope</code> adds a content version for cached drawings. The backend is exposed as <code>NanoUI.Diagrams.Backend</code> if you need to emit <code>DrawOp</code>s yourself.</p>
-<h2 id="performance-checklist"><a class="header" href="#performance-checklist">Performance checklist</a></h2>
+<p><code>useTask</code> is the simpler form when only the latest result matters:</p>
+<pre><code class="language-haskell">contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
+label (fromMaybe "Loading..." contents)
+</code></pre>
+<p>Rules:</p>
 <ul>
-<li>Allocate the <code>PlotCache</code> once, in <code>IO</code>.</li>
-<li>Build the <code>Chart</code> value per frame only from data you already have; do not parse or regroup in the view.</li>
-<li>Keep the point count sane; decimation helps drawing, not the cost of building the list.</li>
-<li>For live data, keep only the visible window of samples (the <code>LiveChart</code> example keeps 200).</li>
-<li>Do not create a new plot id per item in a growing list.</li>
+<li><strong>The key identifies the job.</strong> A new key starts a worker and cancels the old job with an asynchronous exception.</li>
+<li><strong>A skipped hook cancels the job.</strong> If the view does not call <code>useTask</code> for a full frame — because the pane is in an inactive tab or inside a branch — the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
+<li><strong>To retrigger the same input, put a counter in the key.</strong> A Retry button must change the key or the job never reruns.</li>
+<li><strong>Cancellation is an async exception.</strong> Use <code>bracket</code> or <code>withFile</code> inside the job so resources are released when the user changes the query.</li>
+<li><strong>The result is forced on the worker.</strong> Return a value in weak head normal form; force a list’s spine with <code>length found \</code>seq` pure found`.</li>
+<li><strong><code>TaskRunning previous</code> carries the last result</strong>, so a list does not flash empty while the next query runs.</li>
 </ul>
-<p>The live chart tutorial shows the stream-to-chart pipeline end to end: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</p>
+<h2 id="stream-repeated-pushes"><a class="header" href="#stream-repeated-pushes"><code>Stream</code>: repeated pushes</a></h2>
+<p>A <code>Stream</code> is for sensors, downloads, token streams, and anything that pushes repeatedly:</p>
+<pre><code class="language-haskell">data App = App {appProgress :: Stream () Int}
+
+newApp = App &lt;$&gt; newStream
+
+pct &lt;- useStream (appProgress app) () (0 :: Int) $ \update -&gt;
+  forM_ [1 .. 100] $ \i -&gt; do
+    threadDelay 50000
+    update (const i)
+progressBar (fromIntegral pct / 100)
+</code></pre>
+<p>The producer receives <code>update :: (s -&gt; s) -&gt; IO ()</code> and returns when done, cancelled, or throwing. Each update wakes the loop; updates between frames coalesce into one frame.</p>
+<ul>
+<li><strong>Stop by not calling the hook.</strong> <code>when isRunning (useStream ...)</code> releases the producer.</li>
+<li><strong>Stopping discards the accumulated state.</strong> Save it outside and pass it as the next initial value to resume.</li>
+<li><strong>The producer owns no UI.</strong> It may call <code>update</code> from its thread or threads it starts; never touch the UI <code>Context</code>.</li>
+</ul>
+<h2 id="threads-outside-those-handles"><a class="header" href="#threads-outside-those-handles">Threads outside those handles</a></h2>
+<pre><code class="language-haskell">wake &lt;- askWake        -- in the view, once
+
+forkIO $ do
+  result &lt;- expensiveQuery
+  writeVarIO queryResult result
+  wake                 -- schedule one frame
+</code></pre>
+<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The wake repaints the whole window because nothing says which widget changed; fine for occasional updates, not for a per-token stream.</p>
+<h2 id="animation"><a class="header" href="#animation">Animation</a></h2>
+<p><code>animateTo</code> moves a value toward a target:</p>
+<pre><code class="language-haskell">currentWidth &lt;- animateTo (Tween EaseOutQuad 0.25 0) targetWidth
+</code></pre>
+<p>A <code>Transition</code> is either:</p>
+<ul>
+<li><strong><code>Tween ease duration delay</code></strong>, in seconds. <code>EaseOutQuad</code>, <code>EaseInOutCubic</code>, <code>EaseOutBack</code>, and <code>EaseCubicBezier</code> are some available curves.</li>
+<li><strong><code>Spring params</code></strong>, a damped spring. <code>presetSmooth</code>, <code>presetBouncy</code>, and <code>presetStiff</code> are the presets.</li>
+</ul>
+<pre><code class="language-haskell">pos &lt;- animateToA (Spring presetSmooth) (V2 targetX targetY)
+</code></pre>
+<p>Springs retarget mid-flight from their current position and velocity. <code>animateToA</code> animates any <code>Animatable</code> value — <code>Float</code>, <code>Double</code>, <code>V2</code>, or <code>Color</code> — channel by channel.</p>
+<h3 id="continuous-animation"><a class="header" href="#continuous-animation">Continuous animation</a></h3>
+<p><code>pulse</code> returns a value oscillating in <code>[0, 1]</code> with the given period in seconds:</p>
+<pre><code class="language-haskell">opacity &lt;- pulse 1.2
+</code></pre>
+<p>Clock-driven values do not, by themselves, keep the loop awake. A widget that draws from them must call <code>keepAnimating</code> <strong>with its own response</strong>, every frame it is on screen:</p>
+<pre><code class="language-haskell">(resp, ()) &lt;- customWidget defaultCustomWidgetSpec
+  { widgetLayout = fixedWH 24 24
+  , widgetContent = contentKey [t * 100]
+  , widgetDraw = \cdc (Rect x y w h) -&gt; runCanvasFor cdc $
+      drawCircle (V2 (x + w / 2) (y + h / 2)) (6 + 3 * t) (themeAccent (cdcTheme cdc))
+  }
+keepAnimating resp
+</code></pre>
+<p>The loop goes back to sleep on the first frame that leaves it out.</p>
+<blockquote class="blockquote-tag blockquote-tag-caution">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
+<p>Never force continuous redraws by dirtying the context every frame. That is an unpaced busy loop. Call <code>keepAnimating</code> only in the widget that is actually moving.</p>
+</blockquote>
+<h3 id="timers"><a class="header" href="#timers">Timers</a></h3>
+<p><code>wakeAfter</code> requests one frame after a delay in <strong>seconds</strong>:</p>
+<pre><code class="language-haskell">clock = do
+  label =&lt;&lt; currentTimeText
+  wakeAfter 1
+</code></pre>
+<p>Call it on every frame that still needs the future wake; pending wakes reset each frame. Use <code>wakeAfter</code> for clocks, debounces, and polling on a schedule; use <code>keepAnimating</code> for continuous motion.</p>
+<h2 id="choosing-a-tool"><a class="header" href="#choosing-a-tool">Choosing a tool</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>The work…</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td>Returns one result for an input</td><td><code>Task</code> + <code>useTask</code> / <code>useTaskStatus</code></td></tr>
+<tr><td>Pushes many updates</td><td><code>Stream</code> + <code>useStream</code></td></tr>
+<tr><td>Is already running in a thread you own</td><td><code>Var</code> IO operations + <code>askWake</code></td></tr>
+<tr><td>Must keep running while its pane is hidden</td><td>Keep the hook outside the tab or branch</td></tr>
+<tr><td>Changes on a schedule</td><td><code>wakeAfter</code></td></tr>
+<tr><td>Animates continuously</td><td><code>animateTo</code> / <code>pulse</code> + <code>keepAnimating</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The runnable versions are in <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>, <code>Tasks.hs</code>, and <code>LiveChart.hs</code>.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
+<ul>
+<li>Background work in a full application: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</li>
+<li>Custom animation drawing: <a href="../widgets/custom-drawing.html">Custom Drawing &amp; Controls</a>.</li>
+<li>Window updates and screenshots: <a href="window-management.html">Desktop Windows</a>.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../packages/nano-ui-rgfw.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../input/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../packages/nano-ui-form.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../advanced/window-management.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -288,11 +318,11 @@ myDiagram = diagram (fixedWH 320 200) $ circle 80 # fc blue
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../packages/nano-ui-rgfw.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../input/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../packages/nano-ui-form.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../advanced/window-management.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

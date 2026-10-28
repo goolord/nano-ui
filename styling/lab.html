@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Buttons &amp; Menus - nano-ui Documentation</title>
+        <title>Interactive Styling Lab - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,113 +178,79 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="buttons--menus"><a class="header" href="#buttons--menus">Buttons &amp; Menus</a></h1>
-<p>Buttons are immediate-mode widgets: they draw themselves and return whether they were activated this frame, or a primed <code>Response</code> with the details.</p>
-<h2 id="signatures"><a class="header" href="#signatures">Signatures</a></h2>
-<pre><code class="language-haskell">button         :: Text -&gt; NanoUI Bool
-button'        :: Text -&gt; NanoUI Response
-buttonWith     :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI Bool
-buttonWith'    :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI Response
-buttonConfigured  :: ButtonConfig -&gt; Text -&gt; NanoUI Bool
-buttonConfigured' :: ButtonConfig -&gt; Text -&gt; NanoUI Response
-buttonContent  :: NanoUI () -&gt; NanoUI Bool
-iconButton     :: Svg -&gt; Text -&gt; NanoUI Bool
-menuButton     :: Text -&gt; Bool -&gt; NanoUI Bool
-menuButton'    :: Text -&gt; Bool -&gt; NanoUI Response
-menuItem       :: Text -&gt; NanoUI Bool
-menuItemShortcut :: Text -&gt; Shortcut -&gt; NanoUI Bool
-menuItemDisabled :: Text -&gt; NanoUI ()
-menuSeparator  :: NanoUI ()
-contextMenu    :: HasResponse r =&gt; r -&gt; NanoUI a -&gt; NanoUI (Maybe a)
-</code></pre>
-<h2 id="push-buttons"><a class="header" href="#push-buttons">Push buttons</a></h2>
-<p><code>button</code> returns <code>True</code> only on the frame it is activated, by left click or by Enter/Space while focused:</p>
-<pre><code class="language-haskell">whenM (button "Save Document") (liftIO saveFile)
-</code></pre>
-<p>The <code>whenM</code> guard is essential: the view runs every frame, so an unguarded <code>saveFile</code> would run forever. The same applies to every event in this chapter.</p>
-<p>Use the primed form when you need the response — hover state, a rectangle for an anchored popup, or a tooltip:</p>
-<pre><code class="language-haskell">resp &lt;- button' "Refresh"
-tooltip resp "Poll the remote server for updates"
-when (respClicked resp) refresh
-</code></pre>
-<h3 id="custom-content"><a class="header" href="#custom-content">Custom content</a></h3>
-<p><code>buttonContent</code> lets the button contain any view. The content is laid out like a label and takes the button’s text color; a click anywhere on the button activates it:</p>
-<pre><code class="language-haskell">whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
-          svgIcon 16 saveIcon
-          label "Save") $
-  saveDocument
-</code></pre>
-<p><code>iconButton</code> is the common case of a leading icon, with an optional label:</p>
-<pre><code class="language-haskell">whenM (iconButton saveIcon "Save") saveDocument
-whenM (iconButton gearIcon "") openSettings   -- icon alone, square button
-</code></pre>
-<h2 id="menu-buttons-and-popups"><a class="header" href="#menu-buttons-and-popups">Menu buttons and popups</a></h2>
-<p><code>menuButton</code> draws a menu-bar title. Its second argument is whether the menu is open, and it returns <code>True</code> when the title is clicked:</p>
-<pre><code class="language-haskell">fileOpen &lt;- useVar False
-btn &lt;- menuButton' "File" =&lt;&lt; readVar fileOpen
-when (respClicked btn) (modifyVar fileOpen not)
-</code></pre>
-<p><code>menuButton</code> does not draw the menu itself. A menu is a <code>popup'</code> anchored to the button’s rectangle, and its contents are ordinary <code>NanoUI</code>:</p>
-<pre><code class="language-haskell">fileMenu :: Var Bool -&gt; Var Text -&gt; NanoUI ()
-fileMenu fileOpen docPath = do
-  isOpen &lt;- readVar fileOpen
-  btn &lt;- menuButton' "File" isOpen
-  when (respClicked btn) (writeVar fileOpen (not isOpen))
-
-  let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
-              {cfgPlacement = PlacementBelow, cfgOffset = 0}
-  -- constVar: the truth is `isOpen`, so writes to the popup's Var are no-ops.
-  (popupResp, _) &lt;- popup' (constVar isOpen) cfg $
-    columnWith (tight . gap 0) $ do
-      whenM (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) $ do
-        writeVar docPath ""
-        writeVar fileOpen False
-      whenM (menuItemShortcut "Open..." (cmdOrCtrl &lt;&gt; key 'o')) $ do
-        startOpenDialog          -- application action: askOpenFileDialog, etc.
-        writeVar fileOpen False
-      menuSeparator
-      whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
-
-  when (respClicked popupResp) (writeVar fileOpen False)
-</code></pre>
-<p>Why <code>constVar</code>? <code>popup'</code> requires a <code>Var Bool</code> for open state, but the real state is “this menu’s label is the open one”. <code>constVar isOpen</code> supplies a read-only <code>Var</code>; a click on the popup is reported through <code>popupResp</code>, and the code writes <code>fileOpen</code> itself.</p>
-<p><code>prompt</code> for menu rows:</p>
-<ul>
-<li><code>menuItem</code> returns <code>True</code> when clicked.</li>
-<li><code>menuItemShortcut</code> shows the chord label and binds the chord <strong>while the menu is open</strong>. Bind the same chord with <code>shortcut</code> outside the menu for when it is closed; the menu row declared first wins while open.</li>
-<li><code>menuItemDisabled</code> draws a dimmed row that cannot be clicked.</li>
-<li><code>menuSeparator</code> draws a divider.</li>
-</ul>
-<p>A complete menu bar with File/Edit/View/Help menus, commands, and a status bar is built in <a href="../tutorials/notepad.html">Build a Notepad</a>.</p>
-<blockquote class="blockquote-tag blockquote-tag-important">
-<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
-<p>Call <code>popup'</code> (and every overlay) unconditionally. It draws nothing while closed; wrapping it in <code>when isOpen</code> changes later widget ids each time the menu opens.</p>
-</blockquote>
-<h2 id="context-menus"><a class="header" href="#context-menus">Context menus</a></h2>
-<p><code>contextMenu</code> attaches a right-click menu to any widget with a <code>Response</code>:</p>
-<pre><code class="language-haskell">(_, cardResp) &lt;- mouseArea (fillW . gap 6) $
-  label "Right-click for actions"
-_ &lt;- contextMenu cardResp $ do
-  whenM (menuItem "Inspect") inspectCard
-  whenM (menuItem "Copy") copyCard
-</code></pre>
-<p>It returns the menu body’s result while the menu is open (<code>Maybe a</code>). The menu closes when a row is clicked or the user clicks outside. For a whole region, <code>contextMenuArea</code> takes the layout, the area content, and a function from the click position to the menu body.</p>
-<h2 id="styling-buttons"><a class="header" href="#styling-buttons">Styling buttons</a></h2>
-<p>Buttons use <code>themeButton</code> for their background, border, and text. Scope a change rather than editing the theme globally:</p>
-<pre><code class="language-haskell">whenM (styled destructive (button "Delete")) deleteItem
-whenM (styled (primary . rounded 999) (button "Continue")) next
-</code></pre>
-<p>The <code>buttonStyle</code>, <code>inputStyle</code>, and <code>panelStyle</code> scopes apply to every button in a subtree; <code>background</code>, <code>foreground</code>, <code>borderColor</code>, and the rest adjust one surface. See <a href="../styling/overview.html">Theming &amp; Surfaces</a> and the <a href="../styling/widget-surfaces.html">workbenches</a>.</p>
+                        <h1 id="interactive-styling-lab"><a class="header" href="#interactive-styling-lab">Interactive Styling Lab</a></h1>
+<p>Explore how every styling modifier (<code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>accentColor</code>, <code>rounded</code>, <code>disabledWhen</code>) and theme mode affects each widget family in <code>nano-ui</code>. For what each widget <em>does</em> rather than how it looks, see the <a href="../widgets/index.html">Widget Gallery</a>; for the concepts behind the modifiers, see <a href="index.html">Styling &amp; Theming</a> and <a href="gotchas.html">Styling Gotchas</a>.</p>
+<p>Use the toggle chips on each workbench to toggle modifiers on and off, click <strong>Toggle Compare Baseline</strong> to see a side-by-side diff against the unstyled widget, and copy the generated Haskell code directly into your project.</p>
+<hr>
+<h2 id="1-buttons"><a class="header" href="#1-buttons">1. Buttons</a></h2>
+<p>Standard push buttons, quiet buttons, and styled actions.</p>
+<p><nano-ui-workbench widget="button" title="Push Buttons"></nano-ui-workbench></p>
+<hr>
+<h2 id="2-toggle-buttons"><a class="header" href="#2-toggle-buttons">2. Toggle Buttons</a></h2>
+<p>Two-state toggle buttons with persistent active styling.</p>
+<p><nano-ui-workbench widget="toggle-button" title="Toggle Buttons"></nano-ui-workbench></p>
+<hr>
+<h2 id="3-checkboxes"><a class="header" href="#3-checkboxes">3. Checkboxes</a></h2>
+<p>Checkboxes route through three distinct surfaces: the box well (<code>themeInput</code>), check indicator (<code>themeAccent</code>), and label text.</p>
+<p><nano-ui-workbench widget="checkbox" title="Checkboxes"></nano-ui-workbench></p>
+<hr>
+<h2 id="4-radio-buttons"><a class="header" href="#4-radio-buttons">4. Radio Buttons</a></h2>
+<p>Single-choice radio groups with circular indicator wells.</p>
+<p><nano-ui-workbench widget="radio" title="Radio Buttons"></nano-ui-workbench></p>
+<hr>
+<h2 id="5-text-inputs"><a class="header" href="#5-text-inputs">5. Text Inputs</a></h2>
+<p>Single-line text fields with active caret, selection highlighting, and focus rings.</p>
+<p><nano-ui-workbench widget="text-input" title="Text Fields"></nano-ui-workbench></p>
+<hr>
+<h2 id="6-search--numeric-inputs"><a class="header" href="#6-search--numeric-inputs">6. Search &amp; Numeric Inputs</a></h2>
+<p>Debounced search fields and bounded numeric steppers.</p>
+<p><nano-ui-workbench widget="search-numeric" title="Search &amp; Numeric Fields"></nano-ui-workbench></p>
+<hr>
+<h2 id="7-select-vs-combobox"><a class="header" href="#7-select-vs-combobox">7. Select vs ComboBox</a></h2>
+<p>Dropdown triggers: <code>select</code> uses <code>themeButton</code> for trigger styling, whereas <code>comboBox</code> uses <code>themeInput</code>.</p>
+<p><nano-ui-workbench widget="select-vs-combo" title="Dropdown Select &amp; ComboBox"></nano-ui-workbench></p>
+<hr>
+<h2 id="8-multi-line-text-areas"><a class="header" href="#8-multi-line-text-areas">8. Multi-line Text Areas</a></h2>
+<p>Scrollable multi-line text editing with document-level line sharing.</p>
+<p><nano-ui-workbench widget="textarea" title="Multi-line Text Area"></nano-ui-workbench></p>
+<hr>
+<h2 id="9-sliders"><a class="header" href="#9-sliders">9. Sliders</a></h2>
+<p>Continuous and discrete sliders with track and thumb geometry.</p>
+<p><nano-ui-workbench widget="slider" title="Sliders"></nano-ui-workbench></p>
+<hr>
+<h2 id="10-custom-controls-switches-knobs-spinners"><a class="header" href="#10-custom-controls-switches-knobs-spinners">10. Custom Controls (Switches, Knobs, Spinners)</a></h2>
+<p>Custom vector canvas controls from <code>NanoUI.Widgets.Custom</code>.</p>
+<p><nano-ui-workbench widget="custom-controls" title="Custom Vector Controls"></nano-ui-workbench></p>
+<hr>
+<h2 id="11-panels-cards--callouts"><a class="header" href="#11-panels-cards--callouts">11. Panels, Cards &amp; Callouts</a></h2>
+<p>Structural containers: <code>panelStyle</code> routes background, border, and semantic tone styling.</p>
+<p><nano-ui-workbench widget="panel-card-callout" title="Panels, Cards &amp; Callouts"></nano-ui-workbench></p>
+<hr>
+<h2 id="12-bounded-scroll-areas"><a class="header" href="#12-bounded-scroll-areas">12. Bounded Scroll Areas</a></h2>
+<p>Scrollable wells and custom styled scrollbars.</p>
+<p><nano-ui-workbench widget="scroll-bounded" title="Scroll Areas"></nano-ui-workbench></p>
+<hr>
+<h2 id="13-tabs"><a class="header" href="#13-tabs">13. Tabs</a></h2>
+<p>Tab headers in Underline, Segmented, and Pill styles.</p>
+<p><nano-ui-workbench widget="tabs-styles" title="Tab Bars"></nano-ui-workbench></p>
+<hr>
+<h2 id="14-tables--trees"><a class="header" href="#14-tables--trees">14. Tables &amp; Trees</a></h2>
+<p>Colonnade data tables with sort arrows and hierarchical tree views.</p>
+<p><nano-ui-workbench widget="table-tree" title="Tables &amp; Tree Views"></nano-ui-workbench></p>
+<hr>
+<h2 id="15-overlays-floating-windows--menus"><a class="header" href="#15-overlays-floating-windows--menus">15. Overlays (Floating Windows &amp; Menus)</a></h2>
+<p>Floating modal windows, popup menus, and tooltips.</p>
+<p><nano-ui-workbench widget="overlays" title="Overlays &amp; Floating Windows"></nano-ui-workbench></p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../widgets/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../styling/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../widgets/inputs.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../styling/gotchas.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -294,11 +260,11 @@ whenM (styled (primary . rounded 999) (button "Continue")) next
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../widgets/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../styling/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../widgets/inputs.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../styling/gotchas.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

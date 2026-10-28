@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Application Patterns - nano-ui Documentation</title>
+        <title>Buttons, Menus &amp; Inputs - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
+            window.path_to_searchindex_js = "../searchindex-aed4bf86.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-27a189cc.js"></script>
+        <script src="../toc-9b0acd6d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,143 +178,150 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="application-patterns"><a class="header" href="#application-patterns">Application Patterns</a></h1>
-<p>Real applications built on nano-ui — <code>ned</code> (a vim-like modal editor), <code>stronghead</code> (a profiling debugger), and <code>winget-gui</code> (a Windows package-manager front end) — converge on the same architecture. The differences are about where the durable state lives, not about the frame.</p>
-<h2 id="the-core-rule-setup-once-in-io-then-run"><a class="header" href="#the-core-rule-setup-once-in-io-then-run">The core rule: setup once in IO, then run</a></h2>
-<p>Everything frame-lived is either a value created in <code>IO</code> before the session, or a <code>Var</code> declared in the view. Nothing else survives.</p>
-<pre><code class="language-haskell">main :: IO ()
-main = do
-  cache &lt;- newViewCache      -- a record of newVar calls and IORef caches
-  env   &lt;- newAppEnv         -- domain state outside nano-ui's knowledge
-  runSdlApp
-    defaultSdlOptions {sdlWindowSettings = ...}
-    (appView env cache)
+                        <h1 id="buttons-menus--inputs"><a class="header" href="#buttons-menus--inputs">Buttons, Menus &amp; Inputs</a></h1>
+<p>The controls most applications need: buttons, menus, and the widgets that edit a <code>Var</code>.</p>
+<h2 id="buttons"><a class="header" href="#buttons">Buttons</a></h2>
+<pre><code class="language-haskell">button   :: Text -&gt; NanoUI Bool
+button'  :: Text -&gt; NanoUI Response
+buttonWith :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI Bool
+buttonContent :: NanoUI () -&gt; NanoUI Bool
+iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
 </code></pre>
-<p>The view is a pure-ish projection of that state. It may read and write it, but it must not create a new source of truth on every pass.</p>
-<h2 id="pattern-a-winget-gui--one-domain-state-and-a-wake-channel"><a class="header" href="#pattern-a-winget-gui--one-domain-state-and-a-wake-channel">Pattern A: <code>winget-gui</code> — one domain state and a wake channel</a></h2>
-<p><code>winget-gui</code> runs package-manager commands on worker threads and keeps the result in one <code>IORef</code>. The view snapshots that state at the start of each frame:</p>
-<pre><code class="language-haskell">data Env = Env
-  { envState :: IORef AppState
-  , envWake  :: IORef (IO ())
-  }
-
-main :: IO ()
-main = do
-  stateRef &lt;- newIORef initialAppState
-  wakeRef  &lt;- newIORef (pure ())
-  runSdlApp opts (appView (Env stateRef wakeRef))
-
-appView :: Env -&gt; NanoUI ()
-appView env = do
-  -- Install the wake callback on the first frame.
-  wake &lt;- askWake
-  liftIO $ writeIORef env.envWake wake
-
-  -- Snapshot the frame's state once, before building anything.
-  state &lt;- liftIO $ readIORef env.envState
-
-  mainLayout state
+<p><code>button</code> returns <code>True</code> only on the frame it is activated, by left click or by Enter/Space while focused:</p>
+<pre><code class="language-haskell">whenM (button "Save Document") (liftIO saveFile)
 </code></pre>
-<p>A worker publishes a change atomically, then wakes the loop:</p>
-<pre><code class="language-haskell">forkIO $ do
-  results &lt;- queryPackageDatabase
-  atomicModifyIORef' env.envState (\s -&gt; (s {packages = results}, ()))
-  wake &lt;- readIORef env.envWake
-  wake
+<p>The <code>whenM</code> guard is essential: the view runs every frame, so an unguarded side effect would run forever.</p>
+<p>Use the primed form when you need the response — hover state, a rectangle for an anchored popup, or a tooltip:</p>
+<pre><code class="language-haskell">resp &lt;- button' "Refresh"
+tooltip resp "Poll the remote server for updates"
+when (respClicked resp) refresh
 </code></pre>
-<p>The company pattern around this:</p>
-<ul>
-<li><strong><code>prepareFrame</code></strong> gathers every read into one <code>Frame</code> record before the window is built. Widgets do not each read the <code>IORef</code> and risk seeing different snapshots.</li>
-<li><strong>Memoized derived collections</strong> live in <code>IORef (Maybe (key, value))</code> caches keyed by a revision counter. Expensive grouping or sorting runs when the revision changes, not every frame.</li>
-<li><strong>Keyboard shortcuts are read after</strong> the widgets have run, so focus-dependent guards see the current focus.</li>
-<li><strong>A headless mode runs the same view</strong> against real data with <code>--screenshot</code> / <code>--selftest</code> (SDL in a hidden window), which is how the UI is regression-tested.</li>
-</ul>
-<p>Use this pattern when the domain state is shared with worker threads, a database, or a long-running protocol.</p>
-<h2 id="pattern-b-stronghead--an-app-record-of-vars"><a class="header" href="#pattern-b-stronghead--an-app-record-of-vars">Pattern B: <code>stronghead</code> — an app record of <code>Var</code>s</a></h2>
-<p><code>stronghead</code> has many panels, each with its own interactive state. It keeps one large record of handles:</p>
-<pre><code class="language-haskell">data App = App
-  { filterText   :: Var Text
-  , activeTab    :: Var TabId
-  , zoomLevel    :: Var Float
-  , isInspecting :: Var Bool
-  , panes        :: PaneState
-  }
+<p><code>buttonContent</code> puts any view inside a button. The content is for display; a click anywhere on the button activates it:</p>
+<pre><code class="language-haskell">whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
+          svgIcon 16 saveIcon
+          label "Save") $
+  saveDocument
+</code></pre>
+<p><code>iconButton</code> is the leading-icon case; an empty label gives an icon-only square button.</p>
+<h2 id="menus"><a class="header" href="#menus">Menus</a></h2>
+<p><code>menuItem</code> is a row that returns <code>True</code> when clicked. <code>menuItemShortcut</code> also displays a chord and binds it while the menu is open. <code>menuSeparator</code> and <code>menuItemDisabled</code> complete the row set.</p>
+<p>A menu bar is a <code>menuButton'</code> plus a <code>popup'</code> anchored to its rectangle:</p>
+<pre><code class="language-haskell">fileOpen &lt;- useVar False
+isOpen &lt;- readVar fileOpen
+btn &lt;- menuButton' "File" isOpen
+when (respClicked btn) (writeVar fileOpen (not isOpen))
 
-newApp :: IO App
-newApp = App
-  &lt;$&gt; newVar ""
-  &lt;*&gt; newVar TabOverview
-  &lt;*&gt; newVar 1.0
-  &lt;*&gt; newVar False
-  &lt;*&gt; newPaneState
+let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
+            {cfgPlacement = PlacementBelow, cfgOffset = 0}
+(popupResp, _) &lt;- popup' (constVar isOpen) cfg $
+  columnWith (tight . gap 0) $ do
+    whenM (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) newDocument
+    whenM (menuItem "Open...") openDocument
+    menuSeparator
+    whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
+when (respClicked popupResp) (writeVar fileOpen False)
 </code></pre>
-<p>Panel modules take the slice they own:</p>
-<pre><code class="language-haskell">inspectorPane :: Var Bool -&gt; Var Float -&gt; NanoUI ()
-inspectorPane inspecting zoom = panel $ do
-  ...
+<p><code>constVar</code> supplies a read-only open flag: the truth is the menu’s own state, and a click on the popup is written back to the real <code>Var</code>.</p>
+<blockquote class="blockquote-tag blockquote-tag-important">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
+<p>Call overlays unconditionally. <code>popup'</code> draws nothing while closed, but wrapping it in <code>when isOpen</code> changes later widget ids each time the menu opens.</p>
+</blockquote>
+<p>Bind a command chord <strong>outside</strong> the menu as well as on its row, so it works with the menu closed:</p>
+<pre><code class="language-haskell">whenM (menuItemShortcut "Save" saveChord) saveDocument
+whenM (shortcut saveChord) saveDocument
 </code></pre>
-<p>The record is passed into view functions, which read and mutate its fields directly. There is no global state and no lost update: every handle is explicit in a type.</p>
-<p>Use this pattern when the application is mostly interactive UI state, with many independent surfaces and little external I/O.</p>
-<h2 id="pattern-c-ned--the-application-owns-the-state"><a class="header" href="#pattern-c-ned--the-application-owns-the-state">Pattern C: <code>ned</code> — the application owns the state</a></h2>
-<p><code>ned</code> is an editor first: its state is a document and an editing model that exist independently of the UI. It keeps a plain <code>IORef App</code> and lets the toolkit know nothing about it. The view projects slices of it each frame and re-reads after any part that might have changed it:</p>
-<pre><code class="language-haskell">newtype Editor = Editor (IORef App)
-
-editorView :: Editor -&gt; NanoUI ()
-editorView (Editor ref) = do
-  app &lt;- liftIO (readIORef ref)
-  renderEditor app
-
-  -- The parts above may have changed the model (a command, a click).
-  app' &lt;- liftIO (readIORef ref)
-  when (viewChanged app app') requestFrame
+<p>Only the first binding of a chord in a frame fires, so the open menu’s row wins. A complete menu bar is built in <a href="../tutorials/notepad.html">Build a Notepad</a>.</p>
+<p><code>contextMenu</code> attaches a right-click menu to any widget with a <code>Response</code>:</p>
+<pre><code class="language-haskell">(_, rowResp) &lt;- mouseArea (fillW . gap 6) (label "Right-click for actions")
+_ &lt;- contextMenu rowResp $ do
+  whenM (menuItem "Inspect") inspectRow
+  whenM (menuItem "Copy") copyRow
 </code></pre>
-<p><code>requestFrame</code> asks for one more frame when what was drawn no longer matches the state. This is a deliberate escape hatch; it is not a substitute for <code>Var</code> dependencies.</p>
-<p>Use this pattern for editors, terminals, games, and anything whose model is already a well-tested library that should not be rewritten in terms of <code>Var</code>s.</p>
-<h2 id="choosing"><a class="header" href="#choosing">Choosing</a></h2>
+<h2 id="input-widgets"><a class="header" href="#input-widgets">Input widgets</a></h2>
+<p>Input widgets take the mutable <code>Var</code> they display and edit. They manage caret, selection, focus, and keyboard routing themselves.</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>The application…</th><th>Pattern</th></tr>
+<tr><th>Widget</th><th>Signature</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td>Owns one domain state, uses worker threads, runs commands</td><td>A — <code>IORef</code> + <code>askWake</code></td></tr>
-<tr><td>Is a large set of interactive panes and tools</td><td>B — record of <code>Var</code>s</td></tr>
-<tr><td>Has a model that predates the UI or is shared with a library</td><td>C — app-owned <code>IORef</code> + <code>requestFrame</code></td></tr>
-<tr><td>Is a state machine with explicit transitions and few external effects</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
-<tr><td>Is a small tool</td><td>Whatever is simplest; a handful of <code>useVar</code>s is fine</td></tr>
+<tr><td><code>checkbox</code></td><td><code>Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Two-state box with a label</td></tr>
+<tr><td><code>toggleButton</code></td><td><code>Tone -&gt; Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Two-state button, filled in the tone while on</td></tr>
+<tr><td><code>radio</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Int -&gt; NanoUI ()</code></td><td>Radio group over indexed options</td></tr>
+<tr><td><code>boundedRadio</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Radio group over every enum value</td></tr>
+<tr><td><code>select</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Int -&gt; NanoUI ()</code></td><td>Drop-down select by index</td></tr>
+<tr><td><code>boundedSelect</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Drop-down over every enum value</td></tr>
+<tr><td><code>comboBox</code></td><td><code>Foldable f =&gt; Text -&gt; f Text -&gt; Var Text -&gt; NanoUI ()</code></td><td>Placeholder, suggestions, free-text value</td></tr>
+<tr><td><code>slider</code></td><td><code>Float -&gt; Float -&gt; Var Float -&gt; NanoUI ()</code></td><td>Min, max, value</td></tr>
+<tr><td><code>textInput</code></td><td><code>Var Text -&gt; NanoUI ()</code></td><td>Single-line editable text</td></tr>
+<tr><td><code>searchInput</code></td><td><code>Text -&gt; Var Text -&gt; NanoUI ()</code></td><td>Placeholder + search field with a clear button</td></tr>
+<tr><td><code>numericInput</code></td><td><code>Var Double -&gt; NanoUI ()</code></td><td>Numeric field with steppers</td></tr>
+<tr><td><code>colorPicker</code></td><td><code>Var Color -&gt; NanoUI ()</code></td><td>Saturation/value field and hue bar</td></tr>
 </tbody>
 </table>
 </div>
-<p>The patterns mix. An <code>IORef</code> domain state with <code>Var</code> view state is normal; an Elm reducer can sit inside one pane of a <code>Var</code>-based application.</p>
-<h2 id="the-shared-view-discipline"><a class="header" href="#the-shared-view-discipline">The shared view discipline</a></h2>
-<p>Independent of where state lives, the view has the same shape:</p>
-<ol>
-<li><strong>Read the state once at the top</strong>, or read each source immediately before the subtree that uses it.</li>
-<li><strong>Build top-to-bottom.</strong> Layout is solved after the view runs, so geometry is from the previous frame; do not target widgets by rectangle in the same pass they are first declared.</li>
-<li><strong>Read after the parts that may write.</strong> A read placed before a writer sees the old value and forces a second pass.</li>
-<li><strong>Run keyboard and focus queries last.</strong> Focus state is resolved after the widgets have run.</li>
-<li><strong>Guard effects with events.</strong> A view can run more than once per frame; file I/O, subprocesses, and logging belong behind a button or shortcut check.</li>
-<li><strong>Keep derived values derived.</strong> Cache expensive computations by revision, not by copying every field into a <code>Var</code>.</li>
-</ol>
-<h2 id="anti-patterns"><a class="header" href="#anti-patterns">Anti-patterns</a></h2>
+<p>Every widget has the usual variants: primed (<code>...'</code>) returns a <code>Response</code>, <code>...With</code> takes a layout modifier, and <code>...Configured</code> takes a config record. For example:</p>
+<pre><code class="language-haskell">numericInputConfigured defaultNumericInputConfig
+  {nicMin = 0, nicMax = 255, nicHex = True} byte
+</code></pre>
+<h3 id="text-and-search-fields"><a class="header" href="#text-and-search-fields">Text and search fields</a></h3>
+<pre><code class="language-haskell">query &lt;- useVar ""
+resp &lt;- textInput' query
+when (respSubmitted resp) (search =&lt;&lt; readVar query)
+when (respChanged resp) (preview =&lt;&lt; readVar query)
+</code></pre>
+<p><code>respChanged</code> fires on every edit; <code>respSubmitted</code> fires on Enter. For expensive work use <code>searchInput'</code>, whose <code>respChanged</code> is debounced (300 ms by default) and fires immediately when the field is cleared:</p>
+<pre><code class="language-haskell">resp &lt;- searchInput' "Find a package" query
+when (respChanged resp) (refreshResults =&lt;&lt; readVar query)
+</code></pre>
+<h3 id="choices"><a class="header" href="#choices">Choices</a></h3>
+<pre><code class="language-haskell">enabled &lt;- useVar True
+checkbox "Enable notifications" enabled
+
+bold &lt;- useVar False
+toggleButton Accent "B" bold
+
+data Pace = Walk | Jog | Sprint
+  deriving (Eq, Show, Enum, Bounded)
+
+pace &lt;- useEnumVar Jog
+enumRadio pace
+enumSelect pace
+</code></pre>
+<p><code>select</code> is index-based for data-driven options:</p>
+<pre><code class="language-haskell">choice &lt;- useVar 0
+select ["Small", "Medium", "Large"] choice
+</code></pre>
+<p><code>comboBox</code> takes free text plus suggestions; its <code>respChanged</code> fires on commit, not on every model write.</p>
+<h3 id="sliders-numbers-color"><a class="header" href="#sliders-numbers-color">Sliders, numbers, color</a></h3>
+<pre><code class="language-haskell">volume &lt;- useVar (40 :: Float)
+slider 0 100 volume
+
+count &lt;- useVar (0 :: Double)
+numericInput count
+
+accent &lt;- newVar (colorHex "#38bdf8")
+colorPicker accent
+</code></pre>
+<p><code>numericInput</code> accepts digits and a leading minus when the range allows it; arrow keys step, and <code>Shift</code> steps ten times as far. <code>nicDecimals</code> controls display and accepted precision. <code>colorPickerRGBA</code> adds an alpha bar.</p>
+<h2 id="reading-and-resetting"><a class="header" href="#reading-and-resetting">Reading and resetting</a></h2>
+<p>All input widgets mutate the <code>Var</code> directly and return <code>()</code>. To reset a field, write the <code>Var</code>; to react, use the primed response. Read below the widget that edits a value when something else displays it, and do not read a value just to pass it back into the same widget.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><strong>A global <code>IORef</code> read from many widget helpers.</strong> The frame sees inconsistent snapshots; gather state once, or read it explicitly at one point.</li>
-<li><strong>Allocating a source of truth in the view.</strong> <code>newVar</code>/<code>newIORef</code>/<code>newTask</code> inside the view leaks or resets every pass.</li>
-<li><strong>Mirroring the model in <code>Var</code>s.</strong> Two sources of truth drift. Keep local UI state local and durable state single.</li>
-<li><strong>Using <code>requestFrame</code> to force animation.</strong> Use <code>keepAnimating</code> inside the animating widget, and <code>wakeAfter</code> for timers.</li>
-<li><strong>Rebuilding caches every frame.</strong> Compare first (a revision counter, a pointer, a small key) and rebuild only when it changes.</li>
+<li>Multi-line editing and undo: <a href="text-editing.html">Text Editing</a>.</li>
+<li>Widget inventory and naming: <a href="index.html">Widget Gallery</a>.</li>
+<li>Theming these controls: <a href="../styling/index.html">Styling &amp; Theming</a>.</li>
 </ul>
-<p>For the frame that makes these patterns necessary, read <a href="frame-model.html">The Frame Model</a>. For pure reducers, read <a href="../state/elm-overview.html">Elm-Style Views</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../architecture/frame-model.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../widgets/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../architecture/abstraction-audit.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../widgets/text-editing.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -324,11 +331,11 @@ editorView (Editor ref) = do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../architecture/frame-model.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../widgets/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../architecture/abstraction-audit.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../widgets/text-editing.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
