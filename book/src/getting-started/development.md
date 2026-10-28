@@ -38,6 +38,26 @@ To run a single test suite with detailed failure reports:
 cabal test nano-ui-test --test-show-details=failures
 ```
 
+## Haddocks and Hoogle
+
+Released packages have Haddock pages on Hackage. To build documentation for the current checkout:
+
+```sh
+cabal haddock-project --output=haddocks --hoogle
+```
+
+This writes the HTML documentation under `haddocks/` with an index at `haddocks/index.html`. The `--hoogle` flag also writes Hoogle input files in that directory.
+
+To build one package instead:
+
+```sh
+cabal haddock nano-ui --haddock-hoogle
+```
+
+Its output is under `dist-newstyle/.../doc/html/nano-ui/`. Building every package at once can use a lot of memory; the one-package command is the lighter option.
+
+To search the generated Hoogle data locally, point `hoogle generate --local=...` at the directory containing the generated `.txt` files, then search with the same database. See [Installing Hoogle locally](https://github.com/ndmitchell/hoogle/blob/master/docs/Install.md) for the local database options.
+
 ## Repository Architecture
 
 ```

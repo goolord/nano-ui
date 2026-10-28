@@ -2,6 +2,8 @@
 
 The core toolkit is `nano-ui`; the other packages add a backend or a focused capability. Add only what the application uses.
 
+Released versions of `nano-ui`, `nano-ui-sdl`, `nano-ui-diagrams`, and `nano-ui-form` are on Hackage. The repository can be ahead of those releases, and `nano-ui-emit`, `nano-ui-markdown`, `nano-ui-svg`, and `nano-ui-rgfw` are not published there. Use the source pin in [Quick Start](../getting-started/quickstart.md) for the current API.
+
 | Package | What it adds |
 | --- | --- |
 | `nano-ui-sdl` | SDL3 window backend, TrueType fonts, native file dialogs, custom chrome |

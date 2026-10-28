@@ -38,10 +38,10 @@ Monorepo layout (this repository):
 | `packages/nano-ui-svg` | `DrawOp`-to-SVG export (headless screenshots of any view) |
 | `packages/nano-ui-demo` | Example apps + single-topic tutorials |
 
-Not on Hackage. Consumers pin it as a Cabal `source-repository-package`
+Released versions of `nano-ui`, `nano-ui-sdl`, `nano-ui-diagrams`, and `nano-ui-form` are on Hackage. The repository can be ahead of those releases, and `nano-ui-emit`, `nano-ui-markdown`, `nano-ui-svg`, and `nano-ui-rgfw` are not published there. Consumers that need the current revision pin it as a Cabal `source-repository-package`
 (github.com/goolord/nano-ui) with `subdir: packages/nano-ui packages/nano-ui-emit packages/nano-ui-sdl ...`
 and `package nano-ui-sdl flags: +sdl`. Cabal fetches the pinned source into
-`dist-newstyle/src/nano-ui-<hash>/` — read library source or the export list
+`dist-newstyle/src/nano-ui-<hash>/`; read library source or the export list
 there when working in a consumer repo.
 
 Requires GHC 9.10–9.14 (dev uses 9.14), `default-language: GHC2024`,

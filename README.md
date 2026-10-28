@@ -109,6 +109,8 @@ used to check that the vertex writers compile without dictionaries or tuples.
 | `nano-ui-markdown` | Markdown documents drawn with rich text, parsed incrementally for streamed chat replies |
 | `nano-ui-demo` | Example applications |
 
+Released versions of [`nano-ui`](https://hackage.haskell.org/package/nano-ui), [`nano-ui-sdl`](https://hackage.haskell.org/package/nano-ui-sdl), [`nano-ui-diagrams`](https://hackage.haskell.org/package/nano-ui-diagrams), and [`nano-ui-form`](https://hackage.haskell.org/package/nano-ui-form) are on Hackage. The repository can be ahead of those releases, and `nano-ui-emit`, `nano-ui-markdown`, `nano-ui-svg`, and `nano-ui-rgfw` are not published there.
+
 ## Documentation
 
 Comprehensive documentation is available at **[goolord.github.io/nano-ui](https://goolord.github.io/nano-ui/)** (and offline in the [`book/`](book/) directory):
@@ -123,7 +125,7 @@ Comprehensive documentation is available at **[goolord.github.io/nano-ui](https:
 - **[Troubleshooting](https://goolord.github.io/nano-ui/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and their fixes.
 - **[Architecture & Internals](https://goolord.github.io/nano-ui/architecture/index.html)**: Frame lifecycle, application patterns, and internals.
 - **[Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html)**: Building, testing, profiling, and repository conventions.
-- `NanoUI` Haddock: Reference documentation for widgets, state, and layout modifiers.
+- **[`NanoUI` Haddock](https://hackage.haskell.org/package/nano-ui)**: Released API documentation. For the current source, run `cabal haddock-project --output=haddocks --hoogle`.
 
 ## License
 
