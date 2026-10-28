@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-12a7a635.js";
+            window.path_to_searchindex_js = "searchindex-63b26a18.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -1206,14 +1206,14 @@ modal confirm "Delete the file?" $
 <pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
 data Msg = Increment | Decrement | SetName Text
 
-view :: Model -&gt; Emit.NanoUIE Msg ()
-view m = Emit.withNanoUI column $ do
-  Emit.liftNanoUI (heading "Profile")
-  Emit.withNanoUI row $ do
-    Emit.emitWhen (button "-") Decrement
-    Emit.liftNanoUI (label (T.pack (show m.counter)))
-    Emit.emitWhen (button "+") Increment
-  Emit.emitChanged textInput m.name SetName
+view :: Model -&gt; NanoUIE Msg ()
+view m = column $ do
+  heading "Profile"
+  row $ do
+    emitWhenE (button "-") Decrement
+    label (T.pack (show m.counter))
+    emitWhenE (button "+") Increment
+  emitChangedE textInput m.name SetName
 
 update :: Msg -&gt; Model -&gt; Model
 update Increment m = m {counter = m.counter + 1}
@@ -1225,7 +1225,8 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </code></pre>
 <p>Widgets, layout, focus, and keys are unchanged. Only the state model differs.</p>
 <h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
-<p><code>NanoUIE msg a</code> is a <code>NanoUI</code> action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting the wrong type is a compile error.</p>
+<p><code>NanoUIE msg a</code> is a UI action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting the wrong type is a compile error.</p>
+<p>Every widget exported by <code>nano-ui</code> is directly available in <code>NanoUI.Emit</code> as a <code>NanoUIE msg</code> action: containers (<code>column</code>, <code>row</code>, <code>panel</code>, <code>scroll</code>, etc.), controls (<code>button</code>, <code>slider</code>, <code>textInput</code>, <code>checkbox</code>, etc.), text (<code>label</code>, <code>heading</code>, etc.), overlays, and scopes (<code>withKey</code>, <code>styled</code>, <code>disabledWhen</code>, etc.). Views use standard <code>do</code> notation without manual lifting.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -1233,26 +1234,29 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </thead>
 <tbody>
 <tr><td><code>emit msg</code></td><td>Immediately</td></tr>
-<tr><td><code>emitWhen widget msg</code></td><td>The widget returns <code>True</code> (button click, submitted field)</td></tr>
-<tr><td><code>emitChanged widget old toMsg</code></td><td>The widget’s final value differs from <code>old</code></td></tr>
-<tr><td><code>emitEdited widget old toMsg</code></td><td>The value changed <strong>and</strong> <code>respChanged</code> is true</td></tr>
+<tr><td><code>emitWhenE widget msg</code></td><td>The wrapped widget returns <code>True</code> (button click, submitted field)</td></tr>
+<tr><td><code>emitWhen widget msg</code></td><td>An unwrapped <code>NanoUI Bool</code> widget returns <code>True</code></td></tr>
+<tr><td><code>emitChangedE widget old toMsg</code></td><td>The wrapped widget’s final value differs from <code>old</code></td></tr>
+<tr><td><code>emitChanged widget old toMsg</code></td><td>An unwrapped <code>Var a -&gt; NanoUI r</code> widget’s final value differs from <code>old</code></td></tr>
+<tr><td><code>emitEditedE widget old toMsg</code></td><td>The wrapped widget’s value changed <strong>and</strong> <code>respChanged</code> is true</td></tr>
+<tr><td><code>emitEdited widget old toMsg</code></td><td>An unwrapped widget’s value changed <strong>and</strong> <code>respChanged</code> is true</td></tr>
 </tbody>
 </table>
 </div>
-<p><code>liftNanoUI</code> runs an ordinary widget or action. <code>withNanoUI</code> wraps a typed body in an ordinary layout, key, or scope:</p>
-<pre><code class="language-haskell">Emit.withNanoUI column $ do
-  Emit.liftNanoUI (label "Settings")
-  Emit.withNanoUI (withKey "form") $ do
-    Emit.emitChanged (slider 0 100) volume SetVolume
-    Emit.emitWhen (button "Save") Save
-</code></pre>
-<p><code>withRunInNanoUIE</code> supplies a runner for ordinary widgets that take callbacks or multiple bodies:</p>
-<pre><code class="language-haskell">view model = Emit.withRunInNanoUIE $ \run -&gt; column $ do
+<p><code>liftNanoUI</code> and <code>withNanoUI</code> are available for wrapping custom widgets or external <code>NanoUI</code> actions:</p>
+<pre><code class="language-haskell">column $ do
   label "Settings"
-  run (Emit.emitChanged (slider 0 100) model.volume SetVolume)
-  run (Emit.emitWhen (button "Save") SaveDocument)
+  withKey "form" $ do
+    emitChangedE (slider 0 100) volume SetVolume
+    emitWhenE (button "Save") Save
 </code></pre>
-<p><code>emitChanged</code> runs the widget against a temporary <code>Var</code> seeded with the model value and emits the new value only if it differs. <code>emitEdited</code> is its stricter form for text fields, where programmatic writes should not look like edits.</p>
+<p><code>withRunInNanoUIE</code> supplies a runner when embedding typed actions inside external widgets taking callbacks or untyped bodies:</p>
+<pre><code class="language-haskell">view model = withRunInNanoUIE $ \run -&gt; customContainer $ do
+  label "Settings"
+  run (emitChangedE (slider 0 100) model.volume SetVolume)
+  run (emitWhenE (button "Save") SaveDocument)
+</code></pre>
+<p><code>emitChangedE</code> runs the widget against a temporary <code>Var</code> seeded with the model value and emits the new value only if it differs. <code>emitEditedE</code> is its stricter form for text fields, where programmatic writes should not look like edits.</p>
 <blockquote class="blockquote-tag blockquote-tag-caution">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
 <p>Emit only inside an event branch. <code>emit Save</code> at the top level of a view emits on every pass, and the reducer runs every message. The adapters above already guard on the widget’s event.</p>
@@ -1263,16 +1267,16 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 <pre><code class="language-haskell">data ChildMsg = ChildIncrement | ChildReset
 data ParentMsg = Child ChildMsg | SaveAll
 
-childView :: Int -&gt; Emit.NanoUIE ChildMsg ()
-childView n = Emit.withNanoUI row $ do
-  Emit.emitWhen (button "+") ChildIncrement
-  Emit.liftNanoUI (label (T.pack (show n)))
-  Emit.emitWhen (button "Reset") ChildReset
+childView :: Int -&gt; NanoUIE ChildMsg ()
+childView n = row $ do
+  emitWhenE (button "+") ChildIncrement
+  label (T.pack (show n))
+  emitWhenE (button "Reset") ChildReset
 
-parentView :: Int -&gt; Emit.NanoUIE ParentMsg ()
-parentView n = Emit.withNanoUI column $ do
-  Emit.mapMessages Child (childView n)
-  Emit.emitWhen (button "Save All") SaveAll
+parentView :: Int -&gt; NanoUIE ParentMsg ()
+parentView n = column $ do
+  mapMessages Child (childView n)
+  emitWhenE (button "Save All") SaveAll
 </code></pre>
 <p>Messages go straight to the parent’s sink in traversal order, with no intermediate queue. <code>mapMessages</code> changes the message type, not widget identity: a list still needs <code>withKey</code> around each component, exactly as a <code>Var</code>-based row does.</p>
 <p>For local UI state, keep using <code>Var</code> inside the component; the durable model stays in <code>NanoUIE</code>.</p>
