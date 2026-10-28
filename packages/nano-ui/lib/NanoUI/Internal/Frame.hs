@@ -35,7 +35,7 @@ import NanoUI.Internal.NativeWindow (clearWindowClose)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (Padding (..), Theme (..), pageBackground, themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
-import NanoUI.Internal.Types (Color, Damage (..), Rect (..), Size (..), colorA, colorB, colorG, colorR, colorRGBA, damageIsEmpty, rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (Color, Damage (..), Rect (..), Size (..), colorA, damageIsEmpty, fadeAlpha, lerpColor, rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 import NanoUI.Internal.Var (beginVarPass, endVarFrame, takeVarRerun)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
@@ -172,12 +172,13 @@ runFrameEff unlift ctx rawInp ui = do
   -- shows the layout overlay, can neither keep its draw nor reuse one.
   reuse <- readIORef (ctxDrawReuse ctx)
   paintFull <- readIORef (ctxPaintFull ctx)
-  key <- if drOn reuse && paintFull && not explain then drawReuseKey ctx size else pure Nothing
+  clear <- frameClearColor ctx
+  key <- if drOn reuse && paintFull && not explain then drawReuseKey ctx size clear else pure Nothing
   let !mayReuse = case (key, drLast reuse) of
         (Just k, Just (lastKey, _)) -> k == lastKey
         _ -> False
   writeDamage ctx frameInp snap mayReuse layoutFloats
-  drawData <- paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse
+  drawData <- paintOrReuse ctx frameInp size explain paintFull clear reuse key mayReuse
   dirtyAfterUi <- isDirty ctx
   pure (result, drawData, dirtyAfterUi)
 
@@ -245,8 +246,8 @@ finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore = do
 -- nothing. Other frames paint, and a full frame caches its output for the
 -- next. Paint that reads state nano-ui does not track must call 'damageFull'
 -- when that state changes.
-paintOrReuse :: Context -> Input -> Size -> Bool -> Bool -> DrawReuse -> Maybe DrawReuseKey -> Bool -> IO DrawData
-paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse = do
+paintOrReuse :: Context -> Input -> Size -> Bool -> Bool -> Color -> DrawReuse -> Maybe DrawReuseKey -> Bool -> IO DrawData
+paintOrReuse ctx frameInp size explain paintFull clear reuse key mayReuse = do
   damage <- getsDamage ctx dsDamage
   case drLast reuse of
     Just (_, lastDraw) | mayReuse && damageIsEmpty damage -> pure lastDraw
@@ -254,7 +255,7 @@ paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse = do
       -- The kept draw borrows the draw arena's buffers, which paint
       -- overwrites: drop it first, so a paint that throws leaves none behind.
       when (isJust (drLast reuse)) $ writeIORef (ctxDrawReuse ctx) $! reuse {drLast = Nothing}
-      drawData <- paintFrame ctx frameInp size explain paintFull
+      drawData <- paintFrame ctx frameInp size explain paintFull clear
       -- Nothing to keep now or before: leave the state as it is.
       unless (isNothing key && isNothing (drLast reuse)) $
         writeIORef (ctxDrawReuse ctx) $! reuse {drLast = (\k -> (k, drawData)) <$!> key}
@@ -264,8 +265,8 @@ paintOrReuse ctx frameInp size explain paintFull reuse key mayReuse = do
 -- 'Nothing' when it cannot be reused: paint builds a custom drawing on a
 -- node that is not a drawing (a pane grid's focus ring) afresh, and no
 -- damage says when it changes.
-drawReuseKey :: Context -> Size -> IO (Maybe DrawReuseKey)
-drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size = do
+drawReuseKey :: Context -> Size -> Color -> IO (Maybe DrawReuseKey)
+drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size clear = do
   customs <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
   let onDrawing k rest =
         lookupNodeByKey na k >>= \case
@@ -287,7 +288,7 @@ drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size = do
           <*> readIORef (ctxActiveId ctx)
           <*> getPaintSignature na
           <*> atlasToken (ctxImageAtlas ctx)
-          <*> frameClearColor ctx
+          <*> pure clear
 
 -- | The colour of the page surface this frame: the root node's theme, so a
 -- scope around the whole view applies, or the base theme's for an empty view.
@@ -313,24 +314,19 @@ frameClearColor ctx = do
 -- blend lays a draw over the target: the colour mixed by the top's alpha,
 -- and the alphas combined.
 blendOver :: Color -> Color -> Color
-blendOver top bottom
-  | ta >= 1 = top
-  | ta <= 0 = bottom
-  | otherwise = colorRGBA (mix colorR) (mix colorG) (mix colorB) (round (255 * (ta + ba * (1 - ta))))
+blendOver top bottom = fadeAlpha (lerpColor bottom top ta) (round (255 * (ta + ba * (1 - ta))))
   where
     unit c = fromIntegral c / 255 :: Float
     ta = unit (colorA top)
     ba = unit (colorA bottom)
-    mix ch = round (fromIntegral (ch top) * ta + fromIntegral (ch bottom) * (1 - ta))
 
 -- | Paint the frame. Clip frames repaint the damaged region of the retained
 -- texture, which preserves the other pixels ('paintDamageClip'). Full-present
 -- frames (fresh retain, forced full, continuous) paint everything.
-paintFrame :: Context -> Input -> Size -> Bool -> Bool -> IO DrawData
-paintFrame ctx frameInp size explain paintFull = do
+paintFrame :: Context -> Input -> Size -> Bool -> Bool -> Color -> IO DrawData
+paintFrame ctx frameInp size explain paintFull clear = do
   let da = ctxDrawArena ctx
   resetDrawArena da
-  clear <- frameClearColor ctx
   setDrawClear da clear
   beginLayer da LayerBackground
   unless paintFull $ do

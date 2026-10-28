@@ -52,7 +52,7 @@ import Data.Primitive.SmallArray (SmallArray, SmallMutableArray, emptySmallArray
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
-import NanoUI.Internal.Context (Context (..), InteractionState (..), ScrollMetrics (..), getPrevRect, getScrollMetrics, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), ScrollMetrics (..), getPrevRect, readScrollMetrics, recordLayoutRead, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
 import NanoUI.Internal.Var (Binding (..), bindVarOn, useVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
@@ -61,11 +61,11 @@ import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCu
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, explicitMin, fillH, fillW, minW, tight)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import Data.String (IsString (..))
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (buttonFlagTable, tableSortLane)
+import NanoUI.Internal.WidgetText (buttonFlagTable, rowStripe, stripeBits, tableHeaderPadX)
 import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
@@ -402,7 +402,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
             remeasure 0
           _ -> mapM_ measure [0 .. n - 1]
         -- As the header shows it, with the sort mark's lane beside it.
-        writePrimArray hdrWM i . (+ (cellPadX + tableSortLane)) =<< lineWidthIO fm (hdrs V.! i)
+        writePrimArray hdrWM i . (+ tableHeaderPadX) =<< lineWidthIO fm (hdrs V.! i)
       cellWs <- unsafeFreezePrimArray cellWM
       hdrWs <- unsafeFreezePrimArray hdrWM
       let widest i !r !w = if r >= n then w else widest i (r + 1) (max w (indexPrimArray cellWs (i * n + r)))
@@ -494,39 +494,34 @@ numCellLayout =
 -- minimum that surfaces a horizontal bar under a table that fits the
 -- scroller's full width. Its drag floor ('colFloor') still binds once the
 -- column has been resized to a stored width.
-colBoxLayout :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
-colBoxLayout fillInner hasStretch sizes contentWs stored i
-  | saved > 0 = fixed (max floorW saved)
-  | ColStretch <- size, fillInner = stretchBox {layoutWidth = Grow 1}
-  | ColContent <- size, fillInner && not hasStretch = box {layoutWidth = Grow 1}
-  | otherwise = fixed floorW
-  where
-    saved = primAt stored i 0
-    floorW = colFloor sizes contentWs i
-    size = smallAt sizes i ColContent
-    box = (fillH flatLayout) {layoutMinW = floorW}
-    stretchBox = (fillH flatLayout) {layoutMinW = explicitMin 0}
-    fixed w = box {layoutWidth = Fixed w, layoutMinW = w, layoutMaxW = w}
-
--- | Column @i@'s box under the squeeze ('tableSqueeze'): it grows by its
--- pinned width (its dragged width once it has one, else its floor) up to
--- that width, so a table narrower than their sum shrinks the columns in
+--
+-- Under the squeeze ('tableSqueeze') the box instead grows by its pinned
+-- width (its dragged width once it has one, else its floor) up to that
+-- width, so a table narrower than their sum shrinks the columns in
 -- proportion to it, none under 'minColW', and scrolls sideways only once
 -- every column sits at that floor. A stretch column takes part with a
 -- bounded share, which keeps fixed columns from crushing it to nothing, and
 -- has no cap, so it takes what the others leave; so do the content columns
 -- of a table that fills its width with no stretch column.
-squeezeBoxLayout :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
-squeezeBoxLayout fillInner hasStretch sizes contentWs stored i =
-  (fillH flatLayout) {layoutWidth = Grow pinned, layoutMinW = minColW, layoutMaxW = if uncapped then 1e9 else pinned}
+colBoxLayout :: Bool -> Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
+colBoxLayout squeeze fillInner hasStretch sizes contentWs stored i
+  | squeeze = box {layoutWidth = Grow pinned, layoutMinW = minColW, layoutMaxW = if grows then 1e9 else pinned}
+  | saved > 0 = fixed (max floorW saved)
+  | grows, ColStretch <- size = minW 0 box {layoutWidth = Grow 1}
+  | grows = box {layoutWidth = Grow 1}
+  | otherwise = fixed floorW
   where
     saved = primAt stored i 0
+    floorW = colFloor sizes contentWs i
     size = smallAt sizes i ColContent
+    -- Whether the column takes the spare width once it has no stored width.
+    grows = saved <= 0 && fillInner && (size == ColStretch || size == ColContent && not hasStretch)
     pinned
-      | saved > 0 = max (colFloor sizes contentWs i) saved
+      | saved > 0 = max floorW saved
       | ColStretch <- size = max minColW (min 120 (primAt contentWs i minColW))
-      | otherwise = colFloor sizes contentWs i
-    uncapped = saved <= 0 && fillInner && (size == ColStretch || (size == ColContent && not hasStretch))
+      | otherwise = floorW
+    box = (fillH flatLayout) {layoutMinW = floorW}
+    fixed w = box {layoutWidth = Fixed w, layoutMinW = w, layoutMaxW = w}
 
 -- | Sortable table with resizable, reorderable columns, with sort state bound
 -- to a 'Var': a header click updates it in place. @key@ distinguishes tables
@@ -651,8 +646,13 @@ tableCore cfg f key cols inputRows curSort =
     -- Whether the body showed its vertical bar last frame. The header then
     -- keeps a spacer the width of the bar's lane, so its columns line up
     -- with the rows; it follows the body a frame late when the bar comes or
-    -- goes.
-    hasVertBar <- liftIO (maybe False ((> 0) . v2Y . scrollRange) <$> getScrollMetrics ctx vWid)
+    -- goes. Only a change in the bar itself asks for that frame, not every
+    -- change in the body's metrics.
+    hasVertBar <- liftIO $ do
+      let barOf = maybe False ((> 0) . v2Y . scrollRange)
+      bar <- barOf <$> readScrollMetrics ctx vWid
+      recordLayoutRead ctx (slotKey SlotScrollRange (intKey vWid)) ((/= bar) . barOf <$> readScrollMetrics ctx vWid)
+      pure bar
     let nRows = sizeofSmallArray encoded
         widths1Arr = primArrayFromList widths1
         outerLayout = f (fillW flatLayout)
@@ -677,7 +677,7 @@ tableCore cfg f key cols inputRows curSort =
         squeezed i = tableSqueeze cfg && i `notElem` frozenIdx
         colBoxes =
           smallArrayFromList
-            [ (if squeezed i then squeezeBoxLayout else colBoxLayout) fillInner hasStretch sizes contentWs widths1Arr i
+            [ colBoxLayout (squeezed i) fillInner hasStretch sizes contentWs widths1Arr i
             | i <- [0 .. n - 1]
             ]
         colBox i = smallAt colBoxes i (tight defaultLayout)
@@ -693,7 +693,7 @@ tableCore cfg f key cols inputRows curSort =
             Just hdrAct -> buttonContentStyled styleIx flags cellLay hdrAct
         textCellAt ri i t = do
           wid <- nextId
-          void (addWidgetStyled wid NodeText t 0 (cellLayout i) (if even ri then 1 else 2))
+          void (addWidgetStyled wid NodeText t 0 (cellLayout i) (rowStripe ri))
         -- Text cells show their cached text; only a column with widget
         -- views encodes its visible cells again, for the views.
         renderCell ri r i
@@ -702,7 +702,7 @@ tableCore cfg f key cols inputRows curSort =
             Nothing -> textCellAt ri i (indexSmallArray encoded r V.! i)
             -- The cell's panel carries the row fill in its style index
             -- ('panelSurface'), as a text cell's node does.
-            Just widgetAct -> styledContainer NodePanel ((if even ri then 1 else 2) `shiftL` 4) (cellLayout i) widgetAct
+            Just widgetAct -> styledContainer NodePanel (stripeBits (rowStripe ri)) (cellLayout i) widgetAct
         rowCells rowLay idxs colLays ri =
           gridColumnsLay rowLay idxs colLays [renderCell ri (indexPrimArray sorted ri) i | i <- idxs]
         paneRoot = fillIf fillInner (tight (fillH defaultLayout))

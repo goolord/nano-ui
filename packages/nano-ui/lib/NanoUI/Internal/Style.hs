@@ -101,7 +101,6 @@ module NanoUI.Internal.Style
   , maxW
   , fixedW
   , minH
-  , explicitMin
   , hasExplicitMin
   , maxH
   , fixedH
@@ -168,7 +167,7 @@ import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
 import GHC.Enum (boundedEnumFrom, boundedEnumFromThen, predError, succError)
-import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorB, colorG, colorR, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
+import NanoUI.Internal.Types (Color (..), V2 (..), clamp, colorA, colorB, colorG, colorR, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -1035,7 +1034,7 @@ background c s =
 -- alpha.
 shiftColor :: Color -> Color -> Color -> Color
 shiftColor from to c =
-  let ch f = fromIntegral (max 0 (min 255 (fromIntegral (f c) + fromIntegral (f to) - fromIntegral (f from) :: Int)))
+  let ch f = fromIntegral (clamp 0 255 (fromIntegral (f c) + fromIntegral (f to) - fromIntegral (f from) :: Int))
    in colorRGBA (ch colorR) (ch colorG) (ch colorB) (colorA c)
 
 -- | Set a surface's text and foreground colour.

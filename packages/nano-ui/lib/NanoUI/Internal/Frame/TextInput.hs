@@ -14,6 +14,7 @@ module NanoUI.Internal.Frame.TextInput
   , drawTextInputCaret
   , pushFieldText
   , fieldTextColor
+  , nodeTextColor
   , drawLineSelection
   , drawLineCaret
   , drawCaretAt
@@ -47,7 +48,7 @@ import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId, nodeFontBits)
 import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldSelection, fieldSelectionWrite, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), themeSelection, toneColor)
@@ -141,12 +142,20 @@ pushFieldText da fm native si x y txt col = do
 -- @fg@.
 {-# INLINE fieldTextColor #-}
 fieldTextColor :: Context -> NodeIdx -> Color -> IO Color
-fieldTextColor ctx idx fg =
+fieldTextColor ctx = nodeTextColor ctx NodeTextArea
+
+-- | 'fieldTextColor' for node @idx@ of type @nt@, whose tone sits in its
+-- font bits: all of a text area's or field's style index, the label font of
+-- a button or select ('nodeFontBits').
+{-# INLINE nodeTextColor #-}
+nodeTextColor :: Context -> NodeType -> NodeIdx -> Color -> IO Color
+nodeTextColor ctx nt idx fg =
   getNodeFontColor (ctxNodeArena ctx) idx >>= \case
     Just c -> pure c
     Nothing -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      maybe (pure fg) (\t -> (`toneColor` t) <$> nodeTheme ctx idx) (textNodeFontTone si)
+      let font = if nt == NodeTextArea then si else nodeFontBits nt si
+      maybe (pure fg) (\t -> (`toneColor` t) <$> nodeTheme ctx idx) (textNodeFontTone font)
 
 -- | The selection highlight behind characters @lo@ to @hi@ of @line@, whose
 -- pen starts at @x@, on a row at @y@ of height @lineH@.

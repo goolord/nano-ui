@@ -28,7 +28,7 @@ import Data.Word (Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
 import NanoUI.Internal.Draw.Arena
-import NanoUI.Internal.Draw.Types (DrawArena (..), DrawOp (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, shiftDrawOp, vertexSize)
+import NanoUI.Internal.Draw.Types (DrawArena (..), DrawOp (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, quadPolygon, shiftDrawOp, vertexSize)
 import NanoUI.Internal.Path (idealArcSteps, miterOffset, shoelace)
 import NanoUI.Internal.SIMD
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, forUpTo_, onGrid)
@@ -87,10 +87,8 @@ pushImageRotated da (Rect x y w h) angle tex0 u0 v0 u1 v1 col = do
   -- A solid quad is a shape; an image is not.
   when (tex0 <= 0) $
     recordOp da $
-      FillPolygon
+      quadPolygon
         (primArrayFromListN 8 [cornerX (-hw) (-hh), cornerY (-hw) (-hh), cornerX hw (-hh), cornerY hw (-hh), cornerX hw hh, cornerY hw hh, cornerX (-hw) hh, cornerY (-hw) hh])
-        (primArrayFromListN 2 [0, 4])
-        (primArrayFromListN 6 [0, 1, 2, 0, 2, 3])
         (Flat col)
   setTexture da tex
   withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
@@ -460,9 +458,10 @@ pokeArcTop !vp !ip !base !baseIdx !hasCore !innerAA !inner !outerR !outerAA !r !
 -- already snapped by the caller; the texture is already selected.
 pushSquareStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushSquareStroke da x y w h t col = do
+  recording <- getDrawRecordOps da
   let edge qx qy qw qh =
         when (qw > 0 && qh > 0) $ do
-          recordOp da (FillRect (Rect qx qy qw qh) col)
+          when recording $ recordOpOn da (FillRect (Rect qx qy qw qh) col)
           pushQuad da (Rect qx qy qw qh) whitePixel whitePixel whitePixel whitePixel col
       !innerH = h - 2 * t
   edge x y w t

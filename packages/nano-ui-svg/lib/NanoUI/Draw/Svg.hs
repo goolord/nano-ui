@@ -171,7 +171,7 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
             | otherwise ->
                 let
                   !gid = nextGrad + 1
-                  !gidStr = pfx <> "grad_" <> TB.fromString (show gid)
+                  !gidStr = gradId gid
                   !(coords, stops)
                     | tl == bl && tr == br =
                         ( attr "x1" "0%" <> attr "y1" "0%" <> attr "x2" "100%" <> attr "y2" "0%"
@@ -187,24 +187,16 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
                             <> stopElem p "50%" (lerpColor tr bl 0.5)
                             <> stopElem p "100%" br
                         )
-                  gradDef =
-                    "<linearGradient id=\""
-                      <> gidStr
-                      <> "\""
-                      <> coords
-                      <> ">"
-                      <> stops
-                      <> "</linearGradient>"
                   gradRect =
                     "<rect"
                       <> numAttr p "x" x
                       <> numAttr p "y" y
                       <> numAttr p "width" w
                       <> numAttr p "height" h
-                      <> attr "fill" ("url(#" <> gidStr <> ")")
+                      <> gradFill gidStr
                       <> "/>"
                  in
-                  walk (i + 1) clips nextClip gid (dAcc <> gradDef) (bAcc <> gradRect)
+                  walk (i + 1) clips nextClip gid (dAcc <> gradientDef gidStr coords stops) (bAcc <> gradRect)
           -- A canvas 'Linear' fill is one gradient cut into triangles at its
           -- stops; draw it as one, so the seams between triangles never show.
           FillPolygon pts rings tris (Shaded cs)
@@ -212,27 +204,31 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
             , Just ((x1, y1), (x2, y2), stops) <- linearShade pts tris cs ->
                 let
                   !gid = nextGrad + 1
-                  !gidStr = pfx <> "grad_" <> TB.fromString (show gid)
+                  !gidStr = gradId gid
                   gradDef =
-                    "<linearGradient id=\""
-                      <> gidStr
-                      <> "\" gradientUnits=\"userSpaceOnUse\""
-                      <> numAttr p "x1" x1
-                      <> numAttr p "y1" y1
-                      <> numAttr p "x2" x2
-                      <> numAttr p "y2" y2
-                      <> ">"
-                      <> foldMap (\(t, col) -> stopElem p (fmtNum p (t * 100) <> "%") col) stops
-                      <> "</linearGradient>"
+                    gradientDef
+                      gidStr
+                      ( attr "gradientUnits" "userSpaceOnUse"
+                          <> numAttr p "x1" x1
+                          <> numAttr p "y1" y1
+                          <> numAttr p "x2" x2
+                          <> numAttr p "y2" y2
+                      )
+                      (foldMap (\(t, col) -> stopElem p (fmtNum p (t * 100) <> "%") col) stops)
                   el =
                     "<path"
                       <> attr "d" d
                       <> attr "fill-rule" "evenodd"
-                      <> attr "fill" ("url(#" <> gidStr <> ")")
+                      <> gradFill gidStr
                       <> "/>"
                  in
                   walk (i + 1) clips nextClip gid (dAcc <> gradDef) (bAcc <> el)
           op -> walk (i + 1) clips nextClip nextGrad dAcc (bAcc <> emitOp p cfg op)
+
+  gradId g = pfx <> "grad_" <> TB.fromString (show g)
+  gradFill gidStr = attr "fill" ("url(#" <> gidStr <> ")")
+  gradientDef gidStr attrs stops =
+    "<linearGradient id=\"" <> gidStr <> "\"" <> attrs <> ">" <> stops <> "</linearGradient>"
 
 emitOp :: Int -> SvgConfig -> DrawOp -> TB.Builder
 emitOp p cfg = \case
@@ -350,7 +346,7 @@ emitPolygon p pts rings tris shade =
     Nothing ->
       case shade of
         Shaded cs
-          | nt >= 3 && sizeofPrimArray cs >= n && ptsFinite n && trisValid ->
+          | shadedValid pts tris cs ->
               foldMap
                 ( \k ->
                     let
@@ -373,9 +369,19 @@ emitPolygon p pts rings tris shade =
  where
   !n = sizeofPrimArray pts `div` 2
   !nt = sizeofPrimArray tris - sizeofPrimArray tris `mod` 3
-  trisValid = trianglesValid n tris
-  ptsFinite m = and [finite (indexPrimArray pts k) | k <- [0 .. 2 * m - 1]]
   pt i = (indexPrimArray pts (2 * i), indexPrimArray pts (2 * i + 1))
+
+-- | Whether a 'Shaded' polygon is well formed: a whole triangle, finite
+-- points, a colour for each, and triangles that name only those points.
+shadedValid :: PrimArray Float -> PrimArray Int -> PrimArray Word32 -> Bool
+shadedValid pts tris cs =
+  sizeofPrimArray tris >= 3 && sizeofPrimArray cs >= n && pointsFinite n pts && trianglesValid n tris
+ where
+  !n = sizeofPrimArray pts `div` 2
+
+-- | Whether the first @m@ points are finite.
+pointsFinite :: Int -> PrimArray Float -> Bool
+pointsFinite m pts = and [finite (indexPrimArray pts k) | k <- [0 .. 2 * m - 1]]
 
 -- | Whether every index of every whole triangle names one of @n@ points.
 trianglesValid :: Int -> PrimArray Int -> Bool
@@ -388,7 +394,7 @@ trianglesValid n tris =
 -- the rings or their points are malformed.
 ringsPathData :: Int -> PrimArray Float -> PrimArray Int -> Maybe TB.Builder
 ringsPathData p pts rings
-  | ringsValid && and [finite (indexPrimArray pts k) | k <- [0 .. 2 * nOut - 1]] =
+  | ringsValid && pointsFinite nOut pts =
       Just (joinNonEmpty " " [ringPath r | r <- [0 .. nr - 1]])
   | otherwise = Nothing
  where
@@ -431,8 +437,7 @@ ringsPathData p pts rings
 linearShade ::
   PrimArray Float -> PrimArray Int -> PrimArray Word32 -> Maybe ((Float, Float), (Float, Float), [(Float, Color)])
 linearShade pts tris cs
-  | n < 3 || nt < 3 || sizeofPrimArray cs < n || not (trianglesValid n tris) = Nothing
-  | not (all finite [indexPrimArray pts k | k <- [0 .. 2 * n - 1]]) = Nothing
+  | n < 3 || not (shadedValid pts tris cs) = Nothing
   | sxx + syy <= 1.0e-12 || span' < 1.0e-3 = Nothing
   | not (all followsAxis triangles) || not (sameWhereLevel samples) = Nothing
   | otherwise =
@@ -522,7 +527,7 @@ emitPolyline ::
   -> Shade
   -> TB.Builder
 emitPolyline p pts w closed cap join limit shade
-  | n < 2 || not (w > 0) || not (finite w && finite limit) || not ptsFinite =
+  | n < 2 || not (w > 0) || not (finite w && finite limit) || not (pointsFinite n pts) =
       mempty
   | otherwise =
       case uniformShade n shade of
@@ -569,7 +574,6 @@ emitPolyline p pts w closed cap join limit shade
             _ -> mempty
  where
   !n = sizeofPrimArray pts `div` 2
-  ptsFinite = and [finite (indexPrimArray pts k) | k <- [0 .. 2 * n - 1]]
   px i = indexPrimArray pts (2 * i)
   py i = indexPrimArray pts (2 * i + 1)
   ptAt i = fmtPt p (px i) (py i)

@@ -42,7 +42,10 @@ module NanoUI.Internal.WidgetText
   , containerFlagClip
   , hasFlag
   , tableSortLane
+  , tableHeaderPadX
   , tableStripeColor
+  , rowStripe
+  , stripeBits
   , panelSurface
   , tableStripeInset
   , stripeColor
@@ -266,7 +269,7 @@ colorFromHex txt = do
 {-# INLINE packTextNodeStyle #-}
 packTextNodeStyle :: Layout -> Int -> Int
 packTextNodeStyle l stripe =
-  (stripe `shiftL` 4)
+  stripeBits stripe
     .|. (fromEnum (variantFace (layoutFontVariant l)) .&. 0x0F)
     .|. ((fromEnum (layoutFontWeight l) .&. 0x0F) `shiftL` 8)
     .|. ((fromEnum (layoutFontStyle l) .&. 0x03) `shiftL` 12)
@@ -321,6 +324,16 @@ stripeColor theme s = case s of
   2 -> Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.55)
   _ -> Nothing
 
+-- | The stripe code of table row @ri@.
+{-# INLINE rowStripe #-}
+rowStripe :: Int -> Int
+rowStripe ri = if even ri then 1 else 2
+
+-- | A stripe code in its style-index bits, as 'tableStripeColor' decodes it.
+{-# INLINE stripeBits #-}
+stripeBits :: Int -> Int
+stripeBits s = s `shiftL` 4
+
 -- | Row fill decoded from a text node's or a panel's style index.
 tableStripeColor :: Theme -> Int -> Maybe Color
 tableStripeColor theme si = stripeColor theme ((si `shiftR` 4) .&. 0x0F)
@@ -350,6 +363,11 @@ tableStripeInset si = case (si `shiftR` 4) .&. 0x0F of
 -- label.
 tableSortLane :: Float
 tableSortLane = 14
+
+-- | A table header's horizontal padding: the cell inset on both sides and
+-- the sort mark's lane.
+tableHeaderPadX :: Float
+tableHeaderPadX = 2 * tableCellInset + tableSortLane
 
 -- | Sort direction encoded for a table-header style, in bits 16-17: clear of
 -- the font fields in the low bits, which it would otherwise restyle.

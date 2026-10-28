@@ -1858,7 +1858,6 @@ filterBar = do
     filterBtn False "surface-panel" "themePanel (panelStyle)"
     filterBtn False "typography" "Typography"
     filterBtn False "trap" "8 Unexpected Interactions"
-    filterBtn False "framesvg" "frameToSvg Quirks"
   where
     filterBtn :: Bool -> Text -> Text -> Html ()
     filterBtn active cat btnLabel =
@@ -2125,17 +2124,13 @@ layoutDemo = columnWith (fillW . fillH . padAll 14 . gap 10)
 -- | Render one layout example, cropped to its painted height. @hoverPos@
 -- parks the pointer on a control for the hover and pointer-mode examples.
 layoutSvg :: Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO Text
-layoutSvg = settledSvg 1
-
--- | 'layoutSvg' after @n@ warm-up frames. A chart sizes itself from the
--- envelope of the drawing it made the frame before, so it takes more than
--- one frame to settle.
-settledSvg :: Int -> Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO Text
-settledSvg n tag w h hoverPos ui = do
-  (svg, bounds) <- settledFrame n tag w h hoverPos ui
+layoutSvg tag w h hoverPos ui = do
+  (svg, bounds) <- settledFrame 1 tag w h hoverPos ui
   pure (cropSvg w h bounds svg)
 
--- | The uncropped SVG of 'settledSvg' and the bounds of what it painted.
+-- | The uncropped SVG of a view after @n@ warm-up frames, and the bounds of
+-- what it painted. A chart sizes itself from the envelope of the drawing it
+-- made the frame before, so it takes more than one frame to settle.
 settledFrame :: Int -> Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO (Text, Maybe Rect)
 settledFrame n tag w h hoverPos ui = do
   ctx <- newSvgContext

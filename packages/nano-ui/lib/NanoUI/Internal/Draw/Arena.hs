@@ -16,6 +16,7 @@ module NanoUI.Internal.Draw.Arena
   , setDrawRecordOps
   , getDrawRecordOps
   , recordOp
+  , recordOpOn
   , recordedOps
   , beginLayer
   , currentLayer

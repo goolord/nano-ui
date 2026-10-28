@@ -291,21 +291,26 @@ crosshair (V2 x y) = do
   guideStroke (P.moveTo (V2 x (y - 16)) <> P.lineTo (V2 x (y + 16)))
   drawCircle (V2 x y) 2.5 rose
 
+-- | A grid example as (file name, canvas width, view): 'cells' and its
+-- padding.
+cellGrid :: Text -> Int -> Float -> Float -> [(Text, Rect -> CanvasM ())] -> (Text, Float, NanoUI ())
+cellGrid name cols cw ch examples = (name, fromIntegral cols * cw + 24, cells cols cw ch examples)
+
 -- | Every example as (file name, canvas width, view). The width covers the
 -- padded canvas; the generator crops the height to what was drawn.
 canvasExamples :: [(Text, Float, NanoUI ())]
 canvasExamples =
   [ ("badge", 144, columnWith (padAll 12) badge)
-  , ("primitives", 4 * 160 + 24, cells 4 160 120 primitives)
-  , ("segments", 5 * 150 + 24, cells 5 150 130 [(c, \r -> drawStrokePath (mk r) 3 blue >> pathPoints (mk r)) | (c, mk) <- segments])
-  , ("shapes", 4 * 160 + 24, cells 4 160 120 shapes)
-  , ("fill-rules", 3 * 200 + 24, cells 3 200 130 fillRules)
-  , ("paints", 4 * 160 + 24, cells 4 160 120 paints)
-  , ("caps", 3 * 180 + 24, cells 3 180 100 (annotate (\r -> guideStroke (capLine r) >> pathPoints (capLine r)) caps))
-  , ("joins", 4 * 170 + 24, cells 4 170 120 (annotate (\r -> guideStroke (zigzag r) >> pathPoints (zigzag r)) joins))
-  , ("dashes", 4 * 160 + 24, cells 4 160 120 dashes)
-  , ("transforms", 4 * 170 + 24, cells 4 170 130 (annotate (dashedGuide . arrowPath) transforms))
-  , ("clip", 2 * 200 + 24, cells 2 200 130 (annotate (\r -> dashedGuide (P.rect (clipBox r))) clips))
-  , ("text", 4 * 150 + 24, cells 4 150 100 (annotate (\r -> crosshair (centre r)) textAnchors))
-  , ("borders", 2 * 200 + 24, cells 2 200 130 (annotate (guideStroke . P.rect) borders))
+  , cellGrid "primitives" 4 160 120 primitives
+  , cellGrid "segments" 5 150 130 [(c, \r -> drawStrokePath (mk r) 3 blue >> pathPoints (mk r)) | (c, mk) <- segments]
+  , cellGrid "shapes" 4 160 120 shapes
+  , cellGrid "fill-rules" 3 200 130 fillRules
+  , cellGrid "paints" 4 160 120 paints
+  , cellGrid "caps" 3 180 100 (annotate (\r -> guideStroke (capLine r) >> pathPoints (capLine r)) caps)
+  , cellGrid "joins" 4 170 120 (annotate (\r -> guideStroke (zigzag r) >> pathPoints (zigzag r)) joins)
+  , cellGrid "dashes" 4 160 120 dashes
+  , cellGrid "transforms" 4 170 130 (annotate (dashedGuide . arrowPath) transforms)
+  , cellGrid "clip" 2 200 130 (annotate (\r -> dashedGuide (P.rect (clipBox r))) clips)
+  , cellGrid "text" 4 150 100 (annotate (\r -> crosshair (centre r)) textAnchors)
+  , cellGrid "borders" 2 200 130 (annotate (guideStroke . P.rect) borders)
   ]

@@ -27,7 +27,7 @@ import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
 import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
-import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
+import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextColor, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
@@ -295,16 +295,7 @@ placedTextSpans ctx nt idx placements = do
       fg <- textInputFg ctx style idx =<< textInputFocused ctx idx
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements]
     _ -> do
-      fg <-
-        if nt == NodeTextArea
-          then fieldTextColor ctx idx (styleFg style)
-          else do
-            font <- nodeFontBits nt <$> getStyleIdx (ctxNodeArena ctx) idx
-            mCol <- getNodeFontColor (ctxNodeArena ctx) idx
-            -- 'labelColor', reading the node's theme only for a tone.
-            case textNodeFontTone font of
-              Just _ | Nothing <- mCol -> (\theme -> labelColor theme style font Nothing) <$> nodeTheme ctx idx
-              _ -> pure (fromMaybe (styleFg style) mCol)
+      fg <- nodeTextColor ctx nt idx (styleFg style)
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
 
 -- | The colour of a text input's text ('fieldTextColor'), faded toward the
@@ -397,7 +388,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
           -- padding layout gave a centred label, all of the box beside
           -- adornments, and short of a select's chevron.
           room
-            | isTable = max 0 (w - 2 * tableCellInset - tableSortLane)
+            | isTable = max 0 (w - tableHeaderPadX)
             | nt == NodeSelect = w - ix - selectChevronReserve
             | ax /= AlignCenter = w
             | hasFlag buttonFlagTab si = w - 2 * tabHeaderPadX

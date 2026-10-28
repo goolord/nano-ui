@@ -36,7 +36,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (find, partition, sortOn)
 import Data.Map.Strict qualified as M
-import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
+import Data.Primitive.PrimArray (PrimArray)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -96,6 +96,7 @@ import NanoUI.Internal.Layout.Arena
   , hasCenteredLabel
   , nodeFontBits
   )
+import NanoUI.Internal.Path (ringBox)
 import NanoUI.Testing
   ( textNodeFontStyle
   , textNodeFontVariant
@@ -191,11 +192,10 @@ frameToSvg cfg0 ctx inp dd = do
         ]
     tclip = TB.fromText (fsIdPrefix cfg) <> "tclip_"
     (pageTextDefs, pageTextBody, nextTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles tclip 1 pageSpans
-    (overlayTextDefs, overlayTextBody, _) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles tclip nextTClip overlaySpans
+    (overlayTextDefs, overlayTextBody, lastTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles tclip nextTClip overlaySpans
     allDefs
-      | nullDefs = mempty
+      | lastTClip == 1 = mempty
       | otherwise = "<defs>" <> pageTextDefs <> overlayTextDefs <> "</defs>"
-    nullDefs = TL.null (TB.toLazyText pageTextDefs) && TL.null (TB.toLazyText overlayTextDefs)
     doc =
       "<svg xmlns=\"http://www.w3.org/2000/svg\""
         <> numAttr 0 "width" vw
@@ -326,12 +326,10 @@ opBounds = \case
 -- | The box around x/y pairs, grown by @pad@ on every side.
 pointsBox :: Float -> PrimArray Float -> Maybe Rect
 pointsBox pad pts
-  | null xs = Nothing
-  | otherwise = Just (Rect (minimum xs - pad) (minimum ys - pad) (maximum xs - minimum xs + 2 * pad) (maximum ys - minimum ys + 2 * pad))
+  | x0 > x1 = Nothing
+  | otherwise = Just (Rect (x0 - pad) (y0 - pad) (x1 - x0 + 2 * pad) (y1 - y0 + 2 * pad))
  where
-  n = sizeofPrimArray pts `div` 2
-  xs = [indexPrimArray pts (2 * i) | i <- [0 .. n - 1]]
-  ys = [indexPrimArray pts (2 * i + 1) | i <- [0 .. n - 1]]
+  (x0, y0, x1, y1) = ringBox pts
 
 --------------------------------------------------------------------------------
 -- Text from the raster spans

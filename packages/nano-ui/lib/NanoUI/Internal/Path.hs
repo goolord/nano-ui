@@ -42,6 +42,7 @@ module NanoUI.Internal.Path
   , miterOffset
   , FillRule (..)
   , fillsWinding
+  , ringBox
   , Paint (..)
   , Shade (..)
     -- * Rings
@@ -87,7 +88,7 @@ import Data.Primitive.PrimArray
   )
 import Data.Primitive.SmallArray (indexSmallArray, newSmallArray, readSmallArray, runSmallArray, smallArrayFromListN, writeSmallArray)
 import Data.Word (Word32)
-import NanoUI.Internal.Draw.Types (DrawOp (..), LineCap (..), LineJoin (..), Shade (..), defaultTextFont)
+import NanoUI.Internal.Draw.Types (DrawOp (..), LineCap (..), LineJoin (..), Shade (..), defaultTextFont, quadPolygon)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor, newZeroedPrimArray)
 
 --------------------------------------------------------------------------------
@@ -1660,7 +1661,7 @@ transformOp tol t@(Transform a b c d _ _) op
             -- The transformed corners, with the same order and two
             -- triangles the untransformed quad uses.
             let quad = primArrayFromList (concat [[x, y] | (x, y) <- corners r])
-             in [ FillPolygon quad (primArrayFromListN 2 [0, 4]) (primArrayFromListN 6 [0, 1, 2, 0, 2, 3]) (Shaded (primArrayFromListN 4 [w | Color w <- [tl, tr, br, bl]]))
+             in [ quadPolygon quad (Shaded (primArrayFromListN 4 [w | Color w <- [tl, tr, br, bl]]))
                 | abs (a * d - b * c) > 0
                 ]
         where

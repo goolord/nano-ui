@@ -629,7 +629,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
             let body = if T.null txt then " " else txt
                 (padX, padY)
                   | nt /= NodeButton = widgetPadding fm
-                  | hasFlag buttonFlagTable si = (2 * tableCellInset + tableSortLane, 0)
+                  | hasFlag buttonFlagTable si = (tableHeaderPadX, 0)
                   | hasFlag buttonFlagTab si = (2 * tabHeaderPadX, snd (buttonPadding fm))
                   -- Menu rows reserve the same gutter the text-field context
                   -- menu paints (outer pad + item pad on each side of the

@@ -16,6 +16,7 @@ module NanoUI.Internal.Draw.Types
   , defaultTextFont
   , DrawingBuild
   , shiftDrawOp
+  , quadPolygon
   , DrawCmd (..)
   , DrawData (..)
   , drawCmdCount
@@ -35,7 +36,7 @@ module NanoUI.Internal.Draw.Types
 where
 
 import Data.IORef (IORef)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, imapPrimArray, indexPrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, imapPrimArray, indexPrimArray, primArrayFromListN)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word32, Word8)
@@ -228,6 +229,11 @@ data TextFont = TextFont
 -- | Regular text using the backend's default size, weight, and upright style.
 defaultTextFont :: TextFont
 defaultTextFont = TextFont 0 FontRegular WeightNormal FontStyleNormal DecorationNone
+
+-- | A quad as a 'FillPolygon': its four corners' x/y pairs in order round
+-- it, cut into two triangles from the first.
+quadPolygon :: PrimArray Float -> Shade -> DrawOp
+quadPolygon corners = FillPolygon corners (primArrayFromListN 2 [0, 4]) (primArrayFromListN 6 [0, 1, 2, 0, 2, 3])
 
 -- | Translate every vertex in a 'DrawOp'. Paint reuses ops when only (x, y) moved.
 shiftDrawOp :: Float -> Float -> DrawOp -> DrawOp
