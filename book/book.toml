@@ -1,0 +1,24 @@
+[book]
+title = "nano-ui Documentation"
+authors = ["goolord"]
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/nano-ui/"
+additional-css = ["theme/nano-ui-book.css"]
+additional-js = ["theme/nano-ui-banks.js", "theme/nano-ui-components.js"]
+git-repository-url = "https://github.com/goolord/nano-ui"
+default-theme = "coal"
+preferred-dark-theme = "coal"
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3

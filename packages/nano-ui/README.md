@@ -109,7 +109,7 @@ for typed messages, which the backend reducer runners fold into a model.
   modifiers.
 - [GitHub repository](https://github.com/goolord/nano-ui): demo applications,
   video tour, and
-  [docs/development.md](https://github.com/goolord/nano-ui/blob/main/docs/development.md).
+  [development guide](https://goolord.github.io/nano-ui/getting-started/development.html).
 
 ## License
 

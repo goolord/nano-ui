@@ -111,14 +111,16 @@ used to check that the vertex writers compile without dictionaries or tuples.
 
 ## Documentation
 
-- [User guide](packages/nano-ui/GUIDE.md): application setup, stable widget
-  identity, layout, background work, custom drawing, and headless tests.
-- [State](docs/typed-state.md): `Var`s, where they come from, write costs,
-  handle-based resource APIs, and migration from the old hooks.
-- [Development guide](docs/development.md): building, testing, profiling, and
-  repository structure.
-- `NanoUI` Haddock: reference documentation for widgets, state, and layout
-  modifiers.
+Comprehensive documentation is available at **[goolord.github.io/nano-ui](https://goolord.github.io/nano-ui/)** (and offline in the [`book/`](book/) directory):
+
+- **[Quickstart & Setup](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
+- **[Core Architecture](https://goolord.github.io/nano-ui/core/frame-model.html)**: Frame lifecycle, arena allocation, and rendering pipeline.
+- **[State & `Var`](https://goolord.github.io/nano-ui/core/state-var.html)**: `Var` semantics, write costs, handle-based resource APIs, and `VarMap`.
+- **[Interactive Styling](https://goolord.github.io/nano-ui/styling/widget-surfaces.html)**: Interactive widget workbenches, live style combination previews, and Haskell code generator.
+- **[Layout System](https://goolord.github.io/nano-ui/layout/containers.html)**: Containers, layout modifiers, and 100,000-row list virtualization.
+- **[Widgets & Packages](https://goolord.github.io/nano-ui/widgets/buttons-menus.html)**: Buttons, inputs, text editors, overlays, charts, and backends (`SDL3`, `RGFW`).
+- **[Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html)**: Building, testing, profiling, and repository conventions.
+- `NanoUI` Haddock: Reference documentation for widgets, state, and layout modifiers.
 
 ## License
 

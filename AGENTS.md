@@ -653,10 +653,9 @@ Quick one-liners; the section above has the full story and real fixes.
 
 - `packages/nano-ui/lib/NanoUI.hs` — the entire public API, grouped and
   documented (Haddock overview). First place to find what exists.
-- `packages/nano-ui/GUIDE.md` — the user guide: setup, identity, layout,
-  overlays, input, tasks, drawing, window management, headless tests.
-- `docs/typed-state.md` — `Var` semantics, write costs, resource handles.
-- `docs/development.md` — building, testing, profiling, conventions.
+- `book/src/` (or [online](https://goolord.github.io/nano-ui/)) — full documentation book: setup, identity, layout, styling workbenches, `Var` semantics, and architecture.
+- `book/src/core/state-var.md` — `Var` semantics, write costs, resource handles.
+- `book/src/getting-started/development.md` — building, testing, profiling, conventions.
 - `packages/nano-ui-demo/examples/` — one concept per file (`Hello`, `State`,
   `Layout`, `Components`, `Forms`, `TodoList`, `Keyboard`, `Overlays`,
   `Theming`, `Animation`, `Images`, `Canvas`, `Tasks`, `Files`, `LongList`,

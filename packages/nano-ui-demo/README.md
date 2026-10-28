@@ -86,7 +86,7 @@ cabal run nano-ui-example-layout
 Requires GHC 9.10 through 9.14 (development uses GHC 9.14), Cabal, SDL3,
 SDL3_ttf 3.2+, and `pkg-config`. In a repository checkout, `nix develop`
 provides the full toolchain and native dependencies; see the
-[development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md#setup)
+[development guide](https://goolord.github.io/nano-ui/getting-started/development.html#setup)
 for details. All executables are gated behind the package's `sdl` Cabal flag
 (enabled by default).
 

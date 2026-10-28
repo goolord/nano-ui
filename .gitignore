@@ -32,3 +32,5 @@ packages/*/bench.csv
 demo.svg
 demo-plots.png
 *.exe
+book/book/
+docs/*.html

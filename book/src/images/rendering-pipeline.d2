@@ -1,0 +1,139 @@
+# One runSessionLoop pass: wait for events, run a frame when a redraw is needed, present.
+# Render: d2 docs/rendering-pipeline.d2 docs/rendering-pipeline.svg
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    pad: 48
+  }
+}
+
+direction: down
+
+classes: {
+  box: {
+    style: {
+      border-radius: 10
+      font-size: 15
+      font-color: "#1b2a41"
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  gate: {
+    shape: diamond
+    style: {
+      font-size: 14
+      font-color: "#1b2a41"
+      fill: "#f4e8c1"
+      stroke: "#b08900"
+      stroke-width: 2
+    }
+  }
+}
+
+style.fill: "#f6f4ef"
+style.stroke: "#f6f4ef"
+
+heading: {
+  label: Rendering pipeline
+  near: top-center
+  shape: text
+  style: {
+    font-size: 28
+    bold: true
+    font-color: "#1b2a41"
+  }
+}
+
+idle: "runSessionLoop (NanoUI.Runner)" {
+  class: box
+  style.fill: "#ece7dc"
+  style.stroke: "#8a8174"
+  direction: down
+
+  poll: Wait for events { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
+  gate: redraw needed? { class: gate }
+  skip: Keep last frame { class: box; style.fill: "#e4e0d6"; style.stroke: "#8a8174" }
+  present: Draw frame { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
+
+  poll -> gate
+  gate -> skip: idle
+  gate -> present: dirty
+}
+
+frame: runFrameEff {
+  class: box
+  style.fill: "#dce6f2"
+  style.stroke: "#3d5a80"
+  direction: down
+
+  reset: "1  Route pointer, update scroll\nthen reset arenas and id scopes" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  build: "2  Build view\nwidgets add nodes, read and write Vars" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  mirror: "Var read earlier\nthen written?" {
+    class: gate
+  }
+  layout: "3  Layout solve\nflex measure/place, windows, scroll" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  input: "4  Input and focus\npointer, text, select, menus, anim tick" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  paint: "6  Paint damaged region\nbackground, content, overlay, chrome" {
+    class: box
+    style.fill: "#c5d4e8"
+    style.stroke: "#3d5a80"
+  }
+  damage: "5  Compute damage\ngeometry, state, theme, animation" {
+    class: box
+    style.fill: "#adc2dc"
+    style.stroke: "#3d5a80"
+  }
+
+  reset -> build
+  build -> mirror
+  mirror -> build: rebuild once without one-shot input
+  mirror -> layout: view ready
+  layout -> input -> damage -> paint
+}
+
+drawdata: "DrawData\npinned verts/indices, layered cmds" {
+  class: box
+  style.fill: "#f3ead8"
+  style.stroke: "#9a6b2f"
+}
+
+hosts: Hosts {
+  class: box
+  style.fill: "#dceee6"
+  style.stroke: "#2d6a4f"
+  direction: right
+
+  sdl: "SDL\nsnapDamage, renderDrawDataPass, present" {
+    class: box
+    style.fill: "#eef7f2"
+    style.stroke: "#2d6a4f"
+  }
+  rgfw: "RGFW\nrenderArenaGl, swapBuffersGL" {
+    class: box
+    style.fill: "#eef7f2"
+    style.stroke: "#2d6a4f"
+  }
+}
+
+idle.present -> frame.reset: run frame
+frame.paint -> drawdata
+drawdata -> hosts.sdl
+drawdata -> hosts.rgfw

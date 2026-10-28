@@ -1,0 +1,380 @@
+/* nano-ui mdBook custom styling & interactive workbenches */
+
+:root {
+  --nano-accent: #38bdf8;
+  --nano-accent-dim: rgba(56, 189, 248, 0.15);
+  --nano-accent-border: rgba(56, 189, 248, 0.4);
+  --nano-well-bg: #18181b;
+  --nano-well-border: #27272a;
+  --nano-card-bg: #1e1e24;
+  --nano-card-border: #33333d;
+  --nano-chip-bg: #27272f;
+  --nano-chip-border: #3f3f4a;
+  --nano-chip-active-bg: #0369a1;
+  --nano-chip-active-border: #38bdf8;
+  --nano-chip-text: #e4e4e7;
+  --nano-trap-border: #d97706;
+  --nano-trap-badge-bg: rgba(217, 119, 6, 0.15);
+  --nano-trap-badge-text: #fbbf24;
+  --nano-fix-badge-bg: rgba(16, 185, 129, 0.15);
+  --nano-fix-badge-text: #34d399;
+}
+
+/* Light mode overrides for mdBook */
+html.light, html.rust {
+  --nano-well-bg: #f4f4f5;
+  --nano-well-border: #e4e4e7;
+  --nano-card-bg: #ffffff;
+  --nano-card-border: #e2e8f0;
+  --nano-chip-bg: #f1f5f9;
+  --nano-chip-border: #cbd5e1;
+  --nano-chip-active-bg: #0284c7;
+  --nano-chip-active-border: #0ea5e9;
+  --nano-chip-text: #0f172a;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Workbenches & Components                                                   */
+/* -------------------------------------------------------------------------- */
+
+nano-ui-workbench,
+nano-ui-hero,
+nano-ui-state-lab,
+nano-ui-typo-lab,
+nano-ui-trap {
+  display: block;
+  margin: 1.8rem 0;
+  background: var(--nano-card-bg);
+  border: 1px solid var(--nano-card-border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.nano-wb-header {
+  padding: 12px 18px;
+  background: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid var(--nano-card-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.nano-wb-title {
+  font-weight: 700;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nano-wb-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--nano-accent-dim);
+  color: var(--nano-accent);
+  border: 1px solid var(--nano-accent-border);
+}
+
+.nano-wb-controls {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--nano-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.nano-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.nano-chip-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+  margin-right: 6px;
+  min-width: 65px;
+}
+
+.nano-chip {
+  appearance: none;
+  border: 1px solid var(--nano-chip-border);
+  background: var(--nano-chip-bg);
+  color: var(--nano-chip-text);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.nano-chip:hover {
+  border-color: var(--nano-accent);
+}
+
+.nano-chip.active {
+  background: var(--nano-chip-active-bg);
+  border-color: var(--nano-chip-active-border);
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+}
+
+.nano-chip.chip-compare {
+  margin-left: auto;
+  border-color: #d97706;
+  color: #f59e0b;
+}
+
+.nano-chip.chip-compare.active {
+  background: #b45309;
+  border-color: #f59e0b;
+  color: #ffffff;
+}
+
+/* -------------------------------------------------------------------------- */
+/* SVG Specimen Well                                                          */
+/* -------------------------------------------------------------------------- */
+
+.nano-well-container {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nano-well-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .nano-well-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nano-svg-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nano-pane-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+}
+
+.svg-well {
+  background: var(--nano-well-bg);
+  border: 1px solid var(--nano-well-border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-x: auto;
+  min-height: 80px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.svg-well svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Haskell Code Bar                                                           */
+/* -------------------------------------------------------------------------- */
+
+.nano-code-bar {
+  padding: 10px 18px;
+  background: rgba(0, 0, 0, 0.25);
+  border-top: 1px solid var(--nano-card-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-mono, Consolas, Monaco, monospace);
+  font-size: 12.5px;
+}
+
+.nano-code-snippet {
+  overflow-x: auto;
+  white-space: pre;
+  color: #38bdf8;
+}
+
+.nano-copy-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--nano-chip-border);
+  color: var(--nano-chip-text);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.nano-copy-btn:hover {
+  border-color: var(--nano-accent);
+  color: var(--nano-accent);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Notes / Surface Inspection                                                 */
+/* -------------------------------------------------------------------------- */
+
+.nano-notes-box {
+  padding: 12px 18px;
+  border-top: 1px solid var(--nano-card-border);
+  font-size: 12.5px;
+  background: rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nano-note-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.nano-note-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.nano-note-badge.primary { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
+.nano-note-badge.partial { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+.nano-note-badge.surprise { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+.nano-note-badge.noop { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+
+/* -------------------------------------------------------------------------- */
+/* Trap Specimen Cards                                                        */
+/* -------------------------------------------------------------------------- */
+
+nano-ui-trap {
+  border-left: 5px solid var(--nano-trap-border);
+}
+
+.nano-trap-header {
+  padding: 14px 18px;
+  background: rgba(0, 0, 0, 0.12);
+  border-bottom: 1px solid var(--nano-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nano-trap-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nano-trap-num {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--nano-trap-badge-text);
+  background: var(--nano-trap-badge-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.nano-trap-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.nano-trap-where {
+  font-size: 12px;
+  opacity: 0.7;
+  font-family: var(--font-mono, monospace);
+}
+
+.nano-trap-blocks {
+  padding: 14px 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nano-trap-block {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.nano-trap-fix-block {
+  background: var(--nano-accent-dim);
+  border-left: 3px solid var(--nano-accent);
+}
+
+.nano-trap-code-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 18px 14px;
+}
+
+@media (max-width: 768px) {
+  .nano-trap-code-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nano-code-card {
+  border: 1px solid var(--nano-card-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.nano-code-card-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid var(--nano-card-border);
+}
+
+.nano-code-card-header.bad { color: #f87171; }
+.nano-code-card-header.good { color: #34d399; }
+
+.nano-code-card pre {
+  margin: 0;
+  padding: 10px;
+  font-size: 12px;
+  overflow-x: auto;
+}

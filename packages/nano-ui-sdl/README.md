@@ -134,7 +134,7 @@ it does not require AVX2.
 From this package's source directory, run `cabal build` after installing the
 native libraries. Check discovery with `pkg-config --modversion sdl3 sdl3-ttf`.
 
-See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
+See the [development guide](https://goolord.github.io/nano-ui/getting-started/development.html)
 for tests, profiling, and building the complete repository.
 
 ## License

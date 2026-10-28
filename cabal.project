@@ -14,7 +14,7 @@ tests: True
 benchmarks: True
 
 -- Packages build at Cabal's default -O1 with no extra optimisation flags.
--- See docs/development.md ("Performance") for profiling commands.
+-- See book/src/getting-started/development.md ("Performance") for profiling commands.
 package *
   profiling-detail: late
 

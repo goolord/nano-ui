@@ -83,7 +83,7 @@ decoration are not rendered; `richText` and Markdown draw their underlines
 and strikes as shapes, so those show. Choose the SDL backend when those text
 features are required.
 
-See the [development guide](https://github.com/goolord/nano-ui/blob/main/docs/development.md)
+See the [development guide](https://goolord.github.io/nano-ui/getting-started/development.html)
 for headless tests and native rendering checks.
 
 ## License
