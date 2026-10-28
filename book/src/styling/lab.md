@@ -1,6 +1,6 @@
-# Interactive Workbenches
+# Interactive Styling Lab
 
-Explore how every styling modifier (`buttonStyle`, `inputStyle`, `panelStyle`, `accentColor`, `rounded`, `disabledWhen`) and theme mode affects each widget family in `nano-ui`. For what each widget *does* rather than how it looks, see the [Widget Gallery](../widgets/index.md).
+Explore how every styling modifier (`buttonStyle`, `inputStyle`, `panelStyle`, `accentColor`, `rounded`, `disabledWhen`) and theme mode affects each widget family in `nano-ui`. For what each widget *does* rather than how it looks, see the [Widget Gallery](../widgets/index.md); for the concepts behind the modifiers, see [Styling & Theming](index.md) and [Styling Gotchas](gotchas.md).
 
 Use the toggle chips on each workbench to toggle modifiers on and off, click **Toggle Compare Baseline** to see a side-by-side diff against the unstyled widget, and copy the generated Haskell code directly into your project.
 

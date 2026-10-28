@@ -84,6 +84,6 @@ For a single-line field, `textInput` and `textInput'` are the equivalents; `sear
 
 ## Related
 
-- Input widgets and their signatures: [Input Controls](inputs.md).
+- Input widgets and their signatures: [Buttons, Menus & Inputs](controls.md).
 - Working with the document in an application: [Build a Notepad](../tutorials/notepad.md).
-- Theming text: [Typography & Fonts](../styling/typography.md).
+- Theming and typography: [Styling & Theming](../styling/index.md).

@@ -29,8 +29,8 @@ Most of the code in these chapters is ordinary Haskell: data types, pure helpers
 - Anything that must survive between frames lives in a `Var` (`useVar` for ordinary values, `newVar` for application-owned state), an Elm-style model, or a reference you own.
 - A side effect belongs inside an event check, never after a bare widget call. `whenM (button "Save") save` is correct; `button "Save" >> save` would save every frame.
 
-The [Introduction to State](../state/introduction.md) explains the frame model in more depth. For now, the three rules above are enough to follow along.
+[State & `Var`](../state/index.md) explains the frame model in more depth. For now, the three rules above are enough to follow along.
 
 ## After the tutorials
 
-Read the [Widget Gallery](../widgets/index.md) to find the widget that fits a problem, [Layout](../layout/containers.md) to arrange it, and [Styling](../styling/overview.md) to make it look intentional. When the application grows, [Application Patterns](../architecture/patterns.md) shows how the tutorial state shapes scale up to multi-pane applications.
+Read the [Widget Gallery](../widgets/index.md) to find the widget that fits a problem, [Layout & Scrolling](../layout/index.md) to arrange it, and [Styling & Theming](../styling/index.md) to make it look intentional. When the application grows, [Architecture & Internals](../architecture/index.md) shows how the tutorial state shapes scale up to multi-pane applications.

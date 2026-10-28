@@ -226,7 +226,7 @@ when isEditing (whenM takeEscape (writeVar editing False))
 
 `takeEscape` claims the press for this handler, so later Escape handlers in the view — an open popup or a second `takeEscape` — do not also act on it. The window's quit policy is separate: the example sets `sdlAppShouldQuit = pressedOnceIn KeyEscape`, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).
 
-For the full shortcut model — `shortcut`, `shortcutOnce`, menu bindings, and how focused widgets claim keys — see [Keyboard Shortcuts](../input/shortcuts.md).
+For the full shortcut model — `shortcut`, `shortcutOnce`, menu bindings, and how focused widgets claim keys — see [Keyboard, Focus & IME](../input/index.md).
 
 ## 8. Try it
 
@@ -235,6 +235,6 @@ Start from the runnable source and change one thing at a time:
 - Replace the Up/Down buttons with `useReorder` for drag-and-drop reordering (see [Drag & Drop](../widgets/drag-and-drop.md)).
 - Add a "hide completed" filter persistence setting with `newVar` and a `Settings` record.
 - Show an empty state when `shown` is empty, for example `muted "Nothing here yet."`
-- Validate the draft length with the techniques in [Validated Forms](../packages/nano-ui-form.md).
+- Validate the draft length with the techniques in [Ecosystem Packages](../packages/index.md).
 
 Next: [Tutorial 2: Build a Notepad](notepad.md) adds menus, dialogs, and a real text document.

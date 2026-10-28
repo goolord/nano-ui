@@ -111,3 +111,9 @@ The default delay is half a second; `TooltipConfig` sets the delay and placement
 - **Confirm destructive actions in a modal**, not a popup: a popup can be dismissed by a click outside, which is the wrong default for a destructive action.
 
 The notepad tutorial wires a modal to the window's close request and builds a menu bar from `popup'`: [Build a Notepad](../tutorials/notepad.md).
+
+## See also
+
+- Widget inventory: [Widget Gallery](index.md).
+- Styling dialogs and popups: [Styling & Theming](../styling/index.md).
+- Window-level chrome and screenshots: [Desktop Windows](../advanced/window-management.md).

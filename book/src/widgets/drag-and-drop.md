@@ -50,3 +50,9 @@ case (gesture, pgrDropTarget grid) of
   _ -> pure ()
 ```
 The destination provides `pgdLocation` (`BesidePane paneId edge` or `OutsideGrid edge`), `pgdRect`, and `pgdPane` for custom drop validation.
+
+## See also
+
+- Widget inventory: [Widget Gallery](index.md).
+- Tabs and tables that drag reordering is usually paired with: [Tabs, Tables & Trees](data-views.md).
+- Styling drag targets: [Styling & Theming](../styling/index.md).

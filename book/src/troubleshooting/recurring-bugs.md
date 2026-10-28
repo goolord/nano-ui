@@ -231,7 +231,7 @@ The drag anchor must be taken from the press, not re-derived from the selection 
 
 ### A widget that appears next frame cannot be focused this frame
 
-`requestFocus` resolves after layout, but only for widgets declared on that pass. If a field appears because of a state change, request focus on the pass that declares it (store a `focusPending` flag). See [Focus, Navigation & IME](../input/focus.md).
+`requestFocus` resolves after layout, but only for widgets declared on that pass. If a field appears because of a state change, request focus on the pass that declares it (store a `focusPending` flag). See [Keyboard, Focus & IME](../input/index.md).
 
 ### Conditional widgets shift ids
 

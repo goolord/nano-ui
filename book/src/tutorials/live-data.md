@@ -227,8 +227,8 @@ Building the `Chart` value every frame is fine — it is a plain value, and comp
 ## 7. Try it
 
 - Add a search that runs on every keystroke (key by the query) and compare the cancellation behaviour with `searchInput'`.
-- Stream markdown tokens into `NanoUI.Markdown` and append them incrementally (see [Markdown Rendering](../packages/nano-ui-markdown.md)).
-- Virtualize a 100,000-row log list using `getScrollMetricsUi` (see [Scrolling & Virtualization](../layout/scrolling.md) and the `Logs.hs` example).
+- Stream markdown tokens into `NanoUI.Markdown` and append them incrementally (see [Ecosystem Packages](../packages/index.md)).
+- Virtualize a 100,000-row log list using `getScrollMetricsUi` (see [Layout & Scrolling](../layout/index.md) and the `Logs.hs` example).
 - Replace the streamed chart with a `Task` that loads a whole dataset once.
 
-For the full cancellation and lifecycle reference, read [Asynchronous Work & Streams](../advanced/background-work.md).
+For the full cancellation and lifecycle reference, read [Async Work & Animation](../advanced/async.md).

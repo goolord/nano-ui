@@ -115,14 +115,13 @@ Comprehensive documentation is available at **[goolord.github.io/nano-ui](https:
 
 - **[Quick Start](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
 - **[Tutorials](https://goolord.github.io/nano-ui/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.
-- **[Introduction to State](https://goolord.github.io/nano-ui/state/introduction.html)** and **[`Var` in Depth](https://goolord.github.io/nano-ui/state/var.html)**: Where state lives, `Var` semantics, write costs, and `VarMap`.
-- **[Elm-Style State](https://goolord.github.io/nano-ui/state/elm-overview.html)**: Typed messages and pure reducers with `nano-ui-emit`, as a state-management alternative to `Var`.
-- **[Keyboard & Focus](https://goolord.github.io/nano-ui/input/shortcuts.html)**: Shortcuts, focus, and IME.
-- **[Layout](https://goolord.github.io/nano-ui/layout/containers.html)**: Containers, layout modifiers, and 100,000-row list virtualization.
-- **[Widget Gallery](https://goolord.github.io/nano-ui/widgets/index.html)**: Buttons, inputs, text editors, overlays, tables, charts, and custom controls.
-- **[Styling](https://goolord.github.io/nano-ui/styling/overview.html)**: Theming, interaction states, typography, and live workbenches.
+- **[State & `Var`](https://goolord.github.io/nano-ui/state/index.html)** and **[Elm-Style State](https://goolord.github.io/nano-ui/state/elm.html)**: Where state lives, write costs, `VarMap`, and typed reducers.
+- **[Layout & Scrolling](https://goolord.github.io/nano-ui/layout/index.html)**: Containers, modifiers, and 100,000-row list virtualization.
+- **[Widget Gallery](https://goolord.github.io/nano-ui/widgets/index.html)** and **[Styling & Theming](https://goolord.github.io/nano-ui/styling/index.html)**: One guide to every widget, plus theming, states, typography, and the [styling lab](https://goolord.github.io/nano-ui/styling/lab.html).
+- **[Keyboard, Focus & IME](https://goolord.github.io/nano-ui/input/index.html)**: Shortcuts, focus, and text input.
+- **[Async Work & Animation](https://goolord.github.io/nano-ui/advanced/async.html)** and **[Ecosystem Packages](https://goolord.github.io/nano-ui/packages/index.html)**: Background work, charts, forms, markdown, SVG, and backends.
 - **[Troubleshooting](https://goolord.github.io/nano-ui/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and their fixes.
-- **[Architecture Notes](https://goolord.github.io/nano-ui/architecture/frame-model.html)**: Frame lifecycle, application patterns, and internals.
+- **[Architecture & Internals](https://goolord.github.io/nano-ui/architecture/index.html)**: Frame lifecycle, application patterns, and internals.
 - **[Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html)**: Building, testing, profiling, and repository conventions.
 - `NanoUI` Haddock: Reference documentation for widgets, state, and layout modifiers.
 

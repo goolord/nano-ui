@@ -1,6 +1,6 @@
-# Unexpected Styling Interactions
+# Styling Gotchas
 
-This chapter catalogs twelve non-obvious styling interactions, edge cases, and gotchas discovered in `nano-ui`'s layout, theming, and rendering pipelines.
+Twelve non-obvious styling interactions, edge cases, and gotchas discovered in `nano-ui`'s layout, theming, and rendering pipelines. Start with [Styling & Theming](index.md) for the concepts and the [Interactive Styling Lab](lab.md) for live examples; come here when the result is not what you expected.
 
 Each interaction includes an explanation of **why it happens** under the hood, the **recommended idiom or fix**, code comparisons, and interactive headless SVG specimens showing the trap vs the fix.
 

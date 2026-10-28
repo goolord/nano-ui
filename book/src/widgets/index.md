@@ -1,19 +1,35 @@
 # Widget Gallery
 
-Every widget is an ordinary function in `NanoUI` that appends a node to the frame and reports what happened to it. This page is the index; each family has a chapter with signatures and examples.
+This is the single place to start when you need a widget. Every widget is an ordinary function in `NanoUI`; the family pages below cover the API, and the styling pages cover how it looks.
+
+## Find a widget by task
+
+| You need… | Read |
+| --- | --- |
+| Buttons, menus, checkboxes, toggles, radios, selects, combo boxes, sliders, numeric fields, text fields, color pickers | [Buttons, Menus & Inputs](controls.md) |
+| Multi-line text, documents, undo history, IME-aware editing | [Text Editing](text-editing.md) |
+| Tabs, sortable tables, trees | [Tabs, Tables & Trees](data-views.md) |
+| Modals, floating windows, popups, tooltips, context menus | [Overlays & Windows](overlays.md) |
+| Drag-and-drop, tab reordering, dockable pane grids | [Drag & Drop](drag-and-drop.md) |
+| Knobs, switches, progress bars, spinners, sparklines, canvas drawing | [Custom Drawing & Controls](custom-drawing.md) |
+| Colors, themes, interaction states, fonts | [Styling & Theming](../styling/index.md) |
+| Live examples of every styling modifier | [Interactive Styling Lab](../styling/lab.md) |
+| Non-obvious styling behavior | [Styling Gotchas](../styling/gotchas.md) |
+
+Containers (`row`, `column`, `grid`, `panel`, `card`, `layers`, ...) and sizing are covered once in [Layout & Scrolling](../layout/index.md).
 
 ## How widget names work
 
-The same four names appear across the library:
+The same four forms appear across the library:
 
 | Form | Meaning |
 | --- | --- |
 | `button "Save"` | Base form. Returns `Bool` (activated) or `()` |
-| `button'` | Primed form. Also — or instead — returns a `Response` |
+| `button'` | Primed form. Returns a `Response` |
 | `buttonWith (fixedW 120)` | Takes a `Layout -> Layout` modifier first |
 | `buttonConfigured cfg` | Takes a config record; every config has a `default...Config` |
 
-`Response` is the shared record for widget identity and interaction:
+A `Response` carries identity and interaction state:
 
 | Field / helper | Meaning |
 | --- | --- |
@@ -27,72 +43,23 @@ The same four names appear across the library:
 | `respHeldWith` / `respClickedWith` | Which `MouseButton` is held / clicked |
 | `respRightPressed` / `respRightClicked` | Secondary-button variants |
 
-Anything with a `Response` can be a `HasResponse` argument to `tooltip`, `contextMenu`, and focus helpers.
+Anything with a `Response` can be passed to `tooltip`, `contextMenu`, and the focus helpers.
 
-## The families
+## The one input rule
 
-| Family | What is there | Chapter |
-| --- | --- | --- |
-| Containers | `row`, `column`, `grid`, `panel`, `card`, `callout`, `toolbar`, `center`, `responsive`, `scroll`, `scroll2D`, `layers`, `mouseArea`, `separator`, `spacer` | [Containers](../layout/containers.md) |
-| Text | `label`, `heading`, `muted`, `mono`, `danger`, `kv`, `selectableText` | [Typography](../styling/typography.md) |
-| Buttons and menus | `button`, `iconButton`, `buttonContent`, `menuButton`, `menuItem`, `menuSeparator`, `contextMenu` | [Buttons & Menus](buttons-menus.md) |
-| Inputs | `checkbox`, `toggleButton`, `radio` / `enumRadio`, `select` / `enumSelect` / `boundedSelect`, `slider`, `textInput`, `searchInput`, `numericInput`, `comboBox`, `textArea`, `textAreaDocument`, `colorPicker` | [Input Controls](inputs.md) |
-| Tabs | `tabs`, `tabBar`, `closableTab`, enum and bounded variants | [Workbenches](../styling/widget-surfaces.md) |
-| Trees and tables | `tree`, `table`, `simpleTable` (Colonnade-based, sortable) | [Tables & Trees](tables-trees.md) |
-| Overlays | `modal`, `window`, `popup`, `tooltip`, `contextMenu` | [Overlays & Windows](overlays.md) |
-| Panes | `paneGrid` for dockable, splittable layouts | [Drag & Drop](drag-and-drop.md) |
-| Drag and drop | `useDrag`, `useDrop`, `dropZone`, `useReorder`, `insertionIndex` | [Drag & Drop](drag-and-drop.md) |
-| Rich text | `NanoUI.Widgets.RichText` spans and paragraphs | `NanoUI.Widgets.RichText` |
-| Images and SVG | `image`, `imageConfigured`, `svgIcon`, `parseSvg`, image handles | `NanoUI` API |
-| Custom controls | switches, knobs, progress bars, spinners, sparklines | [Custom Controls](custom-controls.md) |
-| Canvas drawing | `customWidget`, `canvas`, paths, strokes, gradients | [Canvas Drawing](canvas-custom.md) |
+Input widgets take the `Var` they display and mutate it directly; there is no callback and no on-change handler. To react to an edit, use the primed form's `Response`. The full set of controls and their examples is in [Buttons, Menus & Inputs](controls.md).
 
-The authoritative list is the export list in `packages/nano-ui/lib/NanoUI.hs`; if this book and that file disagree, the file wins. The [interactive workbenches](../styling/widget-surfaces.md) render many of these families live.
+Containers and modifiers are not repeated here: see [Layout & Scrolling](../layout/index.md) for `row`, `column`, `grid`, padding, alignment, and scrolling.
 
-## Input widgets and `Var`
+## Reading order
 
-Input widgets take the `Var` they display and mutate it directly. There is no callback and no on-change handler:
+If you are new to the toolkit, the shortest route through this section is:
 
-```haskell
-query <- useVar ""
-textInput query
+1. [Buttons, Menus & Inputs](controls.md) — the controls most applications need.
+2. [Text Editing](text-editing.md) — the moment a field becomes a document.
+3. [Tabs, Tables & Trees](data-views.md) — showing collections.
+4. [Overlays & Windows](overlays.md) — dialogs and menus that float.
+5. [Drag & Drop](drag-and-drop.md) and [Custom Drawing & Controls](custom-drawing.md) when the built-in widgets are not enough.
+6. [Styling & Theming](../styling/index.md), then the [lab](../styling/lab.md) and [gotchas](../styling/gotchas.md).
 
-volume <- newVar 40
-slider 0 100 volume
-
-enabled <- useVar True
-checkbox "Enabled" enabled
-```
-
-To react to an edit, use the primed form's `Response`:
-
-```haskell
-resp <- textInput' query
-when (respSubmitted resp) (search =<< readVar query)
-```
-
-`searchInput'` debounces `respChanged` until typing pauses; `textInput'` reports every change. That difference matters for expensive work:
-
-```haskell
-resp <- searchInput' query
-when (respChanged resp) refreshResults     -- once per pause, not per keystroke
-```
-
-## Layout is an argument
-
-`row`, `column`, and friends take a layout; `rowWith` and `columnWith` take a `Layout -> Layout` modifier first. Modifiers compose with `(.)`, and the leftmost wins:
-
-```haskell
-columnWith (gap 8 . padAll 12 . fillW) $ do
-  label "Settings"
-  buttonWith (fixedW 120) "Apply"
-```
-
-Sizing comes from content by default. A label whose text changes length will move its siblings unless its width is pinned; see [Recurring Bugs & Fixes](../troubleshooting/recurring-bugs.md) for the fixes that came from real applications.
-
-## Where to go next
-
-- Build one: [Build a Todo List](../tutorials/todo-list.md) uses lists, keys, text input, filtering, and per-row state.
-- Arrange them: [Layout](../layout/containers.md) and [Layout Modifiers](../layout/modifiers.md).
-- Style them: [Theming & Surfaces](../styling/overview.md) and the [workbenches](../styling/widget-surfaces.md).
-- Draw outside the box: [Custom Controls](custom-controls.md) and [Canvas Drawing](canvas-custom.md).
+Every family page has a "See also" block back to this guide and across to the styling pages.

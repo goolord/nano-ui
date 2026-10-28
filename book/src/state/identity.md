@@ -114,4 +114,4 @@ Without pruning, a long-running application accumulates state for rows that no l
 | State appears in the wrong row after sorting | Per-row `useVar`s are outside `withKey`, or the key is the index. |
 | Memory grows with every streamed entry | Per-row state is in an unbounded `VarMap`; `retainVars`. |
 
-For the `Var` side of this — allocation, projections, and write costs — read [`Var` in Depth](var.md). For the lifecycle that makes ids reset, read [The Frame Model](../architecture/frame-model.md).
+For the `Var` side of this — allocation, projections, and write costs — read [State & `Var`](index.md). For the lifecycle that makes ids reset, read [Architecture & Internals](../architecture/index.md).

@@ -118,12 +118,12 @@ cabal run -j1 my-app
 4. **`button "+"`** draws an interactive button and returns `True` only on the frame it is activated.
 5. **`modifyVar n (+ 1)`** updates the value. Reading `n` below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.
 
-The view runs every frame, so ordinary side effects must be guarded by an event (`whenM (button "Save") save`), and per-frame resources must not be allocated inside it. The [Introduction to State](../state/introduction.md) explains both rules in depth.
+The view runs every frame, so ordinary side effects must be guarded by an event (`whenM (button "Save") save`), and per-frame resources must not be allocated inside it. [State & `Var`](../state/index.md) explains both rules in depth.
 
 ## Next steps
 
 - Build something end to end: [Tutorial 1: Build a Todo List](../tutorials/todo-list.md).
-- Understand the state model: [Introduction to State](../state/introduction.md).
+- Understand the state model: [State & `Var`](../state/index.md).
 - Find a widget: [Widget Gallery](../widgets/index.md).
-- Arrange a window: [Layout](../layout/containers.md).
+- Arrange a window: [Layout & Scrolling](../layout/index.md).
 - Work on nano-ui itself: [Development Setup](development.md).

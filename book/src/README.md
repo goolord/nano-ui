@@ -19,26 +19,27 @@ The book is a learning path first, a reference second:
 
 1. **[Quick Start](getting-started/quickstart.md)** installs the toolchain and gets a window on screen.
 2. **[Tutorials](tutorials/index.md)** build three small applications end to end: a todo list, a notepad, and a live data view.
-3. **[State](state/introduction.md)** explains where state lives, what a `Var` is, what writes cost, and the typed-message [Elm-style alternative](state/elm-overview.md).
-4. **[Keyboard & Focus](input/shortcuts.md)** covers chords, focus, and IME.
-5. **[Layout](layout/containers.md)** and the **[Widget Gallery](widgets/index.md)** are the API tour.
-6. **[Styling](styling/overview.md)** and the **[Advanced Guides](advanced/background-work.md)** go deeper.
-7. **[Ecosystem Packages](packages/nano-ui-sdl.md)**, **[Troubleshooting](troubleshooting/recurring-bugs.md)**, and **[Architecture Notes](architecture/frame-model.md)** are the reference material for when an application grows.
+3. **[State & `Var`](state/index.md)** explains where state lives, what writes cost, and the [Elm-style alternative](state/elm.md).
+4. **[Layout & Scrolling](layout/index.md)** covers containers, modifiers, and large lists.
+5. The **[Widget Gallery](widgets/index.md)** is the single entry point for controls, data views, overlays, and custom drawing. **[Styling & Theming](styling/index.md)** lives next to it, with a [live lab](styling/lab.md) and [gotchas](styling/gotchas.md).
+6. **[Keyboard, Focus & IME](input/index.md)** covers chords, focus, and text input.
+7. **[Async Work & Animation](advanced/async.md)**, **[Desktop Windows](advanced/window-management.md)**, and **[Ecosystem Packages](packages/index.md)** go further.
+8. **[Troubleshooting](troubleshooting/recurring-bugs.md)**, **[Development Setup](getting-started/development.md)**, and **[Architecture & Internals](architecture/index.md)** are the reference material.
 
-If you already know immediate-mode UI, skim the Quick Start and start with [Introduction to State](state/introduction.md).
+If you already know immediate-mode UI, skim the Quick Start and start with [State & `Var`](state/index.md).
 
 ## Packages in the monorepo
 
 | Package | What it is | Read |
 | --- | --- | --- |
-| `packages/nano-ui` | Core toolkit: widgets, layout, input, theming, draw list, text arena. | [State](state/introduction.md), [Layout](layout/containers.md), [Widget Gallery](widgets/index.md) |
-| `packages/nano-ui-sdl` | SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars. | [SDL3 Backend](packages/nano-ui-sdl.md) |
-| `packages/nano-ui-rgfw` | Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies. | [RGFW Backend](packages/nano-ui-rgfw.md) |
-| `packages/nano-ui-emit` | Elm-style typed messages and update reducers (`NanoUIE msg a`). | [Elm-Style Views](state/elm-overview.md) |
-| `packages/nano-ui-diagrams` | Line, bar, scatter, and area charts (`NanoUI.Plot`) with diagrams-lib integration. | [Charts & Diagrams](packages/nano-ui-diagrams.md) |
-| `packages/nano-ui-form` | Validated applicative forms built on ditto. | [Validated Forms](packages/nano-ui-form.md) |
-| `packages/nano-ui-markdown` | Markdown rendering, incrementally appendable for streamed replies. | [Markdown Rendering](packages/nano-ui-markdown.md) |
-| `packages/nano-ui-svg` | Headless `DrawOp`-to-SVG export and visual regression testing. | [Headless SVG Export](packages/nano-ui-svg.md) |
+| `packages/nano-ui` | Core toolkit: widgets, layout, input, theming, draw list, text arena. | [State](state/index.md), [Layout](layout/index.md), [Widget Gallery](widgets/index.md) |
+| `packages/nano-ui-sdl` | SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars. | [Ecosystem Packages](packages/index.md), [Desktop Windows](advanced/window-management.md) |
+| `packages/nano-ui-rgfw` | Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies. | [Ecosystem Packages](packages/index.md) |
+| `packages/nano-ui-emit` | Elm-style typed messages and update reducers (`NanoUIE msg a`). | [Elm-Style State](state/elm.md) |
+| `packages/nano-ui-diagrams` | Line, bar, scatter, and area charts (`NanoUI.Plot`) with diagrams-lib integration. | [Ecosystem Packages](packages/index.md) |
+| `packages/nano-ui-form` | Validated applicative forms built on ditto. | [Ecosystem Packages](packages/index.md) |
+| `packages/nano-ui-markdown` | Markdown rendering, incrementally appendable for streamed replies. | [Ecosystem Packages](packages/index.md) |
+| `packages/nano-ui-svg` | Headless `DrawOp`-to-SVG export and visual regression testing. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-demo` | Runnable example applications and single-topic tutorials. | [Tutorials](tutorials/index.md) |
 
 ## Interactive styling laboratory
