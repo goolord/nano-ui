@@ -2,6 +2,13 @@
 
 ## 0.1.0.0 -- Unreleased
 
+- Complete wrapped widget API in `NanoUI.Emit.Widgets` (re-exported by `NanoUI.Emit`),
+  providing direct `NanoUIE msg` actions for all containers, inputs, buttons,
+  text, overlays, and scopes exported by core `nano-ui`. Views no longer need
+  to manually `liftNanoUI` or wrap with `withNanoUI`.
+- Added `emitWhenE`, `emitChangedE`, and `emitEditedE` adapters operating directly
+  on wrapped `NanoUIE` widgets.
+
 - `emitChanged` and `emitEdited` take an input of type `Var a -> NanoUI r`,
   such as `slider 0 100`, with the current value; they run it on a temporary
   `Var` and emit the value it leaves.

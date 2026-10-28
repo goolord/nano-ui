@@ -22,13 +22,21 @@ source-repository head
 library
     default-language: GHC2024
     ghc-options:      -Wall -Wcompat -Wredundant-constraints
-    exposed-modules:  NanoUI.Emit
+    exposed-modules:
+        NanoUI.Emit
+        NanoUI.Emit.Widgets
+    other-modules:
+        NanoUI.Emit.Internal
     hs-source-dirs:   lib
     -- The library imports NanoUI.Internal modules, which change without
     -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        colonnade ^>=1.2,
+        hashable ^>=1.5,
         nano-ui >=0.2.0 && <0.2.1,
+        text ^>=2.1,
         transformers ^>=0.6
 
 test-suite nano-ui-emit-test

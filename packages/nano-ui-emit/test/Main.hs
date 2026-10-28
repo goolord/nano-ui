@@ -2,11 +2,22 @@ module Main (main) where
 
 import Control.Exception (IOException, TypeError (..), evaluate, try)
 import Control.Monad (unless, void, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import DeferredWrongMessage (wrongMessage)
+import NanoUI qualified as UI
 import NanoUI
+  ( Key (KeyEnter)
+  , Response (..)
+  , becameVisible
+  , newVar
+  , respClicked
+  , tab
+  , visEvent
+  , visVisible
+  )
 import NanoUI.Emit
 import NanoUI.Internal.Context (ctxFocusId)
 import NanoUI.Testing (Context, collectTextSpans, newContext)
@@ -48,6 +59,7 @@ main = do
   testMapMessages
   testIsolation
   testWrongMessage
+  testWrappedWidgets
   putStrLn "Typed emission tests passed."
 
 testReduce :: IO ()
@@ -55,13 +67,13 @@ testReduce = do
   ctx <- newContext
   let
     inp = withInput 80 80
-    view _ = withNanoUI column (emit Inc >> emit Dec >> emit Inc)
+    view _ = withNanoUI UI.column (emit Inc >> emit Dec >> emit Inc)
   ((), model, msgs, _, dirty) <- runFrameReduce update ctx inp 0 view
   check
     "reducer messages and dirty"
     (msgs == [Inc, Dec, Inc] && model == 1 && dirty)
   let
-    identity _ = withNanoUI column (emit Inc >> emit Dec)
+    identity _ = withNanoUI UI.column (emit Inc >> emit Dec)
   ((), model2, msgs2, _, dirty2) <- runFrameReduce update ctx inp 0 identity
   check
     "unchanged model stays clean"
@@ -77,15 +89,15 @@ testAdapters = do
   ctx <- newContext
   calls <- newIORef (0 :: Int)
   let
-    control v = liftIO (modifyIORef' calls (+ 1)) >> modifyVar v (+ 1)
+    control v = liftIO (modifyIORef' calls (+ 1)) >> UI.modifyVar v (+ 1)
     adapters = do
       emitWhen (pure False) (1 :: Int)
       emitWhen (pure True) 2
       emitChanged (\_ -> pure ()) 3 id
       emitChanged control 3 id
-      emitEdited (\v -> (mempty :: Response) <$ modifyVar v (+ 1)) 5 id
+      emitEdited (\v -> (mempty :: Response) <$ UI.modifyVar v (+ 1)) 5 id
       emitEdited (\_ -> pure mempty {rawRespChanged = True}) 6 id
-      emitEdited (\v -> mempty {rawRespChanged = True} <$ modifyVar v (+ 1)) 7 id
+      emitEdited (\v -> mempty {rawRespChanged = True} <$ UI.modifyVar v (+ 1)) 7 id
   (_, msgs, _, _) <- runFrameE ctx (withInput 80 80) adapters
   check "adapters distinguish edits and changes" (msgs == [2, 4, 8])
   check "control evaluated once" . (== 1) =<< readIORef calls
@@ -96,9 +108,9 @@ testClick = do
   let
     inp = withInput 240 120
     view m = do
-      resp <- liftNanoUI (button' "Go")
+      resp <- button' "Go"
       when (respClicked resp) (emit Inc)
-      liftNanoUI (label (T.pack (show m)))
+      label (T.pack (show m))
       pure resp
   void (runFrameReduce update ctx inp 0 view)
   (resp, model, _, _, _) <- runFrameReduce update ctx inp 0 view
@@ -109,7 +121,7 @@ testClick = do
   check "idle after click" (model1 == 1 && null idle)
   -- Lifting an ordinary button cannot produce implicit messages.
   let
-    buttonUi = liftNanoUI (button' "Go") :: NanoUIE Msg Response
+    buttonUi = liftNanoUI (UI.button' "Go") :: NanoUIE Msg Response
   (target, _, _, _) <- runFrameE ctx inp buttonUi
   let
     (press, release) = clickPair inp (centerOf target)
@@ -123,8 +135,8 @@ testKeyboard = do
   let
     inp = withInputOff 200 100
     ui = do
-      wid <- liftNanoUI currentId
-      emitChanged (checkbox "Emit") False id
+      wid <- currentId
+      emitChanged (UI.checkbox "Emit") False id
       pure wid
   (wid, _, _, _) <- runFrameE ctx inp ui
   writeIORef (ctxFocusId ctx) wid
@@ -139,9 +151,9 @@ testTabs = do
     ui =
       emitChanged
         ( \active ->
-            tabs
+            UI.tabs
               active
-              [tab False "Alpha" (label "Body A"), tab True "Beta" (label "Body B")]
+              [tab False "Alpha" (UI.label "Body A"), tab True "Beta" (UI.label "Body B")]
         )
         False
         id
@@ -160,14 +172,14 @@ testRebuild = do
   seenRef <- newIORef (0 :: Int)
   let
     inp = withInputOff 300 200
-    view _ = withRunInNanoUIE $ \run -> column $ do
-      loadedVar <- useVar False
-      loaded <- readVar loadedVar
-      (vis, _) <- sensor (label (if loaded then "loaded" else "loading"))
+    view _ = withRunInNanoUIE $ \run -> UI.column $ do
+      loadedVar <- UI.useVar False
+      loaded <- UI.readVar loadedVar
+      (vis, _) <- UI.sensor (UI.label (if loaded then "loaded" else "loading"))
       when (becameVisible vis) $ do
         liftIO (modifyIORef' seenRef (+ 1))
         run (emit (1 :: Int))
-        writeVar loadedVar True
+        UI.writeVar loadedVar True
       pure (loaded, (visVisible vis, visEvent vis))
     frame model =
       (\(r, model', _, _, _) -> (r, model')) <$> runFrameReduce (+) ctx inp model view
@@ -183,12 +195,12 @@ testScopes = do
   ctx <- newContext
   let
     inp = withInput 120 80
-    ui = withRunInNanoUIE $ \run -> column $ do
+    ui = withRunInNanoUIE $ \run -> UI.column $ do
       run (emit (1 :: Int))
-      disabledWhen True $ run $ do
+      UI.disabledWhen True $ run $ do
         emitWhen (pure True) 2
-        emitWhen (button "Disabled") 99
-      run (withNanoUI row (emit 3))
+        emitWhen (UI.button "Disabled") 99
+      run (withNanoUI UI.row (emit 3))
   (_, msgs, _, _) <- runFrameE ctx (keyInp KeyEnter inp) ui
   check "nested scopes share the sink" (msgs == [1, 2, 3])
   (((), inner), outer, _, _) <- runFrameE ctx inp $ do
@@ -201,9 +213,9 @@ testScopes = do
 testMapMessages :: IO ()
 testMapMessages = do
   ctx <- newContext
-  let child = withRunInNanoUIE $ \run -> column $ do
+  let child = withRunInNanoUIE $ \run -> UI.column $ do
         run (emit True)
-        run (withNanoUI row (emit False))
+        run (withNanoUI UI.row (emit False))
         pure (42 :: Int)
       ui = do
         emit (Left "before" :: Either String Int)
@@ -216,8 +228,8 @@ testMapMessages = do
   cell <- newVar False
   (_, rebuilt, _, _) <- runFrameE ctx (withInputOff 100 100) $
     mapMessages Just $ do
-      done <- liftNanoUI (readVar cell)
-      unless done $ emit True >> liftNanoUI (writeVar cell True)
+      done <- readVar cell
+      unless done $ emit True >> writeVar cell True
   check "mapped messages survive a child rebuild once" (rebuilt == [Just True])
 
 testIsolation :: IO ()
@@ -247,3 +259,21 @@ testWrongMessage = do
       | "Int" `isInfixOf` err && "Bool" `isInfixOf` err -> pure ()
       | otherwise -> fail ("the type error was not the Int/Bool mismatch: " <> err)
     Right _ -> fail "a view emitted a message of another type"
+
+testWrappedWidgets :: IO ()
+testWrappedWidgets = do
+  ctx <- newContext
+  let
+    inp = withInput 240 120
+    view m = column $ do
+      heading "Counter"
+      row $ do
+        emitWhenE (button "-") Dec
+        label (T.pack (show m))
+        b <- button' "+"
+        when (respClicked b) (emit Inc)
+        pure b
+  (resp, model, msgs, _, dirty) <- runFrameReduce update ctx inp 0 view
+  check "initial wrapped view" (msgs == [] && model == 0 && not dirty)
+  (model1, msgs1, dirty1) <- runClickReduce update ctx inp 0 view (centerOf resp)
+  check "wrapped button emits and reduces" (msgs1 == [Inc] && model1 == 1 && dirty1)
