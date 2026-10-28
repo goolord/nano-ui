@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-5449b033.js";
+            window.path_to_searchindex_js = "../searchindex-c517881d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -210,7 +210,25 @@ let activeKey = tabActive resp
       {tabsStyle = TabSegmented, tabsOrientation = TabTop, tabsTrailing = newTabButton}
 tabsConfigured cfg active tabs
 </code></pre>
-<p>Styles: <code>TabUnderline</code>, <code>TabPill</code>, <code>TabSegmented</code>, <code>TabContained</code>. Placements: <code>TabTop</code>, <code>TabBottom</code>, <code>TabLeft</code>, <code>TabRight</code>. <code>boundedTabs</code> / <code>boundedTabBar</code> generate a tab per enum value.</p>
+<p>Every <code>TabStyle</code> is rendered below. The selected tab differs in each row so the treatment is visible:</p>
+<figure class="nano-figure">
+<img src="../images/tab-styles.svg" alt="Four tab strips: underline, pill, segmented, and contained, each with a different selected tab.">
+<figcaption>The four `TabStyle` values, rendered with nano-ui-svg.</figcaption>
+</figure>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Style</th><th>Header treatment</th></tr>
+</thead>
+<tbody>
+<tr><td><code>TabUnderline</code></td><td>Headers on a rule; the selected header has an accent bar</td></tr>
+<tr><td><code>TabPill</code></td><td>The selected header is filled with the accent color</td></tr>
+<tr><td><code>TabSegmented</code></td><td>Headers sit in a rounded track; the selected one is raised</td></tr>
+<tr><td><code>TabContained</code></td><td>Folder tabs; the selected header opens onto a bordered body</td></tr>
+</tbody>
+</table>
+</div>
+<p>Placements: <code>TabTop</code>, <code>TabBottom</code>, <code>TabLeft</code>, <code>TabRight</code>. <code>boundedTabs</code> / <code>boundedTabBar</code> generate a tab per enum value.</p>
 <h2 id="tables"><a class="header" href="#tables">Tables</a></h2>
 <p><code>table</code> renders Colonnade columns. Header clicks sort through a <code>Var SortCol</code>:</p>
 <pre><code class="language-haskell">data Process = Process
