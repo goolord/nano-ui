@@ -25,7 +25,7 @@ module NanoUI.Draw.Svg
 where
 
 import Data.Bits (shiftL, (.|.))
-import Data.List (intersperse)
+import Data.List (intersperse, sortOn)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Text (Text)
@@ -205,6 +205,33 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
                       <> "/>"
                  in
                   walk (i + 1) clips nextClip gid (dAcc <> gradDef) (bAcc <> gradRect)
+          -- A canvas 'Linear' fill is one gradient cut into triangles at its
+          -- stops; draw it as one, so the seams between triangles never show.
+          FillPolygon pts rings tris (Shaded cs)
+            | Just d <- ringsPathData p pts rings
+            , Just ((x1, y1), (x2, y2), stops) <- linearShade pts tris cs ->
+                let
+                  !gid = nextGrad + 1
+                  !gidStr = pfx <> "grad_" <> TB.fromString (show gid)
+                  gradDef =
+                    "<linearGradient id=\""
+                      <> gidStr
+                      <> "\" gradientUnits=\"userSpaceOnUse\""
+                      <> numAttr p "x1" x1
+                      <> numAttr p "y1" y1
+                      <> numAttr p "x2" x2
+                      <> numAttr p "y2" y2
+                      <> ">"
+                      <> foldMap (\(t, col) -> stopElem p (fmtNum p (t * 100) <> "%") col) stops
+                      <> "</linearGradient>"
+                  el =
+                    "<path"
+                      <> attr "d" d
+                      <> attr "fill-rule" "evenodd"
+                      <> attr "fill" ("url(#" <> gidStr <> ")")
+                      <> "/>"
+                 in
+                  walk (i + 1) clips nextClip gid (dAcc <> gradDef) (bAcc <> el)
           op -> walk (i + 1) clips nextClip nextGrad dAcc (bAcc <> emitOp p cfg op)
 
 emitOp :: Int -> SvgConfig -> DrawOp -> TB.Builder
@@ -312,27 +339,13 @@ emitPolygon ::
 emitPolygon p pts rings tris shade =
   case uniformShade n shade of
     Just col
-      | colorA col > 0 && ringsValid && ptsFinite nOut ->
-          let
-            ringPath r =
-              let
-                !from = ringAt r
-                !to = ringAt (r + 1)
-               in
-                if to - from < 3
-                  then mempty
-                  else
-                    "M"
-                      <> ptAt from
-                      <> foldMap (\i -> " L" <> ptAt i) [from + 1 .. to - 1]
-                      <> " Z"
-            d = joinNonEmpty " " [ringPath r | r <- [0 .. nr - 1]]
-           in
-            "<path"
-              <> attr "d" d
-              <> attr "fill-rule" "evenodd"
-              <> fillAttrs p col
-              <> "/>"
+      | colorA col > 0
+      , Just d <- ringsPathData p pts rings ->
+          "<path"
+            <> attr "d" d
+            <> attr "fill-rule" "evenodd"
+            <> fillAttrs p col
+            <> "/>"
       | otherwise -> mempty
     Nothing ->
       case shade of
@@ -359,8 +372,28 @@ emitPolygon p pts rings tris shade =
         _ -> mempty
  where
   !n = sizeofPrimArray pts `div` 2
-  !nr = sizeofPrimArray rings - 1
   !nt = sizeofPrimArray tris - sizeofPrimArray tris `mod` 3
+  trisValid = trianglesValid n tris
+  ptsFinite m = and [finite (indexPrimArray pts k) | k <- [0 .. 2 * m - 1]]
+  pt i = (indexPrimArray pts (2 * i), indexPrimArray pts (2 * i + 1))
+
+-- | Whether every index of every whole triangle names one of @n@ points.
+trianglesValid :: Int -> PrimArray Int -> Bool
+trianglesValid n tris =
+  and [t >= 0 && t < n | k <- [0 .. nt - 1], let t = indexPrimArray tris k]
+ where
+  !nt = sizeofPrimArray tris - sizeofPrimArray tris `mod` 3
+
+-- | A 'FillPolygon''s rings as path data, outline first, or 'Nothing' when
+-- the rings or their points are malformed.
+ringsPathData :: Int -> PrimArray Float -> PrimArray Int -> Maybe TB.Builder
+ringsPathData p pts rings
+  | ringsValid && and [finite (indexPrimArray pts k) | k <- [0 .. 2 * nOut - 1]] =
+      Just (joinNonEmpty " " [ringPath r | r <- [0 .. nr - 1]])
+  | otherwise = Nothing
+ where
+  !n = sizeofPrimArray pts `div` 2
+  !nr = sizeofPrimArray rings - 1
   ringAt r = indexPrimArray rings r
   !nOut = if nr >= 1 then ringAt nr else 0
   ringsValid =
@@ -369,16 +402,114 @@ emitPolygon p pts rings tris shade =
       && ringAt 0 == 0
       && nOut <= n
       && and [ringAt r + 3 <= ringAt (r + 1) | r <- [0 .. nr - 1]]
-  trisValid =
-    and
-      [ t >= 0 && t < n
-      | k <- [0 .. nt - 1]
-      , let
-          t = indexPrimArray tris k
-      ]
-  ptsFinite m = and [finite (indexPrimArray pts k) | k <- [0 .. 2 * m - 1]]
-  pt i = (indexPrimArray pts (2 * i), indexPrimArray pts (2 * i + 1))
-  ptAt i = uncurry (fmtPt p) (pt i)
+  ptAt i = fmtPt p (indexPrimArray pts (2 * i)) (indexPrimArray pts (2 * i + 1))
+  ringPath r =
+    let
+      !from = ringAt r
+      !to = ringAt (r + 1)
+     in
+      if to - from < 3
+        then mempty
+        else
+          "M"
+            <> ptAt from
+            <> foldMap (\i -> " L" <> ptAt i) [from + 1 .. to - 1]
+            <> " Z"
+
+-- | The single linear gradient a shaded polygon's colours follow, as its
+-- start and end points and its stops (offset in @0..1@, colour). A canvas
+-- 'NanoUI.Path.Linear' fill has one: its triangles are split at the
+-- gradient's stops, so each is coloured along the gradient's axis alone.
+-- A four-corner gradient has none, and gives 'Nothing'.
+--
+-- The axis is the dominant direction of the triangles' colour gradients,
+-- weighted by squared area: 8-bit colours pin a large triangle's gradient
+-- down, and a sliver's hardly at all. Along the axis, each triangle's
+-- middle corner must then take the blend of the other two, within two
+-- colour levels. The stops are the vertices' colours in order along the
+-- axis, less those a straight blend of their neighbours already gives.
+linearShade ::
+  PrimArray Float -> PrimArray Int -> PrimArray Word32 -> Maybe ((Float, Float), (Float, Float), [(Float, Color)])
+linearShade pts tris cs
+  | n < 3 || nt < 3 || sizeofPrimArray cs < n || not (trianglesValid n tris) = Nothing
+  | not (all finite [indexPrimArray pts k | k <- [0 .. 2 * n - 1]]) = Nothing
+  | sxx + syy <= 1.0e-12 || span' < 1.0e-3 = Nothing
+  | not (all followsAxis triangles) || not (sameWhereLevel samples) = Nothing
+  | otherwise =
+      Just
+        ( (ux * tMin, uy * tMin)
+        , (ux * tMax, uy * tMax)
+        , [((t - tMin) / span', col) | (t, col) <- simplify samples]
+        )
+ where
+  !n = sizeofPrimArray pts `div` 2
+  !nt = sizeofPrimArray tris - sizeofPrimArray tris `mod` 3
+  px i = indexPrimArray pts (2 * i)
+  py i = indexPrimArray pts (2 * i + 1)
+  colourAt i = Color (indexPrimArray cs i)
+  channels :: Color -> [Float]
+  channels c = map fromIntegral [colorR c, colorG c, colorB c, colorA c]
+  triangles =
+    [ (i0, i1, i2)
+    | k <- [0, 3 .. nt - 3]
+    , let
+        i0 = indexPrimArray tris k
+        i1 = indexPrimArray tris (k + 1)
+        i2 = indexPrimArray tris (k + 2)
+    ]
+  -- Per channel, the colour gradient across one triangle and its squared
+  -- doubled area. Colour is affine across a triangle, so three corners fix
+  -- it.
+  triangleGradients (i0, i1, i2)
+    | abs det <= 1.0e-6 = []
+    | otherwise =
+        [ ((dc1 * dy2 - dc2 * dy1) / det, (dx1 * dc2 - dx2 * dc1) / det, det * det)
+        | (c0, c1, c2) <- zip3 (channels (colourAt i0)) (channels (colourAt i1)) (channels (colourAt i2))
+        , let
+            dc1 = c1 - c0
+            dc2 = c2 - c0
+        ]
+   where
+    dx1 = px i1 - px i0
+    dy1 = py i1 - py i0
+    dx2 = px i2 - px i0
+    dy2 = py i2 - py i0
+    det = dx1 * dy2 - dx2 * dy1
+  gradients = concatMap triangleGradients triangles
+  (sxx, sxy, syy) =
+    foldl'
+      (\(!a, !b, !c) (gx, gy, w) -> (a + w * gx * gx, b + w * gx * gy, c + w * gy * gy))
+      (0, 0, 0)
+      gradients
+  angle = 0.5 * atan2 (2 * sxy) (sxx - syy)
+  ux = cos angle
+  uy = sin angle
+  along i = ux * px i + uy * py i
+  followsAxis (i0, i1, i2) = case sortOn fst [(along i, colourAt i) | i <- [i0, i1, i2]] of
+    [(t0, c0), (t1, c1), (t2, c2)]
+      | t2 - t0 < 1.0e-4 -> closeColour 2 c0 c1 && closeColour 2 c0 c2
+      | otherwise -> closeColour 2 c1 (lerpColor c0 c2 ((t1 - t0) / (t2 - t0)))
+    _ -> False
+  samples = sortOn fst [(along i, colourAt i) | i <- [0 .. n - 1]]
+  tMin = minimum (map fst samples)
+  tMax = maximum (map fst samples)
+  span' = tMax - tMin
+  -- Vertices at the same place along the axis share a colour.
+  sameWhereLevel ss =
+    and [closeColour 3 a b | ((ta, a), (tb, b)) <- zip ss (drop 1 ss), tb - ta < 0.05]
+  closeColour tol a b = and (zipWith (\x y -> abs (x - y) <= tol) (channels a) (channels b))
+  -- Keep a sample only where a straight blend from the last kept one to a
+  -- later one would miss a colour in between by over a level.
+  simplify = \case
+    s0 : s1 : rest -> s0 : thin s0 [] s1 rest
+    ss -> ss
+  thin _ _ s [] = [s]
+  thin kept mids s (next : more)
+    | fits kept (s : mids) next = thin kept (s : mids) next more
+    | otherwise = s : thin s [] next more
+  fits (t0, c0) mids (t1, c1) =
+    t1 - t0 > 1.0e-4
+      && all (\(t, c) -> closeColour 1 c (lerpColor c0 c1 ((t - t0) / (t1 - t0)))) mids
 
 emitPolyline ::
   Int

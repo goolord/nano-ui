@@ -15,6 +15,7 @@
 module Main (main) where
 
 import Control.Monad (forM, forM_, void, when)
+import CanvasExamples (canvasExamples)
 import Data.Aeson.Micro (ToJSON (..), Value, encode, object, (.=))
 import Data.Bits (shiftL, shiftR, testBit, (.&.))
 import Data.ByteString (ByteString)
@@ -2742,7 +2743,7 @@ tabStylesSpecimen =
         , tab 2 "Settings" (muted "Settings")
         ]
 
--- | Write the layout and gallery specimens to the book's images directory.
+-- | Write the layout, canvas and gallery specimens to the book's images directory.
 generateBookVisuals :: IO ()
 generateBookVisuals = do
   createDirectoryIfMissing True "book/src/images"
@@ -2750,6 +2751,12 @@ generateBookVisuals = do
   forM_ layoutDemos $ \(name, w, h, hoverPos, ui) -> do
     svg <- layoutSvg ("book-layout-" <> name) w h hoverPos ui
     let path = "book/src/images/layout/" <> T.unpack name <> ".svg"
+    TIO.writeFile path svg
+    putStrLn ("wrote " <> path)
+  createDirectoryIfMissing True "book/src/images/canvas"
+  forM_ canvasExamples $ \(name, w, ui) -> do
+    svg <- layoutSvg ("book-canvas-" <> name) w 600 Nothing ui
+    let path = "book/src/images/canvas/" <> T.unpack name <> ".svg"
     TIO.writeFile path svg
     putStrLn ("wrote " <> path)
   writeSvg "gallery-controls" 880 260 galleryControlsSpecimen

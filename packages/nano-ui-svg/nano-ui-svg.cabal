@@ -84,7 +84,8 @@ executable nano-ui-svg-glossary
     import:           extensions
     import:           warnings
     main-is:          Glossary.hs
-    other-modules:    Paths_nano_ui_svg
+    other-modules:    CanvasExamples
+                      Paths_nano_ui_svg
     autogen-modules:  Paths_nano_ui_svg
     ghc-options:      -threaded -rtsopts "-with-rtsopts=-N1"
     if os(windows)

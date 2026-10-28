@@ -203,8 +203,31 @@ testPathsAndShaded = do
         gradPaint
     shadedSvg = drawOpsToSvg vp shadedOps
   check
-    "shaded polygon emits triangles"
-    (T.isInfixOf "<polygon points=" shadedSvg)
+    "linear gradient fill emits one gradient path"
+    ( T.isInfixOf
+        "<linearGradient id=\"grad_1\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"20\" y2=\"0\"><stop offset=\"0%\" stop-color=\"#ff0000\"/><stop offset=\"100%\" stop-color=\"#00ff00\"/></linearGradient>"
+        shadedSvg
+        && T.isInfixOf "fill=\"url(#grad_1)\"" shadedSvg
+        && not (T.isInfixOf "<polygon points=" shadedSvg)
+    )
+
+  -- Four different corners follow no single linear gradient, so the
+  -- triangles are emitted one by one.
+  let
+    blue = colorRGBA 0 0 255 255
+    yellow = colorRGBA 255 255 0 255
+    corners =
+      smallArrayFromList
+        [ FillPolygon
+            (primArrayFromList [0, 0, 20, 0, 20, 20, 0, 20])
+            (primArrayFromList [0, 4])
+            (primArrayFromList [0, 1, 2, 0, 2, 3])
+            (Shaded (primArrayFromList (map colorToWord32 [red, green, blue, yellow])))
+        ]
+    cornersSvg = drawOpsToSvg vp corners
+  check
+    "four-corner shaded polygon falls back to triangles"
+    (T.isInfixOf "<polygon points=" cornersSvg && not (T.isInfixOf "linearGradient" cornersSvg))
   check
     "shaded polyline emits segment lines"
     (T.isInfixOf "<line x1=\"0\" y1=\"0\" x2=\"10\" y2=\"0\"" shadedSvg)
