@@ -656,6 +656,26 @@ nano-ui-trap {
   letter-spacing: 0.5px;
 }
 
+.nano-figure {
+  margin: 1.5rem 0;
+}
+
+.nano-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--nano-well-border);
+  border-radius: 8px;
+  background: var(--nano-well-bg);
+}
+
+.nano-figure figcaption {
+  margin-top: 0.5rem;
+  color: var(--sidebar-fg);
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
 .svg-well {
   background: var(--nano-well-bg);
   border: 1px solid var(--nano-well-border);

@@ -1,6 +1,6 @@
 # Tutorial 2: Build a Notepad
 
-A menu bar, file dialogs, a real text document with undo, a status bar, and a prompt before losing unsaved work. This is the shape of most desktop tools, and it exercises the parts of nano-ui that a todo list does not.
+A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work. It covers menus, dialogs, and close confirmation.
 
 The complete program is [`packages/nano-ui-demo/examples/Notepad.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Notepad.hs). Run it with:
 
@@ -30,7 +30,7 @@ newNotepad =
 
 The menu state, path, dirty flag, zoom, and transient messages are simpler and can be `useVar`s inside the view. The rule of thumb: allocate in `IO` what other code needs a handle to (a document, a task, a dialog), and use `useVar` for view-local state.
 
-## 2. The window that asks before closing
+## 2. Close confirmation
 
 By default the window closes as soon as the close button is pressed. A notepad needs to intercept that and ask about unsaved changes, so the window is created with `wsExitOnCloseRequest = False`:
 
@@ -86,7 +86,7 @@ menuBar openMenu entries = do
       when (respClicked popupResp) (writeVar openMenu "")
 ```
 
-Why `constVar` for the popup? `popup'` needs a `Var Bool` for whether it is open, but the truth is derived from `openMenu` ("is this label the open one?"). `constVar isOpen` gives it a read-only `Var`; writes to it are no-ops. When the popup reports a click, the code writes the real state (`openMenu`) instead.
+`popup'` needs a `Var Bool` for whether it is open, but the state is derived from `openMenu` ("is this label the open one?"). `constVar isOpen` supplies a read-only `Var`; writes to it are no-ops. When the popup reports a click, the code writes the real state (`openMenu`) instead.
 
 > [!IMPORTANT]
 > Call overlays unconditionally. `popup'` is called for every title on every frame, even when closed; it draws nothing while closed. Wrapping it in `when isOpen` would change the widget ids of later siblings each time a menu opens.
@@ -261,7 +261,7 @@ statusBar name doc statusMsg zoomVal = do
     labelWith (tight . fontMuted) ("Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%")
 ```
 
-Reading `doc` here records a dependency: every edit repaints the status bar. That is intentional — the line count changes. If the label's text length changes often, pin its width with `fixedW` so the rest of the bar does not shift (see [Recurring Bugs](../troubleshooting/recurring-bugs.md)).
+Reading `doc` here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label's text length changes often, pin its width with `fixedW` so the rest of the bar does not shift (see [Recurring Bugs](../troubleshooting/recurring-bugs.md)).
 
 ## 10. Try it
 

@@ -10,6 +10,11 @@ columnWith (gap 8 . padAll 12 . fillW) $ do
 
 Logical pixels, origin top-left, `y` downward. Backends handle DPI scaling.
 
+<figure class="nano-figure">
+<img src="../images/layout-overview.svg" alt="A nano-ui window with a toolbar, sidebar, three metric panels, and a deployments table.">
+<figcaption>A frame built from a row, a sidebar panel, stat panels, and a table. Rendered with nano-ui-svg.</figcaption>
+</figure>
+
 ## Containers
 
 | Container | What it does |
@@ -45,28 +50,28 @@ layers $ do
 
 **Sizing**
 
-- `fillW` / `fillH` — take all available space on an axis; `grow` is both.
-- `fixedW w`, `fixedH h`, `fixedWH w h` — explicit logical pixels.
-- `minW w`, `maxW w`, `minH h`, `maxH h` — bounds.
-- `percent p` — a percentage of the parent.
-- `aspect r` — width/height ratio.
+- `fillW` / `fillH`: take all available space on an axis; `grow` is both.
+- `fixedW w`, `fixedH h`, `fixedWH w h`: explicit logical pixels.
+- `minW w`, `maxW w`, `minH h`, `maxH h`: bounds.
+- `percent p`: a percentage of the parent.
+- `aspect r`: width/height ratio.
 
 **Spacing**
 
 - `padAll p`, `padXY x y`, `padLeft`, `padRight`, `padTop`, `padBottom`, `padLRTB l r t b`.
-- `gap g` — space between children.
-- `tight` — remove internal padding but keep the gap.
+- `gap g`: space between children.
+- `tight`: remove internal padding but keep the gap.
 
 **Alignment and wrapping**
 
 - `alignMid`, `alignStart`, `alignEnd`, `alignCenter`, `alignTop`, `alignBottom`, `alignBaseline`.
-- `wrap` — wrap onto new lines; add `lineGap` and `lineAlign`.
+- `wrap`: wrap onto new lines; add `lineGap` and `lineAlign`.
 
 **Positioning and pointer behavior**
 
-- `pinAt x y` — position absolutely within the parent. `pinAt 0 0 . grow` covers it for a scrim.
-- `pointer PointerBlock` — consume pointer events (a scrim).
-- `pointer PointerPass` — do not consume them (decorative drawing).
+- `pinAt x y`: position absolutely within the parent. `pinAt 0 0 . grow` covers it for a scrim.
+- `pointer PointerBlock`: consume pointer events (a scrim).
+- `pointer PointerPass`: do not consume them (decorative drawing).
 
 `alignMid` on a row positions the row itself in its parent. To centre the row's *contents*, apply it to each child or use `alignCenter` inside the row.
 

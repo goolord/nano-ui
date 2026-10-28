@@ -14,7 +14,7 @@ cabal run nano-ui-example-live-chart
 
 ## 1. Allocate handles once
 
-A `Task` owns one typed job; a `Stream` owns one typed push channel. Both are created during setup, exactly like a `Var`:
+A `Task` runs one typed job; a `Stream` carries one typed push channel. Both are created during setup, like a `Var`:
 
 ```haskell
 data App = App
@@ -212,7 +212,7 @@ The chart API is small:
 - `chart` takes the list of series; `withGrid`, `withLegend`, `withXAxis`, `withYAxis`, and `withTitle` decorate it.
 - `plot cache layout theChart` draws it and returns a `PlotResponse` whose `plotHover` is the nearest data point under the pointer.
 
-Building the `Chart` value every frame is fine — it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the *diagram*; the `PlotCache` is what prevents that.
+Building the `Chart` value every frame is fine: it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the *diagram*; the `PlotCache` is what prevents that.
 
 ## 6. The rules, collected
 

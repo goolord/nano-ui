@@ -1,6 +1,6 @@
 # Architecture & Internals
 
-This is the reference for how a frame executes and how real applications are structured around it. You do not need it to write a view, but it explains the cost model behind `readVar`, focus, and damage.
+Reference for how a frame executes and how applications are structured around it. It explains the cost model behind `readVar`, focus, and damage; a view does not need any of it to work.
 
 ## The frame lifecycle
 
@@ -78,7 +78,7 @@ newApp = App <$> newVar "" <*> newVar TabOverview <*> newVar 1.0 <*> newVar Fals
 
 Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.
 
-### Pattern C: the application owns the state
+### Pattern C: application-owned state
 
 `ned` keeps a plain `IORef App`; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:
 
@@ -96,9 +96,9 @@ editorView (Editor ref) = do
 
 | The application… | Pattern |
 | --- | --- |
-| Owns one domain state, uses worker threads, runs commands | A — `IORef` + `askWake` |
-| Is a large set of interactive panes and tools | B — record of `Var`s |
-| Has a model that predates the UI or is shared with a library | C — app-owned `IORef` + `requestFrame` |
+| Has one domain state, uses worker threads, runs commands | A: `IORef` + `askWake` |
+| Is a large set of interactive panes and tools | B: record of `Var`s |
+| Has a model that predates the UI or is shared with a library | C: app-owned `IORef` + `requestFrame` |
 | Is a state machine with explicit transitions | Elm-style (`nano-ui-emit`) |
 | Is a small tool | Whatever is simplest; a handful of `useVar`s is fine |
 

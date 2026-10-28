@@ -1,6 +1,6 @@
 # Recurring Bugs & Fixes
 
-A field guide mined from the git histories of real nano-ui applications (`ned`, `stronghead`, and `winget-gui`). Each entry states the symptom first, because that is what you have when you arrive here.
+Bugs and fixes from the git histories of nano-ui applications (`ned`, `stronghead`, and `winget-gui`). Each entry starts with the symptom.
 
 ## Symptom index
 
@@ -82,7 +82,7 @@ Symptoms:
 - A dialog has two concentric borders.
 - A pane with a panel inside a card looks recessed twice.
 
-**Fix:** exactly one level owns the chrome.
+**Fix:** one level supplies the chrome.
 
 - Give the outer dialog `padAll 0` and move the padding to the inner `columnWith (fillW . padAll 12 ...)`.
 - Or strip the inner surface:
@@ -92,7 +92,7 @@ Symptoms:
   ```
 
 - Set `themeFloatingWindow` and `themePopup` to the panel surface, so a padded body does not show a panel box inside the dialog.
-- Between two chrome regions, draw one `separator` at the seam — not a border on the bottom of one and the top of the other.
+- Between two chrome regions, draw one `separator` at the seam, not a border on the bottom of one and the top of the other.
 
 The `stronghead` fix was named "Remove duplicate borders from workspace popovers and notifications"; the same change appears in `winget-gui`'s dialogs.
 
@@ -136,13 +136,13 @@ A two-line block with a large label over a small one centres by line boxes, whic
 
 ## 4. Stale cached drawings
 
-A custom-drawn widget has no text spans and no automatic diff of its inputs. Without a content key, its ops are rebuilt and diffed every frame. With a key, unchanged frames skip both — and a key that misses an input shows stale pixels.
+A custom-drawn widget has no text spans and no automatic diff of its inputs. Without a content key, its ops are rebuilt and diffed every frame. With a key, unchanged frames skip both, and a key that misses an input shows stale pixels.
 
 ### The drawing freezes on an input the key missed
 
 `winget-gui`'s sort arrow stayed on the old column until the key covered everything the drawing read.
 
-**Fix:** include every input in the key — values, colors, text, theme, scroll viewport width, animation state:
+**Fix:** include every input in the key: values, colors, text, theme, scroll viewport width, animation state.
 
 ```haskell
 drawingVersioned (contentKey [round sortCol, round scrollY, fromEnum theme]) $ \dc -> ...
@@ -250,22 +250,22 @@ When exporting with `nano-ui-svg`:
 
 ## Quick checklist
 
-- [ ] `liftIO (newVar ...)` inside a view — allocates every pass. Move it to setup.
-- [ ] Unguarded side effects — the view re-runs. Wrap them in `whenM (button ...)`.
+- [ ] `liftIO (newVar ...)` inside a view: allocates every pass. Move it to setup.
+- [ ] Unguarded side effects: the view re-runs. Wrap them in `whenM (button ...)`.
 - [ ] Conditional widgets or `useVar`s without `scope`; keyed lists using indices.
 - [ ] Overlays called conditionally instead of unconditionally with a `Var Bool`.
-- [ ] `useTask` inside a tab or branch — the task is cancelled when hidden.
-- [ ] `keepAnimating` at an always-run top level — a busy loop. Call it in the animating widget; use `wakeAfter` for timers.
-- [ ] Writing a freshly computed `NaN` to a `Var Float` — `NaN /= NaN`, so it redraws forever. Guard the write.
-- [ ] A custom widget's content key missing an input — stale pixels or a frozen drawing.
-- [ ] A changing label without `fixedW` — its siblings shift every frame.
-- [ ] A wide cell in a scrolling list without `fillW` — the list scrolls sideways.
-- [ ] A `scrollArea` / `panel` / `card` nested in a popup — a box inside a box.
-- [ ] Focus queries at the top of the view — the arena was reset; read them at the end.
-- [ ] Escape behind the same guard as Ctrl+A/Delete — text inputs do not claim Escape.
-- [ ] A focused widget reading `inputChars` without `useInputMethod` — typed text never arrives.
-- [ ] Per-glyph advance × count for a long run — use `lineWidth`.
-- [ ] Parsing or rebuilding documents per frame — parse once and keep the result outside the view.
-- [ ] `readVar` above the widget that edits the `Var` — an extra pass per change.
+- [ ] `useTask` inside a tab or branch: the task is cancelled when hidden.
+- [ ] `keepAnimating` at an always-run top level: a busy loop. Call it in the animating widget; use `wakeAfter` for timers.
+- [ ] Writing a freshly computed `NaN` to a `Var Float`: `NaN /= NaN`, so it redraws forever. Guard the write.
+- [ ] A custom widget's content key missing an input: stale pixels or a frozen drawing.
+- [ ] A changing label without `fixedW`: its siblings shift every frame.
+- [ ] A wide cell in a scrolling list without `fillW`: the list scrolls sideways.
+- [ ] A `scrollArea` / `panel` / `card` nested in a popup: a box inside a box.
+- [ ] Focus queries at the top of the view: the arena was reset; read them at the end.
+- [ ] Escape behind the same guard as Ctrl+A/Delete: text inputs do not claim Escape.
+- [ ] A focused widget reading `inputChars` without `useInputMethod`: typed text never arrives.
+- [ ] Per-glyph advance × count for a long run: use `lineWidth`.
+- [ ] Parsing or rebuilding documents per frame: parse once and keep the result outside the view.
+- [ ] `readVar` above the widget that edits the `Var`: an extra pass per change.
 - [ ] Missing `-threaded`.
-- [ ] Touching `Context` from a worker thread — wake with `askWake` instead.
+- [ ] Touching `Context` from a worker thread: wake with `askWake` instead.

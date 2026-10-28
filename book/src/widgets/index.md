@@ -1,6 +1,11 @@
 # Widget Gallery
 
-This is the single place to start when you need a widget. Every widget is an ordinary function in `NanoUI`; the family pages below cover the API, and the styling pages cover how it looks.
+Start here for widgets. Every widget is an ordinary function in `NanoUI`; the family pages cover the API, and the styling pages cover appearance.
+
+<figure class="nano-figure">
+<img src="../images/gallery-controls.svg" alt="Buttons, a checkbox, text field, select, slider, switch, knob, spinner, progress bar, and sparkline in one nano-ui row.">
+<figcaption>Buttons, inputs, and canvas controls in one frame. Rendered with nano-ui-svg.</figcaption>
+</figure>
 
 ## Find a widget by task
 
@@ -45,21 +50,8 @@ A `Response` carries identity and interaction state:
 
 Anything with a `Response` can be passed to `tooltip`, `contextMenu`, and the focus helpers.
 
-## The one input rule
+## Input widgets
 
 Input widgets take the `Var` they display and mutate it directly; there is no callback and no on-change handler. To react to an edit, use the primed form's `Response`. The full set of controls and their examples is in [Buttons, Menus & Inputs](controls.md).
 
-Containers and modifiers are not repeated here: see [Layout & Scrolling](../layout/index.md) for `row`, `column`, `grid`, padding, alignment, and scrolling.
-
-## Reading order
-
-If you are new to the toolkit, the shortest route through this section is:
-
-1. [Buttons, Menus & Inputs](controls.md) — the controls most applications need.
-2. [Text Editing](text-editing.md) — the moment a field becomes a document.
-3. [Tabs, Tables & Trees](data-views.md) — showing collections.
-4. [Overlays & Windows](overlays.md) — dialogs and menus that float.
-5. [Drag & Drop](drag-and-drop.md) and [Custom Drawing & Controls](custom-drawing.md) when the built-in widgets are not enough.
-6. [Styling & Theming](../styling/index.md), then the [lab](../styling/lab.md) and [gotchas](../styling/gotchas.md).
-
-Every family page has a "See also" block back to this guide and across to the styling pages.
+Containers and modifiers are covered once in [Layout & Scrolling](../layout/index.md).

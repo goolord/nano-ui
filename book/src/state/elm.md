@@ -24,7 +24,7 @@ main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 ```
 
-Everything else about nano-ui — widgets, layout, focus, and keys — is unchanged. The state-management style is what differs.
+Widgets, layout, focus, and keys are unchanged. Only the state model differs.
 
 ## Emitting
 

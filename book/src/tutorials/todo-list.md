@@ -79,7 +79,7 @@ todoApp app = do
     todoList items filt
 ```
 
-The view's local state — the draft text and the current filter — is allocated with `useVar` and `useEnumVar`. Both are positional: they are identified by their call site, so they need no setup and no record field.
+The view's local state (the draft text and the current filter) is allocated with `useVar` and `useEnumVar`. Both are positional: they are identified by their call site, so they need no setup and no record field.
 
 `columnWith (padAll 20 . gap 12 . fillW . fillH)` is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.
 
@@ -99,7 +99,7 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
     requestFocus (respId inputR)
 ```
 
-Several things are worth pausing on:
+Details:
 
 - **The primed widget returns a `Response`.** `textInputConfigured'` reports the widget's identity, rectangle, hover and click state, and whether Enter was submitted (`respSubmitted`). `button` already returns the one `Bool` this row needs.
 - **`readVar draft` sits below the field that edits it.** The field's write lands first, then the read sees the new text in the same pass. Reading *above* an editing widget forces a second pass.
@@ -138,7 +138,7 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
 
 ## 5. Rows own their state
 
-Now the interesting part. Each row has local state — whether it is being edited and the draft of its text — but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row's position on screen.
+Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row's position on screen.
 
 ```haskell
 todoList :: Var [Todo] -> Var Filter -> NanoUI ()
@@ -224,9 +224,9 @@ Enter in the new-item field adds an item because `respSubmitted` reports it. Esc
 when isEditing (whenM takeEscape (writeVar editing False))
 ```
 
-`takeEscape` claims the press for this handler, so later Escape handlers in the view — an open popup or a second `takeEscape` — do not also act on it. The window's quit policy is separate: the example sets `sdlAppShouldQuit = pressedOnceIn KeyEscape`, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).
+`takeEscape` claims the press for this handler, so later Escape handlers in the view (an open popup or a second `takeEscape`) do not also act on it. The window's quit policy is separate: the example sets `sdlAppShouldQuit = pressedOnceIn KeyEscape`, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).
 
-For the full shortcut model — `shortcut`, `shortcutOnce`, menu bindings, and how focused widgets claim keys — see [Keyboard, Focus & IME](../input/index.md).
+For the full shortcut model (`shortcut`, `shortcutOnce`, menu bindings, and how focused widgets claim keys), see [Keyboard, Focus & IME](../input/index.md).
 
 ## 8. Try it
 

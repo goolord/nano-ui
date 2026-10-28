@@ -39,7 +39,7 @@ label (fromMaybe "Loading..." contents)
 Rules:
 
 - **The key identifies the job.** A new key starts a worker and cancels the old job with an asynchronous exception.
-- **A skipped hook cancels the job.** If the view does not call `useTask` for a full frame — because the pane is in an inactive tab or inside a branch — the work is released. Keep the hook outside tabs when work must continue while hidden.
+- **A skipped hook cancels the job.** If the view does not call `useTask` for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.
 - **To retrigger the same input, put a counter in the key.** A Retry button must change the key or the job never reruns.
 - **Cancellation is an async exception.** Use `bracket` or `withFile` inside the job so resources are released when the user changes the query.
 - **The result is forced on the worker.** Return a value in weak head normal form; force a list's spine with `length found \`seq\` pure found`.
@@ -65,7 +65,7 @@ The producer receives `update :: (s -> s) -> IO ()` and returns when done, cance
 
 - **Stop by not calling the hook.** `when isRunning (useStream ...)` releases the producer.
 - **Stopping discards the accumulated state.** Save it outside and pass it as the next initial value to resume.
-- **The producer owns no UI.** It may call `update` from its thread or threads it starts; never touch the UI `Context`.
+- **Producers must not touch the UI.** They may call `update` from their thread or threads they start; never touch the UI `Context`.
 
 ## Threads outside those handles
 
@@ -97,7 +97,7 @@ A `Transition` is either:
 pos <- animateToA (Spring presetSmooth) (V2 targetX targetY)
 ```
 
-Springs retarget mid-flight from their current position and velocity. `animateToA` animates any `Animatable` value — `Float`, `Double`, `V2`, or `Color` — channel by channel.
+Springs retarget mid-flight from their current position and velocity. `animateToA` animates any `Animatable` value (`Float`, `Double`, `V2`, or `Color`) channel by channel.
 
 ### Continuous animation
 

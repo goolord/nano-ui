@@ -49,7 +49,7 @@ The `fixedW` on the changing number keeps the controls from shifting. Read the v
 import NanoUI.Path qualified as P
 
 badge :: NanoUI ()
-badge = canvas (fixedWH 120 40) $ \_dc -> do
+badge = canvas (fixedWH 120 40) $ \_rect -> do
   drawRoundedRect (Rect 0 0 120 40) 8 (colorRGBA 37 99 235 255)
   drawStrokePath (P.circle (V2 20 20) 8) 2 colorWhite
   drawText (V2 68 20) AlignCenter AlignMiddle "Ready" colorWhite
@@ -80,7 +80,7 @@ Outside a canvas, use `customWidget` with a `CustomWidgetSpec`:
 
 ### Content keys and caching
 
-Without `widgetContent`, a custom widget's draw ops are rebuilt and diffed every frame. With a key, unchanged frames skip rebuild and repaint — but the key must cover **everything the drawing reads**:
+Without `widgetContent`, a custom widget's draw ops are rebuilt and diffed every frame. With a key, unchanged frames skip rebuild and repaint, but the key must cover **everything the drawing reads**:
 
 ```haskell
 (resp, ()) <- customWidget defaultCustomWidgetSpec
@@ -90,9 +90,9 @@ Without `widgetContent`, a custom widget's draw ops are rebuilt and diffed every
   }
 ```
 
-A key that misses an input shows stale pixels. This is the most common custom-drawing bug; see [Styling Gotchas](../styling/gotchas.md).
+A key that misses an input shows stale pixels. See [Styling Gotchas](../styling/gotchas.md).
 
-A drawing whose layout rectangle never changes — a drag ghost pinned under the pointer with `pinAt` — gets no layout change when it moves. Give it an explicit version that includes what moves it:
+A drawing whose layout rectangle never changes (a drag ghost pinned under the pointer with `pinAt`) gets no layout change when it moves. Give it an explicit version that includes what moves it:
 
 ```haskell
 -- dragGhostOps :: Rect -> SmallArray DrawOp

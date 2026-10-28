@@ -24,7 +24,7 @@ editorView docVar = do
   writeVar editorId (respId resp)
 ```
 
-Only the edited lines are copied; unchanged lines are shared. `documentText` materializes the whole text — call it when saving, not on every edit:
+Only the edited lines are copied; unchanged lines are shared. `documentText` materializes the whole text; call it when saving, not on every edit.
 
 ```haskell
 save = liftIO (BS.writeFile path (TE.encodeUtf8 (documentText doc)))
@@ -82,8 +82,9 @@ The primed variants return a `Response`:
 
 For a single-line field, `textInput` and `textInput'` are the equivalents; `searchInput'` adds debounced change reporting and a clear button.
 
-## Related
+## See also
 
+- Widget inventory: [Widget Gallery](index.md).
 - Input widgets and their signatures: [Buttons, Menus & Inputs](controls.md).
 - Working with the document in an application: [Build a Notepad](../tutorials/notepad.md).
 - Theming and typography: [Styling & Theming](../styling/index.md).

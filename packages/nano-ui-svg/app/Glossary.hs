@@ -6,6 +6,8 @@
 -- @assets/glossary.js@ and are spliced into the generated document, so the
 -- output stays one portable file while the visual and interactive layers are
 -- edited as plain CSS and JavaScript rather than Haskell string literals.
+-- 'generateBookVisuals' also writes the layout and widget-gallery SVGs used by
+-- the documentation book.
 --
 -- Run:
 --
@@ -2296,6 +2298,134 @@ buildHtmlDocument ::
 buildHtmlDocument assets hero state rows typo interactions =
   TL.toStrict (renderText (glossaryPage assets hero state rows typo interactions))
 
+-- ---------------------------------------------------------------------------
+-- Book visuals
+-- ---------------------------------------------------------------------------
+
+-- | A layout specimen for the book: toolbar, sidebar, stat panels, and a table
+-- in one frame. Rendered as a standalone SVG with the same @frameToSvg@ path
+-- as the glossary specimens.
+layoutSpecimen :: NanoUI ()
+layoutSpecimen =
+  columnWith (fillW . fillH . padAll 18 . gap 12) $ do
+    search <- useVar "payments"
+    void $ rowWith (tight . gap 10 . alignMid . fillW) $ do
+      heading "Northwind"
+      spacer (Grow 1) Fit
+      textInputConfigured
+        defaultTextInputConfig {ticPlaceholder = "Search", ticLayout = fixedW 190 defaultLayout}
+        search
+      void (button "Share")
+      void (button "Deploy")
+    rowWith (tight . gap 12 . fillW . fillH) $ do
+      panelWith (fixedW 180 . fillH . padAll 12 . gap 8) $ do
+        muted "WORKSPACE"
+        mapM_ (buttonWith fillW) ["Overview", "Services", "Jobs", "Settings"]
+        spacer Fit (Grow 1)
+        muted "v0.2.1"
+      columnWith (tight . gap 12 . fillW . fillH) $ do
+        rowWith (tight . gap 12 . fillW) $ do
+          statPanel "Requests" "1.2M"
+          statPanel "Errors" "0.4%"
+          statPanel "P95" "84 ms"
+        panelWith (gap 8 . fillW . fillH . padAll 12) $ do
+          rowWith (tight . gap 8 . alignMid . fillW) $ do
+            heading "Deployments"
+            spacer (Grow 1) Fit
+            muted "3 running"
+          _ <-
+            simpleTable
+              ["Service", "Status", "Latency"]
+              [ ["api", "running", "12 ms"]
+              , ["worker", "running", "48 ms"]
+              , ["scheduler", "idle", "2 ms"]
+              ]
+          pure ()
+  where
+    statPanel caption value =
+      panelWith (fillW . padAll 10 . gap 4) $ do
+        muted caption
+        labelWith (fontSize 20 . fontBold) value
+
+-- | Controls in the book's widget gallery.
+galleryControlsSpecimen :: NanoUI ()
+galleryControlsSpecimen = do
+  enabled <- useVar True
+  boldVar <- useVar False
+  query <- useVar ""
+  priority <- useVar (1 :: Int)
+  volume <- useVar (62 :: Float)
+  columnWith (fillW . padAll 18 . gap 14) $ do
+    heading "Controls"
+    rowWith (tight . gap 10 . fillW . wrap . alignMid) $ do
+      void (button "Primary")
+      void (button "Secondary")
+      toggleButtonWith (fixedW 90) Accent "Bold" boldVar
+      checkbox "Enabled" enabled
+    rowWith (tight . gap 14 . fillW . wrap . alignMid) $ do
+      textInputConfigured
+        defaultTextInputConfig {ticPlaceholder = "Project name", ticLayout = fixedW 210 defaultLayout}
+        query
+      selectWith (fixedW 150) ["Low", "Medium", "High"] priority
+      sliderWith (fixedW 190) 0 100 volume
+    rowWith (tight . gap 12 . fillW) $ do
+      panelWith (fillW . padAll 12 . gap 10) $ do
+        muted "CUSTOM CONTROLS"
+        rowWith (tight . gap 16 . alignMid) $ do
+          toggleSwitch enabled
+          knob 0 100 volume
+          spinner
+      panelWith (fillW . padAll 12 . gap 10) $ do
+        muted "TELEMETRY"
+        progressBar 0.62
+        sparkline [18, 22, 19, 27, 24, 31, 28, 35, 33, 41, 38, 46]
+        muted "12 samples, last 46"
+
+-- | Tabs, a table, and a tree in one frame.
+galleryDataSpecimen :: NanoUI ()
+galleryDataSpecimen = do
+  page <- useVar (0 :: Int)
+  selected <- useVar (0 :: Int)
+  columnWith (fillW . fillH . padAll 18 . gap 12) $ do
+    heading "Collections"
+    tabs
+      page
+      [ tab 0 "Overview" (label "Deployment health across three regions.")
+      , tab 1 "Queries" (label "Slow query log for the last hour.")
+      , tab 2 "Settings" (label "Retention and sampling policy.")
+      ]
+    rowWith (tight . gap 12 . fillW . fillH) $ do
+      panelWith (fillW . fillH . padAll 12 . gap 8) $ do
+        _ <-
+          simpleTable
+            ["Service", "Status", "Latency"]
+            [ ["api", "running", "12 ms"]
+            , ["worker", "running", "48 ms"]
+            , ["scheduler", "idle", "2 ms"]
+            ]
+        pure ()
+      panelWith (fixedW 230 . fillH . padAll 12 . gap 8) $ do
+        muted "TREE"
+        tree
+          "book-tree"
+          [ TreeItem "src" [TreeItem "Main.hs" [], TreeItem "Widgets" []]
+          , TreeItem "README.md" []
+          ]
+          selected
+
+-- | Write the layout and gallery specimens to the book's images directory.
+generateBookVisuals :: IO ()
+generateBookVisuals = do
+  createDirectoryIfMissing True "book/src/images"
+  writeSvg "layout-overview" 880 470 layoutSpecimen
+  writeSvg "gallery-controls" 880 260 galleryControlsSpecimen
+  writeSvg "gallery-data" 880 420 galleryDataSpecimen
+  where
+    writeSvg name w h ui = do
+      svg <- renderSvg ("book-" <> name) w h ui
+      TIO.writeFile ("book/src/images/" <> T.unpack name <> ".svg") svg
+      putStrLn ("wrote book/src/images/" <> T.unpack name <> ".svg")
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -2326,6 +2456,7 @@ main = do
     probeRows <- generateProbeMatrix
     typoDemos <- generateTypoDemos
     interactions <- generateInteractions
+    generateBookVisuals
     let html = buildHtmlDocument assets banner stateStrip probeRows typoDemos interactions
     withFile outPath WriteMode $ \h -> do
       hSetEncoding h utf8

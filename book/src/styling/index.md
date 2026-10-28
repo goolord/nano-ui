@@ -50,10 +50,10 @@ For a fully custom look, define a palette record, build a `Theme` from it, and d
 
 Widgets move through four states:
 
-1. **Default** — `styleBg`, `styleFg`, `styleBorder`.
-2. **Hover** — `styleHoverBg`.
-3. **Pressed** — `styleActiveBg`, while the primary button is held inside the widget.
-4. **Disabled** — dimmed and non-interactive.
+1. **Default**: `styleBg`, `styleFg`, `styleBorder`.
+2. **Hover**: `styleHoverBg`.
+3. **Pressed**: `styleActiveBg`, while the primary button is held inside the widget.
+4. **Disabled**: dimmed and non-interactive.
 
 `disabledWhen cond subtree` disables interaction and dims rendering while preserving layout and state:
 

@@ -34,7 +34,7 @@ A chord does not fire:
 
 - behind an open modal;
 - inside `disabledWhen True`;
-- when the focused widget claims the key — a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;
+- when the focused widget claims the key: a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;
 - for Escape when `takeEscape` fails, or when an open overlay takes it first.
 
 Focused widgets claim only their own unmodified or Shift-modified keys, so modified chords such as `Ctrl+Enter`, `Alt+Left`, or `Ctrl+S` still reach the application while a field is focused. The matching low-level functions are filtered the same way: `keyPressed`, `keyPressedOnce`, `keyReleased`, and `keyHeld`. Use raw `pressedIn` only when implementing a custom widget.
@@ -52,7 +52,7 @@ The open menu’s row is declared first, so it wins. Define the action once and 
 
 ## Escape
 
-Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition — do not share the “a field is editing” guard used for Ctrl+A or Delete.
+Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition. Do not share the “a field is editing” guard used for Ctrl+A or Delete.
 
 `takeEscape` claims a press for the current handler:
 

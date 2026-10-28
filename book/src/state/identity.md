@@ -1,10 +1,10 @@
 # Widget Identity & Keys
 
-Widget state — caret position, text selection, an open drop-down, a scroll offset, per-row local `Var`s — is not stored in the widget. It is stored under the widget's **id**, and ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This chapter is about keeping the order stable.
+Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local `Var`s) is stored under the widget's **id**, not in the widget. Ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This section explains how to keep the order stable.
 
 ## How ids are assigned
 
-Every container gives its children ids counting up from the start of that container. A `column` with three labels has children 0, 1, and 2; a nested `row` starts its own count. The useful mental model is "the nth call at this level", not a global counter.
+Each container assigns ids to its children counting from zero. A `column` with three labels has children 0, 1, and 2; a nested `row` starts its own count. Ids are per container, not global.
 
 Two separate id spaces exist:
 
@@ -47,7 +47,7 @@ scope $
 
 ## Rule 3: key dynamic lists with `withKey`
 
-Never key a list item by its index. Wrap each item in `withKey` with a stable, sibling-unique key — an item id, a UUID, a file path:
+Never key a list item by its index. Wrap each item in `withKey` with a stable, sibling-unique key: an item id, a UUID, a file path.
 
 ```haskell
 column $ for_ items $ \todo ->
@@ -96,7 +96,7 @@ Wrapping the call in `when (readVar confirm)` shifts every later sibling's id wh
 
 ## Rule 5: retain state for dynamic collections
 
-Widget and `Var` state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection — a chat log, a set of tabs, a streaming table — keep the per-row state in a `VarMap` and prune it periodically:
+Widget and `Var` state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection (a chat log, a set of tabs, a streaming table), keep the per-row state in a `VarMap` and prune it periodically:
 
 ```haskell
 retainVars (`elem` liveIds) rowVars
@@ -114,4 +114,4 @@ Without pruning, a long-running application accumulates state for rows that no l
 | State appears in the wrong row after sorting | Per-row `useVar`s are outside `withKey`, or the key is the index. |
 | Memory grows with every streamed entry | Per-row state is in an unbounded `VarMap`; `retainVars`. |
 
-For the `Var` side of this — allocation, projections, and write costs — read [State & `Var`](index.md). For the lifecycle that makes ids reset, read [Architecture & Internals](../architecture/index.md).
+For allocation, projections, and write costs, read [State & `Var`](index.md). For the lifecycle that makes ids reset, read [Architecture & Internals](../architecture/index.md).

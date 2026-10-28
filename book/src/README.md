@@ -15,13 +15,13 @@ counter = row $ do
 
 ## How this book is organized
 
-The book is a learning path first, a reference second:
+Chapters follow this order:
 
 1. **[Quick Start](getting-started/quickstart.md)** installs the toolchain and gets a window on screen.
 2. **[Tutorials](tutorials/index.md)** build three small applications end to end: a todo list, a notepad, and a live data view.
 3. **[State & `Var`](state/index.md)** explains where state lives, what writes cost, and the [Elm-style alternative](state/elm.md).
 4. **[Layout & Scrolling](layout/index.md)** covers containers, modifiers, and large lists.
-5. The **[Widget Gallery](widgets/index.md)** is the single entry point for controls, data views, overlays, and custom drawing. **[Styling & Theming](styling/index.md)** lives next to it, with a [live lab](styling/lab.md) and [gotchas](styling/gotchas.md).
+5. The **[Widget Gallery](widgets/index.md)** is the entry point for controls, data views, overlays, and custom drawing. **[Styling & Theming](styling/index.md)** is next to it, with a [live lab](styling/lab.md) and [gotchas](styling/gotchas.md).
 6. **[Keyboard, Focus & IME](input/index.md)** covers chords, focus, and text input.
 7. **[Async Work & Animation](advanced/async.md)**, **[Desktop Windows](advanced/window-management.md)**, and **[Ecosystem Packages](packages/index.md)** go further.
 8. **[Troubleshooting](troubleshooting/recurring-bugs.md)**, **[Development Setup](getting-started/development.md)**, and **[Architecture & Internals](architecture/index.md)** are the reference material.
@@ -42,10 +42,10 @@ If you already know immediate-mode UI, skim the Quick Start and start with [Stat
 | `packages/nano-ui-svg` | Headless `DrawOp`-to-SVG export and visual regression testing. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-demo` | Runnable example applications and single-topic tutorials. | [Tutorials](tutorials/index.md) |
 
-## Interactive styling laboratory
+## Styling workbenches
 
-This documentation includes interactive, headlessly rendered SVG workbenches embedded directly in the chapters. You can toggle styling modifiers, themes, and interaction states live:
+Interactive SVG workbenches are embedded in the styling chapters. Toggle modifiers, themes, and interaction states live:
 
 <nano-ui-hero></nano-ui-hero>
 
-Every code sample assumes `import NanoUI` and `OverloadedStrings`; examples that use anything else import it explicitly. The complete, runnable source for each tutorial lives in [`packages/nano-ui-demo/examples`](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples).
+Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source for each tutorial is in [`packages/nano-ui-demo/examples`](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples).

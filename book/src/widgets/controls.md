@@ -20,7 +20,7 @@ whenM (button "Save Document") (liftIO saveFile)
 
 The `whenM` guard is essential: the view runs every frame, so an unguarded side effect would run forever.
 
-Use the primed form when you need the response — hover state, a rectangle for an anchored popup, or a tooltip:
+Use the primed form when you need the response: hover state, a rectangle for an anchored popup, or a tooltip.
 
 ```haskell
 resp <- button' "Refresh"

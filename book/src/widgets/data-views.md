@@ -2,6 +2,11 @@
 
 Widgets that show collections: tab strips, sortable tables, and hierarchical trees.
 
+<figure class="nano-figure">
+<img src="../images/gallery-data.svg" alt="A nano-ui frame with a tab strip, a sortable service table, and a file tree.">
+<figcaption>A tab strip, sortable table, and tree in one frame. Rendered with nano-ui-svg.</figcaption>
+</figure>
+
 ## Tabs
 
 A tab strip binds the active key to a `Var`; only the selected tab's body runs:
@@ -29,9 +34,9 @@ for_ (tabClosed resp) closeTab
 let activeKey = tabActive resp
 ```
 
-The caller owns removal: `tabs'` reports `tabClosed`, it does not remove the tab. A key no tab has selects the first tab and writes that key back to the `Var`.
+The caller must remove the tab: `tabs'` reports `tabClosed`, it does not remove it. A key no tab has selects the first tab and writes that key back to the `Var`.
 
-`tabBar` / `tabBar'` draw headers only and leave the body to the caller — useful for pane layouts and custom bodies. `tabsConfigured` / `tabBarConfigured` take a `TabsConfig`:
+`tabBar` / `tabBar'` draw headers only and leave the body to the caller, which is useful for pane layouts and custom bodies. `tabsConfigured` / `tabBarConfigured` take a `TabsConfig`:
 
 ```haskell
 let cfg = defaultTabsConfig
@@ -82,7 +87,7 @@ fileTree = tree "file-tree"
 
 `TreeItem` is the library type (`treeItemLabel`, `treeItemChildren`), not an app-defined record. `tree` reports the selected **pre-order index** through the `Var Int`, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.
 
-For very large trees, keep the expansion set in a `VarMap` keyed by a stable path, and rebuild the visible items before calling `tree`.
+For large trees, keep the expansion set in a `VarMap` keyed by a stable path, and rebuild the visible items before calling `tree`.
 
 ## See also
 

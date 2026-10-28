@@ -1,6 +1,6 @@
 # Tutorials
 
-Three applications, built one feature at a time. Each chapter is a guided tour of a runnable program; the full source is in `packages/nano-ui-demo/examples/`, so you can run it, change it, and break it while you read.
+Three applications, built one feature at a time. Each chapter walks through a runnable program; the full source is in `packages/nano-ui-demo/examples/`.
 
 | Tutorial | You build | You learn |
 | --- | --- | --- |
