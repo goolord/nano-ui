@@ -59,13 +59,13 @@ import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), So
 import NanoUI.Internal.Font (FontMetrics (..), ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, styled, uiTheme, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), Style (..), defaultLayout, explicitMin, fillH, fillW, minW, panelStyle, tight)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, explicitMin, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import Data.String (IsString (..))
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (buttonFlagTable, stripeColor, tableSortLane)
+import NanoUI.Internal.WidgetText (buttonFlagTable, tableSortLane)
 import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
@@ -700,13 +700,9 @@ tableCore cfg f key cols inputRows curSort =
           | not (smallAt views i False) = textCellAt ri i (indexSmallArray encoded r V.! i)
           | otherwise = case cellView (toCell (Encode.oneColonnadeEncode (V.unsafeIndex encoders i) (rowsVec V.! r))) of
             Nothing -> textCellAt ri i (indexSmallArray encoded r V.! i)
-            Just widgetAct -> do
-              theme <- uiTheme
-              let mBg = stripeColor theme (if even ri then 1 else 2)
-                  cellStyle = case mBg of
-                    Just bg -> styled (panelStyle (\s -> s {styleBg = bg, styleBorderWidth = 0, styleCornerRadius = 0}))
-                    Nothing -> id
-              cellStyle (panel' (cellLayout i) widgetAct)
+            -- The cell's panel carries the row fill in its style index
+            -- ('panelSurface'), as a text cell's node does.
+            Just widgetAct -> styledContainer NodePanel ((if even ri then 1 else 2) `shiftL` 4) (cellLayout i) widgetAct
         rowCells rowLay idxs colLays ri =
           gridColumnsLay rowLay idxs colLays [renderCell ri (indexPrimArray sorted ri) i | i <- idxs]
         paneRoot = fillIf fillInner (tight (fillH defaultLayout))

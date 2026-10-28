@@ -19,9 +19,9 @@ import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), themePanel, variantFace)
+import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), variantFace)
 import NanoUI.Internal.Types (Rect (..))
-import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
+import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
 
 -- | Font for a node of type @nt@ with an explicit size and packed style: the
 -- metrics, whether the host returned a native styled face (paint then skips
@@ -101,7 +101,9 @@ childPaintClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
 childPaintClip ctx idx nt rect@(Rect x y w h) = case nt of
   NodeContainer -> (\si -> if hasFlag containerFlagClip si then Just rect else Nothing) <$> getStyleIdx (ctxNodeArena ctx) idx
   NodeScrollContainer -> (\sn -> Just (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
-  NodePanel -> (\theme -> Just (borderContentClip (themePanel theme) rect)) <$> nodeTheme ctx idx
+  NodePanel -> do
+    si <- getStyleIdx (ctxNodeArena ctx) idx
+    (\theme -> Just (borderContentClip (panelSurface theme si) rect)) <$> nodeTheme ctx idx
   _ -> pure (Just rect)
 
 -- | How far the adornment rows ('adornRows') of widget @idx@, whose left edge

@@ -232,7 +232,7 @@ atlasImageUv ctx tid = fmap (atlasTextureId,) <$> lookupImageUv ctx (ImageId tid
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintPanelNode env@PaintEnv {peDrawArena = da} idx rect = do
-  let style = themePanel (peTheme env)
+  style <- panelSurface (peTheme env) <$> getStyleIdx (peNodeArena env) idx
   paintStyledRect da style rect
   withClip da (borderContentClip style rect) $ walkChildrenWithOccluders env idx
 

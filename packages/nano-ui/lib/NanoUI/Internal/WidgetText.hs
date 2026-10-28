@@ -43,6 +43,7 @@ module NanoUI.Internal.WidgetText
   , hasFlag
   , tableSortLane
   , tableStripeColor
+  , panelSurface
   , tableStripeInset
   , stripeColor
   , packTextNodeStyle
@@ -75,7 +76,7 @@ import Data.Word (Word8)
 import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, tableCellInset, widgetContentInset)
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), TextDecoration (..), Theme (..), Tone (..), styleBg, variantFace, variantTone)
+import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), Theme (..), Tone (..), variantFace, variantTone)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
@@ -317,9 +318,18 @@ stripeColor theme s = case s of
   2 -> Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.55)
   _ -> Nothing
 
--- | Row fill decoded from a text node's style index.
+-- | Row fill decoded from a text node's or a panel's style index.
 tableStripeColor :: Theme -> Int -> Maybe Color
 tableStripeColor theme si = stripeColor theme ((si `shiftR` 4) .&. 0x0F)
+
+-- | The surface of a panel with style index @si@: the theme's panel, or, for
+-- a table's widget cell, its row fill ('tableStripeColor') with no border or
+-- rounding.
+{-# INLINE panelSurface #-}
+panelSurface :: Theme -> Int -> Style
+panelSurface theme si = case tableStripeColor theme si of
+  Just bg -> (themePanel theme) {styleBg = bg, styleBorderWidth = 0, styleCornerRadius = 0}
+  Nothing -> themePanel theme
 
 -- | How far the lines of a text node with style index @si@ keep from each
 -- side: a table cell's inset when it has a row fill ('tableStripeColor').

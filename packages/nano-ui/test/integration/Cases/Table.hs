@@ -126,6 +126,14 @@ runTableCellMixedTest ctx failed = do
   assert failed (isJust (findHeader "Button" spans))
   assert failed (isJust (findExact "banana" spans))
   assert failed (isJust (findExact "Eat apple" spans))
+  -- Each widget cell's panel carries its row's fill in its style index,
+  -- even rows code 1 and odd rows code 2, rather than a theme scope.
+  let na = ctxNodeArena ctx
+  panelStripes <- foldNodesM na (\acc i -> do
+    nt <- getNodeType na i
+    if nt == NodePanel then (: acc) . (\si -> (si `div` 16) .&. 0x0F) <$> getStyleIdx na i else pure acc) []
+  assertEq failed (IS.fromList (filter (/= 0) panelStripes)) (IS.fromList [1, 2])
+  assertEq failed (length (filter (/= 0) panelStripes)) 6
   let sortedAsc = sortRows cols (SortCol 1 SortAsc) rows
   assertEq failed [("apple", 1), ("banana", 2), ("cherry", 3)] sortedAsc
   let sortedDesc = sortRows cols (SortCol 1 SortDesc) rows

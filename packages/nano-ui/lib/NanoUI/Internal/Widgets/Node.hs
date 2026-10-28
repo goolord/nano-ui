@@ -21,6 +21,7 @@ module NanoUI.Internal.Widgets.Node
   , inertResponse
   , currentParent
   , container
+  , styledContainer
   , containerResponse
   , mouseArea
   , inertContainer
@@ -200,7 +201,7 @@ container nt layout child = do
 -- pointer events pass through to the enclosing widget
 -- ('NanoUI.Internal.Frame.Hit.innermostHit').
 inertContainer :: Layout -> NanoUI a -> NanoUI a
-inertContainer layout = flaggedContainer containerFlagInert layout . inertView
+inertContainer layout = styledContainer NodeContainer containerFlagInert layout . inertView
 
 -- | A plain container that clips its children to its rect, drawing none of
 -- its own. It takes a fresh id, so the pointer is clipped from the frame
@@ -208,14 +209,16 @@ inertContainer layout = flaggedContainer containerFlagInert layout . inertView
 clipContainer :: Layout -> NanoUI a -> NanoUI a
 clipContainer layout child = do
   wid <- nextId
-  flaggedContainer containerFlagClip layout (tagContainer wid *> child)
+  styledContainer NodeContainer containerFlagClip layout (tagContainer wid *> child)
 
-flaggedContainer :: Int -> Layout -> NanoUI a -> NanoUI a
-flaggedContainer flag layout child = do
+-- | A 'container' of type @nt@ with style index @si@: a plain container's
+-- flags, or a panel's row fill ('panelSurface').
+styledContainer :: NodeType -> Int -> Layout -> NanoUI a -> NanoUI a
+styledContainer nt si layout child = do
   idx <- withContext $ \ctx -> do
     parent <- currentParent ctx
-    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent layout
-    idx <$ setStyleIdx (ctxNodeArena ctx) idx flag
+    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
+    idx <$ setStyleIdx (ctxNodeArena ctx) idx si
   withContainerNode True idx child
 
 -- | A 'container' tagged with a fresh id, and its interaction under that id.
