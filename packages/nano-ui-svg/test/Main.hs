@@ -7,7 +7,7 @@ import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import NanoUI
-import NanoUI.Backend (monospaceMetrics, runFrame)
+import NanoUI.Backend (monospaceMetrics)
 import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
 import NanoUI.Draw.Svg
   ( SvgConfig (..)
@@ -21,7 +21,7 @@ import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
 import NanoUI.Svg (rasterizeSvg)
 import NanoUI.Testing (newPixelContext)
-import NanoUI.Testing.Assert (withInput)
+import NanoUI.Testing.Assert (run2Frames, withInput)
 
 check :: String -> Bool -> IO ()
 check msg ok = unless ok (fail msg)
@@ -426,8 +426,7 @@ testFrameToSvg = do
       _ <- button "Go"
       _ <- canvas (fixedWH 60 60) $ \_ -> drawCircle (V2 30 30) 12 red
       pure ()
-  _ <- runFrame ctx inp ui
-  (_, dd, _) <- runFrame ctx inp ui
+  (_, dd, _) <- run2Frames ctx inp ui
   svg <- frameToSvg defaultFrameSvgConfig ctx inp dd
   check
     "frame svg header"
@@ -444,13 +443,12 @@ testFrameToSvg = do
   check "button chrome as a rect" (T.isInfixOf "<rect " svg)
   check "label text from spans" (T.isInfixOf ">Frame label</text>" svg)
   check "bold label text" (T.isInfixOf ">Bold label</text>" svg)
-  check "bold weight follows the span style" (T.isInfixOf "font-weight=\"700\"" svg)
+  check "bold weight follows the span style" (T.isInfixOf "font-weight=\"bold\"" svg)
   check "button label text" (T.isInfixOf ">Go</text>" svg)
   check "canvas circle from draw ops" (T.isInfixOf "<circle " svg)
   -- A page scoped onto the panel surface exports that surface.
   let panelUi = styled panelPage ui
-  _ <- runFrame ctx inp panelUi
-  (_, panelDraw, _) <- runFrame ctx inp panelUi
+  (_, panelDraw, _) <- run2Frames ctx inp panelUi
   panelSvg <- frameToSvg defaultFrameSvgConfig ctx inp panelDraw
   check
     "panel page background"

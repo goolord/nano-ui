@@ -32,15 +32,12 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TB
-import Data.Word (Word32, Word8)
+import Data.Word (Word32)
 import NanoUI
   ( Color (..)
   , DrawOp (..)
-  , FontStyle (..)
   , FontVariant (..)
-  , FontWeight (..)
   , Rect (..)
-  , TextDecoration (..)
   , TextFont (..)
   , colorA
   , colorB
@@ -48,6 +45,23 @@ import NanoUI
   , colorR
   , colorToHex
   , lerpColor
+  )
+import NanoUI.Draw.Svg.Attr
+  ( attr
+  , escapeXml
+  , fillAttrs
+  , finite
+  , fmtNum
+  , fmtPt
+  , fontStyleAttrs
+  , lineEl
+  , numAttr
+  , opacityAttr
+  , polygonEl
+  , rectEl
+  , roundedRectEl
+  , roundedStrokeEl
+  , strokeAttrs
   )
 import NanoUI.Internal.Path
   ( LineCap (..)
@@ -189,38 +203,17 @@ renderDrawOpsSvg cfg (Rect vx0 vy0 vw0 vh0) ops =
 
 emitOp :: Int -> SvgConfig -> DrawOp -> TB.Builder
 emitOp p cfg = \case
-  FillRect (Rect x y w h) col
-    | w > 0 && h > 0 && colorA col > 0 && all finite [x, y, w, h] ->
-        "<rect"
-          <> numAttr p "x" x
-          <> numAttr p "y" y
-          <> numAttr p "width" w
-          <> numAttr p "height" h
-          <> fillAttrs p col
-          <> "/>"
+  FillRect r@(Rect x y w h) col
+    | w > 0 && h > 0 && colorA col > 0 && all finite [x, y, w, h] -> rectEl p r col
     | otherwise -> mempty
-  FillRoundedRect (Rect x y w h) r col
-    | w > 0 && h > 0 && colorA col > 0 && all finite [x, y, w, h, r] ->
-        let
-          !rad = min (max 0 r) (min (w * 0.5) (h * 0.5))
-         in
-          "<rect"
-            <> numAttr p "x" x
-            <> numAttr p "y" y
-            <> numAttr p "width" w
-            <> numAttr p "height" h
-            <> (if rad > 0 then numAttr p "rx" rad else mempty)
-            <> fillAttrs p col
-            <> "/>"
+  FillRoundedRect rect@(Rect x y w h) r col
+    | w > 0 && h > 0 && colorA col > 0 && all finite [x, y, w, h, r] -> roundedRectEl p rect r col
     | otherwise -> mempty
   FillTriangle x0 y0 x1 y1 x2 y2 col
     | colorA col > 0
     , all finite [x0, y0, x1, y1, x2, y2]
     , abs ((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)) > 0 ->
-        "<polygon"
-          <> attr "points" (fmtPt p x0 y0 <> " " <> fmtPt p x1 y1 <> " " <> fmtPt p x2 y2)
-          <> fillAttrs p col
-          <> "/>"
+        polygonEl p [(x0, y0), (x1, y1), (x2, y2)] col
     | otherwise -> mempty
   FillCircle cx cy r col
     | r > 0 && colorA col > 0 && all finite [cx, cy, r] ->
@@ -233,22 +226,9 @@ emitOp p cfg = \case
     | otherwise -> mempty
   Stroke x0 y0 x1 y1 bw col -> emitLine p x0 y0 x1 y1 bw col
   StrokeLineAA x0 y0 x1 y1 bw col -> emitLine p x0 y0 x1 y1 bw col
-  StrokeRoundedRect (Rect x y w h) r bw col
+  StrokeRoundedRect rect@(Rect x y w h) r bw col
     | w > 0 && h > 0 && bw > 0 && colorA col > 0 && all finite [x, y, w, h, r, bw] ->
-        let
-          !ibw = min bw (min (w * 0.5) (h * 0.5))
-          !rad = min (max 0 r) (min (w * 0.5) (h * 0.5))
-          !rx = max 0 (rad - ibw * 0.5)
-         in
-          "<rect"
-            <> numAttr p "x" (x + ibw * 0.5)
-            <> numAttr p "y" (y + ibw * 0.5)
-            <> numAttr p "width" (max 0 (w - ibw))
-            <> numAttr p "height" (max 0 (h - ibw))
-            <> (if rx > 0 then numAttr p "rx" rx else mempty)
-            <> strokeAttrs p col ibw
-            <> attr "fill" "none"
-            <> "/>"
+        roundedStrokeEl p rect r bw col
     | otherwise -> mempty
   StrokeCircle cx cy r bw col
     -- As 'StrokeRoundedRect': the border never exceeds the radius, so the
@@ -313,13 +293,7 @@ emitLine p x0 y0 x1 y1 bw col
   , colorA col > 0
   , all finite [x0, y0, x1, y1, bw]
   , let dx = x1 - x0; dy = y1 - y0 in dx * dx + dy * dy >= 1.0e-6 =
-      "<line"
-        <> numAttr p "x1" x0
-        <> numAttr p "y1" y0
-        <> numAttr p "x2" x1
-        <> numAttr p "y2" y1
-        <> strokeAttrs p col bw
-        <> "/>"
+      lineEl p x0 y0 x1 y1 bw col
   | otherwise = mempty
 
 emitPolygon ::
@@ -373,10 +347,7 @@ emitPolygon p pts rings tris shade =
                       if colorA col == 0
                         then mempty
                         else
-                          "<polygon"
-                            <> attr "points" (ptAt i0 <> " " <> ptAt i1 <> " " <> ptAt i2)
-                            <> fillAttrs p col
-                            <> "/>"
+                          polygonEl p [pt i0, pt i1, pt i2] col
                 )
                 [0, 3 .. nt - 3]
         _ -> mempty
@@ -400,7 +371,8 @@ emitPolygon p pts rings tris shade =
           t = indexPrimArray tris k
       ]
   ptsFinite m = and [finite (indexPrimArray pts k) | k <- [0 .. 2 * m - 1]]
-  ptAt i = fmtPt p (indexPrimArray pts (2 * i)) (indexPrimArray pts (2 * i + 1))
+  pt i = (indexPrimArray pts (2 * i), indexPrimArray pts (2 * i + 1))
+  ptAt i = uncurry (fmtPt p) (pt i)
 
 emitPolyline ::
   Int
@@ -531,25 +503,10 @@ emitText p x y ax ay scale mFont txt col
         familyAttr = case textFontVariant font of
           FontMono -> attr "font-family" "monospace"
           _ -> mempty
-        weightAttr = case textFontWeight font of
-          WeightNormal -> mempty
-          WeightBold -> attr "font-weight" "bold"
-          WeightLight -> attr "font-weight" "300"
-          WeightMedium -> attr "font-weight" "500"
-          WeightSemiBold -> attr "font-weight" "600"
-          WeightExtraBold -> attr "font-weight" "800"
-          WeightBlack -> attr "font-weight" "900"
-        styleAttr = case textFontStyle font of
-          FontStyleNormal -> mempty
-          FontStyleItalic -> attr "font-style" "italic"
-          FontStyleOblique -> attr "font-style" "oblique"
-        decoAttr = case textFontDecoration font of
-          DecorationNone -> mempty
-          DecorationUnderline -> attr "text-decoration" "underline"
-          DecorationStrikethrough -> attr "text-decoration" "line-through"
-          DecorationUnderlineStrike -> attr "text-decoration" "underline line-through"
        in
-        sizeAttr <> familyAttr <> weightAttr <> styleAttr <> decoAttr
+        sizeAttr
+          <> familyAttr
+          <> fontStyleAttrs (textFontWeight font) (textFontStyle font) (textFontDecoration font)
 
 -- | Extract a single color when the shade is flat or all vertex colors match.
 uniformShade :: Int -> Shade -> Maybe Color
@@ -582,26 +539,6 @@ averageColor3 a b c =
 joinNonEmpty :: TB.Builder -> [TB.Builder] -> TB.Builder
 joinNonEmpty sep = mconcat . intersperse sep
 
-attr :: TB.Builder -> TB.Builder -> TB.Builder
-attr k v = " " <> k <> "=\"" <> v <> "\""
-
-numAttr :: Int -> TB.Builder -> Float -> TB.Builder
-numAttr p k v = attr k (fmtNum p v)
-
-fmtPt :: Int -> Float -> Float -> TB.Builder
-fmtPt p x y = fmtNum p x <> "," <> fmtNum p y
-
-fillAttrs :: Int -> Color -> TB.Builder
-fillAttrs p col =
-  attr "fill" (TB.fromText (colorToHex col))
-    <> opacityAttr p "fill-opacity" (colorA col)
-
-strokeAttrs :: Int -> Color -> Float -> TB.Builder
-strokeAttrs p col bw =
-  attr "stroke" (TB.fromText (colorToHex col))
-    <> opacityAttr p "stroke-opacity" (colorA col)
-    <> numAttr p "stroke-width" bw
-
 stopElem :: Int -> TB.Builder -> Color -> TB.Builder
 stopElem p offset col =
   "<stop"
@@ -609,43 +546,3 @@ stopElem p offset col =
     <> attr "stop-color" (TB.fromText (colorToHex col))
     <> opacityAttr p "stop-opacity" (colorA col)
     <> "/>"
-
--- | The named opacity attribute unless the colour is opaque. Uses at least
--- three digits: a step of 1/255 is just under 0.004.
-opacityAttr :: Int -> TB.Builder -> Word8 -> TB.Builder
-opacityAttr p name a
-  | a < 255 = numAttr (max 3 p) name (fromIntegral a / 255)
-  | otherwise = mempty
-
-finite :: Float -> Bool
-finite v = not (isNaN v || isInfinite v)
-
-fmtNum :: Int -> Float -> TB.Builder
-fmtNum p v
-  | not (finite v) = "0"
-  | n == 0 = "0"
-  | frac == 0 = sign <> TB.fromString (show whole)
-  | otherwise =
-      let
-        raw = show frac
-        padded = replicate (p - length raw) '0' ++ raw
-        trimmed = reverse (dropWhile (== '0') (reverse padded))
-       in
-        sign <> TB.fromString (show whole) <> "." <> TB.fromString trimmed
- where
-  !scale = 10 ^ p :: Integer
-  !mag = floor (abs (realToFrac v :: Double) * fromIntegral scale + 0.5) :: Integer
-  !n = if v < 0 then negate mag else mag
-  !sign = if n < 0 then "-" else mempty
-  !(whole, frac) = quotRem mag scale
-
-escapeXml :: Text -> TB.Builder
-escapeXml = T.foldl' (\acc c -> acc <> escapeChar c) mempty
- where
-  escapeChar = \case
-    '&' -> "&amp;"
-    '<' -> "&lt;"
-    '>' -> "&gt;"
-    '"' -> "&quot;"
-    '\'' -> "&apos;"
-    c -> TB.singleton c

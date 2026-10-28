@@ -161,68 +161,53 @@ verifyInclude root inc = do
                         <> T.unpack anchor
                   else pure Nothing
 
--- | Parse interactive specimen references like `<nano-ui-trap id="...">` and `<nano-ui-workbench widget="...">`
-parseSpecimens :: FilePath -> T.Text -> [(FilePath, Int, T.Text, T.Text)]
-parseSpecimens mdFile content =
-  [ (mdFile, lineNo, kind, tagId)
-  | (lineNo, line) <- zip [1 ..] (T.lines content)
-  , (kind, tagId) <- extractTags line
+-- | An interactive specimen tag: its element name, the attribute naming the
+-- specimen, how the specimen's key appears in nano-ui-banks.js, and what the
+-- error calls it.
+data SpecimenKind = SpecimenKind
+  { skTag :: T.Text
+  , skAttr :: T.Text
+  , skPattern :: T.Text -> T.Text
+  , skLabel :: String
+  }
+
+specimenKinds :: [SpecimenKind]
+specimenKinds =
+  [ SpecimenKind "<nano-ui-trap" "id=\"" trapPattern "trap specimen"
+  , SpecimenKind "<nano-ui-workbench" "widget=\"" (\w -> "\"" <> w <> "\"") "workbench widget"
   ]
  where
-  extractTags l = extractTrap l ++ extractWorkbench l
-  extractTrap l
-    | "<nano-ui-trap" `T.isInfixOf` l =
-        case extractAttr "id=\"" l of
-          Just val -> [("nano-ui-trap", val)]
-          Nothing -> []
-    | otherwise = []
-  extractWorkbench l
-    | "<nano-ui-workbench" `T.isInfixOf` l =
-        case extractAttr "widget=\"" l of
-          Just val -> [("nano-ui-workbench", val)]
-          Nothing -> []
-    | otherwise = []
-  extractAttr attr l =
-    case T.breakOn attr l of
-      (_, rest)
-        | T.null rest -> Nothing
-        | otherwise ->
-            let
-              after = T.drop (T.length attr) rest
-             in
-              Just (T.takeWhile (/= '"') after)
+  trapPattern tagId =
+    let
+      digits = T.filter isDigit tagId
+      num = if T.length digits == 1 then "0" <> digits else digits
+     in
+      "\"id\":\"" <> num <> "\""
 
-verifySpecimen :: T.Text -> (FilePath, Int, T.Text, T.Text) -> Maybe String
+-- | Parse interactive specimen references like `<nano-ui-trap id="...">` and `<nano-ui-workbench widget="...">`
+parseSpecimens :: FilePath -> T.Text -> [(FilePath, Int, SpecimenKind, T.Text)]
+parseSpecimens mdFile content =
+  [ (mdFile, lineNo, kind, val)
+  | (lineNo, line) <- zip [1 ..] (T.lines content)
+  , kind <- specimenKinds
+  , skTag kind `T.isInfixOf` line
+  , let (_, rest) = T.breakOn (skAttr kind) line
+  , not (T.null rest)
+  , let val = T.takeWhile (/= '"') (T.drop (T.length (skAttr kind)) rest)
+  ]
+
+verifySpecimen :: T.Text -> (FilePath, Int, SpecimenKind, T.Text) -> Maybe String
 verifySpecimen banksJs (f, lineNo, kind, tagId)
-  | kind == "nano-ui-trap" =
-      let
-        digits = T.filter isDigit tagId
-        num = if T.length digits == 1 then "0" <> digits else digits
-        pattern = "\"id\":\"" <> num <> "\""
-       in
-        if pattern `T.isInfixOf` banksJs
-          then Nothing
-          else
-            Just $
-              f
-                <> ":"
-                <> show lineNo
-                <> ": trap specimen not found in nano-ui-banks.js: "
-                <> T.unpack tagId
-  | kind == "nano-ui-workbench" =
-      let
-        pattern = "\"" <> tagId <> "\""
-       in
-        if pattern `T.isInfixOf` banksJs
-          then Nothing
-          else
-            Just $
-              f
-                <> ":"
-                <> show lineNo
-                <> ": workbench widget not found in nano-ui-banks.js: "
-                <> T.unpack tagId
-  | otherwise = Nothing
+  | skPattern kind tagId `T.isInfixOf` banksJs = Nothing
+  | otherwise =
+      Just $
+        f
+          <> ":"
+          <> show lineNo
+          <> ": "
+          <> skLabel kind
+          <> " not found in nano-ui-banks.js: "
+          <> T.unpack tagId
 
 main :: IO ()
 main = do
@@ -295,7 +280,7 @@ main = do
     Just mdbookPath -> do
       putStrLn $ "  Running mdbook build with: " <> mdbookPath
       (code, out, err) <-
-        readCreateProcessWithExitCode (proc mdbookPath ["build", "book"]) ""
+        readCreateProcessWithExitCode (proc mdbookPath ["build", root </> "book"]) ""
       case code of
         ExitSuccess -> do
           putStrLn "  mdbook build succeeded without errors."

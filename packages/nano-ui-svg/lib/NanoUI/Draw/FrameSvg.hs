@@ -26,15 +26,14 @@ module NanoUI.Draw.FrameSvg
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad (forM)
-import Data.Bits (shiftR, (.&.))
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.List (nub, partition)
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.List (find, nub, partition)
+import Data.Map.Strict qualified as M
+import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -47,12 +46,12 @@ import Foreign.Storable (peekByteOff)
 import NanoUI
   ( Color (..)
   , DrawOp (..)
+  , FontVariant (..)
   , Input (..)
   , Rect (..)
   , Size (..)
   , colorA
   , colorRGBA
-  , colorToHex
   , rectIntersect
   , themeWindow
   )
@@ -68,11 +67,23 @@ import NanoUI.Backend
   , vertexSize
   )
 import NanoUI.Draw.Svg (SvgConfig (..), defaultSvgConfig, renderDrawOpsSvg)
+import NanoUI.Draw.Svg.Attr
+  ( attr
+  , escapeXml
+  , fillAttrs
+  , fmtNum
+  , fontStyleAttrs
+  , lineEl
+  , numAttr
+  , polygonEl
+  , rectEl
+  , roundedRectEl
+  , roundedStrokeEl
+  )
 import NanoUI.Internal.Context
   ( Context (..)
   , DrawingCacheState (..)
   , intKey
-  , nodeTheme
   )
 import NanoUI.Internal.Context.Types
   ( CustomDrawOpCacheEntry (..)
@@ -86,6 +97,12 @@ import NanoUI.Internal.Layout.Arena
   , getNodeType
   , getStyleIdx
   , getWidgetId
+  )
+import NanoUI.Testing
+  ( textNodeFontStyle
+  , textNodeFontVariant
+  , textNodeFontWeight
+  , textNodeTextDecoration
   )
 
 -- | Options for 'frameToSvg'.
@@ -119,11 +136,6 @@ frameToSvg cfg ctx inp dd = do
   (pageSpans, overlaySpans) <- collectRasterSpans ctx inp
   spanStyles <- collectSpanStyles ctx
   baseTheme <- readIORef (ctxTheme ctx)
-  theme <- do
-    cnt <- arenaCount (ctxNodeArena ctx)
-    if cnt > 0
-      then nodeTheme ctx 0
-      else pure baseTheme
   live <- liveDrawingIds ctx
   dc <- readIORef (ctxDrawingCache ctx)
   let
@@ -139,12 +151,13 @@ frameToSvg cfg ctx inp dd = do
   (pageShapes, overlayShapes) <- frameShapes (map fst cached) dd
   let
     Size vw vh = inputWindowSize inp
+    p = max 0 (min 6 (fsPrecision cfg))
     fm = ctxFontMetrics ctx
     sizeRatio = ctxFontSize ctx / fmLineHeight fm
     fragCfg =
       defaultSvgConfig
         { svgStandalone = False
-        , svgPrecision = fsPrecision cfg
+        , svgPrecision = p
         , svgImageUri = fsImageUri cfg
         }
     vp = Rect 0 0 vw vh
@@ -153,10 +166,10 @@ frameToSvg cfg ctx inp dd = do
         [ TB.fromText (renderDrawOpsSvg fragCfg vp (vectorOnly ops))
         | (_, ops) <- cached
         ]
-    (pageShapeDefs, pageShapeBody, nextSClip) = renderShapes 1 pageShapes
-    (overlayShapeDefs, overlayShapeBody, _) = renderShapes nextSClip overlayShapes
-    (pageTextDefs, pageTextBody, nextTClip) = spanTexts (fsFontFamily cfg) fm sizeRatio spanStyles 1 pageSpans
-    (overlayTextDefs, overlayTextBody, _) = spanTexts (fsFontFamily cfg) fm sizeRatio spanStyles nextTClip overlaySpans
+    (pageShapeDefs, pageShapeBody, nextSClip) = renderShapes p 1 pageShapes
+    (overlayShapeDefs, overlayShapeBody, _) = renderShapes p nextSClip overlayShapes
+    (pageTextDefs, pageTextBody, nextTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles 1 pageSpans
+    (overlayTextDefs, overlayTextBody, _) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles nextTClip overlaySpans
     allDefs
       | nullDefs = mempty
       | otherwise = "<defs>" <> pageShapeDefs <> overlayShapeDefs <> pageTextDefs <> overlayTextDefs <> "</defs>"
@@ -167,15 +180,12 @@ frameToSvg cfg ctx inp dd = do
         && TL.null (TB.toLazyText overlayTextDefs)
     doc =
       "<svg xmlns=\"http://www.w3.org/2000/svg\""
-        <> attr "width" (fmt 0 vw)
-        <> attr "height" (fmt 0 vh)
-        <> attr
-          "viewBox"
-          (fmt 0 0 <> " " <> fmt 0 0 <> " " <> fmt 0 vw <> " " <> fmt 0 vh)
+        <> numAttr 0 "width" vw
+        <> numAttr 0 "height" vh
+        <> attr "viewBox" ("0 0 " <> fmtNum 0 vw <> " " <> fmtNum 0 vh)
         <> ">"
         <> allDefs
-        <> rectEl (Rect 0 0 vw vh) (themeWindow theme)
-        <> maybe mempty (rectEl (Rect 0 0 vw vh)) (drawBackground dd)
+        <> solidRect p vp (fromMaybe (themeWindow baseTheme) (drawBackground dd))
         <> pageShapeBody
         <> frags
         <> pageTextBody
@@ -615,21 +625,19 @@ vertColor vp vi = do
 -- Text from the raster spans
 --------------------------------------------------------------------------------
 
--- Blank-glyph markers some span labels carry (sort arrows, reserve padding).
-dropMarkers :: Text -> Text
-dropMarkers = T.dropWhile (`elem` ['\x01', '\x02', '\x05'])
-
--- | Collect packed font-style codes for 'NodeText' and 'NodeTextInput' spans.
-collectSpanStyles :: Context -> IO [(Rect, Int)]
+-- | Packed font-style codes for 'NodeText' spans, keyed by their exact
+-- rects, and for 'NodeTextInput' nodes, whose spans lie inside them.
+collectSpanStyles :: Context -> IO (M.Map RectKey Int, [(Rect, Int)])
 collectSpanStyles ctx = do
   sc <- readIORef (ctxSpanCache ctx)
   let
     textStyles =
-      [ (r, sceStyle e)
-      | e <- IM.elems sc
-      , sceStyle e /= 0
-      , (r, _, _, _) <- sceSpans e
-      ]
+      M.fromList
+        [ (rectKey r, sceStyle e)
+        | e <- IM.elems sc
+        , sceStyle e /= 0
+        , (r, _, _, _) <- sceSpans e
+        ]
     na = ctxNodeArena ctx
   n <- arenaCount na
   inputStyles <-
@@ -642,54 +650,29 @@ collectSpanStyles ctx = do
             then Just . (,si) <$> getNodeRect na i
             else pure Nothing
         else pure Nothing
-  pure (textStyles ++ [p | Just p <- inputStyles])
+  pure (textStyles, [st | Just st <- inputStyles])
 
 
 -- | Every span as clipped group and fitted text. Spans whose line box is
 -- not fully inside their clip share one @clipPath@ per clip.
 spanTexts ::
-  Text -> FontMetrics -> Float -> [(Rect, Int)] -> Int -> [(Rect, Text, Color, Color, Rect)] -> (TB.Builder, TB.Builder, Int)
-spanTexts fontFam fm ratio spanStyles startId spans = (defs, body, startId + length needClips)
+  Int -> Text -> FontMetrics -> Float -> (M.Map RectKey Int, [(Rect, Int)]) -> Int -> [(Rect, Text, Color, Color, Rect)] -> (TB.Builder, TB.Builder, Int)
+spanTexts p fontFam fm ratio (textStyles, inputStyles) startId spans = (defs, body, nextId)
  where
   baseLineH = fmLineHeight fm
   spaceAdv = fmAdvance fm ' '
-  lookupStyle r0 =
-    fromMaybe
-      0
-      ( lookup r0 spanStyles
-          <|> listToMaybe [si | (nr, si) <- spanStyles, fullyInside r0 nr]
-      )
-  fontStyleAttrs si =
+  lookupStyle r0 = case M.lookup (rectKey r0) textStyles of
+    Just si -> si
+    Nothing -> maybe 0 snd (find (fullyInside r0 . fst) inputStyles)
+  fontAttrs si =
     attr "font-family" (TB.fromText fam)
-      <> weightAttr
-      <> slantAttr
-      <> decoAttr
+      <> fontStyleAttrs (textNodeFontWeight si) (textNodeFontStyle si) (textNodeTextDecoration si)
    where
-    fam = case si .&. 0x0F of
-      1 -> "'Cascadia Mono', 'JetBrains Mono', monospace"
+    fam = case textNodeFontVariant si of
+      FontMono -> "'Cascadia Mono', 'JetBrains Mono', monospace"
       _ -> fontFam
-    -- FontWeight: Normal 0, Bold 1, Light 2, Medium 3, SemiBold 4,
-    -- ExtraBold 5, Black 6.
-    weightAttr = case (si `shiftR` 8) .&. 0x0F of
-      1 -> attr "font-weight" "700"
-      2 -> attr "font-weight" "300"
-      3 -> attr "font-weight" "500"
-      4 -> attr "font-weight" "600"
-      5 -> attr "font-weight" "800"
-      6 -> attr "font-weight" "900"
-      _ -> mempty
-    slantAttr = case (si `shiftR` 12) .&. 0x03 of
-      1 -> attr "font-style" "italic"
-      2 -> attr "font-style" "oblique"
-      _ -> mempty
-    decoAttr = case (si `shiftR` 14) .&. 0x03 of
-      1 -> attr "text-decoration" "underline"
-      2 -> attr "text-decoration" "line-through"
-      3 -> attr "text-decoration" "underline line-through"
-      _ -> mempty
-  trimSpan (Rect x y w h) raw =
+  trimSpan (Rect x y w h) t0 =
     let
-      t0 = dropMarkers raw
       lead = T.length (T.takeWhile (== ' ') t0)
       trail = T.length (T.takeWhileEnd (== ' ') t0)
       t = T.strip t0
@@ -707,79 +690,66 @@ spanTexts fontFam fm ratio spanStyles startId spans = (defs, body, startId + len
     , rectH r > 0.5
     , rectIntersect r c /= Nothing
     ]
-  needClips = nub [c | (r, _, _, c, _) <- kept, not (fullyInside r c)]
-  clipId c = fromMaybe 0 (lookup c (zip needClips [startId ..]))
-  defs
-    | null needClips = mempty
-    | otherwise =
-        mconcat
-          [ "<clipPath id=\"tclip_"
-              <> fmt 0 (fromIntegral i)
-              <> "\"><rect"
-              <> num "x" 1 (rectX c)
-              <> num "y" 1 (rectY c)
-              <> num "width" 1 (rectW c)
-              <> num "height" 1 (rectH c)
-              <> "/></clipPath>"
-          | (c, i) <- zip needClips [startId ..]
-          ]
+  (defs, wrapClip, nextId) = clipDefs p "tclip_" startId [c | (r, _, _, c, _) <- kept, not (fullyInside r c)]
   body = mconcat (map el kept)
-  el (r@(Rect x y w h), t, fg, c, si) = wrapClipped textEl
+  el (r@(Rect x y w h), t, fg, c, si)
+    | fullyInside r c = textEl
+    | otherwise = wrapClip c textEl
    where
-    wrapClipped b
-      | fullyInside r c = b
-      | otherwise =
-          "<g clip-path=\"url(#tclip_"
-            <> fmt 0 (fromIntegral (clipId c))
-            <> ")\">"
-            <> b
-            <> "</g>"
     textEl =
       "<text"
-        <> num "x" 1 x
-        <> num "y" 1 (y + h / 2)
+        <> numAttr p "x" x
+        <> numAttr p "y" (y + h / 2)
         <> attr "dominant-baseline" "central"
-        <> num "font-size" 1 (h * ratio)
-        <> fontStyleAttrs si
+        <> numAttr p "font-size" (h * ratio)
+        <> fontAttrs si
         <> attr "xml:space" "preserve"
-        <> fillAttrs fg
-        <> num "textLength" 1 (max 1 w)
+        <> fillAttrs p fg
+        <> numAttr p "textLength" (max 1 w)
         <> attr "lengthAdjust" "spacing"
         <> ">"
-        <> escape t
+        <> escapeXml t
         <> "</text>"
 
 --------------------------------------------------------------------------------
 -- SVG fragments
 --------------------------------------------------------------------------------
 
-renderShapes :: Int -> [Shape] -> (TB.Builder, TB.Builder, Int)
-renderShapes startId shapes = (defs, mconcat (map emit shapes), startId + length needClips)
+renderShapes :: Int -> Int -> [Shape] -> (TB.Builder, TB.Builder, Int)
+renderShapes p startId shapes = (defs, mconcat (map emit shapes), nextId)
  where
-  needClips = nub [c | sh <- shapes, Just c <- [shapeClip sh]]
-  clipId c = fromMaybe 0 (lookup c (zip needClips [startId ..]))
-  defs
-    | null needClips = mempty
-    | otherwise =
-        mconcat
-          [ "<clipPath id=\"sclip_"
-              <> fmt 0 (fromIntegral i)
-              <> "\"><rect"
-              <> num "x" 1 (rectX c)
-              <> num "y" 1 (rectY c)
-              <> num "width" 1 (rectW c)
-              <> num "height" 1 (rectH c)
-              <> "/></clipPath>"
-          | (c, i) <- zip needClips [startId ..]
-          ]
-  emit sh = case shapeClip sh of
-    Nothing -> shapeEl sh
-    Just c ->
-      "<g clip-path=\"url(#sclip_"
-        <> fmt 0 (fromIntegral (clipId c))
-        <> ")\">"
-        <> shapeEl sh
-        <> "</g>"
+  (defs, wrapClip, nextId) = clipDefs p "sclip_" startId [c | sh <- shapes, Just c <- [shapeClip sh]]
+  emit sh = maybe id wrapClip (shapeClip sh) (shapeEl p sh)
+
+-- | A rect's fields, as an ordered key.
+type RectKey = (Float, Float, Float, Float)
+
+rectKey :: Rect -> RectKey
+rectKey (Rect x y w h) = (x, y, w, h)
+
+-- | One @clipPath@ per distinct clip, numbered from @startId@ under @prefix@
+-- in order of first use; a wrapper putting a fragment in its clip's group;
+-- and the next free number.
+clipDefs :: Int -> TB.Builder -> Int -> [Rect] -> (TB.Builder, Rect -> TB.Builder -> TB.Builder, Int)
+clipDefs p prefix startId clips = (defs, wrap, startId + M.size ids)
+ where
+  (ids, ordered) = foldl' assign (M.empty, []) clips
+  assign acc@(m, os) c
+    | M.member (rectKey c) m = acc
+    | otherwise = let i = startId + M.size m in (M.insert (rectKey c) i m, (c, i) : os)
+  clipRef i = prefix <> TB.fromString (show i)
+  defs =
+    mconcat
+      [ "<clipPath id=\"" <> clipRef i <> "\"><rect"
+          <> numAttr p "x" (rectX c)
+          <> numAttr p "y" (rectY c)
+          <> numAttr p "width" (rectW c)
+          <> numAttr p "height" (rectH c)
+          <> "/></clipPath>"
+      | (c, i) <- reverse ordered
+      ]
+  wrap c b =
+    "<g clip-path=\"url(#" <> clipRef (M.findWithDefault 0 (rectKey c) ids) <> ")\">" <> b <> "</g>"
 
 shapeClip :: Shape -> Maybe Rect
 shapeClip = \case
@@ -790,161 +760,31 @@ shapeClip = \case
   ShapeQuad _ _ _ _ _ _ _ _ _ mc -> mc
   ShapeTri _ _ _ _ _ _ _ mc -> mc
 
-shapeEl :: Shape -> TB.Builder
-shapeEl (ShapeRect r col) = rectEl r col
-shapeEl (ShapeRoundedRect (Rect x y w h) r col _)
+shapeEl :: Int -> Shape -> TB.Builder
+shapeEl p = \case
+  ShapeRect r col -> solidRect p r col
+  ShapeRoundedRect rect@(Rect _ _ w h) r col _
+    | colorA col == 0 || w <= 0.01 || h <= 0.01 -> mempty
+    | otherwise -> roundedRectEl p rect r col
+  ShapeRoundedStroke rect@(Rect _ _ w h) r bw col _
+    | colorA col == 0 || w <= 0.01 || h <= 0.01 || bw <= 0.01 -> mempty
+    | otherwise -> roundedStrokeEl p rect r bw col
+  ShapeLine x0 y0 x1 y1 bw col _
+    | colorA col == 0 || bw <= 0.01 -> mempty
+    | otherwise -> lineEl p x0 y0 x1 y1 bw col
+  ShapeQuad x0 y0 x1 y1 x2 y2 x3 y3 col _
+    | colorA col == 0 -> mempty
+    | otherwise -> polygonEl p [(x0, y0), (x1, y1), (x2, y2), (x3, y3)] col
+  ShapeTri x0 y0 x1 y1 x2 y2 col _
+    | colorA col == 0 -> mempty
+    | otherwise -> polygonEl p [(x0, y0), (x1, y1), (x2, y2)] col
+
+-- | A filled rect, or nothing for a transparent or empty one.
+solidRect :: Int -> Rect -> Color -> TB.Builder
+solidRect p r@(Rect _ _ w h) col
   | colorA col == 0 || w <= 0.01 || h <= 0.01 = mempty
-  | otherwise =
-      let rad = min (max 0 r) (min (w * 0.5) (h * 0.5))
-       in "<rect"
-            <> num "x" 1 x
-            <> num "y" 1 y
-            <> num "width" 1 w
-            <> num "height" 1 h
-            <> (if rad > 0 then num "rx" 1 rad else mempty)
-            <> fillAttrs col
-            <> "/>"
-shapeEl (ShapeRoundedStroke (Rect x y w h) r bw col _)
-  | colorA col == 0 || w <= 0.01 || h <= 0.01 || bw <= 0.01 = mempty
-  | otherwise =
-      let
-        ibw = min bw (min (w * 0.5) (h * 0.5))
-        rad = min (max 0 r) (min (w * 0.5) (h * 0.5))
-        rx = max 0 (rad - ibw * 0.5)
-       in
-        "<rect"
-          <> num "x" 1 (x + ibw * 0.5)
-          <> num "y" 1 (y + ibw * 0.5)
-          <> num "width" 1 (max 0 (w - ibw))
-          <> num "height" 1 (max 0 (h - ibw))
-          <> (if rx > 0 then num "rx" 1 rx else mempty)
-          <> strokeAttrs col ibw
-          <> attr "fill" "none"
-          <> "/>"
-shapeEl (ShapeLine x0 y0 x1 y1 bw col _)
-  | colorA col == 0 || bw <= 0.01 = mempty
-  | otherwise =
-      "<line"
-        <> num "x1" 1 x0
-        <> num "y1" 1 y0
-        <> num "x2" 1 x1
-        <> num "y2" 1 y1
-        <> strokeAttrs col bw
-        <> "/>"
-shapeEl (ShapeQuad x0 y0 x1 y1 x2 y2 x3 y3 col _)
-  | colorA col == 0 = mempty
-  | otherwise =
-      "<polygon"
-        <> attr
-          "points"
-          ( fmt 1 x0
-              <> ","
-              <> fmt 1 y0
-              <> " "
-              <> fmt 1 x1
-              <> ","
-              <> fmt 1 y1
-              <> " "
-              <> fmt 1 x2
-              <> ","
-              <> fmt 1 y2
-              <> " "
-              <> fmt 1 x3
-              <> ","
-              <> fmt 1 y3
-          )
-        <> fillAttrs col
-        <> "/>"
-shapeEl (ShapeTri x0 y0 x1 y1 x2 y2 col _)
-  | colorA col == 0 = mempty
-  | otherwise =
-      "<polygon"
-        <> attr
-          "points"
-          ( fmt 1 x0
-              <> ","
-              <> fmt 1 y0
-              <> " "
-              <> fmt 1 x1
-              <> ","
-              <> fmt 1 y1
-              <> " "
-              <> fmt 1 x2
-              <> ","
-              <> fmt 1 y2
-          )
-        <> fillAttrs col
-        <> "/>"
-
-rectEl :: Rect -> Color -> TB.Builder
-rectEl (Rect x y w h) col
-  | colorA col == 0 || w <= 0.01 || h <= 0.01 = mempty
-  | otherwise =
-      "<rect"
-        <> num "x" 1 x
-        <> num "y" 1 y
-        <> num "width" 1 w
-        <> num "height" 1 h
-        <> fillAttrs col
-        <> "/>"
-
-fillAttrs :: Color -> TB.Builder
-fillAttrs col =
-  attr "fill" (TB.fromText (colorToHex col))
-    <> ( if a < 255
-           then attr "fill-opacity" (fmt 2 (fromIntegral a / 255))
-           else mempty
-       )
- where
-  a = colorA col
-
-strokeAttrs :: Color -> Float -> TB.Builder
-strokeAttrs col bw =
-  attr "stroke" (TB.fromText (colorToHex col))
-    <> ( if a < 255
-           then attr "stroke-opacity" (fmt 2 (fromIntegral a / 255))
-           else mempty
-       )
-    <> num "stroke-width" 1 bw
- where
-  a = colorA col
+  | otherwise = rectEl p r col
 
 fullyInside :: Rect -> Rect -> Bool
 fullyInside (Rect x y w h) (Rect sx sy sw sh) =
   x >= sx && y >= sy && x + w <= sx + sw && y + h <= sy + sh
-
-attr :: TB.Builder -> TB.Builder -> TB.Builder
-attr k v = " " <> k <> "=\"" <> v <> "\""
-
-num :: TB.Builder -> Int -> Float -> TB.Builder
-num k p v = attr k (fmt p v)
-
--- | Decimal digits, rounded half up, without trailing zeros or exponents.
-fmt :: Int -> Float -> TB.Builder
-fmt p v
-  | isNaN v || isInfinite v = "0"
-  | n == 0 = "0"
-  | frac == 0 = sign <> TB.fromString (show whole)
-  | otherwise =
-      let
-        raw = show frac
-        padded = replicate (p - length raw) '0' ++ raw
-        trimmed = reverse (dropWhile (== '0') (reverse padded))
-       in
-        sign <> TB.fromString (show whole) <> "." <> TB.fromString trimmed
- where
-  !scale = 10 ^ p :: Integer
-  !mag = floor (abs (realToFrac v :: Double) * fromIntegral scale + 0.5) :: Integer
-  !n = if v < 0 then negate mag else mag
-  !sign = if n < 0 then "-" else mempty
-  !(whole, frac) = quotRem mag scale
-
-escape :: Text -> TB.Builder
-escape = T.foldl' (\acc c -> acc <> esc c) mempty
- where
-  esc = \case
-    '&' -> "&amp;"
-    '<' -> "&lt;"
-    '>' -> "&gt;"
-    '"' -> "&quot;"
-    c -> TB.singleton c

@@ -52,6 +52,8 @@ library
     exposed-modules:
         NanoUI.Draw.Svg
         NanoUI.Draw.FrameSvg
+    other-modules:
+        NanoUI.Draw.Svg.Attr
     -- The library imports NanoUI.Internal modules, which change without
     -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
