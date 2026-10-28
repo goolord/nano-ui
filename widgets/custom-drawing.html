@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-21aa7395.js";
+            window.path_to_searchindex_js = "../searchindex-18430377.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -204,6 +204,14 @@
 progressBarWith fillW 6 progress
 sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
+<p><code>sparkline</code> scales the values to their own range, so it shows the shape of a series, not its size. At its default size and with <code>sparklineWith</code>:</p>
+<pre><code class="language-haskell">sparklines :: [Float] -&gt; NanoUI ()
+sparklines samples = rowWith (gap 16 . alignMid) $ do
+  sparkline samples
+  sparklineWith (fixedWH 120 32) 120 32 samples
+</code></pre>
+<img src="../images/charts/sparkline.svg" alt="Two small boxed blue line graphs of the same wavy series, the second wider and taller.">
+<p>For a chart with axes, a legend, and hover, use <code>plot</code> from <code>nano-ui-diagrams</code> (see <a href="../packages/index.html#charts-and-diagrams">Ecosystem Packages</a>).</p>
 <p>A settings row:</p>
 <pre><code class="language-haskell">settingsRow :: Var Bool -&gt; Var Float -&gt; NanoUI ()
 settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do

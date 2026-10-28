@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-21aa7395.js";
+            window.path_to_searchindex_js = "searchindex-18430377.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -1068,6 +1068,8 @@ walkChart points =
     chart [line "walk" points]
 
 </code></pre>
+<p>This is the chart after its first 200 samples, when the window is full:</p>
+<img src="images/charts/live-chart.svg" alt="A line chart of a 200-sample random walk with a grid, the x axis titled sample and the y axis titled value.">
 <p>The chart API is small:</p>
 <ul>
 <li><code>line</code>, <code>scatter</code>, <code>bar</code>, <code>area</code>, and <code>step</code> build series from points (or category/value pairs for bars).</li>
@@ -2430,6 +2432,14 @@ case (gesture, pgrDropTarget grid) of
 progressBarWith fillW 6 progress
 sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
+<p><code>sparkline</code> scales the values to their own range, so it shows the shape of a series, not its size. At its default size and with <code>sparklineWith</code>:</p>
+<pre><code class="language-haskell">sparklines :: [Float] -&gt; NanoUI ()
+sparklines samples = rowWith (gap 16 . alignMid) $ do
+  sparkline samples
+  sparklineWith (fixedWH 120 32) 120 32 samples
+</code></pre>
+<img src="images/charts/sparkline.svg" alt="Two small boxed blue line graphs of the same wavy series, the second wider and taller.">
+<p>For a chart with axes, a legend, and hover, use <code>plot</code> from <code>nano-ui-diagrams</code> (see <a href="#charts-and-diagrams">Ecosystem Packages</a>).</p>
 <p>A settings row:</p>
 <pre><code class="language-haskell">settingsRow :: Var Bool -&gt; Var Float -&gt; NanoUI ()
 settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
@@ -3359,24 +3369,130 @@ main = runRgfwApp defaultRgfwOptions appView
 </code></pre>
 <p>It links RGFW statically, bundles a bitmap font, and produces small standalone binaries. Use it for tools, overlays, or environments where SDL3 is not available.</p>
 <h2 id="charts-and-diagrams"><a class="header" href="#charts-and-diagrams">Charts and diagrams</a></h2>
-<p><code>nano-ui-diagrams</code> provides <code>NanoUI.Plot</code> and the diagrams-lib widget:</p>
-<pre><code class="language-haskell">import NanoUI
-import NanoUI.Plot
-
-cpuChart app samples =
-  void $ plot (appPlots app) (fillW . fixedH 220) $
+<p><code>nano-ui-diagrams</code> provides <code>NanoUI.Plot</code> and the diagrams-lib widget. <code>import NanoUI.Diagrams</code> brings in both. A chart is a plain <code>Chart</code> value; <code>plot</code> draws it, sized by a layout modifier:</p>
+<pre><code class="language-haskell">cpuChart :: PlotCache -&gt; [(Double, Double)] -&gt; NanoUI ()
+cpuChart cache samples =
+  void $ plot cache (fillW . fixedH 220) $
     withGrid GridBoth
       . withXAxis "time (s)"
       . withYAxis "CPU %"
       . withLegend LegendNone
       $ chart [line "cpu" samples]
 </code></pre>
-<p>Series constructors are <code>line</code>, <code>scatter</code>, <code>bar</code>, <code>area</code>, and <code>step</code>; <code>withColor</code>, <code>withStrokeWidth</code>, <code>withMarker</code>, and <code>withBaseline</code> style them. <code>lineChart</code>, <code>barChart</code>, <code>scatterChart</code>, and <code>areaChart</code> are one-series shortcuts. <code>plot</code> returns a <code>PlotResponse</code> whose <code>plotHover</code> is the nearest data point under the pointer:</p>
-<pre><code class="language-haskell">case plotHover resp of
-  Nothing -&gt; muted "Hover a point"
-  Just h  -&gt; kv "value" (T.pack (show (round (hoverDataY h) :: Int)))
+<img src="images/charts/cpu-chart.svg" alt="A framed line chart of CPU load over sixty seconds, with a grid, numbered axes, and the titles time (s) and CPU %.">
+<p>Allocate the <code>PlotCache</code> once in <code>IO</code> with <code>newPlotCache</code> and keep it in the application record. It rebuilds a chart’s drawing only when the chart or the theme changes, so building the <code>Chart</code> value every frame is cheap.</p>
+<p>A chart keeps its drawing’s proportions. With <code>fillW</code> the frame fills the width and the chart is centred in it; with only <code>fixedH</code> the widget takes the width the proportions give. A chart whose labels would overlap at the requested size is drawn larger, up to twice the size.</p>
+<p>The images below are compiled from <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs"><code>ChartExamples.hs</code></a>, and <code>nano-ui-svg-glossary</code> renders the same definitions to the images. They share this data:</p>
+<pre><code class="language-haskell">wave :: [(Double, Double)]
+wave = [(x, 3 + sin x + 0.5 * sin (2.3 * x)) | x &lt;- [0, 0.3 .. 2 * pi]]
+
+counts :: [(Double, Double)]
+counts = zip [0 ..] [2, 4, 3, 6, 5, 7, 4, 5]
+
+quarters :: [(Text, Double)]
+quarters = [("Q1", 3), ("Q2", 5), ("Q3", 4), ("Q4", 7)]
 </code></pre>
-<p>Allocate <code>newPlotCache</code> once in <code>IO</code>; it rebuilds a chart’s diagram only when the chart or theme changes. <code>diagram (fixedWH 320 200)</code> places arbitrary diagrams-lib content. The live chart tutorial uses a <code>Stream</code> for the data: <a href="#tutorial-3-live-data--background-work">Live Data &amp; Background Work</a>.</p>
+<h3 id="series"><a class="header" href="#series">Series</a></h3>
+<p>Series constructors take a name and the points: <code>(x, y)</code> pairs, or <code>(label, value)</code> pairs for <code>bar</code>. Each cell below plots <code>withLegend LegendNone (chart [s])</code>.</p>
+<img src="images/charts/series.svg" alt="Five small charts: a line through a wave, the same wave as dots, the wave filled down to zero, a staircase through eight counts, and four bars labelled Q1 to Q4.">
+<pre><code class="language-haskell">seriesKinds :: [(Text, Series)]
+seriesKinds =
+  [ ("line", line "line" wave)
+  , ("scatter", scatter "scatter" wave)
+  , ("area", area "area" wave)
+  , ("step", step "step" counts)
+  , ("bar", bar "bar" quarters)
+  ]
+</code></pre>
+<p>Lines and steps join the points in the order given, so sort them first if they are not already in x order. An area fills down to zero. Bars sit in category order, each taking 72% of its slot. <code>lineChart</code>, <code>barChart</code>, <code>scatterChart</code>, and <code>areaChart</code> are one-series shortcuts that plot a list with a grid and no legend.</p>
+<p>Series without a colour take the theme’s series colours in order. The modifiers override the colour and size:</p>
+<img src="images/charts/styles.svg" alt="Four charts: a teal line, a thick line, a line with a dot on every point, and an area filled up and down to the line y equals 3.">
+<pre><code class="language-haskell">seriesStyles :: [(Text, Series)]
+seriesStyles =
+  [ ("withColor", withColor (colorRGB 20 184 166) (line "s" wave))
+  , ("withStrokeWidth 4", withStrokeWidth 4 (line "s" wave))
+  , ("withMarker MarkCircle", withMarker MarkCircle (line "s" counts))
+  , ("withBaseline 3", withBaseline 3 (area "s" wave))
+  ]
+</code></pre>
+<p><code>withStrokeWidth</code> means the line width for a line or step, the marker size for a scatter, and the slot fraction for a bar. <code>withBaseline</code> sets where an area fills to, in data units, so values below it fill downward. A line’s markers are twice its stroke width; a scatter’s markers are its stroke width, 3 by default:</p>
+<img src="images/charts/markers.svg" alt="Five scatter charts of the same counts drawn with circles, squares, diamonds, triangles, and crosses.">
+<pre><code class="language-haskell">markers :: [(Text, Series)]
+markers =
+  [ (name, withStrokeWidth 6 (withMarker shape (scatter name counts)))
+  | (name, shape) &lt;-
+      [ ("MarkCircle", MarkCircle)
+      , ("MarkSquare", MarkSquare)
+      , ("MarkDiamond", MarkDiamond)
+      , ("MarkTriangle", MarkTriangle)
+      , ("MarkCross", MarkCross)
+      ]
+  ]
+</code></pre>
+<h3 id="grid-titles-and-legend"><a class="header" href="#grid-titles-and-legend">Grid, titles, and legend</a></h3>
+<p><code>withGrid</code> picks the grid lines drawn through the data box. Ticks and their labels stay either way.</p>
+<img src="images/charts/grids.svg" alt="The same wave four times: with horizontal and vertical grid lines, horizontal only, vertical only, and no grid.">
+<pre><code class="language-haskell">grids :: [(Text, Chart)]
+grids =
+  [ (name, withGrid mode . withLegend LegendNone $ chart [line "s" wave])
+  | (name, mode) &lt;-
+      [("GridBoth", GridBoth), ("GridHorizontal", GridHorizontal), ("GridVertical", GridVertical), ("GridNone", GridNone)]
+  ]
+</code></pre>
+<p><code>withTitle</code>, <code>withXAxis</code>, and <code>withYAxis</code> add titles. <code>withLegend</code> places the legend, which is on the right by default. At this height the bottom and inside legends would overlap other labels, so those two charts are drawn larger.</p>
+<img src="images/charts/legends.svg" alt="Five charts titled Latency with lines p50 and p99: the legend on the right, along the top, absent, along the bottom of a larger chart, and inside the top left corner of a larger chart.">
+<pre><code class="language-haskell">latency :: Chart
+latency =
+  withTitle "Latency" $
+    chart [line "p50" [(x, 20 + 4 * sin x) | x &lt;- [0, 0.5 .. 6]], line "p99" [(x, 42 + 9 * sin (x + 1)) | x &lt;- [0, 0.5 .. 6]]]
+
+legends :: [(Text, Chart)]
+legends =
+  [ (name, withLegend pos latency)
+  | (name, pos) &lt;-
+      [ ("LegendRight", LegendRight)
+      , ("LegendTop", LegendTop)
+      , ("LegendNone", LegendNone)
+      , ("LegendBottom", LegendBottom)
+      , ("LegendInside", LegendInside)
+      ]
+  ]
+</code></pre>
+<h3 id="hover"><a class="header" href="#hover">Hover</a></h3>
+<p><code>plot</code> returns a <code>PlotResponse</code>. Its <code>plotHover</code> is the point nearest the pointer, in data units, while the pointer is inside the data box:</p>
+<pre><code class="language-haskell">requests :: [(Double, Double)]
+requests = zip [0 ..] [120, 180, 150, 260, 210, 300, 240, 280]
+
+hoverReadout :: PlotCache -&gt; NanoUI ()
+hoverReadout cache = columnWith (gap 8) $ do
+  resp &lt;- plot cache (fixedWH 240 200) (withLegend LegendNone (chart [line "requests" requests]))
+  case plotHover resp of
+    Nothing -&gt; muted "Hover a point"
+    Just h -&gt; kv "value" (T.pack (show (round (hoverDataY h) :: Int)))
+</code></pre>
+<img src="images/charts/hover.svg" alt="A line chart of eight request counts with the pointer by the seventh point; below it the readout value 240.">
+<p>The pointer rests by the seventh point, so the readout shows its 240. <code>hoverSeriesIdx</code> and <code>hoverPointIdx</code> say which series and point it is. Wrap the chart in <code>withCursorShape UiCursorCrosshair</code> to give the pointer a crosshair.</p>
+<h3 id="diagrams"><a class="header" href="#diagrams">Diagrams</a></h3>
+<p><code>diagram</code> places any diagrams-lib <code>Diagram B</code> in the layout, framed like a chart and scaled to fit the layout modifier with its proportions kept. Colour it from the theme with <code>colourOf</code>, or take the chart colours from <code>uiPlotStyle</code>:</p>
+<pre><code class="language-haskell">-- | Three labelled boxes joined by arrows, coloured from the theme.
+stages :: Theme -&gt; Diagram B
+stages t = (mconcat (zipWith stage [0 ..] ["view", "layout", "paint"]) &lt;&gt; arrows) # frame 0.25
+  where
+    ink = colourOf (styleFg (themePanel t))
+    stage i name =
+      (text name # fontSizeL 0.3 # fc ink &lt;&gt; roundedRect 1.6 0.8 0.15 # fc (colourOf (themeAccent t)) # lw none)
+        # translate (D.r2 (2.4 * i, 0))
+    arrows =
+      mconcat
+        [ arrowBetween' (with &amp; headLength .~ local 0.2) (p2 (2.4 * i + 0.9, 0)) (p2 (2.4 * i + 1.5, 0)) # lc ink # lwO 1.5
+        | i &lt;- [0, 1]
+        ]
+
+pipelineDiagram :: NanoUI ()
+pipelineDiagram = void $ diagram (fixedWH 360 72) . stages =&lt;&lt; uiTheme
+</code></pre>
+<img src="images/charts/diagram.svg" alt="Three blue rounded boxes labelled view, layout, and paint, joined left to right by white arrows.">
+<p>Text in a diagram is measured with the current font so labels fit. The drawing is cached per theme and size, not per content: for a diagram that changes, use <code>diagramWithKeyAndEnvelope</code> with a key that changes with it. The live chart tutorial feeds a chart from a <code>Stream</code>: <a href="#tutorial-3-live-data--background-work">Live Data &amp; Background Work</a>.</p>
 <h2 id="validated-forms"><a class="header" href="#validated-forms">Validated forms</a></h2>
 <p><code>nano-ui-form</code> builds applicative forms on ditto. A <code>Form Text a</code> has <code>Text</code> errors and returns <code>a</code>:</p>
 <pre><code class="language-haskell">data Signup = Signup Text Text
