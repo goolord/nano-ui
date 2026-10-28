@@ -39,7 +39,6 @@ import Control.Monad.ST (runST)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
 import Data.IORef (modifyIORef')
-import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (find)
@@ -53,7 +52,7 @@ import Data.Primitive.SmallArray (SmallArray, SmallMutableArray, emptySmallArray
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
-import NanoUI.Internal.Context (Context (..), InteractionState (..), getPrevRect, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), ScrollMetrics (..), getPrevRect, getScrollMetrics, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
 import NanoUI.Internal.Var (Binding (..), bindVarOn, useVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
@@ -90,11 +89,12 @@ data TableConfig = TableConfig
   -- change here is ignored.
   , tableSqueeze :: !Bool
   -- ^ Squeeze instead of scroll: when the table is narrower than the sum of
-  -- its pinned widths (fixed columns, content floors, dragged widths), scale
-  -- them all down proportionally, none under 'minColW', rather than surfacing
-  -- a horizontal scrollbar. A stretch column takes part with a bounded
-  -- share, and the scrollbar's own lane is budgeted for. Off by
-  -- default: a table too wide for its pane keeps its sideways scroll.
+  -- its pinned widths (fixed columns, content floors, dragged widths), the
+  -- unfrozen columns shrink in proportion, none under 'minColW', rather than
+  -- surfacing a horizontal scrollbar. A stretch column takes part with a
+  -- bounded share, frozen columns keep their widths, and the vertical
+  -- scrollbar's lane comes off the room first. Off by default: a table too
+  -- wide for its pane keeps its sideways scroll.
   }
   deriving (Eq, Show)
 
@@ -461,23 +461,6 @@ colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColStretch -> minColW
   ColContent -> max minColW (primAt contentWs i minColW)
 
--- | Scale pinned column widths down to @budget@ so a squeezing table fits its
--- viewport in place of scrolling sideways. Each pass rescales what is left in
--- proportion and floors every width at 'minColW', so columns that reach the
--- floor stop contributing and the others absorb the rest of the shortfall;
--- when everything sits at the floor the widths no longer shrink, and the
--- table keeps whatever scroll is left.
-fitWidthsTo :: Float -> [Float] -> [Float]
-fitWidthsTo budget0 = go
-  where
-    budget = max 0 budget0
-    go ws
-      | sum ws <= budget + 0.5 = ws
-      | otherwise =
-          let total = sum ws
-              ws' = map (\w -> max minColW (w * budget / total)) ws
-           in if ws' == ws then ws else go ws'
-
 flatLayout :: Layout
 flatLayout = tight defaultLayout {layoutGap = 0}
 
@@ -505,14 +488,14 @@ numCellLayout =
 -- its floor. Columns stretch to the row height so every cell's background
 -- and borders span the full row even when one cell wraps.
 --
--- A stretch column is the table's slack: its minimum is only @stretchMinW@,
+-- A stretch column is the table's slack: its minimum is an explicit zero,
 -- so it compresses (under a vertical scrollbar's lane, say, which narrows
 -- the viewport by the lane's width) rather than reporting its content as a
 -- minimum that surfaces a horizontal bar under a table that fits the
 -- scroller's full width. Its drag floor ('colFloor') still binds once the
 -- column has been resized to a stored width.
-colBoxLayout :: Bool -> Bool -> Float -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
-colBoxLayout fillInner hasStretch stretchMinW sizes contentWs stored i
+colBoxLayout :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
+colBoxLayout fillInner hasStretch sizes contentWs stored i
   | saved > 0 = fixed (max floorW saved)
   | ColStretch <- size, fillInner = stretchBox {layoutWidth = Grow 1}
   | ColContent <- size, fillInner && not hasStretch = box {layoutWidth = Grow 1}
@@ -522,8 +505,28 @@ colBoxLayout fillInner hasStretch stretchMinW sizes contentWs stored i
     floorW = colFloor sizes contentWs i
     size = smallAt sizes i ColContent
     box = (fillH flatLayout) {layoutMinW = floorW}
-    stretchBox = (fillH flatLayout) {layoutMinW = stretchMinW}
+    stretchBox = (fillH flatLayout) {layoutMinW = explicitMin 0}
     fixed w = box {layoutWidth = Fixed w, layoutMinW = w, layoutMaxW = w}
+
+-- | Column @i@'s box under the squeeze ('tableSqueeze'): it grows by its
+-- pinned width (its dragged width once it has one, else its floor) up to
+-- that width, so a table narrower than their sum shrinks the columns in
+-- proportion to it, none under 'minColW', and scrolls sideways only once
+-- every column sits at that floor. A stretch column takes part with a
+-- bounded share, which keeps fixed columns from crushing it to nothing, and
+-- has no cap, so it takes what the others leave; so do the content columns
+-- of a table that fills its width with no stretch column.
+squeezeBoxLayout :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
+squeezeBoxLayout fillInner hasStretch sizes contentWs stored i =
+  (fillH flatLayout) {layoutWidth = Grow pinned, layoutMinW = minColW, layoutMaxW = if uncapped then 1e9 else pinned}
+  where
+    saved = primAt stored i 0
+    size = smallAt sizes i ColContent
+    pinned
+      | saved > 0 = max (colFloor sizes contentWs i) saved
+      | ColStretch <- size = max minColW (min 120 (primAt contentWs i minColW))
+      | otherwise = colFloor sizes contentWs i
+    uncapped = saved <= 0 && fillInner && (size == ColStretch || (size == ColContent && not hasStretch))
 
 -- | Sortable table with resizable, reorderable columns, with sort state bound
 -- to a 'Var': a header click updates it in place. @key@ distinguishes tables
@@ -643,10 +646,13 @@ tableCore cfg f key cols inputRows curSort =
           | drag0 >= 0 && heldIn MouseLeft inp =
               setAt drag0 (max (colFloor sizes contentWs drag0) (dragW0 + mx - dragX0)) widths0
           | otherwise = widths0
-    -- Last frame's body rect, for the squeeze budget and (below) the header's
-    -- vertical-bar spacer: a resize settles one frame later, as that spacer
-    -- already does.
+    -- Last frame's body rect, for the header's resize edges.
     mPrevBody <- lastRect vWid
+    -- Whether the body showed its vertical bar last frame. The header then
+    -- keeps a spacer the width of the bar's lane, so its columns line up
+    -- with the rows; it follows the body a frame late when the bar comes or
+    -- goes.
+    hasVertBar <- liftIO (maybe False ((> 0) . v2Y . scrollRange) <$> getScrollMetrics ctx vWid)
     let nRows = sizeofSmallArray encoded
         widths1Arr = primArrayFromList widths1
         outerLayout = f (fillW flatLayout)
@@ -664,50 +670,16 @@ tableCore cfg f key cols inputRows curSort =
             Grow _ -> True
             _ -> False
         fillIf b = if b then fillW else id
-        -- What column i gives up under the squeeze: its dragged width once
-        -- it has one, else its floor. A stretch column has no width of its
-        -- own, so it takes part with a bounded share, which keeps fixed
-        -- columns from crushing it to nothing.
-        pinnedW i
-          | primAt widths1Arr i 0 > 0 = max (colFloor sizes contentWs i) (primAt widths1Arr i 0)
-          | smallAt sizes i ColContent == ColStretch = max minColW (min 120 (primAt contentWs i minColW))
-          | otherwise = colFloor sizes contentWs i
-        -- Squeeze: with the flag set and the body narrower than the pinned
-        -- widths plus rules, scale every pinned width down to fit, none
-        -- under minColW. The vertical bar's lane, when the rows overflow,
-        -- comes off the budget first, so a squeezed table does not surface a
-        -- horizontal bar for the lane either.
-        rulesW = fromIntegral (max 0 (length vis - 1))
         rowH = max tableRowMinH (fmLineHeight (ctxFontMetrics ctx) + 6)
         rowStep = rowH + 1
-        totalH = if scrollN <= 0 then 0 else fromIntegral scrollN * rowH + fromIntegral (scrollN - 1)
-        firstFrameCapH = case layoutHeight outerLayout of
-          Fixed h -> max 0 (min h (layoutMaxH outerLayout) - rowStep)
-          Fit
-            | layoutMaxH outerLayout < 1e8 -> max 0 (layoutMaxH outerLayout - rowStep)
-            | otherwise -> totalH
-          _ -> 100
-        rowsOverrun = totalH > maybe firstFrameCapH rectH mPrevBody + 0.5
-        squeezeBudget =
-          if tableSqueeze cfg
-            then fmap (\r -> max 0 (rectW r - (if rowsOverrun then scrollBarGutter ScrollBarList 0 else 0))) mPrevBody
-            else Nothing
-        -- The sizes the columns are laid out from: under the squeeze, each
-        -- column's scaled by the ratio of its fitted to its pinned width.
-        (sizesLay, contentWsLay, widthsLay) = case squeezeBudget of
-          Nothing -> (sizes, contentWs, widths1Arr)
-          Just budget ->
-            let fitted = IM.fromList (zip vis (fitWidthsTo (budget - rulesW) (map pinnedW vis)))
-                scaleOf i = maybe 1 (\w -> w / max 1.0e-3 (pinnedW i)) (IM.lookup i fitted)
-             in ( smallArrayFromListN n [case smallAt sizes i ColContent of ColFixed w -> ColFixed (w * scaleOf i); s -> s | i <- [0 .. n - 1]]
-                , primArrayFromList [primAt contentWs i minColW * scaleOf i | i <- [0 .. n - 1]]
-                , primArrayFromList [primAt widths1Arr i 0 * scaleOf i | i <- [0 .. n - 1]]
-                )
-        -- A stretch column's minimum: an explicit zero outside the squeeze,
-        -- which the solver reports in place of the column's content.
-        stretchMinW = if isJust squeezeBudget then minColW else explicitMin 0
+        -- Under the squeeze the unfrozen columns shrink to the body in the
+        -- same frame; frozen columns keep their widths.
+        squeezed i = tableSqueeze cfg && i `notElem` frozenIdx
         colBoxes =
-          smallArrayFromList (map (colBoxLayout fillInner hasStretch stretchMinW sizesLay contentWsLay widthsLay) [0 .. n - 1])
+          smallArrayFromList
+            [ (if squeezed i then squeezeBoxLayout else colBoxLayout) fillInner hasStretch sizes contentWs widths1Arr i
+            | i <- [0 .. n - 1]
+            ]
         colBox i = smallAt colBoxes i (tight defaultLayout)
         cellLayout i = if smallAt numeric i False then numCellLayout else textCellLayout
         isSortable i = smallAt sortable i False
@@ -810,7 +782,7 @@ tableCore cfg f key cols inputRows curSort =
                     scrollHorizontalHidden
                     (column' (gridRowLay unfrozenIdx) (headerBlock unfrozenIdx))
                 -- The body scroller has no padding, so its whole lane is gutter.
-                when rowsOverrun $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
+                when hasVertBar $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
                 pure hs'
             liftIO (linkScrollAxes ctx vWid hWid)
             -- The body owns both scrollbars.

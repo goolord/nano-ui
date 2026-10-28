@@ -951,7 +951,8 @@ runTableStretchAbsorbsVLaneTest ctx failed = do
         assertGt failed (hx + hw) (bx + bw - 24)
 
 -- | @tableSqueeze@: pinned columns too wide for the body compress
--- proportionally, none under minColW, instead of scrolling sideways; below
+-- proportionally in the same frame, none under minColW, instead of
+-- scrolling sideways; below
 -- twice minColW plus the rule even that is exhausted and the table keeps its
 -- horizontal scroll. Without the flag the same table still scrolls (see
 -- 'runTableHBarReachTest').
@@ -975,6 +976,13 @@ runTableSqueezeTest ctx failed = do
       -- overflow), so each half is a little under half the body.
       assertGt failed (rectW r) (bw / 2 - 12)
       assert failed (rectW r <= bw / 2 + 1)
+  -- The squeeze lands in the frame the table first appears, with no frame
+  -- at the pinned widths before it.
+  first <- newContext
+  _ <- runFrame first inp0 ui
+  firstHdrs <- headerButtonRects first
+  assertEq failed (length firstHdrs) 2
+  forM_ firstHdrs $ \r -> assert failed (rectW r <= 351)
   -- A body narrower than two floors plus the rule cannot squeeze any
   -- further, and the table goes back to scrolling sideways.
   tiny <- newContext
