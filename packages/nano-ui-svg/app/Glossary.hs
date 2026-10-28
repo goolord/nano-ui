@@ -6,15 +6,15 @@
 -- @assets/glossary.js@ and are spliced into the generated document, so the
 -- output stays one portable file while the visual and interactive layers are
 -- edited as plain CSS and JavaScript rather than Haskell string literals.
--- 'generateBookVisuals' also writes the layout and widget-gallery SVGs used by
--- the documentation book.
+-- 'generateBookVisuals' also writes the layout-chapter and widget-gallery
+-- SVGs used by the documentation book.
 --
 -- Run:
 --
 -- > cabal run -j1 nano-ui-svg-glossary -- [docs/styling-glossary.html]
 module Main (main) where
 
-import Control.Monad (forM, void)
+import Control.Monad (forM, forM_, void, when)
 import Data.Aeson.Micro (ToJSON (..), Value, encode, object, (.=))
 import Data.Bits (shiftL, shiftR, testBit, (.&.))
 import Data.ByteString (ByteString)
@@ -2302,50 +2302,416 @@ buildHtmlDocument assets hero state rows typo interactions =
 -- Book visuals
 -- ---------------------------------------------------------------------------
 
--- | A layout specimen for the book: toolbar, sidebar, stat panels, and a table
--- in one frame. Rendered as a standalone SVG with the same @frameToSvg@ path
--- as the glossary specimens.
-layoutSpecimen :: NanoUI ()
-layoutSpecimen =
-  columnWith (fillW . fillH . padAll 18 . gap 12) $ do
-    search <- useVar "payments"
-    void $ rowWith (tight . gap 10 . alignMid . fillW) $ do
-      heading "Northwind"
+-- ---------------------------------------------------------------------------
+-- Layout chapter examples
+-- ---------------------------------------------------------------------------
+
+-- | One layout example: a padded frame whose root column fills the canvas.
+layoutDemo :: NanoUI () -> NanoUI ()
+layoutDemo = columnWith (fillW . fillH . padAll 14 . gap 10)
+
+-- | Render one layout example, cropped to its painted height. @hoverPos@
+-- parks the pointer on a control for the hover and pointer-mode examples.
+layoutSvg :: Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO Text
+layoutSvg tag w h hoverPos ui = do
+  ctx <- newSvgContext False
+  let base = offInput w h
+      capture = case hoverPos of
+        Nothing -> base
+        Just pos -> base {inputMousePos = pos}
+      warm = case hoverPos of
+        Nothing -> [base]
+        Just _ -> [base, capture]
+  mapM_ (\inp -> runFrame ctx inp ui) warm
+  (_, dd, _) <- runFrame ctx capture (ui >> damageFullNow)
+  spans <- collectRasterSpans ctx capture
+  bounds <- frameInkBounds dd (fst spans <> snd spans)
+  svg <- frameToSvg defaultFrameSvgConfig ctx capture dd
+  pure (namespaceSvg tag (cropSvg w h bounds svg))
+
+layoutRowDemo :: NanoUI ()
+layoutRowDemo =
+  layoutDemo $
+    rowWith (gap 8) $
+      mapM_ (void . button) ["One", "Two", "Three"]
+
+layoutColumnDemo :: NanoUI ()
+layoutColumnDemo =
+  layoutDemo $
+    columnWith (gap 8) $
+      mapM_ (void . buttonWith fillW) ["One", "Two", "Three"]
+
+layoutGridDemo :: NanoUI ()
+layoutGridDemo =
+  layoutDemo $
+    gridWith 3 (gap 8 . fillW) $
+      mapM_
+        (\i -> void (buttonWith fillW ("Cell " <> T.pack (show (i :: Int)))))
+        [1 .. 6]
+
+layoutPanelDemo :: NanoUI ()
+layoutPanelDemo =
+  layoutDemo $
+    panelWith (fixedW 300 . padAll 12 . gap 6) $ do
+      heading "Deployments"
+      muted "3 services running"
+
+layoutCardDemo :: NanoUI ()
+layoutCardDemo =
+  layoutDemo $
+    card $ do
+      heading "Build #482"
+      muted "Passed in 1m 42s"
+
+layoutCalloutDemo :: NanoUI ()
+layoutCalloutDemo =
+  layoutDemo $ do
+    warnCol <- themeWarning <$> uiTheme
+    callout warnCol $ do
+      heading "Certificate expiring"
+      muted "TLS certificate expires in 3 days."
+
+layoutLayersDemo :: NanoUI ()
+layoutLayersDemo =
+  layoutDemo $
+    layers $ do
+      let badgeRed = colorRGB 204 64 64
+      void (buttonWith (fixedWH 170 40) "Inbox")
+      styled (panelStyle (background badgeRed . borderColor badgeRed)) $
+        panelWith (alignEnd . alignTop . padXY 6 1) $
+          labelWith (fontColor colorWhite) "3"
+
+layoutCenterDemo :: NanoUI ()
+layoutCenterDemo =
+  layoutDemo $
+    panelWith (fillW . fillH) $
+      center (label "Centred on both axes")
+
+layoutResponsiveDemo :: NanoUI ()
+layoutResponsiveDemo =
+  layoutDemo $
+    responsiveRowCol 640 (tight . gap 8 . fillW) $ do
+      panelWith (fillW . padAll 12) (label "Sidebar")
+      panelWith (fillW . padAll 12) (label "Content")
+
+layoutMouseAreaDemo :: NanoUI ()
+layoutMouseAreaDemo =
+  layoutDemo $ do
+    (_, area) <-
+      panelWith fillW $
+        mouseArea (fillW . padAll 10 . gap 4) $ do
+          label "build.log"
+          muted "Click anywhere in this card"
+    when (respClicked area) (muted "opening build.log")
+
+layoutSeparatorDemo :: NanoUI ()
+layoutSeparatorDemo =
+  layoutDemo $
+    columnWith (fillW . gap 8) $ do
+      label "Above the rule"
+      separator
+      label "Below the rule"
+
+layoutSpacerDemo :: NanoUI ()
+layoutSpacerDemo =
+  layoutDemo $
+    rowWith (fillW . alignMid) $ do
+      label "Left"
       spacer (Grow 1) Fit
-      textInputConfigured
-        defaultTextInputConfig {ticPlaceholder = "Search", ticLayout = fixedW 190 defaultLayout}
-        search
-      void (button "Share")
-      void (button "Deploy")
-    rowWith (tight . gap 12 . fillW . fillH) $ do
-      panelWith (fixedW 180 . fillH . padAll 12 . gap 8) $ do
-        muted "WORKSPACE"
-        mapM_ (buttonWith fillW) ["Overview", "Services", "Jobs", "Settings"]
-        spacer Fit (Grow 1)
-        muted "v0.2.1"
-      columnWith (tight . gap 12 . fillW . fillH) $ do
-        rowWith (tight . gap 12 . fillW) $ do
-          statPanel "Requests" "1.2M"
-          statPanel "Errors" "0.4%"
-          statPanel "P95" "84 ms"
-        panelWith (gap 8 . fillW . fillH . padAll 12) $ do
-          rowWith (tight . gap 8 . alignMid . fillW) $ do
-            heading "Deployments"
-            spacer (Grow 1) Fit
-            muted "3 running"
-          _ <-
-            simpleTable
-              ["Service", "Status", "Latency"]
-              [ ["api", "running", "12 ms"]
-              , ["worker", "running", "48 ms"]
-              , ["scheduler", "idle", "2 ms"]
-              ]
-          pure ()
-  where
-    statPanel caption value =
-      panelWith (fillW . padAll 10 . gap 4) $ do
-        muted caption
-        labelWith (fontSize 20 . fontBold) value
+      label "Right"
+
+layoutFillWDemo :: NanoUI ()
+layoutFillWDemo =
+  layoutDemo $
+    rowWith (fillW . gap 8) $ do
+      void (buttonWith (fixedW 110) "fixedW 110")
+      void (buttonWith fillW "fillW")
+
+layoutFillHDemo :: NanoUI ()
+layoutFillHDemo =
+  layoutDemo $
+    rowWith (fillW . gap 8 . fixedH 96) $ do
+      panelWith (fixedW 120 . fillH) (label "fillH")
+      panelWith (fixedW 120) (label "natural")
+
+layoutGrowDemo :: NanoUI ()
+layoutGrowDemo =
+  layoutDemo $
+    rowWith (grow . gap 8) $ do
+      panelWith (fixedW 120) (label "fixedW 120")
+      panelWith grow (label "grow")
+
+layoutFixedWDemo :: NanoUI ()
+layoutFixedWDemo =
+  layoutDemo $
+    rowWith (gap 8) $ do
+      void (buttonWith (fixedW 60) "60")
+      void (buttonWith (fixedW 110) "110")
+      void (buttonWith (fixedW 170) "170")
+
+layoutFixedHDemo :: NanoUI ()
+layoutFixedHDemo =
+  layoutDemo $
+    rowWith (gap 8 . fillW) $ do
+      void (buttonWith (fixedH 30) "fixedH 30")
+      void (buttonWith (fixedH 56) "fixedH 56")
+      void (buttonWith (fixedH 82) "fixedH 82")
+
+layoutFixedWHDemo :: NanoUI ()
+layoutFixedWHDemo =
+  layoutDemo $
+    rowWith (gap 8) $ do
+      void (buttonWith (fixedWH 120 36) "120 x 36")
+      void (buttonWith (fixedWH 200 72) "200 x 72")
+
+layoutMinWDemo :: NanoUI ()
+layoutMinWDemo =
+  layoutDemo $
+    rowWith (fillW . gap 8) $ do
+      void (buttonWith (minW 200) "minW 200")
+      void (button "natural")
+
+layoutMaxWDemo :: NanoUI ()
+layoutMaxWDemo =
+  layoutDemo $
+    rowWith (fillW . gap 8) $ do
+      void (buttonWith (fillW . maxW 160) "maxW 160")
+      void (buttonWith fillW "fillW")
+
+layoutMinHDemo :: NanoUI ()
+layoutMinHDemo =
+  layoutDemo $
+    rowWith (fillW . gap 8) $ do
+      panelWith (minH 80 . fillW) (label "minH 80")
+      panelWith fillW (label "natural")
+
+layoutMaxHDemo :: NanoUI ()
+layoutMaxHDemo =
+  layoutDemo $
+    rowWith (fillW . gap 8 . fixedH 100) $ do
+      panelWith (maxH 50 . fillW) (label "maxH 50")
+      panelWith (fillW . fillH) (label "fillH")
+
+layoutPercentDemo :: NanoUI ()
+layoutPercentDemo =
+  layoutDemo $
+    rowWith (fillW . gap 8) $ do
+      panelWith (percent 30) (label "percent 30")
+      panelWith (percent 60) (label "percent 60")
+
+layoutAspectDemo :: NanoUI ()
+layoutAspectDemo =
+  layoutDemo $
+    panelWith (fillW . aspect (16 / 9)) $
+      center (label "16 : 9")
+
+layoutPadAllDemo :: NanoUI ()
+layoutPadAllDemo =
+  layoutDemo $
+    panelWith (fixedWH 260 120 . padAll 20) $
+      panelWith (fillW . fillH) (label "padAll 20")
+
+layoutPadXYDemo :: NanoUI ()
+layoutPadXYDemo =
+  layoutDemo $
+    panelWith (fixedWH 280 100 . padXY 32 10) $
+      panelWith (fillW . fillH) (label "padXY 32 10")
+
+layoutPadLeftDemo :: NanoUI ()
+layoutPadLeftDemo =
+  layoutDemo $
+    panelWith (fixedWH 260 100 . padLeft 48) $
+      panelWith (fillW . fillH) (label "padLeft 48")
+
+layoutPadRightDemo :: NanoUI ()
+layoutPadRightDemo =
+  layoutDemo $
+    panelWith (fixedWH 260 100 . padRight 48) $
+      panelWith (fillW . fillH) (label "padRight 48")
+
+layoutPadTopDemo :: NanoUI ()
+layoutPadTopDemo =
+  layoutDemo $
+    panelWith (fixedWH 260 120 . padTop 40) $
+      panelWith (fillW . fillH) (label "padTop 40")
+
+layoutPadBottomDemo :: NanoUI ()
+layoutPadBottomDemo =
+  layoutDemo $
+    panelWith (fixedWH 260 120 . padBottom 40) $
+      panelWith (fillW . fillH) (label "padBottom 40")
+
+layoutPadLRTBDemo :: NanoUI ()
+layoutPadLRTBDemo =
+  layoutDemo $
+    panelWith (fixedWH 280 120 . padLRTB 40 8 30 12) $
+      panelWith (fillW . fillH) (label "padLRTB 40 8 30 12")
+
+layoutGapDemo :: NanoUI ()
+layoutGapDemo =
+  layoutDemo $
+    columnWith (fillW . gap 12) $ do
+      rowWith (gap 4) $ mapM_ (void . button) ["gap 4", "B", "C"]
+      rowWith (gap 24) $ mapM_ (void . button) ["gap 24", "B", "C"]
+
+layoutTightDemo :: NanoUI ()
+layoutTightDemo =
+  layoutDemo $
+    rowWith (gap 16 . fillW) $ do
+      panelWith (padAll 14 . gap 6 . fillW) $ do
+        muted "padAll 14"
+        label "default padding"
+      panelWith (tight . padAll 14 . gap 6 . fillW) $ do
+        muted "tight"
+        label "no padding"
+
+layoutAlignStartDemo :: NanoUI ()
+layoutAlignStartDemo =
+  layoutDemo $
+    panelWith (fixedWH 300 110 . padAll 10) $
+      void (buttonWith (alignStart . fixedW 140) "alignStart")
+
+layoutAlignEndDemo :: NanoUI ()
+layoutAlignEndDemo =
+  layoutDemo $
+    panelWith (fixedWH 300 110 . padAll 10) $
+      void (buttonWith (alignEnd . fixedW 140) "alignEnd")
+
+layoutAlignCenterDemo :: NanoUI ()
+layoutAlignCenterDemo =
+  layoutDemo $
+    panelWith (fixedWH 300 110 . padAll 10) $
+      void (buttonWith (alignCenter . fixedW 140) "alignCenter")
+
+layoutAlignTopDemo :: NanoUI ()
+layoutAlignTopDemo =
+  layoutDemo $
+    panelWith (fixedWH 300 110 . padAll 10) $
+      rowWith (fillW . fillH . gap 8) $
+        void (buttonWith (alignTop . fixedW 140) "alignTop")
+
+layoutAlignMidDemo :: NanoUI ()
+layoutAlignMidDemo =
+  layoutDemo $
+    panelWith (fixedWH 300 110 . padAll 10) $
+      rowWith (fillW . fillH . gap 8) $
+        void (buttonWith (alignMid . fixedW 140) "alignMid")
+
+layoutAlignBottomDemo :: NanoUI ()
+layoutAlignBottomDemo =
+  layoutDemo $
+    panelWith (fixedWH 300 110 . padAll 10) $
+      rowWith (fillW . fillH . gap 8) $
+        void (buttonWith (alignBottom . fixedW 140) "alignBottom")
+
+layoutAlignBaselineDemo :: NanoUI ()
+layoutAlignBaselineDemo =
+  layoutDemo $
+    rowWith (gap 12 . fixedW 340) $ do
+      labelWith (fontSize 24 . alignBaseline) "Title"
+      labelWith alignBaseline "baseline text"
+
+layoutWrapDemo :: NanoUI ()
+layoutWrapDemo =
+  layoutDemo $
+    rowWith (wrap . gap 6 . fixedW 280) $
+      mapM_ (void . button) ["haskell", "immediate", "mode", "layout", "sdl", "widgets"]
+
+layoutLineGapDemo :: NanoUI ()
+layoutLineGapDemo =
+  layoutDemo $
+    columnWith (fillW . gap 16) $ do
+      let labels = ["haskell", "immediate", "mode", "layout", "sdl", "widgets"]
+      muted "lineGap 2"
+      rowWith (wrap . lineGap 2 . gap 6 . fixedW 280) $ mapM_ (void . button) labels
+      muted "lineGap 18"
+      rowWith (wrap . lineGap 18 . gap 6 . fixedW 280) $ mapM_ (void . button) labels
+
+layoutLineAlignDemo :: NanoUI ()
+layoutLineAlignDemo =
+  layoutDemo $
+    rowWith (wrap . lineAlign LinesCenter . gap 6 . fixedW 210) $
+      mapM_ (void . button) ["alpha", "beta", "gamma", "delta", "epsilon"]
+
+layoutPinAtDemo :: NanoUI ()
+layoutPinAtDemo =
+  layoutDemo $
+    panelWith (fixedWH 280 110 . padAll 12) $ do
+      heading "Inbox"
+      muted "The badge is pinned, not stacked."
+      let badgeCol = colorRGB 204 64 64
+      styled (panelStyle (background badgeCol . borderColor badgeCol)) $
+        panelWith (pinAt 6 (-6) . alignEnd . alignTop . padXY 6 1) $
+          labelWith (fontColor colorWhite) "12"
+
+layoutPointerBlockDemo :: NanoUI ()
+layoutPointerBlockDemo =
+  layoutDemo $
+    layers $ do
+      void (buttonWith (fixedWH 200 44) "Open logs")
+      styled (panelStyle (background (colorRGBA 0 0 0 150) . borderWidth 0)) $
+        panelWith (pinAt 0 0 . grow . pointer PointerBlock . padAll 6) $
+          muted "scrim"
+
+layoutPointerPassDemo :: NanoUI ()
+layoutPointerPassDemo =
+  layoutDemo $
+    layers $ do
+      void (buttonWith (fixedWH 200 44) "Open logs")
+      labelWith (pinAt 8 (-6) . pointer PointerPass) "decorative label"
+
+-- | Every layout example, in the order the book presents them. The hover
+-- points park the pointer on the control a pointer-mode example overlays.
+layoutDemos :: [(Text, Float, Float, Maybe V2, NanoUI ())]
+layoutDemos =
+  [ ("row", 420, 74, Nothing, layoutRowDemo)
+  , ("column", 420, 140, Nothing, layoutColumnDemo)
+  , ("grid", 420, 120, Nothing, layoutGridDemo)
+  , ("panel", 420, 110, Nothing, layoutPanelDemo)
+  , ("card", 420, 120, Nothing, layoutCardDemo)
+  , ("callout", 420, 130, Nothing, layoutCalloutDemo)
+  , ("layers", 420, 90, Nothing, layoutLayersDemo)
+  , ("center", 420, 150, Nothing, layoutCenterDemo)
+  , ("responsive-narrow", 420, 140, Nothing, layoutResponsiveDemo)
+  , ("responsive-wide", 760, 110, Nothing, layoutResponsiveDemo)
+  , ("mousearea", 420, 100, Nothing, layoutMouseAreaDemo)
+  , ("separator", 420, 110, Nothing, layoutSeparatorDemo)
+  , ("spacer", 420, 74, Nothing, layoutSpacerDemo)
+  , ("fillw", 420, 74, Nothing, layoutFillWDemo)
+  , ("fillh", 420, 140, Nothing, layoutFillHDemo)
+  , ("grow", 420, 150, Nothing, layoutGrowDemo)
+  , ("fixedw", 420, 74, Nothing, layoutFixedWDemo)
+  , ("fixedh", 420, 130, Nothing, layoutFixedHDemo)
+  , ("fixedwh", 420, 120, Nothing, layoutFixedWHDemo)
+  , ("minw", 420, 74, Nothing, layoutMinWDemo)
+  , ("maxw", 420, 74, Nothing, layoutMaxWDemo)
+  , ("minh", 420, 130, Nothing, layoutMinHDemo)
+  , ("maxh", 420, 130, Nothing, layoutMaxHDemo)
+  , ("percent", 420, 100, Nothing, layoutPercentDemo)
+  , ("aspect", 460, 280, Nothing, layoutAspectDemo)
+  , ("padall", 420, 150, Nothing, layoutPadAllDemo)
+  , ("padxy", 420, 130, Nothing, layoutPadXYDemo)
+  , ("padleft", 420, 130, Nothing, layoutPadLeftDemo)
+  , ("padright", 420, 130, Nothing, layoutPadRightDemo)
+  , ("padtop", 420, 150, Nothing, layoutPadTopDemo)
+  , ("padbottom", 420, 150, Nothing, layoutPadBottomDemo)
+  , ("padlrtb", 420, 150, Nothing, layoutPadLRTBDemo)
+  , ("gap", 420, 110, Nothing, layoutGapDemo)
+  , ("tight", 420, 140, Nothing, layoutTightDemo)
+  , ("alignstart", 420, 150, Nothing, layoutAlignStartDemo)
+  , ("aligncenter", 420, 150, Nothing, layoutAlignCenterDemo)
+  , ("alignend", 420, 150, Nothing, layoutAlignEndDemo)
+  , ("aligntop", 420, 150, Nothing, layoutAlignTopDemo)
+  , ("alignmid", 420, 150, Nothing, layoutAlignMidDemo)
+  , ("alignbottom", 420, 150, Nothing, layoutAlignBottomDemo)
+  , ("alignbaseline", 420, 90, Nothing, layoutAlignBaselineDemo)
+  , ("wrap", 420, 170, Nothing, layoutWrapDemo)
+  , ("linegap", 420, 230, Nothing, layoutLineGapDemo)
+  , ("linealign", 420, 170, Nothing, layoutLineAlignDemo)
+  , ("pinat", 420, 160, Nothing, layoutPinAtDemo)
+  , ("pointer-block", 420, 100, Just (V2 114 36), layoutPointerBlockDemo)
+  , ("pointer-pass", 420, 100, Just (V2 40 20), layoutPointerPassDemo)
+  ]
 
 -- | Controls in the book's widget gallery.
 galleryControlsSpecimen :: NanoUI ()
@@ -2437,7 +2803,12 @@ tabStylesSpecimen =
 generateBookVisuals :: IO ()
 generateBookVisuals = do
   createDirectoryIfMissing True "book/src/images"
-  writeSvg "layout-overview" 880 470 layoutSpecimen
+  createDirectoryIfMissing True "book/src/images/layout"
+  forM_ layoutDemos $ \(name, w, h, hoverPos, ui) -> do
+    svg <- layoutSvg ("book-layout-" <> name) w h hoverPos ui
+    let path = "book/src/images/layout/" <> T.unpack name <> ".svg"
+    TIO.writeFile path svg
+    putStrLn ("wrote " <> path)
   writeSvg "gallery-controls" 880 260 galleryControlsSpecimen
   writeSvg "gallery-data" 880 420 galleryDataSpecimen
   writeSvg "tab-styles" 880 500 tabStylesSpecimen
