@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-c517881d.js";
+            window.path_to_searchindex_js = "../searchindex-2f5966d8.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -215,6 +215,16 @@ cabal test -j1 all
 <p>To run a single test suite with detailed failure reports:</p>
 <pre><code class="language-sh">cabal test nano-ui-test --test-show-details=failures
 </code></pre>
+<h2 id="haddocks-and-hoogle"><a class="header" href="#haddocks-and-hoogle">Haddocks and Hoogle</a></h2>
+<p>Released packages have Haddock pages on Hackage. To build documentation for the current checkout:</p>
+<pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle
+</code></pre>
+<p>This writes the HTML documentation under <code>haddocks/</code> with an index at <code>haddocks/index.html</code>. The <code>--hoogle</code> flag also writes Hoogle input files in that directory.</p>
+<p>To build one package instead:</p>
+<pre><code class="language-sh">cabal haddock nano-ui --haddock-hoogle
+</code></pre>
+<p>Its output is under <code>dist-newstyle/.../doc/html/nano-ui/</code>. Building every package at once can use a lot of memory; the one-package command is the lighter option.</p>
+<p>To search the generated Hoogle data locally, point <code>hoogle generate --local=...</code> at the directory containing the generated <code>.txt</code> files, then search with the same database. See <a href="https://github.com/ndmitchell/hoogle/blob/master/docs/Install.md">Installing Hoogle locally</a> for the local database options.</p>
 <h2 id="repository-architecture"><a class="header" href="#repository-architecture">Repository Architecture</a></h2>
 <pre><code>packages/
   nano-ui/             # Core toolkit: widgets, layout, state, drawing, text arena
