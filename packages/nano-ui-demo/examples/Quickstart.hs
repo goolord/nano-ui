@@ -4,7 +4,6 @@
 -- ANCHOR: quickstart
 module Main (main) where
 
-import Control.Monad (whenM)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend.Sdl

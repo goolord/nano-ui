@@ -273,6 +273,9 @@ testWrappedWidgets = do
         b <- button' "+"
         when (respClicked b) (emit Inc)
         pure b
+  -- Geometry lags a frame: the first frame's response has no rect yet, so
+  -- the click targets the second's.
+  _ <- runFrameReduce update ctx inp 0 view
   (resp, model, msgs, _, dirty) <- runFrameReduce update ctx inp 0 view
   check "initial wrapped view" (msgs == [] && model == 0 && not dirty)
   (model1, msgs1, dirty1) <- runClickReduce update ctx inp 0 view (centerOf resp)
