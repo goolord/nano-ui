@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-5815e8e5.js";
+            window.path_to_searchindex_js = "../searchindex-12a7a635.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -197,6 +197,19 @@
 </table>
 </div>
 <p>A <code>Style</code> is <code>bg</code>, <code>fg</code>, <code>border</code>, <code>borderWidth</code>, <code>cornerRadius</code>, <code>hoverBg</code>, and <code>activeBg</code>. A <code>Theme</code> also defines semantic colors: <code>themeAccent</code> / <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success/warning/danger tones.</p>
+<p>The page behind the view is <code>pageBackground</code>: <code>themeWindow</code> by default,
+unless the theme sets <code>themePage</code>. <code>panelPage</code> gives a view that draws no
+panel the panel surface, so the app sits on the panel colour while
+<code>themeWindow</code> stays the window background behind it; <code>pageColor</code> sets any
+other page. The page is laid over the window background, so the window shows
+in the gaps between a page’s panels:</p>
+<pre><code class="language-haskell">-- An app with no panel of its own: the panel surface is the page.
+sdlAppTheme = Just (panelPage defaultTheme)
+
+-- Or scope it to a page with no panels.
+styled panelPage (columnWith (padAll 12) (label "Body"))
+</code></pre>
+<p>A full-window scroller (<code>scrollWith grow</code>) fills the page colour.</p>
 <p>Built-in themes: <code>defaultTheme</code> (dark), <code>defaultLightTheme</code>, the Tomorrow variants, and <code>themeFromBase16</code> / <code>themeFromBase16Dark</code> / <code>themeFromBase16Light</code>. Set one at startup with <code>sdlAppTheme = Just appTheme</code>, switch per frame with <code>setUiTheme</code>, or follow the OS with <code>followSystemTheme</code> / <code>lightDark</code>.</p>
 <h2 id="scoped-styling"><a class="header" href="#scoped-styling">Scoped styling</a></h2>
 <pre><code class="language-haskell">-- Replace the base theme for a subtree.
@@ -311,7 +324,7 @@ whenM (styled quiet (button "Skip")) skip
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
+        <script src="../theme/nano-ui-banks-03c2b288.js"></script>
         <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
