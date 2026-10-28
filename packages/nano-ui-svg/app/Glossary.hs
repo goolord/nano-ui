@@ -1145,7 +1145,7 @@ generateInteractions = do
 
   -- 3. checkbox & radio 3-surface split + modal popup shift
   i3Bad <-
-    renderSvg "i3-bad" 260 100 $
+    renderSvg "i3-bad" 260 120 $
       styled
         ( buttonStyle
             ( background (colorRGBA 220 38 38 255)
@@ -1162,7 +1162,7 @@ generateInteractions = do
           rSel <- useVar (0 :: Int)
           radio ["Radio ring (input bg + btn border)" :: Text] rSel
   i3Good <-
-    renderSvg "i3-good" 260 100 $
+    renderSvg "i3-good" 260 120 $
       styled
         ( buttonStyle (foreground (colorRGBA 56 189 248 255) . borderColor (colorRGBA 56 189 248 255))
             . popupStyle (foreground (colorRGBA 251 191 36 255) . borderColor (colorRGBA 251 191 36 255))
