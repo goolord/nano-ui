@@ -2374,7 +2374,7 @@ galleryControlsSpecimen = do
         rowWith (tight . gap 16 . alignMid) $ do
           toggleSwitch enabled
           knob 0 100 volume
-          spinner
+          circularProgress 0.62
       panelWith (fillW . padAll 12 . gap 10) $ do
         muted "TELEMETRY"
         progressBar 0.62
@@ -2413,6 +2413,26 @@ galleryDataSpecimen = do
           ]
           selected
 
+-- | Every tab header style, one per row.
+tabStylesSpecimen :: NanoUI ()
+tabStylesSpecimen =
+  columnWith (fillW . padAll 18 . gap 12) $ do
+    heading "Tab styles"
+    tabStyleRow "Underline" 0 TabUnderline
+    tabStyleRow "Pill" 1 TabPill
+    tabStyleRow "Segmented" 2 TabSegmented
+    tabStyleRow "Contained" 1 TabContained
+  where
+    tabStyleRow :: Text -> Int -> TabStyle -> NanoUI ()
+    tabStyleRow caption initial style = do
+      active <- useVar initial
+      labelWith fontMuted caption
+      tabsConfigured defaultTabsConfig {tabsStyle = style} active
+        [ tab 0 "Overview" (muted "Overview")
+        , tab 1 "Activity" (muted "Activity")
+        , tab 2 "Settings" (muted "Settings")
+        ]
+
 -- | Write the layout and gallery specimens to the book's images directory.
 generateBookVisuals :: IO ()
 generateBookVisuals = do
@@ -2420,6 +2440,7 @@ generateBookVisuals = do
   writeSvg "layout-overview" 880 470 layoutSpecimen
   writeSvg "gallery-controls" 880 260 galleryControlsSpecimen
   writeSvg "gallery-data" 880 420 galleryDataSpecimen
+  writeSvg "tab-styles" 880 500 tabStylesSpecimen
   where
     writeSvg name w h ui = do
       svg <- renderSvg ("book-" <> name) w h ui

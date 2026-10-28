@@ -44,7 +44,21 @@ let cfg = defaultTabsConfig
 tabsConfigured cfg active tabs
 ```
 
-Styles: `TabUnderline`, `TabPill`, `TabSegmented`, `TabContained`. Placements: `TabTop`, `TabBottom`, `TabLeft`, `TabRight`. `boundedTabs` / `boundedTabBar` generate a tab per enum value.
+Every `TabStyle` is rendered below. The selected tab differs in each row so the treatment is visible:
+
+<figure class="nano-figure">
+<img src="../images/tab-styles.svg" alt="Four tab strips: underline, pill, segmented, and contained, each with a different selected tab.">
+<figcaption>The four `TabStyle` values, rendered with nano-ui-svg.</figcaption>
+</figure>
+
+| Style | Header treatment |
+| --- | --- |
+| `TabUnderline` | Headers on a rule; the selected header has an accent bar |
+| `TabPill` | The selected header is filled with the accent color |
+| `TabSegmented` | Headers sit in a rounded track; the selected one is raised |
+| `TabContained` | Folder tabs; the selected header opens onto a bordered body |
+
+Placements: `TabTop`, `TabBottom`, `TabLeft`, `TabRight`. `boundedTabs` / `boundedTabBar` generate a tab per enum value.
 
 ## Tables
 
