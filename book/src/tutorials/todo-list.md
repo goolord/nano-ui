@@ -20,29 +20,13 @@ cabal run nano-ui-example-todo-list
 A todo item needs an identity that outlives its position. Positions change when an item is added, removed, filtered, or reordered; the id does not. Every widget or `Var` that belongs to a row is keyed by that id later.
 
 ```haskell
-{-# LANGUAGE OverloadedRecordDot #-}
-
-data Todo = Todo
-  { todoId :: !Int
-  , todoText :: !Text
-  , todoDone :: !Bool
-  }
-  deriving (Eq, Generic)
-
-data Todos = Todos
-  { todoItems :: ![Todo]
-  , todoNext :: !Int
-  }
-  deriving (Eq, Generic)
-
-newtype App = App {appTodos :: Var Todos}
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:model}}
 ```
 
 The list lives in a `Var Todos`. That is not a type `useVar` can allocate, so it is created once during setup with `newVar`:
 
 ```haskell
-newApp :: IO App
-newApp = App <$> newVar (Todos [Todo 0 "Read the header" True, Todo 1 "Water the plants" False] 2)
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:new_app}}
 ```
 
 `newVar` returns `IO (Var a)`. Allocating it in `main` and passing it into the view is what makes it survive between frames. Allocating a `Var` *inside* the view would create a fresh one on every pass.
@@ -52,31 +36,13 @@ Both records derive `Generic`; with `OverloadedRecordDot`, `app.appTodos.todoIte
 ## 2. The application shell
 
 ```haskell
-main :: IO ()
-main = do
-  app <- newApp
-  runSdlApp
-    defaultSdlOptions
-      { sdlAppShouldQuit = pressedOnceIn KeyEscape
-      , sdlWindowSettings =
-          defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
-      }
-    (todoApp app)
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:main}}
 ```
 
 `runSdlApp` takes the options and the view. The view is not called once: the backend calls it every frame, and it must describe the whole window each time.
 
 ```haskell
-todoApp :: App -> NanoUI ()
-todoApp app = do
-  let items = app.appTodos.todoItems
-  draft <- useVar ""
-  filt <- useEnumVar All
-  columnWith (padAll 20 . gap 12 . fillW . fillH) $ do
-    heading "Todos"
-    newItemRow app.appTodos draft
-    filterRow items filt
-    todoList items filt
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:todo_app}}
 ```
 
 The view's local state (the draft text and the current filter) is allocated with `useVar` and `useEnumVar`. Both are positional: they are identified by their call site, so they need no setup and no record field.
@@ -88,15 +54,7 @@ The view's local state (the draft text and the current filter) is allocated with
 The input row has three jobs: draw the field, draw the button, and decide whether this frame is an "add" frame.
 
 ```haskell
-newItemRow :: Var Todos -> Var Text -> NanoUI ()
-newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
-  inputR <- textInputConfigured' defaultTextInputConfig {ticPlaceholder = "What needs doing?"} draft
-  clicked <- button "Add"
-  text <- T.strip <$> readVar draft
-  when ((clicked || respSubmitted inputR) && not (T.null text)) $ do
-    modifyVar todosVar (\(Todos xs n) -> Todos (xs <> [Todo n text False]) (n + 1))
-    writeVar draft ""
-    requestFocus (respId inputR)
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:new_item_row}}
 ```
 
 Details:
@@ -114,24 +72,7 @@ Details:
 The filter is a local value with three states. `useEnumVar` accepts any `Enum`/`Bounded` type and keeps the chosen value across frames:
 
 ```haskell
-data Filter = All | Active | Done
-  deriving (Eq, Show, Enum, Bounded)
-
-matches :: Filter -> Todo -> Bool
-matches All _ = True
-matches Active t = not (todoDone t)
-matches Done t = todoDone t
-
-filterRow :: Var [Todo] -> Var Filter -> NanoUI ()
-filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
-  boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} (T.pack . show) filt
-  flex
-  todos <- readVar items
-  let left = length (filter (not . todoDone) todos)
-  labelWith (tight . alignMid . fontMuted)
-    (T.pack (show left) <> if left == 1 then " item left" else " items left")
-  disabledWhen (left == length todos) $
-    whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:filter_and_count}}
 ```
 
 `boundedTabBarConfigured` draws a segmented control over every constructor of `Filter`; the label function is `show`. The count is *derived*: it is computed from the list every frame, never stored in a second `Var` that could drift. `disabledWhen` dims the clear button and blocks its events without removing it from the layout.
@@ -141,16 +82,7 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
 Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row's position on screen.
 
 ```haskell
-todoList :: Var [Todo] -> Var Filter -> NanoUI ()
-todoList items filt = do
-  shownFilter <- readVar filt
-  scrollWith (grow . fillW) $
-    columnWith (tight . gap 6 . fillW) $
-      withElemVars todoId items $ \todos at -> do
-        let shown = filter (matches shownFilter) todos
-        forM_ (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) <> [Nothing])) $
-          \(todo, above, below) ->
-            withKey (todoId todo) (todoRow items (at todo) above below)
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:todo_list}}
 ```
 
 - `withElemVars todoId items` gives the current list and a function `at :: Todo -> Var Todo`. `at todo` is a `Var` addressed by the item's id, so it survives a reorder or a filter change.
@@ -160,37 +92,7 @@ todoList items filt = do
 Here is the row itself, trimmed to the essential structure:
 
 ```haskell
-todoRow :: Var [Todo] -> Var Todo -> Maybe Todo -> Maybe Todo -> NanoUI ()
-todoRow items todo above below = do
-  editing <- useVar False
-  focusPending <- useVar False
-  draft <- useVar ""
-  t <- readVar todo
-  isEditing <- readVar editing
-  let tid = todoId t
-      save = do
-        writeVar todo.todoText =<< readVar draft
-        writeVar editing False
-  when isEditing (whenM takeEscape (writeVar editing False))
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
-    checkboxWith alignMid "" todo.todoDone
-    scope $
-      if isEditing
-        then do
-          fieldR <- textInput' draft
-          whenM (readVar focusPending) $
-            requestFocus (respId fieldR) >> writeVar focusPending False
-          when (respSubmitted fieldR) save
-        else
-          labelWith (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id)) (todoText t)
-    whenM (button (if isEditing then "Save" else "Edit")) $
-      if isEditing then save else do
-        writeVar draft (todoText t)
-        writeVar editing True
-        writeVar focusPending True
-    disabledWhen (null above) $ whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
-    disabledWhen (null below) $ whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
-    whenM (styled destructive (button "Delete")) (modifyVar items (filter ((/= tid) . todoId)))
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:todo_row}}
 ```
 
 Three details make this work:
@@ -204,14 +106,7 @@ Three details make this work:
 Up and Down need to swap two items wherever they are in the full list. Swapping by id keeps the operation correct even though the visible list is filtered:
 
 ```haskell
-swapIds :: Int -> Int -> [Todo] -> [Todo]
-swapIds a b xs = map pick xs
-  where
-    byId i t = fromMaybe t (find ((== i) . todoId) xs)
-    pick t
-      | todoId t == a = byId b t
-      | todoId t == b = byId a t
-      | otherwise = t
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:swap_ids}}
 ```
 
 The row's local state follows the id, not the index, so the edit flag and draft travel with the item. This is the payoff for the keys in the previous section.
@@ -221,7 +116,7 @@ The row's local state follows the id, not the index, so the edit flag and draft 
 Enter in the new-item field adds an item because `respSubmitted` reports it. Escape cancels an edit:
 
 ```haskell
-when isEditing (whenM takeEscape (writeVar editing False))
+{{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:take_escape}}
 ```
 
 `takeEscape` claims the press for this handler, so later Escape handlers in the view (an open popup or a second `takeEscape`) do not also act on it. The window's quit policy is separate: the example sets `sdlAppShouldQuit = pressedOnceIn KeyEscape`, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).

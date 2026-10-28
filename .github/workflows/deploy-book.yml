@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'book/**'
+      - 'packages/nano-ui-demo/examples/**'
       - '.github/workflows/deploy-book.yml'
   workflow_dispatch:
 

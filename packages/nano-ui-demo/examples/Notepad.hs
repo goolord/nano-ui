@@ -11,13 +11,14 @@ module Notepad
   , newNotepad
   , notepadUi
   , writeDocument
-  ) where
+  )
+where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (when)
 import Data.ByteString qualified as BS
-import Data.Foldable (for_)
 import Data.Either (isRight)
+import Data.Foldable (for_)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -30,26 +31,36 @@ import NanoUI.Shortcut
 -- Application entry point
 --------------------------------------------------------------------------------
 
+-- ANCHOR: main
 main :: IO ()
 main = do
   state <- newNotepad
   runSdlApp
     defaultSdlOptions
       { -- A close request goes to the view, which may ask about unsaved changes.
-        sdlWindowSettings = defaultWindowSettings {wsTitle = "nano-ui Notepad", wsSize = Size 1000 720, wsExitOnCloseRequest = False}
+        sdlWindowSettings =
+          defaultWindowSettings
+            { wsTitle = "nano-ui Notepad"
+            , wsSize = Size 1000 720
+            , wsExitOnCloseRequest = False
+            }
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
     (notepadUi state)
+
+-- ANCHOR_END: main
 
 --------------------------------------------------------------------------------
 -- The application
 --------------------------------------------------------------------------------
 
-data NotepadState = NotepadState
-  !(Var TextDocument)
-  !(Var WidgetId)
-  !(Var (Maybe FileDialogId))
-  !(Var (Maybe FileDialogId))
+-- ANCHOR: state
+data NotepadState
+  = NotepadState
+      !(Var TextDocument)
+      !(Var WidgetId)
+      !(Var (Maybe FileDialogId))
+      !(Var (Maybe FileDialogId))
 
 -- | A notepad's private document and dialog state. Allocate one per
 -- instance before starting the SDL session, and draw it with 'notepadUi'.
@@ -60,6 +71,8 @@ newNotepad =
     <*> newVar (WidgetId 0)
     <*> newVar Nothing
     <*> newVar Nothing
+
+-- ANCHOR_END: state
 
 notepadUi :: NotepadState -> NanoUI ()
 notepadUi (NotepadState doc editorId openDlg saveDlg) = do
@@ -75,6 +88,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
   zoom <- useVar (1.0 :: Float)
 
   ----------------------------------------------------------- file dialogs ---
+  -- ANCHOR: file_dialogs
   useFileDialog openDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       loaded <-
@@ -98,6 +112,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
           writeVar docDirty False
           writeVar statusMsg ("Saved " <> T.pack filePath)
         else writeVar statusMsg ("Could not save " <> T.pack filePath)
+  -- ANCHOR_END: file_dialogs
 
   ------------------------------------------------------------- menu data ---
   let
@@ -124,27 +139,38 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     zoomOut = modifyVar zoom (\z -> max 0.5 (z / 1.1))
 
     -- A menu row and its action; running it closes the menu.
+    -- ANCHOR: item_helper
     item menuRow action = whenM menuRow (writeVar openMenu "" >> action)
+    -- ANCHOR_END: item_helper
     editItem name chord cmd =
-      item (menuItemShortcut name chord) (readVar editorId >>= \editor -> runTextCommand editor cmd)
+      item
+        (menuItemShortcut name chord)
+        (readVar editorId >>= \editor -> runTextCommand editor cmd)
 
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
     newCmd = ("New", cmdOrCtrl <> key 'n', newDocument)
-    openCmd = ("Open...", cmdOrCtrl <> key 'o', writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions)
+    openCmd =
+      ( "Open..."
+      , cmdOrCtrl <> key 'o'
+      , writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions
+      )
     saveCmd = ("Save", cmdOrCtrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", cmdOrCtrl <> shift <> key 's', saveDocument True)
     -- Quit, or ask first when there are unsaved changes. The question puts
     -- the About dialog away, so one modal shows at a time.
+    -- ANCHOR: exit_app
     exitApp = do
       dirty <- readVar docDirty
       if dirty then writeVar aboutOpen False >> writeVar confirmExit True else quitUi
+    -- ANCHOR_END: exit_app
     exitCmd = ("Exit", cmdOrCtrl <> key 'q', exitApp)
     zoomInCmd = ("Zoom In", cmdOrCtrl <> key '=', zoomIn)
     zoomOutCmd = ("Zoom Out", cmdOrCtrl <> key '-', zoomOut)
     resetZoomCmd = ("Reset Zoom", cmdOrCtrl <> key '0', writeVar zoom 1.0)
     commandItem (name, chord, action) = item (menuItemShortcut name chord) action
 
+    -- ANCHOR: file_menu
     fileMenu = do
       commandItem newCmd
       commandItem openCmd
@@ -152,29 +178,40 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
       commandItem saveAsCmd
       menuSeparator
       commandItem exitCmd
+    -- ANCHOR_END: file_menu
 
+    -- ANCHOR: edit_menu
     editMenu = do
       editor <- readVar editorId
       canUndo <- textCanUndo editor
       canRedo <- textCanRedo editor
-      if canUndo then editItem "Undo" (cmdOrCtrl <> key 'z') Undo else menuItemDisabled "Undo"
-      if canRedo then editItem "Redo" (cmdOrCtrl <> shift <> key 'z') Redo else menuItemDisabled "Redo"
+      if canUndo
+        then editItem "Undo" (cmdOrCtrl <> key 'z') Undo
+        else menuItemDisabled "Undo"
+      if canRedo
+        then editItem "Redo" (cmdOrCtrl <> shift <> key 'z') Redo
+        else menuItemDisabled "Redo"
       menuSeparator
       editItem "Cut" (cmdOrCtrl <> key 'x') Cut
       editItem "Copy" (cmdOrCtrl <> key 'c') Copy
       editItem "Paste" (cmdOrCtrl <> key 'v') Paste
       menuSeparator
       editItem "Select All" (cmdOrCtrl <> key 'a') SelectAll
+    -- ANCHOR_END: edit_menu
 
     viewMenu = do
       statusShown <- readVar showStatus
-      item (menuItem (if statusShown then "Hide Status Bar" else "Show Status Bar")) (writeVar showStatus (not statusShown))
+      item
+        (menuItem (if statusShown then "Hide Status Bar" else "Show Status Bar"))
+        (writeVar showStatus (not statusShown))
       menuSeparator
       commandItem zoomInCmd
       commandItem zoomOutCmd
       commandItem resetZoomCmd
       menuSeparator
-      item (menuItem "Document Statistics") (writeVar statusMsg . documentStats . documentText =<< readVar doc)
+      item
+        (menuItem "Document Statistics")
+        (writeVar statusMsg . documentStats . documentText =<< readVar doc)
 
     helpMenu = do
       item (menuItem "About nano-ui Notepad") (writeVar aboutOpen True)
@@ -185,10 +222,18 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
   -- chords are also bound here, ahead of the rows, and close an open menu as
   -- the rows do; so does a close request. The editor handles its own editing
   -- chords. Ctrl++ is Ctrl+Shift+= on a US layout, or keypad plus.
-  for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd, zoomInCmd, zoomOutCmd, resetZoomCmd] $
+  -- ANCHOR: shortcut_bindings
+  for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd] $
     \(_, chord, action) -> item (shortcut chord) action
-  item (or <$> traverse shortcut [cmdOrCtrl <> shift <> key '=', cmdOrCtrl <> key '+']) zoomIn
+  -- ANCHOR_END: shortcut_bindings
+  for_ [zoomInCmd, zoomOutCmd, resetZoomCmd] $
+    \(_, chord, action) -> item (shortcut chord) action
+  item
+    (or <$> traverse shortcut [cmdOrCtrl <> shift <> key '=', cmdOrCtrl <> key '+'])
+    zoomIn
+  -- ANCHOR: close_request
   item (winCloseRequested <$> askWindow) exitApp
+  -- ANCHOR_END: close_request
 
   --------------------------------------------------------------- layout ---
   docName <- columnWith (grow . gap 0) $ do
@@ -205,6 +250,7 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     -- zoom.
     gen <- readVar docGen
     zoomVal <- readVar zoom
+    -- ANCHOR: editor
     editorResp <-
       withKey gen $
         textAreaDocumentWith'
@@ -213,11 +259,15 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     -- respChanged reports an edit, not a caret move.
     when (respChanged editorResp) (writeVar docDirty True)
     writeVar editorId (respId editorResp)
+    -- ANCHOR_END: editor
 
     -- Read after the editor, which marks the document changed.
+    -- ANCHOR: window_title
     path <- readVar docPath
     dirty <- readVar docDirty
-    let name = (if T.null path then "Untitled" else path) <> (if dirty then " *" else "")
+    let
+      name = (if T.null path then "Untitled" else path) <> (if dirty then " *" else "")
+    -- ANCHOR_END: window_title
     whenM (readVar showStatus) $ do
       separator
       statusBar name doc statusMsg zoomVal
@@ -235,12 +285,15 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     rowWith fillW $ do
       flex
       whenM (button "Close") (writeVar aboutOpen False)
+  -- ANCHOR: exit_modal
   modal confirmExit "Unsaved changes" $ do
     label "Discard the changes to this document and exit?"
     rowWith fillW $ do
       flex
       whenM (button "Discard") quitUi
       whenM (button "Cancel") (writeVar confirmExit False)
+
+-- ANCHOR_END: exit_modal
 
 --------------------------------------------------------------------------------
 -- Local menu-bar widget
@@ -249,21 +302,32 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
 -- | A horizontal menu bar. @openMenu@ holds the label of the currently open
 -- drop-down (the empty text when every menu is closed). Each entry pairs a
 -- label with its drop-down body; item actions are expected to close the menu.
+-- ANCHOR: menu_bar
 menuBar :: Var Text -> [(Text, NanoUI ())] -> NanoUI ()
 menuBar openMenu entries = do
   current <- readVar openMenu
   rowWith (tight . fillW . fixedH 28) $ do
     for_ entries $ \(menuLabel, body) -> do
-      let isOpen = current == menuLabel
+      let
+        isOpen = current == menuLabel
       -- Each title covers the bar's height, its text in the middle.
       btn <- menuButtonWith' fillH menuLabel isOpen
       when (respClicked btn) (writeVar openMenu (if isOpen then "" else menuLabel))
-      when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu menuLabel)
-      let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
+      when
+        (not isOpen && not (T.null current) && respHovered btn)
+        (writeVar openMenu menuLabel)
+      let
+        cfg =
+          (defaultPopupConfig (AnchorRect (respRect btn)))
+            { cfgPlacement = PlacementBelow
+            , cfgOffset = 0
+            }
       -- The open flag is derived from the open menu's name, so the popup
       -- gets a constant and closing it is written here.
       (popupResp, _) <- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
+
+-- ANCHOR_END: menu_bar
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -271,15 +335,22 @@ menuBar openMenu entries = do
 
 -- | Write the document as UTF-8 with its own line ends, the bytes the editor
 -- reads back.
+-- ANCHOR: write_document
 writeDocument :: FilePath -> TextDocument -> NanoUI Bool
 writeDocument filePath doc = do
   result <-
-    liftIO (try (BS.writeFile filePath (TE.encodeUtf8 (documentText doc))) :: IO (Either SomeException ()))
+    liftIO
+      ( try (BS.writeFile filePath (TE.encodeUtf8 (documentText doc))) ::
+          IO (Either SomeException ())
+      )
   pure (isRight result)
+
+-- ANCHOR_END: write_document
 
 -- | The status bar. It shows the line count, which the document keeps; the
 -- word and character counts read the whole text, so View > Document
 -- Statistics computes them when asked.
+-- ANCHOR: status_bar
 statusBar :: Text -> Var TextDocument -> Var Text -> Float -> NanoUI ()
 statusBar docName docVar statusMsg zoomVal = do
   doc <- readVar docVar
@@ -288,9 +359,14 @@ statusBar docName docVar statusMsg zoomVal = do
     labelWith (tight . fontMuted) message
     flex
     labelWith (tight . fontMuted) docName
-    labelWith (tight . fontMuted) ("Lines: " <> T.pack (show (documentLineCount doc)))
-    labelWith (tight . fontMuted)
+    labelWith
+      (tight . fontMuted)
+      ("Lines: " <> T.pack (show (documentLineCount doc)))
+    labelWith
+      (tight . fontMuted)
       ("Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%")
+
+-- ANCHOR_END: status_bar
 
 documentStats :: Text -> Text
 documentStats contents =

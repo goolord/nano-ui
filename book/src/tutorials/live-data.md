@@ -17,14 +17,7 @@ cabal run nano-ui-example-live-chart
 A `Task` runs one typed job; a `Stream` carries one typed push channel. Both are created during setup, like a `Var`:
 
 ```haskell
-data App = App
-  { appSearch   :: Task Text [Text]
-  , appFlaky    :: Task Int Text
-  , appProgress :: Stream () Int
-  }
-
-newApp :: IO App
-newApp = App <$> newTask <*> newTask <*> newStream
+{{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:handles}}
 ```
 
 The key type and result type are fixed by the handle. That means a task cannot accidentally be reused for a different job, and no message type is erased at runtime.
@@ -34,37 +27,13 @@ The key type and result type are fixed by the handle. That means a task cannot a
 The query field is debounced: `searchInput'` reports `respChanged` once typing pauses, not on every keystroke. The committed query becomes the task's key:
 
 ```haskell
-searchCard :: App -> NanoUI ()
-searchCard app = do
-  query <- useVar ""
-  committed <- useVar ""
-  resp <- searchInput' "Find a word" query
-  when (respChanged resp) (writeVar committed =<< readVar query)
-  key <- readVar committed
-
-  status <- useTaskStatus (appSearch app) key (slowSearch key)
-
-  let (hits, running) = case status of
-        TaskRunning previous -> (fromMaybe [] previous, True)
-        TaskDone found       -> (found, False)
-        TaskFailed _ previous -> (fromMaybe [] previous, False)
-  rowWith (tight . gap 8 . alignMid) $ do
-    -- The spinner comes and goes, so it sits in a scope.
-    scope (when running spinner)
-    muted (T.pack (show (length hits)) <> " matches"
-             <> if running then " (searching...)" else "")
-  rowWith (wrap . gap 6 . fillW) $
-    forM_ (take 24 hits) $ \w -> withKey w (label w)
+{{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:search_card}}
 ```
 
 `slowSearch` is ordinary blocking IO:
 
 ```haskell
-slowSearch :: Text -> IO [Text]
-slowSearch q = do
-  threadDelay 500000
-  let found = filter (T.isInfixOf (T.toLower q)) wordList
-  length found `seq` pure found
+{{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:slow_search}}
 ```
 
 What the loop does with it:
@@ -86,21 +55,7 @@ label (fromMaybe "Loading..." contents)
 A job that throws becomes `TaskFailed err previous`. The exception is shown and the key includes an attempt counter, so pressing Retry reruns the *same* input:
 
 ```haskell
-flakyCard :: App -> NanoUI ()
-flakyCard app = do
-  attemptVar <- useVar (0 :: Int)
-  attempt <- readVar attemptVar
-  status <- useTaskStatus (appFlaky app) attempt (flakyRequest attempt)
-  scope $ case status of
-    TaskRunning _ -> rowWith (tight . gap 8 . alignMid) $ do
-      spinner
-      label "Contacting the server..."
-    TaskDone reply -> rowWith (tight . gap 8 . alignMid) $ do
-      label reply
-      whenM (button "Run again") (modifyVar attemptVar (+ 1))
-    TaskFailed err _ -> rowWith (tight . gap 8 . alignMid) $ do
-      danger (T.pack (displayException err))
-      whenM (button "Retry") (modifyVar attemptVar (+ 1))
+{{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:flaky_card}}
 ```
 
 Two rules are visible here:
@@ -119,20 +74,7 @@ withConnection connInfo $ \conn -> ...
 A `Stream` is for work that pushes repeatedly: progress ticks, sensor readings, tokens from a model. The producer is a function that receives `update` and runs until it returns or is cancelled:
 
 ```haskell
-progressCard :: App -> NanoUI ()
-progressCard app = do
-  running <- useVar False
-  checkbox "Run" running
-  isRunning <- readVar running
-  scope $ when isRunning $ do
-    pct <- useStream (appProgress app) () (0 :: Int) $ \update ->
-      forM_ [1 .. 100] $ \i -> do
-        threadDelay 50000
-        update (const i)
-    progressBar (fromIntegral pct / 100)
-    muted (if pct >= 100
-             then "Done. Untick and tick Run to start over."
-             else T.pack (show pct) <> "%")
+{{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:progress_card}}
 ```
 
 - **Stopping is not calling the hook.** When `isRunning` is false, `useStream` is not called, and the producer is cancelled. There is no stop button to wire up.
@@ -147,63 +89,19 @@ The frame loop sleeps until the next update. A paused progress pane costs no fra
 The chart is a `Stream` feeding a `PlotCache`. The cache is allocated once and passed to `plot`; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:
 
 ```haskell
-data ChartApp = ChartApp
-  { appFeed  :: Stream () Feed
-  , appSaved :: Var Feed
-  , appPlots :: PlotCache
-  }
-
-newChartApp :: IO ChartApp
-newChartApp = ChartApp <$> newStream <*> newVar emptyFeed <*> newPlotCache
+{{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:chart_handles}}
 ```
 
 The view pauses by not calling the stream, and resumes from the saved feed:
 
 ```haskell
-chartCard :: ChartApp -> NanoUI ()
-chartCard app = do
-  running <- useVar True
-  isRunning <- readVar running
-  saved <- readVar (appSaved app)
-  feed <-
-    scope $
-      if isRunning
-        then useStream (appFeed app) () saved $ \update -> forever $ do
-          threadDelay 100000
-          update advance
-        else pure saved
-
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
-    whenM (button (if isRunning then "Pause" else "Resume")) $ do
-      when isRunning (writeVar (appSaved app) feed)
-      writeVar running (not isRunning)
-    muted (if isRunning then "Live: a sample every 100 ms"
-                        else "Paused: the loop is idle")
-
-  let points = feedPoints feed
-  resp <- withCursorShape UiCursorCrosshair
-            (plot (appPlots app) (fillW . minH 300) (walkChart points))
-
-  rowWith (tight . gap 16 . alignMid . fillW) $ do
-    let ys = fmap snd points
-    scope $ if Seq.null ys
-      then muted "Waiting for the first sample..."
-      else do
-        kv "min" (fmt (minimum ys))
-        kv "max" (fmt (maximum ys))
-        kv "last" (fmt (feedLevel feed))
-    scope . for_ (plotHover resp) $ \hover ->
-      kv "cursor" ("#" <> T.pack (show (round (hoverDataX hover) :: Int))
-                     <> " = " <> fmt (hoverDataY hover))
+{{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:chart_card}}
 ```
 
 `Feed`, `advance`, and `fmt` are in `LiveChart.hs`; `walkChart` builds the chart value:
 
 ```haskell
-walkChart :: Seq (Double, Double) -> Chart
-walkChart points =
-  withGrid GridBoth . withLegend LegendNone . withXAxis "sample" . withYAxis "value" $
-    chart [line "walk" points]
+{{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:walk_chart}}
 ```
 
 The chart API is small:

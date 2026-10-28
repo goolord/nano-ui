@@ -27,10 +27,12 @@ import Control.Exception (displayException, throwIO)
 import Control.Monad (forM_, when)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import GHC.Clock (getMonotonicTimeNSec)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
+
+-- ANCHOR: handles
 
 -- | One handle per job. The types fix each job's key and result.
 data App = App
@@ -42,26 +44,29 @@ data App = App
 newApp :: IO App
 newApp = App <$> newTask <*> newTask <*> newStream
 
+-- ANCHOR_END: handles
+
 main :: IO ()
 main = do
   app <- newApp
   runSdlApp
     defaultSdlOptions
       { sdlAppShouldQuit = pressedOnceIn KeyEscape
-      , sdlWindowSettings = defaultWindowSettings {wsTitle = "Tasks", wsSize = Size 720 640}
+      , sdlWindowSettings =
+          defaultWindowSettings {wsTitle = "Tasks", wsSize = Size 720 640}
       }
     (view app)
 
 view :: App -> NanoUI ()
 view app = columnWith (padAll 16 . gap 12 . grow) $ do
-  card (searchSection app)
-  card (flakySection app)
-  card (progressSection app)
+  card (heading "Slow search" >> searchCard app)
+  card (heading "Flaky request" >> flakyCard app)
+  card (heading "Streamed progress" >> progressCard app)
 
 -- | (a) A search whose results come from a slow job keyed by the query.
-searchSection :: App -> NanoUI ()
-searchSection app = do
-  heading "Slow search"
+-- ANCHOR: search_card
+searchCard :: App -> NanoUI ()
+searchCard app = do
   query <- useVar ""
   committed <- useVar ""
   resp <- searchInput' "Find a word" query
@@ -73,25 +78,37 @@ searchSection app = do
   status <- useTaskStatus (appSearch app) key (slowSearch key)
   -- While a new query runs, TaskRunning carries the previous results, so
   -- the list stays put instead of flashing empty.
-  let (hits, running) = case status of
-        TaskRunning previous -> (fromMaybe [] previous, True)
-        TaskDone found -> (found, False)
-        TaskFailed _ previous -> (fromMaybe [] previous, False)
+  let
+    (hits, running) = case status of
+      TaskRunning previous -> (fromMaybe [] previous, True)
+      TaskDone found -> (found, False)
+      TaskFailed _ previous -> (fromMaybe [] previous, False)
   rowWith (tight . gap 8 . alignMid) $ do
     -- The spinner comes and goes, so it sits in a scope: the label after it
     -- keeps its widget id either way.
     scope (when running spinner)
-    muted (T.pack (show (length hits)) <> " matches" <> if running then " (searching...)" else "")
+    muted
+      ( T.pack (show (length hits))
+          <> " matches"
+          <> if running then " (searching...)" else ""
+      )
   rowWith (wrap . gap 6 . fillW) $
-    forM_ (take 24 hits) $ \w -> withKey w (label w)
+    forM_ (take 24 hits) $
+      \w -> withKey w (label w)
+
+-- ANCHOR_END: search_card
 
 -- | Pretend to be slow. The result is forced only to weak head normal form
 -- on the worker, so force the list's spine here rather than in the view.
+-- ANCHOR: slow_search
 slowSearch :: Text -> IO [Text]
 slowSearch q = do
   threadDelay 500000
-  let found = filter (T.isInfixOf (T.toLower q)) wordList
+  let
+    found = filter (T.isInfixOf (T.toLower q)) wordList
   length found `seq` pure found
+
+-- ANCHOR_END: slow_search
 
 wordList :: [Text]
 wordList =
@@ -105,9 +122,9 @@ wordList =
     \tomato watermelon"
 
 -- | (b) A job that fails half the time, with a Retry button.
-flakySection :: App -> NanoUI ()
-flakySection app = do
-  heading "Flaky request"
+-- ANCHOR: flaky_card
+flakyCard :: App -> NanoUI ()
+flakyCard app = do
   attemptVar <- useVar (0 :: Int)
   attempt <- readVar attemptVar
   -- Same input every time, so the attempt number is the key: bumping it is
@@ -125,6 +142,8 @@ flakySection app = do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
 
+-- ANCHOR_END: flaky_card
+
 -- | Waits, then succeeds or throws on a coin flip. An exception thrown by
 -- the job becomes 'TaskFailed'.
 flakyRequest :: Int -> IO Text
@@ -136,9 +155,9 @@ flakyRequest attempt = do
     else throwIO (userError ("attempt " <> show (attempt + 1) <> " timed out"))
 
 -- | (c) A producer pushing progress ticks, alive only while "Run" is ticked.
-progressSection :: App -> NanoUI ()
-progressSection app = do
-  heading "Streamed progress"
+-- ANCHOR: progress_card
+progressCard :: App -> NanoUI ()
+progressCard app = do
   running <- useVar False
   checkbox "Run" running
   isRunning <- readVar running
@@ -154,4 +173,10 @@ progressSection app = do
         -- between frames share it.
         update (const i)
     progressBar (fromIntegral pct / 100)
-    muted (if pct >= 100 then "Done. Untick and tick Run to start over." else T.pack (show pct) <> "%")
+    muted
+      ( if pct >= 100
+          then "Done. Untick and tick Run to start over."
+          else T.pack (show pct) <> "%"
+      )
+
+-- ANCHOR_END: progress_card

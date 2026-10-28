@@ -24,9 +24,9 @@ import Control.Monad (forever, when)
 import Data.Bits (shiftR)
 import Data.Foldable (for_)
 import Data.Sequence (Seq, (|>))
-import qualified Data.Sequence as Seq
+import Data.Sequence qualified as Seq
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
@@ -56,7 +56,7 @@ data Feed = Feed
   , feedLevel :: !Double
   , feedPoints :: !(Seq (Double, Double))
   }
-  deriving (Eq)
+  deriving Eq
 
 emptyFeed :: Feed
 emptyFeed = Feed 0 42 0 Seq.empty
@@ -69,14 +69,21 @@ keepSamples = 200
 -- MMIX constants) and move the level by up to half a unit either way.
 advance :: Feed -> Feed
 advance feed =
-  let seed' = feedSeed feed * 6364136223846793005 + 1442695040888963407
-      -- The top 53 bits as a Double in [0, 1).
-      unit = fromIntegral (seed' `shiftR` 11) / 2 ^ (53 :: Int) :: Double
-      level' = feedLevel feed + unit - 0.5
-      !sample = (fromIntegral (feedIndex feed), level')
-      kept = feedPoints feed |> sample
-   in Feed (feedIndex feed + 1) seed' level' (Seq.drop (Seq.length kept - keepSamples) kept)
+  let
+    seed' = feedSeed feed * 6364136223846793005 + 1442695040888963407
+    -- The top 53 bits as a Double in [0, 1).
+    unit = fromIntegral (seed' `shiftR` 11) / 2 ^ (53 :: Int) :: Double
+    level' = feedLevel feed + unit - 0.5
+    !sample = (fromIntegral (feedIndex feed), level')
+    kept = feedPoints feed |> sample
+   in
+    Feed
+      (feedIndex feed + 1)
+      seed'
+      level'
+      (Seq.drop (Seq.length kept - keepSamples) kept)
 
+-- ANCHOR: chart_handles
 data App = App
   { appFeed :: !(Stream () Feed)
   , appSaved :: !(Var Feed)
@@ -86,16 +93,20 @@ data App = App
 newApp :: IO App
 newApp = App <$> newStream <*> newVar emptyFeed <*> newPlotCache
 
+-- ANCHOR_END: chart_handles
+
 main :: IO ()
 main = do
   app <- newApp
   runSdlApp
     defaultSdlOptions
       { sdlAppShouldQuit = pressedOnceIn KeyEscape
-      , sdlWindowSettings = defaultWindowSettings {wsTitle = "Live chart", wsSize = Size 760 520}
+      , sdlWindowSettings =
+          defaultWindowSettings {wsTitle = "Live chart", wsSize = Size 760 520}
       }
     (view app)
 
+-- ANCHOR: chart_card
 view :: App -> NanoUI ()
 view app = columnWith (padAll 16 . gap 12 . grow) $ do
   running <- useVar True
@@ -116,29 +127,50 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
     whenM (button (if isRunning then "Pause" else "Resume")) $ do
       when isRunning (writeVar (appSaved app) feed)
       writeVar running (not isRunning)
-    muted (if isRunning then "Live: a sample every 100 ms" else "Paused: the loop is idle")
+    muted
+      (if isRunning then "Live: a sample every 100 ms" else "Paused: the loop is idle")
 
-  let points = feedPoints feed
+  let
+    points = feedPoints feed
   -- A crosshair for reading values off the plot; the response reports the
   -- sample nearest the pointer.
-  resp <- withCursorShape UiCursorCrosshair (plot (appPlots app) (fillW . minH 300) (walkChart points))
+  resp <-
+    withCursorShape
+      UiCursorCrosshair
+      (plot (appPlots app) (fillW . minH 300) (walkChart points))
 
   rowWith (tight . gap 16 . alignMid . fillW) $ do
-    let ys = fmap snd points
+    let
+      ys = fmap snd points
     -- Both parts come and go, so each sits in a scope.
-    scope $ if Seq.null ys
-      then muted "Waiting for the first sample..."
-      else do
-        kv "min" (fmt (minimum ys))
-        kv "max" (fmt (maximum ys))
-        kv "last" (fmt (feedLevel feed))
+    scope $
+      if Seq.null ys
+        then muted "Waiting for the first sample..."
+        else do
+          kv "min" (fmt (minimum ys))
+          kv "max" (fmt (maximum ys))
+          kv "last" (fmt (feedLevel feed))
     scope . for_ (plotHover resp) $ \hover ->
-      kv "cursor" ("#" <> T.pack (show (round (hoverDataX hover) :: Int)) <> " = " <> fmt (hoverDataY hover))
+      kv
+        "cursor"
+        ( "#"
+            <> T.pack (show (round (hoverDataX hover) :: Int))
+            <> " = "
+            <> fmt (hoverDataY hover)
+        )
 
+-- ANCHOR_END: chart_card
+
+-- ANCHOR: walk_chart
 walkChart :: Seq (Double, Double) -> Chart
 walkChart points =
-  withGrid GridBoth . withLegend LegendNone . withXAxis "sample" . withYAxis "value" $
+  withGrid GridBoth
+    . withLegend LegendNone
+    . withXAxis "sample"
+    . withYAxis "value" $
     chart [line "walk" points]
+
+-- ANCHOR_END: walk_chart
 
 fmt :: Double -> Text
 fmt x = T.pack (showFFloat (Just 2) x "")

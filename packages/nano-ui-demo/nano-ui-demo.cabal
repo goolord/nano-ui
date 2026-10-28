@@ -176,6 +176,11 @@ common example
         nano-ui ^>=0.2,
         nano-ui-sdl ^>=0.2
 
+executable nano-ui-example-quickstart
+    import:           example
+    main-is:          Quickstart.hs
+    build-depends:    text ^>=2.1
+
 executable nano-ui-example-hello
     import:           example
     main-is:          Hello.hs
@@ -295,4 +300,20 @@ test-suite nano-ui-terminal-test
     main-is:          TerminalTest.hs
     hs-source-dirs:   test, examples
     other-modules:    Terminal
+
+-- Verifies that book includes, anchors, and code examples exist and build.
+test-suite nano-ui-book-test
+    default-language: GHC2024
+    default-extensions: OverloadedStrings
+    type:             exitcode-stdio-1.0
+    main-is:          BookTest.hs
+    hs-source-dirs:   test
+    if os(windows)
+        ghc-options:  -optl-mconsole
+    build-depends:
+        base >=4.20 && <4.23,
+        directory ^>=1.3,
+        filepath ^>=1.5,
+        process ^>=1.6,
+        text ^>=2.1
 

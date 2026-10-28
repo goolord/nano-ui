@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+
 -- | TodoList: a list whose rows are added, removed, filtered and reordered,
 -- each keeping its own local state.
 --
@@ -26,32 +28,97 @@
 -- validation and resetting.
 --
 -- Run it with @cabal run nano-ui-example-todo-list@.
-{-# LANGUAGE OverloadedRecordDot #-}
-
 module Main (main) where
 
 import Control.Monad (forM_, when)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import GHC.Generics (Generic)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 
-data Todo = Todo {todoId :: !Int, todoText :: !Text, todoDone :: !Bool}
+-- ANCHOR: model
+data Todo = Todo
+  { todoId :: !Int
+  , todoText :: !Text
+  , todoDone :: !Bool
+  }
   deriving (Eq, Generic)
 
 -- | The items in order, and the id the next one gets.
-data Todos = Todos {todoItems :: ![Todo], todoNext :: !Int}
+data Todos = Todos
+  { todoItems :: ![Todo]
+  , todoNext :: !Int
+  }
   deriving (Eq, Generic)
 
 newtype App = App {appTodos :: Var Todos}
 
+-- ANCHOR_END: model
+
+-- ANCHOR: new_app
 newApp :: IO App
 newApp =
-  App <$> newVar (Todos [Todo 0 "Read the header" True, Todo 1 "Water the plants" False, Todo 2 "Edit me, then delete the first row" False] 3)
+  App
+    <$> newVar
+      ( Todos
+          [ Todo 0 "Read the header" True
+          , Todo 1 "Water the plants" False
+          , Todo 2 "Edit me, then delete the first row" False
+          ]
+          3
+      )
 
+-- ANCHOR_END: new_app
+
+-- ANCHOR: main
+main :: IO ()
+main = do
+  app <- newApp
+  runSdlApp
+    defaultSdlOptions
+      { sdlAppShouldQuit = pressedOnceIn KeyEscape
+      , sdlWindowSettings =
+          defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
+      }
+    (todoApp app)
+
+-- ANCHOR_END: main
+
+-- ANCHOR: todo_app
+todoApp :: App -> NanoUI ()
+todoApp app = do
+  let
+    items = app.appTodos.todoItems
+  draft <- useVar ""
+  filt <- useEnumVar All
+  columnWith (padAll 20 . gap 12 . fillW . fillH) $ do
+    heading "Todos"
+    newItemRow app.appTodos draft
+    filterRow items filt
+    todoList items filt
+
+-- ANCHOR_END: todo_app
+
+-- ANCHOR: new_item_row
+newItemRow :: Var Todos -> Var Text -> NanoUI ()
+newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
+  inputR <-
+    textInputConfigured'
+      defaultTextInputConfig {ticPlaceholder = "What needs doing?"}
+      draft
+  clicked <- button "Add"
+  text <- T.strip <$> readVar draft
+  when ((clicked || respSubmitted inputR) && not (T.null text)) $ do
+    modifyVar todosVar (\(Todos xs n) -> Todos (xs <> [Todo n text False]) (n + 1))
+    writeVar draft ""
+    requestFocus (respId inputR)
+
+-- ANCHOR_END: new_item_row
+
+-- ANCHOR: filter_and_count
 data Filter = All | Active | Done
   deriving (Eq, Show, Enum, Bounded)
 
@@ -60,50 +127,43 @@ matches All _ = True
 matches Active t = not (todoDone t)
 matches Done t = todoDone t
 
-main :: IO ()
-main = do
-  app <- newApp
-  runSdlApp
-    defaultSdlOptions
-      { sdlAppShouldQuit = pressedOnceIn KeyEscape
-      , sdlWindowSettings = defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
-      }
-    (todoApp app)
+filterRow :: Var [Todo] -> Var Filter -> NanoUI ()
+filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
+  -- A header for every filter, as a segmented control.
+  boundedTabBarConfigured
+    defaultTabsConfig {tabsStyle = TabSegmented}
+    (T.pack . show)
+    filt
+  flex
+  todos <- readVar items
+  let
+    left = length (filter (not . todoDone) todos)
+  labelWith
+    (tight . alignMid . fontMuted)
+    (T.pack (show left) <> if left == 1 then " item left" else " items left")
+  disabledWhen (left == length todos) $
+    whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
 
-todoApp :: App -> NanoUI ()
-todoApp app = do
-  let items = app.appTodos.todoItems
-  draft <- useVar ""
-  filt <- useEnumVar All
-  columnWith (padAll 20 . gap 12 . fillW . fillH) $ do
-    heading "Todos"
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
-      inputR <- textInputConfigured' defaultTextInputConfig {ticPlaceholder = "What needs doing?"} draft
-      clicked <- button "Add"
-      text <- T.strip <$> readVar draft
-      when ((clicked || respSubmitted inputR) && not (T.null text)) $ do
-        modifyVar app.appTodos (\(Todos xs n) -> Todos (xs <> [Todo n text False]) (n + 1))
-        writeVar draft ""
-        requestFocus (respId inputR)
-    rowWith (tight . gap 12 . alignMid . fillW) $ do
-      -- A header for every filter, as a segmented control.
-      boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} (T.pack . show) filt
-      flex
-      todos <- readVar items
-      let left = length (filter (not . todoDone) todos)
-      labelWith (tight . alignMid . fontMuted) (T.pack (show left) <> if left == 1 then " item left" else " items left")
-      disabledWhen (left == length todos) $
-        whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
-    shownFilter <- readVar filt
-    scrollWith (grow . fillW) $
-      columnWith (tight . gap 6 . fillW) $
-        withElemVars todoId items $ \todos at -> do
-          let shown = filter (matches shownFilter) todos
-          -- Each row gets its visible neighbours, so Up and Down skip rows
-          -- the filter hides.
-          forM_ (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) <> [Nothing])) $ \(todo, above, below) ->
-            withKey (todoId todo) (todoRow items (at todo) above below)
+-- ANCHOR_END: filter_and_count
 
+-- ANCHOR: todo_list
+todoList :: Var [Todo] -> Var Filter -> NanoUI ()
+todoList items filt = do
+  shownFilter <- readVar filt
+  scrollWith (grow . fillW) $
+    columnWith (tight . gap 6 . fillW) $
+      withElemVars todoId items $ \todos at -> do
+        let
+          shown = filter (matches shownFilter) todos
+        -- Each row gets its visible neighbours, so Up and Down skip rows
+        -- the filter hides.
+        forM_
+          (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) <> [Nothing])) $ \(todo, above, below) ->
+          withKey (todoId todo) (todoRow items (at todo) above below)
+
+-- ANCHOR_END: todo_list
+
+-- ANCHOR: todo_row
 todoRow :: Var [Todo] -> Var Todo -> Maybe Todo -> Maybe Todo -> NanoUI ()
 todoRow items todo above below = do
   -- Local state, kept under this row's key.
@@ -112,11 +172,14 @@ todoRow items todo above below = do
   draft <- useVar ""
   t <- readVar todo
   isEditing <- readVar editing
-  let tid = todoId t
-      save = do
-        writeVar todo.todoText =<< readVar draft
-        writeVar editing False
+  let
+    tid = todoId t
+    save = do
+      writeVar todo.todoText =<< readVar draft
+      writeVar editing False
+  -- ANCHOR: take_escape
   when isEditing (whenM takeEscape (writeVar editing False))
+  -- ANCHOR_END: take_escape
   rowWith (tight . gap 8 . alignMid . fillW) $ do
     checkboxWith alignMid "" todo.todoDone
     -- The label and the field swap places, so they share a scope.
@@ -127,23 +190,41 @@ todoRow items todo above below = do
           -- Focus can only move to a widget declared in the pass that asks,
           -- and the field first appears in the pass after Edit was clicked,
           -- so the request waits in a Var.
-          whenM (readVar focusPending) (requestFocus (respId fieldR) >> writeVar focusPending False)
+          whenM
+            (readVar focusPending)
+            (requestFocus (respId fieldR) >> writeVar focusPending False)
           when (respSubmitted fieldR) save
-        else labelWith (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id)) (todoText t)
+        else
+          labelWith
+            (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id))
+            (todoText t)
     whenM (button (if isEditing then "Save" else "Edit")) $
       if isEditing
         then save
-        else writeVar draft (todoText t) >> writeVar editing True >> writeVar focusPending True
-    disabledWhen (null above) $ whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
-    disabledWhen (null below) $ whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
-    whenM (styled destructive (button "Delete")) (modifyVar items (filter ((/= tid) . todoId)))
+        else
+          writeVar draft (todoText t)
+            >> writeVar editing True
+            >> writeVar focusPending True
+    disabledWhen (null above) $
+      whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
+    disabledWhen (null below) $
+      whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
+    whenM
+      (styled destructive (button "Delete"))
+      (modifyVar items (filter ((/= tid) . todoId)))
+
+-- ANCHOR_END: todo_row
+
+-- ANCHOR: swap_ids
 
 -- | Swap the places of two items, by id.
 swapIds :: Int -> Int -> [Todo] -> [Todo]
 swapIds a b xs = map pick xs
-  where
-    byId i t = fromMaybe t (find ((== i) . todoId) xs)
-    pick t
-      | todoId t == a = byId b t
-      | todoId t == b = byId a t
-      | otherwise = t
+ where
+  byId i t = fromMaybe t (find ((== i) . todoId) xs)
+  pick t
+    | todoId t == a = byId b t
+    | todoId t == b = byId a t
+    | otherwise = t
+
+-- ANCHOR_END: swap_ids
