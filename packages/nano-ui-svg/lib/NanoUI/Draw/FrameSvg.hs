@@ -32,7 +32,6 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (find, partition, sortOn)
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Text (Text)
@@ -48,7 +47,6 @@ import NanoUI
   , Size (..)
   , colorA
   , rectIntersect
-  , themeWindow
   )
 import NanoUI.Backend
   ( DrawData (..)
@@ -128,7 +126,6 @@ frameToSvg :: FrameSvgConfig -> Context -> Input -> DrawData -> IO Text
 frameToSvg cfg ctx inp dd = do
   (pageSpans, overlaySpans) <- collectRasterSpans ctx inp
   spanStyles <- collectSpanStyles ctx
-  baseTheme <- readIORef (ctxTheme ctx)
   live <- liveDrawingIds ctx
   dc <- readIORef (ctxDrawingCache ctx)
   recorded <- drawRecordedOps ctx
@@ -180,7 +177,7 @@ frameToSvg cfg ctx inp dd = do
         <> attr "viewBox" ("0 0 " <> fmtNum 0 vw <> " " <> fmtNum 0 vh)
         <> ">"
         <> allDefs
-        <> solidRect p vp (fromMaybe (themeWindow baseTheme) (drawBackground dd))
+        <> solidRect p vp (drawClear dd)
         <> render "s" pageShapes
         <> frags
         <> pageTextBody

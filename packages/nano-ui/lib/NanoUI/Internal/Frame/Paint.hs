@@ -251,9 +251,9 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- view, but on clip frames (scrolling, resize) the strip vacated by
   -- scrolled content has no covering command and the retained texture would
   -- show stale pixels, a ghost of a previous scroll position. Paint the full
-  -- rect with the page colour when the frame's own surface does not already
-  -- cover it ('ctxPagePainted'); the clip backdrop paints it on the frames
-  -- that cut the view to damage.
+  -- rect with the page colour when the frame's clear does not already cover
+  -- it ('drawClear'); the clip backdrop paints it on the frames that cut the
+  -- view to damage.
   unless (scrollBare (snConfig sn)) $ do
     surface <- fmap (floatingSurface tm) <$> floatingAncestor ctx idx
     let inFloating = isJust surface
@@ -262,20 +262,20 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
     if wTag == SizingGrow && hTag == SizingGrow
       then do
         let bg = maybe (pageBackground tm) styleBg surface
-        -- A full frame lays the page surface over the window clear before the
-        -- view ('paintPageSurface'). Drawn first, in that same opaque colour, the
-        -- backdrop would only fill the same pixels again: a whole-window blend
-        -- on every continuous frame. Anything drawn before it (a panel, a
-        -- card, a layer below), a scope's other page colour or a translucent
-        -- one still needs it, as clip frames do.
+        -- A full frame clears to the page surface laid over the window
+        -- colour before the view ('drawClear'). Drawn first, in that same
+        -- opaque colour, the backdrop would only fill the same pixels again:
+        -- a whole-window blend on every continuous frame. Anything drawn
+        -- before it (a panel, a card, a layer below), a scope's other page
+        -- colour or a translucent one still needs it, as clip frames do.
         redundant <-
           if inFloating || colorA bg /= 255
             then pure False
             else do
               full <- readIORef (ctxPaintFull ctx)
               drawn <- drawnVertexCount da
-              page <- pageBackground <$> nodeTheme ctx 0
-              pure (full && drawn == 0 && bg == page)
+              clear <- getDrawClear da
+              pure (full && drawn == 0 && bg == clear)
         unless redundant $ pushRect da rect bg
       else do
         let well = (fromMaybe (themeInput tm) surface) {styleCornerRadius = 0}

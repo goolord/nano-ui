@@ -35,7 +35,7 @@ import NanoUI.Internal.NativeWindow (clearWindowClose)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (Padding (..), Theme (..), pageBackground, themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
-import NanoUI.Internal.Types (Color, Damage (..), Rect (..), Size (..), colorA, damageIsEmpty, rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (Color, Damage (..), Rect (..), Size (..), colorA, colorB, colorG, colorR, colorRGBA, damageIsEmpty, rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 import NanoUI.Internal.Var (beginVarPass, endVarFrame, takeVarRerun)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
@@ -287,6 +287,7 @@ drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size = do
           <*> readIORef (ctxActiveId ctx)
           <*> getPaintSignature na
           <*> atlasToken (ctxImageAtlas ctx)
+          <*> frameClearColor ctx
 
 -- | The colour of the page surface this frame: the root node's theme, so a
 -- scope around the whole view applies, or the base theme's for an empty view.
@@ -298,20 +299,29 @@ framePageBackground ctx = do
     then pageBackground <$> nodeTheme ctx 0
     else pure (pageBackground base)
 
--- | Lay the page surface over the window clear. A page the same colour as the
--- clear is left out. An opaque page different from the clear is left to the
--- backend, which clears to it in place of the window colour, without a vertex
--- in the draw list. A translucent one is a command here, so it blends over
--- the clear.
-paintPageSurface :: Context -> Size -> IO ()
-paintPageSurface ctx (Size w h) = do
+-- | The colour a full frame clears to ('drawClear'): the page surface laid
+-- over the window colour as the backends blend a draw, so an opaque page
+-- replaces the window's and a translucent one tints it. The default page is
+-- the window itself, so a translucent window keeps its own alpha.
+frameClearColor :: Context -> IO Color
+frameClearColor ctx = do
   page <- framePageBackground ctx
-  clear <- themeWindow <$> readIORef (ctxTheme ctx)
-  let da = ctxDrawArena ctx
-  unless (w <= 0 || h <= 0 || colorA page == 0 || page == clear) $
-    if colorA page == 255
-      then setDrawBackground da (Just page)
-      else pushRect da (Rect 0 0 w h) page
+  window <- themeWindow <$> readIORef (ctxTheme ctx)
+  pure (if page == window then window else blendOver page window)
+
+-- | @top@ over @bottom@ with straight alpha, as SDL's and the GL backend's
+-- blend lays a draw over the target: the colour mixed by the top's alpha,
+-- and the alphas combined.
+blendOver :: Color -> Color -> Color
+blendOver top bottom
+  | ta >= 1 = top
+  | ta <= 0 = bottom
+  | otherwise = colorRGBA (mix colorR) (mix colorG) (mix colorB) (round (255 * (ta + ba * (1 - ta))))
+  where
+    unit c = fromIntegral c / 255 :: Float
+    ta = unit (colorA top)
+    ba = unit (colorA bottom)
+    mix ch = round (fromIntegral (ch top) * ta + fromIntegral (ch bottom) * (1 - ta))
 
 -- | Paint the frame. Clip frames repaint the damaged region of the retained
 -- texture, which preserves the other pixels ('paintDamageClip'). Full-present
@@ -320,12 +330,12 @@ paintFrame :: Context -> Input -> Size -> Bool -> Bool -> IO DrawData
 paintFrame ctx frameInp size explain paintFull = do
   let da = ctxDrawArena ctx
   resetDrawArena da
+  clear <- frameClearColor ctx
+  setDrawClear da clear
   beginLayer da LayerBackground
-  if paintFull
-    then paintPageSurface ctx size
-    else do
-      damage <- takeDamage ctx
-      paintDamageClip ctx damage =<< takeDamagePieces ctx
+  unless paintFull $ do
+    damage <- takeDamage ctx
+    paintDamageClip da clear damage =<< takeDamagePieces ctx
   lowerShapes ctx
   -- Page outlines go above the page's scrollbars and below floating panels.
   when explain $ do
@@ -393,17 +403,15 @@ drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww w
 -- paints a backdrop over each, and every command is cut to them. Each is
 -- inflated by a logical pixel to cover the runner's outward snap. An empty clip
 -- stays empty, so a frame with nothing damaged paints nothing.
-paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
-paintDamageClip _ DamageFull _ = pure ()
-paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
+paintDamageClip :: DrawArena -> Color -> Damage -> [Rect] -> IO ()
+paintDamageClip _ _ DamageFull _ = pure ()
+paintDamageClip da clear (DamageClip r) pieces = do
   let clip = if rectNonEmpty r then rectInflate 1 r else r
       pieceClips = map (rectInflate 1) pieces
       backdrops = if null pieces then [clip] else pieceClips
   setClip da clip
   setClipPieces da pieceClips
-  when (rectNonEmpty r) $ do
-    page <- framePageBackground ctx
-    mapM_ (flip (pushRect da) page) backdrops
+  when (rectNonEmpty r) $ mapM_ (flip (pushRect da) clear) backdrops
 
 -- | Lay out the arena and place the floating panels over it. The cached solve
 -- is restored when it was taken at this size and font generation and @check@

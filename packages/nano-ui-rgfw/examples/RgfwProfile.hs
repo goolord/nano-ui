@@ -17,7 +17,6 @@ import NanoUI
   , Rect (..)
   , Size (..)
   , TextFont (..)
-  , Theme (..)
   , V2 (..)
   , canvas
   , colorRGBA
@@ -89,7 +88,7 @@ main = do
               when drawn $ do
                 (baseSpans, overlaySpans) <- collectRasterSpans ctx frameInp
                 pieces <- if force then pure [] else takeDamagePieces ctx
-                renderArenaGl renderer getCozetteFont scale physW physH (themeWindow theme)
+                renderArenaGl renderer getCozetteFont scale physW physH
                   (if force then DamageFull else damage) pieces draw baseSpans overlaySpans
                 R.swapBuffersGL win
               pure drawn

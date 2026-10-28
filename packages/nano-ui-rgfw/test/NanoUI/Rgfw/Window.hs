@@ -17,7 +17,7 @@ import Data.Text qualified as T
 import Foreign.C.Types (CUChar (..))
 import Foreign.Ptr (Ptr)
 import NanoUI
-  ( AlignX (..), AlignY (..), DrawOp (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..), Rect (..), Response, Size (..), Theme (..), V2 (..), WindowMode (..)
+  ( AlignX (..), AlignY (..), DrawOp (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..), Rect (..), Response, Size (..), V2 (..), WindowMode (..)
   , WindowSettings (..), WindowState (..), askInput, askWindow, button', canvas, column, defaultWindowSettings, drawText, inlineText, quitUi, requestFrame, respRect
   , rgbaBytes, rgbaHeight, rgbaWidth, richText, setWindowTitleUi, strong, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
   , tomorrowNightMinDarkTheme, pageColor, windowColor
@@ -67,7 +67,7 @@ testGlWindow assert =
         writeIORef (ctxPaintFull ctx) True
         (_, draw, _) <- runFrame ctx inp view
         (base, overlay) <- collectRasterSpans ctx inp
-        renderArenaGl renderer getCozetteFont 1 w h (themeWindow theme) DamageFull [] draw base overlay
+        renderArenaGl renderer getCozetteFont 1 w h DamageFull [] draw base overlay
         img <- maybe (fail "OpenGL window: no screenshot") pure =<< retainedPixels renderer w h
         let name s = "OpenGL window: " ++ s
             at x y = [fromIntegral (BS.index (rgbaBytes img) ((y * w + x) * 4 + c)) | c <- [0 .. 3]]
@@ -126,7 +126,7 @@ testGlDrawingText assert =
               when drawn $ do
                 (base, overlay) <- collectRasterSpans ctx frameInp
                 pieces <- if force then pure [] else takeDamagePieces ctx
-                renderArenaGl renderer getCozetteFont 1 w h (themeWindow theme) (if force then DamageFull else damage) pieces draw base overlay
+                renderArenaGl renderer getCozetteFont 1 w h (if force then DamageFull else damage) pieces draw base overlay
               pure drawn
             settle :: Int -> Input -> NanoUI Response -> IO ()
             settle n frameInp ui = do

@@ -11,7 +11,8 @@ module NanoUI.Internal.Draw.Arena
   , getDrawSnapScale
   , setDrawSquareGeometry
   , setDrawExternalText
-  , setDrawBackground
+  , setDrawClear
+  , getDrawClear
   , setDrawRecordOps
   , recordOp
   , recordedOps
@@ -91,7 +92,7 @@ newDrawArena = do
   daExternalText <- newIORef False
   daClipPieces <- newIORef emptyPrimArray
   daTextSpans <- newIORef ([], [])
-  daBackground <- newIORef Nothing
+  daClear <- newIORef (Color 0)
   daRecordOps <- newIORef False
   daRecordedOps <- newIORef []
   let
@@ -106,7 +107,7 @@ resetDrawArena da = do
   setClip da (Rect 0 0 1e9 1e9)
   writeIORef (daCurrentTexture da) glyphAtlasTextureId
   writeIORef (daClipPieces da) emptyPrimArray
-  writeIORef (daBackground da) Nothing
+  writeIORef (daClear da) (Color 0)
   -- Only here: a reused frame paints nothing and keeps the last paint's.
   writeIORef (daTextSpans da) ([], [])
   writeIORef (daRecordedOps da) []
@@ -161,12 +162,16 @@ getDrawSnapScale da = readIORef (daSnapScale da)
 setDrawSquareGeometry :: DrawArena -> Bool -> IO ()
 setDrawSquareGeometry da = writeIORef (daSquareGeometry da)
 
--- | The page surface the backend fills over the window clear before the
--- frame's commands. 'Nothing' when the clear already covers it, and on clip
--- frames, whose commands paint the page backdrop themselves.
-{-# INLINE setDrawBackground #-}
-setDrawBackground :: DrawArena -> Maybe Color -> IO ()
-setDrawBackground da = writeIORef (daBackground da)
+-- | The colour the backend clears a full frame to before its commands
+-- ('drawClear').
+{-# INLINE setDrawClear #-}
+setDrawClear :: DrawArena -> Color -> IO ()
+setDrawClear da = writeIORef (daClear da)
+
+-- | This paint's clear colour, as 'setDrawClear' left it.
+{-# INLINE getDrawClear #-}
+getDrawClear :: DrawArena -> IO Color
+getDrawClear da = readIORef (daClear da)
 
 -- | Record every solid shape the emitters draw ('recordedOps'), for
 -- exporters that redraw a frame as vectors. Off, each emitter pays one flag
@@ -359,7 +364,7 @@ finishDraw da = do
       then pure (arr0, count0)
       else cutCmdsToPieces pieces arr0 count0
   (cmds, offsets) <- groupCmdsByLayer arr count
-  bg <- readIORef (daBackground da)
+  clear <- readIORef (daClear da)
   pure
     DrawData
       { drawVertices = vFPtr
@@ -368,7 +373,7 @@ finishDraw da = do
       , drawIndexCount = iCount
       , drawCommands = cmds
       , drawLayerOffsets = offsets
-      , drawBackground = bg
+      , drawClear = clear
       }
 
 -- | Each command once per piece its clip meets, clipped to that piece, in

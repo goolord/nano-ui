@@ -14,7 +14,7 @@ import Control.Exception (onException)
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (isNothing)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
@@ -22,7 +22,7 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (free, malloc)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (poke)
-import NanoUI (Color, Rect (..), colorA, colorB, colorG, colorR, rectIntersect)
+import NanoUI (Rect (..), colorA, colorB, colorG, colorR, rectIntersect)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, lookupImage)
 import NanoUI.Testing
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
@@ -76,25 +76,23 @@ applyClipState batch ref ren next = do
         setRenderClipRect ren (PtrConst.unsafeFromPtr (rbClipRect batch))
 
 -- | Draw every command in layer order, clipped to its own rect and to
--- the damage. A full repaint clears the target to the colour first.
+-- the damage. A full repaint clears the target to 'drawClear' first.
 renderDrawDataPass ::
   RenderBatch
   -> Ptr SDL_Renderer
-  -> Color
   -> DrawData
   -> ImageAtlas
   -> Ptr ()
   -- ^ The glyph atlas, whose pages text draws from ('glyphPageTexture').
   -> Damage
   -> IO ()
-renderDrawDataPass batch ren bg drawData images glyphs damage =
+renderDrawDataPass batch ren drawData images glyphs damage =
   unless (damageIsEmpty damage) $ do
     clipRef <- newIORef ClipNone
     void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
     mDamage <- case damage of
       DamageFull -> do
-        -- An opaque page surface covers the window clear, so it is the clear.
-        let clear = fromMaybe bg (drawBackground drawData)
+        let clear = drawClear drawData
         void $ setRenderDrawColorSafe ren (colorR clear) (colorG clear) (colorB clear) (colorA clear)
         void $ renderClearSafe ren
         pure Nothing

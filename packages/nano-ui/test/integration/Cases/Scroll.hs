@@ -288,11 +288,11 @@ runPageBackdropTest ctx failed = do
         writeIORef (ctxPaintFull ctx) True
         _ <- warmup2 ctx inp0 ui
         (_, draw, _) <- runFrame ctx inp0 ui
-        pure (drawBackground draw)
+        pure (drawClear draw)
       red = colorRGBA 1 2 3 255
-  pageOf (page id) >>= assertEq failed Nothing
-  pageOf (page (themed (pageColor red theme))) >>= assertEq failed (Just red)
-  pageOf (page (themed (panelPage theme))) >>= assertEq failed (Just (styleBg (themePanel theme)))
+  pageOf (page id) >>= assertEq failed (themeWindow theme)
+  pageOf (page (themed (pageColor red theme))) >>= assertEq failed red
+  pageOf (page (themed (panelPage theme))) >>= assertEq failed (styleBg (themePanel theme))
 
 -- A label far taller than its scroller draws only the lines near the
 -- viewport: its quads stay few however long the text is, and every row of

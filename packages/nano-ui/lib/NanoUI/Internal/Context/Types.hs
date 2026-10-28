@@ -409,6 +409,9 @@ data DrawReuseKey = DrawReuseKey
   , drkArena :: !Word64
   -- ^ 'NanoUI.Internal.Layout.Arena.getPaintSignature'.
   , drkAtlas :: !AtlasToken
+  , drkClear :: !Color
+  -- ^ The frame's clear colour ('NanoUI.Internal.Draw.Types.drawClear'):
+  -- the base theme's window colour is not in the arena's signature.
   }
   deriving (Eq)
 
@@ -973,11 +976,10 @@ data Context = Context
   -- | True when the next present must repaint the whole window (fresh retain
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region. A backend
-  -- that sets it clears the target to 'NanoUI.themeWindow' of 'ctxTheme', as
-  -- it is after the frame, before it draws the frame, or to an opaque page
-  -- surface ('NanoUI.pageBackground') the frame leaves in
-  -- 'NanoUI.Internal.Draw.Types.drawBackground'; the frame paints the page
-  -- as the clip backdrop otherwise.
+  -- that sets it clears the target to the frame's
+  -- 'NanoUI.Internal.Draw.Types.drawClear' (the page surface laid over
+  -- 'NanoUI.themeWindow') before it draws the frame; the frame paints that
+  -- colour as the clip backdrop otherwise.
   , ctxPaintFull :: !(IORef Bool)
   , ctxDrawReuse :: !(IORef DrawReuse)
   -- | Whether the host reads this frame's damage

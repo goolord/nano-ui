@@ -147,22 +147,19 @@ renderArenaGl ::
   Float -> -- logical (layout) -> physical (pixel) scale
   Int -> -- framebuffer width (physical pixels)
   Int -> -- framebuffer height
-  Color -> -- clear colour
   Damage -> -- what to redraw, in logical pixels
   [Rect] -> -- the damage's pieces, if any
-  DrawData ->
+  DrawData -> -- the frame, and the colour a full frame clears to
   [TextSpan] -> -- base spans
   [TextSpan] -> -- overlay spans
   IO ()
-renderArenaGl r font !scale !fbW !fbH bg damage pieces drawData baseSpans overlaySpans = do
+renderArenaGl r font !scale !fbW !fbH damage pieces drawData baseSpans overlaySpans = do
   let !h = glHandle r
       (!full, textBoxes) = case damage of
         DamageFull -> (1, [(0, 0, fbW, fbH)])
         DamageClip rect -> (0, map (damageBox scale fbW fbH) (if null pieces then [rect] else pieces))
-      -- An opaque page surface covers the window clear, so it is the clear.
-      (!clear, !clearAll) = maybe (bg, full) (\page -> (page, 1)) (drawBackground drawData)
-      (!bgR, !bgG, !bgB, _) = colorFloats clear
-  began <- c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB clearAll
+      (!bgR, !bgG, !bgB, _) = colorFloats (drawClear drawData)
+  began <- c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB full
   when (began == 0) $ fail "nano-ui-rgfw: retained framebuffer setup failed"
   atlas <- ensureAtlas r font scale
   buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6 * length textBoxes)

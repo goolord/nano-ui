@@ -305,11 +305,11 @@ data DrawData = DrawData
   , drawLayerOffsets :: !(PrimArray Int)
   -- ^ Cumulative command offsets: layer @i@ occupies @[offsets[i], offsets[i+1])@.
   -- Includes a final sentinel equal to 'drawCmdCount'; empty layers repeat offsets.
-  , drawBackground :: !(Maybe Color)
-  -- ^ The opaque page surface a full frame clears to in place of the window
-  -- colour, before 'drawCommands'. 'Nothing' when the window clear already
-  -- covers it, or on a clip frame, whose commands paint the page backdrop
-  -- themselves.
+  , drawClear :: !Color
+  -- ^ The colour a full frame clears the target to before 'drawCommands':
+  -- the page surface ('NanoUI.pageBackground') laid over the window colour
+  -- ('NanoUI.themeWindow'). A clip frame's commands paint it as their own
+  -- backdrop.
   }
 
 -- | Number of batches across all layers.
@@ -367,9 +367,8 @@ data DrawArena = DrawArena
   -- 'NanoUI.Internal.Frame.Spans.collectRasterSpans' and emptied only by
   -- 'NanoUI.Internal.Draw.Arena.resetDrawArena', so a reused frame keeps
   -- the spans of the paint that drew it.
-  , daBackground :: !(IORef (Maybe Color))
-  -- ^ The page surface this paint leaves for the backend to clear to; see
-  -- 'drawBackground'.
+  , daClear :: !(IORef Color)
+  -- ^ This paint's clear colour; see 'drawClear'.
   , daRecordOps :: !(IORef Bool)
   -- ^ Whether the shape emitters record what they draw ('daRecordedOps').
   -- Persists across 'NanoUI.Internal.Draw.Arena.resetDrawArena'.

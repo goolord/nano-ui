@@ -253,7 +253,7 @@ geometry points = do
   indices <- mallocForeignPtrBytes (4 * n)
   withForeignPtr vertices $ \p -> pokeArray (castPtr p) [CFloat v | (x, y) <- points, v <- [x, y, 1, 0, 0, 1, 0, 0]]
   withForeignPtr indices $ \p -> pokeArray (castPtr p) [0 .. fromIntegral n - 1 :: CInt]
-  pure (DrawData vertices n indices n (U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent)) (primArrayFromList [0, 0, 1, 1, 1]) Nothing)
+  pure (DrawData vertices n indices n (U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent)) (primArrayFromList [0, 0, 1, 1, 1]) black)
 
 -- | A triangle covering pixel (20, 20) that samples @texture@, with floats
 -- written at each vertex's byte offsets: colour at 8 to 20, UV at 24 and 28.
@@ -316,12 +316,12 @@ main = do
     setEnv "SDL_RENDER_DRIVER" "software"
   unless bench keyboardTranslation
   ctx <- newPixelContext
-  -- These checks read pixels over a black clear; give the page the same
-  -- colour so its fill over that clear changes nothing.
+  -- These checks read pixels over a black clear: a black page makes the
+  -- frame's clear black.
   getTheme ctx >>= setTheme ctx . pageColor black
   withSdlBench ctx $ \_ env -> bracket newImageAtlas destroyImageAtlas $ \images ->
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do
-      let drawWithGlyph glyphs dd dmg = renderDrawDataPass batch (sdlRenderer env) black dd images glyphs dmg >> flushRenderBatch batch
+      let drawWithGlyph glyphs dd dmg = renderDrawDataPass batch (sdlRenderer env) dd images glyphs dmg >> flushRenderBatch batch
           draw = drawWithGlyph nullPtr
           damage = DamageClip (Rect 15 15 10 10)
           step name act = act >> putStrLn ("SDL " ++ name ++ ": ok")

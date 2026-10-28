@@ -189,7 +189,6 @@ presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
   -- A null texture draws full-repaint sessions straight to the window.
   unlessM ((&&) <$> setRenderTarget ren tex <*> setRenderScale ren scale scale) $
     fail "SDL_SetRenderTarget/Scale failed"
-  theme <- readIORef (ctxTheme ctx)
   let glyphs = glyphAtlasHandle (sdlFontCache env)
   -- A transparent window draws atlas textures with its own blend mode.
   -- Set it after the UI pass, which can create atlas textures.
@@ -200,7 +199,7 @@ presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
   -- Partial updates preserve the undamaged part of the retained texture.
   -- The batch is flushed even when the pass throws, so no geometry leaks
   -- into the next frame.
-  renderDrawDataPass (sdlBatch env) ren (themeWindow theme) drawData (sdlImages env) glyphs damage
+  renderDrawDataPass (sdlBatch env) ren drawData (sdlImages env) glyphs damage
     `finally` flushRenderBatch (sdlBatch env)
   t2 <- getMonotonicTime
   unlessM (if direct then setRenderScale ren 1 1 else copyRetained env tex) $

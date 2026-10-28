@@ -21,7 +21,8 @@ module NanoUI.Internal.Draw
   , setDrawSnapScale
   , getDrawSnapScale
   , setDrawSquareGeometry
-  , setDrawBackground
+  , setDrawClear
+  , getDrawClear
   , setDrawExternalText
   , setDrawRecordOps
   , recordedOps

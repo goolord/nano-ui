@@ -9,11 +9,11 @@
   background underneath.
 
 - **Breaking:** `Theme` gained `themePage` (`Maybe Color`; `Nothing` means
-  `themeWindow`), and `DrawData` gained `drawBackground`, the page colour a
-  host draws over its window clear on a full frame. Themes built with record
-  updates need no change; a full `Theme` record construction must set the
-  field, and a host that renders `DrawData` itself must fill
-  `drawBackground`.
+  `themeWindow`), and `DrawData` gained `drawClear`, the colour a host
+  clears to on a full frame: the page laid over the window colour. Themes
+  built with record updates need no change; a full `Theme` record
+  construction must set the field, and a host that renders `DrawData` itself
+  clears to `drawClear` in place of `themeWindow`.
 
 - **Breaking:** state lives in `Var`s, and inputs take the `Var` they edit
   instead of a value to pass back. `textInput :: Var Text -> NanoUI ()`
