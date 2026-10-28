@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-63b26a18.js";
+            window.path_to_searchindex_js = "../searchindex-d78d4b64.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -185,12 +185,15 @@
 </code></pre>
 <h2 id="1-state-that-belongs-to-the-session"><a class="header" href="#1-state-that-belongs-to-the-session">1. State that belongs to the session</a></h2>
 <p>A text document is not a type <code>useVar</code> can hold, and the editor’s identity must outlive any single frame, so both live in a record allocated once:</p>
-<pre><code class="language-haskell">data NotepadState = NotepadState
-  !(Var TextDocument)   -- the document
-  !(Var WidgetId)       -- the editor's widget id, for menu commands
-  !(Var (Maybe FileDialogId))  -- the open dialog
-  !(Var (Maybe FileDialogId))  -- the save dialog
+<pre><code class="language-haskell">data NotepadState
+  = NotepadState
+      !(Var TextDocument)
+      !(Var WidgetId)
+      !(Var (Maybe FileDialogId))
+      !(Var (Maybe FileDialogId))
 
+-- | A notepad's private document and dialog state. Allocate one per
+-- instance before starting the SDL session, and draw it with 'notepadUi'.
 newNotepad :: IO NotepadState
 newNotepad =
   NotepadState
@@ -198,6 +201,7 @@ newNotepad =
     &lt;*&gt; newVar (WidgetId 0)
     &lt;*&gt; newVar Nothing
     &lt;*&gt; newVar Nothing
+
 </code></pre>
 <p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. The rule of thumb: allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
 <h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
@@ -207,7 +211,8 @@ main = do
   state &lt;- newNotepad
   runSdlApp
     defaultSdlOptions
-      { sdlWindowSettings =
+      { -- A close request goes to the view, which may ask about unsaved changes.
+        sdlWindowSettings =
           defaultWindowSettings
             { wsTitle = "nano-ui Notepad"
             , wsSize = Size 1000 720
@@ -216,9 +221,10 @@ main = do
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
     (notepadUi state)
+
 </code></pre>
 <p>With exit-on-close off, <code>winCloseRequested &lt;$&gt; askWindow</code> reports the request inside the view, where it can open a confirmation modal instead of quitting:</p>
-<pre><code class="language-haskell">whenM (winCloseRequested &lt;$&gt; askWindow) exitApp
+<pre><code class="language-haskell">  item (winCloseRequested &lt;$&gt; askWindow) exitApp
 </code></pre>
 <p><code>exitApp</code> quits immediately when the document is clean, and opens a modal when it is not. The full wiring is in section 7.</p>
 <h2 id="3-a-menu-bar-from-primitives"><a class="header" href="#3-a-menu-bar-from-primitives">3. A menu bar from primitives</a></h2>
@@ -229,19 +235,25 @@ menuBar openMenu entries = do
   current &lt;- readVar openMenu
   rowWith (tight . fillW . fixedH 28) $ do
     for_ entries $ \(menuLabel, body) -&gt; do
-      let isOpen = current == menuLabel
+      let
+        isOpen = current == menuLabel
+      -- Each title covers the bar's height, its text in the middle.
       btn &lt;- menuButtonWith' fillH menuLabel isOpen
-      when (respClicked btn) $
-        writeVar openMenu (if isOpen then "" else menuLabel)
-      -- Hovering another title while a menu is open switches to it.
-      when (not isOpen &amp;&amp; not (T.null current) &amp;&amp; respHovered btn) $
-        writeVar openMenu menuLabel
-      let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
-                  {cfgPlacement = PlacementBelow, cfgOffset = 0}
+      when (respClicked btn) (writeVar openMenu (if isOpen then "" else menuLabel))
+      when
+        (not isOpen &amp;&amp; not (T.null current) &amp;&amp; respHovered btn)
+        (writeVar openMenu menuLabel)
+      let
+        cfg =
+          (defaultPopupConfig (AnchorRect (respRect btn)))
+            { cfgPlacement = PlacementBelow
+            , cfgOffset = 0
+            }
       -- The open flag is derived from the open menu's name, so the popup
-      -- gets a const Var and closing is written back here.
+      -- gets a constant and closing it is written here.
       (popupResp, _) &lt;- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
+
 </code></pre>
 <p><code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the state is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> supplies a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
@@ -250,20 +262,20 @@ menuBar openMenu entries = do
 </blockquote>
 <h2 id="4-commands-menus-and-shortcuts"><a class="header" href="#4-commands-menus-and-shortcuts">4. Commands, menus, and shortcuts</a></h2>
 <p>Each menu row is a <code>menuItem</code> / <code>menuItemShortcut</code>. The row reports activation, and the action runs in the same frame:</p>
-<pre><code class="language-haskell">item menuRow action = whenM menuRow (writeVar openMenu "" &gt;&gt; action)
+<pre><code class="language-haskell">    item menuRow action = whenM menuRow (writeVar openMenu "" &gt;&gt; action)
 
-fileMenu = do
-  item (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) newDocument
-  item (menuItemShortcut "Open..." (cmdOrCtrl &lt;&gt; key 'o')) openDocument
-  item (menuItemShortcut "Save" (cmdOrCtrl &lt;&gt; key 's')) (saveDocument False)
-  item (menuItemShortcut "Save As..." (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 's')) (saveDocument True)
-  menuSeparator
-  item (menuItemShortcut "Exit" (cmdOrCtrl &lt;&gt; key 'q')) exitApp
+    fileMenu = do
+      commandItem newCmd
+      commandItem openCmd
+      commandItem saveCmd
+      commandItem saveAsCmd
+      menuSeparator
+      commandItem exitCmd
 </code></pre>
 <p>(<code>newDocument</code>, <code>openDocument</code>, <code>saveDocument</code>, and <code>exitApp</code> are ordinary <code>NanoUI ()</code> actions defined in the full source; <code>openDocument</code> starts a non-blocking <code>askOpenFileDialog</code>.)</p>
 <p><code>menuItemShortcut</code> shows the chord label and binds it <strong>while the menu is open</strong>. To make the command work with the menu closed, bind the same chord with <code>shortcut</code> outside the menu:</p>
-<pre><code class="language-haskell">for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd] $
-  \(_, chord, action) -&gt; item (shortcut chord) action
+<pre><code class="language-haskell">  for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd] $
+    \(_, chord, action) -&gt; item (shortcut chord) action
 </code></pre>
 <p>Only the first binding of a chord in a frame fires, so the menu row and the view binding never both run it. The menu row is declared first, so while the menu is open its row wins.</p>
 <p>Two more details from the source:</p>
@@ -273,21 +285,29 @@ fileMenu = do
 </ul>
 <h2 id="5-opening-and-saving-files"><a class="header" href="#5-opening-and-saving-files">5. Opening and saving files</a></h2>
 <p>The SDL backend’s file dialogs are asynchronous. <code>useFileDialog</code> polls a <code>Var (Maybe FileDialogId)</code>, consumes the finished result once, and restores focus afterwards:</p>
-<pre><code class="language-haskell">useFileDialog openDlg $ \chosenPaths -&gt;
-  for_ (listToMaybe chosenPaths) $ \filePath -&gt; do
-    loaded &lt;- liftIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
-    case loaded of
-      Left _ -&gt; writeVar statusMsg ("Could not open " &lt;&gt; T.pack filePath)
-      Right raw -&gt; do
-        writeVar doc (textDocument (TE.decodeUtf8With (\_ _ -&gt; Just '\xFFFD') raw))
-        modifyVar docGen (+ 1)          -- a new editor, with no old caret or undo
-        writeVar docPath (T.pack filePath)
-        writeVar docDirty False
-        writeVar statusMsg ("Opened " &lt;&gt; T.pack filePath)
-
-useFileDialog saveDlg $ \chosenPaths -&gt;
-  for_ (listToMaybe chosenPaths) $ \filePath -&gt;
-    writeDocument filePath =&lt;&lt; readVar doc
+<pre><code class="language-haskell">  useFileDialog openDlg $ \chosenPaths -&gt;
+    for_ (listToMaybe chosenPaths) $ \filePath -&gt; do
+      loaded &lt;-
+        liftIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
+      case loaded of
+        Left _ -&gt; writeVar statusMsg ("Could not open " &lt;&gt; T.pack filePath)
+        Right raw -&gt; do
+          -- Lenient decode: malformed bytes become U+FFFD instead of throwing.
+          writeVar doc (textDocument (TE.decodeUtf8With (\_ _ -&gt; Just '\xFFFD') raw))
+          -- A new editor, without the old document's caret and undo history.
+          modifyVar docGen (+ 1)
+          writeVar docPath (T.pack filePath)
+          writeVar docDirty False
+          writeVar statusMsg ("Opened " &lt;&gt; T.pack filePath)
+  useFileDialog saveDlg $ \chosenPaths -&gt;
+    for_ (listToMaybe chosenPaths) $ \filePath -&gt; do
+      saved &lt;- writeDocument filePath =&lt;&lt; readVar doc
+      if saved
+        then do
+          writeVar docPath (T.pack filePath)
+          writeVar docDirty False
+          writeVar statusMsg ("Saved " &lt;&gt; T.pack filePath)
+        else writeVar statusMsg ("Could not save " &lt;&gt; T.pack filePath)
 </code></pre>
 <p>Starting a dialog returns an id:</p>
 <pre><code class="language-haskell">writeVar openDlg . Just =&lt;&lt; askOpenFileDialog defaultFileDialogOptions
@@ -296,20 +316,25 @@ writeVar saveDlg . Just =&lt;&lt; askSaveFileDialog defaultFileDialogOptions
 <p><code>writeDocument</code> is ordinary Haskell around <code>liftIO</code>, because file I/O is an event-driven side effect:</p>
 <pre><code class="language-haskell">writeDocument :: FilePath -&gt; TextDocument -&gt; NanoUI Bool
 writeDocument filePath doc = do
-  result &lt;- liftIO (try (BS.writeFile filePath (TE.encodeUtf8 (documentText doc)))
-                        :: IO (Either SomeException ()))
+  result &lt;-
+    liftIO
+      ( try (BS.writeFile filePath (TE.encodeUtf8 (documentText doc))) ::
+          IO (Either SomeException ())
+      )
   pure (isRight result)
+
 </code></pre>
 <p><code>documentText</code> is the only conversion from the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
 <h2 id="6-the-editor"><a class="header" href="#6-the-editor">6. The editor</a></h2>
 <p><code>textAreaDocument</code> edits a <code>Var TextDocument</code> with line-sharing and an undo history. The primed variant supplies the <code>Response</code> the application needs:</p>
-<pre><code class="language-haskell">editorResp &lt;-
-  withKey gen $
-    textAreaDocumentWith'
-      (grow . minW 240 . minH 160 . fontSizeScale zoomVal)
-      doc
-when (respChanged editorResp) (writeVar docDirty True)
-writeVar editorId (respId editorResp)
+<pre><code class="language-haskell">    editorResp &lt;-
+      withKey gen $
+        textAreaDocumentWith'
+          (grow . minW 240 . minH 160 . fontSizeScale zoomVal)
+          doc
+    -- respChanged reports an edit, not a caret move.
+    when (respChanged editorResp) (writeVar docDirty True)
+    writeVar editorId (respId editorResp)
 </code></pre>
 <ul>
 <li><strong><code>withKey gen</code></strong> changes the editor’s key when the document is replaced. A new document gets a fresh caret, selection, and undo stack. Merely editing does not change <code>gen</code>.</li>
@@ -319,46 +344,46 @@ writeVar editorId (respId editorResp)
 <p><code>fontSizeScale zoomVal</code> zooms the text without touching the document. The zoom commands are ordinary <code>modifyVar</code> calls clamped to a sane range.</p>
 <h2 id="7-dirty-state-title-and-the-close-prompt"><a class="header" href="#7-dirty-state-title-and-the-close-prompt">7. Dirty state, title, and the close prompt</a></h2>
 <p>The title is derived every frame from the path and the dirty flag, and set declaratively:</p>
-<pre><code class="language-haskell">path &lt;- readVar docPath
-dirty &lt;- readVar docDirty
-let name = (if T.null path then "Untitled" else path) &lt;&gt; (if dirty then " *" else "")
+<pre><code class="language-haskell">    path &lt;- readVar docPath
+    dirty &lt;- readVar docDirty
+    let
+      name = (if T.null path then "Untitled" else path) &lt;&gt; (if dirty then " *" else "")
 setWindowTitleUi (name &lt;&gt; " - nano-ui Notepad")
 </code></pre>
 <p><code>setWindowTitleUi</code> is a no-op when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
 <p>The close request and the modal fit together like this:</p>
-<pre><code class="language-haskell">exitApp = do
-  dirty &lt;- readVar docDirty
-  if dirty
-    then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True
-    else quitUi
+<pre><code class="language-haskell">    exitApp = do
+      dirty &lt;- readVar docDirty
+      if dirty then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True else quitUi
 
 -- ...inside the view, called unconditionally:
-modal confirmExit "Unsaved changes" $ do
-  label "Discard the changes to this document and exit?"
-  rowWith fillW $ do
-    flex
-    whenM (button "Discard") quitUi
-    whenM (button "Cancel") (writeVar confirmExit False)
+  modal confirmExit "Unsaved changes" $ do
+    label "Discard the changes to this document and exit?"
+    rowWith fillW $ do
+      flex
+      whenM (button "Discard") quitUi
+      whenM (button "Cancel") (writeVar confirmExit False)
+
 </code></pre>
 <p>There is one modal at a time: opening the exit prompt closes the About modal first. Overlay state is a <code>Var Bool</code>, and the modal call itself is unconditional.</p>
 <h2 id="8-undo-redo-and-the-rest-of-the-editing-commands"><a class="header" href="#8-undo-redo-and-the-rest-of-the-editing-commands">8. Undo, redo, and the rest of the editing commands</a></h2>
 <p>The document keeps one undo history shared by typing, context-menu actions, and programmatic commands. The Edit menu reads the history state and runs commands by widget id:</p>
-<pre><code class="language-haskell">editMenu = do
-  editor &lt;- readVar editorId
-  canUndo &lt;- textCanUndo editor
-  canRedo &lt;- textCanRedo editor
-  if canUndo
-    then item (menuItemShortcut "Undo" (cmdOrCtrl &lt;&gt; key 'z')) (runTextCommand editor Undo)
-    else menuItemDisabled "Undo"
-  if canRedo
-    then item (menuItemShortcut "Redo" (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 'z')) (runTextCommand editor Redo)
-    else menuItemDisabled "Redo"
-  menuSeparator
-  item (menuItemShortcut "Cut" (cmdOrCtrl &lt;&gt; key 'x')) (runTextCommand editor Cut)
-  item (menuItemShortcut "Copy" (cmdOrCtrl &lt;&gt; key 'c')) (runTextCommand editor Copy)
-  item (menuItemShortcut "Paste" (cmdOrCtrl &lt;&gt; key 'v')) (runTextCommand editor Paste)
-  menuSeparator
-  item (menuItemShortcut "Select All" (cmdOrCtrl &lt;&gt; key 'a')) (runTextCommand editor SelectAll)
+<pre><code class="language-haskell">    editMenu = do
+      editor &lt;- readVar editorId
+      canUndo &lt;- textCanUndo editor
+      canRedo &lt;- textCanRedo editor
+      if canUndo
+        then editItem "Undo" (cmdOrCtrl &lt;&gt; key 'z') Undo
+        else menuItemDisabled "Undo"
+      if canRedo
+        then editItem "Redo" (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 'z') Redo
+        else menuItemDisabled "Redo"
+      menuSeparator
+      editItem "Cut" (cmdOrCtrl &lt;&gt; key 'x') Cut
+      editItem "Copy" (cmdOrCtrl &lt;&gt; key 'c') Copy
+      editItem "Paste" (cmdOrCtrl &lt;&gt; key 'v') Paste
+      menuSeparator
+      editItem "Select All" (cmdOrCtrl &lt;&gt; key 'a') SelectAll
 </code></pre>
 <p><code>TextCommand</code> covers <code>InsertText</code>, <code>Delete</code>, <code>Move</code>, <code>Select</code>, <code>Replace</code>, <code>ReplaceAll</code>, <code>Undo</code>, <code>Redo</code>, <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, and <code>SelectAll</code>. Using commands rather than writing the <code>Var</code> keeps undo intact; assigning a freshly computed <code>TextDocument</code> to <code>doc</code> clears the history.</p>
 <blockquote class="blockquote-tag blockquote-tag-tip">
@@ -367,15 +392,21 @@ modal confirmExit "Unsaved changes" $ do
 </blockquote>
 <h2 id="9-the-status-bar"><a class="header" href="#9-the-status-bar">9. The status bar</a></h2>
 <p>The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
-<pre><code class="language-haskell">statusBar name doc statusMsg zoomVal = do
-  d &lt;- readVar doc
+<pre><code class="language-haskell">statusBar :: Text -&gt; Var TextDocument -&gt; Var Text -&gt; Float -&gt; NanoUI ()
+statusBar docName docVar statusMsg zoomVal = do
+  doc &lt;- readVar docVar
   message &lt;- readVar statusMsg
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
     labelWith (tight . fontMuted) message
     flex
-    labelWith (tight . fontMuted) name
-    labelWith (tight . fontMuted) ("Lines: " &lt;&gt; T.pack (show (documentLineCount d)))
-    labelWith (tight . fontMuted) ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
+    labelWith (tight . fontMuted) docName
+    labelWith
+      (tight . fontMuted)
+      ("Lines: " &lt;&gt; T.pack (show (documentLineCount doc)))
+    labelWith
+      (tight . fontMuted)
+      ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
+
 </code></pre>
 <p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="../troubleshooting/recurring-bugs.html">Recurring Bugs</a>).</p>
 <h2 id="10-try-it"><a class="header" href="#10-try-it">10. Try it</a></h2>

@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-63b26a18.js";
+            window.path_to_searchindex_js = "../searchindex-d78d4b64.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -193,15 +193,14 @@
 </code></pre>
 <h2 id="1-the-data-model"><a class="header" href="#1-the-data-model">1. The data model</a></h2>
 <p>A todo item needs an identity that outlives its position. Positions change when an item is added, removed, filtered, or reordered; the id does not. Every widget or <code>Var</code> that belongs to a row is keyed by that id later.</p>
-<pre><code class="language-haskell">{-# LANGUAGE OverloadedRecordDot #-}
-
-data Todo = Todo
+<pre><code class="language-haskell">data Todo = Todo
   { todoId :: !Int
   , todoText :: !Text
   , todoDone :: !Bool
   }
   deriving (Eq, Generic)
 
+-- | The items in order, and the id the next one gets.
 data Todos = Todos
   { todoItems :: ![Todo]
   , todoNext :: !Int
@@ -209,10 +208,21 @@ data Todos = Todos
   deriving (Eq, Generic)
 
 newtype App = App {appTodos :: Var Todos}
+
 </code></pre>
 <p>The list lives in a <code>Var Todos</code>. That is not a type <code>useVar</code> can allocate, so it is created once during setup with <code>newVar</code>:</p>
 <pre><code class="language-haskell">newApp :: IO App
-newApp = App &lt;$&gt; newVar (Todos [Todo 0 "Read the header" True, Todo 1 "Water the plants" False] 2)
+newApp =
+  App
+    &lt;$&gt; newVar
+      ( Todos
+          [ Todo 0 "Read the header" True
+          , Todo 1 "Water the plants" False
+          , Todo 2 "Edit me, then delete the first row" False
+          ]
+          3
+      )
+
 </code></pre>
 <p><code>newVar</code> returns <code>IO (Var a)</code>. Allocating it in <code>main</code> and passing it into the view is what makes it survive between frames. Allocating a <code>Var</code> <em>inside</em> the view would create a fresh one on every pass.</p>
 <p>Both records derive <code>Generic</code>; with <code>OverloadedRecordDot</code>, <code>app.appTodos.todoItems</code> is a <code>Var [Todo]</code> projecting just that field. Editing the list does not repaint a widget that reads only <code>todoNext</code>.</p>
@@ -227,11 +237,13 @@ main = do
           defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
       }
     (todoApp app)
+
 </code></pre>
 <p><code>runSdlApp</code> takes the options and the view. The view is not called once: the backend calls it every frame, and it must describe the whole window each time.</p>
 <pre><code class="language-haskell">todoApp :: App -&gt; NanoUI ()
 todoApp app = do
-  let items = app.appTodos.todoItems
+  let
+    items = app.appTodos.todoItems
   draft &lt;- useVar ""
   filt &lt;- useEnumVar All
   columnWith (padAll 20 . gap 12 . fillW . fillH) $ do
@@ -239,6 +251,7 @@ todoApp app = do
     newItemRow app.appTodos draft
     filterRow items filt
     todoList items filt
+
 </code></pre>
 <p>The view’s local state (the draft text and the current filter) is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
 <p><code>columnWith (padAll 20 . gap 12 . fillW . fillH)</code> is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.</p>
@@ -246,13 +259,17 @@ todoApp app = do
 <p>The input row has three jobs: draw the field, draw the button, and decide whether this frame is an “add” frame.</p>
 <pre><code class="language-haskell">newItemRow :: Var Todos -&gt; Var Text -&gt; NanoUI ()
 newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
-  inputR &lt;- textInputConfigured' defaultTextInputConfig {ticPlaceholder = "What needs doing?"} draft
+  inputR &lt;-
+    textInputConfigured'
+      defaultTextInputConfig {ticPlaceholder = "What needs doing?"}
+      draft
   clicked &lt;- button "Add"
   text &lt;- T.strip &lt;$&gt; readVar draft
   when ((clicked || respSubmitted inputR) &amp;&amp; not (T.null text)) $ do
     modifyVar todosVar (\(Todos xs n) -&gt; Todos (xs &lt;&gt; [Todo n text False]) (n + 1))
     writeVar draft ""
     requestFocus (respId inputR)
+
 </code></pre>
 <p>Details:</p>
 <ul>
@@ -277,14 +294,21 @@ matches Done t = todoDone t
 
 filterRow :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
 filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
-  boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} (T.pack . show) filt
+  -- A header for every filter, as a segmented control.
+  boundedTabBarConfigured
+    defaultTabsConfig {tabsStyle = TabSegmented}
+    (T.pack . show)
+    filt
   flex
   todos &lt;- readVar items
-  let left = length (filter (not . todoDone) todos)
-  labelWith (tight . alignMid . fontMuted)
+  let
+    left = length (filter (not . todoDone) todos)
+  labelWith
+    (tight . alignMid . fontMuted)
     (T.pack (show left) &lt;&gt; if left == 1 then " item left" else " items left")
   disabledWhen (left == length todos) $
     whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
+
 </code></pre>
 <p><code>boundedTabBarConfigured</code> draws a segmented control over every constructor of <code>Filter</code>; the label function is <code>show</code>. The count is <em>derived</em>: it is computed from the list every frame, never stored in a second <code>Var</code> that could drift. <code>disabledWhen</code> dims the clear button and blocks its events without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
@@ -295,10 +319,14 @@ todoList items filt = do
   scrollWith (grow . fillW) $
     columnWith (tight . gap 6 . fillW) $
       withElemVars todoId items $ \todos at -&gt; do
-        let shown = filter (matches shownFilter) todos
-        forM_ (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) &lt;&gt; [Nothing])) $
-          \(todo, above, below) -&gt;
-            withKey (todoId todo) (todoRow items (at todo) above below)
+        let
+          shown = filter (matches shownFilter) todos
+        -- Each row gets its visible neighbours, so Up and Down skip rows
+        -- the filter hides.
+        forM_
+          (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) &lt;&gt; [Nothing])) $ \(todo, above, below) -&gt;
+          withKey (todoId todo) (todoRow items (at todo) above below)
+
 </code></pre>
 <ul>
 <li><code>withElemVars todoId items</code> gives the current list and a function <code>at :: Todo -&gt; Var Todo</code>. <code>at todo</code> is a <code>Var</code> addressed by the item’s id, so it survives a reorder or a filter change.</li>
@@ -308,35 +336,51 @@ todoList items filt = do
 <p>Here is the row itself, trimmed to the essential structure:</p>
 <pre><code class="language-haskell">todoRow :: Var [Todo] -&gt; Var Todo -&gt; Maybe Todo -&gt; Maybe Todo -&gt; NanoUI ()
 todoRow items todo above below = do
+  -- Local state, kept under this row's key.
   editing &lt;- useVar False
   focusPending &lt;- useVar False
   draft &lt;- useVar ""
   t &lt;- readVar todo
   isEditing &lt;- readVar editing
-  let tid = todoId t
-      save = do
-        writeVar todo.todoText =&lt;&lt; readVar draft
-        writeVar editing False
+  let
+    tid = todoId t
+    save = do
+      writeVar todo.todoText =&lt;&lt; readVar draft
+      writeVar editing False
   when isEditing (whenM takeEscape (writeVar editing False))
   rowWith (tight . gap 8 . alignMid . fillW) $ do
     checkboxWith alignMid "" todo.todoDone
+    -- The label and the field swap places, so they share a scope.
     scope $
       if isEditing
         then do
           fieldR &lt;- textInput' draft
-          whenM (readVar focusPending) $
-            requestFocus (respId fieldR) &gt;&gt; writeVar focusPending False
+          -- Focus can only move to a widget declared in the pass that asks,
+          -- and the field first appears in the pass after Edit was clicked,
+          -- so the request waits in a Var.
+          whenM
+            (readVar focusPending)
+            (requestFocus (respId fieldR) &gt;&gt; writeVar focusPending False)
           when (respSubmitted fieldR) save
         else
-          labelWith (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id)) (todoText t)
+          labelWith
+            (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id))
+            (todoText t)
     whenM (button (if isEditing then "Save" else "Edit")) $
-      if isEditing then save else do
-        writeVar draft (todoText t)
-        writeVar editing True
-        writeVar focusPending True
-    disabledWhen (null above) $ whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
-    disabledWhen (null below) $ whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
-    whenM (styled destructive (button "Delete")) (modifyVar items (filter ((/= tid) . todoId)))
+      if isEditing
+        then save
+        else
+          writeVar draft (todoText t)
+            &gt;&gt; writeVar editing True
+            &gt;&gt; writeVar focusPending True
+    disabledWhen (null above) $
+      whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
+    disabledWhen (null below) $
+      whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
+    whenM
+      (styled destructive (button "Delete"))
+      (modifyVar items (filter ((/= tid) . todoId)))
+
 </code></pre>
 <p>Three details make this work:</p>
 <ol>
@@ -346,19 +390,22 @@ todoRow items todo above below = do
 </ol>
 <h2 id="6-reordering-by-id"><a class="header" href="#6-reordering-by-id">6. Reordering by id</a></h2>
 <p>Up and Down need to swap two items wherever they are in the full list. Swapping by id keeps the operation correct even though the visible list is filtered:</p>
-<pre><code class="language-haskell">swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
+<pre><code class="language-haskell">
+-- | Swap the places of two items, by id.
+swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
 swapIds a b xs = map pick xs
-  where
-    byId i t = fromMaybe t (find ((== i) . todoId) xs)
-    pick t
-      | todoId t == a = byId b t
-      | todoId t == b = byId a t
-      | otherwise = t
+ where
+  byId i t = fromMaybe t (find ((== i) . todoId) xs)
+  pick t
+    | todoId t == a = byId b t
+    | todoId t == b = byId a t
+    | otherwise = t
+
 </code></pre>
 <p>The row’s local state follows the id, not the index, so the edit flag and draft travel with the item. This is the payoff for the keys in the previous section.</p>
 <h2 id="7-keyboard-behaviour"><a class="header" href="#7-keyboard-behaviour">7. Keyboard behaviour</a></h2>
 <p>Enter in the new-item field adds an item because <code>respSubmitted</code> reports it. Escape cancels an edit:</p>
-<pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
+<pre><code class="language-haskell">  when isEditing (whenM takeEscape (writeVar editing False))
 </code></pre>
 <p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view (an open popup or a second <code>takeEscape</code>) do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
 <p>For the full shortcut model (<code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys), see <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>

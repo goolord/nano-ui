@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-63b26a18.js";
+            window.path_to_searchindex_js = "../searchindex-d78d4b64.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -181,6 +181,8 @@
                         <h1 id="elm-style-state"><a class="header" href="#elm-style-state">Elm-Style State</a></h1>
 <p><code>nano-ui-emit</code> is the reducer-based alternative to <code>Var</code>: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model.</p>
 <pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
+  deriving Eq
+
 data Msg = Increment | Decrement | SetName Text
 
 view :: Model -&gt; NanoUIE Msg ()
@@ -199,6 +201,7 @@ update (SetName n) m = m {name = n}
 
 main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
+
 </code></pre>
 <p>Widgets, layout, focus, and keys are unchanged. Only the state model differs.</p>
 <h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
@@ -242,6 +245,7 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 <h2 id="components"><a class="header" href="#components">Components</a></h2>
 <p><code>mapMessages</code> embeds a child view whose message type is smaller than its parent’s:</p>
 <pre><code class="language-haskell">data ChildMsg = ChildIncrement | ChildReset
+
 data ParentMsg = Child ChildMsg | SaveAll
 
 childView :: Int -&gt; NanoUIE ChildMsg ()
@@ -254,6 +258,7 @@ parentView :: Int -&gt; NanoUIE ParentMsg ()
 parentView n = column $ do
   mapMessages Child (childView n)
   emitWhenE (button "Save All") SaveAll
+
 </code></pre>
 <p>Messages go straight to the parent’s sink in traversal order, with no intermediate queue. <code>mapMessages</code> changes the message type, not widget identity: a list still needs <code>withKey</code> around each component, exactly as a <code>Var</code>-based row does.</p>
 <p>For local UI state, keep using <code>Var</code> inside the component; the durable model stays in <code>NanoUIE</code>.</p>

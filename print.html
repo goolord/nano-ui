@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-63b26a18.js";
+            window.path_to_searchindex_js = "searchindex-d78d4b64.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -313,6 +313,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
     whenM (button "+") (modifyVar n (+ 1))
 
   whenM (button "Reset") (writeVar n 0)
+
 </code></pre>
 <p>Run it:</p>
 <pre><code class="language-sh">cabal run -j1 my-app
@@ -384,15 +385,14 @@ cabal run nano-ui-example-live-chart
 </code></pre>
 <h2 id="1-the-data-model"><a class="header" href="#1-the-data-model">1. The data model</a></h2>
 <p>A todo item needs an identity that outlives its position. Positions change when an item is added, removed, filtered, or reordered; the id does not. Every widget or <code>Var</code> that belongs to a row is keyed by that id later.</p>
-<pre><code class="language-haskell">{-# LANGUAGE OverloadedRecordDot #-}
-
-data Todo = Todo
+<pre><code class="language-haskell">data Todo = Todo
   { todoId :: !Int
   , todoText :: !Text
   , todoDone :: !Bool
   }
   deriving (Eq, Generic)
 
+-- | The items in order, and the id the next one gets.
 data Todos = Todos
   { todoItems :: ![Todo]
   , todoNext :: !Int
@@ -400,10 +400,21 @@ data Todos = Todos
   deriving (Eq, Generic)
 
 newtype App = App {appTodos :: Var Todos}
+
 </code></pre>
 <p>The list lives in a <code>Var Todos</code>. That is not a type <code>useVar</code> can allocate, so it is created once during setup with <code>newVar</code>:</p>
 <pre><code class="language-haskell">newApp :: IO App
-newApp = App &lt;$&gt; newVar (Todos [Todo 0 "Read the header" True, Todo 1 "Water the plants" False] 2)
+newApp =
+  App
+    &lt;$&gt; newVar
+      ( Todos
+          [ Todo 0 "Read the header" True
+          , Todo 1 "Water the plants" False
+          , Todo 2 "Edit me, then delete the first row" False
+          ]
+          3
+      )
+
 </code></pre>
 <p><code>newVar</code> returns <code>IO (Var a)</code>. Allocating it in <code>main</code> and passing it into the view is what makes it survive between frames. Allocating a <code>Var</code> <em>inside</em> the view would create a fresh one on every pass.</p>
 <p>Both records derive <code>Generic</code>; with <code>OverloadedRecordDot</code>, <code>app.appTodos.todoItems</code> is a <code>Var [Todo]</code> projecting just that field. Editing the list does not repaint a widget that reads only <code>todoNext</code>.</p>
@@ -418,11 +429,13 @@ main = do
           defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
       }
     (todoApp app)
+
 </code></pre>
 <p><code>runSdlApp</code> takes the options and the view. The view is not called once: the backend calls it every frame, and it must describe the whole window each time.</p>
 <pre><code class="language-haskell">todoApp :: App -&gt; NanoUI ()
 todoApp app = do
-  let items = app.appTodos.todoItems
+  let
+    items = app.appTodos.todoItems
   draft &lt;- useVar ""
   filt &lt;- useEnumVar All
   columnWith (padAll 20 . gap 12 . fillW . fillH) $ do
@@ -430,6 +443,7 @@ todoApp app = do
     newItemRow app.appTodos draft
     filterRow items filt
     todoList items filt
+
 </code></pre>
 <p>The view’s local state (the draft text and the current filter) is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
 <p><code>columnWith (padAll 20 . gap 12 . fillW . fillH)</code> is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.</p>
@@ -437,13 +451,17 @@ todoApp app = do
 <p>The input row has three jobs: draw the field, draw the button, and decide whether this frame is an “add” frame.</p>
 <pre><code class="language-haskell">newItemRow :: Var Todos -&gt; Var Text -&gt; NanoUI ()
 newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
-  inputR &lt;- textInputConfigured' defaultTextInputConfig {ticPlaceholder = "What needs doing?"} draft
+  inputR &lt;-
+    textInputConfigured'
+      defaultTextInputConfig {ticPlaceholder = "What needs doing?"}
+      draft
   clicked &lt;- button "Add"
   text &lt;- T.strip &lt;$&gt; readVar draft
   when ((clicked || respSubmitted inputR) &amp;&amp; not (T.null text)) $ do
     modifyVar todosVar (\(Todos xs n) -&gt; Todos (xs &lt;&gt; [Todo n text False]) (n + 1))
     writeVar draft ""
     requestFocus (respId inputR)
+
 </code></pre>
 <p>Details:</p>
 <ul>
@@ -468,14 +486,21 @@ matches Done t = todoDone t
 
 filterRow :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
 filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
-  boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} (T.pack . show) filt
+  -- A header for every filter, as a segmented control.
+  boundedTabBarConfigured
+    defaultTabsConfig {tabsStyle = TabSegmented}
+    (T.pack . show)
+    filt
   flex
   todos &lt;- readVar items
-  let left = length (filter (not . todoDone) todos)
-  labelWith (tight . alignMid . fontMuted)
+  let
+    left = length (filter (not . todoDone) todos)
+  labelWith
+    (tight . alignMid . fontMuted)
     (T.pack (show left) &lt;&gt; if left == 1 then " item left" else " items left")
   disabledWhen (left == length todos) $
     whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
+
 </code></pre>
 <p><code>boundedTabBarConfigured</code> draws a segmented control over every constructor of <code>Filter</code>; the label function is <code>show</code>. The count is <em>derived</em>: it is computed from the list every frame, never stored in a second <code>Var</code> that could drift. <code>disabledWhen</code> dims the clear button and blocks its events without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
@@ -486,10 +511,14 @@ todoList items filt = do
   scrollWith (grow . fillW) $
     columnWith (tight . gap 6 . fillW) $
       withElemVars todoId items $ \todos at -&gt; do
-        let shown = filter (matches shownFilter) todos
-        forM_ (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) &lt;&gt; [Nothing])) $
-          \(todo, above, below) -&gt;
-            withKey (todoId todo) (todoRow items (at todo) above below)
+        let
+          shown = filter (matches shownFilter) todos
+        -- Each row gets its visible neighbours, so Up and Down skip rows
+        -- the filter hides.
+        forM_
+          (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) &lt;&gt; [Nothing])) $ \(todo, above, below) -&gt;
+          withKey (todoId todo) (todoRow items (at todo) above below)
+
 </code></pre>
 <ul>
 <li><code>withElemVars todoId items</code> gives the current list and a function <code>at :: Todo -&gt; Var Todo</code>. <code>at todo</code> is a <code>Var</code> addressed by the item’s id, so it survives a reorder or a filter change.</li>
@@ -499,35 +528,51 @@ todoList items filt = do
 <p>Here is the row itself, trimmed to the essential structure:</p>
 <pre><code class="language-haskell">todoRow :: Var [Todo] -&gt; Var Todo -&gt; Maybe Todo -&gt; Maybe Todo -&gt; NanoUI ()
 todoRow items todo above below = do
+  -- Local state, kept under this row's key.
   editing &lt;- useVar False
   focusPending &lt;- useVar False
   draft &lt;- useVar ""
   t &lt;- readVar todo
   isEditing &lt;- readVar editing
-  let tid = todoId t
-      save = do
-        writeVar todo.todoText =&lt;&lt; readVar draft
-        writeVar editing False
+  let
+    tid = todoId t
+    save = do
+      writeVar todo.todoText =&lt;&lt; readVar draft
+      writeVar editing False
   when isEditing (whenM takeEscape (writeVar editing False))
   rowWith (tight . gap 8 . alignMid . fillW) $ do
     checkboxWith alignMid "" todo.todoDone
+    -- The label and the field swap places, so they share a scope.
     scope $
       if isEditing
         then do
           fieldR &lt;- textInput' draft
-          whenM (readVar focusPending) $
-            requestFocus (respId fieldR) &gt;&gt; writeVar focusPending False
+          -- Focus can only move to a widget declared in the pass that asks,
+          -- and the field first appears in the pass after Edit was clicked,
+          -- so the request waits in a Var.
+          whenM
+            (readVar focusPending)
+            (requestFocus (respId fieldR) &gt;&gt; writeVar focusPending False)
           when (respSubmitted fieldR) save
         else
-          labelWith (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id)) (todoText t)
+          labelWith
+            (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id))
+            (todoText t)
     whenM (button (if isEditing then "Save" else "Edit")) $
-      if isEditing then save else do
-        writeVar draft (todoText t)
-        writeVar editing True
-        writeVar focusPending True
-    disabledWhen (null above) $ whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
-    disabledWhen (null below) $ whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
-    whenM (styled destructive (button "Delete")) (modifyVar items (filter ((/= tid) . todoId)))
+      if isEditing
+        then save
+        else
+          writeVar draft (todoText t)
+            &gt;&gt; writeVar editing True
+            &gt;&gt; writeVar focusPending True
+    disabledWhen (null above) $
+      whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
+    disabledWhen (null below) $
+      whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
+    whenM
+      (styled destructive (button "Delete"))
+      (modifyVar items (filter ((/= tid) . todoId)))
+
 </code></pre>
 <p>Three details make this work:</p>
 <ol>
@@ -537,19 +582,22 @@ todoRow items todo above below = do
 </ol>
 <h2 id="6-reordering-by-id"><a class="header" href="#6-reordering-by-id">6. Reordering by id</a></h2>
 <p>Up and Down need to swap two items wherever they are in the full list. Swapping by id keeps the operation correct even though the visible list is filtered:</p>
-<pre><code class="language-haskell">swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
+<pre><code class="language-haskell">
+-- | Swap the places of two items, by id.
+swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
 swapIds a b xs = map pick xs
-  where
-    byId i t = fromMaybe t (find ((== i) . todoId) xs)
-    pick t
-      | todoId t == a = byId b t
-      | todoId t == b = byId a t
-      | otherwise = t
+ where
+  byId i t = fromMaybe t (find ((== i) . todoId) xs)
+  pick t
+    | todoId t == a = byId b t
+    | todoId t == b = byId a t
+    | otherwise = t
+
 </code></pre>
 <p>The row’s local state follows the id, not the index, so the edit flag and draft travel with the item. This is the payoff for the keys in the previous section.</p>
 <h2 id="7-keyboard-behaviour"><a class="header" href="#7-keyboard-behaviour">7. Keyboard behaviour</a></h2>
 <p>Enter in the new-item field adds an item because <code>respSubmitted</code> reports it. Escape cancels an edit:</p>
-<pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
+<pre><code class="language-haskell">  when isEditing (whenM takeEscape (writeVar editing False))
 </code></pre>
 <p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view (an open popup or a second <code>takeEscape</code>) do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
 <p>For the full shortcut model (<code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys), see <a href="#keyboard-focus--ime">Keyboard, Focus &amp; IME</a>.</p>
@@ -570,12 +618,15 @@ swapIds a b xs = map pick xs
 </code></pre>
 <h2 id="1-state-that-belongs-to-the-session"><a class="header" href="#1-state-that-belongs-to-the-session">1. State that belongs to the session</a></h2>
 <p>A text document is not a type <code>useVar</code> can hold, and the editor’s identity must outlive any single frame, so both live in a record allocated once:</p>
-<pre><code class="language-haskell">data NotepadState = NotepadState
-  !(Var TextDocument)   -- the document
-  !(Var WidgetId)       -- the editor's widget id, for menu commands
-  !(Var (Maybe FileDialogId))  -- the open dialog
-  !(Var (Maybe FileDialogId))  -- the save dialog
+<pre><code class="language-haskell">data NotepadState
+  = NotepadState
+      !(Var TextDocument)
+      !(Var WidgetId)
+      !(Var (Maybe FileDialogId))
+      !(Var (Maybe FileDialogId))
 
+-- | A notepad's private document and dialog state. Allocate one per
+-- instance before starting the SDL session, and draw it with 'notepadUi'.
 newNotepad :: IO NotepadState
 newNotepad =
   NotepadState
@@ -583,6 +634,7 @@ newNotepad =
     &lt;*&gt; newVar (WidgetId 0)
     &lt;*&gt; newVar Nothing
     &lt;*&gt; newVar Nothing
+
 </code></pre>
 <p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. The rule of thumb: allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
 <h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
@@ -592,7 +644,8 @@ main = do
   state &lt;- newNotepad
   runSdlApp
     defaultSdlOptions
-      { sdlWindowSettings =
+      { -- A close request goes to the view, which may ask about unsaved changes.
+        sdlWindowSettings =
           defaultWindowSettings
             { wsTitle = "nano-ui Notepad"
             , wsSize = Size 1000 720
@@ -601,9 +654,10 @@ main = do
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
     (notepadUi state)
+
 </code></pre>
 <p>With exit-on-close off, <code>winCloseRequested &lt;$&gt; askWindow</code> reports the request inside the view, where it can open a confirmation modal instead of quitting:</p>
-<pre><code class="language-haskell">whenM (winCloseRequested &lt;$&gt; askWindow) exitApp
+<pre><code class="language-haskell">  item (winCloseRequested &lt;$&gt; askWindow) exitApp
 </code></pre>
 <p><code>exitApp</code> quits immediately when the document is clean, and opens a modal when it is not. The full wiring is in section 7.</p>
 <h2 id="3-a-menu-bar-from-primitives"><a class="header" href="#3-a-menu-bar-from-primitives">3. A menu bar from primitives</a></h2>
@@ -614,19 +668,25 @@ menuBar openMenu entries = do
   current &lt;- readVar openMenu
   rowWith (tight . fillW . fixedH 28) $ do
     for_ entries $ \(menuLabel, body) -&gt; do
-      let isOpen = current == menuLabel
+      let
+        isOpen = current == menuLabel
+      -- Each title covers the bar's height, its text in the middle.
       btn &lt;- menuButtonWith' fillH menuLabel isOpen
-      when (respClicked btn) $
-        writeVar openMenu (if isOpen then "" else menuLabel)
-      -- Hovering another title while a menu is open switches to it.
-      when (not isOpen &amp;&amp; not (T.null current) &amp;&amp; respHovered btn) $
-        writeVar openMenu menuLabel
-      let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
-                  {cfgPlacement = PlacementBelow, cfgOffset = 0}
+      when (respClicked btn) (writeVar openMenu (if isOpen then "" else menuLabel))
+      when
+        (not isOpen &amp;&amp; not (T.null current) &amp;&amp; respHovered btn)
+        (writeVar openMenu menuLabel)
+      let
+        cfg =
+          (defaultPopupConfig (AnchorRect (respRect btn)))
+            { cfgPlacement = PlacementBelow
+            , cfgOffset = 0
+            }
       -- The open flag is derived from the open menu's name, so the popup
-      -- gets a const Var and closing is written back here.
+      -- gets a constant and closing it is written here.
       (popupResp, _) &lt;- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
+
 </code></pre>
 <p><code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the state is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> supplies a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
@@ -635,20 +695,20 @@ menuBar openMenu entries = do
 </blockquote>
 <h2 id="4-commands-menus-and-shortcuts"><a class="header" href="#4-commands-menus-and-shortcuts">4. Commands, menus, and shortcuts</a></h2>
 <p>Each menu row is a <code>menuItem</code> / <code>menuItemShortcut</code>. The row reports activation, and the action runs in the same frame:</p>
-<pre><code class="language-haskell">item menuRow action = whenM menuRow (writeVar openMenu "" &gt;&gt; action)
+<pre><code class="language-haskell">    item menuRow action = whenM menuRow (writeVar openMenu "" &gt;&gt; action)
 
-fileMenu = do
-  item (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) newDocument
-  item (menuItemShortcut "Open..." (cmdOrCtrl &lt;&gt; key 'o')) openDocument
-  item (menuItemShortcut "Save" (cmdOrCtrl &lt;&gt; key 's')) (saveDocument False)
-  item (menuItemShortcut "Save As..." (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 's')) (saveDocument True)
-  menuSeparator
-  item (menuItemShortcut "Exit" (cmdOrCtrl &lt;&gt; key 'q')) exitApp
+    fileMenu = do
+      commandItem newCmd
+      commandItem openCmd
+      commandItem saveCmd
+      commandItem saveAsCmd
+      menuSeparator
+      commandItem exitCmd
 </code></pre>
 <p>(<code>newDocument</code>, <code>openDocument</code>, <code>saveDocument</code>, and <code>exitApp</code> are ordinary <code>NanoUI ()</code> actions defined in the full source; <code>openDocument</code> starts a non-blocking <code>askOpenFileDialog</code>.)</p>
 <p><code>menuItemShortcut</code> shows the chord label and binds it <strong>while the menu is open</strong>. To make the command work with the menu closed, bind the same chord with <code>shortcut</code> outside the menu:</p>
-<pre><code class="language-haskell">for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd] $
-  \(_, chord, action) -&gt; item (shortcut chord) action
+<pre><code class="language-haskell">  for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd] $
+    \(_, chord, action) -&gt; item (shortcut chord) action
 </code></pre>
 <p>Only the first binding of a chord in a frame fires, so the menu row and the view binding never both run it. The menu row is declared first, so while the menu is open its row wins.</p>
 <p>Two more details from the source:</p>
@@ -658,21 +718,29 @@ fileMenu = do
 </ul>
 <h2 id="5-opening-and-saving-files"><a class="header" href="#5-opening-and-saving-files">5. Opening and saving files</a></h2>
 <p>The SDL backend’s file dialogs are asynchronous. <code>useFileDialog</code> polls a <code>Var (Maybe FileDialogId)</code>, consumes the finished result once, and restores focus afterwards:</p>
-<pre><code class="language-haskell">useFileDialog openDlg $ \chosenPaths -&gt;
-  for_ (listToMaybe chosenPaths) $ \filePath -&gt; do
-    loaded &lt;- liftIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
-    case loaded of
-      Left _ -&gt; writeVar statusMsg ("Could not open " &lt;&gt; T.pack filePath)
-      Right raw -&gt; do
-        writeVar doc (textDocument (TE.decodeUtf8With (\_ _ -&gt; Just '\xFFFD') raw))
-        modifyVar docGen (+ 1)          -- a new editor, with no old caret or undo
-        writeVar docPath (T.pack filePath)
-        writeVar docDirty False
-        writeVar statusMsg ("Opened " &lt;&gt; T.pack filePath)
-
-useFileDialog saveDlg $ \chosenPaths -&gt;
-  for_ (listToMaybe chosenPaths) $ \filePath -&gt;
-    writeDocument filePath =&lt;&lt; readVar doc
+<pre><code class="language-haskell">  useFileDialog openDlg $ \chosenPaths -&gt;
+    for_ (listToMaybe chosenPaths) $ \filePath -&gt; do
+      loaded &lt;-
+        liftIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
+      case loaded of
+        Left _ -&gt; writeVar statusMsg ("Could not open " &lt;&gt; T.pack filePath)
+        Right raw -&gt; do
+          -- Lenient decode: malformed bytes become U+FFFD instead of throwing.
+          writeVar doc (textDocument (TE.decodeUtf8With (\_ _ -&gt; Just '\xFFFD') raw))
+          -- A new editor, without the old document's caret and undo history.
+          modifyVar docGen (+ 1)
+          writeVar docPath (T.pack filePath)
+          writeVar docDirty False
+          writeVar statusMsg ("Opened " &lt;&gt; T.pack filePath)
+  useFileDialog saveDlg $ \chosenPaths -&gt;
+    for_ (listToMaybe chosenPaths) $ \filePath -&gt; do
+      saved &lt;- writeDocument filePath =&lt;&lt; readVar doc
+      if saved
+        then do
+          writeVar docPath (T.pack filePath)
+          writeVar docDirty False
+          writeVar statusMsg ("Saved " &lt;&gt; T.pack filePath)
+        else writeVar statusMsg ("Could not save " &lt;&gt; T.pack filePath)
 </code></pre>
 <p>Starting a dialog returns an id:</p>
 <pre><code class="language-haskell">writeVar openDlg . Just =&lt;&lt; askOpenFileDialog defaultFileDialogOptions
@@ -681,20 +749,25 @@ writeVar saveDlg . Just =&lt;&lt; askSaveFileDialog defaultFileDialogOptions
 <p><code>writeDocument</code> is ordinary Haskell around <code>liftIO</code>, because file I/O is an event-driven side effect:</p>
 <pre><code class="language-haskell">writeDocument :: FilePath -&gt; TextDocument -&gt; NanoUI Bool
 writeDocument filePath doc = do
-  result &lt;- liftIO (try (BS.writeFile filePath (TE.encodeUtf8 (documentText doc)))
-                        :: IO (Either SomeException ()))
+  result &lt;-
+    liftIO
+      ( try (BS.writeFile filePath (TE.encodeUtf8 (documentText doc))) ::
+          IO (Either SomeException ())
+      )
   pure (isRight result)
+
 </code></pre>
 <p><code>documentText</code> is the only conversion from the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
 <h2 id="6-the-editor"><a class="header" href="#6-the-editor">6. The editor</a></h2>
 <p><code>textAreaDocument</code> edits a <code>Var TextDocument</code> with line-sharing and an undo history. The primed variant supplies the <code>Response</code> the application needs:</p>
-<pre><code class="language-haskell">editorResp &lt;-
-  withKey gen $
-    textAreaDocumentWith'
-      (grow . minW 240 . minH 160 . fontSizeScale zoomVal)
-      doc
-when (respChanged editorResp) (writeVar docDirty True)
-writeVar editorId (respId editorResp)
+<pre><code class="language-haskell">    editorResp &lt;-
+      withKey gen $
+        textAreaDocumentWith'
+          (grow . minW 240 . minH 160 . fontSizeScale zoomVal)
+          doc
+    -- respChanged reports an edit, not a caret move.
+    when (respChanged editorResp) (writeVar docDirty True)
+    writeVar editorId (respId editorResp)
 </code></pre>
 <ul>
 <li><strong><code>withKey gen</code></strong> changes the editor’s key when the document is replaced. A new document gets a fresh caret, selection, and undo stack. Merely editing does not change <code>gen</code>.</li>
@@ -704,46 +777,46 @@ writeVar editorId (respId editorResp)
 <p><code>fontSizeScale zoomVal</code> zooms the text without touching the document. The zoom commands are ordinary <code>modifyVar</code> calls clamped to a sane range.</p>
 <h2 id="7-dirty-state-title-and-the-close-prompt"><a class="header" href="#7-dirty-state-title-and-the-close-prompt">7. Dirty state, title, and the close prompt</a></h2>
 <p>The title is derived every frame from the path and the dirty flag, and set declaratively:</p>
-<pre><code class="language-haskell">path &lt;- readVar docPath
-dirty &lt;- readVar docDirty
-let name = (if T.null path then "Untitled" else path) &lt;&gt; (if dirty then " *" else "")
+<pre><code class="language-haskell">    path &lt;- readVar docPath
+    dirty &lt;- readVar docDirty
+    let
+      name = (if T.null path then "Untitled" else path) &lt;&gt; (if dirty then " *" else "")
 setWindowTitleUi (name &lt;&gt; " - nano-ui Notepad")
 </code></pre>
 <p><code>setWindowTitleUi</code> is a no-op when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
 <p>The close request and the modal fit together like this:</p>
-<pre><code class="language-haskell">exitApp = do
-  dirty &lt;- readVar docDirty
-  if dirty
-    then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True
-    else quitUi
+<pre><code class="language-haskell">    exitApp = do
+      dirty &lt;- readVar docDirty
+      if dirty then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True else quitUi
 
 -- ...inside the view, called unconditionally:
-modal confirmExit "Unsaved changes" $ do
-  label "Discard the changes to this document and exit?"
-  rowWith fillW $ do
-    flex
-    whenM (button "Discard") quitUi
-    whenM (button "Cancel") (writeVar confirmExit False)
+  modal confirmExit "Unsaved changes" $ do
+    label "Discard the changes to this document and exit?"
+    rowWith fillW $ do
+      flex
+      whenM (button "Discard") quitUi
+      whenM (button "Cancel") (writeVar confirmExit False)
+
 </code></pre>
 <p>There is one modal at a time: opening the exit prompt closes the About modal first. Overlay state is a <code>Var Bool</code>, and the modal call itself is unconditional.</p>
 <h2 id="8-undo-redo-and-the-rest-of-the-editing-commands"><a class="header" href="#8-undo-redo-and-the-rest-of-the-editing-commands">8. Undo, redo, and the rest of the editing commands</a></h2>
 <p>The document keeps one undo history shared by typing, context-menu actions, and programmatic commands. The Edit menu reads the history state and runs commands by widget id:</p>
-<pre><code class="language-haskell">editMenu = do
-  editor &lt;- readVar editorId
-  canUndo &lt;- textCanUndo editor
-  canRedo &lt;- textCanRedo editor
-  if canUndo
-    then item (menuItemShortcut "Undo" (cmdOrCtrl &lt;&gt; key 'z')) (runTextCommand editor Undo)
-    else menuItemDisabled "Undo"
-  if canRedo
-    then item (menuItemShortcut "Redo" (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 'z')) (runTextCommand editor Redo)
-    else menuItemDisabled "Redo"
-  menuSeparator
-  item (menuItemShortcut "Cut" (cmdOrCtrl &lt;&gt; key 'x')) (runTextCommand editor Cut)
-  item (menuItemShortcut "Copy" (cmdOrCtrl &lt;&gt; key 'c')) (runTextCommand editor Copy)
-  item (menuItemShortcut "Paste" (cmdOrCtrl &lt;&gt; key 'v')) (runTextCommand editor Paste)
-  menuSeparator
-  item (menuItemShortcut "Select All" (cmdOrCtrl &lt;&gt; key 'a')) (runTextCommand editor SelectAll)
+<pre><code class="language-haskell">    editMenu = do
+      editor &lt;- readVar editorId
+      canUndo &lt;- textCanUndo editor
+      canRedo &lt;- textCanRedo editor
+      if canUndo
+        then editItem "Undo" (cmdOrCtrl &lt;&gt; key 'z') Undo
+        else menuItemDisabled "Undo"
+      if canRedo
+        then editItem "Redo" (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 'z') Redo
+        else menuItemDisabled "Redo"
+      menuSeparator
+      editItem "Cut" (cmdOrCtrl &lt;&gt; key 'x') Cut
+      editItem "Copy" (cmdOrCtrl &lt;&gt; key 'c') Copy
+      editItem "Paste" (cmdOrCtrl &lt;&gt; key 'v') Paste
+      menuSeparator
+      editItem "Select All" (cmdOrCtrl &lt;&gt; key 'a') SelectAll
 </code></pre>
 <p><code>TextCommand</code> covers <code>InsertText</code>, <code>Delete</code>, <code>Move</code>, <code>Select</code>, <code>Replace</code>, <code>ReplaceAll</code>, <code>Undo</code>, <code>Redo</code>, <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, and <code>SelectAll</code>. Using commands rather than writing the <code>Var</code> keeps undo intact; assigning a freshly computed <code>TextDocument</code> to <code>doc</code> clears the history.</p>
 <blockquote class="blockquote-tag blockquote-tag-tip">
@@ -752,15 +825,21 @@ modal confirmExit "Unsaved changes" $ do
 </blockquote>
 <h2 id="9-the-status-bar"><a class="header" href="#9-the-status-bar">9. The status bar</a></h2>
 <p>The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
-<pre><code class="language-haskell">statusBar name doc statusMsg zoomVal = do
-  d &lt;- readVar doc
+<pre><code class="language-haskell">statusBar :: Text -&gt; Var TextDocument -&gt; Var Text -&gt; Float -&gt; NanoUI ()
+statusBar docName docVar statusMsg zoomVal = do
+  doc &lt;- readVar docVar
   message &lt;- readVar statusMsg
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
     labelWith (tight . fontMuted) message
     flex
-    labelWith (tight . fontMuted) name
-    labelWith (tight . fontMuted) ("Lines: " &lt;&gt; T.pack (show (documentLineCount d)))
-    labelWith (tight . fontMuted) ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
+    labelWith (tight . fontMuted) docName
+    labelWith
+      (tight . fontMuted)
+      ("Lines: " &lt;&gt; T.pack (show (documentLineCount doc)))
+    labelWith
+      (tight . fontMuted)
+      ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
+
 </code></pre>
 <p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="#recurring-bugs--fixes">Recurring Bugs</a>).</p>
 <h2 id="10-try-it"><a class="header" href="#10-try-it">10. Try it</a></h2>
@@ -784,14 +863,17 @@ cabal run nano-ui-example-live-chart
 </blockquote>
 <h2 id="1-allocate-handles-once"><a class="header" href="#1-allocate-handles-once">1. Allocate handles once</a></h2>
 <p>A <code>Task</code> runs one typed job; a <code>Stream</code> carries one typed push channel. Both are created during setup, like a <code>Var</code>:</p>
-<pre><code class="language-haskell">data App = App
-  { appSearch   :: Task Text [Text]
-  , appFlaky    :: Task Int Text
-  , appProgress :: Stream () Int
+<pre><code class="language-haskell">
+-- | One handle per job. The types fix each job's key and result.
+data App = App
+  { appSearch :: !(Task Text [Text])
+  , appFlaky :: !(Task Int Text)
+  , appProgress :: !(Stream () Int)
   }
 
 newApp :: IO App
 newApp = App &lt;$&gt; newTask &lt;*&gt; newTask &lt;*&gt; newStream
+
 </code></pre>
 <p>The key type and result type are fixed by the handle. That means a task cannot accidentally be reused for a different job, and no message type is erased at runtime.</p>
 <h2 id="2-a-background-search"><a class="header" href="#2-a-background-search">2. A background search</a></h2>
@@ -801,29 +883,41 @@ searchCard app = do
   query &lt;- useVar ""
   committed &lt;- useVar ""
   resp &lt;- searchInput' "Find a word" query
+  -- searchInput' reports a change once typing pauses, so a fast typist
+  -- starts one job, not one per keystroke. Keying by the query itself would
+  -- also work; each new key would just kill the job before it.
   when (respChanged resp) (writeVar committed =&lt;&lt; readVar query)
   key &lt;- readVar committed
-
   status &lt;- useTaskStatus (appSearch app) key (slowSearch key)
-
-  let (hits, running) = case status of
-        TaskRunning previous -&gt; (fromMaybe [] previous, True)
-        TaskDone found       -&gt; (found, False)
-        TaskFailed _ previous -&gt; (fromMaybe [] previous, False)
+  -- While a new query runs, TaskRunning carries the previous results, so
+  -- the list stays put instead of flashing empty.
+  let
+    (hits, running) = case status of
+      TaskRunning previous -&gt; (fromMaybe [] previous, True)
+      TaskDone found -&gt; (found, False)
+      TaskFailed _ previous -&gt; (fromMaybe [] previous, False)
   rowWith (tight . gap 8 . alignMid) $ do
-    -- The spinner comes and goes, so it sits in a scope.
+    -- The spinner comes and goes, so it sits in a scope: the label after it
+    -- keeps its widget id either way.
     scope (when running spinner)
-    muted (T.pack (show (length hits)) &lt;&gt; " matches"
-             &lt;&gt; if running then " (searching...)" else "")
+    muted
+      ( T.pack (show (length hits))
+          &lt;&gt; " matches"
+          &lt;&gt; if running then " (searching...)" else ""
+      )
   rowWith (wrap . gap 6 . fillW) $
-    forM_ (take 24 hits) $ \w -&gt; withKey w (label w)
+    forM_ (take 24 hits) $
+      \w -&gt; withKey w (label w)
+
 </code></pre>
 <p><code>slowSearch</code> is ordinary blocking IO:</p>
 <pre><code class="language-haskell">slowSearch :: Text -&gt; IO [Text]
 slowSearch q = do
   threadDelay 500000
-  let found = filter (T.isInfixOf (T.toLower q)) wordList
+  let
+    found = filter (T.isInfixOf (T.toLower q)) wordList
   length found `seq` pure found
+
 </code></pre>
 <p>What the loop does with it:</p>
 <ul>
@@ -842,7 +936,10 @@ label (fromMaybe "Loading..." contents)
 flakyCard app = do
   attemptVar &lt;- useVar (0 :: Int)
   attempt &lt;- readVar attemptVar
+  -- Same input every time, so the attempt number is the key: bumping it is
+  -- what reruns the job.
   status &lt;- useTaskStatus (appFlaky app) attempt (flakyRequest attempt)
+  -- Each branch declares different widgets, so the whole case is one scope.
   scope $ case status of
     TaskRunning _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
       spinner
@@ -853,6 +950,7 @@ flakyCard app = do
     TaskFailed err _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
+
 </code></pre>
 <p>Two rules are visible here:</p>
 <ul>
@@ -869,15 +967,24 @@ progressCard app = do
   running &lt;- useVar False
   checkbox "Run" running
   isRunning &lt;- readVar running
+  -- When "Run" is unticked 'useStream' is not called, and that alone kills
+  -- the producer: there is no stop button to wire up. Ticking it again
+  -- starts a fresh producer from the initial value. The scope keeps
+  -- anything declared after it on stable ids.
   scope $ when isRunning $ do
     pct &lt;- useStream (appProgress app) () (0 :: Int) $ \update -&gt;
       forM_ [1 .. 100] $ \i -&gt; do
         threadDelay 50000
+        -- Each update wakes the loop for one frame; updates that arrive
+        -- between frames share it.
         update (const i)
     progressBar (fromIntegral pct / 100)
-    muted (if pct &gt;= 100
-             then "Done. Untick and tick Run to start over."
-             else T.pack (show pct) &lt;&gt; "%")
+    muted
+      ( if pct &gt;= 100
+          then "Done. Untick and tick Run to start over."
+          else T.pack (show pct) &lt;&gt; "%"
+      )
+
 </code></pre>
 <ul>
 <li><strong>Stopping is not calling the hook.</strong> When <code>isRunning</code> is false, <code>useStream</code> is not called, and the producer is cancelled. There is no stop button to wire up.</li>
@@ -888,21 +995,25 @@ progressCard app = do
 <p>The frame loop sleeps until the next update. A paused progress pane costs no frames.</p>
 <h2 id="5-a-live-chart"><a class="header" href="#5-a-live-chart">5. A live chart</a></h2>
 <p>The chart is a <code>Stream</code> feeding a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:</p>
-<pre><code class="language-haskell">data ChartApp = ChartApp
-  { appFeed  :: Stream () Feed
-  , appSaved :: Var Feed
-  , appPlots :: PlotCache
+<pre><code class="language-haskell">data App = App
+  { appFeed :: !(Stream () Feed)
+  , appSaved :: !(Var Feed)
+  , appPlots :: !PlotCache
   }
 
-newChartApp :: IO ChartApp
-newChartApp = ChartApp &lt;$&gt; newStream &lt;*&gt; newVar emptyFeed &lt;*&gt; newPlotCache
+newApp :: IO App
+newApp = App &lt;$&gt; newStream &lt;*&gt; newVar emptyFeed &lt;*&gt; newPlotCache
+
 </code></pre>
 <p>The view pauses by not calling the stream, and resumes from the saved feed:</p>
-<pre><code class="language-haskell">chartCard :: ChartApp -&gt; NanoUI ()
-chartCard app = do
+<pre><code class="language-haskell">view :: App -&gt; NanoUI ()
+view app = columnWith (padAll 16 . gap 12 . grow) $ do
   running &lt;- useVar True
   isRunning &lt;- readVar running
   saved &lt;- readVar (appSaved app)
+  -- While running, the stream is the source of truth; 'saved' only seeds a
+  -- restarted producer and is ignored after its first frame. While paused,
+  -- 'useStream' is not called and the saved samples are shown instead.
   feed &lt;-
     scope $
       if isRunning
@@ -915,30 +1026,48 @@ chartCard app = do
     whenM (button (if isRunning then "Pause" else "Resume")) $ do
       when isRunning (writeVar (appSaved app) feed)
       writeVar running (not isRunning)
-    muted (if isRunning then "Live: a sample every 100 ms"
-                        else "Paused: the loop is idle")
+    muted
+      (if isRunning then "Live: a sample every 100 ms" else "Paused: the loop is idle")
 
-  let points = feedPoints feed
-  resp &lt;- withCursorShape UiCursorCrosshair
-            (plot (appPlots app) (fillW . minH 300) (walkChart points))
+  let
+    points = feedPoints feed
+  -- A crosshair for reading values off the plot; the response reports the
+  -- sample nearest the pointer.
+  resp &lt;-
+    withCursorShape
+      UiCursorCrosshair
+      (plot (appPlots app) (fillW . minH 300) (walkChart points))
 
   rowWith (tight . gap 16 . alignMid . fillW) $ do
-    let ys = fmap snd points
-    scope $ if Seq.null ys
-      then muted "Waiting for the first sample..."
-      else do
-        kv "min" (fmt (minimum ys))
-        kv "max" (fmt (maximum ys))
-        kv "last" (fmt (feedLevel feed))
+    let
+      ys = fmap snd points
+    -- Both parts come and go, so each sits in a scope.
+    scope $
+      if Seq.null ys
+        then muted "Waiting for the first sample..."
+        else do
+          kv "min" (fmt (minimum ys))
+          kv "max" (fmt (maximum ys))
+          kv "last" (fmt (feedLevel feed))
     scope . for_ (plotHover resp) $ \hover -&gt;
-      kv "cursor" ("#" &lt;&gt; T.pack (show (round (hoverDataX hover) :: Int))
-                     &lt;&gt; " = " &lt;&gt; fmt (hoverDataY hover))
+      kv
+        "cursor"
+        ( "#"
+            &lt;&gt; T.pack (show (round (hoverDataX hover) :: Int))
+            &lt;&gt; " = "
+            &lt;&gt; fmt (hoverDataY hover)
+        )
+
 </code></pre>
 <p><code>Feed</code>, <code>advance</code>, and <code>fmt</code> are in <code>LiveChart.hs</code>; <code>walkChart</code> builds the chart value:</p>
 <pre><code class="language-haskell">walkChart :: Seq (Double, Double) -&gt; Chart
 walkChart points =
-  withGrid GridBoth . withLegend LegendNone . withXAxis "sample" . withYAxis "value" $
+  withGrid GridBoth
+    . withLegend LegendNone
+    . withXAxis "sample"
+    . withYAxis "value" $
     chart [line "walk" points]
+
 </code></pre>
 <p>The chart API is small:</p>
 <ul>
@@ -1204,6 +1333,8 @@ modal confirm "Delete the file?" $
 <h1 id="elm-style-state"><a class="header" href="#elm-style-state">Elm-Style State</a></h1>
 <p><code>nano-ui-emit</code> is the reducer-based alternative to <code>Var</code>: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model.</p>
 <pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
+  deriving Eq
+
 data Msg = Increment | Decrement | SetName Text
 
 view :: Model -&gt; NanoUIE Msg ()
@@ -1222,6 +1353,7 @@ update (SetName n) m = m {name = n}
 
 main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
+
 </code></pre>
 <p>Widgets, layout, focus, and keys are unchanged. Only the state model differs.</p>
 <h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
@@ -1265,6 +1397,7 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 <h2 id="components"><a class="header" href="#components">Components</a></h2>
 <p><code>mapMessages</code> embeds a child view whose message type is smaller than its parent’s:</p>
 <pre><code class="language-haskell">data ChildMsg = ChildIncrement | ChildReset
+
 data ParentMsg = Child ChildMsg | SaveAll
 
 childView :: Int -&gt; NanoUIE ChildMsg ()
@@ -1277,6 +1410,7 @@ parentView :: Int -&gt; NanoUIE ParentMsg ()
 parentView n = column $ do
   mapMessages Child (childView n)
   emitWhenE (button "Save All") SaveAll
+
 </code></pre>
 <p>Messages go straight to the parent’s sink in traversal order, with no intermediate queue. <code>mapMessages</code> changes the message type, not widget identity: a list still needs <code>withKey</code> around each component, exactly as a <code>Var</code>-based row does.</p>
 <p>For local UI state, keep using <code>Var</code> inside the component; the durable model stays in <code>NanoUIE</code>.</p>
