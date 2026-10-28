@@ -298,44 +298,79 @@
     }
   }
 
+  function formatProse(str) {
+    if (!str) return '';
+    const parts = str.split('`');
+    return parts.map((part, i) => {
+      const esc = escapeHtml(part);
+      return (i % 2 === 1) ? `<code>${esc}</code>` : esc;
+    }).join('');
+  }
+
   // -------------------------------------------------------------------------
   // 5. <nano-ui-trap id="...">
   // -------------------------------------------------------------------------
   class NanoUiTrap extends HTMLElement {
     connectedCallback() {
-      let rawId = this.getAttribute('id') || 'trap-01';
-      if (!rawId.startsWith('trap-')) {
-        rawId = 'trap-' + (rawId.length === 1 ? '0' + rawId : rawId);
-      }
-      this.trapId = rawId;
+      let rawId = (this.getAttribute('id') || 'trap-01').trim();
+      let num = rawId.replace(/^trap-?/i, '');
+      if (num.length === 1) num = '0' + num;
+      this.trapId = 'trap-' + num;
+      this.trapNum = num;
       this.mode = 'split'; // 'bad', 'good', or 'split'
       this.render();
     }
 
     render() {
-      const traps = window.NANO_UI_TRAPS || {};
-      const trap = traps[this.trapId];
+      const traps = window.NANO_UI_TRAPS;
+      if (!traps) {
+        window.addEventListener('load', () => this.render(), { once: true });
+        this.innerHTML = `<div style="padding:16px;color:#f87171">Trap specimen <code>${this.trapId}</code> not found in library.</div>`;
+        return;
+      }
+
+      let trap = null;
+      if (Array.isArray(traps)) {
+        trap = traps.find(t => t.id === this.trapNum || t.id === ('trap-' + this.trapNum) || t.id === this.trapId);
+      } else if (typeof traps === 'object') {
+        trap = traps[this.trapId] || traps[this.trapNum] || traps['trap-' + this.trapNum];
+      }
+
       if (!trap) {
         this.innerHTML = `<div style="padding:16px;color:#f87171">Trap specimen <code>${this.trapId}</code> not found in library.</div>`;
         return;
       }
 
+      const numLabel = trap.numLabel || ('TRAP ' + this.trapNum);
+      const title = trap.title || '';
+      const where = trap.where || '';
+      const whyHtml = trap.why ? `<strong>Why it happens:</strong> ${formatProse(trap.why)}` : '';
+      const fixHtml = trap.fix ? `<strong>Recommended fix:</strong> ${formatProse(trap.fix)}` : '';
+      const blocks = trap.blocks || [whyHtml, fixHtml].filter(Boolean);
+
+      const badCode = (trap.bad && trap.bad.code) || trap.codeBad || '';
+      const goodCode = (trap.good && trap.good.code) || trap.codeGood || '';
+      const badSvgLabel = (trap.bad && trap.bad.svgLabel) || trap.labelA || 'Trap Output';
+      const goodSvgLabel = (trap.good && trap.good.svgLabel) || trap.labelB || 'Fix Output';
+      const badSvg = (trap.bad && trap.bad.svg) || trap.svgA || '';
+      const goodSvg = (trap.good && trap.good.svg) || trap.svgB || '';
+
       this.innerHTML = `
         <div class="nano-trap-header">
           <div class="nano-trap-meta">
-            <span class="nano-trap-num">${trap.numLabel || this.trapId.toUpperCase()}</span>
+            <span class="nano-trap-num">${numLabel}</span>
             <div class="nano-chip-group">
               <button type="button" class="nano-chip ${this.mode === 'bad' ? 'active' : ''}" data-mode="bad">Show Trap</button>
               <button type="button" class="nano-chip ${this.mode === 'good' ? 'active' : ''}" data-mode="good">Show Fix</button>
               <button type="button" class="nano-chip ${this.mode === 'split' ? 'active' : ''}" data-mode="split">Side-by-Side</button>
             </div>
           </div>
-          <h3 class="nano-trap-title">${trap.title}</h3>
-          ${trap.where ? `<code class="nano-trap-where">${trap.where}</code>` : ''}
+          <h3 class="nano-trap-title">${escapeHtml(title)}</h3>
+          ${where ? `<code class="nano-trap-where">${escapeHtml(where)}</code>` : ''}
         </div>
 
         <div class="nano-trap-blocks">
-          ${(trap.blocks || []).map((b, i) => `
+          ${blocks.map((b, i) => `
             <div class="nano-trap-block ${i === 1 ? 'nano-trap-fix-block' : ''}">${b}</div>
           `).join('')}
         </div>
@@ -343,11 +378,11 @@
         <div class="nano-trap-code-grid">
           <div class="nano-code-card">
             <div class="nano-code-card-header bad">Gotcha / Trap Pattern</div>
-            <pre><code>${escapeHtml(trap.bad.code)}</code></pre>
+            <pre><code>${escapeHtml(badCode)}</code></pre>
           </div>
           <div class="nano-code-card">
             <div class="nano-code-card-header good">Recommended Fix</div>
-            <pre><code>${escapeHtml(trap.good.code)}</code></pre>
+            <pre><code>${escapeHtml(goodCode)}</code></pre>
           </div>
         </div>
 
@@ -355,14 +390,14 @@
           <div class="${this.mode === 'split' ? 'nano-well-split' : ''}">
             ${this.mode !== 'good' ? `
               <div class="nano-svg-pane">
-                <span class="nano-pane-label" style="color:#f87171">${trap.bad.svgLabel || 'Trap Output'}</span>
-                <div class="svg-well">${trap.bad.svg}</div>
+                <span class="nano-pane-label" style="color:#f87171">${escapeHtml(badSvgLabel)}</span>
+                <div class="svg-well">${badSvg}</div>
               </div>
             ` : ''}
             ${this.mode !== 'bad' ? `
               <div class="nano-svg-pane">
-                <span class="nano-pane-label" style="color:#34d399">${trap.good.svgLabel || 'Fix Output'}</span>
-                <div class="svg-well">${trap.good.svg}</div>
+                <span class="nano-pane-label" style="color:#34d399">${escapeHtml(goodSvgLabel)}</span>
+                <div class="svg-well">${goodSvg}</div>
               </div>
             ` : ''}
           </div>
