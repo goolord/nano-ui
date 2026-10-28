@@ -1,0 +1,1683 @@
+<!DOCTYPE HTML>
+<html lang="en" class="coal sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>nano-ui Documentation</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-e96d0476.css">
+        <link rel="stylesheet" href="css/chrome-d279d366.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="theme/nano-ui-book-c965c05a.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "coal";
+            const default_dark_theme = "coal";
+            window.path_to_searchindex_js = "searchindex-d700f23e.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-ce59c934.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('coal')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">nano-ui Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/goolord/nano-ui" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="nano-ui"><a class="header" href="#nano-ui">nano-ui</a></h1>
+<p>An immediate-mode GUI toolkit for Haskell.</p>
+<p>A view is a <code>NanoUI ()</code> action that the backend re-runs every frame. Widgets return values directly (e.g. <code>button</code> returns <code>Bool</code>), input widgets take a mutable <code>Var</code> holding their state, and layout is a composable modifier argument. You write UIs with ordinary Haskell functions, <code>do</code> notation, and standard control flow (<code>if</code>, <code>case</code>, <code>for_</code>).</p>
+<pre><code class="language-haskell">counter :: NanoUI ()
+counter = row $ do
+  n &lt;- useVar (0 :: Int)
+  whenM (button "-") (modifyVar n (subtract 1))
+  label . T.pack . show =&lt;&lt; readVar n
+  whenM (button "+") (modifyVar n (+ 1))
+</code></pre>
+<h2 id="packages-in-the-monorepo"><a class="header" href="#packages-in-the-monorepo">Packages in the Monorepo</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Package</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="#nano-ui-sdl-sdl3-backend"><code>packages/nano-ui</code></a></td><td>Core toolkit: widgets, layout, input, theming, draw list, text arena.</td></tr>
+<tr><td><a href="#nano-ui-sdl-sdl3-backend"><code>packages/nano-ui-sdl</code></a></td><td>SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars.</td></tr>
+<tr><td><a href="#nano-ui-rgfw-rgfw-backend"><code>packages/nano-ui-rgfw</code></a></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies.</td></tr>
+<tr><td><a href="#nano-ui-emit-elm-style-architecture"><code>packages/nano-ui-emit</code></a></td><td>Elm-style typed messages and update reducers (<code>NanoUIE msg a</code>).</td></tr>
+<tr><td><a href="#nano-ui-diagrams-charts--plots"><code>packages/nano-ui-diagrams</code></a></td><td>Line, bar, scatter, and area charts (<code>NanoUI.Plot</code>) with diagrams-lib integration.</td></tr>
+<tr><td><a href="#nano-ui-form-validated-forms"><code>packages/nano-ui-form</code></a></td><td>Validated applicative forms built on ditto.</td></tr>
+<tr><td><a href="#nano-ui-markdown-markdown-rendering"><code>packages/nano-ui-markdown</code></a></td><td>Markdown rendering, incrementally appendable for streaming chat replies.</td></tr>
+<tr><td><a href="#nano-ui-svg-headless-svg-export"><code>packages/nano-ui-svg</code></a></td><td>Headless <code>DrawOp</code>-to-SVG export and visual regression testing.</td></tr>
+<tr><td><a href="#nano-ui-sdl-sdl3-backend"><code>packages/nano-ui-demo</code></a></td><td>Interactive demos, full apps, and single-topic tutorials.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="interactive-styling-laboratory"><a class="header" href="#interactive-styling-laboratory">Interactive Styling Laboratory</a></h2>
+<p>This documentation includes interactive, headlessly-rendered SVG workbenches embedded directly within the chapters. You can toggle styling modifiers, themes, and interaction states live:</p>
+<p><nano-ui-hero></nano-ui-hero></p>
+<p>Explore the rest of this book to learn the mental model, API conventions, state management with <code>Var</code>, layout engine, and production best practices.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quickstart"><a class="header" href="#quickstart">Quickstart</a></h1>
+<p>This guide walks you through setting up a project with <code>nano-ui</code> and building your first native desktop application.</p>
+<h2 id="prerequisites--installation"><a class="header" href="#prerequisites--installation">Prerequisites &amp; Installation</a></h2>
+<p><code>nano-ui</code> requires:</p>
+<ul>
+<li><strong>GHC 9.10 through 9.14</strong> (recommended: GHC 9.14)</li>
+<li><strong>Cabal 3.12+</strong></li>
+<li><strong>SDL3 &amp; SDL3_ttf</strong> (3.2+) when using the SDL backend (<code>nano-ui-sdl</code>).</li>
+<li><strong>pkg-config</strong></li>
+</ul>
+<h3 id="nix-linux--macos"><a class="header" href="#nix-linux--macos">Nix (Linux / macOS)</a></h3>
+<p>In this repository, running <code>nix develop</code> provides all dependencies (GHC, Cabal, SDL3, SDL3_ttf, pkg-config).</p>
+<h3 id="windows"><a class="header" href="#windows">Windows</a></h3>
+<p>On Windows, install SDL3 and SDL3_ttf via MSYS2 UCRT64:</p>
+<pre><code class="language-sh">pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
+</code></pre>
+<p>Point <code>PKG_CONFIG_PATH</code> to MSYS2’s ucrt64 pkgconfig:</p>
+<pre><code class="language-powershell">$env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
+</code></pre>
+<h3 id="cabal-pinning"><a class="header" href="#cabal-pinning">Cabal Pinning</a></h3>
+<p><code>nano-ui</code> is pinned as a Cabal <code>source-repository-package</code>:</p>
+<pre><code class="language-cabal">-- In your cabal.project:
+source-repository-package
+  type: git
+  location: https://github.com/goolord/nano-ui
+  subdir:
+    packages/nano-ui
+    packages/nano-ui-sdl
+
+package nano-ui-sdl
+  flags: +sdl
+</code></pre>
+<p>In your application’s <code>.cabal</code> file:</p>
+<pre><code class="language-cabal">executable my-app
+  main-is: Main.hs
+  default-language: GHC2024
+  default-extensions: OverloadedStrings
+  ghc-options: -threaded -Wall
+  build-depends:
+      base &gt;= 4.20 &amp;&amp; &lt; 5
+    , nano-ui
+    , nano-ui-sdl
+    , text
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-important">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
+<p>Always compile executables with <code>-threaded</code>. Immediate-mode GUI loops, task threads, and native window event processing require the GHC threaded runtime.</p>
+</blockquote>
+<hr>
+<h2 id="your-first-application"><a class="header" href="#your-first-application">Your First Application</a></h2>
+<p>Create a <code>Main.hs</code>:</p>
+<pre><code class="language-haskell">module Main (main) where
+
+import Control.Monad (whenM)
+import Data.Text qualified as T
+import NanoUI
+import NanoUI.Backend.Sdl
+
+main :: IO ()
+main = runSdlApp defaultSdlOptions { sdlWindowSettings = defaultWindowSettings { wsTitle = "Hello nano-ui" } } appView
+
+appView :: NanoUI ()
+appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
+  heading "Counter Demo"
+  
+  -- Positional mutable variable initialized to 0
+  n &lt;- useVar (0 :: Int)
+  
+  rowWith (gap 8 . alignMid) $ do
+    whenM (button "-") (modifyVar n (subtract 1))
+    
+    val &lt;- readVar n
+    labelWith (fontMono . fontSize 18) (T.pack (show val))
+    
+    whenM (button "+") (modifyVar n (+ 1))
+    
+  whenM (button "Reset") (writeVar n 0)
+</code></pre>
+<p>Run with Cabal:</p>
+<pre><code class="language-sh">cabal run -j1 my-app
+</code></pre>
+<h2 id="how-it-works"><a class="header" href="#how-it-works">How It Works</a></h2>
+<ol>
+<li><strong><code>runSdlApp</code></strong> initializes SDL3, creates a window with TrueType font rendering, and begins the frame event loop.</li>
+<li><strong><code>columnWith</code> / <code>rowWith</code></strong> are layout containers parameterized by composable layout modifiers (<code>gap 12 . padAll 20</code>).</li>
+<li><strong><code>useVar (0 :: Int)</code></strong> declares state at this position in the view hierarchy. On subsequent frames, it retrieves the existing state.</li>
+<li><strong><code>button "+"</code></strong> renders an interactive button that returns <code>True</code> only in the frame it was clicked.</li>
+<li><strong><code>modifyVar n (+ 1)</code></strong> mutates the variable. If a variable was read earlier in the frame, nano-ui safely invalidates and re-runs the pass without repeating one-shot click events.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="development-setup"><a class="header" href="#development-setup">Development Setup</a></h1>
+<p>Guidance for building, testing, and developing within the <code>nano-ui</code> monorepo.</p>
+<h2 id="building-and-testing"><a class="header" href="#building-and-testing">Building and Testing</a></h2>
+<pre><code class="language-sh">cabal build -j1 all
+cabal test -j1 all
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-warning">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
+<p>Always build with <code>-j1</code>. Running multiple optimizing GHC processes in parallel can easily exhaust physical memory on developer machines. For a strict memory cap, prefix with <code>GHCRTS=-M4G cabal build -j1 ...</code>.</p>
+</blockquote>
+<h3 id="test-suite-catalog"><a class="header" href="#test-suite-catalog">Test Suite Catalog</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Test suite</th><th>Purpose &amp; Coverage</th></tr>
+</thead>
+<tbody>
+<tr><td><code>nano-ui-test</code></td><td>Widgets, layout solver, input handling, focus ring, damage calculation, and draw list generation run headlessly frame-by-frame.</td></tr>
+<tr><td><code>nano-ui-emit-test</code></td><td>Elm-style typed emissions, widget adapters, reducers, and message queue isolation.</td></tr>
+<tr><td><code>text-buffer-spec</code></td><td>Multi-line text buffer, piece tables, and undo history.</td></tr>
+<tr><td><code>nano-ui-svg-test</code></td><td><code>DrawOp</code>-to-SVG headless rendering: precision, clipping masks, gradients, escaping, and rasterization.</td></tr>
+<tr><td><code>nano-ui-inspection</code></td><td>Compiler-level inspection test ensuring unboxed commands, SIMD writers, and memory alignment.</td></tr>
+<tr><td><code>nano-ui-rgfw-test</code></td><td>RGFW backend input translation, bitmap font atlas, and OpenGL frame delivery.</td></tr>
+<tr><td><code>nano-ui-font-search-test</code></td><td>Font discovery, HarfBuzz font shaping, and handle lifetimes under SDL.</td></tr>
+<tr><td><code>nano-ui-render-test</code></td><td>Native SDL readback of partial-damage triangles, clipping, and screenshot captures.</td></tr>
+<tr><td><code>nano-ui-diagrams-test</code></td><td>Diagrams-lib conversion, tessellation, and chart rendering.</td></tr>
+<tr><td><code>nano-ui-form-test</code></td><td>Form validation scopes, reset mechanisms, and submission states.</td></tr>
+<tr><td><code>nano-ui-markdown-test</code></td><td>Markdown parsing, incremental append vs. full-text parsing (QuickCheck), and rich text layout.</td></tr>
+<tr><td><code>nano-ui-demo-test</code></td><td>The SDL demo, notepad, log viewer, and IME composition in hidden windows.</td></tr>
+</tbody>
+</table>
+</div>
+<p>To run a single test suite with detailed failure reports:</p>
+<pre><code class="language-sh">cabal test nano-ui-test --test-show-details=failures
+</code></pre>
+<h2 id="repository-architecture"><a class="header" href="#repository-architecture">Repository Architecture</a></h2>
+<pre><code>packages/
+  nano-ui/             # Core toolkit: widgets, layout, state, drawing, text arena
+  nano-ui-sdl/         # SDL3 + HarfBuzz + native dialogs backend
+  nano-ui-rgfw/        # RGFW + OpenGL 3.2 backend
+  nano-ui-emit/        # Elm architecture (NanoUIE msg a)
+  nano-ui-diagrams/    # Charts and diagrams-lib integration
+  nano-ui-form/        # Validated applicative forms (ditto)
+  nano-ui-markdown/    # Incremental Markdown renderer
+  nano-ui-svg/         # DrawOp-to-SVG headless exporter
+  nano-ui-demo/        # Example applications and tutorials
+</code></pre>
+<h3 id="module-conventions"><a class="header" href="#module-conventions">Module Conventions</a></h3>
+<p>Core modules reside under <code>packages/nano-ui/lib</code>:</p>
+<ul>
+<li>Public API modules are directly under <code>NanoUI</code> and <code>NanoUI.Widgets.*</code>.</li>
+<li>Implementation internals live under <code>NanoUI.Internal.*</code>. Internal modules are exposed for backends and tests, but are not guaranteed to be stable across minor releases.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="the-frame-model"><a class="header" href="#the-frame-model">The Frame Model</a></h1>
+<p><code>nano-ui</code> is built on an immediate-mode execution model. Unlike retained-mode frameworks where you build an object graph of widgets and mutate them via event listeners, in <code>nano-ui</code> the view action re-runs every frame to describe the entire interface.</p>
+<h2 id="the-frame-lifecycle"><a class="header" href="#the-frame-lifecycle">The Frame Lifecycle</a></h2>
+<p>Each frame proceeds through six deterministic stages:</p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="images/rendering-pipeline.svg" alt="Rendering Pipeline"><span class="img-wrapper"><img src="images/rendering-pipeline.svg" alt="Rendering Pipeline"></span></label></p>
+<ol>
+<li><strong>View Execution (<code>NanoUI ()</code>)</strong>: The user action executes top-to-bottom. It emits layout nodes into an unboxed arena, reads input events, queries layout geometry from the previous frame, and reads/writes mutable <code>Var</code> references.</li>
+<li><strong>Re-run Check (Self-Invalidation)</strong>: If a <code>Var</code> is written <em>after</em> it was already read in the same pass, the view action is re-run once with one-shot input events cleared (preventing buttons or keystrokes from firing twice).</li>
+<li><strong>Layout Solver</strong>: The layout tree is solved from root to leaves, determining logical rectangles for every node based on flex weights, gaps, and explicit constraints.</li>
+<li><strong>Hit-Testing &amp; Focus Resolution</strong>: Pointer coordinates, keyboard shortcuts, and Tab cycles are resolved against the freshly solved geometry.</li>
+<li><strong>Damage Calculation</strong>: The new frame geometry and draw operations are diffed against the previous frame to calculate the minimal damaged bounding box.</li>
+<li><strong>Rasterization / Paint</strong>: Only the damaged region is uploaded to the GPU / backend renderer for presentation.</li>
+</ol>
+<hr>
+<h2 id="architectural-consequences"><a class="header" href="#architectural-consequences">Architectural Consequences</a></h2>
+<h3 id="1-view-actions-can-run-more-than-once-per-frame"><a class="header" href="#1-view-actions-can-run-more-than-once-per-frame">1. View Actions Can Run More Than Once Per Frame</a></h3>
+<p>Writing a <code>Var</code> that was read earlier in the same pass triggers a second pass to reconcile the UI.</p>
+<blockquote class="blockquote-tag blockquote-tag-caution">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
+<p>Never allocate per-frame resources inside a view. For instance, <code>liftIO (newVar x)</code> inside a view is a critical bug—it allocates a new reference on every pass. Guard all side effects behind event checks:</p>
+<pre><code class="language-haskell">whenM (button "Save") (liftIO saveDocument)
+</code></pre>
+</blockquote>
+<h3 id="2-readvar-placement-matters"><a class="header" href="#2-readvar-placement-matters">2. <code>readVar</code> Placement Matters</a></h3>
+<p>The position of <code>readVar</code> relative to mutating widgets impacts performance:</p>
+<ul>
+<li><strong>Single Pass</strong>: Reading a <code>Var</code> <em>below</em> the input widget that edits it allows the mutation and new value to resolve in a single pass.</li>
+<li><strong>Double Pass</strong>: Reading a <code>Var</code> <em>above</em> the input widget forces a second pass whenever the user types or interacts.</li>
+<li><strong>Widget-Level Repaint</strong>: Widgets bound directly to a <code>Var</code> without any external <code>readVar</code> calls only repaint that specific widget.</li>
+</ul>
+<h3 id="3-geometry-lags-one-frame"><a class="header" href="#3-geometry-lags-one-frame">3. Geometry Lags One Frame</a></h3>
+<p>Because layout is calculated <em>after</em> the view action executes, <code>respRect</code> returns the geometry from the <strong>previous frame</strong> (empty on first appearance). When writing automated tests or positioning dynamic popups based on rects, warm up one frame before checking coordinates.</p>
+<h3 id="4-idle-costs-zero-cpu"><a class="header" href="#4-idle-costs-zero-cpu">4. Idle Costs Zero CPU</a></h3>
+<p>When no animations, background tasks, or OS window events are pending, the backend event loop blocks on the OS event queue. The application consumes 0% CPU while idle.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="state-management--var"><a class="header" href="#state-management--var">State Management &amp; <code>Var</code></a></h1>
+<p>State in <code>nano-ui</code> is statically typed through explicit handles. Values are not stored in <code>Data.Dynamic</code>, looked up by runtime type representations, or cast out of untyped widget slots. <code>NanoUI</code> works identically whether state is managed via <code>Var</code>s, an Elm-style reducer (<code>nano-ui-emit</code>), or application-owned references (<code>IORef</code>).</p>
+<h2 id="the-var-a-reference"><a class="header" href="#the-var-a-reference">The <code>Var a</code> Reference</a></h2>
+<p>A <code>Var a</code> is a typed mutable reference. Input widgets take the <code>Var</code> they display and mutate directly:</p>
+<pre><code class="language-haskell">counter :: NanoUI ()
+counter = row $ do
+  n &lt;- useVar (0 :: Int)
+  whenM (button "-") (modifyVar n (subtract 1))
+  label . T.pack . show =&lt;&lt; readVar n
+  whenM (button "+") (modifyVar n (+ 1))
+</code></pre>
+<h3 id="allocating-vars"><a class="header" href="#allocating-vars">Allocating <code>Var</code>s</a></h3>
+<p>There are three ways to allocate a <code>Var</code>:</p>
+<ol>
+<li><strong><code>useVar initial</code></strong>: Allocates a positional <code>Var</code> inside <code>NanoUI</code> for <code>Int</code>, <code>Double</code>, <code>Float</code>, <code>Bool</code>, <code>Text</code>, or <code>SortCol</code> (<code>useEnumVar</code> for custom <code>Enum</code> types). Positional <code>Var</code>s use a per-scope counter and key space separate from widget IDs, so conditional widgets do not shift <code>useVar</code> slots.</li>
+<li><strong><code>newVar initial</code></strong>: Allocates an arbitrary <code>Var a</code> in <code>IO</code>. Allocate it during setup and store it in an application environment record passed into the view. Passing the same <code>Var</code> to multiple widgets naturally shares state.</li>
+<li><strong><code>VarMap</code></strong>: One <code>Var</code> per key for dynamic collections (chat logs, file trees, dynamic rows). Use <code>varAt</code> to retrieve or create a <code>Var</code>, and <code>dropVar</code> or <code>retainVars</code> to clean up expired entries.</li>
+</ol>
+<h3 id="read-only-and-projected-vars"><a class="header" href="#read-only-and-projected-vars">Read-Only and Projected <code>Var</code>s</a></h3>
+<ul>
+<li><strong><code>constVar x</code></strong>: A read-only <code>Var</code> where writes are no-ops. Ideal for displaying derived values in input widgets and reacting via the primed <code>Response</code>.</li>
+<li><strong><code>withValue val widget</code></strong>: Runs a widget against a temporary <code>Var</code> initialized to <code>val</code>, returning both the widget result and the updated value.</li>
+<li><strong>Record Projections (<code>OverloadedRecordDot</code>)</strong>: With <code>GHC.Generics.Generic</code>, <code>settings.volume</code> projects a <code>Var Float</code> for that specific field. Writes to <code>settings.volume</code> do not invalidate widgets reading <code>settings.title</code>!</li>
+<li><strong>Lenses &amp; Zooming</strong>: Use <code>zoomVar</code> (getter/setter) or <code>zoomVarL</code> (lens) for custom projections.</li>
+<li><strong>Lists</strong>: <code>forEachVar key list body</code> provides per-element <code>Var</code>s that track keys across reorders.</li>
+</ul>
+<hr>
+<h2 id="what-a-write-costs"><a class="header" href="#what-a-write-costs">What a Write Costs</a></h2>
+<p><code>readVar</code> records a dependency in the current pass. When a <code>Var</code> changes, nano-ui classifies the write:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Write Type</th><th>Description</th><th>Cost</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Forward Write</strong></td><td>Written <em>before</em> any reads in the current pass.</td><td>Single pass. Subsequent reads get the new value immediately.</td></tr>
+<tr><td><strong>Backward Write</strong></td><td>Written <em>after</em> being read earlier in the same pass.</td><td>Triggers a second pass with one-shot events cleared.</td></tr>
+<tr><td><strong>Unchanged Write</strong></td><td>New value is <code>==</code> to old value (pointer checked first).</td><td>No-op. Zero passes, zero repaints.</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote class="blockquote-tag blockquote-tag-tip">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
+<p><strong>Granular Repainting</strong>: When an input widget is bound to a <code>Var</code> without any <code>readVar</code> calls anywhere in the view tree, only that individual widget’s bounds are repainted on change! Calling <code>readVar</code> promotes the write to a full-window repaint.</p>
+</blockquote>
+<h3 id="peek-and-thread-safe-operations"><a class="header" href="#peek-and-thread-safe-operations">Peek and Thread-Safe Operations</a></h3>
+<ul>
+<li><strong><code>peekVar</code></strong>: Reads the value of a <code>Var</code> <em>without</em> recording a dependency (useful for comparing previous vs current frame without triggering second passes).</li>
+<li><strong>Background Threads</strong>: Use <code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> from external worker threads, then signal the UI to repaint by calling the callback obtained from <code>askWake</code>.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="widget-identity--scoping"><a class="header" href="#widget-identity--scoping">Widget Identity &amp; Scoping</a></h1>
+<p>In <code>nano-ui</code>, widget IDs are generated deterministically based on invocation call order among siblings. Internal interactive state—such as text caret positions, active text selection, open dropdown menus, and scroll offsets—is keyed to these widget IDs.</p>
+<h2 id="the-identity-rules"><a class="header" href="#the-identity-rules">The Identity Rules</a></h2>
+<h3 id="1-consistent-call-order"><a class="header" href="#1-consistent-call-order">1. Consistent Call Order</a></h3>
+<p>Because widget IDs count up in traversal order, the structure of calls should remain stable across consecutive frames.</p>
+<h3 id="2-wrap-conditional-subtrees-in-scope"><a class="header" href="#2-wrap-conditional-subtrees-in-scope">2. Wrap Conditional Subtrees in <code>scope</code></a></h3>
+<p>If an element or section is conditionally displayed, wrapping it in <code>scope</code> reserves a single stable slot regardless of whether the branch executes:</p>
+<pre><code class="language-haskell">-- BAD: If showDetails is False, subsequent siblings shift IDs!
+when showDetails $ do
+  label "Details..."
+  textInput detailsVar
+
+-- GOOD: scope reserves a consistent slot in the parent hierarchy
+scope $ when showDetails $ do
+  label "Details..."
+  textInput detailsVar
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-note">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
+<p><code>useVar</code> maintains its own dedicated counter separate from layout widget IDs. While conditional widgets alone do not shift <code>useVar</code> slots, conditional <code>useVar</code> calls themselves still require <code>scope</code>.</p>
+</blockquote>
+<h3 id="3-reorderable-lists-with-withkey"><a class="header" href="#3-reorderable-lists-with-withkey">3. Reorderable Lists with <code>withKey</code></a></h3>
+<p>When rendering collections that can be sorted, filtered, inserted, or removed, <strong>never key by list index</strong>. Wrap each item in <code>withKey</code> with a unique, persistent identifier (such as an item ID or UUID):</p>
+<pre><code class="language-haskell">column $ for_ items $ \item -&gt; do
+  withKey item.id $ do
+    row $ do
+      label item.name
+      whenM (button "Delete") (deleteItem item.id)
+</code></pre>
+<h3 id="4-retaining-dynamic-state"><a class="header" href="#4-retaining-dynamic-state">4. Retaining Dynamic State</a></h3>
+<p>State associated with dynamic keys is preserved while visible. For unbounded dynamic collections (such as streamed logs or ephemeral tabs), maintain row state in a <code>VarMap</code> and prune dead keys periodically with <code>retainVars</code>:</p>
+<pre><code class="language-haskell">retainVars activeKeys varMap
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="architecture--application-patterns"><a class="header" href="#architecture--application-patterns">Architecture &amp; Application Patterns</a></h1>
+<p>Real-world applications built on <code>nano-ui</code> (such as <code>ned</code>, a vim-like modal editor, <code>stronghead</code>, a profiling debugger, and <code>winget-gui</code>, a Windows package manager client) converge on clean, highly reliable architectural patterns.</p>
+<h2 id="the-core-rule-setup-once-in-io-then-run"><a class="header" href="#the-core-rule-setup-once-in-io-then-run">The Core Rule: Setup Once in IO, Then Run</a></h2>
+<p>Everything frame-lived is either managed via a <code>Var</code> or declared directly inside the view action:</p>
+<pre><code class="language-haskell">main :: IO ()
+main = do
+  cache &lt;- newViewCache      -- Persistent records of newVar calls &amp; caches
+  env   &lt;- newAppEnv         -- Application state outside nano-ui
+  runSdlApp defaultSdlOptions (appView env cache)
+</code></pre>
+<hr>
+<h2 id="pattern-a-the-winget-gui-pattern-worker-threads--ioref"><a class="header" href="#pattern-a-the-winget-gui-pattern-worker-threads--ioref">Pattern A: The <code>winget-gui</code> Pattern (Worker Threads + IORef)</a></h2>
+<p>For applications performing extensive I/O, subprocess execution, or database queries:</p>
+<pre><code class="language-haskell">data Env = Env
+  { envState :: IORef AppState
+  , envWake  :: IORef (IO ())
+  }
+
+main :: IO ()
+main = do
+  stateRef &lt;- newIORef initialAppState
+  wakeRef  &lt;- newIORef (pure ())
+  let env = Env stateRef wakeRef
+  runSdlApp opts (appView env)
+
+appView :: Env -&gt; NanoUI ()
+appView env = do
+  -- Install the wake callback on the first frame
+  wakeCb &lt;- askWake
+  liftIO $ writeIORef env.envWake wakeCb
+
+  -- Snapshot the state at the beginning of the frame
+  state &lt;- liftIO $ readIORef env.envState
+
+  -- Build UI hierarchy top-to-bottom
+  mainLayout state
+</code></pre>
+<h3 id="thread-safety-with-askwake"><a class="header" href="#thread-safety-with-askwake">Thread Safety with <code>askWake</code></a></h3>
+<p>Background threads update <code>envState</code> atomically, then trigger a redraw:</p>
+<pre><code class="language-haskell">forkIO $ do
+  results &lt;- queryPackageDatabase
+  atomicModifyIORef' env.envState (\s -&gt; (s { packages = results }, ()))
+  wake &lt;- readIORef env.envWake
+  wake  -- Wake the event loop for a new frame
+</code></pre>
+<hr>
+<h2 id="pattern-b-the-stronghead-pattern-app-record-of-vars"><a class="header" href="#pattern-b-the-stronghead-pattern-app-record-of-vars">Pattern B: The <code>stronghead</code> Pattern (App Record of <code>Var</code>s)</a></h2>
+<p>For complex multi-pane applications with tightly coupled interactive state:</p>
+<pre><code class="language-haskell">data App = App
+  { filterText :: Var Text
+  , activeTab  :: Var TabId
+  , zoomLevel  :: Var Float
+  , isInspecting :: Var Bool
+  }
+
+newApp :: IO App
+newApp = App
+  &lt;$&gt; newVar ""
+  &lt;*&gt; newVar TabOverview
+  &lt;*&gt; newVar 1.0
+  &lt;*&gt; newVar False
+</code></pre>
+<p>The <code>App</code> record is passed into view functions, which read and mutate its fields directly with zero global state.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="containers"><a class="header" href="#containers">Containers</a></h1>
+<p><code>nano-ui</code> provides a rich set of layout containers that arrange child nodes into rows, columns, grids, layered stacks, and responsive panes.</p>
+<h2 id="container-inventory"><a class="header" href="#container-inventory">Container Inventory</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Container</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>row</code> / <code>rowWith</code></td><td>Lays out children horizontally in a flexible flow.</td></tr>
+<tr><td><code>column</code> / <code>columnWith</code></td><td>Lays out children vertically from top to bottom.</td></tr>
+<tr><td><code>grid</code> / <code>gridWith</code></td><td>Arranges children into rows and columns with <code>gridCols n</code>.</td></tr>
+<tr><td><code>panel</code> / <code>panelWith</code></td><td>Renders a styled surface container with background, border, and padding.</td></tr>
+<tr><td><code>card</code> / <code>cardWith</code></td><td>Elevated panel with distinct background and rounded corners.</td></tr>
+<tr><td><code>callout</code> / <code>calloutWith</code></td><td>Informational or alert panel with semantic tone styling.</td></tr>
+<tr><td><code>layers</code></td><td>Stacks children on top of each other in call order (last on top), aligning within the shared bounding box.</td></tr>
+<tr><td><code>center</code></td><td>Centers child content both horizontally and vertically.</td></tr>
+<tr><td><code>responsive</code></td><td>Adapts layout dynamically based on available width.</td></tr>
+<tr><td><code>mouseArea</code></td><td>Wraps a subtree to report hover, clicks, and drag events across the entire region.</td></tr>
+<tr><td><code>separator</code></td><td>Horizontal or vertical divider line styled by <code>themeSeparator</code>.</td></tr>
+<tr><td><code>spacer</code></td><td>Flexible space absorber that expands to fill available room.</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
+<h3 id="horizontal-toolbar-with-alignments"><a class="header" href="#horizontal-toolbar-with-alignments">Horizontal Toolbar with Alignments</a></h3>
+<pre><code class="language-haskell">rowWith (gap 8 . padAll 8 . fillW . alignMid) $ do
+  button "Back"
+  button "Forward"
+  spacer  -- Pushes search input to the right
+  textInput searchVar
+</code></pre>
+<h3 id="layered-scrim--modal-backdrop"><a class="header" href="#layered-scrim--modal-backdrop">Layered Scrim / Modal Backdrop</a></h3>
+<pre><code class="language-haskell">layers $ do
+  mainContent
+  
+  -- Dimming scrim positioned across the entire parent
+  panelWith (pinAt 0 0 . grow . pointer PointerBlock) $ do
+    modalDialog
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="layout-modifiers"><a class="header" href="#layout-modifiers">Layout Modifiers</a></h1>
+<p>Layout modifiers are functions of type <code>Layout -&gt; Layout</code> composed with standard function composition <code>(.)</code>.</p>
+<blockquote class="blockquote-tag blockquote-tag-important">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
+<p><strong>Precedence Rule: Leftmost Wins</strong>
+When two modifiers configure the same property, the <strong>leftmost modifier wins</strong>:</p>
+<pre><code class="language-haskell">-- fixedW 200 takes effect; fixedW 100 is ignored
+buttonWith (fixedW 200 . fixedW 100) "Submit"
+</code></pre>
+</blockquote>
+<h2 id="modifier-reference"><a class="header" href="#modifier-reference">Modifier Reference</a></h2>
+<h3 id="sizing-and-expansion"><a class="header" href="#sizing-and-expansion">Sizing and Expansion</a></h3>
+<ul>
+<li><strong><code>fillW</code> / <code>fillH</code></strong>: Expands to take up all available space in the parent container along the specified axis.</li>
+<li><strong><code>grow</code></strong>: Shorthand for <code>fillW . fillH</code>.</li>
+<li><strong><code>fixedW w</code> / <code>fixedH h</code> / <code>fixedWH w h</code></strong>: Sets explicit logical pixel dimensions.</li>
+<li><strong><code>minW w</code> / <code>maxW w</code> / <code>minH h</code> / <code>maxH h</code></strong>: Constrains minimum and maximum dimensions.</li>
+<li><strong><code>percent p</code></strong>: Sets size as a percentage (0 to 100) of the parent box.</li>
+<li><strong><code>aspect r</code></strong>: Constrains the aspect ratio (width / height).</li>
+</ul>
+<h3 id="padding-and-spacing"><a class="header" href="#padding-and-spacing">Padding and Spacing</a></h3>
+<ul>
+<li><strong><code>padAll p</code></strong>: Insets all four sides by <code>p</code> logical pixels.</li>
+<li><strong><code>padXY x y</code></strong>: Insets horizontally by <code>x</code> and vertically by <code>y</code>.</li>
+<li><strong><code>padLeft</code> / <code>padRight</code> / <code>padTop</code> / <code>padBottom</code></strong>: Insets individual sides.</li>
+<li><strong><code>padLRTB l r t b</code></strong>: Explicit padding for left, right, top, and bottom.</li>
+<li><strong><code>gap g</code></strong>: Spacing between consecutive children in rows, columns, or grids.</li>
+<li><strong><code>tight</code></strong>: Removes all internal padding while preserving inter-item gap.</li>
+</ul>
+<h3 id="alignment-and-wrapping"><a class="header" href="#alignment-and-wrapping">Alignment and Wrapping</a></h3>
+<ul>
+<li><strong><code>alignMid</code></strong>: Centers children perpendicular to the flow axis.</li>
+<li><strong><code>alignStart</code> / <code>alignEnd</code></strong>: Aligns children to the start or end of the container.</li>
+<li><strong><code>alignCenter</code></strong>: Centers along both axes.</li>
+<li><strong><code>alignBaseline</code></strong>: Aligns text baselines across adjacent widgets.</li>
+<li><strong><code>wrap</code></strong>: Wraps overflowing children onto subsequent rows/columns (customize with <code>lineGap</code> and <code>lineAlign</code>).</li>
+</ul>
+<h3 id="absolute-positioning-and-overlays"><a class="header" href="#absolute-positioning-and-overlays">Absolute Positioning and Overlays</a></h3>
+<ul>
+<li><strong><code>pinAt x y</code></strong>: Positions a child absolutely at <code>(x, y)</code> logical coordinates within its parent container.</li>
+<li><strong><code>pointer PointerBlock</code></strong>: Consumes pointer events (preventing clicks from passing through).</li>
+<li><strong><code>pointer PointerPass</code></strong>: Transparent to pointer clicks (allows interaction with underlying elements).</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="scrolling--virtualization"><a class="header" href="#scrolling--virtualization">Scrolling &amp; Virtualization</a></h1>
+<p><code>nano-ui</code> provides high-performance scroll containers supporting momentum scrolling, custom scrollbars, and virtualization for lists containing hundreds of thousands of items.</p>
+<h2 id="bounded-scroll-viewports"><a class="header" href="#bounded-scroll-viewports">Bounded Scroll Viewports</a></h2>
+<p>A scroll container must have a bounded dimension along its scrolling axis:</p>
+<pre><code class="language-haskell">-- Bounded vertically to 300px; fills parent horizontally
+scrollWith (fixedH 300 . fillW) $ do
+  column $ for_ items $ \item -&gt; do
+    label item
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-warning">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
+<p>Giving a scroll container <code>grow</code> without a bounded parent can lead to unexpected collapses. Ensure the ancestor container provides a definite constraint.</p>
+</blockquote>
+<hr>
+<h2 id="2d-scrolling"><a class="header" href="#2d-scrolling">2D Scrolling</a></h2>
+<p>For data grids, code canvases, or image viewports:</p>
+<pre><code class="language-haskell">scroll2DWith (fixedWH 600 400) $ do
+  largeCanvasContent
+</code></pre>
+<hr>
+<h2 id="virtualization-for-massive-datasets"><a class="header" href="#virtualization-for-massive-datasets">Virtualization for Massive Datasets</a></h2>
+<p>When rendering datasets with 10,000+ to 100,000+ rows, creating thousands of layout nodes degrades frame rates. Virtualization solves this by rendering only the rows currently visible within the scroll viewport.</p>
+<h3 id="implementation-pattern"><a class="header" href="#implementation-pattern">Implementation Pattern</a></h3>
+<pre><code class="language-haskell">virtualizedList :: [Item] -&gt; NanoUI ()
+virtualizedList items = do
+  -- Capture the widget ID of the scroller
+  sid &lt;- currentId
+  
+  scrollWith (fixedH 500 . fillW) $ do
+    -- Query scroll metrics (current offset and viewport height)
+    metrics &lt;- getScrollMetricsUi sid
+    
+    let rowHeight = 28.0
+        totalCount = length items
+        totalHeight = fromIntegral totalCount * rowHeight
+        
+        -- Compute visible row slice
+        firstVisible = max 0 (floor (smOffsetY metrics / rowHeight))
+        visibleCount = ceiling (smViewportHeight metrics / rowHeight) + 2
+        lastVisible = min totalCount (firstVisible + visibleCount)
+        
+        topSpacerHeight = fromIntegral firstVisible * rowHeight
+        bottomSpacerHeight = fromIntegral (totalCount - lastVisible) * rowHeight
+        
+        visibleRows = take (lastVisible - firstVisible) (drop firstVisible items)
+    
+    column $ do
+      -- Top spacer maintains scroll height
+      when (topSpacerHeight &gt; 0) $ spacerWith (fixedH topSpacerHeight)
+      
+      -- Render only active rows
+      for_ visibleRows $ \rowItem -&gt; do
+        withKey rowItem.id $ do
+          labelWith (fixedH rowHeight . fillW) rowItem.title
+          
+      -- Bottom spacer maintains scroll height
+      when (bottomSpacerHeight &gt; 0) $ spacerWith (fixedH bottomSpacerHeight)
+</code></pre>
+<p>See <code>nano-ui-example-long-list</code> in <code>packages/nano-ui-demo</code> for a complete working demo of 100,000 rows virtualized at 60 FPS.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="theming--surface-architecture"><a class="header" href="#theming--surface-architecture">Theming &amp; Surface Architecture</a></h1>
+<p><code>nano-ui</code> uses a structured surface routing architecture rather than individual per-widget CSS rules.</p>
+<h2 id="the-five-surfaces-of-a-theme"><a class="header" href="#the-five-surfaces-of-a-theme">The Five Surfaces of a <code>Theme</code></a></h2>
+<p>A <code>Theme</code> holds five distinct <code>Style</code> records corresponding to semantic surfaces:</p>
+<ol>
+<li><strong><code>themeButton</code></strong>: Interactive controls, buttons, toggles, and dropdown triggers.</li>
+<li><strong><code>themeInput</code></strong>: Editable text fields, search boxes, numeric inputs, and sliders.</li>
+<li><strong><code>themePanel</code></strong>: Cards, containers, sidebars, toolbars, and background chrome.</li>
+<li><strong><code>themePopup</code></strong>: Dropdown menus, context menus, and select popouts.</li>
+<li><strong><code>themeFloatingWindow</code></strong>: Modals, draggable windows, and inspector dialogs.</li>
+</ol>
+<p>In addition, a <code>Theme</code> defines semantic color roles:</p>
+<ul>
+<li><code>themeAccent</code> &amp; <code>themeOnAccent</code>: Primary brand actions and focus rings.</li>
+<li><code>themeMuted</code>: Secondary labels, placeholders, and subtle borders.</li>
+<li><code>themeSelection</code>: Highlighted text and selected list rows.</li>
+<li><code>themeFocusRing</code>: Keyboard focus outlines.</li>
+<li>Semantic Tones: <code>themeSuccess</code>, <code>themeWarning</code>, <code>themeDanger</code>.</li>
+</ul>
+<hr>
+<h2 id="interactive-surface-overview"><a class="header" href="#interactive-surface-overview">Interactive Surface Overview</a></h2>
+<p>Toggle surfaces below to observe how each surface category routes across composite controls:</p>
+<p><nano-ui-hero></nano-ui-hero></p>
+<hr>
+<h2 id="scoped-theming-with-styled-and-themed"><a class="header" href="#scoped-theming-with-styled-and-themed">Scoped Theming with <code>styled</code> and <code>themed</code></a></h2>
+<p>Themes are composable and scoped lexically using standard Haskell combinators:</p>
+<pre><code class="language-haskell">-- Switch base theme for a subtree
+themed defaultLightTheme $ do
+  mainContent
+
+-- Scope a theme transformation
+styled (primary . rounded 999) $ do
+  button "Submit Order"
+</code></pre>
+<p>Modifiers compose cleanly with <code>(.)</code>. Nested scopes inherit modifications made by outer scopes.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="interaction-states"><a class="header" href="#interaction-states">Interaction States</a></h1>
+<p>Widgets transition through four distinct interactive states based on pointer coordinates, clicks, and disabled status:</p>
+<ol>
+<li><strong>Default</strong>: Rest state. Uses <code>styleBg</code>, <code>styleFg</code>, and <code>styleBorder</code>.</li>
+<li><strong>Hover</strong>: Cursor is positioned over the widget’s bounding geometry. Uses <code>styleHoverBg</code>.</li>
+<li><strong>Pressed (Active)</strong>: Primary mouse button is held down within the widget bounds. Uses <code>styleActiveBg</code>.</li>
+<li><strong>Disabled</strong>: Interaction is suppressed by <code>disabledWhen True</code>. Rendering is automatically dimmed, and events are blocked.</li>
+</ol>
+<hr>
+<h2 id="state-transition-laboratory"><a class="header" href="#state-transition-laboratory">State Transition Laboratory</a></h2>
+<p>The interactive specimen below demonstrates how the four states render across controls in both dark and light modes:</p>
+<p><nano-ui-state-lab></nano-ui-state-lab></p>
+<hr>
+<h2 id="disabling-subtrees-with-disabledwhen"><a class="header" href="#disabling-subtrees-with-disabledwhen">Disabling Subtrees with <code>disabledWhen</code></a></h2>
+<p><code>disabledWhen</code> preserves layout dimensions and state while dimming visual output and intercepting events:</p>
+<pre><code class="language-haskell">disabledWhen isSaving $ do
+  row $ do
+    button "Cancel"
+    button "Confirm"
+</code></pre>
+<p>Shortcuts and mouse events inside a disabled subtree are suppressed automatically.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="interactive-widget-workbenches"><a class="header" href="#interactive-widget-workbenches">Interactive Widget Workbenches</a></h1>
+<p>Explore how every styling modifier (<code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>accentColor</code>, <code>rounded</code>, <code>disabledWhen</code>) and theme mode affects each widget family in <code>nano-ui</code>.</p>
+<p>Use the toggle chips on each workbench to toggle modifiers on and off, click <strong>Toggle Compare Baseline</strong> to see a side-by-side diff against the unstyled widget, and copy the generated Haskell code directly into your project.</p>
+<hr>
+<h2 id="1-buttons"><a class="header" href="#1-buttons">1. Buttons</a></h2>
+<p>Standard push buttons, quiet buttons, and styled actions.</p>
+<p><nano-ui-workbench widget="button" title="Push Buttons"></nano-ui-workbench></p>
+<hr>
+<h2 id="2-toggle-buttons"><a class="header" href="#2-toggle-buttons">2. Toggle Buttons</a></h2>
+<p>Two-state toggle buttons with persistent active styling.</p>
+<p><nano-ui-workbench widget="toggle-button" title="Toggle Buttons"></nano-ui-workbench></p>
+<hr>
+<h2 id="3-checkboxes"><a class="header" href="#3-checkboxes">3. Checkboxes</a></h2>
+<p>Checkboxes route through three distinct surfaces: the box well (<code>themeInput</code>), check indicator (<code>themeAccent</code>), and label text.</p>
+<p><nano-ui-workbench widget="checkbox" title="Checkboxes"></nano-ui-workbench></p>
+<hr>
+<h2 id="4-radio-buttons"><a class="header" href="#4-radio-buttons">4. Radio Buttons</a></h2>
+<p>Single-choice radio groups with circular indicator wells.</p>
+<p><nano-ui-workbench widget="radio" title="Radio Buttons"></nano-ui-workbench></p>
+<hr>
+<h2 id="5-text-inputs"><a class="header" href="#5-text-inputs">5. Text Inputs</a></h2>
+<p>Single-line text fields with active caret, selection highlighting, and focus rings.</p>
+<p><nano-ui-workbench widget="text-input" title="Text Fields"></nano-ui-workbench></p>
+<hr>
+<h2 id="6-search--numeric-inputs"><a class="header" href="#6-search--numeric-inputs">6. Search &amp; Numeric Inputs</a></h2>
+<p>Debounced search fields and bounded numeric steppers.</p>
+<p><nano-ui-workbench widget="search-numeric" title="Search &amp; Numeric Fields"></nano-ui-workbench></p>
+<hr>
+<h2 id="7-select-vs-combobox"><a class="header" href="#7-select-vs-combobox">7. Select vs ComboBox</a></h2>
+<p>Dropdown triggers: <code>select</code> uses <code>themeButton</code> for trigger styling, whereas <code>comboBox</code> uses <code>themeInput</code>.</p>
+<p><nano-ui-workbench widget="select-vs-combo" title="Dropdown Select &amp; ComboBox"></nano-ui-workbench></p>
+<hr>
+<h2 id="8-multi-line-text-areas"><a class="header" href="#8-multi-line-text-areas">8. Multi-line Text Areas</a></h2>
+<p>Scrollable multi-line text editing with document-level line sharing.</p>
+<p><nano-ui-workbench widget="textarea" title="Multi-line Text Area"></nano-ui-workbench></p>
+<hr>
+<h2 id="9-sliders"><a class="header" href="#9-sliders">9. Sliders</a></h2>
+<p>Continuous and discrete sliders with track and thumb geometry.</p>
+<p><nano-ui-workbench widget="slider" title="Sliders"></nano-ui-workbench></p>
+<hr>
+<h2 id="10-custom-controls-switches-knobs-spinners"><a class="header" href="#10-custom-controls-switches-knobs-spinners">10. Custom Controls (Switches, Knobs, Spinners)</a></h2>
+<p>Custom vector canvas controls from <code>NanoUI.Widgets.Custom</code>.</p>
+<p><nano-ui-workbench widget="custom-controls" title="Custom Vector Controls"></nano-ui-workbench></p>
+<hr>
+<h2 id="11-panels-cards--callouts"><a class="header" href="#11-panels-cards--callouts">11. Panels, Cards &amp; Callouts</a></h2>
+<p>Structural containers: <code>panelStyle</code> routes background, border, and semantic tone styling.</p>
+<p><nano-ui-workbench widget="panel-card-callout" title="Panels, Cards &amp; Callouts"></nano-ui-workbench></p>
+<hr>
+<h2 id="12-bounded-scroll-areas"><a class="header" href="#12-bounded-scroll-areas">12. Bounded Scroll Areas</a></h2>
+<p>Scrollable wells and custom styled scrollbars.</p>
+<p><nano-ui-workbench widget="scroll-bounded" title="Scroll Areas"></nano-ui-workbench></p>
+<hr>
+<h2 id="13-tabs"><a class="header" href="#13-tabs">13. Tabs</a></h2>
+<p>Tab headers in Underline, Segmented, and Pill styles.</p>
+<p><nano-ui-workbench widget="tabs-styles" title="Tab Bars"></nano-ui-workbench></p>
+<hr>
+<h2 id="14-tables--trees"><a class="header" href="#14-tables--trees">14. Tables &amp; Trees</a></h2>
+<p>Colonnade data tables with sort arrows and hierarchical tree views.</p>
+<p><nano-ui-workbench widget="table-tree" title="Tables &amp; Tree Views"></nano-ui-workbench></p>
+<hr>
+<h2 id="15-overlays-floating-windows--menus"><a class="header" href="#15-overlays-floating-windows--menus">15. Overlays (Floating Windows &amp; Menus)</a></h2>
+<p>Floating modal windows, popup menus, and tooltips.</p>
+<p><nano-ui-workbench widget="overlays" title="Overlays &amp; Floating Windows"></nano-ui-workbench></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="typography--fonts"><a class="header" href="#typography--fonts">Typography &amp; Fonts</a></h1>
+<p><code>nano-ui</code> supports rich font styling including font sizes, monospace styling, weights, slants, text decorations, semantic font tones, and custom font colors.</p>
+<h2 id="font-modifiers"><a class="header" href="#font-modifiers">Font Modifiers</a></h2>
+<p>Font modifiers can be applied directly to text-capable widgets (<code>labelWith</code>, <code>headingWith</code>, <code>textInputWith</code>, <code>buttonWith</code>):</p>
+<ul>
+<li><strong><code>fontSize px</code></strong>: Sets font size in logical units.</li>
+<li><strong><code>fontMono</code></strong>: Switches to the monospace font family (<code>sdlAppMonoFont</code>).</li>
+<li><strong><code>fontBold</code></strong>: Sets heavy font weight (700).</li>
+<li><strong><code>fontItalic</code></strong>: Applies italic slant.</li>
+<li><strong><code>fontUnderline</code></strong>: Draws an underline rule.</li>
+<li><strong><code>fontStrike</code></strong>: Draws a strikethrough line.</li>
+<li><strong><code>fontTone Tone</code></strong>: Applies a semantic tone (<code>fontTone Danger</code>, <code>fontTone Warning</code>, <code>fontTone Success</code>).</li>
+<li><strong><code>fontColor Color</code></strong>: Overrides text color with an explicit RGB/RGBA value.</li>
+</ul>
+<hr>
+<h2 id="typography-laboratory"><a class="header" href="#typography-laboratory">Typography Laboratory</a></h2>
+<p>Inspect how font modifiers render across different controls:</p>
+<p><nano-ui-typo-lab></nano-ui-typo-lab></p>
+<hr>
+<h2 id="font-discovery--backend-configuration"><a class="header" href="#font-discovery--backend-configuration">Font Discovery &amp; Backend Configuration</a></h2>
+<p>Under the SDL backend, default TrueType fonts are bundled (Inter for proportional text). You can configure system font lookup via <code>FontSearch</code>:</p>
+<pre><code class="language-haskell">sdlOptions
+  { sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Helvetica Neue"]
+  , sdlAppMonoFont = FontSearch ["Cascadia Mono", "JetBrains Mono", "Consolas"]
+  , sdlAppFontSize = 14
+  }
+</code></pre>
+<p>On Windows, font metrics are resolved with HarfBuzz shaping and FreeType rendering.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="unexpected-styling-interactions"><a class="header" href="#unexpected-styling-interactions">Unexpected Styling Interactions</a></h1>
+<p>This chapter catalogs twelve non-obvious styling interactions, edge cases, and gotchas discovered in <code>nano-ui</code>’s layout, theming, and rendering pipelines.</p>
+<p>Each interaction includes an explanation of <strong>why it happens</strong> under the hood, the <strong>recommended idiom or fix</strong>, code comparisons, and interactive headless SVG specimens showing the trap vs the fix.</p>
+<hr>
+<h2 id="1-buttonwith-drops-font-flags"><a class="header" href="#1-buttonwith-drops-font-flags">1. <code>buttonWith</code> Drops Font Flags</a></h2>
+<p><code>buttonWith</code> drops font flags like <code>fontBold</code>, <code>fontItalic</code>, <code>fontUnderline</code>, and <code>fontTone</code>.</p>
+<p><nano-ui-trap id="trap-01"></nano-ui-trap></p>
+<hr>
+<h2 id="2-heading-and-fontheading-differ"><a class="header" href="#2-heading-and-fontheading-differ">2. <code>heading</code> and <code>fontHeading</code> Differ</a></h2>
+<p><code>heading</code> and <code>fontHeading</code> produce different sizes and margins.</p>
+<p><nano-ui-trap id="trap-02"></nano-ui-trap></p>
+<hr>
+<h2 id="3-checkbox--radio-span-three-surfaces"><a class="header" href="#3-checkbox--radio-span-three-surfaces">3. <code>checkbox</code> &amp; <code>radio</code> Span Three Surfaces</a></h2>
+<p>Checkboxes and radio buttons route their indicator, box well, and text label through different surface records.</p>
+<p><nano-ui-trap id="trap-03"></nano-ui-trap></p>
+<hr>
+<h2 id="4-select-and-combobox-use-different-surfaces"><a class="header" href="#4-select-and-combobox-use-different-surfaces">4. <code>select</code> and <code>comboBox</code> Use Different Surfaces</a></h2>
+<p><code>select</code> trigger buttons read <code>themeButton</code>, while <code>comboBox</code> fields read <code>themeInput</code>.</p>
+<p><nano-ui-trap id="trap-04"></nano-ui-trap></p>
+<hr>
+<h2 id="5-scrollwith-changes-surface-with-its-sizing"><a class="header" href="#5-scrollwith-changes-surface-with-its-sizing">5. <code>scrollWith</code> Changes Surface With Its Sizing</a></h2>
+<p>Sizing modifiers on <code>scrollWith</code> change whether the scroll well is drawn.</p>
+<p><nano-ui-trap id="trap-05"></nano-ui-trap></p>
+<hr>
+<h2 id="6-callout-tints-nested-panels"><a class="header" href="#6-callout-tints-nested-panels">6. <code>callout</code> Tints Nested Panels</a></h2>
+<p><code>callout</code> applies <code>panelStyle</code> overrides that cascade down to any nested panels.</p>
+<p><nano-ui-trap id="trap-06"></nano-ui-trap></p>
+<hr>
+<h2 id="7-togglebutton-ignores-buttonstyle-when-on"><a class="header" href="#7-togglebutton-ignores-buttonstyle-when-on">7. <code>toggleButton</code> Ignores <code>buttonStyle</code> When On</a></h2>
+<p>When active, <code>toggleButton</code> overrides <code>themeButton</code> background with <code>themeAccent</code>.</p>
+<p><nano-ui-trap id="trap-07"></nano-ui-trap></p>
+<hr>
+<h2 id="8-background-resets-on-focus"><a class="header" href="#8-background-resets-on-focus">8. <code>background</code> Resets on Focus</a></h2>
+<p>Setting background color directly on an input can be masked when the widget gains focus.</p>
+<p><nano-ui-trap id="trap-08"></nano-ui-trap></p>
+<hr>
+<h2 id="9-borderwidth-does-not-add-layout-space"><a class="header" href="#9-borderwidth-does-not-add-layout-space">9. <code>borderWidth</code> Does Not Add Layout Space</a></h2>
+<p>Borders in <code>nano-ui</code> are drawn inset and do not expand widget layout bounds.</p>
+<p><nano-ui-trap id="trap-09"></nano-ui-trap></p>
+<hr>
+<h2 id="10-modifier-order-in--and-styled"><a class="header" href="#10-modifier-order-in--and-styled">10. Modifier Order in <code>(.)</code> and <code>styled</code></a></h2>
+<p>Leftmost-wins layout composition vs nested <code>styled</code> lexical scoping.</p>
+<p><nano-ui-trap id="trap-10"></nano-ui-trap></p>
+<hr>
+<h2 id="11-tabs-read-themepanel-not-themebutton"><a class="header" href="#11-tabs-read-themepanel-not-themebutton">11. <code>tabs</code> Read <code>themePanel</code>, Not <code>themeButton</code></a></h2>
+<p>Tab headers read their styling from <code>themePanel</code>, not <code>themeButton</code>.</p>
+<p><nano-ui-trap id="trap-11"></nano-ui-trap></p>
+<hr>
+<h2 id="12-frametosvg-geometry--fontmetrics-quirks"><a class="header" href="#12-frametosvg-geometry--fontmetrics-quirks">12. <code>frameToSvg</code> Geometry &amp; FontMetrics Quirks</a></h2>
+<p>Headless SVG rendering considerations for text bounds and square geometry.</p>
+<p><nano-ui-trap id="trap-12"></nano-ui-trap></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="buttons--menus"><a class="header" href="#buttons--menus">Buttons &amp; Menus</a></h1>
+<p>Buttons are immediate-mode widgets that return <code>Bool</code> indicating activation, or a primed <code>Response</code> record.</p>
+<h2 id="signatures"><a class="header" href="#signatures">Signatures</a></h2>
+<pre><code class="language-haskell">button        :: Text -&gt; NanoUI Bool
+button'       :: Text -&gt; NanoUI Response
+buttonWith    :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI Bool
+buttonContent :: NanoUI () -&gt; NanoUI Bool
+iconButton    :: SvgIcon -&gt; NanoUI Bool
+menuButton    :: Text -&gt; NanoUI () -&gt; NanoUI ()
+menuItem      :: Text -&gt; NanoUI Bool
+menuSeparator :: NanoUI ()
+contextMenu   :: Response -&gt; NanoUI () -&gt; NanoUI ()
+</code></pre>
+<h2 id="push-buttons"><a class="header" href="#push-buttons">Push Buttons</a></h2>
+<p>A button returns <code>True</code> only in the single frame it was activated (via left mouse click or keyboard Enter/Space when focused):</p>
+<pre><code class="language-haskell">whenM (button "Save Document") $ do
+  liftIO saveFile
+</code></pre>
+<h3 id="custom-content-with-buttoncontent"><a class="header" href="#custom-content-with-buttoncontent">Custom Content with <code>buttonContent</code></a></h3>
+<p>To embed icons, rich layout, or bold text inside a button:</p>
+<pre><code class="language-haskell">whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
+        svgIcon saveIcon
+        labelWith (fontBold . fontTone Danger) "Delete") $ do
+  confirmDelete
+</code></pre>
+<hr>
+<h2 id="dropdown-menus--context-menus"><a class="header" href="#dropdown-menus--context-menus">Dropdown Menus &amp; Context Menus</a></h2>
+<p><code>menuButton</code> displays a trigger that opens a dropdown popup menu:</p>
+<pre><code class="language-haskell">menuButton "File" $ do
+  whenM (menuItem "New File") createNew
+  whenM (menuItem "Open...") openFile
+  menuSeparator
+  whenM (menuItem "Exit") quitUi
+</code></pre>
+<p>Attach a right-click context menu to any widget using its <code>Response</code>:</p>
+<pre><code class="language-haskell">resp &lt;- card' $ label "Right-click me for actions"
+contextMenu resp $ do
+  whenM (menuItem "Inspect") inspectCard
+  whenM (menuItem "Copy") copyCard
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="input-controls"><a class="header" href="#input-controls">Input Controls</a></h1>
+<p>Input widgets in <code>nano-ui</code> take the mutable <code>Var</code> they display and edit. They manage their own caret, selection, and keyboard event routing internally.</p>
+<h2 id="input-widget-overview"><a class="header" href="#input-widget-overview">Input Widget Overview</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Widget</th><th>Signature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>checkbox</code></td><td><code>Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Two-state toggle box with label.</td></tr>
+<tr><td><code>toggleButton</code></td><td><code>Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Two-state push button with active fill.</td></tr>
+<tr><td><code>radio</code></td><td><code>Eq a =&gt; Text -&gt; a -&gt; Var a -&gt; NanoUI ()</code></td><td>Single choice radio button for value <code>a</code>.</td></tr>
+<tr><td><code>enumRadio</code></td><td><code>(Enum a, Bounded a, Show a) =&gt; Var a -&gt; NanoUI ()</code></td><td>Radio button group for all enum values.</td></tr>
+<tr><td><code>select</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Int -&gt; NanoUI ()</code></td><td>Dropdown select by index.</td></tr>
+<tr><td><code>comboBox</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Text -&gt; NanoUI ()</code></td><td>Editable text field with dropdown suggestions.</td></tr>
+<tr><td><code>slider</code></td><td><code>Float -&gt; Float -&gt; Var Float -&gt; NanoUI ()</code></td><td>Slider with track and thumb (min, max).</td></tr>
+<tr><td><code>textInput</code></td><td><code>Var Text -&gt; NanoUI ()</code></td><td>Single-line editable text input.</td></tr>
+<tr><td><code>searchInput</code></td><td><code>Var Text -&gt; NanoUI ()</code></td><td>Search field with clear button.</td></tr>
+<tr><td><code>numericInput</code></td><td><code>(Num a, Ord a) =&gt; a -&gt; a -&gt; Var a -&gt; NanoUI ()</code></td><td>Numeric stepper field with increment/decrement buttons.</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="examples-1"><a class="header" href="#examples-1">Examples</a></h2>
+<h3 id="text-input-with-response"><a class="header" href="#text-input-with-response">Text Input with Response</a></h3>
+<p>Use the primed variant <code>textInput'</code> to react to submission (Enter) or changes:</p>
+<pre><code class="language-haskell">queryVar &lt;- useVar ""
+resp &lt;- textInput' queryVar
+when (respSubmitted resp) $ do
+  performSearch =&lt;&lt; readVar queryVar
+</code></pre>
+<h3 id="debounced-search-with-searchinput"><a class="header" href="#debounced-search-with-searchinput">Debounced Search with <code>searchInput'</code></a></h3>
+<p><code>searchInput'</code> fires <code>respChanged</code> only after a typing pause, saving expensive queries:</p>
+<pre><code class="language-haskell">searchVar &lt;- useVar ""
+resp &lt;- searchInput' searchVar
+when (respChanged resp) $ do
+  triggerBackendQuery =&lt;&lt; readVar searchVar
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="text-editing"><a class="header" href="#text-editing">Text Editing</a></h1>
+<p><code>nano-ui</code> offers two levels of multi-line text editing:</p>
+<ol>
+<li><strong><code>textArea</code></strong>: Works on a <code>Var Text</code> directly. Suitable for short notes, descriptions, and commit messages.</li>
+<li><strong><code>textAreaDocument</code></strong>: Uses a <code>Var TextDocument</code> piece tree. Optimized for large files, editors, and code buffers with line-level immutable sharing.</li>
+</ol>
+<h2 id="using-textareadocument-for-large-files"><a class="header" href="#using-textareadocument-for-large-files">Using <code>textAreaDocument</code> for Large Files</a></h2>
+<pre><code class="language-haskell">editorView :: Var TextDocument -&gt; NanoUI ()
+editorView docVar = do
+  resp &lt;- textAreaDocument' docVar
+  
+  -- Programmatic undo/redo integration
+  when (textCanUndo (respId resp)) $ do
+    -- Right click menu or toolbar button can invoke TextCommand
+    pure ()
+</code></pre>
+<h3 id="text-commands--shared-undo-history"><a class="header" href="#text-commands--shared-undo-history">Text Commands &amp; Shared Undo History</a></h3>
+<p>Edits performed via the keyboard, mouse selection, context menu, and programmatic calls to <code>runTextCommand</code> share a single undo history:</p>
+<pre><code class="language-haskell">-- Run an undo command on a text editor
+runTextCommand editorWid TextUndo
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-tip">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
+<p>Directly overwriting the <code>Var Text</code> or <code>Var TextDocument</code> from outside resets the undo stack. To preserve undo across programmatic edits, issue a <code>TextCommand</code> instead.</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="overlays-windows--modals"><a class="header" href="#overlays-windows--modals">Overlays, Windows &amp; Modals</a></h1>
+<p>Overlays in <code>nano-ui</code> include modal dialogs, draggable floating windows, popups, and hover tooltips.</p>
+<h2 id="the-cardinal-rule-call-overlays-unconditionally"><a class="header" href="#the-cardinal-rule-call-overlays-unconditionally">The Cardinal Rule: Call Overlays Unconditionally</a></h2>
+<p><code>modal</code>, <code>window</code>, and <code>popup</code> take a <code>Var Bool</code> representing their open/closed state:</p>
+<pre><code class="language-haskell">modal  :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
+window :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
+popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-caution">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
+<p><strong>Always call overlays unconditionally every frame.</strong>
+Wrapping a modal call in <code>when isShown (modal ...)</code> shifts widget IDs for all subsequent siblings when the modal opens or closes! Overlays draw nothing when their <code>Var Bool</code> is <code>False</code>.</p>
+</blockquote>
+<pre><code class="language-haskell">-- CORRECT: Called unconditionally
+showConfirm &lt;- useVar False
+
+whenM (button "Delete File...") (writeVar showConfirm True)
+
+modal showConfirm "Confirm Deletion" $ do
+  label "Are you sure you want to permanently delete this file?"
+  row $ do
+    whenM (button "Cancel") (writeVar showConfirm False)
+    whenM (buttonWith destructive "Delete") $ do
+      deleteFile
+      writeVar showConfirm False
+</code></pre>
+<h3 id="auto-dismiss-behavior"><a class="header" href="#auto-dismiss-behavior">Auto-Dismiss Behavior</a></h3>
+<p>By default, clicking outside an overlay, pressing the <code>Escape</code> key, or clicking the close button writes <code>False</code> to the <code>Var Bool</code>.
+For dialogs that require explicit confirmation or derived open states, pass <code>constVar True</code> and use <code>modal'</code> with <code>respClicked</code>.</p>
+<hr>
+<h2 id="tooltips"><a class="header" href="#tooltips">Tooltips</a></h2>
+<p>Tooltips are stateless and anchor to any widget <code>Response</code>:</p>
+<pre><code class="language-haskell">resp &lt;- button' "Refresh"
+tooltip resp "Poll the remote server for updates"
+</code></pre>
+<p>Customize placement and delay with <code>tooltipConfigured</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="tables--trees"><a class="header" href="#tables--trees">Tables &amp; Trees</a></h1>
+<p>Data presentation widgets in <code>nano-ui</code> support sorting, custom cell rendering, and hierarchical tree navigation.</p>
+<h2 id="tables-colonnade-based"><a class="header" href="#tables-colonnade-based">Tables (Colonnade-Based)</a></h2>
+<p><code>table</code> and <code>simpleTable</code> render structured columns with sortable headers:</p>
+<pre><code class="language-haskell">data Process = Process
+  { pid  :: Int
+  , name :: Text
+  , mem  :: Int
+  }
+
+processTable :: [Process] -&gt; Var SortCol -&gt; NanoUI ()
+processTable procs sortVar = do
+  let cols = mconcat
+        [ headed "PID" (\p -&gt; label (T.pack (show p.pid)))
+        , headed "Name" (\p -&gt; label p.name)
+        , headed "Memory (MB)" (\p -&gt; label (T.pack (show p.mem)))
+        ]
+  table "procs" cols procs sortVar
+</code></pre>
+<p><code>SortCol</code> tracks which column is active and whether the order is ascending or descending.</p>
+<hr>
+<h2 id="trees"><a class="header" href="#trees">Trees</a></h2>
+<p><code>tree</code> renders collapsible hierarchical collections:</p>
+<pre><code class="language-haskell">data TreeItem = TreeItem
+  { tiId       :: Int
+  , tiLabel    :: Text
+  , tiChildren :: [TreeItem]
+  }
+
+treeView :: [TreeItem] -&gt; Var Int -&gt; NanoUI ()
+treeView items selectedIdVar = do
+  tree "file-tree" items selectedIdVar
+</code></pre>
+<p><code>selectedIdVar</code> reflects the currently selected item and updates on click or arrow navigation.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="drag-and-drop"><a class="header" href="#drag-and-drop">Drag and Drop</a></h1>
+<p><code>nano-ui</code> includes local drag-and-drop primitives via <code>useDrag</code>, <code>useDrop</code>, <code>dropZone</code>, and <code>useReorder</code>. Applications own the data and choose which target accepts a release gesture.</p>
+<h2 id="drag-lifecycle-with-usedrag"><a class="header" href="#drag-lifecycle-with-usedrag">Drag Lifecycle with <code>useDrag</code></a></h2>
+<p>Allocate a <code>dragHandle &lt;- newDrag</code> once during component setup, then use it in the view:</p>
+<pre><code class="language-haskell">headers &lt;- tabBar' active documents
+gesture &lt;- useDrag dragHandle (tabHeaders headers)
+</code></pre>
+<p><code>useDrag</code> tracks gesture coordinates and reports one of four phases:</p>
+<ul>
+<li><strong><code>DragStarted</code></strong>: Pointer exceeded the drag distance threshold.</li>
+<li><strong><code>Dragging</code></strong>: Pointer is actively moving while button is held.</li>
+<li><strong><code>DragReleased</code></strong>: User released the mouse button over a target.</li>
+<li><strong><code>DragCancelled</code></strong>: Gesture cancelled via Escape key or lost focus.</li>
+</ul>
+<hr>
+<h2 id="reordering-tab-strips"><a class="header" href="#reordering-tab-strips">Reordering Tab Strips</a></h2>
+<pre><code class="language-haskell">case gesture of
+  Just d | dragPhase d /= DragCancelled -&gt; do
+    let remaining = filter ((/= dragPayload d) . fst) (tabHeaders headers)
+        slot = insertionIndex DragAxisX (tabStripRect headers)
+                 (map (respRect . snd) remaining) (dragAt d)
+    case slot of
+      Just i | dragPhase d == DragReleased -&gt; moveTab (dragPayload d) i
+      _ -&gt; pure ()
+  _ -&gt; pure ()
+</code></pre>
+<p><code>insertionIndex</code> returns <code>Nothing</code> outside the strip bounds and calculates the target insertion index respecting ancestor clips.</p>
+<hr>
+<h2 id="pane-grids-panegrid"><a class="header" href="#pane-grids-panegrid">Pane Grids (<code>paneGrid</code>)</a></h2>
+<p>Dockable, splittable multi-pane arrangements (as seen in IDEs and profiling debuggers):</p>
+<pre><code class="language-haskell">grid &lt;- paneGrid cfg
+case (gesture, pgrDropTarget grid) of
+  (Just d, Just target)
+    | dragPhase d == DragReleased -&gt; do
+        commitPaneDrop target
+  _ -&gt; pure ()
+</code></pre>
+<p>The destination provides <code>pgdLocation</code> (<code>BesidePane paneId edge</code> or <code>OutsideGrid edge</code>), <code>pgdRect</code>, and <code>pgdPane</code> for custom drop validation.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="custom-canvas-drawing"><a class="header" href="#custom-canvas-drawing">Custom Canvas Drawing</a></h1>
+<p>For custom graphics, visualizers, audio meters, or sparklines, <code>nano-ui</code> provides low-level 2D vector path primitives and cached custom widget hooks.</p>
+<h2 id="vector-paths-with-nanouipath"><a class="header" href="#vector-paths-with-nanouipath">Vector Paths with <code>NanoUI.Path</code></a></h2>
+<p>Import <code>NanoUI.Path</code> qualified as <code>P</code>:</p>
+<pre><code class="language-haskell">import NanoUI.Path qualified as P
+
+myIcon :: NanoUI ()
+myIcon = canvas (fixedWH 48 48) $ \dc -&gt; do
+  -- Draw a smooth curved shape
+  drawPathWith P.NonZero (P.Solid (colorHex "#38bdf8")) $ do
+    P.moveTo 10 10
+    P.lineTo 38 10
+    P.cubicTo 38 24 24 38 10 38
+    P.closePath
+</code></pre>
+<h3 id="strokes-and-caps"><a class="header" href="#strokes-and-caps">Strokes and Caps</a></h3>
+<pre><code class="language-haskell">drawStrokePathWith (P.Stroke 2.0 P.CapRound P.JoinRound Nothing) (P.Solid colorWhite) $ do
+  P.circle 24 24 16
+</code></pre>
+<hr>
+<h2 id="content-keys--caching"><a class="header" href="#content-keys--caching">Content Keys &amp; Caching</a></h2>
+<p>Without a content key, custom widget draw operations are rebuilt and diffed every single frame. Providing a <code>widgetContent</code> key allows unchanged frames to skip rebuild and repaint completely:</p>
+<pre><code class="language-haskell">-- Hash numbers or data values that the drawing depends on
+let key = contentKey [round angle, round volume]
+
+drawingVersioned key $ \dc -&gt; do
+  drawGaugeMeter dc angle volume
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-caution">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
+<p>A content key must hash <strong>everything the drawing reads</strong> (values, colors, theme). An incomplete key will display stale pixels when unhashed state changes!</p>
+</blockquote>
+<hr>
+<h2 id="moving-overlays--drag-ghosts"><a class="header" href="#moving-overlays--drag-ghosts">Moving Overlays &amp; Drag Ghosts</a></h2>
+<p>If an overlay’s layout rectangle never changes (e.g. an element pinned at cursor coordinates via <code>pinAt mx my</code>), give it an explicit version that incorporates the pointer coordinates:</p>
+<pre><code class="language-haskell">drawingVersioned (contentKey [round mx, round my]) $ do
+  drawDragGhost
+</code></pre>
+<p>Otherwise, the engine assumes its geometry and ops have not changed since it first appeared.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nano-ui-emit-elm-style-architecture"><a class="header" href="#nano-ui-emit-elm-style-architecture">nano-ui-emit: Elm-style Architecture</a></h1>
+<p><code>nano-ui-emit</code> provides Elm-style typed messages and pure state reducers on top of <code>nano-ui</code>.</p>
+<h2 id="the-nanouie-msg-a-view"><a class="header" href="#the-nanouie-msg-a-view">The <code>NanoUIE msg a</code> View</a></h2>
+<p>Instead of mutating <code>Var</code>s directly in views, a <code>NanoUIE msg ()</code> view emits messages:</p>
+<pre><code class="language-haskell">{-# LANGUAGE OverloadedStrings #-}
+
+import NanoUI
+import NanoUI.Emit qualified as Emit
+
+data Msg
+  = SaveDocument
+  | SetVolume Float
+  | Increment
+  | Decrement
+
+view :: AppModel -&gt; Emit.NanoUIE Msg ()
+view model = Emit.withNanoUI column $ do
+  Emit.liftNanoUI (label "Application Settings")
+  
+  -- Emit on button activation
+  Emit.emitWhen (button "Save") SaveDocument
+  
+  -- Emit on value change
+  Emit.emitChanged (slider 0 100) model.volume SetVolume
+  
+  Emit.withNanoUI row $ do
+    Emit.emitWhen (button "-") Decrement
+    Emit.liftNanoUI (label (T.pack (show model.counter)))
+    Emit.emitWhen (button "+") Increment
+</code></pre>
+<h2 id="the-reducer-runner"><a class="header" href="#the-reducer-runner">The Reducer Runner</a></h2>
+<p>Pair your view with a pure update reducer <code>msg -&gt; model -&gt; model</code>:</p>
+<pre><code class="language-haskell">update :: Msg -&gt; AppModel -&gt; AppModel
+update SaveDocument m = m  -- Trigger side effect via external command
+update (SetVolume v) m = m { volume = v }
+update Increment m = m { counter = counter m + 1 }
+update Decrement m = m { counter = counter m - 1 }
+
+main :: IO ()
+main = runSdlAppReduce view update initialModel
+</code></pre>
+<h3 id="component-hierarchies-with-mapmessages"><a class="header" href="#component-hierarchies-with-mapmessages">Component Hierarchies with <code>mapMessages</code></a></h3>
+<p>Embed reusable child components using <code>mapMessages</code>:</p>
+<pre><code class="language-haskell">data ParentMsg = ChildMsg SubMsg | ParentSave
+
+parentView :: SubModel -&gt; Emit.NanoUIE ParentMsg ()
+parentView sub = do
+  Emit.mapMessages ChildMsg (childView sub)
+  Emit.emitWhen (button "Save All") ParentSave
+</code></pre>
+<p>Messages are dispatched in order directly to the parent queue with zero intermediate wrapper allocations.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nano-ui-sdl-sdl3-backend"><a class="header" href="#nano-ui-sdl-sdl3-backend">nano-ui-sdl: SDL3 Backend</a></h1>
+<p><code>nano-ui-sdl</code> is the primary desktop backend for <code>nano-ui</code>. It uses modern SDL3, SDL3_ttf, FreeType, and HarfBuzz for high-quality font rendering, subpixel anti-aliasing, and platform integration.</p>
+<h2 id="key-features"><a class="header" href="#key-features">Key Features</a></h2>
+<ul>
+<li><strong>TrueType Font Shaping</strong>: HarfBuzz shaping with kerning, ligatures, and font fallback.</li>
+<li><strong>System Font Discovery</strong>: Automatic lookup of installed platform fonts (<code>FontSearch</code>).</li>
+<li><strong>Non-Blocking Native File Dialogs</strong>: Asynchronous file open/save dialogs via <code>useFileDialog</code> or <code>askOpenFileDialog</code>.</li>
+<li><strong>Custom Window Chrome</strong>: Build custom client-side window frames and title bars (<code>DecorationsNone</code> / <code>DecorationsFrame</code>).</li>
+<li><strong>High-DPI Awareness</strong>: Automatic DPI scaling on Windows, macOS, and Linux.</li>
+</ul>
+<h2 id="running-an-sdl-application"><a class="header" href="#running-an-sdl-application">Running an SDL Application</a></h2>
+<pre><code class="language-haskell">main :: IO ()
+main = runSdlApp opts appView
+  where
+    opts = defaultSdlOptions
+      { sdlWindowSettings = defaultWindowSettings
+          { wsTitle = "My Application"
+          , wsSize  = Size 1024 768
+          }
+      , sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Inter"]
+      , sdlAppFontSize = 14
+      , sdlAppTheme = Just defaultTheme
+      }
+</code></pre>
+<h2 id="native-file-dialogs"><a class="header" href="#native-file-dialogs">Native File Dialogs</a></h2>
+<p>File dialogs are non-blocking so the GUI never freezes:</p>
+<pre><code class="language-haskell">-- useFileDialog handles polling and restores focus automatically
+useFileDialog fileDialogVar $ \selectedPath -&gt; do
+  liftIO $ loadFile selectedPath
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nano-ui-rgfw-rgfw-backend"><a class="header" href="#nano-ui-rgfw-rgfw-backend">nano-ui-rgfw: RGFW Backend</a></h1>
+<p><code>nano-ui-rgfw</code> is a lightweight, zero-system-dependency backend powered by <a href="https://github.com/ColleagueRiley/RGFW">RGFW</a> and OpenGL 3.2.</p>
+<h2 id="why-rgfw"><a class="header" href="#why-rgfw">Why RGFW?</a></h2>
+<p>While <code>nano-ui-sdl</code> is rich in features (TrueType fonts, native file dialogs), it requires SDL3 shared libraries. In contrast, <code>nano-ui-rgfw</code>:</p>
+<ul>
+<li>Links statically with bundled C source code.</li>
+<li>Has <strong>zero external system C dependencies</strong>.</li>
+<li>Includes a bundled bitmap font (<code>Cozette</code>).</li>
+<li>Compiles in seconds and produces small, completely standalone binaries.</li>
+</ul>
+<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
+<pre><code class="language-haskell">import NanoUI
+import NanoUI.Backend.Rgfw
+
+main :: IO ()
+main = runRgfwApp defaultRgfwOptions appView
+</code></pre>
+<p>Ideal for quick tools, game overlays, embedded environments, or minimal deployment scenarios.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nano-ui-diagrams-charts--plots"><a class="header" href="#nano-ui-diagrams-charts--plots">nano-ui-diagrams: Charts &amp; Plots</a></h1>
+<p><code>nano-ui-diagrams</code> integrates high-level plotting primitives (<code>NanoUI.Plot</code>) and general 2D vector drawing from <code>diagrams-lib</code> into <code>nano-ui</code>.</p>
+<h2 id="chart-types"><a class="header" href="#chart-types">Chart Types</a></h2>
+<p>The <code>NanoUI.Plot</code> module provides ready-to-use chart widgets:</p>
+<ul>
+<li><strong>Line Plots</strong>: Multi-series line charts with customizable strokes, point markers, and grid lines.</li>
+<li><strong>Bar Charts</strong>: Grouped and stacked bar charts.</li>
+<li><strong>Scatter Plots</strong>: 2D scatter plots with confidence intervals.</li>
+<li><strong>Area Charts</strong>: Shaded area graphs for timelines and volume distributions.</li>
+</ul>
+<pre><code class="language-haskell">import NanoUI
+import NanoUI.Plot
+
+cpuChart :: [Double] -&gt; NanoUI ()
+cpuChart samples = linePlot (fixedWH 400 200) $ do
+  plotSeries "CPU %" samples
+  plotYRange 0 100
+  plotGridLines True
+</code></pre>
+<p>Charts automatically adapt their background, grid lines, and axis label colors to the active <code>Theme</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nano-ui-form-validated-forms"><a class="header" href="#nano-ui-form-validated-forms">nano-ui-form: Validated Forms</a></h1>
+<p><code>nano-ui-form</code> provides applicative form composition and declarative validation based on <code>ditto</code>.</p>
+<h2 id="composing-validated-forms"><a class="header" href="#composing-validated-forms">Composing Validated Forms</a></h2>
+<p>Forms combine field inputs, error messages, and validation rules applicatively:</p>
+<pre><code class="language-haskell">data UserRegistration = UserRegistration
+  { username :: Text
+  , age      :: Int
+  , email    :: Text
+  }
+
+registrationForm :: Form NanoUI UserRegistration
+registrationForm = UserRegistration
+  &lt;$&gt; field "Username" (nonEmpty "Username required" textInput)
+  &lt;*&gt; field "Age" (check (&gt; 13) "Must be at least 13" (numericInput 0 120))
+  &lt;*&gt; field "Email" (check containsAt "Invalid email" textInput)
+  where
+    containsAt t = "@" `T.isInfixOf` t
+</code></pre>
+<p>When submitted, validation errors are rendered inline beside invalid fields. Successful submissions produce the parsed, strongly typed <code>UserRegistration</code> record.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nano-ui-markdown-markdown-rendering"><a class="header" href="#nano-ui-markdown-markdown-rendering">nano-ui-markdown: Markdown Rendering</a></h1>
+<p><code>nano-ui-markdown</code> provides rich Markdown rendering optimized for immediate-mode GUIs and streaming responses.</p>
+<h2 id="key-capabilities"><a class="header" href="#key-capabilities">Key Capabilities</a></h2>
+<ul>
+<li><strong>Incremental Append</strong>: Fast incremental parsing designed specifically for streaming LLM tokens and chat replies without re-parsing the entire document on every token.</li>
+<li><strong>Rich Elements</strong>: Headings, bold/italic, inline code, fenced code blocks with syntax highlighting, blockquotes, ordered/unordered lists, and tables.</li>
+<li><strong>Theme Awareness</strong>: Text colors, code backgrounds, and table borders automatically conform to the active <code>Theme</code>.</li>
+</ul>
+<pre><code class="language-haskell">import NanoUI
+import NanoUI.Markdown
+
+chatMessage :: Text -&gt; NanoUI ()
+chatMessage markdownText = markdown markdownText
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="nano-ui-svg-headless-svg-export"><a class="header" href="#nano-ui-svg-headless-svg-export">nano-ui-svg: Headless SVG Export</a></h1>
+<p><code>nano-ui-svg</code> exports <code>nano-ui</code> draw operations (<code>DrawOp</code>) and complete layout frames directly to scalable vector graphics (SVG).</p>
+<h2 id="use-cases"><a class="header" href="#use-cases">Use Cases</a></h2>
+<ul>
+<li><strong>Interactive Documentation</strong>: All the interactive specimens and workbenches in this book are generated headlessly using <code>frameToSvg</code>!</li>
+<li><strong>Headless Screenshot &amp; Regression Testing</strong>: Render entire views to SVG in CI without a display server (X11, Wayland, or Windows desktop) and diff against golden SVGs.</li>
+<li><strong>Diagram Export</strong>: Export charts and canvases to standalone <code>.svg</code> files for reports.</li>
+</ul>
+<h2 id="exporting-a-frame-to-svg"><a class="header" href="#exporting-a-frame-to-svg">Exporting a Frame to SVG</a></h2>
+<pre><code class="language-haskell">import NanoUI
+import NanoUI.Testing (newPixelContext, runFrame)
+import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
+
+exportViewToSvg :: NanoUI () -&gt; IO Text
+exportViewToSvg myView = do
+  ctx &lt;- newPixelContext
+  (result, drawData, isDirty) &lt;- runFrame ctx myView
+  pure (frameToSvg defaultFrameSvgConfig ctx drawData)
+</code></pre>
+<p>The exported SVG includes proper <code>clip-path</code> masks, linear gradients, rounded rectangles, and embedded font metrics.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="keyboard-navigation--focus"><a class="header" href="#keyboard-navigation--focus">Keyboard Navigation &amp; Focus</a></h1>
+<p>Keyboard interaction in <code>nano-ui</code> covers shortcut chords, focus cycling, programmatic focus control, and IME composition.</p>
+<h2 id="keyboard-shortcuts"><a class="header" href="#keyboard-shortcuts">Keyboard Shortcuts</a></h2>
+<p>Define keyboard chords using <code>NanoUI.Shortcut</code>:</p>
+<pre><code class="language-haskell">-- Fires once per keystroke (ignores key repeat)
+whenM (shortcutOnce (cmdOrCtrl &lt;&gt; key 's')) $ do
+  saveDocument
+
+-- Complex multi-modifier chords
+whenM (shortcut (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 'p')) $ do
+  openCommandPalette
+</code></pre>
+<h3 id="automatic-shortcut-suppression"><a class="header" href="#automatic-shortcut-suppression">Automatic Shortcut Suppression</a></h3>
+<p>Shortcuts and key queries are automatically suppressed when:</p>
+<ul>
+<li>An overlay/modal is open (unless the chord targets the modal).</li>
+<li>The widget is inside a <code>disabledWhen True</code> subtree.</li>
+<li>A focused widget claims the key (e.g. typing text in a field claims letters, arrows on a slider claim directions). Modified chords like <code>Ctrl+Enter</code> or <code>Alt+Left</code> still pass through.</li>
+</ul>
+<hr>
+<h2 id="focus-lifecycle"><a class="header" href="#focus-lifecycle">Focus Lifecycle</a></h2>
+<ul>
+<li><strong>Click to Focus</strong>: Clicking any focusable widget (text input, slider, select) focuses it.</li>
+<li><strong>Tab Cycling</strong>: Pressing <code>Tab</code> moves focus to the next widget; <code>Shift+Tab</code> moves to the previous widget.</li>
+<li><strong>Programmatic Focus</strong>:
+<pre><code class="language-haskell">resp &lt;- textInput' myVar
+when shouldFocus $ requestFocus (respId resp)
+</code></pre>
+</li>
+<li><strong>Timing</strong>: Focus takes effect at the <strong>end of the frame</strong>.</li>
+</ul>
+<blockquote class="blockquote-tag blockquote-tag-warning">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
+<p>Because the node arena is reset before the view runs, checking focus at the <em>top</em> of a view always returns <code>False</code>. Query focus state at the <strong>end</strong> of the view, after the widgets have executed.</p>
+</blockquote>
+<hr>
+<h2 id="ime-input-method-editor-composition"><a class="header" href="#ime-input-method-editor-composition">IME (Input Method Editor) Composition</a></h2>
+<p>Built-in text fields handle IME composition automatically. For custom widgets that consume raw committed characters from <code>inputChars</code>, call <code>useInputMethod</code> on every focused frame to position the OS candidate window correctly:</p>
+<pre><code class="language-haskell">when (isFocused wid) $ do
+  useInputMethod (respRect resp)
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="asynchronous-work--streams"><a class="header" href="#asynchronous-work--streams">Asynchronous Work &amp; Streams</a></h1>
+<p>Long-running I/O, network requests, and streaming data must not block the immediate-mode GUI frame loop. <code>nano-ui</code> provides structured concurrency primitives via <code>Task</code> and <code>Stream</code>.</p>
+<h2 id="one-shot-background-work-task"><a class="header" href="#one-shot-background-work-task">One-Shot Background Work: <code>Task</code></a></h2>
+<p>Allocate a task handle once during setup:</p>
+<pre><code class="language-haskell">task &lt;- newTask
+</code></pre>
+<p>Inside your view, call <code>useTask</code> or <code>useTaskStatus</code>:</p>
+<pre><code class="language-haskell">-- useTask keeps the previous result while a new key runs (preventing UI flashes)
+mResult &lt;- useTask task queryKey $ \key -&gt; do
+  fetchSearchResults key
+
+case mResult of
+  Nothing      -&gt; spinner
+  Just results -&gt; resultList results
+</code></pre>
+<h3 id="cancellation-semantics"><a class="header" href="#cancellation-semantics">Cancellation Semantics</a></h3>
+<ul>
+<li><strong>Key Change</strong>: A task restarts automatically whenever its key changes. Ongoing work is cancelled via an asynchronous exception (<code>bracket</code> resources safely!).</li>
+<li><strong>Skipped Frames</strong>: If a <code>useTask</code> call is <strong>skipped for an entire frame</strong> (for example, if hidden inside an inactive tab), the task is automatically cancelled! To keep background downloads running while hidden, keep the <code>useTask</code> call outside conditional branches.</li>
+</ul>
+<hr>
+<h2 id="continuous-pushing-stream"><a class="header" href="#continuous-pushing-stream">Continuous Pushing: <code>Stream</code></a></h2>
+<p>For continuous telemetry, progress indicators, or token streaming:</p>
+<pre><code class="language-haskell">stream &lt;- newStream
+
+-- Inside the view:
+tokens &lt;- useStream stream downloadId [] $ \push -&gt; do
+  runDownloadWithCallback push
+</code></pre>
+<p>Updates between frames coalesce automatically so high-frequency pushes never starve the UI.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="animations--timers"><a class="header" href="#animations--timers">Animations &amp; Timers</a></h1>
+<p><code>nano-ui</code> includes continuous animation channels, tweening curves, physical spring simulations, and timed wakes.</p>
+<h2 id="springs-and-tweens"><a class="header" href="#springs-and-tweens">Springs and Tweens</a></h2>
+<ul>
+<li><strong><code>animateTo</code></strong>: Tweens a value toward a target using an easing curve (<code>EaseInOut</code>, <code>EaseOutQuad</code>, etc.).</li>
+<li><strong><code>animateToA</code></strong>: Drives physical spring animations (<code>presetSmooth</code>, <code>presetBouncy</code>, <code>presetStiff</code>). Supports mid-flight retargeting without velocity hitches.</li>
+</ul>
+<pre><code class="language-haskell">-- Smoothly animate sidebar width toward target
+currentWidth &lt;- animateTo (Tween 0.25 EaseOutQuad) targetWidth
+</code></pre>
+<h2 id="continuous-animations--keepanimating"><a class="header" href="#continuous-animations--keepanimating">Continuous Animations &amp; <code>keepAnimating</code></a></h2>
+<p>When drawing continuous animations (such as spinners or pulsing badges), call <code>keepAnimating</code> <strong>inside the animating widget</strong>:</p>
+<pre><code class="language-haskell">pulsingBadge :: NanoUI ()
+pulsingBadge = do
+  t &lt;- pulse 1.0  -- Oscillates between 0.0 and 1.0
+  keepAnimating   -- Requests a frame next tick only while on screen
+  drawCircleWithRadius t
+</code></pre>
+<blockquote class="blockquote-tag blockquote-tag-caution">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
+<p>Never force continuous redraws by marking the entire context dirty every frame. That creates an unpaced busy loop that drains batteries and pins CPUs.</p>
+</blockquote>
+<hr>
+<h2 id="timers-and-debounces-with-wakeafter"><a class="header" href="#timers-and-debounces-with-wakeafter">Timers and Debounces with <code>wakeAfter</code></a></h2>
+<p>To schedule future redraws (e.g. for clocks, timers, or tooltips):</p>
+<pre><code class="language-haskell">-- Schedules a frame in 500 milliseconds
+wakeAfter 500
+</code></pre>
+<p>Call <code>wakeAfter</code> on every frame that still requires a wake; pending wakes reset at the end of each frame.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="window-chrome--screenshots"><a class="header" href="#window-chrome--screenshots">Window Chrome &amp; Screenshots</a></h1>
+<p><code>nano-ui</code> provides high-level declarative and imperative controls for desktop windows.</p>
+<h2 id="window-settings"><a class="header" href="#window-settings">Window Settings</a></h2>
+<p>Configure startup window properties in <code>WindowSettings</code>:</p>
+<pre><code class="language-haskell">opts = defaultSdlOptions
+  { sdlWindowSettings = defaultWindowSettings
+      { wsTitle       = "Main Window"
+      , wsSize        = Size 1280 800
+      , wsMinSize     = Just (Size 640 480)
+      , wsMode        = Normal  -- Maximized, Fullscreen, Hidden
+      , wsTransparent = False
+      }
+  }
+</code></pre>
+<h2 id="declarative-vs-imperative-window-apis"><a class="header" href="#declarative-vs-imperative-window-apis">Declarative vs Imperative Window APIs</a></h2>
+<p>Inside the view:</p>
+<ul>
+<li><strong>Declarative Setters</strong> (<code>setWindowTitleUi</code>, <code>setWindowModeUi</code>): No-ops when the value has not changed. Safe to call unconditionally every frame.</li>
+<li><strong>Imperative Actions</strong> (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>, <code>closeWindowUi</code>): Run on every call. Always guard behind an event:
+<pre><code class="language-haskell">whenM (button "Maximize") maximizeWindowUi
+</code></pre>
+</li>
+</ul>
+<hr>
+<h2 id="custom-title-bars--window-chrome"><a class="header" href="#custom-title-bars--window-chrome">Custom Title Bars &amp; Window Chrome</a></h2>
+<p>For modern frameless desktop apps (like VS Code or <code>ned</code>):</p>
+<ol>
+<li>Set <code>sdlWindowDecorations = DecorationsNone</code> or <code>DecorationsFrame</code> in <code>SdlOptions</code>.</li>
+<li>Render your own title bar in the view with <code>windowFrame</code>, <code>captionButtons</code>, and <code>dragSpans</code>:</li>
+</ol>
+<pre><code class="language-haskell">customTitleBar :: NanoUI ()
+customTitleBar = rowWith (fillW . fixedH 32 . alignMid) $ do
+  -- Draggable area for moving the window
+  dragSpans $ label "My Application"
+  spacer
+  captionButtons  -- Minimise, Maximise, Close
+</code></pre>
+<hr>
+<h2 id="taking-screenshots"><a class="header" href="#taking-screenshots">Taking Screenshots</a></h2>
+<p>Capture window contents programmatically:</p>
+<pre><code class="language-haskell">whenM (button "Take Screenshot") $ do
+  requestScreenshot
+</code></pre>
+<p>Consume the resulting raw pixels with <code>useScreenshot</code> or save them to disk with <code>saveScreenshot</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="recurring-bugs--fixes"><a class="header" href="#recurring-bugs--fixes">Recurring Bugs &amp; Fixes</a></h1>
+<p>Mined from the git histories and production deployments of real-world <code>nano-ui</code> applications (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Check this reference whenever diagnosing unexpected UI behavior.</p>
+<hr>
+<h2 id="1-layout-shifting--jitter"><a class="header" href="#1-layout-shifting--jitter">1. Layout Shifting &amp; Jitter</a></h2>
+<h3 id="a-label-whose-text-changes-length-moves-its-siblings-every-frame"><a class="header" href="#a-label-whose-text-changes-length-moves-its-siblings-every-frame">A label whose text changes length moves its siblings every frame</a></h3>
+<ul>
+<li><strong>Symptom</strong>: A counter going <code>9 -&gt; 10 -&gt; 100</code>, a live stopwatch, or a byte counter causes adjacent buttons to shift left and right on every tick.</li>
+<li><strong>Fix</strong>: Pin changing labels to a fixed width sized to their widest expected value:
+<pre><code class="language-haskell">labelWith (fixedW 48 . alignEnd) (fmtInt count)
+</code></pre>
+</li>
+</ul>
+<h3 id="long-values-inside-a-scrolling-list-widen-the-whole-list"><a class="header" href="#long-values-inside-a-scrolling-list-widen-the-whole-list">Long values inside a scrolling list widen the whole list</a></h3>
+<ul>
+<li><strong>Symptom</strong>: A wide row causes horizontal scrollbars to flash into existence, scrolling the entire container sideways.</li>
+<li><strong>Fix</strong>: Make cells fill their column rather than taking natural width, and enable text clipping:
+<pre><code class="language-haskell">nameLine f = rowWith (fillW . tight) . labelWith (fillW . f)
+</code></pre>
+</li>
+</ul>
+<h3 id="dropdowns-clipping-their-longest-option"><a class="header" href="#dropdowns-clipping-their-longest-option">Dropdowns clipping their longest option</a></h3>
+<ul>
+<li><strong>Symptom</strong>: Fixed-width select dropdowns truncate items like <code>"Drive C: \ 412 GB free"</code>.</li>
+<li><strong>Fix</strong>: Measure option text lengths using font metrics:
+<pre><code class="language-haskell">let w = maximum (0 : map (lineWidth fm) options) + 56
+selectWith (fixedW w) options selVar
+</code></pre>
+</li>
+</ul>
+<hr>
+<h2 id="2-double-borders--box-in-a-box-chrome"><a class="header" href="#2-double-borders--box-in-a-box-chrome">2. Double Borders &amp; Box-in-a-Box Chrome</a></h2>
+<ul>
+<li><strong>Symptom</strong>: Nesting <code>panel</code>, <code>card</code>, or <code>scrollArea</code> inside modals, popovers, or inspector panes creates redundant double borders and nested boxes.</li>
+<li><strong>Fix</strong>: Only one container level should own surface chrome:
+<ul>
+<li>Give outer dialogs <code>padAll 0</code> and pad inner containers, OR</li>
+<li>Strip chrome from the inner container:
+<pre><code class="language-haskell">styled (inputStyle (background colorTransparent . borderWidth 0)) ...
+</code></pre>
+</li>
+<li>Between adjacent sections, draw a single <code>separator</code> rather than opposing borders.</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h2 id="3-text-metrics--pixel-grid"><a class="header" href="#3-text-metrics--pixel-grid">3. Text Metrics &amp; Pixel Grid</a></h2>
+<h3 id="glyphs-drifting-over-long-text-runs"><a class="header" href="#glyphs-drifting-over-long-text-runs">Glyphs drifting over long text runs</a></h3>
+<ul>
+<li><strong>Symptom</strong>: <code>fmAdvance</code> multiplied by character count drifts ~1px every 30 characters compared to actual rendered text.</li>
+<li><strong>Fix</strong>: Always measure runs using <code>lineWidth fm run</code> (which accounts for HarfBuzz kerning and unrounded fractional advances).</li>
+</ul>
+<h3 id="text-shimmering-at-fractional-dpi-scales-125-150"><a class="header" href="#text-shimmering-at-fractional-dpi-scales-125-150">Text shimmering at fractional DPI scales (125%, 150%)</a></h3>
+<ul>
+<li><strong>Symptom</strong>: Rows of 22.4px alternate 22px and 23px apart, producing shimmering during scrolling.</li>
+<li><strong>Fix</strong>: Snap coordinates to the device pixel grid using <code>fmSnapScale</code>:
+<pre><code class="language-haskell">snap v = let k = max 1 (fmSnapScale f) in fromIntegral (round (v * k) :: Int) / k
+</code></pre>
+</li>
+</ul>
+<hr>
+<h2 id="4-stale-cached-drawings"><a class="header" href="#4-stale-cached-drawings">4. Stale Cached Drawings</a></h2>
+<ul>
+<li><strong>Symptom</strong>: A custom-drawn widget (e.g. table sort arrow or audio visualizer) freezes or shows outdated information.</li>
+<li><strong>Fix</strong>: The <code>widgetContent</code> key is missing an input! The key must cover <strong>every variable, color, viewport dimension, and animation channel</strong> the drawing reads.</li>
+</ul>
+<hr>
+<h2 id="5-input-ordering--focus"><a class="header" href="#5-input-ordering--focus">5. Input Ordering &amp; Focus</a></h2>
+<h3 id="asking-focus-questions-at-the-top-of-the-view"><a class="header" href="#asking-focus-questions-at-the-top-of-the-view">Asking focus questions at the top of the view</a></h3>
+<ul>
+<li><strong>Symptom</strong>: Global shortcuts (<code>Ctrl+A</code>, <code>Delete</code>) fire while the user is actively typing inside a text field.</li>
+<li><strong>Fix</strong>: The node arena is reset before the view action runs. Calling <code>isFocused</code> or checking text editing state at the <em>top</em> of the view always returns <code>False</code>. Place keyboard shortcuts and focus queries at the <strong>end of the view</strong>, after widgets have executed.</li>
+</ul>
+<h3 id="escape-claimed-by-text-inputs"><a class="header" href="#escape-claimed-by-text-inputs">Escape claimed by text inputs</a></h3>
+<ul>
+<li><strong>Symptom</strong>: Pressing <code>Escape</code> inside a search box fails to clear a modal or dismiss a dropdown.</li>
+<li><strong>Fix</strong>: Text fields do not claim <code>Escape</code>. Give <code>Escape</code> handlers their own distinct conditional branch separate from <code>inputChars</code> suppression.</li>
+</ul>
+<hr>
+<h2 id="quick-pitfalls-checklist"><a class="header" href="#quick-pitfalls-checklist">Quick Pitfalls Checklist</a></h2>
+<ul>
+<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside a view — allocates every pass. Move to setup.</li>
+<li><input disabled="" type="checkbox"> Unguarded side effects — view re-runs. Wrap in <code>whenM (button ...)</code>.</li>
+<li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code> without <code>scope</code> — shifts sibling IDs.</li>
+<li><input disabled="" type="checkbox"> Overlays called conditionally instead of unconditionally with <code>Var Bool</code>.</li>
+<li><input disabled="" type="checkbox"> <code>useTask</code> inside a hidden tab — task is cancelled when skipped.</li>
+<li><input disabled="" type="checkbox"> Writing freshly computed <code>NaN</code> to a <code>Var Float</code> — causes infinite redraw loop (<code>NaN /= NaN</code>).</li>
+<li><input disabled="" type="checkbox"> Missing <code>-threaded</code> in executable cabal options.</li>
+<li><input disabled="" type="checkbox"> Touching <code>Context</code> from a background thread — call <code>askWake</code> instead.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="abstraction-audit"><a class="header" href="#abstraction-audit">Abstraction Audit</a></h1>
+<p>An audit of architectural refinements, source simplifications, and zero-cost abstractions across <code>nano-ui</code>.</p>
+<h2 id="summary-of-refinements"><a class="header" href="#summary-of-refinements">Summary of Refinements</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Subsystem</th><th>Optimization / Abstraction</th><th>Impact</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Widget Construction</strong></td><td>Inlined leaf node initializers with text-style packing kept strictly on the styled path.</td><td>Eliminates branch overhead during traversal.</td></tr>
+<tr><td><strong>Controlled Inputs</strong></td><td>Shared boolean activation and completion policies with live-versus-caller comparison.</td><td>Unifies input event lifecycle.</td></tr>
+<tr><td><strong>UI Scopes</strong></td><td>Shared bridge for bracketed ID allocation and paint scopes.</td><td>Prevents ID drift across frame rebuilds.</td></tr>
+<tr><td><strong>Forms</strong></td><td>Named/positional input families, independent field captions, and <code>inputWidget</code> adapters.</td><td>Zero-allocation applicative forms.</td></tr>
+<tr><td><strong>Reducers</strong></td><td>Three generic adapters replacing dozens of per-widget <code>NanoUI.Emit</code> wrappers.</td><td>Massive code reduction in <code>nano-ui-emit</code>.</td></tr>
+<tr><td><strong>Scrollbars</strong></td><td>Unified scalar calculation for vertical and horizontal orientations with inverse thumb positioning.</td><td>Eliminates duplicate layout code.</td></tr>
+<tr><td><strong>Themes</strong></td><td>Shared Base16 palette construction with dark/light adaptive transforms.</td><td>Instant theme switching.</td></tr>
+<tr><td><strong>Animation</strong></td><td>Indexed applicative channel traversal replacing lists and partial reconstructions.</td><td>Constant-time channel updates.</td></tr>
+<tr><td><strong>Draw Commands</strong></td><td>Vector’s <code>IsoUnbox</code>/<code>As</code> deriving replacing handwritten <code>Prim</code> instances.</td><td>Compile-time SIMD unboxing.</td></tr>
+<tr><td><strong>Canvas</strong></td><td>Strict standard <code>State</code> monad replacing custom handwritten monad instances.</td><td>Inlines directly into draw-op arrays.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="verification-suite"><a class="header" href="#verification-suite">Verification Suite</a></h2>
+<p>The <code>nano-ui-inspection</code> test suite includes 21 formal assertions verifying that:</p>
+<ol>
+<li>Vector animation traversal equals handwritten scalar arithmetic.</li>
+<li>Command reads/writes compile without typeclass dictionaries or box allocations.</li>
+<li>Canvas construction matches direct array emission.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="source-code-reduction"><a class="header" href="#source-code-reduction">Source Code Reduction</a></h1>
+<p>A rigorous analysis of codebase simplification, performance boundaries, and line-count reduction across all maintained packages.</p>
+<h2 id="metrics--scope"><a class="header" href="#metrics--scope">Metrics &amp; Scope</a></h2>
+<p>Across every maintained library package (core, SDL, RGFW, bindings, diagrams, forms):</p>
+<ul>
+<li><strong>237 physical / 373 formatter-normalized lines</strong> were eliminated while strictly expanding test coverage and maintaining 100% backward compatibility.</li>
+<li>All 11 test suites pass under GHC 9.14 with <code>-Wall -Werror</code>.</li>
+</ul>
+<h2 id="key-simplifications"><a class="header" href="#key-simplifications">Key Simplifications</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Boundary</th><th>Description</th><th style="text-align: right">Line Savings</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>SDL Damage Rejection</strong></td><td>Replaced complex quad-only scalar/AVX2 loops with conservative triangle checks.</td><td style="text-align: right">-152 lines</td></tr>
+<tr><td><strong>Header-Checked SDL_ttf</strong></td><td>Header-checked direct C-FFI imports in place of forwarding wrappers.</td><td style="text-align: right">-75 lines</td></tr>
+<tr><td><strong>Direct Glyph Uploads</strong></td><td>SDL-owned atlas storage with direct texture streaming.</td><td style="text-align: right">-27 lines</td></tr>
+<tr><td><strong>RGFW Constant Derivation</strong></td><td>Derived bindings and event codes directly from the single C header.</td><td style="text-align: right">-31 lines</td></tr>
+<tr><td><strong>Context Initialization</strong></td><td>Streamlined record initialization using <code>RecordWildCards</code>.</td><td style="text-align: right">-31 lines</td></tr>
+<tr><td><strong>Cursor State Sharing</strong></td><td>Shared cursor state machine and short-circuiting fallbacks.</td><td style="text-align: right">-26 lines</td></tr>
+<tr><td><strong>Palette Defaults</strong></td><td>Consolidated Base16 and Tomorrow color policies.</td><td style="text-align: right">-20 lines</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="rigorous-validation-gates"><a class="header" href="#rigorous-validation-gates">Rigorous Validation Gates</a></h2>
+<p>Every refactoring passed strict validation:</p>
+<ol>
+<li><code>cabal build -j1 all</code> cleanly with <code>-Werror</code>.</li>
+<li>All 11 test suites passing (<code>nano-ui-test</code>, <code>nano-ui-inspection</code>, <code>text-buffer-spec</code>, <code>nano-ui-render-test</code>, etc.).</li>
+<li>SDL demo and log viewer <code>--selftest</code> in off-screen windows.</li>
+<li>RGFW 500-frame profile test.</li>
+<li>Per-frame ID allocation benchmark (<code>nano-ui-id-bench</code>).</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-09f2665d.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="theme/nano-ui-banks-a7aa1e5c.js"></script>
+        <script src="theme/nano-ui-components-3b273595.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>
