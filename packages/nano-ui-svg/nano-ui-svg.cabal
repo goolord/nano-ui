@@ -18,6 +18,9 @@ tested-with:        GHC ==9.10.3 || ==9.14.1
 extra-doc-files:
     CHANGELOG.md
     README.md
+data-files:
+    assets/glossary.css
+    assets/glossary.js
 
 source-repository head
     type:     git
@@ -64,6 +67,8 @@ test-suite nano-ui-svg-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
+    if os(windows)
+        ghc-options:  -optl-mconsole
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
@@ -72,3 +77,25 @@ test-suite nano-ui-svg-test
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   test
+
+executable nano-ui-svg-glossary
+    import:           extensions
+    import:           warnings
+    main-is:          Glossary.hs
+    other-modules:    Paths_nano_ui_svg
+    autogen-modules:  Paths_nano_ui_svg
+    ghc-options:      -threaded -rtsopts "-with-rtsopts=-N1"
+    if os(windows)
+        ghc-options:  -optl-mconsole
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        containers >=0.7 && <0.9,
+        directory ^>=1.3,
+        lucid2 ^>=0.0.20260427,
+        microaeson >=0.1 && <0.2,
+        nano-ui,
+        nano-ui-sdl,
+        nano-ui-svg,
+        text ^>=2.1
+    hs-source-dirs:   app
