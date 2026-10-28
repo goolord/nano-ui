@@ -1399,7 +1399,6 @@ tomorrowNightMinDarkTheme =
           (colorRGBA 26 27 29 255)  -- #1A1B1D
    in (accentColor accentCol defaultTheme)
         { themeWindow = windowCol
-        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1446,7 +1445,6 @@ tomorrowMinLightTheme =
           (colorRGBA 219 219 219 255)  -- #DBDBDB
    in (accentColor (colorRGBA 82 134 188 255) defaultTheme) -- #5286BC (Tomorrow Blue)
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
-        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1491,7 +1489,6 @@ tomorrowMidnightMinDarkTheme =
           (colorRGBA 12 13 15 255)  -- #0C0D0F
    in (accentColor accentCol defaultTheme)
         { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
-        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1587,7 +1584,6 @@ themeFromBase16Mode dark b =
    in withReadableTones $
         (accentColor (base0D b) defaultTheme)
           { themeWindow = base00 b
-      , themePage = Nothing
       , themePanel = panelSurface
       , themeFloatingWindow = panelSurface
       , themePopup = panelSurface

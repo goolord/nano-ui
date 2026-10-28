@@ -974,15 +974,11 @@ data Context = Context
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region. A backend
   -- that sets it clears the target to 'NanoUI.themeWindow' of 'ctxTheme', as
-  -- it is after the frame, before it draws the frame; the frame leaves the
-  -- page surface ('NanoUI.pageBackground') in
-  -- 'NanoUI.Internal.Draw.Types.drawBackground' to fill over that clear, and
-  -- paints it as the clip backdrop otherwise.
+  -- it is after the frame, before it draws the frame, or to an opaque page
+  -- surface ('NanoUI.pageBackground') the frame leaves in
+  -- 'NanoUI.Internal.Draw.Types.drawBackground'; the frame paints the page
+  -- as the clip backdrop otherwise.
   , ctxPaintFull :: !(IORef Bool)
-  -- | The page surface recorded this frame, and the draw vertex count after a
-  -- translucent page command: 'Nothing' on a clip frame. A page scroller
-  -- whose fill would only repeat it leaves its own backdrop out.
-  , ctxPagePainted :: !(IORef (Maybe (Color, Int)))
   , ctxDrawReuse :: !(IORef DrawReuse)
   -- | Whether the host reads this frame's damage
   -- ('NanoUI.Internal.Context.Core.takeDamage'). A host that repaints the

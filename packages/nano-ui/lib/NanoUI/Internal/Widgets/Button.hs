@@ -14,9 +14,11 @@ module NanoUI.Internal.Widgets.Button
   , buttonContent'
   , buttonContentWith
   , buttonContentWith'
+  , buttonContentStyled
   )
 where
 
+import Data.Bits ((.|.))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Monad (NanoUI, uiTheme)
@@ -125,9 +127,13 @@ buttonContentWith f content = respClicked <$> buttonContentWith' f content
 
 -- | 'buttonContentWith' returning its 'Response'.
 buttonContentWith' :: (Layout -> Layout) -> NanoUI () -> NanoUI Response
-buttonContentWith' f content = do
-  let lay = f defaultLayout
-  resp <- buttonStyledEx True "" 0 lay buttonFlagContent
+buttonContentWith' f = buttonContentStyled 0 0 (f defaultLayout)
+
+-- | A content button with style index @styleIx@ and the extra button
+-- @flags@, as a table's header passes them.
+buttonContentStyled :: Float -> Int -> Layout -> NanoUI () -> NanoUI Response
+buttonContentStyled styleIx flags lay content = do
+  resp <- buttonStyledEx True "" styleIx lay (flags .|. buttonFlagContent)
   theme <- uiTheme
   -- The content is the button's one child, which lays out and paints as an
   -- adornment beside an empty label does.

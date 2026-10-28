@@ -693,7 +693,7 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   nt <- readTagEnum a idx TagNodeType
   si <- readTree a idx TreeStyleIdx
   let chrome = isChromeColumn nt dir
-      clipped = nt == NodeContainer && hasFlag containerFlagClip si
+      clipped = isClippedContainer nt si
       padX = padL pad + padR pad
       padY = padT pad + padB pad
       -- The room inside the fixed size, or else inside the maximum.
@@ -1010,6 +1010,12 @@ measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap = do
               pure (fromIntegral cols * maxChildW + gap * fromIntegral (max 0 (cols - 1)))
       pure (contentW, contentH)
 
+-- | Whether a node of type @nt@ and style index @si@ is a container that
+-- clips its content (a pane), so its content does not size it.
+{-# INLINE isClippedContainer #-}
+isClippedContainer :: NodeType -> Int -> Bool
+isClippedContainer nt si = nt == NodeContainer && hasFlag containerFlagClip si
+
 -- | The height node @idx@ takes when @availW@ is offered to it: text and a
 -- measured drawing can wrap taller when narrower, and so can a column that
 -- holds them. Memoized per node and width for the frame.
@@ -1030,6 +1036,8 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
         effW' = clamp minW maxW (if wTag == SizingFixed then wVal else availW)
 
     ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
+    clippedGrowH <-
+      if hTag == SizingGrow then isClippedContainer nt <$> readTree a idx TreeStyleIdx else pure False
     case nt of
       -- A fit height with an aspect ratio is width / ratio.
       _ | ratio > 0 -> pure (clamp minH maxH (effW' / ratio))
@@ -1045,57 +1053,57 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
         | hTag == SizingFit -> drawingHeightAt env idx effW' hAx oldH
         | otherwise -> pure oldH
 
+      -- A clipped container growing in height is as tall as it is given,
+      -- whatever it holds.
+      _ | clippedGrowH -> pure oldH
+
       _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
-            si <- readTree a idx TreeStyleIdx
-            if nt == NodeContainer && hasFlag containerFlagClip si && hTag == SizingGrow
-              then pure oldH
+            (pad, gap, dir) <- containerFlow a idx
+            gCols <- readTree a idx TreeGridCols
+            minColW <- readStyle a idx StyleGridMinColW
+            let innerW = max 0 (effW' - padL pad - padR pad)
+                -- A child's height when @w@ is offered to it, kept to its max width.
+                childH w ci = do
+                  subAx <- getWidthSizing na ci
+                  let subW = widthOf subAx w
+                  recomputeFitHeightAtWidth env ci (if axMax subAx < 1e8 then min subW (axMax subAx) else subW)
+                padded h = pure (clamp minH maxH (h + padT pad + padB pad))
+            if gCols > 0 || minColW > 0
+              then do
+                -- A grid stacks rows, each as tall as its tallest cell at the
+                -- column width, not every cell.
+                let cols = gridColumnCount gCols minColW innerW gap
+                    colW = max 0 ((innerW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+                    rows [] = []
+                    rows hs = let (r, rest) = splitAt cols hs in r : rows rest
+                hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
+                let rowHs = map (foldl' max 0) (rows hs)
+                padded (if null rowHs then 0 else sum rowHs + gap * fromIntegral (length rowHs - 1))
               else do
-                (pad, gap, dir) <- containerFlow a idx
-                gCols <- readTree a idx TreeGridCols
-                minColW <- readStyle a idx StyleGridMinColW
-                let innerW = max 0 (effW' - padL pad - padR pad)
-                    -- A child's height when @w@ is offered to it, kept to its max width.
-                    childH w ci = do
-                      subAx <- getWidthSizing na ci
-                      let subW = widthOf subAx w
-                      recomputeFitHeightAtWidth env ci (if axMax subAx < 1e8 then min subW (axMax subAx) else subW)
-                    padded h = pure (clamp minH maxH (h + padT pad + padB pad))
-                if gCols > 0 || minColW > 0
-                  then do
-                    -- A grid stacks rows, each as tall as its tallest cell at the
-                    -- column width, not every cell.
-                    let cols = gridColumnCount gCols minColW innerW gap
-                        colW = max 0 ((innerW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
-                        rows [] = []
-                        rows hs = let (r, rest) = splitAt cols hs in r : rows rest
-                    hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
-                    let rowHs = map (foldl' max 0) (rows hs)
-                    padded (if null rowHs then 0 else sum rowHs + gap * fromIntegral (length rowHs - 1))
-                  else do
-                    flow <- readTagEnum a idx TagFlow
-                    case flow of
-                      -- Layers are as tall as the tallest child at this width.
-                      Layered -> padded . foldl' max 0 =<< mapM (childH innerW) =<< flowChildrenInOrder na idx
-                      -- A wrapping row is as tall as the lines this width breaks
-                      -- it into, with percentages resolved against the width. A
-                      -- wrapping column's height does not depend on its width.
-                      Wrap
-                        | dir == DirRow -> do
-                            let sized ci = do
-                                  subAx <- getWidthSizing na ci
-                                  Rect _ _ w h <- getNodeRect na ci
-                                  pure (ci, (percentOr subAx innerW w, h))
-                            kids <- mapM sized =<< flowChildrenInOrder na idx
-                            padded . snd =<< wrapExtent env idx dir gap innerW kids
-                        | otherwise -> pure oldH
-                      Line
-                        | dir == DirRow -> pure oldH
-                        | otherwise -> do
-                            let step (FlowAcc count contentH _) ci = do
-                                  subH <- childH innerW ci
-                                  pure (FlowAcc (count + 1) (contentH + subH) 0)
-                            FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-                            padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
+                flow <- readTagEnum a idx TagFlow
+                case flow of
+                  -- Layers are as tall as the tallest child at this width.
+                  Layered -> padded . foldl' max 0 =<< mapM (childH innerW) =<< flowChildrenInOrder na idx
+                  -- A wrapping row is as tall as the lines this width breaks
+                  -- it into, with percentages resolved against the width. A
+                  -- wrapping column's height does not depend on its width.
+                  Wrap
+                    | dir == DirRow -> do
+                        let sized ci = do
+                              subAx <- getWidthSizing na ci
+                              Rect _ _ w h <- getNodeRect na ci
+                              pure (ci, (percentOr subAx innerW w, h))
+                        kids <- mapM sized =<< flowChildrenInOrder na idx
+                        padded . snd =<< wrapExtent env idx dir gap innerW kids
+                    | otherwise -> pure oldH
+                  Line
+                    | dir == DirRow -> pure oldH
+                    | otherwise -> do
+                        let step (FlowAcc count contentH _) ci = do
+                              subH <- childH innerW ci
+                              pure (FlowAcc (count + 1) (contentH + subH) 0)
+                        FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+                        padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
 
       _ -> pure oldH
 

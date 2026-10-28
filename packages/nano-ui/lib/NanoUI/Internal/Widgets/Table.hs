@@ -34,10 +34,12 @@ where
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
 import Control.Monad (forM, forM_, mfilter, unless, void, when)
+import Control.Monad.Primitive (RealWorld)
 import Control.Monad.ST (runST)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
 import Data.IORef (modifyIORef')
+import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (find)
@@ -47,7 +49,7 @@ import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.PrimArray (PrimArray, copyMutablePrimArray, copyPrimArray, generatePrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
-import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, mapSmallArray', newSmallArray, sizeofSmallArray, smallArrayFromList, smallArrayFromListN, unsafeFreezeSmallArray, writeSmallArray)
+import Data.Primitive.SmallArray (SmallArray, SmallMutableArray, emptySmallArray, indexSmallArray, mapSmallArray', newSmallArray, sizeofSmallArray, smallArrayFromList, smallArrayFromListN, unsafeFreezeSmallArray, writeSmallArray)
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
@@ -60,12 +62,12 @@ import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCu
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, styled, uiTheme, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), Style (..), Theme (..), defaultLayout, fillH, fillW, minW, panelStyle, tight)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), Style (..), defaultLayout, fillH, fillW, minW, panelStyle, tight)
 import Data.Bits ((.|.), shiftL)
 import Data.String (IsString (..))
-import NanoUI.Internal.Types (Color, Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (buttonFlagContent, buttonFlagTable, stripeColor, tableHeaderLabel, tableSortBlank)
-import NanoUI.Internal.Widgets.Adornment (adornmentRow)
+import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
+import NanoUI.Internal.WidgetText (buttonFlagTable, stripeColor, tableHeaderLabel, tableSortBlank)
+import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
@@ -90,8 +92,8 @@ data TableConfig = TableConfig
   -- ^ Squeeze instead of scroll: when the table is narrower than the sum of
   -- its pinned widths (fixed columns, content floors, dragged widths), scale
   -- them all down proportionally, none under 'minColW', rather than surfacing
-  -- a horizontal scrollbar. A stretch column is never pinned (it has no
-  -- width of its own), and the scrollbar's own lane is budgeted for. Off by
+  -- a horizontal scrollbar. A stretch column takes part with a bounded
+  -- share, and the scrollbar's own lane is budgeted for. Off by
   -- default: a table too wide for its pane keeps its sideways scroll.
   }
   deriving (Eq, Show)
@@ -147,7 +149,7 @@ class ToCell c where
 
 instance ToCell Text where
   {-# INLINE toCell #-}
-  toCell t = Cell (Just t) t Nothing
+  toCell = textCell
 
 instance ToCell Cell where
   {-# INLINE toCell #-}
@@ -155,11 +157,11 @@ instance ToCell Cell where
 
 instance ToCell (NanoUI ()) where
   {-# INLINE toCell #-}
-  toCell w = Cell Nothing T.empty (Just w)
+  toCell = cellWidget
 
 instance IsString Cell where
   {-# INLINE fromString #-}
-  fromString s = let !t = T.pack s in Cell (Just t) t Nothing
+  fromString = textCell . T.pack
 
 -- | Plain text cell (sortable by its text).
 textCell :: Text -> Cell
@@ -186,11 +188,9 @@ cellSortKey = cellSort
 withText :: Text -> Cell -> Cell
 withText t c = c { cellText = t }
 
-labelColor :: Layout -> Theme -> Color
-labelColor lay theme = fromMaybe (styleFg (themeButton theme)) (layoutFontColor lay)
-
 -- | Stable sort by the selected column's sort key (or text).
--- Out-of-range or unsortable column indices retain input order.
+-- Out-of-range or unsortable column indices retain input order: an
+-- unsortable column's keys are all empty, so the stable sort keeps it.
 sortRows :: (Foldable f, ToCell c) => Colonnade Headed row c -> SortCol -> f row -> [row]
 sortRows cols sort inputRows =
   let rows = toList inputRows
@@ -199,14 +199,10 @@ sortRows cols sort inputRows =
    in case Encode.getColonnade cols V.!? idx of
         Nothing -> rows
         Just col ->
-          let enc r = toCell (Encode.oneColonnadeEncode col r)
-              key r = fromMaybe (cellText (enc r)) (cellKey (enc r))
-              hasAnyKey = any (isJust . cellKey . enc) rows || any (not . T.null . cellText . enc) rows
-           in if not hasAnyKey
-                then rows
-                else case sortColDir sort of
-                  SortAsc -> L.sortOn key rows
-                  SortDesc -> L.sortOn (Down . key) rows
+          let key r = let c = toCell (Encode.oneColonnadeEncode col r) in fromMaybe (cellText c) (cellKey c)
+           in case sortColDir sort of
+                SortAsc -> L.sortOn key rows
+                SortDesc -> L.sortOn (Down . key) rows
 
 isNumericCell :: Text -> Bool
 isNumericCell txt =
@@ -234,48 +230,44 @@ tableDerived ctx key !cols !rows sort = do
     _ -> rederive ctx cols rows sort hdrs (mfilter ((== hdrs) . tdHeaders) cached)
   let !resorted
         | tdSort derived == sort = derived
-        | otherwise = derived {tdSort = sort, tdOrder = orderFor sort (tdSortable derived) (tdKeys derived)}
+        | otherwise = derived {tdSort = sort, tdOrder = orderFor sort (tdKeys derived)}
   case cached of
     Just d | samePtr (Opaque d) resorted -> pure ()
     _ -> writeDerived tableCache ctx key resorted
   pure resorted
 
--- | Row indices sorted by the sort column's key or text.
--- Falls back to input order if the column is unsortable.
-orderFor :: SortCol -> SmallArray Bool -> SmallArray (V.Vector Text) -> PrimArray Int
-orderFor sort sortable keys
-  | not (smallAt sortable (sortColIndex sort) False) =
-      generatePrimArray (sizeofSmallArray keys) id
-  | otherwise =
-      sortIndices (sortColDir sort) (mapSmallArray' (sortKey sort) keys)
+-- | Row indices sorted by the sort column's key or text. An unsortable
+-- column's keys are all empty, so the stable sort keeps the input order.
+orderFor :: SortCol -> SmallArray (V.Vector Text) -> PrimArray Int
+orderFor sort keys = sortIndices (sortColDir sort) (mapSmallArray' (sortKey sort) keys)
 
 sortKey :: SortCol -> V.Vector Text -> Text
 sortKey sort row = fromMaybe T.empty (row V.!? sortColIndex sort)
 
--- | A row's cells, each evaluated.
-encodeRow :: ToCell c => V.Vector (Encode.OneColonnade Headed row c) -> row -> (V.Vector Text, V.Vector Text, V.Vector Bool)
-encodeRow encoders r = runST $ do
+-- | A row's cells, each evaluated, and their sort keys: the cells
+-- themselves (the same vector) unless a cell's key is not its text. Marks in
+-- @sortable@ each column with a key or text, and in @views@ each column with
+-- a widget view.
+encodeRow :: ToCell c => SmallMutableArray RealWorld Bool -> SmallMutableArray RealWorld Bool -> V.Vector (Encode.OneColonnade Headed row c) -> row -> IO (V.Vector Text, V.Vector Text)
+encodeRow sortable views encoders r = do
   let k = V.length encoders
   txts <- MV.unsafeNew k
   keys <- MV.unsafeNew k
-  hasKey <- MV.unsafeNew k
-  let fill !j = when (j < k) $ do
-        let !c = toCell (Encode.oneColonnadeEncode (V.unsafeIndex encoders j) r)
-            !t = cellText c
-        MV.unsafeWrite txts j t
-        case cellKey c of
-          Just sk -> do
-            MV.unsafeWrite keys j sk
-            MV.unsafeWrite hasKey j True
-          Nothing -> do
-            MV.unsafeWrite keys j t
-            MV.unsafeWrite hasKey j (not (T.null t))
-        fill (j + 1)
-  fill 0
+  let fill !j !distinct
+        | j >= k = pure distinct
+        | otherwise = do
+            let !c = toCell (Encode.oneColonnadeEncode (V.unsafeIndex encoders j) r)
+                !t = cellText c
+                !ky = fromMaybe t (cellKey c)
+            MV.unsafeWrite txts j t
+            MV.unsafeWrite keys j ky
+            when (isJust (cellKey c) || not (T.null t)) (writeSmallArray sortable j True)
+            when (isJust (cellView c)) (writeSmallArray views j True)
+            fill (j + 1) (distinct || not (eqByPtr ky t))
+  distinct <- fill 0 False
   !vTxts <- V.unsafeFreeze txts
-  !vKeys <- V.unsafeFreeze keys
-  !vHasKey <- V.unsafeFreeze hasKey
-  pure (vTxts, vKeys, vHasKey)
+  !vKeys <- if distinct then V.unsafeFreeze keys else pure vTxts
+  pure (vTxts, vKeys)
 
 -- | The first cell at which two rows differ, or -1 when they are the same.
 firstDiff :: V.Vector Text -> V.Vector Text -> Int
@@ -310,10 +302,14 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
   diffM <- newPrimArray n
   countM <- newPrimArray 1
   sortableM <- newSmallArray c False
+  viewsM <- newSmallArray c False
   case old of
-    Just d -> forM_ [0 .. c - 1] $ \j -> writeSmallArray sortableM j (smallAt (tdSortable d) j False)
+    Just d -> forM_ [0 .. c - 1] $ \j -> do
+      writeSmallArray sortableM j (smallAt (tdSortable d) j False)
+      writeSmallArray viewsM j (smallAt (tdViews d) j False)
     Nothing -> pure ()
   let store i o e k = writeSmallArray objsM i o >> writeSmallArray encM i e >> writeSmallArray keysM i k
+      encodeNew = encodeRow sortableM viewsM encoders
       note k i d = writePrimArray changedM k i >> writePrimArray diffM k d
       -- Lists the rows whose text changed or is new, each with its first
       -- changed cell (0 for a new row), and stores their count in countM,
@@ -330,27 +326,24 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
             if sameCols && samePtr o r
               then store i o e ky >> walk (i + 1) k rs
               else do
-                let (!e', !ky', !hasKeys) = encodeRow encoders r
-                forM_ [0 .. c - 1] $ \j ->
-                  when (hasKeys V.! j) (writeSmallArray sortableM j True)
+                (!e', !ky') <- encodeNew r
                 let !d = firstDiff e' e
                 if d < 0
                   then store i (Opaque r) e ky >> walk (i + 1) k rs
                   else store i (Opaque r) e' ky' >> note k i d >> walk (i + 1) (k + 1) rs
         | otherwise = do
-            let (!e', !ky', !hasKeys) = encodeRow encoders r
-            forM_ [0 .. c - 1] $ \j ->
-              when (hasKeys V.! j) (writeSmallArray sortableM j True)
+            (!e', !ky') <- encodeNew r
             store i (Opaque r) e' ky' >> note k i 0 >> walk (i + 1) (k + 1) rs
   walk (0 :: Int) (0 :: Int) (toList rows)
   nChanged <- readPrimArray countM 0
   objs <- unsafeFreezeSmallArray objsM
+  sortable <- unsafeFreezeSmallArray sortableM
+  views <- unsafeFreezeSmallArray viewsM
   case old of
-    Just d | n == oldN && nChanged == 0 -> pure d {tdRows = Opaque rows, tdCols = Opaque cols, tdRowObjs = objs}
+    Just d | n == oldN && nChanged == 0 -> pure d {tdRows = Opaque rows, tdCols = Opaque cols, tdRowObjs = objs, tdSortable = sortable, tdViews = views}
     _ -> do
       encoded <- unsafeFreezeSmallArray encM
       keys <- unsafeFreezeSmallArray keysM
-      sortable <- unsafeFreezeSmallArray sortableM
       changedRows <- unsafeFreezePrimArray changedM
       firstDiffs <- unsafeFreezePrimArray diffM
       let !cellPadX = 2 * tableCellInset
@@ -423,7 +416,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
              in n == oldN && findChanged keyChanged < 0
           (sort', order) = case old of
             Just d | keysKept d -> (tdSort d, tdOrder d)
-            _ -> (sort, orderFor sort sortable keys)
+            _ -> (sort, orderFor sort keys)
       pure
         TableDerived
           { tdRows = Opaque rows
@@ -435,6 +428,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
           , tdEncoded = encoded
           , tdKeys = keys
           , tdSortable = sortable
+          , tdViews = views
           , tdCellW = cellWs
           , tdTextRow = textRows
           , tdWidths = widths
@@ -472,8 +466,7 @@ colFloor sizes contentWs i = case smallAt sizes i ColContent of
 -- proportion and floors every width at 'minColW', so columns that reach the
 -- floor stop contributing and the others absorb the rest of the shortfall;
 -- when everything sits at the floor the widths no longer shrink, and the
--- table keeps whatever scroll is left. A width of zero or less (an unfilled
--- stretch column) stays there: it pins nothing, so it gives nothing.
+-- table keeps whatever scroll is left.
 fitWidthsTo :: Float -> [Float] -> [Float]
 fitWidthsTo budget0 = go
   where
@@ -482,7 +475,7 @@ fitWidthsTo budget0 = go
       | sum ws <= budget + 0.5 = ws
       | otherwise =
           let total = sum ws
-              ws' = map (\w -> if w <= 0 then 0 else max minColW (w * budget / total)) ws
+              ws' = map (\w -> max minColW (w * budget / total)) ws
            in if ws' == ws then ws else go ws'
 
 flatLayout :: Layout
@@ -512,12 +505,12 @@ numCellLayout =
 -- its floor. Columns stretch to the row height so every cell's background
 -- and borders span the full row even when one cell wraps.
 --
--- A stretch column keeps no minimum of its own: it is the table's slack, so
--- it compresses to nothing — under a vertical scrollbar's lane, say, which
--- narrows the viewport by the lane's width — rather than reporting a minimum
--- that surfaces a horizontal bar under a table that fits the scroller's full
--- width. Its drag floor ('colFloor') still binds once the column has been
--- resized to a stored width.
+-- A stretch column is the table's slack: its minimum is only @stretchMinW@,
+-- so it compresses (under a vertical scrollbar's lane, say, which narrows
+-- the viewport by the lane's width) rather than reporting its content as a
+-- minimum that surfaces a horizontal bar under a table that fits the
+-- scroller's full width. Its drag floor ('colFloor') still binds once the
+-- column has been resized to a stored width.
 colBoxLayout :: Bool -> Bool -> Float -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
 colBoxLayout fillInner hasStretch stretchMinW sizes contentWs stored i
   | saved > 0 = fixed (max floorW saved)
@@ -528,9 +521,9 @@ colBoxLayout fillInner hasStretch stretchMinW sizes contentWs stored i
     saved = primAt stored i 0
     floorW = colFloor sizes contentWs i
     size = smallAt sizes i ColContent
-    box = (fillH flatLayout) {layoutMinW = max floorW saved}
-    stretchBox = (fillH flatLayout) {layoutMinW = max stretchMinW saved}
-    fixed w = box {layoutWidth = Fixed w, layoutMaxW = w}
+    box = (fillH flatLayout) {layoutMinW = floorW}
+    stretchBox = (fillH flatLayout) {layoutMinW = stretchMinW}
+    fixed w = box {layoutWidth = Fixed w, layoutMinW = w, layoutMaxW = w}
 
 -- | Sortable table with resizable, reorderable columns, with sort state bound
 -- to a 'Var': a header click updates it in place. @key@ distinguishes tables
@@ -614,9 +607,8 @@ tableCore ::
 tableCore cfg f key cols inputRows curSort =
   let encoders = Encode.getColonnade cols
       n = V.length encoders
-      rowsList = toList inputRows
-      rowsVec = V.fromList rowsList
-      nRows = V.length rowsVec
+      -- Built only for a column with widget views, which reads its rows.
+      rowsVec = V.fromList (toList inputRows)
   in withKey ("table:" <> key) $ do
     (stateWid, ctx) <- freshWidget
     vWid <- nextId
@@ -627,10 +619,9 @@ tableCore cfg f key cols inputRows curSort =
     inp <- askInput
     st0 <- liftIO (getStore ctx)
     TableDerived
-      { tdHeaders = _hdrs
-      , tdEncoded = _encoded
-      , tdKeys = _keys
+      { tdEncoded = encoded
       , tdSortable = sortable
+      , tdViews = views
       , tdWidths = contentWs
       , tdNumeric = numeric
       , tdOrder = sorted
@@ -656,7 +647,8 @@ tableCore cfg f key cols inputRows curSort =
     -- vertical-bar spacer: a resize settles one frame later, as that spacer
     -- already does.
     mPrevBody <- lastRect vWid
-    let widths1Arr = primArrayFromList widths1
+    let nRows = sizeofSmallArray encoded
+        widths1Arr = primArrayFromList widths1
         outerLayout = f (fillW flatLayout)
         hasStretch = any (\i -> smallAt sizes i ColContent == ColStretch) vis
         vis = filter (`IS.notMember` hidden0) order0
@@ -672,15 +664,13 @@ tableCore cfg f key cols inputRows curSort =
             Grow _ -> True
             _ -> False
         fillIf b = if b then fillW else id
-        -- What column i cannot shrink below as laid out: its dragged width
-        -- once it has one, else its floor; a stretch column filling the
-        -- table has no width of its own (colBoxLayout keeps no minimum for
-        -- it), unless squeezing is active, where it participates with a
-        -- bounded share so fixed columns do not crush it to zero.
+        -- What column i gives up under the squeeze: its dragged width once
+        -- it has one, else its floor. A stretch column has no width of its
+        -- own, so it takes part with a bounded share, which keeps fixed
+        -- columns from crushing it to nothing.
         pinnedW i
           | primAt widths1Arr i 0 > 0 = max (colFloor sizes contentWs i) (primAt widths1Arr i 0)
-          | fillInner && smallAt sizes i ColContent == ColStretch =
-              if tableSqueeze cfg then max minColW (min 120 (primAt contentWs i minColW)) else 0
+          | smallAt sizes i ColContent == ColStretch = max minColW (min 120 (primAt contentWs i minColW))
           | otherwise = colFloor sizes contentWs i
         -- Squeeze: with the flag set and the body narrower than the pinned
         -- widths plus rules, scale every pinned width down to fit, none
@@ -702,41 +692,43 @@ tableCore cfg f key cols inputRows curSort =
           if tableSqueeze cfg
             then fmap (\r -> max 0 (rectW r - (if rowsOverrun then scrollBarGutter ScrollBarList 0 else 0))) mPrevBody
             else Nothing
-        pinned0 = map pinnedW vis
-        fitted0 = maybe pinned0 (\budget -> fitWidthsTo (budget - rulesW) pinned0) squeezeBudget
-        -- Per-column layout scale: the ratio of fitted to pinned, 1 outside
-        -- the squeeze.
-        scaleOf i = case lookup i (zip vis fitted0) of
-          Just w -> w / max 1.0e-3 (pinnedW i)
-          Nothing -> 1
-        sizesLay = smallArrayFromListN n [case smallAt sizes i ColContent of ColFixed w -> ColFixed (w * scaleOf i); s -> s | i <- [0 .. n - 1]]
-        contentWsLay = primArrayFromList [primAt contentWs i minColW * scaleOf i | i <- [0 .. n - 1]]
-        widthsLay = [primAt widths1Arr i 0 * scaleOf i | i <- [0 .. n - 1]]
+        -- The sizes the columns are laid out from: under the squeeze, each
+        -- column's scaled by the ratio of its fitted to its pinned width.
+        (sizesLay, contentWsLay, widthsLay) = case squeezeBudget of
+          Nothing -> (sizes, contentWs, widths1Arr)
+          Just budget ->
+            let fitted = IM.fromList (zip vis (fitWidthsTo (budget - rulesW) (map pinnedW vis)))
+                scaleOf i = maybe 1 (\w -> w / max 1.0e-3 (pinnedW i)) (IM.lookup i fitted)
+             in ( smallArrayFromListN n [case smallAt sizes i ColContent of ColFixed w -> ColFixed (w * scaleOf i); s -> s | i <- [0 .. n - 1]]
+                , primArrayFromList [primAt contentWs i minColW * scaleOf i | i <- [0 .. n - 1]]
+                , primArrayFromList [primAt widths1Arr i 0 * scaleOf i | i <- [0 .. n - 1]]
+                )
+        -- A stretch column's minimum: a token width outside the squeeze,
+        -- which the solver takes as an explicit minimum in place of the
+        -- column's content.
         stretchMinW = if isJust squeezeBudget then minColW else 1.0e-3
         colBoxes =
-          smallArrayFromList (map (colBoxLayout fillInner hasStretch stretchMinW sizesLay contentWsLay (primArrayFromList widthsLay)) [0 .. n - 1])
+          smallArrayFromList (map (colBoxLayout fillInner hasStretch stretchMinW sizesLay contentWsLay widthsLay) [0 .. n - 1])
         colBox i = smallAt colBoxes i (tight defaultLayout)
         cellLayout i = if smallAt numeric i False then numCellLayout else textCellLayout
         isSortable i = smallAt sortable i False
         renderHeader i active cellLay flags = do
           let oneCol = encoders V.! i
               hdrCell = toCell (getHeaded (Encode.oneColonnadeHead oneCol))
+              styleIx = if active then 1 else 0
           case cellView hdrCell of
             Nothing ->
-              buttonStyledEx True (tableHeaderLabel (smallAt numeric i False) (cellText hdrCell)) (if active then 1 else 0) cellLay flags
-            Just hdrAct -> do
-              resp <- buttonStyledEx True "" (if active then 1 else 0) cellLay (flags .|. buttonFlagContent)
-              theme <- uiTheme
-              _ <- withWidgetChildren (respId resp) (adornmentRow cellLay (labelColor cellLay theme) hdrAct)
-              pure resp
-        renderCell ri r i = do
-          let rowVal = rowsVec V.! r
-              col = V.unsafeIndex encoders i
-              cell = toCell (Encode.oneColonnadeEncode col rowVal)
-          case cellView cell of
-            Nothing -> do
-              wid <- nextId
-              void (addWidgetStyled wid NodeText (cellText cell) 0 (cellLayout i) (if even ri then 1 else 2))
+              buttonStyledEx True (tableHeaderLabel (smallAt numeric i False) (cellText hdrCell)) styleIx cellLay flags
+            Just hdrAct -> buttonContentStyled styleIx flags cellLay hdrAct
+        textCellAt ri i t = do
+          wid <- nextId
+          void (addWidgetStyled wid NodeText t 0 (cellLayout i) (if even ri then 1 else 2))
+        -- Text cells show their cached text; only a column with widget
+        -- views encodes its visible cells again, for the views.
+        renderCell ri r i
+          | not (smallAt views i False) = textCellAt ri i (indexSmallArray encoded r V.! i)
+          | otherwise = case cellView (toCell (Encode.oneColonnadeEncode (V.unsafeIndex encoders i) (rowsVec V.! r))) of
+            Nothing -> textCellAt ri i (indexSmallArray encoded r V.! i)
             Just widgetAct -> do
               theme <- uiTheme
               let mBg = stripeColor theme (if even ri then 1 else 2)
@@ -807,7 +799,6 @@ tableCore cfg f key cols inputRows curSort =
         unfrozenPane = do
           -- Uses last frame's rect, so the header's spacer lags the body's
           -- vertical bar by one frame when the bar appears or disappears.
-          let hasVertBar = rowsOverrun
           column' (paneLay fillInner unfrozenIdx) $ do
             hs <-
               row' (fillIf fillInner flatLayout) $ do
@@ -820,7 +811,7 @@ tableCore cfg f key cols inputRows curSort =
                     scrollHorizontalHidden
                     (column' (gridRowLay unfrozenIdx) (headerBlock unfrozenIdx))
                 -- The body scroller has no padding, so its whole lane is gutter.
-                when hasVertBar $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
+                when rowsOverrun $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
                 pure hs'
             liftIO (linkScrollAxes ctx vWid hWid)
             -- The body owns both scrollbars.
@@ -848,7 +839,6 @@ tableCore cfg f key cols inputRows curSort =
             unfrozenHs <-
               if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane
             pure (frozenHs ++ unfrozenHs)
-      mBodyRect <- lastRect vWid
       covered <- liftIO (pointerCovered ctx tableWid)
       clip <- liftIO (getPrevClipRect ctx tableWid)
       disabled <- liftIO (isDisabled ctx tableWid)
@@ -860,7 +850,7 @@ tableCore cfg f key cols inputRows curSort =
           -- past the body's right edge has its edge outside its clip.
           shownEdges = [h | (h@(_, Rect x _ w _), Just (Rect cx _ cw _)) <- zip headerRects headerClips, x + w >= cx, x + w <= cx + cw + 0.5]
           -- Also used as the resize cursor's zones.
-          edgeZones = headerEdgeZones 4 mBodyRect shownEdges
+          edgeZones = headerEdgeZones 4 mPrevBody shownEdges
           hitCol zones = fst <$> find (\(_, r) -> rectContains r mouse) zones
           edgeCol = if reachable then hitCol edgeZones else Nothing
           isResize = drag0 >= 0

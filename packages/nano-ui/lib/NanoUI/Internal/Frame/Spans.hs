@@ -376,19 +376,17 @@ cachedWidgetLabel ctx nt idx labelAlign w h = do
         (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt w h (fromEnum ax) placement) cache)
       pure placement
 
+-- | A table header's label cut to @room@, keeping the blank its sort mark is
+-- drawn over on whichever side it sits.
 truncateTableHeader :: (T.Text -> IO Float) -> Float -> T.Text -> IO T.Text
 truncateTableHeader lineW room txt
-  | Just hdr <- T.stripPrefix tableSortBlank txt = do
-      blankW <- lineW tableSortBlank
-      let avail = max 0 (room - blankW)
-      cut <- truncateTextIO lineW avail hdr
-      pure (tableSortBlank <> cut)
-  | Just hdr <- T.stripSuffix tableSortBlank txt = do
-      blankW <- lineW tableSortBlank
-      let avail = max 0 (room - blankW)
-      cut <- truncateTextIO lineW avail hdr
-      pure (cut <> tableSortBlank)
+  | Just hdr <- T.stripPrefix tableSortBlank txt = (tableSortBlank <>) <$> fit hdr
+  | Just hdr <- T.stripSuffix tableSortBlank txt = (<> tableSortBlank) <$> fit hdr
   | otherwise = truncateTextIO lineW room txt
+  where
+    fit hdr = do
+      blankW <- lineW tableSortBlank
+      truncateTextIO lineW (max 0 (room - blankW)) hdr
 
 -- All coordinates here are local. centeredTextY snaps the baseline offset,
 -- not the origin; final device-pixel snapping stays in the draw backend.

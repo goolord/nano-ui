@@ -299,31 +299,19 @@ framePageBackground ctx = do
     else pure (pageBackground base)
 
 -- | Lay the page surface over the window clear. A page the same colour as the
--- clear is left out, and a scroller's backdrop then stands in for it
--- ('ctxPagePainted').
+-- clear is left out. An opaque page different from the clear is left to the
+-- backend, which clears to it in place of the window colour, without a vertex
+-- in the draw list. A translucent one is a command here, so it blends over
+-- the clear.
 paintPageSurface :: Context -> Size -> IO ()
 paintPageSurface ctx (Size w h) = do
   page <- framePageBackground ctx
   clear <- themeWindow <$> readIORef (ctxTheme ctx)
   let da = ctxDrawArena ctx
-      -- An opaque page different from the clear is left to the backend, which
-      -- fills it after the clear without a vertex in the draw list. A
-      -- translucent one is a command here, so it blends over the clear.
-      opaque = colorA page == 255
-  if w <= 0 || h <= 0 || colorA page == 0 || page == clear
-    then do
-      setDrawBackground da Nothing
-      writeIORef (ctxPagePainted ctx) (Just (page, 0))
-    else
-      if opaque
-        then do
-          setDrawBackground da (Just page)
-          writeIORef (ctxPagePainted ctx) (Just (page, 0))
-        else do
-          pushRect da (Rect 0 0 w h) page
-          n <- drawnVertexCount da
-          setDrawBackground da Nothing
-          writeIORef (ctxPagePainted ctx) (Just (page, n))
+  unless (w <= 0 || h <= 0 || colorA page == 0 || page == clear) $
+    if colorA page == 255
+      then setDrawBackground da (Just page)
+      else pushRect da (Rect 0 0 w h) page
 
 -- | Paint the frame. Clip frames repaint the damaged region of the retained
 -- texture, which preserves the other pixels ('paintDamageClip'). Full-present
@@ -333,7 +321,6 @@ paintFrame ctx frameInp size explain paintFull = do
   let da = ctxDrawArena ctx
   resetDrawArena da
   beginLayer da LayerBackground
-  writeIORef (ctxPagePainted ctx) Nothing
   if paintFull
     then paintPageSurface ctx size
     else do

@@ -263,7 +263,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
       then do
         let bg = maybe (pageBackground tm) styleBg surface
         -- A full frame lays the page surface over the window clear before the
-        -- view ('ctxPagePainted'). Drawn first, in that same opaque colour, the
+        -- view ('paintPageSurface'). Drawn first, in that same opaque colour, the
         -- backdrop would only fill the same pixels again: a whole-window blend
         -- on every continuous frame. Anything drawn before it (a panel, a
         -- card, a layer below), a scope's other page colour or a translucent
@@ -274,8 +274,8 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
             else do
               full <- readIORef (ctxPaintFull ctx)
               drawn <- drawnVertexCount da
-              painted <- readIORef (ctxPagePainted ctx)
-              pure (full && maybe False (\(pc, n) -> bg == pc && drawn == n) painted)
+              page <- pageBackground <$> nodeTheme ctx 0
+              pure (full && drawn == 0 && bg == page)
         unless redundant $ pushRect da rect bg
       else do
         let well = (fromMaybe (themeInput tm) surface) {styleCornerRadius = 0}

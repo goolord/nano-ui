@@ -30,7 +30,7 @@ module NanoUI.Emit
 where
 
 import Control.Monad (when)
-import Control.Monad.Trans.Reader (ReaderT (..), ask)
+import Control.Monad.Trans.Reader (runReaderT)
 import NanoUI (HasResponse (..), Input, NanoUI, Response, V2, Var, respChanged, withValue)
 import NanoUI.Internal.Context (isDirty, markDirty)
 import NanoUI.Testing (Context, DrawData, runFrame)
@@ -51,7 +51,7 @@ import NanoUI.Emit.Widgets
 -- | Emit when an ordinary 'NanoUI' widget activates.
 {-# INLINE emitWhen #-}
 emitWhen :: NanoUI Bool -> msg -> NanoUIE msg ()
-emitWhen widget msg = liftNanoUI widget >>= \active -> when active (emit msg)
+emitWhen widget = emitWhenE (liftNanoUI widget)
 
 -- | Emit when a wrapped 'NanoUIE' widget activates.
 --
@@ -66,9 +66,7 @@ emitWhenE widget msg = widget >>= \active -> when active (emit msg)
 -- > emitChanged (slider 0 100) volume SetVolume
 {-# INLINE emitChanged #-}
 emitChanged :: Eq a => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitChanged widget old toMsg = do
-  (_, new) <- liftNanoUI (withValue old widget)
-  when (new /= old) (emit (toMsg new))
+emitChanged widget = emitChangedE (liftNanoUI . widget)
 
 -- | Run a wrapped 'Var'-based input widget on a temporary 'Var' initialized to
 -- @old@, and emit only when the value changes.
@@ -77,9 +75,7 @@ emitChanged widget old toMsg = do
 {-# INLINE emitChangedE #-}
 emitChangedE :: Eq a => (Var a -> NanoUIE msg r) -> a -> (a -> msg) -> NanoUIE msg ()
 emitChangedE widget old toMsg = do
-  sink <- NanoUIE ask
-  let runAction (NanoUIE (ReaderT f)) = f sink
-  (_, new) <- liftNanoUI (withValue old (runAction . widget))
+  (_, new) <- withRunInNanoUIE (\run -> withValue old (run . widget))
   when (new /= old) (emit (toMsg new))
 
 -- | Emit a changed value only when the input's response also reports an
@@ -87,9 +83,7 @@ emitChangedE widget old toMsg = do
 {-# INLINE emitEdited #-}
 emitEdited ::
   (Eq a, HasResponse r) => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitEdited widget old toMsg = do
-  (r, new) <- liftNanoUI (withValue old widget)
-  when (respChanged (toResponse r) && new /= old) (emit (toMsg new))
+emitEdited widget = emitEditedE (liftNanoUI . widget)
 
 -- | Emit a changed value only when the wrapped input's response also reports
 -- an edit.
@@ -97,9 +91,7 @@ emitEdited widget old toMsg = do
 emitEditedE ::
   (Eq a, HasResponse r) => (Var a -> NanoUIE msg r) -> a -> (a -> msg) -> NanoUIE msg ()
 emitEditedE widget old toMsg = do
-  sink <- NanoUIE ask
-  let runAction (NanoUIE (ReaderT f)) = f sink
-  (r, new) <- liftNanoUI (withValue old (runAction . widget))
+  (r, new) <- withRunInNanoUIE (\run -> withValue old (run . widget))
   when (respChanged (toResponse r) && new /= old) (emit (toMsg new))
 
 -- | Run a complete frame and collect messages from all its passes in order.

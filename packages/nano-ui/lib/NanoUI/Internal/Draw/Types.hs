@@ -305,9 +305,10 @@ data DrawData = DrawData
   -- ^ Cumulative command offsets: layer @i@ occupies @[offsets[i], offsets[i+1])@.
   -- Includes a final sentinel equal to 'drawCmdCount'; empty layers repeat offsets.
   , drawBackground :: !(Maybe Color)
-  -- ^ The page surface to fill over the window clear on a full frame, before
-  -- 'drawCommands'. 'Nothing' when the clear already covers it, or on a clip
-  -- frame, whose commands paint the page backdrop themselves.
+  -- ^ The opaque page surface a full frame clears to in place of the window
+  -- colour, before 'drawCommands'. 'Nothing' when the window clear already
+  -- covers it, or on a clip frame, whose commands paint the page backdrop
+  -- themselves.
   }
 
 -- | Number of batches across all layers.
@@ -366,7 +367,7 @@ data DrawArena = DrawArena
   -- 'NanoUI.Internal.Draw.Arena.resetDrawArena', so a reused frame keeps
   -- the spans of the paint that drew it.
   , daBackground :: !(IORef (Maybe Color))
-  -- ^ The page surface this paint leaves for the backend to fill; see
+  -- ^ The page surface this paint leaves for the backend to clear to; see
   -- 'drawBackground'.
   }
 

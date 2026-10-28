@@ -460,7 +460,7 @@ rowWith = withNanoUI . UI.rowWith
 -- | Horizontal layout returning the child's result and container's 'Response'.
 {-# INLINE rowWith' #-}
 rowWith' :: LayoutModifier -> NanoUIE msg a -> NanoUIE msg (a, Response)
-rowWith' lm body = withRunInNanoUIE $ \run -> UI.rowWith' lm (run body)
+rowWith' lm body = withNanoUI (UI.rowWith' lm) body
 
 -- | Lay out children vertically.
 {-# INLINE column #-}
@@ -475,7 +475,7 @@ columnWith = withNanoUI . UI.columnWith
 -- | Vertical layout returning the child's result and container's 'Response'.
 {-# INLINE columnWith' #-}
 columnWith' :: LayoutModifier -> NanoUIE msg a -> NanoUIE msg (a, Response)
-columnWith' lm body = withRunInNanoUIE $ \run -> UI.columnWith' lm (run body)
+columnWith' lm body = withNanoUI (UI.columnWith' lm) body
 
 -- | Compact horizontal stack.
 {-# INLINE hstack #-}
@@ -565,12 +565,12 @@ scroll2DWith = withNanoUI . UI.scroll2DWith
 -- | Scroll area returning the child result and scroller's 'WidgetId'.
 {-# INLINE scrollArea #-}
 scrollArea :: LayoutModifier -> NanoUIE msg a -> NanoUIE msg (WidgetId, a)
-scrollArea lm body = withRunInNanoUIE $ \run -> UI.scrollArea lm (run body)
+scrollArea lm body = withNanoUI (UI.scrollArea lm) body
 
 -- | Bidirectional scroll area returning the child result and scroller's 'WidgetId'.
 {-# INLINE scrollArea2D #-}
 scrollArea2D :: LayoutModifier -> NanoUIE msg a -> NanoUIE msg (WidgetId, a)
-scrollArea2D lm body = withRunInNanoUIE $ \run -> UI.scrollArea2D lm (run body)
+scrollArea2D lm body = withNanoUI (UI.scrollArea2D lm) body
 
 -- | Horizontal divider line.
 {-# INLINE separator #-}
@@ -600,7 +600,7 @@ layersWith = withNanoUI . UI.layersWith
 -- | Interactive mouse area over a subtree.
 {-# INLINE mouseArea #-}
 mouseArea :: LayoutModifier -> NanoUIE msg a -> NanoUIE msg (a, Response)
-mouseArea lm body = withRunInNanoUIE $ \run -> UI.mouseArea lm (run body)
+mouseArea lm body = withNanoUI (UI.mouseArea lm) body
 
 -- Text
 
@@ -729,22 +729,22 @@ iconButton' doc txt = liftNanoUI (UI.iconButton' doc txt)
 -- | Button containing arbitrary UI body.
 {-# INLINE buttonContent #-}
 buttonContent :: NanoUIE msg () -> NanoUIE msg Bool
-buttonContent body = withRunInNanoUIE $ \run -> UI.buttonContent (run body)
+buttonContent body = withNanoUI UI.buttonContent body
 
 -- | Button containing arbitrary UI body returning its 'Response'.
 {-# INLINE buttonContent' #-}
 buttonContent' :: NanoUIE msg () -> NanoUIE msg Response
-buttonContent' body = withRunInNanoUIE $ \run -> UI.buttonContent' (run body)
+buttonContent' body = withNanoUI UI.buttonContent' body
 
 -- | Button containing arbitrary UI body with layout modifier.
 {-# INLINE buttonContentWith #-}
 buttonContentWith :: LayoutModifier -> NanoUIE msg () -> NanoUIE msg Bool
-buttonContentWith lm body = withRunInNanoUIE $ \run -> UI.buttonContentWith lm (run body)
+buttonContentWith lm body = withNanoUI (UI.buttonContentWith lm) body
 
 -- | Button containing arbitrary UI body with layout modifier returning its 'Response'.
 {-# INLINE buttonContentWith' #-}
 buttonContentWith' :: LayoutModifier -> NanoUIE msg () -> NanoUIE msg Response
-buttonContentWith' lm body = withRunInNanoUIE $ \run -> UI.buttonContentWith' lm (run body)
+buttonContentWith' lm body = withNanoUI (UI.buttonContentWith' lm) body
 
 -- | Configured button.
 {-# INLINE buttonConfigured #-}
@@ -809,7 +809,7 @@ menuHeader = liftNanoUI . UI.menuHeader
 -- | Context menu for any widget response.
 {-# INLINE contextMenu #-}
 contextMenu :: HasResponse r => r -> NanoUIE msg a -> NanoUIE msg (Maybe a)
-contextMenu target body = withRunInNanoUIE $ \run -> UI.contextMenu target (run body)
+contextMenu target body = withNanoUI (UI.contextMenu target) body
 
 -- | Region with an attached context menu.
 {-# INLINE contextMenuArea #-}
@@ -1204,72 +1204,72 @@ simpleTable headers = liftNanoUI . UI.simpleTable headers
 -- | Modal dialog overlay.
 {-# INLINE modal #-}
 modal :: Var Bool -> Text -> NanoUIE msg () -> NanoUIE msg ()
-modal open title body = withRunInNanoUIE $ \run -> UI.modal open title (run body)
+modal open title body = withNanoUI (UI.modal open title) body
 
 -- | Modal dialog overlay returning its 'Response' and child result.
 {-# INLINE modal' #-}
 modal' :: Var Bool -> Text -> NanoUIE msg a -> NanoUIE msg (Response, Maybe a)
-modal' open title body = withRunInNanoUIE $ \run -> UI.modal' open title (run body)
+modal' open title body = withNanoUI (UI.modal' open title) body
 
 -- | Modal dialog with layout modifier.
 {-# INLINE modalWith #-}
 modalWith :: LayoutModifier -> Var Bool -> Text -> NanoUIE msg () -> NanoUIE msg ()
-modalWith lm open title body = withRunInNanoUIE $ \run -> UI.modalWith lm open title (run body)
+modalWith lm open title body = withNanoUI (UI.modalWith lm open title) body
 
 -- | Modal dialog with layout modifier returning its 'Response' and child result.
 {-# INLINE modalWith' #-}
 modalWith' :: LayoutModifier -> Var Bool -> Text -> NanoUIE msg a -> NanoUIE msg (Response, Maybe a)
-modalWith' lm open title body = withRunInNanoUIE $ \run -> UI.modalWith' lm open title (run body)
+modalWith' lm open title body = withNanoUI (UI.modalWith' lm open title) body
 
 -- | Modal dialog styled as a panel.
 {-# INLINE modalPanel #-}
 modalPanel :: Var Bool -> NanoUIE msg () -> NanoUIE msg ()
-modalPanel open body = withRunInNanoUIE $ \run -> UI.modalPanel open (run body)
+modalPanel open body = withNanoUI (UI.modalPanel open) body
 
 -- | Modal dialog styled as a panel returning its 'Response' and child result.
 {-# INLINE modalPanel' #-}
 modalPanel' :: Var Bool -> NanoUIE msg a -> NanoUIE msg (Response, Maybe a)
-modalPanel' open body = withRunInNanoUIE $ \run -> UI.modalPanel' open (run body)
+modalPanel' open body = withNanoUI (UI.modalPanel' open) body
 
 -- | Modal dialog styled as a panel with layout modifier.
 {-# INLINE modalPanelWith #-}
 modalPanelWith :: LayoutModifier -> Var Bool -> NanoUIE msg () -> NanoUIE msg ()
-modalPanelWith lm open body = withRunInNanoUIE $ \run -> UI.modalPanelWith lm open (run body)
+modalPanelWith lm open body = withNanoUI (UI.modalPanelWith lm open) body
 
 -- | Modal dialog styled as a panel with layout modifier returning its 'Response' and child result.
 {-# INLINE modalPanelWith' #-}
 modalPanelWith' :: LayoutModifier -> Var Bool -> NanoUIE msg a -> NanoUIE msg (Response, Maybe a)
-modalPanelWith' lm open body = withRunInNanoUIE $ \run -> UI.modalPanelWith' lm open (run body)
+modalPanelWith' lm open body = withNanoUI (UI.modalPanelWith' lm open) body
 
 -- | Floating window overlay.
 {-# INLINE window #-}
 window :: Var Bool -> Text -> NanoUIE msg () -> NanoUIE msg ()
-window open title body = withRunInNanoUIE $ \run -> UI.window open title (run body)
+window open title body = withNanoUI (UI.window open title) body
 
 -- | Floating window overlay returning its caption and window responses and child result.
 {-# INLINE window' #-}
 window' :: Var Bool -> Text -> NanoUIE msg a -> NanoUIE msg (Response, Maybe a)
-window' open title body = withRunInNanoUIE $ \run -> UI.window' open title (run body)
+window' open title body = withNanoUI (UI.window' open title) body
 
 -- | Context popup overlay.
 {-# INLINE popup #-}
 popup :: Var Bool -> PopupConfig -> NanoUIE msg () -> NanoUIE msg ()
-popup open cfg body = withRunInNanoUIE $ \run -> UI.popup open cfg (run body)
+popup open cfg body = withNanoUI (UI.popup open cfg) body
 
 -- | Context popup overlay returning its 'Response' and child result.
 {-# INLINE popup' #-}
 popup' :: Var Bool -> PopupConfig -> NanoUIE msg a -> NanoUIE msg (Response, Maybe a)
-popup' open cfg body = withRunInNanoUIE $ \run -> UI.popup' open cfg (run body)
+popup' open cfg body = withNanoUI (UI.popup' open cfg) body
 
 -- | Context popup overlay with layout modifier.
 {-# INLINE popupWith #-}
 popupWith :: Var Bool -> PopupConfig -> LayoutModifier -> NanoUIE msg () -> NanoUIE msg ()
-popupWith open cfg lm body = withRunInNanoUIE $ \run -> UI.popupWith open cfg lm (run body)
+popupWith open cfg lm body = withNanoUI (UI.popupWith open cfg lm) body
 
 -- | Context popup overlay with layout modifier returning its 'Response' and child result.
 {-# INLINE popupWith' #-}
 popupWith' :: Var Bool -> PopupConfig -> LayoutModifier -> NanoUIE msg a -> NanoUIE msg (Response, Maybe a)
-popupWith' open cfg lm body = withRunInNanoUIE $ \run -> UI.popupWith' open cfg lm (run body)
+popupWith' open cfg lm body = withNanoUI (UI.popupWith' open cfg lm) body
 
 -- | Tooltip text on a response.
 {-# INLINE tooltip #-}
@@ -1284,7 +1284,7 @@ tooltipAt placement r = liftNanoUI . UI.tooltipAt placement r
 -- | Tooltip containing an arbitrary UI widget.
 {-# INLINE tooltipWidget #-}
 tooltipWidget :: HasResponse r => r -> NanoUIE msg a -> NanoUIE msg (Maybe a)
-tooltipWidget r body = withRunInNanoUIE $ \run -> UI.tooltipWidget r (run body)
+tooltipWidget r body = withNanoUI (UI.tooltipWidget r) body
 
 -- | Configured tooltip text.
 {-# INLINE tooltipConfigured #-}
@@ -1294,7 +1294,7 @@ tooltipConfigured cfg r = liftNanoUI . UI.tooltipConfigured cfg r
 -- | Configured tooltip containing an arbitrary UI widget.
 {-# INLINE tooltipWidgetConfigured #-}
 tooltipWidgetConfigured :: HasResponse r => TooltipConfig -> r -> NanoUIE msg a -> NanoUIE msg (Maybe a)
-tooltipWidgetConfigured cfg r body = withRunInNanoUIE $ \run -> UI.tooltipWidgetConfigured cfg r (run body)
+tooltipWidgetConfigured cfg r body = withNanoUI (UI.tooltipWidgetConfigured cfg r) body
 
 -- | Attach a rich tooltip widget to an inner UI computation.
 {-# INLINE withTooltip #-}
@@ -1338,7 +1338,7 @@ paneGrid = liftNanoUI . UI.paneGrid
 -- | Drag handle for a pane edge.
 {-# INLINE paneDragHandle #-}
 paneDragHandle :: PaneGridCtx -> LayoutModifier -> NanoUIE msg a -> NanoUIE msg a
-paneDragHandle pctx lm body = withRunInNanoUIE $ \run -> UI.paneDragHandle pctx lm (run body)
+paneDragHandle pctx lm body = withNanoUI (UI.paneDragHandle pctx lm) body
 
 -- Rich text
 
@@ -1646,7 +1646,7 @@ withCursorShape c = withNanoUI (UI.withCursorShape c)
 -- | Drag-and-drop drop zone.
 {-# INLINE dropZone #-}
 dropZone :: (Layout -> Layout) -> NanoUIE msg a -> NanoUIE msg (a, Response, DropTarget)
-dropZone lm body = withRunInNanoUIE $ \run -> UI.dropZone lm (run body)
+dropZone lm body = withNanoUI (UI.dropZone lm) body
 
 -- | Poll for drop events at the current location.
 {-# INLINE useDrop #-}

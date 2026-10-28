@@ -49,6 +49,8 @@ data TableDerived = TableDerived
   , tdEncoded :: !(SmallArray (Vector Text))
   , tdKeys :: !(SmallArray (Vector Text))
   , tdSortable :: !(SmallArray Bool)
+  , tdViews :: !(SmallArray Bool)
+  -- ^ Each column that has a cell with a widget view.
   , tdCellW :: !(PrimArray Float)
   , tdTextRow :: !(PrimArray Int)
   , tdWidths :: !(PrimArray Float)

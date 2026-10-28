@@ -14,7 +14,7 @@ import Control.Exception (onException)
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
@@ -93,13 +93,10 @@ renderDrawDataPass batch ren bg drawData images glyphs damage =
     void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
     mDamage <- case damage of
       DamageFull -> do
-        void $ setRenderDrawColorSafe ren (colorR bg) (colorG bg) (colorB bg) (colorA bg)
+        -- An opaque page surface covers the window clear, so it is the clear.
+        let clear = fromMaybe bg (drawBackground drawData)
+        void $ setRenderDrawColorSafe ren (colorR clear) (colorG clear) (colorB clear) (colorA clear)
         void $ renderClearSafe ren
-        -- The page surface, over the window clear. An opaque fill, so a
-        -- second clear is exact.
-        for_ (drawBackground drawData) $ \page -> do
-          void $ setRenderDrawColorSafe ren (colorR page) (colorG page) (colorB page) 255
-          void $ renderClearSafe ren
         pure Nothing
       -- The draw list starts a clip frame with its own page backdrop, so a
       -- clip needs no clear here.
