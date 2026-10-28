@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-8cf0161d.js";
+            window.path_to_searchindex_js = "../searchindex-21aa7395.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,56 +179,40 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="styling-gotchas"><a class="header" href="#styling-gotchas">Styling Gotchas</a></h1>
-<p>Twelve non-obvious styling interactions, edge cases, and gotchas discovered in <code>nano-ui</code>’s layout, theming, and rendering pipelines. Start with <a href="index.html">Styling &amp; Theming</a> for the concepts and the <a href="lab.html">Interactive Styling Lab</a> for live examples; come here when the result is not what you expected.</p>
+<p>Eight non-obvious styling interactions in <code>nano-ui</code>’s layout, theming, and rendering pipelines. Start with <a href="index.html">Styling &amp; Theming</a> for the concepts and the <a href="lab.html">Interactive Styling Lab</a> for live examples; come here when the result is not what you expected.</p>
 <p>Each interaction includes an explanation of <strong>why it happens</strong>, the <strong>recommended fix</strong>, code comparisons, and headless SVG specimens showing the trap and the fix.</p>
 <hr>
-<h2 id="1-buttonwith-drops-font-flags"><a class="header" href="#1-buttonwith-drops-font-flags">1. <code>buttonWith</code> Drops Font Flags</a></h2>
-<p><code>buttonWith</code> drops font flags like <code>fontBold</code>, <code>fontItalic</code>, <code>fontUnderline</code>, and <code>fontTone</code>.</p>
+<h2 id="1-checkbox--radio-span-three-surfaces"><a class="header" href="#1-checkbox--radio-span-three-surfaces">1. <code>checkbox</code> &amp; <code>radio</code> Span Three Surfaces</a></h2>
+<p>Checkboxes and radio buttons route their indicator, box well, and text label through different surface records.</p>
 <p><nano-ui-trap id="trap-01"></nano-ui-trap></p>
 <hr>
-<h2 id="2-heading-and-fontheading-differ"><a class="header" href="#2-heading-and-fontheading-differ">2. <code>heading</code> and <code>fontHeading</code> Differ</a></h2>
-<p><code>heading</code> and <code>fontHeading</code> produce different sizes and margins.</p>
+<h2 id="2-select-and-combobox-use-different-surfaces"><a class="header" href="#2-select-and-combobox-use-different-surfaces">2. <code>select</code> and <code>comboBox</code> Use Different Surfaces</a></h2>
+<p><code>select</code> trigger buttons read <code>themeButton</code>, while <code>comboBox</code> fields read <code>themeInput</code>.</p>
 <p><nano-ui-trap id="trap-02"></nano-ui-trap></p>
 <hr>
-<h2 id="3-checkbox--radio-span-three-surfaces"><a class="header" href="#3-checkbox--radio-span-three-surfaces">3. <code>checkbox</code> &amp; <code>radio</code> Span Three Surfaces</a></h2>
-<p>Checkboxes and radio buttons route their indicator, box well, and text label through different surface records.</p>
+<h2 id="3-scrollwith-changes-surface-with-its-sizing"><a class="header" href="#3-scrollwith-changes-surface-with-its-sizing">3. <code>scrollWith</code> Changes Surface With Its Sizing</a></h2>
+<p>Sizing modifiers on <code>scrollWith</code> change whether the scroll well is drawn: a <code>grow</code> scroller drops it and fills the page background instead.</p>
 <p><nano-ui-trap id="trap-03"></nano-ui-trap></p>
 <hr>
-<h2 id="4-select-and-combobox-use-different-surfaces"><a class="header" href="#4-select-and-combobox-use-different-surfaces">4. <code>select</code> and <code>comboBox</code> Use Different Surfaces</a></h2>
-<p><code>select</code> trigger buttons read <code>themeButton</code>, while <code>comboBox</code> fields read <code>themeInput</code>.</p>
+<h2 id="4-callout-tints-nested-panels"><a class="header" href="#4-callout-tints-nested-panels">4. <code>callout</code> Tints Nested Panels</a></h2>
+<p><code>callout</code> applies <code>panelStyle</code> overrides that cascade down to any nested panels.</p>
 <p><nano-ui-trap id="trap-04"></nano-ui-trap></p>
 <hr>
-<h2 id="5-scrollwith-changes-surface-with-its-sizing"><a class="header" href="#5-scrollwith-changes-surface-with-its-sizing">5. <code>scrollWith</code> Changes Surface With Its Sizing</a></h2>
-<p>Sizing modifiers on <code>scrollWith</code> change whether the scroll well is drawn: a <code>grow</code> scroller drops it and fills the page background instead.</p>
+<h2 id="5-togglebutton-ignores-buttonstyle-when-on"><a class="header" href="#5-togglebutton-ignores-buttonstyle-when-on">5. <code>toggleButton</code> Ignores <code>buttonStyle</code> When On</a></h2>
+<p>When active, <code>toggleButton</code> overrides <code>themeButton</code> background with <code>themeAccent</code>.</p>
 <p><nano-ui-trap id="trap-05"></nano-ui-trap></p>
 <hr>
-<h2 id="6-callout-tints-nested-panels"><a class="header" href="#6-callout-tints-nested-panels">6. <code>callout</code> Tints Nested Panels</a></h2>
-<p><code>callout</code> applies <code>panelStyle</code> overrides that cascade down to any nested panels.</p>
+<h2 id="6-borderwidth-does-not-add-layout-space"><a class="header" href="#6-borderwidth-does-not-add-layout-space">6. <code>borderWidth</code> Does Not Add Layout Space</a></h2>
+<p>Borders in <code>nano-ui</code> are drawn inset and do not expand widget layout bounds.</p>
 <p><nano-ui-trap id="trap-06"></nano-ui-trap></p>
 <hr>
-<h2 id="7-togglebutton-ignores-buttonstyle-when-on"><a class="header" href="#7-togglebutton-ignores-buttonstyle-when-on">7. <code>toggleButton</code> Ignores <code>buttonStyle</code> When On</a></h2>
-<p>When active, <code>toggleButton</code> overrides <code>themeButton</code> background with <code>themeAccent</code>.</p>
+<h2 id="7-modifier-order-in--and-styled"><a class="header" href="#7-modifier-order-in--and-styled">7. Modifier Order in <code>(.)</code> and <code>styled</code></a></h2>
+<p>Leftmost-wins layout composition vs nested <code>styled</code> lexical scoping.</p>
 <p><nano-ui-trap id="trap-07"></nano-ui-trap></p>
 <hr>
-<h2 id="8-background-resets-on-focus"><a class="header" href="#8-background-resets-on-focus">8. <code>background</code> Resets on Focus</a></h2>
-<p>Setting background color directly on an input can be masked when the widget gains focus.</p>
-<p><nano-ui-trap id="trap-08"></nano-ui-trap></p>
-<hr>
-<h2 id="9-borderwidth-does-not-add-layout-space"><a class="header" href="#9-borderwidth-does-not-add-layout-space">9. <code>borderWidth</code> Does Not Add Layout Space</a></h2>
-<p>Borders in <code>nano-ui</code> are drawn inset and do not expand widget layout bounds.</p>
-<p><nano-ui-trap id="trap-09"></nano-ui-trap></p>
-<hr>
-<h2 id="10-modifier-order-in--and-styled"><a class="header" href="#10-modifier-order-in--and-styled">10. Modifier Order in <code>(.)</code> and <code>styled</code></a></h2>
-<p>Leftmost-wins layout composition vs nested <code>styled</code> lexical scoping.</p>
-<p><nano-ui-trap id="trap-10"></nano-ui-trap></p>
-<hr>
-<h2 id="11-tabs-read-themepanel-not-themebutton"><a class="header" href="#11-tabs-read-themepanel-not-themebutton">11. <code>tabs</code> Read <code>themePanel</code>, Not <code>themeButton</code></a></h2>
+<h2 id="8-tabs-read-themepanel-not-themebutton"><a class="header" href="#8-tabs-read-themepanel-not-themebutton">8. <code>tabs</code> Read <code>themePanel</code>, Not <code>themeButton</code></a></h2>
 <p>Tab headers read their styling from <code>themePanel</code>, not <code>themeButton</code>.</p>
-<p><nano-ui-trap id="trap-11"></nano-ui-trap></p>
-<hr>
-<h2 id="12-frametosvg-geometry--fontmetrics-quirks"><a class="header" href="#12-frametosvg-geometry--fontmetrics-quirks">12. <code>frameToSvg</code> Geometry &amp; FontMetrics Quirks</a></h2>
-<p>Headless SVG rendering considerations for text bounds and square geometry.</p>
-<p><nano-ui-trap id="trap-12"></nano-ui-trap></p>
+<p><nano-ui-trap id="trap-08"></nano-ui-trap></p>
 
                     </main>
 
@@ -281,7 +265,7 @@
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-93c119de.js"></script>
+        <script src="../theme/nano-ui-banks-0969b910.js"></script>
         <script src="../theme/nano-ui-components-b3281698.js"></script>
 
 
