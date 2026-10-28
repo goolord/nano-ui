@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Messages, Reducers &amp; Components - nano-ui Documentation</title>
+        <title>Elm-Style Views - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-43412013.js";
+            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-78fae1ba.js"></script>
+        <script src="../toc-27a189cc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,131 +178,89 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="messages-reducers--components"><a class="header" href="#messages-reducers--components">Messages, Reducers &amp; Components</a></h1>
-<p><code>NanoUIE msg a</code> is a view that can emit only <code>msg</code>. This chapter covers the adapters, component composition, the runners, and the rules that keep message flow predictable.</p>
-<pre><code class="language-haskell">import NanoUI
-import NanoUI.Emit qualified as Emit
-</code></pre>
-<h2 id="the-view"><a class="header" href="#the-view">The view</a></h2>
-<p>A <code>NanoUIE msg ()</code> view uses the same <code>do</code> notation as <code>NanoUI</code>. Widgets that are not adapted are lifted:</p>
-<pre><code class="language-haskell">settingsView :: Model -&gt; Emit.NanoUIE Msg ()
-settingsView model = Emit.withNanoUI column $ do
-  Emit.liftNanoUI (heading "Application Settings")
+                        <h1 id="elm-style-views"><a class="header" href="#elm-style-views">Elm-Style Views</a></h1>
+<p><code>nano-ui-emit</code> is the reducer-based alternative to the <code>Var</code> pages before it: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model. The shape will be familiar if you have used Elm, Redux, or <code>brick</code>’s state machines. Everything else about nano-ui — widgets, layout, focus, and keys — is unchanged.</p>
+<pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
+data Msg = Increment | Decrement | SetName Text
 
-  -- Emit on activation.
-  Emit.emitWhen (button "Save") SaveDocument
-
-  -- Run the widget against the model value; emit only on change.
-  Emit.emitChanged (slider 0 100) model.volume SetVolume
-
+view :: Model -&gt; Emit.NanoUIE Msg ()
+view m = Emit.withNanoUI column $ do
+  Emit.liftNanoUI (heading "Profile")
   Emit.withNanoUI row $ do
     Emit.emitWhen (button "-") Decrement
-    Emit.liftNanoUI (label (T.pack (show model.counter)))
+    Emit.liftNanoUI (label (T.pack (show m.counter)))
     Emit.emitWhen (button "+") Increment
-</code></pre>
-<p><code>withNanoUI</code> is <code>mapReaderT</code>: it applies an ordinary layout or scope function to the typed body. It does not change which messages are emitted; it changes where the widgets are laid out. <code>liftNanoUI</code> is the identity adapter for an ordinary <code>NanoUI</code> action.</p>
-<p><code>withRunInNanoUIE</code> is for ordinary widgets that take callbacks or multiple bodies, such as a custom container that runs a child action twice:</p>
-<pre><code class="language-haskell">view model = Emit.withRunInNanoUIE $ \run -&gt; column $ do
-  label "Settings"
-  run (Emit.emitChanged (slider 0 100) model.volume SetVolume)
-  run (Emit.emitWhen (button "Save") SaveDocument)
-</code></pre>
-<p>Call the supplied <code>run</code> function only inside the enclosing UI action.</p>
-<h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Function</th><th>Emits when</th></tr>
-</thead>
-<tbody>
-<tr><td><code>emit msg</code></td><td>Immediately.</td></tr>
-<tr><td><code>emitWhen widget msg</code></td><td>The widget returns <code>True</code> (a button click, a submitted field).</td></tr>
-<tr><td><code>emitChanged widget old toMsg</code></td><td>The widget’s final value differs from <code>old</code>.</td></tr>
-<tr><td><code>emitEdited widget old toMsg</code></td><td>The widget’s value changed <strong>and</strong> its <code>Response</code> reports <code>respChanged</code>.</td></tr>
-</tbody>
-</table>
-</div>
-<p><code>emitChanged</code> is built on <code>withValue</code>: the widget edits a temporary <code>Var</code> seeded with the model value, and the temporary’s final value is compared to the old one. This is why it works with any <code>Var</code> widget, and why mutations to the temporary do not trigger a second pass or a repaint.</p>
-<p><code>emitEdited</code> is the right choice for text fields when programmatic model updates should not look like user edits. <code>emitChanged</code> is usually right for sliders and checkboxes.</p>
-<blockquote class="blockquote-tag blockquote-tag-caution">
-<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
-<p>Only emit inside an event branch. <code>emit SaveDocument</code> at the top level of a view emits on every pass, and the reducer runs every emitted message. The adapters above already guard on the widget’s event.</p>
-</blockquote>
-<p>Messages are queued for the whole frame, including local-<code>Var</code> rebuilds. The queue is drained at frame end, so the order is emission order — top-to-bottom through the view, and left-to-right among siblings.</p>
-<h2 id="components"><a class="header" href="#components">Components</a></h2>
-<p><code>mapMessages</code> embeds a child view whose message type is smaller than the parent’s:</p>
-<pre><code class="language-haskell">data ChildMsg = ChildIncrement | ChildReset
-data ParentMsg = Child ChildMsg | SaveAll
+  Emit.emitChanged textInput m.name SetName
 
-childView :: Int -&gt; Emit.NanoUIE ChildMsg ()
-childView n = Emit.withNanoUI row $ do
-  Emit.emitWhen (button "+") ChildIncrement
-  Emit.liftNanoUI (label (T.pack (show n)))
-  Emit.emitWhen (button "Reset") ChildReset
+update :: Msg -&gt; Model -&gt; Model
+update Increment m = m {counter = m.counter + 1}
+update Decrement m = m {counter = m.counter - 1}
+update (SetName n) m = m {name = n}
 
-parentView :: Int -&gt; Emit.NanoUIE ParentMsg ()
-parentView n = Emit.withNanoUI column $ do
-  Emit.mapMessages Child (childView n)
-  Emit.emitWhen (button "Save All") SaveAll
-</code></pre>
-<p>The child’s messages go straight to the parent’s sink, in traversal order, with no intermediate queue and no allocation of a wrapper per message. The parent’s <code>update</code> handles <code>Child ChildIncrement</code> and <code>SaveAll</code> together.</p>
-<p>A component’s <em>widget</em> state is still ordinary nano-ui state. If the child is a list item, key it with <code>withKey</code> inside the child or around the <code>mapMessages</code> call. <code>mapMessages</code> changes the message type, not widget identity.</p>
-<p>For components that need their own durable state, pass a <code>Var</code> for the local part and a model slice for the rendered part:</p>
-<pre><code class="language-haskell">searchView :: Var Text -&gt; [Text] -&gt; Emit.NanoUIE Msg ()
-searchView query results = do
-  Emit.liftNanoUI (searchInput query)
-  -- Read the query after the field that edits it.
-  Emit.liftNanoUI $ do
-    q &lt;- readVar query
-    when (not (T.null q) &amp;&amp; null results) (muted "No matches")
-</code></pre>
-<h2 id="running"><a class="header" href="#running">Running</a></h2>
-<p>The backend runners take an update function, an initial model, and a view of the model:</p>
-<pre><code class="language-haskell">main :: IO ()
+main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </code></pre>
-<p><code>runSdlAppReduce</code> is in <code>NanoUI.Backend.Sdl</code>; <code>runRgfwAppReduce</code> is the RGFW equivalent. Both fold messages through <code>update</code> in emission order at the end of each frame.</p>
-<p>For tests and embedded uses:</p>
+<h2 id="what-the-types-say"><a class="header" href="#what-the-types-say">What the types say</a></h2>
+<p><code>NanoUIE msg a</code> is a <code>NanoUI</code> action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting a message of the wrong type is a compile error.</p>
+<ul>
+<li><strong><code>liftNanoUI</code></strong> runs an ordinary widget or UI operation in an emitting view.</li>
+<li><strong><code>withNanoUI</code></strong> wraps a typed body in an ordinary layout, key, or scope: <code>withNanoUI column</code>, <code>withNanoUI row</code>, <code>withNanoUI (withKey todoId)</code>, <code>withNanoUI (disabledWhen True)</code>.</li>
+<li><strong><code>emit</code></strong> emits a message directly.</li>
+<li><strong><code>emitWhen</code></strong> emits when an ordinary widget activates: <code>emitWhen (button "Save") Save</code>.</li>
+<li><strong><code>emitChanged</code></strong> runs a <code>Var</code> widget against the current model value and emits only if the value changed.</li>
+<li><strong><code>emitEdited</code></strong> additionally requires the widget’s <code>respChanged</code>, filtering out programmatic value updates.</li>
+<li><strong><code>mapMessages</code></strong> lifts a child component’s message type into its parent’s.</li>
+</ul>
+<p>The <code>Var</code> widgets are still the widgets. <code>emitChanged (slider 0 100) volume SetVolume</code> is the <code>slider</code> bound to a temporary <code>Var</code>; the model is the source of truth, and the emitted message carries the new value back.</p>
+<h2 id="the-frame-under-a-reducer"><a class="header" href="#the-frame-under-a-reducer">The frame under a reducer</a></h2>
+<p>With <code>runSdlAppReduce</code>:</p>
+<ol>
+<li>The view runs with the current model and emits messages as widgets report events.</li>
+<li>At the end of the frame, the messages are folded through <code>update</code> in emission order.</li>
+<li>The drawing shown for that frame is from the model <strong>before</strong> reduction.</li>
+<li>If the reduced model differs from the old one, another frame is requested to draw the new state.</li>
+</ol>
+<p>That last point surprises people: a click that changes the model still costs a follow-up frame. The alternative — reducing mid-frame — would make the view read a model that changed halfway through the pass, which is worse. Keep the model update cheap and the follow-up frame is not noticeable.</p>
+<p>Messages from every pass of a frame are collected in order, including passes caused by a local <code>Var</code> rebuild. Each runner invocation owns its queue, so an exception cannot leave messages for a later frame.</p>
+<h2 id="when-to-use-it"><a class="header" href="#when-to-use-it">When to use it</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Function</th><th>Returns</th></tr>
+<tr><th></th><th><code>Var</code>-first</th><th>Elm-style</th></tr>
 </thead>
 <tbody>
-<tr><td><code>runNanoUIE view</code></td><td><code>NanoUI (result, [msg])</code> — collects one action’s messages</td></tr>
-<tr><td><code>runFrameE ctx input view</code></td><td><code>IO (result, [msg], DrawData, Bool)</code></td></tr>
-<tr><td><code>runFrameReduce update ctx input model view</code></td><td><code>IO (result, model, [msg], DrawData, Bool)</code></td></tr>
-<tr><td><code>runClickReduce update ctx input model view pos</code></td><td><code>IO (model, [msg], Bool)</code> — a press/release pair</td></tr>
-<tr><td><code>reduceMessages update model msgs</code></td><td>The folded model</td></tr>
-<tr><td><code>reduceUpdates model fns</code></td><td>The folded model for function-valued messages</td></tr>
+<tr><td>State shape</td><td>Distributed through the view and app record</td><td>One model value</td></tr>
+<tr><td>Transitions</td><td>Direct mutation</td><td>Explicit <code>Msg</code> constructors and one <code>update</code></td></tr>
+<tr><td>Testing</td><td>Widget-level with <code>NanoUI.Testing</code></td><td>Pure <code>update</code> tests plus frame tests</td></tr>
+<tr><td>Local widget state</td><td>Natural</td><td>Still use <code>Var</code> for drafts and open flags</td></tr>
+<tr><td>Large application</td><td>Scales by modules and app records</td><td>Scales by components and <code>mapMessages</code></td></tr>
+<tr><td>Best for</td><td>Tools and editors with external state</td><td>State machines, wizards, undo/history, small apps with a clear model</td></tr>
 </tbody>
 </table>
 </div>
-<p><code>runFrameReduce</code> requests a follow-up frame when the reduced model differs. The <code>Bool</code> in the tuple reports whether one was requested; the drawing in the same tuple is from before the reduction.</p>
-<p>A <code>Var</code>-based view can run a small emitting component and act on its messages immediately:</p>
-<pre><code class="language-haskell">(result, msgs) &lt;- runNanoUIE (toolbarView model)
-for_ msgs handleToolbarMessage
-</code></pre>
-<h2 id="rules-and-pitfalls"><a class="header" href="#rules-and-pitfalls">Rules and pitfalls</a></h2>
+<p>The two styles are not exclusive. An emitting view can allocate and read <code>Var</code>s for transient UI state (a draft, an open dropdown), while the durable model stays in <code>NanoUIE</code>. A <code>Var</code>-based view can call <code>runNanoUIE</code> on a small emitting component and act on the returned messages.</p>
+<p>If you want the direct-mutation style, read <a href="introduction.html">Introduction to State</a> and <a href="var.html"><code>Var</code> in Depth</a>. If you want the reducer style, continue with <a href="elm-messages.html">Messages, Reducers &amp; Components</a>.</p>
+<h2 id="trade-offs-in-practice"><a class="header" href="#trade-offs-in-practice">Trade-offs in practice</a></h2>
 <ul>
-<li><strong>Keep <code>update</code> pure.</strong> File reads, process launches, and logging belong in the view’s event branch, or in an effect queue the application interprets outside the reducer.</li>
-<li><strong>Model changes draw on the next frame.</strong> That is intentional; do not compensate by writing the model into a <code>Var</code> mid-frame.</li>
-<li><strong>Do not duplicate model state in <code>Var</code>s.</strong> Local UI state (draft text, open menus) is fine; durable state should have one home.</li>
-<li><strong>Unconditional emissions run on every pass.</strong> Guard them with <code>emitWhen</code>, <code>emitChanged</code>, or an explicit event.</li>
-<li><strong>The keyboard and focus rules are unchanged.</strong> Shortcuts are read in the view (or adapter); focus queries still belong at the end of the view.</li>
-<li><strong>Component keys are required for lists.</strong> Two instances of the same component in a reorderable list need distinct <code>withKey</code> keys, exactly as two <code>Var</code>-based rows do.</li>
+<li><strong>A reducer is easier to unit test.</strong> <code>update</code> is a pure function; no context, no frame, no widgets.</li>
+<li><strong>A reducer centralizes transitions.</strong> Every way the model changes is a <code>Msg</code> constructor you can grep for. That is valuable when the state machine is the hard part.</li>
+<li><strong>Direct <code>Var</code> mutation is less ceremony for local state.</strong> A text field’s draft does not need a message type and an <code>update</code> branch.</li>
+<li><strong>Side effects stay in the view or outside the reducer.</strong> <code>update</code> is pure. A save button can emit <code>Save</code> <em>and</em> perform the write in the view on the same event, or the model can hold a queue of effects that an interpreter drains. Keep file and network I/O out of <code>update</code>.</li>
 </ul>
-<p>See <a href="overview.html">Elm-Style Views</a> for when this style is the right choice, and <a href="../architecture/frame-model.html">The Frame Model</a> for what a follow-up frame costs.</p>
+<blockquote class="blockquote-tag blockquote-tag-tip">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
+<p>The reducer runners are <code>runSdlAppReduce</code> and <code>runRgfwAppReduce</code>; the SDL one is in <code>NanoUI.Backend.Sdl</code> and the RGFW one in <code>NanoUI.Backend.Rgfw</code>. For headless tests, use <code>runFrameE</code>, <code>runFrameReduce</code>, and <code>runClickReduce</code> from <code>NanoUI.Emit</code>.</p>
+</blockquote>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../elm/overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../state/identity.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../input/shortcuts.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../state/elm-messages.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -312,11 +270,11 @@ for_ msgs handleToolbarMessage
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../elm/overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../state/identity.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../input/shortcuts.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../state/elm-messages.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-43412013.js";
+            window.path_to_searchindex_js = "../searchindex-d5549fbc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-78fae1ba.js"></script>
+        <script src="../toc-27a189cc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -180,7 +180,7 @@
                     <main>
                         <h1 id="introduction-to-state"><a class="header" href="#introduction-to-state">Introduction to State</a></h1>
 <p>The view runs every frame. Nothing is retained between frames except the state you keep explicitly, so the first design question in a nano-ui application is not “which widget?” but “where does this value live?”</p>
-<p>This chapter is the map. It covers the three ways to keep state and the frame-model facts that make them behave the way they do. The details are in <a href="var.html"><code>Var</code> in Depth</a>, <a href="identity.html">Widget Identity &amp; Keys</a>, and <a href="../elm/overview.html">Elm-Style Views</a>.</p>
+<p>This chapter is the map. It covers the three ways to keep state and the frame-model facts that make them behave the way they do. The direct-mutation details are in <a href="var.html"><code>Var</code> in Depth</a> and <a href="identity.html">Widget Identity &amp; Keys</a>; the typed-message alternative is in <a href="elm-overview.html">Elm-Style Views</a>.</p>
 <h2 id="state-you-keep-state-you-derive"><a class="header" href="#state-you-keep-state-you-derive">State you keep, state you derive</a></h2>
 <p>A value that changes over time and cannot be recomputed from something else belongs in a <code>Var</code>. A value that <em>can</em> be recomputed belongs in a local binding, computed fresh every frame:</p>
 <pre><code class="language-haskell">appView :: App -&gt; NanoUI ()
@@ -296,7 +296,7 @@ main = do
 <tr><td>Belongs to one row of a dynamic list</td><td>A <code>Var</code> addressed by a stable key (<code>withElemVars</code>, <code>VarMap</code>)</td></tr>
 <tr><td>Must survive reordering or filtering</td><td>A keyed <code>Var</code>, plus <code>withKey</code> for widget state</td></tr>
 <tr><td>Already lives outside the UI (a database handle, a worker’s state)</td><td>Keep it in <code>IORef</code> or a record, wake the UI with <code>askWake</code></td></tr>
-<tr><td>Is a pure state machine with a clear <code>msg -&gt; model -&gt; model</code></td><td>The Elm-style reducer in <code>nano-ui-emit</code></td></tr>
+<tr><td>Is a pure state machine with a clear <code>msg -&gt; model -&gt; model</code></td><td>The <a href="elm-overview.html">Elm-style reducer</a> in <code>nano-ui-emit</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -314,7 +314,7 @@ main = do
 <ul>
 <li><a href="var.html"><code>Var</code> in Depth</a> — projections, <code>VarMap</code>, <code>constVar</code>, thread-safe reads and writes.</li>
 <li><a href="identity.html">Widget Identity &amp; Keys</a> — why call order matters and how to keep state attached to the right row.</li>
-<li><a href="../elm/overview.html">Elm-Style Views</a> — a pure model and reducer instead of direct mutation.</li>
+<li><a href="elm-overview.html">Elm-Style Views</a> — a pure model and reducer instead of direct mutation.</li>
 </ul>
 
                     </main>

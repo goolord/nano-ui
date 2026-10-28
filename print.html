@@ -37,10 +37,10 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-43412013.js";
+            window.path_to_searchindex_js = "searchindex-d5549fbc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-78fae1ba.js"></script>
+        <script src="toc-27a189cc.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -194,8 +194,7 @@ counter = row $ do
 <ol>
 <li><strong><a href="#quick-start">Quick Start</a></strong> installs the toolchain and gets a window on screen.</li>
 <li><strong><a href="#tutorials">Tutorials</a></strong> build three small applications end to end: a todo list, a notepad, and a live data view.</li>
-<li><strong><a href="#introduction-to-state">State</a></strong> explains where state lives, what a <code>Var</code> is, and what writes cost.</li>
-<li><strong><a href="#elm-style-views">The Elm Architecture</a></strong> covers the alternative typed-message style in <code>nano-ui-emit</code>.</li>
+<li><strong><a href="#introduction-to-state">State</a></strong> explains where state lives, what a <code>Var</code> is, what writes cost, and the typed-message <a href="#elm-style-views">Elm-style alternative</a>.</li>
 <li><strong><a href="#keyboard-shortcuts">Keyboard &amp; Focus</a></strong> covers chords, focus, and IME.</li>
 <li><strong><a href="#containers">Layout</a></strong> and the <strong><a href="#widget-gallery">Widget Gallery</a></strong> are the API tour.</li>
 <li><strong><a href="#theming--surface-architecture">Styling</a></strong> and the <strong><a href="#asynchronous-work--streams">Advanced Guides</a></strong> go deeper.</li>
@@ -212,7 +211,7 @@ counter = row $ do
 <tr><td><code>packages/nano-ui</code></td><td>Core toolkit: widgets, layout, input, theming, draw list, text arena.</td><td><a href="#introduction-to-state">State</a>, <a href="#containers">Layout</a>, <a href="#widget-gallery">Widget Gallery</a></td></tr>
 <tr><td><code>packages/nano-ui-sdl</code></td><td>SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars.</td><td><a href="#nano-ui-sdl-sdl3-backend">SDL3 Backend</a></td></tr>
 <tr><td><code>packages/nano-ui-rgfw</code></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies.</td><td><a href="#nano-ui-rgfw-rgfw-backend">RGFW Backend</a></td></tr>
-<tr><td><code>packages/nano-ui-emit</code></td><td>Elm-style typed messages and update reducers (<code>NanoUIE msg a</code>).</td><td><a href="#elm-style-views">Elm Architecture</a></td></tr>
+<tr><td><code>packages/nano-ui-emit</code></td><td>Elm-style typed messages and update reducers (<code>NanoUIE msg a</code>).</td><td><a href="#elm-style-views">Elm-Style Views</a></td></tr>
 <tr><td><code>packages/nano-ui-diagrams</code></td><td>Line, bar, scatter, and area charts (<code>NanoUI.Plot</code>) with diagrams-lib integration.</td><td><a href="#charts--diagrams-nano-ui-diagrams">Charts &amp; Diagrams</a></td></tr>
 <tr><td><code>packages/nano-ui-form</code></td><td>Validated applicative forms built on ditto.</td><td><a href="#validated-forms-nano-ui-form">Validated Forms</a></td></tr>
 <tr><td><code>packages/nano-ui-markdown</code></td><td>Markdown rendering, incrementally appendable for streamed replies.</td><td><a href="#markdown-rendering-nano-ui-markdown">Markdown Rendering</a></td></tr>
@@ -967,7 +966,7 @@ walkChart points =
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="introduction-to-state"><a class="header" href="#introduction-to-state">Introduction to State</a></h1>
 <p>The view runs every frame. Nothing is retained between frames except the state you keep explicitly, so the first design question in a nano-ui application is not “which widget?” but “where does this value live?”</p>
-<p>This chapter is the map. It covers the three ways to keep state and the frame-model facts that make them behave the way they do. The details are in <a href="#var-in-depth"><code>Var</code> in Depth</a>, <a href="#widget-identity--keys">Widget Identity &amp; Keys</a>, and <a href="#elm-style-views">Elm-Style Views</a>.</p>
+<p>This chapter is the map. It covers the three ways to keep state and the frame-model facts that make them behave the way they do. The direct-mutation details are in <a href="#var-in-depth"><code>Var</code> in Depth</a> and <a href="#widget-identity--keys">Widget Identity &amp; Keys</a>; the typed-message alternative is in <a href="#elm-style-views">Elm-Style Views</a>.</p>
 <h2 id="state-you-keep-state-you-derive"><a class="header" href="#state-you-keep-state-you-derive">State you keep, state you derive</a></h2>
 <p>A value that changes over time and cannot be recomputed from something else belongs in a <code>Var</code>. A value that <em>can</em> be recomputed belongs in a local binding, computed fresh every frame:</p>
 <pre><code class="language-haskell">appView :: App -&gt; NanoUI ()
@@ -1083,7 +1082,7 @@ main = do
 <tr><td>Belongs to one row of a dynamic list</td><td>A <code>Var</code> addressed by a stable key (<code>withElemVars</code>, <code>VarMap</code>)</td></tr>
 <tr><td>Must survive reordering or filtering</td><td>A keyed <code>Var</code>, plus <code>withKey</code> for widget state</td></tr>
 <tr><td>Already lives outside the UI (a database handle, a worker’s state)</td><td>Keep it in <code>IORef</code> or a record, wake the UI with <code>askWake</code></td></tr>
-<tr><td>Is a pure state machine with a clear <code>msg -&gt; model -&gt; model</code></td><td>The Elm-style reducer in <code>nano-ui-emit</code></td></tr>
+<tr><td>Is a pure state machine with a clear <code>msg -&gt; model -&gt; model</code></td><td>The <a href="#elm-style-views">Elm-style reducer</a> in <code>nano-ui-emit</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -1307,7 +1306,7 @@ modal confirm "Delete the file?" $
 <p>For the <code>Var</code> side of this — allocation, projections, and write costs — read <a href="#var-in-depth"><code>Var</code> in Depth</a>. For the lifecycle that makes ids reset, read <a href="#the-frame-model">The Frame Model</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="elm-style-views"><a class="header" href="#elm-style-views">Elm-Style Views</a></h1>
-<p><code>nano-ui-emit</code> adds a second way to write a view: instead of mutating <code>Var</code>s directly, the view emits typed messages, and a pure reducer folds them into a model. The shape will be familiar if you have used Elm, Redux, or <code>brick</code>’s state machines.</p>
+<p><code>nano-ui-emit</code> is the reducer-based alternative to the <code>Var</code> pages before it: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model. The shape will be familiar if you have used Elm, Redux, or <code>brick</code>’s state machines. Everything else about nano-ui — widgets, layout, focus, and keys — is unchanged.</p>
 <pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
 data Msg = Increment | Decrement | SetName Text
 
@@ -1367,7 +1366,7 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </table>
 </div>
 <p>The two styles are not exclusive. An emitting view can allocate and read <code>Var</code>s for transient UI state (a draft, an open dropdown), while the durable model stays in <code>NanoUIE</code>. A <code>Var</code>-based view can call <code>runNanoUIE</code> on a small emitting component and act on the returned messages.</p>
-<p>If you want the <code>Var</code> style, read <a href="#introduction-to-state">Introduction to State</a>. If you want the reducer style, continue with <a href="#messages-reducers--components">Messages, Reducers &amp; Components</a>.</p>
+<p>If you want the direct-mutation style, read <a href="#introduction-to-state">Introduction to State</a> and <a href="#var-in-depth"><code>Var</code> in Depth</a>. If you want the reducer style, continue with <a href="#messages-reducers--components">Messages, Reducers &amp; Components</a>.</p>
 <h2 id="trade-offs-in-practice"><a class="header" href="#trade-offs-in-practice">Trade-offs in practice</a></h2>
 <ul>
 <li><strong>A reducer is easier to unit test.</strong> <code>update</code> is a pure function; no context, no frame, no widgets.</li>
