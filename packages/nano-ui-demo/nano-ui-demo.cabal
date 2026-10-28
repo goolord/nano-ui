@@ -268,6 +268,14 @@ executable nano-ui-example-live-chart
         nano-ui-diagrams ^>=0.2,
         text ^>=2.1
 
+executable nano-ui-example-elm
+    import:           sdl-exe
+    main-is:          Elm.hs
+    build-depends:
+        nano-ui-emit ^>=0.1,
+        nano-ui-sdl ^>=0.2,
+        text ^>=2.1
+
 -- Drives the demo, notepad, and log viewer in hidden windows.
 test-suite nano-ui-demo-test
     import:           sdl-app
