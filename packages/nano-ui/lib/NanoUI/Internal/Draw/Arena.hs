@@ -14,6 +14,7 @@ module NanoUI.Internal.Draw.Arena
   , setDrawClear
   , getDrawClear
   , setDrawRecordOps
+  , getDrawRecordOps
   , recordOp
   , recordedOps
   , beginLayer
@@ -179,6 +180,11 @@ getDrawClear da = readIORef (daClear da)
 {-# INLINE setDrawRecordOps #-}
 setDrawRecordOps :: DrawArena -> Bool -> IO ()
 setDrawRecordOps da = writeIORef (daRecordOps da)
+
+-- | Whether 'setDrawRecordOps' is on.
+{-# INLINE getDrawRecordOps #-}
+getDrawRecordOps :: DrawArena -> IO Bool
+getDrawRecordOps da = readIORef (daRecordOps da)
 
 -- | Record @op@ under the current layer and clip while recording is on.
 {-# INLINE recordOp #-}

@@ -112,12 +112,12 @@ data TextMeasurer = TextMeasurer
   }
 
 -- | How node @idx@, of type @nt@ and style index @nodeSi@, measures its
--- text: a text node or text field in its own font, and any other widget's
--- label in its font size in the default face, as
+-- text: in the font its style packs ('nodeFontBits'), else in its font size
+-- in the default face, as
 -- 'NanoUI.Internal.Frame.Node.resolveFontFor' draws them.
 nodeMeasurer :: SolveEnv -> NodeIdx -> NodeType -> Int -> IO TextMeasurer
 nodeMeasurer SolveEnv {seArena = na, seMs = ms} idx nt nodeSi = do
-  let si = if packsNodeFont nt then nodeSi else 0
+  let si = nodeFontBits nt nodeSi
   size <- getNodeFontSize na idx
   let variant = textNodeFontVariant si
       weight = textNodeFontWeight si

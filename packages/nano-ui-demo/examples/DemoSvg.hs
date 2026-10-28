@@ -14,8 +14,7 @@ import Demo qualified
 import DemoApp (withHiddenWindow)
 import NanoUI (V2 (..))
 import NanoUI.Backend (damageFullNow, runFrame)
-import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
-import NanoUI.Internal.Context (setDrawExternalText, setDrawRecordOps, setDrawSquareGeometry)
+import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Testing (collectTextSpans)
 import NanoUI.Testing.Harness (clickPos, findExact, requireSpan)
 import System.Environment (getArgs)
@@ -43,11 +42,8 @@ main = do
 capture :: Demo.DemoState -> IO T.Text
 capture st =
   withHiddenWindow width height (V2 (-10) (-10)) id $ \ctx _env base -> do
-    -- Recorded shapes, flat and axis-aligned, and text as spans, as
-    -- 'frameToSvg' reads the frame.
-    setDrawRecordOps ctx True
-    setDrawSquareGeometry ctx True
-    setDrawExternalText ctx True
+    -- Recorded shapes and text as spans, as 'frameToSvg' reads the frame.
+    enableSvgExport ctx
     let
       ui = Demo.demoUi st
       draw inp = void (runFrame ctx inp ui)

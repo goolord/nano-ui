@@ -275,8 +275,9 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
       da = peDrawArena env
   mFontColor <- getNodeFontColor (peNodeArena env) idx
   fontSize <- getNodeFontSize (peNodeArena env) idx
-  (fm, _, _) <- resolveFontFor ctx nt fontSize si
-  let widgetFg = fromMaybe (styleFg style) mFontColor
+  (fm, native, _) <- resolveFontFor ctx nt fontSize si
+  let !font = nodeFontBits nt si
+      !widgetFg = labelColor (peTheme env) style font mFontColor
       sortMark = if nt == NodeButton && hasFlag buttonFlagTable si then tableSortMarkOf si else 0
   -- Table sort arrow: pinned inside the cell inset to the edge the label
   -- does not align to, the right edge for a left-aligned label and the left
@@ -288,10 +289,17 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
         | otherwise = x + w - tableCellInset - 5
       drawPlacement lastLine txt px py _ th =
         unless (T.null txt) $ do
-          pushText da fm px py txt widgetFg
+          if font == 0 then pushText da fm px py txt widgetFg else pushStyledLabel da fm native font px py txt widgetFg
           when (sortMark /= 0 && lastLine) $
             drawSortTriangle da sortArrowX (py + th / 2) (sortMark == 2) widgetFg
   forWidgetTextPlacements_ ctx nt idx x y w h drawPlacement
+
+-- | A label in the weight, slant and decoration of font bits @font@
+-- ('pushFieldText'). Out of line: inlined, it costs every plain label
+-- (measured: 260 bytes per label per frame).
+{-# NOINLINE pushStyledLabel #-}
+pushStyledLabel :: DrawArena -> FontMetrics -> Bool -> Int -> Float -> Float -> T.Text -> Color -> IO ()
+pushStyledLabel = pushFieldText
 
 -- | Sort direction triangle for a table header: up when ascending, down when
 -- descending, centered on the label line in the header's reserved slot.

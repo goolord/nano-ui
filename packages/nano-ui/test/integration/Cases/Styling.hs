@@ -4,6 +4,8 @@ import Spec
 import Control.Exception (ErrorCall, evaluate, try)
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Layout.Arena (getStyleIdx, lookupNodeByWidgetId, nodeFontBits)
+import Data.Bits ((.&.))
 import Data.Text (Text)
 import Data.Text qualified as T
 
@@ -18,6 +20,8 @@ tests =
   , spec "styled-keeps-text-caches" runStyledKeepsTextCachesTest
   , spec "font-size-label-fit" runFontSizeLabelFitTest
   , spec "border-left" runBorderLeftTest
+  , spec "background-moves-shades" runBackgroundMovesShadesTest
+  , spec "label-font-flags" runLabelFontFlagsTest
   , spec "byte-enums" runByteEnumsTest
   ]
 
@@ -208,3 +212,61 @@ runBorderLeftTest ctx failed = do
   quads <- drawQuads draw
   let Rect x y _ h = respRect inner
   assertEq failed [Rect x y 3 h] [q | (q, c) <- quads, c == col]
+
+-- | 'background' moves the hover and press shades with it: a focused field
+-- fills with the new colour's press shade, not the theme's. It once set the
+-- resting fill alone, so a field styled teal went back to the theme's dark
+-- well when clicked. Shades equal to the old fill (a panel's hover) stay
+-- equal to the new one.
+runBackgroundMovesShadesTest :: Context -> IORef Int -> IO ()
+runBackgroundMovesShadesTest ctx failed = do
+  base <- getTheme ctx
+  ref <- newVar ("text" :: Text)
+  let teal = colorRGBA 13 148 136 255
+      inp = withInputOff 300 200
+      field = background teal (themeInput base)
+      ui = styled (inputStyle (background teal)) $ column $ do
+        r <- textInput' ref
+        requestFocus (respId r)
+        pure r
+  _ <- warmupDraw ctx inp ui
+  (r, draw, _) <- runFrame ctx inp ui
+  quads <- drawQuads draw
+  assert failed (styleActiveBg field /= styleActiveBg (themeInput base))
+  assert failed (styleActiveBg field `elem` fillsIn (respRect r) quads)
+  let surface = themePanel base
+      tinted' = background teal surface
+  assertEq failed (styleHoverBg surface == styleBg surface) (styleHoverBg tinted' == teal)
+
+-- | A button's, select's and checkbox's label takes the font flags of its
+-- layout: weight, slant and tone. They once shared the style index with the
+-- widget's own data and were dropped. The flags leave that data alone: a
+-- bold checkbox keeps a plain one's low bits, which say it is a checkbox.
+runLabelFontFlagsTest :: Context -> IORef Int -> IO ()
+runLabelFontFlagsTest ctx failed = do
+  base <- getTheme ctx
+  sel <- newVar (0 :: Int)
+  on <- newVar False
+  let inp = withInputOff 500 300
+      flags = fontBold . fontItalic . fontDanger
+      ui = column $ do
+        b <- buttonWith' flags "Delete"
+        s <- currentId
+        selectWith flags ["Option"] sel
+        c <- currentId
+        checkboxWith flags "Bold box" on
+        p <- currentId
+        checkbox "Plain box" on
+        pure (respId b, s, c, p)
+  ((b, s, c, p), _) <- warmupDraw ctx inp ui
+  spans <- collectTextSpans ctx
+  let red = themeDanger base
+      fgOf t = [fg | (_, t', fg, _, _) <- spans, t' == t]
+  assertEq failed [red] (fgOf "Delete")
+  assertEq failed [red] (fgOf "Option")
+  assertEq failed [red] (fgOf "Bold box")
+  let styleOf wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= maybe (pure 0) (getStyleIdx (ctxNodeArena ctx))
+  [bs, ss, cs, ps] <- mapM styleOf [b, s, c, p]
+  assertEq failed [WeightBold, WeightBold, WeightBold] [textNodeFontWeight (nodeFontBits NodeButton bs), textNodeFontWeight (nodeFontBits NodeSelect ss), textNodeFontWeight (nodeFontBits NodeButton cs)]
+  assertEq failed FontStyleItalic (textNodeFontStyle (nodeFontBits NodeButton bs))
+  assertEq failed (ps .&. 0xFFFFFFFF) (cs .&. 0xFFFFFFFF)

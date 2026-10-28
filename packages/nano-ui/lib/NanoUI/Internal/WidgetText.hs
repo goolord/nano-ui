@@ -55,6 +55,8 @@ module NanoUI.Internal.WidgetText
   , textNodeTextDecoration
   , tableSortMarkOf
   , buttonVisualStyle
+  , labelFontStyle
+  , labelColor
   , buttonToneStyle
   , buttonToneOf
   , tabEncodeStyle
@@ -76,7 +78,8 @@ import Data.Word (Word8)
 import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, tableCellInset, widgetContentInset)
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), Theme (..), Tone (..), variantFace, variantTone)
+import NanoUI.Internal.Layout.Arena (labelFontShift)
+import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), Theme (..), Tone (..), toneColor, variantFace, variantTone)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
@@ -423,9 +426,25 @@ containerFlagClip = 2
 hasFlag :: Int -> Int -> Bool
 hasFlag flag si = si .&. flag /= 0
 
+-- | A button's own style bits: its low 32 without the type flags, leaving
+-- out the label font above them ('labelFontStyle').
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
-buttonVisualStyle si = si .&. complement buttonFlagMask
+buttonVisualStyle si = si .&. 0xFFFFFFFF .&. complement buttonFlagMask
+
+-- | The colour of a widget label in font bits @font@ ('nodeFontBits') on a
+-- surface of @style@: the layout's 'NanoUI.Internal.Style.fontColor', else
+-- its tone's, else the surface's text colour.
+{-# INLINE labelColor #-}
+labelColor :: Theme -> Style -> Int -> Maybe Color -> Color
+labelColor theme style font = fromMaybe (maybe (styleFg style) (toneColor theme) (textNodeFontTone font))
+
+-- | A button's or select's label font from its layout: the text-node packing
+-- ('packTextNodeStyle') moved up to 'labelFontShift', for 'nodeFontBits' to
+-- read back.
+{-# INLINE labelFontStyle #-}
+labelFontStyle :: Layout -> Int
+labelFontStyle l = packTextNodeStyle l 0 `shiftL` labelFontShift
 
 -- | A plain button's packed style carrying the 'Tone' it fills with while
 -- its value is on, in bits 20-22 (a toggle button's).

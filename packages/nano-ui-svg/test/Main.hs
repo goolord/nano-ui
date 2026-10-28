@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Control.Exception (IOException, try)
 import Control.Monad (unless)
 import Data.ByteString qualified as BS
 import Data.Primitive.PrimArray (primArrayFromList)
@@ -8,7 +9,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import NanoUI
 import NanoUI.Backend (monospaceMetrics)
-import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
+import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Draw.Svg
   ( SvgConfig (..)
   , defaultSvgConfig
@@ -37,7 +38,42 @@ main = do
   testDegenerateOps
   testRoundTripRaster
   testFrameToSvg
+  testSvgExportSetup
   putStrLn "nano-ui-svg tests passed."
+
+-- | 'enableSvgExport' is all the setup 'frameToSvg' needs, and without it
+-- the export fails rather than drop every shape. Ids take a prefix from the
+-- document, so two documents inlined in one page keep theirs apart, and a
+-- button's bold label exports bold.
+testSvgExportSetup :: IO ()
+testSvgExportSetup = do
+  let
+    inp = withInput 240 120
+    ui :: Int -> NanoUI ()
+    ui n = column $ do
+      _ <- buttonWith fontBold "Strong"
+      -- Text longer than its field overhangs the field's clip.
+      textInputConfigured defaultTextInputConfig {ticLayout = fixedW 80 defaultLayout} (constVar ("A value far too long for its field " <> T.pack (show n)))
+  bare <- newPixelContext
+  (_, bareDraw, _) <- run2Frames bare inp (ui 0)
+  refused <- try @IOException (frameToSvg defaultFrameSvgConfig bare inp bareDraw)
+  check "frameToSvg refuses a context that records no shapes" (either (const True) (const False) refused)
+  ctx <- newPixelContext
+  enableSvgExport ctx
+  (_, d1, _) <- run2Frames ctx inp (ui 0)
+  svg1 <- frameToSvg defaultFrameSvgConfig ctx inp d1
+  (_, d2, _) <- run2Frames ctx inp (ui 10)
+  svg2 <- frameToSvg defaultFrameSvgConfig ctx inp d2
+  let
+    firstId svg = T.takeWhile (/= '"') (snd (T.breakOnEnd "clipPath id=\"" svg))
+    strongEl = snd (T.breakOnEnd "<text" (fst (T.breakOn ">Strong</text>" svg1)))
+  check "an overflowing field exports a clip id" (T.isInfixOf "clipPath id=" svg1)
+  check "no placeholder is left in the document" (not (T.isInfixOf "<id>" svg1))
+  check "documents that differ have different ids" (firstId svg1 /= firstId svg2)
+  check "ids carry the document prefix" (T.isPrefixOf "n" (firstId svg1) && T.isInfixOf "-tclip_" (firstId svg1))
+  check "a button's bold label exports bold" (T.isInfixOf "font-weight=\"bold\"" strongEl)
+  named <- frameToSvg defaultFrameSvgConfig {fsIdPrefix = "mine-"} ctx inp d1
+  check "a set prefix is kept" (T.isPrefixOf "mine-" (firstId named))
 
 cdc :: CustomDrawContext
 cdc =

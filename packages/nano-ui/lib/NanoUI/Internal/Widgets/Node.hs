@@ -41,6 +41,7 @@ module NanoUI.Internal.Widgets.Node
 where
 
 import Control.Monad (forM, forM_, unless, when)
+import Data.Bits ((.|.))
 import Data.IORef (readIORef, writeIORef)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -51,7 +52,7 @@ import NanoUI.Internal.Id.Cursor (readIdCursor, writeIdCursor)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, inertView, localInput, nextId, liftIO, withContext, withIdFrame)
-import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, packTextNodeStyle)
+import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, labelFontStyle, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectUnion, rectW)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, passesPointer, withWidgetNode)
@@ -334,7 +335,10 @@ addWidgetStyled ::
   -> NanoUI Response
 addWidgetStyled wid nt txt value layout styleIdx =
   addWidgetNode wid nt txt value layout $ \arena idx ->
-    setStyleIdx arena idx (if nt == NodeText then packTextNodeStyle layout styleIdx else styleIdx)
+    setStyleIdx arena idx $ case nt of
+      NodeText -> packTextNodeStyle layout styleIdx
+      NodeButton -> styleIdx .|. labelFontStyle layout
+      _ -> styleIdx
 
 -- The initializer specializes at each call site; the node allocation, identity
 -- and interaction path are shared by styled leaves and option controls.
@@ -370,7 +374,7 @@ addWidgetWithOptions ::
 addWidgetWithOptions wid nt txt opts value layout =
   addWidgetNode wid nt txt value layout $ \arena idx -> do
     setOptions arena idx opts
-    setStyleIdx arena idx 0
+    setStyleIdx arena idx (if nt == NodeSelect then labelFontStyle layout else 0)
 
 -- | Whether @mouse@ is on widget @wid@ (last frame's @rect@, node @mIdx@):
 -- inside its scroll-visible part ('nodeInteractionHit'), not covered by

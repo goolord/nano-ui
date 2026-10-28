@@ -25,6 +25,8 @@ module NanoUI.Internal.Layout.Arena
   , NodeArenaArrays (..)
   , isWidgetNode
   , packsNodeFont
+  , labelFontShift
+  , nodeFontBits
   , hasCenteredLabel
   , isContainerNode
   , isScrollNode
@@ -272,10 +274,26 @@ isWidgetNode nt =
 -- decoration and tone through 'NanoUI.Internal.Frame.TextInput.pushFieldText'
 -- and 'NanoUI.Internal.Frame.TextInput.fieldTextColor'.
 -- Every other type keeps its own data there (a colour picker part, a tab's
--- look), so its style must not be read as a font.
+-- look), so its style must not be read as a font; a button or select keeps
+-- its label's font above that data ('nodeFontBits').
 {-# INLINE packsNodeFont #-}
 packsNodeFont :: NodeType -> Bool
 packsNodeFont nt = nt == NodeText || nt == NodeTextInput
+
+-- | Where a button's or select's style index keeps its label's font, packed
+-- as a text node packs one: above the 32 bits its own data uses.
+labelFontShift :: Int
+labelFontShift = 32
+
+-- | The font bits of a node's style index @si@, in a text node's packing:
+-- all of a text node's or text field's, the label font of a button or select
+-- ('labelFontShift'), and none for any other type.
+{-# INLINE nodeFontBits #-}
+nodeFontBits :: NodeType -> Int -> Int
+nodeFontBits nt si
+  | packsNodeFont nt = si
+  | hasCenteredLabel nt = si `shiftR` labelFontShift
+  | otherwise = 0
 
 -- | Whether the node paints one line of label text centered vertically in its
 -- box: a button or select. The solver takes that line's baseline as the

@@ -298,7 +298,13 @@ placedTextSpans ctx nt idx placements = do
       fg <-
         if nt == NodeTextArea
           then fieldTextColor ctx idx (styleFg style)
-          else fromMaybe (styleFg style) <$> getNodeFontColor (ctxNodeArena ctx) idx
+          else do
+            font <- nodeFontBits nt <$> getStyleIdx (ctxNodeArena ctx) idx
+            mCol <- getNodeFontColor (ctxNodeArena ctx) idx
+            -- 'labelColor', reading the node's theme only for a tone.
+            case textNodeFontTone font of
+              Just _ | Nothing <- mCol -> (\theme -> labelColor theme style font Nothing) <$> nodeTheme ctx idx
+              _ -> pure (fromMaybe (styleFg style) mCol)
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
 
 -- | The colour of a text input's text ('fieldTextColor'), faded toward the

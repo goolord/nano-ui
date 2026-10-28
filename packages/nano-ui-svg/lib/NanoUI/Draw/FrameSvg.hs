@@ -6,26 +6,30 @@
 -- renders those through "NanoUI.Draw.Svg", along with the vector drawings in
 -- the frame's draw-op caches and the text from 'collectRasterSpans'.
 --
--- Enable 'setDrawRecordOps' and 'setDrawExternalText' on the context before
--- running frames: the first records the shapes, the second moves all text,
--- including text inside drawings, onto the raster spans consumed here.
--- Without the first no shapes export; without the second drawing text is
--- missing. 'setDrawSquareGeometry' is optional: with it, rounded shapes
--- export as the flat rects it draws. Atlas images are omitted (the atlas has
--- no URI); 'DrawOp' images inside drawings resolve through 'fsImageUri'.
+-- Call 'enableSvgExport' on the context before running frames. It records
+-- the shapes, moves all text (including text inside drawings) onto the
+-- raster spans consumed here, and draws rounded shapes round. Atlas images
+-- are omitted (the atlas has no URI); 'DrawOp' images inside drawings
+-- resolve through 'fsImageUri'.
 --
--- > setDrawRecordOps ctx True
--- > setDrawExternalText ctx True
+-- > enableSvgExport ctx
 -- > (_, dd, _) <- runFrame ctx inp view
 -- > svg <- frameToSvg defaultFrameSvgConfig ctx inp dd
+--
+-- Text is fitted to the widths the context measured. A context from
+-- 'NanoUI.Testing.newPixelContext' measures in a 16 px monospace grid, so
+-- for text that reads like the app's, run the frames inside a backend
+-- session (@withSdl@) that measures with the real font.
 module NanoUI.Draw.FrameSvg
   ( FrameSvgConfig (..)
   , defaultFrameSvgConfig
+  , enableSvgExport
   , frameToSvg
   )
 where
 
-import Control.Monad (forM)
+import Control.Monad (forM, unless)
+import Data.Bits (xor)
 import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
@@ -38,6 +42,8 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TB
+import Data.Word (Word32)
+import Numeric (showHex)
 import NanoUI
   ( Color (..)
   , DrawOp (..)
@@ -69,7 +75,11 @@ import NanoUI.Internal.Context
   , DrawingCacheState (..)
   , RecordedOp (..)
   , drawRecordedOps
+  , getDrawRecordOps
   , intKey
+  , setDrawExternalText
+  , setDrawRecordOps
+  , setDrawSquareGeometry
   )
 import NanoUI.Internal.Context.Types
   ( CustomDrawOpCacheEntry (..)
@@ -83,6 +93,8 @@ import NanoUI.Internal.Layout.Arena
   , getNodeType
   , getStyleIdx
   , getWidgetId
+  , hasCenteredLabel
+  , nodeFontBits
   )
 import NanoUI.Testing
   ( textNodeFontStyle
@@ -105,11 +117,13 @@ data FrameSvgConfig = FrameSvgConfig
   -- URI. Images without a resolution are omitted.
   , fsIdPrefix :: !Text
   -- ^ Prepended to every clip and gradient id in the document, so several
-  -- documents inlined in one page keep their ids apart.
+  -- documents inlined in one page keep their ids apart. Empty, the default,
+  -- takes a prefix from a hash of the document, which differs between
+  -- documents that differ.
   }
 
--- | One decimal place, a sans-serif stack, no image resolver, and no id
--- prefix.
+-- | One decimal place, a sans-serif stack, no image resolver, and an id
+-- prefix from the document's hash.
 defaultFrameSvgConfig :: FrameSvgConfig
 defaultFrameSvgConfig =
   FrameSvgConfig
@@ -122,8 +136,20 @@ defaultFrameSvgConfig =
 -- | Render the frame 'runFrame' returned for @inp@ into a standalone SVG
 -- document sized to the input's window. Text draws last, over the shapes
 -- and vector drawings beneath it, in paint order for each.
+--
+-- Fails if the context was not recording shapes ('enableSvgExport'), which
+-- would export the text alone.
 frameToSvg :: FrameSvgConfig -> Context -> Input -> DrawData -> IO Text
-frameToSvg cfg ctx inp dd = do
+frameToSvg cfg0 ctx inp dd = do
+  recording <- getDrawRecordOps ctx
+  unless recording $
+    ioError (userError "frameToSvg: the context does not record shapes; call enableSvgExport before running the frame")
+  let
+    autoPrefix = T.null (fsIdPrefix cfg0)
+    -- An automatic prefix is filled in once the document is known. The
+    -- placeholder holds a character that text and attribute values always
+    -- carry escaped, so it can only be one of the ids.
+    cfg = if autoPrefix then cfg0 {fsIdPrefix = idPlaceholder} else cfg0
   (pageSpans, overlaySpans) <- collectRasterSpans ctx inp
   spanStyles <- collectSpanStyles ctx
   live <- liveDrawingIds ctx
@@ -184,7 +210,29 @@ frameToSvg cfg ctx inp dd = do
         <> render "o" overlayShapes
         <> overlayTextBody
         <> "</svg>"
-  pure (TL.toStrict (TB.toLazyText doc))
+    out = TL.toStrict (TB.toLazyText doc)
+  pure (if autoPrefix then T.replace idPlaceholder (documentIdPrefix out) out else out)
+
+-- | Turn on what 'frameToSvg' reads from a context: shape recording
+-- ('setDrawRecordOps'), text as spans ('setDrawExternalText'), and rounded
+-- geometry ('setDrawSquareGeometry' off). Call it before running the frames
+-- to export.
+enableSvgExport :: Context -> IO ()
+enableSvgExport ctx = do
+  setDrawRecordOps ctx True
+  setDrawExternalText ctx True
+  setDrawSquareGeometry ctx False
+
+-- | Stands for the automatic id prefix while the document is built.
+idPlaceholder :: Text
+idPlaceholder = "<id>"
+
+-- | An id prefix from an FNV-1a hash of a document, as eight hex digits.
+documentIdPrefix :: Text -> Text
+documentIdPrefix t =
+  let h = T.foldl' (\acc c -> (acc `xor` fromIntegral (fromEnum c)) * 16777619) (2166136261 :: Word32) t
+      hex = showHex h ""
+   in "n" <> T.pack (replicate (8 - length hex) '0' <> hex) <> "-"
 
 -- | The widget ids the view declared this frame, so drawings left in the
 -- caches by widgets no longer shown (another tab's charts) are skipped.
@@ -290,7 +338,8 @@ pointsBox pad pts
 --------------------------------------------------------------------------------
 
 -- | Packed font-style codes for 'NodeText' spans, keyed by their exact
--- rects, and for 'NodeTextInput' nodes, whose spans lie inside them.
+-- rects, and for text fields, buttons and selects, whose spans lie inside
+-- them ('nodeFontBits').
 collectSpanStyles :: Context -> IO (M.Map RectKey Int, [(Rect, Int)])
 collectSpanStyles ctx = do
   sc <- readIORef (ctxSpanCache ctx)
@@ -307,9 +356,9 @@ collectSpanStyles ctx = do
   inputStyles <-
     forM [0 .. n - 1] $ \i -> do
       nt <- getNodeType na i
-      if nt == NodeTextInput
+      if nt == NodeTextInput || hasCenteredLabel nt
         then do
-          si <- getStyleIdx na i
+          si <- nodeFontBits nt <$> getStyleIdx na i
           if si /= 0
             then Just . (,si) <$> getNodeRect na i
             else pure Nothing

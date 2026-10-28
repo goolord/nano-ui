@@ -31,8 +31,8 @@ import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, tex
 -- lets the result triple fold away at each call site (measured: 30 MB less
 -- allocation over the 3000-frame profile).
 --
--- Only a node that packs a font into its style ('packsNodeFont') has its
--- style read as one.
+-- Only the font bits of the style are read ('nodeFontBits'): a label's or
+-- field's whole style, a button's or select's label font.
 {-# INLINE resolveFontFor #-}
 resolveFontFor :: Context -> NodeType -> Float -> Int -> IO (FontMetrics, Bool, Text -> IO (Float, Float))
 resolveFontFor ctx nt size packed = do
@@ -44,7 +44,7 @@ resolveFontFor ctx nt size packed = do
   pure (fm, native, measure)
   where
     font@(TextFont _ variant weight style _) =
-      packedTextFont size (if packsNodeFont nt then packed else 0)
+      packedTextFont size (nodeFontBits nt packed)
 
 -- | Whether the host draws the weight and slant of the font a text node of
 -- @size@ and packed style @si@ is set in ('resolveFontFor'), for paint, which

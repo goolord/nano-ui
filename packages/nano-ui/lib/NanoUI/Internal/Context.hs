@@ -87,6 +87,7 @@ module NanoUI.Internal.Context
   , setDrawSquareGeometry
   , setDrawExternalText
   , setDrawRecordOps
+  , getDrawRecordOps
   , drawRecordedOps
   , RecordedOp (..)
   , askHostIO
@@ -553,6 +554,11 @@ setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
 {-# INLINE setDrawRecordOps #-}
 setDrawRecordOps :: Context -> Bool -> IO ()
 setDrawRecordOps ctx = Draw.setDrawRecordOps (ctxDrawArena ctx)
+
+-- | Whether 'setDrawRecordOps' is on.
+{-# INLINE getDrawRecordOps #-}
+getDrawRecordOps :: Context -> IO Bool
+getDrawRecordOps ctx = Draw.getDrawRecordOps (ctxDrawArena ctx)
 
 -- | The solid shapes the last paint drew while 'setDrawRecordOps' was on, in
 -- paint order, each with its layer and clip.

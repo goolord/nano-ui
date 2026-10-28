@@ -25,6 +25,7 @@ module NanoUI.Internal.Draw
   , getDrawClear
   , setDrawExternalText
   , setDrawRecordOps
+  , getDrawRecordOps
   , recordedOps
   , beginLayer
   , currentLayer

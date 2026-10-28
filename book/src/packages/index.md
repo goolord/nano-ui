@@ -126,21 +126,19 @@ When appending on the UI thread, append a frame's tokens in one call. The parser
 - **`NanoUI.Draw.FrameSvg`** re-renders a whole frame: `frameToSvg config ctx input drawData`.
 
 ```haskell
-import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
-import NanoUI.Internal.Context (setDrawExternalText, setDrawSquareGeometry)
+import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Testing (newPixelContext, runFrame)
 import NanoUI.Testing.Harness (withInputOff)
 
 exportViewToSvg view = do
   ctx <- newPixelContext
   let inp = withInputOff 1280 800
-  setDrawSquareGeometry ctx True
-  setDrawExternalText ctx True
+  enableSvgExport ctx
   (_, drawData, _) <- runFrame ctx inp view
   frameToSvg defaultFrameSvgConfig ctx inp drawData
 ```
 
-`setDrawSquareGeometry` makes widget edges axis-aligned; `setDrawExternalText` moves text onto the raster spans the exporter reads. Without them the export still renders, but rounded edges approximate and drawing text is missing. This is the path used for the interactive specimens in this book and for visual regression tests.
+`enableSvgExport` records the shapes paint draws and moves text onto the raster spans the exporter reads. `frameToSvg` fails on a context without it rather than export text alone. Ids in the document take a prefix from its hash, so several SVGs can be inlined in one page. A `newPixelContext` measures text in a 16 px monospace grid; run the frames inside `withSdl` for text measured in the real font. This is the path used for the interactive specimens in this book and for visual regression tests.
 
 ## See also
 

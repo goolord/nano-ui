@@ -36,8 +36,8 @@ import Lucid.Base (makeAttributes)
 import NanoUI
 import NanoUI.Backend (DrawData (..), FontMetrics (..), collectRasterSpans, damageFullNow, monospaceMetrics, vertexSize)
 import NanoUI.Backend.Sdl (NanoUIFont (..), SdlOptions (..), defaultSdlOptions, withSdl)
-import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, frameToSvg)
-import NanoUI.Internal.Context (Context (..), setDrawExternalText, setDrawRecordOps, setDrawSquareGeometry)
+import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (newPixelContext, runFrame, withFontMetrics, withMonoFontMetrics)
 import NanoUI.Testing.Harness (clickPair, pressAt, withInputOff)
 import Paths_nano_ui_svg (getDataFileName)
@@ -79,8 +79,8 @@ svgMonoMetrics =
     , fmAdvance = \c -> if c == ' ' then 4 else 8
     }
 
-newSvgContext :: Bool -> IO Context
-newSvgContext squareGeo = do
+newSvgContext :: IO Context
+newSvgContext = do
   ctx0 <- newPixelContext
   mSdl <- readIORef sdlFontCtxRef
   let ctx = case mSdl of
@@ -96,10 +96,7 @@ newSvgContext squareGeo = do
             }
         Nothing ->
           withMonoFontMetrics (withFontMetrics ctx0 svgProportionalMetrics) svgMonoMetrics
-  setDrawRecordOps ctx True
-  setDrawSquareGeometry ctx squareGeo
-  setDrawExternalText ctx True
-  pure ctx
+  ctx <$ enableSvgExport ctx
 
 -- | Pure Base64 encoder for embedding @packages/nano-ui-sdl/data/inter.ttf@
 -- as a @data:font/ttf;base64,...@ @\@font-face@ in the HTML glossary.
@@ -259,13 +256,11 @@ cropSvg canvasW canvasH (Just (Rect bx by bw bh)) svg
 -- 'damageFullNow' and export it as an inline @<svg>@ element whose ids
 -- carry @tag@, so the documents on one page never collide.
 --
--- 'squareGeo' selects between flat square geometry (@True@) and rounded vector
--- geometry (@False@) for 'frameToSvg'. Every frame in 'warmInputs' is run once
--- without damage to settle layout and state; the 'captureInput' frame is the
--- one returned.
-captureSvg :: Text -> Bool -> [Input] -> Input -> NanoUI () -> IO Text
-captureSvg tag squareGeo warmInputs captureInput ui = do
-  ctx <- newSvgContext squareGeo
+-- Every frame in 'warmInputs' is run once without damage to settle layout
+-- and state; the 'captureInput' frame is the one returned.
+captureSvg :: Text -> [Input] -> Input -> NanoUI () -> IO Text
+captureSvg tag warmInputs captureInput ui = do
+  ctx <- newSvgContext
   mapM_ (\inp -> runFrame ctx inp ui) warmInputs
   fst <$> exportFrame tag ctx captureInput ui
 
@@ -280,26 +275,19 @@ exportFrame tag ctx inp ui = do
 -- | Render a two-frame warmed-up view with rounded geometry and external text
 -- spans, returning a namespaced inline @<svg>@ element.
 renderSvg :: Text -> Float -> Float -> NanoUI () -> IO Text
-renderSvg tag w h ui = captureSvg tag False [inp] inp ui
-  where
-    inp = withInputOff w h
-
--- | Render with @setDrawSquareGeometry ctx True@ to compare flat square
--- geometry against rounded vector geometry in 'frameToSvg'.
-renderSvgRound :: Text -> Float -> Float -> NanoUI () -> IO Text
-renderSvgRound tag w h ui = captureSvg tag True [inp] inp ui
+renderSvg tag w h ui = captureSvg tag [inp] inp ui
   where
     inp = withInputOff w h
 
 -- | Render a view with the cursor hovering at @pos@ on the second frame.
 renderSvgHover :: Text -> Float -> Float -> V2 -> NanoUI () -> IO Text
-renderSvgHover tag w h pos ui = captureSvg tag False [base] (base {inputMousePos = pos}) ui
+renderSvgHover tag w h pos ui = captureSvg tag [base] (base {inputMousePos = pos}) ui
   where
     base = withInputOff w h
 
 -- | Render a view with the left mouse button held down at @pos@.
 renderSvgPress :: Text -> Float -> Float -> V2 -> NanoUI () -> IO Text
-renderSvgPress tag w h pos ui = captureSvg tag False [base] (pressAt base pos) ui
+renderSvgPress tag w h pos ui = captureSvg tag [base] (pressAt base pos) ui
   where
     base = withInputOff w h
 
@@ -307,7 +295,7 @@ renderSvgPress tag w h pos ui = captureSvg tag False [base] (pressAt base pos) u
 -- resulting frame (e.g. focused field or open dropdown overlay).
 renderSvgClick :: Text -> Float -> Float -> V2 -> NanoUI () -> IO Text
 renderSvgClick tag w h pos ui =
-  captureSvg tag False [base, press, release] base ui
+  captureSvg tag [base, press, release] base ui
   where
     base = withInputOff w h
     (press, release) = clickPair base pos
@@ -440,7 +428,7 @@ applyStyleMask isOverlay mask view0 =
 -- resizes the specimen.
 renderStyleBank :: Text -> Float -> Float -> Bool -> NanoUI () -> IO (Text, Value)
 renderStyleBank bankId w h isOverlay view = do
-  ctx <- newSvgContext False
+  ctx <- newSvgContext
   let inp = withInputOff w h
       nsTag = "wb-" <> bankId
   _ <- runFrame ctx inp view
@@ -960,7 +948,7 @@ applyTypoMask mask =
 generateTypoDemos :: IO TypoSectionData
 generateTypoDemos = do
   -- 64-combination Interactive Typography & *With Workbench (bits 0..5)
-  ctx <- newSvgContext False
+  ctx <- newSvgContext
   let w = 480
       h = 152
       inp = withInputOff w h
@@ -996,7 +984,7 @@ generateTypoDemos = do
         rowWith (gap 12 . alignMid) $ do
           label "label (14px)"
           heading "heading (WeightMedium)"
-          labelWith fontHeading "labelWith fontHeading (accent)"
+          labelWith (fontTone Accent) "fontTone Accent"
         rowWith (gap 12 . alignMid) $ do
           muted "muted"
           mono "mono"
@@ -1031,8 +1019,8 @@ generateTypoDemos = do
       , tsdDemos =
           [ TypoDemo
               "Text helpers and font modifiers"
-              "label, heading, labelWith fontHeading, muted, mono, danger, bold, italic, underline, fontStrike, fontColor"
-              "NodeText and NodeTextInput pack font variant, tone, weight, style and decoration into styleIdx."
+              "label, heading, labelWith (fontTone Accent), muted, mono, danger, bold, italic, underline, fontStrike, fontColor"
+              "NodeText and NodeTextInput pack font variant, tone, weight, style and decoration into styleIdx; buttons and selects pack the same above their own 32 bits."
               svgLabels
           , TypoDemo
               "Tones and tinted surfaces"
@@ -1043,7 +1031,7 @@ generateTypoDemos = do
       }
 
 -- ---------------------------------------------------------------------------
--- Section IV: 12 Unexpected Interactions & Edge Cases
+-- Section IV: 8 Unexpected Interactions & Edge Cases
 -- ---------------------------------------------------------------------------
 
 data InteractionCard = InteractionCard
@@ -1063,33 +1051,7 @@ data InteractionCard = InteractionCard
 
 generateInteractions :: IO [InteractionCard]
 generateInteractions = do
-  -- 1. buttonWith / selectWith / checkboxWith ignore fontBold, fontTone, fontMono
-  i1Bad <-
-    renderSvg "i1-bad" 260 92 $
-      panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-        void (buttonWith (fontBold . fontUnderline . fontDanger) "buttonWith fontDanger")
-        vSel <- useVar (0 :: Int)
-        selectWith (fillW . fontBold . fontDanger) ["selectWith fontDanger" :: Text] vSel
-  i1Good <-
-    renderSvg "i1-good" 260 92 $
-      panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-        void (styled (tinted themeDanger) (buttonContent (labelWith (fontBold . fontUnderline . fontDanger) "buttonContent + tinted")))
-        vSel <- useVar (0 :: Int)
-        selectWith (fillW . fontColor (colorRGBA 248 113 113 255)) ["selectWith fontColor" :: Text] vSel
-
-  -- 2. heading vs labelWith fontHeading
-  i2Bad <-
-    renderSvg "i2-bad" 260 84 $
-      panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-        heading "heading \"Section\" (18px, panel fg)"
-        label "Uses FontRegular + fontMedium (18px)"
-  i2Good <-
-    renderSvg "i2-good" 260 84 $
-      panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-        labelWith fontHeading "labelWith fontHeading (14px, accent)"
-        labelWith (fontMedium . fontHeading) "fontMedium . fontHeading (18px, accent)"
-
-  -- 3. checkbox & radio 3-surface split + modal popup shift
+  -- 1. checkbox & radio 3-surface split + modal popup shift
   i3Bad <-
     renderSvg "i3-bad" 260 120 $
       styled
@@ -1119,7 +1081,7 @@ generateInteractions = do
             vC <- useVar False
             checkbox "Switched to popupStyle" vC
 
-  -- 4. select (themeButton) vs comboBox (themeInput)
+  -- 2. select (themeButton) vs comboBox (themeInput)
   i4Bad <-
     renderSvg "i4-bad" 260 92 $
       styled probeInput $
@@ -1137,7 +1099,7 @@ generateInteractions = do
           comboBox "Pick..." ["comboBox (inputStyle)" :: Text] vCombo
           selectWith fillW ["select (buttonStyle matched)" :: Text] vSel
 
-  -- 5. scrollWith bounded (themeInput well, cornerRadius=0) vs grow (page background, no border)
+  -- 3. scrollWith bounded (themeInput well, cornerRadius=0) vs grow (page background, no border)
   i5Bad <-
     renderSvg "i5-bad" 260 96 $
       styled (probeInput . rounded 12) $
@@ -1156,7 +1118,7 @@ generateInteractions = do
             label "Drops the themeInput well and border"
             label "Paints the page background instead"
 
-  -- 6. callout leaks panelStyle into child panels
+  -- 4. callout leaks panelStyle into child panels
   let warnCol = colorRGBA 235 179 56 255
   i6Bad <-
     renderSvg "i6-bad" 260 104 $
@@ -1173,7 +1135,7 @@ generateInteractions = do
           styled (\t -> t {themePanel = basePanel}) $
             card (label "Nested card with restored themePanel")
 
-  -- 7. toggleButton active state overwrites buttonStyle with Tone
+  -- 5. toggleButton active state overwrites buttonStyle with Tone
   i7Bad <-
     renderSvg "i7-bad" 260 80 $
       styled probeButton $
@@ -1193,26 +1155,7 @@ generateInteractions = do
             toggleButton Accent "OFF (buttonStyle)" vOff
             toggleButton Accent "ON (accentColor)" vOn
 
-  -- 8. background vs fillColor on focused textInput and hovered button
-  let customTeal = colorRGBA 13 148 136 255
-  i8Bad <-
-    renderSvgClick "i8-bad" 260 88 (V2 80 20) $
-      styled (inputStyle (background customTeal . foreground colorWhite) . buttonStyle (background customTeal . foreground colorWhite)) $
-        panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-          vFocused <- useVar ("Focused: lost teal" :: Text)
-          vUnfocused <- useVar ("Unfocused: keeps teal bg" :: Text)
-          textInput vFocused
-          textInput vUnfocused
-  i8Good <-
-    renderSvgClick "i8-good" 260 88 (V2 80 20) $
-      styled (inputStyle (fillColor customTeal . foreground colorWhite) . buttonStyle (fillColor customTeal . foreground colorWhite)) $
-        panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-          vFocused <- useVar ("Focused: fillColor kept" :: Text)
-          vUnfocused <- useVar ("Unfocused: fillColor kept" :: Text)
-          textInput vFocused
-          textInput vUnfocused
-
-  -- 9. borderWidth & borderSides do not add layout padding
+  -- 6. borderWidth & borderSides do not add layout padding
   i9Bad <-
     renderSvg "i9-bad" 260 80 $
       framePad $
@@ -1226,7 +1169,7 @@ generateInteractions = do
           panelWith (fillW . padLRTB 12 8 8 8) $
             label "borderLeft 6 + padLeft 12 clears stroke"
 
-  -- 10. Composition order (.) vs nested styled scopes
+  -- 7. Composition order (.) vs nested styled scopes
   i10Bad <-
     renderSvg "i10-bad" 260 84 $
       panelWith (fillW . fillH . padAll 8 . gap 6) $ do
@@ -1240,7 +1183,7 @@ generateInteractions = do
         rowWith (gap 6) $ do
           void (styled primary (styled destructive (button "nested: inner destructive wins")))
 
-  -- 11. Tabs (tabHeaderVisualStyle) read themePanel, not themeButton
+  -- 8. Tabs (tabHeaderVisualStyle) read themePanel, not themeButton
   i11Bad <-
     renderSvg "i11-bad" 260 96 $
       styled probeButton $
@@ -1258,55 +1201,9 @@ generateInteractions = do
           tabBarConfigured (defaultTabsConfig {tabsStyle = TabUnderline}) vT ts
           tabBarConfigured (defaultTabsConfig {tabsStyle = TabContained}) vT ts
 
-  -- 12. frameToSvg specifics: setDrawSquareGeometry flattening vs rounded geometry
-  i12Bad <-
-    renderSvgRound "i12-bad" 260 92 $
-      styled (rounded 10) $
-        panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-          label "SquareGeo=True flattens rx to 0:"
-          rowWith (gap 8 . alignMid) $ do
-            void (styled primary (button "Flat Button"))
-            vSw <- useVar True
-            toggleSwitch vSw
-  i12Good <-
-    renderSvg "i12-good" 260 92 $
-      styled (rounded 10) $
-        panelWith (fillW . fillH . padAll 8 . gap 6) $ do
-          label "SquareGeo=False keeps rx=10:"
-          rowWith (gap 8 . alignMid) $ do
-            void (styled primary (button "Rounded Pill"))
-            vSw <- useVar True
-            toggleSwitch vSw
-
   pure
     [ InteractionCard
         "01"
-        "typography surface-button"
-        "buttonWith drops font flags"
-        "NanoUI.Internal.Layout.Arena (packsNodeFont), NanoUI.Internal.Frame.Spans (nodeFontStyle)"
-        "Every node shares one `styleIdx` column. Only `NodeText` and `NodeTextInput` pack font data (`FontVariant`, `FontTone`, bold, italic, underline, strike) into it. `NodeButton` and `NodeSelect` overwrite `styleIdx` with widget metadata (`buttonKindToggle`, `buttonFlagChoice`, `TabStyle`, sort arrows). `fontSize` and `fontColor` use separate arena columns, so they still work on buttons and selects."
-        "Use `fontSize` and `fontColor` on `buttonWith`/`selectWith`/`checkboxWith`. For bold, italic, underline, monospace or `fontTone` inside a button, wrap a `labelWith` in `buttonContent`."
-        "buttonWith (fontBold . fontUnderline . fontDanger) \"Delete\"\nselectWith (fontBold . fontDanger) [\"Item\"] sel"
-        "styled (tinted Danger) $\n  buttonContent (labelWith (fontBold . fontUnderline . fontDanger) \"Delete\")\nselectWith (fontColor coral) [\"Item\"] sel"
-        "fontBold, fontUnderline, fontDanger dropped"
-        i1Bad
-        "buttonContent for font flags, fontColor for tint"
-        i1Good
-    , InteractionCard
-        "02"
-        "typography surface-panel"
-        "heading and fontHeading differ"
-        "NanoUI.Internal.Widgets.Display (heading), NanoUI.Internal.Style (textToneColor)"
-        "`heading` is `labelWith (tight . fontMedium)`: it sets 18px with `FontRegular`, so its color is `styleFg (themePanel theme)`. The `fontHeading` modifier sets `layoutFontVariant = FontHeading` and leaves `fontSize` at 14px; `textToneColor` paints `FontHeading` with `themeAccent`."
-        "Use `fontMedium . fontHeading` for an 18px accent title, or `heading` for 18px in the panel foreground color."
-        "heading \"Section\" -- 18px, styleFg(themePanel)\nlabelWith fontHeading \"Section\" -- 14px, themeAccent"
-        "labelWith (fontMedium . fontHeading) \"Section\" -- 18px, themeAccent"
-        "heading: 18px, panel foreground"
-        i2Bad
-        "fontHeading: 14px, accent"
-        i2Good
-    , InteractionCard
-        "03"
         "surface-button surface-input surface-popup"
         "checkbox and radio span three surfaces"
         "NanoUI.Internal.Frame.Chrome (widgetVisualStyle), NanoUI.Internal.Frame.Paint.Widgets (paintCheckboxNode)"
@@ -1319,7 +1216,7 @@ generateInteractions = do
         "inside a modal, ring and label use popupStyle"
         i3Good
     , InteractionCard
-        "04"
+        "02"
         "surface-button surface-input"
         "select and comboBox use different surfaces"
         "NanoUI.Internal.Frame.Chrome (widgetVisualStyle)"
@@ -1332,7 +1229,7 @@ generateInteractions = do
         "inputStyle and buttonStyle match"
         i4Good
     , InteractionCard
-        "05"
+        "03"
         "surface-input surface-panel"
         "scrollWith changes surface with its sizing"
         "NanoUI.Internal.Frame.Paint (paintScrollSurface)"
@@ -1345,7 +1242,7 @@ generateInteractions = do
         "fixedH 80: bordered themeInput well, radius 0"
         i5Good
     , InteractionCard
-        "06"
+        "04"
         "surface-panel"
         "callout tints nested panels"
         "NanoUI.Internal.Widgets.Layout (calloutWith)"
@@ -1358,7 +1255,7 @@ generateInteractions = do
         "themePanel restored inside the callout"
         i6Good
     , InteractionCard
-        "07"
+        "05"
         "surface-button"
         "toggleButton ignores buttonStyle when on"
         "NanoUI.Internal.Frame.Chrome (widgetVisualStyle)"
@@ -1371,20 +1268,7 @@ generateInteractions = do
         "buttonStyle for off, accentColor for on"
         i7Good
     , InteractionCard
-        "08"
-        "surface-input surface-button"
-        "background resets on focus"
-        "NanoUI.Internal.Style (background vs fillColor), NanoUI.Internal.Frame.Chrome (widgetVisualStyle)"
-        "`background c` only sets `styleBg`. When a `textInput` or `textArea` gains focus, `widgetVisualStyle` sets its background to `styleActiveBg (themeInput theme)`, so an input styled with `background teal` loses the teal when clicked."
-        "Use `fillColor` (or `tinted`) on `buttonStyle`, `inputStyle` and `popupStyle`; it updates `styleBg`, `styleHoverBg` and `styleActiveBg` together."
-        "-- focus swaps the background to styleActiveBg\nstyled (inputStyle (background teal)) (textInput txt)"
-        "-- fillColor updates all three background fields\nstyled (inputStyle (fillColor teal)) (textInput txt)"
-        "background teal: focused field reverts"
-        i8Bad
-        "fillColor teal: focused field keeps the color"
-        i8Good
-    , InteractionCard
-        "09"
+        "06"
         "surface-panel"
         "borderWidth does not add layout space"
         "NanoUI.Internal.Frame.Chrome (strokeStyledSides), NanoUI.Internal.Layout.Solve"
@@ -1397,7 +1281,7 @@ generateInteractions = do
         "borderLeft 6 with padLRTB 12 8 8 8"
         i9Good
     , InteractionCard
-        "10"
+        "07"
         "surface-button"
         "modifier order in (.) and styled"
         "NanoUI.Internal.Style, function composition"
@@ -1410,7 +1294,7 @@ generateInteractions = do
         "nested styled: innermost wins"
         i10Good
     , InteractionCard
-        "11"
+        "08"
         "surface-panel surface-button"
         "tabs read themePanel, not themeButton"
         "NanoUI.Internal.Frame.Chrome (tabHeaderVisualStyle)"
@@ -1422,19 +1306,6 @@ generateInteractions = do
         i11Bad
         "panelStyle and accentColor: headers respond"
         i11Good
-    , InteractionCard
-        "12"
-        "framesvg"
-        "frameToSvg quirks"
-        "NanoUI.Draw.FrameSvg (frameToSvg), NanoUI.Backend.Sdl (withSdl), NanoUI.Testing (newPixelContext)"
-        "A few things matter for `frameToSvg`. Widget shapes export only from a context with `setDrawRecordOps ctx True`. `setDrawSquareGeometry ctx True` makes rounded rects and strokes draw as 0-radius quads, flattening `cornerRadius` on `button`, `panel` and `textInput`; `NodeDrawing` widgets still render smooth rects and circles from cached ops. `newPixelContext` defaults to 16px monospace metrics, so load `inter.ttf` through `withSdl` and embed it with `@font-face` for matching `textLength`. Every document numbers its clip and gradient IDs from 1 (`tclip_1`, `sclip_1`, `grad_1`), so give each its own `fsIdPrefix` when inlining several SVGs."
-        "Use `setDrawRecordOps ctx True` and `setDrawSquareGeometry ctx False`, render inside `withSdl` with `DefaultFont` and `@font-face`, and set `fsIdPrefix` per document."
-        "setDrawSquareGeometry ctx True -- flattens button and panel radius to 0\n-- newPixelContext's 16px monospace metrics distort textLength"
-        "-- Render inside withSdl with DefaultFont and @font-face\nctx <- newContext\nsetDrawRecordOps ctx True\nsetDrawExternalText ctx True"
-        "square geometry on: rounded corners flattened"
-        i12Bad
-        "square geometry off: rounded corners preserved"
-        i12Good
     ]
 
 -- ---------------------------------------------------------------------------
@@ -1725,8 +1596,8 @@ typoSection tsd = do
           div_ [class_ "control-group-label"] "Toggle modifiers:"
           p_ [style_ "margin:0 0 10px 0;font-size:13px;color:var(--ink-secondary)"] $
             inline
-              [ Code "labelWith", Txt ", ", Code "textInput", Txt " and ", Code "buttonContent"
-              , Txt " take every modifier; ", Code "buttonWith", Txt " ignores the font flags."
+              [ Code "labelWith", Txt ", ", Code "textInput", Txt ", ", Code "buttonContent"
+              , Txt " take every modifier, and so does ", Code "buttonWith", Txt "."
               ]
           div_ [class_ "toggle-chip-grid", id_ "typo-toggles"] $ mapM_ typoChip typoChips
           div_ [style_ "margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"] $ do
@@ -1736,11 +1607,11 @@ typoSection tsd = do
   mapM_ typoCard (tsdDemos tsd)
   where
     typoChips =
-      [ (0 :: Int, "fontBold", "impact-partial", "Text")
-      , (1, "fontItalic", "impact-partial", "Text")
-      , (2, "fontUnderline", "impact-partial", "Text")
-      , (3, "fontStrike", "impact-partial", "Text")
-      , (4, "fontTone Danger", "impact-partial", "Text")
+      [ (0 :: Int, "fontBold", "impact-primary", "All rows")
+      , (1, "fontItalic", "impact-primary", "All rows")
+      , (2, "fontUnderline", "impact-primary", "All rows")
+      , (3, "fontStrike", "impact-primary", "All rows")
+      , (4, "fontTone Danger", "impact-primary", "All rows")
       , (5, "fontSize 16", "impact-primary", "All rows")
       ]
     typoChip :: (Int, Text, Text, Text) -> Html ()
@@ -1760,7 +1631,7 @@ typoSection tsd = do
           p_ (toHtml (tdNote d))
         div_ [class_ "svg-well typo-svg"] (toHtmlRaw (tdSvg d))
 
--- | Section V: the twelve unexpected-interaction cards.
+-- | Section V: the eight unexpected-interaction cards.
 interactionsSection :: [InteractionCard] -> Html ()
 interactionsSection = mapM_ trapCard
   where
@@ -1907,18 +1778,14 @@ sidebarNav = do
   navList trapLinks
   where
     trapLinks =
-      [ ("#trap-01", "#01 buttonWith Ignores Font Flags")
-      , ("#trap-02", "#02 heading vs fontHeading")
-      , ("#trap-03", "#03 checkbox 3-Surface + Modal Shift")
-      , ("#trap-04", "#04 select vs comboBox Surface")
-      , ("#trap-05", "#05 scrollWith grow Loses Well")
-      , ("#trap-06", "#06 callout Leaks panelStyle")
-      , ("#trap-07", "#07 toggleButton ON Overwrites Style")
-      , ("#trap-08", "#08 background vs fillColor Focus Bug")
-      , ("#trap-09", "#09 borderWidth Zero Inset & Sides")
-      , ("#trap-10", "#10 (.) Order vs Nested styled")
-      , ("#trap-11", "#11 tabs Read themePanel, Not Button")
-      , ("#trap-12", "#12 frameToSvg Geometry & FontMetrics")
+      [ ("#trap-01", "#01 checkbox 3-Surface + Modal Shift")
+      , ("#trap-02", "#02 select vs comboBox Surface")
+      , ("#trap-03", "#03 scrollWith grow Loses Well")
+      , ("#trap-04", "#04 callout Leaks panelStyle")
+      , ("#trap-05", "#05 toggleButton ON Overwrites Style")
+      , ("#trap-06", "#06 borderWidth Zero Inset & Sides")
+      , ("#trap-07", "#07 (.) Order vs Nested styled")
+      , ("#trap-08", "#08 tabs Read themePanel, Not Button")
       ]
 
 -- | The top banner: intro copy and the live composite specimen.
@@ -1988,7 +1855,7 @@ filterBar = do
     filterBtn False "surface-input" "themeInput (inputStyle)"
     filterBtn False "surface-panel" "themePanel (panelStyle)"
     filterBtn False "typography" "Typography"
-    filterBtn False "trap" "12 Unexpected Interactions"
+    filterBtn False "trap" "8 Unexpected Interactions"
     filterBtn False "framesvg" "frameToSvg Quirks"
   where
     filterBtn :: Bool -> Text -> Text -> Html ()
@@ -2027,7 +1894,7 @@ routingRows =
     , [Badge "b-btn" "themeButton", Txt " ", Code "styleBorder"]
     , [Badge "b-btn" "themeButton", Txt " ", Code "styleFg"]
     , [Txt "Hover: ", Code "styleHoverBg", Txt "; Press: ", Code "styleActiveBg", Txt "; Focus: outer 2px ", Code "themeFocusRing"]
-    , [Link "#trap-01" [Txt "Ignores ", Code "fontBold", Txt "/", Code "fontTone", Txt " in ", Code "buttonWith", Txt " (#01)"]]
+    , [Txt "None"]
     ]
   , [ [Code "toggleButton"]
     , [Code "NodeButton", Txt " (toggle)"]
@@ -2035,7 +1902,7 @@ routingRows =
     , [Txt "OFF: ", Badge "b-btn" "themeButton", Brk, Txt "ON: ", Badge "b-acc" "toneColor"]
     , [Txt "OFF: ", Badge "b-btn" "themeButton", Brk, Txt "ON: ", Code "readableOn"]
     , [Txt "When ON, overwrites ", Code "styleBg", Txt ", ", Code "styleHoverBg", Txt ", ", Code "styleBorder", Txt ", ", Code "styleFg"]
-    , [Link "#trap-07" [Txt "ON state ignores ", Code "buttonStyle", Txt " colors (#07)"]]
+    , [Link "#trap-05" [Txt "ON state ignores ", Code "buttonStyle", Txt " colors (#05)"]]
     ]
   , [ [Code "checkbox", Txt ", ", Code "radio"]
     , [Code "NodeButton", Txt " (choice)"]
@@ -2043,7 +1910,7 @@ routingRows =
     , [Txt "Unchecked ring/box: ", Badge "b-btn" "themeButton", Txt " ", Code "styleBorder"]
     , [Txt "Label: ", Badge "b-btn" "themeButton", Txt " ", Code "styleFg"]
     , [Txt "Checked box/dot: ", Badge "b-acc" "themeAccent", Txt " + ", Code "themeOnAccent"]
-    , [Link "#trap-03" [Txt "3-surface split + switches to ", Code "themePopup", Txt " in ", Code "modal", Txt " (#03)"]]
+    , [Link "#trap-01" [Txt "3-surface split + switches to ", Code "themePopup", Txt " in ", Code "modal", Txt " (#01)"]]
     ]
   , [ [Code "select"]
     , [Code "NodeSelect"]
@@ -2051,7 +1918,7 @@ routingRows =
     , [Badge "b-btn" "themeButton", Txt " ", Code "styleBorder"]
     , [Badge "b-btn" "themeButton", Txt " ", Code "styleFg", Txt " (text & chevron)"]
     , [Txt "Focused border: ", Badge "b-acc" "themeAccent", Txt "; Open menu: ", Badge "b-pop" "themePopup"]
-    , [Link "#trap-04" [Txt "Uses ", Code "themeButton", Txt ", not ", Code "themeInput", Txt " (#04)"]]
+    , [Link "#trap-02" [Txt "Uses ", Code "themeButton", Txt ", not ", Code "themeInput", Txt " (#02)"]]
     ]
   , [ [Code "comboBox"]
     , [Code "NodeTextInput"]
@@ -2059,7 +1926,7 @@ routingRows =
     , [Badge "b-inp" "themeInput", Txt " ", Code "styleBorder"]
     , [Txt "Text: ", Badge "b-inp" "themeInput", Txt " ", Code "styleFg", Txt "; Chevron: 45% lerp to bg"]
     , [Txt "Focused border: ", Badge "b-acc" "themeAccent", Txt ", bg: ", Code "styleActiveBg", Txt "; Menu: ", Badge "b-pop" "themePopup"]
-    , [Link "#trap-04" [Txt "Paired with ", Code "select", Txt " but on ", Code "themeInput", Txt " (#04)"]]
+    , [Link "#trap-02" [Txt "Paired with ", Code "select", Txt " but on ", Code "themeInput", Txt " (#02)"]]
     ]
   , [ [Code "textInput", Txt ", ", Code "searchInput", Txt ", ", Code "numericInput", Txt ", ", Code "textArea"]
     , [Code "NodeTextInput", Txt " / ", Code "NodeTextArea"]
@@ -2067,7 +1934,7 @@ routingRows =
     , [Badge "b-inp" "themeInput", Txt " ", Code "styleBorder"]
     , [Badge "b-inp" "themeInput", Txt " ", Code "styleFg", Txt " (placeholder 40% lerp to bg)"]
     , [Txt "Focused: swaps border to ", Badge "b-acc" "themeAccent", Txt " & bg to ", Code "styleActiveBg(themeInput)", Txt " (no outer ring)"]
-    , [Link "#trap-08" [Code "background", Txt " without ", Code "fillColor", Txt " reverts on focus (#08)"]]
+    , [Txt "None"]
     ]
   , [ [Code "slider"]
     , [Code "NodeSlider"]
@@ -2083,18 +1950,15 @@ routingRows =
     , [Badge "b-pnl" "themePanel", Txt " ", Code "styleBorder"]
     , [Txt "Inherited by child ", Code "label", Txt "s via ", Badge "b-pnl" "themePanel", Txt " ", Code "styleFg"]
     , [Txt "Clips children to ", Code "borderContentClip"]
-    , [Link "#trap-06" [Code "callout", Txt " leaks tinted ", Code "panelStyle", Txt " to child panels (#06)"]]
+    , [Link "#trap-04" [Code "callout", Txt " leaks tinted ", Code "panelStyle", Txt " to child panels (#04)"]]
     ]
   , [ [Code "label", Txt ", ", Code "heading", Txt ", ", Code "kv"]
     , [Code "NodeText"]
     , [Txt "Transparent (except in ", Code "frameToSvg", Txt " or striped tables)"]
     , [Txt "None"]
     , [Badge "b-pnl" "themePanel", Txt " ", Code "styleFg", Txt " (or ", Code "fontColor", Txt " / ", Code "fontTone", Txt ")"]
-    , [Code "fontHeading", Txt " uses ", Badge "b-acc" "themeAccent", Txt "; ", Code "heading", Txt " uses ", Badge "b-pnl" "themePanel", Txt " ", Code "styleFg"]
-    , [ Link "#trap-02" [Code "heading", Txt " vs ", Code "fontHeading", Txt " (#02)"]
-      , Txt " · "
-      , Link "#trap-12" [Txt "SVG bg rect (#12)"]
-      ]
+    , [Code "heading", Txt " is ", Code "fontHeading", Txt ": medium weight in ", Badge "b-pnl" "themePanel", Txt " ", Code "styleFg"]
+    , [Txt "None"]
     ]
   , [ [Code "scrollWith"]
     , [Code "NodeScroll"]
@@ -2102,7 +1966,7 @@ routingRows =
     , [Txt "Bounded: ", Badge "b-inp" "themeInput", Txt " ", Code "styleBorder", Brk, Code "grow", Txt ": None"]
     , [Txt "Scrollbar blends ", Badge "b-inp" "themeInput", Txt " + ", Code "themeSeparator"]
     , [Txt "Always forces ", Code "styleCornerRadius = 0", Txt " on the scroll well"]
-    , [Link "#trap-05" [Code "scrollWith grow", Txt " drops well & border (#05)"]]
+    , [Link "#trap-03" [Code "scrollWith grow", Txt " drops well & border (#03)"]]
     ]
   , [ [Code "tabs", Txt ", ", Code "tabBar"]
     , [Code "NodeButton", Txt " (tab)"]
@@ -2110,7 +1974,7 @@ routingRows =
     , [Badge "b-pnl" "themePanel", Txt " (", Code "TabSegmented", Txt " uses ", Badge "b-btn" "themeButton", Txt ")"]
     , [Badge "b-pnl" "themePanel", Txt " ", Code "styleFg", Txt " (inactive dimmed to alpha 175)"]
     , [Txt "Selected indicator: ", Badge "b-acc" "themeAccent"]
-    , [Link "#trap-11" [Txt "Ignores ", Code "buttonStyle", Txt " on 3 of 4 tab styles (#11)"]]
+    , [Link "#trap-08" [Txt "Ignores ", Code "buttonStyle", Txt " on 3 of 4 tab styles (#08)"]]
     ]
   , [ [Code "table", Txt ", ", Code "simpleTable"]
     , [Code "NodePanel", Txt " + ", Code "NodeButton", Txt " + ", Code "NodeText"]
@@ -2260,7 +2124,7 @@ layoutDemo = columnWith (fillW . fillH . padAll 14 . gap 10)
 -- parks the pointer on a control for the hover and pointer-mode examples.
 layoutSvg :: Text -> Float -> Float -> Maybe V2 -> NanoUI () -> IO Text
 layoutSvg tag w h hoverPos ui = do
-  ctx <- newSvgContext False
+  ctx <- newSvgContext
   let base = withInputOff w h
       capture = case hoverPos of
         Nothing -> base

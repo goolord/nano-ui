@@ -168,7 +168,7 @@ import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
 import GHC.Enum (boundedEnumFrom, boundedEnumFromThen, predError, succError)
-import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
+import NanoUI.Internal.Types (Color (..), V2 (..), colorA, colorB, colorG, colorR, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -244,10 +244,11 @@ windowPad = Padding 10 10 0 10
 windowMargin :: Float
 windowMargin = 14
 
--- | Semantic font choice. The backend selects a face; headings use the
--- theme's accent colour. 'FontMuted' and 'FontDanger' are the regular face in
--- the 'Muted' and 'Danger' tones. The 'fontMuted' and 'fontDanger' modifiers
--- set a tone ('fontTone') instead, so they combine with any face.
+-- | Semantic font choice. The backend selects a face. 'FontHeading',
+-- 'FontMuted' and 'FontDanger' are the regular face in the 'Accent', 'Muted'
+-- and 'Danger' tones. The 'fontMuted' and 'fontDanger' modifiers set a tone
+-- ('fontTone') instead, so they combine with any face; 'fontHeading' sets the
+-- weight 'NanoUI.heading' uses, not this variant.
 data FontVariant
   = FontRegular
   | FontHeading
@@ -518,9 +519,11 @@ gridCols n l = l {layoutGridCols = max 0 n}
 fontRegular :: Layout -> Layout
 fontRegular l = l {layoutFontVariant = FontRegular}
 
--- | Select the heading font variant.
+-- | Text set as 'NanoUI.heading' sets it: medium weight, in the current size
+-- and colour. Add 'fontSize' for a bigger title or @'fontTone' 'Accent'@ for
+-- a coloured one.
 fontHeading :: Layout -> Layout
-fontHeading l = l {layoutFontVariant = FontHeading}
+fontHeading = fontMedium
 
 -- | Text in the theme's muted colour: 'fontTone' 'Muted'.
 fontMuted :: Layout -> Layout
@@ -990,13 +993,12 @@ toneColor t = \case
 textToneColor :: Theme -> FontVariant -> Maybe Tone -> Color
 textToneColor theme variant t = case t <|> variantTone variant of
   Just t' -> toneColor theme t'
-  Nothing
-    | variant == FontHeading -> themeAccent theme
-    | otherwise -> styleFg (themePanel theme)
+  Nothing -> styleFg (themePanel theme)
 
 -- | The face a variant draws in. Colour-only variants use the regular face.
 variantFace :: FontVariant -> FontVariant
 variantFace = \case
+  FontHeading -> FontRegular
   FontMuted -> FontRegular
   FontDanger -> FontRegular
   v -> v
@@ -1004,6 +1006,7 @@ variantFace = \case
 -- | The tone implied by a colour-only variant.
 variantTone :: FontVariant -> Maybe Tone
 variantTone = \case
+  FontHeading -> Just Accent
   FontMuted -> Just Muted
   FontDanger -> Just Danger
   _ -> Nothing
@@ -1012,9 +1015,28 @@ variantTone = \case
 -- Style and theme modifiers
 -- -----------------------------------------------------------------------------
 
--- | Set the resting background, retaining hover and pressed colours.
+-- | Set the background. The hover and press backgrounds move with it,
+-- keeping the offsets the style gave them, so a focused field or a hovered
+-- button keeps the new colour; a shade equal to the old background becomes
+-- @c@. Over a transparent background there is no offset to keep, and the
+-- shades are derived as 'fillColor' derives them. Set a shade of its own
+-- with 'hoverBackground' or 'pressBackground' to the left of this.
 background :: Color -> Style -> Style
-background c s = s {styleBg = c}
+background c s =
+  s {styleBg = c, styleHoverBg = follow styleHoverBg, styleActiveBg = follow styleActiveBg}
+  where
+    old = styleBg s
+    follow shade
+      | shade s == old = c
+      | colorA old == 0 = shade (fillColor c s)
+      | otherwise = shiftColor old (shade s) c
+
+-- | @c@ moved by the per-channel offset from @from@ to @to@, keeping @c@'s
+-- alpha.
+shiftColor :: Color -> Color -> Color -> Color
+shiftColor from to c =
+  let ch f = fromIntegral (max 0 (min 255 (fromIntegral (f c) + fromIntegral (f to) - fromIntegral (f from) :: Int)))
+   in colorRGBA (ch colorR) (ch colorG) (ch colorB) (colorA c)
 
 -- | Set a surface's text and foreground colour.
 foreground :: Color -> Style -> Style
@@ -1058,7 +1080,8 @@ pressBackground :: Color -> Style -> Style
 pressBackground c s = s {styleActiveBg = c}
 
 -- | A background with hover and press shades derived from it: hovering mixes
--- in some of the foreground, pressing darkens.
+-- in some of the foreground, pressing darkens. 'background' keeps the
+-- style's own shades instead, moved to the new colour.
 fillColor :: Color -> Style -> Style
 fillColor c s =
   s

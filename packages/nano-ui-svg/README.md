@@ -26,21 +26,19 @@ Use `renderDrawOpsSvg` with `SvgConfig` to emit an inner `<g>` fragment (`svgSta
 
 ## Whole frames
 
-Widget chrome never becomes `DrawOp`s — paint lowers every widget straight to the GPU vertex buffer — so `NanoUI.Draw.FrameSvg` re-renders a finished frame from what a host already sees: solid geometry from `DrawData`, vector drawings from their draw-op caches, and text from the raster spans:
+Paint lowers every widget straight to the GPU vertex buffer, so widget chrome never becomes `DrawOp`s of its own. `NanoUI.Draw.FrameSvg` re-renders a finished frame from the shapes paint recorded while drawing it, vector drawings from their draw-op caches, and text from the raster spans:
 
 ```haskell
-import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
-import NanoUI.Internal.Context (setDrawExternalText, setDrawSquareGeometry)
+import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 
 -- once, before running frames:
-setDrawSquareGeometry ctx True
-setDrawExternalText ctx True
+enableSvgExport ctx
 
 (_, drawData, _) <- runFrame ctx inp view
 svg <- frameToSvg defaultFrameSvgConfig ctx inp drawData
 ```
 
-Square geometry makes every widget shape a flat axis-aligned quad and external text moves all text onto the spans; without them the export still renders, but anti-aliased edges approximate and drawing text is missing. The `nano-ui-demo-svg` executable in `nano-ui-demo` uses this to export the demo's Plots tab.
+`enableSvgExport` records each shape paint draws and moves all text onto the spans; `frameToSvg` fails on a context without it rather than export the text alone. Clip and gradient ids take a prefix from the document's hash, so several documents can be inlined in one page. The `nano-ui-demo-svg` executable in `nano-ui-demo` uses this to export the demo's Plots tab.
 
 ## Documentation
 

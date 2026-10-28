@@ -51,9 +51,10 @@ import NanoUI.Internal.Widgets.Layout (labelEx, labelWith, panelWith, row', rowW
 import NanoUI.Internal.Widgets.Image (ImageConfig (..), defaultImageConfig, imageConfigured', imageNode)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled)
 
--- | Medium-weight label without padding. Uses the current font size.
+-- | Medium-weight label without padding ('fontHeading'). Uses the current
+-- font size.
 heading :: Text -> NanoUI ()
-heading = labelWith (tight . fontMedium)
+heading = labelWith (tight . fontHeading)
 
 -- | Full-width label in the theme's muted colour.
 muted :: Text -> NanoUI ()
