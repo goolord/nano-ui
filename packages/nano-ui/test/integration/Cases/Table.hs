@@ -882,6 +882,9 @@ runTableHeaderTruncateTest ctx failed = do
   spans <- collectTextSpans ctx
   let texts = [t | (_, t, _, _, _) <- spans]
   assert failed (any (\t -> "..." `T.isInfixOf` t) texts)
+  -- A header's text is its label alone: the sort mark's lane is an inset,
+  -- not blank text.
+  assert failed ("Next" `elem` texts)
   case ([r | (r, t, _, _, _) <- spans, "Long" `T.isPrefixOf` t], [r | (r, t, _, _, _) <- spans, "Next" `T.isPrefixOf` t]) of
     (Rect hx _ hw _ : _, Rect nx _ _ _ : _) -> do
       assert failed (hx + hw <= nx)

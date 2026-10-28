@@ -65,7 +65,7 @@ import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVari
 import Data.Bits ((.|.), shiftL)
 import Data.String (IsString (..))
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
-import NanoUI.Internal.WidgetText (buttonFlagTable, stripeColor, tableHeaderLabel, tableSortBlank)
+import NanoUI.Internal.WidgetText (buttonFlagTable, stripeColor, tableSortLane)
 import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
@@ -401,8 +401,8 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
                   remeasure (j + 1)
             remeasure 0
           _ -> mapM_ measure [0 .. n - 1]
-        -- As the header shows it: the sort mark is drawn over a blank slot.
-        writePrimArray hdrWM i . (+ cellPadX) =<< lineWidthIO fm (hdrs V.! i <> tableSortBlank)
+        -- As the header shows it, with the sort mark's lane beside it.
+        writePrimArray hdrWM i . (+ (cellPadX + tableSortLane)) =<< lineWidthIO fm (hdrs V.! i)
       cellWs <- unsafeFreezePrimArray cellWM
       hdrWs <- unsafeFreezePrimArray hdrWM
       let widest i !r !w = if r >= n then w else widest i (r + 1) (max w (indexPrimArray cellWs (i * n + r)))
@@ -689,7 +689,7 @@ tableCore cfg f key cols inputRows curSort =
               styleIx = if active then 1 else 0
           case cellView hdrCell of
             Nothing ->
-              buttonStyledEx True (tableHeaderLabel (smallAt numeric i False) (cellText hdrCell)) styleIx cellLay flags
+              buttonStyledEx True (cellText hdrCell) styleIx cellLay flags
             Just hdrAct -> buttonContentStyled styleIx flags cellLay hdrAct
         textCellAt ri i t = do
           wid <- nextId

@@ -280,9 +280,8 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
       sortMark = if nt == NodeButton && hasFlag buttonFlagTable si then tableSortMarkOf si else 0
   -- Table sort arrow: pinned inside the cell inset to the edge the label
   -- does not align to, the right edge for a left-aligned label and the left
-  -- for a right-aligned one. The label carries a blank reserve slot on that
-  -- side (the ▲/▼ codepoint is not in the pruned UI font), which keeps the
-  -- column wide enough for the text and the arrow.
+  -- for a right-aligned one, in the lane the header keeps there
+  -- ('tableSortLane').
   sortAlign <- if sortMark /= 0 then getAlignX (peNodeArena env) idx else pure AlignStart
   let sortArrowX
         | sortAlign == AlignEnd = x + tableCellInset + 5

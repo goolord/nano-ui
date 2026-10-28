@@ -44,9 +44,6 @@ displayText :: Context -> NodeType -> NodeIdx -> IO Text
 displayText ctx nt idx = do
   txt <- getText (ctxNodeArena ctx) idx
   case nt of
-    NodeButton -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
-      pure $! if hasFlag buttonFlagTable si then tableHeaderDisplayText txt else txt
     NodeTextInput -> textInputFieldText txt <$> textInputValue ctx idx <*> textInputFocused ctx idx
     NodeTextArea -> textInputValue ctx idx
     NodeSelect -> selectDisplayText txt <$> selectCurrentOption ctx idx

@@ -376,18 +376,6 @@ cachedWidgetLabel ctx nt idx labelAlign w h = do
         (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt w h (fromEnum ax) placement) cache)
       pure placement
 
--- | A table header's label cut to @room@, keeping the blank its sort mark is
--- drawn over on whichever side it sits.
-truncateTableHeader :: (T.Text -> IO Float) -> Float -> T.Text -> IO T.Text
-truncateTableHeader lineW room txt
-  | Just hdr <- T.stripPrefix tableSortBlank txt = (tableSortBlank <>) <$> fit hdr
-  | Just hdr <- T.stripSuffix tableSortBlank txt = (<> tableSortBlank) <$> fit hdr
-  | otherwise = truncateTextIO lineW room txt
-  where
-    fit hdr = do
-      blankW <- lineW tableSortBlank
-      truncateTextIO lineW (max 0 (room - blankW)) hdr
-
 -- All coordinates here are local. centeredTextY snaps the baseline offset,
 -- not the origin; final device-pixel snapping stays in the draw backend.
 computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
@@ -403,7 +391,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
           -- padding layout gave a centred label, all of the box beside
           -- adornments, and short of a select's chevron.
           room
-            | isTable = max 0 (w - 2 * tableCellInset)
+            | isTable = max 0 (w - 2 * tableCellInset - tableSortLane)
             | nt == NodeSelect = w - ix - selectChevronReserve
             | ax /= AlignCenter = w
             | hasFlag buttonFlagTab si = w - 2 * tabHeaderPadX
@@ -412,9 +400,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
       (label, tw) <-
         if (plain || isTable || nt == NodeSelect) && tw0 > room + 0.5
           then do
-            cut <- if isTable
-              then truncateTableHeader (fmap fst . measure) room txt
-              else truncateTextIO (fmap fst . measure) room txt
+            cut <- truncateTextIO (fmap fst . measure) room txt
             (cut,) . fst <$> measure cut
           else pure (txt, tw0)
       -- Metrics for the label as it is shown, which places it.

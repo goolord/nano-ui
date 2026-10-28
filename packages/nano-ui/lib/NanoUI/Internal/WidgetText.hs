@@ -41,7 +41,7 @@ module NanoUI.Internal.WidgetText
   , containerFlagInert
   , containerFlagClip
   , hasFlag
-  , tableSortBlank
+  , tableSortLane
   , tableStripeColor
   , tableStripeInset
   , stripeColor
@@ -52,8 +52,6 @@ module NanoUI.Internal.WidgetText
   , textNodeFontWeight
   , textNodeFontStyle
   , textNodeTextDecoration
-  , tableHeaderLabel
-  , tableHeaderDisplayText
   , tableSortMarkOf
   , buttonVisualStyle
   , buttonToneStyle
@@ -332,37 +330,18 @@ tableStripeInset si = case (si `shiftR` 4) .&. 0x0F of
   2 -> tableCellInset
   _ -> 0
 
--- | Slot reserved in every header so the sort mark never changes column
--- width: trailing, or leading ('tableSortReserveLead') in a right-aligned
--- column, whose arrow sits on the left.
-tableSortReserve :: Text
-tableSortReserve = "  ▲"
-
-tableSortReserveLead :: Text
-tableSortReserveLead = "▲  "
-
--- | A header's label with its sort slot, leading when @alignEnd@.
-tableHeaderLabel :: Bool -> Text -> Text
-tableHeaderLabel alignEnd hdr
-  | alignEnd = tableSortReserveLead <> hdr
-  | otherwise = hdr <> tableSortReserve
+-- | The lane every table header keeps beside its label for the sort mark,
+-- on the side the label does not align to: the right of a left-aligned
+-- label, the left of a right-aligned one. Reserved whether or not the column
+-- is sorted, so the mark never changes the column's width or covers the
+-- label.
+tableSortLane :: Float
+tableSortLane = 14
 
 -- | Sort direction encoded for a table-header style, in bits 16-17: clear of
 -- the font fields in the low bits, which it would otherwise restyle.
 tableSortMarkOf :: Int -> Int
 tableSortMarkOf styleIdx = (styleIdx `shiftR` 16) .&. 0x03
-
--- | Blank reserve slot (spaces only). The sort mark is drawn as a triangle
--- over this slot, so the ▲/▼ codepoint never enters measured or laid-out text
--- (the pruned UI font does not carry it).
-tableSortBlank :: Text
-tableSortBlank = T.map (const ' ') tableSortReserve
-
-tableHeaderDisplayText :: Text -> Text
-tableHeaderDisplayText txt
-  | Just hdr <- T.stripSuffix tableSortReserve txt = hdr <> tableSortBlank
-  | Just hdr <- T.stripPrefix tableSortReserveLead txt = tableSortBlank <> hdr
-  | otherwise = txt <> tableSortBlank
 
 -- Type flags live in bits 24-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int

@@ -626,13 +626,10 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
             let (depth, _, _) = treeDecodeStyle si
             measureMarkedWidget fm measure txt (treeRowLeading fm depth) (treeItemPadding fm)
         | otherwise -> do
-            let body
-                  | T.null txt = " "
-                  | hasFlag buttonFlagTable si = tableHeaderDisplayText txt
-                  | otherwise = txt
+            let body = if T.null txt then " " else txt
                 (padX, padY)
                   | nt /= NodeButton = widgetPadding fm
-                  | hasFlag buttonFlagTable si = (2 * tableCellInset, 0)
+                  | hasFlag buttonFlagTable si = (2 * tableCellInset + tableSortLane, 0)
                   | hasFlag buttonFlagTab si = (2 * tabHeaderPadX, snd (buttonPadding fm))
                   -- Menu rows reserve the same gutter the text-field context
                   -- menu paints (outer pad + item pad on each side of the
