@@ -841,8 +841,8 @@ runScrollGlideClampTest ctx failed = do
       assertGt failed (v2Y (scrollRange m)) 0
       assert failed (off <= v2Y (scrollRange m) + 0.5)
 
--- A grow cell with its own minimum width counts as that minimum in a 2D
--- scroller, not as its widest label: the row fits once the window clears the
+-- A grow cell with its own minimum width, zero included, counts as that
+-- minimum in a 2D scroller, not as its widest label: the row fits once the window clears the
 -- cell's minimum and the fixed cells beside it. Without a minimum, a grow
 -- wrapper's content still counts, so wide content keeps its sideways scroll.
 runScroll2DGrowMinWidthTest :: Context -> IORef Int -> IO ()
@@ -864,6 +864,9 @@ runScroll2DGrowMinWidthTest ctx failed = do
   assertEq failed wide 0
   narrow <- rangeX (withInput 150 200) (rows minCell)
   assertGt failed narrow 0
+  -- An explicit zero minimum counts as zero: the row fits at 150 as well.
+  zero <- rangeX (withInput 150 200) (rows (columnWith (grow . minW 0 . tight) (label longName)))
+  assertEq failed zero 0
   wrapped <- rangeX (withInput 400 200) (rows (columnWith (grow . tight) (rowWith (fixedW 600 . tight) (label (T.pack "wide")))))
   assertGt failed wrapped 0
 

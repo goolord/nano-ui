@@ -62,7 +62,7 @@ import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCu
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, styled, uiTheme, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), Style (..), defaultLayout, fillH, fillW, minW, panelStyle, tight)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), Style (..), defaultLayout, explicitMin, fillH, fillW, minW, panelStyle, tight)
 import Data.Bits ((.|.), shiftL)
 import Data.String (IsString (..))
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
@@ -703,10 +703,9 @@ tableCore cfg f key cols inputRows curSort =
                 , primArrayFromList [primAt contentWs i minColW * scaleOf i | i <- [0 .. n - 1]]
                 , primArrayFromList [primAt widths1Arr i 0 * scaleOf i | i <- [0 .. n - 1]]
                 )
-        -- A stretch column's minimum: a token width outside the squeeze,
-        -- which the solver takes as an explicit minimum in place of the
-        -- column's content.
-        stretchMinW = if isJust squeezeBudget then minColW else 1.0e-3
+        -- A stretch column's minimum: an explicit zero outside the squeeze,
+        -- which the solver reports in place of the column's content.
+        stretchMinW = if isJust squeezeBudget then minColW else explicitMin 0
         colBoxes =
           smallArrayFromList (map (colBoxLayout fillInner hasStretch stretchMinW sizesLay contentWsLay widthsLay) [0 .. n - 1])
         colBox i = smallAt colBoxes i (tight defaultLayout)

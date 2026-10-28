@@ -101,6 +101,8 @@ module NanoUI.Internal.Style
   , maxW
   , fixedW
   , minH
+  , explicitMin
+  , hasExplicitMin
   , maxH
   , fixedH
   , fixedWH
@@ -420,8 +422,11 @@ grow :: Layout -> Layout
 grow = fillW . fillH
 
 -- | Set the minimum width in logical pixels without changing the sizing mode.
+-- The minimum is explicit, zero included: a grow node whose width its parent
+-- assigns reports it in place of its content, as CSS's min-width does on a
+-- flex item, so it may shrink below what it holds.
 minW :: Float -> Layout -> Layout
-minW n l = l {layoutMinW = n}
+minW n l = l {layoutMinW = explicitMin n}
 
 -- | Set the maximum width in logical pixels without changing the sizing mode.
 maxW :: Float -> Layout -> Layout
@@ -431,9 +436,22 @@ maxW n l = l {layoutMaxW = n}
 fixedW :: Float -> Layout -> Layout
 fixedW n l = l {layoutWidth = Fixed n, layoutMinW = n, layoutMaxW = n}
 
--- | Set the minimum height in logical pixels without changing the sizing mode.
+-- | Set the minimum height in logical pixels without changing the sizing
+-- mode. Explicit, zero included, as 'minW' is.
 minH :: Float -> Layout -> Layout
-minH n l = l {layoutMinH = n}
+minH n l = l {layoutMinH = explicitMin n}
+
+-- | A minimum set on purpose. Zero is kept as negative zero, which compares
+-- and computes as zero everywhere but tells CSS's @min-width: 0@ from the
+-- default automatic minimum ('hasExplicitMin').
+explicitMin :: Float -> Float
+explicitMin n = if n == 0 then -0.0 else n
+
+-- | Whether a minimum was set on purpose ('explicitMin'): any positive one,
+-- or an explicit zero.
+{-# INLINE hasExplicitMin #-}
+hasExplicitMin :: Float -> Bool
+hasExplicitMin m = m > 0 || isNegativeZero m
 
 -- | Set the maximum height in logical pixels without changing the sizing mode.
 maxH :: Float -> Layout -> Layout

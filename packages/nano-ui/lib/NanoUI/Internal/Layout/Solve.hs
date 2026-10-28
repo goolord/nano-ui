@@ -34,7 +34,7 @@ import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), alignXFraction, alignYFraction, lineAlignFraction, windowMargin)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), alignXFraction, alignYFraction, hasExplicitMin, lineAlignFraction, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan, newZeroedPrimArray, onGrid)
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Frame.Scroll.Geometry
@@ -514,17 +514,36 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
 -- widen for it and the label would wrap into more lines than the modal
 -- measured. Windows keep their own width and truncate long lines instead.
 growParent :: NodeArena -> NodeIdx -> IO Bool
-growParent na idx = getParent na idx >>= go True
+growParent na = growParentOn na True
+
+-- | 'growParent' along the width with @horizontal@, else the height.
+growParentOn :: NodeArena -> Bool -> NodeIdx -> IO Bool
+growParentOn na horizontal idx = getParent na idx >>= go True
   where
     go isParent p
       | p < 0 = pure (not isParent)
       | otherwise = do
-          pwTag <- axTag <$> getWidthSizing na p
-          if pwTag == SizingGrow || pwTag == SizingPercent
+          pTag <- axTag <$> (if horizontal then getWidthSizing else getHeightSizing) na p
+          if pTag == SizingGrow || pTag == SizingPercent
             then getParent na p >>= go False
             else if isParent
               then pure False
               else (/= NodeModal) <$> getNodeType na p
+
+-- | Whether a container of type @nt@ reports its minimum along an axis, with
+-- @horizontal@ the width, in place of its content: it grows along the axis,
+-- its minimum is explicit ('hasExplicitMin'), and its parent assigns its
+-- size there ('growParentOn'). It shrinks that far in a line that is short of
+-- space, so that is the least it needs. As with CSS's min-width on a flex
+-- item, the explicit minimum replaces the content-based one. Otherwise a 2D
+-- scroller, which lays its content out at the width it reports, scrolls
+-- sideways for a long label in a cell that would have fit, and a pane's
+-- content would size the pane grid. Without a minimum the content still
+-- counts, so a grow wrapper around a wide table keeps its sideways scroll.
+minAssignedOn :: NodeArena -> NodeType -> Bool -> NodeIdx -> AxisSizing -> IO Bool
+minAssignedOn na nt horizontal idx (AxisSizing tag _ lo _)
+  | tag == SizingGrow && hasExplicitMin lo && not (isFloatingNode nt) = growParentOn na horizontal idx
+  | otherwise = pure False
 
 -- | Measure a node with no measurable content: an image, a box, a spacer,
 -- or a drawing without its own measure. Unless fixed, it takes @natural@
@@ -688,12 +707,10 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   gCols <- readTree a idx TreeGridCols
   minColW <- readStyle a idx StyleGridMinColW
   flow <- readTagEnum a idx TagFlow
-  wAx@(AxisSizing wTag _ minW _) <- readAxisSizing a idx True
-  hAx@(AxisSizing hTag _ _ _) <- readAxisSizing a idx False
+  wAx@(AxisSizing wTag _ _ _) <- readAxisSizing a idx True
+  hAx <- readAxisSizing a idx False
   nt <- readTagEnum a idx TagNodeType
-  si <- readTree a idx TreeStyleIdx
   let chrome = isChromeColumn nt dir
-      clipped = isClippedContainer nt si
       padX = padL pad + padR pad
       padY = padT pad + padB pad
       -- The room inside the fixed size, or else inside the maximum.
@@ -717,21 +734,9 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
               n <- loadChildrenScratch na idx (flowChildSize env False innerMaxW innerAvailH)
               foldChromeColumnScratch na n gap
           | otherwise -> foldChildDimsFromParent env idx dir gap
-  -- A grow container with its own minimum width, whose width is assigned from
-  -- above, reports that minimum rather than its content: it shrinks that far
-  -- in a row that is short of space, so that is the least it needs. As with
-  -- CSS's min-width on a flex item, the explicit minimum replaces the
-  -- content-based one. Otherwise a 2D scroller, which lays its content out at
-  -- the width it reports, scrolls sideways for a long label in a cell that
-  -- would have fit. Without a minimum the content still counts, so a grow
-  -- wrapper around a wide table keeps its sideways scroll.
-  minAssigned <-
-    if clipped && wTag == SizingGrow
-      then pure True
-      else if wTag == SizingGrow && minW > 0 && not (isFloatingNode nt)
-        then growParent na idx
-        else pure False
-  let h = sizeWithin hAx (if clipped && hTag == SizingGrow then 0 else contentH + padY)
+  minAssignedW <- minAssignedOn na nt True idx wAx
+  minAssignedH <- minAssignedOn na nt False idx hAx
+  let h = sizeWithin hAx (if minAssignedH then 0 else contentH + padY)
   -- A window or modal that fits its width to its content leaves room for its
   -- body's scrollbar when the body will scroll, or the bar's gutter narrows
   -- the content below its measured width and clips its right edge.
@@ -739,7 +744,7 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
     if chrome && wTag /= SizingFixed
       then floatingBodyGutter na idx (contentH + padY - h)
       else pure 0
-  setRect na idx 0 0 (sizeWithin wAx (if minAssigned then 0 else contentW + padX + bodyGutter)) h
+  setRect na idx 0 0 (sizeWithin wAx (if minAssignedW then 0 else contentW + padX + bodyGutter)) h
 
 -- | Width the scrollbar of window or modal @idx@'s body takes when the
 -- window is @overflow@ shorter than its content.
@@ -1010,12 +1015,6 @@ measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap = do
               pure (fromIntegral cols * maxChildW + gap * fromIntegral (max 0 (cols - 1)))
       pure (contentW, contentH)
 
--- | Whether a node of type @nt@ and style index @si@ is a container that
--- clips its content (a pane), so its content does not size it.
-{-# INLINE isClippedContainer #-}
-isClippedContainer :: NodeType -> Int -> Bool
-isClippedContainer nt si = nt == NodeContainer && hasFlag containerFlagClip si
-
 -- | The height node @idx@ takes when @availW@ is offered to it: text and a
 -- measured drawing can wrap taller when narrower, and so can a column that
 -- holds them. Memoized per node and width for the frame.
@@ -1036,8 +1035,8 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
         effW' = clamp minW maxW (if wTag == SizingFixed then wVal else availW)
 
     ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
-    clippedGrowH <-
-      if hTag == SizingGrow then isClippedContainer nt <$> readTree a idx TreeStyleIdx else pure False
+    minAssignedH <-
+      if nt == NodeContainer || nt == NodePanel then minAssignedOn na nt False idx hAx else pure False
     case nt of
       -- A fit height with an aspect ratio is width / ratio.
       _ | ratio > 0 -> pure (clamp minH maxH (effW' / ratio))
@@ -1053,9 +1052,9 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
         | hTag == SizingFit -> drawingHeightAt env idx effW' hAx oldH
         | otherwise -> pure oldH
 
-      -- A clipped container growing in height is as tall as it is given,
-      -- whatever it holds.
-      _ | clippedGrowH -> pure oldH
+      -- A container that reports its minimum height ('minAssignedOn') is as
+      -- tall as it is given, whatever it holds.
+      _ | minAssignedH -> pure oldH
 
       _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
             (pad, gap, dir) <- containerFlow a idx
