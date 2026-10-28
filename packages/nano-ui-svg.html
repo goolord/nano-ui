@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>nano-ui-svg: Headless SVG Export - nano-ui Documentation</title>
+        <title>Headless SVG Export - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,26 +178,69 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="nano-ui-svg-headless-svg-export"><a class="header" href="#nano-ui-svg-headless-svg-export">nano-ui-svg: Headless SVG Export</a></h1>
-<p><code>nano-ui-svg</code> exports <code>nano-ui</code> draw operations (<code>DrawOp</code>) and complete layout frames directly to scalable vector graphics (SVG).</p>
-<h2 id="use-cases"><a class="header" href="#use-cases">Use Cases</a></h2>
+                        <h1 id="headless-svg-export-nano-ui-svg"><a class="header" href="#headless-svg-export-nano-ui-svg">Headless SVG Export (<code>nano-ui-svg</code>)</a></h1>
+<p><code>nano-ui-svg</code> turns nano-ui drawing into SVG. It has two levels:</p>
 <ul>
-<li><strong>Interactive Documentation</strong>: All the interactive specimens and workbenches in this book are generated headlessly using <code>frameToSvg</code>!</li>
-<li><strong>Headless Screenshot &amp; Regression Testing</strong>: Render entire views to SVG in CI without a display server (X11, Wayland, or Windows desktop) and diff against golden SVGs.</li>
-<li><strong>Diagram Export</strong>: Export charts and canvases to standalone <code>.svg</code> files for reports.</li>
+<li><strong><code>NanoUI.Draw.Svg</code></strong> exports <code>DrawOp</code> sequences from canvases, custom widgets, and <code>nano-ui-diagrams</code>.</li>
+<li><strong><code>NanoUI.Draw.FrameSvg</code></strong> re-renders a whole painted frame: widget geometry, vector drawings, and text.</li>
 </ul>
-<h2 id="exporting-a-frame-to-svg"><a class="header" href="#exporting-a-frame-to-svg">Exporting a Frame to SVG</a></h2>
+<h2 id="drawing-operations"><a class="header" href="#drawing-operations">Drawing operations</a></h2>
 <pre><code class="language-haskell">import NanoUI
-import NanoUI.Testing (newPixelContext, runFrame)
+import NanoUI.Draw.Svg (drawOpsToSvg)
+import NanoUI.Path qualified as P
+
+exportBadge :: CustomDrawContext -&gt; IO ()
+exportBadge cdc = do
+  let bounds = Rect 0 0 120 40
+      ops = runCanvasFor cdc $ do
+        drawRoundedRect bounds 8 (colorRGBA 37 99 235 255)
+        drawStrokePath (P.circle (V2 20 20) 8) 2 colorWhite
+        drawText (V2 68 20) AlignCenter AlignMiddle "Ready" colorWhite
+  TIO.writeFile "badge.svg" (drawOpsToSvg bounds ops)
+</code></pre>
+<p><code>renderDrawOpsSvg</code> with an <code>SvgConfig</code> emits an inner <code>&lt;g&gt;</code> fragment (<code>svgStandalone = False</code>), adjusts coordinate precision (<code>svgPrecision</code>), or supplies an image URI resolver (<code>svgImageUri</code>).</p>
+<h2 id="whole-frames"><a class="header" href="#whole-frames">Whole frames</a></h2>
+<p>Widget chrome is not represented as <code>DrawOp</code>s — paint lowers widgets directly to the GPU vertex buffer. <code>frameToSvg</code> rebuilds a frame from what the host sees: solid geometry from <code>DrawData</code>, vector drawings from their draw-op caches, and text from the raster spans.</p>
+<pre><code class="language-haskell">import NanoUI
 import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, frameToSvg)
+import NanoUI.Internal.Context (setDrawExternalText, setDrawSquareGeometry)
+import NanoUI.Testing (newPixelContext, runFrame)
+import NanoUI.Testing.Harness (withInputOff)
 
 exportViewToSvg :: NanoUI () -&gt; IO Text
-exportViewToSvg myView = do
+exportViewToSvg view = do
   ctx &lt;- newPixelContext
-  (result, drawData, isDirty) &lt;- runFrame ctx myView
-  pure (frameToSvg defaultFrameSvgConfig ctx drawData)
+  let inp = withInputOff 1280 800
+  -- Once, before running frames:
+  setDrawSquareGeometry ctx True
+  setDrawExternalText ctx True
+  (_, drawData, _) &lt;- runFrame ctx inp view
+  frameToSvg defaultFrameSvgConfig ctx inp drawData
 </code></pre>
-<p>The exported SVG includes proper <code>clip-path</code> masks, linear gradients, rounded rectangles, and embedded font metrics.</p>
+<p>The two <code>setDraw...</code> switches matter:</p>
+<ul>
+<li><strong><code>setDrawSquareGeometry</code></strong> makes every widget shape a flat axis-aligned quad. Without it, anti-aliased edges are approximations of the rounded shapes.</li>
+<li><strong><code>setDrawExternalText</code></strong> moves all text onto the spans the exporter reads. Without it, drawing text is missing from the export.</li>
+</ul>
+<p>The export includes proper <code>clip-path</code> masks, linear gradients, rounded rectangles, and font metrics. The interactive specimens and workbenches in this book are generated with this path, and the <code>nano-ui-demo-svg</code> executable exports the demo’s Plots tab.</p>
+<h2 id="use-cases"><a class="header" href="#use-cases">Use cases</a></h2>
+<ul>
+<li><strong>Documentation</strong>: render a view or widget to an SVG for a static page.</li>
+<li><strong>Visual regression testing</strong>: run frames headlessly in CI (no X11, Wayland, or Windows desktop) and diff against golden SVGs.</li>
+<li><strong>Diagram export</strong>: write charts and canvases to standalone <code>.svg</code> files for reports.</li>
+</ul>
+<h2 id="pitfalls"><a class="header" href="#pitfalls">Pitfalls</a></h2>
+<ul>
+<li>Several canvas drawings in one frame can emit colliding <code>clip_</code>/<code>grad_</code> element ids. Scope them per drawing, for example by prefixing each <code>&lt;g&gt;&lt;defs&gt;</code> block with an index.</li>
+<li>Right-aligned numerals can lose their anchor: <code>text-anchor</code>/<code>textLength</code> may need post-processing. Use tabular numbers (<code>font-variant-numeric: tabular-nums</code>) for readouts.</li>
+<li>Widget chrome comes from the frame’s vertex data, not from <code>DrawOp</code>s; a custom widget must draw through the canvas API to appear in the vector output.</li>
+</ul>
+<h2 id="related"><a class="header" href="#related">Related</a></h2>
+<ul>
+<li>Custom drawing: <a href="../widgets/canvas-custom.html">Canvas Drawing</a>.</li>
+<li>Charts: <a href="nano-ui-diagrams.html">Charts &amp; Diagrams</a>.</li>
+<li>Headless testing: <code>NanoUI.Testing</code> and <code>NanoUI.Testing.Harness</code>.</li>
+</ul>
 
                     </main>
 
@@ -207,7 +250,7 @@ exportViewToSvg myView = do
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../advanced/keyboard-focus.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../troubleshooting/recurring-bugs.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -221,7 +264,7 @@ exportViewToSvg myView = do
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../advanced/keyboard-focus.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../troubleshooting/recurring-bugs.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -251,7 +294,7 @@ exportViewToSvg myView = do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

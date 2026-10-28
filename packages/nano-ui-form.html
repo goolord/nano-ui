@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>nano-ui-form: Validated Forms - nano-ui Documentation</title>
+        <title>Validated Forms - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,25 +178,106 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="nano-ui-form-validated-forms"><a class="header" href="#nano-ui-form-validated-forms">nano-ui-form: Validated Forms</a></h1>
-<p><code>nano-ui-form</code> provides applicative form composition and declarative validation based on <code>ditto</code>.</p>
-<h2 id="composing-validated-forms"><a class="header" href="#composing-validated-forms">Composing Validated Forms</a></h2>
-<p>Forms combine field inputs, error messages, and validation rules applicatively:</p>
-<pre><code class="language-haskell">data UserRegistration = UserRegistration
-  { username :: Text
-  , age      :: Int
-  , email    :: Text
-  }
+                        <h1 id="validated-forms-nano-ui-form"><a class="header" href="#validated-forms-nano-ui-form">Validated Forms (<code>nano-ui-form</code>)</a></h1>
+<p><code>nano-ui-form</code> builds applicative forms on <a href="https://hackage.haskell.org/package/ditto">ditto</a>. A form is a value whose inputs draw nano-ui widgets and whose validators produce errors; running it renders the fields and returns the parsed record when the form is valid.</p>
+<pre><code class="language-haskell">{-# LANGUAGE OverloadedStrings #-}
 
-registrationForm :: Form NanoUI UserRegistration
-registrationForm = UserRegistration
-  &lt;$&gt; field "Username" (nonEmpty "Username required" textInput)
-  &lt;*&gt; field "Age" (check (&gt; 13) "Must be at least 13" (numericInput 0 120))
-  &lt;*&gt; field "Email" (check containsAt "Invalid email" textInput)
-  where
-    containsAt t = "@" `T.isInfixOf` t
+import Data.Text (Text)
+import NanoUI (NanoUI, label)
+import NanoUI.Form hiding (label)
+
+data Signup = Signup Text Text
+
+signup :: Form Text Signup
+signup =
+  Signup
+    &lt;$&gt; withFieldErrors (inputText "Name" "" `prove` notEmpty "Name is required")
+    &lt;*&gt; withFieldErrors (inputText "Email" "" `prove` validEmail (const "Not an email address"))
 </code></pre>
-<p>When submitted, validation errors are rendered inline beside invalid fields. Successful submissions produce the parsed, strongly typed <code>UserRegistration</code> record.</p>
+<p><code>Form err a</code> fixes the error type (here <code>Text</code>) and the result type (here <code>Signup</code>). Each <code>inputText</code> is a field; <code>prove</code> attaches a validation <code>Proof</code>; <code>withFieldErrors</code> renders the error below the field.</p>
+<h2 id="running-a-form"><a class="header" href="#running-a-form">Running a form</a></h2>
+<p>Allocate a <code>FormState</code> once, before the session, and pass the same stable prefix every frame:</p>
+<pre><code class="language-haskell">main :: IO ()
+main = do
+  owner &lt;- newFormState
+  runSdlApp defaultSdlOptions (view owner)
+
+view :: FormState -&gt; NanoUI ()
+view owner = do
+  submitted &lt;- nanoFormSubmit owner "signup" "Sign up" signup
+  case submitted of
+    Just (Signup name _) -&gt; label ("Welcome, " &lt;&gt; name)
+    Nothing              -&gt; pure ()
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Runner</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td><code>nanoFormSubmit owner prefix label form</code></td><td>Adds a submit button; returns <code>Just a</code> on the frame a valid form is submitted.</td></tr>
+<tr><td><code>nanoFormLive owner prefix form</code></td><td>Returns <code>Just a</code> whenever the form is valid, for previews.</td></tr>
+<tr><td><code>nanoFormEx owner config prefix form</code></td><td>Configured runner; returns <code>FormValid a</code> or <code>FormInvalid errs</code>.</td></tr>
+<tr><td><code>runNanoForm owner prefix form</code></td><td>Returns the form’s view and result separately.</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>nanoFormLive</code> on every frame is fine for a preview, but <code>Just</code> is not an event: if the value must remain visible after submission, store it. <code>nanoFormSubmit</code>’s <code>Just</code> is a one-frame event.</p>
+<p>Give each form a distinct stable prefix, and allocate one <code>FormState</code> per component or session. A changed prefix is a different form. Call <code>resetForm owner prefix</code> when starting a new entry with the same form.</p>
+<p><code>FormOnSubmit</code> forms show errors only after the first submission; call <code>markSubmitted</code> from your own submit button when you render one yourself. <code>nanoFormSubmit</code> and <code>nanoFormEx</code> handle that marking.</p>
+<h2 id="inputs"><a class="header" href="#inputs">Inputs</a></h2>
+<p><code>NanoUI.Form.Input</code> provides one family for named and positional fields:</p>
+<pre><code class="language-haskell">inputText "name" "Ada"                     -- stable key and caption
+inputText unnamed "Ada"                    -- numbered, no caption
+inputCheckbox (unnamed {fieldLabel = Just "Accept"}) False
+inputText ((named "login") {fieldLabel = Just "User name"}) "Ada"
+</code></pre>
+<p>The family includes <code>inputText</code>, <code>inputTextWithPlaceholder</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputEnumSelect</code>, <code>inputRadio</code>, <code>inputEnumRadio</code>, and <code>inputColor</code>.</p>
+<h2 id="validation"><a class="header" href="#validation">Validation</a></h2>
+<p><code>NanoUI.Form.Validation</code> supplies the common proofs:</p>
+<pre><code class="language-haskell">notEmpty "Required"
+minLength 8 (\n -&gt; "Use at least " &lt;&gt; T.pack (show n) &lt;&gt; " characters")
+maxLength 64 (const "Too long")
+inRange 0 130 (const "Out of range")
+validEmail (const "Not an email address")
+matches confirmPassword "Passwords do not match"
+</code></pre>
+<p>The numeric proofs from ditto read a <code>String</code>; apply them after <code>fmap T.unpack</code>:</p>
+<pre><code class="language-haskell">(T.unpack &lt;$&gt; inputText "Age" "") `prove` decimal (const "Not a number") 0
+</code></pre>
+<p><code>customProof</code> and <code>satisfies</code> cover everything else. Errors accumulate applicatively: every invalid field reports its own error, and the record is produced only when all fields validate.</p>
+<h2 id="adapting-a-widget"><a class="header" href="#adapting-a-widget">Adapting a widget</a></h2>
+<p><code>inputWidget</code> adapts any widget of type <code>Var a -&gt; NanoUI Response</code>:</p>
+<pre><code class="language-haskell">import NanoUI qualified as UI
+
+volume :: Form Text Float
+volume =
+  inputWidget (Just "volume") decode (OnChangeOr UI.respChanged) FormInputFloat
+    (UI.knob' 0 100) 50
+  where
+    decode (FormInputFloat n) = Right n
+    decode _ = Left "Expected a volume"
+</code></pre>
+<p>The arguments are the optional stable name, a decoder, a publication policy, the encoder, the widget, and the initial value. <code>Nothing</code> selects positional identity.</p>
+<p>Publication policies decide when an edit is committed to the form:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Policy</th><th>Publishes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>OnChange</code></td><td>Whenever the widget’s <code>Var</code> changes to a different value.</td></tr>
+<tr><td><code>OnChangeOr p</code></td><td>Also when <code>p</code> holds for the response (for widgets that report an edit without value change).</td></tr>
+<tr><td><code>OnlyWhen p</code></td><td>Only when <code>p</code> holds, such as <code>OnlyWhen UI.respSubmitted</code> for an Enter-committed field.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Uncommitted edits stay in the field state across frames until committed.</p>
+<blockquote class="blockquote-tag blockquote-tag-note">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
+<p>Form state is keyed by the prefix and the field names. Changing a caption does not change the stored key; changing the prefix starts a new form. This makes forms safe across frames and sortable/filterable views, but it also means two forms with the same prefix share field state.</p>
+</blockquote>
+<p>The package’s example (<code>cabal run nano-ui-form-example</code>) needs <code>nano-ui-sdl</code>; the library itself has no backend dependency.</p>
 
                     </main>
 
@@ -250,7 +331,7 @@ registrationForm = UserRegistration
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

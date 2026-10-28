@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Architecture &amp; Application Patterns - nano-ui Documentation</title>
+        <title>Widget Gallery - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,79 +178,110 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="architecture--application-patterns"><a class="header" href="#architecture--application-patterns">Architecture &amp; Application Patterns</a></h1>
-<p>Real-world applications built on <code>nano-ui</code> (such as <code>ned</code>, a vim-like modal editor, <code>stronghead</code>, a profiling debugger, and <code>winget-gui</code>, a Windows package manager client) converge on clean, highly reliable architectural patterns.</p>
-<h2 id="the-core-rule-setup-once-in-io-then-run"><a class="header" href="#the-core-rule-setup-once-in-io-then-run">The Core Rule: Setup Once in IO, Then Run</a></h2>
-<p>Everything frame-lived is either managed via a <code>Var</code> or declared directly inside the view action:</p>
-<pre><code class="language-haskell">main :: IO ()
-main = do
-  cache &lt;- newViewCache      -- Persistent records of newVar calls &amp; caches
-  env   &lt;- newAppEnv         -- Application state outside nano-ui
-  runSdlApp defaultSdlOptions (appView env cache)
+                        <h1 id="widget-gallery"><a class="header" href="#widget-gallery">Widget Gallery</a></h1>
+<p>Every widget is an ordinary function in <code>NanoUI</code> that appends a node to the frame and reports what happened to it. This page is the index; each family has a chapter with signatures and examples.</p>
+<h2 id="how-widget-names-work"><a class="header" href="#how-widget-names-work">How widget names work</a></h2>
+<p>The same four names appear across the library:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Form</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>button "Save"</code></td><td>Base form. Returns <code>Bool</code> (activated) or <code>()</code></td></tr>
+<tr><td><code>button'</code></td><td>Primed form. Also — or instead — returns a <code>Response</code></td></tr>
+<tr><td><code>buttonWith (fixedW 120)</code></td><td>Takes a <code>Layout -&gt; Layout</code> modifier first</td></tr>
+<tr><td><code>buttonConfigured cfg</code></td><td>Takes a config record; every config has a <code>default...Config</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Response</code> is the shared record for widget identity and interaction:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field / helper</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>respId</code></td><td>The widget’s <code>WidgetId</code> (focus, menus, scroll targets)</td></tr>
+<tr><td><code>respRect</code></td><td>The widget’s rectangle from the <strong>previous</strong> frame</td></tr>
+<tr><td><code>respHovered</code></td><td>Pointer is over the widget</td></tr>
+<tr><td><code>respPressed</code></td><td>Held down, not yet released</td></tr>
+<tr><td><code>respClicked</code></td><td>Activated: left click, Enter, or Space</td></tr>
+<tr><td><code>respChanged</code></td><td>The value was edited</td></tr>
+<tr><td><code>respSubmitted</code></td><td>Committed, for example Enter in a text field</td></tr>
+<tr><td><code>respHeldWith</code> / <code>respClickedWith</code></td><td>Which <code>MouseButton</code> is held / clicked</td></tr>
+<tr><td><code>respRightPressed</code> / <code>respRightClicked</code></td><td>Secondary-button variants</td></tr>
+</tbody>
+</table>
+</div>
+<p>Anything with a <code>Response</code> can be a <code>HasResponse</code> argument to <code>tooltip</code>, <code>contextMenu</code>, and focus helpers.</p>
+<h2 id="the-families"><a class="header" href="#the-families">The families</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Family</th><th>What is there</th><th>Chapter</th></tr>
+</thead>
+<tbody>
+<tr><td>Containers</td><td><code>row</code>, <code>column</code>, <code>grid</code>, <code>panel</code>, <code>card</code>, <code>callout</code>, <code>toolbar</code>, <code>center</code>, <code>responsive</code>, <code>scroll</code>, <code>scroll2D</code>, <code>layers</code>, <code>mouseArea</code>, <code>separator</code>, <code>spacer</code></td><td><a href="../layout/containers.html">Containers</a></td></tr>
+<tr><td>Text</td><td><code>label</code>, <code>heading</code>, <code>muted</code>, <code>mono</code>, <code>danger</code>, <code>kv</code>, <code>selectableText</code></td><td><a href="../styling/typography.html">Typography</a></td></tr>
+<tr><td>Buttons and menus</td><td><code>button</code>, <code>iconButton</code>, <code>buttonContent</code>, <code>menuButton</code>, <code>menuItem</code>, <code>menuSeparator</code>, <code>contextMenu</code></td><td><a href="buttons-menus.html">Buttons &amp; Menus</a></td></tr>
+<tr><td>Inputs</td><td><code>checkbox</code>, <code>toggleButton</code>, <code>radio</code> / <code>enumRadio</code>, <code>select</code> / <code>enumSelect</code> / <code>boundedSelect</code>, <code>slider</code>, <code>textInput</code>, <code>searchInput</code>, <code>numericInput</code>, <code>comboBox</code>, <code>textArea</code>, <code>textAreaDocument</code>, <code>colorPicker</code></td><td><a href="inputs.html">Input Controls</a></td></tr>
+<tr><td>Tabs</td><td><code>tabs</code>, <code>tabBar</code>, <code>closableTab</code>, enum and bounded variants</td><td><a href="../styling/widget-surfaces.html">Workbenches</a></td></tr>
+<tr><td>Trees and tables</td><td><code>tree</code>, <code>table</code>, <code>simpleTable</code> (Colonnade-based, sortable)</td><td><a href="tables-trees.html">Tables &amp; Trees</a></td></tr>
+<tr><td>Overlays</td><td><code>modal</code>, <code>window</code>, <code>popup</code>, <code>tooltip</code>, <code>contextMenu</code></td><td><a href="overlays.html">Overlays &amp; Windows</a></td></tr>
+<tr><td>Panes</td><td><code>paneGrid</code> for dockable, splittable layouts</td><td><a href="drag-and-drop.html">Drag &amp; Drop</a></td></tr>
+<tr><td>Drag and drop</td><td><code>useDrag</code>, <code>useDrop</code>, <code>dropZone</code>, <code>useReorder</code>, <code>insertionIndex</code></td><td><a href="drag-and-drop.html">Drag &amp; Drop</a></td></tr>
+<tr><td>Rich text</td><td><code>NanoUI.Widgets.RichText</code> spans and paragraphs</td><td><code>NanoUI.Widgets.RichText</code></td></tr>
+<tr><td>Images and SVG</td><td><code>image</code>, <code>imageConfigured</code>, <code>svgIcon</code>, <code>parseSvg</code>, image handles</td><td><code>NanoUI</code> API</td></tr>
+<tr><td>Custom controls</td><td>switches, knobs, progress bars, spinners, sparklines</td><td><a href="custom-controls.html">Custom Controls</a></td></tr>
+<tr><td>Canvas drawing</td><td><code>customWidget</code>, <code>canvas</code>, paths, strokes, gradients</td><td><a href="canvas-custom.html">Canvas Drawing</a></td></tr>
+</tbody>
+</table>
+</div>
+<p>The authoritative list is the export list in <code>packages/nano-ui/lib/NanoUI.hs</code>; if this book and that file disagree, the file wins. The <a href="../styling/widget-surfaces.html">interactive workbenches</a> render many of these families live.</p>
+<h2 id="input-widgets-and-var"><a class="header" href="#input-widgets-and-var">Input widgets and <code>Var</code></a></h2>
+<p>Input widgets take the <code>Var</code> they display and mutate it directly. There is no callback and no on-change handler:</p>
+<pre><code class="language-haskell">query &lt;- useVar ""
+textInput query
+
+volume &lt;- newVar 40
+slider 0 100 volume
+
+enabled &lt;- useVar True
+checkbox "Enabled" enabled
 </code></pre>
-<hr>
-<h2 id="pattern-a-the-winget-gui-pattern-worker-threads--ioref"><a class="header" href="#pattern-a-the-winget-gui-pattern-worker-threads--ioref">Pattern A: The <code>winget-gui</code> Pattern (Worker Threads + IORef)</a></h2>
-<p>For applications performing extensive I/O, subprocess execution, or database queries:</p>
-<pre><code class="language-haskell">data Env = Env
-  { envState :: IORef AppState
-  , envWake  :: IORef (IO ())
-  }
-
-main :: IO ()
-main = do
-  stateRef &lt;- newIORef initialAppState
-  wakeRef  &lt;- newIORef (pure ())
-  let env = Env stateRef wakeRef
-  runSdlApp opts (appView env)
-
-appView :: Env -&gt; NanoUI ()
-appView env = do
-  -- Install the wake callback on the first frame
-  wakeCb &lt;- askWake
-  liftIO $ writeIORef env.envWake wakeCb
-
-  -- Snapshot the state at the beginning of the frame
-  state &lt;- liftIO $ readIORef env.envState
-
-  -- Build UI hierarchy top-to-bottom
-  mainLayout state
+<p>To react to an edit, use the primed form’s <code>Response</code>:</p>
+<pre><code class="language-haskell">resp &lt;- textInput' query
+when (respSubmitted resp) (search =&lt;&lt; readVar query)
 </code></pre>
-<h3 id="thread-safety-with-askwake"><a class="header" href="#thread-safety-with-askwake">Thread Safety with <code>askWake</code></a></h3>
-<p>Background threads update <code>envState</code> atomically, then trigger a redraw:</p>
-<pre><code class="language-haskell">forkIO $ do
-  results &lt;- queryPackageDatabase
-  atomicModifyIORef' env.envState (\s -&gt; (s { packages = results }, ()))
-  wake &lt;- readIORef env.envWake
-  wake  -- Wake the event loop for a new frame
+<p><code>searchInput'</code> debounces <code>respChanged</code> until typing pauses; <code>textInput'</code> reports every change. That difference matters for expensive work:</p>
+<pre><code class="language-haskell">resp &lt;- searchInput' query
+when (respChanged resp) refreshResults     -- once per pause, not per keystroke
 </code></pre>
-<hr>
-<h2 id="pattern-b-the-stronghead-pattern-app-record-of-vars"><a class="header" href="#pattern-b-the-stronghead-pattern-app-record-of-vars">Pattern B: The <code>stronghead</code> Pattern (App Record of <code>Var</code>s)</a></h2>
-<p>For complex multi-pane applications with tightly coupled interactive state:</p>
-<pre><code class="language-haskell">data App = App
-  { filterText :: Var Text
-  , activeTab  :: Var TabId
-  , zoomLevel  :: Var Float
-  , isInspecting :: Var Bool
-  }
-
-newApp :: IO App
-newApp = App
-  &lt;$&gt; newVar ""
-  &lt;*&gt; newVar TabOverview
-  &lt;*&gt; newVar 1.0
-  &lt;*&gt; newVar False
+<h2 id="layout-is-an-argument"><a class="header" href="#layout-is-an-argument">Layout is an argument</a></h2>
+<p><code>row</code>, <code>column</code>, and friends take a layout; <code>rowWith</code> and <code>columnWith</code> take a <code>Layout -&gt; Layout</code> modifier first. Modifiers compose with <code>(.)</code>, and the leftmost wins:</p>
+<pre><code class="language-haskell">columnWith (gap 8 . padAll 12 . fillW) $ do
+  label "Settings"
+  buttonWith (fixedW 120) "Apply"
 </code></pre>
-<p>The <code>App</code> record is passed into view functions, which read and mutate its fields directly with zero global state.</p>
+<p>Sizing comes from content by default. A label whose text changes length will move its siblings unless its width is pinned; see <a href="../troubleshooting/recurring-bugs.html">Recurring Bugs &amp; Fixes</a> for the fixes that came from real applications.</p>
+<h2 id="where-to-go-next"><a class="header" href="#where-to-go-next">Where to go next</a></h2>
+<ul>
+<li>Build one: <a href="../tutorials/todo-list.html">Build a Todo List</a> uses lists, keys, text input, filtering, and per-row state.</li>
+<li>Arrange them: <a href="../layout/containers.html">Layout</a> and <a href="../layout/modifiers.html">Layout Modifiers</a>.</li>
+<li>Style them: <a href="../styling/overview.html">Theming &amp; Surfaces</a> and the <a href="../styling/widget-surfaces.html">workbenches</a>.</li>
+<li>Draw outside the box: <a href="custom-controls.html">Custom Controls</a> and <a href="canvas-custom.html">Canvas Drawing</a>.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../core/identity.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../layout/scrolling.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../layout/containers.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../widgets/buttons-menus.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -260,11 +291,11 @@ newApp = App
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../core/identity.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../layout/scrolling.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../layout/containers.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../widgets/buttons-menus.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -294,7 +325,7 @@ newApp = App
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

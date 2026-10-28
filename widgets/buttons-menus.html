@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -179,51 +179,108 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="buttons--menus"><a class="header" href="#buttons--menus">Buttons &amp; Menus</a></h1>
-<p>Buttons are immediate-mode widgets that return <code>Bool</code> indicating activation, or a primed <code>Response</code> record.</p>
+<p>Buttons are immediate-mode widgets: they draw themselves and return whether they were activated this frame, or a primed <code>Response</code> with the details.</p>
 <h2 id="signatures"><a class="header" href="#signatures">Signatures</a></h2>
-<pre><code class="language-haskell">button        :: Text -&gt; NanoUI Bool
-button'       :: Text -&gt; NanoUI Response
-buttonWith    :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI Bool
-buttonContent :: NanoUI () -&gt; NanoUI Bool
-iconButton    :: SvgIcon -&gt; NanoUI Bool
-menuButton    :: Text -&gt; NanoUI () -&gt; NanoUI ()
-menuItem      :: Text -&gt; NanoUI Bool
-menuSeparator :: NanoUI ()
-contextMenu   :: Response -&gt; NanoUI () -&gt; NanoUI ()
+<pre><code class="language-haskell">button         :: Text -&gt; NanoUI Bool
+button'        :: Text -&gt; NanoUI Response
+buttonWith     :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI Bool
+buttonWith'    :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI Response
+buttonConfigured  :: ButtonConfig -&gt; Text -&gt; NanoUI Bool
+buttonConfigured' :: ButtonConfig -&gt; Text -&gt; NanoUI Response
+buttonContent  :: NanoUI () -&gt; NanoUI Bool
+iconButton     :: Svg -&gt; Text -&gt; NanoUI Bool
+menuButton     :: Text -&gt; Bool -&gt; NanoUI Bool
+menuButton'    :: Text -&gt; Bool -&gt; NanoUI Response
+menuItem       :: Text -&gt; NanoUI Bool
+menuItemShortcut :: Text -&gt; Shortcut -&gt; NanoUI Bool
+menuItemDisabled :: Text -&gt; NanoUI ()
+menuSeparator  :: NanoUI ()
+contextMenu    :: HasResponse r =&gt; r -&gt; NanoUI a -&gt; NanoUI (Maybe a)
 </code></pre>
-<h2 id="push-buttons"><a class="header" href="#push-buttons">Push Buttons</a></h2>
-<p>A button returns <code>True</code> only in the single frame it was activated (via left mouse click or keyboard Enter/Space when focused):</p>
-<pre><code class="language-haskell">whenM (button "Save Document") $ do
-  liftIO saveFile
+<h2 id="push-buttons"><a class="header" href="#push-buttons">Push buttons</a></h2>
+<p><code>button</code> returns <code>True</code> only on the frame it is activated, by left click or by Enter/Space while focused:</p>
+<pre><code class="language-haskell">whenM (button "Save Document") (liftIO saveFile)
 </code></pre>
-<h3 id="custom-content-with-buttoncontent"><a class="header" href="#custom-content-with-buttoncontent">Custom Content with <code>buttonContent</code></a></h3>
-<p>To embed icons, rich layout, or bold text inside a button:</p>
+<p>The <code>whenM</code> guard is essential: the view runs every frame, so an unguarded <code>saveFile</code> would run forever. The same applies to every event in this chapter.</p>
+<p>Use the primed form when you need the response — hover state, a rectangle for an anchored popup, or a tooltip:</p>
+<pre><code class="language-haskell">resp &lt;- button' "Refresh"
+tooltip resp "Poll the remote server for updates"
+when (respClicked resp) refresh
+</code></pre>
+<h3 id="custom-content"><a class="header" href="#custom-content">Custom content</a></h3>
+<p><code>buttonContent</code> lets the button contain any view. The content is laid out like a label and takes the button’s text color; a click anywhere on the button activates it:</p>
 <pre><code class="language-haskell">whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
-        svgIcon saveIcon
-        labelWith (fontBold . fontTone Danger) "Delete") $ do
-  confirmDelete
+          svgIcon 16 saveIcon
+          label "Save") $
+  saveDocument
 </code></pre>
-<hr>
-<h2 id="dropdown-menus--context-menus"><a class="header" href="#dropdown-menus--context-menus">Dropdown Menus &amp; Context Menus</a></h2>
-<p><code>menuButton</code> displays a trigger that opens a dropdown popup menu:</p>
-<pre><code class="language-haskell">menuButton "File" $ do
-  whenM (menuItem "New File") createNew
-  whenM (menuItem "Open...") openFile
-  menuSeparator
-  whenM (menuItem "Exit") quitUi
+<p><code>iconButton</code> is the common case of a leading icon, with an optional label:</p>
+<pre><code class="language-haskell">whenM (iconButton saveIcon "Save") saveDocument
+whenM (iconButton gearIcon "") openSettings   -- icon alone, square button
 </code></pre>
-<p>Attach a right-click context menu to any widget using its <code>Response</code>:</p>
-<pre><code class="language-haskell">resp &lt;- card' $ label "Right-click me for actions"
-contextMenu resp $ do
+<h2 id="menu-buttons-and-popups"><a class="header" href="#menu-buttons-and-popups">Menu buttons and popups</a></h2>
+<p><code>menuButton</code> draws a menu-bar title. Its second argument is whether the menu is open, and it returns <code>True</code> when the title is clicked:</p>
+<pre><code class="language-haskell">fileOpen &lt;- useVar False
+btn &lt;- menuButton' "File" =&lt;&lt; readVar fileOpen
+when (respClicked btn) (modifyVar fileOpen not)
+</code></pre>
+<p><code>menuButton</code> does not draw the menu itself. A menu is a <code>popup'</code> anchored to the button’s rectangle, and its contents are ordinary <code>NanoUI</code>:</p>
+<pre><code class="language-haskell">fileMenu :: Var Bool -&gt; Var Text -&gt; NanoUI ()
+fileMenu fileOpen docPath = do
+  isOpen &lt;- readVar fileOpen
+  btn &lt;- menuButton' "File" isOpen
+  when (respClicked btn) (writeVar fileOpen (not isOpen))
+
+  let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
+              {cfgPlacement = PlacementBelow, cfgOffset = 0}
+  -- constVar: the truth is `isOpen`, so writes to the popup's Var are no-ops.
+  (popupResp, _) &lt;- popup' (constVar isOpen) cfg $
+    columnWith (tight . gap 0) $ do
+      whenM (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) $ do
+        writeVar docPath ""
+        writeVar fileOpen False
+      whenM (menuItemShortcut "Open..." (cmdOrCtrl &lt;&gt; key 'o')) $ do
+        startOpenDialog          -- application action: askOpenFileDialog, etc.
+        writeVar fileOpen False
+      menuSeparator
+      whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
+
+  when (respClicked popupResp) (writeVar fileOpen False)
+</code></pre>
+<p>Why <code>constVar</code>? <code>popup'</code> requires a <code>Var Bool</code> for open state, but the real state is “this menu’s label is the open one”. <code>constVar isOpen</code> supplies a read-only <code>Var</code>; a click on the popup is reported through <code>popupResp</code>, and the code writes <code>fileOpen</code> itself.</p>
+<p><code>prompt</code> for menu rows:</p>
+<ul>
+<li><code>menuItem</code> returns <code>True</code> when clicked.</li>
+<li><code>menuItemShortcut</code> shows the chord label and binds the chord <strong>while the menu is open</strong>. Bind the same chord with <code>shortcut</code> outside the menu for when it is closed; the menu row declared first wins while open.</li>
+<li><code>menuItemDisabled</code> draws a dimmed row that cannot be clicked.</li>
+<li><code>menuSeparator</code> draws a divider.</li>
+</ul>
+<p>A complete menu bar with File/Edit/View/Help menus, commands, and a status bar is built in <a href="../tutorials/notepad.html">Build a Notepad</a>.</p>
+<blockquote class="blockquote-tag blockquote-tag-important">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
+<p>Call <code>popup'</code> (and every overlay) unconditionally. It draws nothing while closed; wrapping it in <code>when isOpen</code> changes later widget ids each time the menu opens.</p>
+</blockquote>
+<h2 id="context-menus"><a class="header" href="#context-menus">Context menus</a></h2>
+<p><code>contextMenu</code> attaches a right-click menu to any widget with a <code>Response</code>:</p>
+<pre><code class="language-haskell">(_, cardResp) &lt;- mouseArea (fillW . gap 6) $
+  label "Right-click for actions"
+_ &lt;- contextMenu cardResp $ do
   whenM (menuItem "Inspect") inspectCard
   whenM (menuItem "Copy") copyCard
 </code></pre>
+<p>It returns the menu body’s result while the menu is open (<code>Maybe a</code>). The menu closes when a row is clicked or the user clicks outside. For a whole region, <code>contextMenuArea</code> takes the layout, the area content, and a function from the click position to the menu body.</p>
+<h2 id="styling-buttons"><a class="header" href="#styling-buttons">Styling buttons</a></h2>
+<p>Buttons use <code>themeButton</code> for their background, border, and text. Scope a change rather than editing the theme globally:</p>
+<pre><code class="language-haskell">whenM (styled destructive (button "Delete")) deleteItem
+whenM (styled (primary . rounded 999) (button "Continue")) next
+</code></pre>
+<p>The <code>buttonStyle</code>, <code>inputStyle</code>, and <code>panelStyle</code> scopes apply to every button in a subtree; <code>background</code>, <code>foreground</code>, <code>borderColor</code>, and the rest adjust one surface. See <a href="../styling/overview.html">Theming &amp; Surfaces</a> and the <a href="../styling/widget-surfaces.html">workbenches</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../styling/unexpected-interactions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../widgets/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -237,7 +294,7 @@ contextMenu resp $ do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../styling/unexpected-interactions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../widgets/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
@@ -271,7 +328,7 @@ contextMenu resp $ do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>nano-ui-markdown: Markdown Rendering - nano-ui Documentation</title>
+        <title>Markdown Rendering - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,20 +178,62 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="nano-ui-markdown-markdown-rendering"><a class="header" href="#nano-ui-markdown-markdown-rendering">nano-ui-markdown: Markdown Rendering</a></h1>
-<p><code>nano-ui-markdown</code> provides rich Markdown rendering optimized for immediate-mode GUIs and streaming responses.</p>
-<h2 id="key-capabilities"><a class="header" href="#key-capabilities">Key Capabilities</a></h2>
-<ul>
-<li><strong>Incremental Append</strong>: Fast incremental parsing designed specifically for streaming LLM tokens and chat replies without re-parsing the entire document on every token.</li>
-<li><strong>Rich Elements</strong>: Headings, bold/italic, inline code, fenced code blocks with syntax highlighting, blockquotes, ordered/unordered lists, and tables.</li>
-<li><strong>Theme Awareness</strong>: Text colors, code backgrounds, and table borders automatically conform to the active <code>Theme</code>.</li>
-</ul>
-<pre><code class="language-haskell">import NanoUI
-import NanoUI.Markdown
+                        <h1 id="markdown-rendering-nano-ui-markdown"><a class="header" href="#markdown-rendering-nano-ui-markdown">Markdown Rendering (<code>nano-ui-markdown</code>)</a></h1>
+<p><code>nano-ui-markdown</code> parses Markdown with <a href="https://hackage.haskell.org/package/commonmark">commonmark</a> and draws it with nano-ui’s rich text. It is designed for two jobs: static documentation, and streamed replies where text arrives a token at a time.</p>
+<h2 id="a-document"><a class="header" href="#a-document">A document</a></h2>
+<p>Parse once and keep the <code>MarkdownDoc</code>; drawing it every frame is cheap.</p>
+<pre><code class="language-haskell">import NanoUI.Markdown
 
-chatMessage :: Text -&gt; NanoUI ()
-chatMessage markdownText = markdown markdownText
+readme :: MarkdownDoc
+readme = parseMarkdown "# Hello\n\nSome *emphasis*, `code` and [a link](https://example.com)."
+
+view :: MarkdownCache -&gt; NanoUI ()
+view cache = do
+  lastLink &lt;- useVar ""
+  clicked &lt;- markdown cache readme
+  for_ clicked (writeVar lastLink)
+  link &lt;- readVar lastLink
+  unless (T.null link) $ label ("Clicked " &lt;&gt; link)
 </code></pre>
+<p><code>markdown</code> takes the cache and the document and returns the destination of a link clicked this frame, if any. Allocate the <code>MarkdownCache</code> once in setup with <code>newMarkdownCache</code>; it caches block drawing across frames.</p>
+<p>The renderer supports headings, emphasis, inline code, fenced code blocks, blockquotes, ordered and unordered lists, task lists, tables, strikethrough, and autolinks. Paragraphs, headings, table cells, and code blocks can be selected and copied, with Select All and Copy acting on the focused block. Raw HTML is shown as text with comments removed.</p>
+<h2 id="streaming"><a class="header" href="#streaming">Streaming</a></h2>
+<p><code>appendMarkdown</code> adds text without re-parsing the whole document:</p>
+<pre><code class="language-haskell">-- On the UI thread, append a frame's tokens at once:
+onTokens :: [Text] -&gt; MarkdownDoc -&gt; MarkdownDoc
+onTokens tokens = appendMarkdown (T.concat tokens)
+</code></pre>
+<p>On a worker thread, stream tokens into the view with <code>useStream</code>:</p>
+<pre><code class="language-haskell">replyView :: MarkdownCache -&gt; Stream Int MarkdownDoc -&gt; Client -&gt; Int -&gt; NanoUI ()
+replyView cache stream client replyId = do
+  doc &lt;- useStream stream replyId emptyMarkdown $ \update -&gt;
+    onToken client (\token -&gt; update (appendMarkdown token))
+  void (markdown cache doc)
+</code></pre>
+<p>When appending on the UI thread, append a frame’s batch in <strong>one</strong> call. Appending a token at a time costs a parse per token; a batched append parses the last block once. Appending to a plain final paragraph word-by-word is the exception that avoids a parse for ordinary words.</p>
+<h3 id="what-re-parses"><a class="header" href="#what-re-parses">What re-parses</a></h3>
+<p><code>appendMarkdown new old</code> keeps the blocks the new text cannot change and re-parses the rest: the last top-level block, or — when the text ends inside a list, table, fenced code block, or blockquote — only its last item, row, line, or block. Two cases still cost a whole-document parse:</p>
+<ul>
+<li>the reply ends in one long block that cannot be split this way (a paragraph, a list or code block inside a list item or blockquote, indented code, or an HTML block);</li>
+<li>an appended link reference definition changes earlier blocks that may link to it.</li>
+</ul>
+<p>Joining the reparsed part onto a long list or table still copies the earlier part, which is cheap next to parsing but grows with the block.</p>
+<h2 id="custom-block-drawing"><a class="header" href="#custom-block-drawing">Custom block drawing</a></h2>
+<p><code>MarkdownConfig</code> has an <code>mdBlock</code> hook that overrides block drawing at any depth. It receives the built-in drawing for the block, so a renderer can wrap or replace it:</p>
+<pre><code class="language-haskell">highlighted :: MarkdownConfig
+highlighted = defaultMarkdownConfig
+  { mdBlock = \own -&gt; \case
+      CodeBlock "haskell" code -&gt; Nothing &lt;$ panel (richText (highlight code))
+      block -&gt; own block
+  }
+</code></pre>
+<p><code>markdownConfigured cache highlighted doc</code> draws with the config.</p>
+<h2 id="related"><a class="header" href="#related">Related</a></h2>
+<ul>
+<li>The rich-text widget itself: <code>NanoUI.Widgets.RichText</code>.</li>
+<li>Streaming primitives: <a href="../advanced/background-work.html">Asynchronous Work &amp; Streams</a>.</li>
+<li>A complete streamed view: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</li>
+</ul>
 
                     </main>
 
@@ -245,7 +287,7 @@ chatMessage markdownText = markdown markdownText
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

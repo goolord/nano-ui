@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>State Management &amp; Var - nano-ui Documentation</title>
+        <title>Application Patterns - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,66 +178,143 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="state-management--var"><a class="header" href="#state-management--var">State Management &amp; <code>Var</code></a></h1>
-<p>State in <code>nano-ui</code> is statically typed through explicit handles. Values are not stored in <code>Data.Dynamic</code>, looked up by runtime type representations, or cast out of untyped widget slots. <code>NanoUI</code> works identically whether state is managed via <code>Var</code>s, an Elm-style reducer (<code>nano-ui-emit</code>), or application-owned references (<code>IORef</code>).</p>
-<h2 id="the-var-a-reference"><a class="header" href="#the-var-a-reference">The <code>Var a</code> Reference</a></h2>
-<p>A <code>Var a</code> is a typed mutable reference. Input widgets take the <code>Var</code> they display and mutate directly:</p>
-<pre><code class="language-haskell">counter :: NanoUI ()
-counter = row $ do
-  n &lt;- useVar (0 :: Int)
-  whenM (button "-") (modifyVar n (subtract 1))
-  label . T.pack . show =&lt;&lt; readVar n
-  whenM (button "+") (modifyVar n (+ 1))
+                        <h1 id="application-patterns"><a class="header" href="#application-patterns">Application Patterns</a></h1>
+<p>Real applications built on nano-ui — <code>ned</code> (a vim-like modal editor), <code>stronghead</code> (a profiling debugger), and <code>winget-gui</code> (a Windows package-manager front end) — converge on the same architecture. The differences are about where the durable state lives, not about the frame.</p>
+<h2 id="the-core-rule-setup-once-in-io-then-run"><a class="header" href="#the-core-rule-setup-once-in-io-then-run">The core rule: setup once in IO, then run</a></h2>
+<p>Everything frame-lived is either a value created in <code>IO</code> before the session, or a <code>Var</code> declared in the view. Nothing else survives.</p>
+<pre><code class="language-haskell">main :: IO ()
+main = do
+  cache &lt;- newViewCache      -- a record of newVar calls and IORef caches
+  env   &lt;- newAppEnv         -- domain state outside nano-ui's knowledge
+  runSdlApp
+    defaultSdlOptions {sdlWindowSettings = ...}
+    (appView env cache)
 </code></pre>
-<h3 id="allocating-vars"><a class="header" href="#allocating-vars">Allocating <code>Var</code>s</a></h3>
-<p>There are three ways to allocate a <code>Var</code>:</p>
-<ol>
-<li><strong><code>useVar initial</code></strong>: Allocates a positional <code>Var</code> inside <code>NanoUI</code> for <code>Int</code>, <code>Double</code>, <code>Float</code>, <code>Bool</code>, <code>Text</code>, or <code>SortCol</code> (<code>useEnumVar</code> for custom <code>Enum</code> types). Positional <code>Var</code>s use a per-scope counter and key space separate from widget IDs, so conditional widgets do not shift <code>useVar</code> slots.</li>
-<li><strong><code>newVar initial</code></strong>: Allocates an arbitrary <code>Var a</code> in <code>IO</code>. Allocate it during setup and store it in an application environment record passed into the view. Passing the same <code>Var</code> to multiple widgets naturally shares state.</li>
-<li><strong><code>VarMap</code></strong>: One <code>Var</code> per key for dynamic collections (chat logs, file trees, dynamic rows). Use <code>varAt</code> to retrieve or create a <code>Var</code>, and <code>dropVar</code> or <code>retainVars</code> to clean up expired entries.</li>
-</ol>
-<h3 id="read-only-and-projected-vars"><a class="header" href="#read-only-and-projected-vars">Read-Only and Projected <code>Var</code>s</a></h3>
+<p>The view is a pure-ish projection of that state. It may read and write it, but it must not create a new source of truth on every pass.</p>
+<h2 id="pattern-a-winget-gui--one-domain-state-and-a-wake-channel"><a class="header" href="#pattern-a-winget-gui--one-domain-state-and-a-wake-channel">Pattern A: <code>winget-gui</code> — one domain state and a wake channel</a></h2>
+<p><code>winget-gui</code> runs package-manager commands on worker threads and keeps the result in one <code>IORef</code>. The view snapshots that state at the start of each frame:</p>
+<pre><code class="language-haskell">data Env = Env
+  { envState :: IORef AppState
+  , envWake  :: IORef (IO ())
+  }
+
+main :: IO ()
+main = do
+  stateRef &lt;- newIORef initialAppState
+  wakeRef  &lt;- newIORef (pure ())
+  runSdlApp opts (appView (Env stateRef wakeRef))
+
+appView :: Env -&gt; NanoUI ()
+appView env = do
+  -- Install the wake callback on the first frame.
+  wake &lt;- askWake
+  liftIO $ writeIORef env.envWake wake
+
+  -- Snapshot the frame's state once, before building anything.
+  state &lt;- liftIO $ readIORef env.envState
+
+  mainLayout state
+</code></pre>
+<p>A worker publishes a change atomically, then wakes the loop:</p>
+<pre><code class="language-haskell">forkIO $ do
+  results &lt;- queryPackageDatabase
+  atomicModifyIORef' env.envState (\s -&gt; (s {packages = results}, ()))
+  wake &lt;- readIORef env.envWake
+  wake
+</code></pre>
+<p>The company pattern around this:</p>
 <ul>
-<li><strong><code>constVar x</code></strong>: A read-only <code>Var</code> where writes are no-ops. Ideal for displaying derived values in input widgets and reacting via the primed <code>Response</code>.</li>
-<li><strong><code>withValue val widget</code></strong>: Runs a widget against a temporary <code>Var</code> initialized to <code>val</code>, returning both the widget result and the updated value.</li>
-<li><strong>Record Projections (<code>OverloadedRecordDot</code>)</strong>: With <code>GHC.Generics.Generic</code>, <code>settings.volume</code> projects a <code>Var Float</code> for that specific field. Writes to <code>settings.volume</code> do not invalidate widgets reading <code>settings.title</code>!</li>
-<li><strong>Lenses &amp; Zooming</strong>: Use <code>zoomVar</code> (getter/setter) or <code>zoomVarL</code> (lens) for custom projections.</li>
-<li><strong>Lists</strong>: <code>forEachVar key list body</code> provides per-element <code>Var</code>s that track keys across reorders.</li>
+<li><strong><code>prepareFrame</code></strong> gathers every read into one <code>Frame</code> record before the window is built. Widgets do not each read the <code>IORef</code> and risk seeing different snapshots.</li>
+<li><strong>Memoized derived collections</strong> live in <code>IORef (Maybe (key, value))</code> caches keyed by a revision counter. Expensive grouping or sorting runs when the revision changes, not every frame.</li>
+<li><strong>Keyboard shortcuts are read after</strong> the widgets have run, so focus-dependent guards see the current focus.</li>
+<li><strong>A headless mode runs the same view</strong> against real data with <code>--screenshot</code> / <code>--selftest</code> (SDL in a hidden window), which is how the UI is regression-tested.</li>
 </ul>
-<hr>
-<h2 id="what-a-write-costs"><a class="header" href="#what-a-write-costs">What a Write Costs</a></h2>
-<p><code>readVar</code> records a dependency in the current pass. When a <code>Var</code> changes, nano-ui classifies the write:</p>
+<p>Use this pattern when the domain state is shared with worker threads, a database, or a long-running protocol.</p>
+<h2 id="pattern-b-stronghead--an-app-record-of-vars"><a class="header" href="#pattern-b-stronghead--an-app-record-of-vars">Pattern B: <code>stronghead</code> — an app record of <code>Var</code>s</a></h2>
+<p><code>stronghead</code> has many panels, each with its own interactive state. It keeps one large record of handles:</p>
+<pre><code class="language-haskell">data App = App
+  { filterText   :: Var Text
+  , activeTab    :: Var TabId
+  , zoomLevel    :: Var Float
+  , isInspecting :: Var Bool
+  , panes        :: PaneState
+  }
+
+newApp :: IO App
+newApp = App
+  &lt;$&gt; newVar ""
+  &lt;*&gt; newVar TabOverview
+  &lt;*&gt; newVar 1.0
+  &lt;*&gt; newVar False
+  &lt;*&gt; newPaneState
+</code></pre>
+<p>Panel modules take the slice they own:</p>
+<pre><code class="language-haskell">inspectorPane :: Var Bool -&gt; Var Float -&gt; NanoUI ()
+inspectorPane inspecting zoom = panel $ do
+  ...
+</code></pre>
+<p>The record is passed into view functions, which read and mutate its fields directly. There is no global state and no lost update: every handle is explicit in a type.</p>
+<p>Use this pattern when the application is mostly interactive UI state, with many independent surfaces and little external I/O.</p>
+<h2 id="pattern-c-ned--the-application-owns-the-state"><a class="header" href="#pattern-c-ned--the-application-owns-the-state">Pattern C: <code>ned</code> — the application owns the state</a></h2>
+<p><code>ned</code> is an editor first: its state is a document and an editing model that exist independently of the UI. It keeps a plain <code>IORef App</code> and lets the toolkit know nothing about it. The view projects slices of it each frame and re-reads after any part that might have changed it:</p>
+<pre><code class="language-haskell">newtype Editor = Editor (IORef App)
+
+editorView :: Editor -&gt; NanoUI ()
+editorView (Editor ref) = do
+  app &lt;- liftIO (readIORef ref)
+  renderEditor app
+
+  -- The parts above may have changed the model (a command, a click).
+  app' &lt;- liftIO (readIORef ref)
+  when (viewChanged app app') requestFrame
+</code></pre>
+<p><code>requestFrame</code> asks for one more frame when what was drawn no longer matches the state. This is a deliberate escape hatch; it is not a substitute for <code>Var</code> dependencies.</p>
+<p>Use this pattern for editors, terminals, games, and anything whose model is already a well-tested library that should not be rewritten in terms of <code>Var</code>s.</p>
+<h2 id="choosing"><a class="header" href="#choosing">Choosing</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Write Type</th><th>Description</th><th>Cost</th></tr>
+<tr><th>The application…</th><th>Pattern</th></tr>
 </thead>
 <tbody>
-<tr><td><strong>Forward Write</strong></td><td>Written <em>before</em> any reads in the current pass.</td><td>Single pass. Subsequent reads get the new value immediately.</td></tr>
-<tr><td><strong>Backward Write</strong></td><td>Written <em>after</em> being read earlier in the same pass.</td><td>Triggers a second pass with one-shot events cleared.</td></tr>
-<tr><td><strong>Unchanged Write</strong></td><td>New value is <code>==</code> to old value (pointer checked first).</td><td>No-op. Zero passes, zero repaints.</td></tr>
+<tr><td>Owns one domain state, uses worker threads, runs commands</td><td>A — <code>IORef</code> + <code>askWake</code></td></tr>
+<tr><td>Is a large set of interactive panes and tools</td><td>B — record of <code>Var</code>s</td></tr>
+<tr><td>Has a model that predates the UI or is shared with a library</td><td>C — app-owned <code>IORef</code> + <code>requestFrame</code></td></tr>
+<tr><td>Is a state machine with explicit transitions and few external effects</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
+<tr><td>Is a small tool</td><td>Whatever is simplest; a handful of <code>useVar</code>s is fine</td></tr>
 </tbody>
 </table>
 </div>
-<blockquote class="blockquote-tag blockquote-tag-tip">
-<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
-<p><strong>Granular Repainting</strong>: When an input widget is bound to a <code>Var</code> without any <code>readVar</code> calls anywhere in the view tree, only that individual widget’s bounds are repainted on change! Calling <code>readVar</code> promotes the write to a full-window repaint.</p>
-</blockquote>
-<h3 id="peek-and-thread-safe-operations"><a class="header" href="#peek-and-thread-safe-operations">Peek and Thread-Safe Operations</a></h3>
+<p>The patterns mix. An <code>IORef</code> domain state with <code>Var</code> view state is normal; an Elm reducer can sit inside one pane of a <code>Var</code>-based application.</p>
+<h2 id="the-shared-view-discipline"><a class="header" href="#the-shared-view-discipline">The shared view discipline</a></h2>
+<p>Independent of where state lives, the view has the same shape:</p>
+<ol>
+<li><strong>Read the state once at the top</strong>, or read each source immediately before the subtree that uses it.</li>
+<li><strong>Build top-to-bottom.</strong> Layout is solved after the view runs, so geometry is from the previous frame; do not target widgets by rectangle in the same pass they are first declared.</li>
+<li><strong>Read after the parts that may write.</strong> A read placed before a writer sees the old value and forces a second pass.</li>
+<li><strong>Run keyboard and focus queries last.</strong> Focus state is resolved after the widgets have run.</li>
+<li><strong>Guard effects with events.</strong> A view can run more than once per frame; file I/O, subprocesses, and logging belong behind a button or shortcut check.</li>
+<li><strong>Keep derived values derived.</strong> Cache expensive computations by revision, not by copying every field into a <code>Var</code>.</li>
+</ol>
+<h2 id="anti-patterns"><a class="header" href="#anti-patterns">Anti-patterns</a></h2>
 <ul>
-<li><strong><code>peekVar</code></strong>: Reads the value of a <code>Var</code> <em>without</em> recording a dependency (useful for comparing previous vs current frame without triggering second passes).</li>
-<li><strong>Background Threads</strong>: Use <code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> from external worker threads, then signal the UI to repaint by calling the callback obtained from <code>askWake</code>.</li>
+<li><strong>A global <code>IORef</code> read from many widget helpers.</strong> The frame sees inconsistent snapshots; gather state once, or read it explicitly at one point.</li>
+<li><strong>Allocating a source of truth in the view.</strong> <code>newVar</code>/<code>newIORef</code>/<code>newTask</code> inside the view leaks or resets every pass.</li>
+<li><strong>Mirroring the model in <code>Var</code>s.</strong> Two sources of truth drift. Keep local UI state local and durable state single.</li>
+<li><strong>Using <code>requestFrame</code> to force animation.</strong> Use <code>keepAnimating</code> inside the animating widget, and <code>wakeAfter</code> for timers.</li>
+<li><strong>Rebuilding caches every frame.</strong> Compare first (a revision counter, a pointer, a small key) and rebuild only when it changes.</li>
 </ul>
+<p>For the frame that makes these patterns necessary, read <a href="frame-model.html">The Frame Model</a>. For pure reducers, read <a href="../elm/overview.html">Elm-Style Views</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../core/frame-model.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../architecture/frame-model.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../core/identity.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../architecture/abstraction-audit.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -247,11 +324,11 @@ counter = row $ do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../core/frame-model.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../architecture/frame-model.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../core/identity.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../architecture/abstraction-audit.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -281,7 +358,7 @@ counter = row $ do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

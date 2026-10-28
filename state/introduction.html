@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Widget Identity &amp; Scoping - nano-ui Documentation</title>
+        <title>Introduction to State - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,49 +178,154 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="widget-identity--scoping"><a class="header" href="#widget-identity--scoping">Widget Identity &amp; Scoping</a></h1>
-<p>In <code>nano-ui</code>, widget IDs are generated deterministically based on invocation call order among siblings. Internal interactive state—such as text caret positions, active text selection, open dropdown menus, and scroll offsets—is keyed to these widget IDs.</p>
-<h2 id="the-identity-rules"><a class="header" href="#the-identity-rules">The Identity Rules</a></h2>
-<h3 id="1-consistent-call-order"><a class="header" href="#1-consistent-call-order">1. Consistent Call Order</a></h3>
-<p>Because widget IDs count up in traversal order, the structure of calls should remain stable across consecutive frames.</p>
-<h3 id="2-wrap-conditional-subtrees-in-scope"><a class="header" href="#2-wrap-conditional-subtrees-in-scope">2. Wrap Conditional Subtrees in <code>scope</code></a></h3>
-<p>If an element or section is conditionally displayed, wrapping it in <code>scope</code> reserves a single stable slot regardless of whether the branch executes:</p>
-<pre><code class="language-haskell">-- BAD: If showDetails is False, subsequent siblings shift IDs!
-when showDetails $ do
-  label "Details..."
-  textInput detailsVar
+                        <h1 id="introduction-to-state"><a class="header" href="#introduction-to-state">Introduction to State</a></h1>
+<p>The view runs every frame. Nothing is retained between frames except the state you keep explicitly, so the first design question in a nano-ui application is not “which widget?” but “where does this value live?”</p>
+<p>This chapter is the map. It covers the three ways to keep state and the frame-model facts that make them behave the way they do. The details are in <a href="var.html"><code>Var</code> in Depth</a>, <a href="identity.html">Widget Identity &amp; Keys</a>, and <a href="../elm/overview.html">Elm-Style Views</a>.</p>
+<h2 id="state-you-keep-state-you-derive"><a class="header" href="#state-you-keep-state-you-derive">State you keep, state you derive</a></h2>
+<p>A value that changes over time and cannot be recomputed from something else belongs in a <code>Var</code>. A value that <em>can</em> be recomputed belongs in a local binding, computed fresh every frame:</p>
+<pre><code class="language-haskell">appView :: App -&gt; NanoUI ()
+appView app = do
+  -- Keep: these are the input to the next frame.
+  draft &lt;- useVar ""
+  settings &lt;- readVar app.appSettings
 
--- GOOD: scope reserves a consistent slot in the parent hierarchy
-scope $ when showDetails $ do
-  label "Details..."
-  textInput detailsVar
+  -- Derive: computed from what was kept, every frame.
+  label ("Signed in as " &lt;&gt; settings.nickname)
+  label ("Draft: " &lt;&gt; T.pack (show (T.length draft)) &lt;&gt; " characters")
 </code></pre>
-<blockquote class="blockquote-tag blockquote-tag-note">
-<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
-<p><code>useVar</code> maintains its own dedicated counter separate from layout widget IDs. While conditional widgets alone do not shift <code>useVar</code> slots, conditional <code>useVar</code> calls themselves still require <code>scope</code>.</p>
-</blockquote>
-<h3 id="3-reorderable-lists-with-withkey"><a class="header" href="#3-reorderable-lists-with-withkey">3. Reorderable Lists with <code>withKey</code></a></h3>
-<p>When rendering collections that can be sorted, filtered, inserted, or removed, <strong>never key by list index</strong>. Wrap each item in <code>withKey</code> with a unique, persistent identifier (such as an item ID or UUID):</p>
-<pre><code class="language-haskell">column $ for_ items $ \item -&gt; do
-  withKey item.id $ do
-    row $ do
-      label item.name
-      whenM (button "Delete") (deleteItem item.id)
+<p>Keeping a derived value in a second <code>Var</code> means every place that changes the source must also update the copy. The first place that forgets is a bug. Compute it instead.</p>
+<h2 id="a-var-is-the-default"><a class="header" href="#a-var-is-the-default">A <code>Var</code> is the default</a></h2>
+<p>A <code>Var a</code> is a typed mutable reference. Input widgets take the <code>Var</code> they display and mutate it directly; there is no callback and no on-change handler:</p>
+<pre><code class="language-haskell">counter :: NanoUI ()
+counter = rowWith (gap 8 . alignMid) $ do
+  n &lt;- useVar (0 :: Int)
+  whenM (button "-") (modifyVar n (subtract 1))
+  label . T.pack . show =&lt;&lt; readVar n
+  whenM (button "+") (modifyVar n (+ 1))
 </code></pre>
-<h3 id="4-retaining-dynamic-state"><a class="header" href="#4-retaining-dynamic-state">4. Retaining Dynamic State</a></h3>
-<p>State associated with dynamic keys is preserved while visible. For unbounded dynamic collections (such as streamed logs or ephemeral tabs), maintain row state in a <code>VarMap</code> and prune dead keys periodically with <code>retainVars</code>:</p>
-<pre><code class="language-haskell">retainVars activeKeys varMap
+<p>There are two ways to allocate one:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th><code>useVar</code></th><th><code>newVar</code></th></tr>
+</thead>
+<tbody>
+<tr><td>Where</td><td>Inside the view</td><td>In <code>IO</code>, during setup</td></tr>
+<tr><td>Types</td><td><code>Int</code>, <code>Float</code>, <code>Double</code>, <code>Bool</code>, <code>Text</code>, <code>SortCol</code> (<code>useEnumVar</code> for any <code>Enum</code>)</td><td>Any type</td></tr>
+<tr><td>Identity</td><td>The call site, counted in call order</td><td>The reference itself</td></tr>
+<tr><td>Best for</td><td>View-local state: a draft text, an open flag, a filter</td><td>Application state: a document, a list, a settings record, a task</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>newVar</code> state is passed into the view, usually in an application record:</p>
+<pre><code class="language-haskell">data App = App
+  { appTodos :: Var [Todo]
+  , appFilter :: Var Filter
+  }
+
+newApp :: IO App
+newApp = App &lt;$&gt; newVar [] &lt;*&gt; newVar All
+
+appView :: App -&gt; NanoUI ()
+appView app = column $ do
+  todos &lt;- readVar app.appTodos
+  ...
 </code></pre>
+<p>Passing the same <code>Var</code> to two widgets shares the state between them. Passing a record in a <code>Var</code> gives each field its own projection (<code>settings.volume</code>), tracked independently of the other fields.</p>
+<h2 id="four-operations"><a class="header" href="#four-operations">Four operations</a></h2>
+<pre><code class="language-haskell">n &lt;- useVar (0 :: Int)          -- allocate at this call site (first frame only)
+v &lt;- readVar n                  -- read and record a dependency
+writeVar n 10                   -- replace
+modifyVar n (+ 1)               -- update from the latest value
+</code></pre>
+<p><code>modifyVar</code> is preferred over <code>writeVar n =&lt;&lt; (+ 1) &lt;$&gt; readVar n</code> when several changes can land in one frame: each modification is applied to the latest value, so none are lost.</p>
+<p><code>peekVar</code> reads without recording a dependency. Use it to compare against the previous frame when a read would otherwise force a second pass.</p>
+<h2 id="what-a-write-costs"><a class="header" href="#what-a-write-costs">What a write costs</a></h2>
+<p>A <code>readVar</code> records a dependency for the current pass. When the value changes, nano-ui classifies the write:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Write</th><th>When</th><th>Cost</th></tr>
+</thead>
+<tbody>
+<tr><td>Forward</td><td>Written before any read this pass</td><td>One pass; later reads see the new value.</td></tr>
+<tr><td>Backward</td><td>Written after being read earlier this pass</td><td>A second view pass, with one-shot input events cleared.</td></tr>
+<tr><td>Unchanged</td><td>New value <code>==</code> old value</td><td>No-op: no pass, no repaint.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Two practical consequences:</p>
+<ul>
+<li><strong>Reading below the widget that edits a <code>Var</code> keeps typing to one pass.</strong> Reading above it costs a second pass on every change.</li>
+<li><strong>A widget bound directly to a <code>Var</code> with no <code>readVar</code> anywhere repaints only that widget.</strong> Any <code>readVar</code> promotes the write to a full-window repaint.</li>
+</ul>
+<p>The second rule is why the counter above reads <code>n</code> in a <code>label</code> — the label must show the new value — while a <code>textInput</code> bound to a <code>Var</code> can update without a <code>readVar</code> if nothing else displays it.</p>
+<h2 id="the-two-rules-that-prevent-most-bugs"><a class="header" href="#the-two-rules-that-prevent-most-bugs">The two rules that prevent most bugs</a></h2>
+<ol>
+<li>
+<p><strong>Never allocate a frame-lived resource inside the view.</strong></p>
+<pre><code class="language-haskell">-- Wrong: allocates a new Var every pass.
+appView = do
+  n &lt;- liftIO (newVar 0)
+  ...
+
+-- Right: allocate once in main and pass it in.
+main = do
+  n &lt;- newVar 0
+  runSdlApp opts (appView n)
+</code></pre>
+<p><code>useVar</code> is the exception: it is designed to be called in the view and allocates only on the first frame at that position.</p>
+</li>
+<li>
+<p><strong>Guard side effects behind events.</strong></p>
+<p>The view re-runs, and it can re-run within a single frame. Work that should happen once must be behind an event check:</p>
+<pre><code class="language-haskell">whenM (button "Save") saveDocument
+</code></pre>
+<p><code>button "Save" &gt;&gt; saveDocument</code> would save on every frame. File I/O, process launches, logging, and state writes outside the UI all follow the same rule.</p>
+</li>
+</ol>
+<h2 id="where-should-this-value-live"><a class="header" href="#where-should-this-value-live">Where should this value live?</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>The value…</th><th>Put it in</th></tr>
+</thead>
+<tbody>
+<tr><td>Is a draft, open flag, selection, or filter used by one view</td><td><code>useVar</code> / <code>useEnumVar</code></td></tr>
+<tr><td>Is a list, document, settings record, or task handle</td><td><code>newVar</code> in <code>IO</code>, stored in the app record</td></tr>
+<tr><td>Belongs to one row of a dynamic list</td><td>A <code>Var</code> addressed by a stable key (<code>withElemVars</code>, <code>VarMap</code>)</td></tr>
+<tr><td>Must survive reordering or filtering</td><td>A keyed <code>Var</code>, plus <code>withKey</code> for widget state</td></tr>
+<tr><td>Already lives outside the UI (a database handle, a worker’s state)</td><td>Keep it in <code>IORef</code> or a record, wake the UI with <code>askWake</code></td></tr>
+<tr><td>Is a pure state machine with a clear <code>msg -&gt; model -&gt; model</code></td><td>The Elm-style reducer in <code>nano-ui-emit</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The last two are escape hatches, not the default. Most applications mix them: a <code>winget-gui</code>-style app keeps domain state in an <code>IORef</code> and its view state in <code>Var</code>s; <code>stronghead</code> keeps a large record of <code>Var</code>s; <code>ned</code> keeps its editor state in an <code>IORef</code> and re-reads it each frame.</p>
+<h2 id="reading-the-state-in-the-right-place"><a class="header" href="#reading-the-state-in-the-right-place">Reading the state in the right place</a></h2>
+<p>A few ordering rules matter enough to repeat here:</p>
+<ul>
+<li><strong>Read a <code>Var</code> below the widget that edits it</strong> when the order is free. This keeps a change to one pass.</li>
+<li><strong>Per-row <code>useVar</code> calls belong under <code>withKey</code>.</strong> Otherwise their positions move when a row is removed or filtered.</li>
+<li><strong>Conditional <code>useVar</code> calls belong in <code>scope</code>.</strong> Widgets and <code>Var</code>s have separate counters, but a <code>useVar</code> that comes and goes still shifts the <code>useVar</code> slots after it.</li>
+<li><strong>Focus questions belong at the end of the view.</strong> The node arena is reset before the view runs, so asking “is a text field focused?” at the top always answers no.</li>
+</ul>
+<p><a href="identity.html">Widget Identity &amp; Keys</a> covers the keying rules in detail.</p>
+<h2 id="next"><a class="header" href="#next">Next</a></h2>
+<ul>
+<li><a href="var.html"><code>Var</code> in Depth</a> — projections, <code>VarMap</code>, <code>constVar</code>, thread-safe reads and writes.</li>
+<li><a href="identity.html">Widget Identity &amp; Keys</a> — why call order matters and how to keep state attached to the right row.</li>
+<li><a href="../elm/overview.html">Elm-Style Views</a> — a pure model and reducer instead of direct mutation.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../core/state-var.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../tutorials/live-data.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../core/patterns.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../state/var.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -230,11 +335,11 @@ scope $ when showDetails $ do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../core/state-var.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../tutorials/live-data.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../core/patterns.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../state/var.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -264,7 +369,7 @@ scope $ when showDetails $ do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

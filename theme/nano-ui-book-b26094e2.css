@@ -1,0 +1,851 @@
+/* ========================================================================== */
+/* nano-ui mdBook Theme & Custom Styling                                      */
+/* Derived from NanoUI.Internal.Style (defaultTheme & defaultLightTheme)      */
+/* ========================================================================== */
+
+/* -------------------------------------------------------------------------- */
+/* 1. CSS Custom Properties: Nano-UI Dark (Default)                           */
+/* -------------------------------------------------------------------------- */
+:root,
+html.coal,
+html:not(.light) {
+  /* Surfaces & Hierarchy (nano-ui defaultTheme) */
+  --bg: #18181b;                          /* themeWindow: rgb(24, 24, 27) */
+  --fg: #eceae6;                          /* primary text: rgb(236, 234, 230) */
+  --sidebar-bg: #131316;                  /* recessed navigation shelf */
+  --sidebar-fg: #b0aca4;                  /* themeMuted: rgb(176, 172, 164) */
+  --sidebar-non-existant: #52525b;        /* zinc-600 */
+  --sidebar-active: #589cf6;              /* themeAccent: rgb(88, 156, 246) */
+  --sidebar-spacer: #27272a;              /* hairline divider */
+  --sidebar-header-border-color: #589cf6;
+
+  /* Accent, Links & Code */
+  --links: #7cb2fa;                       /* themeLink: rgb(124, 178, 250) */
+  --links-hover: #a0cbff;
+  --inline-code-color: #93c5fd;           /* luminous sky blue */
+
+  /* Chrome & Overlays */
+  --icons: #8e8d8a;
+  --icons-hover: #eceae6;
+  --scrollbar: #3e4048;                   /* themeSeparator: rgb(62, 64, 72) */
+  --theme-popup-bg: #222226;              /* themePanel: rgb(34, 34, 38) */
+  --theme-popup-border: #3e4048;
+  --theme-hover: #34343a;                 /* themeButton: rgb(52, 52, 58) */
+  --overlay-bg: rgba(8, 8, 10, 0.72);     /* themeOverlayDim */
+
+  /* Content Containers */
+  --quote-bg: rgba(34, 34, 38, 0.55);
+  --quote-border: #3e4048;
+  --table-border-color: #27272a;
+  --table-header-bg: #222226;
+  --table-alternate-bg: #1c1c20;
+
+  /* Search Engine */
+  --searchbar-border-color: #3e4048;
+  --searchbar-bg: #121215;                /* themeInput: rgb(18, 18, 21) */
+  --searchbar-fg: #eceae6;
+  --searchbar-shadow-color: rgba(88, 156, 246, 0.35);
+  --searchresults-header-fg: #b0aca4;
+  --searchresults-border-color: #3e4048;
+  --searchresults-li-bg: #1e1e24;
+  --search-mark-bg: rgba(88, 156, 246, 0.35);
+
+  /* Semantic Admonition Callouts (nano-ui tones) */
+  --blockquote-note-color: #589cf6;       /* themeAccent */
+  --blockquote-tip-color: #68a87c;        /* themeGreen */
+  --blockquote-important-color: #b08cdc;  /* themePurple */
+  --blockquote-warning-color: #f2b44c;    /* themeWarning */
+  --blockquote-caution-color: #fca5a5;    /* themeDanger / themeRed */
+  --warning-border: #f2b44c;
+
+  /* Interactive Workbench Tokens */
+  --nano-accent: #589cf6;
+  --nano-accent-dim: rgba(88, 156, 246, 0.15);
+  --nano-accent-border: rgba(88, 156, 246, 0.4);
+  --nano-well-bg: #121215;
+  --nano-well-border: #27272a;
+  --nano-card-bg: #1e1e24;
+  --nano-card-border: #33333d;
+  --nano-chip-bg: #24242c;
+  --nano-chip-border: #3e4048;
+  --nano-chip-active-bg: #1d4ed8;
+  --nano-chip-active-border: #589cf6;
+  --nano-chip-text: #eceae6;
+  --nano-trap-border: #f2b44c;
+  --nano-trap-badge-bg: rgba(242, 180, 76, 0.15);
+  --nano-trap-badge-text: #f2b44c;
+  --nano-fix-badge-bg: rgba(104, 168, 124, 0.15);
+  --nano-fix-badge-text: #68a87c;
+
+  /* Typography metrics */
+  --mono-font: "Cascadia Mono", "Fira Code", "Source Code Pro", Menlo, Consolas, Monaco, monospace;
+  --code-font-size: 0.9em;
+  --content-max-width: 860px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 2. CSS Custom Properties: Nano-UI Light                                    */
+/* -------------------------------------------------------------------------- */
+html.light {
+  /* Surfaces & Hierarchy (nano-ui defaultLightTheme) */
+  --bg: #f4f4f2;                          /* themeWindow: rgb(244, 244, 242) */
+  --fg: #242428;                          /* primary text: rgb(36, 36, 40) */
+  --sidebar-bg: #eaeae7;                  /* themeButton / shelf */
+  --sidebar-fg: #6c6964;                  /* themeMuted: rgb(108, 105, 100) */
+  --sidebar-non-existant: #a1a1aa;
+  --sidebar-active: #2563eb;              /* themeAccent: rgb(37, 99, 235) */
+  --sidebar-spacer: #d6d6d2;              /* themeSeparator: rgb(214, 214, 210) */
+  --sidebar-header-border-color: #2563eb;
+
+  /* Accent, Links & Code */
+  --links: #1d4ed8;                       /* themeLink: rgb(29, 78, 216) */
+  --links-hover: #1e40af;
+  --inline-code-color: #1d4ed8;
+
+  /* Chrome & Overlays */
+  --icons: #71717a;
+  --icons-hover: #18181b;
+  --scrollbar: #d6d6d2;
+  --theme-popup-bg: #fcfcfb;              /* themePanel: rgb(252, 252, 251) */
+  --theme-popup-border: #d6d6d2;
+  --theme-hover: #eaeae7;
+  --overlay-bg: rgba(20, 20, 24, 0.35);
+
+  /* Content Containers */
+  --quote-bg: rgba(234, 234, 231, 0.55);
+  --quote-border: #d6d6d2;
+  --table-border-color: #e4e4e7;
+  --table-header-bg: #eaeae7;
+  --table-alternate-bg: #fcfcfb;
+
+  /* Search Engine */
+  --searchbar-border-color: #d6d6d2;
+  --searchbar-bg: #ffffff;
+  --searchbar-fg: #242428;
+  --searchbar-shadow-color: rgba(37, 99, 235, 0.25);
+  --searchresults-header-fg: #6c6964;
+  --searchresults-border-color: #d6d6d2;
+  --searchresults-li-bg: #fcfcfb;
+  --search-mark-bg: rgba(37, 99, 235, 0.2);
+
+  /* Semantic Admonition Callouts */
+  --blockquote-note-color: #2563eb;
+  --blockquote-tip-color: #1e8046;
+  --blockquote-important-color: #8046be;
+  --blockquote-warning-color: #965a00;
+  --blockquote-caution-color: #be2828;
+  --warning-border: #965a00;
+
+  /* Interactive Workbench Tokens */
+  --nano-accent: #2563eb;
+  --nano-accent-dim: rgba(37, 99, 235, 0.1);
+  --nano-accent-border: rgba(37, 99, 235, 0.35);
+  --nano-well-bg: #ffffff;
+  --nano-well-border: #e4e4e7;
+  --nano-card-bg: #fcfcfb;
+  --nano-card-border: #d6d6d2;
+  --nano-chip-bg: #eaeae7;
+  --nano-chip-border: #d6d6d2;
+  --nano-chip-active-bg: #2563eb;
+  --nano-chip-active-border: #1d4ed8;
+  --nano-chip-text: #242428;
+  --nano-trap-border: #b45309;
+  --nano-trap-badge-bg: rgba(180, 83, 9, 0.12);
+  --nano-trap-badge-text: #b45309;
+  --nano-fix-badge-bg: rgba(30, 128, 70, 0.12);
+  --nano-fix-badge-text: #1e8046;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 3. Typography & Reading Polish                                             */
+/* -------------------------------------------------------------------------- */
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  color: var(--fg);
+  background-color: var(--bg);
+}
+
+.content main {
+  font-size: 16px;
+  line-height: 1.72;
+  letter-spacing: -0.01em;
+}
+
+.content h1,
+.content h2,
+.content h3,
+.content h4,
+.content h5,
+.content h6 {
+  color: var(--fg);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+}
+
+.content h1 {
+  font-size: 2.15rem;
+  margin-top: 1.6rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--sidebar-spacer);
+}
+
+.content h2 {
+  font-size: 1.55rem;
+  margin-top: 2.2rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--sidebar-spacer);
+}
+
+.content h3 {
+  font-size: 1.25rem;
+  margin-top: 1.8rem;
+  margin-bottom: 0.6rem;
+}
+
+.content p {
+  margin-bottom: 1.25em;
+}
+
+/* Content Links */
+.content a:not(.header) {
+  color: var(--links);
+  text-decoration: underline;
+  text-decoration-color: rgba(124, 178, 250, 0.35);
+  text-underline-offset: 3px;
+  transition: all 0.15s ease;
+}
+
+.content a:not(.header):hover {
+  color: var(--links-hover);
+  text-decoration-color: var(--links-hover);
+}
+
+/* Text Selection */
+::selection {
+  background: var(--nano-accent-dim);
+  color: #ffffff;
+}
+
+html.light ::selection {
+  background: var(--nano-accent-dim);
+  color: #0f172a;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 4. Inline Code & Code Blocks                                               */
+/* -------------------------------------------------------------------------- */
+
+/* Inset pill for inline code */
+:not(pre) > code,
+:not(pre) > .hljs {
+  background-color: var(--nano-well-bg) !important;
+  color: var(--inline-code-color) !important;
+  border: 1px solid var(--sidebar-spacer) !important;
+  border-radius: 5px !important;
+  padding: 0.15em 0.42em !important;
+  font-size: 0.88em !important;
+  font-family: var(--mono-font) !important;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Code block container */
+pre {
+  position: relative;
+  background-color: var(--nano-well-bg) !important;
+  border: 1px solid var(--nano-well-border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 1.6rem 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  overflow-x: auto;
+}
+
+html.light pre {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+pre > code,
+pre > .hljs {
+  background: transparent !important;
+  font-family: var(--mono-font) !important;
+  font-size: var(--code-font-size);
+  line-height: 1.62;
+  padding: 0 !important;
+  color: var(--fg);
+  border: none !important;
+}
+
+/* Harmonized Syntax Highlighting */
+.hljs-comment,
+.hljs-quote {
+  color: #8e8d8a !important;
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag {
+  color: #b08cdc !important;
+  font-weight: 600;
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-function {
+  color: #7cb2fa !important;
+  font-weight: 600;
+}
+
+.hljs-string,
+.hljs-symbol {
+  color: #68a87c !important;
+}
+
+.hljs-number,
+.hljs-literal {
+  color: #f2b44c !important;
+}
+
+.hljs-variable,
+.hljs-attribute {
+  color: #fca5a5 !important;
+}
+
+.hljs-type,
+.hljs-built_in {
+  color: #589cf6 !important;
+}
+
+html.light .hljs-comment { color: #71717a !important; }
+html.light .hljs-keyword { color: #8046be !important; }
+html.light .hljs-title { color: #1d4ed8 !important; }
+html.light .hljs-string { color: #1e8046 !important; }
+html.light .hljs-number { color: #b45309 !important; }
+html.light .hljs-type { color: #2563eb !important; }
+
+/* Copy buttons */
+pre > .buttons button.clip-button {
+  background: rgba(34, 34, 38, 0.85);
+  border: 1px solid var(--sidebar-spacer);
+  border-radius: 6px;
+  color: var(--sidebar-fg);
+  padding: 4px 8px;
+  transition: all 0.15s ease;
+}
+
+pre > .buttons button.clip-button:hover {
+  background: var(--theme-hover);
+  color: var(--nano-accent);
+  border-color: var(--nano-accent);
+}
+
+/* -------------------------------------------------------------------------- */
+/* 5. Navigation & Chrome                                                     */
+/* -------------------------------------------------------------------------- */
+
+/* Sidebar */
+.sidebar {
+  border-inline-end: 1px solid var(--sidebar-spacer);
+}
+
+.sidebar .sidebar-scrollbox {
+  padding: 12px 14px;
+}
+
+.chapter li.part-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sidebar-fg);
+  opacity: 0.65;
+  margin: 1.5em 0 0.4em 8px;
+}
+
+.chapter li a {
+  display: block;
+  padding: 5px 10px;
+  border-radius: 6px;
+  color: var(--sidebar-fg);
+  transition: background 0.12s ease, color 0.12s ease;
+  font-size: 13.5px;
+}
+
+.chapter li a:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg);
+}
+
+html.light .chapter li a:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.chapter li a.active {
+  background: var(--nano-accent-dim);
+  color: var(--sidebar-active) !important;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--sidebar-active);
+}
+
+/* Header & Menu Bar */
+#mdbook-menu-bar {
+  background: rgba(24, 24, 27, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--sidebar-spacer);
+}
+
+html.light #mdbook-menu-bar {
+  background: rgba(244, 244, 242, 0.9);
+}
+
+.menu-title {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.icon-button {
+  border-radius: 6px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.icon-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+html.light .icon-button:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* -------------------------------------------------------------------------- */
+/* 6. Tables & Admonitions                                                    */
+/* -------------------------------------------------------------------------- */
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--table-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 1.5rem 0;
+}
+
+table th {
+  background: var(--table-header-bg);
+  color: var(--fg);
+  font-weight: 600;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--table-border-color);
+  text-align: left;
+}
+
+table td {
+  padding: 10px 14px;
+  border-top: 1px solid var(--table-border-color);
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+}
+
+table tr:first-child td {
+  border-top: none;
+}
+
+/* Blockquotes & Callouts */
+blockquote {
+  background: var(--quote-bg);
+  border-inline-start: 4px solid var(--quote-border);
+  border-radius: 0 8px 8px 0;
+  padding: 14px 18px;
+  margin: 1.5rem 0;
+  color: var(--fg);
+}
+
+.blockquote-tag {
+  background: var(--quote-bg);
+  border-radius: 0 8px 8px 0;
+  padding: 14px 18px;
+  margin: 1.5rem 0;
+}
+
+/* Search Modal */
+#mdbook-searchbar {
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+
+#mdbook-searchbar:focus {
+  border-color: var(--nano-accent);
+  box-shadow: 0 0 0 3px var(--nano-accent-dim);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-hover);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 7. Interactive Workbenches & Components                                    */
+/* -------------------------------------------------------------------------- */
+
+nano-ui-workbench,
+nano-ui-hero,
+nano-ui-state-lab,
+nano-ui-typo-lab,
+nano-ui-trap {
+  display: block;
+  margin: 1.8rem 0;
+  background: var(--nano-card-bg);
+  border: 1px solid var(--nano-card-border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+
+.nano-wb-header {
+  padding: 12px 18px;
+  background: rgba(0, 0, 0, 0.18);
+  border-bottom: 1px solid var(--nano-card-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.nano-wb-title {
+  font-weight: 700;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nano-wb-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--nano-accent-dim);
+  color: var(--nano-accent);
+  border: 1px solid var(--nano-accent-border);
+}
+
+.nano-wb-controls {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--nano-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.nano-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.nano-chip-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+  margin-right: 6px;
+  min-width: 65px;
+}
+
+.nano-chip {
+  appearance: none;
+  border: 1px solid var(--nano-chip-border);
+  background: var(--nano-chip-bg);
+  color: var(--nano-chip-text);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.nano-chip:hover {
+  border-color: var(--nano-accent);
+}
+
+.nano-chip.active {
+  background: var(--nano-chip-active-bg);
+  border-color: var(--nano-chip-active-border);
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(88, 156, 246, 0.35);
+}
+
+.nano-chip.chip-compare {
+  margin-left: auto;
+  border-color: var(--nano-trap-border);
+  color: var(--nano-trap-badge-text);
+}
+
+.nano-chip.chip-compare.active {
+  background: #b45309;
+  border-color: var(--nano-trap-badge-text);
+  color: #ffffff;
+}
+
+/* SVG Specimen Well */
+.nano-well-container {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nano-well-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .nano-well-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nano-svg-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nano-pane-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+}
+
+.svg-well {
+  background: var(--nano-well-bg);
+  border: 1px solid var(--nano-well-border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-x: auto;
+  min-height: 80px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.svg-well svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Haskell Code Bar */
+.nano-code-bar {
+  padding: 10px 18px;
+  background: rgba(0, 0, 0, 0.25);
+  border-top: 1px solid var(--nano-card-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--mono-font);
+  font-size: 12.5px;
+}
+
+.nano-code-snippet {
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--nano-accent);
+}
+
+.nano-copy-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--nano-chip-border);
+  color: var(--nano-chip-text);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.nano-copy-btn:hover {
+  border-color: var(--nano-accent);
+  color: var(--nano-accent);
+}
+
+/* Surface Inspector Notes */
+.nano-notes-box {
+  padding: 12px 18px;
+  border-top: 1px solid var(--nano-card-border);
+  font-size: 12.5px;
+  background: rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nano-note-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.nano-note-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.nano-note-badge.primary { background: var(--nano-accent-dim); color: var(--nano-accent); }
+.nano-note-badge.partial { background: rgba(242, 180, 76, 0.18); color: #f2b44c; }
+.nano-note-badge.surprise { background: rgba(252, 165, 165, 0.2); color: #fca5a5; }
+.nano-note-badge.noop { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+
+/* Trap Specimen Cards */
+nano-ui-trap {
+  border-left: 5px solid var(--nano-trap-border);
+}
+
+.nano-trap-header {
+  padding: 14px 18px;
+  background: rgba(0, 0, 0, 0.12);
+  border-bottom: 1px solid var(--nano-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nano-trap-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nano-trap-num {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--nano-trap-badge-text);
+  background: var(--nano-trap-badge-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.nano-trap-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.nano-trap-where {
+  font-size: 12px;
+  opacity: 0.7;
+  font-family: var(--mono-font);
+}
+
+.nano-trap-blocks {
+  padding: 14px 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nano-trap-block {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.nano-trap-fix-block {
+  background: var(--nano-accent-dim);
+  border-left: 3px solid var(--nano-accent);
+}
+
+.nano-trap-code-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 18px 14px;
+}
+
+@media (max-width: 768px) {
+  .nano-trap-code-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nano-code-card {
+  border: 1px solid var(--nano-card-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.nano-code-card-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid var(--nano-card-border);
+}
+
+.nano-code-card-header.bad { color: #fca5a5; }
+.nano-code-card-header.good { color: #68a87c; }
+
+.nano-code-card pre {
+  margin: 0;
+  padding: 10px;
+  font-size: 12px;
+  overflow-x: auto;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}

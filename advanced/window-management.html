@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Window Chrome &amp; Screenshots - nano-ui Documentation</title>
+        <title>Windows &amp; Screenshots - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -179,49 +179,100 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="window-chrome--screenshots"><a class="header" href="#window-chrome--screenshots">Window Chrome &amp; Screenshots</a></h1>
-<p><code>nano-ui</code> provides high-level declarative and imperative controls for desktop windows.</p>
-<h2 id="window-settings"><a class="header" href="#window-settings">Window Settings</a></h2>
-<p>Configure startup window properties in <code>WindowSettings</code>:</p>
-<pre><code class="language-haskell">opts = defaultSdlOptions
-  { sdlWindowSettings = defaultWindowSettings
-      { wsTitle       = "Main Window"
-      , wsSize        = Size 1280 800
-      , wsMinSize     = Just (Size 640 480)
-      , wsMode        = Normal  -- Maximized, Fullscreen, Hidden
-      , wsTransparent = False
-      }
-  }
+<p>nano-ui exposes window management at two levels: declarative settings and view actions from the core library, and SDL-specific chrome and screenshot helpers from <code>nano-ui-sdl</code>.</p>
+<h2 id="window-settings"><a class="header" href="#window-settings">Window settings</a></h2>
+<p>Configure startup properties in <code>WindowSettings</code>:</p>
+<pre><code class="language-haskell">opts =
+  defaultSdlOptions
+    { sdlWindowSettings =
+        defaultWindowSettings
+          { wsTitle       = "Main Window"
+          , wsSize        = Size 1280 800
+          , wsMinSize     = Just (Size 640 480)
+          , wsMode        = Windowed      -- Windowed | Fullscreen | Hidden
+          , wsTransparent = False
+          , wsResizable   = True
+          }
+    }
 </code></pre>
-<h2 id="declarative-vs-imperative-window-apis"><a class="header" href="#declarative-vs-imperative-window-apis">Declarative vs Imperative Window APIs</a></h2>
+<p>Sizes are logical units, not pixels; the backend applies DPI scaling. <code>wsPosition</code> defaults to the desktop’s placement. <code>wsOpacity</code> (SDL) sets whole-window opacity.</p>
+<h2 id="declarative-and-imperative-actions"><a class="header" href="#declarative-and-imperative-actions">Declarative and imperative actions</a></h2>
 <p>Inside the view:</p>
 <ul>
-<li><strong>Declarative Setters</strong> (<code>setWindowTitleUi</code>, <code>setWindowModeUi</code>): No-ops when the value has not changed. Safe to call unconditionally every frame.</li>
-<li><strong>Imperative Actions</strong> (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>, <code>closeWindowUi</code>): Run on every call. Always guard behind an event:
-<pre><code class="language-haskell">whenM (button "Maximize") maximizeWindowUi
+<li>
+<p><strong>Declarative setters</strong> (<code>setWindowTitleUi</code>, <code>setWindowModeUi</code>, <code>setWindowMinSizeUi</code>, <code>setWindowMaxSizeUi</code>, <code>setWindowOpacityUi</code>, <code>setWindowIconUi</code>) are no-ops when the value has not changed, so calling them every frame is safe and cheap:</p>
+<pre><code class="language-haskell">setWindowTitleUi (docName &lt;&gt; " - My App")
+</code></pre>
+</li>
+<li>
+<p><strong>Imperative actions</strong> (<code>moveWindowUi</code>, <code>centerWindowUi</code>, <code>resizeWindowUi</code>, <code>minimizeWindowUi</code>, <code>maximizeWindowUi</code>, <code>restoreWindowUi</code>, <code>toggleMaximizedUi</code>) run on every call. Always guard them behind an event:</p>
+<pre><code class="language-haskell">whenM (button "Maximize") toggleMaximizedUi
 </code></pre>
 </li>
 </ul>
-<hr>
-<h2 id="custom-title-bars--window-chrome"><a class="header" href="#custom-title-bars--window-chrome">Custom Title Bars &amp; Window Chrome</a></h2>
-<p>For modern frameless desktop apps (like VS Code or <code>ned</code>):</p>
-<ol>
-<li>Set <code>sdlWindowDecorations = DecorationsNone</code> or <code>DecorationsFrame</code> in <code>SdlOptions</code>.</li>
-<li>Render your own title bar in the view with <code>windowFrame</code>, <code>captionButtons</code>, and <code>dragSpans</code>:</li>
-</ol>
-<pre><code class="language-haskell">customTitleBar :: NanoUI ()
-customTitleBar = rowWith (fillW . fixedH 32 . alignMid) $ do
-  -- Draggable area for moving the window
-  dragSpans $ label "My Application"
+<p><code>quitUi</code> ends the session; there is no separate “close window” command.</p>
+<h2 id="close-requests"><a class="header" href="#close-requests">Close requests</a></h2>
+<p>By default the window closes as soon as the platform asks it to. To confirm unsaved work, set <code>wsExitOnCloseRequest = False</code> and handle the request in the view:</p>
+<pre><code class="language-haskell">runSdlApp
+  defaultSdlOptions
+    { sdlWindowSettings = defaultWindowSettings {wsExitOnCloseRequest = False} }
+  appView
+
+appView = do
+  ...
+  whenM (winCloseRequested &lt;$&gt; askWindow) askBeforeQuitting
+</code></pre>
+<p><code>askWindow</code> reports the window’s current state, including size, scale, maximized/fullscreen flags, and the close request. <a href="../tutorials/notepad.html">Build a Notepad</a> wires this to a confirmation modal.</p>
+<h2 id="custom-title-bars"><a class="header" href="#custom-title-bars">Custom title bars</a></h2>
+<p>For a frameless window (VS Code style, or <code>ned</code>), set the decorations and draw the bar yourself. The <code>nano-ui-sdl</code> backend supplies <code>windowCaption</code>, which draws the minimize/maximize/close buttons, registers the drag region, and reports a close click:</p>
+<pre><code class="language-haskell">opts = defaultSdlOptions
+  { sdlWindowDecorations = DecorationsNone
+  , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1000 720}
+  }
+
+appView :: NanoUI ()
+appView = columnWith (fillW . fillH) $ do
+  titleBar
+  mainContent
+
+titleBar :: NanoUI ()
+titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
+  menuResp &lt;- button' "File"          -- interactive: exclude from dragging
+  label "My Application"
   spacer
-  captionButtons  -- Minimise, Maximise, Close
+  closeClicked &lt;- windowCaption [respRect menuResp]
+  when closeClicked quitUi
 </code></pre>
-<hr>
-<h2 id="taking-screenshots"><a class="header" href="#taking-screenshots">Taking Screenshots</a></h2>
-<p>Capture window contents programmatically:</p>
-<pre><code class="language-haskell">whenM (button "Take Screenshot") $ do
-  requestScreenshot
+<p><code>windowCaption</code> takes the rectangles of interactive widgets in the bar (menu buttons, tabs, search fields); the spans between them become draggable. The returned <code>Bool</code> is true on the frame the close button is clicked. <code>windowCaptionWith</code> customizes the buttons and resize border.</p>
+<p><code>DecorationsFrame</code> keeps the platform’s resize frame while removing the title bar; <code>DecorationsNone</code> removes both. On a resizable frameless window, edge resizing takes precedence over the drag region along the outer edges.</p>
+<p>An optional rounded border around the whole view comes from <code>windowFrame</code>:</p>
+<pre><code class="language-haskell">mainView = windowFrame (defaultWindowFrame (colorRGBA 70 70 80 255)) $ do
+  ...
 </code></pre>
-<p>Consume the resulting raw pixels with <code>useScreenshot</code> or save them to disk with <code>saveScreenshot</code>.</p>
+<p>It draws a border and insets the view; the border does not consume layout space.</p>
+<h2 id="screenshots"><a class="header" href="#screenshots">Screenshots</a></h2>
+<p><code>requestScreenshot</code> asks the backend for the next presented frame and delivers it to a callback:</p>
+<pre><code class="language-haskell">whenM (button "Screenshot") $
+  requestScreenshot $ \maybeScreenshot -&gt; ...
+</code></pre>
+<p>The callback runs in <code>IO</code> after the frame is presented. Keep it short (an <code>IORef</code> write or a <code>forkIO</code> for encoding); the next frame waits on it. Each request is answered exactly once, including with <code>Nothing</code> when the backend cannot capture.</p>
+<p>For thread-safe capture use <code>askScreenshot</code>, which returns an <code>IO</code> action for a background thread, or <code>useScreenshot</code> for a per-key screenshot owned by a task:</p>
+<pre><code class="language-haskell">data App = App
+  { appShots :: Task Int (Maybe Screenshot)
+  , appCount :: Var Int
+  }
+
+newApp = App &lt;$&gt; newTask &lt;*&gt; newVar 0
+
+view app = do
+  whenM (button "Screenshot") (modifyVar (appCount app) (+ 1))
+  key &lt;- readVar (appCount app)
+  shot &lt;- if key == 0 then pure Nothing else useScreenshot (appShots app) key
+  for_ shot $ \(Screenshot pixels scale) -&gt; ...
+</code></pre>
+<p>The <code>nano-ui-sdl</code> backend also has <code>saveScreenshot env path</code> (a BMP of the current frame) and <code>captureScreenshot env</code> (pixels), both on the display thread. For PNG encoding, use <code>JuicyPixels</code> or a similar library in a background thread.</p>
+<h2 id="testing-window-behavior"><a class="header" href="#testing-window-behavior">Testing window behavior</a></h2>
+<p>Window operations are no-ops without a session, which makes headless tests possible: <code>setWindowTitleUi</code> and the other declarative setters can be called from <code>NanoUI.Testing</code> frames, and <code>askWindow</code> reports a default state. Native screenshot and chrome tests need a real SDL session, as in <code>nano-ui-demo</code>’s hidden-window self-tests.</p>
 
                     </main>
 
@@ -231,7 +282,7 @@ customTitleBar = rowWith (fillW . fixedH 32 . alignMid) $ do
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../production/recurring-bugs.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../packages/nano-ui-sdl.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -245,7 +296,7 @@ customTitleBar = rowWith (fillW . fixedH 32 . alignMid) $ do
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../production/recurring-bugs.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../packages/nano-ui-sdl.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -275,7 +326,7 @@ customTitleBar = rowWith (fillW . fixedH 32 . alignMid) $ do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

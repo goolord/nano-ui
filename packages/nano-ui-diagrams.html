@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>nano-ui-diagrams: Charts &amp; Plots - nano-ui Documentation</title>
+        <title>Charts &amp; Diagrams - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,26 +178,97 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="nano-ui-diagrams-charts--plots"><a class="header" href="#nano-ui-diagrams-charts--plots">nano-ui-diagrams: Charts &amp; Plots</a></h1>
-<p><code>nano-ui-diagrams</code> integrates high-level plotting primitives (<code>NanoUI.Plot</code>) and general 2D vector drawing from <code>diagrams-lib</code> into <code>nano-ui</code>.</p>
-<h2 id="chart-types"><a class="header" href="#chart-types">Chart Types</a></h2>
-<p>The <code>NanoUI.Plot</code> module provides ready-to-use chart widgets:</p>
+                        <h1 id="charts--diagrams-nano-ui-diagrams"><a class="header" href="#charts--diagrams-nano-ui-diagrams">Charts &amp; Diagrams (<code>nano-ui-diagrams</code>)</a></h1>
+<p><code>nano-ui-diagrams</code> brings two things into a nano-ui layout:</p>
 <ul>
-<li><strong>Line Plots</strong>: Multi-series line charts with customizable strokes, point markers, and grid lines.</li>
-<li><strong>Bar Charts</strong>: Grouped and stacked bar charts.</li>
-<li><strong>Scatter Plots</strong>: 2D scatter plots with confidence intervals.</li>
-<li><strong>Area Charts</strong>: Shaded area graphs for timelines and volume distributions.</li>
+<li><strong><code>NanoUI.Plot</code></strong> — line, bar, scatter, area, and step charts with axes, grid, legend, hover readout, and decimation.</li>
+<li><strong><code>NanoUI.Diagrams</code></strong> — the diagrams-lib backend and widget, for arbitrary vector drawings.</li>
 </ul>
 <pre><code class="language-haskell">import NanoUI
 import NanoUI.Plot
-
-cpuChart :: [Double] -&gt; NanoUI ()
-cpuChart samples = linePlot (fixedWH 400 200) $ do
-  plotSeries "CPU %" samples
-  plotYRange 0 100
-  plotGridLines True
 </code></pre>
-<p>Charts automatically adapt their background, grid lines, and axis label colors to the active <code>Theme</code>.</p>
+<h2 id="a-first-chart"><a class="header" href="#a-first-chart">A first chart</a></h2>
+<pre><code class="language-haskell">data App = App {appPlots :: PlotCache}
+
+newApp :: IO App
+newApp = App &lt;$&gt; newPlotCache
+
+cpuChart :: App -&gt; Seq (Double, Double) -&gt; NanoUI ()
+cpuChart app samples =
+  void $ plot (appPlots app) (fillW . fixedH 220) $
+    withGrid GridBoth
+      . withXAxis "time (s)"
+      . withYAxis "CPU %"
+      . withLegend LegendNone
+      $ chart [line "cpu" samples]
+</code></pre>
+<p><code>plot</code> takes the cache, a layout modifier, and the <code>Chart</code>, and returns a <code>PlotResponse</code>. The cache is what makes it cheap: the <code>Chart</code> value can be rebuilt every frame, but the diagram behind it is rebuilt only when the chart or theme actually changes.</p>
+<p><code>lineChart</code>, <code>barChart</code>, <code>scatterChart</code>, and <code>areaChart</code> are the one-series shortcuts:</p>
+<pre><code class="language-haskell">resp &lt;- lineChart cache (fillW . fixedH 200) samples
+</code></pre>
+<h2 id="series"><a class="header" href="#series">Series</a></h2>
+<pre><code class="language-haskell">line    "cpu"   points     -- (x, y) pairs, connected in input order
+scatter "load"  points
+area    "mem"   points     -- filled to a baseline
+step    "state" points     -- horizontal/vertical steps
+bar     "disk"  [(label, value)]
+</code></pre>
+<p>Style modifiers compose on a series (<code>&amp;</code> is from <code>Diagrams.Prelude</code>):</p>
+<pre><code class="language-haskell">import Diagrams.Prelude ((&amp;))
+
+chart
+  [ line "cpu" cpuPoints
+      &amp; withColor (colorHex "#38bdf8")
+      &amp; withStrokeWidth 2
+      &amp; withMarker MarkCircle
+  , area "memory" memPoints
+  ]
+</code></pre>
+<p>Charts have a <code>Domain</code> per axis; <code>emptyChart</code> defaults to the data’s extent. <code>withTitle</code>, <code>withXAxis</code>, <code>withYAxis</code>, <code>withGrid</code>, <code>withLegend</code>, and <code>withDecimate</code> decorate the chart. <code>addSeries</code> appends a series while preserving order.</p>
+<p>Decimation is on by default for line, area, and step series; it thins the drawing and hit testing without changing the stored data. Scatter series and marked lines are thinned only past 2,000 points.</p>
+<h2 id="hover-and-live-readouts"><a class="header" href="#hover-and-live-readouts">Hover and live readouts</a></h2>
+<p><code>plot</code> returns <code>PlotResponse {plotResponse, plotHover}</code>. Hover is <code>Nothing</code> outside the data box:</p>
+<pre><code class="language-haskell">resp &lt;- plot cache (fillW . fixedH 260) theChart
+case plotHover resp of
+  Nothing -&gt; muted "Hover the chart to inspect a point"
+  Just h  -&gt; kv "value"
+               (T.pack (show (round (hoverDataY h) :: Int)) &lt;&gt; " at sample "
+                  &lt;&gt; T.pack (show (round (hoverDataX h) :: Int)))
+</code></pre>
+<p>For a crosshair cursor over the chart, wrap the call:</p>
+<pre><code class="language-haskell">withCursorShape UiCursorCrosshair (plot cache layout theChart)
+</code></pre>
+<h2 id="theme-awareness"><a class="header" href="#theme-awareness">Theme awareness</a></h2>
+<p>Charts read the active theme for the frame, grid, axes, labels, and the series palette. A chart inside <code>styled</code> or <code>themed</code> picks up that scope automatically. There is no separate chart theme to configure; <code>themeAccent</code>, <code>themeMuted</code>, and the palette fields do the work.</p>
+<h2 id="cache-lifetime"><a class="header" href="#cache-lifetime">Cache lifetime</a></h2>
+<p>A <code>PlotCache</code> belongs to one component and one session:</p>
+<pre><code class="language-haskell">data App = App
+  { appPlots :: PlotCache
+  , appSeries :: Var [Point]
+  }
+
+newApp :: IO App
+newApp = App &lt;$&gt; newPlotCache &lt;*&gt; newVar []
+</code></pre>
+<p>Do not allocate a cache inside the view; it would discard the comparison state every frame. The cache keeps an entry per plot widget id and does not evict entries, so avoid creating plots whose ids change constantly (for example, one per item of an unbounded list). For a scrolling list of charts, reuse a fixed window of plot ids instead.</p>
+<h2 id="diagrams-lib-content"><a class="header" href="#diagrams-lib-content">Diagrams-lib content</a></h2>
+<p><code>diagram</code> places any <code>QDiagram</code> in the layout:</p>
+<pre><code class="language-haskell">import Diagrams.Prelude
+import NanoUI.Diagrams
+
+myDiagram :: NanoUI Response
+myDiagram = diagram (fixedWH 320 200) $ circle 80 # fc blue
+</code></pre>
+<p><code>diagramWithEnvelope</code> sets an explicit envelope; <code>diagramWithKeyAndEnvelope</code> adds a content version for cached drawings. The backend is exposed as <code>NanoUI.Diagrams.Backend</code> if you need to emit <code>DrawOp</code>s yourself.</p>
+<h2 id="performance-checklist"><a class="header" href="#performance-checklist">Performance checklist</a></h2>
+<ul>
+<li>Allocate the <code>PlotCache</code> once, in <code>IO</code>.</li>
+<li>Build the <code>Chart</code> value per frame only from data you already have; do not parse or regroup in the view.</li>
+<li>Keep the point count sane; decimation helps drawing, not the cost of building the list.</li>
+<li>For live data, keep only the visible window of samples (the <code>LiveChart</code> example keeps 200).</li>
+<li>Do not create a new plot id per item in a growing list.</li>
+</ul>
+<p>The live chart tutorial shows the stream-to-chart pipeline end to end: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</p>
 
                     </main>
 
@@ -251,7 +322,7 @@ cpuChart samples = linePlot (fixedWH 400 200) $ do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

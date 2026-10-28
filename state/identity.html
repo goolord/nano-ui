@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>The Frame Model - nano-ui Documentation</title>
+        <title>Widget Identity &amp; Keys - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,50 +178,100 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="the-frame-model"><a class="header" href="#the-frame-model">The Frame Model</a></h1>
-<p><code>nano-ui</code> is built on an immediate-mode execution model. Unlike retained-mode frameworks where you build an object graph of widgets and mutate them via event listeners, in <code>nano-ui</code> the view action re-runs every frame to describe the entire interface.</p>
-<h2 id="the-frame-lifecycle"><a class="header" href="#the-frame-lifecycle">The Frame Lifecycle</a></h2>
-<p>Each frame proceeds through six deterministic stages:</p>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"><span class="img-wrapper"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"></span></label></p>
-<ol>
-<li><strong>View Execution (<code>NanoUI ()</code>)</strong>: The user action executes top-to-bottom. It emits layout nodes into an unboxed arena, reads input events, queries layout geometry from the previous frame, and reads/writes mutable <code>Var</code> references.</li>
-<li><strong>Re-run Check (Self-Invalidation)</strong>: If a <code>Var</code> is written <em>after</em> it was already read in the same pass, the view action is re-run once with one-shot input events cleared (preventing buttons or keystrokes from firing twice).</li>
-<li><strong>Layout Solver</strong>: The layout tree is solved from root to leaves, determining logical rectangles for every node based on flex weights, gaps, and explicit constraints.</li>
-<li><strong>Hit-Testing &amp; Focus Resolution</strong>: Pointer coordinates, keyboard shortcuts, and Tab cycles are resolved against the freshly solved geometry.</li>
-<li><strong>Damage Calculation</strong>: The new frame geometry and draw operations are diffed against the previous frame to calculate the minimal damaged bounding box.</li>
-<li><strong>Rasterization / Paint</strong>: Only the damaged region is uploaded to the GPU / backend renderer for presentation.</li>
-</ol>
-<hr>
-<h2 id="architectural-consequences"><a class="header" href="#architectural-consequences">Architectural Consequences</a></h2>
-<h3 id="1-view-actions-can-run-more-than-once-per-frame"><a class="header" href="#1-view-actions-can-run-more-than-once-per-frame">1. View Actions Can Run More Than Once Per Frame</a></h3>
-<p>Writing a <code>Var</code> that was read earlier in the same pass triggers a second pass to reconcile the UI.</p>
-<blockquote class="blockquote-tag blockquote-tag-caution">
-<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
-<p>Never allocate per-frame resources inside a view. For instance, <code>liftIO (newVar x)</code> inside a view is a critical bug—it allocates a new reference on every pass. Guard all side effects behind event checks:</p>
-<pre><code class="language-haskell">whenM (button "Save") (liftIO saveDocument)
-</code></pre>
-</blockquote>
-<h3 id="2-readvar-placement-matters"><a class="header" href="#2-readvar-placement-matters">2. <code>readVar</code> Placement Matters</a></h3>
-<p>The position of <code>readVar</code> relative to mutating widgets impacts performance:</p>
+                        <h1 id="widget-identity--keys"><a class="header" href="#widget-identity--keys">Widget Identity &amp; Keys</a></h1>
+<p>Widget state — caret position, text selection, an open drop-down, a scroll offset, per-row local <code>Var</code>s — is not stored in the widget. It is stored under the widget’s <strong>id</strong>, and ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This chapter is about keeping the order stable.</p>
+<h2 id="how-ids-are-assigned"><a class="header" href="#how-ids-are-assigned">How ids are assigned</a></h2>
+<p>Every container gives its children ids counting up from the start of that container. A <code>column</code> with three labels has children 0, 1, and 2; a nested <code>row</code> starts its own count. The useful mental model is “the nth call at this level”, not a global counter.</p>
+<p>Two separate id spaces exist:</p>
 <ul>
-<li><strong>Single Pass</strong>: Reading a <code>Var</code> <em>below</em> the input widget that edits it allows the mutation and new value to resolve in a single pass.</li>
-<li><strong>Double Pass</strong>: Reading a <code>Var</code> <em>above</em> the input widget forces a second pass whenever the user types or interacts.</li>
-<li><strong>Widget-Level Repaint</strong>: Widgets bound directly to a <code>Var</code> without any external <code>readVar</code> calls only repaint that specific widget.</li>
+<li><strong>Widget ids</strong> for layout nodes, focus, input state, and scroll state.</li>
+<li><strong><code>useVar</code> slots</strong>, counted in call order, with their own counter and key space.</li>
 </ul>
-<h3 id="3-geometry-lags-one-frame"><a class="header" href="#3-geometry-lags-one-frame">3. Geometry Lags One Frame</a></h3>
-<p>Because layout is calculated <em>after</em> the view action executes, <code>respRect</code> returns the geometry from the <strong>previous frame</strong> (empty on first appearance). When writing automated tests or positioning dynamic popups based on rects, warm up one frame before checking coordinates.</p>
-<h3 id="4-idle-costs-zero-cpu"><a class="header" href="#4-idle-costs-zero-cpu">4. Idle Costs Zero CPU</a></h3>
-<p>When no animations, background tasks, or OS window events are pending, the backend event loop blocks on the OS event queue. The application consumes 0% CPU while idle.</p>
+<p>That separation means a conditional <em>widget</em> does not shift <code>useVar</code> slots, and a conditional <em><code>useVar</code></em> does not shift widget ids. Both still need their position kept stable if they come and go, which is what <code>scope</code> does.</p>
+<h2 id="rule-1-keep-the-call-order-stable"><a class="header" href="#rule-1-keep-the-call-order-stable">Rule 1: keep the call order stable</a></h2>
+<p>The structure of the calls should be the same on every frame. Straight-line code and ordinary <code>if</code>/<code>case</code> over widget <em>values</em> are fine; conditionally <em>calling</em> a widget changes the count for everything after it.</p>
+<h2 id="rule-2-wrap-conditional-subtrees-in-scope"><a class="header" href="#rule-2-wrap-conditional-subtrees-in-scope">Rule 2: wrap conditional subtrees in <code>scope</code></a></h2>
+<p><code>scope</code> reserves one slot whether or not its body runs, so later siblings keep their ids:</p>
+<pre><code class="language-haskell">-- BAD: when showDetails is False, every later sibling shifts down one id.
+when showDetails $ do
+  label "Details..."
+  textInput detailsVar
+
+-- GOOD: one stable slot, whether or not the body runs.
+scope $
+  when showDetails $ do
+    label "Details..."
+    textInput detailsVar
+</code></pre>
+<p>The same applies to a branch that swaps two widgets:</p>
+<pre><code class="language-haskell">scope $
+  if isEditing
+    then textInput draft
+    else label (todoText todo)
+</code></pre>
+<p><code>scope</code> is cheap and local. Use it around anything that may not run on every frame: a conditional block, a case whose branches declare different widgets, a placeholder that appears while loading. Overlays are the exception with a simpler rule: call them unconditionally (see Rule 4).</p>
+<h2 id="rule-3-key-dynamic-lists-with-withkey"><a class="header" href="#rule-3-key-dynamic-lists-with-withkey">Rule 3: key dynamic lists with <code>withKey</code></a></h2>
+<p>Never key a list item by its index. Wrap each item in <code>withKey</code> with a stable, sibling-unique key — an item id, a UUID, a file path:</p>
+<pre><code class="language-haskell">column $ for_ items $ \todo -&gt;
+  withKey (todoId todo) $ do
+    row $ do
+      label (todoText todo)
+      whenM (button "Delete") (deleteItem (todoId todo))
+</code></pre>
+<p>Without the key, removing the first row makes every later row inherit the previous row’s caret, selection, and local <code>Var</code>s. With it, the row’s state travels with the item through filters, sorts, and reorders.</p>
+<p><code>withKey</code> is also how per-row <code>useVar</code> calls stay attached to their row:</p>
+<pre><code class="language-haskell">for_ items $ \todo -&gt;
+  withKey (todoId todo) $ do
+    expanded &lt;- useVar False      -- follows todoId, not the row index
+    ...
+</code></pre>
+<p>The full todo-list tutorial builds this up step by step: <a href="../tutorials/todo-list.html">Build a Todo List</a>.</p>
+<h3 id="lists-that-use-vars-per-element"><a class="header" href="#lists-that-use-vars-per-element">Lists that use <code>Var</code>s per element</a></h3>
+<p>For a list stored in a <code>Var [a]</code>, <code>forEachVar key list body</code> gives each element a <code>Var a</code> and puts the body under the element’s key automatically. <code>withElemVars</code> does the same but passes the elements and an <code>at</code> accessor, for when you filter or sort the list yourself:</p>
+<pre><code class="language-haskell">withElemVars todoId items $ \todos at -&gt;
+  forM_ (filter visible todos) $ \todo -&gt;
+    withKey (todoId todo) (row (at todo))
+</code></pre>
+<h2 id="rule-4-call-overlays-unconditionally"><a class="header" href="#rule-4-call-overlays-unconditionally">Rule 4: call overlays unconditionally</a></h2>
+<p><code>modal</code>, <code>window</code>, and <code>popup</code> take a <code>Var Bool</code> for their open state and draw nothing while it is false. Call them every frame:</p>
+<pre><code class="language-haskell">confirm &lt;- useVar False
+whenM (button "Delete...") (writeVar confirm True)
+
+modal confirm "Delete the file?" $
+  whenM (button "Delete") (deleteFile &gt;&gt; writeVar confirm False)
+</code></pre>
+<p>Wrapping the call in <code>when (readVar confirm)</code> shifts every later sibling’s id when the dialog opens and closes, which is exactly the jump <code>scope</code> and keys exist to prevent. For derived open state, pass <code>constVar</code> and use the primed variants.</p>
+<h2 id="rule-5-retain-state-for-dynamic-collections"><a class="header" href="#rule-5-retain-state-for-dynamic-collections">Rule 5: retain state for dynamic collections</a></h2>
+<p>Widget and <code>Var</code> state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection — a chat log, a set of tabs, a streaming table — keep the per-row state in a <code>VarMap</code> and prune it periodically:</p>
+<pre><code class="language-haskell">retainVars (`elem` liveIds) rowVars
+</code></pre>
+<p>Without pruning, a long-running application accumulates state for rows that no longer exist. With aggressive pruning, state disappears the moment a row is filtered out; choose the policy per collection. A todo row can keep its draft while hidden; a row from a 100,000-row log cannot.</p>
+<h2 id="symptoms-and-their-fixes"><a class="header" href="#symptoms-and-their-fixes">Symptoms and their fixes</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Symptom</th><th>Likely cause</th></tr>
+</thead>
+<tbody>
+<tr><td>Typing in one field moves the caret in another</td><td>A conditional widget before it changed the id count; wrap the branch in <code>scope</code>.</td></tr>
+<tr><td>Deleting a row resets the next row’s edit state</td><td>The list is keyed by index; use <code>withKey item.id</code>.</td></tr>
+<tr><td>A modal’s fields do not respond after opening another modal</td><td>The modal is called conditionally; call it unconditionally with a <code>Var Bool</code>.</td></tr>
+<tr><td>State appears in the wrong row after sorting</td><td>Per-row <code>useVar</code>s are outside <code>withKey</code>, or the key is the index.</td></tr>
+<tr><td>Memory grows with every streamed entry</td><td>Per-row state is in an unbounded <code>VarMap</code>; <code>retainVars</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>For the <code>Var</code> side of this — allocation, projections, and write costs — read <a href="var.html"><code>Var</code> in Depth</a>. For the lifecycle that makes ids reset, read <a href="../architecture/frame-model.html">The Frame Model</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../getting-started/development.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../state/var.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../core/state-var.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../elm/overview.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -231,11 +281,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../getting-started/development.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../state/var.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../core/state-var.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../elm/overview.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -265,7 +315,7 @@
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

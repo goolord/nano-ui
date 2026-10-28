@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -179,64 +179,91 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="scrolling--virtualization"><a class="header" href="#scrolling--virtualization">Scrolling &amp; Virtualization</a></h1>
-<p><code>nano-ui</code> provides high-performance scroll containers supporting momentum scrolling, custom scrollbars, and virtualization for lists containing hundreds of thousands of items.</p>
-<h2 id="bounded-scroll-viewports"><a class="header" href="#bounded-scroll-viewports">Bounded Scroll Viewports</a></h2>
-<p>A scroll container must have a bounded dimension along its scrolling axis:</p>
-<pre><code class="language-haskell">-- Bounded vertically to 300px; fills parent horizontally
-scrollWith (fixedH 300 . fillW) $ do
-  column $ for_ items $ \item -&gt; do
+<p>Scroll containers handle wheel and drag scrolling, a scrollbar, and (for huge lists) virtualization. The one requirement is a <strong>bounded viewport</strong> along the scrolling axis.</p>
+<h2 id="bounded-scroll-viewports"><a class="header" href="#bounded-scroll-viewports">Bounded scroll viewports</a></h2>
+<pre><code class="language-haskell">-- Bounded vertically to 300 px; fills the parent horizontally.
+scrollWith (fixedH 300 . fillW) $
+  column $ for_ items $ \item -&gt;
     label item
 </code></pre>
 <blockquote class="blockquote-tag blockquote-tag-warning">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
-<p>Giving a scroll container <code>grow</code> without a bounded parent can lead to unexpected collapses. Ensure the ancestor container provides a definite constraint.</p>
+<p>A scroll container given <code>grow</code> inside an unbounded parent has nothing to size against and can collapse. Make sure an ancestor provides a definite height (or width, for horizontal scrolling).</p>
 </blockquote>
-<hr>
-<h2 id="2d-scrolling"><a class="header" href="#2d-scrolling">2D Scrolling</a></h2>
-<p>For data grids, code canvases, or image viewports:</p>
-<pre><code class="language-haskell">scroll2DWith (fixedWH 600 400) $ do
-  largeCanvasContent
+<p><code>scrollWith</code> returns the body’s result. <code>scrollArea</code> also returns the scroller’s <code>WidgetId</code>, which is what programmatic scrolling needs:</p>
+<pre><code class="language-haskell">(sid, picked) &lt;- scrollArea (fixedH 240 . fillW) $ do
+  ...
 </code></pre>
-<hr>
-<h2 id="virtualization-for-massive-datasets"><a class="header" href="#virtualization-for-massive-datasets">Virtualization for Massive Datasets</a></h2>
-<p>When rendering datasets with 10,000+ to 100,000+ rows, creating thousands of layout nodes degrades frame rates. Virtualization solves this by rendering only the rows currently visible within the scroll viewport.</p>
-<h3 id="implementation-pattern"><a class="header" href="#implementation-pattern">Implementation Pattern</a></h3>
+<h2 id="2d-scrolling"><a class="header" href="#2d-scrolling">2D scrolling</a></h2>
+<p><code>scroll2DWith</code> and <code>scrollArea2D</code> scroll both axes. The log viewer and data grids use this:</p>
+<pre><code class="language-haskell">scroll2DWith (fixedWH 600 400) largeCanvasContent
+</code></pre>
+<p>Use 2D scrolling only when the content genuinely needs both axes; a one-axis container has a simpler scrollbar and wheel behavior.</p>
+<h2 id="virtualization-for-massive-lists"><a class="header" href="#virtualization-for-massive-lists">Virtualization for massive lists</a></h2>
+<p>A list of 100,000 rows cannot create 100,000 layout nodes per frame. Virtualization draws only the rows inside the viewport, with spacers standing in for the rows before and after.</p>
+<p>The scroller’s geometry is read from the <strong>previous</strong> frame’s layout, so capture the id and read the metrics before building the content:</p>
 <pre><code class="language-haskell">virtualizedList :: [Item] -&gt; NanoUI ()
 virtualizedList items = do
-  -- Capture the widget ID of the scroller
-  sid &lt;- currentId
-  
+  sid &lt;- currentId                       -- the id the scroller will receive
   scrollWith (fixedH 500 . fillW) $ do
-    -- Query scroll metrics (current offset and viewport height)
-    metrics &lt;- getScrollMetricsUi sid
-    
-    let rowHeight = 28.0
-        totalCount = length items
-        totalHeight = fromIntegral totalCount * rowHeight
-        
-        -- Compute visible row slice
-        firstVisible = max 0 (floor (smOffsetY metrics / rowHeight))
-        visibleCount = ceiling (smViewportHeight metrics / rowHeight) + 2
-        lastVisible = min totalCount (firstVisible + visibleCount)
-        
-        topSpacerHeight = fromIntegral firstVisible * rowHeight
-        bottomSpacerHeight = fromIntegral (totalCount - lastVisible) * rowHeight
-        
+    metrics &lt;- getScrollMetricsUi sid    -- previous frame's geometry, or Nothing
+    let rowH = 28
+        total = length items
+        (offsetY, viewH) = case metrics of
+          Nothing -&gt; (0, 0)
+          Just m  -&gt; (v2Y (scrollOffset m), rectH (scrollViewport m))
+        firstVisible = max 0 (floor (offsetY / rowH))
+        visibleCount = ceiling (viewH / rowH) + 2
+        lastVisible  = min total (firstVisible + visibleCount)
+        topH    = fromIntegral firstVisible * rowH
+        bottomH = fromIntegral (total - lastVisible) * rowH
         visibleRows = take (lastVisible - firstVisible) (drop firstVisible items)
-    
-    column $ do
-      -- Top spacer maintains scroll height
-      when (topSpacerHeight &gt; 0) $ spacerWith (fixedH topSpacerHeight)
-      
-      -- Render only active rows
-      for_ visibleRows $ \rowItem -&gt; do
-        withKey rowItem.id $ do
-          labelWith (fixedH rowHeight . fillW) rowItem.title
-          
-      -- Bottom spacer maintains scroll height
-      when (bottomSpacerHeight &gt; 0) $ spacerWith (fixedH bottomSpacerHeight)
+    columnWith (tight . fillW) $ do
+      when (topH &gt; 0) (spacer Fit (Fixed topH))
+      for_ visibleRows $ \item -&gt;
+        withKey (itemId item) $
+          labelWith (fixedH rowH . fillW) (itemTitle item)
+      when (bottomH &gt; 0) (spacer Fit (Fixed bottomH))
 </code></pre>
-<p>See <code>nano-ui-example-long-list</code> in <code>packages/nano-ui-demo</code> for a complete working demo of 100,000 rows virtualized at 60 FPS.</p>
+<p>Why each piece matters:</p>
+<ul>
+<li><strong><code>currentId</code> before the scroller</strong> names the widget that <code>getScrollMetricsUi</code> reads. The metrics are from the previous frame, like <code>respRect</code>.</li>
+<li><strong><code>scrollViewport</code> includes padding and excludes the scrollbar lane.</strong> Use it, not the container’s rectangle, for the visible height.</li>
+<li><strong><code>scrollOffset</code> is the current offset</strong>, which may have moved since layout (a wheel event or glide).</li>
+<li><strong>The top and bottom spacers keep the scroll range correct.</strong> Without them, the scrollbar would shrink to just the visible rows.</li>
+<li><strong><code>withKey (itemId item)</code></strong> keeps row state attached to the item, not the visible position.</li>
+<li><strong>A metrics read registers a layout dependency</strong>: when the viewport changes size, the view gets another frame with the new metrics.</li>
+</ul>
+<p><code>packages/nano-ui-demo/examples/LongList.hs</code> runs this pattern with 100,000 rows; <code>Logs.hs</code> adds sticky-to-bottom behavior on top.</p>
+<h2 id="programmatic-scrolling"><a class="header" href="#programmatic-scrolling">Programmatic scrolling</a></h2>
+<p>The scroller id unlocks commands:</p>
+<pre><code class="language-haskell">metrics &lt;- getScrollMetricsUi sid
+when (shouldReveal row) $
+  scrollRectIntoViewUi sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant
+</code></pre>
+<p>Available from a view: <code>scrollToUi</code>, <code>scrollByUi</code>, <code>scrollPagesUi</code>, <code>scrollRectIntoViewUi</code>, <code>setScrollOffsetUi</code>, and <code>setScrollStepUi</code>. The <code>Context</code>-based variants (<code>scrollTo</code>, <code>scrollBy</code>, <code>getScrollOffset2D</code>, …) are used from <code>IO</code> when a view is not the caller.</p>
+<p><code>scrollRectIntoViewUi</code> respects ancestor clips and is what focus uses to reveal a Tab target. <code>ScrollAlign</code> chooses nearest/start/end/center; <code>ScrollInstant</code> versus <code>ScrollSmooth</code> chooses the motion.</p>
+<h2 id="wheel-behavior"><a class="header" href="#wheel-behavior">Wheel behavior</a></h2>
+<p>By default a wheel notch scrolls 60 logical pixels. For a list of fixed-height rows, set the step so one notch is exactly one row:</p>
+<pre><code class="language-haskell">ctx &lt;- askContext
+liftIO $ setScrollTuning ctx defaultScrollTuning
+  {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
+</code></pre>
+<p><code>setScrollStepUi sid px</code> overrides the step for one scroller; <code>0</code> returns it to the context setting. A nonzero <code>scrollSmoothTime</code> turns each notch into a short glide.</p>
+<h2 id="performance-notes"><a class="header" href="#performance-notes">Performance notes</a></h2>
+<ul>
+<li>Build only the visible rows. A <code>label</code> per row of 100,000 is still 100,000 layout nodes even if the drawing is clipped.</li>
+<li>Keep row heights constant when virtualizing; content-derived heights make the visible slice computation wrong.</li>
+<li>Avoid <code>readVar</code> above the scroller for values that change while scrolling; a read above the editor forces a second pass per change.</li>
+<li>Use <code>scroll2D</code> only when needed; the extra axis costs a scrollbar lane and hit-testing.</li>
+<li>A <code>scrollArea</code> nested in a popup or dialog draws a box in a box; see <a href="../troubleshooting/recurring-bugs.html#2-double-borders--box-in-a-box">Double borders</a>.</li>
+</ul>
+<h2 id="related"><a class="header" href="#related">Related</a></h2>
+<ul>
+<li>Container inventory: <a href="containers.html">Containers</a>.</li>
+<li>Sizing modifiers: <a href="modifiers.html">Layout Modifiers</a>.</li>
+<li>The 100,000-row example and the log viewer: <code>packages/nano-ui-demo/examples/</code>.</li>
+</ul>
 
                     </main>
 
@@ -246,7 +273,7 @@ virtualizedList items = do
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../styling/overview.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../widgets/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -260,7 +287,7 @@ virtualizedList items = do
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../styling/overview.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../widgets/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -290,7 +317,7 @@ virtualizedList items = do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Source Code Reduction - nano-ui Documentation</title>
+        <title>Messages, Reducers &amp; Components - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,49 +178,133 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="source-code-reduction"><a class="header" href="#source-code-reduction">Source Code Reduction</a></h1>
-<p>A rigorous analysis of codebase simplification, performance boundaries, and line-count reduction across all maintained packages.</p>
-<h2 id="metrics--scope"><a class="header" href="#metrics--scope">Metrics &amp; Scope</a></h2>
-<p>Across every maintained library package (core, SDL, RGFW, bindings, diagrams, forms):</p>
-<ul>
-<li><strong>237 physical / 373 formatter-normalized lines</strong> were eliminated while strictly expanding test coverage and maintaining 100% backward compatibility.</li>
-<li>All 11 test suites pass under GHC 9.14 with <code>-Wall -Werror</code>.</li>
-</ul>
-<h2 id="key-simplifications"><a class="header" href="#key-simplifications">Key Simplifications</a></h2>
+                        <h1 id="messages-reducers--components"><a class="header" href="#messages-reducers--components">Messages, Reducers &amp; Components</a></h1>
+<p><code>NanoUIE msg a</code> is a view that can emit only <code>msg</code>. This chapter covers the adapters, component composition, the runners, and the rules that keep message flow predictable.</p>
+<pre><code class="language-haskell">import NanoUI
+import NanoUI.Emit qualified as Emit
+</code></pre>
+<h2 id="the-view"><a class="header" href="#the-view">The view</a></h2>
+<p>A <code>NanoUIE msg ()</code> view uses the same <code>do</code> notation as <code>NanoUI</code>. Widgets that are not adapted are lifted:</p>
+<pre><code class="language-haskell">settingsView :: Model -&gt; Emit.NanoUIE Msg ()
+settingsView model = Emit.withNanoUI column $ do
+  Emit.liftNanoUI (heading "Application Settings")
+
+  -- Emit on activation.
+  Emit.emitWhen (button "Save") SaveDocument
+
+  -- Run the widget against the model value; emit only on change.
+  Emit.emitChanged (slider 0 100) model.volume SetVolume
+
+  Emit.withNanoUI row $ do
+    Emit.emitWhen (button "-") Decrement
+    Emit.liftNanoUI (label (T.pack (show model.counter)))
+    Emit.emitWhen (button "+") Increment
+</code></pre>
+<p><code>withNanoUI</code> is <code>mapReaderT</code>: it applies an ordinary layout or scope function to the typed body. It does not change which messages are emitted; it changes where the widgets are laid out. <code>liftNanoUI</code> is the identity adapter for an ordinary <code>NanoUI</code> action.</p>
+<p><code>withRunInNanoUIE</code> is for ordinary widgets that take callbacks or multiple bodies, such as a custom container that runs a child action twice:</p>
+<pre><code class="language-haskell">view model = Emit.withRunInNanoUIE $ \run -&gt; column $ do
+  label "Settings"
+  run (Emit.emitChanged (slider 0 100) model.volume SetVolume)
+  run (Emit.emitWhen (button "Save") SaveDocument)
+</code></pre>
+<p>Call the supplied <code>run</code> function only inside the enclosing UI action.</p>
+<h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Boundary</th><th>Description</th><th style="text-align: right">Line Savings</th></tr>
+<tr><th>Function</th><th>Emits when</th></tr>
 </thead>
 <tbody>
-<tr><td><strong>SDL Damage Rejection</strong></td><td>Replaced complex quad-only scalar/AVX2 loops with conservative triangle checks.</td><td style="text-align: right">-152 lines</td></tr>
-<tr><td><strong>Header-Checked SDL_ttf</strong></td><td>Header-checked direct C-FFI imports in place of forwarding wrappers.</td><td style="text-align: right">-75 lines</td></tr>
-<tr><td><strong>Direct Glyph Uploads</strong></td><td>SDL-owned atlas storage with direct texture streaming.</td><td style="text-align: right">-27 lines</td></tr>
-<tr><td><strong>RGFW Constant Derivation</strong></td><td>Derived bindings and event codes directly from the single C header.</td><td style="text-align: right">-31 lines</td></tr>
-<tr><td><strong>Context Initialization</strong></td><td>Streamlined record initialization using <code>RecordWildCards</code>.</td><td style="text-align: right">-31 lines</td></tr>
-<tr><td><strong>Cursor State Sharing</strong></td><td>Shared cursor state machine and short-circuiting fallbacks.</td><td style="text-align: right">-26 lines</td></tr>
-<tr><td><strong>Palette Defaults</strong></td><td>Consolidated Base16 and Tomorrow color policies.</td><td style="text-align: right">-20 lines</td></tr>
+<tr><td><code>emit msg</code></td><td>Immediately.</td></tr>
+<tr><td><code>emitWhen widget msg</code></td><td>The widget returns <code>True</code> (a button click, a submitted field).</td></tr>
+<tr><td><code>emitChanged widget old toMsg</code></td><td>The widget’s final value differs from <code>old</code>.</td></tr>
+<tr><td><code>emitEdited widget old toMsg</code></td><td>The widget’s value changed <strong>and</strong> its <code>Response</code> reports <code>respChanged</code>.</td></tr>
 </tbody>
 </table>
 </div>
-<h2 id="rigorous-validation-gates"><a class="header" href="#rigorous-validation-gates">Rigorous Validation Gates</a></h2>
-<p>Every refactoring passed strict validation:</p>
-<ol>
-<li><code>cabal build -j1 all</code> cleanly with <code>-Werror</code>.</li>
-<li>All 11 test suites passing (<code>nano-ui-test</code>, <code>nano-ui-inspection</code>, <code>text-buffer-spec</code>, <code>nano-ui-render-test</code>, etc.).</li>
-<li>SDL demo and log viewer <code>--selftest</code> in off-screen windows.</li>
-<li>RGFW 500-frame profile test.</li>
-<li>Per-frame ID allocation benchmark (<code>nano-ui-id-bench</code>).</li>
-</ol>
+<p><code>emitChanged</code> is built on <code>withValue</code>: the widget edits a temporary <code>Var</code> seeded with the model value, and the temporary’s final value is compared to the old one. This is why it works with any <code>Var</code> widget, and why mutations to the temporary do not trigger a second pass or a repaint.</p>
+<p><code>emitEdited</code> is the right choice for text fields when programmatic model updates should not look like user edits. <code>emitChanged</code> is usually right for sliders and checkboxes.</p>
+<blockquote class="blockquote-tag blockquote-tag-caution">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
+<p>Only emit inside an event branch. <code>emit SaveDocument</code> at the top level of a view emits on every pass, and the reducer runs every emitted message. The adapters above already guard on the widget’s event.</p>
+</blockquote>
+<p>Messages are queued for the whole frame, including local-<code>Var</code> rebuilds. The queue is drained at frame end, so the order is emission order — top-to-bottom through the view, and left-to-right among siblings.</p>
+<h2 id="components"><a class="header" href="#components">Components</a></h2>
+<p><code>mapMessages</code> embeds a child view whose message type is smaller than the parent’s:</p>
+<pre><code class="language-haskell">data ChildMsg = ChildIncrement | ChildReset
+data ParentMsg = Child ChildMsg | SaveAll
+
+childView :: Int -&gt; Emit.NanoUIE ChildMsg ()
+childView n = Emit.withNanoUI row $ do
+  Emit.emitWhen (button "+") ChildIncrement
+  Emit.liftNanoUI (label (T.pack (show n)))
+  Emit.emitWhen (button "Reset") ChildReset
+
+parentView :: Int -&gt; Emit.NanoUIE ParentMsg ()
+parentView n = Emit.withNanoUI column $ do
+  Emit.mapMessages Child (childView n)
+  Emit.emitWhen (button "Save All") SaveAll
+</code></pre>
+<p>The child’s messages go straight to the parent’s sink, in traversal order, with no intermediate queue and no allocation of a wrapper per message. The parent’s <code>update</code> handles <code>Child ChildIncrement</code> and <code>SaveAll</code> together.</p>
+<p>A component’s <em>widget</em> state is still ordinary nano-ui state. If the child is a list item, key it with <code>withKey</code> inside the child or around the <code>mapMessages</code> call. <code>mapMessages</code> changes the message type, not widget identity.</p>
+<p>For components that need their own durable state, pass a <code>Var</code> for the local part and a model slice for the rendered part:</p>
+<pre><code class="language-haskell">searchView :: Var Text -&gt; [Text] -&gt; Emit.NanoUIE Msg ()
+searchView query results = do
+  Emit.liftNanoUI (searchInput query)
+  -- Read the query after the field that edits it.
+  Emit.liftNanoUI $ do
+    q &lt;- readVar query
+    when (not (T.null q) &amp;&amp; null results) (muted "No matches")
+</code></pre>
+<h2 id="running"><a class="header" href="#running">Running</a></h2>
+<p>The backend runners take an update function, an initial model, and a view of the model:</p>
+<pre><code class="language-haskell">main :: IO ()
+main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
+</code></pre>
+<p><code>runSdlAppReduce</code> is in <code>NanoUI.Backend.Sdl</code>; <code>runRgfwAppReduce</code> is the RGFW equivalent. Both fold messages through <code>update</code> in emission order at the end of each frame.</p>
+<p>For tests and embedded uses:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Function</th><th>Returns</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runNanoUIE view</code></td><td><code>NanoUI (result, [msg])</code> — collects one action’s messages</td></tr>
+<tr><td><code>runFrameE ctx input view</code></td><td><code>IO (result, [msg], DrawData, Bool)</code></td></tr>
+<tr><td><code>runFrameReduce update ctx input model view</code></td><td><code>IO (result, model, [msg], DrawData, Bool)</code></td></tr>
+<tr><td><code>runClickReduce update ctx input model view pos</code></td><td><code>IO (model, [msg], Bool)</code> — a press/release pair</td></tr>
+<tr><td><code>reduceMessages update model msgs</code></td><td>The folded model</td></tr>
+<tr><td><code>reduceUpdates model fns</code></td><td>The folded model for function-valued messages</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>runFrameReduce</code> requests a follow-up frame when the reduced model differs. The <code>Bool</code> in the tuple reports whether one was requested; the drawing in the same tuple is from before the reduction.</p>
+<p>A <code>Var</code>-based view can run a small emitting component and act on its messages immediately:</p>
+<pre><code class="language-haskell">(result, msgs) &lt;- runNanoUIE (toolbarView model)
+for_ msgs handleToolbarMessage
+</code></pre>
+<h2 id="rules-and-pitfalls"><a class="header" href="#rules-and-pitfalls">Rules and pitfalls</a></h2>
+<ul>
+<li><strong>Keep <code>update</code> pure.</strong> File reads, process launches, and logging belong in the view’s event branch, or in an effect queue the application interprets outside the reducer.</li>
+<li><strong>Model changes draw on the next frame.</strong> That is intentional; do not compensate by writing the model into a <code>Var</code> mid-frame.</li>
+<li><strong>Do not duplicate model state in <code>Var</code>s.</strong> Local UI state (draft text, open menus) is fine; durable state should have one home.</li>
+<li><strong>Unconditional emissions run on every pass.</strong> Guard them with <code>emitWhen</code>, <code>emitChanged</code>, or an explicit event.</li>
+<li><strong>The keyboard and focus rules are unchanged.</strong> Shortcuts are read in the view (or adapter); focus queries still belong at the end of the view.</li>
+<li><strong>Component keys are required for lists.</strong> Two instances of the same component in a reorderable list need distinct <code>withKey</code> keys, exactly as two <code>Var</code>-based rows do.</li>
+</ul>
+<p>See <a href="overview.html">Elm-Style Views</a> for when this style is the right choice, and <a href="../architecture/frame-model.html">The Frame Model</a> for what a follow-up frame costs.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../production/abstraction-audit.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../elm/overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
+                            <a rel="next prefetch" href="../input/shortcuts.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -228,10 +312,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../production/abstraction-audit.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../elm/overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
+                    <a rel="next prefetch" href="../input/shortcuts.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
             </nav>
 
         </div>
@@ -259,7 +346,7 @@
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Keyboard Navigation &amp; Focus - nano-ui Documentation</title>
+        <title>Build a Todo List - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,57 +178,209 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="keyboard-navigation--focus"><a class="header" href="#keyboard-navigation--focus">Keyboard Navigation &amp; Focus</a></h1>
-<p>Keyboard interaction in <code>nano-ui</code> covers shortcut chords, focus cycling, programmatic focus control, and IME composition.</p>
-<h2 id="keyboard-shortcuts"><a class="header" href="#keyboard-shortcuts">Keyboard Shortcuts</a></h2>
-<p>Define keyboard chords using <code>NanoUI.Shortcut</code>:</p>
-<pre><code class="language-haskell">-- Fires once per keystroke (ignores key repeat)
-whenM (shortcutOnce (cmdOrCtrl &lt;&gt; key 's')) $ do
-  saveDocument
+                        <h1 id="tutorial-1-build-a-todo-list"><a class="header" href="#tutorial-1-build-a-todo-list">Tutorial 1: Build a Todo List</a></h1>
+<p>This tutorial builds a todo list with the features that make a list worth using:</p>
+<ul>
+<li>add items with Enter or a button</li>
+<li>edit an item in place</li>
+<li>mark items done</li>
+<li>filter by all / active / done</li>
+<li>reorder items, keeping each row’s local state with it</li>
+<li>clear completed items</li>
+</ul>
+<p>The complete program is <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/TodoList.hs"><code>packages/nano-ui-demo/examples/TodoList.hs</code></a>. Run it with:</p>
+<pre><code class="language-sh">cabal run nano-ui-example-todo-list
+</code></pre>
+<h2 id="1-the-data-model"><a class="header" href="#1-the-data-model">1. The data model</a></h2>
+<p>A todo item needs an identity that outlives its position. Positions change when an item is added, removed, filtered, or reordered; the id does not. Every widget or <code>Var</code> that belongs to a row is keyed by that id later.</p>
+<pre><code class="language-haskell">{-# LANGUAGE OverloadedRecordDot #-}
 
--- Complex multi-modifier chords
-whenM (shortcut (cmdOrCtrl &lt;&gt; shift &lt;&gt; key 'p')) $ do
-  openCommandPalette
+data Todo = Todo
+  { todoId :: !Int
+  , todoText :: !Text
+  , todoDone :: !Bool
+  }
+  deriving (Eq, Generic)
+
+data Todos = Todos
+  { todoItems :: ![Todo]
+  , todoNext :: !Int
+  }
+  deriving (Eq, Generic)
+
+newtype App = App {appTodos :: Var Todos}
 </code></pre>
-<h3 id="automatic-shortcut-suppression"><a class="header" href="#automatic-shortcut-suppression">Automatic Shortcut Suppression</a></h3>
-<p>Shortcuts and key queries are automatically suppressed when:</p>
-<ul>
-<li>An overlay/modal is open (unless the chord targets the modal).</li>
-<li>The widget is inside a <code>disabledWhen True</code> subtree.</li>
-<li>A focused widget claims the key (e.g. typing text in a field claims letters, arrows on a slider claim directions). Modified chords like <code>Ctrl+Enter</code> or <code>Alt+Left</code> still pass through.</li>
-</ul>
-<hr>
-<h2 id="focus-lifecycle"><a class="header" href="#focus-lifecycle">Focus Lifecycle</a></h2>
-<ul>
-<li><strong>Click to Focus</strong>: Clicking any focusable widget (text input, slider, select) focuses it.</li>
-<li><strong>Tab Cycling</strong>: Pressing <code>Tab</code> moves focus to the next widget; <code>Shift+Tab</code> moves to the previous widget.</li>
-<li><strong>Programmatic Focus</strong>:
-<pre><code class="language-haskell">resp &lt;- textInput' myVar
-when shouldFocus $ requestFocus (respId resp)
+<p>The list lives in a <code>Var Todos</code>. That is not a type <code>useVar</code> can allocate, so it is created once during setup with <code>newVar</code>:</p>
+<pre><code class="language-haskell">newApp :: IO App
+newApp = App &lt;$&gt; newVar (Todos [Todo 0 "Read the header" True, Todo 1 "Water the plants" False] 2)
 </code></pre>
-</li>
-<li><strong>Timing</strong>: Focus takes effect at the <strong>end of the frame</strong>.</li>
+<p><code>newVar</code> returns <code>IO (Var a)</code>. Allocating it in <code>main</code> and passing it into the view is what makes it survive between frames. Allocating a <code>Var</code> <em>inside</em> the view would create a fresh one on every pass.</p>
+<p>Both records derive <code>Generic</code>; with <code>OverloadedRecordDot</code>, <code>app.appTodos.todoItems</code> is a <code>Var [Todo]</code> projecting just that field. Editing the list does not repaint a widget that reads only <code>todoNext</code>.</p>
+<h2 id="2-the-application-shell"><a class="header" href="#2-the-application-shell">2. The application shell</a></h2>
+<pre><code class="language-haskell">main :: IO ()
+main = do
+  app &lt;- newApp
+  runSdlApp
+    defaultSdlOptions
+      { sdlAppShouldQuit = pressedOnceIn KeyEscape
+      , sdlWindowSettings =
+          defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
+      }
+    (todoApp app)
+</code></pre>
+<p><code>runSdlApp</code> takes the options and the view. The view is not called once: the backend calls it every frame, and it must describe the whole window each time.</p>
+<pre><code class="language-haskell">todoApp :: App -&gt; NanoUI ()
+todoApp app = do
+  let items = app.appTodos.todoItems
+  draft &lt;- useVar ""
+  filt &lt;- useEnumVar All
+  columnWith (padAll 20 . gap 12 . fillW . fillH) $ do
+    heading "Todos"
+    newItemRow app.appTodos draft
+    filterRow items filt
+    todoList items filt
+</code></pre>
+<p>The view’s local state — the draft text and the current filter — is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
+<p><code>columnWith (padAll 20 . gap 12 . fillW . fillH)</code> is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.</p>
+<h2 id="3-adding-an-item"><a class="header" href="#3-adding-an-item">3. Adding an item</a></h2>
+<p>The input row has three jobs: draw the field, draw the button, and decide whether this frame is an “add” frame.</p>
+<pre><code class="language-haskell">newItemRow :: Var Todos -&gt; Var Text -&gt; NanoUI ()
+newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
+  inputR &lt;- textInputConfigured' defaultTextInputConfig {ticPlaceholder = "What needs doing?"} draft
+  clicked &lt;- button "Add"
+  text &lt;- T.strip &lt;$&gt; readVar draft
+  when ((clicked || respSubmitted inputR) &amp;&amp; not (T.null text)) $ do
+    modifyVar todosVar (\(Todos xs n) -&gt; Todos (xs &lt;&gt; [Todo n text False]) (n + 1))
+    writeVar draft ""
+    requestFocus (respId inputR)
+</code></pre>
+<p>Several things are worth pausing on:</p>
+<ul>
+<li><strong>The primed widget returns a <code>Response</code>.</strong> <code>textInputConfigured'</code> reports the widget’s identity, rectangle, hover and click state, and whether Enter was submitted (<code>respSubmitted</code>). <code>button</code> already returns the one <code>Bool</code> this row needs.</li>
+<li><strong><code>readVar draft</code> sits below the field that edits it.</strong> The field’s write lands first, then the read sees the new text in the same pass. Reading <em>above</em> an editing widget forces a second pass.</li>
+<li><strong><code>modifyVar</code> reads the latest value.</strong> Two changes in one frame both apply; the append does not lose one.</li>
+<li><strong>The field is cleared and focused again</strong>, so the next item can be typed immediately. <code>requestFocus</code> takes effect at the end of the frame.</li>
 </ul>
-<blockquote class="blockquote-tag blockquote-tag-warning">
-<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
-<p>Because the node arena is reset before the view runs, checking focus at the <em>top</em> of a view always returns <code>False</code>. Query focus state at the <strong>end</strong> of the view, after the widgets have executed.</p>
+<blockquote class="blockquote-tag blockquote-tag-note">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
+<p>The <code>when</code> guard around the mutation is not optional. The view runs every frame, so an unguarded <code>modifyVar</code> would add an item on every pass. Event-driven work goes inside <code>whenM (button ...)</code> or a condition like the one above.</p>
 </blockquote>
-<hr>
-<h2 id="ime-input-method-editor-composition"><a class="header" href="#ime-input-method-editor-composition">IME (Input Method Editor) Composition</a></h2>
-<p>Built-in text fields handle IME composition automatically. For custom widgets that consume raw committed characters from <code>inputChars</code>, call <code>useInputMethod</code> on every focused frame to position the OS candidate window correctly:</p>
-<pre><code class="language-haskell">when (isFocused wid) $ do
-  useInputMethod (respRect resp)
+<h2 id="4-filtering-and-a-derived-count"><a class="header" href="#4-filtering-and-a-derived-count">4. Filtering and a derived count</a></h2>
+<p>The filter is a local value with three states. <code>useEnumVar</code> accepts any <code>Enum</code>/<code>Bounded</code> type and keeps the chosen value across frames:</p>
+<pre><code class="language-haskell">data Filter = All | Active | Done
+  deriving (Eq, Show, Enum, Bounded)
+
+matches :: Filter -&gt; Todo -&gt; Bool
+matches All _ = True
+matches Active t = not (todoDone t)
+matches Done t = todoDone t
+
+filterRow :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
+filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
+  boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} (T.pack . show) filt
+  flex
+  todos &lt;- readVar items
+  let left = length (filter (not . todoDone) todos)
+  labelWith (tight . alignMid . fontMuted)
+    (T.pack (show left) &lt;&gt; if left == 1 then " item left" else " items left")
+  disabledWhen (left == length todos) $
+    whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
 </code></pre>
+<p><code>boundedTabBarConfigured</code> draws a segmented control over every constructor of <code>Filter</code>; the label function is <code>show</code>. The count is <em>derived</em>: it is computed from the list every frame, never stored in a second <code>Var</code> that could drift. <code>disabledWhen</code> dims the clear button and blocks its events without removing it from the layout.</p>
+<h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
+<p>Now the interesting part. Each row has local state — whether it is being edited and the draft of its text — but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row’s position on screen.</p>
+<pre><code class="language-haskell">todoList :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
+todoList items filt = do
+  shownFilter &lt;- readVar filt
+  scrollWith (grow . fillW) $
+    columnWith (tight . gap 6 . fillW) $
+      withElemVars todoId items $ \todos at -&gt; do
+        let shown = filter (matches shownFilter) todos
+        forM_ (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) &lt;&gt; [Nothing])) $
+          \(todo, above, below) -&gt;
+            withKey (todoId todo) (todoRow items (at todo) above below)
+</code></pre>
+<ul>
+<li><code>withElemVars todoId items</code> gives the current list and a function <code>at :: Todo -&gt; Var Todo</code>. <code>at todo</code> is a <code>Var</code> addressed by the item’s id, so it survives a reorder or a filter change.</li>
+<li><code>withKey (todoId todo)</code> does the same for the row’s <em>widget</em> state and its positional <code>useVar</code> slots. Without the key, deleting the first row would move every later row’s caret, edit flag, and half-typed draft one position up.</li>
+<li><code>matches</code> filters the rows. The neighbours (<code>above</code>, <code>below</code>) are passed in so the Up/Down buttons can skip rows that the filter hides.</li>
+</ul>
+<p>Here is the row itself, trimmed to the essential structure:</p>
+<pre><code class="language-haskell">todoRow :: Var [Todo] -&gt; Var Todo -&gt; Maybe Todo -&gt; Maybe Todo -&gt; NanoUI ()
+todoRow items todo above below = do
+  editing &lt;- useVar False
+  focusPending &lt;- useVar False
+  draft &lt;- useVar ""
+  t &lt;- readVar todo
+  isEditing &lt;- readVar editing
+  let tid = todoId t
+      save = do
+        writeVar todo.todoText =&lt;&lt; readVar draft
+        writeVar editing False
+  when isEditing (whenM takeEscape (writeVar editing False))
+  rowWith (tight . gap 8 . alignMid . fillW) $ do
+    checkboxWith alignMid "" todo.todoDone
+    scope $
+      if isEditing
+        then do
+          fieldR &lt;- textInput' draft
+          whenM (readVar focusPending) $
+            requestFocus (respId fieldR) &gt;&gt; writeVar focusPending False
+          when (respSubmitted fieldR) save
+        else
+          labelWith (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id)) (todoText t)
+    whenM (button (if isEditing then "Save" else "Edit")) $
+      if isEditing then save else do
+        writeVar draft (todoText t)
+        writeVar editing True
+        writeVar focusPending True
+    disabledWhen (null above) $ whenM (button "Up") (forM_ above (modifyVar items . swapIds tid . todoId))
+    disabledWhen (null below) $ whenM (button "Down") (forM_ below (modifyVar items . swapIds tid . todoId))
+    whenM (styled destructive (button "Delete")) (modifyVar items (filter ((/= tid) . todoId)))
+</code></pre>
+<p>Three details make this work:</p>
+<ol>
+<li><strong><code>scope</code> around the label/field swap.</strong> Only one of the two branches runs on a given frame. Without <code>scope</code>, the widgets after the branch would shift ids whenever the row enters or leaves edit mode. <code>scope</code> reserves one slot either way. (The <code>useVar</code> slots inside the row are stable because the whole row is under <code>withKey</code>.)</li>
+<li><strong>A delayed focus request.</strong> <code>requestFocus</code> can only target a widget declared in the same pass. The field first appears in the pass <em>after</em> Edit was clicked, so the request waits in <code>focusPending</code> until the field exists.</li>
+<li><strong>Editing writes back into the item’s <code>Var</code>.</strong> <code>todo.todoText</code> projects one field; <code>todo.todoDone</code> does too, which is why the checkbox can edit it in place. Saving writes the draft and clears the edit flag.</li>
+</ol>
+<h2 id="6-reordering-by-id"><a class="header" href="#6-reordering-by-id">6. Reordering by id</a></h2>
+<p>Up and Down need to swap two items wherever they are in the full list. Swapping by id keeps the operation correct even though the visible list is filtered:</p>
+<pre><code class="language-haskell">swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
+swapIds a b xs = map pick xs
+  where
+    byId i t = fromMaybe t (find ((== i) . todoId) xs)
+    pick t
+      | todoId t == a = byId b t
+      | todoId t == b = byId a t
+      | otherwise = t
+</code></pre>
+<p>The row’s local state follows the id, not the index, so the edit flag and draft travel with the item. This is the payoff for the keys in the previous section.</p>
+<h2 id="7-keyboard-behaviour"><a class="header" href="#7-keyboard-behaviour">7. Keyboard behaviour</a></h2>
+<p>Enter in the new-item field adds an item because <code>respSubmitted</code> reports it. Escape cancels an edit:</p>
+<pre><code class="language-haskell">when isEditing (whenM takeEscape (writeVar editing False))
+</code></pre>
+<p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view — an open popup or a second <code>takeEscape</code> — do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
+<p>For the full shortcut model — <code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys — see <a href="../input/shortcuts.html">Keyboard Shortcuts</a>.</p>
+<h2 id="8-try-it"><a class="header" href="#8-try-it">8. Try it</a></h2>
+<p>Start from the runnable source and change one thing at a time:</p>
+<ul>
+<li>Replace the Up/Down buttons with <code>useReorder</code> for drag-and-drop reordering (see <a href="../widgets/drag-and-drop.html">Drag &amp; Drop</a>).</li>
+<li>Add a “hide completed” filter persistence setting with <code>newVar</code> and a <code>Settings</code> record.</li>
+<li>Show an empty state when <code>shown</code> is empty, for example <code>muted "Nothing here yet."</code></li>
+<li>Validate the draft length with the techniques in <a href="../packages/nano-ui-form.html">Validated Forms</a>.</li>
+</ul>
+<p>Next: <a href="notepad.html">Tutorial 2: Build a Notepad</a> adds menus, dialogs, and a real text document.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../packages/nano-ui-svg.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../tutorials/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../advanced/background-work.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../tutorials/notepad.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -238,11 +390,11 @@ when shouldFocus $ requestFocus (respId resp)
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../packages/nano-ui-svg.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../tutorials/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../advanced/background-work.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../tutorials/notepad.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -272,7 +424,7 @@ when shouldFocus $ requestFocus (respId resp)
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

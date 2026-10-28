@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -179,34 +179,70 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="animations--timers"><a class="header" href="#animations--timers">Animations &amp; Timers</a></h1>
-<p><code>nano-ui</code> includes continuous animation channels, tweening curves, physical spring simulations, and timed wakes.</p>
-<h2 id="springs-and-tweens"><a class="header" href="#springs-and-tweens">Springs and Tweens</a></h2>
-<ul>
-<li><strong><code>animateTo</code></strong>: Tweens a value toward a target using an easing curve (<code>EaseInOut</code>, <code>EaseOutQuad</code>, etc.).</li>
-<li><strong><code>animateToA</code></strong>: Drives physical spring animations (<code>presetSmooth</code>, <code>presetBouncy</code>, <code>presetStiff</code>). Supports mid-flight retargeting without velocity hitches.</li>
-</ul>
-<pre><code class="language-haskell">-- Smoothly animate sidebar width toward target
-currentWidth &lt;- animateTo (Tween 0.25 EaseOutQuad) targetWidth
+<p>Animation in nano-ui is driven by the frame loop, not by a separate clock thread. A tween or spring advances only while the view keeps drawing it, and the loop sleeps when nothing is animating.</p>
+<h2 id="tweens-and-springs"><a class="header" href="#tweens-and-springs">Tweens and springs</a></h2>
+<p><code>animateTo</code> moves a value toward a target and returns the current value:</p>
+<pre><code class="language-haskell">import NanoUI
+
+currentWidth &lt;- animateTo (Tween EaseOutQuad 0.25 0) targetWidth
 </code></pre>
-<h2 id="continuous-animations--keepanimating"><a class="header" href="#continuous-animations--keepanimating">Continuous Animations &amp; <code>keepAnimating</code></a></h2>
-<p>When drawing continuous animations (such as spinners or pulsing badges), call <code>keepAnimating</code> <strong>inside the animating widget</strong>:</p>
+<p>A <code>Transition</code> is either:</p>
+<ul>
+<li>
+<p><strong><code>Tween ease duration delay</code></strong>, in seconds. <code>EaseOutQuad</code>, <code>EaseInOutCubic</code>, <code>EaseOutBack</code>, and <code>EaseCubicBezier</code> are some of the available curves.</p>
+</li>
+<li>
+<p><strong><code>Spring params</code></strong>, a damped spring. <code>presetSmooth</code>, <code>presetBouncy</code>, and <code>presetStiff</code> are the standard presets:</p>
+<pre><code class="language-haskell">currentX &lt;- animateTo (Spring presetSmooth) targetX
+</code></pre>
+</li>
+</ul>
+<p>Springs retarget mid-flight from their current position and velocity, so a moving target does not cause a hitch. <code>animateToA</code> does the same for any <code>Animatable</code> value — a <code>V2</code>, a <code>Color</code>, or a numeric type — channel by channel:</p>
+<pre><code class="language-haskell">pos &lt;- animateToA (Spring presetSmooth) (V2 targetX targetY)
+</code></pre>
+<p><code>animate</code> (without <code>To</code>) animates from one value to another and restarts when it completes, which is useful for a one-shot demonstration but rarely for UI state. Most UI animation is <code>animateTo</code>.</p>
+<h2 id="continuous-animation-and-keepanimating"><a class="header" href="#continuous-animation-and-keepanimating">Continuous animation and <code>keepAnimating</code></a></h2>
+<p><code>pulse</code> returns a value oscillating in <code>[0, 1]</code> with the given period in seconds:</p>
+<pre><code class="language-haskell">opacity &lt;- pulse 1.2       -- one full sweep every 1.2 s
+</code></pre>
+<p>Clock-driven values (<code>pulse</code>, or anything read from <code>uiTime</code>) do not, by themselves, keep the frame loop awake. A widget that draws from them must call <code>keepAnimating</code> <strong>with its own response</strong>, every frame it is on screen:</p>
 <pre><code class="language-haskell">pulsingBadge :: NanoUI ()
 pulsingBadge = do
-  t &lt;- pulse 1.0  -- Oscillates between 0.0 and 1.0
-  keepAnimating   -- Requests a frame next tick only while on screen
-  drawCircleWithRadius t
+  t &lt;- pulse 1.0
+  (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
+    { widgetLayout = fixedWH 24 24
+    , widgetContent = contentKey [t * 100]
+    , widgetDraw = \cdc (Rect x y w h) -&gt; runCanvasFor cdc $
+        drawCircle (V2 (x + w / 2) (y + h / 2)) (6 + 3 * t) (themeAccent (cdcTheme cdc))
+    }
+  keepAnimating resp
 </code></pre>
+<p>The loop goes back to sleep on the first frame that leaves out <code>keepAnimating</code>.</p>
 <blockquote class="blockquote-tag blockquote-tag-caution">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
-<p>Never force continuous redraws by marking the entire context dirty every frame. That creates an unpaced busy loop that drains batteries and pins CPUs.</p>
+<p>Never force continuous redraws by marking the context dirty every frame. That creates an unpaced busy loop that pins a CPU and drains a laptop battery. Call <code>keepAnimating</code> only in the widget that is actually moving.</p>
 </blockquote>
-<hr>
-<h2 id="timers-and-debounces-with-wakeafter"><a class="header" href="#timers-and-debounces-with-wakeafter">Timers and Debounces with <code>wakeAfter</code></a></h2>
-<p>To schedule future redraws (e.g. for clocks, timers, or tooltips):</p>
-<pre><code class="language-haskell">-- Schedules a frame in 500 milliseconds
-wakeAfter 500
+<h2 id="timers-with-wakeafter"><a class="header" href="#timers-with-wakeafter">Timers with <code>wakeAfter</code></a></h2>
+<p><code>wakeAfter</code> requests one frame after a delay in <strong>seconds</strong>:</p>
+<pre><code class="language-haskell">clock :: NanoUI ()
+clock = do
+  label =&lt;&lt; currentTimeText
+  wakeAfter 1          -- next tick in one second
 </code></pre>
-<p>Call <code>wakeAfter</code> on every frame that still requires a wake; pending wakes reset at the end of each frame.</p>
+<p>Call it on every frame that still needs the future wake; pending wakes are reset each frame. Use <code>wakeAfter</code> for clocks, debounces, and polling on a schedule; use <code>keepAnimating</code> for continuous motion. <code>wakeAfter</code> costs one frame per interval; <code>keepAnimating</code> runs a frame per display refresh.</p>
+<h2 id="what-starts-and-stops-an-animation"><a class="header" href="#what-starts-and-stops-an-animation">What starts and stops an animation</a></h2>
+<ul>
+<li><strong><code>animateTo</code></strong> runs while the value differs from the target, and requests frames itself.</li>
+<li><strong><code>pulse</code></strong> and other clock-driven drawing need explicit <code>keepAnimating</code> (or a <code>wakeAfter</code> for a lower frame rate).</li>
+<li><strong>Leaving the widget out of the view</strong> stops it. A conditional widget that disappears and reappears starts from its stored value, not from a new animation, unless the transition is recreated.</li>
+<li><strong>Idle means idle.</strong> If nothing animates, no timed wake is pending, and no input arrives, the loop blocks in the OS event queue and uses no CPU.</li>
+</ul>
+<h2 id="testing-animation-deterministically"><a class="header" href="#testing-animation-deterministically">Testing animation deterministically</a></h2>
+<p><code>NanoUI.Testing.runFrame</code> takes an explicit <code>inputDeltaTime</code>, so a test can step animation time without waiting:</p>
+<pre><code class="language-haskell">(_, _, _) &lt;- runFrame ctx (inp {inputDeltaTime = 0.016}) view
+(_, _, _) &lt;- runFrame ctx (inp {inputDeltaTime = 0.016}) view
+</code></pre>
+<p>Drive the same sequence of frames in the test and the app; do not use real sleeps. For task and stream wake-ups, <code>newWakeSignal</code> from <code>NanoUI.Testing.Harness</code> makes the timing deterministic.</p>
 
                     </main>
 
@@ -260,7 +296,7 @@ wakeAfter 500
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

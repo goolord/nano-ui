@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Quickstart - nano-ui Documentation</title>
+        <title>Quick Start - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,29 +178,27 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="quickstart"><a class="header" href="#quickstart">Quickstart</a></h1>
-<p>This guide walks you through setting up a project with <code>nano-ui</code> and building your first native desktop application.</p>
-<h2 id="prerequisites--installation"><a class="header" href="#prerequisites--installation">Prerequisites &amp; Installation</a></h2>
-<p><code>nano-ui</code> requires:</p>
+                        <h1 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h1>
+<p>This guide sets up a project and builds a small windowed application. It should take about ten minutes. The <a href="../tutorials/index.html">tutorials</a> take it from there.</p>
+<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
 <ul>
-<li><strong>GHC 9.10 through 9.14</strong> (recommended: GHC 9.14)</li>
+<li><strong>GHC 9.10 through 9.14</strong> (development uses 9.14)</li>
 <li><strong>Cabal 3.12+</strong></li>
-<li><strong>SDL3 &amp; SDL3_ttf</strong> (3.2+) when using the SDL backend (<code>nano-ui-sdl</code>).</li>
+<li><strong>SDL3 and SDL3_ttf 3.2+</strong> for the SDL backend</li>
 <li><strong>pkg-config</strong></li>
 </ul>
 <h3 id="nix-linux--macos"><a class="header" href="#nix-linux--macos">Nix (Linux / macOS)</a></h3>
-<p>In this repository, running <code>nix develop</code> provides all dependencies (GHC, Cabal, SDL3, SDL3_ttf, pkg-config).</p>
+<p>In the nano-ui repository, <code>nix develop</code> provides GHC, Cabal, SDL3, SDL3_ttf, and pkg-config.</p>
 <h3 id="windows"><a class="header" href="#windows">Windows</a></h3>
-<p>On Windows, install SDL3 and SDL3_ttf via MSYS2 UCRT64:</p>
+<p>Install SDL3 and SDL3_ttf through MSYS2 UCRT64:</p>
 <pre><code class="language-sh">pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
 </code></pre>
-<p>Point <code>PKG_CONFIG_PATH</code> to MSYS2’s ucrt64 pkgconfig:</p>
+<p>Then point <code>PKG_CONFIG_PATH</code> at MSYS2’s pkgconfig directory:</p>
 <pre><code class="language-powershell">$env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 </code></pre>
-<h3 id="cabal-pinning"><a class="header" href="#cabal-pinning">Cabal Pinning</a></h3>
-<p><code>nano-ui</code> is pinned as a Cabal <code>source-repository-package</code>:</p>
-<pre><code class="language-cabal">-- In your cabal.project:
-source-repository-package
+<h2 id="add-nano-ui-to-a-project"><a class="header" href="#add-nano-ui-to-a-project">Add nano-ui to a project</a></h2>
+<p><code>nano-ui</code> is not on Hackage. Pin it as a Cabal <code>source-repository-package</code>. In your <code>cabal.project</code>:</p>
+<pre><code class="language-cabal">source-repository-package
   type: git
   location: https://github.com/goolord/nano-ui
   subdir:
@@ -210,7 +208,8 @@ source-repository-package
 package nano-ui-sdl
   flags: +sdl
 </code></pre>
-<p>In your application’s <code>.cabal</code> file:</p>
+<p>Add the other packages you need (<code>nano-ui-emit</code>, <code>nano-ui-diagrams</code>, and so on) to the <code>subdir</code> list and to your <code>.cabal</code> dependencies.</p>
+<p>In <code>my-app.cabal</code>:</p>
 <pre><code class="language-cabal">executable my-app
   main-is: Main.hs
   default-language: GHC2024
@@ -224,11 +223,10 @@ package nano-ui-sdl
 </code></pre>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
-<p>Always compile executables with <code>-threaded</code>. Immediate-mode GUI loops, task threads, and native window event processing require the GHC threaded runtime.</p>
+<p>Compile executables with <code>-threaded</code>. The immediate-mode loop, task threads, and native window event processing require the GHC threaded runtime.</p>
 </blockquote>
-<hr>
-<h2 id="your-first-application"><a class="header" href="#your-first-application">Your First Application</a></h2>
-<p>Create a <code>Main.hs</code>:</p>
+<h2 id="your-first-application"><a class="header" href="#your-first-application">Your first application</a></h2>
+<p>Create <code>Main.hs</code>:</p>
 <pre><code class="language-haskell">module Main (main) where
 
 import Control.Monad (whenM)
@@ -237,36 +235,52 @@ import NanoUI
 import NanoUI.Backend.Sdl
 
 main :: IO ()
-main = runSdlApp defaultSdlOptions { sdlWindowSettings = defaultWindowSettings { wsTitle = "Hello nano-ui" } } appView
+main =
+  runSdlApp
+    defaultSdlOptions
+      { sdlWindowSettings =
+          defaultWindowSettings {wsTitle = "Hello nano-ui"}
+      }
+    appView
 
 appView :: NanoUI ()
 appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
   heading "Counter Demo"
-  
-  -- Positional mutable variable initialized to 0
+
+  -- State at this call site; allocated on the first frame only.
   n &lt;- useVar (0 :: Int)
-  
+
   rowWith (gap 8 . alignMid) $ do
     whenM (button "-") (modifyVar n (subtract 1))
-    
-    val &lt;- readVar n
-    labelWith (fontMono . fontSize 18) (T.pack (show val))
-    
+
+    value &lt;- readVar n
+    labelWith (fontMono . fontSize 18) (T.pack (show value))
+
     whenM (button "+") (modifyVar n (+ 1))
-    
+
   whenM (button "Reset") (writeVar n 0)
 </code></pre>
-<p>Run with Cabal:</p>
+<p>Run it:</p>
 <pre><code class="language-sh">cabal run -j1 my-app
 </code></pre>
-<h2 id="how-it-works"><a class="header" href="#how-it-works">How It Works</a></h2>
+<p><code>-j1</code> is the recommendation for this repository and for memory-constrained machines; a normal project can use cabal’s defaults.</p>
+<h2 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h2>
 <ol>
-<li><strong><code>runSdlApp</code></strong> initializes SDL3, creates a window with TrueType font rendering, and begins the frame event loop.</li>
-<li><strong><code>columnWith</code> / <code>rowWith</code></strong> are layout containers parameterized by composable layout modifiers (<code>gap 12 . padAll 20</code>).</li>
-<li><strong><code>useVar (0 :: Int)</code></strong> declares state at this position in the view hierarchy. On subsequent frames, it retrieves the existing state.</li>
-<li><strong><code>button "+"</code></strong> renders an interactive button that returns <code>True</code> only in the frame it was clicked.</li>
-<li><strong><code>modifyVar n (+ 1)</code></strong> mutates the variable. If a variable was read earlier in the frame, nano-ui safely invalidates and re-runs the pass without repeating one-shot click events.</li>
+<li><strong><code>runSdlApp</code></strong> initializes SDL3, creates a window with TrueType font rendering, and starts the frame loop.</li>
+<li><strong><code>columnWith</code> / <code>rowWith</code></strong> are layout containers. Their argument composes layout modifiers (<code>gap 12 . padAll 20</code>); the leftmost modifier wins when two set the same property.</li>
+<li><strong><code>useVar (0 :: Int)</code></strong> declares state at this position in the view. On later frames it retrieves the existing value; the initial value is used only on the first frame.</li>
+<li><strong><code>button "+"</code></strong> draws an interactive button and returns <code>True</code> only on the frame it is activated.</li>
+<li><strong><code>modifyVar n (+ 1)</code></strong> updates the value. Reading <code>n</code> below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.</li>
 </ol>
+<p>The view runs every frame, so ordinary side effects must be guarded by an event (<code>whenM (button "Save") save</code>), and per-frame resources must not be allocated inside it. The <a href="../state/introduction.html">Introduction to State</a> explains both rules in depth.</p>
+<h2 id="next-steps"><a class="header" href="#next-steps">Next steps</a></h2>
+<ul>
+<li>Build something end to end: <a href="../tutorials/todo-list.html">Tutorial 1: Build a Todo List</a>.</li>
+<li>Understand the state model: <a href="../state/introduction.html">Introduction to State</a>.</li>
+<li>Find a widget: <a href="../widgets/index.html">Widget Gallery</a>.</li>
+<li>Arrange a window: <a href="../layout/containers.html">Layout</a>.</li>
+<li>Work on nano-ui itself: <a href="development.html">Development Setup</a>.</li>
+</ul>
 
                     </main>
 
@@ -276,7 +290,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../getting-started/development.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../tutorials/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -290,7 +304,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../getting-started/development.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../tutorials/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -320,7 +334,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

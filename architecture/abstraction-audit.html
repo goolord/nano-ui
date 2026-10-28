@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Recurring Bugs &amp; Fixes - nano-ui Documentation</title>
+        <title>Abstraction Audit - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,105 +178,45 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="recurring-bugs--fixes"><a class="header" href="#recurring-bugs--fixes">Recurring Bugs &amp; Fixes</a></h1>
-<p>Mined from the git histories and production deployments of real-world <code>nano-ui</code> applications (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Check this reference whenever diagnosing unexpected UI behavior.</p>
-<hr>
-<h2 id="1-layout-shifting--jitter"><a class="header" href="#1-layout-shifting--jitter">1. Layout Shifting &amp; Jitter</a></h2>
-<h3 id="a-label-whose-text-changes-length-moves-its-siblings-every-frame"><a class="header" href="#a-label-whose-text-changes-length-moves-its-siblings-every-frame">A label whose text changes length moves its siblings every frame</a></h3>
-<ul>
-<li><strong>Symptom</strong>: A counter going <code>9 -&gt; 10 -&gt; 100</code>, a live stopwatch, or a byte counter causes adjacent buttons to shift left and right on every tick.</li>
-<li><strong>Fix</strong>: Pin changing labels to a fixed width sized to their widest expected value:
-<pre><code class="language-haskell">labelWith (fixedW 48 . alignEnd) (fmtInt count)
-</code></pre>
-</li>
-</ul>
-<h3 id="long-values-inside-a-scrolling-list-widen-the-whole-list"><a class="header" href="#long-values-inside-a-scrolling-list-widen-the-whole-list">Long values inside a scrolling list widen the whole list</a></h3>
-<ul>
-<li><strong>Symptom</strong>: A wide row causes horizontal scrollbars to flash into existence, scrolling the entire container sideways.</li>
-<li><strong>Fix</strong>: Make cells fill their column rather than taking natural width, and enable text clipping:
-<pre><code class="language-haskell">nameLine f = rowWith (fillW . tight) . labelWith (fillW . f)
-</code></pre>
-</li>
-</ul>
-<h3 id="dropdowns-clipping-their-longest-option"><a class="header" href="#dropdowns-clipping-their-longest-option">Dropdowns clipping their longest option</a></h3>
-<ul>
-<li><strong>Symptom</strong>: Fixed-width select dropdowns truncate items like <code>"Drive C: \ 412 GB free"</code>.</li>
-<li><strong>Fix</strong>: Measure option text lengths using font metrics:
-<pre><code class="language-haskell">let w = maximum (0 : map (lineWidth fm) options) + 56
-selectWith (fixedW w) options selVar
-</code></pre>
-</li>
-</ul>
-<hr>
-<h2 id="2-double-borders--box-in-a-box-chrome"><a class="header" href="#2-double-borders--box-in-a-box-chrome">2. Double Borders &amp; Box-in-a-Box Chrome</a></h2>
-<ul>
-<li><strong>Symptom</strong>: Nesting <code>panel</code>, <code>card</code>, or <code>scrollArea</code> inside modals, popovers, or inspector panes creates redundant double borders and nested boxes.</li>
-<li><strong>Fix</strong>: Only one container level should own surface chrome:
-<ul>
-<li>Give outer dialogs <code>padAll 0</code> and pad inner containers, OR</li>
-<li>Strip chrome from the inner container:
-<pre><code class="language-haskell">styled (inputStyle (background colorTransparent . borderWidth 0)) ...
-</code></pre>
-</li>
-<li>Between adjacent sections, draw a single <code>separator</code> rather than opposing borders.</li>
-</ul>
-</li>
-</ul>
-<hr>
-<h2 id="3-text-metrics--pixel-grid"><a class="header" href="#3-text-metrics--pixel-grid">3. Text Metrics &amp; Pixel Grid</a></h2>
-<h3 id="glyphs-drifting-over-long-text-runs"><a class="header" href="#glyphs-drifting-over-long-text-runs">Glyphs drifting over long text runs</a></h3>
-<ul>
-<li><strong>Symptom</strong>: <code>fmAdvance</code> multiplied by character count drifts ~1px every 30 characters compared to actual rendered text.</li>
-<li><strong>Fix</strong>: Always measure runs using <code>lineWidth fm run</code> (which accounts for HarfBuzz kerning and unrounded fractional advances).</li>
-</ul>
-<h3 id="text-shimmering-at-fractional-dpi-scales-125-150"><a class="header" href="#text-shimmering-at-fractional-dpi-scales-125-150">Text shimmering at fractional DPI scales (125%, 150%)</a></h3>
-<ul>
-<li><strong>Symptom</strong>: Rows of 22.4px alternate 22px and 23px apart, producing shimmering during scrolling.</li>
-<li><strong>Fix</strong>: Snap coordinates to the device pixel grid using <code>fmSnapScale</code>:
-<pre><code class="language-haskell">snap v = let k = max 1 (fmSnapScale f) in fromIntegral (round (v * k) :: Int) / k
-</code></pre>
-</li>
-</ul>
-<hr>
-<h2 id="4-stale-cached-drawings"><a class="header" href="#4-stale-cached-drawings">4. Stale Cached Drawings</a></h2>
-<ul>
-<li><strong>Symptom</strong>: A custom-drawn widget (e.g. table sort arrow or audio visualizer) freezes or shows outdated information.</li>
-<li><strong>Fix</strong>: The <code>widgetContent</code> key is missing an input! The key must cover <strong>every variable, color, viewport dimension, and animation channel</strong> the drawing reads.</li>
-</ul>
-<hr>
-<h2 id="5-input-ordering--focus"><a class="header" href="#5-input-ordering--focus">5. Input Ordering &amp; Focus</a></h2>
-<h3 id="asking-focus-questions-at-the-top-of-the-view"><a class="header" href="#asking-focus-questions-at-the-top-of-the-view">Asking focus questions at the top of the view</a></h3>
-<ul>
-<li><strong>Symptom</strong>: Global shortcuts (<code>Ctrl+A</code>, <code>Delete</code>) fire while the user is actively typing inside a text field.</li>
-<li><strong>Fix</strong>: The node arena is reset before the view action runs. Calling <code>isFocused</code> or checking text editing state at the <em>top</em> of the view always returns <code>False</code>. Place keyboard shortcuts and focus queries at the <strong>end of the view</strong>, after widgets have executed.</li>
-</ul>
-<h3 id="escape-claimed-by-text-inputs"><a class="header" href="#escape-claimed-by-text-inputs">Escape claimed by text inputs</a></h3>
-<ul>
-<li><strong>Symptom</strong>: Pressing <code>Escape</code> inside a search box fails to clear a modal or dismiss a dropdown.</li>
-<li><strong>Fix</strong>: Text fields do not claim <code>Escape</code>. Give <code>Escape</code> handlers their own distinct conditional branch separate from <code>inputChars</code> suppression.</li>
-</ul>
-<hr>
-<h2 id="quick-pitfalls-checklist"><a class="header" href="#quick-pitfalls-checklist">Quick Pitfalls Checklist</a></h2>
-<ul>
-<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside a view — allocates every pass. Move to setup.</li>
-<li><input disabled="" type="checkbox"> Unguarded side effects — view re-runs. Wrap in <code>whenM (button ...)</code>.</li>
-<li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code> without <code>scope</code> — shifts sibling IDs.</li>
-<li><input disabled="" type="checkbox"> Overlays called conditionally instead of unconditionally with <code>Var Bool</code>.</li>
-<li><input disabled="" type="checkbox"> <code>useTask</code> inside a hidden tab — task is cancelled when skipped.</li>
-<li><input disabled="" type="checkbox"> Writing freshly computed <code>NaN</code> to a <code>Var Float</code> — causes infinite redraw loop (<code>NaN /= NaN</code>).</li>
-<li><input disabled="" type="checkbox"> Missing <code>-threaded</code> in executable cabal options.</li>
-<li><input disabled="" type="checkbox"> Touching <code>Context</code> from a background thread — call <code>askWake</code> instead.</li>
-</ul>
+                        <h1 id="abstraction-audit"><a class="header" href="#abstraction-audit">Abstraction Audit</a></h1>
+<p>An audit of architectural refinements, source simplifications, and zero-cost abstractions across <code>nano-ui</code>.</p>
+<h2 id="summary-of-refinements"><a class="header" href="#summary-of-refinements">Summary of Refinements</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Subsystem</th><th>Optimization / Abstraction</th><th>Impact</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Widget Construction</strong></td><td>Inlined leaf node initializers with text-style packing kept strictly on the styled path.</td><td>Eliminates branch overhead during traversal.</td></tr>
+<tr><td><strong>Controlled Inputs</strong></td><td>Shared boolean activation and completion policies with live-versus-caller comparison.</td><td>Unifies input event lifecycle.</td></tr>
+<tr><td><strong>UI Scopes</strong></td><td>Shared bridge for bracketed ID allocation and paint scopes.</td><td>Prevents ID drift across frame rebuilds.</td></tr>
+<tr><td><strong>Forms</strong></td><td>Named/positional input families, independent field captions, and <code>inputWidget</code> adapters.</td><td>Zero-allocation applicative forms.</td></tr>
+<tr><td><strong>Reducers</strong></td><td>Three generic adapters replacing dozens of per-widget <code>NanoUI.Emit</code> wrappers.</td><td>Massive code reduction in <code>nano-ui-emit</code>.</td></tr>
+<tr><td><strong>Scrollbars</strong></td><td>Unified scalar calculation for vertical and horizontal orientations with inverse thumb positioning.</td><td>Eliminates duplicate layout code.</td></tr>
+<tr><td><strong>Themes</strong></td><td>Shared Base16 palette construction with dark/light adaptive transforms.</td><td>Instant theme switching.</td></tr>
+<tr><td><strong>Animation</strong></td><td>Indexed applicative channel traversal replacing lists and partial reconstructions.</td><td>Constant-time channel updates.</td></tr>
+<tr><td><strong>Draw Commands</strong></td><td>Vector’s <code>IsoUnbox</code>/<code>As</code> deriving replacing handwritten <code>Prim</code> instances.</td><td>Compile-time SIMD unboxing.</td></tr>
+<tr><td><strong>Canvas</strong></td><td>Strict standard <code>State</code> monad replacing custom handwritten monad instances.</td><td>Inlines directly into draw-op arrays.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="verification-suite"><a class="header" href="#verification-suite">Verification Suite</a></h2>
+<p>The <code>nano-ui-inspection</code> test suite includes 21 formal assertions verifying that:</p>
+<ol>
+<li>Vector animation traversal equals handwritten scalar arithmetic.</li>
+<li>Command reads/writes compile without typeclass dictionaries or box allocations.</li>
+<li>Canvas construction matches direct array emission.</li>
+</ol>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../advanced/window-management.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../architecture/patterns.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../production/abstraction-audit.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../architecture/source-reduction.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -286,11 +226,11 @@ selectWith (fixedW w) options selVar
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../advanced/window-management.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../architecture/patterns.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../production/abstraction-audit.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../architecture/source-reduction.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -320,7 +260,7 @@ selectWith (fixedW w) options selVar
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

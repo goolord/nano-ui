@@ -395,5 +395,19 @@
   customElements.define('nano-ui-typo-lab', NanoUiTypoLab);
   customElements.define('nano-ui-trap', NanoUiTrap);
 
+  // Label theme options to highlight nano-ui identity
+  function labelThemePicker() {
+    const coalBtn = document.getElementById('mdbook-theme-coal');
+    if (coalBtn) coalBtn.textContent = 'Nano Dark (Default)';
+    const lightBtn = document.getElementById('mdbook-theme-light');
+    if (lightBtn) lightBtn.textContent = 'Nano Light';
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', labelThemePicker);
+  } else {
+    labelThemePicker();
+  }
+
   console.log('nano-ui Web Components initialized');
 })();

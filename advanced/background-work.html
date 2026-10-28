@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -179,41 +179,110 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="asynchronous-work--streams"><a class="header" href="#asynchronous-work--streams">Asynchronous Work &amp; Streams</a></h1>
-<p>Long-running I/O, network requests, and streaming data must not block the immediate-mode GUI frame loop. <code>nano-ui</code> provides structured concurrency primitives via <code>Task</code> and <code>Stream</code>.</p>
-<h2 id="one-shot-background-work-task"><a class="header" href="#one-shot-background-work-task">One-Shot Background Work: <code>Task</code></a></h2>
-<p>Allocate a task handle once during setup:</p>
-<pre><code class="language-haskell">task &lt;- newTask
-</code></pre>
-<p>Inside your view, call <code>useTask</code> or <code>useTaskStatus</code>:</p>
-<pre><code class="language-haskell">-- useTask keeps the previous result while a new key runs (preventing UI flashes)
-mResult &lt;- useTask task queryKey $ \key -&gt; do
-  fetchSearchResults key
+<p>The view runs in the frame loop, so it must never block. Long-running I/O, network requests, and streaming data go on worker threads behind two typed handles: <code>Task</code> for one-shot work and <code>Stream</code> for repeated pushes. Both wake the loop when there is a new result to draw.</p>
+<p>Compile with <code>-threaded</code>; the loop sleeps while a job runs, and the job runs on a Haskell thread while it is blocked.</p>
+<h2 id="task-one-job-per-key"><a class="header" href="#task-one-job-per-key"><code>Task</code>: one job per key</a></h2>
+<p>Allocate the handle once, during setup:</p>
+<pre><code class="language-haskell">data App = App
+  { appSearch :: Task Text [Text]
+  , appFlaky  :: Task Int Text
+  }
 
-case mResult of
-  Nothing      -&gt; spinner
-  Just results -&gt; resultList results
+newApp :: IO App
+newApp = App &lt;$&gt; newTask &lt;*&gt; newTask
 </code></pre>
-<h3 id="cancellation-semantics"><a class="header" href="#cancellation-semantics">Cancellation Semantics</a></h3>
+<p>Then call the hook from the view. <code>useTaskStatus</code> reports the whole lifecycle:</p>
+<pre><code class="language-haskell">status &lt;- useTaskStatus (appSearch app) queryKey (fetchSearchResults queryKey)
+
+case status of
+  TaskRunning previous -&gt; showPreviousOrSpinner previous
+  TaskDone results     -&gt; renderResults results
+  TaskFailed err prev  -&gt; showError (displayException err)
+</code></pre>
+<p><code>useTask</code> is the simpler form when only the latest result matters:</p>
+<pre><code class="language-haskell">contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
+label (fromMaybe "Loading..." contents)
+</code></pre>
+<p>Rules:</p>
 <ul>
-<li><strong>Key Change</strong>: A task restarts automatically whenever its key changes. Ongoing work is cancelled via an asynchronous exception (<code>bracket</code> resources safely!).</li>
-<li><strong>Skipped Frames</strong>: If a <code>useTask</code> call is <strong>skipped for an entire frame</strong> (for example, if hidden inside an inactive tab), the task is automatically cancelled! To keep background downloads running while hidden, keep the <code>useTask</code> call outside conditional branches.</li>
-</ul>
-<hr>
-<h2 id="continuous-pushing-stream"><a class="header" href="#continuous-pushing-stream">Continuous Pushing: <code>Stream</code></a></h2>
-<p>For continuous telemetry, progress indicators, or token streaming:</p>
-<pre><code class="language-haskell">stream &lt;- newStream
-
--- Inside the view:
-tokens &lt;- useStream stream downloadId [] $ \push -&gt; do
-  runDownloadWithCallback push
+<li>
+<p><strong>A key identifies the job.</strong> The first frame with a new key starts the worker. Changing the key cancels the old job with an asynchronous exception and starts the new one.</p>
+</li>
+<li>
+<p><strong>A skipped hook cancels the job.</strong> If the view does not call <code>useTask</code> for a full frame — because the pane is in an inactive tab, or inside a branch — the work is released. Keep the hook outside tabs when the work must continue while hidden.</p>
+</li>
+<li>
+<p><strong>To retrigger the same input, put a counter in the key.</strong> Pressing Retry must change the key, or the key stays equal and the job never reruns:</p>
+<pre><code class="language-haskell">attempt &lt;- readVar attemptVar
+status &lt;- useTaskStatus (appFlaky app) attempt (flakyRequest attempt)
+whenM (button "Retry") (modifyVar attemptVar (+ 1))
 </code></pre>
-<p>Updates between frames coalesce automatically so high-frequency pushes never starve the UI.</p>
+</li>
+<li>
+<p><strong>Cancellation is an async exception.</strong> Use <code>bracket</code>, <code>withFile</code>, or a similar resource combinator inside the job. A connection or temporary directory must be released even when the user changes the query mid-request.</p>
+</li>
+<li>
+<p><strong>The result is forced on the worker.</strong> Return a value in weak head normal form; force a list’s spine with <code>length found \</code>seq` pure found` if the view should not evaluate it.</p>
+</li>
+<li>
+<p><strong><code>TaskRunning previous</code> carries the last result</strong>, which is why a search list does not flash empty while the next query runs.</p>
+</li>
+</ul>
+<h2 id="stream-repeated-pushes"><a class="header" href="#stream-repeated-pushes"><code>Stream</code>: repeated pushes</a></h2>
+<p>A <code>Stream</code> is for sensors, downloads, token streams, and anything that pushes values repeatedly:</p>
+<pre><code class="language-haskell">data App = App
+  { appProgress :: Stream () Int
+  }
+
+newApp = App &lt;$&gt; newStream
+</code></pre>
+<pre><code class="language-haskell">pct &lt;- useStream (appProgress app) () (0 :: Int) $ \update -&gt;
+  forM_ [1 .. 100] $ \i -&gt; do
+    threadDelay 50000
+    update (const i)
+progressBar (fromIntegral pct / 100)
+</code></pre>
+<p>The producer receives <code>update :: (s -&gt; s) -&gt; IO ()</code> and returns when it is done, cancelled, or throws. Each update wakes the loop; updates that arrive between frames coalesce into one frame.</p>
+<ul>
+<li><strong>Stop by not calling the hook.</strong> There is no stop function. <code>when isRunning (useStream ...)</code> releases the producer when the condition turns false.</li>
+<li><strong>Stopping discards the accumulated state.</strong> If the view needs to resume from where it left off, save the current value outside and pass it as the next initial value. The live chart example does exactly this with a <code>Var Feed</code>.</li>
+<li><strong>The producer owns no UI.</strong> It may call <code>update</code> from the thread it runs on, including threads it starts; it must not touch the UI <code>Context</code>.</li>
+</ul>
+<h2 id="threads-outside-the-handles"><a class="header" href="#threads-outside-the-handles">Threads outside the handles</a></h2>
+<p>When state already lives outside <code>Task</code>/<code>Stream</code>:</p>
+<pre><code class="language-haskell">wake &lt;- askWake        -- in the view, once
+
+forkIO $ do
+  result &lt;- expensiveQuery
+  writeVarIO queryResult result
+  wake                 -- schedule one frame
+</code></pre>
+<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The wake repaints the whole window because nothing says which widget changed; that is fine for occasional external updates, not for a per-token stream.</p>
+<p>Never call UI functions or touch context/damage from a worker thread.</p>
+<h2 id="choosing-a-tool"><a class="header" href="#choosing-a-tool">Choosing a tool</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>The work…</th><th>Use</th></tr>
+</thead>
+<tbody>
+<tr><td>Returns one result for an input</td><td><code>Task</code> + <code>useTask</code> / <code>useTaskStatus</code></td></tr>
+<tr><td>Pushes many updates</td><td><code>Stream</code> + <code>useStream</code></td></tr>
+<tr><td>Is already running in a thread you own</td><td><code>Var</code> IO operations + <code>askWake</code></td></tr>
+<tr><td>Needs to keep running while its pane is hidden</td><td>Keep the hook outside the tab or branch</td></tr>
+<tr><td>Needs to stop and resume with state</td><td>Save the state, pass it as the next initial value</td></tr>
+</tbody>
+</table>
+</div>
+<p>The complete runnable version of these patterns is in <a href="../tutorials/live-data.html">Tutorial 3: Live Data &amp; Background Work</a> and <code>packages/nano-ui-demo/examples/Tasks.hs</code>.</p>
+<h2 id="animations-are-not-background-work"><a class="header" href="#animations-are-not-background-work">Animations are not background work</a></h2>
+<p>Animation is driven by the frame loop, not a worker. Use <code>animateTo</code>, <code>pulse</code>, and <code>keepAnimating</code> from <a href="animation.html">Animations &amp; Timers</a>; do not start a thread to change a value every display frame.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../advanced/keyboard-focus.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../styling/unexpected-interactions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -227,7 +296,7 @@ tokens &lt;- useStream stream downloadId [] $ \push -&gt; do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../advanced/keyboard-focus.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../styling/unexpected-interactions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
@@ -261,7 +330,7 @@ tokens &lt;- useStream stream downloadId [] $ \push -&gt; do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 

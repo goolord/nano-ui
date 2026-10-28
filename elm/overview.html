@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>nano-ui-emit: Elm-style Architecture - nano-ui Documentation</title>
+        <title>Elm-Style Views - nano-ui Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -28,7 +28,7 @@
         <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
-        <link rel="stylesheet" href="../theme/nano-ui-book-c965c05a.css">
+        <link rel="stylesheet" href="../theme/nano-ui-book-b26094e2.css">
 
 
         <!-- Provide site root and default themes to javascript -->
@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d700f23e.js";
+            window.path_to_searchindex_js = "../searchindex-43412013.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ce59c934.js"></script>
+        <script src="../toc-78fae1ba.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -178,67 +178,89 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="nano-ui-emit-elm-style-architecture"><a class="header" href="#nano-ui-emit-elm-style-architecture">nano-ui-emit: Elm-style Architecture</a></h1>
-<p><code>nano-ui-emit</code> provides Elm-style typed messages and pure state reducers on top of <code>nano-ui</code>.</p>
-<h2 id="the-nanouie-msg-a-view"><a class="header" href="#the-nanouie-msg-a-view">The <code>NanoUIE msg a</code> View</a></h2>
-<p>Instead of mutating <code>Var</code>s directly in views, a <code>NanoUIE msg ()</code> view emits messages:</p>
-<pre><code class="language-haskell">{-# LANGUAGE OverloadedStrings #-}
+                        <h1 id="elm-style-views"><a class="header" href="#elm-style-views">Elm-Style Views</a></h1>
+<p><code>nano-ui-emit</code> adds a second way to write a view: instead of mutating <code>Var</code>s directly, the view emits typed messages, and a pure reducer folds them into a model. The shape will be familiar if you have used Elm, Redux, or <code>brick</code>’s state machines.</p>
+<pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
+data Msg = Increment | Decrement | SetName Text
 
-import NanoUI
-import NanoUI.Emit qualified as Emit
-
-data Msg
-  = SaveDocument
-  | SetVolume Float
-  | Increment
-  | Decrement
-
-view :: AppModel -&gt; Emit.NanoUIE Msg ()
-view model = Emit.withNanoUI column $ do
-  Emit.liftNanoUI (label "Application Settings")
-  
-  -- Emit on button activation
-  Emit.emitWhen (button "Save") SaveDocument
-  
-  -- Emit on value change
-  Emit.emitChanged (slider 0 100) model.volume SetVolume
-  
+view :: Model -&gt; Emit.NanoUIE Msg ()
+view m = Emit.withNanoUI column $ do
+  Emit.liftNanoUI (heading "Profile")
   Emit.withNanoUI row $ do
     Emit.emitWhen (button "-") Decrement
-    Emit.liftNanoUI (label (T.pack (show model.counter)))
+    Emit.liftNanoUI (label (T.pack (show m.counter)))
     Emit.emitWhen (button "+") Increment
-</code></pre>
-<h2 id="the-reducer-runner"><a class="header" href="#the-reducer-runner">The Reducer Runner</a></h2>
-<p>Pair your view with a pure update reducer <code>msg -&gt; model -&gt; model</code>:</p>
-<pre><code class="language-haskell">update :: Msg -&gt; AppModel -&gt; AppModel
-update SaveDocument m = m  -- Trigger side effect via external command
-update (SetVolume v) m = m { volume = v }
-update Increment m = m { counter = counter m + 1 }
-update Decrement m = m { counter = counter m - 1 }
+  Emit.emitChanged textInput m.name SetName
+
+update :: Msg -&gt; Model -&gt; Model
+update Increment m = m {counter = m.counter + 1}
+update Decrement m = m {counter = m.counter - 1}
+update (SetName n) m = m {name = n}
 
 main :: IO ()
-main = runSdlAppReduce view update initialModel
+main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </code></pre>
-<h3 id="component-hierarchies-with-mapmessages"><a class="header" href="#component-hierarchies-with-mapmessages">Component Hierarchies with <code>mapMessages</code></a></h3>
-<p>Embed reusable child components using <code>mapMessages</code>:</p>
-<pre><code class="language-haskell">data ParentMsg = ChildMsg SubMsg | ParentSave
-
-parentView :: SubModel -&gt; Emit.NanoUIE ParentMsg ()
-parentView sub = do
-  Emit.mapMessages ChildMsg (childView sub)
-  Emit.emitWhen (button "Save All") ParentSave
-</code></pre>
-<p>Messages are dispatched in order directly to the parent queue with zero intermediate wrapper allocations.</p>
+<h2 id="what-the-types-say"><a class="header" href="#what-the-types-say">What the types say</a></h2>
+<p><code>NanoUIE msg a</code> is a <code>NanoUI</code> action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting a message of the wrong type is a compile error.</p>
+<ul>
+<li><strong><code>liftNanoUI</code></strong> runs an ordinary widget or UI operation in an emitting view.</li>
+<li><strong><code>withNanoUI</code></strong> wraps a typed body in an ordinary layout, key, or scope: <code>withNanoUI column</code>, <code>withNanoUI row</code>, <code>withNanoUI (withKey todoId)</code>, <code>withNanoUI (disabledWhen True)</code>.</li>
+<li><strong><code>emit</code></strong> emits a message directly.</li>
+<li><strong><code>emitWhen</code></strong> emits when an ordinary widget activates: <code>emitWhen (button "Save") Save</code>.</li>
+<li><strong><code>emitChanged</code></strong> runs a <code>Var</code> widget against the current model value and emits only if the value changed.</li>
+<li><strong><code>emitEdited</code></strong> additionally requires the widget’s <code>respChanged</code>, filtering out programmatic value updates.</li>
+<li><strong><code>mapMessages</code></strong> lifts a child component’s message type into its parent’s.</li>
+</ul>
+<p>The <code>Var</code> widgets are still the widgets. <code>emitChanged (slider 0 100) volume SetVolume</code> is the <code>slider</code> bound to a temporary <code>Var</code>; the model is the source of truth, and the emitted message carries the new value back.</p>
+<h2 id="the-frame-under-a-reducer"><a class="header" href="#the-frame-under-a-reducer">The frame under a reducer</a></h2>
+<p>With <code>runSdlAppReduce</code>:</p>
+<ol>
+<li>The view runs with the current model and emits messages as widgets report events.</li>
+<li>At the end of the frame, the messages are folded through <code>update</code> in emission order.</li>
+<li>The drawing shown for that frame is from the model <strong>before</strong> reduction.</li>
+<li>If the reduced model differs from the old one, another frame is requested to draw the new state.</li>
+</ol>
+<p>That last point surprises people: a click that changes the model still costs a follow-up frame. The alternative — reducing mid-frame — would make the view read a model that changed halfway through the pass, which is worse. Keep the model update cheap and the follow-up frame is not noticeable.</p>
+<p>Messages from every pass of a frame are collected in order, including passes caused by a local <code>Var</code> rebuild. Each runner invocation owns its queue, so an exception cannot leave messages for a later frame.</p>
+<h2 id="when-to-use-it"><a class="header" href="#when-to-use-it">When to use it</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th><code>Var</code>-first</th><th>Elm-style</th></tr>
+</thead>
+<tbody>
+<tr><td>State shape</td><td>Distributed through the view and app record</td><td>One model value</td></tr>
+<tr><td>Transitions</td><td>Direct mutation</td><td>Explicit <code>Msg</code> constructors and one <code>update</code></td></tr>
+<tr><td>Testing</td><td>Widget-level with <code>NanoUI.Testing</code></td><td>Pure <code>update</code> tests plus frame tests</td></tr>
+<tr><td>Local widget state</td><td>Natural</td><td>Still use <code>Var</code> for drafts and open flags</td></tr>
+<tr><td>Large application</td><td>Scales by modules and app records</td><td>Scales by components and <code>mapMessages</code></td></tr>
+<tr><td>Best for</td><td>Tools and editors with external state</td><td>State machines, wizards, undo/history, small apps with a clear model</td></tr>
+</tbody>
+</table>
+</div>
+<p>The two styles are not exclusive. An emitting view can allocate and read <code>Var</code>s for transient UI state (a draft, an open dropdown), while the durable model stays in <code>NanoUIE</code>. A <code>Var</code>-based view can call <code>runNanoUIE</code> on a small emitting component and act on the returned messages.</p>
+<p>If you want the <code>Var</code> style, read <a href="../state/introduction.html">Introduction to State</a>. If you want the reducer style, continue with <a href="messages.html">Messages, Reducers &amp; Components</a>.</p>
+<h2 id="trade-offs-in-practice"><a class="header" href="#trade-offs-in-practice">Trade-offs in practice</a></h2>
+<ul>
+<li><strong>A reducer is easier to unit test.</strong> <code>update</code> is a pure function; no context, no frame, no widgets.</li>
+<li><strong>A reducer centralizes transitions.</strong> Every way the model changes is a <code>Msg</code> constructor you can grep for. That is valuable when the state machine is the hard part.</li>
+<li><strong>Direct <code>Var</code> mutation is less ceremony for local state.</strong> A text field’s draft does not need a message type and an <code>update</code> branch.</li>
+<li><strong>Side effects stay in the view or outside the reducer.</strong> <code>update</code> is pure. A save button can emit <code>Save</code> <em>and</em> perform the write in the view on the same event, or the model can hold a queue of effects that an interpreter drains. Keep file and network I/O out of <code>update</code>.</li>
+</ul>
+<blockquote class="blockquote-tag blockquote-tag-tip">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
+<p>The reducer runners are <code>runSdlAppReduce</code> and <code>runRgfwAppReduce</code>; the SDL one is in <code>NanoUI.Backend.Sdl</code> and the RGFW one in <code>NanoUI.Backend.Rgfw</code>. For headless tests, use <code>runFrameE</code>, <code>runFrameReduce</code>, and <code>runClickReduce</code> from <code>NanoUI.Emit</code>.</p>
+</blockquote>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../widgets/canvas-custom.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../state/identity.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../packages/nano-ui-sdl.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../elm/messages.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -248,11 +270,11 @@ parentView sub = do
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../widgets/canvas-custom.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../state/identity.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../packages/nano-ui-sdl.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../elm/messages.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -282,7 +304,7 @@ parentView sub = do
 
         <!-- Custom JS scripts -->
         <script src="../theme/nano-ui-banks-a7aa1e5c.js"></script>
-        <script src="../theme/nano-ui-components-3b273595.js"></script>
+        <script src="../theme/nano-ui-components-cd25224f.js"></script>
 
 
 
