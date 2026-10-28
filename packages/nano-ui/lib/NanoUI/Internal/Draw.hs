@@ -20,6 +20,7 @@ module NanoUI.Internal.Draw
   , setDrawSnapScale
   , getDrawSnapScale
   , setDrawSquareGeometry
+  , setDrawBackground
   , setDrawExternalText
   , beginLayer
   , currentLayer

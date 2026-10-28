@@ -237,6 +237,13 @@ A `Theme` holds a `Style` per surface kind (`themeButton`, `themeInput`,
 `themeWindow`, `themeSeparator`, success/warning/danger, etc.). A `Style` is
 bg/fg/border/borderWidth/cornerRadius/hoverBg/activeBg.
 
+The page behind a view is `pageBackground`: `themeWindow` by default, unless
+`themePage` is set. `pageColor` sets one; `panelPage` gives a view that draws
+no panel the panel surface. The page is laid over the window background, so
+`themeWindow` remains the window; a page that uses it shows it in the gaps
+between panels. A full-window scroller (`scrollWith grow`) fills the page
+colour.
+
 - Built-ins: `defaultTheme` (dark), `defaultLightTheme`, Tomorrow variants,
   or `themeFromBase16`/`themeFromBase16Dark`/`themeFromBase16Light` from any
   Base16 palette.
@@ -251,12 +258,12 @@ bg/fg/border/borderWidth/cornerRadius/hoverBg/activeBg.
 - Scope modifiers: style-level (`background`, `foreground`, `borderColor`,
   `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`,
   `pressBackground`, `fillColor`), theme-level (`buttonStyle`, `inputStyle`,
-  `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `rounded`,
-  `subtle`, `tinted`, `readableOn`), semantic (`primary`, `destructive`,
-  `success`, `warning`, `tone Danger`, `toneColor Warning` for custom
-  drawing). Text style modifiers on any text widget: `fontMono`,
-  `fontTone Warning`, `fontSize`, `fontWeight`, `fontItalic`,
-  `fontUnderline`.
+  `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `pageColor`,
+  `panelPage`, `rounded`, `subtle`, `tinted`, `readableOn`), semantic
+  (`primary`, `destructive`, `success`, `warning`, `tone Danger`,
+  `toneColor Warning` for custom drawing). Text style modifiers on any text
+  widget: `fontMono`, `fontTone Warning`, `fontSize`, `fontWeight`,
+  `fontItalic`, `fontUnderline`.
 - `disabledWhen cond subtree` disables interaction and dims rendering while
   preserving layout and state.
 - `uiTheme` reads the active theme in the view (for custom drawing); `drawContext`
@@ -648,6 +655,27 @@ Quick one-liners; the section above has the full story and real fixes.
   move reads below when order is free.
 - Missing `-threaded`.
 - Touching `Context` from a worker thread — wake with `askWake` instead.
+
+## Writing style
+
+The book and UI copy read as if a person wrote them. Generated prose has a
+recognizable accent; do not reproduce it.
+
+- No em-dashes. Use a colon, a comma, parentheses, or a second sentence. This
+  applies to `book/src` and to the book strings in `Glossary.hs`, which
+  generate `book/theme/nano-ui-banks.js`. A book edit is not done until
+  `rg '\x{2014}' book/src` finds nothing.
+- Drop the "not X, but Y" and "isn't just X, it's Y" cadence, rhetorical
+  question openings, and a closing paragraph that restates the section.
+- Avoid the stock vocabulary: delve, leverage, seamless, robust, landscape,
+  realm, tapestry, testament, elevate, unlock, streamline, game changer,
+  cutting edge, at its core, it's worth noting, here's the thing, let's dive
+  in.
+- Do not pad with three-item lists of abstractions or stack parallel clauses
+  to sound thorough. One concrete example beats three vague ones.
+- Prefer short sentences, active voice, measurable claims and code. Let a
+  section end when its last point is made.
+- Vary paragraph and sentence length. Uniform rhythm reads as generated.
 
 ## Where to look things up
 

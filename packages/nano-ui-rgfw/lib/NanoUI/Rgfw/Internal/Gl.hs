@@ -87,6 +87,9 @@ foreign import ccall unsafe "nano_ui_gl_upload_images"
 foreign import ccall unsafe "nano_ui_gl_begin"
   c_begin :: Ptr NanoUiGl -> Int32 -> Int32 -> Float -> Float -> Float -> Float -> Int32 -> IO Int32
 
+foreign import ccall unsafe "nano_ui_gl_fill"
+  c_fill :: Ptr NanoUiGl -> Float -> Float -> Float -> IO ()
+
 foreign import ccall unsafe "nano_ui_gl_present"
   c_present :: Ptr NanoUiGl -> IO ()
 
@@ -162,6 +165,11 @@ renderArenaGl r font !scale !fbW !fbH bg damage pieces drawData baseSpans overla
         DamageClip rect -> (0, map (damageBox scale fbW fbH) (if null pieces then [rect] else pieces))
   began <- c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB full
   when (began == 0) $ fail "nano-ui-rgfw: retained framebuffer setup failed"
+  case drawBackground drawData of
+    Nothing -> pure ()
+    Just page -> do
+      let (!pageR, !pageG, !pageB, _) = colorFloats page
+      c_fill h pageR pageG pageB
   atlas <- ensureAtlas r font scale
   buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6 * length textBoxes)
   let spansIn spans n0 = foldM (\n tb -> foldM (writeSpanQuads atlas font tb buf) n spans) n0 textBoxes

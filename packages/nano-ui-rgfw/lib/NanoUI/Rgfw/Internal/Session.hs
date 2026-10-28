@@ -457,7 +457,8 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
                   syncImagesGl renderer c
                   -- The window colour of the theme the frame was painted in,
                   -- which a view's 'setUiTheme' may have changed: a full
-                  -- frame leaves the page backdrop to this clear.
+                  -- frame clears to it, and paints the page surface the draw
+                  -- data carries over it.
                   paintedTheme <- readIORef (ctxTheme c)
                   renderArenaGl renderer font curScale pw ph (themeWindow paintedTheme)
                       (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans

@@ -15,6 +15,7 @@ tests =
   , spec "tone-contrast" runToneContrastTest
   , spec "tones" runTonesTest
   , spec "tone-with-face" runToneWithFaceTest
+  , spec "page-background" runPageBackgroundTest
   , spec "theme-appearance" runThemeAppearanceTest
   , spec "follow-system-theme" runFollowSystemThemeTest
   , spec "set-theme-stops-following" runSetThemeStopsFollowingTest
@@ -77,12 +78,13 @@ builtInThemes =
     [defaultTheme, defaultLightTheme, tomorrowNightMinDarkTheme, tomorrowMinLightTheme, tomorrowMidnightMinDarkTheme, themeFromBase16 base16TomorrowNight, themeFromBase16 base16TomorrowLight]
 
 -- | Each built-in theme's success, warning and danger colours reach 4.5:1
--- contrast on its window colour, and a label reaches it on the warning colour.
+-- contrast on its page background, and a label reaches it on the warning
+-- colour.
 runToneContrastTest :: Context -> IORef Int -> IO ()
 runToneContrastTest _ failed =
   forM_ builtInThemes $ \(name, t) -> do
     let amber = themeWarning t
-        readable c = contrastRatio c (themeWindow t) >= 4.5
+        readable c = contrastRatio c (pageBackground t) >= 4.5
     assertEq failed (name, True, True, True, True) (name, all readable [themeSuccess t, amber, themeDanger t], contrastRatio (readableOn t amber) amber >= 4.5, amber /= themeDanger t, themeSuccess t /= themeDanger t)
 
 -- | Each tone's colour comes from the theme, and its buttons match the old tinted button names.
@@ -115,7 +117,22 @@ runToneWithFaceTest ctx failed = do
   let faces = [(textNodeFontVariant si, textNodeFontTone si) | (NodeText, si) <- styles]
   assertEq failed [(FontMono, Just Warning), (FontMono, Just Warning), (FontRegular, Just Muted), (FontRegular, Just Danger), (FontRegular, Just Danger)] faces
 
--- | A theme is light or dark by its window colour; 'lightDark' picks dark when the system appearance is unknown.
+-- | The page is the window background unless the theme sets one, and
+-- 'panelPage' gives it the panel surface.
+runPageBackgroundTest :: Context -> IORef Int -> IO ()
+runPageBackgroundTest _ failed = do
+  let t = defaultTheme
+      panelBg = styleBg (themePanel t)
+      red = colorRGBA 1 2 3 255
+  assertEq failed (themeWindow t) (pageBackground t)
+  assertEq failed panelBg (pageBackground (panelPage t))
+  assertEq failed red (pageBackground (pageColor red t))
+  assertEq failed panelBg (pageBackground (panelPage (pageColor red t)))
+  -- A translucent panel surface does not change a page left unset.
+  assertEq failed (themeWindow t) (pageBackground (panelStyle (background colorTransparent) t))
+
+-- | A theme is light or dark by its page background; 'lightDark' picks dark
+-- when the system appearance is unknown.
 runThemeAppearanceTest :: Context -> IORef Int -> IO ()
 runThemeAppearanceTest _ failed = do
   assertEq failed [AppearanceDark, AppearanceLight, AppearanceDark, AppearanceLight, AppearanceDark, AppearanceDark, AppearanceLight] (map (themeAppearance . snd) builtInThemes)

@@ -54,8 +54,9 @@ data WindowSettings = WindowSettings
   , wsResizable :: !Bool
   , wsMode :: !WindowMode
   , wsTransparent :: !Bool
-  -- ^ Desktop transparency where the theme background is translucent. SDL
-  -- supports it with a compositor; RGFW windows are opaque.
+  -- ^ Desktop transparency where the page background is translucent; set it
+  -- with 'pageColor' (an unset page is 'themeWindow'). SDL supports it with a
+  -- compositor; RGFW windows are opaque.
   , wsOpacity :: !Float
   -- ^ Whole-window opacity, including decorations, from 0 to 1 (SDL only).
   , wsExitOnCloseRequest :: !Bool

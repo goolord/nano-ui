@@ -422,6 +422,7 @@ testFrameToSvg = do
     inp = withInput 240 120
     ui = column $ do
       label "Frame label"
+      labelWith fontBold "Bold label"
       _ <- button "Go"
       _ <- canvas (fixedWH 60 60) $ \_ -> drawCircle (V2 30 30) 12 red
       pure ()
@@ -435,9 +436,25 @@ testFrameToSvg = do
         svg
     )
   check
-    "window background"
-    (T.isInfixOf ("fill=\"" <> colorToHex (themeWindow defaultTheme) <> "\"") svg)
+    "page background"
+    (T.isInfixOf ("fill=\"" <> colorToHex (pageBackground defaultTheme) <> "\"") svg)
+  check
+    "the page is the window background"
+    (pageBackground defaultTheme == themeWindow defaultTheme)
   check "button chrome as a rect" (T.isInfixOf "<rect " svg)
   check "label text from spans" (T.isInfixOf ">Frame label</text>" svg)
+  check "bold label text" (T.isInfixOf ">Bold label</text>" svg)
+  check "bold weight follows the span style" (T.isInfixOf "font-weight=\"700\"" svg)
   check "button label text" (T.isInfixOf ">Go</text>" svg)
   check "canvas circle from draw ops" (T.isInfixOf "<circle " svg)
+  -- A page scoped onto the panel surface exports that surface.
+  let panelUi = styled panelPage ui
+  _ <- runFrame ctx inp panelUi
+  (_, panelDraw, _) <- runFrame ctx inp panelUi
+  panelSvg <- frameToSvg defaultFrameSvgConfig ctx inp panelDraw
+  check
+    "panel page background"
+    ( T.isInfixOf
+        ("fill=\"" <> colorToHex (styleBg (themePanel defaultTheme)) <> "\"")
+        panelSvg
+    )

@@ -33,9 +33,9 @@ import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solve
 import NanoUI.Internal.Monad (NanoUI (..), Ui, runUi, whenM)
 import NanoUI.Internal.NativeWindow (clearWindowClose)
 import NanoUI.Internal.Store (ptrEq)
-import NanoUI.Internal.Style (Padding (..), Theme (..), themeOverlayDim, themeSeparator)
+import NanoUI.Internal.Style (Padding (..), Theme (..), pageBackground, themeOverlayDim, themeSeparator)
 import NanoUI.Internal.Tasks (sweepHeld)
-import NanoUI.Internal.Types (Damage (..), Rect (..), Size (..), damageIsEmpty, rectInflate, rectNonEmpty)
+import NanoUI.Internal.Types (Color, Damage (..), Rect (..), Size (..), colorA, damageIsEmpty, rectInflate, rectNonEmpty)
 import NanoUI.Internal.Widgets.Overlay (windowChromeSepH, windowTitleBarH)
 import NanoUI.Internal.Var (beginVarPass, endVarFrame, takeVarRerun)
 import NanoUI.Internal.Widgets.Sensor (beginSensors, updateSensors)
@@ -288,6 +288,43 @@ drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size = do
           <*> getPaintSignature na
           <*> atlasToken (ctxImageAtlas ctx)
 
+-- | The colour of the page surface this frame: the root node's theme, so a
+-- scope around the whole view applies, or the base theme's for an empty view.
+framePageBackground :: Context -> IO Color
+framePageBackground ctx = do
+  base <- readIORef (ctxTheme ctx)
+  n <- arenaCount (ctxNodeArena ctx)
+  if n > 0
+    then pageBackground <$> nodeTheme ctx 0
+    else pure (pageBackground base)
+
+-- | Lay the page surface over the window clear. A page the same colour as the
+-- clear is left out, and a scroller's backdrop then stands in for it
+-- ('ctxPagePainted').
+paintPageSurface :: Context -> Size -> IO ()
+paintPageSurface ctx (Size w h) = do
+  page <- framePageBackground ctx
+  clear <- themeWindow <$> readIORef (ctxTheme ctx)
+  let da = ctxDrawArena ctx
+      -- An opaque page different from the clear is left to the backend, which
+      -- fills it after the clear without a vertex in the draw list. A
+      -- translucent one is a command here, so it blends over the clear.
+      opaque = colorA page == 255
+  if w <= 0 || h <= 0 || colorA page == 0 || page == clear
+    then do
+      setDrawBackground da Nothing
+      writeIORef (ctxPagePainted ctx) (Just (page, 0))
+    else
+      if opaque
+        then do
+          setDrawBackground da (Just page)
+          writeIORef (ctxPagePainted ctx) (Just (page, 0))
+        else do
+          pushRect da (Rect 0 0 w h) page
+          n <- drawnVertexCount da
+          setDrawBackground da Nothing
+          writeIORef (ctxPagePainted ctx) (Just (page, n))
+
 -- | Paint the frame. Clip frames repaint the damaged region of the retained
 -- texture, which preserves the other pixels ('paintDamageClip'). Full-present
 -- frames (fresh retain, forced full, continuous) paint everything.
@@ -296,9 +333,12 @@ paintFrame ctx frameInp size explain paintFull = do
   let da = ctxDrawArena ctx
   resetDrawArena da
   beginLayer da LayerBackground
-  unless paintFull $ do
-    damage <- takeDamage ctx
-    paintDamageClip ctx damage =<< takeDamagePieces ctx
+  writeIORef (ctxPagePainted ctx) Nothing
+  if paintFull
+    then paintPageSurface ctx size
+    else do
+      damage <- takeDamage ctx
+      paintDamageClip ctx damage =<< takeDamagePieces ctx
   lowerShapes ctx
   -- Page outlines go above the page's scrollbars and below floating panels.
   when explain $ do
@@ -359,13 +399,13 @@ drawFloatingPanels ctx@Context {ctxNodeArena = na, ctxDrawArena = da} (Size ww w
     panels NodeModal plain
   panels NodePopup plain
 
--- | Start a clip frame from the window backdrop, as a full frame starts from a
--- window-coloured clear. Widgets with a transparent fill, such as an idle
--- menu-bar title, draw nothing over the pixels they covered, so without the
--- backdrop a hover that just ended would stay in the retain texture. Damage
--- in pieces paints a backdrop over each, and every command is cut to them.
--- Each is inflated by a logical pixel to cover the runner's outward snap. An
--- empty clip stays empty, so a frame with nothing damaged paints nothing.
+-- | Start a clip frame from the page surface, as a full frame lays it over the
+-- window clear. Widgets with a transparent fill, such as an idle menu-bar
+-- title, draw nothing over the pixels they covered, so without the backdrop a
+-- hover that just ended would stay in the retain texture. Damage in pieces
+-- paints a backdrop over each, and every command is cut to them. Each is
+-- inflated by a logical pixel to cover the runner's outward snap. An empty clip
+-- stays empty, so a frame with nothing damaged paints nothing.
 paintDamageClip :: Context -> Damage -> [Rect] -> IO ()
 paintDamageClip _ DamageFull _ = pure ()
 paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
@@ -375,8 +415,8 @@ paintDamageClip ctx@Context {ctxDrawArena = da} (DamageClip r) pieces = do
   setClip da clip
   setClipPieces da pieceClips
   when (rectNonEmpty r) $ do
-    theme <- readIORef (ctxTheme ctx)
-    mapM_ (flip (pushRect da) (themeWindow theme)) backdrops
+    page <- framePageBackground ctx
+    mapM_ (flip (pushRect da) page) backdrops
 
 -- | Lay out the arena and place the floating panels over it. The cached solve
 -- is restored when it was taken at this size and font generation and @check@

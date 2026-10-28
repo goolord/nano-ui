@@ -17,7 +17,7 @@ Each container and modifier in the next two sections has a collapsible example: 
 A container is a `NanoUI` action that arranges its children. The plain form (`row`) uses the inherited layout; the `...With` form takes a modifier function.
 
 <details class="nano-example">
-<summary><code>row</code> / <code>rowWith</code> — children left to right</summary>
+<summary><code>row</code> / <code>rowWith</code>: children left to right</summary>
 
 ```haskell
 rowWith (gap 8) $
@@ -29,7 +29,7 @@ rowWith (gap 8) $
 </details>
 
 <details class="nano-example">
-<summary><code>column</code> / <code>columnWith</code> — children top to bottom</summary>
+<summary><code>column</code> / <code>columnWith</code>: children top to bottom</summary>
 
 ```haskell
 columnWith (gap 8) $
@@ -41,7 +41,7 @@ columnWith (gap 8) $
 </details>
 
 <details class="nano-example">
-<summary><code>grid</code> / <code>gridWith</code> — rows of equal columns</summary>
+<summary><code>grid</code> / <code>gridWith</code>: rows of equal columns</summary>
 
 ```haskell
 gridWith 3 (gap 8 . fillW) $
@@ -55,7 +55,7 @@ gridWith 3 (gap 8 . fillW) $
 </details>
 
 <details class="nano-example">
-<summary><code>panel</code> / <code>panelWith</code> — a styled surface</summary>
+<summary><code>panel</code> / <code>panelWith</code>: a styled surface</summary>
 
 ```haskell
 panelWith (fixedW 300 . padAll 12 . gap 6) $ do
@@ -68,7 +68,7 @@ panelWith (fixedW 300 . padAll 12 . gap 6) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>card</code> — a full-width panel with a minimum width</summary>
+<summary><code>card</code>: a full-width panel with a minimum width</summary>
 
 ```haskell
 card $ do
@@ -81,7 +81,7 @@ card $ do
 </details>
 
 <details class="nano-example">
-<summary><code>callout</code> — a panel tinted by a semantic colour</summary>
+<summary><code>callout</code>: a panel tinted by a semantic colour</summary>
 
 ```haskell
 warnCol <- themeWarning <$> uiTheme
@@ -95,7 +95,7 @@ callout warnCol $ do
 </details>
 
 <details class="nano-example">
-<summary><code>layers</code> — children stacked in one box, later on top</summary>
+<summary><code>layers</code>: children stacked in one box, later on top</summary>
 
 ```haskell
 layers $ do
@@ -111,7 +111,7 @@ layers $ do
 </details>
 
 <details class="nano-example">
-<summary><code>center</code> — content centred on both axes</summary>
+<summary><code>center</code>: content centred on both axes</summary>
 
 ```haskell
 panelWith (fillW . fillH) $
@@ -123,7 +123,7 @@ panelWith (fillW . fillH) $
 </details>
 
 <details class="nano-example">
-<summary><code>responsive</code> / <code>responsiveRowCol</code> — one layout when wide, another when narrow</summary>
+<summary><code>responsive</code> / <code>responsiveRowCol</code>: one layout when wide, another when narrow</summary>
 
 `responsive breakpoint wide narrow body` picks a container by window width; `responsiveRowCol` is the common row/column pair.
 
@@ -144,7 +144,7 @@ The same view at 760 px:
 </details>
 
 <details class="nano-example">
-<summary><code>mouseArea</code> — hover and clicks for a whole region</summary>
+<summary><code>mouseArea</code>: hover and clicks for a whole region</summary>
 
 ```haskell
 (_, area) <-
@@ -160,7 +160,7 @@ when (respClicked area) (muted "opening build.log")
 </details>
 
 <details class="nano-example">
-<summary><code>separator</code> — a one-pixel rule</summary>
+<summary><code>separator</code>: a one-pixel rule</summary>
 
 ```haskell
 columnWith (fillW . gap 8) $ do
@@ -174,7 +174,7 @@ columnWith (fillW . gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>spacer</code> — flexible space between siblings</summary>
+<summary><code>spacer</code>: flexible space between siblings</summary>
 
 ```haskell
 rowWith (fillW . alignMid) $ do
@@ -194,7 +194,7 @@ Modifiers are `Layout -> Layout` functions. The leftmost wins when two set the s
 ### Sizing
 
 <details class="nano-example">
-<summary><code>fillW</code> — take all remaining width</summary>
+<summary><code>fillW</code>: take all remaining width</summary>
 
 ```haskell
 rowWith (fillW . gap 8) $ do
@@ -207,7 +207,7 @@ rowWith (fillW . gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>fillH</code> — take all remaining height</summary>
+<summary><code>fillH</code>: take all remaining height</summary>
 
 ```haskell
 rowWith (fillW . gap 8 . fixedH 96) $ do
@@ -220,7 +220,7 @@ rowWith (fillW . gap 8 . fixedH 96) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>grow</code> — fill both axes (<code>fillW . fillH</code>)</summary>
+<summary><code>grow</code>: fill both axes (<code>fillW . fillH</code>)</summary>
 
 ```haskell
 rowWith (grow . gap 8) $ do
@@ -233,7 +233,7 @@ rowWith (grow . gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>fixedW</code> — an exact width</summary>
+<summary><code>fixedW</code>: an exact width</summary>
 
 ```haskell
 rowWith (gap 8) $ do
@@ -247,7 +247,7 @@ rowWith (gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>fixedH</code> — an exact height</summary>
+<summary><code>fixedH</code>: an exact height</summary>
 
 ```haskell
 rowWith (gap 8 . fillW) $ do
@@ -261,7 +261,7 @@ rowWith (gap 8 . fillW) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>fixedWH</code> — an exact width and height</summary>
+<summary><code>fixedWH</code>: an exact width and height</summary>
 
 ```haskell
 rowWith (gap 8) $ do
@@ -274,7 +274,7 @@ rowWith (gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>minW</code> — a lower width bound</summary>
+<summary><code>minW</code>: a lower width bound</summary>
 
 ```haskell
 rowWith (fillW . gap 8) $ do
@@ -287,7 +287,7 @@ rowWith (fillW . gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>maxW</code> — an upper width bound</summary>
+<summary><code>maxW</code>: an upper width bound</summary>
 
 ```haskell
 rowWith (fillW . gap 8) $ do
@@ -300,7 +300,7 @@ rowWith (fillW . gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>minH</code> — a lower height bound</summary>
+<summary><code>minH</code>: a lower height bound</summary>
 
 ```haskell
 rowWith (fillW . gap 8) $ do
@@ -313,7 +313,7 @@ rowWith (fillW . gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>maxH</code> — an upper height bound</summary>
+<summary><code>maxH</code>: an upper height bound</summary>
 
 ```haskell
 rowWith (fillW . gap 8 . fixedH 100) $ do
@@ -326,7 +326,7 @@ rowWith (fillW . gap 8 . fixedH 100) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>percent</code> — a percentage of the parent's width</summary>
+<summary><code>percent</code>: a percentage of the parent's width</summary>
 
 ```haskell
 rowWith (fillW . gap 8) $ do
@@ -339,7 +339,7 @@ rowWith (fillW . gap 8) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>aspect</code> — keep a width / height ratio</summary>
+<summary><code>aspect</code>: keep a width / height ratio</summary>
 
 ```haskell
 panelWith (fillW . aspect (16 / 9)) $
@@ -353,7 +353,7 @@ panelWith (fillW . aspect (16 / 9)) $
 ### Spacing
 
 <details class="nano-example">
-<summary><code>padAll</code> — equal padding on all four edges</summary>
+<summary><code>padAll</code>: equal padding on all four edges</summary>
 
 ```haskell
 panelWith (fixedWH 260 120 . padAll 20) $
@@ -365,7 +365,7 @@ panelWith (fixedWH 260 120 . padAll 20) $
 </details>
 
 <details class="nano-example">
-<summary><code>padXY</code> — horizontal, then vertical, padding</summary>
+<summary><code>padXY</code>: horizontal, then vertical, padding</summary>
 
 ```haskell
 panelWith (fixedWH 280 100 . padXY 32 10) $
@@ -377,7 +377,7 @@ panelWith (fixedWH 280 100 . padXY 32 10) $
 </details>
 
 <details class="nano-example">
-<summary><code>padLeft</code> — left padding</summary>
+<summary><code>padLeft</code>: left padding</summary>
 
 ```haskell
 panelWith (fixedWH 260 100 . padLeft 48) $
@@ -389,7 +389,7 @@ panelWith (fixedWH 260 100 . padLeft 48) $
 </details>
 
 <details class="nano-example">
-<summary><code>padRight</code> — right padding</summary>
+<summary><code>padRight</code>: right padding</summary>
 
 ```haskell
 panelWith (fixedWH 260 100 . padRight 48) $
@@ -401,7 +401,7 @@ panelWith (fixedWH 260 100 . padRight 48) $
 </details>
 
 <details class="nano-example">
-<summary><code>padTop</code> — top padding</summary>
+<summary><code>padTop</code>: top padding</summary>
 
 ```haskell
 panelWith (fixedWH 260 120 . padTop 40) $
@@ -413,7 +413,7 @@ panelWith (fixedWH 260 120 . padTop 40) $
 </details>
 
 <details class="nano-example">
-<summary><code>padBottom</code> — bottom padding</summary>
+<summary><code>padBottom</code>: bottom padding</summary>
 
 ```haskell
 panelWith (fixedWH 260 120 . padBottom 40) $
@@ -425,7 +425,7 @@ panelWith (fixedWH 260 120 . padBottom 40) $
 </details>
 
 <details class="nano-example">
-<summary><code>padLRTB</code> — left, right, top, bottom padding</summary>
+<summary><code>padLRTB</code>: left, right, top, bottom padding</summary>
 
 ```haskell
 panelWith (fixedWH 280 120 . padLRTB 40 8 30 12) $
@@ -437,7 +437,7 @@ panelWith (fixedWH 280 120 . padLRTB 40 8 30 12) $
 </details>
 
 <details class="nano-example">
-<summary><code>gap</code> — space between children</summary>
+<summary><code>gap</code>: space between children</summary>
 
 ```haskell
 columnWith (fillW . gap 12) $ do
@@ -450,7 +450,7 @@ columnWith (fillW . gap 12) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>tight</code> — remove container padding, keep the gap</summary>
+<summary><code>tight</code>: remove container padding, keep the gap</summary>
 
 ```haskell
 rowWith (gap 16 . fillW) $ do
@@ -471,7 +471,7 @@ rowWith (gap 16 . fillW) $ do
 `alignStart`, `alignCenter`, and `alignEnd` place a child across a column. `alignTop`, `alignMid`, and `alignBottom` place it down a row. A child always aligns itself; putting `alignMid` on a row positions the row in its parent, not the row's contents.
 
 <details class="nano-example">
-<summary><code>alignStart</code> — the left edge</summary>
+<summary><code>alignStart</code>: the left edge</summary>
 
 ```haskell
 panelWith (fixedWH 300 110 . padAll 10) $
@@ -483,7 +483,7 @@ panelWith (fixedWH 300 110 . padAll 10) $
 </details>
 
 <details class="nano-example">
-<summary><code>alignCenter</code> — the horizontal centre</summary>
+<summary><code>alignCenter</code>: the horizontal centre</summary>
 
 ```haskell
 panelWith (fixedWH 300 110 . padAll 10) $
@@ -495,7 +495,7 @@ panelWith (fixedWH 300 110 . padAll 10) $
 </details>
 
 <details class="nano-example">
-<summary><code>alignEnd</code> — the right edge</summary>
+<summary><code>alignEnd</code>: the right edge</summary>
 
 ```haskell
 panelWith (fixedWH 300 110 . padAll 10) $
@@ -507,7 +507,7 @@ panelWith (fixedWH 300 110 . padAll 10) $
 </details>
 
 <details class="nano-example">
-<summary><code>alignTop</code> — the top edge</summary>
+<summary><code>alignTop</code>: the top edge</summary>
 
 ```haskell
 panelWith (fixedWH 300 110 . padAll 10) $
@@ -520,7 +520,7 @@ panelWith (fixedWH 300 110 . padAll 10) $
 </details>
 
 <details class="nano-example">
-<summary><code>alignMid</code> — the vertical centre</summary>
+<summary><code>alignMid</code>: the vertical centre</summary>
 
 ```haskell
 panelWith (fixedWH 300 110 . padAll 10) $
@@ -533,7 +533,7 @@ panelWith (fixedWH 300 110 . padAll 10) $
 </details>
 
 <details class="nano-example">
-<summary><code>alignBottom</code> — the bottom edge</summary>
+<summary><code>alignBottom</code>: the bottom edge</summary>
 
 ```haskell
 panelWith (fixedWH 300 110 . padAll 10) $
@@ -546,7 +546,7 @@ panelWith (fixedWH 300 110 . padAll 10) $
 </details>
 
 <details class="nano-example">
-<summary><code>alignBaseline</code> — share the first baseline</summary>
+<summary><code>alignBaseline</code>: share the first baseline</summary>
 
 ```haskell
 rowWith (gap 12 . fixedW 340) $ do
@@ -559,7 +559,7 @@ rowWith (gap 12 . fixedW 340) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>wrap</code> — start a new line when a child does not fit</summary>
+<summary><code>wrap</code>: start a new line when a child does not fit</summary>
 
 ```haskell
 rowWith (wrap . gap 6 . fixedW 280) $
@@ -571,7 +571,7 @@ rowWith (wrap . gap 6 . fixedW 280) $
 </details>
 
 <details class="nano-example">
-<summary><code>lineGap</code> — space between wrapped lines</summary>
+<summary><code>lineGap</code>: space between wrapped lines</summary>
 
 ```haskell
 columnWith (fillW . gap 16) $ do
@@ -587,7 +587,7 @@ columnWith (fillW . gap 16) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>lineAlign</code> — align wrapped lines in the container</summary>
+<summary><code>lineAlign</code>: align wrapped lines in the container</summary>
 
 ```haskell
 rowWith (wrap . lineAlign LinesCenter . gap 6 . fixedW 210) $
@@ -603,7 +603,7 @@ rowWith (wrap . lineAlign LinesCenter . gap 6 . fixedW 210) $
 `pinAt` takes a child out of the flow. `pointer` decides whether an overlapping region consumes pointer events (`PointerBlock`) or passes them to what is underneath (`PointerPass`). The pointer examples park the pointer over the overlay.
 
 <details class="nano-example">
-<summary><code>pinAt</code> — position absolutely inside the parent</summary>
+<summary><code>pinAt</code>: position absolutely inside the parent</summary>
 
 ```haskell
 panelWith (fixedWH 280 110 . padAll 12) $ do
@@ -620,7 +620,7 @@ panelWith (fixedWH 280 110 . padAll 12) $ do
 </details>
 
 <details class="nano-example">
-<summary><code>pointer PointerBlock</code> — consume pointer events over a region</summary>
+<summary><code>pointer PointerBlock</code>: consume pointer events over a region</summary>
 
 ```haskell
 layers $ do
@@ -635,7 +635,7 @@ layers $ do
 </details>
 
 <details class="nano-example">
-<summary><code>pointer PointerPass</code> — let pointer events through</summary>
+<summary><code>pointer PointerPass</code>: let pointer events through</summary>
 
 ```haskell
 layers $ do
@@ -661,6 +661,9 @@ Without a bounded ancestor, `grow` can leave a scroller with nothing to size aga
 - `scrollWith` returns the body's result.
 - `scrollArea` also returns the scroller's `WidgetId`, for programmatic control.
 - `scroll2DWith` / `scrollArea2D` scroll both axes.
+- A scroller that fills both axes (`grow`) drops its well and paints the page
+  background (`pageBackground`, `themeWindow` by default). Scope a view in
+  `styled panelPage` for a page on the panel surface.
 
 ### Virtualization
 

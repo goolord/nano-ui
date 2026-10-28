@@ -2,6 +2,19 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- The page behind a view is the window background (`themeWindow`) by
+  default. `pageBackground` reads it; `pageColor` sets another page surface,
+  and `panelPage` gives a view that draws no panel the panel surface. A set
+  page is laid over the window clear; `themeWindow` remains the window
+  background underneath.
+
+- **Breaking:** `Theme` gained `themePage` (`Maybe Color`; `Nothing` means
+  `themeWindow`), and `DrawData` gained `drawBackground`, the page colour a
+  host draws over its window clear on a full frame. Themes built with record
+  updates need no change; a full `Theme` record construction must set the
+  field, and a host that renders `DrawData` itself must fill
+  `drawBackground`.
+
 - **Breaking:** state lives in `Var`s, and inputs take the `Var` they edit
   instead of a value to pass back. `textInput :: Var Text -> NanoUI ()`
   shows the Var's text and stores the user's edits in it; primed variants

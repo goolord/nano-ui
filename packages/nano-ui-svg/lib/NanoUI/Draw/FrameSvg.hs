@@ -175,6 +175,7 @@ frameToSvg cfg ctx inp dd = do
         <> ">"
         <> allDefs
         <> rectEl (Rect 0 0 vw vh) (themeWindow theme)
+        <> maybe mempty (rectEl (Rect 0 0 vw vh)) (drawBackground dd)
         <> pageShapeBody
         <> frags
         <> pageTextBody
@@ -667,16 +668,15 @@ spanTexts fontFam fm ratio spanStyles startId spans = (defs, body, startId + len
     fam = case si .&. 0x0F of
       1 -> "'Cascadia Mono', 'JetBrains Mono', monospace"
       _ -> fontFam
+    -- FontWeight: Normal 0, Bold 1, Light 2, Medium 3, SemiBold 4,
+    -- ExtraBold 5, Black 6.
     weightAttr = case (si `shiftR` 8) .&. 0x0F of
-      1 -> attr "font-weight" "100"
-      2 -> attr "font-weight" "200"
-      3 -> attr "font-weight" "300"
-      4 -> mempty -- normal
-      5 -> attr "font-weight" "500"
-      6 -> attr "font-weight" "600"
-      7 -> attr "font-weight" "700"
-      8 -> attr "font-weight" "800"
-      9 -> attr "font-weight" "900"
+      1 -> attr "font-weight" "700"
+      2 -> attr "font-weight" "300"
+      3 -> attr "font-weight" "500"
+      4 -> attr "font-weight" "600"
+      5 -> attr "font-weight" "800"
+      6 -> attr "font-weight" "900"
       _ -> mempty
     slantAttr = case (si `shiftR` 12) .&. 0x03 of
       1 -> attr "font-style" "italic"

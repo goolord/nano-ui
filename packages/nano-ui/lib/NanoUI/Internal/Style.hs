@@ -67,6 +67,9 @@ module NanoUI.Internal.Style
   , linkColor
   , selectionColor
   , windowColor
+  , pageBackground
+  , pageColor
+  , panelPage
   , rounded
   , tinted
   , primary
@@ -856,9 +859,17 @@ styleHasSide side s = testBit (styleBorderSides s) (fromEnum side)
 -- @styled@ for a subtree or @setUiTheme@ to change the session's base theme.
 data Theme = Theme
   { themeWindow :: {-# UNPACK #-} !Color
-  -- ^ The window's background, under everything drawn.
+  -- ^ The window background and the default page colour. It is what the
+  -- backend clears to and what a page uses unless 'themePage' says otherwise;
+  -- it shows in the gaps between panels on a page that uses it.
+  , themePage :: !(Maybe Color)
+  -- ^ The page surface, painted over the window background under the view's
+  -- content and a full-window scroller. 'Nothing' (the default) uses
+  -- 'themeWindow', so the window background stays the page unless a theme
+  -- says otherwise. Set it with 'pageColor', or with 'panelPage' for a view
+  -- that draws no panel.
   , themePanel :: !Style
-  -- ^ Panels, and text drawn on them or on the window ('styleFg').
+  -- ^ Panels, and text drawn on them or on the page ('styleFg').
   , themeFloatingWindow :: !Style
   -- ^ In-app windows ('NanoUI.window').
   , themePopup :: !Style
@@ -882,11 +893,11 @@ data Theme = Theme
   , themeGreen :: {-# UNPACK #-} !Color
   , themePurple :: {-# UNPACK #-} !Color
   , themeSuccess :: {-# UNPACK #-} !Color
-  -- ^ 'Success' tone: a green readable on 'themeWindow'.
+  -- ^ 'Success' tone: a green readable on the page.
   , themeWarning :: {-# UNPACK #-} !Color
-  -- ^ 'Warning' tone: an amber readable on 'themeWindow'.
+  -- ^ 'Warning' tone: an amber readable on the page.
   , themeDanger :: {-# UNPACK #-} !Color
-  -- ^ 'Danger' tone: a red readable on 'themeWindow', used by 'danger',
+  -- ^ 'Danger' tone: a red readable on the page, used by 'danger',
   -- 'fontDanger' and 'destructive'.
   , themeOverlayDim :: {-# UNPACK #-} !Color
   -- ^ Translucent backdrop drawn over the page behind an open modal.
@@ -928,10 +939,10 @@ lightDark _ dark _ = dark
 defaultThemeFor :: Maybe Appearance -> Theme
 defaultThemeFor = lightDark defaultLightTheme defaultTheme
 
--- | Classify a theme by its window colour: dark if white text reads better
--- on it than black.
+-- | Classify a theme by its page background: dark if white text reads better on
+-- it than black.
 themeAppearance :: Theme -> Appearance
-themeAppearance t = if darkColor (themeWindow t) then AppearanceDark else AppearanceLight
+themeAppearance t = if darkColor (pageBackground t) then AppearanceDark else AppearanceLight
 
 -- | Whether white reads better on a colour than black.
 darkColor :: Color -> Bool
@@ -1089,9 +1100,30 @@ linkColor c t = t {themeLink = c}
 selectionColor :: Color -> Theme -> Theme
 selectionColor c t = t {themeSelection = c}
 
--- | The backdrop behind everything, which disabled widgets also fade toward.
+-- | The window background, and the page's unless 'pageColor' sets another.
 windowColor :: Color -> Theme -> Theme
 windowColor c t = t {themeWindow = c}
+
+-- | The colour a page is painted on: 'themePage' when the theme sets one, and
+-- otherwise the window background 'themeWindow'. The window itself is cleared
+-- to 'themeWindow'; the frame paints this surface over it, so a scoped page
+-- colour set on the root applies to the whole view. 'panelPage' is the easy
+-- way to give a view that draws no panel the panel surface.
+pageBackground :: Theme -> Color
+pageBackground t = fromMaybe (themeWindow t) (themePage t)
+
+-- | Set the page surface: the colour painted under the view and over the
+-- window clear. Without it the page is 'themeWindow'.
+pageColor :: Color -> Theme -> Theme
+pageColor c t = t {themePage = Just c}
+
+-- | A page painted on the panel surface. Use it for a view that draws no
+-- panel, so the app sits on the panel colour; the window background
+-- ('themeWindow') remains the colour behind the page.
+--
+-- > sdlAppTheme = Just (panelPage defaultTheme)
+panelPage :: Theme -> Theme
+panelPage t = pageColor (styleBg (themePanel t)) t
 
 -- | The corner radius of every surface.
 rounded :: Float -> Theme -> Theme
@@ -1160,14 +1192,15 @@ readableOn t c =
    in foldr1 best candidates
 
 -- | The theme disabled widgets are drawn with: every colour but the
--- selection highlight, overlay dim and shadow faded toward the window colour
--- by 'themeDisabledFade', and no hover or press feedback.
+-- selection highlight, overlay dim and shadow faded toward the page
+-- background by 'themeDisabledFade', and no hover or press feedback.
 disabledTheme :: Theme -> Theme
 disabledTheme t =
   let f = themeDisabledFade t
+      page = pageBackground t
       fade c
         | colorA c == 0 = c
-        | otherwise = fadeAlpha (lerpColor c (themeWindow t) f) (colorA c)
+        | otherwise = fadeAlpha (lerpColor c page f) (colorA c)
       fadeStyle s =
         let bg = fade (styleBg s)
          in s {styleBg = bg, styleFg = fade (styleFg s), styleBorder = fade (styleBorder s), styleHoverBg = bg, styleActiveBg = bg}
@@ -1204,13 +1237,13 @@ flatStyle bg fg border hoverBg activeBg =
     }
 
 -- | Set 'themeSuccess' and 'themeDanger' from the theme's green and red,
--- toned to read on its window ('readableTone'). The built-in themes end with
+-- toned to read on its page ('readableTone'). The built-in themes end with
 -- this, so the tones follow the colours they are made from.
 withReadableTones :: Theme -> Theme
 withReadableTones t =
   t
-    { themeSuccess = readableTone (themeWindow t) (themeGreen t)
-    , themeDanger = readableTone (themeWindow t) (themeRed t)
+    { themeSuccess = readableTone (pageBackground t) (themeGreen t)
+    , themeDanger = readableTone (pageBackground t) (themeRed t)
     }
 
 -- | What a theme built field by field holds where 'withReadableTones' fills
@@ -1232,6 +1265,7 @@ defaultTheme =
           (colorRGBA 30 30 34 255)
    in Theme
         { themeWindow = colorRGBA 24 24 27 255
+        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1282,6 +1316,7 @@ defaultLightTheme =
           (colorRGBA 240 240 238 255)
    in Theme
         { themeWindow = colorRGBA 244 244 242 255
+        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1364,6 +1399,7 @@ tomorrowNightMinDarkTheme =
           (colorRGBA 26 27 29 255)  -- #1A1B1D
    in (accentColor accentCol defaultTheme)
         { themeWindow = windowCol
+        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1410,6 +1446,7 @@ tomorrowMinLightTheme =
           (colorRGBA 219 219 219 255)  -- #DBDBDB
    in (accentColor (colorRGBA 82 134 188 255) defaultTheme) -- #5286BC (Tomorrow Blue)
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
+        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1454,6 +1491,7 @@ tomorrowMidnightMinDarkTheme =
           (colorRGBA 12 13 15 255)  -- #0C0D0F
    in (accentColor accentCol defaultTheme)
         { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
+        , themePage = Nothing
         , themePanel = panelSurface
         , themeFloatingWindow = panelSurface
         , themePopup = panelSurface
@@ -1546,9 +1584,10 @@ themeFromBase16Mode dark b =
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
     readable = readableTone (base00 b)
-   in
-    (accentColor (base0D b) defaultTheme)
-      { themeWindow = base00 b
+   in withReadableTones $
+        (accentColor (base0D b) defaultTheme)
+          { themeWindow = base00 b
+      , themePage = Nothing
       , themePanel = panelSurface
       , themeFloatingWindow = panelSurface
       , themePopup = panelSurface
@@ -1573,10 +1612,10 @@ themeFromBase16Mode dark b =
       , themeYellow = base0A b
       , themeGreen = base0B b
       , themePurple = base0E b
-      , themeSuccess = readable (base0B b)
+      , themeSuccess = tonedLater
       -- Warning uses orange on light schemes, where yellow rarely reads.
       , themeWarning = readable (pick (base0A b) (base09 b))
-      , themeDanger = readable (base08 b)
+      , themeDanger = tonedLater
       , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
       , themeOnAccent =
           if colorLuminance (base0D b) > 0.6

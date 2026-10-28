@@ -27,6 +27,8 @@ main =
   runSdlApp
     defaultSdlOptions
       { sdlAppShouldQuit = pressedOnceIn KeyEscape
+      , -- This page draws no panel, so the page itself takes the panel surface.
+        sdlAppTheme = Just (panelPage defaultTheme)
       , sdlWindowSettings = defaultWindowSettings {wsTitle = "Hello", wsSize = Size 480 300}
       }
     hello

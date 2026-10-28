@@ -83,7 +83,7 @@ runDisabledFocusOrderTest ctx failed = do
   _ <- runFrame ctx (tabInp inp) ui
   assertEq failed (respId c) =<< readIORef (ctxFocusId ctx)
 
--- | A disabled button paints its fill faded toward the window colour.
+-- | A disabled button paints its fill faded toward the page background.
 runDisabledLookTest :: Context -> IORef Int -> IO ()
 runDisabledLookTest ctx failed = do
   theme <- getTheme ctx

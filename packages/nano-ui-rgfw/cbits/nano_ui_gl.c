@@ -469,6 +469,15 @@ int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, f
   return 1;
 }
 
+/* Fill the retained framebuffer with the page surface, over the window
+ * clear nano_ui_gl_begin just laid down. The page is opaque, so a clear is
+ * exact. */
+void nano_ui_gl_fill(nano_ui_gl* r, float red, float green, float blue) {
+  ngl_api* gl = &r->gl;
+  gl->ClearColor(red, green, blue, 1.0f);
+  gl->Clear(GL_COLOR_BUFFER_BIT);
+}
+
 /* Read the bottom-left w x h of the retained frame as RGBA rows, bottom row
  * first, into out, which holds w * h * 4 bytes. Pixels past the last frame's
  * size are undefined. */

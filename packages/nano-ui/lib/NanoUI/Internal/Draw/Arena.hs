@@ -11,6 +11,7 @@ module NanoUI.Internal.Draw.Arena
   , getDrawSnapScale
   , setDrawSquareGeometry
   , setDrawExternalText
+  , setDrawBackground
   , beginLayer
   , currentLayer
   , currentClip
@@ -87,6 +88,7 @@ newDrawArena = do
   daExternalText <- newIORef False
   daClipPieces <- newIORef emptyPrimArray
   daTextSpans <- newIORef ([], [])
+  daBackground <- newIORef Nothing
   let
     da = DrawArena {..}
   resetDrawArena da
@@ -99,6 +101,7 @@ resetDrawArena da = do
   setClip da (Rect 0 0 1e9 1e9)
   writeIORef (daCurrentTexture da) glyphAtlasTextureId
   writeIORef (daClipPieces da) emptyPrimArray
+  writeIORef (daBackground da) Nothing
   -- Only here: a reused frame paints nothing and keeps the last paint's.
   writeIORef (daTextSpans da) ([], [])
 
@@ -151,6 +154,13 @@ getDrawSnapScale da = readIORef (daSnapScale da)
 {-# INLINE setDrawSquareGeometry #-}
 setDrawSquareGeometry :: DrawArena -> Bool -> IO ()
 setDrawSquareGeometry da = writeIORef (daSquareGeometry da)
+
+-- | The page surface the backend fills over the window clear before the
+-- frame's commands. 'Nothing' when the clear already covers it, and on clip
+-- frames, whose commands paint the page backdrop themselves.
+{-# INLINE setDrawBackground #-}
+setDrawBackground :: DrawArena -> Maybe Color -> IO ()
+setDrawBackground da = writeIORef (daBackground da)
 
 -- | External text for hosts that rasterize text themselves from the collected
 -- text spans. Text emitters push no quads, so fonts without a glyph atlas do
@@ -318,6 +328,7 @@ finishDraw da = do
       then pure (arr0, count0)
       else cutCmdsToPieces pieces arr0 count0
   (cmds, offsets) <- groupCmdsByLayer arr count
+  bg <- readIORef (daBackground da)
   pure
     DrawData
       { drawVertices = vFPtr
@@ -326,6 +337,7 @@ finishDraw da = do
       , drawIndexCount = iCount
       , drawCommands = cmds
       , drawLayerOffsets = offsets
+      , drawBackground = bg
       }
 
 -- | Each command once per piece its clip meets, clipped to that piece, in

@@ -39,6 +39,7 @@ tests =
   , spec "fit-scroll-max-gutter" runFitScrollMaxGutterTest
   , spec "scroll-2d-direction" runScroll2DDirectionTest
   , spec "page-scroll-backdrop-coverage" runPageScrollBackdropCoverageTest
+  , spec "page-backdrop" runPageBackdropTest
   , spec "scroll-tall-label-cull" runTallLabelCullTest
   , pixelSpec "scroll-2d-pad-fill-overflow" run2DPadFillOverflowTest
   , pixelSpec "scroll-2d-pad-overflow-scrolls" run2DPadOverflowScrollsTest
@@ -231,16 +232,21 @@ runScrollTextDamageTest ctx failed = do
 -- so on clip frames the strip vacated by scrolled content has no covering
 -- command and the retained texture would show stale pixels, a ghost of a
 -- previous scroll position. Every clip frame must emit a full-viewport fill
--- (the window-color backdrop) so clip replay repaints the whole viewport. A
--- full frame starts from the runner's clear to the window colour, so there
--- the fill is left out, unless something was drawn under the scroller or a
--- scope gives it another window colour.
+-- (the page-colour backdrop) so clip replay repaints the whole viewport. A
+-- full frame lays the page surface down first, so the scroller's own backdrop
+-- is left out unless something was drawn under it or a scope gives it another
+-- page colour.
 runPageScrollBackdropCoverageTest :: Context -> IORef Int -> IO ()
 runPageScrollBackdropCoverageTest ctx failed = do
   theme <- readIORef (ctxTheme ctx)
   let inp0 = withInputOff 300 220
       page around = fmap fst $ around $ scrollArea grow (column (replicateM_ 20 (label "scroll backdrop line")))
-      other = theme {themeWindow = colorRGBA 1 2 3 255}
+      other = theme {themePage = Just (colorRGBA 1 2 3 255)}
+      sameViewport (Rect rx ry rw rh) (Rect qx qy qw qh) =
+        abs (qx - rx) <= 0.6
+          && abs (qy - ry) <= 0.6
+          && abs (qx + qw - (rx + rw)) <= 0.6
+          && abs (qy + qh - (ry + rh)) <= 0.6
       -- Whether the frame after @prep@ fills the scroller's viewport.
       backdrop ui prep = do
         sid <- warmup2 ctx inp0 ui
@@ -249,20 +255,44 @@ runPageScrollBackdropCoverageTest ctx failed = do
         quads <- drawQuads draw
         getPrevRect ctx sid >>= \case
           Nothing -> False <$ assert failed False
-          Just (Rect rx ry rw rh) ->
-            pure $ flip any quads $ \(Rect qx qy qw qh, _) ->
-              abs (qx - rx) <= 0.6
-                && abs (qy - ry) <= 0.6
-                && abs (qx + qw - (rx + rw)) <= 0.6
-                && abs (qy + qh - (ry + rh)) <= 0.6
+          Just r -> pure (any (\(q, _) -> sameViewport r q) quads)
+      -- Full-viewport fills on a full frame: the scroller's backdrop only,
+      -- since the page surface is the backend's fill, not a command.
+      fullFills ui = do
+        writeIORef (ctxPaintFull ctx) True
+        sid <- warmup2 ctx inp0 ui
+        (_, draw, _) <- runFrame ctx inp0 ui
+        quads <- drawQuads draw
+        getPrevRect ctx sid >>= \case
+          Nothing -> 0 <$ assert failed False
+          Just r -> pure (length [() | (q, _) <- quads, sameViewport r q])
   writeIORef (ctxPaintFull ctx) False
   -- A clip frame after a scroll, here one that repaints a few lines: a frame
   -- with nothing damaged paints nothing at all.
   backdrop (page id) (\sid -> setScrollOffset ctx sid 120 >> void (runFrame ctx inp0 (page id)) >> damageRect ctx (Rect 10 10 20 20)) >>= assert failed
-  writeIORef (ctxPaintFull ctx) True
-  backdrop (page id) (const (pure ())) >>= assert failed . not
-  backdrop (page (themed other)) (const (pure ())) >>= assert failed
-  backdrop (page panel) (const (pure ())) >>= assert failed
+  -- The page surface is the scroller's own colour and already covers it.
+  fullFills (page id) >>= assertEq failed 0
+  fullFills (page (themed other)) >>= assertEq failed 0
+  -- A panel under the scroller must be repainted over.
+  fullFills (page panel) >>= assertEq failed 1
+
+-- | A full frame leaves a page surface to the backend: an opaque 'pageColor'
+-- or 'panelPage' over the window clear, and nothing for the default page,
+-- which is the clear already.
+runPageBackdropTest :: Context -> IORef Int -> IO ()
+runPageBackdropTest ctx failed = do
+  theme <- readIORef (ctxTheme ctx)
+  let inp0 = withInputOff 300 220
+      page around = fmap fst $ around $ scrollArea grow (column (replicateM_ 20 (label "backdrop line")))
+      pageOf ui = do
+        writeIORef (ctxPaintFull ctx) True
+        _ <- warmup2 ctx inp0 ui
+        (_, draw, _) <- runFrame ctx inp0 ui
+        pure (drawBackground draw)
+      red = colorRGBA 1 2 3 255
+  pageOf (page id) >>= assertEq failed Nothing
+  pageOf (page (themed (pageColor red theme))) >>= assertEq failed (Just red)
+  pageOf (page (themed (panelPage theme))) >>= assertEq failed (Just (styleBg (themePanel theme)))
 
 -- A label far taller than its scroller draws only the lines near the
 -- viewport: its quads stay few however long the text is, and every row of

@@ -16,6 +16,23 @@ For a live tour of the modifiers, see the [Interactive Styling Lab](lab.md). For
 
 A `Style` is `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`. A `Theme` also defines semantic colors: `themeAccent` / `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success/warning/danger tones.
 
+The page behind the view is `pageBackground`: `themeWindow` by default,
+unless the theme sets `themePage`. `panelPage` gives a view that draws no
+panel the panel surface, so the app sits on the panel colour while
+`themeWindow` stays the window background behind it; `pageColor` sets any
+other page. The page is laid over the window background, so the window shows
+in the gaps between a page's panels:
+
+```haskell
+-- An app with no panel of its own: the panel surface is the page.
+sdlAppTheme = Just (panelPage defaultTheme)
+
+-- Or scope it to a page with no panels.
+styled panelPage (columnWith (padAll 12) (label "Body"))
+```
+
+A full-window scroller (`scrollWith grow`) fills the page colour.
+
 Built-in themes: `defaultTheme` (dark), `defaultLightTheme`, the Tomorrow variants, and `themeFromBase16` / `themeFromBase16Dark` / `themeFromBase16Light`. Set one at startup with `sdlAppTheme = Just appTheme`, switch per frame with `setUiTheme`, or follow the OS with `followSystemTheme` / `lightDark`.
 
 ## Scoped styling

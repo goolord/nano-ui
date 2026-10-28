@@ -317,8 +317,8 @@ runOrphanAnimationDamageSettlesTest ctx failed = do
   dmgFresh2 <- takeDamage ctx2
   assert failed (dmgFresh2 /= DamageFull)
 
--- | A clip frame repaints its region from the window backdrop, as a full frame
--- repaints from the cleared window. An idle menu-bar title has no fill, so
+-- | A clip frame repaints its region from the page backdrop, as a full frame
+-- lays the page over the window. An idle menu-bar title has no fill, so
 -- without the backdrop the hover highlight it just lost would stay in the
 -- retain texture.
 runClipFrameBackdropTest :: Context -> IORef Int -> IO ()
@@ -340,7 +340,7 @@ runClipFrameBackdropTest ctx failed = do
       assert failed (covers clip (respRect file))
       assertJust failed (listToMaybe quads) $ \(r, c) -> do
         assert failed (covers r clip)
-        assertEq failed c (themeWindow theme)
+        assertEq failed c (pageBackground theme)
     DamageFull -> assert failed False
 
 -- | Select all (Ctrl+A, Command+A on macOS) repaints the text area on the

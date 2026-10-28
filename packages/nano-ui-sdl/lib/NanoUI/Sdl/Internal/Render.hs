@@ -94,9 +94,15 @@ renderDrawDataPass batch ren bg drawData images glyphs damage =
     mDamage <- case damage of
       DamageFull -> do
         void $ setRenderDrawColorSafe ren (colorR bg) (colorG bg) (colorB bg) (colorA bg)
-        Nothing <$ renderClearSafe ren
-      -- The draw list starts a clip frame with its own window backdrop, so
-      -- a clip needs no clear here.
+        void $ renderClearSafe ren
+        -- The page surface, over the window clear. An opaque fill, so a
+        -- second clear is exact.
+        for_ (drawBackground drawData) $ \page -> do
+          void $ setRenderDrawColorSafe ren (colorR page) (colorG page) (colorB page) 255
+          void $ renderClearSafe ren
+        pure Nothing
+      -- The draw list starts a clip frame with its own page backdrop, so a
+      -- clip needs no clear here.
       DamageClip r -> Just r <$ applyClipState batch clipRef ren (toClipKey r)
     let drawCmd vp ip cmd = do
           let !count = fromIntegral (cmdIndexCount cmd)

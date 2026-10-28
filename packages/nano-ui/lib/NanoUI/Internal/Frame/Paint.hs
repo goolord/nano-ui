@@ -247,13 +247,13 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- A bare scroller paints nothing at all: it only lends its clip and
   -- offset, so whatever sits behind it (window, panel) keeps showing
   -- through. Grow×grow scrollers (page-level) keep no well so they blend
-  -- into the window backdrop. That backdrop only exists while the runner
-  -- clears it on DamageFull frames; on clip frames (scrolling, resize)
-  -- the strip vacated by scrolled content has no covering command and
-  -- the retained texture would show stale pixels, a ghost of a previous
-  -- scroll position. Paint the full rect with the window color instead:
-  -- invisible on a cleared backdrop, and clip replay then always
-  -- repaints the whole viewport.
+  -- into the page surface. A full frame lays that surface down before the
+  -- view, but on clip frames (scrolling, resize) the strip vacated by
+  -- scrolled content has no covering command and the retained texture would
+  -- show stale pixels, a ghost of a previous scroll position. Paint the full
+  -- rect with the page colour when the frame's own surface does not already
+  -- cover it ('ctxPagePainted'); the clip backdrop paints it on the frames
+  -- that cut the view to damage.
   unless (scrollBare (snConfig sn)) $ do
     surface <- fmap (floatingSurface tm) <$> floatingAncestor ctx idx
     let inFloating = isJust surface
@@ -261,22 +261,21 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
     hTag <- axTag <$> getHeightSizing arena idx
     if wTag == SizingGrow && hTag == SizingGrow
       then do
-        let bg = maybe (themeWindow tm) styleBg surface
-        -- A full frame starts from the runner's clear to the base theme's
-        -- window colour ('ctxPaintFull'). Drawn first, in that same opaque
-        -- colour, the backdrop would only fill the cleared pixels again: a
-        -- whole-window blend on every continuous frame. Anything drawn
-        -- before it (a panel, a card, a layer below), a scope's other
-        -- window colour or a translucent one still needs it, as clip
-        -- frames do.
+        let bg = maybe (pageBackground tm) styleBg surface
+        -- A full frame lays the page surface over the window clear before the
+        -- view ('ctxPagePainted'). Drawn first, in that same opaque colour, the
+        -- backdrop would only fill the same pixels again: a whole-window blend
+        -- on every continuous frame. Anything drawn before it (a panel, a
+        -- card, a layer below), a scope's other page colour or a translucent
+        -- one still needs it, as clip frames do.
         redundant <-
           if inFloating || colorA bg /= 255
             then pure False
             else do
               full <- readIORef (ctxPaintFull ctx)
               drawn <- drawnVertexCount da
-              base <- readIORef (ctxTheme ctx)
-              pure (full && drawn == 0 && bg == themeWindow base)
+              painted <- readIORef (ctxPagePainted ctx)
+              pure (full && maybe False (\(pc, n) -> bg == pc && drawn == n) painted)
         unless redundant $ pushRect da rect bg
       else do
         let well = (fromMaybe (themeInput tm) surface) {styleCornerRadius = 0}

@@ -40,7 +40,7 @@ Checkboxes and radio buttons route their indicator, box well, and text label thr
 
 ## 5. `scrollWith` Changes Surface With Its Sizing
 
-Sizing modifiers on `scrollWith` change whether the scroll well is drawn.
+Sizing modifiers on `scrollWith` change whether the scroll well is drawn: a `grow` scroller drops it and fills the page background instead.
 
 <nano-ui-trap id="trap-05"></nano-ui-trap>
 

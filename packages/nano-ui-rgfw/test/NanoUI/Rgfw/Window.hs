@@ -20,7 +20,7 @@ import NanoUI
   ( AlignX (..), AlignY (..), DrawOp (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..), Rect (..), Response, Size (..), Theme (..), V2 (..), WindowMode (..)
   , WindowSettings (..), WindowState (..), askInput, askWindow, button', canvas, column, defaultWindowSettings, drawText, inlineText, quitUi, requestFrame, respRect
   , rgbaBytes, rgbaHeight, rgbaWidth, richText, setWindowTitleUi, strong, windowSize, colorB, colorG, colorR, colorRGBA, columnWith, drawing, fixedWH, tight
-  , tomorrowNightMinDarkTheme, windowColor
+  , tomorrowNightMinDarkTheme, pageColor, windowColor
   )
 import NanoUI.Backend (Damage (..))
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
@@ -57,11 +57,11 @@ testGlWindow assert =
     True -> bracket (R.createWindowGL "nano-ui-rgfw-test" 0 0 w h R.rgfw_windowHide 3 2) (mapM_ R.closeWindow) $ \case
       Nothing -> putStrLn "[SKIP] OpenGL window frames: no OpenGL 3.2 window"
       Just _ -> bracket newGlRenderer freeGlRenderer $ \renderer -> do
-        let theme = windowColor backdrop tomorrowNightMinDarkTheme
+        let theme = pageColor backdrop (windowColor backdrop tomorrowNightMinDarkTheme)
             inp = withInput (fromIntegral w) (fromIntegral h)
             opsBox ops = void (drawing (fixedWH 40 20) (smallArrayFromList . ops))
-            -- An opaque box, then the window colour painted twice, as a
-            -- page's scroller paints over the backdrop.
+            -- An opaque box, then the page colour painted twice, as a page's
+            -- scroller paints over the backdrop.
             view = columnWith tight (opsBox (\r -> [FillRect r red]) >> opsBox (\r -> [FillRect r backdrop, FillRect r backdrop]))
         ctx <- newRgfwContext theme
         writeIORef (ctxPaintFull ctx) True
@@ -74,8 +74,8 @@ testGlWindow assert =
             pixels = [(y, at x y) | y <- [0 .. h - 1], x <- [0 .. w - 1]]
             reds = [y | (y, p) <- pixels, take 3 p == rgb red]
         assert (name "screenshot size") (rgbaWidth img == w && rgbaHeight img == h)
-        assert (name "the window colour, opaque") (at (w - 1) (h - 1) == rgb backdrop ++ [255])
-        assert (name "the window colour stays opaque, painted twice") (and [p !! 3 == 255 | (_, p) <- pixels, take 3 p == rgb backdrop])
+        assert (name "the page colour, opaque") (at (w - 1) (h - 1) == rgb backdrop ++ [255])
+        assert (name "the page colour stays opaque, painted twice") (and [p !! 3 == 255 | (_, p) <- pixels, take 3 p == rgb backdrop])
         assert (name "an opaque box") (length reds == 800 && all (< 20) reds)
         -- A read smaller than the frame fills only its own buffer.
         corner <- readRetainedPixels renderer 2 1
@@ -87,7 +87,7 @@ testGlWindow assert =
         win <- readWindowPixels renderer w h
         let shown x y = [fromIntegral (BS.index win (((h - 1 - y) * w + x) * 4 + c)) | c <- [0 .. 2]]
             near want got = and (zipWith (\a b -> abs (a - b) <= 2) want got)
-        assert (name "the present shows the window colour") (near (rgb backdrop) (shown (w - 1) (h - 1)))
+        assert (name "the present shows the page colour") (near (rgb backdrop) (shown (w - 1) (h - 1)))
         assert (name "the present shows an opaque box") (near (rgb red) (shown 5 5))
   where
     w = 200

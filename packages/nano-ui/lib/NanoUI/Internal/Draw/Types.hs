@@ -304,6 +304,10 @@ data DrawData = DrawData
   , drawLayerOffsets :: !(PrimArray Int)
   -- ^ Cumulative command offsets: layer @i@ occupies @[offsets[i], offsets[i+1])@.
   -- Includes a final sentinel equal to 'drawCmdCount'; empty layers repeat offsets.
+  , drawBackground :: !(Maybe Color)
+  -- ^ The page surface to fill over the window clear on a full frame, before
+  -- 'drawCommands'. 'Nothing' when the clear already covers it, or on a clip
+  -- frame, whose commands paint the page backdrop themselves.
   }
 
 -- | Number of batches across all layers.
@@ -361,6 +365,9 @@ data DrawArena = DrawArena
   -- 'NanoUI.Internal.Frame.Spans.collectRasterSpans' and emptied only by
   -- 'NanoUI.Internal.Draw.Arena.resetDrawArena', so a reused frame keeps
   -- the spans of the paint that drew it.
+  , daBackground :: !(IORef (Maybe Color))
+  -- ^ The page surface this paint leaves for the backend to fill; see
+  -- 'drawBackground'.
   }
 
 -- | Packed vertex stride in bytes: 32. A vertex is eight 32-bit floats: x

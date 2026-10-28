@@ -609,6 +609,7 @@ newContext = do
   ctxWrapCache <- newIORef (WrapCache 0 emptyGenCache)
   ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
+  ctxPagePainted <- newIORef Nothing
   ctxDrawReuse <- newIORef (DrawReuse True Nothing)
   ctxDamageWanted <- newIORef True
   ctxExplain <- newIORef initialExplainState

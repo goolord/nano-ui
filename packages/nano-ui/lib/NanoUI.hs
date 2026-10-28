@@ -836,6 +836,10 @@ module NanoUI
     -- >   whenM (button "Open") openFile
     -- >   styled primary (whenM (button "Save") save)
     --
+    -- The page behind the view is the window background by default
+    -- ('pageBackground'; 'themeWindow'), laid under the content. 'panelPage'
+    -- gives a view that draws no panel the panel surface instead.
+    --
     -- Nested 'styled' calls modify the enclosing theme, so semantic modifiers
     -- ('primary', 'destructive', etc.) adapt to whichever base theme is
     -- active. 'uiTheme' reads the current theme in the view.
@@ -876,6 +880,9 @@ module NanoUI
   , linkColor
   , selectionColor
   , windowColor
+  , pageBackground
+  , pageColor
+  , panelPage
   , rounded
   , tone
   , toneColor

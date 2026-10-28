@@ -67,10 +67,10 @@ options =
 withWindow :: (WindowSettings -> WindowSettings) -> SdlOptions
 withWindow f = options {sdlWindowSettings = f (sdlWindowSettings options)}
 
--- | A session with window colour @backdrop@.
+-- | A session with page and window colour @backdrop@.
 session :: SdlOptions -> Color -> (Context -> SdlEnv -> IO a) -> IO a
 session opts backdrop act = do
-  ctx <- newPixelContext >>= (`withTheme` windowColor backdrop defaultTheme)
+  ctx <- newPixelContext >>= (`withTheme` pageColor backdrop (windowColor backdrop defaultTheme))
   withSdl opts ctx act
 
 -- | Draw one frame; @full@ forces a full repaint. Returns the view's result.

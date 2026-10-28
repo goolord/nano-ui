@@ -1191,7 +1191,7 @@ generateInteractions = do
           comboBox "Pick..." ["comboBox (inputStyle)" :: Text] vCombo
           selectWith fillW ["select (buttonStyle matched)" :: Text] vSel
 
-  -- 5. scrollWith bounded (themeInput well, cornerRadius=0) vs grow (themeWindow, no border)
+  -- 5. scrollWith bounded (themeInput well, cornerRadius=0) vs grow (page background, no border)
   i5Bad <-
     renderSvg "i5-bad" 260 96 $
       styled (probeInput . rounded 12) $
@@ -1208,7 +1208,7 @@ generateInteractions = do
           scrollWith (grow . padAll 6 . gap 4) $ do
             label "scrollWith grow (fillW . fillH):"
             label "Drops the themeInput well and border"
-            label "Paints flat themeWindow instead"
+            label "Paints the page background instead"
 
   -- 6. callout leaks panelStyle into child panels
   let warnCol = colorRGBA 235 179 56 255
@@ -1390,11 +1390,11 @@ generateInteractions = do
         "surface-input surface-panel"
         "scrollWith changes surface with its sizing"
         "NanoUI.Internal.Frame.Paint (paintScrollSurface)"
-        "When either axis is `Fixed` or `Fit`, `paintScrollSurface` draws a bordered `themeInput` well with `styleCornerRadius` forced to 0. When both axes are `Fill` (`scrollWith grow`), it treats the scroller as a full-window page scroller: it drops the border and fills with `themeWindow`."
+        "When either axis is `Fixed` or `Fit`, `paintScrollSurface` draws a bordered `themeInput` well with `styleCornerRadius` forced to 0. When both axes are `Fill` (`scrollWith grow`), it treats the scroller as a full-window page scroller: it drops the border and fills with the page background (`pageBackground`, `themeWindow` by default)."
         "Give embedded scrollers a fixed or bounded height (`fixedH`, `maxH`), or wrap a `grow` scroller in a styled `panelWith`."
         "-- both axes fill: no well, no border\nscrollWith (grow . padAll 6) body"
         "-- bounded height keeps the themeInput well\nscrollWith (fillW . fixedH 80 . padAll 6) body"
-        "grow: no well, no border, themeWindow fill"
+        "grow: no well, no border, page background fill"
         i5Bad
         "fixedH 80: bordered themeInput well, radius 0"
         i5Good
@@ -2152,7 +2152,7 @@ routingRows =
     ]
   , [ [Code "scrollWith"]
     , [Code "NodeScroll"]
-    , [Txt "Bounded: ", Badge "b-inp" "themeInput", Txt " ", Code "styleBg", Brk, Code "grow", Txt ": ", Code "themeWindow"]
+    , [Txt "Bounded: ", Badge "b-inp" "themeInput", Txt " ", Code "styleBg", Brk, Code "grow", Txt ": ", Code "pageBackground"]
     , [Txt "Bounded: ", Badge "b-inp" "themeInput", Txt " ", Code "styleBorder", Brk, Code "grow", Txt ": None"]
     , [Txt "Scrollbar blends ", Badge "b-inp" "themeInput", Txt " + ", Code "themeSeparator"]
     , [Txt "Always forces ", Code "styleCornerRadius = 0", Txt " on the scroll well"]

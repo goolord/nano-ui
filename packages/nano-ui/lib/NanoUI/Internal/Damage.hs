@@ -43,8 +43,9 @@ import NanoUI.Internal.Types
 layoutSettleMinArea :: Float
 layoutSettleMinArea = 0.25
 
--- Partial retain clears with themeWindow. Expand interaction clips to the painted
--- panel/window backdrop so slop pixels get the correct fill, not window color.
+-- Partial retain clears with the page colour. Expand interaction clips to the
+-- painted panel/page backdrop so slop pixels get the correct fill, not the
+-- page colour.
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
 backdropRectFromNode Context {ctxNodeArena = na} idx = walkAncestors na idx $ \i -> do
   nt <- getNodeType na i
