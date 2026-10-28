@@ -109,7 +109,7 @@ used to check that the vertex writers compile without dictionaries or tuples.
 | `nano-ui-markdown` | Markdown documents drawn with rich text, parsed incrementally for streamed chat replies |
 | `nano-ui-demo` | Example applications |
 
-Released versions of [`nano-ui`](https://hackage.haskell.org/package/nano-ui), [`nano-ui-sdl`](https://hackage.haskell.org/package/nano-ui-sdl), [`nano-ui-diagrams`](https://hackage.haskell.org/package/nano-ui-diagrams), and [`nano-ui-form`](https://hackage.haskell.org/package/nano-ui-form) are on Hackage. The repository can be ahead of those releases, and `nano-ui-emit`, `nano-ui-markdown`, `nano-ui-svg`, and `nano-ui-rgfw` are not published there.
+[`nano-ui`](https://hackage.haskell.org/package/nano-ui) is on Hackage. The repository may be ahead of the released API.
 
 ## Documentation
 

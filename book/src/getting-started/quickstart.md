@@ -29,11 +29,9 @@ $env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 
 ## Add nano-ui to a project
 
-Released versions of [`nano-ui`](https://hackage.haskell.org/package/nano-ui), [`nano-ui-sdl`](https://hackage.haskell.org/package/nano-ui-sdl), [`nano-ui-diagrams`](https://hackage.haskell.org/package/nano-ui-diagrams), and [`nano-ui-form`](https://hackage.haskell.org/package/nano-ui-form) are on Hackage. Their Haddock pages document the released API.
+`nano-ui` is on Hackage. The repository may be ahead of the released API, so code in this book may not match the latest release.
 
-The repository can be ahead of those releases, and some packages (`nano-ui-emit`, `nano-ui-markdown`, `nano-ui-svg`, `nano-ui-rgfw`) are not published there. If you are targeting a released version, depend on it from Hackage as usual; its API may differ from this book.
-
-To match the API in this book, pin the source as a Cabal `source-repository-package`. In your `cabal.project`:
+For the API in this book, pin the source as a Cabal `source-repository-package`. In your `cabal.project`:
 
 ```cabal
 source-repository-package
@@ -64,15 +62,15 @@ executable my-app
     , text
 ```
 
-### Haddocks for the current revision
+### Haddocks and Hoogle
 
-Hackage pages link the Haddocks for each release. For the current source, from a checkout:
+Hackage has Haddocks for the released version. For the current source, from a checkout:
 
 ```sh
 cabal haddock-project --output=haddocks --hoogle
 ```
 
-Open `haddocks/index.html`. The `--hoogle` flag writes Hoogle input files in the same output directory; index the generated `.txt` files with Hoogle's local database option. Building docs for every package can use a lot of memory, so `cabal haddock nano-ui --haddock-hoogle` is a lighter option when you only need the core package.
+`haddocks/index.html` is the HTML index. The same directory contains the Hoogle input files. Building every package is memory-heavy, so `cabal haddock nano-ui --haddock-hoogle` is the lighter option. See [Development Setup](development.md#haddocks-and-hoogle) for Hoogle indexing.
 
 > [!IMPORTANT]
 > Compile executables with `-threaded`. The immediate-mode loop, task threads, and native window event processing require the GHC threaded runtime.
