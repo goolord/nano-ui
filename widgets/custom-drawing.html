@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d78d4b64.js";
+            window.path_to_searchindex_js = "../searchindex-5608e5b4.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,8 +179,9 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="custom-drawing--controls"><a class="header" href="#custom-drawing--controls">Custom Drawing &amp; Controls</a></h1>
-<p>When the built-in widgets do not fit, draw the control yourself. <code>NanoUI.Widgets.Custom</code> already provides the common canvas-drawn controls, and the canvas API handles everything else.</p>
-<h2 id="ready-made-custom-controls"><a class="header" href="#ready-made-custom-controls">Ready-made custom controls</a></h2>
+<p>When the built-in widgets do not fit, draw the control yourself with the 2D canvas API.</p>
+<p>The widgets in <code>NanoUI.Widgets.Custom</code> (<code>knob</code>, <code>toggleSwitch</code>, <code>circularProgress</code>, <code>progressBar</code>, <code>spinner</code>, <code>sparkline</code>) are designed to serve as <strong>reference implementations</strong> for custom widgets users may want to implement themselves. This API is meant to <strong>accompany the canvas API</strong>, demonstrating how 2D vector drawing, layout sizing, gesture hooks (<code>useDrag2DOn</code>, <code>useWheelDeltaOn</code>), keyboard navigation, and responsive state binding (<code>bindVar</code>) integrate into cohesive, interactive controls.</p>
+<h2 id="reference-custom-controls"><a class="header" href="#reference-custom-controls">Reference custom controls</a></h2>
 <pre><code class="language-haskell">import NanoUI.Widgets.Custom
 </code></pre>
 <div class="table-wrapper">
@@ -214,6 +215,14 @@ settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
 </code></pre>
 <p>The <code>fixedW</code> on the changing number keeps the controls from shifting. Read the value <em>below</em> the knob so a drag resolves in one pass.</p>
 <p><code>spinner</code> calls <code>keepAnimating</code> internally while it is drawn. Do not add a global <code>keepAnimating</code>; that would keep the loop running when the spinner is not visible.</p>
+<h3 id="implementing-custom-controls"><a class="header" href="#implementing-custom-controls">Implementing custom controls</a></h3>
+<p>You can inspect the source code of <code>NanoUI.Widgets.Custom</code> as a blueprint for implementing your own controls. A typical interactive control follows this pattern:</p>
+<ol>
+<li><strong>Allocate widget identity</strong>: <code>(wid, ctx) &lt;- freshWidget</code> obtains a unique <code>WidgetId</code>.</li>
+<li><strong>Define geometry &amp; drawing</strong>: Specify layout constraints and vector draw ops via <code>CustomWidgetSpec</code> and <code>runCanvasFor</code>.</li>
+<li><strong>Capture gestures &amp; input</strong>: Use gesture hooks (<code>drag &lt;- useDrag2DOn resp</code>, <code>(_, scrollY) &lt;- useWheelDeltaOn resp</code>, <code>nav &lt;- useKeyNav wid</code>) to compute value deltas.</li>
+<li><strong>Synchronize state</strong>: Apply <code>bindVar</code> or <code>finishInput</code> to bind the pure calculation to the caller’s mutable <code>Var</code>.</li>
+</ol>
 <h2 id="canvas-drawing"><a class="header" href="#canvas-drawing">Canvas drawing</a></h2>
 <p><code>customWidget</code> (a <code>CustomWidgetSpec</code> with layout, draw, cursor, and content key) or <code>canvas</code> / <code>canvasConfigured</code> draws with the 2D canvas API:</p>
 <pre><code class="language-haskell">import NanoUI.Path qualified as P
@@ -257,6 +266,109 @@ badge = canvas (fixedWH 120 40) $ \_rect -&gt; do
 drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) dragGhostOps
 </code></pre>
 <p>Otherwise it keeps the ops of the frame it first appeared in.</p>
+<h2 id="svg--vector-graphics"><a class="header" href="#svg--vector-graphics">SVG &amp; Vector Graphics</a></h2>
+<p><code>nano-ui</code> includes vector SVG support at both the widget level and the canvas drawing level:</p>
+<ul>
+<li><strong>SVG icons</strong>: Parse in-memory SVG strings (<code>parseSvg</code>) or load SVG files (<code>loadSvg</code>), then display them with <code>svgIcon</code> or in buttons.</li>
+<li><strong>Canvas SVG textures</strong>: Rasterize SVGs to RGBA buffers with <code>rasterizeSvg</code> from <code>NanoUI.Svg</code> and draw them onto a canvas using <code>drawImage</code>.</li>
+<li><strong>Canvas to SVG export</strong>: Export <code>DrawOp</code> sequences directly to SVG vector files using <code>nano-ui-svg</code> (<code>drawOpsToSvg</code>).</li>
+</ul>
+<h3 id="1-svg-icons-in-views"><a class="header" href="#1-svg-icons-in-views">1. SVG Icons in Views</a></h3>
+<p>Monochrome SVG icons use <code>currentColor</code> and automatically inherit the active text color. This means they can be tinted with <code>fontColor</code> or semantic styles:</p>
+<pre><code class="language-haskell">import qualified Data.ByteString.Char8 as BS8
+import NanoUI
+
+-- Parse an inline SVG icon (e.g. 24x24 viewBox)
+starIcon :: Svg
+starIcon = case parseSvg "&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'&gt;&lt;polygon points='12,2 15,9 22,9.5 16.5,14.5 18.5,21.5 12,17.5 5.5,21.5 7.5,14.5 2,9.5 9,9'/&gt;&lt;/svg&gt;" of
+  Right svg -&gt; svg
+  Left err  -&gt; error ("Invalid SVG: " ++ err)
+
+-- Render SVG icons with various sizes and theme colors
+iconBar :: Svg -&gt; NanoUI ()
+iconBar icon = rowWith (gap 12 . alignMid) $ do
+  theme &lt;- uiTheme
+
+  -- 1. Standard icon sizing (24x24 logical pixels)
+  svgIcon 24 icon
+
+  -- 2. Scoped styling and tinting via fontColor
+  svgIconWith (fixedWH 32 32 . fontColor (themeAccent theme)) icon
+
+  -- 3. In an icon button
+  whenM (iconButton icon "Star") $
+    putStrLn "Starred!"
+
+  -- 4. Custom button content
+  whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
+            svgIcon 16 icon
+            label "Favorite") $
+    putStrLn "Favorited!"
+</code></pre>
+<p>Multi-color SVGs preserve their embedded fill and stroke colors. For flexible image-style scaling, <code>svgIconConfigured</code> accepts <code>ImageConfig</code> with CSS-like fitting (<code>FitContain</code>, <code>FitCover</code>, <code>FitFill</code>).</p>
+<h3 id="2-drawing-svg-inside-canvas"><a class="header" href="#2-drawing-svg-inside-canvas">2. Drawing SVG inside Canvas</a></h3>
+<p>Within <code>CanvasM</code>, you can draw rasterized textures with <code>drawImage</code> / <code>drawImageUV</code> / <code>drawImageWith</code>. To draw an <code>Svg</code> onto a canvas, rasterize it to RGBA bytes using <code>rasterizeSvg</code> (or <code>rasterizeSvgIn</code>) from <code>NanoUI.Svg</code>:</p>
+<pre><code class="language-haskell">import NanoUI
+import NanoUI.Svg (rasterizeSvg)
+import NanoUI.Widgets.Custom (CanvasM, canvas, drawImage, drawRoundedRect, drawStrokeRoundedRect, drawText)
+
+-- | A custom badge widget that draws an SVG icon alongside custom vector geometry.
+customBadge :: ImageHandle () -&gt; Svg -&gt; Text -&gt; NanoUI ()
+customBadge imgHandle svg title = do
+  theme &lt;- uiTheme
+  let iconPx = 32
+      -- Rasterize the SVG to RGBA at target pixel dimensions with a tint color
+      rgba = rasterizeSvg iconPx iconPx (themeAccent theme) svg
+
+  -- Lease the rasterized texture in the backend atlas
+  mIid &lt;- useImageRgba imgHandle () iconPx iconPx rgba
+
+  canvas (fixedWH 140 44) $ \(Rect x y w h) -&gt; do
+    -- Draw container geometry
+    drawRoundedRect (Rect x y w h) 8 (styleBg (themeButton theme))
+    drawStrokeRoundedRect (Rect x y w h) 8 1 (styleBorder (themeButton theme))
+
+    -- Draw the rasterized SVG icon if registered
+    case mIid of
+      Just iid -&gt; drawImage (Rect (x + 8) (y + 6) 32 32) iid
+      Nothing  -&gt; pure ()
+
+    -- Draw accompanying text
+    drawText (V2 (x + 48) (y + 22)) AlignStart AlignMiddle title (styleFg (themeButton theme))
+</code></pre>
+<h3 id="3-exporting-canvas-drawings-to-svg-nano-ui-svg"><a class="header" href="#3-exporting-canvas-drawings-to-svg-nano-ui-svg">3. Exporting Canvas Drawings to SVG (<code>nano-ui-svg</code>)</a></h3>
+<p>When you need vector screenshots, reports, or test fixtures, <code>nano-ui-svg</code> can export any <code>DrawOp</code> array generated by <code>runCanvas</code> or <code>runCanvasFor</code> directly to an SVG string:</p>
+<pre><code class="language-haskell">import qualified Data.Text.IO as TIO
+import NanoUI
+import NanoUI.Draw.Svg (defaultSvgConfig, drawOpsToSvg, renderDrawOpsSvg, SvgConfig (..))
+import NanoUI.Path qualified as P
+import NanoUI.Widgets.Custom
+
+-- | Draw a vector gauge and export it to an SVG file.
+exportGaugeSvg :: FilePath -&gt; Float -&gt; IO ()
+exportGaugeSvg filePath value = do
+  let bounds = Rect 0 0 160 50
+      ops = runCanvas bounds $ do
+        -- Outer background
+        drawRoundedRect bounds 10 (colorRGBA 30 41 59 255)
+        drawStrokeRoundedRect bounds 10 1.5 (colorRGBA 56 189 248 255)
+
+        -- Progress bar path
+        let barW = 140 * clamp 0 1 value
+        drawRoundedRect (Rect 10 32 barW 8) 4 (colorRGBA 56 189 248 255)
+
+        -- Indicator circle &amp; text
+        drawStrokePath (P.circle (V2 24 18) 8) 2 colorWhite
+        drawText (V2 42 18) AlignStart AlignMiddle "CPU Load" colorWhite
+
+  -- Export directly as a standalone SVG document:
+  TIO.writeFile filePath (drawOpsToSvg bounds ops)
+</code></pre>
+<p>To embed the output inside an existing HTML/SVG document, pass <code>svgStandalone = False</code>:</p>
+<pre><code class="language-haskell">-- Emits an inner &lt;g&gt; fragment instead of a full &lt;svg&gt; document
+let fragment = renderDrawOpsSvg defaultSvgConfig { svgStandalone = False } bounds ops
+</code></pre>
+<p>For whole-window or view-level SVG captures, see <code>NanoUI.Draw.FrameSvg</code> in <code>nano-ui-svg</code>.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li>Widget inventory: <a href="index.html">Widget Gallery</a>.</li>
