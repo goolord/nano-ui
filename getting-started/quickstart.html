@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-2f5966d8.js";
+            window.path_to_searchindex_js = "../searchindex-12d8a96c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -197,9 +197,8 @@
 <pre><code class="language-powershell">$env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 </code></pre>
 <h2 id="add-nano-ui-to-a-project"><a class="header" href="#add-nano-ui-to-a-project">Add nano-ui to a project</a></h2>
-<p>Released versions of <a href="https://hackage.haskell.org/package/nano-ui"><code>nano-ui</code></a>, <a href="https://hackage.haskell.org/package/nano-ui-sdl"><code>nano-ui-sdl</code></a>, <a href="https://hackage.haskell.org/package/nano-ui-diagrams"><code>nano-ui-diagrams</code></a>, and <a href="https://hackage.haskell.org/package/nano-ui-form"><code>nano-ui-form</code></a> are on Hackage. Their Haddock pages document the released API.</p>
-<p>The repository can be ahead of those releases, and some packages (<code>nano-ui-emit</code>, <code>nano-ui-markdown</code>, <code>nano-ui-svg</code>, <code>nano-ui-rgfw</code>) are not published there. If you are targeting a released version, depend on it from Hackage as usual; its API may differ from this book.</p>
-<p>To match the API in this book, pin the source as a Cabal <code>source-repository-package</code>. In your <code>cabal.project</code>:</p>
+<p><code>nano-ui</code> is on Hackage. The repository may be ahead of the released API, so code in this book may not match the latest release.</p>
+<p>For the API in this book, pin the source as a Cabal <code>source-repository-package</code>. In your <code>cabal.project</code>:</p>
 <pre><code class="language-cabal">source-repository-package
   type: git
   location: https://github.com/goolord/nano-ui
@@ -223,11 +222,11 @@ package nano-ui-sdl
     , nano-ui-sdl
     , text
 </code></pre>
-<h3 id="haddocks-for-the-current-revision"><a class="header" href="#haddocks-for-the-current-revision">Haddocks for the current revision</a></h3>
-<p>Hackage pages link the Haddocks for each release. For the current source, from a checkout:</p>
+<h3 id="haddocks-and-hoogle"><a class="header" href="#haddocks-and-hoogle">Haddocks and Hoogle</a></h3>
+<p>Hackage has Haddocks for the released version. For the current source, from a checkout:</p>
 <pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle
 </code></pre>
-<p>Open <code>haddocks/index.html</code>. The <code>--hoogle</code> flag writes Hoogle input files in the same output directory; index the generated <code>.txt</code> files with Hoogle’s local database option. Building docs for every package can use a lot of memory, so <code>cabal haddock nano-ui --haddock-hoogle</code> is a lighter option when you only need the core package.</p>
+<p><code>haddocks/index.html</code> is the HTML index. The same directory contains the Hoogle input files. Building every package is memory-heavy, so <code>cabal haddock nano-ui --haddock-hoogle</code> is the lighter option. See <a href="development.html#haddocks-and-hoogle">Development Setup</a> for Hoogle indexing.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
 <p>Compile executables with <code>-threaded</code>. The immediate-mode loop, task threads, and native window event processing require the GHC threaded runtime.</p>
