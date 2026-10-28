@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Control.Monad (forM, when)
-import Data.Char (isSpace)
+import Data.Char (isDigit, isSpace)
 import Data.List (isPrefixOf)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
@@ -161,6 +161,69 @@ verifyInclude root inc = do
                         <> T.unpack anchor
                   else pure Nothing
 
+-- | Parse interactive specimen references like `<nano-ui-trap id="...">` and `<nano-ui-workbench widget="...">`
+parseSpecimens :: FilePath -> T.Text -> [(FilePath, Int, T.Text, T.Text)]
+parseSpecimens mdFile content =
+  [ (mdFile, lineNo, kind, tagId)
+  | (lineNo, line) <- zip [1 ..] (T.lines content)
+  , (kind, tagId) <- extractTags line
+  ]
+ where
+  extractTags l = extractTrap l ++ extractWorkbench l
+  extractTrap l
+    | "<nano-ui-trap" `T.isInfixOf` l =
+        case extractAttr "id=\"" l of
+          Just val -> [("nano-ui-trap", val)]
+          Nothing -> []
+    | otherwise = []
+  extractWorkbench l
+    | "<nano-ui-workbench" `T.isInfixOf` l =
+        case extractAttr "widget=\"" l of
+          Just val -> [("nano-ui-workbench", val)]
+          Nothing -> []
+    | otherwise = []
+  extractAttr attr l =
+    case T.breakOn attr l of
+      (_, rest)
+        | T.null rest -> Nothing
+        | otherwise ->
+            let
+              after = T.drop (T.length attr) rest
+             in
+              Just (T.takeWhile (/= '"') after)
+
+verifySpecimen :: T.Text -> (FilePath, Int, T.Text, T.Text) -> Maybe String
+verifySpecimen banksJs (f, lineNo, kind, tagId)
+  | kind == "nano-ui-trap" =
+      let
+        digits = T.filter isDigit tagId
+        num = if T.length digits == 1 then "0" <> digits else digits
+        pattern = "\"id\":\"" <> num <> "\""
+       in
+        if pattern `T.isInfixOf` banksJs
+          then Nothing
+          else
+            Just $
+              f
+                <> ":"
+                <> show lineNo
+                <> ": trap specimen not found in nano-ui-banks.js: "
+                <> T.unpack tagId
+  | kind == "nano-ui-workbench" =
+      let
+        pattern = "\"" <> tagId <> "\""
+       in
+        if pattern `T.isInfixOf` banksJs
+          then Nothing
+          else
+            Just $
+              f
+                <> ":"
+                <> show lineNo
+                <> ": workbench widget not found in nano-ui-banks.js: "
+                <> T.unpack tagId
+  | otherwise = Nothing
+
 main :: IO ()
 main = do
   root <- findRepoRoot
@@ -199,6 +262,29 @@ main = do
 
   mapM_ (\e -> putStrLn ("  ERROR: " <> e)) includeErrors
 
+  -- Check interactive specimen tags (<nano-ui-trap> and <nano-ui-workbench>)
+  putStrLn "\nChecking interactive specimen references..."
+  let
+    banksJsPath = root </> "book" </> "theme" </> "nano-ui-banks.js"
+  hasBanksJs <- doesFileExist banksJsPath
+  (specimenErrors, totalSpecimens) <-
+    if not hasBanksJs
+      then do
+        putStrLn "  ERROR: book/theme/nano-ui-banks.js not found!"
+        pure (["book/theme/nano-ui-banks.js missing"], 0)
+      else do
+        banksJs <- TIO.readFile banksJsPath
+        allSpecimens <- fmap concat $
+          forM mdFiles $ \f -> do
+            content <- TIO.readFile f
+            pure (parseSpecimens f content)
+        putStrLn $
+          "Found " <> show (length allSpecimens) <> " interactive specimen tags."
+        let
+          errs = [e | Just e <- map (verifySpecimen banksJs) allSpecimens]
+        mapM_ (\e -> putStrLn ("  ERROR: " <> e)) errs
+        pure (errs, length allSpecimens)
+
   -- If mdbook is installed, verify `mdbook build book`
   putStrLn "\nChecking mdbook build..."
   mCmd <- findExecutable "mdbook"
@@ -221,7 +307,7 @@ main = do
           pure ["mdbook build failed"]
 
   let
-    allErrors = fenceErrors <> includeErrors <> mdbookErrors
+    allErrors = fenceErrors <> includeErrors <> specimenErrors <> mdbookErrors
   if null allErrors
     then do
       putStrLn "\n========================================"
@@ -230,6 +316,7 @@ main = do
       putStrLn $
         " - " <> show (length allIncludes) <> " included code anchors validated"
       putStrLn $ " - " <> show totalBlocks <> " code blocks balanced"
+      putStrLn $ " - " <> show totalSpecimens <> " interactive specimens validated"
       putStrLn "========================================"
       exitSuccess
     else do
