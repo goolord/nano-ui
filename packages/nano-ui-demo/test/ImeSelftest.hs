@@ -21,6 +21,7 @@ import NanoUI.Backend.Sdl
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, newTextInputSync, pollEvents, syncTextInput)
 import NanoUI.Sdl.Internal.Window (sdlTextInput, sdlWindow)
 import NanoUI.Testing (TextInputArea (..), collectTextSpans, textInputArea)
+import NanoUI.Testing.Assert (require, requireEq)
 import NanoUI.Testing.Harness (hasText, held, pressAt, releaseAt, tabInp)
 import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_EventType (..), SDL_TextEditingEvent (..), SDL_TextInputEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
@@ -38,8 +39,7 @@ selftest =
   withHiddenWindow 480 200 (V2 5 5) id $ \ctx env base -> do
     ref <- newVar "ab"
     zoom <- windowZoom env
-    let check ok msg = unless ok (fail ("ime: " <> msg))
-        drawFrame inp = void (sdlDrawFrame ctx (void (column (held ref textInput'))) env inp False)
+    let drawFrame inp = void (sdlDrawFrame ctx (void (column (held ref textInput'))) env inp False)
         -- Fold the queued native events into the next frame's input.
         step inp = (\evs -> (evs, foldl' applyEvent (clearEphemeral inp) evs)) <$> pollEvents
         sync s = syncTextInput s (sdlWindow env) zoom ctx
@@ -49,11 +49,12 @@ selftest =
         >>= maybePeek peekCString . PtrConst.unsafeToPtr
     -- An environment variable named after the hint overrides the session.
     overridden <- isJust <$> lookupEnv "SDL_IME_IMPLEMENTED_UI"
-    check (hint == Just "composition" || overridden) ("the session did not ask for the composition: " <> show hint)
+    require ("the session did not ask for the composition: " <> show hint) $
+      hint == Just "composition" || overridden
     mapM_ drawFrame [base, base, tabInp base, base]
     (evs, composing) <- editing "かな" 2 0 (step base)
-    check (EvEditing "かな" 2 0 `elem` evs && inputComposition composing == Just (Composition "かな" 2 0))
-      ("composition not applied: " <> show evs)
+    require ("composition not applied: " <> show evs) $
+      EvEditing "かな" 2 0 `elem` evs && inputComposition composing == Just (Composition "かな" 2 0)
     -- The drawn frames told SDL about the focused field: text input is on,
     -- nothing restarts, and the composition shows.
     restartedInField <- sync (sdlTextInput env) composing
@@ -61,11 +62,11 @@ selftest =
     drawn <- hasText "abかな" <$> collectTextSpans ctx
     value <- readVarIO ref
     running <- active
-    check (running && not restartedInField && drawn && value == "ab") $
-      "in the field: " <> show (running, restartedInField, drawn, value)
+    require ("in the field: " <> show (running, restartedInField, drawn, value)) $
+      running && not restartedInField && drawn && value == "ab"
     -- A fresh sync starts text input for the field.
     started <- newTextInputSync >>= (`sync` composing)
-    (started &&) <$> active >>= (`check` "text input not started for the focused field")
+    (started &&) <$> active >>= require "text input not started for the focused field"
     -- The caret area reaches SDL in window coordinates.
     area <- textInputArea ctx
     native <- alloca $ \cursorP -> with (SDL_Rect 0 0 0 0) $ \rectP ->
@@ -73,21 +74,21 @@ selftest =
     let at v = round (v * zoom)
         want TextInputArea {textInputAreaRect = Rect x y w h, textInputAreaCursor = cursor} =
           (SDL_Rect (at x) (at y) (max 1 (at w)) (max 1 (at h)), at cursor)
-    check (fmap want area == Just native) ("text input area " <> show native <> ", wanted " <> show (want <$> area))
+    requireEq "the text input area" (want <$> area) (Just native)
     -- Committed text arrives as typing, and the composition ends.
     (_, committed) <- typed "仮名" (editing "" 0 0 (step composing))
-    check (isNothing (inputComposition committed) && inputChars committed == "仮名") "commit not applied"
+    require "commit not applied" (isNothing (inputComposition committed) && inputChars committed == "仮名")
     mapM_ drawFrame [committed, clearEphemeral committed]
-    readVarIO ref >>= \v -> check (v == "ab仮名") ("the commit did not insert: " <> show v)
+    readVarIO ref >>= requireEq "the field after the commit" "ab仮名"
     -- Losing window focus ends the composition, even if SDL does not report it.
     (_, again) <- editing "か" 1 0 (step committed)
     (_, blurred) <- focusLost (step again)
-    check (isJust (inputComposition again) && isNothing (inputComposition blurred)) $
-      "losing the window's focus did not end the composition"
+    require "losing the window's focus did not end the composition" $
+      isJust (inputComposition again) && isNothing (inputComposition blurred)
     -- Text input stops when no widget takes text.
     let away = pressAt blurred (V2 470 190)
     mapM_ drawFrame [away, releaseAt away, clearEphemeral blurred]
-    not <$> active >>= (`check` "text input left running with no widget taking text")
+    not <$> active >>= require "text input left running with no widget taking text"
   where
     editing txt (start :: Int) (len :: Int) = queue txt $ \p c ->
       poke p.edit (SDL_TextEditingEvent Events.SDL_EVENT_TEXT_EDITING 0 0 0 c (fromIntegral start) (fromIntegral len))

@@ -10,8 +10,9 @@ import DemoApp (withHiddenWindow)
 import Drive
 import Logs (appendEntries, logsApp, newAppState)
 import NanoUI
-import NanoUI.Internal.Context (Context (..), getPrevRect)
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Shortcut
+import NanoUI.Testing.Sim (onContext, prevRect, scrollOffset2DOf, textShown)
 
 selftest :: IO ()
 selftest = withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env base -> do
@@ -23,8 +24,6 @@ selftest = withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env base -> do
       isRow txt = "#00" `T.isPrefixOf` txt && " [" `T.isInfixOf` txt
       rows = (\ss -> [(r, t) | (r, t, _, _, _) <- ss, isRow t]) <$> spans
   runDrive ctx env base (logsApp state scroller) $ do
-    frame
-    frame
     expect "Log Viewer"
     -- "● PINNED", as "⏸ UNPINNED" holds "PINNED" too.
     expect "● PINNED"
@@ -33,7 +32,7 @@ selftest = withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env base -> do
     expect "● PINNED"
     -- Pinned is the scroller's own end, so the last row clears the
     -- horizontal bar.
-    metrics <- liftIO . getScrollMetrics ctx =<< scrollerId
+    metrics <- onContext . flip getScrollMetrics =<< scrollerId
     check ("a PINNED view should sit at the scroller's end: " <> show metrics) $
       fmap (\m -> v2Y (scrollOffset m) == v2Y (scrollRange m)) metrics == Just True
     wheelAt (V2 500 350) (V2 0 (-15))
@@ -52,10 +51,10 @@ selftest = withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env base -> do
       not (null warned) && all ("[WARN ]" `T.isInfixOf`) warned
     click "ALL"
     wheelAt (V2 500 350) (V2 20 0)
-    offset <- liftIO . getScrollOffset2D ctx =<< scrollerId
+    offset <- scrollOffset2DOf =<< scrollerId
     check "horizontal scroll did not move the horizontal offset" (v2X offset > 0)
     click "Select All"
-    selected <- (||) <$> found "ALL LOGS SELECTED" <*> found "Deselect All"
+    selected <- (||) <$> textShown "ALL LOGS SELECTED" <*> textShown "Deselect All"
     check "Select All did not select the logs" selected
     chord (cmdOrCtrl <> key 'c')
     clip <- liftIO (ctxClipboardGet ctx)
@@ -65,12 +64,10 @@ selftest = withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env base -> do
     expect "Select All"
     -- A click on a visible row clears Select All.
     click "Select All"
-    port <- liftIO . getPrevRect ctx =<< scrollerId
-    visible <- (\rs -> [v | (r, _) <- rs, Just v <- [port >>= (`rectIntersect` r)], rectW v > 20]) <$> rows
+    port <- prevRect =<< scrollerId
+    visible <- (\rs -> [v | (r, _) <- rs, Just v <- [rectIntersect port r], rectW v > 20]) <$> rows
     case visible of
       v : _ -> clickAt (V2 (rectX v + 4) (rectY v + rectH v / 2))
       [] -> check "no visible log row to click" False
     expect "Select All"
   putStrLn "logs selftest: ok"
-  where
-    found needle = (any (\(_, t, _, _, _) -> needle `T.isInfixOf` t) <$> spans)

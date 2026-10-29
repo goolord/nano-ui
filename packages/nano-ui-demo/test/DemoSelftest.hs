@@ -37,7 +37,7 @@ selftest continuous = do
       -- A field value wider than the glyph atlas draws glyph by glyph, and
       -- the text drawn before and after it in the frame survives.
       before <- length <$> spans
-      clickAt . nudge 80 0 =<< rightmost "Name"
+      clickAt . v2Add (V2 80 0) =<< rightmost "Name"
       typeText (T.replicate 400 "f")
       expect "Mute"
       after <- length <$> spans
@@ -48,7 +48,7 @@ selftest continuous = do
       expect "descending"
       expect "(desc)"
       dept <- header "Dept"
-      dragTo dept (nudge 180 0 dept)
+      dragTo dept (v2Add (V2 180 0) dept)
       expect "Sonia"
       click "List"
       click "README.md"
@@ -57,7 +57,7 @@ selftest continuous = do
       expect "Live Playground"
       size <- rightmost "Size"
       wheelAt (V2 640 400) (V2 0 (-350))
-      for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0] $ \dx -> dragTo size (nudge dx 0 size)
+      for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0] $ \dx -> dragTo size (v2Add (V2 dx 0) size)
       expect "Live Playground"
       -- The Graphics tab decodes its GIF in a useTask worker. The GIF is
       -- below the fold, so each wait scrolls a notch over the tab's right
@@ -95,7 +95,7 @@ selftest continuous = do
       check "following the system did not pick the default theme" $
         followed == lightDark defaultLightTheme defaultTheme appearance
       click "Tomorrow Light"
-      clickAt . nudge 80 0 =<< rightmost "Volume"
+      clickAt . v2Add (V2 80 0) =<< rightmost "Volume"
       click "About"
       expect "Immediate-mode"
       -- Font metrics can make the body overflow the modal's viewport; the
@@ -132,9 +132,6 @@ selftest continuous = do
       case [spanCenter r | r <- at txt, any ((== rectY r) . rectY) (at "Age")] of
         p : _ -> pure p
         [] -> fail ("no header " <> show txt)
-
-nudge :: Float -> Float -> V2 -> V2
-nudge dx dy (V2 x y) = V2 (x + dx) (y + dy)
 
 -- | The pane grid: split, maximise, restore, close, and three drops.
 panes :: Drive ()
@@ -181,7 +178,7 @@ panes = do
   -- (~quarter), where a flat third column keeps them equal.
   click "+"
   [l3, m3, _] <- titles
-  dragTo (nudge 70 100 (centre m3)) (V2 (rectX (fst l3) - 10) (rectY (fst l3) + 150))
+  dragTo (v2Add (V2 70 100) (centre m3)) (V2 (rectX (fst l3) - 10) (rectY (fst l3) + 150))
   [a, b, c] <- titles
   check "the top-level drop did not move the middle pane left" (snd a == snd m3)
   check "the top-level drop did not collapse the others onto one side" $
