@@ -1,10 +1,8 @@
-# Window Chrome & Screenshots
+# Desktop Windows
 
-nano-ui exposes window management at two levels: declarative settings and view actions from the core library, and SDL-specific chrome and screenshot helpers from `nano-ui-sdl`.
+The core library has window settings and view actions; `nano-ui-sdl` adds custom chrome and native screenshots.
 
 ## Window settings
-
-Configure startup properties in `WindowSettings`:
 
 ```haskell
 opts =
@@ -27,13 +25,13 @@ Sizes are logical units, not pixels; the backend applies DPI scaling. `wsPositio
 
 Inside the view:
 
-- **Declarative setters** (`setWindowTitleUi`, `setWindowModeUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowOpacityUi`, `setWindowIconUi`) are no-ops when the value has not changed, so calling them every frame is safe and cheap:
+- **Declarative setters** (`setWindowTitleUi`, `setWindowModeUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowOpacityUi`, `setWindowIconUi`) are no-ops when the value has not changed. Call them every frame:
 
   ```haskell
   setWindowTitleUi (docName <> " - My App")
   ```
 
-- **Imperative actions** (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`) run on every call. Always guard them behind an event:
+- **Imperative actions** (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`) run on every call. Guard them with an event:
 
   ```haskell
   whenM (button "Maximize") toggleMaximizedUi
@@ -60,7 +58,7 @@ appView = do
 
 ## Custom title bars
 
-For a frameless window (VS Code style, or `ned`), set the decorations and draw the bar yourself. The `nano-ui-sdl` backend supplies `windowCaption`, which draws the minimize/maximize/close buttons, registers the drag region, and reports a close click:
+For a frameless window, set the decorations and draw the bar yourself. `windowCaption` from `nano-ui-sdl` draws the minimize, maximize, and close buttons, registers the drag region, and reports a close click:
 
 ```haskell
 opts = defaultSdlOptions
@@ -77,7 +75,7 @@ titleBar :: NanoUI ()
 titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
   menuResp <- button' "File"          -- interactive: exclude from dragging
   label "My Application"
-  spacer
+  spacer (Grow 1) Fit
   closeClicked <- windowCaption [respRect menuResp]
   when closeClicked quitUi
 ```
@@ -104,7 +102,7 @@ whenM (button "Screenshot") $
   requestScreenshot $ \maybeScreenshot -> ...
 ```
 
-The callback runs in `IO` after the frame is presented. Keep it short (an `IORef` write or a `forkIO` for encoding); the next frame waits on it. Each request is answered exactly once, including with `Nothing` when the backend cannot capture.
+The callback runs in `IO` after the frame is presented, and the next frame waits on it, so keep it short: an `IORef` write, or a `forkIO` to encode. Each request is answered once, with `Nothing` when the backend cannot capture.
 
 For thread-safe capture use `askScreenshot`, which returns an `IO` action for a background thread, or `useScreenshot` for a per-key screenshot owned by a task:
 
@@ -127,4 +125,4 @@ The `nano-ui-sdl` backend also has `saveScreenshot env path` (a BMP of the curre
 
 ## Testing window behavior
 
-Window operations are no-ops without a session, which makes headless tests possible: `setWindowTitleUi` and the other declarative setters can be called from `NanoUI.Testing` frames, and `askWindow` reports a default state. Native screenshot and chrome tests need a real SDL session, as in `nano-ui-demo`'s hidden-window self-tests.
+Window operations are no-ops without a session, so views that set titles or read `askWindow` run under `NanoUI.Testing`. Native screenshots and chrome need a real SDL session, as in `nano-ui-demo`'s hidden-window tests.

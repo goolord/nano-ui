@@ -1,15 +1,6 @@
 # Tutorial 1: Build a Todo List
 
-This tutorial builds a todo list with the features that make a list worth using:
-
-- add items with Enter or a button
-- edit an item in place
-- mark items done
-- filter by all / active / done
-- reorder items, keeping each row's local state with it
-- clear completed items
-
-The complete program is [`packages/nano-ui-demo/examples/TodoList.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/TodoList.hs). Run it with:
+A todo list that adds items with Enter, edits them in place, filters by all/active/done, reorders rows with their local state, and clears completed items. The complete program is [`packages/nano-ui-demo/examples/TodoList.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/TodoList.hs). Run it with:
 
 ```sh
 cabal run nano-ui-example-todo-list
@@ -29,7 +20,7 @@ The list lives in a `Var Todos`. That is not a type `useVar` can allocate, so it
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:new_app}}
 ```
 
-`newVar` returns `IO (Var a)`. Allocating it in `main` and passing it into the view is what makes it survive between frames. Allocating a `Var` *inside* the view would create a fresh one on every pass.
+Allocated in `main` and passed into the view, it survives between frames. A `Var` allocated *inside* the view would be fresh on every pass.
 
 Both records derive `Generic`; with `OverloadedRecordDot`, `app.appTodos.todoItems` is a `Var [Todo]` projecting just that field. Editing the list does not repaint a widget that reads only `todoNext`.
 
@@ -39,25 +30,21 @@ Both records derive `Generic`; with `OverloadedRecordDot`, `app.appTodos.todoIte
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:main}}
 ```
 
-`runSdlApp` takes the options and the view. The view is not called once: the backend calls it every frame, and it must describe the whole window each time.
+`runSdlApp` calls the view every frame, and the view describes the whole window each time.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:todo_app}}
 ```
 
-The view's local state (the draft text and the current filter) is allocated with `useVar` and `useEnumVar`. Both are positional: they are identified by their call site, so they need no setup and no record field.
-
-`columnWith (padAll 20 . gap 12 . fillW . fillH)` is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.
+The draft text and the filter are view-local, allocated with `useVar` and `useEnumVar`. Both are identified by their call site, so they need no setup and no record field.
 
 ## 3. Adding an item
 
-The input row has three jobs: draw the field, draw the button, and decide whether this frame is an "add" frame.
+The input row draws the field and the button, and decides whether this frame adds an item.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:new_item_row}}
 ```
-
-Details:
 
 - **The primed widget returns a `Response`.** `textInputConfigured'` reports the widget's identity, rectangle, hover and click state, and whether Enter was submitted (`respSubmitted`). `button` already returns the one `Bool` this row needs.
 - **`readVar draft` sits below the field that edits it.** The field's write lands first, then the read sees the new text in the same pass. Reading *above* an editing widget forces a second pass.
@@ -109,7 +96,7 @@ Up and Down need to swap two items wherever they are in the full list. Swapping 
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:swap_ids}}
 ```
 
-The row's local state follows the id, not the index, so the edit flag and draft travel with the item. This is the payoff for the keys in the previous section.
+The row's local state follows the id, so the edit flag and draft travel with the item.
 
 ## 7. Keyboard behaviour
 
@@ -125,10 +112,8 @@ For the full shortcut model (`shortcut`, `shortcutOnce`, menu bindings, and how 
 
 ## 8. Try it
 
-Start from the runnable source and change one thing at a time:
-
 - Replace the Up/Down buttons with `useReorder` for drag-and-drop reordering (see [Drag & Drop](../widgets/drag-and-drop.md)).
-- Add a "hide completed" filter persistence setting with `newVar` and a `Settings` record.
+- Remember the filter across runs in a `Settings` record allocated with `newVar`.
 - Show an empty state when `shown` is empty, for example `muted "Nothing here yet."`
 - Validate the draft length with the techniques in [Ecosystem Packages](../packages/index.md).
 

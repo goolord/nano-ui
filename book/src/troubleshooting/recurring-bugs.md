@@ -20,8 +20,6 @@ Bugs and fixes from the git histories of nano-ui applications (`ned`, `stronghea
 | A drag selects one character leftward | [Focus and input ordering](#6-focus-and-input-ordering) |
 | SVG clip paths collide | [SVG export](#7-svg-export) |
 
----
-
 ## 1. Layout shifting & jitter
 
 ### A label whose text changes length moves its siblings every frame
@@ -34,7 +32,7 @@ A counter going `9 -> 10 -> 100`, a timer, or a byte total changes the label's n
 labelWith (fixedW 48 . alignEnd) (fmtInt count)
 ```
 
-This is a recurring fix in `stronghead` ("fix markers count to fixed width") and in dashboards generally.
+`stronghead` made this fix more than once ("fix markers count to fixed width").
 
 ### A long value inside a scrolling list widens the whole list
 
@@ -46,8 +44,6 @@ One long row increases the column's natural width, the list grows a horizontal s
 -- In a row, a label too narrow for its text cuts it off rather than wrapping.
 nameLine f = rowWith (fillW . tight) . labelWith (fillW . f)
 ```
-
-Inside a scrolling list, cells should be `fillW`, not sized by content.
 
 ### A drop-down clips its longest option
 
@@ -64,13 +60,11 @@ selectWith (fixedW w) options selectedVar
 
 Tree column widths, row heights, and pane splits that are derived from the current content every frame move when the content changes.
 
-**Fix:** lock the geometry in saved layout state (`ned`'s "grid size locking") or key constants off the content type, not the text. For a row height, use a constant; for a pane split, store the user's chosen size.
+**Fix:** lock the geometry. Use a constant row height, and store a pane split the user chose in saved layout state (`ned`'s "grid size locking").
 
 ### `flex` around the wrong child
 
-`flex` still works, but the clearer pattern is to make the one growable child `fillW` directly. `stronghead` replaced `fixedW 90` + `flex` around a filter box with `fillW`, which also removed dead space.
-
----
+Make the one growable child `fillW` instead. `stronghead` replaced `fixedW 90` + `flex` around a filter box with `fillW`, which also removed dead space.
 
 ## 2. Double borders & box in a box
 
@@ -94,9 +88,7 @@ Symptoms:
 - Set `themeFloatingWindow` and `themePopup` to the panel surface, so a padded body does not show a panel box inside the dialog.
 - Between two chrome regions, draw one `separator` at the seam, not a border on the bottom of one and the top of the other.
 
-The `stronghead` fix was named "Remove duplicate borders from workspace popovers and notifications"; the same change appears in `winget-gui`'s dialogs.
-
----
+`stronghead` ("Remove duplicate borders from workspace popovers and notifications") and `winget-gui`'s dialogs both made this fix.
 
 ## 3. Text metrics & the pixel grid
 
@@ -110,7 +102,7 @@ The `stronghead` fix was named "Remove duplicate borders from workspace popovers
 lineWidth fm run
 ```
 
-`ned` fixed this as "text stays on the cell grid along a long run".
+(`ned`: "text stays on the cell grid along a long run".)
 
 ### Text shimmers at fractional DPI scales
 
@@ -122,50 +114,43 @@ At 125% scaling, rows of 22.4 px stack as 22, 23, 22, 23 and text shimmers while
 snap v = let k = max 1 (fmSnapScale f) in fromIntegral (round (v * k) :: Int) / k
 ```
 
-`winget-gui`'s `rowButton` is the reference implementation.
+`winget-gui`'s `rowButton` does this.
 
 ### Box-centred is not optically centred
 
-A two-line block with a large label over a small one centres by line boxes, which leave more room under the smaller line; it reads ~4 px high. For exact optical centring, centre on the ink: measure the ink span and the capital/x-height midpoints from `FontMetrics` glyphs.
+A large label over a small one centres by line boxes, which leave more room under the smaller line, so the block reads about 4 px high. Nudge it with `padTop`, or centre on the ink: measure the ink span and the cap/x-height midpoints from `FontMetrics` glyphs.
 
 ### `alignMid` on a row positions the row, not its contents
 
-`alignMid` on a row positions the row itself in its parent. Centring the row's *contents* takes the modifier on each child (or `alignMid` in the child's layout). This is the "header dead space" fix in `stronghead`.
-
----
+Centring the row's *contents* takes `alignMid` on each child. This was `stronghead`'s "header dead space" fix.
 
 ## 4. Stale cached drawings
 
-A custom-drawn widget has no text spans and no automatic diff of its inputs. Without a content key, its ops are rebuilt and diffed every frame. With a key, unchanged frames skip both, and a key that misses an input shows stale pixels.
+Without a content key, a custom widget's ops are rebuilt and diffed every frame. With a key, unchanged frames skip both, so a key that misses an input shows stale pixels.
 
 ### The drawing freezes on an input the key missed
 
 `winget-gui`'s sort arrow stayed on the old column until the key covered everything the drawing read.
 
-**Fix:** include every input in the key: values, colors, text, theme, scroll viewport width, animation state.
+**Fix:** key on every input: values, colours, text, theme, scroll viewport width, animation state. `contentKey` hashes numbers; fold colours and text in with `mix64` from `NanoUI.Backend`.
 
 ```haskell
-drawingVersioned (contentKey [round sortCol, round scrollY, fromEnum theme]) $ \dc -> ...
+drawingVersioned (contentKey [fromIntegral col, if ascending then 1 else 0, scrollY]) (fixedWH 12 12) arrowOps
 ```
-
-If a keyed drawing shows stale pixels, the key is missing an input; the widget is not broken.
 
 ### A pinned overlay keeps its first frame's ops
 
-A drag ghost pinned under the pointer with `pinAt mx my` never changes its layout rectangle, so an unversioned drawing caches the frame it appeared in (`ned`'s "tab ghost").
+A drag ghost pinned under the pointer never changes its layout rectangle, so an unversioned drawing keeps the frame it appeared in (`ned`'s "tab ghost").
 
-**Fix:** give it an explicit version that includes what moves it:
+**Fix:** version it by what moves it:
 
 ```haskell
-drawingVersioned (contentKey [round mx, round my]) $ do
-  drawDragGhost
+drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOps
 ```
 
 ### Widths from the scroll viewport belong in the key
 
 `ned`'s finder rows clamp to `rectW (scrollViewport metrics)` and key on it, so the drawing follows the viewport when the scrollbar appears.
-
----
 
 ## 5. Scroll details
 
@@ -175,7 +160,7 @@ The scrollbar keeps a lane out of the viewport. A wide row drawn to the widget's
 
 ### The wheel step does not match the row height
 
-The default notch (~60 px) jumps about one row of 54 px or three smaller rows. Set the wheel step per scroller so a notch is exactly one row:
+The default notch (60 px) jumps about one row of 54 px or three smaller rows. Set the step so a notch is one row:
 
 ```haskell
 ctx <- askContext
@@ -185,13 +170,11 @@ liftIO $ setScrollTuning ctx defaultScrollTuning
 
 A scroller can also set its own step with `setScrollStepUi`; `0` returns it to the context step.
 
----
-
 ## 6. Focus and input ordering
 
 ### Focus questions at the top of the view always say "no"
 
-The node arena is reset before the view runs. `isFocused` (and any check of editing state) at the top of `appView` answers `False` every frame.
+The node arena is reset before the view runs, so `isFocused` (or any check of editing state) at the top of `appView` answers `False` every frame.
 
 **Symptom:** Ctrl+A selects every item while the search box is being typed into; Delete opens the uninstall dialog.
 
@@ -199,19 +182,17 @@ The node arena is reset before the view runs. `isFocused` (and any check of edit
 
 ```haskell
 appView = do
-  searchResp <- searchInput' query
+  searchResp <- searchInput' "Search" query
   -- ... all widgets ...
   searching <- isFocused (respId searchResp)
-  when (not searching) $ whenM (shortcut (key KeyDelete)) deleteSelected
+  unless searching $ whenM (shortcut (key KeyDelete)) deleteSelected
 ```
-
-This was `winget-gui`'s worst input bug.
 
 ### Escape behind the same guard as Ctrl+A
 
 Text inputs do not claim Escape. If Escape shares the "a field is editing" guard with Ctrl+A and Delete, Escape can never clear a selection once a field has focus.
 
-**Fix:** give Escape its own condition. It must keep working while a field is focused.
+**Fix:** give Escape its own condition.
 
 ### Typed keys never reach a custom widget
 
@@ -227,7 +208,9 @@ for_ preedit drawCompositionAtCaret
 
 ### A slow leftward drag selects one character
 
-The drag anchor must be taken from the press, not re-derived from the selection each frame. A one-character selection's anchor sits on its left, so re-deriving it carries the anchor along and selects one character (`ned`'s "slow leftward drags").
+A one-character selection's anchor sits on its left, so re-deriving the anchor from the selection each frame carries it along with a leftward drag (`ned`'s "slow leftward drags").
+
+**Fix:** keep the anchor from the press.
 
 ### A widget that appears next frame cannot be focused this frame
 
@@ -237,16 +220,10 @@ The drag anchor must be taken from the press, not re-derived from the selection 
 
 A branch that declares different widgets than its alternative changes the id count for everything after it; widgets appear to swap caret state. Wrap the branch in `scope`, and keep overlays unconditional. See [Widget Identity & Keys](../state/identity.md).
 
----
-
 ## 7. SVG export
-
-When exporting with `nano-ui-svg`:
 
 - Several canvas drawings in one frame emit colliding `clip_`/`grad_` element ids. Scope them per drawing (prefix each `<g><defs>` block with an index), as `stronghead` does.
 - Right-aligned numerals lose their anchor: `text-anchor`/`textLength` may need post-processing, and tabular numbers help readouts (`font-variant-numeric: tabular-nums` at the root).
-
----
 
 ## Quick checklist
 

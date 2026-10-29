@@ -1,6 +1,6 @@
 # Tutorial 2: Build a Notepad
 
-A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work. It covers menus, dialogs, and close confirmation.
+A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work.
 
 The complete program is [`packages/nano-ui-demo/examples/Notepad.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Notepad.hs). Run it with:
 
@@ -36,9 +36,9 @@ With exit-on-close off, `winCloseRequested <$> askWindow` reports the request in
 
 ## 3. A menu bar from primitives
 
-There is no opaque `menuBar` widget. A menu bar is a row of `menuButton'`s, each paired with a `popup'` anchored to the button's rectangle. That is a feature: the menu's contents are ordinary `NanoUI ()`.
+There is no `menuBar` widget. A menu bar is a row of `menuButton'`s, each paired with a `popup'` anchored to the button's rectangle, so a menu's contents are ordinary `NanoUI ()`.
 
-The helper below mirrors the one in the notepad source. `openMenu` holds the label of the open menu (empty when all are closed):
+`openMenu` holds the label of the open menu (empty when all are closed):
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:menu_bar}}
@@ -68,8 +68,6 @@ Each menu row is a `menuItem` / `menuItemShortcut`. The row reports activation, 
 ```
 
 Only the first binding of a chord in a frame fires, so the menu row and the view binding never both run it. The menu row is declared first, so while the menu is open its row wins.
-
-Two more details from the source:
 
 - `menuItemDisabled "Undo"` draws a dimmed row that cannot be clicked. The Edit menu chooses between a real item and a disabled one by checking `textCanUndo` / `textCanRedo`.
 - An action that opens a file dialog writes the new `FileDialogId` into a `Var`; dialogs are non-blocking, so the view is not interrupted.
@@ -161,6 +159,6 @@ Reading `doc` here records a dependency: every edit repaints the status bar. Tha
 - Add a recent-files list persisted between runs.
 - Replace the About modal with a floating `window` that can be moved and resized.
 - Add word wrap using the editor's layout options.
-- Build a custom title bar with `captionButtons` and `dragSpans` (see [Windows & Screenshots](../advanced/window-management.md)).
+- Build a custom title bar with `captionButtons` and `dragSpans` (see [Desktop Windows](../advanced/window-management.md)).
 
 Next: [Tutorial 3: Live Data & Background Work](live-data.md) moves slow work off the frame and streams results back.

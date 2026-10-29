@@ -58,7 +58,7 @@ For local UI state, keep using `Var` inside the component; the durable model sta
 runSdlAppReduce defaultSdlOptions update initialModel view
 ```
 
-The view runs with the current model, messages are reduced at frame end, and the drawing shown for that frame is from **before** the reduction. If the model changed, another frame is requested to draw it. That follow-up frame is intentional.
+The view runs with the current model, messages are reduced at frame end, and the drawing shown for that frame is from **before** the reduction. If the model changed, another frame is requested to draw it.
 
 For tests and embedded uses:
 
@@ -83,13 +83,4 @@ For tests and embedded uses:
 
 The styles mix. An emitting view can keep `Var`s for transient UI state; a `Var`-based view can run a small component with `runNanoUIE` and act on the returned messages.
 
-## Rules and pitfalls
-
-- **Keep `update` pure.** File and network I/O belong in the view's event branch or in an effect queue interpreted outside the reducer.
-- **Do not duplicate model state in `Var`s.** Local UI state is fine; durable state should have one home.
-- **Guard every emission.** Unconditional emissions run on every pass.
-- **Component keys are required in lists.** Give each instance a distinct `withKey`.
-- **Keyboard and focus rules are unchanged.** Focus queries still belong at the end of the view.
-- **Model changes draw on the next frame.** Do not compensate by writing the model into a `Var` mid-frame.
-
-The `Var` style is covered in [State & `Var`](index.md); the frame consequences are in [Architecture & Internals](../architecture/index.md).
+Keep `update` pure: file and network I/O belong in the view's event branch, or in an effect queue run outside the reducer. Do not mirror model state in `Var`s to see it a frame earlier; durable state has one home.

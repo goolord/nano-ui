@@ -1,6 +1,6 @@
 # Widget Gallery
 
-Start here for widgets. Every widget is an ordinary function in `NanoUI`; the family pages cover the API, and the styling pages cover appearance.
+Every widget is an ordinary function exported from `NanoUI`.
 
 <figure class="nano-figure">
 <img src="../images/gallery-controls.svg" alt="Buttons, a checkbox, text field, select, slider, switch, knob, spinner, progress bar, and sparkline in one nano-ui row.">
@@ -49,9 +49,3 @@ A `Response` carries identity and interaction state:
 | `respRightPressed` / `respRightClicked` | Secondary-button variants |
 
 Anything with a `Response` can be passed to `tooltip`, `contextMenu`, and the focus helpers.
-
-## Input widgets
-
-Input widgets take the `Var` they display and mutate it directly; there is no callback and no on-change handler. To react to an edit, use the primed form's `Response`. The full set of controls and their examples is in [Buttons, Menus & Inputs](controls.md).
-
-Containers and modifiers are covered once in [Layout & Scrolling](../layout/index.md).

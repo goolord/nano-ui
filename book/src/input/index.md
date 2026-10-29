@@ -48,7 +48,7 @@ whenM (menuItemShortcut "Save" saveChord) saveDocument
 whenM (shortcut saveChord) saveDocument
 ```
 
-The open menu’s row is declared first, so it wins. Define the action once and connect both triggers to it.
+The open menu's row is declared first, so it wins.
 
 ## Escape
 
@@ -152,9 +152,3 @@ runSim ctx failed (withInput 400 300) editorView $ do
 A string literal aims at the visible text with that label. `At p`, `Within rect`, `On response` and `OnWidget wid` aim elsewhere. `check` and `checkEq` count failures on `failed`.
 
 For lower-level tests, `runFrame ctx input view` runs one frame. Focus changes apply on the next frame, and geometry lags one frame, so warm up with `warmup2` before targeting a widget by `respRect`. `keyInp` / `chordInp` from `NanoUI.Testing.Harness` build key input.
-
-## See also
-
-- Widgets that take keys: [Buttons, Menus & Inputs](../widgets/controls.md).
-- Focus-dependent shortcut bugs: [Troubleshooting](../troubleshooting/recurring-bugs.md).
-- Frame timing: [Architecture & Internals](../architecture/index.md).

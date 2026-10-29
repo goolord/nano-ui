@@ -1,6 +1,6 @@
 # Widget Identity & Keys
 
-Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local `Var`s) is stored under the widget's **id**, not in the widget. Ids are generated deterministically from the call order among siblings. If the order changes, the state appears to jump to a different widget. This section explains how to keep the order stable.
+Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local `Var`s) is stored under the widget's **id**, not in the widget. Ids come from the call order among siblings. If the order changes, the state jumps to a different widget.
 
 ## How ids are assigned
 
@@ -11,7 +11,7 @@ Two separate id spaces exist:
 - **Widget ids** for layout nodes, focus, input state, and scroll state.
 - **`useVar` slots**, counted in call order, with their own counter and key space.
 
-That separation means a conditional *widget* does not shift `useVar` slots, and a conditional *`useVar`* does not shift widget ids. Both still need their position kept stable if they come and go, which is what `scope` does.
+A conditional *widget* does not shift `useVar` slots, and a conditional *`useVar`* does not shift widget ids. Both still shift their own kind; `scope` prevents that.
 
 ## Rule 1: keep the call order stable
 
@@ -43,7 +43,7 @@ scope $
     else label (todoText todo)
 ```
 
-`scope` is cheap and local. Use it around anything that may not run on every frame: a conditional block, a case whose branches declare different widgets, a placeholder that appears while loading. Overlays are the exception with a simpler rule: call them unconditionally (see Rule 4).
+`scope` is cheap. Use it around anything that may not run every frame: a conditional block, a `case` whose branches declare different widgets, a loading placeholder. Overlays are the exception: call them unconditionally (Rule 4).
 
 ## Rule 3: key dynamic lists with `withKey`
 
@@ -92,7 +92,7 @@ modal confirm "Delete the file?" $
   whenM (button "Delete") (deleteFile >> writeVar confirm False)
 ```
 
-Wrapping the call in `when (readVar confirm)` shifts every later sibling's id when the dialog opens and closes, which is exactly the jump `scope` and keys exist to prevent. For derived open state, pass `constVar` and use the primed variants.
+Wrapping the call in `when` shifts every later sibling's id each time the dialog opens or closes. For derived open state, pass `constVar` and use the primed variants.
 
 ## Rule 5: retain state for dynamic collections
 
@@ -102,7 +102,7 @@ Widget and `Var` state under a key survives the key not being drawn for a while:
 retainVars (`elem` liveIds) rowVars
 ```
 
-Without pruning, a long-running application accumulates state for rows that no longer exist. With aggressive pruning, state disappears the moment a row is filtered out; choose the policy per collection. A todo row can keep its draft while hidden; a row from a 100,000-row log cannot.
+Prune too little and state for deleted rows accumulates; prune too eagerly and a filtered-out row loses its draft. Choose per collection: a todo row can keep its draft while hidden, a row from a 100,000-row log cannot.
 
 ## Symptoms and their fixes
 

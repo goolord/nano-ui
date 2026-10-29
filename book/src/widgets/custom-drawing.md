@@ -1,8 +1,6 @@
 # Custom Drawing & Controls
 
-When the built-in widgets do not fit, draw the control yourself with the 2D canvas API.
-
-The widgets in `NanoUI.Widgets.Custom` (`knob`, `toggleSwitch`, `circularProgress`, `progressBar`, `spinner`, `sparkline`) are designed to serve as **reference implementations** for custom widgets users may want to implement themselves. This API is meant to **accompany the canvas API**, demonstrating how 2D vector drawing, layout sizing, gesture hooks (`useDrag2DOn`, `useWheelDeltaOn`), keyboard navigation, and responsive state binding (`bindVar`) integrate into cohesive, interactive controls.
+When the built-in widgets do not fit, draw the control with the canvas API. The six controls in `NanoUI.Widgets.Custom` are built on it, and their source is the example to copy.
 
 ## Reference custom controls
 
@@ -55,12 +53,12 @@ The `fixedW` on the changing number keeps the controls from shifting. Read the v
 
 ### Implementing custom controls
 
-You can inspect the source code of `NanoUI.Widgets.Custom` as a blueprint for implementing your own controls. A typical interactive control follows this pattern:
+Each control in `NanoUI.Widgets.Custom` follows the same steps:
 
-1. **Allocate widget identity**: `(wid, ctx) <- freshWidget` obtains a unique `WidgetId`.
-2. **Define geometry & drawing**: Specify layout constraints and vector draw ops via `CustomWidgetSpec` and `runCanvasFor`.
-3. **Capture gestures & input**: Use gesture hooks (`drag <- useDrag2DOn resp`, `(_, scrollY) <- useWheelDeltaOn resp`, `nav <- useKeyNav wid`) to compute value deltas.
-4. **Synchronize state**: Apply `bindVar` or `finishInput` to bind the pure calculation to the caller's mutable `Var`.
+1. Take an id with `freshWidget`.
+2. Size and draw through a `CustomWidgetSpec` and `runCanvasFor`.
+3. Turn input into a change of value with `useDrag2DOn`, `useWheelDeltaOn`, and `useKeyNav`.
+4. Write the result to the caller's `Var` with `bindVar` or `finishInput`.
 
 ## Canvas drawing
 
@@ -253,130 +251,24 @@ drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) dragGhostOps
 
 Otherwise it keeps the ops of the frame it first appeared in.
 
-## SVG & Vector Graphics
+## SVG
 
-`nano-ui` includes vector SVG support at both the widget level and the canvas drawing level:
-
-- **SVG icons**: Parse in-memory SVG strings (`parseSvg`) or load SVG files (`loadSvg`), then display them with `svgIcon` or in buttons.
-- **Canvas SVG textures**: Rasterize SVGs to RGBA buffers with `rasterizeSvg` from `NanoUI.Svg` and draw them onto a canvas using `drawImage`.
-- **Canvas to SVG export**: Export `DrawOp` sequences directly to SVG vector files using `nano-ui-svg` (`drawOpsToSvg`).
-
-### 1. SVG Icons in Views
-
-Monochrome SVG icons use `currentColor` and automatically inherit the active text color. This means they can be tinted with `fontColor` or semantic styles:
+`parseSvg` reads SVG text and `loadSvg` reads a file. An icon that strokes or fills with `currentColor` takes the text colour, so `fontColor` and the semantic styles tint it; other colours are kept.
 
 ```haskell
-import qualified Data.ByteString.Char8 as BS8
-import NanoUI
-
--- Parse an inline SVG icon (e.g. 24x24 viewBox)
-starIcon :: Svg
-starIcon = case parseSvg "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polygon points='12,2 15,9 22,9.5 16.5,14.5 18.5,21.5 12,17.5 5.5,21.5 7.5,14.5 2,9.5 9,9'/></svg>" of
-  Right svg -> svg
-  Left err  -> error ("Invalid SVG: " ++ err)
-
--- Render SVG icons with various sizes and theme colors
-iconBar :: Svg -> NanoUI ()
-iconBar icon = rowWith (gap 12 . alignMid) $ do
-  theme <- uiTheme
-
-  -- 1. Standard icon sizing (24x24 logical pixels)
-  svgIcon 24 icon
-
-  -- 2. Scoped styling and tinting via fontColor
-  svgIconWith (fixedWH 32 32 . fontColor (themeAccent theme)) icon
-
-  -- 3. In an icon button
-  whenM (iconButton icon "Star") $
-    putStrLn "Starred!"
-
-  -- 4. Custom button content
-  whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
-            svgIcon 16 icon
-            label "Favorite") $
-    putStrLn "Favorited!"
+svgIcon 24 star
+svgIconWith (fixedWH 32 32 . fontColor accent) star
+whenM (iconButton star "Star") starItem
 ```
 
-Multi-color SVGs preserve their embedded fill and stroke colors. For flexible image-style scaling, `svgIconConfigured` accepts `ImageConfig` with CSS-like fitting (`FitContain`, `FitCover`, `FitFill`).
+`svgIconConfigured` takes an `ImageConfig` for CSS-style fitting (`FitContain`, `FitCover`, `FitFill`).
 
-### 2. Drawing SVG inside Canvas
-
-Within `CanvasM`, you can draw rasterized textures with `drawImage` / `drawImageUV` / `drawImageWith`. To draw an `Svg` onto a canvas, rasterize it to RGBA bytes using `rasterizeSvg` (or `rasterizeSvgIn`) from `NanoUI.Svg`:
+Inside a canvas, rasterize the SVG with `rasterizeSvg` from `NanoUI.Svg`, lease the pixels with `useImageRgba`, and draw the image. Key the lease on everything the pixels depend on, here the tint:
 
 ```haskell
-import NanoUI
-import NanoUI.Svg (rasterizeSvg)
-import NanoUI.Widgets.Custom (CanvasM, canvas, drawImage, drawRoundedRect, drawStrokeRoundedRect, drawText)
-
--- | A custom badge widget that draws an SVG icon alongside custom vector geometry.
-customBadge :: ImageHandle () -> Svg -> Text -> NanoUI ()
-customBadge imgHandle svg title = do
-  theme <- uiTheme
-  let iconPx = 32
-      -- Rasterize the SVG to RGBA at target pixel dimensions with a tint color
-      rgba = rasterizeSvg iconPx iconPx (themeAccent theme) svg
-
-  -- Lease the rasterized texture in the backend atlas
-  mIid <- useImageRgba imgHandle () iconPx iconPx rgba
-
-  canvas (fixedWH 140 44) $ \(Rect x y w h) -> do
-    -- Draw container geometry
-    drawRoundedRect (Rect x y w h) 8 (styleBg (themeButton theme))
-    drawStrokeRoundedRect (Rect x y w h) 8 1 (styleBorder (themeButton theme))
-
-    -- Draw the rasterized SVG icon if registered
-    case mIid of
-      Just iid -> drawImage (Rect (x + 8) (y + 6) 32 32) iid
-      Nothing  -> pure ()
-
-    -- Draw accompanying text
-    drawText (V2 (x + 48) (y + 22)) AlignStart AlignMiddle title (styleFg (themeButton theme))
+iid <- useImageRgba owner tint 32 32 (rasterizeSvg 32 32 tint star)
+canvas (fixedWH 140 44) $ \(Rect x y _ _) ->
+  for_ iid $ \i -> drawImage (Rect (x + 8) (y + 6) 32 32) i colorWhite
 ```
 
-### 3. Exporting Canvas Drawings to SVG (`nano-ui-svg`)
-
-When you need vector screenshots, reports, or test fixtures, `nano-ui-svg` can export any `DrawOp` array generated by `runCanvas` or `runCanvasFor` directly to an SVG string:
-
-```haskell
-import qualified Data.Text.IO as TIO
-import NanoUI
-import NanoUI.Draw.Svg (defaultSvgConfig, drawOpsToSvg, renderDrawOpsSvg, SvgConfig (..))
-import NanoUI.Path qualified as P
-import NanoUI.Widgets.Custom
-
--- | Draw a vector gauge and export it to an SVG file.
-exportGaugeSvg :: FilePath -> Float -> IO ()
-exportGaugeSvg filePath value = do
-  let bounds = Rect 0 0 160 50
-      ops = runCanvas bounds $ do
-        -- Outer background
-        drawRoundedRect bounds 10 (colorRGBA 30 41 59 255)
-        drawStrokeRoundedRect bounds 10 1.5 (colorRGBA 56 189 248 255)
-
-        -- Progress bar path
-        let barW = 140 * clamp 0 1 value
-        drawRoundedRect (Rect 10 32 barW 8) 4 (colorRGBA 56 189 248 255)
-
-        -- Indicator circle & text
-        drawStrokePath (P.circle (V2 24 18) 8) 2 colorWhite
-        drawText (V2 42 18) AlignStart AlignMiddle "CPU Load" colorWhite
-
-  -- Export directly as a standalone SVG document:
-  TIO.writeFile filePath (drawOpsToSvg bounds ops)
-```
-
-To embed the output inside an existing HTML/SVG document, pass `svgStandalone = False`:
-
-```haskell
--- Emits an inner <g> fragment instead of a full <svg> document
-let fragment = renderDrawOpsSvg defaultSvgConfig { svgStandalone = False } bounds ops
-```
-
-For whole-window or view-level SVG captures, see `NanoUI.Draw.FrameSvg` in `nano-ui-svg`.
-
-## See also
-
-- Widget inventory: [Widget Gallery](index.md).
-- Drawing styles, colors, and themes: [Styling & Theming](../styling/index.md).
-- SVG export of canvas drawings: [Ecosystem Packages](../packages/index.md).
-
+`nano-ui-svg` goes the other way and exports draw ops as SVG; see [SVG export](../packages/index.md#svg-export).

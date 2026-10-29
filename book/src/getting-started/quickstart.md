@@ -1,6 +1,6 @@
 # Quick Start
 
-This guide sets up a project and builds a small windowed application. It should take about ten minutes. The [tutorials](../tutorials/index.md) take it from there.
+Set up a project and open a window. The [tutorials](../tutorials/index.md) continue from here.
 
 ## Prerequisites
 
@@ -29,9 +29,7 @@ $env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 
 ## Add nano-ui to a project
 
-`nano-ui` is on Hackage. The repository may be ahead of the released API, so code in this book may not match the latest release.
-
-For the API in this book, pin the source as a Cabal `source-repository-package`. In your `cabal.project`:
+`nano-ui` is on Hackage, but this book follows the repository, which may be ahead of the release. Pin the source in `cabal.project`:
 
 ```cabal
 source-repository-package
@@ -70,7 +68,7 @@ Hackage has Haddocks for the released version. For the current source, from a ch
 cabal haddock-project --output=haddocks --hoogle
 ```
 
-`haddocks/index.html` is the HTML index. The same directory contains the Hoogle input files. Building every package is memory-heavy, so `cabal haddock nano-ui --haddock-hoogle` is the lighter option. See [Development Setup](development.md#haddocks-and-hoogle) for Hoogle indexing.
+Open `haddocks/index.html`. Building every package is memory-heavy; `cabal haddock nano-ui --haddock-hoogle` builds one. See [Development Setup](development.md#haddocks-and-hoogle) for Hoogle indexing.
 
 > [!IMPORTANT]
 > Compile executables with `-threaded`. The immediate-mode loop, task threads, and native window event processing require the GHC threaded runtime.
@@ -89,7 +87,7 @@ Run it:
 cabal run -j1 my-app
 ```
 
-`-j1` is the recommendation for this repository and for memory-constrained machines; a normal project can use cabal's defaults.
+`-j1` keeps memory down; a normal project can use cabal's defaults.
 
 ## How it works
 
@@ -99,12 +97,9 @@ cabal run -j1 my-app
 4. **`button "+"`** draws an interactive button and returns `True` only on the frame it is activated.
 5. **`modifyVar n (+ 1)`** updates the value. Reading `n` below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.
 
-The view runs every frame, so ordinary side effects must be guarded by an event (`whenM (button "Save") save`), and per-frame resources must not be allocated inside it. [State & `Var`](../state/index.md) explains both rules in depth.
+The view runs every frame, so two rules follow:
 
-## Next steps
+- Guard side effects with an event: `whenM (button "Save") save`. `button "Save" >> save` saves every frame.
+- Allocate long-lived resources (`newVar`, tasks, caches) in `IO` before `runSdlApp`, never inside the view.
 
-- Build something end to end: [Tutorial 1: Build a Todo List](../tutorials/todo-list.md).
-- Understand the state model: [State & `Var`](../state/index.md).
-- Find a widget: [Widget Gallery](../widgets/index.md).
-- Arrange a window: [Layout & Scrolling](../layout/index.md).
-- Work on nano-ui itself: [Development Setup](development.md).
+Next: [Tutorial 1: Build a Todo List](../tutorials/todo-list.md).

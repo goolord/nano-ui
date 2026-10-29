@@ -1,8 +1,6 @@
 # Async Work & Animation
 
-The view must never block, and it should not redraw when nothing is moving. nano-ui handles both with the same idea: work is scheduled on a worker or a timed wake, and the frame loop sleeps until there is something to draw.
-
-Compile with `-threaded`; the loop sleeps while a job runs and the job runs on a Haskell thread while it is blocked.
+The view must never block, and nothing should redraw while nothing moves. Slow work runs on a worker, timed work on a wake, and the frame loop sleeps in between. Compile with `-threaded`.
 
 ## `Task`: one job per key
 
@@ -18,7 +16,7 @@ newApp :: IO App
 newApp = App <$> newTask <*> newTask
 ```
 
-Use it from the view:
+In the view:
 
 ```haskell
 status <- useTaskStatus (appSearch app) queryKey (fetchSearchResults queryKey)
@@ -35,8 +33,6 @@ case status of
 contents <- useTask (appFile app) path (T.readFile (T.unpack path))
 label (fromMaybe "Loading..." contents)
 ```
-
-Rules:
 
 - **The key identifies the job.** A new key starts a worker and cancels the old job with an asynchronous exception.
 - **A skipped hook cancels the job.** If the view does not call `useTask` for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.
@@ -78,7 +74,7 @@ forkIO $ do
   wake                 -- schedule one frame
 ```
 
-`readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe `Var` operations. The wake repaints the whole window because nothing says which widget changed; fine for occasional updates, not for a per-token stream.
+`readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe `Var` operations. The wake repaints the whole window, since nothing says which widget changed. Use a `Stream` for frequent updates.
 
 ## Animation
 
@@ -90,7 +86,7 @@ currentWidth <- animateTo (Tween EaseOutQuad 0.25 0) targetWidth
 
 A `Transition` is either:
 
-- **`Tween ease duration delay`**, in seconds. `EaseOutQuad`, `EaseInOutCubic`, `EaseOutBack`, and `EaseCubicBezier` are some available curves.
+- **`Tween ease duration delay`**, in seconds. Curves include `EaseOutQuad`, `EaseInOutCubic`, `EaseOutBack`, and `EaseCubicBezier`.
 - **`Spring params`**, a damped spring. `presetSmooth`, `presetBouncy`, and `presetStiff` are the presets.
 
 ```haskell
@@ -122,7 +118,7 @@ keepAnimating resp
 The loop goes back to sleep on the first frame that leaves it out.
 
 > [!CAUTION]
-> Never force continuous redraws by dirtying the context every frame. That is an unpaced busy loop. Call `keepAnimating` only in the widget that is actually moving.
+> Never force redraws by dirtying the context every frame. That is an unpaced busy loop.
 
 ### Timers
 
@@ -134,7 +130,7 @@ clock = do
   wakeAfter 1
 ```
 
-Call it on every frame that still needs the future wake; pending wakes reset each frame. Use `wakeAfter` for clocks, debounces, and polling on a schedule; use `keepAnimating` for continuous motion.
+Call it on every frame that still needs the wake; pending wakes reset each frame.
 
 ## Choosing a tool
 
@@ -147,10 +143,4 @@ Call it on every frame that still needs the future wake; pending wakes reset eac
 | Changes on a schedule | `wakeAfter` |
 | Animates continuously | `animateTo` / `pulse` + `keepAnimating` |
 
-The runnable versions are in [Live Data & Background Work](../tutorials/live-data.md), `Tasks.hs`, and `LiveChart.hs`.
-
-## See also
-
-- Background work in a full application: [Live Data & Background Work](../tutorials/live-data.md).
-- Custom animation drawing: [Custom Drawing & Controls](../widgets/custom-drawing.md).
-- Window updates and screenshots: [Desktop Windows](window-management.md).
+Runnable versions: [Live Data & Background Work](../tutorials/live-data.md), `Tasks.hs`, `LiveChart.hs`, `Animation.hs`.

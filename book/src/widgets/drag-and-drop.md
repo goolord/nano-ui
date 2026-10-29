@@ -1,58 +1,60 @@
-# Drag and Drop
+# Drag & Drop
 
-`nano-ui` includes local drag-and-drop primitives via `useDrag`, `useDrop`, `dropZone`, and `useReorder`. Applications own the data and choose which target accepts a release gesture.
+The application owns the data. The hooks report gestures; your code decides what a drop does.
 
-## Drag Lifecycle with `useDrag`
+## Reordering a list
 
-Allocate a `dragHandle <- newDrag` once during component setup, then use it in the view:
+`useReorder` takes the current order of item ids and each item's response, in drawn order:
+
+```haskell
+order <- readVar orderVar            -- orderVar <- newVar [0 .. 4] in setup
+drawn <- forM order $ \i -> (i,) <$> chip i
+r <- useReorder order drawn
+writeVar orderVar (reorderOrder r)
+```
+
+`reorderOrder` changes on the frame the item is dropped. Draw from `reorderPreview` instead to show the other items making room during the drag. `reorderDragging` is the held item, and `reorderMoved` tells a drag from a click.
+
+## Gestures with `useDrag`
+
+For anything else, `useDrag` tracks a thresholded drag across keyed sources. Allocate the handle once with `newDrag` in setup:
 
 ```haskell
 headers <- tabBar' active documents
 gesture <- useDrag dragHandle (tabHeaders headers)
 ```
 
-`useDrag` tracks gesture coordinates and reports one of four phases:
-- **`DragStarted`**: Pointer exceeded the drag distance threshold.
-- **`Dragging`**: Pointer is actively moving while button is held.
-- **`DragReleased`**: User released the mouse button over a target.
-- **`DragCancelled`**: Gesture cancelled via Escape key or lost focus.
+`dragPhase` is `DragStarted`, `Dragging`, `DragReleased`, or `DragCancelled` (Escape, a lost hold, or the source disappearing). The last two last one frame. Commit only on `DragReleased`.
 
----
-
-## Reordering Tab Strips
+`insertionIndex` turns the pointer into a slot in a row or column, or `Nothing` outside its bounds:
 
 ```haskell
-case gesture of
-  Just d | dragPhase d /= DragCancelled -> do
-    let remaining = filter ((/= dragPayload d) . fst) (tabHeaders headers)
-        slot = insertionIndex DragAxisX (tabStripRect headers)
-                 (map (respRect . snd) remaining) (dragAt d)
-    case slot of
-      Just i | dragPhase d == DragReleased -> moveTab (dragPayload d) i
-      _ -> pure ()
-  _ -> pure ()
+for_ gesture $ \d -> when (dragPhase d == DragReleased) $ do
+  let rest = filter ((/= dragPayload d) . fst) (tabHeaders headers)
+  for_ (insertionIndex DragAxisX (tabStripRect headers) (map (respRect . snd) rest) (dragAt d)) $
+    moveTab (dragPayload d)
 ```
 
-`insertionIndex` returns `Nothing` outside the strip bounds and calculates the target insertion index respecting ancestor clips.
+## Files and text from the OS
 
----
+`dropZone` is a panel that reports what the OS dropped on it:
 
-## Pane Grids (`paneGrid`)
+```haskell
+(_, _, target) <- dropZone (fillW . padAll 12) (label "Drop files here")
+when (dropReceived target) (mapM_ openFile (dropFiles target))
+```
 
-Dockable, splittable multi-pane arrangements (as seen in IDEs and profiling debuggers):
+`dropHovered` is true while a drag is over the zone. `useDrop rect` does the same for any rectangle. Only the topmost layer sees the drop, so a zone behind a modal gets nothing.
+
+## Pane grids
+
+`paneGrid` lays out dockable, splittable panes. Its response's `pgrDropTarget` is the destination under the pointer, which pairs with a `useDrag` gesture:
 
 ```haskell
 grid <- paneGrid cfg
 case (gesture, pgrDropTarget grid) of
-  (Just d, Just target)
-    | dragPhase d == DragReleased -> do
-        commitPaneDrop target
+  (Just d, Just target) | dragPhase d == DragReleased -> commitPaneDrop target
   _ -> pure ()
 ```
-The destination provides `pgdLocation` (`BesidePane paneId edge` or `OutsideGrid edge`), `pgdRect`, and `pgdPane` for custom drop validation.
 
-## See also
-
-- Widget inventory: [Widget Gallery](index.md).
-- Tabs and tables that drag reordering is usually paired with: [Tabs, Tables & Trees](data-views.md).
-- Styling drag targets: [Styling & Theming](../styling/index.md).
+`pgdLocation` is `BesidePane paneId edge` or `OutsideGrid edge`; `pgdRect` and `pgdPane` help validate the drop. Save `pgrTree` when `pgrCommitted` is set.

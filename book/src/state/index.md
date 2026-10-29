@@ -1,8 +1,6 @@
 # State & `Var`
 
-The view runs every frame. Nothing is retained between frames except the state you keep explicitly, so the first design question in a nano-ui application is not "which widget?" but "where does this value live?"
-
-Most state lives in a `Var`: a typed mutable reference. Input widgets take the `Var` they display and mutate it directly; there is no callback and no on-change handler.
+The view runs every frame, and nothing survives between frames except state you keep. Most state lives in a `Var`, a typed mutable reference. Input widgets take the `Var` they display and mutate it directly, with no callback.
 
 ```haskell
 counter :: NanoUI ()
@@ -29,7 +27,7 @@ appView app = do
   label ("Draft: " <> T.pack (show (T.length draft)) <> " characters")
 ```
 
-Keeping a derived value in a second `Var` means every place that changes the source must also update the copy. The first place that forgets is a bug.
+A derived value copied into a second `Var` drifts as soon as one writer forgets to update it.
 
 ## Allocating state
 
@@ -122,6 +120,8 @@ Two habits follow:
 - Place `readVar` **below** the widget that edits the value when the order is free. Typing then resolves in one pass; reading above it costs a second pass per change.
 - Do not `readVar` a value only to pass it back into the same widget. Passing the `Var` is enough.
 
+A freshly computed `NaN` is never unchanged (`NaN /= NaN`), so writing one every pass redraws forever. Guard the write.
+
 > [!TIP]
 > When an input widget is bound to a `Var` and nothing in the view calls `readVar` on it, only that widget repaints on change. A `readVar` promotes the write to a full-window repaint.
 
@@ -149,13 +149,5 @@ A handle allocated inside the view is a per-frame leak. If the view needs a new 
 | Belongs to one row of a dynamic list | A keyed `Var` (`forEachVar`, `withElemVars`, `VarMap`) |
 | Already lives outside the UI | An `IORef` or app record, woken with `askWake` |
 | Is a pure state machine with a clear `msg -> model -> model` | The [Elm-style reducer](elm.md) |
-
-## Common mistakes
-
-- **`liftIO (newVar ...)` inside a view** allocates every pass; move it to setup.
-- **A conditional `useVar` without `scope`** shifts later slots.
-- **Reading above the input that writes** costs a second pass per change.
-- **Writing a freshly computed `NaN`** redraws forever (`NaN /= NaN`); guard the write.
-- **A second `Var` holding a derived value** drifts; compute it instead.
 
 Next: [Widget Identity & Keys](identity.md) for keyed lists and conditional UI, or [Elm-Style State](elm.md) for the reducer alternative.

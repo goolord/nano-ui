@@ -1,6 +1,6 @@
 # Overlays & Windows
 
-Overlays are modal dialogs, draggable floating windows, anchored popups, and hover tooltips. They are ordinary `NanoUI` actions called every frame, with a `Var Bool` for open state.
+Modals, floating windows, and popups are ordinary `NanoUI` actions that take a `Var Bool` for their open state.
 
 ## Call overlays unconditionally
 
@@ -38,7 +38,7 @@ modalWith (fixedWH 600 400) open "Settings" $
   columnWith (fillW . fillH) settingsBody
 ```
 
-`modal'` returns `(Response, Maybe a)`, where the response reports a close request as a click. Use it when the open flag is derived from other state: pass `constVar` so the overlay cannot write the derived value, and write the real flag from the response:
+`modal'` returns `(Response, Maybe a)` and reports a close request as a click. When the open flag is derived from other state, pass `constVar` and write the real flag from the response:
 
 ```haskell
 open <- useVar False
@@ -60,7 +60,7 @@ window inspectorOpen "Inspector" $ do
   inspectorBody
 ```
 
-`window'` returns the body result and a response. Use `window` for panels that should coexist with the main content; use `modal` when the user must answer before doing anything else.
+`window'` returns the body result and a response. Use `window` for panels that coexist with the main content, `modal` when the user must answer first.
 
 ## Popups
 
@@ -102,18 +102,11 @@ tooltipConfigured defaultTooltipConfig
 
 The default delay is half a second; `TooltipConfig` sets the delay and placement. `withTooltip` attaches a rich tooltip widget instead of text.
 
-## Overlay rules of thumb
+## Rules
 
-- **One modal at a time.** Opening a second modal is allowed, but nested modals close inner-first; side-by-side modals close in declaration order.
-- **Keep the open flag in a `Var` at the level that owns the decision**, not in a child that may not be drawn.
-- **Read focus after the overlay call**, not before it.
-- **Do not nest a `scrollArea`, `panel`, or `card` inside a dialog body** without stripping its chrome; see [Double borders](../troubleshooting/recurring-bugs.md#2-double-borders--box-in-a-box).
-- **Confirm destructive actions in a modal**, not a popup: a popup can be dismissed by a click outside, which is the wrong default for a destructive action.
+- Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.
+- Keep the open flag at the level that owns the decision, not in a child that may not be drawn.
+- Read focus after the overlay call.
+- A `scrollArea`, `panel`, or `card` inside a dialog body draws a box in a box; strip its chrome (see [Double borders](../troubleshooting/recurring-bugs.md#2-double-borders--box-in-a-box)).
 
-The notepad tutorial wires a modal to the window's close request and builds a menu bar from `popup'`: [Build a Notepad](../tutorials/notepad.md).
-
-## See also
-
-- Widget inventory: [Widget Gallery](index.md).
-- Styling dialogs and popups: [Styling & Theming](../styling/index.md).
-- Window-level chrome and screenshots: [Desktop Windows](../advanced/window-management.md).
+[Build a Notepad](../tutorials/notepad.md) wires a modal to the window's close request and builds a menu bar from `popup'`.

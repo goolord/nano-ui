@@ -10,7 +10,7 @@ columnWith (gap 8 . padAll 12 . fillW) $ do
 
 Logical pixels, origin top-left, `y` downward. Backends handle DPI scaling.
 
-Each container and modifier in the next two sections has a collapsible example: open it for the code and the frame that code renders. The snippets show the arrangement itself; the rendered frames add `padAll 14` and fill the window so the spacing is visible.
+Each example below expands to its code and the frame it renders. The frames add `padAll 14` and fill the window so the spacing shows.
 
 ## Containers
 
@@ -700,7 +700,6 @@ See `packages/nano-ui-demo/examples/LongList.hs` (100,000 rows) and `Logs.hs` (s
 ### Programmatic scrolling and wheel tuning
 
 ```haskell
-metrics <- getScrollMetricsUi sid
 when shouldReveal $
   scrollRectIntoViewUi sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant
 ```
@@ -722,9 +721,3 @@ liftIO $ setScrollTuning ctx defaultScrollTuning
 `scrollArea`, `panel`, and `card` each draw a background, border, and radius. Nesting them inside a popup or dialog draws a box in a box. Let one level own the chrome: flatten the inner surface with `styled (inputStyle (background colorTransparent . borderWidth 0))`, or give the outer dialog `padAll 0` and pad the inner body.
 
 See [Styling Gotchas](../styling/gotchas.md) and [Troubleshooting](../troubleshooting/recurring-bugs.md) for the recurring cases.
-
-## Related
-
-- Widget inventory: [Widget Gallery](../widgets/index.md).
-- Container styling: [Styling & Theming](../styling/index.md).
-- Scrolling examples: `packages/nano-ui-demo/examples/LongList.hs`, `Logs.hs`.

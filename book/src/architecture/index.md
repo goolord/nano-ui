@@ -1,6 +1,6 @@
 # Architecture & Internals
 
-Reference for how a frame executes and how applications are structured around it. It explains the cost model behind `readVar`, focus, and damage; a view does not need any of it to work.
+How a frame runs, and how applications are structured around it. None of this is needed to write a view; it explains what `readVar`, focus, and damage cost.
 
 ## The frame lifecycle
 
@@ -27,7 +27,7 @@ The view runs before layout, so `respRect` is the **previous** frame's rectangle
 
 ## Application patterns
 
-Three real applications (`ned`, `stronghead`, `winget-gui`) converge on the same architecture; the difference is where durable state lives. All of them follow the core rule: **setup once in `IO`, then run.**
+Three applications (`ned`, `stronghead`, `winget-gui`) share one rule, **set up once in `IO`, then run**, and differ in where durable state lives.
 
 ```haskell
 main :: IO ()
@@ -90,7 +90,7 @@ editorView (Editor ref) = do
   when (viewChanged app app') requestFrame
 ```
 
-`requestFrame` asks for one more frame when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library. It is an escape hatch, not a replacement for `Var` dependencies.
+`requestFrame` asks for one more frame when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.
 
 ### Choosing
 
@@ -112,29 +112,3 @@ Patterns mix. An `IORef` domain state with `Var` view state is normal; an Elm re
 4. **Run keyboard and focus queries last.**
 5. **Guard effects with events.** The view can run more than once per frame.
 6. **Keep derived values derived.** Cache expensive work by revision, not by copying fields.
-
-## Refactoring history
-
-The repository keeps a small record of source-level simplifications. These are internals, not user-facing APIs.
-
-| Area | Change |
-| --- | --- |
-| Widget construction | Inlined leaf initializers; text-style packing kept on the styled path |
-| Controlled inputs | Shared activation/completion policies instead of per-widget copies |
-| UI scopes | Shared bridge for bracketed id allocation and paint scopes |
-| Forms | Named/positional input families and zero-allocation adapters |
-| Reducers | Three generic adapters replacing dozens of per-widget `NanoUI.Emit` wrappers |
-| Scrollbars | Unified scalar calculation for both orientations |
-| Themes | Shared Base16 construction with dark/light transforms |
-| Animation | Indexed applicative channel traversal |
-| Draw commands | `vector` `IsoUnbox`/`As` deriving replacing handwritten `Prim` instances |
-| Canvas | Strict standard `State` monad inlining into draw-op arrays |
-
-Validation gates for these changes: `cabal build -j1 all` with `-Werror`, the full test suite (including `nano-ui-inspection`), hidden-window SDL demos, the RGFW profile test, and the per-frame id benchmark. The detailed audits live in the git history rather than the reading path.
-
-## See also
-
-- State and `Var`: [State & `Var`](../state/index.md).
-- Keys and ids: [Widget Identity & Keys](../state/identity.md).
-- Reducer runners: [Elm-Style State](../state/elm.md).
-- Contributing and tests: [Development Setup](../getting-started/development.md).

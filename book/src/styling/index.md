@@ -16,12 +16,7 @@ For a live tour of the modifiers, see the [Interactive Styling Lab](lab.md). For
 
 A `Style` is `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`. A `Theme` also defines semantic colors: `themeAccent` / `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success/warning/danger tones.
 
-The page behind the view is `pageBackground`: `themeWindow` by default,
-unless the theme sets `themePage`. `panelPage` gives a view that draws no
-panel the panel surface, so the app sits on the panel colour while
-`themeWindow` stays the window background behind it; `pageColor` sets any
-other page. The page is laid over the window background, so the window shows
-in the gaps between a page's panels:
+The page behind the view is `pageBackground`: `themeWindow`, unless the theme sets `themePage`. `pageColor` sets one. `panelPage` puts a view that draws no panel of its own on the panel surface. The page sits over the window background, which shows in the gaps between panels:
 
 ```haskell
 -- An app with no panel of its own: the panel surface is the page.
@@ -47,13 +42,11 @@ styled (primary . rounded 999) $ button "Continue"
 
 Modifiers compose with `(.)`; nested scopes inherit the outer modification. Theme scopes affect painting only, never layout metrics.
 
-Useful modifiers:
-
 - **Style fields:** `background`, `foreground`, `borderColor`, `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`, `fillColor`.
 - **Theme-level:** `buttonStyle`, `inputStyle`, `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `rounded`, `subtle`, `tinted`, `readableOn`.
 - **Semantic shortcuts:** `primary`, `destructive`, `success`, `warning`, `tone Danger`, `toneColor Warning`.
 
-A common local helper is a quiet button:
+A quiet button:
 
 ```haskell
 quiet = subtle . buttonStyle (foreground muted)
@@ -82,7 +75,7 @@ disabledWhen isSaving $ row $ do
 
 Shortcuts and pointer events inside a disabled subtree are suppressed automatically.
 
-The interactive state laboratory renders all four states across controls in both light and dark mode:
+All four states, light and dark:
 
 <nano-ui-state-lab></nano-ui-state-lab>
 
@@ -97,7 +90,7 @@ Font modifiers apply to any text-capable widget (`labelWith`, `headingWith`, `te
 labelWith (fontMono . fontSize 15 . fontTone Warning) "warning: low disk"
 ```
 
-The SDL backend bundles Inter and uses installed fonts by family name:
+The SDL backend bundles Inter and finds installed fonts by family name:
 
 ```haskell
 defaultSdlOptions
@@ -107,15 +100,8 @@ defaultSdlOptions
   }
 ```
 
-`setSdlUiFont` changes fonts mid-session. `sdlAppUiScale = 0` follows the desktop scale on Windows. For exact font metrics and text measurement, use `lineWidth`, `fmLineHeight`, and `fmSnapScale` from the drawing API rather than summing per-glyph advances.
+`setSdlUiFont` changes fonts mid-session. `sdlAppUiScale = 0` follows the desktop scale on Windows. Measure text with `lineWidth`, `fmLineHeight`, and `fmSnapScale`, not by summing per-glyph advances.
 
-The typography laboratory shows the modifiers side by side:
+The font modifiers side by side:
 
 <nano-ui-typo-lab></nano-ui-typo-lab>
-
-## See also
-
-- Widgets: [Widget Gallery](../widgets/index.md).
-- Live modifier workbenches: [Interactive Styling Lab](lab.md).
-- Behavior that surprises people: [Styling Gotchas](gotchas.md).
-- Layout spacing and sizing: [Layout & Scrolling](../layout/index.md).

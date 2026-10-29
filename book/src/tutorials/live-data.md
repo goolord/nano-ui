@@ -20,7 +20,7 @@ A `Task` runs one typed job; a `Stream` carries one typed push channel. Both are
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:handles}}
 ```
 
-The key type and result type are fixed by the handle. That means a task cannot accidentally be reused for a different job, and no message type is erased at runtime.
+The handle fixes the key and result types, so a task cannot be reused for a different job.
 
 ## 2. A background search
 
@@ -63,10 +63,10 @@ Two rules are visible here:
 - **The key must change to rerun.** Keying by the input alone would never restart an identical request; the attempt number is part of the key.
 - **Each branch is a whole `scope`.** The branches declare different widgets; the scope keeps the widget ids after the card stable as the status changes.
 
-Resource safety belongs inside the job. A file handle, a network connection, or a temporary directory should be acquired with `bracket`, because cancellation is an asynchronous exception:
+Cancellation is an asynchronous exception, so acquire resources inside the job with `bracket`:
 
 ```haskell
-withConnection connInfo $ \conn -> ...
+bracket (connect info) disconnect $ \conn -> runQuery conn q
 ```
 
 ## 4. Streams: many updates, one frame
@@ -77,12 +77,12 @@ A `Stream` is for work that pushes repeatedly: progress ticks, sensor readings, 
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:progress_card}}
 ```
 
-- **Stopping is not calling the hook.** When `isRunning` is false, `useStream` is not called, and the producer is cancelled. There is no stop button to wire up.
+- **Stopping is not calling the hook.** When `isRunning` is false, `useStream` is not called, and the producer is cancelled.
 - **Updates coalesce.** If the producer pushes five values between two frames, the next frame draws the latest one; it does not run five frames.
 - **The stream's state starts from the initial value.** Restarting after a pause begins at `0` here, which is why the label explains how to start over. To resume from the last state, save it outside and pass it as the initial value (the live chart below does exactly that).
 - **Keep the hook outside tabs when the stream must keep running.** Like a task, a stream is released when its hook is skipped for a whole frame.
 
-The frame loop sleeps until the next update. A paused progress pane costs no frames.
+A paused progress pane costs no frames.
 
 ## 5. A live chart
 
@@ -116,21 +116,11 @@ The chart API is small:
 
 Building the `Chart` value every frame is fine: it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the *diagram*; the `PlotCache` is what prevents that.
 
-## 6. The rules, collected
-
-| Situation | Use | Key rule |
-| --- | --- | --- |
-| One slow request per input | `Task` + `useTaskStatus` | Key changes restart the job; include a retry counter to rerun the same input. |
-| Latest result only | `Task` + `useTask` | Previous result stays while a new key runs. |
-| Repeated pushes | `Stream` + `useStream` | Stop by not calling; updates coalesce; pass saved state as the initial value to resume. |
-| Work must survive a hidden tab | Move the hook outside the tab | A skipped hook releases the job. |
-| Worker threads you own | `readVarIO` / `modifyVarIO` + `askWake` | Never touch the UI `Context` from another thread. |
-
-## 7. Try it
+## 6. Try it
 
 - Add a search that runs on every keystroke (key by the query) and compare the cancellation behaviour with `searchInput'`.
 - Stream markdown tokens into `NanoUI.Markdown` and append them incrementally (see [Ecosystem Packages](../packages/index.md)).
 - Virtualize a 100,000-row log list using `getScrollMetricsUi` (see [Layout & Scrolling](../layout/index.md) and the `Logs.hs` example).
 - Replace the streamed chart with a `Task` that loads a whole dataset once.
 
-For the full cancellation and lifecycle reference, read [Async Work & Animation](../advanced/async.md).
+The full lifecycle reference is [Async Work & Animation](../advanced/async.md).

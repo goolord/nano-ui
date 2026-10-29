@@ -1,8 +1,6 @@
 # Ecosystem Packages
 
-The core toolkit is `nano-ui`; the other packages add a backend or a focused capability. Add only what the application uses.
-
-`nano-ui` is on Hackage. The repository may be ahead of the released API; use the source pin in [Quick Start](../getting-started/quickstart.md) for the API in this book.
+Each package adds a backend or one capability to `nano-ui`. Pin them from source as in the [Quick Start](../getting-started/quickstart.md).
 
 | Package | What it adds |
 | --- | --- |
@@ -40,7 +38,7 @@ import NanoUI.Backend.Rgfw
 main = runRgfwApp defaultRgfwOptions appView
 ```
 
-It links RGFW statically, bundles a bitmap font, and produces small standalone binaries. Use it for tools, overlays, or environments where SDL3 is not available.
+It links RGFW statically and bundles a bitmap font, so binaries are small and standalone. Use it where SDL3 is not available.
 
 ## Charts and diagrams
 
@@ -56,7 +54,7 @@ Allocate the `PlotCache` once in `IO` with `newPlotCache` and keep it in the app
 
 A chart keeps its drawing's proportions. With `fillW` the frame fills the width and the chart is centred in it; with only `fixedH` the widget takes the width the proportions give. A chart whose labels would overlap at the requested size is drawn larger, up to twice the size.
 
-The images below are compiled from [`ChartExamples.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs), and `nano-ui-svg-glossary` renders the same definitions to the images. They share this data:
+The examples below are compiled from [`ChartExamples.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs), which `nano-ui-svg-glossary` also renders to the images. They share this data:
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:data}}
@@ -201,10 +199,4 @@ exportViewToSvg view = do
   frameToSvg defaultFrameSvgConfig ctx inp drawData
 ```
 
-`enableSvgExport` records the shapes paint draws and moves text onto the raster spans the exporter reads. `frameToSvg` fails on a context without it rather than export text alone. Ids in the document take a prefix from its hash, so several SVGs can be inlined in one page. A `newPixelContext` measures text in a 16 px monospace grid; run the frames inside `withSdl` for text measured in the real font. This is the path used for the interactive specimens in this book and for visual regression tests.
-
-## See also
-
-- Building an application: [Quick Start](../getting-started/quickstart.md) and [Tutorials](../tutorials/index.md).
-- Windows and screenshots: [Desktop Windows](../advanced/window-management.md).
-- Rendering internals and the frame: [Architecture & Internals](../architecture/index.md).
+`enableSvgExport` records the shapes paint draws and the text spans the exporter reads; `frameToSvg` fails on a context without it. Ids in the document take a prefix from its hash, so several SVGs can share a page. A `newPixelContext` measures text on a 16 px monospace grid; run the frames inside `withSdl` to measure in the real font. The specimens in this book are made this way.

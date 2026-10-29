@@ -1,7 +1,5 @@
 # Tabs, Tables & Trees
 
-Widgets that show collections: tab strips, sortable tables, and hierarchical trees.
-
 <figure class="nano-figure">
 <img src="../images/gallery-data.svg" alt="A nano-ui frame with a tab strip, a sortable service table, and a file tree.">
 <figcaption>A tab strip, sortable table, and tree in one frame. Rendered with nano-ui-svg.</figcaption>
@@ -36,7 +34,7 @@ let activeKey = tabActive resp
 
 The caller must remove the tab: `tabs'` reports `tabClosed`, it does not remove it. A key no tab has selects the first tab and writes that key back to the `Var`.
 
-`tabBar` / `tabBar'` draw headers only and leave the body to the caller, which is useful for pane layouts and custom bodies. `tabsConfigured` / `tabBarConfigured` take a `TabsConfig`:
+`tabBar` / `tabBar'` draw headers only and leave the body to the caller. `tabsConfigured` / `tabBarConfigured` take a `TabsConfig`:
 
 ```haskell
 let cfg = defaultTabsConfig
@@ -44,7 +42,7 @@ let cfg = defaultTabsConfig
 tabsConfigured cfg active tabs
 ```
 
-Every `TabStyle` is rendered below. The selected tab differs in each row so the treatment is visible:
+The four `TabStyle`s, with a different tab selected in each:
 
 <figure class="nano-figure">
 <img src="../images/tab-styles.svg" alt="Four tab strips: underline, pill, segmented, and contained, each with a different selected tab.">
@@ -103,8 +101,4 @@ fileTree = tree "file-tree"
 
 For large trees, keep the expansion set in a `VarMap` keyed by a stable path, and rebuild the visible items before calling `tree`.
 
-## See also
-
-- The rest of the widget family: [Widget Gallery](index.md).
-- Styling tables and tabs: [Styling & Theming](../styling/index.md) and the [lab](../styling/lab.md).
-- Drag-and-drop tab reordering: [Drag & Drop](drag-and-drop.md).
+To reorder tabs by dragging, see [Drag & Drop](drag-and-drop.md).

@@ -1,7 +1,5 @@
 # Buttons, Menus & Inputs
 
-The controls most applications need: buttons, menus, and the widgets that edit a `Var`.
-
 ## Buttons
 
 ```haskell
@@ -17,8 +15,6 @@ iconButton :: Svg -> Text -> NanoUI Bool
 ```haskell
 whenM (button "Save Document") (liftIO saveFile)
 ```
-
-The `whenM` guard is essential: the view runs every frame, so an unguarded side effect would run forever.
 
 Use the primed form when you need the response: hover state, a rectangle for an anchored popup, or a tooltip.
 
@@ -74,7 +70,7 @@ whenM (menuItemShortcut "Save" saveChord) saveDocument
 whenM (shortcut saveChord) saveDocument
 ```
 
-Only the first binding of a chord in a frame fires, so the open menu’s row wins. A complete menu bar is built in [Build a Notepad](../tutorials/notepad.md).
+Only the first binding of a chord in a frame fires, so the open menu's row wins. A complete menu bar is built in [Build a Notepad](../tutorials/notepad.md).
 
 `contextMenu` attaches a right-click menu to any widget with a `Response`:
 
@@ -87,7 +83,7 @@ _ <- contextMenu rowResp $ do
 
 ## Input widgets
 
-Input widgets take the mutable `Var` they display and edit. They manage caret, selection, focus, and keyboard routing themselves.
+Input widgets take the `Var` they display and edit it, and manage caret, selection, focus, and keys themselves. To reset a field, write the `Var`; to react to an edit, use the primed form's `Response`.
 
 | Widget | Signature | Description |
 | --- | --- | --- |
@@ -167,13 +163,3 @@ colorPicker accent
 ```
 
 `numericInput` accepts digits and a leading minus when the range allows it; arrow keys step, and `Shift` steps ten times as far. `nicDecimals` controls display and accepted precision. `colorPickerRGBA` adds an alpha bar.
-
-## Reading and resetting
-
-All input widgets mutate the `Var` directly and return `()`. To reset a field, write the `Var`; to react, use the primed response. Read below the widget that edits a value when something else displays it, and do not read a value just to pass it back into the same widget.
-
-## See also
-
-- Multi-line editing and undo: [Text Editing](text-editing.md).
-- Widget inventory and naming: [Widget Gallery](index.md).
-- Theming these controls: [Styling & Theming](../styling/index.md).
