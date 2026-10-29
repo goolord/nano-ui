@@ -14,7 +14,7 @@ For a live tour of the modifiers, see the [Interactive Styling Lab](lab.md). For
 | `themePopup` | Dropdowns, context menus, select popouts |
 | `themeFloatingWindow` | Modals, floating windows, inspectors |
 
-A `Style` is `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`. A `Theme` also defines semantic colors: `themeAccent` / `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success/warning/danger tones.
+A `Style` sets `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`. A `Theme` also defines semantic colors: `themeAccent` / `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success/warning/danger tones.
 
 The page behind the view is `pageBackground`: `themeWindow`, unless the theme sets `themePage`. `pageColor` sets one. `panelPage` puts a view that draws no panel of its own on the panel surface. The page sits over the window background, which shows in the gaps between panels:
 

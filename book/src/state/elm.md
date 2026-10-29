@@ -1,6 +1,6 @@
 # Elm-Style State
 
-`nano-ui-emit` is the reducer-based alternative to `Var`: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model.
+`nano-ui-emit` replaces `Var` mutation with typed messages: the view emits them, and a pure reducer folds them into a model.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Elm.hs:full_app}}
@@ -10,9 +10,9 @@ Widgets, layout, focus, and keys are unchanged. Only the state model differs.
 
 ## Emitting
 
-`NanoUIE msg a` is a UI action that can emit only `msg`. There is no `Typeable` constraint and no runtime type test: emitting the wrong type is a compile error.
+`NanoUIE msg a` restricts a UI action to emitting `msg`. There is no `Typeable` constraint and no runtime type test: emitting the wrong type is a compile error.
 
-A `NanoUIE` view is an ordinary `NanoUI` action with the view's message sink in scope (an implicit parameter, `?emit`). Every core widget runs in it unchanged, so `NanoUI.Emit` re-exports `NanoUI` and adds the functions below. An `emit` inside a container, an overlay body, a tab or a menu callback goes to the sink of the view around it.
+Every core widget runs unchanged in a `NanoUIE` view, because the view is an ordinary `NanoUI` action with its message sink in scope (an implicit parameter, `?emit`). `NanoUI.Emit` therefore re-exports `NanoUI` and adds the functions below. An `emit` inside a container, an overlay body, a tab or a menu callback goes to the sink of the view around it.
 
 | Function | Emits when |
 | --- | --- |

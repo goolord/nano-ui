@@ -16,7 +16,7 @@ In the view:
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:task_status}}
 ```
 
-`useTask` is the simpler form when only the latest result matters:
+When only the latest result matters, use `useTask`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:use_task}}
@@ -31,7 +31,7 @@ In the view:
 
 ## `Stream`: repeated pushes
 
-A `Stream` is for sensors, downloads, token streams, and anything that pushes repeatedly:
+Sensors, downloads, token streams, and anything else that pushes repeatedly feed a `Stream`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:stream}}

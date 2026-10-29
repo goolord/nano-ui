@@ -94,7 +94,7 @@ The basic ops take a rectangle or a centre and radius. They need no `NanoUI.Path
 
 ### Paths
 
-A `Path` is a list of steps joined with `<>`. `moveTo` starts a subpath. `lineTo`, `quadTo`, `cubicTo`, and `arc` extend it from the current point, and `close` draws a line back to where it started. Each path below is stroked with `drawStrokePath (path r) 3 blue`. Filled dots are points on the path; hollow dots are control points and arc centres.
+Steps joined with `<>` build a `Path`. `moveTo` starts a subpath. `lineTo`, `quadTo`, `cubicTo`, and `arc` extend it from the current point, and `close` draws a line back to where it started. Each path below is stroked with `drawStrokePath (path r) 3 blue`. Filled dots are points on the path; hollow dots are control points and arc centres.
 
 <img src="../images/canvas/segments.svg" alt="Five cells: a two-segment peak, a quadratic curve with its control point above, an S-shaped cubic curve with two control points, a three-quarter arc, and the same arc closed through its centre into a pie slice.">
 
@@ -128,7 +128,7 @@ Shape helpers build whole subpaths. They never join onto what comes before them,
 
 ### Paints
 
-`P.Solid` is one colour. `P.Linear from to stops` is a gradient along the line from `from` (offset 0) to `to` (offset 1).
+`P.Solid` fills with one colour. `P.Linear from to stops` blends a gradient along the line from `from` (offset 0) to `to` (offset 1).
 
 <img src="../images/canvas/paints.svg" alt="Four cells: a solid blue rounded rectangle, a blue-to-teal gradient across the full width, the same gradient squeezed into the middle third with solid ends, and a disc shading amber to rose to blue along its diagonal.">
 

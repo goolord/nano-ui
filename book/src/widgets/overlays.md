@@ -1,6 +1,6 @@
 # Overlays & Windows
 
-Modals, floating windows, and popups are ordinary `NanoUI` actions that take a `Var Bool` for their open state.
+Modals, floating windows, and popups take a `Var Bool` for their open state and otherwise run like any `NanoUI` action.
 
 ## Call overlays unconditionally
 
@@ -35,7 +35,7 @@ For a modal without a title bar or close button, use `modalPanel` / `modalPanel'
 
 ## Floating windows
 
-`window` is a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:
+`window` draws a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:window}}
@@ -45,7 +45,7 @@ For a modal without a title bar or close button, use `modalPanel` / `modalPanel'
 
 ## Popups
 
-`popup` is a floating panel placed by a `PopupConfig`:
+`popup` floats a panel wherever its `PopupConfig` places it:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:popup}}

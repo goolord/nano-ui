@@ -61,7 +61,7 @@ Cell helpers: `textCell`, `cellWidget`, `widgetCell`, and `Cell` with an explici
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:tree}}
 ```
 
-`TreeItem` is the library type (`treeItemLabel`, `treeItemChildren`), not an app-defined record. `tree` reports the selected **pre-order index** through the `Var Int`, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.
+`tree` takes the library's `TreeItem` (`treeItemLabel`, `treeItemChildren`), not an app-defined record. It reports the selected **pre-order index** through the `Var Int`, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.
 
 For large trees, keep the expansion set in a `VarMap` keyed by a stable path, and rebuild the visible items before calling `tree`.
 

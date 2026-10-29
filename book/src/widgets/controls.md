@@ -24,13 +24,13 @@ Use the primed form when you need the response: hover state, a rectangle for an 
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:button_content}}
 ```
 
-`iconButton` is the leading-icon case; an empty label gives an icon-only square button.
+`iconButton` puts an icon before the label; an empty label gives an icon-only square button.
 
 ## Menus
 
-`menuItem` is a row that returns `True` when clicked. `menuItemShortcut` also displays a chord and binds it while the menu is open. `menuSeparator` and `menuItemDisabled` complete the row set.
+`menuItem` draws a row and returns `True` when clicked. `menuItemShortcut` also displays a chord and binds it while the menu is open. `menuSeparator` and `menuItemDisabled` complete the row set.
 
-A menu bar is a `menuButton'` plus a `popup'` anchored to its rectangle:
+To build a menu bar, anchor a `popup'` to a `menuButton'`'s rectangle:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:menu_bar}}

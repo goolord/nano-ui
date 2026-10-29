@@ -24,7 +24,7 @@ For anything else, `useDrag` tracks a thresholded drag across keyed sources. All
 
 ## Files and text from other applications
 
-The SDL backend delivers the operating system's drag and drop; the RGFW backend does not. `dropZone` is a panel that reports the files and text dropped on it:
+The SDL backend delivers the operating system's drag and drop; the RGFW backend does not. `dropZone` draws a panel and reports the files and text dropped on it:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/DragDrop.hs:drop_zone}}

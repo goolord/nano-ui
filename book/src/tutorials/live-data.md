@@ -43,7 +43,7 @@ What the loop does with it:
 - The worker finishes and wakes the loop for a frame. The next call reports `TaskDone`.
 - Changing the key (typing a new committed query) cancels the old worker with an asynchronous exception and starts the new one.
 
-`useTask` is the simpler variant when only the latest result matters:
+When only the latest result matters, use `useTask`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:use_task}}
@@ -70,7 +70,7 @@ Cancellation is an asynchronous exception, so acquire resources inside the job w
 
 ## 4. Streams: many updates, one frame
 
-A `Stream` is for work that pushes repeatedly: progress ticks, sensor readings, tokens from a model. The producer is a function that receives `update` and runs until it returns or is cancelled:
+Progress ticks, sensor readings, and tokens from a model arrive many times per job, so they go through a `Stream`. Its producer receives `update` and runs until it returns or is cancelled:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:progress_card}}
@@ -85,7 +85,7 @@ A paused progress pane costs no frames.
 
 ## 5. A live chart
 
-The chart is a `Stream` feeding a `PlotCache`. The cache is allocated once and passed to `plot`; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:
+A `Stream` feeds the chart through a `PlotCache`. The cache is allocated once and passed to `plot`; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:chart_handles}}

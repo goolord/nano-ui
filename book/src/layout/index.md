@@ -1,6 +1,6 @@
 # Layout & Scrolling
 
-Layout is a modifier argument to a container: `row` and `column` take a layout, and `rowWith`/`columnWith` take a `Layout -> Layout` function first. Modifiers compose with `(.)`, and **when two set the same property, the leftmost wins**.
+Every container takes its layout as an argument: `row` and `column` take a layout, and `rowWith`/`columnWith` take a `Layout -> Layout` function first. Modifiers compose with `(.)`, and **when two set the same property, the leftmost wins**.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:modifiers}}
@@ -12,7 +12,7 @@ Each example below expands to its code and the frame it renders. The frames add 
 
 ## Containers
 
-A container is a `NanoUI` action that arranges its children. The plain form (`row`) uses the inherited layout; the `...With` form takes a modifier function.
+A container wraps a `NanoUI` block and arranges the widgets it draws. The plain form (`row`) uses the inherited layout; the `...With` form takes a modifier function.
 
 <details class="nano-example">
 <summary><code>row</code> / <code>rowWith</code>: children left to right</summary>
@@ -156,7 +156,7 @@ The same view at 760 px:
 
 ## Modifiers
 
-Modifiers are `Layout -> Layout` functions. The leftmost wins when two set the same property, so `tight . padAll 14` has no padding while `padAll 14 . tight` keeps it.
+Each modifier rewrites a `Layout` (`Layout -> Layout`), so modifiers chain with `(.)`. The leftmost wins when two set the same property, so `tight . padAll 14` has no padding while `padAll 14 . tight` keeps it.
 
 ### Sizing
 

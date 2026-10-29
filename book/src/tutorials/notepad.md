@@ -92,7 +92,7 @@ The Open command starts one and keeps its id:
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:write_document}}
 ```
 
-`documentText` is the only conversion from the document to a `Text`; editing works on the document directly and never rebuilds the whole string per keystroke.
+Only `documentText` converts the document to a `Text`; editing works on the document directly and never rebuilds the whole string per keystroke.
 
 ## 6. The editor
 
@@ -119,7 +119,7 @@ The title is derived every frame from the path and the dirty flag, and set decla
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:set_title}}
 ```
 
-`setWindowTitleUi` is a no-op when the title has not changed, so it is safe to call unconditionally. The imperative window actions (`resizeWindowUi`, `maximizeWindowUi`) are different: they run on every call and belong behind events.
+`setWindowTitleUi` does nothing when the title has not changed, so it is safe to call unconditionally. The imperative window actions (`resizeWindowUi`, `maximizeWindowUi`) are different: they run on every call and belong behind events.
 
 The close request and the modal fit together like this:
 
@@ -147,7 +147,7 @@ The document keeps one undo history shared by typing, context-menu actions, and 
 
 ## 9. The status bar
 
-The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from `documentText`:
+A row of muted labels makes the status bar. Line count comes from the document without materializing its text; word and character counts are computed on demand from `documentText`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:status_bar}}

@@ -13,7 +13,7 @@ Each package adds a backend or one capability to `nano-ui`. Pin them from source
 
 ## Backends
 
-`nano-ui-sdl` is the primary desktop backend:
+Desktop apps normally run on `nano-ui-sdl`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:sdl}}
@@ -21,7 +21,7 @@ Each package adds a backend or one capability to `nano-ui`. Pin them from source
 
 It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (`useFileDialog`), custom title bars (`windowCaption`), and screenshots (`saveScreenshot`, `captureScreenshot`). See [Desktop Windows](../advanced/window-management.md) for the window side.
 
-`nano-ui-rgfw` is the zero-system-dependency alternative:
+`nano-ui-rgfw` needs no system dependencies:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:rgfw}}
