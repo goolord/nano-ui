@@ -100,7 +100,6 @@ test-suite nano-ui-form-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
-    other-modules:    Scope
     ghc-options:      -rtsopts -threaded "-with-rtsopts=-M256m -N1"
     build-depends:
         base >=4.20 && <4.23,
