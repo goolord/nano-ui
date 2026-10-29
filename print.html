@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-7e24e794.js";
+            window.path_to_searchindex_js = "searchindex-b776d972.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -181,7 +181,7 @@
                     <main>
                         <h1 id="nano-ui"><a class="header" href="#nano-ui">nano-ui</a></h1>
 <p>An immediate-mode GUI toolkit for Haskell.</p>
-<p>A view is a <code>NanoUI ()</code> action that the backend re-runs every frame. Widgets return values directly (<code>button</code> returns <code>Bool</code>), input widgets take a mutable <code>Var</code> holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, <code>do</code> notation, and <code>if</code>/<code>case</code>/<code>for_</code>.</p>
+<p>You describe the whole window as one <code>NanoUI ()</code> action, and the backend runs that action again on every frame. The rest of this book calls that action the <em>view</em>. Widgets return values directly (<code>button</code> returns <code>Bool</code>), input widgets take a mutable <code>Var</code> holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, <code>do</code> notation, and <code>if</code>/<code>case</code>/<code>for_</code>.</p>
 <pre><code class="language-haskell">counter :: NanoUI ()
 counter = row $ do
   n &lt;- useVar (0 :: Int)
