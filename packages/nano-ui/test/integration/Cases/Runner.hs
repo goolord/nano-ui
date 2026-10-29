@@ -62,7 +62,12 @@ runLoop ctx edit batches = do
   debug <- newDebugSampler
   waits <- batchedWaits batches
   clearDirty ctx
-  runSessionLoop (edit (quietDriver debug) {sdWaitEvents = waits, sdShouldDraw = \_ _ _ _ _ -> pure True}) ctx emptyInput
+  let driver = edit (quietDriver debug) {sdWaitEvents = waits, sdShouldDraw = \_ _ _ _ _ -> pure True}
+  runSessionLoop driver ctx emptyInput
+
+-- | A draw that runs one frame of @view@.
+viewing :: NanoUI a -> Context -> Input -> Bool -> IO Bool
+viewing view c inp _ = False <$ evalUi c inp view
 
 -- | 'runLoop', counting the frames drawn.
 drawCount :: Context -> (SessionDriver Int -> SessionDriver Int) -> [[Int]] -> IO Int
@@ -149,7 +154,8 @@ runSessionLoopClicksTest ctx failed = do
         d
           { sdApplyEvent = \inp e -> maybe inp (\(b, down) -> applyMouseButton b down inp) (buttonOf e)
           , sdIsButtonEdge = \e -> buttonOf e /= Nothing
-          , sdDraw = \_ inp _ -> False <$ when (anyButtonPressed inp) (modifyIORef' clicks (<> [inputMouseClicks inp]))
+          , sdDraw = \_ inp _ ->
+              False <$ when (anyButtonPressed inp) (modifyIORef' clicks (<> [inputMouseClicks inp]))
           }
     )
     [[1, 2, 1, 2, 1, 2, 4], [3]]
@@ -195,7 +201,8 @@ runSessionLoopWakesTest ctx failed = do
   timeouts <- newIORef []
   clearDirty ctx
   requestWakeAfter ctx (30 * 86400)
-  runSessionLoop (quietDriver debug) {sdWaitEvents = \timeout -> [3] <$ modifyIORef' timeouts (timeout :)} ctx emptyInput
+  let farWake = (quietDriver debug) {sdWaitEvents = \timeout -> [3] <$ modifyIORef' timeouts (timeout :)}
+  runSessionLoop farWake ctx emptyInput
   ts <- readIORef timeouts
   assert failed (not (null ts) && all (\t -> t > 0 && t <= 2147483647) ts)
 
@@ -205,6 +212,7 @@ runSessionLoopWakesTest ctx failed = do
 -- 2 releases Ctrl, 4 types c, 5 Tab, others nothing.
 runSessionLoopHardQuitTest :: Context -> IORef Int -> IO ()
 runSessionLoopHardQuitTest ctx failed = do
+  copies <- newIORef (0 :: Int)
   let typed inp = \case
         1 -> chordInp (ctrl <> key 'c') inp
         2 -> inp {inputModifiers = (inputModifiers inp) {modCtrl = False}}
@@ -212,12 +220,12 @@ runSessionLoopHardQuitTest ctx failed = do
         5 -> chordInp (key KeyTab) inp
         _ -> inp
       quits = drawCount ctx (\d -> d {sdApplyEvent = typed})
-      frames view = drawCount ctx (\d -> d {sdApplyEvent = typed, sdDraw = \c inp _ -> False <$ evalUi c inp view})
+      frames view = drawCount ctx (\d -> d {sdApplyEvent = typed, sdDraw = viewing view})
+      copy = whenM (shortcut (ctrl <> key 'c')) (liftIO (modifyIORef' copies (+ 1)))
   assertEq failed 1 =<< quits [[1, 2], [6], [3]]
   assertEq failed 1 =<< quits [[1], [6], [3]]
   assertEq failed 2 =<< quits [[4, 2], [6], [3]]
-  copies <- newIORef (0 :: Int)
-  assertEq failed 2 =<< frames (whenM (shortcut (ctrl <> key 'c')) (liftIO (modifyIORef' copies (+ 1)))) [[1], [6], [3]]
+  assertEq failed 2 =<< frames copy [[1], [6], [3]]
   assertEq failed 1 =<< readIORef copies
   -- Two Tabs focus the field; one more wraps round to the button.
   let fields = button "b" >> void (withValue "" textInput')
@@ -246,17 +254,18 @@ runSessionLoopKeysTest ctx failed = do
         6 -> applyKey (KeyChar 's') False inp
         7 -> ctrlOn False inp
         _ -> inp
-      record _ inp _ = False <$ modifyIORef' frames (<> [(inputChars inp, toList (inputKeys inp), modCtrl (inputModifiers inp))])
-      run batches = do
-        writeIORef frames []
-        runLoop ctx (\d -> d {sdApplyEvent = apply, sdIsSessionQuit = (== 0), sdDraw = record}) (batches ++ [[0]])
-        readIORef frames
-  assertEq failed [("ll", [KeyChar 'l', KeyChar 'l', KeyEnter, KeyEnter], False), ("x", [], False), ("", [KeyChar 's'], True), ("", [], False)]
+      record _ inp _ =
+        False <$ modifyIORef' frames (<> [(inputChars inp, toList (inputKeys inp), modCtrl (inputModifiers inp))])
+      keyed d = d {sdApplyEvent = apply, sdIsSessionQuit = (== 0), sdDraw = record}
+      run batches = writeIORef frames [] >> runLoop ctx keyed (batches ++ [[0]]) >> readIORef frames
+  let ctrlS = ("", [KeyChar 's'], True)
+  assertEq failed [("ll", [KeyChar 'l', KeyChar 'l', KeyEnter, KeyEnter], False), ("x", [], False), ctrlS, ("", [], False)]
     =<< run [[1, 1, 2, 2, 3, 4, 5, 6, 7]]
   -- One event per batch, as in steady typing, adds no frames.
   assertEq failed 7 . length =<< run (map pure [1, 2, 3, 4, 5, 6, 7])
   -- 1 presses Down (a repeat while held), 2 releases it, and 4 types "a".
-  let typeA inp = applyKey (KeyChar 'a') False (applyKey (KeyChar 'a') True inp) {inputChars = inputChars inp <> "a"}
+  let typeA inp =
+        applyKey (KeyChar 'a') False (applyKey (KeyChar 'a') True inp) {inputChars = inputChars inp <> "a"}
       repeats d =
         d
           { sdApplyEvent = \inp -> \case
@@ -275,7 +284,8 @@ runSessionLoopCloseTest :: Context -> IORef Int -> IO ()
 runSessionLoopCloseTest _ failed = do
   let fresh exitOnClose = do
         ctx <- newContext
-        ctx <$ installWindowHost ctx defaultWindowSettings {wsExitOnCloseRequest = exitOnClose} defaultWindowHost
+        let settings = defaultWindowSettings {wsExitOnCloseRequest = exitOnClose}
+        ctx <$ installWindowHost ctx settings defaultWindowHost
   exits <- fresh True
   assertEq failed 1 =<< drawCount exits id [[], [3]]
   quitFirst <- fresh True
@@ -283,7 +293,7 @@ runSessionLoopCloseTest _ failed = do
   assertEq failed 0 =<< drawCount quitFirst id []
   asks <- fresh False
   seen <- newIORef []
-  runLoop asks (\d -> d {sdDraw = \c inp _ -> False <$ evalUi c inp (closeWatcher seen ((== 1) . length . filter id))}) [[3], [], [3]]
+  runLoop asks (\d -> d {sdDraw = viewing (closeWatcher seen ((== 1) . length . filter id))}) [[3], [], [3]]
   assertEq failed [True, False, True] =<< readIORef seen
   skips <- fresh False
   decisions <- newIORef (0 :: Int)
@@ -294,7 +304,7 @@ runSessionLoopCloseTest _ failed = do
         d
           { -- The first pass, the close request's, draws nothing.
             sdShouldDraw = \_ _ _ _ _ -> atomicModifyIORef' decisions (\n -> (n + 1, n > 0))
-          , sdDraw = \c inp _ -> False <$ evalUi c inp (closeWatcher seenAfterSkip (const True))
+          , sdDraw = viewing (closeWatcher seenAfterSkip (const True))
           }
     )
     [[3], [], [3]]
@@ -309,6 +319,6 @@ runDrawingLockTest _ failed = do
     assertEq failed Unmasked =<< getMaskingState
     assertEq failed Nothing =<< tryWithDrawingLock lock (pure ())
   assertEq failed (Just ()) result
-  failure <- try (tryWithDrawingLock lock (throwIO (userError "draw failed"))) :: IO (Either IOException (Maybe ()))
+  failure <- try @IOException (tryWithDrawingLock lock (throwIO (userError "draw failed")))
   assertEq failed True (either (const True) (const False) failure)
   assertEq failed (Just ()) =<< tryWithDrawingLock lock (pure ())

@@ -57,17 +57,22 @@ typeInto ui = do
   _ <- run2Frames ctx inp0 ui
   costOf . snd <$> frameCost ctx (inp0 {inputChars = "a"}) inp0 ui
 
--- | A press on the response the view returns, then the measured release.
-clickOn :: NanoUI Response -> IO Cost
-clickOn ui = do
+-- | A press on the response the view returns, then a measured release, or
+-- a held move 30 px right when @dragging@.
+pressOn :: Bool -> NanoUI Response -> IO Cost
+pressOn dragging ui = do
   ctx <- newContext
-  r <- warmup2 ctx inp0 ui
-  let pos = centerOf r
-      hover = inp0 {inputMousePos = pos}
-      (press, release) = clickPair hover pos
+  pos@(V2 x y) <- centerOf <$> warmup2 ctx inp0 ui
+  let hover = inp0 {inputMousePos = pos}
+      moved = holdAt hover (V2 (x + 30) y)
+      (next, after) = if dragging then (moved, moved) else (releaseAt (pressAt hover pos), hover)
   _ <- run2Frames ctx hover ui
-  _ <- runFrame ctx press ui
-  costOf . snd <$> frameCost ctx release hover ui
+  _ <- runFrame ctx (pressAt hover pos) ui
+  costOf . snd <$> frameCost ctx next after ui
+
+clickOn, dragOn :: NanoUI Response -> IO Cost
+clickOn = pressOn False
+dragOn = pressOn True
 
 -- | A frame with no input, once the view has settled.
 idleFrame :: NanoUI a -> IO Cost
@@ -75,18 +80,6 @@ idleFrame ui = do
   ctx <- newContext
   _ <- run2Frames ctx inp0 ui
   costOf . snd <$> frameCost ctx inp0 inp0 ui
-
--- | A press on the returned slider's centre, then a measured held move.
-dragOn :: NanoUI Response -> IO Cost
-dragOn ui = do
-  ctx <- newContext
-  r <- warmup2 ctx inp0 ui
-  let pos = centerOf r
-      hover = inp0 {inputMousePos = pos}
-      to = let V2 x y = pos in V2 (x + 30) y
-  _ <- run2Frames ctx hover ui
-  _ <- runFrame ctx (pressAt hover pos) ui
-  costOf . snd <$> frameCost ctx (holdAt hover to) (holdAt hover to) ui
 
 -- | The hooks Vars replaced (23217753) cost (2, Full, 1) for a bound field.
 runPassesTest :: Context -> IORef Int -> IO ()

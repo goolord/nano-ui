@@ -77,7 +77,8 @@ runAnimationValuesTest ctx failed = do
 runAnimateToStaysSettledTest :: Context -> IORef Int -> IO ()
 runAnimateToStaysSettledTest ctx failed = do
   let inp = withDelta 200 100 0.05
-      ui shown = (if shown then withKey ("fade" :: String) (animateTo (Tween EaseLinear 0.2 0) 1) else pure 0) <* label "rest"
+      fade = withKey ("fade" :: String) (animateTo (Tween EaseLinear 0.2 0) 1)
+      ui shown = (if shown then fade else pure 0) <* label "rest"
       near v x = abs (x - v) <= 0.001
   replicateM_ 10 (runFrame ctx inp (ui True))
   assert failed . not =<< anyAnimating ctx
@@ -123,7 +124,8 @@ runCompositeAnimationIsolationTest _ failed = do
   let color = colorRGBA 17 80 190 255
   assertEq failed ([0, 1], V2 3 5) (traverseChannels (\i x -> ([i], x + fromIntegral i)) (V2 3 4))
   assertEq failed ([0, 1, 2, 3], color) (traverseChannels (\i x -> ([i], x)) color)
-  assertEq failed (colorRGBA 0 255 255 255) (snd (traverseChannels (\i _ -> ([i], if i == 0 then -1 else 2)) color))
+  let clamped = snd (traverseChannels (\i _ -> ([i], if i == 0 then -1 else 2)) color)
+  assertEq failed (colorRGBA 0 255 255 255) clamped
   forM_ [animateToA (Tween EaseLinear 0.2 0), animateToA (Spring presetSmooth)] $ \animateVector -> do
     ctx <- newContext
     let inp = withDelta 200 100 0.05
@@ -145,7 +147,7 @@ runButtonHoverAnimTest ctx failed = do
   let inp0 = withDelta 200 100 0.016
       ui = column (button "Hover")
   _ <- runFrame ctx inp0 ui
-  vals <- replicateM 5 (runFrame ctx inp0 {inputMousePos = V2 10 10} ui >> getHotId ctx >>= getAnimationValue ctx)
+  vals <- replicateM 5 $ runFrame ctx inp0 {inputMousePos = V2 10 10} ui >> getHotId ctx >>= getAnimationValue ctx
   assert failed (and (zipWith (\a b -> b + 0.001 >= a) vals (drop 1 vals)))
   assert failed (last vals >= 0.4)
   _ <- runClick ctx inp0 ui (V2 10 10)
@@ -210,7 +212,8 @@ runAnimationLeftOutTest _ failed = do
         _ <- animate (Tween EaseLinear 120 0) 0 1
         _ <- animateTo (Spring (SpringParams 180 0 1)) 1
         label "moving"
-  forM_ [(column (label "Loading" >> spinner), column (label "Loaded")), (tweenAndSpring, label "other")] $ \(shown, other) -> do
+      loading = column (label "Loading" >> spinner)
+  forM_ [(loading, column (label "Loaded")), (tweenAndSpring, label "other")] $ \(shown, other) -> do
     ctx <- newContext
     let inp = withDelta 400 300 0.016
     replicateM_ 5 (runFrame ctx inp shown)

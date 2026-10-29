@@ -24,7 +24,8 @@ tests =
 
 -- | A custom widget of a fixed size, focusable or not.
 sizedWidget :: Float -> Float -> Bool -> CustomWidgetSpec ()
-sizedWidget w h focusable = defaultCustomWidgetSpec {widgetLayout = fixedWH w h defaultLayout, widgetFocusable = focusable}
+sizedWidget w h focusable =
+  defaultCustomWidgetSpec {widgetLayout = fixedWH w h defaultLayout, widgetFocusable = focusable}
 
 -- | 'lastRect' is nothing before a widget's first frame and its laid-out rect
 -- after. 'uiFontSize' is the metrics' line height until overridden.
@@ -136,12 +137,14 @@ runLayoutVariantsTest :: Context -> IORef Int -> IO ()
 runLayoutVariantsTest _ failed = do
   let sim :: Float -> Float -> NanoUI a -> Sim a () -> IO ()
       sim w h ui script = newContext >>= \c -> runSim c failed (withInput w h) ui script
-      filler = respRect . fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = (fillW . fillH) defaultLayout}
-  sim 400 300 (rowWith (tight . gap 0 . fixedH 60 . fillW) (fst <$> withValue False (checkboxWith' alignMid "Match case"))) $ do
+      filler = respRect . fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = fillW (fillH defaultLayout)}
+      centred = fst <$> withValue False (checkboxWith' alignMid "Match case")
+      ab = (,) <$> buttonWith' (fixedWH 50 20) "A" <*> buttonWith' (fixedWH 50 20) "B"
+  sim 400 300 (rowWith (tight . gap 0 . fixedH 60 . fillW) centred) $ do
     Rect _ y _ h <- respRect <$> result
     checkLt h 60
     check (abs (y + h / 2 - 30) <= 1)
-  sim 400 300 (rowWith' (fillW . tight . gap 0) ((,) <$> buttonWith' (fixedWH 50 20) "A" <*> buttonWith' (fixedWH 50 20) "B")) $ do
+  sim 400 300 (rowWith' (fillW . tight . gap 0) ab) $ do
     ((a, b), bar) <- result
     checkEq 400 (rectW (respRect bar))
     checkEq (rectX (respRect a) + 50) (rectX (respRect b))
@@ -219,7 +222,8 @@ runPaneGridInitialTest ctx failed = do
   writeIORef closing False
   assertEq failed [[], []] =<< replicateM 2 (evalUi once inp seeded)
   tabbed <- newContext
-  let grids focusable = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgFocusable = focusable} >> focusedWidget
+  let grids focusable =
+        paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgFocusable = focusable} >> focusedWidget
   _ <- warmup2 tabbed inp (grids False)
   _ <- runFrame tabbed (tabInp inp) (grids False)
   assertEq failed (WidgetId 0) =<< evalUi tabbed inp (grids False)
@@ -251,7 +255,8 @@ runScrollUiTest ctx failed = do
   run (\sid -> scrollRectIntoViewUi sid (Rect 0 500 1 20) ScrollNearest ScrollInstant)
   assertJustM failed offsetNow $ \y -> assert failed (y >= 320 && y <= 500)
   run (\sid -> setScrollOffsetUi sid (V2 0 5000))
-  assertJustM failed (snd <$> evalUi ctx inp ui) $ \m -> assertEq failed (v2Y (scrollRange m)) (v2Y (scrollOffset m))
+  assertJustM failed (snd <$> evalUi ctx inp ui) $ \m ->
+    assertEq failed (v2Y (scrollRange m)) (v2Y (scrollOffset m))
   before <- offsetNow
   run (\sid -> scrollPagesUi sid (V2 0 (-0.5)) ScrollInstant)
   after <- offsetNow

@@ -76,7 +76,7 @@ runExplicitDamageTest ctx failed = do
   dmg <- damageOf 1 (\b -> damageWidgetNow (respId b) (DamageInflated sliderDamageSlop))
   let Rect ex ey ew eh = rectInflate sliderDamageSlop (respRect btn)
   case dmg of
-    DamageClip (Rect x y w h) -> unless (all ((< 0.05) . abs) [x - ex, y - ey, w - ew, h - eh]) (assertEq failed (Rect ex ey ew eh) (Rect x y w h))
+    DamageClip (Rect x y w h) -> assert failed (all ((< 0.05) . abs) [x - ex, y - ey, w - ew, h - eh])
     DamageFull -> assert failed False
   isEmpty 1
   assertEq failed (DamageClip (Rect 5 5 20 20)) =<< damageOf 1 (const (damageRectNow (Rect 5 5 20 20)))
@@ -217,7 +217,8 @@ runContentChangeDamageTest _ failed = do
   writeIORef frameRef (ImageId 2)
   _ <- runFrame imgCtx (withInputOff 320 200) page
   dmg <- takeDamage imgCtx
-  assertJustM failed (getPrevRect imgCtx wid) $ \r -> assert failed (clipCovers dmg r && clipUnder (320 * 200 / 4) dmg)
+  assertJustM failed (getPrevRect imgCtx wid) $ \r ->
+    assert failed (clipCovers dmg r && clipUnder (320 * 200 / 4) dmg)
 
 -- | A clip frame paints its region over the page backdrop (or an unfilled
 -- menu title keeps its lost hover), far changes as two pieces, and with
@@ -238,7 +239,8 @@ runClipFramePaintTest _ failed = do
   takeDamage ctx >>= \case
     DamageClip clip -> do
       assert failed (covers clip (respRect file))
-      assertJust failed (listToMaybe quads) $ \(r, c) -> assert failed (covers r clip) >> assertEq failed (pageBackground theme) c
+      assertJust failed (listToMaybe quads) $ \(r, c) ->
+        assert failed (covers r clip) >> assertEq failed (pageBackground theme) c
     DamageFull -> assert failed False
   let corners k = columnWith (fillW . fillH) $ do
         label (T.pack (show (k :: Int)))

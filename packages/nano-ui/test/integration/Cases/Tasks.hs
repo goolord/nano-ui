@@ -229,7 +229,8 @@ runTaskFailureTest ctx failed = do
     _ <- wait 0
     putMVar gate ()
     Just (statuses, plain) <- frameUntil wait ctx ui (all (isJust . failure) . fst)
-    assert failed (and (zipWith (\s msg -> maybe False (msg `isInfixOf`) (failure s)) statuses ["boom", "lazy"]))
+    let says s msg = maybe False (msg `isInfixOf`) (failure s)
+    assert failed (and (zipWith says statuses ["boom", "lazy"]))
     assertEq failed Nothing plain
     threadDelay 20000
     assertEq failed 0 =<< readIORef uncaught
@@ -259,7 +260,8 @@ burster :: IO ((Int -> IO ()) -> IO (), IO ())
 burster = do
   go <- newEmptyMVar
   done <- newEmptyMVar
-  pure (\step -> takeMVar go >> mapM_ step [1 .. 1000] >> putMVar done () >> takeMVar go, putMVar go () >> takeMVar done)
+  let produce step = takeMVar go >> mapM_ step [1 .. 1000] >> putMVar done () >> takeMVar go
+  pure (produce, putMVar go () >> takeMVar done)
 
 -- | A burst faster than the frame rate costs one frame showing the last
 -- value: from an app thread that writes state and wakes the loop with
@@ -276,7 +278,9 @@ runBurstTest _ failed = do
         _ <- useTask job ("stream" :: String) (produceA (\i -> writeIORef latest i >> wake))
         n <- liftIO (readIORef latest)
         n <$ lamp (n > 0)
-      streamed = useStream stream ("stream" :: String) 0 (\update -> produceB (update . (+))) >>= \n -> n <$ lamp (n > 0)
+      streamed = do
+        n <- useStream stream ("stream" :: String) 0 (\update -> produceB (update . (+)))
+        n <$ lamp (n > 0)
   forM_ [(woken, letGoA, 1000), (streamed, letGoB, 500500)] $ \(ui, letGo, final) -> do
     ctx <- newContext
     wait <- newWakeSignal ctx

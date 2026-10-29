@@ -28,10 +28,12 @@ runSimdWritesTest _ failed = do
           fillBytes vp 0xa5 160
           fillBytes ip 0xa5 56
           write vp ip
-          assertEq failed (concat expected) =<< forM [0 .. 31 :: Int] (\i -> peekByteOff vp (16 + i * 4))
-          assertEq failed ([7, 8, 9, 7, 9, 10] :: [Word32]) =<< forM [0 .. 5 :: Int] (\i -> peekByteOff ip (16 + i * 4))
-          forM_ [(vp, 144), (ip, 40)] $ \(ptr, end) ->
-            assertEq failed (replicate 32 0xa5 :: [Word8]) =<< mapM (peekByteOff ptr) ([0 .. 15] ++ [end .. end + 15])
+          let words4 p n = forM [0 .. n - 1 :: Int] (\i -> peekByteOff p (16 + i * 4))
+          assertEq failed (concat expected) =<< words4 vp 32
+          assertEq failed ([7, 8, 9, 7, 9, 10] :: [Word32]) =<< words4 ip 6
+          forM_ [(vp, 144), (ip, 40)] $ \(ptr, end) -> do
+            guards <- mapM (peekByteOff ptr) ([0 .. 15] ++ [end .. end + 15])
+            assertEq failed (replicate 32 0xa5 :: [Word8]) guards
   checkQuad
     (\vp ip -> pokeQuadSIMD vp 16 ip 16 2 3 5 7 0 0.25 0.5 1 1 0 0.5 1 7)
     [ [2, 3, 1, 0, 0.5, 1, 0, 0.25]
@@ -40,7 +42,9 @@ runSimdWritesTest _ failed = do
     , [2, 10, 1, 0, 0.5, 1, 0, 1]
     ]
   checkQuad
-    (\vp ip -> pokeQuadGradientSIMD vp 16 ip 16 2 3 5 7 0.25 0.5 (1, 0, 0, 1) (0, 1, 0, 1) (0, 0, 1, 1) (1, 1, 1, 0.5) 7)
+    ( \vp ip ->
+        pokeQuadGradientSIMD vp 16 ip 16 2 3 5 7 0.25 0.5 (1, 0, 0, 1) (0, 1, 0, 1) (0, 0, 1, 1) (1, 1, 1, 0.5) 7
+    )
     [ [2, 3, 1, 0, 0, 1, 0.25, 0.5]
     , [7, 3, 0, 1, 0, 1, 0.25, 0.5]
     , [7, 10, 0, 0, 1, 1, 0.25, 0.5]

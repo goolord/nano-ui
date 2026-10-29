@@ -101,21 +101,18 @@ runFlexSizingTest ctx failed = forM_ cases $ \(w, h, ui, size, want) -> do
     shrink l = l {layoutWidth = Shrink 1}
     rowOf w = rowWith (fixedW w . tight . gap 0) . sequence
     widths = pure . rectW
+    sizes r = [rectW r, rectH r]
     -- Spacers keep a non-zero width: prev-rect tracking skips zero-area rects.
     growSpacer = currentId <* spacer (Fixed 10) (Grow 1)
+    halves = rowWith (fixedW 206 . tight . gap 6) (sequence [sized (percent 50) "A", sized (percent 50) "B"])
     cases :: [(Float, Float, NanoUI [WidgetId], Rect -> [Float], [[Float]])]
     cases =
       [ (210, 40, rowOf 210 [filling id "A", filling id "AAAAA"], widths, [[105], [105]])
       , (200, 40, rowOf 200 [filling id "A", filling id (T.replicate 15 "A")], widths, [[20], [180]])
-      , (240, 40, rowOf 240 [filling (minW 12) "A", filling (minW 60) "A", filling (minW 130) "A"], widths, [[50], [60], [130]])
+      , (240, 40, rowOf 240 (map (`filling` "A") [minW 12, minW 60, minW 130]), widths, [[50], [60], [130]])
       , (60, 200, columnWith (fixedH 200 . tight . gap 0) (sequence [growSpacer, growSpacer]), pure . rectH, [[100], [100]])
       , (200, 80, rowOf 200 [sized (percent 25) "A", sized (percent 75) "B"], widths, [[50], [150]])
-      , ( 300
-        , 80
-        , rowWith (fixedW 206 . tight . gap 6) (sequence [sized (percent 50) "A", sized (percent 50) "B"])
-        , \r -> [rectX r, rectW r]
-        , [[0, 100], [106, 100]]
-        )
+      , (300, 80, halves, \r -> [rectX r, rectW r], [[0, 100], [106, 100]])
       , ( 400
         , 200
         , rowOf 100 [sized shrink "abcdefghijkl", spacer (Grow 1) (Fixed 5) >> respId <$> buttonWith' tight "X"]
@@ -123,7 +120,7 @@ runFlexSizingTest ctx failed = forM_ cases $ \(w, h, ui, size, want) -> do
         , [[64], [100]]
         )
       , (400, 200, rowOf 100 [sized shrink "abcdefghijkl" <* labelWith (shrink . tight) "ab"], widths, [[100]])
-      , (320, 240, columnWith (fixedW 160 . tight) (sequence [sized (fixedAspectW 160 2) "X"]), \r -> [rectW r, rectH r], [[160, 80]])
+      , (320, 240, columnWith (fixedW 160 . tight) (sequence [sized (fixedAspectW 160 2) "X"]), sizes, [[160, 80]])
       ]
 
 -- | An end-aligned label's text ends at the label's right edge.
@@ -176,7 +173,8 @@ runEmptyFrameTest ctx failed = do
   _ <- needsRedraw ctx inp0 (inp0 {inputMousePos = V2 60 60})
   _ <- uiCursorKind ctx inp0
   wid <- warmup2 ctx inp0 (row (currentId <* image (fixedWH 40 24) (ImageId 0)))
-  assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) -> assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
+  assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) ->
+    assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
 
 -- | Pointer cursor over a button and a (pressed) checkbox only. A checkbox
 -- shows its Var's value before any click stores state, and each click at
@@ -281,6 +279,13 @@ testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40
 recordPane :: IORef (IM.IntMap v) -> Word64 -> v -> NanoUI ()
 recordPane ref pid v = liftIO (modifyIORef' ref (IM.insert (fromIntegral pid) v))
 
+-- | Drag the root divider of a 600 by 400 grid from its middle to x = 120.
+dragDividerTo120 :: Context -> NanoUI a -> IO ()
+dragDividerTo120 ctx ui = runDragFrom ctx inp ui (V2 300 200) (V2 120 200) >> void (runFrame ctx (releaseAt hold) ui)
+  where
+    inp = withInput 600 400
+    hold = holdAt inp (V2 120 200)
+
 -- | Drop previews simulate the post-drop layout (lifting a pane re-flows a
 -- mixed-axis grid) and size-preserving drops keep the pane's extent. Live, a
 -- drop lands with every pane's state, outside the grid cancels, and a drag
@@ -295,12 +300,13 @@ runPaneGridMixedDragTest ctx failed = do
       r2 = lay tree0 M.! 2
       r3 = lay tree0 M.! 3
       preview dt = dpRect <$> dropPreviewTreeSized Nothing minSize gutter tree0 1 0 base dt
+      within (Rect x y w h) fx fy = V2 (x + w * fx) (y + h * fy)
   assertEq failed (M.fromList [(1, Rect 0 0 298 400), (2, Rect 302 0 298 198), (3, Rect 302 202 298 198)]) (lay tree0)
   -- With pane 1 lifted the right branch fills the grid, so an edge drop on
   -- pane 3 lands across its foot, not in half its old rect (302 301 298 99).
   forM_
-    [ (dropTargetForPane r3 (V2 (rectX r3 + rectW r3 / 2) (rectY r3 + rectH r3 * 0.9)) 3, DropSplit 3 AxisH False, Rect 0 303 600 97)
-    , (dropTargetForPane r2 (V2 (rectX r2 + rectW r2 * 0.9) (rectY r2 + rectH r2 / 2)) 2, DropSplit 2 AxisV False, r2)
+    [ (dropTargetForPane r3 (within r3 0.5 0.9) 3, DropSplit 3 AxisH False, Rect 0 303 600 97)
+    , (dropTargetForPane r2 (within r2 0.9 0.5) 2, DropSplit 2 AxisV False, r2)
     , (dropTargetForPane r2 (spanCenter r2) 2, DropSwap 2, r2)
     , (DropTop AxisV True, DropTop AxisV True, Rect 0 0 298 400)
     ]
@@ -447,12 +453,14 @@ runPaneGridDropPreviewTest ctx failed = do
         assert failed (not (IM.member p lifted) && not (IM.member p during) && IM.member p after)
         assertEq failed during (IM.delete p after)
   replicateM_ 2 (layoutAt inp0)
-  -- Pane 1 left, 3 and 5 right; the root divider dragged to x = 120.
-  mapM_ (\i -> runFrame ctx i ui) [pressAt inp0 (V2 300 200), holdAt inp0 (V2 120 200), releaseAt (holdAt inp0 (V2 120 200))]
+  -- Pane 1 left, 3 and 5 right, uneven.
+  dragDividerTo120 ctx ui
   uneven <- layoutAt inp0
-  assertEq failed (IM.fromList [(1, Rect 0 0 112 400), (3, Rect 128 0 472 192), (5, Rect 128 208 472 192)]) (IM.map (wholePx . fst) uneven)
+  assertEq failed (IM.fromList [(1, Rect 0 0 112 400), (3, Rect 128 0 472 192), (5, Rect 128 208 472 192)]) $
+    IM.map (wholePx . fst) uneven
   -- The model rects are the solver's: the strip spans its pane.
-  assert failed (all (\(m, s) -> (rectX (wholePx m), rectW (wholePx m)) == (rectX (wholePx s), rectW (wholePx s))) uneven)
+  let across r = (rectX (wholePx r), rectW (wholePx r))
+  assert failed (all (\(m, s) -> across m == across s) uneven)
   -- A centre drop swaps: lifted, pane 3 spans the top row, and the hover
   -- already shows it in pane 1's narrow column.
   swap@(liftedS, duringS, _) <- dragPane 1 (at 3 (0.5, 0.5))
@@ -514,8 +522,8 @@ runPaneGridPinnedPaneTest ctx failed = do
         readIORef rects
       inp0 = withInput 600 400
   replicateM_ 2 (warmup2 ctx inp0 (ui True))
-  -- The divider dragged to x = 120: the 16px gutter leaves 584 to share.
-  mapM_ (\i -> runFrame ctx i (ui True)) [pressAt inp0 (V2 300 200), holdAt inp0 (V2 120 200), releaseAt (holdAt inp0 (V2 120 200))]
+  -- The 16px gutter leaves 584 to share.
+  dragDividerTo120 ctx (ui True)
   forM_
     [ (True, 600, 2, [(1, 112), (3, 472)])
     , (True, 900, 1, [(1, 112)])

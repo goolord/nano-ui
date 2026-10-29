@@ -43,7 +43,8 @@ runWrapTruncateTest ctx failed = do
     , (10, flags, 30, ["\x1F1FA\x1F1F8", "\x1F1EB\x1F1F7"])
     , (10, "a" <> england, 30, ["a", england])
     ]
-    $ \(k, txt, w, want) -> assertEq failed want =<< wrapTextLinesIO (\t -> pure (k * fromIntegral (T.length t))) txt w
+    $ \(k, txt, w, want) ->
+      assertEq failed want =<< wrapTextLinesIO (\t -> pure (k * fromIntegral (T.length t))) txt w
   forM_
     [ (monospaceMetrics 10, 55, "ae\x0301\&bcd", "a...")
     , (monospaceMetrics 10, 65, flags <> "xyz", "\x1F1FA\x1F1F8...")
