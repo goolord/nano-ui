@@ -4,26 +4,15 @@ module Cases.Scroll (tests) where
 import Spec
 import Data.List (sort)
 import Data.Maybe (isJust)
-import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Ptr (Ptr, castPtr)
-import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
-import NanoUI.Internal.Context
-  ( InteractionState (isScrollDrag)
-  , ctxNodeArena
-  , getsInteraction
-  , setDrawSnapScale
-  )
+import NanoUI.Internal.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Internal.Layout.Arena
   ( findNodeM
-  , getClipBounds
-  , getClipRect
   , getNodeValue
   , getNodeType
   , getNodeRect
   , getScrollContentW
   , getWidgetId
-  , lookupNodeByWidgetId
   )
 import NanoUI.Testing.Sim
 
@@ -49,10 +38,6 @@ tests =
 numbered :: String -> Int -> NanoUI ()
 numbered prefix n = mapM_ (\i -> label (T.pack (prefix <> show i))) [1 .. n]
 
--- | Eight lines in an 80px list.
-eightLines :: NanoUI (WidgetId, ())
-eightLines = scrollArea (fillW . fixedH 80) (column (replicateM_ 8 (label "scroll line")))
-
 -- | The thumb shows a grab cursor and, pressed, a grabbing one, and neither
 -- behind a modal. Hovered or dragged anywhere it brightens; moving onto or
 -- off the bar wakes a frame repainting the bar alone, moving along it none.
@@ -60,6 +45,7 @@ runScrollThumbTest :: Context -> IORef Int -> IO ()
 runScrollThumbTest ctx failed = do
   dialog <- newVar False
   let off = withInputOff 200 120
+      eightLines = scrollArea (fillW . fixedH 80) (column (replicateM_ 8 (label "scroll line")))
       ui = eightLines <* modal dialog "Title" (label "body")
   (sid, ()) <- warmup2 ctx off ui
   theme <- readIORef (ctxTheme ctx)
@@ -170,7 +156,7 @@ runScrollDamageTest ctx failed = do
         pure cb
   runSim pixel failed (withInputOff 400 160) controls $ do
     _ <- moveTo . On =<< result
-    dmg <- liftIO (takeDamage pixel)
+    dmg <- frameDamage
     check (case dmg of DamageFull -> True; DamageClip (Rect _ y _ h) -> y >= -1 && y + h <= 161)
 
 -- | A page-level scroller paints no well, so every clip frame fills its
@@ -246,7 +232,7 @@ runNestedScrollTest ctx failed = do
         pure inner
   runSim ctx failed (withInput 240 220) ui $ do
     (outer, inner) <- result
-    let offsets = liftIO ((,) <$> getScrollOffset ctx outer <*> getScrollOffset ctx inner)
+    let offsets = (,) <$> scrollOffsetOf outer <*> scrollOffsetOf inner
         notch = frameWith (\i -> i {inputScroll = V2 0 1})
         pump prev = do
           (_, now) <- notch >> offsets
@@ -254,7 +240,7 @@ runNestedScrollTest ctx failed = do
     r@(Rect ix iy iw ih) <- prevRect inner
     Rect _ oy _ oh <- prevRect outer
     pressTab 1
-    check . (/= WidgetId 0) =<< liftIO (getFocusId ctx)
+    check . (/= WidgetId 0) =<< focusedId
     _ <- wheel (at 230 210) (V2 0 1)
     checkEq (0, 0) =<< offsets
     _ <- wheel (Within r) (V2 0 1)
@@ -278,7 +264,7 @@ runNestedScrollTest ctx failed = do
     r <- prevRect inner
     check (v2Y (spanCenter r) > 80 && v2Y (spanCenter r) < 400)
     _ <- wheel (Within r) (V2 0 1)
-    checkEq 0 =<< liftIO (getScrollOffset c inner)
+    checkEq 0 =<< scrollOffsetOf inner
 
 -- | A button scrolled into view, in a fixed or a page-level scroller, takes
 -- the click where it is drawn. One scrolled out keeps its last rect, but a
@@ -297,7 +283,7 @@ runScrollHitTest _ failed = do
       wheelDown n = do
         (sid, _, _) <- result
         replicateM_ n (wheel (OnWidget sid) (V2 0 1))
-        liftIO . (`getScrollOffset` sid) =<< simContext
+        scrollOffsetOf sid
       hitOf (_, _, hit) = hit
   let hosts =
         [(newContext, withInput 240 160, fillW . fixedH 80), (newPixelContext, withInput 640 120, tight . grow)]
@@ -315,11 +301,11 @@ runScrollHitTest _ failed = do
     (_, b, _) <- result
     r <- prevRect (respId b)
     checkEq UiCursorDefault =<< cursorAt (Within r)
-    check . (/= respId b) =<< liftIO (getHotId ctx)
+    check . (/= respId b) =<< hotId
     checkEq "" . hitOf =<< click (Within r)
 
 -- | Content of a scroller outside its parent's viewport has an empty clip
--- (rather than none) and takes no pointer input, even scrolled up into the
+-- (rather than none, which would draw it) and takes no pointer input, even scrolled up into the
 -- outer viewport's rect. In view, a pinned button wins over layered ones,
 -- and the top layer's button wins beside it.
 runDisjointViewportTest :: Context -> IORef Int -> IO ()
@@ -338,16 +324,12 @@ runDisjointViewportTest ctx failed = do
       targets bs =
         let V2 _ y = centerOf (bs !! 1)
          in [(1, V2 (rectX (respRect (bs !! 1)) + 10) y), (2 :: Int, centerOf (bs !! 2))]
-      na = ctxNodeArena ctx
       buttonsAfter offsets = liftIO offsets >> (\(_, _, bs) -> bs) <$> settle
-      hotAt p = moveTo (At p) >> frame >> liftIO (getHotId ctx)
+      hotAt p = moveTo (At p) >> frame >> hotId
   runSim ctx failed (withInputOff 300 200) ui $ do
     (outer, inner, _) <- result
     hidden <- buttonsAfter (setScrollOffset ctx inner 100)
-    forM_ hidden $ \b -> do
-      Just idx <- liftIO (lookupNodeByWidgetId na (respId b))
-      checkEq Nothing =<< liftIO (getClipRect na idx)
-      check . maybe False (\(Rect _ _ w h) -> w == 0 && h == 0) =<< liftIO (getClipBounds na idx)
+    mapM_ expectNot ["Under", "Over", "Pin"]
     forM_ (targets hidden) $ \(_, p) -> do
       check (v2Y p > 0 && v2Y p < 100)
       check . (`notElem` map respId hidden) =<< hotAt p
@@ -389,13 +371,22 @@ runScrollLockstepProbeTest ctx failed = do
     setScrollOffset ctx sid off
     (_, draw, _) <- run2Frames ctx inp0 ui
     ss <- collectTextSpans ctx
-    quads <- decodeQuads draw
+    vs <- drawnVertices draw
     -- Solid fills sample the atlas's white texel (a copy of
     -- 'NanoUI.Internal.Draw.Arena.whitePixel', which tests cannot import).
     let white = 1.5 / 1024
         solid u v = abs (u - white) < 1.0e-6 && abs (v - white) < 1.0e-6
         keyYs = [y | (k, _) <- rows, y <- take 1 (spanYOf k ss)]
-    pure (sort keyYs, sort [y1 | (x1, y1, x2, _, u, v) <- quads, solid u v, x2 - x1 > 60, y1 > 1])
+        -- The buffer holds each quad as four vertices.
+        quads (a : b : c : d : rest) = [a, b, c, d] : quads rest
+        quads _ = []
+        fills =
+          [ (minimum (map vY q), maximum xs - minimum xs)
+          | q@(v : _) <- quads vs
+          , solid (vU v) (vV v)
+          , let xs = map vX q
+          ]
+    pure (sort keyYs, sort [y1 | (y1, w) <- fills, w > 60, y1 > 1])
   -- The probe found rows and separators to compare at every step.
   assert failed (all (\(ks, fs) -> not (null ks) && not (null fs)) yss)
   let steady ds = and [abs (d - e) <= 1.0e-3 | (d, e) <- zip ds (drop 1 ds)]
@@ -406,16 +397,6 @@ runScrollLockstepProbeTest ctx failed = do
     case (textDs, fillDs) of
       (t0 : _, f0 : _) -> assert failed (all (steady . take n) [textDs, fillDs] && abs (t0 - f0) <= 1e-3)
       _ -> pure ()
-
--- | The final (snapped) quads of a vertex buffer: each quad is 4 vertices
--- of 8 floats (x, y, r, g, b, a, u, v), as (x1, y1, x2, y2, u, v).
-decodeQuads :: DrawData -> IO [(Float, Float, Float, Float, Float, Float)]
-decodeQuads dd = withForeignPtr (drawVertices dd) $ \vp -> do
-  let fptr = castPtr vp :: Ptr Float
-  forM [0 .. drawVertexCount dd `div` 4 - 1] $ \q -> do
-    vs <- forM [0 .. 3] $ \k -> mapM (peekElemOff fptr . ((q * 4 + k) * 8 +)) [0, 1, 6, 7]
-    let col j = map (!! j) vs
-    pure (minimum (col 0), minimum (col 1), maximum (col 0), maximum (col 1), col 2 !! 0, col 3 !! 0)
 
 -- | The main extent of the scroll node @wid@ (its content width for a 2D
 -- one, its content height for a 1D one) and the size inside its 6px padding.
@@ -510,7 +491,7 @@ runScrollTuningTest ctx failed = do
   runSim ctx failed (withInput 200 120) ui $ do
     sid <- result
     let notch = frameWith (\i -> i {inputScroll = V2 0 1})
-        offset = liftIO (getScrollOffset ctx sid)
+        offset = scrollOffsetOf sid
         gliding = liftIO (scrollGliding ctx sid)
         io = liftIO
     _ <- moveTo (OnWidget sid)
@@ -563,7 +544,7 @@ runScrollCommandsTest ctx failed = do
     r <- prevRect sid
     let range = v2Y (scrollRange m)
         view = scrollViewport m
-        after cmd = liftIO cmd >> frame >> liftIO (getScrollOffset ctx sid)
+        after cmd = liftIO cmd >> frame >> scrollOffsetOf sid
         target = respId (rows !! 11)
         atTop wid = prevRect wid >>= \rr -> check (abs (rectY rr - rectY view) < 1.5)
     checkEq (ScrollAxisY, V2 0 0, 0) (scrollAxes m, scrollOffset m, v2X (scrollRange m))
@@ -598,7 +579,7 @@ wheelMoves failed ui aim d = do
   ctx <- newContext
   runSim ctx failed (withInputOff 400 300) ui $ do
     _ <- flip wheel d =<< aim =<< result
-    liftIO . mapM (fmap (/= V2 0 0) . getScrollOffset2D ctx) =<< result
+    map (/= V2 0 0) <$> (mapM scrollOffset2DOf =<< result)
 
 -- | Which scroller takes the wheel: the topmost under the pointer, though
 -- declared first, unless a 'PointerBlock' panel over it (not inside it)
@@ -648,14 +629,12 @@ runWheelRoutingTest _ failed = do
       wider = innerThen (fixedWH 400 150) (replicateM_ 30 (label "inner row"))
       halfBar = scrollBarGutter ScrollBarList 0 / 2
       lane sids = (\(Rect px py pw _) -> at (px + pw - halfBar) (py + 10)) <$> firstRect sids
-
-
   expectMoves [True, False] fitting (on 1) (V2 0 1)
   expectMoves [True, False] wider lane (V2 0 1)
   ctx <- newContext
   runSim ctx failed (withInputOff 400 300) wider $ do
     _ <- press =<< lane =<< result
-    check . isJust =<< liftIO (getsInteraction ctx isScrollDrag)
+    checkEq UiCursorGrabbing =<< pointerCursor
   let inside = page $ do
         replicateM_ 3 (row (label "plain" >> void (button' "b")))
         (inner, ()) <- column (scrollArea (across 200 40) cells)

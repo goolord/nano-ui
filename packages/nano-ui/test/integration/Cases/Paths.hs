@@ -8,8 +8,6 @@ import Spec
 import Data.Foldable (toList)
 import Data.IntMap.Strict qualified as IM
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, primArrayFromList, primArrayToList, sizeofPrimArray)
-import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Storable (peekByteOff)
 import GHC.Stack (HasCallStack)
 import NanoUI.Internal.Context (Context (..), DrawingCacheState (..), setDrawSnapScale)
 import NanoUI.Internal.Canvas (emitOp)
@@ -34,10 +32,10 @@ tests =
 
 red, black, blue, green, white :: Color
 red = colorRGBA 220 40 40 255
-black = colorRGBA 0 0 0 255
+black = colorBlack
 blue = colorRGBA 0 0 255 255
 green = colorRGBA 0 255 0 255
-white = colorRGBA 255 255 255 255
+white = colorWhite
 
 -- | A canvas block's ops, flattened at @scale@ device pixels per logical pixel.
 opsAt :: Float -> CanvasM () -> [DrawOp]
@@ -514,10 +512,7 @@ canvasVertices ctx draw = do
   (resp, dd, _) <- runFrame ctx (withInput 300 300) (canvas (fixedWH 200 200) draw)
   setDrawSnapScale ctx 0
   let Rect ox oy _ _ = respRect resp
-  withForeignPtr (drawVertices dd) $ \vp ->
-    forM [0 .. drawVertexCount dd - 1] $ \i -> do
-      let at o = peekByteOff vp (i * vertexSize + o) :: IO Float
-      (\x y a -> (V2 (x - ox) (y - oy), a)) <$> at 0 <*> at 4 <*> at 20
+  map (\v -> (V2 (vX v - ox) (vY v - oy), vA v)) <$> drawnVertices dd
 
 -- | How far stroke vertices reach outward past a corner (miter tip, round
 -- arc or bevel edge), and past a line end for each cap.

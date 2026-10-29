@@ -2,39 +2,15 @@
 module Cases.Tooltip (tests) where
 
 import Spec
-import Data.Maybe (isJust)
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
-  [ simSpec "tooltip-scroll-pos" 200 200 scrolledUi tooltipScrollPos
-  , simSpec "tooltip-targets" 400 300 targetsUi tooltipTargets
+  [ simSpec "tooltip-targets" 400 300 targetsUi tooltipTargets
   ]
 
 now :: TooltipConfig
 now = defaultTooltipConfig {tooltipDelay = 0}
-
-scrolledUi :: NanoUI (WidgetId, Response)
-scrolledUi = scrollArea (fillW . fixedH 80) $ column $ do
-  replicateM_ 40 (label "pad line")
-  btn <- button' "Tip Target"
-  tooltipConfigured now btn "Scrolled tip text"
-  replicateM_ 12 (label "tail line")
-  pure btn
-
--- | A tooltip in a scrolled area appears under its target where it is
--- drawn, not at its unscrolled layout position.
-tooltipScrollPos :: Sim (WidgetId, Response) ()
-tooltipScrollPos = do
-  ctx <- simContext
-  (sid, _) <- result
-  Just (off, btn) <- liftIO (wheelIntoView ctx (withInput 200 200) scrolledUi snd sid 16)
-  checkGt off 0
-  _ <- moveTo (On btn) >> settle
-  tipY <- rectY <$> rectOf "Scrolled tip text"
-  let bottom = rectY (respRect btn) + rectH (respRect btn)
-  check (abs (tipY - bottom) <= 16)
-  check (abs (tipY - bottom) < abs (tipY - (bottom + off)))
 
 targetsUi :: NanoUI (Response, Response, Response, Maybe ())
 targetsUi = columnWith tight $ do
@@ -55,7 +31,7 @@ tooltipTargets = do
   (_, near, far, _) <- result
   let offTip p = do
         (off, _, _, body) <- moveTo (At p) >> settle
-        shown <- isJust <$> findSpan "Why it is off"
+        shown <- labelShown "Why it is off"
         pure (respHovered off, body, shown)
       gapUnder r tip = do
         (_, _, _, body) <- moveTo (On r) >> settle

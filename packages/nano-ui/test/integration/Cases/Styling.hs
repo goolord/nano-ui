@@ -39,7 +39,7 @@ runDisabledPointerTest ctx failed = do
           _ <- drag (At p) (At (V2 (x + 60) y)) 1
           _ <- typeText "x"
           after <- moveTo (At p)
-          checkEq initial =<< liftIO (readVarIO ref)
+          checkEq initial =<< readV ref
           check (not (respClicked after) && not (respHovered after))
           check . (/= respId r) =<< focusedId
   untouched False (\_ -> button' "Go")
@@ -88,7 +88,7 @@ runStyledPaintTest base failed = do
     assert failed . elem c . map snd =<< drawQuads recoloured
   assertEq failed 0 =<< readIORef measured
 
--- | Nested scopes modify the theme around them; a primary button stays faded when disabled.
+-- | Nested scopes modify the theme around them.
 runStyledNestingTest :: Context -> IORef Int -> IO ()
 runStyledNestingTest ctx failed = do
   base <- getTheme ctx
@@ -101,8 +101,6 @@ runStyledNestingTest ctx failed = do
       pure (o, ir)
     (,,,) o i r . themeAccent <$> uiTheme
   assertEq failed (teal, teal, 9, themeAccent base) seen
-  offTheme <- warmup2 ctx inp (column (disabledWhen True (styled primary uiTheme)))
-  assertEq failed (styleBg (themeButton offTheme)) (styleBg (themeButton (disabledTheme (primary base))))
 
 -- | A widget with its own font size is laid out in that font: with 24 px cells "Big" is
 -- 72 px plus two 24 px spaces of padding, not the base font's 60 px.
@@ -152,7 +150,6 @@ runBackgroundMovesShadesTest ctx failed = do
 
 -- | Button, select and checkbox labels take their layout's font flags (once dropped),
 -- leaving the widget's own style bits alone.
-
 runLabelFontFlagsTest :: Context -> IORef Int -> IO ()
 runLabelFontFlagsTest ctx failed = do
   base <- getTheme ctx

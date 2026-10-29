@@ -311,10 +311,9 @@ runLayoutChangeTest ctx failed = do
 
 -- With a delay, a sensor reports visible only after staying in view that long,
 -- woken rather than by follow-up frames; hiding is immediate.
-
 runDelayTest :: Context -> IORef Int -> IO ()
 runDelayTest ctx failed = do
-  let cfg = defaultSensorConfig {sensorDelay = 0.1}
+  let cfg = defaultSensorConfig {sensorDelay = 0.03}
       ui = scrollCol 100 (replicateM_ 10 bar *> (fst <$> sensorConfigured cfg bar) <* replicateM_ 9 bar)
       report = do
         ((_, v), _) <- step ctx inp ui
@@ -326,7 +325,7 @@ runDelayTest ctx failed = do
   settle ctx inp ui 2
   report >>= assertEq failed off
   assert failed . (> 0) =<< getWakeAt ctx
-  threadDelay 150000
+  threadDelay 50000
   -- The woken frame measures it visible; the next frame reports it.
   _ <- step ctx inp ui
   report >>= assertEq failed cameIn

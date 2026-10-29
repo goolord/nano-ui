@@ -54,7 +54,7 @@ cachedOps c wid =
 
 -- | Focus @r@ and select all of it.
 selectAll :: Context -> Input -> NanoUI a -> Response -> IO ()
-selectAll c inp ui r = writeIORef (ctxFocusId c) (respId r) >> void (evalUi c (chordInp (cmdOrCtrl <> key 'a') inp) ui)
+selectAll c inp ui r = setFocus c (respId r) >> void (evalUi c (chordInp (cmdOrCtrl <> key 'a') inp) ui)
 
 -- | Wrapping at the column's width, leading-space indents, 'textBreak'
 -- policies (whole words, or anywhere but inside a flag), and newlines
@@ -105,7 +105,7 @@ runRichTextLinkTest ctx failed = do
         (onLink, onLinkStart, onText) = (pt (prefixW + linkW / 2), pt (prefixW + 1), pt 2)
         onLinkEnd = pt (prefixW + linkW - docsW / 2)
         clickAt p = moveTo (At p) >> snd <$> click (At p)
-        cursorIsPointer p = moveTo (At p) >> getInput >>= \i -> liftIO (cursorKindIs ctx i UiCursorPointer)
+        cursorIsPointer p = (== UiCursorPointer) <$> cursorAt (At p)
     checkEq (Just "docs-target") =<< clickAt onLink
     check =<< cursorIsPointer onLink
     (_, dd, _) <- liftIO . (\i -> runFrame ctx i ui) =<< getInput

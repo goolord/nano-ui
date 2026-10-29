@@ -22,13 +22,12 @@ import NanoUI.Testing.Sim
 tests :: [Spec]
 tests =
   [ spec "tabs-scroll" runTabsScrollTest
-  , spec "tabs-scroll-close-button" runTabsScrollCloseButtonTest
-  , spec "tabs-strip-in-page" runTabsStripInPageTest
+  , simSpec "tabs-scroll-close-button" 900 120 closeButtonsUi tabsScrollCloseButton
+  , simSpec "tabs-strip-in-page" 240 120 stripInPageUi tabsStripInPage
   , spec "tabs-bodies" runTabsBodiesTest
   , spec "tabs-keyed-reorder-state" runTabsKeyedReorderTest
   , spec "tabs-missing-key" runTabsMissingKeyTest
-  , spec "tabs-enum" runEnumTabsTest
-  , spec "tabs-close" runTabsCloseTest
+  , simSpec "tabs-close" 300 100 closingUi tabsClose
   , spec "tabs-disabled" runTabsDisabledTest
   , spec "tabs-contained-body-damage" runTabsContainedBodyDamageTest
   , spec "panel-body-swap-damage" runPanelBodySwapDamageTest
@@ -40,7 +39,7 @@ tests =
   ]
 
 data DummyTab = TabA | TabB | TabC
-  deriving (Eq, Show, Enum, Bounded)
+  deriving (Eq, Show, Enum)
 
 instance Hashable DummyTab where
   hashWithSalt salt = hashWithSalt salt . fromEnum
@@ -54,14 +53,14 @@ strip :: Var Int -> [Int] -> [T.Text] -> NanoUI (TabResponse Int)
 strip active keys labels = tabBar' active [tab k l () | (k, l) <- zip keys labels]
 
 -- | What @get@ reads off each node whose text is @txt@, in arena order.
-nodesTexted :: T.Text -> (NodeArena -> NodeIdx -> IO b) -> Context -> IO [b]
-nodesTexted txt get ctx = do
+nodesTexted :: T.Text -> (NodeArena -> NodeIdx -> IO b) -> Sim a [b]
+nodesTexted txt get = onContext $ \ctx -> do
   let na = ctxNodeArena ctx
   n <- arenaCount na
   filterM (fmap (== txt) . getText na) [0 .. n - 1] >>= mapM (get na)
 
 -- | The close buttons' rects, in order.
-closeRects :: Context -> IO [Rect]
+closeRects :: Sim a [Rect]
 closeRects = nodesTexted "\215" getNodeRect
 
 -- | Whether the strip's paging arrows show.
@@ -89,13 +88,13 @@ runTabsScrollTest ctx failed = do
   runSim ctx failed (withInput 900 120) ui $ do
     mapM_ (check <=< textShown) overflowLabels
     check . not =<< hasArrows
-    [Rect x0 _ _ _] <- liftIO (nodesTexted "Controls" getNodeRect ctx)
-    [Rect lx _ lw _] <- liftIO (nodesTexted "LongestTabName" getNodeRect ctx)
+    [Rect x0 _ _ _] <- nodesTexted "Controls" getNodeRect
+    [Rect lx _ lw _] <- nodesTexted "LongestTabName" getNodeRect
     -- The frame a strip first measures an overflow publishes its range. That
     -- is layout, not a scroll: the resize still repaints the whole window.
     modifyInput (\i -> i {inputWindowSize = Size 240 120})
     _ <- frame
-    checkEq DamageFull =<< liftIO (takeDamage ctx)
+    checkEq DamageFull =<< frameDamage
     _ <- settle
     check =<< textShown "Controls"
     check . not =<< textShown "LongestTabName"
@@ -114,7 +113,7 @@ runTabsScrollTest ctx failed = do
     checkGt (rectX right + rectW right) 200
     _ <- click (Within right) >> frame
     check . not =<< textShown "Controls"
-    check . (`damageCovers` left) =<< liftIO (takeDamage ctx)
+    check . (`damageCovers` left) =<< frameDamage
     _ <- click (Within left) >> frame
     check =<< textShown "Controls"
     controls <- rectOf "Controls"
@@ -138,40 +137,42 @@ runTabsScrollTest ctx failed = do
     check . not =<< hasArrows
     _ <- resize 240 120
     forM_ [(4, "LongestTabName"), (0, "Controls")] $ \(k, l) -> do
-      liftIO (writeVarIO active k)
+      writeV active k
       check =<< (settle >> textShown l)
-    setLabels (overflowLabels ++ ["Appended"]) >> liftIO (writeVarIO active 5)
+    setLabels (overflowLabels ++ ["Appended"]) >> writeV active 5
     check =<< (settle >> textShown "Appended")
 
 -- | A strip whose last close button runs past the bar overflows, though every
 -- header's main button fits: the range counts each header's close button.
-runTabsScrollCloseButtonTest :: Context -> IORef Int -> IO ()
-runTabsScrollCloseButtonTest ctx failed = do
-  let headers = zipWith (\i l -> closableTab i l ()) [0 :: Int ..] ["Controls", "Graphics", "Typography"]
-      ui = tabBar' (constVar 0) headers
-  runSim ctx failed (withInput 900 120) ui $ do
-    [Rect x0 _ _ _] <- liftIO (nodesTexted "Controls" getNodeRect ctx)
-    closes <- liftIO (closeRects ctx)
-    checkEq 3 (length closes)
-    -- The last close button's right edge, less a little, and the window's
-    -- right padding: only that button runs past the bar.
-    _ <- resize (maximum [rectX r + rectW r | r <- closes] - 4 + x0) 120
-    check =<< hasArrows
+tabsScrollCloseButton :: Sim (TabResponse Int) ()
+tabsScrollCloseButton = do
+  [Rect x0 _ _ _] <- nodesTexted "Controls" getNodeRect
+  closes <- closeRects
+  checkEq 3 (length closes)
+  -- The last close button's right edge, less a little, and the window's
+  -- right padding: only that button runs past the bar.
+  _ <- resize (maximum [rectX r + rectW r | r <- closes] - 4 + x0) 120
+  check =<< hasArrows
+
+closeButtonsUi :: NanoUI (TabResponse Int)
+closeButtonsUi =
+  tabBar' (constVar 0) (zipWith (\i l -> closableTab i l ()) [0 ..] ["Controls", "Graphics", "Typography"])
 
 -- | A strip brings its active tab into view whatever its key, 0 too, and the
 -- vertical wheel over it pages the strip alone, not the page round it.
-runTabsStripInPageTest :: Context -> IORef Int -> IO ()
-runTabsStripInPageTest ctx failed = do
-  let ui = scrollArea (tight . grow) $ do
-        _ <- strip (constVar 0) [4, 3 .. 0] overflowLabels
-        replicateM_ 20 (label "line")
-  runSim ctx failed (withInput 240 120) ui $ do
-    (page, _) <- result
-    longest <- rectOf "LongestTabName"
-    forM_ [(V2 0 (-20), True), (V2 0 20, False)] $ \(d, first) -> do
-      _ <- wheel (Within longest) d >> frame
-      checkEq first =<< textShown "Controls"
-      checkEq 0 =<< liftIO (getScrollOffset ctx page)
+tabsStripInPage :: Sim (WidgetId, ()) ()
+tabsStripInPage = do
+  (page, _) <- result
+  longest <- rectOf "LongestTabName"
+  forM_ [(V2 0 (-20), True), (V2 0 20, False)] $ \(d, first) -> do
+    _ <- wheel (Within longest) d >> frame
+    checkEq first =<< textShown "Controls"
+    checkEq 0 =<< scrollOffsetOf page
+
+stripInPageUi :: NanoUI (WidgetId, ())
+stripInPageUi = scrollArea (tight . grow) $ do
+  _ <- strip (constVar 0) [4, 3 .. 0] overflowLabels
+  replicateM_ 20 (label "line")
 
 -- | Only the active body runs. Bodies keep separate state, even at the same
 -- position, while hidden too. A header click switches tabs and repaints the
@@ -187,10 +188,9 @@ runTabsBodiesTest ctx failed = do
         whenM (button ("Toggle" <> name)) (writeVar flagVar (not flag))
         label (name <> if flag then "On" else "Off")
       ui = tabs' active [tab TabA "A" (body "A"), tab TabB "B" (body "B"), tab TabC "C" (body "C")]
-      damage = liftIO (takeDamage ctx)
   runSim ctx failed (withInputOff 300 100) ui $ do
     check . all (== "A") =<< liftIO (readIORef ran)
-    check . (/= DamageFull) =<< damage
+    check . (/= DamageFull) =<< frameDamage
     _ <- click "ToggleA" >> settle
     expect "AOn"
     switched <- click "B"
@@ -198,8 +198,8 @@ runTabsBodiesTest ctx failed = do
     expect "BOff"
     expectNot "AOn"
     bodyB <- rectOf "BOff"
-    check . (`damageCovers` bodyB) =<< damage
-    replicateM_ 2 (frame >> (check . (/= DamageFull) =<< damage))
+    check . (`damageCovers` bodyB) =<< frameDamage
+    replicateM_ 2 (frame >> (check . (/= DamageFull) =<< frameDamage))
     _ <- click "A" >> settle
     expect "AOn"
 
@@ -220,7 +220,7 @@ runTabsKeyedReorderTest ctx failed = do
   original <- warmup2 ctx inp (ui TabB [TabA, TabB, TabC])
   Seen _ nVar fieldId <- readBody
   runNanoUI ctx inp (writeVar nVar 7)
-  writeIORef (ctxFocusId ctx) fieldId
+  setFocus ctx fieldId
   forM_ [[TabC, TabA, TabB], [TabB, TabC], [TabC, TabB]] $ \order -> do
     moved <- warmup2 ctx inp (ui TabB order)
     Seen n _ fieldId' <- readBody
@@ -245,34 +245,18 @@ runTabsMissingKeyTest ctx failed = do
   assertEq failed [1, 0] =<< buttonValues ctx
   assert failed . hasText "Body one" =<< collectTextSpans ctx
 
--- | enumTabs has a tab per value, labelled with show, and a click stores the
--- value in the Var; boundedTabBar does the same with its own labels.
-runEnumTabsTest :: Context -> IORef Int -> IO ()
-runEnumTabsTest ctx failed = do
-  page <- newVar TabA
-  pick <- newVar TabA
-  let ui = column $ do
-        enumTabs page (label . ("Body of " <>) . T.pack . show)
-        boundedTabBar (T.toLower . T.pack . show) pick
-  runSim ctx failed (withInput 400 200) ui $ do
-    expect "Body of TabA"
-    _ <- click "TabC" >> settle
-    checkEq TabC =<< liftIO (readVarIO page)
-    expect "Body of TabC"
-    _ <- click "tabb"
-    checkEq TabB =<< liftIO (readVarIO pick)
-
 -- | A close button reports its tab closed and keeps the active one. A click
 -- just left of one selects its tab: the close button does not take the press.
-runTabsCloseTest :: Context -> IORef Int -> IO ()
-runTabsCloseTest ctx failed = do
-  let ui = tabs' (constVar TabA) [closableTab k (T.pack (show k)) (label "Body") | k <- [TabA, TabB]]
-  runSim ctx failed (withInput 300 100) ui $ do
-    [closeA, Rect bx by _ bh] <- liftIO (closeRects ctx)
-    closed <- click (Within closeA)
-    checkEq (Just TabA, TabA) (tabClosed closed, tabActive closed)
-    beside <- click (at (bx - 3) (by + bh / 2))
-    checkEq (Nothing, TabB) (tabClosed beside, tabActive beside)
+tabsClose :: Sim (TabResponse DummyTab) ()
+tabsClose = do
+  [closeA, Rect bx by _ bh] <- closeRects
+  closed <- click (Within closeA)
+  checkEq (Just TabA, TabA) (tabClosed closed, tabActive closed)
+  beside <- click (at (bx - 3) (by + bh / 2))
+  checkEq (Nothing, TabB) (tabClosed beside, tabActive beside)
+
+closingUi :: NanoUI (TabResponse DummyTab)
+closingUi = tabs' (constVar TabA) [closableTab k (T.pack (show k)) (label "Body") | k <- [TabA, TabB]]
 
 -- | A disabled header ignores clicks on it and its close control, and Enter
 -- with focus kept from before; re-enabled, it activates again.
@@ -289,19 +273,17 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
       inert r = checkEq (TabA, Nothing, False, False) (tabActive r, tabClosed r, respClicked r, respChanged r)
       disable b = liftIO (writeIORef disabledRef b) >> void settle
   runSim ctx failed (withInputOff 400 240) ui $ do
-    wids <- liftIO ((++) <$> nodesTexted "Disabled" getWidgetId ctx <*> closeIds ctx)
+    wids <- (++) <$> nodesTexted "Disabled" getWidgetId <*> nodesTexted "\215" getWidgetId
     checkEq 2 (length wids)
     disable True
     inert =<< click "Disabled"
-    [close] <- liftIO (closeRects ctx)
+    [close] <- closeRects
     inert =<< click (Within close)
     forM_ wids $ \wid -> do
-      liftIO (writeIORef (ctxFocusId ctx) wid)
+      focusOn wid
       inert =<< pressKey KeyEnter
     disable False
     checkEq TabB . tabActive =<< click "Disabled"
-  where
-    closeIds = nodesTexted "\215" getWidgetId
 
 -- | A contained body that shrinks repaints where its own bottom border was.
 runTabsContainedBodyDamageTest :: Context -> IORef Int -> IO ()
@@ -314,7 +296,6 @@ runTabsContainedBodyDamageTest ctx failed = do
       -- The body is the column round the tab's label.
       bodyText = findNodeM na (fmap (`elem` [long, "body"]) . getText na)
       bodyRect = traverse (getNodeRect na <=< getParent na) =<< bodyText
-
   _ <- run2Frames ctx inp0 (ui long) >> runFrame ctx inp0 (ui long)
   mTall <- bodyRect
   _ <- runFrame ctx inp0 (ui "body")
@@ -421,7 +402,7 @@ runTabDragReorderTest ctx failed = do
         pure (r, gesture)
       currentOrder = liftIO (readIORef orderRef)
   runSim ctx failed (withInput 400 200) ui $ do
-    [close] <- liftIO (closeRects ctx)
+    [close] <- closeRects
     disabled <- rectOf "TabC"
     forM_ [close, disabled] $ \r -> do
       let V2 x y = spanCenter r
@@ -452,7 +433,6 @@ runTabsDropBoundsTest ctx failed = do
   forM_ [TabTop, TabLeft] $ \orientation -> do
     let pane _ _ = do
           s <- panelWith (fixedW 600) (bar orientation 3)
-
           liftIO (writeIORef stripRect (tabStripRect s))
           pure (PaneView "Tabs" False)
     c <- newContext

@@ -83,9 +83,8 @@ runThickRoundedStrokeTest ctx failed = do
 runGeometryGuardsTest :: Context -> IORef Int -> IO ()
 runGeometryGuardsTest ctx failed = do
   let opsIn ops = drawn ctx (void (drawing (fixedWH 60 60) (smallArrayFromList . ops)))
-      white = colorRGBA 255 255 255 255
   clipped <- opsIn $ \r ->
-    [FillRect r white, PushClip (Rect 0 0 10 10), PushClip (Rect 20 20 10 10), FillRect r red, PopClip, PopClip]
+    [FillRect r colorWhite, PushClip (Rect 0 0 10 10), PushClip (Rect 20 20 10 10), FillRect r red, PopClip, PopClip]
   assert failed (not (drawCmdNull clipped))
   assertEq failed [] [c | c <- drawCmdElems clipped, cmdClipW c <= 0 || cmdClipH c <= 0]
   let tri = primArrayFromList [0, 0, 40, 0, 0, 40]
@@ -163,8 +162,18 @@ runGlyphKerningTest base failed = do
   spaced <- drawn base (label "a\x00A0\&b\x3000\&c d")
   assertEq failed (4 * 6) (sum [cmdIndexCount c | c <- drawCmdElems spaced, cmdTextureId c == glyphAtlasTextureId])
 
--- | Text, search and numeric fields set in a larger font draw their value
--- in it, as a label in that font does.
+-- | Every text field kind, with its layout changed by the argument.
+fieldKinds :: [(Layout -> Layout) -> NanoUI ()]
+fieldKinds =
+  [ \f -> void (withValue "abc" (textInputConfigured defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}))
+  , \f -> selectableTextWith f "abc"
+  , \f -> void (withValue "abc" (textAreaWith' f))
+  , \f -> void (withValue "abc" (searchInputConfigured defaultSearchInputConfig {sicLayout = f (sicLayout defaultSearchInputConfig)}))
+  , \f -> void (withValue 123 (numericInputConfigured defaultNumericInputConfig {nicLayout = f (nicLayout defaultNumericInputConfig)}))
+  ]
+
+-- | Fields, selectable text and text areas set in a larger font draw their
+-- value in it, as a label in that font does.
 runTextInputFontTest :: Context -> IORef Int -> IO ()
 runTextInputFontTest base failed = do
   -- Each font shapes any text to one glyph of its own size.
@@ -180,12 +189,7 @@ runTextInputFontTest base failed = do
         let size f = if null ps then 0 else maximum (map f ps) - minimum (map f ps)
         pure (size vX, size vY)
   extent (labelWith big "Hg") >>= assertEq failed (16, 26)
-  mapM extent
-    [ void (withValue "Hg" (textInputConfigured defaultTextInputConfig {ticLayout = big (ticLayout defaultTextInputConfig)}))
-    , void (withValue "Hg" (searchInputConfigured defaultSearchInputConfig {sicLayout = big (sicLayout defaultSearchInputConfig)}))
-    , void (withValue 7 (numericInputConfigured defaultNumericInputConfig {nicLayout = big (nicLayout defaultNumericInputConfig)}))
-    ]
-    >>= assertEq failed (replicate 3 (16, 26))
+  mapM (extent . ($ big)) fieldKinds >>= assertEq failed (replicate 5 (16, 26))
 
 -- | Fields, selectable text and text areas draw the layout's weight,
 -- decoration and tone as a label does: bold draws each glyph twice (the
@@ -197,15 +201,7 @@ runFieldFontStyleTest ctx failed = do
       frameOf ui = snd <$> warmupDraw ctx (withInput 400 300) (column ui)
       quadsIn col f ui = length . filter ((== col) . snd) <$> (drawQuads =<< frameOf (ui f))
       atlasQuads f ui = (\dd -> sum [cmdIndexCount c `div` 6 | c <- drawCmdElems dd, cmdTextureId c == glyphAtlasTextureId]) <$> frameOf (ui f)
-      kinds :: [(Layout -> Layout) -> NanoUI ()]
-      kinds =
-        [ \f -> void (withValue "abc" (textInputConfigured defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}))
-        , \f -> selectableTextWith f "abc"
-        , \f -> void (withValue "abc" (textAreaWith' f))
-        , \f -> void (withValue "abc" (searchInputConfigured defaultSearchInputConfig {sicLayout = f (sicLayout defaultSearchInputConfig)}))
-        , \f -> void (withValue 123 (numericInputConfigured defaultNumericInputConfig {nicLayout = f (nicLayout defaultNumericInputConfig)}))
-        ]
-  forM_ kinds $ \ui -> do
+  forM_ fieldKinds $ \ui -> do
     assertEq failed 3 =<< ((-) <$> atlasQuads fontBold ui <*> atlasQuads id ui)
     assertEq failed 1 =<< ((-) <$> quadsIn red (fontUnderline . fontColor red) ui <*> quadsIn red (fontColor red) ui)
     assertEq failed 3 =<< ((-) <$> quadsIn mutedFg fontMuted ui <*> quadsIn mutedFg id ui)

@@ -5,9 +5,9 @@ import Spec
 import Data.Bits ((.&.))
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.List (nub, sort, sortOn, tails)
+import Data.List (nub, sort, sortOn)
 import Data.Ord (Down (..))
-import Data.Maybe (isJust, listToMaybe, mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray qualified as SA
@@ -40,8 +40,7 @@ tests =
   , spec "table-reorder" runTableReorderTest
   , spec "table-hide-columns" runTableHideColumnsTest
   , spec "table-frozen" runTableFrozenTest
-  , pixelSpec "table-shared-scroll-metrics" runTableSharedScrollMetricsTest
-  , pixelSpec "page-wheel-above-table" runPageWheelAboveTableTest
+  , pixelSimSpec "page-wheel-above-table" 320 220 pageAboveTableUi pageWheelAboveTable
   , pixelSpec "table-scroll-reveal" runTableScrollRevealTest
   , spec "table-wrap" runTableWrapTest
   , spec "table-column-widths" runTableColumnWidthsTest
@@ -107,18 +106,16 @@ mixedCols eaten =
 fruits :: [(Text, Int)]
 fruits = [("banana", 2), ("apple", 1), ("cherry", 3)]
 
--- | Rows sort stably by a column's text or a widget cell's sort key, and
--- stay as given with no column to sort by.
+-- | Rows sort stably by a column's text, and stay as given with no column
+-- to sort by. (Widget cells sort by their key in "table-widget-cells".)
 runTableSortTest :: Context -> IORef Int -> IO ()
 runTableSortTest _ failed = do
   let byKey = headed "Key" fst
       rows = [("b", 1), ("a", 2), ("b", 3), ("a", 4)] :: [(Text, Int)]
   assertEq failed [2, 4, 1, 3] (map snd (sortRows byKey (SortCol 0 SortAsc) (SA.smallArrayFromList rows)))
   assertEq failed [1, 3, 2, 4] (map snd (sortRows byKey (SortCol 0 SortDesc) rows))
-  eaten <- newIORef []
-  forM_ [(SortAsc, [1, 2, 3]), (SortDesc, [3, 2, 1])] $ \(dir, counts) -> do
+  forM_ [SortAsc, SortDesc] $ \dir ->
     assertEq failed rows (sortRows (mempty :: Colonnade Headed (Text, Int) Text) (SortCol 0 dir) rows)
-    assertEq failed counts (map snd (sortRows (mixedCols eaten) (SortCol 1 dir) fruits))
 
 -- | Widget cells take clicks on the row they belong to, after a sort too, and
 -- carry their row's stripe in their panel's style index (even rows 1, odd 2).
@@ -135,7 +132,7 @@ runTableWidgetCellsTest ctx failed = do
     striped <- filter (/= 0) <$> liftIO (foldNodesM na stripe [])
     checkEq (IS.fromList [1, 2], 6) (IS.fromList striped, length striped)
     _ <- click "Eat apple"
-    liftIO (writeVarIO sortV (SortCol 1 SortDesc))
+    writeV sortV (SortCol 1 SortDesc)
     _ <- settle
     ys <- mapM (fmap rectY . rectOf) ["cherry", "banana", "apple"]
     checkEq (sort ys) ys
@@ -164,8 +161,8 @@ data LiveRow = LiveRow Text Text Text
 -- starts being numeric (and so changes font), and the order all follow.
 runTableLiveRowsTest :: Context -> IORef Int -> IO ()
 runTableLiveRowsTest ctx0 failed = do
-  let cols = mconcat [headed h (\(LiveRow a b c) -> [a, b, c] !! k) | (k, h) <- zip [0 ..] headers]
-      headers = ["Name", "Qty", "Note"]
+  let cols = mconcat [headed h (\(LiveRow a b c) -> [a, b, c] !! k) | (k, h) <- zip [0 ..] names]
+      names = ["Name", "Qty", "Note"]
       fonts c = withMonoFontMetrics c (monospaceMetrics 10)
       inp0 = (withInput 600 300) {inputMousePos = V2 590 290}
       laidOut c rows = warmup2 c inp0 (sortedTable (table "live" cols rows)) >> collectTextSpans c
@@ -211,8 +208,8 @@ runTableReorderTest _ failed = do
         when covered (panelWith (pinAt 0 0 . pointer PointerBlock . fixedWH 500 240) (pure ()))
         pure r
       order = tableColOrder <$> settle
-      onTable script = newPixelContext >>= \c -> runSim c failed (withInputOff 500 240) ui (script c)
-  onTable $ \_ -> do
+      onTable script = newPixelContext >>= \c -> runSim c failed (withInputOff 500 240) ui script
+  onTable $ do
     first <- Within <$> rectOf "First"
     _ <- click first
     checkEq [0, 1, 2] =<< order
@@ -221,20 +218,20 @@ runTableReorderTest _ failed = do
     checkEq [1, 2, 0] =<< order
     _ <- moveTo first
     checkEq [1, 2, 0] =<< order
-  onTable $ \c -> do
-    [first, Rect sx sy sw sh, _] <- liftIO (headerButtonRects c)
+  onTable $ do
+    [first, Rect sx sy sw sh, _] <- headers
     _ <- press (Within first)
     replicateM_ 2 (moveTo (at (sx + sw - 1) (sy + sh / 2)))
     check . (/= UiCursorEwResize) =<< pointerCursor
     _ <- release
     checkEq [1, 0, 2] =<< order
   writeIORef scrim True
-  onTable $ \c -> do
-    before@(Rect fx fy fw fh : _) <- liftIO (headerButtonRects c)
+  onTable $ do
+    before@(Rect fx fy fw fh : _) <- headers
     forM_ [V2 (fx + fw / 2) (fy + fh / 2), V2 (fx + fw - 1) (fy + fh / 2)] $ \p@(V2 x y) -> do
       _ <- drag (At p) (at (x + 120) y) 1
       checkEq [0, 1, 2] =<< order
-      checkEq before =<< liftIO (headerButtonRects c)
+      checkEq before =<< headers
 
 -- | A right-click on a header hides its column while another stays visible,
 -- whatever out-of-range indices the hidden set holds; the others share a
@@ -245,7 +242,6 @@ runTableHideColumnsTest ctx failed = do
       cfg = defaultTableConfig {tableColSizes = sizes, tableHidden = IS.singleton 5}
       ui = tableConfigured' cfg id "hide" (peopleCols 3) people =<< useVar (SortCol 0 SortAsc)
       rightEdge = maybe 0 (\r -> rectX r + rectW r) . listToMaybe . reverse
-      headers = liftIO (headerButtonRects ctx)
       hideFirst = do
         first : _ <- headers
         _ <- rightClick (Within first)
@@ -266,52 +262,41 @@ runTableHideColumnsTest ctx failed = do
 
 -- | A sideways wheel over a frozen column scrolls the body, though the rows
 -- fit and the frozen pane sharing its id has nothing to scroll. A column
--- edge scrolled under the frozen column has no resize zone there.
+-- edge scrolled under the frozen column has no resize zone there. Of the
+-- two scroll nodes the table builds under one id, only the pane owning both
+-- bars publishes metrics, and they hold still (two publishers rewrote the
+-- store every frame).
 runTableFrozenTest :: Context -> IORef Int -> IO ()
 runTableFrozenTest ctx failed = do
   let cfg = defaultTableConfig {tableFreezeCols = 1, tableColSizes = map ColFixed [150, 100, 500]}
   runSim ctx failed (withInputOff 400 240) (tableOf cfg (fixedH 200) (peopleCols 3) people) $ do
-    Rect fx fy fw fh : _ <- liftIO (headerButtonRects ctx)
+    Just wid <- onContext bodyWid
+    metrics <- onContext (`getScrollMetrics` wid)
+    checkEq (Just ScrollAxisXY) (scrollAxes <$> metrics)
+    checkEq metrics =<< (frame >> onContext (`getScrollMetrics` wid))
+    Rect fx fy fw fh : _ <- headers
     _ <- wheel (at (fx + fw / 2) (fy + fh + 10)) (V2 1 0)
-    V2 offX _ <- liftIO (bodyOffset ctx)
+    V2 offX _ <- scrollOffset2DOf wid
     checkGt offX 0
-    Just wid <- liftIO (tableBodyScrollWid ctx)
-    liftIO (setScrollOffset2D ctx wid (V2 120 0))
-    [Rect _ _ frozenW _, Rect hx hy hw hh, _] <- settle >> liftIO (headerButtonRects ctx)
+    onContext (\c -> setScrollOffset2D c wid (V2 120 0))
+    [Rect _ _ frozenW _, Rect hx hy hw hh, _] <- settle >> headers
     check (hx + hw < fx + frozenW)
     check . (/= UiCursorEwResize) =<< cursorAt (at (hx + hw - 1) (hy + hh / 2))
 
--- | Of the two scroll nodes a frozen table builds under one id, only the
--- pane owning both bars publishes metrics, and they hold still (two
--- publishers rewrote the store every frame).
-runTableSharedScrollMetricsTest :: Context -> IORef Int -> IO ()
-runTableSharedScrollMetricsTest ctx failed = do
-  let inp0 = (withInput 320 220) {inputMousePos = V2 40 80}
-      ui = tableOf defaultTableConfig {tableFreezeCols = 1} (fixedH 150) scrollCols scrollRows
-  replicateM_ 3 (runFrame ctx inp0 ui)
-  assertJustM failed (tableBodyScrollWid ctx) $ \wid -> do
-    before <- getScrollMetrics ctx wid
-    assertEq failed (Just ScrollAxisXY) (fmap scrollAxes before)
-    _ <- runFrame ctx inp0 ui
-    assertEq failed before =<< getScrollMetrics ctx wid
-
--- | The N of a "row-N" label.
-rowLabelIndex :: Text -> Maybe Int
-rowLabelIndex t = readMaybe (T.unpack (T.takeWhile (/= ' ') (T.drop 4 t)))
+pageAboveTableUi :: NanoUI (WidgetId, ())
+pageAboveTableUi = scrollArea (fillW . fixedH 200 . gap 0) $ do
+  mapM_ (\i -> label (T.pack ("head " <> show (i :: Int)))) [1 .. 10]
+  tableOf defaultTableConfig (fixedH 120) scrollCols scrollRows
 
 -- | The wheel well above a table in a page scrolls the page: hit rects that
 -- drifted by the page's offset made it scroll the table's phantom rect.
-runPageWheelAboveTableTest :: Context -> IORef Int -> IO ()
-runPageWheelAboveTableTest ctx failed = do
-  let ui = scrollArea (fillW . fixedH 200 . gap 0) $ do
-        mapM_ (\i -> label (T.pack ("head " <> show (i :: Int)))) [1 .. 10]
-        tableOf defaultTableConfig (fixedH 120) scrollCols scrollRows
-  runSim ctx failed (withInput 320 220) ui $ do
-    (page, _) <- result
-    replicateM_ 2 (wheel (at 160 80) (V2 0 5))
-    off <- liftIO (getScrollOffset ctx page)
-    checkGt off 0
-    check . isJust =<< findSpan "row-1"
+pageWheelAboveTable :: Sim (WidgetId, ()) ()
+pageWheelAboveTable = do
+  (page, _) <- result
+  replicateM_ 2 (wheel (at 160 80) (V2 0 5))
+  off <- scrollOffsetOf page
+  checkGt off 0
+  check =<< labelShown "row-1"
 
 -- | Scrolling builds the revealed rows in the frame the offset lands (it
 -- applies after the view runs, which left the revealed strip empty).
@@ -321,7 +306,9 @@ runTableScrollRevealTest ctx failed = do
   -- order (the labels sort as text, so "row-2" comes after "row-19").
   setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 20}
   let rowSpans = (\ss -> [(r, t) | (r, t, _, _, _) <- ss, "row-" `T.isPrefixOf` t]) <$> spans
-      bottomRow = listToMaybe . mapMaybe (rowLabelIndex . snd) . sortOn (Down . rectY . fst) <$> rowSpans
+      -- The N of the lowest "row-N" label.
+      rowIndex t = readMaybe (T.unpack (T.takeWhile (/= ' ') (T.drop 4 t))) :: Maybe Int
+      bottomRow = listToMaybe . mapMaybe (rowIndex . snd) . sortOn (Down . rectY . fst) <$> rowSpans
       ui = tableOf defaultTableConfig (fixedH 150) scrollCols scrollRows
   runSim ctx failed ((withInput 320 220) {inputMousePos = V2 40 80}) ui $ do
     lo <- bottomRow
@@ -492,9 +479,9 @@ runTableResizeOverflowTest ctx failed = do
   -- Five rows put the body just inside the vertical bar's toggle band: the
   -- bar appears exactly when the header lane spacer does.
   let ui = tableOf defaultTableConfig (fixedH 180) scrollCols (take 5 scrollRows)
-      offX = (\(V2 x _) -> x) <$> liftIO (bodyOffset ctx)
+      offX = (\(V2 x _) -> x) <$> onContext bodyOffset
   runSim ctx failed ((withInput 400 300) {inputMousePos = V2 30 30}) ui $ do
-    Rect hx hy hw hh : _ <- liftIO (headerButtonRects ctx)
+    Rect hx hy hw hh : _ <- headers
     let edgeX = hx + hw
         headerY = hy + hh / 2
     _ <- press (at (edgeX - 2) headerY)
@@ -502,11 +489,11 @@ runTableResizeOverflowTest ctx failed = do
     -- inside the bar's gutter band, where viewport and lane flag disagree.
     forM_ [160, 320, 300, 290, 310, 300] $ \dx -> do
       _ <- moveTo (at (edgeX + dx) headerY)
-      Just (Rect _ cy _ ch) <- liftIO (headerScrollerClip ctx)
-      Rect _ y _ h : _ <- liftIO (headerButtonRects ctx)
+      Just (Rect _ cy _ ch) <- onContext headerScrollerClip
+      Rect _ y _ h : _ <- headers
       check (y + h <= cy + ch + 0.5)
     _ <- release >> settle
-    Just (Rect bx by bw bh) <- liftIO (bodyScrollerRect ctx)
+    Just (Rect bx by bw bh) <- onContext bodyScrollerRect
     let barY = by + bh - scrollBarWidth / 2
     _ <- press (at (bx + bw * 0.3) barY)
     off1 <- offX
@@ -533,10 +520,10 @@ runTableColResizeTest _ failed =
     ctx <- newPixelContext
     let ui = scrollWith (tight . grow) . columnWith (padAll 6 . gap 6 . fillW) . card $
           tableOf defaultTableConfig (fixedH 280) (peopleCols 5) (take 14 (cycle people))
-        widthNow = rectW . (!! k) <$> liftIO (headerButtonRects ctx)
+        widthNow = rectW . (!! k) <$> headers
     runSim ctx failed ((withInput 1200 500) {inputMousePos = V2 400 100}) ui $ do
-      bodyBot <- liftIO (tableBodyBottom ctx)
-      Rect hx hy hw hh : _ <- drop k <$> liftIO (headerButtonRects ctx)
+      bodyBot <- onContext tableBodyBottom
+      Rect hx hy hw hh : _ <- drop k <$> headers
       check (bodyBot > hy + hh + 20)
       let edgeX = hx + hw - 2
           grabY = if inBody then (hy + hh + bodyBot) / 2 else hy + hh / 2
@@ -550,6 +537,10 @@ runTableColResizeTest _ failed =
       checkEq UiCursorEwResize =<< cursorAt (at (edgeX + 60) 490)
       _ <- release
       check . (/= UiCursorEwResize) =<< pointerCursor
+
+-- | 'headerButtonRects' in a script.
+headers :: Sim a [Rect]
+headers = onContext headerButtonRects
 
 -- | All table-header button rects, left to right.
 headerButtonRects :: Context -> IO [Rect]
@@ -601,13 +592,6 @@ bodyOffset ctx = maybe (pure (V2 0 0)) (getScrollOffset2D ctx) =<< bodyWid ctx
 -- | The body scroller's published metrics.
 bodyMetrics :: Context -> IO (Maybe ScrollMetrics)
 bodyMetrics ctx = maybe (pure Nothing) (getScrollMetrics ctx) =<< bodyWid ctx
-
--- | The widget id shared by the table body's panes: the id of the first scroll
--- container the arena holds that another scroll container repeats.
-tableBodyScrollWid :: Context -> IO (Maybe WidgetId)
-tableBodyScrollWid ctx = do
-  wids <- map fst <$> nodesOfType NodeScrollContainer ctx
-  pure (listToMaybe [w | w : rest <- tails wids, w `elem` rest])
 
 -- | At the end of a sideways scroll the last column clears the vertical
 -- bar's lane, which the reachable range counts. Header and cells move as one.
@@ -663,7 +647,6 @@ runTableSqueezeTest ctx failed = do
   let cell txt = cellSort txt (cellWidget (rowWith (tight . fillW . fillH . alignMid) (labelWith fillW txt)))
       squeezed = defaultTableConfig {tableColSizes = suspectSizes, tableSqueeze = True}
       suspects layout n = tableOf squeezed layout (suspectCols cell) (suspectRows n)
-
       inPane = columnWith (fillW . gap 8) $ do
         labelWith (fontSizeScale 0.92) "Header above table"
         suspects (maxH (9 * 29 + 6)) 4
@@ -682,7 +665,6 @@ runTableSqueezeTest ctx failed = do
       gridCfg = defaultPaneGridConfig {pgLayout = tight . fillW . fillH, pgMinSize = 40, pgSpacing = 4}
       heapPane = columnWith (tight . fillW . fillH) $
         paneGrid gridCfg {pgTree = InitialTree (Just heapTree), pgViewPane = pane}
-      headers = liftIO (headerButtonRects pg)
       topOf = map (round . rectY) . take 1
   runSim pg failed ((withInput 800 600) {inputMousePos = V2 100 100}) heapPane $ do
     before <- headers

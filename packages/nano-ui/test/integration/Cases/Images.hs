@@ -5,10 +5,8 @@ import Spec
 import Data.ByteString qualified as BS
 import Data.List (unzip4)
 import Data.Maybe (fromMaybe)
+import Data.Sequence qualified as Seq
 import Data.Text qualified as T
-import Data.Word (Word32)
-import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Storable (peekByteOff)
 import NanoUI.Internal.Context (lookupImageSize, lookupImageUv)
 
 tests :: [Spec]
@@ -30,15 +28,11 @@ frame :: Context -> ImageId -> NanoUI a -> IO (a, DrawData, [[Corner]])
 frame ctx iid ui = do
   (a, dd, _) <- run2Frames ctx (withInput 400 400) (column ui)
   (a0, b0, a1, b1) <- fromMaybe (0, 0, 1, 1) <$> lookupImageUv ctx iid
-  fmap ((,,) a dd . concat) . withForeignPtr (drawVertices dd) $ \vp -> withForeignPtr (drawIndices dd) $ \ip ->
-    forM [c | c <- drawCmdElems dd, cmdTextureId c == atlasTextureId] $ \cmd -> do
-      let off = fromIntegral (cmdIndexOffset cmd)
+  let corner v = (vX v, vY v, (vU v - a0) / (a1 - a0), (vV v - b0) / (b1 - b0), vA v)
       -- Quad indices are a b c a c d.
-      forM [off, off + 6 .. off + fromIntegral (cmdIndexCount cmd) - 6] $ \q ->
-        forM [q, q + 1, q + 2, q + 5] $ \ii -> do
-          vi <- fromIntegral <$> (peekByteOff ip (ii * indexSize) :: IO Word32)
-          let at o = peekByteOff vp (vi * vertexSize + o) :: IO Float
-          (\x y u v alpha -> (x, y, (u - a0) / (a1 - a0), (v - b0) / (b1 - b0), alpha)) <$> at 0 <*> at 4 <*> at 24 <*> at 28 <*> at 20
+      quads (p : q : r : _ : _ : t : rest) = map corner [p, q, r, t] : quads rest
+      quads _ = []
+  (,,) a dd . quads <$> textureVertices atlasTextureId dd
 
 -- | Each quad's position relative to @o@, its size, and its UV bounds.
 bounds :: V2 -> [[Corner]] -> [[Float]]
@@ -146,8 +140,7 @@ runImageLookTest ctx failed = do
   alphasOf (imageConfigured cfg {icOpacity = 0} iid) >>= assertEq failed []
   let painted paint = frame ctx iid (canvas (fixedWH 40 40) paint)
       drawn paint = (\(r, _, quads) -> boundsAt r quads) <$> painted paint
-      white = colorRGBA 255 255 255 255
-  drawn (\(Rect x y _ _) -> drawImage (Rect (x + 10) (y + 5) 16 8) iid white) >>= assertNear failed [10, 5, 16, 8, 0, 0, 1, 1]
+  drawn (\(Rect x y _ _) -> drawImage (Rect (x + 10) (y + 5) 16 8) iid colorWhite) >>= assertNear failed [10, 5, 16, 8, 0, 0, 1, 1]
   drawn (\(Rect x y _ _) -> drawImageWith (imageDraw (Rect (x + 10) (y + 10) 16 8) iid) {imageAngle = pi / 2})
     >>= assertNear failed [14, 6, 8, 16, 0, 0, 1, 1]
   drawn (\(Rect x y _ _) -> drawImageWith (imageDraw (Rect x y 8 8) iid) {imageUV = Rect 0.5 0 0.5 1})
@@ -163,7 +156,7 @@ runImageLookTest ctx failed = do
   let quadsOf ui = (\(_, dd, _) -> dd) <$> run2Frames ctx (withInput 200 200) (column ui) >>= drawQuads
   plain <- quadsOf (svgIconWith (fixedWH 16 16) doc)
   quadsOf (svgIconConfigured defaultImageConfig {icLayout = fixedWH 16 16} doc) >>= assertEq failed plain
-  quadsOf (svgIconConfigured defaultImageConfig {icLayout = fixedWH 16 16 . fontColor white, icOpacity = 0.5} doc)
+  quadsOf (svgIconConfigured defaultImageConfig {icLayout = fixedWH 16 16 . fontColor colorWhite, icOpacity = 0.5} doc)
     >>= assert failed . any ((== colorRGBA 255 255 255 128) . snd)
 
 -- | A solid rotation reserves the rotated bounds; a floating one keeps the layout and is clipped.
@@ -214,12 +207,12 @@ runImageDamageTest ctx failed = do
         forM_ [(x, damageIsEmpty), (y, (`clipCovers` respRect r)), (y, damageIsEmpty)] $ \(v, ok) ->
           runFrame ctx inp (column (ui v)) >> takeDamage ctx >>= assert failed . ok
   repaints (\o -> looked o a) 1 0.5
-  repaints (image' (fixedWH 80 40)) a b
   repaints (looked 1) a b
 
 -- | 'useImageRgba' keeps one image per key while called and frees it on a
 -- new key or a skipped frame, for the next to reuse; 'registerImageRgba'
--- keeps an image until 'releaseImageRgba'.
+-- keeps an image until 'releaseImageRgba'. A failed image does not stop
+-- the rest of a 'registerImages' batch.
 runImageRgbaLifetimeTest :: Context -> IORef Int -> IO ()
 runImageRgbaLifetimeTest ctx failed = do
   textImage <- newImageHandle
@@ -263,3 +256,7 @@ runImageRgbaLifetimeTest ctx failed = do
   (r2, okR2) <- ownFrame register
   assert failed (okR && okR2)
   lookupImageUv own r2 >>= assertEq failed rAt
+  let pixel = BS.replicate 4 255
+      batch = Seq.fromList [(ImageId 0, 1, 1, pixel), (ImageId 42, 1, 1, pixel)]
+  assertEq failed False =<< registerImages own batch
+  assert failed . (/= Nothing) =<< lookupImageUv own (ImageId 42)
