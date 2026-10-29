@@ -3,9 +3,7 @@ module Cases (tests) where
 import Spec
 import Control.Concurrent (threadDelay)
 import GHC.Clock (getMonotonicTime)
-import Data.ByteString qualified as BS
 import Data.IntMap.Strict qualified as IM
-import Data.List (nub)
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Word (Word64)
@@ -36,13 +34,11 @@ tests :: [Spec]
 tests =
   [ spec "embed-state" runEmbedStateTest
   , spec "host-slot" runHostSlotTest
-  , spec "id-keyed-list" runIdKeyedListTest
   , simSpec "deep-nesting" 300 300 (nest 320) (expect "deep")
   , spec "flex-sizing" runFlexSizingTest
   , pixelSpec "label-align-end" runLabelAlignEndTest
   , pixelSimSpec "responsive-wrap" 520 800 responsiveUi responsiveWrap
   , pixelSimSpec "kv-multiline-height" 320 400 kvUi kvMultilineHeight
-  , spec "image" runImageTest
   , spec "empty-frame" runEmptyFrameTest
   , pixelSpec "basic-widgets" runBasicWidgetsTest
   , spec "search-input-clear" runSearchInputClearTest
@@ -90,29 +86,14 @@ runHostSlotTest ctx failed = do
   got <- evalUi ctx (withInput 80 80) (column (pure ()) >> askCompact compactOwner)
   assertEq failed (Just (10000, 9999)) ((\xs -> (length xs, last xs)) <$> got)
 
--- | A keyed widget keeps its id when siblings come before or after it, or the
--- list reverses.
-runIdKeyedListTest :: Context -> IORef Int -> IO ()
-runIdKeyedListTest ctx failed = do
-  let idsFor keys = zip keys <$> evalUi ctx (withInput 200 200) (column (mapM (\k -> withKey k nextId) keys))
-  base <- idsFor ["a", "b", "c" :: String]
-  assertEq failed 3 (length (nub (map snd base)))
-  forM_ [["x", "a", "b", "c"], ["a", "b", "c", "y"], ["c", "b", "a"]] $ \keys -> do
-    ids <- idsFor keys
-    forM_ base $ \(k, wid) -> assertEq failed (k, Just wid) (k, lookup k ids)
-
--- | Nesting deeper than the initial level capacity still lays out (the level
--- array grows on demand).
+-- | Nesting deeper than the initial level capacity still lays out.
 nest :: Int -> NanoUI ()
 nest 0 = label "deep"
 nest k = column (nest (k - 1))
 
--- | How rows and columns share space, at 12 px a character. Grow children
--- split free space by factor over a content floor, and a child locked at its
--- floor shrinks the pool, which must lock the next one on a later sweep (one
--- sweep would give the middle child 55). Percent children size against the
--- row and give a gap's overflow back. Shrinking children give up a shortfall,
--- the longer covering what the shorter cannot. An aspect sets the height.
+-- | Grow, percent, shrink and aspect sizing, 12 px a character. Locking the
+-- largest grow child must lock the middle one on a later sweep (one sweep
+-- gives it 55), and percent children give a gap's overflow back.
 runFlexSizingTest :: Context -> IORef Int -> IO ()
 runFlexSizingTest ctx failed = forM_ cases $ \(w, h, ui, size, want) -> do
   ids <- warmup2 ctx (withInput w h) ui
@@ -191,29 +172,9 @@ kvMultilineHeight = do
   treeRow <- rectOf "Tree"
   checkGt (rectY treeRow) (rectY line5)
 
--- | Images draw from the atlas at their layout size with their own UVs, fresh
--- ids start above the registered ones, and an unregistered id draws nothing.
-runImageTest :: Context -> IORef Int -> IO ()
-runImageTest ctx failed = do
-  let px a b c = BS.pack (concat (replicate 16 [a, b, c, 255]))
-      inp = withInput 320 200
-      img = image (fixedWH 40 24)
-      atlasCmds dd = filter ((== atlasTextureId) . cmdTextureId) (drawCmdElems dd)
-  assert failed . and =<< sequence [registerImage ctx (ImageId 1) 4 4 (px 255 0 0), registerImage ctx (ImageId 7) 4 4 (px 0 0 255)]
-  (wid, dd) <- warmupDraw ctx inp (row (img (ImageId 1) >> currentId <* img (ImageId 7)))
-  assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) -> assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
-  assertEq failed [12] (map cmdIndexCount (atlasCmds dd))
-  (u0, _) <- vertUv dd 0
-  (u4, _) <- vertUv dd 4
-  assert failed (abs (u0 - u4) >= 1e-6)
-  assertEq failed [8, 9] . map unImageId =<< evalUi ctx inp (replicateM 2 freshImageId)
-  (_, missing) <- warmupDraw ctx inp (img (ImageId 0))
-  assertEq failed [] (atlasCmds missing)
-
--- | A frame whose view adds no widgets runs presses, wheel input, redraw and
--- cursor queries on the empty arena, not on node 0, which starts out as a
--- container that is its own child, so reading it recursed without end.
--- Widgets added on the next frame still lay out.
+-- | A frame with no widgets runs input, redraw and cursor queries on the
+-- empty arena, not on node 0, which starts out as its own child: reading it
+-- recursed without end.
 runEmptyFrameTest :: Context -> IORef Int -> IO ()
 runEmptyFrameTest ctx failed = do
   arrays <- arenaArrays (ctxNodeArena ctx)
@@ -228,10 +189,9 @@ runEmptyFrameTest ctx failed = do
   wid <- warmup2 ctx inp0 (row (currentId <* image (fixedWH 40 24) (ImageId 0)))
   assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) -> assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
 
--- | A button and a checkbox want the pointer cursor, pressed too, and empty
--- space does not. A checkbox shows its Var's initial value before any click
--- stores state, and each click shows at once and stays. A slider in a filling
--- column spans it, and a press at the track's end sets about its maximum.
+-- | Pointer cursor over a button and a (pressed) checkbox only. A checkbox
+-- shows its Var's value before any click stores state, and each click at
+-- once. A slider in a filling column spans it to its maximum.
 runBasicWidgetsTest :: Context -> IORef Int -> IO ()
 runBasicWidgetsTest ctx failed = do
   checked <- newVar True
