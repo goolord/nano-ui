@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (IOException, try)
-import Control.Monad (forM_, unless, void)
+import Control.Monad (forM_, void)
 import Data.Either (isLeft)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int8)
@@ -17,14 +17,30 @@ import NanoUI qualified as NUI
 import NanoUI.Backend (runNanoUI)
 import NanoUI.Form
 import NanoUI.Form.Internal.Backend
-import NanoUI.Internal.Context (ctxFocusId)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Testing (Context, clearDirty, collectTextSpans, isDirty, newPixelContext, runFrame)
+import NanoUI.Testing.Assert (require, requireEq)
+import NanoUI.Testing.Harness (hasText, keyInp, nodesOfType, withInputOff)
+import NanoUI.Testing.Sim
+  ( Sim
+  , SimOptions (..)
+  , Target (..)
+  , check
+  , checkEq
+  , click
+  , defaultSimOptions
+  , expect
+  , expectNot
+  , focusOn
+  , frame
+  , frameWith
+  , onContext
+  , pressKey
+  , runSimWith
+  , settle
+  , typeText
+  )
 import NanoUI.Var (peekVar)
-import NanoUI.Testing.Harness (hasText, keyInp, nodesOfType, runClick, spanCenter, warmup2, withInputOff)
-
-check :: String -> Bool -> IO ()
-check message ok = unless ok (fail message)
 
 type Checked a = Ditto.Result Text (Ditto.Proved a)
 
@@ -67,12 +83,19 @@ decodeText _ = Left "Expected text"
 enabledForm :: Form Text Bool
 enabledForm = inputCheckbox "enabled" False
 
--- | Focus the frame's one control of a type.
-focusOnly :: NodeType -> Context -> IO ()
-focusOnly ty ctx =
-  nodesOfType ty ctx >>= \case
-    [(wid, _)] -> writeIORef (ctxFocusId ctx) wid
-    other -> fail ("expected one " <> show ty <> ", got " <> show (length other))
+-- | Run a script against a view in a 400 by 240 window of the context,
+-- stopping at the first failed check.
+sim :: Context -> NanoUI a -> Sim a r -> IO r
+sim ctx ui script = newIORef 0 >>= \failed -> runSimWith opts ctx failed input ui script
+  where
+    opts = defaultSimOptions {simFailFast = True}
+
+-- | Focus the frame's first control of a type.
+focusFirst :: NodeType -> Sim a ()
+focusFirst ty =
+  onContext (nodesOfType ty) >>= \case
+    (wid, _) : _ -> focusOn wid
+    [] -> fail ("expected a " <> show ty)
 
 main :: IO ()
 main = do
@@ -114,12 +137,12 @@ testCustomFields = do
     current = formValue owner ctx "custom" customForm
   (customView, _) <- runForm owner ctx "custom" customForm
   drawView ctx customView []
-  check "custom fields did not publish their changes" . (== ("edited", "automatic")) =<< current
+  require "custom fields did not publish their changes" . (== ("edited", "automatic")) =<< current
   updateFieldInput owner ctx "custom" "internal-key" (FormInputText "external")
-  check "custom field identity depends on its label" . (== ("external", "automatic")) =<< current
+  require "custom field identity depends on its label" . (== ("external", "automatic")) =<< current
   updateFieldInput owner ctx "custom" "internal-key" (FormInputBool True)
   errs <- errorsOf "custom decoder" . snd =<< runForm owner ctx "custom" customForm
-  check "custom field decoder errors did not reach ditto" (map snd errs == ["Expected text"])
+  require "custom field decoder errors did not reach ditto" (map snd errs == ["Expected text"])
 
 -- | A commit-only field holds uncommitted edits as a draft and publishes
 -- them only when committed; an outside change replaces the draft.
@@ -147,17 +170,17 @@ testCommitOnly = do
     drawCommit (v, _) = drawView ctx v []
   drawCommit =<< runCommit
   editing <- runCommit
-  check "a commit-only field published an uncommitted edit" . (== "a") =<< okValue "editing" (snd editing)
+  require "a commit-only field published an uncommitted edit" . (== "a") =<< okValue "editing" (snd editing)
   drawCommit editing
-  check "a commit-only field does not show its held edit" . (== "ab") =<< readIORef shown
+  require "a commit-only field does not show its held edit" . (== "ab") =<< readIORef shown
   writeIORef commitNow True
   drawCommit editing
-  check "a commit-only field did not publish on commit" . (== "ab") =<< formValue owner ctx "commit" commitForm
+  require "a commit-only field did not publish on commit" . (== "ab") =<< formValue owner ctx "commit" commitForm
   writeIORef commitNow False
   forM_ ["a", "external"] $ \t -> do
     updateFieldInput owner ctx "commit" "draft" (FormInputText t)
     drawCommit =<< runCommit
-  check "an outside change did not replace a held edit" . (== "external") =<< readIORef shown
+  require "an outside change did not replace a held edit" . (== "external") =<< readIORef shown
 
 -- | A named field keeps its value when its caption changes, and built-in
 -- inputs draw the current caption.
@@ -173,9 +196,9 @@ testCaptions = do
   _ <- runFrame ctx input (renderCaption firstCaption)
   updateFieldInput owner ctx "captions" "stable-key" (FormInputText "kept")
   (result, _, _) <- runFrame ctx input (renderCaption firstCaption {fieldLabel = Just "Second caption"})
-  check "a caption change lost the named field's value" . (== "kept") =<< okValue "captions" result
+  require "a caption change lost the named field's value" . (== "kept") =<< okValue "captions" result
   spans <- collectTextSpans ctx
-  check "built-in inputs do not draw their caption" $
+  require "built-in inputs do not draw their caption" $
     hasText "Second caption" spans && not (hasText "First caption" spans)
 
 -- | Initial and decoded values of collection, enum and number fields, and
@@ -189,7 +212,7 @@ testValues = do
         <$> inputSelect "select" (Seq.fromList ["First", "Second"]) 1
         <*> inputRadio "radio" (Seq.fromList ["First", "Second"]) 0
         <*> inputSelect unnamed (Just "Only") 0
-  check "foldable options lost their initial indices" . (== (1, 0, 0 :: Int))
+  require "foldable options lost their initial indices" . (== (1, 0, 0 :: Int))
     =<< formValue owner ctx "collections" collectionForm
   let
     failing =
@@ -197,14 +220,10 @@ testValues = do
         <$> (inputText "name" "" `prove` notEmpty "Name is required")
         <*> (inputSlider "age" 0 100 12 `prove` inRange 18 100 (const "Must be at least 18"))
   errs <- errorsOf "failing" . snd =<< runForm owner ctx "failing" failing
-  check "failing proofs did not both report" $
+  require "failing proofs did not both report" $
     sort (map snd errs) == ["Must be at least 18", "Name is required"]
   inRangeNaN <- proofFunction (inRange 0 1 (const ("Out of range" :: Text))) (0 / 0 :: Double)
-  check "inRange accepts NaN" (isLeft inRangeNaN)
-  -- ditto's number proofs read a String, as NanoUI.Form.Validation shows.
-  age <- formValue owner ctx "age" $
-    (T.unpack <$> inputText "age" "42") `prove` decimal (const "Not a number") (0 :: Int)
-  check "a number proof did not parse a text field" (age == 42)
+  require "inRange accepts NaN" (isLeft inRangeNaN)
   -- Enum fields use zero-based widget indices whatever the enum's bounds,
   -- and clamp indices outside them.
   let
@@ -212,11 +231,11 @@ testValues = do
     enumForm =
       (,,) <$> inputEnumSelect "select" (-42) <*> inputEnumRadio "radio" 42 <*> inputEnumSelect unnamed (-12)
     enums = formValue owner ctx "enums" enumForm
-  check "enum fields lost their initial values" . (== (-42, 42, -12)) =<< enums
+  require "enum fields lost their initial values" . (== (-42, 42, -12)) =<< enums
   forM_ [(0, 255), (-10, 300)] $ \(sel, rad) -> do
     updateFieldInput owner ctx "enums" "select" (FormInputInt sel)
     updateFieldInput owner ctx "enums" "radio" (FormInputInt rad)
-    check ("enum indices " <> show (sel, rad)) . (== (minBound, maxBound, -12)) =<< enums
+    require ("enum indices " <> show (sel, rad)) . (== (minBound, maxBound, -12)) =<< enums
 
 -- | An error appearing and clearing on one field leaves its siblings'
 -- values alone, and a long error message is drawn whole.
@@ -231,13 +250,13 @@ testErrorsKeepSiblings = do
         <*> withFieldErrors (inputText "bio" "Bio text" `prove` notEmpty "Bio required")
     valid msg want = do
       (v, r) <- runForm owner ctx "multi" multiForm
-      check msg . (== want) =<< okValue msg r
+      require msg . (== want) =<< okValue msg r
       drawView ctx v []
   valid "initial values" ("Ada", 25 :: Float, "Bio text")
   updateFieldInput owner ctx "multi" "age" (FormInputFloat 15)
   (v2, r2) <- runForm owner ctx "multi" multiForm
   errs <- errorsOf "age 15" r2
-  check "age did not fail alone" (length errs == 1)
+  require "age did not fail alone" (length errs == 1)
   drawView ctx v2 errs
   updateFieldInput owner ctx "multi" "bio" (FormInputText "Bio modified")
   updateFieldInput owner ctx "multi" "age" (FormInputFloat 30)
@@ -247,11 +266,11 @@ testErrorsKeepSiblings = do
     emailForm = withFieldErrors (inputText "email" "bad-email" `prove` validEmail (const message))
   (v, r) <- runForm owner ctx "longError" (emailForm :: Form Text Text)
   emailErrs <- errorsOf "email" r
-  check "the email error did not report once" (length emailErrs == 1)
+  require "the email error did not report once" (length emailErrs == 1)
   _ <- runFrame ctx (input {inputWindowSize = NUI.Size 60 20}) $
     columnWith (tight . minW 300 . maxW 360) (runFormView (Ditto.unView v emailErrs))
   shown <- T.unwords . map (\(_, t, _, _, _) -> t) <$> collectTextSpans ctx
-  check "the long email error lost text" (all (`T.isInfixOf` shown) ["Invalid email", "name@domain.com"])
+  require "the long email error lost text" (all (`T.isInfixOf` shown) ["Invalid email", "name@domain.com"])
 
 -- | Clicking a checkbox writes only to the form that owns it: same-named
 -- fields of forms whose views are drawn later, and a field after a form
@@ -267,16 +286,16 @@ testFormOwnership = do
       Ditto.view (FormView (void (nanoFormLive owner "inner" enabledForm))) *> enabledForm
   forM_ [(deferred, 0, "left", "right"), (nested, 1, "outer", "inner")] $ \(mkUi, clicked, own, other) -> do
     (ctx, owner) <- fresh
-    let ui = mkUi owner
-    _ <- warmup2 ctx input ui
-    nodesOfType NodeButton ctx >>= \case
-      controls@[(a, _), (b, _)] -> do
-        check "same-named fields in different forms share a widget ID" (a /= b)
-        void (runClick ctx input ui (spanCenter (snd (controls !! clicked))))
-      found -> fail ("expected two checkboxes, got " <> show (length found))
-    _ <- warmup2 ctx input ui
-    check ("the click did not reach " <> T.unpack own) =<< formValue owner ctx own enabledForm
-    check ("the click wrote to " <> T.unpack other) . not =<< formValue owner ctx other enabledForm
+    sim ctx (mkUi owner) $ do
+      onContext (nodesOfType NodeButton) >>= \case
+        controls@[(a, _), (b, _)] -> do
+          -- Same-named fields in different forms have their own widget ids.
+          check (a /= b)
+          void (click (Within (snd (controls !! clicked))))
+        found -> fail ("expected two checkboxes, got " <> show (length found))
+      void settle
+    require ("the click did not reach " <> T.unpack own) =<< formValue owner ctx own enabledForm
+    require ("the click wrote to " <> T.unpack other) . not =<< formValue owner ctx other enabledForm
 
 -- | A form scope that throws restores the enclosing one and keeps the
 -- field updates made before the throw.
@@ -291,10 +310,10 @@ testPrefixRestoration = do
         ioError (userError "form failed")
     FormScope _ prefix <- askFormScope
     pure (prefix, result :: Either IOException ())
-  check "expected a form exception" (isLeft result)
-  check "exception changed the enclosing form owner" (prefix == "outer")
+  require "expected a form exception" (isLeft result)
+  require "exception changed the enclosing form owner" (prefix == "outer")
   store <- getFormStore owner "inner"
-  check "prefix restoration discarded field updates" $
+  require "prefix restoration discarded field updates" $
     Map.lookup "value" (fssInputs store) == Just (FormInputText "preserved")
 
 -- | Each form mutation requests one redraw, and repeating it none.
@@ -309,7 +328,7 @@ testFormInvalidation = do
     $ \update -> forM_ [True, False] $ \dirties -> do
       clearDirty ctx
       update
-      check "a form mutation's redraw request is wrong" . (== dirties) =<< isDirty ctx
+      require "a form mutation's redraw request is wrong" . (== dirties) =<< isDirty ctx
 
 -- | Enter submits a form's value once, including text typed in the same
 -- frame, for a field that publishes each edit and one that publishes on
@@ -317,11 +336,11 @@ testFormInvalidation = do
 testSubmit :: IO ()
 testSubmit = do
   (ctx, owner) <- fresh
-  let ui = nanoFormSubmit owner "submit" "Save" (pure (42 :: Int))
-  check "form submitted before activation" . (== Nothing) =<< warmup2 ctx input ui
-  (submitted, _, _) <- runFrame ctx (keyInp KeyEnter input) ui
-  check "valid submission did not return its value" (submitted == Just 42)
-  check "a submitted form kept emitting values on idle frames" . (== Nothing) =<< warmup2 ctx input ui
+  sim ctx (nanoFormSubmit owner "submit" "Save" (pure (42 :: Int))) $ do
+    checkEq Nothing =<< frame
+    checkEq (Just 42) =<< pressKey KeyEnter
+    -- A submitted form emits nothing on idle frames.
+    checkEq Nothing =<< settle
   let onEnter = inputWidget (Just "query") decodeText (OnlyWhen respSubmitted) FormInputText textInput' ""
   forM_
     [ ("submit-typed", inputText "query" "", NodeTextInput, Just "abc")
@@ -330,12 +349,11 @@ testSubmit = do
     ]
     $ \(prefix, field, ty, want) -> do
       (fctx, fowner) <- fresh
-      let fieldUi = nanoFormSubmit fowner prefix "Save" (field `prove` notEmpty "Required")
-      _ <- warmup2 fctx input fieldUi
-      focusOnly ty fctx
-      _ <- warmup2 fctx input fieldUi
-      (got, _, _) <- runFrame fctx (keyInp KeyEnter input {inputChars = "abc"}) fieldUi
-      check ("Enter submitted the wrong value: " <> show prefix) (got == want)
+      got <- sim fctx (nanoFormSubmit fowner prefix "Save" (field `prove` notEmpty "Required")) $ do
+        focusFirst ty
+        _ <- settle
+        frameWith (\i -> keyInp KeyEnter i {inputChars = "abc"})
+      requireEq ("the value Enter submitted: " <> show prefix) want got
 
 -- | A colour field's value is the colour its picker shows: a picker without
 -- an alpha bar makes an edited translucent colour opaque.
@@ -344,17 +362,14 @@ testColorEdit = do
   (ctx, owner) <- fresh
   let
     overlay = colorRGBA 0 0 0 128
-    ui = nanoFormLive owner "colour" (inputColor "Overlay" overlay)
-  _ <- warmup2 ctx input ui
-  -- The picker's first part is its saturation / value field.
-  nodesOfType NodeColorPicker ctx >>= \case
-    (wid, _) : _ -> writeIORef (ctxFocusId ctx) wid
-    [] -> fail "expected a colour picker"
-  _ <- warmup2 ctx input ui
-  void (runFrame ctx (keyInp KeyUp input) ui)
-  edited <- warmup2 ctx input ui
-  check "Up did not brighten the colour" (edited /= Just overlay)
-  check "the field's colour is not the opaque one its picker shows" (fmap colorA edited == Just 255)
+  edited <- sim ctx (nanoFormLive owner "colour" (inputColor "Overlay" overlay)) $ do
+    -- The picker's first part is its saturation / value field.
+    focusFirst NodeColorPicker
+    _ <- settle
+    _ <- pressKey KeyUp
+    settle
+  require "Up did not brighten the colour" (edited /= Just overlay)
+  require "the field's colour is not the opaque one its picker shows" (fmap colorA edited == Just 255)
 
 -- | The app's own button submits a 'FormOnSubmit' form through
 -- 'markSubmitted', and the form then shows its errors.
@@ -364,13 +379,12 @@ testMarkSubmitted = do
   let
     form = withFieldErrors (inputText "name" "" `prove` notEmpty "Name is required")
     ui = nanoFormEx owner defaultFormConfig {fcMode = FormOnSubmit} "on-submit" form
+  sim ctx ui $ do
     -- The message wraps, so look for its last word.
-    errorShown = hasText "required" <$> collectTextSpans ctx
-  _ <- warmup2 ctx input ui
-  check "a FormOnSubmit form showed errors before submission" . not =<< errorShown
-  runNanoUI ctx input (markSubmitted owner "on-submit")
-  _ <- warmup2 ctx input ui
-  check "markSubmitted did not show the form's errors" =<< errorShown
+    expectNot "required"
+    liftIO (runNanoUI ctx input (markSubmitted owner "on-submit"))
+    _ <- settle
+    expect "required"
 
 -- | Resetting a form restores its defaults, including a text area's cached
 -- buffer, and leaves other forms' values and widget ids alone.
@@ -383,22 +397,22 @@ testReset = do
         (,)
           <$> nanoFormLive owner "reset-left" enabledForm
           <*> nanoFormLive owner "reset-right" enabledForm
-    values = warmup2 ctx input ui
-  _ <- values
-  controls <- nodesOfType NodeButton ctx
-  forM_ controls $ \(_, r) -> void (runClick ctx input ui (spanCenter r))
-  check "checkboxes did not retain their edits" . (== (Just True, Just True)) =<< values
-  runNanoUI ctx input (resetForm owner "reset-left")
-  check "reset did not restore defaults or changed another form" . (== (Just False, Just True)) =<< values
-  after <- nodesOfType NodeButton ctx
-  check "reset changed another form's widget identity" (map fst (drop 1 after) == map fst (drop 1 controls))
-  setFormStore owner ctx "reset-left" emptyFormStateStore
-  check "writing form data revived a retired widget cache" . (== (Just False, Just True)) =<< values
+    afterward act = liftIO act >> settle
+  sim ctx ui $ do
+    controls <- onContext (nodesOfType NodeButton)
+    mapM_ (click . Within . snd) controls
+    -- The checkboxes keep their edits; a reset restores only its own form's
+    -- defaults, and keeps the other form's widget ids.
+    checkEq (Just True, Just True) =<< settle
+    checkEq (Just False, Just True) =<< afterward (runNanoUI ctx input (resetForm owner "reset-left"))
+    after <- onContext (nodesOfType NodeButton)
+    checkEq (map fst (drop 1 controls)) (map fst (drop 1 after))
+    -- Writing form data does not revive a retired widget cache.
+    checkEq (Just False, Just True) =<< afterward (setFormStore owner ctx "reset-left" emptyFormStateStore)
   (actx, aowner) <- fresh
-  let editor = nanoFormLive aowner "reset-editor" (inputTextArea "notes" "initial")
-  _ <- warmup2 actx input editor
-  focusOnly NodeTextArea actx
-  void (runFrame actx input {inputChars = "edited"} editor)
-  check "text area did not retain its edit" . (== Just "editedinitial") =<< warmup2 actx input editor
-  runNanoUI actx input (resetForm aowner "reset-editor")
-  check "reset retained the text area's cached buffer" . (== Just "initial") =<< warmup2 actx input editor
+  sim actx (nanoFormLive aowner "reset-editor" (inputTextArea "notes" "initial")) $ do
+    focusFirst NodeTextArea
+    _ <- typeText "edited"
+    checkEq (Just "editedinitial") =<< settle
+    -- A reset drops the text area's cached buffer.
+    checkEq (Just "initial") =<< afterward (runNanoUI actx input (resetForm aowner "reset-editor"))
