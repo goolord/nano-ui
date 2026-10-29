@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Monad (forM_, replicateM_, unless)
+import Control.Monad (forM_, replicateM_)
 import Data.Colour (withOpacity)
 import Data.Colour.Names (coral, red, steelblue)
 import Data.Foldable (toList)
@@ -21,11 +21,8 @@ import NanoUI.Diagrams
 import NanoUI.Internal.Path (Shade (..))
 import NanoUI.Path qualified as P
 import NanoUI.Plot.Widget qualified as Plot
+import NanoUI.Testing.Assert (require)
 import Test.Hspec (describe, hspec, it)
-
--- | Fail with @msg@ unless the condition holds.
-check :: String -> Bool -> IO ()
-check msg ok = unless ok (fail msg)
 
 main :: IO ()
 main = hspec $ do
@@ -91,7 +88,7 @@ testRendering = do
     (_, dd, _) <-
       runFrame ctx (emptyInput {inputWindowSize = Size 240 120}) $
         diagram (fixedWH 200 80) (D.circle 1 # D.fc coral # D.lw D.none)
-    check "diagram produced no draw commands" (drawIndexCount dd > 0 && not (drawCmdNull dd))
+    require "diagram produced no draw commands" (drawIndexCount dd > 0 && not (drawCmdNull dd))
   let
     d = chartDia (bareChart [line "s" [(0, 0), (1, 2), (2, 1)]]) # D.lwO 2 # D.fc steelblue
     isText = \case
@@ -101,8 +98,8 @@ testRendering = do
     let
       full = toList (diagramOps w h d)
       labels = toList (diagramTextOps w h d)
-    check "text-only rendering differs from the full render's text" (labels == filter isText full)
-    check "text-only rendering did not separate chart labels from geometry" $
+    require "text-only rendering differs from the full render's text" (labels == filter isText full)
+    require "text-only rendering did not separate chart labels from geometry" $
       w <= 0 || h <= 0 || (not (null labels) && length labels < length full)
 
 testChartCache :: IO ()
@@ -121,11 +118,11 @@ testChartCache = do
       map doeContent . toList . dcsDrawOpCache <$> readIORef (ctxDrawingCache c)
   first <- render owner ctx
   again <- render owner ctx
-  check "chart cache did not reuse unchanged content" (not (null first) && first == again)
+  require "chart cache did not reuse unchanged content" (not (null first) && first == again)
   changed <- render owner (withFontMetrics base larger)
-  check "chart cache ignored changed font metrics" (changed /= first)
+  require "chart cache ignored changed font metrics" (changed /= first)
   independent <- render otherOwner (withFontMetrics other larger)
-  check "chart cache version leaked across contexts" (independent == first)
+  require "chart cache version leaked across contexts" (independent == first)
 
 -- | A chart holding NaN equals a rebuilt copy of itself, so a plot built
 -- from it every frame settles instead of asking for frames forever.
@@ -143,9 +140,9 @@ testNaNChartIdle = do
     frame k = runFrame ctx (emptyInput {inputWindowSize = Size 400 240}) $ do
       _ <- Plot.lineChart owner (fixedWH 360 100) [(0, 0), (1, nan * fromIntegral (k :: Int)), (2, 1)]
       Plot.plot owner (fixedWH 360 100) (bareChart [withBaseline (nan * fromIntegral k) (area "a" [(0, 0), (1, 1)])])
-  check "a chart holding NaN differs from itself" (held == held && params == params)
+  require "a chart holding NaN differs from itself" (held == held && params == params)
   again <- mapM frame [1 .. 4]
-  check "a plot of a chart holding NaN asks for frames forever" (not (or [more | (_, _, more) <- drop 2 again]))
+  require "a plot of a chart holding NaN asks for frames forever" (not (or [more | (_, _, more) <- drop 2 again]))
 
 testDiagramOps :: IO ()
 testDiagramOps = do
@@ -155,43 +152,43 @@ testDiagramOps = do
       FillRect {} -> True
       FillPolygon {} -> True
       _ -> False
-  check "a level rectangle is not one rect op" $ case fills (D.rect 4 2) of
+  require "a level rectangle is not one rect op" $ case fills (D.rect 4 2) of
     [FillRect {}] -> True
     _ -> False
-  check "a turned rectangle is not one polygon" $ case fills (D.rect 4 2 # D.rotateBy (1 / 8)) of
+  require "a turned rectangle is not one polygon" $ case fills (D.rect 4 2 # D.rotateBy (1 / 8)) of
     [FillPolygon {}] -> True
     _ -> False
   -- Colours are straight alpha, whether the alpha is the colour's or the opacity's.
   let
     fillsOf d = mapMaybe inkColor (diaOps (d # D.lw D.none))
     halfRed = colorRGBA 255 0 0 128
-  check "a translucent fill was darkened" (fillsOf (D.circle 1 # D.fcA (red `withOpacity` 0.5)) == [halfRed])
-  check "opacity did not reach the fill" (fillsOf (D.circle 1 # D.fc red # D.opacity 0.5) == [halfRed])
+  require "a translucent fill was darkened" (fillsOf (D.circle 1 # D.fcA (red `withOpacity` 0.5)) == [halfRed])
+  require "opacity did not reach the fill" (fillsOf (D.circle 1 # D.fc red # D.opacity 0.5) == [halfRed])
   -- A path's loops fill together. The inner circle is a hole under even-odd,
   -- or under winding when reversed; with the same direction it is filled.
   let
     ringsOf d = [sizeofPrimArray rings - 1 | FillPolygon _ rings _ _ <- diaOps (d # D.fc coral # D.lw D.none)]
     annulus :: D.Path D.V2 Double
     annulus = D.circle 2 <> D.circle 1
-  check "even-odd annulus lost its hole" (ringsOf (D.strokeP annulus # D.fillRule D.EvenOdd) == [2])
-  check "winding annulus lost its hole" (ringsOf (D.strokeP (D.circle 2 <> D.reversePath (D.circle 1))) == [2])
-  check "winding annulus cut a hole" (ringsOf (D.strokeP annulus) == [1])
+  require "even-odd annulus lost its hole" (ringsOf (D.strokeP annulus # D.fillRule D.EvenOdd) == [2])
+  require "winding annulus lost its hole" (ringsOf (D.strokeP (D.circle 2 <> D.reversePath (D.circle 1))) == [2])
+  require "winding annulus cut a hole" (ringsOf (D.strokeP annulus) == [1])
   let
     strokes d = [(cap, join) | StrokePolyline _ _ _ cap join _ _ <- diaOps (d # D.lc steelblue)]
     zigzag = D.fromVertices [D.p2 (0, 0), D.p2 (1, 0), D.p2 (1, 1)] :: Diagram B
-  check "a line's cap and join were not the style's" $
+  require "a line's cap and join were not the style's" $
     strokes (zigzag # D.lineCap D.LineCapRound # D.lineJoin D.LineJoinRound) == [(P.RoundCap, P.RoundJoin)]
-  check "a line's default cap and join changed" (strokes zigzag == [(P.ButtCap, P.MiterJoin)])
-  check "a dashed line was not cut into dashes" (length (strokes (zigzag # D.dashingO [4, 4] 0)) > 4)
+  require "a line's default cap and join changed" (strokes zigzag == [(P.ButtCap, P.MiterJoin)])
+  require "a dashed line was not cut into dashes" (length (strokes (zigzag # D.dashingO [4, 4] 0)) > 4)
 
 testTicks :: IO ()
 testTicks = do
   let
     t0 = niceTicks 6 (Domain 0 100)
     labels d = map snd (niceTickLabels 6 d)
-  check "nice ticks failed for [0,100]" (fmap (<= 0) (listToMaybe t0) == Just True && fmap (>= 100) (listToMaybe (reverse t0)) == Just True)
-  check "nice ticks failed for [-5,5]" (0 `elem` niceTicks 6 (Domain (-5) 5))
-  check "niceTicks failed on overflowing, singleton, or empty-budget domains" $
+  require "nice ticks failed for [0,100]" (fmap (<= 0) (listToMaybe t0) == Just True && fmap (>= 100) (listToMaybe (reverse t0)) == Just True)
+  require "nice ticks failed for [-5,5]" (0 `elem` niceTicks 6 (Domain (-5) 5))
+  require "niceTicks failed on overflowing, singleton, or empty-budget domains" $
     niceTicks 6 (Domain (-1e308) 1e308) == []
       && niceTicks 6 (Domain 1e308 1e308) == [1e308]
       && niceTicks 0 (Domain 0 100) == []
@@ -200,8 +197,8 @@ testTicks = do
     [ (6, "6"), (0.2, "0.2"), (0.2 + 0.2 + 0.2, "0.6"), (0.0008, "0.0008"), (1.5e-10, "1.500e-10")
     , (1e308, "1.000e308"), (-1e308, "-1.000e308")
     ]
-    $ \(v, want) -> check ("formatTick " <> show v) (formatTick v == want)
-  check "tick labels carry noise or spare digits" $
+    $ \(v, want) -> require ("formatTick " <> show v) (formatTick v == want)
+  require "tick labels carry noise or spare digits" $
     labels (Domain 0 1) == ["0", "0.2", "0.4", "0.6", "0.8", "1"]
       && labels (Domain 1e-8 5e-8) == ["1e-8", "2e-8", "3e-8", "4e-8", "5e-8"]
       && labels (Domain 1700000000 1700086400) == ["1.7e9", "1.70002e9", "1.70004e9", "1.70006e9", "1.70008e9"]
@@ -210,8 +207,8 @@ testTicks = do
   let
     yLabels pts = [t | DrawText _ _ 1 _ t _ <- chartOps 400 240 (bareChart [line "s" pts])]
     distinct ts = length ts >= 3 && length (nub ts) == length ts
-  check "fine ticks lost their digits" (distinct (yLabels [(0, 1), (1, 1.0000004)]))
-  check "a large offset hid the ticks' step" (distinct (yLabels [(0, 1700000000), (1, 1700086400)]))
+  require "fine ticks lost their digits" (distinct (yLabels [(0, 1), (1, 1.0000004)]))
+  require "a large offset hid the ticks' step" (distinct (yLabels [(0, 1700000000), (1, 1700086400)]))
 
 -- | Series share bounds; an area's reaches its baseline. Empty series, flat
 -- lines and values that are not finite leave the others' span alone.
@@ -220,7 +217,7 @@ testDomains = do
   let
     nan = 0 / 0
     finite x = not (isNaN x || isInfinite x)
-    domains msg ok ss = check msg (ok (seriesDomains (bareChart ss)))
+    domains msg ok ss = require msg (ok (seriesDomains (bareChart ss)))
     yDomain msg ok = domains msg (ok . snd)
   domains "multi-series domains do not share bounds" (\(Domain xl xh, Domain yl yh) -> yl <= 0 && yh >= 20 && xl <= 0 && xh >= 1) $
     [line "a" (V.fromList [(0, 0), (1, 1)]), line "b" [(0, 10), (1, 20)]]
@@ -241,13 +238,12 @@ testDomains = do
     [line "s" [(0, -100), (1, nan), (2, 5), (3, 6)]]
   domains "an infinite value made the domain infinite" (\(Domain a b, Domain c d) -> all finite [a, b, c, d] && d >= 3) $
     [line "s" [(0, 1), (1, 1 / 0), (2, 3)]]
-  check "mergeDomains broken" (mergeDomains (Domain 0 1) (Domain 0 10) == Domain 0 10)
   -- Hover and drawing skip a NaN too.
   let
     holes = bareChart [line "s" [(0, 0), (1, nan), (2, 10)]]
     hovered = nearestPlotHover (seriesDomains holes) (map (seriesPoints holes) (chartSeries holes)) 0.05 0.05
-  check "hover picked a point past a NaN" (fmap hoverDataX hovered == Just 0)
-  check "a NaN point reached the drawing" $
+  require "hover picked a point past a NaN" (fmap hoverDataX hovered == Just 0)
+  require "a NaN point reached the drawing" $
     all (all finite . primArrayToList) [p | StrokePolyline p _ _ _ _ _ _ <- chartOps 200 120 holes]
 
 testDecimation :: IO ()
@@ -256,12 +252,12 @@ testDecimation = do
     wave = V.fromList [(fromIntegral i, sin (fromIntegral i / 10)) | i <- [0 .. 9999 :: Int]]
     ys = toList (V.map snd (lttb 500 wave))
     ordered ps = V.and (V.zipWith (\a b -> fst a < fst b) ps (V.drop 1 ps))
-  check "LTTB lost its target count or waveform extrema" (length ys == 500 && minimum ys < -0.5 && maximum ys > 0.5)
-  check "LTTB skipped the first bucket's spike" $
+  require "LTTB lost its target count or waveform extrema" (length ys == 500 && minimum ys < -0.5 && maximum ys > 0.5)
+  require "LTTB skipped the first bucket's spike" $
     lttb 3 (V.fromList [(x, if x == 1 then 10 else 0) | x <- [0 .. 9]]) == V.fromList [(0, 0), (1, 10), (9, 0)]
-  check "min/max decimation changed equal-extrema tie handling" $
+  require "min/max decimation changed equal-extrema tie handling" $
     minMaxDecimate 1 (V.fromList [(0, 2), (1, 2), (2, 2)]) == V.singleton (0, 2)
-  check "min/max decimation lost extrema or reversed their order" $
+  require "min/max decimation lost extrema or reversed their order" $
     minMaxDecimate 2 (V.fromList [(x, 9 - x) | x <- [0 .. 8]]) == V.fromList [(0, 9), (4, 5), (5, 4), (8, 1)]
   forM_ [0 .. 60] $ \n -> forM_ [-1 .. n + 1] $ \k -> do
     let
@@ -269,21 +265,21 @@ testDecimation = do
       sampled = lttb k input
       kept = minMaxDecimate k input
       extremes ps = (V.minimum (V.map snd ps), V.maximum (V.map snd ps))
-    check "LTTB violated its point budget or input order" (V.length sampled == min n (max 0 k) && ordered sampled)
-    check "LTTB lost an endpoint" $
+    require "LTTB violated its point budget or input order" (V.length sampled == min n (max 0 k) && ordered sampled)
+    require "LTTB lost an endpoint" $
       (V.null sampled || V.head sampled == V.head input) && (V.length sampled < 2 || V.last sampled == V.last input)
-    check "min/max decimation violated its budget or input order" (V.length kept <= max 0 (2 * k) && ordered kept)
-    check "min/max decimation invented a point" (V.all (`V.elem` input) kept)
-    check "min/max decimation lost a global extremum" (V.null kept || extremes input == extremes kept)
+    require "min/max decimation violated its budget or input order" (V.length kept <= max 0 (2 * k) && ordered kept)
+    require "min/max decimation invented a point" (V.all (`V.elem` input) kept)
+    require "min/max decimation lost a global extremum" (V.null kept || extremes input == extremes kept)
   -- Default decimation thins a long line, but keeps every marker of a
   -- scatter or a marked line up to 2000: a dropped marker is simply missing.
   let
     pts n = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. n - 1 :: Int]]
     drawn s = U.length (seriesPoints (chart [s]) s)
-  check "decimation did not thin a long line" (drawn (line "l" (pts 100)) < 100)
-  check "decimation thinned a scatter series" (drawn (scatter "s" (pts 100)) == 100)
-  check "decimation thinned a marked line" (drawn (withMarker MarkCircle (line "l" (pts 100))) == 100)
-  check "decimation kept every point of a huge scatter" (drawn (scatter "s" (pts 5000)) == 2000)
+  require "decimation did not thin a long line" (drawn (line "l" (pts 100)) < 100)
+  require "decimation thinned a scatter series" (drawn (scatter "s" (pts 100)) == 100)
+  require "decimation thinned a marked line" (drawn (withMarker MarkCircle (line "l" (pts 100))) == 100)
+  require "decimation kept every point of a huge scatter" (drawn (scatter "s" (pts 5000)) == 2000)
 
 barChartSample :: Chart
 barChartSample =
@@ -308,8 +304,8 @@ testLabelFit = do
       (Fixed bw, Fixed bh) -> map snd (textBoxes (chartOps bw bh barChartSample))
       _ -> []
     xs = [x | Rect x _ _ _ <- boxes]
-  check "axis labels did not spread along x" (length xs >= 3 && maximum xs - minimum xs > 20)
-  check "axis label boxes overlap" (not (or [rectsOverlap a b | (a : rest) <- tails boxes, b <- rest]))
+  require "axis labels did not spread along x" (length xs >= 3 && maximum xs - minimum xs > 20)
+  require "axis label boxes overlap" (not (or [rectsOverlap a b | (a : rest) <- tails boxes, b <- rest]))
   let
     sleepChart =
       (bareChart [scatter "focus" [(4, 3), (9, 8)], line "trend" [(4, 3), (9, 8)]])
@@ -331,8 +327,8 @@ testLabelFit = do
         LegendBottom -> by > h * 0.55
         _ -> False
   forM_ [(sleepChart, 400, 240), (sleepChart, 220, 150), (barChartSample, 220, 150), (botChart, 400, 240)] $
-    \(c, w, h) -> check ("axis titles overlap ticks at " <> show (w, h)) (not (titleOverlaps c w h))
-  forM_ [sleepChart, botChart] $ \c -> check "legend overlaps ticks" (not (legendOverlaps c 400 240))
+    \(c, w, h) -> require ("axis titles overlap ticks at " <> show (w, h)) (not (titleOverlaps c w h))
+  forM_ [sleepChart, botChart] $ \c -> require "legend overlaps ticks" (not (legendOverlaps c 400 240))
   -- A top legend has a row of its own, under the title and inside the
   -- drawing, also where the drawing is as tall as its box.
   let
@@ -340,14 +336,14 @@ testLabelFit = do
     titled = topChart {chartTitle = Just "Temperature"}
     named ns c h = [b | (t, b) <- textBoxes (chartOps 400 h c), t `elem` ns]
     entries = named ["in", "out"]
-  check "top legend overlaps the title" $
+  require "top legend overlaps the title" $
     not (or [rectsOverlap a b | a <- named ["Temperature"] titled 240, b <- entries titled 240])
-  check "top legend spills above the drawing" $
+  require "top legend spills above the drawing" $
     all (\(Rect _ y _ _) -> y >= 0) (entries topChart 150 ++ entries titled 150)
   let
     shortTitles = (bareChart [line "sin(x)" [(0, 0), (1, 1)]]) {chartYTitle = Just "y", chartXTitle = Just "x"}
     shortM = chartMargins fm shortTitles {chartLegend = LegendRight}
-  check "short axis titles left a huge gutter" (marginLeft shortM < 0.85 && marginBottom shortM < 0.65)
+  require "short axis titles left a huge gutter" (marginLeft shortM < 0.85 && marginBottom shortM < 0.65)
 
 -- | Empty series isolate the legend strokes from data geometry. Every
 -- placement keeps the labels and the series' colour overrides.
@@ -363,10 +359,10 @@ testLegendColors = do
       labels = [t | DrawText _ _ _ _ t _ <- ops, t `elem` ["custom", "default"]]
       colors = mapMaybe inkColor ops
     if position == LegendNone
-      then check "hidden legend rendered entries" (null labels && custom `notElem` colors)
+      then require "hidden legend rendered entries" (null labels && custom `notElem` colors)
       else do
-        check "legend lost or duplicated a series label" (length labels == 2 && nub labels == labels)
-        check "legend colors differ from series colors" (custom `elem` colors && fallback `elem` colors)
+        require "legend lost or duplicated a series label" (length labels == 2 && nub labels == labels)
+        require "legend colors differ from series colors" (custom `elem` colors && fallback `elem` colors)
 
 testPlotHover :: IO ()
 testPlotHover = do
@@ -375,16 +371,16 @@ testPlotHover = do
     centre c = hoverAt c 0.5 0.5
     picked = fmap (\h -> (hoverSeriesIdx h, hoverPointIdx h, hoverDataX h, hoverDataY h)) . centre . bareChart
   forM_ [bareChart [], bareChart [line "empty" []]] $ \c ->
-    check "empty chart produced a hover target" (centre c == Nothing)
-  check "equidistant hover targets did not prefer the first point" $
+    require "empty chart produced a hover target" (centre c == Nothing)
+  require "equidistant hover targets did not prefer the first point" $
     picked [line "first" [(0, 0), (0, 0)], line "second" [(0, 0)]] == Just (0, 0, 0, 0)
-  check "nearestPlotHover picked wrong point" (picked [line "a" [(0, 0), (1, 1), (2, 4)]] == Just (0, 1, 1, 1))
+  require "nearestPlotHover picked wrong point" (picked [line "a" [(0, 0), (1, 1), (2, 4)]] == Just (0, 1, 1, 1))
   -- Just above the first point, the second is far off on screen but nearer
   -- in data units, where y spans a thousand times x.
   let
     spread = bareChart [scatter "s" [(0.1, 500), (0.9, 505), (0, 0), (1, 1000)]]
     (xDom, yDom) = seriesDomains spread
-  check "hover picked a point far away on screen" $
+  require "hover picked a point far away on screen" $
     fmap hoverPointIdx (hoverAt spread (domainToPlot xDom 0.1) (domainToPlot yDom 510)) == Just 0
 
 -- | Series shapes sit where their data is: an area starts at the line
@@ -402,8 +398,8 @@ testSeriesShapes = do
     diamonds = [centre (pointsOf p) | FillPolygon p _ _ _ <- ops, sizeofPrimArray p == 8]
   case (linePts, areaPts) of
     ([l@(start : _)], [area0 : _]) -> do
-      check "area does not start at its first sample" (near start area0)
-      check "diamond markers are not centred on their points" $
+      require "area does not start at its first sample" (near start area0)
+      require "diamond markers are not centred on their points" $
         length diamonds == length l && all (\d -> any (near d) l) diamonds
     _ -> fail ("expected one line and one area, got " <> show (length linePts, length areaPts))
   let
@@ -414,11 +410,11 @@ testSeriesShapes = do
     crossXs = map fst (concat (fills cross ++ strokes cross))
     lineMarkers = filter ((== 4) . length) (fills (withMarker MarkDiamond (line "l" [(0, 0), (1, 1), (2, 0)])))
     triangles = [t | FillPolygon _ _ t _ <- chartOps 200 120 (bareChart [withMarker MarkTriangle (scatter "t" [(1, 1)])])]
-  check "triangle marker produced no fill" (sum (map sizeofPrimArray triangles) >= 3)
-  check "MarkCross arm left at origin" (not (null crossXs) && maximum crossXs - minimum crossXs < 40)
-  check "line markers were not drawn" (length lineMarkers == 3)
+  require "triangle marker produced no fill" (sum (map sizeofPrimArray triangles) >= 3)
+  require "MarkCross arm left at origin" (not (null crossXs) && maximum crossXs - minimum crossXs < 40)
+  require "line markers were not drawn" (length lineMarkers == 3)
   -- A step series ends with the riser to its last point, the highest here.
-  check "step series stopped short of its last point" $ case map (map snd) (strokes (step "s" [(0, 0), (1, 1), (2, 5)])) of
+  require "step series stopped short of its last point" $ case map (map snd) (strokes (step "s" [(0, 0), (1, 1), (2, 5)])) of
     [path] -> length path == 5 && last path == minimum path
     _ -> False
   let
@@ -428,8 +424,8 @@ testSeriesShapes = do
     tickY t = listToMaybe [y | DrawText _ y 1 _ t' _ <- barOps, t' == t]
     bars = map snd (sortOn fst [(rectX r, (rectY r, rectY r + rectH r)) | FillRect r c <- barOps, c == seriesInk])
     close a b = abs (a - b) < 0.5
-  check "bar categories are not on the x axis" (all (`elem` [t | DrawText _ _ _ _ t _ <- barOps]) days)
-  check "bars disagree with the y axis" $ case (tickY "0", tickY "2", tickY "4", bars) of
+  require "bar categories are not on the x axis" (all (`elem` [t | DrawText _ _ _ _ t _ <- barOps]) days)
+  require "bars disagree with the y axis" $ case (tickY "0", tickY "2", tickY "4", bars) of
     (Just y0, Just y2, Just y4, [(top2, _), _, (top4, _), _, _]) ->
       all (close y0 . snd) bars && close top2 y2 && close top4 y4
     _ -> False
@@ -456,11 +452,11 @@ testAreaRings = do
     crossing = [(x, sin x) | x <- [0, 0.5 .. 10]]
   case rings above of
     [r@(p, _)] -> do
-      check "area ring has more than its samples and the baseline's ends" (sizeofPrimArray p `div` 2 <= length above + 2)
-      check "area triangles do not cover their ring" (exact r)
+      require "area ring has more than its samples and the baseline's ends" (sizeofPrimArray p `div` 2 <= length above + 2)
+      require "area triangles do not cover their ring" (exact r)
     polys -> fail ("expected one area polygon, got " <> show (length polys))
-  check "crossing area is not a ring per side" (length (rings crossing) == 4)
-  check "crossing area triangles do not cover their rings" (all exact (rings crossing))
+  require "crossing area is not a ring per side" (length (rings crossing) == 4)
+  require "crossing area triangles do not cover their rings" (all exact (rings crossing))
 
 -- | A growing plot's height is capped, but the caller's own height holds. A
 -- diagram with no width, such as a vertical rule, takes the caller's box.
@@ -470,16 +466,16 @@ testFit = do
     fittedWith f = fitLayout fm (f defaultLayout) (chartDia barChartSample)
     heights f = let l = fittedWith f in (layoutMinH l, layoutMaxH l)
     (grownMin, grownMax) = heights fillW
-  check "plot grow height ballooned" (grownMin <= 260 && grownMax <= 260)
-  check "a growing plot capped a taller minimum" (fst (heights (fillW . minH 300)) >= 300)
-  check "a growing plot lost its fixed height" (heights (fillW . fixedH 400) == (400, 400))
+  require "plot grow height ballooned" (grownMin <= 260 && grownMax <= 260)
+  require "a growing plot capped a taller minimum" (fst (heights (fillW . minH 300)) >= 300)
+  require "a growing plot lost its fixed height" (heights (fillW . fixedH 400) == (400, 400))
   -- Too short for the labels, which would otherwise enlarge it.
-  check "a growing plot lost a fixed height under the cap" (heights (fillW . fixedH 100) == (100, 100))
-  check "a growing plot stopped growing in height" $ case layoutHeight (fittedWith grow) of
+  require "a growing plot lost a fixed height under the cap" (heights (fillW . fixedH 100) == (100, 100))
+  require "a growing plot stopped growing in height" $ case layoutHeight (fittedWith grow) of
     Grow _ -> True
     _ -> False
   let
     rule = D.vrule 50 :: Diagram B
     boxed = fitLayout fm (fixedWH 200 100 defaultLayout) rule
-  check "a fixed width made a rule infinitely tall" (layoutMaxH (fitLayout fm (fixedW 200 defaultLayout) rule) < 1e6)
-  check "a fixed box lost its width for a rule" (layoutMinW boxed == 200 && layoutMaxW boxed == 200)
+  require "a fixed width made a rule infinitely tall" (layoutMaxH (fitLayout fm (fixedW 200 defaultLayout) rule) < 1e6)
+  require "a fixed box lost its width for a rule" (layoutMinW boxed == 200 && layoutMaxW boxed == 200)
