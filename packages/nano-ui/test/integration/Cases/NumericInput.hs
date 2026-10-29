@@ -2,11 +2,7 @@
 module Cases.NumericInput (tests) where
 
 import Spec
-import Data.IntMap.Strict qualified as IM
-import Data.Maybe (isJust)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (intKey)
-import NanoUI.Internal.Store (Slot (..), WidgetStore (..), slotKey)
 import NanoUI.Shortcut qualified as Shortcut
 import NanoUI.Testing.Sim
 
@@ -28,7 +24,7 @@ runNumericInputTest _ failed =
   where
     range = defaultNumericInputConfig {nicMin = 0, nicMax = 100}
     values = fmap (map snd) . sequence
-    shown txt = check . isJust =<< findSpan txt
+    shown txt = check =<< labelShown txt
     cases =
       [ -- The arrows step (Shift ten times as far), typing that is not a
         -- number is dropped, typing clamps to the range, and Enter rewrites
@@ -68,21 +64,20 @@ runNumericInputTest _ failed =
       ]
 
 -- | A command run on a focused numeric field from above it in the view, before
--- this frame declares it, still edits it, and leaves no change pulse behind.
+-- this frame declares it, still edits it, and pulses 'respChanged' once,
+-- leaving no change behind for later frames.
 runNumericInputCommandTest :: Context -> IORef Int -> IO ()
 runNumericInputCommandTest ctx failed = do
   valueRef <- newVar 12
   pending <- newIORef []
   field <- newIORef Nothing
+  -- The commands run before the field.
   let ui = column $ do
         cmds <- liftIO (atomicModifyIORef' pending ([],))
         liftIO (readIORef field) >>= mapM_ (\wid -> mapM_ (runTextCommand wid) cmds)
-        (resp, _) <- held valueRef numericInput'
-        liftIO (writeIORef field (Just (respId resp)))
+        (resp, v) <- held valueRef numericInput'
+        (respChanged resp, v) <$ liftIO (writeIORef field (Just (respId resp)))
   runSim ctx failed (withInput 320 120) ui $ do
     pressTab 1
     liftIO (writeIORef pending [ReplaceAll "42"])
-    _ <- frame >> frame
-    checkEq 42 =<< liftIO (readVarIO valueRef)
-    wid <- maybe 0 intKey <$> liftIO (readIORef field)
-    check . not . IM.member (slotKey SlotTextAreaChanged wid) . storeInt =<< liftIO (getStore ctx)
+    checkEq [(True, 42), (False, 42), (False, 42)] =<< replicateM 3 frame

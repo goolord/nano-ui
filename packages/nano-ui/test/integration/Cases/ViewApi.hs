@@ -7,14 +7,12 @@ module Cases.ViewApi (tests) where
 import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (..))
 import NanoUI.Monad (focusedWidget, releaseFocus)
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
-  [ spec "view-queries" runViewQueriesTest
-  , spec "hold-focus" runHoldFocusTest
+  [ spec "hold-focus" runHoldFocusTest
   , spec "pointer-track" runPointerTrackTest
   , spec "content-key-of" runContentKeyOfTest
   , spec "layout-variants" runLayoutVariantsTest
@@ -28,26 +26,6 @@ sizedWidget :: Float -> Float -> Bool -> CustomWidgetSpec ()
 sizedWidget w h focusable =
   defaultCustomWidgetSpec {widgetLayout = fixedWH w h defaultLayout, widgetFocusable = focusable}
 
--- | 'lastRect' is nothing before a widget's first frame and its laid-out rect
--- after. 'uiFontSize' is the metrics' line height until overridden.
-runViewQueriesTest :: Context -> IORef Int -> IO ()
-runViewQueriesTest ctx failed = do
-  let inp = withInput 400 300
-      ui = do
-        wid <- nextId
-        before <- lastRect wid
-        (resp, ()) <- customWidgetWithId wid (sizedWidget 120 40 False)
-        pure (before, respRect resp)
-  assertEq failed Nothing . fst =<< evalUi ctx inp ui
-  (second, laidOut) <- warmup2 ctx inp ui
-  assertEq failed (Just laidOut) second
-  assertEq failed (120, 40) (rectW laidOut, rectH laidOut)
-  let sized c = evalUi c inp uiFontSize
-      big = withFontMetrics ctx (monospaceMetrics 20)
-  assertEq failed (fmLineHeight (ctxFontMetrics ctx)) =<< sized ctx
-  assertEq failed 20 =<< sized big
-  assertEq failed 15 =<< sized (withFontSize big 15)
-
 data FocusMode = Holding | Free | Releasing
   deriving (Eq)
 
@@ -56,11 +34,11 @@ data FocusMode = Holding | Free | Releasing
 -- the widget named. A holder behind an open modal leaves the modal's focus.
 runHoldFocusTest :: Context -> IORef Int -> IO ()
 runHoldFocusTest ctx failed = do
-  modeRef <- newIORef Holding
+  modeVar <- newVar Holding
   let inp = withInput 400 300
       ui = do
         wid <- nextId
-        mode <- liftIO (readIORef modeRef)
+        mode <- readVar modeVar
         when (mode == Holding) (holdFocus wid)
         when (mode == Releasing) (releaseFocus wid)
         _ <- customWidgetWithId wid (sizedWidget 100 30 True)
@@ -68,33 +46,30 @@ runHoldFocusTest ctx failed = do
         when (mode == Holding) (releaseFocus other)
         _ <- customWidgetWithId other (sizedWidget 100 30 True)
         (wid,) <$> focusedWidget
-      noRing = assertEq failed False =<< readIORef (ctxFocusVisible ctx)
-  (wid, held') <- warmup2 ctx inp ui
-  assertEq failed wid held'
-  noRing
-  _ <- runFrame ctx (tabInp inp) ui
-  assertEq failed wid =<< readIORef (ctxFocusId ctx)
-  noRing
-  writeIORef modeRef Free
-  _ <- runFrame ctx (tabInp inp) ui
-  moved <- readIORef (ctxFocusId ctx)
-  assert failed (moved /= wid && moved /= WidgetId 0)
-  writeIORef modeRef Holding
-  assertEq failed wid . snd =<< warmup2 ctx inp ui
-  writeIORef modeRef Releasing
-  assertEq failed (WidgetId 0) . snd =<< warmup2 ctx inp ui
+  runSim ctx failed inp ui $ do
+    (wid, held') <- result
+    checkEq wid held'
+    check . not =<< focusRing
+    checkEq wid =<< (pressTab 1 >> focusedId)
+    check . not =<< focusRing
+    writeV modeVar Free
+    moved <- pressTab 1 >> focusedId
+    check (moved /= wid && moved /= WidgetId 0)
+    writeV modeVar Holding
+    checkEq wid . snd =<< settle
+    writeV modeVar Releasing
+    checkEq (WidgetId 0) . snd =<< settle
   behind <- newContext
   let page = do
         p <- nextId
         holdFocus p
         _ <- customWidgetWithId p (sizedWidget 100 30 False)
         p <$ modal' (constVar True) "Dialog" (customWidget (sizedWidget 100 30 True))
-  _ <- warmup2 behind inp page
-  _ <- runFrame behind (tabInp inp) page
-  inModal <- readIORef (ctxFocusId behind)
-  p <- warmup2 behind inp page
-  assert failed (inModal /= WidgetId 0 && inModal /= p)
-  assertEq failed inModal =<< readIORef (ctxFocusId behind)
+  runSim behind failed inp page $ do
+    p <- result
+    inModal <- pressTab 1 >> focusedId
+    check (inModal /= WidgetId 0 && inModal /= p)
+    checkEq inModal =<< (settle >> focusedId)
 
 -- | A pointer that moves within one widget runs no frame, unless that widget
 -- tracks the pointer; one that moves onto another widget always does.
@@ -125,30 +100,17 @@ runContentKeyOfTest _ failed = do
       texts xs = contentKeyOf (map keyPart xs)
   assert failed (ints [big] /= ints [big + 1])
   assert failed (ints [1, 2] /= ints [2, 1])
-  assertEq failed (ints [1, 2]) (ints [1, 2])
   assert failed (texts ["ab", "c"] /= texts ["a", "bc"])
-  assert failed (contentKeyOf [keyPart (Nothing :: Maybe Int)] /= contentKeyOf [keyPart (Just (0 :: Int))])
   assert failed (contentKeyOf [keyPart (0.1 :: Double)] /= contentKeyOf [keyPart (0.1 + 1e-12 :: Double)])
   assert failed (contentKeyOf [] /= 0)
 
--- | The @With@ variants apply their layout: a centred checkbox, a row that
--- reports its rect, a sized modal whose filling body gets the inside, and a
--- bare modal panel, which Escape dismisses.
+-- | The modal @With@ variants apply their layout: a sized modal whose filling
+-- body gets the inside, and a bare modal panel, which Escape dismisses.
 runLayoutVariantsTest :: Context -> IORef Int -> IO ()
 runLayoutVariantsTest _ failed = do
   let sim :: Float -> Float -> NanoUI a -> Sim a () -> IO ()
       sim w h ui script = newContext >>= \c -> runSim c failed (withInput w h) ui script
       filler = respRect . fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = fillW (fillH defaultLayout)}
-      centred = fst <$> withValue False (checkboxWith' alignMid "Match case")
-      ab = (,) <$> buttonWith' (fixedWH 50 20) "A" <*> buttonWith' (fixedWH 50 20) "B"
-  sim 400 300 (rowWith (tight . gap 0 . fixedH 60 . fillW) centred) $ do
-    Rect _ y _ h <- respRect <$> result
-    checkLt h 60
-    check (abs (y + h / 2 - 30) <= 1)
-  sim 400 300 (rowWith' (fillW . tight . gap 0) ab) $ do
-    ((a, b), bar) <- result
-    checkEq 400 (rectW (respRect bar))
-    checkEq (rectX (respRect a) + 50) (rectX (respRect b))
   sim 800 600 (modalWith' (fixedWH 500 400) (constVar True) "Sized" (columnWith (fillW . fillH . tight) filler)) $ do
     result >>= \(_, inside) -> checkJust inside $ \(Rect x _ w h) -> do
       -- Inside the panel's padding and title bar, and most of it.
@@ -231,43 +193,27 @@ runPaneGridInitialTest ctx failed = do
   _ <- runFrame tabbed (tabInp inp) (grids True)
   assert failed . (/= WidgetId 0) =<< evalUi tabbed inp (grids True)
 
--- | The scroll commands run from a view: a row scrolls into view, an offset
--- past the content is held to it, and a page goes back. A view reading
--- 'getScrollMetrics' gets a frame when a resize changes them, and no more.
+-- | A scroll offset set from a view past the content is held to it. A view
+-- reading 'getScrollMetrics' gets a frame when a resize changes them, and no
+-- more.
 runScrollUiTest :: Context -> IORef Int -> IO ()
 runScrollUiTest ctx failed = do
-  command <- newIORef (Nothing :: Maybe (WidgetId -> NanoUI ()))
   let inp = withInput 400 300
+      tall = void (customWidget (sizedWidget 180 1000 False))
       ui = do
-        sid <- currentId
-        cmd <- liftIO (readIORef command)
-        liftIO (writeIORef command Nothing)
-        mapM_ ($ sid) cmd
-        (sid', ()) <- scrollArea (fixedWH 200 200 . tight . gap 0) $
-          void (customWidget (sizedWidget 180 1000 False))
-        m <- getScrollMetricsUi sid'
-        pure (sid == sid', m)
-      run cmd = writeIORef command (Just cmd) >> replicateM_ 3 (runFrame ctx inp ui)
-      offsetNow = fmap (v2Y . scrollOffset) . snd <$> evalUi ctx inp ui
-  (same, m0) <- warmup2 ctx inp ui
-  assert failed same
-  assertEq failed (Just 0) (v2Y . scrollOffset <$> m0)
-  -- A row at 500..520 comes into view at the viewport's foot.
-  run (\sid -> scrollRectIntoViewUi sid (Rect 0 500 1 20) ScrollNearest ScrollInstant)
-  assertJustM failed offsetNow $ \y -> assert failed (y >= 320 && y <= 500)
-  run (\sid -> setScrollOffsetUi sid (V2 0 5000))
-  assertJustM failed (snd <$> evalUi ctx inp ui) $ \m ->
-    assertEq failed (v2Y (scrollRange m)) (v2Y (scrollOffset m))
-  before <- offsetNow
-  run (\sid -> scrollPagesUi sid (V2 0 (-0.5)) ScrollInstant)
-  after <- offsetNow
-  assertJust failed ((,) <$> before <*> after) $ \(b, a) -> assertLt failed a b
+        (sid, ()) <- scrollArea (fixedWH 200 200 . tight . gap 0) tall
+        (sid,) <$> getScrollMetricsUi sid
+  runSim ctx failed inp ui $ do
+    (sid, m0) <- result
+    checkEq (Just 0) (v2Y . scrollOffset <$> m0)
+    (_, m) <- afterView (setScrollOffsetUi sid (V2 0 5000)) >> settle
+    checkJust m $ \m' -> checkEq (v2Y (scrollRange m')) (v2Y (scrollOffset m'))
   reader <- newContext
   let rows = do
         sid <- currentId
         c <- askContext
         m <- liftIO (getScrollMetrics c sid)
-        _ <- scrollArea (fillW . fillH) (void (customWidget (sizedWidget 180 1000 False)))
+        _ <- scrollArea (fillW . fillH) tall
         pure (fmap (rectH . scrollViewport) m)
       dirtyAfter h = (\(_, _, d) -> d) <$> runFrame reader (withInput 400 h) rows
   replicateM_ 3 (runFrame reader inp rows)

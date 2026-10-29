@@ -7,7 +7,20 @@ import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..), getFocusables)
 import NanoUI.Internal.Layout.Arena (flowChildrenInOrder, getNodeRect, lookupNodeByWidgetId)
-import NanoUI.Testing.Sim (Target (..), check, checkEq, click, focusedId, moveTo, pointerCursor, rectOf, result, runSim, typeText)
+import NanoUI.Testing.Sim
+  ( Target (..)
+  , check
+  , checkEq
+  , click
+  , focusedId
+  , hotId
+  , moveTo
+  , pointerCursor
+  , rectOf
+  , result
+  , runSim
+  , typeText
+  )
 
 tests :: [Spec]
 tests =
@@ -198,7 +211,7 @@ runAdornedFieldControlTest ctx failed = do
     checkEq (respId field) =<< focusedId
     checkEq "abc" . snd . fst =<< typeText "c"
     _ <- moveTo "Off" >> moveTo "Off"
-    checkEq (respId field) =<< liftIO (readIORef (ctxHotId ctx))
+    checkEq (respId field) =<< hotId
     checkEq UiCursorText =<< pointerCursor
 
 -- | Display content neither enters tab order nor requests the input method, even focused.
@@ -223,7 +236,7 @@ runAdornmentKeyboardInertTest ctx failed = do
     assertEq failed (respId expected) =<< getFocusId ctx
     void (runFrame ctx (keyInp KeyEnter inp) ui)
   assertEq failed 0 =<< readIORef clicks
-  writeIORef (ctxFocusId ctx) =<< readIORef childId
+  setFocus ctx =<< readIORef childId
   _ <- runFrame ctx inp ui
   assertEq failed Nothing =<< textInputArea ctx
 
@@ -254,6 +267,5 @@ runAdornmentClipTest ctx failed = do
   weighing <- newContext
   let weigh =
         defaultButtonConfig {bcLayout = fixedW 60 defaultLayout, bcAdornments = A.trailing (A.affix "kilograms")}
-
   (weighed, kgClip, _) <- clipped weighing (buttonConfigured' weigh "Weigh") "kilograms"
   assert failed (covers (respRect weighed) kgClip)

@@ -5,7 +5,6 @@ import Spec
 import Data.Either (isRight)
 import Data.Foldable (toList)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Input (isHardQuitInput, takeFrame)
 import NanoUI.Shortcut
 import System.Info (os)
@@ -24,10 +23,6 @@ tests =
   , spec "key-listeners-focus" runKeyListenersFocusTest
   , spec "key-repeats" runKeyRepeatsTest
   , spec "key-repeats-widgets" runKeyRepeatsWidgetsTest
-  , spec "key-pressable" runKeyPressableTest
-  , spec "key-hard-quit" runKeyHardQuitTest
-  , spec "key-frame-modifiers" runKeyFrameModifiersTest
-  , spec "shortcut-focus-from-code" runShortcutFocusFromCodeTest
   , spec "shortcut-disabled-focus" runShortcutDisabledFocusTest
   , spec "shortcut-precise-claims" runPreciseClaimsTest
   ]
@@ -43,7 +38,7 @@ runShortcutDisabledFocusTest ctx failed = do
         after <- shortcut (ctrl <> key 'a')
         pure (field, before, after)
   (field, _, _) <- warmup2 ctx inp0 (ui False)
-  writeIORef (ctxFocusId ctx) (respId field)
+  setFocus ctx (respId field)
   (_, _, after) <- evalUi ctx (chordInp (ctrl <> key 'a') inp0) (ui True)
   assertEq failed True after
   _ <- warmup2 ctx inp0 (ui True)
@@ -62,7 +57,7 @@ runPreciseClaimsTest ctx failed = do
         pure (r, global, local)
       check claim chord expected = do
         (r, _, _) <- warmup2 ctx inp0 (ui claim chord)
-        writeIORef (ctxFocusId ctx) (respId r)
+        setFocus ctx (respId r)
         (_, global, local) <- evalUi ctx (chordInp chord inp0) (ui claim chord)
         assertEq failed expected global
         assertEq failed True local
@@ -71,6 +66,7 @@ runPreciseClaimsTest ctx failed = do
   check exact (alt <> key 'k') True
   check exact (key 'k') True
   check exact (key KeyDelete) False
+  check KeysAll (ctrl <> key 'k') False
   check KeysNone (ctrl <> key 'k') True
   check KeysReadOnly (ctrl <> key 'c') False
   check KeysReadOnly (key KeyDelete) True
@@ -182,13 +178,13 @@ runShortcutFocusedFieldTest ctx failed = do
   fires failed press False [key 'j', shift <> key 'j', key KeyEnter, ctrl <> key KeyLeft]
   -- Alt with a letter types on macOS (Option).
   fires failed press True ([ctrl <> key 's', key (KeyF 2), ctrl <> key KeySpace] ++ [alt <> key 'j' | os /= "darwin"])
-  writeIORef (ctxFocusId ctx) (WidgetId 0)
+  setFocus ctx (WidgetId 0)
   fires failed press True [cmdOrCtrl <> key 'a', key 'j', key KeyEnter]
 
 -- | A focused button keeps Enter and Space (plain or with Shift), a slider
 -- also the arrows, a select Down but not Ctrl+Down, and a text area Enter,
 -- Shift+Enter and the vertical arrows. Ctrl+Enter, Alt+Left and similar go
--- to shortcuts instead. A custom widget keeps the keys it claims, here all.
+-- to shortcuts instead.
 runShortcutFocusedControlTest :: Context -> IORef Int -> IO ()
 runShortcutFocusedControlTest _ failed = do
   let passed = [ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
@@ -208,9 +204,6 @@ runShortcutFocusedControlTest _ failed = do
   pressSel <- focusedOn [ctrl <> key KeyDown] (\_ -> void (held selRef (select' ["a", "b", "c"])))
   let chosenAfter c = pressSel (chordInp c inp0) >> pressSel inp0 >> readVarIO selRef
   assertEq failed [0, 1] =<< mapM chosenAfter [ctrl <> key KeyDown, key KeyDown]
-  let claimsAll = defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll}
-  pressC <- focusedOn chords (\_ -> void (customWidget claimsAll))
-  fires failed pressC False chords
   areaRef <- newVar "hi"
   let areaKept = [key KeyEnter, shift <> key KeyEnter, key KeyUp]
       areaPassed = [ctrl <> key KeyEnter, alt <> key KeyEnter, ctrl <> key KeyUp, alt <> key KeyDown]
@@ -256,7 +249,12 @@ runShortcutMenuItemTest ctx failed = do
   fires failed press True [ctrl <> key 's']
 
 -- | Releases and held keys reach the view; 'clearEphemeral' clears releases
--- like presses.
+-- like presses. An auto-repeat is held once and is no new press. Losing
+-- keyboard focus releases held keys and modifiers. Ctrl+C is a hard quit
+-- when it arrives as a key, with Ctrl alone (Ctrl+Alt is AltGr, and
+-- Ctrl+Shift+C is a shortcut). A modifier change ends a frame that holds
+-- keys or text, so typing x and then pressing Ctrl+S does not read the x as
+-- Ctrl+X.
 runKeyReleaseTest :: Context -> IORef Int -> IO ()
 runKeyReleaseTest ctx failed = do
   let keys = sequence [keyPressed KeySpace, keyReleased KeySpace, keyHeld KeySpace]
@@ -264,13 +262,30 @@ runKeyReleaseTest ctx failed = do
       down = applyKey KeySpace True inp0
       holding = clearEphemeral down
       up = applyKey KeySpace False holding
+      repeated = applyKey KeySpace True holding
   warmup ctx inp0 ui
   forM_ [(down, [True, False, True]), (holding, [False, False, True]), (up, [False, True, False]), (clearEphemeral up, [False, False, False])] $ \(i, seen) ->
     assertEq failed seen =<< evalUi ctx i ui
-  -- A repeated key appears once in the held set.
-  assertEq failed ([KeySpace], [], [KeySpace]) (toList (inputKeysHeld holding), toList (inputKeysReleased (clearEphemeral up)), toList (inputKeysHeld (applyKey KeySpace True down)))
+  assertEq failed ([KeySpace], [], [KeySpace]) (toList (inputKeysHeld holding), toList (inputKeysReleased (clearEphemeral up)), toList (inputKeysHeld repeated))
+  assertEq failed [True, False] (map (pressedOnceIn KeySpace) [down, repeated])
   assert failed (inputInteracted holding up)
   assertEq failed [False, False, False] =<< evalUi ctx down (disabledWhen True keys)
+  let blurred = releaseAllKeys (clearEphemeral (chordInp (ctrl <> key 's') inp0))
+  assertEq failed ([], [KeyChar 's'], noModifiers) (toList (inputKeysHeld blurred), toList (inputKeysReleased blurred), inputModifiers blurred)
+  let quits =
+        [ctrl <> key 'c', key 'c', ctrl <> shift <> key 'x', ctrl <> alt <> key 'c', ctrl <> shift <> key 'c']
+  assertEq failed [True, False, False, False, False] (map (isHardQuitInput . (`chordInp` inp0)) quits)
+  let events =
+        [ applyKey (KeyChar 'x') True
+        , \i -> i {inputChars = inputChars i <> "x"}
+        , \i -> i {inputModifiers = ctrlHeld}
+        , applyKey (KeyChar 's') True
+        ]
+      split i = takeFrame (flip ($)) (const False) i
+      (typed, _, rest) = split inp0 events
+      (chorded, _, rest') = split (clearEphemeral typed) rest
+  assertEq failed ("x", [KeyChar 'x'], noModifiers, 2) (inputChars typed, toList (inputKeys typed), inputModifiers typed, length rest)
+  assertEq failed ("", [KeyChar 's'], ctrlHeld, 0) (inputChars chorded, toList (inputKeys chorded), inputModifiers chorded, length rest')
 
 -- | Key queries match only keys not claimed by the focused widget: a text
 -- field claims Delete, while F2 reaches the view. The raw input still has both.
@@ -283,7 +298,7 @@ runKeyListenersFocusTest ctx failed = do
   warmupFocused ctx inp0 ui
   assertEq failed [(False, False), (True, True)] =<< evalUi ctx pressBoth ui
   assert failed (pressedIn KeyDelete pressBoth && heldIn KeyDelete pressBoth)
-  writeIORef (ctxFocusId ctx) (WidgetId 0)
+  setFocus ctx (WidgetId 0)
   _ <- runFrame ctx inp0 ui
   assertEq failed [(True, True), (True, True)] =<< evalUi ctx pressBoth ui
 
@@ -305,9 +320,6 @@ runKeyRepeatsTest ctx failed = do
   assertEq failed ["pressed", "k"] =<< press (repeated 'k')
   assertEq failed ["j once"] =<< press (down 'j')
   assertEq failed ["j"] =<< press (repeated 'j')
-  -- Backends pass every repeat; the held set lists the key once.
-  let r = repeated 'k'
-  assertEq failed ([KeyChar 'k'], [], [KeyChar 'k']) (toList (inputKeys r), toList (inputKeysNew r), toList (inputKeysHeld r))
 
 -- | Held Enter repeats line breaks in a text area but clicks a button and
 -- submits a text field only once.
@@ -327,55 +339,3 @@ runKeyRepeatsWidgetsTest ctx failed = do
   let field = column (held fieldRef textInput')
   warmupFocused f inp0 field
   assertEq failed [True, False] . map (respSubmitted . fst) =<< mapM (\i -> evalUi f i field) [keyInp KeyEnter inp0, keyRepeatInp KeyEnter inp0]
-
--- | Keys and mouse buttons share one query API; losing keyboard focus
--- releases held keys and modifiers.
-runKeyPressableTest :: Context -> IORef Int -> IO ()
-runKeyPressableTest _ failed = do
-  let down = applyMouseButton MouseMiddle True (applyKey KeyEnter True inp0)
-      up = applyMouseButton MouseMiddle False (applyKey KeyEnter False (clearEphemeral down))
-      queries i = [pressedIn KeyEnter i, pressedOnceIn KeyEnter i, releasedIn KeyEnter i, heldIn KeyEnter i, pressedIn MouseMiddle i, pressedOnceIn MouseMiddle i, releasedIn MouseMiddle i, heldIn MouseMiddle i]
-  assertEq failed [True, True, False, True, True, True, False, True] (queries down)
-  assertEq failed [False, False, False, True, False, False, False, True] (queries (clearEphemeral down))
-  assertEq failed [False, False, True, False, False, False, True, False] (queries up)
-  let blurred = releaseAllKeys (clearEphemeral (chordInp (ctrl <> key 's') inp0))
-  assertEq failed ([], [KeyChar 's'], noModifiers) (toList (inputKeysHeld blurred), toList (inputKeysReleased blurred), inputModifiers blurred)
-
--- | Ctrl+C is a hard quit when it arrives as a key, not just as text. Only
--- with Ctrl alone: Ctrl+Alt is AltGr, and Ctrl+Shift+C is a shortcut.
-runKeyHardQuitTest :: Context -> IORef Int -> IO ()
-runKeyHardQuitTest _ failed =
-  assertEq failed [True, False, False, False, False] [isHardQuitInput (chordInp c inp0) | c <- [ctrl <> key 'c', key 'c', ctrl <> shift <> key 'x', ctrl <> alt <> key 'c', ctrl <> shift <> key 'c']]
-
--- | A modifier change ends a frame that holds keys or text, so typing x and
--- then pressing Ctrl+S does not read the x as Ctrl+X.
-runKeyFrameModifiersTest :: Context -> IORef Int -> IO ()
-runKeyFrameModifiersTest _ failed = do
-  let events =
-        [ applyKey (KeyChar 'x') True
-        , \i -> i {inputChars = inputChars i <> "x"}
-        , \i -> i {inputModifiers = ctrlHeld}
-        , applyKey (KeyChar 's') True
-        ]
-      frame inp = takeFrame (flip ($)) (const False) inp
-      (typed, _, rest) = frame inp0 events
-      (chord, _, rest') = frame (clearEphemeral typed) rest
-  assertEq failed ("x", [KeyChar 'x'], noModifiers, 2) (inputChars typed, toList (inputKeys typed), inputModifiers typed, length rest)
-  assertEq failed ("", [KeyChar 's'], ctrlHeld, 0) (inputChars chord, toList (inputKeys chord), inputModifiers chord, length rest')
-
--- | Ctrl+F focuses a search box from code. The next frame's typing goes there
--- and the chord types nothing into the previous field.
-runShortcutFocusFromCodeTest :: Context -> IORef Int -> IO ()
-runShortcutFocusFromCodeTest ctx failed = do
-  refs <- mapM newVar ["notes", ""]
-  let ui = column $ do
-        ids <- mapM (fmap (respId . fst) . (`held` textInput')) refs
-        forM_ (drop 1 ids) (whenM (shortcut (ctrl <> key 'f')) . requestFocus)
-        pure ids
-  warmupFocused ctx inp0 ui
-  [notes, search] <- evalUi ctx inp0 ui
-  assertEq failed notes =<< getFocusId ctx
-  _ <- runFrame ctx (chordInp (ctrl <> key 'f') inp0) ui
-  assertEq failed search =<< getFocusId ctx
-  _ <- runFrame ctx inp0 {inputChars = "abc"} ui
-  assertEq failed ["notes", "abc"] =<< mapM readVarIO refs

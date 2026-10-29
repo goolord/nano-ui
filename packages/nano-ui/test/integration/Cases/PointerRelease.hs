@@ -49,11 +49,11 @@ runReleaseElsewhereTest ctx failed = do
     let Rect lx ly lw lh = respRect (rs !! 4)
         overlap = At (V2 (lx + lw - 10) (ly + lh / 2))
     _ <- moveTo overlap
-    checkEq (respId (rs !! 4)) =<< liftIO (getHotId ctx)
+    checkEq (respId (rs !! 4)) =<< hotId
     pressed <- map respPressed . take 2 . drop 4 . responses <$> (press overlap >> frame)
     checkEq [True, False] pressed
     _ <- release
-    [p] <- map snd <$> liftIO (nodesOfType NodePanel ctx)
+    [p] <- map snd <$> onContext (nodesOfType NodePanel)
     check (not (rectContains p (centerOf (rs !! 6))))
     ups <- sequence [press (on 6), release]
     check (not (or [respHovered t || respClicked t | (xs, _, _) <- ups, t <- drop 6 xs]))
@@ -95,8 +95,8 @@ runReleaseTapAndModalTest ctx failed = do
     p <- targetPoint "Delete 3"
     _ <- frameWith (\i -> applyMouseButton MouseLeft False (pressWith MouseLeft i p))
     replicateM_ 2 frame
-    checkEq [1, 2, 4, 5] =<< liftIO (readVarIO items)
+    checkEq [1, 2, 4, 5] =<< readV items
     _ <- press "Delete 1"
-    liftIO (writeVarIO open True)
+    writeV open True
     _ <- frame >> release >> frame >> frame
-    checkEq [1, 2, 4, 5] =<< liftIO (readVarIO items)
+    checkEq [1, 2, 4, 5] =<< readV items

@@ -2,7 +2,6 @@
 module Cases.TextInput (tests) where
 
 import Spec
-import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import GHC.Stack (HasCallStack)
 import NanoUI.Internal.Context (Context (..), intKey)
@@ -18,19 +17,18 @@ import NanoUI.Internal.Frame.TextArea
   , textAreaLineHeight
   )
 import NanoUI.Internal.Input (onMac)
-import NanoUI.Internal.Store (Slot (..), WidgetStore (..), slotKey)
-import NanoUI.Internal.Widgets.TextArea (TextAreaState, loadTextAreaState, tasBuffer, tasSelectionAnchor)
+import NanoUI.Internal.Widgets.TextArea (TextAreaState, loadTextAreaState, tasBuffer)
 import NanoUI.Shortcut
 import NanoUI.Testing.Sim
-import NanoUI.Widgets.TextBuffer (fromText, getCursor, lineAt, toLines, toText)
+import NanoUI.Widgets.TextBuffer (fromText, getCursor, lineAt, toLines)
 
 tests :: [Spec]
 tests =
   [ spec "text-edits" runEditsTest
-  , pixelSpec "text-input-press-focus" runFieldPressFocusTest
+  , pixelSimSpec "text-input-press-focus" 320 120 pressFocusUi fieldPressFocus
   , spec "text-input-search-clear" runSearchClearTest
   , spec "text-input-menu-clipboard" runMenuClipboardTest
-  , spec "text-idle" runTextIdleTest
+  , simSpec "text-idle" 320 220 textIdleUi textIdle
   , spec "text-input-scroll" runFieldScrollTest
   , varSimSpec "text-undo" 320 120 "" undoField textUndo
   , spec "text-area-document" runTextAreaDocumentTest
@@ -39,7 +37,6 @@ tests =
   , pixelSpec "text-area-zoom-scroll" runTextAreaZoomScrollTest
   , pixelSpec "text-area-remount-scroll" runTextAreaRemountScrollTest
   , pixelSpec "text-area-menu" runTextAreaMenuTest
-  , pixelSpec "text-area-bar-range" runTextAreaBarRangeTest
   , pixelSpec "text-area-caret-in-view" runCaretInViewTest
   , spec "text-area-font" runTextAreaFontTest
   ]
@@ -155,8 +152,7 @@ is want = result >>= \r -> r <$ checkEq want (snd r)
 -- | The clipboard holds @want@.
 clipIs :: HasCallStack => T.Text -> Sim a a
 clipIs want = do
-  ctx <- simContext
-  checkEq (Just want) =<< liftIO (ctxClipboardGet ctx)
+  checkEq (Just want) =<< onContext ctxClipboardGet
   result
 
 -- | Run the step and check whether it reported a change.
@@ -203,43 +199,45 @@ labeledArea lbl initial = label lbl >> withValue initial textArea'
 fortyLines :: T.Text
 fortyLines = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
 
--- | Run the commands queued in @q@ on the widget, after it.
-withCommands :: IORef [TextCommand] -> NanoUI (Response, b) -> NanoUI (Response, b)
-withCommands q widget = do
-  r <- widget
-  mapM_ (runTextCommand (respId (fst r))) =<< liftIO (atomicModifyIORef' q ([],))
-  pure r
+textAreaState :: WidgetId -> Sim a TextAreaState
+textAreaState wid = onContext (fmap (`loadTextAreaState` intKey wid) . getStore)
 
-textAreaState :: Context -> WidgetId -> Sim a TextAreaState
-textAreaState ctx wid = liftIO ((`loadTextAreaState` intKey wid) <$> getStore ctx)
+pressFocusUi :: NanoUI (Response, T.Text)
+pressFocusUi = column (label "Name" >> withValue "" (textInputConfigured' config))
+  where
+    config = defaultTextInputConfig {ticPlaceholder = "Enter Name"}
 
 -- | A press near the top of a field focuses it, and it stays focused.
-runFieldPressFocusTest :: Context -> IORef Int -> IO ()
-runFieldPressFocusTest ctx failed = do
-  let field = withValue "" (textInputConfigured' defaultTextInputConfig {ticPlaceholder = "Enter Name"})
-  runSim ctx failed (withInput 320 120) (column (label "Name" >> field)) $ do
-    wid <- respId . fst <$> result
-    Rect x y w _ <- rectOf "Enter Name"
-    checkEq wid =<< (press (At (V2 (x + w / 2) (y + 0.5))) >> focusedId)
-    checkEq (replicate 5 wid) =<< (release >> replicateM 5 (frame >> focusedId))
+fieldPressFocus :: Sim (Response, T.Text) ()
+fieldPressFocus = do
+  wid <- respId . fst <$> result
+  Rect x y w _ <- rectOf "Enter Name"
+  checkEq wid =<< (press (At (V2 (x + w / 2) (y + 0.5))) >> focusedId)
+  checkEq (replicate 5 wid) =<< (release >> replicateM 5 (frame >> focusedId))
 
--- | Emptying a search field from the keyboard reports the change on that
--- frame, as its clear button does, rather than after the debounce. The clear
--- button empties it and repaints a clip, not the window.
+-- | Emptying a search field from the keyboard, or by its clear button,
+-- reports the change on that frame and only that one, rather than after the
+-- debounce, and keeps focus. The clear button repaints a clip, not the
+-- window.
 runSearchClearTest :: Context -> IORef Int -> IO ()
-runSearchClearTest ctx failed = do
-  ref <- newVar "abc"
-  runSim ctx failed (withInput 320 120) (column (fst <$> held ref (searchInput' "Search"))) $ do
-    resp <- click . On =<< result
-    let Rect x y w h = respRect resp
-        fm = ctxFontMetrics ctx
-        iconW = max 12 (min 15 (fmLineHeight fm * 0.8))
-    check . respChanged =<< (command 'a' >> pressKey KeyBackspace)
-    checkEq "" =<< liftIO (readVarIO ref)
-    _ <- typeText "abc" >> settle
-    _ <- click (At (V2 (x + w - fst (widgetContentInset fm) - iconW / 2) (y + h / 2)))
-    check . (/= DamageFull) =<< liftIO (takeDamage ctx)
-    checkEq "" =<< liftIO (readVarIO ref)
+runSearchClearTest _ failed =
+  forM_ [selectAllDelete, clearButton] $ \empty -> do
+    ctx <- newContext
+    ref <- newVar "abc"
+    runSim ctx failed (withInput 320 120) (column (fst <$> held ref (searchInput' "Search"))) $ do
+      resp <- click . On =<< result
+      check . respChanged =<< empty resp
+      checkEq "" =<< readV ref
+      checkEq (respId resp) =<< focusedId
+      check . not . respChanged =<< frame
+  where
+    selectAllDelete _ = command 'a' >> pressKey KeyBackspace
+    clearButton resp = do
+      fm <- onContext (pure . ctxFontMetrics)
+      let Rect x y w h = respRect resp
+          iconW = max 12 (min 15 (fmLineHeight fm * 0.8))
+      cleared <- click (At (V2 (x + w - fst (widgetContentInset fm) - iconW / 2) (y + h / 2)))
+      cleared <$ (check . (/= DamageFull) =<< frameDamage)
 
 -- | An open edit menu paints and hovers its Paste row without reading the
 -- clipboard, a round trip to its owner on X11. A press on a row that cannot
@@ -254,7 +252,7 @@ runMenuClipboardTest base failed = do
     mapM_ (\x -> moveTo (At (V2 x (py + ph / 2)))) [px + 2, px + pw / 2]
     checkEq 0 =<< liftIO (readIORef clipReads)
     _ <- click "Undo"
-    check . (/= DamageFull) =<< liftIO (takeDamage ctx)
+    check . (/= DamageFull) =<< frameDamage
     expectNot "Undo"
 
 -- | Text widgets let the loop sleep: a focused field asks for no frame or
@@ -262,33 +260,35 @@ runMenuClipboardTest base failed = do
 -- selection drag held still past the field's edge keeps waking, so the text
 -- scrolls under it, until the button comes up. A button held still in a text
 -- area after a click selects nothing new and asks for nothing.
-runTextIdleTest :: Context -> IORef Int -> IO ()
-runTextIdleTest ctx failed = do
-  let ui = column ((,) <$> withValue "some text to select" textInput' <*> withValue "some\ntext" textArea')
-  runSim ctx failed (withInput 320 220) ui $ do
-    ((field, _), (area, _)) <- result
-    let Rect fx fy fw _ = respRect field
-        grab = At (V2 (fx + 4) (fy + 4))
-        grabArea = At (V2 (rectX (respRect area) + 20) (rectY (respRect area) + 10))
-    _ <- click grab
-    modifyInput (\i -> i {inputDeltaTime = 1})
-    _ <- settle
-    check . not =<< wouldRedraw id
-    checkEq 0 =<< wakeTime
-    check =<< wouldRedraw (\i -> i {inputChars = "x"})
-    check =<< wouldRedraw (\i -> i {inputWindowRedraw = True})
-    _ <- press grab >> frame
-    checkEq 0 =<< wakeTime
-    _ <- moveTo (At (V2 (fx + fw + 40) (fy + 4)))
-    checkLt 0 =<< wakeTime
-    _ <- release >> frame
-    checkEq 0 =<< wakeTime
-    _ <- drag grabArea grabArea 1 >> frame >> frame
-    _ <- targetPoint grabArea >>= \p -> frameWith (`holdAt` p)
-    check . not =<< wantsFrame
-    checkEq 0 =<< wakeTime
+textIdleUi :: NanoUI (Field, Field)
+textIdleUi = column ((,) <$> withValue "some text to select" textInput' <*> withValue "some\ntext" textArea')
 
--- | End scrolls a long field to show its caret, and Home scrolls back. A
+textIdle :: Sim (Field, Field) ()
+textIdle = do
+  ((field, _), (area, _)) <- result
+  let Rect fx fy fw _ = respRect field
+      grab = At (V2 (fx + 4) (fy + 4))
+      grabArea = At (V2 (rectX (respRect area) + 20) (rectY (respRect area) + 10))
+  _ <- click grab
+  modifyInput (\i -> i {inputDeltaTime = 1})
+  _ <- settle
+  check . not =<< wouldRedraw id
+  checkEq 0 =<< wakeTime
+  check =<< wouldRedraw (\i -> i {inputChars = "x"})
+  check =<< wouldRedraw (\i -> i {inputWindowRedraw = True})
+  _ <- press grab >> frame
+  checkEq 0 =<< wakeTime
+  _ <- moveTo (At (V2 (fx + fw + 40) (fy + 4)))
+  checkLt 0 =<< wakeTime
+  _ <- release >> frame
+  checkEq 0 =<< wakeTime
+  _ <- drag grabArea grabArea 1 >> frame >> frame
+  _ <- targetPoint grabArea >>= \p -> frameWith (`holdAt` p)
+  check . not =<< wantsFrame
+  checkEq 0 =<< wakeTime
+
+-- | End scrolls a long field's text to show its caret, and Home scrolls it
+-- back. A
 -- field in its own font lays out by that font: its text, caret and hit tests
 -- start at its content inset (30 px in for 24 px cells, so a press just past
 -- the start of the "c" puts the caret before it, not a cell later), and 17
@@ -299,16 +299,18 @@ runFieldScrollTest _ failed = do
   pixel <- newPixelContext
   sized <- withMonospaceFonts 12 24 <$> newContext
   let big = defaultTextInputConfig {ticLayout = fontSize 24 (fixedW 300 (ticLayout defaultTextInputConfig))}
-      scrollsBack :: Context -> WidgetId -> Float -> Sim a ()
-      scrollsBack ctx wid past = do
-        let slot = slotKey SlotTextInputScroll (intKey wid)
-            scrollX = liftIO (IM.findWithDefault 0 slot . storeFloat <$> getStore ctx)
-        checkLt past =<< (pressKey KeyEnd >> scrollX)
-        checkEq 0 =<< (pressKey KeyHome >> scrollX)
+      -- Where the field's text starts, scrolled.
+      textX = rectX <$> (rectOf . snd =<< result)
+      -- End scrolls the text more than @past@ left of @x0@, Home back to it.
+      scrollsBack :: Float -> Float -> Sim (Response, T.Text) ()
+      scrollsBack x0 past = do
+        checkGt (x0 - past) =<< (pressKey KeyEnd >> textX)
+        checkEq x0 =<< (pressKey KeyHome >> textX)
       long = "VeryLongTextEnteredIntoTheFieldThatExceedsTheWidth"
-  runSim pixel failed (withInput 200 200) (column (fst <$> withValue long textInput')) $ do
-    wid <- respId <$> (click . On =<< result)
-    scrollsBack pixel wid 0
+  runSim pixel failed (withInput 200 200) (column (withValue long textInput')) $ do
+    x0 <- textX
+    _ <- click . On . fst =<< result
+    scrollsBack x0 0
   ref <- newVar "abcdef"
   runSim sized failed (withInputOff 400 200) (column (held ref (textInputConfigured' big))) $ do
     (resp, _) <- result
@@ -317,7 +319,7 @@ runFieldScrollTest _ failed = do
     _ <- click (At (V2 (penX + 2 * 24 + 4) (penY + penH / 2)))
     checkEq "abXcdef" . snd =<< typeText "X"
     _ <- pressKey KeyEnd >> typeText "ghijklmnop"
-    scrollsBack sized (respId resp) (408 - 300)
+    scrollsBack penX (408 - 300)
 
 -- | Ctrl+Z and Ctrl+Shift+Z or Ctrl+Y (Command on macOS) undo and redo typing;
 -- commands run from outside the frame edit the field and pulse 'respChanged'
@@ -352,7 +354,7 @@ runTextAreaDocumentTest ctx failed = do
   let ui = column (held ref textAreaDocument' >>= \(r, doc) -> (,) (r, doc) <$> textCanUndo (respId r))
       -- Whether the step reported a change and handed back the same document.
       edit step = do
-        before <- liftIO (readVarIO ref)
+        before <- readV ref
         ((r, after), undoable) <- step
         pure ((respChanged r, sameDocument before after, undoable), after)
       quiet step = checkEq (False, True) . (\((c, s, _), _) -> (c, s)) =<< edit step
@@ -362,8 +364,8 @@ runTextAreaDocumentTest ctx failed = do
     checkEq ((True, False, True), "xline 1", 1000) (flags, documentLine 1 typed, documentLineCount typed)
     check . (\((_, s, _), _) -> s) =<< edit frame
     _ <- chord (cmdOrCtrl <> key 'z')
-    checkEq original . documentText =<< liftIO (readVarIO ref)
-    liftIO (writeVarIO ref (textDocument "fresh"))
+    checkEq original . documentText =<< readV ref
+    writeV ref (textDocument "fresh")
     ((_, _, undoable), fresh) <- frame >> edit frame
     checkEq (textDocument "fresh", False) (fresh, undoable)
   copyCtx <- newContext
@@ -383,7 +385,7 @@ runTextAreaWidthTrackingTest ctx failed = do
   runSim ctx failed (withInput 400 300) (column (held ref (textAreaWith' grow))) $ do
     let widthsMatch = do
           (resp, text) <- frame
-          liftIO (textAreaHitForWidget ctx (respId resp)) >>= (`checkJust` \hit -> do
+          onContext (`textAreaHitForWidget` respId resp) >>= (`checkJust` \hit -> do
             (tracked, _) <- liftIO (textAreaContentMetrics ctx (tahNodeIdx hit))
             fm <- liftIO (resolveTextAreaFont ctx (tahNodeIdx hit))
             widths <- liftIO (mapM (lineWidthIO fm) (T.splitOn "\n" text))
@@ -411,10 +413,11 @@ runTextAreaScrollingTest ctx failed = do
   runSim ctx failed (withInput 320 220) (column (labeledArea "Notes" txt)) $ do
     (resp, _) <- result
     let field = respRect resp
-        offsets = liftIO (getScrollOffset2D ctx (respId resp))
+        offsets = scrollOffset2DOf (respId resp)
         wheelBy d = wheel (Within field) d >> offsets
         bars = textAreaBars fm field (maximum (map (lineWidth fm) rows)) (40 * textAreaLineHeight fm)
-        caret = getCursor . tasBuffer <$> textAreaState ctx (respId resp)
+        caret = getCursor . tasBuffer <$> textAreaState (respId resp)
+        V2 _ rangeY = tabRange bars
     checkEq UiCursorDefault =<< cursorAt "Notes"
     checkEq UiCursorText =<< cursorAt (At (V2 (rectX field + 20) (rectY field + 20)))
     checkJust (uncurry (liftA2 (,)) (textAreaBarLayouts field bars 0 0)) $ \(v, h) -> do
@@ -427,6 +430,12 @@ runTextAreaScrollingTest ctx failed = do
         before <- along <$> offsets
         checkLt before . along =<< (moveTo (At (V2 (cx + dx) (cy + dy))) >> offsets)
         void release
+    -- Scrolled to the end, the thumb meets the end of its track.
+    checkJust (fst (textAreaBarLayouts field bars 0 rangeY)) $ \end -> do
+      let Rect _ ty _ th = sbTrack end
+          Rect _ my _ mh = sbThumb end
+      checkEq rangeY (sbMaxOff end)
+      check (abs (ty + th - (my + mh)) < 0.01)
     pressTab 1
     checkEq (V2 0 0) =<< wheelBy (V2 (-10) (-10))
     V2 x0 y0 <- wheelBy (V2 2 3)
@@ -436,10 +445,8 @@ runTextAreaScrollingTest ctx failed = do
     check (x1 == 0 && y1 > 0)
     checkEq (V2 0 y1) =<< (frame >> offsets)
     checkLt y1 . v2Y =<< wheelBy (V2 0 3)
-    st <- textAreaState ctx (respId resp)
-    checkEq (txt, Cursor 0 0) (toText (tasBuffer st), getCursor (tasBuffer st))
-    checkEq (Cursor 0 0) (tasSelectionAnchor st)
-    checkEq (V2 0 0, Cursor 0 1) =<< (typeText "!" >> (,) <$> offsets <*> caret)
+    -- The caret at the start and no selection: typing inserts there.
+    checkEq (V2 0 0, "!" <> txt) =<< (typeText "!" >> (,) <$> offsets <*> (snd <$> result))
     V2 x2 y2 <- wheelBy (V2 1 0)
     check (x2 > 0 && y2 == 0)
     V2 x3 _ <- wheelBy (V2 3 0)
@@ -451,7 +458,7 @@ runTextAreaScrollingTest ctx failed = do
   short <- newPixelContext
   runSim short failed (withInput 320 220) (column (labeledArea "Short" "Line 1\nLine 2")) $ do
     (resp, _) <- result
-    checkEq 0 =<< (wheel (On resp) (V2 0 1) >> liftIO (getScrollOffset short (respId resp)))
+    checkEq 0 =<< (wheel (On resp) (V2 0 1) >> scrollOffsetOf (respId resp))
 
 -- | A text area in its own font size scrolls as far as that font's content
 -- needs, short of each bar's lane.
@@ -459,7 +466,7 @@ runTextAreaZoomScrollTest :: Context -> IORef Int -> IO ()
 runTextAreaZoomScrollTest ctx failed =
   runSim ctx failed (withInput 320 220) (column (withValue fortyLines (textAreaWith' (fontSize 32)))) $ do
     (resp, _) <- result
-    liftIO (textAreaHitForWidget ctx (respId resp)) >>= (`checkJust` \hit -> do
+    onContext (`textAreaHitForWidget` respId resp) >>= (`checkJust` \hit -> do
       fm <- liftIO (resolveTextAreaFont ctx (tahNodeIdx hit))
       let field = tahFieldRect hit
           contentH = fromIntegral (max 1 (length (toLines (fromText fortyLines)))) * tahLineH hit
@@ -469,7 +476,7 @@ runTextAreaZoomScrollTest ctx failed =
           innerH = rectH field - 2 * iy
           hasH = contentW > (if contentH > innerH then max 0 (innerW - textAreaBarLane) else innerW)
           availH = if hasH then max 0 (innerH - textAreaBarLane) else innerH
-      off <- wheel (Within field) (V2 0 100) >> liftIO (getScrollOffset ctx (respId resp))
+      off <- wheel (Within field) (V2 0 100) >> scrollOffsetOf (respId resp)
       check (abs (off - max 0 (contentH - availH)) < 0.5))
 
 -- | An editor mounted under a fresh key scrolls on wheel hover without
@@ -485,50 +492,31 @@ runTextAreaRemountScrollTest ctx failed = do
     -- wheel frame would damage the area and mask a missing scroll repaint.
     modifyInput (\i -> i {inputDeltaTime = 1})
     _ <- moveTo (On resp) >> replicateM_ 3 frame
-    check . damageIsEmpty =<< liftIO (takeDamage ctx)
+    check . damageIsEmpty =<< frameDamage
     _ <- frameWith (\i -> i {inputScroll = V2 0 1})
-    checkLt 0 =<< liftIO (getScrollOffset ctx (respId resp))
-    check . not . damageIsEmpty =<< liftIO (takeDamage ctx)
+    checkLt 0 =<< scrollOffsetOf (respId resp)
+    check . not . damageIsEmpty =<< frameDamage
 
 -- | The edit menu edits a text area with no key or text on the frame. Select
 -- All keeps the whole document selected once the button comes up (the
--- gesture moves no caret and starts no drag), and Cut pulses 'respChanged'
--- once, on its release frame. A command that only selects pulses nothing.
+-- gesture moves no caret and starts no drag), so Cut empties it, pulsing
+-- 'respChanged' once, on its release frame. A command that only selects
+-- pulses nothing.
 runTextAreaMenuTest :: Context -> IORef Int -> IO ()
 runTextAreaMenuTest ctx failed = do
-  let original = T.intercalate "\n" (["line " <> T.pack (show i) | i <- [0 .. 199 :: Int]] ++ [lastLine])
-      lastLine = "the last line"
+  let original = T.intercalate "\n" ["line " <> T.pack (show i) | i <- [0 .. 200 :: Int]]
   ref <- newVar original
-  q <- newIORef []
-  runSim ctx failed (withInput 400 300) (column (withCommands q (held ref (textAreaWith' grow)))) $ do
+  runSim ctx failed (withInput 400 300) (column (held ref (textAreaWith' grow))) $ do
     (resp, _) <- result
     let Rect x y w h = respRect resp
         mid = At (V2 (x + w / 3) (y + h / 3))
         pick entry = rightClick mid >> settle >> click entry
         changedValue (r, v) = (respChanged r, v)
     _ <- click mid
-    liftIO (writeIORef q [SelectAll])
-    checkEq (False, original) . changedValue =<< (frame >> frame)
-    st <- pick "Select All" >> textAreaState ctx (respId resp)
-    checkEq (Cursor 0 0, Cursor 200 (T.length lastLine)) (tasSelectionAnchor st, getCursor (tasBuffer st))
-    checkEq (True, "") . changedValue =<< pick "Cut"
+    afterView (runTextCommand (respId resp) SelectAll)
+    checkEq (False, original) . changedValue =<< frame
+    checkEq (True, "") . changedValue =<< (pick "Select All" >> pick "Cut")
     checkEq (False, "") . changedValue =<< frame
-
--- | A text area's bar spans the text's own range, not its insets: scrolled
--- to the end, the thumb meets the end of its track, with the other bar shown
--- or not.
-runTextAreaBarRangeTest :: Context -> IORef Int -> IO ()
-runTextAreaBarRangeTest ctx failed =
-  forM_ [0, 1000] $ \contentW -> do
-    let fm = ctxFontMetrics ctx
-        field = Rect 0 0 200 100
-        bars = textAreaBars fm field contentW (10 * textAreaLineHeight fm)
-        V2 _ rangeY = tabRange bars
-    assertJust failed (fst (textAreaBarLayouts field bars 0 rangeY)) $ \layout -> do
-      let Rect _ ty _ th = sbTrack layout
-          Rect _ my _ mh = sbThumb layout
-      assertEq failed rangeY (sbMaxOff layout)
-      assert failed (abs (ty + th - (my + mh)) < 0.01)
 
 -- | A text area keeps its caret in view: typing past its right edge scrolls
 -- across, and Home back; the caret moved to the last row sits above the
@@ -540,12 +528,12 @@ runCaretInViewTest base failed = do
         runSim ctx failed (withInput 320 220) (column (fst <$> held ref widget)) $ do
           wid <- respId <$> result
           pressTab 1
-          script (liftIO (caretInView ctx wid)) (liftIO (getScrollOffset2D ctx wid))
+          script (onContext (`caretInView` wid)) (scrollOffset2DOf wid)
   follow <- newPixelContext
   typed <- newVar ""
   area follow typed (textAreaWith' (fixedW 200)) $ \inView offsets -> do
     check . and =<< replicateM 60 (typeText "x" >> inView)
-    checkEq 60 . T.length =<< liftIO (readVarIO typed)
+    checkEq 60 . T.length =<< readV typed
     checkLt 0 . v2X =<< offsets
     checkEq 0 . v2X =<< (pressKey KeyHome >> offsets)
   wide <- newPixelContext

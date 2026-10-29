@@ -2,7 +2,6 @@
 module Cases.Demo (tests) where
 
 import Spec
-import Data.Hashable (Hashable (..))
 import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 import NanoUI.Shortcut
@@ -15,16 +14,6 @@ tests =
   , pixelSpec "controls-tab-height" runControlsTabHeightTest
   , pixelSpec "bounded-radio-offset" runBoundedRadioTest
   ]
-
-data DemoTab
-  = Controls
-  | List
-  | Diagnostics
-  deriving (Bounded, Enum, Eq, Ord, Read, Show)
-
-instance Hashable DemoTab where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
-
 
 newtype OffsetChoice = OffsetChoice Int
   deriving (Eq, Show)
@@ -45,7 +34,7 @@ runBoundedRadioTest ctx failed = do
     checkEq (OffsetChoice 11) =<< result
     checkEq (OffsetChoice 12) =<< click "OffsetChoice 12"
     checkEq (OffsetChoice 12) =<< frame
-    liftIO (writeVarIO v (OffsetChoice 10))
+    writeV v (OffsetChoice 10)
     checkEq (OffsetChoice 10) =<< frame
 
 -- | Beside a taller column, the demo's controls keep near their height alone, also
@@ -65,16 +54,15 @@ runControlsTabHeightTest ctx failed = do
         liftIO $ writeIORef dumpRef [cb, cp, ti]
       state = [("Feature", "off"), ("Volume", "50"), ("Quality", "Medium"), ("Theme", "Dark")]
         ++ [("Name", "-"), ("Clicked", "-")]
-
       demoPage dumpRef =
         scrollWith (tight . grow) . columnWith (padAll 8 . gap 8 . fillW) . rowWith (tight . gap 8 . fillW) $ do
           columnWith (tight . gap 8 . fillW) $ do
             card (heading "State" >> mapM_ (uncurry kv) state)
             card (heading "Gallery" >> forM_ [1 .. 8 :: Int] (\i -> label (T.pack ("thumb line " <> show i))))
           card $ do
-            demoTabVar <- useEnumVar Controls
-            let body t = if t == Controls then controlsBody dumpRef else heading (T.pack (show t))
-            tabs demoTabVar [tab t (T.pack (show t)) (body t) | t <- [minBound ..]]
+            demoTabVar <- useVar ("Controls" :: T.Text)
+            let body t = if t == "Controls" then controlsBody dumpRef else heading t
+            tabs demoTabVar [tab t t (body t) | t <- ["Controls", "List", "Diagnostics"]]
       -- Heights of the checkbox, colour picker and text input, in that order.
       heights c dumpRef = readIORef dumpRef >>= mapM (fmap (fmap rectH) . getPrevRect c . respId)
       extent lbls ss = case [(y, y + h) | (Rect _ y _ h, txt, _, _, _) <- ss, any (`T.isSuffixOf` txt) lbls] of
@@ -121,7 +109,7 @@ picker failed rgba h c script = do
 -- | The picker's committed ("current") and live colours.
 storeColors :: WidgetId -> Sim a (Color, Color)
 storeColors wid = do
-  st <- simContext >>= liftIO . getStore
+  st <- onContext getStore
   pure (widgetStoreBaseColor st wid initial, widgetStoreColor st wid initial)
 
 -- | A press on the SV field previews, a held one keeps sampling, and the release
@@ -156,7 +144,6 @@ runColorPickerPointerTest _ failed = do
 -- | An arrow on the field changes and commits once, opaque without an alpha bar;
 -- channel fields edit live and numerically; bar keys move handles as drawn (Shift
 -- ten times, Home and End to the ends); an arrow's repaint covers every part.
-
 runColorPickerKeysTest :: Context -> IORef Int -> IO ()
 runColorPickerKeysTest _ failed = do
   picker failed False 420 initial $ \_ -> do
@@ -190,10 +177,9 @@ runColorPickerKeysTest _ failed = do
     checkEq 255 . colorA . snd =<< pressKey KeyEnd
     checkEq 254 . colorA . snd =<< pressKey KeyUp
   picker failed True 1200 initial $ \_ -> do
-    ctx <- simContext
     pressTab 1 >> void frame
     _ <- pressKey KeyRight
-    dmg <- liftIO (takeDamage ctx)
-    parts <- map snd <$> liftIO (nodesOfType NodeColorPicker ctx)
+    dmg <- frameDamage
+    parts <- map snd <$> onContext (nodesOfType NodeColorPicker)
     checkEq 4 (length parts)
     check (all (clipCovers dmg) parts)

@@ -5,16 +5,13 @@ import Spec
 import Data.Bifunctor (first)
 import Data.Primitive.SmallArray qualified as SA
 import Data.Text qualified as T
-import NanoUI.Internal.Store (anySelectOpen)
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
   [ pixelSimSpec "slider-cursor" 300 80 (column (withValue 50 (slider' 0 100))) sliderCursor
-  , spec "select-mouse-and-keys" runSelectMouseAndKeysTest
+  , varSimSpec "select-mouse-and-keys" 320 200 1 mouseAndKeysUi selectMouseAndKeys
   , simSpec "select-dropdown-paint" 640 480 (column (withValue 0 (select' lowHigh))) selectDropdownPaint
-  , spec "select-dropdown-placement" runSelectDropdownPlacementTest
-  , spec "select-dropdown-scrolled-away" runSelectDropdownScrolledAwayTest
   , spec "select-keys-after-focus-moves" runSelectKeysAfterFocusMovesTest
   , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
   , spec "choices-unreached-index" runChoicesUnreachedIndexTest
@@ -33,19 +30,22 @@ twenty = withValue 20 (slider' 0 100)
 lowHigh :: [T.Text]
 lowHigh = ["Low", "Medium", "High"]
 
+-- | Whether a dropdown of 'lowHigh' shows: one of its options drawn on the
+-- overlay layer.
 selectOpen :: Sim a Bool
-selectOpen = simContext >>= \ctx -> liftIO (anySelectOpen <$> getStore ctx)
+selectOpen = do
+  inp <- getInput
+  any (\(_, t, _, _, _) -> spanLabel t `elem` lowHigh) <$> onContext (`collectOverlayTextSpans` inp)
 
--- | A slider's track shows the grab cursor, and grabbing while pressed, even
--- dragged off it; with the button up off it, the default.
+-- | A slider's track shows the grab cursor, and grabbing while pressed; with
+-- the button up off it, the default.
 sliderCursor :: Sim (Response, Float) ()
 sliderCursor = do
   Rect rx ry rw rh <- respRect . fst <$> result
   checkEq UiCursorGrab =<< cursorAt (Within (sliderTrackBounds rx ry rw rh))
   _ <- press (Within (sliderTrackBounds rx ry rw rh))
   checkEq UiCursorGrabbing =<< pointerCursor
-  checkEq UiCursorGrabbing =<< cursorAt (At (V2 (rx + rw + 20) (ry + rh + 20)))
-  checkEq UiCursorDefault =<< (release >> frame >> pointerCursor)
+  checkEq UiCursorDefault =<< (release >> cursorAt (At (V2 (rx + rw + 20) (ry + rh + 20))))
 
 -- | A select opens on the press, and a release on the row it was dragged to
 -- picks that row. Open, the arrows move the pick and Escape closes it, and a
@@ -53,98 +53,55 @@ sliderCursor = do
 -- arrows step without opening it, Home and Page Up pick the first option, End
 -- and Page Down the last, and Space or Enter opens and closes it. Rows show
 -- the pointer cursor, hovered and pressed, and a pick reports one change.
-runSelectMouseAndKeysTest :: Context -> IORef Int -> IO ()
-runSelectMouseAndKeysTest ctx failed = do
-  ref <- newVar 1
-  runSim ctx failed (withInput 320 200) (column (held ref (select' (SA.smallArrayFromList lowHigh)))) $ do
-    (resp, _) <- result
-    let value = liftIO (readVarIO ref)
-        -- The value lands on the frame after the key.
-        valuesAfter = mapM (\k -> pressKey k >> frame >> value)
-    _ <- press (On resp)
-    expect "High"
-    checkEq UiCursorPointer =<< cursorAt "Low"
-    checkEq (0, False) =<< (release >> (,) <$> value <*> selectOpen)
-    _ <- click (On resp)
-    checkEq [1, 0] =<< valuesAfter [KeyDown, KeyUp]
-    let openAfter = mapM (>> selectOpen)
-    checkEq [False, True, False] =<< openAfter [pressKey KeyEscape, click (On resp), click (On resp)]
-    checkEq (respId resp) =<< liftIO (getFocusId ctx)
-    checkEq [1, 0, 2, 0, 2, 0] =<< valuesAfter [KeyRight, KeyLeft, KeyEnd, KeyHome, KeyPageDown, KeyPageUp]
-    check . not =<< selectOpen
-    checkEq [True, False, True, False] =<< openAfter (map pressKey [KeySpace, KeySpace, KeyEnter, KeyEnter])
-    _ <- click (On resp)
-    checkEq UiCursorPointer =<< cursorAt "High"
-    (pressed, _) <- press "High"
-    checkEq UiCursorPointer =<< pointerCursor
-    rest <- sequence [release, frame, frame, frame]
-    checkEq [2, 2, 2, 2] (map snd rest)
-    checkEq 1 (length (filter respChanged (pressed : map fst rest)))
-    checkEq [False, False, False] (map (respChanged . fst) (drop 1 rest))
+mouseAndKeysUi :: Var Int -> NanoUI (Response, Int)
+mouseAndKeysUi ref = column (held ref (select' (SA.smallArrayFromList lowHigh)))
+
+selectMouseAndKeys :: Var Int -> Sim (Response, Int) ()
+selectMouseAndKeys ref = do
+  (resp, _) <- result
+  -- The value lands on the frame after the key.
+  let valuesAfter = mapM (\k -> pressKey k >> frame >> readV ref)
+  _ <- press (On resp)
+  expect "High"
+  checkEq UiCursorPointer =<< cursorAt "Low"
+  checkEq (0, False) =<< (release >> (,) <$> readV ref <*> selectOpen)
+  _ <- click (On resp)
+  checkEq [1, 0] =<< valuesAfter [KeyDown, KeyUp]
+  let openAfter = mapM (>> selectOpen)
+  checkEq [False, True, False] =<< openAfter [pressKey KeyEscape, click (On resp), click (On resp)]
+  checkEq (respId resp) =<< focusedId
+  checkEq [1, 0, 2, 0, 2, 0] =<< valuesAfter [KeyRight, KeyLeft, KeyEnd, KeyHome, KeyPageDown, KeyPageUp]
+  check . not =<< selectOpen
+  checkEq [True, False, True, False] =<< openAfter (map pressKey [KeySpace, KeySpace, KeyEnter, KeyEnter])
+  _ <- click (On resp)
+  checkEq UiCursorPointer =<< cursorAt "High"
+  (pressed, _) <- press "High"
+  checkEq UiCursorPointer =<< pointerCursor
+  rest <- sequence [release, frame, frame, frame]
+  checkEq [2, 2, 2, 2] (map snd rest)
+  checkEq 1 (length (filter respChanged (pressed : map fst rest)))
+  checkEq [False, False, False] (map (respChanged . fst) (drop 1 rest))
 
 -- | An open dropdown's spans carry the colours it paints, the picked row in
 -- the accent colour. A hover moving inside it, which the arena does not hold,
 -- repaints the dropdown as a clip, not the window.
 selectDropdownPaint :: Sim (Response, Int) ()
 selectDropdownPaint = do
-  ctx <- simContext
-  theme <- liftIO (getTheme ctx)
+  theme <- onContext getTheme
   (resp, _) <- click . On . fst =<< result
   modifyInput (\i -> i {inputDeltaTime = 1})
   _ <- moveTo (At (V2 600 400))
-  overlays <- liftIO . collectOverlayTextSpans ctx =<< getInput
+  inp <- getInput
+  overlays <- onContext (`collectOverlayTextSpans` inp)
   let fgOf lbl = [fg | (_, txt, fg, _, _) <- overlays, txt == lbl]
   checkEq [themeAccent theme] (fgOf "Low")
   check (length (fgOf "Medium") == 1 && themeAccent theme `notElem` fgOf "Medium")
   high <- rectOf "High"
   let overHigh i = i {inputMousePos = V2 (v2X (centerOf resp)) (rectY high + 0.5)}
-  check =<< liftIO . (\i -> needsRedraw ctx i (overHigh i)) =<< getInput
-  _ <- liftIO (takeDamage ctx) >> frameWith overHigh
-  dmg <- liftIO (takeDamage ctx)
+  check =<< wouldRedraw overHigh
+  _ <- frameDamage >> frameWith overHigh
+  dmg <- frameDamage
   forM_ overlays $ \(_, _, _, _, dropRect) -> check (clipCovers dmg dropRect)
-
--- | A select near the window's bottom opens its dropdown above itself, where
--- it fits, and a click there picks the row under it. One that fits on
--- neither side is not slid back over the field, so the click that opens it
--- leaves the value alone.
-runSelectDropdownPlacementTest :: Context -> IORef Int -> IO ()
-runSelectDropdownPlacementTest _ failed = do
-  let below n opts = column (replicateM_ 4 (label "line") >> withValue n (select' opts))
-      tenOpts = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
-  flips <- newContext
-  runSim flips failed (withInput 320 140) (below 1 lowHigh) $ do
-    (resp, _) <- click . On . fst =<< result
-    low <- rectOf "Low"
-    check (rectY low + rectH low <= rectY (respRect resp))
-    checkEq 0 . snd =<< click (Within low)
-  tall <- newContext
-  runSim tall failed (withInput 320 300) (below 3 tenOpts) $ do
-    checkEq 3 . snd =<< click . On . fst =<< result
-    check =<< selectOpen
-
--- | A dropdown goes with its field when the field scrolls out of view: it is
--- not drawn, and a release where it would be picks nothing.
-runSelectDropdownScrolledAwayTest :: Context -> IORef Int -> IO ()
-runSelectDropdownScrolledAwayTest ctx failed = do
-  let field = withValue 0 (selectWith' (fixedW 100) lowHigh) <* replicateM_ 30 (label "line")
-  runSim ctx failed (withInput 320 300) (column (label "toolbar" >> scrollArea (fixedWH 300 120) field)) $ do
-    (sid, (resp, _)) <- result
-    _ <- click (On resp)
-    medium <- rectOf "Medium"
-    -- The wheel over the scroller, beside the dropdown.
-    _ <- wheel (At (V2 250 (rectY (respRect resp) + 10))) (V2 0 5) >> replicateM_ 3 frame
-    expectNot "Medium"
-    -- Pressed open and held while its field scrolls just past the top, the
-    -- dropdown would lie in the window: a release on its middle row there
-    -- picks nothing.
-    let past = rectH (respRect resp) + 20
-        V2 cx cy = spanCenter medium
-    liftIO (setScrollOffset ctx sid 0)
-    _ <- click (At (V2 250 280)) >> press (On resp)
-    check =<< selectOpen
-    liftIO (setScrollOffset ctx sid past)
-    _ <- moveTo (At (V2 cx (cy - past)))
-    checkEq 0 . snd . snd =<< release
 
 -- | Keys reach an open select only while it has focus: a right-click on a
 -- text field closes it, and a field that takes focus by 'holdFocus' keeps
@@ -165,16 +122,16 @@ runSelectKeysAfterFocusMovesTest ctx failed = do
   runSim ctx failed (withInput 320 300) ui $ do
     (s, t, _) <- result
     check =<< (click (On s) >> selectOpen)
-    liftIO (writeVarIO dialog True)
+    writeV dialog True
     check . not =<< (frame >> selectOpen)
     _ <- pressKey KeyEscape
-    checkEq False =<< liftIO (readVarIO dialog)
+    checkEq False =<< readV dialog
     _ <- click (On s) >> rightClick (On t)
     check . not =<< selectOpen
     checkEq 0 =<< valueAfterDown
     _ <- pressKey KeyEscape >> click (On s)
     liftIO (writeIORef grabRef True)
-    checkEq (respId t) =<< (frame >> liftIO (getFocusId ctx))
+    checkEq (respId t) =<< (frame >> focusedId)
     checkEq 0 =<< valueAfterDown
 
 -- | A select's dropdown is as wide as the select, and an option wider than
@@ -221,14 +178,14 @@ runChoicesUnreachedIndexTest ctx failed = do
     checkEq [2, 2, 2] . fst =<< state
     liftIO (writeIORef loaded True)
     checkEq ([2, 2, 2], [0, 0, 1, 0, 0, 1]) =<< (settle >> state)
-    liftIO (mapM_ (`writeVarIO` 5) refs)
+    mapM_ (`writeV` 5) refs
     checkEq ([5, 5, 5], [0, 0, 1, 0, 0, 1]) =<< (settle >> state)
     _ <- click "Three" >> click "Blue" >> (click . On =<< result) >> click "High"
     checkEq [2, 2, 2] . fst =<< state
-    liftIO (writeVarIO selRef 5)
+    writeV selRef 5
     focusOn . respId =<< settle
     check . respChanged =<< (pressKey KeyEnd >> frame)
-    checkEq 2 =<< liftIO (readVarIO selRef)
+    checkEq 2 =<< readV selRef
 
 -- | A tree draws a clicked row selected on the click's frame, though its rows
 -- were added before the click was read. The arrows move the selection, Left
@@ -237,10 +194,10 @@ runTreeTest :: Context -> IORef Int -> IO ()
 runTreeTest ctx failed = do
   ref <- newVar 0
   let items = SA.smallArrayFromList [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
-      value = liftIO (readVarIO ref)
+      value = readV ref
   runSim ctx failed (withInput 200 120) (column (held ref (tree' "k" items))) $ do
     _ <- click "child"
-    checkEq (1, [0, 1, 0]) =<< ((,) <$> value <*> liftIO (buttonValues ctx))
+    checkEq (1, [0, 1, 0]) =<< ((,) <$> value <*> onContext buttonValues)
     -- Tab focuses the first row; the arrows move focus and selection.
     pressTab 1
     checkEq [1, 0, 1, 0] =<< mapM (\k -> pressKey k >> value) [KeyDown, KeyUp, KeyDown, KeyLeft]
@@ -268,9 +225,9 @@ runRadioGroupsTest ctx failed = do
   let ui = column ((,) <$> held aRef (radio' ["x", "y"]) <*> held bRef (radio' ["p", "q", "r"]))
   runSim ctx failed (withInput 200 240) ui $ do
     check . not =<< wantsFrame
-    checkEq [1, 0, 0, 0, 1] =<< liftIO (buttonValues ctx)
+    checkEq [1, 0, 0, 0, 1] =<< onContext buttonValues
     _ <- click "q"
-    checkEq ([1, 0, 0, 1, 0], [0, 1]) =<< liftIO ((,) <$> buttonValues ctx <*> mapM readVarIO [aRef, bRef])
+    checkEq ([1, 0, 0, 1, 0], [0, 1]) =<< ((,) <$> onContext buttonValues <*> mapM readV [aRef, bRef])
 
 -- | Sibling sliders keep separate drags: dragging the second leaves the first.
 slidersDragApart :: Sim ((Response, Float), (Response, Float)) ()

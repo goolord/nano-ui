@@ -4,7 +4,7 @@ module Cases.Modal (tests) where
 import Spec
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
-import NanoUI.Internal.Context (InteractionState (..), getsInteraction, setDrawSquareGeometry)
+import NanoUI.Internal.Context (setDrawSquareGeometry)
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
@@ -20,7 +20,7 @@ tests =
 
 -- | Whether the frame's Escape went to an overlay rather than quitting.
 escapeTaken :: Sim a Bool
-escapeTaken = simContext >>= \ctx -> liftIO (overlayConsumesQuit ctx (keyInp KeyEscape emptyInput))
+escapeTaken = onContext (`overlayConsumesQuit` keyInp KeyEscape emptyInput)
 
 sentence :: T.Text
 sentence = "A sentence that is wider than the smallest modal allows."
@@ -57,21 +57,21 @@ runModalVarTest ctx failed = do
   let ui = column $ do
         whenM (button "Open") (writeVar open True)
         modal open "Title" (whenM (button "Close") (writeVar open False))
-      damage = liftIO (takeDamage ctx)
+      damage = frameDamage
   runSim ctx failed (withInputOff 320 240) ui $ do
     _ <- pressKey KeyEscape
     checkEq False =<< escapeTaken
     _ <- click "Open"
     expect "Title"
     _ <- click "Close"
-    checkEq False =<< liftIO (readVarIO open)
+    checkEq False =<< readV open
     _ <- damage >> click "Open"
     checkEq DamageFull =<< damage
     -- The idle frame after settles the button's release, as a clip.
     check . (\d -> d /= DamageFull && not (damageIsEmpty d)) =<< (advance 1 >> damage)
     _ <- pressKey KeyEscape
-    checkEq False =<< liftIO (readVarIO open)
-    checkEq 2 =<< liftIO (lastFramePasses ctx)
+    checkEq False =<< readV open
+    checkEq 2 =<< onContext lastFramePasses
     check =<< escapeTaken
     expectNot "Title"
     checkEq DamageFull =<< damage
@@ -91,14 +91,14 @@ runModalNestedDismissTest ctx failed = do
           forM_ [1 .. 10 :: Int] (\i -> label (T.pack ("Setting " <> show i)))
           modal inner "Confirm" (label "confirm body")
         pure (field, dlg)
-      states = liftIO ((,) <$> readVarIO outer <*> readVarIO inner)
+      states = (,) <$> readV outer <*> readV inner
   runSim ctx failed (withInput 640 480) ui $ do
     _ <- rightClick . On . fst =<< result
-    check . isJust =<< liftIO (getsInteraction ctx isTextInputMenu)
-    _ <- liftIO (writeVarIO outer True) >> settle
+    expect "Paste"
+    _ <- writeV outer True >> settle
     _ <- pressKey KeyEscape
     checkEq (True, False) =<< states
-    Rect dx dy dw _ <- respRect . snd <$> (liftIO (writeVarIO inner True) >> settle)
+    Rect dx dy dw _ <- respRect . snd <$> (writeV inner True >> settle)
     _ <- click (At (V2 (dx + dw / 2) (dy + 8)))
     checkEq (True, False) =<< states
 
@@ -115,14 +115,12 @@ modalOverInnerWindow = do
   Just (ok, Just hidden) <- result
   check (isJust (rectIntersect (respRect hidden) (respRect ok)))
   checkEq (Just (True, False)) . fmap (\(o, h) -> (respClicked o, any respClicked h)) =<< click (On ok)
-  ctx <- simContext
-  let windows = liftIO (map snd <$> nodesOfType NodeWindow ctx)
+  let windows = map snd <$> onContext (nodesOfType NodeWindow)
   before@[Rect x y w h] <- windows
   _ <- drag (At (V2 (x + w / 2) (y + 10))) (At (V2 (x + w / 2 - 40) (y + 40))) 1
   checkEq before =<< windows
   let edge = V2 (x + 3) (y + h / 2)
-  _ <- moveTo (At edge)
-  check . (/= UiCursorEwResize) =<< liftIO . uiCursorKind ctx =<< getInput
+  check . (/= UiCursorEwResize) =<< cursorAt (At edge)
   _ <- drag (At edge) (At (V2 (x - 37) (y + h / 2))) 1
   checkEq before =<< windows
 

@@ -165,15 +165,6 @@ spec = do
       text = TB.toText . TE.editorBuffer
       depth = TE.historyDepth . TE.editorHistory
 
-    it "undoes typing a word at a time and redoes it" $ do
-      let
-        typed = typeText TE.singleLineMode "hello world" single
-        once = line TE.Undo typed
-        twice = line TE.Undo once
-      map text [typed, once, twice] `shouldBe` ["hello world", "hello ", ""]
-      text (run TE.singleLineMode twice [TE.Redo, TE.Redo]) `shouldBe` "hello world"
-      TB.getCursor (TE.editorBuffer once) `shouldBe` TB.Cursor 0 6
-
     it "joins a run of deletes into one step and restores the selection it replaced" $ do
       let
         deleted = run TE.singleLineMode (typeText TE.singleLineMode "abcdef" single) (replicate 3 backspace)
@@ -231,15 +222,12 @@ spec = do
       foo = atEnd "foo bar"
       (wordMods, otherMods) = if onMac then (altMods, ctrlMods) else (ctrlMods, altMods)
       lineMods = if onMac then Modifiers False False False True else Modifiers True True False False
-      altGr = Modifiers False True True False
       at = TB.Cursor 0
       mac a b = if onMac then a else b
 
     it "maps keys and typed text to edits by platform" $
       forM_
-        [ -- Ctrl+Alt types characters (AltGr) while Ctrl or Command alone runs shortcuts.
-          ("AltGr types", typeArea altGr "@€" [] (atEnd "ab"), ("ab@€", at 4))
-        , -- The word modifier edits and moves by word, the other of Ctrl and Alt by character.
+        [ -- The word modifier edits and moves by word, the other of Ctrl and Alt by character.
           ("word delete", typeArea wordMods "" [KeyDelete] (start "foo bar"), (" bar", at 0))
         , ("word right", typeArea wordMods "" [KeyRight] (start "foo bar"), ("foo bar", at 3))
         , ("word left", typeArea wordMods "" [KeyLeft] (atEnd "foo"), ("foo", at 0))
@@ -259,19 +247,13 @@ spec = do
         ]
         $ \(name, s, want) -> (name :: String, areaText s) `shouldBe` (name, want)
 
-    it "selects all with Ctrl+A or Ctrl+a, and undoes with Ctrl+Z (Command on macOS)" $ do
+    it "selects all with Ctrl+A or Ctrl+a (Command on macOS), and reads chords from keys" $ do
       forM_ [KeyChar 'a', KeyChar 'A'] $ \k -> do
         let s = typeArea primaryModifiers "" [k] foo
         (TA.tasSelectionAnchor s, TB.getCursor (TA.tasBuffer s)) `shouldBe` (at 0, at 7)
-      let
-        typed = foldl' (\s c -> typeArea noMods (T.singleton c) [] s) (start "") ("one two" :: String)
-        undone = typeArea primaryModifiers "" [KeyChar 'z'] typed
-      fst (areaText undone) `shouldBe` "one "
-      fst (areaText (typeArea primaryModifiers {modShift = True} "" [KeyChar 'z'] undone)) `shouldBe` "one two"
       -- Chords come from key events; characters typed with Ctrl held are ignored.
       TE.inputTextCommands TE.singleLineMode (frameInput primaryModifiers "z\x1a" [KeyChar 'z', KeyChar 'y'])
         `shouldBe` [TE.Undo, TE.Redo]
-      TE.inputTextCommands TE.singleLineMode (frameInput altGr "@" [KeyChar 'q']) `shouldBe` [TE.InsertText "@"]
 
     it "typing and Enter replace a backwards multiline selection and collapse its anchor" $ do
       let

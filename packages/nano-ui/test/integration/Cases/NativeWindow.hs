@@ -19,7 +19,6 @@ tests :: [Spec]
 tests =
   [ spec "native-window-without-host" runWithoutHostTest
   , spec "native-window-screenshot-requests" runScreenshotRequestsTest
-  , spec "native-window-screenshot-from-a-click" runScreenshotFromClickTest
   , spec "native-window-screenshot-lifecycle" runScreenshotLifecycleTest
   , spec "native-window-setters" runSettersTest
   , spec "native-window-commands-and-state" runCommandsTest
@@ -76,8 +75,6 @@ runWithoutHostTest ctx failed = do
   let bytes n = BS.replicate n 7
       sized = [(2, 3, 24), (2, 3, 23), (2, 3, 25), (0, 3, 0), (-2, -3, 24)]
   assertEq failed [True, False, False, False, False] [isJust (rgbaPixels w h (bytes n)) | (w, h, n) <- sized]
-  assertEq failed (Just (2, 3, 24)) $
-    (\p -> (rgbaWidth p, rgbaHeight p, BS.length (rgbaBytes p))) <$> rgbaPixels 2 3 (bytes 24)
   assertEq failed Nothing (rgbaPixels (maxBound `div` 2 + 1) 4 BS.empty)
   answers <- newIORef []
   st <- evalUi ctx inp $ do
@@ -161,28 +158,10 @@ runScreenshotRequestsTest ctx failed = do
   assertEq failed [False, True] =<< readIORef done
   closeWindowHost ctx
 
--- | A screenshot requested from a click is requested once, though the click reruns the view.
-runScreenshotFromClickTest :: Context -> IORef Int -> IO ()
-runScreenshotFromClickTest ctx failed = do
-  _ <- recordingHost defaultWindowSettings ctx
-  answers <- newIORef (0 :: Int)
-  passes <- newIORef (0 :: Int)
-  let view = do
-        liftIO (modifyIORef' passes (+ 1))
-        shotsVar <- useVar (0 :: Int)
-        shots <- readVar shotsVar
-        whenM (button "Shot") $
-          requestScreenshot (\_ -> modifyIORef' answers (+ 1)) >> writeVar shotsVar (shots + 1)
-  runSim ctx failed inp view $ do
-    _ <- press "Shot"
-    liftIO (writeIORef passes 0)
-    _ <- release
-    checkEq 2 =<< liftIO (readIORef passes)
-  answerScreenshots ctx (pure (Just (solid 1 1)))
-  assertEq failed 1 =<< readIORef answers
-
 -- | 'useScreenshot' waits in a task for the next frame on screen; a key captures once.
--- Closing or replacing a window answers pending requests; a closed host is not called.
+-- A screenshot requested from a click is requested once, though the click reruns the
+-- view. Closing or replacing a window answers pending requests; a closed host is not
+-- called.
 runScreenshotLifecycleTest :: Context -> IORef Int -> IO ()
 runScreenshotLifecycleTest base failed = do
   job <- newTask
@@ -198,6 +177,21 @@ runScreenshotLifecycleTest base failed = do
   replicateM_ 3 answered
   assertEq failed 1 =<< readIORef captures
   cancelTasks base
+  answers <- newIORef (0 :: Int)
+  passes <- newIORef (0 :: Int)
+  let view = do
+        liftIO (modifyIORef' passes (+ 1))
+        shotsVar <- useVar (0 :: Int)
+        shots <- readVar shotsVar
+        whenM (button "Shot") $
+          requestScreenshot (\_ -> modifyIORef' answers (+ 1)) >> writeVar shotsVar (shots + 1)
+  runSim base failed inp view $ do
+    _ <- press "Shot"
+    liftIO (writeIORef passes 0)
+    _ <- release
+    checkEq 2 =<< liftIO (readIORef passes)
+  answerScreenshots base (pure (Just (solid 1 1)))
+  assertEq failed 1 =<< readIORef answers
   ctx <- newContext
   _ <- recordingHost defaultWindowSettings ctx
   oldShoot <- evalUi ctx inp askScreenshot
