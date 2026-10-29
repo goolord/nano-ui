@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-202247ca.js";
+            window.path_to_searchindex_js = "searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -181,7 +181,7 @@
                     <main>
                         <h1 id="nano-ui"><a class="header" href="#nano-ui">nano-ui</a></h1>
 <p>An immediate-mode GUI toolkit for Haskell.</p>
-<p>A view is a <code>NanoUI ()</code> action that the backend re-runs every frame. Widgets return values directly (<code>button</code> returns <code>Bool</code>), input widgets take a mutable <code>Var</code> holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, <code>do</code> notation, and <code>if</code>/<code>case</code>/<code>for_</code>.</p>
+<p>The backend re-runs your view, a <code>NanoUI ()</code> action, every frame. Widgets return values directly (<code>button</code> returns <code>Bool</code>), input widgets take a mutable <code>Var</code> holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, <code>do</code> notation, and <code>if</code>/<code>case</code>/<code>for_</code>.</p>
 <pre><code class="language-haskell">counter :: NanoUI ()
 counter = row $ do
   n &lt;- useVar (0 :: Int)
@@ -702,7 +702,7 @@ writeDocument filePath doc = do
       )
   pure (isRight result)
 </code></pre>
-<p><code>documentText</code> is the only conversion from the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
+<p>Only <code>documentText</code> converts the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
 <h2 id="6-the-editor"><a class="header" href="#6-the-editor">6. The editor</a></h2>
 <p><code>textAreaDocument</code> edits a <code>Var TextDocument</code> with line-sharing and an undo history. The primed variant supplies the <code>Response</code> the application needs:</p>
 <pre><code class="language-haskell">    editorResp &lt;-
@@ -730,7 +730,7 @@ writeDocument filePath doc = do
 -- ...after the layout, which returns the name as docName:
   setWindowTitleUi (docName &lt;&gt; " - nano-ui Notepad")
 </code></pre>
-<p><code>setWindowTitleUi</code> is a no-op when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
+<p><code>setWindowTitleUi</code> does nothing when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
 <p>The close request and the modal fit together like this:</p>
 <pre><code class="language-haskell">    exitApp = do
       dirty &lt;- readVar docDirty
@@ -770,7 +770,7 @@ writeDocument filePath doc = do
 <p>A focused text editor claims its own editing chords (Ctrl+Z, Ctrl+X, and so on) before the application’s shortcuts see them. The menu items still work because they are explicit commands, and the top-level bindings are a fallback for when focus is elsewhere.</p>
 </blockquote>
 <h2 id="9-the-status-bar"><a class="header" href="#9-the-status-bar">9. The status bar</a></h2>
-<p>The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
+<p>A row of muted labels makes the status bar. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
 <pre><code class="language-haskell">statusBar :: Text -&gt; Var TextDocument -&gt; Var Text -&gt; Float -&gt; NanoUI ()
 statusBar docName docVar statusMsg zoomVal = do
   doc &lt;- readVar docVar
@@ -867,7 +867,7 @@ slowSearch q = do
 <li>The worker finishes and wakes the loop for a frame. The next call reports <code>TaskDone</code>.</li>
 <li>Changing the key (typing a new committed query) cancels the old worker with an asynchronous exception and starts the new one.</li>
 </ul>
-<p><code>useTask</code> is the simpler variant when only the latest result matters:</p>
+<p>When only the latest result matters, use <code>useTask</code>:</p>
 <pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
 fileView app path = do
   contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
@@ -904,7 +904,7 @@ flakyCard app = do
 job q = bracket (connect info) disconnect $ \conn -&gt; runQuery conn q
 </code></pre>
 <h2 id="4-streams-many-updates-one-frame"><a class="header" href="#4-streams-many-updates-one-frame">4. Streams: many updates, one frame</a></h2>
-<p>A <code>Stream</code> is for work that pushes repeatedly: progress ticks, sensor readings, tokens from a model. The producer is a function that receives <code>update</code> and runs until it returns or is cancelled:</p>
+<p>Progress ticks, sensor readings, and tokens from a model arrive many times per job, so they go through a <code>Stream</code>. Its producer receives <code>update</code> and runs until it returns or is cancelled:</p>
 <pre><code class="language-haskell">progressCard :: App -&gt; NanoUI ()
 progressCard app = do
   running &lt;- useVar False
@@ -936,7 +936,7 @@ progressCard app = do
 </ul>
 <p>A paused progress pane costs no frames.</p>
 <h2 id="5-a-live-chart"><a class="header" href="#5-a-live-chart">5. A live chart</a></h2>
-<p>The chart is a <code>Stream</code> feeding a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:</p>
+<p>A <code>Stream</code> feeds the chart through a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:</p>
 <pre><code class="language-haskell">data App = App
   { appFeed :: !(Stream () Feed)
   , appSaved :: !(Var Feed)
@@ -1120,7 +1120,7 @@ settingsView settings = do
   checkbox "Silent" settings.silent
   textInput settings.nickname
 </code></pre>
-<p><code>settings.volume</code> is a <code>Var Float</code> projecting one field. Editing it does not repaint what reads only <code>settings.nickname</code>.</p>
+<p><code>settings.volume</code> projects one field as a <code>Var Float</code>. Editing it does not repaint what reads only <code>settings.nickname</code>.</p>
 <ul>
 <li><strong><code>constVar x</code></strong> is read-only; writes are no-ops. Use it for a derived value shown in an input widget.</li>
 <li><strong><code>withValue val widget</code></strong> runs a <code>Var</code> widget against a temporary <code>Var</code> and returns the result and final value. <code>nano-ui-emit</code> uses it for <code>emitChanged</code>.</li>
@@ -1279,7 +1279,7 @@ pruneRows rowVars liveIds = retainVars (`elem` liveIds) rowVars
 <p>For allocation, projections, and write costs, read <a href="#state--var">State &amp; <code>Var</code></a>. For the lifecycle that makes ids reset, read <a href="#architecture--internals">Architecture &amp; Internals</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="elm-style-state"><a class="header" href="#elm-style-state">Elm-Style State</a></h1>
-<p><code>nano-ui-emit</code> is the reducer-based alternative to <code>Var</code>: instead of mutating state directly, the view emits typed messages, and a pure reducer folds them into a model.</p>
+<p><code>nano-ui-emit</code> replaces <code>Var</code> mutation with typed messages: the view emits them, and a pure reducer folds them into a model.</p>
 <pre><code class="language-haskell">data Model = Model {counter :: Int, name :: Text}
   deriving Eq
 
@@ -1304,8 +1304,8 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </code></pre>
 <p>Widgets, layout, focus, and keys are unchanged. Only the state model differs.</p>
 <h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
-<p><code>NanoUIE msg a</code> is a UI action that can emit only <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting the wrong type is a compile error.</p>
-<p>A <code>NanoUIE</code> view is an ordinary <code>NanoUI</code> action with the view’s message sink in scope (an implicit parameter, <code>?emit</code>). Every core widget runs in it unchanged, so <code>NanoUI.Emit</code> re-exports <code>NanoUI</code> and adds the functions below. An <code>emit</code> inside a container, an overlay body, a tab or a menu callback goes to the sink of the view around it.</p>
+<p><code>NanoUIE msg a</code> restricts a UI action to emitting <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime type test: emitting the wrong type is a compile error.</p>
+<p>Every core widget runs unchanged in a <code>NanoUIE</code> view, because the view is an ordinary <code>NanoUI</code> action with its message sink in scope (an implicit parameter, <code>?emit</code>). <code>NanoUI.Emit</code> therefore re-exports <code>NanoUI</code> and adds the functions below. An <code>emit</code> inside a container, an overlay body, a tab or a menu callback goes to the sink of the view around it.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -1393,7 +1393,7 @@ main = runSdlAppReduce defaultSdlOptions update initialModel view
 <p>Keep <code>update</code> pure: file and network I/O belong in the view’s event branch, or in an effect queue run outside the reducer. Do not mirror model state in <code>Var</code>s to see it a frame earlier; durable state has one home.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="layout--scrolling"><a class="header" href="#layout--scrolling">Layout &amp; Scrolling</a></h1>
-<p>Layout is a modifier argument to a container: <code>row</code> and <code>column</code> take a layout, and <code>rowWith</code>/<code>columnWith</code> take a <code>Layout -&gt; Layout</code> function first. Modifiers compose with <code>(.)</code>, and <strong>when two set the same property, the leftmost wins</strong>.</p>
+<p>Every container takes its layout as an argument: <code>row</code> and <code>column</code> take a layout, and <code>rowWith</code>/<code>columnWith</code> take a <code>Layout -&gt; Layout</code> function first. Modifiers compose with <code>(.)</code>, and <strong>when two set the same property, the leftmost wins</strong>.</p>
 <pre><code class="language-haskell">settingsPanel :: NanoUI ()
 settingsPanel =
   columnWith (gap 8 . padAll 12 . fillW) $ do
@@ -1403,7 +1403,7 @@ settingsPanel =
 <p>Logical pixels, origin top-left, <code>y</code> downward. Backends handle DPI scaling.</p>
 <p>Each example below expands to its code and the frame it renders. The frames add <code>padAll 14</code> and fill the window so the spacing shows.</p>
 <h2 id="containers"><a class="header" href="#containers">Containers</a></h2>
-<p>A container is a <code>NanoUI</code> action that arranges its children. The plain form (<code>row</code>) uses the inherited layout; the <code>...With</code> form takes a modifier function.</p>
+<p>A container wraps a <code>NanoUI</code> block and arranges the widgets it draws. The plain form (<code>row</code>) uses the inherited layout; the <code>...With</code> form takes a modifier function.</p>
 <details class="nano-example">
 <summary><code>row</code> / <code>rowWith</code>: children left to right</summary>
 <pre><code class="language-haskell">rowExample =
@@ -1524,7 +1524,7 @@ settingsPanel =
 <img class="nano-example-shot" src="images/layout/spacer.svg" alt="Left and Right labels pushed to opposite ends of a row.">
 </details>
 <h2 id="modifiers"><a class="header" href="#modifiers">Modifiers</a></h2>
-<p>Modifiers are <code>Layout -&gt; Layout</code> functions. The leftmost wins when two set the same property, so <code>tight . padAll 14</code> has no padding while <code>padAll 14 . tight</code> keeps it.</p>
+<p>Each modifier rewrites a <code>Layout</code> (<code>Layout -&gt; Layout</code>), so modifiers chain with <code>(.)</code>. The leftmost wins when two set the same property, so <code>tight . padAll 14</code> has no padding while <code>padAll 14 . tight</code> keeps it.</p>
 <h3 id="sizing"><a class="header" href="#sizing">Sizing</a></h3>
 <details class="nano-example">
 <summary><code>fillW</code>: take all remaining width</summary>
@@ -1901,7 +1901,7 @@ oneRowPerNotch rowHeight = do
 <p>See <a href="#styling-gotchas">Styling Gotchas</a> and <a href="#recurring-bugs--fixes">Troubleshooting</a> for the recurring cases.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="widget-gallery"><a class="header" href="#widget-gallery">Widget Gallery</a></h1>
-<p>Every widget is an ordinary function exported from <code>NanoUI</code>.</p>
+<p>You call every widget as an ordinary function, exported from <code>NanoUI</code>.</p>
 <figure class="nano-figure">
 <img src="images/gallery-controls.svg" alt="Buttons, a checkbox, text field, select, slider, switch, knob, spinner, progress bar, and sparkline in one nano-ui row.">
 <figcaption>Buttons, inputs, and canvas controls in one frame. Rendered with nano-ui-svg.</figcaption>
@@ -1986,10 +1986,10 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
             label "Save") $
     saveDocument
 </code></pre>
-<p><code>iconButton</code> is the leading-icon case; an empty label gives an icon-only square button.</p>
+<p><code>iconButton</code> puts an icon before the label; an empty label gives an icon-only square button.</p>
 <h2 id="menus"><a class="header" href="#menus">Menus</a></h2>
-<p><code>menuItem</code> is a row that returns <code>True</code> when clicked. <code>menuItemShortcut</code> also displays a chord and binds it while the menu is open. <code>menuSeparator</code> and <code>menuItemDisabled</code> complete the row set.</p>
-<p>A menu bar is a <code>menuButton'</code> plus a <code>popup'</code> anchored to its rectangle:</p>
+<p><code>menuItem</code> draws a row and returns <code>True</code> when clicked. <code>menuItemShortcut</code> also displays a chord and binds it while the menu is open. <code>menuSeparator</code> and <code>menuItemDisabled</code> complete the row set.</p>
+<p>To build a menu bar, anchor a <code>popup'</code> to a <code>menuButton'</code>’s rectangle:</p>
 <pre><code class="language-haskell">fileMenu = do
   fileOpen &lt;- useVar False
   isOpen &lt;- readVar fileOpen
@@ -2258,12 +2258,12 @@ items =
 fileTree :: [TreeItem] -&gt; Var Int -&gt; NanoUI ()
 fileTree = tree "file-tree"
 </code></pre>
-<p><code>TreeItem</code> is the library type (<code>treeItemLabel</code>, <code>treeItemChildren</code>), not an app-defined record. <code>tree</code> reports the selected <strong>pre-order index</strong> through the <code>Var Int</code>, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.</p>
+<p><code>tree</code> takes the library’s <code>TreeItem</code> (<code>treeItemLabel</code>, <code>treeItemChildren</code>), not an app-defined record. It reports the selected <strong>pre-order index</strong> through the <code>Var Int</code>, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.</p>
 <p>For large trees, keep the expansion set in a <code>VarMap</code> keyed by a stable path, and rebuild the visible items before calling <code>tree</code>.</p>
 <p>To reorder tabs by dragging, see <a href="#drag--drop">Drag &amp; Drop</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="overlays--windows"><a class="header" href="#overlays--windows">Overlays &amp; Windows</a></h1>
-<p>Modals, floating windows, and popups are ordinary <code>NanoUI</code> actions that take a <code>Var Bool</code> for their open state.</p>
+<p>Modals, floating windows, and popups take a <code>Var Bool</code> for their open state and otherwise run like any <code>NanoUI</code> action.</p>
 <h2 id="call-overlays-unconditionally"><a class="header" href="#call-overlays-unconditionally">Call overlays unconditionally</a></h2>
 <pre><code class="language-haskell">modal  :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
 window :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
@@ -2305,7 +2305,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <p>For a modal without a title bar or close button, use <code>modalPanel</code> / <code>modalPanel'</code>; the panel surface and backdrop remain, and Escape or an outside click still writes <code>False</code>.</p>
 <h2 id="floating-windows"><a class="header" href="#floating-windows">Floating windows</a></h2>
-<p><code>window</code> is a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:</p>
+<p><code>window</code> draws a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:</p>
 <pre><code class="language-haskell">inspector = do
   inspectorOpen &lt;- useVar False
   window inspectorOpen "Inspector" $ do
@@ -2313,7 +2313,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <p><code>window'</code> returns the body result and a response. Use <code>window</code> for panels that coexist with the main content, <code>modal</code> when the user must answer first.</p>
 <h2 id="popups"><a class="header" href="#popups">Popups</a></h2>
-<p><code>popup</code> is a floating panel placed by a <code>PopupConfig</code>:</p>
+<p><code>popup</code> floats a panel wherever its <code>PopupConfig</code> places it:</p>
 <pre><code class="language-haskell">filterPopup = do
   filterOpen &lt;- useVar False
   showFruit &lt;- useVar True
@@ -2379,7 +2379,7 @@ tabStrip dragHandle active documents = do
 </code></pre>
 <p><code>dragPhase</code> is <code>DragStarted</code>, <code>Dragging</code>, <code>DragReleased</code>, or <code>DragCancelled</code> (Escape, a lost hold, or the source disappearing). The last two last one frame. Commit only on <code>DragReleased</code>.</p>
 <h2 id="files-and-text-from-other-applications"><a class="header" href="#files-and-text-from-other-applications">Files and text from other applications</a></h2>
-<p>The SDL backend delivers the operating system’s drag and drop; the RGFW backend does not. <code>dropZone</code> is a panel that reports the files and text dropped on it:</p>
+<p>The SDL backend delivers the operating system’s drag and drop; the RGFW backend does not. <code>dropZone</code> draws a panel and reports the files and text dropped on it:</p>
 <pre><code class="language-haskell">fileDrop :: NanoUI ()
 fileDrop = do
   (_, _, target) &lt;- dropZone (fillW . padAll 12) (label "Drop files here")
@@ -2504,7 +2504,7 @@ primitives =
 </code></pre>
 <p><code>drawStrokeCircle</code> keeps its border inside the radius. <code>drawStrokeAA</code> is an anti-aliased line with square ends; <code>drawStroke</code> is the same line without anti-aliasing, for axis-aligned rules. <code>drawQuadGradient</code> takes its colours clockwise from the top left.</p>
 <h3 id="paths"><a class="header" href="#paths">Paths</a></h3>
-<p>A <code>Path</code> is a list of steps joined with <code>&lt;&gt;</code>. <code>moveTo</code> starts a subpath. <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code> extend it from the current point, and <code>close</code> draws a line back to where it started. Each path below is stroked with <code>drawStrokePath (path r) 3 blue</code>. Filled dots are points on the path; hollow dots are control points and arc centres.</p>
+<p>Steps joined with <code>&lt;&gt;</code> build a <code>Path</code>. <code>moveTo</code> starts a subpath. <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code> extend it from the current point, and <code>close</code> draws a line back to where it started. Each path below is stroked with <code>drawStrokePath (path r) 3 blue</code>. Filled dots are points on the path; hollow dots are control points and arc centres.</p>
 <img src="images/canvas/segments.svg" alt="Five cells: a two-segment peak, a quadratic curve with its control point above, an S-shaped cubic curve with two control points, a three-quarter arc, and the same arc closed through its centre into a pie slice.">
 <pre><code class="language-haskell">segments :: [(Text, Rect -&gt; P.Path)]
 segments =
@@ -2557,7 +2557,7 @@ fillRules =
 </code></pre>
 <p><code>P.circle</code> always runs clockwise, so under <code>NonZero</code> the inner circles add to the outer one and the disc is solid. Running the middle circle the other way cancels it out, cutting a hole. <code>EvenOdd</code> ignores direction: each nested subpath toggles between filled and empty. Crossing subpaths are not resolved against each other, so keep holes inside the shape they cut.</p>
 <h3 id="paints"><a class="header" href="#paints">Paints</a></h3>
-<p><code>P.Solid</code> is one colour. <code>P.Linear from to stops</code> is a gradient along the line from <code>from</code> (offset 0) to <code>to</code> (offset 1).</p>
+<p><code>P.Solid</code> fills with one colour. <code>P.Linear from to stops</code> blends a gradient along the line from <code>from</code> (offset 0) to <code>to</code> (offset 1).</p>
 <img src="images/canvas/paints.svg" alt="Four cells: a solid blue rounded rectangle, a blue-to-teal gradient across the full width, the same gradient squeezed into the middle third with solid ends, and a disc shading amber to rose to blue along its diagonal.">
 <pre><code class="language-haskell">paints :: [(Text, Rect -&gt; CanvasM ())]
 paints =
@@ -2732,7 +2732,7 @@ starBadge owner star tint = do
 </tbody>
 </table>
 </div>
-<p>A <code>Style</code> is <code>bg</code>, <code>fg</code>, <code>border</code>, <code>borderWidth</code>, <code>cornerRadius</code>, <code>hoverBg</code>, and <code>activeBg</code>. A <code>Theme</code> also defines semantic colors: <code>themeAccent</code> / <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success/warning/danger tones.</p>
+<p>A <code>Style</code> sets <code>bg</code>, <code>fg</code>, <code>border</code>, <code>borderWidth</code>, <code>cornerRadius</code>, <code>hoverBg</code>, and <code>activeBg</code>. A <code>Theme</code> also defines semantic colors: <code>themeAccent</code> / <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success/warning/danger tones.</p>
 <p>The page behind the view is <code>pageBackground</code>: <code>themeWindow</code>, unless the theme sets <code>themePage</code>. <code>pageColor</code> sets one. <code>panelPage</code> puts a view that draws no panel of its own on the panel surface. The page sits over the window background, which shows in the gaps between panels:</p>
 <pre><code class="language-haskell">-- An app with no panel of its own: the panel surface is the page.
 panelPageOptions :: SdlOptions
@@ -3020,7 +3020,7 @@ results app queryKey = do
     TaskDone found       -&gt; renderResults found
     TaskFailed err _     -&gt; danger (T.pack (displayException err))
 </code></pre>
-<p><code>useTask</code> is the simpler form when only the latest result matters:</p>
+<p>When only the latest result matters, use <code>useTask</code>:</p>
 <pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
 fileView app path = do
   contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
@@ -3035,7 +3035,7 @@ fileView app path = do
 <li><strong><code>TaskRunning previous</code> carries the last result</strong>, so a list does not flash empty while the next query runs.</li>
 </ul>
 <h2 id="stream-repeated-pushes"><a class="header" href="#stream-repeated-pushes"><code>Stream</code>: repeated pushes</a></h2>
-<p>A <code>Stream</code> is for sensors, downloads, token streams, and anything that pushes repeatedly:</p>
+<p>Sensors, downloads, token streams, and anything else that pushes repeatedly feed a <code>Stream</code>:</p>
 <pre><code class="language-haskell">progress :: App -&gt; NanoUI ()
 progress app = do
   pct &lt;- useStream (appProgress app) () (0 :: Int) $ \update -&gt;
@@ -3261,7 +3261,7 @@ view app = do
 </table>
 </div>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
-<p><code>nano-ui-sdl</code> is the primary desktop backend:</p>
+<p>Desktop apps normally run on <code>nano-ui-sdl</code>:</p>
 <pre><code class="language-haskell">sdlMain :: IO ()
 sdlMain = Sdl.runSdlApp
   Sdl.defaultSdlOptions
@@ -3273,7 +3273,7 @@ sdlMain = Sdl.runSdlApp
   appView
 </code></pre>
 <p>It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (<code>useFileDialog</code>), custom title bars (<code>windowCaption</code>), and screenshots (<code>saveScreenshot</code>, <code>captureScreenshot</code>). See <a href="#desktop-windows">Desktop Windows</a> for the window side.</p>
-<p><code>nano-ui-rgfw</code> is the zero-system-dependency alternative:</p>
+<p><code>nano-ui-rgfw</code> needs no system dependencies:</p>
 <pre><code class="language-haskell">rgfwMain :: IO ()
 rgfwMain = Rgfw.runRgfwApp Rgfw.defaultRgfwOptions appView
 </code></pre>

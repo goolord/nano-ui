@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -196,7 +196,7 @@
 </table>
 </div>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
-<p><code>nano-ui-sdl</code> is the primary desktop backend:</p>
+<p>Desktop apps normally run on <code>nano-ui-sdl</code>:</p>
 <pre><code class="language-haskell">sdlMain :: IO ()
 sdlMain = Sdl.runSdlApp
   Sdl.defaultSdlOptions
@@ -208,7 +208,7 @@ sdlMain = Sdl.runSdlApp
   appView
 </code></pre>
 <p>It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (<code>useFileDialog</code>), custom title bars (<code>windowCaption</code>), and screenshots (<code>saveScreenshot</code>, <code>captureScreenshot</code>). See <a href="../advanced/window-management.html">Desktop Windows</a> for the window side.</p>
-<p><code>nano-ui-rgfw</code> is the zero-system-dependency alternative:</p>
+<p><code>nano-ui-rgfw</code> needs no system dependencies:</p>
 <pre><code class="language-haskell">rgfwMain :: IO ()
 rgfwMain = Rgfw.runRgfwApp Rgfw.defaultRgfwOptions appView
 </code></pre>

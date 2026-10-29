@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -203,7 +203,7 @@ tabStrip dragHandle active documents = do
 </code></pre>
 <p><code>dragPhase</code> is <code>DragStarted</code>, <code>Dragging</code>, <code>DragReleased</code>, or <code>DragCancelled</code> (Escape, a lost hold, or the source disappearing). The last two last one frame. Commit only on <code>DragReleased</code>.</p>
 <h2 id="files-and-text-from-other-applications"><a class="header" href="#files-and-text-from-other-applications">Files and text from other applications</a></h2>
-<p>The SDL backend delivers the operating system’s drag and drop; the RGFW backend does not. <code>dropZone</code> is a panel that reports the files and text dropped on it:</p>
+<p>The SDL backend delivers the operating system’s drag and drop; the RGFW backend does not. <code>dropZone</code> draws a panel and reports the files and text dropped on it:</p>
 <pre><code class="language-haskell">fileDrop :: NanoUI ()
 fileDrop = do
   (_, _, target) &lt;- dropZone (fillW . padAll 12) (label "Drop files here")

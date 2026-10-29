@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -261,7 +261,7 @@ items =
 fileTree :: [TreeItem] -&gt; Var Int -&gt; NanoUI ()
 fileTree = tree "file-tree"
 </code></pre>
-<p><code>TreeItem</code> is the library type (<code>treeItemLabel</code>, <code>treeItemChildren</code>), not an app-defined record. <code>tree</code> reports the selected <strong>pre-order index</strong> through the <code>Var Int</code>, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.</p>
+<p><code>tree</code> takes the library’s <code>TreeItem</code> (<code>treeItemLabel</code>, <code>treeItemChildren</code>), not an app-defined record. It reports the selected <strong>pre-order index</strong> through the <code>Var Int</code>, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.</p>
 <p>For large trees, keep the expansion set in a <code>VarMap</code> keyed by a stable path, and rebuild the visible items before calling <code>tree</code>.</p>
 <p>To reorder tabs by dragging, see <a href="drag-and-drop.html">Drag &amp; Drop</a>.</p>
 

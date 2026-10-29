@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -201,7 +201,7 @@ results app queryKey = do
     TaskDone found       -&gt; renderResults found
     TaskFailed err _     -&gt; danger (T.pack (displayException err))
 </code></pre>
-<p><code>useTask</code> is the simpler form when only the latest result matters:</p>
+<p>When only the latest result matters, use <code>useTask</code>:</p>
 <pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
 fileView app path = do
   contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
@@ -216,7 +216,7 @@ fileView app path = do
 <li><strong><code>TaskRunning previous</code> carries the last result</strong>, so a list does not flash empty while the next query runs.</li>
 </ul>
 <h2 id="stream-repeated-pushes"><a class="header" href="#stream-repeated-pushes"><code>Stream</code>: repeated pushes</a></h2>
-<p>A <code>Stream</code> is for sensors, downloads, token streams, and anything that pushes repeatedly:</p>
+<p>Sensors, downloads, token streams, and anything else that pushes repeatedly feed a <code>Stream</code>:</p>
 <pre><code class="language-haskell">progress :: App -&gt; NanoUI ()
 progress app = do
   pct &lt;- useStream (appProgress app) () (0 :: Int) $ \update -&gt;

@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -322,7 +322,7 @@ writeDocument filePath doc = do
       )
   pure (isRight result)
 </code></pre>
-<p><code>documentText</code> is the only conversion from the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
+<p>Only <code>documentText</code> converts the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
 <h2 id="6-the-editor"><a class="header" href="#6-the-editor">6. The editor</a></h2>
 <p><code>textAreaDocument</code> edits a <code>Var TextDocument</code> with line-sharing and an undo history. The primed variant supplies the <code>Response</code> the application needs:</p>
 <pre><code class="language-haskell">    editorResp &lt;-
@@ -350,7 +350,7 @@ writeDocument filePath doc = do
 -- ...after the layout, which returns the name as docName:
   setWindowTitleUi (docName &lt;&gt; " - nano-ui Notepad")
 </code></pre>
-<p><code>setWindowTitleUi</code> is a no-op when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
+<p><code>setWindowTitleUi</code> does nothing when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
 <p>The close request and the modal fit together like this:</p>
 <pre><code class="language-haskell">    exitApp = do
       dirty &lt;- readVar docDirty
@@ -390,7 +390,7 @@ writeDocument filePath doc = do
 <p>A focused text editor claims its own editing chords (Ctrl+Z, Ctrl+X, and so on) before the application’s shortcuts see them. The menu items still work because they are explicit commands, and the top-level bindings are a fallback for when focus is elsewhere.</p>
 </blockquote>
 <h2 id="9-the-status-bar"><a class="header" href="#9-the-status-bar">9. The status bar</a></h2>
-<p>The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
+<p>A row of muted labels makes the status bar. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
 <pre><code class="language-haskell">statusBar :: Text -&gt; Var TextDocument -&gt; Var Text -&gt; Float -&gt; NanoUI ()
 statusBar docName docVar statusMsg zoomVal = do
   doc &lt;- readVar docVar

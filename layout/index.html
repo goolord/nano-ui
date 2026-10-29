@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="layout--scrolling"><a class="header" href="#layout--scrolling">Layout &amp; Scrolling</a></h1>
-<p>Layout is a modifier argument to a container: <code>row</code> and <code>column</code> take a layout, and <code>rowWith</code>/<code>columnWith</code> take a <code>Layout -&gt; Layout</code> function first. Modifiers compose with <code>(.)</code>, and <strong>when two set the same property, the leftmost wins</strong>.</p>
+<p>Every container takes its layout as an argument: <code>row</code> and <code>column</code> take a layout, and <code>rowWith</code>/<code>columnWith</code> take a <code>Layout -&gt; Layout</code> function first. Modifiers compose with <code>(.)</code>, and <strong>when two set the same property, the leftmost wins</strong>.</p>
 <pre><code class="language-haskell">settingsPanel :: NanoUI ()
 settingsPanel =
   columnWith (gap 8 . padAll 12 . fillW) $ do
@@ -189,7 +189,7 @@ settingsPanel =
 <p>Logical pixels, origin top-left, <code>y</code> downward. Backends handle DPI scaling.</p>
 <p>Each example below expands to its code and the frame it renders. The frames add <code>padAll 14</code> and fill the window so the spacing shows.</p>
 <h2 id="containers"><a class="header" href="#containers">Containers</a></h2>
-<p>A container is a <code>NanoUI</code> action that arranges its children. The plain form (<code>row</code>) uses the inherited layout; the <code>...With</code> form takes a modifier function.</p>
+<p>A container wraps a <code>NanoUI</code> block and arranges the widgets it draws. The plain form (<code>row</code>) uses the inherited layout; the <code>...With</code> form takes a modifier function.</p>
 <details class="nano-example">
 <summary><code>row</code> / <code>rowWith</code>: children left to right</summary>
 <pre><code class="language-haskell">rowExample =
@@ -310,7 +310,7 @@ settingsPanel =
 <img class="nano-example-shot" src="../images/layout/spacer.svg" alt="Left and Right labels pushed to opposite ends of a row.">
 </details>
 <h2 id="modifiers"><a class="header" href="#modifiers">Modifiers</a></h2>
-<p>Modifiers are <code>Layout -&gt; Layout</code> functions. The leftmost wins when two set the same property, so <code>tight . padAll 14</code> has no padding while <code>padAll 14 . tight</code> keeps it.</p>
+<p>Each modifier rewrites a <code>Layout</code> (<code>Layout -&gt; Layout</code>), so modifiers chain with <code>(.)</code>. The leftmost wins when two set the same property, so <code>tight . padAll 14</code> has no padding while <code>padAll 14 . tight</code> keeps it.</p>
 <h3 id="sizing"><a class="header" href="#sizing">Sizing</a></h3>
 <details class="nano-example">
 <summary><code>fillW</code>: take all remaining width</summary>

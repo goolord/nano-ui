@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -249,7 +249,7 @@ slowSearch q = do
 <li>The worker finishes and wakes the loop for a frame. The next call reports <code>TaskDone</code>.</li>
 <li>Changing the key (typing a new committed query) cancels the old worker with an asynchronous exception and starts the new one.</li>
 </ul>
-<p><code>useTask</code> is the simpler variant when only the latest result matters:</p>
+<p>When only the latest result matters, use <code>useTask</code>:</p>
 <pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
 fileView app path = do
   contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
@@ -286,7 +286,7 @@ flakyCard app = do
 job q = bracket (connect info) disconnect $ \conn -&gt; runQuery conn q
 </code></pre>
 <h2 id="4-streams-many-updates-one-frame"><a class="header" href="#4-streams-many-updates-one-frame">4. Streams: many updates, one frame</a></h2>
-<p>A <code>Stream</code> is for work that pushes repeatedly: progress ticks, sensor readings, tokens from a model. The producer is a function that receives <code>update</code> and runs until it returns or is cancelled:</p>
+<p>Progress ticks, sensor readings, and tokens from a model arrive many times per job, so they go through a <code>Stream</code>. Its producer receives <code>update</code> and runs until it returns or is cancelled:</p>
 <pre><code class="language-haskell">progressCard :: App -&gt; NanoUI ()
 progressCard app = do
   running &lt;- useVar False
@@ -318,7 +318,7 @@ progressCard app = do
 </ul>
 <p>A paused progress pane costs no frames.</p>
 <h2 id="5-a-live-chart"><a class="header" href="#5-a-live-chart">5. A live chart</a></h2>
-<p>The chart is a <code>Stream</code> feeding a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:</p>
+<p>A <code>Stream</code> feeds the chart through a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:</p>
 <pre><code class="language-haskell">data App = App
   { appFeed :: !(Stream () Feed)
   , appSaved :: !(Var Feed)

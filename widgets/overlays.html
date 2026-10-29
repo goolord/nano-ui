@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="overlays--windows"><a class="header" href="#overlays--windows">Overlays &amp; Windows</a></h1>
-<p>Modals, floating windows, and popups are ordinary <code>NanoUI</code> actions that take a <code>Var Bool</code> for their open state.</p>
+<p>Modals, floating windows, and popups take a <code>Var Bool</code> for their open state and otherwise run like any <code>NanoUI</code> action.</p>
 <h2 id="call-overlays-unconditionally"><a class="header" href="#call-overlays-unconditionally">Call overlays unconditionally</a></h2>
 <pre><code class="language-haskell">modal  :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
 window :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
@@ -221,7 +221,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <p>For a modal without a title bar or close button, use <code>modalPanel</code> / <code>modalPanel'</code>; the panel surface and backdrop remain, and Escape or an outside click still writes <code>False</code>.</p>
 <h2 id="floating-windows"><a class="header" href="#floating-windows">Floating windows</a></h2>
-<p><code>window</code> is a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:</p>
+<p><code>window</code> draws a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:</p>
 <pre><code class="language-haskell">inspector = do
   inspectorOpen &lt;- useVar False
   window inspectorOpen "Inspector" $ do
@@ -229,7 +229,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <p><code>window'</code> returns the body result and a response. Use <code>window</code> for panels that coexist with the main content, <code>modal</code> when the user must answer first.</p>
 <h2 id="popups"><a class="header" href="#popups">Popups</a></h2>
-<p><code>popup</code> is a floating panel placed by a <code>PopupConfig</code>:</p>
+<p><code>popup</code> floats a panel wherever its <code>PopupConfig</code> places it:</p>
 <pre><code class="language-haskell">filterPopup = do
   filterOpen &lt;- useVar False
   showFruit &lt;- useVar True

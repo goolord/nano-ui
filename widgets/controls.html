@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -202,10 +202,10 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
             label "Save") $
     saveDocument
 </code></pre>
-<p><code>iconButton</code> is the leading-icon case; an empty label gives an icon-only square button.</p>
+<p><code>iconButton</code> puts an icon before the label; an empty label gives an icon-only square button.</p>
 <h2 id="menus"><a class="header" href="#menus">Menus</a></h2>
-<p><code>menuItem</code> is a row that returns <code>True</code> when clicked. <code>menuItemShortcut</code> also displays a chord and binds it while the menu is open. <code>menuSeparator</code> and <code>menuItemDisabled</code> complete the row set.</p>
-<p>A menu bar is a <code>menuButton'</code> plus a <code>popup'</code> anchored to its rectangle:</p>
+<p><code>menuItem</code> draws a row and returns <code>True</code> when clicked. <code>menuItemShortcut</code> also displays a chord and binds it while the menu is open. <code>menuSeparator</code> and <code>menuItemDisabled</code> complete the row set.</p>
+<p>To build a menu bar, anchor a <code>popup'</code> to a <code>menuButton'</code>’s rectangle:</p>
 <pre><code class="language-haskell">fileMenu = do
   fileOpen &lt;- useVar False
   isOpen &lt;- readVar fileOpen

@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-202247ca.js";
+            window.path_to_searchindex_js = "../searchindex-f1e66533.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -285,7 +285,7 @@ primitives =
 </code></pre>
 <p><code>drawStrokeCircle</code> keeps its border inside the radius. <code>drawStrokeAA</code> is an anti-aliased line with square ends; <code>drawStroke</code> is the same line without anti-aliasing, for axis-aligned rules. <code>drawQuadGradient</code> takes its colours clockwise from the top left.</p>
 <h3 id="paths"><a class="header" href="#paths">Paths</a></h3>
-<p>A <code>Path</code> is a list of steps joined with <code>&lt;&gt;</code>. <code>moveTo</code> starts a subpath. <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code> extend it from the current point, and <code>close</code> draws a line back to where it started. Each path below is stroked with <code>drawStrokePath (path r) 3 blue</code>. Filled dots are points on the path; hollow dots are control points and arc centres.</p>
+<p>Steps joined with <code>&lt;&gt;</code> build a <code>Path</code>. <code>moveTo</code> starts a subpath. <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code> extend it from the current point, and <code>close</code> draws a line back to where it started. Each path below is stroked with <code>drawStrokePath (path r) 3 blue</code>. Filled dots are points on the path; hollow dots are control points and arc centres.</p>
 <img src="../images/canvas/segments.svg" alt="Five cells: a two-segment peak, a quadratic curve with its control point above, an S-shaped cubic curve with two control points, a three-quarter arc, and the same arc closed through its centre into a pie slice.">
 <pre><code class="language-haskell">segments :: [(Text, Rect -&gt; P.Path)]
 segments =
@@ -338,7 +338,7 @@ fillRules =
 </code></pre>
 <p><code>P.circle</code> always runs clockwise, so under <code>NonZero</code> the inner circles add to the outer one and the disc is solid. Running the middle circle the other way cancels it out, cutting a hole. <code>EvenOdd</code> ignores direction: each nested subpath toggles between filled and empty. Crossing subpaths are not resolved against each other, so keep holes inside the shape they cut.</p>
 <h3 id="paints"><a class="header" href="#paints">Paints</a></h3>
-<p><code>P.Solid</code> is one colour. <code>P.Linear from to stops</code> is a gradient along the line from <code>from</code> (offset 0) to <code>to</code> (offset 1).</p>
+<p><code>P.Solid</code> fills with one colour. <code>P.Linear from to stops</code> blends a gradient along the line from <code>from</code> (offset 0) to <code>to</code> (offset 1).</p>
 <img src="../images/canvas/paints.svg" alt="Four cells: a solid blue rounded rectangle, a blue-to-teal gradient across the full width, the same gradient squeezed into the middle third with solid ends, and a disc shading amber to rose to blue along its diagonal.">
 <pre><code class="language-haskell">paints :: [(Text, Rect -&gt; CanvasM ())]
 paints =
