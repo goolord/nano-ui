@@ -12,11 +12,9 @@ tests =
   , spec "animate-to-stays-settled" runAnimateToStaysSettledTest
   , spec "animation-damage" runAnimationDamageTest
   , spec "composite-animation-isolation" runCompositeAnimationIsolationTest
-  , spec "button-hover-anim" runButtonHoverAnimTest
-  , spec "spinner" runSpinnerTest
+  , spec "button-animation" runButtonHoverAnimTest
+  , spec "animated-drawings" runSpinnerTest
   , spec "animation-left-out" runAnimationLeftOutTest
-  , spec "keep-animating-rest" runKeepAnimatingRestTest
-  , spec "drawing-animation-end" runDrawingAnimationEndTest
   , spec "wake-after" runWakeAfterTest
   ]
 
@@ -140,6 +138,8 @@ runCompositeAnimationIsolationTest _ failed = do
     assert failed . not =<< needsRedraw ctx inp inp
 
 -- | A button's hover eases in without dipping and stays on through a click.
+-- A 'keepAnimating' lease is not the widget's value: a spring on the key
+-- starts from the resting value, and a set keeps the lease and repaints.
 runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
 runButtonHoverAnimTest ctx failed = do
   let inp0 = withDelta 200 100 0.016
@@ -152,8 +152,25 @@ runButtonHoverAnimTest ctx failed = do
   hot <- getHotId ctx
   assert failed (hashWidgetId hot /= 0)
   assert failed . (>= 0.99) =<< getAnimationValue ctx hot
+  leased <- newContext
+  let inp = withDelta 200 100 0.05
+      hover = inp {inputMousePos = V2 10 10}
+      kept = column (button' "Go" >>= \b -> b <$ keepAnimating b)
+  _ <- runFrame leased inp kept
+  wid <- respId . last <$> replicateM 10 (evalUi leased hover kept)
+  assertEq failed 1 =<< getAnimationValue leased wid
+  startSpring leased wid presetSmooth 0.5
+  assert failed . (> 0.99) =<< getAnimationValue leased wid
+  replicateM_ 60 (runFrame leased hover kept)
+  assertEq failed 0.5 =<< getAnimationValue leased wid
+  setAnimationValue leased wid 0
+  assertEq failed 0 =<< getAnimationValue leased wid
+  assert failed =<< anyAnimating leased
+  assert failed =<< needsRedraw leased hover hover
 
 -- | A spinner keeps the loop drawing, repaints only around itself, and turns.
+-- An unversioned drawing rebuilds on the frame its animation ends, which
+-- once replayed the last animated frame's ops for good.
 runSpinnerTest :: Context -> IORef Int -> IO ()
 runSpinnerTest ctx failed = do
   theme <- getTheme ctx
@@ -173,6 +190,16 @@ runSpinnerTest ctx failed = do
     DamageClip r -> assert failed (rectW r < 80 && rectH r < 80 && rectIntersect r (respRect resp) /= Nothing)
     DamageFull -> assert failed False
   assert failed . (arc quads0 /=) . arc =<< drawQuads draw1
+  ended <- newContext
+  let running = colorRGBA 255 0 0 255
+      stopped = colorRGBA 0 0 255 255
+      square on = column $ do
+        d <- drawing (fixedWH 40 40) (\r -> smallArrayFromList [FillRect r (if on then running else stopped)])
+        when on (keepAnimating d)
+  replicateM_ 3 (runFrame ended inp (square True))
+  (_, draw, _) <- runFrame ended inp (square False)
+  quads <- map snd <$> drawQuads draw
+  assert failed (stopped `elem` quads && running `notElem` quads)
 
 -- | An animation the view stops building stops drawing frames and runs again
 -- when shown: a spinner's 'keepAnimating', and a long tween or undamped
@@ -194,40 +221,6 @@ runAnimationLeftOutTest _ failed = do
     assert failed . not =<< needsRedraw ctx inp inp
     _ <- runFrame ctx inp shown
     assert failed =<< anyAnimating ctx
-
--- | A 'keepAnimating' lease is not the widget's value: a spring on the key
--- starts from the resting value, and a set keeps the lease and repaints.
-runKeepAnimatingRestTest :: Context -> IORef Int -> IO ()
-runKeepAnimatingRestTest ctx failed = do
-  let inp = withDelta 200 100 0.05
-      hover = inp {inputMousePos = V2 10 10}
-      ui = column (button' "Go" >>= \b -> b <$ keepAnimating b)
-  _ <- runFrame ctx inp ui
-  wid <- respId . last <$> replicateM 10 (evalUi ctx hover ui)
-  assertEq failed 1 =<< getAnimationValue ctx wid
-  startSpring ctx wid presetSmooth 0.5
-  assert failed . (> 0.99) =<< getAnimationValue ctx wid
-  replicateM_ 60 (runFrame ctx hover ui)
-  assertEq failed 0.5 =<< getAnimationValue ctx wid
-  setAnimationValue ctx wid 0
-  assertEq failed 0 =<< getAnimationValue ctx wid
-  assert failed =<< anyAnimating ctx
-  assert failed =<< needsRedraw ctx hover hover
-
--- | An unversioned drawing rebuilds on the frame its animation ends, which
--- once replayed the last animated frame's ops for good.
-runDrawingAnimationEndTest :: Context -> IORef Int -> IO ()
-runDrawingAnimationEndTest ctx failed = do
-  let inp = withDelta 200 100 0.016
-      running = colorRGBA 255 0 0 255
-      stopped = colorRGBA 0 0 255 255
-      ui on = column $ do
-        d <- drawing (fixedWH 40 40) (\r -> smallArrayFromList [FillRect r (if on then running else stopped)])
-        when on (keepAnimating d)
-  replicateM_ 3 (runFrame ctx inp (ui True))
-  (_, draw, _) <- runFrame ctx inp (ui False)
-  quads <- map snd <$> drawQuads draw
-  assert failed (stopped `elem` quads && running `notElem` quads)
 
 -- | 'wakeAfter' schedules one frame, the earliest request winning.
 runWakeAfterTest :: Context -> IORef Int -> IO ()

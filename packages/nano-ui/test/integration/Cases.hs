@@ -34,11 +34,9 @@ tests :: [Spec]
 tests =
   [ spec "embed-state" runEmbedStateTest
   , spec "host-slot" runHostSlotTest
-  , simSpec "deep-nesting" 300 300 (nest 320) (expect "deep")
+  , spec "layout-flow" runLayoutFlowTest
   , spec "flex-sizing" runFlexSizingTest
   , pixelSpec "label-align-end" runLabelAlignEndTest
-  , pixelSimSpec "responsive-wrap" 520 800 responsiveUi responsiveWrap
-  , pixelSimSpec "kv-multiline-height" 320 400 kvUi kvMultilineHeight
   , spec "empty-frame" runEmptyFrameTest
   , pixelSpec "basic-widgets" runBasicWidgetsTest
   , spec "search-input-clear" runSearchInputClearTest
@@ -86,10 +84,6 @@ runHostSlotTest ctx failed = do
   got <- evalUi ctx (withInput 80 80) (column (pure ()) >> askCompact compactOwner)
   assertEq failed (Just (10000, 9999)) ((\xs -> (length xs, last xs)) <$> got)
 
--- | Nesting deeper than the initial level capacity still lays out.
-nest :: Int -> NanoUI ()
-nest 0 = label "deep"
-nest k = column (nest (k - 1))
 
 -- | Grow, percent, shrink and aspect sizing, 12 px a character. Locking the
 -- largest grow child must lock the middle one on a later sweep (one sweep
@@ -143,34 +137,29 @@ runLabelAlignEndTest ctx failed = do
     assert failed (abs (x + w - (bx + bw)) <= 0.6 && abs (w - tw) <= 0.6)
   checkLabelAlignEndInk failed
 
-responsiveUi :: NanoUI ()
-responsiveUi = responsiveRowCol 720 (tight . gap 8 . fillW) $ do
-  columnWith (tight . gap 8 . fillW) (card (label "LeftTop") >> card (label "LeftBot"))
-  card (label "Right")
-
--- | A responsive row stacks its children below the breakpoint and keeps them
--- side by side above it.
-responsiveWrap :: Sim () ()
-responsiveWrap = do
-  right <- rectOf "Right"
-  leftBot <- rectOf "LeftBot"
-  checkGt (rectY right) (rectY leftBot + 1)
-  _ <- resize 1200 800
-  right' <- rectOf "Right"
-  leftTop <- rectOf "LeftTop"
-  checkGt (rectX right') (rectX leftTop + 1)
-
-kvUi :: NanoUI ()
-kvUi = column . card $ do
-  kv "Notes" "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
-  kv "Tree" "0"
-
--- | A multi-line value makes its row tall enough that the next row sits below.
-kvMultilineHeight :: Sim () ()
-kvMultilineHeight = do
-  line5 <- rectOf "Line 5"
-  treeRow <- rectOf "Tree"
-  checkGt (rectY treeRow) (rectY line5)
+-- | Nesting past the level array's first capacity lays out, a responsive row
+-- stacks only below its breakpoint, and a multi-line kv value pushes the next
+-- row down.
+runLayoutFlowTest :: Context -> IORef Int -> IO ()
+runLayoutFlowTest ctx failed = do
+  let nest :: Int -> NanoUI ()
+      nest 0 = label "deep"
+      nest k = column (nest (k - 1))
+      stacking = responsiveRowCol 720 (tight . gap 8 . fillW) $ do
+        columnWith (tight . gap 8 . fillW) (card (label "LeftTop") >> card (label "LeftBot"))
+        card (label "Right")
+      kvs = column . card $ kv "Notes" "Line 1\nLine 2\nLine 3\nLine 4\nLine 5" >> kv "Tree" "0"
+      above a b = join ((\ra rb -> checkGt (rectY rb) (rectY ra + 1)) <$> rectOf a <*> rectOf b)
+  runSim ctx failed (withInput 300 300) (nest 320) (expect "deep")
+  responsiveCtx <- newPixelContext
+  runSim responsiveCtx failed (withInput 520 800) stacking $ do
+    above "LeftBot" "Right"
+    _ <- resize 1200 800
+    right <- rectOf "Right"
+    leftTop <- rectOf "LeftTop"
+    checkGt (rectX right) (rectX leftTop + 1)
+  kvCtx <- newPixelContext
+  runSim kvCtx failed (withInput 320 400) kvs (above "Line 5" "Tree")
 
 -- | A frame with no widgets runs input, redraw and cursor queries on the
 -- empty arena, not on node 0, which starts out as its own child: reading it

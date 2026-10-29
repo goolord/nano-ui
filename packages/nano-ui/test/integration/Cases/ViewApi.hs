@@ -18,10 +18,7 @@ tests =
   , spec "content-key-of" runContentKeyOfTest
   , spec "layout-variants" runLayoutVariantsTest
   , spec "pane-grid-initial" runPaneGridInitialTest
-  , spec "pane-grid-initial-once" runPaneGridInitialOnceTest
-  , spec "pane-grid-unfocusable" runPaneGridUnfocusableTest
   , spec "scroll-ui" runScrollUiTest
-  , spec "scroll-metrics-read-follows" runScrollMetricsReadTest
   , simSpec "take-escape" 400 300 escapeUi takeEscapeOnce
   ]
 
@@ -159,9 +156,10 @@ runLayoutVariantsTest _ failed = do
       check (abs (x + w / 2 - 400) <= 1 && abs (y + h / 2 - 300) <= 1)
     check . respClicked . fst =<< pressKey KeyEscape
 
--- | A grid given 'pgTree' lays its split out from the first frame, asks
--- for the panes it names, gives a pane it makes later an id above all of
--- them, and holds a pinned pane at the width the ratio first gave it.
+-- | A grid given 'pgTree' lays its split out from the first frame, numbers
+-- later panes above it, and pins at the width the ratio first gave. The seed
+-- takes once: closing every pane leaves an empty grid. An unfocusable grid
+-- is no Tab stop.
 runPaneGridInitialTest :: Context -> IORef Int -> IO ()
 runPaneGridInitialTest ctx failed = do
   rects <- newIORef IM.empty
@@ -203,14 +201,10 @@ runPaneGridInitialTest ctx failed = do
   panes <- pgrPanes <$> evalUi ctx (withInput 900 400) ui
   assertEq failed 3 (length panes)
   assert failed (all (\p -> p `elem` [10, 20] || p > 30) panes)
-
--- | 'InitialTree' seeds only once: closing every pane leaves an empty grid,
--- rather than recreating the seed or inventing another pane.
-runPaneGridInitialOnceTest :: Context -> IORef Int -> IO ()
-runPaneGridInitialOnceTest ctx failed = do
+  once <- newContext
   closing <- newIORef False
   let inp = withInput 600 400
-      panes = fmap pgrPanes . paneGrid $
+      seeded = fmap pgrPanes . paneGrid $
         defaultPaneGridConfig
           { pgLayout = fillW . fillH
           , pgTree = InitialTree (Just (Split 30 AxisV 0.5 (Pane 10) (Pane 20)))
@@ -219,26 +213,22 @@ runPaneGridInitialOnceTest ctx failed = do
               when close (pgcClose pctx)
               pure (PaneView "P" False)
           }
-  assertEq failed [10, 20] =<< warmup2 ctx inp panes
+  assertEq failed [10, 20] =<< warmup2 once inp seeded
   writeIORef closing True
-  replicateM_ 3 (runFrame ctx inp panes)
+  replicateM_ 3 (runFrame once inp seeded)
   writeIORef closing False
-  assertEq failed [[], []] =<< replicateM 2 (evalUi ctx inp panes)
+  assertEq failed [[], []] =<< replicateM 2 (evalUi once inp seeded)
+  tabbed <- newContext
+  let grids focusable = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgFocusable = focusable} >> focusedWidget
+  _ <- warmup2 tabbed inp (grids False)
+  _ <- runFrame tabbed (tabInp inp) (grids False)
+  assertEq failed (WidgetId 0) =<< evalUi tabbed inp (grids False)
+  _ <- runFrame tabbed (tabInp inp) (grids True)
+  assert failed . (/= WidgetId 0) =<< evalUi tabbed inp (grids True)
 
--- | A grid that is not focusable is no Tab stop.
-runPaneGridUnfocusableTest :: Context -> IORef Int -> IO ()
-runPaneGridUnfocusableTest ctx failed = do
-  let inp = withInput 400 300
-      ui focusable = paneGrid defaultPaneGridConfig {pgLayout = fillW . fillH, pgFocusable = focusable} >> focusedWidget
-  _ <- warmup2 ctx inp (ui False)
-  _ <- runFrame ctx (tabInp inp) (ui False)
-  assertEq failed (WidgetId 0) =<< evalUi ctx inp (ui False)
-  _ <- runFrame ctx (tabInp inp) (ui True)
-  assert failed . (/= WidgetId 0) =<< evalUi ctx inp (ui True)
-
--- | The scroll commands run from a view: a list scrolls a row into view, a
--- raw offset past the content is held to what the content turns out to be,
--- and the metrics say where the scroller is.
+-- | The scroll commands run from a view: a row scrolls into view, an offset
+-- past the content is held to it, and a page goes back. A view reading
+-- 'getScrollMetrics' gets a frame when a resize changes them, and no more.
 runScrollUiTest :: Context -> IORef Int -> IO ()
 runScrollUiTest ctx failed = do
   command <- newIORef (Nothing :: Maybe (WidgetId -> NanoUI ()))
@@ -266,20 +256,15 @@ runScrollUiTest ctx failed = do
   run (\sid -> scrollPagesUi sid (V2 0 (-0.5)) ScrollInstant)
   after <- offsetNow
   assertJust failed ((,) <$> before <*> after) $ \(b, a) -> assertLt failed a b
-
--- | A view that picks rows from the context's 'getScrollMetrics' gets a
--- frame after a resize changes them, as through 'getScrollMetricsUi', and
--- none once they hold.
-runScrollMetricsReadTest :: Context -> IORef Int -> IO ()
-runScrollMetricsReadTest ctx failed = do
-  let ui = do
+  reader <- newContext
+  let rows = do
         sid <- currentId
         c <- askContext
         m <- liftIO (getScrollMetrics c sid)
         _ <- scrollArea (fillW . fillH) (void (customWidget (sizedWidget 180 1000 False)))
         pure (fmap (rectH . scrollViewport) m)
-      dirtyAfter h = (\(_, _, d) -> d) <$> runFrame ctx (withInput 400 h) ui
-  replicateM_ 3 (runFrame ctx (withInput 400 300) ui)
+      dirtyAfter h = (\(_, _, d) -> d) <$> runFrame reader (withInput 400 h) rows
+  replicateM_ 3 (runFrame reader inp rows)
   assertEq failed [False, True, False] =<< mapM dirtyAfter [300, 200, 200]
 
 escapeUi :: NanoUI (Response, Bool, Bool)
