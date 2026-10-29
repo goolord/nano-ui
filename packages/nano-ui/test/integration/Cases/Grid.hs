@@ -24,12 +24,10 @@ spansOf ctx inp names ui = do
   spans <- collectTextSpans ctx
   pure [listToMaybe [(r, fg) | (r, t, fg, _, _) <- spans, t == n] | n <- names]
 
--- | Grid cells take their own columns and rows: with a font colour set on
--- the grid (the two once shared a node slot, which collapsed the grid to one
--- column), around a nested grid (which reuses the solver's scratch arrays),
--- and for a fit panel aligned in its row, which keeps its own height there.
--- Grow children of a column with a gap share the height left after the
--- gaps, as they do in a row.
+-- | Cells keep their own columns with a font colour on the grid (the two
+-- once shared a node slot) and around a nested grid (which reuses solver
+-- scratch); an aligned fit panel keeps its height; grow children share
+-- what a column's gaps leave.
 runGridPlacementTest :: Context -> IORef Int -> IO ()
 runGridPlacementTest ctx failed = do
   let cells = ["c0", "c1", "c2", "c3"]
@@ -52,12 +50,9 @@ runGridPlacementTest ctx failed = do
   _ <- warmup2 ctx (withInput 800 400) (columnWith (gap 10 . fixedH 200 . fixedW 100) (replicateM_ 3 (box fillH red)))
   arenaRects ctx >>= assertEq failed [Rect 0 0 100 200, Rect 3 3 32 58, Rect 3 71 32 58, Rect 3 139 32 58]
 
--- | A grid is as tall as its rows, not as all its cells stacked: a
--- fill-width grid in a column, and one with adaptive columns
--- ('gridMinColW') in a column, panel or page scroller, before it gets a
--- width. A wrapped cell sets its row's height as the width changes, and a
--- label wider than the 2D scroller it measured against is as many lines
--- tall as paint draws it in.
+-- | A grid, also with 'gridMinColW', is as tall as its rows, not its cells
+-- stacked. A wrapped cell sets its row's height, and a label wider than its
+-- 2D scroller is as tall as paint draws it.
 runGridHeightsTest :: Context -> IORef Int -> IO ()
 runGridHeightsTest ctx failed = do
   let adaptive = columnWith (gridMinColW 140 . fillW) (replicateM_ 7 (button "x"))
@@ -101,13 +96,9 @@ runGridHeightsTest ctx failed = do
     [_, _, wide, _] -> assert failed (rectW wide > 300) >> assertPaintedLines failed ctx ["after"] wide
     rs -> assertEq failed 4 (length rs)
 
--- | A node without a layout descriptor does not inherit the font colour of
--- the node that held its index last frame. Font size, colour, weight, style
--- and decoration modifiers compose on one label, and the bold, italic and
--- underline helpers set the same style bits. Labels of different sizes, a
--- button and a padded column share one baseline on a baseline-aligned row:
--- the button by its label and the column by its first child, with what
--- follows below them all. The test font's ascent is 0.8 of its line.
+-- | No stale font colour from last frame's node; font modifiers compose on
+-- a label as the helpers do; a baseline row lines up labels, a button and a
+-- column's first child (the test font's ascent is 0.8 of its line).
 runFontStylesTest :: Context -> IORef Int -> IO ()
 runFontStylesTest ctx failed = do
   let inp = withInput 800 600

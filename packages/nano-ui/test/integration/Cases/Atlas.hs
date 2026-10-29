@@ -41,12 +41,9 @@ corners ctx tid = do
 origin :: Context -> Int -> IO (Maybe (Int, Int))
 origin ctx tid = fmap fst <$> corners ctx tid
 
--- | A wider image grows the atlas, and wrapping starts a new shelf, keeping
--- each image's pixels. A same-size update keeps its place and changes only
--- its pixels; a different size is refused, leaving the atlas as it was, as
--- is an image no shelf can hold within the maximum size. Narrow images
--- spread across the allowed width instead of stacking in one strip until
--- the height limit.
+-- | Growing and new shelves keep pixels; a same-size update stays put, and a
+-- new size or an image no shelf holds is refused. Narrow images use the
+-- allowed width rather than one strip.
 runAtlasGrowthTest :: Context -> IORef Int -> IO ()
 runAtlasGrowthTest ctx failed = do
   let (red, blue) = (BS.pack [255, 0, 0, 255], BS.pack [0, 0, 255, 255])
@@ -101,13 +98,9 @@ runAtlasChangesTest ctx failed = do
   upload 4 (Just (204, AtlasWhole))
   upload 203 (Just (204, AtlasRegions [(10, 1, 4, 4)]))
 
--- | A released image stops drawing and its slot is reused by the next image
--- that fits, with the surrounding padding cleared and uploaded; images that
--- do not fit go on the shelves, and released ids are not reused. Space a
--- smaller image split off is whole again once that image is released too,
--- even when the split left a strip too thin for any image. Releasing an
--- image still on screen requests a frame that repaints it (as the
--- placeholder); releasing an unknown id requests nothing.
+-- | A released slot goes to the next image that fits, padding cleared, and
+-- merges back whole once a split-off image goes too; ids are not reused.
+-- Releasing an image on screen repaints it as the placeholder.
 runAtlasReleaseTest :: Context -> IORef Int -> IO ()
 runAtlasReleaseTest ctx failed = do
   mapM_ (\(tid, w, v) -> insert ctx tid w w (solid v) >>= assert failed) [(1, 8, 200), (2, 4, 100)]

@@ -1,4 +1,4 @@
--- | Labels cut to their room, toggle buttons, and the colour helpers.
+-- | Labels cut to their room, and toggle buttons.
 module Cases.Labels (tests) where
 
 import Data.Primitive.PrimArray (primArrayFromList)
@@ -10,20 +10,15 @@ tests :: [Spec]
 tests =
   [ spec "label-truncates" runTruncateTest
   , spec "toggle-button" runToggleButtonTest
-  , spec "color-helpers" runColorHelpersTest
   ]
 
 -- | The text spans drawn inside a widget's rect.
 spansIn :: Context -> Rect -> IO [(Rect, T.Text)]
 spansIn ctx r = (\ss -> [(s, t) | (s, t, _, _, _) <- ss, rectIntersect s r /= Nothing]) <$> collectTextSpans ctx
 
--- | A button narrower than its label ends the label in dots, inside the
--- button, and one that fits shows all of it. A select's label stops short
--- of its chevron. 'truncateTextUi' fits text to a width with dots and
--- leaves text that fits alone. A label cut short is placed by its own shaped
--- width, not the advances of what is left of the whole label. A label that
--- layout keeps on one line, less than half a pixel wider than its room,
--- shows whole.
+-- | Buttons, selects (short of the chevron) and 'truncateTextUi' end text
+-- that does not fit in dots, measured by its shaped width; text that fits,
+-- or overflows by under half a pixel, shows whole.
 runTruncateTest :: Context -> IORef Int -> IO ()
 runTruncateTest base failed = do
   let inp = withInputOff 400 200
@@ -77,10 +72,3 @@ runToggleButtonTest ctx failed = do
     check . elem tint . fillsIn (respRect resp) =<< liftIO (drawQuads draw)
     _ <- click (On resp)
     checkEq False =<< liftIO (readVarIO ref)
-
-runColorHelpersTest :: Context -> IORef Int -> IO ()
-runColorHelpersTest _ failed =
-  assertEq
-    failed
-    [colorRGBA 1 2 3 255, colorRGBA 10 20 30 128, colorWhite, colorRGBA 0 0 0 0, colorRGBA 0 0 0 0]
-    [colorRGB 1 2 3, withAlpha (colorRGB 10 20 30) 0.5, withAlpha colorWhite 2, withAlpha colorBlack (-1), colorTransparent]

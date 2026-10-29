@@ -55,20 +55,17 @@ cachedOps c wid =
 selectAll :: Context -> Input -> NanoUI a -> Response -> IO ()
 selectAll c inp ui r = writeIORef (ctxFocusId c) (respId r) >> void (evalUi c (chordInp (cmdOrCtrl <> key 'a') inp) ui)
 
--- | A paragraph wraps at its column's width, a line's height per line, and
--- mixed pieces share a line. Spaces that open a paragraph indent its first
--- line, as they do a line after a newline. Wrapping follows 'textBreak',
--- not the font: monospaced text keeps whole words, and 'breakAnywhere'
--- wraps inside one without splitting a flag. A newline breaks a
--- 'breakAnywhere' line whatever joiner or mark is beside it, and every
--- other character is still drawn.
+-- | Wrapping at the column's width, leading-space indents, 'textBreak'
+-- policies (whole words, or anywhere but inside a flag), and newlines
+-- beside joiners and marks under 'breakAnywhere'.
 runRichTextWrapTest :: Context -> IORef Int -> IO ()
 runRichTextWrapTest ctx failed = do
   let fm = ctxFontMetrics ctx
       heightOf f pieces = rectH . respRect . fst <$> warmup2 ctx (withInput 600 400) (column (richTextWith' f pieces))
       flag = "\x1F1FA\x1F1F8"
   lineH <- heightOf id ["word"]
-  Rect _ _ w h <- respRect <$> warmup2 ctx inp400 (columnWith (fixedW 200) (fst <$> richText' [inlineText (T.replicate 12 "word "), strong "bold", " end"]))
+  let paragraph = [inlineText (T.replicate 12 "word "), strong "bold", " end"]
+  Rect _ _ w h <- respRect <$> warmup2 ctx inp400 (columnWith (fixedW 200) (fst <$> richText' paragraph))
   assert failed (lineH > 0 && w <= 200 && h >= 2 * lineH)
   assertEq failed 0 (round h `mod` round lineH :: Int)
   (Rect rx _ _ _, indented) <- settledOps ctx inp400 (column (fst <$> richText' ["  where\n    go = 1"]))
@@ -88,12 +85,12 @@ runRichTextWrapTest ctx failed = do
   forM_ ["one\n\x200Dtwo", "one\x200D\ntwo", "one\n\x0301two"] $ \txt -> do
     (_, ops) <- settledOps ctx inp400 (column (fst <$> richTextWith' breakAnywhere [inlineText txt]))
     let drawn = [(y, t) | (_, y, t) <- texts ops]
-    assertEq failed (txt, 2, T.filter (/= '\n') txt) (txt, length (groupBy (\a b -> fst a == fst b) drawn), T.concat (map snd drawn))
+    assertEq failed (txt, 2, T.filter (/= '\n') txt) $
+      (txt, length (groupBy (\a b -> fst a == fst b) drawn), T.concat (map snd drawn))
 
--- | A link reports its target when clicked, shows the pointer cursor, and is
--- underlined once across its words when hovered. Text beside it reports
--- nothing, and so does a press on that text dragged onto the link. A move
--- along the link runs no frame, one onto it does.
+-- | A link reports its target when clicked, shows the pointer and one
+-- underline when hovered; text beside it, or a drag from there onto it,
+-- reports nothing. A move along the link runs no frame, one onto it does.
 runRichTextLinkTest :: Context -> IORef Int -> IO ()
 runRichTextLinkTest ctx failed = do
   let fm = ctxFontMetrics ctx
@@ -104,7 +101,8 @@ runRichTextLinkTest ctx failed = do
   runSim ctx failed inp400 ui $ do
     Rect rx ry _ rh <- respRect . fst <$> result
     let at dx = V2 (rx + dx) (ry + rh / 2)
-        (onLink, onLinkStart, onLinkEnd, onText) = (at (prefixW + linkW / 2), at (prefixW + 1), at (prefixW + linkW - docsW / 2), at 2)
+        (onLink, onLinkStart, onText) = (at (prefixW + linkW / 2), at (prefixW + 1), at 2)
+        onLinkEnd = at (prefixW + linkW - docsW / 2)
         clickAt p = moveTo (At p) >> snd <$> click (At p)
         cursorIsPointer p = moveTo (At p) >> getInput >>= \i -> liftIO (cursorKindIs ctx i UiCursorPointer)
     checkEq (Just "docs-target") =<< clickAt onLink
@@ -119,11 +117,8 @@ runRichTextLinkTest ctx failed = do
     check . not =<< liftIO (hoverZoneCrossed ctx onLinkStart onLinkEnd)
     check =<< liftIO (hoverZoneCrossed ctx onText onLinkStart)
 
--- | Each line of a paragraph, wrapped or not, aligns within its box: flush
--- right for 'alignEnd', centred for 'alignCenter'. A fit-width paragraph is
--- placed in its column by the same alignment at its wrapped width, so its
--- lines land where a full-width paragraph's do. A word wider than its box
--- starts at the box's left edge whatever the alignment.
+-- | Each line aligns within the box, a fit-width paragraph lands where a
+-- full-width one does, and a word wider than the box starts at its left edge.
 runRichTextAlignTest :: Context -> IORef Int -> IO ()
 runRichTextAlignTest ctx failed = do
   let fm = ctxFontMetrics ctx
@@ -140,7 +135,8 @@ runRichTextAlignTest ctx failed = do
     assert failed (length full > 1)
     forM_ full $ \(x0, x1) -> assertEq failed (round (rx + at * rw) :: Int) (round (x0 + at * (x1 - x0)))
     assertEq failed full fitted
-    (Rect ox _ _ _, ops) <- settledOps ctx inp400 (columnWith (fixedW 40) (fst <$> richTextWith' (fillW . align) ["supercalifragilistic", " short"]))
+    (Rect ox _ _ _, ops) <-
+      settledOps ctx inp400 (columnWith (fixedW 40) (fst <$> richTextWith' (fillW . align) ["supercalifragilistic", " short"]))
     let xs = [x | (x, _, _) <- texts ops]
     assert failed (not (null xs) && all (>= ox - 0.5) xs)
 
@@ -161,14 +157,14 @@ runRichTextManyTest base failed = do
   replicateM_ 2 frame'
   assertEq failed 0 =<< readIORef measured
 
--- | A piece's background is painted under its words, spanning inner spaces
--- but not leading or trailing ones, once per line, the full height of the
--- line box. Changing the colour counts as a new paragraph.
+-- | A piece's background spans its words and inner spaces, under them, the
+-- line box's height. Changing the colour counts as a new paragraph.
 runRichTextBackgroundTest :: Context -> IORef Int -> IO ()
 runRichTextBackgroundTest ctx failed = do
   let fm = ctxFontMetrics ctx
       tint = colorRGBA 1 2 3 255
-      opsOf c = settledOps ctx inp400 (column (fst <$> richText' ["Run ", inlineBackground c (inlineCode " cabal build "), " first"]))
+      opsOf c = settledOps ctx inp400 . column $
+        fst <$> richText' ["Run ", inlineBackground c (inlineCode " cabal build "), " first"]
   (Rect rx ry _ rh, ops) <- opsOf tint
   prefixW <- sum <$> mapM (lineWidthIO fm) ["Run", " ", " "]
   codeW <- sum <$> mapM (lineWidthIO fm) ["cabal", " ", "build"]
@@ -200,13 +196,9 @@ runRichTextScrollCullTest ctx failed = do
           shown y = any (\(Rect _ gy _ gh) -> gy <= y && y < gy + gh) glyphs
       assert failed (length quads < 1000 && all shown [ry + fromIntegral k | k <- [12, 17 .. floor rh - 12 :: Int]])
 
--- | A paragraph whose width changes every frame, and one capped at a width
--- it stays under, hovered on and off, edited and resized, draw at the rect
--- and with the ops one laid out from the start draws. The capped one is as
--- tall as one laid out at the width it takes: what it keeps between frames
--- never goes stale. The same pieces drawn frame after frame (as a Markdown
--- document's closed blocks are) still follow a change to the paragraph's
--- layout or the theme.
+-- | A paragraph resized every frame, or capped under a width while hovered,
+-- edited and resized, draws as one laid out from the start. The same pieces
+-- (a Markdown document's closed blocks) still follow layout and theme.
 runRichTextRelayoutTest :: Context -> IORef Int -> IO ()
 runRichTextRelayoutTest ctx failed = do
   let paragraph t = [inlineText t, strong "wrapping", " over several lines ", hyperlink "x" "here"]
@@ -242,12 +234,8 @@ runRichTextRelayoutTest ctx failed = do
   light <- colorsOf defaultLightTheme id
   assert failed (length dark == 1 && dark /= light)
 
--- | A scroll area in a fixed-width popup is as tall as its paragraphs wrap to
--- at the popup's width, as a column with the same padding is: paragraphs well
--- under the popup's height cap show whole, with nothing left to scroll to,
--- whether they sit in the scroll area directly or in a column inside it.
--- Paragraphs that do not fit under the cap leave the scroll area inside the
--- popup, scrolling the rest.
+-- | A scroll area in a fixed-width popup is as tall as its wrapped paragraphs,
+-- as a column is, up to the popup's height cap, past which it scrolls.
 runRichTextScrollPopupTest :: Context -> IORef Int -> IO ()
 runRichTextScrollPopupTest _ failed = do
   let cfg = (defaultPopupConfig (AnchorPoint (V2 20 20))) {cfgPlacement = PlacementBelow, cfgDismissable = False}
@@ -276,18 +264,16 @@ runRichTextScrollPopupTest _ failed = do
   assertJustM failed (getPrevRect c sid) $ \view ->
     assert failed (rectH view > 0 && bottom view <= bottom cappedPopup - 6 + 0.5 && bottom (snd (last rects)) > bottom view)
 
--- | A paragraph shows its selection only while it has focus, and draws no
--- focus ring of its own. The selection is widget state: styling, streaming
--- and cache eviction preserve it. 'breakAnywhere' places each character
--- where the shaper put it, as the line is drawn (a wide fallback character,
--- an accent over its letter), so selecting it all highlights the line
--- without a gap.
+-- | A selection shows only while focused, with no focus ring, and survives
+-- styling, streaming and cache eviction. A shaped 'breakAnywhere' line
+-- highlights without a gap.
 runSelectionTest :: Context -> IORef Int -> IO ()
 runSelectionTest base failed = do
   theme <- readIORef (ctxTheme base)
   let inp = withInputOff 500 300
       selection ops = [r | FillRect r c <- ops, c == themeSelection theme]
-      two = column ((,) <$> (fst <$> selectableRichText' ["first paragraph"]) <*> (fst <$> selectableRichText' ["second paragraph"]))
+      paragraph t = fst <$> selectableRichText' [t]
+      two = column ((,) <$> paragraph "first paragraph" <*> paragraph "second paragraph")
   (a, b) <- warmup2 base inp two
   selectAll base inp two a
   selected <- drawnOps base a
@@ -318,7 +304,8 @@ runSelectionTest base failed = do
   assert failed (maybe False id (ptrEq <$> before <*> after))
   let txt = "a\x65E5\&e\x0301\&b"
       fm = monospaceMetrics 10
-      prepare t = pure fm {fmShape = \t' -> if t' == t && t == txt then Just (ShapedText 47 47 (primArrayFromList [0, 10, 27, 32, 37, 47])) else Nothing}
+      shapedTxt = ShapedText 47 47 (primArrayFromList [0, 10, 27, 32, 37, 47])
+      prepare t = pure fm {fmShape = \t' -> if t' == t && t == txt then Just shapedTxt else Nothing}
       shapedUi = column (fst <$> selectableRichTextWith' breakAnywhere [inlineText txt])
   shaped <- newContext >>= \c -> evaluate (withFontMetrics c fm {fmBackend = Just (FontBackend prepare (const (pure Nothing)))})
   resp <- warmup2 shaped inp shapedUi

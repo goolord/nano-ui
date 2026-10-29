@@ -55,13 +55,9 @@ runSvgRasterTest _ failed = do
   assertEq failed [255, 0] [alphaAt 20 apx 10 10, alphaAt 20 apx 1 1]
   assert failed (either (const True) (const False) (parseSvg "<nope/>"))
 
--- | An icon draws its raster tinted with the text colour, and later frames
--- reuse it. A raster stays in the atlas while frames draw it, and an icon
--- hidden and shown again keeps it. The next raster made takes the space of
--- those no frame drew since the one before: a size the icon no longer has,
--- or an icon no longer shown. A raster too big for the atlas is remembered
--- too, rather than made again every frame, and is made again once an image
--- leaves the atlas while the icon is still drawn.
+-- | An icon's raster is tinted with the text colour and leased: kept while
+-- drawn (or hidden for a frame), replaced once undrawn, remembered when too
+-- big for the atlas, and made again once there is room.
 runSvgRasterCacheTest :: Context -> IORef Int -> IO ()
 runSvgRasterCacheTest ctx failed = do
   doc <- square

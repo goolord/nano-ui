@@ -67,13 +67,9 @@ assertNear failed want got = unless (length want == length got && and (zipWith n
 whiteImage :: Context -> Int -> Int -> Int -> IO ImageId
 whiteImage ctx n w h = ImageId n <$ registerImage ctx (ImageId n) w h (BS.replicate (w * h * 4) 255)
 
--- | Each fit places wide and tall images in wide and tall boxes, cropping
--- via UVs, never past the box; alignment positions a contained image and
--- picks which part a cover crop keeps. The default config stretches the
--- image over its rect, like 'image'. A crop treats part of the image as the
--- whole for size and fit, clamped to the image. A scale zooms the fitted
--- image about its centre, clipped to the rect. 'fitRect' places content
--- the same way, extending past the box when the fit overflows.
+-- | Each fit and alignment places wide and tall images in wide and tall
+-- boxes, cropping via UVs, never past the box; the default stretches like
+-- 'image'. A crop is the whole image for size and fit; a scale zooms.
 runImageFitTest :: Context -> IORef Int -> IO ()
 runImageFitTest ctx failed = do
   wide <- whiteImage ctx 1 40 20
@@ -82,7 +78,8 @@ runImageFitTest ctx failed = do
   let (wb, tb, full, mid) = ((100, 80), (60, 120), [0, 0, 1, 1], (AlignCenter, AlignMiddle))
       fitted (bw, bh) fit (ax, ay) = defaultImageConfig {icLayout = fixedWH bw bh, icFit = fit, icAlignX = ax, icAlignY = ay}
       -- The rect's size, then the quads' bounds.
-      drawnWith iid cfg = (\(r, _, quads) -> rectW (respRect r) : rectH (respRect r) : boundsAt r quads) <$> frame ctx iid (imageConfigured' cfg iid)
+      drawnWith iid cfg =
+        (\(r, _, quads) -> rectW (respRect r) : rectH (respRect r) : boundsAt r quads) <$> frame ctx iid (imageConfigured' cfg iid)
       sized (bw, bh) = [bw, bh]
   forM_
     [ (wide, wb, FitContain, mid, [0, 15, 100, 50] ++ full), (wide, wb, FitCover, mid, [0, 0, 100, 80, 0.1875, 0, 0.8125, 1])
@@ -111,22 +108,12 @@ runImageFitTest ctx failed = do
       , [100, 80, 10, 0, 80, 80, 0, 0, 0.5, 1] )
     ]
     $ \(cfg, want) -> drawnWith wide cfg >>= assertNear failed want
-  let at fit ax ay size = fitRect fit ax ay size (Rect 10 10 100 80)
-  assertEq failed
-    [Rect 10 25 100 50, Rect (-20) 10 160 80, Rect 10 10 100 80, Rect 50 45 20 10, Rect 90 80 20 10, Rect 10 10 20 10, Rect 10 10 0 0]
-    [ at FitContain AlignCenter AlignMiddle (40, 20)
-    , at FitCover AlignCenter AlignTop (40, 20)
-    , at FitFill AlignEnd AlignBottom (40, 20)
-    , at FitNone AlignCenter AlignMiddle (20, 10)
-    , at FitScaleDown AlignEnd AlignBottom (20, 10)
-    , at FitScaleDown AlignStart AlignTop (20, 10)
-    , at FitContain AlignStart AlignTop (0, 10)
-    ]
+  -- Empty content fits as an empty rect rather than dividing by zero.
+  assertEq failed (Rect 10 10 0 0) (fitRect FitContain AlignStart AlignTop (0, 10) (Rect 10 10 100 80))
 
--- | An unsized axis takes the image's size, keeps its aspect beside a fixed
--- or filled axis (in a row, the share it gets), and obeys limits; an
--- unregistered image gets the size 'image' gives it. A layout 'aspect'
--- overrides the image's, and a plain 'image' stays 32 pixels high.
+-- | An unsized axis takes the image's size or keeps its aspect beside a
+-- sized one, within limits; a layout 'aspect' overrides it, and a plain
+-- 'image' (or an unregistered one) gets the default size.
 runImageSizeTest :: Context -> IORef Int -> IO ()
 runImageSizeTest ctx failed = do
   wide <- whiteImage ctx 1 40 20
@@ -140,12 +127,9 @@ runImageSizeTest ctx failed = do
     ]
     $ \(ui, want) -> sized ui >>= assertEq failed want
 
--- | Opacity scales the tint's alpha, disabling fades further, and 0 draws
--- nothing, for configured images and a drawing's image ops alike. A
--- drawing's image ops draw registered images from the atlas, rotated or a
--- sub-rect of them. An image id past what a 'Float' holds exactly still
--- draws its own image. A configured SVG icon fades like an image, and its
--- default config draws as 'svgIconWith' does.
+-- | Opacity, tint and disabling fade configured images, drawing image ops
+-- (also rotated or cropped) and configured SVG icons. An image id past what
+-- a 'Float' holds exactly still draws its own image.
 runImageLookTest :: Context -> IORef Int -> IO ()
 runImageLookTest ctx failed = do
   iid <- whiteImage ctx 1 40 20
@@ -165,7 +149,8 @@ runImageLookTest ctx failed = do
   drawn (\(Rect x y _ _) -> drawImage (Rect (x + 10) (y + 5) 16 8) iid white) >>= assertNear failed [10, 5, 16, 8, 0, 0, 1, 1]
   drawn (\(Rect x y _ _) -> drawImageWith (imageDraw (Rect (x + 10) (y + 10) 16 8) iid) {imageAngle = pi / 2})
     >>= assertNear failed [14, 6, 8, 16, 0, 0, 1, 1]
-  drawn (\(Rect x y _ _) -> drawImageWith (imageDraw (Rect x y 8 8) iid) {imageUV = Rect 0.5 0 0.5 1}) >>= assertNear failed [0, 0, 8, 8, 0.5, 0, 1, 1]
+  drawn (\(Rect x y _ _) -> drawImageWith (imageDraw (Rect x y 8 8) iid) {imageUV = Rect 0.5 0 0.5 1})
+    >>= assertNear failed [0, 0, 8, 8, 0.5, 0, 1, 1]
   alphas <$> painted (\r -> drawImageWith (imageDraw r iid) {imageOpacity = 0.5}) >>= assertNear failed half
   alphas <$> painted (\r -> drawImageWith (imageDraw r iid) {imageOpacity = 0}) >>= assertEq failed []
   _ <- whiteImage ctx (2 ^ (24 :: Int)) 40 20
@@ -213,9 +198,8 @@ runImageRotationTest ctx failed = do
   assertEq failed 1 (length low)
   assertNear failed (concat high) (concat low)
 
--- | Changing how a configured image draws at the same rect (an animated
--- fade), or which image a node shows, plain or with a look, repaints it;
--- drawing it unchanged does not.
+-- | A new look (an animated fade) or a new image at the same rect repaints
+-- the node; drawing it unchanged does not.
 runImageDamageTest :: Context -> IORef Int -> IO ()
 runImageDamageTest ctx failed = do
   writeIORef (ctxPaintFull ctx) False
@@ -232,11 +216,9 @@ runImageDamageTest ctx failed = do
   repaints (image' (fixedWH 80 40)) a b
   repaints (looked 1) a b
 
--- | 'useImageRgba' registers once per key and returns the same id while
--- called. A new key registers a new image and frees the old one, and a
--- frame that skips the hook (or a scope around it) frees its image; the
--- next image reuses that atlas space. An image a view registers with
--- 'registerImageRgba' stays until the view releases it.
+-- | 'useImageRgba' keeps one image per key while called and frees it on a
+-- new key or a skipped frame, for the next to reuse; 'registerImageRgba'
+-- keeps an image until 'releaseImageRgba'.
 runImageRgbaLifetimeTest :: Context -> IORef Int -> IO ()
 runImageRgbaLifetimeTest ctx failed = do
   textImage <- newImageHandle

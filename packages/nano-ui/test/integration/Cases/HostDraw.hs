@@ -60,14 +60,13 @@ triangles dd = triples <$> indexed dd [0 .. drawIndexCount dd - 1]
 shapedFont :: Float -> [[Float]] -> FontMetrics
 shapedFont size glyphs = fm
   where
-    fm = (monospaceMetrics size) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just (ShapedGlyphs (primArrayFromList (concat glyphs))))))}
+    fm = (monospaceMetrics size) {fmBackend = Just (FontBackend (\_ -> pure fm) (\_ -> pure (Just shaped)))}
+    shaped = ShapedGlyphs (primArrayFromList (concat glyphs))
 
 drawn :: Context -> NanoUI a -> IO DrawData
 drawn ctx ui = (\(_, dd, _) -> dd) <$> runFrame ctx (withInput 300 200) ui
 
--- | Rounded fills and AA strokes carry transparent fringe vertices next to
--- opaque ones. Square geometry emits only flat primitives, so every triangle
--- has a uniform alpha.
+-- | Square geometry emits only flat primitives: no triangle mixes alphas.
 runSquareGeometryTest :: Context -> IORef Int -> IO ()
 runSquareGeometryTest ctx failed = do
   let uniform (a, b, c) = vA a == vA b && vA b == vA c
@@ -81,13 +80,12 @@ runSquareGeometryTest ctx failed = do
   squareTris <- triangles =<< drawn ctx controls
   assert failed (not (null squareTris) && all uniform squareTris)
 
--- | A rounded border wider than twice its radius keeps its ink inside its
--- box: the corner arcs end on the corner radius. A translucent one covers
--- each point of its band once: at the inner corners, beside the arcs and
--- along the sides.
+-- | A rounded border wider than twice its radius keeps its ink in its box
+-- and, translucent, covers each point of its band once.
 runThickRoundedStrokeTest :: Context -> IORef Int -> IO ()
 runThickRoundedStrokeTest ctx failed = do
-  let border ink = drawing (fixedWH 60 60) (\(Rect x y _ _) -> smallArrayFromList [StrokeRoundedRect (Rect (x + 10) (y + 10) 40 40) 1 8 ink])
+  let border ink = drawing (fixedWH 60 60) $ \(Rect x y _ _) ->
+        smallArrayFromList [StrokeRoundedRect (Rect (x + 10) (y + 10) 40 40) 1 8 ink]
   inked <- filter (\v -> vRgb v == (0, 0, 1) && vA v > 0) <$> (vertices =<< drawn ctx (border (colorRGBA 0 0 255 255)))
   let extent f = maximum (map f inked) - minimum (map f inked)
   assert failed (not (null inked) && extent vX <= 40 && extent vY <= 40)
@@ -109,21 +107,21 @@ runThickRoundedStrokeTest ctx failed = do
         ]
   forM_ points $ \(dx, dy) -> assert failed (abs (alphaAt (rx + 10 + dx) (ry + 10 + dy) - 128 / 255) < 0.01)
 
--- | Geometry clipped to nothing gets no command, which a host would still
--- draw into the pixel its empty clip rounds to. A polygon whose triangles
--- index past its points draws nothing, rather than triangles into other
--- geometry or past the frame's vertices. Circles sharing a fractional
--- centre stay concentric, filled or stroked, whatever their radii, under
--- pixel snapping.
+-- | Nothing clipped to nothing gets a command (a host would draw a pixel),
+-- a polygon indexing past its points draws nothing, and circles sharing a
+-- fractional centre stay concentric under pixel snapping.
 runGeometryGuardsTest :: Context -> IORef Int -> IO ()
 runGeometryGuardsTest ctx failed = do
   let opsIn ops = drawn ctx (void (drawing (fixedWH 60 60) (smallArrayFromList . ops)))
       white = colorRGBA 255 255 255 255
-  clipped <- opsIn $ \r -> [FillRect r white, PushClip (Rect 0 0 10 10), PushClip (Rect 20 20 10 10), FillRect r red, PopClip, PopClip]
+  clipped <- opsIn $ \r ->
+    [FillRect r white, PushClip (Rect 0 0 10 10), PushClip (Rect 20 20 10 10), FillRect r red, PopClip, PopClip]
   assert failed (not (drawCmdNull clipped))
   assertEq failed [] [c | c <- drawCmdElems clipped, cmdClipW c <= 0 || cmdClipH c <= 0]
-  bad <- opsIn . const $ [FillPolygon (primArrayFromList [0, 0, 40, 0, 0, 40]) (primArrayFromList [0, 3]) (primArrayFromList [0, 1, 100]) (Flat red)]
-  indices <- withForeignPtr (drawIndices bad) $ \ip -> forM [0 .. drawIndexCount bad - 1] $ \i -> peekByteOff ip (i * indexSize) :: IO Word32
+  let tri = primArrayFromList [0, 0, 40, 0, 0, 40]
+  bad <- opsIn . const $ [FillPolygon tri (primArrayFromList [0, 3]) (primArrayFromList [0, 1, 100]) (Flat red)]
+  indices <- withForeignPtr (drawIndices bad) $ \ip ->
+    forM [0 .. drawIndexCount bad - 1] $ \i -> peekByteOff ip (i * indexSize) :: IO Word32
   assert failed (all ((< drawVertexCount bad) . fromIntegral) indices)
   let circles = void $ customWidget defaultCustomWidgetSpec
         { widgetLayout = fixedWH 120 60 defaultLayout
@@ -147,12 +145,9 @@ runGeometryGuardsTest ctx failed = do
   where
     red = colorRGBA 255 0 0 255
 
--- | A shaped run with glyphs on two atlas pages draws each page's glyphs
--- under that page's texture, with the page taken out of their u, and the
--- first glyph on page 0 before the others. A glyph whose u lies outside
--- every page is skipped: the run binds no texture past the pages, even for
--- a u just below 0. A shaped line far longer than its clip reserves room
--- only for the glyphs that can show, so it does not grow the draw buffers.
+-- | Glyphs on two atlas pages draw under each page's texture with the page
+-- taken out of their u; a u outside every page is skipped; and a shaped
+-- line far longer than its clip does not grow the draw buffers.
 runGlyphPagesTest :: Context -> IORef Int -> IO ()
 runGlyphPagesTest ctx failed = do
   let glyph x u = [x, 0, 6, 10, u, 0.5, u + 0.25, 0.75]
@@ -163,7 +158,8 @@ runGlyphPagesTest ctx failed = do
   assertEq failed [0.25, 0.5] . nub . sort . map vU =<< fromTexture (glyphPageTextureId 1) dd
   firstUs <- map vU <$> fromTexture (glyphPageTextureId 0) dd
   assert failed (0.25 `elem` firstUs && 0.5 `elem` firstUs)
-  outside <- drawn (withFontMetrics ctx (shapedFont 12 [glyph 0 0.25, glyph 8 (-0.25), glyph 16 4.25, glyph 24 (-1)])) (label "abcd")
+  let pastPages = shapedFont 12 [glyph 0 0.25, glyph 8 (-0.25), glyph 16 4.25, glyph 24 (-1)]
+  outside <- drawn (withFontMetrics ctx pastPages) (label "abcd")
   assertEq failed [glyphAtlasTextureId] (nub [cmdTextureId c | c <- drawCmdElems outside, cmdIndexCount c > 0])
   let long = shapedFont 12 [glyph (fromIntegral k * 6) 0.25 | k <- [0 .. 9999 :: Int]]
       scrolled = void (scrollArea (fixedWH 120 40) (label "abc"))
@@ -171,11 +167,8 @@ runGlyphPagesTest ctx failed = do
   after <- drawn (withFontMetrics ctx long) scrolled
   assert failed (drawVertices before == drawVertices after)
 
--- | Glyphs drawn by character move a kerned pair's second glyph: "AV"
--- kerned 2 closer draws the V 2 nearer the A, and the A after it where it
--- would be anyway. Aligned to the end, the last V's ink meets the edge. A
--- character with no glyph draws an advance box, but whitespace of any kind
--- draws nothing.
+-- | Kerning moves only a pair's second glyph, and end-aligned ink meets the
+-- edge. A missing glyph draws an advance box, but no whitespace does.
 runGlyphKerningTest :: Context -> IORef Int -> IO ()
 runGlyphKerningTest base failed = do
   let uOf c = if c == 'V' then 0.6 else 0.25
@@ -186,7 +179,8 @@ runGlyphKerningTest base failed = do
           , fmGlyph = \c -> Just (GlyphQuad 0 0 6 10 (uOf c) 0 (uOf c + 0.25) 1)
           }
       ctx = withFontMetrics base fm
-  (lab, dd) <- warmupDraw ctx (withInput 300 100) (rowWith (fixedW 100 . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "AVAV"))
+  (lab, dd) <- warmupDraw ctx (withInput 300 100) $
+    rowWith (fixedW 100 . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "AVAV")
   xus <- map (\v -> (vX v, vU v)) <$> fromTexture glyphAtlasTextureId dd
   let aXs = [x | (x, u) <- xus, u < 0.55]
       vXs = [x | (x, u) <- xus, u > 0.55]
@@ -199,10 +193,8 @@ runGlyphKerningTest base failed = do
   spaced <- drawn base (label "a\x00A0\&b\x3000\&c d")
   assertEq failed (4 * 6) (sum [cmdIndexCount c | c <- drawCmdElems spaced, cmdTextureId c == glyphAtlasTextureId])
 
--- | A text field set in a larger font draws its value's glyphs in that font:
--- they cover what a label in the same font covers, and not what the base
--- font's glyph covers. Search and numeric fields too, which paint without a
--- caption.
+-- | Text, search and numeric fields set in a larger font draw their value
+-- in it, as a label in that font does.
 runTextInputFontTest :: Context -> IORef Int -> IO ()
 runTextInputFontTest base failed = do
   -- Each font shapes any text to one glyph of its own size.
@@ -224,11 +216,9 @@ runTextInputFontTest base failed = do
     ]
     >>= assertEq failed (replicate 3 (16, 26))
 
--- | Text, search and numeric fields, selectable text and text areas draw the
--- layout's weight, decoration and tone as a label does, though the font
--- gives no face for them: bold draws each of the three glyphs twice (the
--- headless font's advance boxes), an underline adds a rule in the text's
--- colour, and a muted tone takes the theme's muted colour.
+-- | Fields, selectable text and text areas draw the layout's weight,
+-- decoration and tone as a label does: bold draws each glyph twice (the
+-- headless font has no bold face), underline adds a rule, muted recolours.
 runFieldFontStyleTest :: Context -> IORef Int -> IO ()
 runFieldFontStyleTest ctx failed = do
   mutedFg <- themeMuted <$> getTheme ctx
@@ -281,14 +271,10 @@ textsOf ss = [t | (_, t, _, _, _) <- ss]
 externalContext :: IO Context
 externalContext = newContext >>= \c -> c <$ setDrawExternalText c True
 
--- | External text keeps text spans but pushes no text quads, so the buffer
--- does not grow with the text, for labels and for drawing text, plain,
--- styled or aligned. Drawing text is recorded as spans after the node spans
--- of the base list, in op order: its line box, the ink on a transparent
--- background, and the drawing's clip, cut by a 'PushClip'. In a floating
--- window it is overlay text, clipped inside the window. Without external
--- text (the SDL host) drawing text draws quads, and 'collectRasterSpans'
--- has the node spans alone.
+-- | External text pushes no text quads; labels and drawing text become
+-- spans, drawing text after the node spans, in op order, with its line box,
+-- ink and clip (overlay spans in a floating window). Without it (the SDL
+-- host) drawing text draws quads and adds no spans.
 runExternalTextTest :: Context -> IORef Int -> IO ()
 runExternalTextTest internal failed = do
   let inp = withInput 400 100
@@ -326,12 +312,9 @@ runExternalTextTest internal failed = do
   vertexCounts internal drawingText >>= \(short, long) -> assertGt failed long short
   assertEq failed ([], []) =<< drawnSpans internal inp
 
--- | A full frame reused from the last paint keeps that paint's drawing
--- spans, however often they are collected, and so does a frame painted with
--- reuse off. A drawing far taller than its scroller records only the lines
--- within the glyph slack of the viewport, all of those in view among them,
--- each clipped to the viewport. A clip frame records no span for a drawing
--- it does not repaint, and the spans of one it does, inside the damage.
+-- | Drawing spans survive a reused frame and reuse off, are culled to the
+-- viewport's glyph slack and clipped to it, and on a clip frame come only
+-- from drawings it repaints.
 runExternalTextFramesTest :: Context -> IORef Int -> IO ()
 runExternalTextFramesTest _ failed = do
   let inp = withInputOff 400 300

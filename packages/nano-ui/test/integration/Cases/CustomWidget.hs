@@ -19,7 +19,8 @@ blue = colorRGBA 0 0 255 255
 
 -- | A custom widget of this layout, content key and drawing.
 custom :: (Layout -> Layout) -> Int -> CustomDrawBuild -> NanoUI Response
-custom f key draw = fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = f defaultLayout, widgetContent = key, widgetDraw = draw}
+custom f key draw =
+  fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = f defaultLayout, widgetContent = key, widgetDraw = draw}
 
 -- | A label, then an 80x40 custom widget with this content key and drawing.
 afterLabel :: Int -> CustomDrawBuild -> NanoUI Response
@@ -33,11 +34,9 @@ filled c cdc r = runCanvasFor cdc (drawRect r c)
 frameQuads :: Context -> Input -> NanoUI a -> IO [(Rect, Color)]
 frameQuads ctx inp ui = runFrame ctx inp ui >>= \(_, draw, _) -> drawQuads draw
 
--- | 'widgetMeasure' sizes a widget, and the size reverts when the hook goes
--- and returns with it, with the arena unchanged. A measure whose result
--- changes with nothing in the arena changed resizes the containers sized
--- from it, as a fresh solve does. A progress bar takes the caller's width
--- mode over the fill it has by default, keeping its height.
+-- | 'widgetMeasure' sizes a widget and the containers sized from it, as a
+-- fresh solve does, even with the arena unchanged. A progress bar takes the
+-- caller's width mode.
 runCustomWidgetMeasureTest :: Context -> IORef Int -> IO ()
 runCustomWidgetMeasureTest ctx failed = do
   let inp = withInput 400 400
@@ -55,13 +54,9 @@ runCustomWidgetMeasureTest ctx failed = do
   (fullW, _) <- sizeOf (bar id)
   sizeOf (bar (percent 50)) >>= assertEq failed (fullW / 2, 12)
 
--- | A custom widget's cursor follows its 'widgetCursor', with the scope's
--- shape elsewhere; a drag started on its edge keeps that cursor off the
--- widget until release. It reports hover, press and click through
--- 'widgetInteract', and a queued post-layout click reaches it (or a canvas)
--- even when its build-time hit test misses. The reference knob rises when
--- dragged up, but under a pinned button neither drags nor scrolls, since
--- 'useDrag2DOn' and 'useWheelDeltaOn' use its response, not its rect.
+-- | 'widgetCursor' (kept through a drag off the widget), 'widgetInteract',
+-- a queued post-layout click, and the reference knob, which a pinned button
+-- covers for drags and the wheel ('useDrag2DOn' uses the response).
 runCustomWidgetPointerTest :: Context -> IORef Int -> IO ()
 runCustomWidgetPointerTest ctx failed = do
   let inp = withInput 300 300
@@ -114,14 +109,10 @@ runCustomWidgetPointerTest ctx failed = do
     check . (> 50) =<< moved dragUp onKnob
     check . (/= 50) =<< moved wheelOn onKnob
 
--- | An unkeyed custom drawing repaints when captured state changes while
--- its rect and hover and press state stay the same; the built-in progress
--- bar captures its fraction the same way. A content key is taken at its
--- word: while it is unchanged the widget neither rebuilds its ops nor
--- repaints, and a new key does both. Disabling it, or a change of theme
--- (through either entry point, or a scope's theme), rebuilds its ops though
--- the key did not move; a scope's theme leaves the font metrics' generation
--- as it was. A keyed widget that only moved draws at its new place.
+-- | An unkeyed drawing repaints when captured state changes. A content key
+-- is taken at its word, except that disabling or a new theme rebuilds the
+-- ops (a scope's theme without touching font metrics), and a widget that
+-- only moved draws at its new place.
 runCustomWidgetContentTest :: Context -> IORef Int -> IO ()
 runCustomWidgetContentTest ctx failed = do
   let inp = withInputOff 400 300
@@ -166,13 +157,9 @@ runCustomWidgetContentTest ctx failed = do
   colours ctx (scoped accent3) >>= assert failed . elem accent3
   assertEq failed gen =<< readIORef (ctxMetricGen ctx)
 
--- | 'useDrop' reports a drag over its bounds, then the files and texts
--- dropped there. Payload coordinates are ignored for the last drag position,
--- so a drop SDL reports at (0, 0) still lands, and the landing frame keeps
--- the position. A completed drop clears hover and position, and a drag that
--- moves outside delivers nothing. An OS drop goes to the layer on top: a
--- page zone gets nothing under a modal, wherever it lands, nor under a
--- floating window, whose own zone takes the file.
+-- | 'useDrop' follows the last drag position (SDL may report a drop at
+-- (0, 0)), clears it once complete, and gets nothing under a modal or a
+-- window on top.
 runDropTargetTest :: Context -> IORef Int -> IO ()
 runDropTargetTest ctx failed = do
   let inp = withInput 300 300
@@ -183,7 +170,8 @@ runDropTargetTest ctx failed = do
       (begin, complete) = (DropEvent DropBegin Nothing "", DropEvent DropComplete Nothing "")
   _ <- warmup2 ctx inp ui
   dropping [begin] >>= assert failed . not . dropHovered
-  dropping [DropEvent DropPosition (Just dropPoint) ""] >>= \t -> assert failed (dropHovered t && dropPosition t == Just dropPoint)
+  dropping [DropEvent DropPosition (Just dropPoint) ""] >>= \t ->
+    assert failed (dropHovered t && dropPosition t == Just dropPoint)
   dropping [file dropPoint "/tmp/a.txt", DropEvent DropText (Just dropPoint) "hello"] >>= \t ->
     assertEq failed (True, ["/tmp/a.txt"], ["hello"]) (dropReceived t, dropFiles t, dropTexts t)
   dropping [file (V2 0 0) "/tmp/origin.txt", complete] >>= \t ->
@@ -192,7 +180,8 @@ runDropTargetTest ctx failed = do
   mapM_ dropping [[begin], [DropEvent DropPosition (Just (V2 250 250)) ""]]
   dropping [file (V2 250 250) "/tmp/out.txt", complete] >>= \t -> assertEq failed (False, []) (dropReceived t, dropFiles t)
   open <- newVar True
-  let dropAt p = (withInput 400 400) {inputDrops = SA.smallArrayFromList [begin, DropEvent DropPosition (Just p) "", file p "a.txt", complete]}
+  let dropAt p =
+        (withInput 400 400) {inputDrops = SA.smallArrayFromList [begin, DropEvent DropPosition (Just p) "", file p "a.txt", complete]}
       stacked overlay = (,) <$> useDrop (Rect 0 0 400 400) <*> overlay open (useDrop (Rect 0 0 400 400))
       files c overlay p = (\(page, (_, inner)) -> (dropFiles page, dropFiles <$> inner)) <$> evalUi c (dropAt p) (stacked overlay)
   (_, (onModal, _)) <- warmup2 ctx (withInput 400 400) (stacked (`modal'` "Modal"))

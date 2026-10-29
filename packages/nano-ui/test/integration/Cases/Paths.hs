@@ -122,11 +122,8 @@ bezier ps t = bezier (zipWith (\(V2 x0 y0) (V2 x1 y1) -> V2 (x0 + t * (x1 - x0))
 onEllipse :: V2 -> Float -> Float -> V2 -> Bool
 onEllipse (V2 cx cy) rx ry (V2 x y) = abs (((x - cx) / rx) ^ (2 :: Int) + ((y - cy) / ry) ^ (2 :: Int) - 1) < 1e-3
 
--- | Circle chords stay within a quarter device pixel of the circle at every
--- scale, and are not much finer than that. A flattened Bezier keeps its end
--- points and stays within tolerance of the curve. Arcs end at their end
--- angle; SVG arcs end at their end point, with the side and size picked by
--- the flags.
+-- | Curves flatten to within a quarter device pixel at every scale (and not
+-- much finer), keeping their ends; SVG arc flags pick the side and size.
 runCurvesTest :: Context -> IORef Int -> IO ()
 runCurvesTest _ failed = do
   let centre = V2 100 100
@@ -165,10 +162,8 @@ runCurvesTest _ failed = do
   single failed (filled (P.moveTo c <> P.arc c 30 0 (pi / 2) <> P.close)) $ \(pts, _) -> do
     assertEq failed [c] (take 1 pts)
     assertLt failed (abs (abs (polyArea pts) - 30 * 30 * pi / 4)) 30
-  -- A clockwise SVG arc from (0, 0) to (20, 0) goes over the top, an
-  -- anticlockwise one under. Radii too small to span the end points are
-  -- scaled up until they do. With radius 20, the large arc bulges further
-  -- than the small one. A zero radius is a straight line.
+  -- Clockwise goes over the top; small radii scale up to span the ends; the
+  -- large arc bulges further; a zero radius is a line.
   single failed (svgArc 10 False True) $ \pts -> do
     assertEq failed [V2 0 0, V2 20 0] (ends pts)
     assert failed (onSmallCircle pts && minimum (ysOf pts) < -9.7)
@@ -441,14 +436,8 @@ runFillHolesTest _ failed = do
       bands = [s * s - (s - 10) * (s - 10) | j <- [0 .. 9 :: Int], let s = 200 - 20 * fromIntegral j]
       cells = foldMap (\k -> square (10 * fromIntegral (k `mod` 10)) (10 * fromIntegral (k `div` 10)) 5) [0 .. 99 :: Int]
   forM_
-    -- A square inside a square: even-odd cuts a hole; non-zero cuts one only
-    -- when the inner square winds the other way. An island inside a hole is
-    -- a separate polygon, and crossing subpaths fill separately. Copies of
-    -- one loop nest: under even-odd two cancel and three fill once, a loop
-    -- and its reverse cancel under non-zero, and two the same way fill once.
-    -- Many subpaths each find their parent among the others: nested squares
-    -- are filled bands and holes in turn, and a grid of squares is 100
-    -- polygons, or 100 holes inside a larger square.
+    -- Holes by rule and winding, islands, crossings, repeated loops, and
+    -- many subpaths each finding its parent.
     [ ("even-odd hole", P.EvenOdd, square 0 0 100 <> square 20 20 60, [6400])
     , ("non-zero hole", P.NonZero, square 0 0 100 <> squareBack 20 20 60, [6400])
     , ("non-zero same way", P.NonZero, square 0 0 100 <> square 20 20 60, [10000])
@@ -621,8 +610,7 @@ runGradientTest _ failed = do
     assertNear failed 1e-4 (map (P.transformPoint (P.rotate 0.5)) [V2 0 0, V2 10 0, V2 10 10, V2 0 10]) (pairs pts)
     assertEq failed [red, green, blue, black] (map Color (primArrayToList cs))
 
--- | Per-corner rounded rects, and transforms undone. A clip emits push and
--- pop ops around its content, and the frame applies it.
+-- | Per-corner rounded rects, inverse transforms, and clips the frame applies.
 runShapesAndClipTest :: Context -> IORef Int -> IO ()
 runShapesAndClipTest ctx failed = do
   let areaOf path = sum [abs (polyArea pts) | (pts, _) <- filled path]
@@ -662,9 +650,8 @@ runShapesAndClipTest ctx failed = do
       clips = [(cmdClipX c - x, cmdClipY c - y, cmdClipW c, cmdClipH c) | c <- drawCmdElems dd, cmdIndexCount c > 0]
   assert failed ((10, 10, 20, 20) `elem` clips && any (\(_, _, w, _) -> w >= 100) clips)
 
--- | A canvas repaints only when its drawing changes, and flattens for the
--- display scale. A configured canvas caches its drawing by key, the drawing
--- sees hover state, and the canvas sets its cursor.
+-- | A canvas repaints only when its drawing changes and flattens for the
+-- display scale; a configured one sees hover and sets its cursor.
 runCanvasFramesTest :: Context -> IORef Int -> IO ()
 runCanvasFramesTest ctx failed = do
   let inp = withInputOff 400 300
