@@ -3,16 +3,33 @@ module Cases.LayoutFlow (tests) where
 
 import Spec
 import Data.List (findIndex)
-import Data.Maybe (isJust)
 import Data.Primitive.SmallArray (smallArrayFromList)
+import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (GeomCol, StyleCol, TagCol, TreeCol, geomStride, getClipRect, styleStride, tagStride, treeStride)
+import NanoUI.Internal.Layout.Arena
+  ( GeomCol
+  , StyleCol
+  , TagCol (..)
+  , TreeCol (..)
+  , arenaArrays
+  , geomStride
+  , getClipRect
+  , styleStride
+  , tagStride
+  , treeStride
+  , writeTagEnum
+  , writeTree
+  )
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
-  [ spec "layout-flow-rects" runLayoutFlowRectsTest
+  [ spec "layout-flow" runLayoutFlowTest
+  , spec "flex-sizing" runFlexSizingTest
+  , pixelSpec "label-align-end" runLabelAlignEndTest
+  , spec "empty-frame" runEmptyFrameTest
+  , spec "layout-flow-rects" runLayoutFlowRectsTest
   , spec "layout-text-sizes" runTextSizesTest
   , spec "wrap-refit-in-column" runWrapRefitInColumnTest
   , spec "flow-in-scroller" runFlowInScrollerTest
@@ -404,7 +421,7 @@ runCoveredFieldFocusTest ctx failed = do
 runCoveredWidgetNoPointerTest :: Context -> IORef Int -> IO ()
 runCoveredWidgetNoPointerTest ctx failed = do
   let tipped txt w = w <$ tooltipConfigured defaultTooltipConfig {tooltipDelay = 0} w txt
-      tipShown txt t = moveTo t >> isJust <$> findSpan txt
+      tipShown txt t = moveTo t >> labelShown txt
       covered = columnWith tight $ do
         _ <- drawing (fixedWH 200 100) (const mempty) >>= tipped "Canvas tip"
         buttonWith' (pinAt 10 10 . fixedWH 60 30) "pin"
@@ -418,7 +435,7 @@ runCoveredWidgetNoPointerTest ctx failed = do
   sim ctx failed sliderUi $ do
     (_, b) <- pressThrough . On =<< result
     check (respClicked b)
-    checkEq 0 =<< liftIO (readVarIO valueRef)
+    checkEq 0 =<< readV valueRef
   let selectUi = columnWith tight $
         withValue 0 (selectWith (fixedW 200) ["Alpha", "Beta", "Gamma"]) >> buttonWith' (pinAt 120 0 . fixedWH 60 20) "y"
   sim ctx failed selectUi $ do
@@ -446,3 +463,94 @@ runCoveredWidgetNoPointerTest ctx failed = do
       _ <- moveTo (At p)
       checkEq uncovered . respHovered =<< moveTo (At p)
       checkEq uncovered =<< tipShown "Label tip" (At p)
+
+-- | Grow, percent, shrink and aspect sizing, 12 px a character. Locking the
+-- largest grow child must lock the middle one on a later sweep (one sweep
+-- gives it 55), and percent children give a gap's overflow back.
+runFlexSizingTest :: Context -> IORef Int -> IO ()
+runFlexSizingTest ctx failed = forM_ cases $ \(w, h, ui, size, want) -> do
+  ids <- warmup2 ctx (withInput w h) ui
+  got <- mapM (fmap (maybe [] size) . getPrevRect ctx) ids
+  let near a b = abs (a - b) <= 0.5
+  unless (map length got == map length want && and (zipWith near (concat got) (concat want))) $
+    assertEq failed want got
+  where
+    sized l txt = respId <$> labelWith' (l . tight) txt
+    filling l = sized (fillW . l)
+    shrink l = l {layoutWidth = Shrink 1}
+    rowOf w = rowWith (fixedW w . tight . gap 0) . sequence
+    widths = pure . rectW
+    sizes r = [rectW r, rectH r]
+    -- Spacers keep a non-zero width: prev-rect tracking skips zero-area rects.
+    growSpacer = currentId <* spacer (Fixed 10) (Grow 1)
+    halves = rowWith (fixedW 206 . tight . gap 6) (sequence [sized (percent 50) "A", sized (percent 50) "B"])
+    cases :: [(Float, Float, NanoUI [WidgetId], Rect -> [Float], [[Float]])]
+    cases =
+      [ (210, 40, rowOf 210 [filling id "A", filling id "AAAAA"], widths, [[105], [105]])
+      , (200, 40, rowOf 200 [filling id "A", filling id (T.replicate 15 "A")], widths, [[20], [180]])
+      , (240, 40, rowOf 240 (map (`filling` "A") [minW 12, minW 60, minW 130]), widths, [[50], [60], [130]])
+      , (60, 200, columnWith (fixedH 200 . tight . gap 0) (sequence [growSpacer, growSpacer]), pure . rectH, [[100], [100]])
+      , (200, 80, rowOf 200 [sized (percent 25) "A", sized (percent 75) "B"], widths, [[50], [150]])
+      , (300, 80, halves, \r -> [rectX r, rectW r], [[0, 100], [106, 100]])
+      , ( 400
+        , 200
+        , rowOf 100 [sized shrink "abcdefghijkl", spacer (Grow 1) (Fixed 5) >> respId <$> buttonWith' tight "X"]
+        , \r -> [rectX r + rectW r]
+        , [[64], [100]]
+        )
+      , (400, 200, rowOf 100 [sized shrink "abcdefghijkl" <* labelWith (shrink . tight) "ab"], widths, [[100]])
+      , (320, 240, columnWith (fixedW 160 . tight) (sequence [sized (fixedAspectW 160 2) "X"]), sizes, [[160, 80]])
+      ]
+
+-- | An end-aligned label's text ends at the label's right edge.
+runLabelAlignEndTest :: Context -> IORef Int -> IO ()
+runLabelAlignEndTest ctx failed = do
+  let tw = fmAdvance (ctxFontMetrics ctx) ' ' * 2
+      ui = rowWith (fixedW (tw + 4) . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "ab")
+  lab <- warmup2 ctx emptyInput {inputWindowSize = Size (tw + 12) 8} ui
+  assertJustM failed (spanRect "ab" <$> collectTextSpans ctx) $ \(Rect x _ w _) -> do
+    let Rect bx _ bw _ = respRect lab
+    assert failed (abs (x + w - (bx + bw)) <= 0.6 && abs (w - tw) <= 0.6)
+  checkLabelAlignEndInk failed
+
+-- | Nesting past the level array's first capacity lays out, a responsive row
+-- stacks only below its breakpoint, and a multi-line kv value pushes the next
+-- row down.
+runLayoutFlowTest :: Context -> IORef Int -> IO ()
+runLayoutFlowTest ctx failed = do
+  let nest :: Int -> NanoUI ()
+      nest 0 = label "deep"
+      nest k = column (nest (k - 1))
+      stacking = responsiveRowCol 720 (tight . gap 8 . fillW) $ do
+        columnWith (tight . gap 8 . fillW) (card (label "LeftTop") >> card (label "LeftBot"))
+        card (label "Right")
+      kvs = column . card $ kv "Notes" "Line 1\nLine 2\nLine 3\nLine 4\nLine 5" >> kv "Tree" "0"
+      above a b = join ((\ra rb -> checkGt (rectY rb) (rectY ra + 1)) <$> rectOf a <*> rectOf b)
+  runSim ctx failed (withInput 300 300) (nest 320) (expect "deep")
+  responsiveCtx <- newPixelContext
+  runSim responsiveCtx failed (withInput 520 800) stacking $ do
+    above "LeftBot" "Right"
+    _ <- resize 1200 800
+    right <- rectOf "Right"
+    leftTop <- rectOf "LeftTop"
+    checkGt (rectX right) (rectX leftTop + 1)
+  kvCtx <- newPixelContext
+  runSim kvCtx failed (withInput 320 400) kvs (above "Line 5" "Tree")
+
+-- | A frame with no widgets runs input, redraw and cursor queries on the
+-- empty arena, not on node 0, which starts out as its own child: reading it
+-- recursed without end.
+runEmptyFrameTest :: Context -> IORef Int -> IO ()
+runEmptyFrameTest ctx failed = do
+  arrays <- arenaArrays (ctxNodeArena ctx)
+  writeTagEnum arrays 0 TagNodeType NodeContainer
+  writeTree arrays 0 TreeFirstChild 0
+  writeTree arrays 0 TreeNextSibling (-1)
+  let inp0 = (withInput 320 200) {inputMousePos = V2 40 40}
+  _ <- runFrame ctx inp0 (pure ())
+  _ <- runFrame ctx (applyMouseButton MouseLeft True inp0) {inputScroll = V2 0 1} (pure ())
+  _ <- needsRedraw ctx inp0 (inp0 {inputMousePos = V2 60 60})
+  _ <- uiCursorKind ctx inp0
+  wid <- warmup2 ctx inp0 (row (currentId <* image (fixedWH 40 24) (ImageId 0)))
+  assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) ->
+    assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)

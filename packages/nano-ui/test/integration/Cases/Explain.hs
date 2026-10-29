@@ -245,7 +245,6 @@ runExplainLayersAndPinTest ctx failed = do
       (explainedDirection n, explainedFlow n, explainedPin n, explainedPointer n)
 
 -- | 'explainScope' limits outlining and explaining to its body; off, it records nothing.
-
 runExplainScopeTest :: Context -> IORef Int -> IO ()
 runExplainScopeTest ctx failed = do
   theme <- outlining ctx

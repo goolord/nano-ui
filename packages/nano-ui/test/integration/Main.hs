@@ -7,7 +7,6 @@ import Cases.SIMD qualified
 import Cases.NoThunks qualified
 import Cases.State qualified
 import Cases.Passes qualified
-import Cases qualified
 import Cases.Window qualified
 import Cases.Cache qualified
 import Cases.LayoutReuse qualified
@@ -66,7 +65,6 @@ main = do
     , Cases.NoThunks.tests
     , Cases.State.tests
     , Cases.Passes.tests
-    , Cases.tests
     , Cases.Window.tests
     , Cases.Cache.tests
     , Cases.LayoutReuse.tests

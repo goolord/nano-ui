@@ -22,7 +22,8 @@ sameAsFullSolves failed frames = do
   forM_ frames $ \(inp, ui) -> sameAsFreshSolve failed fresh reusing inp ui
 
 -- | A ticking label beside rows that stay put, a label that gains and loses
--- a line so everything below it moves, and a window that resizes. Then
+-- a line so everything below it moves, a window that resizes, and a label
+-- whose container narrows. Then
 -- randomised trees of every container kind, with texts that change at
 -- different rates and a window that resizes now and then.
 runPositionReuseTest :: Context -> IORef Int -> IO ()
@@ -41,6 +42,9 @@ runPositionReuseTest _ failed = do
   sameAsFullSolves failed [(inp, ticking f) | f <- [0 .. 5 :: Int]]
   sameAsFullSolves failed [(inp, shifting f) | f <- [0 .. 5 :: Int]]
   sameAsFullSolves failed [(withInput w 400, ticking (0 :: Int)) | w <- [640, 640, 500, 500, 640]]
+  -- A wrapping label measures again when only its container's width changes.
+  let long = "a long label that wraps onto several lines at a narrow width"
+  sameAsFullSolves failed [(inp, columnWith (fixedWH w 200) (label long)) | w <- [360, 120]]
   forM_ [1 .. 16 :: Word64] $ \seed -> do
     let t = gen (mix seed) 0
         size f = if (f `div` 13) `mod` 2 == 0 then withInput 900 700 else withInput 640 700

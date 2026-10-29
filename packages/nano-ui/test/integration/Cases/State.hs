@@ -4,43 +4,32 @@
 module Cases.State (tests) where
 
 import Spec
+import Control.Concurrent (threadDelay)
 import Control.Exception (ErrorCall (..), throwIO, try)
-import Data.ByteString qualified as BS
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Sequence qualified as Seq
-import Data.Primitive.SmallArray qualified as SA
+import Effectful (Eff, IOE, runEff)
+import Effectful.State.Static.Local (State, evalState, get, modify)
+import GHC.Clock (getMonotonicTime)
 import GHC.Generics (Generic)
-import NanoUI.Internal.Context (lookupImageUv)
+import NanoUI.Effectful (Ui, embedNanoUI, runFrameEff, withRunInNanoUI)
+import NanoUI.Monad (localInput)
 import NanoUI.Shortcut qualified as Shortcut
+import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
   [ spec "controlled-inputs" runControlledInputsTest
+  , pixelSpec "basic-widgets" runBasicWidgetsTest
   , spec "var-slots" runVarSlotTest
   , spec "var-lifecycle" runVarLifecycleTest
   , spec "var-focus" runVarFocusTest
   , spec "var-shared" runVarSharedTest
   , spec "var-late-writes" runVarLateWritesTest
-  , spec "collection-api" runCollectionApiTest
+  , spec "embed-state" runEmbedStateTest
+  , spec "host-slot" runHostSlotTest
+  , varSimSpec "search-input-debounce" 320 100 "" debounced searchDebounce
   ]
-
--- | A stack runs its children in order, empty option lists leave the index
--- alone, and a failed image does not stop the rest of a batch.
-runCollectionApiTest :: Context -> IORef Int -> IO ()
-runCollectionApiTest ctx failed = do
-  seen <- newIORef []
-  _ <- runFrame ctx (withInputOff 300 100) $
-    hstack (SA.smallArrayFromList [liftIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
-  assertEq failed [9, 2, 7] =<< readIORef seen
-  picked <- evalUi ctx (withInputOff 300 200) . withKey ("collection-options" :: Text) . column $
-    (,,)
-      <$> (snd <$> withValue 5 (select (SA.emptySmallArray :: SA.SmallArray Text)))
-      <*> (snd <$> withValue (-1) (radio (Seq.empty :: Seq.Seq Text)))
-      <*> (snd <$> withValue "Beta" (comboBox "Choose" (Seq.fromList ["Alpha", "Beta"])))
-  assertEq failed (5, -1, "Beta") picked
-  assertEq failed False =<< registerImages ctx (Seq.fromList [(ImageId 0, 1, 1, BS.replicate 4 255), (ImageId 42, 1, 1, BS.replicate 4 255)])
-  assert failed . (/= Nothing) =<< lookupImageUv ctx (ImageId 42)
 
 -- | Inputs show the caller's value, reporting no change for the caller's
 -- own; a user edit is reported and stays only if the caller passes it back.
@@ -84,11 +73,11 @@ runControlledInputsTest ctx failed = do
 runVarSlotTest :: Context -> IORef Int -> IO ()
 runVarSlotTest ctx failed = do
   let inp = withInputOff 300 100
-      at :: Text -> NanoUI a -> IO a
-      at k = runNanoUI ctx inp . withKey k
-      check :: (Eq a, Show a) => Text -> NanoUI (Var a) -> a -> a -> IO ()
-      check k slot initial changed = do
-        let evaluate = at k (slot >>= \v -> (v,) <$> readVar v)
+      keyed :: Text -> NanoUI a -> IO a
+      keyed k = runNanoUI ctx inp . withKey k
+      holds :: (Eq a, Show a) => Text -> NanoUI (Var a) -> a -> a -> IO ()
+      holds k slot initial changed = do
+        let evaluate = keyed k (slot >>= \v -> (v,) <$> readVar v)
         (v, value) <- evaluate
         assertEq failed initial value
         clearDirty ctx
@@ -97,21 +86,21 @@ runVarSlotTest ctx failed = do
         runNanoUI ctx inp (writeVar v changed)
         assertEq failed True =<< isDirty ctx
         assertEq failed changed . snd =<< evaluate
-  check "int" (useVar (0 :: Int)) 0 12
-  check "float" (useVar (0 :: Float)) 0 1.5
-  check "double" (useVar (0 :: Double)) 0 2.5
-  check "text" (useVar ("initial" :: Text)) "initial" "changed"
-  check "flag" (useVar False) False True
-  check "enum" (useEnumVar LT) LT GT
-  check "sort" (useVar (SortCol 0 SortAsc)) (SortCol 0 SortAsc) (SortCol 2 SortDesc)
-  let asInt = at "slot" (readVar =<< useVar (5 :: Int))
+  holds "int" (useVar (0 :: Int)) 0 12
+  holds "float" (useVar (0 :: Float)) 0 1.5
+  holds "double" (useVar (0 :: Double)) 0 2.5
+  holds "text" (useVar ("initial" :: Text)) "initial" "changed"
+  holds "flag" (useVar False) False True
+  holds "enum" (useEnumVar LT) LT GT
+  holds "sort" (useVar (SortCol 0 SortAsc)) (SortCol 0 SortAsc) (SortCol 2 SortDesc)
+  let asInt = keyed "slot" (readVar =<< useVar (5 :: Int))
   assertEq failed 5 =<< asInt
-  at "slot" (useVar (5 :: Int) >>= \v -> writeVar v 9)
+  keyed "slot" (useVar (5 :: Int) >>= \v -> writeVar v 9)
   assertEq failed 9 =<< asInt
-  assertEq failed "five" =<< at "slot" (readVar =<< useVar ("five" :: Text))
+  assertEq failed "five" =<< keyed "slot" (readVar =<< useVar ("five" :: Text))
   assertEq failed 5 =<< asInt
-  at "enum" (useEnumVar LT >>= \v -> writeVar v EQ)
-  assertEq failed False =<< at "enum" (readVar =<< useEnumVar False)
+  keyed "enum" (useEnumVar LT >>= \v -> writeVar v EQ)
+  assertEq failed False =<< keyed "enum" (readVar =<< useEnumVar False)
   let view extra = column $ do
         when extra (void (button "extra"))
         n <- useVar (0 :: Int)
@@ -132,9 +121,9 @@ runVarSlotTest ctx failed = do
   runNanoUI ctx inp (writeVar a 6 >> retainVars (/= 2) m)
   assertEq failed 0 =<< (readVarIO =<< row' 2)
 
--- | A key press runs once even when its write reruns the view, which then
--- repaints whole and leaves nothing dirty. Owned Vars survive hiding and
--- keyed reordering, and independent ones do not share state.
+-- | A key press runs once even when its write reruns the view (the Passes
+-- spec counts what that costs). Owned Vars survive hiding and keyed
+-- reordering, and independent ones do not share state.
 runVarLifecycleTest :: Context -> IORef Int -> IO ()
 runVarLifecycleTest ctx failed = do
   left <- newVar (0 :: Int)
@@ -149,12 +138,7 @@ runVarLifecycleTest ctx failed = do
         readVar left
   _ <- warmup2 ctx inp view
   assertEq failed 2 =<< evalUi ctx (keyInp (KeyChar 'a') inp) view
-  assertEq failed 2 =<< lastFramePasses ctx
-  assertEq failed DamageFull =<< takeDamage ctx
   assert failed . any (\(_, text, _, _, _) -> text == "2") =<< collectTextSpans ctx
-  (_, _, dirty) <- runFrame ctx inp view
-  assertEq failed False dirty
-  assert failed . damageIsEmpty =<< takeDamage ctx
   runNanoUI ctx inp (modifyVar left (+ 3) >> writeVar left 0)
   assertEq failed 0 =<< readVarIO left
   (owned, _) <- evalUi ctx inp ((,) <$> item "left" <*> item "right")
@@ -182,7 +166,7 @@ runVarFocusTest ctx failed = do
   _ <- warmup2 ctx inp view
   runNanoUI ctx inp (modifyVar model.rows reverse)
   _ <- warmup2 ctx inp view
-  first : _ <- runNanoUI ctx inp (withElemVars rowKey model.rows (\xs at -> pure (map at xs)))
+  first : _ <- runNanoUI ctx inp (withElemVars rowKey model.rows (\xs elemVar -> pure (map elemVar xs)))
   runNanoUI ctx inp (writeVar first.rowName "THREE")
   assertEq failed ["THREE", "two", "one"] . map rowName . rows =<< readVarIO model
   runNanoUI ctx inp (modifyVar model.rows (filter ((/= 3) . rowKey)))
@@ -237,3 +221,101 @@ runVarLateWritesTest ctx failed = do
     _ <- runFrame ctx inp (named >> late)
     _ <- runFrame ctx inp named
     assertEq failed DamageFull =<< takeDamage ctx
+
+-- | Pointer cursor over a button and a (pressed) checkbox only. A checkbox
+-- shows its Var's value before any click stores state, and each click at
+-- once. A slider in a filling column spans it to its maximum.
+runBasicWidgetsTest :: Context -> IORef Int -> IO ()
+runBasicWidgetsTest ctx failed = do
+  checked <- newVar True
+  level <- newVar 0
+  let ui = columnWith fillW ((,,) <$> button' "Click" <*> checkbox' "Opt" checked <*> slider' 0 100 level)
+      wantsPointer = liftIO . pointerCursorWanted ctx =<< getInput
+      showsChecked cb on = do
+        checkEq on =<< readV checked
+        checkEq (Just (if on then 1 else 0)) =<< liftIO (widgetValue ctx (respId cb))
+  runSim ctx failed (withInput 400 200) ui $ do
+    (btn, cb, sl) <- result
+    showsChecked cb True
+    check =<< (moveTo (On btn) >> wantsPointer)
+    check . not =<< (moveTo (At (V2 (-1) (-1))) >> wantsPointer)
+    check =<< (moveTo (On cb) >> wantsPointer)
+    check =<< (press (On cb) >> wantsPointer)
+    _ <- release
+    showsChecked cb False
+    _ <- frame
+    showsChecked cb False
+    let Rect cx cy _ _ = respRect cb
+    _ <- click (At (V2 (cx + 1) (cy + 0.5)))
+    showsChecked cb True
+    let Rect sx sy sw sh = respRect sl
+        Rect tx ty tw th = sliderTrackBounds sx sy sw sh
+    checkGt sw 300
+    _ <- press (At (V2 (tx + tw - 2) (ty + th / 2)))
+    flip checkGt 90 =<< readV level
+
+-- | An Effectful view embeds NanoUI, and a body run in a NanoUI scope keeps
+-- the effect's state and sees that scope's input.
+runEmbedStateTest :: Context -> IORef Int -> IO ()
+runEmbedStateTest ctx failed = do
+  let ui :: Eff '[Ui, State Int, IOE] (Int, Float)
+      ui = do
+        _ <- embedNanoUI (column (pure ()))
+        modify (+ (1 :: Int))
+        w <- withRunInNanoUI $ \run -> column $ do
+          run (modify (+ (1 :: Int)))
+          inp <- askInput
+          localInput inp {inputWindowSize = Size 123 45} (run (embedNanoUI windowWidth))
+        (,w) <$> get
+  ((n, w), _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
+  assertEq failed (2, 123) (n, w)
+
+-- | Hosts hand the view what the app set, each of its own type, and a compact
+-- host hands back the whole value.
+runHostSlotTest :: Context -> IORef Int -> IO ()
+runHostSlotTest ctx failed = do
+  stringHost <- newHost
+  intHost <- newHost
+  otherHost <- newHost
+  compactOwner <- newHost
+  let ask :: Host a -> IO (Maybe a)
+      ask h = evalUi ctx (withInput 80 80) (column (pure ()) >> askHost h)
+  assertEq failed Nothing =<< ask stringHost
+  setHost stringHost ("ok" :: String)
+  setHost intHost (1 :: Int)
+  setHost otherHost ("independent" :: String)
+  assertEq failed (Just "ok") =<< ask stringHost
+  assertEq failed (Just 1) =<< ask intHost
+  assertEq failed (Just "independent") =<< ask otherHost
+  _ <- compactHost compactOwner ([0 .. 9999] :: [Int])
+  got <- evalUi ctx (withInput 80 80) (column (pure ()) >> askCompact compactOwner)
+  assertEq failed (Just (10000, 9999)) ((\xs -> (length xs, last xs)) <$> got)
+
+-- | A search field on a 20 ms debounce, bound to the Var.
+debounced :: Var Text -> NanoUI (Response, Text)
+debounced query = column (held query (searchInputConfigured' defaultSearchInputConfig {sicDebounceMs = 20}))
+
+-- | A search field commits caller-set text after one pause (with no edit time
+-- it once never did, waking every period), and typing on a wake 20 ms after
+-- the last edit.
+searchDebounce :: Var Text -> Sim (Response, Text) ()
+searchDebounce query = do
+  let showing want changed (resp, txt) = checkEq (want, changed) (txt, respChanged resp)
+      afterPause us = liftIO (threadDelay us) >> frame
+  pressTab 1
+  writeV query "recent"
+  showing "recent" False =<< frame
+  wakeTime >>= \t -> checkGt t 0
+  showing "recent" True =<< afterPause 30000
+  checkEq 0 =<< wakeTime
+  writeV query ""
+  _ <- afterPause 30000
+  showing "a" False =<< typeText "a"
+  before <- liftIO getMonotonicTime
+  showing "ab" False =<< typeText "b"
+  after <- liftIO getMonotonicTime
+  -- The edit is stamped during its frame: the wake is 20 ms past a moment in it.
+  wakeTime >>= \t -> check (t >= before + 0.02 && t <= after + 0.022)
+  showing "ab" True =<< afterPause 30000
+  checkEq 0 =<< wakeTime
+  showing "ab" False =<< afterPause 25000

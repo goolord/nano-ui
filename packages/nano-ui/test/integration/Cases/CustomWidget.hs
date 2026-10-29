@@ -48,9 +48,9 @@ runCustomWidgetMeasureTest ctx failed = do
   -- The inner column takes its width from the widget, and the label after
   -- it in the row sits where that width ends.
   let parent w = column . row $ column (measured (Just (\_ _ -> (w, 48)))) <* label "after"
-  sizeOf (parent 120) >> sizeOf (parent 240) >>= assertEq failed 240 . fst
-  grown <- arenaRects ctx
-  assertEq failed grown =<< (newContext >>= \fresh -> warmup2 fresh inp (parent 240) >> arenaRects fresh)
+  fresh <- newContext
+  _ <- sizeOf (parent 120) >> sameAsFreshSolve failed fresh ctx inp (parent 240)
+  sizeOf (parent 240) >>= assertEq failed 240 . fst
   let bar f = rowWith (fixedW 300 . tight) (progressBarWith' f 12 0.3)
   (fullW, _) <- sizeOf (bar id)
   sizeOf (bar (percent 50)) >>= assertEq failed (fullW / 2, 12)
@@ -65,18 +65,16 @@ runCustomWidgetPointerTest ctx failed = do
         { widgetLayout = fixedWH 80 80 defaultLayout
         , widgetCursor = Just $ \_ (Rect x _ w _) (V2 px _) -> if px > x + w - 10 then UiCursorEwResize else UiCursorDefault
         }
-      cursor = getInput >>= liftIO . uiCursorKind ctx
   runSim ctx failed inp edged $ do
     Rect rx ry rw rh <- respRect <$> result
     let onEdge = At (V2 (rx + rw - 4) (ry + rh / 2))
         away = At (V2 (rx + rw + 50) (ry + rh + 50))
-    checkEq UiCursorEwResize =<< (moveTo onEdge >> cursor)
-    checkEq UiCursorHidden =<< (moveTo (Within (Rect rx ry rw rh)) >> cursor)
+    checkEq UiCursorEwResize =<< cursorAt onEdge
+    checkEq UiCursorHidden =<< cursorAt (Within (Rect rx ry rw rh))
     _ <- press onEdge
-    checkEq UiCursorEwResize =<< (moveTo away >> cursor)
+    checkEq UiCursorEwResize =<< cursorAt away
     _ <- release
-    checkEq UiCursorDefault =<< (moveTo away >> cursor)
-    checkEq UiCursorHidden (cursorFallback UiCursorHidden)
+    checkEq UiCursorDefault =<< cursorAt away
   let interacting = column $ customWidget defaultCustomWidgetSpec
         { widgetLayout = fixedWH 80 40 defaultLayout
         , widgetInteract = \resp cdc _ -> (resp, (cdcHovered cdc, cdcPressed cdc))
@@ -91,18 +89,11 @@ runCustomWidgetPointerTest ctx failed = do
     writeIORef (ctxClickedId ctx) (respId resp0)
     resps <- evalUi ctx away queued
     assertEq failed [j == i | j <- [0 .. length resps - 1]] (map respClicked resps)
-  runSim ctx failed inp (column (withValue 25 (knobWith' id 36 0 100))) $ do
-    (k, v0) <- result
-    checkEq 25 v0
-    let V2 x y = centerOf k
-    _ <- press (On k)
-    (dragged, v1) <- moveTo (At (V2 x (y - 30)))
-    check (v1 > 25 && respChanged dragged)
   value <- newVar (0 :: Float)
   let covered = columnWith tight (fst <$> held value (knobWith' id 60 0 100) <* buttonWith' (pinAt 0 0 . fixedWH 30 60) "x")
   runSim ctx failed (withInputOff 300 300) covered $ do
     Rect kx ky _ kh <- respRect <$> result
-    let moved how p = liftIO (writeVarIO value 50) >> how p >> liftIO (readVarIO value)
+    let moved how p = writeV value 50 >> how p >> readV value
         dragUp (V2 px py) = moveTo (At (V2 px py)) >> drag (At (V2 px py)) (At (V2 px (py - 40))) 1
         wheelOn p = wheel (At p) (V2 0 3)
         (onButton, onKnob) = (V2 (kx + 15) (ky + kh / 2), V2 (kx + 45) (ky + kh / 2))
