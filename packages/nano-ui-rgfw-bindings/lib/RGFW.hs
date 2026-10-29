@@ -8,6 +8,8 @@ module RGFW
   , swapBuffersGL
   , closeWindow
   , pollEvent
+  , pollAnyEvent
+  , makeCurrentGL
   , waitForEvent
   , stopWaitForEvent
   , withEventBuffer
@@ -136,9 +138,27 @@ withEventBuffer f = do
 pollEvent :: Window -> Ptr RGFW_event -> IO Event
 pollEvent (Window win) evPtr = do
   hasEv <- c_RGFW_window_checkEvent win evPtr
+  if hasEv == 0 then pure EventNone else decodeEvent evPtr
+
+-- | Take the next queued event of any window, with the window it is for
+-- (a null one for none); 'Nothing' only when the queue is empty. Taking
+-- every window's events here leaves none behind in RGFW's queue, which
+-- 'waitForEvent' does not look at.
+pollAnyEvent :: Ptr RGFW_event -> IO (Maybe (Window, Event))
+pollAnyEvent evPtr = do
+  hasEv <- c_RGFW_checkEvent evPtr
   if hasEv == 0
-    then pure EventNone
-    else do
+    then pure Nothing
+    else (\w ev -> Just (Window w, ev)) <$> c_rgfw_event_window evPtr <*> decodeEvent evPtr
+
+-- | Make the window's OpenGL context current on the calling thread, for a
+-- session with more than one window.
+makeCurrentGL :: Window -> IO ()
+makeCurrentGL (Window w) = c_RGFW_window_makeCurrentContext_OpenGL w
+
+-- | The event in the buffer.
+decodeEvent :: Ptr RGFW_event -> IO Event
+decodeEvent evPtr = do
       CUChar t <- c_rgfw_event_type evPtr
       case t of
         _

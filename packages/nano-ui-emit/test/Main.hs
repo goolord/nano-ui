@@ -2,13 +2,13 @@ module Main (main) where
 
 import Control.Exception (TypeError (..), evaluate, try)
 import Control.Monad (unless, when)
-import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import DeferredWrongMessage (wrongMessage)
 import NanoUI qualified as UI
 import NanoUI.Emit
-import NanoUI.Testing (Context, newContext)
+import NanoUI.Testing (Context, isDirty, newContext, runFrame)
 import NanoUI.Testing.Assert (require, requireEq, withInput)
 import NanoUI.Testing.Harness (centerOf)
 import NanoUI.Testing.Sim hiding (result)
@@ -38,6 +38,7 @@ main = do
   testClick
   testScopes
   testWrongMessage
+  testLateMessages
   putStrLn "Typed emission tests passed."
 
 testReduce :: IO ()
@@ -141,3 +142,29 @@ testWrongMessage = do
       | "Int" `isInfixOf` err && "Bool" `isInfixOf` err -> pure ()
       | otherwise -> fail ("the type error was not the Int/Bool mismatch: " <> err)
     Right _ -> fail "a view emitted a message of another type"
+
+-- | A message emitted after its frame ended, as a further window's view
+-- does through the sink of the view that declared it, asks for a frame,
+-- which reduces it before drawing.
+testLateMessages :: IO ()
+testLateMessages = do
+  ctx <- newContext
+  other <- newContext
+  reducer <- newReducer update 0
+  later <- newIORef (pure ())
+  seen <- newIORef []
+  let inp = withInput 80 80
+      view :: Int -> NanoUIE Msg ()
+      view m = do
+        UI.liftIO (modifyIORef' seen (m :))
+        UI.liftIO (writeIORef later (emit Inc))
+  _ <- reduceFrame reducer ctx inp view
+  _ <- runFrame ctx inp (pure ())
+  isDirty ctx >>= require "nothing pending before the late message" . not
+  late <- readIORef later
+  _ <- runFrame other inp late
+  isDirty ctx >>= require "a late message asks for a frame"
+  reducerModel reducer >>= requireEq "a late message waits for that frame" 0
+  _ <- reduceFrame reducer ctx inp view
+  reducerModel reducer >>= requireEq "the next frame reduces it" 1
+  readIORef seen >>= requireEq "and draws the reduced model" [1, 0]

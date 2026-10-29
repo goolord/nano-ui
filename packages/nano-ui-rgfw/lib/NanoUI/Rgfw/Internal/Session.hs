@@ -24,7 +24,7 @@ module NanoUI.Rgfw.Internal.Session
   , mapRgfwCursor
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
+import Control.Concurrent (myThreadId, rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket, finally, onException)
 import Control.Monad (unless, void, when)
 import Data.Bits (complement, (.&.), (.|.))
@@ -34,7 +34,7 @@ import Data.List (find)
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
 import Data.Word (Word8, Word32)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, nullPtr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Appearance
@@ -85,11 +85,13 @@ import NanoUI.Backend
   )
 import NanoUI.Internal.Context
   ( Context (..)
+  , setBackendSession
   , withClipboard
   )
 import NanoUI.Testing
   ( DrawData (..)
   , UiCursorKind (..)
+  , runFrame
   , collectRasterSpans
   , damageIsEmpty
   , drawCmdCount
@@ -98,12 +100,13 @@ import NanoUI.Testing
   , uiCursorKind
   )
 import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
-import NanoUI.Emit (NanoUIE, runFrameReduce)
+import NanoUI.Emit (NanoUIE, newReducer, reduceFrame, reducerModel)
 import NanoUI.Runner
   ( SessionDriver (..)
   , runSessionLoop
   , shouldRedrawFrame
   )
+import NanoUI.Runner.Windows (WindowOps (..), afterMainPass, closeWindows, mainNeedsFrame, newWindows, noteMainFrame, openWindows, windowsWait)
 import NanoUI.Internal.Layout.Arena (arenaCount)
 import NanoUI.Rgfw.Internal.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Internal.Debug
@@ -113,7 +116,7 @@ import NanoUI.Rgfw.Internal.Debug
   , rgfwSession
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
-import NanoUI.Rgfw.Internal.Gl (freeGlRenderer, newGlRenderer, renderArenaGl, retainedPixels, syncImagesGl)
+import NanoUI.Rgfw.Internal.Gl (GlRenderer, freeGlRenderer, newGlRenderer, renderArenaGl, retainedPixels, syncImagesGl)
 import qualified RGFW as R
 
 -- | Window and rendering options for the RGFW runners.
@@ -310,227 +313,379 @@ runRgfwAppReduceCustomWith ::
   (env -> model -> NanoUIE msg ()) ->
   IO ()
 runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup appView = inBoundThread $ do
-  -- Open hidden at the requested scale: the monitor's scale is unknown until
-  -- the window exists. Resize, place and show it once that scale is known.
-  let flags =
-        R.rgfw_windowHide
-          .|. (if wsResizable settings then 0 else R.rgfw_windowNoResize)
-          .|. (if wsMode settings == Fullscreen then R.rgfw_windowFullscreen else 0)
-      (openW, openH) = pixelSize (resolveScale (snd (getThemeAndScale initialModel)) 1)
-  bracket
-    (R.createWindowGL (T.unpack (wsTitle settings)) 0 0 openW openH flags 3 2)
-    (mapM_ R.closeWindow) $ \mWin -> case mWin of
-      Nothing -> fail "nano-ui-rgfw: could not create a window with an OpenGL 3.2 core context"
-      Just win -> runWindow win
+  sh <- RgfwShared opts <$> newIORef (snd (getThemeAndScale initialModel)) <*> newIORef Nothing
+  bracket (createRgfwWindow sh settings) R.closeWindow (runWindow sh)
   where
     settings = optWindow opts
     -- The GL context is current only on the OS thread that created it.
     inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act
-    -- The model's scale, else the options', else the monitor's.
-    resolveScale userScale monScale = fromMaybe 1 (find (> 0) [userScale, optScale opts, monScale])
-    -- Native pixel size at a scale, of any size or of the settings' size.
-    pixelsAt scale (Size w h) = (max 1 (round (w * scale)), max 1 (round (h * scale)))
-    pixelSize scale = pixelsAt scale (wsSize settings)
-    runWindow win = do
-      let !refreshHz = if optRefreshHz opts > 0 then optRefreshHz opts else 60
-          !refreshSec = 1.0 / fromIntegral refreshHz :: Double
-      monScaleInit <- R.windowScale win
-      let !initMonScale = if monScaleInit > 0.0 then monScaleInit else 1.0
-      monScaleRef <- newIORef initMonScale
-
-      let -- Native pixels to layout units at a scale.
-          logicalSize (pw, ph) scale = Size (units pw) (units ph)
-            where
-              units v = fromIntegral (max 1 (round (fromIntegral v / scale) :: Int))
-          (initTheme, initScaleChoice) = getThemeAndScale initialModel
-          !initScale = resolveScale initScaleChoice initMonScale
-      -- A window opened fullscreen already covers its monitor, and resizing
-      -- it would shrink it on Windows.
-      initPhys <-
-        if wsMode settings == Fullscreen
-          then R.windowSize win
-          else do
-            let phys = pixelSize initScale
-            when (phys /= pixelSize (resolveScale initScaleChoice 1)) $ uncurry (R.resizeWindow win) phys
-            pure phys
-
-      modelRef <- newIORef initialModel
-      scaleRef <- newIORef initScale
-      winSizeRef <- newIORef initPhys
+    runWindow sh win = do
+      rw <- setupRgfwWindow sh settings win
+      reducer <- newReducer updateModel initialModel
+      let initTheme = fst (getThemeAndScale initialModel)
       -- The theme last applied, before squaring: comparing it with the
       -- model's theme skips rebuilding the squared theme on every frame.
       themeRef <- newIORef initTheme
-      cursorRef <- newIORef UiCursorDefault
-      -- Physical size and scale of the last presented frame. The retained
-      -- framebuffer holds that frame, so a frame at another size or scale
-      -- has nothing to keep and paints in full.
-      presentedRef <- newIORef (0, 0, 0)
-
       ctx0 <- newRgfwContext initTheme
       let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
-      debugSampler <- newRgfwDebugSampler
       env <- setup
       setExplainLayout ctx (optExplainLayout opts)
-      -- Size limits are in layout units, converted at the current scale.
-      let limit set s = do
-            scale <- readIORef scaleRef
-            uncurry (set win) (sizeLimitAt scale (0, 0) s)
-          place = case wsPosition settings of
-            WindowPositionDefault -> WindowPositionCentered
-            p -> p
-      installWindowHost ctx settings {wsPosition = place} $
-        defaultWindowHost
-          { hostCapabilities = allWindowCapabilities {wcOpacity = False}
-          , hostSetTitle = R.setWindowName win
-          , hostSetIcon = \p -> void (R.setWindowIcon win (rgbaWidth p) (rgbaHeight p) (rgbaBytes p))
-          , hostSetMinSize = limit R.setWindowMinSize
-          , hostSetMaxSize = limit R.setWindowMaxSize
-            -- No 'hostSetOpacity': RGFW windows cannot fade.
-          , hostSetMode = \case
-              -- Leaving fullscreen restores the geometry saved on entering
-              -- it, which on Windows a windowed window has none of.
-              Windowed -> do
-                full <- (\f -> f .&. R.rgfw_windowFullscreen /= 0) <$> R.windowFlags win
-                when full (R.setWindowFullscreen win False)
-                R.showWindow win
-              Fullscreen -> R.showWindow win >> R.setWindowFullscreen win True
-              Hidden -> R.hideWindow win
-          , hostMove = R.moveWindow win
-          , hostCenter = R.centerWindow win
-          , hostResize = \s -> readIORef scaleRef >>= \scale -> uncurry (R.resizeWindow win) (pixelsAt scale s)
-          , hostMinimize = R.minimizeWindow win
-          , hostMaximize = R.maximizeWindow win
-          , hostRestore = R.restoreWindow win
-          }
-      reportWindowState ctx =<< rgfwWindowState win initScale
-      unless (wsMode settings == Hidden) (R.showWindow win)
+      installRgfwHost sh rw ctx
       -- A wake from another thread (a background job) ends the event wait,
       -- or the next one if none is under way.
       setWakeLoop ctx R.stopWaitForEvent
-      let font = getCozetteFont
-          -- The pointer is off the window until an entry or a motion says
-          -- where it is, not on the widget in the top-left corner.
-          initInp = applyPointerLeave emptyInput {inputWindowSize = logicalSize initPhys initScale}
-          -- Touch the platform cursor only when the wanted kind changes.
-          -- 'UiCursorHidden' hides the pointer.
-          syncCursor c inp = uiCursorKind c inp >>= syncCursorKind cursorRef (R.showMouse win) (setIcon . mapRgfwCursor)
-          setIcon icon = void $ if icon == R.rgfw_mouseArrow then R.setMouseDefault win else R.setMouseStandard win icon
+      initInp <- rgfwOpeningInput rw
 
       let cleanup = closeWindowHost ctx `finally` cancelTasks ctx
-      bracket (newGlRenderer `onException` cleanup) (\r -> cleanup `finally` freeGlRenderer r) $ \renderer -> R.withEventBuffer $ \evPtr -> do
-        let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
-
-        -- A frame whose damage is empty would swap in the picture already on
-        -- screen, so it skips the render and the swap: an animation scrolled
-        -- out of view costs its UI pass and nothing on the GPU. The opening
-        -- frame and an animation's settle frame are forced. Other frames
-        -- paint only their damage over the retained last frame.
+          release r = cleanup `finally` (useGl sh win >> freeGlRenderer r)
+      bracket (newGlRenderer `onException` cleanup) release $ \renderer -> R.withEventBuffer $ \evPtr -> do
+        windows <- newWindows (childOps sh)
         let drawOne force c curInp = do
-              tUiStart <- getMonotonicTime
-              curScale <- readIORef scaleRef
-              (pw, ph) <- readIORef winSizeRef
-              presented <- readIORef presentedRef
-              let !paintFull = force || presented /= (pw, ph, curScale) || inputWindowRedraw curInp
-              writeIORef (ctxPaintFull c) paintFull
-              curModel <- readIORef modelRef
-              let (frameTheme, _) = getThemeAndScale curModel
-              appliedTheme <- readIORef themeRef
-              when (frameTheme /= appliedTheme) $ do
-                writeIORef themeRef frameTheme
-                applyRgfwTheme c frameTheme
-              (_, newModel, _, drawData, dirtyAfterUi) <-
-                runFrameReduce updateModel c curInp curModel (appView env)
-              writeIORef modelRef newModel
-              tUiEnd <- getMonotonicTime
-              damage <- takeDamage c
-              if damageIsEmpty damage && not paintFull
-                then do
-                  noteDebugSkip (rdsSampler debugSampler)
-                  -- Nothing was drawn, so the retained framebuffer holds this frame.
-                  answerScreenshots c (retainedPixels renderer pw ph)
-                  pure dirtyAfterUi
-                else do
-                  tRenderStart <- getMonotonicTime
-                  curMonScale <- readIORef monScaleRef
-                  (baseSpans, overlaySpans) <- collectRasterSpans c curInp
-                  pieces <- if paintFull then pure [] else takeDamagePieces c
-                  syncImagesGl renderer c
-                  -- A full frame clears to the draw data's colour, the page
-                  -- over the window colour of the theme it was painted in.
-                  renderArenaGl renderer font curScale pw ph
-                      (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
-                  writeIORef presentedRef $! (pw, ph, curScale)
-                  tSwapStart <- getMonotonicTime
-                  R.swapBuffersGL win
-                  tSwapEnd <- getMonotonicTime
-                  answerScreenshots c (retainedPixels renderer pw ph)
-                  nodes <- arenaCount (ctxNodeArena c)
-                  let ms a b = (b - a) * 1000
-                  noteDebugPresent (rdsSampler debugSampler) (ms tUiStart tUiEnd) (ms tRenderStart tSwapStart)
-                    (ms tSwapStart tSwapEnd) (ms tUiStart tSwapEnd)
-                    (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
-                  writeIORef (rdsFrame debugSampler)
-                    RgfwFrameStats
-                      { fsNodes = nodes
-                      , fsPhysW = pw
-                      , fsPhysH = ph
-                      , fsScale = curScale
-                      , fsMonScale = curMonScale
-                      }
-                  -- A reduced message that switched themes changed the model, so
-                  -- the core marks the frame dirty and the next one applies it.
-                  pure dirtyAfterUi
-
-        let drv =
+              noteMainFrame windows
+              presentRgfw sh rw renderer force c curInp $ do
+                curModel <- reducerModel reducer
+                let (frameTheme, _) = getThemeAndScale curModel
+                appliedTheme <- readIORef themeRef
+                when (frameTheme /= appliedTheme) $ do
+                  writeIORef themeRef frameTheme
+                  applyRgfwTheme c frameTheme
+                -- A reduced message that switched themes changed the model, so
+                -- the core marks the frame dirty and the next one applies it.
+                (\(_, drawData, dirty) -> (drawData, dirty)) <$> reduceFrame reducer c curInp (appView env)
+            -- With further windows open, one drain takes every window's
+            -- events and queues the others' on them; with none, this
+            -- window's own events are taken as in a session of one.
+            pollMain = do
+              kids <- openWindows windows
+              if null kids
+                then pollRgfwEvents win evPtr (rwScale rw) (rwMonScale rw)
+                else drainRgfwEvents evPtr rw [(rwWin (rcWindow c), (c, queue)) | (c, queue) <- kids]
+            drv =
               SessionDriver
-                { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef
+                { sdPollEvents    = pollMain
                 , sdWaitEvents    = \t -> do
-                    R.waitForEvent t
-                    pollRgfwEvents win evPtr scaleRef monScaleRef
+                    other <- windowsWait windows
+                    R.waitForEvent (if t < 0 then other else if other < 0 then t else min t other)
+                    pollMain
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = \case RgfwEvButton {} -> True; _ -> False
                 , sdIsSessionQuit = \case RgfwEvClose -> True; _ -> False
                 , sdSyncDisplay   = \c inp -> do
-                    -- A minimized window reports 0x0 (on Windows): keep the
-                    -- last real size.
-                    (curWinW, curWinH) <- R.windowSize win
-                    (pw0, ph0) <- readIORef winSizeRef
-                    let (pw, ph) = if curWinW > 0 && curWinH > 0 then (curWinW, curWinH) else (pw0, ph0)
-                    writeIORef winSizeRef (pw, ph)
-                    curMonScale <- readIORef monScaleRef
-                    curModel <- readIORef modelRef
-                    oldScale <- readIORef scaleRef
-                    let (_, userScale) = getThemeAndScale curModel
-                        !newScale = resolveScale userScale curMonScale
-                        -- Motion was divided by the old scale when decoded.
-                        V2 mx my = inputMousePos inp
-                        !k = oldScale / newScale
-                        mouse = if k == 1 then inputMousePos inp else V2 (mx * k) (my * k)
-                    writeIORef scaleRef newScale
-                    reportWindowState c =<< rgfwWindowState win newScale
-                    pure (c, inp {inputWindowSize = logicalSize (pw, ph) newScale, inputMousePos = mouse})
-                , sdDebug         = rdsSampler debugSampler
+                    curModel <- reducerModel reducer
+                    writeIORef (rsUserScale sh) (snd (getThemeAndScale curModel))
+                    syncRgfwDisplay sh rw c inp
+                , sdDebug         = rdsSampler (rwDebug rw)
                 , sdContinuous    = False
                   -- Presents are unthrottled (swap interval 0, no vsync), so a
                   -- live in-view animation is paced at the refresh period
                   -- instead of spinning.
-                , sdPacingMs      = animateTimeout
+                , sdPacingMs      = rgfwPacingMs opts
                 , sdPresentPaces  = pure False
-                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue ->
-                    shouldRedrawFrame c prevInp inpSynced wasAnim False refreshDue
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim refreshDue -> do
+                    varDue <- mainNeedsFrame windows
+                    shouldRedrawFrame c prevInp inpSynced wasAnim False (refreshDue || varDue)
                 , sdDraw          = \c curInp forceFull -> drawOne forceFull c curInp
-                , sdOnCursor      = syncCursor
+                  -- Runs after every pass: the further windows' frames go here.
+                , sdOnCursor      = \c inp -> syncRgfwCursor rw c inp >> void (afterMainPass windows c)
                 , sdShouldQuit    = \_ -> False
-                , sdAlignSec      = refreshSec
+                , sdAlignSec      = 1 / fromIntegral (rgfwRefreshHz opts)
                 }
         -- Present the opening frame before entering the loop so the window has
         -- content immediately; once idle the loop blocks with no redraws. If
         -- the opening frame marked the context dirty, the loop draws the
-        -- follow-up frame immediately instead of blocking for input. Views
-        -- find the debug sampler on the context ('askRgfwDebug').
-        withBackendSession ctx rgfwSession debugSampler $ do
+        -- follow-up frame immediately instead of blocking for input. The
+        -- windows it declared open now. Views find the debug sampler on the
+        -- context ('askRgfwDebug').
+        withBackendSession ctx rgfwSession (rwDebug rw) $ do
           _ <- drawOne True ctx initInp
-          runSessionLoop drv ctx initInp
+          _ <- afterMainPass windows ctx
+          runSessionLoop drv ctx initInp `finally` closeWindows windows
+
+-- | What the windows of one RGFW session share: the options, the UI scale
+-- the model asks for, and the window whose OpenGL context is current.
+data RgfwShared = RgfwShared
+  { rsOpts :: !RgfwOptions
+  , rsUserScale :: !(IORef Float)
+  , rsCurrent :: !(IORef (Maybe R.Window))
+  }
+
+-- | One window and the state drawing into it needs.
+data RgfwWindow = RgfwWindow
+  { rwWin :: !R.Window
+  , rwSettings :: !WindowSettings
+  , rwScale :: !(IORef Float)
+  , rwMonScale :: !(IORef Float)
+  , rwSize :: !(IORef (Int, Int))
+  , rwPresented :: !(IORef (Int, Int, Float))
+  -- ^ Physical size and scale of the last presented frame. The retained
+  -- framebuffer holds that frame, so a frame at another size or scale has
+  -- nothing to keep and paints in full.
+  , rwCursor :: !(IORef UiCursorKind)
+  , rwDebug :: !RgfwDebugSampler
+  }
+
+rgfwRefreshHz :: RgfwOptions -> Int
+rgfwRefreshHz opts = if optRefreshHz opts > 0 then optRefreshHz opts else 60
+
+rgfwPacingMs :: RgfwOptions -> Int
+rgfwPacingMs opts = max 1 (floor (1000 / fromIntegral (rgfwRefreshHz opts) :: Double) - 2)
+
+-- | The model's scale, else the options', else the monitor's.
+resolveScale :: RgfwOptions -> Float -> Float -> Float
+resolveScale opts userScale monScale = fromMaybe 1 (find (> 0) [userScale, optScale opts, monScale])
+
+-- | Native pixel size of a layout size at a scale.
+pixelsAt :: Float -> Size -> (Int, Int)
+pixelsAt scale (Size w h) = (max 1 (round (w * scale)), max 1 (round (h * scale)))
+
+-- | Native pixels to layout units at a scale.
+logicalSize :: (Int, Int) -> Float -> Size
+logicalSize (pw, ph) scale = Size (units pw) (units ph)
+  where
+    units v = fromIntegral (max 1 (round (fromIntegral v / scale) :: Int))
+
+-- | Open a window for the settings, hidden, at the requested scale: the
+-- monitor's scale is unknown until the window exists. 'setupRgfwWindow'
+-- sizes it once that scale is known, and 'installRgfwHost' shows it. Its
+-- OpenGL context is current afterwards.
+createRgfwWindow :: RgfwShared -> WindowSettings -> IO R.Window
+createRgfwWindow sh settings = do
+  userScale <- readIORef (rsUserScale sh)
+  let flags =
+        R.rgfw_windowHide
+          .|. (if wsResizable settings then 0 else R.rgfw_windowNoResize)
+          .|. (if wsMode settings == Fullscreen then R.rgfw_windowFullscreen else 0)
+      (openW, openH) = pixelsAt (resolveScale (rsOpts sh) userScale 1) (wsSize settings)
+  R.createWindowGL (T.unpack (wsTitle settings)) 0 0 openW openH flags 3 2 >>= \case
+    Nothing -> fail "nano-ui-rgfw: could not create a window with an OpenGL 3.2 core context"
+    Just win -> win <$ writeIORef (rsCurrent sh) (Just win)
+
+-- | Size a window just opened at its monitor's scale.
+setupRgfwWindow :: RgfwShared -> WindowSettings -> R.Window -> IO RgfwWindow
+setupRgfwWindow sh settings win = do
+  userScale <- readIORef (rsUserScale sh)
+  monScaleInit <- R.windowScale win
+  let opts = rsOpts sh
+      !monScale = if monScaleInit > 0.0 then monScaleInit else 1.0
+      !scale = resolveScale opts userScale monScale
+  -- A window opened fullscreen already covers its monitor, and resizing it
+  -- would shrink it on Windows.
+  phys <-
+    if wsMode settings == Fullscreen
+      then R.windowSize win
+      else do
+        let phys = pixelsAt scale (wsSize settings)
+        when (phys /= pixelsAt (resolveScale opts userScale 1) (wsSize settings)) $ uncurry (R.resizeWindow win) phys
+        pure phys
+  RgfwWindow win settings
+    <$> newIORef scale
+    <*> newIORef monScale
+    <*> newIORef phys
+    <*> newIORef (0, 0, 0)
+    <*> newIORef UiCursorDefault
+    <*> newRgfwDebugSampler
+
+-- | The opening input: the window's size, and the pointer off the window
+-- until an entry or a motion says where it is, not on the widget in the
+-- top-left corner.
+rgfwOpeningInput :: RgfwWindow -> IO Input
+rgfwOpeningInput rw = do
+  phys <- readIORef (rwSize rw)
+  scale <- readIORef (rwScale rw)
+  pure (applyPointerLeave emptyInput {inputWindowSize = logicalSize phys scale})
+
+-- | Install the host that carries out a view's window requests, report the
+-- window's state, and show it unless the settings hide it.
+installRgfwHost :: RgfwShared -> RgfwWindow -> Context -> IO ()
+installRgfwHost _ rw ctx = do
+  -- Size limits are in layout units, converted at the current scale.
+  let win = rwWin rw
+      settings = rwSettings rw
+      limit set s = do
+        scale <- readIORef (rwScale rw)
+        uncurry (set win) (sizeLimitAt scale (0, 0) s)
+      place = case wsPosition settings of
+        WindowPositionDefault -> WindowPositionCentered
+        p -> p
+  installWindowHost ctx settings {wsPosition = place} $
+    defaultWindowHost
+      { hostCapabilities = allWindowCapabilities {wcOpacity = False}
+      , hostSetTitle = R.setWindowName win
+      , hostSetIcon = \p -> void (R.setWindowIcon win (rgbaWidth p) (rgbaHeight p) (rgbaBytes p))
+      , hostSetMinSize = limit R.setWindowMinSize
+      , hostSetMaxSize = limit R.setWindowMaxSize
+        -- No 'hostSetOpacity': RGFW windows cannot fade.
+      , hostSetMode = \case
+          -- Leaving fullscreen restores the geometry saved on entering
+          -- it, which on Windows a windowed window has none of.
+          Windowed -> do
+            full <- (\f -> f .&. R.rgfw_windowFullscreen /= 0) <$> R.windowFlags win
+            when full (R.setWindowFullscreen win False)
+            R.showWindow win
+          Fullscreen -> R.showWindow win >> R.setWindowFullscreen win True
+          Hidden -> R.hideWindow win
+      , hostMove = R.moveWindow win
+      , hostCenter = R.centerWindow win
+      , hostResize = \s -> readIORef (rwScale rw) >>= \scale -> uncurry (R.resizeWindow win) (pixelsAt scale s)
+      , hostMinimize = R.minimizeWindow win
+      , hostMaximize = R.maximizeWindow win
+      , hostRestore = R.restoreWindow win
+      }
+  reportWindowState ctx =<< rgfwWindowState win =<< readIORef (rwScale rw)
+  unless (wsMode settings == Hidden) (R.showWindow win)
+
+-- | Make the window's OpenGL context current, unless it is.
+useGl :: RgfwShared -> R.Window -> IO ()
+useGl sh win = do
+  cur <- readIORef (rsCurrent sh)
+  unless (cur == Just win) $ R.makeCurrentGL win >> writeIORef (rsCurrent sh) (Just win)
+
+-- | Read the window's size and scale into the frame's input.
+syncRgfwDisplay :: RgfwShared -> RgfwWindow -> Context -> Input -> IO (Context, Input)
+syncRgfwDisplay sh rw c inp = do
+  -- A minimized window reports 0x0 (on Windows): keep the last real size.
+  (curWinW, curWinH) <- R.windowSize (rwWin rw)
+  (pw0, ph0) <- readIORef (rwSize rw)
+  let (pw, ph) = if curWinW > 0 && curWinH > 0 then (curWinW, curWinH) else (pw0, ph0)
+  writeIORef (rwSize rw) (pw, ph)
+  curMonScale <- readIORef (rwMonScale rw)
+  userScale <- readIORef (rsUserScale sh)
+  oldScale <- readIORef (rwScale rw)
+  let !newScale = resolveScale (rsOpts sh) userScale curMonScale
+      -- Motion was divided by the old scale when decoded.
+      V2 mx my = inputMousePos inp
+      !k = oldScale / newScale
+      mouse = if k == 1 then inputMousePos inp else V2 (mx * k) (my * k)
+  writeIORef (rwScale rw) newScale
+  reportWindowState c =<< rgfwWindowState (rwWin rw) newScale
+  pure (c, inp {inputWindowSize = logicalSize (pw, ph) newScale, inputMousePos = mouse})
+
+-- | Touch the platform cursor only when the wanted kind changes.
+-- 'UiCursorHidden' hides the pointer. Each window has its own.
+syncRgfwCursor :: RgfwWindow -> Context -> Input -> IO ()
+syncRgfwCursor rw c inp = uiCursorKind c inp >>= syncCursorKind (rwCursor rw) (R.showMouse win) (setIcon . mapRgfwCursor)
+  where
+    win = rwWin rw
+    setIcon icon = void $ if icon == R.rgfw_mouseArrow then R.setMouseDefault win else R.setMouseStandard win icon
+
+-- | Run a frame's UI pass and present it. A frame whose damage is empty
+-- would swap in the picture already on screen, so it skips the render and
+-- the swap: an animation scrolled out of view costs its UI pass and nothing
+-- on the GPU. The opening frame and an animation's settle frame are forced.
+-- Other frames paint only their damage over the retained last frame.
+presentRgfw :: RgfwShared -> RgfwWindow -> GlRenderer -> Bool -> Context -> Input -> IO (DrawData, Bool) -> IO Bool
+presentRgfw sh rw renderer force c curInp runUi = do
+  useGl sh win
+  tUiStart <- getMonotonicTime
+  curScale <- readIORef (rwScale rw)
+  (pw, ph) <- readIORef (rwSize rw)
+  presented <- readIORef (rwPresented rw)
+  let !paintFull = force || presented /= (pw, ph, curScale) || inputWindowRedraw curInp
+  writeIORef (ctxPaintFull c) paintFull
+  (drawData, dirtyAfterUi) <- runUi
+  tUiEnd <- getMonotonicTime
+  damage <- takeDamage c
+  if damageIsEmpty damage && not paintFull
+    then do
+      noteDebugSkip (rdsSampler debugSampler)
+      -- Nothing was drawn, so the retained framebuffer holds this frame.
+      answerScreenshots c (retainedPixels renderer pw ph)
+      pure dirtyAfterUi
+    else do
+      tRenderStart <- getMonotonicTime
+      curMonScale <- readIORef (rwMonScale rw)
+      (baseSpans, overlaySpans) <- collectRasterSpans c curInp
+      pieces <- if paintFull then pure [] else takeDamagePieces c
+      syncImagesGl renderer c
+      -- A full frame clears to the draw data's colour, the page
+      -- over the window colour of the theme it was painted in.
+      renderArenaGl renderer getCozetteFont curScale pw ph
+          (if paintFull then DamageFull else damage) pieces drawData baseSpans overlaySpans
+      writeIORef (rwPresented rw) $! (pw, ph, curScale)
+      tSwapStart <- getMonotonicTime
+      R.swapBuffersGL win
+      tSwapEnd <- getMonotonicTime
+      answerScreenshots c (retainedPixels renderer pw ph)
+      nodes <- arenaCount (ctxNodeArena c)
+      let ms a b = (b - a) * 1000
+      noteDebugPresent (rdsSampler debugSampler) (ms tUiStart tUiEnd) (ms tRenderStart tSwapStart)
+        (ms tSwapStart tSwapEnd) (ms tUiStart tSwapEnd)
+        (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
+      writeIORef (rdsFrame debugSampler)
+        RgfwFrameStats
+          { fsNodes = nodes
+          , fsPhysW = pw
+          , fsPhysH = ph
+          , fsScale = curScale
+          , fsMonScale = curMonScale
+          }
+      pure dirtyAfterUi
+  where
+    win = rwWin rw
+    debugSampler = rwDebug rw
+
+-- | A further window ('NanoUI.nativeWindow'): the window, its renderer, and
+-- the context its view runs on.
+data RgfwChild = RgfwChild
+  { rcWindow :: !RgfwWindow
+  , rcRenderer :: !GlRenderer
+  , rcContext :: !Context
+  }
+
+-- | How the session opens, draws and closes further windows. Each has its
+-- own OpenGL context and renderer; the first window's drain queues their
+-- events ('drainRgfwEvents').
+childOps :: RgfwShared -> WindowOps RgfwChild RgfwEvent
+childOps sh =
+  WindowOps
+    { woOpen = \_ parentCtx settings -> do
+        win <- createRgfwWindow sh settings
+        rw <- setupRgfwWindow sh settings win `onException` R.closeWindow win
+        ctx0 <- newRgfwContext =<< readIORef (ctxTheme parentCtx)
+        let ctx = withClipboard ctx0 R.readClipboardText R.writeClipboardText
+        renderer <- newGlRenderer `onException` R.closeWindow win
+        installRgfwHost sh rw ctx
+        setWakeLoop ctx R.stopWaitForEvent
+        setBackendSession ctx rgfwSession (rwDebug rw)
+        myThreadId >>= writeIORef (ctxLoopThread ctx) . Just
+        pure (RgfwChild rw renderer ctx, ctx)
+    , woClose = \c -> do
+        let win = rwWin (rcWindow c)
+        (closeWindowHost (rcContext c) `finally` cancelTasks (rcContext c)) `finally` do
+          useGl sh win
+          freeGlRenderer (rcRenderer c)
+          R.closeWindow win
+          writeIORef (rsCurrent sh) Nothing
+    , woPoll = \_ -> pure []
+    , woApplyEvent = applyRgfwEvent
+    , woIsButtonEdge = \case RgfwEvButton {} -> True; _ -> False
+    , woIsClose = \case RgfwEvClose -> True; _ -> False
+    , woSync = syncRgfwDisplay sh . rcWindow
+    , woDraw = \c ctx view inp force ->
+        presentRgfw sh (rcWindow c) (rcRenderer c) force ctx inp $
+          (\(_, drawData, dirty) -> (drawData, dirty)) <$> runFrame ctx inp view
+      -- Each window has its own cursor.
+    , woPointerIn = \_ -> pure True
+    , woCursor = syncRgfwCursor . rcWindow
+    , woPacingMs = \_ -> rgfwPacingMs (rsOpts sh)
+    }
+
+-- | Take every window's events: the first window's are answered, and each
+-- further window's queued on it. Events for a window just closed go nowhere.
+drainRgfwEvents :: Ptr R.RGFW_event -> RgfwWindow -> [(R.Window, (RgfwChild, RgfwEvent -> IO ()))] -> IO [RgfwEvent]
+drainRgfwEvents evPtr first kids = go []
+  where
+    go acc =
+      R.pollAnyEvent evPtr >>= \case
+        Nothing -> pure (reverse acc)
+        Just (win, ev)
+          | Just (c, queue) <- lookup win kids -> decodeFor (rcWindow c) ev >>= mapM_ queue >> go acc
+          | win == rwWin first || win == R.Window nullPtr -> decodeFor first ev >>= \evs -> go (reverse evs ++ acc)
+          | otherwise -> go acc
+    decodeFor rw ev = do
+      ev' <- prepareRgfwEvent (rwMonScale rw) ev
+      scale <- readIORef (rwScale rw)
+      pure (decodeRgfwEvents scale [ev'])
 
 -- | The window's state at a scale, from what RGFW tracks through its events,
 -- so reading it costs no round trip to the desktop.
@@ -572,24 +727,27 @@ pollRgfwEvents win evPtr scaleRef monScaleRef = do
   scale <- readIORef scaleRef
   pure (decodeRgfwEvents scale raw)
   where
-    drain acc = do
-      ev <- R.pollEvent win evPtr
-      case ev of
+    drain acc =
+      R.pollEvent win evPtr >>= \case
         R.EventNone -> pure (reverse acc)
-        R.EventScaleUpdate sx _ -> do
-          writeIORef monScaleRef (if sx > 0 then sx else 1)
-          drain (ev : acc)
-        R.EventKeyPress k m -> relayout R.EventKeyPress k m
-        R.EventKeyRepeat k m -> relayout R.EventKeyRepeat k m
-        -- A modifier key let go while the one on the other side is down
-        -- leaves the modifier held, as that key's repeat would.
-        R.EventKeyRelease k m
-          | Just (_, twin) <- lookup k modifierRgfwKeys ->
-              R.isKeyDown twin >>= \held -> drain ((if held then R.EventKeyRepeat twin m else ev) : acc)
-          | otherwise -> relayout R.EventKeyRelease k m
-        _ -> drain (ev : acc)
-      where
-        relayout event k m = layoutKey k >>= \k' -> drain (event k' m : acc)
+        ev -> prepareRgfwEvent monScaleRef ev >>= \ev' -> drain (ev' : acc)
+
+-- | Read one raw event before decoding: record a scale change for the next
+-- sync, and remap a key to the current layout.
+prepareRgfwEvent :: IORef Float -> R.Event -> IO R.Event
+prepareRgfwEvent monScaleRef ev = case ev of
+  R.EventScaleUpdate sx _ -> ev <$ writeIORef monScaleRef (if sx > 0 then sx else 1)
+  R.EventKeyPress k m -> relayout R.EventKeyPress k m
+  R.EventKeyRepeat k m -> relayout R.EventKeyRepeat k m
+  -- A modifier key let go while the one on the other side is down
+  -- leaves the modifier held, as that key's repeat would.
+  R.EventKeyRelease k m
+    | Just (_, twin) <- lookup k modifierRgfwKeys ->
+        (\held -> if held then R.EventKeyRepeat twin m else ev) <$> R.isKeyDown twin
+    | otherwise -> relayout R.EventKeyRelease k m
+  _ -> pure ev
+  where
+    relayout event k m = (\k' -> event k' m) <$> layoutKey k
     -- RGFW key codes are what the key types on a US layout. Letter and
     -- punctuation keys are remapped to the current layout when the result is
     -- ASCII. Digits stay, since some layouts type symbols there unshifted.

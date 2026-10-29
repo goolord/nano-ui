@@ -30,7 +30,7 @@ import NanoUI.Rgfw.Internal.Gl
 import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCursor)
 import NanoUI.Rgfw.Render (RgfwSurface (..), packColor, renderArena, withSurface)
 import NanoUI.Rgfw.Wake (testRgfwWake)
-import NanoUI.Rgfw.Window (testGlWindow, testSessionWindow)
+import NanoUI.Rgfw.Window (testChildWindow, testGlWindow, testSessionWindow)
 import NanoUI.Testing (Context, collectRasterSpans)
 import NanoUI.Testing.Assert (run2Frames)
 import NanoUI.Testing.Harness (DemoSpan, nodesOfType, withInputOff)
@@ -319,5 +319,6 @@ main = do
   testWindowLayer
   testGlWindow assert
   testSessionWindow assert
+  testChildWindow assert
   testRgfwWake
   putStrLn "=== All tests passed successfully! ==="

@@ -81,6 +81,7 @@ library
         NanoUI.Monad
         NanoUI.Path
         NanoUI.Runner
+        NanoUI.Runner.Windows
         NanoUI.Shortcut
         NanoUI.Svg
         NanoUI.Testing

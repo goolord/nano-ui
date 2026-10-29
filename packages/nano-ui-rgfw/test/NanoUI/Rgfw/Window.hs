@@ -1,5 +1,5 @@
 -- | Window tests, skipped without a display or an OpenGL 3.2 window.
-module NanoUI.Rgfw.Window (hasDisplay, testGlWindow, testSessionWindow) where
+module NanoUI.Rgfw.Window (hasDisplay, testChildWindow, testGlWindow, testSessionWindow) where
 
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM, void, when)
@@ -20,7 +20,10 @@ import NanoUI
   , setWindowTitleUi, strong, tight, tomorrowNightMinDarkTheme, windowColor, windowSize
   )
 import NanoUI.Backend (Damage (..))
-import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
+import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp, runRgfwAppReduce)
+import NanoUI qualified as UI
+import NanoUI.Emit (NanoUIE, emit)
+import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
@@ -194,3 +197,44 @@ testSessionWindow assert =
             ((size, scale) == (Size 200 150, 2) && isRight (ended :: Either IOException ()))
           assert "RGFW session window: the pointer starts off the window" offWindow
           assert "RGFW session: one Shift let go while the other is down keeps Shift" (shiftClick == Just True)
+
+-- | A reducer session's further window ('UI.nativeWindow'), hidden: it runs
+-- its view on its own OpenGL context, a message it emits reaches the model,
+-- and it sees the new model through the declaring view's frame, which it
+-- closes over. 'quitUi' in it closes it and writes 'False', which the first
+-- window shows promptly though nothing else wakes it.
+testChildWindow :: (String -> Bool -> IO ()) -> IO ()
+testChildWindow assert =
+  hasDisplay >>= \case
+    False -> putStrLn "[SKIP] RGFW further window: no display"
+    True -> do
+      open <- UI.newVar True
+      passes <- newIORef (0 :: Int)
+      childSaw <- newIORef []
+      closedAt <- newIORef Nothing
+      noticedAt <- newIORef Nothing
+      let hidden = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}
+          options = defaultRgfwOptions {optScale = 1, optWindow = hidden}
+          view :: Int -> NanoUIE () ()
+          view m = do
+            n <- liftIO (readIORef passes <* modifyIORef' passes (+ 1))
+            UI.nativeWindow open hidden {wsTitle = "second"} $ do
+              UI.wakeAfter 0.02
+              liftIO (modifyIORef' childSaw (m :))
+              when (m == 0) (emit ())
+              when (m >= 1) $ do
+                liftIO (getMonotonicTime >>= writeIORef closedAt . Just)
+                quitUi
+            stillOpen <- UI.readVar open
+            when (not stillOpen) $ liftIO (getMonotonicTime >>= writeIORef noticedAt . Just)
+            when (not stillOpen || n > 2000) quitUi
+      ended <- try (runRgfwAppReduce options (\() k -> k + 1) (0 :: Int) view)
+      saw <- readIORef childSaw
+      if null saw && not (isRight (ended :: Either IOException ()))
+        then putStrLn "[SKIP] RGFW further window: no OpenGL 3.2 window"
+        else do
+          assert "RGFW further window: runs its view" (0 `elem` saw)
+          assert "RGFW further window: its message reaches the model, which its view sees" (any (>= 1) saw)
+          shut <- not <$> UI.readVarIO open
+          lag <- (\a b -> (-) <$> b <*> a) <$> readIORef closedAt <*> readIORef noticedAt
+          assert "RGFW further window: quitUi in it closes it, which the first window shows" (shut && maybe False (< 1) lag)

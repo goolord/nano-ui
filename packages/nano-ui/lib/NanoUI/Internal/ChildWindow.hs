@@ -27,13 +27,16 @@ import NanoUI.Internal.Var.Types (Var)
 -- settings, which take effect when it opens; set its title or theme later
 -- from @body@ ('NanoUI.setWindowTitleUi', 'NanoUI.setUiTheme').
 --
--- Share state with @body@ through 'Var's: a 'Var' either window writes
--- shows in the other on its next frame. @body@ runs in the window's frame,
--- not this one, so a plain value it closes over is the one from the last
--- frame of this view.
+-- @body@ runs in the window's own frames. It may close over this view's
+-- values: the window runs it again after each frame of this view. A 'Var'
+-- either window writes shows in the other on its next frame. In an
+-- emitting view ("NanoUI.Emit"), @body@ emits to the session's reducer.
+-- There, to keep the open state in the model, pass a 'NanoUI.constVar',
+-- turn 'NanoUI.wsExitOnCloseRequest' off, and emit a message from @body@
+-- when 'NanoUI.winCloseRequested' is set.
 --
--- The SDL backend opens the window; elsewhere, and in tests, nothing opens
--- and @body@ does not run.
+-- The SDL and RGFW backends open the window; in tests nothing opens and
+-- @body@ does not run.
 nativeWindow :: Var Bool -> WindowSettings -> NanoUI () -> NanoUI ()
 nativeWindow open settings body = do
   key <- nextId

@@ -189,34 +189,40 @@ openingCloseCheck = do
 -- | A view's 'nativeWindow' opens a window with a view of its own, which
 -- keeps getting frames from its timed wakes. A 'Var' it writes reaches the
 -- first window's view, and its close request writes 'False', which closes
--- it.
+-- it and shows in the first window at once, though nothing else wakes it (a
+-- watchdog wakes it after five seconds, so a regression fails rather than
+-- hangs).
 childWindowCheck :: IO ()
 childWindowCheck = do
   open <- newVar True
   shared <- newVar (0 :: Int)
   passes <- newIORef 0
   childPasses <- newIORef 0
-  closeSent <- newIORef False
+  closedAt <- newIORef Nothing
+  noticedAt <- newIORef Nothing
   seen <- newIORef []
   runSdlApp options $ do
-    wakeAfter 0.05
     n <- countPass passes
+    when (n == 1) $ askWake >>= \wake -> liftIO (void (forkIO (threadDelay 5000000 >> wake)))
     v <- readVar shared
     liftIO (modifyIORef' seen (v :))
     nativeWindow open (sdlWindowSettings options) {wsTitle = "second"} $ do
       wakeAfter 0.02
       m <- countPass childPasses
       when (m == 1) (writeVar shared 7)
-      sent <- liftIO (readIORef closeSent)
-      when (m >= 4 && not sent) $ askSdlEnv >>= \live -> liftIO $ for_ live $ \env -> do
-        writeIORef closeSent True
+      sent <- liftIO (readIORef closedAt)
+      when (m >= 4 && isNothing sent) $ askSdlEnv >>= \live -> liftIO $ for_ live $ \env -> do
+        getMonotonicTime >>= writeIORef closedAt . Just
         wid <- SDL.getWindowID (sdlWindow env)
         push (SDL_WindowEvent Events.SDL_EVENT_WINDOW_CLOSE_REQUESTED 0 0 wid 0 0)
     stillOpen <- readVar open
-    when ((n > 2 && not stillOpen) || n > 400) quitUi
+    when (n > 1 && not stillOpen) $ liftIO (getMonotonicTime >>= writeIORef noticedAt . Just)
+    when (n > 1 && not stillOpen) quitUi
   readIORef childPasses >>= require "the second window runs its view" . (>= 4)
   readIORef seen >>= require "a Var the second window writes reaches the first" . elem 7
   readVarIO open >>= require "the close request writes False" . not
+  lag <- (\a b -> (-) <$> b <*> a) <$> readIORef closedAt <*> readIORef noticedAt
+  require "the first window shows the close at once" (maybe False (< 1) lag)
 
 -- | A frame the resize watch draws (a live resize) that throws ends the
 -- session with the exception, as a frame of the loop's own does, rather

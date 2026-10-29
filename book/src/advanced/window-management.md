@@ -48,9 +48,11 @@ By default the window closes as soon as the platform asks it to. To confirm unsa
 
 The new window has its own focus, widget state, `useVar` slots and frames. It starts with the declaring view's theme; the settings take effect when it opens, so change its title or theme later from its own view. A window's view can open further windows the same way.
 
-Share state between windows through `Var`s. When a `Var` changes, every open window runs its view again on its next frame, so typing in one window shows in another. The body runs in the new window's frames, not the declaring view's, so a plain value it closes over is the one from the declaring view's last frame. Read state with `readVar` inside the body instead.
+The body runs in the new window's own frames, and after each frame of the declaring view, so it can use that view's values directly. Windows also share state through `Var`s: when a `Var` changes, every open window runs its view again on its next frame, so typing in one window shows in another.
 
-An app that never calls `nativeWindow` pays nothing for it. With several windows open, a `Var` write costs each other window one run of its view (with no repaint if nothing it shows changed), and every window keeps its own glyph and image textures. Only the SDL backend opens these windows; under RGFW and in tests the call does nothing. On Windows, a window being resized does not redraw the others until the drag ends. `nano-ui-example-windows` shows three windows sharing state.
+In an Elm-style view (`NanoUIE`), the body emits to the same reducer as the rest of the view. To keep a window's open state in the model, pass `constVar model.inspectorOpen`, set `wsExitOnCloseRequest = False` in its settings, and emit a close message from the body when `winCloseRequested <$> askWindow` is true.
+
+An app that never calls `nativeWindow` pays nothing for it. With several windows open, a `Var` write or a frame of the declaring view costs each window one run of its view (with no repaint if nothing it shows changed), and every window keeps its own glyph and image textures. The SDL and RGFW backends open these windows; in tests the call does nothing. On Windows, a window being resized does not redraw the others until the drag ends. `nano-ui-example-windows` shows three windows sharing state.
 
 ## Custom title bars
 

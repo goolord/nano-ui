@@ -12,6 +12,7 @@ import Data.Maybe (fromJust, isJust, isNothing)
 import Spec
 import GHC.TypeLits (symbolSing)
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Runner.Windows
 import NanoUI.Testing.Sim
 import System.Timeout (timeout)
 
@@ -23,6 +24,7 @@ tests =
   , spec "native-window-setters" runSettersTest
   , spec "native-window-commands-and-state" runCommandsTest
   , spec "native-window-children" runChildrenTest
+  , spec "native-window-runner" runWindowsRunnerTest
   ]
 
 type instance BackendSession ('Custom "test") = Int
@@ -340,3 +342,55 @@ runChildrenTest ctx failed = do
   assertEq failed 0 . length =<< childWindows other
   writeVarIO open False
   assertEq failed 0 . length =<< declared
+
+-- | The session runner's further windows, with windows that are contexts:
+-- a declaration opens one, whose view runs again when the declaring view
+-- draws (it may close over that frame's values) but not on an idle pass. A
+-- 'Var' it writes asks the first window for a frame. Its close request
+-- writes 'False' and closes it.
+runWindowsRunnerTest :: Context -> IORef Int -> IO ()
+runWindowsRunnerTest ctx failed = do
+  open <- newVar True
+  shared <- newVar (0 :: Int)
+  frames <- newIORef (0 :: Int)
+  childSaw <- newIORef []
+  closed <- newIORef []
+  let ops =
+        WindowOps
+          { woOpen = \_ _ settings -> (,) (wsTitle settings) <$> newContext
+          , woClose = \t -> modifyIORef' closed (t :)
+          , woPoll = \_ -> pure []
+          , woApplyEvent = const
+          , woIsButtonEdge = const False
+          , woIsClose = id
+          , woSync = \_ c i -> pure (c, i)
+          , woDraw = \_ c v i _ -> (\(_, _, more) -> more) <$> runFrame c i v
+          , woPointerIn = \_ -> pure False
+          , woCursor = \_ _ _ -> pure ()
+          , woPacingMs = const 16
+          }
+      firstFrame = do
+        n <- liftIO (atomicModifyIORef' frames (\k -> (k + 1, k + 1)))
+        nativeWindow open defaultWindowSettings {wsTitle = "second"} $ do
+          liftIO (modifyIORef' childSaw (n :))
+          when (n == 3) (writeVar shared 1)
+  windows <- newWindows ops
+  let mainFrame = noteMainFrame windows >> runFrame ctx inp firstFrame
+      step = void (afterMainPass windows ctx)
+      settled = replicateM_ 4 step >> length <$> readIORef childSaw
+  _ <- mainFrame
+  opening <- settled
+  assertEq failed (True, True) . (,) (opening >= 2) . all (== 1) =<< readIORef childSaw
+  _ <- mainFrame
+  step
+  assertEq failed [2] . take 1 =<< readIORef childSaw
+  quiet <- settled
+  assertEq failed quiet =<< settled
+  assertEq failed False =<< mainNeedsFrame windows
+  _ <- mainFrame
+  step
+  assertEq failed True =<< mainNeedsFrame windows
+  [(_, queue)] <- openWindows windows
+  queue True
+  step
+  assertEq failed (["second"], False, 0) =<< (,,) <$> readIORef closed <*> readVarIO open <*> (length <$> openWindows windows)

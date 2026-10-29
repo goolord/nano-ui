@@ -21,6 +21,12 @@ module NanoUI.Emit
   , reduceMessages
   , reduceUpdates
 
+    -- * Running a session
+  , Reducer
+  , newReducer
+  , reducerModel
+  , reduceFrame
+
     -- * Deprecated
   , emitWhenE
   , emitChangedE
@@ -34,7 +40,9 @@ module NanoUI.Emit
   )
 where
 
+import Control.Exception (finally)
 import Control.Monad (when)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
 import NanoUI.Internal.Context (isDirty, markDirty)
 import NanoUI.Testing (Context, DrawData, runFrame)
@@ -141,6 +149,44 @@ runClickReduce update ctx inp model view pos = do
   (_, modelP, _, _, _) <- runFrameReduce update ctx press model view
   (_, modelR, msgs, _, dirty) <- runFrameReduce update ctx release modelP view
   pure (modelR, msgs, dirty)
+
+-- | A reducer session's update function and model, for a backend's runner.
+-- It also keeps the messages a view emitted after its frame ended: a further
+-- window's view ('NanoUI.nativeWindow') runs in that window's own frames
+-- and emits through the sink of the view that declared it.
+data Reducer msg model = Reducer
+  { rUpdate :: msg -> model -> model
+  , rModel :: IORef model
+  , rLate :: IORef [msg]
+  -- ^ Newest first.
+  }
+
+newReducer :: (msg -> model -> model) -> model -> IO (Reducer msg model)
+newReducer update model = Reducer update <$> newIORef model <*> newIORef []
+
+-- | The current model.
+reducerModel :: Reducer msg model -> IO model
+reducerModel = readIORef . rModel
+
+-- | Run a frame of the view on the model, as 'runFrameReduce' does, and keep
+-- the result. Messages emitted after an earlier frame ended are reduced
+-- first, so the frame draws them; a message emitted after this frame ends
+-- asks the context for another.
+reduceFrame :: Eq model => Reducer msg model -> Context -> Input -> (model -> NanoUIE msg a) -> IO (a, DrawData, Bool)
+reduceFrame r ctx inp view = do
+  late <- atomicModifyIORef' (rLate r) ([],)
+  model <- reduceMessages (rUpdate r) <$> readIORef (rModel r) <*> pure (reverse late)
+  live <- newIORef True
+  messages <- newIORef []
+  let sink msg = liftIO $ readIORef live >>= \case
+        True -> modifyIORef' messages (msg :)
+        False -> modifyIORef' (rLate r) (msg :) >> markDirty ctx
+  (a, draw, dirty) <- runFrame ctx inp (withSink sink (view model)) `finally` writeIORef live False
+  model' <- reduceMessages (rUpdate r) model . reverse <$> readIORef messages
+  writeIORef (rModel r) model'
+  when (model' /= model) (markDirty ctx)
+  dirty' <- isDirty ctx
+  pure (a, draw, dirty || dirty')
 
 -- | Strictly fold messages through an update function in traversal order.
 reduceMessages ::

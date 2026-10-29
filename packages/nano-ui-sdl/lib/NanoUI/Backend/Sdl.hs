@@ -95,7 +95,6 @@ module NanoUI.Backend.Sdl
   , resetRenderTextures
   ) where
 
-import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
 import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, resetRenderTextures, sdlDebugSnapshot, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
@@ -107,7 +106,7 @@ import NanoUI.Sdl.Internal.Chrome
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Internal.Font.Search (listFontFamilies)
 import NanoUI.Sdl.Internal.Url (openUrl)
-import NanoUI.Emit (NanoUIE, runFrameReduce)
+import NanoUI.Emit (NanoUIE, newReducer, reduceFrame)
 
 -- | Open an SDL window and run a view until close or the quit predicate fires.
 -- Owns and releases the native resources. Call from the application's display
@@ -134,9 +133,7 @@ runSdlAppReduce ::
   -> (model -> NanoUIE msg ())
   -> IO ()
 runSdlAppReduce options update model view = do
-  modelRef <- newIORef model
+  reducer <- newReducer update model
   runSdlSession options $ \ctx env inp forceFull ->
-    drawFrameWith ctx env inp forceFull $ do
-      m <- readIORef modelRef
-      (_, m', _, drawData, dirty) <- runFrameReduce update ctx inp m view
-      (drawData, dirty) <$ writeIORef modelRef m'
+    drawFrameWith ctx env inp forceFull $
+      (\(_, drawData, dirty) -> (drawData, dirty)) <$> reduceFrame reducer ctx inp view

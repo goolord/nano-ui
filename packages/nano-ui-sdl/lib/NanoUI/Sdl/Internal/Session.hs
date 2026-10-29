@@ -14,6 +14,7 @@ import NanoUI (WindowSettings (..), followSystemTheme, unlessM, whenM)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
+import NanoUI.Runner.Windows (closeWindows, mainNeedsFrame, noteMainFrame, windowsWait)
 import NanoUI.Sdl.Internal.Children
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
@@ -38,8 +39,8 @@ runSdlSession options drawSession = do
     -- Windows the view opens beside this one ('NanoUI.nativeWindow'). Every
     -- frame of this window notes when its view began, so a 'Var' another
     -- window writes later brings it a frame.
-    windows <- newWindows options env
-    let drawFn c e i f = noteMainFrame windows >> drawSession c e i f
+    windows <- newSdlWindows options env
+    let drawFn c e i f = noteMainFrame (swWindows windows) >> drawSession c e i f
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
@@ -146,7 +147,7 @@ runSdlSession options drawSession = do
             { sdPollEvents    = poll
             , sdWaitEvents    = \t -> do
                 -- Further windows can need a pass sooner than this one.
-                other <- windowsWait windows
+                other <- windowsWait (swWindows windows)
                 let t' = if t < 0 then other else if other < 0 then t else min t other
                 -- Take the rest of the queue with the event that ended the
                 -- wait, so one pass sees a whole burst (a resize queues
@@ -176,7 +177,7 @@ runSdlSession options drawSession = do
                 presented <- readIORef resizePresented
                 writeIORef resizePresented Nothing
                 wakeDue <- readIORef wakeRef
-                varDue <- mainNeedsFrame windows
+                varDue <- mainNeedsFrame (swWindows windows)
                 let !(prevInp', inpSynced') = case presented of
                       Just size
                         | size == inputWindowSize inpSynced ->
@@ -212,4 +213,4 @@ runSdlSession options drawSession = do
     closeNow <- if quit then requestWindowClose ctx2 else pure False
     unless closeNow $
       bracket (installResizeWatch onResize) id $ \_ ->
-        runSessionLoop drv ctx2 inp1 `finally` closeWindows windows
+        runSessionLoop drv ctx2 inp1 `finally` closeWindows (swWindows windows)

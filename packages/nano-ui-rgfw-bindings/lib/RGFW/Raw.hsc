@@ -5,6 +5,9 @@ module RGFW.Raw
   , RGFW_event
   , c_RGFW_window_close
   , c_RGFW_window_checkEvent
+  , c_RGFW_checkEvent
+  , c_RGFW_window_makeCurrentContext_OpenGL
+  , c_rgfw_event_window
   , c_RGFW_waitForEvent
   , c_RGFW_stopCheckEvents
   , c_rgfw_create_window_gl
@@ -193,6 +196,15 @@ foreign import ccall "RGFW_window_close"
 foreign import ccall "RGFW_window_checkEvent"
   c_RGFW_window_checkEvent :: Ptr RGFW_window -> Ptr RGFW_event -> IO CUChar
 
+-- | 'c_RGFW_window_checkEvent' for every window: the event's window is
+-- 'c_rgfw_event_window'.
+foreign import ccall "RGFW_checkEvent"
+  c_RGFW_checkEvent :: Ptr RGFW_event -> IO CUChar
+
+-- | Make the window's OpenGL context current on the calling thread.
+foreign import ccall "RGFW_window_makeCurrentContext_OpenGL"
+  c_RGFW_window_makeCurrentContext_OpenGL :: Ptr RGFW_window -> IO ()
+
 -- | Wait in milliseconds: negative blocks indefinitely; zero does not wait.
 foreign import ccall "RGFW_waitForEvent"
   c_RGFW_waitForEvent :: CInt -> IO ()
@@ -218,6 +230,10 @@ foreign import ccall "RGFW_window_swapBuffers_OpenGL"
 -- | Event tag; inspect it before reading fields of the event union.
 c_rgfw_event_type :: Ptr RGFW_event -> IO CUChar
 c_rgfw_event_type = #{peek RGFW_event, type}
+
+-- | The window an event is for; null for one that is for none.
+c_rgfw_event_window :: Ptr RGFW_event -> IO (Ptr RGFW_window)
+c_rgfw_event_window = #{peek RGFW_event, common.win}
 
 -- | Mouse-motion x coordinate in native window pixels.
 c_rgfw_event_mouse_x :: Ptr RGFW_event -> IO CInt
