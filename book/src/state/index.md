@@ -57,12 +57,12 @@ A record in a `Var` gives a `Var` for each field. With `Generic` and `Overloaded
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:projections}}
 ```
 
-`settings.volume` projects one field as a `Var Float`. Editing it does not repaint what reads only `settings.nickname`.
+`settings.volume` is a `Var Float` projecting one field. Editing it does not repaint what reads only `settings.nickname`.
 
-- **`constVar x`** is read-only; writes are no-ops. Use it for a derived value shown in an input widget.
-- **`withValue val widget`** runs a `Var` widget against a temporary `Var` and returns the result and final value. `nano-ui-emit` uses it for `emitChanged`.
-- **`zoomVar getter setter`** projects a computed part of a larger `Var`; `zoomVarL` does the same from a lens.
-- **Lists:** `forEachVar key list body` gives per-element `Var`s that follow their keys across reorders. `withElemVars` is the variant for filtering or sorting yourself.
+- `constVar x` is read-only; writes are no-ops. Use it for a derived value shown in an input widget.
+- `withValue val widget` runs a `Var` widget against a temporary `Var` and returns the result and final value. `nano-ui-emit` uses it for `emitChanged`.
+- `zoomVar getter setter` projects a computed part of a larger `Var`; `zoomVarL` does the same from a lens.
+- `forEachVar key list body` gives per-element `Var`s that follow their keys across reorders. `withElemVars` is the variant for filtering or sorting yourself.
 
 ## What a write costs
 

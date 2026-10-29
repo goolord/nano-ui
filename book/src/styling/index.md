@@ -34,9 +34,9 @@ Built-in themes: `defaultTheme` (dark), `defaultLightTheme`, the Tomorrow varian
 
 Modifiers compose with `(.)`; nested scopes inherit the outer modification. Theme scopes affect painting only, never layout metrics.
 
-- **Style fields:** `background`, `foreground`, `borderColor`, `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`, `fillColor`.
-- **Theme-level:** `buttonStyle`, `inputStyle`, `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `rounded`, `subtle`, `tinted`, `readableOn`.
-- **Semantic shortcuts:** `primary`, `destructive`, `success`, `warning`, `tone Danger`, `toneColor Warning`.
+- `background`, `foreground`, `borderColor`, `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`, and `fillColor` set `Style` fields.
+- `buttonStyle`, `inputStyle`, `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `rounded`, `subtle`, `tinted`, and `readableOn` modify the `Theme`.
+- `primary`, `destructive`, `success`, `warning`, `tone Danger`, and `toneColor Warning` apply semantic colours.
 
 A quiet button:
 
@@ -48,12 +48,14 @@ For a fully custom look, define a palette record, build a `Theme` from it, and d
 
 ## Interaction states
 
-Widgets move through four states:
+A widget is drawn in one of four states:
 
-1. **Default**: `styleBg`, `styleFg`, `styleBorder`.
-2. **Hover**: `styleHoverBg`.
-3. **Pressed**: `styleActiveBg`, while the primary button is held inside the widget.
-4. **Disabled**: dimmed and non-interactive.
+| State | Drawn with |
+| --- | --- |
+| Default | `styleBg`, `styleFg`, `styleBorder` |
+| Hover | `styleHoverBg` |
+| Pressed | `styleActiveBg`, while the primary button is held inside the widget |
+| Disabled | Dimmed colours; pointer and keyboard input are ignored |
 
 `disabledWhen cond subtree` disables interaction and dims rendering while preserving layout and state:
 

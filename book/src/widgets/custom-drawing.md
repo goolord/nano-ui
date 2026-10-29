@@ -21,7 +21,7 @@ Each has a primed form returning `Response` (`knob'`, `toggleSwitch'`, ...) and 
 {{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:with_forms}}
 ```
 
-`sparkline` scales the values to their own range, so it shows the shape of a series, not its size. At its default size and with `sparklineWith`:
+`sparkline` maps the smallest value to the bottom of its plot area and the largest to the top, so two series of different magnitude can draw the same line. At its default size and with `sparklineWith`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:sparkline}}
@@ -94,7 +94,7 @@ The basic ops take a rectangle or a centre and radius. They need no `NanoUI.Path
 
 ### Paths
 
-Steps joined with `<>` build a `Path`. `moveTo` starts a subpath. `lineTo`, `quadTo`, `cubicTo`, and `arc` extend it from the current point, and `close` draws a line back to where it started. Each path below is stroked with `drawStrokePath (path r) 3 blue`. Filled dots are points on the path; hollow dots are control points and arc centres.
+A `Path` is a list of steps joined with `<>`. `moveTo` starts a subpath. `lineTo`, `quadTo`, `cubicTo`, and `arc` extend it from the current point, and `close` draws a line back to where it started. Each path below is stroked with `drawStrokePath (path r) 3 blue`. Filled dots are points on the path; hollow dots are control points and arc centres.
 
 <img src="../images/canvas/segments.svg" alt="Five cells: a two-segment peak, a quadratic curve with its control point above, an S-shaped cubic curve with two control points, a three-quarter arc, and the same arc closed through its centre into a pie slice.">
 
@@ -128,7 +128,7 @@ Shape helpers build whole subpaths. They never join onto what comes before them,
 
 ### Paints
 
-`P.Solid` fills with one colour. `P.Linear from to stops` blends a gradient along the line from `from` (offset 0) to `to` (offset 1).
+`P.Solid` is one colour. `P.Linear from to stops` is a gradient along the line from `from` (offset 0) to `to` (offset 1).
 
 <img src="../images/canvas/paints.svg" alt="Four cells: a solid blue rounded rectangle, a blue-to-teal gradient across the full width, the same gradient squeezed into the middle third with solid ends, and a disc shading amber to rose to blue along its diagonal.">
 
@@ -176,7 +176,7 @@ Joins shape the corners between segments. A miter longer than `strokeMiterLimit`
 {{#include ../../../packages/nano-ui-svg/app/CanvasExamples.hs:transforms}}
 ```
 
-`P.rotate` and `P.scale` work about the window origin, not the widget. Move the pivot to the origin first: `P.rotateAround` does that for rotation, and `scaleAround` above does it for scale. Stroke widths and dashes scale with the transform, so the enlarged arrow's outline is thicker. Text moves its anchor and scales, but glyphs do not rotate.
+`P.rotate` and `P.scale` work about the window origin (0, 0). Move the pivot to the origin first: `P.rotateAround` does that for rotation, and `scaleAround` above does it for scale. Stroke widths and dashes scale with the transform, so the enlarged arrow's outline is thicker. Text moves its anchor and scales, but glyphs do not rotate.
 
 ### Clipping
 
@@ -190,7 +190,7 @@ Joins shape the corners between segments. A miter longer than `strokeMiterLimit`
 
 ### Text
 
-`drawText pos alignX alignY txt colour` anchors text to a point. The alignment says which part of the text sits on the point (the red dot): `AlignStart` puts the point at the left edge, `AlignTop` at the top of the line, `AlignBaseline` on the baseline. `drawTextWith` takes a `TextFont` for size, variant, weight, and slant.
+`drawText pos alignX alignY txt colour` anchors text to a point. The alignment selects which part of the text sits on the point (the red dot): `AlignStart` puts the point at the left edge, `AlignTop` at the top of the line, `AlignBaseline` on the baseline. `drawTextWith` takes a `TextFont` for size, variant, weight, and slant.
 
 <img src="../images/canvas/text.svg" alt="Eight cells showing the word Anchor placed against a red dot: left, centre and right aligned; then top, middle, baseline and bottom aligned; and a large bold amber 42.">
 

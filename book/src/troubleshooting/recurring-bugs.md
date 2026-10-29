@@ -84,7 +84,7 @@ Symptoms:
 ```
 
 - Set `themeFloatingWindow` and `themePopup` to the panel surface, so a padded body does not show a panel box inside the dialog.
-- Between two chrome regions, draw one `separator` at the seam, not a border on the bottom of one and the top of the other.
+- Between two chrome regions, draw one `separator` at the seam instead of a border on the bottom of one and the top of the other.
 
 `stronghead` ("Remove duplicate borders from workspace popovers and notifications") and `winget-gui`'s dialogs both made this fix.
 
@@ -168,9 +168,9 @@ A scroller can also set its own step with `setScrollStepUi`; `0` returns it to t
 
 ## 6. Focus and input ordering
 
-### Focus questions at the top of the view always say "no"
+### Focus queries at the top of the view always return `False`
 
-The node arena is reset before the view runs, so `isFocused` (or any check of editing state) at the top of `appView` answers `False` every frame.
+The node arena is reset before the view runs, so `isFocused` (or any check of editing state) at the top of `appView` returns `False` every frame.
 
 **Symptom:** Ctrl+A selects every item while the search box is being typed into; Delete opens the uninstall dialog.
 
@@ -188,7 +188,7 @@ Text inputs do not claim Escape. If Escape shares the "a field is editing" guard
 
 ### Typed keys never reach a custom widget
 
-A focused widget that reads `inputChars` must call `useInputMethod` every frame it accepts text, even when it is not a text field. `ned`'s file tree takes vim's `j`/`k` as typed text; only the editor asked for input, so the keys never reached the tree.
+A focused widget that reads `inputChars` must call `useInputMethod` every frame it accepts text, even when it is not a text field. `ned`'s file tree takes vim's `j`/`k` as typed text; only the editor called `useInputMethod`, so the keys never reached the tree.
 
 **Fix:**
 

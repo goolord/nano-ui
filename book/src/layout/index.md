@@ -156,7 +156,7 @@ The same view at 760 px:
 
 ## Modifiers
 
-Each modifier rewrites a `Layout` (`Layout -> Layout`), so modifiers chain with `(.)`. The leftmost wins when two set the same property, so `tight . padAll 14` has no padding while `padAll 14 . tight` keeps it.
+Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmost wins when two set the same property, so `tight . padAll 14` has no padding while `padAll 14 . tight` keeps it.
 
 ### Sizing
 
@@ -395,7 +395,7 @@ Each modifier rewrites a `Layout` (`Layout -> Layout`), so modifiers chain with 
 
 ### Alignment and wrapping
 
-`alignStart`, `alignCenter`, and `alignEnd` place a child across a column. `alignTop`, `alignMid`, and `alignBottom` place it down a row. A child always aligns itself; putting `alignMid` on a row positions the row in its parent, not the row's contents.
+`alignStart`, `alignCenter`, and `alignEnd` place a child across a column. `alignTop`, `alignMid`, and `alignBottom` place it down a row. An alignment modifier positions the node it is applied to inside its parent. `alignMid` on a row moves the row; to centre the row's children, put `alignMid` on each child.
 
 <details class="nano-example">
 <summary><code>alignStart</code>: the left edge</summary>
@@ -569,7 +569,7 @@ For 10,000+ rows, build only the visible slice and use spacers for the rest. Cap
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:virtualized}}
 ```
 
-`scrollViewport` excludes padding and the scrollbar lane; use it, not the container rectangle, for the visible height. `scrollOffset` is the current offset. The metrics read registers a layout dependency, so a resize triggers another frame.
+`scrollViewport` excludes padding and the scrollbar lane; use it instead of the container rectangle for the visible height. `scrollOffset` is the current offset. The metrics read registers a layout dependency, so a resize triggers another frame.
 
 See `packages/nano-ui-demo/examples/LongList.hs` (100,000 rows) and `Logs.hs` (sticky-to-bottom).
 
@@ -591,6 +591,6 @@ One wheel notch scrolls 60 logical pixels by default. For fixed-height rows, set
 
 ## Nesting and chrome
 
-`scrollArea`, `panel`, and `card` each draw a background, border, and radius. Nesting them inside a popup or dialog draws a box in a box. Let one level own the chrome: flatten the inner surface with `styled (inputStyle (background colorTransparent . borderWidth 0))`, or give the outer dialog `padAll 0` and pad the inner body.
+`scrollArea`, `panel`, and `card` each draw a background, border, and radius. Nesting them inside a popup or dialog draws a box in a box. Draw the chrome at one level only: flatten the inner surface with `styled (inputStyle (background colorTransparent . borderWidth 0))`, or give the outer dialog `padAll 0` and pad the inner body.
 
 See [Styling Gotchas](../styling/gotchas.md) and [Troubleshooting](../troubleshooting/recurring-bugs.md) for the recurring cases.

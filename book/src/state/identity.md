@@ -1,15 +1,15 @@
 # Widget Identity & Keys
 
-Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local `Var`s) is stored under the widget's **id**, not in the widget. Ids come from the call order among siblings. If the order changes, the state jumps to a different widget.
+Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local `Var`s) is stored under the widget's **id**. Ids come from the call order among siblings. If the order changes, the state jumps to a different widget.
 
 ## How ids are assigned
 
-Each container assigns ids to its children counting from zero. A `column` with three labels has children 0, 1, and 2; a nested `row` starts its own count. Ids are per container, not global.
+Each container assigns ids to its children counting from zero. A `column` with three labels has children 0, 1, and 2; a nested `row` starts its own count.
 
 Two separate id spaces exist:
 
-- **Widget ids** for layout nodes, focus, input state, and scroll state.
-- **`useVar` slots**, counted in call order, with their own counter and key space.
+- Widget ids, for layout nodes, focus, input state, and scroll state.
+- `useVar` slots, counted in call order, with their own counter and key space.
 
 A conditional *widget* does not shift `useVar` slots, and a conditional *`useVar`* does not shift widget ids. Both still shift their own kind; `scope` prevents that.
 

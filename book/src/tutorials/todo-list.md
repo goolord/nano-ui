@@ -46,13 +46,13 @@ The input row draws the field and the button, and adds an item on Enter or a cli
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:new_item_row}}
 ```
 
-- **The primed widget returns a `Response`.** `textInputConfigured'` reports the widget's identity, rectangle, hover and click state, and whether Enter was submitted (`respSubmitted`). `button` already returns the one `Bool` this row needs.
-- **`readVar draft` sits below the field that edits it.** The field's write lands first, then the read sees the new text in the same pass. Reading *above* an editing widget forces a second pass.
-- **`modifyVar` reads the latest value.** Two changes in one frame both apply; the append does not lose one.
-- **The field is cleared and focused again**, so the next item can be typed immediately. `requestFocus` takes effect at the end of the frame.
+- `textInputConfigured'`, the primed form, returns a `Response` holding the widget's identity, rectangle, hover and click state, and whether Enter was submitted (`respSubmitted`). `button` already returns the one `Bool` this row needs.
+- `readVar draft` sits below the field that edits it, so the field's write happens first and the read returns the new text in the same pass. Reading *above* an editing widget forces a second pass.
+- `modifyVar` applies its function to the latest value, so two changes in one frame both apply.
+- The code clears the field and focuses it again, so the next item can be typed immediately. `requestFocus` takes effect at the end of the frame.
 
 > [!NOTE]
-> The `when` guard around the mutation is not optional. The view runs every frame, so an unguarded `modifyVar` would add an item on every pass. Event-driven work goes inside `whenM (button ...)` or a condition like the one above.
+> The `when` guard around the mutation is required. The view runs every frame, so an unguarded `modifyVar` would add an item on every pass. Event-driven work goes inside `whenM (button ...)` or a condition like the one above.
 
 ## 4. Filtering and a derived count
 
@@ -66,7 +66,7 @@ The filter is a local value with three states. `useEnumVar` accepts any `Enum`/`
 
 ## 5. Rows own their state
 
-Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row's position on screen.
+Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must therefore be keyed by the item's id, which stays fixed while the row's screen position changes.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:todo_list}}
@@ -76,7 +76,7 @@ Each row needs local state (whether it is being edited and the draft of its text
 - `withKey (todoId todo)` does the same for the row's *widget* state and its positional `useVar` slots. Without the key, deleting the first row would move every later row's caret, edit flag, and half-typed draft one position up.
 - `matches` filters the rows. The neighbours (`above`, `below`) are passed in so the Up/Down buttons can skip rows that the filter hides.
 
-Here is the row itself, trimmed to the essential structure:
+The row, trimmed to its structure:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:todo_row}}
@@ -84,9 +84,9 @@ Here is the row itself, trimmed to the essential structure:
 
 Three details make this work:
 
-1. **`scope` around the label/field swap.** Only one of the two branches runs on a given frame. Without `scope`, the widgets after the branch would shift ids whenever the row enters or leaves edit mode. `scope` reserves one slot either way. (The `useVar` slots inside the row are stable because the whole row is under `withKey`.)
-2. **A delayed focus request.** `requestFocus` can only target a widget declared in the same pass. The field first appears in the pass *after* Edit was clicked, so the request waits in `focusPending` until the field exists.
-3. **Editing writes back into the item's `Var`.** `todo.todoText` projects one field; `todo.todoDone` does too, which is why the checkbox can edit it in place. Saving writes the draft and clears the edit flag.
+1. `scope` wraps the label/field swap. Only one of the two branches runs on a given frame. Without `scope`, the widgets after the branch would shift ids whenever the row enters or leaves edit mode. `scope` reserves one slot either way. (The `useVar` slots inside the row are stable because the whole row is under `withKey`.)
+2. The focus request is delayed. `requestFocus` can only target a widget declared in the same pass. The field first appears in the pass *after* Edit was clicked, so the request is stored in `focusPending` and issued on the pass that declares the field.
+3. Editing writes back into the item's `Var`. `todo.todoText` projects one field; `todo.todoDone` does too, which is why the checkbox can edit it in place. Saving writes the draft and clears the edit flag.
 
 ## 6. Reordering by id
 

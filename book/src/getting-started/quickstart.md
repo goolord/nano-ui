@@ -4,10 +4,10 @@ Set up a project and open a window. The [tutorials](../tutorials/index.md) conti
 
 ## Prerequisites
 
-- **GHC 9.10 through 9.14** (development uses 9.14)
-- **Cabal 3.12+**
-- **SDL3 and SDL3_ttf 3.2+** for the SDL backend
-- **pkg-config**
+- GHC 9.10 through 9.14 (development uses 9.14)
+- Cabal 3.12+
+- SDL3 and SDL3_ttf 3.2+ for the SDL backend
+- pkg-config
 
 ### Nix (Linux / macOS)
 
@@ -91,11 +91,11 @@ cabal run -j1 my-app
 
 ## How it works
 
-1. **`runSdlApp`** initializes SDL3, creates a window with TrueType font rendering, and starts the frame loop.
-2. **`columnWith` / `rowWith`** are layout containers. Their argument composes layout modifiers (`gap 12 . padAll 20`); the leftmost modifier wins when two set the same property.
-3. **`useVar (0 :: Int)`** declares state at this position in the view. On later frames it retrieves the existing value; the initial value is used only on the first frame.
-4. **`button "+"`** draws an interactive button and returns `True` only on the frame it is activated.
-5. **`modifyVar n (+ 1)`** updates the value. Reading `n` below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.
+1. `runSdlApp` initializes SDL3, creates a window with TrueType font rendering, and starts the frame loop.
+2. `columnWith` and `rowWith` are layout containers. Their argument composes layout modifiers (`gap 12 . padAll 20`); the leftmost modifier wins when two set the same property.
+3. `useVar (0 :: Int)` allocates a `Var` on the first frame and returns the same `Var` on later frames, matched by its call position in the view. The initial value is used only on the first frame.
+4. `button "+"` draws an interactive button and returns `True` only on the frame it is activated.
+5. `modifyVar n (+ 1)` updates the value. Reading `n` below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.
 
 The view runs every frame, so two rules follow:
 

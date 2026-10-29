@@ -1,6 +1,6 @@
 # Keyboard, Focus & IME
 
-Keyboard input is read during the frame, not registered with the window. A focused widget claims the keys it uses; shortcuts and key listeners are filtered automatically.
+The view reads keyboard input during the frame; there are no key handlers to register. A focused widget claims the keys it uses, and shortcuts and key queries skip claimed keys.
 
 ## Shortcuts
 
@@ -16,8 +16,8 @@ Keyboard input is read during the frame, not registered with the window. A focus
 
 Use `cmdOrCtrl` for application commands. `ctrl`, `shift`, `alt`, and `super` are exact: `ctrl <> key 's'` does **not** match Ctrl+Shift+S.
 
-- **`shortcut`** fires on the frame the chord goes down, including auto-repeat (holding Ctrl+Z repeats undo).
-- **`shortcutOnce`** ignores auto-repeat. Use it for toggles and one-shot commands.
+- `shortcut` fires on the frame the chord goes down, including auto-repeat (holding Ctrl+Z repeats undo).
+- `shortcutOnce` ignores auto-repeat. Use it for toggles and one-shot commands.
 
 Only the **first** matching `shortcut` call in a frame fires. It consumes that key's presses for the frame, so two bindings of the same chord never both run. Declaration order is priority order.
 
@@ -52,7 +52,7 @@ Text fields do not claim Escape, so Escape can still close a popup, clear a sele
 {{#include ../../../packages/nano-ui-demo/book/Book/Input.hs:take_escape}}
 ```
 
-The first call that succeeds wins. An open popup, dropdown, or text-edit menu reserves Escape before the view sees it.
+The first call that succeeds wins. An open popup, dropdown, or text-edit menu reserves Escape before the view's own handlers run.
 
 ## User-configurable chords
 
@@ -68,10 +68,10 @@ The syntax is modifier prefixes followed by a key: `C-` Ctrl, `S-` Shift, `A-` A
 
 ## Focus
 
-- **Click** a text field, select, slider, or focusable custom widget to focus it. Clicking elsewhere unfocuses the current field.
-- **Tab** moves to the next focusable widget; **Shift+Tab** to the previous.
-- **`requestFocus (respId resp)`** focuses a widget. **`focusNext` / `focusPrevious`** behave like Tab. **`clearFocus`** drops focus at the end of the frame.
-- **`holdFocus wid`** claims focus every frame for a view that handles input itself; it also consumes Tab so an editor can indent with it.
+- Clicking a text field, select, slider, or focusable custom widget focuses it. Clicking elsewhere unfocuses the current field.
+- Tab moves to the next focusable widget; Shift+Tab moves to the previous one.
+- `requestFocus (respId resp)` focuses a widget. `focusNext` and `focusPrevious` move focus like Tab and Shift+Tab. `clearFocus` drops focus at the end of the frame.
+- `holdFocus wid` claims focus every frame for a view that handles input itself; it also consumes Tab so an editor can indent with it.
 
 Focus requests are applied **at the end of the frame**, against that frame's layout. A focus move is visible on the next frame:
 
@@ -86,7 +86,7 @@ A request can name a widget declared later in the same pass (for example with `c
 ```
 
 > [!WARNING]
-> Query focus at the **end** of the view. The node arena is reset before the view runs, so `isFocused` at the top always answers `False`. Keyboard shortcuts that depend on focus belong after the widgets have run.
+> Query focus at the **end** of the view. The node arena is reset before the view runs, so `isFocused` at the top always returns `False`. Keyboard shortcuts that depend on focus belong after the widgets have run.
 
 A focus request is ignored for a disabled widget, a widget behind an open modal, one not declared this pass, or a group response that is not itself a Tab stop. A widget in an inactive tab is not declared, so it cannot keep focus; request focus again when the tab is shown.
 

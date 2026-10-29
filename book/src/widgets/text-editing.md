@@ -1,7 +1,7 @@
 # Text Editing
 
-- **`textArea`** edits a `Var Text`. Use it for short text: notes, descriptions, commit messages.
-- **`textAreaDocument`** edits a `Var TextDocument`, which shares unchanged lines between edits. Use it for files and code buffers.
+- `textArea` edits a `Var Text`. Use it for short text: notes, descriptions, commit messages.
+- `textAreaDocument` edits a `Var TextDocument`, which shares unchanged lines between edits. Use it for files and code buffers.
 
 ## `textArea` for short text
 
@@ -17,7 +17,7 @@ Every edit builds a new `Text`, which is cheap for a few kilobytes.
 {{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:document}}
 ```
 
-Only the edited lines are copied; unchanged lines are shared. `documentText` materializes the whole text; call it when saving, not on every edit.
+Only the edited lines are copied; unchanged lines are shared. `documentText` materializes the whole text; call it when saving instead of on every edit.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:save}}
@@ -50,4 +50,4 @@ A complete Edit menu built this way is in [Build a Notepad](../tutorials/notepad
 > [!TIP]
 > Directly overwriting the `Var Text` or `Var TextDocument` from outside resets the undo stack. To make a programmatic edit undoable, issue a `TextCommand` (`InsertText`, `ReplaceAll`, and so on) instead of writing the `Var`.
 
-In the primed variants' `Response`, `respChanged` reports an edit, not a caret move, so it is the signal to mark a document dirty. `respId` names the editor for commands and focus.
+In the primed variants' `Response`, `respChanged` is `True` after an edit and `False` after a caret move alone, so use it to mark a document dirty. `respId` names the editor for commands and focus.

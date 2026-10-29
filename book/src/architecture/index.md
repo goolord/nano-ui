@@ -4,26 +4,26 @@ How a frame runs, and how applications are structured around it. None of this is
 
 ## The frame lifecycle
 
-![Rendering Pipeline](../images/rendering-pipeline.svg)
+![Frame lifecycle](../images/rendering-pipeline.svg)
 
 Each frame:
 
-1. **View execution.** The `NanoUI ()` action runs top-to-bottom, appending layout nodes, reading input, and reading/writing `Var`s.
-2. **Re-run check.** If a `Var` was written after it was read this pass, the action runs again with one-shot input events cleared.
-3. **Layout solve.** Flex weights, gaps, padding, and constraints produce a rectangle for every node.
-4. **Hit testing and focus.** Pointer coordinates, shortcuts, hover, press, and Tab order resolve against the new geometry.
-5. **Damage calculation.** The new geometry and draw ops are diffed against the previous frame.
-6. **Paint.** Only the damaged region is rasterized and presented.
+1. The `NanoUI ()` action runs top-to-bottom, appending layout nodes, reading input, and reading and writing `Var`s.
+2. If a `Var` was written after it was read this pass, the action runs again with one-shot input events cleared.
+3. The layout pass computes a rectangle for every node from flex weights, gaps, padding, and constraints.
+4. Pointer coordinates, hover, press, shortcuts, and Tab order are resolved against the new geometry.
+5. The new geometry and draw ops are diffed against the previous frame's to find the damaged region.
+6. The backend rasterizes and presents only the damaged region.
 
 The view runs before layout, so `respRect` is the **previous** frame's rectangle. Focus is resolved after the view, so a focus request takes effect next frame.
 
 ## Consequences
 
-- **The view can run more than once per frame.** A write to a `Var` read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (`whenM (button ...)`), and never allocate frame-lived resources inside the view.
-- **`readVar` placement is a performance decision.** Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. A `Var` bound to a widget with no `readVar` repaints only that widget; a `readVar` promotes the change to a full-window repaint.
-- **Geometry lags one frame.** `respRect` is empty on a widget's first appearance. Tests warm up before targeting rectangles.
-- **Widget ids are positional.** Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. `scope` and `withKey` keep the counts stable; see [Widget Identity & Keys](../state/identity.md).
-- **Idle costs zero.** With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.
+- The view can run more than once per frame. A write to a `Var` read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (`whenM (button ...)`), and never allocate frame-lived resources inside the view.
+- `readVar` placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. A `Var` bound to a widget with no `readVar` repaints only that widget; a `readVar` promotes the change to a full-window repaint.
+- Geometry lags one frame. `respRect` is empty on a widget's first appearance. Tests warm up before targeting rectangles.
+- Widget ids are positional. Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. `scope` and `withKey` keep the counts stable; see [Widget Identity & Keys](../state/identity.md).
+- An idle window costs nothing. With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.
 
 ## Application patterns
 
@@ -55,13 +55,13 @@ Panel modules take the slice they own. Use this when the application is mostly i
 
 ### Pattern C: application-owned state
 
-`ned` keeps a plain `IORef App`; nano-ui never sees it. The view projects slices and re-reads after anything that may change the model:
+`ned` keeps a plain `IORef App` that nano-ui holds no reference to. The view projects slices and re-reads after anything that may change the model:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_c}}
 ```
 
-`requestFrame` asks for one more frame when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.
+`requestFrame` schedules one more frame; call it when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.
 
 ### Choosing
 
@@ -77,9 +77,9 @@ Patterns mix. An `IORef` domain state with `Var` view state is normal; an Elm re
 
 ## The shared view discipline
 
-1. **Read state once at the top**, or immediately before the subtree that uses it.
-2. **Build top-to-bottom.** Layout is solved after the view.
-3. **Read after the parts that may write.**
-4. **Run keyboard and focus queries last.**
-5. **Guard effects with events.** The view can run more than once per frame.
-6. **Keep derived values derived.** Cache expensive work by revision, not by copying fields.
+1. Read state once at the top, or immediately before the subtree that uses it.
+2. Build top-to-bottom. Layout is solved after the view.
+3. Read after the parts that may write.
+4. Run keyboard and focus queries last.
+5. Guard effects with events. The view can run more than once per frame.
+6. Keep derived values derived. Cache expensive work by revision, not by copying fields.

@@ -19,7 +19,7 @@ A tab strip binds the active key to a `Var`; only the selected tab's body runs:
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:closable_tabs}}
 ```
 
-The caller must remove the tab: `tabs'` reports `tabClosed`, it does not remove it. A key no tab has selects the first tab and writes that key back to the `Var`.
+`tabs'` reports `tabClosed` and leaves the tab in place; the caller removes it from its list. A key no tab has selects the first tab and writes that key back to the `Var`.
 
 `tabBar` / `tabBar'` draw headers only and leave the body to the caller. `tabsConfigured` / `tabBarConfigured` take a `TabsConfig`:
 
@@ -61,7 +61,7 @@ Cell helpers: `textCell`, `cellWidget`, `widgetCell`, and `Cell` with an explici
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:tree}}
 ```
 
-`tree` takes the library's `TreeItem` (`treeItemLabel`, `treeItemChildren`), not an app-defined record. It reports the selected **pre-order index** through the `Var Int`, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.
+`tree` takes the library's `TreeItem` type (`treeItemLabel`, `treeItemChildren`). The `Var Int` holds the selected item's **pre-order index**. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.
 
 For large trees, keep the expansion set in a `VarMap` keyed by a stable path, and rebuild the visible items before calling `tree`.
 

@@ -16,11 +16,11 @@ A text document is not a type `useVar` can hold, and the editor's identity must 
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:state}}
 ```
 
-The menu state, path, dirty flag, zoom, and transient messages are simpler and can be `useVar`s inside the view. The rule of thumb: allocate in `IO` what other code needs a handle to (a document, a task, a dialog), and use `useVar` for view-local state.
+The menu state, path, dirty flag, zoom, and transient messages are simpler and can be `useVar`s inside the view. Allocate in `IO` what other code needs a handle to (a document, a task, a dialog), and use `useVar` for view-local state.
 
 ## 2. Close confirmation
 
-By default the window closes as soon as the close button is pressed. A notepad needs to intercept that and ask about unsaved changes, so the window is created with `wsExitOnCloseRequest = False`:
+By default the window closes as soon as the close button is pressed. To prompt about unsaved changes first, the notepad creates the window with `wsExitOnCloseRequest = False`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:main}}
@@ -69,7 +69,7 @@ Each menu row is a `menuItem` / `menuItemShortcut`. The row reports activation, 
 
 Only the first binding of a chord in a frame fires, so the menu row and the view binding never both run it. The menu row is declared first, so while the menu is open its row wins.
 
-- `menuItemDisabled "Undo"` draws a dimmed row that cannot be clicked. The Edit menu chooses between a real item and a disabled one by checking `textCanUndo` / `textCanRedo`.
+- `menuItemDisabled "Undo"` draws a dimmed row that cannot be clicked. The Edit menu draws a real item or a disabled one depending on `textCanUndo` / `textCanRedo`.
 - An action that opens a file dialog writes the new `FileDialogId` into a `Var`; dialogs are non-blocking, so the view is not interrupted.
 
 ## 5. Opening and saving files
@@ -102,9 +102,9 @@ Only `documentText` converts the document to a `Text`; editing works on the docu
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:editor}}
 ```
 
-- **`withKey gen`** changes the editor's key when the document is replaced. A new document gets a fresh caret, selection, and undo stack. Merely editing does not change `gen`.
-- **`respChanged`** reports an edit, not a caret move. Marking dirty on caret movement would make a read-only inspection look like a modification.
-- **`respId`** is saved for menu commands. The menus can later call `runTextCommand editor Undo` and friends.
+- `withKey gen` changes the editor's key when the document is replaced, so a new document gets a fresh caret, selection, and undo stack. Editing does not change `gen`.
+- `respChanged` is `True` after an edit and `False` after a caret move alone. Marking dirty on caret movement would make a read-only inspection look like a modification.
+- `respId` is saved for menu commands, which call `runTextCommand editor Undo` and the other `TextCommand`s.
 
 `fontSizeScale zoomVal` zooms the text without touching the document. The zoom commands are ordinary `modifyVar` calls clamped to a sane range.
 
@@ -143,11 +143,11 @@ The document keeps one undo history shared by typing, context-menu actions, and 
 `TextCommand` covers `InsertText`, `Delete`, `Move`, `Select`, `Replace`, `ReplaceAll`, `Undo`, `Redo`, `Cut`, `Copy`, `Paste`, and `SelectAll`. Using commands rather than writing the `Var` keeps undo intact; assigning a freshly computed `TextDocument` to `doc` clears the history.
 
 > [!TIP]
-> A focused text editor claims its own editing chords (Ctrl+Z, Ctrl+X, and so on) before the application's shortcuts see them. The menu items still work because they are explicit commands, and the top-level bindings are a fallback for when focus is elsewhere.
+> A focused text editor claims its editing chords (Ctrl+Z, Ctrl+X, and so on), and `shortcut` skips claimed keys. The menu items still work because they run explicit commands, and the top-level bindings fire when focus is elsewhere.
 
 ## 9. The status bar
 
-A row of muted labels makes the status bar. Line count comes from the document without materializing its text; word and character counts are computed on demand from `documentText`:
+The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from `documentText`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:status_bar}}

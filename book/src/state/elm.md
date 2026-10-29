@@ -1,6 +1,6 @@
 # Elm-Style State
 
-`nano-ui-emit` replaces `Var` mutation with typed messages: the view emits them, and a pure reducer folds them into a model.
+`nano-ui-emit` is the reducer-based alternative to `Var`: the view emits typed messages, and a pure reducer folds them into a model.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Elm.hs:full_app}}
@@ -10,9 +10,9 @@ Widgets, layout, focus, and keys are unchanged. Only the state model differs.
 
 ## Emitting
 
-`NanoUIE msg a` restricts a UI action to emitting `msg`. There is no `Typeable` constraint and no runtime type test: emitting the wrong type is a compile error.
+`NanoUIE msg a` is a UI action that can emit only `msg`. There is no `Typeable` constraint and no runtime type test: emitting the wrong type is a compile error.
 
-Every core widget runs unchanged in a `NanoUIE` view, because the view is an ordinary `NanoUI` action with its message sink in scope (an implicit parameter, `?emit`). `NanoUI.Emit` therefore re-exports `NanoUI` and adds the functions below. An `emit` inside a container, an overlay body, a tab or a menu callback goes to the sink of the view around it.
+A `NanoUIE` view is an ordinary `NanoUI` action with the view's message sink in scope (an implicit parameter, `?emit`). Every core widget runs in it unchanged, so `NanoUI.Emit` re-exports `NanoUI` and adds the functions below. An `emit` inside a container, an overlay body, a tab or a menu callback goes to the sink of the view around it.
 
 | Function | Emits when |
 | --- | --- |
@@ -42,7 +42,7 @@ Messages are collected across every pass of a frame, including local-`Var` rebui
 {{#include ../../../packages/nano-ui-demo/examples/Elm.hs:components}}
 ```
 
-Messages go straight to the parent's sink in traversal order, with no intermediate queue. `mapMessages` changes the message type, not widget identity: a list still needs `withKey` around each component, exactly as a `Var`-based row does.
+Messages go straight to the parent's sink in traversal order, with no intermediate queue. `mapMessages` changes only the message type and leaves widget ids unchanged, so a list still needs `withKey` around each component, exactly as a `Var`-based row does.
 
 For local UI state, keep using `Var` inside the component; the durable model stays in `NanoUIE`.
 
@@ -79,4 +79,4 @@ For tests and embedded uses:
 
 The styles mix. An emitting view can keep `Var`s for transient UI state; a `Var`-based view can run a small component with `runNanoUIE` and act on the returned messages.
 
-Keep `update` pure: file and network I/O belong in the view's event branch, or in an effect queue run outside the reducer. Do not mirror model state in `Var`s to see it a frame earlier; durable state has one home.
+Keep `update` pure: file and network I/O belong in the view's event branch, or in an effect queue run outside the reducer. Do not mirror model state in `Var`s to read it a frame earlier; keep durable state in the model only.

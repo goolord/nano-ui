@@ -30,13 +30,13 @@ Use the primed form when you need the response: hover state, a rectangle for an 
 
 `menuItem` draws a row and returns `True` when clicked. `menuItemShortcut` also displays a chord and binds it while the menu is open. `menuSeparator` and `menuItemDisabled` complete the row set.
 
-To build a menu bar, anchor a `popup'` to a `menuButton'`'s rectangle:
+A menu bar is a `menuButton'` plus a `popup'` anchored to its rectangle:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:menu_bar}}
 ```
 
-`constVar` supplies a read-only open flag: the truth is the menu's own state, and a click on the popup is written back to the real `Var`.
+`constVar` supplies a read-only open flag derived from the menu state, and the code writes a click on the popup back to the real `Var`.
 
 > [!IMPORTANT]
 > Call overlays unconditionally. `popup'` draws nothing while closed, but wrapping it in `when isOpen` changes later widget ids each time the menu opens.
@@ -57,7 +57,7 @@ Only the first binding of a chord in a frame fires, so the open menu's row wins.
 
 ## Input widgets
 
-Input widgets take the `Var` they display and edit it, and manage caret, selection, focus, and keys themselves. To reset a field, write the `Var`; to react to an edit, use the primed form's `Response`.
+Input widgets read and write the `Var` they display, and store caret and selection state under their widget id. To reset a field, write the `Var`; to react to an edit, use the primed form's `Response`.
 
 | Widget | Signature | Description |
 | --- | --- | --- |
@@ -104,7 +104,7 @@ Every widget has the usual variants: primed (`...'`) returns a `Response`, `...W
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:select}}
 ```
 
-`comboBox` takes free text plus suggestions; its `respChanged` fires on commit, not on every model write.
+`comboBox` takes free text plus suggestions; its `respChanged` fires on commit; a model write alone does not set it.
 
 ### Sliders, numbers, color
 

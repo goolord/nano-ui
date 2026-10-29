@@ -30,7 +30,7 @@ The SDL backend delivers the operating system's drag and drop; the RGFW backend 
 {{#include ../../../packages/nano-ui-demo/book/Book/DragDrop.hs:drop_zone}}
 ```
 
-`dropHovered` is true while a drag is over the zone. `useDrop rect` does the same for any rectangle. Only the topmost layer sees the drop, so a zone behind a modal gets nothing.
+`dropHovered` is true while a drag is over the zone. `useDrop rect` does the same for any rectangle. Only the topmost layer receives the drop, so a zone behind a modal gets nothing.
 
 ## Pane grids
 

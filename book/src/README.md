@@ -2,7 +2,7 @@
 
 An immediate-mode GUI toolkit for Haskell.
 
-The backend re-runs your view, a `NanoUI ()` action, every frame. Widgets return values directly (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, `do` notation, and `if`/`case`/`for_`.
+A view is a `NanoUI ()` action that the backend re-runs every frame. Widgets return values directly (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, `do` notation, and `if`/`case`/`for_`.
 
 ```haskell
 {{#include ../../packages/nano-ui-demo/book/Book/Intro.hs:counter}}
@@ -16,7 +16,7 @@ Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source
 | --- | --- | --- |
 | `packages/nano-ui` | Core toolkit: widgets, layout, input, theming, draw list, text arena. | [State](state/index.md), [Layout](layout/index.md), [Widget Gallery](widgets/index.md) |
 | `packages/nano-ui-sdl` | SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars. | [Ecosystem Packages](packages/index.md), [Desktop Windows](advanced/window-management.md) |
-| `packages/nano-ui-rgfw` | Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and zero system dependencies. | [Ecosystem Packages](packages/index.md) |
+| `packages/nano-ui-rgfw` | RGFW + OpenGL 3.2 backend with a bundled bitmap font and no system dependencies. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-emit` | Elm-style typed messages and update reducers (`NanoUIE msg a`). | [Elm-Style State](state/elm.md) |
 | `packages/nano-ui-diagrams` | Line, bar, scatter, and area charts (`NanoUI.Plot`) with diagrams-lib integration. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-form` | Validated applicative forms built on ditto. | [Ecosystem Packages](packages/index.md) |

@@ -1,6 +1,6 @@
 # Widget Gallery
 
-You call every widget as an ordinary function, exported from `NanoUI`.
+Every widget is an ordinary function exported from `NanoUI`.
 
 <figure class="nano-figure">
 <img src="../images/gallery-controls.svg" alt="Buttons, a checkbox, text field, select, slider, switch, knob, spinner, progress bar, and sparkline in one nano-ui row.">

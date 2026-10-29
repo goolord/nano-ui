@@ -13,7 +13,7 @@ Each package adds a backend or one capability to `nano-ui`. Pin them from source
 
 ## Backends
 
-Desktop apps normally run on `nano-ui-sdl`:
+`nano-ui-sdl` is the primary desktop backend:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:sdl}}
@@ -21,7 +21,7 @@ Desktop apps normally run on `nano-ui-sdl`:
 
 It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (`useFileDialog`), custom title bars (`windowCaption`), and screenshots (`saveScreenshot`, `captureScreenshot`). See [Desktop Windows](../advanced/window-management.md) for the window side.
 
-`nano-ui-rgfw` needs no system dependencies:
+`nano-ui-rgfw` is the alternative with no system dependencies:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:rgfw}}
@@ -105,7 +105,7 @@ Series without a colour take the theme's series colours in order. The modifiers 
 
 <img src="../images/charts/hover.svg" alt="A line chart of eight request counts with the pointer by the seventh point; below it the readout value 240.">
 
-The pointer rests by the seventh point, so the readout shows its 240. `hoverSeriesIdx` and `hoverPointIdx` say which series and point it is. Wrap the chart in `withCursorShape UiCursorCrosshair` to give the pointer a crosshair.
+The pointer rests by the seventh point, so the readout shows its 240. `hoverSeriesIdx` and `hoverPointIdx` hold the index of its series and point. Wrap the chart in `withCursorShape UiCursorCrosshair` to give the pointer a crosshair.
 
 ### Diagrams
 
@@ -117,7 +117,7 @@ The pointer rests by the seventh point, so the readout shows its 240. `hoverSeri
 
 <img src="../images/charts/diagram.svg" alt="Three blue rounded boxes labelled view, layout, and paint, joined left to right by white arrows.">
 
-Text in a diagram is measured with the current font so labels fit. The drawing is cached per theme and size, not per content: for a diagram that changes, use `diagramWithKeyAndEnvelope` with a key that changes with it. The live chart tutorial feeds a chart from a `Stream`: [Live Data & Background Work](../tutorials/live-data.md).
+Text in a diagram is measured with the current font so labels fit. The cache key is the theme and the size only, so for a diagram whose content changes, use `diagramWithKeyAndEnvelope` with a key that changes with it. The live chart tutorial feeds a chart from a `Stream`: [Live Data & Background Work](../tutorials/live-data.md).
 
 ## Validated forms
 
@@ -155,8 +155,8 @@ When appending on the UI thread, append a frame's tokens in one call. The parser
 
 `nano-ui-svg` has two levels:
 
-- **`NanoUI.Draw.Svg`** exports `DrawOp` sequences: `drawOpsToSvg bounds ops` or `renderDrawOpsSvg config`.
-- **`NanoUI.Draw.FrameSvg`** re-renders a whole frame: `frameToSvg config ctx input drawData`.
+- `NanoUI.Draw.Svg` exports `DrawOp` sequences: `drawOpsToSvg bounds ops` or `renderDrawOpsSvg config`.
+- `NanoUI.Draw.FrameSvg` re-renders a whole frame: `frameToSvg config ctx input drawData`.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:frame_svg}}

@@ -59,8 +59,8 @@ A job that throws becomes `TaskFailed err previous`. The exception is shown and 
 
 Two rules are visible here:
 
-- **The key must change to rerun.** Keying by the input alone would never restart an identical request; the attempt number is part of the key.
-- **Each branch is a whole `scope`.** The branches declare different widgets; the scope keeps the widget ids after the card stable as the status changes.
+- The key must change to rerun. Keying by the input alone would never restart an identical request, so the attempt number is part of the key.
+- Each branch is a whole `scope`. The branches declare different widgets, and the scope keeps the widget ids after the card stable as the status changes.
 
 Cancellation is an asynchronous exception, so acquire resources inside the job with `bracket`:
 
@@ -70,22 +70,22 @@ Cancellation is an asynchronous exception, so acquire resources inside the job w
 
 ## 4. Streams: many updates, one frame
 
-Progress ticks, sensor readings, and tokens from a model arrive many times per job, so they go through a `Stream`. Its producer receives `update` and runs until it returns or is cancelled:
+A `Stream` is for work that pushes many times per job: progress ticks, sensor readings, tokens from a model. Its producer receives `update` and runs until it returns or is cancelled:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:progress_card}}
 ```
 
-- **Stopping is not calling the hook.** When `isRunning` is false, `useStream` is not called, and the producer is cancelled.
-- **Updates coalesce.** If the producer pushes five values between two frames, the next frame draws the latest one; it does not run five frames.
-- **The stream's state starts from the initial value.** Restarting after a pause begins at `0` here, which is why the label explains how to start over. To resume from the last state, save it outside and pass it as the initial value (the live chart below does exactly that).
-- **Keep the hook outside tabs when the stream must keep running.** Like a task, a stream is released when its hook is skipped for a whole frame.
+- To stop the stream, stop calling the hook. When `isRunning` is false, `useStream` is not called, and the producer is cancelled.
+- Updates coalesce. If the producer pushes five values between two frames, one frame runs and draws the latest value.
+- The stream's state starts from the initial value. Restarting after a pause begins at `0` here, which is why the label explains how to start over. To resume from the last state, save it outside and pass it as the initial value (the live chart below does this).
+- Keep the hook outside tabs when the stream must keep running. Like a task, a stream is released when its hook is skipped for a whole frame.
 
 A paused progress pane costs no frames.
 
 ## 5. A live chart
 
-A `Stream` feeds the chart through a `PlotCache`. The cache is allocated once and passed to `plot`; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:
+A `Stream` feeds the chart through a `PlotCache`. The cache is allocated once and passed to `plot`, which compares the chart with the one stored in the cache and rebuilds the diagram only when the data or theme changes:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:chart_handles}}
@@ -113,7 +113,7 @@ The chart API is small:
 - `chart` takes the list of series; `withGrid`, `withLegend`, `withXAxis`, `withYAxis`, and `withTitle` decorate it.
 - `plot cache layout theChart` draws it and returns a `PlotResponse` whose `plotHover` is the nearest data point under the pointer.
 
-Building the `Chart` value every frame is fine: it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the *diagram*; the `PlotCache` is what prevents that.
+Building the `Chart` value every frame is cheap: it is a plain value, and comparing a few hundred points costs little. Rebuilding the *diagram* is expensive, and the `PlotCache` skips it when the chart and theme are unchanged.
 
 ## 6. Try it
 

@@ -22,16 +22,16 @@ When only the latest result matters, use `useTask`:
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:use_task}}
 ```
 
-- **The key identifies the job.** A new key starts a worker and cancels the old job with an asynchronous exception.
-- **A skipped hook cancels the job.** If the view does not call `useTask` for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.
-- **To retrigger the same input, put a counter in the key.** A Retry button must change the key or the job never reruns.
-- **Cancellation is an async exception.** Use `bracket` or `withFile` inside the job so resources are released when the user changes the query.
-- **The result is forced on the worker.** Return a value in weak head normal form; force a list's spine with `length found \`seq\` pure found`.
-- **`TaskRunning previous` carries the last result**, so a list does not flash empty while the next query runs.
+- The key identifies the job. A new key starts a worker and cancels the old job with an asynchronous exception.
+- A skipped hook cancels the job. If the view does not call `useTask` for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.
+- To retrigger the same input, put a counter in the key. A Retry button must change the key or the job never reruns.
+- Cancellation is an async exception. Use `bracket` or `withFile` inside the job so resources are released when the user changes the query.
+- The result is forced on the worker. Return a value in weak head normal form; force a list's spine with `length found \`seq\` pure found`.
+- `TaskRunning previous` carries the last result, so a list does not flash empty while the next query runs.
 
 ## `Stream`: repeated pushes
 
-Sensors, downloads, token streams, and anything else that pushes repeatedly feed a `Stream`:
+A `Stream` is for sensors, downloads, token streams, and anything else that pushes repeatedly:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:stream}}
@@ -39,9 +39,9 @@ Sensors, downloads, token streams, and anything else that pushes repeatedly feed
 
 The producer receives `update :: (s -> s) -> IO ()` and returns when done, cancelled, or throwing. Each update wakes the loop; updates between frames coalesce into one frame.
 
-- **Stop by not calling the hook.** `when isRunning (useStream ...)` releases the producer.
-- **Stopping discards the accumulated state.** Save it outside and pass it as the next initial value to resume.
-- **Producers must not touch the UI.** They may call `update` from their thread or threads they start; never touch the UI `Context`.
+- Stop by not calling the hook. `when isRunning (useStream ...)` releases the producer.
+- Stopping discards the accumulated state. Save it outside and pass it as the next initial value to resume.
+- Producers must not touch the UI. They may call `update` from their thread or threads they start; never touch the UI `Context`.
 
 ## Threads outside those handles
 
@@ -49,7 +49,7 @@ The producer receives `update :: (s -> s) -> IO ()` and returns when done, cance
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:wake}}
 ```
 
-`readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe `Var` operations. The wake repaints the whole window, since nothing says which widget changed. Use a `Stream` for frequent updates.
+`readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe `Var` operations. The wake repaints the whole window, because it carries no record of which widget changed. Use a `Stream` for frequent updates.
 
 ## Animation
 
@@ -61,8 +61,8 @@ The producer receives `update :: (s -> s) -> IO ()` and returns when done, cance
 
 A `Transition` is either:
 
-- **`Tween ease duration delay`**, in seconds. Curves include `EaseOutQuad`, `EaseInOutCubic`, `EaseOutBack`, and `EaseCubicBezier`.
-- **`Spring params`**, a damped spring. `presetSmooth`, `presetBouncy`, and `presetStiff` are the presets.
+- `Tween ease duration delay`, in seconds. Curves include `EaseOutQuad`, `EaseInOutCubic`, `EaseOutBack`, and `EaseCubicBezier`.
+- `Spring params`, a damped spring. `presetSmooth`, `presetBouncy`, and `presetStiff` are the presets.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:spring}}

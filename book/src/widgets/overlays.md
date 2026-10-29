@@ -1,6 +1,6 @@
 # Overlays & Windows
 
-Modals, floating windows, and popups take a `Var Bool` for their open state and otherwise run like any `NanoUI` action.
+Modals, floating windows, and popups are ordinary `NanoUI` actions that take a `Var Bool` for their open state.
 
 ## Call overlays unconditionally
 
@@ -45,13 +45,13 @@ For a modal without a title bar or close button, use `modalPanel` / `modalPanel'
 
 ## Popups
 
-`popup` floats a panel wherever its `PopupConfig` places it:
+`popup` is a floating panel placed by a `PopupConfig`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:popup}}
 ```
 
-A press on the anchor is not "outside", so the button that toggles the popup does not immediately reopen it.
+A press on the anchor counts as inside the popup, so the button that toggles the popup does not immediately reopen it.
 
 Popup placement:
 
@@ -75,7 +75,7 @@ The default delay is half a second; `TooltipConfig` sets the delay and placement
 ## Rules
 
 - Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.
-- Keep the open flag in the view that opens and closes the overlay, not in a child that may not be drawn.
+- Allocate the open flag in the view that opens and closes the overlay, outside any child that may be skipped.
 - Read focus after the overlay call.
 - A `scrollArea`, `panel`, or `card` inside a dialog body draws a box in a box; strip its chrome (see [Double borders](../troubleshooting/recurring-bugs.md#2-double-borders--box-in-a-box)).
 

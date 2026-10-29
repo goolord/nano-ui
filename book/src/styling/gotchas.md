@@ -28,7 +28,7 @@ The tinted `panelStyle` a callout sets reaches every panel inside it.
 
 ## `toggleButton` ignores `buttonStyle` when on
 
-On, it fills with its tone colour (`themeAccent` for `Accent`), whatever `buttonStyle` says.
+While on, it fills with its tone colour (`themeAccent` for `Accent`) regardless of `buttonStyle`.
 
 <nano-ui-trap id="trap-05"></nano-ui-trap>
 
