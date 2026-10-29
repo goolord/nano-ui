@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-41691f98.js";
+            window.path_to_searchindex_js = "../searchindex-aa4a54ea.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="drag--drop"><a class="header" href="#drag--drop">Drag &amp; Drop</a></h1>
-<p>The application owns the data. The hooks report gestures; your code decides what a drop does.</p>
+<p>There are two kinds of drag: a pointer drag inside the window (reordering a list, moving tabs, docking panes), and files or text dropped in from another application. The hooks only report what happened. Applying a drop to your data is up to you.</p>
 <h2 id="reordering-a-list"><a class="header" href="#reordering-a-list">Reordering a list</a></h2>
 <p><code>useReorder</code> takes the current order of item ids and each item’s response, in drawn order:</p>
 <pre><code class="language-haskell">chips :: Var [Int] -&gt; NanoUI ()
@@ -189,7 +189,7 @@ chips orderVar = rowWith (gap 6) $ do
   r &lt;- useReorder order drawn
   writeVar orderVar (reorderOrder r)
 </code></pre>
-<p><code>reorderOrder</code> changes on the frame the item is dropped. Draw from <code>reorderPreview</code> instead to show the other items making room during the drag. <code>reorderDragging</code> is the held item, and <code>reorderMoved</code> tells a drag from a click.</p>
+<p><code>reorderOrder</code> changes on the frame the item is dropped. Draw from <code>reorderPreview</code> instead to move the other items aside during the drag. <code>reorderDragging</code> is the held item, and <code>reorderMoved</code> is set once the press has moved past the drag threshold, so a click can be ignored.</p>
 <h2 id="gestures-with-usedrag"><a class="header" href="#gestures-with-usedrag">Gestures with <code>useDrag</code></a></h2>
 <p>For anything else, <code>useDrag</code> tracks a thresholded drag across keyed sources. Allocate the handle once with <code>newDrag</code> in setup. Here it reorders tabs, with <code>insertionIndex</code> turning the pointer into a slot in the strip (<code>Nothing</code> outside it):</p>
 <pre><code class="language-haskell">tabStrip :: DragHandle Text -&gt; Var Text -&gt; [Tab Text ()] -&gt; NanoUI ()
@@ -202,8 +202,8 @@ tabStrip dragHandle active documents = do
       moveTab (dragPayload d)
 </code></pre>
 <p><code>dragPhase</code> is <code>DragStarted</code>, <code>Dragging</code>, <code>DragReleased</code>, or <code>DragCancelled</code> (Escape, a lost hold, or the source disappearing). The last two last one frame. Commit only on <code>DragReleased</code>.</p>
-<h2 id="files-and-text-from-the-os"><a class="header" href="#files-and-text-from-the-os">Files and text from the OS</a></h2>
-<p><code>dropZone</code> is a panel that reports what the OS dropped on it:</p>
+<h2 id="files-and-text-from-other-applications"><a class="header" href="#files-and-text-from-other-applications">Files and text from other applications</a></h2>
+<p>The SDL backend delivers the operating system’s drag and drop; the RGFW backend does not. <code>dropZone</code> is a panel that reports the files and text dropped on it:</p>
 <pre><code class="language-haskell">fileDrop :: NanoUI ()
 fileDrop = do
   (_, _, target) &lt;- dropZone (fillW . padAll 12) (label "Drop files here")

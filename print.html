@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-41691f98.js";
+            window.path_to_searchindex_js = "searchindex-aa4a54ea.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -298,7 +298,6 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
     whenM (button "+") (modifyVar n (+ 1))
 
   whenM (button "Reset") (writeVar n 0)
-
 </code></pre>
 <p>Run it:</p>
 <pre><code class="language-sh">cabal run -j1 my-app
@@ -361,7 +360,6 @@ data Todos = Todos
   deriving (Eq, Generic)
 
 newtype App = App {appTodos :: Var Todos}
-
 </code></pre>
 <p>The list lives in a <code>Var Todos</code>. That is not a type <code>useVar</code> can allocate, so it is created once during setup with <code>newVar</code>:</p>
 <pre><code class="language-haskell">newApp :: IO App
@@ -375,7 +373,6 @@ newApp =
           ]
           3
       )
-
 </code></pre>
 <p>Allocated in <code>main</code> and passed into the view, it survives between frames. A <code>Var</code> allocated <em>inside</em> the view would be fresh on every pass.</p>
 <p>Both records derive <code>Generic</code>; with <code>OverloadedRecordDot</code>, <code>app.appTodos.todoItems</code> is a <code>Var [Todo]</code> projecting just that field. Editing the list does not repaint a widget that reads only <code>todoNext</code>.</p>
@@ -390,7 +387,6 @@ main = do
           defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
       }
     (todoApp app)
-
 </code></pre>
 <p><code>runSdlApp</code> calls the view every frame, and the view describes the whole window each time.</p>
 <pre><code class="language-haskell">todoApp :: App -&gt; NanoUI ()
@@ -404,11 +400,10 @@ todoApp app = do
     newItemRow app.appTodos draft
     filterRow items filt
     todoList items filt
-
 </code></pre>
 <p>The draft text and the filter are view-local, allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are identified by their call site, so they need no setup and no record field.</p>
 <h2 id="3-adding-an-item"><a class="header" href="#3-adding-an-item">3. Adding an item</a></h2>
-<p>The input row draws the field and the button, and decides whether this frame adds an item.</p>
+<p>The input row draws the field and the button, and adds an item on Enter or a click.</p>
 <pre><code class="language-haskell">newItemRow :: Var Todos -&gt; Var Text -&gt; NanoUI ()
 newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
   inputR &lt;-
@@ -421,7 +416,6 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
     modifyVar todosVar (\(Todos xs n) -&gt; Todos (xs &lt;&gt; [Todo n text False]) (n + 1))
     writeVar draft ""
     requestFocus (respId inputR)
-
 </code></pre>
 <ul>
 <li><strong>The primed widget returns a <code>Response</code>.</strong> <code>textInputConfigured'</code> reports the widget’s identity, rectangle, hover and click state, and whether Enter was submitted (<code>respSubmitted</code>). <code>button</code> already returns the one <code>Bool</code> this row needs.</li>
@@ -459,7 +453,6 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
     (T.pack (show left) &lt;&gt; if left == 1 then " item left" else " items left")
   disabledWhen (left == length todos) $
     whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
-
 </code></pre>
 <p><code>boundedTabBarConfigured</code> draws a segmented control over every constructor of <code>Filter</code>; the label function is <code>show</code>. The count is <em>derived</em>: it is computed from the list every frame, never stored in a second <code>Var</code> that could drift. <code>disabledWhen</code> dims the clear button and blocks its events without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
@@ -477,7 +470,6 @@ todoList items filt = do
         forM_
           (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) &lt;&gt; [Nothing])) $ \(todo, above, below) -&gt;
           withKey (todoId todo) (todoRow items (at todo) above below)
-
 </code></pre>
 <ul>
 <li><code>withElemVars todoId items</code> gives the current list and a function <code>at :: Todo -&gt; Var Todo</code>. <code>at todo</code> is a <code>Var</code> addressed by the item’s id, so it survives a reorder or a filter change.</li>
@@ -531,7 +523,6 @@ todoRow items todo above below = do
     whenM
       (styled destructive (button "Delete"))
       (modifyVar items (filter ((/= tid) . todoId)))
-
 </code></pre>
 <p>Three details make this work:</p>
 <ol>
@@ -541,8 +532,7 @@ todoRow items todo above below = do
 </ol>
 <h2 id="6-reordering-by-id"><a class="header" href="#6-reordering-by-id">6. Reordering by id</a></h2>
 <p>Up and Down need to swap two items wherever they are in the full list. Swapping by id keeps the operation correct even though the visible list is filtered:</p>
-<pre><code class="language-haskell">
--- | Swap the places of two items, by id.
+<pre><code class="language-haskell">-- | Swap the places of two items, by id.
 swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
 swapIds a b xs = map pick xs
  where
@@ -551,7 +541,6 @@ swapIds a b xs = map pick xs
     | todoId t == a = byId b t
     | todoId t == b = byId a t
     | otherwise = t
-
 </code></pre>
 <p>The row’s local state follows the id, so the edit flag and draft travel with the item.</p>
 <h2 id="7-keyboard-behaviour"><a class="header" href="#7-keyboard-behaviour">7. Keyboard behaviour</a></h2>
@@ -576,23 +565,22 @@ swapIds a b xs = map pick xs
 </code></pre>
 <h2 id="1-state-that-belongs-to-the-session"><a class="header" href="#1-state-that-belongs-to-the-session">1. State that belongs to the session</a></h2>
 <p>A text document is not a type <code>useVar</code> can hold, and the editor’s identity must outlive any single frame, so both live in a record allocated once:</p>
-<pre><code class="language-haskell">data NotepadState
-  = NotepadState
-      !(Var TextDocument)
-      !(Var WidgetId)
-      !(Var (Maybe FileDialogId))
-      !(Var (Maybe FileDialogId))
+<pre><code class="language-haskell">data NotepadState = NotepadState
+  { doc :: !(Var TextDocument)
+  , editorId :: !(Var WidgetId)
+  , openDlg :: !(Var (Maybe FileDialogId))
+  , saveDlg :: !(Var (Maybe FileDialogId))
+  }
 
 -- | A notepad's private document and dialog state. Allocate one per
 -- instance before starting the SDL session, and draw it with 'notepadUi'.
 newNotepad :: IO NotepadState
-newNotepad =
-  NotepadState
-    &lt;$&gt; newVar emptyDocument
-    &lt;*&gt; newVar (WidgetId 0)
-    &lt;*&gt; newVar Nothing
-    &lt;*&gt; newVar Nothing
-
+newNotepad = do
+  doc &lt;- newVar emptyDocument
+  editorId &lt;- newVar (WidgetId 0)
+  openDlg &lt;- newVar Nothing
+  saveDlg &lt;- newVar Nothing
+  pure NotepadState {..}
 </code></pre>
 <p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. The rule of thumb: allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
 <h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
@@ -612,7 +600,6 @@ main = do
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
     (notepadUi state)
-
 </code></pre>
 <p>With exit-on-close off, <code>winCloseRequested &lt;$&gt; askWindow</code> reports the request inside the view, where it can open a confirmation modal instead of quitting:</p>
 <pre><code class="language-haskell">  item (winCloseRequested &lt;$&gt; askWindow) exitApp
@@ -644,7 +631,6 @@ menuBar openMenu entries = do
       -- gets a constant and closing it is written here.
       (popupResp, _) &lt;- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
-
 </code></pre>
 <p><code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the state is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> supplies a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
@@ -715,7 +701,6 @@ writeDocument filePath doc = do
           IO (Either SomeException ())
       )
   pure (isRight result)
-
 </code></pre>
 <p><code>documentText</code> is the only conversion from the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
 <h2 id="6-the-editor"><a class="header" href="#6-the-editor">6. The editor</a></h2>
@@ -758,7 +743,6 @@ writeDocument filePath doc = do
       flex
       whenM (button "Discard") quitUi
       whenM (button "Cancel") (writeVar confirmExit False)
-
 </code></pre>
 <p>There is one modal at a time: opening the exit prompt closes the About modal first. Overlay state is a <code>Var Bool</code>, and the modal call itself is unconditional.</p>
 <h2 id="8-undo-redo-and-the-rest-of-the-editing-commands"><a class="header" href="#8-undo-redo-and-the-rest-of-the-editing-commands">8. Undo, redo, and the rest of the editing commands</a></h2>
@@ -801,7 +785,6 @@ statusBar docName docVar statusMsg zoomVal = do
     labelWith
       (tight . fontMuted)
       ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
-
 </code></pre>
 <p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="#recurring-bugs--fixes">Recurring Bugs</a>).</p>
 <h2 id="10-try-it"><a class="header" href="#10-try-it">10. Try it</a></h2>
@@ -825,8 +808,7 @@ cabal run nano-ui-example-live-chart
 </blockquote>
 <h2 id="1-allocate-handles-once"><a class="header" href="#1-allocate-handles-once">1. Allocate handles once</a></h2>
 <p>A <code>Task</code> runs one typed job; a <code>Stream</code> carries one typed push channel. Both are created during setup, like a <code>Var</code>:</p>
-<pre><code class="language-haskell">
--- | One handle per job. The types fix each job's key and result.
+<pre><code class="language-haskell">-- | One handle per job. The types fix each job's key and result.
 data App = App
   { appSearch :: !(Task Text [Text])
   , appFlaky :: !(Task Int Text)
@@ -835,7 +817,6 @@ data App = App
 
 newApp :: IO App
 newApp = App &lt;$&gt; newTask &lt;*&gt; newTask &lt;*&gt; newStream
-
 </code></pre>
 <p>The handle fixes the key and result types, so a task cannot be reused for a different job.</p>
 <h2 id="2-a-background-search"><a class="header" href="#2-a-background-search">2. A background search</a></h2>
@@ -870,7 +851,6 @@ searchCard app = do
   rowWith (wrap . gap 6 . fillW) $
     forM_ (take 24 hits) $
       \w -&gt; withKey w (label w)
-
 </code></pre>
 <p><code>slowSearch</code> is ordinary blocking IO:</p>
 <pre><code class="language-haskell">slowSearch :: Text -&gt; IO [Text]
@@ -879,7 +859,6 @@ slowSearch q = do
   let
     found = filter (T.isInfixOf (T.toLower q)) wordList
   length found `seq` pure found
-
 </code></pre>
 <p>What the loop does with it:</p>
 <ul>
@@ -914,7 +893,6 @@ flakyCard app = do
     TaskFailed err _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
-
 </code></pre>
 <p>Two rules are visible here:</p>
 <ul>
@@ -949,7 +927,6 @@ progressCard app = do
           then "Done. Untick and tick Run to start over."
           else T.pack (show pct) &lt;&gt; "%"
       )
-
 </code></pre>
 <ul>
 <li><strong>Stopping is not calling the hook.</strong> When <code>isRunning</code> is false, <code>useStream</code> is not called, and the producer is cancelled.</li>
@@ -968,7 +945,6 @@ progressCard app = do
 
 newApp :: IO App
 newApp = App &lt;$&gt; newStream &lt;*&gt; newVar emptyFeed &lt;*&gt; newPlotCache
-
 </code></pre>
 <p>The view pauses by not calling the stream, and resumes from the saved feed:</p>
 <pre><code class="language-haskell">view :: App -&gt; NanoUI ()
@@ -1022,7 +998,6 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
             &lt;&gt; " = "
             &lt;&gt; fmt (hoverDataY hover)
         )
-
 </code></pre>
 <p><code>Feed</code>, <code>advance</code>, and <code>fmt</code> are in <code>LiveChart.hs</code>; <code>walkChart</code> builds the chart value:</p>
 <pre><code class="language-haskell">walkChart :: Seq (Double, Double) -&gt; Chart
@@ -1032,7 +1007,6 @@ walkChart points =
     . withXAxis "sample"
     . withYAxis "value" $
     chart [line "walk" points]
-
 </code></pre>
 <p>This is the chart after its first 200 samples, when the window is full:</p>
 <img src="images/charts/live-chart.svg" alt="A line chart of a 200-sample random walk with a grid, the x axis titled sample and the y axis titled value.">
@@ -1327,7 +1301,6 @@ update (SetName n) m = m {name = n}
 
 main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
-
 </code></pre>
 <p>Widgets, layout, focus, and keys are unchanged. Only the state model differs.</p>
 <h2 id="emitting"><a class="header" href="#emitting">Emitting</a></h2>
@@ -1377,7 +1350,6 @@ parentView :: Int -&gt; NanoUIE ParentMsg ()
 parentView n = column $ do
   mapMessages Child (childView n)
   emitWhen (button "Save All") SaveAll
-
 </code></pre>
 <p>Messages go straight to the parent’s sink in traversal order, with no intermediate queue. <code>mapMessages</code> changes the message type, not widget identity: a list still needs <code>withKey</code> around each component, exactly as a <code>Var</code>-based row does.</p>
 <p>For local UI state, keep using <code>Var</code> inside the component; the durable model stays in <code>NanoUIE</code>.</p>
@@ -1833,7 +1805,7 @@ settingsPanel =
 <img class="nano-example-shot" src="images/layout/linealign.svg" alt="Wrapped buttons with the final line centred.">
 </details>
 <h3 id="positioning-and-pointer-behavior"><a class="header" href="#positioning-and-pointer-behavior">Positioning and pointer behavior</a></h3>
-<p><code>pinAt</code> takes a child out of the flow. <code>pointer</code> decides whether an overlapping region consumes pointer events (<code>PointerBlock</code>) or passes them to what is underneath (<code>PointerPass</code>). The pointer examples park the pointer over the overlay.</p>
+<p><code>pinAt</code> takes a child out of the flow. <code>pointer</code> sets whether an overlapping region consumes pointer events (<code>PointerBlock</code>) or passes them to what is underneath (<code>PointerPass</code>). The pointer examples park the pointer over the overlay.</p>
 <details class="nano-example">
 <summary><code>pinAt</code>: position absolutely inside the parent</summary>
 <pre><code class="language-haskell">pinAtExample =
@@ -2376,14 +2348,14 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 <h2 id="rules"><a class="header" href="#rules">Rules</a></h2>
 <ul>
 <li>Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.</li>
-<li>Keep the open flag at the level that owns the decision, not in a child that may not be drawn.</li>
+<li>Keep the open flag in the view that opens and closes the overlay, not in a child that may not be drawn.</li>
 <li>Read focus after the overlay call.</li>
 <li>A <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a dialog body draws a box in a box; strip its chrome (see <a href="#2-double-borders--box-in-a-box">Double borders</a>).</li>
 </ul>
 <p><a href="#tutorial-2-build-a-notepad">Build a Notepad</a> wires a modal to the window’s close request and builds a menu bar from <code>popup'</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="drag--drop"><a class="header" href="#drag--drop">Drag &amp; Drop</a></h1>
-<p>The application owns the data. The hooks report gestures; your code decides what a drop does.</p>
+<p>There are two kinds of drag: a pointer drag inside the window (reordering a list, moving tabs, docking panes), and files or text dropped in from another application. The hooks only report what happened. Applying a drop to your data is up to you.</p>
 <h2 id="reordering-a-list"><a class="header" href="#reordering-a-list">Reordering a list</a></h2>
 <p><code>useReorder</code> takes the current order of item ids and each item’s response, in drawn order:</p>
 <pre><code class="language-haskell">chips :: Var [Int] -&gt; NanoUI ()
@@ -2393,7 +2365,7 @@ chips orderVar = rowWith (gap 6) $ do
   r &lt;- useReorder order drawn
   writeVar orderVar (reorderOrder r)
 </code></pre>
-<p><code>reorderOrder</code> changes on the frame the item is dropped. Draw from <code>reorderPreview</code> instead to show the other items making room during the drag. <code>reorderDragging</code> is the held item, and <code>reorderMoved</code> tells a drag from a click.</p>
+<p><code>reorderOrder</code> changes on the frame the item is dropped. Draw from <code>reorderPreview</code> instead to move the other items aside during the drag. <code>reorderDragging</code> is the held item, and <code>reorderMoved</code> is set once the press has moved past the drag threshold, so a click can be ignored.</p>
 <h2 id="gestures-with-usedrag"><a class="header" href="#gestures-with-usedrag">Gestures with <code>useDrag</code></a></h2>
 <p>For anything else, <code>useDrag</code> tracks a thresholded drag across keyed sources. Allocate the handle once with <code>newDrag</code> in setup. Here it reorders tabs, with <code>insertionIndex</code> turning the pointer into a slot in the strip (<code>Nothing</code> outside it):</p>
 <pre><code class="language-haskell">tabStrip :: DragHandle Text -&gt; Var Text -&gt; [Tab Text ()] -&gt; NanoUI ()
@@ -2406,8 +2378,8 @@ tabStrip dragHandle active documents = do
       moveTab (dragPayload d)
 </code></pre>
 <p><code>dragPhase</code> is <code>DragStarted</code>, <code>Dragging</code>, <code>DragReleased</code>, or <code>DragCancelled</code> (Escape, a lost hold, or the source disappearing). The last two last one frame. Commit only on <code>DragReleased</code>.</p>
-<h2 id="files-and-text-from-the-os"><a class="header" href="#files-and-text-from-the-os">Files and text from the OS</a></h2>
-<p><code>dropZone</code> is a panel that reports what the OS dropped on it:</p>
+<h2 id="files-and-text-from-other-applications"><a class="header" href="#files-and-text-from-other-applications">Files and text from other applications</a></h2>
+<p>The SDL backend delivers the operating system’s drag and drop; the RGFW backend does not. <code>dropZone</code> is a panel that reports the files and text dropped on it:</p>
 <pre><code class="language-haskell">fileDrop :: NanoUI ()
 fileDrop = do
   (_, _, target) &lt;- dropZone (fillW . padAll 12) (label "Drop files here")
@@ -3784,7 +3756,7 @@ newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1
 </code></pre>
 <p>Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.</p>
 <h3 id="pattern-c-application-owned-state"><a class="header" href="#pattern-c-application-owned-state">Pattern C: application-owned state</a></h3>
-<p><code>ned</code> keeps a plain <code>IORef App</code>; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:</p>
+<p><code>ned</code> keeps a plain <code>IORef App</code>; nano-ui never sees it. The view projects slices and re-reads after anything that may change the model:</p>
 <pre><code class="language-haskell">editorView :: Editor -&gt; NanoUI ()
 editorView (Editor ref) = do
   app &lt;- liftIO (readIORef ref)

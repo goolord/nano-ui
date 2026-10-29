@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-41691f98.js";
+            window.path_to_searchindex_js = "../searchindex-aa4a54ea.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -243,7 +243,7 @@ newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1
 </code></pre>
 <p>Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.</p>
 <h3 id="pattern-c-application-owned-state"><a class="header" href="#pattern-c-application-owned-state">Pattern C: application-owned state</a></h3>
-<p><code>ned</code> keeps a plain <code>IORef App</code>; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:</p>
+<p><code>ned</code> keeps a plain <code>IORef App</code>; nano-ui never sees it. The view projects slices and re-reads after anything that may change the model:</p>
 <pre><code class="language-haskell">editorView :: Editor -&gt; NanoUI ()
 editorView (Editor ref) = do
   app &lt;- liftIO (readIORef ref)

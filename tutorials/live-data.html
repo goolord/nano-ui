@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-41691f98.js";
+            window.path_to_searchindex_js = "../searchindex-aa4a54ea.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -190,8 +190,7 @@ cabal run nano-ui-example-live-chart
 </blockquote>
 <h2 id="1-allocate-handles-once"><a class="header" href="#1-allocate-handles-once">1. Allocate handles once</a></h2>
 <p>A <code>Task</code> runs one typed job; a <code>Stream</code> carries one typed push channel. Both are created during setup, like a <code>Var</code>:</p>
-<pre><code class="language-haskell">
--- | One handle per job. The types fix each job's key and result.
+<pre><code class="language-haskell">-- | One handle per job. The types fix each job's key and result.
 data App = App
   { appSearch :: !(Task Text [Text])
   , appFlaky :: !(Task Int Text)
@@ -200,7 +199,6 @@ data App = App
 
 newApp :: IO App
 newApp = App &lt;$&gt; newTask &lt;*&gt; newTask &lt;*&gt; newStream
-
 </code></pre>
 <p>The handle fixes the key and result types, so a task cannot be reused for a different job.</p>
 <h2 id="2-a-background-search"><a class="header" href="#2-a-background-search">2. A background search</a></h2>
@@ -235,7 +233,6 @@ searchCard app = do
   rowWith (wrap . gap 6 . fillW) $
     forM_ (take 24 hits) $
       \w -&gt; withKey w (label w)
-
 </code></pre>
 <p><code>slowSearch</code> is ordinary blocking IO:</p>
 <pre><code class="language-haskell">slowSearch :: Text -&gt; IO [Text]
@@ -244,7 +241,6 @@ slowSearch q = do
   let
     found = filter (T.isInfixOf (T.toLower q)) wordList
   length found `seq` pure found
-
 </code></pre>
 <p>What the loop does with it:</p>
 <ul>
@@ -279,7 +275,6 @@ flakyCard app = do
     TaskFailed err _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
-
 </code></pre>
 <p>Two rules are visible here:</p>
 <ul>
@@ -314,7 +309,6 @@ progressCard app = do
           then "Done. Untick and tick Run to start over."
           else T.pack (show pct) &lt;&gt; "%"
       )
-
 </code></pre>
 <ul>
 <li><strong>Stopping is not calling the hook.</strong> When <code>isRunning</code> is false, <code>useStream</code> is not called, and the producer is cancelled.</li>
@@ -333,7 +327,6 @@ progressCard app = do
 
 newApp :: IO App
 newApp = App &lt;$&gt; newStream &lt;*&gt; newVar emptyFeed &lt;*&gt; newPlotCache
-
 </code></pre>
 <p>The view pauses by not calling the stream, and resumes from the saved feed:</p>
 <pre><code class="language-haskell">view :: App -&gt; NanoUI ()
@@ -387,7 +380,6 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
             &lt;&gt; " = "
             &lt;&gt; fmt (hoverDataY hover)
         )
-
 </code></pre>
 <p><code>Feed</code>, <code>advance</code>, and <code>fmt</code> are in <code>LiveChart.hs</code>; <code>walkChart</code> builds the chart value:</p>
 <pre><code class="language-haskell">walkChart :: Seq (Double, Double) -&gt; Chart
@@ -397,7 +389,6 @@ walkChart points =
     . withXAxis "sample"
     . withYAxis "value" $
     chart [line "walk" points]
-
 </code></pre>
 <p>This is the chart after its first 200 samples, when the window is full:</p>
 <img src="../images/charts/live-chart.svg" alt="A line chart of a 200-sample random walk with a grid, the x axis titled sample and the y axis titled value.">

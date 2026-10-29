@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-41691f98.js";
+            window.path_to_searchindex_js = "../searchindex-aa4a54ea.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -263,7 +263,6 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
     whenM (button "+") (modifyVar n (+ 1))
 
   whenM (button "Reset") (writeVar n 0)
-
 </code></pre>
 <p>Run it:</p>
 <pre><code class="language-sh">cabal run -j1 my-app

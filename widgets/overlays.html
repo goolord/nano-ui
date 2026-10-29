@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-41691f98.js";
+            window.path_to_searchindex_js = "../searchindex-aa4a54ea.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -264,7 +264,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 <h2 id="rules"><a class="header" href="#rules">Rules</a></h2>
 <ul>
 <li>Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.</li>
-<li>Keep the open flag at the level that owns the decision, not in a child that may not be drawn.</li>
+<li>Keep the open flag in the view that opens and closes the overlay, not in a child that may not be drawn.</li>
 <li>Read focus after the overlay call.</li>
 <li>A <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a dialog body draws a box in a box; strip its chrome (see <a href="../troubleshooting/recurring-bugs.html#2-double-borders--box-in-a-box">Double borders</a>).</li>
 </ul>

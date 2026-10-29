@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-41691f98.js";
+            window.path_to_searchindex_js = "../searchindex-aa4a54ea.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -185,23 +185,22 @@
 </code></pre>
 <h2 id="1-state-that-belongs-to-the-session"><a class="header" href="#1-state-that-belongs-to-the-session">1. State that belongs to the session</a></h2>
 <p>A text document is not a type <code>useVar</code> can hold, and the editor’s identity must outlive any single frame, so both live in a record allocated once:</p>
-<pre><code class="language-haskell">data NotepadState
-  = NotepadState
-      !(Var TextDocument)
-      !(Var WidgetId)
-      !(Var (Maybe FileDialogId))
-      !(Var (Maybe FileDialogId))
+<pre><code class="language-haskell">data NotepadState = NotepadState
+  { doc :: !(Var TextDocument)
+  , editorId :: !(Var WidgetId)
+  , openDlg :: !(Var (Maybe FileDialogId))
+  , saveDlg :: !(Var (Maybe FileDialogId))
+  }
 
 -- | A notepad's private document and dialog state. Allocate one per
 -- instance before starting the SDL session, and draw it with 'notepadUi'.
 newNotepad :: IO NotepadState
-newNotepad =
-  NotepadState
-    &lt;$&gt; newVar emptyDocument
-    &lt;*&gt; newVar (WidgetId 0)
-    &lt;*&gt; newVar Nothing
-    &lt;*&gt; newVar Nothing
-
+newNotepad = do
+  doc &lt;- newVar emptyDocument
+  editorId &lt;- newVar (WidgetId 0)
+  openDlg &lt;- newVar Nothing
+  saveDlg &lt;- newVar Nothing
+  pure NotepadState {..}
 </code></pre>
 <p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. The rule of thumb: allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
 <h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
@@ -221,7 +220,6 @@ main = do
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
     (notepadUi state)
-
 </code></pre>
 <p>With exit-on-close off, <code>winCloseRequested &lt;$&gt; askWindow</code> reports the request inside the view, where it can open a confirmation modal instead of quitting:</p>
 <pre><code class="language-haskell">  item (winCloseRequested &lt;$&gt; askWindow) exitApp
@@ -253,7 +251,6 @@ menuBar openMenu entries = do
       -- gets a constant and closing it is written here.
       (popupResp, _) &lt;- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
-
 </code></pre>
 <p><code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the state is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> supplies a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
@@ -324,7 +321,6 @@ writeDocument filePath doc = do
           IO (Either SomeException ())
       )
   pure (isRight result)
-
 </code></pre>
 <p><code>documentText</code> is the only conversion from the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
 <h2 id="6-the-editor"><a class="header" href="#6-the-editor">6. The editor</a></h2>
@@ -367,7 +363,6 @@ writeDocument filePath doc = do
       flex
       whenM (button "Discard") quitUi
       whenM (button "Cancel") (writeVar confirmExit False)
-
 </code></pre>
 <p>There is one modal at a time: opening the exit prompt closes the About modal first. Overlay state is a <code>Var Bool</code>, and the modal call itself is unconditional.</p>
 <h2 id="8-undo-redo-and-the-rest-of-the-editing-commands"><a class="header" href="#8-undo-redo-and-the-rest-of-the-editing-commands">8. Undo, redo, and the rest of the editing commands</a></h2>
@@ -410,7 +405,6 @@ statusBar docName docVar statusMsg zoomVal = do
     labelWith
       (tight . fontMuted)
       ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
-
 </code></pre>
 <p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="../troubleshooting/recurring-bugs.html">Recurring Bugs</a>).</p>
 <h2 id="10-try-it"><a class="header" href="#10-try-it">10. Try it</a></h2>
