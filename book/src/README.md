@@ -2,7 +2,7 @@
 
 An immediate-mode GUI toolkit for Haskell.
 
-A view is a `NanoUI ()` action that the backend re-runs every frame. Widgets return values directly (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, `do` notation, and `if`/`case`/`for_`.
+You describe the whole window as one `NanoUI ()` action, and the backend runs that action again on every frame. The rest of this book calls that action the *view*. Widgets return values directly (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, `do` notation, and `if`/`case`/`for_`.
 
 ```haskell
 {{#include ../../packages/nano-ui-demo/book/Book/Intro.hs:counter}}
