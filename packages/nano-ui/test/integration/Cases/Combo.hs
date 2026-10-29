@@ -6,16 +6,15 @@ import Data.Text qualified as T
 import NanoUI.Internal.Input (onMac)
 import NanoUI.Shortcut
 import NanoUI.Testing.Sim
-import NanoUI.Widgets.Combo (ComboInput (..), ComboState (..), ComboStep (..), comboStep)
 
 tests :: [Spec]
 tests =
   [ spec "combo-pick-and-commit" runComboPickTest
-  , spec "combo-dropdown-placement" runComboDropdownPlacementTest
-  , spec "combo-dropdown-scrolled-away" runComboDropdownScrolledAwayTest
+  , spec "dropdown-placement" runDropdownPlacementTest
+  , spec "dropdown-scrolled-away" runDropdownScrolledAwayTest
   , spec "combo-escape-owned" runComboEscapeOwnedTest
   , simSpec "combo-scrollbar-drag" 320 300 (withValue "" (comboBox' "Fonts" (famOpts 12))) comboScrollbarDrag
-  , spec "combo-track-press-holds" runComboTrackPressHoldsTest
+  , simSpec "combo-track-press-holds" 320 300 (withValue "" (comboBox' "Fonts" (famOpts 100))) comboTrackHolds
   , simSpec "combo-wheel" 200 360 (withValue "" (comboBox' "Fonts" (famOpts 20 ++ [longOpt]))) comboWheel
   ]
 
@@ -35,27 +34,28 @@ type Combo = (Response, T.Text)
 commitOf :: Combo -> (Bool, T.Text)
 commitOf (r, t) = (respChanged r, t)
 
--- | Each script drives a fresh combo over 'comboOpts' holding its text.
-pickCases :: [(T.Text, Sim Combo ())]
+-- | Each script drives a fresh combo over 'comboOpts' holding its text in
+-- the 'Var' it is given.
+pickCases :: [(T.Text, Var T.Text -> Sim Combo ())]
 pickCases =
   [ -- Typing filters the list, folding case so "STRASSE" finds "Straße",
     -- and never picks anything on its own: Enter with no highlight leaves
     -- the typed text alone.
-    ("", focused >> typeText "ga" >> expect "Gamma Mono" >> expectNot "Alpha Sans" >> enterLeaves "ga")
-  , ("", focused >> typeText "STRASSE" >> expect "Straße Sans" >> expectNot "Beta Serif")
+    ("", \_ -> focused >> typeText "ga" >> expect "Gamma Mono" >> expectNot "Alpha Sans" >> enterLeaves "ga")
+  , ("", \_ -> focused >> typeText "STRASSE" >> expect "Straße Sans" >> expectNot "Beta Serif")
   , -- Down from nothing highlights the first row and Enter commits the
     -- highlight.
     ( ""
-    , do
+    , \_ -> do
         _ <- focused >> pressKey KeyDown >> pressKey KeyDown
         enterCommits (True, "Beta Serif")
         expect "Beta Serif"
     )
   , -- A click on a row commits it and blurs the field, which closes the list.
     ( ""
-    , do
+    , \_ -> do
         checkEq (True, "Beta Serif") . commitOf =<< (focused >> click "Beta Serif")
-        checkEq (WidgetId 0) =<< (simContext >>= liftIO . getFocusId)
+        checkEq (WidgetId 0) =<< focusedId
         expectNot "Alpha Sans"
     )
   , -- Hovering a row highlights it, with the pointer cursor and the hover
@@ -63,7 +63,7 @@ pickCases =
     -- from it, a pointer that has not moved does not pull it back, and Enter
     -- commits the row the keys reached.
     ( ""
-    , do
+    , \_ -> do
         _ <- focused >> moveTo "Beta Serif"
         checkEq (False, "") . commitOf =<< frame
         checkEq UiCursorPointer =<< pointerCursor
@@ -77,23 +77,30 @@ pickCases =
     -- list. Escape cancels an edit: the text reverts to the last commit with
     -- no commit pulse, and the field blurs, closing the list.
     ( "Inter"
-    , do
+    , \_ -> do
         expect "Inter" >> expectNot "Alpha Sans"
         _ <- focused >> typeText "No"
         checkEq (False, "Inter") . commitOf =<< pressKey KeyEscape
-        checkEq (WidgetId 0) =<< (simContext >>= liftIO . getFocusId)
+        checkEq (WidgetId 0) =<< focusedId
         expectNot "Alpha Sans"
     )
   , -- Typing edits the text without committing, word-wise keys
     -- (Ctrl+Backspace, Option+Backspace on macOS) work as in a text input,
     -- and the frame after a blur commits the text.
     ( ""
-    , do
+    , \_ -> do
         checkEq [(False, "N"), (False, "No")] . map commitOf =<< (focused >> mapM typeText ["N", "o"])
         _ <- typeText " bar" >> chord ((if onMac then alt else ctrl) <> key KeyBackspace)
         checkEq (False, "No ") . commitOf =<< frame
         _ <- pressKey KeyBackspace >> press (At (V2 310 5))
         checkEq [(True, "No"), (False, "No")] . map commitOf =<< sequence [release, frame]
+    )
+  , -- A value the application writes after a commit shows, but is no commit.
+    ( ""
+    , \ref -> do
+        check . respChanged . fst =<< (focused >> pressKey KeyDown >> pressKey KeyEnter)
+        writeV ref "Reset"
+        checkEq (False, "Reset") . commitOf =<< frame
     )
   ]
   where
@@ -102,54 +109,59 @@ pickCases =
     enterLeaves txt = checkEq txt . snd =<< pressKey KeyEnter
 
 runComboPickTest :: Context -> IORef Int -> IO ()
-runComboPickTest _ failed = do
+runComboPickTest _ failed =
   forM_ pickCases $ \(initial, script) -> do
     ctx <- newContext
     ref <- newVar initial
-    runSim ctx failed (withInput 320 200) (column (held ref (comboBox' "Font" comboOpts))) script
-  -- A value the application writes after a commit shows, but is no commit.
-  ctx <- newContext
-  ref <- newVar ""
-  runSim ctx failed (withInput 320 200) (column (held ref (comboBox' "Font" comboOpts))) $ do
-    check . respChanged . fst =<< (pressKey KeyTab >> pressKey KeyDown >> pressKey KeyEnter)
-    liftIO (writeVarIO ref "Reset")
-    checkEq (False, "Reset") . commitOf =<< frame
+    runSim ctx failed (withInput 320 200) (column (held ref (comboBox' "Font" comboOpts))) (script ref)
 
--- | A combo near the window's bottom lists its options above itself, where
--- they fit, and a click there picks the row under it. A list that fits on
--- neither side is not slid back over the field, so the click that focuses
--- the combo commits nothing.
-runComboDropdownPlacementTest :: Context -> IORef Int -> IO ()
-runComboDropdownPlacementTest _ failed = do
-  let below n opts = column (replicateM_ n (label "line") >> withValue "" (comboBox' "Font" opts))
-  flips <- newContext
-  runSim flips failed (withInput 320 200) (below 6 comboOpts) $ do
-    (resp, _) <- pressKey KeyTab >> settle
-    beta <- rectOf "Beta Serif"
-    check (rectY beta + rectH beta <= rectY (respRect resp))
-    checkEq "Beta Serif" . snd =<< click (Within beta)
-  tall <- newContext
-  runSim tall failed (withInput 320 300) (below 4 (famOpts 12)) $ do
-    (resp, _) <- result
-    checkEq "" . snd =<< click (On resp)
-    checkEq (respId resp) =<< liftIO (getFocusId tall)
+-- | A select and a combo box over @opts@, each with its value as the
+-- option's text: the select on the second option, the combo empty.
+dropdowns :: [(T.Text, [T.Text] -> NanoUI (Response, T.Text))]
+dropdowns =
+  [ ("select", \opts -> fmap (opts !!) <$> withValue 1 (select' opts))
+  , ("combo", \opts -> withValue "" (comboBox' "Font" opts))
+  ]
 
--- | A focused combo whose field scrolls out of view shows no list, and the
--- pointer where the list would be highlights no row for Enter to commit.
-runComboDropdownScrolledAwayTest :: Context -> IORef Int -> IO ()
-runComboDropdownScrolledAwayTest ctx failed = do
-  let field = withValue "" (comboBox' "Font" comboOpts) <* replicateM_ 30 (label "line")
-  runSim ctx failed (withInput 320 300) (column (label "toolbar" >> scrollArea (fixedWH 300 120) field)) $ do
-    (sid, (resp, _)) <- result
-    _ <- click (On resp)
-    V2 cx cy <- spanCenter <$> rectOf "Beta Serif"
-    -- Scrolled just past its field, the list would lie in the window.
-    let past = rectH (respRect resp) + 20
-    liftIO (setScrollOffset ctx sid past)
-    _ <- frame >> frame
-    expectNot "Beta Serif"
-    _ <- moveTo (At (V2 cx (cy - past)))
-    checkEq "" . snd . snd =<< pressKey KeyEnter
+-- | A dropdown near the window's bottom opens above its field, where it
+-- fits, and a click there picks the row under it. One that fits on neither
+-- side is not slid back over the field, so the click that opens it picks
+-- nothing.
+runDropdownPlacementTest :: Context -> IORef Int -> IO ()
+runDropdownPlacementTest _ failed =
+  forM_ dropdowns $ \(name, field) -> do
+    let below n opts = column (replicateM_ n (label "line") >> field opts)
+    flips <- newContext
+    runSim flips failed (withInput 320 200) (below 6 comboOpts) $ do
+      (resp, _) <- click . On . fst =<< result
+      alpha <- rectOf "Alpha Sans"
+      checkEq (name, True) (name, rectY alpha + rectH alpha <= rectY (respRect resp))
+      checkEq (name, "Alpha Sans") . (name,) . snd =<< click (Within alpha)
+    tall <- newContext
+    runSim tall failed (withInput 320 300) (below 4 (famOpts 12)) $ do
+      (resp, before) <- result
+      checkEq (name, before) . (name,) . snd =<< click (On resp)
+      checkEq (name, True) . (name,) =<< labelShown "Fam 01"
+
+-- | A dropdown goes with its field when the field scrolls out of view. Held
+-- open while the field scrolls just past the top, where the dropdown would
+-- still lie in the window, it is not drawn, and neither a release where its
+-- row would be nor Enter picks anything.
+runDropdownScrolledAwayTest :: Context -> IORef Int -> IO ()
+runDropdownScrolledAwayTest _ failed =
+  forM_ dropdowns $ \(name, field) -> do
+    ctx <- newContext
+    let page = field comboOpts <* replicateM_ 30 (label "line")
+    runSim ctx failed (withInput 320 300) (column (label "toolbar" >> scrollArea (fixedWH 300 120) page)) $ do
+      (sid, (resp, before)) <- result
+      V2 cx cy <- press (On resp) >> frame >> (spanCenter <$> rectOf "Gamma Mono")
+      let past = rectH (respRect resp) + 20
+          picked = checkEq (name, before) . (name,) . snd . snd
+      onContext (\c -> setScrollOffset c sid past)
+      _ <- frame >> frame
+      checkEq (name, False) . (name,) =<< labelShown "Gamma Mono"
+      picked =<< (moveTo (At (V2 cx (cy - past))) >> release)
+      picked =<< pressKey KeyEnter
 
 -- | Escape on a focused combo showing its list cancels the combo and nothing
 -- else, wherever another Escape consumer is declared: a popup's dismiss, a
@@ -174,9 +186,9 @@ runComboEscapeOwnedTest _ failed =
       runSim ctx failed (withInput 320 200) ui $ do
         _ <- pressKey KeyTab >> typeText "a" >> frameWith (chordInp (key KeyEscape))
         _ <- frameWith (keyRepeatInp KeyEscape) >> frameWith (keyUpInp KeyEscape)
-        acted <- liftIO ((||) <$> readIORef fired <*> (not <$> readVarIO popupOpen))
+        acted <- (||) <$> liftIO (readIORef fired) <*> (not <$> readV popupOpen)
         checkEq (which :: T.Text, before, False) (which, before, acted)
-        checkEq (WidgetId 0) =<< liftIO (getFocusId ctx)
+        checkEq (WidgetId 0) =<< focusedId
 
 -- | Dragging the list's scrollbar thumb scrolls it, and releasing the drag
 -- over a row commits nothing.
@@ -194,17 +206,15 @@ comboScrollbarDrag = do
 
 -- | A press on the scrollbar track below the thumb jumps the list there, and
 -- holding the button still keeps the list where the jump put it.
-runComboTrackPressHoldsTest :: Context -> IORef Int -> IO ()
-runComboTrackPressHoldsTest _ failed = do
-  let fresh = ComboState (-1) 0 0 50 0 0 0 "" "" True Nothing
-      rows = [T.pack (show i) | i <- [1 .. 100 :: Int]]
-      step inp = stepState . comboStep (ComboInput True False "" rows 50 (Rect 0 0 200 30) inp)
-      -- The list opens 4 px below the field; its scrollbar lane is its
-      -- right-most 10 px.
-      onTrack = V2 195 (34 + 100)
-      pressed = step (pressAt (withInput 400 400) onTrack) fresh
-  assertGt failed (csWindow pressed) 0
-  assertEq failed (csWindow pressed) (csWindow (step (holdAt (withInput 400 400) onTrack) pressed))
+comboTrackHolds :: Sim Combo ()
+comboTrackHolds = do
+  (resp, _) <- pressKey KeyTab >> settle
+  -- The list opens 4 px below the field, its scrollbar lane at its right.
+  let Rect rx ry rw rh = respRect resp
+      rows = (\ss -> [spanLabel t | (_, t, _, _, _) <- ss, "Fam " `T.isPrefixOf` spanLabel t]) <$> spans
+  jumped <- press (At (V2 (rx + rw - 5) (ry + rh + 4 + 120))) >> rows
+  check ("Fam 01" `notElem` jumped)
+  checkEq jumped =<< (frame >> rows)
 
 -- | The wheel over the open list scrolls it: a notch three rows, and a
 -- trackpad's eighths of a notch add up to as much. A horizontal wheel shifts

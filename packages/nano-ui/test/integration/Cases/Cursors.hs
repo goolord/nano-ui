@@ -20,10 +20,7 @@ plainArea w h = drawing (fixedWH w h) (const mempty)
 
 -- | The cursor for the pointer at @p@, from the last frame's solve.
 cursorNow :: V2 -> Sim a UiCursorKind
-cursorNow p = do
-  ctx <- simContext
-  i <- getInput
-  liftIO (uiCursorKind ctx i {inputMousePos = p})
+cursorNow p = getInput >>= \i -> onContext (`uiCursorKind` i {inputMousePos = p})
 
 -- | Views that return points, and the cursor each point shows.
 shapeCases :: [(NanoUI [V2], [UiCursorKind])]
@@ -137,7 +134,7 @@ runCursorShapeIdsLayoutTest ctx failed = do
         pure (a, b, n)
       snapshot = do
         (a, b, n) <- result
-        rects <- liftIO (arenaRects ctx)
+        rects <- onContext arenaRects
         pure (respId a, respId b, respRect a, respRect b, rects, n)
       setScoped on = liftIO (writeIORef scoped on) >> settle
   runSim ctx failed (withInputOff 640 480) ui $ do
@@ -182,4 +179,4 @@ cursorDragOwner = do
   checkEq UiCursorGrabbing =<< dragOver s f
   checkEq UiCursorText =<< dragOver f g
   _ <- press (On s) >> moveTo (On b)
-  check . (/= respId b) =<< liftIO . getHotId =<< simContext
+  check . (/= respId b) =<< hotId

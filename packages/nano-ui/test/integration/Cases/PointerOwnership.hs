@@ -44,7 +44,7 @@ slackUi = columnWith tight $ do
 colorPickerBarSlack :: Sim (Response, Color) ()
 colorPickerBarSlack = do
   -- The field, then the hue bar; down its middle stretch, off hue 0 at either end.
-  _ : Rect hx hy _ hh : _ <- liftIO . fmap (map snd) . nodesOfType NodeColorPicker =<< simContext
+  _ : Rect hx hy _ hh : _ <- map snd <$> onContext (nodesOfType NodeColorPicker)
   let p = At (V2 (hx - 1) (hy + hh * 0.3))
   (_, c) <- moveTo p >> press p >> moveTo (At (V2 (hx - 1) (hy + hh * 0.5)))
   check (c /= red)
@@ -101,40 +101,40 @@ overlays =
     panelBody = columnWith (fixedWH 420 420) (mapM_ label (numbered "overlay line" [1 .. 6]))
     -- Overlays the frame draws itself: the panel rect rides on their spans.
     spanPanelRect _ = do
-      ctx <- simContext
-      listToMaybe . map (\(_, _, _, _, r) -> r) <$> (liftIO . collectOverlayTextSpans ctx =<< getInput)
+      inp <- getInput
+      listToMaybe . map (\(_, _, _, _, r) -> r) <$> onContext (`collectOverlayTextSpans` inp)
     -- Floating panels, which are layout nodes.
-    nodePanelRect src = simContext >>= \ctx -> liftIO (getPrevRect ctx (respId src))
+    nodePanelRect src = onContext (`getPrevRect` respId src)
 
 victims :: IO [Victim]
 victims = do
   -- The tab bar does not keep its own state, so the test holds it.
   tabRef <- newVar (0 :: Int)
   let tabBarUi v = toResponse <$> tabBar' v [tab i (T.pack ("tab " <> show i)) () | i <- [0 .. 3 :: Int]]
-      plain name ui place = Victim name (fmap show <$> ui) (hotAt place) (\_ _ -> pure "")
+      plain name ui place = Victim name ui (hotAt place) (\_ _ -> pure "")
       -- The point @fx@ across and @fy@ down the rect, moved by @dx@ and @dy@.
       pt fx dx fy dy (Rect x y w h) = V2 (x + w * fx + dx) (y + h * fy + dy)
-      area = T.unlines (replicate 30 "victim area line")
-  pure
-    [ plain "button" ((,()) <$> button' "victim button") spanCenter
-    , plain "checkbox" (withValue False (checkbox' "victim checkbox")) spanCenter
-    , -- The last option.
-      plain "radio" (withValue 0 (radio' ["one", "two", "three"])) (pt 0.5 0 1 (-6))
-    , plain "slider" (withValue 50 (slider' 0 100)) (pt 0.8 0 0.5 0)
-    , plain "knob" (withValue 50 (knobWith' id 36 0 100)) spanCenter
-    , plain "color-picker" (withValue red colorPicker') (spanCenter . colorPickerSvSquare)
-    , -- The up arrow.
-      plain "numeric-stepper" (withValue 5 numericInput') (pt 1 (-8) 0.25 0)
-    , (plain "text-input" (withValue "victim text" textInput') spanCenter) {vcProbe = caretProbe}
-    , (plain "text-area" (withValue area (textAreaWith' (fixedH 120))) spanCenter) {vcProbe = areaProbe}
-    , (plain "select" (withValue 0 (selectWith' fillW ["a", "b", "c"])) spanCenter) {vcProbe = selectProbe}
-    , -- The second tab.
-      plain "tab-bar" (held tabRef tabBarUi) (pt 0 90 0.5 0)
-    , -- On the scrollbar lane, where a press drags the thumb.
-      (plain "scroll-area" scroller (pt 1 (-5) 0.7 0)) {vcProbe = scrollProbe}
-    , -- On the boundary between the two headers, where a press resizes.
-      (plain "table-columns" tableUi spanCenter) {vcHot = headerBoundary}
-    ]
+      -- Where a press changes each control, and what else of its state to watch.
+      control (name, ui) = case name of
+        -- The last option.
+        "radio" -> plain name ui (pt 0.5 0 1 (-6))
+        "slider" -> plain name ui (pt 0.8 0 0.5 0)
+        "color picker" -> plain name ui (spanCenter . colorPickerSvSquare)
+        -- The up arrow.
+        "numeric input" -> plain name ui (pt 1 (-8) 0.25 0)
+        "text input" -> (plain name ui spanCenter) {vcProbe = caretProbe}
+        "text area" -> (plain name ui spanCenter) {vcProbe = areaProbe}
+        "select" -> (plain name ui spanCenter) {vcProbe = selectProbe}
+        _ -> plain name ui spanCenter
+  pure $
+    map control everyControl
+      ++ [ -- The second tab.
+           plain "tab-bar" (fmap show <$> held tabRef tabBarUi) (pt 0 90 0.5 0)
+         , -- On the scrollbar lane, where a press drags the thumb.
+           (plain "scroll-area" (fmap show <$> scroller) (pt 1 (-5) 0.7 0)) {vcProbe = scrollProbe}
+         , -- On the boundary between the two headers, where a press resizes.
+           (plain "table-columns" (fmap show <$> tableUi) spanCenter) {vcHot = headerBoundary}
+         ]
   where
     hotAt place _ = pure . place . respRect
     scroller = do
@@ -195,7 +195,7 @@ runPointerOwnershipTest _ failed = do
     -- Found with nothing on top, which could hide the spans some widgets need.
     offset <- withPage failed Nothing vc (V2 0 0) (V2 0 0) $ \_ _ -> do
       (_, (resp, _)) <- result
-      V2 hx hy <- simContext >>= \ctx -> liftIO (vcHot vc ctx resp)
+      V2 hx hy <- onContext (\ctx -> vcHot vc ctx resp)
       pure (V2 (hx - rectX (respRect resp)) (hy - rectY (respRect resp)))
     -- The control: with no overlay the widget does notice.
     noticed <- scenario failed Nothing vc offset (V2 0 0) ClickDrag
@@ -216,10 +216,9 @@ scenario failed mOv vc offset shift gesture = withPage failed mOv vc offset shif
   Nothing -> pure ["overlay did not open"]
   Just r | not (rectContains r hot) -> pure ["hot " <> show hot <> " is not under the overlay at " <> show r]
   Just _ -> do
-    ctx <- simContext
     (_, (resp0, value0)) <- frame
-    probe0 <- liftIO (vcProbe vc ctx resp0)
-    focus0 <- liftIO (getFocusId ctx)
+    probe0 <- onContext (\ctx -> vcProbe vc ctx resp0)
+    focus0 <- focusedId
     let victimId = respId resp0
         -- Each step, and whether its flags count (hover once the gesture ends is fair).
         steps = case gesture of
@@ -235,10 +234,10 @@ scenario failed mOv vc offset shift gesture = withPage failed mOv vc offset shif
             [(True, pressButton MouseRight (At hot)), (True, releaseButton MouseRight), (False, frame)]
     fmap concat . forM (zip [1 :: Int ..] steps) $ \(i, (flags, step)) -> do
       (_, (resp, value)) <- step
-      probe <- liftIO (vcProbe vc ctx resp)
-      focus <- liftIO (getFocusId ctx)
-      active <- liftIO (readIORef (ctxActiveId ctx))
-      menu <- liftIO (getsInteraction ctx isTextInputMenu)
+      probe <- onContext (\ctx -> vcProbe vc ctx resp)
+      focus <- focusedId
+      active <- onContext (readIORef . ctxActiveId)
+      menu <- onContext (`getsInteraction` isTextInputMenu)
       let state =
             [ (value /= value0, "value " <> value0 <> " -> " <> value)
             , (probe /= probe0, "state " <> probe0 <> " -> " <> probe)

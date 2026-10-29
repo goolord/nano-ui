@@ -8,6 +8,7 @@ module Spec
   , simSpec
   , pixelSimSpec
   , varSimSpec
+  , everyControl
   , arenaRects
   , nodeLayout
   , sameAsFreshSolve
@@ -67,6 +68,29 @@ pixelSimSpec name w h view script = pixelSpec name (\ctx failed -> runSim ctx fa
 varSimSpec :: String -> Float -> Float -> v -> (Var v -> NanoUI a) -> (Var v -> Sim a ()) -> Spec
 varSimSpec name w h initial view script =
   spec name (\ctx failed -> newVar initial >>= \v -> runSim ctx failed (withInput w h) (view v) (script v))
+
+-- | One of each control a user can focus and work, with its value shown, for
+-- the properties every control has: focus from code, no keys while
+-- disabled, no pointer through an overlay.
+everyControl :: [(String, NanoUI (Response, String))]
+everyControl =
+  [ ("button", (,"") <$> button' "Go")
+  , ("checkbox", shown (withValue False (checkbox' "Check")))
+  , ("toggle", shown (withValue False (toggleSwitchWith' id)))
+  , ("slider", shown (withValue 50 (slider' 0 100)))
+  , ("knob", shown (withValue 50 (knobWith' id 36 0 100)))
+  , ("radio", shown (withValue 0 (radio' ["one", "two", "three"])))
+  , ("select", shown (withValue 0 (selectWith' fillW ["a", "b", "c"])))
+  , ("text input", shown (withValue "some text" textInput'))
+  , ("search input", shown (withValue "some text" (searchInput' "Search")))
+  , ("numeric input", shown (withValue 5 numericInput'))
+  , ("combo box", shown (withValue "a" (comboBox' "Choose" ["a", "b"])))
+  , ("text area", shown (withValue (T.unlines (replicate 30 "a line")) (textAreaWith' (fixedH 120))))
+  , ("color picker", shown (withValue (colorRGBA 200 40 40 255) colorPicker'))
+  ]
+  where
+    shown :: Show v => NanoUI (Response, v) -> NanoUI (Response, String)
+    shown = fmap (fmap show)
 
 -- | @base@ with a monospace base font of @baseCell@ px cells, and
 -- @sizedCell@ px cells for text given a font size of its own, so a test can

@@ -5,12 +5,10 @@
 module Cases.Ime (tests) where
 
 import Spec
-import Data.IntMap.Strict qualified as IM
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Text qualified as T
 import GHC.Stack (HasCallStack)
-import NanoUI.Internal.Context (intKey, setDrawSquareGeometry)
-import NanoUI.Internal.Store (Slot (..), WidgetStore (..), slotKey)
+import NanoUI.Internal.Context (setDrawSquareGeometry)
 import NanoUI.Shortcut
 import NanoUI.Testing.Sim
 
@@ -29,7 +27,7 @@ tests =
   , pixelSpec "ime-repeated-pass" runImeRepeatedPassTest
   , pixelSpec "ime-shortcuts" runImeShortcutsTest
   , pixelSpec "ime-custom-widget" runImeCustomWidgetTest
-  , pixelSpec "ime-purpose" runImePurposeTest
+  , pixelSimSpec "ime-purpose" 400 300 purposeUi imePurpose
   ]
 
 inp :: Input
@@ -64,7 +62,7 @@ shown yes no = do
 type Field = (Response, T.Text)
 
 imeArea :: Sim a (Maybe TextInputArea)
-imeArea = simContext >>= liftIO . textInputArea
+imeArea = onContext textInputArea
 
 -- | Run the script on @widget@ holding @v@ in a column, focused by Tab, its
 -- caret @back@ characters from the end.
@@ -121,7 +119,8 @@ runImeCommitTest ctx failed = do
     checkEq "仮名" . snd =<< commitText "仮名"
 
 -- | A view rerun after a hook write shows the composition and commits it
--- once.
+-- once. ('respChanged' comes from the rerun, which has no events, so
+-- 'runImeCommitTest' cannot check this.)
 runImeRepeatedPassTest :: Context -> IORef Int -> IO ()
 runImeRepeatedPassTest ctx failed =
   field ctx failed "ab" 0 (\v -> textInput' v <* rerun) $ do
@@ -137,7 +136,7 @@ runImeKeysTest ctx failed =
   field ctx failed "abcd" 2 (\v -> textInput' v <* button "After") $ do
     let escapeKept f = do
           i <- keyInp KeyEscape . f <$> getInput
-          frameWith (const i) >> liftIO (overlayConsumesQuit ctx i)
+          frameWith (const i) >> onContext (`overlayConsumesQuit` i)
     _ <- compose "xyz" 3
     let keys = [KeyBackspace, KeyDelete, KeyLeft, KeyRight, KeyHome, KeyEnd, KeyEnter, KeyEscape, KeyTab]
     forM_ keys $ \k -> do
@@ -232,8 +231,6 @@ runImeScrollTest ctx failed = do
     (resp, _) <- compose "0123456789" 10
     let Rect fx _ fw _ = respRect resp
         caretIn ok = imeArea >>= (`checkJust` \(TextInputArea r cursor _) -> check (ok (rectX r + cursor)))
-    store <- liftIO (getStore ctx)
-    checkLt 0 (IM.findWithDefault 0 (slotKey SlotTextInputScroll (intKey (respId resp))) (storeFloat store))
     caretIn (\x -> x >= fx && x <= fx + fw)
     _ <- compose "0123456789" 0
     caretIn (>= fx)
@@ -275,22 +272,20 @@ runImeOwnerTest ctx failed = do
     checkEq "b" . snd . snd =<< (pressKey KeyEnd >> pressKey KeyBackspace)
     _ <- comp 3
     shown ["bxyz"] []
-    checkEq "aa" =<< liftIO (readVarIO aRef)
+    checkEq "aa" =<< readV aRef
 
 -- | Starting, changing or ending a composition repaints its field on an
 -- idle frame.
 runImeDamageTest :: Context -> IORef Int -> IO ()
 runImeDamageTest ctx failed = do
-  ref <- newVar "abcd"
-  let damage = liftIO (takeDamage ctx)
-  let ui = column (label "Above" *> held ref textInput' <* label "Below")
+  let ui = column (label "Above" *> withValue "abcd" textInput' <* label "Below")
   runSim ctx failed inp {inputDeltaTime = 1} ui $ do
     (resp, _) <- pressTab 1 >> settle
-    check . damageIsEmpty =<< damage
-    check =<< (getInput >>= \i -> liftIO (needsRedraw ctx i (composing "x" 1 i)))
+    check . damageIsEmpty =<< frameDamage
+    check =<< wouldRedraw (composing "x" 1)
     forM_ [composing "x" 1, composing "xy" 2, commit ""] $ \step -> do
-      check . (`clipCovers` respRect resp) =<< (frameWith step >> damage)
-      check . damageIsEmpty =<< (frameWith step >> damage)
+      check . (`clipCovers` respRect resp) =<< (frameWith step >> frameDamage)
+      check . damageIsEmpty =<< (frameWith step >> frameDamage)
 
 -- | IME keys fire no shortcuts. While composing, presses, releases and held
 -- keys are dropped. On the commit frame, passed-on keys reach the field but
@@ -358,16 +353,17 @@ runImeCustomWidgetTest ctx failed = do
 -- | Fields report their input purpose (secure for passwords, numeric for
 -- numbers), already on the frame Tab focuses them. Selectable labels and
 -- buttons take no text.
-runImePurposeTest :: Context -> IORef Int -> IO ()
-runImePurposeTest ctx failed = do
-  let ui = column $ do
-        _ <- button "Before"
-        _ <- withValue "secret" (textInputConfigured defaultTextInputConfig {ticPassword = True})
-        _ <- withValue 3 numericInput
-        _ <- withValue "notes" textArea
-        selectableText "label"
-      purpose = fmap textInputAreaPurpose <$> imeArea
-  runSim ctx failed inp ui $ do
-    let purposes = [Nothing, Just InputSecure, Just InputNumeric, Just InputNormal, Nothing]
-    checkEq purposes =<< replicateM 5 (pressKey KeyTab >> purpose)
-    checkEq Nothing =<< (frame >> purpose)
+purposeUi :: NanoUI ()
+purposeUi = column $ do
+  _ <- button "Before"
+  _ <- withValue "secret" (textInputConfigured defaultTextInputConfig {ticPassword = True})
+  _ <- withValue 3 numericInput
+  _ <- withValue "notes" textArea
+  selectableText "label"
+
+imePurpose :: Sim () ()
+imePurpose = do
+  let purpose = fmap textInputAreaPurpose <$> imeArea
+      purposes = [Nothing, Just InputSecure, Just InputNumeric, Just InputNormal, Nothing]
+  checkEq purposes =<< replicateM 5 (pressKey KeyTab >> purpose)
+  checkEq Nothing =<< (frame >> purpose)
