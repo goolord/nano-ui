@@ -203,15 +203,14 @@ findExact needle spans =
     , spanLabel txt == needle
     ]
 
--- | Find a table-header centre, preferring its reserved sort padding over an
--- ordinary label with the same text. Ties choose the rightmost match.
+-- | Find a table-header centre: a span that is the needle plus padding, or
+-- else the rightmost span labelled exactly the needle ('findExact'). Text
+-- that only starts with the needle, such as "Name (asc)", never matches.
+-- Current tables draw their sort mark as a style flag, not padding, so their
+-- headers come from the 'findExact' fallback, and a view with another label
+-- of the same text to the right needs a finder of its own.
 findHeader :: T.Text -> [DemoSpan] -> Maybe V2
 findHeader needle spans =
-  -- Header spans keep their sort-reserve padding ("Name   ", or "   Age" in
-  -- a right-aligned column, the arrow glyph blanked), while every other
-  -- "Name" label is trimmed. Match the raw, untrimmed text, and only the
-  -- needle plus that padding, so the header wins over right-aligned kv
-  -- values that repeat the column name and labels such as "Name (asc)".
   let marked =
         [ (x, spanCenter r)
         | (r@(Rect x _ w h), txt, _, _, _) <- spans
