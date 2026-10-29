@@ -28,46 +28,8 @@ import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..), DrawingCacheState (..))
 import NanoUI.Internal.Context.Types (DrawOpCacheEntry (..))
 import NanoUI.Diagrams
-  ( B
-  , defaultPlotStyle
-  , diagram
-  , diagramOps
-  , fitLayout
-  )
-import NanoUI.Diagrams.Backend (diagramTextOps)
 import NanoUI.Internal.Path (Shade (..))
 import NanoUI.Path qualified as P
-import NanoUI.Plot.Chrome
-  ( Margins (..)
-  , chartDiagram
-  , chartMargins
-  , seriesDomains
-  , seriesPoints
-  )
-import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
-import NanoUI.Plot.Builder qualified as Builder
-import NanoUI.Plot.Hit (nearestPlotHover)
-import NanoUI.Plot.Scale (domainToPlot, formatTick, mergeDomains, niceTickLabels, niceTicks)
-import NanoUI.Plot.Series
-  ( area
-  , bar
-  , line
-  , scatter
-  , step
-  , withBaseline
-  , withColor
-  , withMarker
-  , withStrokeWidth
-  )
-import NanoUI.Plot.Types
-  ( Chart (..)
-  , Domain (..)
-  , GridMode (..)
-  , LegendPos (..)
-  , MarkShape (..)
-  , PlotHover (..)
-  , Series (..)
-  )
 import NanoUI.Plot.Widget qualified as Plot
 import Test.Hspec (describe, hspec, it)
 
@@ -100,7 +62,7 @@ fm = monospaceMetrics 16
 
 -- | A chart of the given series with no legend, grid or decimation.
 bareChart :: [Series] -> Chart
-bareChart ss = (Builder.chart ss) {chartLegend = LegendNone, chartGrid = GridNone, chartDecimate = False}
+bareChart ss = (chart ss) {chartLegend = LegendNone, chartGrid = GridNone, chartDecimate = False}
 
 chartDia :: Chart -> Diagram B
 chartDia c = chartDiagram fm defaultTheme defaultPlotStyle (seriesDomains c) (map (seriesPoints c) (chartSeries c)) c
@@ -327,7 +289,7 @@ testDecimation = do
   -- scatter or a marked line up to 2000: a dropped marker is simply missing.
   let
     pts n = [(fromIntegral i, sin (fromIntegral i)) | i <- [0 .. n - 1 :: Int]]
-    drawn s = U.length (seriesPoints (Builder.chart [s]) s)
+    drawn s = U.length (seriesPoints (chart [s]) s)
   check "decimation did not thin a long line" (drawn (line "l" (pts 100)) < 100)
   check "decimation thinned a scatter series" (drawn (scatter "s" (pts 100)) == 100)
   check "decimation thinned a marked line" (drawn (withMarker MarkCircle (line "l" (pts 100))) == 100)
@@ -404,10 +366,10 @@ testLegendColors = do
   let
     custom = colorRGBA 17 211 83 255
     fallback = themeSeries defaultTheme !! 1
-    chart = bareChart [withColor custom (line "custom" []), line "default" []]
+    legendChart = bareChart [withColor custom (line "custom" []), line "default" []]
   forM_ [LegendNone, LegendRight, LegendBottom, LegendTop, LegendInside] $ \position -> do
     let
-      ops = chartOps 400 280 chart {chartLegend = position}
+      ops = chartOps 400 280 legendChart {chartLegend = position}
       labels = [t | DrawText _ _ _ _ t _ <- ops, t `elem` ["custom", "default"]]
       colors = mapMaybe inkColor ops
     if position == LegendNone
@@ -422,8 +384,8 @@ testPlotHover = do
     hoverAt c = nearestPlotHover (seriesDomains c) (map (seriesPoints c) (chartSeries c))
     centre c = hoverAt c 0.5 0.5
     picked = fmap (\h -> (hoverSeriesIdx h, hoverPointIdx h, hoverDataX h, hoverDataY h)) . centre . bareChart
-  forM_ [bareChart [], bareChart [line "empty" []]] $ \chart ->
-    check "empty chart produced a hover target" (centre chart == Nothing)
+  forM_ [bareChart [], bareChart [line "empty" []]] $ \c ->
+    check "empty chart produced a hover target" (centre c == Nothing)
   check "equidistant hover targets did not prefer the first point" $
     picked [line "first" [(0, 0), (0, 0)], line "second" [(0, 0)]] == Just (0, 0, 0, 0)
   check "nearestPlotHover picked wrong point" (picked [line "a" [(0, 0), (1, 1), (2, 4)]] == Just (0, 1, 1, 1))

@@ -13,38 +13,12 @@ import Data.Text qualified as T
 import Ditto.Core qualified as Ditto
 import Ditto.Types qualified as Ditto
 import NanoUI
-  ( Input (..)
-  , Key (KeyEnter, KeyUp)
-  , colorA
-  , colorRGBA
-  , columnWith
-  , fillW
-  , liftIO
-  , maxW
-  , minW
-  , respSubmitted
-  , textInput'
-  , tight
-  )
 import NanoUI qualified as NUI
 import NanoUI.Backend (runNanoUI)
 import NanoUI.Form
 import NanoUI.Form.Internal.Backend
-  ( FormScope (..)
-  , FormStateStore (..)
-  , askFormScope
-  , emptyFormStateStore
-  , getFormStore
-  , markFormSubmitted
-  , resetFormState
-  , runFormUI
-  , setFormStore
-  , updateFieldInput
-  )
 import NanoUI.Internal.Context (ctxFocusId)
-import NanoUI.Internal.Layout.Arena
-  ( NodeType (NodeButton, NodeColorPicker, NodeTextArea, NodeTextInput)
-  )
+import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Testing (Context, clearDirty, collectTextSpans, isDirty, newPixelContext, runFrame)
 import NanoUI.Var (peekVar)
 import NanoUI.Testing.Harness (hasText, keyInp, nodesOfType, runClick, spanCenter, warmup2, withInputOff)
@@ -239,10 +213,10 @@ testValues = do
       (,,) <$> inputEnumSelect "select" (-42) <*> inputEnumRadio "radio" 42 <*> inputEnumSelect unnamed (-12)
     enums = formValue owner ctx "enums" enumForm
   check "enum fields lost their initial values" . (== (-42, 42, -12)) =<< enums
-  forM_ [(0, 255), (-10, 300)] $ \(sel, radio) -> do
+  forM_ [(0, 255), (-10, 300)] $ \(sel, rad) -> do
     updateFieldInput owner ctx "enums" "select" (FormInputInt sel)
-    updateFieldInput owner ctx "enums" "radio" (FormInputInt radio)
-    check ("enum indices " <> show (sel, radio)) . (== (minBound, maxBound, -12)) =<< enums
+    updateFieldInput owner ctx "enums" "radio" (FormInputInt rad)
+    check ("enum indices " <> show (sel, rad)) . (== (minBound, maxBound, -12)) =<< enums
 
 -- | An error appearing and clearing on one field leaves its siblings'
 -- values alone, and a long error message is drawn whole.

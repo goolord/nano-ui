@@ -12,11 +12,6 @@ import NanoUI
 import NanoUI.Backend (monospaceMetrics)
 import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Draw.Svg
-  ( SvgConfig (..)
-  , defaultSvgConfig
-  , drawOpsToSvg
-  , renderDrawOpsSvg
-  )
 import NanoUI.Internal.Path (Shade (Shaded))
 import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P

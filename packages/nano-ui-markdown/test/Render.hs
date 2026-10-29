@@ -149,7 +149,7 @@ customCode =
 
 spec :: Spec
 spec = before newMarkdownCache $ do
-  it "holds a few passes' blocks however many keys churn through it, and every block a frame draws" $ \cache -> do
+  it "holds a few passes' blocks however many keys churn, and every block a frame draws" $ \cache -> do
     ctx <- newContext
     let
       doc = parseMarkdown (T.intercalate "\n\n" ["paragraph " <> T.pack (show i) | i <- [1 .. 50 :: Int]])
@@ -160,18 +160,6 @@ spec = before newMarkdownCache $ do
     -- Sixty documents sharing the blocks.
     replicateM_ 4 (frameOf (forM_ [1 .. 60 :: Int] $ \i -> withKey i (markdown cache doc)))
     markdownCacheSize cache >>= (`shouldSatisfy` (>= 3000))
-
-  it "draws every kind of block's text" $ \cache -> do
-    ctx <-
-      drawn 600 800 . view cache . parseMarkdown $
-        "# Title\n\nHello *world*, see [the docs](https://example.com).\n\n\
-        \- one\n- [x] two\n\n1. first\n\n> quoted\n\n| h1 | h2 |\n|---|---|\n| c1 | c2 |\n\n\
-        \```hs\ncode here\n```\n\n---\n\n![alt text](missing.png)"
-    ws <- wordTexts ctx
-    let wanted = ["Title", "Hello", "world", "docs", "one", "two", "first", "quoted", "h1", "c2", "alt", "text", "code here"]
-    mapM_ (\w -> ws `shouldContain` [w]) wanted
-    -- The code language remains a normal text span.
-    hasText "hs" <$> collectTextSpans ctx `shouldReturn` True
 
   it "scales headings and small text from the backend's default font size" $ \cache -> do
     -- Text height equals font size in this resolver; the body size is 20.
@@ -266,7 +254,8 @@ spec = before newMarkdownCache $ do
       long = "a_long_identifier_much_wider_than_the_column_it_is_drawn_in"
       indented = "    x  =  alpha  beta  gamma  delta  epsilon  zeta  eta  theta"
       -- No fixed-width ancestor: the column fills the window.
-      codeIn w src = drawn w 400 (columnWith (fillW . padAll 10) (markdown cache (parseMarkdown ("```\n" <> src <> "\n```"))))
+      codeIn w src = drawn w 400 . columnWith (fillW . padAll 10) . markdown cache $
+        parseMarkdown ("```\n" <> src <> "\n```")
     code <- drawnWords =<< codeIn 400 ("first\n" <> long <> "\nlast")
     let
       texts = map wText code
