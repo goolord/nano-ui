@@ -287,7 +287,8 @@ spec = before newMarkdownCache $ do
     ctx <- newContext
     let paras n = T.concat ["para " <> T.pack (show i) <> "\n\n" | i <- [1 .. n :: Int]]
         doc = parseMarkdown (paras 3 <> "```\ncode\n```\n\n" <> paras 30)
-    sim ctx 400 300 (scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))) $ do
+        ui = scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))
+    sim ctx 400 300 ui $ do
       (sid, _) <- result
       _ <- (`wheel` V2 0 3) =<< wordAt 0 "code"
       -- Let the glide settle.

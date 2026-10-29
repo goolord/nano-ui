@@ -189,7 +189,7 @@ cursorChecks :: IO ()
 cursorChecks = do
   let kinds = [minBound .. maxBound] :: [UiCursorKind]
       wanted = mapMaybe sdlSystemCursor kinds
-      own = [sdlSystemCursor k | k <- kinds, cursorFallback k == k, k `notElem` [UiCursorDefault, UiCursorHidden]]
+      own = [sdlSystemCursor k | k <- kinds, cursorFallback k == k, k /= UiCursorDefault, k /= UiCursorHidden]
   unless (all (\c -> c >= M.SDL_SYSTEM_CURSOR_DEFAULT && c < M.SDL_SYSTEM_CURSOR_COUNT) wanted) $
     fail ("cursor kinds ask for undeclared SDL cursors: " ++ show wanted)
   unless (all isJust own && length (nub own) == length own) $

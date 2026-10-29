@@ -10,9 +10,9 @@ import Data.Word (Word32)
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
-  ( AlignX (..), AlignY (..), NanoUI, Rect (..), Style (..), Theme (..), UiCursorKind (..), V2 (..), button, canvas
-  , checkbox, colorRGBA, column, constVar, drawText, fixedWH, fontColor, fontMono, fontSize, inlineWith, labelWith
-  , richText, tomorrowNightMinDarkTheme, window'
+  ( AlignX (..), AlignY (..), NanoUI, Rect (..), Style (..), Theme (..), UiCursorKind (..), V2 (..), button
+  , canvas, checkbox, colorRGBA, column, constVar, drawText, fixedWH, fontColor, fontMono, fontSize, inlineWith
+  , labelWith, richText, tomorrowNightMinDarkTheme, window'
   )
 import NanoUI.Backend (cursorFallback)
 import NanoUI.Input
