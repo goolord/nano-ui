@@ -27,12 +27,16 @@ import NanoUI.Emit (emit)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import SDL3.Sys.Blendmode qualified as Blend
-import SDL3.Sys.Bindgen.Events (SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent), SDL_RenderEvent (SDL_RenderEvent), SDL_WindowEvent (SDL_WindowEvent))
+import SDL3.Sys.Bindgen.Events
+  ( SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent), SDL_RenderEvent (SDL_RenderEvent)
+  , SDL_WindowEvent (SDL_WindowEvent)
+  )
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Events (pushEventSafe)
-import SDL3.Sys.Video (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
+import SDL3.Sys.Video
+  (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
 import SDL3.Sys.Video qualified as SDL
 import System.Environment (lookupEnv)
 import System.Timeout (timeout)
@@ -48,10 +52,9 @@ windowChecks drivers gpu = do
   mapM_ screenshotChecks [False, True]
   transparencyChecks gpu
   reducerEnvironmentCheck
-  openingInputCheck
+  openingFramesCheck
   openingCloseCheck
   resizeFailureCheck
-  deviceResetCheck
   uiScaleNaNCheck
   dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
@@ -104,7 +107,7 @@ reducerEnvironmentCheck = do
   completed <- timeout 10000000 $
     runSdlAppReduce options (+) (0 :: Int) $ \model -> do
       live <- askSdlEnv
-      title <- liftIO (traverse (\env -> getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr) live)
+      title <- liftIO (traverse windowTitle live)
       liftIO (modifyIORef' observed ((model, title) :))
       if model == 0 then emit 1 else quitUi
   check "reducer terminates" (completed == Just ())
@@ -116,6 +119,9 @@ reducerEnvironmentCheck = do
     (,) <$> askSdlEnv <*> (pollFileDialogUi =<< askOpenFileDialog defaultFileDialogOptions)
   check "a closed session is out of reach" (isNothing closed)
   expect "a dialog outside a session fails" FileDialogFailed dialog
+
+windowTitle :: SdlEnv -> IO String
+windowTitle env = getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr
 
 -- | Put an event on SDL's queue, as the desktop would.
 push :: Storable e => e -> IO ()
@@ -134,21 +140,35 @@ countPass ref = liftIO (atomicModifyIORef' ref (\n -> (n + 1, n + 1)))
 
 -- | The opening frames are drawn before the loop starts. A press taken while
 -- the first draws is seen by one frame, not replayed by the next; one taken
--- while the second draws is seen too, not dropped. A wake a second after
--- each pass draws a frame should the loop wait for input that never comes.
-openingInputCheck :: IO ()
-openingInputCheck = do
+-- while the second draws is seen too, not dropped. After a render device
+-- reset, which empties every texture, the next frame repaints in full with
+-- the textures made again, text included. A wake a second after each pass
+-- draws a frame should the loop wait for input that never comes.
+openingFramesCheck :: IO ()
+openingFramesCheck = do
   passes <- newIORef 0
   seen <- newIORef []
+  shots <- newIORef []
+  redrawn <- newIORef False
   runSdlApp options $ do
     wakeAfter 1
     n <- countPass passes
     inp <- askInput
+    label "Text after a reset"
+    let shot = requestScreenshot (\s -> modifyIORef' shots (s :))
     liftIO $ modifyIORef' seen ([b | b <- [MouseMiddle, MouseBack], pressedIn b inp] ++)
     when (n == 1) $ liftIO (pushPress sDL_BUTTON_MIDDLE)
-    when (n == 2) $ liftIO (pushPress sDL_BUTTON_X1)
-    when (n >= 3) quitUi
+    when (n == 2) $ do
+      shot
+      liftIO (pushPress sDL_BUTTON_X1 >> push (SDL_RenderEvent Events.SDL_EVENT_RENDER_DEVICE_RESET 0 0 0))
+    when (n == 3) $ shot >> liftIO (writeIORef redrawn (inputWindowRedraw inp)) >> quitUi
   readIORef seen >>= expect "presses during the opening frames, each seen once" [MouseBack, MouseMiddle]
+  readIORef redrawn >>= check "a device reset repaints the window"
+  readIORef shots >>= \case
+    [Just after, Just before] -> do
+      check "text before the reset" (length (nub (pixelsOf before)) > 1)
+      check "text drawn from the remade textures" (after == before)
+    other -> fail ("two screenshots wanted, got " ++ show (length other))
 
 -- | A close request taken during the opening frames closes the window, as
 -- one in the loop does.
@@ -189,33 +209,8 @@ resizeFailureCheck = do
         push (SDL_WindowEvent Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED 0 0 0 200 100)
       -- The wake's frame: nothing drew the resize.
       when (n >= 3) quitUi
-    case outcome of
-      Left (e :: IOException) -> check "the resize frame's exception leaves the session" ("too narrow" `isInfixOf` show e)
-      Right () -> fail "a session whose resize frame threw ended normally"
-
--- | After a render device reset, which empties every texture, the next frame
--- repaints in full with the textures made again, text included.
-deviceResetCheck :: IO ()
-deviceResetCheck = do
-  passes <- newIORef 0
-  shots <- newIORef []
-  redrawn <- newIORef False
-  runSdlApp options $ do
-    wakeAfter 1
-    n <- countPass passes
-    inp <- askInput
-    label "Text after a reset"
-    let shot = requestScreenshot (\s -> modifyIORef' shots (s :))
-    when (n == 2) $ shot >> liftIO (push (SDL_RenderEvent Events.SDL_EVENT_RENDER_DEVICE_RESET 0 0 0))
-    when (n == 3) $ shot >> liftIO (writeIORef redrawn (inputWindowRedraw inp)) >> quitUi
-  readIORef redrawn >>= check "a device reset repaints the window"
-  readIORef shots >>= \case
-    [Just after, Just before] -> do
-      check "text before the reset" (length (nub (pixels before)) > 1)
-      check "text drawn from the remade textures" (after == before)
-    other -> fail ("two screenshots wanted, got " ++ show (length other))
-  where
-    pixels s = let img = screenshotPixels s in [pixelAt s x y | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1]]
+    check "the resize frame's exception leaves the session" $
+      either (\(e :: IOException) -> "too narrow" `isInfixOf` show e) (const False) outcome
 
 -- | A UI scale that is not a number follows the display, as zero does, and
 -- asking for it again asks for no frame.
@@ -225,20 +220,25 @@ uiScaleNaNCheck =
     replicateM_ 3 (frame ctx env True (setSdlUiScale (0 / 0)))
     isDirty ctx >>= check "asking again for a UI scale that is not a number asks for no frame" . not
 
+-- | A file dialog's result: pending until it completes, delivered once,
+-- and never revived by a late or abandoned callback.
 dialogStateChecks :: IO ()
 dialogStateChecks = do
-  result <- newIORef Dialog.FileDialogPending
-  Dialog.takeResult result >>= expect "pending poll is repeatable" Dialog.FileDialogPending
-  Dialog.takeResult result >>= expect "second pending poll" Dialog.FileDialogPending
-  Dialog.completeResult result (Dialog.FileDialogSelected ["chosen.txt"])
-  readIORef result >>= expect "peek does not consume" (Dialog.FileDialogSelected ["chosen.txt"])
-  Dialog.takeResult result >>= expect "completion delivered once" (Dialog.FileDialogSelected ["chosen.txt"])
-  Dialog.takeResult result >>= expect "completed handle consumed" Dialog.FileDialogUnknown
-  Dialog.completeResult result Dialog.FileDialogCancelled
-  Dialog.takeResult result >>= expect "late callback cannot revive consumed handle" Dialog.FileDialogUnknown
-  writeIORef result Dialog.FileDialogUnknown
-  Dialog.completeResult result (Dialog.FileDialogSelected ["abandoned.txt"])
-  Dialog.takeResult result >>= expect "abandoned callback discarded" Dialog.FileDialogUnknown
+  ref <- newIORef Dialog.FileDialogPending
+  let complete = Dialog.completeResult ref
+      chosen = Dialog.FileDialogSelected ["chosen.txt"]
+  mapM_
+    (\(name, act, want) -> act >> Dialog.takeResult ref >>= expect name want)
+    [ ("a pending poll is repeatable", pure (), Dialog.FileDialogPending)
+    , ("a second pending poll", pure (), Dialog.FileDialogPending)
+    , ("completion delivered once", complete chosen, chosen)
+    , ("completed handle consumed", pure (), Dialog.FileDialogUnknown)
+    , ("a late callback cannot revive it", complete Dialog.FileDialogCancelled, Dialog.FileDialogUnknown)
+    , ( "an abandoned callback is discarded"
+      , writeIORef ref Dialog.FileDialogUnknown >> complete (Dialog.FileDialogSelected ["abandoned.txt"])
+      , Dialog.FileDialogUnknown
+      )
+    ]
 
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()
 expect name want got = unless (want == got) (fail (name ++ ": wanted " ++ show want ++ ", got " ++ show got))
@@ -249,8 +249,7 @@ expect name want got = unless (want == got) (fail (name ++ ": wanted " ++ show w
 optionChecks :: Bool -> Int -> IO ()
 optionChecks gpu zoom =
   session
-    (withWindow (\w -> w {wsMinSize = Just (Size 150 80), wsMaxSize = Just (Size 900 700), wsOpacity = 0.5, wsPosition = WindowPositionAt 30 20}))
-      { sdlAppUiScale = fromIntegral zoom }
+    (withWindow limits) {sdlAppUiScale = fromIntegral zoom}
     (colorRGBA 0 0 0 255)
     $ \ctx env -> do
       let after :: (Eq a, Show a) => String -> IO () -> IO a -> a -> IO ()
@@ -264,7 +263,7 @@ optionChecks gpu zoom =
           maximal name act = after name act (pair getWindowMaximumSize) . zoomed
           flags = getWindowFlags (sdlWindow env)
           hidden = (\f -> f .&. SDL.SDL_WINDOW_HIDDEN /= zeroBits) <$> flags
-          title = getWindowTitle (sdlWindow env) >>= peekCString . castPtr . PtrConst.unsafeToPtr
+          title = windowTitle env
           askedWindow = frame ctx env True askWindow
       minimal "minimum size at creation" (pure ()) (150, 80)
       maximal "maximum size at creation" (pure ()) (900, 700)
@@ -274,7 +273,8 @@ optionChecks gpu zoom =
       after "the title from a view" (ui (setWindowTitleUi "renamed")) title "renamed"
       after "the scale a view reads" (pure ()) (winScale <$> askedWindow) (fromIntegral zoom)
       -- X11 resizes asynchronously; sync before reading the size.
-      after "a resize from a view" (ui (resizeWindowUi (Size 300 150))) (SDL.syncWindowSafe (sdlWindow env) >> pair getWindowSize) (zoomed (300, 150))
+      let size = SDL.syncWindowSafe (sdlWindow env) >> pair getWindowSize
+      after "a resize from a view" (ui (resizeWindowUi (Size 300 150))) size (zoomed (300, 150))
       after "a hidden window" (pure ()) hidden True
       after "shown from a view" (ui (setWindowModeUi Windowed)) hidden False
       after "hidden from a view" (ui (setWindowModeUi Hidden)) hidden True
@@ -286,6 +286,12 @@ optionChecks gpu zoom =
         ui (setWindowIconUi (fromJust (rgbaPixels 2 2 (BS.pack (concat (replicate 4 [200, 30, 60, 255]))))))
         moved "the position at creation" (pure ()) (30, 20)
         moved "the position from a view" (ui (moveWindowUi 60 70)) (60, 70)
+  where
+    limits w =
+      w
+        { wsMinSize = Just (Size 150 80), wsMaxSize = Just (Size 900 700), wsOpacity = 0.5
+        , wsPosition = WindowPositionAt 30 20
+        }
 
 red :: Color
 red = colorRGBA 200 30 60 255
@@ -297,17 +303,20 @@ pixelAt shot x y =
   where
     img = screenshotPixels shot
 
--- | Alphas of all pixels whose RGB matches the colour.
-alphasOf :: Color -> Screenshot -> [Int]
-alphasOf c shot =
-  [p !! 3 | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1], let p = pixelAt shot x y, take 3 p == rgb]
+-- | Every pixel's RGBA bytes, row by row.
+pixelsOf :: Screenshot -> [[Int]]
+pixelsOf shot = [pixelAt shot x y | y <- [0 .. rgbaHeight img - 1], x <- [0 .. rgbaWidth img - 1]]
   where
     img = screenshotPixels shot
-    rgb = map fromIntegral [colorR c, colorG c, colorB c]
+
+-- | Alphas of all pixels whose RGB matches the colour.
+alphasOf :: Color -> Screenshot -> [Int]
+alphasOf c shot = [p !! 3 | p <- pixelsOf shot, take 3 p == map fromIntegral [colorR c, colorG c, colorB c]]
 
 -- | A 40x20 box, versioned by its colour so a colour change repaints it.
 solidBox :: Color -> NanoUI ()
-solidBox c = void (drawingVersioned (fromIntegral (colorToWord32 c)) (fixedWH 40 20) (\r -> smallArrayFromList [FillRect r c]))
+solidBox c =
+  void (drawingVersioned (fromIntegral (colorToWord32 c)) (fixedWH 40 20) (\r -> smallArrayFromList [FillRect r c]))
 
 -- | A screenshot is answered after its frame is drawn (a skipped frame
 -- returns what is on screen), and answering requests another frame. In a
@@ -318,13 +327,15 @@ screenshotChecks continuous =
     let name s = (if continuous then "continuous: " else "retained: ") ++ s
     frame ctx env True (solidBox (colorRGBA 0 0 255 255))
     img <- shoot (name "a frame that repaints the box") ctx env False (solidBox red)
-    expect (name "screenshot size") (200, 100, 1) (rgbaWidth (screenshotPixels img), rgbaHeight (screenshotPixels img), screenshotScale img)
+    let size = (rgbaWidth (screenshotPixels img), rgbaHeight (screenshotPixels img), screenshotScale img)
+    expect (name "screenshot size") (200, 100, 1) size
     expect (name "the box's pixels") (replicate 800 255) (alphasOf red img)
     expect (name "the window's colour") [12, 34, 56, 255] (pixelAt img 199 99)
     isDirty ctx >>= check (name "an answered screenshot asks for another frame")
     unless continuous $ do
       captureScreenshot env >>= check (name "captureScreenshot reads the same frame") . (== Just img)
-      shoot (name "a skipped frame") ctx env False (solidBox red) >>= check (name "a skipped frame's screenshot") . (== img)
+      skipped <- shoot (name "a skipped frame") ctx env False (solidBox red)
+      check (name "a skipped frame's screenshot") (skipped == img)
 
 -- | A transparent window keeps the window colour's alpha, a partial repaint
 -- matches a full one, and a GPU renderer keeps the alpha where the window
@@ -339,7 +350,7 @@ transparencyChecks gpu =
         shot full tint = shoot "transparent" ctx env full . column $ do
           solidBox red
           solidBox tint
-          when exact $ void (drawing (fixedWH 60 20) (\r -> smallArrayFromList [FillRect r backdrop, FillRect r backdrop]))
+          when exact $ void $ drawing (fixedWH 60 20) $ \r -> smallArrayFromList (replicate 2 (FillRect r backdrop))
         keepsAlpha img = all (== 128) (alphasOf backdrop img)
     check "a transparent window has blend modes" (sdlTransparent env /= Nothing)
     when gpu $ check "a GPU renderer draws a transparent window with custom blend modes" exact
@@ -351,7 +362,8 @@ transparencyChecks gpu =
     -- or old backdrop.
     second <- shot False (colorRGBA 0 0 200 100)
     check "transparent: the change was drawn" (second /= first)
-    shot True (colorRGBA 0 0 200 100) >>= check "transparent: a change comes out as a full repaint does" . (== second)
+    full <- shot True (colorRGBA 0 0 200 100)
+    check "transparent: a change comes out as a full repaint does" (full == second)
     check "transparent: the backdrop keeps its alpha after a change" (keepsAlpha second)
   where
     backdrop = colorRGBA 10 20 30 128
