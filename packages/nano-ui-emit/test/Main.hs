@@ -2,6 +2,7 @@ module Main (main) where
 
 import Control.Exception (IOException, TypeError (..), evaluate, try)
 import Control.Monad (unless, void, when)
+import Data.Either (isLeft)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Text qualified as T
@@ -9,19 +10,28 @@ import DeferredWrongMessage (wrongMessage)
 import NanoUI qualified as UI
 import NanoUI.Emit
 import NanoUI.Internal.Context (ctxFocusId)
-import NanoUI.Testing (Context, collectTextSpans, newContext)
+import NanoUI.Testing (Context, newContext)
 import NanoUI.Testing.Assert (withInput)
-import NanoUI.Testing.Harness
-  ( centerOf
-  , clickPair
-  , keyInp
-  , spanCenter
-  , spanRect
-  , withInputOff
-  )
+import NanoUI.Testing.Harness (centerOf, keyInp, withInputOff)
+import NanoUI.Testing.Sim (Sim, click, checkEq, frame, pressKey, runSim, simContext)
+import NanoUI.Testing.Sim qualified as Sim
 
 check :: String -> Bool -> IO ()
 check name ok = unless ok (fail name)
+
+-- | Run a script against an emitting view in a fresh context; its result
+-- is the view's with the frame's messages.
+simE :: Input -> NanoUIE msg a -> Sim (a, [msg]) r -> IO r
+simE inp view script = do
+  ctx <- newContext
+  failed <- newIORef 0
+  r <- runSim ctx failed inp (runNanoUIE view) script
+  n <- readIORef failed
+  r <$ check (show n <> " Sim checks failed") (n == 0)
+
+-- | The messages of one frame.
+messages :: Context -> Input -> NanoUIE msg a -> IO [msg]
+messages ctx inp view = (\(_, msgs, _, _) -> msgs) <$> runFrameE ctx inp view
 
 data Msg = Inc | Dec deriving (Eq, Show)
 
@@ -29,26 +39,16 @@ update :: Msg -> Int -> Int
 update Inc = (+ 1)
 update Dec = subtract 1
 
--- A polymorphic message works without a Typeable constraint, including when
--- the message itself is a function over an unknown type.
-polymorphicFrame :: Context -> msg -> IO [msg]
-polymorphicFrame ctx msg = do
-  (_, msgs, _, _) <- runFrameE ctx (withInput 80 80) (emit msg)
-  pure msgs
-
 main :: IO ()
 main = do
   testReduce
   testAdapters
   testClick
-  testKeyboard
-  testTabs
+  testWidgetMessages
   testRebuild
   testScopes
-  testMapMessages
   testIsolation
   testWrongMessage
-  testWrappedWidgets
   putStrLn "Typed emission tests passed."
 
 testReduce :: IO ()
@@ -56,22 +56,18 @@ testReduce = do
   ctx <- newContext
   let
     inp = withInput 80 80
-    view :: Int -> NanoUIE Msg ()
-    view _ = UI.column (emit Inc >> emit Dec >> emit Inc)
-  ((), model, msgs, _, dirty) <- runFrameReduce update ctx inp 0 view
-  check
-    "reducer messages and dirty"
-    (msgs == [Inc, Dec, Inc] && model == 1 && dirty)
-  let
-    identity :: Int -> NanoUIE Msg ()
-    identity _ = UI.column (emit Inc >> emit Dec)
-  ((), model2, msgs2, _, dirty2) <- runFrameReduce update ctx inp 0 identity
-  check
-    "unchanged model stays clean"
-    (msgs2 == [Inc, Dec] && model2 == 0 && not dirty2)
-  -- Order must matter, not just the net sum of increments and decrements.
-  functions <- polymorphicFrame ctx ((+ 2) :: Int -> Int)
+    reduce :: NanoUIE Msg () -> IO (Int, [Msg], Bool)
+    reduce emits = do
+      ((), m, msgs, _, dirty) <- runFrameReduce update ctx inp 0 (\_ -> emits)
+      pure (m, msgs, dirty)
+  check "reducer messages and dirty" . (== (1, [Inc, Dec, Inc], True))
+    =<< reduce (emit Inc >> emit Dec >> emit Inc)
+  check "unchanged model stays clean" . (== (0, [Inc, Dec], False)) =<< reduce (emit Inc >> emit Dec)
+  -- A polymorphic message works without a Typeable constraint, including
+  -- when the message itself is a function over an unknown type.
+  functions <- messages ctx inp (emit ((+ 2) :: Int -> Int))
   check "polymorphic function messages" (reduceUpdates 3 functions == 5)
+  -- Order must matter, not just the net sum of increments and decrements.
   (_, ordered, _, _, _) <- runFrameReduce ($) ctx inp (1 :: Int) $ \_ -> emit (+ 2) >> emit (* 3)
   check "noncommutative emission order" (ordered == 9)
 
@@ -90,84 +86,72 @@ testAdapters = do
       emitEdited (\v -> (mempty :: Response) <$ UI.modifyVar v (+ 1)) 5 id
       emitEdited (\_ -> pure mempty {rawRespChanged = True}) 6 id
       emitEdited (\v -> mempty {rawRespChanged = True} <$ UI.modifyVar v (+ 1)) 7 id
-  (_, msgs, _, _) <- runFrameE ctx (withInput 80 80) adapters
-  check "adapters distinguish edits and changes" (msgs == [2, 4, 8])
+  check "adapters distinguish edits and changes" . (== [2, 4, 8]) =<< messages ctx (withInput 80 80) adapters
   check "control evaluated once" . (== 1) =<< readIORef calls
 
+-- | Core buttons emit through 'emitWhen' and a primed response, a click
+-- reduces once, and an ordinary button emits nothing of its own.
 testClick :: IO ()
 testClick = do
-  ctx <- newContext
   let
-    inp = withInput 240 120
+    inp = withInput 240 160
     view :: Int -> NanoUIE Msg Response
-    view m = do
-      resp <- button' "Go"
-      when (respClicked resp) (emit Inc)
-      label (T.pack (show m))
-      pure resp
-  void (runFrameReduce update ctx inp 0 view)
-  (resp, model, _, _, _) <- runFrameReduce update ctx inp 0 view
-  check "idle model" (model == 0)
-  (modelR, msgs, dirty) <- runClickReduce update ctx inp 0 view (centerOf resp)
-  check "click reduces once" (msgs == [Inc] && modelR == 1 && dirty)
-  (_, model1, idle, _, _) <- runFrameReduce update ctx inp modelR view
-  check "idle after click" (model1 == 1 && null idle)
-  -- An ordinary button in an emitting view produces no messages of its own.
-  let
-    buttonUi :: NanoUIE Msg Response
-    buttonUi = UI.button' "Go"
-  (target, _, _, _) <- runFrameE ctx inp buttonUi
-  let
-    (press, release) = clickPair inp (centerOf target)
-  void (runFrameE ctx press buttonUi)
-  (clicked, noMessages, _, _) <- runFrameE ctx release buttonUi
-  check "ordinary widgets emit nothing" (respClicked clicked && null noMessages)
-
-testKeyboard :: IO ()
-testKeyboard = do
+    view m = column $ do
+      heading "Counter"
+      row $ do
+        emitWhen (button "-") Dec
+        label (T.pack (show m))
+        b <- button' "+"
+        when (respClicked b) (emit Inc)
+        pure b
+  simE inp (view 0) $ do
+    (_, idle) <- frame
+    checkEq [] idle
+    (_, decs) <- click "-"
+    checkEq [Dec] decs
+  simE inp (UI.button' "Plain" :: NanoUIE Msg Response) $ do
+    (plain, none) <- click "Plain"
+    checkEq (True, []) (respClicked plain, none)
   ctx <- newContext
+  -- Geometry lags a frame: the first frame's response has no rect yet.
+  _ <- runFrameReduce update ctx inp 0 view
+  (inc, model, _, _, dirty) <- runFrameReduce update ctx inp 0 view
+  check "initial view" (model == 0 && not dirty)
+  (model1, msgs1, dirty1) <- runClickReduce update ctx inp 0 view (centerOf inc)
+  check "click reduces once" (msgs1 == [Inc] && model1 == 1 && dirty1)
+  (_, model2, idle, _, _) <- runFrameReduce update ctx inp model1 view
+  check "idle after click" (model2 == 1 && null idle)
+
+-- | 'emitChanged' reports a checkbox toggled from the keyboard and a tab
+-- chosen with the mouse.
+testWidgetMessages :: IO ()
+testWidgetMessages = do
   let
-    inp = withInputOff 200 100
-    ui :: NanoUIE Bool WidgetId
-    ui = do
+    ui :: NanoUIE (Either Bool Bool) WidgetId
+    ui = UI.column $ do
       wid <- currentId
-      emitChanged (UI.checkbox "Emit") False id
-      pure wid
-  (wid, _, _, _) <- runFrameE ctx inp ui
-  writeIORef (ctxFocusId ctx) wid
-  (_, msgs, _, _) <- runFrameE ctx (keyInp KeyEnter inp) ui
-  check "keyboard checkbox emission" (msgs == [True])
-
-testTabs :: IO ()
-testTabs = do
-  ctx <- newContext
-  let
-    inp = withInput 300 100
-    ui :: NanoUIE Bool ()
-    ui =
+      emitChanged (UI.checkbox "Emit") False Left
       emitChanged
-        ( \active ->
-            UI.tabs
-              active
-              [tab False "Alpha" (UI.label "Body A"), tab True "Beta" (UI.label "Body B")]
-        )
+        (\active -> UI.tabs active [tab False "Alpha" (UI.label "Body A"), tab True "Beta" (UI.label "Body B")])
         False
-        id
-  void (runFrameE ctx inp ui)
-  spans <- collectTextSpans ctx
-  target <- maybe (fail "missing Beta tab") pure (spanRect "Beta" spans)
-  let
-    (press, release) = clickPair inp (spanCenter target)
-  void (runFrameE ctx press ui)
-  (_, msgs, _, _) <- runFrameE ctx release ui
-  check "tab emission" (msgs == [True])
+        Right
+      pure wid
+  simE (withInputOff 300 120) ui $ do
+    ctx <- simContext
+    (wid, _) <- Sim.result
+    liftIO (writeIORef (ctxFocusId ctx) wid)
+    (_, keyed) <- pressKey KeyEnter
+    checkEq [Left True] keyed
+    (_, clicked) <- click "Beta"
+    checkEq [Right True] clicked
 
+-- | A message emitted before a write that reruns the view survives the
+-- rerun exactly once.
 testRebuild :: IO ()
 testRebuild = do
   ctx <- newContext
   seenRef <- newIORef (0 :: Int)
   let
-    inp = withInputOff 300 200
     view :: Int -> NanoUIE Int (Bool, (Bool, Maybe VisibilityEvent))
     view _ = UI.column $ do
       loadedVar <- UI.useVar False
@@ -178,106 +162,69 @@ testRebuild = do
         emit 1
         UI.writeVar loadedVar True
       pure (loaded, (visVisible vis, visEvent vis))
-    frame model =
-      (\(r, model', _, _, _) -> (r, model')) <$> runFrameReduce (+) ctx inp model view
-  (second, model2) <- frame 0 >>= frame . snd
-  model5 <- snd <$> (frame model2 >>= frame . snd >>= frame . snd)
+    step model = do
+      (r, model', _, _, _) <- runFrameReduce (+) ctx (withInputOff 300 200) model view
+      pure (r, model')
+  (second, model2) <- step 0 >>= step . snd
+  model5 <- snd <$> (step model2 >>= step . snd >>= step . snd)
   seen <- readIORef seenRef
-  check
-    "message survives a rerun exactly once"
-    (second == (True, (True, Nothing)) && seen == 1 && model5 == 1)
+  check "message survives a rerun exactly once" (second == (True, (True, Nothing)) && seen == 1 && model5 == 1)
 
+-- | Nested layout and disabled scopes share the sink; nested collectors and
+-- 'mapMessages' children keep their own types, results and order.
 testScopes :: IO ()
 testScopes = do
   ctx <- newContext
-  let
-    inp = withInput 120 80
-    ui :: NanoUIE Int ()
-    ui = UI.column $ do
-      emit 1
-      UI.disabledWhen True $ do
-        emitWhen (pure True) 2
-        emitWhen (UI.button "Disabled") 99
-      UI.row (emit 3)
-  (_, msgs, _, _) <- runFrameE ctx (keyInp KeyEnter inp) ui
-  check "nested scopes share the sink" (msgs == [1, 2, 3])
+  let inp = withInput 120 80
+  shared <- messages ctx (keyInp KeyEnter inp) $ UI.column $ do
+    emit (1 :: Int)
+    UI.disabledWhen True $ do
+      emitWhen (pure True) 2
+      emitWhen (UI.button "Disabled") 99
+    UI.row (emit 3)
+  check "nested scopes share the sink" (shared == [1, 2, 3])
   (((), inner), outer, _, _) <- runFrameE ctx inp $ do
     emit (4 :: Int)
     runNanoUIE (emit True)
-  check
-    "nested collectors have independent message types"
-    (inner == [True] && outer == [4])
-
-testMapMessages :: IO ()
-testMapMessages = do
-  ctx <- newContext
-  let child :: NanoUIE Bool Int
-      child = UI.column $ do
-        emit True
-        UI.row (emit False)
-        pure 42
-      ui :: NanoUIE (Either String Int) Int
-      ui = do
-        emit (Left "before" :: Either String Int)
-        result <- mapMessages Right (mapMessages (\b -> if b then 1 else 2) child)
-        emit (Left "after")
-        pure result
-  (result, msgs, _, _) <- runFrameE ctx (withInputOff 100 100) ui
-  check "mapped children keep results and message order"
-    (result == 42 && msgs == [Left "before", Right 1, Right 2, Left "after"])
+  check "nested collectors have independent message types" (inner == [True] && outer == [4])
+  let
+    child :: NanoUIE Bool Int
+    child = UI.column $ do
+      emit True
+      UI.row (emit False)
+      pure 42
+  (mapped, msgs, _, _) <- runFrameE ctx inp $ do
+    emit (Left "before" :: Either String Int)
+    r <- mapMessages Right (mapMessages (\b -> if b then 1 else 2) child)
+    emit (Left "after")
+    pure r
+  check "mapped children keep results and message order" $
+    mapped == 42 && msgs == [Left "before", Right 1, Right 2, Left "after"]
   cell <- newVar False
-  (_, rebuilt, _, _) <- runFrameE ctx (withInputOff 100 100) $
-    mapMessages Just $ do
-      done <- readVar cell
-      unless done $ emit True >> writeVar cell True
+  rebuilt <- messages ctx inp $ mapMessages Just $ do
+    done <- readVar cell
+    unless done $ emit True >> writeVar cell True
   check "mapped messages survive a child rebuild once" (rebuilt == [Just True])
 
 testIsolation :: IO ()
 testIsolation = do
   ctx <- newContext
-  let
-    inp = withInput 80 80
+  let inp = withInput 80 80
   failed <- try @IOException $ void $ runFrameE ctx inp $ do
     emit (1 :: Int)
     liftIO (ioError (userError "failed view"))
-  check "view exception propagated" (either (const True) (const False) failed)
-  (_, msgs, _, _) <- runFrameE ctx inp (emit (2 :: Int))
-  check "failed frame cannot leak messages" (msgs == [2])
-  (_, empty, _, _) <- runFrameE ctx inp (pure () :: NanoUIE Int ())
-  check "queues are per invocation" (null empty)
+  check "view exception propagated" (isLeft failed)
+  check "failed frame cannot leak messages" . (== [2]) =<< messages ctx inp (emit (2 :: Int))
+  check "queues are per invocation" . null =<< messages ctx inp (pure () :: NanoUIE Int ())
 
 -- | The message type is part of the view: emitting a Bool from an Int view
 -- does not typecheck, so its deferred type error fires.
 testWrongMessage :: IO ()
 testWrongMessage = do
   ctx <- newContext
-  result <- try $ do
-    (_, msgs, _, _) <- runFrameE ctx (withInput 80 80) wrongMessage
-    evaluate (sum msgs)
+  result <- try (evaluate . sum =<< messages ctx (withInput 80 80) wrongMessage)
   case result of
     Left (TypeError err)
       | "Int" `isInfixOf` err && "Bool" `isInfixOf` err -> pure ()
       | otherwise -> fail ("the type error was not the Int/Bool mismatch: " <> err)
     Right _ -> fail "a view emitted a message of another type"
-
-testWrappedWidgets :: IO ()
-testWrappedWidgets = do
-  ctx <- newContext
-  let
-    inp = withInput 240 120
-    view :: Int -> NanoUIE Msg Response
-    view m = column $ do
-      heading "Counter"
-      row $ do
-        emitWhen (button "-") Dec
-        label (T.pack (show m))
-        b <- button' "+"
-        when (respClicked b) (emit Inc)
-        pure b
-  -- Geometry lags a frame: the first frame's response has no rect yet, so
-  -- the click targets the second's.
-  _ <- runFrameReduce update ctx inp 0 view
-  (resp, model, msgs, _, dirty) <- runFrameReduce update ctx inp 0 view
-  check "initial view" (msgs == [] && model == 0 && not dirty)
-  (model1, msgs1, dirty1) <- runClickReduce update ctx inp 0 view (centerOf resp)
-  check "core button emits and reduces" (msgs1 == [Inc] && model1 == 1 && dirty1)
