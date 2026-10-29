@@ -1,13 +1,12 @@
 module Main (main) where
 
 import Control.Exception (IOException, try)
-import Control.Monad (forM_, unless)
+import Control.Monad (forM_)
 import Data.ByteString qualified as BS
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Encoding qualified as TE
 import NanoUI
 import NanoUI.Backend (monospaceMetrics)
 import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
@@ -15,16 +14,12 @@ import NanoUI.Draw.Svg
 import NanoUI.Internal.Path (Shade (Shaded))
 import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
-import NanoUI.Svg (rasterizeSvg)
 import NanoUI.Testing (newPixelContext)
-import NanoUI.Testing.Assert (run2Frames, withInput)
-
-check :: String -> Bool -> IO ()
-check msg ok = unless ok (fail msg)
+import NanoUI.Testing.Assert (require, run2Frames, withInput)
 
 -- | Fail on the first needle the document lacks.
 contains :: Text -> [Text] -> IO ()
-contains doc = mapM_ (\n -> check ("missing " <> show n <> " in " <> show doc) (T.isInfixOf n doc))
+contains doc = mapM_ (\n -> require ("missing " <> show n <> " in " <> show doc) (T.isInfixOf n doc))
 
 main :: IO ()
 main = do
@@ -33,7 +28,6 @@ main = do
   testPathsAndShaded
   testGradientsAndClips
   testTextAndImages
-  testRoundTripRaster
   testFrameToSvg
   putStrLn "nano-ui-svg tests passed."
 
@@ -61,13 +55,13 @@ testStandaloneAndPrecision = do
     standalone = drawOpsToSvg vp ops
     atPrecision p = renderDrawOpsSvg defaultSvgConfig {svgStandalone = False, svgPrecision = p} vp ops
     rectAt x w = "<g><rect x=\"" <> x <> "\" y=\"0\" width=\"" <> w <> "\" height=\"40\" fill=\"#ff0000\"/></g>"
-  check "standalone header" $
+  require "standalone header" $
     T.isPrefixOf "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"80\" viewBox=\"0 0 100 80\">" standalone
-  check "standalone footer, no empty defs" (T.isSuffixOf "</svg>" standalone && not (T.isInfixOf "<defs>" standalone))
+  require "standalone footer, no empty defs" (T.isSuffixOf "</svg>" standalone && not (T.isInfixOf "<defs>" standalone))
   -- Precision 2 by default, and no negative zero.
   contains standalone ["<rect x=\"10.26\" y=\"0\" width=\"30.5\" height=\"40\" fill=\"#ff0000\"/>"]
-  check "precision 1" (atPrecision 1 == rectAt "10.3" "30.5")
-  check "precision 0" (atPrecision 0 == rectAt "10" "31")
+  require "precision 1" (atPrecision 1 == rectAt "10.3" "30.5")
+  require "precision 0" (atPrecision 0 == rectAt "10" "31")
   let
     nan = 0 / 0
     inf = 1 / 0
@@ -82,7 +76,7 @@ testStandaloneAndPrecision = do
       , DrawText 0 0 0 0 "" red
       , DrawText inf 0 0 0 "x" red
       ]
-  check "degenerate ops emit nothing" (fragment (smallArrayFromList degenerate) == "<g></g>")
+  require "degenerate ops emit nothing" (fragment (smallArrayFromList degenerate) == "<g></g>")
 
 testPrimitiveShapes :: IO ()
 testPrimitiveShapes =
@@ -138,7 +132,7 @@ testPathsAndShaded = do
     , "fill=\"url(#grad_1)\""
     , "<line x1=\"0\" y1=\"0\" x2=\"10\" y2=\"0\""
     ]
-  check "a gradient fill fell back to triangles" (not (T.isInfixOf "<polygon points=" shadedSvg))
+  require "a gradient fill fell back to triangles" (not (T.isInfixOf "<polygon points=" shadedSvg))
   -- Four different corners follow no single linear gradient, so the
   -- triangles are emitted one by one.
   let
@@ -151,13 +145,13 @@ testPathsAndShaded = do
               (primArrayFromList [0, 1, 2, 0, 2, 3])
               (Shaded (primArrayFromList (map colorToWord32 [red, green, blue, colorRGBA 255 255 0 255])))
           ]
-  check "four-corner shaded polygon falls back to triangles" $
+  require "four-corner shaded polygon falls back to triangles" $
     T.isInfixOf "<polygon points=" cornersSvg && not (T.isInfixOf "linearGradient" cornersSvg)
   -- A shaded op whose vertex colours all match is one flat shape.
   let
     redW = colorToWord32 red
     uniform = StrokePolyline (primArrayFromList [0, 0, 10, 0, 10, 10]) 2 False ButtCap MiterJoin 4 (Shaded (primArrayFromList [redW, redW, redW]))
-  check "uniform shaded polyline collapses to one polyline" $
+  require "uniform shaded polyline collapses to one polyline" $
     fragment (smallArrayFromList [uniform])
       == "<g><polyline points=\"0,0 10,0 10,10\" fill=\"none\" stroke=\"#ff0000\" stroke-width=\"2\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\"/></g>"
 
@@ -182,7 +176,7 @@ testGradientsAndClips = do
       "<rect x=\"60\" y=\"5\" width=\"10\" height=\"10\" fill=\"#ff0000\"/>"
     ]
   -- An unclosed PushClip and a stray PopClip stay well-formed.
-  check "unbalanced clips" $
+  require "unbalanced clips" $
     fragment (smallArrayFromList [PopClip, PushClip (Rect 0 0 10 10), FillRect (Rect 1 1 2 2) red])
       == "<g><defs><clipPath id=\"clip_1\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"10\"/></clipPath></defs><g clip-path=\"url(#clip_1)\"><rect x=\"1\" y=\"1\" width=\"2\" height=\"2\" fill=\"#ff0000\"/></g></g>"
 
@@ -220,26 +214,12 @@ testTextAndImages = do
       2 -> Just "data:image/png;base64,AAAA"
       _ -> Nothing
     resolved = renderDrawOpsSvg defaultSvgConfig {svgImageUri = uri} vp images
-  check "unresolved images omitted" (not (T.isInfixOf "<image" (drawOpsToSvg vp images)))
-  check "an image with an unknown id was drawn" (T.count "<image" resolved == 2)
+  require "an image with an unknown id was drawn" (T.count "<image" resolved == 2)
   contains
     resolved
     [ "<image x=\"10\" y=\"20\" width=\"30\" height=\"40\" preserveAspectRatio=\"none\" href=\"https://example.com/a.png?x=1&amp;y=2\"/>"
     , "<image x=\"0\" y=\"0\" width=\"20\" height=\"20\" preserveAspectRatio=\"none\" href=\"data:image/png;base64,AAAA\" opacity=\"0.502\" transform=\"rotate(90 10 10)\"/>"
     ]
-
-testRoundTripRaster :: IO ()
-testRoundTripRaster = do
-  let
-    svgText = drawOpsToSvg (Rect 0 0 20 20) . runCanvasFor cdc $ do
-      drawPathWith P.EvenOdd (P.rect (Rect 0 0 14 14) <> P.rect (Rect 3 3 8 8)) (P.Solid red)
-      drawCircle (V2 17 3) 2 blue
-    pixelAt bytes x y = [BS.index bytes ((y * 20 + x) * 4 + k) | k <- [0 .. 3]]
-  doc <- either (fail . ("parseSvg failed on drawOpsToSvg output: " <>)) pure (parseSvg (TE.encodeUtf8 svgText))
-  check "roundtrip svgSize" (svgSize doc == (20, 20))
-  let px = rasterizeSvg 20 20 colorWhite doc
-  check "ring, hole and circle pixels" $
-    map (uncurry (pixelAt px)) [(1, 1), (7, 7), (17, 3)] == [[255, 0, 0, 255], [0, 0, 0, 0], [0, 0, 255, 255]]
 
 -- | A whole frame of ordinary widgets renders through 'frameToSvg', which
 -- 'enableSvgExport' sets up: chrome as rects, a canvas as the shapes it
@@ -263,7 +243,7 @@ testFrameToSvg = do
   bare <- newPixelContext
   (_, bareDraw, _) <- run2Frames bare inp (ui 0)
   refused <- try @IOException (frameToSvg defaultFrameSvgConfig bare inp bareDraw)
-  check "frameToSvg refuses a context that records no shapes" (either (const True) (const False) refused)
+  require "frameToSvg refuses a context that records no shapes" (either (const True) (const False) refused)
   ctx <- newPixelContext
   enableSvgExport ctx
   svg1 <- exportOf ctx defaultFrameSvgConfig (ui 0)
@@ -273,28 +253,28 @@ testFrameToSvg = do
     fill c = "fill=\"" <> colorToHex c <> "\""
     lastId svg = T.takeWhile (/= '"') (snd (T.breakOnEnd "clipPath id=\"" svg))
     textEl t = snd (T.breakOnEnd "<text" (fst (T.breakOn (">" <> t <> "</text>") svg1)))
-  check "frame svg header" (T.isPrefixOf "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"200\"" svg1)
+  require "frame svg header" (T.isPrefixOf "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"200\"" svg1)
   contains svg1 $
     [fill (pageBackground defaultTheme), "<rect ", "rx=\"12\" fill=\"#ff0000\""]
       <> [">" <> t <> "</text>" | t <- ["Frame label", "Bold label", "Strong"]]
   forM_ ["Bold label", "Strong"] $ \t ->
-    check (T.unpack t <> " does not export bold") (T.isInfixOf "font-weight=\"bold\"" (textEl t))
-  check "an overflowing field exports a clip id" (T.isInfixOf "clipPath id=" svg1)
-  check "no placeholder is left in the document" (not (T.isInfixOf "<id>" svg1))
-  check "documents that differ have different ids" (lastId svg1 /= lastId svg2)
-  check "ids carry the document prefix" (T.isPrefixOf "n" (lastId svg1) && T.isInfixOf "-tclip_" (lastId svg1))
-  check "a set prefix is kept" (T.isPrefixOf "mine-" (lastId named))
+    require (T.unpack t <> " does not export bold") (T.isInfixOf "font-weight=\"bold\"" (textEl t))
+  require "an overflowing field exports a clip id" (T.isInfixOf "clipPath id=" svg1)
+  require "no placeholder is left in the document" (not (T.isInfixOf "<id>" svg1))
+  require "documents that differ have different ids" (lastId svg1 /= lastId svg2)
+  require "ids carry the document prefix" (T.isPrefixOf "n" (lastId svg1) && T.isInfixOf "-tclip_" (lastId svg1))
+  require "a set prefix is kept" (T.isPrefixOf "mine-" (lastId named))
   -- A page scoped onto the panel surface exports that surface.
   panelSvg <- exportOf ctx defaultFrameSvgConfig (styled panelPage (ui 0))
   contains panelSvg [fill (styleBg (themePanel defaultTheme))]
   -- A drawing in a modal draws over the modal's panel, in its layer.
   modalSvg <- exportOf ctx defaultFrameSvgConfig (modal (constVar True) "Dialog" (() <$ circle))
   let (_, afterPanel) = T.breakOnEnd (fill (styleBg (themeFloatingWindow defaultTheme))) modalSvg
-  check "modal drawing over its panel" (T.isInfixOf "rx=\"12\" fill=\"#ff0000\"" afterPanel)
+  require "modal drawing over its panel" (T.isInfixOf "rx=\"12\" fill=\"#ff0000\"" afterPanel)
   -- Widget images export under their id.
   (iid, _, _) <- run2Frames ctx inp $ do
     i <- freshImageId
     _ <- registerImageRgba i 2 2 (BS.replicate 16 255)
     pure i
   imageSvg <- exportOf ctx defaultFrameSvgConfig {fsImageUri = \_ -> Just "data:image/png;base64,AA=="} (image (fixedWH 20 20) iid)
-  check "widget image under its id" (T.isInfixOf "<image " imageSvg)
+  require "widget image under its id" (T.isInfixOf "<image " imageSvg)

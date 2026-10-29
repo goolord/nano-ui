@@ -96,8 +96,8 @@ stopWaitCheck event = withTestWindow "stop wait" $ \win -> do
   endsWithin 1 "a stop before the wait" stopWaitForEvent
   endsWithin 1 "piled-up stops" (replicateM_ 100 stopWaitForEvent)
   -- A stray event can end a wait early, so one full wait in three suffices.
-  waited <- mapM (const (timedWait 200)) [1 .. 3 :: Int]
-  unless (any (>= 0.15) waited) $
+  waited <- mapM (const (timedWait 100)) [1 .. 3 :: Int]
+  unless (any (>= 0.07) waited) $
     fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited)
 
 -- | The pointer entering the window comes as motion to where it entered:

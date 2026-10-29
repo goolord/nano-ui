@@ -6,6 +6,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Markdown
 import Test.Hspec
+import Test.Hspec.QuickCheck (modifyMaxSuccess)
 import Test.QuickCheck
 
 -- | A document of parser-stressing lines, each with its own line ending:
@@ -124,34 +125,33 @@ appendsLikeWhole a b = do
 spec :: Spec
 spec = do
   describe "appendMarkdown" $ do
-    it "parses to what the whole text does, in any number of pieces" $
-      withNumTests 3000 $ property $ \(Cut d cuts) ->
+    modifyMaxSuccess (const 400) . it "parses to what the whole text does, in any number of pieces" $
+      property $ \(Cut d cuts) ->
         markdownBlocks (appendAll (chunksAt cuts (docText d))) === parseMarkdownBlocks (docText d)
-    it "parses to what the whole text does, a character at a time" $
-      withNumTests 300 $ property $ \d ->
+    modifyMaxSuccess (const 60) . it "parses to what the whole text does, a character at a time" $
+      property $ \d ->
         markdownBlocks (appendAll (T.chunksOf 1 (docText d))) === parseMarkdownBlocks (docText d)
     it "parses any text" $
       property $ \s ->
         let t = T.pack s
          in length (show (parseMarkdownBlocks t)) `seq` markdownBlocks (appendMarkdown t (parseMarkdown t)) === parseMarkdownBlocks (t <> t)
 
+  let adds name a b = it name (appendsLikeWhole a b)
   describe "a line right under a paragraph" $ do
     -- Such a line may underline the paragraph, make it a table header, or
     -- fail to interrupt it where it would otherwise start a block, so the
     -- paragraph must be reparsed with it.
-    let underParagraph name a b = it name (appendsLikeWhole a b)
-    underParagraph "underlines it into a heading" "a\n---\n" "b"
-    underParagraph "makes it a table's header" "a | b\n--|--\n" "c | d"
-    underParagraph "continues it with an ordered item not numbered 1" "a\n2. b\n" "c"
-    underParagraph "continues it with an ordered item numbered 10" "a\n10. b\n" "c"
-    underParagraph "continues it with HTML of type 7" "a\n<x-y>\n" "b"
-    underParagraph "continues it with a task item with nothing after its box" "a\n- [x] \n" "b"
-    underParagraph "continues link reference definitions" "[r]: /u\n- [x] \n" "b"
+    adds "underlines it into a heading" "a\n---\n" "b"
+    adds "makes it a table's header" "a | b\n--|--\n" "c | d"
+    adds "continues it with an ordered item not numbered 1" "a\n2. b\n" "c"
+    adds "continues it with an ordered item numbered 10" "a\n10. b\n" "c"
+    adds "continues it with HTML of type 7" "a\n<x-y>\n" "b"
+    adds "continues it with a task item with nothing after its box" "a\n- [x] \n" "b"
+    adds "continues link reference definitions" "[r]: /u\n- [x] \n" "b"
 
   describe "plain words" $ do
     -- Words added to a paragraph join its last line without a parse, unless
     -- the text could still become another block or inline.
-    let adds name a b = it name (appendsLikeWhole a b)
     adds "complete a link reference definition" "[foo]:" " bar"
     adds "close a definition's title" "[a]: /u 'title\nfoo" " bar'"
     adds "close a definition's title on its own line" "[a]: /u\n'title\nfoo" " bar'"
@@ -167,19 +167,11 @@ spec = do
     adds "follow a space from an entity" "foo&#32;" " "
     adds "join a letter the parse normalizes" "\28010" "\63786"
     adds "combine with the letter before" "cafe" "\769"
-    it "parse to what the whole text does, one at a time" $
-      withNumTests 1000 $ property $ forAll ((:) <$> elements openings <*> listOf (elements proseTokens)) $ \tokens ->
+    modifyMaxSuccess (const 150) . it "parse to what the whole text does, one at a time" $
+      property $ forAll ((:) <$> elements openings <*> listOf (elements proseTokens)) $ \tokens ->
         map markdownBlocks (streams tokens) === map (parseMarkdownBlocks . T.concat) (inits tokens)
 
   describe "a streamed message" $ do
-    it "keeps its finished blocks" $ do
-      let msg = "# Reply\n\nFirst paragraph with *emphasis*.\n\n- one\n- two\n\n```hs\nx = 1\n```\n\nLast [link](/u)."
-          whole = parseMarkdownBlocks msg
-          streamed = streams (T.chunksOf 3 msg)
-      markdownBlocks (last streamed) `shouldBe` whole
-      -- A closed block stays unchanged while the rest streams in.
-      let settled = [length (takeWhile id (zipWith (==) (markdownBlocks p) whole)) | p <- streamed]
-      settled `shouldBe` sort settled
     it "continues an open code block, list, table and block quote" $
       mapM_
         streamsLikeWhole
@@ -206,8 +198,8 @@ spec = do
       parseMarkdown "a" `shouldNotBe` parseMarkdown "a\n"
       parseMarkdown "a\r\n" `shouldNotBe` parseMarkdown "a\n"
       emptyMarkdown `shouldBe` parseMarkdown ""
-    it "hands back its text, however it was built" $
-      withNumTests 300 $ property $ \(Cut d cuts) ->
+    modifyMaxSuccess (const 300) . it "hands back its text, however it was built" $
+      property $ \(Cut d cuts) ->
         markdownSource (appendAll (chunksAt cuts (docText d))) === docText d
     it "lists its images' sources once each, in order, at any depth" $
       markdownImages

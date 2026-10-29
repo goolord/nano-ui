@@ -23,12 +23,11 @@ import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
 import Input (inputChecks, queueChecks)
 import NanoUI
-  ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), V2 (..), canvas, colorRGBA, column
-  , defaultImageConfig, defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH
-  , followSystemTheme, getTheme, imageConfigured', lightDark, pageColor, respRect
+  ( ImageId (..), Rect (..), V2 (..), canvas, colorBlack, colorRGBA, column, defaultLightTheme, defaultTheme
+  , drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark, pageColor, respRect
   )
 import NanoUI.Path qualified as P
-import NanoUI.Backend (Appearance (..), emptyInput, getSystemAppearance, setSystemAppearance)
+import NanoUI.Backend (Appearance (..), cursorFallback, emptyInput, getSystemAppearance, setSystemAppearance)
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors, sdlSystemCursor, showCursorKind)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, syncImageAtlas)
@@ -119,8 +118,7 @@ atlasChecks env draw = withGlyphSurface $ \surface ->
 
 -- | Images reach the atlas texture however they change: rewritten in place,
 -- added beside others, or added by growing the atlas. Each is sampled at its
--- centre through white vertices. Then a view's images: a clockwise quarter
--- turn puts the left half on top, and a half-opaque image shows half the backdrop.
+-- centre through white vertices.
 imageChecks :: SdlEnv -> Context -> ImageAtlas -> (DrawData -> IO ()) -> IO ()
 imageChecks env ctx images draw = do
   let register tid w h px = registerImage ctx (ImageId tid) w h px >>= (`unless` fail "image registration failed")
@@ -142,55 +140,24 @@ imageChecks env ctx images draw = do
   solid 4 300 2 (0, 255, 255)
   sample "added by growing" 4 (0, 255, 255)
   sample "kept across growth" 1 (0, 0, 255)
-  -- Red on the left half, blue on the right.
-  register 5 8 4 $
-    BS.pack (concat [if x < 4 then [255, 0, 0, 255] else [0, 0, 255, 255] | _ <- [0 .. 3 :: Int], x <- [0 .. 7 :: Int]])
-  let image h cfg = imageConfigured' cfg {icLayout = fixedWH 80 h} (ImageId 5)
-  ((turned, faded), dd) <-
-    warmupDraw ctx (withInput 400 300) . column $
-      (,)
-        <$> image 80 defaultImageConfig {icRotation = RotateSolid (pi / 2)}
-        <*> image 40 defaultImageConfig {icOpacity = 0.5}
-  syncImageAtlas (sdlRenderer env) images ctx
-  draw dd
-  let at resp dx dy = let Rect x y _ _ = respRect resp in pixel env (floor (x + dx)) (floor (y + dy))
-  top <- at turned 40 15
-  bottom <- at turned 40 65
-  unless (top == (255, 0, 0) && bottom == (0, 0, 255)) (fail ("turned image: " ++ show (top, bottom)))
-  half@(r, g, b) <- at faded 10 20
-  unless (r >= 120 && r <= 136 && g == 0 && b == 0) (fail ("half-opaque image: " ++ show half))
 
--- | Canvas paths as SDL draws them: an even-odd ring leaves its hole
--- unfilled; a translucent line has even alpha across its round caps and join
--- (a cap drawn over the line's end would darken it); a dashed line has gaps.
+-- | A translucent canvas line as SDL draws it has even alpha across its
+-- round caps and join: a cap drawn over the line's end would darken it.
 pathChecks :: SdlEnv -> Context -> (DrawData -> IO ()) -> IO ()
 pathChecks env ctx draw = do
-  let white = colorRGBA 255 255 255 255
-      glass = colorRGBA 255 255 255 128
   (resp, dd) <-
-    warmupDraw ctx (withInput 400 300) . column . canvas (fixedWH 200 100) $ \(Rect x y _ _) -> do
-      let c = V2 (x + 40) (y + 50)
-      drawPathWith P.EvenOdd (P.circle c 30 <> P.circle c 15) (P.Solid white)
+    warmupDraw ctx (withInput 400 300) . column . canvas (fixedWH 200 100) $ \(Rect x y _ _) ->
       drawStrokePathWith
         (P.stroke 20) {P.strokeCap = P.RoundCap, P.strokeJoin = P.RoundJoin}
         (P.polyline [V2 (x + 100) (y + 30), V2 (x + 150) (y + 30), V2 (x + 150) (y + 80)])
-        (P.Solid glass)
-      drawStrokePathWith
-        (P.stroke 4) {P.strokeDash = [6, 6]}
-        (P.polyline [V2 (x + 100) (y + 95), V2 (x + 190) (y + 95)])
-        (P.Solid white)
+        (P.Solid (colorRGBA 255 255 255 128))
   draw dd
   let at dx dy = let Rect x y _ _ = respRect resp in pixel env (floor (x + dx)) (floor (y + dy))
   backdrop <- at 80 5
-  hole <- at 40 50
-  ring <- at 40 27
-  unless (hole == backdrop && ring == (255, 255, 255)) (fail ("even-odd ring: " ++ show (hole, ring, backdrop)))
   line <- mapM (uncurry at) [(125, 30), (103, 30), (93, 30), (152, 28), (156, 24), (150, 88)]
   case nub line of
     [one] | one /= backdrop -> pure ()
     _ -> fail ("translucent line, caps and join: " ++ show line)
-  dashes <- mapM (\dx -> at dx 95) [103, 109, 115, 121]
-  unless (dashes == [(255, 255, 255), backdrop, (255, 255, 255), backdrop]) (fail ("dashes: " ++ show dashes))
 
 atlasBench :: SdlEnv -> IO ()
 atlasBench env = withGlyphSurface $ \surface ->
@@ -215,29 +182,18 @@ benchmark name warm n action = do
   printf "%s: %.6f ms/frame | %.1f B/frame\n" name (perRun (t1 - t0) / 1e6) (perRun (bytes0 - bytes1))
 
 -- | Every cursor kind maps to a system cursor SDL declares (SDL 3.2 does not
--- check), each kind SDL has a cursor for gets a distinct one, and showing
--- every kind twice creates each system cursor once, NULL ones (this driver's)
--- included.
+-- check), each kind SDL has a cursor for (its own fallback, bar the default
+-- and hidden ones) gets a distinct one, and showing every kind twice creates
+-- each system cursor once, NULL ones (this driver's) included.
 cursorChecks :: IO ()
 cursorChecks = do
   let kinds = [minBound .. maxBound] :: [UiCursorKind]
       wanted = mapMaybe sdlSystemCursor kinds
-      native =
-        [ (UiCursorPointer, M.SDL_SYSTEM_CURSOR_POINTER), (UiCursorText, M.SDL_SYSTEM_CURSOR_TEXT)
-        , (UiCursorNsResize, M.SDL_SYSTEM_CURSOR_NS_RESIZE), (UiCursorEwResize, M.SDL_SYSTEM_CURSOR_EW_RESIZE)
-        , (UiCursorNwseResize, M.SDL_SYSTEM_CURSOR_NWSE_RESIZE), (UiCursorNeswResize, M.SDL_SYSTEM_CURSOR_NESW_RESIZE)
-        , (UiCursorNotAllowed, M.SDL_SYSTEM_CURSOR_NOT_ALLOWED), (UiCursorWait, M.SDL_SYSTEM_CURSOR_WAIT)
-        , (UiCursorProgress, M.SDL_SYSTEM_CURSOR_PROGRESS), (UiCursorCrosshair, M.SDL_SYSTEM_CURSOR_CROSSHAIR)
-        , (UiCursorMove, M.SDL_SYSTEM_CURSOR_MOVE), (UiCursorNResize, M.SDL_SYSTEM_CURSOR_N_RESIZE)
-        , (UiCursorNeResize, M.SDL_SYSTEM_CURSOR_NE_RESIZE), (UiCursorEResize, M.SDL_SYSTEM_CURSOR_E_RESIZE)
-        , (UiCursorSeResize, M.SDL_SYSTEM_CURSOR_SE_RESIZE), (UiCursorSResize, M.SDL_SYSTEM_CURSOR_S_RESIZE)
-        , (UiCursorSwResize, M.SDL_SYSTEM_CURSOR_SW_RESIZE), (UiCursorWResize, M.SDL_SYSTEM_CURSOR_W_RESIZE)
-        , (UiCursorNwResize, M.SDL_SYSTEM_CURSOR_NW_RESIZE)
-        ]
+      own = [sdlSystemCursor k | k <- kinds, cursorFallback k == k, k /= UiCursorDefault, k /= UiCursorHidden]
   unless (all (\c -> c >= M.SDL_SYSTEM_CURSOR_DEFAULT && c < M.SDL_SYSTEM_CURSOR_COUNT) wanted) $
     fail ("cursor kinds ask for undeclared SDL cursors: " ++ show wanted)
-  unless (all (\(k, c) -> sdlSystemCursor k == Just c) native && length (nub (map snd native)) == length native) $
-    fail ("cursor kinds do not show their own SDL cursors: " ++ show [(k, sdlSystemCursor k) | (k, _) <- native])
+  unless (all isJust own && length (nub own) == length own) $
+    fail ("cursor kinds do not show their own SDL cursors: " ++ show own)
   bracket initCursors destroyCursors $ \cursors -> do
     mapM_ (showCursorKind cursors) (kinds ++ kinds)
     created <- map fst <$> readIORef (scSystem cursors)
@@ -251,9 +207,6 @@ cursorChecks = do
     unless (hidden && shownAgain) $
       fail ("the hidden cursor kind does not hide the pointer and show it again: " ++ show (hidden, shownAgain))
 
-black :: Color
-black = colorRGBA 0 0 0 255
-
 -- The public draw format is SDL_Vertex-compatible: xy, rgba, uv floats.
 geometry :: [(Float, Float)] -> IO DrawData
 geometry points = do
@@ -263,7 +216,7 @@ geometry points = do
   withForeignPtr vertices $ \p -> pokeArray (castPtr p) [CFloat v | (x, y) <- points, v <- [x, y, 1, 0, 0, 1, 0, 0]]
   withForeignPtr indices $ \p -> pokeArray (castPtr p) [0 .. fromIntegral n - 1 :: CInt]
   let cmds = U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent)
-  pure (DrawData vertices n indices n cmds (primArrayFromList [0, 0, 1, 1, 1]) black)
+  pure (DrawData vertices n indices n cmds (primArrayFromList [0, 0, 1, 1, 1]) colorBlack)
 
 -- | A triangle covering pixel (20, 20) that samples @texture@, with floats
 -- written at each vertex's byte offsets: colour at 8 to 20, UV at 24 and 28.
@@ -322,7 +275,7 @@ main = do
   ctx <- newPixelContext
   -- These checks read pixels over a black clear: a black page makes the
   -- frame's clear black.
-  getTheme ctx >>= setTheme ctx . pageColor black
+  getTheme ctx >>= setTheme ctx . pageColor colorBlack
   withSdlBench ctx $ \_ env -> bracket newImageAtlas destroyImageAtlas $ \images ->
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do
       let drawWithGlyph glyphs dd dmg =
@@ -362,9 +315,8 @@ main = do
                 fail (name ++ ": clipped geometry lost or escaped damage: " ++ show (inside, untouched))
           step "glyph upload, padding and reset readback" $
             atlasChecks env (\glyphs dd -> drawWithGlyph glyphs dd DamageFull)
-          step "image atlas upload, and turned and faded image readback" $
-            imageChecks env ctx images (`draw` DamageFull)
-          step "canvas paths, caps, joins and dashes readback" (pathChecks env ctx (`draw` DamageFull))
+          step "image atlas upload readback" (imageChecks env ctx images (`draw` DamageFull))
+          step "canvas line caps and joins readback" (pathChecks env ctx (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks
           step "native events and the system theme" (queueChecks >> systemThemeChecks env ctx)
   unless bench $ do

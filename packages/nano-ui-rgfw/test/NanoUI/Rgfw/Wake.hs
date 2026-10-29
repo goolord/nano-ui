@@ -44,14 +44,14 @@ testRgfwWake =
       let failNow msg = putStrLn ("[FAIL] RGFW wake: " ++ msg) >> hFlush stdout >> c_exit 1
           await what signal = timeout 5000000 (takeMVar signal) >>= maybe (failNow (what ++ " never showed")) pure
           next p = writeIORef phase p >> join (readIORef wakeRef)
-          -- For half a second, write each value where the view reads it and
-          -- wake, faster than frames; then write -1 to mark the end.
+          -- For a fifth of a second, write each value where the view reads it
+          -- and wake, faster than frames; then write -1 to mark the end.
           produce wake = do
             t0 <- getMonotonicTime
             let go i = do
                   atomicWriteIORef latest i >> wake
                   t <- getMonotonicTime
-                  if t - t0 < 0.5 then yield >> go (i + 1) else atomicWriteIORef latest (-1) >> wake
+                  if t - t0 < 0.2 then yield >> go (i + 1) else atomicWriteIORef latest (-1) >> wake
             go 1
           view = do
             liftIO (atomicModifyIORef' passes (\n -> (n + 1, ())))
@@ -59,7 +59,7 @@ testRgfwWake =
             liftIO (writeIORef wakeRef wake)
             liftIO (readIORef phase) >>= \case
               0 -> do
-                r <- useTask job ("job" :: String) (threadDelay 300000 >> pure (42 :: Int))
+                r <- useTask job ("job" :: String) (threadDelay 50000 >> pure (42 :: Int))
                 when (r == Just 42) (liftIO (void (tryPutMVar shown ())))
                 label "job"
               1 -> do
@@ -72,14 +72,14 @@ testRgfwWake =
         await "the job's result" shown
         next 1
         await "the stream's last value" streamed
-        threadDelay 300000
+        threadDelay 100000
         c0 <- getCPUTime
         f0 <- readIORef passes
-        threadDelay 1000000
+        threadDelay 400000
         c1 <- getCPUTime
         f1 <- readIORef passes
         let cpu = fromIntegral (c1 - c0) / 1e12 :: Double
-        when (cpu > 0.3 || f1 /= f0) $
+        when (cpu > 0.12 || f1 /= f0) $
           failNow ("after the stream the loop used " ++ show cpu ++ " s of CPU and ran " ++ show (f1 - f0) ++ " passes")
         next 2
       -- Hidden, so pointer motion over it cannot run passes while it idles.

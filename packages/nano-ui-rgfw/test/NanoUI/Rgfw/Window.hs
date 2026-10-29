@@ -16,7 +16,7 @@ import NanoUI
   ( AlignX (..), AlignY (..), DrawOp (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..)
   , Rect (..), Size (..), V2 (..), WindowMode (..), WindowSettings (..), WindowState (..), askInput, askWindow
   , button', canvas, colorB, colorG, colorR, colorRGBA, column, columnWith, defaultWindowSettings, drawText, drawing
-  , fixedWH, inlineText, pageColor, quitUi, requestFrame, respRect, rgbaBytes, rgbaHeight, rgbaWidth, richText
+  , fixedWH, inlineText, pageColor, quitUi, requestFrame, rgbaBytes, rgbaHeight, rgbaWidth, richText
   , setWindowTitleUi, strong, tight, tomorrowNightMinDarkTheme, windowColor, windowSize
   )
 import NanoUI.Backend (Damage (..))
@@ -27,7 +27,7 @@ import NanoUI.Rgfw.Internal.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Internal.Gl
   (freeGlRenderer, newGlRenderer, readRetainedPixels, readWindowPixels, renderArenaGl, retainedPixels)
 import NanoUI.Testing (collectRasterSpans, damageIsEmpty, runFrame, takeDamage, takeDamagePieces)
-import NanoUI.Testing.Harness (withInputOff)
+import NanoUI.Testing.Harness (centerOf, withInputOff)
 import RGFW qualified as R
 import System.Environment (lookupEnv)
 import System.Info (os)
@@ -105,7 +105,7 @@ testGlWindow assert =
         btn <- newIORef (V2 0 0)
         let view k = column $ do
               b <- button' "hover"
-              liftIO (writeIORef btn (let Rect x y bw bh = respRect b in V2 (x + bw / 2) (y + bh / 2)))
+              liftIO (writeIORef btn (centerOf b))
               let counter = T.pack (" at " ++ show k)
               void $ richText [inlineText "rich text beside ", strong "a counter", inlineText counter]
               void $ canvas (fixedWH 160 20) $ \(Rect x y _ _) ->

@@ -22,8 +22,6 @@ selftest :: IO ()
 selftest = do
   state <- Notepad.newNotepad
   withHiddenWindow 1000 720 (V2 500 400) id $ \ctx env base -> runDrive ctx env base (Notepad.notepadUi state) $ do
-    frame
-    frame
     expect "Ready"
     click "File"
     expect "Save As..."

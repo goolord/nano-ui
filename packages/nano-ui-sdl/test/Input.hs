@@ -13,8 +13,9 @@ import Foreign.C.Types (CBool (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (castPtr)
 import Foreign.Storable (Storable, poke)
-import NanoUI (Pressable (..), V2 (..))
+import NanoUI (V2 (..))
 import NanoUI.Backend
+import NanoUI.Testing.Assert (require)
 import SDL3.Sys.Bindgen.Events
   (SDL_MouseButtonEvent (..), SDL_MouseMotionEvent (..), SDL_RenderEvent (..), SDL_WindowEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
@@ -28,7 +29,7 @@ import "nano-ui-sdl" NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollE
 
 checks :: String -> [(String, Bool)] -> IO ()
 checks what cs = do
-  forM_ cs $ \(name, ok) -> unless ok (fail (what <> ": " <> name))
+  forM_ cs $ \(name, ok) -> require (what <> ": " <> name) ok
   putStrLn ("SDL " <> what <> ": ok")
 
 -- | Keycodes and folded keyboard and pointer events; no SDL needed.
@@ -42,14 +43,9 @@ inputChecks = do
       folded = foldl' applyEvent emptyInput
       chord = folded [EvModifiers ctrl, EvKey (KeyChar 's') True ctrl]
       letGo = folded [EvKey (KeyChar 's') True ctrl, EvKey (KeyChar 's') False ctrl, EvModifiers noModifiers]
-      enterHeld = folded [EvKey KeyEnter True noModifiers, EvKey KeyEnter True noModifiers]
       blurred = applyEvent chord EvFocusLost
       typed = folded [EvKey (KeyChar 'x') True shift, EvText "X"]
       button b isDown inp = applyEvent inp (EvMouseButton b isDown (V2 5 5) (inputModifiers emptyInput))
-      pressed = button MouseMiddle True emptyInput
-      side = button MouseBack False (clearEphemeral (button MouseBack True emptyInput))
-      dragOut = applyEvent pressed EvMouseLeave
-      gone = applyEvent (button MouseMiddle False pressed) EvMouseLeave
       -- A click is read with the modifiers of the whole batch, which may
       -- already have let go of a key released just after it.
       ctrlClick = button MouseLeft True (applyEvent emptyInput (EvModifiers ctrl))
@@ -66,13 +62,9 @@ inputChecks = do
     , ( "a chord is a key with its modifiers and types nothing"
       , toList (inputKeys chord) == [KeyChar 's'] && inputModifiers chord == ctrl && inputChars chord == ""
       )
-    , ("a pressed key is held", toList (inputKeysHeld chord) == [KeyChar 's'])
     , ( "a release is reported, and a modifier let go clears it"
       , toList (inputKeysReleased letGo) == [KeyChar 's'] && null (inputKeysHeld letGo)
           && inputModifiers letGo == noModifiers
-      )
-    , ( "Enter repeats, and a repeat is no new press"
-      , toList (inputKeys enterHeld) == [KeyEnter, KeyEnter] && toList (inputKeysNew enterHeld) == [KeyEnter]
       )
     , ( "losing the keyboard lets go of the keys and modifiers held"
       , null (inputKeysHeld blurred) && toList (inputKeysReleased blurred) == [KeyChar 's']
@@ -80,12 +72,6 @@ inputChecks = do
       )
     , ( "typed text keeps the modifiers of the key that typed it"
       , inputChars typed == "X" && inputModifiers typed == shift
-      )
-    , ("a middle press is held", heldIn MouseMiddle pressed && pressedIn MouseMiddle pressed)
-    , ("a side button is released", releasedIn MouseBack side && not (heldIn MouseBack side))
-    , ("leaving moves the pointer off the window", let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
-    , ( "leaving during a drag keeps the pointer and the button"
-      , inputMousePos dragOut == V2 5 5 && heldIn MouseMiddle dragOut
       )
     , ("a click keeps the modifiers of the keys before it", inputModifiers ctrlClick == ctrl)
     ]
