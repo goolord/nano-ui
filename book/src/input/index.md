@@ -137,15 +137,21 @@ Raw input fields: `inputChars` (committed text), `inputKeys` (pressed, including
 
 ## Testing
 
-Focus changes apply on the next frame, so drive at least two frames:
+`NanoUI.Testing.Sim` drives a view headlessly the way a user would. `runSim` settles the view, then the script clicks text, types, and presses keys, each action running the frames a real event would:
 
 ```haskell
 ctx <- newContext
-(_, _, _) <- runFrame ctx input1 view
-(_, _, _) <- runFrame ctx input2 view
+failed <- newIORef 0
+runSim ctx failed (withInput 400 300) editorView $ do
+  click "Rename"
+  typeText "notes.txt"
+  pressKey KeyEnter
+  expect "notes.txt"
 ```
 
-Warm up with `warmup2` before targeting a widget by `respRect`. For shortcut tests, build input with `keyInp` / `chordInp` from `NanoUI.Testing.Harness`.
+A string literal aims at the visible text with that label. `At p`, `Within rect`, `On response` and `OnWidget wid` aim elsewhere. `check` and `checkEq` count failures on `failed`.
+
+For lower-level tests, `runFrame ctx input view` runs one frame. Focus changes apply on the next frame, and geometry lags one frame, so warm up with `warmup2` before targeting a widget by `respRect`. `keyInp` / `chordInp` from `NanoUI.Testing.Harness` build key input.
 
 ## See also
 

@@ -172,7 +172,7 @@ runComboEscapeOwnedTest _ failed =
             _ -> listen keyHeld
           ui = column (when before other >> withValue "" (comboBox' "Font" comboOpts) <* unless before other)
       runSim ctx failed (withInput 320 200) ui $ do
-        _ <- pressKey KeyTab >> typeText "a" >> chord (key KeyEscape)
+        _ <- pressKey KeyTab >> typeText "a" >> frameWith (chordInp (key KeyEscape))
         _ <- frameWith (keyRepeatInp KeyEscape) >> frameWith (keyUpInp KeyEscape)
         acted <- liftIO ((||) <$> readIORef fired <*> (not <$> readVarIO popupOpen))
         checkEq (which :: T.Text, before, False) (which, before, acted)

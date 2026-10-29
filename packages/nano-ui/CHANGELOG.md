@@ -2,6 +2,11 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- `NanoUI.Testing.Sim`: a scripted user for headless tests. `runSim`
+  settles a view, then `click "Save"`, `typeText`, `pressKey`, `chord`,
+  `wheel`, `drag` and `expect "text"` drive it frame by frame, aiming at
+  visible text, points, rects or widgets.
+
 - The page behind a view is the window background (`themeWindow`) by
   default. `pageBackground` reads it; `pageColor` sets another page surface,
   and `panelPage` gives a view that draws no panel the panel surface. A set

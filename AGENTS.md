@@ -472,6 +472,15 @@ stronghead records demo videos by driving the real view with scripted input.
 
 ## Testing
 
+`NanoUI.Testing.Sim` is the default for anything a user does: `runSim ctx
+failed input view script` settles the view, then `click "Save"` (string
+literals aim at visible text; `At p`, `Within rect`, `On resp`, `OnWidget
+wid` otherwise), `typeText`, `pressKey`, `chord`, `wheel`, `drag`, `settle`,
+`expect "text"`, `checkEq`. In this repo's integration suite, `simSpec name w
+h view script` wraps it; import `NanoUI.Testing.Sim` explicitly (its short
+names clash with locals under `-Wname-shadowing`). Merge checks that share a
+setup into one script rather than adding a spec per assertion.
+
 `NanoUI.Testing`: `newContext` + `runFrame ctx size dt input view` → result,
 `DrawData`, and whether a follow-up frame was requested; `runFrameE` for emit
 views. Harness (`NanoUI.Testing.Harness`): `warmup2`, `clickPair` /
