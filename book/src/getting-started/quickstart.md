@@ -71,7 +71,7 @@ cabal haddock-project --output=haddocks --hoogle
 Open `haddocks/index.html`. Building every package is memory-heavy; `cabal haddock nano-ui --haddock-hoogle` builds one. See [Development Setup](development.md#haddocks-and-hoogle) for Hoogle indexing.
 
 > [!IMPORTANT]
-> Compile executables with `-threaded`. The immediate-mode loop, task threads, and native window event processing require the GHC threaded runtime.
+> Compile executables with `-threaded`. Between frames the backend blocks in SDL's event wait, a foreign call. Under the non-threaded runtime that call stops every Haskell thread, so `Task` and `Stream` workers make no progress while the window is idle.
 
 ## Your first application
 

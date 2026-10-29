@@ -2,13 +2,15 @@
 
 An immediate-mode GUI toolkit for Haskell.
 
-You describe the whole window as one `NanoUI ()` action, and the backend runs that action again on every frame. The rest of this book calls that action the *view*. Widgets return values directly (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, `do` notation, and `if`/`case`/`for_`.
+In an immediate-mode GUI, your UI code runs again on every frame. Drawing a button and checking whether it was clicked is one function call, and the application keeps no tree of widget objects to update. In Haskell this makes the interface a function of state, written with ordinary functions, `do` notation, and `if`/`case`/`for_`, with no callbacks to register.
+
+You describe the whole window as one `NanoUI ()` action, and the backend runs that action again on every frame. The rest of this book calls that action the *view*. Widgets return values directly (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is a composable modifier argument.
 
 ```haskell
 {{#include ../../packages/nano-ui-demo/book/Book/Intro.hs:counter}}
 ```
 
-Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source for each tutorial is in [`packages/nano-ui-demo/examples`](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples). If you already know immediate-mode UI, skim the [Quick Start](getting-started/quickstart.md) and go to [State & `Var`](state/index.md).
+Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source for each tutorial is in [`packages/nano-ui-demo/examples`](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples).
 
 ## Packages in the monorepo
 
