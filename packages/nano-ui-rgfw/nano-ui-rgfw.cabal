@@ -110,7 +110,6 @@ test-suite nano-ui-rgfw-test
     main-is:          Spec.hs
     other-modules:
         NanoUI.Rgfw.Render
-        NanoUI.Rgfw.Surface
         NanoUI.Rgfw.Window
         NanoUI.Rgfw.Wake
     -- Threaded: the wake test's job and producer run while the loop blocks in RGFW.
@@ -122,6 +121,5 @@ test-suite nano-ui-rgfw-test
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,
         primitive ^>=0.9,
-        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   test
