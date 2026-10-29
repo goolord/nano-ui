@@ -8,9 +8,7 @@ import NanoUI.Internal.Store (ptrEq)
 
 tests :: [Spec]
 tests =
-  [ spec "shared-key-vanish-damage" (runSharedKeyVanishDamageTest 1)
-  , spec "unshared-key-vanish-damage" (runSharedKeyVanishDamageTest 0)
-  , spec "shared-key-steady-prev-rects" runSharedKeySteadyPrevRectsTest
+  [ spec "shared-key-prev-rects" runSharedKeyPrevRectsTest
   , spec "widget-id-index-lookups" runWidgetIdIndexLookupsTest
   , spec "widget-id-index-epoch-wrap" runWidgetIdIndexEpochWrapTest
   , spec "width-memo-frame-tag-wrap" runWidthMemoFrameTagWrapTest
@@ -19,25 +17,22 @@ tests =
 inp :: Input
 inp = withInputOff 320 300
 
--- | A label removed after a table repaints its old area and drops out of the
--- previous rects, with or without a frozen column (two panes under one id).
-runSharedKeyVanishDamageTest :: Int -> Context -> IORef Int -> IO ()
-runSharedKeyVanishDamageTest freeze ctx failed = do
-  mResp <- warmup ctx inp (tableAndLabel freeze True) >> warmup2 ctx inp (tableAndLabel freeze True)
-  assertJust failed mResp $ \resp -> do
-    let old = respRect resp
-    assert failed (rectW old > 0 && rectH old > 0)
-    _ <- runFrame ctx inp (tableAndLabel freeze False)
-    assert failed . (`damageCovers` old) =<< takeDamage ctx
-    assertEq failed Nothing =<< getPrevRect ctx (respId resp)
-
--- | With such a table shown, an unchanged frame reuses last frame's rect map.
-runSharedKeySteadyPrevRectsTest :: Context -> IORef Int -> IO ()
-runSharedKeySteadyPrevRectsTest ctx failed = do
-  let frameRects = runFrame ctx inp (tableAndLabel 1 True) >> getsDamage ctx (pfRects . dsPrev)
-  !before <- replicateM_ 2 frameRects >> frameRects
+-- | With a table shown, with or without a frozen column (two panes under one
+-- id), an unchanged frame reuses last frame's rect map, and a label removed
+-- after the table repaints its old area and drops out of the previous rects.
+runSharedKeyPrevRectsTest :: Context -> IORef Int -> IO ()
+runSharedKeyPrevRectsTest _ failed = forM_ [0, 1] $ \freeze -> do
+  ctx <- newContext
+  Just resp <- last <$> replicateM 3 (evalUi ctx inp (tableAndLabel freeze True))
+  let old = respRect resp
+      frameRects = runFrame ctx inp (tableAndLabel freeze True) >> getsDamage ctx (pfRects . dsPrev)
+  assert failed (rectW old > 0 && rectH old > 0)
+  !before <- frameRects
   !after <- frameRects
   assert failed (not (null before) && ptrEq before after)
+  _ <- runFrame ctx inp (tableAndLabel freeze False)
+  assert failed . (`damageCovers` old) =<< takeDamage ctx
+  assertEq failed Nothing =<< getPrevRect ctx (respId resp)
 
 -- | Every widget resolves to its own node, beyond the index's initial size,
 -- and a widget left out next frame resolves to nothing.
