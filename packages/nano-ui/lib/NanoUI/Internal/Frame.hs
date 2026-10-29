@@ -361,6 +361,7 @@ resetUiBuild ctx newFrame = do
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxCursorZones ctx) []
   writeIORef (ctxCursorRegions ctx) []
+  readIORef (ctxChildWindows ctx) >>= \ws -> unless (null ws) (writeIORef (ctxChildWindows ctx) [])
   resetDrawingScopeCache ctx
   -- The layout overlay's scopes are ranges of the arena just emptied.
   explain <- readIORef (ctxExplain ctx)

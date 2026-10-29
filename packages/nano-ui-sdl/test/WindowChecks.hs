@@ -55,6 +55,7 @@ windowChecks drivers gpu = do
   reducerEnvironmentCheck
   openingFramesCheck
   openingCloseCheck
+  childWindowCheck
   resizeFailureCheck
   uiScaleNaNCheck
   dialogStateChecks
@@ -184,6 +185,38 @@ openingCloseCheck = do
         push (SDL_QuitEvent Events.SDL_EVENT_QUIT 0 0)
       Just t0 -> when (now > t0 + 0.5) $ liftIO (writeIORef lost True) >> quitUi
   readIORef lost >>= require "a close request during the opening frames closes the window" . not
+
+-- | A view's 'nativeWindow' opens a window with a view of its own, which
+-- keeps getting frames from its timed wakes. A 'Var' it writes reaches the
+-- first window's view, and its close request writes 'False', which closes
+-- it.
+childWindowCheck :: IO ()
+childWindowCheck = do
+  open <- newVar True
+  shared <- newVar (0 :: Int)
+  passes <- newIORef 0
+  childPasses <- newIORef 0
+  closeSent <- newIORef False
+  seen <- newIORef []
+  runSdlApp options $ do
+    wakeAfter 0.05
+    n <- countPass passes
+    v <- readVar shared
+    liftIO (modifyIORef' seen (v :))
+    nativeWindow open (sdlWindowSettings options) {wsTitle = "second"} $ do
+      wakeAfter 0.02
+      m <- countPass childPasses
+      when (m == 1) (writeVar shared 7)
+      sent <- liftIO (readIORef closeSent)
+      when (m >= 4 && not sent) $ askSdlEnv >>= \live -> liftIO $ for_ live $ \env -> do
+        writeIORef closeSent True
+        wid <- SDL.getWindowID (sdlWindow env)
+        push (SDL_WindowEvent Events.SDL_EVENT_WINDOW_CLOSE_REQUESTED 0 0 wid 0 0)
+    stillOpen <- readVar open
+    when ((n > 2 && not stillOpen) || n > 400) quitUi
+  readIORef childPasses >>= require "the second window runs its view" . (>= 4)
+  readIORef seen >>= require "a Var the second window writes reaches the first" . elem 7
+  readVarIO open >>= require "the close request writes False" . not
 
 -- | A frame the resize watch draws (a live resize) that throws ends the
 -- session with the exception, as a frame of the loop's own does, rather

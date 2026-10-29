@@ -1126,6 +1126,13 @@ module NanoUI
   , toggleMaximizedUi
   , quitUi
 
+    -- ** More windows
+
+    -- | 'nativeWindow' opens another native window beside the first, with
+    -- its own view, while a 'Var' holds 'True'. An app with one window
+    -- never calls it and pays nothing for it.
+  , nativeWindow
+
     -- ** Pixels and screenshots
   , RgbaPixels
   , rgbaPixels
@@ -1148,6 +1155,7 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
 import NanoUI.Internal.NativeWindow
+import NanoUI.Internal.ChildWindow (nativeWindow)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Tasks
 import NanoUI.Svg

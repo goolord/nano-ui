@@ -99,11 +99,21 @@ view app = do
   for_ shot showShot
 -- ANCHOR_END: use_screenshot
 
+-- ANCHOR: native_window
+editorView :: Var Bool -> NanoUI ()
+editorView showInspector = do
+  checkbox "Inspector" showInspector
+  nativeWindow showInspector
+    defaultWindowSettings {wsTitle = "Inspector", wsSize = Size 360 480}
+    inspectorView
+-- ANCHOR_END: native_window
+
 -- Stand-ins for application code the snippets refer to.
 
-mainContent, askBeforeQuitting :: NanoUI ()
+mainContent, askBeforeQuitting, inspectorView :: NanoUI ()
 mainContent = pure ()
 askBeforeQuitting = pure ()
+inspectorView = pure ()
 
 saveShot :: Screenshot -> IO ()
 saveShot _ = pure ()

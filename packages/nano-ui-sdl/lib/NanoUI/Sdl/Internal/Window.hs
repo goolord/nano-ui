@@ -14,6 +14,7 @@ module NanoUI.Sdl.Internal.Window
   , defaultSdlOptions
   , withSdl
   , withSdlBench
+  , openChildWindow
   , askSdlEnv
   , withSdlEnv
   , syncDisplay
@@ -23,12 +24,13 @@ module NanoUI.Sdl.Internal.Window
   , captureFrame
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
-import Control.Exception (IOException, bracket, catch, finally)
-import Control.Monad (mfilter, unless, void, when)
+import Control.Concurrent (myThreadId, rtsSupportsBoundThreads, runInBoundThread)
+import Control.Exception (IOException, bracket, catch, finally, mask)
+import Control.Monad (forM_, mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
 import Data.Acquire qualified as Acquire
+import Data.Acquire.Internal qualified as Acquire
 import Data.Bits (zeroBits, (.|.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
@@ -49,8 +51,8 @@ import Foreign.Storable (peek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (Appearance, ImageId, Input (..), NanoUI, RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels, unlessM)
 import NanoUI.Backend (Backend (..), BackendSession, SBackend (..), askBackendSession, withBackendSession, cancelTasks, closeWindowHost, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
-import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
-import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, withClipboard)
+import NanoUI.Internal.Context (Context (..), followSystemTheme, setBackendSession, setDrawSnapScale)
+import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, newPixelContext, registerImage, withClipboard, withTheme)
 import NanoUI.Sdl.Internal.Display
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
@@ -464,7 +466,7 @@ withSdlWindow hints flags opts ctx act =
     hints
     fontSource <- resolveNanoUIFont (sdlAppFont opts)
     monoSource <- resolveNanoUIFont (sdlAppMonoFont opts)
-    Acquire.with (startSdlWindow opts flags ctx fontSource monoSource) $ \(ctx', env) ->
+    Acquire.with (startSdl >> startSdlWindow opts flags ctx fontSource monoSource Nothing) $ \(ctx', env) ->
       withBackendSession ctx' SSdl env (act ctx' env)
   where
     -- SDL's GL renderer -- what 'RenderDriverAuto' asks for on Windows --
@@ -509,13 +511,22 @@ acquireWindowAndRenderer opts flags =
     settings = sdlWindowSettings opts
     Size w h = wsSize settings
 
-startSdlWindow ::
-  SdlOptions -> SDL_WindowFlags -> Context -> FontSource -> FontSource -> Acquire (Context, SdlEnv)
-startSdlWindow opts flags ctx fontSource monoSource = do
+-- | Start SDL's video subsystem and register the wake event, for the
+-- session's windows.
+startSdl :: Acquire ()
+startSdl = do
   mkAcquire
     (unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) (fail "SDL_Init(SDL_INIT_VIDEO) failed"))
     (const quitSafe)
   liftIO $ unlessM initRefreshEvent (fail "SDL_RegisterEvents failed for refresh wake")
+
+-- | Open a window, its renderer and what draws into it. A further window
+-- shares its session's first window's cursors and its font and UI scale
+-- requests, so 'NanoUI.Backend.Sdl.setSdlUiFont' and
+-- 'NanoUI.Backend.Sdl.setSdlUiScale' reach every window.
+startSdlWindow ::
+  SdlOptions -> SDL_WindowFlags -> Context -> FontSource -> FontSource -> Maybe SdlEnv -> Acquire (Context, SdlEnv)
+startSdlWindow opts flags ctx fontSource monoSource first = do
   let settings = sdlWindowSettings opts
   -- NANO_FORCE_SCALE: debug override of the pixel density.
   sdlForcedScale <- liftIO $ mfilter (> 0) . (>>= readMaybe) <$> lookupEnv "NANO_FORCE_SCALE"
@@ -538,13 +549,13 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   sdlRendererName <-
     liftIO $ fromMaybe "unknown" <$> (maybePeek TextForeign.peekCString . PtrConst.unsafeToPtr =<< getRendererName sdlRenderer)
   sdlScaleRef <- liftIO $ newIORef scale
-  sdlUiScaleRef <- liftIO $ newIORef (sdlAppUiScale opts)
+  sdlUiScaleRef <- liftIO $ maybe (newIORef (sdlAppUiScale opts)) (pure . sdlUiScaleRef) first
   sdlPointerSeen <- liftIO $ newIORef False
-  sdlFontRequestRef <- liftIO $ newIORef (sdlAppFont opts)
-  sdlFontAppliedRef <- liftIO $ newIORef (sdlAppFont opts)
+  sdlFontRequestRef <- liftIO $ maybe (newIORef (sdlAppFont opts)) (pure . sdlFontRequestRef) first
+  sdlFontAppliedRef <- liftIO $ newIORef =<< maybe (pure (sdlAppFont opts)) (readIORef . sdlFontAppliedRef) first
   glyphAtlas <- mkAcquire (newGlyphAtlas sdlRenderer) destroyGlyphAtlas
   sdlImages <- mkAcquire newImageAtlas destroyImageAtlas
-  sdlCursors <- mkAcquire initCursors destroyCursors
+  sdlCursors <- maybe (mkAcquire initCursors destroyCursors) (pure . sdlCursors) first
   sdlDebug <- liftIO newDebugSampler
   sdlDebugPublished <- liftIO (newIORef Nothing)
   sdlFrameTrace <- liftIO $ isJust <$> lookupEnv "NANO_FRAME_TRACE"
@@ -599,6 +610,41 @@ startSdlWindow opts flags ctx fontSource monoSource = do
   liftIO $ installWindowHost ctx' settings (windowHostFor sdlWindow (windowZoom env) sdlSizeLimits)
   liftIO $ reportWindowState ctx' =<< queryWindowState sdlWindow scale
   pure (ctx', env)
+
+-- | Open a further window of a session, for a view's
+-- 'NanoUI.nativeWindow': a context of its own with the declaring view's
+-- theme and the session's images, and a window with the settings, the full
+-- desktop frame, no vsync (the session's first window paces the loop), and
+-- the session's fonts and UI scale. Answers the context, the environment,
+-- and the action that closes the window, which also cancels the view's
+-- background jobs. Call on the display thread.
+openChildWindow :: SdlOptions -> SdlEnv -> Context -> WindowSettings -> IO (Context, SdlEnv, IO ())
+openChildWindow opts first parent settings = do
+  base <- newPixelContext
+  themeFor <- readIORef (ctxThemeFor parent)
+  ctx <- maybe (withTheme base =<< readIORef (ctxTheme parent)) (\pick -> base <$ followSystemTheme base pick) themeFor
+  forM_ (sdlAppImages opts) $ \(RgbaImage image w h pixels) ->
+    unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
+  fontSource <- sdlFontCacheSource (sdlFontCache first)
+  uiScale <- readIORef (sdlUiScaleRef first)
+  let childOpts =
+        opts
+          { sdlWindowSettings = settings
+          , sdlWindowDecorations = DecorationsFull
+          , sdlWindowAlwaysOnTop = False
+          , sdlAppVsync = False
+          , sdlAppContinuous = False
+          , sdlAppUiScale = uiScale
+          }
+      monoSource = sdlFontCacheMonoSource (sdlFontCache first)
+  -- The window's resources outlive this call, so they are taken out of the
+  -- 'Acquire' by hand and freed by the action answered.
+  let Acquire.Acquire start = startSdlWindow childOpts (windowFlags childOpts) ctx fontSource monoSource (Just first)
+  mask $ \restore -> do
+    Acquire.Allocated (ctx', env) release <- start restore
+    setBackendSession ctx' SSdl env
+    myThreadId >>= writeIORef (ctxLoopThread ctx') . Just
+    pure (ctx', env, release Acquire.ReleaseNormal)
 
 -- | The blend modes a transparent window draws and presents with.
 --

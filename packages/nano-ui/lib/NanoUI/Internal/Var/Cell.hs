@@ -19,6 +19,7 @@ module NanoUI.Internal.Var.Cell
   , addChange
   , orWord
   , nextTick
+  , varChangeCount
   , newStamps
   , passSlot
   , baseSlot
@@ -33,7 +34,7 @@ import Control.Monad (when)
 import Control.Monad.Primitive (RealWorld)
 import Data.Bits (complement, (.&.), (.|.))
 import Data.IORef (IORef, newIORef)
-import Data.Primitive.ByteArray (MutableByteArray (..), newByteArray, writeByteArray)
+import Data.Primitive.ByteArray (MutableByteArray (..), newByteArray, readByteArray, writeByteArray)
 import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, sameMutablePrimArray, setPrimArray, writePrimArray)
 import Data.Word (Word64)
 import GHC.Exts (Int (..), fetchAddIntArray#, (+#))
@@ -195,19 +196,34 @@ changedSince cell base sig = do
 -- one from another thread with a later tick.
 addChange :: Cell s -> Word64 -> Word64 -> Sig -> IO ()
 addChange cell base t sig = do
+  countChange
   chg <- readStamp cell chgSlot
   writeStamp cell chgSlot (max chg t)
   let fresh = chg < base
   when fresh (writeStamp cell (chgSlot + 1) base)
   addBits cell (chgSlot + 2) fresh sig
 
--- | Process-wide monotonic tick counter stored in a single machine word.
+-- | Process-wide monotonic tick counter, then the count of changes any cell
+-- has had ('varChangeCount'), each in a machine word.
 {-# NOINLINE tickClock #-}
 tickClock :: MutableByteArray RealWorld
 tickClock = unsafePerformIO $ do
-  arr <- newByteArray 8
+  arr <- newByteArray 16
   writeByteArray arr 0 (1 :: Int)
+  writeByteArray arr 1 (0 :: Int)
   pure arr
+
+-- | How many changes any cell has had, process-wide. A window that ran its
+-- view when this was lower may show a value since changed, which is how a
+-- backend with several windows knows to run the others' views again.
+varChangeCount :: IO Word64
+varChangeCount = fromIntegral <$> (readByteArray tickClock 1 :: IO Int)
+
+{-# INLINE countChange #-}
+countChange :: IO ()
+countChange = case tickClock of
+  MutableByteArray arr -> IO $ \s -> case fetchAddIntArray# arr 1# 1# s of
+    (# s', _ #) -> (# s', () #)
 
 -- | Atomically increment and return the next tick without boxing an 'IORef'.
 {-# INLINE nextTick #-}

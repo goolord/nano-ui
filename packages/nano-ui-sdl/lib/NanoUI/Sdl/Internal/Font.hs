@@ -22,6 +22,7 @@ module NanoUI.Sdl.Internal.Font
   , destroySdlFontCache
   , reloadSdlFontCache
   , sdlFontCacheSource
+  , sdlFontCacheMonoSource
   , withSdlFontCache
   ) where
 
@@ -954,6 +955,10 @@ dropGlyphTextures cache = do
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource
 sdlFontCacheSource cache = readIORef (sfcSansSourceRef cache)
+
+-- | The monospace family's source.
+sdlFontCacheMonoSource :: SdlFontCache -> FontSource
+sdlFontCacheMonoSource = sfcMonoSource
 
 -- | Close fonts and drop their glyphs from the shared atlas index.
 closeCachedFonts :: GlyphAtlas -> [SdlFont] -> IO ()

@@ -424,7 +424,10 @@ declarative setters (`setWindowTitleUi`, `setWindowModeUi`, ...) are no-ops
 when unchanged — call them unconditionally; imperative commands
 (`resizeWindowUi`, `maximizeWindowUi`, ...) run per call — trigger from
 events. `wsExitOnCloseRequest = False` + `winCloseRequested` + `quitUi` for
-close confirmation. `requestScreenshot`/`askScreenshot`/`useScreenshot` for
+close confirmation. More native windows: `nativeWindow open settings body`
+(SDL only), called every frame like `modal`; each window has its own
+context and frames, shares state through `Var`s (any `Var` change reruns
+every window's view), and `quitUi` in its body closes just that window. `requestScreenshot`/`askScreenshot`/`useScreenshot` for
 pixels. Custom title bars: `sdlWindowDecorations = DecorationsNone`/
 `DecorationsFrame` + `captionButtons`, `dragSpans`, `windowFrame` (ned builds
 its whole own title bar this way).

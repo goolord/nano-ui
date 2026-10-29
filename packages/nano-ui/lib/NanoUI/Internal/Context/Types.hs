@@ -66,6 +66,7 @@ module NanoUI.Internal.Context.Types
   , CustomDrawBuild
   , ThemeScopes (..)
   , intKey
+  , ChildWindow (..)
   ) where
 
 import Control.Concurrent (ThreadId)
@@ -73,7 +74,7 @@ import NanoUI.Internal.Derived (DerivedCache)
 import NanoUI.Internal.Resource (Held)
 import NanoUI.Internal.Host (Host)
 import NanoUI.Internal.BackendSession (SomeBackendSession)
-import NanoUI.Internal.NativeWindow.Types (NativeWindow)
+import NanoUI.Internal.NativeWindow.Types (NativeWindow, WindowSettings)
 import NanoUI.Internal.Sensor.Types (Sensors)
 import NanoUI.Internal.RichText.Types (Paragraphs)
 import Data.HashMap.Strict (HashMap)
@@ -100,9 +101,9 @@ import NanoUI.Internal.Font (CustomMeasureFn, FontMetrics, WrapResult)
 import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Id.Cursor (IdCursor)
-import NanoUI.Internal.Var.Types (SlotVar)
+import NanoUI.Internal.Var.Types (SlotVar, Var)
 import NanoUI.Internal.Image (ImageLook)
-import NanoUI.Internal.Input (Composition, InputPurpose, MouseButton, UiCursorKind)
+import NanoUI.Internal.Input (Composition, Input, InputPurpose, MouseButton, UiCursorKind)
 import NanoUI.Internal.Shortcut (Shortcut)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
@@ -1039,6 +1040,21 @@ data Context = Context
   -- ^ Monotonic time ('GHC.Clock.getMonotonicTime') of the earliest scheduled
   -- wake timer, or 0 for none. Reset to 0 at the start of each frame so active
   -- timers re-register each frame and the loop can sleep until the next timer.
+  , ctxChildWindows :: !(IORef [ChildWindow])
+  -- ^ The open native windows the last view run declared
+  -- ('NanoUI.Internal.ChildWindow.nativeWindow'), newest first. Each run
+  -- starts empty.
+  }
+
+-- | A native window a view declared open this frame, for the backend to open
+-- or keep. The key is the declaring call's widget id. The view is kept run
+-- against a context and input rather than as a 'NanoUI.NanoUI' action,
+-- which this module cannot name.
+data ChildWindow = ChildWindow
+  { childKey :: !WidgetId
+  , childOpen :: !(Var Bool)
+  , childSettings :: !WindowSettings
+  , childRun :: Context -> Input -> IO ()
   }
 
 -- | Convert a widget's hash to its store key. The representation assumes a

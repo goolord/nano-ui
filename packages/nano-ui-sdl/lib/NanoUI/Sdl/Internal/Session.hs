@@ -3,7 +3,7 @@ module NanoUI.Sdl.Internal.Session
   ( runSdlSession
   ) where
 
-import Control.Exception (SomeException, bracket, handle, throwIO)
+import Control.Exception (SomeException, bracket, finally, handle, throwIO)
 import Control.Monad (forM_, unless, void, when)
 import Data.Foldable (traverse_)
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -14,7 +14,7 @@ import NanoUI (WindowSettings (..), followSystemTheme, unlessM, whenM)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
-import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
+import NanoUI.Sdl.Internal.Children
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
 import NanoUI.Sdl.Internal.Runner (resetRenderTextures)
@@ -27,7 +27,7 @@ import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 -- frame and answers whether another is needed; its flag forces a full
 -- repaint.
 runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO Bool) -> IO ()
-runSdlSession options drawFn = do
+runSdlSession options drawSession = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
   forM_ (sdlAppThemeFor options) (followSystemTheme ctx)
@@ -35,6 +35,11 @@ runSdlSession options drawFn = do
   forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
     unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
   withSdl options ctx $ \ctx0 env -> do
+    -- Windows the view opens beside this one ('NanoUI.nativeWindow'). Every
+    -- frame of this window notes when its view began, so a 'Var' another
+    -- window writes later brings it a frame.
+    windows <- newWindows options env
+    let drawFn c e i f = noteMainFrame windows >> drawSession c e i f
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
@@ -96,8 +101,9 @@ runSdlSession options drawFn = do
     -- each batch, until none is left. SDL asks to quit once, so a request
     -- taken here is kept for the loop.
     quitTaken <- newIORef False
-    let settle c inp = do
-          pending <- pollEvents >>= decode
+    let poll = pollWindowEvents >>= routeEvents windows >>= decode
+        settle c inp = do
+          pending <- poll
           when (EvQuit `elem` pending) (writeIORef quitTaken True)
           (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
           if null pending then pure (c', inp') else settle c' inp'
@@ -126,6 +132,9 @@ runSdlSession options drawFn = do
     when (inputWindowSize inp1 /= inputWindowSize inp0b || scaleMoved scale1 scaleSettle || scaleMoved scaleSettle scale0 || inp1 /= clearEphemeral inp1) $
       startupFrame ctx2 inp1
     writeIORef prev inp1
+    -- Open the windows the opening frames declared, which the loop would
+    -- otherwise leave for its first pass, after waiting for input.
+    afterMainPass windows ctx2 inp1
     -- The last opening frame may have asked for another: it marked the
     -- context dirty, which the loop sees by itself, or a wake arrived after
     -- it began, which the drains above took off the queue. Queue that wake
@@ -134,12 +143,15 @@ runSdlSession options drawFn = do
     whenM (readIORef wakeRef) pushRefreshEvent
     let drv =
           SessionDriver
-            { sdPollEvents    = pollEvents >>= decode
-            , sdWaitEvents    = \t ->
+            { sdPollEvents    = poll
+            , sdWaitEvents    = \t -> do
+                -- Further windows can need a pass sooner than this one.
+                other <- windowsWait windows
+                let t' = if t < 0 then other else if other < 0 then t else min t other
                 -- Take the rest of the queue with the event that ended the
                 -- wait, so one pass sees a whole burst (a resize queues
                 -- several window events at once).
-                waitEvent t >>= maybe (pure []) (\ev -> decode . (ev :) =<< pollEvents)
+                waitWindowEvent t' >>= maybe (pure []) (\ev -> routeEvents windows . (ev :) =<< pollWindowEvents) >>= decode
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
             , sdIsSessionQuit = (== EvQuit)
@@ -164,12 +176,13 @@ runSdlSession options drawFn = do
                 presented <- readIORef resizePresented
                 writeIORef resizePresented Nothing
                 wakeDue <- readIORef wakeRef
+                varDue <- mainNeedsFrame windows
                 let !(prevInp', inpSynced') = case presented of
                       Just size
                         | size == inputWindowSize inpSynced ->
                             (prevInp {inputWindowSize = size}, inpSynced {inputWindowRedraw = False})
                       _ -> (prevInp, inpSynced)
-                shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) (refreshDue || wakeDue)
+                shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) (refreshDue || wakeDue || varDue)
             , sdDraw          = \c inpSynced forceFull -> do
                 writeIORef resizePresented Nothing
                 -- Only a frame that runs answers a wake.
@@ -187,7 +200,8 @@ runSdlSession options drawFn = do
                 -- free.
                 when (isNothing drawn) $ whenM (readIORef wakeRef) pushRefreshEvent
                 pure (fromMaybe False drawn)
-            , sdOnCursor      = syncPointerCursor (sdlCursors env)
+              -- Runs after every pass: the further windows' frames go here.
+            , sdOnCursor      = afterMainPass windows
             , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = sdlAppShouldQuit options
             }
@@ -198,4 +212,4 @@ runSdlSession options drawFn = do
     closeNow <- if quit then requestWindowClose ctx2 else pure False
     unless closeNow $
       bracket (installResizeWatch onResize) id $ \_ ->
-        runSessionLoop drv ctx2 inp1
+        runSessionLoop drv ctx2 inp1 `finally` closeWindows windows

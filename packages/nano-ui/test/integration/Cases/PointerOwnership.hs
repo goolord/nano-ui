@@ -277,6 +277,7 @@ runPointerRoutingLintTest _ failed = do
       , "NanoUI/Internal/Widgets/Node.hs" -- routes a floating panel's body and a dropdown's owner
       , "NanoUI/Internal/Widgets/Behavior.hs" -- useDismissable: a press anywhere else dismisses
       , "NanoUI/Internal/Widgets/Popup.hs" -- tooltips: a press anywhere shuts one; one over its target stays
+      , "NanoUI/Internal/ChildWindow.hs" -- a further window's view starts from its frame's input, as a frame does
       ]
     complain msg = putStrLn ("  " <> msg) >> bump failed
     haskellFiles dir = do

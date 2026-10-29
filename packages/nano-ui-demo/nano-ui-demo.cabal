@@ -262,6 +262,11 @@ executable nano-ui-example-overlays
     main-is:          Overlays.hs
     build-depends:    text ^>=2.1
 
+executable nano-ui-example-windows
+    import:           example
+    main-is:          Windows.hs
+    build-depends:    text ^>=2.1
+
 executable nano-ui-example-theming
     import:           example
     main-is:          Theming.hs

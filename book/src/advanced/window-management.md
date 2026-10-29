@@ -26,7 +26,7 @@ Inside the view:
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:maximize}}
 ```
 
-`quitUi` ends the session; there is no separate "close window" command.
+`quitUi` ends the session; there is no separate "close window" command. In a window opened with `nativeWindow` (below), it closes that window instead.
 
 ## Close requests
 
@@ -37,6 +37,20 @@ By default the window closes as soon as the platform asks it to. To confirm unsa
 ```
 
 `askWindow` reports the window's current state, including size, scale, maximized/fullscreen flags, and the close request. [Build a Notepad](../tutorials/notepad.md) wires this to a confirmation modal.
+
+## More windows
+
+`nativeWindow` opens another native window, with its own view, while a `Var Bool` holds `True`. Like `modal`, call it every frame, and the window's close button writes `False`:
+
+```haskell
+{{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:native_window}}
+```
+
+The new window has its own focus, widget state, `useVar` slots and frames. It starts with the declaring view's theme; the settings take effect when it opens, so change its title or theme later from its own view. A window's view can open further windows the same way.
+
+Share state between windows through `Var`s. When a `Var` changes, every open window runs its view again on its next frame, so typing in one window shows in another. The body runs in the new window's frames, not the declaring view's, so a plain value it closes over is the one from the declaring view's last frame. Read state with `readVar` inside the body instead.
+
+An app that never calls `nativeWindow` pays nothing for it. With several windows open, a `Var` write costs each other window one run of its view (with no repaint if nothing it shows changed), and every window keeps its own glyph and image textures. Only the SDL backend opens these windows; under RGFW and in tests the call does nothing. On Windows, a window being resized does not redraw the others until the drag ends. `nano-ui-example-windows` shows three windows sharing state.
 
 ## Custom title bars
 

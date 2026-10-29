@@ -8,6 +8,8 @@ module NanoUI.Sdl.Internal.Input
   ( SdlEvent (..)
   , pollEvents
   , waitEvent
+  , pollWindowEvents
+  , waitWindowEvent
   , applyEvent
   , isButtonEdge
   , scaleEventPositions
@@ -152,29 +154,53 @@ data SdlEvent
   | EvFocusLost
   -- ^ The window lost keyboard focus. Held keys are released
   -- ('releaseAllKeys') and the composition ends.
+  | EvCloseRequested
+  -- ^ The desktop asked to close one window. With one window open SDL asks
+  -- to quit as well ('EvQuit'), which is what ends a session; with more, it
+  -- is how a window learns it should close.
   deriving (Eq, Show)
 
 -- | Drain every pending event, oldest first.
 pollEvents :: IO [SdlEvent]
-pollEvents =
-  alloca $ \(p :: Ptr SDL_Event) -> do
-    refreshTy <- refreshEventType
-    let drain acc = do
-          got <- pollEventSafe p
-          if got
-            then decodeEvent refreshTy p >>= \ev -> drain (maybe acc (: acc) ev)
-            else pure (reverse acc)
-    drain []
+pollEvents = map snd <$> pollWindowEvents
 
 -- | Wait for one native event, for up to the supplied milliseconds or, when
 -- negative, for as long as it takes. 'Nothing' covers a timeout, an SDL
 -- failure and an ignored event, so it does not imply a quit request. Call
 -- from the display thread.
 waitEvent :: Int -> IO (Maybe SdlEvent)
-waitEvent ms =
+waitEvent ms = fmap snd <$> waitWindowEvent ms
+
+-- | 'pollEvents', each event with the SDL id of the window it is for, or 0
+-- for one that is for every window (a wake, a quit, a theme change).
+pollWindowEvents :: IO [(Word32, SdlEvent)]
+pollWindowEvents =
+  alloca $ \(p :: Ptr SDL_Event) -> do
+    refreshTy <- refreshEventType
+    let drain acc = do
+          got <- pollEventSafe p
+          if got
+            then decodeWindowEvent refreshTy p >>= \ev -> drain (maybe acc (: acc) ev)
+            else pure (reverse acc)
+    drain []
+
+-- | 'waitEvent' with the event's window id, as 'pollWindowEvents' gives it.
+waitWindowEvent :: Int -> IO (Maybe (Word32, SdlEvent))
+waitWindowEvent ms =
   alloca $ \p -> do
     got <- if ms < 0 then waitEventSafe p else waitEventTimeoutSafe p (fromIntegral ms)
-    if got then refreshEventType >>= \ty -> decodeEvent ty p else pure Nothing
+    if got then refreshEventType >>= \ty -> decodeWindowEvent ty p else pure Nothing
+
+-- | 'decodeEvent' with the window id. Every event decoded for one window
+-- (window, keyboard, text, mouse, drop and render events) keeps it right
+-- after the common header, at the same offset in each.
+decodeWindowEvent :: Word32 -> Ptr SDL_Event -> IO (Maybe (Word32, SdlEvent))
+decodeWindowEvent refreshTy p =
+  decodeEvent refreshTy p >>= traverse (\case
+    EvQuit -> pure (0, EvQuit)
+    EvRefresh -> pure (0, EvRefresh)
+    EvSystemThemeChanged -> pure (0, EvSystemThemeChanged)
+    ev -> (,ev) <$> peekByteOff p 16)
 
 -- | Translate one SDL event, given the refresh event type; 'Nothing' for
 -- events the UI ignores. A lost render device, which ends the session,
@@ -210,6 +236,7 @@ decodeEvent refreshTy p = do
       -- can drop the composition silently. End it here, or a field would
       -- keep showing it and routing keys to it.
       Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just EvFocusLost)
+      Events.SDL_EVENT_WINDOW_CLOSE_REQUESTED -> pure (Just EvCloseRequested)
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
         Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
@@ -362,6 +389,7 @@ applyEvent inp ev =
     -- damage decides what is presented, if anything.
     EvRefresh -> inp
     EvQuit -> inp
+    EvCloseRequested -> inp
     EvWindowChanged -> inp
     EvSystemThemeChanged -> inp
 

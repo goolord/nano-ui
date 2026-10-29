@@ -8,6 +8,7 @@ module NanoUI.Runner
   , tryWithDrawingLock
     -- * Redraw Decision
   , shouldRedrawFrame
+  , stampClicks
     -- * Session loop
   , SessionDriver (..)
   , DebugSamplerRef

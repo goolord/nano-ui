@@ -322,6 +322,20 @@ module NanoUI.Backend
   , clearWindowClose
   , quitRequested
 
+    -- ** More windows
+
+    -- | A view declares further windows with 'NanoUI.nativeWindow'. After a
+    -- frame, 'childWindows' lists those the view declared open; a backend
+    -- opens a window for each new key, runs 'childView' as its view on a
+    -- context of its own, and closes windows whose key stopped appearing.
+    -- Each window's loop also runs its view when 'varChangeCount' has moved
+    -- since that view last began, so a 'NanoUI.Var' written in one window
+    -- shows in the others.
+  , ChildWindow (..)
+  , childWindows
+  , childView
+  , varChangeCount
+
     -- * Background work
 
     -- | Background jobs (@useTaskStatus@, @useTask@, @useStream@) and
@@ -361,6 +375,8 @@ import NanoUI.Internal.Context
   , withBackendSession, backendSession
   )
 import NanoUI.Internal.Frame (runFrame)
+import NanoUI.Internal.ChildWindow (ChildWindow (..), childView, childWindows)
+import NanoUI.Internal.Var.Cell (varChangeCount)
 import NanoUI.Internal.Frame.Spans (collectRasterSpans)
 import NanoUI.Internal.Frame.Cursor (uiCursorKind)
 import NanoUI.Internal.Damage (damagePieces)

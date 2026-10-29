@@ -22,6 +22,7 @@ tests =
   , spec "native-window-screenshot-lifecycle" runScreenshotLifecycleTest
   , spec "native-window-setters" runSettersTest
   , spec "native-window-commands-and-state" runCommandsTest
+  , spec "native-window-children" runChildrenTest
   ]
 
 type instance BackendSession ('Custom "test") = Int
@@ -311,3 +312,31 @@ runCommandsTest ctx failed = do
   _ <- runFrame c inp ui
   assertEq failed DamageFull =<< takeDamage c
 
+-- | A view declares a further window while its 'Var' holds 'True', under the
+-- same key each frame; the declared view runs on a context of its own. A
+-- changing write counts as a change, an equal one does not.
+runChildrenTest :: Context -> IORef Int -> IO ()
+runChildrenTest ctx failed = do
+  open <- newVar False
+  ran <- newIORef (0 :: Int)
+  let body = liftIO (modifyIORef' ran (+ 1))
+      view = label "first" >> nativeWindow open defaultWindowSettings {wsTitle = "second"} body
+      declared = runFrame ctx inp view >> childWindows ctx
+  assertEq failed 0 . length =<< declared
+  before <- varChangeCount
+  writeVarIO open True
+  afterOpen <- varChangeCount
+  writeVarIO open True
+  afterSame <- varChangeCount
+  assertEq failed (True, afterOpen) (afterOpen > before, afterSame)
+  first <- declared
+  again <- declared
+  assertEq failed [("second", True)] [(wsTitle (childSettings c), True) | c <- first]
+  assertEq failed (map childKey first) (map childKey again)
+  assertEq failed 0 =<< readIORef ran
+  other <- newContext
+  forM_ first $ \c -> runFrame other inp (childView c)
+  assertEq failed 1 =<< readIORef ran
+  assertEq failed 0 . length =<< childWindows other
+  writeVarIO open False
+  assertEq failed 0 . length =<< declared

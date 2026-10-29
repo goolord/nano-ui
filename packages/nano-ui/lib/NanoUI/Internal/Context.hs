@@ -7,6 +7,7 @@
 module NanoUI.Internal.Context
   ( Context (..)
   , withBackendSession
+  , setBackendSession
   , backendSession
   , frameNumber
   , module NanoUI.Internal.Context.Core
@@ -611,6 +612,7 @@ newContext = do
   ctxWakePending <- newIORef False
   ctxLoopThread <- newIORef Nothing
   ctxWakeAt <- newIORef 0
+  ctxChildWindows <- newIORef []
   ctxTheme <- newIORef defaultTheme
   ctxThemeScopes <- newIORef =<< newThemeScopes
   ctxSystemAppearance <- newIORef Nothing
@@ -755,6 +757,11 @@ withBackendSession ctx backend session act =
     (const act)
   where
     slot = ctxBackendSession ctx
+
+-- | 'withBackendSession' for a session that ends with its context rather
+-- than a scope, such as a further window's.
+setBackendSession :: Context -> SBackend b -> BackendSession b -> IO ()
+setBackendSession ctx backend session = setHost (ctxBackendSession ctx) (SomeBackendSession backend session)
 
 -- | The session value of the backend driving this context, if it is the
 -- backend asked for.
