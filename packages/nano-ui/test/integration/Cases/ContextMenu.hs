@@ -10,7 +10,7 @@ import NanoUI.Testing.Sim
 tests :: [Spec]
 tests =
   [ simSpec "context-menu-open" 640 480 menuUi contextMenuOpen
-  , simSpec "context-menu-scroll-pos" 200 200 scrolledMenuUi contextMenuScrollPos
+  , simSpec "overlay-scroll-pos" 200 200 scrolledUi overlayScrollPos
   , simSpec "context-menu-rows" 640 480 rowsUi contextMenuRows
   , simSpec "context-menu-taller-than-window" 400 300 tallUi contextMenuTall
   , simSpec "menu-button-popup-toggle" 400 300 dropDownUi menuButtonToggle
@@ -42,31 +42,38 @@ contextMenuOpen = do
   _ <- pressButton MouseRight (At (V2 500 400))
   checkEq False . isJust . snd =<< releaseButton MouseRight
 
-scrolledMenuUi :: NanoUI (WidgetId, (Response, Maybe Bool))
-scrolledMenuUi = scrollArea (fillW . fixedH 80) $ column $ do
+scrolledUi :: NanoUI (WidgetId, (Response, Maybe Bool))
+scrolledUi = scrollArea (fillW . fixedH 80) $ column $ do
   replicateM_ 40 (label "pad line")
-  btn <- button' "Menu Target"
+  btn <- button' "Target"
+  tooltipConfigured defaultTooltipConfig {tooltipDelay = 0} btn "Scrolled tip"
   cut <- contextMenu btn (menuItem "Scroll Cut")
   replicateM_ 12 (label "tail line")
   pure (btn, cut)
 
--- | A menu opened in a scrolled area appears at the pointer, not at the
--- target's unscrolled layout position, and picking a row closes it.
-contextMenuScrollPos :: Sim (WidgetId, (Response, Maybe Bool)) ()
-contextMenuScrollPos = do
+-- | A tooltip and a menu on a button in a scrolled area appear where it is
+-- drawn, not at its unscrolled layout position: the tip under the button,
+-- the menu at the pointer. Picking a row closes the menu.
+overlayScrollPos :: Sim (WidgetId, (Response, Maybe Bool)) ()
+overlayScrollPos = do
   (sid, _) <- result
-  ctx <- simContext
-  let scrollToTarget n = do
-        (_, (btn, _)) <- result
-        Rect _ sy _ sh <- maybe (Rect 0 0 0 0) id <$> liftIO (getPrevRect ctx sid)
-        let Rect _ by _ bh = respRect btn
-        unless (n == (0 :: Int) || (by >= sy + 4 && by + bh + 8 <= sy + sh)) $
-          wheel (OnWidget sid) (V2 0 1) >> settle >> scrollToTarget (n - 1)
-  scrollToTarget 200
+  -- Wheel a notch at a time until the button shows with room below it.
+  let intoView n = do
+        Rect _ sy _ sh <- prevRect sid
+        Rect _ by _ bh <- respRect . fst . snd <$> result
+        unless (n == (0 :: Int) || (by >= sy + 4 && by + bh + 16 <= sy + sh)) $
+          wheel (OnWidget sid) (V2 0 1) >> settle >> intoView (n - 1)
+  intoView 200
   (_, (btn, _)) <- result
   off <- scrollOffsetOf sid
   checkGt off 0
   let p = centerOf btn
+      bottom = rectY (respRect btn) + rectH (respRect btn)
+  -- Hover first: any press closes the tip.
+  _ <- moveTo (At p) >> settle
+  tipY <- rectY <$> rectOf "Scrolled tip"
+  check (abs (tipY - bottom) <= 16)
+  check (abs (tipY - bottom) < abs (tipY - (bottom + off)))
   openOn (At p)
   cut <- rectOf "Scroll Cut"
   check (abs (rectY cut - v2Y p) <= 16)

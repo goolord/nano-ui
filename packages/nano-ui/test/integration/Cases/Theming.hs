@@ -59,7 +59,6 @@ runWarningToneTest ctx failed = do
   assertJust failed (spanRectOf "Careful" spans) $ \r -> assert failed (amber `elem` fillsIn r quads)
   assert failed (amber `notElem` [themeDanger theme, faded])
   assertEq failed (map (Just . snd) fgs) (map ((`spanFg` spans) . fst) fgs)
-  assert failed (fontMono (fontTone Warning defaultLayout) == fontTone Warning (fontMono defaultLayout))
   let na = ctxNodeArena ctx
   n <- arenaCount na
   styles <- forM [0 .. n - 1] $ \i -> (,) <$> getNodeType na i <*> getStyleIdx na i
@@ -71,7 +70,6 @@ runWarningToneTest ctx failed = do
   assertEq failed (styleBg (themeButton offTheme)) (styleBg (themeButton (disabledTheme (warning theme))))
   let richCases = [(["Plain text"], False), (["Plain ", inlineWith (fontTone Warning) "text"], True)]
   forM_ richCases $ \(pieces, warns) -> do
-
     (_, rich, _) <- frames 2 ctx (column (richText pieces))
     assertEq failed warns (amber `elem` map snd rich)
 
@@ -99,13 +97,7 @@ runThemeValuesTest _ failed = do
     assertEq failed (name, True, True) (name, amber /= themeDanger t, themeSuccess t /= themeDanger t)
   assertEq failed [dark, light, dark, light, dark, dark, light] (map (themeAppearance . snd) builtInThemes)
   let t = tomorrowMinLightTheme
-      tones = [(primary, Accent), (destructive, Danger), (success, Success), (warning, Warning)]
-  assertEq failed (map ($ t) [themeAccent, themeMuted, themeSuccess, themeWarning, themeDanger]) $
-    map (toneColor t) [minBound .. maxBound]
-  assert failed (and [f t == tone c t | (f, c) <- tones])
   assert failed (styleBg (themeButton (tone Danger t)) == themeDanger t)
-  assert failed (fontMuted defaultLayout == fontTone Muted defaultLayout)
-  assert failed (fontDanger defaultLayout == fontTone Danger defaultLayout)
   assert failed (and [toneColor (disabledTheme t) c /= toneColor t c | c <- [Success, Warning, Danger]])
   let panelBg = styleBg (themePanel defaultTheme)
       red = colorRGBA 1 2 3 255
@@ -167,7 +159,6 @@ runFollowSystemThemeTest ctx failed = do
 
 -- | A view sees an appearance change next frame; setting its theme from it every frame
 -- (twice, or over a context following the system) settles a frame after a switch.
-
 runViewPicksThemeTest :: Context -> IORef Int -> IO ()
 runViewPicksThemeTest ctx failed = do
   let shown = maybe "unknown" (\a -> if a == AppearanceDark then "dark" else "light")

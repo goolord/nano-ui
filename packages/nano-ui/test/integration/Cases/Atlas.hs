@@ -16,9 +16,9 @@ tests =
   , spec "atlas-release" runAtlasReleaseTest
   ]
 
--- | Register a @w@ x @h@ image of one repeated pixel.
-insert :: Context -> Int -> Int -> Int -> BS.ByteString -> IO Bool
-insert ctx tid w h px = registerImage ctx (ImageId tid) w h (BS.concat (replicate (w * h) px))
+-- | Register a @w@ x @h@ image whose every byte is @v@.
+insert :: Context -> Int -> Int -> Int -> Word8 -> IO Bool
+insert ctx tid w h v = registerImage ctx (ImageId tid) w h (BS.replicate (w * h * 4) v)
 
 solid :: Int -> BS.ByteString
 solid v = BS.replicate 4 (fromIntegral v)
@@ -48,28 +48,29 @@ origin ctx tid = fmap fst <$> corners ctx tid
 runAtlasGrowthTest :: Context -> IORef Int -> IO ()
 runAtlasGrowthTest ctx failed = do
   let (red, blue) = (BS.pack [255, 0, 0, 255], BS.pack [0, 0, 255, 255])
+      paint tid w h px = registerImage ctx (ImageId tid) w h (BS.concat (replicate (w * h) px))
       checkPixel tid want = corners ctx tid >>= maybe (fail "missing image UV") (\((x0, y0), (x1, y1)) ->
         forM_ [(x, y) | x <- [x0, x1 - 1], y <- [y0, y1 - 1]] $ \(x, y) -> pixelAt ctx x y >>= assertEq failed want)
-  insert ctx 1 2 2 red >>= assert failed
+  paint 1 2 2 red >>= assert failed
   initialUv <- lookupImageUv ctx (ImageId 1)
-  assert failed . and =<< sequence [insert ctx 2 300 3 blue, insert ctx 3 400 1 red]
+  assert failed . and =<< sequence [paint 2 300 3 blue, paint 3 400 1 red]
   grownUv <- lookupImageUv ctx (ImageId 1)
   assert failed (initialUv /= grownUv)
   mapM_ (uncurry checkPixel) [(1, red), (2, blue), (3, red)]
-  insert ctx 1 2 2 blue >>= assert failed
+  paint 1 2 2 blue >>= assert failed
   lookupImageUv ctx (ImageId 1) >>= assertEq failed grownUv
   mapM_ (uncurry checkPixel) [(1, blue), (2, blue)]
   before <- atlasSnapshot ctx
-  insert ctx 1 3 2 red >>= assert failed . not
+  paint 1 3 2 red >>= assert failed . not
   atlasSnapshot ctx >>= assertEq failed before
   full <- newContext
-  insert full 1 1 3000 (solid 255) >>= assert failed
+  insert full 1 1 3000 255 >>= assert failed
   fullBefore <- atlasSnapshot full
-  insert full 2 4094 1100 (solid 0) >>= assert failed . not
+  insert full 2 4094 1100 0 >>= assert failed . not
   atlasSnapshot full >>= assertEq failed fullBefore
   lookupImageUv full (ImageId 2) >>= assertEq failed Nothing
   wide <- newContext
-  let go n = insert wide n 100 100 (solid 9) >>= \ok -> if ok && n <= 1000 then go (n + 1) else pure n
+  let go n = insert wide n 100 100 9 >>= \ok -> if ok && n <= 1000 then go (n + 1) else pure n
   placed <- go 1
   assertGt failed placed 900
 
@@ -77,7 +78,7 @@ runAtlasGrowthTest ctx failed = do
 -- atlas grew or the writes are too far back to know.
 runAtlasChangesTest :: Context -> IORef Int -> IO ()
 runAtlasChangesTest ctx failed = do
-  let put tid w h = insert ctx tid w h (solid 7) >>= assert failed
+  let put tid w h = insert ctx tid w h 7 >>= assert failed
       upload since want = (fmap (\(_, _, _, gen, u) -> (gen, u)) <$> atlasChanges ctx since) >>= assertEq failed want
   upload 0 Nothing
   put 1 8 8
@@ -104,12 +105,12 @@ runAtlasChangesTest ctx failed = do
 -- Releasing an image on screen repaints it as the placeholder.
 runAtlasReleaseTest :: Context -> IORef Int -> IO ()
 runAtlasReleaseTest ctx failed = do
-  mapM_ (\(tid, w, v) -> insert ctx tid w w (solid v) >>= assert failed) [(1, 8, 200), (2, 4, 100)]
+  mapM_ (\(tid, w, v) -> insert ctx tid w w v >>= assert failed) [(1, 8, 200), (2, 4, 100)]
   Just (x, y) <- origin ctx 1
   sizeBefore <- (\(w, h, _, _) -> (w, h)) <$> snapshot ctx
   releaseImage ctx (ImageId 1)
   lookupImageUv ctx (ImageId 1) >>= assertEq failed Nothing
-  insert ctx 3 6 6 (solid 50) >>= assert failed
+  insert ctx 3 6 6 50 >>= assert failed
   origin ctx 3 >>= assertEq failed (Just (x, y))
   (\(w, h, _, _) -> (w, h)) <$> snapshot ctx >>= assertEq failed sizeBefore
   forM_ [(x + 6, y), (x + 6, y + 5), (x, y + 6), (x + 6, y + 6)] $ \(px, py) -> pixelAt ctx px py >>= assertEq failed (solid 0)
@@ -117,25 +118,25 @@ runAtlasReleaseTest ctx failed = do
   (\(_, _, _, g) -> g) <$> snapshot ctx >>= atlasChanges ctx . subtract 1
     >>= assertEq failed (Just (AtlasRegions [(x - 1, y - 1, 8, 8)])) . fmap (\(_, _, _, _, u) -> u)
   -- The leftover strip is too thin for a 4x4 image, so it goes on a shelf.
-  insert ctx 4 4 4 (solid 60) >>= assert failed
+  insert ctx 4 4 4 60 >>= assert failed
   origin ctx 4 >>= assert failed . (/= Just (x, y))
   releaseImage ctx (ImageId 4)
   fresh <- evalUi ctx (withInput 100 100) freshImageId
   assert failed (fresh > ImageId 4)
   merged <- newContext
-  insert merged 1 100 100 (solid 9) >>= assert failed
+  insert merged 1 100 100 9 >>= assert failed
   first <- origin merged 1
   releaseImage merged (ImageId 1)
   forM_ [(2, 60, 100, 3), (4, 99, 99, 5)] $ \(small, w, h, large) -> do
-    insert merged small w h (solid 9) >>= assert failed
+    insert merged small w h 9 >>= assert failed
     releaseImage merged (ImageId small)
-    insert merged large 100 100 (solid 9) >>= assert failed
+    insert merged large 100 100 9 >>= assert failed
     origin merged large >>= assertEq failed first
     releaseImage merged (ImageId large)
   shown <- newContext
   let inp = withInput 200 100
       ui = image (fixedWH 20 20) (ImageId 1)
-  insert shown 1 2 2 (solid 255) >>= assert failed
+  insert shown 1 2 2 255 >>= assert failed
   replicateM_ 3 (runFrame shown inp ui)
   assert failed . (/= DamageFull) =<< takeDamage shown
   clearDirty shown
