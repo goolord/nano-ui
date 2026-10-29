@@ -20,16 +20,10 @@ tests =
   , spec "wake-after" runWakeAfterTest
   ]
 
--- | Tweens, delays and springs reach the values they should and then leave
--- the loop asleep. A light or stiff spring stays near its range at a low
--- frame rate (a fixed 1/30 s step ran one this fast off toward 1e21, then
--- NaN), and so does one stepped by a two-second frame. A spring toward 1500
--- lands on it: integrating its absolute position, where a float steps by
--- about 1e-4, froze it a few steps short with its velocity above the settle
--- threshold, running for good. A tween settles on its target, clean; a
--- delayed one holds its start until the delay ends, and declarative tweens
--- stagger the same way per key. A retargeted spring carries on from where
--- it was.
+-- | Tweens, delays and springs reach their values and let the loop sleep. A
+-- fast spring at a low frame rate stays in range (a fixed 1/30 s step sent
+-- it to NaN), and one toward 1500 lands (integrating its absolute position
+-- froze it short, running for good). A retargeted spring carries on.
 runAnimationValuesTest :: Context -> IORef Int -> IO ()
 runAnimationValuesTest ctx failed = do
   let near tol want v = abs (v - want) <= tol
@@ -79,12 +73,9 @@ runAnimationValuesTest ctx failed = do
   v <- value (WidgetId 403)
   assert failed (not (isNaN v || isInfinite v || v < 0 || v > 1.5))
 
--- | A settled 'animateTo' value holds its target for as long as the view
--- reads it. Its key has no node, and resting values were once dropped after
--- 300 frames without a widget rect, so it read 0 again and animated back up.
--- One the view skips for a few frames comes back settled; one no view reads
--- for long enough is dropped, and animates in from 0 like a new one. The key
--- keeps the label from taking the value's id while it is hidden.
+-- | A settled 'animateTo' value with no node holds its target while read
+-- (resting values were once dropped after 300 rectless frames), comes back
+-- settled after a short skip, and starts over after a long one.
 runAnimateToStaysSettledTest :: Context -> IORef Int -> IO ()
 runAnimateToStaysSettledTest ctx failed = do
   let inp = withDelta 200 100 0.05
@@ -100,9 +91,8 @@ runAnimateToStaysSettledTest ctx failed = do
   replicateM_ 700 (runFrame ctx inp (ui False))
   assert failed . near 0 =<< evalUi ctx inp (ui True)
 
--- | A tween that moves a label repaints where the label was and where it went,
--- also when the tween starts and finishes within one frame. At rest it
--- repaints nothing of its own.
+-- | A tween moving a label repaints its old and new rects, also one that
+-- starts and ends in a frame.
 runAnimationDamageTest :: Context -> IORef Int -> IO ()
 runAnimationDamageTest ctx0 failed = do
   ctx1 <- newContext
@@ -122,10 +112,9 @@ runAnimationDamageTest ctx0 failed = do
         assertGt failed (rectX new) (rectX old)
         assert failed (damageCovers dmg old && damageCovers dmg new)
 
--- | Easing curves hit their ends and bend the right way. Each composite
--- animation owns a scope: component indices alone are not unique when two
--- vectors animate side by side in one parent. Colour channels clamp. Tweens
--- and springs of vectors both settle and stop asking for frames.
+-- | Easing curves hit their ends and bend the right way, colour channels
+-- clamp, and two vectors animating side by side keep their own channels
+-- (indices alone collide), settling under tweens and springs.
 runCompositeAnimationIsolationTest :: Context -> IORef Int -> IO ()
 runCompositeAnimationIsolationTest _ failed = do
   let out = EaseCubicBezier 0 0 0.58 1
@@ -150,8 +139,7 @@ runCompositeAnimationIsolationTest _ failed = do
     assert failed . not =<< anyAnimating ctx
     assert failed . not =<< needsRedraw ctx inp inp
 
--- | Hovering a button eases its highlight in without dipping, and a press and
--- release over it leaves the hover animation fully on.
+-- | A button's hover eases in without dipping and stays on through a click.
 runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
 runButtonHoverAnimTest ctx failed = do
   let inp0 = withDelta 200 100 0.016
@@ -186,11 +174,9 @@ runSpinnerTest ctx failed = do
     DamageFull -> assert failed False
   assert failed . (arc quads0 /=) . arc =<< drawQuads draw1
 
--- | An animation the view stops building stops drawing frames, since nothing
--- reads it, and runs again when shown again: a spinner whose 'keepAnimating'
--- would otherwise hold the loop at the display rate for good, and a long
--- tween or an undamped spring behind a tab switch, which once kept drawing
--- for minutes or for good.
+-- | An animation the view stops building stops drawing frames and runs again
+-- when shown: a spinner's 'keepAnimating', and a long tween or undamped
+-- spring behind a tab switch, which once drew for minutes or for good.
 runAnimationLeftOutTest :: Context -> IORef Int -> IO ()
 runAnimationLeftOutTest _ failed = do
   let tweenAndSpring = do
@@ -209,11 +195,8 @@ runAnimationLeftOutTest _ failed = do
     _ <- runFrame ctx inp shown
     assert failed =<< anyAnimating ctx
 
--- | A 'keepAnimating' lease is not the widget's value. A spring on the key
--- starts from the resting value, and setting the value keeps the lease and
--- repaints. The lease once read as a running animation at about 0: the
--- spring started from 0, and a set dropped the lease without a repaint, so
--- the loop stopped.
+-- | A 'keepAnimating' lease is not the widget's value: a spring on the key
+-- starts from the resting value, and a set keeps the lease and repaints.
 runKeepAnimatingRestTest :: Context -> IORef Int -> IO ()
 runKeepAnimatingRestTest ctx failed = do
   let inp = withDelta 200 100 0.05
@@ -231,9 +214,8 @@ runKeepAnimatingRestTest ctx failed = do
   assert failed =<< anyAnimating ctx
   assert failed =<< needsRedraw ctx hover hover
 
--- | A drawing without a version rebuilds while it animates, and on the frame
--- its animation ends, whose view drew it again (here, stopped). That frame
--- once replayed the last animated frame's ops, which then stayed on screen.
+-- | An unversioned drawing rebuilds on the frame its animation ends, which
+-- once replayed the last animated frame's ops for good.
 runDrawingAnimationEndTest :: Context -> IORef Int -> IO ()
 runDrawingAnimationEndTest ctx failed = do
   let inp = withDelta 200 100 0.016
@@ -247,8 +229,7 @@ runDrawingAnimationEndTest ctx failed = do
   quads <- map snd <$> drawQuads draw
   assert failed (stopped `elem` quads && running `notElem` quads)
 
--- | 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
--- a frame that does not ask again leaves nothing pending.
+-- | 'wakeAfter' schedules one frame, the earliest request winning.
 runWakeAfterTest :: Context -> IORef Int -> IO ()
 runWakeAfterTest ctx failed = do
   let inp = withDelta 200 100 0.016

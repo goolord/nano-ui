@@ -27,12 +27,9 @@ tests =
   , spec "wrap-and-truncate" runWrapTruncateTest
   ]
 
--- | Wrapping drops the spaces at a break but keeps indentation and runs of
--- spaces inside a line, which code needs. Breaking a word by character, or
--- cutting text short, keeps a character with its marks, a joined emoji and
--- a flag whole: a cut that would part them moves back before the character,
--- or past it when it is the first. A cut never makes text wider than the
--- room: a first character that leaves no room for the dots goes without.
+-- | Wrapping keeps indentation and inner runs of spaces; breaks and cuts keep
+-- marks, joined emoji and flags whole; a cut never overflows, dropping the
+-- dots when only a first character fits.
 runWrapTruncateTest :: Context -> IORef Int -> IO ()
 runWrapTruncateTest ctx failed = do
   let flags = "\x1F1FA\x1F1F8\x1F1EB\x1F1F7"
@@ -55,10 +52,8 @@ runWrapTruncateTest ctx failed = do
     ]
     $ \(fm, w, txt, want) -> assertEq failed want =<< evalUi ctx (withInput 100 100) (truncateTextUi fm w txt)
 
--- | A wrap holds for every width from its widest fitting line up to, not
--- including, its break width: the wrap cache hands it out for all of them.
--- Characters of different widths, words broken by character, forced single
--- characters, blank paragraphs and runs of spaces.
+-- | A wrap holds for every width from its widest line up to its break width,
+-- since the wrap cache hands it out for all of them.
 runWrapBoundsTest :: Context -> IORef Int -> IO ()
 runWrapBoundsTest _ failed = do
   let charW :: Char -> Float
@@ -102,11 +97,9 @@ snapshotDraw draw = do
 drawnBy :: Context -> Input -> NanoUI a -> IO (BS.ByteString, BS.ByteString, [DrawCmd])
 drawnBy c inp ui = runFrame c inp ui >>= \(_, dd, _) -> snapshotDraw dd
 
--- | Contexts derived with other text measures share their parent's mutable
--- caches but lay out with their own measures, also on returning to one (an
--- incremented pure revision would collide there). Each font modifier draws
--- what a fresh context with it draws, and a new default size, which no diff
--- sees, repaints whole.
+-- | Contexts derived with other measures share their parent's caches yet lay
+-- out with their own (an incremented revision would collide on returning);
+-- each font modifier draws as a fresh context does; a new size repaints.
 runMetricCacheInvalidationTest :: Context -> IORef Int -> IO ()
 runMetricCacheInvalidationTest ctx failed = do
   let inp = withInputOff 400 300
@@ -156,8 +149,8 @@ header ctx ax x y = liftIO $ do
   setNodeText na i "Header"
   setStyleIdx na i 0x80000000
 
--- | At each snap scale, a new alignment places the header afresh, and moving
--- its parent reuses the text cache yet draws what a cold placement draws.
+-- | At each snap scale a new alignment places afresh, and a moved parent
+-- reuses the text cache yet draws as a cold placement.
 runWidgetPlacementCacheTest :: Context -> IORef Int -> IO ()
 runWidgetPlacementCacheTest _ failed =
   forM_ [1, 1.5, 2] $ \scale -> do
@@ -179,9 +172,7 @@ runWidgetPlacementCacheTest _ failed =
       clearMeasureCache fresh
       assertEq failed moved =<< drawn fresh AlignEnd x y
 
--- | A layout cache hit keeps the frame's own paint state: a slider value and
--- colours change the drawing without a new layout, and draw what a cold
--- layout draws.
+-- | A layout cache hit keeps the frame's own paint state, as a cold layout.
 runLayoutPaintStateTest :: Context -> IORef Int -> IO ()
 runLayoutPaintStateTest ctx failed = do
   let inp = withInputOff 400 300
@@ -204,12 +195,9 @@ runLayoutPaintStateTest ctx failed = do
   writeIORef (ctxLayoutCache ctx) Nothing
   assertEq failed changed =<< drawn 0.8 (colorRGBA 0 0 255 255)
 
--- | A full frame with no damage, built from the same view output as the
--- last, returns the last frame's draw data itself, unpainted. A change to
--- paint state alone (a box's colour, a slider's value, a font colour, an
--- image or its look) still draws the change; a custom drawing on a
--- container paints again, as does every frame with reuse off, the layout
--- overlay on, or a clip.
+-- | A full undamaged frame of unchanged view output returns the last draw
+-- data itself; paint-state changes still draw. Container drawings, reuse
+-- off, the layout overlay and clip frames always paint.
 runDrawReuseTest :: Context -> IORef Int -> IO ()
 runDrawReuseTest ctx failed = do
   let px = BS.replicate (4 * 4 * 4) 200
@@ -262,12 +250,9 @@ runDrawReuseTest ctx failed = do
     $ \(off, on) -> off >> check base base False >> on
   check base base True
 
--- | A continuous session: every frame paints in full and the host does not
--- read damage ('ctxDamageWanted' off around each frame, as the SDL runner
--- sets it). Every frame draws what a context that never reuses draws. A
--- hover, a focus move, each step of an animation drawn by a drawing alone or
--- moving a widget, and each wheel notch paint again; idle frames, and those
--- after a change settles, return the last frame's draw data.
+-- | In a continuous session not reading damage (as the SDL runner), each
+-- frame draws what a never-reusing context draws: hovers, focus, animation
+-- steps and wheel notches paint, settled frames reuse.
 runContinuousDrawReuseTest :: Context -> IORef Int -> IO ()
 runContinuousDrawReuseTest ctx failed = do
   ref <- newContext
@@ -325,8 +310,7 @@ runContinuousDrawReuseTest ctx failed = do
   assert failed . all repainted =<< steps 3 wheel (1, 1)
   assert failed . paintsThenSettles =<< steps 12 wheel {inputScroll = V2 0 0} (1, 1)
 
--- | A frame that changes only a wrapping label's container width measures
--- the label again, rather than restoring the size it wrapped to before.
+-- | A wrapping label measures again when only its container's width changes.
 runPartialMeasureAncestorTest :: Context -> IORef Int -> IO ()
 runPartialMeasureAncestorTest ctx failed = do
   let inp = withInputOff 400 300

@@ -64,8 +64,7 @@ runLoop ctx edit batches = do
   clearDirty ctx
   runSessionLoop (edit (quietDriver debug) {sdWaitEvents = waits, sdShouldDraw = \_ _ _ _ _ -> pure True}) ctx emptyInput
 
--- | 'runLoop', counting the frames drawn. The edited 'sdDraw' still runs on
--- each of them.
+-- | 'runLoop', counting the frames drawn.
 drawCount :: Context -> (SessionDriver Int -> SessionDriver Int) -> [[Int]] -> IO Int
 drawCount ctx edit batches = do
   drawn <- newIORef (0 :: Int)
@@ -73,8 +72,8 @@ drawCount ctx edit batches = do
   runLoop ctx counted batches
   readIORef drawn
 
--- | A view that notes whether the window was asked to close, and quits on a
--- request once @quitAfter@ holds of the requests it noted before.
+-- | Notes each frame's close request, quitting on one once @quitAfter@ holds
+-- of those noted before.
 closeWatcher :: IORef [Bool] -> ([Bool] -> Bool) -> NanoUI ()
 closeWatcher seen quitAfter = do
   closing <- winCloseRequested <$> askWindow
@@ -135,8 +134,7 @@ runSessionLoopTest ctx failed = do
     =<< readIORef logRef
   assertEq failed 3 =<< readIORef draws
 
--- | Quick presses of one button count up to a triple click; a press of
--- another button restarts the count.
+-- | Quick presses count up to a triple click; another button restarts.
 runSessionLoopClicksTest :: Context -> IORef Int -> IO ()
 runSessionLoopClicksTest ctx failed = do
   clicks <- newIORef []
@@ -157,12 +155,9 @@ runSessionLoopClicksTest ctx failed = do
     [[1, 2, 1, 2, 1, 2, 4], [3]]
   assertEq failed [1, 2, 3, 1] =<< readIORef clicks
 
--- | A requested wake bounds the idle wait and draws when it comes due, with
--- no pass in between (the loop sleeps to the deadline instead of polling),
--- and the loop blocks again once nothing asks for another. A driver deciding
--- with 'shouldRedrawFrame' alone, as a backend following "NanoUI.Backend"
--- does, draws the frame a background thread's wake asks for. A wake a month
--- away waits no longer than the 32-bit millisecond timeout backends take.
+-- | A requested wake bounds the idle wait (sleeping to it, not polling) and
+-- draws when due; a thread's wake draws through 'shouldRedrawFrame' alone; a
+-- wake a month away fits the 32-bit millisecond timeout backends take.
 runSessionLoopWakesTest :: Context -> IORef Int -> IO ()
 runSessionLoopWakesTest ctx failed = do
   logRef <- newIORef []
@@ -204,13 +199,10 @@ runSessionLoopWakesTest ctx failed = do
   ts <- readIORef timeouts
   assert failed (not (null ts) && all (\t -> t > 0 && t <= 2147483647) ts)
 
--- | Ctrl+C quits after its frame, even when a later event in the same batch
--- releases Ctrl; typing c without Ctrl does not. It is no quit when a
--- shortcut takes it or the focused widget uses it, as a text field does to
--- copy (a focused button does not). Otherwise it asks to close the window
--- like its close button: with 'wsExitOnCloseRequest' off, the next frame
--- sees 'winCloseRequested'. Events: 1 presses Ctrl+C, 2 releases Ctrl, 4
--- types c alone, 5 presses Tab, and others change nothing.
+-- | Ctrl+C quits after its frame (Ctrl released later in the batch too, a
+-- bare c not), unless a shortcut or a focused text field takes it; with
+-- 'wsExitOnCloseRequest' off it asks to close instead. Events: 1 Ctrl+C,
+-- 2 releases Ctrl, 4 types c, 5 Tab, others nothing.
 runSessionLoopHardQuitTest :: Context -> IORef Int -> IO ()
 runSessionLoopHardQuitTest ctx failed = do
   let typed inp = \case
@@ -236,13 +228,9 @@ runSessionLoopHardQuitTest ctx failed = do
   assertEq failed 2 =<< frames (closeWatcher seen (const True)) [[1], [6]]
   assertEq failed [False, True] =<< readIORef seen
 
--- | A batch keeps its text, keys and modifiers in order. A frame ends after
--- a command key followed by text, another key or a modifier change, and on
--- any modifier change once it holds keys or text, so its text precedes its
--- one command key and every key sees its own modifiers; repeats and typing
--- share a frame. Each auto-repeat of a held key draws a frame, as does a
--- character typed again, though each input equals the one before: a view
--- that only writes a 'Var' on the key leaves nothing dirty to ask for it.
+-- | A batch splits into frames so text precedes each frame's one command key
+-- and every key sees its own modifiers; repeats and typing share a frame.
+-- Each auto-repeat or retyped character draws, though the input is equal.
 runSessionLoopKeysTest :: Context -> IORef Int -> IO ()
 runSessionLoopKeysTest ctx failed = do
   frames <- newIORef []
@@ -280,12 +268,9 @@ runSessionLoopKeysTest ctx failed = do
           }
   assertEq failed 7 =<< drawCount ctx repeats [[1], [1], [1], [1], [2], [4], [4], [3]]
 
--- | With 'wsExitOnCloseRequest' on, a close request ends the session
--- without another frame, and a view that called 'quitUi' in an opening
--- frame the backend drew before the loop ends it without a wait. With it
--- off, each close request is visible to the next frame only, also past a
--- pass that runs no frame, and the session ends after the frame that calls
--- 'quitUi'.
+-- | With 'wsExitOnCloseRequest' on, a close request, or 'quitUi' in a frame
+-- drawn before the loop, ends the session. Off, each request reaches the
+-- next frame only (past a pass that draws none) until one calls 'quitUi'.
 runSessionLoopCloseTest :: Context -> IORef Int -> IO ()
 runSessionLoopCloseTest _ failed = do
   let fresh exitOnClose = do

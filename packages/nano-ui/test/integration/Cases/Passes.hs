@@ -88,10 +88,7 @@ dragOn ui = do
   _ <- runFrame ctx (pressAt hover pos) ui
   costOf . snd <$> frameCost ctx (holdAt hover to) (holdAt hover to) ui
 
--- | Measured with the hooks this replaced (23217753): a hook-bound field,
--- slider or checkbox, and a hook display above or below its button, each
--- cost (2, Full, 1); a field held in an IORef (1, Clip, 1); a plain button
--- (1, Clip, 0).
+-- | The hooks Vars replaced (23217753) cost (2, Full, 1) for a bound field.
 runPassesTest :: Context -> IORef Int -> IO ()
 runPassesTest _ failed = do
   let fresh :: a -> (Var a -> IO b) -> IO b

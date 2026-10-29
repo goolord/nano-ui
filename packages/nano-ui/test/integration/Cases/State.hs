@@ -24,9 +24,8 @@ tests =
   , spec "collection-api" runCollectionApiTest
   ]
 
--- | A stack runs its children in order, a select or radio with no options
--- leaves the caller's index alone, and a combo box keeps its value. A failed
--- image does not stop the later ones in a batch registering.
+-- | A stack runs its children in order, empty option lists leave the index
+-- alone, and a failed image does not stop the rest of a batch.
 runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do
   seen <- newIORef []
@@ -42,10 +41,8 @@ runCollectionApiTest ctx failed = do
   assertEq failed False =<< registerImages ctx (Seq.fromList [(ImageId 0, 1, 1, BS.replicate 4 255), (ImageId 42, 1, 1, BS.replicate 4 255)])
   assert failed . (/= Nothing) =<< lookupImageUv ctx (ImageId 42)
 
--- | Inputs show the value the caller passes. A value the caller changes
--- between frames is shown and reported as no change. A user edit, from the
--- keyboard too, is reported, and stays if the caller passes it back; one
--- the caller ignores is undone on the next frame.
+-- | Inputs show the caller's value, reporting no change for the caller's
+-- own; a user edit is reported and stays only if the caller passes it back.
 runControlledInputsTest :: Context -> IORef Int -> IO ()
 runControlledInputsTest ctx failed = do
   model <- newIORef (False, "one")
@@ -80,12 +77,9 @@ runControlledInputsTest ctx failed = do
       assertEq failed (Just (if checked then 1 else 0)) =<< widgetValue ctx (respId cb)
       assert failed . any (\(_, t, _, _, _) -> t == text) =<< collectTextSpans ctx
 
--- | Positional Vars of every slot type keep a value across frames; an equal
--- write leaves the loop asleep and a changed one outside a frame wakes it. A
--- slot that finds a value of another type starts over (enumerations by
--- type, though stored by index), and widgets that come and go before a
--- positional Var leave it alone. A Var map keeps a row's state under its
--- key until the row is dropped.
+-- | Positional Vars of every slot type keep their value, wake only on a
+-- change, start over on a value of another type, and ignore widgets that
+-- come and go before them. A Var map keeps a row until it is dropped.
 runVarSlotTest :: Context -> IORef Int -> IO ()
 runVarSlotTest ctx failed = do
   let inp = withInputOff 300 100
@@ -218,11 +212,9 @@ runVarSharedTest ctx failed = do
   _ <- runFrame other inp view
   assert failed . any (\(_, t, _, _, _) -> t == "1") =<< collectTextSpans other
 
--- | Writes the frame's own bookkeeping misses repaint the next frame whole:
--- one by a frame an exception cut short (which leaves no rerun behind, so
--- the next frame runs its view once), and one from another thread landing in
--- a pass after the pass read the Var, also when the pass then writes another
--- part of the same Var.
+-- | Writes a frame's bookkeeping misses repaint the next frame whole: one in
+-- a frame an exception cut short (leaving no rerun), and a thread's write
+-- landing after the pass read the Var, also beside a write to another part.
 runVarLateWritesTest :: Context -> IORef Int -> IO ()
 runVarLateWritesTest ctx failed = do
   v <- newVar (0 :: Int)

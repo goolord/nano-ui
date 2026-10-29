@@ -245,10 +245,9 @@ runSearchInputClearTest ctx failed = do
       checkEq (respId cleared) =<< liftIO (getFocusId ctx)
       check . not . respChanged =<< frame
 
--- | A focused search field commits text the caller set, which nobody typed,
--- after one pause: with no edit time to age from it once never committed and
--- woke the loop every period for good. Typing shows at once and commits on a
--- wake the field asks for 40 ms after the last edit, instead of polling.
+-- | A search field commits caller-set text after one pause (with no edit time
+-- it once never did, waking every period), and typing on a wake 40 ms after
+-- the last edit.
 runSearchInputDebounceTest :: Context -> IORef Int -> IO ()
 runSearchInputDebounceTest ctx failed = do
   query <- newVar ""
@@ -278,8 +277,7 @@ runSearchInputDebounceTest ctx failed = do
 -- | Where 'seedMixedGrid' has got to.
 data MixedSeed = SeedStart | SeedRight Word64 | SeedDone
 
--- | Called from every pane's 'pgViewPane', grows a fresh grid into one pane
--- on the left and two stacked on the right over its first frames.
+-- | From every pane's view, grows a grid into one pane left, two right.
 seedMixedGrid :: IORef MixedSeed -> Word64 -> PaneGridCtx -> NanoUI ()
 seedMixedGrid ref pid pctx =
   liftIO (readIORef ref) >>= \case
@@ -294,12 +292,10 @@ testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40
 recordPane :: IORef (IM.IntMap v) -> Word64 -> v -> NanoUI ()
 recordPane ref pid v = liftIO (modifyIORef' ref (IM.insert (fromIntegral pid) v))
 
--- | Drop previews simulate the post-drop layout rather than halving the
--- target's pre-drop rect: in a grid mixing axes, lifting the dragged pane
--- collapses its parent split and re-flows the rest. Size-preserving drops
--- keep the dragged pane's extent. Live, a pane dragged onto another's lower
--- edge lands below it with every pane's state kept, a release outside the
--- grid cancels, and a drag from a pane's close button lifts no pane.
+-- | Drop previews simulate the post-drop layout (lifting a pane re-flows a
+-- mixed-axis grid) and size-preserving drops keep the pane's extent. Live, a
+-- drop lands with every pane's state, outside the grid cancels, and a drag
+-- from a close button lifts nothing.
 runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()
 runPaneGridMixedDragTest ctx failed = do
   let minSize = 40
@@ -419,10 +415,9 @@ runPaneGridMixedDragTest ctx failed = do
   (closed, _, _) <- runFrame ctx (releaseAt (holdAt inp0 closePos)) ui
   assertEq failed [pb, pc] (pgrPanes closed)
 
--- | While a pane is dragged over a target, the grid is laid out as the drop
--- will leave it, with the dragged pane's slot empty for the highlight: once
--- splits are uneven, a highlight over the pre-drop panes lines up with
--- nothing (a swap sends the target to the dragged pane's old slot).
+-- | Hovering a target lays the grid out as the drop will leave it, the
+-- dragged pane's slot empty: over uneven splits a highlight on the pre-drop
+-- panes lines up with nothing.
 runPaneGridDropPreviewTest :: Context -> IORef Int -> IO ()
 runPaneGridDropPreviewTest ctx failed = do
   -- Per pane: 'pgcRect', and the solved rect of a full-width strip inside it.
@@ -504,9 +499,8 @@ runPaneGridDropPreviewTest ctx failed = do
   assert failed (not (IM.member 1 duringC))
   assertEq failed start afterC
 
--- | A pinned pane keeps its width while the grid resizes, from the first frame
--- at the new size: the other side of its split takes the whole difference.
--- The same grid unpinned scales both sides by the ratio.
+-- | A pinned pane keeps its width from the first frame of a resize; unpinned,
+-- both sides scale.
 runPaneGridPinnedPaneTest :: Context -> IORef Int -> IO ()
 runPaneGridPinnedPaneTest ctx failed = do
   rects <- newIORef IM.empty
@@ -549,38 +543,29 @@ runPaneGridPinnedPaneTest ctx failed = do
       forM_ want $ \(p, x) -> case IM.lookup p ms of
         Just r | abs (rectW r - x) <= 1 -> pure ()
         got -> assertEq failed (pinned, w, p, Just x) (pinned, w, p, rectW <$> got)
-  -- Trees the widget case cannot reach, against the pure re-ratio it runs. A
-  -- pin holds only the split its pane hangs off, so two hold at once and an
-  -- ancestor on the other axis shares as before. A right-hand pin holds
-  -- through a drag growing the grid by a fraction a frame, as a zoomed window
-  -- does: the rounding that keeps it whole must not walk it.
+  -- The pure re-ratio on trees the widget case cannot reach: two pins at
+  -- once, a pin under a split on the other axis, and a right-hand pin held
+  -- through a drag growing the grid by a fraction a frame without walking.
   let lay t r = fst (layoutNode 40 16 t r)
       reflow fixed old new = reflowFixed (`elem` fixed) 40 16 old new
       area = Rect 0 0
       ends = Split 10 AxisV 0.25 (Pane 1) (Split 11 AxisV 0.5 (Pane 2) (Pane 3))
-      ends' = reflow [1, 3] (area 600 400) (area 900 400) ends
       stacked = Split 20 AxisH 0.5 (Split 21 AxisV 0.5 (Pane 1) (Pane 2)) (Pane 3)
       stacked' = reflow [1] (area 600 400) (area 900 600) stacked
       rightPin = Split 30 AxisV 0.5 (Pane 1) (Pane 2)
       at k = area (600 + k * 2 / 3) 400
-      dragged = foldl (\t k -> reflow [2] (at k) (at (k + 1)) t) rightPin [0 .. 29 :: Float]
   forM_
-    [ ("two pinned ends", ends, area 600 400, 1, rectW, 146)
-    , ("two pinned ends", ends, area 600 400, 3, rectW, 211)
-    , ("two pinned ends", ends', area 900 400, 1, rectW, 146)
-    , ("two pinned ends", ends', area 900 400, 3, rectW, 211)
-    , ("two pinned ends", ends', area 900 400, 2, rectW, 511)
-    , ("a pin under a stack", stacked, area 600 400, 1, rectW, 292)
-    , ("a pin under a stack", stacked', area 900 600, 1, rectW, 292)
-    , ("a pin under a stack", stacked', area 900 600, 2, rectW, 592)
-    , ("a pin under a stack", stacked', area 900 600, 1, rectH, 292)
-    , ("a pin under a stack", stacked', area 900 600, 3, rectH, 292)
-    , ("a right-hand pin", rightPin, at 0, 2, rectW, 292)
-    , ("a right-hand pin", dragged, at 30, 2, rectW, 292)
+    [ (ends, area 600 400, rectW, [(1, 146), (3, 211)])
+    , (reflow [1, 3] (area 600 400) (area 900 400) ends, area 900 400, rectW, [(1, 146), (3, 211), (2, 511)])
+    , (stacked, area 600 400, rectW, [(1, 292)])
+    , (stacked', area 900 600, rectW, [(1, 292), (2, 592)])
+    , (stacked', area 900 600, rectH, [(1, 292), (3, 292)])
+    , (rightPin, at 0, rectW, [(2, 292)])
+    , (foldl (\t k -> reflow [2] (at k) (at (k + 1)) t) rightPin [0 .. 29 :: Float], at 30, rectW, [(2, 292)])
     ]
-    $ \(what, t, r, p, size, want) -> case M.lookup p (lay t r) of
-      Just g | abs (size g - want) <= 0.01 -> pure ()
-      got -> assertEq failed (what :: String, Just want) (what, size <$> got)
+    $ \(t, r, size, want) -> forM_ want $ \(p, x) -> case M.lookup p (lay t r) of
+      Just g | abs (size g - x) <= 0.01 -> pure ()
+      got -> assertEq failed (r, p, Just x) (r, p, size <$> got)
 
 -- | A button scrolled above its viewport can overlap the header, but its
 -- hidden rect must not claim the header's drag press.
