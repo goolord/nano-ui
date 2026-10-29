@@ -196,8 +196,10 @@ spec = before newMarkdownCache $ do
     readIORef copied `shouldReturn` Just "Select these words"
 
   it "copies code blocks, whitespace kept, by selection and by the copy button" $ \cache -> do
-    let ui = view cache (parseMarkdown "```\n  let x = 1\n```")
+    let ui = view cache (parseMarkdown "```hs\tlinenos\n  let x = 1\n```")
     (ctx, copied) <- withCopies ui
+    -- The language runs up to the first space or tab.
+    isJust . spanRectOf "hs" <$> collectTextSpans ctx `shouldReturn` True
     _ <- runClick ctx (withInput 600 400) ui =<< inWord ctx 1 "  let x = 1"
     mapM_ (chordFrame ctx ui) ['a', 'c']
     readIORef copied `shouldReturn` Just "  let x = 1"
@@ -244,10 +246,6 @@ spec = before newMarkdownCache $ do
     map hit ["alpha", "beta", "gamma"] `shouldBe` [[False], [False], [True]]
     -- Redrawing the same document measures nothing.
     measuring doc2 `shouldReturn` []
-
-  it "takes a code block's language up to the first space or tab" $ \cache -> do
-    ctx <- drawn 600 400 (view cache (parseMarkdown "```hs\tlinenos\ncode\n```"))
-    isJust . spanRectOf "hs" <$> collectTextSpans ctx `shouldReturn` True
 
   it "wraps a code line wider than the document, keeping all of it, its indent and its spaces" $ \cache -> do
     let

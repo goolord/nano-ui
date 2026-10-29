@@ -12,17 +12,7 @@ import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude qualified as D
-import Diagrams.Prelude
-  ( Diagram
-  , circle
-  , fc
-  , lw
-  , lwO
-  , none
-  , rect
-  , rotateBy
-  , (#)
-  )
+import Diagrams.Prelude (Diagram, (#))
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..), DrawingCacheState (..))
@@ -100,10 +90,10 @@ testRendering = do
   replicateM_ 2 $ do
     (_, dd, _) <-
       runFrame ctx (emptyInput {inputWindowSize = Size 240 120}) $
-        diagram (fixedWH 200 80) (circle 1 # fc coral # lw none)
+        diagram (fixedWH 200 80) (D.circle 1 # D.fc coral # D.lw D.none)
     check "diagram produced no draw commands" (drawIndexCount dd > 0 && not (drawCmdNull dd))
   let
-    d = chartDia (bareChart [line "s" [(0, 0), (1, 2), (2, 1)]]) # lwO 2 # fc steelblue
+    d = chartDia (bareChart [line "s" [(0, 0), (1, 2), (2, 1)]]) # D.lwO 2 # D.fc steelblue
     isText = \case
       DrawText {} -> True
       _ -> False
@@ -160,27 +150,27 @@ testNaNChartIdle = do
 testDiagramOps :: IO ()
 testDiagramOps = do
   let
-    fills d = [op | op <- diaOps (d # fc coral # lw none), isFill op]
+    fills d = [op | op <- diaOps (d # D.fc coral # D.lw D.none), isFill op]
     isFill = \case
       FillRect {} -> True
       FillPolygon {} -> True
       _ -> False
-  check "a level rectangle is not one rect op" $ case fills (rect 4 2) of
+  check "a level rectangle is not one rect op" $ case fills (D.rect 4 2) of
     [FillRect {}] -> True
     _ -> False
-  check "a turned rectangle is not one polygon" $ case fills (rect 4 2 # rotateBy (1 / 8)) of
+  check "a turned rectangle is not one polygon" $ case fills (D.rect 4 2 # D.rotateBy (1 / 8)) of
     [FillPolygon {}] -> True
     _ -> False
   -- Colours are straight alpha, whether the alpha is the colour's or the opacity's.
   let
-    fillsOf d = mapMaybe inkColor (diaOps (d # lw none))
+    fillsOf d = mapMaybe inkColor (diaOps (d # D.lw D.none))
     halfRed = colorRGBA 255 0 0 128
-  check "a translucent fill was darkened" (fillsOf (circle 1 # D.fcA (red `withOpacity` 0.5)) == [halfRed])
-  check "opacity did not reach the fill" (fillsOf (circle 1 # fc red # D.opacity 0.5) == [halfRed])
+  check "a translucent fill was darkened" (fillsOf (D.circle 1 # D.fcA (red `withOpacity` 0.5)) == [halfRed])
+  check "opacity did not reach the fill" (fillsOf (D.circle 1 # D.fc red # D.opacity 0.5) == [halfRed])
   -- A path's loops fill together. The inner circle is a hole under even-odd,
   -- or under winding when reversed; with the same direction it is filled.
   let
-    ringsOf d = [sizeofPrimArray rings - 1 | FillPolygon _ rings _ _ <- diaOps (d # fc coral # lw none)]
+    ringsOf d = [sizeofPrimArray rings - 1 | FillPolygon _ rings _ _ <- diaOps (d # D.fc coral # D.lw D.none)]
     annulus :: D.Path D.V2 Double
     annulus = D.circle 2 <> D.circle 1
   check "even-odd annulus lost its hole" (ringsOf (D.strokeP annulus # D.fillRule D.EvenOdd) == [2])
