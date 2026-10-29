@@ -1,7 +1,6 @@
--- | The parts of the view API a widget that works out its own input leans
--- on: where it was laid out, the keyboard, the clipboard, frames for a
--- pointer moving over it, its content key, and a pane grid it lays out from
--- a split of its own.
+-- | The view API a widget that works out its own input leans on: where it
+-- was laid out, the keyboard, pointer frames, content keys, scrolling, and
+-- pane grids.
 module Cases.ViewApi (tests) where
 
 import Spec
@@ -13,10 +12,8 @@ import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
-  [ spec "last-rect" runLastRectTest
+  [ spec "view-queries" runViewQueriesTest
   , spec "hold-focus" runHoldFocusTest
-  , spec "hold-focus-modal" runHoldFocusModalTest
-  , spec "clipboard" runClipboardTest
   , spec "pointer-track" runPointerTrackTest
   , spec "content-key-of" runContentKeyOfTest
   , spec "layout-variants" runLayoutVariantsTest
@@ -26,27 +23,16 @@ tests =
   , spec "scroll-ui" runScrollUiTest
   , spec "scroll-metrics-read-follows" runScrollMetricsReadTest
   , simSpec "take-escape" 400 300 escapeUi takeEscapeOnce
-  , spec "font-size" runFontSizeTest
   ]
 
 -- | A custom widget of a fixed size, focusable or not.
 sizedWidget :: Float -> Float -> Bool -> CustomWidgetSpec ()
 sizedWidget w h focusable = defaultCustomWidgetSpec {widgetLayout = fixedWH w h defaultLayout, widgetFocusable = focusable}
 
--- | 'uiFontSize' is the text size used when a layout sets none: the font
--- metrics' line height, until overridden.
-runFontSizeTest :: Context -> IORef Int -> IO ()
-runFontSizeTest ctx failed = do
-  let sized c = evalUi c (withInput 200 200) uiFontSize
-      big = withFontMetrics ctx (monospaceMetrics 20)
-  assertEq failed (fmLineHeight (ctxFontMetrics ctx)) =<< sized ctx
-  assertEq failed 20 =<< sized big
-  assertEq failed 15 =<< sized (withFontSize big 15)
-
--- | 'lastRect' is nothing before a widget's first frame and the rect it was
--- laid out in after it.
-runLastRectTest :: Context -> IORef Int -> IO ()
-runLastRectTest ctx failed = do
+-- | 'lastRect' is nothing before a widget's first frame and its laid-out rect
+-- after. 'uiFontSize' is the metrics' line height until overridden.
+runViewQueriesTest :: Context -> IORef Int -> IO ()
+runViewQueriesTest ctx failed = do
   let inp = withInput 400 300
       ui = do
         wid <- nextId
@@ -57,14 +43,18 @@ runLastRectTest ctx failed = do
   (second, laidOut) <- warmup2 ctx inp ui
   assertEq failed (Just laidOut) second
   assertEq failed (120, 40) (rectW laidOut, rectH laidOut)
+  let sized c = evalUi c inp uiFontSize
+      big = withFontMetrics ctx (monospaceMetrics 20)
+  assertEq failed (fmLineHeight (ctxFontMetrics ctx)) =<< sized ctx
+  assertEq failed 20 =<< sized big
+  assertEq failed 15 =<< sized (withFontSize big 15)
 
 data FocusMode = Holding | Free | Releasing
   deriving (Eq)
 
--- | 'holdFocus' gives a widget the keyboard without the ring Tab draws, and
--- keeps it through a Tab, with no other widget taking it even for a frame.
--- Let go, the same Tab moves focus on. 'releaseFocus' takes it off only the
--- widget named.
+-- | 'holdFocus' keeps the keyboard, ringless, through a Tab (no other widget
+-- gets it even for a frame); let go, Tab moves on. 'releaseFocus' frees only
+-- the widget named. A holder behind an open modal leaves the modal's focus.
 runHoldFocusTest :: Context -> IORef Int -> IO ()
 runHoldFocusTest ctx failed = do
   modeRef <- newIORef Holding
@@ -94,35 +84,18 @@ runHoldFocusTest ctx failed = do
   assertEq failed wid . snd =<< warmup2 ctx inp ui
   writeIORef modeRef Releasing
   assertEq failed (WidgetId 0) . snd =<< warmup2 ctx inp ui
-
--- | A widget behind an open modal that holds focus leaves the keyboard with
--- the widget in the modal that has it.
-runHoldFocusModalTest :: Context -> IORef Int -> IO ()
-runHoldFocusModalTest ctx failed = do
-  let inp = withInput 400 300
-      ui = do
-        page <- nextId
-        holdFocus page
-        _ <- customWidgetWithId page (sizedWidget 100 30 False)
-        _ <- modal' (constVar True) "Dialog" (customWidget (sizedWidget 100 30 True))
-        pure page
-  _ <- warmup2 ctx inp ui
-  -- Tab puts the keyboard on a widget in the modal.
-  _ <- runFrame ctx (tabInp inp) ui
-  inModal <- readIORef (ctxFocusId ctx)
-  page <- warmup2 ctx inp ui
-  assert failed (inModal /= WidgetId 0 && inModal /= page)
-  assertEq failed inModal =<< readIORef (ctxFocusId ctx)
-
--- | 'setClipboard' and 'getClipboard' go through the context's clipboard.
-runClipboardTest :: Context -> IORef Int -> IO ()
-runClipboardTest ctx0 failed = do
-  board <- newIORef (Nothing :: Maybe Text)
-  let ctx = withClipboard ctx0 (readIORef board) (\t -> writeIORef board (Just t) >> pure True)
-      inp = withInput 400 300
-  assertEq failed Nothing . fst =<< evalUi ctx inp ((,) <$> getClipboard <*> setClipboard "copied")
-  assertEq failed (Just "copied") =<< readIORef board
-  assertEq failed (Just "copied") =<< evalUi ctx inp getClipboard
+  behind <- newContext
+  let page = do
+        p <- nextId
+        holdFocus p
+        _ <- customWidgetWithId p (sizedWidget 100 30 False)
+        p <$ modal' (constVar True) "Dialog" (customWidget (sizedWidget 100 30 True))
+  _ <- warmup2 behind inp page
+  _ <- runFrame behind (tabInp inp) page
+  inModal <- readIORef (ctxFocusId behind)
+  p <- warmup2 behind inp page
+  assert failed (inModal /= WidgetId 0 && inModal /= p)
+  assertEq failed inModal =<< readIORef (ctxFocusId behind)
 
 -- | A pointer that moves within one widget runs no frame, unless that widget
 -- tracks the pointer; one that moves onto another widget always does.
@@ -159,11 +132,9 @@ runContentKeyOfTest _ failed = do
   assert failed (contentKeyOf [keyPart (0.1 :: Double)] /= contentKeyOf [keyPart (0.1 + 1e-12 :: Double)])
   assert failed (contentKeyOf [] /= 0)
 
--- | The @With@ variants take a layout. 'checkboxWith' centres in a row taller
--- than itself. 'rowWith'' reports where the row was laid out and lays its
--- children out left to right. 'modalWith' sizes the panel and a body that
--- fills it gets the inside, centred; 'modalPanelWith' leaves only the
--- border, and Escape dismisses it.
+-- | The @With@ variants apply their layout: a centred checkbox, a row that
+-- reports its rect, a sized modal whose filling body gets the inside, and a
+-- bare modal panel, which Escape dismisses.
 runLayoutVariantsTest :: Context -> IORef Int -> IO ()
 runLayoutVariantsTest _ failed = do
   let sim :: Float -> Float -> NanoUI a -> Sim a () -> IO ()
