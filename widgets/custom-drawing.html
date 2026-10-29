@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -204,7 +204,7 @@ controls volume progress samples = do
   progressBarWith fillW 6 progress
   sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
-<p><code>sparkline</code> scales the values to their own range, so it shows the shape of a series, not its size. At its default size and with <code>sparklineWith</code>:</p>
+<p><code>sparkline</code> maps the smallest value to the bottom of its plot area and the largest to the top, so two series of different magnitude can draw the same line. At its default size and with <code>sparklineWith</code>:</p>
 <pre><code class="language-haskell">sparklines :: [Float] -&gt; NanoUI ()
 sparklines samples = rowWith (gap 16 . alignMid) $ do
   sparkline samples
@@ -285,7 +285,7 @@ primitives =
 </code></pre>
 <p><code>drawStrokeCircle</code> keeps its border inside the radius. <code>drawStrokeAA</code> is an anti-aliased line with square ends; <code>drawStroke</code> is the same line without anti-aliasing, for axis-aligned rules. <code>drawQuadGradient</code> takes its colours clockwise from the top left.</p>
 <h3 id="paths"><a class="header" href="#paths">Paths</a></h3>
-<p>Steps joined with <code>&lt;&gt;</code> build a <code>Path</code>. <code>moveTo</code> starts a subpath. <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code> extend it from the current point, and <code>close</code> draws a line back to where it started. Each path below is stroked with <code>drawStrokePath (path r) 3 blue</code>. Filled dots are points on the path; hollow dots are control points and arc centres.</p>
+<p>A <code>Path</code> is a list of steps joined with <code>&lt;&gt;</code>. <code>moveTo</code> starts a subpath. <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code> extend it from the current point, and <code>close</code> draws a line back to where it started. Each path below is stroked with <code>drawStrokePath (path r) 3 blue</code>. Filled dots are points on the path; hollow dots are control points and arc centres.</p>
 <img src="../images/canvas/segments.svg" alt="Five cells: a two-segment peak, a quadratic curve with its control point above, an S-shaped cubic curve with two control points, a three-quarter arc, and the same arc closed through its centre into a pie slice.">
 <pre><code class="language-haskell">segments :: [(Text, Rect -&gt; P.Path)]
 segments =
@@ -338,7 +338,7 @@ fillRules =
 </code></pre>
 <p><code>P.circle</code> always runs clockwise, so under <code>NonZero</code> the inner circles add to the outer one and the disc is solid. Running the middle circle the other way cancels it out, cutting a hole. <code>EvenOdd</code> ignores direction: each nested subpath toggles between filled and empty. Crossing subpaths are not resolved against each other, so keep holes inside the shape they cut.</p>
 <h3 id="paints"><a class="header" href="#paints">Paints</a></h3>
-<p><code>P.Solid</code> fills with one colour. <code>P.Linear from to stops</code> blends a gradient along the line from <code>from</code> (offset 0) to <code>to</code> (offset 1).</p>
+<p><code>P.Solid</code> is one colour. <code>P.Linear from to stops</code> is a gradient along the line from <code>from</code> (offset 0) to <code>to</code> (offset 1).</p>
 <img src="../images/canvas/paints.svg" alt="Four cells: a solid blue rounded rectangle, a blue-to-teal gradient across the full width, the same gradient squeezed into the middle third with solid ends, and a disc shading amber to rose to blue along its diagonal.">
 <pre><code class="language-haskell">paints :: [(Text, Rect -&gt; CanvasM ())]
 paints =
@@ -415,7 +415,7 @@ transforms =
   , ("scaleAround c (-1) 1", \r -&gt; withTransform (scaleAround (centre r) (-1) 1) (arrow r))
   ]
 </code></pre>
-<p><code>P.rotate</code> and <code>P.scale</code> work about the window origin, not the widget. Move the pivot to the origin first: <code>P.rotateAround</code> does that for rotation, and <code>scaleAround</code> above does it for scale. Stroke widths and dashes scale with the transform, so the enlarged arrow’s outline is thicker. Text moves its anchor and scales, but glyphs do not rotate.</p>
+<p><code>P.rotate</code> and <code>P.scale</code> work about the window origin (0, 0). Move the pivot to the origin first: <code>P.rotateAround</code> does that for rotation, and <code>scaleAround</code> above does it for scale. Stroke widths and dashes scale with the transform, so the enlarged arrow’s outline is thicker. Text moves its anchor and scales, but glyphs do not rotate.</p>
 <h3 id="clipping"><a class="header" href="#clipping">Clipping</a></h3>
 <p><code>withClip rect</code> clips a block to <code>rect</code>, intersected with the current clip. The current clip is at most the widget’s rectangle, so a canvas never draws outside its own bounds.</p>
 <img src="../images/canvas/clip.svg" alt="Two cells with a rose disc and the text &#39;text past the edge&#39;: without a clip both spill past a dashed box; with withClip they are cut at the box.">
@@ -434,7 +434,7 @@ clips =
   ]
 </code></pre>
 <h3 id="text"><a class="header" href="#text">Text</a></h3>
-<p><code>drawText pos alignX alignY txt colour</code> anchors text to a point. The alignment says which part of the text sits on the point (the red dot): <code>AlignStart</code> puts the point at the left edge, <code>AlignTop</code> at the top of the line, <code>AlignBaseline</code> on the baseline. <code>drawTextWith</code> takes a <code>TextFont</code> for size, variant, weight, and slant.</p>
+<p><code>drawText pos alignX alignY txt colour</code> anchors text to a point. The alignment selects which part of the text sits on the point (the red dot): <code>AlignStart</code> puts the point at the left edge, <code>AlignTop</code> at the top of the line, <code>AlignBaseline</code> on the baseline. <code>drawTextWith</code> takes a <code>TextFont</code> for size, variant, weight, and slant.</p>
 <img src="../images/canvas/text.svg" alt="Eight cells showing the word Anchor placed against a red dot: left, centre and right aligned; then top, middle, baseline and bottom aligned; and a large bold amber 42.">
 <pre><code class="language-haskell">textAnchors :: [(Text, Rect -&gt; CanvasM ())]
 textAnchors =

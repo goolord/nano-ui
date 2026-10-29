@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="overlays--windows"><a class="header" href="#overlays--windows">Overlays &amp; Windows</a></h1>
-<p>Modals, floating windows, and popups take a <code>Var Bool</code> for their open state and otherwise run like any <code>NanoUI</code> action.</p>
+<p>Modals, floating windows, and popups are ordinary <code>NanoUI</code> actions that take a <code>Var Bool</code> for their open state.</p>
 <h2 id="call-overlays-unconditionally"><a class="header" href="#call-overlays-unconditionally">Call overlays unconditionally</a></h2>
 <pre><code class="language-haskell">modal  :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
 window :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
@@ -229,7 +229,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <p><code>window'</code> returns the body result and a response. Use <code>window</code> for panels that coexist with the main content, <code>modal</code> when the user must answer first.</p>
 <h2 id="popups"><a class="header" href="#popups">Popups</a></h2>
-<p><code>popup</code> floats a panel wherever its <code>PopupConfig</code> places it:</p>
+<p><code>popup</code> is a floating panel placed by a <code>PopupConfig</code>:</p>
 <pre><code class="language-haskell">filterPopup = do
   filterOpen &lt;- useVar False
   showFruit &lt;- useVar True
@@ -241,7 +241,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
     checkbox "Fruit" showFruit
     checkbox "Vegetables" showVeg
 </code></pre>
-<p>A press on the anchor is not “outside”, so the button that toggles the popup does not immediately reopen it.</p>
+<p>A press on the anchor counts as inside the popup, so the button that toggles the popup does not immediately reopen it.</p>
 <p>Popup placement:</p>
 <ul>
 <li><code>AnchorRect (respRect r)</code> anchors to a widget; <code>AnchorPoint pos</code> anchors to a coordinate.</li>
@@ -264,7 +264,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 <h2 id="rules"><a class="header" href="#rules">Rules</a></h2>
 <ul>
 <li>Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.</li>
-<li>Keep the open flag in the view that opens and closes the overlay, not in a child that may not be drawn.</li>
+<li>Allocate the open flag in the view that opens and closes the overlay, outside any child that may be skipped.</li>
 <li>Read focus after the overlay call.</li>
 <li>A <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a dialog body draws a box in a box; strip its chrome (see <a href="../troubleshooting/recurring-bugs.html#2-double-borders--box-in-a-box">Double borders</a>).</li>
 </ul>

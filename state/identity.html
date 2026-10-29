@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,13 +179,13 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="widget-identity--keys"><a class="header" href="#widget-identity--keys">Widget Identity &amp; Keys</a></h1>
-<p>Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local <code>Var</code>s) is stored under the widget’s <strong>id</strong>, not in the widget. Ids come from the call order among siblings. If the order changes, the state jumps to a different widget.</p>
+<p>Widget state (caret position, text selection, an open drop-down, a scroll offset, per-row local <code>Var</code>s) is stored under the widget’s <strong>id</strong>. Ids come from the call order among siblings. If the order changes, the state jumps to a different widget.</p>
 <h2 id="how-ids-are-assigned"><a class="header" href="#how-ids-are-assigned">How ids are assigned</a></h2>
-<p>Each container assigns ids to its children counting from zero. A <code>column</code> with three labels has children 0, 1, and 2; a nested <code>row</code> starts its own count. Ids are per container, not global.</p>
+<p>Each container assigns ids to its children counting from zero. A <code>column</code> with three labels has children 0, 1, and 2; a nested <code>row</code> starts its own count.</p>
 <p>Two separate id spaces exist:</p>
 <ul>
-<li><strong>Widget ids</strong> for layout nodes, focus, input state, and scroll state.</li>
-<li><strong><code>useVar</code> slots</strong>, counted in call order, with their own counter and key space.</li>
+<li>Widget ids, for layout nodes, focus, input state, and scroll state.</li>
+<li><code>useVar</code> slots, counted in call order, with their own counter and key space.</li>
 </ul>
 <p>A conditional <em>widget</em> does not shift <code>useVar</code> slots, and a conditional <em><code>useVar</code></em> does not shift widget ids. Both still shift their own kind; <code>scope</code> prevents that.</p>
 <h2 id="rule-1-keep-the-call-order-stable"><a class="header" href="#rule-1-keep-the-call-order-stable">Rule 1: keep the call order stable</a></h2>

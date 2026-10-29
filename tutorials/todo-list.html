@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -257,14 +257,14 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
     requestFocus (respId inputR)
 </code></pre>
 <ul>
-<li><strong>The primed widget returns a <code>Response</code>.</strong> <code>textInputConfigured'</code> reports the widget’s identity, rectangle, hover and click state, and whether Enter was submitted (<code>respSubmitted</code>). <code>button</code> already returns the one <code>Bool</code> this row needs.</li>
-<li><strong><code>readVar draft</code> sits below the field that edits it.</strong> The field’s write lands first, then the read sees the new text in the same pass. Reading <em>above</em> an editing widget forces a second pass.</li>
-<li><strong><code>modifyVar</code> reads the latest value.</strong> Two changes in one frame both apply; the append does not lose one.</li>
-<li><strong>The field is cleared and focused again</strong>, so the next item can be typed immediately. <code>requestFocus</code> takes effect at the end of the frame.</li>
+<li><code>textInputConfigured'</code>, the primed form, returns a <code>Response</code> holding the widget’s identity, rectangle, hover and click state, and whether Enter was submitted (<code>respSubmitted</code>). <code>button</code> already returns the one <code>Bool</code> this row needs.</li>
+<li><code>readVar draft</code> sits below the field that edits it, so the field’s write happens first and the read returns the new text in the same pass. Reading <em>above</em> an editing widget forces a second pass.</li>
+<li><code>modifyVar</code> applies its function to the latest value, so two changes in one frame both apply.</li>
+<li>The code clears the field and focuses it again, so the next item can be typed immediately. <code>requestFocus</code> takes effect at the end of the frame.</li>
 </ul>
 <blockquote class="blockquote-tag blockquote-tag-note">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
-<p>The <code>when</code> guard around the mutation is not optional. The view runs every frame, so an unguarded <code>modifyVar</code> would add an item on every pass. Event-driven work goes inside <code>whenM (button ...)</code> or a condition like the one above.</p>
+<p>The <code>when</code> guard around the mutation is required. The view runs every frame, so an unguarded <code>modifyVar</code> would add an item on every pass. Event-driven work goes inside <code>whenM (button ...)</code> or a condition like the one above.</p>
 </blockquote>
 <h2 id="4-filtering-and-a-derived-count"><a class="header" href="#4-filtering-and-a-derived-count">4. Filtering and a derived count</a></h2>
 <p>The filter is a local value with three states. <code>useEnumVar</code> accepts any <code>Enum</code>/<code>Bounded</code> type and keeps the chosen value across frames:</p>
@@ -295,7 +295,7 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
 </code></pre>
 <p><code>boundedTabBarConfigured</code> draws a segmented control over every constructor of <code>Filter</code>; the label function is <code>show</code>. The count is <em>derived</em>: it is computed from the list every frame, never stored in a second <code>Var</code> that could drift. <code>disabledWhen</code> dims the clear button and blocks its events without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
-<p>Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must follow the item, not the row’s position on screen.</p>
+<p>Each row needs local state (whether it is being edited and the draft of its text), but the list can be filtered and reordered underneath it. Per-row state must therefore be keyed by the item’s id, which stays fixed while the row’s screen position changes.</p>
 <pre><code class="language-haskell">todoList :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
 todoList items filt = do
   shownFilter &lt;- readVar filt
@@ -315,7 +315,7 @@ todoList items filt = do
 <li><code>withKey (todoId todo)</code> does the same for the row’s <em>widget</em> state and its positional <code>useVar</code> slots. Without the key, deleting the first row would move every later row’s caret, edit flag, and half-typed draft one position up.</li>
 <li><code>matches</code> filters the rows. The neighbours (<code>above</code>, <code>below</code>) are passed in so the Up/Down buttons can skip rows that the filter hides.</li>
 </ul>
-<p>Here is the row itself, trimmed to the essential structure:</p>
+<p>The row, trimmed to its structure:</p>
 <pre><code class="language-haskell">todoRow :: Var [Todo] -&gt; Var Todo -&gt; Maybe Todo -&gt; Maybe Todo -&gt; NanoUI ()
 todoRow items todo above below = do
   -- Local state, kept under this row's key.
@@ -365,9 +365,9 @@ todoRow items todo above below = do
 </code></pre>
 <p>Three details make this work:</p>
 <ol>
-<li><strong><code>scope</code> around the label/field swap.</strong> Only one of the two branches runs on a given frame. Without <code>scope</code>, the widgets after the branch would shift ids whenever the row enters or leaves edit mode. <code>scope</code> reserves one slot either way. (The <code>useVar</code> slots inside the row are stable because the whole row is under <code>withKey</code>.)</li>
-<li><strong>A delayed focus request.</strong> <code>requestFocus</code> can only target a widget declared in the same pass. The field first appears in the pass <em>after</em> Edit was clicked, so the request waits in <code>focusPending</code> until the field exists.</li>
-<li><strong>Editing writes back into the item’s <code>Var</code>.</strong> <code>todo.todoText</code> projects one field; <code>todo.todoDone</code> does too, which is why the checkbox can edit it in place. Saving writes the draft and clears the edit flag.</li>
+<li><code>scope</code> wraps the label/field swap. Only one of the two branches runs on a given frame. Without <code>scope</code>, the widgets after the branch would shift ids whenever the row enters or leaves edit mode. <code>scope</code> reserves one slot either way. (The <code>useVar</code> slots inside the row are stable because the whole row is under <code>withKey</code>.)</li>
+<li>The focus request is delayed. <code>requestFocus</code> can only target a widget declared in the same pass. The field first appears in the pass <em>after</em> Edit was clicked, so the request is stored in <code>focusPending</code> and issued on the pass that declares the field.</li>
+<li>Editing writes back into the item’s <code>Var</code>. <code>todo.todoText</code> projects one field; <code>todo.todoDone</code> does too, which is why the checkbox can edit it in place. Saving writes the draft and clears the edit flag.</li>
 </ol>
 <h2 id="6-reordering-by-id"><a class="header" href="#6-reordering-by-id">6. Reordering by id</a></h2>
 <p>Up and Down need to swap two items wherever they are in the full list. Swapping by id keeps the operation correct even though the visible list is filtered:</p>

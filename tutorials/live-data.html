@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -278,15 +278,15 @@ flakyCard app = do
 </code></pre>
 <p>Two rules are visible here:</p>
 <ul>
-<li><strong>The key must change to rerun.</strong> Keying by the input alone would never restart an identical request; the attempt number is part of the key.</li>
-<li><strong>Each branch is a whole <code>scope</code>.</strong> The branches declare different widgets; the scope keeps the widget ids after the card stable as the status changes.</li>
+<li>The key must change to rerun. Keying by the input alone would never restart an identical request, so the attempt number is part of the key.</li>
+<li>Each branch is a whole <code>scope</code>. The branches declare different widgets, and the scope keeps the widget ids after the card stable as the status changes.</li>
 </ul>
 <p>Cancellation is an asynchronous exception, so acquire resources inside the job with <code>bracket</code>:</p>
 <pre><code class="language-haskell">job :: Text -&gt; IO [Text]
 job q = bracket (connect info) disconnect $ \conn -&gt; runQuery conn q
 </code></pre>
 <h2 id="4-streams-many-updates-one-frame"><a class="header" href="#4-streams-many-updates-one-frame">4. Streams: many updates, one frame</a></h2>
-<p>Progress ticks, sensor readings, and tokens from a model arrive many times per job, so they go through a <code>Stream</code>. Its producer receives <code>update</code> and runs until it returns or is cancelled:</p>
+<p>A <code>Stream</code> is for work that pushes many times per job: progress ticks, sensor readings, tokens from a model. Its producer receives <code>update</code> and runs until it returns or is cancelled:</p>
 <pre><code class="language-haskell">progressCard :: App -&gt; NanoUI ()
 progressCard app = do
   running &lt;- useVar False
@@ -311,14 +311,14 @@ progressCard app = do
       )
 </code></pre>
 <ul>
-<li><strong>Stopping is not calling the hook.</strong> When <code>isRunning</code> is false, <code>useStream</code> is not called, and the producer is cancelled.</li>
-<li><strong>Updates coalesce.</strong> If the producer pushes five values between two frames, the next frame draws the latest one; it does not run five frames.</li>
-<li><strong>The stream’s state starts from the initial value.</strong> Restarting after a pause begins at <code>0</code> here, which is why the label explains how to start over. To resume from the last state, save it outside and pass it as the initial value (the live chart below does exactly that).</li>
-<li><strong>Keep the hook outside tabs when the stream must keep running.</strong> Like a task, a stream is released when its hook is skipped for a whole frame.</li>
+<li>To stop the stream, stop calling the hook. When <code>isRunning</code> is false, <code>useStream</code> is not called, and the producer is cancelled.</li>
+<li>Updates coalesce. If the producer pushes five values between two frames, one frame runs and draws the latest value.</li>
+<li>The stream’s state starts from the initial value. Restarting after a pause begins at <code>0</code> here, which is why the label explains how to start over. To resume from the last state, save it outside and pass it as the initial value (the live chart below does this).</li>
+<li>Keep the hook outside tabs when the stream must keep running. Like a task, a stream is released when its hook is skipped for a whole frame.</li>
 </ul>
 <p>A paused progress pane costs no frames.</p>
 <h2 id="5-a-live-chart"><a class="header" href="#5-a-live-chart">5. A live chart</a></h2>
-<p>A <code>Stream</code> feeds the chart through a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:</p>
+<p>A <code>Stream</code> feeds the chart through a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>, which compares the chart with the one stored in the cache and rebuilds the diagram only when the data or theme changes:</p>
 <pre><code class="language-haskell">data App = App
   { appFeed :: !(Stream () Feed)
   , appSaved :: !(Var Feed)
@@ -398,7 +398,7 @@ walkChart points =
 <li><code>chart</code> takes the list of series; <code>withGrid</code>, <code>withLegend</code>, <code>withXAxis</code>, <code>withYAxis</code>, and <code>withTitle</code> decorate it.</li>
 <li><code>plot cache layout theChart</code> draws it and returns a <code>PlotResponse</code> whose <code>plotHover</code> is the nearest data point under the pointer.</li>
 </ul>
-<p>Building the <code>Chart</code> value every frame is fine: it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the <em>diagram</em>; the <code>PlotCache</code> is what prevents that.</p>
+<p>Building the <code>Chart</code> value every frame is cheap: it is a plain value, and comparing a few hundred points costs little. Rebuilding the <em>diagram</em> is expensive, and the <code>PlotCache</code> skips it when the chart and theme are unchanged.</p>
 <h2 id="6-try-it"><a class="header" href="#6-try-it">6. Try it</a></h2>
 <ul>
 <li>Add a search that runs on every keystroke (key by the query) and compare the cancellation behaviour with <code>searchInput'</code>.</li>

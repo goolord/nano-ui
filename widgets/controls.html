@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -205,7 +205,7 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
 <p><code>iconButton</code> puts an icon before the label; an empty label gives an icon-only square button.</p>
 <h2 id="menus"><a class="header" href="#menus">Menus</a></h2>
 <p><code>menuItem</code> draws a row and returns <code>True</code> when clicked. <code>menuItemShortcut</code> also displays a chord and binds it while the menu is open. <code>menuSeparator</code> and <code>menuItemDisabled</code> complete the row set.</p>
-<p>To build a menu bar, anchor a <code>popup'</code> to a <code>menuButton'</code>’s rectangle:</p>
+<p>A menu bar is a <code>menuButton'</code> plus a <code>popup'</code> anchored to its rectangle:</p>
 <pre><code class="language-haskell">fileMenu = do
   fileOpen &lt;- useVar False
   isOpen &lt;- readVar fileOpen
@@ -222,7 +222,7 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
       whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
   when (respClicked popupResp) (writeVar fileOpen False)
 </code></pre>
-<p><code>constVar</code> supplies a read-only open flag: the truth is the menu’s own state, and a click on the popup is written back to the real <code>Var</code>.</p>
+<p><code>constVar</code> supplies a read-only open flag derived from the menu state, and the code writes a click on the popup back to the real <code>Var</code>.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
 <p>Call overlays unconditionally. <code>popup'</code> draws nothing while closed, but wrapping it in <code>when isOpen</code> changes later widget ids each time the menu opens.</p>
@@ -242,7 +242,7 @@ saveBindings = do
     whenM (menuItem "Copy") copyRow
 </code></pre>
 <h2 id="input-widgets"><a class="header" href="#input-widgets">Input widgets</a></h2>
-<p>Input widgets take the <code>Var</code> they display and edit it, and manage caret, selection, focus, and keys themselves. To reset a field, write the <code>Var</code>; to react to an edit, use the primed form’s <code>Response</code>.</p>
+<p>Input widgets read and write the <code>Var</code> they display, and store caret and selection state under their widget id. To reset a field, write the <code>Var</code>; to react to an edit, use the primed form’s <code>Response</code>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -303,7 +303,7 @@ choices = do
   choice &lt;- useVar 0
   select ["Small", "Medium", "Large"] choice
 </code></pre>
-<p><code>comboBox</code> takes free text plus suggestions; its <code>respChanged</code> fires on commit, not on every model write.</p>
+<p><code>comboBox</code> takes free text plus suggestions; its <code>respChanged</code> fires on commit; a model write alone does not set it.</p>
 <h3 id="sliders-numbers-color"><a class="header" href="#sliders-numbers-color">Sliders, numbers, color</a></h3>
 <pre><code class="language-haskell">values :: Var Color -&gt; NanoUI ()
 values accent = do

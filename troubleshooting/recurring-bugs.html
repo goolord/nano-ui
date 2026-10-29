@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -254,7 +254,7 @@ diskSelect options selectedVar = do
 flatList = styled (inputStyle (background colorTransparent . borderWidth 0))</p>
 <pre><code>
 - Set `themeFloatingWindow` and `themePopup` to the panel surface, so a padded body does not show a panel box inside the dialog.
-- Between two chrome regions, draw one `separator` at the seam, not a border on the bottom of one and the top of the other.
+- Between two chrome regions, draw one `separator` at the seam instead of a border on the bottom of one and the top of the other.
 
 `stronghead` ("Remove duplicate borders from workspace popovers and notifications") and `winget-gui`'s dialogs both made this fix.
 
@@ -313,8 +313,8 @@ oneRowPerNotch rowHeight = do
 </code></pre>
 <p>A scroller can also set its own step with <code>setScrollStepUi</code>; <code>0</code> returns it to the context step.</p>
 <h2 id="6-focus-and-input-ordering"><a class="header" href="#6-focus-and-input-ordering">6. Focus and input ordering</a></h2>
-<h3 id="focus-questions-at-the-top-of-the-view-always-say-no"><a class="header" href="#focus-questions-at-the-top-of-the-view-always-say-no">Focus questions at the top of the view always say “no”</a></h3>
-<p>The node arena is reset before the view runs, so <code>isFocused</code> (or any check of editing state) at the top of <code>appView</code> answers <code>False</code> every frame.</p>
+<h3 id="focus-queries-at-the-top-of-the-view-always-return-false"><a class="header" href="#focus-queries-at-the-top-of-the-view-always-return-false">Focus queries at the top of the view always return <code>False</code></a></h3>
+<p>The node arena is reset before the view runs, so <code>isFocused</code> (or any check of editing state) at the top of <code>appView</code> returns <code>False</code> every frame.</p>
 <p><strong>Symptom:</strong> Ctrl+A selects every item while the search box is being typed into; Delete opens the uninstall dialog.</p>
 <p><strong>Fix:</strong> read focus and place shortcuts at the <strong>end</strong> of the view, after the widgets have run:</p>
 <pre><code class="language-haskell">appView :: Var Text -&gt; NanoUI ()
@@ -328,7 +328,7 @@ appView query = do
 <p>Text inputs do not claim Escape. If Escape shares the “a field is editing” guard with Ctrl+A and Delete, Escape can never clear a selection once a field has focus.</p>
 <p><strong>Fix:</strong> give Escape its own condition.</p>
 <h3 id="typed-keys-never-reach-a-custom-widget"><a class="header" href="#typed-keys-never-reach-a-custom-widget">Typed keys never reach a custom widget</a></h3>
-<p>A focused widget that reads <code>inputChars</code> must call <code>useInputMethod</code> every frame it accepts text, even when it is not a text field. <code>ned</code>’s file tree takes vim’s <code>j</code>/<code>k</code> as typed text; only the editor asked for input, so the keys never reached the tree.</p>
+<p>A focused widget that reads <code>inputChars</code> must call <code>useInputMethod</code> every frame it accepts text, even when it is not a text field. <code>ned</code>’s file tree takes vim’s <code>j</code>/<code>k</code> as typed text; only the editor called <code>useInputMethod</code>, so the keys never reached the tree.</p>
 <p><strong>Fix:</strong></p>
 <pre><code class="language-haskell">-- Every frame the widget accepts text:
 composition :: WidgetId -&gt; Rect -&gt; NanoUI ()

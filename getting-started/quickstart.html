@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -182,10 +182,10 @@
 <p>Set up a project and open a window. The <a href="../tutorials/index.html">tutorials</a> continue from here.</p>
 <h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
 <ul>
-<li><strong>GHC 9.10 through 9.14</strong> (development uses 9.14)</li>
-<li><strong>Cabal 3.12+</strong></li>
-<li><strong>SDL3 and SDL3_ttf 3.2+</strong> for the SDL backend</li>
-<li><strong>pkg-config</strong></li>
+<li>GHC 9.10 through 9.14 (development uses 9.14)</li>
+<li>Cabal 3.12+</li>
+<li>SDL3 and SDL3_ttf 3.2+ for the SDL backend</li>
+<li>pkg-config</li>
 </ul>
 <h3 id="nix-linux--macos"><a class="header" href="#nix-linux--macos">Nix (Linux / macOS)</a></h3>
 <p>In the nano-ui repository, <code>nix develop</code> provides GHC, Cabal, SDL3, SDL3_ttf, and pkg-config.</p>
@@ -270,11 +270,11 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
 <p><code>-j1</code> keeps memory down; a normal project can use cabal’s defaults.</p>
 <h2 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h2>
 <ol>
-<li><strong><code>runSdlApp</code></strong> initializes SDL3, creates a window with TrueType font rendering, and starts the frame loop.</li>
-<li><strong><code>columnWith</code> / <code>rowWith</code></strong> are layout containers. Their argument composes layout modifiers (<code>gap 12 . padAll 20</code>); the leftmost modifier wins when two set the same property.</li>
-<li><strong><code>useVar (0 :: Int)</code></strong> declares state at this position in the view. On later frames it retrieves the existing value; the initial value is used only on the first frame.</li>
-<li><strong><code>button "+"</code></strong> draws an interactive button and returns <code>True</code> only on the frame it is activated.</li>
-<li><strong><code>modifyVar n (+ 1)</code></strong> updates the value. Reading <code>n</code> below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.</li>
+<li><code>runSdlApp</code> initializes SDL3, creates a window with TrueType font rendering, and starts the frame loop.</li>
+<li><code>columnWith</code> and <code>rowWith</code> are layout containers. Their argument composes layout modifiers (<code>gap 12 . padAll 20</code>); the leftmost modifier wins when two set the same property.</li>
+<li><code>useVar (0 :: Int)</code> allocates a <code>Var</code> on the first frame and returns the same <code>Var</code> on later frames, matched by its call position in the view. The initial value is used only on the first frame.</li>
+<li><code>button "+"</code> draws an interactive button and returns <code>True</code> only on the frame it is activated.</li>
+<li><code>modifyVar n (+ 1)</code> updates the value. Reading <code>n</code> below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.</li>
 </ol>
 <p>The view runs every frame, so two rules follow:</p>
 <ul>

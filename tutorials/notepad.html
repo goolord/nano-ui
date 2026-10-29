@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -202,9 +202,9 @@ newNotepad = do
   saveDlg &lt;- newVar Nothing
   pure NotepadState {..}
 </code></pre>
-<p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. The rule of thumb: allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
+<p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. Allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
 <h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
-<p>By default the window closes as soon as the close button is pressed. A notepad needs to intercept that and ask about unsaved changes, so the window is created with <code>wsExitOnCloseRequest = False</code>:</p>
+<p>By default the window closes as soon as the close button is pressed. To prompt about unsaved changes first, the notepad creates the window with <code>wsExitOnCloseRequest = False</code>:</p>
 <pre><code class="language-haskell">main :: IO ()
 main = do
   state &lt;- newNotepad
@@ -276,7 +276,7 @@ menuBar openMenu entries = do
 </code></pre>
 <p>Only the first binding of a chord in a frame fires, so the menu row and the view binding never both run it. The menu row is declared first, so while the menu is open its row wins.</p>
 <ul>
-<li><code>menuItemDisabled "Undo"</code> draws a dimmed row that cannot be clicked. The Edit menu chooses between a real item and a disabled one by checking <code>textCanUndo</code> / <code>textCanRedo</code>.</li>
+<li><code>menuItemDisabled "Undo"</code> draws a dimmed row that cannot be clicked. The Edit menu draws a real item or a disabled one depending on <code>textCanUndo</code> / <code>textCanRedo</code>.</li>
 <li>An action that opens a file dialog writes the new <code>FileDialogId</code> into a <code>Var</code>; dialogs are non-blocking, so the view is not interrupted.</li>
 </ul>
 <h2 id="5-opening-and-saving-files"><a class="header" href="#5-opening-and-saving-files">5. Opening and saving files</a></h2>
@@ -335,9 +335,9 @@ writeDocument filePath doc = do
     writeVar editorId (respId editorResp)
 </code></pre>
 <ul>
-<li><strong><code>withKey gen</code></strong> changes the editor’s key when the document is replaced. A new document gets a fresh caret, selection, and undo stack. Merely editing does not change <code>gen</code>.</li>
-<li><strong><code>respChanged</code></strong> reports an edit, not a caret move. Marking dirty on caret movement would make a read-only inspection look like a modification.</li>
-<li><strong><code>respId</code></strong> is saved for menu commands. The menus can later call <code>runTextCommand editor Undo</code> and friends.</li>
+<li><code>withKey gen</code> changes the editor’s key when the document is replaced, so a new document gets a fresh caret, selection, and undo stack. Editing does not change <code>gen</code>.</li>
+<li><code>respChanged</code> is <code>True</code> after an edit and <code>False</code> after a caret move alone. Marking dirty on caret movement would make a read-only inspection look like a modification.</li>
+<li><code>respId</code> is saved for menu commands, which call <code>runTextCommand editor Undo</code> and the other <code>TextCommand</code>s.</li>
 </ul>
 <p><code>fontSizeScale zoomVal</code> zooms the text without touching the document. The zoom commands are ordinary <code>modifyVar</code> calls clamped to a sane range.</p>
 <h2 id="7-dirty-state-title-and-the-close-prompt"><a class="header" href="#7-dirty-state-title-and-the-close-prompt">7. Dirty state, title, and the close prompt</a></h2>
@@ -387,10 +387,10 @@ writeDocument filePath doc = do
 <p><code>TextCommand</code> covers <code>InsertText</code>, <code>Delete</code>, <code>Move</code>, <code>Select</code>, <code>Replace</code>, <code>ReplaceAll</code>, <code>Undo</code>, <code>Redo</code>, <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, and <code>SelectAll</code>. Using commands rather than writing the <code>Var</code> keeps undo intact; assigning a freshly computed <code>TextDocument</code> to <code>doc</code> clears the history.</p>
 <blockquote class="blockquote-tag blockquote-tag-tip">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
-<p>A focused text editor claims its own editing chords (Ctrl+Z, Ctrl+X, and so on) before the application’s shortcuts see them. The menu items still work because they are explicit commands, and the top-level bindings are a fallback for when focus is elsewhere.</p>
+<p>A focused text editor claims its editing chords (Ctrl+Z, Ctrl+X, and so on), and <code>shortcut</code> skips claimed keys. The menu items still work because they run explicit commands, and the top-level bindings fire when focus is elsewhere.</p>
 </blockquote>
 <h2 id="9-the-status-bar"><a class="header" href="#9-the-status-bar">9. The status bar</a></h2>
-<p>A row of muted labels makes the status bar. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
+<p>The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
 <pre><code class="language-haskell">statusBar :: Text -&gt; Var TextDocument -&gt; Var Text -&gt; Float -&gt; NanoUI ()
 statusBar docName docVar statusMsg zoomVal = do
   doc &lt;- readVar docVar

@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -181,24 +181,24 @@
                         <h1 id="architecture--internals"><a class="header" href="#architecture--internals">Architecture &amp; Internals</a></h1>
 <p>How a frame runs, and how applications are structured around it. None of this is needed to write a view; it explains what <code>readVar</code>, focus, and damage cost.</p>
 <h2 id="the-frame-lifecycle"><a class="header" href="#the-frame-lifecycle">The frame lifecycle</a></h2>
-<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"><span class="img-wrapper"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"></span></label></p>
+<p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="../images/rendering-pipeline.svg" alt="Frame lifecycle"><span class="img-wrapper"><img src="../images/rendering-pipeline.svg" alt="Frame lifecycle"></span></label></p>
 <p>Each frame:</p>
 <ol>
-<li><strong>View execution.</strong> The <code>NanoUI ()</code> action runs top-to-bottom, appending layout nodes, reading input, and reading/writing <code>Var</code>s.</li>
-<li><strong>Re-run check.</strong> If a <code>Var</code> was written after it was read this pass, the action runs again with one-shot input events cleared.</li>
-<li><strong>Layout solve.</strong> Flex weights, gaps, padding, and constraints produce a rectangle for every node.</li>
-<li><strong>Hit testing and focus.</strong> Pointer coordinates, shortcuts, hover, press, and Tab order resolve against the new geometry.</li>
-<li><strong>Damage calculation.</strong> The new geometry and draw ops are diffed against the previous frame.</li>
-<li><strong>Paint.</strong> Only the damaged region is rasterized and presented.</li>
+<li>The <code>NanoUI ()</code> action runs top-to-bottom, appending layout nodes, reading input, and reading and writing <code>Var</code>s.</li>
+<li>If a <code>Var</code> was written after it was read this pass, the action runs again with one-shot input events cleared.</li>
+<li>The layout pass computes a rectangle for every node from flex weights, gaps, padding, and constraints.</li>
+<li>Pointer coordinates, hover, press, shortcuts, and Tab order are resolved against the new geometry.</li>
+<li>The new geometry and draw ops are diffed against the previous frame’s to find the damaged region.</li>
+<li>The backend rasterizes and presents only the damaged region.</li>
 </ol>
 <p>The view runs before layout, so <code>respRect</code> is the <strong>previous</strong> frame’s rectangle. Focus is resolved after the view, so a focus request takes effect next frame.</p>
 <h2 id="consequences"><a class="header" href="#consequences">Consequences</a></h2>
 <ul>
-<li><strong>The view can run more than once per frame.</strong> A write to a <code>Var</code> read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (<code>whenM (button ...)</code>), and never allocate frame-lived resources inside the view.</li>
-<li><strong><code>readVar</code> placement is a performance decision.</strong> Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. A <code>Var</code> bound to a widget with no <code>readVar</code> repaints only that widget; a <code>readVar</code> promotes the change to a full-window repaint.</li>
-<li><strong>Geometry lags one frame.</strong> <code>respRect</code> is empty on a widget’s first appearance. Tests warm up before targeting rectangles.</li>
-<li><strong>Widget ids are positional.</strong> Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. <code>scope</code> and <code>withKey</code> keep the counts stable; see <a href="../state/identity.html">Widget Identity &amp; Keys</a>.</li>
-<li><strong>Idle costs zero.</strong> With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.</li>
+<li>The view can run more than once per frame. A write to a <code>Var</code> read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (<code>whenM (button ...)</code>), and never allocate frame-lived resources inside the view.</li>
+<li><code>readVar</code> placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. A <code>Var</code> bound to a widget with no <code>readVar</code> repaints only that widget; a <code>readVar</code> promotes the change to a full-window repaint.</li>
+<li>Geometry lags one frame. <code>respRect</code> is empty on a widget’s first appearance. Tests warm up before targeting rectangles.</li>
+<li>Widget ids are positional. Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. <code>scope</code> and <code>withKey</code> keep the counts stable; see <a href="../state/identity.html">Widget Identity &amp; Keys</a>.</li>
+<li>An idle window costs nothing. With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.</li>
 </ul>
 <h2 id="application-patterns"><a class="header" href="#application-patterns">Application patterns</a></h2>
 <p>Three applications (<code>ned</code>, <code>stronghead</code>, <code>winget-gui</code>) share one rule, <strong>set up once in <code>IO</code>, then run</strong>, and differ in where durable state lives.</p>
@@ -243,7 +243,7 @@ newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1
 </code></pre>
 <p>Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.</p>
 <h3 id="pattern-c-application-owned-state"><a class="header" href="#pattern-c-application-owned-state">Pattern C: application-owned state</a></h3>
-<p><code>ned</code> keeps a plain <code>IORef App</code>; nano-ui never sees it. The view projects slices and re-reads after anything that may change the model:</p>
+<p><code>ned</code> keeps a plain <code>IORef App</code> that nano-ui holds no reference to. The view projects slices and re-reads after anything that may change the model:</p>
 <pre><code class="language-haskell">editorView :: Editor -&gt; NanoUI ()
 editorView (Editor ref) = do
   app &lt;- liftIO (readIORef ref)
@@ -251,7 +251,7 @@ editorView (Editor ref) = do
   app' &lt;- liftIO (readIORef ref)
   when (viewChanged app app') requestFrame
 </code></pre>
-<p><code>requestFrame</code> asks for one more frame when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.</p>
+<p><code>requestFrame</code> schedules one more frame; call it when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.</p>
 <h3 id="choosing"><a class="header" href="#choosing">Choosing</a></h3>
 <div class="table-wrapper">
 <table>
@@ -270,12 +270,12 @@ editorView (Editor ref) = do
 <p>Patterns mix. An <code>IORef</code> domain state with <code>Var</code> view state is normal; an Elm reducer can sit inside one pane of a <code>Var</code>-based application.</p>
 <h2 id="the-shared-view-discipline"><a class="header" href="#the-shared-view-discipline">The shared view discipline</a></h2>
 <ol>
-<li><strong>Read state once at the top</strong>, or immediately before the subtree that uses it.</li>
-<li><strong>Build top-to-bottom.</strong> Layout is solved after the view.</li>
-<li><strong>Read after the parts that may write.</strong></li>
-<li><strong>Run keyboard and focus queries last.</strong></li>
-<li><strong>Guard effects with events.</strong> The view can run more than once per frame.</li>
-<li><strong>Keep derived values derived.</strong> Cache expensive work by revision, not by copying fields.</li>
+<li>Read state once at the top, or immediately before the subtree that uses it.</li>
+<li>Build top-to-bottom. Layout is solved after the view.</li>
+<li>Read after the parts that may write.</li>
+<li>Run keyboard and focus queries last.</li>
+<li>Guard effects with events. The view can run more than once per frame.</li>
+<li>Keep derived values derived. Cache expensive work by revision, not by copying fields.</li>
 </ol>
 
                     </main>

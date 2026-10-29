@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -209,7 +209,7 @@ fileDrop = do
   (_, _, target) &lt;- dropZone (fillW . padAll 12) (label "Drop files here")
   when (dropReceived target) (mapM_ openFile (dropFiles target))
 </code></pre>
-<p><code>dropHovered</code> is true while a drag is over the zone. <code>useDrop rect</code> does the same for any rectangle. Only the topmost layer sees the drop, so a zone behind a modal gets nothing.</p>
+<p><code>dropHovered</code> is true while a drag is over the zone. <code>useDrop rect</code> does the same for any rectangle. Only the topmost layer receives the drop, so a zone behind a modal gets nothing.</p>
 <h2 id="pane-grids"><a class="header" href="#pane-grids">Pane grids</a></h2>
 <p><code>paneGrid</code> lays out dockable, splittable panes. Its response’s <code>pgrDropTarget</code> is the destination under the pointer, which pairs with a <code>useDrag</code> gesture:</p>
 <pre><code class="language-haskell">dockPanes :: PaneGridConfig -&gt; Maybe (Drag Word64) -&gt; NanoUI ()

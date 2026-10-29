@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -218,9 +218,9 @@ body = styled panelPage (columnWith (padAll 12) (label "Body"))
 </code></pre>
 <p>Modifiers compose with <code>(.)</code>; nested scopes inherit the outer modification. Theme scopes affect painting only, never layout metrics.</p>
 <ul>
-<li><strong>Style fields:</strong> <code>background</code>, <code>foreground</code>, <code>borderColor</code>, <code>borderWidth</code>, <code>borderSides</code>, <code>cornerRadius</code>, <code>hoverBackground</code>, <code>pressBackground</code>, <code>fillColor</code>.</li>
-<li><strong>Theme-level:</strong> <code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>everyStyle</code>, <code>accentColor</code>, <code>textColor</code>, <code>rounded</code>, <code>subtle</code>, <code>tinted</code>, <code>readableOn</code>.</li>
-<li><strong>Semantic shortcuts:</strong> <code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, <code>toneColor Warning</code>.</li>
+<li><code>background</code>, <code>foreground</code>, <code>borderColor</code>, <code>borderWidth</code>, <code>borderSides</code>, <code>cornerRadius</code>, <code>hoverBackground</code>, <code>pressBackground</code>, and <code>fillColor</code> set <code>Style</code> fields.</li>
+<li><code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>everyStyle</code>, <code>accentColor</code>, <code>textColor</code>, <code>rounded</code>, <code>subtle</code>, <code>tinted</code>, and <code>readableOn</code> modify the <code>Theme</code>.</li>
+<li><code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, and <code>toneColor Warning</code> apply semantic colours.</li>
 </ul>
 <p>A quiet button:</p>
 <pre><code class="language-haskell">quiet :: Theme -&gt; Theme
@@ -230,13 +230,20 @@ quietSkip = whenM (styled quiet (button "Skip")) skip
 </code></pre>
 <p>For a fully custom look, define a palette record, build a <code>Theme</code> from it, and derive scoped helpers. Keep three surface levels (well, shelf, controls) and reserve color for meaning.</p>
 <h2 id="interaction-states"><a class="header" href="#interaction-states">Interaction states</a></h2>
-<p>Widgets move through four states:</p>
-<ol>
-<li><strong>Default</strong>: <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>.</li>
-<li><strong>Hover</strong>: <code>styleHoverBg</code>.</li>
-<li><strong>Pressed</strong>: <code>styleActiveBg</code>, while the primary button is held inside the widget.</li>
-<li><strong>Disabled</strong>: dimmed and non-interactive.</li>
-</ol>
+<p>A widget is drawn in one of four states:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>State</th><th>Drawn with</th></tr>
+</thead>
+<tbody>
+<tr><td>Default</td><td><code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code></td></tr>
+<tr><td>Hover</td><td><code>styleHoverBg</code></td></tr>
+<tr><td>Pressed</td><td><code>styleActiveBg</code>, while the primary button is held inside the widget</td></tr>
+<tr><td>Disabled</td><td>Dimmed colours; pointer and keyboard input are ignored</td></tr>
+</tbody>
+</table>
+</div>
 <p><code>disabledWhen cond subtree</code> disables interaction and dims rendering while preserving layout and state:</p>
 <pre><code class="language-haskell">savingButtons = do
   isSaving &lt;- useVar False

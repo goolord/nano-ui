@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -272,12 +272,12 @@ settingsView settings = do
   checkbox "Silent" settings.silent
   textInput settings.nickname
 </code></pre>
-<p><code>settings.volume</code> projects one field as a <code>Var Float</code>. Editing it does not repaint what reads only <code>settings.nickname</code>.</p>
+<p><code>settings.volume</code> is a <code>Var Float</code> projecting one field. Editing it does not repaint what reads only <code>settings.nickname</code>.</p>
 <ul>
-<li><strong><code>constVar x</code></strong> is read-only; writes are no-ops. Use it for a derived value shown in an input widget.</li>
-<li><strong><code>withValue val widget</code></strong> runs a <code>Var</code> widget against a temporary <code>Var</code> and returns the result and final value. <code>nano-ui-emit</code> uses it for <code>emitChanged</code>.</li>
-<li><strong><code>zoomVar getter setter</code></strong> projects a computed part of a larger <code>Var</code>; <code>zoomVarL</code> does the same from a lens.</li>
-<li><strong>Lists:</strong> <code>forEachVar key list body</code> gives per-element <code>Var</code>s that follow their keys across reorders. <code>withElemVars</code> is the variant for filtering or sorting yourself.</li>
+<li><code>constVar x</code> is read-only; writes are no-ops. Use it for a derived value shown in an input widget.</li>
+<li><code>withValue val widget</code> runs a <code>Var</code> widget against a temporary <code>Var</code> and returns the result and final value. <code>nano-ui-emit</code> uses it for <code>emitChanged</code>.</li>
+<li><code>zoomVar getter setter</code> projects a computed part of a larger <code>Var</code>; <code>zoomVarL</code> does the same from a lens.</li>
+<li><code>forEachVar key list body</code> gives per-element <code>Var</code>s that follow their keys across reorders. <code>withElemVars</code> is the variant for filtering or sorting yourself.</li>
 </ul>
 <h2 id="what-a-write-costs"><a class="header" href="#what-a-write-costs">What a write costs</a></h2>
 <p><code>readVar</code> records a dependency for the current pass. When the value changes, nano-ui classifies the write:</p>

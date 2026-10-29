@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -196,7 +196,7 @@
 </table>
 </div>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
-<p>Desktop apps normally run on <code>nano-ui-sdl</code>:</p>
+<p><code>nano-ui-sdl</code> is the primary desktop backend:</p>
 <pre><code class="language-haskell">sdlMain :: IO ()
 sdlMain = Sdl.runSdlApp
   Sdl.defaultSdlOptions
@@ -208,7 +208,7 @@ sdlMain = Sdl.runSdlApp
   appView
 </code></pre>
 <p>It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (<code>useFileDialog</code>), custom title bars (<code>windowCaption</code>), and screenshots (<code>saveScreenshot</code>, <code>captureScreenshot</code>). See <a href="../advanced/window-management.html">Desktop Windows</a> for the window side.</p>
-<p><code>nano-ui-rgfw</code> needs no system dependencies:</p>
+<p><code>nano-ui-rgfw</code> is the alternative with no system dependencies:</p>
 <pre><code class="language-haskell">rgfwMain :: IO ()
 rgfwMain = Rgfw.runRgfwApp Rgfw.defaultRgfwOptions appView
 </code></pre>
@@ -316,7 +316,7 @@ hoverReadout cache = columnWith (gap 8) $ do
     Just h -&gt; kv "value" (T.pack (show (round (hoverDataY h) :: Int)))
 </code></pre>
 <img src="../images/charts/hover.svg" alt="A line chart of eight request counts with the pointer by the seventh point; below it the readout value 240.">
-<p>The pointer rests by the seventh point, so the readout shows its 240. <code>hoverSeriesIdx</code> and <code>hoverPointIdx</code> say which series and point it is. Wrap the chart in <code>withCursorShape UiCursorCrosshair</code> to give the pointer a crosshair.</p>
+<p>The pointer rests by the seventh point, so the readout shows its 240. <code>hoverSeriesIdx</code> and <code>hoverPointIdx</code> hold the index of its series and point. Wrap the chart in <code>withCursorShape UiCursorCrosshair</code> to give the pointer a crosshair.</p>
 <h3 id="diagrams"><a class="header" href="#diagrams">Diagrams</a></h3>
 <p><code>diagram</code> places any diagrams-lib <code>Diagram B</code> in the layout, framed like a chart and scaled to fit the layout modifier with its proportions kept. Colour it from the theme with <code>colourOf</code>, or take the chart colours from <code>uiPlotStyle</code>:</p>
 <pre><code class="language-haskell">-- | Three labelled boxes joined by arrows, coloured from the theme.
@@ -337,7 +337,7 @@ pipelineDiagram :: NanoUI ()
 pipelineDiagram = void $ diagram (fixedWH 360 72) . stages =&lt;&lt; uiTheme
 </code></pre>
 <img src="../images/charts/diagram.svg" alt="Three blue rounded boxes labelled view, layout, and paint, joined left to right by white arrows.">
-<p>Text in a diagram is measured with the current font so labels fit. The drawing is cached per theme and size, not per content: for a diagram that changes, use <code>diagramWithKeyAndEnvelope</code> with a key that changes with it. The live chart tutorial feeds a chart from a <code>Stream</code>: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</p>
+<p>Text in a diagram is measured with the current font so labels fit. The cache key is the theme and the size only, so for a diagram whose content changes, use <code>diagramWithKeyAndEnvelope</code> with a key that changes with it. The live chart tutorial feeds a chart from a <code>Stream</code>: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</p>
 <h2 id="validated-forms"><a class="header" href="#validated-forms">Validated forms</a></h2>
 <p><code>nano-ui-form</code> builds applicative forms on ditto. A <code>Form Text a</code> has <code>Text</code> errors and returns <code>a</code>:</p>
 <pre><code class="language-haskell">data Signup = Signup Text Text
@@ -378,8 +378,8 @@ reply stream cache replyId = do
 <h2 id="svg-export"><a class="header" href="#svg-export">SVG export</a></h2>
 <p><code>nano-ui-svg</code> has two levels:</p>
 <ul>
-<li><strong><code>NanoUI.Draw.Svg</code></strong> exports <code>DrawOp</code> sequences: <code>drawOpsToSvg bounds ops</code> or <code>renderDrawOpsSvg config</code>.</li>
-<li><strong><code>NanoUI.Draw.FrameSvg</code></strong> re-renders a whole frame: <code>frameToSvg config ctx input drawData</code>.</li>
+<li><code>NanoUI.Draw.Svg</code> exports <code>DrawOp</code> sequences: <code>drawOpsToSvg bounds ops</code> or <code>renderDrawOpsSvg config</code>.</li>
+<li><code>NanoUI.Draw.FrameSvg</code> re-renders a whole frame: <code>frameToSvg config ctx input drawData</code>.</li>
 </ul>
 <pre><code class="language-haskell">exportViewToSvg :: NanoUI () -&gt; IO Text
 exportViewToSvg v = do

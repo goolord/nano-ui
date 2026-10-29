@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -310,7 +310,7 @@ settingsPanel =
 <img class="nano-example-shot" src="../images/layout/spacer.svg" alt="Left and Right labels pushed to opposite ends of a row.">
 </details>
 <h2 id="modifiers"><a class="header" href="#modifiers">Modifiers</a></h2>
-<p>Each modifier rewrites a <code>Layout</code> (<code>Layout -&gt; Layout</code>), so modifiers chain with <code>(.)</code>. The leftmost wins when two set the same property, so <code>tight . padAll 14</code> has no padding while <code>padAll 14 . tight</code> keeps it.</p>
+<p>Modifiers are <code>Layout -&gt; Layout</code> functions, so they chain with <code>(.)</code>. The leftmost wins when two set the same property, so <code>tight . padAll 14</code> has no padding while <code>padAll 14 . tight</code> keeps it.</p>
 <h3 id="sizing"><a class="header" href="#sizing">Sizing</a></h3>
 <details class="nano-example">
 <summary><code>fillW</code>: take all remaining width</summary>
@@ -501,7 +501,7 @@ settingsPanel =
 <img class="nano-example-shot" src="../images/layout/tight.svg" alt="Two panels comparing normal padding with tight.">
 </details>
 <h3 id="alignment-and-wrapping"><a class="header" href="#alignment-and-wrapping">Alignment and wrapping</a></h3>
-<p><code>alignStart</code>, <code>alignCenter</code>, and <code>alignEnd</code> place a child across a column. <code>alignTop</code>, <code>alignMid</code>, and <code>alignBottom</code> place it down a row. A child always aligns itself; putting <code>alignMid</code> on a row positions the row in its parent, not the row’s contents.</p>
+<p><code>alignStart</code>, <code>alignCenter</code>, and <code>alignEnd</code> place a child across a column. <code>alignTop</code>, <code>alignMid</code>, and <code>alignBottom</code> place it down a row. An alignment modifier positions the node it is applied to inside its parent. <code>alignMid</code> on a row moves the row; to centre the row’s children, put <code>alignMid</code> on each child.</p>
 <details class="nano-example">
 <summary><code>alignStart</code>: the left edge</summary>
 <pre><code class="language-haskell">alignStartExample =
@@ -665,7 +665,7 @@ virtualizedList items = do
           labelWith (fixedH rowH . fillW) (itemTitle item)
       when (bottomH &gt; 0) (spacer Fit (Fixed bottomH))
 </code></pre>
-<p><code>scrollViewport</code> excludes padding and the scrollbar lane; use it, not the container rectangle, for the visible height. <code>scrollOffset</code> is the current offset. The metrics read registers a layout dependency, so a resize triggers another frame.</p>
+<p><code>scrollViewport</code> excludes padding and the scrollbar lane; use it instead of the container rectangle for the visible height. <code>scrollOffset</code> is the current offset. The metrics read registers a layout dependency, so a resize triggers another frame.</p>
 <p>See <code>packages/nano-ui-demo/examples/LongList.hs</code> (100,000 rows) and <code>Logs.hs</code> (sticky-to-bottom).</p>
 <h3 id="programmatic-scrolling-and-wheel-tuning"><a class="header" href="#programmatic-scrolling-and-wheel-tuning">Programmatic scrolling and wheel tuning</a></h3>
 <pre><code class="language-haskell">reveal :: WidgetId -&gt; Float -&gt; Int -&gt; Bool -&gt; NanoUI ()
@@ -683,7 +683,7 @@ oneRowPerNotch rowHeight = do
 </code></pre>
 <p><code>setScrollStepUi sid px</code> overrides one scroller; <code>0</code> restores the context step.</p>
 <h2 id="nesting-and-chrome"><a class="header" href="#nesting-and-chrome">Nesting and chrome</a></h2>
-<p><code>scrollArea</code>, <code>panel</code>, and <code>card</code> each draw a background, border, and radius. Nesting them inside a popup or dialog draws a box in a box. Let one level own the chrome: flatten the inner surface with <code>styled (inputStyle (background colorTransparent . borderWidth 0))</code>, or give the outer dialog <code>padAll 0</code> and pad the inner body.</p>
+<p><code>scrollArea</code>, <code>panel</code>, and <code>card</code> each draw a background, border, and radius. Nesting them inside a popup or dialog draws a box in a box. Draw the chrome at one level only: flatten the inner surface with <code>styled (inputStyle (background colorTransparent . borderWidth 0))</code>, or give the outer dialog <code>padAll 0</code> and pad the inner body.</p>
 <p>See <a href="../styling/gotchas.html">Styling Gotchas</a> and <a href="../troubleshooting/recurring-bugs.html">Troubleshooting</a> for the recurring cases.</p>
 
                     </main>

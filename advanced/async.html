@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-55b2db3d.js";
+            window.path_to_searchindex_js = "../searchindex-7e24e794.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -208,15 +208,15 @@ fileView app path = do
   label (fromMaybe "Loading..." contents)
 </code></pre>
 <ul>
-<li><strong>The key identifies the job.</strong> A new key starts a worker and cancels the old job with an asynchronous exception.</li>
-<li><strong>A skipped hook cancels the job.</strong> If the view does not call <code>useTask</code> for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
-<li><strong>To retrigger the same input, put a counter in the key.</strong> A Retry button must change the key or the job never reruns.</li>
-<li><strong>Cancellation is an async exception.</strong> Use <code>bracket</code> or <code>withFile</code> inside the job so resources are released when the user changes the query.</li>
-<li><strong>The result is forced on the worker.</strong> Return a value in weak head normal form; force a list’s spine with <code>length found \</code>seq` pure found`.</li>
-<li><strong><code>TaskRunning previous</code> carries the last result</strong>, so a list does not flash empty while the next query runs.</li>
+<li>The key identifies the job. A new key starts a worker and cancels the old job with an asynchronous exception.</li>
+<li>A skipped hook cancels the job. If the view does not call <code>useTask</code> for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
+<li>To retrigger the same input, put a counter in the key. A Retry button must change the key or the job never reruns.</li>
+<li>Cancellation is an async exception. Use <code>bracket</code> or <code>withFile</code> inside the job so resources are released when the user changes the query.</li>
+<li>The result is forced on the worker. Return a value in weak head normal form; force a list’s spine with <code>length found \</code>seq` pure found`.</li>
+<li><code>TaskRunning previous</code> carries the last result, so a list does not flash empty while the next query runs.</li>
 </ul>
 <h2 id="stream-repeated-pushes"><a class="header" href="#stream-repeated-pushes"><code>Stream</code>: repeated pushes</a></h2>
-<p>Sensors, downloads, token streams, and anything else that pushes repeatedly feed a <code>Stream</code>:</p>
+<p>A <code>Stream</code> is for sensors, downloads, token streams, and anything else that pushes repeatedly:</p>
 <pre><code class="language-haskell">progress :: App -&gt; NanoUI ()
 progress app = do
   pct &lt;- useStream (appProgress app) () (0 :: Int) $ \update -&gt;
@@ -227,9 +227,9 @@ progress app = do
 </code></pre>
 <p>The producer receives <code>update :: (s -&gt; s) -&gt; IO ()</code> and returns when done, cancelled, or throwing. Each update wakes the loop; updates between frames coalesce into one frame.</p>
 <ul>
-<li><strong>Stop by not calling the hook.</strong> <code>when isRunning (useStream ...)</code> releases the producer.</li>
-<li><strong>Stopping discards the accumulated state.</strong> Save it outside and pass it as the next initial value to resume.</li>
-<li><strong>Producers must not touch the UI.</strong> They may call <code>update</code> from their thread or threads they start; never touch the UI <code>Context</code>.</li>
+<li>Stop by not calling the hook. <code>when isRunning (useStream ...)</code> releases the producer.</li>
+<li>Stopping discards the accumulated state. Save it outside and pass it as the next initial value to resume.</li>
+<li>Producers must not touch the UI. They may call <code>update</code> from their thread or threads they start; never touch the UI <code>Context</code>.</li>
 </ul>
 <h2 id="threads-outside-those-handles"><a class="header" href="#threads-outside-those-handles">Threads outside those handles</a></h2>
 <pre><code class="language-haskell">refreshInBackground :: Var [Text] -&gt; NanoUI ()
@@ -241,7 +241,7 @@ refreshInBackground queryResult = do
     writeVarIO queryResult result
     wake -- schedule one frame
 </code></pre>
-<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The wake repaints the whole window, since nothing says which widget changed. Use a <code>Stream</code> for frequent updates.</p>
+<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The wake repaints the whole window, because it carries no record of which widget changed. Use a <code>Stream</code> for frequent updates.</p>
 <h2 id="animation"><a class="header" href="#animation">Animation</a></h2>
 <p><code>animateTo</code> moves a value toward a target:</p>
 <pre><code class="language-haskell">sidebar :: Float -&gt; NanoUI ()
@@ -251,8 +251,8 @@ sidebar targetWidth = do
 </code></pre>
 <p>A <code>Transition</code> is either:</p>
 <ul>
-<li><strong><code>Tween ease duration delay</code></strong>, in seconds. Curves include <code>EaseOutQuad</code>, <code>EaseInOutCubic</code>, <code>EaseOutBack</code>, and <code>EaseCubicBezier</code>.</li>
-<li><strong><code>Spring params</code></strong>, a damped spring. <code>presetSmooth</code>, <code>presetBouncy</code>, and <code>presetStiff</code> are the presets.</li>
+<li><code>Tween ease duration delay</code>, in seconds. Curves include <code>EaseOutQuad</code>, <code>EaseInOutCubic</code>, <code>EaseOutBack</code>, and <code>EaseCubicBezier</code>.</li>
+<li><code>Spring params</code>, a damped spring. <code>presetSmooth</code>, <code>presetBouncy</code>, and <code>presetStiff</code> are the presets.</li>
 </ul>
 <pre><code class="language-haskell">follow :: Float -&gt; Float -&gt; NanoUI V2
 follow targetX targetY = animateToA (Spring presetSmooth) (V2 targetX targetY)
