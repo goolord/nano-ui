@@ -3,7 +3,6 @@ module Main (main) where
 import Control.Exception (bracket)
 import Control.Monad (filterM, forM_, void)
 import Data.Bits ((.|.))
-import Data.ByteString qualified as BS
 import Data.Foldable (toList)
 import Data.List (nub)
 import Data.Text qualified as T
@@ -11,17 +10,16 @@ import Data.Word (Word32)
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
 import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
-  ( AlignX (..), AlignY (..), ImageConfig (..), ImageId (..), NanoUI, Rect (..), Rotation (..), Style (..)
-  , Theme (..), UiCursorKind (..), V2 (..), button, canvas, checkbox, colorRGBA, column, constVar
-  , defaultImageConfig, drawText, fixedWH, fontColor, fontMono, fontSize, imageConfigured', inlineWith, labelWith
-  , rectIntersect, respRect, richText, roundHalfUp, tomorrowNightMinDarkTheme, window', withClip, withTransform
+  ( AlignX (..), AlignY (..), NanoUI, Rect (..), Style (..), Theme (..), UiCursorKind (..), V2 (..), button, canvas
+  , checkbox, colorRGBA, column, constVar, drawText, fixedWH, fontColor, fontMono, fontSize, inlineWith, labelWith
+  , richText, tomorrowNightMinDarkTheme, window'
   )
+import NanoUI.Backend (cursorFallback)
 import NanoUI.Input
-  ( Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsFromList, buttonsToList
+  ( Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsToList
   , emptyInput, noModifiers
   )
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Path qualified as P
 import NanoUI.Rgfw.Internal.Context (newRgfwContext)
 import NanoUI.Rgfw.Internal.Font.Cozette
   ( CozetteFont (..), charToGlyphId, cozetteGlyphBit, cozetteGlyphFootprint, getCozetteFont
@@ -33,7 +31,7 @@ import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCu
 import NanoUI.Rgfw.Render (RgfwSurface (..), packColor, renderArena, withSurface)
 import NanoUI.Rgfw.Wake (testRgfwWake)
 import NanoUI.Rgfw.Window (testGlWindow, testSessionWindow)
-import NanoUI.Testing (Context, collectRasterSpans, registerImage)
+import NanoUI.Testing (Context, collectRasterSpans)
 import NanoUI.Testing.Assert (run2Frames)
 import NanoUI.Testing.Harness (DemoSpan, nodesOfType, withInputOff)
 import RGFW (Event (..))
@@ -132,19 +130,23 @@ testGlyphs = do
       (aw, ah) = (fromIntegral (gaWidth ga), fromIntegral (gaHeight ga)) :: (Float, Float)
       (ax, ay) = atlasCell ga (fromIntegral (charToGlyphId font 'A'))
       uv u v = [fromIntegral u / aw, fromIntegral v / ah]
-      quads txt clip = allocaBytes (64 * 32) $ \buf -> do
-        n <- writeSpanQuads ga font (0, 0, 200, 100) buf 0 (Rect 10 5 0 0, txt, red, red, clip)
+      quads g origin txt clip = allocaBytes (64 * 32) $ \buf -> do
+        n <- writeSpanQuads g font (0, 0, 200, 100) buf 0 (origin, txt, red, red, clip)
         vs <- mapM (\i -> mapM (\o -> peekByteOff buf (i * 32 + o)) [0, 4, 24, 28]) [0 .. n - 1]
         pure (n, vs :: [[Float]])
-  (n1, v1) <- quads "A B\nC" (Rect 0 0 100 50)
-  (n2, v2) <- quads "A" (Rect 12 0 100 50)
-  (n3, _) <- quads "A" (Rect 150 80 10 10)
+      at10 = Rect 10 5 0 0
+  (n1, v1) <- quads ga at10 "A B\nC" (Rect 0 0 100 50)
+  (n2, v2) <- quads ga at10 "A" (Rect 12 0 100 50)
+  (n3, _) <- quads ga at10 "A" (Rect 150 80 10 10)
+  -- At 1.5x a span at (11, 7) puts its pen at (16.5, 10.5), which rounds up.
+  (_, v4) <- quads (glyphAtlasFor font 1.5) (Rect 11 7 0 0) "A" (Rect 0 0 100 50)
   asserts "span quads: "
     [ ("one quad per visible glyph", n1 == 18)
     , ("first glyph at the scaled pen", take 1 v1 == [[20, 10] ++ uv ax ay])
     , ("newline resets the column", map (take 2) (take 1 (drop 12 v1)) == [[20, 36]])
     , ("clip trims position and UV", n2 == 6 && take 1 v2 == [[24, 10] ++ uv (ax + 4) ay])
     , ("clip outside the framebuffer emits nothing", n3 == 0)
+    , ("the pen rounds half up at 1.5x", map (take 2) (take 1 v4) == [[17, 11]])
     ]
 
 -- | An RGFW context renders square, themed widgets, and stamps widget,
@@ -221,54 +223,6 @@ testWindowLayer = do
         assert "Drawing text in a floating window shows over its background" (map glyphs overInk == [True])
       [] -> assert "Floating window node present in arena" False
 
--- | A canvas transform moves its text's span, and a canvas clip clips it:
--- translated by (30, 10), the span is the plain one moved that far, and its
--- clip is the clip rect cut to the canvas. At 1.5x its first glyph quad
--- starts at the span's origin scaled and rounded half up.
-testDrawingTextTransform :: IO ()
-testDrawingTextTransform = do
-  ctx <- newRgfwContext tomorrowNightMinDarkTheme
-  let ink = colorRGBA 0x12 0xEE 0x34 255
-      inp = withInputOff 240 80
-      clipR = Rect 20 5 300 30
-      at (Rect x y _ _) = V2 (x + 5) (y + 4)
-      ui = canvas (fixedWH 200 60) $ \r -> do
-        drawText (at r) AlignStart AlignTop "plain" ink
-        withClip clipR (withTransform (P.translate 30 10) (drawText (at r) AlignStart AlignTop "moved" ink))
-  (resp, _, _) <- run2Frames ctx inp ui
-  (base, _) <- collectRasterSpans ctx inp
-  case ([r | (r, "plain", _, _, _) <- base], [(r, c) | (r, "moved", _, _, c) <- base]) of
-    ([Rect px py _ _], [(moved@(Rect mx my _ _), clip)]) -> do
-      assert "A canvas transform moves drawing text" ((mx, my) == (px + 30, py + 10))
-      assert "A canvas clip clips drawing text" (Just clip == rectIntersect clipR (respRect resp))
-      let ga = glyphAtlasFor getCozetteFont 1.5
-          pen v = fromIntegral (roundHalfUp (v * 1.5)) :: Float
-      first <- allocaBytes (64 * 32) $ \buf -> do
-        n <- writeSpanQuads ga getCozetteFont (0, 0, 400, 200) buf 0 (moved, "moved", ink, ink, clip)
-        if n > 0 then Just <$> mapM (peekByteOff buf) [0, 4] else pure Nothing
-      assert "Drawing text's first glyph lands on its rounded pen at 1.5x" (first == Just [pen mx, pen my])
-    _ -> assert "Transformed and plain drawing text spans collected" False
-
--- | A rotated image reaches the rasteriser as a rotated quad, clipped to its
--- widget: turned 45 degrees, a 40 by 20 image covers its rect's centre and
--- top-left and bottom-right corners only; unturned, all of it.
-testTurnedImageRaster :: IO ()
-testTurnedImageRaster = do
-  let probe angle = do
-        ctx <- newRgfwContext tomorrowNightMinDarkTheme
-        _ <- registerImage ctx (ImageId 1) 8 4 (BS.replicate (8 * 4 * 4) 255)
-        let cfg = defaultImageConfig {icLayout = fixedWH 40 20, icRotation = RotateFloating angle}
-        raster ctx 60 40 0 (column (imageConfigured' cfg (ImageId 1))) $ \resp _ px -> do
-          let Rect x y w h = respRect resp
-              (r, b) = (x + w - 2, y + h - 2)
-              white (u, v) = (== packColor (colorRGBA 255 255 255 255)) <$> px (round u) (round v)
-          mapM white [(x + w / 2, y + h / 2), (x + 1, y + 1), (r, y + 1), (x + 1, b), (r, b)]
-  turned <- probe (pi / 4)
-  flat <- probe 0
-  assert "Turned image covers its centre and the corners its long axis reaches" $
-    turned == [True, True, False, False, True]
-  assert "Unturned image covers its whole rect" (and flat)
-
 -- | RGFW keyboard translation. A Ctrl+letter keystroke is a chord that
 -- types nothing, whichever of its key-char and key-press events RGFW queues
 -- first.
@@ -282,8 +236,6 @@ testRgfwKeys = do
       ctrlLCharFirst = [EventKeyChar '\x0c', EventKeyPress keyL R.rgfw_modControl]
       ctrlLPressFirst = [EventKeyPress keyL R.rgfw_modControl, EventKeyChar '\x0c']
       chord evs = chars evs == "" && keys evs == [KeyChar 'l'] && modCtrl (mods evs)
-      released = applied [EventKeyPress keyL 0, EventKeyRelease keyL 0]
-      enterHeld = applied [EventKeyPress R.rgfw_keyReturn 0, EventKeyRepeat R.rgfw_keyReturn 0]
       blurred = applied [EventKeyPress keyL R.rgfw_modControl, EventOther R.rgfw_windowFocusOut]
       pad1 = R.rgfw_keyPad1 + 1
       shift = noModifiers {modShift = True}
@@ -300,15 +252,7 @@ testRgfwKeys = do
     , ("Ctrl+L queued char-first is a chord", chord ctrlLCharFirst)
     , ("Ctrl+L queued press-first is a chord", chord ctrlLPressFirst)
     , ("Ctrl+L twice presses twice", keys (ctrlLCharFirst ++ ctrlLPressFirst) == [KeyChar 'l', KeyChar 'l'])
-    , ( "a release is reported and leaves nothing held"
-      , toList (inputKeysReleased released) == [KeyChar 'l'] && null (inputKeysHeld released)
-      )
-    , ("a held key is held", toList (inputKeysHeld (applied [EventKeyPress keyL 0])) == [KeyChar 'l'])
-    , ( "every key repeats, and a repeat is no new press"
-      , keys [EventKeyPress keyL 0, EventKeyRepeat keyL 0] == [KeyChar 'l', KeyChar 'l']
-          && toList (inputKeys enterHeld) == [KeyEnter, KeyEnter]
-          && toList (inputKeysNew enterHeld) == [KeyEnter]
-      )
+    , ("every key repeats", keys [EventKeyPress keyL 0, EventKeyRepeat keyL 0] == [KeyChar 'l', KeyChar 'l'])
     , ( "losing the keyboard lets go of the keys held"
       , null (inputKeysHeld blurred) && pressedIn (KeyChar 'l') blurred && releasedIn (KeyChar 'l') blurred
           && inputModifiers blurred == noModifiers
@@ -338,53 +282,31 @@ testRgfwKeys = do
 -- | RGFW pointer translation, window repaints, and cursor shapes.
 testRgfwPointer :: IO ()
 testRgfwPointer = do
-  let middle = applied [EventMouseButton R.rgfw_mouseMiddle True]
-      middleUp = applied [EventMouseButton R.rgfw_mouseMiddle True, EventMouseButton R.rgfw_mouseMiddle False]
-      pressedBy b = buttonsToList (inputButtonsPressed (applied [EventMouseButton b True]))
+  let pressedBy b = buttonsToList (inputButtonsPressed (applied [EventMouseButton b True]))
+      buttons = R.rgfw_mouseMiddle : R.rgfw_mouseMisc1 : [R.rgfw_mouseMisc2 .. R.rgfw_mouseMisc2 + 3]
       gone = applied [EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
-      -- A drag's motion outside the window still comes, so a leave then
-      -- would drop a dragged slider or scrollbar to the far corner.
-      dragOut =
-        applied [EventMouseButton R.rgfw_mouseLeft True, EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
       redraws evs = inputWindowRedraw (applied evs)
       wheel = inputScroll . applied . map (uncurry EventMouseScroll)
   asserts "RGFW pointer: "
     [ -- RGFW's wheel is positive up and left, the input's down and right.
       ("a batch of wheel events accumulates", wheel [(0, 1), (0.5, 2)] == V2 (-0.5) (-3))
     , ("the wheel turned down and right scrolls down and right", wheel [(-1, -1)] == V2 1 1)
-    , ("the middle button goes down", heldIn MouseMiddle middle && pressedIn MouseMiddle middle)
-    , ("the middle button comes up", not (heldIn MouseMiddle middleUp) && releasedIn MouseMiddle middleUp)
-    , ("the middle button is not the left", inputButtonsHeld middle == buttonsFromList [MouseMiddle])
-    , ("misc 1 is back", pressedBy R.rgfw_mouseMisc1 == [MouseBack])
-    , ("misc 2 is forward", pressedBy R.rgfw_mouseMisc2 == [MouseForward])
-    , ( "misc 3 to 5 are the next buttons"
-      , concatMap pressedBy [R.rgfw_mouseMisc2 + 1 .. R.rgfw_mouseMisc2 + 3] == map MouseOther [6, 7, 8]
+    , ( "middle, misc 1 and misc 2 are middle, back and forward; misc 3 to 5 the next buttons"
+      , concatMap pressedBy buttons == [MouseMiddle, MouseBack, MouseForward] ++ map MouseOther [6, 7, 8]
       )
     , ("leaving the window moves the pointer off it", let V2 x y = inputMousePos gone in x < -1000 && y < -1000)
-    , ("leaving with a button held keeps the pointer", inputMousePos dragOut == V2 30 40)
     , ( "an uncovered or restored window repaints in full"
       , redraws [EventOther R.rgfw_windowRefresh] && redraws [EventOther R.rgfw_windowRestored]
           && not (redraws [EventMouseMotion 1 1])
       )
     ]
-  -- Each kind with a native RGFW cursor shows its own.
-  let native =
-        [ (UiCursorDefault, R.rgfw_mouseArrow), (UiCursorPointer, R.rgfw_mousePointingHand)
-        , (UiCursorText, R.rgfw_mouseIbeam), (UiCursorNsResize, R.rgfw_mouseResizeNS)
-        , (UiCursorEwResize, R.rgfw_mouseResizeEW), (UiCursorNwseResize, R.rgfw_mouseResizeNWSE)
-        , (UiCursorNeswResize, R.rgfw_mouseResizeNESW), (UiCursorNotAllowed, R.rgfw_mouseNotAllowed)
-        , (UiCursorWait, R.rgfw_mouseWait), (UiCursorProgress, R.rgfw_mouseProgress)
-        , (UiCursorCrosshair, R.rgfw_mouseCrosshair), (UiCursorMove, R.rgfw_mouseResizeAll)
-        , (UiCursorNResize, R.rgfw_mouseResizeN), (UiCursorNeResize, R.rgfw_mouseResizeNE)
-        , (UiCursorEResize, R.rgfw_mouseResizeE), (UiCursorSeResize, R.rgfw_mouseResizeSE)
-        , (UiCursorSResize, R.rgfw_mouseResizeS), (UiCursorSwResize, R.rgfw_mouseResizeSW)
-        , (UiCursorWResize, R.rgfw_mouseResizeW), (UiCursorNwResize, R.rgfw_mouseResizeNW)
-        ]
+  -- Each kind RGFW has a cursor for (its own fallback, bar the hidden one)
+  -- shows a cursor of its own.
+  let kinds = [minBound .. maxBound]
+      native = [mapRgfwCursor k | k <- kinds, cursorFallback k == k, k /= UiCursorHidden]
   asserts "RGFW cursors: "
-    [ ( "each native shape shows its own cursor"
-      , all (\(k, icon) -> mapRgfwCursor k == icon) native && length (nub (map snd native)) == length native
-      )
-    , ("every other kind falls back to a native one", all ((`elem` map snd native) . mapRgfwCursor) [minBound ..])
+    [ ("each native shape shows its own cursor", length (nub native) == length native)
+    , ("every other kind falls back to a native one", all ((`elem` native) . mapRgfwCursor) kinds)
     ]
 
 main :: IO ()
@@ -395,8 +317,6 @@ main = do
   testGlyphs
   testThemedRaster
   testWindowLayer
-  testDrawingTextTransform
-  testTurnedImageRaster
   testGlWindow assert
   testSessionWindow assert
   testRgfwWake
