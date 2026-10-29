@@ -8,64 +8,91 @@ import GHC.Clock (getMonotonicTime)
 
 tests :: [Spec]
 tests =
-  [ spec "animation-settle" runAnimationSettleTest
+  [ spec "animation-values" runAnimationValuesTest
   , spec "animate-to-stays-settled" runAnimateToStaysSettledTest
   , spec "animation-damage" runAnimationDamageTest
-  , spec "animation-stagger" runAnimationStaggerTest
-  , spec "animation-bezier" runAnimationBezierTest
-  , spec "animation-spring-retarget" runAnimationSpringRetargetTest
-  , spec "animation-spring-dt" runAnimationSpringDtTest
-  , spec "animation-spring-far-target" runAnimationSpringFarTargetTest
-  , spec "animation-spring-light" runAnimationSpringLightTest
   , spec "composite-animation-isolation" runCompositeAnimationIsolationTest
   , spec "button-hover-anim" runButtonHoverAnimTest
   , spec "spinner" runSpinnerTest
-  , spec "keep-animating-lapse" runKeepAnimatingLapseTest
+  , spec "animation-left-out" runAnimationLeftOutTest
   , spec "keep-animating-rest" runKeepAnimatingRestTest
-  , spec "animate-left-out" runAnimateLeftOutTest
   , spec "drawing-animation-end" runDrawingAnimationEndTest
   , spec "wake-after" runWakeAfterTest
   ]
 
--- A started animation requests redraws, settles on its target, and then
--- leaves the context idle and clean.
-runAnimationSettleTest :: Context -> IORef Int -> IO ()
-runAnimationSettleTest ctx failed = do
-  let inp = withDelta 100 100 0.1
-      wid = WidgetId 99
-  _ <- runFrame ctx inp (label "settle")
-  startAnimation ctx wid 0 1 0.25
-  need <- needsRedraw ctx inp inp
-  assert failed need
-  replicateM_ 4 (runFrame ctx inp (label "settle"))
-  val <- getAnimationValue ctx wid
-  assert failed (abs (val - 1) <= 0.01)
-  live <- anyAnimating ctx
-  assert failed (not live)
-  needAfter <- needsRedraw ctx inp inp
-  assert failed (not needAfter)
-  (_, _, dirty) <- runFrame ctx inp (label "settle")
-  assert failed (not dirty)
+-- | Tweens, delays and springs reach the values they should and then leave
+-- the loop asleep. A light or stiff spring stays near its range at a low
+-- frame rate (a fixed 1/30 s step ran one this fast off toward 1e21, then
+-- NaN), and so does one stepped by a two-second frame. A spring toward 1500
+-- lands on it: integrating its absolute position, where a float steps by
+-- about 1e-4, froze it a few steps short with its velocity above the settle
+-- threshold, running for good. A tween settles on its target, clean; a
+-- delayed one holds its start until the delay ends, and declarative tweens
+-- stagger the same way per key. A retargeted spring carries on from where
+-- it was.
+runAnimationValuesTest :: Context -> IORef Int -> IO ()
+runAnimationValuesTest ctx failed = do
+  let near tol want v = abs (v - want) <= tol
+      frames n dt = replicateM_ n (runFrame ctx (withDelta 200 100 dt) (label "anim"))
+      value = getAnimationValue ctx
+  forM_ [(presetBouncy {springMass = 0.05}, 60), (SpringParams 2000 150 1, 30)] $ \(params, hz) -> do
+    setAnimationValue ctx (WidgetId 404) 0
+    startSpring ctx (WidgetId 404) params 1
+    vals <- replicateM 120 (frames 1 (1 / hz) >> value (WidgetId 404))
+    assert failed (all (\v -> v >= -0.5 && v <= 1.5) vals)
+    assert failed . not =<< anyAnimating ctx
+    assertEq failed 1 (last vals)
+  let far = animateTo (Spring presetSmooth) 1500 <* label "far"
+  replicateM_ 600 (runFrame ctx (withDelta 200 100 (1 / 60)) far)
+  assert failed . not =<< anyAnimating ctx
+  assertEq failed 1500 =<< evalUi ctx (withDelta 200 100 (1 / 60)) far
+  let inp = withDelta 200 100 0.1
+  startAnimation ctx (WidgetId 99) 0 1 0.25
+  assert failed =<< needsRedraw ctx inp inp
+  frames 4 0.1
+  assert failed . near 0.01 1 =<< value (WidgetId 99)
+  assert failed . not =<< anyAnimating ctx
+  assert failed . not =<< needsRedraw ctx inp inp
+  assert failed . not . (\(_, _, dirty) -> dirty) =<< runFrame ctx inp (label "anim")
+  startAnimationEaseDelay ctx (WidgetId 202) 0 1 0.2 EaseLinear 0.15
+  frames 1 0.1
+  assert failed . near 0.01 0 =<< value (WidgetId 202)
+  assert failed =<< anyAnimating ctx
+  frames 1 0.1
+  assert failed . near 0.03 0.25 =<< value (WidgetId 202)
+  let staggered = do
+        _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
+        withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1) <* label "trail"
+  replicateM_ 2 (runFrame ctx (withDelta 200 100 0.02) staggered)
+  assert failed . (<= 0.01) =<< evalUi ctx (withDelta 200 100 0.02) staggered
+  replicateM_ 9 (runFrame ctx (withDelta 200 100 0.02) staggered)
+  assert failed . (>= 0.15) =<< evalUi ctx (withDelta 200 100 0.02) staggered
+  startSpring ctx (WidgetId 402) presetBouncy 1
+  frames 5 0.02
+  v1 <- value (WidgetId 402)
+  assert failed (v1 >= 0.02 && v1 <= 0.98)
+  startSpring ctx (WidgetId 402) presetBouncy 0
+  assert failed . near 0.02 v1 =<< value (WidgetId 402)
+  assert failed =<< anyAnimating ctx
+  startSpring ctx (WidgetId 403) presetStiff 1
+  frames 1 2
+  v <- value (WidgetId 403)
+  assert failed (not (isNaN v || isInfinite v || v < 0 || v > 1.5))
 
--- A settled 'animateTo' value holds its target for as long as the view reads
--- it. Its key has no node, and resting values were once dropped after 300
--- frames without a widget rect, so it read 0 again and animated back up. One
--- the view skips for a few frames comes back settled; one no view reads for
--- long enough is dropped, and animates in from 0 like a new one. The key
--- keeps the label from taking the value's id while it is hidden, which would
--- hold it through the label's rect.
+-- | A settled 'animateTo' value holds its target for as long as the view
+-- reads it. Its key has no node, and resting values were once dropped after
+-- 300 frames without a widget rect, so it read 0 again and animated back up.
+-- One the view skips for a few frames comes back settled; one no view reads
+-- for long enough is dropped, and animates in from 0 like a new one. The key
+-- keeps the label from taking the value's id while it is hidden.
 runAnimateToStaysSettledTest :: Context -> IORef Int -> IO ()
 runAnimateToStaysSettledTest ctx failed = do
   let inp = withDelta 200 100 0.05
-      ui shown = do
-        t <- if shown then withKey ("fade" :: String) (animateTo (Tween EaseLinear 0.2 0) 1) else pure 0
-        label "rest"
-        pure t
+      ui shown = (if shown then withKey ("fade" :: String) (animateTo (Tween EaseLinear 0.2 0) 1) else pure 0) <* label "rest"
       near v x = abs (x - v) <= 0.001
   replicateM_ 10 (runFrame ctx inp (ui True))
   assert failed . not =<< anyAnimating ctx
-  vals <- replicateM 400 (evalUi ctx inp (ui True))
-  assert failed (all (near 1) vals)
+  assert failed . all (near 1) =<< replicateM 400 (evalUi ctx inp (ui True))
   assert failed . not =<< anyAnimating ctx
   assert failed . not =<< needsRedraw ctx inp inp
   replicateM_ 10 (runFrame ctx inp (ui False))
@@ -95,148 +122,50 @@ runAnimationDamageTest ctx0 failed = do
         assertGt failed (rectX new) (rectX old)
         assert failed (damageCovers dmg old && damageCovers dmg new)
 
--- A delayed tween holds its start value until the delay elapses and then
--- eases from there; declarative tweens stagger the same way per key.
-runAnimationStaggerTest :: Context -> IORef Int -> IO ()
-runAnimationStaggerTest ctx failed = do
-  let inp = withDelta 200 100 0.02
-      wid = WidgetId 202
-      slow = inp {inputDeltaTime = 0.1}
-  startAnimationEaseDelay ctx wid 0 1 0.2 EaseLinear 0.15
-  _ <- runFrame ctx slow (label "delay")
-  v0 <- getAnimationValue ctx wid
-  assert failed (abs v0 <= 0.01)
-  live0 <- anyAnimating ctx
-  assert failed live0
-  _ <- runFrame ctx slow (label "delay")
-  v1 <- getAnimationValue ctx wid
-  assert failed (abs (v1 - 0.25) <= 0.03)
-  let ui = do
-        _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
-        t <- withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1)
-        t <$ label "trail"
-  replicateM_ 2 (runFrame ctx inp ui)
-  early <- evalUi ctx inp ui
-  assert failed (early <= 0.01)
-  replicateM_ 9 (runFrame ctx inp ui)
-  late <- evalUi ctx inp ui
-  assert failed (late >= 0.15)
-
-runAnimationBezierTest :: Context -> IORef Int -> IO ()
-runAnimationBezierTest _ failed = do
-  let lin = applyEase (EaseCubicBezier 0 0 1 1) 0.5
-      out = applyEase (EaseCubicBezier 0 0 0.58 1) 0.5
-  assert failed (abs (lin - 0.5) <= 0.01)
-  assert failed (out > 0.5)
-  assert failed (abs (applyEase EaseInQuad 0.5 - 0.25) <= 0.01)
-  assert failed (abs (applyEase (EaseCubicBezier 0.33 0 0.2 1) 0) <= 0.001)
-  assert failed (abs (applyEase (EaseCubicBezier 0.33 0 0.2 1) 1 - 1) <= 0.001)
-
-runAnimationSpringRetargetTest :: Context -> IORef Int -> IO ()
-runAnimationSpringRetargetTest ctx failed = do
-  let inp = withDelta 100 100 0.02
-      wid = WidgetId 402
-  startSpring ctx wid presetBouncy 1
-  replicateM_ 5 (runFrame ctx inp (label "retarget"))
-  v1 <- getAnimationValue ctx wid
-  assert failed (v1 >= 0.02 && v1 <= 0.98)
-  startSpring ctx wid presetBouncy 0
-  v2 <- getAnimationValue ctx wid
-  assert failed (abs (v2 - v1) <= 0.02)
-  live <- anyAnimating ctx
-  assert failed live
-
-runAnimationSpringDtTest :: Context -> IORef Int -> IO ()
-runAnimationSpringDtTest ctx failed = do
-  let inp = withDelta 100 100 2
-      wid = WidgetId 403
-  startSpring ctx wid presetStiff 1
-  _ <- runFrame ctx inp (label "dt")
-  val <- getAnimationValue ctx wid
-  assert failed (not (isNaN val || isInfinite val || val < 0 || val > 1.5))
-
--- A spring toward a target far from zero lands on it and lets the loop
--- sleep. Near 1500 a float moves in steps of about 1e-4, so a spring that
--- integrated its absolute position froze a few steps short of the target
--- with its velocity above the settle threshold, and ran for good.
-runAnimationSpringFarTargetTest :: Context -> IORef Int -> IO ()
-runAnimationSpringFarTargetTest ctx failed = do
-  let inp = withDelta 200 100 (1 / 60)
-      ui = do
-        x <- animateTo (Spring presetSmooth) 1500
-        label "far"
-        pure x
-  replicateM_ 600 (runFrame ctx inp ui)
-  assert failed . not =<< anyAnimating ctx
-  assertEq failed 1500 =<< evalUi ctx inp ui
-
--- A light or stiff spring stays near its range at a low frame rate and
--- settles. A fixed 1/30 s step was too long for one this fast, and the
--- value ran off toward 1e21 and then NaN.
-runAnimationSpringLightTest :: Context -> IORef Int -> IO ()
-runAnimationSpringLightTest ctx failed = do
-  forM_ [(presetBouncy {springMass = 0.05}, 60), (SpringParams 2000 150 1, 30)] $ \(params, hz) -> do
-    let inp = withDelta 100 100 (1 / hz)
-        wid = WidgetId 404
-    setAnimationValue ctx wid 0
-    startSpring ctx wid params 1
-    vals <- replicateM 120 (runFrame ctx inp (label "light") >> getAnimationValue ctx wid)
-    assert failed (all (\v -> v >= -0.5 && v <= 1.5) vals)
-    assert failed . not =<< anyAnimating ctx
-    assertEq failed 1 (last vals)
-
--- Each composite animation owns a scope; component indices alone are not
--- unique when two vectors animate side by side in the same parent. Tweens
--- and springs both settle and stop requesting redraws.
+-- | Easing curves hit their ends and bend the right way. Each composite
+-- animation owns a scope: component indices alone are not unique when two
+-- vectors animate side by side in one parent. Colour channels clamp. Tweens
+-- and springs of vectors both settle and stop asking for frames.
 runCompositeAnimationIsolationTest :: Context -> IORef Int -> IO ()
 runCompositeAnimationIsolationTest _ failed = do
-  let
-    (indices, vector) = traverseChannels (\i x -> ([i], x + fromIntegral i)) (V2 3 4)
-    color = colorRGBA 17 80 190 255
-    (rgbaIndices, roundtrip) = traverseChannels (\i x -> ([i], x)) color
-    (_, clipped) = traverseChannels (\i _ -> ([i], if i == 0 then -1 else 2)) color
-  assertEq failed [0, 1] indices
-  assertEq failed (V2 3 5) vector
-  assertEq failed [0, 1, 2, 3] rgbaIndices
-  assertEq failed color roundtrip
-  assertEq failed (colorRGBA 0 255 255 255) clipped
+  let out = EaseCubicBezier 0 0 0.58 1
+      snappy = EaseCubicBezier 0.33 0 0.2 1
+  assert failed (abs (applyEase (EaseCubicBezier 0 0 1 1) 0.5 - 0.5) <= 0.01 && applyEase out 0.5 > 0.5)
+  assert failed (abs (applyEase EaseInQuad 0.5 - 0.25) <= 0.01)
+  assert failed (abs (applyEase snappy 0) <= 0.001 && abs (applyEase snappy 1 - 1) <= 0.001)
+  let color = colorRGBA 17 80 190 255
+  assertEq failed ([0, 1], V2 3 5) (traverseChannels (\i x -> ([i], x + fromIntegral i)) (V2 3 4))
+  assertEq failed ([0, 1, 2, 3], color) (traverseChannels (\i x -> ([i], x)) color)
+  assertEq failed (colorRGBA 0 255 255 255) (snd (traverseChannels (\i _ -> ([i], if i == 0 then -1 else 2)) color))
   forM_ [animateToA (Tween EaseLinear 0.2 0), animateToA (Spring presetSmooth)] $ \animateVector -> do
     ctx <- newContext
-    let
-      inp = withDelta 200 100 0.05
-      ui = do
-        a <- animateVector (V2 1 2)
-        b <- animateVector (V2 (-1) (-2))
-        label (T.pack (show (a, b)))
-        pure (a, b)
+    let inp = withDelta 200 100 0.05
+        ui = do
+          a <- animateVector (V2 1 2)
+          b <- animateVector (V2 (-1) (-2))
+          (a, b) <$ label (T.pack (show (a, b)))
     replicateM_ 80 (runFrame ctx inp ui)
-    ((V2 ax ay, V2 bx by), _, _) <- runFrame ctx inp ui
-    assert failed (abs (ax - 1) < 0.05 && abs (ay - 2) < 0.05)
-    assert failed (abs (bx + 1) < 0.05 && abs (by + 2) < 0.05)
-    live <- anyAnimating ctx
-    assert failed (not live)
-    need <- needsRedraw ctx inp inp
-    assert failed (not need)
+    (V2 ax ay, V2 bx by) <- evalUi ctx inp ui
+    assert failed (all ((< 0.05) . abs) [ax - 1, ay - 2, bx + 1, by + 2])
+    assert failed . not =<< anyAnimating ctx
+    assert failed . not =<< needsRedraw ctx inp inp
 
--- Hovering a button eases its highlight in without dipping, and a press and
+-- | Hovering a button eases its highlight in without dipping, and a press and
 -- release over it leaves the hover animation fully on.
 runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
 runButtonHoverAnimTest ctx failed = do
   let inp0 = withDelta 200 100 0.016
       ui = column (button "Hover")
   _ <- runFrame ctx inp0 ui
-  let inp1 = inp0 {inputMousePos = V2 10 10}
-  vals <- replicateM 5 (runFrame ctx inp1 ui >> getHotId ctx >>= getAnimationValue ctx)
-  let decreases = any (uncurry (\a b -> b + 0.001 < a)) (zip vals (drop 1 vals))
-  assert failed (not decreases)
+  vals <- replicateM 5 (runFrame ctx inp0 {inputMousePos = V2 10 10} ui >> getHotId ctx >>= getAnimationValue ctx)
+  assert failed (and (zipWith (\a b -> b + 0.001 >= a) vals (drop 1 vals)))
   assert failed (last vals >= 0.4)
   _ <- runClick ctx inp0 ui (V2 10 10)
   hot <- getHotId ctx
-  val <- getAnimationValue ctx hot
   assert failed (hashWidgetId hot /= 0)
-  assert failed (val >= 0.99)
+  assert failed . (>= 0.99) =<< getAnimationValue ctx hot
 
--- A spinner keeps the loop drawing, repaints only around itself, and turns.
+-- | A spinner keeps the loop drawing, repaints only around itself, and turns.
 runSpinnerTest :: Context -> IORef Int -> IO ()
 runSpinnerTest ctx failed = do
   theme <- getTheme ctx
@@ -244,43 +173,43 @@ runSpinnerTest ctx failed = do
       ui = column $ do
         label "Loading a long label so the window has more than the spinner"
         spinnerWith' id 18
+      arc qs = [q | (q, c) <- qs, c == themeAccent theme]
   _ <- runFrame ctx inp ui
   (resp, draw0, _) <- runFrame ctx inp ui
-  need <- needsRedraw ctx inp inp
-  assert failed need
+  assert failed =<< needsRedraw ctx inp inp
   quads0 <- drawQuads draw0
-  assert failed (any ((== themeAccent theme) . snd) quads0)
+  assert failed (not (null (arc quads0)))
   threadDelay 60000
   (_, draw1, _) <- runFrame ctx inp ui
-  dmg <- takeDamage ctx
-  case dmg of
+  takeDamage ctx >>= \case
     DamageClip r -> assert failed (rectW r < 80 && rectH r < 80 && rectIntersect r (respRect resp) /= Nothing)
     DamageFull -> assert failed False
-  quads1 <- drawQuads draw1
-  let arc qs = [q | (q, c) <- qs, c == themeAccent theme]
-  assert failed (arc quads0 /= arc quads1)
+  assert failed . (arc quads0 /=) . arc =<< drawQuads draw1
 
--- 'keepAnimating' holds the loop open only while it keeps being called. A
--- spinner that is no longer built must let the loop sleep: its animation
--- never ends by itself, so a view that showed one while loading would
--- otherwise run frames at the display rate for the life of the process.
-runKeepAnimatingLapseTest :: Context -> IORef Int -> IO ()
-runKeepAnimatingLapseTest ctx failed = do
-  let inp = withDelta 400 300 0.016
-      loading = column (label "Loading" >> spinner)
-      loaded = column (label "Loaded")
-  _ <- warmup2 ctx inp loading
-  assert failed =<< anyAnimating ctx
-  -- The first frame without the spinner ends its animation.
-  _ <- runFrame ctx inp loaded
-  assert failed . not =<< anyAnimating ctx
-  _ <- runFrame ctx inp loaded
-  assert failed . not =<< needsRedraw ctx inp inp
-  -- Shown again, it runs again.
-  _ <- runFrame ctx inp loading
-  assert failed =<< anyAnimating ctx
+-- | An animation the view stops building stops drawing frames, since nothing
+-- reads it, and runs again when shown again: a spinner whose 'keepAnimating'
+-- would otherwise hold the loop at the display rate for good, and a long
+-- tween or an undamped spring behind a tab switch, which once kept drawing
+-- for minutes or for good.
+runAnimationLeftOutTest :: Context -> IORef Int -> IO ()
+runAnimationLeftOutTest _ failed = do
+  let tweenAndSpring = do
+        _ <- animate (Tween EaseLinear 120 0) 0 1
+        _ <- animateTo (Spring (SpringParams 180 0 1)) 1
+        label "moving"
+  forM_ [(column (label "Loading" >> spinner), column (label "Loaded")), (tweenAndSpring, label "other")] $ \(shown, other) -> do
+    ctx <- newContext
+    let inp = withDelta 400 300 0.016
+    replicateM_ 5 (runFrame ctx inp shown)
+    assert failed =<< anyAnimating ctx
+    _ <- runFrame ctx inp other
+    assert failed . not =<< anyAnimating ctx
+    _ <- runFrame ctx inp other
+    assert failed . not =<< needsRedraw ctx inp inp
+    _ <- runFrame ctx inp shown
+    assert failed =<< anyAnimating ctx
 
--- A 'keepAnimating' lease is not the widget's value. A spring on the key
+-- | A 'keepAnimating' lease is not the widget's value. A spring on the key
 -- starts from the resting value, and setting the value keeps the lease and
 -- repaints. The lease once read as a running animation at about 0: the
 -- spring started from 0, and a set dropped the lease without a repaint, so
@@ -289,13 +218,9 @@ runKeepAnimatingRestTest :: Context -> IORef Int -> IO ()
 runKeepAnimatingRestTest ctx failed = do
   let inp = withDelta 200 100 0.05
       hover = inp {inputMousePos = V2 10 10}
-      ui = column $ do
-        b <- button' "Go"
-        keepAnimating b
-        pure b
+      ui = column (button' "Go" >>= \b -> b <$ keepAnimating b)
   _ <- runFrame ctx inp ui
-  bs <- replicateM 10 (evalUi ctx hover ui)
-  let wid = respId (last bs)
+  wid <- respId . last <$> replicateM 10 (evalUi ctx hover ui)
   assertEq failed 1 =<< getAnimationValue ctx wid
   startSpring ctx wid presetSmooth 0.5
   assert failed . (> 0.99) =<< getAnimationValue ctx wid
@@ -306,28 +231,7 @@ runKeepAnimatingRestTest ctx failed = do
   assert failed =<< anyAnimating ctx
   assert failed =<< needsRedraw ctx hover hover
 
--- An 'animate' or 'animateTo' the view stops calling stops drawing frames,
--- since nothing reads it. A long tween or an undamped spring behind a tab
--- switch once kept the loop drawing until it ended by itself, for minutes
--- or for good. Shown again, it runs again.
-runAnimateLeftOutTest :: Context -> IORef Int -> IO ()
-runAnimateLeftOutTest ctx failed = do
-  let inp = withDelta 200 100 0.05
-      shown = do
-        _ <- animate (Tween EaseLinear 120 0) 0 1
-        _ <- animateTo (Spring (SpringParams 180 0 1)) 1
-        label "moving"
-      other = label "other"
-  replicateM_ 5 (runFrame ctx inp shown)
-  assert failed =<< anyAnimating ctx
-  _ <- runFrame ctx inp other
-  assert failed . not =<< anyAnimating ctx
-  _ <- runFrame ctx inp other
-  assert failed . not =<< needsRedraw ctx inp inp
-  _ <- runFrame ctx inp shown
-  assert failed =<< anyAnimating ctx
-
--- A drawing without a version rebuilds while it animates, and on the frame
+-- | A drawing without a version rebuilds while it animates, and on the frame
 -- its animation ends, whose view drew it again (here, stopped). That frame
 -- once replayed the last animated frame's ops, which then stayed on screen.
 runDrawingAnimationEndTest :: Context -> IORef Int -> IO ()
@@ -343,18 +247,17 @@ runDrawingAnimationEndTest ctx failed = do
   quads <- map snd <$> drawQuads draw
   assert failed (stopped `elem` quads && running `notElem` quads)
 
--- 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
+-- | 'wakeAfter' schedules one frame: the earliest request of a frame wins, and
 -- a frame that does not ask again leaves nothing pending.
 runWakeAfterTest :: Context -> IORef Int -> IO ()
 runWakeAfterTest ctx failed = do
   let inp = withDelta 200 100 0.016
-  t0 <- getMonotonicTime
-  _ <- runFrame ctx inp (label "tick" >> wakeAfter 5)
-  at0 <- getWakeAt ctx
-  assert failed (at0 > t0 + 4.5 && at0 < t0 + 6)
-  t1 <- getMonotonicTime
-  _ <- runFrame ctx inp (wakeAfter 5 >> wakeAfter 1 >> wakeAfter 3 >> label "tick")
-  at1 <- getWakeAt ctx
-  assert failed (at1 > t1 + 0.5 && at1 < t1 + 2)
+      wakeWithin ui lo hi = do
+        t <- getMonotonicTime
+        _ <- runFrame ctx inp ui
+        at <- getWakeAt ctx
+        assert failed (at > t + lo && at < t + hi)
+  wakeWithin (label "tick" >> wakeAfter 5) 4.5 6
+  wakeWithin (wakeAfter 5 >> wakeAfter 1 >> wakeAfter 3 >> label "tick") 0.5 2
   _ <- runFrame ctx inp (label "tick")
   assertEq failed 0 =<< getWakeAt ctx
