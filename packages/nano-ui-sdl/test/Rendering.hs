@@ -12,20 +12,20 @@ import Data.List (isInfixOf, nub)
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Vector.Unboxed qualified as U
-import Data.Word (Word32, Word8)
+import Data.Word (Word8)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CUInt (..))
 import Foreign.ForeignPtr (mallocForeignPtrBytes, withForeignPtr)
-import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray, pokeArray)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
-import Keyboard (keyboardTranslation)
+import Input (inputChecks, queueChecks)
 import NanoUI
-  ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), V2 (..), canvas, colorRGBA, column, defaultImageConfig
-  , defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark
-  , imageConfigured', pageColor, respRect
+  ( Color, ImageConfig (..), ImageId (..), Rect (..), Rotation (..), V2 (..), canvas, colorRGBA, column
+  , defaultImageConfig, defaultLightTheme, defaultTheme, drawPathWith, drawStrokePathWith, fixedWH
+  , followSystemTheme, getTheme, imageConfigured', lightDark, pageColor, respRect
   )
 import NanoUI.Path qualified as P
 import NanoUI.Backend (Appearance (..), emptyInput, getSystemAppearance, setSystemAppearance)
@@ -34,8 +34,8 @@ import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors,
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, syncImageAtlas)
 import NanoUI.Sdl.Internal.Render (destroyRenderBatch, flushRenderBatch, newRenderBatch, renderDrawDataPass)
 import NanoUI.Testing
-  ( Context, Damage (..), DrawCmd (..), DrawData (..), Layer (..), UiCursorKind (..), atlasTextureId, glyphPageTextureId
-  , newPixelContext, registerImage, setTheme
+  ( Context, Damage (..), DrawCmd (..), DrawData (..), Layer (..), UiCursorKind (..), atlasTextureId
+  , glyphPageTextureId, newPixelContext, registerImage, setTheme
   )
 import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness (warmupDraw)
@@ -43,7 +43,6 @@ import SDL3.Sys.Bindgen.Mouse qualified as M
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video qualified as Video
-import SDL3.Sys.Events (pushEvent)
 import SDL3.Sys.Mouse (cursorVisibleSafe)
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
 import SDL3.Sys.Video (getSystemTheme)
@@ -54,18 +53,19 @@ import Text.Read (readMaybe)
 import WindowChecks (windowChecks)
 import "nano-ui-sdl" NanoUI.Backend.Sdl (SdlEnv, syncDisplay, withSdlBench)
 import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlRenderer)
-import "nano-ui-sdl" NanoUI.Sdl.Internal.Input (SdlEvent (..), pollEvents)
 
 foreign import ccall unsafe "SDL_ReadSurfacePixel"
   readPixel :: Ptr () -> CInt -> CInt -> Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> IO CBool
 foreign import ccall unsafe "SDL_DestroySurface" freeSurface :: Ptr () -> IO ()
 foreign import capi unsafe "SDL3/SDL.h value SDL_PIXELFORMAT_RGBA32" rgba32 :: CUInt
-foreign import capi unsafe "SDL3/SDL.h SDL_CreateSurfaceFrom" surfaceFrom :: CInt -> CInt -> CUInt -> Ptr Word8 -> CInt -> IO (Ptr ())
+foreign import capi unsafe "SDL3/SDL.h SDL_CreateSurfaceFrom"
+  surfaceFrom :: CInt -> CInt -> CUInt -> Ptr Word8 -> CInt -> IO (Ptr ())
 foreign import capi unsafe "SDL3/SDL.h SDL_FillSurfaceRect" fillSurface :: Ptr () -> Ptr () -> CUInt -> IO CBool
 foreign import ccall unsafe "nano_ui_text_atlas_create" newAtlas :: Ptr SDL_Renderer -> IO (Ptr ())
 foreign import ccall unsafe "nano_ui_text_atlas_destroy" freeAtlas :: Ptr () -> IO ()
 foreign import ccall unsafe "nano_ui_text_atlas_reset" resetAtlas :: Ptr () -> IO ()
-foreign import ccall unsafe "nano_ui_text_atlas_insert_surface" insertAtlas :: Ptr () -> Ptr () -> Ptr CFloat -> IO CBool
+foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
+  insertAtlas :: Ptr () -> Ptr () -> Ptr CFloat -> IO CBool
 
 -- A padded pitch deliberately differs from both the glyph width and atlas pitch.
 withGlyphSurface :: (Ptr () -> IO a) -> IO a
@@ -94,7 +94,8 @@ atlasChecks :: SdlEnv -> (Ptr () -> DrawData -> IO ()) -> IO ()
 atlasChecks env draw = withGlyphSurface $ \surface ->
   bracket (newAtlas (sdlRenderer env)) freeAtlas $ \atlas -> do
     unless (atlas /= nullPtr) (fail "atlas creation failed")
-    let firstGlyph name = insertInto atlas surface >>= \r -> unless (r == Just (0, [5, 1, 3, 2])) (fail (name ++ ": " ++ show r))
+    let firstGlyph name =
+          insertInto atlas surface >>= \r -> unless (r == Just (0, [5, 1, 3, 2])) (fail (name ++ ": " ++ show r))
         sampleOn page name x y expected = do
           draw atlas =<< texturedTriangle (glyphPageTextureId page) [(24, x / 2048), (28, y / 2048)]
           expectPixel env name expected
@@ -108,7 +109,8 @@ atlasChecks env draw = withGlyphSurface $ \surface ->
     sample "transparent glyph padding" 8.5 2.5 (0, 0, 0)
     -- A full page opens the next one rather than failing.
     fill >>= \case
-      Just (1, [x, y, _, _]) -> sampleOn 1 "glyph on the second page" (realToFrac x + 1.5) (realToFrac y + 0.5) (255, 0, 0)
+      Just (1, [x, y, _, _]) ->
+        sampleOn 1 "glyph on the second page" (realToFrac x + 1.5) (realToFrac y + 0.5) (255, 0, 0)
       next -> fail ("a full page did not open another: " ++ show next)
     resetAtlas atlas
     sample "white patch after reset" 0.5 0.5 (255, 0, 0)
@@ -121,12 +123,13 @@ atlasChecks env draw = withGlyphSurface $ \surface ->
 -- turn puts the left half on top, and a half-opaque image shows half the backdrop.
 imageChecks :: SdlEnv -> Context -> ImageAtlas -> (DrawData -> IO ()) -> IO ()
 imageChecks env ctx images draw = do
-  let register tid w h px = registerImage ctx (ImageId tid) w h px >>= \ok -> unless ok (fail "image registration failed")
+  let register tid w h px = registerImage ctx (ImageId tid) w h px >>= (`unless` fail "image registration failed")
       solid tid w h (r, g, b) = register tid w h (BS.concat (replicate (w * h) (BS.pack [r, g, b, 255])))
       sample name tid expected = do
         syncImageAtlas (sdlRenderer env) images ctx
         (u0, v0, u1, v1) <- lookupImageUv ctx (ImageId tid) >>= maybe (fail "missing image") pure
-        draw =<< texturedTriangle atlasTextureId ([(o, 1) | o <- [8, 12, 16, 20]] ++ [(24, (u0 + u1) / 2), (28, (v0 + v1) / 2)])
+        let white = [(o, 1) | o <- [8, 12, 16, 20]]
+        draw =<< texturedTriangle atlasTextureId (white ++ [(24, (u0 + u1) / 2), (28, (v0 + v1) / 2)])
         expectPixel env name expected
   solid 1 4 4 (255, 0, 0)
   solid 2 4 4 (0, 255, 0)
@@ -140,11 +143,14 @@ imageChecks env ctx images draw = do
   sample "added by growing" 4 (0, 255, 255)
   sample "kept across growth" 1 (0, 0, 255)
   -- Red on the left half, blue on the right.
-  register 5 8 4 (BS.concat [BS.pack (if x < 4 then [255, 0, 0, 255] else [0, 0, 255, 255]) | _ <- [0 .. 3 :: Int], x <- [0 .. 7 :: Int]])
+  register 5 8 4 $
+    BS.pack (concat [if x < 4 then [255, 0, 0, 255] else [0, 0, 255, 255] | _ <- [0 .. 3 :: Int], x <- [0 .. 7 :: Int]])
   let image h cfg = imageConfigured' cfg {icLayout = fixedWH 80 h} (ImageId 5)
   ((turned, faded), dd) <-
     warmupDraw ctx (withInput 400 300) . column $
-      (,) <$> image 80 defaultImageConfig {icRotation = RotateSolid (pi / 2)} <*> image 40 defaultImageConfig {icOpacity = 0.5}
+      (,)
+        <$> image 80 defaultImageConfig {icRotation = RotateSolid (pi / 2)}
+        <*> image 40 defaultImageConfig {icOpacity = 0.5}
   syncImageAtlas (sdlRenderer env) images ctx
   draw dd
   let at resp dx dy = let Rect x y _ _ = respRect resp in pixel env (floor (x + dx)) (floor (y + dy))
@@ -169,7 +175,10 @@ pathChecks env ctx draw = do
         (P.stroke 20) {P.strokeCap = P.RoundCap, P.strokeJoin = P.RoundJoin}
         (P.polyline [V2 (x + 100) (y + 30), V2 (x + 150) (y + 30), V2 (x + 150) (y + 80)])
         (P.Solid glass)
-      drawStrokePathWith (P.stroke 4) {P.strokeDash = [6, 6]} (P.polyline [V2 (x + 100) (y + 95), V2 (x + 190) (y + 95)]) (P.Solid white)
+      drawStrokePathWith
+        (P.stroke 4) {P.strokeDash = [6, 6]}
+        (P.polyline [V2 (x + 100) (y + 95), V2 (x + 190) (y + 95)])
+        (P.Solid white)
   draw dd
   let at dx dy = let Rect x y _ _ = respRect resp in pixel env (floor (x + dx)) (floor (y + dy))
   backdrop <- at 80 5
@@ -253,7 +262,8 @@ geometry points = do
   indices <- mallocForeignPtrBytes (4 * n)
   withForeignPtr vertices $ \p -> pokeArray (castPtr p) [CFloat v | (x, y) <- points, v <- [x, y, 1, 0, 0, 1, 0, 0]]
   withForeignPtr indices $ \p -> pokeArray (castPtr p) [0 .. fromIntegral n - 1 :: CInt]
-  pure (DrawData vertices n indices n (U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent)) (primArrayFromList [0, 0, 1, 1, 1]) black)
+  let cmds = U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent)
+  pure (DrawData vertices n indices n cmds (primArrayFromList [0, 0, 1, 1, 1]) black)
 
 -- | A triangle covering pixel (20, 20) that samples @texture@, with floats
 -- written at each vertex's byte offsets: colour at 8 to 20, UV at 24 and 28.
@@ -265,8 +275,9 @@ texturedTriangle texture writes = do
   pure dd {drawCommands = U.map (\cmd -> cmd {cmdTextureId = texture}) (drawCommands dd)}
 
 pixel :: SdlEnv -> Int -> Int -> IO (Word8, Word8, Word8)
-pixel env x y =
-  bracket (castPtr <$> renderReadPixels (sdlRenderer env) (PtrConst.unsafeFromPtr nullPtr)) freeSurface $ \surface -> do
+pixel env x y = do
+  let readBack = castPtr <$> renderReadPixels (sdlRenderer env) (PtrConst.unsafeFromPtr nullPtr)
+  bracket readBack freeSurface $ \surface -> do
     unless (surface /= nullPtr) (fail "SDL readback failed")
     allocaBytes 4 $ \p -> do
       ok <- readPixel surface (fromIntegral x) (fromIntegral y) p (p `plusPtr` 1) (p `plusPtr` 2) (p `plusPtr` 3)
@@ -275,33 +286,26 @@ pixel env x y =
 
 -- | Fail unless pixel (20, 20) has the expected colour.
 expectPixel :: SdlEnv -> String -> (Word8, Word8, Word8) -> IO ()
-expectPixel env name expected = pixel env 20 20 >>= \actual -> unless (actual == expected) (fail (name ++ ": " ++ show actual))
+expectPixel env name expected =
+  pixel env 20 20 >>= \actual -> unless (actual == expected) (fail (name ++ ": " ++ show actual))
 
--- | SDL's theme-change event reaches the loop as 'EvSystemThemeChanged', and a
--- display sync passes SDL's appearance to the context, switching the theme of
--- a context that follows the system.
+-- | A display sync passes SDL's appearance to the context, switching the
+-- theme of a context that follows the system. The context starts with the
+-- other appearance (light when SDL reports none, as the dummy driver does),
+-- so a sync that did not report would leave the appearance and theme stale.
 systemThemeChecks :: SdlEnv -> Context -> IO ()
 systemThemeChecks env ctx = do
-  -- SDL_EVENT_SYSTEM_THEME_CHANGED; only the type field is set.
-  pushed <- alloca $ \ev -> pokeByteOff ev 0 (0x108 :: Word32) >> pushEvent ev
-  unless pushed (fail "SDL_PushEvent failed")
-  events <- pollEvents
-  unless (EvSystemThemeChanged `elem` events) (fail ("theme event not translated: " ++ show events))
   want <-
     getSystemTheme <&> \case
       Video.SDL_SYSTEM_THEME_LIGHT -> Just AppearanceLight
       Video.SDL_SYSTEM_THEME_DARK -> Just AppearanceDark
       _ -> Nothing
-  -- Start the context with an appearance whose theme is not SDL's, so a
-  -- sync that did not report would leave the appearance and theme stale.
-  -- When SDL reports none, as the dummy driver does, the theme is the dark
-  -- one, so the context starts light.
   setSystemAppearance ctx (Just (if want == Just AppearanceLight then AppearanceDark else AppearanceLight))
   followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
   (synced, _) <- syncDisplay ctx env emptyInput
   got <- getSystemAppearance synced
-  unless (got == want) (fail ("system appearance " ++ show got ++ ", SDL reports " ++ show want))
   theme <- getTheme synced
+  unless (got == want) (fail ("system appearance " ++ show got ++ ", SDL reports " ++ show want))
   unless (theme == lightDark defaultLightTheme defaultTheme want) $
     fail "a context following the system kept the stale theme after the sync"
 
@@ -314,14 +318,15 @@ main = do
   unless (bench || native) $ do
     setEnv "SDL_VIDEODRIVER" "dummy"
     setEnv "SDL_RENDER_DRIVER" "software"
-  unless bench keyboardTranslation
+  unless bench inputChecks
   ctx <- newPixelContext
   -- These checks read pixels over a black clear: a black page makes the
   -- frame's clear black.
   getTheme ctx >>= setTheme ctx . pageColor black
   withSdlBench ctx $ \_ env -> bracket newImageAtlas destroyImageAtlas $ \images ->
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do
-      let drawWithGlyph glyphs dd dmg = renderDrawDataPass batch (sdlRenderer env) dd images glyphs dmg >> flushRenderBatch batch
+      let drawWithGlyph glyphs dd dmg =
+            renderDrawDataPass batch (sdlRenderer env) dd images glyphs dmg >> flushRenderBatch batch
           draw = drawWithGlyph nullPtr
           damage = DamageClip (Rect 15 15 10 10)
           step name act = act >> putStrLn ("SDL " ++ name ++ ": ok")
@@ -333,8 +338,12 @@ main = do
           sparse <- geometry offscreen
           mixed <- geometry (offscreen ++ quad 10 10)
           dense <- geometry (concat (replicate 256 (quad 10 10)))
-          forM_ [("sparse-partial", sparse, damage), ("mixed-partial", mixed, damage), ("dense-partial", dense, damage), ("dense-full", dense, DamageFull)] $
-            \(name, dd, dmg) -> benchmark name 30 iterations (draw dd dmg >> void (renderPresentSafe (sdlRenderer env)))
+          forM_
+            [ ("sparse-partial", sparse, damage), ("mixed-partial", mixed, damage), ("dense-partial", dense, damage)
+            , ("dense-full", dense, DamageFull)
+            ]
+            $ \(name, dd, dmg) ->
+              benchmark name 30 iterations (draw dd dmg >> void (renderPresentSafe (sdlRenderer env)))
         _ -> do
           -- A six-index group can hold independent triangles, and a command can
           -- end in three indices. Neither may be culled as an offscreen quad.
@@ -342,7 +351,8 @@ main = do
             let visible = [(10, 10), (50, 10), (10, 50)]
                 outside = [(100, 100), (120, 100), (100, 120)]
             empty <- geometry []
-            forM_ [("independent triangles", outside ++ visible), ("triangle tail", outside ++ outside ++ visible)] $ \(name, points) -> do
+            forM_ [("independent triangles", [outside]), ("triangle tail", [outside, outside])] $ \(name, before) -> do
+              let points = concat before ++ visible
               dd <- geometry points
               draw empty DamageFull
               draw dd damage
@@ -350,11 +360,13 @@ main = do
               untouched <- pixel env 12 12
               unless (inside == (255, 0, 0) && untouched == (0, 0, 0)) $
                 fail (name ++ ": clipped geometry lost or escaped damage: " ++ show (inside, untouched))
-          step "glyph upload, padding and reset readback" (atlasChecks env (\glyphs dd -> drawWithGlyph glyphs dd DamageFull))
-          step "image atlas upload, and turned and faded image readback" (imageChecks env ctx images (`draw` DamageFull))
+          step "glyph upload, padding and reset readback" $
+            atlasChecks env (\glyphs dd -> drawWithGlyph glyphs dd DamageFull)
+          step "image atlas upload, and turned and faded image readback" $
+            imageChecks env ctx images (`draw` DamageFull)
           step "canvas paths, caps, joins and dashes readback" (pathChecks env ctx (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks
-          step "system theme event" (systemThemeChecks env ctx)
+          step "native events and the system theme" (queueChecks >> systemThemeChecks env ctx)
   unless bench $ do
     windowChecks (if native then "native drivers" else "dummy video, software renderer") False
     -- With a display, repeat on the GPU renderers, which give a transparent

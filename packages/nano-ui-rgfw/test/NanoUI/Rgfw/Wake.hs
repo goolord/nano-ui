@@ -1,14 +1,16 @@
 -- | The RGFW session's wake: another thread can interrupt the loop's event wait.
 module NanoUI.Rgfw.Wake (testRgfwWake) where
 
-import Control.Concurrent (forkIO, getNumCapabilities, killThread, newEmptyMVar, setNumCapabilities, takeMVar, threadDelay, tryPutMVar, yield)
+import Control.Concurrent
+  (forkIO, getNumCapabilities, killThread, newEmptyMVar, setNumCapabilities, takeMVar, threadDelay, tryPutMVar, yield)
 import Control.Exception (SomeException, try)
 import Control.Monad (join, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (atomicModifyIORef', atomicWriteIORef, newIORef, readIORef, writeIORef)
 import Foreign.C.Types (CInt (..))
 import GHC.Clock (getMonotonicTime)
-import NanoUI (Size (..), WindowMode (..), WindowSettings (..), askWake, defaultWindowSettings, label, quitUi, useTask, newTask)
+import NanoUI
+  (Size (..), WindowMode (..), WindowSettings (..), askWake, defaultWindowSettings, label, newTask, quitUi, useTask)
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp)
 import NanoUI.Rgfw.Window (hasDisplay)
 import System.CPUTime (getCPUTime)
@@ -78,15 +80,16 @@ testRgfwWake =
         f1 <- readIORef passes
         let cpu = fromIntegral (c1 - c0) / 1e12 :: Double
         when (cpu > 0.3 || f1 /= f0) $
-          failNow ("after the stream the loop used " ++ show cpu ++ " s of CPU and ran " ++ show (f1 - f0) ++ " passes in a second")
+          failNow ("after the stream the loop used " ++ show cpu ++ " s of CPU and ran " ++ show (f1 - f0) ++ " passes")
         next 2
       -- Hidden, so pointer motion over it cannot run passes while it idles.
-      result <- try (runRgfwApp defaultRgfwOptions {optWindow = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}} view)
+      let hidden = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}
+      result <- try (runRgfwApp defaultRgfwOptions {optWindow = hidden} view)
       ran <- readIORef passes
       case result of
         _ | ran == 0 -> killThread watcher >> putStrLn "[SKIP] RGFW wake: no OpenGL 3.2 window"
         Right () ->
           readIORef phase >>= \case
-            2 -> putStrLn "[PASS] RGFW wake: a job's result and a stream show, the loop idles after, and quitUi ends it"
+            2 -> putStrLn "[PASS] RGFW wake: a job's result and a stream show, the loop idles, and quitUi ends it"
             _ -> failNow "the session ended by itself"
         Left (e :: SomeException) -> failNow ("the session ended with " ++ show e)

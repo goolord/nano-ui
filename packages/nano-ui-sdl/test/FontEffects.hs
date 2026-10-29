@@ -1,27 +1,25 @@
+-- | The SDL session's fonts: start-up failures release what they took,
+-- shaped text measures as SDL draws it, caches and font replacement leave
+-- earlier text intact, and font handles outlive neither their font nor the
+-- session.
 module Main (main) where
 
 import Control.Exception (IOException, evaluate, finally, try)
 import Control.Monad (forM_, unless, void, when)
-import Data.List (isInfixOf)
 import Data.IORef (writeIORef)
+import Data.List (isInfixOf)
+import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArray)
+import Data.Text qualified as T
 import Data.Word (Word32)
-import qualified Data.Text as T
-import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Testing (textIndexAtX)
 import NanoUI.Backend.Sdl
-  ( NanoUIFont (..)
-  , SdlDebugSnapshot (..)
-  , SdlOptions (..)
-  , defaultSdlOptions
-  , sdlDebugSnapshot
-  , syncDisplay
-  , withSdl
-  , withSdlBench
+  ( NanoUIFont (..), SdlDebugSnapshot (..), SdlOptions (..), defaultSdlOptions, sdlDebugSnapshot, syncDisplay
+  , withSdl, withSdlBench
   )
 import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
 import NanoUI.Sdl.Internal.Window (sdlFontRequestRef)
+import NanoUI.Testing (textIndexAtX)
 import System.Directory (copyFile, createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Environment (setEnv)
 import System.FilePath ((</>))
@@ -30,157 +28,134 @@ import System.Mem (performGC)
 
 foreign import ccall unsafe "SDL_WasInit" wasInit :: Word32 -> IO Word32
 
+check :: String -> Bool -> IO ()
+check name ok = unless ok (fail name)
+
+-- | Whether two widths agree.
+near :: Float -> Float -> Bool
+near a b = abs (a - b) < 0.01
+
+-- | The floats of a run's glyph quads, eight per glyph.
+quadFloats :: Maybe ShapedGlyphs -> Int
+quadFloats = maybe 0 (\(ShapedGlyphs q) -> sizeofPrimArray q)
+
 main :: IO ()
 main = do
   setEnv "SDL_VIDEODRIVER" "dummy"
-  setEnv "SDL_RENDER_DRIVER" "software"
   ctx0 <- newPixelContext
-  -- Window creation fails after SDL initialization. Completed acquisitions
-  -- must still be released, and a subsequent session must open normally.
+  -- Window creation fails after SDL starts: what was acquired is released,
+  -- and a later session opens normally.
   setEnv "SDL_RENDER_DRIVER" "nano-ui-test-unavailable-renderer"
-  failedStart <-
-    try
-      ( withSdl
-          defaultSdlOptions {sdlWindowSettings = defaultWindowSettings {wsMode = Hidden}}
-          ctx0
-          (\_ _ -> fail "unexpected window")
-      ) ::
-      IO (Either IOException ())
+  let hidden = defaultSdlOptions {sdlWindowSettings = defaultWindowSettings {wsMode = Hidden}}
+  failedStart <- try (withSdl hidden ctx0 (\_ _ -> pure ()))
   setEnv "SDL_RENDER_DRIVER" "software"
-  case failedStart of
-    Left err | "SDL_CreateWindowAndRenderer failed" `isInfixOf` show err -> pure ()
-    _ -> fail "unavailable renderer did not fail at creation"
-  initialized <- wasInit 0
-  unless (initialized == 0) $
-    fail "failed acquisition leaked initialized SDL subsystems"
+  check "an unavailable renderer did not fail at creation" $ case failedStart of
+    Left (e :: IOException) -> "SDL_CreateWindowAndRenderer failed" `isInfixOf` show e
+    Right () -> False
+  (== 0) <$> wasInit 0 >>= check "a failed start leaked initialised SDL subsystems"
   -- The bundled Inter twice, as a family's regular and bold files: the
   -- "bold" is at the regular's own weight. The directory is this run's own,
   -- since another run may hold its files open.
   fixtures <- do
-    tmp <- getTemporaryDirectory
-    (path, handle) <- openTempFile tmp "nano-ui-font-effects"
+    (path, handle) <- (`openTempFile` "nano-ui-font-effects") =<< getTemporaryDirectory
     hClose handle >> removeFile path >> createDirectory path
     pure path
-  let fixtureRegular = fixtures </> "NanoFixture-Regular.ttf"
-  copyFile "data/inter.ttf" fixtureRegular
+  let regularFile = fixtures </> "NanoFixture-Regular.ttf"
+      text = "AV To fi café λ"
+  copyFile "data/inter.ttf" regularFile
   copyFile "data/inter.ttf" (fixtures </> "NanoFixture-Bold.ttf")
   (font, snapshot, width, quad) <- (`finally` removePathForcibly fixtures) . withSdlBench ctx0 $ \ctx env -> do
-    (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
-    let
-      text = "AV To fi café λ"
+    let resolve c w s = ctxResolveFont c 16 w s FontRegular
+        measure c w s = fst <$> ctxResolveMeasure c 16 w s FontRegular text
+    (fm, _) <- resolve ctx WeightNormal FontStyleNormal
     prepared <- prepareFontMetrics fm text
-    (hostWidth, _) <-
-      ctxResolveMeasure ctx 16 WeightNormal FontStyleNormal FontRegular text
     measured <- evaluate (lineWidth prepared text)
-    unless (abs (hostWidth - measured) < 0.01) $
-      fail
-        ( "prepared shaped width differs from SDL measurement: "
-            ++ show (hostWidth, measured)
-        )
+    hostWidth <- measure ctx WeightNormal FontStyleNormal
     scaled <- lineWidthIO (scaleFontMetrics 1.5 fm) text
-    unless (abs (scaled - measured * 1.5) < 0.01) $
-      fail "effectful font scaling lost its metric scale"
-    -- Synthetic italic shapes as SDL measures it too.
-    (italicFm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleItalic FontRegular
-    (italicHost, _) <- ctxResolveMeasure ctx 16 WeightNormal FontStyleItalic FontRegular text
+    (italicFm, _) <- resolve ctx WeightNormal FontStyleItalic
     italicWidth <- lineWidthIO italicFm text
-    unless (abs (italicHost - italicWidth) < 0.01) $
-      fail ("italic shaped width differs from SDL measurement: " ++ show (italicHost, italicWidth))
+    italicHost <- measure ctx WeightNormal FontStyleItalic
+    check ("prepared shaped width differs from SDL's: " ++ show (hostWidth, measured)) (near hostWidth measured)
+    check "font scaling lost its metric scale" (near scaled (measured * 1.5))
+    check ("italic shaped width differs from SDL's: " ++ show (italicHost, italicWidth)) $
+      near italicHost italicWidth
     before <- drawShaped fm text
-    unless (maybe False (\(ShapedGlyphs q) -> sizeofPrimArray q >= 8 * 10) before) $
-      fail "shaped drawing returned no glyph quads"
-    -- Exceed both cache caps through measurement only. This must not fill or
-    -- reset the atlas, nor alter an already-rasterised run.
+    check "shaped drawing returned no glyph quads" (quadFloats before >= 8 * 10)
+    -- Exceeding both cache caps through measurement alone neither fills nor
+    -- resets the atlas, nor alters a run already rasterised.
     forM_ [1 .. 1100 :: Int] $ \n -> do
-      let
-        labelText = "counter " <> T.pack (show n)
-      p <- prepareFontMetrics fm labelText
-      void (evaluate (lineWidth p labelText))
+      let counter = "counter " <> T.pack (show n)
+      p <- prepareFontMetrics fm counter
+      void (evaluate (lineWidth p counter))
     after <- drawShaped fm text
-    unless (before == after) $
-      fail "metric preparation mutated the atlas or raster cache"
-    let
-      oversized = T.replicate 1000 "W"
+    check "metric preparation mutated the atlas or raster cache" (before == after)
+    let oversized = T.replicate 1000 "W"
     large <- prepareFontMetrics fm oversized
     largeGlyphs <- drawShaped fm oversized
-    unless
-      ( maybe False (\(ShapedGlyphs q) -> sizeofPrimArray q == 8 * 1000) largeGlyphs
-          && lineWidth large oversized > 0
-      ) $
-      fail "text wider than the atlas lost its glyphs"
+    check "text wider than the atlas lost its glyphs" $
+      quadFloats largeGlyphs == 8 * 1000 && lineWidth large oversized > 0
     shapingChecks fm
     performGC
-    again <- lineWidthIO fm text
-    unless (abs (again - measured) < 0.01) $
-      fail "font metrics changed after cache eviction and GC"
-    -- Exercise the actual font/atlas replacement path. Old pure snapshots
-    -- remain valid while old native callbacks must reject their closed font.
+    lineWidthIO fm text >>= check "font metrics changed after cache eviction and GC" . near measured
+    -- Replacing the font and atlas keeps old pure snapshots valid, while
+    -- old native callbacks reject their closed font.
     writeIORef (sdlFontRequestRef env) (FontSearch [])
     (replacement, _) <- syncDisplay ctx env emptyInput
     expectClosed (drawShaped fm text)
-    (fresh, _) <-
-      ctxResolveFont replacement 16 WeightNormal FontStyleNormal FontRegular
+    (fresh, _) <- resolve replacement WeightNormal FontStyleNormal
     freshWidth <- lineWidthIO fresh text
     freshQuad <- drawShaped fresh text
-    unless (abs (freshWidth - measured) < 0.01 && freshQuad /= Nothing) $
-      fail "font/atlas replacement failed to restore shaped text"
+    check "font/atlas replacement failed to restore shaped text" (near freshWidth measured && freshQuad /= Nothing)
     -- A file named as the font's bold but no heavier is not its bold face:
     -- bold text stays synthetic, and measures as it draws.
-    writeIORef (sdlFontRequestRef env) (FontFilePath fixtureRegular)
+    writeIORef (sdlFontRequestRef env) (FontFilePath regularFile)
     (fromFile, _) <- syncDisplay replacement env emptyInput
-    (boldFm, native) <- ctxResolveFont fromFile 16 WeightBold FontStyleNormal FontRegular
+    (boldFm, native) <- resolve fromFile WeightBold FontStyleNormal
     when native $ fail "a file at the regular weight was taken for the bold face"
-    (boldWidth, _) <- ctxResolveMeasure fromFile 16 WeightBold FontStyleNormal FontRegular text
+    boldWidth <- measure fromFile WeightBold FontStyleNormal
     drawnWidth <- lineWidthIO boldFm text
-    unless (abs (boldWidth - drawnWidth) < 0.01) $
-      fail ("bold text measures unlike it draws: " ++ show (boldWidth, drawnWidth))
+    check ("bold text measures unlike it draws: " ++ show (boldWidth, drawnWidth)) (near boldWidth drawnWidth)
     -- A file that will not open draws in bundled Inter, and the debug
     -- readout names the font drawn, not the one asked for.
     let missing = fixtures </> "NanoMissing.ttf"
     writeIORef (sdlFontRequestRef env) (FontFilePath missing)
     _ <- syncDisplay fromFile env emptyInput
     shown <- dbgFontPath <$> sdlDebugSnapshot env
-    when (shown == missing) $ fail "the debug readout names a font that did not open"
+    check "the debug readout names a font that did not open" (shown /= missing)
     pure (fresh, prepared, measured, freshQuad)
-  -- Pure metric and quad values are safe to evaluate after the native font,
-  -- atlas and SDL session are closed; native effects fail before dereferencing.
-  afterClose <- evaluate (lineWidth snapshot "AV To fi café λ")
-  unless (afterClose == width) $ fail "immutable snapshot changed after shutdown"
+  -- Pure metric and quad values stay safe after the native font, atlas and
+  -- session close; native effects fail before dereferencing.
+  afterClose <- evaluate (lineWidth snapshot text)
+  check "an immutable snapshot changed after shutdown" (afterClose == width)
   void (evaluate quad)
   expectClosed (prepareFontMetrics font "new text")
-  expectClosed (drawShaped font "AV To fi café λ")
+  expectClosed (drawShaped font text)
   putStrLn "font effects: ok"
 
 -- | Shaping reorders right-to-left text and gives every character a caret:
--- an Arabic word's carets run right to left, a mixed line keeps its Latin
--- carets increasing, and a click lands on the nearest caret.
+-- an Arabic word's carets run right to left (the script sets the direction,
+-- whichever font draws it), a mixed line keeps its Latin carets increasing,
+-- and a click lands on the nearest caret.
 shapingChecks :: FontMetrics -> IO ()
 shapingChecks fm = do
   let arabic = "مرحبا"
       mixed = "Hi مرحبا 12"
   pArabic <- prepareFontMetrics fm arabic
-  case fmShape pArabic arabic of
-    Nothing -> fail "Arabic text was not shaped"
-    Just st -> do
-      let carets = [indexPrimArray (stCarets st) i | i <- [0 .. sizeofPrimArray (stCarets st) - 1]]
-      unless (length carets == T.length arabic + 1) $ fail "Arabic carets do not cover every character"
-      -- The script sets the direction, so the word runs right to left
-      -- whichever font draws it.
-      unless (and (zipWith (>=) carets (drop 1 carets))) $
-        fail ("Arabic carets do not decrease: " <> show carets)
-      unless (textIndexAtX pArabic arabic (maximum carets + 1) == 0) $
-        fail "a click at the right edge of Arabic text did not land before its first character"
   pMixed <- prepareFontMetrics fm mixed
-  case fmShape pMixed mixed of
-    Nothing -> fail "mixed text was not shaped"
-    Just st -> do
-      let caret i = indexPrimArray (stCarets st) i
-      unless (caret 0 < caret 1 && caret 1 < caret 2) $ fail "Latin carets in a mixed line do not increase"
-      unless (caret 9 < caret 10 && caret 10 < caret 11) $ fail "digits after right-to-left text do not run left to right"
+  case (fmShape pArabic arabic, fmShape pMixed mixed) of
+    (Just a, Just m) -> do
+      let carets = primArrayToList (stCarets a)
+          caret = indexPrimArray (stCarets m)
+      check "Arabic carets do not cover every character" (length carets == T.length arabic + 1)
+      check ("Arabic carets do not decrease: " <> show carets) (and (zipWith (>=) carets (drop 1 carets)))
+      check "a click right of Arabic text did not land before it" $
+        textIndexAtX pArabic arabic (maximum carets + 1) == 0
+      check "Latin carets in a mixed line do not increase" (caret 0 < caret 1 && caret 1 < caret 2)
+      check "digits after right-to-left text do not run left to right" (caret 9 < caret 10 && caret 10 < caret 11)
+    _ -> fail "Arabic or mixed text was not shaped"
 
 expectClosed :: IO a -> IO ()
-expectClosed action = do
-  result <- try (void action) :: IO (Either IOException ())
-  case result of
-    Left err | "used after" `isInfixOf` show err -> pure ()
-    _ -> fail "retained font callback did not reject its closed native handle"
+expectClosed action =
+  try (void action) >>= \case
+    Left (err :: IOException) | "used after" `isInfixOf` show err -> pure ()
+    _ -> fail "a retained font callback did not reject its closed native handle"

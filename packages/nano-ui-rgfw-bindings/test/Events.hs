@@ -7,7 +7,8 @@ import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime, getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
-import RGFW (Event (..), Window (..), closeWindow, createWindowGL, pollEvent, stopWaitForEvent, waitForEvent, withEventBuffer)
+import RGFW
+  (Event (..), Window (..), closeWindow, createWindowGL, pollEvent, stopWaitForEvent, waitForEvent, withEventBuffer)
 import RGFW.Raw
 import System.Environment (getArgs, lookupEnv)
 import System.Info (os)
@@ -25,7 +26,7 @@ foreign import ccall unsafe "rgfw_test_enter"
   queueEnter :: Ptr RGFW_window -> CInt -> CInt -> IO ()
 
 check :: (Eq a, Show a) => String -> a -> IO a -> IO ()
-check label expected action = action >>= \actual -> unless (actual == expected) (fail (label ++ ": " ++ show actual))
+check name expected action = action >>= \actual -> unless (actual == expected) (fail (name ++ ": " ++ show actual))
 
 main :: IO ()
 main = withEventBuffer $ \event -> do
@@ -55,9 +56,8 @@ main = withEventBuffer $ \event -> do
   -- Key ranges that "RGFW.Raw" documents as consecutive.
   check "function keys are consecutive" (23 :: Int) (pure (fromIntegral (rgfw_keyF24 - rgfw_keyF1)))
   check "keypad digits are consecutive" (8 :: Int) (pure (fromIntegral (rgfw_keyPad9 - rgfw_keyPad1)))
-  args <- getArgs
-  if args == ["--bench"]
-    then do
+  getArgs >>= \case
+    ["--bench"] -> do
       writeEvent event 0
       let loop !n !acc
             | n == (0 :: Int) = pure acc
@@ -68,8 +68,9 @@ main = withEventBuffer $ \event -> do
       t1 <- getMonotonicTimeNSec
       after <- getAllocationCounter
       unless (total == 10000000 * fromIntegral rgfw_keyHome) (fail "event benchmark checksum")
-      printf "event-key: %.6f ns/read | %.3f B/read\n" (fromIntegral (t1 - t0) / 1e7 :: Double) (fromIntegral (before - after) / 1e7 :: Double)
-    else do
+      let perRead x = fromIntegral x / 1e7 :: Double
+      printf "event-key: %.6f ns/read | %.3f B/read\n" (perRead (t1 - t0)) (perRead (before - after))
+    _ -> do
       putStrLn "RGFW native event ABI: ok"
       stopWaitCheck event
       enterCheck event
@@ -78,16 +79,12 @@ main = withEventBuffer $ \event -> do
 -- | A stop from another thread ends a wait, and a stop issued before a wait
 -- makes it return at once. Stops that pile up while nothing waits are
 -- drained by the next wait, so later waits block again instead of returning
--- immediately forever. Skipped on Linux without an X display, and without
--- an OpenGL 3.2 window.
+-- immediately forever.
 stopWaitCheck :: Ptr RGFW_event -> IO ()
 stopWaitCheck event = withTestWindow "stop wait" $ \win -> do
-  let drain = pollEvent win event >>= \case
-        EventNone -> pure ()
-        _ -> drain
-      -- Seconds a wait of up to @ms@ took, starting with an empty queue.
+  let -- Seconds a wait of up to @ms@ took, starting with an empty queue.
       timedWait ms = do
-        drain
+        _ <- events win event
         t0 <- getMonotonicTime
         waitForEvent ms
         subtract t0 <$> getMonotonicTime
@@ -100,42 +97,46 @@ stopWaitCheck event = withTestWindow "stop wait" $ \win -> do
   endsWithin 1 "piled-up stops" (replicateM_ 100 stopWaitForEvent)
   -- A stray event can end a wait early, so one full wait in three suffices.
   waited <- mapM (const (timedWait 200)) [1 .. 3 :: Int]
-  unless (any (>= 0.15) waited) (fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited))
+  unless (any (>= 0.15) waited) $
+    fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited)
 
 -- | The pointer entering the window comes as motion to where it entered:
--- until it moves, nothing else reports where it is. Skipped on Linux
--- without an X display, and without an OpenGL 3.2 window.
+-- until it moves, nothing else reports where it is.
 enterCheck :: Ptr RGFW_event -> IO ()
 enterCheck event = withTestWindow "enter" $ \win@(Window ptr) -> do
-  let events = pollEvent win event >>= \case
-        EventNone -> pure []
-        ev -> (ev :) <$> events
-  _ <- events
+  _ <- events win event
   queueEnter ptr 7 9
-  got <- events
+  got <- events win event
   unless (EventMouseMotion 7 9 `elem` got) (fail ("RGFW enter: " ++ show got))
 
 -- | On Windows a press captures the mouse until the last button comes up, so
 -- a release outside the window still arrives, and the pointer leaves with
--- it. A capture taken away mid-drag releases the button. Windows only, and
--- skipped without an OpenGL 3.2 window.
+-- it. A capture taken away mid-drag releases the button. Windows only.
 captureCheck :: Ptr RGFW_event -> IO ()
 captureCheck event
   | os /= "mingw32" = pure ()
   | otherwise = withTestWindow "mouse capture" $ \win@(Window ptr) -> do
-      let mouse = pollEvent win event >>= \case
-            EventNone -> pure []
-            ev@(EventMouseButton _ _) -> (ev :) <$> mouse
-            ev@(EventOther t) | t == rgfw_mouseLeave -> (ev :) <$> mouse
-            _ -> mouse
+      let mouse = filter isMouse <$> events win event
+          isMouse = \case
+            EventMouseButton _ _ -> True
+            EventOther t -> t == rgfw_mouseLeave
+            _ -> False
           left = EventMouseButton rgfw_mouseLeft
           drag what lose expected = do
             _ <- mouse
             captured <- win32Drag ptr (-20) (-20) lose
             got <- mouse
-            unless (captured == 1 && got == expected) (fail ("RGFW mouse capture: " ++ what ++ ": " ++ show (captured, got)))
+            unless (captured == 1 && got == expected) $
+              fail ("RGFW mouse capture: " ++ what ++ ": " ++ show (captured, got))
       drag "a release outside the window" 0 [left True, left False, EventOther rgfw_mouseLeave]
       drag "a capture taken away" 1 [left True, left False]
+
+-- | Every queued event, oldest first.
+events :: Window -> Ptr RGFW_event -> IO [Event]
+events win event =
+  pollEvent win event >>= \case
+    EventNone -> pure []
+    ev -> (ev :) <$> events win event
 
 -- | Run @body@ on a hidden 64x64 OpenGL 3.2 window titled @name@, then
 -- close it and report "RGFW <name>: ok". Skipped on Linux without an X

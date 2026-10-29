@@ -1,313 +1,108 @@
-{-# LANGUAGE OverloadedStrings #-}
-
+-- | The book's sources hold together: code fences balance, every
+-- @{{#include path:anchor}}@ names a file and a non-empty anchored region,
+-- every interactive specimen tag is in nano-ui-banks.js, and, when mdbook is
+-- installed, the book builds.
 module Main (main) where
 
-import Control.Monad (forM, when)
-import Data.Char (isDigit, isSpace)
-import Data.List (isPrefixOf)
+import Control.Monad (filterM, forM, unless)
+import Data.Char (isDigit)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import System.Directory
-  ( doesDirectoryExist
-  , doesFileExist
-  , findExecutable
-  , listDirectory
-  , makeAbsolute
-  )
-import System.Exit (ExitCode (..), exitFailure, exitSuccess)
-import System.FilePath (dropFileName, normalise, takeExtension, (</>))
+import System.Directory (doesDirectoryExist, doesFileExist, findExecutable, listDirectory, makeAbsolute)
+import System.Exit (ExitCode (..), exitFailure)
+import System.FilePath (dropFileName, normalise, takeDirectory, takeExtension, (</>))
 import System.Process (proc, readCreateProcessWithExitCode)
 
--- | Locate the repository root by walking up to find cabal.project.
+-- | The nearest directory at or above the current one holding cabal.project.
 findRepoRoot :: IO FilePath
-findRepoRoot = go "."
- where
-  go dir = do
-    hasProject <- doesFileExist (dir </> "cabal.project")
-    if hasProject
-      then makeAbsolute dir
-      else do
-        parent <- makeAbsolute (dir </> "..")
-        curr <- makeAbsolute dir
-        if parent == curr
-          then error "Could not find repository root containing cabal.project"
-          else go (dir </> "..")
+findRepoRoot = makeAbsolute "." >>= go
+  where
+    go dir = do
+      found <- doesFileExist (dir </> "cabal.project")
+      if found
+        then pure dir
+        else
+          if takeDirectory dir == dir
+            then fail "no cabal.project above the current directory"
+            else go (takeDirectory dir)
 
--- | Recursively collect all markdown files in a directory.
-collectMarkdownFiles :: FilePath -> IO [FilePath]
-collectMarkdownFiles dir = do
-  entries <- listDirectory dir
-  paths <- forM entries $ \entry -> do
-    let
-      path = dir </> entry
-    isDir <- doesDirectoryExist path
-    if isDir
-      then collectMarkdownFiles path
-      else pure [path | takeExtension path == ".md"]
-  pure (concat paths)
+markdownFiles :: FilePath -> IO [FilePath]
+markdownFiles dir = do
+  paths <- map (dir </>) <$> listDirectory dir
+  dirs <- filterM doesDirectoryExist paths
+  nested <- concat <$> mapM markdownFiles dirs
+  pure (filter ((== ".md") . takeExtension) paths ++ nested)
 
-data IncludeRef = IncludeRef
-  { incSourceMd :: !FilePath
-  , incLineNum :: !Int
-  , incTargetPath :: !FilePath
-  , incAnchor :: !(Maybe T.Text)
-  }
-  deriving (Show, Eq)
-
--- | Parse include directives like `{{#include ../path/file.hs:anchor}}`
-parseIncludes :: FilePath -> T.Text -> [IncludeRef]
-parseIncludes mdFile content =
-  [ makeRef lineNo line
-  | (lineNo, line) <- zip [1 ..] (T.lines content)
-  , prefix `T.isInfixOf` line
-  ]
- where
-  prefix = "{{#include "
-  makeRef lineNo line =
-    let
-      after = T.drop (T.length prefix) (snd (T.breakOn prefix line))
-      inside = T.takeWhile (/= '}') after
-      trimmed = T.strip inside
-      (pathPart, anchorPart) = T.breakOn ":" trimmed
-      anchor =
-        if T.null anchorPart
-          then Nothing
-          else Just (T.drop 1 anchorPart)
-      targetRel = T.unpack pathPart
-      targetFull = normalise (dropFileName mdFile </> targetRel)
-     in
-      IncludeRef
-        { incSourceMd = mdFile
-        , incLineNum = lineNo
-        , incTargetPath = targetFull
-        , incAnchor = anchor
-        }
-
--- | Check if fences (```) are balanced in a markdown file.
-checkFenceBalance :: FilePath -> T.Text -> Either String Int
-checkFenceBalance mdFile content =
-  let
-    fences = [l | l <- T.lines content, "```" `T.isPrefixOf` T.stripStart l]
-    count = length fences
-   in
-    if even count
-      then Right (count `div` 2)
+-- | The errors in one chapter, each prefixed with its file and line.
+chapterErrors :: T.Text -> FilePath -> IO [String]
+chapterErrors banks md = do
+  content <- TIO.readFile md
+  let numbered = zip [1 :: Int ..] (T.lines content)
+      at n msg = md <> ":" <> show n <> ": " <> msg
+      fences = length [() | (_, l) <- numbered, "```" `T.isPrefixOf` T.stripStart l]
+      fenceErrors = [md <> ": unbalanced code fences (" <> show fences <> " markers)" | odd fences]
+      specimens =
+        [ at n (what <> " not found in nano-ui-banks.js: " <> T.unpack val)
+        | (n, l) <- numbered
+        , (tag, attr, key, what) <- specimenKinds
+        , tag `T.isInfixOf` l
+        , let rest = snd (T.breakOn attr l)
+        , not (T.null rest)
+        , let val = T.takeWhile (/= '"') (T.drop (T.length attr) rest)
+        , not (key val `T.isInfixOf` banks)
+        ]
+  includes <- forM [(n, l) | (n, l) <- numbered, "{{#include " `T.isInfixOf` l] $ \(n, l) -> do
+    let inside = T.strip (T.takeWhile (/= '}') (T.drop 11 (snd (T.breakOn "{{#include " l))))
+        (rel, anchorPart) = T.breakOn ":" inside
+        target = normalise (dropFileName md </> T.unpack rel)
+    exists <- doesFileExist target
+    if not exists
+      then pure [at n ("target file not found: " <> target)]
       else
-        Left
-          (mdFile <> ": unbalanced code fences (found " <> show count <> " ``` markers)")
+        if T.null anchorPart
+          then pure []
+          else map (at n . (<> " in " <> target)) . anchorErrors (T.drop 1 anchorPart) <$> TIO.readFile target
+  pure (fenceErrors ++ concat includes ++ specimens)
 
--- | Verify an included file and optional anchor.
-verifyInclude :: FilePath -> IncludeRef -> IO (Maybe String)
-verifyInclude root inc = do
-  exists <- doesFileExist (incTargetPath inc)
-  if not exists
-    then
-      pure
-        $ Just
-        $ incSourceMd inc
-          <> ":"
-          <> show (incLineNum inc)
-          <> ": target file not found: "
-          <> incTargetPath inc
-    else case incAnchor inc of
-      Nothing -> pure Nothing
-      Just anchor -> do
-        fileContent <- TIO.readFile (incTargetPath inc)
-        let
-          fileLines = T.lines fileContent
-          startTag = "ANCHOR: " <> anchor
-          endTag = "ANCHOR_END: " <> anchor
-          hasStart = any (startTag `T.isInfixOf`) fileLines
-          hasEnd = any (endTag `T.isInfixOf`) fileLines
-        if not hasStart
-          then
-            pure
-              $ Just
-              $ incSourceMd inc
-                <> ":"
-                <> show (incLineNum inc)
-                <> ": start anchor not found: "
-                <> T.unpack anchor
-                <> " in "
-                <> incTargetPath inc
-          else
-            if not hasEnd
-              then
-                pure
-                  $ Just
-                  $ incSourceMd inc
-                    <> ":"
-                    <> show (incLineNum inc)
-                    <> ": end anchor not found: "
-                    <> T.unpack anchor
-                    <> " in "
-                    <> incTargetPath inc
-              else do
-                -- Check that content between anchors is non-empty
-                let
-                  between =
-                    takeWhile (not . (endTag `T.isInfixOf`))
-                      $ drop 1
-                      $ dropWhile (not . (startTag `T.isInfixOf`)) fileLines
-                  nonBlank = filter (not . T.null . T.strip) between
-                if null nonBlank
-                  then
-                    pure
-                      $ Just
-                      $ incSourceMd inc
-                        <> ":"
-                        <> show (incLineNum inc)
-                        <> ": anchor region is empty: "
-                        <> T.unpack anchor
-                  else pure Nothing
+-- | What is wrong with an anchor's region in a file, if anything.
+anchorErrors :: T.Text -> T.Text -> [String]
+anchorErrors anchor file
+  | not (any (start `T.isInfixOf`) ls) = ["start anchor not found: " <> T.unpack anchor]
+  | not (any (end `T.isInfixOf`) ls) = ["end anchor not found: " <> T.unpack anchor]
+  | all (T.null . T.strip) region = ["anchor region is empty: " <> T.unpack anchor]
+  | otherwise = []
+  where
+    ls = T.lines file
+    start = "ANCHOR: " <> anchor
+    end = "ANCHOR_END: " <> anchor
+    region = takeWhile (not . (end `T.isInfixOf`)) (drop 1 (dropWhile (not . (start `T.isInfixOf`)) ls))
 
--- | An interactive specimen tag: its element name, the attribute naming the
--- specimen, how the specimen's key appears in nano-ui-banks.js, and what the
--- error calls it.
-data SpecimenKind = SpecimenKind
-  { skTag :: T.Text
-  , skAttr :: T.Text
-  , skPattern :: T.Text -> T.Text
-  , skLabel :: String
-  }
-
-specimenKinds :: [SpecimenKind]
+-- | A specimen tag, the attribute naming it, its key in nano-ui-banks.js, and
+-- what an error calls it.
+specimenKinds :: [(T.Text, T.Text, T.Text -> T.Text, String)]
 specimenKinds =
-  [ SpecimenKind "<nano-ui-trap" "id=\"" trapPattern "trap specimen"
-  , SpecimenKind "<nano-ui-workbench" "widget=\"" (\w -> "\"" <> w <> "\"") "workbench widget"
+  [ ("<nano-ui-trap", "id=\"", trapKey, "trap specimen")
+  , ("<nano-ui-workbench", "widget=\"", \w -> "\"" <> w <> "\"", "workbench widget")
   ]
- where
-  trapPattern tagId =
-    let
-      digits = T.filter isDigit tagId
-      num = if T.length digits == 1 then "0" <> digits else digits
-     in
-      "\"id\":\"" <> num <> "\""
-
--- | Parse interactive specimen references like `<nano-ui-trap id="...">` and `<nano-ui-workbench widget="...">`
-parseSpecimens :: FilePath -> T.Text -> [(FilePath, Int, SpecimenKind, T.Text)]
-parseSpecimens mdFile content =
-  [ (mdFile, lineNo, kind, val)
-  | (lineNo, line) <- zip [1 ..] (T.lines content)
-  , kind <- specimenKinds
-  , skTag kind `T.isInfixOf` line
-  , let (_, rest) = T.breakOn (skAttr kind) line
-  , not (T.null rest)
-  , let val = T.takeWhile (/= '"') (T.drop (T.length (skAttr kind)) rest)
-  ]
-
-verifySpecimen :: T.Text -> (FilePath, Int, SpecimenKind, T.Text) -> Maybe String
-verifySpecimen banksJs (f, lineNo, kind, tagId)
-  | skPattern kind tagId `T.isInfixOf` banksJs = Nothing
-  | otherwise =
-      Just $
-        f
-          <> ":"
-          <> show lineNo
-          <> ": "
-          <> skLabel kind
-          <> " not found in nano-ui-banks.js: "
-          <> T.unpack tagId
+  where
+    trapKey tagId =
+      let ds = T.filter isDigit tagId in "\"id\":\"" <> (if T.length ds == 1 then "0" <> ds else ds) <> "\""
 
 main :: IO ()
 main = do
   root <- findRepoRoot
-  putStrLn $ "Repository root: " <> root
-  let
-    bookSrc = root </> "book" </> "src"
-  mdFiles <- collectMarkdownFiles bookSrc
-  putStrLn $ "Found " <> show (length mdFiles) <> " markdown documentation files."
-
-  -- Check code fence balance
-  putStrLn "\nChecking code fence balance across all book chapters..."
-  fenceResults <- forM mdFiles $ \f -> do
-    content <- TIO.readFile f
-    pure (checkFenceBalance f content)
-
-  let
-    fenceErrors = [err | Left err <- fenceResults]
-    totalBlocks = sum [n | Right n <- fenceResults]
-  mapM_ putStrLn fenceErrors
-  putStrLn $ "Total code blocks verified for balance: " <> show totalBlocks
-
-  -- Check {{#include}} references and anchors
-  putStrLn "\nChecking mdBook include directives and anchors..."
-  allIncludes <- fmap concat $
-    forM mdFiles $ \f -> do
-      content <- TIO.readFile f
-      pure (parseIncludes f content)
-
-  putStrLn $ "Found " <> show (length allIncludes) <> " include directives."
-  includeErrors <- fmap concat $
-    forM allIncludes $ \inc -> do
-      err <- verifyInclude root inc
-      case err of
-        Nothing -> pure []
-        Just e -> pure [e]
-
-  mapM_ (\e -> putStrLn ("  ERROR: " <> e)) includeErrors
-
-  -- Check interactive specimen tags (<nano-ui-trap> and <nano-ui-workbench>)
-  putStrLn "\nChecking interactive specimen references..."
-  let
-    banksJsPath = root </> "book" </> "theme" </> "nano-ui-banks.js"
-  hasBanksJs <- doesFileExist banksJsPath
-  (specimenErrors, totalSpecimens) <-
-    if not hasBanksJs
-      then do
-        putStrLn "  ERROR: book/theme/nano-ui-banks.js not found!"
-        pure (["book/theme/nano-ui-banks.js missing"], 0)
-      else do
-        banksJs <- TIO.readFile banksJsPath
-        allSpecimens <- fmap concat $
-          forM mdFiles $ \f -> do
-            content <- TIO.readFile f
-            pure (parseSpecimens f content)
-        putStrLn $
-          "Found " <> show (length allSpecimens) <> " interactive specimen tags."
-        let
-          errs = [e | Just e <- map (verifySpecimen banksJs) allSpecimens]
-        mapM_ (\e -> putStrLn ("  ERROR: " <> e)) errs
-        pure (errs, length allSpecimens)
-
-  -- If mdbook is installed, verify `mdbook build book`
-  putStrLn "\nChecking mdbook build..."
-  mCmd <- findExecutable "mdbook"
-  mdbookErrors <- case mCmd of
-    Nothing -> do
-      putStrLn "  (mdbook executable not in PATH, skipping mdbook build check)"
-      pure []
-    Just mdbookPath -> do
-      putStrLn $ "  Running mdbook build with: " <> mdbookPath
-      (code, out, err) <-
-        readCreateProcessWithExitCode (proc mdbookPath ["build", root </> "book"]) ""
-      case code of
-        ExitSuccess -> do
-          putStrLn "  mdbook build succeeded without errors."
-          pure []
-        ExitFailure c -> do
-          putStrLn $ "  mdbook build failed with code " <> show c
-          putStrLn $ "  STDOUT:\n" <> out
-          putStrLn $ "  STDERR:\n" <> err
-          pure ["mdbook build failed"]
-
-  let
-    allErrors = fenceErrors <> includeErrors <> specimenErrors <> mdbookErrors
-  if null allErrors
-    then do
-      putStrLn "\n========================================"
-      putStrLn " SUCCESS: All book code examples verified!"
-      putStrLn $ " - " <> show (length mdFiles) <> " markdown files checked"
-      putStrLn $
-        " - " <> show (length allIncludes) <> " included code anchors validated"
-      putStrLn $ " - " <> show totalBlocks <> " code blocks balanced"
-      putStrLn $ " - " <> show totalSpecimens <> " interactive specimens validated"
-      putStrLn "========================================"
-      exitSuccess
-    else do
-      putStrLn "\n========================================"
-      putStrLn $
-        " FAILURE: " <> show (length allErrors) <> " error(s) found in book examples:"
-      mapM_ (\e -> putStrLn (" - " <> e)) allErrors
-      putStrLn "========================================"
-      exitFailure
+  chapters <- markdownFiles (root </> "book" </> "src")
+  let banksPath = root </> "book" </> "theme" </> "nano-ui-banks.js"
+  hasBanks <- doesFileExist banksPath
+  banks <- if hasBanks then TIO.readFile banksPath else pure ""
+  chapterErrs <- concat <$> mapM (chapterErrors banks) chapters
+  mdbook <-
+    findExecutable "mdbook" >>= \case
+      Nothing -> [] <$ putStrLn "mdbook not in PATH: skipping the build"
+      Just exe -> do
+        (code, out, err) <- readCreateProcessWithExitCode (proc exe ["build", root </> "book"]) ""
+        pure ["mdbook build failed:\n" <> out <> err | code /= ExitSuccess]
+  let errors = ["book/theme/nano-ui-banks.js missing" | not hasBanks] ++ chapterErrs ++ mdbook
+  mapM_ (putStrLn . ("ERROR: " <>)) errors
+  unless (null errors) exitFailure
+  putStrLn ("book: " <> show (length chapters) <> " chapters ok")
