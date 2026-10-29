@@ -3,12 +3,7 @@
 The view runs every frame, and nothing survives between frames except state you keep. Most state lives in a `Var`, a typed mutable reference. Input widgets take the `Var` they display and mutate it directly, with no callback.
 
 ```haskell
-counter :: NanoUI ()
-counter = rowWith (gap 8 . alignMid) $ do
-  n <- useVar (0 :: Int)
-  whenM (button "-") (modifyVar n (subtract 1))
-  label . T.pack . show =<< readVar n
-  whenM (button "+") (modifyVar n (+ 1))
+{{#include ../../../packages/nano-ui-demo/book/Book/State.hs:counter}}
 ```
 
 ## Keep state, derive values
@@ -16,15 +11,7 @@ counter = rowWith (gap 8 . alignMid) $ do
 A value that changes over time and cannot be recomputed belongs in a `Var`. A value that *can* be recomputed belongs in a local binding, computed fresh every frame:
 
 ```haskell
-appView :: App -> NanoUI ()
-appView app = do
-  -- Keep: the inputs to the next frame.
-  draft <- useVar ""
-  settings <- readVar app.appSettings
-
-  -- Derive: computed from what was kept.
-  label ("Signed in as " <> settings.nickname)
-  label ("Draft: " <> T.pack (show (T.length draft)) <> " characters")
+{{#include ../../../packages/nano-ui-demo/book/Book/State.hs:keep_derive}}
 ```
 
 A derived value copied into a second `Var` drifts as soon as one writer forgets to update it.
@@ -43,27 +30,13 @@ There are two ways to create a `Var`, plus one for dynamic collections:
 `useVar` needs no setup. Its initial value is used only when the slot is first created; call `writeVar` to reset it later. Its slots are counted separately from widget ids, but a **conditional `useVar`** still needs `scope` so later slots keep their positions:
 
 ```haskell
-showAdvanced <- useVar False
-scope . whenM (readVar showAdvanced) $ do
-  level <- useVar (3 :: Int)
-  ...
+{{#include ../../../packages/nano-ui-demo/book/Book/State.hs:conditional_use_var}}
 ```
 
 `newVar` can hold any type. Allocate it once in `IO` and pass it into the view:
 
 ```haskell
-data App = App
-  { appSettings :: Var Settings
-  , appTodos :: Var [Todo]
-  }
-
-newApp :: IO App
-newApp = App <$> newVar (Settings 40 False "Ada") <*> newVar []
-
-main :: IO ()
-main = do
-  app <- newApp
-  runSdlApp opts (appView app)
+{{#include ../../../packages/nano-ui-demo/book/Book/State.hs:new_var}}
 ```
 
 Passing the same `Var` to two widgets shares their state. Allocating a `Var` *inside* the view creates a fresh one on every pass.
@@ -71,10 +44,7 @@ Passing the same `Var` to two widgets shares their state. Allocating a `Var` *in
 For dynamic collections, `VarMap` gives one `Var` per key:
 
 ```haskell
-rows <- newVarMap
-
-rowState <- varAt rows todoId (RowState False "")
-retainVars (`elem` liveIds) rows
+{{#include ../../../packages/nano-ui-demo/book/Book/State.hs:var_map}}
 ```
 
 `varAt` returns the existing `Var` for a key or creates it. `dropVar` removes one; `retainVars keep` prunes everything whose key fails the predicate.
@@ -84,18 +54,7 @@ retainVars (`elem` liveIds) rows
 A record in a `Var` gives a `Var` for each field. With `Generic` and `OverloadedRecordDot`:
 
 ```haskell
-data Settings = Settings
-  { volume :: !Float
-  , silent :: !Bool
-  , nickname :: !Text
-  }
-  deriving (Eq, Generic)
-
-settings <- newVar (Settings 40 False "Ada")
-
-slider 0 100 settings.volume
-checkbox "Silent" settings.silent
-textInput settings.nickname
+{{#include ../../../packages/nano-ui-demo/book/Book/State.hs:projections}}
 ```
 
 `settings.volume` is a `Var Float` projecting one field. Editing it does not repaint what reads only `settings.nickname`.
@@ -132,10 +91,7 @@ A freshly computed `NaN` is never unchanged (`NaN /= NaN`), so writing one every
 Tasks, streams, image handles, drag handles, plot caches, and file-dialog ids are allocated in `IO` during setup and stored in the application record, exactly like a `newVar`:
 
 ```haskell
-data App = App
-  { appDocument :: Var TextDocument
-  , appTask :: Task Text [Text]
-  }
+{{#include ../../../packages/nano-ui-demo/book/Book/State.hs:handles}}
 ```
 
 A handle allocated inside the view is a per-frame leak. If the view needs a new handle when a key changes, allocate it in setup and key its use, or use a hook that owns its lifetime (`useTask`, `useStream`, `useImageRgba`).

@@ -80,11 +80,10 @@ The SDL backend's file dialogs are asynchronous. `useFileDialog` polls a `Var (M
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:file_dialogs}}
 ```
 
-Starting a dialog returns an id:
+The Open command starts one and keeps its id:
 
 ```haskell
-writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions
-writeVar saveDlg . Just =<< askSaveFileDialog defaultFileDialogOptions
+{{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:open_cmd}}
 ```
 
 `writeDocument` is ordinary Haskell around `liftIO`, because file I/O is an event-driven side effect:
@@ -115,7 +114,9 @@ The title is derived every frame from the path and the dirty flag, and set decla
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:window_title}}
-setWindowTitleUi (name <> " - nano-ui Notepad")
+
+-- ...after the layout, which returns the name as docName:
+{{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:set_title}}
 ```
 
 `setWindowTitleUi` is a no-op when the title has not changed, so it is safe to call unconditionally. The imperative window actions (`resizeWindowUi`, `maximizeWindowUi`) are different: they run on every call and belong behind events.

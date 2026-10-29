@@ -22,6 +22,8 @@ data TextMotion
   | DocumentEnd
   deriving (Eq, Ord, Show, Enum, Bounded)
 
+-- The book's Text Editing chapter includes this declaration.
+-- ANCHOR: text_command
 -- | Editing, navigation, selection, history, and clipboard operations on a
 -- text field. Mutating commands record an undo step and replace any active
 -- selection.
@@ -49,4 +51,5 @@ data TextCommand
   | Copy
   | Paste
   deriving (Eq, Show)
+-- ANCHOR_END: text_command
 

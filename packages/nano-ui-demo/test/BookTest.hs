@@ -1,4 +1,5 @@
--- | The book's sources hold together: code fences balance, every
+-- | The book's sources hold together: code fences balance, Haskell fences
+-- hold only includes of compiled code, every
 -- @{{#include path:anchor}}@ names a file and a non-empty anchored region,
 -- every interactive specimen tag is in nano-ui-banks.js, and, when mdbook is
 -- installed, the book builds.
@@ -41,6 +42,12 @@ chapterErrors banks md = do
       at n msg = md <> ":" <> show n <> ": " <> msg
       fences = length [() | (_, l) <- numbered, "```" `T.isPrefixOf` T.stripStart l]
       fenceErrors = [md <> ": unbalanced code fences (" <> show fences <> " markers)" | odd fences]
+      inlineCode =
+        [ at n "Haskell written inline; put it in a compiled module and {{#include}} it"
+        | (n, l) <- haskellLines numbered
+        , let t = T.strip l
+        , not (T.null t || "{{#include " `T.isPrefixOf` t || "--" `T.isPrefixOf` t)
+        ]
       specimens =
         [ at n (what <> " not found in nano-ui-banks.js: " <> T.unpack val)
         | (n, l) <- numbered
@@ -62,7 +69,18 @@ chapterErrors banks md = do
         if T.null anchorPart
           then pure []
           else map (at n . (<> " in " <> target)) . anchorErrors (T.drop 1 anchorPart) <$> TIO.readFile target
-  pure (fenceErrors ++ concat includes ++ specimens)
+  pure (fenceErrors ++ inlineCode ++ concat includes ++ specimens)
+
+-- | The numbered lines inside ```haskell fences. A comment line may join two
+-- includes; anything else is code the compiler never sees.
+haskellLines :: [(Int, T.Text)] -> [(Int, T.Text)]
+haskellLines = go False
+  where
+    go _ [] = []
+    go inside ((n, l) : rest)
+      | "```" `T.isPrefixOf` T.stripStart l = go (not inside && T.strip l == "```haskell") rest
+      | inside = (n, l) : go inside rest
+      | otherwise = go inside rest
 
 -- | What is wrong with an anchor's region in a file, if anything.
 anchorErrors :: T.Text -> T.Text -> [String]

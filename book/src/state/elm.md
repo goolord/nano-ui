@@ -22,11 +22,7 @@ A `NanoUIE` view is an ordinary `NanoUI` action with the view's message sink in 
 | `emitEdited widget old toMsg` | The widget's value changed **and** `respChanged` is true |
 
 ```haskell
-column $ do
-  label "Settings"
-  withKey "form" $ do
-    emitChanged (slider 0 100) volume SetVolume
-    emitWhen (button "Save") Save
+{{#include ../../../packages/nano-ui-demo/book/Book/Elm.hs:emit}}
 ```
 
 `emitChanged` runs the widget against a temporary `Var` seeded with the model value and emits the new value only if it differs. `emitEdited` is its stricter form for text fields, where programmatic writes should not look like edits.
@@ -55,7 +51,7 @@ For local UI state, keep using `Var` inside the component; the durable model sta
 `runSdlAppReduce` and `runRgfwAppReduce` take an update function, an initial model, and a view:
 
 ```haskell
-runSdlAppReduce defaultSdlOptions update initialModel view
+{{#include ../../../packages/nano-ui-demo/book/Book/Elm.hs:run}}
 ```
 
 The view runs with the current model, messages are reduced at frame end, and the drawing shown for that frame is from **before** the reduction. If the model changed, another frame is requested to draw it.

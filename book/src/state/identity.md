@@ -22,25 +22,13 @@ The structure of the calls should be the same on every frame. Straight-line code
 `scope` reserves one slot whether or not its body runs, so later siblings keep their ids:
 
 ```haskell
--- BAD: when showDetails is False, every later sibling shifts down one id.
-when showDetails $ do
-  label "Details..."
-  textInput detailsVar
-
--- GOOD: one stable slot, whether or not the body runs.
-scope $
-  when showDetails $ do
-    label "Details..."
-    textInput detailsVar
+{{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:scope}}
 ```
 
 The same applies to a branch that swaps two widgets:
 
 ```haskell
-scope $
-  if isEditing
-    then textInput draft
-    else label (todoText todo)
+{{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:scope_branch}}
 ```
 
 `scope` is cheap. Use it around anything that may not run every frame: a conditional block, a `case` whose branches declare different widgets, a loading placeholder. Overlays are the exception: call them unconditionally (Rule 4).
@@ -50,11 +38,7 @@ scope $
 Never key a list item by its index. Wrap each item in `withKey` with a stable, sibling-unique key: an item id, a UUID, a file path.
 
 ```haskell
-column $ for_ items $ \todo ->
-  withKey (todoId todo) $ do
-    row $ do
-      label (todoText todo)
-      whenM (button "Delete") (deleteItem (todoId todo))
+{{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:with_key}}
 ```
 
 Without the key, removing the first row makes every later row inherit the previous row's caret, selection, and local `Var`s. With it, the row's state travels with the item through filters, sorts, and reorders.
@@ -62,10 +46,7 @@ Without the key, removing the first row makes every later row inherit the previo
 `withKey` is also how per-row `useVar` calls stay attached to their row:
 
 ```haskell
-for_ items $ \todo ->
-  withKey (todoId todo) $ do
-    expanded <- useVar False      -- follows todoId, not the row index
-    ...
+{{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:with_key_use_var}}
 ```
 
 The full todo-list tutorial builds this up step by step: [Build a Todo List](../tutorials/todo-list.md).
@@ -75,9 +56,7 @@ The full todo-list tutorial builds this up step by step: [Build a Todo List](../
 For a list stored in a `Var [a]`, `forEachVar key list body` gives each element a `Var a` and puts the body under the element's key automatically. `withElemVars` does the same but passes the elements and an `at` accessor, for when you filter or sort the list yourself:
 
 ```haskell
-withElemVars todoId items $ \todos at ->
-  forM_ (filter visible todos) $ \todo ->
-    withKey (todoId todo) (row (at todo))
+{{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:with_elem_vars}}
 ```
 
 ## Rule 4: call overlays unconditionally
@@ -85,11 +64,7 @@ withElemVars todoId items $ \todos at ->
 `modal`, `window`, and `popup` take a `Var Bool` for their open state and draw nothing while it is false. Call them every frame:
 
 ```haskell
-confirm <- useVar False
-whenM (button "Delete...") (writeVar confirm True)
-
-modal confirm "Delete the file?" $
-  whenM (button "Delete") (deleteFile >> writeVar confirm False)
+{{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:overlay}}
 ```
 
 Wrapping the call in `when` shifts every later sibling's id each time the dialog opens or closes. For derived open state, pass `constVar` and use the primed variants.
@@ -99,7 +74,7 @@ Wrapping the call in `when` shifts every later sibling's id each time the dialog
 Widget and `Var` state under a key survives the key not being drawn for a while: hide a filtered row and show it again, and its draft is still there. That state is not freed automatically. For an unbounded collection (a chat log, a set of tabs, a streaming table), keep the per-row state in a `VarMap` and prune it periodically:
 
 ```haskell
-retainVars (`elem` liveIds) rowVars
+{{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:retain}}
 ```
 
 Prune too little and state for deleted rows accumulates; prune too eagerly and a filtered-out row loses its draft. Choose per collection: a todo row can keep its draft while hidden, a row from a 100,000-row log cannot.

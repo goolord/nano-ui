@@ -88,6 +88,47 @@ library demo-common
         nano-ui-sdl ^>=0.2,
         text ^>=2.1
 
+-- The book's code. Chapters include anchored regions of these modules, so
+-- every snippet in book/src compiles. Nothing calls them.
+library book-examples
+    import:           sdl-app
+    visibility:       private
+    hs-source-dirs:   book
+    default-extensions: OverloadedRecordDot
+    ghc-options:      -Wno-missing-export-lists
+    exposed-modules:
+        Book.Architecture
+        Book.Async
+        Book.Controls
+        Book.CustomDrawing
+        Book.DataViews
+        Book.DragDrop
+        Book.Elm
+        Book.Identity
+        Book.Input
+        Book.Intro
+        Book.Layout
+        Book.Overlays
+        Book.Packages
+        Book.Signatures
+        Book.State
+        Book.Styling
+        Book.TextEditing
+        Book.Troubleshooting
+        Book.Tutorials
+        Book.Windows
+    build-depends:
+        bytestring ^>=0.12,
+        nano-ui ^>=0.2,
+        nano-ui-emit,
+        nano-ui-form,
+        nano-ui-markdown,
+        nano-ui-rgfw,
+        nano-ui-sdl ^>=0.2,
+        nano-ui-svg,
+        primitive ^>=0.9,
+        text ^>=2.1
+
 -- What examples/Demo.hs needs, for each component that compiles it.
 common demo-module
     other-modules:    Paths_nano_ui_demo

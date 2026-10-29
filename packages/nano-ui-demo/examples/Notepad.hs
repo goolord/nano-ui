@@ -150,11 +150,13 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
     -- Commands whose chords work with every menu closed. They are bound
     -- below, and their rows show the chord.
     newCmd = ("New", cmdOrCtrl <> key 'n', newDocument)
+    -- ANCHOR: open_cmd
     openCmd =
       ( "Open..."
       , cmdOrCtrl <> key 'o'
       , writeVar openDlg . Just =<< askOpenFileDialog defaultFileDialogOptions
       )
+    -- ANCHOR_END: open_cmd
     saveCmd = ("Save", cmdOrCtrl <> key 's', saveDocument False)
     saveAsCmd = ("Save As...", cmdOrCtrl <> shift <> key 's', saveDocument True)
     -- Quit, or ask first when there are unsaved changes. The question puts
@@ -275,7 +277,9 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
 
   -------------------------------------------------------------- the window ---
   -- Cheap to set every frame: the window updates only when the title changes.
+  -- ANCHOR: set_title
   setWindowTitleUi (docName <> " - nano-ui Notepad")
+  -- ANCHOR_END: set_title
 
   --------------------------------------------------------------- overlays ---
   modal aboutOpen "About" $ do

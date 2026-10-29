@@ -19,11 +19,7 @@ A `Style` is `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and
 The page behind the view is `pageBackground`: `themeWindow`, unless the theme sets `themePage`. `pageColor` sets one. `panelPage` puts a view that draws no panel of its own on the panel surface. The page sits over the window background, which shows in the gaps between panels:
 
 ```haskell
--- An app with no panel of its own: the panel surface is the page.
-sdlAppTheme = Just (panelPage defaultTheme)
-
--- Or scope it to a page with no panels.
-styled panelPage (columnWith (padAll 12) (label "Body"))
+{{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:panel_page}}
 ```
 
 A full-window scroller (`scrollWith grow`) fills the page colour.
@@ -33,11 +29,7 @@ Built-in themes: `defaultTheme` (dark), `defaultLightTheme`, the Tomorrow varian
 ## Scoped styling
 
 ```haskell
--- Replace the base theme for a subtree.
-themed defaultLightTheme mainContent
-
--- Modify the active theme for a subtree.
-styled (primary . rounded 999) $ button "Continue"
+{{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:scoped}}
 ```
 
 Modifiers compose with `(.)`; nested scopes inherit the outer modification. Theme scopes affect painting only, never layout metrics.
@@ -49,9 +41,7 @@ Modifiers compose with `(.)`; nested scopes inherit the outer modification. Them
 A quiet button:
 
 ```haskell
-quiet = subtle . buttonStyle (foreground muted)
-
-whenM (styled quiet (button "Skip")) skip
+{{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:quiet}}
 ```
 
 For a fully custom look, define a palette record, build a `Theme` from it, and derive scoped helpers. Keep three surface levels (well, shelf, controls) and reserve color for meaning.
@@ -68,9 +58,7 @@ Widgets move through four states:
 `disabledWhen cond subtree` disables interaction and dims rendering while preserving layout and state:
 
 ```haskell
-disabledWhen isSaving $ row $ do
-  button "Cancel"
-  button "Confirm"
+{{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:disabled}}
 ```
 
 Shortcuts and pointer events inside a disabled subtree are suppressed automatically.
@@ -87,17 +75,13 @@ Font modifiers apply to any text-capable widget (`labelWith`, `headingWith`, `te
 - `fontTone Warning`, `fontColor color`.
 
 ```haskell
-labelWith (fontMono . fontSize 15 . fontTone Warning) "warning: low disk"
+{{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:font_modifiers}}
 ```
 
 The SDL backend bundles Inter and finds installed fonts by family name:
 
 ```haskell
-defaultSdlOptions
-  { sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Helvetica Neue"]
-  , sdlAppMonoFont = FontSearch ["Cascadia Mono", "JetBrains Mono", "Consolas"]
-  , sdlAppFontSize = 14
-  }
+{{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:fonts}}
 ```
 
 `setSdlUiFont` changes fonts mid-session. `sdlAppUiScale = 0` follows the desktop scale on Windows. Measure text with `lineWidth`, `fmLineHeight`, and `fmSnapScale`, not by summing per-glyph advances.

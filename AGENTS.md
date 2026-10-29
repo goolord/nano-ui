@@ -670,6 +670,16 @@ Quick one-liners; the section above has the full story and real fixes.
 - Missing `-threaded`.
 - Touching `Context` from a worker thread — wake with `askWake` instead.
 
+## Book code
+
+Every Haskell snippet in `book/src` is an `{{#include path:anchor}}` of
+compiled code, never written inline; `nano-ui-book-test` fails on inline
+Haskell. Chapter snippets live in `packages/nano-ui-demo/book/Book/*.hs` (the
+`book-examples` library), and code drawn to a picture lives in
+`packages/nano-ui-svg/app/*Examples.hs`, which the glossary renders. mdBook
+does not dedent an anchored region, so anchor whole top-level definitions;
+put stand-ins for application code below the anchors.
+
 ## Writing style
 
 The book and UI copy read as if a person wrote them. Generated prose has a

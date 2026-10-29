@@ -30,11 +30,7 @@ The view runs before layout, so `respRect` is the **previous** frame's rectangle
 Three applications (`ned`, `stronghead`, `winget-gui`) share one rule, **set up once in `IO`, then run**, and differ in where durable state lives.
 
 ```haskell
-main :: IO ()
-main = do
-  cache <- newViewCache
-  env   <- newAppEnv
-  runSdlApp defaultSdlOptions (appView env cache)
+{{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:main}}
 ```
 
 ### Pattern A: one domain state and a wake channel
@@ -42,21 +38,7 @@ main = do
 `winget-gui` keeps package-manager results in one `IORef` and snapshots it at frame start:
 
 ```haskell
-data Env = Env
-  { envState :: IORef AppState
-  , envWake  :: IORef (IO ())
-  }
-
-appView env = do
-  wake <- askWake
-  liftIO $ writeIORef env.envWake wake
-  state <- liftIO $ readIORef env.envState
-  mainLayout state
-
--- worker thread
-atomicModifyIORef' env.envState (\s -> (s {packages = results}, ()))
-wake <- readIORef env.envWake
-wake
+{{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_a}}
 ```
 
 Gather every read into one `Frame` record before building the window, memoize derived collections in `IORef (Maybe (key, value))` caches keyed by a revision counter, and read shortcuts after the widgets. Use this when the domain state is shared with workers, a database, or a protocol.
@@ -66,14 +48,7 @@ Gather every read into one `Frame` record before building the window, memoize de
 `stronghead` has many independent panels, each with its own view state:
 
 ```haskell
-data App = App
-  { filterText   :: Var Text
-  , activeTab    :: Var TabId
-  , zoomLevel    :: Var Float
-  , isInspecting :: Var Bool
-  }
-
-newApp = App <$> newVar "" <*> newVar TabOverview <*> newVar 1.0 <*> newVar False
+{{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_b}}
 ```
 
 Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.
@@ -83,11 +58,7 @@ Panel modules take the slice they own. Use this when the application is mostly i
 `ned` keeps a plain `IORef App`; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:
 
 ```haskell
-editorView (Editor ref) = do
-  app <- liftIO (readIORef ref)
-  renderEditor app
-  app' <- liftIO (readIORef ref)
-  when (viewChanged app app') requestFrame
+{{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_c}}
 ```
 
 `requestFrame` asks for one more frame when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.

@@ -13,7 +13,9 @@ import Data.Foldable (for_)
 import Data.Text (Text)
 import NanoUI
 import NanoUI.Internal.Path (Path (..), Segment (..))
+-- ANCHOR: import_path
 import NanoUI.Path qualified as P
+-- ANCHOR_END: import_path
 
 -- ANCHOR: palette
 ink, blue, teal, amber, rose :: Color

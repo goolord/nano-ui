@@ -5,12 +5,7 @@ An immediate-mode GUI toolkit for Haskell.
 A view is a `NanoUI ()` action that the backend re-runs every frame. Widgets return values directly (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, `do` notation, and `if`/`case`/`for_`.
 
 ```haskell
-counter :: NanoUI ()
-counter = row $ do
-  n <- useVar (0 :: Int)
-  whenM (button "-") (modifyVar n (subtract 1))
-  label . T.pack . show =<< readVar n
-  whenM (button "+") (modifyVar n (+ 1))
+{{#include ../../packages/nano-ui-demo/book/Book/Intro.hs:counter}}
 ```
 
 Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source for each tutorial is in [`packages/nano-ui-demo/examples`](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples). If you already know immediate-mode UI, skim the [Quick Start](getting-started/quickstart.md) and go to [State & `Var`](state/index.md).

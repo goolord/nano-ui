@@ -10,26 +10,13 @@
 A tab strip binds the active key to a `Var`; only the selected tab's body runs:
 
 ```haskell
-data Page = Overview | Logs | Settings
-  deriving (Eq, Show, Enum, Bounded)
-
-page <- useEnumVar Overview
-boundedTabs (T.pack . show) page $ \case
-  Overview -> overviewView
-  Logs     -> logsView
-  Settings -> settingsView
+{{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:bounded_tabs}}
 ```
 
 `tab` creates a plain header; `closableTab` adds a close button and reports the close through the primed response:
 
 ```haskell
-active <- useVar ("overview" :: Text)
-resp <- tabs' active
-  [ closableTab "overview" "Overview" overviewView
-  , closableTab "logs" "Logs" logsView
-  ]
-for_ (tabClosed resp) closeTab
-let activeKey = tabActive resp
+{{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:closable_tabs}}
 ```
 
 The caller must remove the tab: `tabs'` reports `tabClosed`, it does not remove it. A key no tab has selects the first tab and writes that key back to the `Var`.
@@ -37,9 +24,7 @@ The caller must remove the tab: `tabs'` reports `tabClosed`, it does not remove 
 `tabBar` / `tabBar'` draw headers only and leave the body to the caller. `tabsConfigured` / `tabBarConfigured` take a `TabsConfig`:
 
 ```haskell
-let cfg = defaultTabsConfig
-      {tabsStyle = TabSegmented, tabsOrientation = TabTop, tabsTrailing = newTabButton}
-tabsConfigured cfg active tabs
+{{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:tabs_config}}
 ```
 
 The four `TabStyle`s, with a different tab selected in each:
@@ -63,21 +48,7 @@ Placements: `TabTop`, `TabBottom`, `TabLeft`, `TabRight`. `boundedTabs` / `bound
 `table` renders Colonnade columns. Header clicks sort through a `Var SortCol`:
 
 ```haskell
-data Process = Process
-  { pid :: Int
-  , name :: Text
-  , mem :: Int
-  }
-
-processTable :: [Process] -> Var SortCol -> NanoUI ()
-processTable procs sortVar =
-  table "procs" cols procs sortVar
-  where
-    cols = mconcat
-      [ headed "PID" (\p -> label (T.pack (show (pid p))))
-      , headed "Name" (\p -> label (name p))
-      , headed "Memory (MB)" (\p -> label (T.pack (show (mem p))))
-      ]
+{{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:table}}
 ```
 
 `SortCol` holds the active column and direction. `simpleTable headers rows` renders a table of text rows. `table'` returns a `TableResponse` with the updated sort, column order, and hidden columns; `tableConfigured` adds frozen rows/columns, fixed column widths, and hidden columns through `TableConfig`. Rows are virtualized internally.
@@ -87,14 +58,7 @@ Cell helpers: `textCell`, `cellWidget`, `widgetCell`, and `Cell` with an explici
 ## Trees
 
 ```haskell
-items :: [TreeItem]
-items =
-  [ TreeItem "src" [TreeItem "Main.hs" [], TreeItem "Widgets" []]
-  , TreeItem "README.md" []
-  ]
-
-fileTree :: [TreeItem] -> Var Int -> NanoUI ()
-fileTree = tree "file-tree"
+{{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:tree}}
 ```
 
 `TreeItem` is the library type (`treeItemLabel`, `treeItemChildren`), not an app-defined record. `tree` reports the selected **pre-order index** through the `Var Int`, not an item id. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.

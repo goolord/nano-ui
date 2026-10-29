@@ -6,8 +6,7 @@
 ## `textArea` for short text
 
 ```haskell
-notes <- useVar ""
-textArea notes
+{{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:text_area}}
 ```
 
 Every edit builds a new `Text`, which is cheap for a few kilobytes.
@@ -15,17 +14,13 @@ Every edit builds a new `Text`, which is cheap for a few kilobytes.
 ## `textAreaDocument` for documents
 
 ```haskell
-editorView :: Var TextDocument -> NanoUI ()
-editorView docVar = do
-  resp <- textAreaDocumentWith' (grow . minW 320 . minH 200) docVar
-  when (respChanged resp) markDirty
-  writeVar editorId (respId resp)
+{{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:document}}
 ```
 
 Only the edited lines are copied; unchanged lines are shared. `documentText` materializes the whole text; call it when saving, not on every edit.
 
 ```haskell
-save = liftIO (BS.writeFile path (TE.encodeUtf8 (documentText doc)))
+{{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:save}}
 ```
 
 `documentLineCount` is cheap enough for a status bar.
@@ -35,34 +30,19 @@ save = liftIO (BS.writeFile path (TE.encodeUtf8 (documentText doc)))
 Keyboard edits, mouse selection, the right-click menu, and programmatic commands all dispatch `TextCommand`s, so they share one undo history:
 
 ```haskell
-data TextCommand
-  = InsertText Text
-  | Delete TextMotion
-  | Move TextMotion Bool
-  | SelectAll
-  | Select Cursor Cursor
-  | Replace Cursor Cursor Text
-  | ReplaceAll Text
-  | Undo
-  | Redo
-  | Cut
-  | Copy
-  | Paste
+{{#include ../../../packages/nano-ui/lib/NanoUI/Widgets/TextCommand.hs:text_command}}
 ```
 
 Run a command against a field by its `WidgetId`:
 
 ```haskell
-whenM (menuItem "Undo") (runTextCommand editor Undo)
-whenM (menuItem "Insert date") (runTextCommand editor (InsertText today))
+{{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:commands}}
 ```
 
 Query history state for menu enablement:
 
 ```haskell
-editor <- readVar editorId
-canUndo <- textCanUndo editor
-canRedo <- textCanRedo editor
+{{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:history}}
 ```
 
 A complete Edit menu built this way is in [Build a Notepad](../tutorials/notepad.md).

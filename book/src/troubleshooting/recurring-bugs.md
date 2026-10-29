@@ -29,7 +29,7 @@ A counter going `9 -> 10 -> 100`, a timer, or a byte total changes the label's n
 **Fix:** pin the label to the width of its widest expected value:
 
 ```haskell
-labelWith (fixedW 48 . alignEnd) (fmtInt count)
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:fixed_width}}
 ```
 
 `stronghead` made this fix more than once ("fix markers count to fixed width").
@@ -41,8 +41,7 @@ One long row increases the column's natural width, the list grows a horizontal s
 **Fix:** make the cell fill its column instead of contributing natural width, and ellipsize the text:
 
 ```haskell
--- In a row, a label too narrow for its text cuts it off rather than wrapping.
-nameLine f = rowWith (fillW . tight) . labelWith (fillW . f)
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:name_line}}
 ```
 
 ### A drop-down clips its longest option
@@ -52,8 +51,7 @@ A fixed width guessed for a select breaks when an option is long (`"Unknown disk
 **Fix:** measure the options with the font and add the chrome:
 
 ```haskell
-let w = maximum (0 : map (lineWidth fm) options) + 56
-selectWith (fixedW w) options selectedVar
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:measured_select}}
 ```
 
 ### Content-derived geometry recomputes and jitters
@@ -82,8 +80,8 @@ Symptoms:
 - Or strip the inner surface:
 
   ```haskell
-  styled (inputStyle (background colorTransparent . borderWidth 0)) ...
-  ```
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:strip_chrome}}
+```
 
 - Set `themeFloatingWindow` and `themePopup` to the panel surface, so a padded body does not show a panel box inside the dialog.
 - Between two chrome regions, draw one `separator` at the seam, not a border on the bottom of one and the top of the other.
@@ -99,7 +97,7 @@ Symptoms:
 **Fix:** measure the whole run:
 
 ```haskell
-lineWidth fm run
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:run_width}}
 ```
 
 (`ned`: "text stays on the cell grid along a long run".)
@@ -111,7 +109,7 @@ At 125% scaling, rows of 22.4 px stack as 22, 23, 22, 23 and text shimmers while
 **Fix:** snap with the font's snap scale:
 
 ```haskell
-snap v = let k = max 1 (fmSnapScale f) in fromIntegral (round (v * k) :: Int) / k
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:snap}}
 ```
 
 `winget-gui`'s `rowButton` does this.
@@ -135,7 +133,7 @@ Without a content key, a custom widget's ops are rebuilt and diffed every frame.
 **Fix:** key on every input: values, colours, text, theme, scroll viewport width, animation state. `contentKey` hashes numbers; fold colours and text in with `mix64` from `NanoUI.Backend`.
 
 ```haskell
-drawingVersioned (contentKey [fromIntegral col, if ascending then 1 else 0, scrollY]) (fixedWH 12 12) arrowOps
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:sort_arrow}}
 ```
 
 ### A pinned overlay keeps its first frame's ops
@@ -145,7 +143,7 @@ A drag ghost pinned under the pointer never changes its layout rectangle, so an 
 **Fix:** version it by what moves it:
 
 ```haskell
-drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOps
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:versioned}}
 ```
 
 ### Widths from the scroll viewport belong in the key
@@ -163,9 +161,7 @@ The scrollbar keeps a lane out of the viewport. A wide row drawn to the widget's
 The default notch (60 px) jumps about one row of 54 px or three smaller rows. Set the step so a notch is one row:
 
 ```haskell
-ctx <- askContext
-liftIO $ setScrollTuning ctx defaultScrollTuning
-  {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
+{{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:wheel_step}}
 ```
 
 A scroller can also set its own step with `setScrollStepUi`; `0` returns it to the context step.
@@ -181,11 +177,7 @@ The node arena is reset before the view runs, so `isFocused` (or any check of ed
 **Fix:** read focus and place shortcuts at the **end** of the view, after the widgets have run:
 
 ```haskell
-appView = do
-  searchResp <- searchInput' "Search" query
-  -- ... all widgets ...
-  searching <- isFocused (respId searchResp)
-  unless searching $ whenM (shortcut (key KeyDelete)) deleteSelected
+{{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:focus_at_end}}
 ```
 
 ### Escape behind the same guard as Ctrl+A
@@ -201,9 +193,7 @@ A focused widget that reads `inputChars` must call `useInputMethod` every frame 
 **Fix:**
 
 ```haskell
--- Every frame the widget accepts text:
-preedit <- useInputMethod wid InputNormal caretRect
-for_ preedit drawCompositionAtCaret
+{{#include ../../../packages/nano-ui-demo/book/Book/Input.hs:input_method}}
 ```
 
 ### A slow leftward drag selects one character

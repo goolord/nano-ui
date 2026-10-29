@@ -46,8 +46,7 @@ What the loop does with it:
 `useTask` is the simpler variant when only the latest result matters:
 
 ```haskell
-contents <- useTask (appFile app) path (T.readFile (T.unpack path))
-label (fromMaybe "Loading..." contents)
+{{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:use_task}}
 ```
 
 ## 3. Retrying a failed job
@@ -66,7 +65,7 @@ Two rules are visible here:
 Cancellation is an asynchronous exception, so acquire resources inside the job with `bracket`:
 
 ```haskell
-bracket (connect info) disconnect $ \conn -> runQuery conn q
+{{#include ../../../packages/nano-ui-demo/book/Book/Tutorials.hs:bracket}}
 ```
 
 ## 4. Streams: many updates, one frame

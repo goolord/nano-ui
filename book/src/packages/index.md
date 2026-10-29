@@ -16,16 +16,7 @@ Each package adds a backend or one capability to `nano-ui`. Pin them from source
 `nano-ui-sdl` is the primary desktop backend:
 
 ```haskell
-import NanoUI.Backend.Sdl
-
-main = runSdlApp
-  defaultSdlOptions
-    { sdlWindowSettings = defaultWindowSettings {wsTitle = "My App", wsSize = Size 1024 768}
-    , sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Inter"]
-    , sdlAppFontSize = 14
-    , sdlAppTheme = Just defaultTheme
-    }
-  appView
+{{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:sdl}}
 ```
 
 It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (`useFileDialog`), custom title bars (`windowCaption`), and screenshots (`saveScreenshot`, `captureScreenshot`). See [Desktop Windows](../advanced/window-management.md) for the window side.
@@ -33,9 +24,7 @@ It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking
 `nano-ui-rgfw` is the zero-system-dependency alternative:
 
 ```haskell
-import NanoUI.Backend.Rgfw
-
-main = runRgfwApp defaultRgfwOptions appView
+{{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:rgfw}}
 ```
 
 It links RGFW statically and bundles a bitmap font, so binaries are small and standalone. Use it where SDL3 is not available.
@@ -135,22 +124,13 @@ Text in a diagram is measured with the current font so labels fit. The drawing i
 `nano-ui-form` builds applicative forms on ditto. A `Form Text a` has `Text` errors and returns `a`:
 
 ```haskell
-data Signup = Signup Text Text
-
-signup :: Form Text Signup
-signup =
-  Signup
-    <$> withFieldErrors (inputText "Name" "" `prove` notEmpty "Name is required")
-    <*> withFieldErrors (inputText "Email" "" `prove` validEmail (const "Not an email address"))
+{{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:form}}
 ```
 
 Allocate `owner <- newFormState` once, then run it with a stable prefix:
 
 ```haskell
-submitted <- nanoFormSubmit owner "signup" "Sign up" signup
-case submitted of
-  Just (Signup name _) -> label ("Welcome, " <> name)
-  Nothing              -> pure ()
+{{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:form_submit}}
 ```
 
 `nanoFormLive` returns `Just a` whenever the form is valid; `nanoFormEx` takes a `FormConfig`; `runNanoForm` returns the view and result separately. Inputs include `inputText`, `inputPassword`, `inputTextArea`, `inputCheckbox`, `inputSlider`, `inputSelect`, `inputRadio`, and `inputColor`. Validation includes `notEmpty`, `minLength`, `maxLength`, `inRange`, `validEmail`, `matches`, and `customProof`. `inputWidget` adapts any `Var a -> NanoUI Response` widget, with a publication policy (`OnChange`, `OnChangeOr`, `OnlyWhen`).
@@ -160,21 +140,13 @@ case submitted of
 `nano-ui-markdown` parses with commonmark and draws with rich text:
 
 ```haskell
-import NanoUI.Markdown
-
-doc = parseMarkdown "# Hello\n\nSome *emphasis* and `code`."
-
-view cache = do
-  clicked <- markdown cache doc
-  for_ clicked $ \url -> openUrl url
+{{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:markdown}}
 ```
 
 Allocate `cache <- newMarkdownCache` once. `markdown` returns the link clicked this frame. For streaming, append without reparsing the whole document:
 
 ```haskell
-doc <- useStream stream replyId emptyMarkdown $ \update ->
-  onToken client (\token -> update (appendMarkdown token))
-void (markdown cache doc)
+{{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:markdown_stream}}
 ```
 
 When appending on the UI thread, append a frame's tokens in one call. The parser reparses only the tail block, with a few documented exceptions (a long unsplittable final block, or a link-reference definition). `MarkdownConfig.mdBlock` overrides block drawing, for example to syntax-highlight code.
@@ -187,16 +159,7 @@ When appending on the UI thread, append a frame's tokens in one call. The parser
 - **`NanoUI.Draw.FrameSvg`** re-renders a whole frame: `frameToSvg config ctx input drawData`.
 
 ```haskell
-import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, enableSvgExport, frameToSvg)
-import NanoUI.Testing (newPixelContext, runFrame)
-import NanoUI.Testing.Harness (withInputOff)
-
-exportViewToSvg view = do
-  ctx <- newPixelContext
-  let inp = withInputOff 1280 800
-  enableSvgExport ctx
-  (_, drawData, _) <- runFrame ctx inp view
-  frameToSvg defaultFrameSvgConfig ctx inp drawData
+{{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:frame_svg}}
 ```
 
 `enableSvgExport` records the shapes paint draws and the text spans the exporter reads; `frameToSvg` fails on a context without it. Ids in the document take a prefix from its hash, so several SVGs can share a page. A `newPixelContext` measures text on a 16 px monospace grid; run the frames inside `withSdl` to measure in the real font. The specimens in this book are made this way.

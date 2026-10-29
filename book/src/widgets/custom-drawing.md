@@ -4,9 +4,7 @@ When the built-in widgets do not fit, draw the control with the canvas API. The 
 
 ## Reference custom controls
 
-```haskell
-import NanoUI.Widgets.Custom
-```
+`NanoUI` exports them from `NanoUI.Widgets.Custom`.
 
 | Control | Signature | Default size | Notes |
 | --- | --- | --- | --- |
@@ -20,9 +18,7 @@ import NanoUI.Widgets.Custom
 Each has a primed form returning `Response` (`knob'`, `toggleSwitch'`, ...) and a `...With` form that takes a layout modifier and size parameters:
 
 ```haskell
-knobWith alignMid 48 0 100 volume
-progressBarWith fillW 6 progress
-sparklineWith (fixedWH 120 32) 120 32 samples
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:with_forms}}
 ```
 
 `sparkline` scales the values to their own range, so it shows the shape of a series, not its size. At its default size and with `sparklineWith`:
@@ -38,13 +34,7 @@ For a chart with axes, a legend, and hover, use `plot` from `nano-ui-diagrams` (
 A settings row:
 
 ```haskell
-settingsRow :: Var Bool -> Var Float -> NanoUI ()
-settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
-  toggleSwitch enabled
-  labelWith (alignMid . fixedW 64) "Enabled"
-  knob 0 100 volume
-  v <- readVar volume
-  labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:settings_row}}
 ```
 
 The `fixedW` on the changing number keeps the controls from shifting. Read the value *below* the knob so a drag resolves in one pass.
@@ -65,7 +55,7 @@ Each control in `NanoUI.Widgets.Custom` follows the same steps:
 `canvas` sizes a rectangle with a layout modifier and runs a `CanvasM` drawing in it. The rectangle is the widget's place in the window, so draw relative to it:
 
 ```haskell
-import NanoUI.Path qualified as P
+{{#include ../../../packages/nano-ui-svg/app/CanvasExamples.hs:import_path}}
 
 {{#include ../../../packages/nano-ui-svg/app/CanvasExamples.hs:badge}}
 ```
@@ -75,13 +65,7 @@ import NanoUI.Path qualified as P
 `canvas` returns the widget's `Response`; discard it with `void` when the drawing needs no hover or clicks. `canvasConfigured` adds a content key, a cursor, and pointer tracking. For full control, use `customWidget` with a `CustomWidgetSpec`:
 
 ```haskell
-(resp, ()) <- customWidget defaultCustomWidgetSpec
-  { widgetLayout = fixedWH 48 48
-  , widgetContent = contentKey [angle, volume]
-  , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
-      drawCircle (V2 (x + w / 2) (y + h / 2)) 16 (themeAccent (cdcTheme cdc))
-  , widgetCursor = Just (\_ _ _ -> UiCursorPointer)
-  }
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:custom_widget}}
 ```
 
 `runCanvasFor` adapts tessellation to the display scale inside `widgetDraw`. `drawContext` / `cdcTheme` supply the active theme, font, hover, and press state.
@@ -233,11 +217,7 @@ Use the inset form for a widget's own border, so it never paints past the widget
 Without `widgetContent`, a custom widget's draw ops are rebuilt and diffed every frame. With a key, unchanged frames skip rebuild and repaint, but the key must cover **everything the drawing reads**:
 
 ```haskell
-(resp, ()) <- customWidget defaultCustomWidgetSpec
-  { widgetLayout = fixedWH 48 48
-  , widgetContent = contentKey [angle, volume, fromIntegral (round scrollY)]
-  , widgetDraw = \cdc rect -> runCanvasFor cdc (drawGauge rect)
-  }
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:content_key}}
 ```
 
 A key that misses an input shows stale pixels. See [Styling Gotchas](../styling/gotchas.md).
@@ -245,8 +225,7 @@ A key that misses an input shows stale pixels. See [Styling Gotchas](../styling/
 A drawing whose layout rectangle never changes (a drag ghost pinned under the pointer with `pinAt`) gets no layout change when it moves. Give it an explicit version that includes what moves it:
 
 ```haskell
--- dragGhostOps :: Rect -> SmallArray DrawOp
-drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) dragGhostOps
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:versioned}}
 ```
 
 Otherwise it keeps the ops of the frame it first appeared in.
@@ -256,9 +235,7 @@ Otherwise it keeps the ops of the frame it first appeared in.
 `parseSvg` reads SVG text and `loadSvg` reads a file. An icon that strokes or fills with `currentColor` takes the text colour, so `fontColor` and the semantic styles tint it; other colours are kept.
 
 ```haskell
-svgIcon 24 star
-svgIconWith (fixedWH 32 32 . fontColor accent) star
-whenM (iconButton star "Star") starItem
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:svg_icons}}
 ```
 
 `svgIconConfigured` takes an `ImageConfig` for CSS-style fitting (`FitContain`, `FitCover`, `FitFill`).
@@ -266,9 +243,7 @@ whenM (iconButton star "Star") starItem
 Inside a canvas, rasterize the SVG with `rasterizeSvg` from `NanoUI.Svg`, lease the pixels with `useImageRgba`, and draw the image. Key the lease on everything the pixels depend on, here the tint:
 
 ```haskell
-iid <- useImageRgba owner tint 32 32 (rasterizeSvg 32 32 tint star)
-canvas (fixedWH 140 44) $ \(Rect x y _ _) ->
-  for_ iid $ \i -> drawImage (Rect (x + 8) (y + 6) 32 32) i colorWhite
+{{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:svg_canvas}}
 ```
 
 `nano-ui-svg` goes the other way and exports draw ops as SVG; see [SVG export](../packages/index.md#svg-export).
