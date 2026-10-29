@@ -289,12 +289,14 @@ test-suite nano-ui-demo-test
         Logs
         Notepad
         DemoSelftest
+        Drive
         LogsSelftest
         NotepadSelftest
         ImeSelftest
     build-depends:
         directory ^>=1.3,
-        sdl3-bindgen-sys ^>=0.0.0.2
+        sdl3-bindgen-sys ^>=0.0.0.2,
+        transformers ^>=0.6
     -- A console program, as the executables are: a Windows GUI program
     -- drops the message of the check that failed.
     if os(windows)

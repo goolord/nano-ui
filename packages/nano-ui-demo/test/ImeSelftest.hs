@@ -7,21 +7,21 @@ module ImeSelftest
   ) where
 
 import Control.Monad (unless, void)
+import Data.ByteString qualified as BS
 import Data.Maybe (isJust, isNothing)
 import Data.Text.Foreign qualified as TF
+import DemoApp (withHiddenWindow)
 import Foreign.C.String (peekCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Utils (fillBytes, maybePeek, with)
 import Foreign.Storable (peek, poke, sizeOf)
-import System.Environment (lookupEnv)
 import NanoUI
 import NanoUI.Backend (clearEphemeral)
 import NanoUI.Backend.Sdl
-import NanoUI.Sdl.Internal.Window (sdlWindow, sdlTextInput)
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, newTextInputSync, pollEvents, syncTextInput)
+import NanoUI.Sdl.Internal.Window (sdlTextInput, sdlWindow)
 import NanoUI.Testing (TextInputArea (..), collectTextSpans, textInputArea)
 import NanoUI.Testing.Harness (hasText, held, pressAt, releaseAt, tabInp)
-import DemoApp (withHiddenWindow)
 import SDL3.Sys.Bindgen.Events (SDL_Event, SDL_EventType (..), SDL_TextEditingEvent (..), SDL_TextInputEvent (..))
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Hints (sDL_HINT_IME_IMPLEMENTED_UI)
@@ -31,7 +31,7 @@ import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Events (pushEvent)
 import SDL3.Sys.Hints (getHint)
 import SDL3.Sys.Keyboard (getTextInputArea, textInputActive)
-import Data.ByteString qualified as BS
+import System.Environment (lookupEnv)
 
 selftest :: IO ()
 selftest =
@@ -43,10 +43,13 @@ selftest =
         -- Fold the queued native events into the next frame's input.
         step inp = (\evs -> (evs, foldl' applyEvent (clearEphemeral inp) evs)) <$> pollEvents
         sync s = syncTextInput s (sdlWindow env) zoom ctx
-    hint <- BS.useAsCString sDL_HINT_IME_IMPLEMENTED_UI (getHint . PtrConst.unsafeFromPtr) >>= maybePeek peekCString . PtrConst.unsafeToPtr
+        active = textInputActive (sdlWindow env)
+    hint <-
+      BS.useAsCString sDL_HINT_IME_IMPLEMENTED_UI (getHint . PtrConst.unsafeFromPtr)
+        >>= maybePeek peekCString . PtrConst.unsafeToPtr
     -- An environment variable named after the hint overrides the session.
     overridden <- isJust <$> lookupEnv "SDL_IME_IMPLEMENTED_UI"
-    check (hint == Just "composition" || overridden) ("the session did not ask SDL for the composition: " <> show hint)
+    check (hint == Just "composition" || overridden) ("the session did not ask for the composition: " <> show hint)
     mapM_ drawFrame [base, base, tabInp base, base]
     (evs, composing) <- editing "かな" 2 0 (step base)
     check (EvEditing "かな" 2 0 `elem` evs && inputComposition composing == Just (Composition "かな" 2 0))
@@ -57,12 +60,12 @@ selftest =
     drawFrame composing
     drawn <- hasText "abかな" <$> collectTextSpans ctx
     value <- readVarIO ref
-    running <- textInputActive (sdlWindow env)
-    check (running && not restartedInField && drawn && value == "ab") ("in the field: " <> show (running, restartedInField, drawn, value))
+    running <- active
+    check (running && not restartedInField && drawn && value == "ab") $
+      "in the field: " <> show (running, restartedInField, drawn, value)
     -- A fresh sync starts text input for the field.
     started <- newTextInputSync >>= (`sync` composing)
-    active <- textInputActive (sdlWindow env)
-    check (started && active) "text input not started for the focused field"
+    (started &&) <$> active >>= (`check` "text input not started for the focused field")
     -- The caret area reaches SDL in window coordinates.
     area <- textInputArea ctx
     native <- alloca $ \cursorP -> with (SDL_Rect 0 0 0 0) $ \rectP ->
@@ -79,14 +82,15 @@ selftest =
     -- Losing window focus ends the composition, even if SDL does not report it.
     (_, again) <- editing "か" 1 0 (step committed)
     (_, blurred) <- focusLost (step again)
-    check (isJust (inputComposition again) && isNothing (inputComposition blurred)) "losing the window's focus did not end the composition"
+    check (isJust (inputComposition again) && isNothing (inputComposition blurred)) $
+      "losing the window's focus did not end the composition"
     -- Text input stops when no widget takes text.
-    mapM_ drawFrame [pressAt blurred (V2 470 190), releaseAt (pressAt blurred (V2 470 190)), clearEphemeral blurred]
-    stopped <- not <$> textInputActive (sdlWindow env)
-    check stopped "text input left running with no widget taking text"
+    let away = pressAt blurred (V2 470 190)
+    mapM_ drawFrame [away, releaseAt away, clearEphemeral blurred]
+    not <$> active >>= (`check` "text input left running with no widget taking text")
   where
-    editing txt start len = queue txt $ \p c ->
-      poke p.edit (SDL_TextEditingEvent Events.SDL_EVENT_TEXT_EDITING 0 0 0 c (fromIntegral (start :: Int)) (fromIntegral (len :: Int)))
+    editing txt (start :: Int) (len :: Int) = queue txt $ \p c ->
+      poke p.edit (SDL_TextEditingEvent Events.SDL_EVENT_TEXT_EDITING 0 0 0 c (fromIntegral start) (fromIntegral len))
     typed txt = queue txt $ \p c -> poke p.text (SDL_TextInputEvent Events.SDL_EVENT_TEXT_INPUT 0 0 0 c)
     focusLost = queue "" $ \p _ ->
       let SDL_EventType ty = Events.SDL_EVENT_WINDOW_FOCUS_LOST in poke p.type' (Uint32 (fromIntegral ty))

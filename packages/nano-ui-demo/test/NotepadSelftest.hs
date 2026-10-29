@@ -1,31 +1,19 @@
--- | Headless UI test for the notepad: drives it on a hidden window and
--- asserts the menu bar opens, activates items, closes, and that the Help menu
--- opens the About modal.
+-- | The notepad on a hidden window: the menu bar opens, runs items and
+-- closes, chords close an open menu, editing commands act on the
+-- selection, and Save writes UTF-8.
 module NotepadSelftest
   ( selftest
   ) where
 
 import Control.Exception (bracket)
-import Control.Monad (unless, void, when)
 import Data.ByteString qualified as BS
-import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
+import DemoApp (withHiddenWindow)
+import Drive
+import GHC.IO.Encoding (getLocaleEncoding, setLocaleEncoding)
 import NanoUI
 import NanoUI.Backend (runNanoUI)
-import NanoUI.Backend.Sdl
 import NanoUI.Shortcut
-import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans)
-import NanoUI.Testing.Harness
-  ( chordInp
-  , clickPos
-  , findExact
-  , findRightmost
-  , expectText
-  , hasText
-  , requireSpan
-  )
-import DemoApp (withHiddenWindow)
-import GHC.IO.Encoding (getLocaleEncoding, setLocaleEncoding)
 import Notepad qualified
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, latin1, openTempFile)
@@ -33,101 +21,62 @@ import System.IO (hClose, latin1, openTempFile)
 selftest :: IO ()
 selftest = do
   state <- Notepad.newNotepad
-  withHiddenWindow 1000 720 (V2 500 400) id $ \ctx env base -> do
-      let notepadUi = Notepad.notepadUi state
-      let
-        drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
-        click = clickPos drawFrame base
-        clickOn name spans = click =<< requireSpan ("selftest: " <> T.unpack name) (findExact name spans)
-        chord c = drawFrame (chordInp c base) >> drawFrame base
-        overlay = collectOverlayTextSpans ctx base
-
-      mapM_ drawFrame [base, base]
-
-      spans0 <- collectTextSpans ctx
-      expectText "selftest: status bar missing" "Ready" spans0
-
-      clickOn "File" spans0
-      spansFile <- overlay
-      expectText "selftest: File menu did not open" "Save As..." spansFile
-      click =<< requireSpan "selftest: New item" (findRightmost "New" spansFile)
-      baseSpansNew <- collectTextSpans ctx
-      overlaySpansNew <- overlay
-      when (hasText "Save As..." overlaySpansNew) $
-        fail "selftest: File menu did not close"
-      expectText "selftest: New action not run" "New document" baseSpansNew
-
-      -- A command's chord closes the open menu, as its row does.
-      clickOn "File" baseSpansNew
-      chord (cmdOrCtrl <> key 'n')
-      overlaySpansChord <- overlay
-      when (hasText "Save As..." overlaySpansChord) $
-        fail "selftest: the New chord left the File menu open"
-
-      -- Focus the editor and type; Select All from the Edit menu must keep the
-      -- field focused so the selection highlights and the next keystroke
-      -- replaces the selection.
-      click (V2 500 300)
-      drawFrame base {inputChars = "abc"}
-      drawFrame base
-      clickOn "Edit" baseSpansNew
-      click =<< requireSpan "selftest: Select All item" . findRightmost "Select All" =<< overlay
-      drawFrame base {inputChars = "Z"}
-      drawFrame base
-      spansReplaced <- collectTextSpans ctx
-      void (requireSpan "selftest: Select All did not keep focus" (findExact "Z" spansReplaced))
-      when (hasText "abc" spansReplaced) $
-        fail "selftest: typed text was not replaced"
-
-      -- Edit > Cut takes only the selection, not the whole text.
-      drawFrame base {inputChars = "12"}
-      drawFrame base
-      chord (shift <> key KeyLeft)
-      clickOn "Edit" =<< collectTextSpans ctx
-      click =<< requireSpan "selftest: Cut item" . findRightmost "Cut" =<< overlay
-      spansCut <- collectTextSpans ctx
-      expectText "selftest: Edit > Cut removed more than the selection" "Z1" spansCut
-      when (hasText "Z12" spansCut) $
-        fail "selftest: Edit > Cut did not cut the selection"
-
-      -- Ctrl+= / Ctrl+- zoom the editor font only; the status bar tracks it.
-      chord (cmdOrCtrl <> key '=')
-      expectText "selftest: Ctrl+= did not zoom in" "Zoom: 110%" =<< collectTextSpans ctx
-      chord (cmdOrCtrl <> key '-')
-      expectText "selftest: Ctrl+- did not zoom out" "Zoom: 100%" =<< collectTextSpans ctx
-      -- Ctrl++ (Ctrl+Shift+=), bound apart from the rows, closes an open menu
-      -- as they do.
-      clickOn "View" =<< collectTextSpans ctx
-      chord (cmdOrCtrl <> shift <> key '=')
-      overlaySpansZoom <- overlay
-      when (hasText "Zoom In" overlaySpansZoom) $
-        fail "selftest: the Ctrl++ chord left the View menu open"
-      expectText "selftest: Ctrl++ did not zoom in" "Zoom: 110%" =<< collectTextSpans ctx
-
-      -- The File menu offers Exit; activating it ends the session (via
-      -- 'quitUi', after confirming unsaved changes), so the selftest only
-      -- checks the item is present and closes the menu again.
-      clickOn "File" =<< collectTextSpans ctx
-      expectText "selftest: File menu missing Exit item" "Exit" =<< overlay
-      click (V2 500 300) -- dismiss the menu without activating Exit
-
-      clickOn "Help" baseSpansNew
-      spansHelp <- overlay
-      expectText "selftest: Help menu did not open" "About nano-ui Notepad" spansHelp
-      clickOn "About nano-ui Notepad" spansHelp
-      expectText "selftest: About modal did not open" "built with nano-ui" =<< overlay
-
-      -- Save writes the document's UTF-8 bytes with its own line ends, which
-      -- Open reads back unchanged, whatever the locale: under Latin-1 a
-      -- text-mode write cannot encode the arrow.
+  withHiddenWindow 1000 720 (V2 500 400) id $ \ctx env base -> runDrive ctx env base (Notepad.notepadUi state) $ do
+    frame
+    frame
+    expect "Ready"
+    click "File"
+    expect "Save As..."
+    clickRow "New"
+    expectNot "Save As..."
+    expect "New document"
+    -- A command's chord closes the open menu, as its row does.
+    click "File"
+    chord (cmdOrCtrl <> key 'n')
+    expectNot "Save As..."
+    -- Select All from the Edit menu keeps the editor focused, so the next
+    -- keystroke replaces the selection.
+    clickAt (V2 500 300)
+    typeText "abc"
+    click "Edit"
+    clickRow "Select All"
+    typeText "Z"
+    _ <- find "Z"
+    expectNot "abc"
+    -- Edit > Cut takes only the selection.
+    typeText "12"
+    chord (shift <> key KeyLeft)
+    click "Edit"
+    clickRow "Cut"
+    expect "Z1"
+    expectNot "Z12"
+    -- Ctrl+= and Ctrl+- zoom the editor font; the status bar tracks it.
+    chord (cmdOrCtrl <> key '=')
+    expect "Zoom: 110%"
+    chord (cmdOrCtrl <> key '-')
+    expect "Zoom: 100%"
+    -- Ctrl++ (Ctrl+Shift+=), bound apart from the rows, closes an open menu
+    -- as they do.
+    click "View"
+    chord (cmdOrCtrl <> shift <> key '=')
+    expectNot "Zoom In"
+    expect "Zoom: 110%"
+    -- Exit would end the session, so only check it is offered.
+    click "File"
+    expect "Exit"
+    clickAt (V2 500 300)
+    click "Help"
+    click "About nano-ui Notepad"
+    expect "built with nano-ui"
+    -- Save writes the document's UTF-8 bytes with its own line ends whatever
+    -- the locale: under Latin-1 a text-mode write cannot encode the arrow.
+    let contents = "caf\233\n\8594 \26085\n"
+    (saved, bytes) <- liftIO $ do
       (file, h) <- (`openTempFile` "notepad.txt") =<< getTemporaryDirectory
       hClose h
-      let contents = "caf\233\n\8594 \26085\n"
       saved <-
         bracket (getLocaleEncoding <* setLocaleEncoding latin1) setLocaleEncoding $ \_ ->
           runNanoUI ctx base (Notepad.writeDocument file (textDocument contents))
-      bytes <- BS.readFile file
-      removeFile file
-      unless (saved && bytes == TE.encodeUtf8 contents) $
-        fail "selftest: Save did not write the document as UTF-8"
-      putStrLn "notepad selftest: ok"
+      (saved,) <$> BS.readFile file <* removeFile file
+    check "Save did not write the document as UTF-8" (saved && bytes == TE.encodeUtf8 contents)
+  putStrLn "notepad selftest: ok"

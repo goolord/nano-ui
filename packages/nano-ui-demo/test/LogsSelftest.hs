@@ -1,127 +1,76 @@
--- | Headless UI test for the log viewer: drives it on a hidden window through
--- pinning while entries arrive, scrolling back, Jump to Bottom, filters,
--- horizontal scroll, Select All, copying, and clearing the selection.
+-- | The log viewer on a hidden window: pinning while entries arrive,
+-- scrolling back, Jump to Bottom, filters, horizontal scroll, Select All,
+-- copying, and clearing the selection.
 module LogsSelftest
   ( selftest
   ) where
 
-import Control.Monad (unless, void, when)
 import Data.Text qualified as T
+import DemoApp (withHiddenWindow)
+import Drive
+import Logs (appendEntries, logsApp, newAppState)
 import NanoUI
-import NanoUI.Backend.Sdl
 import NanoUI.Internal.Context (Context (..), getPrevRect)
 import NanoUI.Shortcut
-import NanoUI.Testing (collectTextSpans)
-import NanoUI.Testing.Harness (chordInp, clickPos, expectText, findExact, hasText, keyInp, requireSpan)
-import DemoApp (withHiddenWindow)
-import Logs (appendEntries, logsApp, newAppState)
 
 selftest :: IO ()
-selftest = do
-  withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env baseInput -> do
-      state <- newVar =<< newAppState 60 False
-      scroller <- newVar Nothing
-      let drawFrame inp = void (sdlDrawFrame ctx (logsApp state scroller) env inp False)
-          click = clickPos drawFrame baseInput
-          append n = readVarIO state >>= (`appendEntries` n) >>= writeVarIO state
-          -- The frame's text spans; fails with @msg@ unless one contains @needle@.
-          spansWith msg needle = do
-            spans <- collectTextSpans ctx
-            spans <$ expectText msg needle spans
-          expect msg needle = void (spansWith msg needle)
-          scrollerId msg = maybe (fail msg) pure =<< readVarIO scroller
-
-      drawFrame baseInput
-      drawFrame baseInput
-
-      spans0 <- spansWith "selftest: title 'Log Viewer' not found in spans" "Log Viewer"
-      -- "● PINNED", as "⏸ UNPINNED" holds "PINNED" too.
-      expectText "selftest: initial state should be PINNED to bottom" "● PINNED" spans0
-
+selftest = withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env base -> do
+  state <- newVar =<< newAppState 60 False
+  scroller <- newVar Nothing
+  let append n = liftIO (readVarIO state >>= (`appendEntries` n) >>= writeVarIO state) >> frame >> frame
+      scrollerId = liftIO (readVarIO scroller) >>= maybe (fail "no scroller WidgetId") pure
       -- A row is one selectable span: id, timestamp, level, service and message.
-      let hasFullLogSpan = any (\(_, txt, _, _, _) -> "#00" `T.isPrefixOf` txt && " [" `T.isInfixOf` txt) spans0
-      unless hasFullLogSpan $
-        fail "selftest: full log line (sequence ID, timestamp, level, service, message) not found in selectable spans"
-
-      append 40
-      drawFrame baseInput
-      drawFrame baseInput
-      expect "selftest: sticky scroll failed to stay PINNED after appending logs" "● PINNED"
-
-      -- Pinned is the scroller's own end, so the last row clears the
-      -- horizontal bar.
-      pinnedWid <- scrollerId "selftest: scroller WidgetId not found for the pinned end"
-      getScrollMetrics ctx pinnedWid >>= \case
-        Just m | v2Y (scrollOffset m) == v2Y (scrollRange m) -> pure ()
-        m -> fail ("selftest: a PINNED view should sit at the scroller's end: " <> show m)
-
-      drawFrame baseInput {inputScroll = V2 0 (-15.0)}
-      drawFrame baseInput
-      expect "selftest: scrolling up into history did not transition to UNPINNED" "UNPINNED"
-
-      -- Entries arriving while scrolled back leave the view where it is.
-      append 50
-      drawFrame baseInput
-      spans3 <- spansWith "selftest: appending logs while reading history should keep state UNPINNED" "UNPINNED"
-
-      click =<< requireSpan "selftest: Jump to Bottom button" (findExact "Jump to Bottom" spans3)
-      drawFrame baseInput
-      spans4 <- spansWith "selftest: Jump to Bottom button failed to restore PINNED status" "● PINNED"
-
-      -- A filter applies in the frame that clicks it, and the view clamps so
-      -- the fewer rows stay visible. The header counts the rows it hides; the
-      -- status bar's "Filtered:" count shows either way.
-      click =<< requireSpan "selftest: WARN filter button" (findExact "WARN" spans4)
-      spansWarn <- collectTextSpans ctx
-      unless (hasText " filtered]" spansWarn) $
-        fail "selftest: filter button did not update view immediately"
-      let rows = [txt | (_, txt, _, _, _) <- spansWarn, "#00" `T.isPrefixOf` txt]
-      when (null rows) $
-        fail "selftest: filtered log lines were blank after filtering from bottom of list"
-      unless (all ("[WARN ]" `T.isInfixOf`) rows) $
-        fail "selftest: the WARN filter left rows of other levels"
-
-      click =<< requireSpan "selftest: ALL filter button" (findExact "ALL" spansWarn)
-
-      scrollWid <- scrollerId "selftest: scroller WidgetId not found"
-      drawFrame baseInput {inputScroll = V2 20.0 0}
-      drawFrame baseInput
-      off2d <- getScrollOffset2D ctx scrollWid
-      unless (v2X off2d > 0) $
-        fail "selftest: horizontal scroll did not update horizontal scroll offset (2D scroll failed)"
-
-      click =<< requireSpan "selftest: Select All button" . findExact "Select All" =<< collectTextSpans ctx
-      spansSelected <- collectTextSpans ctx
-      unless (hasText "ALL LOGS SELECTED" spansSelected || hasText "Deselect All" spansSelected) $
-        fail "selftest: Select All failed to select all logs"
-
-      drawFrame (chordInp (cmdOrCtrl <> key 'c') baseInput)
-      mClip <- ctxClipboardGet ctx
-      case mClip of
-        Nothing -> fail "selftest: Ctrl+C after Select All failed to copy to clipboard"
-        Just clipText ->
-          unless ("#00" `T.isPrefixOf` clipText && "\n" `T.isInfixOf` clipText) $
-            fail "selftest: clipboard does not contain all selected log lines"
-
-      drawFrame (keyInp KeyEscape baseInput)
-      drawFrame baseInput
-      spansCleared <- spansWith "selftest: ESC failed to clear Select All" "Select All"
-
-      -- A click on a row clears Select All.
-      click =<< requireSpan "selftest: Select All button" (findExact "Select All" spansCleared)
-      spansSel2 <- collectTextSpans ctx
-      mScrollerRect <- getPrevRect ctx =<< scrollerId "selftest: scroller WidgetId not found for deselect test"
-      let rowClicks =
-            [ V2 (rectX vis + 4) (rectY vis + rectH vis / 2)
-            | (r, txt, _, _, _) <- spansSel2
-            , "#00" `T.isPrefixOf` txt && " [" `T.isInfixOf` txt
-            , Just vis <- [mScrollerRect >>= (`rectIntersect` r)]
-            , rectW vis > 20
-            ]
-      case rowClicks of
-        (pos : _) -> do
-          click pos
-          expect "selftest: left click on a log row did not clear Select All" "Select All"
-        [] -> fail "selftest: no visible selectable log row found for deselect test"
-
-      putStrLn "logs selftest: ok"
+      isRow txt = "#00" `T.isPrefixOf` txt && " [" `T.isInfixOf` txt
+      rows = (\ss -> [(r, t) | (r, t, _, _, _) <- ss, isRow t]) <$> spans
+  runDrive ctx env base (logsApp state scroller) $ do
+    frame
+    frame
+    expect "Log Viewer"
+    -- "● PINNED", as "⏸ UNPINNED" holds "PINNED" too.
+    expect "● PINNED"
+    rows >>= check "no full log line among the selectable spans" . not . null
+    append 40
+    expect "● PINNED"
+    -- Pinned is the scroller's own end, so the last row clears the
+    -- horizontal bar.
+    metrics <- liftIO . getScrollMetrics ctx =<< scrollerId
+    check ("a PINNED view should sit at the scroller's end: " <> show metrics) $
+      fmap (\m -> v2Y (scrollOffset m) == v2Y (scrollRange m)) metrics == Just True
+    wheelAt (V2 500 350) (V2 0 (-15))
+    expect "UNPINNED"
+    -- Entries arriving while scrolled back leave the view where it is.
+    append 50
+    expect "UNPINNED"
+    click "Jump to Bottom"
+    expect "● PINNED"
+    -- A filter applies in the frame that clicks it, and the view clamps so
+    -- the fewer rows stay visible; the header counts the rows it hides.
+    click "WARN"
+    expect " filtered]"
+    warned <- map snd <$> rows
+    check "the WARN filter left no rows, or rows of other levels" $
+      not (null warned) && all ("[WARN ]" `T.isInfixOf`) warned
+    click "ALL"
+    wheelAt (V2 500 350) (V2 20 0)
+    offset <- liftIO . getScrollOffset2D ctx =<< scrollerId
+    check "horizontal scroll did not move the horizontal offset" (v2X offset > 0)
+    click "Select All"
+    selected <- (||) <$> found "ALL LOGS SELECTED" <*> found "Deselect All"
+    check "Select All did not select the logs" selected
+    chord (cmdOrCtrl <> key 'c')
+    clip <- liftIO (ctxClipboardGet ctx)
+    check "Ctrl+C after Select All did not copy every selected line" $
+      maybe False (\t -> "#00" `T.isPrefixOf` t && "\n" `T.isInfixOf` t) clip
+    pressKey KeyEscape
+    expect "Select All"
+    -- A click on a visible row clears Select All.
+    click "Select All"
+    port <- liftIO . getPrevRect ctx =<< scrollerId
+    visible <- (\rs -> [v | (r, _) <- rs, Just v <- [port >>= (`rectIntersect` r)], rectW v > 20]) <$> rows
+    case visible of
+      v : _ -> clickAt (V2 (rectX v + 4) (rectY v + rectH v / 2))
+      [] -> check "no visible log row to click" False
+    expect "Select All"
+  putStrLn "logs selftest: ok"
+  where
+    found needle = (any (\(_, t, _, _, _) -> needle `T.isInfixOf` t) <$> spans)
