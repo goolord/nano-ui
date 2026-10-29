@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,8 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="ecosystem-packages"><a class="header" href="#ecosystem-packages">Ecosystem Packages</a></h1>
-<p>The core toolkit is <code>nano-ui</code>; the other packages add a backend or a focused capability. Add only what the application uses.</p>
-<p><code>nano-ui</code> is on Hackage. The repository may be ahead of the released API; use the source pin in <a href="../getting-started/quickstart.html">Quick Start</a> for the API in this book.</p>
+<p>Each package adds a backend or one capability to <code>nano-ui</code>. Pin them from source as in the <a href="../getting-started/quickstart.html">Quick Start</a>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -198,24 +197,22 @@
 </div>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
 <p><code>nano-ui-sdl</code> is the primary desktop backend:</p>
-<pre><code class="language-haskell">import NanoUI.Backend.Sdl
-
-main = runSdlApp
-  defaultSdlOptions
-    { sdlWindowSettings = defaultWindowSettings {wsTitle = "My App", wsSize = Size 1024 768}
-    , sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Inter"]
-    , sdlAppFontSize = 14
-    , sdlAppTheme = Just defaultTheme
+<pre><code class="language-haskell">sdlMain :: IO ()
+sdlMain = Sdl.runSdlApp
+  Sdl.defaultSdlOptions
+    { Sdl.sdlWindowSettings = defaultWindowSettings {wsTitle = "My App", wsSize = Size 1024 768}
+    , Sdl.sdlAppFont = Sdl.FontSearch ["Segoe UI", "SF Pro Text", "Inter"]
+    , Sdl.sdlAppFontSize = 14
+    , Sdl.sdlAppTheme = Just defaultTheme
     }
   appView
 </code></pre>
 <p>It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (<code>useFileDialog</code>), custom title bars (<code>windowCaption</code>), and screenshots (<code>saveScreenshot</code>, <code>captureScreenshot</code>). See <a href="../advanced/window-management.html">Desktop Windows</a> for the window side.</p>
 <p><code>nano-ui-rgfw</code> is the zero-system-dependency alternative:</p>
-<pre><code class="language-haskell">import NanoUI.Backend.Rgfw
-
-main = runRgfwApp defaultRgfwOptions appView
+<pre><code class="language-haskell">rgfwMain :: IO ()
+rgfwMain = Rgfw.runRgfwApp Rgfw.defaultRgfwOptions appView
 </code></pre>
-<p>It links RGFW statically, bundles a bitmap font, and produces small standalone binaries. Use it for tools, overlays, or environments where SDL3 is not available.</p>
+<p>It links RGFW statically and bundles a bitmap font, so binaries are small and standalone. Use it where SDL3 is not available.</p>
 <h2 id="charts-and-diagrams"><a class="header" href="#charts-and-diagrams">Charts and diagrams</a></h2>
 <p><code>nano-ui-diagrams</code> provides <code>NanoUI.Plot</code> and the diagrams-lib widget. <code>import NanoUI.Diagrams</code> brings in both. A chart is a plain <code>Chart</code> value; <code>plot</code> draws it, sized by a layout modifier:</p>
 <pre><code class="language-haskell">cpuChart :: PlotCache -&gt; [(Double, Double)] -&gt; NanoUI ()
@@ -230,7 +227,7 @@ cpuChart cache samples =
 <img src="../images/charts/cpu-chart.svg" alt="A framed line chart of CPU load over sixty seconds, with a grid, numbered axes, and the titles time (s) and CPU %.">
 <p>Allocate the <code>PlotCache</code> once in <code>IO</code> with <code>newPlotCache</code> and keep it in the application record. It rebuilds a chart’s drawing only when the chart or the theme changes, so building the <code>Chart</code> value every frame is cheap.</p>
 <p>A chart keeps its drawing’s proportions. With <code>fillW</code> the frame fills the width and the chart is centred in it; with only <code>fixedH</code> the widget takes the width the proportions give. A chart whose labels would overlap at the requested size is drawn larger, up to twice the size.</p>
-<p>The images below are compiled from <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs"><code>ChartExamples.hs</code></a>, and <code>nano-ui-svg-glossary</code> renders the same definitions to the images. They share this data:</p>
+<p>The examples below are compiled from <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs"><code>ChartExamples.hs</code></a>, which <code>nano-ui-svg-glossary</code> also renders to the images. They share this data:</p>
 <pre><code class="language-haskell">wave :: [(Double, Double)]
 wave = [(x, 3 + sin x + 0.5 * sin (2.3 * x)) | x &lt;- [0, 0.3 .. 2 * pi]]
 
@@ -352,26 +349,30 @@ signup =
     &lt;*&gt; withFieldErrors (inputText "Email" "" `prove` validEmail (const "Not an email address"))
 </code></pre>
 <p>Allocate <code>owner &lt;- newFormState</code> once, then run it with a stable prefix:</p>
-<pre><code class="language-haskell">submitted &lt;- nanoFormSubmit owner "signup" "Sign up" signup
-case submitted of
-  Just (Signup name _) -&gt; label ("Welcome, " &lt;&gt; name)
-  Nothing              -&gt; pure ()
+<pre><code class="language-haskell">signupView :: FormState -&gt; NanoUI ()
+signupView owner = do -- owner &lt;- newFormState in setup
+  submitted &lt;- nanoFormSubmit owner "signup" "Sign up" signup
+  case submitted of
+    Just (Signup name _) -&gt; label ("Welcome, " &lt;&gt; name)
+    Nothing              -&gt; pure ()
 </code></pre>
 <p><code>nanoFormLive</code> returns <code>Just a</code> whenever the form is valid; <code>nanoFormEx</code> takes a <code>FormConfig</code>; <code>runNanoForm</code> returns the view and result separately. Inputs include <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputRadio</code>, and <code>inputColor</code>. Validation includes <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. <code>inputWidget</code> adapts any <code>Var a -&gt; NanoUI Response</code> widget, with a publication policy (<code>OnChange</code>, <code>OnChangeOr</code>, <code>OnlyWhen</code>).</p>
 <h2 id="markdown"><a class="header" href="#markdown">Markdown</a></h2>
 <p><code>nano-ui-markdown</code> parses with commonmark and draws with rich text:</p>
-<pre><code class="language-haskell">import NanoUI.Markdown
-
+<pre><code class="language-haskell">doc :: MarkdownDoc
 doc = parseMarkdown "# Hello\n\nSome *emphasis* and `code`."
 
-view cache = do
+view :: MarkdownCache -&gt; NanoUI ()
+view cache = do -- cache &lt;- newMarkdownCache in setup
   clicked &lt;- markdown cache doc
-  for_ clicked $ \url -&gt; openUrl url
+  for_ clicked $ \url -&gt; liftIO (void (Sdl.openUrl url))
 </code></pre>
 <p>Allocate <code>cache &lt;- newMarkdownCache</code> once. <code>markdown</code> returns the link clicked this frame. For streaming, append without reparsing the whole document:</p>
-<pre><code class="language-haskell">doc &lt;- useStream stream replyId emptyMarkdown $ \update -&gt;
-  onToken client (\token -&gt; update (appendMarkdown token))
-void (markdown cache doc)
+<pre><code class="language-haskell">reply :: Stream Int MarkdownDoc -&gt; MarkdownCache -&gt; Int -&gt; NanoUI ()
+reply stream cache replyId = do
+  answer &lt;- useStream stream replyId emptyMarkdown $ \update -&gt;
+    onToken (\token -&gt; update (appendMarkdown token))
+  void (markdown cache answer)
 </code></pre>
 <p>When appending on the UI thread, append a frame’s tokens in one call. The parser reparses only the tail block, with a few documented exceptions (a long unsplittable final block, or a link-reference definition). <code>MarkdownConfig.mdBlock</code> overrides block drawing, for example to syntax-highlight code.</p>
 <h2 id="svg-export"><a class="header" href="#svg-export">SVG export</a></h2>
@@ -380,24 +381,15 @@ void (markdown cache doc)
 <li><strong><code>NanoUI.Draw.Svg</code></strong> exports <code>DrawOp</code> sequences: <code>drawOpsToSvg bounds ops</code> or <code>renderDrawOpsSvg config</code>.</li>
 <li><strong><code>NanoUI.Draw.FrameSvg</code></strong> re-renders a whole frame: <code>frameToSvg config ctx input drawData</code>.</li>
 </ul>
-<pre><code class="language-haskell">import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, enableSvgExport, frameToSvg)
-import NanoUI.Testing (newPixelContext, runFrame)
-import NanoUI.Testing.Harness (withInputOff)
-
-exportViewToSvg view = do
+<pre><code class="language-haskell">exportViewToSvg :: NanoUI () -&gt; IO Text
+exportViewToSvg v = do
   ctx &lt;- newPixelContext
   let inp = withInputOff 1280 800
   enableSvgExport ctx
-  (_, drawData, _) &lt;- runFrame ctx inp view
+  (_, drawData, _) &lt;- runFrame ctx inp v
   frameToSvg defaultFrameSvgConfig ctx inp drawData
 </code></pre>
-<p><code>enableSvgExport</code> records the shapes paint draws and moves text onto the raster spans the exporter reads. <code>frameToSvg</code> fails on a context without it rather than export text alone. Ids in the document take a prefix from its hash, so several SVGs can be inlined in one page. A <code>newPixelContext</code> measures text in a 16 px monospace grid; run the frames inside <code>withSdl</code> for text measured in the real font. This is the path used for the interactive specimens in this book and for visual regression tests.</p>
-<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
-<ul>
-<li>Building an application: <a href="../getting-started/quickstart.html">Quick Start</a> and <a href="../tutorials/index.html">Tutorials</a>.</li>
-<li>Windows and screenshots: <a href="../advanced/window-management.html">Desktop Windows</a>.</li>
-<li>Rendering internals and the frame: <a href="../architecture/index.html">Architecture &amp; Internals</a>.</li>
-</ul>
+<p><code>enableSvgExport</code> records the shapes paint draws and the text spans the exporter reads; <code>frameToSvg</code> fails on a context without it. Ids in the document take a prefix from its hash, so several SVGs can share a page. A <code>newPixelContext</code> measures text on a 16 px monospace grid; run the frames inside <code>withSdl</code> to measure in the real font. The specimens in this book are made this way.</p>
 
                     </main>
 

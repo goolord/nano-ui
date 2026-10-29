@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -197,38 +197,36 @@
 </table>
 </div>
 <p>A <code>Style</code> is <code>bg</code>, <code>fg</code>, <code>border</code>, <code>borderWidth</code>, <code>cornerRadius</code>, <code>hoverBg</code>, and <code>activeBg</code>. A <code>Theme</code> also defines semantic colors: <code>themeAccent</code> / <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success/warning/danger tones.</p>
-<p>The page behind the view is <code>pageBackground</code>: <code>themeWindow</code> by default,
-unless the theme sets <code>themePage</code>. <code>panelPage</code> gives a view that draws no
-panel the panel surface, so the app sits on the panel colour while
-<code>themeWindow</code> stays the window background behind it; <code>pageColor</code> sets any
-other page. The page is laid over the window background, so the window shows
-in the gaps between a page’s panels:</p>
+<p>The page behind the view is <code>pageBackground</code>: <code>themeWindow</code>, unless the theme sets <code>themePage</code>. <code>pageColor</code> sets one. <code>panelPage</code> puts a view that draws no panel of its own on the panel surface. The page sits over the window background, which shows in the gaps between panels:</p>
 <pre><code class="language-haskell">-- An app with no panel of its own: the panel surface is the page.
-sdlAppTheme = Just (panelPage defaultTheme)
+panelPageOptions :: SdlOptions
+panelPageOptions = defaultSdlOptions {sdlAppTheme = Just (panelPage defaultTheme)}
 
 -- Or scope it to a page with no panels.
-styled panelPage (columnWith (padAll 12) (label "Body"))
+body :: NanoUI ()
+body = styled panelPage (columnWith (padAll 12) (label "Body"))
 </code></pre>
 <p>A full-window scroller (<code>scrollWith grow</code>) fills the page colour.</p>
 <p>Built-in themes: <code>defaultTheme</code> (dark), <code>defaultLightTheme</code>, the Tomorrow variants, and <code>themeFromBase16</code> / <code>themeFromBase16Dark</code> / <code>themeFromBase16Light</code>. Set one at startup with <code>sdlAppTheme = Just appTheme</code>, switch per frame with <code>setUiTheme</code>, or follow the OS with <code>followSystemTheme</code> / <code>lightDark</code>.</p>
 <h2 id="scoped-styling"><a class="header" href="#scoped-styling">Scoped styling</a></h2>
-<pre><code class="language-haskell">-- Replace the base theme for a subtree.
-themed defaultLightTheme mainContent
+<pre><code class="language-haskell">themedViews = do
+  -- Replace the base theme for a subtree.
+  themed defaultLightTheme mainContent
 
--- Modify the active theme for a subtree.
-styled (primary . rounded 999) $ button "Continue"
+  -- Modify the active theme for a subtree.
+  whenM (styled (primary . rounded 999) (button "Continue")) continue
 </code></pre>
 <p>Modifiers compose with <code>(.)</code>; nested scopes inherit the outer modification. Theme scopes affect painting only, never layout metrics.</p>
-<p>Useful modifiers:</p>
 <ul>
 <li><strong>Style fields:</strong> <code>background</code>, <code>foreground</code>, <code>borderColor</code>, <code>borderWidth</code>, <code>borderSides</code>, <code>cornerRadius</code>, <code>hoverBackground</code>, <code>pressBackground</code>, <code>fillColor</code>.</li>
 <li><strong>Theme-level:</strong> <code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>everyStyle</code>, <code>accentColor</code>, <code>textColor</code>, <code>rounded</code>, <code>subtle</code>, <code>tinted</code>, <code>readableOn</code>.</li>
 <li><strong>Semantic shortcuts:</strong> <code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, <code>toneColor Warning</code>.</li>
 </ul>
-<p>A common local helper is a quiet button:</p>
-<pre><code class="language-haskell">quiet = subtle . buttonStyle (foreground muted)
+<p>A quiet button:</p>
+<pre><code class="language-haskell">quiet :: Theme -&gt; Theme
+quiet t = (subtle . buttonStyle (foreground (themeMuted t))) t
 
-whenM (styled quiet (button "Skip")) skip
+quietSkip = whenM (styled quiet (button "Skip")) skip
 </code></pre>
 <p>For a fully custom look, define a palette record, build a <code>Theme</code> from it, and derive scoped helpers. Keep three surface levels (well, shelf, controls) and reserve color for meaning.</p>
 <h2 id="interaction-states"><a class="header" href="#interaction-states">Interaction states</a></h2>
@@ -240,12 +238,15 @@ whenM (styled quiet (button "Skip")) skip
 <li><strong>Disabled</strong>: dimmed and non-interactive.</li>
 </ol>
 <p><code>disabledWhen cond subtree</code> disables interaction and dims rendering while preserving layout and state:</p>
-<pre><code class="language-haskell">disabledWhen isSaving $ row $ do
-  button "Cancel"
-  button "Confirm"
+<pre><code class="language-haskell">savingButtons = do
+  isSaving &lt;- useVar False
+  saving &lt;- readVar isSaving
+  disabledWhen saving $ row $ do
+    whenM (button "Cancel") cancel
+    whenM (button "Confirm") confirm
 </code></pre>
 <p>Shortcuts and pointer events inside a disabled subtree are suppressed automatically.</p>
-<p>The interactive state laboratory renders all four states across controls in both light and dark mode:</p>
+<p>All four states, light and dark:</p>
 <p><nano-ui-state-lab></nano-ui-state-lab></p>
 <h2 id="typography-and-fonts"><a class="header" href="#typography-and-fonts">Typography and fonts</a></h2>
 <p>Font modifiers apply to any text-capable widget (<code>labelWith</code>, <code>headingWith</code>, <code>textInputWith</code>, <code>buttonWith</code>, …):</p>
@@ -253,25 +254,20 @@ whenM (styled quiet (button "Skip")) skip
 <li><code>fontSize px</code>, <code>fontMono</code>, <code>fontBold</code> (<code>fontWeight</code>), <code>fontItalic</code>, <code>fontUnderline</code>, <code>fontStrike</code>.</li>
 <li><code>fontTone Warning</code>, <code>fontColor color</code>.</li>
 </ul>
-<pre><code class="language-haskell">labelWith (fontMono . fontSize 15 . fontTone Warning) "warning: low disk"
+<pre><code class="language-haskell">warningLabel = labelWith (fontMono . fontSize 15 . fontTone Warning) "warning: low disk"
 </code></pre>
-<p>The SDL backend bundles Inter and uses installed fonts by family name:</p>
-<pre><code class="language-haskell">defaultSdlOptions
-  { sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Helvetica Neue"]
-  , sdlAppMonoFont = FontSearch ["Cascadia Mono", "JetBrains Mono", "Consolas"]
-  , sdlAppFontSize = 14
-  }
+<p>The SDL backend bundles Inter and finds installed fonts by family name:</p>
+<pre><code class="language-haskell">fontOptions :: SdlOptions
+fontOptions =
+  defaultSdlOptions
+    { sdlAppFont = FontSearch ["Segoe UI", "SF Pro Text", "Helvetica Neue"]
+    , sdlAppMonoFont = FontSearch ["Cascadia Mono", "JetBrains Mono", "Consolas"]
+    , sdlAppFontSize = 14
+    }
 </code></pre>
-<p><code>setSdlUiFont</code> changes fonts mid-session. <code>sdlAppUiScale = 0</code> follows the desktop scale on Windows. For exact font metrics and text measurement, use <code>lineWidth</code>, <code>fmLineHeight</code>, and <code>fmSnapScale</code> from the drawing API rather than summing per-glyph advances.</p>
-<p>The typography laboratory shows the modifiers side by side:</p>
+<p><code>setSdlUiFont</code> changes fonts mid-session. <code>sdlAppUiScale = 0</code> follows the desktop scale on Windows. Measure text with <code>lineWidth</code>, <code>fmLineHeight</code>, and <code>fmSnapScale</code>, not by summing per-glyph advances.</p>
+<p>The font modifiers side by side:</p>
 <p><nano-ui-typo-lab></nano-ui-typo-lab></p>
-<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
-<ul>
-<li>Widgets: <a href="../widgets/index.html">Widget Gallery</a>.</li>
-<li>Live modifier workbenches: <a href="lab.html">Interactive Styling Lab</a>.</li>
-<li>Behavior that surprises people: <a href="gotchas.html">Styling Gotchas</a>.</li>
-<li>Layout spacing and sizing: <a href="../layout/index.html">Layout &amp; Scrolling</a>.</li>
-</ul>
 
                     </main>
 

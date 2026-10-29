@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -202,7 +202,7 @@ newApp :: IO App
 newApp = App &lt;$&gt; newTask &lt;*&gt; newTask &lt;*&gt; newStream
 
 </code></pre>
-<p>The key type and result type are fixed by the handle. That means a task cannot accidentally be reused for a different job, and no message type is erased at runtime.</p>
+<p>The handle fixes the key and result types, so a task cannot be reused for a different job.</p>
 <h2 id="2-a-background-search"><a class="header" href="#2-a-background-search">2. A background search</a></h2>
 <p>The query field is debounced: <code>searchInput'</code> reports <code>respChanged</code> once typing pauses, not on every keystroke. The committed query becomes the task’s key:</p>
 <pre><code class="language-haskell">searchCard :: App -&gt; NanoUI ()
@@ -254,8 +254,10 @@ slowSearch q = do
 <li>Changing the key (typing a new committed query) cancels the old worker with an asynchronous exception and starts the new one.</li>
 </ul>
 <p><code>useTask</code> is the simpler variant when only the latest result matters:</p>
-<pre><code class="language-haskell">contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
-label (fromMaybe "Loading..." contents)
+<pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
+fileView app path = do
+  contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
+  label (fromMaybe "Loading..." contents)
 </code></pre>
 <h2 id="3-retrying-a-failed-job"><a class="header" href="#3-retrying-a-failed-job">3. Retrying a failed job</a></h2>
 <p>A job that throws becomes <code>TaskFailed err previous</code>. The exception is shown and the key includes an attempt counter, so pressing Retry reruns the <em>same</em> input:</p>
@@ -284,8 +286,9 @@ flakyCard app = do
 <li><strong>The key must change to rerun.</strong> Keying by the input alone would never restart an identical request; the attempt number is part of the key.</li>
 <li><strong>Each branch is a whole <code>scope</code>.</strong> The branches declare different widgets; the scope keeps the widget ids after the card stable as the status changes.</li>
 </ul>
-<p>Resource safety belongs inside the job. A file handle, a network connection, or a temporary directory should be acquired with <code>bracket</code>, because cancellation is an asynchronous exception:</p>
-<pre><code class="language-haskell">withConnection connInfo $ \conn -&gt; ...
+<p>Cancellation is an asynchronous exception, so acquire resources inside the job with <code>bracket</code>:</p>
+<pre><code class="language-haskell">job :: Text -&gt; IO [Text]
+job q = bracket (connect info) disconnect $ \conn -&gt; runQuery conn q
 </code></pre>
 <h2 id="4-streams-many-updates-one-frame"><a class="header" href="#4-streams-many-updates-one-frame">4. Streams: many updates, one frame</a></h2>
 <p>A <code>Stream</code> is for work that pushes repeatedly: progress ticks, sensor readings, tokens from a model. The producer is a function that receives <code>update</code> and runs until it returns or is cancelled:</p>
@@ -314,12 +317,12 @@ progressCard app = do
 
 </code></pre>
 <ul>
-<li><strong>Stopping is not calling the hook.</strong> When <code>isRunning</code> is false, <code>useStream</code> is not called, and the producer is cancelled. There is no stop button to wire up.</li>
+<li><strong>Stopping is not calling the hook.</strong> When <code>isRunning</code> is false, <code>useStream</code> is not called, and the producer is cancelled.</li>
 <li><strong>Updates coalesce.</strong> If the producer pushes five values between two frames, the next frame draws the latest one; it does not run five frames.</li>
 <li><strong>The stream’s state starts from the initial value.</strong> Restarting after a pause begins at <code>0</code> here, which is why the label explains how to start over. To resume from the last state, save it outside and pass it as the initial value (the live chart below does exactly that).</li>
 <li><strong>Keep the hook outside tabs when the stream must keep running.</strong> Like a task, a stream is released when its hook is skipped for a whole frame.</li>
 </ul>
-<p>The frame loop sleeps until the next update. A paused progress pane costs no frames.</p>
+<p>A paused progress pane costs no frames.</p>
 <h2 id="5-a-live-chart"><a class="header" href="#5-a-live-chart">5. A live chart</a></h2>
 <p>The chart is a <code>Stream</code> feeding a <code>PlotCache</code>. The cache is allocated once and passed to <code>plot</code>; it compares the chart against the one it drew last time and rebuilds the diagram only when the data or theme changes:</p>
 <pre><code class="language-haskell">data App = App
@@ -405,29 +408,14 @@ walkChart points =
 <li><code>plot cache layout theChart</code> draws it and returns a <code>PlotResponse</code> whose <code>plotHover</code> is the nearest data point under the pointer.</li>
 </ul>
 <p>Building the <code>Chart</code> value every frame is fine: it is a plain value, and comparing a few hundred points is cheap. What is expensive is rebuilding the <em>diagram</em>; the <code>PlotCache</code> is what prevents that.</p>
-<h2 id="6-the-rules-collected"><a class="header" href="#6-the-rules-collected">6. The rules, collected</a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Situation</th><th>Use</th><th>Key rule</th></tr>
-</thead>
-<tbody>
-<tr><td>One slow request per input</td><td><code>Task</code> + <code>useTaskStatus</code></td><td>Key changes restart the job; include a retry counter to rerun the same input.</td></tr>
-<tr><td>Latest result only</td><td><code>Task</code> + <code>useTask</code></td><td>Previous result stays while a new key runs.</td></tr>
-<tr><td>Repeated pushes</td><td><code>Stream</code> + <code>useStream</code></td><td>Stop by not calling; updates coalesce; pass saved state as the initial value to resume.</td></tr>
-<tr><td>Work must survive a hidden tab</td><td>Move the hook outside the tab</td><td>A skipped hook releases the job.</td></tr>
-<tr><td>Worker threads you own</td><td><code>readVarIO</code> / <code>modifyVarIO</code> + <code>askWake</code></td><td>Never touch the UI <code>Context</code> from another thread.</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="7-try-it"><a class="header" href="#7-try-it">7. Try it</a></h2>
+<h2 id="6-try-it"><a class="header" href="#6-try-it">6. Try it</a></h2>
 <ul>
 <li>Add a search that runs on every keystroke (key by the query) and compare the cancellation behaviour with <code>searchInput'</code>.</li>
 <li>Stream markdown tokens into <code>NanoUI.Markdown</code> and append them incrementally (see <a href="../packages/index.html">Ecosystem Packages</a>).</li>
 <li>Virtualize a 100,000-row log list using <code>getScrollMetricsUi</code> (see <a href="../layout/index.html">Layout &amp; Scrolling</a> and the <code>Logs.hs</code> example).</li>
 <li>Replace the streamed chart with a <code>Task</code> that loads a whole dataset once.</li>
 </ul>
-<p>For the full cancellation and lifecycle reference, read <a href="../advanced/async.html">Async Work &amp; Animation</a>.</p>
+<p>The full lifecycle reference is <a href="../advanced/async.html">Async Work &amp; Animation</a>.</p>
 
                     </main>
 

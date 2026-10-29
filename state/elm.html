@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -220,11 +220,13 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 </tbody>
 </table>
 </div>
-<pre><code class="language-haskell">column $ do
-  label "Settings"
-  withKey "form" $ do
-    emitChanged (slider 0 100) volume SetVolume
-    emitWhen (button "Save") Save
+<pre><code class="language-haskell">settingsForm :: Float -&gt; NanoUIE Msg ()
+settingsForm volume =
+  column $ do
+    label "Settings"
+    withKey ("form" :: Text) $ do
+      emitChanged (slider 0 100) volume SetVolume
+      emitWhen (button "Save") Save
 </code></pre>
 <p><code>emitChanged</code> runs the widget against a temporary <code>Var</code> seeded with the model value and emits the new value only if it differs. <code>emitEdited</code> is its stricter form for text fields, where programmatic writes should not look like edits.</p>
 <p>Give each view a signature in its own message type, <code>view :: Model -&gt; NanoUIE Msg ()</code>. The runners take a view of that shape, and a local helper defined outside a view needs the signature too, or GHC finds no sink for its <code>emit</code>.</p>
@@ -255,9 +257,10 @@ parentView n = column $ do
 <p>For local UI state, keep using <code>Var</code> inside the component; the durable model stays in <code>NanoUIE</code>.</p>
 <h2 id="running-and-testing"><a class="header" href="#running-and-testing">Running and testing</a></h2>
 <p><code>runSdlAppReduce</code> and <code>runRgfwAppReduce</code> take an update function, an initial model, and a view:</p>
-<pre><code class="language-haskell">runSdlAppReduce defaultSdlOptions update initialModel view
+<pre><code class="language-haskell">main :: IO ()
+main = runSdlAppReduce defaultSdlOptions update initialModel view
 </code></pre>
-<p>The view runs with the current model, messages are reduced at frame end, and the drawing shown for that frame is from <strong>before</strong> the reduction. If the model changed, another frame is requested to draw it. That follow-up frame is intentional.</p>
+<p>The view runs with the current model, messages are reduced at frame end, and the drawing shown for that frame is from <strong>before</strong> the reduction. If the model changed, another frame is requested to draw it.</p>
 <p>For tests and embedded uses:</p>
 <div class="table-wrapper">
 <table>
@@ -289,16 +292,7 @@ parentView n = column $ do
 </table>
 </div>
 <p>The styles mix. An emitting view can keep <code>Var</code>s for transient UI state; a <code>Var</code>-based view can run a small component with <code>runNanoUIE</code> and act on the returned messages.</p>
-<h2 id="rules-and-pitfalls"><a class="header" href="#rules-and-pitfalls">Rules and pitfalls</a></h2>
-<ul>
-<li><strong>Keep <code>update</code> pure.</strong> File and network I/O belong in the view’s event branch or in an effect queue interpreted outside the reducer.</li>
-<li><strong>Do not duplicate model state in <code>Var</code>s.</strong> Local UI state is fine; durable state should have one home.</li>
-<li><strong>Guard every emission.</strong> Unconditional emissions run on every pass.</li>
-<li><strong>Component keys are required in lists.</strong> Give each instance a distinct <code>withKey</code>.</li>
-<li><strong>Keyboard and focus rules are unchanged.</strong> Focus queries still belong at the end of the view.</li>
-<li><strong>Model changes draw on the next frame.</strong> Do not compensate by writing the model into a <code>Var</code> mid-frame.</li>
-</ul>
-<p>The <code>Var</code> style is covered in <a href="index.html">State &amp; <code>Var</code></a>; the frame consequences are in <a href="../architecture/index.html">Architecture &amp; Internals</a>.</p>
+<p>Keep <code>update</code> pure: file and network I/O belong in the view’s event branch, or in an effect queue run outside the reducer. Do not mirror model state in <code>Var</code>s to see it a frame earlier; durable state has one home.</p>
 
                     </main>
 

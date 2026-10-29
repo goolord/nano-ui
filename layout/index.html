@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -180,86 +180,97 @@
                     <main>
                         <h1 id="layout--scrolling"><a class="header" href="#layout--scrolling">Layout &amp; Scrolling</a></h1>
 <p>Layout is a modifier argument to a container: <code>row</code> and <code>column</code> take a layout, and <code>rowWith</code>/<code>columnWith</code> take a <code>Layout -&gt; Layout</code> function first. Modifiers compose with <code>(.)</code>, and <strong>when two set the same property, the leftmost wins</strong>.</p>
-<pre><code class="language-haskell">columnWith (gap 8 . padAll 12 . fillW) $ do
-  label "Settings"
-  buttonWith (fixedW 120) "Apply"
+<pre><code class="language-haskell">settingsPanel :: NanoUI ()
+settingsPanel =
+  columnWith (gap 8 . padAll 12 . fillW) $ do
+    label "Settings"
+    whenM (buttonWith (fixedW 120) "Apply") apply
 </code></pre>
 <p>Logical pixels, origin top-left, <code>y</code> downward. Backends handle DPI scaling.</p>
-<p>Each container and modifier in the next two sections has a collapsible example: open it for the code and the frame that code renders. The snippets show the arrangement itself; the rendered frames add <code>padAll 14</code> and fill the window so the spacing is visible.</p>
+<p>Each example below expands to its code and the frame it renders. The frames add <code>padAll 14</code> and fill the window so the spacing shows.</p>
 <h2 id="containers"><a class="header" href="#containers">Containers</a></h2>
 <p>A container is a <code>NanoUI</code> action that arranges its children. The plain form (<code>row</code>) uses the inherited layout; the <code>...With</code> form takes a modifier function.</p>
 <details class="nano-example">
 <summary><code>row</code> / <code>rowWith</code>: children left to right</summary>
-<pre><code class="language-haskell">rowWith (gap 8) $
-  mapM_ (void . button) ["One", "Two", "Three"]
+<pre><code class="language-haskell">rowExample =
+  rowWith (gap 8) $
+    mapM_ (void . button) ["One", "Two", "Three"]
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/row.svg" alt="Three buttons in a horizontal row.">
 </details>
 <details class="nano-example">
 <summary><code>column</code> / <code>columnWith</code>: children top to bottom</summary>
-<pre><code class="language-haskell">columnWith (gap 8) $
-  mapM_ (void . buttonWith fillW) ["One", "Two", "Three"]
+<pre><code class="language-haskell">columnExample =
+  columnWith (gap 8) $
+    mapM_ (void . buttonWith fillW) ["One", "Two", "Three"]
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/column.svg" alt="Three full-width buttons stacked vertically.">
 </details>
 <details class="nano-example">
 <summary><code>grid</code> / <code>gridWith</code>: rows of equal columns</summary>
-<pre><code class="language-haskell">gridWith 3 (gap 8 . fillW) $
-  mapM_
-    (\i -&gt; void (buttonWith fillW ("Cell " &lt;&gt; T.pack (show (i :: Int)))))
-    [1 .. 6]
+<pre><code class="language-haskell">gridExample =
+  gridWith 3 (gap 8 . fillW) $
+    mapM_
+      (\i -&gt; void (buttonWith fillW ("Cell " &lt;&gt; T.pack (show (i :: Int)))))
+      [1 .. 6]
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/grid.svg" alt="Six buttons in a three-column grid.">
 </details>
 <details class="nano-example">
 <summary><code>panel</code> / <code>panelWith</code>: a styled surface</summary>
-<pre><code class="language-haskell">panelWith (fixedW 300 . padAll 12 . gap 6) $ do
-  heading "Deployments"
-  muted "3 services running"
+<pre><code class="language-haskell">panelExample =
+  panelWith (fixedW 300 . padAll 12 . gap 6) $ do
+    heading "Deployments"
+    muted "3 services running"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/panel.svg" alt="A panel with a heading and a muted line of text.">
 </details>
 <details class="nano-example">
 <summary><code>card</code>: a full-width panel with a minimum width</summary>
-<pre><code class="language-haskell">card $ do
-  heading "Build #482"
-  muted "Passed in 1m 42s"
+<pre><code class="language-haskell">cardExample =
+  card $ do
+    heading "Build #482"
+    muted "Passed in 1m 42s"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/card.svg" alt="A full-width card showing a build result.">
 </details>
 <details class="nano-example">
 <summary><code>callout</code>: a panel tinted by a semantic colour</summary>
-<pre><code class="language-haskell">warnCol &lt;- themeWarning &lt;$&gt; uiTheme
-callout warnCol $ do
-  heading "Certificate expiring"
-  muted "TLS certificate expires in 3 days."
+<pre><code class="language-haskell">calloutExample = do
+  warnCol &lt;- themeWarning &lt;$&gt; uiTheme
+  callout warnCol $ do
+    heading "Certificate expiring"
+    muted "TLS certificate expires in 3 days."
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/callout.svg" alt="An amber callout warning about an expiring certificate.">
 </details>
 <details class="nano-example">
 <summary><code>layers</code>: children stacked in one box, later on top</summary>
-<pre><code class="language-haskell">layers $ do
-  let badgeRed = colorRGB 204 64 64
-  void (buttonWith (fixedWH 170 40) "Inbox")
-  styled (panelStyle (background badgeRed . borderColor badgeRed)) $
-    panelWith (alignEnd . alignTop . padXY 6 1) $
-      labelWith (fontColor colorWhite) "3"
+<pre><code class="language-haskell">layersExample =
+  layers $ do
+    let badgeRed = colorRGB 204 64 64
+    void (buttonWith (fixedWH 170 40) "Inbox")
+    styled (panelStyle (background badgeRed . borderColor badgeRed)) $
+      panelWith (alignEnd . alignTop . padXY 6 1) $
+        labelWith (fontColor colorWhite) "3"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/layers.svg" alt="A button with a small red count badge stacked at its top right.">
 </details>
 <details class="nano-example">
 <summary><code>center</code>: content centred on both axes</summary>
-<pre><code class="language-haskell">panelWith (fillW . fillH) $
-  center (label "Centred on both axes")
+<pre><code class="language-haskell">centerExample =
+  panelWith (fillW . fillH) $
+    center (label "Centred on both axes")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/center.svg" alt="A label centred in a large panel.">
 </details>
 <details class="nano-example">
 <summary><code>responsive</code> / <code>responsiveRowCol</code>: one layout when wide, another when narrow</summary>
 <p><code>responsive breakpoint wide narrow body</code> picks a container by window width; <code>responsiveRowCol</code> is the common row/column pair.</p>
-<pre><code class="language-haskell">responsiveRowCol 640 (tight . gap 8 . fillW) $ do
-  panelWith (fillW . padAll 12) (label "Sidebar")
-  panelWith (fillW . padAll 12) (label "Content")
+<pre><code class="language-haskell">responsiveExample =
+  responsiveRowCol 640 (tight . gap 8 . fillW) $ do
+    panelWith (fillW . padAll 12) (label "Sidebar")
+    panelWith (fillW . padAll 12) (label "Content")
 </code></pre>
 <p>A 420 px window:</p>
 <img class="nano-example-shot" src="../images/layout/responsive-narrow.svg" alt="Sidebar and Content stacked vertically at 420 pixels wide.">
@@ -268,30 +279,33 @@ callout warnCol $ do
 </details>
 <details class="nano-example">
 <summary><code>mouseArea</code>: hover and clicks for a whole region</summary>
-<pre><code class="language-haskell">(_, area) &lt;-
-  panelWith fillW $
-    mouseArea (fillW . padAll 10 . gap 4) $ do
-      label "build.log"
-      muted "Click anywhere in this card"
-when (respClicked area) (muted "opening build.log")
+<pre><code class="language-haskell">mouseAreaExample = do
+  (_, area) &lt;-
+    panelWith fillW $
+      mouseArea (fillW . padAll 10 . gap 4) $ do
+        label "build.log"
+        muted "Click anywhere in this card"
+  when (respClicked area) (muted "opening build.log")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/mousearea.svg" alt="A card containing two lines, wrapped in a mouse area.">
 </details>
 <details class="nano-example">
 <summary><code>separator</code>: a one-pixel rule</summary>
-<pre><code class="language-haskell">columnWith (fillW . gap 8) $ do
-  label "Above the rule"
-  separator
-  label "Below the rule"
+<pre><code class="language-haskell">separatorExample =
+  columnWith (fillW . gap 8) $ do
+    label "Above the rule"
+    separator
+    label "Below the rule"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/separator.svg" alt="A horizontal rule between two labels.">
 </details>
 <details class="nano-example">
 <summary><code>spacer</code>: flexible space between siblings</summary>
-<pre><code class="language-haskell">rowWith (fillW . alignMid) $ do
-  label "Left"
-  spacer (Grow 1) Fit
-  label "Right"
+<pre><code class="language-haskell">spacerExample =
+  rowWith (fillW . alignMid) $ do
+    label "Left"
+    spacer (Grow 1) Fit
+    label "Right"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/spacer.svg" alt="Left and Right labels pushed to opposite ends of a row.">
 </details>
@@ -300,168 +314,189 @@ when (respClicked area) (muted "opening build.log")
 <h3 id="sizing"><a class="header" href="#sizing">Sizing</a></h3>
 <details class="nano-example">
 <summary><code>fillW</code>: take all remaining width</summary>
-<pre><code class="language-haskell">rowWith (fillW . gap 8) $ do
-  void (buttonWith (fixedW 110) "fixedW 110")
-  void (buttonWith fillW "fillW")
+<pre><code class="language-haskell">fillWExample =
+  rowWith (fillW . gap 8) $ do
+    void (buttonWith (fixedW 110) "fixedW 110")
+    void (buttonWith fillW "fillW")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/fillw.svg" alt="A fixed-width button beside a button filling the rest of the row.">
 </details>
 <details class="nano-example">
 <summary><code>fillH</code>: take all remaining height</summary>
-<pre><code class="language-haskell">rowWith (fillW . gap 8 . fixedH 96) $ do
-  panelWith (fixedW 120 . fillH) (label "fillH")
-  panelWith (fixedW 120) (label "natural")
+<pre><code class="language-haskell">fillHExample =
+  rowWith (fillW . gap 8 . fixedH 96) $ do
+    panelWith (fixedW 120 . fillH) (label "fillH")
+    panelWith (fixedW 120) (label "natural")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/fillh.svg" alt="One panel filling a fixed-height row and one panel at its natural height.">
 </details>
 <details class="nano-example">
 <summary><code>grow</code>: fill both axes (<code>fillW . fillH</code>)</summary>
-<pre><code class="language-haskell">rowWith (grow . gap 8) $ do
-  panelWith (fixedW 120) (label "fixedW 120")
-  panelWith grow (label "grow")
+<pre><code class="language-haskell">growExample =
+  rowWith (grow . gap 8) $ do
+    panelWith (fixedW 120) (label "fixedW 120")
+    panelWith grow (label "grow")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/grow.svg" alt="A small fixed panel beside a panel growing to fill the remaining space.">
 </details>
 <details class="nano-example">
 <summary><code>fixedW</code>: an exact width</summary>
-<pre><code class="language-haskell">rowWith (gap 8) $ do
-  void (buttonWith (fixedW 60) "60")
-  void (buttonWith (fixedW 110) "110")
-  void (buttonWith (fixedW 170) "170")
+<pre><code class="language-haskell">fixedWExample =
+  rowWith (gap 8) $ do
+    void (buttonWith (fixedW 60) "60")
+    void (buttonWith (fixedW 110) "110")
+    void (buttonWith (fixedW 170) "170")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/fixedw.svg" alt="Three buttons at 60, 110, and 170 pixels wide.">
 </details>
 <details class="nano-example">
 <summary><code>fixedH</code>: an exact height</summary>
-<pre><code class="language-haskell">rowWith (gap 8 . fillW) $ do
-  void (buttonWith (fixedH 30) "fixedH 30")
-  void (buttonWith (fixedH 56) "fixedH 56")
-  void (buttonWith (fixedH 82) "fixedH 82")
+<pre><code class="language-haskell">fixedHExample =
+  rowWith (gap 8 . fillW) $ do
+    void (buttonWith (fixedH 30) "fixedH 30")
+    void (buttonWith (fixedH 56) "fixedH 56")
+    void (buttonWith (fixedH 82) "fixedH 82")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/fixedh.svg" alt="Three buttons at 30, 56, and 82 pixels tall.">
 </details>
 <details class="nano-example">
 <summary><code>fixedWH</code>: an exact width and height</summary>
-<pre><code class="language-haskell">rowWith (gap 8) $ do
-  void (buttonWith (fixedWH 120 36) "120 x 36")
-  void (buttonWith (fixedWH 200 72) "200 x 72")
+<pre><code class="language-haskell">fixedWHExample =
+  rowWith (gap 8) $ do
+    void (buttonWith (fixedWH 120 36) "120 x 36")
+    void (buttonWith (fixedWH 200 72) "200 x 72")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/fixedwh.svg" alt="A small button and a larger button with explicit sizes.">
 </details>
 <details class="nano-example">
 <summary><code>minW</code>: a lower width bound</summary>
-<pre><code class="language-haskell">rowWith (fillW . gap 8) $ do
-  void (buttonWith (minW 200) "minW 200")
-  void (button "natural")
+<pre><code class="language-haskell">minWExample =
+  rowWith (fillW . gap 8) $ do
+    void (buttonWith (minW 200) "minW 200")
+    void (button "natural")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/minw.svg" alt="A wide minimum-width button beside a natural-width button.">
 </details>
 <details class="nano-example">
 <summary><code>maxW</code>: an upper width bound</summary>
-<pre><code class="language-haskell">rowWith (fillW . gap 8) $ do
-  void (buttonWith (fillW . maxW 160) "maxW 160")
-  void (buttonWith fillW "fillW")
+<pre><code class="language-haskell">maxWExample =
+  rowWith (fillW . gap 8) $ do
+    void (buttonWith (fillW . maxW 160) "maxW 160")
+    void (buttonWith fillW "fillW")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/maxw.svg" alt="A capped button beside an uncapped fill-width button.">
 </details>
 <details class="nano-example">
 <summary><code>minH</code>: a lower height bound</summary>
-<pre><code class="language-haskell">rowWith (fillW . gap 8) $ do
-  panelWith (minH 80 . fillW) (label "minH 80")
-  panelWith fillW (label "natural")
+<pre><code class="language-haskell">minHExample =
+  rowWith (fillW . gap 8) $ do
+    panelWith (minH 80 . fillW) (label "minH 80")
+    panelWith fillW (label "natural")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/minh.svg" alt="A panel forced to 80 pixels tall beside one at its natural height.">
 </details>
 <details class="nano-example">
 <summary><code>maxH</code>: an upper height bound</summary>
-<pre><code class="language-haskell">rowWith (fillW . gap 8 . fixedH 100) $ do
-  panelWith (maxH 50 . fillW) (label "maxH 50")
-  panelWith (fillW . fillH) (label "fillH")
+<pre><code class="language-haskell">maxHExample =
+  rowWith (fillW . gap 8 . fixedH 100) $ do
+    panelWith (maxH 50 . fillW) (label "maxH 50")
+    panelWith (fillW . fillH) (label "fillH")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/maxh.svg" alt="A panel capped at 50 pixels beside one filling a 100-pixel row.">
 </details>
 <details class="nano-example">
 <summary><code>percent</code>: a percentage of the parent's width</summary>
-<pre><code class="language-haskell">rowWith (fillW . gap 8) $ do
-  panelWith (percent 30) (label "percent 30")
-  panelWith (percent 60) (label "percent 60")
+<pre><code class="language-haskell">percentExample =
+  rowWith (fillW . gap 8) $ do
+    panelWith (percent 30) (label "percent 30")
+    panelWith (percent 60) (label "percent 60")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/percent.svg" alt="Two panels sized to 30 and 60 percent of their row.">
 </details>
 <details class="nano-example">
 <summary><code>aspect</code>: keep a width / height ratio</summary>
-<pre><code class="language-haskell">panelWith (fillW . aspect (16 / 9)) $
-  center (label "16 : 9")
+<pre><code class="language-haskell">aspectExample =
+  panelWith (fillW . aspect (16 / 9)) $
+    center (label "16 : 9")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/aspect.svg" alt="A wide panel with a 16 by 9 aspect ratio.">
 </details>
 <h3 id="spacing"><a class="header" href="#spacing">Spacing</a></h3>
 <details class="nano-example">
 <summary><code>padAll</code>: equal padding on all four edges</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 260 120 . padAll 20) $
-  panelWith (fillW . fillH) (label "padAll 20")
+<pre><code class="language-haskell">padAllExample =
+  panelWith (fixedWH 260 120 . padAll 20) $
+    panelWith (fillW . fillH) (label "padAll 20")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/padall.svg" alt="A panel inset by 20 pixels on every side inside another panel.">
 </details>
 <details class="nano-example">
 <summary><code>padXY</code>: horizontal, then vertical, padding</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 280 100 . padXY 32 10) $
-  panelWith (fillW . fillH) (label "padXY 32 10")
+<pre><code class="language-haskell">padXYExample =
+  panelWith (fixedWH 280 100 . padXY 32 10) $
+    panelWith (fillW . fillH) (label "padXY 32 10")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/padxy.svg" alt="A panel with wide horizontal padding and shallow vertical padding.">
 </details>
 <details class="nano-example">
 <summary><code>padLeft</code>: left padding</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 260 100 . padLeft 48) $
-  panelWith (fillW . fillH) (label "padLeft 48")
+<pre><code class="language-haskell">padLeftExample =
+  panelWith (fixedWH 260 100 . padLeft 48) $
+    panelWith (fillW . fillH) (label "padLeft 48")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/padleft.svg" alt="A panel inset 48 pixels from the left.">
 </details>
 <details class="nano-example">
 <summary><code>padRight</code>: right padding</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 260 100 . padRight 48) $
-  panelWith (fillW . fillH) (label "padRight 48")
+<pre><code class="language-haskell">padRightExample =
+  panelWith (fixedWH 260 100 . padRight 48) $
+    panelWith (fillW . fillH) (label "padRight 48")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/padright.svg" alt="A panel inset 48 pixels from the right.">
 </details>
 <details class="nano-example">
 <summary><code>padTop</code>: top padding</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 260 120 . padTop 40) $
-  panelWith (fillW . fillH) (label "padTop 40")
+<pre><code class="language-haskell">padTopExample =
+  panelWith (fixedWH 260 120 . padTop 40) $
+    panelWith (fillW . fillH) (label "padTop 40")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/padtop.svg" alt="A panel inset 40 pixels from the top.">
 </details>
 <details class="nano-example">
 <summary><code>padBottom</code>: bottom padding</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 260 120 . padBottom 40) $
-  panelWith (fillW . fillH) (label "padBottom 40")
+<pre><code class="language-haskell">padBottomExample =
+  panelWith (fixedWH 260 120 . padBottom 40) $
+    panelWith (fillW . fillH) (label "padBottom 40")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/padbottom.svg" alt="A panel inset 40 pixels from the bottom.">
 </details>
 <details class="nano-example">
 <summary><code>padLRTB</code>: left, right, top, bottom padding</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 280 120 . padLRTB 40 8 30 12) $
-  panelWith (fillW . fillH) (label "padLRTB 40 8 30 12")
+<pre><code class="language-haskell">padLRTBExample =
+  panelWith (fixedWH 280 120 . padLRTB 40 8 30 12) $
+    panelWith (fillW . fillH) (label "padLRTB 40 8 30 12")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/padlrtb.svg" alt="A panel with different padding on each side.">
 </details>
 <details class="nano-example">
 <summary><code>gap</code>: space between children</summary>
-<pre><code class="language-haskell">columnWith (fillW . gap 12) $ do
-  rowWith (gap 4) $ mapM_ (void . button) ["gap 4", "B", "C"]
-  rowWith (gap 24) $ mapM_ (void . button) ["gap 24", "B", "C"]
+<pre><code class="language-haskell">gapExample =
+  columnWith (fillW . gap 12) $ do
+    rowWith (gap 4) $ mapM_ (void . button) ["gap 4", "B", "C"]
+    rowWith (gap 24) $ mapM_ (void . button) ["gap 24", "B", "C"]
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/gap.svg" alt="Two rows with tight and wide spacing between their buttons.">
 </details>
 <details class="nano-example">
 <summary><code>tight</code>: remove container padding, keep the gap</summary>
-<pre><code class="language-haskell">rowWith (gap 16 . fillW) $ do
-  panelWith (padAll 14 . gap 6 . fillW) $ do
-    muted "padAll 14"
-    label "default padding"
-  panelWith (tight . padAll 14 . gap 6 . fillW) $ do
-    muted "tight"
-    label "no padding"
+<pre><code class="language-haskell">tightExample =
+  rowWith (gap 16 . fillW) $ do
+    panelWith (padAll 14 . gap 6 . fillW) $ do
+      muted "padAll 14"
+      label "default padding"
+    panelWith (tight . padAll 14 . gap 6 . fillW) $ do
+      muted "tight"
+      label "no padding"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/tight.svg" alt="Two panels comparing normal padding with tight.">
 </details>
@@ -469,79 +504,89 @@ when (respClicked area) (muted "opening build.log")
 <p><code>alignStart</code>, <code>alignCenter</code>, and <code>alignEnd</code> place a child across a column. <code>alignTop</code>, <code>alignMid</code>, and <code>alignBottom</code> place it down a row. A child always aligns itself; putting <code>alignMid</code> on a row positions the row in its parent, not the row’s contents.</p>
 <details class="nano-example">
 <summary><code>alignStart</code>: the left edge</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 300 110 . padAll 10) $
-  void (buttonWith (alignStart . fixedW 140) "alignStart")
+<pre><code class="language-haskell">alignStartExample =
+  panelWith (fixedWH 300 110 . padAll 10) $
+    void (buttonWith (alignStart . fixedW 140) "alignStart")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/alignstart.svg" alt="A button aligned to the left edge of a panel.">
 </details>
 <details class="nano-example">
 <summary><code>alignCenter</code>: the horizontal centre</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 300 110 . padAll 10) $
-  void (buttonWith (alignCenter . fixedW 140) "alignCenter")
+<pre><code class="language-haskell">alignCenterExample =
+  panelWith (fixedWH 300 110 . padAll 10) $
+    void (buttonWith (alignCenter . fixedW 140) "alignCenter")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/aligncenter.svg" alt="A button centred horizontally in a panel.">
 </details>
 <details class="nano-example">
 <summary><code>alignEnd</code>: the right edge</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 300 110 . padAll 10) $
-  void (buttonWith (alignEnd . fixedW 140) "alignEnd")
+<pre><code class="language-haskell">alignEndExample =
+  panelWith (fixedWH 300 110 . padAll 10) $
+    void (buttonWith (alignEnd . fixedW 140) "alignEnd")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/alignend.svg" alt="A button aligned to the right edge of a panel.">
 </details>
 <details class="nano-example">
 <summary><code>alignTop</code>: the top edge</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 300 110 . padAll 10) $
-  rowWith (fillW . fillH . gap 8) $
-    void (buttonWith (alignTop . fixedW 140) "alignTop")
+<pre><code class="language-haskell">alignTopExample =
+  panelWith (fixedWH 300 110 . padAll 10) $
+    rowWith (fillW . fillH . gap 8) $
+      void (buttonWith (alignTop . fixedW 140) "alignTop")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/aligntop.svg" alt="A button aligned to the top of a tall row.">
 </details>
 <details class="nano-example">
 <summary><code>alignMid</code>: the vertical centre</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 300 110 . padAll 10) $
-  rowWith (fillW . fillH . gap 8) $
-    void (buttonWith (alignMid . fixedW 140) "alignMid")
+<pre><code class="language-haskell">alignMidExample =
+  panelWith (fixedWH 300 110 . padAll 10) $
+    rowWith (fillW . fillH . gap 8) $
+      void (buttonWith (alignMid . fixedW 140) "alignMid")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/alignmid.svg" alt="A button centred vertically in a tall row.">
 </details>
 <details class="nano-example">
 <summary><code>alignBottom</code>: the bottom edge</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 300 110 . padAll 10) $
-  rowWith (fillW . fillH . gap 8) $
-    void (buttonWith (alignBottom . fixedW 140) "alignBottom")
+<pre><code class="language-haskell">alignBottomExample =
+  panelWith (fixedWH 300 110 . padAll 10) $
+    rowWith (fillW . fillH . gap 8) $
+      void (buttonWith (alignBottom . fixedW 140) "alignBottom")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/alignbottom.svg" alt="A button aligned to the bottom of a tall row.">
 </details>
 <details class="nano-example">
 <summary><code>alignBaseline</code>: share the first baseline</summary>
-<pre><code class="language-haskell">rowWith (gap 12 . fixedW 340) $ do
-  labelWith (fontSize 24 . alignBaseline) "Title"
-  labelWith alignBaseline "baseline text"
+<pre><code class="language-haskell">alignBaselineExample =
+  rowWith (gap 12 . fixedW 340) $ do
+    labelWith (fontSize 24 . alignBaseline) "Title"
+    labelWith alignBaseline "baseline text"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/alignbaseline.svg" alt="A large and a small label lined up on their baselines.">
 </details>
 <details class="nano-example">
 <summary><code>wrap</code>: start a new line when a child does not fit</summary>
-<pre><code class="language-haskell">rowWith (wrap . gap 6 . fixedW 280) $
-  mapM_ (void . button) ["haskell", "immediate", "mode", "layout", "sdl", "widgets"]
+<pre><code class="language-haskell">wrapExample =
+  rowWith (wrap . gap 6 . fixedW 280) $
+    mapM_ (void . button) ["haskell", "immediate", "mode", "layout", "sdl", "widgets"]
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/wrap.svg" alt="Buttons wrapped onto two lines.">
 </details>
 <details class="nano-example">
 <summary><code>lineGap</code>: space between wrapped lines</summary>
-<pre><code class="language-haskell">columnWith (fillW . gap 16) $ do
-  let labels = ["haskell", "immediate", "mode", "layout", "sdl", "widgets"]
-  muted "lineGap 2"
-  rowWith (wrap . lineGap 2 . gap 6 . fixedW 280) $ mapM_ (void . button) labels
-  muted "lineGap 18"
-  rowWith (wrap . lineGap 18 . gap 6 . fixedW 280) $ mapM_ (void . button) labels
+<pre><code class="language-haskell">lineGapExample =
+  columnWith (fillW . gap 16) $ do
+    let labels = ["haskell", "immediate", "mode", "layout", "sdl", "widgets"]
+    muted "lineGap 2"
+    rowWith (wrap . lineGap 2 . gap 6 . fixedW 280) $ mapM_ (void . button) labels
+    muted "lineGap 18"
+    rowWith (wrap . lineGap 18 . gap 6 . fixedW 280) $ mapM_ (void . button) labels
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/linegap.svg" alt="Two wrapped rows comparing a small and a large line gap.">
 </details>
 <details class="nano-example">
 <summary><code>lineAlign</code>: align wrapped lines in the container</summary>
-<pre><code class="language-haskell">rowWith (wrap . lineAlign LinesCenter . gap 6 . fixedW 210) $
-  mapM_ (void . button) ["alpha", "beta", "gamma", "delta", "epsilon"]
+<pre><code class="language-haskell">lineAlignExample =
+  rowWith (wrap . lineAlign LinesCenter . gap 6 . fixedW 210) $
+    mapM_ (void . button) ["alpha", "beta", "gamma", "delta", "epsilon"]
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/linealign.svg" alt="Wrapped buttons with the final line centred.">
 </details>
@@ -549,38 +594,43 @@ when (respClicked area) (muted "opening build.log")
 <p><code>pinAt</code> takes a child out of the flow. <code>pointer</code> decides whether an overlapping region consumes pointer events (<code>PointerBlock</code>) or passes them to what is underneath (<code>PointerPass</code>). The pointer examples park the pointer over the overlay.</p>
 <details class="nano-example">
 <summary><code>pinAt</code>: position absolutely inside the parent</summary>
-<pre><code class="language-haskell">panelWith (fixedWH 280 110 . padAll 12) $ do
-  heading "Inbox"
-  muted "The badge is pinned, not stacked."
-  let badgeCol = colorRGB 204 64 64
-  styled (panelStyle (background badgeCol . borderColor badgeCol)) $
-    panelWith (pinAt 6 (-6) . alignEnd . alignTop . padXY 6 1) $
-      labelWith (fontColor colorWhite) "12"
+<pre><code class="language-haskell">pinAtExample =
+  panelWith (fixedWH 280 110 . padAll 12) $ do
+    heading "Inbox"
+    muted "The badge is pinned, not stacked."
+    let badgeCol = colorRGB 204 64 64
+    styled (panelStyle (background badgeCol . borderColor badgeCol)) $
+      panelWith (pinAt 6 (-6) . alignEnd . alignTop . padXY 6 1) $
+        labelWith (fontColor colorWhite) "12"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/pinat.svg" alt="A count badge pinned to the top-right corner of a panel.">
 </details>
 <details class="nano-example">
 <summary><code>pointer PointerBlock</code>: consume pointer events over a region</summary>
-<pre><code class="language-haskell">layers $ do
-  void (buttonWith (fixedWH 200 44) "Open logs")
-  styled (panelStyle (background (colorRGBA 0 0 0 150) . borderWidth 0)) $
-    panelWith (pinAt 0 0 . grow . pointer PointerBlock . padAll 6) $
-      muted "scrim"
+<pre><code class="language-haskell">pointerBlockExample =
+  layers $ do
+    void (buttonWith (fixedWH 200 44) "Open logs")
+    styled (panelStyle (background (colorRGBA 0 0 0 150) . borderWidth 0)) $
+      panelWith (pinAt 0 0 . grow . pointer PointerBlock . padAll 6) $
+        muted "scrim"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/pointer-block.svg" alt="A dimming scrim over a button labelled Open logs.">
 </details>
 <details class="nano-example">
 <summary><code>pointer PointerPass</code>: let pointer events through</summary>
-<pre><code class="language-haskell">layers $ do
-  void (buttonWith (fixedWH 200 44) "Open logs")
-  labelWith (pinAt 8 (-6) . pointer PointerPass) "decorative label"
+<pre><code class="language-haskell">pointerPassExample =
+  layers $ do
+    void (buttonWith (fixedWH 200 44) "Open logs")
+    labelWith (pinAt 8 (-6) . pointer PointerPass) "decorative label"
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/pointer-pass.svg" alt="A decorative label over a button that still receives hover.">
 </details>
 <h2 id="scrolling"><a class="header" href="#scrolling">Scrolling</a></h2>
 <p>A scroll container needs a bounded viewport on its scrolling axis:</p>
-<pre><code class="language-haskell">scrollWith (fixedH 300 . fillW) $
-  column $ for_ items label
+<pre><code class="language-haskell">itemList :: [Text] -&gt; NanoUI ()
+itemList items =
+  scrollWith (fixedH 300 . fillW) $
+    column $ for_ items label
 </code></pre>
 <p>Without a bounded ancestor, <code>grow</code> can leave a scroller with nothing to size against.</p>
 <ul>
@@ -618,26 +668,23 @@ virtualizedList items = do
 <p><code>scrollViewport</code> excludes padding and the scrollbar lane; use it, not the container rectangle, for the visible height. <code>scrollOffset</code> is the current offset. The metrics read registers a layout dependency, so a resize triggers another frame.</p>
 <p>See <code>packages/nano-ui-demo/examples/LongList.hs</code> (100,000 rows) and <code>Logs.hs</code> (sticky-to-bottom).</p>
 <h3 id="programmatic-scrolling-and-wheel-tuning"><a class="header" href="#programmatic-scrolling-and-wheel-tuning">Programmatic scrolling and wheel tuning</a></h3>
-<pre><code class="language-haskell">metrics &lt;- getScrollMetricsUi sid
-when shouldReveal $
-  scrollRectIntoViewUi sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant
+<pre><code class="language-haskell">reveal :: WidgetId -&gt; Float -&gt; Int -&gt; Bool -&gt; NanoUI ()
+reveal sid rowH index shouldReveal =
+  when shouldReveal $
+    scrollRectIntoViewUi sid (Rect 0 (fromIntegral index * rowH) 1 rowH) ScrollNearest ScrollInstant
 </code></pre>
 <p>From a view: <code>scrollToUi</code>, <code>scrollByUi</code>, <code>scrollPagesUi</code>, <code>scrollRectIntoViewUi</code>, <code>setScrollOffsetUi</code>, <code>setScrollStepUi</code>. The <code>Context</code> variants (<code>scrollTo</code>, <code>getScrollOffset2D</code>, …) are for <code>IO</code>.</p>
-<p>One wheel notch scrolls 60 logical pixels by default. For fixed-height rows, set the step so a notch is one row:</p>
-<pre><code class="language-haskell">ctx &lt;- askContext
-liftIO $ setScrollTuning ctx defaultScrollTuning
-  {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
+<p>One wheel notch scrolls 60 logical pixels by default. For fixed-height rows, set the step so a notch is one row (<code>askContext</code> is in <code>NanoUI.Monad</code>):</p>
+<pre><code class="language-haskell">oneRowPerNotch :: Float -&gt; NanoUI ()
+oneRowPerNotch rowHeight = do
+  ctx &lt;- askContext
+  liftIO $ setScrollTuning ctx defaultScrollTuning
+    {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
 </code></pre>
 <p><code>setScrollStepUi sid px</code> overrides one scroller; <code>0</code> restores the context step.</p>
 <h2 id="nesting-and-chrome"><a class="header" href="#nesting-and-chrome">Nesting and chrome</a></h2>
 <p><code>scrollArea</code>, <code>panel</code>, and <code>card</code> each draw a background, border, and radius. Nesting them inside a popup or dialog draws a box in a box. Let one level own the chrome: flatten the inner surface with <code>styled (inputStyle (background colorTransparent . borderWidth 0))</code>, or give the outer dialog <code>padAll 0</code> and pad the inner body.</p>
 <p>See <a href="../styling/gotchas.html">Styling Gotchas</a> and <a href="../troubleshooting/recurring-bugs.html">Troubleshooting</a> for the recurring cases.</p>
-<h2 id="related"><a class="header" href="#related">Related</a></h2>
-<ul>
-<li>Widget inventory: <a href="../widgets/index.html">Widget Gallery</a>.</li>
-<li>Container styling: <a href="../styling/index.html">Styling &amp; Theming</a>.</li>
-<li>Scrolling examples: <code>packages/nano-ui-demo/examples/LongList.hs</code>, <code>Logs.hs</code>.</li>
-</ul>
 
                     </main>
 

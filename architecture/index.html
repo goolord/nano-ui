@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="architecture--internals"><a class="header" href="#architecture--internals">Architecture &amp; Internals</a></h1>
-<p>Reference for how a frame executes and how applications are structured around it. It explains the cost model behind <code>readVar</code>, focus, and damage; a view does not need any of it to work.</p>
+<p>How a frame runs, and how applications are structured around it. None of this is needed to write a view; it explains what <code>readVar</code>, focus, and damage cost.</p>
 <h2 id="the-frame-lifecycle"><a class="header" href="#the-frame-lifecycle">The frame lifecycle</a></h2>
 <p><label class="checkbox-label"><input class="checkbox-img" type="checkbox"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"><span class="img-wrapper"><img src="../images/rendering-pipeline.svg" alt="Rendering Pipeline"></span></label></p>
 <p>Each frame:</p>
@@ -201,12 +201,11 @@
 <li><strong>Idle costs zero.</strong> With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.</li>
 </ul>
 <h2 id="application-patterns"><a class="header" href="#application-patterns">Application patterns</a></h2>
-<p>Three real applications (<code>ned</code>, <code>stronghead</code>, <code>winget-gui</code>) converge on the same architecture; the difference is where durable state lives. All of them follow the core rule: <strong>setup once in <code>IO</code>, then run.</strong></p>
+<p>Three applications (<code>ned</code>, <code>stronghead</code>, <code>winget-gui</code>) share one rule, <strong>set up once in <code>IO</code>, then run</strong>, and differ in where durable state lives.</p>
 <pre><code class="language-haskell">main :: IO ()
 main = do
-  cache &lt;- newViewCache
-  env   &lt;- newAppEnv
-  runSdlApp defaultSdlOptions (appView env cache)
+  env &lt;- newEnv
+  runSdlApp defaultSdlOptions (appView env)
 </code></pre>
 <h3 id="pattern-a-one-domain-state-and-a-wake-channel"><a class="header" href="#pattern-a-one-domain-state-and-a-wake-channel">Pattern A: one domain state and a wake channel</a></h3>
 <p><code>winget-gui</code> keeps package-manager results in one <code>IORef</code> and snapshots it at frame start:</p>
@@ -215,16 +214,19 @@ main = do
   , envWake  :: IORef (IO ())
   }
 
+appView :: Env -&gt; NanoUI ()
 appView env = do
   wake &lt;- askWake
   liftIO $ writeIORef env.envWake wake
   state &lt;- liftIO $ readIORef env.envState
   mainLayout state
 
--- worker thread
-atomicModifyIORef' env.envState (\s -&gt; (s {packages = results}, ()))
-wake &lt;- readIORef env.envWake
-wake
+-- On a worker thread:
+publish :: Env -&gt; [Text] -&gt; IO ()
+publish env results = do
+  atomicModifyIORef' env.envState (\s -&gt; (s {packages = results}, ()))
+  wake &lt;- readIORef env.envWake
+  wake
 </code></pre>
 <p>Gather every read into one <code>Frame</code> record before building the window, memoize derived collections in <code>IORef (Maybe (key, value))</code> caches keyed by a revision counter, and read shortcuts after the widgets. Use this when the domain state is shared with workers, a database, or a protocol.</p>
 <h3 id="pattern-b-an-app-record-of-vars"><a class="header" href="#pattern-b-an-app-record-of-vars">Pattern B: an app record of <code>Var</code>s</a></h3>
@@ -236,18 +238,20 @@ wake
   , isInspecting :: Var Bool
   }
 
+newApp :: IO App
 newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1.0 &lt;*&gt; newVar False
 </code></pre>
 <p>Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.</p>
 <h3 id="pattern-c-application-owned-state"><a class="header" href="#pattern-c-application-owned-state">Pattern C: application-owned state</a></h3>
 <p><code>ned</code> keeps a plain <code>IORef App</code>; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:</p>
-<pre><code class="language-haskell">editorView (Editor ref) = do
+<pre><code class="language-haskell">editorView :: Editor -&gt; NanoUI ()
+editorView (Editor ref) = do
   app &lt;- liftIO (readIORef ref)
   renderEditor app
   app' &lt;- liftIO (readIORef ref)
   when (viewChanged app app') requestFrame
 </code></pre>
-<p><code>requestFrame</code> asks for one more frame when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library. It is an escape hatch, not a replacement for <code>Var</code> dependencies.</p>
+<p><code>requestFrame</code> asks for one more frame when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.</p>
 <h3 id="choosing"><a class="header" href="#choosing">Choosing</a></h3>
 <div class="table-wrapper">
 <table>
@@ -273,35 +277,6 @@ newApp = App &lt;$&gt; newVar "" &lt;*&gt; newVar TabOverview &lt;*&gt; newVar 1
 <li><strong>Guard effects with events.</strong> The view can run more than once per frame.</li>
 <li><strong>Keep derived values derived.</strong> Cache expensive work by revision, not by copying fields.</li>
 </ol>
-<h2 id="refactoring-history"><a class="header" href="#refactoring-history">Refactoring history</a></h2>
-<p>The repository keeps a small record of source-level simplifications. These are internals, not user-facing APIs.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Area</th><th>Change</th></tr>
-</thead>
-<tbody>
-<tr><td>Widget construction</td><td>Inlined leaf initializers; text-style packing kept on the styled path</td></tr>
-<tr><td>Controlled inputs</td><td>Shared activation/completion policies instead of per-widget copies</td></tr>
-<tr><td>UI scopes</td><td>Shared bridge for bracketed id allocation and paint scopes</td></tr>
-<tr><td>Forms</td><td>Named/positional input families and zero-allocation adapters</td></tr>
-<tr><td>Reducers</td><td>Three generic adapters replacing dozens of per-widget <code>NanoUI.Emit</code> wrappers</td></tr>
-<tr><td>Scrollbars</td><td>Unified scalar calculation for both orientations</td></tr>
-<tr><td>Themes</td><td>Shared Base16 construction with dark/light transforms</td></tr>
-<tr><td>Animation</td><td>Indexed applicative channel traversal</td></tr>
-<tr><td>Draw commands</td><td><code>vector</code> <code>IsoUnbox</code>/<code>As</code> deriving replacing handwritten <code>Prim</code> instances</td></tr>
-<tr><td>Canvas</td><td>Strict standard <code>State</code> monad inlining into draw-op arrays</td></tr>
-</tbody>
-</table>
-</div>
-<p>Validation gates for these changes: <code>cabal build -j1 all</code> with <code>-Werror</code>, the full test suite (including <code>nano-ui-inspection</code>), hidden-window SDL demos, the RGFW profile test, and the per-frame id benchmark. The detailed audits live in the git history rather than the reading path.</p>
-<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
-<ul>
-<li>State and <code>Var</code>: <a href="../state/index.html">State &amp; <code>Var</code></a>.</li>
-<li>Keys and ids: <a href="../state/identity.html">Widget Identity &amp; Keys</a>.</li>
-<li>Reducer runners: <a href="../state/elm.html">Elm-Style State</a>.</li>
-<li>Contributing and tests: <a href="../getting-started/development.html">Development Setup</a>.</li>
-</ul>
 
                     </main>
 

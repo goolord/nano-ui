@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,72 +179,78 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="text-editing"><a class="header" href="#text-editing">Text Editing</a></h1>
-<p>nano-ui offers two levels of multi-line editing:</p>
-<ol>
-<li><strong><code>textArea</code></strong> works on a <code>Var Text</code>. It is right for short notes, descriptions, and commit messages, where the whole string is the value.</li>
-<li><strong><code>textAreaDocument</code></strong> works on a <code>Var TextDocument</code>. It is built for large files, editors, and code buffers, with line-level immutable sharing and an undo history that survives edits.</li>
-</ol>
+<ul>
+<li><strong><code>textArea</code></strong> edits a <code>Var Text</code>. Use it for short text: notes, descriptions, commit messages.</li>
+<li><strong><code>textAreaDocument</code></strong> edits a <code>Var TextDocument</code>, which shares unchanged lines between edits. Use it for files and code buffers.</li>
+</ul>
 <h2 id="textarea-for-short-text"><a class="header" href="#textarea-for-short-text"><code>textArea</code> for short text</a></h2>
-<pre><code class="language-haskell">notes &lt;- useVar ""
-textArea notes
+<pre><code class="language-haskell">notes = do
+  draft &lt;- useVar ""
+  textArea draft
 </code></pre>
-<p>Every edit produces a new <code>Text</code>; for a few kilobytes that is a fine trade for the simple API.</p>
+<p>Every edit builds a new <code>Text</code>, which is cheap for a few kilobytes.</p>
 <h2 id="textareadocument-for-documents"><a class="header" href="#textareadocument-for-documents"><code>textAreaDocument</code> for documents</a></h2>
-<pre><code class="language-haskell">editorView :: Var TextDocument -&gt; NanoUI ()
-editorView docVar = do
+<pre><code class="language-haskell">editorView :: Var WidgetId -&gt; Var TextDocument -&gt; NanoUI ()
+editorView editorId docVar = do
   resp &lt;- textAreaDocumentWith' (grow . minW 320 . minH 200) docVar
   when (respChanged resp) markDirty
   writeVar editorId (respId resp)
 </code></pre>
 <p>Only the edited lines are copied; unchanged lines are shared. <code>documentText</code> materializes the whole text; call it when saving, not on every edit.</p>
-<pre><code class="language-haskell">save = liftIO (BS.writeFile path (TE.encodeUtf8 (documentText doc)))
+<pre><code class="language-haskell">save :: FilePath -&gt; TextDocument -&gt; NanoUI ()
+save path doc = liftIO (BS.writeFile path (TE.encodeUtf8 (documentText doc)))
 </code></pre>
-<p><code>documentLineCount</code> is cheap and is the right way to show a line count in a status bar.</p>
+<p><code>documentLineCount</code> is cheap enough for a status bar.</p>
 <h2 id="one-undo-history"><a class="header" href="#one-undo-history">One undo history</a></h2>
 <p>Keyboard edits, mouse selection, the right-click menu, and programmatic commands all dispatch <code>TextCommand</code>s, so they share one undo history:</p>
-<pre><code class="language-haskell">data TextCommand
-  = InsertText Text
-  | Delete TextMotion
-  | Move TextMotion Bool
+<pre><code class="language-haskell">-- | Editing, navigation, selection, history, and clipboard operations on a
+-- text field. Mutating commands record an undo step and replace any active
+-- selection.
+data TextCommand
+  = -- | Replace the selection with text (typing, a snippet).
+    InsertText !Text
+  | -- | Delete the selection, or from the cursor to where the motion lands:
+    -- @Delete CharLeft@ is Backspace, @Delete WordRight@ Ctrl+Delete.
+    Delete !TextMotion
+  | -- | Move the cursor, extending the selection when the flag is set.
+    -- Without it, 'CharLeft' and 'CharRight' over a selection go to its start
+    -- and its end.
+    Move !TextMotion !Bool
   | SelectAll
-  | Select Cursor Cursor
-  | Replace Cursor Cursor Text
-  | ReplaceAll Text
+  | -- | Select from the first position (the anchor) to the second (the
+    -- cursor), clamped into the document.
+    Select !Cursor !Cursor
+  | -- | Replace the text between two positions, leaving the cursor after it.
+    Replace !Cursor !Cursor !Text
+  | -- | Replace the whole document as one undoable edit.
+    ReplaceAll !Text
   | Undo
   | Redo
   | Cut
   | Copy
   | Paste
+  deriving (Eq, Show)
 </code></pre>
 <p>Run a command against a field by its <code>WidgetId</code>:</p>
-<pre><code class="language-haskell">whenM (menuItem "Undo") (runTextCommand editor Undo)
-whenM (menuItem "Insert date") (runTextCommand editor (InsertText today))
+<pre><code class="language-haskell">editMenu :: WidgetId -&gt; Text -&gt; NanoUI ()
+editMenu editor today = do
+  whenM (menuItem "Undo") (runTextCommand editor Undo)
+  whenM (menuItem "Insert date") (runTextCommand editor (InsertText today))
 </code></pre>
 <p>Query history state for menu enablement:</p>
-<pre><code class="language-haskell">editor &lt;- readVar editorId
-canUndo &lt;- textCanUndo editor
-canRedo &lt;- textCanRedo editor
+<pre><code class="language-haskell">undoState :: Var WidgetId -&gt; NanoUI (Bool, Bool)
+undoState editorId = do
+  editor &lt;- readVar editorId
+  canUndo &lt;- textCanUndo editor
+  canRedo &lt;- textCanRedo editor
+  pure (canUndo, canRedo)
 </code></pre>
 <p>A complete Edit menu built this way is in <a href="../tutorials/notepad.html">Build a Notepad</a>.</p>
 <blockquote class="blockquote-tag blockquote-tag-tip">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
 <p>Directly overwriting the <code>Var Text</code> or <code>Var TextDocument</code> from outside resets the undo stack. To make a programmatic edit undoable, issue a <code>TextCommand</code> (<code>InsertText</code>, <code>ReplaceAll</code>, and so on) instead of writing the <code>Var</code>.</p>
 </blockquote>
-<h2 id="reading-the-response"><a class="header" href="#reading-the-response">Reading the response</a></h2>
-<p>The primed variants return a <code>Response</code>:</p>
-<ul>
-<li><code>respChanged</code> reports an <strong>edit</strong>, not a caret move. Use it to mark a document dirty.</li>
-<li><code>respSubmitted</code> reports Enter in a single-line field.</li>
-<li><code>respId</code> identifies the editor for commands and focus.</li>
-</ul>
-<p>For a single-line field, <code>textInput</code> and <code>textInput'</code> are the equivalents; <code>searchInput'</code> adds debounced change reporting and a clear button.</p>
-<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
-<ul>
-<li>Widget inventory: <a href="index.html">Widget Gallery</a>.</li>
-<li>Input widgets and their signatures: <a href="controls.html">Buttons, Menus &amp; Inputs</a>.</li>
-<li>Working with the document in an application: <a href="../tutorials/notepad.html">Build a Notepad</a>.</li>
-<li>Theming and typography: <a href="../styling/index.html">Styling &amp; Theming</a>.</li>
-</ul>
+<p>In the primed variants’ <code>Response</code>, <code>respChanged</code> reports an edit, not a caret move, so it is the signal to mark a document dirty. <code>respId</code> names the editor for commands and focus.</p>
 
                     </main>
 

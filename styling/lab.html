@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,67 +179,40 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="interactive-styling-lab"><a class="header" href="#interactive-styling-lab">Interactive Styling Lab</a></h1>
-<p>Explore how every styling modifier (<code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>accentColor</code>, <code>rounded</code>, <code>disabledWhen</code>) and theme mode affects each widget family in <code>nano-ui</code>. For what each widget <em>does</em> rather than how it looks, see the <a href="../widgets/index.html">Widget Gallery</a>; for the concepts behind the modifiers, see <a href="index.html">Styling &amp; Theming</a> and <a href="gotchas.html">Styling Gotchas</a>.</p>
-<p>Use the toggle chips on each workbench to toggle modifiers on and off, click <strong>Toggle Compare Baseline</strong> to see a side-by-side diff against the unstyled widget, and copy the generated Haskell code directly into your project.</p>
-<hr>
-<h2 id="1-buttons"><a class="header" href="#1-buttons">1. Buttons</a></h2>
-<p>Standard push buttons, quiet buttons, and styled actions.</p>
+<p>Toggle styling modifiers and themes on each widget family. <strong>Toggle Compare Baseline</strong> shows the unstyled widget beside it, and the generated Haskell can be copied. The concepts are in <a href="index.html">Styling &amp; Theming</a> and <a href="gotchas.html">Styling Gotchas</a>.</p>
+<h2 id="buttons"><a class="header" href="#buttons">Buttons</a></h2>
 <p><nano-ui-workbench widget="button" title="Push Buttons"></nano-ui-workbench></p>
-<hr>
-<h2 id="2-toggle-buttons"><a class="header" href="#2-toggle-buttons">2. Toggle Buttons</a></h2>
-<p>Two-state toggle buttons with persistent active styling.</p>
+<h2 id="toggle-buttons"><a class="header" href="#toggle-buttons">Toggle buttons</a></h2>
 <p><nano-ui-workbench widget="toggle-button" title="Toggle Buttons"></nano-ui-workbench></p>
-<hr>
-<h2 id="3-checkboxes"><a class="header" href="#3-checkboxes">3. Checkboxes</a></h2>
-<p>Checkboxes route through three distinct surfaces: the box well (<code>themeInput</code>), check indicator (<code>themeAccent</code>), and label text.</p>
+<h2 id="checkboxes"><a class="header" href="#checkboxes">Checkboxes</a></h2>
+<p>Three surfaces: the box well (<code>themeInput</code>), the check (<code>themeAccent</code>), and the label.</p>
 <p><nano-ui-workbench widget="checkbox" title="Checkboxes"></nano-ui-workbench></p>
-<hr>
-<h2 id="4-radio-buttons"><a class="header" href="#4-radio-buttons">4. Radio Buttons</a></h2>
-<p>Single-choice radio groups with circular indicator wells.</p>
+<h2 id="radio-buttons"><a class="header" href="#radio-buttons">Radio buttons</a></h2>
 <p><nano-ui-workbench widget="radio" title="Radio Buttons"></nano-ui-workbench></p>
-<hr>
-<h2 id="5-text-inputs"><a class="header" href="#5-text-inputs">5. Text Inputs</a></h2>
-<p>Single-line text fields with active caret, selection highlighting, and focus rings.</p>
+<h2 id="text-inputs"><a class="header" href="#text-inputs">Text inputs</a></h2>
 <p><nano-ui-workbench widget="text-input" title="Text Fields"></nano-ui-workbench></p>
-<hr>
-<h2 id="6-search--numeric-inputs"><a class="header" href="#6-search--numeric-inputs">6. Search &amp; Numeric Inputs</a></h2>
-<p>Debounced search fields and bounded numeric steppers.</p>
+<h2 id="search-and-numeric-inputs"><a class="header" href="#search-and-numeric-inputs">Search and numeric inputs</a></h2>
 <p><nano-ui-workbench widget="search-numeric" title="Search &amp; Numeric Fields"></nano-ui-workbench></p>
-<hr>
-<h2 id="7-select-vs-combobox"><a class="header" href="#7-select-vs-combobox">7. Select vs ComboBox</a></h2>
-<p>Dropdown triggers: <code>select</code> uses <code>themeButton</code> for trigger styling, whereas <code>comboBox</code> uses <code>themeInput</code>.</p>
+<h2 id="select-and-combo-box"><a class="header" href="#select-and-combo-box">Select and combo box</a></h2>
+<p><code>select</code> draws its trigger with <code>themeButton</code>; <code>comboBox</code> uses <code>themeInput</code>.</p>
 <p><nano-ui-workbench widget="select-vs-combo" title="Dropdown Select &amp; ComboBox"></nano-ui-workbench></p>
-<hr>
-<h2 id="8-multi-line-text-areas"><a class="header" href="#8-multi-line-text-areas">8. Multi-line Text Areas</a></h2>
-<p>Scrollable multi-line text editing with document-level line sharing.</p>
+<h2 id="text-areas"><a class="header" href="#text-areas">Text areas</a></h2>
 <p><nano-ui-workbench widget="textarea" title="Multi-line Text Area"></nano-ui-workbench></p>
-<hr>
-<h2 id="9-sliders"><a class="header" href="#9-sliders">9. Sliders</a></h2>
-<p>Continuous and discrete sliders with track and thumb geometry.</p>
+<h2 id="sliders"><a class="header" href="#sliders">Sliders</a></h2>
 <p><nano-ui-workbench widget="slider" title="Sliders"></nano-ui-workbench></p>
-<hr>
-<h2 id="10-custom-controls-switches-knobs-spinners"><a class="header" href="#10-custom-controls-switches-knobs-spinners">10. Custom Controls (Switches, Knobs, Spinners)</a></h2>
-<p>Custom vector canvas controls from <code>NanoUI.Widgets.Custom</code>.</p>
+<h2 id="custom-controls"><a class="header" href="#custom-controls">Custom controls</a></h2>
+<p>Switches, knobs, and spinners from <code>NanoUI.Widgets.Custom</code>.</p>
 <p><nano-ui-workbench widget="custom-controls" title="Custom Vector Controls"></nano-ui-workbench></p>
-<hr>
-<h2 id="11-panels-cards--callouts"><a class="header" href="#11-panels-cards--callouts">11. Panels, Cards &amp; Callouts</a></h2>
-<p>Structural containers: <code>panelStyle</code> routes background, border, and semantic tone styling.</p>
+<h2 id="panels-cards-and-callouts"><a class="header" href="#panels-cards-and-callouts">Panels, cards, and callouts</a></h2>
 <p><nano-ui-workbench widget="panel-card-callout" title="Panels, Cards &amp; Callouts"></nano-ui-workbench></p>
-<hr>
-<h2 id="12-bounded-scroll-areas"><a class="header" href="#12-bounded-scroll-areas">12. Bounded Scroll Areas</a></h2>
-<p>Scrollable wells and custom styled scrollbars.</p>
+<h2 id="scroll-areas"><a class="header" href="#scroll-areas">Scroll areas</a></h2>
 <p><nano-ui-workbench widget="scroll-bounded" title="Scroll Areas"></nano-ui-workbench></p>
-<hr>
-<h2 id="13-tabs"><a class="header" href="#13-tabs">13. Tabs</a></h2>
-<p>Tab headers in Underline, Segmented, and Pill styles.</p>
+<h2 id="tabs"><a class="header" href="#tabs">Tabs</a></h2>
 <p><nano-ui-workbench widget="tabs-styles" title="Tab Bars"></nano-ui-workbench></p>
-<hr>
-<h2 id="14-tables--trees"><a class="header" href="#14-tables--trees">14. Tables &amp; Trees</a></h2>
-<p>Colonnade data tables with sort arrows and hierarchical tree views.</p>
+<h2 id="tables-and-trees"><a class="header" href="#tables-and-trees">Tables and trees</a></h2>
 <p><nano-ui-workbench widget="table-tree" title="Tables &amp; Tree Views"></nano-ui-workbench></p>
-<hr>
-<h2 id="15-overlays-floating-windows--menus"><a class="header" href="#15-overlays-floating-windows--menus">15. Overlays (Floating Windows &amp; Menus)</a></h2>
-<p>Floating modal windows, popup menus, and tooltips.</p>
+<h2 id="overlays"><a class="header" href="#overlays">Overlays</a></h2>
+<p>Floating windows, popup menus, and tooltips.</p>
 <p><nano-ui-workbench widget="overlays" title="Overlays &amp; Floating Windows"></nano-ui-workbench></p>
 
                     </main>

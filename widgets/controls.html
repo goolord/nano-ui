@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,6 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="buttons-menus--inputs"><a class="header" href="#buttons-menus--inputs">Buttons, Menus &amp; Inputs</a></h1>
-<p>The controls most applications need: buttons, menus, and the widgets that edit a <code>Var</code>.</p>
 <h2 id="buttons"><a class="header" href="#buttons">Buttons</a></h2>
 <pre><code class="language-haskell">button   :: Text -&gt; NanoUI Bool
 button'  :: Text -&gt; NanoUI Response
@@ -188,38 +187,40 @@ buttonContent :: NanoUI () -&gt; NanoUI Bool
 iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
 </code></pre>
 <p><code>button</code> returns <code>True</code> only on the frame it is activated, by left click or by Enter/Space while focused:</p>
-<pre><code class="language-haskell">whenM (button "Save Document") (liftIO saveFile)
+<pre><code class="language-haskell">saveButton = whenM (button "Save Document") (liftIO saveFile)
 </code></pre>
-<p>The <code>whenM</code> guard is essential: the view runs every frame, so an unguarded side effect would run forever.</p>
 <p>Use the primed form when you need the response: hover state, a rectangle for an anchored popup, or a tooltip.</p>
-<pre><code class="language-haskell">resp &lt;- button' "Refresh"
-tooltip resp "Poll the remote server for updates"
-when (respClicked resp) refresh
+<pre><code class="language-haskell">refreshButton = do
+  resp &lt;- button' "Refresh"
+  tooltip resp "Poll the remote server for updates"
+  when (respClicked resp) refresh
 </code></pre>
 <p><code>buttonContent</code> puts any view inside a button. The content is for display; a click anywhere on the button activates it:</p>
-<pre><code class="language-haskell">whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
-          svgIcon 16 saveIcon
-          label "Save") $
-  saveDocument
+<pre><code class="language-haskell">iconSaveButton =
+  whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
+            svgIcon 16 saveIcon
+            label "Save") $
+    saveDocument
 </code></pre>
 <p><code>iconButton</code> is the leading-icon case; an empty label gives an icon-only square button.</p>
 <h2 id="menus"><a class="header" href="#menus">Menus</a></h2>
 <p><code>menuItem</code> is a row that returns <code>True</code> when clicked. <code>menuItemShortcut</code> also displays a chord and binds it while the menu is open. <code>menuSeparator</code> and <code>menuItemDisabled</code> complete the row set.</p>
 <p>A menu bar is a <code>menuButton'</code> plus a <code>popup'</code> anchored to its rectangle:</p>
-<pre><code class="language-haskell">fileOpen &lt;- useVar False
-isOpen &lt;- readVar fileOpen
-btn &lt;- menuButton' "File" isOpen
-when (respClicked btn) (writeVar fileOpen (not isOpen))
+<pre><code class="language-haskell">fileMenu = do
+  fileOpen &lt;- useVar False
+  isOpen &lt;- readVar fileOpen
+  btn &lt;- menuButton' "File" isOpen
+  when (respClicked btn) (writeVar fileOpen (not isOpen))
 
-let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
-            {cfgPlacement = PlacementBelow, cfgOffset = 0}
-(popupResp, _) &lt;- popup' (constVar isOpen) cfg $
-  columnWith (tight . gap 0) $ do
-    whenM (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) newDocument
-    whenM (menuItem "Open...") openDocument
-    menuSeparator
-    whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
-when (respClicked popupResp) (writeVar fileOpen False)
+  let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
+              {cfgPlacement = PlacementBelow, cfgOffset = 0}
+  (popupResp, _) &lt;- popup' (constVar isOpen) cfg $
+    columnWith (tight . gap 0) $ do
+      whenM (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) newDocument
+      whenM (menuItem "Open...") openDocument
+      menuSeparator
+      whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
+  when (respClicked popupResp) (writeVar fileOpen False)
 </code></pre>
 <p><code>constVar</code> supplies a read-only open flag: the truth is the menu’s own state, and a click on the popup is written back to the real <code>Var</code>.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
@@ -227,18 +228,21 @@ when (respClicked popupResp) (writeVar fileOpen False)
 <p>Call overlays unconditionally. <code>popup'</code> draws nothing while closed, but wrapping it in <code>when isOpen</code> changes later widget ids each time the menu opens.</p>
 </blockquote>
 <p>Bind a command chord <strong>outside</strong> the menu as well as on its row, so it works with the menu closed:</p>
-<pre><code class="language-haskell">whenM (menuItemShortcut "Save" saveChord) saveDocument
-whenM (shortcut saveChord) saveDocument
+<pre><code class="language-haskell">saveBindings :: NanoUI ()
+saveBindings = do
+  whenM (menuItemShortcut "Save" saveChord) saveDocument
+  whenM (shortcut saveChord) saveDocument
 </code></pre>
 <p>Only the first binding of a chord in a frame fires, so the open menu’s row wins. A complete menu bar is built in <a href="../tutorials/notepad.html">Build a Notepad</a>.</p>
 <p><code>contextMenu</code> attaches a right-click menu to any widget with a <code>Response</code>:</p>
-<pre><code class="language-haskell">(_, rowResp) &lt;- mouseArea (fillW . gap 6) (label "Right-click for actions")
-_ &lt;- contextMenu rowResp $ do
-  whenM (menuItem "Inspect") inspectRow
-  whenM (menuItem "Copy") copyRow
+<pre><code class="language-haskell">rowMenu = do
+  (_, rowResp) &lt;- mouseArea (fillW . gap 6) (label "Right-click for actions")
+  void $ contextMenu rowResp $ do
+    whenM (menuItem "Inspect") inspectRow
+    whenM (menuItem "Copy") copyRow
 </code></pre>
 <h2 id="input-widgets"><a class="header" href="#input-widgets">Input widgets</a></h2>
-<p>Input widgets take the mutable <code>Var</code> they display and edit. They manage caret, selection, focus, and keyboard routing themselves.</p>
+<p>Input widgets take the <code>Var</code> they display and edit it, and manage caret, selection, focus, and keys themselves. To reset a field, write the <code>Var</code>; to react to an edit, use the primed form’s <code>Response</code>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -261,57 +265,57 @@ _ &lt;- contextMenu rowResp $ do
 </table>
 </div>
 <p>Every widget has the usual variants: primed (<code>...'</code>) returns a <code>Response</code>, <code>...With</code> takes a layout modifier, and <code>...Configured</code> takes a config record. For example:</p>
-<pre><code class="language-haskell">numericInputConfigured defaultNumericInputConfig
-  {nicMin = 0, nicMax = 255, nicHex = True} byte
+<pre><code class="language-haskell">byteField = do
+  byte &lt;- useVar (0 :: Double)
+  numericInputConfigured defaultNumericInputConfig
+    {nicMin = 0, nicMax = 255, nicHex = True} byte
 </code></pre>
 <h3 id="text-and-search-fields"><a class="header" href="#text-and-search-fields">Text and search fields</a></h3>
-<pre><code class="language-haskell">query &lt;- useVar ""
-resp &lt;- textInput' query
-when (respSubmitted resp) (search =&lt;&lt; readVar query)
-when (respChanged resp) (preview =&lt;&lt; readVar query)
+<pre><code class="language-haskell">queryField = do
+  query &lt;- useVar ""
+  resp &lt;- textInput' query
+  when (respSubmitted resp) (search =&lt;&lt; readVar query)
+  when (respChanged resp) (preview =&lt;&lt; readVar query)
 </code></pre>
 <p><code>respChanged</code> fires on every edit; <code>respSubmitted</code> fires on Enter. For expensive work use <code>searchInput'</code>, whose <code>respChanged</code> is debounced (300 ms by default) and fires immediately when the field is cleared:</p>
-<pre><code class="language-haskell">resp &lt;- searchInput' "Find a package" query
-when (respChanged resp) (refreshResults =&lt;&lt; readVar query)
+<pre><code class="language-haskell">packageSearch = do
+  query &lt;- useVar ""
+  resp &lt;- searchInput' "Find a package" query
+  when (respChanged resp) (refreshResults =&lt;&lt; readVar query)
 </code></pre>
 <h3 id="choices"><a class="header" href="#choices">Choices</a></h3>
-<pre><code class="language-haskell">enabled &lt;- useVar True
-checkbox "Enable notifications" enabled
-
-bold &lt;- useVar False
-toggleButton Accent "B" bold
-
-data Pace = Walk | Jog | Sprint
+<pre><code class="language-haskell">data Pace = Walk | Jog | Sprint
   deriving (Eq, Show, Enum, Bounded)
 
-pace &lt;- useEnumVar Jog
-enumRadio pace
-enumSelect pace
+choices = do
+  enabled &lt;- useVar True
+  checkbox "Enable notifications" enabled
+
+  isBold &lt;- useVar False
+  toggleButton Accent "B" isBold
+
+  pace &lt;- useEnumVar Jog
+  enumRadio pace
+  enumSelect pace
 </code></pre>
 <p><code>select</code> is index-based for data-driven options:</p>
-<pre><code class="language-haskell">choice &lt;- useVar 0
-select ["Small", "Medium", "Large"] choice
+<pre><code class="language-haskell">sizeSelect = do
+  choice &lt;- useVar 0
+  select ["Small", "Medium", "Large"] choice
 </code></pre>
 <p><code>comboBox</code> takes free text plus suggestions; its <code>respChanged</code> fires on commit, not on every model write.</p>
 <h3 id="sliders-numbers-color"><a class="header" href="#sliders-numbers-color">Sliders, numbers, color</a></h3>
-<pre><code class="language-haskell">volume &lt;- useVar (40 :: Float)
-slider 0 100 volume
+<pre><code class="language-haskell">values :: Var Color -&gt; NanoUI ()
+values accent = do
+  volume &lt;- useVar (40 :: Float)
+  slider 0 100 volume
 
-count &lt;- useVar (0 :: Double)
-numericInput count
+  count &lt;- useVar (0 :: Double)
+  numericInput count
 
-accent &lt;- newVar (colorHex "#38bdf8")
-colorPicker accent
+  colorPicker accent -- accent &lt;- newVar (colorHex "#38bdf8") in setup
 </code></pre>
 <p><code>numericInput</code> accepts digits and a leading minus when the range allows it; arrow keys step, and <code>Shift</code> steps ten times as far. <code>nicDecimals</code> controls display and accepted precision. <code>colorPickerRGBA</code> adds an alpha bar.</p>
-<h2 id="reading-and-resetting"><a class="header" href="#reading-and-resetting">Reading and resetting</a></h2>
-<p>All input widgets mutate the <code>Var</code> directly and return <code>()</code>. To reset a field, write the <code>Var</code>; to react, use the primed response. Read below the widget that edits a value when something else displays it, and do not read a value just to pass it back into the same widget.</p>
-<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
-<ul>
-<li>Multi-line editing and undo: <a href="text-editing.html">Text Editing</a>.</li>
-<li>Widget inventory and naming: <a href="index.html">Widget Gallery</a>.</li>
-<li>Theming these controls: <a href="../styling/index.html">Styling &amp; Theming</a>.</li>
-</ul>
 
                     </main>
 

@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="overlays--windows"><a class="header" href="#overlays--windows">Overlays &amp; Windows</a></h1>
-<p>Overlays are modal dialogs, draggable floating windows, anchored popups, and hover tooltips. They are ordinary <code>NanoUI</code> actions called every frame, with a <code>Var Bool</code> for open state.</p>
+<p>Modals, floating windows, and popups are ordinary <code>NanoUI</code> actions that take a <code>Var Bool</code> for their open state.</p>
 <h2 id="call-overlays-unconditionally"><a class="header" href="#call-overlays-unconditionally">Call overlays unconditionally</a></h2>
 <pre><code class="language-haskell">modal  :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
 window :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
@@ -189,48 +189,57 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
 <p>Always call an overlay on every frame. Wrapping it in <code>when isShown (modal ...)</code> shifts widget ids for all subsequent siblings when it opens or closes, which moves focus, carets, and per-row state. Overlays draw nothing while their <code>Var Bool</code> is <code>False</code>.</p>
 </blockquote>
-<pre><code class="language-haskell">showConfirm &lt;- useVar False
+<pre><code class="language-haskell">confirmDelete = do
+  showConfirm &lt;- useVar False
 
-whenM (button "Delete File...") (writeVar showConfirm True)
+  whenM (button "Delete File...") (writeVar showConfirm True)
 
-modal showConfirm "Confirm Deletion" $ do
-  label "Are you sure you want to permanently delete this file?"
-  row $ do
-    whenM (button "Cancel") (writeVar showConfirm False)
-    whenM (buttonWith destructive "Delete") $ do
-      deleteFile
-      writeVar showConfirm False
+  modal showConfirm "Confirm Deletion" $ do
+    label "Are you sure you want to permanently delete this file?"
+    row $ do
+      whenM (button "Cancel") (writeVar showConfirm False)
+      whenM (styled destructive (button "Delete")) $ do
+        deleteFile
+        writeVar showConfirm False
 </code></pre>
 <p>Escape, a click outside, and the close button write <code>False</code> to the <code>Var</code>, so the dialog closes in the same frame. A modal blocks interaction with the content behind it and is drawn above it.</p>
 <h2 id="modals"><a class="header" href="#modals">Modals</a></h2>
 <p><code>modal</code> renders a titled panel with a close button, centered in the window and limited to the window’s bounds. The body is not scrolled automatically; wrap it in <code>scrollWith</code> for long content, and give the panel a size with <code>modalWith</code> when the body needs to fill it:</p>
-<pre><code class="language-haskell">modalWith (fixedWH 600 400) open "Settings" $
-  columnWith (fillW . fillH) settingsBody
+<pre><code class="language-haskell">settingsDialog = do
+  open &lt;- useVar False
+  modalWith (fixedWH 600 400) open "Settings" $
+    columnWith (fillW . fillH) settingsBody
 </code></pre>
-<p><code>modal'</code> returns <code>(Response, Maybe a)</code>, where the response reports a close request as a click. Use it when the open flag is derived from other state: pass <code>constVar</code> so the overlay cannot write the derived value, and write the real flag from the response:</p>
-<pre><code class="language-haskell">open &lt;- useVar False
-(resp, _) &lt;- modal' (constVar open) "Important" $ do
-  label "This dialog is shown while `open` is True."
-  whenM (button "OK") (writeVar open False)
-when (respClicked resp) (writeVar open False)
+<p><code>modal'</code> returns <code>(Response, Maybe a)</code> and reports a close request as a click. When the open flag is derived from other state, pass <code>constVar</code> and write the real flag from the response:</p>
+<pre><code class="language-haskell">notice = do
+  open &lt;- useVar False
+  isOpen &lt;- readVar open
+  (resp, _) &lt;- modal' (constVar isOpen) "Important" $ do
+    label "This dialog is shown while `open` is True."
+    whenM (button "OK") (writeVar open False)
+  when (respClicked resp) (writeVar open False)
 </code></pre>
 <p>For a modal without a title bar or close button, use <code>modalPanel</code> / <code>modalPanel'</code>; the panel surface and backdrop remain, and Escape or an outside click still writes <code>False</code>.</p>
 <h2 id="floating-windows"><a class="header" href="#floating-windows">Floating windows</a></h2>
 <p><code>window</code> is a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:</p>
-<pre><code class="language-haskell">inspectorOpen &lt;- useVar False
-window inspectorOpen "Inspector" $ do
-  inspectorBody
+<pre><code class="language-haskell">inspector = do
+  inspectorOpen &lt;- useVar False
+  window inspectorOpen "Inspector" $ do
+    inspectorBody
 </code></pre>
-<p><code>window'</code> returns the body result and a response. Use <code>window</code> for panels that should coexist with the main content; use <code>modal</code> when the user must answer before doing anything else.</p>
+<p><code>window'</code> returns the body result and a response. Use <code>window</code> for panels that coexist with the main content, <code>modal</code> when the user must answer first.</p>
 <h2 id="popups"><a class="header" href="#popups">Popups</a></h2>
 <p><code>popup</code> is a floating panel placed by a <code>PopupConfig</code>:</p>
-<pre><code class="language-haskell">filterOpen &lt;- useVar False
-filterR &lt;- button' "Filter"
-when (respClicked filterR) (modifyVar filterOpen not)
+<pre><code class="language-haskell">filterPopup = do
+  filterOpen &lt;- useVar False
+  showFruit &lt;- useVar True
+  showVeg &lt;- useVar True
+  filterR &lt;- button' "Filter"
+  when (respClicked filterR) (modifyVar filterOpen not)
 
-popup filterOpen (defaultPopupConfig (AnchorRect (respRect filterR))) $ do
-  checkbox "Fruit" showFruit
-  checkbox "Vegetables" showVeg
+  popup filterOpen (defaultPopupConfig (AnchorRect (respRect filterR))) $ do
+    checkbox "Fruit" showFruit
+    checkbox "Vegetables" showVeg
 </code></pre>
 <p>A press on the anchor is not “outside”, so the button that toggles the popup does not immediately reopen it.</p>
 <p>Popup placement:</p>
@@ -243,29 +252,23 @@ popup filterOpen (defaultPopupConfig (AnchorRect (respRect filterR))) $ do
 <p>An anchored popup positions against the previous frame’s <code>respRect</code>, so warm a frame before relying on it in tests. For long popup bodies, cap the height with <code>popupWith (maxH ...)</code> and scroll the body.</p>
 <h2 id="tooltips"><a class="header" href="#tooltips">Tooltips</a></h2>
 <p>Tooltips are stateless and attach to any widget with a <code>Response</code>:</p>
-<pre><code class="language-haskell">save &lt;- button' "Save"
-tooltip save "Write the file to disk"
+<pre><code class="language-haskell">tooltips = do
+  save &lt;- button' "Save"
+  tooltip save "Write the file to disk"
 
-more &lt;- button' "More"
-tooltipConfigured defaultTooltipConfig
-  {tooltipPlacement = PlacementAtCursor} more "Follows the pointer"
+  more &lt;- button' "More"
+  tooltipConfigured defaultTooltipConfig
+    {tooltipPlacement = PlacementAtCursor} more "Follows the pointer"
 </code></pre>
 <p>The default delay is half a second; <code>TooltipConfig</code> sets the delay and placement. <code>withTooltip</code> attaches a rich tooltip widget instead of text.</p>
-<h2 id="overlay-rules-of-thumb"><a class="header" href="#overlay-rules-of-thumb">Overlay rules of thumb</a></h2>
+<h2 id="rules"><a class="header" href="#rules">Rules</a></h2>
 <ul>
-<li><strong>One modal at a time.</strong> Opening a second modal is allowed, but nested modals close inner-first; side-by-side modals close in declaration order.</li>
-<li><strong>Keep the open flag in a <code>Var</code> at the level that owns the decision</strong>, not in a child that may not be drawn.</li>
-<li><strong>Read focus after the overlay call</strong>, not before it.</li>
-<li><strong>Do not nest a <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a dialog body</strong> without stripping its chrome; see <a href="../troubleshooting/recurring-bugs.html#2-double-borders--box-in-a-box">Double borders</a>.</li>
-<li><strong>Confirm destructive actions in a modal</strong>, not a popup: a popup can be dismissed by a click outside, which is the wrong default for a destructive action.</li>
+<li>Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.</li>
+<li>Keep the open flag at the level that owns the decision, not in a child that may not be drawn.</li>
+<li>Read focus after the overlay call.</li>
+<li>A <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a dialog body draws a box in a box; strip its chrome (see <a href="../troubleshooting/recurring-bugs.html#2-double-borders--box-in-a-box">Double borders</a>).</li>
 </ul>
-<p>The notepad tutorial wires a modal to the window’s close request and builds a menu bar from <code>popup'</code>: <a href="../tutorials/notepad.html">Build a Notepad</a>.</p>
-<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
-<ul>
-<li>Widget inventory: <a href="index.html">Widget Gallery</a>.</li>
-<li>Styling dialogs and popups: <a href="../styling/index.html">Styling &amp; Theming</a>.</li>
-<li>Window-level chrome and screenshots: <a href="../advanced/window-management.html">Desktop Windows</a>.</li>
-</ul>
+<p><a href="../tutorials/notepad.html">Build a Notepad</a> wires a modal to the window’s close request and builds a menu bar from <code>popup'</code>.</p>
 
                     </main>
 

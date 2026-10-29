@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,16 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="tutorial-1-build-a-todo-list"><a class="header" href="#tutorial-1-build-a-todo-list">Tutorial 1: Build a Todo List</a></h1>
-<p>This tutorial builds a todo list with the features that make a list worth using:</p>
-<ul>
-<li>add items with Enter or a button</li>
-<li>edit an item in place</li>
-<li>mark items done</li>
-<li>filter by all / active / done</li>
-<li>reorder items, keeping each row’s local state with it</li>
-<li>clear completed items</li>
-</ul>
-<p>The complete program is <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/TodoList.hs"><code>packages/nano-ui-demo/examples/TodoList.hs</code></a>. Run it with:</p>
+<p>A todo list that adds items with Enter, edits them in place, filters by all/active/done, reorders rows with their local state, and clears completed items. The complete program is <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/TodoList.hs"><code>packages/nano-ui-demo/examples/TodoList.hs</code></a>. Run it with:</p>
 <pre><code class="language-sh">cabal run nano-ui-example-todo-list
 </code></pre>
 <h2 id="1-the-data-model"><a class="header" href="#1-the-data-model">1. The data model</a></h2>
@@ -224,7 +215,7 @@ newApp =
       )
 
 </code></pre>
-<p><code>newVar</code> returns <code>IO (Var a)</code>. Allocating it in <code>main</code> and passing it into the view is what makes it survive between frames. Allocating a <code>Var</code> <em>inside</em> the view would create a fresh one on every pass.</p>
+<p>Allocated in <code>main</code> and passed into the view, it survives between frames. A <code>Var</code> allocated <em>inside</em> the view would be fresh on every pass.</p>
 <p>Both records derive <code>Generic</code>; with <code>OverloadedRecordDot</code>, <code>app.appTodos.todoItems</code> is a <code>Var [Todo]</code> projecting just that field. Editing the list does not repaint a widget that reads only <code>todoNext</code>.</p>
 <h2 id="2-the-application-shell"><a class="header" href="#2-the-application-shell">2. The application shell</a></h2>
 <pre><code class="language-haskell">main :: IO ()
@@ -239,7 +230,7 @@ main = do
     (todoApp app)
 
 </code></pre>
-<p><code>runSdlApp</code> takes the options and the view. The view is not called once: the backend calls it every frame, and it must describe the whole window each time.</p>
+<p><code>runSdlApp</code> calls the view every frame, and the view describes the whole window each time.</p>
 <pre><code class="language-haskell">todoApp :: App -&gt; NanoUI ()
 todoApp app = do
   let
@@ -253,10 +244,9 @@ todoApp app = do
     todoList items filt
 
 </code></pre>
-<p>The view’s local state (the draft text and the current filter) is allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are positional: they are identified by their call site, so they need no setup and no record field.</p>
-<p><code>columnWith (padAll 20 . gap 12 . fillW . fillH)</code> is a layout argument. Modifiers compose left to right, and the leftmost one wins when two set the same property.</p>
+<p>The draft text and the filter are view-local, allocated with <code>useVar</code> and <code>useEnumVar</code>. Both are identified by their call site, so they need no setup and no record field.</p>
 <h2 id="3-adding-an-item"><a class="header" href="#3-adding-an-item">3. Adding an item</a></h2>
-<p>The input row has three jobs: draw the field, draw the button, and decide whether this frame is an “add” frame.</p>
+<p>The input row draws the field and the button, and decides whether this frame adds an item.</p>
 <pre><code class="language-haskell">newItemRow :: Var Todos -&gt; Var Text -&gt; NanoUI ()
 newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
   inputR &lt;-
@@ -271,7 +261,6 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
     requestFocus (respId inputR)
 
 </code></pre>
-<p>Details:</p>
 <ul>
 <li><strong>The primed widget returns a <code>Response</code>.</strong> <code>textInputConfigured'</code> reports the widget’s identity, rectangle, hover and click state, and whether Enter was submitted (<code>respSubmitted</code>). <code>button</code> already returns the one <code>Bool</code> this row needs.</li>
 <li><strong><code>readVar draft</code> sits below the field that edits it.</strong> The field’s write lands first, then the read sees the new text in the same pass. Reading <em>above</em> an editing widget forces a second pass.</li>
@@ -402,7 +391,7 @@ swapIds a b xs = map pick xs
     | otherwise = t
 
 </code></pre>
-<p>The row’s local state follows the id, not the index, so the edit flag and draft travel with the item. This is the payoff for the keys in the previous section.</p>
+<p>The row’s local state follows the id, so the edit flag and draft travel with the item.</p>
 <h2 id="7-keyboard-behaviour"><a class="header" href="#7-keyboard-behaviour">7. Keyboard behaviour</a></h2>
 <p>Enter in the new-item field adds an item because <code>respSubmitted</code> reports it. Escape cancels an edit:</p>
 <pre><code class="language-haskell">  when isEditing (whenM takeEscape (writeVar editing False))
@@ -410,10 +399,9 @@ swapIds a b xs = map pick xs
 <p><code>takeEscape</code> claims the press for this handler, so later Escape handlers in the view (an open popup or a second <code>takeEscape</code>) do not also act on it. The window’s quit policy is separate: the example sets <code>sdlAppShouldQuit = pressedOnceIn KeyEscape</code>, so Escape still quits the application unless the application chooses another policy (or handles Escape itself in the view and leaves the predicate off).</p>
 <p>For the full shortcut model (<code>shortcut</code>, <code>shortcutOnce</code>, menu bindings, and how focused widgets claim keys), see <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>
 <h2 id="8-try-it"><a class="header" href="#8-try-it">8. Try it</a></h2>
-<p>Start from the runnable source and change one thing at a time:</p>
 <ul>
 <li>Replace the Up/Down buttons with <code>useReorder</code> for drag-and-drop reordering (see <a href="../widgets/drag-and-drop.html">Drag &amp; Drop</a>).</li>
-<li>Add a “hide completed” filter persistence setting with <code>newVar</code> and a <code>Settings</code> record.</li>
+<li>Remember the filter across runs in a <code>Settings</code> record allocated with <code>newVar</code>.</li>
 <li>Show an empty state when <code>shown</code> is empty, for example <code>muted "Nothing here yet."</code></li>
 <li>Validate the draft length with the techniques in <a href="../packages/index.html">Ecosystem Packages</a>.</li>
 </ul>

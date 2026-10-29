@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="tutorials"><a class="header" href="#tutorials">Tutorials</a></h1>
-<p>Three applications, built one feature at a time. Each chapter walks through a runnable program; the full source is in <code>packages/nano-ui-demo/examples/</code>.</p>
+<p>Three applications, built one feature at a time. The full source of each is in <code>packages/nano-ui-demo/examples/</code>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -192,24 +192,12 @@
 </tbody>
 </table>
 </div>
-<h2 id="before-you-start"><a class="header" href="#before-you-start">Before you start</a></h2>
-<p>Follow the <a href="../getting-started/quickstart.html">Quick Start</a> once. You need a project that builds with GHC 9.10+ and the SDL3 backend, and executables must be compiled with <code>-threaded</code>.</p>
-<p>If you are reading this book inside the nano-ui repository, every example can be run directly:</p>
+<p>Do the <a href="../getting-started/quickstart.html">Quick Start</a> first. From a nano-ui checkout, run the examples directly:</p>
 <pre><code class="language-sh">cabal run nano-ui-example-todo-list
 cabal run nano-ui-sdl-notepad
 cabal run nano-ui-example-tasks
 cabal run nano-ui-example-live-chart
 </code></pre>
-<h2 id="how-to-read-the-code"><a class="header" href="#how-to-read-the-code">How to read the code</a></h2>
-<p>Most of the code in these chapters is ordinary Haskell: data types, pure helpers, and functions that take a <code>Var</code> or a model and return <code>NanoUI ()</code>. The only unusual idea is the frame:</p>
-<ul>
-<li>The view action runs every frame. A <code>button</code> call draws the button <em>and</em> reports what happened to it in this frame; there is no event handler to register.</li>
-<li>Anything that must survive between frames lives in a <code>Var</code> (<code>useVar</code> for ordinary values, <code>newVar</code> for application-owned state), an Elm-style model, or a reference you own.</li>
-<li>A side effect belongs inside an event check, never after a bare widget call. <code>whenM (button "Save") save</code> is correct; <code>button "Save" &gt;&gt; save</code> would save every frame.</li>
-</ul>
-<p><a href="../state/index.html">State &amp; <code>Var</code></a> explains the frame model in more depth. For now, the three rules above are enough to follow along.</p>
-<h2 id="after-the-tutorials"><a class="header" href="#after-the-tutorials">After the tutorials</a></h2>
-<p>Read the <a href="../widgets/index.html">Widget Gallery</a> to find the widget that fits a problem, <a href="../layout/index.html">Layout &amp; Scrolling</a> to arrange it, and <a href="../styling/index.html">Styling &amp; Theming</a> to make it look intentional. When the application grows, <a href="../architecture/index.html">Architecture &amp; Internals</a> shows how the tutorial state shapes scale up to multi-pane applications.</p>
 
                     </main>
 

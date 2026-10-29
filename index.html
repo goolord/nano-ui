@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -180,7 +180,7 @@
                     <main>
                         <h1 id="nano-ui"><a class="header" href="#nano-ui">nano-ui</a></h1>
 <p>An immediate-mode GUI toolkit for Haskell.</p>
-<p>A view is a <code>NanoUI ()</code> action that the backend re-runs every frame. Widgets return values directly (<code>button</code> returns <code>Bool</code>), input widgets take a mutable <code>Var</code> holding their state, and layout is a composable modifier argument. You write UIs with ordinary Haskell functions, <code>do</code> notation, and standard control flow (<code>if</code>, <code>case</code>, <code>for_</code>).</p>
+<p>A view is a <code>NanoUI ()</code> action that the backend re-runs every frame. Widgets return values directly (<code>button</code> returns <code>Bool</code>), input widgets take a mutable <code>Var</code> holding their state, and layout is a composable modifier argument. You write UIs with ordinary functions, <code>do</code> notation, and <code>if</code>/<code>case</code>/<code>for_</code>.</p>
 <pre><code class="language-haskell">counter :: NanoUI ()
 counter = row $ do
   n &lt;- useVar (0 :: Int)
@@ -188,19 +188,7 @@ counter = row $ do
   label . T.pack . show =&lt;&lt; readVar n
   whenM (button "+") (modifyVar n (+ 1))
 </code></pre>
-<h2 id="how-this-book-is-organized"><a class="header" href="#how-this-book-is-organized">How this book is organized</a></h2>
-<p>Chapters follow this order:</p>
-<ol>
-<li><strong><a href="getting-started/quickstart.html">Quick Start</a></strong> installs the toolchain and gets a window on screen.</li>
-<li><strong><a href="tutorials/index.html">Tutorials</a></strong> build three small applications end to end: a todo list, a notepad, and a live data view.</li>
-<li><strong><a href="state/index.html">State &amp; <code>Var</code></a></strong> explains where state lives, what writes cost, and the <a href="state/elm.html">Elm-style alternative</a>.</li>
-<li><strong><a href="layout/index.html">Layout &amp; Scrolling</a></strong> covers containers, modifiers, and large lists.</li>
-<li>The <strong><a href="widgets/index.html">Widget Gallery</a></strong> is the entry point for controls, data views, overlays, and custom drawing. <strong><a href="styling/index.html">Styling &amp; Theming</a></strong> is next to it, with a <a href="styling/lab.html">live lab</a> and <a href="styling/gotchas.html">gotchas</a>.</li>
-<li><strong><a href="input/index.html">Keyboard, Focus &amp; IME</a></strong> covers chords, focus, and text input.</li>
-<li><strong><a href="advanced/async.html">Async Work &amp; Animation</a></strong>, <strong><a href="advanced/window-management.html">Desktop Windows</a></strong>, and <strong><a href="packages/index.html">Ecosystem Packages</a></strong> go further.</li>
-<li><strong><a href="troubleshooting/recurring-bugs.html">Troubleshooting</a></strong>, <strong><a href="getting-started/development.html">Development Setup</a></strong>, and <strong><a href="architecture/index.html">Architecture &amp; Internals</a></strong> are the reference material.</li>
-</ol>
-<p>If you already know immediate-mode UI, skim the Quick Start and start with <a href="state/index.html">State &amp; <code>Var</code></a>.</p>
+<p>Code samples assume <code>import NanoUI</code> and <code>OverloadedStrings</code>. The runnable source for each tutorial is in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>. If you already know immediate-mode UI, skim the <a href="getting-started/quickstart.html">Quick Start</a> and go to <a href="state/index.html">State &amp; <code>Var</code></a>.</p>
 <h2 id="packages-in-the-monorepo"><a class="header" href="#packages-in-the-monorepo">Packages in the monorepo</a></h2>
 <div class="table-wrapper">
 <table>
@@ -221,9 +209,8 @@ counter = row $ do
 </table>
 </div>
 <h2 id="styling-workbenches"><a class="header" href="#styling-workbenches">Styling workbenches</a></h2>
-<p>Interactive SVG workbenches are embedded in the styling chapters. Toggle modifiers, themes, and interaction states live:</p>
+<p>The styling chapters embed live specimens. Toggle modifiers, themes, and interaction states:</p>
 <p><nano-ui-hero></nano-ui-hero></p>
-<p>Code samples assume <code>import NanoUI</code> and <code>OverloadedStrings</code>. The runnable source for each tutorial is in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>.</p>
 
                     </main>
 

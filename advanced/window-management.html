@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -178,11 +178,11 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="window-chrome--screenshots"><a class="header" href="#window-chrome--screenshots">Window Chrome &amp; Screenshots</a></h1>
-<p>nano-ui exposes window management at two levels: declarative settings and view actions from the core library, and SDL-specific chrome and screenshot helpers from <code>nano-ui-sdl</code>.</p>
+                        <h1 id="desktop-windows"><a class="header" href="#desktop-windows">Desktop Windows</a></h1>
+<p>The core library has window settings and view actions; <code>nano-ui-sdl</code> adds custom chrome and native screenshots.</p>
 <h2 id="window-settings"><a class="header" href="#window-settings">Window settings</a></h2>
-<p>Configure startup properties in <code>WindowSettings</code>:</p>
-<pre><code class="language-haskell">opts =
+<pre><code class="language-haskell">opts :: SdlOptions
+opts =
   defaultSdlOptions
     { sdlWindowSettings =
         defaultWindowSettings
@@ -200,38 +200,45 @@
 <p>Inside the view:</p>
 <ul>
 <li>
-<p><strong>Declarative setters</strong> (<code>setWindowTitleUi</code>, <code>setWindowModeUi</code>, <code>setWindowMinSizeUi</code>, <code>setWindowMaxSizeUi</code>, <code>setWindowOpacityUi</code>, <code>setWindowIconUi</code>) are no-ops when the value has not changed, so calling them every frame is safe and cheap:</p>
-<pre><code class="language-haskell">setWindowTitleUi (docName &lt;&gt; " - My App")
-</code></pre>
-</li>
-<li>
-<p><strong>Imperative actions</strong> (<code>moveWindowUi</code>, <code>centerWindowUi</code>, <code>resizeWindowUi</code>, <code>minimizeWindowUi</code>, <code>maximizeWindowUi</code>, <code>restoreWindowUi</code>, <code>toggleMaximizedUi</code>) run on every call. Always guard them behind an event:</p>
-<pre><code class="language-haskell">whenM (button "Maximize") toggleMaximizedUi
-</code></pre>
+<p><strong>Declarative setters</strong> (<code>setWindowTitleUi</code>, <code>setWindowModeUi</code>, <code>setWindowMinSizeUi</code>, <code>setWindowMaxSizeUi</code>, <code>setWindowOpacityUi</code>, <code>setWindowIconUi</code>) are no-ops when the value has not changed. Call them every frame:</p>
+<pre><code class="language-haskell"></code></pre>
 </li>
 </ul>
+<p>title :: Text -&gt; NanoUI ()
+title docName = setWindowTitleUi (docName &lt;&gt; “ - My App“)</p>
+<pre><code>
+- **Imperative actions** (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`) run on every call. Guard them with an event:
+
+  ```haskell
+maximizeButton :: NanoUI ()
+maximizeButton = whenM (button "Maximize") toggleMaximizedUi
+</code></pre>
 <p><code>quitUi</code> ends the session; there is no separate “close window” command.</p>
 <h2 id="close-requests"><a class="header" href="#close-requests">Close requests</a></h2>
 <p>By default the window closes as soon as the platform asks it to. To confirm unsaved work, set <code>wsExitOnCloseRequest = False</code> and handle the request in the view:</p>
-<pre><code class="language-haskell">runSdlApp
-  defaultSdlOptions
-    { sdlWindowSettings = defaultWindowSettings {wsExitOnCloseRequest = False} }
-  appView
+<pre><code class="language-haskell">main :: IO ()
+main =
+  runSdlApp
+    defaultSdlOptions
+      { sdlWindowSettings = defaultWindowSettings {wsExitOnCloseRequest = False} }
+    appView
 
+appView :: NanoUI ()
 appView = do
-  ...
+  mainContent
   whenM (winCloseRequested &lt;$&gt; askWindow) askBeforeQuitting
 </code></pre>
 <p><code>askWindow</code> reports the window’s current state, including size, scale, maximized/fullscreen flags, and the close request. <a href="../tutorials/notepad.html">Build a Notepad</a> wires this to a confirmation modal.</p>
 <h2 id="custom-title-bars"><a class="header" href="#custom-title-bars">Custom title bars</a></h2>
-<p>For a frameless window (VS Code style, or <code>ned</code>), set the decorations and draw the bar yourself. The <code>nano-ui-sdl</code> backend supplies <code>windowCaption</code>, which draws the minimize/maximize/close buttons, registers the drag region, and reports a close click:</p>
-<pre><code class="language-haskell">opts = defaultSdlOptions
+<p>For a frameless window, set the decorations and draw the bar yourself. <code>windowCaption</code> from <code>nano-ui-sdl</code> draws the minimize, maximize, and close buttons, registers the drag region, and reports a close click:</p>
+<pre><code class="language-haskell">framelessOpts :: SdlOptions
+framelessOpts = defaultSdlOptions
   { sdlWindowDecorations = DecorationsNone
   , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1000 720}
   }
 
-appView :: NanoUI ()
-appView = columnWith (fillW . fillH) $ do
+framelessView :: NanoUI ()
+framelessView = columnWith (fillW . fillH) $ do
   titleBar
   mainContent
 
@@ -239,40 +246,45 @@ titleBar :: NanoUI ()
 titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
   menuResp &lt;- button' "File"          -- interactive: exclude from dragging
   label "My Application"
-  spacer
+  spacer (Grow 1) Fit
   closeClicked &lt;- windowCaption [respRect menuResp]
   when closeClicked quitUi
 </code></pre>
 <p><code>windowCaption</code> takes the rectangles of interactive widgets in the bar (menu buttons, tabs, search fields); the spans between them become draggable. The returned <code>Bool</code> is true on the frame the close button is clicked. <code>windowCaptionWith</code> customizes the buttons and resize border.</p>
 <p><code>DecorationsFrame</code> keeps the platform’s resize frame while removing the title bar; <code>DecorationsNone</code> removes both. On a resizable frameless window, edge resizing takes precedence over the drag region along the outer edges.</p>
 <p>An optional rounded border around the whole view comes from <code>windowFrame</code>:</p>
-<pre><code class="language-haskell">mainView = windowFrame (defaultWindowFrame (colorRGBA 70 70 80 255)) $ do
-  ...
+<pre><code class="language-haskell">framedView :: NanoUI ()
+framedView = windowFrame (defaultWindowFrame (colorRGBA 70 70 80 255)) $ do
+  mainContent
 </code></pre>
 <p>It draws a border and insets the view; the border does not consume layout space.</p>
 <h2 id="screenshots"><a class="header" href="#screenshots">Screenshots</a></h2>
 <p><code>requestScreenshot</code> asks the backend for the next presented frame and delivers it to a callback:</p>
-<pre><code class="language-haskell">whenM (button "Screenshot") $
-  requestScreenshot $ \maybeScreenshot -&gt; ...
+<pre><code class="language-haskell">screenshotButton :: NanoUI ()
+screenshotButton =
+  whenM (button "Screenshot") $
+    requestScreenshot $ \maybeScreenshot -&gt; for_ maybeScreenshot saveShot
 </code></pre>
-<p>The callback runs in <code>IO</code> after the frame is presented. Keep it short (an <code>IORef</code> write or a <code>forkIO</code> for encoding); the next frame waits on it. Each request is answered exactly once, including with <code>Nothing</code> when the backend cannot capture.</p>
+<p>The callback runs in <code>IO</code> after the frame is presented, and the next frame waits on it, so keep it short: an <code>IORef</code> write, or a <code>forkIO</code> to encode. Each request is answered once, with <code>Nothing</code> when the backend cannot capture.</p>
 <p>For thread-safe capture use <code>askScreenshot</code>, which returns an <code>IO</code> action for a background thread, or <code>useScreenshot</code> for a per-key screenshot owned by a task:</p>
 <pre><code class="language-haskell">data App = App
   { appShots :: Task Int (Maybe Screenshot)
   , appCount :: Var Int
   }
 
+newApp :: IO App
 newApp = App &lt;$&gt; newTask &lt;*&gt; newVar 0
 
+view :: App -&gt; NanoUI ()
 view app = do
   whenM (button "Screenshot") (modifyVar (appCount app) (+ 1))
-  key &lt;- readVar (appCount app)
-  shot &lt;- if key == 0 then pure Nothing else useScreenshot (appShots app) key
-  for_ shot $ \(Screenshot pixels scale) -&gt; ...
+  shotKey &lt;- readVar (appCount app)
+  shot &lt;- if shotKey == 0 then pure Nothing else useScreenshot (appShots app) shotKey
+  for_ shot showShot
 </code></pre>
 <p>The <code>nano-ui-sdl</code> backend also has <code>saveScreenshot env path</code> (a BMP of the current frame) and <code>captureScreenshot env</code> (pixels), both on the display thread. For PNG encoding, use <code>JuicyPixels</code> or a similar library in a background thread.</p>
 <h2 id="testing-window-behavior"><a class="header" href="#testing-window-behavior">Testing window behavior</a></h2>
-<p>Window operations are no-ops without a session, which makes headless tests possible: <code>setWindowTitleUi</code> and the other declarative setters can be called from <code>NanoUI.Testing</code> frames, and <code>askWindow</code> reports a default state. Native screenshot and chrome tests need a real SDL session, as in <code>nano-ui-demo</code>’s hidden-window self-tests.</p>
+<p>Window operations are no-ops without a session, so views that set titles or read <code>askWindow</code> run under <code>NanoUI.Testing</code>. Native screenshots and chrome need a real SDL session, as in <code>nano-ui-demo</code>’s hidden-window tests.</p>
 
                     </main>
 

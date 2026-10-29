@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
+            window.path_to_searchindex_js = "../searchindex-41691f98.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="tutorial-2-build-a-notepad"><a class="header" href="#tutorial-2-build-a-notepad">Tutorial 2: Build a Notepad</a></h1>
-<p>A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work. It covers menus, dialogs, and close confirmation.</p>
+<p>A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work.</p>
 <p>The complete program is <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Notepad.hs"><code>packages/nano-ui-demo/examples/Notepad.hs</code></a>. Run it with:</p>
 <pre><code class="language-sh">cabal run nano-ui-sdl-notepad
 </code></pre>
@@ -228,8 +228,8 @@ main = do
 </code></pre>
 <p><code>exitApp</code> quits immediately when the document is clean, and opens a modal when it is not. The full wiring is in section 7.</p>
 <h2 id="3-a-menu-bar-from-primitives"><a class="header" href="#3-a-menu-bar-from-primitives">3. A menu bar from primitives</a></h2>
-<p>There is no opaque <code>menuBar</code> widget. A menu bar is a row of <code>menuButton'</code>s, each paired with a <code>popup'</code> anchored to the button’s rectangle. That is a feature: the menu’s contents are ordinary <code>NanoUI ()</code>.</p>
-<p>The helper below mirrors the one in the notepad source. <code>openMenu</code> holds the label of the open menu (empty when all are closed):</p>
+<p>There is no <code>menuBar</code> widget. A menu bar is a row of <code>menuButton'</code>s, each paired with a <code>popup'</code> anchored to the button’s rectangle, so a menu’s contents are ordinary <code>NanoUI ()</code>.</p>
+<p><code>openMenu</code> holds the label of the open menu (empty when all are closed):</p>
 <pre><code class="language-haskell">menuBar :: Var Text -&gt; [(Text, NanoUI ())] -&gt; NanoUI ()
 menuBar openMenu entries = do
   current &lt;- readVar openMenu
@@ -278,7 +278,6 @@ menuBar openMenu entries = do
     \(_, chord, action) -&gt; item (shortcut chord) action
 </code></pre>
 <p>Only the first binding of a chord in a frame fires, so the menu row and the view binding never both run it. The menu row is declared first, so while the menu is open its row wins.</p>
-<p>Two more details from the source:</p>
 <ul>
 <li><code>menuItemDisabled "Undo"</code> draws a dimmed row that cannot be clicked. The Edit menu chooses between a real item and a disabled one by checking <code>textCanUndo</code> / <code>textCanRedo</code>.</li>
 <li>An action that opens a file dialog writes the new <code>FileDialogId</code> into a <code>Var</code>; dialogs are non-blocking, so the view is not interrupted.</li>
@@ -309,9 +308,12 @@ menuBar openMenu entries = do
           writeVar statusMsg ("Saved " &lt;&gt; T.pack filePath)
         else writeVar statusMsg ("Could not save " &lt;&gt; T.pack filePath)
 </code></pre>
-<p>Starting a dialog returns an id:</p>
-<pre><code class="language-haskell">writeVar openDlg . Just =&lt;&lt; askOpenFileDialog defaultFileDialogOptions
-writeVar saveDlg . Just =&lt;&lt; askSaveFileDialog defaultFileDialogOptions
+<p>The Open command starts one and keeps its id:</p>
+<pre><code class="language-haskell">    openCmd =
+      ( "Open..."
+      , cmdOrCtrl &lt;&gt; key 'o'
+      , writeVar openDlg . Just =&lt;&lt; askOpenFileDialog defaultFileDialogOptions
+      )
 </code></pre>
 <p><code>writeDocument</code> is ordinary Haskell around <code>liftIO</code>, because file I/O is an event-driven side effect:</p>
 <pre><code class="language-haskell">writeDocument :: FilePath -&gt; TextDocument -&gt; NanoUI Bool
@@ -348,7 +350,9 @@ writeDocument filePath doc = do
     dirty &lt;- readVar docDirty
     let
       name = (if T.null path then "Untitled" else path) &lt;&gt; (if dirty then " *" else "")
-setWindowTitleUi (name &lt;&gt; " - nano-ui Notepad")
+
+-- ...after the layout, which returns the name as docName:
+  setWindowTitleUi (docName &lt;&gt; " - nano-ui Notepad")
 </code></pre>
 <p><code>setWindowTitleUi</code> is a no-op when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
 <p>The close request and the modal fit together like this:</p>
@@ -414,7 +418,7 @@ statusBar docName docVar statusMsg zoomVal = do
 <li>Add a recent-files list persisted between runs.</li>
 <li>Replace the About modal with a floating <code>window</code> that can be moved and resized.</li>
 <li>Add word wrap using the editor’s layout options.</li>
-<li>Build a custom title bar with <code>captionButtons</code> and <code>dragSpans</code> (see <a href="../advanced/window-management.html">Windows &amp; Screenshots</a>).</li>
+<li>Build a custom title bar with <code>captionButtons</code> and <code>dragSpans</code> (see <a href="../advanced/window-management.html">Desktop Windows</a>).</li>
 </ul>
 <p>Next: <a href="live-data.html">Tutorial 3: Live Data &amp; Background Work</a> moves slow work off the frame and streams results back.</p>
 
