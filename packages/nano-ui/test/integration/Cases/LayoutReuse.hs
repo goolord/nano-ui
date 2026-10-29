@@ -12,9 +12,7 @@ import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getNo
 
 tests :: [Spec]
 tests =
-  [ spec "position-reuse-cases" runPositionReuseCasesTest
-  , spec "position-reuse-random" runPositionReuseRandomTest
-  ]
+  [spec "position-reuse" runPositionReuseTest]
 
 -- | Every node's rect and each scroll container's content extents.
 layoutOf :: Context -> IO [(Rect, Maybe (Float, Float))]
@@ -39,9 +37,11 @@ sameAsFullSolves failed frames = do
     assertEq failed expected =<< layoutOf reusing
 
 -- | A ticking label beside rows that stay put, a label that gains and loses
--- a line so everything below it moves, and a window that resizes.
-runPositionReuseCasesTest :: Context -> IORef Int -> IO ()
-runPositionReuseCasesTest _ failed = do
+-- a line so everything below it moves, and a window that resizes. Then
+-- randomised trees of every container kind, with texts that change at
+-- different rates and a window that resizes now and then.
+runPositionReuseTest :: Context -> IORef Int -> IO ()
+runPositionReuseTest _ failed = do
   let inp = withInput 640 400
       rows = forM_ [1 .. 30 :: Int] $ \i -> row $ do
         label (T.pack ("row " <> show i))
@@ -56,11 +56,6 @@ runPositionReuseCasesTest _ failed = do
   sameAsFullSolves failed [(inp, ticking f) | f <- [0 .. 5 :: Int]]
   sameAsFullSolves failed [(inp, shifting f) | f <- [0 .. 5 :: Int]]
   sameAsFullSolves failed [(withInput w 400, ticking (0 :: Int)) | w <- [640, 640, 500, 500, 640]]
-
--- | Randomised trees of every container kind, with texts that change at
--- different rates and a window that resizes now and then.
-runPositionReuseRandomTest :: Context -> IORef Int -> IO ()
-runPositionReuseRandomTest _ failed =
   forM_ [1 .. 16 :: Word64] $ \seed -> do
     let t = gen (mix seed) 0
         size f = if (f `div` 13) `mod` 2 == 0 then withInput 900 700 else withInput 640 700
