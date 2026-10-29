@@ -1,97 +1,94 @@
 # Desktop Windows
 
-The core library has window settings and view actions; `nano-ui-sdl` adds custom chrome and native screenshots.
-
 ## Window settings
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:settings}}
 ```
 
-Sizes are logical units, not pixels; the backend applies DPI scaling. `wsPosition` defaults to the desktop's placement. `wsOpacity` (SDL) sets whole-window opacity.
+Sizes are in logical units. The backend scales them for the display. Leave `wsPosition` unset to let the OS place the window. `wsOpacity` (SDL only) sets the opacity of the whole window.
 
-## Declarative and imperative actions
+## Changing the window from a view
 
-Inside the view:
+Setters do nothing when the value is unchanged, so call them every frame: `setWindowTitleUi`, `setWindowModeUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowOpacityUi`, `setWindowIconUi`.
 
-- **Declarative setters** (`setWindowTitleUi`, `setWindowModeUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowOpacityUi`, `setWindowIconUi`) are no-ops when the value has not changed. Call them every frame:
-
-  ```haskell
+```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:title}}
 ```
 
-- **Imperative actions** (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`) run on every call. Guard them with an event:
+Commands run on every call, so only call them on an event: `moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`.
 
-  ```haskell
+```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:maximize}}
 ```
 
-`quitUi` ends the session; there is no separate "close window" command. In a window opened with `nativeWindow` (below), it closes that window instead.
+`quitUi` quits the app. Inside a `nativeWindow` body it closes only that window.
 
-## Close requests
+`askWindow` returns the window's size, scale, maximized and fullscreen flags, and whether a close was requested.
 
-By default the window closes as soon as the platform asks it to. To confirm unsaved work, set `wsExitOnCloseRequest = False` and handle the request in the view:
+## Confirming before close
+
+Set `wsExitOnCloseRequest = False`, then check `winCloseRequested`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:close_request}}
 ```
 
-`askWindow` reports the window's current state, including size, scale, maximized/fullscreen flags, and the close request. [Build a Notepad](../tutorials/notepad.md) wires this to a confirmation modal.
+[Build a Notepad](../tutorials/notepad.md) shows this with a confirmation modal.
 
 ## More windows
 
-`nativeWindow` opens another native window, with its own view, while a `Var Bool` holds `True`. Like `modal`, call it every frame, and the window's close button writes `False`:
+`nativeWindow open settings body` shows a second window while `open` is `True`. Call it every frame, like `modal`. Closing the window sets `open` to `False`.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:native_window}}
 ```
 
-The new window has its own focus, widget state, `useVar` slots and frames. It starts with the declaring view's theme; the settings take effect when it opens, so change its title or theme later from its own view. A window's view can open further windows the same way.
+- Each window has its own focus, widget state, and `useVar` slots.
+- `settings` are read once, when the window opens. Change the title later with `setWindowTitleUi` inside `body`.
+- `body` can use values from the surrounding view, and can open more windows.
+- Windows share state through `Var`s. A `Var` written in one window updates the others.
+- Each open window re-runs `body` on every `Var` write and every frame of the parent view. It only repaints if its output changed.
+- With `NanoUIE`, `body` emits to the same reducer. To keep the open flag in your model, pass `constVar model.inspectorOpen`, set `wsExitOnCloseRequest = False`, and emit a close message when `winCloseRequested` is set.
+- Works with SDL and RGFW. Does nothing in tests.
+- On Windows, other windows stop redrawing while one is being resized.
 
-The body runs in the new window's own frames, and after each frame of the declaring view, so it can use that view's values directly. Windows also share state through `Var`s: when a `Var` changes, every open window runs its view again on its next frame, so typing in one window shows in another.
-
-In an Elm-style view (`NanoUIE`), the body emits to the same reducer as the rest of the view. To keep a window's open state in the model, pass `constVar model.inspectorOpen`, set `wsExitOnCloseRequest = False` in its settings, and emit a close message from the body when `winCloseRequested <$> askWindow` is true.
-
-An app that never calls `nativeWindow` pays nothing for it. With several windows open, a `Var` write or a frame of the declaring view costs each window one run of its view (with no repaint if nothing it shows changed), and every window keeps its own glyph and image textures. The SDL and RGFW backends open these windows; in tests the call does nothing. On Windows, a window being resized does not redraw the others until the drag ends. `nano-ui-example-windows` shows three windows sharing state.
+`nano-ui-example-windows` has three windows sharing state.
 
 ## Custom title bars
 
-For a frameless window, set the decorations and draw the bar yourself. `windowCaption` from `nano-ui-sdl` draws the minimize, maximize, and close buttons, registers the drag region, and reports a close click:
+Remove the OS title bar with `sdlWindowDecorations`, then draw your own. `windowCaption` (from `nano-ui-sdl`) draws minimize, maximize, and close buttons and returns `True` on the frame close is clicked. Pass it the rects of clickable widgets in the bar; the rest of the bar drags the window.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:title_bar}}
 ```
 
-`windowCaption` takes the rectangles of interactive widgets in the bar (menu buttons, tabs, search fields); the spans between them become draggable. The returned `Bool` is true on the frame the close button is clicked. `windowCaptionWith` customizes the buttons and resize border.
+`DecorationsFrame` removes the title bar but keeps the OS resize border. `DecorationsNone` removes both. On a resizable window, the outer edges resize instead of drag. `windowCaptionWith` customizes the buttons and resize border.
 
-`DecorationsFrame` keeps the platform's resize frame while removing the title bar; `DecorationsNone` removes both. On a resizable frameless window, edge resizing takes precedence over the drag region along the outer edges.
-
-An optional rounded border around the whole view comes from `windowFrame`:
+`windowFrame` draws a rounded border around the whole view without taking layout space:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:window_frame}}
 ```
 
-It draws a border and insets the view; the border does not consume layout space.
-
 ## Screenshots
 
-`requestScreenshot` asks the backend for the next presented frame and delivers it to a callback:
+`requestScreenshot` passes the next frame to a callback, or `Nothing` if the backend can't capture:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:request_screenshot}}
 ```
 
-The callback runs in `IO` after the frame is presented, and the next frame waits on it, so keep it short: an `IORef` write, or a `forkIO` to encode. Each request is answered once, with `Nothing` when the backend cannot capture.
+The next frame waits for the callback, so keep it short: write an `IORef` or `forkIO` the encoding.
 
-For thread-safe capture use `askScreenshot`, which returns an `IO` action for a background thread, or `useScreenshot` for a per-key screenshot owned by a task:
+From a background thread, use `askScreenshot`. To take a screenshot per key in a task, use `useScreenshot`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:use_screenshot}}
 ```
 
-The `nano-ui-sdl` backend also has `saveScreenshot env path` (a BMP of the current frame) and `captureScreenshot env` (pixels), both on the display thread. For PNG encoding, use `JuicyPixels` or a similar library in a background thread.
+`nano-ui-sdl` also has `saveScreenshot env path` (BMP) and `captureScreenshot env` (pixels). Call both on the display thread. For PNG, encode with `JuicyPixels` on another thread.
 
-## Testing window behavior
+## Testing
 
-Window operations are no-ops without a session, so views that set titles or read `askWindow` run under `NanoUI.Testing`. Native screenshots and chrome need a real SDL session, as in `nano-ui-demo`'s hidden-window tests.
+Window actions do nothing without a session, so views that use them run fine under `NanoUI.Testing`. Screenshots and custom title bars need a real SDL window, as in `nano-ui-demo`'s hidden-window tests.
