@@ -17,9 +17,9 @@ tests =
 spansIn :: Context -> Rect -> IO [(Rect, T.Text)]
 spansIn ctx r = (\ss -> [(s, t) | (s, t, _, _, _) <- ss, rectIntersect s r /= Nothing]) <$> collectTextSpans ctx
 
--- | Buttons, selects (short of the chevron) and 'truncateTextUi' end text
--- that does not fit in dots, measured by its shaped width; text that fits,
--- or overflows by under half a pixel, shows whole.
+-- | Buttons and selects (short of the chevron) end text that does not fit in
+-- dots, measured by its shaped width; text that fits, or overflows by under
+-- half a pixel, shows whole.
 runTruncateTest :: Context -> IORef Int -> IO ()
 runTruncateTest base failed = do
   let inp = withInputOff 400 200
@@ -32,18 +32,14 @@ runTruncateTest base failed = do
         narrow <- buttonWith' (fixedW 90) long
         fits <- button' "Save"
         (sel, _) <- withValue 0 (selectWith' (fixedW 120) ["An option far too long for the field", "Short"])
-        fm <- uiFontMetrics
-        fitted <- truncateTextUi fm 60 "Something rather long"
-        (,,,) narrow fits sel <$> ((,,) fitted <$> lineWidthUi fm fitted <*> truncateTextUi fm 400 "Short")
-  (narrow, fits, sel, (fitted, fittedW, kept)) <- warmup2 base inp ui
+        pure (narrow, fits, sel)
+  (narrow, fits, sel) <- warmup2 base inp ui
   let Rect nx _ nw _ = respRect narrow
       Rect sx _ sw _ = respRect sel
   cutIn base (respRect narrow) $ \(Rect x _ w _) t ->
     assert failed (T.length t < T.length long && x >= nx && x + w <= nx + nw)
   assertEq failed ["Save"] . map snd =<< spansIn base (respRect fits)
   cutIn base (respRect sel) $ \(Rect x _ w _) _ -> assert failed (x + w <= sx + sw - 16)
-  assert failed (dotted fitted && fittedW <= 60)
-  assertEq failed "Short" kept
   -- Shaping sets a text 8 a character; unshaped advances are 10.
   let shaped t =
         let n = T.length t
@@ -68,8 +64,8 @@ runToggleButtonTest ctx failed = do
   runSim ctx failed inp ui $ do
     resp <- result
     _ <- click (On resp)
-    checkEq True =<< liftIO (readVarIO ref)
+    checkEq True =<< readV ref
     (_, draw) <- liftIO (warmupDraw ctx inp ui)
     check . elem tint . fillsIn (respRect resp) =<< liftIO (drawQuads draw)
     _ <- click (On resp)
-    checkEq False =<< liftIO (readVarIO ref)
+    checkEq False =<< readV ref

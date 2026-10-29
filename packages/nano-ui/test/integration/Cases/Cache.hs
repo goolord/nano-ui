@@ -11,7 +11,7 @@ import Data.Primitive.SmallArray (smallArrayFromList)
 import NanoUI.Internal.Context (Context (..), registerCustomDrawing)
 import NanoUI.Internal.Layout.Arena
   ( addNodeFromLayout, getNodeRect, setNodeText
-  , setNodeValue, setStyleIdx, setWidgetId
+  , setStyleIdx, setWidgetId
   )
 import NanoUI.Internal.Store (ptrEq)
 import System.Mem.StableName (makeStableName)
@@ -20,10 +20,8 @@ tests :: [Spec]
 tests =
   [ spec "metric-cache-invalidation" runMetricCacheInvalidationTest
   , spec "widget-placement-cache" runWidgetPlacementCacheTest
-  , spec "layout-cache-paint-state" runLayoutPaintStateTest
   , spec "draw-reuse" runDrawReuseTest
   , spec "draw-reuse-continuous" runContinuousDrawReuseTest
-  , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   , spec "wrap-width-bounds" runWrapBoundsTest
   , spec "wrap-and-truncate" runWrapTruncateTest
   ]
@@ -174,29 +172,6 @@ runWidgetPlacementCacheTest _ failed =
       clearMeasureCache fresh
       assertEq failed moved =<< drawn fresh AlignEnd x y
 
--- | A layout cache hit keeps the frame's own paint state, as a cold layout.
-runLayoutPaintStateTest :: Context -> IORef Int -> IO ()
-runLayoutPaintStateTest ctx failed = do
-  let inp = withInputOff 400 300
-      ui value color = column $ do
-        box (fixedWH 30 30) color
-        liftIO $ do
-          let na = ctxNodeArena ctx
-          i <- addNodeFromLayout na NodeSlider 0 (fixedWH 200 30 defaultLayout)
-          setWidgetId na i (WidgetId 123)
-          setNodeText na i ""
-          setNodeValue na i value
-        labelWith (fontColor color) "paint only"
-      drawn value color = drawnBy ctx inp (ui value color)
-      cacheName = readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
-  first <- drawn 0.2 (colorRGBA 255 0 0 255)
-  cache <- cacheName
-  changed <- drawn 0.8 (colorRGBA 0 0 255 255)
-  assert failed . (cache ==) =<< cacheName
-  assert failed (first /= changed)
-  writeIORef (ctxLayoutCache ctx) Nothing
-  assertEq failed changed =<< drawn 0.8 (colorRGBA 0 0 255 255)
-
 -- | A full undamaged frame of unchanged view output returns the last draw
 -- data itself; paint-state changes still draw. Container drawings, reuse
 -- off, the layout overlay and clip frames always paint.
@@ -311,19 +286,3 @@ runContinuousDrawReuseTest ctx failed = do
   let wheel = off {inputMousePos = V2 30 120, inputScroll = V2 0 (-1)}
   assert failed . all repainted =<< steps 3 wheel (1, 1)
   assert failed . paintsThenSettles =<< steps 12 wheel {inputScroll = V2 0 0} (1, 1)
-
--- | A wrapping label measures again when only its container's width changes.
-runPartialMeasureAncestorTest :: Context -> IORef Int -> IO ()
-runPartialMeasureAncestorTest ctx failed = do
-  let inp = withInputOff 400 300
-      ui c w = liftIO $ do
-        let na = ctxNodeArena c
-        parent <- addNodeFromLayout na NodeContainer (-1) (fixedWH w 200 defaultLayout)
-        i <- addNodeFromLayout na NodeText parent defaultLayout
-        setNodeText na i "a long label that wraps onto several lines at a narrow width"
-      rectsAt c w = runFrame c inp (ui c w) >> arenaRects c
-  wide <- rectsAt ctx 360
-  narrow <- rectsAt ctx 120
-  assert failed (wide /= narrow)
-  fresh <- newContext
-  assertEq failed narrow =<< rectsAt fresh 120

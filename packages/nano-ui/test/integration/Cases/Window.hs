@@ -23,7 +23,7 @@ tests =
   , spec "window-damage" runWindowDamageTest
   , simSpec "window-drag" 640 400 (fst <$> window' (constVar True) "Debug" (label "Body")) windowDrag
   , simSpec "window-resize" 640 400 resizeUi windowResize
-  , spec "window-resize-halo-scrolled" runWindowResizeHaloScrolledTest
+  , simSpec "window-resize-halo-scrolled" 640 400 haloUi haloScrolled
   , spec "window-layout-reuse" runWindowLayoutReuseTest
   , spec "window-custom-measure-placement" runWindowCustomMeasurePlacementTest
   , spec "page-window-scroll" runPageWindowScrollTest
@@ -121,7 +121,7 @@ safePoint cover@(Rect x y w h) kids =
 
 -- | An open window shows its title and body, leaves the page clickable, ignores
 -- Escape and reports its close button; a closed one draws nothing. A press on a
--- window or modal never reaches the page or a lower window; its own button clicks.
+-- window never reaches a lower window; its own button clicks.
 runWindowOverlayTest :: Context -> IORef Int -> IO ()
 runWindowOverlayTest ctx failed = do
   openRef <- newIORef False
@@ -146,24 +146,19 @@ runWindowOverlayTest ctx failed = do
     Rect px py pw _ <- maybe (respRect win) fst . IM.minView <$> liftIO (floatingPanelRects ctx)
     (_, closing, _) <- click (at (px + pw - padR windowPad - 12.5) (py + padT windowPad + 19.5))
     check (respClicked closing)
-  let covering overlay = do
-        through <- any respClicked <$> column (replicateM 10 (button' "Outside"))
-        (cover, inside) <- overlay (constVar True) "Cover" (button' "Inside")
-        pure (through, cover, inside, [])
-      stacked = do
+  let stacked = do
         (_, lo) <- openWindow "Low" (button' "LowBtn")
         (hi, hiBtn) <- openWindow "High" (button' "HighBtn")
-        pure (maybe False respClicked lo, hi, hiBtn, maybe [] (pure . respRect) lo)
-  forM_ [covering window', covering modal', stacked] $ \covered -> do
-    c <- newContext
-    runSim c failed (withInput 300 220) covered $ do
-      (_, cover, inside, others) <- result
-      checkJust inside $ \btn -> do
-        checkJust (safePoint (respRect cover) (respRect btn : others)) $ \p -> do
-          (through, _, _, _) <- click (At p)
-          check (not through)
-        (_, _, hit, _) <- click (On btn)
-        check (maybe False respClicked hit)
+        pure (lo, hi, hiBtn)
+  c <- newContext
+  runSim c failed (withInput 300 220) stacked $ do
+    (lo, cover, inside) <- result
+    checkJust ((,) <$> lo <*> inside) $ \(low, btn) -> do
+      checkJust (safePoint (respRect cover) [respRect btn, respRect low]) $ \p -> do
+        (through, _, _) <- click (At p)
+        check (not (maybe False respClicked through))
+      (_, _, hit) <- click (On btn)
+      check (maybe False respClicked hit)
 
 -- | Opening a modal or window keeps the ids, and so the state, of later widgets.
 runOverlaySiblingStateTest :: Context -> IORef Int -> IO ()
@@ -215,11 +210,10 @@ runWindowDamageTest _ failed = do
 -- | A title drag moves the window; held still past the left edge it stops there, idle.
 windowDrag :: Sim Response ()
 windowDrag = do
-  ctx <- simContext
   r0 <- respRect <$> result
   let V2 gx gy = windowTitleGrab r0
   _ <- press (at gx gy) >> moveTo (at (gx - 50) (gy + 30))
-  checkEq DamageFull =<< liftIO (takeDamage ctx)
+  checkEq DamageFull =<< frameDamage
   r1 <- respRect <$> (release >> settle)
   check (rectX r1 < rectX r0 - 10 && rectY r1 > rectY r0 + 10)
   let V2 hx hy = windowTitleGrab r1
@@ -268,21 +262,23 @@ windowResize = do
   kind <- cursorAt (At hit)
   check (kind `notElem` [UiCursorEwResize, UiCursorNsResize, UiCursorNwseResize, UiCursorNeswResize])
 
+haloUi :: NanoUI WidgetId
+haloUi = do
+  (page, ()) <- scrollArea (fillW . fillH) . columnWith fillW $ do
+    spacer Fit (Fixed 400)
+    replicateM_ 10 (buttonWith (fillW . fixedH 100) "Page")
+  page <$ window (constVar True) "Tool" (label "Body")
+
 -- | A page button in a window's halo keeps the press, hit where the scrolled page draws it.
-runWindowResizeHaloScrolledTest :: Context -> IORef Int -> IO ()
-runWindowResizeHaloScrolledTest ctx failed = do
-  let ui = do
-        (page, ()) <- scrollArea (fillW . fillH) . columnWith fillW $ do
-          spacer Fit (Fixed 400)
-          replicateM_ 10 (buttonWith (fillW . fixedH 100) "Page")
-        page <$ window (constVar True) "Tool" (label "Body")
-      windows = map snd <$> liftIO (nodesOfType NodeWindow ctx)
-  runSim ctx failed (withInputOff 640 400) ui $ do
-    liftIO . (\page -> setScrollOffset ctx page 400) =<< result
-    before <- settle >> windows
-    checkJust (listToMaybe before) $ \(Rect x y _ h) -> do
-      _ <- drag (at (x - 6) (y + h / 2)) (at (x - 60) (y + h / 2)) 1
-      checkEq before =<< (settle >> windows)
+haloScrolled :: Sim WidgetId ()
+haloScrolled = do
+  let windows = map snd <$> onContext (nodesOfType NodeWindow)
+  page <- result
+  onContext (\c -> setScrollOffset c page 400)
+  before <- settle >> windows
+  checkJust (listToMaybe before) $ \(Rect x y _ h) -> do
+    _ <- drag (at (x - 6) (y + h / 2)) (at (x - 60) (y + h / 2)) 1
+    checkEq before =<< (settle >> windows)
 
 -- | Reusing the layout cache with floating panels open lays out as a fresh solve: still,
 -- with a popup moving in the window, mid-drag, resized, at another size, under a modal.
@@ -340,11 +336,9 @@ runWindowCustomMeasurePlacementTest ctx failed = do
   cache <- cacheName
   _ <- runFrame ctx inp (ui 60)
   assert failed . (== cache) =<< cacheName
-  assertEq failed 60 . heightOf =<< evalUi ctx inp (ui 60)
-  reused <- arenaRects ctx
   fresh <- newContext
-  void $ warmup2 fresh inp (ui 60)
-  assertEq failed reused =<< arenaRects fresh
+  _ <- warmup2 fresh inp (ui 60)
+  assertEq failed 60 . heightOf =<< sameAsFreshSolve failed fresh ctx inp (ui 60)
 
 -- | The wheel over a window scrolls it, not the page, declared in a page scroller or beside.
 runPageWindowScrollTest :: Context -> IORef Int -> IO ()

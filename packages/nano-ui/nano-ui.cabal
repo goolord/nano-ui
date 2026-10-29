@@ -251,7 +251,6 @@ test-suite nano-ui-test
     -- would do the same, but cabal check warns about it.)
     main-is:          Main.hs
     other-modules:
-        Cases
         BackendApi
         Spec
         Cases.Animation

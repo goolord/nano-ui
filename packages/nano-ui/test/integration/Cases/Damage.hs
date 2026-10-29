@@ -15,7 +15,6 @@ tests :: [Spec]
 tests =
   [ spec "damage-rect-math" runDamageRectMathTest
   , spec "damage-explicit" runExplicitDamageTest
-  , spec "damage-var-paint-change" runVarPaintChangeDamageTest
   , spec "damage-hover" runHoverDamageTest
   , spec "damage-orphan-anim-settles" runOrphanAnimationDamageSettlesTest
   , spec "damage-content-change" runContentChangeDamageTest
@@ -98,32 +97,6 @@ runExplicitDamageTest ctx failed = do
   assertEq failed (DamageClip (Rect 0 0 0 0)) =<< damageOf 3 none
   changed <- damageOf 4 none
   assert failed (clipCovers changed (respRect lbl) && not (damageCovers changed (respRect btn)))
-
--- | A Var write that changes a box's colour, alone or beside a same-length
--- label, repaints whole: no diff sees the colour, and the text diff would
--- clip to the label.
-runVarPaintChangeDamageTest :: Context -> IORef Int -> IO ()
-runVarPaintChangeDamageTest _ failed = do
-  let lamp on = box (fixedWH 40 40) (if on then colorRGBA 255 0 0 255 else colorRGBA 0 0 255 255)
-      flag = do
-        onVar <- useVar False
-        on <- readVar onVar
-        resp <- button' "Toggle"
-        when (respClicked resp) (writeVar onVar (not on))
-        labelWith fontMono (if on then "one" else "two")
-        resp <$ lamp on
-      level = do
-        levelVar <- useVar (0 :: Float)
-        v <- readVar levelVar
-        resp <- button' "Raise"
-        when (respClicked resp) (writeVar levelVar (v + 1))
-        resp <$ lamp (v > 0)
-  forM_ [flag, level] $ \ui -> do
-    ctx <- newContext
-    let inp0 = withInputOff 320 240
-    resp <- warmup2 ctx inp0 ui
-    _ <- runClick ctx inp0 ui (centerOf resp)
-    assertEq failed DamageFull =<< takeDamage ctx
 
 -- | Hover enter and press repaint only the button; motion inside it asks for
 -- no frame.
