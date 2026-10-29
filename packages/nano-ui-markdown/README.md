@@ -1,16 +1,14 @@
 # nano-ui-markdown
 
-Markdown for [nano-ui](https://github.com/goolord/nano-ui): documents parsed
-by the [commonmark](https://hackage.haskell.org/package/commonmark) library,
-which text can be appended to without parsing the whole document again, and a
-widget that draws them with nano-ui's rich text.
+Markdown rendering for [nano-ui](https://github.com/goolord/nano-ui). Parsing
+uses [commonmark](https://hackage.haskell.org/package/commonmark). Documents
+support incremental append for streamed text.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
 
 import Control.Monad (unless)
 import Data.Foldable (for_)
-import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI (NanoUI, label, readVar, useVar, writeVar)
 import NanoUI.Markdown
@@ -18,7 +16,7 @@ import NanoUI.Markdown
 readme :: MarkdownDoc
 readme = parseMarkdown "# Hello\n\nSome *emphasis*, `code` and [a link](https://example.com)."
 
--- Allocate cache <- newMarkdownCache once during component setup.
+-- cache <- newMarkdownCache, once at component setup
 view :: MarkdownCache -> NanoUI ()
 view cache = do
   lastLinkVar <- useVar ""
@@ -28,16 +26,36 @@ view cache = do
   unless (T.null lastLink) $ label ("Clicked " <> lastLink)
 ```
 
-`markdown` returns the destination of a link clicked this frame. Parse a
-document once and keep it in your model, rather than parsing it every frame.
+`markdown` returns the destination of a link clicked this frame. Parse once
+and store the `MarkdownDoc`; do not parse per frame.
+
+## Syntax
+
+CommonMark plus GitHub tables, task lists, `~~strikethrough~~` and autolinks
+from `commonmark-extensions`.
+
+- Task lists apply to bullet lists only. `1. [x] a` is an ordered item with
+  text `[x] a`.
+- Raw HTML renders as text. HTML comments are dropped.
+- `markdownBlocks` returns the AST defined in `NanoUI.Markdown.Syntax`.
 
 ## Streaming
 
-A reply that arrives on a thread of its own, from a network client, streams
-into the view with nano-ui's `useStream`: the producer appends each token to
-the document on its thread, and the view draws the document so far. No
-`IORef` is needed, and the UI thread does no parsing. Allocate
-`stream <- newStream` once during component setup:
+`appendMarkdown t doc` produces the same blocks as reparsing the full source,
+but reparses only the tail: the last top-level block, or the last item, row,
+line or block when the text ends inside a list, table, fenced code or block
+quote. Plain words appended to a trailing paragraph skip the parser.
+
+Larger reparses:
+
+| Case | Reparsed |
+| --- | --- |
+| doc ends in a paragraph, indented code, HTML block, or list/code nested in a list item or quote | that whole block |
+| append adds or changes a link reference definition after other blocks | the whole document |
+
+Every call reparses the tail, so append a frame's tokens in one call.
+
+Tokens from a worker thread, via `useStream` (`stream <- newStream` at setup):
 
 ```haskell
 replyView :: MarkdownCache -> Stream Int MarkdownDoc -> Client -> Int -> NanoUI ()
@@ -47,73 +65,36 @@ replyView cache stream client replyId = do
   void (markdown cache doc)
 ```
 
-When storing the document in a model instead, append all tokens received in a
-frame at once:
+Tokens on the UI thread:
 
 ```haskell
-newtype Model = Model {reply :: MarkdownDoc}
-
-onTokens :: [Text] -> Model -> Model
-onTokens tokens m = m {reply = appendMarkdown (T.concat tokens) (reply m)}
+onTokens :: [Text] -> MarkdownDoc -> MarkdownDoc
+onTokens tokens = appendMarkdown (T.concat tokens)
 ```
 
-`appendMarkdown b (parseMarkdown a)` has the blocks of `parseMarkdown (a <> b)`,
-but it keeps the blocks that `b` cannot change and parses again only the rest
-of the text: the last top-level block, or, when the text ends inside a list, a
-table, fenced code or a block quote, only its last item, row, line or block. So
-a token's parse costs about as much at the end of a long reply as of a short
-one, unless the reply ends in one long block that is not split this way, which
-is parsed whole: a paragraph, a list or code block inside a list item or a block
-quote, indented code, or an HTML block. (Joining the parsed part onto a long
-list, table, code block or quote still copies or walks what came before, which
-is quick next to parsing it but grows with the block.) Every append parses that rest again, so
-on the UI thread, appending the tokens of a frame one at a time costs more for
-nothing. The exception is plain words (letters, digits, spaces and common
-punctuation) added to a paragraph that ends the reply, after a space or to a
-word: they join its last line without a parse.
+`MarkdownDoc` equality compares source text (`markdownSource`). Blocks before
+the changed one keep their ids and are not re-measured, laid out or
+repainted. For long chat logs, draw only visible messages
+(`getScrollMetricsUi`).
 
-Text after link reference definitions is parsed with them. An append that adds
-or changes a definition after other blocks parses the whole reply again, as
-those blocks may link to it: definitions at the end of a reply cost a whole
-parse an append.
+## Rendering
 
-`markdownSource` returns a document's source text. Two documents are equal when
-their texts are, so one kept in a `Var` changes with every append. The
-widget keeps the ids of the blocks before the one that changed, so they are not
-measured, laid out or repainted again. A chat log of thousands of paragraphs
-should draw only the messages in view, using `getScrollMetricsUi`.
+`markdownConfigured cache config doc`. Each modifier applies over the default
+look; colours left `Nothing` come from the theme.
 
-`cabal run nano-ui-markdown-example` streams a reply into a chat view with
-`useStream`. It needs `nano-ui-sdl`, behind this package's `sdl` flag (off by
-default; the repository's `cabal.project` turns it on); the library itself
-does not depend on a backend.
-
-## What it parses
-
-CommonMark with GitHub's tables, task lists, `~~strikethrough~~`, and bare web
-and email links, from `commonmark-extensions`. Task lists are bullet lists
-only: `1. [x] a` is an ordered item with the text `[x] a`. Raw HTML stays text,
-and HTML comments are left out. `NanoUI.Markdown.Syntax` has the parsed form,
-which `markdownBlocks` returns.
-
-## Drawing
-
-`markdownConfigured` takes a component-owned `MarkdownCache` and a
-`MarkdownConfig`: the column's layout, the body
-and heading fonts, the link colour, style modifiers over the look of inline
-code (with a background, if you like), code blocks, quotes and table cells,
-whether code blocks have a copy button, and `mdImage`, which resolves an
-image's source to a registered image and a size. An image alone in its
-paragraph, or alone in a link, is drawn when `mdImage` resolves it; a click
-goes to the link, else to its source, and its title (else the link's) shows as
-a tooltip. Any other image shows its alt text as a link. `markdownImages`
-lists a document's image sources, to load them before they are drawn. Long
-code lines wrap, keeping their indentation, and headings scale the backend's
-default font size. Task items draw nano-ui's checkbox.
-
-Text in rendered paragraphs, headings, table cells and code blocks can be
-selected with the mouse. With a text block focused, Ctrl+A selects that block
-and Ctrl+C copies the selection (Command+A and Command+C on macOS).
+| Field | Controls |
+| --- | --- |
+| `mdLayout` | document column |
+| `mdText` | body font |
+| `mdHeading` | heading font by level (1 to 6), over the body font |
+| `mdLinkColor` | link colour |
+| `mdInlineCode`, `mdInlineCodeBackground` | inline code font and background |
+| `mdCodeBlock` | code block panel style |
+| `mdQuote` | block quote text |
+| `mdTableCell` | table cell style; the `Bool` is true for header cells |
+| `mdCopyCode` | copy button on code blocks |
+| `mdImage` | image source to `(ImageId, Size)` |
+| `mdBlock` | custom drawing for any block, at any depth |
 
 ```haskell
 markdownConfigured
@@ -127,9 +108,25 @@ markdownConfigured
   doc
 ```
 
-`mdBlock` overrides block rendering for every block (including inside quotes
-and lists) and receives the default block renderer to fall back to or wrap.
-For example, a code block with custom syntax highlighting:
+Behaviour:
+
+- Images render only when alone in a paragraph (or alone in a link there) and
+  resolved by `mdImage`. A click returns the link, else the source. The
+  tooltip is the image title, else the link title. Other images render their
+  alt text as a link. `markdownImages` lists a document's image sources for
+  preloading.
+- Long code lines wrap and keep their indentation.
+- Heading sizes scale from the backend's default font size.
+- Task items use nano-ui's checkbox.
+- Text in paragraphs, headings, table cells and code blocks is selectable.
+  Ctrl+A / Ctrl+C (Cmd on macOS) select and copy within the focused block.
+
+### Custom blocks
+
+`mdBlock` receives the default renderer, to fall back to or wrap. Return the
+clicked link, if any.
+
+Syntax highlighting:
 
 ```haskell
 highlighted :: MarkdownConfig
@@ -143,10 +140,8 @@ highlighted =
     }
 ```
 
-An image can load as it is drawn, with `useTask` (`decodePng` stands for a
-decoder of yours, which returns the image id and size). Allocate one `newTask`
-handle per source in a component-owned map during setup. Here `taskFor` retrieves
-the handle for a source:
+Lazy image loading with `useTask`, one `newTask` handle per source allocated
+at setup (`decodePng` is application code):
 
 ```haskell
 lazyImages :: (Text -> Task Text (ImageId, Size)) -> MarkdownConfig
@@ -165,11 +160,13 @@ lazyImages taskFor =
 
 ## Build
 
-Add `nano-ui`, `nano-ui-markdown` and `text` to your application's
-`build-depends`. `cabal build lib:nano-ui-markdown` builds the library without
-SDL.
+Depend on `nano-ui`, `nano-ui-markdown` and `text`. The library has no
+backend dependency.
+
+`cabal run nano-ui-markdown-example` streams a reply into a chat view. It
+requires the `sdl` flag (off by default, on in this repository's
+`cabal.project`).
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
-  online guide, tutorials, and markdown documentation.
+[The nano-ui Book](https://goolord.github.io/nano-ui/index.html)
