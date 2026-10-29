@@ -6,38 +6,26 @@ import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Store (WidgetStore (..))
 import NoThunks.Class (NoThunks, noThunks)
 
-
 tests :: [Spec]
-tests =
-  [ spec "no-thunks" runNoThunksTest
-  ]
+tests = [spec "no-thunks" runNoThunksTest]
 
--- | Long-lived widget state must not retain thunks in stored values. Run a
--- frame whose widgets populate several store maps, then check every stored
--- value directly with nothunks. (Container spines/lists are not checked:
--- on GHC 9.14 nothunks flags WHNF list and IntMap internals as thunks, a
--- false positive. Individual values (Text, Int, Float, Float pairs) are
--- checked precisely, which catches the strict-container WHNF trap
--- where a stored tuple's components remain unevaluated.)
+-- | Long-lived widget state keeps no thunks in its stored values, such as a
+-- stored tuple's components (the strict-container WHNF trap). Values only:
+-- on GHC 9.14 nothunks flags WHNF list and IntMap spines as thunks.
 runNoThunksTest :: Context -> IORef Int -> IO ()
 runNoThunksTest ctx failed = do
-  let inp = withInput 300 200
-      ui = column $ do
-        _ <- (snd <$> withValue "hello" textInput)
-        _ <- (snd <$> withValue 42 (slider 0 100))
-        pure ()
-  _ <- warmup2 ctx inp ui
+  _ <- warmup2 ctx (withInput 300 200) (column (withValue "hello" textInput >> withValue 42 (slider 0 100)))
   store <- readIORef (ctxStore ctx)
-  checkAll failed "storeText" (storeText store)
-  checkAll failed "storeInt" (storeInt store)
-  checkAll failed "storeFloat" (storeFloat store)
-  checkAll failed "storeDouble" (storeDouble store)
-  checkAll failed "storePoint" (storePoint store)
-  checkAll failed "storeQuiet" (storeQuiet store)
+  checkAll "storeText" (storeText store)
+  checkAll "storeInt" (storeInt store)
+  checkAll "storeFloat" (storeFloat store)
+  checkAll "storeDouble" (storeDouble store)
+  checkAll "storePoint" (storePoint store)
+  checkAll "storeQuiet" (storeQuiet store)
   where
-    checkAll :: NoThunks v => IORef Int -> String -> IM.IntMap v -> IO ()
-    checkAll failed' what m =
+    checkAll :: NoThunks v => String -> IM.IntMap v -> IO ()
+    checkAll what m =
       forM_ (IM.toList m) $ \(k, !v) ->
         noThunks [] v >>= mapM_ (\info -> do
           putStrLn ("thunks retained in " ++ what ++ " at key " ++ show k ++ ": " ++ show info)
-          assert failed' False)
+          assert failed False)

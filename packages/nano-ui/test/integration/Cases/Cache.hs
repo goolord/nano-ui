@@ -24,47 +24,37 @@ tests =
   , spec "draw-reuse-continuous" runContinuousDrawReuseTest
   , spec "partial-measure-ancestor-width" runPartialMeasureAncestorTest
   , spec "wrap-width-bounds" runWrapBoundsTest
-  , spec "wrap-keeps-spaces" runWrapKeepsSpacesTest
-  , spec "wrap-keeps-clusters" runWrapClustersTest
-  , spec "truncate-first-character" runTruncateFirstCharTest
+  , spec "wrap-and-truncate" runWrapTruncateTest
   ]
 
--- | Breaking a word by character, or cutting text short, keeps a character
--- with the marks after it, a joined emoji and a flag whole: a cut that would
--- part them moves back before the character, or past it when it is the
--- first.
-runWrapClustersTest :: Context -> IORef Int -> IO ()
-runWrapClustersTest ctx failed = do
-  let lineW t = pure (10 * fromIntegral (T.length t))
-      flags = "\x1F1FA\x1F1F8\x1F1EB\x1F1F7"
+-- | Wrapping keeps indentation and inner runs of spaces; breaks and cuts keep
+-- marks, joined emoji and flags whole; a cut never overflows, dropping the
+-- dots when only a first character fits.
+runWrapTruncateTest :: Context -> IORef Int -> IO ()
+runWrapTruncateTest ctx failed = do
+  let flags = "\x1F1FA\x1F1F8\x1F1EB\x1F1F7"
       england = "\x1F3F4\xE0067\xE0062\xE0065\xE006E\xE0067\xE007F"
-  assertEq failed ["a", "e\x0301", "b"] =<< wrapTextLinesIO lineW "ae\x0301\&b" 20
-  assertEq failed ["\x1F469\x200D\x1F4BB", "x"] =<< wrapTextLinesIO lineW "\x1F469\x200D\x1F4BBx" 20
-  assertEq failed ["\x1F1FA\x1F1F8", "\x1F1EB\x1F1F7"] =<< wrapTextLinesIO lineW flags 30
-  assertEq failed ["a", england] =<< wrapTextLinesIO lineW ("a" <> england) 30
-  assertEq failed "a..." =<< evalUi ctx (withInput 100 100) (truncateTextUi (monospaceMetrics 10) 55 "ae\x0301\&bcd")
-  assertEq failed "\x1F1FA\x1F1F8..." =<< evalUi ctx (withInput 100 100) (truncateTextUi (monospaceMetrics 10) 65 (flags <> "xyz"))
+      narrowDots = (monospaceMetrics 10) {fmAdvance = \case 'W' -> 14; '.' -> 4; ' ' -> 5; _ -> 10}
+  forM_
+    [ (1, "    let x  = 1   in  x + 1  ", 14, ["    let x  = 1", "in  x + 1"])
+    , (1, "    a  b  c", 6, ["    a", "b  c"])
+    , (10, "ae\x0301\&b", 20, ["a", "e\x0301", "b"])
+    , (10, "\x1F469\x200D\x1F4BBx", 20, ["\x1F469\x200D\x1F4BB", "x"])
+    , (10, flags, 30, ["\x1F1FA\x1F1F8", "\x1F1EB\x1F1F7"])
+    , (10, "a" <> england, 30, ["a", england])
+    ]
+    $ \(k, txt, w, want) ->
+      assertEq failed want =<< wrapTextLinesIO (\t -> pure (k * fromIntegral (T.length t))) txt w
+  forM_
+    [ (monospaceMetrics 10, 55, "ae\x0301\&bcd", "a...")
+    , (monospaceMetrics 10, 65, flags <> "xyz", "\x1F1FA\x1F1F8...")
+    , (narrowDots, 16, "Wide", "W")
+    , (narrowDots, 36, "Wide", "Wi...")
+    ]
+    $ \(fm, w, txt, want) -> assertEq failed want =<< evalUi ctx (withInput 100 100) (truncateTextUi fm w txt)
 
--- | Cutting text short never makes it wider than the room: a first
--- character that leaves no room for the dots is cut to without them.
-runTruncateFirstCharTest :: Context -> IORef Int -> IO ()
-runTruncateFirstCharTest ctx failed = do
-  let fm = (monospaceMetrics 10) {fmAdvance = \c -> case c of 'W' -> 14; '.' -> 4; ' ' -> 5; _ -> 10}
-  assertEq failed "W" =<< evalUi ctx (withInput 100 100) (truncateTextUi fm 16 "Wide")
-  assertEq failed "Wi..." =<< evalUi ctx (withInput 100 100) (truncateTextUi fm 36 "Wide")
-
--- | Wrapping drops the run of spaces at a line break but keeps indentation
--- and runs of spaces inside a line, which code needs.
-runWrapKeepsSpacesTest :: Context -> IORef Int -> IO ()
-runWrapKeepsSpacesTest _ failed = do
-  let lineW t = pure (fromIntegral (T.length t))
-  assertEq failed ["    let x  = 1", "in  x + 1"] =<< wrapTextLinesIO lineW "    let x  = 1   in  x + 1  " 14
-  assertEq failed ["    a", "b  c"] =<< wrapTextLinesIO lineW "    a  b  c" 6
-
--- | A wrap holds for every width from its widest fitting line up to, not
--- including, its break width: the wrap cache hands it out for all of them.
--- Characters of different widths, words broken by character, forced single
--- characters, blank paragraphs and runs of spaces.
+-- | A wrap holds for every width from its widest line up to its break width,
+-- since the wrap cache hands it out for all of them.
 runWrapBoundsTest :: Context -> IORef Int -> IO ()
 runWrapBoundsTest _ failed = do
   let charW :: Char -> Float
@@ -94,8 +84,8 @@ runWrapBoundsTest _ failed = do
       again <- wrapTextLinesIO lineW txt v
       assertEq failed (txt, w, v, wrLines r) (txt, w, v, again)
 
--- Copy the mutable draw buffers before another frame can reuse them. Counts
--- alone cannot detect stale geometry, colors or translated text.
+-- | A copy of the draw buffers, taken before another frame reuses them:
+-- counts alone cannot see stale geometry, colours or translated text.
 snapshotDraw :: DrawData -> IO (BS.ByteString, BS.ByteString, [DrawCmd])
 snapshotDraw draw = do
   vertices <- withForeignPtr (drawVertices draw) $ \p ->
@@ -104,13 +94,19 @@ snapshotDraw draw = do
     BS.packCStringLen (castPtr p, drawIndexCount draw * indexSize)
   pure (vertices, indices, drawCmdElems draw)
 
+-- | One frame of @ui@, and a copy of what it drew.
+drawnBy :: Context -> Input -> NanoUI a -> IO (BS.ByteString, BS.ByteString, [DrawCmd])
+drawnBy c inp ui = runFrame c inp ui >>= \(_, dd, _) -> snapshotDraw dd
+
+-- | Contexts derived with other measures share their parent's caches yet lay
+-- out with their own (an incremented revision would collide on returning);
+-- each font modifier draws as a fresh context does; a new size repaints.
 runMetricCacheInvalidationTest :: Context -> IORef Int -> IO ()
 runMetricCacheInvalidationTest ctx failed = do
   let inp = withInputOff 400 300
       width c = do
         void $ runFrame c inp (button "ABC")
-        Rect _ _ w _ <- getNodeRect (ctxNodeArena c) 0
-        pure w
+        rectW <$> getNodeRect (ctxNodeArena c) 0
       a = withMeasureText ctx (\_ -> pure (200, 20))
       b = withMeasureText ctx (\_ -> pure (80, 12))
   original <- width ctx
@@ -118,37 +114,31 @@ runMetricCacheInvalidationTest ctx failed = do
   wb <- width b
   assertGt failed wa original
   assertGt failed wa wb
-  -- Both variants derive from the same parent and share mutable caches. An
-  -- incremented pure Int revision would collide here; returning to A matters.
   assertEq failed wa =<< width a
   assertEq failed original =<< width ctx
-
-  -- Each supported pure modifier must invalidate both layout and placement.
   forM_
     [ (\c -> withFontMetrics c (monospaceMetrics 24), void (button "ABC"))
-    , (\c -> withMonoFontMetrics c (monospaceMetrics 24), void (labelWith fontMono "ABC"))
-    , (\c -> withFontResolver c (\_ _ _ _ -> pure (monospaceMetrics 24, False))
-            (\_ _ _ _ _ -> pure (200, 24)), void (labelWith (fontSize 24) "ABC"))
-    ] $ \(configure, ui) -> do
+    , (\c -> withMonoFontMetrics c (monospaceMetrics 24), labelWith fontMono "ABC")
+    , ( \c -> withFontResolver c (\_ _ _ _ -> pure (monospaceMetrics 24, False)) (\_ _ _ _ _ -> pure (200, 24))
+      , labelWith (fontSize 24) "ABC"
+      )
+    ]
+    $ \(configure, ui) -> do
       warm <- newContext
       void $ runFrame warm inp ui
       let configured = configure warm
-      (_, draw, _) <- runFrame configured inp ui
-      actual <- snapshotDraw draw
+      actual <- drawnBy configured inp ui
       spans <- collectTextSpans configured
       fresh <- configure <$> newContext
-      (_, coldDraw, _) <- runFrame fresh inp ui
-      assertEq failed actual =<< snapshotDraw coldDraw
+      assertEq failed actual =<< drawnBy fresh inp ui
       assertEq failed spans =<< collectTextSpans fresh
-  -- A new default size changes how text with no size of its own is drawn,
-  -- which no diff sees, so the next frame repaints whole.
   sized <- newContext
   _ <- warmup2 sized inp (label "ABC")
   _ <- runFrame (withFontSize sized 24) inp (label "ABC")
   assertEq failed DamageFull =<< takeDamage sized
 
--- A table header's width and style stay fixed while alignment and its parent
--- origin change independently. This exercises the placement cache's key.
+-- | A table header of fixed width and style, at an alignment and parent
+-- origin that change independently, as keys the placement cache.
 header :: Context -> AlignX -> Float -> Float -> NanoUI ()
 header ctx ax x y = liftIO $ do
   let na = ctxNodeArena ctx
@@ -160,83 +150,67 @@ header ctx ax x y = liftIO $ do
   setNodeText na i "Header"
   setStyleIdx na i 0x80000000
 
+-- | At each snap scale a new alignment places afresh, and a moved parent
+-- reuses the text cache yet draws as a cold placement.
 runWidgetPlacementCacheTest :: Context -> IORef Int -> IO ()
-runWidgetPlacementCacheTest _ctx failed =
+runWidgetPlacementCacheTest _ failed =
   forM_ [1, 1.5, 2] $ \scale -> do
-    base <- newContext
-    let ctx = withFontMetrics base ((monospaceMetrics 12) {fmSnapScale = scale})
+    let scaled c = withFontMetrics c ((monospaceMetrics 12) {fmSnapScale = scale})
         inp = withInputOff 400 300
+        drawn c ax x y = drawnBy c inp (header c ax x y)
+    ctx <- scaled <$> newContext
+    fresh <- scaled <$> newContext
     void $ runFrame ctx inp (header ctx AlignStart 0 0)
     start <- collectTextSpans ctx
-    (_, draw, _) <- runFrame ctx inp (header ctx AlignEnd 0 0)
-    aligned <- snapshotDraw draw
-    end <- collectTextSpans ctx
-    assert failed (start /= end)
-    freshBase <- newContext
-    let fresh = withFontMetrics freshBase ((monospaceMetrics 12) {fmSnapScale = scale})
-    (_, expectedDraw, _) <- runFrame fresh inp (header fresh AlignEnd 0 0)
-    assertEq failed aligned =<< snapshotDraw expectedDraw
-
-    cache <- readIORef (ctxWidgetTextCache ctx) >>= evaluate >>= makeStableName
+    aligned <- drawn ctx AlignEnd 0 0
+    assert failed . (start /=) =<< collectTextSpans ctx
+    assertEq failed aligned =<< drawn fresh AlignEnd 0 0
+    let cacheName = readIORef (ctxWidgetTextCache ctx) >>= evaluate >>= makeStableName
+    cache <- cacheName
     forM_ [(0.25, 0.5), (9.75, 3.25), (0, 0)] $ \(x, y) -> do
-      (_, movedDraw, _) <- runFrame ctx inp (header ctx AlignEnd x y)
-      moved <- snapshotDraw movedDraw
-      cache' <- readIORef (ctxWidgetTextCache ctx) >>= evaluate >>= makeStableName
-      assert failed (cache == cache')
-      -- Force a fresh placement at the same origin and compare actual bytes.
+      moved <- drawn ctx AlignEnd x y
+      assert failed . (cache ==) =<< cacheName
       clearMeasureCache fresh
-      (_, coldDraw, _) <- runFrame fresh inp (header fresh AlignEnd x y)
-      assertEq failed moved =<< snapshotDraw coldDraw
+      assertEq failed moved =<< drawn fresh AlignEnd x y
 
+-- | A layout cache hit keeps the frame's own paint state, as a cold layout.
 runLayoutPaintStateTest :: Context -> IORef Int -> IO ()
 runLayoutPaintStateTest ctx failed = do
   let inp = withInputOff 400 300
-      ui value color = do
-        column $ do
-          box (fixedWH 30 30) color
-          liftIO $ do
-            let na = ctxNodeArena ctx
-            i <- addNodeFromLayout na NodeSlider 0 (fixedWH 200 30 defaultLayout)
-            setWidgetId na i (WidgetId 123)
-            setNodeText na i ""
-            setNodeValue na i value
-          void (labelWith (fontColor color) "paint only")
-      red = colorRGBA 255 0 0 255
-      blue = colorRGBA 0 0 255 255
-  (_, firstDraw, _) <- runFrame ctx inp (ui 0.2 red)
-  first <- snapshotDraw firstDraw
-  cache <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
-  (_, changedDraw, _) <- runFrame ctx inp (ui 0.8 blue)
-  changed <- snapshotDraw changedDraw
-  cache' <- readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
-  assert failed (cache == cache')
+      ui value color = column $ do
+        box (fixedWH 30 30) color
+        liftIO $ do
+          let na = ctxNodeArena ctx
+          i <- addNodeFromLayout na NodeSlider 0 (fixedWH 200 30 defaultLayout)
+          setWidgetId na i (WidgetId 123)
+          setNodeText na i ""
+          setNodeValue na i value
+        labelWith (fontColor color) "paint only"
+      drawn value color = drawnBy ctx inp (ui value color)
+      cacheName = readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
+  first <- drawn 0.2 (colorRGBA 255 0 0 255)
+  cache <- cacheName
+  changed <- drawn 0.8 (colorRGBA 0 0 255 255)
+  assert failed . (cache ==) =<< cacheName
   assert failed (first /= changed)
-  -- A cache hit must preserve this frame's slider value and paint colors.
   writeIORef (ctxLayoutCache ctx) Nothing
-  (_, coldDraw, _) <- runFrame ctx inp (ui 0.8 blue)
-  assertEq failed changed =<< snapshotDraw coldDraw
+  assertEq failed changed =<< drawn 0.8 (colorRGBA 0 0 255 255)
 
--- | A full frame with no damage, built from the same view output as the
--- last, returns the last frame's draw data itself, unpainted. A change to
--- paint state alone (a box's colour, a slider's value, a font colour, an
--- image or its look, a custom drawing on a container) paints again and
--- draws the change, as does every frame with reuse off, the layout overlay
--- on, or a clip.
+-- | A full undamaged frame of unchanged view output returns the last draw
+-- data itself; paint-state changes still draw. Container drawings, reuse
+-- off, the layout overlay and clip frames always paint.
 runDrawReuseTest :: Context -> IORef Int -> IO ()
 runDrawReuseTest ctx failed = do
   let px = BS.replicate (4 * 4 * 4) 200
-  okA <- registerImage ctx (ImageId 1) 4 4 px
-  okB <- registerImage ctx (ImageId 2) 4 4 px
-  assert failed (okA && okB)
+  assert failed . and =<< mapM (\i -> registerImage ctx (ImageId i) 4 4 px) [1, 2]
   let inp = withInputOff 400 300
       red = colorRGBA 255 0 0 255
       blue = colorRGBA 0 0 255 255
       ui (boxColor, value, fontCol, iid, opacity, stray) = column $ do
         box (fixedWH 30 30) boxColor
-        void ((snd <$> withValue value (slider 0 1)))
-        void (labelWith (fontColor fontCol) "paint only")
+        void (snd <$> withValue value (slider 0 1))
+        labelWith (fontColor fontCol) "paint only"
         imageConfigured defaultImageConfig {icLayout = fixedWH 20 20, icOpacity = opacity} (ImageId iid)
-        -- A custom drawing on a container, which paint builds afresh.
         liftIO $ do
           let na = ctxNodeArena ctx
           i <- addNodeFromLayout na NodeContainer 0 (fixedWH 40 40 defaultLayout)
@@ -248,7 +222,7 @@ runDrawReuseTest ctx failed = do
       -- The case returns the field itself: a selector thunk from fmap would
       -- make two reads of one draw data unequal under 'ptrEq' unoptimised.
       frame s = runFrame ctx inp (ui s) >>= \(_, dd, _) -> pure dd
-      -- Two frames of @s@ after @from@: the first paints @s@, and the second
+      -- Two frames of @s@ after @from@: the first draws @s@, and the second
       -- returns the first's draw data when @reused@.
       check from s reused = do
         before <- frame from >>= snapshotDraw
@@ -258,33 +232,28 @@ runDrawReuseTest ctx failed = do
         now <- snapshotDraw d2
         assert failed (s == from || now /= before)
   replicateM_ 2 (frame base)
-  check base base True
-  check base (blue, 0.2, red, 1, 1, 0) True
-  check base (red, 0.8, red, 1, 1, 0) True
-  check base (red, 0.2, blue, 1, 1, 0) True
-  check base (red, 0.2, red, 2, 1, 0) True
-  check base (red, 0.2, red, 1, 0.5, 0) True
-  check base (red, 0.2, red, 1, 1, 100) False
-  check (red, 0.2, red, 1, 1, 100) (red, 0.2, red, 1, 1, 200) False
-  setDrawReuse ctx False
-  check base base False
-  setDrawReuse ctx True
-  setExplainLayout ctx True
-  check base base False
-  setExplainLayout ctx False
-  writeIORef (ctxPaintFull ctx) False
-  check base base False
-  writeIORef (ctxPaintFull ctx) True
+  forM_
+    [ (base, base, True)
+    , (base, (blue, 0.2, red, 1, 1, 0), True)
+    , (base, (red, 0.8, red, 1, 1, 0), True)
+    , (base, (red, 0.2, blue, 1, 1, 0), True)
+    , (base, (red, 0.2, red, 2, 1, 0), True)
+    , (base, (red, 0.2, red, 1, 0.5, 0), True)
+    , (base, (red, 0.2, red, 1, 1, 100), False)
+    , ((red, 0.2, red, 1, 1, 100), (red, 0.2, red, 1, 1, 200), False)
+    ]
+    $ \(from, s, reused) -> check from s reused
+  forM_
+    [ (setDrawReuse ctx False, setDrawReuse ctx True)
+    , (setExplainLayout ctx True, setExplainLayout ctx False)
+    , (writeIORef (ctxPaintFull ctx) False, writeIORef (ctxPaintFull ctx) True)
+    ]
+    $ \(off, on) -> off >> check base base False >> on
   check base base True
 
--- | A continuous session: every frame paints in full and the host does not
--- read damage ('ctxDamageWanted' off around each frame, as the SDL runner
--- sets it). Every frame draws what a context that never reuses draws: a
--- hover, a focus move, each step of an animation drawn by a drawing alone
--- or moving a widget, and each wheel notch paint again and show the
--- change. Idle frames,
--- and the frames after each change once it settles, return the last frame's
--- draw data.
+-- | In a continuous session not reading damage (as the SDL runner), each
+-- frame draws what a never-reusing context draws: hovers, focus, animation
+-- steps and wheel notches paint, settled frames reuse.
 runContinuousDrawReuseTest :: Context -> IORef Int -> IO ()
 runContinuousDrawReuseTest ctx failed = do
   ref <- newContext
@@ -298,7 +267,7 @@ runContinuousDrawReuseTest ctx failed = do
         void (progressBarWith' (fixedW 100) 12 v)
         -- An animated gap moves the widget below it.
         g <- withKey ("gap" :: String) (animateTo (Tween EaseLinear 0.2 0) gapTo)
-        void (spacer (Fixed 4) (Fixed (4 + 30 * g)))
+        spacer (Fixed 4) (Fixed (4 + 30 * g))
         void (buttonWith' (fixedWH 40 20) "b")
         void $ scrollWith (fixedWH 100 40) $ column $ forM_ [1 .. 10 :: Int] $ \i -> label (T.pack (show i))
         pure b
@@ -342,9 +311,7 @@ runContinuousDrawReuseTest ctx failed = do
   assert failed . all repainted =<< steps 3 wheel (1, 1)
   assert failed . paintsThenSettles =<< steps 12 wheel {inputScroll = V2 0 0} (1, 1)
 
--- A label wraps at its container's width. A frame that changes only the
--- container's width must measure the label again, not restore the size it
--- wrapped to under the old width.
+-- | A wrapping label measures again when only its container's width changes.
 runPartialMeasureAncestorTest :: Context -> IORef Int -> IO ()
 runPartialMeasureAncestorTest ctx failed = do
   let inp = withInputOff 400 300
@@ -353,11 +320,9 @@ runPartialMeasureAncestorTest ctx failed = do
         parent <- addNodeFromLayout na NodeContainer (-1) (fixedWH w 200 defaultLayout)
         i <- addNodeFromLayout na NodeText parent defaultLayout
         setNodeText na i "a long label that wraps onto several lines at a narrow width"
-  void $ runFrame ctx inp (ui ctx 360)
-  wide <- arenaRects ctx
-  void $ runFrame ctx inp (ui ctx 120)
-  narrow <- arenaRects ctx
+      rectsAt c w = runFrame c inp (ui c w) >> arenaRects c
+  wide <- rectsAt ctx 360
+  narrow <- rectsAt ctx 120
   assert failed (wide /= narrow)
   fresh <- newContext
-  void $ runFrame fresh inp (ui fresh 120)
-  assertEq failed narrow =<< arenaRects fresh
+  assertEq failed narrow =<< rectsAt fresh 120

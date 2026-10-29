@@ -3,7 +3,6 @@ module Cases (tests) where
 import Spec
 import Control.Concurrent (threadDelay)
 import GHC.Clock (getMonotonicTime)
-import Data.ByteString qualified as BS
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
@@ -29,137 +28,139 @@ import NanoUI.Internal.Widgets.SplitPane
   , reflowFixed
   , topLevelDropTarget
   )
+import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
   [ spec "embed-state" runEmbedStateTest
   , spec "host-slot" runHostSlotTest
-  , spec "id-keyed-list" runIdKeyedListTest
-  , spec "fit-muted-width" runFitMutedWidthTest
-  , spec "deep-nesting" runDeepNestingTest
-  , spec "grow-split" runGrowSplitTest
-  , spec "percent-gap-shrink" runPercentGapShrinkTest
-  , spec "shrink-shortfall" runShrinkShortfallTest
-  , spec "aspect-layout" runAspectLayoutTest
+  , spec "layout-flow" runLayoutFlowTest
+  , spec "flex-sizing" runFlexSizingTest
   , pixelSpec "label-align-end" runLabelAlignEndTest
-  , pixelSpec "responsive-wrap" runResponsiveWrapTest
-  , pixelSpec "kv-multiline-height" runKvMultilineHeightTest
-  , spec "panel-paints" runPanelPaintsTest
-  , spec "drawing" runDrawingTest
-  , spec "image" runImageTest
   , spec "empty-frame" runEmptyFrameTest
-  , spec "image-swap-damage" runImageSwapDamageTest
-  , spec "pointer-cursor" runPointerCursorTest
-  , spec "hover-damage" runHoverDamageTest
-  , spec "checkbox-initial" runCheckboxInitialTest
-  , pixelSpec "slider-fill-width" runSliderFillWidthTest
+  , pixelSpec "basic-widgets" runBasicWidgetsTest
   , spec "search-input-clear" runSearchInputClearTest
   , spec "search-input-debounce" runSearchInputDebounceTest
-  , spec "search-input-set-text-debounce" runSearchInputSetTextDebounceTest
   , spec "pane-grid-mixed-drag" runPaneGridMixedDragTest
   , spec "pane-grid-clipped-control" runPaneGridClippedControlTest
   , spec "pane-grid-drop-preview" runPaneGridDropPreviewTest
   , spec "pane-grid-pinned-pane" runPaneGridPinnedPaneTest
   ]
 
-runIdKeyedListTest :: Context -> IORef Int -> IO ()
-runIdKeyedListTest ctx failed = do
-  let inp = withInput 200 200
-      keyedIds :: [String] -> IO ([WidgetId], DrawData, Bool)
-      keyedIds keys = runFrame ctx inp (column (mapM (\k -> withKey k nextId) keys))
-      idFor :: String -> [String] -> [WidgetId] -> Maybe WidgetId
-      idFor key keys ids = lookup key (zip keys ids)
-  (idsA, _, _) <- keyedIds ["a", "b", "c"]
-  (idsPrep, _, _) <- keyedIds ["x", "a", "b", "c"]
-  (idsApp, _, _) <- keyedIds ["a", "b", "c", "y"]
-  (idsRev, _, _) <- keyedIds ["c", "b", "a"]
-  case idsA of
-    [a, b, c] -> assert failed (a /= b && b /= c && a /= c)
-    _ -> assert failed False
-  assertEq failed (idFor "a" ["a", "b", "c"] idsA) (idFor "a" ["x", "a", "b", "c"] idsPrep)
-  assertEq failed (idFor "b" ["a", "b", "c"] idsA) (idFor "b" ["a", "b", "c", "y"] idsApp)
-  assertEq failed (idFor "c" ["a", "b", "c"] idsA) (idFor "c" ["c", "b", "a"] idsRev)
+-- | An Effectful view embeds NanoUI, and a body run in a NanoUI scope keeps
+-- the effect's state and sees that scope's input.
+runEmbedStateTest :: Context -> IORef Int -> IO ()
+runEmbedStateTest ctx failed = do
+  let ui :: Eff '[Ui, State Int, IOE] (Int, Float)
+      ui = do
+        _ <- embedNanoUI (column (pure ()))
+        modify (+ (1 :: Int))
+        w <- withRunInNanoUI $ \run -> column $ do
+          run (modify (+ (1 :: Int)))
+          inp <- askInput
+          localInput inp {inputWindowSize = Size 123 45} (run (embedNanoUI windowWidth))
+        (,w) <$> get
+  ((n, w), _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
+  assertEq failed (2, 123) (n, w)
 
-runFitMutedWidthTest :: Context -> IORef Int -> IO ()
-runFitMutedWidthTest ctx failed = do
-  let inp = withInput 400 100
-      ui = columnWith tight (muted "HelloFitMuted")
-  _ <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
-  assertJust failed (rectW <$> spanRect "HelloFitMuted" spans) $ \w -> assertGt failed w 8
+-- | Hosts hand the view what the app set, each of its own type, and a compact
+-- host hands back the whole value.
+runHostSlotTest :: Context -> IORef Int -> IO ()
+runHostSlotTest ctx failed = do
+  stringHost <- newHost
+  intHost <- newHost
+  otherHost <- newHost
+  compactOwner <- newHost
+  let ask :: Host a -> IO (Maybe a)
+      ask h = evalUi ctx (withInput 80 80) (column (pure ()) >> askHost h)
+  assertEq failed Nothing =<< ask stringHost
+  setHost stringHost ("ok" :: String)
+  setHost intHost (1 :: Int)
+  setHost otherHost ("independent" :: String)
+  assertEq failed (Just "ok") =<< ask stringHost
+  assertEq failed (Just 1) =<< ask intHost
+  assertEq failed (Just "independent") =<< ask otherHost
+  _ <- compactHost compactOwner ([0 .. 9999] :: [Int])
+  got <- evalUi ctx (withInput 80 80) (column (pure ()) >> askCompact compactOwner)
+  assertEq failed (Just (10000, 9999)) ((\xs -> (length xs, last xs)) <$> got)
 
--- | Nesting deeper than the initial snapshot-level capacity must still lay
--- out correctly (the level array grows on demand).
-runDeepNestingTest :: Context -> IORef Int -> IO ()
-runDeepNestingTest ctx failed = do
+
+-- | Grow, percent, shrink and aspect sizing, 12 px a character. Locking the
+-- largest grow child must lock the middle one on a later sweep (one sweep
+-- gives it 55), and percent children give a gap's overflow back.
+runFlexSizingTest :: Context -> IORef Int -> IO ()
+runFlexSizingTest ctx failed = forM_ cases $ \(w, h, ui, size, want) -> do
+  ids <- warmup2 ctx (withInput w h) ui
+  got <- mapM (fmap (maybe [] size) . getPrevRect ctx) ids
+  let near a b = abs (a - b) <= 0.5
+  unless (map length got == map length want && and (zipWith near (concat got) (concat want))) $
+    assertEq failed want got
+  where
+    sized l txt = respId <$> labelWith' (l . tight) txt
+    filling l = sized (fillW . l)
+    shrink l = l {layoutWidth = Shrink 1}
+    rowOf w = rowWith (fixedW w . tight . gap 0) . sequence
+    widths = pure . rectW
+    sizes r = [rectW r, rectH r]
+    -- Spacers keep a non-zero width: prev-rect tracking skips zero-area rects.
+    growSpacer = currentId <* spacer (Fixed 10) (Grow 1)
+    halves = rowWith (fixedW 206 . tight . gap 6) (sequence [sized (percent 50) "A", sized (percent 50) "B"])
+    cases :: [(Float, Float, NanoUI [WidgetId], Rect -> [Float], [[Float]])]
+    cases =
+      [ (210, 40, rowOf 210 [filling id "A", filling id "AAAAA"], widths, [[105], [105]])
+      , (200, 40, rowOf 200 [filling id "A", filling id (T.replicate 15 "A")], widths, [[20], [180]])
+      , (240, 40, rowOf 240 (map (`filling` "A") [minW 12, minW 60, minW 130]), widths, [[50], [60], [130]])
+      , (60, 200, columnWith (fixedH 200 . tight . gap 0) (sequence [growSpacer, growSpacer]), pure . rectH, [[100], [100]])
+      , (200, 80, rowOf 200 [sized (percent 25) "A", sized (percent 75) "B"], widths, [[50], [150]])
+      , (300, 80, halves, \r -> [rectX r, rectW r], [[0, 100], [106, 100]])
+      , ( 400
+        , 200
+        , rowOf 100 [sized shrink "abcdefghijkl", spacer (Grow 1) (Fixed 5) >> respId <$> buttonWith' tight "X"]
+        , \r -> [rectX r + rectW r]
+        , [[64], [100]]
+        )
+      , (400, 200, rowOf 100 [sized shrink "abcdefghijkl" <* labelWith (shrink . tight) "ab"], widths, [[100]])
+      , (320, 240, columnWith (fixedW 160 . tight) (sequence [sized (fixedAspectW 160 2) "X"]), sizes, [[160, 80]])
+      ]
+
+-- | An end-aligned label's text ends at the label's right edge.
+runLabelAlignEndTest :: Context -> IORef Int -> IO ()
+runLabelAlignEndTest ctx failed = do
+  let tw = fmAdvance (ctxFontMetrics ctx) ' ' * 2
+      ui = rowWith (fixedW (tw + 4) . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "ab")
+  lab <- warmup2 ctx emptyInput {inputWindowSize = Size (tw + 12) 8} ui
+  assertJustM failed (spanRect "ab" <$> collectTextSpans ctx) $ \(Rect x _ w _) -> do
+    let Rect bx _ bw _ = respRect lab
+    assert failed (abs (x + w - (bx + bw)) <= 0.6 && abs (w - tw) <= 0.6)
+  checkLabelAlignEndInk failed
+
+-- | Nesting past the level array's first capacity lays out, a responsive row
+-- stacks only below its breakpoint, and a multi-line kv value pushes the next
+-- row down.
+runLayoutFlowTest :: Context -> IORef Int -> IO ()
+runLayoutFlowTest ctx failed = do
   let nest :: Int -> NanoUI ()
-      nest 0 = void (label "deep")
+      nest 0 = label "deep"
       nest k = column (nest (k - 1))
-  _ <- runFrame ctx (withInput 300 300) (nest 320)
-  spans <- collectTextSpans ctx
-  assert failed (any (\(_, t, _, _, _) -> t == "deep") spans)
+      stacking = responsiveRowCol 720 (tight . gap 8 . fillW) $ do
+        columnWith (tight . gap 8 . fillW) (card (label "LeftTop") >> card (label "LeftBot"))
+        card (label "Right")
+      kvs = column . card $ kv "Notes" "Line 1\nLine 2\nLine 3\nLine 4\nLine 5" >> kv "Tree" "0"
+      above a b = join ((\ra rb -> checkGt (rectY rb) (rectY ra + 1)) <$> rectOf a <*> rectOf b)
+  runSim ctx failed (withInput 300 300) (nest 320) (expect "deep")
+  responsiveCtx <- newPixelContext
+  runSim responsiveCtx failed (withInput 520 800) stacking $ do
+    above "LeftBot" "Right"
+    _ <- resize 1200 800
+    right <- rectOf "Right"
+    leftTop <- rectOf "LeftTop"
+    checkGt (rectX right) (rectX leftTop + 1)
+  kvCtx <- newPixelContext
+  runSim kvCtx failed (withInput 320 400) kvs (above "Line 5" "Tree")
 
--- | A responsive row stacks its children below the breakpoint and keeps them
--- side by side above it.
-runResponsiveWrapTest :: Context -> IORef Int -> IO ()
-runResponsiveWrapTest ctx failed = do
-  let ui = responsiveRowCol 720 (tight . gap 8 . fillW) $ do
-        columnWith (tight . gap 8 . fillW) (card (void (label "LeftTop")) >> card (void (label "LeftBot")))
-        card (void (label "Right"))
-  _ <- warmup2 ctx (withInput 520 800) ui
-  narrow <- collectTextSpans ctx
-  case (spanYOf "Right" narrow, spanYOf "LeftBot" narrow) of
-    ([ry], [ly]) -> assertGt failed ry (ly + 1)
-    _ -> assert failed False
-  _ <- warmup2 ctx (withInput 1200 800) ui
-  wide <- collectTextSpans ctx
-  case (spanXOf "Right" wide, spanXOf "LeftTop" wide) of
-    ([rx], [lx]) -> assertGt failed rx (lx + 1)
-    _ -> assert failed False
-
-runDrawingTest :: Context -> IORef Int -> IO ()
-runDrawingTest ctx failed = do
-  let ui =
-        drawing (fixedWH 80 40) $ \r ->
-          pure
-            ( Stroke
-                (rectX r)
-                (rectY r + rectH r * 0.5)
-                (rectX r + rectW r)
-                (rectY r + rectH r * 0.5)
-                2
-                (colorRGBA 255 0 0 255)
-            )
-      inp = withInput 200 80
-  (_, draw, _) <- runFrame ctx inp ui
-  assert failed (drawIndexCount draw >= 6 && not (drawCmdNull draw))
-  (_, draw2, _) <- runFrame ctx inp ui
-  assert failed (drawIndexCount draw2 >= 6 && not (drawCmdNull draw2))
-
-runPointerCursorTest :: Context -> IORef Int -> IO ()
-runPointerCursorTest ctx failed = do
-  let inp0 = withInput 200 100
-      ui = column $ do
-        btn <- button' "Click"
-        (cb, _) <- withValue False (checkbox' "Feature")
-        pure (btn, cb)
-      wantAt inp = runFrame ctx inp ui >> pointerCursorWanted ctx inp
-  (btn, cb) <- warmup2 ctx inp0 ui
-  onButton <- wantAt (inp0 {inputMousePos = centerOf btn})
-  assert failed onButton
-  offWidgets <- wantAt (inp0 {inputMousePos = V2 (-1) (-1)})
-  assert failed (not offWidgets)
-  let hoverBox = inp0 {inputMousePos = centerOf cb}
-  onBox <- wantAt hoverBox
-  assert failed onBox
-  pressBox <- wantAt (applyMouseButton MouseLeft True hoverBox)
-  assert failed pressBox
-
--- A frame whose UI adds no widgets is an empty frame, not a read of a node
--- that was never added: presses, wheel input, redraw and cursor queries all
--- run on the empty arena. Node 0 starts out as a container that is its own
--- child, so any read of it recurses without end. Widgets added on the next
--- frame still lay out.
+-- | A frame with no widgets runs input, redraw and cursor queries on the
+-- empty arena, not on node 0, which starts out as its own child: reading it
+-- recursed without end.
 runEmptyFrameTest :: Context -> IORef Int -> IO ()
 runEmptyFrameTest ctx failed = do
   arrays <- arenaArrays (ctxNodeArena ctx)
@@ -167,615 +168,313 @@ runEmptyFrameTest ctx failed = do
   writeTree arrays 0 TreeFirstChild 0
   writeTree arrays 0 TreeNextSibling (-1)
   let inp0 = (withInput 320 200) {inputMousePos = V2 40 40}
-      press = (applyMouseButton MouseLeft True inp0) {inputScroll = V2 0 1}
-      ui = row $ do
-        wid <- currentId
-        image (fixedWH 40 24) (ImageId 0)
-        pure wid
   _ <- runFrame ctx inp0 (pure ())
-  _ <- runFrame ctx press (pure ())
+  _ <- runFrame ctx (applyMouseButton MouseLeft True inp0) {inputScroll = V2 0 1} (pure ())
   _ <- needsRedraw ctx inp0 (inp0 {inputMousePos = V2 60 60})
   _ <- uiCursorKind ctx inp0
-  wid <- warmup2 ctx inp0 ui
-  mRect <- getPrevRect ctx wid
-  assert failed (maybe False (\(Rect _ _ w h) -> abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5) mRect)
+  wid <- warmup2 ctx inp0 (row (currentId <* image (fixedWH 40 24) (ImageId 0)))
+  assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) ->
+    assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
 
--- Switching an image to another id repaints the image, and only the image:
--- frames swapped inside a page must neither leave a stale frame on screen nor
--- repaint the whole page.
-runImageSwapDamageTest :: Context -> IORef Int -> IO ()
-runImageSwapDamageTest ctx failed = do
-  let px a = BS.pack (concat (replicate 16 [a, 0, 0, 255]))
-  ok1 <- registerImage ctx (ImageId 1) 4 4 (px 60)
-  ok2 <- registerImage ctx (ImageId 2) 4 4 (px 120)
-  assert failed (ok1 && ok2)
-  frameRef <- newIORef (ImageId 1)
-  let inp0 = withInputOff 320 200
-      ui = fmap snd $
-        scrollArea (padAll 10 . grow) $
-          column $ do
-            label "frames"
-            wid <- currentId
-            image (fixedWH 40 24) =<< liftIO (readIORef frameRef)
-            pure wid
-  wid <- warmup2 ctx inp0 ui
-  writeIORef frameRef (ImageId 2)
-  _ <- runFrame ctx inp0 ui
-  dmg <- takeDamage ctx
-  mRect <- getPrevRect ctx wid
-  case (dmg, mRect) of
-    (DamageClip (Rect dx dy dw dh), Just (Rect ix iy iw ih)) -> do
-      assert failed (dx <= ix && dy <= iy && dx + dw >= ix + iw && dy + dh >= iy + ih)
-      assert failed (dw * dh < 320 * 200 / 4)
-    _ -> assert failed False
+-- | Pointer cursor over a button and a (pressed) checkbox only. A checkbox
+-- shows its Var's value before any click stores state, and each click at
+-- once. A slider in a filling column spans it to its maximum.
+runBasicWidgetsTest :: Context -> IORef Int -> IO ()
+runBasicWidgetsTest ctx failed = do
+  checked <- newVar True
+  level <- newVar 0
+  let ui = columnWith fillW ((,,) <$> button' "Click" <*> checkbox' "Opt" checked <*> slider' 0 100 level)
+      wantsPointer = liftIO . pointerCursorWanted ctx =<< getInput
+      showsChecked cb on = do
+        checkEq on =<< liftIO (readVarIO checked)
+        checkEq (Just (if on then 1 else 0)) =<< liftIO (widgetValue ctx (respId cb))
+  runSim ctx failed (withInput 400 200) ui $ do
+    (btn, cb, sl) <- result
+    showsChecked cb True
+    check =<< (moveTo (On btn) >> wantsPointer)
+    check . not =<< (moveTo (At (V2 (-1) (-1))) >> wantsPointer)
+    check =<< (moveTo (On cb) >> wantsPointer)
+    check =<< (press (On cb) >> wantsPointer)
+    _ <- release
+    showsChecked cb False
+    _ <- frame
+    showsChecked cb False
+    let Rect cx cy _ _ = respRect cb
+    _ <- click (At (V2 (cx + 1) (cy + 0.5)))
+    showsChecked cb True
+    let Rect sx sy sw sh = respRect sl
+        Rect tx ty tw th = sliderTrackBounds sx sy sw sh
+    checkGt sw 300
+    _ <- press (At (V2 (tx + tw - 2) (ty + th / 2)))
+    liftIO (readVarIO level) >>= \v -> checkGt v 90
 
-runImageTest :: Context -> IORef Int -> IO ()
-runImageTest ctx failed = do
-  let px a b c = BS.pack (concat (replicate 16 [a, b, c, 255]))
-  ok1 <- registerImage ctx (ImageId 1) 4 4 (px 255 0 0)
-  ok7 <- registerImage ctx (ImageId 7) 4 4 (px 0 0 255)
-  assert failed (ok1 && ok7)
-  let inp0 = withInput 320 200
-      imgLayout = fixedWH 40 24
-      ui = row $ do
-        image imgLayout (ImageId 1)
-        wid <- currentId
-        image imgLayout (ImageId 7)
-        pure wid
-  (wid, drawData) <- warmupDraw ctx inp0 ui
-  assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) -> assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
-  let texCmds = filter (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems drawData)
-  assertEq failed (length texCmds) 1
-  assert failed (any (\c -> cmdIndexCount c == 12) texCmds)
-  (u0, _) <- vertUv drawData 0
-  (u4, _) <- vertUv drawData 4
-  assert failed (abs (u0 - u4) >= 1e-6)
-  -- Fresh ids start above the registered ones and never repeat.
-  ((fresh1, fresh2), _, _) <- runFrame ctx inp0 ((,) <$> freshImageId <*> freshImageId)
-  assertEq failed (map unImageId [fresh1, fresh2]) [8, 9]
-  let missing = image imgLayout (ImageId 0)
-  _ <- runFrame ctx inp0 missing
-  (_, missingData, _) <- runFrame ctx inp0 missing
-  assert failed (not (any (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems missingData)))
+-- | The embedded clear button empties the field, keeps focus, and reports the
+-- change at once rather than after the debounce.
+runSearchInputClearTest :: Context -> IORef Int -> IO ()
+runSearchInputClearTest ctx failed = do
+  query <- newVar "hello world"
+  runSim ctx failed (withInput 320 100) (column (searchInput' "Search…" query)) $ do
+    Rect bx by bw bh <- respRect <$> result
+    pressTab 1
+    -- The clear button is where the field shows the pointer cursor.
+    let cy = by + bh / 2
+        findClear x
+          | x < bx = pure Nothing
+          | otherwise = do
+              _ <- moveTo (At (V2 x cy))
+              kind <- liftIO . uiCursorKind ctx =<< getInput
+              if kind == UiCursorPointer then pure (Just x) else findClear (x - 2)
+    findClear (bx + bw - 6) >>= \m -> checkJust m $ \x -> do
+      _ <- press (At (V2 x cy))
+      cleared <- release
+      checkEq "" =<< liftIO (readVarIO query)
+      check (respChanged cleared)
+      checkEq (respId cleared) =<< liftIO (getFocusId ctx)
+      check . not . respChanged =<< frame
 
--- | Hover enter and press repaint only the button, and pointer motion inside
--- an already-hovered button does not request a redraw.
-runHoverDamageTest :: Context -> IORef Int -> IO ()
-runHoverDamageTest ctx failed = do
-  let ui = column (button' "OK")
-      inp0 = withInputOff 240 80
-      assertSmall dmg = case dmg of
-        DamageFull -> assert failed False
-        DamageClip (Rect _ _ w h) -> assert failed (w * h < 240 * 80 * 0.5)
-  _ <- runFrame ctx inp0 ui
-  d0 <- takeDamage ctx
-  assertEq failed d0 DamageFull
-  (resp, _, _) <- runFrame ctx inp0 ui
-  let V2 cx cy = centerOf resp
-      inp1 = inp0 {inputMousePos = V2 cx cy}
-      inp2 = inp0 {inputMousePos = V2 (cx + 1) cy}
-  needEnter <- needsRedraw ctx inp0 inp1
-  assert failed needEnter
-  _ <- runFrame ctx inp1 ui
-  assertSmall =<< takeDamage ctx
-  let drain = inp1 {inputDeltaTime = 1}
-  _ <- runFrame ctx drain ui
-  needStay <- needsRedraw ctx drain inp2
-  assert failed (not needStay)
-  let inpClick = applyMouseButton MouseLeft True inp1
-  needClick <- needsRedraw ctx drain inpClick
-  assert failed needClick
-  _ <- runFrame ctx inpClick ui
-  assertSmall =<< takeDamage ctx
-
-
--- | An unclicked checkbox must keep rendering its initial value when no state
--- is stored, and a click must show at once.
-runCheckboxInitialTest :: Context -> IORef Int -> IO ()
-runCheckboxInitialTest ctx failed = do
-  checkedRef <- newVar True
-  let inp0 = withInput 200 100
-      ui = column (held checkedRef (checkbox' "Opt"))
-  (resp, _) <- warmup2 ctx inp0 ui
-  let drawnAs v = assertEq failed (Just v) =<< widgetValue ctx (respId resp)
-  drawnAs 1
-  let Rect rx ry _ _ = respRect resp
-      (press, release) = clickPair inp0 (V2 (rx + 1) (ry + 0.5))
-  _ <- runFrame ctx press ui
-  ((_, checked), _, _) <- runFrame ctx release ui
-  assert failed (not checked)
-  drawnAs 0
-  -- The toggled value persists on an idle frame.
-  ((_, idle), _, _) <- runFrame ctx inp0 ui
-  assert failed (not idle)
-  _ <- runFrame ctx press ui
-  ((_, checked2), _, _) <- runFrame ctx release ui
-  assert failed checked2
-  drawnAs 1
-
-runSliderFillWidthTest :: Context -> IORef Int -> IO ()
-runSliderFillWidthTest ctx failed = do
-  let inp0 = withInput 400 120
-      ui = columnWith fillW (withValue 0 (slider' 0 100))
-  (resp, _) <- warmup2 ctx inp0 ui
-  let Rect rx ry rw rh = respRect resp
-  assertGt failed rw 300
-  let track = sliderTrackBounds rx ry rw rh
-      endDrag = V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
-  ((_, val), _, _) <- runFrame ctx (pressAt inp0 endDrag) ui
-  assertGt failed val 90
-
--- | Percent children size against the row width, and flex like CSS: two 50%
--- columns plus a gap must give back the overflow so the pair lands exactly on
--- the row width (equal halves, no spill past the row's right edge).
-runPercentGapShrinkTest :: Context -> IORef Int -> IO ()
-runPercentGapShrinkTest ctx failed = do
-  let quarters = rowWith (fixedW 200 . tight . gap 0) $ do
-        a <- labelWith' (percent 25 . tight) "A"
-        b <- labelWith' (percent 75 . tight) "B"
-        pure (a, b)
-  (qa, qb) <- warmup2 ctx (withInput 200 80) quarters
-  assert failed (abs (rectW (respRect qa) - 50) <= 1 && abs (rectW (respRect qb) - 150) <= 1)
-  let inp = withInput 300 80
-      ui = rowWith (fixedW 206 . tight . gap 6) $ do
-        a <- labelWith' (percent 50 . tight) "A"
-        b <- labelWith' (percent 50 . tight) "B"
-        pure (a, b)
-  (a, b) <- warmup2 ctx inp ui
-  let Rect xa _ wa _ = respRect a
-      Rect xb _ wb _ = respRect b
-  assert failed (abs (wa - 100) <= 0.5 && abs (wb - 100) <= 0.5)
-  assert failed (abs (xb - (xa + wa + 6)) <= 0.5)
-
--- | A row too short for its children takes the shortfall from shrinkable
--- children, none below its minimum. A shrinking label beside a spacer gives
--- up all of it, keeping later children in the row; of two shrinking labels,
--- the longer covers what the shorter cannot.
-runShrinkShortfallTest :: Context -> IORef Int -> IO ()
-runShrinkShortfallTest ctx failed = do
-  let inp = withInput 400 200
-      shrink l = l {layoutWidth = Shrink 1}
-  (lbl, btn) <- warmup2 ctx inp $ rowWith (fixedW 100 . tight . gap 0) $ do
-    l <- labelWith' (shrink . tight) "abcdefghijkl"
-    spacer (Grow 1) (Fixed 5)
-    b <- buttonWith' tight "X"
-    pure (l, b)
-  assertEq failed (rectW (respRect lbl)) 64
-  assertEq failed (rectX (respRect btn) + rectW (respRect btn)) 100
-  long <- warmup2 ctx inp $ rowWith (fixedW 100 . tight . gap 0) $ do
-    l <- labelWith' (shrink . tight) "abcdefghijkl"
-    labelWith (shrink . tight) "ab"
-    pure l
-  assertEq failed (rectW (respRect long)) 100
-
--- | Grow children split the free space by factor with a min-content floor
--- (fixed-width rows, 12px per char in this context):
---
--- * equal split: two fillW labels with unequal text come out equal when both
---   fit their share;
--- * content floor: a child whose content needs more than its share takes
---   exactly its content width and the sibling re-shares what is left;
--- * lock cascade: locking the largest child shrinks the share pool, which
---   must lock the middle child on a later sweep (one sweep would give it 55);
--- * the vertical axis splits the same way. Its spacers keep a non-zero width
---   because prev-rect tracking skips zero-area rects.
-runGrowSplitTest :: Context -> IORef Int -> IO ()
-runGrowSplitTest ctx failed = do
-  let growLabel l txt = respId <$> labelWith' (fillW . l . tight) txt
-      growSpacer = currentId <* spacer (Fixed 10) (Grow 1)
-      cases :: [(Input, Rect -> Float, NanoUI [WidgetId], [Float])]
-      cases =
-        [ ( withInput 210 40
-          , rectW
-          , rowWith (fixedW 210 . tight . gap 0) $
-              sequence [growLabel id "A", growLabel id "AAAAA"]
-          , [105, 105]
-          )
-        , ( withInput 200 40
-          , rectW
-          , rowWith (fixedW 200 . tight . gap 0) $
-              sequence [growLabel id "A", growLabel id (T.replicate 15 "A")]
-          , [20, 180]
-          )
-        , ( withInput 240 40
-          , rectW
-          , rowWith (fixedW 240 . tight . gap 0) $
-              sequence [growLabel (minW 12) "A", growLabel (minW 60) "A", growLabel (minW 130) "A"]
-          , [50, 60, 130]
-          )
-        , ( withInput 60 200
-          , rectH
-          , columnWith (fixedH 200 . tight . gap 0) $
-              sequence [growSpacer, growSpacer]
-          , [100, 100]
-          )
-        ]
-  forM_ cases $ \(inp, size, ui, want) -> do
-    ids <- warmup2 ctx inp ui
-    got <- mapM (fmap (maybe 0 size) . getPrevRect ctx) ids
-    assertEq failed (length got) (length want)
-    forM_ (zip got want) $ \(g, w) -> assert failed (abs (g - w) <= 0.5)
-
-runLabelAlignEndTest :: Context -> IORef Int -> IO ()
-runLabelAlignEndTest ctx failed = do
-  let
-    fm = ctxFontMetrics ctx
-    tw = fmAdvance fm ' ' * 2
-    boxW = tw + 4
-    inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
-    ui =
-      rowWith (fixedW boxW . tight . gap 0) $
-        labelWith' (fillW . alignEnd . tight) "ab"
-  lab <- warmup2 ctx inp ui
-  spans <- collectTextSpans ctx
-  let
-    Rect bx _ bw _ = respRect lab
-    hits = [r | (r, txt, _, _, _) <- spans, T.isInfixOf (T.pack "ab") txt]
-  case hits of
-    [] -> assert failed False
-    Rect x _ w _ : _ -> do
-      assert failed (abs ((x + w) - (bx + bw)) <= 0.6)
-      assert failed (abs (w - tw) <= 0.6)
-  checkLabelAlignEndInk failed
-
-runAspectLayoutTest :: Context -> IORef Int -> IO ()
-runAspectLayoutTest ctx failed = do
-  let inp = withInput 320 240
-      ui = columnWith (fixedW 160 . tight) (labelWith' (fixedAspectW 160 2 . tight) "X")
-  resp <- warmup2 ctx inp ui
-  let Rect _ _ w h = respRect resp
-  assert failed (abs (w - 160) <= 1 && abs (h - 80) <= 1)
-
-runHostSlotTest :: Context -> IORef Int -> IO ()
-runHostSlotTest ctx failed = do
-  stringHost <- newHost
-  intHost <- newHost
-  otherStringHost <- newHost
-  compactOwner <- newHost
-  let inp = withInput 80 80
-      hostUiString = do
-        _ <- column (pure ())
-        askHost stringHost
-      hostUiInt = do
-        _ <- column (pure ())
-        askHost intHost
-  (miss, _, _) <- runFrame ctx inp hostUiString
-  setHost stringHost ("ok" :: String)
-  setHost intHost (1 :: Int)
-  setHost otherStringHost ("independent" :: String)
-  (hitS, _, _) <- runFrame ctx inp hostUiString
-  (hitI, _, _) <- runFrame ctx inp hostUiInt
-  assert failed (miss == Nothing && hitS == Just "ok" && hitI == Just 1)
-  assertEq failed (Just "independent") =<< runNanoUI ctx inp (askHost otherStringHost)
-  _ <- compactHost compactOwner ([0 .. 9999] :: [Int])
-  let compactUi = do
-        _ <- column (pure ())
-        askCompact compactOwner
-  (got, _, _) <- runFrame ctx inp compactUi
-  case got of
-    Just xs | length xs == 10000 && last xs == 9999 -> pure ()
-    _ -> assert failed False
-
-runEmbedStateTest :: Context -> IORef Int -> IO ()
-runEmbedStateTest ctx failed = do
-  let ui :: Eff '[Ui, State Int, IOE] (Int, Float)
-      ui = do
-        _ <- embedNanoUI (column (pure ()))
-        modify (+ (1 :: Int))
-        -- The row's actions run inside the body, in the body's scope.
-        w <- withRunInNanoUI $ \run -> column $ do
-          run (modify (+ (1 :: Int)))
-          inp <- askInput
-          localInput inp {inputWindowSize = Size 123 45} (run (embedNanoUI windowWidth))
-        n <- get
-        pure (n, w)
-  ((n, w), _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
-  assertEq failed n 2
-  assertEq failed w 123
-
-runPanelPaintsTest :: Context -> IORef Int -> IO ()
-runPanelPaintsTest ctx failed = do
-  let inp = withInput 200 200
-      fat = padAll 16 . fillW
-  (_, colDraw, _) <- runFrame ctx inp (columnWith fat (label "x"))
-  (_, panDraw, _) <- runFrame ctx inp (panelWith fat (label "x"))
-  assertGt failed (drawVertexCount panDraw) (drawVertexCount colDraw)
+-- | A search field commits caller-set text after one pause (with no edit time
+-- it once never did, waking every period), and typing on a wake 40 ms after
+-- the last edit.
+runSearchInputDebounceTest :: Context -> IORef Int -> IO ()
+runSearchInputDebounceTest ctx failed = do
+  query <- newVar ""
+  let ui = column (held query (searchInputConfigured' defaultSearchInputConfig {sicDebounceMs = 40}))
+      wakeAt = liftIO (getWakeAt ctx)
+      showing want changed (resp, txt) = checkEq (want, changed) (txt, respChanged resp)
+      afterPause us = liftIO (threadDelay us) >> frame
+  runSim ctx failed (withInput 320 100) ui $ do
+    pressTab 1
+    liftIO (writeVarIO query "recent")
+    showing "recent" False =<< frame
+    wakeAt >>= \t -> checkGt t 0
+    showing "recent" True =<< afterPause 80000
+    checkEq 0 =<< wakeAt
+    liftIO (writeVarIO query "")
+    _ <- afterPause 80000
+    showing "a" False =<< typeText "a"
+    before <- liftIO getMonotonicTime
+    showing "ab" False =<< typeText "b"
+    after <- liftIO getMonotonicTime
+    -- The edit is stamped during its frame: the wake is 40 ms past a moment in it.
+    wakeAt >>= \t -> check (t >= before + 0.04 && t <= after + 0.042)
+    showing "ab" True =<< afterPause 80000
+    checkEq 0 =<< wakeAt
+    showing "ab" False =<< afterPause 50000
 
 -- | Where 'seedMixedGrid' has got to.
 data MixedSeed = SeedStart | SeedRight Word64 | SeedDone
 
--- | Called from every pane's 'pgViewPane', grows a fresh grid into the mixed
--- three-pane layout over its first frames: the first pane splits vertically,
--- then the new pane splits horizontally (one pane left, two stacked right).
+-- | From every pane's view, grows a grid into one pane left, two right.
 seedMixedGrid :: IORef MixedSeed -> Word64 -> PaneGridCtx -> NanoUI ()
-seedMixedGrid ref pid pctx = do
-  s <- liftIO (readIORef ref)
-  case s of
-    SeedStart -> do
-      nb <- pgcSplit pctx AxisV
-      liftIO (writeIORef ref (SeedRight nb))
-    SeedRight nb | pid == nb -> do
-      _ <- pgcSplit pctx AxisH
-      liftIO (writeIORef ref SeedDone)
+seedMixedGrid ref pid pctx =
+  liftIO (readIORef ref) >>= \case
+    SeedStart -> pgcSplit pctx AxisV >>= liftIO . writeIORef ref . SeedRight
+    SeedRight nb | pid == nb -> pgcSplit pctx AxisH >> liftIO (writeIORef ref SeedDone)
     _ -> pure ()
 
 -- | A filling grid with 40px minimum panes and 4px dividers.
 testGridConfig :: PaneGridConfig
 testGridConfig = defaultPaneGridConfig {pgLayout = fillW . fillH, pgMinSize = 40, pgSpacing = 4}
 
--- | Drag-drop previews must come from simulating the post-drop layout, not
--- from halving the target's pre-drop rect: in a grid mixing 'AxisV' and
--- 'AxisH' splits, dropping first removes the dragged pane, which collapses
--- its parent split and re-flows the sibling subtrees, so the naive highlight
--- lands at the wrong position and size.
+recordPane :: IORef (IM.IntMap v) -> Word64 -> v -> NanoUI ()
+recordPane ref pid v = liftIO (modifyIORef' ref (IM.insert (fromIntegral pid) v))
+
+-- | Drag the root divider of a 600 by 400 grid from its middle to x = 120.
+dragDividerTo120 :: Context -> NanoUI a -> IO ()
+dragDividerTo120 ctx ui = runDragFrom ctx inp ui (V2 300 200) (V2 120 200) >> void (runFrame ctx (releaseAt hold) ui)
+  where
+    inp = withInput 600 400
+    hold = holdAt inp (V2 120 200)
+
+-- | Drop previews simulate the post-drop layout (lifting a pane re-flows a
+-- mixed-axis grid) and size-preserving drops keep the pane's extent. Live, a
+-- drop lands with every pane's state, outside the grid cancels, and a drag
+-- from a close button lifts nothing.
 runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()
 runPaneGridMixedDragTest ctx failed = do
-  -- Model level: vertical root split with a horizontal split inside the right
-  -- branch: pane 1 left, panes 2 (top right) and 3 (bottom right).
   let minSize = 40
       gutter = 4
       base = Rect 0 0 600 400
+      lay t = fst (layoutNode minSize gutter t base)
       tree0 = Split 100 AxisV 0.5 (Pane 1) (Split 101 AxisH 0.5 (Pane 2) (Pane 3))
-      regions0 = fst (layoutNode minSize gutter tree0 base)
-      r2 = regions0 M.! 2
-      r3 = regions0 M.! 3
-      preview dt = (\dp -> (dpRect dp, dt)) <$> dropPreviewTreeSized Nothing minSize gutter tree0 1 0 base dt
-  assertEq failed regions0 $
-    M.fromList
-      [ (1, Rect 0 0 298 400)
-      , (2, Rect 302 0 298 198)
-      , (3, Rect 302 202 298 198)
-      ]
-  -- Cross-axis edge drop on the bottom-right pane: removing pane 1 collapses
-  -- the root split, so the right branch re-flows to the whole grid and pane 1
-  -- lands in its bottom-right corner, not in a half of the target's old rect
-  -- (which would be Rect 302 301 298 99).
-  let dtA = dropTargetForPane r3 (V2 (rectX r3 + rectW r3 / 2) (rectY r3 + rectH r3 * 0.9)) 3
-  assertEq failed dtA (DropSplit 3 AxisH False)
-  assertEq failed (preview dtA) (Just (Rect 0 303 600 97, DropSplit 3 AxisH False))
-  -- Edge drop on the top-right pane.
-  let dtB = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 * 0.9) (rectY r2 + rectH r2 / 2)) 2
-  assertEq failed dtB (DropSplit 2 AxisV False)
-  assertEq failed (preview dtB) (Just (Rect 302 0 298 198, DropSplit 2 AxisV False))
-  -- Center drop swaps; the preview is the target's exact region.
-  let dtC = dropTargetForPane r2 (spanCenter r2) 2
-  assertEq failed dtC (DropSwap 2)
-  assertEq failed (preview dtC) (Just (Rect 302 0 298 198, DropSwap 2))
-  -- Top-level edge drops restructure the whole grid.
-  assertEq failed (topLevelDropTarget 20 base (V2 5 200)) (Just (DropTop AxisV True))
-  assertEq failed (topLevelDropTarget 20 base (V2 300 200)) Nothing
-  let dtD = DropTop AxisV True
-  assertEq failed (preview dtD) (Just (Rect 0 0 298 400, DropTop AxisV True))
-
-  -- Size-preserving drops use the original pane's extent, including after
-  -- removing it collapses a parent. Both sides and axes share the same rule.
+      r2 = lay tree0 M.! 2
+      r3 = lay tree0 M.! 3
+      preview dt = dpRect <$> dropPreviewTreeSized Nothing minSize gutter tree0 1 0 base dt
+      within (Rect x y w h) fx fy = V2 (x + w * fx) (y + h * fy)
+  assertEq failed (M.fromList [(1, Rect 0 0 298 400), (2, Rect 302 0 298 198), (3, Rect 302 202 298 198)]) (lay tree0)
+  -- With pane 1 lifted the right branch fills the grid, so an edge drop on
+  -- pane 3 lands across its foot, not in half its old rect (302 301 298 99).
+  forM_
+    [ (dropTargetForPane r3 (within r3 0.5 0.9) 3, DropSplit 3 AxisH False, Rect 0 303 600 97)
+    , (dropTargetForPane r2 (within r2 0.9 0.5) 2, DropSplit 2 AxisV False, r2)
+    , (dropTargetForPane r2 (spanCenter r2) 2, DropSwap 2, r2)
+    , (DropTop AxisV True, DropTop AxisV True, Rect 0 0 298 400)
+    ]
+    $ \(dt, want, rect) -> assertEq failed (want, Just rect) (dt, preview dt)
+  assertEq failed (Just (DropTop AxisV True)) (topLevelDropTarget 20 base (V2 5 200))
+  assertEq failed Nothing (topLevelDropTarget 20 base (V2 300 200))
   let sizedTree = Split 100 AxisV 0.25 (Pane 1) (Split 101 AxisH 0.3 (Pane 2) (Pane 3))
-      source = fst (layoutNode minSize gutter sizedTree base) M.! 1
-      sized dt = dropPreviewTreeSized (Just source) minSize gutter sizedTree 1 102 base dt
+      s1 = lay sizedTree M.! 1
+      s2 = lay sizedTree M.! 2
+      sized src p = dropPreviewTreeSized (Just src) minSize gutter sizedTree p 102 base
   forM_ [True, False] $ \onA -> do
-    forM_ [DropTop AxisV onA, DropSplit 3 AxisV onA] $ \dt ->
-      case sized dt of
-        Nothing -> assert failed False
-        Just dp -> do
-          assert failed (abs (rectW (dpRect dp) - rectW source) < 0.01)
-          assertEq failed (M.lookup 1 (fst (layoutNode minSize gutter (dpTree dp) base))) (Just (dpRect dp))
-    -- A thin left pane transfers its width to height on top/bottom drops.
-    forM_ [DropTop AxisH onA, DropSplit 3 AxisH onA] $ \dt ->
-      case sized dt of
-        Nothing -> assert failed False
-        Just dp -> assert failed (abs (rectH (dpRect dp) - rectW source) < 0.01)
-    let source2 = fst (layoutNode minSize gutter sizedTree base) M.! 2
-    case dropPreviewTreeSized (Just source2) minSize gutter sizedTree 2 102 base (DropTop AxisH onA) of
-      Nothing -> assert failed False
-      Just dp -> assert failed (abs (rectH (dpRect dp) - rectH source2) < 0.01)
-    -- Reverse orientation: a short top pane transfers height to width.
-    forM_ [DropTop AxisV onA, DropSplit 3 AxisV onA] $ \dt ->
-      case dropPreviewTreeSized (Just source2) minSize gutter sizedTree 2 102 base dt of
-        Nothing -> assert failed False
-        Just dp -> assert failed (abs (rectW (dpRect dp) - rectH source2) < 0.01)
-    -- Transferred sizes still respect the destination subtree's minimum.
-    case dropPreviewTreeSized (Just (Rect 0 0 500 400)) minSize gutter sizedTree 1 102 base (DropTop AxisH onA) of
-      Nothing -> assert failed False
-      Just dp -> assert failed (abs (rectH (dpRect dp) - 312) < 0.01)
-  assertEq failed (fmap dpRect (sized (DropSwap 2))) (M.lookup 2 (fst (layoutNode minSize gutter sizedTree base)))
-
-  -- Widget level: build the same mixed grid through a live paneGrid, drag the
-  -- left pane onto the bottom-right pane's lower edge, and check the drop
-  -- lands it below that pane (tree order of the restructured grid).
+    let both ax = [DropTop ax onA, DropSplit 3 ax onA]
+    forM_ (both AxisV) $ \dt -> assertJust failed (sized s1 1 dt) $ \dp ->
+      assertEq failed (Just (dpRect dp)) (M.lookup 1 (lay (dpTree dp)))
+    -- Extents carry across axes, within the destination's minimum.
+    forM_
+      ( [(s1, 1, dt, rectW, rectW s1) | dt <- both AxisV]
+          <> [(s1, 1, dt, rectH, rectW s1) | dt <- both AxisH]
+          <> [(s2, 2, DropTop AxisH onA, rectH, rectH s2)]
+          <> [(s2, 2, dt, rectW, rectH s2) | dt <- both AxisV]
+          <> [(Rect 0 0 500 400, 1, DropTop AxisH onA, rectH, 312)]
+      )
+      $ \(src, p, dt, size, want) ->
+        assertJust failed (sized src p dt) $ \dp -> assert failed (abs (size (dpRect dp) - want) < 0.01)
+  assertEq failed (Just s2) (dpRect <$> sized s1 1 (DropSwap 2))
   rects <- newIORef IM.empty
   closeRects <- newIORef IM.empty
   stateUpdates <- newIORef IM.empty
   paneStates <- newIORef IM.empty
   seed <- newIORef SeedStart
   let inp0 = withInput 600 400
-      cfg =
-        testGridConfig
-          { pgViewPane = \pid pctx -> do
-              liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
-              valueVar <- useVar (0 :: Int)
-              value <- readVar valueVar
-              marker <- nextId
-              updates <- liftIO (readIORef stateUpdates)
-              case IM.lookup (fromIntegral pid) updates of
-                Nothing -> pure ()
-                Just n -> do
+      ui =
+        paneGrid
+          testGridConfig
+            { pgViewPane = \pid pctx -> do
+                recordPane rects pid (pgcRect pctx)
+                valueVar <- useVar (0 :: Int)
+                value <- readVar valueVar
+                marker <- nextId
+                pending <- liftIO (IM.lookup (fromIntegral pid) <$> readIORef stateUpdates)
+                forM_ pending $ \n -> do
                   writeVar valueVar n
                   liftIO (modifyIORef' stateUpdates (IM.delete (fromIntegral pid)))
-              liftIO (modifyIORef' paneStates (IM.insert (fromIntegral pid) (marker, value)))
-              seedMixedGrid seed pid pctx
-              close <- button' "x"
-              liftIO (modifyIORef' closeRects (IM.insert (fromIntegral pid) (respRect close)))
-              when (respClicked close) (pgcClose pctx)
-              pure (PaneView "P" True)
-          }
-      ui = paneGrid cfg
+                recordPane paneStates pid (marker, value)
+                seedMixedGrid seed pid pctx
+                close <- button' "x"
+                recordPane closeRects pid (respRect close)
+                when (respClicked close) (pgcClose pctx)
+                pure (PaneView "P" True)
+            }
+      rectsAt i = writeIORef rects IM.empty >> runFrame ctx i ui >> readIORef rects
+      key = fromIntegral :: Word64 -> Int
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx inp0 ui
-  pgr0 <- warmup2 ctx inp0 ui
-  case pgrPanes pgr0 of
-    [pa, pb, pc] -> do
-      let expectedValues = IM.fromList [(fromIntegral p, fromIntegral p + 100) | p <- [pa, pb, pc]]
-      writeIORef stateUpdates expectedValues
-      _ <- warmup2 ctx inp0 ui
-      initialStates <- readIORef paneStates
-      assertEq failed (IM.map snd initialStates) expectedValues
-      rs <- readIORef rects
-      assertJust failed ((,) <$> IM.lookup (fromIntegral pa) rs <*> IM.lookup (fromIntegral pc) rs) $ \(ra, rc) -> do
-          -- Inside the header, only 2px from the divider: the gutter's
-          -- leeway must not extend into this pane and steal the drag.
-          let grab = V2 (rectX ra + rectW ra - 2) (rectY ra + 12)
-              -- 30px above the grid's bottom edge: inside the pane's bottom
-              -- drop zone but clear of the 20px top-level band. Horizontally
-              -- the grid's middle: targets are tested with the dragged pane
-              -- lifted out, where this pane spans the full width, and its own
-              -- middle there (3/4 across the grid) is already its right zone.
-              dest = V2 (gx + gw / 2) (rectY rc + rectH rc - 30)
-              ps = IM.elems rs
-              gx = minimum (map rectX ps)
-              gy = minimum (map rectY ps)
-              gw = maximum (map (\r -> rectX r + rectW r) ps) - gx
-              gh = maximum (map (\r -> rectY r + rectH r) ps) - gy
-          -- The order assert below cannot tell a pane-level split from a
-          -- top-level band drop ([pb, pc, pa] either way), so pin the pointer
-          -- to the pane-split path first.
-          assert failed (topLevelDropTarget 20 (Rect gx gy gw gh) dest == Nothing)
-          let press = pressAt inp0 grab
-              hold = holdAt inp0 dest
-              release = releaseAt hold
-          _ <- runFrame ctx press ui
-          writeIORef rects IM.empty
-          writeIORef paneStates IM.empty
-          _ <- runFrame ctx hold ui
-          during <- readIORef rects
-          duringStates <- readIORef paneStates
-          assertEq failed duringStates (IM.delete (fromIntegral pa) initialStates)
-          assert failed (not (IM.member (fromIntegral pa) during))
-          assertEq failed (IM.size during) 2
-          assert failed (all ((== gw) . rectW) (IM.elems during))
-          -- Crossing back over the original grab point must not make the
-          -- pane reappear or collapse the drag back into a click.
-          writeIORef rects IM.empty
-          _ <- runFrame ctx (hold {inputMousePos = grab}) ui
-          returned <- readIORef rects
-          assert failed (not (IM.member (fromIntegral pa) returned))
-          -- Releasing outside the grid restores the committed layout.
-          (cancelled, _, _) <- runFrame ctx (release {inputMousePos = V2 (-20) (-20)}) ui
-          assertEq failed (pgrPanes cancelled) [pa, pb, pc]
-          writeIORef rects IM.empty
-          _ <- warmup2 ctx inp0 ui
-          restored <- readIORef rects
-          assertEq failed restored rs
-          restoredStates <- readIORef paneStates
-          assertEq failed restoredStates initialStates
-          _ <- runFrame ctx press ui
-          _ <- runFrame ctx hold ui
-          (pgr1, _, _) <- runFrame ctx release ui
-          assertEq failed (pgrPanes pgr1) [pb, pc, pa]
-          _ <- warmup2 ctx inp0 ui
-          droppedStates <- readIORef paneStates
-          assertEq failed droppedStates initialStates
-          buttons <- readIORef closeRects
-          assertJust failed (IM.lookup (fromIntegral pa) buttons) $ \closeRect -> do
-            let closePos = spanCenter closeRect
-                closePress = press {inputMousePos = closePos}
-                closeHold = hold {inputMousePos = V2 (v2X closePos + 60) (v2Y closePos + 40)}
-            _ <- runFrame ctx closePress ui
-            writeIORef rects IM.empty
-            _ <- runFrame ctx closeHold ui
-            duringClose <- readIORef rects
-            assertEq failed (IM.size duringClose) 3
-            (closed, _, _) <- runFrame ctx (release {inputMousePos = closePos}) ui
-            assertEq failed (pgrPanes closed) [pb, pc]
-    _ -> assert failed False
+  [pa, pb, pc] <- pgrPanes <$> warmup2 ctx inp0 ui
+  let expected = IM.fromList [(key p, key p + 100) | p <- [pa, pb, pc]]
+  writeIORef stateUpdates expected
+  _ <- warmup2 ctx inp0 ui
+  initialStates <- readIORef paneStates
+  assertEq failed expected (IM.map snd initialStates)
+  rs <- readIORef rects
+  Just ra <- pure (IM.lookup (key pa) rs)
+  Just rc <- pure (IM.lookup (key pc) rs)
+  let ps = IM.elems rs
+      gx = minimum (map rectX ps)
+      gy = minimum (map rectY ps)
+      gw = maximum (map (\r -> rectX r + rectW r) ps) - gx
+      gh = maximum (map (\r -> rectY r + rectH r) ps) - gy
+      -- In the header, 2px from the divider, whose leeway must not steal it.
+      grab = V2 (rectX ra + rectW ra - 2) (rectY ra + 12)
+      -- In pane 3's bottom zone, clear of the 20px top-level band, at the
+      -- grid's middle: with pane 1 lifted, pane 3 spans the grid.
+      dest = V2 (gx + gw / 2) (rectY rc + rectH rc - 30)
+      grabbed = pressAt inp0 grab
+      hold = holdAt inp0 dest
+      dropped = releaseAt hold
+  -- The order checked below is the same after a top-level band drop.
+  assertEq failed Nothing (topLevelDropTarget 20 (Rect gx gy gw gh) dest)
+  _ <- runFrame ctx grabbed ui
+  writeIORef paneStates IM.empty
+  during <- rectsAt hold
+  assertEq failed (IM.delete (key pa) initialStates) =<< readIORef paneStates
+  assertEq failed (IM.keys (IM.delete (key pa) rs)) (IM.keys during)
+  assert failed (all ((== gw) . rectW) during)
+  -- Back over the grab point the pane stays lifted and the drag no click.
+  assert failed . not . IM.member (key pa) =<< rectsAt hold {inputMousePos = grab}
+  (cancelled, _, _) <- runFrame ctx dropped {inputMousePos = V2 (-20) (-20)} ui
+  assertEq failed [pa, pb, pc] (pgrPanes cancelled)
+  writeIORef rects IM.empty
+  _ <- warmup2 ctx inp0 ui
+  assertEq failed rs =<< readIORef rects
+  assertEq failed initialStates =<< readIORef paneStates
+  mapM_ (\i -> runFrame ctx i ui) [grabbed, hold]
+  (landed, _, _) <- runFrame ctx dropped ui
+  assertEq failed [pb, pc, pa] (pgrPanes landed)
+  _ <- warmup2 ctx inp0 ui
+  assertEq failed initialStates =<< readIORef paneStates
+  Just closePos <- fmap spanCenter . IM.lookup (key pa) <$> readIORef closeRects
+  _ <- runFrame ctx (pressAt inp0 closePos) ui
+  assertEq failed 3 . IM.size =<< rectsAt (holdAt inp0 (V2 (v2X closePos + 60) (v2Y closePos + 40)))
+  (closed, _, _) <- runFrame ctx (releaseAt (holdAt inp0 closePos)) ui
+  assertEq failed [pb, pc] (pgrPanes closed)
 
-
--- | While a pane is dragged over a drop target, the grid is laid out as the
--- drop will leave it, with the dragged pane's slot left empty for the
--- highlight. Highlighting the landing rect over the pre-drop panes is not
--- enough: a drop moves the other panes too, so once the splits are uneven the
--- highlight lines up with nothing on screen (a swap sends the target to the
--- dragged pane's old slot). Every other pane must therefore already sit, while
--- hovering, exactly where it sits after the release.
+-- | Hovering a target lays the grid out as the drop will leave it, the
+-- dragged pane's slot empty: over uneven splits a highlight on the pre-drop
+-- panes lines up with nothing.
 runPaneGridDropPreviewTest :: Context -> IORef Int -> IO ()
 runPaneGridDropPreviewTest ctx failed = do
   -- Per pane: 'pgcRect', and the solved rect of a full-width strip inside it.
   seen <- newIORef IM.empty
   seed <- newIORef SeedStart
   let inp0 = withInput 600 400
-      cfg =
-        testGridConfig
-          { pgViewPane = \pid pctx -> do
-              strip <- labelWith' (fixedH 20 . fillW . tight) "H"
-              liftIO (modifyIORef' seen (IM.insert (fromIntegral pid) (pgcRect pctx, respRect strip)))
-              seedMixedGrid seed pid pctx
-              pure (PaneView "P" True)
-          }
-      ui = paneGrid cfg
-      -- The layout as drawn once the given input has settled (the strip's
-      -- solved rect is a frame behind the layout that produced it).
+      ui =
+        paneGrid
+          testGridConfig
+            { pgViewPane = \pid pctx -> do
+                strip <- labelWith' (fixedH 20 . fillW . tight) "H"
+                recordPane seen pid (pgcRect pctx, respRect strip)
+                seedMixedGrid seed pid pctx
+                pure (PaneView "P" True)
+            }
+      -- The layout once @inp@ has settled (the strip's rect lags a frame).
       layoutAt inp = do
         _ <- warmup2 ctx inp ui
         writeIORef seen IM.empty
         _ <- runFrame ctx inp ui
         readIORef seen
-      -- Lift pane @p@ out of the grid and hover at @dest@, a point chosen
-      -- from the layout with @p@ removed (what drop targets are tested
-      -- against). Returns the layout with @p@ lifted and no target, while
-      -- hovering, and after the release.
+      -- Lift pane @p@, park it outside the grid, hover at @dest@ of that
+      -- lifted layout, and release: the layouts lifted, hovering and after.
       dragPane p dest = do
-        before <- layoutAt inp0
-        case IM.lookup p before of
-          Nothing -> assert failed False >> pure (IM.empty, IM.empty, IM.empty)
-          Just (Rect px py _ _, _) -> do
-            _ <- runFrame ctx (pressAt inp0 (V2 (px + 10) (py + 10))) ui
-            -- Parked outside the grid: no target, the pane's space closes up.
-            lifted <- layoutAt (holdAt inp0 (V2 (-50) (-50)))
-            during <- layoutAt (holdAt inp0 (dest lifted))
-            _ <- runFrame ctx (releaseAt (holdAt inp0 (dest lifted))) ui
-            after <- layoutAt inp0
-            pure (lifted, during, after)
+        Just (Rect px py _ _, _) <- IM.lookup p <$> layoutAt inp0
+        _ <- runFrame ctx (pressAt inp0 (V2 (px + 10) (py + 10))) ui
+        lifted <- layoutAt (holdAt inp0 (V2 (-50) (-50)))
+        during <- layoutAt (holdAt inp0 (dest lifted))
+        _ <- runFrame ctx (releaseAt (holdAt inp0 (dest lifted))) ui
+        (lifted, during,) <$> layoutAt inp0
       at q (fx, fy) lifted = case IM.lookup q lifted of
         Just (Rect x y w h, _) -> V2 (x + w * fx) (y + h * fy)
         Nothing -> V2 (-50) (-50)
       -- Whole pixels: a dragged ratio leaves float dust (112.00001).
       wholePx (Rect x y w h) = Rect (r x) (r y) (r w) (r h) where r v = fromIntegral (round v :: Int)
-      -- The hover showed the drop: nothing else moves on release, and the
-      -- dragged pane (not rendered while lifted) takes the empty slot.
+      -- Nothing moves on release, and the dragged pane takes the empty slot.
       previewed p (lifted, during, after) = do
-        assert failed (not (IM.member p lifted) && not (IM.member p during))
-        assert failed (IM.member p after)
+        assert failed (not (IM.member p lifted) && not (IM.member p during) && IM.member p after)
         assertEq failed during (IM.delete p after)
-  _ <- layoutAt inp0
-  _ <- layoutAt inp0
-  -- Pane 1 left, panes 3 (top) and 5 (bottom) right. Drag the root divider
-  -- from the middle to x = 120 so the columns are uneven.
-  _ <- runFrame ctx (pressAt inp0 (V2 300 200)) ui
-  _ <- runFrame ctx (holdAt inp0 (V2 120 200)) ui
-  _ <- runFrame ctx (releaseAt (holdAt inp0 (V2 120 200))) ui
+  replicateM_ 2 (layoutAt inp0)
+  -- Pane 1 left, 3 and 5 right, uneven.
+  dragDividerTo120 ctx ui
   uneven <- layoutAt inp0
-  assertEq failed (IM.map (wholePx . fst) uneven) $
-    IM.fromList
-      [ (1, Rect 0 0 112 400)
-      , (3, Rect 128 0 472 192)
-      , (5, Rect 128 208 472 192)
-      ]
+  assertEq failed (IM.fromList [(1, Rect 0 0 112 400), (3, Rect 128 0 472 192), (5, Rect 128 208 472 192)]) $
+    IM.map (wholePx . fst) uneven
   -- The model rects are the solver's: the strip spans its pane.
-  assert failed (all (\(m, s) -> (rectX (wholePx m), rectW (wholePx m)) == (rectX (wholePx s), rectW (wholePx s))) (IM.elems uneven))
-  -- Center drop swaps. Lifted, pane 3 spans the whole top row; the swap sends
-  -- it to pane 1's narrow column, which the hover must already show.
+  let across r = (rectX (wholePx r), rectW (wholePx r))
+  assert failed (all (\(m, s) -> across m == across s) uneven)
+  -- A centre drop swaps: lifted, pane 3 spans the top row, and the hover
+  -- already shows it in pane 1's narrow column.
   swap@(liftedS, duringS, _) <- dragPane 1 (at 3 (0.5, 0.5))
-  assertEq failed (fmap (wholePx . fst) (IM.lookup 3 liftedS)) (Just (Rect 0 0 600 192))
-  assertEq failed (fmap (wholePx . fst) (IM.lookup 3 duringS)) (Just (Rect 0 0 112 400))
+  assertEq failed (Just (Rect 0 0 600 192)) (wholePx . fst <$> IM.lookup 3 liftedS)
+  assertEq failed (Just (Rect 0 0 112 400)) (wholePx . fst <$> IM.lookup 3 duringS)
   previewed 1 swap
-  -- Edge drops split the target; the target is shown already halved.
+  -- Edge drops show the target already halved.
   previewed 1 =<< dragPane 1 (at 5 (0.1, 0.5))
   previewed 5 =<< dragPane 5 (at 3 (0.5, 0.9))
   -- The grid's outer band squeezes the whole grid into the other half.
   top@(_, duringT, _) <- dragPane 3 (const (V2 590 200))
-  assert failed (all (\(Rect x _ w _, _) -> x + w <= 300) (IM.elems duringT))
+  assert failed (all (\(Rect x _ w _, _) -> x + w <= 300) duringT)
   previewed 3 top
-  -- A gutter between two panes still has a target (the nearer pane), so the
-  -- preview does not drop out while the pointer crosses it.
+  -- A gutter still targets the nearer pane, so the preview holds across it.
   gut@(liftedG, duringG, _) <- dragPane 1 $ \lifted ->
     let panes = map fst (IM.elems lifted)
         gutterPoints =
@@ -790,255 +489,110 @@ runPaneGridDropPreviewTest ctx failed = do
           [] -> V2 (-50) (-50)
   assert failed (duringG /= liftedG)
   previewed 1 gut
-  -- Outside the grid there is no target: the release cancels, and the uneven
-  -- layout comes back untouched (a top-level drop would re-split it 50/50).
+  -- Outside the grid the release cancels and the uneven layout comes back
+  -- (a top-level drop would re-split it 50/50).
   start <- layoutAt inp0
   (_, duringC, afterC) <- dragPane 1 (const (V2 (-20) 200))
   assert failed (not (IM.member 1 duringC))
-  assertEq failed afterC start
+  assertEq failed start afterC
 
--- | A pinned pane keeps its own width while the grid resizes: the other side
--- of its split takes the whole of the difference, from the first frame at the
--- new size. A ratio alone can only say that both sides scale, which is what
--- the same grid does once the pin comes off.
+-- | A pinned pane keeps its width from the first frame of a resize; unpinned,
+-- both sides scale.
 runPaneGridPinnedPaneTest :: Context -> IORef Int -> IO ()
 runPaneGridPinnedPaneTest ctx failed = do
   rects <- newIORef IM.empty
   split <- newIORef False
-  let inp0 = withInput 600 400
-      cfg pinned =
-        testGridConfig
-          { pgFixedPanes = if pinned then (== 1) else const False
-          , pgViewPane = \pid pctx -> do
-              liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
-              -- One split on the first frame: pane 1 on the left, pane 3 (the
-              -- seed's next id) on the right.
-              done <- liftIO (readIORef split)
-              when (not done) $ do
-                _ <- pgcSplit pctx AxisV
-                liftIO (writeIORef split True)
-              pure (PaneView "P" False)
-          }
-      ui pinned = paneGrid (cfg pinned)
-      -- @n@ frames at @inp@, then one more to report what they solved:
-      -- 'pgcRect' is a frame behind, so @n = 1@ reads the very first frame at
-      -- a new size and a larger @n@ reads the settled layout.
-      settleAt pinned inp n = do
-        forM_ [1 .. n :: Int] $ \_ -> void (runFrame ctx inp (ui pinned))
+  let ui pinned =
+        paneGrid
+          testGridConfig
+            { pgFixedPanes = if pinned then (== 1) else const False
+            , pgViewPane = \pid pctx -> do
+                recordPane rects pid (pgcRect pctx)
+                -- One split on the first frame: pane 1 left, pane 3 right.
+                done <- liftIO (readIORef split)
+                unless done (pgcSplit pctx AxisV >> liftIO (writeIORef split True))
+                pure (PaneView "P" False)
+            }
+      -- @n@ frames at the width, then one more to report what they solved
+      -- ('pgcRect' lags a frame, so @n = 1@ reads the first frame at a size).
+      settleAt pinned w n = do
+        replicateM_ n (runFrame ctx (withInput w 400) (ui pinned))
         writeIORef rects IM.empty
-        _ <- runFrame ctx inp (ui pinned)
+        _ <- runFrame ctx (withInput w 400) (ui pinned)
         readIORef rects
-      widthNear what ms p want =
-        assertJust failed (IM.lookup p ms) $ \r ->
-          if abs (rectW r - want) <= 1
-            then pure ()
-            else assertEq failed (what :: String, rectW r) (what, want)
-  _ <- warmup2 ctx inp0 (ui True)
-  _ <- warmup2 ctx inp0 (ui True)
-  -- Drag the divider left so the two panes are unmistakably uneven: with a
-  -- 4px line and 6px of leeway on each side the gutter is 16, leaving 584 to
-  -- share out, and the pointer at 120 puts the left pane at 112.
-  _ <- runFrame ctx (pressAt inp0 (V2 300 200)) (ui True)
-  _ <- runFrame ctx (holdAt inp0 (V2 120 200)) (ui True)
-  _ <- runFrame ctx (releaseAt (holdAt inp0 (V2 120 200))) (ui True)
-  start <- settleAt True inp0 2
-  widthNear "dragged" start 1 112
-  widthNear "dragged" start 3 472
-  -- 300px wider. The pinned pane is already at its own width on the frame the
-  -- new size arrives on, not a frame later, so a window dragged bigger cannot
-  -- shimmer it.
-  firstWide <- settleAt True (withInput 900 400) 1
-  widthNear "the first frame of a wider grid" firstWide 1 112
-  wide <- settleAt True (withInput 900 400) 3
-  widthNear "a wider grid" wide 1 112
-  widthNear "a wider grid" wide 3 772
-  -- The same going the other way.
-  narrow <- settleAt True inp0 3
-  widthNear "a narrower grid" narrow 1 112
-  widthNear "a narrower grid" narrow 3 472
-  -- Unpinned, the same tree at the same ratio scales as it always did.
-  loose <- settleAt False (withInput 900 400) 3
-  widthNear "an unpinned grid" loose 1 169.5
-  -- Pinned again, the width it was left at is the one it keeps.
-  repinned <- settleAt True inp0 3
-  widthNear "a pinned grid" repinned 1 169.5
-  -- Too narrow to hold the pinned width and the neighbour's minimum both: the
-  -- pinned pane gives way rather than pushing its neighbour off the grid.
-  squeezed <- settleAt True (withInput 100 400) 3
-  widthNear "a grid with no room" squeezed 1 44
-  widthNear "a grid with no room" squeezed 3 40
-  -- Trees the interactive case above cannot reach, against the pure re-ratio
-  -- the widget runs. A pin holds the split its pane hangs off and no other,
-  -- so two of them hold at once and an ancestor on the other axis is left to
-  -- share as it always did.
-  let minSize = 40
-      gutter = 16
-      area w h = Rect 0 0 w h
-      lay t r = fst (layoutNode minSize gutter t r)
-      reflow fixed old new t = reflowFixed (`elem` fixed) minSize gutter old new t
-      sideOf pick what t r p want =
-        assertJust failed (M.lookup p (lay t r)) $ \g ->
-          if abs (pick g - want) <= 0.01
-            then pure ()
-            else assertEq failed (what :: String, pick g) (what, want)
-      widthOf = sideOf rectW
-      heightOf = sideOf rectH
-  -- A pinned pane at each end: only the middle one takes the extra 300px.
-  let ends = Split 10 AxisV 0.25 (Pane 1) (Split 11 AxisV 0.5 (Pane 2) (Pane 3))
-      ends' = reflow [1, 3] (area 600 400) (area 900 400) ends
-  widthOf "two pinned ends" ends (area 600 400) 1 146
-  widthOf "two pinned ends" ends (area 600 400) 3 211
-  widthOf "two pinned ends" ends' (area 900 400) 1 146
-  widthOf "two pinned ends" ends' (area 900 400) 3 211
-  widthOf "two pinned ends" ends' (area 900 400) 2 511
-  -- A pinned width under a split on the other axis: the width holds, and the
-  -- heights, which no pin hangs off, still share the grid out as before.
-  let stacked = Split 20 AxisH 0.5 (Split 21 AxisV 0.5 (Pane 1) (Pane 2)) (Pane 3)
+      inp0 = withInput 600 400
+  replicateM_ 2 (warmup2 ctx inp0 (ui True))
+  -- The 16px gutter leaves 584 to share.
+  dragDividerTo120 ctx (ui True)
+  forM_
+    [ (True, 600, 2, [(1, 112), (3, 472)])
+    , (True, 900, 1, [(1, 112)])
+    , (True, 900, 3, [(1, 112), (3, 772)])
+    , (True, 600, 3, [(1, 112), (3, 472)])
+    , -- Unpinned it scales; pinned again, it keeps the width it was left at.
+      (False, 900, 3, [(1, 169.5)])
+    , (True, 600, 3, [(1, 169.5)])
+    , -- With no room for the pin and the neighbour's minimum, the pin gives way.
+      (True, 100, 3, [(1, 44), (3, 40)])
+    ]
+    $ \(pinned, w, n, want) -> do
+      ms <- settleAt pinned w n
+      forM_ want $ \(p, x) -> case IM.lookup p ms of
+        Just r | abs (rectW r - x) <= 1 -> pure ()
+        got -> assertEq failed (pinned, w, p, Just x) (pinned, w, p, rectW <$> got)
+  -- The pure re-ratio on trees the widget case cannot reach: two pins at
+  -- once, a pin under a split on the other axis, and a right-hand pin held
+  -- through a drag growing the grid by a fraction a frame without walking.
+  let lay t r = fst (layoutNode 40 16 t r)
+      reflow fixed old new = reflowFixed (`elem` fixed) 40 16 old new
+      area = Rect 0 0
+      ends = Split 10 AxisV 0.25 (Pane 1) (Split 11 AxisV 0.5 (Pane 2) (Pane 3))
+      stacked = Split 20 AxisH 0.5 (Split 21 AxisV 0.5 (Pane 1) (Pane 2)) (Pane 3)
       stacked' = reflow [1] (area 600 400) (area 900 600) stacked
-  widthOf "a pin under a stack" stacked (area 600 400) 1 292
-  widthOf "a pin under a stack" stacked' (area 900 600) 1 292
-  widthOf "a pin under a stack" stacked' (area 900 600) 2 592
-  heightOf "a pin under a stack" stacked' (area 900 600) 1 292
-  heightOf "a pin under a stack" stacked' (area 900 600) 3 292
-  -- A pane pinned on the right holds through a drag that grows the grid by a
-  -- fraction of a unit a frame, as a zoomed window does by a pixel: the
-  -- rounding that keeps the pinned side whole must not walk it.
-  let rightPin = Split 30 AxisV 0.5 (Pane 1) (Pane 2)
+      rightPin = Split 30 AxisV 0.5 (Pane 1) (Pane 2)
       at k = area (600 + k * 2 / 3) 400
-      dragged = foldl (\t k -> reflow [2] (at k) (at (k + 1)) t) rightPin [0 .. 29 :: Float]
-  widthOf "a right-hand pin through a fractional drag" rightPin (at 0) 2 292
-  widthOf "a right-hand pin through a fractional drag" dragged (at 30) 2 292
+  forM_
+    [ (ends, area 600 400, rectW, [(1, 146), (3, 211)])
+    , (reflow [1, 3] (area 600 400) (area 900 400) ends, area 900 400, rectW, [(1, 146), (3, 211), (2, 511)])
+    , (stacked, area 600 400, rectW, [(1, 292)])
+    , (stacked', area 900 600, rectW, [(1, 292), (2, 592)])
+    , (stacked', area 900 600, rectH, [(1, 292), (3, 292)])
+    , (rightPin, at 0, rectW, [(2, 292)])
+    , (foldl (\t k -> reflow [2] (at k) (at (k + 1)) t) rightPin [0 .. 29 :: Float], at 30, rectW, [(2, 292)])
+    ]
+    $ \(t, r, size, want) -> forM_ want $ \(p, x) -> case M.lookup p (lay t r) of
+      Just g | abs (size g - x) <= 0.01 -> pure ()
+      got -> assertEq failed (r, p, Just x) (r, p, size <$> got)
 
--- A button scrolled above its viewport can geometrically overlap the header,
--- but its invisible rectangle must not claim the header's drag press.
+-- | A button scrolled above its viewport can overlap the header, but its
+-- hidden rect must not claim the header's drag press.
 runPaneGridClippedControlTest :: Context -> IORef Int -> IO ()
 runPaneGridClippedControlTest ctx failed = do
   rendered <- newIORef False
   geometry <- newIORef Nothing
   let inp0 = withInput 300 240
-      ui = paneGrid defaultPaneGridConfig
-        { pgLayout = fillW . fillH
-        , pgViewPane = \_ _ -> do
-            liftIO (writeIORef rendered True)
-            header <- labelWith' (fixedH 40 . fillW . tight) "Header"
-            (sid, target) <- scrollArea (fixedH 120 . fillW . tight) $
-              columnWith tight $ do
-                b <- button' "Scrolled control"
-                mapM_ (\_ -> void (label "Scroll content")) [1 .. 20 :: Int]
-                pure b
-            liftIO (writeIORef geometry (Just (respId header, sid, respId target)))
-            pure (PaneView "Panel" True)
-        }
+      ui =
+        paneGrid
+          defaultPaneGridConfig
+            { pgLayout = fillW . fillH
+            , pgViewPane = \_ _ -> do
+                liftIO (writeIORef rendered True)
+                header <- labelWith' (fixedH 40 . fillW . tight) "Header"
+                (sid, target) <- scrollArea (fixedH 120 . fillW . tight) . columnWith tight $
+                  button' "Scrolled control" <* replicateM_ 20 (label "Scroll content")
+                liftIO (writeIORef geometry (Just (respId header, sid, respId target)))
+                pure (PaneView "Panel" True)
+            }
   _ <- warmup2 ctx inp0 ui
-  assertJustM failed (readIORef geometry) $ \(headerId, sid, targetId) -> do
-    headerRect <- getPrevRect ctx headerId
-    targetRect <- getPrevRect ctx targetId
-    assertJust failed ((,) <$> headerRect <*> targetRect) $ \(hr, br) -> do
-        -- Place the button's invisible center exactly in the header.
-        let headerY = rectY hr + rectH hr / 2
-        setScrollOffset ctx sid (rectY br + rectH br / 2 - headerY)
-        _ <- warmup2 ctx inp0 ui
-        assertJustM failed (getPrevRect ctx targetId) $ \r -> do
-          let grab = spanCenter r
-              press = pressAt inp0 grab
-              hold = holdAt inp0 (V2 (v2X grab + 30) (v2Y grab))
-          assert failed (rectContains hr grab)
-          _ <- runFrame ctx press ui
-          writeIORef rendered False
-          _ <- runFrame ctx hold ui
-          stillRendered <- readIORef rendered
-          assert failed (not stillRendered)
-
--- Clicking the embedded clear (×) must empty the field, keep focus, and fire an
--- immediate (non-debounced) change pulse.
-runSearchInputClearTest :: Context -> IORef Int -> IO ()
-runSearchInputClearTest ctx failed = do
-  queryRef <- newVar "hello world"
-  let inp0 = withInput 320 100
-      ui = column (held queryRef (searchInput' "Search…"))
-  (resp, _) <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
-  let Rect bx by bw bh = respRect resp
-      cy = by + bh / 2
-      scanClear x
-        | x < bx = pure Nothing
-        | otherwise = do
-            let probe = inp0 {inputMousePos = V2 x cy}
-            _ <- runFrame ctx probe ui
-            kind <- uiCursorKind ctx probe
-            if kind == UiCursorPointer then pure (Just x) else scanClear (x - 2)
-  assertJustM failed (scanClear (bx + bw - 6)) $ \cx -> do
-    let press = pressAt inp0 (V2 cx cy)
-    _ <- runFrame ctx press ui
-    ((r1, t1), _, _) <- runFrame ctx inp0 ui
-    assertEq failed t1 ""
-    assert failed (respChanged r1)
-    assertEq failed (respId r1) =<< getFocusId ctx
-    ((r2, _), _, _) <- runFrame ctx inp0 ui
-    assert failed (not (respChanged r2))
-
--- Typing is echoed immediately but the change pulse only fires after the text
--- has been idle for the configured debounce window.
-runSearchInputDebounceTest :: Context -> IORef Int -> IO ()
-runSearchInputDebounceTest ctx failed = do
-  queryRef <- newVar ""
-  let inp0 = withInput 320 100
-      ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
-  warmupFocused ctx inp0 ui
-  ((rA, tA), _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
-  assertEq failed tA "a"
-  assert failed (not (respChanged rA))
-  before <- getMonotonicTime
-  ((rB, tB), _, _) <- runFrame ctx (inp0 {inputChars = "b"}) ui
-  after <- getMonotonicTime
-  assertEq failed tB "ab"
-  assert failed (not (respChanged rB))
-  -- No input marks the end of the pause, so the field asks for the frame
-  -- that commits: the loop sleeps until then instead of polling. The edit
-  -- is stamped during the frame, so the wake is 40 ms past some moment in it.
-  wakeAt <- getWakeAt ctx
-  assert failed (wakeAt >= before + 0.04 && wakeAt <= after + 0.042)
-  threadDelay 80000
-  ((rC, tC), _, _) <- runFrame ctx inp0 ui
-  assertEq failed tC "ab"
-  assert failed (respChanged rC)
-  -- Committed: nothing is pending.
-  assertEq failed 0 =<< getWakeAt ctx
-  threadDelay 50000
-  ((rD, _), _, _) <- runFrame ctx inp0 ui
-  assert failed (not (respChanged rD))
-
--- Text the caller puts in a focused search field, which nobody has typed in,
--- commits after one pause like typed text. With no edit time to age from it
--- once looked freshly edited on every frame: it never committed, and woke
--- the loop every debounce period for good.
-runSearchInputSetTextDebounceTest :: Context -> IORef Int -> IO ()
-runSearchInputSetTextDebounceTest ctx failed = do
-  queryRef <- newVar ""
-  let inp0 = withInput 320 100
-      ui = column (held queryRef (searchInputConfigured' (defaultSearchInputConfig {sicDebounceMs = 40})))
-  warmupFocused ctx inp0 ui
-  writeVarIO queryRef "recent"
-  ((rA, tA), _, _) <- runFrame ctx inp0 ui
-  assertEq failed tA "recent"
-  assert failed (not (respChanged rA))
-  assert failed . (> 0) =<< getWakeAt ctx
-  threadDelay 80000
-  ((rB, _), _, _) <- runFrame ctx inp0 ui
-  assert failed (respChanged rB)
-  assertEq failed 0 =<< getWakeAt ctx
-
-runKvMultilineHeightTest :: Context -> IORef Int -> IO ()
-runKvMultilineHeightTest ctx failed = do
-  let
-    inp0 = withInput 320 400
-    ui = column $ do
-      card $ do
-        kv "Notes" "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
-        kv "Tree" "0"
+  Just (headerId, sid, targetId) <- readIORef geometry
+  Just hr <- getPrevRect ctx headerId
+  Just br <- getPrevRect ctx targetId
+  -- Scroll the button's centre to the header's.
+  setScrollOffset ctx sid (rectY br + rectH br / 2 - (rectY hr + rectH hr / 2))
   _ <- warmup2 ctx inp0 ui
-  spans <- collectTextSpans ctx
-  case (spanYOf "Line 5" spans, spanYOf "Tree" spans) of
-    ([line5Y], [treeY]) ->
-      assert failed (treeY > line5Y)
-    _ -> assert failed False
+  Just grab <- fmap spanCenter <$> getPrevRect ctx targetId
+  assert failed (rectContains hr grab)
+  _ <- runFrame ctx (pressAt inp0 grab) ui
+  writeIORef rendered False
+  _ <- runFrame ctx (holdAt inp0 (V2 (v2X grab + 30) (v2Y grab))) ui
+  assert failed . not =<< readIORef rendered
