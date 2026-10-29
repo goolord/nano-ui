@@ -26,7 +26,6 @@ tests =
   , spec "key-pressable" runKeyPressableTest
   , spec "key-hard-quit" runKeyHardQuitTest
   , spec "key-frame-modifiers" runKeyFrameModifiersTest
-  , spec "shortcut-focused-text-area" runShortcutFocusedTextAreaTest
   , spec "shortcut-focus-from-code" runShortcutFocusFromCodeTest
   , spec "shortcut-disabled-focus" runShortcutDisabledFocusTest
   , spec "shortcut-precise-claims" runPreciseClaimsTest
@@ -186,33 +185,38 @@ runShortcutFocusedFieldTest ctx failed = do
   fires failed press True [cmdOrCtrl <> key 'a', key 'j', key KeyEnter]
 
 -- | A focused button keeps Enter and Space (plain or with Shift), a slider
--- also the arrows. Ctrl+Enter, Alt+Left and similar go to shortcuts instead.
--- A custom widget keeps the keys it claims, here all of them.
+-- also the arrows, a select Down but not Ctrl+Down, and a text area Enter,
+-- Shift+Enter and the vertical arrows. Ctrl+Enter, Alt+Left and similar go
+-- to shortcuts instead. A custom widget keeps the keys it claims, here all.
 runShortcutFocusedControlTest :: Context -> IORef Int -> IO ()
-runShortcutFocusedControlTest ctx failed = do
-  let chords = [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
-  (ui, press) <- noting ctx $ \note ->
-    column (binds note chords >> whenM (button "Go") (note "button"))
-  warmupFocused ctx inp0 ui
-  forM_ [key KeyEnter, shift <> key KeyEnter] $ \c -> assertEq failed ["button"] =<< press (chordInp c inp0)
-  fires failed press True [ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
-  s <- newContext
-  (sliderUi, pressS) <- noting s $ \note -> column (binds note chords >> void ((snd <$> withValue 5 (slider 0 10))))
-  warmupFocused s inp0 sliderUi
+runShortcutFocusedControlTest _ failed = do
+  let passed = [ctrl <> key KeyEnter, key KeyRight, shift <> key KeyRight, alt <> key KeyLeft, key 's']
+      chords = key KeyEnter : shift <> key KeyEnter : passed
+      -- A frame runner on a fresh view of @widget@ with @bound@ bound, focused.
+      focusedOn bound widget = do
+        c <- newContext
+        (ui, press) <- noting c (\note -> column (binds note bound >> widget note))
+        press <$ warmupFocused c inp0 ui
+  pressB <- focusedOn chords (\note -> whenM (button "Go") (note "button"))
+  forM_ [key KeyEnter, shift <> key KeyEnter] $ \c -> assertEq failed ["button"] =<< pressB (chordInp c inp0)
+  fires failed pressB True passed
+  pressS <- focusedOn chords (\_ -> void (withValue 5 (slider 0 10)))
   fires failed pressS False [key KeyEnter, key KeyRight, shift <> key KeyRight]
   fires failed pressS True [ctrl <> key KeyEnter, alt <> key KeyLeft, key 's']
-  sel <- newContext
   selRef <- newVar 0
-  (selUi, pressSel) <- noting sel $ \note -> column (binds note [ctrl <> key KeyDown] >> void (held selRef (select' ["a", "b", "c"])))
-  warmupFocused sel inp0 selUi
+  pressSel <- focusedOn [ctrl <> key KeyDown] (\_ -> void (held selRef (select' ["a", "b", "c"])))
   let chosenAfter c = pressSel (chordInp c inp0) >> pressSel inp0 >> readVarIO selRef
-  assertEq failed 0 =<< chosenAfter (ctrl <> key KeyDown)
-  assertEq failed 1 =<< chosenAfter (key KeyDown)
-  c <- newContext
-  (customUi, pressC) <- noting c $ \note ->
-    column (binds note chords >> void (customWidget defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll}))
-  warmupFocused c inp0 customUi
+  assertEq failed [0, 1] =<< mapM chosenAfter [ctrl <> key KeyDown, key KeyDown]
+  let claimsAll = defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll}
+  pressC <- focusedOn chords (\_ -> void (customWidget claimsAll))
   fires failed pressC False chords
+  areaRef <- newVar "hi"
+  let areaKept = [key KeyEnter, shift <> key KeyEnter, key KeyUp]
+      areaPassed = [ctrl <> key KeyEnter, alt <> key KeyEnter, ctrl <> key KeyUp, alt <> key KeyDown]
+  pressA <- focusedOn (areaKept ++ areaPassed) (\_ -> void (held areaRef textArea'))
+  fires failed pressA False areaKept
+  fires failed pressA True areaPassed
+  assertEq failed 2 . T.count "\n" =<< readVarIO areaRef
 
 -- | An Escape shortcut consumes Escape so the app does not quit, and a Tab
 -- shortcut does not move focus.
@@ -357,18 +361,6 @@ runKeyFrameModifiersTest _ failed = do
       (chord, _, rest') = frame (clearEphemeral typed) rest
   assertEq failed ("x", [KeyChar 'x'], noModifiers, 2) (inputChars typed, toList (inputKeys typed), inputModifiers typed, length rest)
   assertEq failed ("", [KeyChar 's'], ctrlHeld, 0) (inputChars chord, toList (inputKeys chord), inputModifiers chord, length rest')
-
--- | A focused text area keeps Enter, Shift+Enter and the vertical arrows;
--- Ctrl or Alt with them go to shortcuts.
-runShortcutFocusedTextAreaTest :: Context -> IORef Int -> IO ()
-runShortcutFocusedTextAreaTest ctx failed = do
-  textRef <- newVar "hi"
-  (ui, press) <- noting ctx $ \note ->
-    column (binds note [key KeyEnter, shift <> key KeyEnter, ctrl <> key KeyEnter, alt <> key KeyEnter, key KeyUp, ctrl <> key KeyUp, alt <> key KeyDown] >> held textRef textArea')
-  warmupFocused ctx inp0 ui
-  fires failed press False [key KeyEnter, shift <> key KeyEnter, key KeyUp]
-  fires failed press True [ctrl <> key KeyEnter, alt <> key KeyEnter, ctrl <> key KeyUp, alt <> key KeyDown]
-  assertEq failed 2 . T.count "\n" =<< readVarIO textRef
 
 -- | Ctrl+F focuses a search box from code. The next frame's typing goes there
 -- and the chord types nothing into the previous field.
