@@ -87,6 +87,7 @@ library
         NanoUI.Testing.Assert
         NanoUI.Testing.Harness
         NanoUI.Testing.Runner
+        NanoUI.Testing.Sim
         NanoUI.Var
         NanoUI.Widgets.Combo
         NanoUI.Widgets.Custom

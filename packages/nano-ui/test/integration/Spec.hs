@@ -4,6 +4,8 @@ module Spec
   ( Spec
   , spec
   , pixelSpec
+  , simSpec
+  , pixelSimSpec
   , arenaRects
   , fillsIn
   , buttonValues
@@ -29,6 +31,7 @@ import NanoUI.Backend
 import NanoUI.Testing
 import NanoUI.Testing.Assert
 import NanoUI.Testing.Harness
+import NanoUI.Testing.Sim (Sim, runSim)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getNodeValue, lookupNodeByWidgetId)
 
@@ -40,6 +43,12 @@ type Spec = (String, IO Context, Context -> IORef Int -> IO ())
 spec, pixelSpec :: String -> (Context -> IORef Int -> IO ()) -> Spec
 spec name run = (name, newContext, run)
 pixelSpec name run = (name, newPixelContext, run)
+
+-- | A 'NanoUI.Testing.Sim' script against @view@ in a @w@ x @h@ window, on a
+-- headless or a pixel-snapped context.
+simSpec, pixelSimSpec :: String -> Float -> Float -> NanoUI a -> Sim a () -> Spec
+simSpec name w h view script = spec name (\ctx failed -> runSim ctx failed (withInput w h) view script)
+pixelSimSpec name w h view script = pixelSpec name (\ctx failed -> runSim ctx failed (withInput w h) view script)
 
 -- | @base@ with a monospace base font of @baseCell@ px cells, and
 -- @sizedCell@ px cells for text given a font size of its own, so a test can
