@@ -437,14 +437,17 @@ pushTextSpan da !box t c = unless (T.null t) $ do
 -- | Paint a 'DrawImage' op; other ops paint nothing. @imageUv@ is as for
 -- 'emitDrawOps', and the op's UVs span 0 to 1 over the image. Unrotated
 -- images use the snapped quad; only rotated ones compute their corners.
+-- An image is recorded as the op, under its own id; a solid one (no
+-- texture) records the shape it paints.
 {-# INLINE pushImageOp #-}
 pushImageOp :: DrawArena -> (Int -> IO (Maybe (Int, (Float, Float, Float, Float)))) -> DrawOp -> IO ()
 pushImageOp da imageUv = \case
-  DrawImage r angle tex u0 v0 u1 v1 c ->
+  op@(DrawImage r angle tex u0 v0 u1 v1 c) -> do
     let draw !t !a0 !b0 !a1 !b1
           | angle == 0 = pushImage da r t a0 b0 a1 b1 c
           | otherwise = pushImageRotated da r angle t a0 b0 a1 b1 c
-     in imageUv tex >>= \case
+    when (tex > 0) (recordOp da op)
+    imageUv tex >>= \case
           Just (atlas, (a0, b0, a1, b1)) ->
             draw atlas (a0 + u0 * (a1 - a0)) (b0 + v0 * (b1 - b0)) (a0 + u1 * (a1 - a0)) (b0 + v1 * (b1 - b0))
           Nothing -> draw tex u0 v0 u1 v1

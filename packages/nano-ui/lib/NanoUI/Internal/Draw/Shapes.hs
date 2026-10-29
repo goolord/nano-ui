@@ -84,7 +84,8 @@ pushImageRotated da (Rect x y w h) angle tex0 u0 v0 u1 v1 col = do
       -- Rotated corner at offset (dx, dy) from the centre.
       cornerX dx dy = cx + dx * c - dy * s
       cornerY dx dy = cy + dx * s + dy * c
-  -- A solid quad is a shape; an image is not.
+  -- A solid quad records as a shape; an image records as itself
+  -- ('NanoUI.Internal.Draw.pushImageOp').
   when (tex0 <= 0) $
     recordOp da $
       quadPolygon

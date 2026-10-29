@@ -16,7 +16,6 @@ import NanoUI.Draw.Svg
   , drawOpsToSvg
   , renderDrawOpsSvg
   )
-import NanoUI.Internal.Context (setDrawExternalText, setDrawRecordOps, setDrawSquareGeometry)
 import NanoUI.Internal.Path (Shade (Shaded))
 import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
@@ -471,20 +470,18 @@ testRoundTripRaster = do
       check "circle pixel" (pixelAt 20 px 17 3 == [0, 0, 255, 255])
 
 -- | A whole frame of ordinary widgets renders through 'frameToSvg': chrome
--- as rects, the canvas drawing as vectors, and labels as text.
+-- as rects, the canvas drawing as the shapes it paints, and labels as text.
 testFrameToSvg :: IO ()
 testFrameToSvg = do
   ctx <- newPixelContext
-  setDrawRecordOps ctx True
-  setDrawSquareGeometry ctx True
-  setDrawExternalText ctx True
+  enableSvgExport ctx
   let
     inp = withInput 240 120
     ui = column $ do
       label "Frame label"
       labelWith fontBold "Bold label"
       _ <- button "Go"
-      _ <- canvas (fixedWH 60 60) $ \_ -> drawCircle (V2 30 30) 12 red
+      _ <- canvas (fixedWH 60 60) $ \(Rect x y _ _) -> drawCircle (V2 (x + 30) (y + 30)) 12 red
       pure ()
   (_, dd, _) <- run2Frames ctx inp ui
   svg <- frameToSvg defaultFrameSvgConfig ctx inp dd
@@ -505,7 +502,7 @@ testFrameToSvg = do
   check "bold label text" (T.isInfixOf ">Bold label</text>" svg)
   check "bold weight follows the span style" (T.isInfixOf "font-weight=\"bold\"" svg)
   check "button label text" (T.isInfixOf ">Go</text>" svg)
-  check "canvas circle from draw ops" (T.isInfixOf "<circle " svg)
+  check "canvas circle as painted" (T.isInfixOf "rx=\"12\" fill=\"#ff0000\"" svg)
   -- A page scoped onto the panel surface exports that surface.
   let panelUi = styled panelPage ui
   (_, panelDraw, _) <- run2Frames ctx inp panelUi
@@ -516,3 +513,17 @@ testFrameToSvg = do
         ("fill=\"" <> colorToHex (styleBg (themePanel defaultTheme)) <> "\"")
         panelSvg
     )
+  -- A drawing in a modal draws over the modal's panel, in its layer.
+  let modalUi = modal (constVar True) "Dialog" (() <$ canvas (fixedWH 60 60) (\(Rect x y _ _) -> drawCircle (V2 (x + 30) (y + 30)) 12 red))
+  (_, modalDraw, _) <- run2Frames ctx inp modalUi
+  modalSvg <- frameToSvg defaultFrameSvgConfig ctx inp modalDraw
+  let (_, afterPanel) = T.breakOnEnd ("fill=\"" <> colorToHex (styleBg (themeFloatingWindow defaultTheme)) <> "\"") modalSvg
+  check "modal drawing over its panel" (T.isInfixOf "rx=\"12\" fill=\"#ff0000\"" afterPanel)
+  -- Widget images export under their id.
+  (iid, _, _) <- run2Frames ctx inp $ do
+    i <- freshImageId
+    _ <- registerImageRgba i 2 2 (BS.replicate 16 255)
+    pure i
+  (_, imageFrame, _) <- run2Frames ctx inp (image (fixedWH 20 20) iid)
+  imageSvg <- frameToSvg defaultFrameSvgConfig {fsImageUri = \_ -> Just "data:image/png;base64,AA=="} ctx inp imageFrame
+  check "widget image under its id" (T.isInfixOf "<image " imageSvg)

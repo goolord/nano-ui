@@ -2,15 +2,15 @@
 --
 -- Paint lowers every widget straight to the vertex buffer. With
 -- 'setDrawRecordOps' on, the shape emitters also record each solid shape they
--- draw as the 'DrawOp' that draws it, under its layer and clip; this module
--- renders those through "NanoUI.Draw.Svg", along with the vector drawings in
--- the frame's draw-op caches and the text from 'collectRasterSpans'.
+-- draw, and each image, as the 'DrawOp' that draws it, under its layer and
+-- clip. Drawings lower to the same emitters, so their shapes are recorded
+-- with the widgets'. This module renders the recorded ops through
+-- "NanoUI.Draw.Svg", with the text from 'collectRasterSpans'.
 --
 -- Call 'enableSvgExport' on the context before running frames. It records
 -- the shapes, moves all text (including text inside drawings) onto the
--- raster spans consumed here, and draws rounded shapes round. Atlas images
--- are omitted (the atlas has no URI); 'DrawOp' images inside drawings
--- resolve through 'fsImageUri'.
+-- raster spans consumed here, and draws rounded shapes round. Images, in
+-- widgets and drawings alike, resolve their id through 'fsImageUri'.
 --
 -- > enableSvgExport ctx
 -- > (_, dd, _) <- runFrame ctx inp view
@@ -30,14 +30,12 @@ where
 
 import Control.Monad (forM, unless)
 import Data.Bits (xor)
-import Data.Foldable (toList)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.IntSet qualified as IS
 import Data.List (find, partition, sortOn)
 import Data.Map.Strict qualified as M
 import Data.Primitive.PrimArray (PrimArray)
-import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -72,27 +70,20 @@ import NanoUI.Draw.Svg.Attr
   )
 import NanoUI.Internal.Context
   ( Context (..)
-  , DrawingCacheState (..)
   , RecordedOp (..)
   , drawRecordedOps
   , getDrawRecordOps
-  , intKey
   , setDrawExternalText
   , setDrawRecordOps
   , setDrawSquareGeometry
   )
-import NanoUI.Internal.Context.Types
-  ( CustomDrawOpCacheEntry (..)
-  , DrawOpCacheEntry (..)
-  , SpanCacheEntry (..)
-  )
+import NanoUI.Internal.Context.Types (SpanCacheEntry (..))
 import NanoUI.Internal.Layout.Arena
   ( NodeType (..)
   , arenaCount
   , getNodeRect
   , getNodeType
   , getStyleIdx
-  , getWidgetId
   , hasCenteredLabel
   , nodeFontBits
   )
@@ -114,8 +105,8 @@ data FrameSvgConfig = FrameSvgConfig
   -- width with @textLength@, so any family that lays out similarly to the
   -- context's font reads correctly.
   , fsImageUri :: !(Int -> Maybe Text)
-  -- ^ As 'svgImageUri': resolves a drawing's image id to an @href@ or data
-  -- URI. Images without a resolution are omitted.
+  -- ^ As 'svgImageUri': resolves an image's id ('NanoUI.ImageId') to an
+  -- @href@ or data URI. Images without a resolution are omitted.
   , fsIdPrefix :: !Text
   -- ^ Prepended to every clip and gradient id in the document, so several
   -- documents inlined in one page keep their ids apart. Empty, the default,
@@ -135,8 +126,8 @@ defaultFrameSvgConfig =
     }
 
 -- | Render the frame 'runFrame' returned for @inp@ into a standalone SVG
--- document sized to the input's window. Text draws last, over the shapes
--- and vector drawings beneath it, in paint order for each.
+-- document sized to the input's window. Page text draws over the page's
+-- shapes, and overlay shapes and text over both, in paint order for each.
 --
 -- Fails if the context was not recording shapes ('enableSvgExport'), which
 -- would export the text alone.
@@ -153,21 +144,9 @@ frameToSvg cfg0 ctx inp dd = do
     cfg = if autoPrefix then cfg0 {fsIdPrefix = idPlaceholder} else cfg0
   (pageSpans, overlaySpans) <- collectRasterSpans ctx inp
   spanStyles <- collectSpanStyles ctx
-  live <- liveDrawingIds ctx
-  dc <- readIORef (ctxDrawingCache ctx)
   recorded <- drawRecordedOps ctx
   let
-    cached =
-      [ (doeBounds e, doeOps e)
-      | (k, e) <- IM.toList (dcsDrawOpCache dc)
-      , IS.member k live
-      ]
-        ++ [ (cdeBounds e, cdeOps e)
-           | (k, e) <- IM.toList (dcsCustomDrawOpCache dc)
-           , IS.member k live
-           ]
-  let
-    (pageShapes, overlayShapes) = frameShapes (map fst cached) recorded
+    (pageShapes, overlayShapes) = frameShapes recorded
     Size vw vh = inputWindowSize inp
     p = max 0 (min 6 (fsPrecision cfg))
     fm = ctxFontMetrics ctx
@@ -185,11 +164,6 @@ frameToSvg cfg0 ctx inp dd = do
         , svgImageUri = fsImageUri cfg
         , svgIdPrefix = fsIdPrefix cfg <> scope
         }
-    frags =
-      mconcat
-        [ render ("d" <> T.pack (show k) <> "-") (vectorOnly ops)
-        | (k, (_, ops)) <- zip [1 :: Int ..] cached
-        ]
     tclip = TB.fromText (fsIdPrefix cfg) <> "tclip_"
     (pageTextDefs, pageTextBody, nextTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles tclip 1 pageSpans
     (overlayTextDefs, overlayTextBody, lastTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles tclip nextTClip overlaySpans
@@ -205,7 +179,6 @@ frameToSvg cfg0 ctx inp dd = do
         <> allDefs
         <> solidRect p vp (drawClear dd)
         <> render "s" pageShapes
-        <> frags
         <> pageTextBody
         <> render "o" overlayShapes
         <> overlayTextBody
@@ -234,26 +207,6 @@ documentIdPrefix t =
       hex = showHex h ""
    in "n" <> T.pack (replicate (8 - length hex) '0' <> hex) <> "-"
 
--- | The widget ids the view declared this frame, so drawings left in the
--- caches by widgets no longer shown (another tab's charts) are skipped.
-liveDrawingIds :: Context -> IO IS.IntSet
-liveDrawingIds ctx = do
-  let
-    na = ctxNodeArena ctx
-  n <- arenaCount na
-  IS.fromList <$> mapM (\i -> intKey <$> getWidgetId na i) [0 .. n - 1]
-
--- | A drawing's ops re-rendered as vectors; its text arrives as a span
--- instead, and its images resolve through the config.
-vectorOnly :: SmallArray DrawOp -> [DrawOp]
-vectorOnly = filter keep . toList
- where
-  keep DrawText {} = False
-  keep DrawTextStyled {} = False
-  keep DrawTextAligned {} = False
-  keep DrawImage {} = False
-  keep _ = True
-
 --------------------------------------------------------------------------------
 -- Shapes the paint recorded
 --------------------------------------------------------------------------------
@@ -261,19 +214,13 @@ vectorOnly = filter keep . toList
 -- | The recorded shapes in paint order (layer by layer, as the commands
 -- run), split into page shapes ('LayerBackground', 'LayerContent') and
 -- overlay shapes ('LayerOverlay', 'LayerChrome'). Each is cut to its clip,
--- or put in a clip group when it overhangs it. Shapes inside @skip@ (the
--- drawing widgets' bounds) are left out: those render from their draw ops
--- instead.
-frameShapes :: [Rect] -> [RecordedOp] -> ([DrawOp], [DrawOp])
-frameShapes skip recorded = (clipRuns page, clipRuns overlay)
+-- or put in a clip group when it overhangs it.
+frameShapes :: [RecordedOp] -> ([DrawOp], [DrawOp])
+frameShapes recorded = (clipRuns page, clipRuns overlay)
  where
-  shown =
-    sortOn (\(RecordedOp layer _ _) -> layer)
-      [ ro
-      | ro@(RecordedOp _ _ op) <- recorded
-      , maybe True (\b -> not (any (fullyInside b) skip)) (opBounds op)
-      ]
-  (page, overlay) = partition (\(RecordedOp layer _ _) -> layer < LayerOverlay) shown
+  (page, overlay) =
+    partition (\(RecordedOp layer _ _) -> layer < LayerOverlay) $
+      sortOn (\(RecordedOp layer _ _) -> layer) recorded
 
 -- | Ops cut to their clips: a rect (an upright or level stroke among them)
 -- is cut to it, a shape inside it stands alone, one outside it is dropped,
@@ -307,13 +254,15 @@ asRect op = case op of
     | y0 == y1 = FillRect (Rect (min x0 x1) (y0 - bw / 2) (abs (x1 - x0)) bw) col
     | otherwise = op
 
--- | The box an op draws within, for the ops the emitters record.
+-- | The box an op draws within, for the ops the emitters record; a rotated
+-- image has none, and goes in its clip's group.
 opBounds :: DrawOp -> Maybe Rect
 opBounds = \case
   FillRect r _ -> Just r
   FillRoundedRect r _ _ -> Just r
   StrokeRoundedRect r _ _ _ -> Just r
   FillQuadGradient r _ _ _ _ -> Just r
+  DrawImage r 0 _ _ _ _ _ _ -> Just r
   Stroke x0 y0 x1 y1 bw _ -> Just (segmentBox x0 y0 x1 y1 bw)
   StrokeLineAA x0 y0 x1 y1 bw _ -> Just (segmentBox x0 y0 x1 y1 bw)
   FillPolygon pts _ _ _ -> pointsBox 0 pts

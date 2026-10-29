@@ -379,7 +379,7 @@ data DrawArena = DrawArena
   -- ^ Whether the shape emitters record what they draw ('daRecordedOps').
   -- Persists across 'NanoUI.Internal.Draw.Arena.resetDrawArena'.
   , daRecordedOps :: !(IORef [RecordedOp])
-  -- ^ While 'daRecordOps' is on, the solid shapes this paint drew, newest
+  -- ^ While 'daRecordOps' is on, the shapes and images this paint drew, newest
   -- first. Emptied only by 'NanoUI.Internal.Draw.Arena.resetDrawArena', so
   -- a reused frame keeps the shapes of the paint that drew it.
   }

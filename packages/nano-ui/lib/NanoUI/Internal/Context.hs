@@ -549,7 +549,7 @@ setDrawSquareGeometry ctx = Draw.setDrawSquareGeometry (ctxDrawArena ctx)
 setDrawExternalText :: Context -> Bool -> IO ()
 setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
 
--- | Record the solid shapes each paint draws, as ops, for exporters that
+-- | Record the shapes and images each paint draws, as ops, for exporters that
 -- redraw a frame as vectors ('drawRecordedOps').
 {-# INLINE setDrawRecordOps #-}
 setDrawRecordOps :: Context -> Bool -> IO ()
@@ -560,7 +560,7 @@ setDrawRecordOps ctx = Draw.setDrawRecordOps (ctxDrawArena ctx)
 getDrawRecordOps :: Context -> IO Bool
 getDrawRecordOps ctx = Draw.getDrawRecordOps (ctxDrawArena ctx)
 
--- | The solid shapes the last paint drew while 'setDrawRecordOps' was on, in
+-- | The shapes and images the last paint drew while 'setDrawRecordOps' was on, in
 -- paint order, each with its layer and clip.
 drawRecordedOps :: Context -> IO [RecordedOp]
 drawRecordedOps ctx = Draw.recordedOps (ctxDrawArena ctx)

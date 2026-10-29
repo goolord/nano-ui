@@ -368,7 +368,7 @@ paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
     case node of
       Nothing -> do
         base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
-        pushImage da rect atlasTextureId a0 b0 a1 b1 (fadeBy fade base)
+        pushImageOp da slot (DrawImage rect 0 tid 0 0 1 1 (fadeBy fade base))
       Just ImageNode {inLook = look}
         | lookTurned look ->
             forM_ (lookDraw look (iw, ih) (ImageId tid) fade rect) $ \d ->
