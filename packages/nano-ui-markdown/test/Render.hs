@@ -10,13 +10,10 @@ import Data.List (find, groupBy, nub, sortOn)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Word (Word8)
-import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Storable (peekByteOff)
 import NanoUI
-  ( Color, DrawOp (..), ImageId (..), Input (..), NanoUI, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
-  , V2 (..), WidgetId, background, checkboxBoxSize, colorA, colorB, colorG, colorR, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
-  , getScrollOffset, label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, liftIO, withKey
+  ( Color, DrawOp (..), ImageId (..), NanoUI, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
+  , V2 (..), WidgetId, background, checkboxBoxSize, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
+  , label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, liftIO, withKey
   )
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), getTheme, lookupCustomDrawing)
@@ -24,11 +21,34 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Markdown
 import NanoUI.Testing
-  ( Damage (..), DrawData (..), collectOverlayTextSpans, collectTextSpans, newContext, runFrame, takeDamage, withClipboard
+  ( Damage (..), collectTextSpans, newContext, runFrame, takeDamage, withClipboard
   , lineWidth, withFontMetrics
   )
 import NanoUI.Testing.Assert (withInput)
-import NanoUI.Testing.Harness (chordInp, hasText, holdAt, nodesOfType, pressAt, releaseAt, runClick, spanCenter, spanRect, spanRectOf, warmup, warmup2)
+import NanoUI.Testing.Harness
+  (drawnVertices, hasText, nodesOfType, runClick, spanCenter, spanRect, spanRectOf, vertexColor, warmup2)
+import NanoUI.Testing.Sim
+  ( Sim
+  , SimOptions (..)
+  , Target (..)
+  , advance
+  , check
+  , checkEq
+  , chord
+  , click
+  , defaultSimOptions
+  , drag
+  , expect
+  , expectNot
+  , frame
+  , labelShown
+  , moveTo
+  , onContext
+  , result
+  , runSimWith
+  , scrollOffsetOf
+  , wheel
+  )
 import NanoUI.Shortcut (cmdOrCtrl, key)
 import Test.Hspec
 
@@ -85,26 +105,33 @@ paints c ui = do
   ctx <- drawn 600 400 ui
   writeIORef (ctxPaintFull ctx) True
   (_, dd, _) <- runFrame ctx (withInput 600 400) ui
-  withForeignPtr (drawVertices dd) $ \vp ->
-    fmap or . forM [0 .. drawVertexCount dd - 1] $ \i -> do
-      rgba <- forM [2 .. 5] $ \k -> peekByteOff vp (i * 32 + 4 * k) :: IO Float
-      pure (map (round . (* 255)) rgba == map (fromIntegral :: Word8 -> Int) [colorR c, colorG c, colorB c, colorA c])
+  elem c . map vertexColor <$> drawnVertices dd
 
 -- | A fresh context that has drawn the view twice in a @w@ by @h@ window.
 drawn :: Float -> Float -> NanoUI a -> IO Context
 drawn w h ui = newContext >>= \ctx -> ctx <$ warmup2 ctx (withInput w h) ui
 
--- | 'drawn' 600 by 400, with a clipboard the returned ref holds.
-withCopies :: NanoUI a -> IO (Context, IORef (Maybe Text))
-withCopies ui = do
+-- | Run a script against the view in a @w@ by @h@ window of the context,
+-- stopping at the first failed check.
+sim :: Context -> Float -> Float -> NanoUI a -> Sim a r -> IO r
+sim ctx w h ui script = newIORef 0 >>= \failed -> runSimWith opts ctx failed (withInput w h) ui script
+  where
+    opts = defaultSimOptions {simFailFast = True}
+
+-- | A fresh context with a clipboard the returned ref holds.
+copying :: IO (Context, IORef (Maybe Text))
+copying = do
   copied <- newIORef Nothing
   base <- newContext
-  let ctx = withClipboard base (readIORef copied) (\t -> True <$ writeIORef copied (Just t))
-  (ctx, copied) <$ warmup2 ctx (withInput 600 400) ui
+  pure (withClipboard base (readIORef copied) (\t -> True <$ writeIORef copied (Just t)), copied)
 
--- | Run a chord's frame.
-chordFrame :: Context -> NanoUI a -> Char -> IO ()
-chordFrame ctx ui c = void (runFrame ctx (chordInp (cmdOrCtrl <> key c) (withInput 600 400)) ui)
+-- | Ctrl (Cmd on macOS) with each key in turn.
+chords :: [Char] -> Sim a ()
+chords = mapM_ (chord . (cmdOrCtrl <>) . key)
+
+-- | 'inWord' in the script's frame.
+wordAt :: Float -> Text -> Sim a Target
+wordAt dx w = At <$> onContext (\ctx -> inWord ctx dx w)
 
 -- | Draw a document, append text and draw again. For each pair, the first
 -- word's id before must equal the second word's id after. The @new@ words
@@ -126,12 +153,10 @@ view cache doc = columnWith (fixedW 500 . padAll 10) (markdown cache doc)
 
 -- | Click a drawn word in a 600 by 400 window and return the reported link.
 clickWord :: NanoUI (Maybe Text) -> Text -> IO (Maybe Text)
-clickWord ui w = do
-  let inp = withInput 600 400
-  ctx <- drawn 600 400 ui
-  pos <- inWord ctx 3 w
-  warmup ctx inp {inputMousePos = pos} ui
-  runClick ctx inp ui pos
+clickWord ui w = newContext >>= \ctx -> sim ctx 600 400 ui $ do
+  p <- wordAt 3 w
+  _ <- moveTo p
+  click p
 
 -- | Resolves only cat.png, at 40 by 30.
 catImages :: MarkdownConfig
@@ -173,41 +198,30 @@ spec = before newMarkdownCache $ do
     -- The copy button's text is 0.8 times the body size.
     fmap (\(Rect _ _ _ h) -> h) . spanRect "Copy" <$> collectTextSpans ctx `shouldReturn` Just 16
 
-  it "returns the destination of a clicked link" $ \cache -> do
-    let ui = view cache (parseMarkdown "Read [the docs](https://example.com/docs) or <https://auto.link> now.")
-    clickWord ui "docs" `shouldReturn` Just "https://example.com/docs"
-    clickWord ui "https://auto.link" `shouldReturn` Just "https://auto.link"
-    clickWord ui "Read" `shouldReturn` Nothing
-
   it "selects and copies styled Markdown text" $ \cache -> do
-    let
-      inp = withInput 600 400
-      ui = view cache (parseMarkdown "Select **these** words")
-    (ctx, copied) <- withCopies ui
-    start <- inWord ctx 1 "Select"
-    finish <- inWord ctx (lineWidth (ctxFontMetrics ctx) "these" - 1) "these"
-    let press = pressAt inp start
-    mapM_ (\i -> runFrame ctx i ui) [press, holdAt press finish, releaseAt (holdAt press finish)]
-    selectionColor <- themeSelection <$> getTheme ctx
-    drawnFills selectionColor ctx >>= (`shouldNotBe` [])
-    chordFrame ctx ui 'c'
-    readIORef copied `shouldReturn` Just "Select these"
-    mapM_ (chordFrame ctx ui) ['a', 'c']
-    readIORef copied `shouldReturn` Just "Select these words"
+    (ctx, copied) <- copying
+    sim ctx 600 400 (view cache (parseMarkdown "Select **these** words")) $ do
+      start <- wordAt 1 "Select"
+      finish <- wordAt (lineWidth (ctxFontMetrics ctx) "these" - 1) "these"
+      _ <- drag start finish 1
+      selectionColor <- themeSelection <$> liftIO (getTheme ctx)
+      check . not . null =<< liftIO (drawnFills selectionColor ctx)
+      chords ['c']
+      checkEq (Just "Select these") =<< liftIO (readIORef copied)
+      chords ['a', 'c']
+      checkEq (Just "Select these words") =<< liftIO (readIORef copied)
 
   it "copies code blocks, whitespace kept, by selection and by the copy button" $ \cache -> do
-    let ui = view cache (parseMarkdown "```hs\tlinenos\n  let x = 1\n```")
-    (ctx, copied) <- withCopies ui
-    -- The language runs up to the first space or tab.
-    isJust . spanRectOf "hs" <$> collectTextSpans ctx `shouldReturn` True
-    _ <- runClick ctx (withInput 600 400) ui =<< inWord ctx 1 "  let x = 1"
-    mapM_ (chordFrame ctx ui) ['a', 'c']
-    readIORef copied `shouldReturn` Just "  let x = 1"
-    let button = view cache (parseMarkdown "```\nlet x = 1\n  in x\n```")
-    _ <- warmup2 ctx (withInput 600 400) button
-    Just r <- spanRect "Copy" <$> collectTextSpans ctx
-    void (runClick ctx (withInput 600 400) button (spanCenter r))
-    readIORef copied `shouldReturn` Just "let x = 1\n  in x"
+    (ctx, copied) <- copying
+    sim ctx 600 400 (view cache (parseMarkdown "```hs\tlinenos\n  let x = 1\n```")) $ do
+      -- The language runs up to the first space or tab.
+      check =<< labelShown "hs"
+      _ <- click =<< wordAt 1 "  let x = 1"
+      chords ['a', 'c']
+      checkEq (Just "  let x = 1") =<< liftIO (readIORef copied)
+    sim ctx 600 400 (view cache (parseMarkdown "```\nlet x = 1\n  in x\n```")) $ do
+      _ <- click "Copy"
+      checkEq (Just "let x = 1\n  in x") =<< liftIO (readIORef copied)
 
   it "keeps earlier blocks' ids while text streams in" $ \_ -> do
     -- The growing block keeps its id too.
@@ -271,16 +285,14 @@ spec = before newMarkdownCache $ do
 
   it "lets the wheel over a code block scroll the page" $ \cache -> do
     ctx <- newContext
-    let inp = withInput 400 300
-        paras n = T.concat ["para " <> T.pack (show i) <> "\n\n" | i <- [1 .. n :: Int]]
+    let paras n = T.concat ["para " <> T.pack (show i) <> "\n\n" | i <- [1 .. n :: Int]]
         doc = parseMarkdown (paras 3 <> "```\ncode\n```\n\n" <> paras 30)
-        ui = scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))
-    (sid, _) <- warmup2 ctx inp ui
-    over <- (\p -> inp {inputMousePos = p}) <$> inWord ctx 0 "code"
-    void (runFrame ctx over {inputScroll = V2 0 3} ui)
-    -- Let the glide settle.
-    replicateM_ 30 (runFrame ctx over {inputDeltaTime = 0.05} ui)
-    getScrollOffset ctx sid `shouldNotReturn` 0
+    sim ctx 400 300 (scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))) $ do
+      (sid, _) <- result
+      _ <- (`wheel` V2 0 3) =<< wordAt 0 "code"
+      -- Let the glide settle.
+      replicateM_ 30 (advance 0.05)
+      check . (/= 0) =<< scrollOffsetOf sid
 
   it "draws a resolved image, which returns its source when clicked, and the rest as alt text" $ \cache -> do
     let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "![a cat](cat.png)\n\n![a dog](dog.png)"))
@@ -303,17 +315,16 @@ spec = before newMarkdownCache $ do
 
   it "sends a click on an image in a link to the link, and shows the link's title over it" $ \cache -> do
     let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "[![a cat](cat.png)](https://cats.example \"All about cats\")"))
-        inp = withInput 600 400
-    ctx <- drawn 600 400 ui
-    [r] <- map snd <$> nodesOfType NodeImage ctx
-    let over = inp {inputMousePos = spanCenter r}
-    warmup ctx over ui
-    hasText "All about cats" <$> collectOverlayTextSpans ctx over `shouldReturn` False
-    -- Hover past the tooltip delay.
-    threadDelay 600000
-    warmup ctx over ui
-    hasText "All about cats" <$> collectOverlayTextSpans ctx over `shouldReturn` True
-    runClick ctx inp ui (spanCenter r) `shouldReturn` Just "https://cats.example"
+    ctx <- newContext
+    sim ctx 600 400 ui $ do
+      [r] <- map snd <$> onContext (nodesOfType NodeImage)
+      _ <- moveTo (Within r)
+      expectNot "All about cats"
+      -- Hover past the tooltip delay.
+      liftIO (threadDelay 600000)
+      _ <- frame
+      expect "All about cats"
+      checkEq (Just "https://cats.example") =<< click (Within r)
 
   it "gives a paragraph that turns into a drawn image fresh ids" $ \cache -> do
     let ui = columnWith (fixedW 500) . markdownConfigured cache catImages
@@ -420,9 +431,12 @@ spec = before newMarkdownCache $ do
                 Paragraph _ -> panel (own b)
                 _ -> own b
             }
-        ui = columnWith (fixedW 500) (markdownConfigured cache cfg (parseMarkdown "See [the docs](/docs).\n\n> Quoted [link](/quoted)."))
+        ui = columnWith (fixedW 500) . markdownConfigured cache cfg . parseMarkdown $
+          "See [the docs](/docs) or <https://auto.link>.\n\n> Quoted [link](/quoted)."
     clickWord ui "docs" `shouldReturn` Just "/docs"
+    clickWord ui "https://auto.link" `shouldReturn` Just "https://auto.link"
     clickWord ui "link" `shouldReturn` Just "/quoted"
+    clickWord ui "See" `shouldReturn` Nothing
     -- The quoted paragraph keeps the quote's muted colour.
     ctx <- drawn 600 400 ui
     theme <- readIORef (ctxTheme ctx)
