@@ -10,152 +10,126 @@ import NanoUI.Svg (rasterizeSvg, rasterizeSvgIn, svgMonochrome)
 tests :: [Spec]
 tests =
   [ spec "svg-raster" runSvgRasterTest
-  , spec "svg-icon" runSvgIconTest
+  , spec "svg-raster-cache" runSvgRasterCacheTest
   , spec "svg-fit-content" runSvgFitContentTest
-  , spec "svg-raster-lease" runSvgRasterLeaseTest
-  , spec "svg-raster-retry" runSvgRasterRetryTest
   ]
+
+parsed :: BS.ByteString -> IO Svg
+parsed = either fail pure . parseSvg
+
+square :: IO Svg
+square = parsed "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>"
+
+white :: Color
+white = colorRGBA 255 255 255 255
 
 -- | The ids of the cached rasters, in key order.
 svgRasters :: Context -> IO [ImageId]
 svgRasters ctx = map (\(iid, _, _) -> iid) . Map.elems <$> readIORef (ctxSvgRasters ctx)
 
--- | A raster stays in the atlas while frames draw it, and an icon hidden and
--- shown again keeps it. The next raster made takes the space of those no
--- frame drew since the one before: a size the icon no longer has, or an icon
--- no longer shown. A raster too big for the atlas is remembered too, rather
--- than made again every frame.
-runSvgRasterLeaseTest :: Context -> IORef Int -> IO ()
-runSvgRasterLeaseTest ctx failed = do
-  doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
-  let inp = withInputOff 200 120
-      registered iid = isJust <$> lookupImageSize ctx iid
-      hidden = warmup2 ctx inp (column (pure ()))
-  _ <- warmup2 ctx inp (column (svgIcon 16 doc))
-  small <- svgRasters ctx
-  assertEq failed [True] =<< mapM registered small
-  hidden
-  _ <- warmup2 ctx inp (column (svgIcon 16 doc))
-  assertEq failed small =<< svgRasters ctx
-  hidden
-  _ <- warmup2 ctx inp (column (svgIcon 20 doc))
-  assertEq failed 1 . length =<< svgRasters ctx
-  assertEq failed [False] =<< mapM registered small
-  _ <- warmup2 ctx inp (column (svgIconWith (fixedWH 5000 10) doc))
-  assert failed . elem (ImageId 0) =<< svgRasters ctx
-  hidden
-  _ <- warmup2 ctx inp (column (svgIcon 16 doc))
-  assertEq failed [True] =<< mapM registered =<< svgRasters ctx
+-- | Strokes, even-odd holes, transforms and arcs rasterize where they
+-- should, and a document that is not SVG does not parse.
+runSvgRasterTest :: Context -> IORef Int -> IO ()
+runSvgRasterTest _ failed = do
+  let pixelAt w bytes x y = [BS.index bytes ((y * w + x) * 4 + k) | k <- [0 .. 3]]
+      alphaAt w bytes x y = last (pixelAt w bytes x y)
+  clock <-
+    parsed
+      "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" \
+      \stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\
+      \<!-- a clock --><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 6v6l4 2\"/></svg>"
+  let px = rasterizeSvg 48 48 white clock
+  assertEq failed (True, (24, 24), 48 * 48 * 4) (svgMonochrome clock, svgSize clock, BS.length px)
+  -- On the ring, on the hands, and in the empty face between them.
+  assert failed (alphaAt 48 px 24 44 > 200 && alphaAt 48 px 24 18 > 200)
+  assertEq failed [0, 0] [alphaAt 48 px 24 36, alphaAt 48 px 1 1]
+  holed <-
+    parsed
+      "<svg viewBox='0 0 10 10'><path fill-rule='evenodd' fill='#ff0000' d='M0 0h10v10H0z M3 3h4v4H3z'/>\
+      \<g transform='translate(5 0) scale(0.5)'><rect width='2' height='2' fill='rgb(0,0,255)'/></g></svg>"
+  let hpx = rasterizeSvg 10 10 white holed
+  assert failed (not (svgMonochrome holed))
+  assertEq failed [[255, 0, 0, 255], [0, 0, 0, 0], [0, 0, 255, 255]] [pixelAt 10 hpx 1 8, pixelAt 10 hpx 5 5, pixelAt 10 hpx 5 0]
+  arcs <- parsed "<svg viewBox='0 0 20 20'><path d='M2 10a8 8 0 1 1 16 0a8 8 0 1 1-16 0z'/></svg>"
+  let apx = rasterizeSvg 20 20 white arcs
+  assertEq failed [255, 0] [alphaAt 20 apx 10 10, alphaAt 20 apx 1 1]
+  assert failed (either (const True) (const False) (parseSvg "<nope/>"))
 
--- | A raster the atlas had no room for is made again once an image leaves
--- the atlas, while the icon is still drawn.
-runSvgRasterRetryTest :: Context -> IORef Int -> IO ()
-runSvgRasterRetryTest ctx failed = do
-  doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
+-- | An icon draws its raster tinted with the text colour, and later frames
+-- reuse it. A raster stays in the atlas while frames draw it, and an icon
+-- hidden and shown again keeps it. The next raster made takes the space of
+-- those no frame drew since the one before: a size the icon no longer has,
+-- or an icon no longer shown. A raster too big for the atlas is remembered
+-- too, rather than made again every frame, and is made again once an image
+-- leaves the atlas while the icon is still drawn.
+runSvgRasterCacheTest :: Context -> IORef Int -> IO ()
+runSvgRasterCacheTest ctx failed = do
+  doc <- square
+  theme <- getTheme ctx
   let inp = withInputOff 200 120
-      ui = column (svgIcon 16 doc)
-      fill iid w h = registerImage ctx (ImageId iid) w h (BS.replicate (w * h * 4) 255)
+      red = colorRGBA 220 40 40 255
+      icons = column (svgIcon 24 doc >> svgIconWith (fixedWH 16 16 . fontColor red) doc)
+      colorsOf c ui = map snd <$> (drawQuads . snd =<< warmupDraw c inp ui)
+  colors <- colorsOf ctx icons
+  assert failed (styleFg (themePanel theme) `elem` colors && red `elem` colors)
+  shown <- svgRasters ctx
+  colorsOf ctx icons >>= assertEq failed (length colors) . length
+  assertEq failed shown =<< svgRasters ctx
+  lease <- newContext
+  let registered iid = isJust <$> lookupImageSize lease iid
+      showing ui = warmup2 lease inp (column ui)
+  showing (svgIcon 16 doc)
+  small <- svgRasters lease
+  assertEq failed [True] =<< mapM registered small
+  showing (pure ()) >> showing (svgIcon 16 doc)
+  assertEq failed small =<< svgRasters lease
+  showing (pure ()) >> showing (svgIcon 20 doc)
+  assertEq failed 1 . length =<< svgRasters lease
+  assertEq failed [False] =<< mapM registered small
+  showing (svgIconWith (fixedWH 5000 10) doc)
+  assert failed . elem (ImageId 0) =<< svgRasters lease
+  showing (pure ()) >> showing (svgIcon 16 doc)
+  assertEq failed [True] =<< mapM registered =<< svgRasters lease
   -- A shelf as tall as the atlas, then an image across the rest of its
   -- width, leave no room for another.
-  assert failed =<< fill 1 1 4094
-  assert failed =<< fill 2 4092 17
-  _ <- warmup2 ctx inp ui
-  assertEq failed [ImageId 0] =<< svgRasters ctx
-  releaseImage ctx (ImageId 2)
-  _ <- warmup2 ctx inp ui
-  shown <- svgRasters ctx
-  assert failed (ImageId 0 `notElem` shown)
-  assertEq failed [True] =<< mapM (fmap isJust . lookupImageSize ctx) shown
+  full <- newContext
+  let fill iid w h = registerImage full (ImageId iid) w h (BS.replicate (w * h * 4) 255)
+      ui = column (svgIcon 16 doc)
+  assert failed . and =<< sequence [fill 1 1 4094, fill 2 4092 17]
+  _ <- warmup2 full inp ui
+  assertEq failed [ImageId 0] =<< svgRasters full
+  releaseImage full (ImageId 2)
+  _ <- warmup2 full inp ui
+  retried <- svgRasters full
+  assert failed (ImageId 0 `notElem` retried)
+  assertEq failed [True] =<< mapM (fmap isJust . lookupImageSize full) retried
 
 -- | Fit and alignment place the document's own 2:1 shape, not a square raster
 -- it was first letterboxed into.
 runSvgFitContentTest :: Context -> IORef Int -> IO ()
 runSvgFitContentTest ctx failed = do
-  doc <- either fail pure (parseSvg "<svg width='20' height='10' viewBox='0 0 20 10'><rect width='20' height='10' fill='#ff0000'/></svg>")
-  let white = colorRGBA 255 255 255 255
-      alphas bytes = [BS.index bytes (i * 4 + 3) | i <- [0 .. 99]]
+  doc <- parsed "<svg width='20' height='10' viewBox='0 0 20 10'><rect width='20' height='10' fill='#ff0000'/></svg>"
+  let alphas bytes = [BS.index bytes (i * 4 + 3) | i <- [0 .. 99]]
+      opaque r = all (== 255) (alphas (rasterizeSvgIn 10 10 r white doc))
   -- Letterboxed by 'rasterizeSvg'; covering and stretched by 'rasterizeSvgIn'.
   assertEq failed 0 (BS.index (rasterizeSvg 10 10 white doc) 3)
-  assert failed (all (== 255) (alphas (rasterizeSvgIn 10 10 (Rect (-5) 0 20 10) white doc)))
-  assert failed (all (== 255) (alphas (rasterizeSvgIn 10 10 (Rect 0 0 10 10) white doc)))
+  assert failed (opaque (Rect (-5) 0 20 10) && opaque (Rect 0 0 10 10))
   assert failed (all (== 0) (alphas (rasterizeSvgIn 10 10 (Rect 0 0 0 0) white doc)))
   let inp = withInputOff 200 200
       icon fit ax = svgIconConfigured defaultImageConfig {icLayout = fixedWH 20 20, icFit = fit, icAlignX = ax} doc
       -- After a frame without an icon, the next raster made takes the place
-      -- of the last one.
+      -- of the last one. The key holds the content rect in eighths of a
+      -- raster pixel.
       contentOf ui = do
         warmup ctx inp (column (pure ()))
         _ <- warmupDraw ctx inp ui
-        -- The key holds the content rect in eighths of a raster pixel.
         let pixels v = fromIntegral v / 8 :: Float
         map (\(_, _, _, _, (x, y, w, h)) -> (pixels x, pixels y, pixels w, pixels h)) . Map.keys <$> readIORef (ctxSvgRasters ctx)
-  assertEq failed [(-10, 0, 40, 20)] =<< contentOf (icon FitCover AlignCenter)
-  assertEq failed [(0, 0, 40, 20)] =<< contentOf (icon FitCover AlignStart)
-  assertEq failed [(0, 0, 20, 20)] =<< contentOf (icon FitFill AlignCenter)
-  assertEq failed [(0, 5, 20, 10)] =<< contentOf (icon FitContain AlignCenter)
-  assertEq failed [(0, 5, 20, 10)] =<< contentOf (svgIconWith (fixedWH 20 20) doc)
-
--- | Strokes, even-odd holes and transforms rasterize where they should.
-runSvgRasterTest :: Context -> IORef Int -> IO ()
-runSvgRasterTest _ failed = do
-  let white = colorRGBA 255 255 255 255
-      alphaAt w bytes x y = BS.index bytes ((y * w + x) * 4 + 3)
-      pixelAt w bytes x y = [BS.index bytes ((y * w + x) * 4 + k) | k <- [0 .. 3]]
-      clock =
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" \
-        \stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\
-        \<!-- a clock --><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 6v6l4 2\"/></svg>"
-  case parseSvg clock of
-    Left err -> putStrLn err >> assert failed False
-    Right doc -> do
-      assert failed (svgMonochrome doc)
-      assertEq failed (24, 24) (svgSize doc)
-      let px = rasterizeSvg 48 48 white doc
-      assertEq failed (48 * 48 * 4) (BS.length px)
-      -- On the ring, on the hands, and in the empty face between them.
-      assert failed (alphaAt 48 px 24 44 > 200)
-      assert failed (alphaAt 48 px 24 18 > 200)
-      assertEq failed 0 (alphaAt 48 px 24 36)
-      assertEq failed 0 (alphaAt 48 px 1 1)
-  let holed =
-        "<svg viewBox='0 0 10 10'><path fill-rule='evenodd' fill='#ff0000' d='M0 0h10v10H0z M3 3h4v4H3z'/>\
-        \<g transform='translate(5 0) scale(0.5)'><rect width='2' height='2' fill='rgb(0,0,255)'/></g></svg>"
-  case parseSvg holed of
-    Left err -> putStrLn err >> assert failed False
-    Right doc -> do
-      assert failed (not (svgMonochrome doc))
-      let px = rasterizeSvg 10 10 white doc
-      assertEq failed [255, 0, 0, 255] (pixelAt 10 px 1 8)
-      assertEq failed 0 (alphaAt 10 px 5 5)
-      assertEq failed [0, 0, 255, 255] (pixelAt 10 px 5 0)
-  let arcs = "<svg viewBox='0 0 20 20'><path d='M2 10a8 8 0 1 1 16 0a8 8 0 1 1-16 0z'/></svg>"
-  case parseSvg arcs of
-    Left err -> putStrLn err >> assert failed False
-    Right doc -> do
-      let px = rasterizeSvg 20 20 white doc
-      assertEq failed 255 (alphaAt 20 px 10 10)
-      assertEq failed 0 (alphaAt 20 px 1 1)
-  assert failed (either (const True) (const False) (parseSvg "<nope/>"))
-
--- | An icon draws its raster tinted with the text colour, and later frames
--- reuse the raster.
-runSvgIconTest :: Context -> IORef Int -> IO ()
-runSvgIconTest ctx failed = do
-  theme <- getTheme ctx
-  doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect x='2' y='2' width='20' height='20'/></svg>")
-  let inp = withInputOff 200 120
-      red = colorRGBA 220 40 40 255
-      ui = column $ do
-        svgIcon 24 doc
-        svgIconWith (fixedWH 16 16 . fontColor red) doc
-      rasters = svgRasters ctx
-  (_, draw) <- warmupDraw ctx inp ui
-  quads <- drawQuads draw
-  let colors = map snd quads
-  assert failed (styleFg (themePanel theme) `elem` colors)
-  assert failed (red `elem` colors)
-  shown <- rasters
-  (_, draw2) <- warmupDraw ctx inp ui
-  quads2 <- drawQuads draw2
-  assertEq failed (length quads) (length quads2)
-  assertEq failed shown =<< rasters
+  forM_
+    [ (icon FitCover AlignCenter, (-10, 0, 40, 20))
+    , (icon FitCover AlignStart, (0, 0, 40, 20))
+    , (icon FitFill AlignCenter, (0, 0, 20, 20))
+    , (icon FitContain AlignCenter, (0, 5, 20, 10))
+    , (svgIconWith (fixedWH 20 20) doc, (0, 5, 20, 10))
+    ]
+    $ \(ui, want) -> assertEq failed [want] =<< contentOf ui

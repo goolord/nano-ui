@@ -18,27 +18,25 @@ import NanoUI.Path qualified as P
 
 tests :: [Spec]
 tests =
-  [ spec "path-arc-flattening" runArcFlatteningTest
-  , spec "path-bezier-flattening" runBezierFlatteningTest
-  , spec "path-arc-endpoints" runArcEndpointsTest
+  [ spec "path-curves" runCurvesTest
   , spec "path-strokes" runStrokeTest
   , spec "path-fill-triangulation" runFillTriangulationTest
   , spec "path-transforms" runTransformTest
-  , spec "path-transform-ops" runTransformOpsTest
   , spec "path-degenerate" runDegenerateTest
-  , spec "path-canvas-frames" runCanvasFramesTest
   , spec "path-fill-holes" runFillHolesTest
   , spec "path-stroke-dashes" runDashTest
   , spec "path-stroke-joins" runJoinGeometryTest
   , spec "path-gradients" runGradientTest
-  , spec "path-clip" runClipTest
-  , spec "path-shapes-and-inverse" runShapesAndInverseTest
-  , spec "canvas-configured" runCanvasConfiguredTest
+  , spec "path-shapes-and-clip" runShapesAndClipTest
+  , spec "path-canvas-frames" runCanvasFramesTest
   ]
 
-red, black :: Color
+red, black, blue, green, white :: Color
 red = colorRGBA 220 40 40 255
 black = colorRGBA 0 0 0 255
+blue = colorRGBA 0 0 255 255
+green = colorRGBA 0 255 0 255
+white = colorRGBA 255 255 255 255
 
 -- | A canvas block's ops, flattened at @scale@ device pixels per logical pixel.
 opsAt :: Float -> CanvasM () -> [DrawOp]
@@ -62,6 +60,10 @@ stroked path = strokes (opsAt 1 (drawStrokePath path 1 black))
 filled :: P.Path -> [([V2], [Int])]
 filled path = fills (opsAt 1 (drawPath path red))
 
+-- | The ops of a stroke with this style and a solid paint.
+styledStroke :: P.Stroke -> P.Path -> [DrawOp]
+styledStroke st path = opsAt 1 (drawStrokePathWith st path (P.Solid black))
+
 -- | Check the single element; fail if there is not exactly one.
 single :: HasCallStack => IORef Int -> [a] -> (a -> IO ()) -> IO ()
 single failed xs k = case xs of [x] -> k x; _ -> assertEq failed 1 (length xs)
@@ -76,9 +78,17 @@ dist (V2 x0 y0) (V2 x1 y1) = sqrt ((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0)
 near :: Float -> V2 -> V2 -> Bool
 near eps a b = dist a b <= eps
 
+xsOf, ysOf :: [V2] -> [Float]
+xsOf pts = [x | V2 x _ <- pts]
+ysOf pts = [y | V2 _ y <- pts]
+
 -- | A line's first and last points.
 ends :: [V2] -> [V2]
 ends pts = take 1 pts ++ drop (length pts - 1) pts
+
+triples :: [a] -> [(a, a, a)]
+triples (a : b : c : rest) = (a, b, c) : triples rest
+triples _ = []
 
 -- | Distance from a point to an open polyline.
 polyDist :: [V2] -> V2 -> Float
@@ -95,10 +105,8 @@ polyArea ps = sum [x0 * y1 - x1 * y0 | (V2 x0 y0, V2 x1 y1) <- zip ps (drop 1 ps
 
 -- | Total triangle area, and whether the index list is well formed.
 covered :: [V2] -> [Int] -> (Float, Bool)
-covered ps tris = (sum (map area (triples tris)), all (\i -> i >= 0 && i < length ps) tris && length tris `mod` 3 == 0)
+covered ps tris = (sum [area (ps !! a, ps !! b, ps !! c) | (a, b, c) <- triples tris], all (\i -> i >= 0 && i < length ps) tris && length tris `mod` 3 == 0)
   where
-    triples (a : b : c : rest) = (ps !! a, ps !! b, ps !! c) : triples rest
-    triples _ = []
     area (V2 x0 y0, V2 x1 y1, V2 x2 y2) = abs ((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)) / 2
 
 -- | Deterministic pseudo-random number in [0, 1).
@@ -115,25 +123,23 @@ onEllipse :: V2 -> Float -> Float -> V2 -> Bool
 onEllipse (V2 cx cy) rx ry (V2 x y) = abs (((x - cx) / rx) ^ (2 :: Int) + ((y - cy) / ry) ^ (2 :: Int) - 1) < 1e-3
 
 -- | Circle chords stay within a quarter device pixel of the circle at every
--- scale, and are not much finer than that.
-runArcFlatteningTest :: Context -> IORef Int -> IO ()
-runArcFlatteningTest _ failed = do
-  let c = V2 100 100
-      ring scale = strokes (opsAt scale (drawStrokePath (P.circle c 50) 1 black))
+-- scale, and are not much finer than that. A flattened Bezier keeps its end
+-- points and stays within tolerance of the curve. Arcs end at their end
+-- angle; SVG arcs end at their end point, with the side and size picked by
+-- the flags.
+runCurvesTest :: Context -> IORef Int -> IO ()
+runCurvesTest _ failed = do
+  let centre = V2 100 100
+      ring scale = strokes (opsAt scale (drawStrokePath (P.circle centre 50) 1 black))
       count scale = sum [length pts | (pts, _) <- ring scale]
   forM_ [1, 2, 3] $ \scale -> single failed (ring scale) $ \(pts, closed) -> do
     let tol = 0.25 / scale
-        sags = [50 - dist c (V2 ((ax + bx) / 2) ((ay + by) / 2)) | (V2 ax ay, V2 bx by) <- zip pts (drop 1 pts ++ take 1 pts)]
-    assert failed (closed && all (\p -> abs (dist c p - 50) < 1e-3) pts && all (<= tol + 1e-3) sags)
+        sags = [50 - dist centre (V2 ((ax + bx) / 2) ((ay + by) / 2)) | (V2 ax ay, V2 bx by) <- zip pts (drop 1 pts ++ take 1 pts)]
+    assert failed (closed && all (\p -> abs (dist centre p - 50) < 1e-3) pts && all (<= tol + 1e-3) sags)
     assertGt failed (maximum sags) (tol / 2)
-  assertGt failed (count 2) (count 1)
-  assertGt failed (count 3) (count 2)
+  assert failed (count 3 > count 2 && count 2 > count 1)
   -- 'runCanvas' has no display scale and flattens as if at scale 2.
-  assert failed (opsAt 2 (drawPath (P.circle c 50) red) == toList (runCanvas (drawPath (P.circle c 50) red)))
-
--- | A flattened Bezier keeps its end points and stays within tolerance of the curve.
-runBezierFlatteningTest :: Context -> IORef Int -> IO ()
-runBezierFlatteningTest _ failed = do
+  assert failed (opsAt 2 (drawPath (P.circle centre 50) red) == toList (runCanvas (drawPath (P.circle centre 50) red)))
   let (p0, c1, c2, q, p3) = (V2 10 10, V2 400 (-100), V2 (-200) 300, V2 150 (-200), V2 300 300)
       samples = [fromIntegral k / 2000 | k <- [0 .. 2000 :: Int]]
   forM_ [(s, c) | s <- [1, 2], c <- [(P.cubicTo c1 c2 p3, [p0, c1, c2, p3]), (P.quadTo q p3, [p0, q, p3])]] $ \(scale, (seg, ctrl)) ->
@@ -144,15 +150,9 @@ runBezierFlatteningTest _ failed = do
       assert failed (all (\p -> minimum (map (dist p . bezier ctrl) samples) < 1) pts)
   -- A straight "curve" is one chord.
   single failed (stroked (P.moveTo p0 <> P.cubicTo (V2 20 10) (V2 30 10) (V2 40 10))) $ \(pts, _) -> assertEq failed [p0, V2 40 10] pts
-
--- | Arcs end at their end angle. SVG arcs end at their end point, with the
--- side and size picked by the flags.
-runArcEndpointsTest :: Context -> IORef Int -> IO ()
-runArcEndpointsTest _ failed = do
   let c = V2 50 50
       onCircle a = V2 (50 + 30 * cos a) (50 + 30 * sin a)
-      ys pts = [y | V2 _ y <- pts]
-      svgArc radius large clockwise = stroked (P.moveTo (V2 0 0) <> P.arcTo (V2 radius radius) 0 large clockwise (V2 20 0))
+      svgArc radius large clockwise = map fst (stroked (P.moveTo (V2 0 0) <> P.arcTo (V2 radius radius) 0 large clockwise (V2 20 0)))
       onSmallCircle = all (\p -> abs (dist (V2 10 0) p - 10) < 1e-3)
   single failed (stroked (P.arc c 30 0.3 1.2)) $ \(pts, closed) -> do
     assert failed (not closed)
@@ -160,29 +160,28 @@ runArcEndpointsTest _ failed = do
   -- A negative sweep turns the other way.
   single failed (stroked (P.arc c 30 0.3 (-1.2))) $ \(pts, _) -> do
     assertNear failed 1e-3 [onCircle (-0.9)] (drop 1 (ends pts))
-    assert failed (all (<= 50 + 30 * sin 0.3 + 1e-3) (ys pts))
+    assert failed (all (<= 50 + 30 * sin 0.3 + 1e-3) (ysOf pts))
   -- An arc after a moveTo draws a line to the arc's start (a pie slice).
   single failed (filled (P.moveTo c <> P.arc c 30 0 (pi / 2) <> P.close)) $ \(pts, _) -> do
     assertEq failed [c] (take 1 pts)
     assertLt failed (abs (abs (polyArea pts) - 30 * 30 * pi / 4)) 30
-  -- A clockwise SVG arc from (0, 0) to (20, 0) goes over the top.
-  single failed (svgArc 10 False True) $ \(pts, _) -> do
+  -- A clockwise SVG arc from (0, 0) to (20, 0) goes over the top, an
+  -- anticlockwise one under. Radii too small to span the end points are
+  -- scaled up until they do. With radius 20, the large arc bulges further
+  -- than the small one. A zero radius is a straight line.
+  single failed (svgArc 10 False True) $ \pts -> do
     assertEq failed [V2 0 0, V2 20 0] (ends pts)
-    assert failed (onSmallCircle pts)
-    assertLt failed (minimum (ys pts)) (-9.7)
-  single failed (svgArc 10 False False) $ \(pts, _) -> assertGt failed (maximum (ys pts)) 9.7
-  -- Radii too small to span the end points are scaled up until they do.
-  single failed (svgArc 2 False True) $ assert failed . onSmallCircle . fst
-  -- With radius 20, the large arc bulges further than the small one.
-  single failed (svgArc 20 True True) $ \(pts, _) -> assertLt failed (minimum (ys pts)) (-37)
-  single failed (svgArc 20 False True) $ \(pts, _) -> assertGt failed (minimum (ys pts)) (-2.7)
-  -- A zero radius is a straight line.
-  single failed (svgArc 0 False True) $ assertEq failed [V2 0 0, V2 20 0] . fst
+    assert failed (onSmallCircle pts && minimum (ysOf pts) < -9.7)
+  single failed (svgArc 10 False False) $ \pts -> assertGt failed (maximum (ysOf pts)) 9.7
+  single failed (svgArc 2 False True) $ assert failed . onSmallCircle
+  single failed (svgArc 20 True True) $ \pts -> assertLt failed (minimum (ysOf pts)) (-37)
+  single failed (svgArc 20 False True) $ \pts -> assertGt failed (minimum (ysOf pts)) (-2.7)
+  single failed (svgArc 0 False True) $ assertEq failed [V2 0 0, V2 20 0]
   -- An elliptical arc follows the ellipse's rotation.
   single failed (stroked (P.ellipticalArc c (V2 40 20) (pi / 2) 0 pi)) $ \(pts, _) -> do
     assertNear failed 1e-3 [V2 50 90, V2 50 10] (ends pts)
     assert failed (all (onEllipse c 20 40) pts)
-    assertLt failed (abs (minimum [x | V2 x _ <- pts] - 30)) 0.3
+    assertLt failed (abs (minimum (xsOf pts) - 30)) 0.3
 
 -- | Open and closed strokes, subpaths, and line caps.
 runStrokeTest :: Context -> IORef Int -> IO ()
@@ -190,7 +189,7 @@ runStrokeTest _ failed = do
   let (a, b, c) = (V2 0 0, V2 10 0, V2 10 10)
       plain ops = [(primArrayToList pts, w, closed) | StrokePolyline pts w closed _ _ _ _ <- ops]
       line w path = plain (opsAt 1 (drawStrokePath path w black))
-      capped cap path = opsAt 1 (drawStrokePathWith (P.stroke 4) {P.strokeCap = cap} path (P.Solid black))
+      capped cap = styledStroke (P.stroke 4) {P.strokeCap = cap}
       caps ops = [cap | StrokePolyline _ _ _ cap _ _ _ <- ops]
   assertEq failed [([0, 0, 10, 0, 10, 10], 3, False)] (line 3 (P.polyline [a, b, c]))
   -- Closing drops a last point that repeats the first.
@@ -252,7 +251,8 @@ runFillTriangulationTest _ failed = do
   -- subpath inside another with the same winding merges into it.
   assertEq failed [2, 1] [length (filled (P.rect r0 <> P.rect r1)) | (r0, r1) <- [(Rect 0 0 10 10, Rect 20 0 10 10), (Rect 0 0 100 100, Rect 20 20 10 10)]]
 
--- | Transforms compose inside out, apply before flattening, and scale stroke widths.
+-- | Transforms compose inside out, apply before flattening, and scale stroke
+-- widths. Non-path canvas ops follow a transform as far as their shape allows.
 runTransformTest :: Context -> IORef Int -> IO ()
 runTransformTest _ failed = do
   let tri = [V2 1 0, V2 2 0, V2 2 1]
@@ -281,26 +281,24 @@ runTransformTest _ failed = do
   assertEq failed (points (circle 100)) (points (withTransform (P.scale 10 1) (circle 10)))
   -- A stroke's width scales with the transform.
   assertEq failed ([6], [4]) (widths (P.scale 3 3) 2, widths (P.scale 8 2) 1)
-
--- | Non-path canvas ops follow a transform as far as their shape allows.
-runTransformOpsTest :: Context -> IORef Int -> IO ()
-runTransformOpsTest _ failed = do
-  let (blue, green, white) = (colorRGBA 0 0 255 255, colorRGBA 0 255 0 255, colorRGBA 255 255 255 255)
-      under t block = opsAt 1 (withTransform t block)
+  let under t block = opsAt 1 (withTransform t block)
       r0 = Rect 10 20 10 20
+      corners = [[tl, tr, br, bl] | [FillQuadGradient _ tl tr br bl] <- [under (P.rotate pi) (drawQuadGradient (Rect 0 0 10 10) red green blue white)]]
       -- If the block is a single rotated image: its centre, size, angle and UVs.
       turned block = [([V2 (x + w / 2) (y + h / 2), V2 w h], angle, (u0, v0, u1, v1)) | [DrawImage (Rect x y w h) angle _ u0 v0 u1 v1 _] <- [block], angle /= 0]
       turnedImage r angle = drawImageWith (imageDraw r (ImageId 7)) {imageAngle = angle, imageTint = red}
+      hi = drawText (V2 4 0) AlignCenter AlignMiddle "hi" red
   -- A flip keeps rect sizes positive and mirrors gradients and images.
   assertEq failed [] . map fst . filter (not . snd) . zip [0 :: Int ..] $
     [ [FillRect (Rect 15 25 10 20) red] == under (P.translate 5 5) (drawRect r0 red)
     , [FillRect (Rect (-20) 20 10 20) red] == under (P.scale (-1) 1) (drawRect r0 red)
     , [FillRoundedRect (Rect 20 40 20 40) 8 red] == under (P.scale 2 2) (drawRoundedRect r0 4 red)
-    , [DrawText 9 5 0.5 0.5 "hi" red] == under (P.translate 5 5) (drawText (V2 4 0) AlignCenter AlignMiddle "hi" red)
+    , [DrawText 9 5 0.5 0.5 "hi" red] == under (P.translate 5 5) hi
       -- A rotation leaves text as plain 'DrawText'; a scale scales the text.
-    , case under (P.rotate 0.3) (drawText (V2 4 0) AlignCenter AlignMiddle "hi" red) of [DrawText {}] -> True; _ -> False
-    , [DrawTextAligned 17 5 0.5 0.5 3 defaultTextFont "hi" red] == under (P.translate 5 5 <> P.scale 3 3) (drawText (V2 4 0) AlignCenter AlignMiddle "hi" red)
-    , [DrawTextAligned 17 5 0 1 6 defaultTextFont {textFontSize = 12} "hi" red] == under (P.translate 5 5 <> P.scale 3 3) (withTransform (P.scale 2 2) (drawTextWith defaultTextFont {textFontSize = 12} (V2 2 0) AlignStart AlignTop "hi" red))
+    , case under (P.rotate 0.3) hi of [DrawText {}] -> True; _ -> False
+    , [DrawTextAligned 17 5 0.5 0.5 3 defaultTextFont "hi" red] == under (P.translate 5 5 <> P.scale 3 3) hi
+    , [DrawTextAligned 17 5 0 1 6 defaultTextFont {textFontSize = 12} "hi" red]
+        == under (P.translate 5 5 <> P.scale 3 3) (withTransform (P.scale 2 2) (drawTextWith defaultTextFont {textFontSize = 12} (V2 2 0) AlignStart AlignTop "hi" red))
     , [FillQuadGradient (Rect (-10) 0 10 10) blue red red blue] == under (P.scale (-1) 1) (drawLinearGradientH (Rect 0 0 10 10) red blue)
     , [FillQuadGradient (Rect 0 (-10) 10 10) blue blue red red] == under (P.scale 1 (-1)) (drawLinearGradientV (Rect 0 0 10 10) red blue)
     , [DrawImageRect (Rect (-10) 0 10 10) 7 1 0 0 1 red] == under (P.scale (-1) 1) (drawImage (Rect 0 0 10 10) (ImageId 7) red)
@@ -309,26 +307,25 @@ runTransformOpsTest _ failed = do
     , null (under (P.translate 5 0) (drawQuadGradient (Rect 50 0 (-20) 10) red green blue white))
     , [DrawImageRect (Rect 25 0 40 40) 7 1 0 0 1 red] == under (P.translate 5 0) (drawImage (Rect 60 0 (-40) 40) (ImageId 7) red)
     , [DrawImageRect (Rect (-60) 0 40 40) 7 0 0 1 1 red] == under (P.scale (-1) 1) (drawImage (Rect 60 0 (-40) 40) (ImageId 7) red)
+      -- A half turn rotates a gradient's corner colours, and so does a
+      -- quarter turn of a linear gradient.
+    , corners == [[blue, white, red, green]]
+    , [[red, red, blue, blue]] == [[tl, tr, br, bl] | [FillQuadGradient _ tl tr br bl] <- [under (P.rotate (pi / 2)) (drawLinearGradientH (Rect 0 0 10 10) red blue)]]
+      -- A quarter turn would move the quad's diagonal, which changes a blend
+      -- of four colours, so that quad becomes a polygon with its corner colours.
+    , [[red, green, blue, white]]
+        == [map Color (primArrayToList cs) | [FillPolygon _ _ _ (Shaded cs)] <- [under (P.rotate (pi / 2)) (drawQuadGradient (Rect 0 0 10 10) red green blue white)]]
     ]
-  -- A quarter turn keeps rects as rects. A half turn rotates a gradient's
-  -- corner colours, and so does a quarter turn of a linear gradient.
+  -- A quarter turn keeps rects as rects.
   assertNear failed 1e-4 [V2 (-20) 0, V2 20 10] $
-    concat [[V2 x y, V2 w h] | [FillRect (Rect x y w h) c] <- [under (P.rotate (pi / 2)) (drawRect (Rect 0 0 10 20) red)], c == red]
-  assertEq failed [[blue, white, red, green]] $
-    [[tl, tr, br, bl] | [FillQuadGradient _ tl tr br bl] <- [under (P.rotate pi) (drawQuadGradient (Rect 0 0 10 10) red green blue white)]]
-  assertEq failed [[red, red, blue, blue]] $
-    [[tl, tr, br, bl] | [FillQuadGradient _ tl tr br bl] <- [under (P.rotate (pi / 2)) (drawLinearGradientH (Rect 0 0 10 10) red blue)]]
-  -- A quarter turn would move the quad's diagonal, which changes a blend of
-  -- four colours, so that quad becomes a polygon with its corner colours.
-  assertEq failed [[red, green, blue, white]] $
-    [map Color (primArrayToList cs) | [FillPolygon _ _ _ (Shaded cs)] <- [under (P.rotate (pi / 2)) (drawQuadGradient (Rect 0 0 10 10) red green blue white)]]
+    concat [[V2 x y, V2 w h] | [FillRect (Rect x y w h) col] <- [under (P.rotate (pi / 2)) (drawRect (Rect 0 0 10 20) red)], col == red]
   assertNear failed 1e-4 [V2 2 0, V2 2 20, V2 4 0] $
-    concat [[V2 x0 y0, V2 x1 y1, V2 w 0] | [StrokeLineAA x0 y0 x1 y1 w c] <- [under (P.translate 2 0 <> P.rotate (pi / 2) <> P.scale 4 4) (drawStrokeAA (V2 0 0) (V2 5 0) 1 red)], c == red]
+    concat [[V2 x0 y0, V2 x1 y1, V2 w 0] | [StrokeLineAA x0 y0 x1 y1 w col] <- [under (P.translate 2 0 <> P.rotate (pi / 2) <> P.scale 4 4) (drawStrokeAA (V2 0 0) (V2 5 0) 1 red)], col == red]
   -- A rect at any other angle becomes a polygon of the same area.
   single failed (fills (under (P.rotateAround (V2 15 30) (pi / 5)) (drawRect r0 red))) $ \(pts, tris) -> do
     assertEq failed 4 (length pts)
     assertLt failed (abs (fst (covered pts tris) - 200)) 1e-2
-    assertNear failed 1e-3 [V2 15 30] [V2 (sum [x | V2 x _ <- pts] / 4) (sum [y | V2 _ y <- pts] / 4)]
+    assertNear failed 1e-3 [V2 15 30] [V2 (sum (xsOf pts) / 4) (sum (ysOf pts) / 4)]
   -- A circle stays a circle under rotation and uniform scale; a non-uniform scale makes an ellipse.
   assertNear failed 1e-4 [V2 20 0, V2 10 0] $
     concat [[V2 x y, V2 r 0] | [FillCircle x y r _] <- [under (P.rotate (pi / 2) <> P.scale 2 2) (drawCircle (V2 0 (-10)) 5 red)]]
@@ -373,7 +370,7 @@ runDegenerateTest _ failed = do
     ]
   -- A zero-length subpath is a dot with round or square caps, and a lone
   -- move draws nothing.
-  let capped cap path = [(pairs pts, c) | StrokePolyline pts _ _ c _ _ _ <- opsAt 1 (drawStrokePathWith (P.stroke 2) {P.strokeCap = cap} path (P.Solid black))]
+  let capped cap path = [(pairs pts, c) | StrokePolyline pts _ _ c _ _ _ <- styledStroke (P.stroke 2) {P.strokeCap = cap} path]
   forM_ [P.RoundCap, P.SquareCap] $ \cap ->
     forM_ [P.moveTo p <> P.lineTo p, P.moveTo p <> P.close, P.circle p 0] $ \path ->
       single failed (capped cap path) $ \(ps, c) -> do
@@ -406,38 +403,6 @@ runDegenerateTest _ failed = do
   assert failed (sound crossing && all (\(pts, tris) -> snd (covered pts tris)) (fills crossing))
   assert failed (sound (both (P.polyline [V2 0 0, V2 nan nan, V2 1e30 1e30, V2 (-1e30) 0])))
 
--- | A canvas repaints only when its drawing changes, and flattens for the display scale.
-runCanvasFramesTest :: Context -> IORef Int -> IO ()
-runCanvasFramesTest ctx failed = do
-  let inp = withInputOff 400 300
-      ui turn = column $ do
-        label "Other"
-        drawn <- canvas (fixedWH 120 120) $ \(Rect x y w h) ->
-          withTransform (P.rotateAround (V2 (x + w / 2) (y + h / 2)) turn) $ do
-            drawPath (P.roundedRect (Rect (x + 20) (y + 20) 80 80) 10) red
-            drawStrokePath (P.circle (V2 (x + 60) (y + 60)) 30) 2 black
-        (keyed, ()) <- customWidget defaultCustomWidgetSpec
-          { widgetLayout = fixedWH 60 60 defaultLayout
-          , widgetContent = 1
-          , widgetDraw = \cdc (Rect x y _ _) -> runCanvasFor cdc (drawPath (P.circle (V2 (x + 30) (y + 30)) 25) red)
-          }
-        pure (drawn, keyed)
-      -- Filled point count of each cached canvas.
-      pointsIn c = do
-        dc <- readIORef (ctxDrawingCache c)
-        pure [sum [sizeofPrimArray pts `div` 2 | FillPolygon pts _ _ _ <- toList (cdeOps e)] | e <- IM.elems (dcsCustomDrawOpCache dc)]
-  (drawn, keyed) <- warmup2 ctx inp (ui 0)
-  _ <- runFrame ctx inp (ui 0)
-  takeDamage ctx >>= \same -> assert failed (not (any (damageCovers same . respRect) [drawn, keyed]))
-  _ <- runFrame ctx inp (ui 0.4)
-  takeDamage ctx >>= assert failed . (`clipCovers` respRect drawn)
-  -- Both flatten finer at a higher display scale, including the keyed one whose key is unchanged.
-  before <- pointsIn ctx
-  let dense = withFontMetrics ctx (ctxFontMetrics ctx) {fmSnapScale = 3}
-  _ <- warmup2 dense inp (ui 0.4)
-  after <- pointsIn dense
-  assertEq failed (2, 2, True) (length before, length after, and (zipWith (<) before after))
-
 -- | Points, ring starts and triangles of each filled polygon under a fill rule.
 polygons :: P.FillRule -> P.Path -> [([V2], [Int], [Int])]
 polygons rule path = [(pairs pts, primArrayToList rings, primArrayToList tris) | FillPolygon pts rings tris _ <- opsAt 1 (drawPathWith rule path (P.Solid red))]
@@ -453,16 +418,10 @@ squareBack x y s = P.polygon [V2 x y, V2 x (y + s), V2 (x + s) (y + s), V2 (x + 
 
 -- | Whether any triangle covers a point.
 coversPoint :: ([V2], [Int], [Int]) -> V2 -> Bool
-coversPoint (pts, _, tris) p = any inside (triples tris)
+coversPoint (pts, _, tris) p = any inside [(pts !! a, pts !! b, pts !! c) | (a, b, c) <- triples tris]
   where
-    triples (a : b : c : rest) = (pts !! a, pts !! b, pts !! c) : triples rest
-    triples _ = []
     side (V2 x0 y0) (V2 x1 y1) (V2 x y) = (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)
-    inside (a, b, c) =
-      let d1 = side a b p
-          d2 = side b c p
-          d3 = side c a p
-       in (d1 > 0 && d2 > 0 && d3 > 0) || (d1 < 0 && d2 < 0 && d3 < 0)
+    inside (a, b, c) = let ds = [side a b p, side b c p, side c a p] in all (> 0) ds || all (< 0) ds
 
 -- | A nested subpath is a hole when the fill rule leaves it unfilled, and
 -- the triangles cover exactly the filled area.
@@ -477,25 +436,38 @@ runFillHolesTest _ failed = do
         let got = map coverage (polygons rule path)
          in unless (length got == length wantAreas && and (zipWith (\w a -> maybe False (areaNear w) a) wantAreas got)) $
               assertEq failed (name, map Just wantAreas) (name, got)
-  -- A square inside a square: even-odd cuts a hole; non-zero cuts one only
-  -- when the inner square winds the other way.
-  check "even-odd hole" P.EvenOdd (square 0 0 100 <> square 20 20 60) [6400]
-  check "non-zero hole" P.NonZero (square 0 0 100 <> squareBack 20 20 60) [6400]
-  check "non-zero same way" P.NonZero (square 0 0 100 <> square 20 20 60) [10000]
-  check "two holes" P.EvenOdd (square 0 0 100 <> square 10 10 30 <> squareBack 60 10 30) [8200]
-  -- An island inside a hole is a separate polygon.
-  check "island" P.EvenOdd (square 0 0 100 <> square 20 20 60 <> square 40 40 20) [6400, 400]
-  check "island non-zero" P.NonZero (square 0 0 100 <> squareBack 20 20 60 <> square 40 40 20) [6400, 400]
-  -- Crossing subpaths fill separately.
-  check "crossing" P.EvenOdd (square 0 0 60 <> square 40 40 60) [3600, 3600]
-  -- Copies of one loop nest: under even-odd two cancel and three fill
-  -- once, a loop and its reverse cancel under non-zero, and two the same
-  -- way fill once.
-  check "same loop twice" P.EvenOdd (square 0 0 50 <> square 0 0 50) []
-  check "same loop three times" P.EvenOdd (square 0 0 50 <> square 0 0 50 <> square 0 0 50) [2500]
-  check "loop and its reverse" P.NonZero (square 0 0 50 <> squareBack 0 0 50) []
-  check "same loop twice, non-zero" P.NonZero (square 0 0 50 <> square 0 0 50) [2500]
-  check "copies inside a square" P.EvenOdd (square 0 0 100 <> square 20 20 60 <> square 20 20 60) [6400, 3600]
+      nestedSquare k = square (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)
+      nestedBack k = (if even k then square else squareBack) (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)
+      bands = [s * s - (s - 10) * (s - 10) | j <- [0 .. 9 :: Int], let s = 200 - 20 * fromIntegral j]
+      cells = foldMap (\k -> square (10 * fromIntegral (k `mod` 10)) (10 * fromIntegral (k `div` 10)) 5) [0 .. 99 :: Int]
+  forM_
+    -- A square inside a square: even-odd cuts a hole; non-zero cuts one only
+    -- when the inner square winds the other way. An island inside a hole is
+    -- a separate polygon, and crossing subpaths fill separately. Copies of
+    -- one loop nest: under even-odd two cancel and three fill once, a loop
+    -- and its reverse cancel under non-zero, and two the same way fill once.
+    -- Many subpaths each find their parent among the others: nested squares
+    -- are filled bands and holes in turn, and a grid of squares is 100
+    -- polygons, or 100 holes inside a larger square.
+    [ ("even-odd hole", P.EvenOdd, square 0 0 100 <> square 20 20 60, [6400])
+    , ("non-zero hole", P.NonZero, square 0 0 100 <> squareBack 20 20 60, [6400])
+    , ("non-zero same way", P.NonZero, square 0 0 100 <> square 20 20 60, [10000])
+    , ("two holes", P.EvenOdd, square 0 0 100 <> square 10 10 30 <> squareBack 60 10 30, [8200])
+    , ("island", P.EvenOdd, square 0 0 100 <> square 20 20 60 <> square 40 40 20, [6400, 400])
+    , ("island non-zero", P.NonZero, square 0 0 100 <> squareBack 20 20 60 <> square 40 40 20, [6400, 400])
+    , ("crossing", P.EvenOdd, square 0 0 60 <> square 40 40 60, [3600, 3600])
+    , ("same loop twice", P.EvenOdd, square 0 0 50 <> square 0 0 50, [])
+    , ("same loop three times", P.EvenOdd, square 0 0 50 <> square 0 0 50 <> square 0 0 50, [2500])
+    , ("loop and its reverse", P.NonZero, square 0 0 50 <> squareBack 0 0 50, [])
+    , ("same loop twice, non-zero", P.NonZero, square 0 0 50 <> square 0 0 50, [2500])
+    , ("copies inside a square", P.EvenOdd, square 0 0 100 <> square 20 20 60 <> square 20 20 60, [6400, 3600])
+    , ("20 nested, even-odd", P.EvenOdd, foldMap nestedSquare [0 .. 19 :: Int], bands)
+    , ("20 nested, non-zero alternating", P.NonZero, foldMap nestedBack [0 .. 19 :: Int], bands)
+    , ("20 nested, non-zero same way", P.NonZero, foldMap nestedSquare [0 .. 19 :: Int], [40000])
+    , ("100 apart", P.NonZero, cells, replicate 100 25)
+    , ("100 holes", P.EvenOdd, square (-10) (-10) 120 <> cells, [14400 - 2500])
+    ]
+    $ \(name, rule, path, want) -> check name rule path want
   -- Concentric circles: an annulus, like a glyph with a curved counter.
   let ringArea = sum (map (maybe 0 id . coverage) (polygons P.EvenOdd (P.circle c 50 <> P.circle c 30)))
   assertLt failed (abs (ringArea - pi * (50 * 50 - 30 * 30))) (2 * pi * 80 * 0.25)
@@ -508,18 +480,6 @@ runFillHolesTest _ failed = do
       blobs = map blob [0 .. 7 :: Int]
   single failed (polygons P.EvenOdd (square 0 0 400 <> foldMap P.polygon blobs)) $ \poly ->
     assertLt failed (abs (maybe 0 id (coverage poly) - (160000 - sum (map (abs . polyArea) blobs)))) 1
-  -- Many subpaths, each finding its parent among the others: nested squares
-  -- are filled bands and holes in turn, and a grid of squares is 100
-  -- polygons, or 100 holes inside a larger square.
-  let nested :: Int -> P.Path
-      nested k = (if even k then square else squareBack) (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)
-      bands = [s * s - (s - 10) * (s - 10) | j <- [0 .. 9 :: Int], let s = 200 - 20 * fromIntegral j]
-      cells = foldMap (\k -> square (10 * fromIntegral (k `mod` 10)) (10 * fromIntegral (k `div` 10)) 5) [0 .. 99 :: Int]
-  check "20 nested, even-odd" P.EvenOdd (foldMap (\k -> square (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)) [0 .. 19 :: Int]) bands
-  check "20 nested, non-zero alternating" P.NonZero (foldMap nested [0 .. 19]) bands
-  check "20 nested, non-zero same way" P.NonZero (foldMap (\k -> square (5 * fromIntegral k) (5 * fromIntegral k) (200 - 10 * fromIntegral k)) [0 .. 19 :: Int]) [40000]
-  check "100 apart" P.NonZero cells (replicate 100 25)
-  check "100 holes" P.EvenOdd (square (-10) (-10) 120 <> cells) [14400 - 2500]
   -- A single subpath is one polygon with one ring.
   assertEq failed [[0, 4]] [rings | (_, rings, _) <- polygons P.EvenOdd (square 0 0 10)]
   -- 'fillPathOps', which backends use, matches the canvas output.
@@ -528,13 +488,14 @@ runFillHolesTest _ failed = do
 -- | Dashes split a stroke by the pattern, measured in transformed lengths.
 runDashTest :: Context -> IORef Int -> IO ()
 runDashTest _ failed = do
-  let dashed pattern off path = [(pairs pts, cap) | StrokePolyline pts _ closed cap _ _ _ <- opsAt 1 (drawStrokePathWith (P.stroke 2) {P.strokeDash = pattern, P.strokeDashOffset = off, P.strokeCap = P.RoundCap} path (P.Solid black)), not closed]
+  let dashedWith st pattern off path = [(pairs pts, cap) | StrokePolyline pts _ closed cap _ _ _ <- opsAt 1 (st (drawStrokePathWith (P.stroke 2) {P.strokeDash = pattern, P.strokeDashOffset = off, P.strokeCap = P.RoundCap} path (P.Solid black))), not closed]
+      dashed = dashedWith id
       line = P.polyline [V2 0 0, V2 100 0]
-      spans = map (\(ps, _) -> [x | V2 x _ <- ends ps])
-  assertEq failed [[0, 10], [15, 25], [30, 40], [45, 55], [60, 70], [75, 85], [90, 100]] (spans (dashed [10, 5] 0 line))
+      spans' = map (\(ps, _) -> xsOf (ends ps))
+  assertEq failed [[0, 10], [15, 25], [30, 40], [45, 55], [60, 70], [75, 85], [90, 100]] (spans' (dashed [10, 5] 0 line))
   -- An offset starts partway into the pattern; an odd-length pattern is repeated twice.
-  assertEq failed [[0, 5], [10, 20], [25, 35], [40, 50], [55, 65], [70, 80], [85, 95]] (spans (dashed [10, 5] 5 line))
-  assertEq failed [[0, 10], [20, 30], [40, 50], [60, 70], [80, 90]] (spans (dashed [10] 0 line))
+  assertEq failed [[0, 5], [10, 20], [25, 35], [40, 50], [55, 65], [70, 80], [85, 95]] (spans' (dashed [10, 5] 5 line))
+  assertEq failed [[0, 10], [20, 30], [40, 50], [60, 70], [80, 90]] (spans' (dashed [10] 0 line))
   -- Each dash is capped.
   assert failed (all ((== P.RoundCap) . snd) (dashed [10, 5] 0 line))
   -- A dash turns a corner with its line.
@@ -553,7 +514,7 @@ runDashTest _ failed = do
   -- An invalid or too fine pattern draws a solid line.
   forM_ [[-1, 2], [0, 0], [0.001]] $ \pattern -> assertEq failed [[V2 0 0, V2 100 0]] (map fst (dashed pattern 0 line))
   -- A transform scales the pattern with the line.
-  assertEq failed [[0, 20], [30, 50], [60, 80], [90, 100]] (map (\ps -> [x | V2 x _ <- ends ps]) [pairs pts | StrokePolyline pts _ _ _ _ _ _ <- opsAt 1 (withTransform (P.scale 2 2) (drawStrokePathWith (P.stroke 1) {P.strokeDash = [10, 5]} (P.polyline [V2 0 0, V2 50 0]) (P.Solid black)))])
+  assertEq failed [[0, 20], [30, 50], [60, 80], [90, 100]] (spans' (dashedWith (withTransform (P.scale 2 2)) [10, 5] 0 (P.polyline [V2 0 0, V2 50 0])))
 
 -- | Vertex positions (relative to the canvas corner) and alphas from one
 -- frame that draws a canvas at scale 1.
@@ -573,17 +534,17 @@ canvasVertices ctx draw = do
 runJoinGeometryTest :: Context -> IORef Int -> IO ()
 runJoinGeometryTest ctx failed = do
   let corner = V2 100 100
+      -- The vertices of a polyline through these points, relative to the canvas.
+      strokeVerts st pts = map fst <$> canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith st (P.polyline [V2 (x + px) (y + py) | V2 px py <- pts]) (P.Solid black))
+      -- How far the vertices near @p@ reach along @dir@.
+      reachFrom p dir vs = maximum [v2Dot (v2Sub q p) dir | q <- vs, dist q p < 30]
       -- A right-angle corner whose outside faces the top right.
-      path (Rect x y _ _) = P.polyline [V2 (x + 40) (y + 100), V2 (x + 100) (y + 100), V2 (x + 100) (y + 160)]
-      outward = V2 (sqrt 0.5) (negate (sqrt 0.5))
-      reach st = do
-        vs <- canvasVertices ctx (\r -> drawStrokePathWith st (path r) (P.Solid black))
-        pure (maximum [v2Dot (v2Sub p corner) outward | (p, _) <- vs, dist p corner < 30])
-      hw = 5
-      edge = hw + 0.5
+      reach st = reachFrom corner (V2 (sqrt 0.5) (negate (sqrt 0.5))) <$> strokeVerts st [V2 40 100, corner, V2 100 160]
+      edge = 5 + 0.5
+      roundJoin = (P.stroke 10) {P.strokeJoin = P.RoundJoin}
   miter <- reach (P.stroke 10)
   bevel <- reach (P.stroke 10) {P.strokeJoin = P.BevelJoin}
-  roundJ <- reach (P.stroke 10) {P.strokeJoin = P.RoundJoin}
+  roundJ <- reach roundJoin
   -- A right angle's miter is 1.41 times the width, so a limit of 1.3 bevels it.
   limited <- reach (P.stroke 10) {P.strokeMiterLimit = 1.3}
   assertLt failed (abs (miter - edge * sqrt 2)) 0.01
@@ -594,15 +555,11 @@ runJoinGeometryTest ctx failed = do
   -- the line was heading, whichever way it points.
   forM_ [V2 60 0, V2 60 80] $ \(V2 dx dy) -> do
     let len = sqrt (dx * dx + dy * dy)
-        dir = V2 (dx / len) (dy / len)
         tip = V2 (40 + dx) (100 + dy)
-    vs <- canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith (P.stroke 10) {P.strokeJoin = P.RoundJoin} (P.polyline [V2 (x + 40) (y + 100), V2 (x + 40 + dx) (y + 100 + dy), V2 (x + 40) (y + 100)]) (P.Solid black))
-    let tipReach = maximum [v2Dot (v2Sub q tip) dir | (q, _) <- vs, dist q tip < 30]
+    tipReach <- reachFrom tip (V2 (dx / len) (dy / len)) <$> strokeVerts roundJoin [V2 40 100, tip, V2 40 100]
     assert failed (tipReach > edge * 0.95 && tipReach < edge + 0.01)
   -- Each cap extends past the line end by its expected amount.
-  let capReach cap = do
-        vs <- canvasVertices ctx (\(Rect x y _ _) -> drawStrokePathWith (P.stroke 10) {P.strokeCap = cap} (P.polyline [V2 (x + 40) (y + 100), V2 (x + 100) (y + 100)]) (P.Solid black))
-        pure (maximum [px - 100 | (V2 px py, _) <- vs, abs (py - 100) < 20, px > 90, px < 130])
+  let capReach cap = (\vs -> maximum [px - 100 | V2 px py <- vs, abs (py - 100) < 20, px > 90, px < 130]) <$> strokeVerts (P.stroke 10) {P.strokeCap = cap} [V2 40 100, corner]
   butt <- capReach P.ButtCap
   sq <- capReach P.SquareCap
   roundC <- capReach P.RoundCap
@@ -622,22 +579,19 @@ runJoinGeometryTest ctx failed = do
 -- stops, and follows transforms.
 runGradientTest :: Context -> IORef Int -> IO ()
 runGradientTest _ failed = do
-  let (blue, green) = (colorRGBA 0 0 255 255, colorRGBA 0 255 0 255)
-      shaded ops = [(pairs pts, primArrayToList tris, map Color (primArrayToList cs)) | FillPolygon pts _ tris (Shaded cs) <- ops]
+  let shaded ops = [(pairs pts, primArrayToList tris, map Color (primArrayToList cs)) | FillPolygon pts _ tris (Shaded cs) <- ops]
       gradient p0 p1 stops path = shaded (opsAt 1 (drawPathWith P.NonZero path (P.Linear p0 p1 stops)))
       bar = P.rect (Rect 0 0 100 10)
       channel f c = fromIntegral (f c) :: Float
+      flat paint = [c | FillPolygon _ _ _ (Flat c) <- opsAt 1 (drawPathWith P.NonZero bar paint)]
   -- Two stops spanning the shape: corner colours only, no extra vertices.
-  single failed (gradient (V2 0 0) (V2 100 0) [(0, red), (1, blue)] bar) $ \(pts, _, cols) -> do
-    assertEq failed 4 (length pts)
-    assertEq failed [red, blue, blue, red] cols
+  single failed (gradient (V2 0 0) (V2 100 0) [(0, red), (1, blue)] bar) $ \(pts, _, cols) ->
+    assertEq failed (4, [red, blue, blue, red]) (length pts, cols)
   -- A gradient over part of the shape splits it at every stop, and no
   -- triangle crosses a stop.
   single failed (gradient (V2 25 0) (V2 75 0) [(0, red), (0.5, green), (1, blue)] bar) $ \(pts, tris, cols) -> do
-    let xs = [x | V2 x _ <- pts]
-        triples (a : b : c : rest) = [a, b, c] : triples rest
-        triples _ = []
-        straddles v t = let gs = [xs !! i | i <- t] in minimum gs < v - 1e-3 && maximum gs > v + 1e-3
+    let xs = xsOf pts
+        straddles v (a, b, c) = let gs = [xs !! i | i <- [a, b, c]] in minimum gs < v - 1e-3 && maximum gs > v + 1e-3
     assert failed (all (\v -> any (\x -> abs (x - v) < 1e-3) xs) [25, 50, 75])
     assert failed (not (or [straddles v t | v <- [25, 50, 75], t <- triples tris]))
     assertLt failed (abs (fst (covered pts tris) - 1000)) 1e-2
@@ -646,7 +600,7 @@ runGradientTest _ failed = do
   -- Two stops at one offset are a hard edge: each side keeps its own
   -- colour up to the pixel across the edge.
   single failed (gradient (V2 0 0) (V2 100 0) [(0, red), (0.5, red), (0.5, blue), (1, blue)] bar) $ \(pts, _, cols) -> do
-    assert failed (any (\(V2 x _) -> abs (x - 49.5) < 1e-3) pts && any (\(V2 x _) -> abs (x - 50.5) < 1e-3) pts)
+    assert failed (any (\x -> abs (x - 49.5) < 1e-3) (xsOf pts) && any (\x -> abs (x - 50.5) < 1e-3) (xsOf pts))
     assert failed (and [c == (if x < 50 then red else blue) | (V2 x _, c) <- zip pts cols])
   -- Rotated with its shape, each point keeps its unrotated colour.
   let turn = P.rotateAround (V2 50 5) 0.7
@@ -658,8 +612,7 @@ runGradientTest _ failed = do
       Nothing -> assert failed False
   -- A zero-length gradient, or one with a single stop, is a flat fill.
   assert failed (null (gradient (V2 5 5) (V2 5 5) [(0, red), (1, blue)] bar))
-  assertEq failed [1] [1 :: Int | FillPolygon _ _ _ (Flat c) <- opsAt 1 (drawPathWith P.NonZero bar (P.Linear (V2 5 5) (V2 5 5) [(0, red), (1, blue)])), c == blue]
-  assertEq failed [1] [1 :: Int | FillPolygon _ _ _ (Flat c) <- opsAt 1 (drawPathWith P.NonZero bar (P.Linear (V2 0 0) (V2 100 0) [(0, red)])), c == red]
+  assertEq failed ([blue], [red]) (flat (P.Linear (V2 5 5) (V2 5 5) [(0, red), (1, blue)]), flat (P.Linear (V2 0 0) (V2 100 0) [(0, red)]))
   -- A stroke takes the colours along its centre line.
   assertEq failed [[red, blue]] [map Color (primArrayToList cs) | StrokePolyline _ _ _ _ _ _ (Shaded cs) <- opsAt 1 (drawStrokePathWith (P.stroke 4) (P.polyline [V2 0 0, V2 100 0]) (P.Linear (V2 0 0) (V2 100 0) [(0, red), (1, blue)]))]
   -- A four-corner gradient at a non-quarter angle becomes a shaded polygon
@@ -668,30 +621,10 @@ runGradientTest _ failed = do
     assertNear failed 1e-4 (map (P.transformPoint (P.rotate 0.5)) [V2 0 0, V2 10 0, V2 10 10, V2 0 10]) (pairs pts)
     assertEq failed [red, green, blue, black] (map Color (primArrayToList cs))
 
--- | A clip emits push and pop ops around its content, and the frame applies it.
-runClipTest :: Context -> IORef Int -> IO ()
-runClipTest ctx failed = do
-  let clipOps block = [op | op <- opsAt 1 block, isClip op]
-      isClip = \case PushClip _ -> True; PopClip -> True; _ -> False
-  assert failed (clipOps (withClip (Rect 1 2 3 4) (drawRect (Rect 0 0 10 10) red)) == [PushClip (Rect 1 2 3 4), PopClip])
-  assert failed (clipOps (withTransform (P.translate 5 5) (withClip (Rect 1 2 3 4) (pure ()))) == [PushClip (Rect 6 7 3 4), PopClip])
-  -- Under rotation, the clip is the bounding box of the rotated rect.
-  case clipOps (withTransform (P.rotate (pi / 4)) (withClip (Rect 0 0 10 10) (pure ()))) of
-    [PushClip (Rect x y w h), PopClip] -> assertNear failed 1e-3 [V2 (-10 * sqrt 0.5) 0, V2 (20 * sqrt 0.5) (20 * sqrt 0.5)] [V2 x y, V2 w h]
-    _ -> assert failed False
-  -- In a frame, the content is clipped and later draws are not.
-  let ui = canvas (fixedWH 100 100) $ \(Rect x y _ _) -> do
-        withClip (Rect (x + 10) (y + 10) 20 20) (drawRect (Rect x y 100 100) red)
-        drawRect (Rect x y 50 50) black
-  (resp, dd, _) <- runFrame ctx (withInput 300 300) ui
-  let Rect x y _ _ = respRect resp
-      clips = [(cmdClipX c - x, cmdClipY c - y, cmdClipW c, cmdClipH c) | c <- drawCmdElems dd, cmdIndexCount c > 0]
-  assert failed ((10, 10, 20, 20) `elem` clips)
-  assert failed (any (\(_, _, w, _) -> w >= 100) clips)
-
--- | Per-corner rounded rects, and transforms undone.
-runShapesAndInverseTest :: Context -> IORef Int -> IO ()
-runShapesAndInverseTest _ failed = do
+-- | Per-corner rounded rects, and transforms undone. A clip emits push and
+-- pop ops around its content, and the frame applies it.
+runShapesAndClipTest :: Context -> IORef Int -> IO ()
+runShapesAndClipTest ctx failed = do
   let areaOf path = sum [abs (polyArea pts) | (pts, _) <- filled path]
       quarterCut r = (4 - pi) / 4 * r * r
       -- Area that flattening a quarter circle of radius @r@ may lose.
@@ -714,20 +647,58 @@ runShapesAndInverseTest _ failed = do
     Just back -> assertNear failed 1e-3 pts (map (P.transformPoint back . P.transformPoint t) pts)
     Nothing -> assert failed False
   assertEq failed [True, True] [P.invert (P.scale 0 1) == Nothing, P.invert (P.scale (0 / 0) 1) == Nothing]
+  let clipOps block = [op | op <- opsAt 1 block, case op of PushClip _ -> True; PopClip -> True; _ -> False]
+  assert failed (clipOps (withClip (Rect 1 2 3 4) (drawRect (Rect 0 0 10 10) red)) == [PushClip (Rect 1 2 3 4), PopClip])
+  assert failed (clipOps (withTransform (P.translate 5 5) (withClip (Rect 1 2 3 4) (pure ()))) == [PushClip (Rect 6 7 3 4), PopClip])
+  -- Under rotation, the clip is the bounding box of the rotated rect.
+  case clipOps (withTransform (P.rotate (pi / 4)) (withClip (Rect 0 0 10 10) (pure ()))) of
+    [PushClip (Rect x y w h), PopClip] -> assertNear failed 1e-3 [V2 (-10 * sqrt 0.5) 0, V2 (20 * sqrt 0.5) (20 * sqrt 0.5)] [V2 x y, V2 w h]
+    _ -> assert failed False
+  -- In a frame, the content is clipped and later draws are not.
+  (resp, dd, _) <- runFrame ctx (withInput 300 300) . canvas (fixedWH 100 100) $ \(Rect x y _ _) -> do
+    withClip (Rect (x + 10) (y + 10) 20 20) (drawRect (Rect x y 100 100) red)
+    drawRect (Rect x y 50 50) black
+  let Rect x y _ _ = respRect resp
+      clips = [(cmdClipX c - x, cmdClipY c - y, cmdClipW c, cmdClipH c) | c <- drawCmdElems dd, cmdIndexCount c > 0]
+  assert failed ((10, 10, 20, 20) `elem` clips && any (\(_, _, w, _) -> w >= 100) clips)
 
--- | A configured canvas caches its drawing by key, the drawing sees hover
--- state, and the canvas sets its cursor.
-runCanvasConfiguredTest :: Context -> IORef Int -> IO ()
-runCanvasConfiguredTest ctx failed = do
+-- | A canvas repaints only when its drawing changes, and flattens for the
+-- display scale. A configured canvas caches its drawing by key, the drawing
+-- sees hover state, and the canvas sets its cursor.
+runCanvasFramesTest :: Context -> IORef Int -> IO ()
+runCanvasFramesTest ctx failed = do
+  let inp = withInputOff 400 300
+      ui turn = column $ do
+        label "Other"
+        drawn <- canvas (fixedWH 120 120) $ \(Rect x y w h) ->
+          withTransform (P.rotateAround (V2 (x + w / 2) (y + h / 2)) turn) $ do
+            drawPath (P.roundedRect (Rect (x + 20) (y + 20) 80 80) 10) red
+            drawStrokePath (P.circle (V2 (x + 60) (y + 60)) 30) 2 black
+        (keyed, ()) <- customWidget defaultCustomWidgetSpec
+          { widgetLayout = fixedWH 60 60 defaultLayout
+          , widgetContent = 1
+          , widgetDraw = \cdc (Rect x y _ _) -> runCanvasFor cdc (drawPath (P.circle (V2 (x + 30) (y + 30)) 25) red)
+          }
+        pure (drawn, keyed)
+      cached c = IM.elems . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache c)
+      -- Filled point count of each cached canvas.
+      pointsIn c = map (\e -> sum [sizeofPrimArray pts `div` 2 | FillPolygon pts _ _ _ <- toList (cdeOps e)]) <$> cached c
+  (drawn, keyed) <- warmup2 ctx inp (ui 0)
+  _ <- runFrame ctx inp (ui 0)
+  takeDamage ctx >>= \same -> assert failed (not (any (damageCovers same . respRect) [drawn, keyed]))
+  _ <- runFrame ctx inp (ui 0.4)
+  takeDamage ctx >>= assert failed . (`clipCovers` respRect drawn)
+  -- Both flatten finer at a higher display scale, including the keyed one whose key is unchanged.
+  before <- pointsIn ctx
+  let dense = withFontMetrics ctx (ctxFontMetrics ctx) {fmSnapScale = 3}
+  _ <- warmup2 dense inp (ui 0.4)
+  after <- pointsIn dense
+  assertEq failed (2, 2, True) (length before, length after, and (zipWith (<) before after))
+  configured <- newContext
   let cfg key = defaultCanvasConfig {canvasLayout = fixedWH 60 40 defaultLayout, canvasContent = key, canvasCursor = Just (\_ _ _ -> UiCursorPointer)}
-      ui key = canvasConfigured (cfg key) $ \r -> do
-        cdc <- drawContext
-        drawRect r (if cdcHovered cdc then red else black)
-        pure ()
-      hoverAt resp = (withInput 300 300) {inputMousePos = centerOf resp}
-  resp <- warmup2 ctx (withInput 300 300) (ui 1)
-  _ <- run2Frames ctx (hoverAt resp) (ui 1)
-  dc <- readIORef (ctxDrawingCache ctx)
-  assertEq failed [red] [c | e <- IM.elems (dcsCustomDrawOpCache dc), FillRect _ c <- toList (cdeOps e)]
-  kind <- uiCursorKind ctx (hoverAt resp)
-  assertEq failed UiCursorPointer kind
+      hovered key = canvasConfigured (cfg key) $ \r -> drawContext >>= \cdc -> drawRect r (if cdcHovered cdc then red else black)
+  resp <- warmup2 configured (withInput 300 300) (hovered 1)
+  let hoverAt = (withInput 300 300) {inputMousePos = centerOf resp}
+  _ <- run2Frames configured hoverAt (hovered 1)
+  cached configured >>= \es -> assertEq failed [red] [c | e <- es, FillRect _ c <- toList (cdeOps e)]
+  assertEq failed UiCursorPointer =<< uiCursorKind configured hoverAt

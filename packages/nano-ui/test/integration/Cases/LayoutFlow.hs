@@ -1,43 +1,27 @@
 module Cases.LayoutFlow (tests) where
 
 import Spec
-import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.List (findIndex)
+import Data.Maybe (isJust)
+import Data.Primitive.SmallArray (smallArrayFromList)
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (GeomCol, StyleCol, TagCol, TreeCol, geomStride, getClipRect, styleStride, tagStride, treeStride)
+import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
   [ spec "layout-flow-rects" runLayoutFlowRectsTest
-  , spec "layers-text-wrap" runLayersTextWrapTest
-  , spec "layered-modifier" runLayeredModifierTest
-  , spec "wrap-line-align" runWrapLineAlignTest
-  , spec "aspect-ratio" runAspectRatioTest
+  , spec "layout-text-sizes" runTextSizesTest
   , spec "wrap-refit-in-column" runWrapRefitInColumnTest
-  , spec "wrap-in-scroller" runWrapInScrollerTest
-  , spec "pin-in-scroller" runPinInScrollerTest
+  , spec "flow-in-scroller" runFlowInScrollerTest
   , spec "layer-paint-order" runLayerPaintOrderTest
-  , spec "pin-outside-parent-paint" runPinOutsideParentPaintTest
-  , spec "layer-hit-order" runLayerHitOrderTest
-  , spec "layers-field-focus" runLayersFieldFocusTest
-  , spec "covered-field-select-focus" runCoveredFieldSelectFocusTest
-  , spec "pinned-field-text-cursor" runPinnedFieldTextCursorTest
   , spec "layout-flow-damage" runLayoutFlowDamageTest
-  , spec "scroll-ignores-flow" runScrollIgnoresFlowTest
   , spec "arena-columns-fit-strides" runArenaColumnsFitStridesTest
+  , spec "layer-hit-order" runLayerHitOrderTest
+  , spec "covered-field-focus" runCoveredFieldFocusTest
   , spec "covered-widget-no-pointer" runCoveredWidgetNoPointerTest
   , spec "pointer-modes" runPointerModesTest
-  , spec "pointer-block-nested" runPointerBlockNestedTest
-  , spec "pointer-covers-any-id" runPointerCoversAnyIdTest
-  , spec "center-body" runCenterTest
-  , spec "flex-direction" runFlexDirectionTest
-  , spec "grow-max-handoff" runGrowMaxHandoffTest
-  , spec "fixed-width-label" runFixedWidthLabelTest
-  , spec "fixed-outside-limits" runFixedOutsideLimitsTest
-  , spec "fixed-label-outside-limits" runFixedLabelOutsideLimitsTest
-  , spec "percent-across" runPercentAcrossTest
-  , spec "empty-label-line" runEmptyLabelLineTest
   ]
 
 red, green, blue, yellow :: Color
@@ -49,23 +33,60 @@ yellow = colorRGBA 255 255 0 255
 input0 :: Input
 input0 = withInputOff 400 300
 
+-- | Every rect but the root's after the view settles.
+layoutOf :: Context -> NanoUI a -> IO [Rect]
+layoutOf ctx ui = warmup2 ctx input0 ui >> drop 1 <$> arenaRects ctx
+
 -- | The rects of nodes @is@ in the last frame, in arena order.
 rectsAt :: Context -> [Int] -> IO [Rect]
 rectsAt ctx is = (\rs -> [r | (i, r) <- zip [0 ..] rs, i `elem` is]) <$> arenaRects ctx
 
+-- | 'runSim' on 'input0'.
+sim :: Context -> IORef Int -> NanoUI a -> Sim a r -> IO r
+sim ctx failed = runSim ctx failed input0
+
+-- | The cursor with the pointer on the target.
+cursorAt :: Target -> Sim a UiCursorKind
+cursorAt t = moveTo t >> ((,) <$> simContext <*> getInput) >>= liftIO . uncurry uiCursorKind
+
+focused, hot :: Sim a WidgetId
+focused = simContext >>= liftIO . getFocusId
+hot = simContext >>= liftIO . getHotId
+
+-- | Hover, press, hold and release on the target: the press and release
+-- frames' results.
+pressThrough :: Target -> Sim a (a, a)
+pressThrough t = do
+  _ <- moveTo t
+  pressed <- press t
+  _ <- frame
+  (pressed,) <$> release
+
 -- | Non-root rects for each flow. Layers size to their largest child plus
--- padding and place children by alignment. A wrapping row breaks at its
--- width, using the gap within lines and the line gap between them; an
--- oversized child gets its own line and a grow child fills only its line. A
+-- padding and place children by alignment, as does a 'layered' panel or row.
+-- A wrapping row breaks at its width, using the gap within lines and the
+-- line gap between them; an oversized child gets its own line and a grow
+-- child fills only its line. 'lineAlign' places a wrap's lines along it. A
 -- wrapping column flows into columns. Pinned children sit at their offset
 -- from their aligned position and take no space in the flow or the parent.
+-- 'aspect' sets a fit axis from the other; 'center' fills its room and
+-- centres its body as one block; 'flex' takes the room left along its
+-- parent's direction; a grow child its maximum caps hands the rest to its
+-- siblings; an empty label takes a line.
 runLayoutFlowRectsTest :: Context -> IORef Int -> IO ()
 runLayoutFlowRectsTest ctx failed =
-  forM_ cases $ \(ui, want) -> warmup2 ctx input0 ui >> arenaRects ctx >>= assertEq failed want . drop 1
+  forM_ cases $ \(ui, want) -> layoutOf ctx ui >>= assertEq failed want
   where
     wrapRow w = columnWith tight $ rowWith (wrap . fixedW w . tight . gap 10 . lineGap 5) $ do
       box (alignBottom . fixedWH 30 10) red
       forM_ [(30, 20), (30, 10), (50, 10), (120, 10), (20, 10)] $ \(bw, bh) -> box (fixedWH bw bh) red
+    chips a = columnWith tight $ rowWith (wrap . lineAlign a . fixedW 100 . tight . gap 10 . lineGap 0) $ do
+      replicateM_ 4 (box (fixedWH 30 10) red)
+      box (fillW . fixedH 10) blue
+    chipRects s = [Rect 0 0 100 30, Rect s 0 30 10, Rect (s + 40) 0 30 10, Rect s 10 30 10, Rect (s + 40) 10 30 10, Rect 0 20 100 10]
+    in300 = columnWith (tight . gap 0 . fixedW 300)
+    inBox = columnWith (tight . fixedW 200 . fixedH 100) . center
+    ends container = container $ box (fixedWH 20 10) red >> flex >> box (fixedWH 20 10) blue
     cases =
       [ ( columnWith tight $ layersWith (padAll 4) $ do
             box (fixedWH 100 60) red
@@ -75,6 +96,18 @@ runLayoutFlowRectsTest ctx failed =
             box (alignEnd . percent 50 . fixedH 6) green
             box (fillH . fixedW 5) yellow
         , [Rect 0 0 108 68, Rect 4 4 100 60, Rect 84 54 20 10, Rect 49 29 10 10, Rect 4 4 100 6, Rect 54 4 50 6, Rect 4 4 5 60] )
+      , ( columnWith tight $ panelWith (layered . padAll 5) $ do
+            box (fixedWH 60 40) red
+            box (alignEnd . alignBottom . fixedWH 10 10) blue
+        , [Rect 0 0 70 50, Rect 5 5 60 40, Rect 55 35 10 10] )
+      , ( columnWith tight $ rowWith (layered . tight . fixedW 60) $ do
+            label "one two three four five six"
+            box (alignEnd . fixedWH 10 10) blue
+        , [Rect 0 0 60 72, Rect 0 0 60 72, Rect 50 0 10 10] )
+      , ( columnWith tight $ do
+            layersWith (fixedW 100 . tight) $ label "one two three four five six seven eight nine ten"
+            label "x"
+        , [Rect 0 0 100 84, Rect 0 0 96 84, Rect 0 92 12 12] )
       , (wrapRow 100, [Rect 0 0 100 65, Rect 0 10 30 10, Rect 40 0 30 20, Rect 0 25 30 10, Rect 40 25 50 10, Rect 0 40 120 10, Rect 0 55 20 10])
       , (wrapRow 200, [Rect 0 0 200 35, Rect 0 10 30 10, Rect 40 0 30 20, Rect 80 0 30 10, Rect 120 0 50 10, Rect 0 25 120 10, Rect 130 25 20 10])
       , ( columnWith tight $ rowWith (wrap . fixedW 100 . tight . gap 0) $ do
@@ -82,8 +115,14 @@ runLayoutFlowRectsTest ctx failed =
             box (fillW . minW 30 . fixedH 10) blue
             box (fixedWH 70 10) green
         , [Rect 0 0 100 20, Rect 0 0 60 10, Rect 60 0 40 10, Rect 0 10 70 10] )
+      , (chips LinesStart, chipRects 0)
+      , (chips LinesCenter, chipRects 15)
+      , (chips LinesEnd, chipRects 30)
       , ( columnWith tight $ columnWith (wrap . fixedH 100 . tight . gap 0 . lineGap 5) $ replicateM_ 5 (box (fixedWH 20 40) red)
         , [Rect 0 0 70 100, Rect 0 0 20 40, Rect 0 40 20 40, Rect 25 0 20 40, Rect 25 40 20 40, Rect 50 0 20 40] )
+      , ( columnWith tight . columnWith (wrap . lineAlign LinesEnd . fixedH 100 . tight . gap 0 . lineGap 5) $
+            replicateM_ 3 (box (fixedWH 20 40) red)
+        , [Rect 0 0 45 100, Rect 0 20 20 40, Rect 0 60 20 40, Rect 25 60 20 40] )
       , ( columnWith (tight . gap 0) $ do
             rowWith (padAll 5 . gap 10) $ do
               box (fixedWH 40 40) red
@@ -101,76 +140,86 @@ runLayoutFlowRectsTest ctx failed =
             box (pinAt (-10) 0 . alignEnd . fillW . fixedH 4) green
             box (pinAt 10 0 . alignCenter . alignMid . fixedWH 20 10) yellow
         , [Rect 0 0 200 100, Rect 144 44 40 40, Rect 194 (-6) 12 12, Rect 0 0 190 4, Rect 100 45 20 10] )
+      , (in300 (box (fillW . aspect 2) red), [Rect 0 0 300 150])
+      , (in300 (box (fixedW 80 . aspect 4) red), [Rect 0 0 80 20])
+      , (in300 (box (fixedH 50 . aspect 2) red), [Rect 0 0 100 50])
+      , (in300 (box (fillW . aspect 1 . maxH 50) red), [Rect 0 0 300 50])
+      , (in300 (rowWith (tight . gap 0 . fillW) (box (fillW . aspect 2) red >> box (fixedWH 100 10) blue)), [Rect 0 0 300 100, Rect 0 0 200 100, Rect 200 0 100 10])
+      , -- A panel keeps the ratio's height whatever its content.
+        (in300 (panelWith (tight . fillW . aspect 10) (box (fixedWH 20 100) red) >> box (fixedWH 10 10) blue), [Rect 0 0 300 30, Rect 0 0 20 100, Rect 0 30 10 10])
+      , -- A non-positive ratio is ignored.
+        (in300 (box (fixedWH 40 20 . aspect 0) red), [Rect 0 0 40 20])
+      , (inBox (box (fixedWH 20 10) red), [Rect 0 0 200 100, Rect 90 45 20 10, Rect 90 45 20 10])
+      , -- The block of both boxes and the gap between them sits mid-height.
+        ( inBox (box (fixedWH 40 10) red >> box (alignCenter . fixedWH 20 10) blue)
+        , [Rect 0 0 200 100, Rect 80 36 40 28, Rect 80 36 40 10, Rect 90 54 20 10] )
+      , (ends (columnWith (tight . gap 0 . fixedW 100 . fixedH 200)), [Rect 0 0 20 10, Rect 0 10 8 180, Rect 0 190 20 10])
+      , (ends (rowWith (tight . gap 0 . fixedW 200 . fixedH 50)), [Rect 0 0 20 10, Rect 20 0 160 8, Rect 180 0 20 10])
+      , ( rowWith (tight . gap 0 . fixedW 400 . fixedH 20) $ do
+            box (fillW . maxW 100) red
+            box fillW green
+            box (minW 80) blue
+        , [Rect 0 0 100 32, Rect 100 0 220 32, Rect 320 0 80 32] )
+      , ( columnWith (tight . gap 0 . fixedW 20 . fixedH 300) (box (fillH . maxH 50) red >> box fillH green)
+        , [Rect 0 0 20 50, Rect 0 50 20 250] )
+      , -- A negative weight grows nothing and takes nothing from the others.
+        ( rowWith (tight . gap 0 . fixedW 300 . fixedH 20) (box fillW red >> box (\l -> l {layoutWidth = Grow (-1)}) green)
+        , [Rect 0 0 268 32, Rect 268 0 32 32] )
+      , ( columnWith tight (columnWith tight (label "a" >> label "" >> label "b") >> label "after")
+        , [Rect 0 0 12 52, Rect 0 0 12 12, Rect 0 20 0 12, Rect 0 40 12 12, Rect 0 60 60 12] )
       ]
 
--- | 'layered' makes a panel or row stack its children like 'layers': each at
--- its aligned corner of the content box, the container sized to the largest.
--- Text in a layered row wraps as in a column.
-runLayeredModifierTest :: Context -> IORef Int -> IO ()
-runLayeredModifierTest ctx failed = do
-  _ <- warmup2 ctx input0 . columnWith tight $ panelWith (layered . padAll 5) $ do
-    box (fixedWH 60 40) red
-    box (alignEnd . alignBottom . fixedWH 10 10) blue
-  rectsAt ctx [1, 2, 3] >>= assertEq failed [Rect 0 0 70 50, Rect 5 5 60 40, Rect 55 35 10 10]
-  _ <- warmup2 ctx input0 . columnWith tight $ rowWith (layered . tight . fixedW 60) $ do
-    label "one two three four five six"
-    box (alignEnd . fixedWH 10 10) blue
-  arenaRects ctx >>= \case
-    [_, r, txt, b] -> do
-      assertEq failed (Rect 50 0 10 10) b
-      assert failed (rectW txt <= 60 && rectH txt > rectH b && rectH r == rectH txt)
-    rs -> assertEq failed 4 (length rs)
-
--- | 'lineAlign' places a wrapping row's lines at the start, centre or end of
--- its width (a column's, of its height). A line filled by a grow child does
--- not move.
-runWrapLineAlignTest :: Context -> IORef Int -> IO ()
-runWrapLineAlignTest ctx failed = do
-  let chips a = columnWith tight $ rowWith (wrap . lineAlign a . fixedW 100 . tight . gap 10 . lineGap 0) $ do
-        replicateM_ 4 (box (fixedWH 30 10) red)
-        box (fillW . fixedH 10) blue
-      xs = fmap (map rectX . drop 2) (arenaRects ctx)
-  forM_ [(LinesStart, 0), (LinesCenter, 15), (LinesEnd, 30)] $ \(a, shift) -> do
-    _ <- warmup2 ctx input0 (chips a)
-    xs >>= assertEq failed [shift, shift + 40, shift, shift + 40, 0]
-  _ <- warmup2 ctx input0 . columnWith tight . columnWith (wrap . lineAlign LinesEnd . fixedH 100 . tight . gap 0 . lineGap 5) $
-    replicateM_ 3 (box (fixedWH 20 40) red)
-  rectsAt ctx [2, 3, 4] >>= assertEq failed [Rect 0 20 20 40, Rect 0 60 20 40, Rect 25 60 20 40]
-
--- | With 'aspect', a fit height is width / ratio: when filling a column, with
--- a fixed width, sharing a row, and under a maximum. A fit width with a fixed
--- height is height * ratio. A panel keeps the ratio's height regardless of
--- its content.
-runAspectRatioTest :: Context -> IORef Int -> IO ()
-runAspectRatioTest ctx failed = do
-  let sized ui = warmup2 ctx input0 (columnWith (tight . gap 0 . fixedW 300) ui) >> drop 1 <$> arenaRects ctx
-  sized (box (fillW . aspect 2) red) >>= assertEq failed [Rect 0 0 300 150]
-  sized (box (fixedW 80 . aspect 4) red) >>= assertEq failed [Rect 0 0 80 20]
-  sized (box (fixedH 50 . aspect 2) red) >>= assertEq failed [Rect 0 0 100 50]
-  sized (box (fillW . aspect 1 . maxH 50) red) >>= assertEq failed [Rect 0 0 300 50]
-  sized (rowWith (tight . gap 0 . fillW) (box (fillW . aspect 2) red >> box (fixedWH 100 10) blue))
-    >>= assertEq failed [Rect 0 0 300 100, Rect 0 0 200 100, Rect 200 0 100 10]
-  sized (panelWith (tight . fillW . aspect 10) (box (fixedWH 20 100) red) >> box (fixedWH 10 10) blue)
-    >>= assertEq failed [Rect 0 0 300 30, Rect 0 0 20 100, Rect 0 30 10 10]
-  -- A non-positive ratio is ignored.
-  sized (box (fixedWH 40 20 . aspect 0) red) >>= assertEq failed [Rect 0 0 40 20]
-
--- | A label in fixed-width layers wraps to that width, and the layers and
--- the widgets after them make room for every line.
-runLayersTextWrapTest :: Context -> IORef Int -> IO ()
-runLayersTextWrapTest ctx failed = do
-  _ <- warmup2 ctx input0 . columnWith tight $ do
-    layersWith (fixedW 100 . tight) $ label "one two three four five six seven eight nine ten"
-    label "x"
-  arenaRects ctx >>= \case
-    [_, s, long, short] ->
-      mapM_ (assert failed)
-        [ rectW long <= 100
-        , rectH long >= 2 * rectH short
-        , rectY s + rectH s >= rectY long + rectH long
-        , rectY short >= rectY long + rectH long
-        ]
-    rs -> assertEq failed 4 (length rs)
+-- | Labels with fixed or percentage widths, for which paint must wrap where
+-- the solve placed them (the second item names the label among the rects,
+-- the third the other spans). A fixed width measures that width, so a row
+-- places what follows past it; one whose limits do not repeat it (a plain
+-- 'Fixed') wraps at it, or at a larger minimum. A percentage width is a
+-- share of what a column, grid cell or row offers, and a percentage height
+-- of a row's height.
+runTextSizesTest :: Context -> IORef Int -> IO ()
+runTextSizesTest ctx failed = do
+  forM_ cases $ \(ui, at, others, want) -> do
+    rs <- layoutOf ctx ui
+    assertEq failed want rs
+    assertJust failed (lookup at (zip [0 :: Int ..] rs)) (assertPaintedLines failed ctx others)
+  -- A text field fixed narrower than its minimum, and a measured custom
+  -- widget, keep the minimum when measured too, so a row places what
+  -- follows past them. 'fixedWH', like 'fixedW', sets the limits too.
+  let narrow l = l {layoutWidth = Fixed 100, layoutHeight = Fixed 28}
+      field f = textInputConfigured' defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}
+      custom = defaultCustomWidgetSpec {widgetLayout = narrow (minW 160 defaultLayout), widgetMeasure = Just (\_ _ -> (100, 28))}
+      limits = rowWith tight $ do
+        (a, _) <- withValue "" (field narrow)
+        b <- button' "Go"
+        (c, ()) <- customWidget custom
+        d <- button' "End"
+        (fixed, _) <- withValue "" (field (fixedWH 100 28))
+        pure [a, b, c, d, fixed]
+  map respRect <$> warmup2 ctx input0 limits
+    >>= assertEq failed [Rect 0 0 160 28, Rect 168 0 48 16, Rect 224 0 160 28, Rect 392 0 60 16, Rect 460 0 100 28]
+  where
+    fixedLabel w = labelWith (\l -> l {layoutWidth = Fixed w})
+    cases =
+      [ ( columnWith tight $ do
+            rowWith tight (labelWith (fixedWH 100 20 . alignEnd) "Name" >> void (button "Go"))
+            fixedLabel 100 "a fixed label wide enough to wrap"
+        , 3, ["Name", "Go"], [Rect 0 0 156 20, Rect 0 0 100 20, Rect 108 0 48 16, Rect 0 28 100 60] )
+      , ( columnWith tight . columnWith tight $ do
+            labelWith (\l -> (minW 200 l) {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap twice over"
+            label "after"
+        , 1, ["after"], [Rect 0 0 200 56, Rect 0 0 200 36, Rect 0 44 60 12] )
+      , ( columnWith tight $ do
+            columnWith (tight . fixedW 400) $ do
+              box (percent 50 . alignEnd . fixedH 10) red
+              labelWith (percent 50) "percent sized text wraps at its own width"
+            gridWith 2 (tight . fixedW 401 . gap 1) (box (percent 50 . fixedH 10) red >> box (fixedH 10) blue)
+            rowWith (tight . fixedH 40) $ box (\l -> l {layoutWidth = Fixed 10, layoutHeight = Percent 50}) red
+        , 2
+        , []
+        , [ Rect 0 0 400 54, Rect 200 0 200 10, Rect 0 18 200 36, Rect 0 62 401 10, Rect 0 62 100 10
+          , Rect 201 62 32 10, Rect 0 80 10 40, Rect 0 80 10 20
+          ] )
+      ]
 
 -- | An unbounded wrapping row wraps at its column's width and refits its
 -- height. Widening the window reflows it onto one line with a full repaint.
@@ -182,49 +231,65 @@ runWrapRefitInColumnTest ctx failed = do
   _ <- warmup2 ctx (withInputOff 220 300) ui
   rectsAt ctx [1, 11, 12] >>= assertEq failed [Rect 0 0 220 30, Rect 50 20 50 10, Rect 0 30 10 10]
   warmup ctx (withInputOff 600 300) ui
-  takeDamage ctx >>= \d -> assert failed (case d of DamageFull -> True; DamageClip _ -> False)
+  takeDamage ctx >>= assertEq failed DamageFull
   rectsAt ctx [1, 12] >>= assertEq failed [Rect 0 0 500 10, Rect 0 10 10 10]
 
--- | A wrapping row in a scroller wraps inside the viewport, and the scroll
--- range reaches its last line.
-runWrapInScrollerTest :: Context -> IORef Int -> IO ()
-runWrapInScrollerTest ctx failed = do
-  let ui = columnWith tight . scrollArea (fixedWH 120 50 . tight) $
-        rowWith (wrap . fillW . tight . gap 0) (replicateM_ 12 (box (fixedWH 40 20) red))
+-- | A wrapping row in a scroller wraps inside the viewport and its range
+-- reaches the last line. A pinned child extends the range, scrolls with the
+-- content and is clipped to the viewport. A scroller stacks its children in
+-- sequence even when its layout asks for layers or wrapping.
+runFlowInScrollerTest :: Context -> IORef Int -> IO ()
+runFlowInScrollerTest ctx failed = do
+  let scrolled w h body = columnWith tight (scrollArea (fixedWH w h . tight) body)
+      rangeOf sid want = assertJustM failed (getScrollMetrics ctx sid) (assertEq failed want . v2Y . scrollRange)
       bottom b = rectY b + rectH b
-  (sid, _) <- warmup2 ctx input0 ui
+      wrapped = scrolled 120 50 $ rowWith (wrap . fillW . tight . gap 0) (replicateM_ 12 (box (fixedWH 40 20) red))
+  (sid, _) <- warmup2 ctx input0 wrapped
   r : boxes <- drop 2 <$> arenaRects ctx
   assertEq failed 12 (length boxes)
   assert failed (all (\b -> rectX b + rectW b <= 120) boxes && rectH r >= 80)
   assertEq failed (bottom r) (maximum (map bottom boxes))
-  assertJustM failed (getScrollMetrics ctx sid) $ \m -> assertEq failed (rectH r - 50) (v2Y (scrollRange m))
+  rangeOf sid (rectH r - 50)
   setScrollOffset ctx sid (rectH r - 50)
-  warmup ctx input0 ui
+  warmup ctx input0 wrapped
   arenaRects ctx >>= assertEq failed 50 . bottom . last
-
--- | A pinned child in a scroller extends its range, scrolls with the content
--- and is clipped to the viewport.
-runPinInScrollerTest :: Context -> IORef Int -> IO ()
-runPinInScrollerTest ctx failed = do
-  let ui = columnWith tight . scrollArea (fixedWH 100 50 . tight) $ do
-        box (fixedWH 80 20) red
-        box (pinAt 0 200 . fixedWH 30 30) blue
-  (sid, _) <- warmup2 ctx input0 ui
-  assertJustM failed (getScrollMetrics ctx sid) $ \m -> assertEq failed 180 (v2Y (scrollRange m))
-  setScrollOffset ctx sid 180
-  warmup ctx input0 ui
+  let pinned = scrolled 100 50 (box (fixedWH 80 20) red >> box (pinAt 0 200 . fixedWH 30 30) blue)
+  (pid, _) <- warmup2 ctx input0 pinned
+  rangeOf pid 180
+  setScrollOffset ctx pid 180
+  warmup ctx input0 pinned
   rectsAt ctx [2, 3] >>= assertEq failed [Rect 0 (-180) 80 20, Rect 0 20 30 30]
   assertJustM failed (getClipRect (ctxNodeArena ctx) 3) (assert failed . covers (Rect 0 0 100 50))
+  fresh <- newContext
+  forM_ [layered, wrap] $ \flow -> do
+    (fid, _) <- warmup2 fresh input0 . columnWith tight . scrollArea2D (flow . fixedWH 100 50 . tight . gap 0) $
+      replicateM_ 3 (box (fixedWH 40 20) red)
+    arenaRects fresh >>= assertEq failed [0, 20, 40] . map rectY . drop 2
+    assertJustM failed (getScrollMetrics fresh fid) (assertEq failed 10 . v2Y . scrollRange)
 
 -- | Each case's first colour is painted before its second. A row's earlier
 -- child paints over a later one, a later layer over an earlier one, and a
 -- pinned child over siblings declared before it, or after it among layers.
+-- A pinned child outside its parent is still painted: under zero-size
+-- layers, and on a frame that repaints only that child.
 runLayerPaintOrderTest :: Context -> IORef Int -> IO ()
-runLayerPaintOrderTest ctx failed =
+runLayerPaintOrderTest ctx failed = do
   forM_ cases $ \(ui, under, over) -> do
     quads <- drawQuads . snd =<< warmupDraw ctx input0 ui
     let at col = findIndex ((== col) . snd) quads
     assertJust failed ((,) <$> at under <*> at over) $ \(u, o) -> assert failed (u < o)
+  let outside version = columnWith (tight . gap 0 . fillW) $ do
+        layersWith tight $ box (pinAt 10 10 . fixedWH 20 20) green
+        rowWith (tight . fixedWH 50 20) $
+          drawingVersioned version (pinAt 200 0 . fixedWH 20 20) $ \r ->
+            smallArrayFromList [FillRect r (if version == 1 then red else blue)]
+      drawn draw = map snd <$> drawQuads draw
+  full <- drawn . snd =<< warmupDraw ctx input0 (outside 1)
+  assert failed (green `elem` full && red `elem` full)
+  writeIORef (ctxPaintFull ctx) False
+  (_, draw, _) <- runFrame ctx input0 (outside 2)
+  takeDamage ctx >>= \d -> assert failed (d /= DamageFull)
+  assert failed . elem blue =<< drawn draw
   where
     sq n = fixedWH n n
     cases =
@@ -233,115 +298,6 @@ runLayerPaintOrderTest ctx failed =
       , (rowWith tight (box (sq 40) red >> box (pinAt 10 10 . sq 10) blue), red, blue)
       , (layersWith tight (box (pinAt 5 5 . sq 10) blue >> box (sq 60) red), red, blue)
       ]
-
--- | A pinned child outside its parent is still painted: under zero-size
--- layers, and on a frame that repaints only that child.
-runPinOutsideParentPaintTest :: Context -> IORef Int -> IO ()
-runPinOutsideParentPaintTest ctx failed = do
-  let ui version = columnWith (tight . gap 0 . fillW) $ do
-        layersWith tight $ box (pinAt 10 10 . fixedWH 20 20) green
-        rowWith (tight . fixedWH 50 20) $
-          drawingVersioned version (pinAt 200 0 . fixedWH 20 20) $ \r ->
-            smallArrayFromList [FillRect r (if version == 1 then red else blue)]
-      drawn col draw = any ((== col) . snd) <$> drawQuads draw
-  (_, full) <- warmupDraw ctx input0 (ui 1)
-  forM_ [green, red] $ \col -> assert failed =<< drawn col full
-  writeIORef (ctxPaintFull ctx) False
-  (_, draw, _) <- runFrame ctx input0 (ui 2)
-  takeDamage ctx >>= \d -> assert failed (case d of DamageClip _ -> True; DamageFull -> False)
-  assert failed =<< drawn blue draw
-
--- | The topmost button gets the pointer: a later layer, a pinned child (also
--- among layers when declared first), and each button in pinned layers. Next
--- to them, the button underneath gets it. Each case checks the rects, then
--- that each point hovers and clicks only the expected button.
-runLayerHitOrderTest :: Context -> IORef Int -> IO ()
-runLayerHitOrderTest ctx failed =
-  forM_ cases $ \(ui, check) -> do
-    bs <- warmup2 ctx input0 ui
-    let (rects, points) = check bs
-    forM_ rects $ \(i, r) -> assertEq failed r (respRect (bs !! i))
-    forM_ points $ \(p, want) -> do
-      warmup ctx input0 {inputMousePos = p} ui
-      getHotId ctx >>= assertEq failed (respId (bs !! want))
-      clicked <- runClick ctx input0 {inputMousePos = p} ui p
-      assertEq failed [i == want | i <- [0 .. length bs - 1]] (map respClicked clicked)
-  where
-    btn f w h = buttonWith' (f . fixedWH w h) "b"
-    cases =
-      [ (layers (sequence [btn id 120 40, btn id 120 40]), \bs -> ([(1, respRect (bs !! 0))], [(centerOf (bs !! 1), 1)]))
-      , (rowWith tight (sequence [btn id 120 40, btn (pinAt 20 10) 40 20]), const ([(1, Rect 20 10 40 20)], [(V2 40 20, 1), (V2 100 20, 0)]))
-      , (layersWith tight (sequence [btn (pinAt 10 10) 40 20, btn id 120 60]), const ([(0, Rect 10 10 40 20)], [(V2 30 20, 0)]))
-      , ( rowWith tight ((:) <$> btn id 200 100 <*> layersWith (pinAt 10 10 . tight) (sequence [btn id 50 50, btn id 20 20]))
-        , const ([(1, Rect 10 10 50 50), (2, Rect 10 10 20 20)], [(V2 15 15, 2), (V2 40 40, 1), (V2 150 50, 0)]) )
-      ]
-
--- | A button layered over a text field takes the press, leaves focus
--- unchanged and shows no text cursor; the field's uncovered part still
--- focuses it. A field layered over a button takes focus and the button does
--- not click.
-runLayersFieldFocusTest :: Context -> IORef Int -> IO ()
-runLayersFieldFocusTest ctx failed = do
-  let sized w = defaultTextInputConfig {ticLayout = fixedW w (ticLayout defaultTextInputConfig)}
-      field w t = fst <$> withValue t (textInputConfigured' (sized w))
-      ui = column $ do
-        (f, cover) <- layers $ (,) <$> field 200 "under" <*> buttonWith' (alignEnd . fixedWH 40 20) "x"
-        (under, top) <- layers $ (,) <$> buttonWith' (fixedWH 200 30) "under" <*> field 100 "over"
-        pure (f, cover, under, top)
-  (field0, cover0, _, top0) <- warmup2 ctx input0 ui
-  let press p = runClick ctx input0 {inputMousePos = p} ui p
-      Rect fx fy _ fh = respRect field0
-      onField = V2 (fx + 20) (fy + fh / 2)
-      focusAfter p = press p >> getFocusId ctx
-  cursorOver ctx input0 ui (centerOf cover0) >>= \k -> assert failed (k /= UiCursorText)
-  cursorOver ctx input0 ui onField >>= assertEq failed UiCursorText
-  (_, cover1, _, _) <- press (centerOf cover0)
-  assert failed (respClicked cover1)
-  getFocusId ctx >>= assertEq failed (WidgetId 0)
-  focusAfter onField >>= assertEq failed (respId field0)
-  focusAfter (centerOf cover0) >>= assertEq failed (respId field0)
-  (_, _, under2, _) <- press (centerOf top0)
-  assert failed (not (respClicked under2))
-  getFocusId ctx >>= assertEq failed (respId top0)
-
--- | A button pinned over a text field declared after it takes the press and
--- leaves focus as it was, as a button layered over one does. A button
--- layered over a select takes the press without focusing the select.
-runCoveredFieldSelectFocusTest :: Context -> IORef Int -> IO ()
-runCoveredFieldSelectFocusTest ctx failed = do
-  let sized w = defaultTextInputConfig {ticLayout = fixedW w (ticLayout defaultTextInputConfig)}
-      ui = columnWith tight $ do
-        cover <- buttonWith' (pinAt 100 0 . fixedWH 60 20) "x"
-        f <- fst <$> withValue "text" (textInputConfigured' (sized 200))
-        (s, over) <- layersWith tight $ (,) <$> (fst <$> withValue 0 (selectWith' (fixedW 200) ["Alpha", "Beta"])) <*> buttonWith' (alignEnd . fixedWH 40 20) "y"
-        pure (cover, f, s, over)
-  (cover0, field0, _, over0) <- warmup2 ctx input0 ui
-  let press p = runClick ctx input0 {inputMousePos = p} ui p
-      Rect fx fy _ fh = respRect field0
-      focusAfter p = press p >> getFocusId ctx
-  (cover1, _, _, _) <- press (centerOf cover0)
-  assert failed (respClicked cover1)
-  getFocusId ctx >>= assertEq failed (WidgetId 0)
-  focusAfter (V2 (fx + 20) (fy + fh / 2)) >>= assertEq failed (respId field0)
-  focusAfter (centerOf cover0) >>= assertEq failed (respId field0)
-  (_, _, _, over1) <- press (centerOf over0)
-  assert failed (respClicked over1)
-  getFocusId ctx >>= assertEq failed (WidgetId 0)
-
--- | A text field pinned over a later one shows the text cursor and takes the
--- right-click menu there.
-runPinnedFieldTextCursorTest :: Context -> IORef Int -> IO ()
-runPinnedFieldTextCursorTest ctx failed = do
-  let sized f = defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}
-      ui = columnWith tight $ do
-        pinned <- fst <$> withValue "pinned" (textInputConfigured' (sized (pinAt 50 0 . fixedW 100)))
-        _ <- withValue "under" (textInputConfigured' (sized (fixedW 300)))
-        pure pinned
-  pinned0 <- warmup2 ctx input0 ui
-  let p = centerOf pinned0
-  cursorOver ctx input0 ui p >>= assertEq failed UiCursorText
-  _ <- evalUi ctx (fst (rightClickPair input0 p)) ui
-  getFocusId ctx >>= assertEq failed (respId pinned0)
 
 -- | Changing only a pin offset, a row's wrap flag, or its line gap relayouts
 -- the frame and repaints the moved children's old and new rects.
@@ -366,78 +322,131 @@ runLayoutFlowDamageTest ctx failed = do
   step (ui 120 True 0) [(4, Rect 0 60 100 20), (6, Rect 0 70 40 10)] [Rect 70 60 40 10, Rect 0 70 40 10]
   step (ui 120 True 5) [(4, Rect 0 60 100 25), (6, Rect 0 75 40 10)] [Rect 0 75 40 10]
 
--- | A scroll container stacks its children in sequence even when its layout
--- asks for layers or wrapping, and scrolls over all of them.
-runScrollIgnoresFlowTest :: Context -> IORef Int -> IO ()
-runScrollIgnoresFlowTest ctx failed =
-  forM_ [layered, wrap] $ \flow -> do
-    (sid, _) <- warmup2 ctx input0 . columnWith tight . scrollArea2D (flow . fixedWH 100 50 . tight . gap 0) $
-      replicateM_ 3 (box (fixedWH 40 20) red)
-    arenaRects ctx >>= assertEq failed [0, 20, 40] . map rectY . drop 2
-    assertJustM failed (getScrollMetrics ctx sid) $ \m -> assertEq failed 10 (v2Y (scrollRange m))
-
 -- | Every arena column fits within its row stride; otherwise it would
 -- overwrite the next node's row.
 runArenaColumnsFitStridesTest :: Context -> IORef Int -> IO ()
 runArenaColumnsFitStridesTest _ failed =
-  mapM_ (assert failed)
-    [ columns (minBound :: GeomCol) <= geomStride
-    , columns (minBound :: StyleCol) <= styleStride
-    , columns (minBound :: TagCol) <= tagStride
-    , columns (minBound :: TreeCol) <= treeStride
-    ]
+  assert failed $
+    and
+      [ columns (minBound :: GeomCol) <= geomStride
+      , columns (minBound :: StyleCol) <= styleStride
+      , columns (minBound :: TagCol) <= tagStride
+      , columns (minBound :: TreeCol) <= treeStride
+      ]
   where
     columns :: (Enum c, Bounded c) => c -> Int
     columns c = fromEnum (maxBound `asTypeOf` c) + 1
 
+-- | The topmost button gets the pointer: a later layer, a pinned child (also
+-- among layers when declared first), and each button in pinned layers. Next
+-- to them, the button underneath gets it. Each case checks the rects, then
+-- that each point hovers and clicks only the expected button.
+runLayerHitOrderTest :: Context -> IORef Int -> IO ()
+runLayerHitOrderTest ctx failed =
+  forM_ cases $ \(ui, rects, points) -> sim ctx failed ui $ do
+    bs <- result
+    checkEq rects (map respRect bs)
+    forM_ points $ \(p, want) -> do
+      _ <- moveTo (At p)
+      checkEq (respId (bs !! want)) =<< hot
+      clicked <- click (At p)
+      checkEq [i == want | i <- [0 .. length bs - 1]] (map respClicked clicked)
+  where
+    btn f w h = buttonWith' (f . fixedWH w h) "b"
+    cases =
+      [ (layers (sequence [btn id 120 40, btn id 120 40]), [Rect 3 3 120 40, Rect 3 3 120 40], [(V2 63 23, 1)])
+      , (rowWith tight (sequence [btn id 120 40, btn (pinAt 20 10) 40 20]), [Rect 0 0 120 40, Rect 20 10 40 20], [(V2 40 20, 1), (V2 100 20, 0)])
+      , (layersWith tight (sequence [btn (pinAt 10 10) 40 20, btn id 120 60]), [Rect 10 10 40 20, Rect 0 0 120 60], [(V2 30 20, 0)])
+      , ( rowWith tight ((:) <$> btn id 200 100 <*> layersWith (pinAt 10 10 . tight) (sequence [btn id 50 50, btn id 20 20]))
+        , [Rect 0 0 200 100, Rect 10 10 50 50, Rect 10 10 20 20]
+        , [(V2 15 15, 2), (V2 40 40, 1), (V2 150 50, 0)] )
+      ]
+
+-- | A button layered or pinned over a text field takes the press, leaves
+-- focus as it was and shows no text cursor; the field's uncovered part
+-- still focuses it. A field layered over a button takes focus and the
+-- button does not click. A button layered over a select takes the press
+-- without focusing it. A field pinned over another shows the text cursor
+-- and takes the right-click menu there.
+runCoveredFieldFocusTest :: Context -> IORef Int -> IO ()
+runCoveredFieldFocusTest ctx failed = do
+  let field f t = fst <$> withValue t (textInputConfigured' defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)})
+      onLeft r = At (V2 (rectX (respRect r) + 20) (rectY (respRect r) + rectH (respRect r) / 2))
+      focusAfter t = click t >> focused
+      layeredUi = column $ do
+        (f, cover) <- layers $ (,) <$> field (fixedW 200) "under" <*> buttonWith' (alignEnd . fixedWH 40 20) "x"
+        (under, top) <- layers $ (,) <$> buttonWith' (fixedWH 200 30) "under" <*> field (fixedW 100) "over"
+        pure (f, cover, under, top)
+  sim ctx failed layeredUi $ do
+    (f, cover, _, top) <- result
+    check . (/= UiCursorText) =<< cursorAt (On cover)
+    checkEq UiCursorText =<< cursorAt (onLeft f)
+    (_, cover1, _, _) <- click (On cover)
+    check (respClicked cover1)
+    checkEq (WidgetId 0) =<< focused
+    checkEq (respId f) =<< focusAfter (onLeft f)
+    checkEq (respId f) =<< focusAfter (On cover)
+    (_, _, under, _) <- click (On top)
+    check (not (respClicked under))
+    checkEq (respId top) =<< focused
+  let pinnedOver = columnWith tight $ do
+        cover <- buttonWith' (pinAt 100 0 . fixedWH 60 20) "x"
+        f <- field (fixedW 200) "text"
+        (s, over) <- layersWith tight $
+          (,) <$> (fst <$> withValue 0 (selectWith' (fixedW 200) ["Alpha", "Beta"])) <*> buttonWith' (alignEnd . fixedWH 40 20) "y"
+        pure (cover, f, s, over)
+  newContext >>= \c -> runSim c failed input0 pinnedOver $ do
+    (cover, f, _, over) <- result
+    (cover1, _, _, _) <- click (On cover)
+    check (respClicked cover1)
+    checkEq (WidgetId 0) =<< focused
+    checkEq (respId f) =<< focusAfter (onLeft f)
+    checkEq (respId f) =<< focusAfter (On cover)
+    (_, _, _, over1) <- click (On over)
+    check (respClicked over1)
+    checkEq (WidgetId 0) =<< focused
+  let pinnedField = columnWith tight (field (pinAt 50 0 . fixedW 100) "pinned" <* field (fixedW 300) "under")
+  newContext >>= \c -> runSim c failed input0 pinnedField $ do
+    pinned <- result
+    checkEq UiCursorText =<< cursorAt (On pinned)
+    _ <- rightClick (On pinned)
+    checkEq (respId pinned) =<< focused
+
 -- | A widget under a pinned or layered button gets no pointer there: no
--- hover, press, tooltip, slider movement, or select opening. Beside the
--- button it gets the pointer, and the button's ancestors keep it.
+-- hover, press, tooltip, slider movement, select opening, or hover of a
+-- label with an id. Beside the button it gets the pointer, and the button's
+-- ancestors keep it.
 runCoveredWidgetNoPointerTest :: Context -> IORef Int -> IO ()
 runCoveredWidgetNoPointerTest ctx failed = do
-  let inp = withInputOff 500 300
-      at p = inp {inputMousePos = p}
-      -- Hover, press, hold and release at @p@; returns the press and
-      -- release frames' results.
-      pressThrough :: NanoUI a -> V2 -> IO (a, a)
-      pressThrough ui p = do
-        warmup ctx (at p) ui
-        pressed <- evalUi ctx (pressAt inp p) ui
-        warmup ctx (holdAt inp p) ui
-        (pressed,) <$> evalUi ctx (releaseAt (holdAt inp p)) ui
-  -- A drawing with a tooltip, under a pinned button.
-  let covered = columnWith tight $ do
-        area <- drawing (fixedWH 200 100) (const mempty)
-        tooltipConfigured defaultTooltipConfig {tooltipDelay = 0} area "Canvas tip"
+  let tipped txt w = w <$ tooltipConfigured defaultTooltipConfig {tooltipDelay = 0} w txt
+      covered = columnWith tight $ do
+        area <- drawing (fixedWH 200 100) (const mempty) >>= tipped "Canvas tip"
         (area,) <$> buttonWith' (pinAt 10 10 . fixedWH 60 30) "pin"
-      tipShown p = warmup ctx (at p) covered >> hasText "Canvas tip" <$> collectOverlayTextSpans ctx (at p)
-      beside = V2 150 70
-  (area0, onPin) <- fmap centerOf <$> warmup2 ctx inp covered
-  warmup ctx (at onPin) covered
-  (area1, b1) <- evalUi ctx (at onPin) covered
-  assert failed (not (respHovered area1) && respHovered b1)
-  ((area2, b2), _) <- pressThrough covered onPin
-  assert failed (not (respHovered area2 || respPressed area2) && respPressed b2)
-  assert failed . not =<< tipShown onPin
-  assert failed =<< tipShown beside
-  ((area3, _), _) <- pressThrough covered beside
-  assert failed (respPressed area3 && rectContains (respRect area0) beside)
-  -- A slider under a pinned button stays where it was.
+      tipShown txt t = moveTo t >> isJust <$> findSpan txt
+      beside = At (V2 150 70)
+  runSim ctx failed (withInputOff 500 300) covered $ do
+    (area0, pin) <- result
+    _ <- moveTo (On pin)
+    (area1, b1) <- moveTo (On pin)
+    check (not (respHovered area1) && respHovered b1)
+    ((area2, b2), _) <- pressThrough (On pin)
+    check (not (respHovered area2 || respPressed area2) && respPressed b2)
+    check . not =<< tipShown "Canvas tip" (On pin)
+    check =<< tipShown "Canvas tip" beside
+    ((area3, _), _) <- pressThrough beside
+    check (respPressed area3 && rectContains (respRect area0) (V2 150 70))
   valueRef <- newVar (0 :: Float)
-  let sliders = columnWith (tight . fixedW 300) $ do
-        _ <- held valueRef (sliderWith' id 0 100)
-        buttonWith' (pinAt 200 0 . fixedWH 60 20) "x"
-  (_, b4) <- pressThrough sliders . centerOf =<< warmup2 ctx inp sliders
-  assert failed (respClicked b4)
-  readVarIO valueRef >>= assertEq failed 0
-  -- A select under a pinned button stays shut.
-  let selects = columnWith tight $ do
-        _ <- (snd <$> withValue 0 (selectWith (fixedW 200) ["Alpha", "Beta", "Gamma"]))
-        buttonWith' (pinAt 120 0 . fixedWH 60 20) "y"
-  onB5 <- centerOf <$> warmup2 ctx inp selects
-  _ <- pressThrough selects onB5
-  warmup ctx (at onB5) selects
-  assert failed . not . hasText "Gamma" =<< collectOverlayTextSpans ctx (at onB5)
+  let sliderUi = columnWith (tight . fixedW 300) (held valueRef (sliderWith' id 0 100) >> buttonWith' (pinAt 200 0 . fixedWH 60 20) "x")
+  sim ctx failed sliderUi $ do
+    (_, b) <- pressThrough . On =<< result
+    check (respClicked b)
+    checkEq 0 =<< liftIO (readVarIO valueRef)
+  let selectUi = columnWith tight (withValue 0 (selectWith (fixedW 200) ["Alpha", "Beta", "Gamma"]) >> buttonWith' (pinAt 120 0 . fixedWH 60 20) "y")
+  sim ctx failed selectUi $ do
+    onB <- On <$> result
+    _ <- pressThrough onB
+    _ <- moveTo onB
+    expectNot "Gamma"
   -- A chip with a control adornment, layered over a drawing. The chip keeps
   -- the pointer on its label, the control takes its own click, and the
   -- drawing is neither hovered nor pressed.
@@ -446,261 +455,67 @@ runCoveredWidgetNoPointerTest ctx failed = do
       chipOver = columnWith tight $ layersWith tight $ do
         under <- drawing (fixedWH 200 100) (const mempty)
         (under,) <$> buttonConfigured' defaultButtonConfig {bcAdornments = remove} "Chip"
-  _ <- warmup2 ctx inp chipOver
-  spans <- collectTextSpans ctx
-  assertJust failed ((,) <$> spanRectOf "Chip" spans <*> spanRectOf "x" spans) $ \(chipR, xR) -> do
-    warmup ctx (at (spanCenter chipR)) chipOver
-    (under1, chip1) <- evalUi ctx (at (spanCenter chipR)) chipOver
-    assert failed (respHovered chip1 && not (respHovered under1))
-    ((under2, _), (_, chip3)) <- pressThrough chipOver (spanCenter xR)
-    assert failed (not (respHovered under2 || respPressed under2) && not (respClicked chip3))
-    readIORef removes >>= assertEq failed 1
+  sim ctx failed chipOver $ do
+    _ <- moveTo "Chip"
+    (under1, chip1) <- moveTo "Chip"
+    check (respHovered chip1 && not (respHovered under1))
+    ((under2, _), (_, chip3)) <- pressThrough "x"
+    check (not (respHovered under2 || respPressed under2) && not (respClicked chip3))
+    checkEq 1 =<< liftIO (readIORef removes)
+  let labelUi = columnWith tight $ do
+        l <- labelWith' (fixedWH 200 40) "Covered text" >>= tipped "Label tip"
+        l <$ buttonWith' (pinAt 100 0 . fixedWH 60 30) "on top"
+  sim ctx failed labelUi $
+    forM_ [(V2 130 15, False), (V2 40 15, True)] $ \(p, uncovered) -> do
+      _ <- moveTo (At p)
+      checkEq uncovered . respHovered =<< moveTo (At p)
+      checkEq uncovered =<< tipShown "Label tip" (At p)
 
 -- | 'pointer' sets how an overlapping node treats the pointer. A pinned panel
 -- passes it through by default. With 'PointerBlock' the button beneath is
 -- not hovered or clicked and nothing is hot, but controls inside the panel
--- and the uncovered part of the button still work. A press on a blocking
--- panel does not focus the text field under it, and shows no text cursor. A
--- pinned drawing takes the pointer by default and passes it through with
--- 'PointerPass', taking no hover itself.
+-- and the uncovered part of the button still work, also with the veil
+-- inside a blocking card. A blocking panel over a text field keeps a press
+-- from focusing it and shows no text cursor. A pinned drawing takes the
+-- pointer by default and passes it through with 'PointerPass'.
 runPointerModesTest :: Context -> IORef Int -> IO ()
 runPointerModesTest ctx failed = do
   let over mode = columnWith tight $ do
         b <- buttonWith' (fixedWH 200 100) "under"
         inner <- panelWith (pointer mode . pinAt 10 10 . fixedWH 120 60) (buttonWith' (fixedWH 40 20) "in")
         pure (b, inner)
-      onPanel = V2 100 60
-      at p = input0 {inputMousePos = p}
-      clickAt ui p = runClick ctx (at p) ui p
-  forM_ [(PointerAuto, True), (PointerBlock, False)] $ \(mode, through) -> do
-    (b0, inner0) <- warmup2 ctx input0 (over mode)
-    warmup ctx (at onPanel) (over mode)
-    (b1, _) <- evalUi ctx (at onPanel) (over mode)
-    assertEq failed through (respHovered b1)
-    getHotId ctx >>= assertEq failed (if through then respId b0 else WidgetId 0)
-    (b2, _) <- clickAt (over mode) onPanel
-    assertEq failed through (respClicked b2)
-    (_, inner2) <- clickAt (over mode) (centerOf inner0)
-    assert failed (respClicked inner2)
-    (b3, _) <- clickAt (over mode) (V2 190 90)
-    assert failed (respClicked b3)
-  -- A blocking panel over a text field keeps a press from focusing it.
-  let field mode = columnWith tight $ do
-        f <- fst <$> withValue "text" (textInputConfigured' defaultTextInputConfig {ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)})
-        panelWith (pointer mode . pinAt 60 0 . fixedWH 80 20) (pure ())
-        pure f
-  forM_ [(PointerAuto, True), (PointerBlock, False)] $ \(mode, focused) -> do
-    f0 <- warmup2 ctx input0 (field mode)
-    let Rect fx fy _ _ = respRect f0
-        p = V2 (fx + 100) (fy + 10)
-    cursorOver ctx input0 (field mode) p >>= assertEq failed focused . (== UiCursorText)
-    _ <- runClick ctx (at p) (field mode) p
-    getFocusId ctx >>= assertEq failed (if focused then respId f0 else WidgetId 0)
-    void (runClick ctx (at (V2 390 290)) (field mode) (V2 390 290))
-  -- A drawing over a button takes the pointer or passes it through.
-  let drawn mode = columnWith tight $ do
-        b <- buttonWith' (fixedWH 200 100) "under"
-        d <- drawing (pointer mode . pinAt 20 20 . fixedWH 100 50) (const mempty)
-        pure (b, d)
-      onDrawing = V2 60 40
-  forM_ [(PointerAuto, False), (PointerPass, True)] $ \(mode, through) -> do
-    _ <- warmup2 ctx input0 (drawn mode)
-    warmup ctx (at onDrawing) (drawn mode)
-    (b1, d1) <- evalUi ctx (at onDrawing) (drawn mode)
-    assertEq failed (through, not through) (respHovered b1, respHovered d1)
-    (b2, d2) <- clickAt (drawn mode) onDrawing
-    assertEq failed (through, not through) (respClicked b2, respClicked d2)
-
--- | A 'PointerBlock' veil pinned over a form inside a 'PointerBlock' card
--- blocks the form: the button under the veil is not hovered, hot or clicked,
--- while its uncovered part still works.
-runPointerBlockNestedTest :: Context -> IORef Int -> IO ()
-runPointerBlockNestedTest ctx failed = do
-  let ui = columnWith tight $ panelWith (pointer PointerBlock . fixedWH 300 200) $ do
+      nested = columnWith tight $ panelWith (pointer PointerBlock . fixedWH 300 200) $ do
         b <- buttonWith' (fixedWH 200 100) "under"
         box (pinAt 0 0 . fixedWH 150 80 . pointer PointerBlock) red
-        pure b
-      at p = input0 {inputMousePos = p}
-  Rect bx by _ _ <- respRect <$> warmup2 ctx input0 ui
-  let onVeil = V2 (bx + 20) (by + 20)
-  warmup ctx (at onVeil) ui
-  b1 <- evalUi ctx (at onVeil) ui
-  assert failed (not (respHovered b1))
-  getHotId ctx >>= assertEq failed (WidgetId 0)
-  b2 <- runClick ctx (at onVeil) ui onVeil
-  assert failed (not (respClicked b2))
-  let uncovered = V2 (bx + 190) (by + 90)
-  b3 <- runClick ctx (at uncovered) ui uncovered
-  assert failed (respClicked b3)
-
--- | A control drawn over a non-control node with an id, such as a label,
--- covers it too: no hover there, and its tooltip stays closed.
-runPointerCoversAnyIdTest :: Context -> IORef Int -> IO ()
-runPointerCoversAnyIdTest ctx failed = do
-  let ui = columnWith tight $ do
-        l <- labelWith' (fixedWH 200 40) "Covered text"
-        tooltipConfigured defaultTooltipConfig {tooltipDelay = 0} l "Label tip"
-        _ <- buttonWith' (pinAt 100 0 . fixedWH 60 30) "on top"
-        pure l
-      at p = input0 {inputMousePos = p}
-  _ <- warmup2 ctx input0 ui
-  forM_ [(V2 130 15, False), (V2 40 15, True)] $ \(p, uncovered) -> do
-    warmup ctx (at p) ui
-    l <- evalUi ctx (at p) ui
-    assertEq failed uncovered (respHovered l)
-    warmup ctx (at p) ui
-    assertEq failed uncovered . hasText "Label tip" =<< collectOverlayTextSpans ctx (at p)
-
--- | 'center' fills the room it is given and puts its body in the middle of
--- it on both axes, as one block whose children stack top to bottom.
-runCenterTest :: Context -> IORef Int -> IO ()
-runCenterTest ctx failed = do
-  let inBox body = columnWith (tight . fixedW 200 . fixedH 100) (center body)
-  _ <- warmup2 ctx input0 (inBox (box (fixedWH 20 10) red))
-  rs <- arenaRects ctx
-  case reverse rs of
-    (b : _) -> assertEq failed (rectX b, rectY b, rectW b, rectH b) (90, 45, 20, 10)
-    [] -> assert failed False
-  _ <- warmup2 ctx input0 (inBox (box (fixedWH 40 10) red >> box (alignCenter . fixedWH 20 10) blue))
-  rs2 <- arenaRects ctx
-  case reverse rs2 of
-    (b : a : _) -> do
-      assertEq failed (rectX a, rectX b) (80, 90)
-      -- The block of both boxes and the gap between them sits mid-height.
-      assertEq failed (100 - (rectY b + rectH b)) (rectY a)
-    _ -> assert failed False
-
--- | 'flex' takes the room left along its parent's direction: down a column,
--- across a row.
-runFlexDirectionTest :: Context -> IORef Int -> IO ()
-runFlexDirectionTest ctx failed = do
-  let ends container = container $ box (fixedWH 20 10) red >> flex >> box (fixedWH 20 10) blue
-  _ <- warmup2 ctx input0 (ends (columnWith (tight . gap 0 . fixedW 100 . fixedH 200)))
-  rectsAt ctx [3] >>= assertEq failed [Rect 0 190 20 10]
-  _ <- warmup2 ctx input0 (ends (rowWith (tight . gap 0 . fixedW 200 . fixedH 50)))
-  rectsAt ctx [3] >>= assertEq failed [Rect 180 0 20 10]
-
--- | A grow child its maximum caps gives up the rest of its share to the
--- grow siblings, so a row is filled to its end, and a column likewise.
-runGrowMaxHandoffTest :: Context -> IORef Int -> IO ()
-runGrowMaxHandoffTest ctx failed = do
-  let ui = rowWith (tight . gap 0 . fixedW 400 . fixedH 20) $ do
-        box (fillW . maxW 100) red
-        box fillW green
-        box (minW 80) blue
-  _ <- warmup2 ctx input0 ui
-  rs <- map (\r -> (rectX r, rectW r)) <$> rectsAt ctx [1, 2, 3]
-  assertEq failed rs [(0, 100), (100, 220), (320, 80)]
-  let col = columnWith (tight . gap 0 . fixedW 20 . fixedH 300) $ do
-        box (fillH . maxH 50) red
-        box fillH green
-  _ <- warmup2 ctx input0 col
-  cs <- map (\r -> (rectY r, rectH r)) <$> rectsAt ctx [1, 2]
-  assertEq failed cs [(0, 50), (50, 250)]
-  -- A negative weight grows nothing and takes nothing from the others.
-  let negative = rowWith (tight . gap 0 . fixedW 300 . fixedH 20) $ do
-        box fillW red
-        box (\l -> l {layoutWidth = Grow (-1)}) green
-  _ <- warmup2 ctx input0 negative
-  ns <- map (\r -> (rectX r, rectW r)) <$> rectsAt ctx [1, 2]
-  assertEq failed ns [(0, 268), (268, 32)]
-
--- | A label with a fixed width ('fixedWH') measures that width, so a row
--- places what follows past it, and one whose limits do not repeat it (a
--- plain 'Fixed') wraps at it: paint draws as many lines as the label is
--- tall, none wider than it. The test font's glyphs are as wide as a line is
--- tall.
-runFixedWidthLabelTest :: Context -> IORef Int -> IO ()
-runFixedWidthLabelTest ctx failed = do
-  let ui = columnWith tight $ do
-        rowWith tight $ do
-          labelWith (fixedWH 100 20 . alignEnd) "Name"
-          void (button "Go")
-        labelWith (\l -> l {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap"
-  _ <- warmup2 ctx input0 ui
-  rs <- arenaRects ctx
-  case rs of
-    [_, line, name, go, wrapped] -> do
-      assertEq failed (rectW name) 100
-      assert failed (rectX go >= rectX name + rectW name)
-      assertEq failed (rectX line + rectW line) (rectX go + rectW go)
-      assertEq failed (rectW wrapped) 100
-      assertPaintedLines failed ctx ["Name", "Go"] wrapped
-    _ -> assertEq failed (length rs) 5
-
--- | A label fixed narrower than its minimum width wraps at that minimum when
--- measured, as when placed, so the column it sits in ends at what follows.
-runFixedLabelOutsideLimitsTest :: Context -> IORef Int -> IO ()
-runFixedLabelOutsideLimitsTest ctx failed = do
-  let ui = columnWith tight . columnWith tight $ do
-        labelWith (\l -> (minW 200 l) {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap twice over"
-        label "after"
-  _ <- warmup2 ctx input0 ui
-  rs <- arenaRects ctx
-  case rs of
-    [_, col, wrapped, after] -> do
-      assertEq failed 200 (rectW wrapped)
-      assertPaintedLines failed ctx ["after"] wrapped
-      assertEq failed (rectY col + rectH col) (rectY after + rectH after)
-    _ -> assertEq failed 4 (length rs)
-
--- | A fixed size outside a node's limits takes the limit when measured, as
--- when placed, so a row places what follows past it: a text field fixed 100
--- wide keeps its 160 minimum, and so does a measured custom widget.
-runFixedOutsideLimitsTest :: Context -> IORef Int -> IO ()
-runFixedOutsideLimitsTest ctx failed = do
-  let narrow l = l {layoutWidth = Fixed 100, layoutHeight = Fixed 28}
-      field = defaultTextInputConfig {ticLayout = narrow (ticLayout defaultTextInputConfig)}
-      custom = defaultCustomWidgetSpec {widgetLayout = narrow (minW 160 defaultLayout), widgetMeasure = Just (\_ _ -> (100, 28))}
-      ui = rowWith tight $ do
-        (a, _) <- withValue "" (textInputConfigured' field)
-        b <- button' "Go"
-        (c, ()) <- customWidget custom
-        d <- button' "End"
-        pure [a, b, c, d]
-  rs <- map respRect <$> warmup2 ctx input0 ui
-  assertEq failed [160, 160] [rectW r | (i, r) <- zip [0 :: Int ..] rs, even i]
-  assert failed (and (zipWith (\r next -> rectX next >= rectX r + rectW r) rs (drop 1 rs)))
-  -- 'fixedWH', like 'fixedW', sets the width limits too.
-  (fixed, _) <- warmup2 ctx input0 (withValue "" (textInputConfigured' defaultTextInputConfig {ticLayout = fixedWH 100 28 (ticLayout defaultTextInputConfig)}))
-  assertEq failed 100 (rectW (respRect fixed))
-
--- | A percentage width is a share of the width a column, a grid cell or a
--- row offers, and a percentage height of a row's height. A label is placed
--- and painted at its share, wrapped to as many lines as it is tall.
-runPercentAcrossTest :: Context -> IORef Int -> IO ()
-runPercentAcrossTest ctx failed = do
-  let ui = columnWith tight $ do
-        columnWith (tight . fixedW 400) $ do
-          box (percent 50 . alignEnd . fixedH 10) red
-          labelWith (percent 50) "percent sized text wraps at its own width"
-        gridWith 2 (tight . fixedW 401 . gap 1) $ do
-          box (percent 50 . fixedH 10) red
-          box (fixedH 10) blue
-        rowWith (tight . fixedH 40) $
-          box (\l -> l {layoutWidth = Fixed 10, layoutHeight = Percent 50}) red
-  _ <- warmup2 ctx input0 ui
-  rs <- arenaRects ctx
-  case rs of
-    [_, _, box1, wrapped, _, cell, _, _, rowBox] -> do
-      assertEq failed (rectX box1, rectW box1) (200, 200)
-      assertEq failed (rectW wrapped) 200
-      assertPaintedLines failed ctx [] wrapped
-      assertEq failed (rectW cell) 100
-      assertEq failed (rectH rowBox) 20
-    _ -> assertEq failed (length rs) 9
-
--- | An empty label takes a line in a column, as the column measured it and
--- as it does in a row, so the column ends at its last child.
-runEmptyLabelLineTest :: Context -> IORef Int -> IO ()
-runEmptyLabelLineTest ctx failed = do
-  let ui = columnWith tight $ do
-        columnWith tight (label "a" >> label "" >> label "b")
-        label "after"
-  _ <- warmup2 ctx input0 ui
-  rs <- arenaRects ctx
-  case rs of
-    [_, col, a, empty, b, _] -> do
-      assertEq failed (rectH empty) (rectH a)
-      assertEq failed (rectY col + rectH col) (rectY b + rectH b)
-    _ -> assertEq failed (length rs) 6
+        pure (b, b)
+      onPanel = At (V2 100 60)
+  forM_ [(over PointerAuto, True, True), (over PointerBlock, False, True), (nested, False, False)] $ \(ui, through, inner) ->
+    sim ctx failed ui $ do
+      (b0, inner0) <- result
+      _ <- moveTo onPanel
+      (b1, _) <- moveTo onPanel
+      checkEq through (respHovered b1)
+      checkEq (if through then respId b0 else WidgetId 0) =<< hot
+      checkEq through . respClicked . fst =<< click onPanel
+      when inner $ check . respClicked . snd =<< click (On inner0)
+      check . respClicked . fst =<< click (At (V2 190 90))
+  let field mode = columnWith tight $ do
+        f <- fst <$> withValue "text" (textInputConfigured' defaultTextInputConfig {ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)})
+        f <$ panelWith (pointer mode . pinAt 60 0 . fixedWH 80 20) (pure ())
+  forM_ [(PointerAuto, True), (PointerBlock, False)] $ \(mode, through) -> sim ctx failed (field mode) $ do
+    f <- result
+    let p = At (V2 (rectX (respRect f) + 100) (rectY (respRect f) + 10))
+    checkEq through . (== UiCursorText) =<< cursorAt p
+    _ <- click p
+    checkEq (if through then respId f else WidgetId 0) =<< focused
+    void (click (At (V2 390 290)))
+  let drawn mode = columnWith tight $ do
+        b <- buttonWith' (fixedWH 200 100) "under"
+        (b,) <$> drawing (pointer mode . pinAt 20 20 . fixedWH 100 50) (const mempty)
+      onDrawing = At (V2 60 40)
+  forM_ [(PointerAuto, False), (PointerPass, True)] $ \(mode, through) -> sim ctx failed (drawn mode) $ do
+    _ <- moveTo onDrawing
+    (b1, d1) <- moveTo onDrawing
+    checkEq (through, not through) (respHovered b1, respHovered d1)
+    (b2, d2) <- click onDrawing
+    checkEq (through, not through) (respClicked b2, respClicked d2)
