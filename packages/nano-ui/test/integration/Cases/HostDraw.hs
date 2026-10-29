@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.HostDraw (tests) where
 
 import Spec
@@ -5,9 +6,8 @@ import Data.List (nub, sort)
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Primitive.SmallArray (smallArrayFromList)
 import Data.Text qualified as T
-import Data.Word (Word32, Word8)
+import Data.Word (Word32)
 import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import NanoUI.Internal.Context (setDrawExternalText, setDrawSnapScale, setDrawSquareGeometry)
 import NanoUI.Internal.Store (ptrEq)
@@ -24,37 +24,6 @@ tests =
   , spec "draw-external-text" runExternalTextTest
   , spec "draw-external-text-frames" runExternalTextFramesTest
   ]
-
--- | A vertex: position, colour, alpha and UV.
-data Vertex = Vertex {vX, vY :: Float, vRgb :: (Float, Float, Float), vA, vU, vV :: Float}
-
-vertexAt :: Ptr Word8 -> Int -> IO Vertex
-vertexAt vp i = Vertex <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16) <*> at 20 <*> at 24 <*> at 28
-  where
-    at o = peekByteOff vp (i * vertexSize + o) :: IO Float
-
--- | Every vertex, in buffer order.
-vertices :: DrawData -> IO [Vertex]
-vertices dd = withForeignPtr (drawVertices dd) $ \vp -> mapM (vertexAt vp) [0 .. drawVertexCount dd - 1]
-
--- | The vertex each of these index-buffer positions names.
-indexed :: DrawData -> [Int] -> IO [Vertex]
-indexed dd is =
-  withForeignPtr (drawVertices dd) $ \vp -> withForeignPtr (drawIndices dd) $ \ip ->
-    forM is $ \i -> (peekByteOff ip (i * indexSize) :: IO Word32) >>= vertexAt vp . fromIntegral
-
--- | The vertices the commands drawn from texture @tex@ index.
-fromTexture :: Int -> DrawData -> IO [Vertex]
-fromTexture tex dd = indexed dd (concat [range c | c <- drawCmdElems dd, cmdTextureId c == tex])
-  where
-    range c = [fromIntegral (cmdIndexOffset c) .. fromIntegral (cmdIndexOffset c + cmdIndexCount c) - 1]
-
--- | Every indexed triangle.
-triangles :: DrawData -> IO [(Vertex, Vertex, Vertex)]
-triangles dd = triples <$> indexed dd [0 .. drawIndexCount dd - 1]
-  where
-    triples (a : b : c : rest) = (a, b, c) : triples rest
-    triples _ = []
 
 -- | A font that shapes any text to these glyphs: x, y, w, h and UV corners.
 shapedFont :: Float -> [[Float]] -> FontMetrics
@@ -75,9 +44,9 @@ runSquareGeometryTest ctx failed = do
         void (withValue True (checkbox "check"))
         void (withValue 0.5 (slider 0 1))
         void (button' "menu")
-  assert failed . not . all uniform =<< triangles =<< drawn ctx controls
+  assert failed . not . all uniform =<< drawTriangles =<< drawn ctx controls
   setDrawSquareGeometry ctx True
-  squareTris <- triangles =<< drawn ctx controls
+  squareTris <- drawTriangles =<< drawn ctx controls
   assert failed (not (null squareTris) && all uniform squareTris)
 
 -- | A rounded border wider than twice its radius keeps its ink in its box
@@ -86,11 +55,12 @@ runThickRoundedStrokeTest :: Context -> IORef Int -> IO ()
 runThickRoundedStrokeTest ctx failed = do
   let border ink = drawing (fixedWH 60 60) $ \(Rect x y _ _) ->
         smallArrayFromList [StrokeRoundedRect (Rect (x + 10) (y + 10) 40 40) 1 8 ink]
-  inked <- filter (\v -> vRgb v == (0, 0, 1) && vA v > 0) <$> (vertices =<< drawn ctx (border (colorRGBA 0 0 255 255)))
+  inked <- filter (\v -> vRgb v == (0, 0, 1) && vA v > 0)
+    <$> (drawnVertices =<< drawn ctx (border (colorRGBA 0 0 255 255)))
   let extent f = maximum (map f inked) - minimum (map f inked)
   assert failed (not (null inked) && extent vX <= 40 && extent vY <= 40)
   (resp, dd, _) <- runFrame ctx (withInput 300 200) (border (colorRGBA 0 0 255 128))
-  tris <- triangles dd
+  tris <- drawTriangles dd
   let Rect rx ry _ _ = respRect resp
       alphaAt px py = sum [l0 * vA a + l1 * vA b + l2 * vA c | (a, b, c) <- tris, Just (l0, l1, l2) <- [barycentric a b c]]
         where
@@ -134,7 +104,7 @@ runGeometryGuardsTest ctx failed = do
             drawCircle ring 2.5 (colorRGBA 255 255 0 255)
         }
   setDrawSnapScale ctx 1
-  verts <- vertices =<< drawn ctx circles
+  verts <- drawnVertices =<< drawn ctx circles
   let centreOf rgb = case [(vX v, vY v) | v <- verts, vRgb v == rgb] of
         [] -> Nothing
         ps -> let (xs, ys) = unzip ps in Just ((minimum xs + maximum xs) / 2, (minimum ys + maximum ys) / 2)
@@ -155,8 +125,8 @@ runGlyphPagesTest ctx failed = do
   case [c | c <- drawCmdElems dd, cmdTextureId c == glyphPageTextureId 1, cmdIndexCount c > 0] of
     [cmd] -> assertEq failed 12 (cmdIndexCount cmd)
     other -> assertEq failed 1 (length other)
-  assertEq failed [0.25, 0.5] . nub . sort . map vU =<< fromTexture (glyphPageTextureId 1) dd
-  firstUs <- map vU <$> fromTexture (glyphPageTextureId 0) dd
+  assertEq failed [0.25, 0.5] . nub . sort . map vU =<< textureVertices (glyphPageTextureId 1) dd
+  firstUs <- map vU <$> textureVertices (glyphPageTextureId 0) dd
   assert failed (0.25 `elem` firstUs && 0.5 `elem` firstUs)
   let pastPages = shapedFont 12 [glyph 0 0.25, glyph 8 (-0.25), glyph 16 4.25, glyph 24 (-1)]
   outside <- drawn (withFontMetrics ctx pastPages) (label "abcd")
@@ -181,7 +151,7 @@ runGlyphKerningTest base failed = do
       ctx = withFontMetrics base fm
   (lab, dd) <- warmupDraw ctx (withInput 300 100) $
     rowWith (fixedW 100 . tight . gap 0) (labelWith' (fillW . alignEnd . tight) "AVAV")
-  xus <- map (\v -> (vX v, vU v)) <$> fromTexture glyphAtlasTextureId dd
+  xus <- map (\v -> (vX v, vU v)) <$> textureVertices glyphAtlasTextureId dd
   let aXs = [x | (x, u) <- xus, u < 0.55]
       vXs = [x | (x, u) <- xus, u > 0.55]
       Rect bx _ bw _ = respRect lab
@@ -205,7 +175,8 @@ runTextInputFontTest base failed = do
       extent ui = do
         (_, dd) <- warmupDraw ctx (withInput 400 200) (column ui)
         -- The glyph's own quad: atlas vertices at its UV corners.
-        ps <- filter (\v -> vU v `elem` [0.25, 0.5] && vV v `elem` [0.5, 0.75]) <$> fromTexture glyphAtlasTextureId dd
+        ps <- filter (\v -> vU v `elem` [0.25, 0.5] && vV v `elem` [0.5, 0.75])
+          <$> textureVertices glyphAtlasTextureId dd
         let size f = if null ps then 0 else maximum (map f ps) - minimum (map f ps)
         pure (size vX, size vY)
   extent (labelWith big "Hg") >>= assertEq failed (16, 26)
@@ -319,7 +290,7 @@ runExternalTextFramesTest :: Context -> IORef Int -> IO ()
 runExternalTextFramesTest _ failed = do
   let inp = withInputOff 400 300
   ctx <- externalContext
-  let frame' = (\(_, dd, _) -> dd) <$> runFrame ctx inp (drawingText "reused")
+  let frame' = runFrame ctx inp (drawingText "reused") >>= \(_, !dd, _) -> pure dd
       reused = assertEq failed (replicate 4 "reused") . textsOf . fst =<< drawnSpans ctx inp
   replicateM_ 2 frame'
   d1 <- frame'

@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Focus (tests) where
 
 import Spec
@@ -45,9 +46,6 @@ asking ctx failed mk script = do
   q <- newIORef []
   let ask f ids = liftIO (writeIORef q ids) >> frameWith f >> ((,) <$> wantsFrame <*> focusedId)
   runSim ctx failed inp (mk (mapM_ requestFocus =<< liftIO (atomicModifyIORef' q ([],)))) (script ask)
-
-ring :: Sim a Bool
-ring = simContext >>= liftIO . getFocusVisible
 
 -- | A field's selection, as (anchor, caret).
 selectionOf :: Context -> WidgetId -> Sim a (Int, Int)
@@ -202,7 +200,7 @@ runFocusRequestOrderTest ctx failed = do
     [field, a, b] <- result
     checkEq (WidgetId 0) =<< focusedId
     checkEq (True, field) =<< ask (\i -> i {inputChars = "y"}) [field]
-    check =<< ring
+    check =<< focusRing
     _ <- typeText "!"
     checkEq "hello!" =<< liftIO (readVarIO textRef)
     let asks = [ask id [a, WidgetId 0], ask id [WidgetId 0, b, a], ask tabInp [field]]
@@ -305,7 +303,7 @@ runFocusNextPreviousTest ctx failed = do
     focused <- mapM step [focusNext, focusNext, focusPrevious, focusPrevious]
     checkEq [[True, False, False], [False, True, False], [True, False, False], [False, False, True]] focused
     checkEq c =<< focusedId
-    check =<< ring
+    check =<< focusRing
     checkEq [True, False, False] =<< step (requestFocus =<< currentId)
     checkEq a =<< focusedId
 
@@ -351,7 +349,7 @@ runFocusTextCommandTest ctx failed = do
     liftIO (writeIORef run True)
     checkEq (field, WidgetId 0) =<< frame
     checkEq field =<< focusedId
-    check =<< ring
+    check =<< focusRing
     liftIO (writeIORef run False)
     checkEq "Z" =<< (typeText "Z" >> liftIO (readVarIO ref))
     focusOn (WidgetId 0)
@@ -377,7 +375,7 @@ runCanvasFocusClickTest ctx failed = do
   runSim ctx failed inp ui $ do
     (live, still, _) <- result
     checkEq (respId live) =<< focusedAfter live
-    check . not =<< ring
+    check . not =<< focusRing
     check =<< heardRight
     checkEq (WidgetId 0) =<< focusedAfter still
     check . not =<< heardRight

@@ -1,7 +1,7 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Combo (tests) where
 
 import Spec
-import Cases.SimExtra
 import Data.Text qualified as T
 import NanoUI.Internal.Input (onMac)
 import NanoUI.Shortcut
@@ -222,7 +222,7 @@ comboWheel = do
   expectNot "Fam 06" >> expect "Fam 07"
   before <- rectOf "Fam 07"
   _ <- frameWith (\i -> i {inputScroll = V2 5 0})
-  above 50 . (rectX before -) . rectX =<< rectOf "Fam 07"
+  checkLt 50 . (rectX before -) . rectX =<< rectOf "Fam 07"
   _ <- frameWith (\i -> i {inputScroll = V2 1000 0})
   expect "Fam 07"
   _ <- frameWith (\i -> i {inputScroll = V2 0 10}) >> frame

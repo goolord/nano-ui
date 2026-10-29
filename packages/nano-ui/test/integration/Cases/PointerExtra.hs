@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | Middle, side and other mouse buttons. A non-left click is reported
 -- separately from a plain click, and a held or clicked button belongs to the
 -- widget it was pressed on.

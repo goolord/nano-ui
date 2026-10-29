@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | The view API a widget that works out its own input leans on: where it
 -- was laid out, the keyboard, pointer frames, content keys, scrolling, and
 -- pane grids.

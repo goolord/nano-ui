@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Adornment (tests) where
 
 import Spec

@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Window (tests) where
 
 import Spec
@@ -7,15 +8,7 @@ import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena
-  ( LayoutCache (..)
-  , arenaCount
-  , getNodeRect
-  , getNodeType
-  , getNodeValue
-  , getScrollContentW
-  , isScrollNode
-  )
+import NanoUI.Internal.Layout.Arena (LayoutCache (..))
 import NanoUI.Testing.Sim
 import System.Mem.StableName (makeStableName)
 
@@ -306,21 +299,8 @@ runWindowLayoutReuseTest ctx failed = do
           void (popup' (constVar True) cfg (label "tip"))
         void (modal' (constVar modalOpen) "Note" (label (T.replicate 12 "a note that wraps ")))
         pure win
-      -- Every node rect and scroll extent.
-      layout c = do
-        let na = ctxNodeArena c
-            extent i nt
-              | isScrollNode nt = Just <$> ((,) <$> getNodeValue na i <*> getScrollContentW na i)
-              | otherwise = pure Nothing
-        n <- arenaCount na
-        forM [0 .. n - 1] $ \i -> (,) <$> getNodeRect na i <*> (getNodeType na i >>= extent i)
       -- A frame on this context, which reuses what it placed, and on one that never does.
-      same i u = do
-        (win, _, _) <- runFrame ctx i u
-        writeIORef (ctxLayoutCache fresh) Nothing
-        _ <- runFrame fresh i u
-        join (assertEq failed <$> layout fresh <*> layout ctx)
-        pure (respRect win)
+      same i u = respRect <$> sameAsFreshSolve failed fresh ctx i u
       still = ui False (V2 100 100)
   r0 <- same inp0 still >> same inp0 still
   -- The window and the popup in it are both kept for the next frame.

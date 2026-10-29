@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- A minimal backend must compile using only the supported public surface.
 module BackendApi (backendApiCheck) where
 

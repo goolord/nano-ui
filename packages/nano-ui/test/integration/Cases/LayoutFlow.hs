@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.LayoutFlow (tests) where
 
 import Spec
@@ -43,10 +44,6 @@ rectsAt ctx is = (\rs -> [r | (i, r) <- zip [0 ..] rs, i `elem` is]) <$> arenaRe
 -- | 'runSim' on 'input0'.
 sim :: Context -> IORef Int -> NanoUI a -> Sim a r -> IO r
 sim ctx failed = runSim ctx failed input0
-
--- | The hot widget.
-hot :: Sim a WidgetId
-hot = simContext >>= liftIO . getHotId
 
 -- | Hover, press, hold and release on the target; the press and release results.
 pressThrough :: Target -> Sim a (a, a)
@@ -321,7 +318,7 @@ runPointerOwnerTest ctx failed =
     forM_ (points ws) $ \(t, want) -> do
       _ <- moveTo t
       hovered <- moveTo t
-      checkEq (maybe (WidgetId 0) (respId . (ws !!)) want) =<< hot
+      checkEq (maybe (WidgetId 0) (respId . (ws !!)) want) =<< hotId
       checkEq (only want) (map respHovered hovered)
       checkEq (only want) . map respClicked =<< click t
   where

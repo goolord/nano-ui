@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
 -- | What one interaction costs: view passes in the frame that saw it, the

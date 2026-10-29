@@ -20,6 +20,7 @@ module NanoUI.Testing.Harness
   , warmup2
   , warmupDraw
   , warmupFocused
+  , setFocus
   , held
   , FrameCost (..)
   , frameCost
@@ -56,6 +57,12 @@ module NanoUI.Testing.Harness
   , clickTab
   , dragPos
   , drawQuads
+  , Vertex (..)
+  , vertexColor
+  , drawnVertices
+  , indexedVertices
+  , textureVertices
+  , drawTriangles
   , nodesOfType
   , newWakeSignal
   , measureRuns
@@ -64,20 +71,21 @@ module NanoUI.Testing.Harness
 import Control.Applicative ((<|>))
 import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
 import Control.Monad (filterM, forM, forM_, replicateM_, unless, void, when)
-import Data.IORef (IORef)
+import Data.IORef (IORef, writeIORef)
 import Data.List (maximumBy)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text qualified as T
-import Data.Word (Word32)
+import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stack (HasCallStack)
 import GHC.Stats (RTSStats (..), getRTSStats)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Internal.Context (ctxNodeArena, takeWakes)
+import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena, takeWakes)
 import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Types (clamp)
@@ -94,6 +102,49 @@ import Text.Read (readMaybe)
 -- | Text bounds, text, foreground, background, and clip in logical window coordinates.
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
 
+-- | One vertex of a frame's draw buffer: position, colour, alpha and UV.
+data Vertex = Vertex {vX, vY :: Float, vRgb :: (Float, Float, Float), vA, vU, vV :: Float}
+  deriving (Eq, Show)
+
+-- The vertex at index @i@, read at the buffer's vertex stride.
+vertexAt :: Ptr Word8 -> Int -> IO Vertex
+vertexAt vp i = Vertex <$> at 0 <*> at 4 <*> ((,,) <$> at 8 <*> at 12 <*> at 16) <*> at 20 <*> at 24 <*> at 28
+  where
+    at o = peekByteOff vp (i * vertexSize + o) :: IO Float
+
+-- | A vertex's colour and alpha as a 'Color'.
+vertexColor :: Vertex -> Color
+vertexColor v = let (r, g, b) = vRgb v in colorRGBA (byte r) (byte g) (byte b) (byte (vA v))
+  where
+    byte f = clamp 0 255 (round (f * 255))
+
+-- | Every vertex of a frame, in buffer order. The draw buffers are borrowed:
+-- read them before the context's next frame.
+drawnVertices :: DrawData -> IO [Vertex]
+drawnVertices dd = withForeignPtr (drawVertices dd) $ \vp -> mapM (vertexAt vp) [0 .. drawVertexCount dd - 1]
+
+-- | The vertex each of these index-buffer positions names.
+indexedVertices :: DrawData -> [Int] -> IO [Vertex]
+indexedVertices dd is =
+  withForeignPtr (drawVertices dd) $ \vp -> withForeignPtr (drawIndices dd) $ \ip ->
+    forM is $ \i -> (peekByteOff ip (i * indexSize) :: IO Word32) >>= vertexAt vp . fromIntegral
+
+-- The index-buffer positions a draw command covers.
+cmdIndices :: DrawCmd -> [Int]
+cmdIndices c = [fromIntegral (cmdIndexOffset c) .. fromIntegral (cmdIndexOffset c + cmdIndexCount c) - 1]
+
+-- | The vertices the commands drawn from texture @tex@ index, in order.
+textureVertices :: Int -> DrawData -> IO [Vertex]
+textureVertices tex dd =
+  indexedVertices dd (concat [cmdIndices c | c <- drawCmdElems dd, cmdTextureId c == tex])
+
+-- | Every indexed triangle of a frame.
+drawTriangles :: DrawData -> IO [(Vertex, Vertex, Vertex)]
+drawTriangles dd = triples <$> indexedVertices dd [0 .. drawIndexCount dd - 1]
+  where
+    triples (a : b : c : rest) = (a, b, c) : triples rest
+    triples _ = []
+
 -- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
 -- six-index quad, in draw order. Unlike span and arena queries, this includes
 -- widget chrome such as scroller wells and scrollbar lanes. Use only with
@@ -101,30 +152,20 @@ type DemoSpan = (Rect, T.Text, Color, Color, Rect)
 -- rounded-shape output is not supported. Commands with counts not divisible by
 -- six throw.
 drawQuads :: DrawData -> IO [(Rect, Color)]
-drawQuads dd =
-  withForeignPtr (drawVertices dd) $ \vp ->
-    withForeignPtr (drawIndices dd) $ \ip ->
-      fmap concat $
-        forM (drawCmdElems dd) $ \c -> do
-          let ioff = fromIntegral (cmdIndexOffset c)
-              icnt = fromIntegral (cmdIndexCount c)
-          when (icnt `rem` 6 /= 0) $
-            error ("drawQuads: draw command packs " ++ show icnt ++ " indices; not quad-packed")
-          forM [ioff, ioff + 6 .. ioff + icnt - 1] $ \q -> do
-            -- Each corner as its x, y, r, g, b, a floats.
-            corners <-
-              forM [q .. q + 3] $ \ii -> do
-                vi <- fromIntegral <$> (peekByteOff ip (ii * indexSize) :: IO Word32)
-                forM [0 .. 5] $ \k -> peekByteOff vp (vi * vertexSize + 4 * k) :: IO Float
-            let xs = [x | x : _ <- corners]
-                ys = [y | _ : y : _ <- corners]
-                toW8 f = clamp 0 255 (round (f * 255))
-            pure $ case corners of
-              [_, _, r, g, b, a] : _ ->
-                ( Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
-                , colorRGBA (toW8 r) (toW8 g) (toW8 b) (toW8 a)
-                )
-              _ -> (Rect 0 0 0 0, colorRGBA 0 0 0 0)
+drawQuads dd = do
+  forM_ (drawCmdElems dd) $ \c ->
+    when (cmdIndexCount c `rem` 6 /= 0) $
+      error ("drawQuads: draw command packs " ++ show (cmdIndexCount c) ++ " indices; not quad-packed")
+  quads <$> indexedVertices dd (concatMap cmdIndices (drawCmdElems dd))
+  where
+    -- Each quad's first four indices name its corners.
+    quads vs = case splitAt 6 vs of
+      (corners@(v : _), rest) -> quad (take 4 corners) v : quads rest
+      _ -> []
+    quad corners v =
+      let xs = map vX corners
+          ys = map vY corners
+       in (Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys), vertexColor v)
 
 -- | Ids and rects of the frame's nodes of one type, in arena order.
 nodesOfType :: NodeType -> Context -> IO [(WidgetId, Rect)]
@@ -168,14 +209,15 @@ findHeader :: T.Text -> [DemoSpan] -> Maybe V2
 findHeader needle spans =
   -- Header spans keep their sort-reserve padding ("Name   ", or "   Age" in
   -- a right-aligned column, the arrow glyph blanked), while every other
-  -- "Name" label is trimmed. Match the raw, untrimmed text so the header wins
-  -- over right-aligned kv values that happen to repeat the column name.
+  -- "Name" label is trimmed. Match the raw, untrimmed text, and only the
+  -- needle plus that padding, so the header wins over right-aligned kv
+  -- values that repeat the column name and labels such as "Name (asc)".
   let marked =
         [ (x, spanCenter r)
         | (r@(Rect x _ w h), txt, _, _, _) <- spans
         , w > 1 && h > 1
         , let raw = dropSpanMarkers txt
-        , T.isPrefixOf (needle <> " ") raw || T.isSuffixOf (" " <> needle) raw
+        , T.strip raw == needle && T.length raw > T.length needle
         ]
    in pickRight marked <|> findExact needle spans
 
@@ -304,6 +346,11 @@ warmupDraw ctx inp ui = (\(a, draw, _) -> (a, draw)) <$> run2Frames ctx inp ui
 -- | Warm the view up, then Tab onto its first focusable.
 warmupFocused :: Context -> Input -> NanoUI a -> IO ()
 warmupFocused ctx inp ui = warmup2 ctx inp ui >> void (runFrame ctx (tabInp inp) ui)
+
+-- | Give @wid@ keyboard focus directly, as focus kept from earlier frames
+-- does; the next frame sees it.
+setFocus :: Context -> WidgetId -> IO ()
+setFocus ctx = writeIORef (ctxFocusId ctx)
 
 -- | Run a widget bound to a 'Var' and pair its result with the post-frame
 -- 'Var' value. The read uses 'peekVar', so it adds no rerun of its own; a
@@ -460,9 +507,7 @@ dragWindowEdge ctx inp0 ui grab dest = do
 -- | Read UV coordinates of a zero-based vertex. The index must be below
 -- 'drawVertexCount' and the borrowed draw buffers must still be valid.
 vertUv :: DrawData -> Int -> IO (Float, Float)
-vertUv dd i =
-  withForeignPtr (drawVertices dd) $ \p ->
-    (,) <$> peekByteOff p (i * vertexSize + 24) <*> peekByteOff p (i * vertexSize + 28)
+vertUv dd i = withForeignPtr (drawVertices dd) $ \vp -> (\v -> (vU v, vV v)) <$> vertexAt vp i
 
 -- | Require the transition to idle input to need a frame, then require that
 -- frame's damage to cover the whole window.

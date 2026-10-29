@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
 module Cases.State (tests) where

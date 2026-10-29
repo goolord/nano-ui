@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | Labels cut to their room, and toggle buttons.
 module Cases.Labels (tests) where
 

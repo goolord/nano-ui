@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Tabs (tests) where
 
 import Spec
@@ -63,10 +64,6 @@ nodesTexted txt get ctx = do
 closeRects :: Context -> IO [Rect]
 closeRects = nodesTexted "\215" getNodeRect
 
--- | Whether some span of the last frame shows @txt@.
-showing :: T.Text -> Sim a Bool
-showing txt = any (\(_, t, _, _, _) -> txt `T.isInfixOf` t) <$> spans
-
 -- | Whether the strip's paging arrows show.
 hasArrows :: Sim a Bool
 hasArrows = any (\(_, t, _, _, _) -> T.any (`elem` ['\8249', '\8250']) t) <$> spans
@@ -90,7 +87,7 @@ runTabsScrollTest ctx failed = do
         label "Below"
       setLabels = liftIO . writeIORef labelsRef
   runSim ctx failed (withInput 900 120) ui $ do
-    mapM_ (check <=< showing) overflowLabels
+    mapM_ (check <=< textShown) overflowLabels
     check . not =<< hasArrows
     [Rect x0 _ _ _] <- liftIO (nodesTexted "Controls" getNodeRect ctx)
     [Rect lx _ lw _] <- liftIO (nodesTexted "LongestTabName" getNodeRect ctx)
@@ -100,8 +97,8 @@ runTabsScrollTest ctx failed = do
     _ <- frame
     checkEq DamageFull =<< liftIO (takeDamage ctx)
     _ <- settle
-    check =<< showing "Controls"
-    check . not =<< showing "LongestTabName"
+    check =<< textShown "Controls"
+    check . not =<< textShown "LongestTabName"
     theme <- liftIO (readIORef (ctxTheme ctx))
     inp <- getInput
     (_, dd, _) <- liftIO (run2Frames ctx inp ui)
@@ -116,35 +113,35 @@ runTabsScrollTest ctx failed = do
     right <- arrowRect '\8250'
     checkGt (rectX right + rectW right) 200
     _ <- click (Within right) >> frame
-    check . not =<< showing "Controls"
+    check . not =<< textShown "Controls"
     check . (`damageCovers` left) =<< liftIO (takeDamage ctx)
     _ <- click (Within left) >> frame
-    check =<< showing "Controls"
+    check =<< textShown "Controls"
     controls <- rectOf "Controls"
     _ <- wheel (Within controls) (V2 0 0.3) >> frame
     scrolled <- rectOf "Controls"
     checkLt (rectX scrolled) (rectX controls)
     forM_ [(V2 0 20, False), (V2 10 0, False), (V2 (-100) 0, True), (V2 (-100) 0, True)] $ \(d, shown) -> do
       _ <- wheel (Within controls) d >> frame
-      checkEq shown =<< showing "Controls"
+      checkEq shown =<< textShown "Controls"
     -- One header fits the window, two would not fit between the arrows.
     setLabels ["Controls"] >> void settle
-    check =<< showing "Controls"
+    check =<< textShown "Controls"
     check . not =<< hasArrows
     setLabels overflowLabels >> void settle
     check =<< hasArrows
-    check . not =<< showing "LongestTabName"
+    check . not =<< textShown "LongestTabName"
     -- The headers' extent and the window's padding on both sides: less
     -- spare room than the two arrows take.
     _ <- resize (lx + lw + x0 + 10) 120
-    mapM_ (check <=< showing) overflowLabels
+    mapM_ (check <=< textShown) overflowLabels
     check . not =<< hasArrows
     _ <- resize 240 120
     forM_ [(4, "LongestTabName"), (0, "Controls")] $ \(k, l) -> do
       liftIO (writeVarIO active k)
-      check =<< (settle >> showing l)
+      check =<< (settle >> textShown l)
     setLabels (overflowLabels ++ ["Appended"]) >> liftIO (writeVarIO active 5)
-    check =<< (settle >> showing "Appended")
+    check =<< (settle >> textShown "Appended")
 
 -- | A strip whose last close button runs past the bar overflows, though every
 -- header's main button fits: the range counts each header's close button.
@@ -173,7 +170,7 @@ runTabsStripInPageTest ctx failed = do
     longest <- rectOf "LongestTabName"
     forM_ [(V2 0 (-20), True), (V2 0 20, False)] $ \(d, first) -> do
       _ <- wheel (Within longest) d >> frame
-      checkEq first =<< showing "Controls"
+      checkEq first =<< textShown "Controls"
       checkEq 0 =<< liftIO (getScrollOffset ctx page)
 
 -- | Only the active body runs. Bodies keep separate state, even at the same

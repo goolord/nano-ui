@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | What every integration test module imports: the library, the test
 -- harness and assertions, and the shape of a test with its two helpers.
 module Spec
@@ -6,12 +7,14 @@ module Spec
   , pixelSpec
   , simSpec
   , pixelSimSpec
+  , varSimSpec
   , arenaRects
+  , nodeLayout
+  , sameAsFreshSolve
   , fillsIn
   , buttonValues
   , widgetValue
   , wheelIntoView
-  , hoverWheel
   , assertPaintedLines
   , withMonospaceFonts
   , module Control.Monad
@@ -26,6 +29,7 @@ module Spec
 import Control.Monad
 import Data.IORef
 import Data.Text qualified as T
+import GHC.Stack (HasCallStack, withFrozenCallStack)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Testing
@@ -33,7 +37,15 @@ import NanoUI.Testing.Assert
 import NanoUI.Testing.Harness
 import NanoUI.Testing.Sim (Sim, runSim)
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getNodeValue, lookupNodeByWidgetId)
+import NanoUI.Internal.Layout.Arena
+  ( arenaCount
+  , getNodeRect
+  , getNodeType
+  , getNodeValue
+  , getScrollContentW
+  , isScrollNode
+  , lookupNodeByWidgetId
+  )
 
 -- | A test's name, the context it runs on, and the test, which bumps the
 -- failure counter for each failed check.
@@ -49,6 +61,12 @@ pixelSpec name run = (name, newPixelContext, run)
 simSpec, pixelSimSpec :: String -> Float -> Float -> NanoUI a -> Sim a () -> Spec
 simSpec name w h view script = spec name (\ctx failed -> runSim ctx failed (withInput w h) view script)
 pixelSimSpec name w h view script = pixelSpec name (\ctx failed -> runSim ctx failed (withInput w h) view script)
+
+-- | 'simSpec' on a 'Var' holding @initial@, which the view and the script
+-- share.
+varSimSpec :: String -> Float -> Float -> v -> (Var v -> NanoUI a) -> (Var v -> Sim a ()) -> Spec
+varSimSpec name w h initial view script =
+  spec name (\ctx failed -> newVar initial >>= \v -> runSim ctx failed (withInput w h) (view v) (script v))
 
 -- | @base@ with a monospace base font of @baseCell@ px cells, and
 -- @sizedCell@ px cells for text given a font size of its own, so a test can
@@ -69,6 +87,29 @@ arenaRects :: Context -> IO [Rect]
 arenaRects ctx = do
   n <- arenaCount (ctxNodeArena ctx)
   mapM (getNodeRect (ctxNodeArena ctx)) [0 .. n - 1]
+
+-- | Every node's rect and each scroll container's content extents.
+nodeLayout :: Context -> IO [(Rect, Maybe (Float, Float))]
+nodeLayout ctx = do
+  let na = ctxNodeArena ctx
+      scrollOf i = getNodeType na i >>= \nt ->
+        if isScrollNode nt
+          then Just <$> ((,) <$> getNodeValue na i <*> getScrollContentW na i)
+          else pure Nothing
+  n <- arenaCount na
+  forM [0 .. n - 1] $ \i -> (,) <$> getNodeRect na i <*> scrollOf i
+
+-- | Run a frame on @ctx@, which reuses what its last solve placed, and on
+-- @fresh@ with its layout cache dropped, so it solves from scratch, and
+-- check the two lay out the same ('nodeLayout'). The result on @ctx@.
+sameAsFreshSolve :: HasCallStack => IORef Int -> Context -> Context -> Input -> NanoUI a -> IO a
+sameAsFreshSolve failed fresh ctx inp ui = do
+  (a, _, _) <- runFrame ctx inp ui
+  writeIORef (ctxLayoutCache fresh) Nothing
+  _ <- runFrame fresh inp ui
+  expected <- nodeLayout fresh
+  withFrozenCallStack (assertEq failed expected) =<< nodeLayout ctx
+  pure a
 
 -- | The value of every button in arena order: which of a group's options,
 -- rows or headers is marked selected, in a view of that group alone.
@@ -102,11 +143,6 @@ wheelIntoView ctx inp ui pick sid margin =
           btn <- pick <$> evalUi ctx hover ui
           if inView (respRect btn) || after <= before then pure (after, btn) else pump
     pump)
-
--- | Hover @p@ for a frame, then turn the wheel by @d@ there, as a pointer
--- that moves before it scrolls does.
-hoverWheel :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
-hoverWheel ctx inp ui p d = warmup ctx inp {inputMousePos = p} ui >> void (runFrame ctx inp {inputMousePos = p, inputScroll = d} ui)
 
 -- | Check that paint wrapped a label's text where the solve placed it: the
 -- frame's text spans other than @others@ are as many lines as the label's

@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | A click belongs to the widget its press went down on. Dragging off a
 -- widget and letting go over a neighbour must fire nothing.
 module Cases.PointerRelease (tests) where

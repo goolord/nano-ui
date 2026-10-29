@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- The deprecated 'runCanvas' is still tested.
 {-# OPTIONS_GHC -Wno-deprecations #-}
 

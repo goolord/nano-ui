@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | 'useReorder': a drag past the threshold moves an item, with a live
 -- preview, over wrapped rows too, and a click moves nothing.
 module Cases.Reorder (tests) where

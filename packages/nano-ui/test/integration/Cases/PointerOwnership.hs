@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | The pointer belongs to whatever is on top. Every kind of overlay is opened
 -- over every kind of pointer-driven widget, the pointer clicks, drags, wheels
 -- and right-clicks on the overlay, and the widget underneath must not notice.

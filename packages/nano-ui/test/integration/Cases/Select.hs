@@ -1,7 +1,7 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Select (tests) where
 
 import Spec
-import Cases.SimExtra
 import Data.Bifunctor (first)
 import Data.Primitive.SmallArray qualified as SA
 import Data.Text qualified as T
@@ -281,7 +281,7 @@ slidersDragApart = do
   _ <- press (At (V2 (tx + tw * 0.25) (ty + th / 2)))
   ((_, v1), (_, v2)) <- moveTo (At (V2 (tx + tw * 0.75) (ty + th / 2)))
   checkEq 20 v1
-  above 50 v2
+  checkLt 50 v2
 
 -- | A slider given a value outside its range shows it clamped, and one given
 -- a NaN bound, equal bounds or a reversed range, which keeps a value inside
@@ -313,7 +313,7 @@ runStaleDragTest widget (dx, dy) ctx failed = do
     Just resp <- fst <$> result
     let V2 x y = centerOf resp
     _ <- press (On resp)
-    above 50 . snd =<< moveTo (At (V2 (x + dx) (y + dy)))
+    checkLt 50 . snd =<< moveTo (At (V2 (x + dx) (y + dy)))
     showing False
     _ <- frame >> release >> press (At (V2 200 150))
     showing True

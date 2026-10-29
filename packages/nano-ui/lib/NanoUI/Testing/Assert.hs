@@ -2,7 +2,9 @@
 --
 -- Assertions count failures in a shared 'IORef' instead of aborting, so one
 -- test reports every broken expectation. Each failure prints the caller's
--- source location and, where there are any, the compared values.
+-- source location and, where there are any, the compared values. 'require'
+-- and 'requireEq' fail at once instead, for a suite whose later checks make
+-- no sense after a miss.
 module NanoUI.Testing.Assert
   ( bump
   , assert
@@ -11,6 +13,8 @@ module NanoUI.Testing.Assert
   , assertLt
   , assertJust
   , assertJustM
+  , require
+  , requireEq
   , withInput
   , run2Frames
   , evalUi
@@ -57,6 +61,17 @@ assertJust r m k = maybe (withFrozenCallStack (failWith r "Nothing")) k m
 -- | 'assertJust' on the result of an action.
 assertJustM :: HasCallStack => IORef Int -> IO (Maybe a) -> (a -> IO ()) -> IO ()
 assertJustM r act k = act >>= \m -> withFrozenCallStack (assertJust r m k)
+
+-- | Fail at once, naming the check and the caller's line, unless the
+-- condition holds.
+require :: HasCallStack => String -> Bool -> IO ()
+require name ok = unless ok (ioError (userError (name <> "\n" <> prettyCallStack callStack)))
+
+-- | Fail at once unless the second value (got) equals the first (wanted),
+-- printing both.
+requireEq :: (HasCallStack, Eq a, Show a) => String -> a -> a -> IO ()
+requireEq name want got =
+  withFrozenCallStack (require (name <> ": wanted " <> show want <> ", got " <> show got) (want == got))
 
 -- | Event-free input for a logical window width and height.
 withInput :: Float -> Float -> Input

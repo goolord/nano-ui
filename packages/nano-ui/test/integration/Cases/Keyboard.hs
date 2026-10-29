@@ -1,10 +1,10 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Keyboard (tests) where
 
 import Spec
-import Cases.SimExtra (above)
 import Data.Hashable (Hashable (..))
 import Data.IntMap.Strict qualified as IM
-import NanoUI.Internal.Context (Context (..), getFocusVisible, intKey)
+import NanoUI.Internal.Context (intKey)
 import NanoUI.Internal.Store (WidgetStore (..))
 import NanoUI.Testing.Sim
 
@@ -27,7 +27,7 @@ runKeyboardDisabledTest _ failed = do
         ((resp, before), _, _) <- runFrame ctx inp widget
         let textOf st = IM.lookup (intKey (respId resp)) (storeText st)
         st <- getStore ctx
-        writeIORef (ctxFocusId ctx) (respId resp)
+        setFocus ctx (respId resp)
         ((afterResp, after), _, _) <- runFrame ctx pressed (disabledWhen True widget)
         assertEq failed before after
         assert failed (not (respChanged afterResp) && not (respClicked afterResp))
@@ -88,7 +88,7 @@ runFocusedControlsTest _ failed = do
   value <- newVar 50
   run (held value (slider' 0 100)) $ do
     (v : rest) <- after [KeyRight, KeyLeft, KeyDown, KeyUp]
-    above 50 v
+    checkLt 50 v
     checkEq [50, 49, 50] rest
   choice <- newVar 0
   run (held choice (radio' ["A", "B", "C"])) (checkEq [1, 2, 1] =<< after [KeyDown, KeyDown, KeyUp])
@@ -106,10 +106,8 @@ runFocusedControlsTest _ failed = do
 -- | Moving focus with Tab shows the focus ring; a pointer press hides it.
 keyboardFocusRing :: Sim Response ()
 keyboardFocusRing = do
-  ctx <- simContext
-  let ring = liftIO (getFocusVisible ctx)
-  check . not =<< ring
+  check . not =<< focusRing
   pressTab 1
-  check =<< ring
+  check =<< focusRing
   _ <- click (At (V2 5 150))
-  check . not =<< ring
+  check . not =<< focusRing

@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.ContextMenu (tests) where
 
 import Spec
@@ -63,7 +64,7 @@ contextMenuScrollPos = do
           wheel (OnWidget sid) (V2 0 1) >> settle >> scrollToTarget (n - 1)
   scrollToTarget 200
   (_, (btn, _)) <- result
-  off <- liftIO (getScrollOffset ctx sid)
+  off <- scrollOffsetOf sid
   checkGt off 0
   let p = centerOf btn
   openOn (At p)
@@ -99,7 +100,7 @@ contextMenuRows = do
         openOn "Target Button"
         _ <- click t
         _ <- frame
-        isJust <$> findSpan "Row Redo"
+        labelShown "Row Redo"
   check =<< stillOpenAfter (Within header)
   check =<< stillOpenAfter (Within paste)
   check =<< stillOpenAfter (At (V2 (rectX redo + 2) ((rectY undo + rectH undo + rectY redo) / 2)))

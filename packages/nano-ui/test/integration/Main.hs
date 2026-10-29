@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Main (main) where
 
 import BackendApi (backendApiCheck)

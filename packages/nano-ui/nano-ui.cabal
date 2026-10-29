@@ -245,6 +245,10 @@ test-suite nano-ui-test
     import:           downstream
     import:           test-rts-options
     type:             exitcode-stdio-1.0
+    -- Every module of this suite starts with {-# OPTIONS_GHC -O0 #-}. At -O1
+    -- the simplifier inlines the library's views into every test view: about
+    -- 280 s to compile at -j1, against 20 s at -O0. (-O0 in ghc-options
+    -- would do the same, but cabal check warns about it.)
     main-is:          Main.hs
     other-modules:
         Cases
@@ -274,7 +278,6 @@ test-suite nano-ui-test
         Cases.NoThunks
         Cases.Scroll
         Cases.Select
-        Cases.SimExtra
         Cases.Tabs
         Cases.TextInput
         Cases.NumericInput

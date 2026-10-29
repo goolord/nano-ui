@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | A solve that puts back what the last one placed lays out as solving
 -- from scratch does.
 module Cases.LayoutReuse (tests) where
@@ -7,21 +8,10 @@ import Data.Bits (shiftR, xor)
 import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Adornment (affix, leading, trailing)
-import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getNodeValue, getScrollContentW, isScrollNode)
 
 tests :: [Spec]
 tests =
   [spec "position-reuse" runPositionReuseTest]
-
--- | Every node's rect and each scroll container's content extents.
-layoutOf :: Context -> IO [(Rect, Maybe (Float, Float))]
-layoutOf ctx = do
-  let na = ctxNodeArena ctx
-      scrollOf i = getNodeType na i >>= \nt ->
-        if isScrollNode nt then Just <$> ((,) <$> getNodeValue na i <*> getScrollContentW na i) else pure Nothing
-  n <- arenaCount na
-  forM [0 .. n - 1] $ \i -> (,) <$> getNodeRect na i <*> scrollOf i
 
 -- | Run each frame on a context that keeps its layout cache and on one that
 -- solves every frame from scratch, and check they lay out the same.
@@ -29,12 +19,7 @@ sameAsFullSolves :: IORef Int -> [(Input, NanoUI ())] -> IO ()
 sameAsFullSolves failed frames = do
   reusing <- newContext
   fresh <- newContext
-  forM_ frames $ \(inp, ui) -> do
-    _ <- runFrame reusing inp ui
-    writeIORef (ctxLayoutCache fresh) Nothing
-    _ <- runFrame fresh inp ui
-    expected <- layoutOf fresh
-    assertEq failed expected =<< layoutOf reusing
+  forM_ frames $ \(inp, ui) -> sameAsFreshSolve failed fresh reusing inp ui
 
 -- | A ticking label beside rows that stay put, a label that gains and loses
 -- a line so everything below it moves, and a window that resizes. Then

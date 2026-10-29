@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.TooltipDelay (tests) where
 
 import Control.Concurrent (threadDelay)

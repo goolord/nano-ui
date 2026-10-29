@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.WidgetIdIndex (tests) where
 
 import Spec

@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | The pane grid: the split tree it reports and adopts, when an
 -- arrangement settles, padding, pane sizes, drag handles and dividers.
 module Cases.PaneGrid (tests) where

@@ -6,6 +6,14 @@
   settles a view, then `click "Save"`, `typeText`, `pressKey`, `chord`,
   `wheel`, `drag` and `expect "text"` drive it frame by frame, aiming at
   visible text, points, rects or widgets.
+  Scripts read the context without leaving the script (`frameDamage`,
+  `wouldRedraw`, `wakeTime`, `scrollOffsetOf`, `focusRing`, `hotId`,
+  `labelShown`, `readV`/`writeV`, `onContext`), and `afterView` runs an
+  action after the view for a frame. `runSimWith` takes another frame
+  runner (a backend's own) and can stop at the first failed check.
+  `NanoUI.Testing.Harness` adds a draw-buffer decoder (`drawnVertices`,
+  `drawTriangles`, `textureVertices`) and `setFocus`;
+  `NanoUI.Testing.Assert` adds the fail-fast `require` and `requireEq`.
 
 - The page behind a view is the window background (`themeWindow`) by
   default. `pageBackground` reads it; `pageColor` sets another page surface,

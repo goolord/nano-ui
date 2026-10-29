@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -O0 #-}
 module Cases.Demo (tests) where
 
 import Spec
@@ -146,12 +147,11 @@ runColorPickerPointerTest _ failed = do
     -- Low value keeps every channel dark; a field still writing R would leave it at 204.
     checkGt 60 . colorR . snd =<< frame
   picker failed True 1200 initial $ \_ -> do
-    ctx <- simContext
     (resp, _) <- result
     _ <- press (On resp)
-    check . (`clipCovers` respRect resp) =<< liftIO (takeDamage ctx)
+    check . (`clipCovers` respRect resp) =<< frameDamage
     _ <- release
-    check . (/= DamageFull) =<< liftIO (takeDamage ctx)
+    check . (/= DamageFull) =<< frameDamage
 
 -- | An arrow on the field changes and commits once, opaque without an alpha bar;
 -- channel fields edit live and numerically; bar keys move handles as drawn (Shift
@@ -169,7 +169,7 @@ runColorPickerKeysTest _ failed = do
     checkEq [False, False] =<< replicateM 2 (respChanged . fst <$> frame)
   picker failed False 420 (colorRGBA 204 102 102 128) $ \v -> do
     pressTab 1 >> void (pressKey KeyRight)
-    checkEq 255 . colorA =<< liftIO (readVarIO v)
+    checkEq 255 . colorA =<< readV v
   picker failed False 460 initial $ \_ -> do
     wid <- respId . fst <$> result
     pressTab 3

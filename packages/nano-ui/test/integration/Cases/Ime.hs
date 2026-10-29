@@ -1,10 +1,10 @@
+{-# OPTIONS_GHC -O0 #-}
 -- | IME composition: shown at the focused field's caret without changing
 -- the value, its keys edit nothing, its commit inserts text, and the frame
 -- reports where the candidate window goes.
 module Cases.Ime (tests) where
 
 import Spec
-import Cases.SimExtra (above)
 import Data.IntMap.Strict qualified as IM
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Text qualified as T
@@ -233,7 +233,7 @@ runImeScrollTest ctx failed = do
     let Rect fx _ fw _ = respRect resp
         caretIn ok = imeArea >>= (`checkJust` \(TextInputArea r cursor _) -> check (ok (rectX r + cursor)))
     store <- liftIO (getStore ctx)
-    above 0 (IM.findWithDefault 0 (slotKey SlotTextInputScroll (intKey (respId resp))) (storeFloat store))
+    checkLt 0 (IM.findWithDefault 0 (slotKey SlotTextInputScroll (intKey (respId resp))) (storeFloat store))
     caretIn (\x -> x >= fx && x <= fx + fw)
     _ <- compose "0123456789" 0
     caretIn (>= fx)
