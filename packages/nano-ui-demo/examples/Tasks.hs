@@ -33,7 +33,6 @@ import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 
 -- ANCHOR: handles
-
 -- | One handle per job. The types fix each job's key and result.
 data App = App
   { appSearch :: !(Task Text [Text])
@@ -43,7 +42,6 @@ data App = App
 
 newApp :: IO App
 newApp = App <$> newTask <*> newTask <*> newStream
-
 -- ANCHOR_END: handles
 
 main :: IO ()
@@ -95,7 +93,6 @@ searchCard app = do
   rowWith (wrap . gap 6 . fillW) $
     forM_ (take 24 hits) $
       \w -> withKey w (label w)
-
 -- ANCHOR_END: search_card
 
 -- | Pretend to be slow. The result is forced only to weak head normal form
@@ -107,7 +104,6 @@ slowSearch q = do
   let
     found = filter (T.isInfixOf (T.toLower q)) wordList
   length found `seq` pure found
-
 -- ANCHOR_END: slow_search
 
 wordList :: [Text]
@@ -141,7 +137,6 @@ flakyCard app = do
     TaskFailed err _ -> rowWith (tight . gap 8 . alignMid) $ do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
-
 -- ANCHOR_END: flaky_card
 
 -- | Waits, then succeeds or throws on a coin flip. An exception thrown by
@@ -178,5 +173,4 @@ progressCard app = do
           then "Done. Untick and tick Run to start over."
           else T.pack (show pct) <> "%"
       )
-
 -- ANCHOR_END: progress_card

@@ -55,7 +55,7 @@ Panel modules take the slice they own. Use this when the application is mostly i
 
 ### Pattern C: application-owned state
 
-`ned` keeps a plain `IORef App`; the toolkit knows nothing about it. The view projects slices and re-reads after anything that may change the model:
+`ned` keeps a plain `IORef App`; nano-ui never sees it. The view projects slices and re-reads after anything that may change the model:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_c}}

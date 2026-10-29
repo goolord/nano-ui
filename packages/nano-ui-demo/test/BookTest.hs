@@ -88,11 +88,14 @@ anchorErrors anchor file
   | not (any (start `T.isInfixOf`) ls) = ["start anchor not found: " <> T.unpack anchor]
   | not (any (end `T.isInfixOf`) ls) = ["end anchor not found: " <> T.unpack anchor]
   | all (T.null . T.strip) region = ["anchor region is empty: " <> T.unpack anchor]
+  | any blank (take 1 region ++ take 1 (reverse region)) =
+      ["anchor region starts or ends with a blank line: " <> T.unpack anchor]
   | otherwise = []
   where
     ls = T.lines file
     start = "ANCHOR: " <> anchor
     end = "ANCHOR_END: " <> anchor
+    blank = T.null . T.strip
     region = takeWhile (not . (end `T.isInfixOf`)) (drop 1 (dropWhile (not . (start `T.isInfixOf`)) ls))
 
 -- | A specimen tag, the attribute naming it, its key in nano-ui-banks.js, and

@@ -509,7 +509,7 @@ Modifiers are `Layout -> Layout` functions. The leftmost wins when two set the s
 
 ### Positioning and pointer behavior
 
-`pinAt` takes a child out of the flow. `pointer` decides whether an overlapping region consumes pointer events (`PointerBlock`) or passes them to what is underneath (`PointerPass`). The pointer examples park the pointer over the overlay.
+`pinAt` takes a child out of the flow. `pointer` sets whether an overlapping region consumes pointer events (`PointerBlock`) or passes them to what is underneath (`PointerPass`). The pointer examples park the pointer over the overlay.
 
 <details class="nano-example">
 <summary><code>pinAt</code>: position absolutely inside the parent</summary>

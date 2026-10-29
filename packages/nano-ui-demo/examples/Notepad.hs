@@ -1,3 +1,6 @@
+{-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE RecordWildCards #-}
+
 -- | A small notepad application built on the SDL3 backend.
 --
 -- It is self-contained: the menu bar is implemented locally on
@@ -47,7 +50,6 @@ main = do
       , sdlAppTheme = Just tomorrowNightMinDarkTheme
       }
     (notepadUi state)
-
 -- ANCHOR_END: main
 
 --------------------------------------------------------------------------------
@@ -55,27 +57,26 @@ main = do
 --------------------------------------------------------------------------------
 
 -- ANCHOR: state
-data NotepadState
-  = NotepadState
-      !(Var TextDocument)
-      !(Var WidgetId)
-      !(Var (Maybe FileDialogId))
-      !(Var (Maybe FileDialogId))
+data NotepadState = NotepadState
+  { doc :: !(Var TextDocument)
+  , editorId :: !(Var WidgetId)
+  , openDlg :: !(Var (Maybe FileDialogId))
+  , saveDlg :: !(Var (Maybe FileDialogId))
+  }
 
 -- | A notepad's private document and dialog state. Allocate one per
 -- instance before starting the SDL session, and draw it with 'notepadUi'.
 newNotepad :: IO NotepadState
-newNotepad =
-  NotepadState
-    <$> newVar emptyDocument
-    <*> newVar (WidgetId 0)
-    <*> newVar Nothing
-    <*> newVar Nothing
-
+newNotepad = do
+  doc <- newVar emptyDocument
+  editorId <- newVar (WidgetId 0)
+  openDlg <- newVar Nothing
+  saveDlg <- newVar Nothing
+  pure NotepadState {..}
 -- ANCHOR_END: state
 
 notepadUi :: NotepadState -> NanoUI ()
-notepadUi (NotepadState doc editorId openDlg saveDlg) = do
+notepadUi NotepadState {..} = do
   ------------------------------------------------------------------ state ---
   docPath <- useVar ("" :: Text)
   docDirty <- useVar False
@@ -296,7 +297,6 @@ notepadUi (NotepadState doc editorId openDlg saveDlg) = do
       flex
       whenM (button "Discard") quitUi
       whenM (button "Cancel") (writeVar confirmExit False)
-
 -- ANCHOR_END: exit_modal
 
 --------------------------------------------------------------------------------
@@ -330,7 +330,6 @@ menuBar openMenu entries = do
       -- gets a constant and closing it is written here.
       (popupResp, _) <- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
-
 -- ANCHOR_END: menu_bar
 
 --------------------------------------------------------------------------------
@@ -348,7 +347,6 @@ writeDocument filePath doc = do
           IO (Either SomeException ())
       )
   pure (isRight result)
-
 -- ANCHOR_END: write_document
 
 -- | The status bar. It shows the line count, which the document keeps; the
@@ -369,7 +367,6 @@ statusBar docName docVar statusMsg zoomVal = do
     labelWith
       (tight . fontMuted)
       ("Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%")
-
 -- ANCHOR_END: status_bar
 
 documentStats :: Text -> Text

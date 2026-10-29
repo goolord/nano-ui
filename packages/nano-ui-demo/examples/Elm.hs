@@ -39,7 +39,6 @@ update (SetName n) m = m {name = n}
 
 main :: IO ()
 main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
-
 -- ANCHOR_END: full_app
 
 -- ANCHOR: components
@@ -57,5 +56,4 @@ parentView :: Int -> NanoUIE ParentMsg ()
 parentView n = column $ do
   mapMessages Child (childView n)
   emitWhen (button "Save All") SaveAll
-
 -- ANCHOR_END: components

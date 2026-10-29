@@ -55,7 +55,6 @@ data Todos = Todos
   deriving (Eq, Generic)
 
 newtype App = App {appTodos :: Var Todos}
-
 -- ANCHOR_END: model
 
 -- ANCHOR: new_app
@@ -70,7 +69,6 @@ newApp =
           ]
           3
       )
-
 -- ANCHOR_END: new_app
 
 -- ANCHOR: main
@@ -84,7 +82,6 @@ main = do
           defaultWindowSettings {wsTitle = "Todo list", wsSize = Size 720 560}
       }
     (todoApp app)
-
 -- ANCHOR_END: main
 
 -- ANCHOR: todo_app
@@ -99,7 +96,6 @@ todoApp app = do
     newItemRow app.appTodos draft
     filterRow items filt
     todoList items filt
-
 -- ANCHOR_END: todo_app
 
 -- ANCHOR: new_item_row
@@ -115,7 +111,6 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
     modifyVar todosVar (\(Todos xs n) -> Todos (xs <> [Todo n text False]) (n + 1))
     writeVar draft ""
     requestFocus (respId inputR)
-
 -- ANCHOR_END: new_item_row
 
 -- ANCHOR: filter_and_count
@@ -143,7 +138,6 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
     (T.pack (show left) <> if left == 1 then " item left" else " items left")
   disabledWhen (left == length todos) $
     whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
-
 -- ANCHOR_END: filter_and_count
 
 -- ANCHOR: todo_list
@@ -160,7 +154,6 @@ todoList items filt = do
         forM_
           (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) <> [Nothing])) $ \(todo, above, below) ->
           withKey (todoId todo) (todoRow items (at todo) above below)
-
 -- ANCHOR_END: todo_list
 
 -- ANCHOR: todo_row
@@ -212,11 +205,9 @@ todoRow items todo above below = do
     whenM
       (styled destructive (button "Delete"))
       (modifyVar items (filter ((/= tid) . todoId)))
-
 -- ANCHOR_END: todo_row
 
 -- ANCHOR: swap_ids
-
 -- | Swap the places of two items, by id.
 swapIds :: Int -> Int -> [Todo] -> [Todo]
 swapIds a b xs = map pick xs
@@ -226,5 +217,4 @@ swapIds a b xs = map pick xs
     | todoId t == a = byId b t
     | todoId t == b = byId a t
     | otherwise = t
-
 -- ANCHOR_END: swap_ids

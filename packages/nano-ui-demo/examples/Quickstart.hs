@@ -33,5 +33,4 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
     whenM (button "+") (modifyVar n (+ 1))
 
   whenM (button "Reset") (writeVar n 0)
-
 -- ANCHOR_END: quickstart

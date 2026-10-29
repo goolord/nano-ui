@@ -75,7 +75,7 @@ The default delay is half a second; `TooltipConfig` sets the delay and placement
 ## Rules
 
 - Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.
-- Keep the open flag at the level that owns the decision, not in a child that may not be drawn.
+- Keep the open flag in the view that opens and closes the overlay, not in a child that may not be drawn.
 - Read focus after the overlay call.
 - A `scrollArea`, `panel`, or `card` inside a dialog body draws a box in a box; strip its chrome (see [Double borders](../troubleshooting/recurring-bugs.md#2-double-borders--box-in-a-box)).
 

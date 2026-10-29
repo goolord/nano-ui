@@ -92,7 +92,6 @@ data App = App
 
 newApp :: IO App
 newApp = App <$> newStream <*> newVar emptyFeed <*> newPlotCache
-
 -- ANCHOR_END: chart_handles
 
 main :: IO ()
@@ -158,7 +157,6 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
             <> " = "
             <> fmt (hoverDataY hover)
         )
-
 -- ANCHOR_END: chart_card
 
 -- ANCHOR: walk_chart
@@ -169,7 +167,6 @@ walkChart points =
     . withXAxis "sample"
     . withYAxis "value" $
     chart [line "walk" points]
-
 -- ANCHOR_END: walk_chart
 
 fmt :: Double -> Text

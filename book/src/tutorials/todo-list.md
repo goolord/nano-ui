@@ -40,7 +40,7 @@ The draft text and the filter are view-local, allocated with `useVar` and `useEn
 
 ## 3. Adding an item
 
-The input row draws the field and the button, and decides whether this frame adds an item.
+The input row draws the field and the button, and adds an item on Enter or a click.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:new_item_row}}
