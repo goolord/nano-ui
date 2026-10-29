@@ -275,6 +275,7 @@ test-suite nano-ui-test
         Cases.NoThunks
         Cases.Scroll
         Cases.Select
+        Cases.SimExtra
         Cases.Tabs
         Cases.TextInput
         Cases.NumericInput

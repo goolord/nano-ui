@@ -1,332 +1,155 @@
 module Cases.Combo (tests) where
 
 import Spec
-import NanoUI.Shortcut
-import NanoUI.Internal.Input (onMac)
-import NanoUI.Widgets.Combo (ComboInput (..), ComboState (..), ComboStep (..), comboStep)
+import Cases.SimExtra
 import Data.Text qualified as T
+import NanoUI.Internal.Input (onMac)
+import NanoUI.Shortcut
+import NanoUI.Testing.Sim
+import NanoUI.Widgets.Combo (ComboInput (..), ComboState (..), ComboStep (..), comboStep)
 
 tests :: [Spec]
 tests =
-  [ spec "combo-filter" runComboFilterTest
-  , spec "combo-filter-case-fold" runComboFilterCaseFoldTest
-  , spec "combo-keyboard-pick" runComboKeyboardPickTest
-  , spec "combo-mouse-pick" runComboMousePickTest
-  , spec "combo-dropdown-flips" runComboDropdownFlipsTest
-  , spec "combo-dropdown-off-field" runComboDropdownOffFieldTest
+  [ spec "combo-pick-and-commit" runComboPickTest
+  , spec "combo-dropdown-placement" runComboDropdownPlacementTest
   , spec "combo-dropdown-scrolled-away" runComboDropdownScrolledAwayTest
-  , spec "combo-blur-commit" runComboBlurCommitTest
-  , spec "combo-app-write-no-commit" runComboAppWriteNoCommitTest
-  , spec "combo-escape-revert" runComboEscapeRevertTest
   , spec "combo-escape-owned" runComboEscapeOwnedTest
-  , spec "combo-hover-highlight" runComboHoverHighlightTest
-  , spec "combo-keys-over-still-pointer" runComboKeysOverStillPointerTest
-  , spec "combo-scrollbar-drag" runComboScrollbarDragTest
+  , simSpec "combo-scrollbar-drag" 320 300 (withValue "" (comboBox' "Fonts" (famOpts 12))) comboScrollbarDrag
   , spec "combo-track-press-holds" runComboTrackPressHoldsTest
-  , spec "combo-wheel-scroll" runComboWheelScrollTest
-  , spec "combo-slow-wheel-scroll" runComboSlowWheelScrollTest
-  , spec "combo-wheel-at-end-idle" runComboWheelAtEndIdleTest
+  , simSpec "combo-wheel" 200 360 (withValue "" (comboBox' "Fonts" (famOpts 20 ++ [longOpt]))) comboWheel
   ]
 
 comboOpts :: [T.Text]
-comboOpts = ["Alpha Sans", "Beta Serif", "Gamma Mono", "Delta Round"]
+comboOpts = ["Alpha Sans", "Beta Serif", "Gamma Mono", "Delta Round", "Straße Sans"]
 
--- Enough options to overflow the dropdown's visible window (8 rows). Names
--- are zero-padded so no name is a substring of another.
-comboLongOpts :: [T.Text]
-comboLongOpts =
-  [ "Fam " <> (if i < 10 then "0" else "") <> T.pack (show i)
-  | i <- [1 .. 12 :: Int]
+-- | Options numbered with zero padding, so no name is a substring of another.
+famOpts :: Int -> [T.Text]
+famOpts n = ["Fam " <> (if i < 10 then "0" else "") <> T.pack (show i) | i <- [1 .. n]]
+
+longOpt :: T.Text
+longOpt = "A Very Long Font Family Name That Overflows"
+
+type Combo = (Response, T.Text)
+
+-- | Whether the frame committed, and the text.
+commitOf :: Combo -> (Bool, T.Text)
+commitOf (r, t) = (respChanged r, t)
+
+-- | Each script drives a fresh combo over 'comboOpts' holding its text.
+pickCases :: [(T.Text, Sim Combo ())]
+pickCases =
+  [ -- Typing filters the list, folding case so "STRASSE" finds "Straße",
+    -- and never picks anything on its own: Enter with no highlight leaves
+    -- the typed text alone.
+    ("", focused >> typeText "ga" >> expect "Gamma Mono" >> expectNot "Alpha Sans" >> enterLeaves "ga")
+  , ("", focused >> typeText "STRASSE" >> expect "Straße Sans" >> expectNot "Beta Serif")
+  , -- Down from nothing highlights the first row and Enter commits the
+    -- highlight.
+    ( ""
+    , do
+        _ <- focused >> pressKey KeyDown >> pressKey KeyDown
+        enterCommits (True, "Beta Serif")
+        expect "Beta Serif"
+    )
+  , -- A click on a row commits it and blurs the field, which closes the list.
+    ( ""
+    , do
+        checkEq (True, "Beta Serif") . commitOf =<< (focused >> click "Beta Serif")
+        checkEq (WidgetId 0) =<< (simContext >>= liftIO . getFocusId)
+        expectNot "Alpha Sans"
+    )
+  , -- Hovering a row highlights it, with the pointer cursor and the hover
+    -- background, but commits nothing. The arrows then move the highlight
+    -- from it, a pointer that has not moved does not pull it back, and Enter
+    -- commits the row the keys reached.
+    ( ""
+    , do
+        _ <- focused >> moveTo "Beta Serif"
+        checkEq (False, "") . commitOf =<< frame
+        checkEq UiCursorPointer =<< pointerCursor
+        ss <- spans
+        let bgFor needle = [bg | (_, txt, _, bg, _) <- ss, needle `T.isInfixOf` txt]
+        check (length (bgFor "Beta Serif") == 1 && bgFor "Beta Serif" /= bgFor "Alpha Sans")
+        _ <- pressKey KeyDown >> frame
+        enterCommits (True, "Gamma Mono")
+    )
+  , -- Unfocused, the combo is a search field showing its value, with no
+    -- list. Escape cancels an edit: the text reverts to the last commit with
+    -- no commit pulse, and the field blurs, closing the list.
+    ( "Inter"
+    , do
+        expect "Inter" >> expectNot "Alpha Sans"
+        _ <- focused >> typeText "No"
+        checkEq (False, "Inter") . commitOf =<< pressKey KeyEscape
+        checkEq (WidgetId 0) =<< (simContext >>= liftIO . getFocusId)
+        expectNot "Alpha Sans"
+    )
+  , -- Typing edits the text without committing, word-wise keys
+    -- (Ctrl+Backspace, Option+Backspace on macOS) work as in a text input,
+    -- and the frame after a blur commits the text.
+    ( ""
+    , do
+        checkEq [(False, "N"), (False, "No")] . map commitOf =<< (focused >> mapM typeText ["N", "o"])
+        _ <- typeText " bar" >> chord ((if onMac then alt else ctrl) <> key KeyBackspace)
+        checkEq (False, "No ") . commitOf =<< frame
+        _ <- pressKey KeyBackspace >> press (At (V2 310 5))
+        checkEq [(True, "No"), (False, "No")] . map commitOf =<< sequence [release, frame]
+    )
   ]
+  where
+    focused = pressKey KeyTab >> settle
+    enterCommits want = checkEq want . commitOf =<< pressKey KeyEnter
+    enterLeaves txt = checkEq txt . snd =<< pressKey KeyEnter
 
--- | Focus the combo in @ui@, which opens its list, and run @k@ with the
--- input that rests the pointer on the row showing @name@.
-onComboRow :: Context -> IORef Int -> Input -> NanoUI a -> T.Text -> (Input -> IO ()) -> IO ()
-onComboRow ctx failed inp0 ui name k = do
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect name overlays) $ \rowRect -> k inp0 {inputMousePos = spanCenter rowRect}
+runComboPickTest :: Context -> IORef Int -> IO ()
+runComboPickTest _ failed = do
+  forM_ pickCases $ \(initial, script) -> do
+    ctx <- newContext
+    ref <- newVar initial
+    runSim ctx failed (withInput 320 200) (column (held ref (comboBox' "Font" comboOpts))) script
+  -- A value the application writes after a commit shows, but is no commit.
+  ctx <- newContext
+  ref <- newVar ""
+  runSim ctx failed (withInput 320 200) (column (held ref (comboBox' "Font" comboOpts))) $ do
+    check . respChanged . fst =<< (pressKey KeyTab >> pressKey KeyDown >> pressKey KeyEnter)
+    liftIO (writeVarIO ref "Reset")
+    checkEq (False, "Reset") . commitOf =<< frame
 
--- Typing filters the suggestion list case-insensitively and never selects
--- anything on its own: Enter with no highlight leaves the typed text alone.
-runComboFilterTest :: Context -> IORef Int -> IO ()
-runComboFilterTest ctx failed = do
-  textRef <- newVar ""
-  let inp0 = withInput 320 100
-      ui = held textRef (comboBox' "Font" comboOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputChars = "ga"}) ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assert failed (hasText "Gamma Mono" overlays)
-  assert failed (not (hasText "Alpha Sans" overlays))
-  assertEq failed "ga" . snd =<< evalUi ctx (keyInp KeyEnter inp0) ui
-
--- | The filter folds case rather than lowercasing, so "STRASSE" finds
--- "Straße".
-runComboFilterCaseFoldTest :: Context -> IORef Int -> IO ()
-runComboFilterCaseFoldTest ctx failed = do
-  let inp0 = withInput 320 100
-      ui = withValue "" (comboBox' "Font" ["Straße Sans", "Beta Serif"])
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputChars = "STRASSE"}) ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assert failed (hasText "Straße Sans" overlays)
-  assert failed (not (hasText "Beta Serif" overlays))
-
--- Up/Down move the keyboard highlight (Down from nothing selects the first
--- row), and Enter commits it.
-runComboKeyboardPickTest :: Context -> IORef Int -> IO ()
-runComboKeyboardPickTest ctx failed = do
-  let inp0 = withInput 320 100
-      ui = withValue "" (comboBox' "Font" comboOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx (keyInp KeyDown inp0) ui
-  _ <- runFrame ctx (keyInp KeyDown inp0) ui
-  ((r, t), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
-  assert failed (respChanged r)
-  assertEq failed t "Beta Serif"
-  spans <- collectTextSpans ctx
-  assert failed (hasText "Beta Serif" spans)
-
--- Clicking a suggestion row commits its option text.
-runComboMousePickTest :: Context -> IORef Int -> IO ()
-runComboMousePickTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = withValue "" (comboBox' "Font" comboOpts)
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
-    let release = snd (clickPair inp0 (spanCenter rowRect))
-    (r, t) <- runClick ctx inp0 ui (spanCenter rowRect)
-    assert failed (respChanged r)
-    assertEq failed t "Beta Serif"
-    -- Picking defocuses the field: the dropdown is visible exactly while
-    -- focused, so the menu disappears with the pick.
-    assertEq failed (WidgetId 0) =<< getFocusId ctx
-    overlaysClosed <- collectOverlayTextSpans ctx release
-    assert failed (not (hasText "Alpha Sans" overlaysClosed))
-
--- | A combo near the window's bottom edge lists its options above itself,
--- where they fit, and a click there picks the row under it.
-runComboDropdownFlipsTest :: Context -> IORef Int -> IO ()
-runComboDropdownFlipsTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = column (replicateM_ 6 (label "line") >> withValue "" (comboBox' "Font" comboOpts))
-  warmupFocused ctx inp0 ui
-  (resp, _) <- evalUi ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Beta Serif" overlays) $ \rowRect -> do
-    assert failed (rectY rowRect + rectH rowRect <= rectY (respRect resp))
-    assertEq failed "Beta Serif" . snd =<< runClick ctx inp0 ui (spanCenter rowRect)
-
--- | A list that fits on neither side of its combo is not slid back over the
--- field, so the click that focuses the combo commits no suggestion.
-runComboDropdownOffFieldTest :: Context -> IORef Int -> IO ()
-runComboDropdownOffFieldTest ctx failed = do
-  let inp0 = withInput 320 300
-      ui = column (replicateM_ 4 (label "line") >> withValue "" (comboBox' "Font" comboLongOpts))
-  (resp, _) <- warmup2 ctx inp0 ui
-  assertEq failed "" . snd =<< runClick ctx inp0 ui (centerOf resp)
-  assertEq failed (respId resp) =<< getFocusId ctx
+-- | A combo near the window's bottom lists its options above itself, where
+-- they fit, and a click there picks the row under it. A list that fits on
+-- neither side is not slid back over the field, so the click that focuses
+-- the combo commits nothing.
+runComboDropdownPlacementTest :: Context -> IORef Int -> IO ()
+runComboDropdownPlacementTest _ failed = do
+  let below n opts = column (replicateM_ n (label "line") >> withValue "" (comboBox' "Font" opts))
+  flips <- newContext
+  runSim flips failed (withInput 320 200) (below 6 comboOpts) $ do
+    (resp, _) <- pressKey KeyTab >> settle
+    beta <- rectOf "Beta Serif"
+    check (rectY beta + rectH beta <= rectY (respRect resp))
+    checkEq "Beta Serif" . snd =<< click (Within beta)
+  tall <- newContext
+  runSim tall failed (withInput 320 300) (below 4 (famOpts 12)) $ do
+    (resp, _) <- result
+    checkEq "" . snd =<< click (On resp)
+    checkEq (respId resp) =<< liftIO (getFocusId tall)
 
 -- | A focused combo whose field scrolls out of view shows no list, and the
 -- pointer where the list would be highlights no row for Enter to commit.
 runComboDropdownScrolledAwayTest :: Context -> IORef Int -> IO ()
 runComboDropdownScrolledAwayTest ctx failed = do
-  let inp0 = withInput 320 300
-      ui = column $ do
-        label "toolbar"
-        scrollArea (fixedWH 300 120) (withValue "" (comboBox' "Font" comboOpts) <* replicateM_ 30 (label "line"))
-  (sid, (resp, _)) <- warmup2 ctx inp0 ui
-  _ <- runClick ctx inp0 ui (centerOf resp)
-  shown <- collectOverlayTextSpans ctx inp0
-  -- Scrolled just past its field, the list would lie in the window.
-  let past = rectH (respRect resp) + 20
-  setScrollOffset ctx sid past
-  replicateM_ 2 (runFrame ctx inp0 ui)
-  assert failed . not . hasText "Beta Serif" =<< collectOverlayTextSpans ctx inp0
-  assertJust failed (spanRect "Beta Serif" shown) $ \item -> do
-    let V2 cx cy = spanCenter item
-        hover = inp0 {inputMousePos = V2 cx (cy - past)}
-    _ <- runFrame ctx hover ui
-    assertEq failed "" . snd . snd =<< evalUi ctx (keyInp KeyEnter hover) ui
-
--- Hovering a suggestion row highlights it (hover paint, becomes the Enter
--- target) but never commits by itself; Enter then commits the hovered row.
-runComboHoverHighlightTest :: Context -> IORef Int -> IO ()
-runComboHoverHighlightTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = withValue "" (comboBox' "Font" comboOpts)
-  onComboRow ctx failed inp0 ui "Delta Round" $ \hover -> do
-    _ <- runFrame ctx hover ui
-    -- Hover alone must not commit anything.
-    ((r0, t0), _, _) <- runFrame ctx hover ui
-    assert failed (not (respChanged r0) && T.null t0)
-    -- Menu rows show the pointer cursor while hovered.
-    assert failed =<< cursorKindIs ctx hover UiCursorPointer
-    -- The hovered row carries the hover background, the others do not.
-    overlaysHover <- collectOverlayTextSpans ctx hover
-    let bgFor needle = [bg | (_, txt, _, bg, _) <- overlaysHover, needle `T.isInfixOf` txt]
-    case (bgFor "Delta Round", bgFor "Alpha Sans") of
-      ([dBg], [aBg]) -> assert failed (dBg /= aBg)
-      _ -> assert failed False
-    -- Enter commits the hovered row.
-    ((r1, t1), _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
-    assert failed (respChanged r1)
-    assertEq failed t1 "Delta Round"
-
--- Up/Down move the highlight while the pointer rests on a row: a pointer
--- that has not moved does not pull the highlight back to its row, and Enter
--- commits the row the keys reached.
-runComboKeysOverStillPointerTest :: Context -> IORef Int -> IO ()
-runComboKeysOverStillPointerTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = withValue "" (comboBox' "Font" comboOpts)
-  onComboRow ctx failed inp0 ui "Beta Serif" $ \hover -> do
-    _ <- runFrame ctx hover ui
-    _ <- runFrame ctx hover ui
-    _ <- runFrame ctx (keyInp KeyDown hover) ui
-    _ <- runFrame ctx hover ui
-    ((r, t), _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
-    assert failed (respChanged r)
-    assertEq failed t "Gamma Mono"
-
--- Dragging the vertical scrollbar thumb scrolls the list, and releasing the
--- drag over a row must not commit it.
-runComboScrollbarDragTest :: Context -> IORef Int -> IO ()
-runComboScrollbarDragTest ctx failed = do
-  let inp0 = withInput 320 300
-      ui = withValue "" (comboBox' "Fonts" comboLongOpts)
-  (resp, _) <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
-  _ <- runFrame ctx inp0 ui
-  overlays0 <- collectOverlayTextSpans ctx inp0
-  assert failed (hasText "Fam 01" overlays0)
-  let Rect rx ry rw rh = respRect resp
-      -- Mirrors the overlay geometry: gap 4, item 28, lane 10 wide, rows
-      -- flush at the drop rect's top (no outer margin).
-      dropY = ry + rh + 4
-      trackX = rx + rw - 5
-      -- From the thumb at the lane's top down to the list's bottom.
-      dest = V2 trackX (dropY + 200)
-  runDragFrom ctx inp0 ui (V2 trackX (dropY + 10)) dest
-  -- Release over a row position (bottom of the list): must not pick.
-  ((r, t), _, _) <- runFrame ctx (releaseAt (holdAt inp0 dest)) ui
-  assert failed (T.null t && not (respChanged r))
-  overlays1 <- collectOverlayTextSpans ctx inp0
-  assert failed (not (hasText "Fam 01" overlays1))
-  assert failed (hasText "Fam 12" overlays1)
-
--- | A press on the scrollbar track below the thumb jumps the list there, and
--- holding the button still keeps the list where the jump put it.
-runComboTrackPressHoldsTest :: Context -> IORef Int -> IO ()
-runComboTrackPressHoldsTest _ failed = do
-  let fresh =
-        ComboState
-          { csHighlight = -1
-          , csWindow = 0
-          , csScrollX = 0
-          , csContentW = 50
-          , csDrag = 0
-          , csDragOff = 0
-          , csWheelRem = 0
-          , csCommitted = ""
-          , csLive = ""
-          , csFocused = True
-          , csNavPointer = Nothing
-          }
-      step inp =
-        stepState
-          . comboStep
-            ComboInput
-              { ciFocused = True
-              , ciEdited = False
-              , ciText = ""
-              , ciRows = [T.pack (show i) | i <- [1 .. 100 :: Int]]
-              , ciContentW = 50
-              , ciField = Rect 0 0 200 30
-              , ciInput = inp
-              }
-      -- The dropdown opens 4 px below the field; its scrollbar lane is its
-      -- right-most 10 px, and the thumb starts at the lane's top.
-      onTrack = V2 195 (34 + 100)
-      pressed = step (pressAt (withInput 400 400) onTrack) fresh
-      stillHeld = step (holdAt (withInput 400 400) onTrack) pressed
-  assertGt failed (csWindow pressed) 0
-  assertEq failed (csWindow pressed) (csWindow stillHeld)
-
--- Typing edits the live text without committing, word-wise editing keys
--- (Ctrl+Backspace, Option+Backspace on macOS) work like in the plain text
--- input, and losing focus commits the text.
-runComboBlurCommitTest :: Context -> IORef Int -> IO ()
-runComboBlurCommitTest ctx failed = do
-  textRef <- newVar ""
-  let inp0 = withInput 320 200
-      ui = column (held textRef (comboBox' "Font" comboOpts))
-  warmupFocused ctx inp0 ui
-  ((rA, tA), _, _) <- runFrame ctx (inp0 {inputChars = "N"}) ui
-  assertEq failed tA "N"
-  assert failed (not (respChanged rA))
-  ((rB, tB), _, _) <- runFrame ctx (inp0 {inputChars = "o"}) ui
-  assertEq failed tB "No"
-  assert failed (not (respChanged rB))
-  _ <- runFrame ctx (inp0 {inputChars = " bar"}) ui
-  _ <- runFrame ctx (chordInp ((if onMac then alt else ctrl) <> key KeyBackspace) inp0) ui
-  ((rW, tW), _, _) <- runFrame ctx inp0 ui
-  assertEq failed tW "No "
-  assert failed (not (respChanged rW))
-  _ <- runFrame ctx (keyInp KeyBackspace inp0) ui
-  -- Click far away: focus clears after the UI pass, and the frame after the
-  -- blur commits the typed text.
-  let away = pressAt inp0 (V2 310 5)
-  _ <- runFrame ctx away ui
-  ((rC, tC), _, _) <- runFrame ctx (applyMouseButton MouseLeft False inp0) ui
-  assertEq failed tC "No"
-  assert failed (respChanged rC)
-  ((rD, _), _, _) <- runFrame ctx inp0 ui
-  assert failed (not (respChanged rD))
-
--- | A value the application writes shows in the field, but it is not the
--- user's commit: respChanged stays off.
-runComboAppWriteNoCommitTest :: Context -> IORef Int -> IO ()
-runComboAppWriteNoCommitTest ctx failed = do
-  textRef <- newVar ""
-  let inp0 = withInput 320 200
-      ui = column (held textRef (comboBox' "Font" comboOpts))
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx (keyInp KeyDown inp0) ui
-  ((picked, _), _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
-  assert failed (respChanged picked)
-  writeVarIO textRef "Reset"
-  ((r, t), _, _) <- runFrame ctx inp0 ui
-  assertEq failed "Reset" t
-  assert failed (not (respChanged r))
-
--- Unfocused, the combo is just a search field: the value is visible and no
--- dropdown overlay exists. Escape cancels an edit: the live text reverts to
--- the last committed value without a commit pulse, and the dropdown closes.
-runComboEscapeRevertTest :: Context -> IORef Int -> IO ()
-runComboEscapeRevertTest ctx failed = do
-  textRef <- newVar "Inter"
-  let inp0 = withInput 320 200
-      ui = held textRef (comboBox' "Font" comboOpts)
-  (r0, t0) <- warmup2 ctx inp0 ui
-  assertEq failed t0 "Inter"
-  assert failed (not (respChanged r0))
-  overlays0 <- collectOverlayTextSpans ctx inp0
-  assert failed (not (hasText "Alpha Sans" overlays0))
-  spans0 <- collectTextSpans ctx
-  assert failed (hasText "Inter" spans0)
-  _ <- runFrame ctx (tabInp inp0) ui
-  _ <- runFrame ctx (inp0 {inputChars = "No"}) ui
-  ((r, t), _, _) <- runFrame ctx (keyInp KeyEscape inp0) ui
-  assert failed (not (respChanged r))
-  assertEq failed t "Inter"
-  assertEq failed (WidgetId 0) =<< getFocusId ctx
-  overlays <- collectOverlayTextSpans ctx inp0
-  assert failed (not (hasText "Alpha Sans" overlays))
+  let field = withValue "" (comboBox' "Font" comboOpts) <* replicateM_ 30 (label "line")
+  runSim ctx failed (withInput 320 300) (column (label "toolbar" >> scrollArea (fixedWH 300 120) field)) $ do
+    (sid, (resp, _)) <- result
+    _ <- click (On resp)
+    V2 cx cy <- spanCenter <$> rectOf "Beta Serif"
+    -- Scrolled just past its field, the list would lie in the window.
+    let past = rectH (respRect resp) + 20
+    liftIO (setScrollOffset ctx sid past)
+    _ <- frame >> frame
+    expectNot "Beta Serif"
+    _ <- moveTo (At (V2 cx (cy - past)))
+    checkEq "" . snd . snd =<< pressKey KeyEnter
 
 -- | Escape on a focused combo showing its list cancels the combo and nothing
 -- else, wherever another Escape consumer is declared: a popup's dismiss, a
@@ -334,86 +157,75 @@ runComboEscapeRevertTest ctx failed = do
 -- the listeners while the Escape is held, repeating, and on its release.
 runComboEscapeOwnedTest :: Context -> IORef Int -> IO ()
 runComboEscapeOwnedTest _ failed =
-  forM_ [(which, before) | which <- ["popup", "shortcut", "keyPressed", "keyReleased", "keyHeld"], before <- [True, False]] $ \(which, before) -> do
-    ctx <- newContext
-    fired <- newIORef False
-    popupOpen <- newVar True
-    let inp0 = withInput 320 200
-        listen k = whenM (k KeyEscape) (liftIO (writeIORef fired True))
-        other :: NanoUI ()
-        other = case which of
-          "popup" -> popup popupOpen (defaultPopupConfig (AnchorPoint (V2 300 180))) (label "Panel")
-          "shortcut" -> whenM (shortcut (key KeyEscape)) (liftIO (writeIORef fired True))
-          "keyPressed" -> listen keyPressed
-          "keyReleased" -> listen keyReleased
-          _ -> listen keyHeld
-        ui = column $ do
-          when before other
-          r <- withValue "" (comboBox' "Font" comboOpts)
-          unless before other
-          pure r
-        down = chordInp (key KeyEscape) inp0
-    warmupFocused ctx inp0 ui
-    _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
-    _ <- runFrame ctx down ui
-    _ <- runFrame ctx (keyRepeatInp KeyEscape down) ui
-    _ <- runFrame ctx (keyUpInp KeyEscape down) ui
-    open <- readVarIO popupOpen
-    acted <- readIORef fired
-    assertEq failed (which :: T.Text, before, False) (which, before, acted || not open)
-    assertEq failed (WidgetId 0) =<< getFocusId ctx
+  forM_ [(w, b) | w <- ["popup", "shortcut", "keyPressed", "keyReleased", "keyHeld"], b <- [True, False]] $
+    \(which, before) -> do
+      ctx <- newContext
+      fired <- newIORef False
+      popupOpen <- newVar True
+      let listen k = whenM (k KeyEscape) (liftIO (writeIORef fired True))
+          other :: NanoUI ()
+          other = case which of
+            "popup" -> popup popupOpen (defaultPopupConfig (AnchorPoint (V2 300 180))) (label "Panel")
+            "shortcut" -> whenM (shortcut (key KeyEscape)) (liftIO (writeIORef fired True))
+            "keyPressed" -> listen keyPressed
+            "keyReleased" -> listen keyReleased
+            _ -> listen keyHeld
+          ui = column (when before other >> withValue "" (comboBox' "Font" comboOpts) <* unless before other)
+      runSim ctx failed (withInput 320 200) ui $ do
+        _ <- pressKey KeyTab >> typeText "a" >> chord (key KeyEscape)
+        _ <- frameWith (keyRepeatInp KeyEscape) >> frameWith (keyUpInp KeyEscape)
+        acted <- liftIO ((||) <$> readIORef fired <*> (not <$> readVarIO popupOpen))
+        checkEq (which :: T.Text, before, False) (which, before, acted)
+        checkEq (WidgetId 0) =<< liftIO (getFocusId ctx)
 
--- The wheel scrolls the suggestion list while the pointer is over the open
--- dropdown: a horizontal wheel shifts rows that overflow the dropdown width
--- (clamped), and a vertical notch slides the window past the first rows.
-runComboWheelScrollTest :: Context -> IORef Int -> IO ()
-runComboWheelScrollTest ctx failed = do
-  let inp0 = withInput 200 260
-      long = "A Very Long Font Family Name That Overflows"
-      ui = withValue "" (comboBox' "Fonts" (comboLongOpts ++ [long]))
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  overlays0 <- collectOverlayTextSpans ctx inp0
-  assert failed (hasText "Fam 01" overlays0)
-  assert failed (not (hasText "Fam 09" overlays0))
-  assertJust failed (spanRect "Fam 01" overlays0) $ \rowRect -> do
-    let overList = inp0 {inputMousePos = V2 (rectX rowRect + 4) (rectY rowRect + rectH rowRect / 2)}
-    _ <- runFrame ctx overList ui
-    _ <- runFrame ctx overList {inputScroll = V2 5 0} ui
-    overlaysX <- collectOverlayTextSpans ctx overList
-    assertJust failed (spanRect "Fam 01" overlaysX) $ \after -> assert failed (rectX after < rectX rowRect - 50)
-    -- The x-shift is clamped: a huge wheel does not push rows out of reach.
-    _ <- runFrame ctx overList {inputScroll = V2 1000 0} ui
-    overlaysClamped <- collectOverlayTextSpans ctx overList
-    assert failed (hasText "Fam 01" overlaysClamped)
-    _ <- runFrame ctx overList {inputScroll = V2 0 1} ui
-    overlays1 <- collectOverlayTextSpans ctx overList
-    -- One wheel notch scrolls three rows past "Fam 01".
-    assert failed (not (hasText "Fam 01" overlays1))
-    assert failed (hasText "Fam 04" overlays1)
-    assert failed (hasText "Fam 11" overlays1)
+-- | Dragging the list's scrollbar thumb scrolls it, and releasing the drag
+-- over a row commits nothing.
+comboScrollbarDrag :: Sim Combo ()
+comboScrollbarDrag = do
+  (resp, _) <- pressKey KeyTab >> settle
+  expect "Fam 01"
+  -- The list opens 4 px below the field, its 10 px scrollbar lane at its
+  -- right, the thumb at the lane's top.
+  let Rect rx ry rw rh = respRect resp
+      trackX = rx + rw - 5
+      dropY = ry + rh + 4
+  checkEq (False, "") . commitOf =<< drag (At (V2 trackX (dropY + 10))) (At (V2 trackX (dropY + 200))) 1
+  expectNot "Fam 01" >> expect "Fam 12"
 
--- | A trackpad's small wheel steps add up: eight eighths of a notch, each
--- under half a row, scroll the list as far as one notch does.
-runComboSlowWheelScrollTest :: Context -> IORef Int -> IO ()
-runComboSlowWheelScrollTest ctx failed = do
-  let inp0 = withInput 200 360
-      ui = withValue "" (comboBox' "Fonts" comboLongOpts)
-  onComboRow ctx failed inp0 ui "Fam 01" $ \overList -> do
-    replicateM_ 8 (runFrame ctx overList {inputScroll = V2 0 0.125} ui)
-    overlays1 <- collectOverlayTextSpans ctx overList
-    assert failed (not (hasText "Fam 03" overlays1))
-    assert failed (hasText "Fam 04" overlays1)
+-- | A press on the scrollbar track below the thumb jumps the list there, and
+-- holding the button still keeps the list where the jump put it.
+runComboTrackPressHoldsTest :: Context -> IORef Int -> IO ()
+runComboTrackPressHoldsTest _ failed = do
+  let fresh = ComboState (-1) 0 0 50 0 0 0 "" "" True Nothing
+      rows = [T.pack (show i) | i <- [1 .. 100 :: Int]]
+      step inp = stepState . comboStep (ComboInput True False "" rows 50 (Rect 0 0 200 30) inp)
+      -- The list opens 4 px below the field; its scrollbar lane is its
+      -- right-most 10 px.
+      onTrack = V2 195 (34 + 100)
+      pressed = step (pressAt (withInput 400 400) onTrack) fresh
+  assertGt failed (csWindow pressed) 0
+  assertEq failed (csWindow pressed) (csWindow (step (holdAt (withInput 400 400) onTrack) pressed))
 
--- | A wheel over a list already scrolled to its end moves nothing, and asks
--- for no further frame.
-runComboWheelAtEndIdleTest :: Context -> IORef Int -> IO ()
-runComboWheelAtEndIdleTest ctx failed = do
-  let inp0 = withInput 200 360
-      ui = withValue "" (comboBox' "Fonts" comboLongOpts)
-  onComboRow ctx failed inp0 ui "Fam 01" $ \overList -> do
-    _ <- runFrame ctx overList {inputScroll = V2 0 10} ui
-    _ <- runFrame ctx overList ui
-    (_, _, dirty) <- runFrame ctx overList {inputScroll = V2 0 1} ui
-    assert failed (not dirty)
-    assert failed . hasText "Fam 12" =<< collectOverlayTextSpans ctx overList
+-- | The wheel over the open list scrolls it: a notch three rows, and a
+-- trackpad's eighths of a notch add up to as much. A horizontal wheel shifts
+-- rows that overflow the list's width, clamped so a huge one keeps them in
+-- reach. Scrolled to its end, a wheel moves nothing and asks for no frame.
+comboWheel :: Sim Combo ()
+comboWheel = do
+  _ <- pressKey KeyTab >> settle
+  expect "Fam 01" >> expectNot "Fam 09"
+  Rect x0 y0 _ h0 <- rectOf "Fam 01"
+  let over = At (V2 (x0 + 4) (y0 + h0 / 2))
+  _ <- wheel over (V2 0 1)
+  expectNot "Fam 01" >> expect "Fam 04" >> expect "Fam 11"
+  replicateM_ 8 (frameWith (\i -> i {inputScroll = V2 0 0.125}))
+  expectNot "Fam 06" >> expect "Fam 07"
+  before <- rectOf "Fam 07"
+  _ <- frameWith (\i -> i {inputScroll = V2 5 0})
+  above 50 . (rectX before -) . rectX =<< rectOf "Fam 07"
+  _ <- frameWith (\i -> i {inputScroll = V2 1000 0})
+  expect "Fam 07"
+  _ <- frameWith (\i -> i {inputScroll = V2 0 10}) >> frame
+  _ <- frameWith (\i -> i {inputScroll = V2 0 1})
+  check . not =<< wantsFrame
+  expect "Fam 20"
