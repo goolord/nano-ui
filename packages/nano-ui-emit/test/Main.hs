@@ -11,15 +11,7 @@ import NanoUI.Emit
 import NanoUI.Testing (Context, newContext)
 import NanoUI.Testing.Assert (require, requireEq, withInput)
 import NanoUI.Testing.Harness (centerOf)
-import NanoUI.Testing.Sim
-  ( Sim
-  , SimOptions (..)
-  , checkEq
-  , click
-  , defaultSimOptions
-  , frame
-  , runSimWith
-  )
+import NanoUI.Testing.Sim hiding (result)
 
 -- | Run a script against an emitting view in a fresh context, stopping at
 -- its first failed check; its result is the view's with the frame's messages.

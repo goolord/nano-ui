@@ -21,25 +21,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Testing (Context, clearDirty, collectTextSpans, isDirty, newPixelContext, runFrame)
 import NanoUI.Testing.Assert (require, requireEq)
 import NanoUI.Testing.Harness (hasText, keyInp, nodesOfType, withInputOff)
-import NanoUI.Testing.Sim
-  ( Sim
-  , SimOptions (..)
-  , Target (..)
-  , check
-  , checkEq
-  , click
-  , defaultSimOptions
-  , expect
-  , expectNot
-  , focusOn
-  , frame
-  , frameWith
-  , onContext
-  , pressKey
-  , runSimWith
-  , settle
-  , typeText
-  )
+import NanoUI.Testing.Sim hiding (result, spans)
 import NanoUI.Var (peekVar)
 
 type Checked a = Ditto.Result Text (Ditto.Proved a)

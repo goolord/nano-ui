@@ -27,28 +27,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness
   (drawnVertices, hasText, nodesOfType, runClick, spanCenter, spanRect, spanRectOf, vertexColor, warmup2)
-import NanoUI.Testing.Sim
-  ( Sim
-  , SimOptions (..)
-  , Target (..)
-  , advance
-  , check
-  , checkEq
-  , chord
-  , click
-  , defaultSimOptions
-  , drag
-  , expect
-  , expectNot
-  , frame
-  , labelShown
-  , moveTo
-  , onContext
-  , result
-  , runSimWith
-  , scrollOffsetOf
-  , wheel
-  )
+import NanoUI.Testing.Sim hiding (spans)
 import NanoUI.Shortcut (cmdOrCtrl, key)
 import Test.Hspec
 
