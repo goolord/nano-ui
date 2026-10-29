@@ -12,323 +12,239 @@ import NanoUI.Internal.Layout.Arena (arenaCount, getWidgetId)
 
 tests :: [Spec]
 tests =
-  [ spec "damage-bounds-resolution" runDamageBoundsResolutionTest
-  , spec "damage-widget-explicit" runExplicitDamageWidgetTest
-  , spec "damage-queue-cleared" runDamageQueueClearedPerFrameTest
-  , spec "clear-dirty-keeps-repaint" runClearDirtyKeepsRepaintTest
-  , spec "damage-state-change" runStateChangeDamageTest
+  [ spec "damage-rect-math" runDamageRectMathTest
+  , spec "damage-explicit" runExplicitDamageTest
+  , spec "damage-var-paint-change" runVarPaintChangeDamageTest
+  , spec "damage-hover" runHoverDamageTest
   , spec "damage-orphan-anim-settles" runOrphanAnimationDamageSettlesTest
-  , spec "versioned-drawing-damage" runVersionedDrawingDamageTest
+  , spec "damage-content-change" runContentChangeDamageTest
+  , spec "image-swap-damage" runImageSwapDamageTest
   , spec "clip-frame-backdrop" runClipFrameBackdropTest
-  , spec "textarea-select-all-damage" runTextAreaSelectAllDamageTest
-  , spec "damage-pieces-merge" runDamagePiecesMergeTest
   , spec "damage-pieces-far-labels" runFarLabelsDamagePiecesTest
-  , spec "damage-hook-paint-change" runHookPaintChangeDamageTest
-  , spec "damage-float-hook-paint-change" runFloatHookPaintChangeDamageTest
-  , spec "panel-shrink-damage-hovered" (runPanelResizeDamageTest True 100 60)
-  , spec "panel-shrink-damage" (runPanelResizeDamageTest False 100 60)
-  , spec "panel-grow-damage" (runPanelResizeDamageTest False 60 100)
-  , spec "scroller-shrink-damage" (runScrollerResizeDamageTest 100 60)
-  , spec "scroller-grow-damage" (runScrollerResizeDamageTest 60 100)
-  , spec "panel-steady-no-damage" runPanelSteadyNoDamageTest
-  , spec "drawing-shrink-damage" runDrawingShrinkDamageTest
-  , spec "hovered-button-shrink-damage" runHoveredButtonShrinkDamageTest
-  , spec "root-overflow-grow-damage" (runRootOverflowDamageTest 40 20)
-  , spec "root-overflow-shrink-damage" (runRootOverflowDamageTest 20 30)
-  , spec "damage-unwanted" runDamageUnwantedTest
+  , spec "resize-damage" runResizeDamageTest
   , spec "label-button-swap-damage" runLabelButtonSwapDamageTest
   , spec "prev-frame-matches-fresh-walk" runPrevFrameFreshWalkTest
-  , spec "slider-label-shrink-damage" runSliderLabelShrinkDamageTest
-  , spec "scrolled-popup-shadow-damage" (runScrolledPopupDamageTest False)
-  , spec "scrolled-nested-popup-damage" (runScrolledPopupDamageTest True)
-  , spec "off-window-damage-ignored" runOffWindowDamageTest
+  , spec "scrolled-popup-damage" runScrolledPopupDamageTest
   , spec "empty-damage-paints-nothing" runEmptyDamagePaintTest
   ]
 
--- | A slider drag changes only 'storeFloat', as a scroll does. A label
--- showing the value that shrank from "100" repaints where its old text was.
-runSliderLabelShrinkDamageTest :: Context -> IORef Int -> IO ()
-runSliderLabelShrinkDamageTest ctx failed = do
-  ref <- newIORef (50 :: Float)
-  let inp = withInputOff 400 100
-      ui = row $ do
-        v <- liftIO (readIORef ref)
-        (s, v') <- withValue v (sliderWith' (fixedW 200) 0 100)
-        liftIO (writeIORef ref v')
-        l <- label' (T.pack (show (round v' :: Int)))
-        pure (s, l)
-  (s, _) <- warmup2 ctx inp ui
-  let Rect sx sy sw sh = respRect s
-      at x = V2 x (sy + sh / 2)
-  runDragFrom ctx inp ui (at (sx + sw / 2)) (at (sx + sw + 50))
-  assertEq failed 100 =<< readIORef ref
-  (_, wide) <- evalUi ctx (holdAt inp (at (sx + sw / 2))) ui
-  dmg <- takeDamage ctx
-  assert failed (clipCovers dmg (respRect wide))
+-- | Whether a frame's damage is a clip smaller in area than @a@.
+clipUnder :: Float -> Damage -> Bool
+clipUnder a (DamageClip (Rect _ _ w h)) = w * h < a
+clipUnder _ DamageFull = False
 
--- | A popup that follows a row of a scroller moves on a frame that only
--- scrolls. That frame repaints the popup's old shadow, which lies past its
--- rect, and only a clip, also with a scroller nested in the page, whose
--- viewport moves with it.
-runScrolledPopupDamageTest :: Bool -> Context -> IORef Int -> IO ()
-runScrolledPopupDamageTest nested ctx failed = do
-  let inp = withInputOff 640 400
-      rows = mapM_ (\i -> label (T.pack ("row " <> show (i :: Int))))
-      ui = do
-        (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
-          if nested then void (scrollArea (fillW . fixedH 40) (rows [1 .. 6])) else rows [1 .. 4]
-          anchor <- labelWith' fillW "anchor"
-          rows [(if nested then 7 else 5) .. 30]
-          pure anchor
-        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
-        pure sc
-  sc <- warmup2 ctx inp ui
-  assertJustM failed (getPrevRect ctx sc) $ \r -> do
-    -- Below the nested scroller, over the page's own rows.
-    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 120), inputScroll = V2 0 1}
-    _ <- runFrame ctx wheel ui
-    before <- IM.elems <$> floatingPanelRects ctx
-    _ <- runFrame ctx wheel ui
-    after <- IM.elems <$> floatingPanelRects ctx
-    dmg <- takeDamage ctx
-    pieces <- takeDamagePieces ctx
-    assert failed (before /= after)
-    forM_ before $ \(Rect x y w h) -> do
-      let shadow = Rect (x + 3) (y + 3) w h
-      assert failed (clipCovers dmg shadow && (null pieces || any (`covers` shadow) pieces))
-
--- | Damage wholly off the window adds nothing to a frame's clip: it does not
--- stretch the clip of a label that changed far from it.
-runOffWindowDamageTest :: Context -> IORef Int -> IO ()
-runOffWindowDamageTest ctx failed = do
-  let inp = withInputOff 800 600
-      ui k = columnWith (fillW . fillH) $ do
-        when (k > 1) $ damageRectNow (Rect 100 (-200) 50 50)
-        flex
-        rowWith fillW $ flex >> label' (T.pack (show (k :: Int)))
-  _ <- warmup2 ctx inp (ui 1)
-  (l, _, _) <- runFrame ctx inp (ui 2)
-  dmg <- takeDamage ctx
-  case dmg of
-    DamageClip clip -> assert failed (rectY clip >= rectY (respRect l) - 10)
-    DamageFull -> assert failed False
-
--- | A clip frame with nothing to repaint paints nothing, not even what lies
--- at the window's corner, such as a page scroller's backdrop.
-runEmptyDamagePaintTest :: Context -> IORef Int -> IO ()
-runEmptyDamagePaintTest ctx failed = do
-  let inp = withInputOff 300 200
-      ui = scrollArea grow (column (label "Static" >> button "B"))
-  _ <- warmup2 ctx inp ui
-  writeIORef (ctxPaintFull ctx) False
-  (_, dd, _) <- runFrame ctx inp ui
-  assert failed . damageIsEmpty =<< takeDamage ctx
-  assert failed . null =<< drawQuads dd
-
--- | Far-apart rects stay apart, near ones merge, and a frame never has more
--- than four pieces or just one.
-runDamagePiecesMergeTest :: Context -> IORef Int -> IO ()
-runDamagePiecesMergeTest _ failed = do
+-- | How damage requests resolve against a rect ('DamageNone' is the identity
+-- of a union, not a rect at the origin), and how a frame's rects group into
+-- pieces: far ones stay apart, near ones (or ones a third rect joins) merge
+-- into the bounding box, which is no pieces, and there are never more than
+-- four, disjoint and covering every rect.
+runDamageRectMathTest :: Context -> IORef Int -> IO ()
+runDamageRectMathTest _ failed = do
+  let base = Rect 10 20 100 50
+      stretch (Rect x y w h) = Rect (x - 1) (y - 2) (w + 10) (h + 20)
+  forM_
+    [ (DamageSelf, base)
+    , (DamageInflated 8, Rect 2 12 116 66)
+    , (DamageExact (Rect 0 0 500 500), Rect 0 0 500 500)
+    , (DamageCustom stretch, Rect 9 18 110 70)
+    , (DamageNone, Rect 0 0 0 0)
+    , (DamageUnion (DamageInflated 4) (DamageInflated 8), rectUnion (Rect 6 16 108 58) (Rect 2 12 116 66))
+    , (DamageUnion DamageSelf DamageNone, base)
+    ]
+    $ \(d, want) -> assertEq failed want (resolveDamageRect d base)
+  assertEq failed base (resolveDamageRect (DamageUnion DamageNone (DamageExact base)) (Rect 0 0 0 0))
   let a = Rect 0 0 20 10
-      b = Rect 500 400 20 10
-  assertEq failed (length (damagePieces [a, b])) 2
-  -- Within the merge gap: one piece, which is the bounding box itself.
-  assertEq failed (damagePieces [a, Rect 30 0 20 10]) []
-  assertEq failed (damagePieces [a]) []
-  assertEq failed (damagePieces []) []
-  -- A third rect joining two pieces' gap merges them all.
-  assertEq failed (damagePieces [a, Rect 40 0 20 10, Rect 20 0 20 10]) []
+  assertEq failed 2 (length (damagePieces [a, Rect 500 400 20 10]))
+  forM_ [[a, Rect 30 0 20 10], [a], [], [a, Rect 40 0 20 10, Rect 20 0 20 10]] $ \rs ->
+    assertEq failed [] (damagePieces rs)
   let scattered = [Rect (fromIntegral i * 100) (fromIntegral i * 80) 10 10 | i <- [0 .. 7 :: Int]]
       pieces = damagePieces scattered
-  assert failed (length pieces == 4)
-  -- Every rect lies inside a piece, and the pieces are disjoint.
+  assertEq failed 4 (length pieces)
   assert failed (all (\r -> any (`covers` r) pieces) scattered)
   assert failed (and [rectIntersect p q == Nothing | (i, p) <- zip [0 :: Int ..] pieces, (j, q) <- zip [0 ..] pieces, i < j])
 
--- | Two labels changing in opposite corners repaint as two pieces, and each
--- draw command lies inside one of them.
-runFarLabelsDamagePiecesTest :: Context -> IORef Int -> IO ()
-runFarLabelsDamagePiecesTest ctx failed = do
-  let inp = withInput 800 600
-      ui k = columnWith (fillW . fillH) $ do
-        label (tshow k)
+-- | Damage a view asks for repaints in its own frame only: a widget's rect as
+-- its resolver grows it, a rect, or the whole window. A rect wholly off the
+-- window adds nothing to the clip of a change elsewhere. A host that clears
+-- the dirty flag before the frame still gets the repaint 'markDirty' queued,
+-- since no diff covers an opaque request. A host that does not read damage
+-- gets 'DamageFull' and still keeps what the next frame diffs against.
+runExplicitDamageTest :: Context -> IORef Int -> IO ()
+runExplicitDamageTest ctx failed = do
+  let inp = withInputOff 400 300
+      ui :: Int -> (Response -> NanoUI ()) -> NanoUI (Response, Response)
+      ui n extra = columnWith (fillW . fillH . padAll 20) $ do
+        b <- button' "First"
+        extra b
         flex
-        rowWith fillW $ flex >> label (tshow k)
-      tshow = T.pack . show :: Int -> T.Text
-  _ <- warmup2 ctx inp (ui 1)
-  writeIORef (ctxPaintFull ctx) False
-  (_, dd, _) <- runFrame ctx inp (ui 2)
-  dmg <- takeDamage ctx
-  pieces <- takeDamagePieces ctx
-  assert failed (case dmg of DamageClip _ -> True; DamageFull -> False)
-  assertEq failed (length pieces) 2
-  let clipOf c = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
-      inPiece c = any ((`covers` clipOf c) . rectInflate 1) pieces
-  assert failed (not (null (drawCmdElems dd)) && all inPiece (drawCmdElems dd))
-
--- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
--- ops once the version moves, and nothing else damages them, so a clip frame
--- would otherwise keep the pixels it drew last time.
-runVersionedDrawingDamageTest :: Context -> IORef Int -> IO ()
-runVersionedDrawingDamageTest ctx failed = do
-  let inp = withInput 400 300
-      ui version = column $ do
-        _ <- label "Other"
-        drawingVersioned version (fixedWH 80 40) $ \r ->
-          smallArrayFromList [FillRect r (colorRGBA 255 0 0 255)]
-  resp <- warmup2 ctx inp (ui 1)
-  _ <- runFrame ctx inp (ui 2)
-  dmg <- takeDamage ctx
-  assert failed (clipCovers dmg (respRect resp))
-
-runDamageBoundsResolutionTest :: Context -> IORef Int -> IO ()
-runDamageBoundsResolutionTest _ failed = do
-  let base = Rect 10 20 100 50
-      rSelf = resolveDamageRect DamageSelf base
-      rInflated = resolveDamageRect (DamageInflated 8.0) base
-      rExact = resolveDamageRect (DamageExact (Rect 0 0 500 500)) base
-      rCustom = resolveDamageRect (DamageCustom (\(Rect x y w h) -> Rect (x - 1) (y - 2) (w + 10) (h + 20))) base
-      rNone = resolveDamageRect DamageNone base
-
-  assertEq failed rSelf base
-  assertEq failed rInflated (Rect 2 12 116 66)
-  assertEq failed rExact (Rect 0 0 500 500)
-  assertEq failed rCustom (Rect 9 18 110 70)
-  assertEq failed rNone (Rect 0 0 0 0)
-  assertEq failed (resolveDamageRect (DamageUnion (DamageInflated 4.0) (DamageInflated 8.0)) base)
-    (rectUnion (Rect 6 16 108 58) (Rect 2 12 116 66))
-  -- DamageNone is the identity of a union rather than a rect at the origin.
-  assertEq failed (resolveDamageRect (DamageUnion DamageSelf DamageNone) base) base
-  assertEq failed (resolveDamageRect (DamageUnion DamageNone (DamageExact base)) (Rect 0 0 0 0)) base
-
-runExplicitDamageWidgetTest :: Context -> IORef Int -> IO ()
-runExplicitDamageWidgetTest ctx failed = do
-  let inp = withInput 400 300
-      ui mark = columnWith (padAll 20) $ do
-        w1 <- button' "First"
-        _ <- button' "Second"
-        when mark (damageWidgetNow (respId w1) (DamageInflated sliderDamageSlop))
-        pure w1
-  -- Warmup to establish solved layout rects
-  w1 <- warmup2 ctx inp (ui False)
-
-  -- Queue explicit widget damage
-  _ <- runFrame ctx inp (ui True)
-  dmg <- takeDamage ctx
-  let expected = rectInflate sliderDamageSlop (respRect w1)
-      approxEq (Rect a b c d) (Rect e f g h) =
-        abs (a - e) < 0.05 && abs (b - f) < 0.05 && abs (c - g) < 0.05 && abs (d - h) < 0.05
+        (b,) <$> rowWith fillW (flex >> labelWith' (fixedW 40) (T.pack (show n)))
+      none = const (pure ())
+      damageOf n extra = runFrame ctx inp (ui n extra) >> takeDamage ctx
+      isEmpty n = assert failed . damageIsEmpty =<< damageOf n none
+  (btn, lbl) <- warmup2 ctx inp (ui 1 none)
+  dmg <- damageOf 1 (\b -> damageWidgetNow (respId b) (DamageInflated sliderDamageSlop))
+  let Rect ex ey ew eh = rectInflate sliderDamageSlop (respRect btn)
   case dmg of
+    DamageClip (Rect x y w h) -> unless (all ((< 0.05) . abs) [x - ex, y - ey, w - ew, h - eh]) (assertEq failed (Rect ex ey ew eh) (Rect x y w h))
     DamageFull -> assert failed False
-    DamageClip r -> assert failed (approxEq r expected)
-
--- | A host that clears the dirty flag before the frame it runs for it still
--- gets the whole-window repaint 'markDirty' queued: no diff covers what an
--- opaque request changed. 'clearDirty' once dropped that repaint too.
-runClearDirtyKeepsRepaintTest :: Context -> IORef Int -> IO ()
-runClearDirtyKeepsRepaintTest ctx failed = do
-  let inp = withInput 400 300
-      ui = column (label "Static content")
-  _ <- warmup2 ctx inp ui
+  isEmpty 1
+  assertEq failed (DamageClip (Rect 5 5 20 20)) =<< damageOf 1 (const (damageRectNow (Rect 5 5 20 20)))
+  isEmpty 1
+  assertEq failed DamageFull =<< damageOf 1 (const damageFullNow)
+  isEmpty 1
+  damageOf 2 (const (damageRectNow (Rect 100 (-200) 50 50))) >>= \case
+    DamageClip clip -> assert failed (rectY clip >= rectY (respRect lbl) - 10)
+    DamageFull -> assert failed False
   markDirty ctx
   clearDirty ctx
   assert failed . not =<< isDirty ctx
-  _ <- runFrame ctx inp ui
+  assertEq failed DamageFull =<< damageOf 2 none
+  isEmpty 2
+  writeIORef (ctxDamageWanted ctx) False
+  assertEq failed DamageFull =<< damageOf 3 none
+  writeIORef (ctxDamageWanted ctx) True
+  assertEq failed (DamageClip (Rect 0 0 0 0)) =<< damageOf 3 none
+  changed <- damageOf 4 none
+  assert failed (clipCovers changed (respRect lbl) && not (damageCovers changed (respRect btn)))
+
+-- | A Var write that changes only a box's colour, or a same-length label and
+-- elsewhere a box's colour, repaints the whole window: the Var names no
+-- widget, the colour is outside the store diff, and the text diff alone
+-- would clip to the label.
+runVarPaintChangeDamageTest :: Context -> IORef Int -> IO ()
+runVarPaintChangeDamageTest _ failed = do
+  let lamp on = box (fixedWH 40 40) (if on then colorRGBA 255 0 0 255 else colorRGBA 0 0 255 255)
+      flag = do
+        onVar <- useVar False
+        on <- readVar onVar
+        resp <- button' "Toggle"
+        when (respClicked resp) (writeVar onVar (not on))
+        labelWith fontMono (if on then "one" else "two")
+        resp <$ lamp on
+      level = do
+        levelVar <- useVar (0 :: Float)
+        v <- readVar levelVar
+        resp <- button' "Raise"
+        when (respClicked resp) (writeVar levelVar (v + 1))
+        resp <$ lamp (v > 0)
+  forM_ [flag, level] $ \ui -> do
+    ctx <- newContext
+    let inp0 = withInputOff 320 240
+    resp <- warmup2 ctx inp0 ui
+    _ <- runClick ctx inp0 ui (centerOf resp)
+    assertEq failed DamageFull =<< takeDamage ctx
+
+-- | The first frame repaints whole. Hover enter and press repaint only the
+-- button, and pointer motion inside a hovered button asks for no frame.
+runHoverDamageTest :: Context -> IORef Int -> IO ()
+runHoverDamageTest ctx failed = do
+  let ui = column (button' "OK")
+      inp0 = withInputOff 240 80
+      small = clipUnder (240 * 80 * 0.5)
+  _ <- runFrame ctx inp0 ui
   assertEq failed DamageFull =<< takeDamage ctx
-  _ <- runFrame ctx inp ui
-  assert failed . damageIsEmpty =<< takeDamage ctx
+  V2 cx cy <- centerOf <$> evalUi ctx inp0 ui
+  let over = inp0 {inputMousePos = V2 cx cy}
+      idle = over {inputDeltaTime = 1}
+      press = applyMouseButton MouseLeft True over
+  assert failed =<< needsRedraw ctx inp0 over
+  _ <- runFrame ctx over ui
+  assert failed . small =<< takeDamage ctx
+  _ <- runFrame ctx idle ui
+  assert failed . not =<< needsRedraw ctx idle over {inputMousePos = V2 (cx + 1) cy}
+  assert failed =<< needsRedraw ctx idle press
+  _ <- runFrame ctx press ui
+  assert failed . small =<< takeDamage ctx
 
-runDamageQueueClearedPerFrameTest :: Context -> IORef Int -> IO ()
-runDamageQueueClearedPerFrameTest ctx failed = do
-  let inp = withInput 400 300
-      ui pre = column (pre >> label "Static content")
-  _ <- warmup2 ctx inp (ui (pure ()))
-
-  -- Explicit damage in this frame
-  _ <- runFrame ctx inp (ui (damageRectNow (Rect 5 5 20 20)))
-  assertEq failed (DamageClip (Rect 5 5 20 20)) =<< takeDamage ctx
-
-  -- Next frame without damage requests: damage is empty
-  _ <- runFrame ctx inp (ui (pure ()))
-  assert failed . damageIsEmpty =<< takeDamage ctx
-
-  -- Explicit full-window damage, again only for its own frame
-  _ <- runFrame ctx inp (ui damageFullNow)
-  assertEq failed DamageFull =<< takeDamage ctx
-  _ <- runFrame ctx inp (ui (pure ()))
-  assert failed . damageIsEmpty =<< takeDamage ctx
-
-runStateChangeDamageTest :: Context -> IORef Int -> IO ()
-runStateChangeDamageTest ctx failed = do
-  let inp0 = withInput 400 300
-      ui = do
-        nameVar <- useVar ""
-        name <- readVar nameVar
-        row $ do
-          label ("Left pane: " <> name)
-          writeVar nameVar =<< (snd <$> withValue name textInput)
-
-  -- Warm up and focus textInput via Tab
-  warmupFocused ctx inp0 ui
-
-  -- Type a character into focused textInput
-  _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
-  dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
-
+-- | A perpetual animation on a widget repaints a clip over it, and once the
+-- widget leaves the arena (a tab switch) it stops forcing repaints. A fresh
+-- animation on a widget never laid out repaints whole for its first frame.
 runOrphanAnimationDamageSettlesTest :: Context -> IORef Int -> IO ()
 runOrphanAnimationDamageSettlesTest ctx failed = do
   let winInp = withInput 400 300
       inp = winInp {inputDeltaTime = 0.05}
-      withBar = columnWith (padAll 20) $ do
-        bar <- currentId
-        spacer (Fixed 40) (Fixed 20)
-        pure bar
+      withBar = columnWith (padAll 20) (currentId <* spacer (Fixed 40) (Fixed 20))
       withoutBar = columnWith (padAll 20) (pure ())
-  -- Warm up: the bar widget occupies a nonzero 40x20 rect in the arena.
-  (wid, _, _) <- runFrame ctx inp withBar
-  -- keepAnimating-style perpetual animation on an established widget.
+  wid <- evalUi ctx inp withBar
   startAnimation ctx wid 0 1 1e9
-  -- Widget present and animating => damage is a clip over it, not a
-  -- whole-window repaint.
   _ <- runFrame ctx inp withBar
-  dmgAnimated <- takeDamage ctx
-  case dmgAnimated of
-    DamageFull -> assert failed False
+  takeDamage ctx >>= \case
     DamageClip r -> assert failed (rectW r > 0 && rectH r > 0)
-  -- Widget leaves the arena (tab switch). The first absent frame may repaint
-  -- its old region.
-  _ <- runFrame ctx inp withoutBar
-  -- The perpetual animation is still live, but it must not force the whole
-  -- window to repaint forever after its widget is gone.
-  _ <- runFrame ctx inp withoutBar
-  live <- anyAnimating ctx
-  assert failed live
-  dmgAbsent <- takeDamage ctx
-  assert failed (damageIsEmpty dmgAbsent)
-  -- Guard: a freshly started animation on a widget that has never been laid
-  -- out still escalates to a full repaint for its first rect-less frame.
+    DamageFull -> assert failed False
+  -- The first absent frame may repaint the widget's old region.
+  replicateM_ 2 (runFrame ctx inp withoutBar)
+  assert failed =<< anyAnimating ctx
+  assert failed . damageIsEmpty =<< takeDamage ctx
   ctx2 <- newContext
   startAnimation ctx2 (WidgetId 777) 0 1 0.3
   _ <- runFrame ctx2 winInp (label "bare")
-  dmgFresh <- takeDamage ctx2
-  assertEq failed dmgFresh DamageFull
+  assertEq failed DamageFull =<< takeDamage ctx2
   _ <- runFrame ctx2 winInp (label "bare")
-  dmgFresh2 <- takeDamage ctx2
-  assert failed (dmgFresh2 /= DamageFull)
+  assert failed . (/= DamageFull) =<< takeDamage ctx2
+
+-- | Changes no rect or text diff sees still repaint the widget, as a clip: a
+-- new version of a versioned drawing (paint rebuilds its ops, so a clip frame
+-- would keep the old pixels), select all in a text area (on its own frame,
+-- not a follow-up), and a label beside a dragged slider shrinking from
+-- "100" (only 'storeFloat' changes, as in a scroll).
+runContentChangeDamageTest :: Context -> IORef Int -> IO ()
+runContentChangeDamageTest _ failed = do
+  ctx <- newContext
+  let versioned v = column $ do
+        label "Other"
+        drawingVersioned v (fixedWH 80 40) (\r -> smallArrayFromList [FillRect r (colorRGBA 255 0 0 255)])
+  resp <- warmup2 ctx (withInput 400 300) (versioned 1)
+  _ <- runFrame ctx (withInput 400 300) (versioned 2)
+  assert failed . (`clipCovers` respRect resp) =<< takeDamage ctx
+  -- Frame time lets the click's hover fade finish, which would damage the area.
+  areaCtx <- newContext
+  let inp0 = (withInputOff 800 600) {inputDeltaTime = 0.5}
+      notes = column (label "Notes" >> fst <$> withValue "hello world" (textAreaWith' (fixedWH 200 80)))
+  area <- warmup2 areaCtx inp0 notes
+  _ <- runClick areaCtx inp0 notes (centerOf area)
+  _ <- warmup2 areaCtx inp0 notes
+  _ <- runFrame areaCtx (chordInp (cmdOrCtrl <> key 'a') inp0) notes
+  assert failed . (`clipCovers` respRect area) =<< takeDamage areaCtx
+  sliderCtx <- newContext
+  ref <- newIORef (50 :: Float)
+  let inp = withInputOff 400 100
+      ui = row $ do
+        (s, v) <- liftIO (readIORef ref) >>= \v0 -> withValue v0 (sliderWith' (fixedW 200) 0 100)
+        liftIO (writeIORef ref v)
+        (s,) <$> label' (T.pack (show (round v :: Int)))
+  (s, _) <- warmup2 sliderCtx inp ui
+  let Rect sx sy sw sh = respRect s
+      at x = V2 x (sy + sh / 2)
+  runDragFrom sliderCtx inp ui (at (sx + sw / 2)) (at (sx + sw + 50))
+  assertEq failed 100 =<< readIORef ref
+  (_, wide) <- evalUi sliderCtx (holdAt inp (at (sx + sw / 2))) ui
+  assert failed . (`clipCovers` respRect wide) =<< takeDamage sliderCtx
+
+-- | Switching an image to another id repaints the image and only it: frames
+-- swapped inside a page neither leave a stale frame nor repaint the page.
+runImageSwapDamageTest :: Context -> IORef Int -> IO ()
+runImageSwapDamageTest ctx failed = do
+  let px a = BS.pack (concat (replicate 16 [a, 0, 0, 255]))
+  assert failed . and =<< sequence [registerImage ctx (ImageId 1) 4 4 (px 60), registerImage ctx (ImageId 2) 4 4 (px 120)]
+  frameRef <- newIORef (ImageId 1)
+  let inp0 = withInputOff 320 200
+      ui = fmap snd . scrollArea (padAll 10 . grow) . column $ do
+        label "frames"
+        currentId <* (image (fixedWH 40 24) =<< liftIO (readIORef frameRef))
+  wid <- warmup2 ctx inp0 ui
+  writeIORef frameRef (ImageId 2)
+  _ <- runFrame ctx inp0 ui
+  dmg <- takeDamage ctx
+  assertJustM failed (getPrevRect ctx wid) $ \r -> assert failed (clipCovers dmg r && clipUnder (320 * 200 / 4) dmg)
 
 -- | A clip frame repaints its region from the page backdrop, as a full frame
 -- lays the page over the window. An idle menu-bar title has no fill, so
--- without the backdrop the hover highlight it just lost would stay in the
--- retain texture.
+-- without the backdrop the hover highlight it just lost would stay.
 runClipFrameBackdropTest :: Context -> IORef Int -> IO ()
 runClipFrameBackdropTest ctx failed = do
   writeIORef (ctxPaintFull ctx) False
   let inp0 = withInputOff 400 300
-      ui = rowWith (tight . fillW . fixedH 28) $ do
-        file <- menuButton' "File" False
-        _ <- menuButton' "Edit" False
-        pure file
+      ui = rowWith (tight . fillW . fixedH 28) (menuButton' "File" False <* menuButton' "Edit" False)
   file <- warmup2 ctx inp0 ui
   _ <- runFrame ctx inp0 {inputMousePos = centerOf file} ui
   (_, draw, _) <- runFrame ctx inp0 ui
@@ -338,137 +254,67 @@ runClipFrameBackdropTest ctx failed = do
   case dmg of
     DamageClip clip -> do
       assert failed (covers clip (respRect file))
-      assertJust failed (listToMaybe quads) $ \(r, c) -> do
-        assert failed (covers r clip)
-        assertEq failed c (pageBackground theme)
+      assertJust failed (listToMaybe quads) $ \(r, c) -> assert failed (covers r clip) >> assertEq failed (pageBackground theme) c
     DamageFull -> assert failed False
 
--- | Select all (Ctrl+A, Command+A on macOS) repaints the text area on the
--- frame that selects, rather than leaving the highlight to a follow-up frame.
-runTextAreaSelectAllDamageTest :: Context -> IORef Int -> IO ()
-runTextAreaSelectAllDamageTest ctx failed = do
-  -- Frame time lets the hover fade from the click finish; a live fade would
-  -- damage the area anyway.
-  let inp0 = (withInputOff 800 600) {inputDeltaTime = 0.5}
-      ui = column $ do
-        _ <- label "Notes"
-        fst <$> withValue "hello world" (textAreaWith' (fixedWH 200 80))
-  area <- warmup2 ctx inp0 ui
-  _ <- runClick ctx inp0 ui (centerOf area)
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp0) ui
-  dmg <- takeDamage ctx
-  assert failed (clipCovers dmg (respRect area))
-
--- | A local-hook write that changes a label's text and, elsewhere, a box's
--- colour repaints the whole window: the text diff alone would clip to the
--- label and leave the box showing its old colour, which no diff describes.
-runHookPaintChangeDamageTest :: Context -> IORef Int -> IO ()
-runHookPaintChangeDamageTest ctx failed = do
-  let ui = do
-        onVar <- useVar False
-        on <- readVar onVar
-        resp <- button' "Toggle"
-        when (respClicked resp) (writeVar onVar (not on))
-        -- Same length in a monospace font: the label keeps its rect, so only
-        -- the text diff sees the change.
-        void $ labelWith fontMono (if on then "one" else "two")
-        box (fixedWH 40 40) (if on then colorRGBA 255 0 0 255 else colorRGBA 0 0 255 255)
-        pure resp
-      inp0 = withInputOff 320 240
-  resp <- warmup2 ctx inp0 ui
-  _ <- runClick ctx inp0 ui (centerOf resp)
-  dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
-
--- | A Var write that only changes a box's colour repaints the whole window.
--- The Var names no widget and the colour is outside the store diff, so only
--- the tracked read of the old value says the box needs repainting.
-runFloatHookPaintChangeDamageTest :: Context -> IORef Int -> IO ()
-runFloatHookPaintChangeDamageTest ctx failed = do
-  let ui = do
-        levelVar <- useVar (0 :: Float)
-        level <- readVar levelVar
-        resp <- button' "Raise"
-        when (respClicked resp) (writeVar levelVar (level + 1))
-        box (fixedWH 40 40) (if level > 0 then colorRGBA 255 0 0 255 else colorRGBA 0 0 255 255)
-        pure resp
-      inp0 = withInputOff 320 240
-  resp <- warmup2 ctx inp0 ui
-  _ <- runClick ctx inp0 ui (centerOf resp)
-  dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
-
--- | Run @warm@ frames of @ui from@, then one of @ui to@. @holds@ checks the
--- node sits at @rect from@, then @rect to@; the last frame must repaint both.
-widthChange :: Int -> (Rect -> [Rect] -> Bool) -> Input -> (Float -> NanoUI a) -> (Float -> Rect) -> Float -> Float -> Context -> IORef Int -> IO ()
-widthChange warm holds inp ui rect from to ctx failed = do
-  replicateM_ warm (runFrame ctx inp (ui from))
-  assert failed . holds (rect from) =<< arenaRects ctx
-  _ <- runFrame ctx inp (ui to)
-  assert failed . holds (rect to) =<< arenaRects ctx
-  assert failed . (`damageCovers` rect (max from to)) =<< takeDamage ctx
-
--- | A panel (painted, but with no widget id) repaints its old and new rects,
--- with the pointer on its button (whose hover fade keeps the frame clipped) or away.
-runPanelResizeDamageTest :: Bool -> Float -> Float -> Context -> IORef Int -> IO ()
-runPanelResizeDamageTest hovered =
-  widthChange 2 elem (withInput 300 200) {inputMousePos = if hovered then V2 10 10 else V2 (-10) (-10)}
-    (\w -> panelWith (fixedWH w 40) (void (buttonWith (fixedWH 30 20) ""))) (\w -> Rect 0 0 w 40)
-
--- | A scroller repaints all of its old and new rects, well and bar lane
--- included, not just the viewport clipping its hovered content.
-runScrollerResizeDamageTest :: Float -> Float -> Context -> IORef Int -> IO ()
-runScrollerResizeDamageTest =
-  widthChange 2 elem (withInput 300 200) {inputMousePos = V2 10 10}
-    (\w -> column (scrollWith (fixedWH w 60) (replicateM_ 6 (buttonWith (fixedWH 30 20) "")))) (\w -> Rect 3 3 w 60)
-
--- | A panel that stays put adds no damage to a frame where nothing changed.
-runPanelSteadyNoDamageTest :: Context -> IORef Int -> IO ()
-runPanelSteadyNoDamageTest ctx failed = do
-  let ui = column (panelWith (fixedWH 100 40) (void (buttonWith (fixedWH 30 20) "")) >> panelWith (fixedWH 80 40) (label "second"))
-  _ <- warmup2 ctx (withInputOff 300 200) ui
-  _ <- runFrame ctx (withInputOff 300 200) ui
-  assertEq failed (DamageClip (Rect 0 0 0 0)) =<< takeDamage ctx
-
--- | A shrinking root drawing repaints the strip it vacated rather than clipping
--- its old rect to its new one. The hover fade keeps the frame clipped.
-runDrawingShrinkDamageTest :: Context -> IORef Int -> IO ()
-runDrawingShrinkDamageTest =
-  widthChange 1 (\r -> (== [r])) (withInput 200 100) (`redDrawing` 20) (\w -> Rect 0 0 w 20) 40 20
-
--- | So does a hovered button shrinking with its column.
-runHoveredButtonShrinkDamageTest :: Context -> IORef Int -> IO ()
-runHoveredButtonShrinkDamageTest =
-  widthChange 2 elem (withInput 200 100) {inputMousePos = V2 5 5} (\w -> column (buttonWith (fixedWH w 20) "")) (\w -> Rect 3 3 w 20) 40 20
-
--- | A drawing overflowing a short root repaints everything it drew when it
--- shrinks to @dh@ and the root to @h@: the root clips to the window, not its rect.
-runRootOverflowDamageTest :: Float -> Float -> Context -> IORef Int -> IO ()
-runRootOverflowDamageTest h dh ctx failed = do
-  let inp = (withInput 200 100) {inputMousePos = V2 1 1}
-      ui rootH drawH = columnWith (fixedWH 40 rootH . padAll 0) (redDrawing 40 drawH)
-  _ <- warmup2 ctx inp (ui 20 40)
-  _ <- runFrame ctx inp (ui h dh)
-  assert failed . (`damageCovers` Rect 0 0 40 40) =<< takeDamage ctx
-
--- | A frame whose host does not read damage reports 'DamageFull' and still
--- keeps what the next frame diffs against: that frame, read again, repaints
--- nothing when nothing changed, and only a changed label's rect when it did.
-runDamageUnwantedTest :: Context -> IORef Int -> IO ()
-runDamageUnwantedTest ctx failed = do
-  let inp = withInputOff 300 200
-      ui n = column (labelWith (fixedWH 40 20) (T.pack (show (n :: Int))) >> void (buttonWith (fixedWH 30 20) ""))
+-- | Two labels changing in opposite corners repaint as two pieces, and each
+-- draw command lies inside one of them.
+runFarLabelsDamagePiecesTest :: Context -> IORef Int -> IO ()
+runFarLabelsDamagePiecesTest ctx failed = do
+  let inp = withInput 800 600
+      ui k = columnWith (fillW . fillH) $ do
+        label (T.pack (show (k :: Int)))
+        flex
+        rowWith fillW $ flex >> label (T.pack (show k))
   _ <- warmup2 ctx inp (ui 1)
-  writeIORef (ctxDamageWanted ctx) False
-  _ <- runFrame ctx inp (ui 2)
-  assertEq failed DamageFull =<< takeDamage ctx
-  writeIORef (ctxDamageWanted ctx) True
-  _ <- runFrame ctx inp (ui 2)
+  writeIORef (ctxPaintFull ctx) False
+  (_, dd, _) <- runFrame ctx inp (ui 2)
+  assert failed . (/= DamageFull) =<< takeDamage ctx
+  pieces <- takeDamagePieces ctx
+  assertEq failed 2 (length pieces)
+  let clipOf c = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
+      inPiece c = any ((`covers` clipOf c) . rectInflate 1) pieces
+  assert failed (not (null (drawCmdElems dd)) && all inPiece (drawCmdElems dd))
+
+-- | A node whose size changes repaints its old and new rects: a panel
+-- (painted, with no widget id) with the pointer on its button, whose hover
+-- fade keeps the frame clipped, or away; a scroller, well and bar lane
+-- included, not just the viewport clipping its hovered content; a root
+-- drawing, the strip it vacated rather than its old rect clipped to its new
+-- one; and a hovered button. A drawing overflowing a short root repaints all
+-- it drew (the root clips to the window, not its rect). A panel that stays
+-- put adds nothing.
+runResizeDamageTest :: Context -> IORef Int -> IO ()
+runResizeDamageTest _ failed = do
+  let at w h x y = (withInput w h) {inputMousePos = V2 x y}
+      boxed w = panelWith (fixedWH w 40) (void (buttonWith (fixedWH 30 20) ""))
+      scroller w = column (void (scrollWith (fixedWH w 60) (replicateM_ 6 (buttonWith (fixedWH 30 20) ""))))
+      hoveredButton w = column (void (buttonWith (fixedWH w 20) ""))
+      fresh inp ui = newContext >>= \ctx -> ctx <$ warmup2 ctx inp ui
+  forM_
+    [ (at 300 200 10 10, boxed, \w -> Rect 0 0 w 40, 100, 60)
+    , (at 300 200 (-10) (-10), boxed, \w -> Rect 0 0 w 40, 100, 60)
+    , (at 300 200 (-10) (-10), boxed, \w -> Rect 0 0 w 40, 60, 100)
+    , (at 300 200 10 10, scroller, \w -> Rect 3 3 w 60, 100, 60)
+    , (at 300 200 10 10, scroller, \w -> Rect 3 3 w 60, 60, 100)
+    , (withInput 200 100, (`redDrawing` 20), \w -> Rect 0 0 w 20, 40, 20)
+    , (at 200 100 5 5, hoveredButton, \w -> Rect 3 3 w 20, 40, 20)
+    ]
+    $ \(inp, ui, rect, from, to) -> do
+      ctx <- fresh inp (ui from)
+      assert failed . elem (rect from) =<< arenaRects ctx
+      _ <- runFrame ctx inp (ui to)
+      assert failed . elem (rect to) =<< arenaRects ctx
+      assert failed . (`damageCovers` rect (max from to)) =<< takeDamage ctx
+  let overflow rootH drawH = columnWith (fixedWH 40 rootH . padAll 0) (redDrawing 40 drawH)
+  forM_ [(40, 20), (20, 30)] $ \(h, dh) -> do
+    ctx <- fresh (at 200 100 1 1) (overflow 20 40)
+    _ <- runFrame ctx (at 200 100 1 1) (overflow h dh)
+    assert failed . (`damageCovers` Rect 0 0 40 40) =<< takeDamage ctx
+  let steady = column (boxed 100 >> panelWith (fixedWH 80 40) (label "second"))
+  ctx <- fresh (withInputOff 300 200) steady
+  _ <- runFrame ctx (withInputOff 300 200) steady
   assertEq failed (DamageClip (Rect 0 0 0 0)) =<< takeDamage ctx
-  _ <- runFrame ctx inp (ui 3)
-  dmg <- takeDamage ctx
-  assert failed (dmg `clipCovers` Rect 3 3 40 20 && not (dmg `damageCovers` Rect 3 26 30 20))
 
 -- | An empty label and a button take turns at one key and rect. Each time the
 -- label comes back its rect repaints: the text entry it had left with it.
@@ -483,13 +329,11 @@ runLabelButtonSwapDamageTest ctx failed = do
     unless asButton $ assert failed (dmg `damageCovers` Rect 3 3 60 20)
 
 -- | The previous-frame maps each frame updates in place equal the ones a walk
--- from empty maps builds for the same frame, through label and button swaps,
--- text changes, plain and configured images, image switches, a collapsing
--- widget, shared keys, a panel that moves, a viewport that resizes, and
--- keyed rows reordered and removed. One
--- context keeps its record of the last walk from frame to frame; another
--- walks each frame from empty maps. Each widget's last rect read by its node
--- index ('getPrevRectAt') is its map entry.
+-- from empty maps builds, through label and button swaps, text changes, plain
+-- and configured images and image switches, a collapsing widget, shared keys,
+-- a moving panel, a resizing viewport, keyed rows reordered and removed, and
+-- trailing nodes that come and go. Each widget's rect read by its node index
+-- ('getPrevRectAt') is its map entry.
 runPrevFrameFreshWalkTest :: Context -> IORef Int -> IO ()
 runPrevFrameFreshWalkTest ctx failed = do
   ref <- newContext
@@ -513,7 +357,6 @@ runPrevFrameFreshWalkTest ctx failed = do
           panelWith (fixedWH 80 40) (label "panel")
         void $ scrollWith (fixedWH 200 (if even (f `div` 3) then 100 else 80)) $ column $
           forM_ (if f `mod` 7 < 3 then [1 .. 6 :: Int] else reverse [2 .. 5]) $ \k -> withKey k (void (button (T.pack (show k))))
-        -- Nodes past the end come and go.
         when (f `mod` 8 < 4) $ forM_ [1 .. 3 :: Int] $ \k -> label (T.pack (show k))
       maps c = (\p -> (pfRects p, pfClips p, pfOuterClips p, pfTexts p, pfImages p)) <$> getsDamage c dsPrev
   forM_ [ctx, ref] $ \c -> forM_ [img, img2] $ \i -> assert failed =<< registerImage c i 8 8 (BS.replicate (8 * 8 * 4) 200)
@@ -522,13 +365,54 @@ runPrevFrameFreshWalkTest ctx failed = do
     kept <- maps ctx
     modifyIORef' (ctxDamageState ref) (\ds -> ds {dsPrev = emptyPrevFrame})
     _ <- runFrame ref inp (ui f)
-    fresh <- maps ref
-    assertEq failed fresh kept
+    assertEq failed kept =<< maps ref
     n <- arenaCount (ctxNodeArena ctx)
     forM_ [0 .. n - 1] $ \i -> do
       wid <- getWidgetId (ctxNodeArena ctx) i
       inMap <- fromMaybe (Rect 0 0 0 0) <$> getPrevRect ctx wid
       assertEq failed inMap =<< getPrevRectAt ctx i wid
+
+-- | A popup that follows a row of a scroller moves on a frame that only
+-- scrolls. That frame repaints the popup's old shadow, which lies past its
+-- rect, and only a clip, also with a scroller nested in the page, whose
+-- viewport moves with it.
+runScrolledPopupDamageTest :: Context -> IORef Int -> IO ()
+runScrolledPopupDamageTest _ failed = forM_ [False, True] $ \nested -> do
+  ctx <- newContext
+  let inp = withInputOff 640 400
+      rows = mapM_ (\i -> label (T.pack ("row " <> show (i :: Int))))
+      ui = do
+        (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
+          if nested then void (scrollArea (fillW . fixedH 40) (rows [1 .. 6])) else rows [1 .. 4]
+          labelWith' fillW "anchor" <* rows [(if nested then 7 else 5) .. 30]
+        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
+        pure sc
+  sc <- warmup2 ctx inp ui
+  assertJustM failed (getPrevRect ctx sc) $ \r -> do
+    -- Below the nested scroller, over the page's own rows.
+    let wheel = inp {inputMousePos = V2 (rectX r + 20) (rectY r + 120), inputScroll = V2 0 1}
+    _ <- runFrame ctx wheel ui
+    before <- IM.elems <$> floatingPanelRects ctx
+    _ <- runFrame ctx wheel ui
+    after <- IM.elems <$> floatingPanelRects ctx
+    dmg <- takeDamage ctx
+    pieces <- takeDamagePieces ctx
+    assert failed (before /= after)
+    forM_ before $ \(Rect x y w h) -> do
+      let shadow = Rect (x + 3) (y + 3) w h
+      assert failed (clipCovers dmg shadow && (null pieces || any (`covers` shadow) pieces))
+
+-- | A clip frame with nothing to repaint paints nothing, not even what lies
+-- at the window's corner, such as a page scroller's backdrop.
+runEmptyDamagePaintTest :: Context -> IORef Int -> IO ()
+runEmptyDamagePaintTest ctx failed = do
+  let inp = withInputOff 300 200
+      ui = scrollArea grow (column (label "Static" >> button "B"))
+  _ <- warmup2 ctx inp ui
+  writeIORef (ctxPaintFull ctx) False
+  (_, dd, _) <- runFrame ctx inp ui
+  assert failed . damageIsEmpty =<< takeDamage ctx
+  assert failed . null =<< drawQuads dd
 
 redDrawing :: Float -> Float -> NanoUI ()
 redDrawing w h = void (drawing (fixedWH w h) (\r -> smallArrayFromList [FillRect r (colorRGBA 255 0 0 255)]))
