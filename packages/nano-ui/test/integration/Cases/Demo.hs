@@ -2,21 +2,15 @@ module Cases.Demo (tests) where
 
 import Spec
 import Data.Hashable (Hashable (..))
+import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 import NanoUI.Shortcut
+import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
-  [ pixelSpec "color-picker-commit" runColorPickerCommitTest
-  , pixelSpec "color-picker-rgba" runColorPickerRgbaTest
-  , pixelSpec "color-picker-part-damage" runColorPickerPartDamageTest
-  , pixelSpec "color-picker-drag-damage" runColorPickerDragDamageTest
-  , pixelSpec "color-picker-edit" runColorPickerEditTest
-  , pixelSpec "color-picker-change-once" runColorPickerChangeOnceTest
-  , pixelSpec "color-picker-bar-keys" runColorPickerBarKeysTest
-  , pixelSpec "color-picker-drag-after-field" runColorPickerDragAfterFieldTest
-  , pixelSpec "color-picker-keys-opaque" runColorPickerKeysOpaqueTest
-  , pixelSpec "color-picker-field-commits" runColorPickerFieldCommitsTest
+  [ pixelSpec "color-picker-pointer" runColorPickerPointerTest
+  , pixelSpec "color-picker-keys" runColorPickerKeysTest
   , pixelSpec "controls-tab-height" runControlsTabHeightTest
   , pixelSpec "bounded-radio-offset" runBoundedRadioTest
   ]
@@ -30,11 +24,6 @@ data DemoTab
 instance Hashable DemoTab where
   hashWithSalt salt = hashWithSalt salt . fromEnum
 
-data DemoTheme
-  = Light
-  | Dark
-  | System
-  deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
 newtype OffsetChoice = OffsetChoice Int
   deriving (Eq, Show)
@@ -47,285 +36,164 @@ instance Enum OffsetChoice where
   fromEnum (OffsetChoice n) = n
   toEnum = OffsetChoice
 
+-- | A bounded radio over an enum not starting at 0 shows, picks and follows its value.
 runBoundedRadioTest :: Context -> IORef Int -> IO ()
 runBoundedRadioTest ctx failed = do
-  let inp = withInputOff 300 160
-      ui x = withValue x (boundedRadio' (T.pack . show))
-  (_, initial) <- warmup2 ctx inp (ui (OffsetChoice 11))
-  assertEq failed initial (OffsetChoice 11)
-  spans <- collectTextSpans ctx
-  assertJust failed (spanRect "OffsetChoice 12" spans) $ \r -> do
-    (_, selected) <- runClick ctx inp (ui (OffsetChoice 11)) (spanCenter r)
-    assertEq failed selected (OffsetChoice 12)
-    assertEq failed selected . snd =<< evalUi ctx inp (ui selected)
-    assertEq failed (OffsetChoice 10) . snd =<< evalUi ctx inp (ui (OffsetChoice 10))
+  v <- newVar (OffsetChoice 11)
+  runSim ctx failed (withInputOff 300 160) (snd <$> held v (boundedRadio' (T.pack . show))) $ do
+    checkEq (OffsetChoice 11) =<< result
+    checkEq (OffsetChoice 12) =<< click "OffsetChoice 12"
+    checkEq (OffsetChoice 12) =<< frame
+    liftIO (writeVarIO v (OffsetChoice 10))
+    checkEq (OffsetChoice 10) =<< frame
 
+-- | Beside a taller column, the demo's controls keep near their height alone, also
+-- hovered, and the tab body does not stretch to the column's height.
 runControlsTabHeightTest :: Context -> IORef Int -> IO ()
 runControlsTabHeightTest ctx failed = do
-  let
-    inp0 =
-      withInputOff 1280 800
-    controlsBody dumpRef = do
-      heading "Controls"
-      (cb, _) <- withValue False (checkbox' "Feature")
-      _ <- (snd <$> withValue 50 (slider 0 100))
-      _ <- (snd <$> withValue 1 (select ["Low", "Medium", "High"]))
-      (cp, _) <- withValue (colorRGBA 204 102 102 255) colorPicker'
-      _ <- (snd <$> withValue Dark (boundedRadio (T.pack . show)))
-      (ti, _) <- withValue "" textInput'
-      separator
-      liftIO $ writeIORef dumpRef (Just (cb, cp, ti))
-    demoPage dumpRef =
-      scrollWith (tight . grow) $
-        columnWith (padAll 8 . gap 8 . fillW) $
-          rowWith (tight . gap 8 . fillW) $ do
-            columnWith (tight . gap 8 . fillW) $ do
-              card $ do
-                heading "State"
-                kv "Feature" "off"
-                kv "Volume" "50"
-                kv "Quality" "Medium"
-                kv "Theme" (T.pack (show Dark))
-                kv "Name" "-"
-                kv "Clicked" "-"
-              card $ do
-                heading "Gallery"
-                mapM_ (\i -> void (label (T.pack ("thumb line " <> show (i :: Int))))) [1 .. 8]
-            card $ do
-              demoTabVar <- useEnumVar Controls
-              tabs
-                  demoTabVar
-                  [ tab t (T.pack (show t)) $ case t of
-                      Controls -> controlsBody dumpRef
-                      List -> heading "Tree"
-                      Diagnostics -> heading "Diagnostics"
-                  | t <- [minBound ..]
-                  ]
-    -- Heights of the checkbox, colour picker and text input, in that order.
-    heights c dumpRef = do
-      m <- readIORef dumpRef
-      case m of
-        Just (cb, cp, ti) -> mapM (fmap (fmap rectH) . getPrevRect c . respId) [cb, cp, ti]
-        Nothing -> pure [Nothing, Nothing, Nothing]
-    spanOf lbls spans =
-      let
-        match txt = any (`T.isSuffixOf` txt) lbls
-        ys =
-          [ (y, y + h)
-          | (Rect _ y _ h, txt, _, _, _) <- spans
-          , match txt
-          ]
-       in
-        case ys of
-          [] -> 0
-          _ -> maximum (map snd ys) - minimum (map fst ys)
-  dumpLone <- newIORef Nothing
+  let inp0 = withInputOff 1280 800
+      controlsBody dumpRef = do
+        heading "Controls"
+        (cb, _) <- withValue False (checkbox' "Feature")
+        _ <- withValue 50 (slider 0 100)
+        _ <- withValue 1 (select ["Low", "Medium", "High"])
+        (cp, _) <- withValue (colorRGBA 204 102 102 255) colorPicker'
+        _ <- withValue (OffsetChoice 11) (boundedRadio (T.pack . show))
+        (ti, _) <- withValue "" textInput'
+        separator
+        liftIO $ writeIORef dumpRef [cb, cp, ti]
+      state = [("Feature", "off"), ("Volume", "50"), ("Quality", "Medium"), ("Theme", "Dark")]
+        ++ [("Name", "-"), ("Clicked", "-")]
+
+      demoPage dumpRef =
+        scrollWith (tight . grow) . columnWith (padAll 8 . gap 8 . fillW) . rowWith (tight . gap 8 . fillW) $ do
+          columnWith (tight . gap 8 . fillW) $ do
+            card (heading "State" >> mapM_ (uncurry kv) state)
+            card (heading "Gallery" >> forM_ [1 .. 8 :: Int] (\i -> label (T.pack ("thumb line " <> show i))))
+          card $ do
+            demoTabVar <- useEnumVar Controls
+            let body t = if t == Controls then controlsBody dumpRef else heading (T.pack (show t))
+            tabs demoTabVar [tab t (T.pack (show t)) (body t) | t <- [minBound ..]]
+      -- Heights of the checkbox, colour picker and text input, in that order.
+      heights c dumpRef = readIORef dumpRef >>= mapM (fmap (fmap rectH) . getPrevRect c . respId)
+      extent lbls ss = case [(y, y + h) | (Rect _ y _ h, txt, _, _, _) <- ss, any (`T.isSuffixOf` txt) lbls] of
+        [] -> 0
+        ys -> maximum (map snd ys) - minimum (map fst ys)
+      tooTall pageH loneH = case (pageH, loneH) of
+        (Just p, Just l) -> l >= 8 && p > l * 1.35
+        _ -> True
+      jumped a b = case (a, b) of
+        (Just x, Just y) -> abs (x - y) > 1
+        _ -> True
+      -- The tab body must not fill the wrap-line height of the left column.
+      stretched ss =
+        let left = extent ["State", "Clicked", "Gallery"] ss
+         in left > 80 && extent ["Controls"] ss > left * 0.92
+  dumpLone <- newIORef []
   ctxLone <- newPixelContext
   _ <- runFrame ctxLone inp0 (columnWith (tight . fillW) (controlsBody dumpLone))
   lone <- heights ctxLone dumpLone
-  dumpPage <- newIORef Nothing
+  dumpPage <- newIORef []
   let page = demoPage dumpPage
   _ <- warmup2 ctx inp0 page
   page0 <- heights ctx dumpPage
   spans0 <- collectTextSpans ctx
-  dumped <- readIORef dumpPage
-  cbRect <- maybe (pure Nothing) (\(cb, _, _) -> getPrevRect ctx (respId cb)) dumped
-  let hover = maybe inp0 (\r -> inp0 {inputMousePos = spanCenter r}) cbRect
-  _ <- runFrame ctx hover page
+  cbRect <- readIORef dumpPage >>= maybe (pure Nothing) (getPrevRect ctx . respId) . listToMaybe
+  _ <- runFrame ctx (maybe inp0 (\r -> inp0 {inputMousePos = spanCenter r}) cbRect) page
   pageHover <- heights ctx dumpPage
   spansH <- collectTextSpans ctx
-  let
-    left0 = spanOf ["State", "Clicked", "Gallery"] spans0
-    body0 = spanOf ["Controls"] spans0
-    leftH = spanOf ["State", "Clicked", "Gallery"] spansH
-    bodyH = spanOf ["Controls"] spansH
-    tooTall pageH loneH = case (pageH, loneH) of
-      (Just p, Just l) -> l >= 8 && p > l * 1.35
-      _ -> True
-    jumped a b = case (a, b) of
-      (Just x, Just y) -> abs (x - y) > 1
-      _ -> True
-  assert failed (not (or (zipWith tooTall page0 lone)))
-  assert failed (not (or (zipWith tooTall pageHover lone)))
+  assertEq failed (3, 3) (length lone, length page0)
+  assert failed (not (or (zipWith tooTall page0 lone ++ zipWith tooTall pageHover lone)))
   assert failed (not (or (zipWith jumped page0 pageHover)))
-  -- Body must not fill the wrap-line height of the left column.
-  assert failed (not (left0 > 80 && body0 > left0 * 0.92))
-  assert failed (not (leftH > 80 && bodyH > leftH * 0.92))
+  assert failed (not (stretched spans0 || stretched spansH))
 
--- A press on the SV field previews without committing, a held press keeps
--- sampling it without blanking the field or resetting it to white, and the
--- release commits.
-runColorPickerCommitTest :: Context -> IORef Int -> IO ()
-runColorPickerCommitTest ctx failed = do
-  let initial = colorRGBA 204 102 102 255
-  colorRef <- newVar initial
-  let inp0 = withInput 400 420
-      ui = held colorRef colorPicker'
-  (resp, _) <- warmup2 ctx inp0 ui
-  let sv = colorPickerSvSquare (respRect resp)
-      press = pressAt inp0 (V2 (rectX sv + rectW sv * 0.9) (rectY sv + 2))
-      colors = (\st -> (widgetStoreBaseColor st (respId resp) initial, widgetStoreColor st (respId resp) initial)) <$> getStore ctx
-  _ <- runFrame ctx press ui
-  (baseDrag, drag) <- colors
-  assertEq failed baseDrag initial
-  assert failed (drag /= initial)
-  _ <- runFrame ctx press {inputButtonsPressed = noButtons} ui
-  assertEq failed drag . snd =<< colors
-  _ <- runFrame ctx (releaseAt press) ui
-  (baseDone, done) <- colors
-  assertEq failed baseDone done
+initial :: Color
+initial = colorRGBA 204 102 102 255
 
--- Moving the colour with an arrow key on the focused field moves the markers
--- on the hue and alpha bars and recolours the preview swatch, which are
--- sibling parts with their own rects. The picker's state is keyed on the
--- container that holds them, so the frame repaints a clip covering every part.
-runColorPickerPartDamageTest :: Context -> IORef Int -> IO ()
-runColorPickerPartDamageTest ctx failed = do
-  colorRef <- newVar (colorRGBA 204 102 102 255)
-  let inp0 = withInput 400 1200
-      ui = held colorRef colorPickerRGBA'
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx (keyInp KeyRight inp0) ui
-  dmg <- takeDamage ctx
-  parts <- map snd <$> nodesOfType NodeColorPicker ctx
-  -- The field, hue bar, alpha bar and preview.
-  assertEq failed (length parts) 4
-  assert failed (all (clipCovers dmg) parts)
+-- | A script against a fresh picker (with alpha when @rgba@) bound to a 'Var' of @c@.
+picker :: IORef Int -> Bool -> Float -> Color -> (Var Color -> Sim (Response, Color) ()) -> IO ()
+picker failed rgba h c script = do
+  ctx <- newPixelContext
+  v <- newVar c
+  runSim ctx failed (withInput 400 h) (held v (if rgba then colorPickerRGBA' else colorPicker')) (script v)
 
--- A press that starts a drag on the SV field, and the release that ends it,
--- repaint a clip. The drag hooks' held flags are bookkeeping no node owns;
--- were they diffed like widget state they would escalate both frames to
--- DamageFull.
-runColorPickerDragDamageTest :: Context -> IORef Int -> IO ()
-runColorPickerDragDamageTest ctx failed = do
-  colorRef <- newVar (colorRGBA 204 102 102 255)
-  let inp0 = withInput 400 1200
-      ui = held colorRef colorPickerRGBA'
-  (resp, _) <- warmup2 ctx inp0 ui
-  let (press, release) = clickPair inp0 (centerOf resp)
-  _ <- runFrame ctx press ui
-  pressDmg <- takeDamage ctx
-  assert failed (clipCovers pressDmg (respRect resp))
-  _ <- runFrame ctx release ui
-  releaseDmg <- takeDamage ctx
-  assert failed (releaseDmg /= DamageFull)
+-- | The picker's committed ("current") and live colours.
+storeColors :: WidgetId -> Sim a (Color, Color)
+storeColors wid = do
+  st <- simContext >>= liftIO . getStore
+  pure (widgetStoreBaseColor st wid initial, widgetStoreColor st wid initial)
 
-runColorPickerRgbaTest :: Context -> IORef Int -> IO ()
-runColorPickerRgbaTest ctx failed = do
-  let inp0 = withInputOff 400 460
-      ui = void ((snd <$> withValue (colorRGBA 204 102 102 128) colorPickerRGBA))
-  _ <- warmup2 ctx inp0 ui
-  spans <- collectTextSpans ctx
-  forM_ ["#cc666680", "128", "Current", "New"] $ \needle -> assertSpansHas failed needle spans
+-- | A press on the SV field previews, a held one keeps sampling, and the release
+-- commits; it takes focus from a channel field, which would pull the colour back.
+-- The press and release repaint a clip, not everything.
+runColorPickerPointerTest :: Context -> IORef Int -> IO ()
+runColorPickerPointerTest _ failed = do
+  picker failed False 420 initial $ \_ -> do
+    (resp, _) <- result
+    let Rect x y w _ = colorPickerSvSquare (respRect resp)
+    _ <- press (At (V2 (x + w * 0.9) (y + 2)))
+    (base, live) <- storeColors (respId resp)
+    check (base == initial && live /= initial)
+    _ <- frame
+    checkEq live . snd =<< storeColors (respId resp)
+    _ <- release
+    uncurry checkEq =<< storeColors (respId resp)
+  picker failed False 460 initial $ \_ -> do
+    Rect x y w h <- colorPickerSvSquare . respRect . fst <$> result
+    -- Tab past the field and the hue bar to the R field.
+    pressTab 3
+    _ <- press (At (V2 (x + 2) (y + 2))) >> moveTo (At (V2 (x + w * 0.9) (y + h * 0.9)))
+    -- Low value keeps every channel dark; a field still writing R would leave it at 204.
+    checkGt 60 . colorR . snd =<< frame
+  picker failed True 1200 initial $ \_ -> do
+    ctx <- simContext
+    (resp, _) <- result
+    _ <- press (On resp)
+    check . (`clipCovers` respRect resp) =<< liftIO (takeDamage ctx)
+    _ <- release
+    check . (/= DamageFull) =<< liftIO (takeDamage ctx)
 
--- Typing in a channel field must recolour on the same frame (live edits). The
--- fields are numeric: Up steps the focused one, and letters are dropped.
-runColorPickerEditTest :: Context -> IORef Int -> IO ()
-runColorPickerEditTest ctx failed = do
-  let inp0 = withInput 400 460
-      initial = colorRGBA 204 102 102 255
-  colorVar <- newVar initial
-  let ui = held colorVar colorPicker'
-  _ <- warmup2 ctx inp0 ui
-  -- Tab past the field and the hue bar to the R field.
-  replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace, KeyBackspace, KeyBackspace]}) ui
-  ((_, col), _, _) <- runFrame ctx (inp0 {inputChars = "10"}) ui
-  assertEq failed (colorR col) 10
-  assertEq failed (colorG col) 102
-  ((_, stepped), _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
-  assertEq failed (colorR stepped) 11
-  ((_, lettered), _, _) <- runFrame ctx (inp0 {inputChars = "x"}) ui
-  assertEq failed (colorR lettered) 11
+-- | An arrow on the field changes and commits once, opaque without an alpha bar;
+-- channel fields edit live and numerically; bar keys move handles as drawn (Shift
+-- ten times, Home and End to the ends); an arrow's repaint covers every part.
 
--- A channel field that had focus must not pull the colour back while the
--- canvas is dragged: pressing the canvas takes focus away from the field.
-runColorPickerDragAfterFieldTest :: Context -> IORef Int -> IO ()
-runColorPickerDragAfterFieldTest ctx failed = do
-  let initial = colorRGBA 204 102 102 255
-  colorRef <- newVar initial
-  let inp0 = withInput 400 460
-      ui = held colorRef colorPicker'
-  (resp, _) <- warmup2 ctx inp0 ui
-  -- Tab past the field and the hue bar to the R field.
-  replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
-  let sv = colorPickerSvSquare (respRect resp)
-      press = pressAt inp0 (V2 (rectX sv + 2) (rectY sv + 2))
-      drag = holdAt press (V2 (rectX sv + rectW sv * 0.9) (rectY sv + rectH sv * 0.9))
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx drag ui
-  ((_, col), _, _) <- runFrame ctx drag ui
-  -- Low value keeps every channel dark; a field still writing R would leave
-  -- it at 204.
-  assert failed (colorR col < 60)
-
--- respChanged fires on the frame the colour moves and not on later frames. A key step
--- commits at once: the base colour follows the live one.
-runColorPickerChangeOnceTest :: Context -> IORef Int -> IO ()
-runColorPickerChangeOnceTest ctx failed = do
-  let initial = colorRGBA 204 102 102 255
-  colorRef <- newVar initial
-  let inp0 = withInput 400 420
-      ui = held colorRef colorPicker'
-      changed inp = (\((resp, _), _, _) -> respChanged resp) <$> runFrame ctx inp ui
-  (resp, _) <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (tabInp inp0) ui
-  assert failed =<< changed (keyInp KeyRight inp0)
-  store <- getStore ctx
-  let neu = widgetStoreColor store (respId resp) initial
-  assert failed (neu /= initial)
-  assertEq failed (widgetStoreBaseColor store (respId resp) initial) neu
-  assertEq failed [False, False] =<< mapM changed [inp0, inp0]
-
--- | Without an alpha bar the colour is opaque however it moves: an arrow
--- key on the field drops a translucent alpha, as a drag or a field does.
-runColorPickerKeysOpaqueTest :: Context -> IORef Int -> IO ()
-runColorPickerKeysOpaqueTest ctx failed = do
-  colorRef <- newVar (colorRGBA 204 102 102 128)
-  let inp0 = withInput 400 420
-      ui = held colorRef colorPicker'
-  warmupFocused ctx inp0 ui
-  _ <- runFrame ctx (keyInp KeyRight inp0) ui
-  assertEq failed 255 . colorA =<< readVarIO colorRef
-
--- | An edit in a channel field commits the "current" swatch, as a key step
--- does, so the next drag compares with the colour it starts from.
-runColorPickerFieldCommitsTest :: Context -> IORef Int -> IO ()
-runColorPickerFieldCommitsTest ctx failed = do
-  let initial = colorRGBA 204 102 102 255
-  colorRef <- newVar initial
-  let inp0 = withInput 400 460
-      ui = held colorRef colorPicker'
-  (resp, _) <- warmup2 ctx inp0 ui
-  -- Tab past the field and the hue bar to the R field, and step it up.
-  replicateM_ 3 (runFrame ctx (tabInp inp0) ui)
-  _ <- runFrame ctx (keyInp KeyUp inp0) ui
-  store <- getStore ctx
-  let neu = widgetStoreColor store (respId resp) initial
-  assertEq failed 205 (colorR neu)
-  assertEq failed neu (widgetStoreBaseColor store (respId resp) initial)
-
--- The hue and alpha bars are focus stops after the field. An arrow moves a
--- bar's handle the way it is drawn (down raises the hue, up lowers the alpha),
--- Shift steps ten times as far, and Home / End jump to the bar's ends.
-runColorPickerBarKeysTest :: Context -> IORef Int -> IO ()
-runColorPickerBarKeysTest ctx failed = do
-  let initial = colorRGBA 204 102 102 200
-  colorRef <- newVar initial
-  let inp0 = withInput 440 460
-      ui = held colorRef colorPickerRGBA'
-      frame inp = snd <$> evalUi ctx inp ui
-      press k = keyInp k inp0
-  _ <- warmup2 ctx inp0 ui
-  _ <- frame (press KeyTab)
-  _ <- frame (press KeyTab)
-  shifted <- frame (chordInp (shift <> key KeyDown) inp0)
-  assert failed (colorG shifted > colorG initial + 10)
-  home <- frame (press KeyHome)
-  assert failed (colorG home <= colorG initial + 1)
-  _ <- frame (press KeyTab)
-  opaque <- frame (press KeyEnd)
-  assertEq failed (colorA opaque) 255
-  lowered <- frame (press KeyUp)
-  assertEq failed (colorA lowered) 254
+runColorPickerKeysTest :: Context -> IORef Int -> IO ()
+runColorPickerKeysTest _ failed = do
+  picker failed False 420 initial $ \_ -> do
+    wid <- respId . fst <$> result
+    pressTab 1
+    check . respChanged . fst =<< pressKey KeyRight
+    (base, live) <- storeColors wid
+    check (live /= initial)
+    checkEq base live
+    checkEq [False, False] =<< replicateM 2 (respChanged . fst <$> frame)
+  picker failed False 420 (colorRGBA 204 102 102 128) $ \v -> do
+    pressTab 1 >> void (pressKey KeyRight)
+    checkEq 255 . colorA =<< liftIO (readVarIO v)
+  picker failed False 460 initial $ \_ -> do
+    wid <- respId . fst <$> result
+    pressTab 3
+    _ <- pressKey KeyUp
+    (base, live) <- storeColors wid
+    checkEq (205, live) (colorR live, base)
+    replicateM_ 3 (pressKey KeyBackspace)
+    (_, typed) <- typeText "10"
+    checkEq (10, 102) (colorR typed, colorG typed)
+    checkEq 11 . colorR . snd =<< pressKey KeyUp
+    checkEq 11 . colorR . snd =<< typeText "x"
+  picker failed True 460 (colorRGBA 204 102 102 200) $ \_ -> do
+    mapM_ expect ["#cc6666c8", "200", "Current", "New"]
+    pressTab 2
+    checkLt 112 . colorG . snd =<< chord (shift <> key KeyDown)
+    checkGt 104 . colorG . snd =<< pressKey KeyHome
+    _ <- pressKey KeyTab
+    checkEq 255 . colorA . snd =<< pressKey KeyEnd
+    checkEq 254 . colorA . snd =<< pressKey KeyUp
+  picker failed True 1200 initial $ \_ -> do
+    ctx <- simContext
+    pressTab 1 >> void frame
+    _ <- pressKey KeyRight
+    dmg <- liftIO (takeDamage ctx)
+    parts <- map snd <$> liftIO (nodesOfType NodeColorPicker ctx)
+    checkEq 4 (length parts)
+    check (all (clipCovers dmg) parts)

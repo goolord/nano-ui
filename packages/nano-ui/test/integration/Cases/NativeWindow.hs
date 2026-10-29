@@ -6,64 +6,31 @@ module Cases.NativeWindow (tests) where
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (IOException, try)
 import Data.ByteString qualified as BS
+import Data.Either (isLeft)
 import Data.Maybe (fromJust, isJust, isNothing)
 import Spec
 import GHC.TypeLits (symbolSing)
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Testing.Sim
 import System.Timeout (timeout)
 
 tests :: [Spec]
 tests =
   [ spec "native-window-without-host" runWithoutHostTest
-  , spec "native-window-pixels" runPixelsTest
   , spec "native-window-screenshot-requests" runScreenshotRequestsTest
-  , spec "native-window-settings-at-install" runInstallTest
-  , spec "native-window-setters" runSettersTest
-  , spec "native-window-size-limits-cross" runSizeLimitsCrossTest
-  , spec "native-window-size-limit-units" runSizeLimitAtTest
-  , spec "native-window-commands" runCommandsTest
-  , spec "native-window-state" runStateTest
-  , spec "native-window-state-repaints" runStateRepaintTest
   , spec "native-window-screenshot-from-a-click" runScreenshotFromClickTest
-  , spec "native-window-use-screenshot" runUseScreenshotTest
   , spec "native-window-screenshot-lifecycle" runScreenshotLifecycleTest
-  , spec "native-window-screenshot-failures" runScreenshotFailuresTest
-  , spec "native-window-setter-retry" runSetterRetryTest
-  , spec "native-window-capabilities" runCapabilitiesTest
-  , spec "backend-session" runBackendSessionTest
+  , spec "native-window-setters" runSettersTest
+  , spec "native-window-commands-and-state" runCommandsTest
   ]
 
 type instance BackendSession ('Custom "test") = Int
 
--- | A backend's session value is found through its own singleton, by every
--- copy of the context, and by nothing else; it leaves with the session.
-runBackendSessionTest :: Context -> IORef Int -> IO ()
-runBackendSessionTest ctx failed = do
-  let here = SCustom (symbolSing @"test")
-      elsewhere = SCustom (symbolSing @"other")
-      copy = ctx {ctxHotId = ctxHotId ctx}
-  separate <- newContext
-  withBackendSession ctx here 7 $ do
-    assertEq failed (Just 7) =<< warmup2 copy inp (askBackendSession here)
-    assert failed . isNothing =<< backendSession SSdl ctx
-    assert failed . isNothing =<< backendSession elsewhere ctx
-    assert failed . isNothing =<< backendSession here separate
-  assert failed . isNothing =<< backendSession here ctx
-
--- | 'askWindowCapabilities' returns the capabilities supported by the host:
--- 'noWindowCapabilities' without a host, and the installed host's declaration.
-runCapabilitiesTest :: Context -> IORef Int -> IO ()
-runCapabilitiesTest ctx failed = do
-  assertEq failed noWindowCapabilities =<< warmup2 ctx inp askWindowCapabilities
-  let caps = allWindowCapabilities {wcMove = False}
-  installWindowHost ctx defaultWindowSettings defaultWindowHost {hostCapabilities = caps}
-  assertEq failed caps =<< warmup2 ctx inp askWindowCapabilities
-
 inp :: Input
 inp = withInput 200 100
 
--- | Install a window host for a window opened with @settings@. It records
--- its calls, newest first.
+-- | Install a host for a window opened with @settings@, recording its calls newest first.
+
 recordingHost :: WindowSettings -> Context -> IO (IORef [String])
 recordingHost settings ctx = do
   calls <- newIORef []
@@ -85,6 +52,10 @@ recordingHost settings ctx = do
       }
   pure calls
 
+-- | A fresh context with a recording host for a default window.
+recording :: IO (Context, IORef [String])
+recording = newContext >>= \ctx -> (,) ctx <$> recordingHost defaultWindowSettings ctx
+
 -- | What a view asks of the host in a frame, oldest first.
 asked :: Context -> IORef [String] -> NanoUI a -> IO [String]
 asked ctx calls v = warmup ctx inp v >> reverse <$> readIORef calls <* writeIORef calls []
@@ -92,11 +63,21 @@ asked ctx calls v = warmup ctx inp v >> reverse <$> readIORef calls <* writeIORe
 solid :: Int -> Int -> RgbaPixels
 solid w h = fromJust (rgbaPixels w h (BS.replicate (w * h * 4) 255))
 
--- | Without a window, a screenshot is answered at once with nothing,
--- requests do nothing, and the window reports the frame's size, focused and
--- in its normal state.
+-- | Whether the action threw an 'IOException'.
+throws :: IO a -> IO Bool
+throws action = isLeft <$> try @IOException action
+
+-- | Pixels need 4 bytes a pixel and a positive size. Without a window, requests do
+-- nothing, a screenshot is answered with nothing, and the state is the frame's. A
+-- backend session value is found by its own singleton only, and leaves with the session.
 runWithoutHostTest :: Context -> IORef Int -> IO ()
 runWithoutHostTest ctx failed = do
+  let bytes n = BS.replicate n 7
+      sized = [(2, 3, 24), (2, 3, 23), (2, 3, 25), (0, 3, 0), (-2, -3, 24)]
+  assertEq failed [True, False, False, False, False] [isJust (rgbaPixels w h (bytes n)) | (w, h, n) <- sized]
+  assertEq failed (Just (2, 3, 24)) $
+    (\p -> (rgbaWidth p, rgbaHeight p, BS.length (rgbaBytes p))) <$> rgbaPixels 2 3 (bytes 24)
+  assertEq failed Nothing (rgbaPixels (maxBound `div` 2 + 1) 4 BS.empty)
   answers <- newIORef []
   st <- evalUi ctx inp $ do
     requestScreenshot (\shot -> modifyIORef' answers (fmap screenshotScale shot :))
@@ -111,23 +92,23 @@ runWithoutHostTest ctx failed = do
   assertEq failed [Nothing] =<< readIORef answers
   assertEq failed defaultWindowState {winSize = Size 200 100} st
   assertEq failed False =<< quitRequested ctx
-  shoot <- evalUi ctx inp askScreenshot
-  assertEq failed Nothing =<< shoot
-  -- A close request ends a session with no window to ask.
+  assertEq failed Nothing =<< join (evalUi ctx inp askScreenshot)
+  assertEq failed noWindowCapabilities =<< warmup2 ctx inp askWindowCapabilities
   assert failed =<< requestWindowClose ctx
+  let caps = allWindowCapabilities {wcMove = False}
+  installWindowHost ctx defaultWindowSettings defaultWindowHost {hostCapabilities = caps}
+  assertEq failed caps =<< warmup2 ctx inp askWindowCapabilities
+  let here = SCustom (symbolSing @"test")
+  separate <- newContext
+  withBackendSession ctx here 7 $ do
+    assertEq failed (Just 7) =<< warmup2 ctx {ctxHotId = ctxHotId ctx} inp (askBackendSession here)
+    assert failed . isNothing =<< backendSession SSdl ctx
+    assert failed . isNothing =<< backendSession (SCustom (symbolSing @"other")) ctx
+    assert failed . isNothing =<< backendSession here separate
+  assert failed . isNothing =<< backendSession here ctx
 
--- | Pixels are built only from 4 bytes per pixel and a positive size.
-runPixelsTest :: Context -> IORef Int -> IO ()
-runPixelsTest _ failed = do
-  let bytes n = BS.replicate n 7
-  assertEq failed [True, False, False, False, False] $
-    map isJust [rgbaPixels 2 3 (bytes 24), rgbaPixels 2 3 (bytes 23), rgbaPixels 2 3 (bytes 25), rgbaPixels 0 3 (bytes 0), rgbaPixels (-2) (-3) (bytes 24)]
-  assertEq failed (Just (2, 3, 24)) ((\p -> (rgbaWidth p, rgbaHeight p, BS.length (rgbaBytes p))) <$> rgbaPixels 2 3 (bytes 24))
-  assertEq failed Nothing (rgbaPixels (maxBound `div` 2 + 1) 4 BS.empty)
-
--- | Screenshots wait for the backend until after their frame, then are
--- answered once, in order, from a single capture at the last reported scale.
--- Answering requests a frame.
+-- | Screenshots are answered once each after their frame, in order, from one capture
+-- at the reported scale, requesting a frame; failures and throws still answer all.
 runScreenshotRequestsTest :: Context -> IORef Int -> IO ()
 runScreenshotRequestsTest ctx failed = do
   calls <- recordingHost defaultWindowSettings ctx
@@ -135,208 +116,51 @@ runScreenshotRequestsTest ctx failed = do
   answers <- newIORef ([] :: [(String, Maybe (Int, Float))])
   captures <- newIORef (0 :: Int)
   let capture = Just (solid 3 2) <$ modifyIORef' captures (+ 1)
+      shot sh = (rgbaWidth (screenshotPixels sh), screenshotScale sh)
       ask names = warmup ctx inp . (label "shots" >>) . forM_ names $ \name ->
-        requestScreenshot (\s -> modifyIORef' answers ((name, (\sh -> (rgbaWidth (screenshotPixels sh), screenshotScale sh)) <$> s) :))
-      expect as n = assertEq failed (as, n) =<< ((,) <$> readIORef answers <*> readIORef captures)
+        requestScreenshot (\s -> modifyIORef' answers ((name, shot <$> s) :))
+      expectNow as n = assertEq failed (as, n) =<< ((,) <$> readIORef answers <*> readIORef captures)
       two = [("second", Just (3, 2)), ("first", Just (3, 2))]
   ask []
-  -- Nothing waiting: the capture does not run.
   answerScreenshots ctx capture
-  expect [] 0
+  expectNow [] 0
   ask ["first", "second"]
-  expect [] 0
+  expectNow [] 0
   clearDirty ctx
   answerScreenshots ctx capture
-  expect two 1
+  expectNow two 1
   assert failed =<< isDirty ctx
   answerScreenshots ctx capture
-  expect two 1
-  -- A backend that cannot capture, or a host replaced first, answers with nothing.
+  expectNow two 1
   ask ["failed"]
   answerScreenshots ctx (pure Nothing)
-  expect (("failed", Nothing) : two) 1
+  expectNow (("failed", Nothing) : two) 1
   ask ["replaced"]
   _ <- recordingHost defaultWindowSettings ctx
-  expect (("replaced", Nothing) : ("failed", Nothing) : two) 1
-  -- Nothing was asked of the window itself.
+  expectNow (("replaced", Nothing) : ("failed", Nothing) : two) 1
   assertEq failed [] =<< readIORef calls
-
--- | Closing and replacing a window complete pending and late thread requests.
-runScreenshotLifecycleTest :: Context -> IORef Int -> IO ()
-runScreenshotLifecycleTest ctx failed = do
-  _ <- recordingHost defaultWindowSettings ctx
-  oldShoot <- evalUi ctx inp askScreenshot
-  _ <- recordingHost defaultWindowSettings ctx
-  assertEq failed (Just Nothing) =<< timeout 1000000 oldShoot
-  wait <- newWakeSignal ctx
-  shoot <- evalUi ctx inp askScreenshot
-  result <- newEmptyMVar
-  _ <- forkIO (shoot >>= putMVar result)
-  _ <- wait 1000000
-  closeWindowHost ctx
-  assertEq failed (Just Nothing) =<< timeout 1000000 (takeMVar result)
-  assertEq failed (Just Nothing) =<< timeout 1000000 shoot
-  closeWindowHost ctx
-  -- Access after closing cannot call stale native callbacks.
-  calls <- recordingHost defaultWindowSettings ctx
-  closeWindowHost ctx
-  evalUi ctx inp (setWindowTitleUi "closed")
-  assertEq failed [] =<< readIORef calls
-
-runScreenshotFailuresTest :: Context -> IORef Int -> IO ()
-runScreenshotFailuresTest ctx failed = do
-  _ <- recordingHost defaultWindowSettings ctx
-  answers <- newIORef []
-  let ask action = evalUi ctx inp (requestScreenshot action)
-      note shot = modifyIORef' answers (isJust shot :)
+  done <- newIORef []
+  let request action = evalUi ctx inp (requestScreenshot action)
+      note s = modifyIORef' done (isJust s :)
       broken = ioError (userError "capture failed")
-      checkError action = try @IOException action >>= assert failed . either (const True) (const False)
-  ask note
-  ask note
-  checkError (answerScreenshots ctx broken)
-  assertEq failed [False, False] =<< readIORef answers
-  writeIORef answers []
-  ask (\_ -> broken)
-  ask note
-  checkError (answerScreenshots ctx (pure (Just (solid 1 1))))
-  assertEq failed [True] =<< readIORef answers
-  -- Capturing may precede present; user callbacks must follow it.
+  request note >> request note
+  assert failed =<< throws (answerScreenshots ctx broken)
+  assertEq failed [False, False] =<< readIORef done
+  writeIORef done []
+  request (const broken) >> request note
+  assert failed =<< throws (answerScreenshots ctx (pure (Just (solid 1 1))))
+  assertEq failed [True] =<< readIORef done
   events <- newIORef ([] :: [String])
-  ask (\_ -> modifyIORef' events ("answer" :))
-  answerScreenshotsAfter ctx
-    (Nothing <$ modifyIORef' events ("capture" :))
-    (modifyIORef' events ("present" :))
+  request (\_ -> modifyIORef' events ("answer" :))
+  let event e = modifyIORef' events (e :)
+  answerScreenshotsAfter ctx (Nothing <$ event "capture") (event "present")
   assertEq failed ["answer", "present", "capture"] =<< readIORef events
-  ask (\_ -> broken)
-  ask note
-  checkError (closeWindowHost ctx)
-  assertEq failed [False, True] =<< readIORef answers
+  request (const broken) >> request note
+  assert failed =<< throws (closeWindowHost ctx)
+  assertEq failed [False, True] =<< readIORef done
   closeWindowHost ctx
 
-runSetterRetryTest :: Context -> IORef Int -> IO ()
-runSetterRetryTest ctx failed = do
-  attempts <- newIORef (0 :: Int)
-  installWindowHost ctx defaultWindowSettings defaultWindowHost
-    { hostSetTitle = \_ -> do
-        modifyIORef' attempts (+ 1)
-        n <- readIORef attempts
-        when (n == 1) (ioError (userError "native failure"))
-    }
-  first <- try @IOException (evalUi ctx inp (setWindowTitleUi "retry"))
-  assert failed (either (const True) (const False) first)
-  replicateM_ 2 (evalUi ctx inp (setWindowTitleUi "retry"))
-  assertEq failed 2 =<< readIORef attempts
-
--- | Installing a host applies, through it, the settings a window does not
--- open with: size limits, icon, opacity and position. Setters then act only
--- on values that differ from the opening settings.
-runInstallTest :: Context -> IORef Int -> IO ()
-runInstallTest ctx failed = do
-  let settings =
-        defaultWindowSettings
-          { wsTitle = "opened", wsMinSize = Just (Size 100 50), wsIcon = Just (solid 2 2), wsOpacity = 0.5
-          , wsPosition = WindowPositionAt 30 20, wsMode = Fullscreen
-          }
-  calls <- recordingHost settings ctx
-  assertEq failed ["min Just (Size {sizeW = 100.0, sizeH = 50.0})", "icon 2", "opacity 0.5", "move (30,20)"] . reverse =<< readIORef calls
-  writeIORef calls []
-  assertEq failed [] =<< asked ctx calls (setWindowTitleUi "opened" >> setWindowModeUi Fullscreen >> setWindowOpacityUi 0.5)
-  assertEq failed ["center"] =<< readIORef =<< recordingHost defaultWindowSettings {wsPosition = WindowPositionCentered} ctx
-  assertEq failed [] =<< readIORef =<< recordingHost defaultWindowSettings ctx
-
--- | Setters reach the host only on a change; opacity is kept to 0..1.
-runSettersTest :: Context -> IORef Int -> IO ()
-runSettersTest ctx failed = do
-  calls <- recordingHost defaultWindowSettings ctx
-  let view (title, icon, minSize, opacity, mode) = do
-        setWindowTitleUi title
-        setWindowIconUi (solid icon icon)
-        setWindowMinSizeUi minSize
-        setWindowMaxSizeUi Nothing
-        setWindowOpacityUi opacity
-        setWindowModeUi mode
-      first = ("a", 2, Just (Size 100 50), 0.5, Windowed)
-  forM_
-    [ (first, ["title \"a\"", "icon 2", "min Just (Size {sizeW = 100.0, sizeH = 50.0})", "opacity 0.5"])
-    , (first, [])
-    , (first, [])
-    , (("a", 4, Just (Size 100 50), 7, Hidden), ["icon 4", "opacity 1.0", "mode Hidden"])
-    , (("b", 4, Nothing, 1, Hidden), ["title \"b\"", "min Nothing"])
-    ]
-    $ \(v, expect) -> assertEq failed expect =<< asked ctx calls (view v)
-
--- | A limit set past the other one on an axis moves the other one to it on
--- that axis, and the host gets the moved one first, so it never sees a
--- minimum above the maximum. A zero axis is unlimited and moves nothing.
-runSizeLimitsCrossTest :: Context -> IORef Int -> IO ()
-runSizeLimitsCrossTest ctx failed = do
-  calls <- recordingHost defaultWindowSettings ctx
-  let sz w h = "Just (Size {sizeW = " ++ show (w :: Float) ++ ", sizeH = " ++ show (h :: Float) ++ "})"
-  forM_
-    [ (setWindowMaxSizeUi (Just (Size 300 200)), ["max " ++ sz 300 200])
-    , (setWindowMinSizeUi (Just (Size 400 100)), ["max " ++ sz 400 200, "min " ++ sz 400 100])
-    , (setWindowMaxSizeUi (Just (Size 350 50)), ["min " ++ sz 350 50, "max " ++ sz 350 50])
-    , (setWindowMinSizeUi (Just (Size 0 80)), ["max " ++ sz 350 80, "min " ++ sz 0 80])
-    , (setWindowMaxSizeUi Nothing, ["max Nothing"])
-    , (setWindowMinSizeUi (Just (Size 500 500)), ["min " ++ sz 500 500])
-    ]
-    $ \(v, expect) -> assertEq failed expect =<< asked ctx calls v
-
--- | A limit in native units is scaled, rounded and outset. An axis of zero
--- or less, NaN or infinity is no limit, and a huge one stops at Int32's top.
-runSizeLimitAtTest :: Context -> IORef Int -> IO ()
-runSizeLimitAtTest _ failed = do
-  assertEq failed (302, 0) (sizeLimitAt 1.5 (2, 3) (Just (Size 200 (-1))))
-  assertEq failed (0, 908) (sizeLimitAt 1 (8, 8) (Just (Size (1 / 0) 900)))
-  assertEq failed (0, 900) (sizeLimitAt 1 (0, 0) (Just (Size (0 / 0) 900)))
-  assertEq failed (0x7FFFFFFF, 0) (sizeLimitAt 1 (8, 0) (Just (Size 3e9 0)))
-  -- Past Int's range too, or past Float's once scaled.
-  assertEq failed (0x7FFFFFFF, 0x7FFFFFFF) (sizeLimitAt 2 (16, 39) (Just (Size 1e20 3.4e38)))
-
--- | Commands act on every call; toggling maximizes or restores based on the
--- window state the backend last reported.
-runCommandsTest :: Context -> IORef Int -> IO ()
-runCommandsTest ctx failed = do
-  calls <- recordingHost defaultWindowSettings ctx
-  let commands = moveWindowUi 5 6 >> centerWindowUi >> resizeWindowUi (Size 300 200) >> minimizeWindowUi >> maximizeWindowUi >> restoreWindowUi
-  replicateM_ 2 $
-    assertEq failed ["move (5,6)", "center", "resize Size {sizeW = 300.0, sizeH = 200.0}", "minimize", "maximize", "restore"]
-      =<< asked ctx calls commands
-  assertEq failed ["maximize"] =<< asked ctx calls toggleMaximizedUi
-  reportWindowState ctx defaultWindowState {winMaximized = True}
-  assertEq failed ["restore"] =<< asked ctx calls toggleMaximizedUi
-
--- | A view reads the state the backend reported, at the frame's size. A
--- change requests a frame only once a view has read the state.
-runStateTest :: Context -> IORef Int -> IO ()
-runStateTest ctx failed = do
-  _ <- recordingHost defaultWindowSettings ctx
-  let reported = defaultWindowState {winSize = Size 9 9, winScale = 2, winPosition = Just (10, 20), winFocused = False, winFullscreen = True}
-      changed st = clearDirty ctx >> reportWindowState ctx st >> isDirty ctx
-  assertEq failed False =<< changed reported
-  assertEq failed reported {winSize = Size 200 100} =<< evalUi ctx inp askWindow
-  assertEq failed False =<< changed reported
-  assertEq failed True =<< changed reported {winFocused = True}
-
--- | A view that paints the window state (a box coloured by focus) is
--- repainted when that state changes: no rect or text diff shows the change.
-runStateRepaintTest :: Context -> IORef Int -> IO ()
-runStateRepaintTest ctx failed = do
-  _ <- recordingHost defaultWindowSettings ctx
-  let ui = do
-        st <- askWindow
-        void (label "focus")
-        box (fixedWH 40 40) (if winFocused st then colorRGBA 0 255 0 255 else colorRGBA 128 128 128 255)
-  replicateM_ 3 (runFrame ctx inp ui)
-  assert failed . (/= DamageFull) =<< takeDamage ctx
-  clearDirty ctx
-  reportWindowState ctx defaultWindowState {winFocused = False}
-  assert failed =<< isDirty ctx
-  _ <- runFrame ctx inp ui
-  assertEq failed DamageFull =<< takeDamage ctx
-
--- | A screenshot requested from a click is requested once, even though the
--- click's hook write reruns the view.
+-- | A screenshot requested from a click is requested once, though the click reruns the view.
 runScreenshotFromClickTest :: Context -> IORef Int -> IO ()
 runScreenshotFromClickTest ctx failed = do
   _ <- recordingHost defaultWindowSettings ctx
@@ -346,38 +170,149 @@ runScreenshotFromClickTest ctx failed = do
         liftIO (modifyIORef' passes (+ 1))
         shotsVar <- useVar (0 :: Int)
         shots <- readVar shotsVar
-        resp <- button' "Shot"
-        when (respClicked resp) (requestScreenshot (\_ -> modifyIORef' answers (+ 1)) >> writeVar shotsVar (shots + 1))
-        pure resp
-  resp <- warmup2 ctx inp view
-  let (press, release) = clickPair inp (centerOf resp)
-  warmup ctx press view
-  writeIORef passes 0
-  warmup ctx release view
-  assertEq failed 2 =<< readIORef passes
+        whenM (button "Shot") $
+          requestScreenshot (\_ -> modifyIORef' answers (+ 1)) >> writeVar shotsVar (shots + 1)
+  runSim ctx failed inp view $ do
+    _ <- press "Shot"
+    liftIO (writeIORef passes 0)
+    _ <- release
+    checkEq 2 =<< liftIO (readIORef passes)
   answerScreenshots ctx (pure (Just (solid 1 1)))
   assertEq failed 1 =<< readIORef answers
 
--- | 'useScreenshot' waits in a background task for the next frame on screen,
--- wakes the loop, and returns the screenshot. The same key captures only
--- once.
-runUseScreenshotTest :: Context -> IORef Int -> IO ()
-runUseScreenshotTest ctx failed = do
+-- | 'useScreenshot' waits in a task for the next frame on screen; a key captures once.
+-- Closing or replacing a window answers pending requests; a closed host is not called.
+runScreenshotLifecycleTest :: Context -> IORef Int -> IO ()
+runScreenshotLifecycleTest base failed = do
   job <- newTask
-  _ <- recordingHost defaultWindowSettings ctx
-  wait <- newWakeSignal ctx
+  _ <- recordingHost defaultWindowSettings base
+  woken <- newWakeSignal base
   captures <- newIORef (0 :: Int)
   let capture = Just (solid 4 4) <$ modifyIORef' captures (+ 1)
       ui = fmap (rgbaWidth . screenshotPixels) <$> useScreenshot job ("shot" :: String)
-      -- Run frames, answering each as a backend would, until the view has
-      -- its screenshot.
+      answered = evalUi base inp ui <* answerScreenshots base capture
       go :: Int -> IO (Maybe Int)
-      go n = do
-        shot <- evalUi ctx inp ui
-        answerScreenshots ctx capture
-        if isJust shot || n == 0 then pure shot else wait 2000000 >> go (n - 1)
+      go n = answered >>= \s -> if isJust s || n == 0 then pure s else woken 2000000 >> go (n - 1)
   assertEq failed (Just 4) =<< go 20
+  replicateM_ 3 answered
   assertEq failed 1 =<< readIORef captures
-  replicateM_ 3 (evalUi ctx inp ui >> answerScreenshots ctx capture)
-  assertEq failed 1 =<< readIORef captures
-  cancelTasks ctx
+  cancelTasks base
+  ctx <- newContext
+  _ <- recordingHost defaultWindowSettings ctx
+  oldShoot <- evalUi ctx inp askScreenshot
+  _ <- recordingHost defaultWindowSettings ctx
+  assertEq failed (Just Nothing) =<< timeout 1000000 oldShoot
+  wait <- newWakeSignal ctx
+  shoot <- evalUi ctx inp askScreenshot
+  answer <- newEmptyMVar
+  _ <- forkIO (shoot >>= putMVar answer)
+  _ <- wait 1000000
+  closeWindowHost ctx
+  assertEq failed (Just Nothing) =<< timeout 1000000 (takeMVar answer)
+  assertEq failed (Just Nothing) =<< timeout 1000000 shoot
+  closeWindowHost ctx
+  calls <- recordingHost defaultWindowSettings ctx
+  closeWindowHost ctx
+  evalUi ctx inp (setWindowTitleUi "closed")
+  assertEq failed [] =<< readIORef calls
+
+-- | Installing a host applies the settings a window does not open with; setters then
+-- reach it only on a change, retrying after a failure. A size limit set past the
+-- other moves the other first, so the host never sees a minimum above the maximum.
+runSettersTest :: Context -> IORef Int -> IO ()
+runSettersTest ctx failed = do
+  let sz w h = "Just (Size {sizeW = " ++ show (w :: Float) ++ ", sizeH = " ++ show (h :: Float) ++ "})"
+      opened =
+        defaultWindowSettings
+          { wsTitle = "opened", wsMinSize = Just (Size 100 50), wsIcon = Just (solid 2 2), wsOpacity = 0.5
+          , wsPosition = WindowPositionAt 30 20, wsMode = Fullscreen
+          }
+  calls <- recordingHost opened ctx
+  assertEq failed ["min " ++ sz 100 50, "icon 2", "opacity 0.5", "move (30,20)"] . reverse =<< readIORef calls
+  writeIORef calls []
+  let unchanged = setWindowTitleUi "opened" >> setWindowModeUi Fullscreen >> setWindowOpacityUi 0.5
+      centered = defaultWindowSettings {wsPosition = WindowPositionCentered}
+  assertEq failed [] =<< asked ctx calls unchanged
+  assertEq failed ["center"] =<< readIORef =<< recordingHost centered ctx
+  assertEq failed [] =<< readIORef =<< recordingHost defaultWindowSettings ctx
+  (c1, calls1) <- recording
+  let view (title, icon, minSize, opacity, mode) = do
+        setWindowTitleUi title
+        setWindowIconUi (solid icon icon)
+        setWindowMinSizeUi minSize
+        setWindowMaxSizeUi Nothing
+        setWindowOpacityUi opacity
+        setWindowModeUi mode
+      first = ("a", 2, Just (Size 100 50), 0.5, Windowed)
+  forM_
+    [ (first, ["title \"a\"", "icon 2", "min " ++ sz 100 50, "opacity 0.5"])
+    , (first, [])
+    , (first, [])
+    , (("a", 4, Just (Size 100 50), 7, Hidden), ["icon 4", "opacity 1.0", "mode Hidden"])
+    , (("b", 4, Nothing, 1, Hidden), ["title \"b\"", "min Nothing"])
+    ]
+    $ \(v, want) -> assertEq failed want =<< asked c1 calls1 (view v)
+  (c2, calls2) <- recording
+  forM_
+    [ (setWindowMaxSizeUi (Just (Size 300 200)), ["max " ++ sz 300 200])
+    , (setWindowMinSizeUi (Just (Size 400 100)), ["max " ++ sz 400 200, "min " ++ sz 400 100])
+    , (setWindowMaxSizeUi (Just (Size 350 50)), ["min " ++ sz 350 50, "max " ++ sz 350 50])
+    , (setWindowMinSizeUi (Just (Size 0 80)), ["max " ++ sz 350 80, "min " ++ sz 0 80])
+    , (setWindowMaxSizeUi Nothing, ["max Nothing"])
+    , (setWindowMinSizeUi (Just (Size 500 500)), ["min " ++ sz 500 500])
+    ]
+    $ \(v, want) -> assertEq failed want =<< asked c2 calls2 v
+  c3 <- newContext
+  attempts <- newIORef (0 :: Int)
+  installWindowHost c3 defaultWindowSettings defaultWindowHost
+    { hostSetTitle = \_ -> do
+        modifyIORef' attempts (+ 1)
+        n <- readIORef attempts
+        when (n == 1) (ioError (userError "native failure"))
+    }
+  assert failed =<< throws (evalUi c3 inp (setWindowTitleUi "retry"))
+  replicateM_ 2 (evalUi c3 inp (setWindowTitleUi "retry"))
+  assertEq failed 2 =<< readIORef attempts
+  -- A native limit is scaled, rounded and outset; 0, NaN or infinity is none, and a
+  -- huge one stops at Int32's top.
+  forM_
+    [ ((302, 0), sizeLimitAt 1.5 (2, 3) (Just (Size 200 (-1))))
+    , ((0, 908), sizeLimitAt 1 (8, 8) (Just (Size (1 / 0) 900)))
+    , ((0, 900), sizeLimitAt 1 (0, 0) (Just (Size (0 / 0) 900)))
+    , ((0x7FFFFFFF, 0), sizeLimitAt 1 (8, 0) (Just (Size 3e9 0)))
+    , ((0x7FFFFFFF, 0x7FFFFFFF), sizeLimitAt 2 (16, 39) (Just (Size 1e20 3.4e38)))
+    ]
+    $ uncurry (assertEq failed)
+
+-- | Commands act on every call; toggling follows the reported state. A state change
+-- wakes only a view that read it, and repaints one that paints it.
+runCommandsTest :: Context -> IORef Int -> IO ()
+runCommandsTest ctx failed = do
+  calls <- recordingHost defaultWindowSettings ctx
+  let commands = do
+        moveWindowUi 5 6 >> centerWindowUi >> resizeWindowUi (Size 300 200)
+        minimizeWindowUi >> maximizeWindowUi >> restoreWindowUi
+  replicateM_ 2 $
+    assertEq failed ["move (5,6)", "center", "resize " ++ show (Size 300 200), "minimize", "maximize", "restore"]
+      =<< asked ctx calls commands
+  assertEq failed ["maximize"] =<< asked ctx calls toggleMaximizedUi
+  reportWindowState ctx defaultWindowState {winMaximized = True}
+  assertEq failed ["restore"] =<< asked ctx calls toggleMaximizedUi
+  (c, _) <- recording
+  let reported =
+        defaultWindowState
+          {winSize = Size 9 9, winScale = 2, winPosition = Just (10, 20), winFocused = False, winFullscreen = True}
+      changed st = clearDirty c >> reportWindowState c st >> isDirty c
+      ui = do
+        st <- askWindow
+        label "focus"
+        box (fixedWH 40 40) (if winFocused st then colorRGBA 0 255 0 255 else colorRGBA 128 128 128 255)
+  assertEq failed False =<< changed reported
+  assertEq failed reported {winSize = Size 200 100} =<< evalUi c inp askWindow
+  assertEq failed False =<< changed reported
+  replicateM_ 3 (runFrame c inp ui)
+  assert failed . (/= DamageFull) =<< takeDamage c
+  assertEq failed True =<< changed reported {winFocused = True}
+  _ <- runFrame c inp ui
+  assertEq failed DamageFull =<< takeDamage c
+

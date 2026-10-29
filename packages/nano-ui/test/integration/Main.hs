@@ -11,7 +11,6 @@ import Cases.Window qualified
 import Cases.Cache qualified
 import Cases.LayoutReuse qualified
 import Cases.Grid qualified
-import Cases.Caption qualified
 import Cases.PaneGrid qualified
 import Cases.Labels qualified
 import Cases.Reorder qualified
@@ -71,7 +70,6 @@ main = do
     , Cases.Cache.tests
     , Cases.LayoutReuse.tests
     , Cases.Grid.tests
-    , Cases.Caption.tests
     , Cases.ViewApi.tests
     , Cases.PaneGrid.tests
     , Cases.Labels.tests

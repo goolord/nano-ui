@@ -251,7 +251,6 @@ test-suite nano-ui-test
         BackendApi
         Spec
         Cases.Animation
-        Cases.Caption
         Cases.Atlas
         Cases.Combo
         Cases.Damage
