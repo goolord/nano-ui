@@ -1,125 +1,66 @@
 module Cases.Tooltip (tests) where
 
-import Control.Concurrent (threadDelay)
 import Spec
-import Data.Text qualified as T
+import Data.Maybe (isJust)
+import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
-  [ spec "tooltip-hover" runTooltipHoverTest
-  , spec "tooltip-scroll-pos" runTooltipScrollPosTest
-  , spec "tooltip-disabled-target" runTooltipDisabledTargetTest
-  , spec "tooltip-gap" runTooltipGapTest
+  [ simSpec "tooltip-scroll-pos" 200 200 scrolledUi tooltipScrollPos
+  , simSpec "tooltip-targets" 400 300 targetsUi tooltipTargets
   ]
 
--- | Hold the pointer still past the default tooltip delay, then return the
--- next frame's result.
-restOn :: Context -> Input -> NanoUI a -> IO a
-restOn ctx inp ui = do
-  _ <- runFrame ctx inp ui
-  threadDelay (round (tooltipDelay defaultTooltipConfig * 1e6) + 50000)
-  evalUi ctx inp ui
+now :: TooltipConfig
+now = defaultTooltipConfig {tooltipDelay = 0}
 
--- Resting on a target shows its text tooltip. A widget tooltip evaluates its
--- body only while shown.
-runTooltipHoverTest :: Context -> IORef Int -> IO ()
-runTooltipHoverTest ctx failed = do
-  let inp0 = withInput 640 480
-      ui = rowWith fillW $ do
-        help <- button' "Help Target"
-        tooltip help "Helpful advice here"
-        _ <- spacer (Grow 1) Fit
-        rich <- button' "Rich Info"
-        body <- tooltipWidget rich $ do
-          row $ do
-            void (label "[Icon]")
-            label "Rich tooltip body text"
-        pure (help, rich, body)
+scrolledUi :: NanoUI (WidgetId, Response)
+scrolledUi = scrollArea (fillW . fixedH 80) $ column $ do
+  replicateM_ 40 (label "pad line")
+  btn <- button' "Tip Target"
+  tooltipConfigured now btn "Scrolled tip text"
+  replicateM_ 12 (label "tail line")
+  pure btn
 
-  -- Unhovered: no tooltip overlay, and the widget body is not evaluated
-  (help, rich, body0) <- warmup2 ctx inp0 ui
-  spans0 <- collectOverlayTextSpans ctx inp0
-  assert failed (not (hasText "Helpful advice" spans0))
-  assert failed (case body0 of Nothing -> True; _ -> False)
+-- | A tooltip in a scrolled area appears under its target where it is
+-- drawn, not at its unscrolled layout position.
+tooltipScrollPos :: Sim (WidgetId, Response) ()
+tooltipScrollPos = do
+  ctx <- simContext
+  (sid, _) <- result
+  Just (off, btn) <- liftIO (wheelIntoView ctx (withInput 200 200) scrolledUi snd sid 16)
+  checkGt off 0
+  _ <- moveTo (On btn) >> settle
+  tipY <- rectY <$> rectOf "Scrolled tip text"
+  let bottom = rectY (respRect btn) + rectH (respRect btn)
+  check (abs (tipY - bottom) <= 16)
+  check (abs (tipY - bottom) < abs (tipY - (bottom + off)))
 
-  -- Hovered: no tooltip until the pointer rests
-  let hoverHelp = inp0 {inputMousePos = centerOf help}
-  _ <- runFrame ctx hoverHelp ui
-  assert failed . not . hasText "Helpful advice" =<< collectOverlayTextSpans ctx hoverHelp
-  _ <- restOn ctx hoverHelp ui
-  spans1 <- collectOverlayTextSpans ctx hoverHelp
-  assert failed (hasText "Helpful advice" spans1)
+targetsUi :: NanoUI (Response, Response, Response, Maybe ())
+targetsUi = columnWith tight $ do
+  off <- disabledWhen True (buttonWith' (fixedWH 200 40) "Off")
+  tooltipConfigured now off "Why it is off"
+  _ <- buttonWith' (pinAt 150 0 . fixedWH 40 40) "cover"
+  near <- buttonWith' (fixedWH 100 30) "Near"
+  tooltipConfigured now {tooltipGap = 4} near "Near tip"
+  far <- buttonWith' (fixedWH 100 30) "Far"
+  body <- tooltipWidgetConfigured now {tooltipGap = 20} far (label "Far tip")
+  pure (off, near, far, body)
 
-  let hoverRich = inp0 {inputMousePos = centerOf rich}
-  (_, _, body1) <- restOn ctx hoverRich ui
-  assert failed (case body1 of Just _ -> True; Nothing -> False)
-
-runTooltipScrollPosTest :: Context -> IORef Int -> IO ()
-runTooltipScrollPosTest ctx failed = do
-  let inp0 = withInput 200 200
-      ui =
-        scrollArea (fillW . fixedH 80) $
-          column $ do
-            mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
-            btn <- button' "Tip Target"
-            tooltip btn "Scrolled tip text"
-            mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
-            pure btn
-  (sid, _) <- warmup2 ctx inp0 ui
-  assertJustM failed (wheelIntoView ctx inp0 ui snd sid 16) $ \(off, btn1) -> do
-    assert failed (off > 0)
-    let hoverInp = inp0 {inputMousePos = centerOf btn1}
-        visualBottom = rectY (respRect btn1) + rectH (respRect btn1)
-        layoutBottom = visualBottom + off
-    _ <- restOn ctx hoverInp ui
-    spans <- collectOverlayTextSpans ctx hoverInp
-    let ys =
-          [ rectY r
-          | (r, txt, _, _, _) <- spans
-          , "Scrolled tip" `T.isInfixOf` txt
-          ]
-    case ys of
-      [] -> assert failed False
-      (tipY : _) -> do
-        assert failed (abs (tipY - visualBottom) <= 16)
-        assert failed (abs (tipY - visualBottom) < abs (tipY - layoutBottom))
-
--- | A disabled widget shows its tooltip where the pointer is on it and
--- nothing covers it, even though it reports no hover.
-runTooltipDisabledTargetTest :: Context -> IORef Int -> IO ()
-runTooltipDisabledTargetTest ctx failed = do
-  let inp0 = withInputOff 400 200
-      cfg = defaultTooltipConfig {tooltipDelay = 0}
-      ui = columnWith tight $ do
-        off <- disabledWhen True (buttonWith' (fixedWH 200 40) "Off")
-        tooltipConfigured cfg off "Why it is off"
-        _ <- buttonWith' (pinAt 150 0 . fixedWH 40 40) "cover"
-        pure off
-      tipAt p = do
-        let inp = inp0 {inputMousePos = p}
-        warmup ctx inp ui
-        r <- evalUi ctx inp ui
-        (,) (respHovered r) . hasText "Why it is off" <$> collectOverlayTextSpans ctx inp
-  _ <- warmup2 ctx inp0 ui
-  tipAt (V2 60 20) >>= assertEq failed (False, True)
-  tipAt (V2 170 20) >>= assertEq failed (False, False)
-  tipAt (V2 300 150) >>= assertEq failed (False, False)
-
--- | 'tooltipGap' sets the space between the tooltip and its target.
-runTooltipGapTest :: Context -> IORef Int -> IO ()
-runTooltipGapTest ctx failed = do
-  let inp0 = withInputOff 400 300
-      ui gap' = columnWith tight $ do
-        b <- buttonWith' (fixedWH 100 30) "Target"
-        tooltipConfigured defaultTooltipConfig {tooltipDelay = 0, tooltipGap = gap'} b "Gap tip"
-        pure b
-      tipTop gap' = do
-        b <- warmup2 ctx inp0 (ui gap')
-        let inp = inp0 {inputMousePos = centerOf b}
-        warmup ctx inp (ui gap')
-        warmup ctx inp (ui gap')
-        spans <- collectOverlayTextSpans ctx inp
-        pure (rectY <$> spanRect "Gap tip" spans)
-  near <- tipTop 4
-  far <- tipTop 20
-  assertEq failed (Just 16) ((-) <$> far <*> near)
+-- | A disabled widget shows its tooltip where the pointer is on it uncovered,
+-- though it reports no hover. 'tooltipGap' sets the space below the target,
+-- and a widget tooltip evaluates its body only while shown.
+tooltipTargets :: Sim (Response, Response, Response, Maybe ()) ()
+tooltipTargets = do
+  (_, near, far, _) <- result
+  let offTip p = do
+        (off, _, _, body) <- moveTo (At p) >> settle
+        shown <- isJust <$> findSpan "Why it is off"
+        pure (respHovered off, body, shown)
+      gapUnder r tip = do
+        (_, _, _, body) <- moveTo (On r) >> settle
+        (\t -> (body, rectY t - rectY (respRect r) - rectH (respRect r))) <$> rectOf tip
+  checkEq [(False, Nothing, True), (False, Nothing, False), (False, Nothing, False)]
+    =<< mapM offTip [V2 60 20, V2 170 20, V2 300 150]
+  (body4, g4) <- gapUnder near "Near tip"
+  (body20, g20) <- gapUnder far "Far tip"
+  checkEq (Nothing, Just (), 16) (body4, body20, g20 - g4)

@@ -4,333 +4,175 @@ import Spec
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (InteractionState (..), getsInteraction, setDrawSquareGeometry)
+import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
-  [ spec "modal-overlay" runModalOverlayTest
+  [ simSpec "modal-constant" 800 200 constantUi modalConstant
   , spec "modal-var" runModalVarTest
-  , spec "modal-fits-text" runModalFitsTextTest
-  , spec "modal-no-phantom-scroll" runModalNoPhantomScrollTest
-  , spec "modal-close-damage" runModalCloseDamageTest
-  , spec "modal-closed-by-rerun" runModalClosedByRerunTest
+  , spec "modal-nested-dismiss" runModalNestedDismissTest
+  , simSpec "modal-over-inner-window" 500 400 innerWindowUi modalOverInnerWindow
   , spec "modal-fractional-scale-no-scroll" runModalFractionalScaleNoScrollTest
   , spec "modal-fill-label-fits" runModalFillLabelFitsTest
   , spec "modal-tree-selection" runModalTreeSelectionTest
-  , spec "modal-nested-dismiss" runModalNestedDismissTest
-  , spec "modal-over-inner-window" runModalOverInnerWindowTest
-  , spec "modal-over-inner-window-drag" runModalOverInnerWindowDragTest
-  , spec "modal-over-inner-window-resize" runModalOverInnerWindowResizeTest
-  , spec "modal-hides-text-menu" runModalHidesTextMenuTest
   ]
 
--- | A field's edit menu that a newly opened modal hides closes, so the first
--- Escape closes the modal.
-runModalHidesTextMenuTest :: Context -> IORef Int -> IO ()
-runModalHidesTextMenuTest ctx failed = do
-  open <- newVar False
-  let inp0 = withInput 640 480
-      ui = column $ do
-        (field, _) <- withValue "text" textInput'
-        modal open "Error" (label "Something failed")
-        pure field
-  field <- warmup2 ctx inp0 ui
-  _ <- runRightClick ctx inp0 ui (centerOf field)
-  assert failed . isJust =<< getsInteraction ctx isTextInputMenu
-  writeVarIO open True
-  warmup ctx inp0 ui
-  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
-  assertEq failed False =<< readVarIO open
+-- | Whether the frame's Escape went to an overlay rather than quitting.
+escapeTaken :: Sim a Bool
+escapeTaken = simContext >>= \ctx -> liftIO (overlayConsumesQuit ctx (keyInp KeyEscape emptyInput))
 
--- | A modal declared inside another's body closes first: Escape, then a
--- click on the outer modal, each close only the inner one.
+sentence :: T.Text
+sentence = "A sentence that is wider than the smallest modal allows."
+
+constantUi :: NanoUI (Response, Maybe Response)
+constantUi = column $ do
+  _ <- button "Outside"
+  modal' (constVar True) "Title" $ do
+    r <- button' "Inside"
+    muted sentence
+    r <$ forM_ [1 .. 40 :: Int] (\i -> label (T.pack ("Row " <> show i)))
+
+-- | A modal on a constant fits the window but widens for a label, has no
+-- close button, and reports a press beside it and Escape while staying open.
+modalConstant :: Sim (Response, Maybe Response) ()
+modalConstant = do
+  (dlg, _) <- result
+  check (rectH (respRect dlg) <= 200)
+  whole <- (\ss -> [r | (r, t, _, _, _) <- ss, t == sentence]) <$> spans
+  checkEq [True] (map ((< rectW (respRect dlg) + 0.5) . rectW) whole)
+  checkEq Nothing =<< findSpan "X"
+  check . maybe False respClicked . snd =<< click "Inside"
+  check . respClicked . fst =<< press (At (V2 4 4))
+  _ <- release
+  check . respClicked . fst =<< pressKey KeyEscape
+  check =<< escapeTaken
+  expect "Title"
+
+-- | A modal on a Var closes itself (the Escape frame already draws it closed),
+-- and opening and closing each repaint the whole window once.
+runModalVarTest :: Context -> IORef Int -> IO ()
+runModalVarTest ctx failed = do
+  open <- newVar False
+  let ui = column $ do
+        whenM (button "Open") (writeVar open True)
+        modal open "Title" (whenM (button "Close") (writeVar open False))
+      damage = liftIO (takeDamage ctx)
+  runSim ctx failed (withInputOff 320 240) ui $ do
+    _ <- pressKey KeyEscape
+    checkEq False =<< escapeTaken
+    _ <- click "Open"
+    expect "Title"
+    _ <- click "Close"
+    checkEq False =<< liftIO (readVarIO open)
+    _ <- damage >> click "Open"
+    checkEq DamageFull =<< damage
+    -- The idle frame after settles the button's release, as a clip.
+    check . (\d -> d /= DamageFull && not (damageIsEmpty d)) =<< (advance 1 >> damage)
+    _ <- pressKey KeyEscape
+    checkEq False =<< liftIO (readVarIO open)
+    checkEq 2 =<< liftIO (lastFramePasses ctx)
+    check =<< escapeTaken
+    expectNot "Title"
+    checkEq DamageFull =<< damage
+    -- The second pass no longer built it, so the next frame repaints no more.
+    _ <- frame
+    check . (/= DamageFull) =<< damage
+
+-- | A newly opened modal closes the edit menu it hides, and a modal declared in
+-- another's body closes first, on Escape or a click on the outer one.
 runModalNestedDismissTest :: Context -> IORef Int -> IO ()
 runModalNestedDismissTest ctx failed = do
-  outer <- newVar True
+  outer <- newVar False
   inner <- newVar True
-  let inp0 = withInput 640 480
-      ui = column $ do
-        _ <- button "Behind"
+  let ui = column $ do
+        field <- fst <$> withValue "text" textInput'
         (dlg, _) <- modal' outer "Settings" $ do
           forM_ [1 .. 10 :: Int] (\i -> label (T.pack ("Setting " <> show i)))
           modal inner "Confirm" (label "confirm body")
-        pure dlg
-      reopen = writeVarIO inner True >> warmup ctx inp0 ui
-      states = (,) <$> readVarIO outer <*> readVarIO inner
-  reopen
-  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
-  assertEq failed (True, False) =<< states
-  reopen
-  Rect dx dy dw _ <- respRect <$> evalUi ctx inp0 ui
-  _ <- runClick ctx inp0 ui (V2 (dx + dw / 2) (dy + 8))
-  assertEq failed (True, False) =<< states
+        pure (field, dlg)
+      states = liftIO ((,) <$> readVarIO outer <*> readVarIO inner)
+  runSim ctx failed (withInput 640 480) ui $ do
+    _ <- rightClick . On . fst =<< result
+    check . isJust =<< liftIO (getsInteraction ctx isTextInputMenu)
+    _ <- liftIO (writeVarIO outer True) >> settle
+    _ <- pressKey KeyEscape
+    checkEq (True, False) =<< states
+    Rect dx dy dw _ <- respRect . snd <$> (liftIO (writeVarIO inner True) >> settle)
+    _ <- click (At (V2 (dx + dw / 2) (dy + 8)))
+    checkEq (True, False) =<< states
 
--- | A window declared in a modal's body is painted under the modal panel.
--- Where they overlap, a click goes to the modal's button, not to the
--- window's button under it.
-runModalOverInnerWindowTest :: Context -> IORef Int -> IO ()
-runModalOverInnerWindowTest ctx failed = do
-  let inp0 = withInputOff 500 400
-      ui = fmap snd . modal' (constVar True) "Settings" $ do
-        (_, hidden) <- window' (constVar True) "Inspector" (buttonWith' (fixedWH 380 300) "Hidden")
-        ok <- button' "OK"
-        pure (ok, hidden)
-  assertJustM failed (warmup2 ctx inp0 ui) $ \(ok, mHidden) -> assertJust failed mHidden $ \hidden -> do
-    assert failed (isJust (rectIntersect (respRect hidden) (respRect ok)))
-    assertJustM failed (runClick ctx inp0 ui (centerOf ok)) $ \(ok', hidden') -> do
-      assert failed (respClicked ok')
-      assert failed (not (any respClicked hidden'))
+innerWindowUi :: NanoUI (Maybe (Response, Maybe Response))
+innerWindowUi = fmap snd . modalWith' (fixedWH 460 380) (constVar True) "Settings" $ do
+  (_, hidden) <- window' (constVar True) "Inspector" (buttonWith' (fixedWH 420 200) "Hidden")
+  ok <- button' "OK"
+  pure (ok, hidden)
 
--- | Nor does a drag on that window's title bar, where the modal panel covers
--- it, move the window.
-runModalOverInnerWindowDragTest :: Context -> IORef Int -> IO ()
-runModalOverInnerWindowDragTest ctx failed = do
-  let inp0 = withInputOff 500 400
-      ui = modalWith (fixedWH 460 380) (constVar True) "Settings" (window (constVar True) "Inspector" (label "body"))
-  _ <- warmup2 ctx inp0 ui
-  before <- map snd <$> nodesOfType NodeWindow ctx
-  assertJust failed (listToMaybe before) $ \(Rect x y w _) -> do
-    dragPos (\i -> void (runFrame ctx i ui)) inp0 (V2 (x + w / 2) (y + 10)) (V2 (x + w / 2 - 40) (y + 40))
-    assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
-
--- | Nor does an edge of that window, where the modal panel covers it, show
--- the resize cursor or resize the window.
-runModalOverInnerWindowResizeTest :: Context -> IORef Int -> IO ()
-runModalOverInnerWindowResizeTest ctx failed = do
-  let inp0 = withInputOff 500 400
-      ui = modalWith (fixedWH 460 380) (constVar True) "Settings" (window (constVar True) "Inspector" (label "body"))
-  _ <- warmup2 ctx inp0 ui
-  before <- map snd <$> nodesOfType NodeWindow ctx
-  assertJust failed (listToMaybe before) $ \(Rect x y _ h) -> do
-    let edge = V2 (x + 3) (y + h / 2)
-        press = pressAt inp0 edge
-        moved = holdAt press (V2 (x - 37) (y + h / 2))
-    assert failed . (/= UiCursorEwResize) =<< uiCursorKind ctx (inp0 {inputMousePos = edge})
-    mapM_ (\i -> runFrame ctx i ui) [press, moved, releaseAt moved]
-    assertEq failed before . map snd =<< nodesOfType NodeWindow ctx
-
-runModalOverlayTest :: Context -> IORef Int -> IO ()
-runModalOverlayTest ctx failed = do
-  let
-    inp0 = withInput 320 200
-    ui = column $ do
-      outside <- button' "Outside"
-      (dlg, mInside) <- modal' (constVar True) "Title" (button' "Inside")
-      pure (outside, dlg, mInside)
-    closedUi = column $ do
-      _ <- button "Outside"
-      (dlg, mInside) <- modal' (constVar False) "Title" (button' "Inside")
-      pure (dlg, mInside)
-
-  (dlgClosed, mInsideClosed) <- evalUi ctx inp0 closedUi
-  assert failed (not (respClicked dlgClosed))
-  assert failed (case mInsideClosed of Nothing -> True; _ -> False)
-  closedSpans <- collectOverlayTextSpans ctx inp0
-  assert failed (not (hasText "Title" closedSpans))
-
-  (_, _, mInside0) <- warmup2 ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  assert failed (hasText "Title" overlays && hasText "Inside" overlays)
-  assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
-
-  assertJust failed mInside0 $ \inside -> do
-    (_, _, mClicked) <- runClick ctx inp0 ui (centerOf inside)
-    assert failed (maybe False respClicked mClicked)
-
-    (_, dlgHit, _) <- evalUi ctx (pressAt inp0 (V2 4 4)) ui
-    assert failed (respClicked dlgHit)
-
-    let esc = keyInp KeyEscape inp0
-    ((_, dlgEsc, _), _, _) <- runFrame ctx esc ui
-    assert failed (respClicked dlgEsc)
-    assert failed =<< overlayConsumesQuit ctx esc
-    _ <- runFrame ctx esc closedUi
-    assert failed . not =<< overlayConsumesQuit ctx esc
-
-  let tallUi = modal' (constVar True) "Tall" $ do
-        forM_ [1 .. 40 :: Int] (\i -> label (T.pack ("Row " <> show i)))
-        button "Close"
-  (dlgTall, _) <- warmup2 ctx inp0 tallUi
-  assert failed (rectH (respRect dlgTall) <= 200)
-
--- A modal on a Var closes itself: a dismissal writes False and the view runs
--- again, so the frame that saw Escape already draws it closed. A button in
--- the body closes it by writing the Var, and a constant reports the request
--- and stays open.
-runModalVarTest :: Context -> IORef Int -> IO ()
-runModalVarTest ctx failed = do
-  let inp0 = withInput 320 200
-  open <- newVar True
-  let ui = column $ do
-        _ <- button "Outside"
-        modal open "Title" (label "body")
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
-  assertEq failed False =<< readVarIO open
-  assertEq failed 2 =<< lastFramePasses ctx
-  assert failed . not . hasText "Title" =<< collectOverlayTextSpans ctx inp0
-
-  writeVarIO open True
-  let withClose = column $ do
-        (_, close) <- modal' open "Title" $ do
-          r <- button' "Close"
-          r <$ when (respClicked r) (writeVar open False)
-        pure close
-  mClose <- warmup2 ctx inp0 withClose
-  assertJust failed mClose $ \close -> do
-    _ <- runClick ctx inp0 withClose (centerOf close)
-    assertEq failed False =<< readVarIO open
-
-  let fixed = fst <$> modal' (constVar True) "Title" (label "body")
-  _ <- warmup2 ctx inp0 fixed
-  (dlg, _, _) <- runFrame ctx (keyInp KeyEscape inp0) fixed
-  assert failed (respClicked dlg)
-  assert failed . hasText "Title" =<< collectOverlayTextSpans ctx inp0
-
-runModalNoPhantomScrollTest :: Context -> IORef Int -> IO ()
-runModalNoPhantomScrollTest ctx failed = do
-  let inp0 = withInput 400 300
-      ui = modal' (constVar True) "About" $ do
-        _ <- label "Immediate-mode GUI for Haskell."
-        rowWith fillW $ do
-          _ <- spacer (Grow 1) Fit
-          _ <- button "Close"
-          pure ()
-  (dlg, _) <- warmup2 ctx inp0 ui
-  let Rect _ _ mw mh = respRect dlg
-  assert failed (mw > 0 && mh > 0)
-  off0 <- getScrollOffset ctx (respId dlg)
-  let wheel = inp0 {inputMousePos = centerOf dlg, inputScroll = V2 0 1}
-  _ <- runFrame ctx wheel ui
-  off1 <- getScrollOffset ctx (respId dlg)
-  assertEq failed off0 0
-  assertEq failed off1 0
-
--- Opening and closing a modal each repaint the whole window on the next idle
--- frame.
-runModalCloseDamageTest :: Context -> IORef Int -> IO ()
-runModalCloseDamageTest ctx failed = do
-  let ui = do
-        openVar <- useVar False
-        open <- readVar openVar
-        resp <- button' "Open"
-        when (respClicked resp) (writeVar openVar True)
-        (dlg, _) <- modal' (constVar open) "Title" (label "body")
-        when (respClicked dlg) (writeVar openVar False)
-        pure resp
-      inp0 = withInputOff 320 240
-      esc = keyInp KeyEscape inp0
-      idle = inp0 {inputDeltaTime = 1}
-  resp <- warmup2 ctx inp0 ui
-  -- Opening: the click frame runs the view a second time with the flag set,
-  -- builds the modal, and repaints the whole window (floating panel change).
-  _ <- runClick ctx inp0 ui (centerOf resp)
-  assertEq failed DamageFull =<< takeDamage ctx
-  -- The idle frame after only settles the button's release, as a clip: the
-  -- store write behind the open is damaged per key, not whole-window.
-  _ <- runFrame ctx idle ui
-  dmgIdle <- takeDamage ctx
-  assert failed (dmgIdle /= DamageFull)
-  assert failed (not (damageIsEmpty dmgIdle))
-  -- Closing: the escape frame removes the modal and repaints the whole window.
-  _ <- runFrame ctx esc ui
-  assertEq failed DamageFull =<< takeDamage ctx
-
--- | A modal its Var closes is gone from the frame that closed it, whose
--- second view pass no longer builds it: the next frame does not repaint the
--- whole window for it a second time.
-runModalClosedByRerunTest :: Context -> IORef Int -> IO ()
-runModalClosedByRerunTest ctx failed = do
-  let inp0 = withInputOff 320 240
-  open <- newVar True
-  let ui = column $ do
-        _ <- button "Outside"
-        modal open "Title" (label "body")
-  _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (keyInp KeyEscape inp0) ui
-  assertEq failed 2 =<< lastFramePasses ctx
-  _ <- runFrame ctx inp0 ui
-  assert failed . (/= DamageFull) =<< takeDamage ctx
+-- | Where the modal panel covers a window in its body, clicks, title-bar drags
+-- and edge drags (and the resize cursor) go to the modal, not the window.
+modalOverInnerWindow :: Sim (Maybe (Response, Maybe Response)) ()
+modalOverInnerWindow = do
+  Just (ok, Just hidden) <- result
+  check (isJust (rectIntersect (respRect hidden) (respRect ok)))
+  checkEq (Just (True, False)) . fmap (\(o, h) -> (respClicked o, any respClicked h)) =<< click (On ok)
+  ctx <- simContext
+  let windows = liftIO (map snd <$> nodesOfType NodeWindow ctx)
+  before@[Rect x y w h] <- windows
+  _ <- drag (At (V2 (x + w / 2) (y + 10))) (At (V2 (x + w / 2 - 40) (y + 40))) 1
+  checkEq before =<< windows
+  let edge = V2 (x + 3) (y + h / 2)
+  _ <- moveTo (At edge)
+  check . (/= UiCursorEwResize) =<< liftIO . uiCursorKind ctx =<< getInput
+  _ <- drag (At edge) (At (V2 (x - 37) (y + h / 2))) 1
+  checkEq before =<< windows
 
 -- At fractional display scales, fixed-size content must fit a content-sized
 -- modal without accumulating rounding error through nested containers.
 runModalFractionalScaleNoScrollTest :: Context -> IORef Int -> IO ()
-runModalFractionalScaleNoScrollTest _ failed =
-  forM_ [(scale, rows, nested) | scale <- [1, 1.25, 1.5, 1.75], rows <- [4 .. 8 :: Int], nested <- [False, True]] $ \(scale, rows, nested) -> do
-    base <- newContext
-    let ctx = withFontMetrics base ((monospaceMetrics 12) {fmSnapScale = scale})
-        inp = withInputOff 1000 1000
-        field i = rowWith (fillW . fixedH 30 . alignMid) (label (T.pack ("Field " <> show i)))
-        section = columnWith (fillW . gap 6) $ do
-          label "Section"
-          columnWith (fillW . gap 0) $ do
-            spacer Fit (Fixed 3)
-            forM_ [1 .. rows] field
-            spacer Fit (Fixed 3)
-        body = columnWith (gap 10) (section >> section >> section >> button "Close")
-        -- As the arena's root, and inside other content as an app opens one.
-        ui
-          | nested = column (label "Behind" >> fst <$> modal' (constVar True) "Details" body)
-          | otherwise = fst <$> modal' (constVar True) "Details" body
-        -- Whether a wheel over the modal moves its first field.
-        scrolls c i = do
-          dlg <- warmup2 c i ui
-          let wheel = i {inputMousePos = centerOf dlg, inputScroll = V2 0 3}
-          spans0 <- collectOverlayTextSpans c i
-          _ <- runFrame c wheel ui
-          spans1 <- collectOverlayTextSpans c wheel
-          assert failed (not (null (spanYOf "Field 1" spans0)))
-          pure (spanYOf "Field 1" spans1 /= spanYOf "Field 1" spans0)
-    assertEq failed False =<< scrolls ctx inp
-    -- The same body in a short window does scroll, so the check can fail.
-    short <- newContext
-    assertEq failed True =<< scrolls (withFontMetrics short ((monospaceMetrics 12) {fmSnapScale = scale})) (withInputOff 1000 300)
+runModalFractionalScaleNoScrollTest _ failed = forM_ cases $ \(s, n, nested) -> do
+  let field i = rowWith (fillW . fixedH 30 . alignMid) (label (T.pack ("Field " <> show i)))
+      section = columnWith (fillW . gap 6) $ do
+        label "Section"
+        columnWith (fillW . gap 0) (spacer Fit (Fixed 3) >> forM_ [1 .. n] field >> spacer Fit (Fixed 3))
+      body = columnWith (gap 10) (section >> section >> section >> button "Close")
+      dialog = fst <$> modal' (constVar True) "Details" body
+      -- As the arena's root, and inside other content as an app opens one.
+      ui = if nested then column (label "Behind" >> dialog) else dialog
+      scrolls winH = do
+        ctx <- (`withFontMetrics` (monospaceMetrics 12) {fmSnapScale = s}) <$> newContext
+        runSim ctx failed (withInputOff 1000 winH) ui $ do
+          y0 <- rectOf "Field 1"
+          dlg <- result
+          _ <- wheel (On dlg) (V2 0 3)
+          (/= Just (rectY y0)) . fmap rectY <$> findSpan "Field 1"
+  assertEq failed False =<< scrolls 1000
+  -- The same body in a short window does scroll, so the check can fail.
+  assertEq failed True =<< scrolls 300
+  where
+    cases = [(s, n, nested) | s <- [1, 1.25, 1.5, 1.75], n <- [4 .. 8 :: Int], nested <- [False, True]]
 
--- A modal widens for a filling label so it stays on one line when space permits.
-runModalFitsTextTest :: Context -> IORef Int -> IO ()
-runModalFitsTextTest ctx failed = do
-  let inp = withInput 800 600
-      sentence = T.pack "A sentence that is wider than the smallest modal allows."
-      ui = fst <$> modal' (constVar True) "About" (muted sentence)
-  dlg <- warmup2 ctx inp ui
-  spans <- collectOverlayTextSpans ctx inp
-  let Rect _ _ dw _ = respRect dlg
-      whole = [r | (r, t, _, _, _) <- spans, t == sentence]
-  assertEq failed (length whole) 1
-  forM_ whole $ \(Rect _ _ tw _) -> assertGt failed (dw + 0.5) tw
-
--- A modal measures each label in its requested font size and keeps the last
+-- | A modal measures each label in its requested font size and keeps the last
 -- row visible when the measured body fits.
 runModalFillLabelFitsTest :: Context -> IORef Int -> IO ()
 runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
   ctx <- (`withFontMetrics` monospaceMetrics base) <$> newContext
-  -- Wide enough for the label on one line in its own font, but not in the
-  -- base font.
-  let inp = withInput 2000 800
-      body =
-        columnWith (gap 14 . minW 560 . \l -> l {layoutPadding = Padding 0 0 0 0}) $ do
-          labelWith (tight . fillW) "How cabal should log in to Hackage for uploads:"
-          _ <- (snd <$> withValue (0 :: Int) (radio ["cabal's config file (no login found in it)", "A username and password", "An API token"]))
-          labelWith (tight . fillW . fontSize 14) "Kept in memory for this session only. The password goes to cabal on its standard input."
-          separator
-          rowWith (fillW . gap 8 . alignMid . tight) $ do
-            flex
-            _ <- button "Cancel"
-            button' "Use this login"
-      ui = modal' (constVar True) "Hackage login" body
-  (dlg, mOk) <- warmup2 ctx inp ui
-  spans0 <- collectOverlayTextSpans ctx inp
-  let wheel = inp {inputMousePos = centerOf dlg, inputScroll = V2 0 3}
-  _ <- runFrame ctx wheel ui
-  spans1 <- collectOverlayTextSpans ctx wheel
-  assert failed (not (null (spanYOf "An API token" spans0)))
-  assertEq failed (spanYOf "An API token" spans1) (spanYOf "An API token" spans0)
-  assertJust failed mOk $ \ok -> do
-    let Rect _ dy _ dh = respRect dlg
-        Rect _ by _ bh = respRect ok
-    assertGt failed (dy + dh + 0.5) (by + bh)
+  -- Wide enough for the label on one line in its own font, not the base one.
+  let body = columnWith (gap 14 . minW 560 . \l -> l {layoutPadding = Padding 0 0 0 0}) $ do
+        labelWith (tight . fillW) "How cabal should log in to Hackage for uploads:"
+        let logins = ["cabal's config file (no login found in it)", "A username and password", "An API token"]
+        _ <- withValue (0 :: Int) (radio logins)
+        labelWith (tight . fillW . fontSize 14) $
+          "Kept in memory for this session only. The password goes to cabal on its standard input."
+        separator
+        rowWith (fillW . gap 8 . alignMid . tight) (flex >> button "Cancel" >> button' "Use this login")
+  runSim ctx failed (withInput 2000 800) (modal' (constVar True) "Hackage login" body) $ do
+    (dlg, mOk) <- result
+    y0 <- rectY <$> rectOf "An API token"
+    _ <- wheel (On dlg) (V2 0 3)
+    checkEq y0 . rectY =<< rectOf "An API token"
+    let bottom r = rectY (respRect r) + rectH (respRect r)
+    checkJust mOk $ \ok -> checkGt (bottom dlg + 0.5) (bottom ok)
 
--- | A tree in a modal draws its selected row apart from the others, as one
--- on the page does.
+-- | A tree in a modal draws its selected row apart, as one on the page does.
 runModalTreeSelectionTest :: Context -> IORef Int -> IO ()
 runModalTreeSelectionTest ctx failed = do
   setDrawSquareGeometry ctx True
@@ -340,8 +182,8 @@ runModalTreeSelectionTest ctx failed = do
       rowFills sel = do
         (_, draw) <- warmupDraw ctx inp0 (modal' (constVar True) "Pick" (tree' "t" items (constVar sel)))
         quads <- drawQuads draw
-        spans <- collectOverlayTextSpans ctx inp0
-        let under lbl = spanRectOf lbl spans >>= \r -> listToMaybe (reverse [c | (q, c) <- quads, covers q r])
+        spans' <- collectOverlayTextSpans ctx inp0
+        let under lbl = spanRectOf lbl spans' >>= \r -> listToMaybe [c | (q, c) <- reverse quads, covers q r]
         pure (under "alpha", under "beta")
   (alpha0, beta0) <- rowFills 0
   (alpha1, beta1) <- rowFills 1

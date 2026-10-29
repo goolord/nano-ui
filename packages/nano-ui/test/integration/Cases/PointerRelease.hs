@@ -3,231 +3,99 @@
 module Cases.PointerRelease (tests) where
 
 import Spec
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (isJust)
 import Data.Text qualified as T
+import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
   [ spec "release-elsewhere" runReleaseElsewhereTest
-  , spec "right-release-elsewhere" runRightReleaseElsewhereTest
-  , spec "release-returns" runReleaseReturnsTest
-  , spec "overlap-press" runOverlapPressTest
-  , spec "release-moved-radio" runReleaseMovedRadioTest
-  , spec "release-moved-tab" runReleaseMovedTabTest
-  , spec "panel-clipped-click" runPanelClippedClickTest
-  , spec "tap-clicks-once" runTapClicksOnceTest
-  , spec "release-behind-modal" runReleaseBehindModalTest
+  , spec "release-moved" runReleaseMovedTest
+  , spec "release-tap-and-modal" runReleaseTapAndModalTest
   ]
 
--- | A button laid out past its panel's edge is clipped away: a click where it
--- would be neither hovers nor clicks it.
-runPanelClippedClickTest :: Context -> IORef Int -> IO ()
-runPanelClippedClickTest ctx failed = do
-  let inp0 = withInputOff 300 300
-      ui = column $ do
-        rs <- panelWith (fixedWH 200 60) (column (mapM button' ["One", "Two", "Three"]))
-        label "below"
-        pure rs
-  rs <- warmup2 ctx inp0 ui
-  panels <- map snd <$> nodesOfType NodePanel ctx
-  case (rs, panels) of
-    ([_, _, three], [p]) -> do
-      let at = centerOf three
-          (press, release) = clickPair inp0 at
-      assert failed (not (rectContains p at))
-      after <- mapM (\i -> evalUi ctx i ui) [press, release]
-      assert failed (not (or [respHovered t || respClicked t | [_, _, t] <- after]))
-    _ -> assert failed False
-
--- | A modal that opens while a page button is held hides the button from
--- the release: it is not clicked, that frame or the next.
-runReleaseBehindModalTest :: Context -> IORef Int -> IO ()
-runReleaseBehindModalTest ctx failed = do
-  open <- newVar False
-  clicks <- newIORef (0 :: Int)
-  let inp0 = withInput 320 240
-      ui = column $ do
-        r <- button' "Delete"
-        when (respClicked r) (liftIO (modifyIORef' clicks (+ 1)))
-        modal open "Error" (label "Something failed")
-        pure r
-  at <- centerOf <$> warmup2 ctx inp0 ui
-  _ <- runFrame ctx (pressAt inp0 at) ui
-  writeVarIO open True
-  _ <- runFrame ctx (holdAt inp0 at) ui
-  _ <- runFrame ctx (releaseAt (holdAt inp0 at)) ui
-  replicateM_ 2 (runFrame ctx inp0 {inputMousePos = at} ui)
-  assertEq failed 0 =<< readIORef clicks
-
--- | A press and release in one frame (a tap, or a click while frames are
--- slow) clicks the button the user saw under the pointer. The button the
--- click moves there, keyed by its item, is not clicked on the next frame.
-runTapClicksOnceTest :: Context -> IORef Int -> IO ()
-runTapClicksOnceTest ctx failed = do
-  items <- newVar [1 .. 5 :: Int]
-  let inp0 = withInput 320 240
-      ui = column $ do
-        xs <- readVar items
-        forM_ xs $ \i -> withKey i $
-          whenM (button (T.pack ("Delete " <> show i))) (modifyVar items (filter (/= i)))
-  _ <- warmup2 ctx inp0 ui
-  spans <- collectTextSpans ctx
-  assertJust failed (spanRectOf "Delete 3" spans) $ \r -> do
-    let at = spanCenter r
-    _ <- runFrame ctx (applyMouseButton MouseLeft False (pressAt inp0 at)) ui
-    replicateM_ 2 (runFrame ctx inp0 {inputMousePos = at} ui)
-    assertEq failed [1, 2, 4, 5] =<< readVarIO items
-
--- | Press a control, then release where it moved to on the same frame. The
--- view tests the release against the rect it had before the move and misses
--- it; the frame posts the click from the solved rect, asks for the next frame,
--- and the control reports it there.
-releaseAfterMove ::
-  Context -> IORef Int -> T.Text -> (Float -> NanoUI a) -> (a -> Bool) -> IO ()
-releaseAfterMove ctx failed lbl ui picked = do
-  let inp0 = withInput 320 240
-      shift = 100
-  _ <- warmup2 ctx inp0 (ui 0)
-  spans <- collectTextSpans ctx
-  assertJust failed (spanRectOf lbl spans) $ \r -> do
-    let V2 px py = spanCenter r
-        press = pressAt inp0 (V2 px py)
-        release = applyMouseButton MouseLeft False inp0 {inputMousePos = V2 px (py + shift)}
-    _ <- runFrame ctx press (ui 0)
-    (missed, _, dirty) <- runFrame ctx release (ui shift)
-    assert failed (not (picked missed))
-    assert failed dirty
-    (next, _, _) <- runFrame ctx inp0 {inputMousePos = V2 px (py + shift)} (ui shift)
-    assert failed (picked next)
-
-runReleaseMovedRadioTest :: Context -> IORef Int -> IO ()
-runReleaseMovedRadioTest ctx failed = do
-  sel <- newVar (0 :: Int)
-  releaseAfterMove ctx failed "two"
-    ( \d -> column $ do
-        columnWith (fixedH d . fillW) (pure ())
-        snd <$> held sel (radio' ["one", "two", "three"])
-    )
-    (== 1)
-
-runReleaseMovedTabTest :: Context -> IORef Int -> IO ()
-runReleaseMovedTabTest ctx failed = do
-  cur <- newVar (0 :: Int)
-  releaseAfterMove ctx failed "Beta"
-    ( \d -> column $ do
-        columnWith (fixedH d . fillW) (pure ())
-        snd <$> held cur (`tabBar'` [tab 0 "Alpha" (), tab 1 "Beta" ()])
-    )
-    (== 1)
-
--- | Press one widget, drag onto another, release: neither one fires, this
--- frame or the next.
+-- | A drag between widgets fires neither, that frame or the next, while one
+-- that comes back still clicks; a context menu opens where its right press
+-- went down. Of two overlapping widgets the press goes to the one painted on
+-- top, and a button clipped by its panel takes no click.
 runReleaseElsewhereTest :: Context -> IORef Int -> IO ()
 runReleaseElsewhereTest ctx failed = do
-  -- The checkbox drives its own state across frames, so a stray toggle sticks
-  -- and the value assertions below have something to catch.
   flag <- newVar False
-  let inp0 = withInput 320 240
-      ui = column $ do
+  let ui = column $ do
         a <- button' "Alpha"
         b <- button' "Beta"
         (cb, on) <- held flag (checkbox' "Flag")
-        pure (a, b, cb, on)
+        -- The menu area's response comes from a container node, not a leaf.
+        (area, menu) <- contextMenuArea (fixedH 60 . fillW) (label' "Area") (const (menuItem "Cut"))
+        overlapping <- rowWith (gap (-30)) (mapM (buttonWith' (fixedW 80)) ["Left", "Right"])
+        clipped <- panelWith (fixedWH 200 60) (column (mapM button' ["One", "Two", "Three"]))
+        pure ([a, b, cb, area] <> overlapping <> drop 2 clipped, on, isJust menu)
+  runSim ctx failed (withInput 320 400) ui $ do
+    (rs, _, _) <- result
+    let on i = On (rs !! i)
+        responses (xs, _, _) = xs
+    forM_ [(0, 1), (0, 2), (2, 1)] $ \(from, to) -> do
+      (over, _, _) <- press (on from) >> moveTo (on to)
+      check (not (respHovered (over !! to) || respPressed (over !! to)))
+      ups <- sequence [release, frame]
+      check (not (or [respClicked r || checked | (rs', checked, _) <- ups, r <- take 3 rs']))
+    check . respClicked . (!! 0) . responses =<< click (on 0)
+    check . respClicked . (!! 1) . responses =<< (press (on 1) >> moveTo (on 0) >> moveTo (on 1) >> release)
+    _ <- pressButton MouseRight (on 0) >> moveTo (on 3)
+    (up, _, menuUp) <- releaseButton MouseRight
+    check (not (respRightClicked (up !! 0) || menuUp))
+    check . (\(_, _, menu) -> menu) =<< rightClick (on 3)
+    let Rect lx ly lw lh = respRect (rs !! 4)
+        overlap = At (V2 (lx + lw - 10) (ly + lh / 2))
+    _ <- moveTo overlap
+    checkEq (respId (rs !! 4)) =<< liftIO (getHotId ctx)
+    pressed <- map respPressed . take 2 . drop 4 . responses <$> (press overlap >> frame)
+    checkEq [True, False] pressed
+    _ <- release
+    [p] <- map snd <$> liftIO (nodesOfType NodePanel ctx)
+    check (not (rectContains p (centerOf (rs !! 6))))
+    ups <- sequence [press (on 6), release]
+    check (not (or [respHovered t || respClicked t | (xs, _, _) <- ups, t <- drop 6 xs]))
 
-  (a, b, cb, _) <- warmup2 ctx inp0 ui
-  let at r = inp0 {inputMousePos = centerOf r}
-      pressOn r = pressAt inp0 (centerOf r)
-      dragTo r p = holdAt p (centerOf r)
-      releaseOn r p = releaseAt (dragTo r p)
-  -- Button to button.
-  _ <- runFrame ctx (pressOn a) ui
-  ((_, bDrag, _, _), _, _) <- runFrame ctx (dragTo b (pressOn a)) ui
-  assert failed (not (respHovered bDrag) && not (respPressed bDrag))
-  ((aUp, bUp, _, _), _, _) <- runFrame ctx (releaseOn b (pressOn a)) ui
-  assert failed (not (respClicked aUp) && not (respClicked bUp))
-  ((aNext, bNext, _, _), _, _) <- runFrame ctx (at b) ui
-  assert failed (not (respClicked aNext) && not (respClicked bNext))
+-- | A release where the pressed control moved to on that frame misses it in
+-- the view, so the frame posts the click and asks for another to report it.
+runReleaseMovedTest :: Context -> IORef Int -> IO ()
+runReleaseMovedTest _ failed = do
+  sel <- newVar (0 :: Int)
+  cur <- newVar (0 :: Int)
+  let radioUi = snd <$> held sel (radio' ["one", "two", "three"])
+      tabsUi = snd <$> held cur (`tabBar'` [tab 0 "Alpha" (), tab 1 "Beta" ()])
+  forM_ [("two", radioUi), ("Beta", tabsUi)] $ \(lbl, body) -> do
+    ctx <- newContext
+    shift <- newIORef 0
+    let ui = column (liftIO (readIORef shift) >>= \d -> columnWith (fixedH d . fillW) (pure ()) >> body)
+    runSim ctx failed (withInput 320 240) ui $ do
+      V2 px py <- targetPoint (Labelled lbl)
+      _ <- press (At (V2 px py))
+      liftIO (writeIORef shift 100)
+      missed <- frameWith (releaseWith MouseLeft . \i -> i {inputMousePos = V2 px (py + 100)})
+      check (missed /= 1)
+      check =<< wantsFrame
+      checkEq 1 =<< frame
 
-  -- Button to checkbox: the checkbox must not toggle.
-  _ <- runFrame ctx (pressOn a) ui
-  ((_, _, cbUp, _), _, _) <- runFrame ctx (releaseOn cb (pressOn a)) ui
-  assert failed (not (respClicked cbUp))
-  ((_, _, _, checked), _, _) <- runFrame ctx (at cb) ui
-  assert failed (not checked)
-
-  -- Checkbox to button: neither fires, and the box stays clear.
-  _ <- runFrame ctx (pressOn cb) ui
-  ((_, bOver, cbOff, _), _, _) <- runFrame ctx (releaseOn b (pressOn cb)) ui
-  assert failed (not (respClicked bOver) && not (respClicked cbOff))
-  ((_, _, _, stillOff), _, _) <- runFrame ctx (at b) ui
-  assert failed (not stillOff)
-
--- | The same rule for the right button: a context menu opens where the right
--- press went down, not where it came up. Also covers the container path, since
--- the menu area's response comes from a container node rather than a leaf.
-runRightReleaseElsewhereTest :: Context -> IORef Int -> IO ()
-runRightReleaseElsewhereTest ctx failed = do
-  let inp0 = withInput 320 240
-      ui = column $ do
-        a <- button' "Alpha"
-        (lbl, menu) <-
-          contextMenuArea (fixedH 60 . fillW) (label' "Area") (const (menuItem "Cut"))
-        pure (a, lbl, menu)
-  (a, lbl, _) <- warmup2 ctx inp0 ui
-  let rightPressOn r = fst (rightClickPair inp0 (centerOf r))
-      rightReleaseOn r p = snd (rightClickPair p (centerOf r))
-  -- Right press on the button, release over the menu area: no menu.
-  _ <- runFrame ctx (rightPressOn a) ui
-  ((aUp, _, menuUp), _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn a)) ui
-  assert failed (not (respRightClicked aUp))
-  assert failed (isNothing menuUp)
-
-  -- Right press and release inside the area: the menu opens.
-  _ <- runFrame ctx (rightPressOn lbl) ui
-  ((_, _, menuSame), _, _) <- runFrame ctx (rightReleaseOn lbl (rightPressOn lbl)) ui
-  assert failed (isJust menuSame)
-
--- | Leaving a widget mid-press and coming back still clicks it, and a plain
--- press-release on one widget is unaffected.
-runReleaseReturnsTest :: Context -> IORef Int -> IO ()
-runReleaseReturnsTest ctx failed = do
-  let inp0 = withInput 320 240
-      ui = column $ do
-        a <- button' "Alpha"
-        b <- button' "Beta"
-        pure (a, b)
-  (a, b) <- warmup2 ctx inp0 ui
-  let pressOn r = pressAt inp0 (centerOf r)
-      moveTo r p = holdAt p (centerOf r)
-      releaseOn r p = releaseAt (moveTo r p)
-  -- Straight click.
-  _ <- runFrame ctx (pressOn a) ui
-  ((aUp, _), _, _) <- runFrame ctx (releaseOn a (pressOn a)) ui
-  assert failed (respClicked aUp)
-
-  -- Wander off and back before letting go.
-  _ <- runFrame ctx (pressOn b) ui
-  _ <- runFrame ctx (moveTo a (pressOn b)) ui
-  ((_, bBack), _, _) <- runFrame ctx (releaseOn b (pressOn b)) ui
-  assert failed (respClicked bBack)
-
--- | Where two widgets overlap, a held press belongs to the one hover lights
--- up: the earlier sibling, which paints on top.
-runOverlapPressTest :: Context -> IORef Int -> IO ()
-runOverlapPressTest ctx failed = do
-  let inp0 = withInput 320 240
-      ui = rowWith (gap (-30)) $ do
-        a <- buttonWith' (fixedW 80) "Alpha"
-        b <- buttonWith' (fixedW 80) "Beta"
-        pure (a, b)
-  (a, _) <- warmup2 ctx inp0 ui
-  let Rect ax ay aw ah = respRect a
-      overlap = inp0 {inputMousePos = V2 (ax + aw - 10) (ay + ah / 2)}
-      press = applyMouseButton MouseLeft True overlap
-      held' = overlap {inputButtonsHeld = buttonsFromList [MouseLeft]}
-  _ <- runFrame ctx overlap ui
-  hot <- getHotId ctx
-  assert failed (hot == respId a)
-  _ <- runFrame ctx press ui
-  ((aHeld, bHeld), _, _) <- runFrame ctx held' ui
-  assert failed (respPressed aHeld && not (respPressed bHeld))
+-- | A press and release in one frame clicks the button the user saw, not the
+-- keyed one the click moves there. A modal that opens while a page button is
+-- held hides it from the release.
+runReleaseTapAndModalTest :: Context -> IORef Int -> IO ()
+runReleaseTapAndModalTest ctx failed = do
+  items <- newVar [1 .. 5 :: Int]
+  open <- newVar False
+  let ui = column $ do
+        xs <- readVar items
+        forM_ xs $ \i -> withKey i $
+          whenM (button (T.pack ("Delete " <> show i))) (modifyVar items (filter (/= i)))
+        modal open "Error" (label "Something failed")
+  runSim ctx failed (withInput 320 240) ui $ do
+    p <- targetPoint "Delete 3"
+    _ <- frameWith (\i -> applyMouseButton MouseLeft False (pressWith MouseLeft i p))
+    replicateM_ 2 frame
+    checkEq [1, 2, 4, 5] =<< liftIO (readVarIO items)
+    _ <- press "Delete 1"
+    liftIO (writeVarIO open True)
+    _ <- frame >> release >> frame >> frame
+    checkEq [1, 2, 4, 5] =<< liftIO (readVarIO items)
