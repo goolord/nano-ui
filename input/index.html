@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-18430377.js";
+            window.path_to_searchindex_js = "../searchindex-fc274a41.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -274,12 +274,17 @@ for_ preedit drawCompositionAtCaret
 <p><code>useInputMethod :: WidgetId -&gt; InputPurpose -&gt; Rect -&gt; NanoUI (Maybe Composition)</code> places the candidate window at the caret and returns the in-progress composition to draw. Pass the caret rectangle, not the whole widget. It checks focus itself, so a separate <code>isFocused</code> guard is unnecessary.</p>
 <p>Raw input fields: <code>inputChars</code> (committed text), <code>inputKeys</code> (pressed, including repeats), <code>inputKeysNew</code> (initial presses), <code>inputKeysHeld</code>, <code>inputKeysReleased</code>, and <code>inputComposition</code>. The terminal demo in <code>packages/nano-ui-demo/examples/Terminal.hs</code> is a complete custom text widget.</p>
 <h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
-<p>Focus changes apply on the next frame, so drive at least two frames:</p>
+<p><code>NanoUI.Testing.Sim</code> drives a view headlessly the way a user would. <code>runSim</code> settles the view, then the script clicks text, types, and presses keys, each action running the frames a real event would:</p>
 <pre><code class="language-haskell">ctx &lt;- newContext
-(_, _, _) &lt;- runFrame ctx input1 view
-(_, _, _) &lt;- runFrame ctx input2 view
+failed &lt;- newIORef 0
+runSim ctx failed (withInput 400 300) editorView $ do
+  click "Rename"
+  typeText "notes.txt"
+  pressKey KeyEnter
+  expect "notes.txt"
 </code></pre>
-<p>Warm up with <code>warmup2</code> before targeting a widget by <code>respRect</code>. For shortcut tests, build input with <code>keyInp</code> / <code>chordInp</code> from <code>NanoUI.Testing.Harness</code>.</p>
+<p>A string literal aims at the visible text with that label. <code>At p</code>, <code>Within rect</code>, <code>On response</code> and <code>OnWidget wid</code> aim elsewhere. <code>check</code> and <code>checkEq</code> count failures on <code>failed</code>.</p>
+<p>For lower-level tests, <code>runFrame ctx input view</code> runs one frame. Focus changes apply on the next frame, and geometry lags one frame, so warm up with <code>warmup2</code> before targeting a widget by <code>respRect</code>. <code>keyInp</code> / <code>chordInp</code> from <code>NanoUI.Testing.Harness</code> build key input.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li>Widgets that take keys: <a href="../widgets/controls.html">Buttons, Menus &amp; Inputs</a>.</li>
