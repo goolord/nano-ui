@@ -5,7 +5,7 @@ import Control.Concurrent (threadDelay)
 import Control.Monad (forM, forM_, replicateM_, void, when)
 import Data.Foldable (toList)
 import Data.Function (on)
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find, groupBy, nub, sortOn)
 import Data.Maybe (isJust)
 import Data.Text (Text)
@@ -62,6 +62,16 @@ markers ctx = filter (\(_, _, ops) -> not (any isText ops)) <$> drawings ctx
 wordNamed :: Text -> [Word'] -> Maybe Word'
 wordNamed t = find ((== t) . wText)
 
+-- | The texts of the frame's drawn words.
+wordTexts :: Context -> IO [Text]
+wordTexts ctx = map wText <$> drawnWords ctx
+
+-- | A point @dx@ in from the left of the drawn word, half a line down.
+inWord :: Context -> Float -> Text -> IO V2
+inWord ctx dx w = do
+  Just (Word' _ (V2 x y) _ _ _) <- wordNamed w <$> drawnWords ctx
+  pure (V2 (x + dx) (y + fmLineHeight (ctxFontMetrics ctx) / 2))
+
 -- | Rects that rich-text widgets fill in a colour: backgrounds and
 -- decorations.
 drawnFills :: Color -> Context -> IO [Rect]
@@ -83,6 +93,18 @@ paints c ui = do
 -- | A fresh context that has drawn the view twice in a @w@ by @h@ window.
 drawn :: Float -> Float -> NanoUI a -> IO Context
 drawn w h ui = newContext >>= \ctx -> ctx <$ warmup2 ctx (withInput w h) ui
+
+-- | 'drawn' 600 by 400, with a clipboard the returned ref holds.
+withCopies :: NanoUI a -> IO (Context, IORef (Maybe Text))
+withCopies ui = do
+  copied <- newIORef Nothing
+  base <- newContext
+  let ctx = withClipboard base (readIORef copied) (\t -> True <$ writeIORef copied (Just t))
+  (ctx, copied) <$ warmup2 ctx (withInput 600 400) ui
+
+-- | Run a chord's frame.
+chordFrame :: Context -> NanoUI a -> Char -> IO ()
+chordFrame ctx ui c = void (runFrame ctx (chordInp (cmdOrCtrl <> key c) (withInput 600 400)) ui)
 
 -- | Draw a document, append text and draw again. For each pair, the first
 -- word's id before must equal the second word's id after. The @new@ words
@@ -107,8 +129,7 @@ clickWord :: NanoUI (Maybe Text) -> Text -> IO (Maybe Text)
 clickWord ui w = do
   let inp = withInput 600 400
   ctx <- drawn 600 400 ui
-  Just (Word' _ (V2 x y) _ _ _) <- wordNamed w <$> drawnWords ctx
-  let pos = V2 (x + 3) (y + fmLineHeight (ctxFontMetrics ctx) / 2)
+  pos <- inWord ctx 3 w
   warmup ctx inp {inputMousePos = pos} ui
   runClick ctx inp ui pos
 
@@ -128,38 +149,29 @@ customCode =
 
 spec :: Spec
 spec = before newMarkdownCache $ do
-  it "holds a few passes' blocks however many keys churn through it" $ \cache -> do
+  it "holds a few passes' blocks however many keys churn through it, and every block a frame draws" $ \cache -> do
     ctx <- newContext
-    let doc = parseMarkdown (T.intercalate "\n\n" ["paragraph " <> T.pack (show i) | i <- [1 .. 50 :: Int]])
+    let
+      doc = parseMarkdown (T.intercalate "\n\n" ["paragraph " <> T.pack (show i) | i <- [1 .. 50 :: Int]])
+      frameOf ui = void (runFrame ctx (withInput 600 400) ui)
     -- Fresh keys every frame: 6000 blocks over the run, 50 of them live.
-    forM_ [1 .. 120 :: Int] $ \frame ->
-      void (runFrame ctx (withInput 600 400) (withKey frame (markdown cache doc)))
-    held <- markdownCacheSize cache
-    held `shouldSatisfy` (<= 2048)
-    held `shouldSatisfy` (>= 50)
-  it "keeps every block a frame draws when documents share it" $ \cache -> do
-    ctx <- newContext
-    let doc = parseMarkdown (T.intercalate "\n\n" ["paragraph " <> T.pack (show i) | i <- [1 .. 50 :: Int]])
-        docs = forM_ [1 .. 60 :: Int] $ \i -> withKey i (markdown cache doc)
-    replicateM_ 4 (void (runFrame ctx (withInput 600 400) docs))
-    held <- markdownCacheSize cache
-    held `shouldSatisfy` (>= 3000)
+    forM_ [1 .. 120 :: Int] $ \n -> frameOf (void (withKey n (markdown cache doc)))
+    markdownCacheSize cache >>= (`shouldSatisfy` (\n -> n >= 50 && n <= 2048))
+    -- Sixty documents sharing the blocks.
+    replicateM_ 4 (frameOf (forM_ [1 .. 60 :: Int] $ \i -> withKey i (markdown cache doc)))
+    markdownCacheSize cache >>= (`shouldSatisfy` (>= 3000))
+
   it "draws every kind of block's text" $ \cache -> do
     ctx <-
       drawn 600 800 . view cache . parseMarkdown $
         "# Title\n\nHello *world*, see [the docs](https://example.com).\n\n\
         \- one\n- [x] two\n\n1. first\n\n> quoted\n\n| h1 | h2 |\n|---|---|\n| c1 | c2 |\n\n\
         \```hs\ncode here\n```\n\n---\n\n![alt text](missing.png)"
-    ws <- map wText <$> drawnWords ctx
-    mapM_ (\w -> ws `shouldContain` [w]) ["Title", "Hello", "world", "docs", "one", "two", "first", "quoted", "h1", "c2", "alt", "text", "code here"]
+    ws <- wordTexts ctx
+    let wanted = ["Title", "Hello", "world", "docs", "one", "two", "first", "quoted", "h1", "c2", "alt", "text", "code here"]
+    mapM_ (\w -> ws `shouldContain` [w]) wanted
     -- The code language remains a normal text span.
-    spans <- collectTextSpans ctx
-    map (`hasText` spans) ["hs"] `shouldBe` [True]
-
-  it "draws headings larger than body text" $ \cache -> do
-    ws <- drawnWords =<< drawn 600 400 (view cache (parseMarkdown "# Big\n\nsmall"))
-    let size w = maybe 0 wSize (wordNamed w ws)
-    size "Big" `shouldSatisfy` (> max 16 (size "small"))
+    hasText "hs" <$> collectTextSpans ctx `shouldReturn` True
 
   it "scales headings and small text from the backend's default font size" $ \cache -> do
     -- Text height equals font size in this resolver; the body size is 20.
@@ -168,7 +180,8 @@ spec = before newMarkdownCache $ do
       "# h1\n\n## h2\n\n### h3\n\n#### h4\n\n##### h5\n\n###### h6\n\nbody\n\n```\ncode\n```"
     ws <- drawnWords ctx
     let size w = maybe 0 wSize (wordNamed w ws)
-    map (round . (* 100) . size) ["body", "h1", "h2", "h3", "h4", "h5", "h6"] `shouldBe` [2000, 3200, 2700, 2400, 2100, 2000, 1800 :: Int]
+    map (round . (* 100) . size) ["body", "h1", "h2", "h3", "h4", "h5", "h6"]
+      `shouldBe` [2000, 3200, 2700, 2400, 2100, 2000, 1800 :: Int]
     -- The copy button's text is 0.8 times the body size.
     fmap (\(Rect _ _ _ h) -> h) . spanRect "Copy" <$> collectTextSpans ctx `shouldReturn` Just 16
 
@@ -179,52 +192,36 @@ spec = before newMarkdownCache $ do
     clickWord ui "Read" `shouldReturn` Nothing
 
   it "selects and copies styled Markdown text" $ \cache -> do
-    let inp = withInput 600 400
-        ui = view cache (parseMarkdown "Select **these** words")
-    ctx0 <- drawn 600 400 ui
-    clipboard <- newIORef Nothing
-    let ctx = withClipboard ctx0 (readIORef clipboard) (\txt -> writeIORef clipboard (Just txt) >> pure True)
-    words' <- drawnWords ctx
-    Just firstWord <- pure (wordNamed "Select" words')
-    Just emphasized <- pure (wordNamed "these" words')
-    let V2 sx sy = wPos firstWord
-        V2 tx ty = wPos emphasized
-        lineH = fmLineHeight (ctxFontMetrics ctx)
-        start = V2 (sx + 1) (sy + lineH / 2)
-        finish = V2 (tx + lineWidth (ctxFontMetrics ctx) "these" - 1) (ty + lineH / 2)
-        press = pressAt inp start
-        drag = holdAt press finish
-    _ <- runFrame ctx press ui
-    _ <- runFrame ctx drag ui
-    _ <- runFrame ctx (releaseAt drag) ui
+    let
+      inp = withInput 600 400
+      ui = view cache (parseMarkdown "Select **these** words")
+    (ctx, copied) <- withCopies ui
+    start <- inWord ctx 1 "Select"
+    finish <- inWord ctx (lineWidth (ctxFontMetrics ctx) "these" - 1) "these"
+    let press = pressAt inp start
+    mapM_ (\i -> runFrame ctx i ui) [press, holdAt press finish, releaseAt (holdAt press finish)]
     selectionColor <- themeSelection <$> getTheme ctx
-    fills <- drawnFills selectionColor ctx
-    fills `shouldNotBe` []
-    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'c') inp) ui
-    readIORef clipboard `shouldReturn` Just "Select these"
-    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
-    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'c') inp) ui
-    readIORef clipboard `shouldReturn` Just "Select these words"
+    drawnFills selectionColor ctx >>= (`shouldNotBe` [])
+    chordFrame ctx ui 'c'
+    readIORef copied `shouldReturn` Just "Select these"
+    mapM_ (chordFrame ctx ui) ['a', 'c']
+    readIORef copied `shouldReturn` Just "Select these words"
 
-  it "selects and copies code blocks without losing whitespace" $ \cache -> do
-    let inp = withInput 600 400
-        ui = view cache (parseMarkdown "```\n  let x = 1\n```")
-    ctx0 <- drawn 600 400 ui
-    clipboard <- newIORef Nothing
-    let ctx = withClipboard ctx0 (readIORef clipboard) (\txt -> writeIORef clipboard (Just txt) >> pure True)
-    [code] <- pure . filter ((== "  let x = 1") . wText) =<< drawnWords ctx
-    let V2 x y = wPos code
-        pos = V2 (x + 1) (y + fmLineHeight (ctxFontMetrics ctx) / 2)
-    _ <- runClick ctx inp ui pos
-    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'a') inp) ui
-    _ <- runFrame ctx (chordInp (cmdOrCtrl <> key 'c') inp) ui
-    readIORef clipboard `shouldReturn` Just "  let x = 1"
+  it "copies code blocks, whitespace kept, by selection and by the copy button" $ \cache -> do
+    let ui = view cache (parseMarkdown "```\n  let x = 1\n```")
+    (ctx, copied) <- withCopies ui
+    _ <- runClick ctx (withInput 600 400) ui =<< inWord ctx 1 "  let x = 1"
+    mapM_ (chordFrame ctx ui) ['a', 'c']
+    readIORef copied `shouldReturn` Just "  let x = 1"
+    let button = view cache (parseMarkdown "```\nlet x = 1\n  in x\n```")
+    _ <- warmup2 ctx (withInput 600 400) button
+    Just r <- spanRect "Copy" <$> collectTextSpans ctx
+    void (runClick ctx (withInput 600 400) button (spanCenter r))
+    readIORef copied `shouldReturn` Just "let x = 1\n  in x"
 
-  it "keeps earlier blocks' ids while text streams in" $ \_ ->
+  it "keeps earlier blocks' ids while text streams in" $ \_ -> do
     -- The growing block keeps its id too.
     idsAcross "para one\n\n- item two\n\nstrea" "ming on\n\n# new block" [("one", "one"), ("two", "two"), ("strea", "streaming")] ["new"]
-
-  it "keeps the ids of the items and paragraphs inside a growing list or quote" $ \_ -> do
     -- A list's second item grows and gains a nested list and a sibling. A
     -- quote's second paragraph grows and a third follows.
     idsAcross "- first\n- sec" "ond\n  - nested\n- third" [("first", "first"), ("sec", "second")] ["nested", "third"]
@@ -260,41 +257,30 @@ spec = before newMarkdownCache $ do
     -- Redrawing the same document measures nothing.
     measuring doc2 `shouldReturn` []
 
-  it "copies a code block's code" $ \cache -> do
-    copied <- newIORef Nothing
-    base <- newContext
-    let ctx = withClipboard base (pure Nothing) (\t -> True <$ writeIORef copied (Just t))
-        ui = view cache (parseMarkdown "```\nlet x = 1\n  in x\n```")
-    _ <- warmup2 ctx (withInput 600 400) ui
-    Just r <- spanRect "Copy" <$> collectTextSpans ctx
-    void (runClick ctx (withInput 600 400) ui (spanCenter r))
-    readIORef copied `shouldReturn` Just "let x = 1\n  in x"
-
   it "takes a code block's language up to the first space or tab" $ \cache -> do
     ctx <- drawn 600 400 (view cache (parseMarkdown "```hs\tlinenos\ncode\n```"))
     isJust . spanRectOf "hs" <$> collectTextSpans ctx `shouldReturn` True
 
-  it "wraps a code line wider than the document and shows all of it" $ \cache -> do
-    let long = "a_long_identifier_much_wider_than_the_column_it_is_drawn_in"
-    -- No fixed-width ancestor: the column fills the window.
-    ctx <- drawn 400 400 (columnWith (fillW . padAll 10) (markdown cache (parseMarkdown ("```\nfirst\n" <> long <> "\nlast\n```"))))
-    code <- drawnWords ctx
-    let texts = map wText code
-        middle = takeWhile (/= "last") (drop 1 (dropWhile (/= "first") texts))
+  it "wraps a code line wider than the document, keeping all of it, its indent and its spaces" $ \cache -> do
+    let
+      long = "a_long_identifier_much_wider_than_the_column_it_is_drawn_in"
+      indented = "    x  =  alpha  beta  gamma  delta  epsilon  zeta  eta  theta"
+      -- No fixed-width ancestor: the column fills the window.
+      codeIn w src = drawn w 400 (columnWith (fillW . padAll 10) (markdown cache (parseMarkdown ("```\n" <> src <> "\n```"))))
+    code <- drawnWords =<< codeIn 400 ("first\n" <> long <> "\nlast")
+    let
+      texts = map wText code
+      middle = takeWhile (/= "last") (drop 1 (dropWhile (/= "first") texts))
     mapM_ (\t -> texts `shouldContain` [t]) ["first", "last"]
     T.concat middle `shouldBe` long
     length middle `shouldSatisfy` (> 1)
     -- Every wrapped line starts within the code block's available width.
     mapM_ (\w -> let V2 x _ = wPos w in x < 390 `shouldBe` True) code
-
-  it "keeps a wrapped code line's indent and the spaces inside it" $ \cache -> do
-    let line = "    x  =  alpha  beta  gamma  delta  epsilon  zeta  eta  theta"
-    ctx <- drawn 300 400 (columnWith (fillW . padAll 10) (markdown cache (parseMarkdown ("```\n" <> line <> "\n```"))))
-    code <- map wText <$> drawnWords ctx
-    length code `shouldSatisfy` (> 1)
-    take 1 code `shouldSatisfy` all ("    x  =  " `T.isPrefixOf`)
+    wrapped <- wordTexts =<< codeIn 300 indented
+    length wrapped `shouldSatisfy` (> 1)
+    take 1 wrapped `shouldSatisfy` all ("    x  =  " `T.isPrefixOf`)
     -- Each line is a substring of the source line, spaces included.
-    mapM_ (\t -> (t, t `T.isInfixOf` line) `shouldBe` (t, True)) code
+    mapM_ (\t -> (t, t `T.isInfixOf` indented) `shouldBe` (t, True)) wrapped
 
   it "lets the wheel over a code block scroll the page" $ \cache -> do
     ctx <- newContext
@@ -303,15 +289,13 @@ spec = before newMarkdownCache $ do
         doc = parseMarkdown (paras 3 <> "```\ncode\n```\n\n" <> paras 30)
         ui = scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))
     (sid, _) <- warmup2 ctx inp ui
-    [code] <- pure . filter ((== "code") . wText) =<< drawnWords ctx
-    let V2 x y = wPos code
-        over = inp {inputMousePos = V2 x (y + fmLineHeight (ctxFontMetrics ctx) / 2)}
+    over <- (\p -> inp {inputMousePos = p}) <$> inWord ctx 0 "code"
     void (runFrame ctx over {inputScroll = V2 0 3} ui)
     -- Let the glide settle.
     replicateM_ 30 (runFrame ctx over {inputDeltaTime = 0.05} ui)
     getScrollOffset ctx sid `shouldNotReturn` 0
 
-  it "draws a resolved image, which returns its source when clicked" $ \cache -> do
+  it "draws a resolved image, which returns its source when clicked, and the rest as alt text" $ \cache -> do
     let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "![a cat](cat.png)\n\n![a dog](dog.png)"))
     ctx <- drawn 600 400 ui
     images <- map snd <$> nodesOfType NodeImage ctx
@@ -320,10 +304,15 @@ spec = before newMarkdownCache $ do
         (w, h) `shouldBe` (40, 30)
         runClick ctx (withInput 600 400) ui (spanCenter r) `shouldReturn` Just "cat.png"
       _ -> expectationFailure ("expected one image, got " <> show images)
-    -- The unresolved image shows its alt text.
-    ws <- map wText <$> drawnWords ctx
+    ws <- wordTexts ctx
     ws `shouldContain` ["dog"]
     ws `shouldNotContain` ["cat"]
+    -- An image it does not draw is a link to its source.
+    let alt = view cache (parseMarkdown "See ![the diagram](diagram.png) here.")
+    actx <- drawn 600 400 alt
+    theme <- readIORef (ctxTheme actx)
+    fmap wColor . wordNamed "diagram" <$> drawnWords actx `shouldReturn` Just (themeLink theme)
+    clickWord alt "diagram" `shouldReturn` Just "diagram.png"
 
   it "sends a click on an image in a link to the link, and shows the link's title over it" $ \cache -> do
     let ui = columnWith (fixedW 500) (markdownConfigured cache catImages (parseMarkdown "[![a cat](cat.png)](https://cats.example \"All about cats\")"))
@@ -348,13 +337,6 @@ spec = before newMarkdownCache $ do
     imageIds <- map fst <$> nodesOfType NodeImage ctx
     (length textIds, length imageIds) `shouldBe` (1, 1)
     imageIds `shouldNotBe` textIds
-
-  it "shows an image it does not draw as its alt text, a link to its source" $ \cache -> do
-    let ui = view cache (parseMarkdown "See ![the diagram](diagram.png) here.")
-    ctx <- drawn 600 400 ui
-    theme <- readIORef (ctxTheme ctx)
-    fmap wColor . wordNamed "diagram" <$> drawnWords ctx `shouldReturn` Just (themeLink theme)
-    clickWord ui "diagram" `shouldReturn` Just "diagram.png"
 
   it "sizes an ordered list's markers by its widest number" $ \cache -> do
     -- "1" is narrow, so "10." is wider than the last marker, "11.".
@@ -388,9 +370,7 @@ spec = before newMarkdownCache $ do
           bottom h1 `shouldSatisfy` (<= rectTop m1)
           bottom m2 `shouldSatisfy` (<= rectTop o2)
           bottom table `shouldSatisfy` (\b -> abs (b - bottom o1 - 1) < 0.1)
-          rectTop m1 `shouldBe` rectTop m2
-          bottom m1 `shouldBe` bottom m2
-          bottom o1 `shouldBe` bottom o2
+          (rectTop m1, bottom m1, bottom o1) `shouldBe` (rectTop m2, bottom m2, bottom o2)
         _ -> expectationFailure ("expected a table and six cells, got " <> show panels)
 
   it "lines a table cell's wrapped lines up as its column is aligned" $ \cache -> do
@@ -441,7 +421,7 @@ spec = before newMarkdownCache $ do
     map (`hasText` spans) ["custom top", "custom quoted", "custom listed"] `shouldBe` replicate 3 True
     -- The language label exactly: the block's "Copy" button contains "py".
     isJust (spanRectOf "py" spans) `shouldBe` True
-    map wText <$> drawnWords ctx `shouldReturn` ["item", "other", "after"]
+    wordTexts ctx `shouldReturn` ["item", "other", "after"]
     -- Only the Python block uses the default widget, with its copy button.
     length [() | (_, "Copy", _, _, _) <- spans] `shouldBe` 1
 
