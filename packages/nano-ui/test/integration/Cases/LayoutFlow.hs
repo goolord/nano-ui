@@ -44,12 +44,8 @@ rectsAt ctx is = (\rs -> [r | (i, r) <- zip [0 ..] rs, i `elem` is]) <$> arenaRe
 sim :: Context -> IORef Int -> NanoUI a -> Sim a r -> IO r
 sim ctx failed = runSim ctx failed input0
 
--- | The cursor with the pointer on the target.
-cursorAt :: Target -> Sim a UiCursorKind
-cursorAt t = moveTo t >> ((,) <$> simContext <*> getInput) >>= liftIO . uncurry uiCursorKind
-
-focused, hot :: Sim a WidgetId
-focused = simContext >>= liftIO . getFocusId
+-- | The hot widget.
+hot :: Sim a WidgetId
 hot = simContext >>= liftIO . getHotId
 
 -- | Hover, press, hold and release on the target; the press and release results.
@@ -162,10 +158,10 @@ runLayoutFlowRectsTest ctx failed =
 -- and the other spans). Fixed sizes outside a node's limits take the limit.
 runTextSizesTest :: Context -> IORef Int -> IO ()
 runTextSizesTest ctx failed = do
-  forM_ cases $ \(ui, at, others, want) -> do
+  forM_ cases $ \(ui, idx, others, want) -> do
     rs <- layoutOf ctx ui
     assertEq failed want rs
-    assertJust failed (lookup at (zip [0 :: Int ..] rs)) (assertPaintedLines failed ctx others)
+    assertJust failed (lookup idx (zip [0 :: Int ..] rs)) (assertPaintedLines failed ctx others)
   let narrow l = l {layoutWidth = Fixed 100, layoutHeight = Fixed 28}
       field f = textInputConfigured' defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}
       custom = defaultCustomWidgetSpec {widgetLayout = narrow (minW 160 defaultLayout), widgetMeasure = Just (\_ _ -> (100, 28))}
@@ -253,8 +249,8 @@ runLayerPaintOrderTest :: Context -> IORef Int -> IO ()
 runLayerPaintOrderTest ctx failed = do
   forM_ cases $ \(ui, under, over) -> do
     quads <- drawQuads . snd =<< warmupDraw ctx input0 ui
-    let at col = findIndex ((== col) . snd) quads
-    assertJust failed ((,) <$> at under <*> at over) $ \(u, o) -> assert failed (u < o)
+    let indexOf col = findIndex ((== col) . snd) quads
+    assertJust failed ((,) <$> indexOf under <*> indexOf over) $ \(u, o) -> assert failed (u < o)
   let outside version = columnWith (tight . gap 0 . fillW) $ do
         layersWith tight $ box (pinAt 10 10 . fixedWH 20 20) green
         rowWith (tight . fixedWH 50 20) $
@@ -330,7 +326,6 @@ runPointerOwnerTest ctx failed =
       checkEq (only want) . map respClicked =<< click t
   where
     btn f w h = buttonWith' (f . fixedWH w h) "b"
-    at x y = At (V2 x y)
     over inner = columnWith tight ((\a b -> [a, b]) <$> btn id 200 100 <*> inner)
     panelOver mode = over (panelWith (pointer mode . pinAt 10 10 . fixedWH 120 60) (btn id 40 20))
     drawingOver mode = over (drawing (pointer mode . pinAt 20 20 . fixedWH 100 50) (const mempty))
@@ -358,7 +353,7 @@ runCoveredFieldFocusTest :: Context -> IORef Int -> IO ()
 runCoveredFieldFocusTest ctx failed = do
   let field f t = fst <$> withValue t (textInputConfigured' defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)})
       onLeft r = At (V2 (rectX (respRect r) + 20) (rectY (respRect r) + rectH (respRect r) / 2))
-      focusAfter t = click t >> focused
+      focusAfter t = click t >> focusedId
       layeredUi = column $ do
         (f, cover) <- layers $ (,) <$> field (fixedW 200) "under" <*> buttonWith' (alignEnd . fixedWH 40 20) "x"
         (under, top) <- layers $ (,) <$> buttonWith' (fixedWH 200 30) "under" <*> field (fixedW 100) "over"
@@ -369,12 +364,12 @@ runCoveredFieldFocusTest ctx failed = do
     checkEq UiCursorText =<< cursorAt (onLeft f)
     (_, cover1, _, _) <- click (On cover)
     check (respClicked cover1)
-    checkEq (WidgetId 0) =<< focused
+    checkEq (WidgetId 0) =<< focusedId
     checkEq (respId f) =<< focusAfter (onLeft f)
     checkEq (respId f) =<< focusAfter (On cover)
     (_, _, under, _) <- click (On top)
     check (not (respClicked under))
-    checkEq (respId top) =<< focused
+    checkEq (respId top) =<< focusedId
   let pinnedOver = columnWith tight $ do
         cover <- buttonWith' (pinAt 100 0 . fixedWH 60 20) "x"
         f <- field (fixedW 200) "text"
@@ -385,18 +380,18 @@ runCoveredFieldFocusTest ctx failed = do
     (cover, f, _, over) <- result
     (cover1, _, _, _) <- click (On cover)
     check (respClicked cover1)
-    checkEq (WidgetId 0) =<< focused
+    checkEq (WidgetId 0) =<< focusedId
     checkEq (respId f) =<< focusAfter (onLeft f)
     checkEq (respId f) =<< focusAfter (On cover)
     (_, _, _, over1) <- click (On over)
     check (respClicked over1)
-    checkEq (WidgetId 0) =<< focused
+    checkEq (WidgetId 0) =<< focusedId
   let pinnedField = columnWith tight (field (pinAt 50 0 . fixedW 100) "pinned" <* field (fixedW 300) "under")
   newContext >>= \c -> runSim c failed input0 pinnedField $ do
     pinned <- result
     checkEq UiCursorText =<< cursorAt (On pinned)
     _ <- rightClick (On pinned)
-    checkEq (respId pinned) =<< focused
+    checkEq (respId pinned) =<< focusedId
   let blocked mode = columnWith tight $
         field (fixedW 200) "text" <* panelWith (pointer mode . pinAt 60 0 . fixedWH 80 20) (pure ())
   forM_ [(PointerAuto, True), (PointerBlock, False)] $ \(mode, through) -> sim ctx failed (blocked mode) $ do
@@ -404,7 +399,7 @@ runCoveredFieldFocusTest ctx failed = do
     let p = At (V2 (rectX (respRect f) + 100) (rectY (respRect f) + 10))
     checkEq through . (== UiCursorText) =<< cursorAt p
     _ <- click p
-    checkEq (if through then respId f else WidgetId 0) =<< focused
+    checkEq (if through then respId f else WidgetId 0) =<< focusedId
     void (click (At (V2 390 290)))
 
 -- | A widget under a pinned button shows no tooltip, moves no slider and

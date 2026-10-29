@@ -1,7 +1,6 @@
 module Cases.Window (tests) where
 
 import Spec
-import Cases.SimExtra (cursorAt)
 import Control.Exception (evaluate)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (isJust, isNothing, listToMaybe)
@@ -41,15 +40,6 @@ tests =
   , spec "caption-drag-spans" runDragSpansTest
   , simSpec "caption-buttons" 400 200 captionUi captionButtonsClose
   ]
-
-at :: Float -> Float -> Target
-at x y = At (V2 x y)
-
--- | The widget's rect from the last frame, failing when it has none.
-prevRect :: WidgetId -> Sim a Rect
-prevRect wid = do
-  ctx <- simContext
-  liftIO (getPrevRect ctx wid) >>= maybe (fail ("no rect: " <> show wid)) pure
 
 -- | Drag from @a@ to @b@, settle, and give @wid@'s rect.
 dragRect :: WidgetId -> V2 -> V2 -> Sim a Rect

@@ -77,9 +77,6 @@ arrowRect ch = do
   found : _ <- (\ss -> [r | (r, t, _, _, _) <- ss, T.any (== ch) t]) <$> spans
   pure found
 
-at :: Float -> Float -> Target
-at x y = At (V2 x y)
-
 -- | A too-wide strip scrolls, paged by its arrows, either wheel (clamped) and
 -- a fraction of a notch, with no well or bar behind the headers. The arrows
 -- go once the headers fit the bar, and a tab selected through the Var, or

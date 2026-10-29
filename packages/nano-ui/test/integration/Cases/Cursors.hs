@@ -24,10 +24,6 @@ cursorNow p = do
   i <- getInput
   liftIO (uiCursorKind ctx i {inputMousePos = p})
 
--- | The cursor after a frame with the pointer on the target.
-cursorAt :: Target -> Sim a UiCursorKind
-cursorAt t = moveTo t >> (cursorNow . inputMousePos =<< getInput)
-
 -- | Views that return points, and the cursor each point shows.
 shapeCases :: [(NanoUI [V2], [UiCursorKind])]
 shapeCases =
@@ -68,7 +64,7 @@ shapeCases =
     ( column $ do
         (w, inner) <- window' (constVar True) "Tools" ((,) <$> label' "Body" <*> s UiCursorCrosshair (a 80))
         d@(Rect dx dy dw dh) <- respRect <$> s UiCursorMove (plainArea 620 380)
-        wr@(Rect wx wy ww _) <- prevRect w
+        wr@(Rect wx wy ww _) <- rectNow w
         let inset = [V2 x y | x <- [dx + 12, dx + dw - 12], y <- [dy + 12, dy + dh - 12]]
         pure $ case (inner, filter (not . rectContains (rectInflate 8 wr)) inset) of
           (Just (body, scoped), bare : _) | rectContains d (centerOf body) ->
@@ -84,7 +80,7 @@ shapeCases =
           row (label' (T.pack ("row " <> show i)) <* plainArea 60 8)
         (area, w) <- s UiCursorCrosshair $
           (,) <$> plainArea 80 60 <*> (fst <$> window' (constVar True) "Tools" (label "Body"))
-        wr <- prevRect w
+        wr <- rectNow w
         pure $ case [respRect r | r <- labels, isNothing (rectIntersect (rectInflate 8 wr) (respRect r))] of
           l1 : Rect x y _ h : _ -> [spanCenter l1, V2 (x + 2) (y + h + 3), centerOf area, spanCenter wr]
           _ -> []
@@ -110,7 +106,7 @@ shapeCases =
         Just (area, Just body) | apart area && rectContains (respRect area) (centerOf body) ->
           centerOf body : corners [area]
         _ -> []
-    prevRect r = askContext >>= \ctx -> liftIO (fromMaybe (Rect 0 0 0 0) <$> getPrevRect ctx (respId r))
+    rectNow r = askContext >>= \ctx -> liftIO (fromMaybe (Rect 0 0 0 0) <$> getPrevRect ctx (respId r))
     s = withCursorShape
     a = plainArea 200
     pinned = drawing (pinAt 20 20 . fixedWH 60 40) (const mempty)

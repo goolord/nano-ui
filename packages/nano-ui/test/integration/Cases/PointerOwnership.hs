@@ -112,25 +112,25 @@ victims = do
   let tabBarUi v = toResponse <$> tabBar' v [tab i (T.pack ("tab " <> show i)) () | i <- [0 .. 3 :: Int]]
       plain name ui place = Victim name (fmap show <$> ui) (hotAt place) (\_ _ -> pure "")
       -- The point @fx@ across and @fy@ down the rect, moved by @dx@ and @dy@.
-      at fx dx fy dy (Rect x y w h) = V2 (x + w * fx + dx) (y + h * fy + dy)
+      pt fx dx fy dy (Rect x y w h) = V2 (x + w * fx + dx) (y + h * fy + dy)
       area = T.unlines (replicate 30 "victim area line")
   pure
     [ plain "button" ((,()) <$> button' "victim button") spanCenter
     , plain "checkbox" (withValue False (checkbox' "victim checkbox")) spanCenter
     , -- The last option.
-      plain "radio" (withValue 0 (radio' ["one", "two", "three"])) (at 0.5 0 1 (-6))
-    , plain "slider" (withValue 50 (slider' 0 100)) (at 0.8 0 0.5 0)
+      plain "radio" (withValue 0 (radio' ["one", "two", "three"])) (pt 0.5 0 1 (-6))
+    , plain "slider" (withValue 50 (slider' 0 100)) (pt 0.8 0 0.5 0)
     , plain "knob" (withValue 50 (knobWith' id 36 0 100)) spanCenter
     , plain "color-picker" (withValue red colorPicker') (spanCenter . colorPickerSvSquare)
     , -- The up arrow.
-      plain "numeric-stepper" (withValue 5 numericInput') (at 1 (-8) 0.25 0)
+      plain "numeric-stepper" (withValue 5 numericInput') (pt 1 (-8) 0.25 0)
     , (plain "text-input" (withValue "victim text" textInput') spanCenter) {vcProbe = caretProbe}
     , (plain "text-area" (withValue area (textAreaWith' (fixedH 120))) spanCenter) {vcProbe = areaProbe}
     , (plain "select" (withValue 0 (selectWith' fillW ["a", "b", "c"])) spanCenter) {vcProbe = selectProbe}
     , -- The second tab.
-      plain "tab-bar" (held tabRef tabBarUi) (at 0 90 0.5 0)
+      plain "tab-bar" (held tabRef tabBarUi) (pt 0 90 0.5 0)
     , -- On the scrollbar lane, where a press drags the thumb.
-      (plain "scroll-area" scroller (at 1 (-5) 0.7 0)) {vcProbe = scrollProbe}
+      (plain "scroll-area" scroller (pt 1 (-5) 0.7 0)) {vcProbe = scrollProbe}
     , -- On the boundary between the two headers, where a press resizes.
       (plain "table-columns" tableUi spanCenter) {vcHot = headerBoundary}
     ]

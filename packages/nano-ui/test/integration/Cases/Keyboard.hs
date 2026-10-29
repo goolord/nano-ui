@@ -1,7 +1,7 @@
 module Cases.Keyboard (tests) where
 
 import Spec
-import Cases.SimExtra (above, focusOn)
+import Cases.SimExtra (above)
 import Data.Hashable (Hashable (..))
 import Data.IntMap.Strict qualified as IM
 import NanoUI.Internal.Context (Context (..), getFocusVisible, intKey)

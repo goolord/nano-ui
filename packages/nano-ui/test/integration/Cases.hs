@@ -443,7 +443,7 @@ runPaneGridDropPreviewTest ctx failed = do
         during <- layoutAt (holdAt inp0 (dest lifted))
         _ <- runFrame ctx (releaseAt (holdAt inp0 (dest lifted))) ui
         (lifted, during,) <$> layoutAt inp0
-      at q (fx, fy) lifted = case IM.lookup q lifted of
+      spot q (fx, fy) lifted = case IM.lookup q lifted of
         Just (Rect x y w h, _) -> V2 (x + w * fx) (y + h * fy)
         Nothing -> V2 (-50) (-50)
       -- Whole pixels: a dragged ratio leaves float dust (112.00001).
@@ -463,13 +463,13 @@ runPaneGridDropPreviewTest ctx failed = do
   assert failed (all (\(m, s) -> across m == across s) uneven)
   -- A centre drop swaps: lifted, pane 3 spans the top row, and the hover
   -- already shows it in pane 1's narrow column.
-  swap@(liftedS, duringS, _) <- dragPane 1 (at 3 (0.5, 0.5))
+  swap@(liftedS, duringS, _) <- dragPane 1 (spot 3 (0.5, 0.5))
   assertEq failed (Just (Rect 0 0 600 192)) (wholePx . fst <$> IM.lookup 3 liftedS)
   assertEq failed (Just (Rect 0 0 112 400)) (wholePx . fst <$> IM.lookup 3 duringS)
   previewed 1 swap
   -- Edge drops show the target already halved.
-  previewed 1 =<< dragPane 1 (at 5 (0.1, 0.5))
-  previewed 5 =<< dragPane 5 (at 3 (0.5, 0.9))
+  previewed 1 =<< dragPane 1 (spot 5 (0.1, 0.5))
+  previewed 5 =<< dragPane 5 (spot 3 (0.5, 0.9))
   -- The grid's outer band squeezes the whole grid into the other half.
   top@(_, duringT, _) <- dragPane 3 (const (V2 590 200))
   assert failed (all (\(Rect x _ w _, _) -> x + w <= 300) duringT)
@@ -550,15 +550,15 @@ runPaneGridPinnedPaneTest ctx failed = do
       stacked = Split 20 AxisH 0.5 (Split 21 AxisV 0.5 (Pane 1) (Pane 2)) (Pane 3)
       stacked' = reflow [1] (area 600 400) (area 900 600) stacked
       rightPin = Split 30 AxisV 0.5 (Pane 1) (Pane 2)
-      at k = area (600 + k * 2 / 3) 400
+      widthAt k = area (600 + k * 2 / 3) 400
   forM_
     [ (ends, area 600 400, rectW, [(1, 146), (3, 211)])
     , (reflow [1, 3] (area 600 400) (area 900 400) ends, area 900 400, rectW, [(1, 146), (3, 211), (2, 511)])
     , (stacked, area 600 400, rectW, [(1, 292)])
     , (stacked', area 900 600, rectW, [(1, 292), (2, 592)])
     , (stacked', area 900 600, rectH, [(1, 292), (3, 292)])
-    , (rightPin, at 0, rectW, [(2, 292)])
-    , (foldl (\t k -> reflow [2] (at k) (at (k + 1)) t) rightPin [0 .. 29 :: Float], at 30, rectW, [(2, 292)])
+    , (rightPin, widthAt 0, rectW, [(2, 292)])
+    , (foldl (\t k -> reflow [2] (widthAt k) (widthAt (k + 1)) t) rightPin [0 .. 29 :: Float], widthAt 30, rectW, [(2, 292)])
     ]
     $ \(t, r, size, want) -> forM_ want $ \(p, x) -> case M.lookup p (lay t r) of
       Just g | abs (size g - x) <= 0.01 -> pure ()

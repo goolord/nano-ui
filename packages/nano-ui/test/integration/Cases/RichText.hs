@@ -100,9 +100,9 @@ runRichTextLinkTest ctx failed = do
   docsW <- lineWidthIO fm "docs"
   runSim ctx failed inp400 ui $ do
     Rect rx ry _ rh <- respRect . fst <$> result
-    let at dx = V2 (rx + dx) (ry + rh / 2)
-        (onLink, onLinkStart, onText) = (at (prefixW + linkW / 2), at (prefixW + 1), at 2)
-        onLinkEnd = at (prefixW + linkW - docsW / 2)
+    let pt dx = V2 (rx + dx) (ry + rh / 2)
+        (onLink, onLinkStart, onText) = (pt (prefixW + linkW / 2), pt (prefixW + 1), pt 2)
+        onLinkEnd = pt (prefixW + linkW - docsW / 2)
         clickAt p = moveTo (At p) >> snd <$> click (At p)
         cursorIsPointer p = moveTo (At p) >> getInput >>= \i -> liftIO (cursorKindIs ctx i UiCursorPointer)
     checkEq (Just "docs-target") =<< clickAt onLink
@@ -129,11 +129,11 @@ runRichTextAlignTest ctx failed = do
         extents <- forM (texts ops) $ \(x, y, t) -> (\w -> (y, x, x + w)) <$> lineWidthIO fm t
         let lines' = groupBy (\(a, _, _) (b, _, _) -> a == b) extents
         pure (r, [(minimum [x0 | (_, x0, _) <- l], maximum [x1 | (_, _, x1) <- l]) | l <- lines'])
-  forM_ [(alignEnd, 1), (alignCenter, 0.5 :: Float)] $ \(align, at) -> do
+  forM_ [(alignEnd, 1), (alignCenter, 0.5 :: Float)] $ \(align, pt) -> do
     (Rect rx _ rw _, full) <- linesOf fillW align
     (_, fitted) <- linesOf id align
     assert failed (length full > 1)
-    forM_ full $ \(x0, x1) -> assertEq failed (round (rx + at * rw) :: Int) (round (x0 + at * (x1 - x0)))
+    forM_ full $ \(x0, x1) -> assertEq failed (round (rx + pt * rw) :: Int) (round (x0 + pt * (x1 - x0)))
     assertEq failed full fitted
     (Rect ox _ _ _, ops) <-
       settledOps ctx inp400 (columnWith (fixedW 40) (fst <$> richTextWith' (fillW . align) ["supercalifragilistic", " short"]))

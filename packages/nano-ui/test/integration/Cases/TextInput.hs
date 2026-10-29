@@ -220,8 +220,8 @@ runFieldPressFocusTest ctx failed = do
   runSim ctx failed (withInput 320 120) (column (label "Name" >> field)) $ do
     wid <- respId . fst <$> result
     Rect x y w _ <- rectOf "Enter Name"
-    checkEq wid =<< (press (At (V2 (x + w / 2) (y + 0.5))) >> focusId)
-    checkEq (replicate 5 wid) =<< (release >> replicateM 5 (frame >> focusId))
+    checkEq wid =<< (press (At (V2 (x + w / 2) (y + 0.5))) >> focusedId)
+    checkEq (replicate 5 wid) =<< (release >> replicateM 5 (frame >> focusedId))
 
 -- | Emptying a search field from the keyboard reports the change on that
 -- frame, as its clear button does, rather than after the debounce. The clear

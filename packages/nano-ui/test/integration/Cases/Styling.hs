@@ -1,7 +1,6 @@
 module Cases.Styling (tests) where
 
 import Spec
-import Cases.SimExtra (focusId, focusOn)
 import Data.Bits ((.&.))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -41,7 +40,7 @@ runDisabledPointerTest ctx failed = do
           after <- moveTo (At p)
           checkEq initial =<< liftIO (readVarIO ref)
           check (not (respClicked after) && not (respHovered after))
-          check . (/= respId r) =<< focusId
+          check . (/= respId r) =<< focusedId
   untouched False (\_ -> button' "Go")
   untouched False (checkbox' "Check")
   untouched False (toggleSwitchWith' id)
@@ -66,7 +65,7 @@ disabledFocusOrder = do
   (a, c) <- result
   focusOn (respId a)
   pressTab 1
-  checkEq (respId c) =<< focusId
+  checkEq (respId c) =<< focusedId
 
 -- | A styled scope paints only its own widgets. Changing only its theme repaints but
 -- measures no text (it once dropped the text caches on every change).

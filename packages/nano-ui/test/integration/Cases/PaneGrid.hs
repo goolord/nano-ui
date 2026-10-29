@@ -42,16 +42,6 @@ narrowLeft = Split 30 AxisV 0 (Pane 10) (Pane 20)
 inGrid :: IORef Int -> NanoUI a -> Sim a r -> IO r
 inGrid failed ui script = newContext >>= \ctx -> runSim ctx failed (withInput 600 400) ui script
 
-at :: Float -> Float -> Target
-at x y = At (V2 x y)
-
--- | The cursor with the pointer moved onto the target.
-cursorAt :: Target -> Sim a UiCursorKind
-cursorAt t = do
-  _ <- moveTo t
-  ctx <- simContext
-  liftIO . uiCursorKind ctx =<< getInput
-
 -- | A pane view that, once @flag@ is set, runs @act@ in pane @target@.
 actOnce :: IORef Bool -> Word64 -> (PaneGridCtx -> NanoUI ()) -> Word64 -> PaneGridCtx -> NanoUI PaneView
 actOnce flag target act pid pctx = do

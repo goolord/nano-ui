@@ -44,23 +44,6 @@ tests =
   , spec "scroll-wheel-routing" runWheelRoutingTest
   ]
 
-at :: Float -> Float -> Target
-at x y = At (V2 x y)
-
--- | The cursor with the pointer moved onto the target.
-cursorAt :: Target -> Sim a UiCursorKind
-cursorAt t = do
-  _ <- moveTo t
-  ctx <- simContext
-  liftIO . uiCursorKind ctx =<< getInput
-
--- | The widget's rect from the last frame.
-widgetRect :: WidgetId -> Sim a Rect
-widgetRect wid = do
-  ctx <- simContext
-  Just r <- liftIO (getPrevRect ctx wid)
-  pure r
-
 -- | Labels @prefix 1@ to @prefix n@.
 numbered :: String -> Int -> NanoUI ()
 numbered prefix n = mapM_ (\i -> label (T.pack (prefix <> show i))) [1 .. n]
@@ -267,8 +250,8 @@ runNestedScrollTest ctx failed = do
         pump prev = do
           (_, now) <- notch >> offsets
           when (now > prev) (pump now)
-    r@(Rect ix iy iw ih) <- widgetRect inner
-    Rect _ oy _ oh <- widgetRect outer
+    r@(Rect ix iy iw ih) <- prevRect inner
+    Rect _ oy _ oh <- prevRect outer
     pressTab 1
     check . (/= WidgetId 0) =<< liftIO (getFocusId ctx)
     _ <- wheel (at 230 210) (V2 0 1)
@@ -291,7 +274,7 @@ runNestedScrollTest ctx failed = do
         fst <$> scrollArea (fillW . fixedH 36) (column (numbered "in " 8))
   runSim c failed (withInput 200 400) below $ do
     (_, inner) <- result
-    r <- widgetRect inner
+    r <- prevRect inner
     check (v2Y (spanCenter r) > 80 && v2Y (spanCenter r) < 400)
     _ <- wheel (Within r) (V2 0 1)
     checkEq 0 =<< liftIO (getScrollOffset c inner)
@@ -329,7 +312,7 @@ runScrollHitTest _ failed = do
   runSim ctx failed (withInput 240 160) (target (fillW . fixedH 8) 40) $ do
     _ <- wheelDown 80
     (_, b, _) <- result
-    r <- widgetRect (respId b)
+    r <- prevRect (respId b)
     checkEq UiCursorDefault =<< cursorAt (Within r)
     check . (/= respId b) =<< liftIO (getHotId ctx)
     checkEq "" . hitOf =<< click (Within r)
@@ -576,12 +559,12 @@ runScrollCommandsTest ctx failed = do
   runSim ctx failed (withInput 200 160) ui $ do
     (sid, rows) <- result
     Just m <- liftIO (getScrollMetrics ctx sid)
-    r <- widgetRect sid
+    r <- prevRect sid
     let range = v2Y (scrollRange m)
         view = scrollViewport m
         after cmd = liftIO cmd >> frame >> liftIO (getScrollOffset ctx sid)
         target = respId (rows !! 11)
-        atTop wid = widgetRect wid >>= \rr -> check (abs (rectY rr - rectY view) < 1.5)
+        atTop wid = prevRect wid >>= \rr -> check (abs (rectY rr - rectY view) < 1.5)
     checkEq (ScrollAxisY, V2 0 0, 0) (scrollAxes m, scrollOffset m, v2X (scrollRange m))
     checkGt range 0
     -- The viewport is the scroller's box inside its padding and bar lane.
@@ -596,7 +579,7 @@ runScrollCommandsTest ctx failed = do
     -- A row above the viewport comes back to the top edge.
     _ <- after (scrollIntoView ctx sid (respId (rows !! 1)) ScrollNearest ScrollInstant)
     atTop (respId (rows !! 1))
-    rowH <- rectH <$> widgetRect target
+    rowH <- rectH <$> prevRect target
     off <- after (scrollRectIntoView ctx sid (Rect 0 (rowH * 8) 10 rowH) ScrollStart ScrollInstant)
     check (abs (off - rowH * 8) < 1.5)
     _ <- after (scrollToStart ctx sid ScrollInstant)
@@ -633,7 +616,7 @@ runWheelRoutingTest _ failed = do
       pair (a, b) = [a, b]
       on k sids = pure (OnWidget (sids !! k))
       point p _ = pure (At p)
-      firstRect = widgetRect . (!! 0)
+      firstRect = prevRect . (!! 0)
       expectMoves want ui aim d = assertEq failed want =<< wheelMoves failed ui aim d
       overlapping mode = fmap pair . columnWith tight $ do
         (top, ()) <- scrollArea (pinAt 20 20 . fixedWH 120 100) (rows 30)

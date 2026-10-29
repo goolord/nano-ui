@@ -37,7 +37,9 @@ module NanoUI.Testing.Sim
   , advance
     -- * Pointer
   , Target (..)
+  , at
   , targetPoint
+  , prevRect
   , moveTo
   , press
   , pressButton
@@ -49,11 +51,15 @@ module NanoUI.Testing.Sim
   , doubleClick
   , drag
   , wheel
+  , cursorAt
+  , pointerCursor
     -- * Keyboard
   , typeText
   , pressKey
   , chord
   , pressTab
+  , focusedId
+  , focusOn
     -- * Reading the frame
   , spans
   , findSpan
@@ -80,6 +86,7 @@ import GHC.Stack (HasCallStack, withFrozenCallStack)
 import NanoUI hiding (liftIO)
 import NanoUI.Backend
 import NanoUI.Shortcut (Shortcut)
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (getPrevRect)
 import NanoUI.Testing.Assert qualified as A
 import NanoUI.Testing.Harness (chordInp, keyInp, pressWith, releaseWith, spanLabel)
@@ -184,16 +191,24 @@ data Target
 instance IsString Target where
   fromString = Labelled . T.pack
 
+-- | @'At' ('V2' x y)@.
+at :: Float -> Float -> Target
+at x y = At (V2 x y)
+
 -- | The point a target aims at, throwing when it is not on screen.
 targetPoint :: HasCallStack => Target -> Sim a V2
 targetPoint = \case
   At p -> pure p
   Within (Rect x y w h) -> pure (V2 (x + w / 2) (y + h / 2))
   On resp -> targetPoint (Within (respRect resp))
-  OnWidget wid -> do
-    ctx <- simContext
-    liftIO (getPrevRect ctx wid) >>= maybe (missing ("widget " <> show wid)) (targetPoint . Within)
+  OnWidget wid -> prevRect wid >>= targetPoint . Within
   Labelled txt -> rectOf txt >>= targetPoint . Within
+
+-- | The widget's rect from the last frame, throwing when it has none.
+prevRect :: WidgetId -> Sim a Rect
+prevRect wid = do
+  ctx <- simContext
+  liftIO (getPrevRect ctx wid) >>= maybe (missing ("widget " <> show wid)) pure
 
 missing :: String -> Sim a b
 missing what = liftIO (throwIO (userError ("Sim: no " <> what <> " on screen")))
@@ -250,14 +265,24 @@ drag from to steps = do
   V2 x1 y1 <- targetPoint to
   void (press (At (V2 x0 y0)))
   let n = max 1 steps
-      at k = let s = fromIntegral k / fromIntegral n in V2 (x0 + (x1 - x0) * s) (y0 + (y1 - y0) * s)
-  mapM_ (\k -> frameWith (\i -> i {inputMousePos = at k})) [1 .. n]
+      step k = let s = fromIntegral k / fromIntegral n in V2 (x0 + (x1 - x0) * s) (y0 + (y1 - y0) * s)
+  mapM_ (\k -> frameWith (\i -> i {inputMousePos = step k})) [1 .. n]
   release
 
 -- | Hover the target for a frame, then turn the wheel there by @d@
 -- (positive @y@ scrolls down).
 wheel :: HasCallStack => Target -> V2 -> Sim a a
 wheel t d = moveTo t >> frameWith (\i -> i {inputScroll = d})
+
+-- | The pointer cursor after a frame with the pointer on the target.
+cursorAt :: HasCallStack => Target -> Sim a UiCursorKind
+cursorAt t = moveTo t >> pointerCursor
+
+-- | The pointer cursor the last frame's layout gives the current input.
+pointerCursor :: Sim a UiCursorKind
+pointerCursor = do
+  ctx <- simContext
+  liftIO . uiCursorKind ctx =<< getInput
 
 -- | One frame that types @txt@ into whatever has focus.
 typeText :: T.Text -> Sim a a
@@ -268,17 +293,27 @@ pressKey :: Key -> Sim a a
 pressKey k = frameWith (keyInp k)
 
 -- | One frame pressing a chord such as @cmdOrCtrl <> key 'z'@, with exactly
--- its modifiers held for that frame.
+-- its modifiers held for that frame. The key and modifiers are let go
+-- afterwards, so the same chord again is a new press, not an auto-repeat.
 chord :: Shortcut -> Sim a a
 chord s = do
-  mods <- inputModifiers <$> getInput
+  before <- getInput
   a <- frameWith (chordInp s)
-  modifyInput (\i -> i {inputModifiers = mods})
+  modifyInput (\i -> i {inputModifiers = inputModifiers before, inputKeysHeld = inputKeysHeld before})
   pure a
 
 -- | Press Tab @n@ times, a frame each, moving focus forward.
 pressTab :: Int -> Sim a ()
 pressTab n = replicateM_ n (void (pressKey KeyTab))
+
+-- | The widget with keyboard focus.
+focusedId :: Sim a WidgetId
+focusedId = simContext >>= liftIO . getFocusId
+
+-- | Give @wid@ keyboard focus directly, as focus kept from earlier frames
+-- does; the next frame sees it.
+focusOn :: WidgetId -> Sim a ()
+focusOn wid = simContext >>= \ctx -> liftIO (writeIORef (ctxFocusId ctx) wid)
 
 -- | The text spans of the last frame: the base layer, then overlays.
 spans :: Sim a [(Rect, T.Text, Color, Color, Rect)]

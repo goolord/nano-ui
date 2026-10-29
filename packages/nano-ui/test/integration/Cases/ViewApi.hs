@@ -102,16 +102,16 @@ runPointerTrackTest ctx failed = do
   let ui = rowWith (tight . gap 0) $ do
         _ <- customWidget (sizedWidget 100 100 False) {widgetTrackPointer = True}
         void (customWidget (sizedWidget 100 100 False))
-      at x y = (withInput 400 300) {inputMousePos = V2 x y}
+      pt x y = (withInput 400 300) {inputMousePos = V2 x y}
       -- Hover fades run out first, so what is left is the move's own ask.
       settleAt from n = do
         void (runFrame ctx from {inputDeltaTime = 0.1} ui)
         busy <- needsRedraw ctx from from
         when (busy && n > (0 :: Int)) (settleAt from (n - 1))
       needsAfter from to = warmup2 ctx from ui >> settleAt from 50 >> needsRedraw ctx from to
-  assert failed =<< needsAfter (at 20 50) (at 30 50)
-  assertEq failed False =<< needsAfter (at 120 50) (at 130 50)
-  assert failed =<< needsAfter (at 120 50) (at 20 50)
+  assert failed =<< needsAfter (pt 20 50) (pt 30 50)
+  assertEq failed False =<< needsAfter (pt 120 50) (pt 130 50)
+  assert failed =<< needsAfter (pt 120 50) (pt 20 50)
 
 -- | 'contentKeyOf' tells apart what 'contentKey' would round together, keeps
 -- the order of its parts, and never gives the "no key" 0.

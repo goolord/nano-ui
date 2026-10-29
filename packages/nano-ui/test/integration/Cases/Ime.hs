@@ -4,7 +4,7 @@
 module Cases.Ime (tests) where
 
 import Spec
-import Cases.SimExtra (above, focusId)
+import Cases.SimExtra (above)
 import Data.IntMap.Strict qualified as IM
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Text qualified as T
@@ -143,7 +143,7 @@ runImeKeysTest ctx failed =
     forM_ keys $ \k -> do
       (resp, value) <- pressKey k
       check (value == "abcd" && not (respChanged resp || respSubmitted resp))
-      checkEq (respId resp) =<< focusId
+      checkEq (respId resp) =<< focusedId
     shown ["abxyzcd"] []
     check =<< escapeKept id
     -- The key that ends a composition with nothing committed, an Escape that
@@ -190,10 +190,10 @@ runImeAreaPaintTest ctx failed = do
       carets quads cx = [r | (r@(Rect x _ w h), _) <- quads, near x cx, w <= 1.5, h >= cell / 2]
       -- On the row showing @line@: a composition @len@ cells long starting
       -- at cell @at@, IME caret @c@ cells in.
-      check' line at len c step = do
+      check' line pt len c step = do
         (quads, spans') <- paint step
         assertJust failed (spanRectOf line spans') $ \(Rect sx sy _ sh) -> do
-          let x0 = sx + at * cell
+          let x0 = sx + pt * cell
               underlines (Rect x y w h, _) =
                 near x x0 && near w (len * cell) && h <= 2 && y > sy + sh / 2 && y < sy + sh + 2
           assertJustM failed (textInputArea ctx) $ \(TextInputArea (Rect ax ay aw ah) cursor _) ->
@@ -264,13 +264,13 @@ runImeOwnerTest ctx failed = do
     _ <- comp 1
     shown [] ["x"]
     ((a, _), (b, _)) <- pressKey KeyTab >> frame
-    checkEq (respId a) =<< focusId
+    checkEq (respId a) =<< focusedId
     -- Unchanged, it stays out of the field Tab reached.
     shown [] ["x"]
     _ <- comp 2
     shown ["aaxy"] []
     _ <- click (Within (respRect b))
-    checkEq (respId b) =<< focusId
+    checkEq (respId b) =<< focusedId
     shown ["aa", "bb"] ["xy"]
     checkEq "b" . snd . snd =<< (pressKey KeyEnd >> pressKey KeyBackspace)
     _ <- comp 3

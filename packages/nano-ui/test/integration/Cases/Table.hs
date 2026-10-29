@@ -52,19 +52,6 @@ tests =
   , spec "table-squeeze" runTableSqueezeTest
   ]
 
-at :: Float -> Float -> Target
-at x y = At (V2 x y)
-
--- | The cursor where the pointer is now.
-cursorNow :: Sim a UiCursorKind
-cursorNow = do
-  ctx <- simContext
-  liftIO . uiCursorKind ctx =<< getInput
-
--- | The cursor with the pointer moved onto the target.
-cursorAt :: Target -> Sim a UiCursorKind
-cursorAt t = moveTo t >> cursorNow
-
 -- | A table sorted ascending on its first column, given everything but the sort.
 sortedTable :: (Var SortCol -> NanoUI ()) -> NanoUI ()
 sortedTable build = build =<< useVar (SortCol 0 SortAsc)
@@ -237,7 +224,7 @@ runTableReorderTest _ failed = do
     [first, Rect sx sy sw sh, _] <- liftIO (headerButtonRects c)
     _ <- press (Within first)
     replicateM_ 2 (moveTo (at (sx + sw - 1) (sy + sh / 2)))
-    check . (/= UiCursorEwResize) =<< cursorNow
+    check . (/= UiCursorEwResize) =<< pointerCursor
     _ <- release
     checkEq [1, 0, 2] =<< order
   writeIORef scrim True
@@ -561,7 +548,7 @@ runTableColResizeTest _ failed =
       checkGt after (before + 30)
       checkEq UiCursorEwResize =<< cursorAt (at (edgeX + 60) 490)
       _ <- release
-      check . (/= UiCursorEwResize) =<< cursorNow
+      check . (/= UiCursorEwResize) =<< pointerCursor
 
 -- | All table-header button rects, left to right.
 headerButtonRects :: Context -> IO [Rect]

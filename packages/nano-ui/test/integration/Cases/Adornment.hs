@@ -6,8 +6,7 @@ import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..), getFocusables)
 import NanoUI.Internal.Layout.Arena (flowChildrenInOrder, getNodeRect, lookupNodeByWidgetId)
-import NanoUI.Testing.Sim (Target (..), check, checkEq, click, moveTo, rectOf, result, runSim, typeText)
-import Cases.SimExtra (focusId, pointerCursor)
+import NanoUI.Testing.Sim (Target (..), check, checkEq, click, focusedId, moveTo, pointerCursor, rectOf, result, runSim, typeText)
 
 tests :: [Spec]
 tests =
@@ -185,17 +184,17 @@ runAdornedFieldControlTest ctx failed = do
     ((field, _), (other, _)) <- result
     showR <- rectOf "Show"
     _ <- click (On other) >> click "Show"
-    checkEq (WidgetId 0) =<< focusId
+    checkEq (WidgetId 0) =<< focusedId
     -- Focus the field with the caret at the end of its text.
     _ <- click (At (V2 (rectX showR - 20) (v2Y (spanCenter showR))))
-    checkEq (respId field) =<< focusId
+    checkEq (respId field) =<< focusedId
     ((hovered, _), _) <- moveTo "Show" >> moveTo "Show" >> moveTo "Show"
     check (not (respHovered hovered))
     checkEq UiCursorPointer =<< pointerCursor
     ((clicked, _), _) <- click "Show"
     check (not (respClicked clicked))
     checkEq 2 =<< liftIO (readIORef showClicks)
-    checkEq (respId field) =<< focusId
+    checkEq (respId field) =<< focusedId
     checkEq "abc" . snd . fst =<< typeText "c"
     _ <- moveTo "Off" >> moveTo "Off"
     checkEq (respId field) =<< liftIO (readIORef (ctxHotId ctx))
