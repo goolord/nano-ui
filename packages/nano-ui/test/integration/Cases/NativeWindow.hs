@@ -12,6 +12,7 @@ import Data.Maybe (fromJust, isJust, isNothing)
 import Spec
 import GHC.TypeLits (symbolSing)
 import NanoUI.Internal.Context (Context (..))
+import NanoUI.Runner (LoopWindows (..))
 import NanoUI.Runner.Windows
 import NanoUI.Testing.Sim
 import System.Timeout (timeout)
@@ -357,15 +358,13 @@ runWindowsRunnerTest ctx failed = do
   closed <- newIORef []
   let ops =
         WindowOps
-          { woOpen = \_ _ settings -> (,) (wsTitle settings) <$> newContext
+          { woOpen = \_ settings -> (,) (wsTitle settings) <$> newContext
           , woClose = \t -> modifyIORef' closed (t :)
-          , woPoll = \_ -> pure []
           , woApplyEvent = const
           , woIsButtonEdge = const False
           , woIsClose = id
           , woSync = \_ c i -> pure (c, i)
           , woDraw = \_ c v i _ -> (\(_, _, more) -> more) <$> runFrame c i v
-          , woPointerIn = \_ -> pure False
           , woCursor = \_ _ _ -> pure ()
           , woPacingMs = const 16
           }
@@ -375,8 +374,9 @@ runWindowsRunnerTest ctx failed = do
           liftIO (modifyIORef' childSaw (n :))
           when (n == 3) (writeVar shared 1)
   windows <- newWindows ops
-  let mainFrame = noteMainFrame windows >> runFrame ctx inp firstFrame
-      step = void (afterMainPass windows ctx)
+  let lw = loopWindows windows
+      mainFrame = runFrame ctx inp firstFrame <* lwDrew lw
+      step = afterMainPass windows ctx
       settled = replicateM_ 4 step >> length <$> readIORef childSaw
   _ <- mainFrame
   opening <- settled
@@ -386,10 +386,10 @@ runWindowsRunnerTest ctx failed = do
   assertEq failed [2] . take 1 =<< readIORef childSaw
   quiet <- settled
   assertEq failed quiet =<< settled
-  assertEq failed False =<< mainNeedsFrame windows
+  assertEq failed False =<< lwFirstDue lw
   _ <- mainFrame
   step
-  assertEq failed True =<< mainNeedsFrame windows
+  assertEq failed True =<< lwFirstDue lw
   [(_, queue)] <- openWindows windows
   queue True
   step

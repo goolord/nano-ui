@@ -40,9 +40,8 @@ module NanoUI.Emit
   )
 where
 
-import Control.Exception (finally)
-import Control.Monad (when)
-import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
+import Control.Monad (unless, when)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
 import NanoUI.Internal.Context (isDirty, markDirty)
 import NanoUI.Testing (Context, DrawData, runFrame)
@@ -126,11 +125,16 @@ runFrameReduce ::
   -> IO (a, model, [msg], DrawData, Bool)
 runFrameReduce update ctx inp model view = do
   (a, msgs, draw, dirty) <- runFrameE ctx inp (view model)
-  let
-    model' = reduceMessages update model msgs
+  (model', dirty') <- reduceAfterFrame update ctx model msgs dirty
+  pure (a, model', msgs, draw, dirty')
+
+-- | Reduce a frame's messages; a changed model asks for another frame.
+-- Answers the model and whether the context needs another frame.
+reduceAfterFrame :: Eq model => (msg -> model -> model) -> Context -> model -> [msg] -> Bool -> IO (model, Bool)
+reduceAfterFrame update ctx model msgs dirty = do
+  let model' = reduceMessages update model msgs
   when (model' /= model) (markDirty ctx)
-  dirty' <- isDirty ctx
-  pure (a, model', msgs, draw, dirty || dirty')
+  (model',) . (dirty ||) <$> isDirty ctx
 
 -- | Drive a left press and release through a reducer, returning the final
 -- model, release-frame messages, and release-frame dirty flag.
@@ -157,12 +161,14 @@ runClickReduce update ctx inp model view pos = do
 data Reducer msg model = Reducer
   { rUpdate :: msg -> model -> model
   , rModel :: IORef model
+  , rFrame :: IORef (Maybe [msg])
+  -- ^ The running frame's messages, newest first; 'Nothing' between frames.
   , rLate :: IORef [msg]
-  -- ^ Newest first.
+  -- ^ Messages emitted between frames, newest first.
   }
 
 newReducer :: (msg -> model -> model) -> model -> IO (Reducer msg model)
-newReducer update model = Reducer update <$> newIORef model <*> newIORef []
+newReducer update model = Reducer update <$> newIORef model <*> newIORef Nothing <*> newIORef []
 
 -- | The current model.
 reducerModel :: Reducer msg model -> IO model
@@ -174,19 +180,20 @@ reducerModel = readIORef . rModel
 -- asks the context for another.
 reduceFrame :: Eq model => Reducer msg model -> Context -> Input -> (model -> NanoUIE msg a) -> IO (a, DrawData, Bool)
 reduceFrame r ctx inp view = do
-  late <- atomicModifyIORef' (rLate r) ([],)
+  late <- readIORef (rLate r)
+  unless (null late) (writeIORef (rLate r) [])
   model <- reduceMessages (rUpdate r) <$> readIORef (rModel r) <*> pure (reverse late)
-  live <- newIORef True
-  messages <- newIORef []
-  let sink msg = liftIO $ readIORef live >>= \case
-        True -> modifyIORef' messages (msg :)
-        False -> modifyIORef' (rLate r) (msg :) >> markDirty ctx
-  (a, draw, dirty) <- runFrame ctx inp (withSink sink (view model)) `finally` writeIORef live False
-  model' <- reduceMessages (rUpdate r) model . reverse <$> readIORef messages
+  writeIORef (rFrame r) (Just [])
+  (a, draw, dirty) <- runFrame ctx inp (withSink sink (view model))
+  msgs <- maybe [] reverse <$> readIORef (rFrame r)
+  writeIORef (rFrame r) Nothing
+  (model', dirty') <- reduceAfterFrame (rUpdate r) ctx model msgs dirty
   writeIORef (rModel r) model'
-  when (model' /= model) (markDirty ctx)
-  dirty' <- isDirty ctx
-  pure (a, draw, dirty || dirty')
+  pure (a, draw, dirty')
+  where
+    sink msg = liftIO $ readIORef (rFrame r) >>= \case
+      Just msgs -> writeIORef (rFrame r) (Just (msg : msgs))
+      Nothing -> modifyIORef' (rLate r) (msg :) >> markDirty ctx
 
 -- | Strictly fold messages through an update function in traversal order.
 reduceMessages ::

@@ -15,6 +15,8 @@ module NanoUI.Sdl.Internal.Window
   , withSdl
   , withSdlBench
   , openChildWindow
+  , registerAppImages
+  , sdlPacingMs
   , askSdlEnv
   , withSdlEnv
   , syncDisplay
@@ -24,13 +26,14 @@ module NanoUI.Sdl.Internal.Window
   , captureFrame
   ) where
 
-import Control.Concurrent (myThreadId, rtsSupportsBoundThreads, runInBoundThread)
-import Control.Exception (IOException, bracket, catch, finally, mask)
+import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
+import Control.Exception (IOException, bracket, catch, finally, onException)
 import Control.Monad (forM_, mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
 import Data.Acquire qualified as Acquire
-import Data.Acquire.Internal qualified as Acquire
+import Data.Acquire (allocateAcquire)
+import Control.Monad.Trans.Resource (closeInternalState, createInternalState, runInternalState)
 import Data.Bits (zeroBits, (.|.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
@@ -623,8 +626,7 @@ openChildWindow opts first parent settings = do
   base <- newPixelContext
   themeFor <- readIORef (ctxThemeFor parent)
   ctx <- maybe (withTheme base =<< readIORef (ctxTheme parent)) (\pick -> base <$ followSystemTheme base pick) themeFor
-  forM_ (sdlAppImages opts) $ \(RgbaImage image w h pixels) ->
-    unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
+  registerAppImages opts ctx
   fontSource <- sdlFontCacheSource (sdlFontCache first)
   uiScale <- readIORef (sdlUiScaleRef first)
   let childOpts =
@@ -637,14 +639,27 @@ openChildWindow opts first parent settings = do
           , sdlAppUiScale = uiScale
           }
       monoSource = sdlFontCacheMonoSource (sdlFontCache first)
-  -- The window's resources outlive this call, so they are taken out of the
-  -- 'Acquire' by hand and freed by the action answered.
-  let Acquire.Acquire start = startSdlWindow childOpts (windowFlags childOpts) ctx fontSource monoSource (Just first)
-  mask $ \restore -> do
-    Acquire.Allocated (ctx', env) release <- start restore
-    setBackendSession ctx' SSdl env
-    myThreadId >>= writeIORef (ctxLoopThread ctx') . Just
-    pure (ctx', env, release Acquire.ReleaseNormal)
+  -- The window's resources outlive this call: closing the state frees them.
+  st <- createInternalState
+  (_, (ctx', env)) <-
+    runInternalState (allocateAcquire (startSdlWindow childOpts (windowFlags childOpts) ctx fontSource monoSource (Just first))) st
+      `onException` closeInternalState st
+  setBackendSession ctx' SSdl env
+  pure (ctx', env, closeInternalState st)
+
+-- | Register 'sdlAppImages' on a context.
+registerAppImages :: SdlOptions -> Context -> IO ()
+registerAppImages opts ctx =
+  forM_ (sdlAppImages opts) $ \(RgbaImage image w h pixels) ->
+    unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
+
+-- | The event wait while a window animates. With vsync on, presents throttle
+-- the loop. With vsync off a live animation would spin at max speed, so wait
+-- ~2 ms short of the frame period, leaving the slack for alignFrameStart:
+-- SDL_WaitEventTimeout overruns by ~1 ms, and a wait that returns past the
+-- boundary makes the frame late.
+sdlPacingMs :: SdlEnv -> Int
+sdlPacingMs env = if sdlVsync env then 16 else max 1 (floor (sdlRefreshPeriod env * 1000) - 2)
 
 -- | The blend modes a transparent window draws and presents with.
 --

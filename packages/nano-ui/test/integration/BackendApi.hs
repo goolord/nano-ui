@@ -34,5 +34,6 @@ backendApiCheck = do
             pure dirty
         , sdOnCursor = \_ _ -> pure ()
         , sdShouldQuit = const False
+        , sdWindows = Nothing
         }
   runSessionLoop driver ctx emptyInput

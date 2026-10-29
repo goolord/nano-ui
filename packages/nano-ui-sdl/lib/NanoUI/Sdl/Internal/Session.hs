@@ -10,16 +10,15 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
 import GHC.Clock (getMonotonicTime)
-import NanoUI (WindowSettings (..), followSystemTheme, unlessM, whenM)
+import NanoUI (WindowSettings (..), followSystemTheme, whenM)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
 import NanoUI.Runner
-import NanoUI.Testing (Context, newPixelContext, registerImage, withTheme)
-import NanoUI.Runner.Windows (closeWindows, mainNeedsFrame, noteMainFrame, windowsWait)
+import NanoUI.Testing (Context, newPixelContext, withTheme)
+import NanoUI.Runner.Windows (afterMainPass, closeWindows, loopWindows)
 import NanoUI.Sdl.Internal.Children
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
-import NanoUI.Sdl.Internal.Runner (resetRenderTextures)
-import NanoUI.Sdl.Internal.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), syncDisplay, windowZoom, withSdl)
+import NanoUI.Sdl.Internal.Window (SdlEnv (..), SdlOptions (..), registerAppImages, sdlPacingMs, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 
@@ -28,19 +27,15 @@ import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
 -- frame and answers whether another is needed; its flag forces a full
 -- repaint.
 runSdlSession :: SdlOptions -> (Context -> SdlEnv -> Input -> Bool -> IO Bool) -> IO ()
-runSdlSession options drawSession = do
+runSdlSession options drawFn = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
   forM_ (sdlAppThemeFor options) (followSystemTheme ctx)
   setExplainLayout ctx (sdlExplainLayout options)
-  forM_ (sdlAppImages options) $ \(RgbaImage image w h pixels) ->
-    unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
+  registerAppImages options ctx
   withSdl options ctx $ \ctx0 env -> do
-    -- Windows the view opens beside this one ('NanoUI.nativeWindow'). Every
-    -- frame of this window notes when its view began, so a 'Var' another
-    -- window writes later brings it a frame.
+    -- Windows the view opens beside this one ('NanoUI.nativeWindow').
     windows <- newSdlWindows options env
-    let drawFn c e i f = noteMainFrame (swWindows windows) >> drawSession c e i f
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
     prev <- newIORef emptyInput
     drawing <- newDrawingLock
@@ -90,14 +85,9 @@ runSdlSession options drawSession = do
     -- damage: a wake that changed nothing on screen costs the UI pass and no
     -- repaint or present.
     wakeRef <- newIORef False
-    let noteWake evs = evs <$ when (EvRefresh `elem` evs) (writeIORef wakeRef True)
-        -- Pointer and drop positions in layout units, as each event had them.
-        decode evs = do
-          zoom <- windowZoom env
-          when (hasPointerEvent evs) (writeIORef (sdlPointerSeen env) True)
-          -- The frame the reset asks for makes the textures again.
-          when (EvRenderDeviceReset `elem` evs) (resetRenderTextures env)
-          noteWake (scaleEventPositions zoom evs)
+    let decode evs = do
+          when (EvRefresh `elem` evs) (writeIORef wakeRef True)
+          decodeForWindow env evs
     -- Take every queued event into the input, syncing the display after
     -- each batch, until none is left. SDL asks to quit once, so a request
     -- taken here is kept for the loop.
@@ -135,7 +125,7 @@ runSdlSession options drawSession = do
     writeIORef prev inp1
     -- Open the windows the opening frames declared, which the loop would
     -- otherwise leave for its first pass, after waiting for input.
-    afterMainPass windows ctx2 inp1
+    afterMainPass (swWindows windows) ctx2
     -- The last opening frame may have asked for another: it marked the
     -- context dirty, which the loop sees by itself, or a wake arrived after
     -- it began, which the drains above took off the queue. Queue that wake
@@ -145,14 +135,11 @@ runSdlSession options drawSession = do
     let drv =
           SessionDriver
             { sdPollEvents    = poll
-            , sdWaitEvents    = \t -> do
-                -- Further windows can need a pass sooner than this one.
-                other <- windowsWait (swWindows windows)
-                let t' = if t < 0 then other else if other < 0 then t else min t other
+            , sdWaitEvents    = \t ->
                 -- Take the rest of the queue with the event that ended the
                 -- wait, so one pass sees a whole burst (a resize queues
                 -- several window events at once).
-                waitWindowEvent t' >>= maybe (pure []) (\ev -> routeEvents windows . (ev :) =<< pollWindowEvents) >>= decode
+                waitWindowEvent t >>= maybe (pure []) (\ev -> routeEvents windows . (ev :) =<< pollWindowEvents) >>= decode
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
             , sdIsSessionQuit = (== EvQuit)
@@ -163,12 +150,7 @@ runSdlSession options drawSession = do
                 synced <$ writeIORef prev inp'
             , sdDebug         = sdlDebug env
             , sdContinuous    = sdlContinuous env
-              -- With vsync on, presents throttle the loop. With vsync off a
-              -- live animation would spin at max speed, so wait ~2 ms short
-              -- of the frame period, leaving the slack for alignFrameStart:
-              -- SDL_WaitEventTimeout overruns by ~1 ms, and a wait that
-              -- returns past the boundary makes the frame late.
-            , sdPacingMs      = if sdlVsync env then 16 else max 1 (floor (sdlRefreshPeriod env * 1000) - 2)
+            , sdPacingMs      = sdlPacingMs env
               -- A frame that skipped (empty damage, e.g. an animation scrolled
               -- out of view) did not wait for vblank, so it must not loop
               -- without waiting.
@@ -177,13 +159,12 @@ runSdlSession options drawSession = do
                 presented <- readIORef resizePresented
                 writeIORef resizePresented Nothing
                 wakeDue <- readIORef wakeRef
-                varDue <- mainNeedsFrame (swWindows windows)
                 let !(prevInp', inpSynced') = case presented of
                       Just size
                         | size == inputWindowSize inpSynced ->
                             (prevInp {inputWindowSize = size}, inpSynced {inputWindowRedraw = False})
                       _ -> (prevInp, inpSynced)
-                shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) (refreshDue || wakeDue || varDue)
+                shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) (refreshDue || wakeDue)
             , sdDraw          = \c inpSynced forceFull -> do
                 writeIORef resizePresented Nothing
                 -- Only a frame that runs answers a wake.
@@ -201,10 +182,10 @@ runSdlSession options drawSession = do
                 -- free.
                 when (isNothing drawn) $ whenM (readIORef wakeRef) pushRefreshEvent
                 pure (fromMaybe False drawn)
-              -- Runs after every pass: the further windows' frames go here.
-            , sdOnCursor      = afterMainPass windows
+            , sdOnCursor      = syncFirstCursor windows
             , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = sdlAppShouldQuit options
+            , sdWindows       = Just (loopWindows (swWindows windows))
             }
     -- A close request the opening frames took, which the loop would not see:
     -- it ends the session here, or with exits off the loop's first frame

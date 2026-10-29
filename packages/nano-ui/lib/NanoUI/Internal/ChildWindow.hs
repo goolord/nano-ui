@@ -8,6 +8,7 @@ module NanoUI.Internal.ChildWindow
   , childView
   ) where
 
+import Control.Monad (when)
 import Data.IORef (modifyIORef', readIORef)
 import NanoUI.Internal.Context.Types (ChildWindow (..), Context (..))
 import NanoUI.Internal.Monad (NanoUI, askFrameInput, nextId, runNanoUI, withContext)
@@ -41,10 +42,8 @@ nativeWindow :: Var Bool -> WindowSettings -> NanoUI () -> NanoUI ()
 nativeWindow open settings body = do
   key <- nextId
   isOpen <- readVar open
-  if isOpen
-    then withContext $ \ctx ->
-      modifyIORef' (ctxChildWindows ctx) (ChildWindow key open settings (\c inp -> runNanoUI c inp body) :)
-    else pure ()
+  when isOpen $ withContext $ \ctx ->
+    modifyIORef' (ctxChildWindows ctx) (ChildWindow key open settings (\c inp -> runNanoUI c inp body) :)
 
 -- | The native windows the last view run declared open, in call order.
 childWindows :: Context -> IO [ChildWindow]

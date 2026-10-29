@@ -46,6 +46,7 @@ quietDriver debug =
     , sdDraw = \_ _ _ -> pure False
     , sdOnCursor = \_ _ -> pure ()
     , sdShouldQuit = const False
+    , sdWindows = Nothing
     }
 
 -- | One batch of events per driver wait. A wait past the last batch throws,

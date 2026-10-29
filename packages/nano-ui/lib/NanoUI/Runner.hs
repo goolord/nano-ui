@@ -8,9 +8,15 @@ module NanoUI.Runner
   , tryWithDrawingLock
     -- * Redraw Decision
   , shouldRedrawFrame
+  , ClickTracker
+  , newClickTracker
   , stampClicks
+  , maxFrameDt
+  , wakeTimeoutMs
+  , shorterWait
     -- * Session loop
   , SessionDriver (..)
+  , LoopWindows (..)
   , DebugSamplerRef
   , newDebugSampler
   , runSessionLoop
@@ -67,11 +73,16 @@ alignFrameStart periodSec lastT = do
       now <- getMonotonicTime
       when (now < target) (fullSpin target)
 
+-- | The previous press's time, position, buttons and click count.
+type ClickTracker = IORef (Double, V2, MouseButtons, Int)
+
+newClickTracker :: IO ClickTracker
+newClickTracker = newIORef (0, V2 (-999) (-999), noButtons, 0)
+
 -- | Stamp multi-click counts into an 'Input'. A press of the same buttons
 -- within 5 pixels and 0.4 seconds of the previous press counts up, to a
--- triple click at most. The ref holds the previous press's time, position,
--- buttons and count.
-stampClicks :: IORef (Double, V2, MouseButtons, Int) -> Input -> IO Input
+-- triple click at most.
+stampClicks :: ClickTracker -> Input -> IO Input
 stampClicks ref inp
   | not (anyButtonPressed inp) = pure inp
   | otherwise = do
@@ -173,6 +184,22 @@ data SessionDriver ev = SessionDriver
     -- ^ Sync the host cursor icon after every pass.
   , sdShouldQuit    :: Input -> Bool
     -- ^ Application-level quit predicate.
+  , sdWindows       :: Maybe LoopWindows
+    -- ^ Further windows the session runs beside this one
+    -- ("NanoUI.Runner.Windows"), if the backend has them.
+  }
+
+-- | What the loop needs of a session's further windows.
+data LoopWindows = LoopWindows
+  { lwWait :: IO Int
+    -- ^ The longest wait, in milliseconds, they allow; -1 for no limit.
+  , lwFirstDue :: IO Bool
+    -- ^ Whether this window must run its view: a 'NanoUI.Var' it may read
+    -- changed since it last did.
+  , lwDrew :: IO ()
+    -- ^ This window just ran its view.
+  , lwAfterPass :: Context -> IO ()
+    -- ^ Run their passes, after each of this window's.
   }
 
 -- | NANO_LOOP_TRACE: on the first pass a second or more after the last line,
@@ -220,6 +247,22 @@ traceLoopPass lt nEvents drew why = forM_ lt $ \ref -> do
 wakePadMs :: Int
 wakePadMs = 2
 
+-- | The event wait, in milliseconds, until a timed wake at @wakeAt@ (0 for
+-- none, which waits without limit) from @now@. An hour at most: the backends
+-- take a 32-bit timeout, and the loop waits again when it runs out.
+wakeTimeoutMs :: Double -> Double -> Int
+wakeTimeoutMs wakeAt now
+  | wakeAt <= 0 = -1
+  | wakeAt <= now = 0
+  | otherwise = ceiling (min 3600 (wakeAt - now) * 1000) + wakePadMs
+
+-- | The shorter of two waits, where -1 is no limit.
+shorterWait :: Int -> Int -> Int
+shorterWait a b
+  | a < 0 = b
+  | b < 0 = a
+  | otherwise = min a b
+
 -- | Event wait while only the debug readout needs frames: its refresh period.
 debugHudTimeout :: Int
 debugHudTimeout = round (debugRefreshSec * 1000)
@@ -235,7 +278,7 @@ runSessionLoop ::
   Input ->
   IO ()
 runSessionLoop drv ctx0 inp0 = do
-  clickTracker <- newIORef (0, V2 (-999) (-999), noButtons, 0)
+  clickTracker <- newClickTracker
   startT <- getMonotonicTime
   trace <- newLoopTrace startT
 
@@ -264,21 +307,19 @@ runSessionLoop drv ctx0 inp0 = do
             presentPaces <- sdPresentPaces drv
             wakeAt <- getWakeAt ctx
             waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
-            let paced = wasAnim || animating
-                -- An hour at most: the backends take a 32-bit timeout, and
-                -- the loop waits again when it runs out.
-                wakeMs
-                  | wakeAt <= 0 = -1
-                  | wakeAt <= waitT = 0
-                  | otherwise = ceiling (min 3600 (wakeAt - waitT) * 1000) + wakePadMs :: Int
+            others <- maybe (pure (-1)) lwWait (sdWindows drv)
+            let wakeMs = wakeTimeoutMs wakeAt waitT
                 idleMs
                   | not debugActive = wakeMs
                   | wakeMs < 0 = debugHudTimeout
                   | otherwise = min debugHudTimeout wakeMs
-                timeout
+                own
                   | sdContinuous drv || dueNow || dirty || (animating && presentPaces) = 0
-                  | paced = sdPacingMs drv
+                  | wasAnim || animating = sdPacingMs drv
                   | otherwise = idleMs
+                timeout = shorterWait own others
+                -- A wait another window shortened ends off this one's grid.
+                paced = (wasAnim || animating) && timeout == own
             events <- waitForEvents timeout paced lastT
             wakeDue <-
               if wakeAt > 0
@@ -288,7 +329,8 @@ runSessionLoop drv ctx0 inp0 = do
             -- drawing lock is held) does not spin on an expired wakeAt.
             when wakeDue (clearWakeAt ctx)
             let hudDue = timeout == debugHudTimeout && debugActive && null events
-            pure (events, dueNow || wakeDue || hudDue)
+            firstDue <- maybe (pure False) lwFirstDue (sdWindows drv)
+            pure (events, dueNow || wakeDue || hudDue || firstDue)
 
       loop ctx inp queued lastT pendingDirty wasAnim = do
         (pending, refreshDue) <- nextBatch ctx queued lastT pendingDirty wasAnim
@@ -314,9 +356,10 @@ runSessionLoop drv ctx0 inp0 = do
           -- animations keep clip damage.
           animNow <- anyAnimating ctx'
           dirtyOut <- if shouldDraw
-            then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
+            then sdDraw drv ctx' inpSynced (wasAnim && not animNow) <* mapM_ lwDrew (sdWindows drv)
             else pendingDirty <$ noteDebugSkip (sdDebug drv)
           sdOnCursor drv ctx' inpSynced
+          mapM_ (`lwAfterPass` ctx') (sdWindows drv)
           animAfter <- anyAnimating ctx'
           traceLoopPass trace (length group) shouldDraw $
             (if pendingDirty then "D" else "")
