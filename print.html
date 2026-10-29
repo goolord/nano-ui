@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-aa4a54ea.js";
+            window.path_to_searchindex_js = "searchindex-a0e2a909.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -3160,7 +3160,7 @@ title docName = setWindowTitleUi (docName &lt;&gt; “ - My App“)</p>
 maximizeButton :: NanoUI ()
 maximizeButton = whenM (button "Maximize") toggleMaximizedUi
 </code></pre>
-<p><code>quitUi</code> ends the session; there is no separate “close window” command.</p>
+<p><code>quitUi</code> ends the session; there is no separate “close window” command. In a window opened with <code>nativeWindow</code> (below), it closes that window instead.</p>
 <h2 id="close-requests"><a class="header" href="#close-requests">Close requests</a></h2>
 <p>By default the window closes as soon as the platform asks it to. To confirm unsaved work, set <code>wsExitOnCloseRequest = False</code> and handle the request in the view:</p>
 <pre><code class="language-haskell">main :: IO ()
@@ -3176,6 +3176,19 @@ appView = do
   whenM (winCloseRequested &lt;$&gt; askWindow) askBeforeQuitting
 </code></pre>
 <p><code>askWindow</code> reports the window’s current state, including size, scale, maximized/fullscreen flags, and the close request. <a href="#tutorial-2-build-a-notepad">Build a Notepad</a> wires this to a confirmation modal.</p>
+<h2 id="more-windows"><a class="header" href="#more-windows">More windows</a></h2>
+<p><code>nativeWindow</code> opens another native window, with its own view, while a <code>Var Bool</code> holds <code>True</code>. Like <code>modal</code>, call it every frame, and the window’s close button writes <code>False</code>:</p>
+<pre><code class="language-haskell">editorView :: Var Bool -&gt; NanoUI ()
+editorView showInspector = do
+  checkbox "Inspector" showInspector
+  nativeWindow showInspector
+    defaultWindowSettings {wsTitle = "Inspector", wsSize = Size 360 480}
+    inspectorView
+</code></pre>
+<p>The new window has its own focus, widget state, <code>useVar</code> slots and frames. It starts with the declaring view’s theme; the settings take effect when it opens, so change its title or theme later from its own view. A window’s view can open further windows the same way.</p>
+<p>The body runs in the new window’s own frames, and after each frame of the declaring view, so it can use that view’s values directly. Windows also share state through <code>Var</code>s: when a <code>Var</code> changes, every open window runs its view again on its next frame, so typing in one window shows in another.</p>
+<p>In an Elm-style view (<code>NanoUIE</code>), the body emits to the same reducer as the rest of the view. To keep a window’s open state in the model, pass <code>constVar model.inspectorOpen</code>, set <code>wsExitOnCloseRequest = False</code> in its settings, and emit a close message from the body when <code>winCloseRequested &lt;$&gt; askWindow</code> is true.</p>
+<p>An app that never calls <code>nativeWindow</code> pays nothing for it. With several windows open, a <code>Var</code> write or a frame of the declaring view costs each window one run of its view (with no repaint if nothing it shows changed), and every window keeps its own glyph and image textures. The SDL and RGFW backends open these windows; in tests the call does nothing. On Windows, a window being resized does not redraw the others until the drag ends. <code>nano-ui-example-windows</code> shows three windows sharing state.</p>
 <h2 id="custom-title-bars"><a class="header" href="#custom-title-bars">Custom title bars</a></h2>
 <p>For a frameless window, set the decorations and draw the bar yourself. <code>windowCaption</code> from <code>nano-ui-sdl</code> draws the minimize, maximize, and close buttons, registers the drag region, and reports a close click:</p>
 <pre><code class="language-haskell">framelessOpts :: SdlOptions
