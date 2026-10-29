@@ -34,7 +34,6 @@ tests =
   , spec "tabs-badge-size" runTabsBadgeSizeTest
   , spec "tabs-drag-lifecycle" runTabDragLifecycleTest
   , spec "drag-escape-ownership" runDragEscapeOwnershipTest
-  , spec "tabs-drag-controls" runTabDragControlsTest
   , spec "tabs-drag-reorder" runTabDragReorderTest
   , spec "tabs-drop-bounds" runTabsDropBoundsTest
   ]
@@ -81,13 +80,10 @@ arrowRect ch = do
 at :: Float -> Float -> Target
 at x y = At (V2 x y)
 
--- | Too-wide strips scroll: the arrows page them, as do the vertical wheel
--- (mapped onto the strip) and the sideways one, clamped at both ends, and a
--- trackpad's fraction of a notch moves them by that fraction. The headers
--- look as before the strip could scroll, with no scroller well or bar behind
--- them. The arrows go when the headers fit again, though the scroller between
--- them would still be too narrow, and a tab selected through the Var comes
--- into view, as does one appended and selected in the same frame.
+-- | A too-wide strip scrolls, paged by its arrows, either wheel (clamped) and
+-- a fraction of a notch, with no well or bar behind the headers. The arrows
+-- go once the headers fit the bar, and a tab selected through the Var, or
+-- appended and selected at once, comes into view.
 runTabsScrollTest :: Context -> IORef Int -> IO ()
 runTabsScrollTest ctx failed = do
   labelsRef <- newIORef overflowLabels
@@ -114,7 +110,8 @@ runTabsScrollTest ctx failed = do
     (_, dd, _) <- liftIO (run2Frames ctx inp ui)
     quads <- liftIO (drawQuads dd)
     let well = themeInput theme
-        forbidden = [styleBg well, styleBorder well, scrollBarTrackColor well theme, scrollBarThumbColor well theme]
+        forbidden =
+          styleBg well : styleBorder well : map (\f -> f well theme) [scrollBarTrackColor, scrollBarThumbColor]
     check (null [c | (r, c) <- quads, isJust (rectIntersect r (Rect 0 0 240 34)), c `elem` forbidden])
     -- The right arrow is pinned to the bar's far edge. Paging repaints the
     -- left one, whose muted look no rect or text change covers.
@@ -156,7 +153,8 @@ runTabsScrollTest ctx failed = do
 -- header's main button fits: the range counts each header's close button.
 runTabsScrollCloseButtonTest :: Context -> IORef Int -> IO ()
 runTabsScrollCloseButtonTest ctx failed = do
-  let ui = tabBar' (constVar (0 :: Int)) [closableTab i l () | (i, l) <- zip [0 ..] ["Controls", "Graphics", "Typography"]]
+  let headers = zipWith (\i l -> closableTab i l ()) [0 :: Int ..] ["Controls", "Graphics", "Typography"]
+      ui = tabBar' (constVar 0) headers
   runSim ctx failed (withInput 900 120) ui $ do
     [Rect x0 _ _ _] <- liftIO (nodesTexted "Controls" getNodeRect ctx)
     closes <- liftIO (closeRects ctx)
@@ -166,9 +164,8 @@ runTabsScrollCloseButtonTest ctx failed = do
     _ <- resize (maximum [rectX r + rectW r | r <- closes] - 4 + x0) 120
     check =<< hasArrows
 
--- | A strip brings its active tab into view whatever its key, 0 too (the
--- last of headers keyed newest first). The vertical wheel over it pages the
--- strip alone, not the page scroller round it.
+-- | A strip brings its active tab into view whatever its key, 0 too, and the
+-- vertical wheel over it pages the strip alone, not the page round it.
 runTabsStripInPageTest :: Context -> IORef Int -> IO ()
 runTabsStripInPageTest ctx failed = do
   let ui = scrollArea (tight . grow) $ do
@@ -182,10 +179,9 @@ runTabsStripInPageTest ctx failed = do
       checkEq first =<< showing "Controls"
       checkEq 0 =<< liftIO (getScrollOffset ctx page)
 
--- | Only the active tab's body runs. Bodies keep separate state, even at the
--- same position, and keep it while hidden. A header click switches tabs in
--- its own frame, repainting the new body, and the frames after repaint
--- nothing whole.
+-- | Only the active body runs. Bodies keep separate state, even at the same
+-- position, while hidden too. A header click switches tabs and repaints the
+-- new body in its own frame, leaving the frames after it nothing whole.
 runTabsBodiesTest :: Context -> IORef Int -> IO ()
 runTabsBodiesTest ctx failed = do
   ran <- newIORef []
@@ -248,15 +244,15 @@ runTabsKeyedReorderTest ctx failed = do
 runTabsMissingKeyTest :: Context -> IORef Int -> IO ()
 runTabsMissingKeyTest ctx failed = do
   active <- newVar (3 :: Int)
-  r <- warmup2 ctx (withInputOff 300 100) (tabs' active [tab 1 "One" (label "Body one"), tab 2 "Two" (label "Body two")])
+  let ui = tabs' active [tab k l (label ("Body " <> l)) | (k, l) <- [(1, "one"), (2, "two")]]
+  r <- warmup2 ctx (withInputOff 300 100) ui
   assertEq failed 1 (tabActive r)
   assertEq failed 1 =<< readVarIO active
   assertEq failed [1, 0] =<< buttonValues ctx
   assert failed . hasText "Body one" =<< collectTextSpans ctx
 
--- | enumTabs has a tab per value, labelled with show, and a click stores
--- the value itself in the Var; boundedTabBar does the same with labels of
--- its own and no bodies.
+-- | enumTabs has a tab per value, labelled with show, and a click stores the
+-- value in the Var; boundedTabBar does the same with its own labels.
 runEnumTabsTest :: Context -> IORef Int -> IO ()
 runEnumTabsTest ctx failed = do
   page <- newVar TabA
@@ -272,12 +268,11 @@ runEnumTabsTest ctx failed = do
     _ <- click "tabb"
     checkEq TabB =<< liftIO (readVarIO pick)
 
--- | A click on a close button reports its tab closed and keeps the active
--- one. A click on a header just left of its close button selects the tab:
--- the close button does not take the press there and then lose the release.
+-- | A close button reports its tab closed and keeps the active one. A click
+-- just left of one selects its tab: the close button does not take the press.
 runTabsCloseTest :: Context -> IORef Int -> IO ()
 runTabsCloseTest ctx failed = do
-  let ui = tabs' (constVar TabA) [closableTab TabA "Alpha" (label "Body A"), closableTab TabB "Beta" (label "Body B")]
+  let ui = tabs' (constVar TabA) [closableTab k (T.pack (show k)) (label "Body") | k <- [TabA, TabB]]
   runSim ctx failed (withInput 300 100) ui $ do
     [closeA, Rect bx by _ bh] <- liftIO (closeRects ctx)
     closed <- click (Within closeA)
@@ -285,9 +280,8 @@ runTabsCloseTest ctx failed = do
     beside <- click (at (bx - 3) (by + bh / 2))
     checkEq (Nothing, TabB) (tabClosed beside, tabActive beside)
 
--- | The public disabled flag covers both the header and its close control,
--- including retained keyboard focus when an enabled tab becomes disabled, and
--- re-enabling the header restores activation.
+-- | A disabled header ignores clicks on it and its close control, and Enter
+-- with focus kept from before; re-enabled, it activates again.
 runTabsDisabledTest :: Context -> IORef Int -> IO ()
 runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   ctx <- newContext
@@ -315,8 +309,7 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   where
     closeIds = nodesTexted "\215" getWidgetId
 
--- | A contained body paints its own surface and border: when its text wraps
--- to fewer lines, the frame repaints where its bottom border was.
+-- | A contained body that shrinks repaints where its own bottom border was.
 runTabsContainedBodyDamageTest :: Context -> IORef Int -> IO ()
 runTabsContainedBodyDamageTest ctx failed = do
   let inp0 = withInputOff 300 300
@@ -325,7 +318,9 @@ runTabsContainedBodyDamageTest ctx failed = do
       long = T.unwords (replicate 30 "body")
       na = ctxNodeArena ctx
       -- The body is the column round the tab's label.
-      bodyRect = findNodeM na (fmap (`elem` [long, "body"]) . getText na) >>= traverse (getNodeRect na <=< getParent na)
+      bodyText = findNodeM na (fmap (`elem` [long, "body"]) . getText na)
+      bodyRect = traverse (getNodeRect na <=< getParent na) =<< bodyText
+
   _ <- run2Frames ctx inp0 (ui long) >> runFrame ctx inp0 (ui long)
   mTall <- bodyRect
   _ <- runFrame ctx inp0 (ui "body")
@@ -335,8 +330,8 @@ runTabsContainedBodyDamageTest ctx failed = do
     assert failed (rectH short < rectH tall)
     assert failed (damageCovers dShrink tall)
 
--- | Content replaced inside a floating window repaints every row of the new
--- body: a clip that skipped one would leave stale pixels of the old body.
+-- | A body swapped inside a floating window repaints every row of the new
+-- one, or stale pixels of the old body show through.
 runPanelBodySwapDamageTest :: Context -> IORef Int -> IO ()
 runPanelBodySwapDamageTest ctx failed = do
   let inp0 = withInput 400 300
@@ -345,7 +340,8 @@ runPanelBodySwapDamageTest ctx failed = do
   _ <- run2Frames ctx inp0 uiA >> runFrame ctx inp0 uiA
   _ <- runFrame ctx inp0 (win (column (replicateM_ 5 (label "row line"))))
   dmg <- takeDamage ctx
-  rows <- (\ss -> [r | (r, t, _, _, _) <- ss, "row line" `T.isInfixOf` t]) <$> collectOverlayTextSpans ctx inp0
+  ss <- collectOverlayTextSpans ctx inp0
+  let rows = [r | (r, t, _, _, _) <- ss, "row line" `T.isInfixOf` t]
   assertEq failed 5 (length rows)
   assert failed (not (damageIsEmpty dmg) && all (damageCovers dmg) rows)
 
@@ -354,13 +350,14 @@ runTabsBadgeSizeTest :: Context -> IORef Int -> IO ()
 runTabsBadgeSizeTest ctx0 failed = do
   let ctx = withFontSize ctx0 10
       na = ctxNodeArena ctx
-  _ <- warmup2 ctx (withInputOff 300 100) (tabBar' (constVar (1 :: Int)) [(tab 1 "Inbox" ()) {tabBadge = Just "3"}])
+  let inbox = (tab (1 :: Int) "Inbox" ()) {tabBadge = Just "3"}
+  _ <- warmup2 ctx (withInputOff 300 100) (tabBar' (constVar 1) [inbox])
   badge <- findNodeM na (fmap (== "3") . getText na)
   assertJust failed badge $ \i -> assertEq failed (10 * 0.78) =<< getNodeFontSize na i
 
 -- | A header drag starts past the threshold, keeps its payload while the
--- headers reorder, and is released or cancelled: by Escape, by a release the
--- window never saw, or by its source going away.
+-- headers reorder, and ends released or cancelled: by Escape, by a release
+-- the window never saw, or by its source going away.
 runTabDragLifecycleTest :: Context -> IORef Int -> IO ()
 runTabDragLifecycleTest ctx failed = do
   dragHandle <- newDrag
@@ -387,7 +384,7 @@ runTabDragLifecycleTest ctx failed = do
     void (warmup2 ctx inp (ui keys))
 
 -- | Escape taken before the drag sees it leaves the drag going; untaken, it
--- cancels the drag and nothing after it sees the key, the dialog included.
+-- cancels the drag, and nothing after it sees the key, the dialog included.
 runDragEscapeOwnershipTest :: Context -> IORef Int -> IO ()
 runDragEscapeOwnershipTest ctx failed = do
   handle <- newDrag
@@ -404,70 +401,64 @@ runDragEscapeOwnershipTest ctx failed = do
         down = pressAt inp p
         moved = holdAt down (V2 (x + 15) y)
         escape = keyInp KeyEscape moved
-        afterEscape takeFirst = fmap (\(_, gesture, later) -> (dragPhase <$> gesture, later)) . snd <$> evalUi ctx escape (ui takeFirst)
+        seen (_, gesture, later) = (dragPhase <$> gesture, later)
     mapM_ (\i -> evalUi ctx i (ui False)) [down, moved]
-    assertEq failed (Just (Just Dragging, False)) =<< afterEscape True
+    assertEq failed (Just (Just Dragging, False)) . fmap seen . snd =<< evalUi ctx escape (ui True)
     (dialog, cancelled) <- evalUi ctx escape (ui False)
-    assertEq failed (Just (Just DragCancelled, False)) ((\(_, g, l) -> (dragPhase <$> g, l)) <$> cancelled)
+    assertEq failed (Just (Just DragCancelled, False)) (seen <$> cancelled)
     assertEq failed False (respClicked dialog)
 
--- | A close button and a disabled header do not start a drag.
-runTabDragControlsTest :: Context -> IORef Int -> IO ()
-runTabDragControlsTest ctx failed = do
-  dragHandle <- newDrag
-  let ui = do
-        r <- tabBar' (constVar TabA) [closableTab TabA "Alpha" (), (tab TabB "Disabled" ()) {tabDisabled = True}]
-        useDrag dragHandle (tabHeaders r)
-  runSim ctx failed (withInput 400 200) ui $ do
-    [close] <- liftIO (closeRects ctx)
-    disabled <- rectOf "Disabled"
-    forM_ [close, disabled] $ \r -> do
-      let V2 x y = spanCenter r
-      _ <- press (Within r)
-      checkEq Nothing =<< moveTo (at (x + 20) y)
-      release
-
--- | A header dropped on the far edge of the last one moves there, on the
--- release and not before.
+-- | A close button and a disabled header start no drag. A header dropped on
+-- the far edge of the last one moves there, on the release and not before.
 runTabDragReorderTest :: Context -> IORef Int -> IO ()
 runTabDragReorderTest ctx failed = do
   dragHandle <- newDrag
   orderRef <- newIORef [TabA, TabB, TabC]
-  let ui = do
+  let header k = (if k == TabA then closableTab else tab) k (T.pack (show k)) ()
+      ui = do
         order <- liftIO (readIORef orderRef)
-        r <- tabBar' (constVar TabA) [tab k (T.pack (show k)) () | k <- order]
+        r <- tabBar' (constVar TabA) [(header k) {tabDisabled = k == TabC} | k <- order]
         gesture <- useDrag dragHandle (tabHeaders r)
         forM_ gesture $ \d -> when (dragPhase d == DragReleased) $ do
           let rest = filter ((/= dragPayload d) . fst) (tabHeaders r)
           forM_ (insertionIndex DragAxisX (tabStripRect r) (map (respRect . snd) rest) (dragAt d)) $ \i -> do
             let (before, after) = splitAt i (map fst rest)
             liftIO (writeIORef orderRef (before ++ dragPayload d : after))
-        pure r
+        pure (r, gesture)
       currentOrder = liftIO (readIORef orderRef)
   runSim ctx failed (withInput 400 200) ui $ do
-    Just third <- lookup TabC . tabHeaders <$> result
+    [close] <- liftIO (closeRects ctx)
+    disabled <- rectOf "TabC"
+    forM_ [close, disabled] $ \r -> do
+      let V2 x y = spanCenter r
+      _ <- press (Within r)
+      checkEq Nothing . snd =<< moveTo (at (x + 20) y)
+      release
+    Just third <- lookup TabC . tabHeaders . fst <$> result
     let Rect x y w h = respRect third
     _ <- press "TabA"
     _ <- moveTo (at (x + w - 1) (y + h / 2))
     checkEq [TabA, TabB, TabC] =<< currentOrder
     _ <- release
     checkEq [TabB, TabC, TabA] =<< currentOrder
-    checkEq [TabB, TabC, TabA] . map fst . tabHeaders =<< frame
+    checkEq [TabB, TabC, TabA] . map fst . tabHeaders . fst =<< frame
 
 -- | A strip's drop bounds are where it is drawn: inside its padded panel, and
 -- cut to the pane it is clipped to, in either orientation.
 runTabsDropBoundsTest :: Context -> IORef Int -> IO ()
 runTabsDropBoundsTest ctx failed = do
   let inp = withInput 400 200
-      bar orientation = tabBarConfigured' (TabsConfig TabUnderline orientation (pure ())) (constVar TabA)
-  r <- warmup2 ctx inp (panelWith (padAll 40 . fillW . fillH) (bar TabLeft [tab TabA "Alpha" (), tab TabB "Beta" ()]))
+      bar orientation n = tabBarConfigured' (TabsConfig TabUnderline orientation (pure ())) (constVar TabA) $
+        take n [tab TabA "Alpha" (), tab TabB "Beta" (), tab TabC "Gamma" ()]
+  r <- warmup2 ctx inp (panelWith (padAll 40 . fillW . fillH) (bar TabLeft 2))
   let bounds = tabStripRect r
   assert failed (rectX bounds >= 40 && rectY bounds >= 40)
   assertEq failed Nothing (insertionIndex DragAxisY bounds (map (respRect . snd) (tabHeaders r)) (V2 10 10))
   stripRect <- newIORef (Rect 0 0 0 0)
   forM_ [TabTop, TabLeft] $ \orientation -> do
     let pane _ _ = do
-          s <- panelWith (fixedW 600) (bar orientation [tab TabA "Alpha" (), tab TabB "Beta" (), tab TabC "Gamma" ()])
+          s <- panelWith (fixedW 600) (bar orientation 3)
+
           liftIO (writeIORef stripRect (tabStripRect s))
           pure (PaneView "Tabs" False)
     c <- newContext

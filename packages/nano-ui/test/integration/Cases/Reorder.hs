@@ -41,12 +41,13 @@ dragThrough order rects from path = do
 runReorderDragTest :: Context -> IORef Int -> IO ()
 runReorderDragTest _ failed = do
   let order = [0 .. 4]
+      moved = [1, 2, 3, 4, 0]
   [_, pressed, nudged, dragged, dropped, after] <- dragThrough order slotsInRow (V2 20 15) [V2 23 15, V2 230 15]
   assertEq failed (Just 0) (reorderDragging pressed)
   -- Under the threshold: no preview yet.
   assertEq failed (False, order) (reorderMoved nudged, reorderPreview nudged)
-  assertEq failed (True, [1, 2, 3, 4, 0], order) (reorderMoved dragged, reorderPreview dragged, reorderOrder dragged)
-  assertEq failed (True, [1, 2, 3, 4, 0]) (reorderMoved dropped, reorderOrder dropped)
+  assertEq failed (True, moved, order) (reorderMoved dragged, reorderPreview dragged, reorderOrder dragged)
+  assertEq failed (True, moved) (reorderMoved dropped, reorderOrder dropped)
   assertEq failed (False, Nothing) (reorderMoved after, reorderDragging after)
   -- Item ids can be any Int: negative ones drag like the rest.
   [_, _, _, negDropped, _] <- dragThrough [-1, -2, 0, 3, -7] slotsInRow (V2 20 15) [V2 230 15]
@@ -121,7 +122,8 @@ runInsertionIndexTest _ failed = do
   forM_ [V2 (-1) 15, V2 251 15, V2 20 (-1), V2 20 31] $ \p ->
     assertEq failed Nothing (hit p)
   assertEq failed (Just 0) (insertionIndex DragAxisX bounds [] (V2 10 10))
-  assertEq failed (Just 1) (insertionIndex DragAxisY (Rect 0 0 30 100) [Rect 0 0 30 40, Rect 0 50 30 40] (V2 15 55))
+  let column2 = [Rect 0 0 30 40, Rect 0 50 30 40]
+  assertEq failed (Just 1) (insertionIndex DragAxisY (Rect 0 0 30 100) column2 (V2 15 55))
   assertEq failed (Just 1) (insertionIndex DragAxisX (Rect 50 0 100 30) slotsInRow (V2 51 15))
 
 -- | A drag whose pointer leaves for nowhere ends, and one held still asks for

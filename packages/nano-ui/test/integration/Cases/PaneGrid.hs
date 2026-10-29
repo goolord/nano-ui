@@ -59,7 +59,12 @@ actOnce flag target act pid pctx = do
   when (wanted && pid == target) (liftIO (writeIORef flag False) >> act pctx)
   pure (PaneView "P" False)
 
+-- | A tree the caller holds fixed.
+controlled :: Maybe GridNode -> PaneTree
+controlled = ControlledTree . constVar
+
 splitH :: PaneGridCtx -> NanoUI ()
+
 splitH pctx = void (pgcSplit pctx AxisH)
 
 -- | The ratio of the root split.
@@ -100,10 +105,9 @@ probeGrid f body = do
             }
   pure (paneGrid cfg, laid, told)
 
--- | Padding given through 'pgLayout' insets the panes, a pane whose content
--- is wider than its slot keeps the slot (and so does its neighbour), and the
--- rects the grid hands the panes ('pgcRect') are where they were laid out.
--- 'pgDividerColor' fills the gutter.
+-- | 'pgLayout' padding insets the panes, content wider than a slot keeps both
+-- slots, 'pgcRect' is where a pane is laid out, and 'pgDividerColor' fills
+-- the gutter.
 runLayoutTest :: Context -> IORef Int -> IO ()
 runLayoutTest _ failed = do
   let wide pid = when (pid == 10) . void . panelWith (fillW . fillH) . rowWith fillW $ do
@@ -111,8 +115,9 @@ runLayoutTest _ failed = do
         box (minW 900 . minH 900 . fillW) (colorRGBA 255 0 0 255)
       split axis c = c {pgTree = InitialTree (Just (Split 30 axis 0.5 (Pane 10) (Pane 20)))}
   -- Padded: 560 inside the padding, less a 16px gutter, halved.
+      padded c = c {pgLayout = fillW . fillH . padAll 20}
   forM_
-    [ (\c -> c {pgLayout = fillW . fillH . padAll 20}, const (pure ()), Rect 20 20 272 360, Rect 308 20 272 360)
+    [ (padded, const (pure ()), Rect 20 20 272 360, Rect 308 20 272 360)
     , (split AxisV, wide, Rect 0 0 292 400, Rect 308 0 292 400)
     , (split AxisH, wide, Rect 0 0 600 192, Rect 0 208 600 192)
     ]
@@ -128,11 +133,10 @@ runLayoutTest _ failed = do
   (_, dd) <- warmupDraw ctx (withInput 600 400) (paneGrid halvesGrid {pgDividerColor = Just c})
   assert failed . elem (Rect 292 0 16 400, c) =<< drawQuads dd
 
--- | Dragging the divider sets 'pgrChanged' while it moves and 'pgrCommitted'
--- once, on its release, as a split sets both; a press that moves nothing
--- sets neither. Both panes it moves repaint, at their new place. A divider
--- drawn at a minimum its ratio lies below follows the pointer from its first
--- pixel, and a drag released while the grid was not built is over.
+-- | A divider drag sets 'pgrChanged' while it moves and 'pgrCommitted' on its
+-- release (a split sets both, a still press neither), repainting both panes.
+-- A divider at a minimum its ratio lies below follows from the first pixel,
+-- and a drag released while the grid was not built is over.
 runDividerTest :: Context -> IORef Int -> IO ()
 runDividerTest _ failed = do
   splitNow <- newIORef False
@@ -157,7 +161,8 @@ runDividerTest _ failed = do
     rest <- mapM flags [moveTo (at 360 200), release, frame, click (at 300 200), frame]
     splitting <- mapM flags [liftIO (writeIORef splitNow True) >> frame, frame]
     let none = (False, False)
-    checkEq [none, (True, False), none, (False, True), none, none, none, (True, True), none] (moving ++ rest ++ splitting)
+    checkEq [none, (True, False), none, (False, True), none, none, none] (moving ++ rest)
+    checkEq [(True, True), none] splitting
   -- The left pane ends 70px wide: its 40px minimum and the 30 moved.
   let narrow = paneGrid halvesGrid {pgTree = InitialTree (Just narrowLeft)}
   inGrid failed narrow $ do
@@ -181,12 +186,10 @@ runDividerTest _ failed = do
     replicateM_ 2 (checkEq dragged =<< moveTo (at 150 100))
     checkEq dragged =<< release
 
--- | A tree passed back every frame keeps the grid as it is, even mid-drag,
--- and a different one replaces it. One the caller does not pass back is
--- rejected, and a changed 'InitialTree' seed does not overwrite the grid.
--- A tree kept in a Var the grid edits resets from the view, and written over
--- a maximized pane shows unmaximized (taking external drops) and stays so
--- when the old tree comes back.
+-- | A controlled tree passed back each frame keeps the grid, mid-drag too;
+-- another replaces it; one not passed back is rejected, and a new
+-- 'InitialTree' seed changes nothing. A tree in a Var resets from the view,
+-- and written over a maximized pane shows it unmaximized, taking drops.
 runControlledTest :: Context -> IORef Int -> IO ()
 runControlledTest _ failed = do
   given <- newIORef (Just halves)
@@ -205,7 +208,7 @@ runControlledTest _ failed = do
   edit <- newIORef False
   proposed <- newIORef Nothing
   let rejecting = do
-        r <- paneGrid halvesGrid {pgTree = ControlledTree (constVar (Just halves)), pgViewPane = actOnce edit 10 splitH}
+        r <- paneGrid halvesGrid {pgTree = controlled (Just halves), pgViewPane = actOnce edit 10 splitH}
         when (pgrChanged r) (liftIO (writeIORef proposed (pgrTree r)))
         pure r
   ctx <- newContext
@@ -220,8 +223,9 @@ runControlledTest _ failed = do
   resetNow <- newIORef False
   maximize <- newIORef False
   arrangement <- newVar (Just halves)
-  let inVar = do
-        resp <- paneGrid halvesGrid {pgTree = ControlledTree arrangement, pgViewPane = actOnce maximize 20 pgcMaximize}
+  let inVarCfg = halvesGrid {pgTree = ControlledTree arrangement, pgViewPane = actOnce maximize 20 pgcMaximize}
+      inVar = do
+        resp <- paneGrid inVarCfg
         wanted <- liftIO (readIORef resetNow)
         when wanted (liftIO (writeIORef resetNow False) >> writeVar arrangement (Just halves))
         pure resp
@@ -237,10 +241,9 @@ runControlledTest _ failed = do
     liftIO (writeVarIO arrangement (Just halves))
     checkEq 0 . pgrMaximizedPane =<< settle
 
--- | A press on a pane's 'paneDragHandle' drags the pane, onto the middle of
--- the other one to swap them, and the indicator following the pointer
--- repaints as it moves. A press below the handle, on a button in it, past
--- its pane's edge or under a scrim drags nothing.
+-- | A press on a 'paneDragHandle' drags its pane (onto the other's middle to
+-- swap them) under a repainting indicator. Below the handle, on its button,
+-- past its pane or under a scrim, a press drags nothing.
 runPaneDragTest :: Context -> IORef Int -> IO ()
 runPaneDragTest _ failed = do
   clicks <- newIORef (0 :: Int)
@@ -276,15 +279,14 @@ runPaneDragTest _ failed = do
   inGrid failed covered $ forM_ [V2 300 200, V2 150 200] $ \from ->
     checkEq (Just halves) . pgrTree =<< dragPane from (V2 450 200)
 
--- | The pointer at the grid's edge or beside a divider previews an external
--- drop, rendering no extra pane, and elsewhere none. A drop is committed
--- once and lands on the next frame with the dropped pane focused; a target
--- from a grid since replaced is stale. An overlay over the edge takes the
--- pointer from the drop zone.
+-- | The pointer at the edge or beside a divider previews an external drop
+-- (no extra pane rendered), elsewhere none. A drop commits once, focused, a
+-- replaced grid's target is stale, and an overlay covers the drop zone.
 runDropTest :: Context -> IORef Int -> IO ()
 runDropTest _ failed = do
   rendered <- newIORef []
-  let recording = paneGrid halvesGrid {pgViewPane = \pid _ -> PaneView "Pane" False <$ liftIO (modifyIORef' rendered (pid :))}
+  let note pid _ = PaneView "Pane" False <$ liftIO (modifyIORef' rendered (pid :))
+      recording = paneGrid halvesGrid {pgViewPane = note}
       hover x = moveTo (at x 200)
   inGrid failed recording $ do
     liftIO (writeIORef rendered [])
@@ -315,7 +317,7 @@ runDropTest _ failed = do
     assertJust failed committed $ \(pid, arrangement) ->
       assertEq failed (Just arrangement, pid, 3) (pgrTree after, pgrFocusedPane after, pgrPaneCount after)
   stale <- maybe (fail "missing target") pure (pgrDropTarget after)
-  let replaced = paneGrid halvesGrid {pgTree = ControlledTree (constVar (Just (Pane 90)))}
+  let replaced = paneGrid halvesGrid {pgTree = controlled (Just (Pane 90))}
   assertEq failed Nothing =<< evalUi ctx edge (replaced >> commitPaneDrop stale)
   covered <- newContext
   let overlaid = columnWith (fillW . fillH) $ do
@@ -325,9 +327,8 @@ runDropTest _ failed = do
   r <- warmup covered edge overlaid >> warmup2 covered edge overlaid
   assertEq failed (1, Nothing) (pgrPaneCount r, pgrDropTarget r)
 
--- | A tab dragged out of a pane onto the grid's edge previews without
--- rendering an uncommitted pane, and its release, consumed in the frame that
--- renders its source, commits a new pane.
+-- | A tab dragged onto the grid's edge previews without an uncommitted pane,
+-- and its release, consumed in the frame rendering its source, commits one.
 runTabDropTest :: Context -> IORef Int -> IO ()
 runTabDropTest ctx failed = do
   dragHandle <- newDrag
@@ -350,10 +351,9 @@ runTabDropTest ctx failed = do
     check . isJust . snd =<< release
     checkEq 2 . pgrPaneCount . fst =<< frame
 
--- | Content wider than its pane is cut to it, bars and all: a button pushed
--- past the pane takes no click there, and the bar of a scroller running on
--- into the next pane shows no grab cursor there. Dragging the bar of a
--- scroller in a pane that drags from anywhere scrolls it and leaves the pane.
+-- | Content is cut to its pane: a button or a scroller's bar past it takes
+-- no click or grab there. A bar dragged in a pane that drags from anywhere
+-- scrolls and leaves the pane.
 runClipTest :: Context -> IORef Int -> IO ()
 runClipTest ctx failed = do
   clicks <- newIORef (0 :: Int)
@@ -369,10 +369,12 @@ runClipTest ctx failed = do
         note 0 (respId hidden)
         pure wid
       body _ = fst <$> scrollArea (tight . grow) tall
-      ui = paneGrid halvesGrid {pgViewPane = \pid _ -> body pid >>= note (fromIntegral pid) >> pure (PaneView "P" True)}
+      pane pid _ = body pid >>= note (fromIntegral pid) >> pure (PaneView "P" True)
+      ui = paneGrid halvesGrid {pgViewPane = pane}
   runSim ctx failed (withInput 600 400) ui $ do
     known <- liftIO (readIORef ids)
-    [Just hidden, Just (Rect wx wy ww _), Just (Rect px py pw _)] <- liftIO (mapM (getPrevRect ctx . (known IM.!)) [0, 10, 20])
+    [Just hidden, Just (Rect wx wy ww _), Just (Rect px py pw _)] <-
+      liftIO (mapM (getPrevRect ctx . (known IM.!)) [0, 10, 20])
     -- Laid out past the pane, which ends at 292.
     check (rectX hidden >= 292)
     _ <- click (Within hidden)
@@ -408,7 +410,7 @@ runEmptyTest ctx failed = do
   close <- newIORef False
   let inp = withInputOff 600 400
       withTree t = paneGrid halvesGrid {pgTree = t, pgViewPane = actOnce close 1 pgcClose}
-      one = ControlledTree (constVar (Just (Pane 1)))
+      one = controlled (Just (Pane 1))
       none = InitialTree Nothing
   empty <- warmup2 ctx inp (withTree none)
   assertEq failed (Nothing, 0, []) (pgrTree empty, pgrPaneCount empty, pgrPanes empty)
@@ -418,7 +420,7 @@ runEmptyTest ctx failed = do
   closed <- warmup2 ctx inp (withTree none)
   assertEq failed (Nothing, 0) (pgrTree closed, pgrPaneCount closed)
   assertEq failed [1] . pgrPanes =<< evalUi ctx inp (withTree one)
-  assertEq failed [] . pgrPanes =<< evalUi ctx inp (withTree (ControlledTree (constVar Nothing)))
+  assertEq failed [] . pgrPanes =<< evalUi ctx inp (withTree (controlled Nothing))
 
 runValidationTest :: Context -> IORef Int -> IO ()
 runValidationTest ctx failed = do
@@ -434,5 +436,5 @@ runValidationTest ctx failed = do
   forM_ invalid $ \arrangement -> do
     assert failed (isLeft (validateGridTree arrangement))
     outcome <- try @IOException $ runFrame ctx (withInput 600 400) $
-      paneGrid defaultPaneGridConfig {pgTree = ControlledTree (constVar (Just arrangement))}
+      paneGrid defaultPaneGridConfig {pgTree = controlled (Just arrangement)}
     assert failed (isLeft outcome)

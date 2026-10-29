@@ -116,11 +116,12 @@ runScrollBarGutterTest ctx failed = do
       wideThen n = labelWith' fillW "Wide" <* replicateM_ n (label "scroll line")
       page = scrollArea (padAll 12 . grow) (wideThen 20)
       grown = scrollArea (tight . grow) (wideThen 20)
+      listBar = scrollBarGutter ScrollBarList
   forM_
-    [ (withInput 200 120, scrollArea (fillW . fixedH 60) (wideThen 8), scrollBarGutter ScrollBarList listPad, listPad)
+    [ (withInput 200 120, scrollArea (fillW . fixedH 60) (wideThen 8), listBar listPad, listPad)
     , (withInput 240 140, grown, scrollBarGutter ScrollBarPage 0, 0)
     , (withInput 240 140, page, scrollBarGutter ScrollBarPage 12, 12)
-    , (withInput 240 140, panelWith grow grown, scrollBarGutter ScrollBarList 0, 0)
+    , (withInput 240 140, panelWith grow grown, listBar 0, 0)
     ]
     $ \(inp0, ui, gutter, endPad) -> do
       (sid, child) <- warmup2 ctx inp0 ui
@@ -166,7 +167,8 @@ runScrollDamageTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx sid) $ \(Rect sx sy sw sh) -> do
     _ <- runFrame ctx inp0 (linesOf "count 2" "last")
-    assertJustM failed (clipOf ctx) $ \r -> assert failed (painted r && not (rectContains r (V2 (sx + sw - 2) (sy + sh / 2))))
+    let lane = V2 (sx + sw - 2) (sy + sh / 2)
+    assertJustM failed (clipOf ctx) $ \r -> assert failed (painted r && not (rectContains r lane))
   -- On the page the lines that move repaint the window whole, so make the
   -- content taller in a floating window, which clips them to its viewport.
   let inWindow lastLine = snd <$> window' (constVar True) "Lines" (linesOf "count 1" lastLine)
@@ -313,7 +315,9 @@ runScrollHitTest _ failed = do
         replicateM_ n (wheel (OnWidget sid) (V2 0 1))
         liftIO . (`getScrollOffset` sid) =<< simContext
       hitOf (_, _, hit) = hit
-  forM_ [(newContext, withInput 240 160, fillW . fixedH 80), (newPixelContext, withInput 640 120, tight . grow)] $
+  let hosts =
+        [(newContext, withInput 240 160, fillW . fixedH 80), (newPixelContext, withInput 640 120, tight . grow)]
+  forM_ hosts $
     \(mk, inp, layout) -> do
       ctx <- mk
       runSim ctx failed inp (target layout 6) $ do
@@ -347,7 +351,9 @@ runDisjointViewportTest ctx failed = do
         filler 100
         pure inner
       -- A point on the top layer's button left of the pinned one, and on the pinned one.
-      targets bs = [(1, V2 (rectX (respRect (bs !! 1)) + 10) (v2Y (centerOf (bs !! 1)))), (2 :: Int, centerOf (bs !! 2))]
+      targets bs =
+        let V2 _ y = centerOf (bs !! 1)
+         in [(1, V2 (rectX (respRect (bs !! 1)) + 10) y), (2 :: Int, centerOf (bs !! 2))]
       na = ctxNodeArena ctx
       buttonsAfter offsets = liftIO offsets >> (\(_, _, bs) -> bs) <$> settle
       hotAt p = moveTo (At p) >> frame >> liftIO (getHotId ctx)
@@ -414,7 +420,7 @@ runScrollLockstepProbeTest ctx failed = do
         fillDs = zipWith subtract fillA fillB
         n = min (length textDs) (length fillDs)
     case (textDs, fillDs) of
-      (t0 : _, f0 : _) -> assert failed (steady (take n textDs) && steady (take n fillDs) && abs (t0 - f0) <= 1e-3)
+      (t0 : _, f0 : _) -> assert failed (all (steady . take n) [textDs, fillDs] && abs (t0 - f0) <= 1e-3)
       _ -> pure ()
 
 -- | The final (snapped) quads of a vertex buffer: each quad is 4 vertices
@@ -478,7 +484,8 @@ runScroll2DLayoutTest _ failed = do
     \(lay, range, along, want) -> do
       c <- newContext
       let boxes = replicateM_ 6 (box (fixedWH 100 40) (colorRGBA 255 0 0 255))
-      (sid, ()) <- warmup2 c (withInput 400 300) (columnWith tight (scrollArea2D (lay . tight . gap 0 . fixedWH 300 200) boxes))
+          area = scrollArea2D (lay . tight . gap 0 . fixedWH 300 200) boxes
+      (sid, ()) <- warmup2 c (withInput 400 300) (columnWith tight area)
       assertEq failed want . along . drop 2 =<< arenaRects c
       assertJustM failed (getScrollMetrics c sid) $ \m -> assertEq failed range (scrollRange m)
   padded <- newPixelContext
@@ -493,9 +500,10 @@ runScroll2DLayoutTest _ failed = do
   (wid1, ()) <- warmup2 padded inp0 (scrollArea (padAll 6 . fixedH 80 . fillW) (labelWith tight "fits"))
   assertJustM failed (scrollNodeState padded wid1 False) within
   over <- newPixelContext
-  let overflows = paddedArea (labelWith (tight . fixedW 500) "wide child" >> replicateM_ 30 (label "scroll line"))
+  let overflows = paddedArea (labelWith (tight . fixedW 500) "wide child" >> numbered "line " 30)
   (wid2, ()) <- warmup2 over inp0 overflows
-  assertJustM failed (scrollNodeState over wid2 True) $ \(contentW, innerW) -> assertGt failed contentW (innerW + 40)
+  assertJustM failed (scrollNodeState over wid2 True) $ \(contentW, innerW) ->
+    assertGt failed contentW (innerW + 40)
   assertJustM failed (scrollNodeState over wid2 False) $ \(contentH, innerH) -> do
     assertGt failed contentH (innerH + 100)
     -- Far past the end, the clamp lands on content + padB - view, where the
@@ -651,9 +659,13 @@ runWheelRoutingTest _ failed = do
       belowRoot sids = firstRect sids >>= \r -> Within r <$ checkGt (rectY r) 100
   expectMoves [True] carded (point (V2 60 30)) (V2 0 1)
   expectMoves [True] overflowing belowRoot (V2 0 1)
-  let fitting = page ((: []) . fst <$> scrollArea (fillW . fixedH 100) (replicateM_ 2 (label "fits")) <* rows 30)
-      wider = page ((: []) . fst <$> scrollArea (fixedWH 400 150) (replicateM_ 30 (label "inner row")) <* rows 30)
-      lane sids = (\(Rect px py pw _) -> at (px + pw - scrollBarGutter ScrollBarList 0 / 2) (py + 10)) <$> firstRect sids
+  let innerThen layout body = page ((: []) . fst <$> scrollArea layout body <* rows 30)
+      fitting = innerThen (fillW . fixedH 100) (replicateM_ 2 (label "fits"))
+      wider = innerThen (fixedWH 400 150) (replicateM_ 30 (label "inner row"))
+      halfBar = scrollBarGutter ScrollBarList 0 / 2
+      lane sids = (\(Rect px py pw _) -> at (px + pw - halfBar) (py + 10)) <$> firstRect sids
+
+
   expectMoves [True, False] fitting (on 1) (V2 0 1)
   expectMoves [True, False] wider lane (V2 0 1)
   ctx <- newContext
