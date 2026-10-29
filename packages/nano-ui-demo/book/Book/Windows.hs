@@ -9,6 +9,11 @@ import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), WindowDecorations (..), defaultSdlOptions, runSdlApp, windowCaption)
 
 -- ANCHOR: settings
+main :: IO ()
+main = do
+  docName <- newVar ("untitled.txt" :: Text)
+  runSdlApp opts (editor docName)
+
 opts :: SdlOptions
 opts =
   defaultSdlOptions
@@ -22,21 +27,19 @@ opts =
           , wsResizable   = True
           }
     }
+
+editor :: Var Text -> NanoUI ()
+editor docName = column $ do
+  textInput docName
+  name <- readVar docName
+  setWindowTitleUi (name <> " - My App")         -- setter: every frame
+  whenM (button "Maximize") toggleMaximizedUi    -- command: on click only
+  whenM (button "Quit") quitUi
 -- ANCHOR_END: settings
 
--- ANCHOR: title
-title :: Text -> NanoUI ()
-title docName = setWindowTitleUi (docName <> " - My App")
--- ANCHOR_END: title
-
--- ANCHOR: maximize
-maximizeButton :: NanoUI ()
-maximizeButton = whenM (button "Maximize") toggleMaximizedUi
--- ANCHOR_END: maximize
-
 -- ANCHOR: close_request
-main :: IO ()
-main =
+confirmMain :: IO ()
+confirmMain =
   runSdlApp
     defaultSdlOptions
       { sdlWindowSettings = defaultWindowSettings {wsExitOnCloseRequest = False} }
@@ -44,8 +47,14 @@ main =
 
 appView :: NanoUI ()
 appView = do
+  confirming <- useVar False
   mainContent
-  whenM (winCloseRequested <$> askWindow) askBeforeQuitting
+  -- True on one frame only: keep it in a Var so the modal stays open.
+  whenM (winCloseRequested <$> askWindow) (writeVar confirming True)
+  modal confirming "Quit?" $ do
+    label "Unsaved changes will be lost."
+    whenM (button "Quit") quitUi
+    whenM (button "Cancel") (writeVar confirming False)
 -- ANCHOR_END: close_request
 
 -- ANCHOR: title_bar
@@ -88,6 +97,9 @@ data App = App
   , appCount :: Var Int
   }
 
+screenshotMain :: IO ()
+screenshotMain = newApp >>= runSdlApp defaultSdlOptions . view
+
 newApp :: IO App
 newApp = App <$> newTask <*> newVar 0
 
@@ -100,6 +112,9 @@ view app = do
 -- ANCHOR_END: use_screenshot
 
 -- ANCHOR: native_window
+inspectorMain :: IO ()
+inspectorMain = newVar False >>= runSdlApp defaultSdlOptions . editorView
+
 editorView :: Var Bool -> NanoUI ()
 editorView showInspector = do
   checkbox "Inspector" showInspector
@@ -110,9 +125,8 @@ editorView showInspector = do
 
 -- Stand-ins for application code the snippets refer to.
 
-mainContent, askBeforeQuitting, inspectorView :: NanoUI ()
+mainContent, inspectorView :: NanoUI ()
 mainContent = pure ()
-askBeforeQuitting = pure ()
 inspectorView = pure ()
 
 saveShot :: Screenshot -> IO ()

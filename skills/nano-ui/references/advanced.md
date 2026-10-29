@@ -74,6 +74,8 @@ the widget clears its undo history.
   them from events.
 - Confirm before closing: `wsExitOnCloseRequest = False`, check
   `winCloseRequested <$> askWindow`, and call `quitUi` once confirmed.
+  The flag is `True` for one frame only: write it to a `Var` that opens the
+  confirmation `modal`.
 - More native windows: `nativeWindow openVar settings body`, called every frame
   like `modal`. Each window has its own context and frames, and re-runs its
   view after any `Var` change and after each frame of the view that declared
