@@ -16,17 +16,13 @@ tests =
   , spec "task-key-change" runTaskKeyChangeTest
   , spec "task-type-change" runTaskTypeChangeTest
   , spec "task-lease" runTaskLeaseTest
-  , spec "task-lease-partial" runTaskPartialLeaseTest
   , spec "task-two-passes" runTaskTwoPassTest
   , spec "task-failure" runTaskFailureTest
-  , spec "task-async-failure" runTaskAsyncFailureTest
   , spec "task-status" runTaskStatusTest
   , spec "task-retry" runTaskRetryTest
   , spec "task-shutdown" runTaskShutdownTest
-  , spec "wake-from-thread" runWakeFromThreadTest
-  , spec "wake-undelivered" runWakeUndeliveredTest
-  , spec "wake-signal-after-drain" runWakeSignalAfterDrainTest
-  , spec "stream" runStreamTest
+  , spec "burst-costs-one-frame" runBurstTest
+  , spec "wake-delivery" runWakeDeliveryTest
   , spec "stream-key-change" runStreamKeyChangeTest
   , spec "stream-released" runStreamReleasedTest
   , spec "stream-update-throws" runStreamUpdateThrowsTest
@@ -119,10 +115,7 @@ runTaskKeyChangeTest ctx failed = do
   assertEq failed Nothing =<< evalUi ctx inp ui
   putMVar gate ()
   assertEq failed (Just (Just 10)) =<< frameUntil wait ctx ui isJust
-  writeIORef keyRef 2
-  assertEq failed (Just 10) =<< evalUi ctx inp ui
-  writeIORef keyRef 3
-  assertEq failed (Just 10) =<< evalUi ctx inp ui
+  forM_ [2, 3] $ \k -> writeIORef keyRef k >> (assertEq failed (Just 10) =<< evalUi ctx inp ui)
   assert failed =<< killedIn 2000000
   _ <- wait 0
   putMVar gate ()
@@ -145,40 +138,30 @@ runTaskTypeChangeTest ctx failed = do
   cancelTasks ctx
 
 -- | A job lives while the view calls its hook. The first frame without the
--- call kills it without requesting a frame; a later call starts a new job.
+-- call kills it without requesting a frame, and only that hook's job: the
+-- other keeps its job until a frame skips it too. A later call starts a new
+-- job.
 runTaskLeaseTest :: Context -> IORef Int -> IO ()
 runTaskLeaseTest ctx failed = do
-  job <- newTask
-  starts <- newIORef 0
-  (sleep, _, killedIn) <- sleeper
-  let ui shown = scope (when shown (void (useTask job ("lease" :: String) (tick starts >> sleep)))) >> label "lease"
-  replicateM_ 3 (runFrame ctx inp (ui True))
-  assert failed =<< reaches starts 1
-  assert failed . not =<< killedIn 20000
-  settled ctx failed (ui False) ()
-  assert failed =<< killedIn 2000000
-  _ <- runFrame ctx inp (ui True)
-  assert failed =<< reaches starts 2
-  cancelTasks ctx
-
--- | A frame that skips one of two hooks ends only that hook's job; the other
--- keeps its job through later frames until a frame skips it too.
-runTaskPartialLeaseTest :: Context -> IORef Int -> IO ()
-runTaskPartialLeaseTest ctx failed = do
   jobA <- newTask
   jobB <- newTask
-  (sleepA, startedA, killedA) <- sleeper
+  starts <- newIORef 0
+  (sleepA, _, killedA) <- sleeper
   (sleepB, startedB, killedB) <- sleeper
   let ui showA showB = do
-        scope (when showA (void (useTask jobA ("a" :: String) sleepA)))
+        scope (when showA (void (useTask jobA ("a" :: String) (tick starts >> sleepA))))
         scope (when showB (void (useTask jobB ("b" :: String) sleepB)))
         label "lease"
-  _ <- runFrame ctx inp (ui True True)
-  startedA >> startedB
-  replicateM_ 3 (runFrame ctx inp (ui False True))
+  replicateM_ 3 (runFrame ctx inp (ui True True))
+  assert failed =<< reaches starts 1
+  startedB
+  assert failed . not =<< killedA 20000
+  settled ctx failed (ui False True) ()
+  replicateM_ 2 (runFrame ctx inp (ui False True))
   assert failed =<< killedA 2000000
   assert failed . not =<< killedB 20000
-  _ <- runFrame ctx inp (ui False False)
+  _ <- runFrame ctx inp (ui True False)
+  assert failed =<< reaches starts 2
   assert failed =<< killedB 2000000
   cancelTasks ctx
 
@@ -198,13 +181,13 @@ runTaskTwoPassTest ctx failed = do
   assertEq failed 1 =<< readIORef starts
   cancelTasks ctx
 
--- | A job that throws, or returns a value that throws when forced, fails
--- with that exception and wakes the loop. Nothing reaches the uncaught
--- handler, and 'useTask' keeps its last result.
+-- | A job that throws, returns a value that throws when forced, or meets an
+-- asynchronous exception other than the hook's kill (a stack overflow)
+-- fails with that exception and wakes the loop. Nothing reaches the
+-- uncaught handler, and 'useTask' keeps its last result.
 runTaskFailureTest :: Context -> IORef Int -> IO ()
 runTaskFailureTest ctx failed = do
-  thrownJob <- newTask
-  lazyJob <- newTask
+  [thrownJob, lazyJob, overflowJob] <- replicateM 3 newTask
   plainJob <- newTask
   wait <- newWakeSignal ctx
   gate <- newEmptyMVar
@@ -213,23 +196,26 @@ runTaskFailureTest ctx failed = do
   setUncaughtExceptionHandler (\_ -> tick uncaught)
   flip finally (setUncaughtExceptionHandler handler) $ do
     let ui =
-          (,,)
-            <$> useTaskStatus thrownJob ("thrown" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
-            <*> useTaskStatus lazyJob ("lazy" :: String) (readMVar gate >> pure (error "lazy" :: Int))
+          (,)
+            <$> mapM
+              (\(job, k, act) -> useTaskStatus job (k :: String) (readMVar gate >> act))
+              [ (thrownJob, "thrown", ioError (userError "boom") :: IO Int)
+              , (lazyJob, "lazy", pure (error "lazy"))
+              , (overflowJob, "overflow", throwIO StackOverflow)
+              ]
             <*> useTask plainJob ("thrown too" :: String) (readMVar gate >> ioError (userError "boom") :: IO Int)
         failure = \case
           TaskFailed e Nothing -> Just (displayException e)
           _ -> Nothing
-        shown (thrown, lazy, _) = all (isJust . failure) [thrown, lazy]
     _ <- runFrame ctx inp ui
     _ <- wait 0
     putMVar gate ()
-    Just (thrown, lazy, plain) <- frameUntil wait ctx ui shown
-    assert failed (maybe False ("boom" `isInfixOf`) (failure thrown))
-    assert failed (maybe False ("lazy" `isInfixOf`) (failure lazy))
+    Just (statuses, plain) <- frameUntil wait ctx ui (all (isJust . failure) . fst)
+    assert failed (and (zipWith (\s msg -> maybe False (msg `isInfixOf`) (failure s)) statuses ["boom", "lazy"]))
     assertEq failed Nothing plain
     threadDelay 20000
     assertEq failed 0 =<< readIORef uncaught
+  cancelTasks ctx
 
 -- | A job goes from running to done. A job for a new key reports running,
 -- then failed, carrying the previous key's result.
@@ -262,9 +248,7 @@ runTaskRetryTest ctx failed = do
   wait <- newWakeSignal ctx
   starts <- newIORef 0
   attempt <- newIORef (0 :: Int)
-  let ui = do
-        n <- liftIO (readIORef attempt)
-        useTask job ("same input" :: String, n) (tick starts >> readIORef starts)
+  let ui = liftIO (readIORef attempt) >>= \n -> useTask job ("same input" :: String, n) (tick starts >> readIORef starts)
   assertEq failed (Just (Just 1)) =<< frameUntil wait ctx ui isJust
   assertEq failed (Just 1) =<< evalUi ctx inp ui
   writeIORef attempt 1
@@ -289,100 +273,64 @@ runTaskShutdownTest ctx failed = do
   wakeFromThread ctx
   assertEq failed before =<< readIORef wakes
 
+-- | A producer that runs its step for 1 to 1000 once let go, then idles, and
+-- the action that lets it go and waits for the burst to end.
+burster :: IO ((Int -> IO ()) -> IO (), IO ())
+burster = do
+  go <- newEmptyMVar
+  done <- newEmptyMVar
+  pure (\step -> takeMVar go >> mapM_ step [1 .. 1000] >> putMVar done () >> takeMVar go, putMVar go () >> takeMVar done)
+
+-- | A burst faster than the frame rate costs one frame showing the last
+-- value: from an app thread that writes state and wakes the loop with
+-- 'askWake', and from stream updates folded into the hook's state.
+runBurstTest :: Context -> IORef Int -> IO ()
+runBurstTest _ failed = do
+  job <- newTask
+  stream <- newStream
+  latest <- newIORef 0
+  (produceA, letGoA) <- burster
+  (produceB, letGoB) <- burster
+  let woken = do
+        wake <- askWake
+        _ <- useTask job ("stream" :: String) (produceA (\i -> writeIORef latest i >> wake))
+        n <- liftIO (readIORef latest)
+        n <$ lamp (n > 0)
+      streamed = useStream stream ("stream" :: String) 0 (\update -> produceB (update . (+))) >>= \n -> n <$ lamp (n > 0)
+  forM_ [(woken, letGoA, 1000), (streamed, letGoB, 500500)] $ \(ui, letGo, final) -> do
+    ctx <- newContext
+    wait <- newWakeSignal ctx
+    _ <- warmup2 ctx inp ui
+    settled ctx failed ui 0
+    _ <- wait 0
+    letGo
+    assertEq failed [True, False] =<< replicateM 2 (wait 0)
+    takesNews ctx failed ui final
+    cancelTasks ctx
+
 -- | A wake the action could not deliver (a full event queue), or made with
--- no action installed, does not leave the next wake waiting on it.
-runWakeUndeliveredTest :: Context -> IORef Int -> IO ()
-runWakeUndeliveredTest ctx failed = do
+-- no action installed, does not leave the next wake waiting on it; once one
+-- gets through, the rest wait for the loop to take it. A wake drained with
+-- @wait 0@ and no frame after it does not swallow the job's wake that
+-- follows.
+runWakeDeliveryTest :: Context -> IORef Int -> IO ()
+runWakeDeliveryTest ctx failed = do
   writeIORef (ctxWakeLoop ctx) Nothing
   wakeFromThread ctx
   runs <- newIORef (0 :: Int)
   delivers <- newIORef False
   setWakeLoopChecked ctx (tick runs >> readIORef delivers)
-  wakeFromThread ctx
-  wakeFromThread ctx
+  replicateM_ 2 (wakeFromThread ctx)
   assertEq failed 2 =<< readIORef runs
-  -- Once one gets through, the rest wait for the loop to take it.
   writeIORef delivers True
-  wakeFromThread ctx
-  wakeFromThread ctx
+  replicateM_ 2 (wakeFromThread ctx)
   assertEq failed 3 =<< readIORef runs
-
--- | A wake drained with @wait 0@ and no frame after it does not swallow the
--- job's wake that follows.
-runWakeSignalAfterDrainTest :: Context -> IORef Int -> IO ()
-runWakeSignalAfterDrainTest ctx failed = do
-  wait <- newWakeSignal ctx
-  markDirty ctx
+  drained <- newContext
+  wait <- newWakeSignal drained
+  markDirty drained
   assert failed =<< wait 0
-  wakeFromThread ctx
+  wakeFromThread drained
   assert failed =<< wait 0
-
--- | An asynchronous exception other than the hook's kill, such as a stack
--- overflow, fails the job and wakes the loop.
-runTaskAsyncFailureTest :: Context -> IORef Int -> IO ()
-runTaskAsyncFailureTest ctx failed = do
-  job <- newTask
-  wait <- newWakeSignal ctx
-  let ui = useTaskStatus job ("overflow" :: String) (throwIO StackOverflow :: IO Int)
-      isFailed = \case
-        TaskFailed _ _ -> True
-        _ -> False
-  assert failed . isJust =<< frameUntil wait ctx ui isFailed
-  cancelTasks ctx
-
--- | An app thread that streams values and wakes the loop with 'askWake'
--- costs one frame for a burst faster than the frame rate, showing the last
--- value.
-runWakeFromThreadTest :: Context -> IORef Int -> IO ()
-runWakeFromThreadTest ctx failed = do
-  job <- newTask
-  wait <- newWakeSignal ctx
-  latest <- newIORef (0 :: Int)
-  go <- newEmptyMVar
-  burst <- newEmptyMVar
-  let produce wake = do
-        takeMVar go
-        forM_ [1 .. 1000] $ \i -> writeIORef latest i >> wake
-        putMVar burst ()
-        takeMVar go
-      ui = do
-        wake <- askWake
-        _ <- useTask job ("stream" :: String) (produce wake)
-        n <- liftIO (readIORef latest)
-        n <$ lamp (n > 0)
-  _ <- warmup2 ctx inp ui
-  settled ctx failed ui 0
-  _ <- wait 0
-  putMVar go ()
-  takeMVar burst
-  assertEq failed [True, False] =<< replicateM 2 (wait 0)
-  takesNews ctx failed ui 1000
-  cancelTasks ctx
-
--- | Stream updates fold into the hook's state. A burst faster than the frame
--- rate costs one frame, showing the final state.
-runStreamTest :: Context -> IORef Int -> IO ()
-runStreamTest ctx failed = do
-  stream <- newStream
-  wait <- newWakeSignal ctx
-  go <- newEmptyMVar
-  burst <- newEmptyMVar
-  let produce update = do
-        takeMVar go
-        forM_ [1 .. 1000 :: Int] $ \i -> update (+ i)
-        putMVar burst ()
-        takeMVar go
-      ui = do
-        n <- useStream stream ("stream" :: String) 0 produce
-        n <$ lamp (n > 0)
-  _ <- warmup2 ctx inp ui
-  settled ctx failed ui 0
-  _ <- wait 0
-  putMVar go ()
-  takeMVar burst
-  assertEq failed [True, False] =<< replicateM 2 (wait 0)
-  takesNews ctx failed ui 500500
-  cancelTasks ctx
 
 -- | A new key kills the old producer and restarts from the initial state.
 -- Late updates from the old producer are dropped.
@@ -392,9 +340,7 @@ runStreamKeyChangeTest ctx failed = do
   wait <- newWakeSignal ctx
   (sleep, _, killedIn) <- sleeper
   keyRef <- newIORef (1 :: Int)
-  let ui = do
-        k <- liftIO (readIORef keyRef)
-        useStream stream k [] (\update -> update (k :) >> sleep)
+  let ui = liftIO (readIORef keyRef) >>= \k -> useStream stream k [] (\update -> update (k :) >> sleep)
   assertEq failed (Just [1]) =<< frameUntil wait ctx ui (not . null)
   writeIORef keyRef 2
   -- The new producer may already have run before the view reads it.
@@ -415,8 +361,7 @@ runStreamUpdateThrowsTest ctx failed = do
         _ <- try @ErrorCall (update (\_ -> error "boom"))
         _ <- try @ErrorCall (update (+ 10))
         sleep
-      ui = useStream stream () (0 :: Int) produce
-  assertEq failed (Just 11) =<< frameUntil wait ctx ui (>= 10)
+  assertEq failed (Just 11) =<< frameUntil wait ctx (useStream stream () (0 :: Int) produce) (>= 10)
   cancelTasks ctx
 
 -- | An update to a stream whose hook has stopped running does not wake the
