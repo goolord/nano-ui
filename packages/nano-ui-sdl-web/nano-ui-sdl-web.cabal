@@ -1,0 +1,132 @@
+cabal-version:      3.4
+name:               nano-ui-sdl-web
+version:            0.1.0.0
+synopsis:           Browser backend for nano-ui with SDL_ttf text and WebGL2
+description:
+    Runs nano-ui views in a browser canvas. Built with GHC's WebAssembly
+    backend, it shapes and rasterises text with SDL_ttf, as nano-ui-sdl does,
+    and draws with WebGL2. Requires SDL3 and SDL3_ttf (built for wasm32-wasi
+    for the browser) and pkg-config. The bundled Inter font is under the SIL
+    Open Font License 1.1.
+license:            MIT AND OFL-1.1
+license-files:
+    LICENSE
+    LICENSE-Inter
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
+category:           Graphics
+build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
+extra-doc-files:
+    CHANGELOG.md
+    README.md
+
+extra-source-files:
+    data/inter.ttf
+    cbits/*.h
+    web/*.js
+    web/*.html
+    scripts/*.sh
+
+source-repository head
+    type:     git
+    location: https://github.com/goolord/nano-ui.git
+    subdir:   packages/nano-ui-sdl-web
+
+flag sdl
+    description: Build the backend. Needs SDL3, SDL3_ttf, and pkg-config.
+    manual: True
+    default: True
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+    if arch(wasm32)
+        default-extensions: JavaScriptFFI
+
+common warnings
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-export-lists
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
+        -Wunused-packages
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Backend.SdlWeb
+        NanoUI.SdlWeb.Internal.Host
+        NanoUI.SdlWeb.Internal.Input
+        NanoUI.SdlWeb.Internal.Render
+        NanoUI.SdlWeb.Internal.Session
+        NanoUI.SdlWeb.Internal.Font
+    other-modules:
+        NanoUI.SdlWeb.Internal.Font.Inter
+    -- The library imports NanoUI.Internal modules, which change without
+    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        containers >=0.7 && <0.9,
+        file-embed ^>=0.0.16,
+        nano-ui >=0.2.0 && <0.2.1,
+        nano-ui-emit ^>=0.1,
+        primitive ^>=0.9,
+        text >=2.1.2 && <2.2,
+        vector ^>=0.13
+    hs-source-dirs:   lib
+    if !flag(sdl)
+        buildable: False
+    if flag(sdl)
+        c-sources:        cbits/nano_ui_ttf.c
+                          cbits/nano_ui_web_atlas.c
+        include-dirs:     cbits
+        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
+
+-- The browser demo. Under wasm32 it is a reactor module whose nanoMain
+-- export web/nano-ui-sdl-web.js calls; a native build only checks it
+-- compiles, and running it says it needs a browser.
+executable nano-ui-sdl-web-demo
+    import:           extensions
+    import:           warnings
+    main-is:          WebDemo.hs
+    hs-source-dirs:   examples
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui,
+        nano-ui-sdl-web,
+        text ^>=2.1
+    if arch(wasm32)
+        ghc-options: -no-hs-main -optl-mexec-model=reactor "-optl-Wl,--export=hs_init,--export=nanoMain"
+    if !flag(sdl)
+        buildable: False
+
+-- Runs sessions natively against a host of its own: the events it queues,
+-- and the textures and draws it records.
+test-suite nano-ui-sdl-web-test
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    hs-source-dirs:   test
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui-sdl-web,
+        primitive ^>=0.9,
+        text ^>=2.1,
+        vector ^>=0.13
+    if !flag(sdl)
+        buildable: False

@@ -1,0 +1,15 @@
+-- The browser build: nano-ui and the web backend for wasm32-wasi, with
+-- GHC's wasm backend (ghc-wasm-meta). Build with
+-- packages/nano-ui-sdl-web/scripts/build-web.sh, which passes this file as
+-- --project-file. SDL3 and SDL3_ttf come from build-wasi-deps.sh through
+-- PKG_CONFIG_PATH.
+packages:
+  packages/nano-ui
+  packages/nano-ui-emit
+  packages/nano-ui-sdl-web
+
+tests: False
+benchmarks: False
+
+package nano-ui-sdl-web
+  flags: +sdl
