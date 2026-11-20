@@ -171,6 +171,12 @@ library
         NanoUI.Internal.Frame.SpanArena
         NanoUI.Internal.Frame.TextEdit
         NanoUI.Internal.Frame.TextInput
+        NanoUI.Internal.Layout.Arena.Cache
+        NanoUI.Internal.Layout.Arena.Query
+        NanoUI.Internal.Layout.Arena.Types
+        NanoUI.Internal.Layout.Solve.Flex
+        NanoUI.Internal.Layout.Solve.Measure
+        NanoUI.Internal.Layout.Solve.Position
         NanoUI.Internal.Style
         NanoUI.Internal.Style.Layout
         NanoUI.Internal.Style.Presets
