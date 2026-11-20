@@ -162,15 +162,20 @@ measureTextNodeAt :: SolveEnv -> NodeIdx -> Text -> Float -> (Float -> Float -> 
 measureTextNodeAt env idx txt outerW shouldWrap = do
   si <- getStyleIdx (seArena env) idx
   measurer@TextMeasurer {tmMetrics = textFm} <- nodeMeasurer env idx NodeText si
-  (tw0, th0) <- measureFontLine measurer txt
   let wrapW = max 0 (outerW - 2 * tableStripeInset si)
       lineH = fmLineHeight textFm
       na = seArena env
-  if T.any (== '\n') txt || shouldWrap (max 0 outerW) tw0
+  if T.any (== '\n') txt
     then do
       (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped env measurer txt wrapW)
       pure (TextBox True tw th lineH)
-    else pure (TextBox False tw0 th0 lineH)
+    else do
+      (tw0, th0) <- measureFontLine measurer txt
+      if shouldWrap (max 0 outerW) tw0
+        then do
+          (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped env measurer txt wrapW)
+          pure (TextBox True tw th lineH)
+        else pure (TextBox False tw0 th0 lineH)
 
 -- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text wraps at
 -- newlines, and at @w@ when @allowed@ and its line overflows a positive @w@.

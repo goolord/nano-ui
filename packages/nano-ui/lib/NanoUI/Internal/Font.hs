@@ -155,13 +155,15 @@ prepareFontMetrics fm txt = maybe (pure fm) (`fbPrepare` txt) (fmBackend fm)
 prepareFontMetricsMany :: FontMetrics -> [Text] -> IO FontMetrics
 prepareFontMetricsMany fm texts = case fmBackend fm of
   Nothing -> pure fm
-  Just _ -> do
-    combined <- prepareFontMetrics fm (T.intercalate "\n" texts)
-    shapes <- mapM (\t -> do
-      prepared <- prepareFontMetrics fm t
-      pure (t, fmShape prepared t)) texts
-    let !byText = Map.fromList shapes
-    pure combined {fmShape = \t -> Map.findWithDefault Nothing t byText}
+  Just _ -> case texts of
+    [] -> pure fm
+    _ -> do
+      preparedList <- mapM (\t -> (t,) <$> prepareFontMetrics fm t) texts
+      let !base = case preparedList of
+            (_, p) : _ -> p
+            [] -> fm
+          !byText = Map.fromList [(t, fmShape p t) | (t, p) <- preparedList]
+      pure base {fmShape = \t -> Map.findWithDefault Nothing t byText}
 
 -- | Prepare metrics and measure a single line's advance in logical pixels.
 {-# INLINE lineWidthIO #-}

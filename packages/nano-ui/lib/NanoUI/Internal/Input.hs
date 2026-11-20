@@ -703,9 +703,21 @@ foldInputKeys = foldl'
 -- | Compare interaction fields, including buttons, keys, scroll, drops, and
 -- window size. Pointer motion, elapsed time, and the redraw flag are ignored.
 inputInteracted :: Input -> Input -> Bool
-inputInteracted a b = quiet a /= quiet b
-  where
-    quiet i = i {inputMousePos = V2 0 0, inputDeltaTime = 0, inputWindowRedraw = False}
+inputInteracted a b =
+  inputButtonsHeld a /= inputButtonsHeld b
+    || inputButtonsPressed a /= inputButtonsPressed b
+    || inputButtonsReleased a /= inputButtonsReleased b
+    || inputMouseClicks a /= inputMouseClicks b
+    || inputScroll a /= inputScroll b
+    || inputKeys a /= inputKeys b
+    || inputKeysNew a /= inputKeysNew b
+    || inputKeysReleased a /= inputKeysReleased b
+    || inputKeysHeld a /= inputKeysHeld b
+    || inputChars a /= inputChars b
+    || inputModifiers a /= inputModifiers b
+    || inputWindowSize a /= inputWindowSize b
+    || inputDrops a /= inputDrops b
+    || inputComposition a /= inputComposition b
 
 -- | Whether any mouse button is held.
 {-# INLINE inputPointerHeld #-}

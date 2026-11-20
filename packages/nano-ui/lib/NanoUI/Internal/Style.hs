@@ -1047,10 +1047,10 @@ borderSides sides s = s {styleBorderSides = foldl' (\m side -> setBit m (fromEnu
 -- | A border of width @w@ and colour @c@ on one side only: 'borderSides'
 -- with 'borderWidth' and 'borderColor'.
 borderLeft, borderRight, borderTop, borderBottom :: Float -> Color -> Style -> Style
-borderLeft w c = borderSides [SideLeft] . borderWidth w . borderColor c
-borderRight w c = borderSides [SideRight] . borderWidth w . borderColor c
-borderTop w c = borderSides [SideTop] . borderWidth w . borderColor c
-borderBottom w c = borderSides [SideBottom] . borderWidth w . borderColor c
+borderLeft w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideLeft)}
+borderRight w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideRight)}
+borderTop w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideTop)}
+borderBottom w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideBottom)}
 
 -- | Set corner radius in logical pixels, clamped to zero or greater.
 cornerRadius :: Float -> Style -> Style
@@ -1103,7 +1103,14 @@ popupStyle f t = t {themePopup = f (themePopup t)}
 
 -- | Modify button, input, panel, floating-window and popup surfaces together.
 everyStyle :: (Style -> Style) -> Theme -> Theme
-everyStyle f = buttonStyle f . inputStyle f . panelStyle f . windowStyle f . popupStyle f
+everyStyle f t =
+  t
+    { themeButton = f (themeButton t)
+    , themeInput = f (themeInput t)
+    , themePanel = f (themePanel t)
+    , themeFloatingWindow = f (themeFloatingWindow t)
+    , themePopup = f (themePopup t)
+    }
 
 -- | Set the accent and focus-ring colours, and recolour the selection
 -- highlight while preserving its alpha.
@@ -1213,9 +1220,19 @@ subtle =
 -- | Whichever of the theme's text colours reads best on @c@.
 readableOn :: Theme -> Color -> Color
 readableOn t c =
-  let candidates = [themeOnAccent t, styleFg (themePanel t), themeWindow t]
-      best a b = if contrastRatio a c >= contrastRatio b c then a else b
-   in foldr1 best candidates
+  let !lc = colorLuminance c
+      ratio a =
+        let !la = colorLuminance a
+         in (max la lc + 0.05) / (min la lc + 0.05)
+      !c0 = themeOnAccent t
+      !c1 = styleFg (themePanel t)
+      !c2 = themeWindow t
+      !r0 = ratio c0
+      !r1 = ratio c1
+      !r2 = ratio c2
+   in if r0 >= r1 && r0 >= r2
+        then c0
+        else if r1 >= r2 then c1 else c2
 
 -- | The theme disabled widgets are drawn with: every colour but the
 -- selection highlight, overlay dim and shadow faded toward the page

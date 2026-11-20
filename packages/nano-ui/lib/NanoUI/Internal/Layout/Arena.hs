@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE StrictData #-}
 
 -- | Layout nodes for one frame, stored in flat mutable arrays.
 --
