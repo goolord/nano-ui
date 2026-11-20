@@ -151,6 +151,8 @@ library
         NanoUI.Internal.Damage
         NanoUI.Internal.Draw
         NanoUI.Internal.Font
+        NanoUI.Internal.Font.Types
+        NanoUI.Internal.Metrics
         NanoUI.Internal.Frame
         NanoUI.Internal.Frame.Cursor
         NanoUI.Internal.Draw.Arena
@@ -170,6 +172,9 @@ library
         NanoUI.Internal.Frame.TextEdit
         NanoUI.Internal.Frame.TextInput
         NanoUI.Internal.Style
+        NanoUI.Internal.Style.Layout
+        NanoUI.Internal.Style.Presets
+        NanoUI.Internal.Style.Theme
         NanoUI.Internal.Types
         NanoUI.Internal.WidgetText
         NanoUI.Internal.Widgets.Node

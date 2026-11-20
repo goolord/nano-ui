@@ -39,7 +39,7 @@ import NanoUI.Internal.NativeWindow (quitRequested, requestWindowClose)
 import NanoUI.Internal.NativeWindow.Types (WindowSettings (..))
 import NanoUI.Internal.Var (readVarIO, writeVarIO)
 import NanoUI.Internal.Var.Cell (varChangeCount)
-import NanoUI.Runner (ClickTracker, LoopWindows (..), maxFrameDt, newClickTracker, shorterWait, shouldRedrawFrame, stampClicks, wakeTimeoutMs)
+import NanoUI.Runner (ClickTracker, LoopWindows (..), maxFrameDt, newClickTracker, shorterWait, shouldRedrawFrame, stampClicks, takeDueWake, windowTimeoutMs)
 
 -- | How a backend opens, draws and closes a further window @w@ with events
 -- @ev@.
@@ -143,11 +143,7 @@ childWait w c = do
   due <- childDue c cl
   if due
     then pure 0
-    else do
-      animating <- (clWasAnim cl ||) <$> anyAnimating (clCtx cl)
-      if animating
-        then pure (woPacingMs (wOps w) (chWin c))
-        else wakeTimeoutMs <$> getWakeAt (clCtx cl) <*> getMonotonicTime
+    else windowTimeoutMs (clWasAnim cl) (woPacingMs (wOps w) (chWin c)) (clCtx cl)
 
 -- | Whether a window must draw next pass, whatever its input.
 mustDraw :: ChildLoop -> IO Bool
@@ -251,10 +247,8 @@ stepChild w c = do
   let ctx = clCtx cl
   due <- childDue c cl
   animating <- anyAnimating ctx
-  wakeAt <- getWakeAt ctx
+  wakeDue <- takeDueWake ctx
   now <- getMonotonicTime
-  let wakeDue = wakeAt > 0 && now >= wakeAt
-  when wakeDue (clearWakeAt ctx)
   when (due || clWasAnim cl || animating || wakeDue) $ do
     takeWakes ctx
     evs <- reverse <$> readIORef (chQueue c)

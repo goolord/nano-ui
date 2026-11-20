@@ -14,6 +14,8 @@ module NanoUI.Runner
   , maxFrameDt
   , wakeTimeoutMs
   , shorterWait
+  , windowTimeoutMs
+  , takeDueWake
     -- * Session loop
   , SessionDriver (..)
   , LoopWindows (..)
@@ -266,6 +268,24 @@ shorterWait a b
   | b < 0 = a
   | otherwise = min a b
 
+-- | Milliseconds a window may sleep before its next frame: @pacingMs@ when an
+-- animation is active or just ended, else the remaining time until 'getWakeAt'.
+windowTimeoutMs :: Bool -> Int -> Context -> IO Int
+windowTimeoutMs wasAnim pacingMs ctx = do
+  animating <- (wasAnim ||) <$> anyAnimating ctx
+  if animating
+    then pure pacingMs
+    else wakeTimeoutMs <$> getWakeAt ctx <*> getMonotonicTime
+
+-- | Check whether a scheduled wake deadline has arrived; if so, clear it so a
+-- skipped frame does not spin on an expired timestamp, and return 'True'.
+takeDueWake :: Context -> IO Bool
+takeDueWake ctx = do
+  wakeAt <- getWakeAt ctx
+  due <- if wakeAt > 0 then (>= wakeAt) <$> getMonotonicTime else pure False
+  when due (clearWakeAt ctx)
+  pure due
+
 -- | Event wait while only the debug readout needs frames: its refresh period.
 debugHudTimeout :: Int
 debugHudTimeout = round (debugRefreshSec * 1000)
@@ -325,13 +345,7 @@ runSessionLoop drv ctx0 inp0 = do
                 -- A wait another window shortened ends off this one's grid.
                 paced = (wasAnim || animating) && timeout == own
             events <- waitForEvents timeout paced lastT
-            wakeDue <-
-              if wakeAt > 0
-                then (>= wakeAt) <$> getMonotonicTime
-                else pure False
-            -- Clear the deadline once reached so a skipped draw (when the
-            -- drawing lock is held) does not spin on an expired wakeAt.
-            when wakeDue (clearWakeAt ctx)
+            wakeDue <- takeDueWake ctx
             let hudDue = timeout == debugHudTimeout && debugActive && null events
             firstDue <- maybe (pure False) lwFirstDue (sdWindows drv)
             pure (events, dueNow || wakeDue || hudDue || firstDue)
