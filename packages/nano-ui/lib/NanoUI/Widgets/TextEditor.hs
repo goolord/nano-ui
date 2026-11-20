@@ -218,8 +218,11 @@ runCommandIO ctx mode cmd ed =
     Copy -> ed <$ copySelection
     Cut
       | modeEditable mode && modeCopyable mode -> do
-          copySelection
-          pure (runCommand mode (Delete CharRight) (if hasSelection ed then ed else runCommand mode SelectAll ed))
+          if hasSelection ed || not (modeMultiLine mode)
+            then do
+              copySelection
+              pure (runCommand mode (Delete CharRight) (if hasSelection ed then ed else runCommand mode SelectAll ed))
+            else pure ed
       | otherwise -> pure ed
     Paste
       | modeEditable mode -> do
@@ -263,7 +266,7 @@ keyCommand mode mods key =
   where
     multi = modeMultiLine mode
     jump = modJump mods
-    chorded = modCtrl mods || modAlt mods
+    chorded = modCtrl mods || modAlt mods || modSuper mods
     -- Extent of an arrow or deletion; 'widen' adds Ctrl+Shift deletions to
     -- the line's ends off macOS.
     reach line word char
@@ -284,13 +287,13 @@ keyCommand mode mods key =
 -- drops only its key's own character: the @f@ of Alt+F, but not the \@ of
 -- AltGr+Q on a German layout.
 inputTextCommands :: EditorMode -> Input -> [TextCommand]
-inputTextCommands mode inp = T.foldr char keys (inputChars inp)
+inputTextCommands mode inp =
+  let typed = T.filter keepChar (inputChars inp)
+   in [InsertText typed | not (T.null typed)] ++ keys
   where
     mods = inputModifiers inp
-    char c rest
-      | not (isControl c) && not (isCommandKey mods (KeyChar c) && (modCtrl mods || modSuper mods || ownKey c)) =
-          InsertText (T.singleton c) : rest
-      | otherwise = rest
+    keepChar c =
+      not (isControl c) && not (isCommandKey mods (KeyChar c) && (modCtrl mods || modSuper mods || ownKey c))
     -- The key's press can end the frame before its text, so the key is
     -- looked for among those held or released.
     ownKey c = any (inputKeysElem (KeyChar (toLower c))) [inputKeysHeld inp, inputKeysReleased inp]

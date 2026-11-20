@@ -14,7 +14,7 @@ module NanoUI.Bidi
   ) where
 
 import Control.Applicative ((<|>))
-import Data.Char (ord)
+import Data.Char (GeneralCategory (..), generalCategory, ord)
 import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -84,7 +84,22 @@ classify c
   | n >= 0x2000 && n <= 0x206F = if n <= 0x200A || n == 0x2028 || n == 0x2029 then WS else ON
   | n >= 0x10800 && n <= 0x10FFF = R
   | n >= 0x1E800 && n <= 0x1EFFF = AL
-  | otherwise = L
+  | otherwise = case generalCategory c of
+      NonSpacingMark -> NSM
+      EnclosingMark -> NSM
+      CurrencySymbol -> ET
+      Space -> WS
+      MathSymbol -> ON
+      ModifierSymbol -> ON
+      OtherSymbol -> ON
+      ConnectorPunctuation -> ON
+      DashPunctuation -> ON
+      OpenPunctuation -> ON
+      ClosePunctuation -> ON
+      InitialQuote -> ON
+      FinalQuote -> ON
+      OtherPunctuation -> ON
+      _ -> L
   where
     n = ord c
     latin

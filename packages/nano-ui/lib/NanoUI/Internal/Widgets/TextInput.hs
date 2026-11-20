@@ -148,8 +148,9 @@ fieldTextCommands ctx mode inp = do
   pure $
     if kind == FocusComposing
       then
-        [InsertText (T.singleton c) | c <- T.unpack (inputChars inp), not (isControl c)]
-          ++ inputTextCommands mode inp {inputChars = T.empty}
+        let committed = T.filter (not . isControl) (inputChars inp)
+         in ([InsertText committed | not (T.null committed)])
+              ++ inputTextCommands mode inp {inputChars = T.empty}
       else inputTextCommands mode inp
 
 -- | The editor mode of a single-line field with these style flags.

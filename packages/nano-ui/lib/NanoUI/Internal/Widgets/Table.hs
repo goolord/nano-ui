@@ -328,9 +328,15 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
               else do
                 (!e', !ky') <- encodeNew r
                 let !d = firstDiff e' e
-                if d < 0
+                    !kd = firstDiff ky' ky
+                    !diffCol = case (d < 0, kd < 0) of
+                      (True, True) -> -1
+                      (False, True) -> d
+                      (True, False) -> kd
+                      (False, False) -> min d kd
+                if diffCol < 0
                   then store i (Opaque r) e ky >> walk (i + 1) k rs
-                  else store i (Opaque r) e' ky' >> note k i d >> walk (i + 1) (k + 1) rs
+                  else store i (Opaque r) (if d < 0 then e else e') ky' >> note k i diffCol >> walk (i + 1) (k + 1) rs
         | otherwise = do
             (!e', !ky') <- encodeNew r
             store i (Opaque r) e' ky' >> note k i 0 >> walk (i + 1) (k + 1) rs

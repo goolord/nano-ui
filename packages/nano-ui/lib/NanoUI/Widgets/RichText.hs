@@ -26,7 +26,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.List (dropWhileEnd, groupBy)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
-import Data.Primitive.PrimArray (indexPrimArray)
+import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -518,8 +518,13 @@ measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
       prepared <- if anywhere then pure wholeMetrics else prepareFontMetrics fm part
       let w = case carets of
             _ | kind == Break -> 0
-            Just cs -> abs (indexPrimArray cs (at - start + T.length part) - indexPrimArray cs (at - start))
-            Nothing -> Font.lineWidth prepared part
+            Just cs
+              | let i0 = at - start
+                    i1 = i0 + T.length part
+                    lenCs = sizeofPrimArray cs
+              , i0 >= 0 && i1 < lenCs ->
+                  abs (indexPrimArray cs i1 - indexPrimArray cs i0)
+            _ -> Font.lineWidth prepared part
           token = Token part i kind w at prepared
       pure (at + T.length part, token : acc)
 

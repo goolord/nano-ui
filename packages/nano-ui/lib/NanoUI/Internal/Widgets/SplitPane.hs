@@ -143,8 +143,8 @@ splitLength spacing avail minA minB ratio
 splitBounds :: GridAxis -> Float -> Rect -> Float -> (Rect, Rect, Rect)
 splitBounds ax spacing r d =
   let Rect x y w h = alongAxis ax r
-   in ( alongAxis ax (Rect x y d h)
-      , alongAxis ax (Rect (x + d + spacing) y (w - d - spacing) h)
+   in ( alongAxis ax (Rect x y (max 0 d) h)
+      , alongAxis ax (Rect (x + d + spacing) y (max 0 (w - d - spacing)) h)
       , alongAxis ax (Rect (x + d) y spacing h)
       )
 

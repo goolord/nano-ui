@@ -628,8 +628,12 @@ renderPane env pid rect =
                     nt <- getNodeType arena idx
                     hit <- pure (isWidgetNode nt) <&&> do
                       child <- getWidgetId arena idx
-                      r <- getPrevRect ctx child
-                      maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
+                      dis <- isDisabled ctx child
+                      if dis
+                        then pure False
+                        else do
+                          r <- getPrevRect ctx child
+                          maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
                     if hit then pure True else hitFrom (idx + 1)
           hitFrom start
     handleRect <- liftIO (readIORef handleRef)

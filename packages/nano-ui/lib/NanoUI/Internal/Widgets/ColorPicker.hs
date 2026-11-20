@@ -151,7 +151,7 @@ colorPickerPreviewGeom fm (Rect x y w h) =
   let
     labelH = fmLineHeight fm
     swatchW = min 80 w
-    swatchH = clamp 0 30 (h - labelH * 2 - colorPickerGap)
+    swatchH = clamp 0 30 ((h - labelH * 2 - colorPickerGap) / 2)
     stackH = labelH + swatchH + colorPickerGap + labelH + swatchH
     top = y + max 0 ((h - stackH) / 2)
     currentY = top + labelH
@@ -337,8 +337,13 @@ colorPickerWith showAlpha value = do
       forM_ (if showAlpha then rgbaChannels else rgbChannels) $ \(lbl, get, set) -> do
         let shown = fromIntegral (get rgb)
         n <- channelField pct lbl 255 shown
-        when (n /= shown) $
-          writeColor (set (fromIntegral n) (fadeAlpha rgb (alphaOf rgb)))
+        when (n /= shown) $ do
+          let c' = set (fromIntegral n) (fadeAlpha rgb (alphaOf rgb))
+          if lbl == "A"
+            then do
+              st <- liftIO (getStore ctx)
+              writePicker c' (widgetStoreHsv st wid value)
+            else writeColor c'
     hsvStore <- liftIO (getStore ctx)
     let
       hsv = widgetStoreHsv hsvStore wid value

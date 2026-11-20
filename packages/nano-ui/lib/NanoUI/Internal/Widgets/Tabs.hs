@@ -245,11 +245,13 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   -- moving alone needs no second frame.
   mBar <- liftIO (getPrevRect ctx groupId)
   mScr <- liftIO (getPrevRect ctx scrollWid)
+  mClip <- liftIO (getPrevClipRect ctx scrollWid)
   inp <- askInput
   -- Over the scroller only: it keeps the vertical wheel from the scrollers
   -- round it, which the arrows do not. The wheel counts as a scroller takes
   -- it, fractions of a notch from a trackpad too.
-  let overStrip = maybe False (\r -> rectContains r (inputMousePos inp)) mScr
+  let visScr = maybe mScr (\c -> mScr >>= rectIntersect c) mClip
+      overStrip = maybe False (\r -> rectContains r (inputMousePos inp)) visScr
       wheelY = if overStrip then v2Y (inputScroll inp) else 0
       -- A paging arrow while the bar overflows, muted at its end. The muted
       -- look is a font colour, which no diff covers, so a slot at the arrow

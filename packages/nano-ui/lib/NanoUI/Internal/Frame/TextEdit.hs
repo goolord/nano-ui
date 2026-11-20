@@ -16,7 +16,7 @@ module NanoUI.Internal.Frame.TextEdit
   ) where
 
 import Control.Monad (forM_, when)
-import Data.IORef (writeIORef)
+import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (catMaybes, isJust, listToMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
@@ -24,7 +24,7 @@ import NanoUI.Internal.Draw (pushRect, pushText)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId, reachedWidgetAt, widgetOverlayAllowed)
-import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
+import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection, isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
@@ -128,6 +128,8 @@ openTextEditMenu ctx inp =
     let mouse@(V2 mx my) = inputMousePos inp
     mWid <- textFieldWidgetAtMouse ctx mouse
     forM_ mWid $ \wid -> do
+      prevFocus <- readIORef (ctxFocusId ctx)
+      when (prevFocus /= wid) (collapseTextFieldSelection ctx prevFocus)
       writeIORef (ctxFocusId ctx) wid
       -- As wide as the widest label plus padding, and no narrower than any menu.
       labelWs <- mapM (fmap fst . ctxMeasureText ctx . snd) (catMaybes textEditMenuRows)

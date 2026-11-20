@@ -22,7 +22,7 @@ module NanoUI.Internal.Widgets.Drop
 import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.List (find)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI.Internal.Context
@@ -30,9 +30,9 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, takeEscape, withContext)
 import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
 import NanoUI.Internal.Style (Layout)
-import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains)
+import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectIntersect)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Widgets.Node (Response, containerResponse, respRect, respPressed)
+import NanoUI.Internal.Widgets.Node (Response, containerResponse, respId, respRect, respPressed)
 import NanoUI.Internal.Widgets.Behavior (DragAxis (..), dragThresholdPx)
 
 -- | A thresholded pointer gesture. Terminal phases last one frame.
@@ -93,8 +93,11 @@ useDrag (DragHandle ref) sources = do
       (next, result) = maybe (Nothing, Nothing) step armed
   when (next /= old) $ withContext $ \ctx -> do
     writeIORef ref next
-    damageFull ctx
-    markDirtyCovered ctx
+    -- Only repaint when a drag actually became active or ended; arming and
+    -- releasing on a plain click below threshold needs no full-window damage.
+    when (isJust result || maybe False (\(DragState _ _ h) -> h) old) $ do
+      damageFull ctx
+      markDirtyCovered ctx
   pure result
 
 -- | Insertion slot in an ordered row or column, bounded by its visible
@@ -180,5 +183,7 @@ dropZone :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response, DropTarget)
 dropZone f child = do
   base <- askDefaultLayout
   (a, resp) <- containerResponse NodePanel (f base) child
-  target <- useDrop (respRect resp)
+  mClip <- withContext (`getPrevClipRect` respId resp)
+  let dropBounds = maybe (respRect resp) (fromMaybe (Rect 0 0 0 0) . rectIntersect (respRect resp)) mClip
+  target <- useDrop dropBounds
   pure (a, resp, target)

@@ -222,8 +222,10 @@ syncTextInputScroll ctx idx x y w h = do
                   | caretRelX + 1 > oldScroll + viewW = caretRelX + 1 - viewW
                   | otherwise = oldScroll
             pure (clamp 0 (max 0 (totalTextW + 1 - viewW)) s0)
+      -- Paint already uses 'newScroll', so write the cache directly without
+      -- scheduling an extra follow-up frame via 'setStore'.
       when (newScroll /= oldScroll) $
-        setStore ctx (insertSlot fieldFloat (slotKey SlotTextInputScroll key) newScroll store)
+        writeIORef (ctxStore ctx) $! insertSlot fieldFloat (slotKey SlotTextInputScroll key) newScroll store
       pure newScroll
 
 -- | What a focused single-line field paints its selection and caret from: the

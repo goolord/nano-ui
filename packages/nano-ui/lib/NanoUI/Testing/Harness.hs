@@ -158,9 +158,9 @@ drawQuads dd = do
       error ("drawQuads: draw command packs " ++ show (cmdIndexCount c) ++ " indices; not quad-packed")
   quads <$> indexedVertices dd (concatMap cmdIndices (drawCmdElems dd))
   where
-    -- Each quad's first four indices name its corners.
+    -- Each quad's 6 indices are [a, b, c, a, c, d]; corners are a, b, c, d.
     quads vs = case splitAt 6 vs of
-      (corners@(v : _), rest) -> quad (take 4 corners) v : quads rest
+      (a : b : c : _ : _ : d : _, rest) -> quad [a, b, c, d] a : quads rest
       _ -> []
     quad corners v =
       let xs = map vX corners

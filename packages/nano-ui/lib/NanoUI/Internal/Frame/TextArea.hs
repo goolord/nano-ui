@@ -291,9 +291,11 @@ textAreaContentMetrics ctx idx = do
             | widest >= 0 && snd freshWidest >= widestW = freshWidest
             | otherwise = widestFrom 0 widths
           pick a b = if snd b > snd a then b else a
-      modifyStore ctx $
+      -- Line-width metrics are a derived cache; write directly so cold queries
+      -- during paint do not wake a redundant extra frame.
+      writeIORef (ctxStore ctx) $!
         insertSlot fieldLineWidths widthsKey (LineWidths face gen widths widest' contentW contentH)
-          . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf)
+          (insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf) store)
       pure (contentW, contentH)
 
 -- | Field rect and scrollbars of a text area, for its node font and content
@@ -358,14 +360,25 @@ syncTextAreaViewport ctx idx key fm field = do
       revealKey = slotKey SlotTextAreaReveal key
       (sx, sy) = findSlot fieldPoint (0, 0) scrollKey store
       reveal = memberSlot fieldQuiet revealKey store
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  let state = TA.loadTextAreaState store key
+  mPre <- textAreaPreedit ctx wid state
   caretAt <-
-    if reveal
+    if reveal || isJust mPre
       then do
-        let buf = TA.textAreaBuffer store key
+        let buf = TA.tasBuffer state
             TB.Cursor row col = TB.getCursor buf
-        Just <$> caretXIO fm (TB.lineAt row buf) col
+            (line, caretCol) = case mPre of
+              Just (_, pre) -> (preeditLine pre, preeditCaret pre)
+              Nothing -> (TB.lineAt row buf, col)
+        Just <$> caretXIO fm line caretCol
       else pure Nothing
-  let V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 (maybe sx (\at -> clamp (at + 1 - viewW) at sx) caretAt) sy)
+  let revealX at
+        | viewW <= 0 = sx
+        | at < sx = at
+        | at + 1 > sx + viewW = at + 1 - viewW
+        | otherwise = sx
+      V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 (maybe sx revealX caretAt) sy)
       viewportKey = slotKey SlotTextAreaViewport key
       lineKey = slotKey SlotTextAreaLineH key
       lineH = textAreaLineHeight fm
@@ -383,7 +396,6 @@ syncTextAreaViewport ctx idx key fm field = do
         $ (if resized then insertSlot fieldPoint viewportKey (viewW, viewH) store else store)
   -- A glide aimed past a range that shrank (the text got shorter) would
   -- never land, since the offset is clamped back here every frame.
-  wid <- getWidgetId (ctxNodeArena ctx) idx
   clampScrollGlide ctx wid (tabRange bars)
   pure (extent, caretAt)
 
