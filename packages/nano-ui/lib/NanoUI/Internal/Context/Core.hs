@@ -301,10 +301,8 @@ wakeFromThread ctx = do
 takeThreadWake :: Context -> IO ()
 takeThreadWake ctx = do
   takeWakes ctx
-  woken <- readIORef (ctxWoken ctx)
-  when woken $ do
-    atomicWriteIORef (ctxWoken ctx) False
-    damageFull ctx
+  woken <- atomicModifyIORef' (ctxWoken ctx) (False,)
+  when woken (damageFull ctx)
 
 -- | Schedule a frame at a monotonic timestamp ('getMonotonicTime') even if no
 -- input arrives. The earliest deadline wins. Cleared at the start of each

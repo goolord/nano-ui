@@ -31,15 +31,21 @@ import NanoUI.Internal.Draw.Arena
 import NanoUI.Internal.Draw.Types (DrawArena (..), DrawOp (..), LineCap (..), LineJoin (..), Shade (..), glyphAtlasTextureId, indexSize, quadPolygon, shiftDrawOp, vertexSize)
 import NanoUI.Internal.Path (idealArcSteps, miterOffset, shoelace)
 import NanoUI.Internal.SIMD
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, forUpTo_, onGrid)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, finite, forUpTo_, onGrid)
 
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()
-pushRect da rect col = do
-  r <- snapRectOrigin da rect
-  recordOp da (FillRect r col)
-  setTexture da glyphAtlasTextureId
-  pushQuad da r whitePixel whitePixel whitePixel whitePixel col
+pushRect da rect col =
+  snapRectOrigin da rect >>= \r -> pushRectRaw da r col
+
+{-# INLINE pushRectRaw #-}
+pushRectRaw :: DrawArena -> Rect -> Color -> IO ()
+pushRectRaw da r@(Rect _ _ w h) col
+  | w <= 0 || h <= 0 = pure ()
+  | otherwise = do
+      recordOp da (FillRect r col)
+      setTexture da glyphAtlasTextureId
+      pushQuad da r whitePixel whitePixel whitePixel whitePixel col
 
 -- Quad with a color per corner. GPU interpolates across the two triangles.
 -- Corners: top-left, top-right, bottom-right, bottom-left.
@@ -239,9 +245,9 @@ pushRoundedRectRaw da (Rect x y w h) radius col
   | w <= 0 || h <= 0 = pure ()
   | otherwise = do
       square <- readIORef (daSquareGeometry da)
-      let !rad = min radius (min (w * 0.5) (h * 0.5))
+      let !rad = min (max 0 radius) (min (w * 0.5) (h * 0.5))
       if square || rad <= 0.5
-        then pushRect da (Rect x y w h) col
+        then pushRectRaw da (Rect x y w h) col
         else do
           recordOp da (FillRoundedRect (Rect x y w h) rad col)
           setTexture da glyphAtlasTextureId
@@ -414,9 +420,10 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !iiLR = if doTB then 36 else 0
               !viC = stripCount * 8
               !iiC = stripCount * 18
-              !inner = max 0 (cr - core)
+              !solidCenter = ibw >= rad - 1.0e-4
+              !inner = if solidCenter then 0 else max 0 (cr - core)
               !outerR = cr + core
-              !innerAA = max 0 (inner - arcFeather)
+              !innerAA = if solidCenter then 0 else max 0 (inner - arcFeather)
               !outerAA = outerR + arcFeather
           when doTB $ do
             pokeStripAt vp ip base baseIdx 0 0 x0 topY (x0 + midW) topY ibw r g b a
@@ -475,19 +482,21 @@ pushSquareStroke da x y w h t col = do
 -- caps.
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushLine da x1 y1 x2 y2 thickness col = do
-  square <- readIORef (daSquareGeometry da)
-  let !r = thickness / 2
-      cap cx cy = pushCircle da cx cy r col
-  if square
-    then pushStroke da x1 y1 x2 y2 thickness col
-    else
-      if x1 == x2 || y1 == y2
-        then pushRect da (Rect (min x1 x2 - r) (min y1 y2 - r) (abs (x2 - x1) + thickness) (abs (y2 - y1) + thickness)) col
-        else when (thickness > 0) $ do
-          pushStrokeAA da x1 y1 x2 y2 thickness col
-          cap x1 y1
-          cap x2 y2
+pushLine da x1 y1 x2 y2 thickness col
+  | thickness <= 0 = pure ()
+  | otherwise = do
+      square <- readIORef (daSquareGeometry da)
+      let !r = thickness / 2
+          cap cx cy = pushCircle da cx cy r col
+      if square
+        then pushStroke da x1 y1 x2 y2 thickness col
+        else
+          if x1 == x2 || y1 == y2
+            then pushRect da (Rect (min x1 x2 - r) (min y1 y2 - r) (abs (x2 - x1) + thickness) (abs (y2 - y1) + thickness)) col
+            else do
+              pushStrokeAA da x1 y1 x2 y2 thickness col
+              cap x1 y1
+              cap x2 y2
 
 -- Coverage-AA strip for a straight segment, the strip a rounded stroke's
 -- sides use, without the round caps 'pushLine' adds.
@@ -504,7 +513,7 @@ pushStrokeAARaw :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Col
 pushStrokeAARaw da x0 y0 x1 y1 bw col = do
   square <- readIORef (daSquareGeometry da)
   if square
-    then pushStroke da x0 y0 x1 y1 bw col
+    then pushStrokeRaw da x0 y0 x1 y1 bw col
     else case strokeAxes x0 y0 x1 y1 of
       Nothing -> pure ()
       Just _ -> do
@@ -519,7 +528,7 @@ strokeAxes x0 y0 x1 y1 =
   let dx = x1 - x0
       dy = y1 - y0
       len = sqrt (dx * dx + dy * dy)
-   in if len < 0.001 then Nothing else Just (dx, dy, len)
+   in if not (finite len) || len < 0.001 then Nothing else Just (dx, dy, len)
 
 -- One quad per segment. Plots and diagrams use this; pushLine adds round caps.
 pushStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -527,10 +536,12 @@ pushStroke da x1 y1 x2 y2 thickness col
   | thickness <= 0 = pure ()
   | otherwise = do
       s <- readIORef (daSnapScale da)
-      let !px1 = onGrid s x1
-          !py1 = onGrid s y1
-          !px2 = onGrid s x2
-          !py2 = onGrid s y2
+      pushStrokeRaw da (onGrid s x1) (onGrid s y1) (onGrid s x2) (onGrid s y2) thickness col
+
+pushStrokeRaw :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushStrokeRaw da px1 py1 px2 py2 thickness col
+  | thickness <= 0 = pure ()
+  | otherwise =
       case strokeAxes px1 py1 px2 py2 of
         Nothing -> pure ()
         Just (dx, dy, len) -> do
@@ -619,7 +630,7 @@ segNormal x0 y0 x1 y1 =
   let !dx = x1 - x0
       !dy = y1 - y0
       !len = sqrt (dx * dx + dy * dy)
-   in if len < 1.0e-6 then (0, 0) else (-dy / len, dx / len)
+   in if not (finite len) || len < 1.0e-6 then (0, 0) else (-dy / len, dx / len)
 
 -- | Whether a shade is flat or has a colour for each of @n@ points.
 shadeCovers :: Shade -> Int -> Bool
@@ -909,7 +920,7 @@ pushPolylineAA da pts w closed cap join limit shade
 -- scale @s@, keeping each within a quarter device pixel. Clamped to 1..32.
 arcChords :: Float -> Float -> Float -> Int
 arcChords s r sweep
-  | not (rd > 0.25) = 1
+  | not (rd > 0.25) || not (finite sweep) = 1
   -- Bounded before rounding, so a huge radius cannot overflow the 'Int'.
   | otherwise = clamp 1 32 (ceiling (min 32 (idealArcSteps 0.25 rd sweep)))
   where

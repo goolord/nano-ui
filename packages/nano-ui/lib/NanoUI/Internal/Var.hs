@@ -121,7 +121,7 @@ readVar (VarConst a) = pure a
 -- nothing new: its change was checked the first time, and a write since
 -- found it seen.
 readCell :: Sig -> Cell s -> Lens s a -> NanoUI a
-readCell !sig cell@(Cell ref _) l = withContext $ \ctx -> do
+readCell !sig cell@(Cell ref _ _) l = withContext $ \ctx -> do
   unless (isInert cell) $ do
     p <- frameSlot ctx passSlot
     when (p /= 0) $ do
@@ -156,7 +156,7 @@ modifyVar (VarRef cell l) f = withContext $ \ctx -> do
 -- | Read from any thread without recording a dependency.
 readVarIO :: Var a -> IO a
 readVarIO (VarConst a) = pure a
-readVarIO (VarRef (Cell ref _) l) = peekLens l =<< readIORef ref
+readVarIO (VarRef (Cell ref _ _) l) = peekLens l =<< readIORef ref
 
 -- | Mutate a 'Var' from any thread or setup code. Does not wake the event
 -- loop; call the action from 'NanoUI.askWake' after background mutations.
@@ -173,7 +173,7 @@ modifyVarIO (VarRef cell l) f = mapM_ (stampChange 0 cell) =<< modifyRoot cell l
 -- mutations to this temporary 'Var' do not trigger reruns or damage.
 withValue :: a -> (Var a -> NanoUI r) -> NanoUI (r, a)
 withValue a body = do
-  cell@(Cell ref _) <- liftIO (newInertCell a)
+  cell@(Cell ref _ _) <- liftIO (newInertCell a)
   r <- body (VarRef cell Here)
   a' <- liftIO (readIORef ref)
   pure (r, a')
@@ -184,7 +184,7 @@ withValue a body = do
 -- list, which the write leaves alone.
 {-# INLINE modifyRoot #-}
 modifyRoot :: Cell s -> Lens s a -> (a -> a) -> (a -> a -> Bool) -> IO (Maybe Sig)
-modifyRoot cell@(Cell ref _) l f eq
+modifyRoot cell@(Cell ref _ _) l f eq
   | isInert cell = do
       (root', touched) <- step <$> readIORef ref
       Nothing <$ mapM_ (\_ -> writeIORef ref root') touched
@@ -272,7 +272,7 @@ bindVarOn mode value = bindWith eqByPtr mode id value
 {-# INLINE bindWith #-}
 bindWith :: (a -> a -> Bool) -> Binding -> (x -> r) -> (x -> a) -> Var a -> (a -> NanoUI x) -> NanoUI r
 bindWith _ _ result _ (VarConst a) widget = result <$> widget a
-bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
+bindWith eq mode result value (VarRef cell@(Cell ref _ _) l) widget = do
   ctx <- askContext
   let !sig = lensSig l
   (root0, a0, before) <- liftIO $ do

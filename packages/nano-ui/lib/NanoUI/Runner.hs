@@ -33,6 +33,7 @@ import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, 
 import Data.IORef
   ( IORef
   , atomicModifyIORef'
+  , atomicWriteIORef
   , newIORef
   , readIORef
   , writeIORef
@@ -107,7 +108,7 @@ tryWithDrawingLock :: DrawingLock -> IO a -> IO (Maybe a)
 tryWithDrawingLock (DrawingLock ref) act = mask $ \restore -> do
   ok <- atomicModifyIORef' ref $ \busy -> (True, not busy)
   if ok
-    then Just <$> (restore act `finally` writeIORef ref False)
+    then Just <$> (restore act `finally` atomicWriteIORef ref False)
     else pure Nothing
 
 -- | Centralized decision predicate: should the host backend redraw this frame?
@@ -210,7 +211,9 @@ data LoopWindows = LoopWindows
 -- reasons are @D@ a dirty context, @A@ an animation, @R@ a window redraw
 -- request, and @T@ a timed wake or a debug readout refresh; a pass with none
 -- of them was caused by input.
-type LoopTrace = Maybe (IORef (Double, Int, Int, Int, [String]))
+data LoopTraceState = LoopTraceState !Double !Int !Int !Int ![String]
+
+type LoopTrace = Maybe (IORef LoopTraceState)
 
 newLoopTrace :: Double -> IO LoopTrace
 newLoopTrace now = do
@@ -218,15 +221,15 @@ newLoopTrace now = do
   -- stderr is unbuffered by default, which writes a line a character at a
   -- time: enough system calls to show up in the measurement being taken.
   when on (hSetBuffering stderr LineBuffering)
-  if on then Just <$> newIORef (now, 0, 0, 0, []) else pure Nothing
+  if on then Just <$> newIORef (LoopTraceState now 0 0 0 []) else pure Nothing
 
 traceLoopPass :: LoopTrace -> Int -> Bool -> String -> IO ()
 traceLoopPass lt nEvents drew why = forM_ lt $ \ref -> do
   now <- getMonotonicTime
-  (t0, passes, draws, events, whys) <- readIORef ref
-  let passes' = passes + 1
-      draws' = if drew then draws + 1 else draws
-      events' = events + nEvents
+  LoopTraceState t0 passes draws events whys <- readIORef ref
+  let !passes' = passes + 1
+      !draws' = if drew then draws + 1 else draws
+      !events' = events + nEvents
       whys' = if passes < 24 then (if null why then "-" else why) : whys else whys
   if now - t0 >= 1
     then do
@@ -234,8 +237,8 @@ traceLoopPass lt nEvents drew why = forM_ lt $ \ref -> do
         "LOOP " ++ showFFloat (Just 1) (now - t0) "s passes=" ++ show passes' ++ " draws=" ++ show draws'
           ++ " events=" ++ show events' ++ " why=" ++ unwords (reverse whys')
       hFlush stderr
-      writeIORef ref (now, 0, 0, 0, [])
-    else writeIORef ref (t0, passes', draws', events', whys')
+      writeIORef ref $! LoopTraceState now 0 0 0 []
+    else writeIORef ref $! LoopTraceState t0 passes' draws' events' whys'
 
 -- | Added to the wait for a timed wake, so the wait ends at or after the time
 -- asked for. An OS wait can return a millisecond or two early, and a backend
@@ -304,6 +307,7 @@ runSessionLoop drv ctx0 inp0 = do
             (debugActive, dueNow) <- debugCadence (sdDebug drv)
             animating <- anyAnimating ctx
             dirty <- isDirty ctx
+            woken <- readIORef (ctxWoken ctx)
             presentPaces <- sdPresentPaces drv
             wakeAt <- getWakeAt ctx
             waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
@@ -314,7 +318,7 @@ runSessionLoop drv ctx0 inp0 = do
                   | wakeMs < 0 = debugHudTimeout
                   | otherwise = min debugHudTimeout wakeMs
                 own
-                  | sdContinuous drv || dueNow || dirty || (animating && presentPaces) = 0
+                  | sdContinuous drv || dueNow || dirty || woken || (animating && presentPaces) = 0
                   | wasAnim || animating = sdPacingMs drv
                   | otherwise = idleMs
                 timeout = shorterWait own others

@@ -75,7 +75,7 @@ import Data.Foldable (traverse_)
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (ctxNativeWindow), markDirty, markDirtyCovered, wakeFromThread)
+import NanoUI.Internal.Context (Context (ctxNativeWindow), markDirty, wakeFromThread)
 import NanoUI.Internal.Host (Host, askHostIO, clearHost, setHost)
 import NanoUI.Internal.NativeWindow.Types
 import NanoUI.Internal.Monad (NanoUI, windowSize, withContext)
@@ -115,7 +115,9 @@ defaultWindowSettings =
 -- zero or less, NaN or infinity, is 0 on that axis: no limit. A limit stops
 -- at the largest 32-bit size, which is what hosts take.
 sizeLimitAt :: Float -> (Int, Int) -> Maybe Size -> (Int, Int)
-sizeLimitAt scale (outW, outH) limit = (axis w outW, axis h outH)
+sizeLimitAt scale (outW, outH) limit
+  | not (scale > 0) || isInfinite scale = (0, 0)
+  | otherwise = (axis w outW, axis h outH)
   where
     Size w h = fromMaybe (Size 0 0) limit
     axis v outset = if not (v > 0) || isInfinite v then 0 else min 0x7FFFFFFF (round (min 3.0e9 (v * scale)) + outset)
@@ -255,7 +257,7 @@ requestWindowClose ctx =
       exits <- wsExitOnCloseRequest <$> readIORef (nwSettings nw)
       unless exits $ do
         modifyIORef' (nwState nw) (\s -> s {winCloseRequested = True})
-        markDirtyCovered ctx
+        markDirty ctx
       pure exits
 
 -- | Clear 'winCloseRequested' after the frame that saw it.
@@ -312,7 +314,9 @@ setIcon :: NativeWindow -> RgbaPixels -> IO ()
 setIcon nw = setting wsIcon (\v s -> s {wsIcon = v}) (traverse_ . hostSetIcon) nw . Just
 
 setOpacity :: NativeWindow -> Float -> IO ()
-setOpacity nw = setting wsOpacity (\v s -> s {wsOpacity = v}) hostSetOpacity nw . max 0 . min 1
+setOpacity nw v
+  | isNaN v || isInfinite v = pure ()
+  | otherwise = setting wsOpacity (\x s -> s {wsOpacity = x}) hostSetOpacity nw (max 0 (min 1 v))
 
 -- | Set the window title ('wsTitle').
 --

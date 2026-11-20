@@ -23,7 +23,8 @@ module NanoUI.Runner.Windows
   ) where
 
 import Control.Concurrent (myThreadId)
-import Control.Monad (filterM, forM, forM_, unless, when)
+import Control.Exception (onException)
+import Control.Monad (filterM, forM_, unless, when)
 import Data.Foldable (foldlM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find)
@@ -180,13 +181,20 @@ syncChildren w parent ref = do
   unless (null decls && null old) $ do
     frame <- frameNumber parent
     open <- filterM (readVarIO . childOpen) decls
-    new <- forM open $ \d -> case find ((== childKey d) . chKey) old of
-      Just c -> do
-        writeIORef (chDecl c) d
-        modifyIORef' (chLoop c) $ \cl ->
-          if clParentFrame cl == frame then cl else cl {clParentFrame = frame, clDraw = True}
-        pure c
-      Nothing -> openChild w parent ref frame d
+    openedRef <- newIORef []
+    new <-
+      let go [] acc = pure (reverse acc)
+          go (d : ds) acc = case find ((== childKey d) . chKey) old of
+            Just c -> do
+              writeIORef (chDecl c) d
+              modifyIORef' (chLoop c) $ \cl ->
+                if clParentFrame cl == frame then cl else cl {clParentFrame = frame, clDraw = True}
+              go ds (c : acc)
+            Nothing -> do
+              c <- openChild w parent ref frame d
+              modifyIORef' openedRef (c :)
+              go ds (c : acc)
+       in go open [] `onException` (readIORef openedRef >>= mapM_ (closeChild w))
     forM_ old $ \c -> unless (any ((== chKey c) . chKey) new) (closeChild w c)
     writeIORef ref new
 
@@ -252,7 +260,7 @@ stepChild w c = do
     evs <- reverse <$> readIORef (chQueue c)
     let dt = min maxFrameDt (realToFrac (now - clLastT cl))
         (frameInp, group, rest) = takeFrame (woApplyEvent ops) (woIsButtonEdge ops) (clearEphemeral (clInput cl) {inputDeltaTime = dt}) evs
-    writeIORef (chQueue c) (reverse rest)
+    writeIORef (chQueue c) $! reverse rest
     closing <- if any (woIsClose ops) group then requestWindowClose ctx else pure False
     if closing
       then closeRequested w c
@@ -270,7 +278,7 @@ stepChild w c = do
               seen <- varChangeCount
               pure cl {clDraw = more, clSettle = max 0 (clSettle cl - 1), clSeen = seen}
             else pure cl
-        writeIORef (chLoop c) cl' {clCtx = ctx', clInput = synced, clLastT = now, clWasAnim = animNow}
+        writeIORef (chLoop c) $! cl' {clCtx = ctx', clInput = synced, clLastT = now, clWasAnim = animNow}
         woCursor ops win ctx' synced
         quit <- quitRequested ctx'
         if quit then closeRequested w c else syncChildren w ctx' (chChildren c)

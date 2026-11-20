@@ -25,7 +25,7 @@ module NanoUI.Internal.Tasks
 where
 
 import Control.Concurrent (forkIO, forkIOWithUnmask, killThread, newEmptyMVar, newMVar, putMVar, readMVar, withMVar)
-import Control.Exception (AsyncException (ThreadKilled), SomeException, evaluate, finally, fromException, mask_, throwIO, try)
+import Control.Exception (AsyncException (ThreadKilled), SomeException, catch, evaluate, finally, fromException, mask, mask_, throwIO, try)
 import Control.Monad (filterM, forM_, unless, void, when)
 import Data.IORef (IORef, atomicWriteIORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -63,17 +63,20 @@ useHeldBy (Resource key cell) k acquire =
       Just (k0, v, holding) | k0 == k -> do
         touch registry frame holding
         pure v
-      _ -> do
+      _ -> mask $ \restore -> do
         -- The replaced entry leaves the map, and the counts, before its
         -- release, so an @acquire@ that throws leaves nothing released
-        -- behind for a later frame to release again.
+        -- behind for a later frame to release again. Guard membership in case
+        -- a Resource was reused across contexts.
         forM_ entry $ \(_, _, old) -> do
-          modifyIORef' ref (IM.delete key)
-          modifyPrimVar countVar (subtract 1)
-          s <- readPrimVar (holdingSeen old)
-          when (s == frame) $ modifyPrimVar stampedVar (subtract 1)
-          void (holdingRelease old)
-        (v, release) <- acquire ctx ((\(_, v, _) -> v) <$> entry)
+          wasHere <- IM.member key <$> readIORef ref
+          when wasHere $ do
+            modifyIORef' ref (IM.delete key)
+            modifyPrimVar countVar (subtract 1)
+            s <- readPrimVar (holdingSeen old)
+            when (s == frame) $ modifyPrimVar stampedVar (subtract 1)
+          void (holdingRelease old `catch` \(_ :: SomeException) -> pure (pure ()))
+        (v, release) <- restore (acquire ctx ((\(_, v, _) -> v) <$> entry))
         seen <- newPrimVar frame
         let holding = Holding (writeIORef cell Nothing >> release) seen
         writeIORef cell (Just (k, v, holding))
@@ -295,7 +298,7 @@ sweepHeld ctx = sweep (ctxHeld ctx)
         gone <- filterM (\(_, Holding _ seen) -> (/= frame) <$> readPrimVar seen) (IM.toAscList held)
         writeIORef ref $! IM.withoutKeys held (IS.fromDistinctAscList (map fst gone))
         writePrimVar countVar (count - length gone)
-        mapM_ (holdingRelease . snd) gone
+        mapM_ (\(_, h) -> void (holdingRelease h) `catch` \(_ :: SomeException) -> pure ()) gone
 
 -- | Kill every job on the context and release images held by
 -- 'NanoUI.useImageRgba', at session end. 'NanoUI.Runner.runSessionLoop' calls
@@ -310,12 +313,13 @@ cancelTasks ctx = cancelTasksOf (ctxWakeLoop ctx) (ctxHeld ctx)
 -- | 'cancelTasks' on the context's 'ctxWakeLoop' and 'ctxHeld', for a caller
 -- that keeps those rather than the context.
 cancelTasksOf :: IORef (Maybe (IO Bool)) -> Held -> IO ()
-cancelTasksOf wake (Held ref _ _ stampedVar countVar) = do
+cancelTasksOf wake (Held ref widgets _ stampedVar countVar) = do
   writeIORef wake Nothing
   held <- readIORef ref
   writeIORef ref IM.empty
+  writeIORef widgets IM.empty
   writePrimVar stampedVar 0
   writePrimVar countVar 0
   -- Every kill is sent before the wait, so the jobs unwind together.
-  waits <- mapM holdingRelease held
-  void (timeout 1000000 (sequence_ waits))
+  waits <- mapM (\h -> holdingRelease h `catch` \(_ :: SomeException) -> pure (pure ())) held
+  void (timeout 1000000 (mapM_ (\wait -> wait `catch` \(_ :: SomeException) -> pure ()) waits))

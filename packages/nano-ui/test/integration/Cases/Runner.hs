@@ -11,7 +11,7 @@ import Control.Exception
   , throwIO
   , try
   )
-import NanoUI.Internal.Context (wakeFromThread)
+import NanoUI.Internal.Context (takeThreadWake, wakeFromThread)
 import NanoUI.Runner
 import NanoUI.Shortcut (ctrl, key)
 
@@ -200,6 +200,7 @@ runSessionLoopWakesTest ctx failed = do
           , sdShouldDraw = \c prev cur wasAnim due -> shouldRedrawFrame c prev cur wasAnim False due
           }
   assertEq failed 1 =<< drawCount ctx threadWake [[], [3]]
+  takeThreadWake ctx
   timeouts <- newIORef []
   clearDirty ctx
   requestWakeAfter ctx (30 * 86400)

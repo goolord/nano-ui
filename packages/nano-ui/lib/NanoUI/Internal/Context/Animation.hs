@@ -76,9 +76,9 @@ startAnimationEase ctx wid start end dur ease = startAnimationEaseDelay ctx wid 
 -- negative delay is treated as zero. Matching requests do not restart it.
 startAnimationEaseDelay :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> Float -> IO ()
 startAnimationEaseDelay ctx wid start end dur ease delay
-  -- A NaN or infinite end never compares near anything, so the tween would
-  -- restart every frame and never let the loop idle; it is ignored.
-  | not (finite end) = pure ()
+  -- A NaN or infinite end/duration/delay would restart or run forever and
+  -- never let the loop idle; ignore non-finite targets/durations.
+  | not (finite end) || not (finite dur) || not (finite delay) = pure ()
   | not (finite start) || dur <= 0 || approxEq start end = settleKey ctx key end
   | otherwise = do
       as <- readIORef (ctxAnimationState ctx)
@@ -97,6 +97,13 @@ startSpring :: Context -> WidgetId -> SpringParams -> Float -> IO ()
 startSpring ctx wid params target
   -- A non-finite target would leave the spring NaN for good.
   | not (finite target) = pure ()
+  -- Non-positive or non-finite stiffness/damping would oscillate or diverge
+  -- forever and prevent idling; settle at target immediately.
+  | not (finite (springStiffness params))
+      || not (finite (springDamping params))
+      || springStiffness params <= 0
+      || springDamping params <= 0 =
+      settleKey ctx (intKey wid) target
   | otherwise = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)

@@ -744,6 +744,7 @@ data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
   , cdeHovered :: {-# UNPACK #-} !Bool
   , cdePressed :: {-# UNPACK #-} !Bool
   , cdeFocused :: {-# UNPACK #-} !Bool
+  , cdeActive :: {-# UNPACK #-} !Bool
   , cdeDisabled :: {-# UNPACK #-} !Bool
   , cdeGen :: {-# UNPACK #-} !Int
   , cdeOps :: !(SmallArray DrawOp)

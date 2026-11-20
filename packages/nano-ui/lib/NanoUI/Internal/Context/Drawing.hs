@@ -225,6 +225,7 @@ customEntryMatches e content rect cdc gen =
     && cdeHovered e == cdcHovered cdc
     && cdePressed e == cdcPressed cdc
     && cdeFocused e == cdcFocused cdc
+    && cdeActive e == cdcActive cdc
     && cdeDisabled e == cdcDisabled cdc
 
 -- | 'customEntryMatches' without the interaction state: the content key, the
@@ -305,7 +306,7 @@ refreshCustomDrawingOps ctx wid content rect cdc build = do
 storeCustomDrawingOps :: Context -> WidgetId -> Int -> Rect -> CustomDrawContext -> Int -> SmallArray DrawOp -> IO ()
 storeCustomDrawingOps ctx wid content rect cdc gen ops =
   registerIn dcsCustomDrawOpCache (\m dc -> dc {dcsCustomDrawOpCache = m}) ctx wid $
-    CustomDrawOpCacheEntry content rect (cdcHovered cdc) (cdcPressed cdc) (cdcFocused cdc) (cdcDisabled cdc) gen ops
+    CustomDrawOpCacheEntry content rect (cdcHovered cdc) (cdcPressed cdc) (cdcFocused cdc) (cdcActive cdc) (cdcDisabled cdc) gen ops
 
 -- | Whether a versioned drawing's cached ops are for another version at the
 -- same rect. Paint rebuilds them; the pixels they covered must repaint too,

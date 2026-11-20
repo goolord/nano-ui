@@ -154,11 +154,15 @@ releaseImage (ImageAtlas ref) (ImageId tid) = do
   case IM.lookup tid (asSlots st) of
     Nothing -> pure False
     Just (AtlasSlot x y w h) -> do
-      writeIORef
-        ref
+      let slots' = IM.delete tid (asSlots st)
+          emptyAtlas = IM.null slots'
+      writeIORef ref $!
         st
-          { asSlots = IM.delete tid (asSlots st)
-          , asFree = mergeFree (AtlasSlot x y (w + atlasPad) (h + atlasPad)) (asFree st)
+          { asSlots = slots'
+          , asX = if emptyAtlas then atlasPad else asX st
+          , asY = if emptyAtlas then atlasPad else asY st
+          , asRowH = if emptyAtlas then 0 else asRowH st
+          , asFree = if emptyAtlas then [] else mergeFree (AtlasSlot x y (w + atlasPad) (h + atlasPad)) (asFree st)
           , asLastFresh = max tid (asLastFresh st)
           , asReleased = asReleased st + 1
           }

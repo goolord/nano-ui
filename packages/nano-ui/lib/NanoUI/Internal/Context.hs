@@ -384,9 +384,10 @@ wrapsPerText = 8
 -- enabled. Otherwise install the callback directly.
 wrapMeasureCache :: Float -> Context -> (Text -> IO (Float, Float)) -> Context
 wrapMeasureCache scale ctx measure =
-  case ctxMeasureCache ctx of
-    Nothing -> trackMetricSource ctx {ctxMeasureText = measure}
-    Just ref -> trackMetricSource ctx {ctxMeasureText = cacheMeasureText ref scale measure}
+  withMeasureText ctx $
+    case ctxMeasureCache ctx of
+      Nothing -> measure
+      Just ref -> cacheMeasureText ref scale measure
 
 -- | Drop text span, widget text and whole-layout caches and bump the metric
 -- generation, for changes that alter how text lays out.
@@ -529,7 +530,8 @@ enableMeasureCache ctx =
     Just _ -> pure ctx
     Nothing -> do
       ref <- newIORef emptyGenCache
-      pure ctx {ctxMeasureCache = Just ref, ctxMeasureText = cacheMeasureText ref 0 (ctxMeasureText ctx)}
+      let ctx' = ctx {ctxMeasureCache = Just ref, ctxMeasureText = cacheMeasureText ref 0 (ctxMeasureText ctx)}
+      pure (trackMetricSource ctx' {ctxResolveMeasure = defaultResolveMeasure ctx'})
 
 -- | Set the device pixel scale used to snap geometry origins/endpoints to
 -- whole pixels. The SDL backend calls this when the window pixel density is synced.
