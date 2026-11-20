@@ -493,6 +493,8 @@ data NodeArena = NodeArena
   -- this frame. Grows on demand.
   , naImageCount :: IOArr Int
   -- ^ Entries of 'naImages' used this frame, in one slot.
+  , naHighWater :: IORef Int
+  -- ^ High-water node count whose boxed text/option slots have not been cleared.
   }
 
 -- | An image node's look ('ImageLook') and the image's natural size, used on
@@ -782,6 +784,7 @@ newNodeArena = do
   naClassCounts <- newZeroedPrimArray nodeClassCount
   naImages <- newIORef =<< newArray 0 noImageNode
   naImageCount <- newZeroedPrimArray 1
+  naHighWater <- newIORef 0
   pure NodeArena {..}
 
 nodeClassCount :: Int
@@ -792,6 +795,33 @@ nodeClassCount = fromEnum (maxBound :: NodeClass) + 1
 -- floating-panel state. 'addNode' initialises each reused slot.
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
+  prevCount <- readIORef (naCount na)
+  highWater <- readIORef (naHighWater na)
+  -- Release boxed references in slots beyond the frame that just finished,
+  -- while keeping live slots [0 .. prevCount - 1] intact so 'setNodeText' and
+  -- 'setOptions' keep their pointer-equality hash reuse across steady frames.
+  if prevCount < highWater
+    then do
+      a <- readIORef (naArrays na)
+      th <- readIORef (naTextHash na)
+      oh <- readIORef (naOptionsHash na)
+      let clearAt !i = when (i < highWater) $ do
+            writeArray (naArrTextStore a) i T.empty
+            writeArray (naArrOptionsStore a) i []
+            writeArray (naArrOptionsLast a) i []
+            clearAt (i + 1)
+      clearAt prevCount
+      setPrimArray th prevCount (highWater - prevCount) 0
+      setPrimArray oh prevCount (highWater - prevCount) 0
+      writeIORef (naHighWater na) prevCount
+    else when (prevCount > highWater) (writeIORef (naHighWater na) prevCount)
+  prevImages <- readPrimArray (naImageCount na) 0
+  when (prevImages > 0) $ do
+    imgs <- readIORef (naImages na)
+    let clearImg !i = when (i < prevImages) $ do
+          writeArray imgs i noImageNode
+          clearImg (i + 1)
+    clearImg 0
   writeIORef (naCount na) 0
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0

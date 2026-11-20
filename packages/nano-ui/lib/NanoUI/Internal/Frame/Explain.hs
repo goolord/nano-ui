@@ -24,7 +24,7 @@ import NanoUI.Internal.Input (Input (..))
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (inArenaRange)
 import NanoUI.Internal.Id (hashWidgetId)
-import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme, fadeAlpha, themeSeries)
+import NanoUI.Internal.Style (Direction (..), Flow (..), Padding (..), Theme (themeAccent), fadeAlpha, themeSeries)
 import NanoUI.Internal.Types (Color, Rect (..), Size (..), V2 (..), rectContains, rectIntersect)
 
 -- | Compute what the overlay draws this frame and damage what changed: every
@@ -118,7 +118,7 @@ paintExplainHover ctx@Context {ctxDrawArena = da} = do
     beginLayer da LayerChrome
     forM_ (rectIntersect clip rect) $ \tint -> pushRect da tint (fadeAlpha col 0x40)
     when (l > 0 || r > 0 || t > 0 || b > 0) $
-      outline da clip (Rect (x + l) (y + t) (w - l - r) (h - t - b)) col
+      outline da clip (Rect (x + l) (y + t) (max 0 (w - l - r)) (max 0 (h - t - b))) col
 
 -- | The clip node @idx@'s children paint in, given the node paints in @clip@
 -- at @rect@ ('childPaintClip'). 'Nothing' when no child can show.
@@ -177,14 +177,15 @@ nodeKind nt dir flow
 
 -- | Outline colour for a depth, cycling through the theme's series colours.
 depthColor :: Theme -> Int -> Color
-depthColor theme = \depth -> series !! (depth `rem` length series)
-  where
-    series = themeSeries theme
+depthColor theme depth = case themeSeries theme of
+  [] -> themeAccent theme
+  series -> series !! (depth `rem` length series)
 
 -- | A one-pixel border just inside @rect@, cut to @clip@.
 outline :: DrawArena -> Rect -> Rect -> Color -> IO ()
 outline da clip (Rect x y w h) col =
-  forM_ edges $ \edge -> forM_ (rectIntersect clip edge) $ \r -> pushRect da r col
+  when (w > 0 && h > 0) $
+    forM_ edges $ \edge -> forM_ (rectIntersect clip edge) $ \r -> pushRect da r col
   where
     edges =
       [ Rect x y w 1

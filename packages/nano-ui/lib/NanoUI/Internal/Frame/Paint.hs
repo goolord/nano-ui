@@ -126,7 +126,9 @@ paintPinnedBelow :: PaintEnv -> NodeIdx -> IO ()
 paintPinnedBelow env idx = do
   pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
   nt <- getNodeType (peNodeArena env) idx
-  when (pinnedBelow && nt == NodeContainer) $ walkChildrenWithOccluders env idx
+  when (pinnedBelow && nt == NodeContainer) $ do
+    si <- getStyleIdx (peNodeArena env) idx
+    unless (hasFlag containerFlagClip si) $ walkChildrenWithOccluders env idx
 
 -- | Whether @p@ holds for any of the @x0, y0, x1, y1@ runs of @rects@.
 {-# INLINE anyRun #-}
@@ -136,10 +138,11 @@ anyRun rects p = go 0
     at = indexPrimArray rects
     go !o = o < sizeofPrimArray rects && (p (at o) (at (o + 1)) (at (o + 2)) (at (o + 3)) || go (o + 4))
 
--- | How far a node may paint outside its rect: the focus ring sits 2px out
--- with a 1.5px stroke.
+-- | How far a node may paint outside its rect: focus rings sit 2px out with a
+-- 1.5px stroke, and a 'ScrollBarWindow' track sits up to 7px past the body's
+-- right/bottom edge inside the window padding.
 paintOverhang :: Float
-paintOverhang = 4
+paintOverhang = 8
 
 -- | Explicit per-node-type dispatch. Kept NOINLINE and thin so the recursive
 -- loop never sees the branch bodies.

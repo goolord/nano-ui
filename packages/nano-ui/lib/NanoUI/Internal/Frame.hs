@@ -235,10 +235,10 @@ finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore = do
   finalizeFocusRequest ctx
   constrainFocusToModal ctx
   finalizeTabFocus ctx frameInp
-  settleInputMethod ctx focusBefore
   finalizeSelectKeyboard ctx frameInp
   finalizeSelectPick ctx dropInp
   closeSelectOnOutsideClick ctx frameInp
+  settleInputMethod ctx focusBefore
 
 -- | The frame's draw data. A full frame with no damage whose 'DrawReuseKey'
 -- (@key@) matches the last full frame's (@mayReuse@) returns the previous

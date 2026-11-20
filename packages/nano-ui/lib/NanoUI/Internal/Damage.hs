@@ -37,6 +37,7 @@ import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds)
 import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
+import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types
 
@@ -96,8 +97,12 @@ outerClip na window idx = do
     else do
       clip <- fromMaybe window <$> getClipBounds na p
       pt <- getNodeType na p
-      -- A widget also clips its content to its own rect.
-      if isWidgetNode pt
+      -- A widget or clipContainer also clips its content to its own rect.
+      clipSelf <-
+        if isWidgetNode pt
+          then pure True
+          else if pt == NodeContainer then hasFlag containerFlagClip <$> getStyleIdx na p else pure False
+      if clipSelf
         then do
           r <- getNodeRect na p
           pure (fromMaybe (Rect (rectX r) (rectY r) 0 0) (rectIntersect clip r))
@@ -716,8 +721,8 @@ clipDamage ctx snap d owners = do
       -- repaints. Unchanged interaction rects kept the steady state at
       -- DamageFull whenever the hot widget sat inside a panel whose backdrop
       -- covered over half the window.
-      role oldW newW = when (rectIn old oldW /= rectIn new newW) $ addInteraction oldW >> addInteraction newW
-      addText k = mapM_ addDamageRect (IM.lookup k (pfRects new))
+      role oldW newW = when (oldW /= newW || rectIn old oldW /= rectIn new newW) $ addInteraction oldW >> addInteraction newW
+      addText k = addDamageKeyGrow new k id
       !newTexts = pfTexts new
       !oldTexts = pfTexts old
       !newImages = pfImages new
@@ -937,10 +942,9 @@ scrollOffsetDamage Context {ctxNodeArena = na} oldStore newStore =
           let widKey = intKey wid
               one = [idx]
           pure $
-            IM.insert widKey one $
-              IM.insert (slotKey SlotScrollCross widKey) one $
-                IM.insert (slotKey SlotTextAreaScroll widKey) one $
-                  IM.insertWith (++) (slotKey SlotScrollRange widKey) one m
+            IM.insertWith (++) widKey one $
+              IM.insertWith (++) (slotKey SlotScrollCross widKey) one $
+                IM.insertWith (++) (slotKey SlotScrollRange widKey) one m
 
 -- | The store keys (outside the scroll offsets) whose value changed and that
 -- are not themselves widget keys, with the node each owns through a sub-slot
@@ -1000,8 +1004,18 @@ ownerSlots =
   , SlotTextAreaText
   , SlotTextAreaBuffer
   , SlotTextAreaWidths
-  , SlotTextAreaLineH
   , SlotDrop
+  , SlotDrag
+  , SlotScrollAxes
+  , SlotScrollLinkX
+  , SlotScrollLinkY
+  , SlotComboHighlight
+  , SlotComboScroll
+  , SlotComboCount
+  , SlotComboFocus
+  , SlotComboDrag
+  , SlotComboLive
+  , SlotComboCommitted
   , SlotNumericHeld
   , SlotNumericRepeat
   , SlotMenuOpen

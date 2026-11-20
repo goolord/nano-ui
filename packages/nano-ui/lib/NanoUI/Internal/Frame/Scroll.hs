@@ -22,9 +22,11 @@ import NanoUI.Internal.Frame.Node (childPaintClip, readScrollNode)
 import NanoUI.Internal.Frame.Scroll.Geometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)
+import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..))
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectInflate, rectIntersect, rectUnion)
 
@@ -385,6 +387,10 @@ updateScrollDrag ctx inp
               forM_ bars $ \(dir, layout, setOffset) ->
                 when (dir == dragDir) $
                   setOffset (scrollOffsetFromThumb dir layout grabOff (inputMousePos inp))
+          | otherwise ->
+              -- Release was lost (e.g. focus loss or overlay routing); clear
+              -- the drag so 'needsRedraw' does not spin idle frames forever.
+              modifyInteraction ctx (\s -> s {isScrollDrag = Nothing})
         Nothing | pressedIn MouseLeft inp -> tryStartScrollDrag ctx inp
         _ -> pure ()
 
@@ -422,8 +428,24 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
           top <- overlayHitRoot ctx mouse
           let candidate idx = do
                 nt <- getNodeType na idx
-                pure (nt == NodeTextArea || isScrollNode nt)
-                  <&&> (rectContains <$> getNodeRect na idx <*> pure mouse)
+                let isScroll = isScrollNode nt
+                pure (nt == NodeTextArea || isScroll)
+                  <&&> ( do
+                           r <- getNodeRect na idx
+                           -- A ScrollBarWindow bar sits outside the scroller's
+                           -- rect in the enclosing window's padding, so check
+                           -- its padded hit bounds rather than raw node rect.
+                           inRect <-
+                             if isScroll
+                               then do
+                                 slot <- scrollBarSlotOf na idx
+                                 pure $
+                                   if slot == ScrollBarWindow
+                                     then rectContains (Rect (rectX r) (rectY r) (rectW r + 10) (rectH r + 10)) mouse
+                                     else rectContains r mouse
+                               else pure (rectContains r mouse)
+                           pure inRect
+                       )
                   <&&> do
                     -- A scroller's own clip is its viewport, short of its
                     -- bars; the clip around it is its parent's, cut to what

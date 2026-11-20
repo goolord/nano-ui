@@ -118,8 +118,8 @@ scrollGutters2D slot cfg pad contentW contentH innerW innerH =
       gHorz inner = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentW inner
       gW0 = gVert innerH
       gH0 = gHorz innerW
-      gW = gVert (innerH - gH0)
-      gH = gHorz (innerW - gW0)
+      gW = gVert (max 0 (innerH - gH0))
+      gH = gHorz (max 0 (innerW - gW0))
    in (gW, gH)
 
 isScrollStyle2D :: Int -> Bool
@@ -274,7 +274,8 @@ scrollBarLayoutIn slot dir (Rect x y w h) pad viewMain trailing contentSize off 
     trackStart = origin + barMargin
     trackSize = max 0 (viewMain - 2 * barMargin)
     thumbSize = max minThumb (trackSize * viewMain / (contentSize + trailing))
-    thumbStart = trackStart + (off / maxOff) * (trackSize - thumbSize)
+    clampedOff = max 0 (min maxOff off)
+    thumbStart = trackStart + (clampedOff / maxOff) * (trackSize - thumbSize)
     band start size = case dir of
       DirColumn -> Rect (rectX lane) start barW size
       DirRow -> Rect start (rectY lane) size barW

@@ -116,7 +116,8 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
 -- | The open dropdowns the modal state lets be drawn and picked from, in
 -- arena order.
 allowedDropdowns :: Context -> IO [Dropdown]
-allowedDropdowns ctx = filterM (widgetOverlayAllowed ctx . ddWidget) =<< openDropdowns ctx
+allowedDropdowns ctx =
+  filterM (\dd -> widgetOverlayAllowed ctx (ddWidget dd) <&&> (not <$> isDisabled ctx (ddWidget dd))) =<< openDropdowns ctx
 
 -- | One placed row of an open dropdown, with its colours.
 data DropdownRow = DropdownRow

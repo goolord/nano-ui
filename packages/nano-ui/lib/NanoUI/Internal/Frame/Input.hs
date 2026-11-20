@@ -496,7 +496,7 @@ constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
-    unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus)) $
+    unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus) <&&> (not <$> isDisabled ctx focus)) $
       writeIORef (ctxFocusId ctx) (WidgetId 0)
   getsInteraction ctx isTextInputMenu >>= mapM_ (\m ->
     unlessM (widgetOverlayAllowed ctx (textInputMenuWidget m)) $

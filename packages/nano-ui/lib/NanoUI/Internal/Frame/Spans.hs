@@ -89,7 +89,7 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
     mClipChildren <-
       if isScrollNode nt
         then
-          getClipRect (ctxNodeArena ctx) idx >>= \case
+          getClipBounds (ctxNodeArena ctx) idx >>= \case
             Just live -> pure (rectIntersect clip live)
             Nothing -> (\sn -> rectIntersect clip (scrollNodeViewport sn x y w h)) <$> readScrollNode (ctxNodeArena ctx) idx
         else

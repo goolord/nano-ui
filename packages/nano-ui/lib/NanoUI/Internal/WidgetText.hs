@@ -72,7 +72,7 @@ module NanoUI.Internal.WidgetText
   ) where
 
 import Control.Applicative ((<|>))
-import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
+import Data.Bits ((.&.), (.|.), complement, finiteBitSize, shiftL, shiftR, xor)
 import Data.Char (digitToInt, isHexDigit)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
@@ -288,7 +288,11 @@ decodeStyleEnum shift mask fallback si =
 -- in, as one key: the size and the variant, weight and slant bits of the
 -- style index.
 textNodeFontKey :: Float -> Int -> Int
-textNodeFontKey size si = fromIntegral (castFloatToWord32 size) `shiftL` 16 .|. (si .&. 0x3F0F)
+textNodeFontKey size si =
+  let w = castFloatToWord32 size
+   in if finiteBitSize (0 :: Int) > 32
+        then fromIntegral w `shiftL` 16 .|. (si .&. 0x3F0F)
+        else fromIntegral (w `xor` (w `shiftR` 16)) `shiftL` 14 .|. (si .&. 0x3F0F)
 
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant
@@ -475,7 +479,7 @@ buttonToneStyle t = (fromEnum t + 1) `shiftL` 20
 buttonToneOf :: Int -> Maybe Tone
 buttonToneOf si = case (si `shiftR` 20) .&. 7 of
   0 -> Nothing
-  n -> Just (toEnum (n - 1))
+  n -> Just (decodeStyleEnum 0 7 Danger (n - 1))
 
 -- | A tab header's packed button style: the strip's tab style (0-3) in bits
 -- 0-1, its orientation (0-3) in bits 2-3, and 'buttonFlagTab'.

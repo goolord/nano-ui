@@ -438,9 +438,9 @@ customMeasure fm measureFn wAx hAx =
 -- else its maximum when that is finite (under 1e8), and 1e9 otherwise.
 {-# INLINE offeredExtent #-}
 offeredExtent :: AxisSizing -> Float
-offeredExtent (AxisSizing tag val _ m)
-  | tag == SizingFixed = val
-  | otherwise = if m < 1e8 then m else 1e9
+offeredExtent (AxisSizing tag val lo hi)
+  | tag == SizingFixed = clamp lo hi val
+  | otherwise = if hi < 1e8 then hi else 1e9
 
 -- | The axis's fixed size or else @content@, within its limits.
 {-# INLINE sizeWithin #-}
@@ -479,9 +479,9 @@ findAncestorMaxW na idx = go idx 0
         else do
           pad <- getPadding na p
           let padAccum' = padAccum + padL pad + padR pad
-          AxisSizing pwTag pwVal _ pMaxW <- getWidthSizing na p
+          AxisSizing pwTag pwVal pMinW pMaxW <- getWidthSizing na p
           if pwTag == SizingFixed
-            then pure (max 0 (pwVal - padAccum'))
+            then pure (max 0 (clamp pMinW pMaxW pwVal - padAccum'))
             else if pMaxW < 1e8
               then pure (max 0 (pMaxW - padAccum'))
               else go p padAccum'
@@ -711,7 +711,7 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
       padX = padL pad + padR pad
       padY = padT pad + padB pad
       -- The room inside the fixed size, or else inside the maximum.
-      inner (AxisSizing tag val _ hi) p = max 0 ((if tag == SizingFixed then val else hi) - p)
+      inner (AxisSizing tag val lo hi) p = max 0 ((if tag == SizingFixed then clamp lo hi val else hi) - p)
       innerMaxW = inner wAx padX
       innerAvailH = inner hAx padY
   (contentW, contentH) <-
@@ -777,8 +777,8 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   let padX = padL pad + padR pad
       padY = padT pad + padB pad
   si <- getStyleIdx na idx
-  wAx@(AxisSizing wTag wVal _ wMax) <- getWidthSizing na idx
-  hAx@(AxisSizing hTag hVal _ hMax) <- getHeightSizing na idx
+  wAx@(AxisSizing wTag wVal wMin wMax) <- getWidthSizing na idx
+  hAx@(AxisSizing hTag hVal hMin hMax) <- getHeightSizing na idx
   parent <- getParent na idx
   -- A modal's body scrolls like a window's: its bar sits just inside the
   -- panel's edge, out in the panel padding.
@@ -804,7 +804,7 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
     if not vertical
       then pure 1e9
       else if wTag == SizingFixed
-        then pure wVal
+        then pure (clamp wMin wMax wVal)
         else (\w -> min wMax (if wTag == SizingPercent then w * wVal / 100 else w)) <$> findAncestorMaxW na idx
   (contentW, contentH) <-
     if bound >= 1e8 && not (vertical && fitsContent)
@@ -823,7 +823,7 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
               FlowAcc count maxW sumH <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
               pure (maxW, sumH + gap * fromIntegral (max 0 (count - 1)))
         full@(_, fullH) <- stackAt (viewAt 0)
-        let capH = (if hTag == SizingFixed then hVal else hMax) - padY
+        let capH = (if hTag == SizingFixed then clamp hMin hMax hVal else hMax) - padY
             narrowed = viewAt (scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) fullH capH)
         if narrowed /= viewAt 0 then stackAt narrowed else pure full
   -- A width fit to the content makes room for the bar when the content
@@ -882,7 +882,7 @@ measureWrap env@SolveEnv {seArena = na} idx dir gap bound = do
     if dir == DirRow && bound >= 1e8
       then do
         pad <- getPadding na idx
-        (\w -> w - padL pad - padR pad) <$> findAncestorMaxW na idx
+        (\w -> max 0 (w - padL pad - padR pad)) <$> findAncestorMaxW na idx
       else pure bound
   (along, across) <- wrapExtent env idx dir gap limit kids
   wTag <- axTag <$> getWidthSizing na idx
@@ -1023,9 +1023,9 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
     hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
     Rect _ _ _ oldH <- getNodeRect na idx
     let -- The width a node takes of @avail@: fixed, a percentage, or all of it.
-        widthOf (AxisSizing tag val _ _) avail = case tag of
+        widthOf (AxisSizing tag val lo hi) avail = case tag of
           SizingPercent -> avail * val / 100
-          SizingFixed -> val
+          SizingFixed -> clamp lo hi val
           _ -> avail
         -- Every caller offers this node a percentage already resolved, as
         -- 'childH' below does, so only a fixed width replaces the offer.
@@ -1145,9 +1145,12 @@ flowChildSize env refit availW availH ci = do
   pure (w', h')
 
 -- | A percentage of @avail@ within the axis's limits, or else @size@.
+-- Ignores unbounded extents (>= 1e8) so percentage children inside fit-sized
+-- modals, windows, or unbounded grids keep their measured size.
 {-# INLINE percentOr #-}
 percentOr :: AxisSizing -> Float -> Float -> Float
-percentOr (AxisSizing tag val lo hi) avail size = if tag == SizingPercent then clamp lo hi (avail * val / 100) else size
+percentOr (AxisSizing tag val lo hi) avail size =
+  if tag == SizingPercent && avail < 1e8 then clamp lo hi (avail * val / 100) else size
 
 -- | Place node @idx@ and its subtree in the rect offered it. In the solve's
 -- position pass, record the rect, or put the subtree back from the cache
@@ -1522,7 +1525,10 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx
               -- container would take all of it and overrun the row.
               let offerW = percentOr wAx colW colW
                   childW = resolveSize wAx iw offerW
-                  childH = resolveSize hAx fh rowH
+                  childH =
+                    if axTag hAx == SizingPercent
+                      then percentOr hAx rowH rowH
+                      else resolveSize hAx fh rowH
                   itemX = cx + fromIntegral j * (colW + gap)
               ax <- getAlignX na ci
               ay <- getAlignY na ci
@@ -1738,7 +1744,7 @@ distributeScratch na n avail gapSum horizontal = do
 shrinkScratch :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Int -> Float -> IO ()
 shrinkScratch mainArr factorArr minAt n = pass
   where
-    pass !need = do
+    pass !need = when (need > 0) $ do
       total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
       when (total > 0) $ do
         let stop !i !given !stopped
@@ -1766,7 +1772,7 @@ shrinkScratch mainArr factorArr minAt n = pass
 shrinkFactor :: AxisSizing -> Float
 shrinkFactor (AxisSizing tag val _ _) =
   case tag of
-    SizingShrink -> val
+    SizingShrink -> max 0 val
     -- Grow also gives space back when the window is smaller than content.
     SizingGrow -> if val > 0 then val else 1
     -- Percent flexes like CSS: when siblings plus gaps overflow the axis,
@@ -2086,7 +2092,7 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
       let onAxis p size lim isBefore isAfter
             | isBefore = before p 0 lim size
             | isAfter = after p 0 lim size
-            | p + size > lim - margin && p - size - margin >= 0 = p - size - offset
+            | p + size > lim - margin && p - size - offset >= margin = p - size - offset
             | otherwise = p
        in ( clamp margin (winW - iw - margin) (onAxis px iw winW (placement == PlacementLeft) (placement == PlacementRight))
           , clampY (onAxis py ih winH (placement == PlacementAbove) (placement == PlacementBelow))
