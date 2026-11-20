@@ -26,6 +26,7 @@ module Main
   , focusSetProbe
   , focusSetByHand
   , focusDotProbe
+  , luminanceProbe
   )
 where
 
@@ -51,6 +52,7 @@ import NanoUI
   , CustomDrawContext
   , Rect (..)
   , V2 (..)
+  , colorLuminance
   , drawCircle
   , drawRect
   , runCanvasFor
@@ -199,3 +201,10 @@ inspect $ hasNoGenerics 'focusGetProbe
 inspect $ hasNoGenerics 'focusSetProbe
 inspect $ hasNoGenerics 'focusDotProbe
 inspect $ hasNoTypeClasses 'focusDotProbe
+
+-- colorLuminance must use the precomputed sRGB LUT with no floating-point pow.
+luminanceProbe :: Color -> Double
+luminanceProbe = colorLuminance
+
+inspect $ 'luminanceProbe `doesNotUse` '(**)
+inspect $ hasNoTypeClasses 'luminanceProbe
