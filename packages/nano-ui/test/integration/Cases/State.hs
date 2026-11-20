@@ -4,7 +4,7 @@
 module Cases.State (tests) where
 
 import Spec
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay)
 import Control.Exception (ErrorCall (..), throwIO, try)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -290,6 +290,13 @@ runHostSlotTest ctx failed = do
   _ <- compactHost compactOwner ([0 .. 9999] :: [Int])
   got <- evalUi ctx (withInput 80 80) (column (pure ()) >> askCompact compactOwner)
   assertEq failed (Just (10000, 9999)) ((\xs -> (length xs, last xs)) <$> got)
+  shared <- newVar (0 :: Int)
+  dones <- replicateM 4 newEmptyMVar
+  forM_ dones $ \done -> void . forkIO $ do
+    replicateM_ 250 (modifyVarIO shared (+ 1))
+    putMVar done ()
+  mapM_ takeMVar dones
+  assertEq failed 1000 =<< readVarIO shared
 
 -- | A search field on a 20 ms debounce, bound to the Var.
 debounced :: Var Text -> NanoUI (Response, Text)

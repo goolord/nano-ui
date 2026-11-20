@@ -178,6 +178,7 @@ drawnOver na b a = climb a b (-1) (-1)
 -- The leading row aligns to the start and the trailing one to the end.
 data AdornRows = AdornRows !NodeIdx !Float !NodeIdx !Float !Float
 
+-- | Collect the leading and trailing adornment rows and their widths and shared height.
 adornRows :: NodeArena -> NodeIdx -> IO AdornRows
 adornRows na idx = do
   a <- arenaArrays na

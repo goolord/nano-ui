@@ -5,6 +5,7 @@ import Spec
 import Data.Text qualified as T
 import NanoUI.Internal.Context (getFocusVisible, intKey)
 import NanoUI.Internal.Store (fieldSelection, fieldText, findSlot)
+import NanoUI.Internal.Monad (inertView)
 import NanoUI.Monad (focusedWidget, releaseFocus)
 import NanoUI.Shortcut
 import NanoUI.Testing.Sim
@@ -57,15 +58,16 @@ runFocusRequestKindsTest _ failed =
 -- no-op and asks for no frame. Requesting @WidgetId 0@ unfocuses the field,
 -- and the loop can sleep.
 refusedUi :: Var T.Text -> NanoUI [WidgetId]
-refusedUi ref = column (mapM (fmap respId) [fst <$> held ref textInput', fst <$> disabled, label' "Label"])
+refusedUi ref = column (mapM (fmap respId) [fst <$> held ref textInput', fst <$> disabled, label' "Label", inertBtn])
   where
     disabled = disabledWhen True (withValue "" textInput')
+    inertBtn = inertView (button' "Inert")
 
 focusRequestRefused :: Var T.Text -> Sim [WidgetId] ()
 focusRequestRefused ref = do
-  [field, off, lbl] <- result
+  [field, off, lbl, inertB] <- result
   checkEq field =<< (askFocus [field] >> typeText "a" >> focusedId)
-  forM_ [off, lbl, WidgetId 987654321] $ \w -> checkEq (False, field) =<< askFocus [w]
+  forM_ [off, lbl, inertB, WidgetId 987654321] $ \w -> checkEq (False, field) =<< askFocus [w]
   check =<< onContext textFieldActive
   checkEq (True, WidgetId 0) =<< askFocus [WidgetId 0]
   check . not =<< onContext textFieldActive

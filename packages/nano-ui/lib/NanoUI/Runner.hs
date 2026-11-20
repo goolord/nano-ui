@@ -79,6 +79,7 @@ alignFrameStart periodSec lastT = do
 -- | The previous press's time, position, buttons and click count.
 type ClickTracker = IORef (Double, V2, MouseButtons, Int)
 
+-- | Allocate an empty multi-click state tracker for 'stampClicks'.
 newClickTracker :: IO ClickTracker
 newClickTracker = newIORef (0, V2 (-999) (-999), noButtons, 0)
 

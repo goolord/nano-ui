@@ -111,6 +111,15 @@ spec = do
         cursors = map TB.getCursor
       cursors [TB.moveLeft (atEnd "a🇺🇸"), TB.moveLeft (atEnd "a👩\x200D💻"), TB.moveRight (TB.fromText "e\x0301x")]
         `shouldBe` [TB.Cursor 0 1, TB.Cursor 0 1, TB.Cursor 0 2]
+      forM_ ["a🇺🇸🇫🇷x", "US🇺🇸🇫🇷🇺", "a😀\x200D👩\x200D👧b", "\x200Dx", "e\x0301\n👍🏽y"] $ \sample -> do
+        let buf = TB.fromText sample
+            endCur = TB.documentEnd buf
+            traceBounds targetCur step s0 =
+              let cur = TB.getCursor s0
+               in cur : if cur == targetCur then [] else traceBounds targetCur step (step s0)
+            fwd = traceBounds endCur TB.moveRight buf
+            bwd = reverse (traceBounds (TB.Cursor 0 0) TB.moveLeft (TB.withCursor endCur buf))
+        (sample, bwd) `shouldBe` (sample, fwd)
       cursors [TB.moveUp top, bottom, TB.moveDown bottom, TB.moveUp (TB.moveUp bottom), TB.moveDown TB.empty]
         `shouldBe` [TB.Cursor 0 3, TB.Cursor 2 3, TB.Cursor 2 3, TB.Cursor 0 3, TB.Cursor 0 0]
       cursors [TB.moveDown short, TB.moveDown (TB.moveDown short), TB.moveUp (TB.moveDown (TB.moveDown short))]

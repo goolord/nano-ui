@@ -65,6 +65,7 @@ data WindowOps w ev = WindowOps
   -- ^ The wait between frames while the window animates.
   }
 
+-- | Active set of secondary native windows owned by a session runner.
 data Windows w ev = Windows
   { wOps :: !(WindowOps w ev)
   , wTop :: !(IORef [Child w ev])
@@ -108,6 +109,7 @@ data ChildLoop = ChildLoop
   -- ^ The declaring window's frame number at the last sync.
   }
 
+-- | Create an empty 'Windows' manager using the given backend callbacks.
 newWindows :: WindowOps w ev -> IO (Windows w ev)
 newWindows ops = Windows ops <$> newIORef [] <*> (newIORef =<< varChangeCount)
 

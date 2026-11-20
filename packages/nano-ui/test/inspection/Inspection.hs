@@ -27,6 +27,8 @@ module Main
   , focusSetByHand
   , focusDotProbe
   , luminanceProbe
+  , inputInteractedProbe
+  , everyStyleProbe
   )
 where
 
@@ -51,12 +53,16 @@ import NanoUI
   , Color
   , CustomDrawContext
   , Rect (..)
+  , Style
+  , Theme
   , V2 (..)
   , colorLuminance
   , drawCircle
   , drawRect
+  , everyStyle
   , runCanvasFor
   )
+import NanoUI.Backend (Input, inputInteracted)
 import NanoUI.Testing (DrawCmd (..), DrawOp (..), Layer (..))
 
 main :: IO ()
@@ -208,3 +214,17 @@ luminanceProbe = colorLuminance
 
 inspect $ 'luminanceProbe `doesNotUse` '(**)
 inspect $ hasNoTypeClasses 'luminanceProbe
+
+-- inputInteracted must compare fields directly without building intermediate lists.
+inputInteractedProbe :: Input -> Input -> Bool
+inputInteractedProbe = inputInteracted
+
+inspect $ 'inputInteractedProbe `hasNoType` ''[]
+inspect $ hasNoTypeClasses 'inputInteractedProbe
+
+-- everyStyle must map Theme fields directly without intermediate function lists.
+everyStyleProbe :: (Style -> Style) -> Theme -> Theme
+everyStyleProbe = everyStyle
+
+inspect $ 'everyStyleProbe `hasNoType` ''[]
+inspect $ hasNoTypeClasses 'everyStyleProbe

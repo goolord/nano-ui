@@ -615,6 +615,7 @@ writeGeom a idx col = writePrimArray (naArrGeom a) (idx * geomStride + fromEnum 
 readStyle :: NodeArenaArrays -> NodeIdx -> StyleCol -> IO Float
 readStyle a idx col = readPrimArray (naArrStyle a) (idx * styleStride + fromEnum col)
 
+-- | Write style column @col@ of node @idx@.
 {-# INLINE writeStyle #-}
 writeStyle :: NodeArenaArrays -> NodeIdx -> StyleCol -> Float -> IO ()
 writeStyle a idx col = writePrimArray (naArrStyle a) (idx * styleStride + fromEnum col)
@@ -684,6 +685,7 @@ newWidthMemo cap = do
   pure WidthMemo {..}
 
 
+-- | Number of entries in 'NodeClass'.
 nodeClassCount :: Int
 nodeClassCount = fromEnum (maxBound :: NodeClass) + 1
 
@@ -741,6 +743,7 @@ arenaCount na = readIORef (naCount na)
 arenaArrays :: NodeArena -> IO NodeArenaArrays
 arenaArrays na = readIORef (naArrays na)
 
+-- | Resize a mutable primitive array to @newCap@, filling slots @[cap .. newCap - 1]@ with @defVal@.
 {-# NOINLINE growPrimArrayCopy #-}
 growPrimArrayCopy :: Prim a => IOArr a -> Int -> Int -> a -> IO (IOArr a)
 growPrimArrayCopy oldArr cap newCap defVal = do
@@ -748,6 +751,7 @@ growPrimArrayCopy oldArr cap newCap defVal = do
   setPrimArray newArr cap (newCap - cap) defVal
   pure newArr
 
+-- | Allocate a new boxed array of size @newCap@ and copy @oldCap@ entries into it.
 {-# NOINLINE growBoxedStoreCopy #-}
 growBoxedStoreCopy :: a -> MutableArray RealWorld a -> Int -> Int -> IO (MutableArray RealWorld a)
 growBoxedStoreCopy emptyVal arr oldCap newCap = do
@@ -764,6 +768,7 @@ axisSizing (AxisSizing tag val _ _) = case tag of
   SizingShrink -> Shrink val
   SizingPercent -> Percent val
 
+-- | Decompose a 'Sizing' into its arena tag and scalar value.
 {-# INLINE sizingTag #-}
 sizingTag :: Sizing -> (SizingTag, Float)
 sizingTag (Fixed v) = (SizingFixed, v)

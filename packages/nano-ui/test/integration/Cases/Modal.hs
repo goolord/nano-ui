@@ -162,9 +162,13 @@ runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
         labelWith (tight . fillW . fontSize 14) $
           "Kept in memory for this session only. The password goes to cabal on its standard input."
         separator
-        rowWith (fillW . gap 8 . alignMid . tight) (flex >> button "Cancel" >> button' "Use this login")
+        ok <- rowWith (fillW . gap 8 . alignMid . tight) (flex >> button "Cancel" >> button' "Use this login")
+        void (buttonWith' (\l -> l {layoutWidth = Percent 50}) "HalfFit")
+        pure ok
   runSim ctx failed (withInput 2000 800) (modal' (constVar True) "Hackage login" body) $ do
     (dlg, mOk) <- result
+    pctR <- rectOf "HalfFit"
+    check (rectW pctR > 0 && rectW pctR < 1000)
     y0 <- rectY <$> rectOf "An API token"
     _ <- wheel (On dlg) (V2 0 3)
     checkEq y0 . rectY =<< rectOf "An API token"

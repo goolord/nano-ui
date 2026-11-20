@@ -358,7 +358,7 @@ runDegenerateTest _ failed = do
     [ both (P.moveTo p <> P.lineTo p <> P.lineTo p), both (P.moveTo p <> P.lineTo p <> P.close), both (P.circle p 0)
     , both (P.arc p 0 0 pi), both (P.moveTo p), both mempty, both (P.polygon [])
     , opsAt 1 (drawPath (P.polygon [V2 0 0, V2 5 0, V2 10 0]) red)
-    , both (P.circle p nan), both (P.arc p 10 0 nan), segment nan, segment (-1)
+    , both (P.circle p nan), both (P.arc p 10 0 nan), segment nan, segment 0, segment (-1)
     , opsAt 1 (withTransform (P.scale nan 1) (drawPath (P.circle p 5) red >> drawRect (Rect 0 0 5 5) red >> drawCircle p 3 red))
     , opsAt 1 (withTransform (P.rotate inf) (drawPath (P.circle p 5) red))
     ]
