@@ -65,7 +65,7 @@ module NanoUI.Internal.Context.Core
 where
 
 import Control.Concurrent (myThreadId)
-import Control.Monad (forM_, guard, unless, when, (<$!>))
+import Control.Monad (forM_, unless, when, (<$!>))
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.IORef (atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef, writeIORef)
 import Data.Primitive.Array (readArray)
@@ -74,19 +74,18 @@ import Data.Primitive.PrimVar (readPrimVar)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
 import Data.Foldable (foldlM)
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe)
 import Data.IntSet qualified as IS
 import GHC.Clock (getMonotonicTime)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeContainer), getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId, getNodeType, getStyleIdx, walkAncestors)
+import NanoUI.Internal.Layout.Arena (NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Theme, disabledTheme)
 import NanoUI.Internal.Types (Damage, DamageBounds (..), Rect (..), defaultDamageSlop, rectH, rectW)
 import NanoUI.Widgets.TextCommand (TextCommand)
-import NanoUI.Internal.WidgetText (containerFlagInert, hasFlag)
 
 -- =============================================================================
 -- State records
@@ -520,17 +519,12 @@ scopeDisabled Context {ctxNodeArena = na} wid = do
 -- =============================================================================
 
 -- | Display-only descendants cannot acquire focus or handle input. Before a
--- widget is added, inspect the open container instead of its not-yet-built node.
+-- widget is added, inspect the open scope instead of its not-yet-built node.
+{-# INLINE isInert #-}
 isInert :: Context -> WidgetId -> IO Bool
-isInert ctx wid = do
-  node <- lookupNodeByWidgetId na wid
-  parent <- maybe (fromMaybe (-1) . listToMaybe <$> readIORef (ctxContainerStack ctx)) pure node
-  fmap isJust . walkAncestors na parent $ \i -> do
-    nt <- getNodeType na i
-    si <- getStyleIdx na i
-    pure (guard (nt == NodeContainer && hasFlag containerFlagInert si))
-  where
-    na = ctxNodeArena ctx
+isInert Context {ctxNodeArena = na} wid = do
+  scope <- lookupNodeByWidgetId na wid >>= maybe (getArenaScope na) (getNodeScope na)
+  pure (scope .&. 2 /= 0)
 
 -- | Allocate empty current/previous scope arrays. Only entries below their
 -- recorded counts are initialised and may be read.
@@ -602,7 +596,7 @@ pushThemeScope ctx disabled raw = do
   writeSmallArray raws i raw
   writeIORef (ctxThemeScopes ctx) $!
     ts {tsCount = i + 1, tsThemes = themes, tsRaw = raws, tsDisabled = tsDisabled ts || disabled, tsChanged = tsChanged ts || not same}
-  pure (((i + 1) `shiftL` 1) .|. fromEnum disabled)
+  pure (((i + 1) `shiftL` 2) .|. fromEnum disabled)
 
 -- | Whether this frame's scopes look different from last frame's: a theme
 -- changed, scopes were added or dropped, or nodes moved between scopes.
@@ -632,7 +626,7 @@ scopeThemeIn arr ctx scope
       ts <- readIORef (ctxThemeScopes ctx)
       readSmallArray (arr ts) (ti - 1)
   where
-    !ti = scope `shiftR` 1
+    !ti = scope `shiftR` 2
 
 -- | Active theme for the current arena scope.
 {-# INLINE currentTheme #-}

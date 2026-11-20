@@ -13,7 +13,7 @@ module NanoUI.Internal.Frame.Paint
   ) where
 
 import Control.Monad (forM_, unless, when)
-import Data.Bits ((.&.))
+import Data.Bits (complement, (.&.))
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
@@ -110,7 +110,7 @@ paintNodeWithEnv env idx = do
     then paintPinnedBelow env idx
     else do
       nt <- getNodeType (peNodeArena env) idx
-      scope <- getNodeScope (peNodeArena env) idx
+      scope <- (.&. complement 2) <$> getNodeScope (peNodeArena env) idx
       if scope == peScope env
         then lowerNodeVisible env idx nt (Rect x y w h)
         else do

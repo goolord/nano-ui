@@ -3,6 +3,7 @@ module NanoUI.Internal.Frame.Chrome
   ( floatingAncestor
   , displayText
   , widgetVisualStyle
+  , widgetVisualStyleWith
   , textInputValue
   , maskPassword
   , textInputFocused
@@ -251,11 +252,17 @@ paintTableHeader da theme isSorted style x y w h = do
 
 widgetVisualStyle :: Context -> NodeType -> NodeIdx -> IO Style
 widgetVisualStyle ctx nt idx = do
-  wid <- getWidgetId (ctxNodeArena ctx) idx
-  val <- getNodeValue (ctxNodeArena ctx) idx
   hot <- readIORef (ctxHotId ctx)
   active <- readIORef (ctxActiveId ctx)
   focus <- readIORef (ctxFocusId ctx)
+  widgetVisualStyleWith ctx hot active focus nt idx
+
+-- | 'widgetVisualStyle' using caller-cached interaction ids so the paint
+-- walk does not re-read 'ctxHotId', 'ctxActiveId' and 'ctxFocusId' per node.
+widgetVisualStyleWith :: Context -> WidgetId -> WidgetId -> WidgetId -> NodeType -> NodeIdx -> IO Style
+widgetVisualStyleWith ctx hot active focus nt idx = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  val <- getNodeValue (ctxNodeArena ctx) idx
   animT <- getAnimationValue ctx wid
   styleIdx <- if nt == NodeButton then getStyleIdx (ctxNodeArena ctx) idx else pure 0
   let !bkind = if nt == NodeButton then buttonKindOf styleIdx else ButtonPlain

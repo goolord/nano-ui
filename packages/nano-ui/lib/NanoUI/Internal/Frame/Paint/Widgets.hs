@@ -48,6 +48,9 @@ data PaintEnv = PaintEnv
     -- frame has none.
   , peFocusRing :: WidgetId
     -- ^ The focused widget while its keyboard focus ring shows, else 0.
+  , peHotId :: WidgetId
+  , peActiveId :: WidgetId
+  , peFocusId :: WidgetId
   , pePieces :: PrimArray Float
     -- ^ The frame's damage pieces as @x0, y0, x1, y1@ runs, of which a node
     -- must meet one to paint; empty when the clip is the one piece.
@@ -59,6 +62,8 @@ data PaintEnv = PaintEnv
 buildPaintEnv :: Context -> PrimArray Float -> IO PaintEnv
 buildPaintEnv ctx occluders = do
   theme <- readIORef (ctxTheme ctx)
+  hot <- readIORef (ctxHotId ctx)
+  active <- readIORef (ctxActiveId ctx)
   focus <- readIORef (ctxFocusId ctx)
   focusVisible <- readIORef (ctxFocusVisible ctx)
   pieces <- getClipPieces (ctxDrawArena ctx)
@@ -71,6 +76,9 @@ buildPaintEnv ctx occluders = do
     , peFontMetrics = ctxFontMetrics ctx
     , peOccluders = occluders
     , peFocusRing = if focusVisible then focus else WidgetId 0
+    , peHotId = hot
+    , peActiveId = active
+    , peFocusId = focus
     , pePieces = pieces
     }
 
@@ -82,7 +90,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
       fm = peFontMetrics env
-  style <- widgetVisualStyle ctx NodeTextInput idx
+  style <- widgetVisualStyleWith ctx (peHotId env) (peActiveId env) (peFocusId env) NodeTextInput idx
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
   if hasFlag textInputFlagNumeric si
@@ -121,8 +129,8 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
 paintTextAreaNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintTextAreaNode PaintEnv {peContext = ctx, peDrawArena = da} idx (Rect x y w h) = do
-  style <- widgetVisualStyle ctx NodeTextArea idx
+paintTextAreaNode env@PaintEnv {peContext = ctx, peDrawArena = da} idx (Rect x y w h) = do
+  style <- widgetVisualStyleWith ctx (peHotId env) (peActiveId env) (peFocusId env) NodeTextArea idx
   areaFm <- resolveTextAreaFont ctx idx
   paintStyledRect da style (Rect x y w h)
   drawTextAreaContentWith da ctx areaFm idx x y w h style
@@ -133,7 +141,7 @@ paintTextAreaNode PaintEnv {peContext = ctx, peDrawArena = da} idx (Rect x y w h
 {-# NOINLINE paintWidget #-}
 paintWidget :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
 paintWidget env@PaintEnv {peContext = ctx} idx nt rect@(Rect _ ry _ rh) = do
-  style <- widgetVisualStyle ctx nt idx
+  style <- widgetVisualStyleWith ctx (peHotId env) (peActiveId env) (peFocusId env) nt idx
   value <- getNodeValue (peNodeArena env) idx
   si <- getStyleIdx (peNodeArena env) idx
   -- Menu rows paint edge-to-edge across the popup panel, exactly like the
@@ -189,8 +197,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
     NodeButton -> case bkind of
       ButtonMenu -> do
         wid <- getWidgetId (peNodeArena env) idx
-        hot <- readIORef (ctxHotId ctx)
-        when (wid == hot) $ paintMenuAccent da theme menuRowRect
+        when (wid == peHotId env) $ paintMenuAccent da theme menuRowRect
       ButtonTab ->
         paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style (Rect x y w h)
       ButtonTable ->
@@ -217,7 +224,7 @@ paintTabClose env idx (Rect x y w h) = do
       na = peNodeArena env
       da = peDrawArena env
   wid <- getWidgetId na idx
-  hot <- readIORef (ctxHotId ctx)
+  let hot = peHotId env
   animT <- getAnimationValue ctx wid
   label <- fromMaybe (styleFg (themeButton (peTheme env))) <$> getNodeFontColor na idx
   let hotT = clamp01 (if wid == hot && not (animT > 0) then 1 else animT)

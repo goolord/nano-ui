@@ -463,7 +463,7 @@ paneGridCore cfg controlled given = do
     if maxPane /= 0
       then void (renderPane env maxPane baseRect)
       else do
-        rendered <- maybe (pure []) (renderNode env (M.fromList [(diSplitId d, d) | d <- visibleDividers])) visibleTree
+        rendered <- maybe (pure []) (\t -> renderNode env (M.fromList [(diSplitId d, d) | d <- visibleDividers]) t (buildMinTree (geMinSize env) (geGutter env) t)) visibleTree
         runGestures wid env dividers rendered dragMoved dragZone
         -- The indicator follows the pointer on the grid's own drawing, which
         -- nothing else damages, so the grid repaints while a pane is lifted.
@@ -643,8 +643,9 @@ renderNode ::
   GridEnv ->
   Map Word64 DividerInfo ->
   GridNode ->
+  MinTree ->
   NanoUI [RenderedPane]
-renderNode env dividers = \case
+renderNode env dividers node mt = case node of
   Pane pid
     -- The lifted pane's landing slot in a drop preview: an empty cell of the
     -- pane's size, which the drop-zone highlight fills.
@@ -655,8 +656,11 @@ renderNode env dividers = \case
         renderPane env pid (M.findWithDefault (Rect 0 0 0 0) pid (geRegions env))
   Split sid ax ratio a b ->
     withKey sid $ do
-      let (wa, ha) = subtreeMin (geMinSize env) (geGutter env) a
-          (wb, hb) = subtreeMin (geMinSize env) (geGutter env) b
+      let (ma, mb) = case mt of
+            MinBranch _ _ l r -> (l, r)
+            _ -> (buildMinTree (geMinSize env) (geGutter env) a, buildMinTree (geMinSize env) (geGutter env) b)
+          (wa, ha) = minTreeDims ma
+          (wb, hb) = minTreeDims mb
           mDiv = M.lookup sid dividers
           avail = maybe 0 (mainLen ax . diRegion) mDiv
           -- The A side's extent after 'layoutNode' clamped it.
@@ -676,9 +680,9 @@ renderNode env dividers = \case
             | pinA = (axisLay ax (Fixed (max 0 dA)), fillLay)
             | otherwise = (fillLay, axisLay ax (Fixed (max 0 (avail - dA - geGutter env))))
       (if ax == AxisV then row' else column') fillLay $ do
-        a' <- container NodeContainer (minW wa (minH ha aSide)) (renderNode env dividers a)
+        a' <- container NodeContainer (minW wa (minH ha aSide)) (renderNode env dividers a ma)
         dividerWidget env ax
-        b' <- container NodeContainer (minW wb (minH hb bSide)) (renderNode env dividers b)
+        b' <- container NodeContainer (minW wb (minH hb bSide)) (renderNode env dividers b mb)
         pure (a' <> b')
 
 draggingPane :: GridEnv -> Word64 -> Bool

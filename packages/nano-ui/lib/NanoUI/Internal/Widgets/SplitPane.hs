@@ -11,6 +11,9 @@ module NanoUI.Internal.Widgets.SplitPane
   , treeMaxId
   , paneExist
   , subtreeMin
+  , MinTree (..)
+  , buildMinTree
+  , minTreeDims
   , alongAxis
   , mainLen
   , layoutNode
@@ -102,10 +105,35 @@ paneExist t p = foldGrid (== p) (\_ _ _ a b -> a || b) t
 -- | Minimum (width, height) that must be reserved for a subtree under a
 -- @minSize@ per-pane floor and @spacing@ between every split level.
 subtreeMin :: Float -> Float -> GridNode -> (Float, Float)
-subtreeMin minSize spacing = foldGrid (const (minSize, minSize)) $ \_ axis _ (wa, ha) (wb, hb) ->
-  case axis of
-    AxisV -> (wa + spacing + wb, max ha hb)
-    AxisH -> (max wa wb, ha + spacing + hb)
+subtreeMin minSize spacing = minTreeDims . buildMinTree minSize spacing
+
+-- | Cached bottom-up subtree minimum extents so tree traversals read each
+-- split's child minima in O(1).
+data MinTree
+  = MinLeaf {-# UNPACK #-} !Float {-# UNPACK #-} !Float
+  | MinBranch {-# UNPACK #-} !Float {-# UNPACK #-} !Float !MinTree !MinTree
+
+-- | Total minimum @(width, height)@ of a 'MinTree'.
+{-# INLINE minTreeDims #-}
+minTreeDims :: MinTree -> (Float, Float)
+minTreeDims (MinLeaf w h) = (w, h)
+minTreeDims (MinBranch w h _ _) = (w, h)
+
+-- | Compute the minimum @(width, height)@ for every node of @GridNode@ in a
+-- single O(P) bottom-up pass.
+buildMinTree :: Float -> Float -> GridNode -> MinTree
+buildMinTree minSize spacing = go
+  where
+    go (Pane _) = MinLeaf minSize minSize
+    go (Split _ axis _ a b) =
+      let ma = go a
+          mb = go b
+          (wa, ha) = minTreeDims ma
+          (wb, hb) = minTreeDims mb
+          (w, h) = case axis of
+            AxisV -> (wa + spacing + wb, max ha hb)
+            AxisH -> (max wa wb, ha + spacing + hb)
+       in MinBranch w h ma mb
 
 -- | A rect seen along a split's main axis: as it is for 'AxisV', with x and y
 -- (and width and height) swapped for 'AxisH', so per-axis geometry is written
@@ -118,12 +146,14 @@ alongAxis AxisH (Rect x y w h) = Rect y x h w
 mainLen :: GridAxis -> Rect -> Float
 mainLen ax = rectW . alongAxis ax
 
--- | The minima of a split's two subtrees along its main axis: widths for
--- 'AxisV' (panes left/right), heights for 'AxisH' (panes stacked).
-splitMins :: Float -> Float -> GridAxis -> GridNode -> GridNode -> (Float, Float)
-splitMins minSize spacing axis a b = (along a, along b)
-  where
-    along n = (if axis == AxisV then fst else snd) (subtreeMin minSize spacing n)
+-- | The minima of two cached subtrees along @axis@.
+splitMinsTree :: GridAxis -> MinTree -> MinTree -> (Float, Float)
+splitMinsTree axis ma mb =
+  let (wa, ha) = minTreeDims ma
+      (wb, hb) = minTreeDims mb
+   in case axis of
+        AxisV -> (wa, wb)
+        AxisH -> (ha, hb)
 
 -- | A-side extent for a split along its main axis, honouring the subtree
 -- minima. The ratio shares out the extent left after the gutter between the
@@ -177,16 +207,26 @@ clampRatio spacing d r0
 -- Dividers are reported parent-before-child so dragging a divider resizes its
 -- immediate subtrees relative to the same region.
 layoutNode :: Float -> Float -> GridNode -> Rect -> (Map Word64 Rect, [DividerInfo])
-layoutNode minSize spacing sp r =
-  case sp of
-    Pane pid -> (M.singleton pid r, [])
-    Split sid axis ratio0 a b ->
-      let mins = splitMins minSize spacing axis a b
-          (rA, rB, band) = splitBounds axis spacing r (uncurry (splitLength spacing (mainLen axis r)) mins ratio0)
-          self = DividerInfo sid axis r band ratio0 mins
-          (regionsA, divsA) = layoutNode minSize spacing a rA
-          (regionsB, divsB) = layoutNode minSize spacing b rB
-       in (M.union regionsA regionsB, self : divsA <> divsB)
+layoutNode minSize spacing root = go root (buildMinTree minSize spacing root)
+  where
+    go sp mt r = case (sp, mt) of
+      (Pane pid, _) -> (M.singleton pid r, [])
+      (Split sid axis ratio0 a b, MinBranch _ _ ma mb) ->
+        let mins = splitMinsTree axis ma mb
+            (rA, rB, band) = splitBounds axis spacing r (uncurry (splitLength spacing (mainLen axis r)) mins ratio0)
+            self = DividerInfo sid axis r band ratio0 mins
+            (regionsA, divsA) = go a ma rA
+            (regionsB, divsB) = go b mb rB
+         in (M.union regionsA regionsB, self : divsA <> divsB)
+      (Split sid axis ratio0 a b, _) ->
+        let ma = buildMinTree minSize spacing a
+            mb = buildMinTree minSize spacing b
+            mins = splitMinsTree axis ma mb
+            (rA, rB, band) = splitBounds axis spacing r (uncurry (splitLength spacing (mainLen axis r)) mins ratio0)
+            self = DividerInfo sid axis r band ratio0 mins
+            (regionsA, divsA) = go a ma rA
+            (regionsB, divsB) = go b mb rB
+         in (M.union regionsA regionsB, self : divsA <> divsB)
 
 -- | Split the pane (first arg) along the axis with a 0.5 ratio, inserting the
 -- new pane. @newOnA@ places the new pane on the A (left/top) side of the new
@@ -233,13 +273,16 @@ lengthRatio spacing avail minA minB d
 -- room beside the gutter. A pinned pane squeezed below its extent keeps the
 -- smaller extent when the region grows back.
 reflowFixed :: (Word64 -> Bool) -> Float -> Float -> Rect -> Rect -> GridNode -> GridNode
-reflowFixed isFixed minSize spacing = go
+reflowFixed isFixed minSize spacing oldR0 newR0 root = go oldR0 newR0 root (buildMinTree minSize spacing root)
   where
-    go _ _ n@(Pane _) = n
-    go oldR newR (Split sid axis ratio a b) =
-      Split sid axis ratio' (go oldA newA a) (go oldB newB b)
+    go _ _ n@(Pane _) _ = n
+    go oldR newR (Split sid axis ratio a b) mt =
+      Split sid axis ratio' (go oldA newA a ma) (go oldB newB b mb)
       where
-        (mA, mB) = splitMins minSize spacing axis a b
+        (ma, mb) = case mt of
+          MinBranch _ _ l r -> (l, r)
+          _ -> (buildMinTree minSize spacing a, buildMinTree minSize spacing b)
+        (mA, mB) = splitMinsTree axis ma mb
         oldAvail = mainLen axis oldR
         newAvail = mainLen axis newR
         dOld = splitLength spacing oldAvail mA mB ratio

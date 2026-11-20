@@ -97,7 +97,7 @@ import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Control.Monad.Trans.Control (MonadBaseControl)
-import Data.Bits ((.&.))
+import Data.Bits ((.&.), (.|.))
 import Data.Hashable (Hashable, hash)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
 import Data.IORef (modifyIORef', writeIORef)
@@ -380,7 +380,7 @@ uiTheme = withContext currentTheme
 {-# INLINE styled #-}
 styled :: (Theme -> Theme) -> NanoUI a -> NanoUI a
 styled f = withPaintScope $ \ctx outer ->
-  pushThemeScope ctx (outer .&. 1 /= 0) . f =<< scopeRawTheme ctx outer
+  (.|. (outer .&. 2)) <$> (pushThemeScope ctx (outer .&. 1 /= 0) . f =<< scopeRawTheme ctx outer)
 
 -- | Draw a part of the view with another theme, whatever the theme around it.
 {-# INLINE themed #-}
@@ -406,7 +406,7 @@ disabledWhen True m =
       (stripInteractionInput i) {inputButtonsHeld = noButtons, inputKeysHeld = mempty}
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer
-      | otherwise = pushThemeScope ctx True =<< scopeRawTheme ctx outer
+      | otherwise = (.|. (outer .&. 2)) <$> (pushThemeScope ctx True =<< scopeRawTheme ctx outer)
 
 -- Run @m@ with the arena scope @enter@ picks, then restore the scope around it
 -- (also on exceptions).
@@ -492,8 +492,8 @@ localInput inp (NanoUI m) = NanoUI (localStaticRep (\r -> r {repInput = inp}) m)
 -- | Display-only content sees neither routed nor raw interaction input.
 -- Its container flag independently excludes its widgets from focus and IME.
 inertView :: NanoUI a -> NanoUI a
-inertView (NanoUI m) = NanoUI $
-  localStaticRep (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)}) m
+inertView m = withPaintScope (\_ outer -> pure (outer .|. 2)) $ NanoUI $
+  localStaticRep (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)}) (unNanoUI m)
   where
     inert i = (withoutPointer (stripInteractionInput i)) {inputKeysHeld = mempty, inputComposition = Nothing}
 

@@ -10,6 +10,7 @@ import Control.Monad (unless, when, (<$!>))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (isJust, isNothing)
+import Data.Primitive.PrimVar (writePrimVar)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Atlas (atlasToken)
 import NanoUI.Internal.Context
@@ -355,7 +356,7 @@ resetUiBuild ctx newFrame = do
   resetNodeArena (ctxNodeArena ctx)
   writeIORef (ctxContainerStack ctx) []
   writeIdCursor (ctxIdCursor ctx) initialIdContext
-  writeIORef (ctxFocusablesCount ctx) 0
+  writePrimVar (ctxFocusablesCount ctx) 0
   -- The view re-requests the input method each run while a widget takes text.
   readIORef (ctxInputMethod ctx) >>= mapM_ (\_ -> writeIORef (ctxInputMethod ctx) Nothing)
   writeIORef (ctxHotId ctx) (WidgetId 0)

@@ -1007,7 +1007,7 @@ data Context = Context
   -- base theme.
   , ctxContainerStack :: IORef [Int]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
-  , ctxFocusablesCount :: IORef Int
+  , ctxFocusablesCount :: !(PrimVar RealWorld Int)
   , ctxSpanBase :: SpanArena
   -- ^ Base-layer text spans for the current frame, reused on the next frame.
   , ctxSpanOverlay :: SpanArena

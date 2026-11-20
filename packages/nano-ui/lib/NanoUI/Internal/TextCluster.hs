@@ -3,11 +3,21 @@
 module NanoUI.Internal.TextCluster
   ( clusterLength
   , clusterBounds
+  , prevClusterStart
   ) where
 
 import Data.Char (isMark)
 import Data.Text (Text)
 import Data.Text qualified as T
+
+attaches :: Char -> Bool
+attaches c =
+  isMark c
+    || (c >= '\x1F3FB' && c <= '\x1F3FF')
+    || (c >= '\xE0020' && c <= '\xE007F')
+
+isRegional :: Char -> Bool
+isRegional c = c >= '\x1F1E6' && c <= '\x1F1FF'
 
 -- | How many characters the user-perceived character @t@ starts with spans,
 -- 0 for empty text: a character keeps the combining marks (variation
@@ -30,11 +40,6 @@ clusterLength t = case T.uncons t of
         | attaches c -> 1 + extend False rest
         | regional && isRegional c -> 1 + extend False rest
       _ -> 0
-    attaches c =
-      isMark c
-        || (c >= '\x1F3FB' && c <= '\x1F3FF')
-        || (c >= '\xE0020' && c <= '\xE007F')
-    isRegional c = c >= '\x1F1E6' && c <= '\x1F1FF'
 
 -- | The user-perceived character boundaries around character @k@ of @t@:
 -- the last at or before it and the first at or after it. Both are @k@ where
@@ -48,3 +53,36 @@ clusterBounds t k = go 0 t
       | otherwise = go (i + n) (T.drop n s)
       where
         n = clusterLength s
+
+-- | Start index of the cluster immediately preceding character offset @k@
+-- (for @k > 0@), equal to @fst (clusterBounds t (k - 1))@ while only walking
+-- back to the nearest guaranteed cluster boundary.
+prevClusterStart :: Text -> Int -> Int
+prevClusterStart t !k
+  | k <= 1 = 0
+  | otherwise =
+      let prefix = T.take k t
+          target = k - 1
+          syncPos = rewind k prefix
+          run !i s =
+            let n = clusterLength s
+             in if n == 0 || i + n > target
+                  then i
+                  else run (i + n) (T.drop n s)
+       in case T.unsnoc prefix of
+            Just (rest, c)
+              | not (attaches c || c == '\x200D' || isRegional c)
+              , not (endsWithZWJ rest) -> target
+            _ -> run syncPos (T.drop syncPos prefix)
+  where
+    endsWithZWJ s = case T.unsnoc s of
+      Just (_, '\x200D') -> True
+      _ -> False
+    rewind !i s
+      | i <= 0 = 0
+      | otherwise = case T.unsnoc s of
+          Nothing -> 0
+          Just (rest, c)
+            | c == '\n' -> i - 1
+            | attaches c || c == '\x200D' || isRegional c || endsWithZWJ rest -> rewind (i - 1) rest
+            | otherwise -> i - 1

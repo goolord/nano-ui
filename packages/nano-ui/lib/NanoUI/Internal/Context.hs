@@ -148,6 +148,7 @@ import Data.Primitive.PrimArray
   , getSizeofMutablePrimArray
   , resizeMutablePrimArray
   )
+import Data.Primitive.PrimVar (newPrimVar, writePrimVar)
 import Data.Text (Text)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr)
@@ -602,7 +603,7 @@ newContext = do
   ctxVarSlots <- newIORef IM.empty
   ctxContainerStack <- newIORef []
   ctxFocusables <- newIORef =<< newPrimArray 64
-  ctxFocusablesCount <- newIORef 0
+  ctxFocusablesCount <- newPrimVar 0
   ctxSpanBase <- newSpanArena
   ctxSpanOverlay <- newSpanArena
   ctxInteractionState <- newIORef initialInteractionState
@@ -692,7 +693,7 @@ registerFocusable ctx wid = do
   scope <- getArenaScope (ctxNodeArena ctx)
   inert <- isInert ctx wid
   when (scope .&. 1 == 0 && not inert) $ do
-    idx <- readIORef (ctxFocusablesCount ctx)
+    idx <- readPrimVar (ctxFocusablesCount ctx)
     arr <- readIORef (ctxFocusables ctx)
     cap <- getSizeofMutablePrimArray arr
     arr' <-
@@ -703,7 +704,7 @@ registerFocusable ctx wid = do
           pure grown
         else pure arr
     writePrimArray arr' idx wid
-    writeIORef (ctxFocusablesCount ctx) (idx + 1)
+    writePrimVar (ctxFocusablesCount ctx) (idx + 1)
 
 -- | Enable the input method this frame for the focused widget @wid@, with its
 -- caret in window coordinates ('Nothing' for a text field; the frame finds
@@ -732,7 +733,7 @@ fieldComposition ctx wid = do
 {-# INLINE getFocusables #-}
 getFocusables :: Context -> IO [WidgetId]
 getFocusables ctx = do
-  count <- readIORef (ctxFocusablesCount ctx)
+  count <- readPrimVar (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
 
@@ -740,7 +741,7 @@ getFocusables ctx = do
 -- without copying the list.
 isFocusable :: Context -> WidgetId -> IO Bool
 isFocusable ctx wid = do
-  count <- readIORef (ctxFocusablesCount ctx)
+  count <- readPrimVar (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   let go i
         | i >= count = pure False

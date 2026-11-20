@@ -64,8 +64,8 @@ data LayoutCache = LayoutCache
   , lcGeom :: !(IOArr Float)
   -- ^ The captured 'naArrGeom'.
   , lcStyle :: !(IOArr Float)
-  -- ^ The captured 'naArrStyle'. A restore reads only the columns the solver
-  -- writes.
+  -- ^ Per captured scroll node, its 'StyleScrollContentW' and 'StyleNodeValue'
+  -- (two floats).
   , lcTags :: !(IOArr Word8)
   -- ^ The captured 'naArrTags'. A restore reads only 'TagScrollBarSlot'.
   , lcPlaced :: !(IORef (IntMap PlacedFloat))
@@ -99,7 +99,7 @@ newLayoutCache cap0 = do
   lcOffered <- newPrimArray (cap * 4)
   lcUnsnapped <- newPrimArray (cap * 4)
   lcGeom <- newPrimArray (cap * geomStride)
-  lcStyle <- newPrimArray (cap * styleStride)
+  lcStyle <- newPrimArray (cap * 2)
   lcTags <- newPrimArray (cap * tagStride)
   lcPlaced <- newIORef IM.empty
   pure (LayoutCache cap 0 0 IM.empty IS.empty lcSub lcMeasured lcOffered lcUnsnapped lcGeom lcStyle lcTags lcPlaced)
@@ -118,7 +118,10 @@ captureLayoutCache na lc0 = do
   lc <- if n <= lcCap lc0 then pure lc0 else newLayoutCache (max n (lcCap lc0 * 2))
   a <- arenaArrays na
   copyMutablePrimArray (lcGeom lc) 0 (naArrGeom a) 0 (n * geomStride)
-  copyMutablePrimArray (lcStyle lc) 0 (naArrStyle a) 0 (n * styleStride)
+  forClassNodes_ na BackdropNodes $ \i -> do
+    nt <- readTagEnum a i TagNodeType
+    when (isScrollNode nt) $
+      copyMutablePrimArray (lcStyle lc) (i * 2) (naArrStyle a) (i * styleStride + fromEnum StyleScrollContentW) 2
   copyMutablePrimArray (lcTags lc) 0 (naArrTags a) 0 (n * tagStride)
   copyMutablePrimArray (lcSub lc) 0 subA 0 n
   copyMutablePrimArray (lcMeasured lc) 0 measuredA 0 (n * 2)
@@ -156,9 +159,8 @@ restoreLayoutCache na lc = do
 -- (the content height), which the position pass raises.
 {-# INLINE restoreScrollExtents #-}
 restoreScrollExtents :: NodeArenaArrays -> LayoutCache -> NodeIdx -> IO ()
-restoreScrollExtents a lc i = do
-  let !off = i * styleStride + fromEnum StyleScrollContentW
-  copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
+restoreScrollExtents a lc i =
+  copyMutablePrimArray (naArrStyle a) (i * styleStride + fromEnum StyleScrollContentW) (lcStyle lc) (i * 2) 2
 
 -- | The number of nodes in @idx@'s subtree when they are the indices from
 -- @idx@ on, as a view that adds each node under the open container leaves

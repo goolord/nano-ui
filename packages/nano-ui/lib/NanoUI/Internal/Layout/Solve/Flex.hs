@@ -154,13 +154,21 @@ distributeScratch na n avail gapSum horizontal = do
 -- the passes run unboxed.
 {-# INLINE shrinkScratch #-}
 shrinkScratch :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Int -> Float -> IO ()
-shrinkScratch mainArr factorArr minAt n = pass
+shrinkScratch mainArr factorArr minAt n = pass 0
   where
-    pass !need = when (need > 0) $ do
+    pass !sweep !need = when (need > 0) $ do
       total <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
       when (total > 0) $ do
         let stop !i !given !stopped
-              | i >= n = if stopped > (0 :: Int) then pass (need - given) else apply 0
+              | i >= n =
+                  if stopped > (0 :: Int)
+                    then do
+                      need' <-
+                        if sweep + 1 == waterFillAfter
+                          then waterFillShrink mainArr factorArr minAt (need - given) n
+                          else pure (need - given)
+                      pass (sweep + 1) need'
+                    else apply 0
               | otherwise = do
                   f <- readPrimArray factorArr i
                   if f <= 0
@@ -179,6 +187,32 @@ shrinkScratch mainArr factorArr minAt n = pass
               when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
               apply (i + 1)
         stop 0 0 0
+
+-- | Lock every remaining shrinkable child whose headroom per unit of factor is
+-- less than the shortfall per unit left once the tighter children before it
+-- hit their floors. Runs in O(n log n) after 'waterFillAfter' sweeps.
+waterFillShrink :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Float -> Int -> IO Float
+waterFillShrink mainArr factorArr minAt need0 n
+  | need0 <= 0 = pure need0
+  | otherwise = do
+      total0 <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
+      let collect acc i = do
+            f <- readPrimArray factorArr i
+            if f <= 0
+              then pure acc
+              else do
+                lo <- minAt i
+                main <- readPrimArray mainArr i
+                let !slack = main - lo
+                pure ((slack / f, slack, lo, f, i) : acc)
+          stopFrom !remNeed !total ((_, slack, lo, f, i) : rest)
+            | remNeed > 0 && slack * total < remNeed * f = do
+                writePrimArray mainArr i lo
+                writePrimArray factorArr i 0
+                stopFrom (remNeed - slack) (total - f) rest
+          stopFrom !remNeed _ _ = pure remNeed
+      items <- foldUpTo n collect []
+      stopFrom need0 total0 (sortOn (\(perUnit, _, _, _, _) -> perUnit) items)
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: AxisSizing -> Float
