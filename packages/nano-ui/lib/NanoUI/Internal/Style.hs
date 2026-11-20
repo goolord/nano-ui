@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StrictData #-}
 
@@ -165,8 +167,10 @@ import Control.Applicative ((<|>))
 import Data.Bits (setBit, testBit, (.|.))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
+import Data.Proxy (Proxy (..))
 import Data.Word (Word8)
-import GHC.Enum (boundedEnumFrom, boundedEnumFromThen, predError, succError)
+import GHC.Enum (boundedEnumFrom, boundedEnumFromThen, predError, succError, toEnumError)
+import GHC.TypeLits (KnownNat, Nat, natVal)
 import NanoUI.Internal.Types (Color (..), V2 (..), clamp, colorA, colorB, colorG, colorR, colorLuminance, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
@@ -677,12 +681,34 @@ lineGap n l = l {layoutLineGap = max 0 n}
 lineAlign :: LineAlign -> Layout -> Layout
 lineAlign a l = l {layoutLineAlign = a}
 
+-- | Shared 'Bounded' and 'Enum' implementation for 'Word8'-backed enum
+-- newtypes with values @[0 .. n]@.
+newtype BoundedByte (n :: Nat) = BoundedByte Word8
+  deriving newtype (Eq, Ord)
+
+instance KnownNat n => Bounded (BoundedByte n) where
+  minBound = BoundedByte 0
+  maxBound = BoundedByte (fromIntegral (natVal (Proxy @n)))
+
+instance KnownNat n => Enum (BoundedByte n) where
+  fromEnum (BoundedByte x) = fromIntegral x
+  toEnum i
+    | i >= 0 && i <= hi = BoundedByte (fromIntegral i)
+    | otherwise = toEnumError "BoundedByte" i (0 :: Int, hi)
+    where
+      hi = fromIntegral (natVal (Proxy @n))
+  succ a = if a >= maxBound then succError "BoundedByte" else toEnum (fromEnum a + 1)
+  pred a = if a <= minBound then predError "BoundedByte" else toEnum (fromEnum a - 1)
+  enumFrom = boundedEnumFrom
+  enumFromThen = boundedEnumFromThen
+
 -- | Line position for 'lineAlign': 'LinesStart', 'LinesCenter' or
 -- 'LinesEnd'.
 --
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype LineAlign = LineAlign Word8
   deriving newtype (Eq, Ord)
+  deriving (Bounded, Enum) via BoundedByte 2
 
 -- | Left of a row, top of a column.
 pattern LinesStart :: LineAlign
@@ -702,20 +728,6 @@ instance Show LineAlign where
   show LinesStart = "LinesStart"
   show LinesCenter = "LinesCenter"
   show LinesEnd = "LinesEnd"
-
-instance Bounded LineAlign where
-  minBound = LinesStart
-  maxBound = LinesEnd
-
--- | Enumerations, 'succ' and 'pred' stop at the bounds, not at the byte's.
--- 'toEnum' does not check its argument.
-instance Enum LineAlign where
-  fromEnum (LineAlign n) = fromIntegral n
-  toEnum = LineAlign . fromIntegral
-  succ a = if a >= maxBound then succError "LineAlign" else toEnum (fromEnum a + 1)
-  pred a = if a <= minBound then predError "LineAlign" else toEnum (fromEnum a - 1)
-  enumFrom = boundedEnumFrom
-  enumFromThen = boundedEnumFromThen
 
 -- | Fraction of a line's free space placed before it: 0, 0.5 or 1.
 lineAlignFraction :: LineAlign -> Float
@@ -755,6 +767,7 @@ pinAt x y l = l {layoutPin = Just (V2 x y)}
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype PointerMode = PointerMode Word8
   deriving newtype (Eq, Ord)
+  deriving (Bounded, Enum) via BoundedByte 2
 
 -- | The default. Controls (buttons, sliders, text fields, drawings) take the
 -- pointer from what they cover; containers, labels, images and boxes pass it
@@ -780,20 +793,6 @@ instance Show PointerMode where
   show PointerBlock = "PointerBlock"
   show PointerPass = "PointerPass"
 
-instance Bounded PointerMode where
-  minBound = PointerAuto
-  maxBound = PointerPass
-
--- | Enumerations, 'succ' and 'pred' stop at the bounds, not at the byte's.
--- 'toEnum' does not check its argument.
-instance Enum PointerMode where
-  fromEnum (PointerMode n) = fromIntegral n
-  toEnum = PointerMode . fromIntegral
-  succ a = if a >= maxBound then succError "PointerMode" else toEnum (fromEnum a + 1)
-  pred a = if a <= minBound then predError "PointerMode" else toEnum (fromEnum a - 1)
-  enumFrom = boundedEnumFrom
-  enumFromThen = boundedEnumFromThen
-
 -- | Set how the node handles the pointer where it overlaps others:
 --
 -- > layers $ do
@@ -810,6 +809,7 @@ pointer m l = l {layoutPointer = m}
 -- A byte so it packs into the 'layoutGap' word of 'Layout'.
 newtype TextBreak = TextBreak Word8
   deriving newtype (Eq, Ord)
+  deriving (Bounded, Enum) via BoundedByte 1
 
 -- | Wrap at spaces and newlines; a word longer than the line gets a line of
 -- its own.
@@ -825,20 +825,6 @@ pattern BreakAnywhere = TextBreak 1
 
 instance Show TextBreak where
   show b = if b == BreakWords then "BreakWords" else "BreakAnywhere"
-
-instance Bounded TextBreak where
-  minBound = BreakWords
-  maxBound = BreakAnywhere
-
--- | Enumerations, 'succ' and 'pred' stop at the bounds, not at the byte's.
--- 'toEnum' does not check its argument.
-instance Enum TextBreak where
-  fromEnum (TextBreak n) = fromIntegral n
-  toEnum = TextBreak . fromIntegral
-  succ a = if a >= maxBound then succError "TextBreak" else toEnum (fromEnum a + 1)
-  pred a = if a <= minBound then predError "TextBreak" else toEnum (fromEnum a - 1)
-  enumFrom = boundedEnumFrom
-  enumFromThen = boundedEnumFromThen
 
 -- | Set where rich text may wrap its lines.
 textBreak :: TextBreak -> Layout -> Layout
@@ -1286,10 +1272,17 @@ withReadableTones t =
     , themeDanger = readableTone (pageBackground t) (themeRed t)
     }
 
--- | What a theme built field by field holds where 'withReadableTones' fills
--- in the colour.
-tonedLater :: Color
-tonedLater = colorRGBA 0 0 0 0
+-- | Shared preset builder: installs @panelSurface@ on panel, floating window,
+-- and popup slots, derives readable success/danger tones, and applies overrides.
+buildThemePreset :: Theme -> Style -> (Theme -> Theme) -> Theme
+buildThemePreset base panelSurface refine =
+  withReadableTones $
+    refine
+      base
+        { themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
+        , themePopup = panelSurface
+        }
 
 -- | Neutral charcoal surfaces, warm text, and a blue selection accent.
 -- Keep structural edges quiet; interactive borders and focus carry contrast.
@@ -1303,6 +1296,8 @@ defaultTheme =
           (colorRGBA 54 54 62 255)
           (colorRGBA 34 34 38 255)
           (colorRGBA 30 30 34 255)
+      greenCol = colorRGBA 104 168 124 255
+      redCol = colorRGBA 252 165 165 255
    in Theme
         { themeWindow = colorRGBA 24 24 27 255
         , themePage = Nothing
@@ -1326,14 +1321,14 @@ defaultTheme =
         , themeSeparator = colorRGBA 62 64 72 255
         , themeAccent = colorRGBA 88 156 246 255
         , themeMuted = colorRGBA 176 172 164 255
-        , themeRed = colorRGBA 252 165 165 255
+        , themeRed = redCol
         , themeOrange = colorRGBA 216 140 72 255
         , themeYellow = colorRGBA 212 176 88 255
-        , themeGreen = colorRGBA 104 168 124 255
+        , themeGreen = greenCol
         , themePurple = colorRGBA 176 140 220 255
-        , themeSuccess = tonedLater
+        , themeSuccess = greenCol
         , themeWarning = colorRGBA 242 180 76 255
-        , themeDanger = tonedLater
+        , themeDanger = redCol
         , themeOverlayDim = colorRGBA 8 8 10 176
         , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 88 156 246 255) 115
@@ -1346,20 +1341,18 @@ defaultTheme =
 -- | Light counterpart of 'defaultTheme', for use with @followSystemTheme@.
 defaultLightTheme :: Theme
 defaultLightTheme =
-  withReadableTones $
-  let panelSurface =
-        flatStyle
-          (colorRGBA 252 252 251 255)
-          (colorRGBA 36 36 40 255)
-          (colorRGBA 220 220 216 255)
-          (colorRGBA 252 252 251 255)
-          (colorRGBA 240 240 238 255)
-   in Theme
+  buildThemePreset
+    defaultTheme
+    ( flatStyle
+        (colorRGBA 252 252 251 255)
+        (colorRGBA 36 36 40 255)
+        (colorRGBA 220 220 216 255)
+        (colorRGBA 252 252 251 255)
+        (colorRGBA 240 240 238 255)
+    )
+    $ \t ->
+      t
         { themeWindow = colorRGBA 244 244 242 255
-        , themePage = Nothing
-        , themePanel = panelSurface
-        , themeFloatingWindow = panelSurface
-        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 234 234 231 255)
@@ -1382,16 +1375,12 @@ defaultLightTheme =
         , themeYellow = colorRGBA 150 104 0 255
         , themeGreen = colorRGBA 30 128 70 255
         , themePurple = colorRGBA 128 70 190 255
-        , themeSuccess = tonedLater
         , themeWarning = colorRGBA 150 90 0 255
-        , themeDanger = tonedLater
         , themeOverlayDim = colorRGBA 20 20 24 90
-        , themeOnAccent = colorRGBA 255 255 255 255
         , themeSelection = fadeAlpha (colorRGBA 37 99 235 255) 80
         , themeFocusRing = colorRGBA 37 99 235 255
         , themeLink = colorRGBA 29 78 216 255
         , themeShadow = colorRGBA 0 0 0 40
-        , themeDisabledFade = 0.55
         }
 
 -- | Series palette in order: red, orange, yellow, green, accent, purple.
@@ -1429,19 +1418,18 @@ scrollBarThumbHoverColor base theme =
 -- | Ported from "Tomorrow Night Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowNightMinDarkTheme :: Theme
 tomorrowNightMinDarkTheme =
-  withReadableTones $
-  let panelSurface =
-        flatStyle
-          (colorRGBA 30 31 33 255)  -- base.bg #1E1F21 (elevated panel canvas)
-          (colorRGBA 234 234 234 255)  -- bright.fg #EAEAEA
-          edgeCol
-          (colorRGBA 52 54 62 255)  -- #34363E
-          (colorRGBA 26 27 29 255)  -- #1A1B1D
-   in (accentColor accentCol defaultTheme)
+  buildThemePreset
+    (accentColor accentCol defaultTheme)
+    ( flatStyle
+        (colorRGBA 30 31 33 255)  -- base.bg #1E1F21 (elevated panel canvas)
+        (colorRGBA 234 234 234 255)  -- bright.fg #EAEAEA
+        edgeCol
+        (colorRGBA 52 54 62 255)  -- #34363E
+        (colorRGBA 26 27 29 255)  -- #1A1B1D
+    )
+    $ \t ->
+      t
         { themeWindow = windowCol
-        , themePanel = panelSurface
-        , themeFloatingWindow = panelSurface
-        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 44 46 51 255)  -- elevated button surface
@@ -1475,19 +1463,18 @@ tomorrowNightMinDarkTheme =
 -- | Ported from "Tomorrow Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowMinLightTheme :: Theme
 tomorrowMinLightTheme =
-  withReadableTones $
-  let panelSurface =
-        flatStyle
-          (colorRGBA 242 242 242 255)  -- #F2F2F2
-          (colorRGBA 55 59 65 255)  -- #373B41
-          (colorRGBA 222 222 222 255)  -- #DEDEDE
-          (colorRGBA 231 231 231 255)  -- #E7E7E7 (darker than #F2F2F2 so hover reads)
-          (colorRGBA 219 219 219 255)  -- #DBDBDB
-   in (accentColor (colorRGBA 82 134 188 255) defaultTheme) -- #5286BC (Tomorrow Blue)
+  buildThemePreset
+    (accentColor (colorRGBA 82 134 188 255) defaultLightTheme) -- #5286BC (Tomorrow Blue)
+    ( flatStyle
+        (colorRGBA 242 242 242 255)  -- #F2F2F2
+        (colorRGBA 55 59 65 255)  -- #373B41
+        (colorRGBA 222 222 222 255)  -- #DEDEDE
+        (colorRGBA 231 231 231 255)  -- #E7E7E7 (darker than #F2F2F2 so hover reads)
+        (colorRGBA 219 219 219 255)  -- #DBDBDB
+    )
+    $ \t ->
+      t
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
-        , themePanel = panelSurface
-        , themeFloatingWindow = panelSurface
-        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 232 232 232 255)  -- #E8E8E8 (step down from panel for zebra rows)
@@ -1519,19 +1506,18 @@ tomorrowMinLightTheme =
 -- | Ported from "Tomorrow at Midnight Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowMidnightMinDarkTheme :: Theme
 tomorrowMidnightMinDarkTheme =
-  withReadableTones $
-  let panelSurface =
-        flatStyle
-          (colorRGBA 16 17 20 255)  -- #101114 (elevated panel canvas)
-          (colorRGBA 238 238 238 255)  -- #EEEEEE
-          edgeCol
-          (colorRGBA 46 48 56 255)  -- #2E3038
-          (colorRGBA 12 13 15 255)  -- #0C0D0F
-   in (accentColor accentCol defaultTheme)
+  buildThemePreset
+    (accentColor accentCol defaultTheme)
+    ( flatStyle
+        (colorRGBA 16 17 20 255)  -- #101114 (elevated panel canvas)
+        (colorRGBA 238 238 238 255)  -- #EEEEEE
+        edgeCol
+        (colorRGBA 46 48 56 255)  -- #2E3038
+        (colorRGBA 12 13 15 255)  -- #0C0D0F
+    )
+    $ \t ->
+      t
         { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
-        , themePanel = panelSurface
-        , themeFloatingWindow = panelSurface
-        , themePopup = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 26 27 34 255)  -- #1A1B22
@@ -1621,46 +1607,41 @@ themeFromBase16Mode dark b =
         (pick (lerpColor panelBg (base02 b) 0.5) (lerpColor panelBg (base00 b) 0.4))
         (lerpColor panelBg (pick (base00 b) (base02 b)) 0.4)
     readable = readableTone (base00 b)
-   in withReadableTones $
-        (accentColor (base0D b) defaultTheme)
+   in buildThemePreset (accentColor (base0D b) (pick defaultTheme defaultLightTheme)) panelSurface $ \t ->
+        t
           { themeWindow = base00 b
-      , themePanel = panelSurface
-      , themeFloatingWindow = panelSurface
-      , themePopup = panelSurface
-      , themeButton =
-          flatStyle
-            (pick (base02 b) (base01 b))
-            (pick (base07 b) (base05 b))
-            edgeCol
-            (pick (lerpColor (base02 b) (base03 b) 0.4) (base02 b))
-            (pick (base01 b) (lerpColor (base02 b) (base03 b) 0.35))
-      , themeInput =
-          flatStyle
-            (base00 b)
-            (base05 b)
-            edgeCol
-            (pick (base01 b) (lerpColor (base00 b) (base01 b) 0.3))
-            (pick (base00 b) (lerpColor (base00 b) (base01 b) 0.6))
-      , themeSeparator = edgeCol
-      , themeMuted = base03 b
-      , themeRed = base08 b
-      , themeOrange = base09 b
-      , themeYellow = base0A b
-      , themeGreen = base0B b
-      , themePurple = base0E b
-      , themeSuccess = tonedLater
-      -- Warning uses orange on light schemes, where yellow rarely reads.
-      , themeWarning = readable (pick (base0A b) (base09 b))
-      , themeDanger = tonedLater
-      , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
-      , themeOnAccent =
-          if colorLuminance (base0D b) > 0.6
-            then pick (base00 b) (base07 b)
-            else colorRGBA 255 255 255 255
-      , themeSelection = fadeAlpha (base0D b) (pick 115 80)
-      , themeLink = base0D b
-      , themeShadow = colorRGBA 0 0 0 (pick 72 36)
-      }
+          , themeButton =
+              flatStyle
+                (pick (base02 b) (base01 b))
+                (pick (base07 b) (base05 b))
+                edgeCol
+                (pick (lerpColor (base02 b) (base03 b) 0.4) (base02 b))
+                (pick (base01 b) (lerpColor (base02 b) (base03 b) 0.35))
+          , themeInput =
+              flatStyle
+                (base00 b)
+                (base05 b)
+                edgeCol
+                (pick (base01 b) (lerpColor (base00 b) (base01 b) 0.3))
+                (pick (base00 b) (lerpColor (base00 b) (base01 b) 0.6))
+          , themeSeparator = edgeCol
+          , themeMuted = base03 b
+          , themeRed = base08 b
+          , themeOrange = base09 b
+          , themeYellow = base0A b
+          , themeGreen = base0B b
+          , themePurple = base0E b
+          -- Warning uses orange on light schemes, where yellow rarely reads.
+          , themeWarning = readable (pick (base0A b) (base09 b))
+          , themeOverlayDim = colorRGBA 0 0 0 (pick 160 100)
+          , themeOnAccent =
+              if colorLuminance (base0D b) > 0.6
+                then pick (base00 b) (base07 b)
+                else colorRGBA 255 255 255 255
+          , themeSelection = fadeAlpha (base0D b) (pick 115 80)
+          , themeLink = base0D b
+          , themeShadow = colorRGBA 0 0 0 (pick 72 36)
+          }
 
 -- | Tomorrow Night Base16 reference palette.
 base16TomorrowNight :: Base16

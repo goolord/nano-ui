@@ -350,8 +350,6 @@ data Slot
   | SlotScrollLinkY
   | SlotScrollStep
   | SlotScrollAxes
-  | SlotScrollViewPos
-  | SlotScrollViewSize
   | SlotScrollRange
   | SlotScrollContent
   | -- | An offset in window axes set before the scroller's first layout

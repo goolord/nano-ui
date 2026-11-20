@@ -275,6 +275,9 @@ withHost ctx act = askHostIO (ctxNativeWindow ctx) >>= traverse_ act
 withNativeWindow :: (NativeWindow -> IO ()) -> NanoUI ()
 withNativeWindow act = withContext (`withHost` act)
 
+hostAction :: (WindowHost -> IO ()) -> NanoUI ()
+hostAction f = withNativeWindow (f . nwHost)
+
 -- | Apply a setting through the host only when it differs from the current
 -- one.
 setting :: Eq a => (WindowSettings -> a) -> (a -> WindowSettings -> WindowSettings) -> (WindowHost -> a -> IO ()) -> NativeWindow -> a -> IO ()
@@ -368,28 +371,28 @@ setWindowModeUi m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode =
 -- not every frame. Some desktops ignore placement (Wayland does), and a
 -- maximized or fullscreen window stays put.
 moveWindowUi :: Int -> Int -> NanoUI ()
-moveWindowUi x y = withNativeWindow (\nw -> hostMove (nwHost nw) x y)
+moveWindowUi x y = hostAction (\h -> hostMove h x y)
 
 -- | Centre the window on its display.
 centerWindowUi :: NanoUI ()
-centerWindowUi = withNativeWindow (hostCenter . nwHost)
+centerWindowUi = hostAction hostCenter
 
 -- | Resize the view to a size in layout units, excluding the desktop's
 -- decorations.
 resizeWindowUi :: Size -> NanoUI ()
-resizeWindowUi s = withNativeWindow (\nw -> hostResize (nwHost nw) s)
+resizeWindowUi s = hostAction (`hostResize` s)
 
 -- | Minimize the window to the taskbar.
 minimizeWindowUi :: NanoUI ()
-minimizeWindowUi = withNativeWindow (hostMinimize . nwHost)
+minimizeWindowUi = hostAction hostMinimize
 
 -- | Maximize the window, leaving the desktop's panels visible.
 maximizeWindowUi :: NanoUI ()
-maximizeWindowUi = withNativeWindow (hostMaximize . nwHost)
+maximizeWindowUi = hostAction hostMaximize
 
 -- | Return a maximized or minimized window to its previous size.
 restoreWindowUi :: NanoUI ()
-restoreWindowUi = withNativeWindow (hostRestore . nwHost)
+restoreWindowUi = hostAction hostRestore
 
 -- | Maximize the window, or restore it if it is maximized. Reads
 -- 'winMaximized', since the desktop can maximize the window itself (on a
