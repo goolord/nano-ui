@@ -41,6 +41,8 @@ module NanoUI.Internal.Font
   , centeredTextY
   , alignedTextPen
   , textInkEnd
+  , textDecorationMetrics
+  , revealSpanInViewport
   , isDefaultNodeFont
   , checkboxBoxSize
   , checkboxLeading
@@ -325,6 +327,27 @@ alignedTextPen ax x w ix fm txt =
         AlignEnd -> x + w - ix - shift
         AlignCenter -> x + ix + (contentW - shift) / 2
    in (tx, used)
+
+-- | Decoration stroke thickness, underline offset from line top, and
+-- strikethrough offset from line top, given a font's line height and ascent.
+{-# INLINE textDecorationMetrics #-}
+textDecorationMetrics :: Float -> Float -> (Float, Float, Float)
+textDecorationMetrics lineH ascent =
+  (max 1 (0.06 * lineH), ascent + max 1 (0.1 * lineH), ascent * 0.65)
+
+-- | Scroll offset that keeps @[spanStart, spanStart + spanSize]@ inside a
+-- viewport of extent @viewExtent@ over @contentExtent@ of content, starting
+-- from @oldScroll@.
+{-# INLINE revealSpanInViewport #-}
+revealSpanInViewport :: Float -> Float -> Float -> Float -> Float -> Float
+revealSpanInViewport oldScroll viewExtent contentExtent spanStart spanSize
+  | viewExtent <= 0 = 0
+  | otherwise =
+      let s0
+            | spanStart < oldScroll = spanStart
+            | spanStart + spanSize > oldScroll + viewExtent = spanStart + spanSize - viewExtent
+            | otherwise = oldScroll
+       in clamp 0 (max 0 (contentExtent - viewExtent)) s0
 
 -- | Total horizontal and vertical content padding, twice 'widgetContentInset'.
 {-# INLINE widgetPadding #-}

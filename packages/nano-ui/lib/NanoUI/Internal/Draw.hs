@@ -343,9 +343,9 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
         Nothing -> pushGlyphQuads da fm slant (px + k * bOff) py txt col
       when (deco /= DecorationNone) $ do
         let !textW = lineWidth fm txt
-            !thick = max 1.0 (0.06 * lh)
-            underline = pushRect da (Rect px (py + fmAscent fm + max 1.0 (0.1 * lh)) textW thick) col
-            strike = pushRect da (Rect px (py + fmAscent fm * 0.65) textW thick) col
+            !(thick, underOff, strikeOff) = textDecorationMetrics lh (fmAscent fm)
+            underline = pushRect da (Rect px (py + underOff) textW thick) col
+            strike = pushRect da (Rect px (py + strikeOff) textW thick) col
         case deco of
           DecorationUnderline -> underline
           DecorationStrikethrough -> strike

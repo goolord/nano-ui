@@ -21,7 +21,7 @@ import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome
 import NanoUI.Internal.Frame.Node (resolveFontFor)
-import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, plainFieldPen, selectableTextGeometry, textInputFg)
+import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, selectableTextGeometry)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith, resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
 import NanoUI.Internal.Id (WidgetId (..))
@@ -115,19 +115,8 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
             else void $ field (comboTextClip fm x y w h) $
               drawSelectChevron da focus (x + w - selectChevronReserve) y selectChevronReserve h iconCol
         else do
-          let field = textInputFieldRect fm x y w h
-          paintStyledRect da style field
-          fontSizeVal <- getNodeFontSize (peNodeArena env) idx
-          (ffm, native, _) <- resolveFontFor ctx NodeTextInput fontSizeVal si
-          -- Paint discards the measured text width that the span path needs,
-          -- so it takes the pen directly and skips the host measurement.
-          (txt, fx, fy, clip) <- plainFieldPen ctx idx si ffm x y w h
-          ffg <- textInputFg ctx style idx focus
-          -- 'plainFieldPen' settled the scroll, so use its pen rather than
-          -- measuring the caret again.
-          mEdit <- readFieldEdit ctx idx field fx
-          -- Glyphs in the field's own font, which placed the pen.
-          paintClippedFieldText ctx da ffm native si style idx mEdit clip fx fy txt ffg
+          (field, clip) <- nodeTextFieldGeom ctx idx x y w h
+          void $ paintCaptionlessField env style idx focus field clip True (pure ())
 
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
@@ -338,27 +327,19 @@ paintClippedFieldText ctx da fm native si style idx mEdit clip penX penY txt fg 
 -- or its label as a placeholder (dimmed) while empty and unfocused when it
 -- has one, scrolled to keep the caret in @clip@. Returns the value.
 paintCaptionlessField :: PaintEnv -> Style -> NodeIdx -> Bool -> Rect -> Rect -> Bool -> IO () -> IO T.Text
-paintCaptionlessField env style idx focus box@(Rect x y w h) clip@(Rect clipX _ _ _) hasPlaceholder chrome = do
+paintCaptionlessField env style idx focus box clip hasPlaceholder chrome = do
   let ctx = peContext env
       da = peDrawArena env
-  -- Glyphs in the field's own font, which places its caret and takes its
-  -- clicks.
   si <- getStyleIdx (peNodeArena env) idx
-  fontSizeVal <- getNodeFontSize (peNodeArena env) idx
-  (fm, native, measure) <- resolveFontFor ctx NodeTextInput fontSizeVal si
   paintStyledRect da style box
-  value <- textInputValue ctx idx
-  -- The value, including any input-method composition in progress.
-  (shown, _, _, _) <- fieldEditLine ctx idx
-  placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
   chrome
+  TextInputFrame fm native value shown penX rowY mEdit <-
+    resolveTextInputFrame ctx idx si focus box clip
+  placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
   let display = textInputFieldText placeholder shown focus
-  scrollX <- syncTextInputScroll ctx idx x y w h
-  -- Its colour or tone, dimmed while empty and unfocused, as its spans take it.
-  fg <- textInputFg ctx style idx focus
-  ty <- if T.null display then pure 0 else centeredTextY fm y h . snd <$> measure display
-  mEdit <- readFieldEdit ctx idx box (clipX - scrollX)
-  paintClippedFieldText ctx da fm native si style idx mEdit clip (clipX - scrollX) ty display fg
+  fgBase <- fieldTextColor ctx idx (styleFg style)
+  let fg = if T.null value && not focus then lerpColor fgBase (styleBg style) 0.40 else fgBase
+  paintClippedFieldText ctx da fm native si style idx mEdit clip penX rowY display fg
   pure value
 
 -- | A stepper arrow in its half of the stepper, nudged toward the other half so

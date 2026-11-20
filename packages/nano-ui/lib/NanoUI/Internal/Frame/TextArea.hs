@@ -373,11 +373,7 @@ syncTextAreaViewport ctx idx key fm field = do
               Nothing -> (TB.lineAt row buf, col)
         Just <$> caretXIO fm line caretCol
       else pure Nothing
-  let revealX at
-        | viewW <= 0 = sx
-        | at < sx = at
-        | at + 1 > sx + viewW = at + 1 - viewW
-        | otherwise = sx
+  let revealX at = revealSpanInViewport sx viewW (max contentW (at + 1)) at 1
       V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 (maybe sx revealX caretAt) sy)
       viewportKey = slotKey SlotTextAreaViewport key
       lineKey = slotKey SlotTextAreaLineH key

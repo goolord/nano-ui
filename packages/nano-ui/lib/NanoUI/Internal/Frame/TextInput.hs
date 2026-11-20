@@ -7,6 +7,8 @@ module NanoUI.Internal.Frame.TextInput
   , nodeTextFieldGeom
   , tagTextInputClippedSpans
   , syncTextInputScroll
+  , TextInputFrame (..)
+  , resolveTextInputFrame
   , FieldEdit
   , readFieldEdit
   , fieldEditLine
@@ -41,14 +43,14 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushPreparedTextStyled, pushRect)
-import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, selectionSpans, textIndexAtX, widgetContentInset)
+import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, revealSpanInViewport, selectionSpans, textDecorationMetrics, textIndexAtX, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (maskPassword, textInputFocused, textInputValue)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
-import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics)
+import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics, resolveFontFor)
 import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId, nodeFontBits)
+import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeFontSize, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId, nodeFontBits)
 import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldFloat, fieldSelection, fieldSelectionWrite, fieldText, findSlot, insertSlot, setFieldSelection)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), themeSelection, toneColor)
@@ -186,12 +188,29 @@ drawLinePreedit :: DrawArena -> FontMetrics -> Preedit -> Float -> Float -> Floa
 drawLinePreedit da fm p x y lineH fg = do
   let line = preeditLine p
   prepared <- prepareFontMetrics fm line
-  let thick = max 1 (0.06 * lineH)
-      underY = y + fmAscent fm + max 1 (0.1 * lineH)
+  let (thick, underOff, _) = textDecorationMetrics lineH (fmAscent fm)
+      underY = y + underOff
   forM_ (selectionSpans prepared line (preeditStart p) (preeditEnd p)) $ \(wLo, wHi) ->
     pushRect da (Rect (x + wLo) underY (max 1 (wHi - wLo)) thick) fg
   when (preeditSelectionEnd p == preeditCaret p) $
     drawLineCaret da fm line (preeditCaret p) x y lineH fg
+
+-- | Sync horizontal scroll for a field whose font, edit line, and clip width
+-- are already resolved. Writes the cache directly without scheduling an extra
+-- frame.
+syncTextInputScrollWith :: Context -> Int -> WidgetStore -> FontMetrics -> Bool -> Float -> Text -> Int -> IO Float
+syncTextInputScrollWith ctx key store fm focus viewW shown cursor = do
+  let oldScroll = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
+  newScroll <-
+    if not focus || viewW <= 0
+      then pure 0
+      else do
+        caretRelX <- caretXIO fm shown cursor
+        totalTextW <- lineWidthIO fm shown
+        pure (revealSpanInViewport oldScroll viewW (totalTextW + 1) caretRelX 1)
+  when (newScroll /= oldScroll) $
+    writeIORef (ctxStore ctx) $! insertSlot fieldFloat (slotKey SlotTextInputScroll key) newScroll store
+  pure newScroll
 
 -- | The horizontal scroll that keeps field @idx@'s caret in view, zero while
 -- it is unfocused, stored as it changes.
@@ -203,30 +222,52 @@ syncTextInputScroll ctx idx x y w h = do
     else do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       store <- getStore ctx
-      let key = intKey wid
       focus <- textInputFocused ctx idx
-      -- An unfocused field shows its start, so only a focused one needs its clip.
       viewW <- if focus then rectW . snd <$> nodeTextFieldGeom ctx idx x y w h else pure 0
-      let oldScroll = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
-      newScroll <-
-        if viewW <= 0
-          then pure 0
-          else do
-            fm <- nodeFontMetrics ctx idx
-            -- Keep the input method's caret in view, composition included.
-            (value, cursor, _, _) <- fieldEditLine ctx idx
-            caretRelX <- caretXIO fm value cursor
-            totalTextW <- lineWidthIO fm value
-            let s0
-                  | caretRelX < oldScroll = caretRelX
-                  | caretRelX + 1 > oldScroll + viewW = caretRelX + 1 - viewW
-                  | otherwise = oldScroll
-            pure (clamp 0 (max 0 (totalTextW + 1 - viewW)) s0)
-      -- Paint already uses 'newScroll', so write the cache directly without
-      -- scheduling an extra follow-up frame via 'setStore'.
-      when (newScroll /= oldScroll) $
-        writeIORef (ctxStore ctx) $! insertSlot fieldFloat (slotKey SlotTextInputScroll key) newScroll store
-      pure newScroll
+      if not focus || viewW <= 0
+        then syncTextInputScrollWith ctx (intKey wid) store (ctxFontMetrics ctx) False 0 "" 0
+        else do
+          fm <- nodeFontMetrics ctx idx
+          (shown, cursor, _, _) <- fieldEditLine ctx idx
+          syncTextInputScrollWith ctx (intKey wid) store fm True viewW shown cursor
+
+-- | Single-pass resolved state for painting a single-line text field.
+data TextInputFrame = TextInputFrame
+  { tifFont :: !FontMetrics
+  , tifNative :: !Bool
+  , tifValue :: !Text
+  , tifShown :: !Text
+  , tifPenX :: !Float
+  , tifRowY :: !Float
+  , tifEdit :: !(Maybe FieldEdit)
+  }
+
+-- | Resolve font, masked value, composition line, horizontal scroll, centered
+-- row Y, and optional 'FieldEdit' in one pass for a captionless or plain field.
+resolveTextInputFrame :: Context -> NodeIdx -> Int -> Bool -> Rect -> Rect -> IO TextInputFrame
+resolveTextInputFrame ctx idx si focus (Rect _ boxY _ boxH) (Rect clipX _ clipW _) = do
+  let na = ctxNodeArena ctx
+  fontSizeVal <- getNodeFontSize na idx
+  (fm, native, _) <- resolveFontFor ctx NodeTextInput fontSizeVal si
+  wid <- getWidgetId na idx
+  store <- getStore ctx
+  value <- textInputValue ctx idx
+  let key = intKey wid
+      (anchor0, cursor0) = fieldSelection store key value
+  (shown, cursor, anchor, preedit) <-
+    fieldComposition ctx wid >>= \case
+      Nothing -> pure (value, cursor0, anchor0, Nothing)
+      Just c ->
+        let masked
+              | hasFlag textInputFlagPassword si = c {compositionText = maskPassword (compositionText c)}
+              | otherwise = c
+            p = splicePreedit masked value (min anchor0 cursor0) (max anchor0 cursor0)
+         in pure (preeditLine p, preeditCaret p, preeditSelectionEnd p, Just p)
+  scrollX <- syncTextInputScrollWith ctx key store fm focus clipW shown cursor
+  let !penX = clipX - scrollX
+      !rowY = centeredTextY fm boxY boxH (fmLineHeight fm)
+      !edit = if focus then Just (FieldEdit shown cursor anchor fm rowY penX preedit) else Nothing
+  pure (TextInputFrame fm native value shown penX rowY edit)
 
 -- | What a focused single-line field paints its selection and caret from: the
 -- displayed value, cursor and anchor, the node font, the top of its text row,

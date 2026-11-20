@@ -34,7 +34,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Host qualified as Host
 import NanoUI.Internal.RichText.Types
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..))
-import NanoUI.Internal.Font (FontMetrics (..), ShapedText (..), prepareFontMetrics, selectionSpans, textIndexAtX)
+import NanoUI.Internal.Font (FontMetrics (..), ShapedText (..), prepareFontMetrics, selectionSpans, textDecorationMetrics, textIndexAtX)
 import NanoUI.Internal.Font qualified as Font
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id (WidgetId)
@@ -262,9 +262,9 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
             ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
                | (run, runIdx, x1, x2) <- spans
                , let deco = decorationOf runIdx
-                     thick = max 1 (0.06 * runLineHeight run)
+                     (thick, under, strike) = textDecorationMetrics (runLineHeight run) (runAscent run)
                , deco /= DecorationNone
-               , offset <- decorationOffsets deco run
+               , offset <- decorationOffsets deco under strike
                ]
     lineY line run = y0 + lineTop line + lineAscent line - runAscent run
     glyphGroups line =
@@ -272,15 +272,12 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
     decorationOf runIdx =
       (if Just runIdx == hoveredRun then addUnderline else id)
         (textFontDecoration (runFont (indexSmallArray runs runIdx)))
-    decorationOffsets deco run =
-      let lh = runLineHeight run
-          under = runAscent run + max 1 (0.1 * lh)
-          strike = runAscent run * 0.65
-       in case deco of
-            DecorationUnderline -> [under]
-            DecorationStrikethrough -> [strike]
-            DecorationUnderlineStrike -> [under, strike]
-            DecorationNone -> []
+    decorationOffsets deco under strike =
+      case deco of
+        DecorationUnderline -> [under]
+        DecorationStrikethrough -> [strike]
+        DecorationUnderlineStrike -> [under, strike]
+        DecorationNone -> []
 
 -- | Each piece's stretch of a line without the spaces at its ends: its run,
 -- the run's index, and its left and right edges.
