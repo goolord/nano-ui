@@ -19,7 +19,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Read qualified as TR
 import GHC.Clock (getMonotonicTime)
-import NanoUI.Internal.Context (getStore, intKey, registerFocusable, requestInputMethod, requestWakeAt, modifyStore)
+import NanoUI.Internal.Context (getStore, intKey, requestWakeAt, modifyStore)
 import NanoUI.Internal.Equality (sameDouble)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -28,10 +28,9 @@ import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldEditorMod
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, packTextNodeStyle, textInputFlagNumeric)
-import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
 import NanoUI.Widgets.TextEditor (singleLineMode)
-import NanoUI.Internal.Widgets.TextInput (TextInputState (..), editTextInput, editorTextState, loadTextInputState, saveTextEditor, saveTextInputState)
+import NanoUI.Internal.Widgets.TextInput (TextInputState (..), editTextInput, editorTextState, focusAndIme, loadTextInputState, saveTextEditor, saveTextInputState)
 import NanoUI.Internal.Var (Binding (..), bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import Numeric (showFFloat, showHex)
@@ -104,11 +103,9 @@ numericInputCore :: NumericInputConfig -> Double -> NanoUI (Response, Double)
 numericInputCore cfg value = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  liftIO $ registerFocusable ctx wid
-  store <- liftIO (getStore ctx)
-  isFocus <- keyboardFocused wid
   -- Hex input needs letters, so it gets the normal text keyboard.
-  when isFocus $ liftIO (requestInputMethod ctx wid Nothing (if nicHex cfg then InputNormal else InputNumeric))
+  isFocus <- focusAndIme ctx wid True (if nicHex cfg then InputNormal else InputNumeric)
+  store <- liftIO (getStore ctx)
   let
     key = intKey wid
     given = clampNumber cfg value

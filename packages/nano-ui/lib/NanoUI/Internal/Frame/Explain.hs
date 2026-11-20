@@ -62,12 +62,9 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
   -- Layers in paint order: the page, then windows, modals and popups, each
   -- kind in arena order. The page root is node 0, unless the view has no
   -- page and node 0 is a panel.
-  floating <-
-    foldClassNodeRevM na FloatingNodes (\acc idx -> (: acc) . (,idx) <$> getNodeType na idx) []
+  floating <- floatingNodesInPaintOrder na
   page <- if count > 0 then not . isFloatingNode <$> getNodeType na 0 else pure False
-  let roots =
-        [(pageLayer, 0) | page]
-          ++ [(idx, idx) | nt <- [NodeWindow, NodeModal, NodePopup], (t, idx) <- floating, t == nt]
+  let roots = [(pageLayer, 0) | page] ++ [(idx, idx) | idx <- floating]
   layers <- mapM (\(key, root) -> (key,) <$> outlines (0 :: Int) window root []) roots
   route <- getsInteraction ctx isPointerRoute
   hover <- case route of

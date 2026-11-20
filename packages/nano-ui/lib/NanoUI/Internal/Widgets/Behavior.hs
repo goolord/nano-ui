@@ -18,6 +18,7 @@ module NanoUI.Internal.Widgets.Behavior
   , navStep
   , useDismissable
   , dragThresholdPx
+  , pastDragThreshold
   )
 where
 
@@ -43,6 +44,14 @@ import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
 dragThresholdPx = 8
+
+-- | Whether the pointer has moved past 'dragThresholdPx' from the press origin.
+{-# INLINE pastDragThreshold #-}
+pastDragThreshold :: V2 -> V2 -> Bool
+pastDragThreshold (V2 sx sy) (V2 mx my) =
+  let dx = mx - sx
+      dy = my - sy
+   in dx * dx + dy * dy > dragThresholdPx * dragThresholdPx
 
 -- | The axis a drag or an insertion index measures along.
 data DragAxis = DragAxisX | DragAxisY
@@ -183,11 +192,11 @@ useReorder order responses = do
         | press = hit
         | token == findSlot fieldQuiet 0 dragK store = stored
         | otherwise = Nothing
-      startPos@(V2 sx sy) = if press then V2 mx my else findSlot fieldPoint (V2 mx my) startK store
+      startPos = if press then V2 mx my else findSlot fieldPoint (V2 mx my) startK store
       moved =
         isJust dragging
           && not press
-          && (flagSlot movedK store || (mx - sx) * (mx - sx) + (my - sy) * (my - sy) > dragThresholdPx * dragThresholdPx)
+          && (flagSlot movedK store || pastDragThreshold startPos (V2 mx my))
       distance (Rect x y w h) =
         let dx = max 0 (max (x - mx) (mx - x - w))
             dy = max 0 (max (y - my) (my - y - h))

@@ -28,6 +28,7 @@ module NanoUI.Internal.Widgets.TextInput
   , searchInputConfigured'
   , buildTextInput
   , editTextField
+  , focusAndIme
     -- * Selectable text
   , selectableText
   , selectableText'
@@ -244,10 +245,19 @@ fieldAdornmentColor lay theme =
 -- replaces the stored text, so a field that mirrors another value follows it.
 -- Returns the text before and after this frame, whether it is focused, and
 -- whether a command run from outside the frame changed it.
+-- | Register a focusable field and request IME input when it holds keyboard
+-- focus and @acceptIme@ is 'True'.
+focusAndIme :: Context -> WidgetId -> Bool -> InputPurpose -> NanoUI Bool
+focusAndIme ctx wid acceptIme purpose = do
+  liftIO $ registerFocusable ctx wid
+  isFocus <- keyboardFocused wid
+  when (isFocus && acceptIme) $
+    liftIO (requestInputMethod ctx wid Nothing purpose)
+  pure isFocus
+
 editTextField :: WidgetId -> EditorMode -> Text -> Maybe Text -> NanoUI (Text, Text, Bool, Bool)
 editTextField wid mode initial unfocusedText = do
   ctx <- askContext
-  liftIO $ registerFocusable ctx wid
   inp <- askInput
   store <- liftIO (getStore ctx)
   let
@@ -262,11 +272,9 @@ editTextField wid mode initial unfocusedText = do
       (if isNothing stored then insertSlot fieldText key initial else id)
         . deleteSlot fieldInt pulseKey
         . insertSlot fieldEditorMode modeKey mode
-  isFocus <- keyboardFocused wid
   -- Password fields request 'InputSecure' so the IME does not display or
   -- record their text.
-  when (isFocus && modeEditable mode) $
-    liftIO (requestInputMethod ctx wid Nothing (if modeCopyable mode then InputNormal else InputSecure))
+  isFocus <- focusAndIme ctx wid (modeEditable mode) (if modeCopyable mode then InputNormal else InputSecure)
   mEdited <- if isFocus then liftIO (editTextInput ctx mode inp store key s0) else pure Nothing
   let s1 = case mEdited of
         Just ed -> editorTextState ed

@@ -23,7 +23,7 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import Data.Hashable (hashWithSalt)
 import Data.Primitive.Array (MutableArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, writePrimArray)
@@ -377,22 +377,14 @@ dropKey k m = if IM.member k m then IM.delete k m else m
 -- window, then every modal, then every popup, each kind in arena order. The
 -- pointer's layer is the last of these that holds it.
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
-floatingPanelsInOrder Context {ctxNodeArena = na} = do
-  tagged <- foldClassNodeRevM na FloatingNodes step []
-  pure [p | r <- [0, 1, 2 :: Int], (r', p) <- tagged, r' == r]
+floatingPanelsInOrder Context {ctxNodeArena = na} =
+  catMaybes <$> (mapM step =<< floatingNodesInPaintOrder na)
   where
-    rank nt = case nt of
-      NodeWindow -> 0
-      NodeModal -> 1
-      _ -> 2
-    step acc idx = do
+    step idx = do
       wid <- getWidgetId na idx
       if hashWidgetId wid == 0
-        then pure acc
-        else do
-          nt <- getNodeType na idx
-          rect <- getNodeRect na idx
-          pure ((rank nt, (intKey wid, rect)) : acc)
+        then pure Nothing
+        else Just . (intKey wid,) <$> getNodeRect na idx
 
 -- | Current floating-panel bounds keyed by widget id, in logical window coordinates.
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)

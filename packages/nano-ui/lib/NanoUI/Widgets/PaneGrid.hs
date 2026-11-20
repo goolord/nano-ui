@@ -59,7 +59,7 @@ import NanoUI.Internal.Store (fieldGrid, fieldQuiet, findSlot, insertSlot, looku
 import NanoUI.Internal.Store.Types (GridState (..), Gesture (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
-import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragThresholdPx, leftPress, useKeyNav)
+import NanoUI.Internal.Widgets.Behavior (KeyNav (..), leftPress, pastDragThreshold, useKeyNav)
 import NanoUI.Internal.Widgets.Cursor (withCursorShape)
 import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Layout (column', row', rowWith')
@@ -408,8 +408,7 @@ paneGridCore cfg controlled given = do
       (dragMoved, dragZone, remaining) = case (arrangement, gsGesture gs) of
         (Just tree, Drag pid press moved0 _) ->
           let mFrom = M.lookup pid regions
-              V2 dx dy = v2Sub mouse press
-              moved = moved0 || dx * dx + dy * dy > dragThresholdPx * dragThresholdPx
+              moved = moved0 || pastDragThreshold press mouse
               rest = treeRemovePane pid tree
               targetRegions = maybe M.empty (\t -> fst (layoutNode minSize gutter t baseRect)) rest
               preview = dropPreviewTreeSized (if pgPreserveDragSize cfg then mFrom else Nothing) minSize gutter tree pid (gsSeed gs) baseRect

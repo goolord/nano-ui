@@ -9,6 +9,7 @@ module NanoUI.Internal.Frame.Scroll.Geometry
   , scrollChromeLane
   , scrollBarLayout
   , scrollBarLayoutIn
+  , scrollThumbSpan
   , scrollAxisRange
   , scrollOffsetFromThumb
   , onScrollBar
@@ -245,6 +246,17 @@ scrollBarLayout slot dir x y w h pad = case dir of
   DirColumn -> scrollBarLayoutIn slot dir (Rect x y w h) pad (h - padT pad - padB pad) (padB pad)
   DirRow -> scrollBarLayoutIn slot dir (Rect x y w h) pad (w - padL pad - padR pad) (padR pad)
 
+-- | Thumb offset along a track of @trackLen@ and clamped thumb length, from a
+-- minimum thumb length, viewport numerator @num@, content denominator @den@,
+-- scroll offset @off@, and range @maxOff@.
+{-# INLINE scrollThumbSpan #-}
+scrollThumbSpan :: Float -> Float -> Float -> Float -> Float -> Float -> (Float, Float)
+scrollThumbSpan trackLen minThumb num den off maxOff =
+  let len = max 1 trackLen
+      size = clamp (min minThumb len) len (len * num / den)
+      clamped = clamp 0 maxOff off
+   in (if maxOff > 0 then (len - size) * clamped / maxOff else 0, size)
+
 -- | 'scrollBarLayout' with an explicit visible main extent and the trailing
 -- padding the content scrolls past. A native 2D scroller passes the padding
 -- box minus the cross-axis lane (see 'scrollGutters2D'), so its reachable
@@ -273,9 +285,8 @@ scrollBarLayoutIn slot dir (Rect x y w h) pad viewMain trailing contentSize off 
     maxOff = scrollAxisRange contentSize viewMain trailing
     trackStart = origin + barMargin
     trackSize = max 0 (viewMain - 2 * barMargin)
-    thumbSize = max minThumb (trackSize * viewMain / (contentSize + trailing))
-    clampedOff = max 0 (min maxOff off)
-    thumbStart = trackStart + (clampedOff / maxOff) * (trackSize - thumbSize)
+    (thumbRel, thumbSize) = scrollThumbSpan trackSize minThumb viewMain (contentSize + trailing) off maxOff
+    thumbStart = trackStart + thumbRel
     band start size = case dir of
       DirColumn -> Rect (rectX lane) start barW size
       DirRow -> Rect start (rectY lane) size barW

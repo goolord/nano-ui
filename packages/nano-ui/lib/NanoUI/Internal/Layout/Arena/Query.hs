@@ -2,6 +2,7 @@
 module NanoUI.Internal.Layout.Arena.Query
   ( topModalNode
   , forFloatingNodes_
+  , floatingNodesInPaintOrder
   , forChildNodes_
   , foldFlowChildrenM
   , flowChildrenInOrder
@@ -46,6 +47,18 @@ topModalNode na = findClassNodeRevM na FloatingNodes (fmap (== NodeModal) . getN
 forFloatingNodes_ :: NodeArena -> NodeType -> (NodeIdx -> IO ()) -> IO ()
 forFloatingNodes_ na t f =
   forClassNodes_ na FloatingNodes $ \idx -> getNodeType na idx >>= \nt -> when (nt == t) (f idx)
+
+-- | Floating nodes (windows, then modals, then popups, each kind in arena
+-- order): bottom to top in paint order.
+floatingNodesInPaintOrder :: NodeArena -> IO [NodeIdx]
+floatingNodesInPaintOrder na = do
+  tagged <- foldClassNodeRevM na FloatingNodes (\acc idx -> (\nt -> (rank nt, idx) : acc) <$> getNodeType na idx) []
+  pure [idx | r <- [0, 1, 2 :: Int], (r', idx) <- tagged, r' == r]
+  where
+    rank nt = case nt of
+      NodeWindow -> 0
+      NodeModal -> 1
+      _ -> 2
 
 
 

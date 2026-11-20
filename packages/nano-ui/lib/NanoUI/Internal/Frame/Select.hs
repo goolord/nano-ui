@@ -27,6 +27,7 @@ import NanoUI.Internal.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds, overlayMenuStyle, paintMenuAccent, paintMenuPanel)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
+import NanoUI.Internal.Frame.Scroll.Geometry (scrollThumbSpan)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getClipBounds, getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
@@ -382,10 +383,7 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
     usableH = max 0 (dh - if hScroll then comboSbW else 0)
     -- Lanes sit flush against the dropdown border and share the corner. A
     -- thumb shows @num / den@ of its track, @off@ of @maxOff@ along it.
-    thumb track num den off maxOff =
-      let len = max 1 track
-          size = clamp (min comboSbMinThumb len) len (len * num / den)
-       in ((len - size) * clamp 0 maxOff off / maxOff, size)
+    thumb track num den off = scrollThumbSpan track comboSbMinThumb num den off
     vx = dx + dw - comboSbW
     hy = dy + dh - comboSbW
     (ty, thumbH) =

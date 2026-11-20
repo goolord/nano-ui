@@ -33,7 +33,7 @@ import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectIntersect)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Widgets.Node (Response, containerResponse, respId, respRect, respPressed)
-import NanoUI.Internal.Widgets.Behavior (DragAxis (..), dragThresholdPx)
+import NanoUI.Internal.Widgets.Behavior (DragAxis (..), pastDragThreshold)
 
 -- | A thresholded pointer gesture. Terminal phases last one frame.
 data DragPhase = DragStarted | Dragging | DragReleased | DragCancelled
@@ -70,18 +70,16 @@ newDrag = DragHandle <$> newIORef Nothing
 useDrag :: Eq a => DragHandle a -> [(a, Response)] -> NanoUI (Maybe (Drag a))
 useDrag (DragHandle ref) sources = do
   inp <- askInput
-  let pos@(V2 x y) = inputMousePos inp
+  let pos = inputMousePos inp
   old <- liftIO (readIORef ref)
   let armed = if pressedIn MouseLeft inp
         then (\(a, _) -> DragState a pos False) <$> find (respPressed . snd) sources
         else old
   escaped <- if isJust armed then takeEscape else pure False
-  let step (DragState a origin@(V2 sx sy) hot) =
+  let step (DragState a origin hot) =
         let cancelled = escaped || all ((/= a) . fst) sources
               || (not (heldIn MouseLeft inp) && not (releasedIn MouseLeft inp))
-            dx = x - sx
-            dy = y - sy
-            moved = hot || dx * dx + dy * dy > dragThresholdPx * dragThresholdPx
+            moved = hot || pastDragThreshold origin pos
             released = releasedIn MouseLeft inp
             phase | cancelled = DragCancelled
                   | released = DragReleased
