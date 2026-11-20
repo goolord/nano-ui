@@ -52,6 +52,7 @@ module NanoUI.Backend
   , drawCmdElems
   , forDrawCmdsInLayer_
   , drawCmdCount
+  , cmdEffectiveClip
   , vertexSize
   , indexSize
   , collectRasterSpans
@@ -61,6 +62,8 @@ module NanoUI.Backend
   , takeDamagePieces
   , damagePieces
   , damageIsEmpty
+  , pixelEdges
+  , snapDamage
   , registerImage
   , registerImages
   , releaseImage
@@ -305,6 +308,7 @@ module NanoUI.Backend
   , SBackend (..)
   , BackendSession
   , withBackendSession
+  , setBackendSession
   , backendSession
   , askBackendSession
   , WindowCapabilities (..)
@@ -372,14 +376,14 @@ import NanoUI.Internal.Context
   , atlasTextureId, atlasSnapshot, atlasChanges, AtlasUpload (..)
   , getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance
   , setExplainLayout, setSystemAppearance, setWakeLoop, setWakeLoopChecked
-  , withBackendSession, backendSession
+  , withBackendSession, setBackendSession, backendSession
   )
 import NanoUI.Internal.Frame (runFrame)
 import NanoUI.Internal.ChildWindow (ChildWindow (..), childView, childWindows)
 import NanoUI.Internal.Var.Cell (varChangeCount)
 import NanoUI.Internal.Frame.Spans (collectRasterSpans)
 import NanoUI.Internal.Frame.Cursor (uiCursorKind)
-import NanoUI.Internal.Damage (damagePieces)
+import NanoUI.Internal.Damage (damagePieces, pixelEdges, snapDamage)
 import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font

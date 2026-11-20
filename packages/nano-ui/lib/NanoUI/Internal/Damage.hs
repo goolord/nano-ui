@@ -9,6 +9,8 @@ module NanoUI.Internal.Damage
   , captureFrameSnapshot
   , writeDamage
   , damagePieces
+  , pixelEdges
+  , snapDamage
   ) where
 
 import Control.Applicative ((<|>))
@@ -1021,3 +1023,20 @@ ownerSlots =
   , SlotMenuOpen
   , SlotColorBase
   ]
+
+-- | The pixel edges of a rect at a scale, rounded outwards: left, top, right
+-- and bottom.
+{-# INLINE pixelEdges #-}
+pixelEdges :: Float -> Rect -> (Int, Int, Int, Int)
+pixelEdges s (Rect x y w h) =
+  (floor (x * s), floor (y * s), ceiling ((x + w) * s), ceiling ((y + h) * s))
+
+-- | Grow damage to whole device pixels so its clip covers every pixel the
+-- changed rect touches.
+{-# INLINE snapDamage #-}
+snapDamage :: Float -> Damage -> Damage
+snapDamage _ DamageFull = DamageFull
+snapDamage scale (DamageClip r) =
+  let (x0, y0, x1, y1) = pixelEdges scale r
+      at v = fromIntegral v / scale
+   in DamageClip (Rect (at x0) (at y0) (at x1 - at x0) (at y1 - at y0))

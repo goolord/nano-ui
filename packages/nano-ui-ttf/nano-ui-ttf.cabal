@@ -1,0 +1,71 @@
+cabal-version:      3.4
+name:               nano-ui-ttf
+version:            0.1.0.0
+synopsis:           Shared SDL3_ttf shaping, glyph atlas, and font cache for nano-ui
+description:
+    Internal shared TrueType shaping, glyph atlas bookkeeping, font caching,
+    and bundled Inter font used by nano-ui-sdl and nano-ui-sdl-web.
+license:            MIT AND OFL-1.1
+license-files:
+    LICENSE
+    LICENSE-Inter
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
+category:           Graphics
+build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
+
+extra-source-files:
+    data/inter.ttf
+
+source-repository head
+    type:     git
+    location: https://github.com/goolord/nano-ui.git
+    subdir:   packages/nano-ui-ttf
+
+flag sdl
+    description: Build the SDL3_ttf layer. Needs SDL3, SDL3_ttf, and pkg-config.
+    manual: True
+    default: True
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+
+common warnings
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-export-lists
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
+        -Wunused-packages
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Ttf.Internal.Font
+        NanoUI.Ttf.Internal.Inter
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        containers >=0.7 && <0.9,
+        file-embed ^>=0.0.16,
+        nano-ui >=0.2.0 && <0.2.1,
+        primitive ^>=0.9,
+        text >=2.1.2 && <2.2
+    hs-source-dirs:   lib
+    if !flag(sdl)
+        buildable: False
+    if flag(sdl)
+        c-sources:        cbits/nano_ui_ttf.c
+        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2

@@ -14,7 +14,6 @@ import Control.Exception (onException)
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Maybe (isNothing)
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
@@ -22,7 +21,8 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (free, malloc)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (poke)
-import NanoUI (Rect (..), colorA, colorB, colorG, colorR, rectIntersect)
+import NanoUI (Rect (..), colorA, colorB, colorG, colorR)
+import NanoUI.Backend (cmdEffectiveClip, pixelEdges, snapDamage)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, lookupImage)
 import NanoUI.Testing
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
@@ -42,21 +42,6 @@ data ClipState
       {-# UNPACK #-} !Int
       {-# UNPACK #-} !Int
   deriving Eq
-
--- | The pixel edges of a rect at a scale, rounded outwards: left, top, right
--- and bottom.
-{-# INLINE pixelEdges #-}
-pixelEdges :: Float -> Rect -> (Int, Int, Int, Int)
-pixelEdges s (Rect x y w h) =
-  (floor (x * s), floor (y * s), ceiling ((x + w) * s), ceiling ((y + h) * s))
-
-{-# INLINE snapDamage #-}
-snapDamage :: Float -> Damage -> Damage
-snapDamage _ DamageFull = DamageFull
-snapDamage scale (DamageClip r) =
-  let (x0, y0, x1, y1) = pixelEdges scale r
-      at v = fromIntegral v / scale
-   in DamageClip (Rect (at x0) (at y0) (at x1 - at x0) (at y1 - at y0))
 
 {-# INLINE toClipKey #-}
 toClipKey :: Rect -> ClipState
@@ -101,19 +86,13 @@ renderDrawDataPass batch ren drawData images glyphs damage =
       DamageClip r -> Just r <$ applyClipState batch clipRef ren (toClipKey r)
     let drawCmd vp ip cmd = do
           let !count = fromIntegral (cmdIndexCount cmd)
-              !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
-              !cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
-              live = case (mDamage, cmdOpen) of
-                (Nothing, _) -> Just cmdRect
-                (Just dmg, True) -> Just dmg
-                (Just dmg, False) -> rectIntersect dmg cmdRect
               -- The C side rejects triangles outside the damage: whether
               -- there is one, and its rect.
               (hasDamage, dx, dy, dw, dh) = case mDamage of
                 Nothing -> (0, 0, 0, 0, 0)
                 Just (Rect x y w h) -> (1, realToFrac x, realToFrac y, realToFrac w, realToFrac h)
-          when (count >= 3) $ for_ live $ \clip -> do
-            applyClipState batch clipRef ren (if cmdOpen && isNothing mDamage then ClipNone else toClipKey clip)
+          when (count >= 3) $ for_ (cmdEffectiveClip mDamage cmd) $ \mClip -> do
+            applyClipState batch clipRef ren (maybe ClipNone toClipKey mClip)
             let !texId = cmdTextureId cmd
             tex <- if textureGlyphPage texId >= 0 then glyphPageTexture glyphs (textureGlyphPage texId) else lookupImage images texId
             batchDrawRange (rbBatch batch) vp (fromIntegral (drawVertexCount drawData)) ip

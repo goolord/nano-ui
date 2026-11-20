@@ -86,7 +86,6 @@ library
         NanoUI.Sdl.Internal.Frame
         NanoUI.Sdl.Internal.Display
         NanoUI.Sdl.Internal.Font
-        NanoUI.Sdl.Internal.Font.Inter
         NanoUI.Sdl.Internal.Font.Search
         NanoUI.Sdl.Internal.Image
         NanoUI.Sdl.Internal.Url
@@ -100,9 +99,9 @@ library
         containers >=0.7 && <0.9,
         directory ^>=1.3,
         filepath ^>=1.5,
-        file-embed ^>=0.0.16,
         nano-ui >=0.2.0 && <0.2.1,
         nano-ui-emit ^>=0.1,
+        nano-ui-ttf ^>=0.1,
         primitive ^>=0.9,
         vector ^>=0.13,
         record-hasfield ^>=1.0,
@@ -118,7 +117,6 @@ library
         buildable: False
     if flag(sdl)
         c-sources:        cbits/nano_ui_frame.c
-                          cbits/nano_ui_ttf.c
                           cbits/nano_ui_display.c
                           cbits/nano_ui_render.c
                           cbits/nano_ui_text_atlas.c

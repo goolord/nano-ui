@@ -40,6 +40,7 @@ module NanoUI.Internal.Draw
   , drawCmdNull
   , forDrawCmdsInLayer_
   , drawCmdElems
+  , cmdEffectiveClip
   , vertexSize
   , indexSize
   , backdropDimTextureId
@@ -97,6 +98,20 @@ textBoxTop :: FontMetrics -> Float -> Float -> Float
 textBoxTop fm y ay
   | ay < 0 = y - fmAscent fm
   | otherwise = y - fmLineHeight fm * (1 - ay)
+
+-- | Intersect a command's clip rectangle with an optional damage rectangle.
+-- Returns 'Nothing' when the command is culled, @Just Nothing@ when both the
+-- command clip and damage are open, and @Just (Just clip)@ for a concrete clip.
+{-# INLINE cmdEffectiveClip #-}
+cmdEffectiveClip :: Maybe Rect -> DrawCmd -> Maybe (Maybe Rect)
+cmdEffectiveClip mDamage cmd =
+  let !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
+      !cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
+   in case (mDamage, cmdOpen) of
+        (Nothing, True) -> Just Nothing
+        (Nothing, False) -> Just (Just cmdRect)
+        (Just dmg, True) -> Just (Just dmg)
+        (Just dmg, False) -> Just <$> rectIntersect dmg cmdRect
 
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()

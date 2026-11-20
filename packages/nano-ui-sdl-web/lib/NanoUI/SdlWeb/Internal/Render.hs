@@ -22,13 +22,16 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (free, mallocBytes, reallocBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (pokeElemOff)
-import NanoUI (Rect (..), colorA, colorB, colorG, colorR, rectIntersect)
+import NanoUI (colorA, colorB, colorG, colorR)
 import NanoUI.Backend
   ( AtlasUpload (..)
   , Damage (..)
   , DrawCmd (..)
   , DrawData (..)
   , atlasTextureId
+  , cmdEffectiveClip
+  , pixelEdges
+  , snapDamage
   , textureGlyphPage
   )
 import NanoUI.Testing (Context, atlasChanges)
@@ -79,22 +82,6 @@ syncTextures host r glyphs ctx = do
           whUploadTexture host imageAtlasSlot w h p w x y rw rh
       writeIORef (rImageGeneration r) gen'
 
--- | The pixel edges of a rect at a scale, rounded outwards: left, top, right
--- and bottom.
-{-# INLINE pixelEdges #-}
-pixelEdges :: Float -> Rect -> (Int, Int, Int, Int)
-pixelEdges s (Rect x y w h) =
-  (floor (x * s), floor (y * s), ceiling ((x + w) * s), ceiling ((y + h) * s))
-
--- | Damage grown to whole device pixels, so its clip covers every pixel the
--- changed rect touches.
-snapDamage :: Float -> Damage -> Damage
-snapDamage _ DamageFull = DamageFull
-snapDamage scale (DamageClip r) =
-  let (x0, y0, x1, y1) = pixelEdges scale r
-      at v = fromIntegral v / scale
-   in DamageClip (Rect (at x0) (at y0) (at x1 - at x0) (at y1 - at y0))
-
 -- | One WebGL draw: texture slot (-1 for none), index range, and the
 -- scissor in device pixels from the top left, if any.
 data DrawCommand = DrawCommand
@@ -118,21 +105,15 @@ drawCommands' scale (pw, ph) damage dd = reverse (U.foldl' step [] (drawCommands
       DamageClip r -> Just r
     step acc cmd
       | count < 3 = acc
-      | otherwise = case live of
+      | otherwise = case cmdEffectiveClip mDamage cmd of
           Nothing -> acc
-          Just clip ->
-            let scissor = if cmdOpen && null mDamage then Nothing else Just (toPixels clip)
+          Just mClip ->
+            let scissor = fmap toPixels mClip
              in case scissor of
                   Just (_, _, sw, sh) | sw <= 0 || sh <= 0 -> acc
                   _ -> push (DrawCommand (slotOf (cmdTextureId cmd)) (fromIntegral (cmdIndexOffset cmd)) count scissor) acc
       where
         count = fromIntegral (cmdIndexCount cmd)
-        cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
-        cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
-        live = case (mDamage, cmdOpen) of
-          (Nothing, _) -> Just cmdRect
-          (Just dmg, True) -> Just dmg
-          (Just dmg, False) -> rectIntersect dmg cmdRect
     push c (prev : rest)
       | dcSlot prev == dcSlot c && dcScissor prev == dcScissor c && dcFirst prev + dcCount prev == dcFirst c =
           prev {dcCount = dcCount prev + dcCount c} : rest

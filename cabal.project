@@ -1,6 +1,7 @@
 packages:
   packages/nano-ui
   packages/nano-ui-emit
+  packages/nano-ui-ttf
   packages/nano-ui-sdl
   packages/nano-ui-sdl-web
   packages/nano-ui-diagrams
@@ -26,6 +27,10 @@ package nano-ui
   ghc-options: -Werror
 
 package nano-ui-emit
+  ghc-options: -Werror
+
+package nano-ui-ttf
+  flags: +sdl
   ghc-options: -Werror
 
 package nano-ui-sdl

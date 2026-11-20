@@ -24,7 +24,6 @@ extra-doc-files:
     README.md
 
 extra-source-files:
-    data/inter.ttf
     cbits/*.h
     web/*.js
     web/*.html
@@ -71,26 +70,21 @@ library
         NanoUI.SdlWeb.Internal.Render
         NanoUI.SdlWeb.Internal.Session
         NanoUI.SdlWeb.Internal.Font
-    other-modules:
-        NanoUI.SdlWeb.Internal.Font.Inter
     -- The library imports NanoUI.Internal modules, which change without
     -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
-        containers >=0.7 && <0.9,
-        file-embed ^>=0.0.16,
         nano-ui >=0.2.0 && <0.2.1,
         nano-ui-emit ^>=0.1,
-        primitive ^>=0.9,
+        nano-ui-ttf ^>=0.1,
         text >=2.1.2 && <2.2,
         vector ^>=0.13
     hs-source-dirs:   lib
     if !flag(sdl)
         buildable: False
     if flag(sdl)
-        c-sources:        cbits/nano_ui_ttf.c
-                          cbits/nano_ui_web_atlas.c
+        c-sources:        cbits/nano_ui_web_atlas.c
         include-dirs:     cbits
         pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
 
