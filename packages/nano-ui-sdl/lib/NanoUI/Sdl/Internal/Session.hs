@@ -193,5 +193,5 @@ runSdlSession options drawFn = do
     quit <- readIORef quitTaken
     closeNow <- if quit then requestWindowClose ctx2 else pure False
     unless closeNow $
-      bracket (installResizeWatch onResize) id $ \_ ->
+      bracket (installResizeWatch (sdlWindow env) onResize) id $ \_ ->
         runSessionLoop drv ctx2 inp1 `finally` closeWindows (swWindows windows)

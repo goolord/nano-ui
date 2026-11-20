@@ -30,7 +30,8 @@ module NanoUI.Sdl.Internal.Dialog
   , useFileDialog
   ) where
 
-import Control.Monad (forM, unless, void, when, (>=>))
+import Control.Exception (SomeException, onException, try)
+import Control.Monad (unless, void, when, (>=>))
 import Data.Foldable (for_)
 import Data.Int (Int32)
 import Data.IORef (IORef, atomicWriteIORef, newIORef, readIORef)
@@ -201,33 +202,45 @@ launchDialog env kind opts = do
   -- as a path ('sdlPathEncoding'): UTF-8 on Windows too, not the code page
   -- Foreign.C.String would use.
   enc <- sdlPathEncoding
-  names <-
-    forM (if kind == FolderDialog then [] else dialogFilters opts) $ \(FileFilter name pattern_) ->
-      (,) <$> GHC.newCString utf8 (T.unpack name) <*> GHC.newCString utf8 (T.unpack pattern_)
+  let allocNames [] acc = pure (reverse acc)
+      allocNames (FileFilter name pattern_ : rest) acc = do
+        n <- GHC.newCString utf8 (T.unpack name) `onException` freePairs acc
+        p <- GHC.newCString utf8 (T.unpack pattern_) `onException` (free n >> freePairs acc)
+        allocNames rest ((n, p) : acc)
+      freePairs = mapM_ (\(n, p) -> free n >> free p)
+  names <- allocNames (if kind == FolderDialog then [] else dialogFilters opts) []
+  let freeNames = freePairs names
   filters <-
-    if null names
+    (if null names
       then pure nullPtr
-      else newArray [SDL_DialogFileFilter (PtrConst.unsafeFromPtr n) (PtrConst.unsafeFromPtr p) | (n, p) <- names]
-  location <- traverse (GHC.newCString enc) (dialogDefaultLocation opts)
-  result <- newIORef FileDialogPending
-  let finish outcome = do
-        mapM_ (\(n, p) -> free n >> free p) names
+      else newArray [SDL_DialogFileFilter (PtrConst.unsafeFromPtr n) (PtrConst.unsafeFromPtr p) | (n, p) <- names])
+      `onException` freeNames
+  location <-
+    traverse (GHC.newCString enc) (dialogDefaultLocation opts)
+      `onException` (free filters >> freeNames)
+  let freeBuffers = do
+        freePairs names
         free filters
         mapM_ free location
+  result <- newIORef FileDialogPending
+  let finish outcome = do
+        freeBuffers
         completeResult result outcome
         pushRefreshEvent
-  userdata <- castPtr . castStablePtrToPtr <$> newStablePtr finish
-  let win = sdlWindow env
+  sp <- newStablePtr finish `onException` freeBuffers
+  let userdata = castPtr (castStablePtrToPtr sp)
+      win = sdlWindow env
       filtersConst = PtrConst.unsafeFromPtr filters
       nfilters = fromIntegral (length names)
       locationConst = PtrConst.unsafeFromPtr (fromMaybe nullPtr location)
-  case kind of
-    OpenDialog ->
-      showOpenFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst (dialogAllowMany opts)
-    SaveDialog ->
-      showSaveFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst
-    FolderDialog ->
-      showOpenFolderDialogSafe dialogCallback userdata win locationConst (dialogAllowMany opts)
+      showDlg = case kind of
+        OpenDialog ->
+          showOpenFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst (dialogAllowMany opts)
+        SaveDialog ->
+          showSaveFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst
+        FolderDialog ->
+          showOpenFolderDialogSafe dialogCallback userdata win locationConst (dialogAllowMany opts)
+  showDlg `onException` (freeStablePtr sp >> freeBuffers)
   pure (FileDialogId (sdlCachedCtx env) result)
 
 -- | The callback every dialog shares, made once a process. A launch's
@@ -249,14 +262,17 @@ onResult userdata filelist _filterIdx = do
   let launch = castPtrToStablePtr userdata
   finish <- deRefStablePtr launch
   freeStablePtr launch
-  enc <- sdlPathEncoding
-  paths <- maybePeek (peekArray0 nullPtr >=> traverse (GHC.peekCString enc)) (castPtr filelist)
+  decoded <- try @SomeException $ do
+    enc <- sdlPathEncoding
+    maybePeek (peekArray0 nullPtr >=> traverse (GHC.peekCString enc)) (castPtr filelist)
   -- A handle abandoned with 'cancelFileDialog' keeps 'FileDialogUnknown'
-  -- ('completeResult').
-  finish $ case paths of
-    Nothing -> FileDialogFailed
-    Just [] -> FileDialogCancelled
-    Just ps -> FileDialogSelected ps
+  -- ('completeResult'). Always run 'finish' even if path decoding throws, so
+  -- buffers are freed and the event loop wakes.
+  finish $ case decoded of
+    Left _ -> FileDialogFailed
+    Right Nothing -> FileDialogFailed
+    Right (Just []) -> FileDialogCancelled
+    Right (Just ps) -> FileDialogSelected ps
 
 -- SDL_DialogFileCallback is `void (*)(void *, const char * const *, int)`,
 -- flattened to `void *` pointers at the FFI boundary.

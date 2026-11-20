@@ -22,15 +22,15 @@ module NanoUI.Sdl.Internal.Display
   , querySystemAppearance
   ) where
 
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
+import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
 import Data.Int (Int32)
 import Data.Word (Word32)
-import NanoUI (Appearance (..), Size (..), V2 (..), ifM, unlessM)
+import NanoUI (Appearance (..), Size (..), V2 (..), ifM)
 import NanoUI.Monad ((<&&>))
 import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
@@ -88,14 +88,18 @@ outPair f = alloca $ \pa -> alloca $ \pb -> do
   r <- f pa pb
   (r,,) <$> peek pa <*> peek pb
 
+-- | Install a resize event watch scoped to a window (or any window when null).
 -- Windows runs a modal loop while the user drags the border, so the app
--- event watch does not run. SDL still delivers resize events to this watch.
-installResizeWatch :: IO () -> IO (IO ())
-installResizeWatch act = do
+-- event loop does not run. SDL still delivers resize events to this watch.
+installResizeWatch :: Ptr SDL_Window -> IO () -> IO (IO ())
+installResizeWatch win act = do
   fp <- mkResizeCb act
-  unlessM ((/= 0) <$> installResizeWatchC fp) (fail "SDL_AddEventWatch failed")
+  handle <- installResizeWatchC win fp
+  when (handle == nullPtr) $ do
+    freeHaskellFunPtr fp
+    fail "SDL_AddEventWatch failed"
   pure $ do
-    removeResizeWatchC
+    removeResizeWatchC handle
     freeHaskellFunPtr fp
 
 -- | The event 'pushRefreshEvent' sends, filled in once by 'initRefreshEvent',
@@ -169,10 +173,10 @@ foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))
 
 foreign import ccall safe "nano_ui_install_resize_watch"
-  installResizeWatchC :: FunPtr (IO ()) -> IO CBool
+  installResizeWatchC :: Ptr SDL_Window -> FunPtr (IO ()) -> IO (Ptr ())
 
 foreign import ccall safe "nano_ui_remove_resize_watch"
-  removeResizeWatchC :: IO ()
+  removeResizeWatchC :: Ptr () -> IO ()
 
 -- | Grow a window just opened at a logical size by the UI zoom, as far as
 -- the usable area of its display allows, and centre it again.

@@ -26,14 +26,14 @@ module NanoUI.Sdl.Internal.Font
   , withSdlFontCache
   ) where
 
-import Control.Exception (IOException, bracket_, catch, throwIO)
+import Control.Exception (IOException, bracket_, catch, finally, onException, throwIO)
 import Control.Monad (foldM_, forM, forM_, unless, when, zipWithM_)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Data.Foldable (traverse_)
 import Data.List (delete, elemIndex)
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray)
-import Foreign.Marshal.Utils (with)
+import Foreign.Marshal.Utils (fillBytes, with)
 import Data.Char (isPrint, isSpace, ord)
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Sdl.Internal.Font.Inter (fontInterBytes, fontInterLabel)
@@ -356,94 +356,98 @@ shapeLine sf inv txt = do
     setPrimArray charOfByte 0 (totalBytes + 1) n
     indexChars 0 0 txt
   size <- fromIntegral <$> ttfShapedSize
-  allocaBytes (size * max 1 pieceCount) $ \outs -> do
+  let totalBuf = size * max 1 pieceCount
+  allocaBytes totalBuf $ \outs -> do
+    fillBytes outs 0 totalBuf
     let resultOf p = outs `plusPtr` (p * size)
-    -- Shape every piece first, so the output arrays are sized once.
-    forM_ (zip [0 ..] runs) $ \(p, (start, end, dir)) ->
-      TF.useAsPtr (T.take (end - start) (T.drop start txt)) $ \ptr len -> do
-        ok <- ttfShape (sfFont sf) (castPtr ptr) (fromIntegral len) dir (resultOf p)
-        when (ok == 0) $ ttfShapedFree (resultOf p)
-    glyphCount <- sum <$> mapM (\p -> fromIntegral <$> ttfShapedInt (resultOf p) 2) [0 .. pieceCount - 1]
-    glyphs <- newPrimArray (glyphCount * 9)
-    fontIndices <- newPrimArray glyphCount
-    -- Caret stops by character in raster pixels, NaN where no cluster
-    -- starts; a later cluster covering a character wins.
-    stops <- newPrimArray n
-    setPrimArray stops 0 n (0 / 0 :: Float)
-    let fillPieces !p !pen !height !g0 !inkEnd !endStop pieces = case pieces of
-          [] -> pure (pen, height, inkEnd, endStop)
-          (start, _, _) : rest -> do
-            let result = resultOf p
-                byteStart = if ascii then start else lengthWord8 (T.take start txt)
-            w <- fromIntegral <$> ttfShapedInt result 0
-            h <- fromIntegral <$> ttfShapedInt result 1
-            nGlyphs <- fromIntegral <$> ttfShapedInt result 2
-            nClusters <- fromIntegral <$> ttfShapedInt result 3
-            glyphPtr <- castPtr <$> ttfShapedPtr result 0
-            fontPtr <- castPtr <$> ttfShapedPtr result 1
-            clusterPtr <- castPtr <$> ttfShapedPtr result 2
-            let glyphInt :: Int -> IO Int32
-                glyphInt k = fromIntegral <$> peekElemOff (glyphPtr :: Ptr CInt) k
-                -- SDL_ttf's ten numbers a glyph start with its text offset,
-                -- which carets take from the clusters instead.
-                copyGlyphs !i !ink
-                  | i >= nGlyphs = pure ink
-                  | otherwise = do
-                      let dst = (g0 + i) * 9
-                      forM_ [1 .. 9] $ \k -> do
-                        v <- glyphInt (i * 10 + k)
-                        writePrimArray glyphs (dst + k - 1) (if k == 2 then v + fromIntegral pen else v)
-                      x1 <- readPrimArray glyphs (dst + 1)
-                      gw <- readPrimArray glyphs (dst + 3)
-                      ptr <- peekElemOff (fontPtr :: Ptr (Ptr ())) i
-                      writePrimArray fontIndices (g0 + i) (fontIndex ptr)
-                      copyGlyphs (i + 1) (max ink (fromIntegral (x1 + gw) :: Int))
-                clusterInt :: Int -> IO Int
-                clusterInt k = fromIntegral <$> peekElemOff (clusterPtr :: Ptr CInt) k
-                -- A cluster's characters share its width, from its left edge
-                -- left to right and from its right edge right to left.
-                placeClusters !i !end
-                  | i >= nClusters = pure end
-                  | otherwise = do
-                      let at k = clusterInt (i * 5 + k)
-                      (off0, len, x0, cw, flags) <- (,,,,) <$> at 0 <*> at 1 <*> at 2 <*> at 3 <*> at 4
-                      if len <= 0
-                        then placeClusters (i + 1) end
-                        else do
-                          let off = off0 + byteStart
-                              x = fromIntegral (x0 + pen) :: Float
-                              fw = fromIntegral cw
-                              rtl = flags .&. 0xFF == 5
-                          c0 <- charAt off
-                          c1 <- charAt (off + len)
-                          let k = max 1 (c1 - c0)
-                              stop j
-                                | c0 + j >= n = pure ()
-                                | rtl = writePrimArray stops (c0 + j) (x + fw - fw * fromIntegral j / fromIntegral k)
-                                | otherwise = writePrimArray stops (c0 + j) (x + fw * fromIntegral j / fromIntegral k)
-                          forM_ [0 .. k - 1] stop
-                          let end'
-                                | isNaN end && c1 == n = if rtl then x else x + fw
-                                | otherwise = end
-                          placeClusters (i + 1) end'
-            ink <- if glyphPtr == nullPtr then pure inkEnd else copyGlyphs 0 inkEnd
-            end <- if clusterPtr == nullPtr then pure endStop else placeClusters 0 endStop
-            ttfShapedFree result
-            fillPieces (p + 1) (pen + w) (max height h) (g0 + nGlyphs) ink end rest
-    (total, height, inkEnd, endStop) <- fillPieces 0 0 (0 :: Int) 0 0 (0 / 0) runs
-    carets <- newPrimArray (n + 1)
-    let fillCaret prev i = do
-          v <- readPrimArray stops i
-          let v' = if isNaN v then prev else v / inv
-          v' <$ writePrimArray carets i v'
-    foldM_ fillCaret 0 [0 .. n - 1]
-    writePrimArray carets n ((if isNaN endStop then fromIntegral total else endStop) / inv)
-    caretArr <- unsafeFreezePrimArray carets
-    glyphArr <- unsafeFreezePrimArray glyphs
-    indexArr <- unsafeFreezePrimArray fontIndices
-    let !width = fromIntegral total / inv
-        !measured = (width, fromIntegral height / inv)
-    pure (Shaped (ShapedText width (fromIntegral inkEnd / inv) caretArr) measured glyphArr indexArr (smallArrayFromList fontList))
+        freeAll = forM_ [0 .. pieceCount - 1] (ttfShapedFree . resultOf)
+    flip finally freeAll $ do
+      -- Shape every piece first, so the output arrays are sized once.
+      forM_ (zip [0 ..] runs) $ \(p, (start, end, dir)) ->
+        TF.useAsPtr (T.take (end - start) (T.drop start txt)) $ \ptr len -> do
+          ok <- ttfShape (sfFont sf) (castPtr ptr) (fromIntegral len) dir (resultOf p)
+          when (ok == 0) $ ttfShapedFree (resultOf p)
+      glyphCount <- sum <$> mapM (\p -> fromIntegral <$> ttfShapedInt (resultOf p) 2) [0 .. pieceCount - 1]
+      glyphs <- newPrimArray (glyphCount * 9)
+      fontIndices <- newPrimArray glyphCount
+      -- Caret stops by character in raster pixels, NaN where no cluster
+      -- starts; a later cluster covering a character wins.
+      stops <- newPrimArray n
+      setPrimArray stops 0 n (0 / 0 :: Float)
+      let fillPieces !p !pen !height !g0 !inkEnd !endStop pieces = case pieces of
+            [] -> pure (pen, height, inkEnd, endStop)
+            (start, _, _) : rest -> do
+              let result = resultOf p
+                  byteStart = if ascii then start else lengthWord8 (T.take start txt)
+              w <- fromIntegral <$> ttfShapedInt result 0
+              h <- fromIntegral <$> ttfShapedInt result 1
+              nGlyphs <- fromIntegral <$> ttfShapedInt result 2
+              nClusters <- fromIntegral <$> ttfShapedInt result 3
+              glyphPtr <- castPtr <$> ttfShapedPtr result 0
+              fontPtr <- castPtr <$> ttfShapedPtr result 1
+              clusterPtr <- castPtr <$> ttfShapedPtr result 2
+              let glyphInt :: Int -> IO Int32
+                  glyphInt k = fromIntegral <$> peekElemOff (glyphPtr :: Ptr CInt) k
+                  -- SDL_ttf's ten numbers a glyph start with its text offset,
+                  -- which carets take from the clusters instead.
+                  copyGlyphs !i !ink
+                    | i >= nGlyphs = pure ink
+                    | otherwise = do
+                        let dst = (g0 + i) * 9
+                        forM_ [1 .. 9] $ \k -> do
+                          v <- glyphInt (i * 10 + k)
+                          writePrimArray glyphs (dst + k - 1) (if k == 2 then v + fromIntegral pen else v)
+                        x1 <- readPrimArray glyphs (dst + 1)
+                        gw <- readPrimArray glyphs (dst + 3)
+                        ptr <- peekElemOff (fontPtr :: Ptr (Ptr ())) i
+                        writePrimArray fontIndices (g0 + i) (fontIndex ptr)
+                        copyGlyphs (i + 1) (max ink (fromIntegral (x1 + gw) :: Int))
+                  clusterInt :: Int -> IO Int
+                  clusterInt k = fromIntegral <$> peekElemOff (clusterPtr :: Ptr CInt) k
+                  -- A cluster's characters share its width, from its left edge
+                  -- left to right and from its right edge right to left.
+                  placeClusters !i !end
+                    | i >= nClusters = pure end
+                    | otherwise = do
+                        let at k = clusterInt (i * 5 + k)
+                        (off0, len, x0, cw, flags) <- (,,,,) <$> at 0 <*> at 1 <*> at 2 <*> at 3 <*> at 4
+                        if len <= 0
+                          then placeClusters (i + 1) end
+                          else do
+                            let off = off0 + byteStart
+                                x = fromIntegral (x0 + pen) :: Float
+                                fw = fromIntegral cw
+                                rtl = flags .&. 0xFF == 5
+                            c0 <- charAt off
+                            c1 <- charAt (off + len)
+                            let k = max 1 (c1 - c0)
+                                stop j
+                                  | c0 + j >= n = pure ()
+                                  | rtl = writePrimArray stops (c0 + j) (x + fw - fw * fromIntegral j / fromIntegral k)
+                                  | otherwise = writePrimArray stops (c0 + j) (x + fw * fromIntegral j / fromIntegral k)
+                            forM_ [0 .. k - 1] stop
+                            let end'
+                                  | isNaN end && c1 == n = if rtl then x else x + fw
+                                  | otherwise = end
+                            placeClusters (i + 1) end'
+              ink <- if glyphPtr == nullPtr then pure inkEnd else copyGlyphs 0 inkEnd
+              end <- if clusterPtr == nullPtr then pure endStop else placeClusters 0 endStop
+              ttfShapedFree result
+              fillPieces (p + 1) (pen + w) (max height h) (g0 + nGlyphs) ink end rest
+      (total, height, inkEnd, endStop) <- fillPieces 0 0 (0 :: Int) 0 0 (0 / 0) runs
+      carets <- newPrimArray (n + 1)
+      let fillCaret prev i = do
+            v <- readPrimArray stops i
+            let v' = if isNaN v then prev else v / inv
+            v' <$ writePrimArray carets i v'
+      foldM_ fillCaret 0 [0 .. n - 1]
+      writePrimArray carets n ((if isNaN endStop then fromIntegral total else endStop) / inv)
+      caretArr <- unsafeFreezePrimArray carets
+      glyphArr <- unsafeFreezePrimArray glyphs
+      indexArr <- unsafeFreezePrimArray fontIndices
+      let !width = fromIntegral total / inv
+          !measured = (width, fromIntegral height / inv)
+      pure (Shaped (ShapedText width (fromIntegral inkEnd / inv) caretArr) measured glyphArr indexArr (smallArrayFromList fontList))
 
 -- | Open the fonts that cover what this one lacks, the first time a text
 -- has a character it cannot draw.
@@ -522,7 +526,7 @@ coverageSourceFor c = do
 -- in that encoding.
 sdlPathEncoding :: IO TextEncoding
 sdlPathEncoding
-  | os == "mingw32" = mkTextEncoding "UTF-8"
+  | os == "mingw32" = mkTextEncoding "UTF-8//ROUNDTRIP"
   | otherwise = getFileSystemEncoding
 
 -- | Close the coverage probes, before SDL_ttf shuts down. Fallbacks copied
@@ -987,15 +991,20 @@ closeEvictedFonts cache = do
 
 -- | Reopen the base fonts from @source@ at the current pixel density, close
 -- every dynamic size, and reset the glyph atlas, which re-warms the new base
--- fonts.
+-- fonts. Replacement fonts open before the previous ones close so a failed
+-- reload leaves the cache intact.
 reloadSdlFontCache :: SdlFontCache -> FontSource -> IO ()
 reloadSdlFontCache cache source = do
-  destroySdlFontCache cache
   scale <- readIORef (sfcScaleRef cache)
   let open grid src = openCachedFont (sfcGlyphAtlas cache) scale grid src (sfcBasePt cache)
   (opened, sans) <- open False source
+  mono <- snd <$> open True (sfcMonoSource cache) `onException` closeFont (cfeFont sans)
+  (dynamic, _) <- atomicModifyIORef' (sfcDynamicCache cache) ((IM.empty, []),)
+  evicted <- atomicModifyIORef' (sfcEvicted cache) ([],)
+  (oldSans, oldMono) <- readIORef (sfcBaseEntries cache)
   writeIORef (sfcSansSourceRef cache) opened
-  writeIORef (sfcBaseEntries cache) . (sans,) . snd =<< open True (sfcMonoSource cache)
+  writeIORef (sfcBaseEntries cache) (sans, mono)
+  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (oldSans : oldMono : IM.elems dynamic) ++ evicted)
   resetGlyphAtlas cache
 
 -- | Install the cache's base fonts as the context's measurement and glyph

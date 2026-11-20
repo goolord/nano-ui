@@ -63,12 +63,15 @@ bool nano_ui_window_position(SDL_Window *window, int *x, int *y)
 
 typedef void (*nano_ui_resize_cb)(void);
 
-static nano_ui_resize_cb g_resize_cb = NULL;
+typedef struct {
+    nano_ui_resize_cb cb;
+    SDL_WindowID window_id;
+} nano_ui_resize_watch_data;
 
 static bool nano_ui_resize_watch(void *userdata, SDL_Event *event)
 {
-    (void)userdata;
-    if (!g_resize_cb || !event) {
+    nano_ui_resize_watch_data *data = (nano_ui_resize_watch_data *)userdata;
+    if (!data || !data->cb || !event) {
         return true;
     }
     /* Not SDL_EVENT_WINDOW_RESIZED: SDL sends it just before the pixel size
@@ -76,27 +79,40 @@ static bool nano_ui_resize_watch(void *userdata, SDL_Event *event)
      * frame drawn on RESIZED goes to the old-size backbuffer, shown cropped
      * or with a bare strip, and the size then counts as drawn, so the window
      * trails the drag by a step. */
-    if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
-        || event->type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
-        g_resize_cb();
+    if ((event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
+         || event->type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED)
+        && (data->window_id == 0 || event->window.windowID == data->window_id)) {
+        data->cb();
     }
     return true;
 }
 
-bool nano_ui_install_resize_watch(nano_ui_resize_cb cb)
+void *nano_ui_install_resize_watch(SDL_Window *window, nano_ui_resize_cb cb)
 {
-    if (!SDL_AddEventWatch(nano_ui_resize_watch, NULL)) {
-        g_resize_cb = NULL;
-        return false;
+    if (!cb) {
+        return NULL;
     }
-    g_resize_cb = cb;
-    return true;
+    nano_ui_resize_watch_data *data =
+        (nano_ui_resize_watch_data *)SDL_malloc(sizeof(nano_ui_resize_watch_data));
+    if (!data) {
+        return NULL;
+    }
+    data->cb = cb;
+    data->window_id = window ? SDL_GetWindowID(window) : 0;
+    if (!SDL_AddEventWatch(nano_ui_resize_watch, data)) {
+        SDL_free(data);
+        return NULL;
+    }
+    return data;
 }
 
-void nano_ui_remove_resize_watch(void)
+void nano_ui_remove_resize_watch(void *handle)
 {
-    SDL_RemoveEventWatch(nano_ui_resize_watch, NULL);
-    g_resize_cb = NULL;
+    if (!handle) {
+        return;
+    }
+    SDL_RemoveEventWatch(nano_ui_resize_watch, handle);
+    SDL_free(handle);
 }
 
 /* Size limits for a Wayland window, sent to the compositor by nano-ui rather
