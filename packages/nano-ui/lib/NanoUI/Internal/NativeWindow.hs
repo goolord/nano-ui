@@ -75,7 +75,7 @@ import Data.Foldable (traverse_)
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (ctxNativeWindow), markDirty, wakeFromThread)
+import NanoUI.Internal.Context (Context (ctxNativeWindow), markDirty, wakeAction)
 import NanoUI.Internal.Host (Host, askHostIO, clearHost, setHost)
 import NanoUI.Internal.NativeWindow.Types
 import NanoUI.Internal.Monad (NanoUI, windowSize, withContext)
@@ -439,12 +439,15 @@ queueScreenshot nw answer = do
 -- > shoot <- askScreenshot
 -- > saved <- useTaskStatus task shots (shoot >>= traverse_ (savePng "shot.png"))
 askScreenshot :: NanoUI (IO (Maybe Screenshot))
-askScreenshot = withContext $ \ctx -> maybe (pure Nothing) (shoot ctx) <$> askHostIO (ctxNativeWindow ctx)
+askScreenshot = withContext $ \ctx -> do
+  let !wake = wakeAction ctx
+  maybe (pure Nothing) (shoot wake) <$> askHostIO (ctxNativeWindow ctx)
   where
-    shoot ctx nw = do
+    shoot :: IO () -> NativeWindow -> IO (Maybe Screenshot)
+    shoot wake nw = do
       box <- newEmptyMVar
       queueScreenshot nw (putMVar box)
-      wakeFromThread ctx
+      wake
       takeMVar box
 
 -- | A screenshot per key. The first frame with a new key requests one, which

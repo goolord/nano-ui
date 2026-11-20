@@ -19,6 +19,7 @@ module NanoUI.Internal.Context.Core
   , isDirty
   , setWakeLoop
   , setWakeLoopChecked
+  , wakeAction
   , wakeFromThread
   , takeWakes
   , takeThreadWake
@@ -285,13 +286,29 @@ wakeOffLoop ctx =
 takeWakes :: Context -> IO ()
 takeWakes ctx = atomicWriteIORef (ctxWakePending ctx) False
 
+-- | Build a thread-safe wake action that retains only the wake 'IORef's and
+-- never the full 'Context', preventing background jobs and callbacks from
+-- pinning stale font metrics or caches across font reloads.
+wakeAction :: Context -> IO ()
+wakeAction ctx =
+  let !wokenRef = ctxWoken ctx
+      !pendingRef = ctxWakePending ctx
+      !loopRef = ctxWakeLoop ctx
+   in do
+        atomicWriteIORef wokenRef True
+        wasPending <- atomicModifyIORef' pendingRef (True,)
+        unless wasPending $
+          readIORef loopRef >>= \case
+            Nothing -> atomicWriteIORef pendingRef False
+            Just wake -> do
+              queued <- wake
+              unless queued (atomicWriteIORef pendingRef False)
+
 -- | Wake the loop from any thread after changing state the view reads.
 -- Publish the change first. The next frame repaints the whole window
 -- ('takeThreadWake'), since the affected widgets are unknown.
 wakeFromThread :: Context -> IO ()
-wakeFromThread ctx = do
-  atomicWriteIORef (ctxWoken ctx) True
-  wakeLoop ctx
+wakeFromThread = wakeAction
 
 -- | At frame start, before the view runs: take the wakes so far
 -- ('takeWakes'), and queue a full repaint if 'wakeFromThread' was called

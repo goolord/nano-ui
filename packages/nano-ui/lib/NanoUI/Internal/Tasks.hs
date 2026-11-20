@@ -33,7 +33,7 @@ import Data.IntSet qualified as IS
 import Data.Primitive.PrimVar (modifyPrimVar, newPrimVar, readPrimVar, writePrimVar)
 import Data.Unique (hashUnique, newUnique)
 import GHC.Conc (labelThread)
-import NanoUI.Internal.Context (Context (ctxWakeLoop, ctxHeld), intKey, wakeFromThread)
+import NanoUI.Internal.Context (Context (ctxWakeLoop, ctxHeld), intKey, wakeAction)
 import NanoUI.Internal.Resource (Resource (..), newResource, Held (..), Holding (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, freshWidget, liftIO, withContext)
 import System.Timeout (timeout)
@@ -158,7 +158,8 @@ newStream = Stream <$> newResource
 useJob :: Eq k => Resource k a -> k -> (IO () -> Maybe a -> IO (a, IO ())) -> NanoUI a
 useJob owner k start = useHeldBy owner k $ \ctx old -> do
   live <- newIORef True
-  (box, run) <- start (readIORef live >>= \l -> when l (wakeFromThread ctx)) old
+  let !wake = wakeAction ctx
+  (box, run) <- start (readIORef live >>= \l -> when l wake) old
   done <- newEmptyMVar
   -- Masked until the handler is in place, so a job killed before it first
   -- runs still reports that it has ended.
@@ -279,7 +280,7 @@ useStream (Stream owner) k initial produce = do
 -- 'useStream' is built on this. Use it directly for a thread the view does
 -- not own: publish each value where the view reads it, then wake.
 askWake :: NanoUI (IO ())
-askWake = wakeFromThread <$> askContext
+askWake = wakeAction <$> askContext
 
 -- | End-of-frame sweep: release resources whose hook did not run this frame.
 -- Two view passes in one frame count as one. When every hook ran, it touches

@@ -93,6 +93,39 @@ canRedo = not . null . historyRedo
 maxHistoryDepth :: Int
 maxHistoryDepth = 500
 
+-- | Maximum individual edits merged into one undo group.
+maxGroupEdits :: Int
+maxGroupEdits = 256
+
+-- | Approximate UTF-8 byte budget for stored undo history per field.
+maxHistoryBytes :: Int
+maxHistoryBytes = 4 * 1024 * 1024
+
+editBytes :: StoredEdit -> Int
+editBytes (StoredEdit _ rm ins) = TS.length rm + TS.length ins
+
+groupBytes :: EditGroup -> Int
+groupBytes g = foldl' (\acc e -> acc + editBytes e) 0 (groupEdits g)
+
+-- | Trim undo groups to both 'maxHistoryDepth' and 'maxHistoryBytes', always
+-- retaining the most recent group so a single large edit can still be undone.
+trimUndoGroups :: [EditGroup] -> ([EditGroup], Int)
+trimUndoGroups [] = ([], 0)
+trimUndoGroups (newest : rest) =
+  let (keptRest, countRest) = go (groupBytes newest) 1 rest
+      kept = newest : keptRest
+   in length kept `seq` (kept, countRest)
+  where
+    go !_ !n [] = ([], n)
+    go !bytes !n (g : gs)
+      | n >= maxHistoryDepth = ([], n)
+      | bytes + gb > maxHistoryBytes = ([], n)
+      | otherwise =
+          let (tailGs, totalN) = go (bytes + gb) (n + 1) gs
+           in (g : tailGs, totalN)
+      where
+        gb = groupBytes g
+
 -- | Record an edit. Typing joins the group before it while the selection is
 -- where that group left it, until a new word starts; consecutive deletes
 -- join the same way. Anything else starts a group. Recording clears redo.
@@ -105,12 +138,10 @@ record kind before edit after (EditHistory undos _ depth open) =
     _ ->
       let depth' = depth + 1
           group = EditGroup kind [stored] before after
-       in if depth' > maxHistoryDepth + 50
+       in if depth' > maxHistoryDepth + 50 || editBytes stored > 65536
             then
-              -- Walk the kept spine now: a lazy 'take' would hold every
-              -- dropped group, and the trim before it, for good.
-              let kept = take maxHistoryDepth (group : undos)
-               in length kept `seq` EditHistory kept [] maxHistoryDepth True
+              let (kept, n) = trimUndoGroups (group : undos)
+               in EditHistory kept [] n True
             else EditHistory (group : undos) [] depth' True
   where
     -- Built now, so the list keeps the compact copies and not the edit,
@@ -121,6 +152,7 @@ record kind before edit after (EditHistory undos _ depth open) =
         && kind /= EditOther
         && groupKind g == kind
         && groupAfter g == before
+        && null (drop (maxGroupEdits - 1) (groupEdits g))
         && (kind /= EditTyping || not (startsWord g))
     -- A letter typed after a space starts a new undo step.
     startsWord g = case (groupEdits g, T.uncons (editInserted edit)) of
@@ -162,7 +194,7 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
     ReplaceAll txt -> runCommand mode (Replace (Cursor 0 0) (TB.documentEnd buf) txt) ed
     Undo
       | g : rest <- historyUndo hist ->
-          restore (groupBefore g) (foldl (\b e -> TB.applyEdit (TB.invertEdit (replayed e)) b) buf (groupEdits g)) $
+          restore (groupBefore g) (foldl' (\b e -> TB.applyEdit (TB.invertEdit (replayed e)) b) buf (groupEdits g)) $
             hist {historyUndo = rest, historyRedo = g : historyRedo hist, historyDepth = historyDepth hist - 1}
     Redo
       | g : rest <- historyRedo hist ->

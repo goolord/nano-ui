@@ -19,6 +19,7 @@ module NanoUI.Internal.Derived
   )
 where
 
+import Control.Applicative ((<|>))
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
@@ -73,20 +74,27 @@ data TreeRows = forall f. TreeRows !(f TreeItem) !IntSet !Int !(SmallArray TreeR
 -- container is retained only to compare identity.
 data ComboMatches = forall f. ComboMatches !(f Text) !Text [Text] !(Maybe Float)
 
+-- | Two-generation bounded map: avoids cliff wipes when live widget count
+-- exceeds the per-generation cap while aging out unmounted widgets.
+data DerivedGen a = DerivedGen !(IntMap a) !(IntMap a)
+
+emptyDerivedGen :: DerivedGen a
+emptyDerivedGen = DerivedGen IM.empty IM.empty
+
 data DerivedCache = DerivedCache
-  { derivedTables :: !(IntMap TableDerived)
-  , derivedTrees :: !(IntMap TreeRows)
-  , derivedCombos :: !(IntMap ComboMatches)
+  { derivedTables :: !(DerivedGen TableDerived)
+  , derivedTrees :: !(DerivedGen TreeRows)
+  , derivedCombos :: !(DerivedGen ComboMatches)
   }
 
 emptyDerivedCache :: DerivedCache
-emptyDerivedCache = DerivedCache IM.empty IM.empty IM.empty
+emptyDerivedCache = DerivedCache emptyDerivedGen emptyDerivedGen emptyDerivedGen
 
 -- | A concrete typed map, chosen at the call site and inlined there.
 data DerivedField a
   = DerivedField
-      (DerivedCache -> IntMap a)
-      (IntMap a -> DerivedCache -> DerivedCache)
+      (DerivedCache -> DerivedGen a)
+      (DerivedGen a -> DerivedCache -> DerivedCache)
 
 tableCache :: DerivedField TableDerived
 tableCache = DerivedField derivedTables (\m c -> c {derivedTables = m})
@@ -99,19 +107,17 @@ comboCache = DerivedField derivedCombos (\m c -> c {derivedCombos = m})
 
 {-# INLINE lookupDerived #-}
 lookupDerived :: DerivedField a -> Int -> DerivedCache -> Maybe a
-lookupDerived (DerivedField get _) k = IM.lookup k . get
+lookupDerived (DerivedField get _) k cache =
+  let DerivedGen cur prev = get cache
+   in IM.lookup k cur <|> IM.lookup k prev
 
--- | Bound all maps together to 64 entries. Replacing an entry does not evict;
--- growing a full cache clears it, as the previous shared cache did.
+-- | Bound each cache generation to 64 entries. Rotating moves the current
+-- generation to previous instead of wiping all live entries at once.
 {-# INLINE insertDerived #-}
 insertDerived :: DerivedField a -> Int -> a -> DerivedCache -> DerivedCache
 insertDerived (DerivedField get set) k value cache =
-  let
-    full =
-      IM.size (derivedTables cache)
-        + IM.size (derivedTrees cache)
-        + IM.size (derivedCombos cache)
-        >= 64
-    base = if full && IM.notMember k (get cache) then emptyDerivedCache else cache
-   in
-    set (IM.insert k value (get base)) base
+  let DerivedGen cur prev = get cache
+      gen'
+        | IM.size cur >= 64 && IM.notMember k cur = DerivedGen (IM.singleton k value) cur
+        | otherwise = DerivedGen (IM.insert k value cur) prev
+   in set gen' cache
