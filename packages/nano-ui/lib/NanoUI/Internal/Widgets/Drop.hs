@@ -143,7 +143,7 @@ useDrop bounds = do
       posK = slotKey SlotDropPos key
   store <- liftIO (getStore ctx)
   let active0 = flagSlot activeK store
-      lastPos0 = uncurry V2 <$> lookupSlot fieldPoint posK store
+      lastPos0 = lookupSlot fieldPoint posK store
       -- A drag is active from 'DropBegin' until 'DropComplete'. A payload
       -- uses the position current at its point in the sequence.
       step (active, pos, fs, ts) ev = case dropEventType ev of
@@ -164,7 +164,7 @@ useDrop bounds = do
   when (active1 /= active0 || stored1 /= lastPos0) $
     liftIO . modifyStore ctx $
       setFlagSlot activeK active1
-        . maybe (deleteSlot fieldPoint posK) (\(V2 x y) -> insertSlot fieldPoint posK (x, y)) stored1
+        . maybe (deleteSlot fieldPoint posK) (insertSlot fieldPoint posK) stored1
   pure
     DropTarget
       { dropHovered = hovered

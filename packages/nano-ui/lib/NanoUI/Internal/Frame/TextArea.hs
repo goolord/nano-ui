@@ -358,7 +358,7 @@ syncTextAreaViewport ctx idx key fm field = do
       Rect _ _ viewW viewH = textAreaTextClip fm field bars
       scrollKey = slotKey SlotTextAreaScroll key
       revealKey = slotKey SlotTextAreaReveal key
-      (sx, sy) = findSlot fieldPoint (0, 0) scrollKey store
+      V2 sx sy = findSlot fieldPoint (V2 0 0) scrollKey store
       reveal = memberSlot fieldQuiet revealKey store
   wid <- getWidgetId (ctxNodeArena ctx) idx
   let state = TA.loadTextAreaState store key
@@ -379,7 +379,7 @@ syncTextAreaViewport ctx idx key fm field = do
       lineKey = slotKey SlotTextAreaLineH key
       lineH = textAreaLineHeight fm
       scrolled = sx' /= sx || sy' /= sy
-      resized = lookupSlot fieldPoint viewportKey store /= Just (viewW, viewH)
+      resized = lookupSlot fieldPoint viewportKey store /= Just (V2 viewW viewH)
       relined = lookupSlot fieldFloat lineKey store /= Just lineH
   -- Commands run between frames keep the caret in view with the viewport
   -- and the row height. Only what changed is written: every keystroke clears
@@ -387,9 +387,9 @@ syncTextAreaViewport ctx idx key fm field = do
   when (reveal || scrolled || resized || relined) $
     writeIORef (ctxStore ctx) $!
       deleteSlot fieldQuiet revealKey
-        . (if scrolled then insertSlot fieldPoint scrollKey (sx', sy') else id)
+        . (if scrolled then insertSlot fieldPoint scrollKey (V2 sx' sy') else id)
         . (if relined then insertSlot fieldFloat lineKey lineH else id)
-        $ (if resized then insertSlot fieldPoint viewportKey (viewW, viewH) store else store)
+        $ (if resized then insertSlot fieldPoint viewportKey (V2 viewW viewH) store else store)
   -- A glide aimed past a range that shrank (the text got shorter) would
   -- never land, since the offset is clamped back here every frame.
   clampScrollGlide ctx wid (tabRange bars)

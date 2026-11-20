@@ -361,7 +361,7 @@ drag2DFrom bounds onIt = do
   let held = findSlot fieldQuiet 0 dragK store
   active0 <- if held == 0 then pure False else (== held) <$> liftIO (leftPress ctx)
   let active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
-      prev = uncurry V2 (findSlot fieldPoint (v2X mouse, v2Y mouse) dragK store)
+      prev = findSlot fieldPoint mouse dragK store
       delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =
         V2
@@ -371,7 +371,7 @@ drag2DFrom bounds onIt = do
     press <- if active && not active0 then leftPress ctx else pure held
     modifyStore ctx $
       if active
-        then insertSlot fieldQuiet dragK press . insertSlot fieldPoint dragK (v2X mouse, v2Y mouse)
+        then insertSlot fieldQuiet dragK press . insertSlot fieldPoint dragK mouse
         else deleteSlot fieldQuiet dragK . deleteSlot fieldPoint dragK
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 

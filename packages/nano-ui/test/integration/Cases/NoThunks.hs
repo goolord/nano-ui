@@ -1,4 +1,7 @@
-{-# OPTIONS_GHC -O0 #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingVia #-}
+{-# OPTIONS_GHC -O0 -Wno-orphans #-}
 module Cases.NoThunks (tests) where
 
 import Spec
@@ -6,6 +9,8 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Store (WidgetStore (..))
 import NoThunks.Class (NoThunks, noThunks)
+
+deriving anyclass instance NoThunks V2
 
 tests :: [Spec]
 tests = [spec "no-thunks" runNoThunksTest]

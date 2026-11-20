@@ -31,11 +31,11 @@ import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), clamp, rectContains
 
 -- | Saved floating-window x/y in logical pixels, or 'Nothing' before placement.
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
-lookupWindowPos ctx wid = lookupSlot fieldPoint (intKey wid) <$> getStore ctx
+lookupWindowPos ctx wid = fmap (\(V2 x y) -> (x, y)) . lookupSlot fieldPoint (intKey wid) <$> getStore ctx
 
 -- | Saved floating-window width/height in logical pixels, or 'Nothing'.
 lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
-lookupWindowSize ctx wid = lookupSlot fieldPoint (slotKey SlotWinSize (intKey wid)) <$> getStore ctx
+lookupWindowSize ctx wid = fmap (\(V2 w h) -> (w, h)) . lookupSlot fieldPoint (slotKey SlotWinSize (intKey wid)) <$> getStore ctx
 
 -- | Save solved floating-window positions and sizes to the store for later frames.
 persistWindowPositions :: Context -> IO ()
@@ -50,12 +50,14 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
             Rect x y w h <- getNodeRect na idx
             let k = intKey wid
                 sizeKey = slotKey SlotWinSize k
+                posV = V2 x y
+                sizeV = V2 w h
             -- Keep an unchanged store as is: the write below is skipped
             -- when it is the same object.
             pure $
-              if lookupSlot fieldPoint k acc == Just (x, y) && lookupSlot fieldPoint sizeKey acc == Just (w, h)
+              if lookupSlot fieldPoint k acc == Just posV && lookupSlot fieldPoint sizeKey acc == Just sizeV
                 then acc
-                else insertSlot fieldPoint k (x, y) (insertSlot fieldPoint sizeKey (w, h) acc)
+                else insertSlot fieldPoint k posV (insertSlot fieldPoint sizeKey sizeV acc)
   !store1 <- foldClassNodesM na FloatingNodes record store0
   unless (ptrEq store1 store0) $ setStore ctx store1
  where
@@ -72,9 +74,10 @@ updateWindowDrag ctx inp =
           -- Kept on screen as placement keeps it ('windowRect'), so a pointer
           -- held past an edge stores what the window shows and moves nothing.
           Rect _ _ w h <- withWidgetNode ctx wid (Rect 0 0 0 0) (getNodeRect (ctxNodeArena ctx))
-          let pos = (clamp 0 (max 0 (winW - w)) (mx - gx), clamp 0 (max 0 (winH - h)) (my - gy))
-          moved <- (/= Just pos) <$> lookupWindowPos ctx wid
-          when moved $ modifyStore ctx (insertSlot fieldPoint (intKey wid) pos)
+          let px = clamp 0 (max 0 (winW - w)) (mx - gx)
+              py = clamp 0 (max 0 (winH - h)) (my - gy)
+          moved <- (/= Just (px, py)) <$> lookupWindowPos ctx wid
+          when moved $ modifyStore ctx (insertSlot fieldPoint (intKey wid) (V2 px py))
           pure moved
     windowGesture ctx inp isWindowDrag (\s -> s {isWindowDrag = Nothing}) drag tryStartWindowDrag
 
@@ -174,7 +177,7 @@ updateWindowResize ctx inp winW winH =
       pos <- lookupWindowPos ctx wid
       let moved = size /= Just (nw, nh) || pos /= Just (nx, ny)
       when moved $
-        modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (nw, nh) . insertSlot fieldPoint key (nx, ny))
+        modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (V2 nw nh) . insertSlot fieldPoint key (V2 nx ny))
       pure moved
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,

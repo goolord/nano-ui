@@ -65,6 +65,7 @@ import NanoUI.Internal.Equality (eqByPtr, ptrEq, sameDouble, sameFloat)
 import NanoUI.Internal.Store.Types (GridState, LineWidths, TextHistory)
 import NanoUI.Internal.RichText.Types (RichSelection)
 import NanoUI.Internal.TextEditor.Types (EditorMode)
+import NanoUI.Internal.Types (V2)
 import NanoUI.Internal.Widgets.TextDocument (TextDocument)
 import NanoUI.Widgets.TextBuffer (TextBuffer)
 
@@ -119,7 +120,7 @@ data WidgetStore = WidgetStore
   , storeInt :: !(IntMap Int)
   , storeFloat :: !(IntMap Float)
   , storeDouble :: !(IntMap Double)
-  , storePoint :: !(IntMap (Float, Float))
+  , storePoint :: !(IntMap V2)
   , storeText :: !(IntMap Text)
   , storeIntSet :: !(IntMap IntSet)
   , storeBuffer :: !(IntMap TextBuffer)
@@ -156,8 +157,8 @@ fieldFloat = Field storeFloat (\m st -> st {storeFloat = m})
 fieldDouble :: Field Double
 fieldDouble = Field storeDouble (\m st -> st {storeDouble = m})
 
--- | Paired float slots for positions, sizes, or offsets.
-fieldPoint :: Field (Float, Float)
+-- | 2D vector slots for positions, sizes, or offsets.
+fieldPoint :: Field V2
 fieldPoint = Field storePoint (\m st -> st {storePoint = m})
 
 -- | Text-value slots.

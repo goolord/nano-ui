@@ -76,14 +76,14 @@ runContextMenu (wid, ctx) rightClick child = do
   store <- liftIO (getStore ctx)
   let openK = slotKey SlotMenuOpen (intKey wid)
       posK = slotKey SlotMenuPos (intKey wid)
-      mouse@(V2 mx my) = inputMousePos inp
-      pos = if rightClick then mouse else uncurry V2 (findSlot fieldPoint (0, 0) posK store)
+      mouse = inputMousePos inp
+      pos = if rightClick then mouse else findSlot fieldPoint (V2 0 0) posK store
       cfg = (defaultPopupConfig (AnchorPoint pos)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
       -- A menu taller than the window is held inside it, as a modal is, and
       -- its rows scroll.
       Size _ winH = inputWindowSize inp
       fitWindow = maxH (max 1 (winH - 2 * windowMargin))
-  when rightClick $ liftIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK (mx, my)))
+  when rightClick $ liftIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK mouse))
   -- A left-button release inside the menu popup picks the row the press went
   -- down on. One on a disabled row, a header, a separator or the padding
   -- picks nothing.

@@ -94,7 +94,7 @@ widgetStoreHsv :: WidgetStore -> WidgetId -> Color -> (Float, Float, Float)
 widgetStoreHsv store wid fallback =
   let
     (h0, s0, v0) = rgbToHsv (widgetStoreColor store wid fallback)
-    (s, v) = findSlot fieldPoint (s0, v0) (pickerKey wid) store
+    V2 s v = findSlot fieldPoint (V2 s0 v0) (pickerKey wid) store
    in
     (findSlot fieldFloat h0 (pickerKey wid) store, s, v)
 
@@ -103,7 +103,7 @@ putColorState :: Int -> Color -> (Float, Float, Float) -> WidgetStore -> WidgetS
 putColorState key col (h, s, v) =
   insertSlot fieldInt key (packColor col)
     . insertSlot fieldFloat key h
-    . insertSlot fieldPoint key (s, v)
+    . insertSlot fieldPoint key (V2 s v)
 
 -- | The square the saturation / value field fills, centered in its node.
 colorPickerSvSquare :: Rect -> Rect

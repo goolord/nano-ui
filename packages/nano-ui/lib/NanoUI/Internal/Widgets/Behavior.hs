@@ -183,7 +183,7 @@ useReorder order responses = do
         | press = hit
         | token == findSlot fieldQuiet 0 dragK store = stored
         | otherwise = Nothing
-      (sx, sy) = if press then (mx, my) else findSlot fieldPoint (mx, my) startK store
+      startPos@(V2 sx sy) = if press then V2 mx my else findSlot fieldPoint (V2 mx my) startK store
       moved =
         isJust dragging
           && not press
@@ -205,7 +205,7 @@ useReorder order responses = do
     liftIO . modifyStore ctx $
       case next of
         Nothing -> deleteSlot fieldInt dragK . deleteSlot fieldQuiet dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
-        Just d -> insertSlot fieldInt dragK d . insertSlot fieldQuiet dragK token . insertSlot fieldPoint startK (sx, sy) . setFlagSlot movedK moved
+        Just d -> insertSlot fieldInt dragK d . insertSlot fieldQuiet dragK token . insertSlot fieldPoint startK startPos . setFlagSlot movedK moved
   pure
     Reorder
       { reorderOrder = if released && moved then preview else order

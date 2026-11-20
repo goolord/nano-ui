@@ -32,7 +32,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Context.Types (newPrevWalk, noImagePaint)
+import NanoUI.Internal.Context.Types (ScrollState (..), newPrevWalk, noImagePaint)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
@@ -192,6 +192,13 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                     writePrimVar (pwValid walk) count
                     unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldImages) $
                       setPrev (PrevFrame m cm om tm lm)
+                    -- Evict stale unmounted entries from unbounded view/selection caches.
+                    ss <- readIORef (ctxScrollState ctx)
+                    when (IM.size (ssViews ss) > 256) $
+                      writeIORef (ctxScrollState ctx) $! ss {ssViews = IM.intersection (ssViews ss) m}
+                    st <- readIORef (ctxStore ctx)
+                    when (IM.size (storeRichSelection st) > 256) $
+                      writeIORef (ctxStore ctx) $! st {storeRichSelection = IM.intersection (storeRichSelection st) m}
             | otherwise = do
                 wid <- getWidgetId na i
                 superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
@@ -976,14 +983,18 @@ storeKeyOwners na wanted = do
             if hashWidgetId wid == 0
               then go (i - 1) found m
               else do
-                let !k = intKey wid
-                    add (!c, !m') sk
-                      | IS.member sk wanted && IM.notMember sk m' = (c + 1, IM.insert sk i m')
-                      | otherwise = (c, m')
-                    -- The widget's own key first, then each sub-slot spelling.
-                    (found', m'') =
-                      foldl' (\acc s -> add acc (slotKey s k)) (add (found, m) k) ownerSlots
-                go (i - 1) found' m''
+                nt <- getNodeType na i
+                if nt == NodeText || nt == NodeSpacer || nt == NodeSeparator || nt == NodeImage || nt == NodeBox
+                  then go (i - 1) found m
+                  else do
+                    let !k = intKey wid
+                        add (!c, !m') sk
+                          | IS.member sk wanted && IM.notMember sk m' = (c + 1, IM.insert sk i m')
+                          | otherwise = (c, m')
+                        -- The widget's own key first, then each sub-slot spelling.
+                        (found', m'') =
+                          foldl' (\acc s -> add acc (slotKey s k)) (add (found, m) k) ownerSlots
+                    go (i - 1) found' m''
   go (n - 1) (0 :: Int) IM.empty
 
 -- | The sub-slots whose writes repaint from the store at paint time: carets and

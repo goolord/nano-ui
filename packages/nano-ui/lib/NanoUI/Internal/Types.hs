@@ -58,13 +58,14 @@ import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray, newPrimArray, primArrayFromList, setPrimArray)
 import Data.Primitive.Types (Prim)
 import Data.Word (Word8, Word32)
+import GHC.Generics (Generic)
 
 -- | A two-component point, offset, or vector; units depend on its use.
 data V2 = V2
   { v2X :: {-# UNPACK #-} !Float
   , v2Y :: {-# UNPACK #-} !Float
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
 
 -- | Width and height in logical pixels.
 data Size = Size

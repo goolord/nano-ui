@@ -41,7 +41,7 @@ import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId,
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, fixedH, minW)
-import NanoUI.Internal.Types (DamageBounds (..), clamp, onGrid)
+import NanoUI.Internal.Types (DamageBounds (..), V2 (..), clamp, onGrid)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.WidgetText (packTextNodeStyle)
@@ -235,7 +235,7 @@ textAreaCore f wid value = do
     liftIO . setStore ctx $
       insertSlot fieldDocument seenKey value
         . adoptDocument
-        . overField fieldPoint (IM.insertWith (\_ old -> old) (slotKey SlotTextAreaScroll key) (0, 0))
+        . overField fieldPoint (IM.insertWith (\_ old -> old) (slotKey SlotTextAreaScroll key) (V2 0 0))
         . insertSlot fieldEditorMode (slotKey SlotTextMode key) multiLineMode
         $ store0
   store <- liftIO (getStore ctx)
@@ -315,8 +315,8 @@ loadTextAreaState store key =
       TB.Cursor row col = TB.getCursor buf
       anchorRow = findSlot fieldInt row (slotKey SlotTextAreaAnchorRow key) store
       anchorCol = findSlot fieldInt col (slotKey SlotTextAreaAnchorCol key) store
-      (sx, sy) = findSlot fieldPoint (0, 0) (slotKey SlotTextAreaScroll key) store
-      (vw, vh) = findSlot fieldPoint (200, 96) (slotKey SlotTextAreaViewport key) store
+      V2 sx sy = findSlot fieldPoint (V2 0 0) (slotKey SlotTextAreaScroll key) store
+      V2 vw vh = findSlot fieldPoint (V2 200 96) (slotKey SlotTextAreaViewport key) store
    in TextAreaState
         { tasBuffer = buf
         , tasSelectionAnchor = TB.clampCursor buf (TB.Cursor anchorRow anchorCol)
@@ -336,9 +336,9 @@ loadTextAreaState store key =
 -- font, brings it into view across ('SlotTextAreaReveal').
 saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state =
-  insertSlot fieldPoint (slotKey SlotTextAreaScroll key) (realToFrac sx, realToFrac sy)
+  insertSlot fieldPoint (slotKey SlotTextAreaScroll key) (V2 (realToFrac sx) (realToFrac sy))
     . insertSlot fieldQuiet (slotKey SlotTextAreaReveal key) 1
-    . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (realToFrac vw, realToFrac vh)
+    . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (V2 (realToFrac vw) (realToFrac vh))
     . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (tasBuffer state)
     . insertSlot fieldHistory (slotKey SlotTextHistory key) (AreaHistory (tasHistory state))
     . insertSlot fieldInt (slotKey SlotTextAreaAnchorRow key) anchorRow
