@@ -38,6 +38,8 @@ module NanoUI.Internal.WidgetText
   , buttonFlagContent
   , buttonFlagChoice
   , buttonFlagRow
+  , ButtonKind (..)
+  , buttonKindOf
   , containerFlagInert
   , containerFlagClip
   , hasFlag
@@ -431,6 +433,34 @@ buttonFlagMask :: Int
 buttonFlagMask =
   buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar .|. buttonFlagContent
     .|. buttonFlagChoice .|. buttonFlagRow
+
+-- | Mutually exclusive visual role of a 'NodeButton' decoded from its style flags.
+data ButtonKind
+  = ButtonPlain
+  | ButtonClose
+  | ButtonTab
+  | ButtonTable
+  | ButtonMenu
+  | ButtonMenuBar
+  | ButtonContent
+  | ButtonChoice
+  | ButtonRow
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | Decode a button's visual role from its packed style flags. Inlined so
+-- case analysis compiles to direct bit-test jumps with zero allocation.
+{-# INLINE buttonKindOf #-}
+buttonKindOf :: Int -> ButtonKind
+buttonKindOf si
+  | hasFlag buttonFlagClose si = ButtonClose
+  | hasFlag buttonFlagTab si = ButtonTab
+  | hasFlag buttonFlagTable si = ButtonTable
+  | hasFlag buttonFlagMenu si = ButtonMenu
+  | hasFlag buttonFlagMenuBar si = ButtonMenuBar
+  | hasFlag buttonFlagContent si = ButtonContent
+  | hasFlag buttonFlagChoice si = ButtonChoice
+  | hasFlag buttonFlagRow si = ButtonRow
+  | otherwise = ButtonPlain
 
 -- | Marks a @NodeContainer@ whose widgets are for display: the pointer passes
 -- through them to the widget they are drawn in

@@ -160,50 +160,51 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
       da = peDrawArena env
       fm = peFontMetrics env
       theme = peTheme env
-      -- Strict: lazy Bools here would allocate thunks per widget per frame.
-      !isButton = nt == NodeButton
-      !isClose = isButton && hasFlag buttonFlagClose si
-      !isTab = isButton && hasFlag buttonFlagTab si
-      !isTable = isButton && hasFlag buttonFlagTable si
-      !isMenuItem = isButton && hasFlag buttonFlagMenu si
-      !isMenu = isMenuItem || (isButton && hasFlag buttonFlagMenuBar si)
-      !isChoice = isButton && hasFlag buttonFlagChoice si
-      !isRow = isButton && hasFlag buttonFlagRow si
+      !bkind = if nt == NodeButton then buttonKindOf si else ButtonPlain
       !hasBg = colorA (styleBg style) > 0
-      !opaqueBg
-        | isMenu = hasBg
-        | isClose || isTab || isChoice = False
-        | isTable || isRow = hasBg
-        | otherwise =
-            nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
+      !opaqueBg = case bkind of
+        ButtonMenu -> hasBg
+        ButtonMenuBar -> hasBg
+        ButtonTable -> hasBg
+        ButtonRow -> hasBg
+        ButtonClose -> False
+        ButtonTab -> False
+        ButtonChoice -> False
+        _ -> nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
+      !drawStroke = case bkind of
+        ButtonTab -> False
+        ButtonTable -> False
+        ButtonMenu -> False
+        ButtonMenuBar -> False
+        ButtonRow -> False
+        _ -> opaqueBg
   when opaqueBg $ fillStyledRect da style menuRowRect
-  when (opaqueBg && not (isTab || isTable || isMenu || isRow)) $
-    strokeStyledRect da style (Rect x y w h)
-  when isMenuItem $ do
-    wid <- getWidgetId (peNodeArena env) idx
-    hot <- readIORef (ctxHotId ctx)
-    -- Same marker as the text-field context menu, from the shared menu
-    -- metrics, so the two painters cannot drift.
-    when (wid == hot) $ paintMenuAccent da theme menuRowRect
-  when isTab $
-    paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style (Rect x y w h)
-  when isTable $
-    paintTableHeader da theme (value > 0.5) style x y w h
-  when isChoice $
-    drawChoiceControl da fm style theme x y h value (buttonVisualStyle si == 0)
-  when isRow $ do
-    let (depth, hasKids, expanded) = treeDecodeStyle si
-    when hasKids $
-      drawTreeChevron da fm x y h depth expanded (styleFg style)
+  when drawStroke $ strokeStyledRect da style (Rect x y w h)
   case nt of
     NodeSlider -> paintSliderBody env x y w h value
-    NodeButton
-      | isClose, buttonVisualStyle si == buttonCloseTab -> paintTabClose env idx (Rect x y w h)
-      | isClose -> drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
     NodeSelect -> drawSelectChevron da False x y w h (styleFg style)
     NodeColorPicker -> do
       store <- getStore ctx
       drawColorPickerPart (peNodeArena env) idx fm da store style (Rect x y w h)
+    NodeButton -> case bkind of
+      ButtonMenu -> do
+        wid <- getWidgetId (peNodeArena env) idx
+        hot <- readIORef (ctxHotId ctx)
+        when (wid == hot) $ paintMenuAccent da theme menuRowRect
+      ButtonTab ->
+        paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style (Rect x y w h)
+      ButtonTable ->
+        paintTableHeader da theme (value > 0.5) style x y w h
+      ButtonChoice ->
+        drawChoiceControl da fm style theme x y h value (buttonVisualStyle si == 0)
+      ButtonRow -> do
+        let (depth, hasKids, expanded) = treeDecodeStyle si
+        when hasKids $
+          drawTreeChevron da fm x y h depth expanded (styleFg style)
+      ButtonClose
+        | buttonVisualStyle si == buttonCloseTab -> paintTabClose env idx (Rect x y w h)
+        | otherwise -> drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
+      _ -> pure ()
     _ -> pure ()
 
 -- | A tab header's close button: its cross in the header's label colour

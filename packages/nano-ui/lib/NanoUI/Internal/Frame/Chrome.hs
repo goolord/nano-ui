@@ -258,13 +258,11 @@ widgetVisualStyle ctx nt idx = do
   focus <- readIORef (ctxFocusId ctx)
   animT <- getAnimationValue ctx wid
   styleIdx <- if nt == NodeButton then getStyleIdx (ctxNodeArena ctx) idx else pure 0
-  let buttonFlag flag = nt == NodeButton && hasFlag flag styleIdx
-      isClose = buttonFlag buttonFlagClose
-      isTab = buttonFlag buttonFlagTab
-      isTable = buttonFlag buttonFlagTable
-      isMenu = buttonFlag buttonFlagMenu || buttonFlag buttonFlagMenuBar
-      isChoice = buttonFlag buttonFlagChoice
-      isRow = buttonFlag buttonFlagRow
+  let !bkind = if nt == NodeButton then buttonKindOf styleIdx else ButtonPlain
+      !isChoice = bkind == ButtonChoice
+      !isRow = bkind == ButtonRow
+      !isClose = bkind == ButtonClose
+      !isMenu = bkind == ButtonMenu || bkind == ButtonMenuBar
       -- Only these consult the floating ancestor; skip the parent walk for
       -- the common panel/text/button path.
       modalAware = isChoice || isRow || nt == NodeSlider
@@ -280,9 +278,9 @@ widgetVisualStyle ctx nt idx = do
           NodeSelect -> focusBorder (themeButton theme)
           NodeColorPicker -> focusBorder (themeInput theme)
           NodeSlider -> clearStyle (themeInput theme)
-          NodeButton
-            | isChoice -> clearStyle (themeButton theme)
-            | isRow ->
+          NodeButton -> case bkind of
+            ButtonChoice -> clearStyle (themeButton theme)
+            ButtonRow ->
                 let btn = themeButton theme
                     accent = themeAccent theme
                     surface = if mFloat == Just NodeModal then overlayMenuStyle theme else themePanel theme
@@ -298,11 +296,12 @@ widgetVisualStyle ctx nt idx = do
                  in if val > 0.5
                       then rowStyle (lerpColor unselectedBg accent 0.25) 0.35 0.45
                       else rowStyle unselectedBg 0.12 0.22
-            | isMenu -> menuItemVisualStyle theme val
-            | isClose -> closeButtonStyle theme hotT
-            | isTab -> tabHeaderVisualStyle theme (buttonVisualStyle styleIdx) (val > 0.5)
-            | isTable -> tableHeaderVisualStyle theme (val > 0.5)
-            | val > 0.5 ->
+            ButtonMenu -> menuItemVisualStyle theme val
+            ButtonMenuBar -> menuItemVisualStyle theme val
+            ButtonClose -> closeButtonStyle theme hotT
+            ButtonTab -> tabHeaderVisualStyle theme (buttonVisualStyle styleIdx) (val > 0.5)
+            ButtonTable -> tableHeaderVisualStyle theme (val > 0.5)
+            _ | val > 0.5 ->
                 let (fill, label) = case buttonToneOf styleIdx of
                       Nothing -> (themeAccent theme, themeOnAccent theme)
                       Just t -> let c = toneColor theme t in (c, readableOn theme c)
@@ -312,6 +311,7 @@ widgetVisualStyle ctx nt idx = do
                   , styleFg = label
                   , styleBorder = fill
                   }
+              | otherwise -> themeButton theme
           _ -> themeButton theme
       widgetBase =
         case mFloat of

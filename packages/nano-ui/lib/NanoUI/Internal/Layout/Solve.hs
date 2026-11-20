@@ -619,25 +619,29 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
             pure (max textInputMinWidth pw, textInputFieldHeight fm)
       -- A text area resolves its own font as it draws ('resolveTextAreaFont').
       NodeTextArea -> pure (textInputMinWidth, max 96 (textInputFieldHeight baseFm * 4))
-      _
-        | nt == NodeButton && hasFlag buttonFlagChoice si ->
-            measureMarkedWidget fm measure txt (checkboxLeading fm) (0, 0)
-        | nt == NodeButton && hasFlag buttonFlagRow si -> do
-            let (depth, _, _) = treeDecodeStyle si
-            measureMarkedWidget fm measure txt (treeRowLeading fm depth) (treeItemPadding fm)
-        | otherwise -> do
-            let body = if T.null txt then " " else txt
-                (padX, padY)
-                  | nt /= NodeButton = widgetPadding fm
-                  | hasFlag buttonFlagTable si = (tableHeaderPadX, 0)
-                  | hasFlag buttonFlagTab si = (2 * tabHeaderPadX, snd (buttonPadding fm))
-                  -- Menu rows reserve the same gutter the text-field context
-                  -- menu paints (outer pad + item pad on each side of the
-                  -- label), so the generic popup panel sizes identically.
-                  | hasFlag buttonFlagMenu si = (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding fm))
-                  | otherwise = buttonPadding fm
-            (mw, mh) <- measure body
-            pure (mw + padX, mh + padY)
+      NodeButton -> case buttonKindOf si of
+        ButtonChoice ->
+          measureMarkedWidget fm measure txt (checkboxLeading fm) (0, 0)
+        ButtonRow -> do
+          let (depth, _, _) = treeDecodeStyle si
+          measureMarkedWidget fm measure txt (treeRowLeading fm depth) (treeItemPadding fm)
+        bkind -> do
+          let body = if T.null txt then " " else txt
+              (padX, padY) = case bkind of
+                ButtonTable -> (tableHeaderPadX, 0)
+                ButtonTab -> (2 * tabHeaderPadX, snd (buttonPadding fm))
+                -- Menu rows reserve the same gutter the text-field context
+                -- menu paints (outer pad + item pad on each side of the
+                -- label), so the generic popup panel sizes identically.
+                ButtonMenu -> (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding fm))
+                _ -> buttonPadding fm
+          (mw, mh) <- measure body
+          pure (mw + padX, mh + padY)
+      _ -> do
+        let body = if T.null txt then " " else txt
+            (padX, padY) = widgetPadding fm
+        (mw, mh) <- measure body
+        pure (mw + padX, mh + padY)
   -- A widget's children are its adornments ('measureAdorned').
   kids <- readTree a idx TreeFirstChild
   (w, h) <- if kids < 0 then pure (rawW, rawH) else measureAdorned env measurer idx nt si txt rawW rawH
