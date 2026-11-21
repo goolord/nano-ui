@@ -239,12 +239,6 @@ fieldAdornmentColor lay theme =
   let s = themeInput theme
    in fieldIconColor s {styleFg = fromMaybe (styleFg s) (layoutFontColor lay)}
 
--- | One frame of a single-line field's text state: load the text (seeding
--- @initial@ on first use) with its cursor and anchor, run the editor while
--- focused, and save any change. While unfocused, @unfocusedText@ (when given)
--- replaces the stored text, so a field that mirrors another value follows it.
--- Returns the text before and after this frame, whether it is focused, and
--- whether a command run from outside the frame changed it.
 -- | Register a focusable field and request IME input when it holds keyboard
 -- focus and @acceptIme@ is 'True'.
 focusAndIme :: Context -> WidgetId -> Bool -> InputPurpose -> NanoUI Bool
@@ -255,6 +249,12 @@ focusAndIme ctx wid acceptIme purpose = do
     liftIO (requestInputMethod ctx wid Nothing purpose)
   pure isFocus
 
+-- | One frame of a single-line field's text state: load the text (seeding
+-- @initial@ on first use) with its cursor and anchor, run the editor while
+-- focused, and save any change. While unfocused, @unfocusedText@ (when given)
+-- replaces the stored text, so a field that mirrors another value follows it.
+-- Returns the text before and after this frame, whether it is focused, and
+-- whether a command run from outside the frame changed it.
 editTextField :: WidgetId -> EditorMode -> Text -> Maybe Text -> NanoUI (Text, Text, Bool, Bool)
 editTextField wid mode initial unfocusedText = do
   ctx <- askContext

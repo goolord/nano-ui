@@ -655,9 +655,7 @@ renderNode env dividers node mt = case node of
         renderPane env pid (M.findWithDefault (Rect 0 0 0 0) pid (geRegions env))
   Split sid ax ratio a b ->
     withKey sid $ do
-      let (ma, mb) = case mt of
-            MinBranch _ _ l r -> (l, r)
-            _ -> (buildMinTree (geMinSize env) (geGutter env) a, buildMinTree (geMinSize env) (geGutter env) b)
+      let (ma, mb) = splitMinChildren (geMinSize env) (geGutter env) a b mt
           (wa, ha) = minTreeDims ma
           (wb, hb) = minTreeDims mb
           mDiv = M.lookup sid dividers

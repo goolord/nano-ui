@@ -206,7 +206,7 @@ waterFillShrink mainArr factorArr minAt need0 n
                 let !slack = main - lo
                 pure ((slack / f, slack, lo, f, i) : acc)
           stopFrom !remNeed !total ((_, slack, lo, f, i) : rest)
-            | remNeed > 0 && slack * total < remNeed * f = do
+            | remNeed > 0 && total > 0 && slack * total < remNeed * f = do
                 writePrimArray mainArr i lo
                 writePrimArray factorArr i 0
                 stopFrom (remNeed - slack) (total - f) rest

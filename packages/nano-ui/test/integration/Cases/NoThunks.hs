@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DerivingVia #-}
 {-# OPTIONS_GHC -O0 -Wno-orphans #-}
 module Cases.NoThunks (tests) where
 

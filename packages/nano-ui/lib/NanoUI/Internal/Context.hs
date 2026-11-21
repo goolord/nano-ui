@@ -691,8 +691,7 @@ getHotId ctx = readIORef (ctxHotId ctx)
 registerFocusable :: Context -> WidgetId -> IO ()
 registerFocusable ctx wid = do
   scope <- getArenaScope (ctxNodeArena ctx)
-  inert <- isInert ctx wid
-  when (scope .&. 1 == 0 && not inert) $ do
+  when (scope .&. 3 == 0) $ do
     idx <- readPrimVar (ctxFocusablesCount ctx)
     arr <- readIORef (ctxFocusables ctx)
     cap <- getSizeofMutablePrimArray arr

@@ -193,11 +193,14 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                     unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldImages) $
                       setPrev (PrevFrame m cm om tm lm)
                     -- Evict stale unmounted entries from unbounded view/selection caches.
+                    -- Scale the threshold with the live node map so views with more than
+                    -- 256 active widgets do not re-intersect on every frame.
+                    let !pruneLimit = max 256 (2 * IM.size m)
                     ss <- readIORef (ctxScrollState ctx)
-                    when (IM.size (ssViews ss) > 256) $
+                    when (IM.size (ssViews ss) > pruneLimit) $
                       writeIORef (ctxScrollState ctx) $! ss {ssViews = IM.intersection (ssViews ss) m}
                     st <- readIORef (ctxStore ctx)
-                    when (IM.size (storeRichSelection st) > 256) $
+                    when (IM.size (storeRichSelection st) > pruneLimit) $
                       writeIORef (ctxStore ctx) $! st {storeRichSelection = IM.intersection (storeRichSelection st) m}
             | otherwise = do
                 wid <- getWidgetId na i

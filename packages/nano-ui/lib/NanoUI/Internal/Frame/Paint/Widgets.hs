@@ -91,7 +91,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
       da = peDrawArena env
       fm = peFontMetrics env
   style <- widgetVisualStyleWith ctx (peHotId env) (peActiveId env) (peFocusId env) NodeTextInput idx
-  focus <- textInputFocused ctx idx
+  focus <- (== peFocusId env) <$> getWidgetId (peNodeArena env) idx
   si <- getStyleIdx (peNodeArena env) idx
   if hasFlag textInputFlagNumeric si
     then do

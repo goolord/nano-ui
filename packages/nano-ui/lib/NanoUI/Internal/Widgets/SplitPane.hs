@@ -14,6 +14,7 @@ module NanoUI.Internal.Widgets.SplitPane
   , MinTree (..)
   , buildMinTree
   , minTreeDims
+  , splitMinChildren
   , alongAxis
   , mainLen
   , layoutNode
@@ -119,6 +120,13 @@ minTreeDims :: MinTree -> (Float, Float)
 minTreeDims (MinLeaf w h) = (w, h)
 minTreeDims (MinBranch w h _ _) = (w, h)
 
+-- | Extract the child minimum trees for a 'Split' node, rebuilding them if the
+-- supplied 'MinTree' does not match the branch shape.
+{-# INLINE splitMinChildren #-}
+splitMinChildren :: Float -> Float -> GridNode -> GridNode -> MinTree -> (MinTree, MinTree)
+splitMinChildren _ _ _ _ (MinBranch _ _ l r) = (l, r)
+splitMinChildren minSize spacing a b _ = (buildMinTree minSize spacing a, buildMinTree minSize spacing b)
+
 -- | Compute the minimum @(width, height)@ for every node of @GridNode@ in a
 -- single O(P) bottom-up pass.
 buildMinTree :: Float -> Float -> GridNode -> MinTree
@@ -209,18 +217,10 @@ clampRatio spacing d r0
 layoutNode :: Float -> Float -> GridNode -> Rect -> (Map Word64 Rect, [DividerInfo])
 layoutNode minSize spacing root = go root (buildMinTree minSize spacing root)
   where
-    go sp mt r = case (sp, mt) of
-      (Pane pid, _) -> (M.singleton pid r, [])
-      (Split sid axis ratio0 a b, MinBranch _ _ ma mb) ->
-        let mins = splitMinsTree axis ma mb
-            (rA, rB, band) = splitBounds axis spacing r (uncurry (splitLength spacing (mainLen axis r)) mins ratio0)
-            self = DividerInfo sid axis r band ratio0 mins
-            (regionsA, divsA) = go a ma rA
-            (regionsB, divsB) = go b mb rB
-         in (M.union regionsA regionsB, self : divsA <> divsB)
-      (Split sid axis ratio0 a b, _) ->
-        let ma = buildMinTree minSize spacing a
-            mb = buildMinTree minSize spacing b
+    go sp mt r = case sp of
+      Pane pid -> (M.singleton pid r, [])
+      Split sid axis ratio0 a b ->
+        let (ma, mb) = splitMinChildren minSize spacing a b mt
             mins = splitMinsTree axis ma mb
             (rA, rB, band) = splitBounds axis spacing r (uncurry (splitLength spacing (mainLen axis r)) mins ratio0)
             self = DividerInfo sid axis r band ratio0 mins
@@ -279,9 +279,7 @@ reflowFixed isFixed minSize spacing oldR0 newR0 root = go oldR0 newR0 root (buil
     go oldR newR (Split sid axis ratio a b) mt =
       Split sid axis ratio' (go oldA newA a ma) (go oldB newB b mb)
       where
-        (ma, mb) = case mt of
-          MinBranch _ _ l r -> (l, r)
-          _ -> (buildMinTree minSize spacing a, buildMinTree minSize spacing b)
+        (ma, mb) = splitMinChildren minSize spacing a b mt
         (mA, mB) = splitMinsTree axis ma mb
         oldAvail = mainLen axis oldR
         newAvail = mainLen axis newR

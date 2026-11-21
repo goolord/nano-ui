@@ -292,3 +292,26 @@ spec = do
         , (T.replicate 10000 "猫", 5000, (0, 10000))
         ]
         $ \(t, i :: Int, want) -> (T.take 20 t, i, textWordBounds t i) `shouldBe` (T.take 20 t, i, want)
+
+  describe "cluster movement" $
+    it "steps left symmetrically with right across combining marks, ZWJ chains, flags, and long lines" $
+      forM_
+        [ "abc"
+        , "cafe\x0301x"
+        , "a\x200Db\x200Dc"
+        , "a\x200D\n"
+        , "\x1F1FA\x1F1F8\x1F1EC\x1F1E7"
+        , T.replicate 200 "a" <> "e\x0301\x0302"
+        ]
+        $ \t -> do
+          let walkRight b =
+                let b' = TB.moveRight b
+                 in if TB.getCursor b' == TB.getCursor b then [TB.getCursor b] else TB.getCursor b : walkRight b'
+              walkLeft b =
+                let b' = TB.moveLeft b
+                 in if TB.getCursor b' == TB.getCursor b then [TB.getCursor b] else TB.getCursor b : walkLeft b'
+              start0 = TB.fromText t
+              fwd = walkRight start0
+              atEndBuf = TB.withCursor (last fwd) start0
+              bwd = reverse (walkLeft atEndBuf)
+          bwd `shouldBe` fwd

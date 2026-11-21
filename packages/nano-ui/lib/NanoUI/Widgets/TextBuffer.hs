@@ -200,8 +200,7 @@ moveRight buf = withCursor (positionRight buf (getCursor buf)) buf
 
 positionLeft :: TextBuffer -> Cursor -> Cursor
 positionLeft buf (Cursor row col)
-  -- The start of the cluster the caret ends, read from the start of the
-  -- line: only there can clusters be told apart.
+  -- Walk back to the start of the cluster immediately before the caret.
   | col > 0 = Cursor row (prevClusterStart (lineAt row buf) col)
   | row > 0 = Cursor (row - 1) (T.length (lineAt (row - 1) buf))
   | otherwise = Cursor 0 0

@@ -536,6 +536,20 @@ runLayoutFlowTest ctx failed = do
     checkGt (rectX right) (rectX leftTop + 1)
   kvCtx <- newPixelContext
   runSim kvCtx failed (withInput 320 400) kvs (above "Line 5" "Tree")
+  -- More than 8 shrinkable children hitting staggered floors triggers waterFillShrink.
+  shrinkCtx <- newPixelContext
+  let floors = [100, 49, 45.4, 45.08, 45.06, 45.055, 45.054, 45.0539, 45.05388, 0, 0, 0 :: Float]
+      shrinkUi = rowWith (tight . gap 0 . fixedW 600) $
+        forM_ floors $ \mw ->
+          rowWith (\l -> (tight . gap 0 . minW mw $ l) {layoutWidth = Shrink 1, layoutHeight = Fixed 10}) $
+            box (fixedWH 100 10) red
+  _ <- warmup2 shrinkCtx (withInput 700 100) shrinkUi
+  -- Each item is a row + inner box (2 nodes per item) after the outer row (node 0).
+  allRs <- arenaRects shrinkCtx
+  let ws = [rectW (allRs !! (1 + 2 * i)) | i <- [0 .. length floors - 1]]
+  assertEq failed (length floors) (length ws)
+  assert failed (all (\(mw, w) -> w + 0.5 >= mw) (zip floors ws))
+  assert failed (abs (sum ws - 600) <= 1.0)
 
 -- | A frame with no widgets runs input, redraw and cursor queries on the
 -- empty arena, not on node 0, which starts out as its own child: reading it

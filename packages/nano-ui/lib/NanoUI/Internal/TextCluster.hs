@@ -61,28 +61,34 @@ prevClusterStart :: Text -> Int -> Int
 prevClusterStart t !k
   | k <= 1 = 0
   | otherwise =
-      let prefix = T.take k t
-          target = k - 1
-          syncPos = rewind k prefix
-          run !i s =
-            let n = clusterLength s
-             in if n == 0 || i + n > target
-                  then i
-                  else run (i + n) (T.drop n s)
-       in case T.unsnoc prefix of
-            Just (rest, c)
-              | not (attaches c || c == '\x200D' || isRegional c)
-              , not (endsWithZWJ rest) -> target
-            _ -> run syncPos (T.drop syncPos prefix)
+      let (prefix, suffix) = T.splitAt k t
+          -- 'T.null suffix' holds only at or past end-of-line; checking length
+          -- there keeps out-of-bounds offsets consistent with 'clusterBounds'.
+          !len = if T.null suffix then T.length prefix else k
+       in if k > len
+            then len
+            else case T.unsnoc prefix of
+              Nothing -> 0
+              Just (rest, c)
+                | not (attaches c || c == '\x200D' || isRegional c)
+                , not (endsWithZWJ rest) -> k - 1
+                | otherwise ->
+                    let !target = k - 1
+                        !back = rewind 0 prefix
+                        !syncPos = k - back
+                        run !i s =
+                          let n = clusterLength s
+                           in if n == 0 || i + n > target
+                                then i
+                                else run (i + n) (T.drop n s)
+                     in run syncPos (T.takeEnd back prefix)
   where
     endsWithZWJ s = case T.unsnoc s of
       Just (_, '\x200D') -> True
       _ -> False
-    rewind !i s
-      | i <= 0 = 0
-      | otherwise = case T.unsnoc s of
-          Nothing -> 0
-          Just (rest, c)
-            | c == '\n' -> i - 1
-            | attaches c || c == '\x200D' || isRegional c || endsWithZWJ rest -> rewind (i - 1) rest
-            | otherwise -> i - 1
+    rewind !back s = case T.unsnoc s of
+      Nothing -> back
+      Just (rest, c)
+        | c == '\n' -> back + 1
+        | attaches c || c == '\x200D' || isRegional c || endsWithZWJ rest -> rewind (back + 1) rest
+        | otherwise -> back + 1

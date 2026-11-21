@@ -329,11 +329,11 @@ data NodeArenaArrays = NodeArenaArrays
   -- ^ Each node's font colour: 0 for none, and otherwise the colour's 32-bit
   -- word with bit 32 set. See 'getNodeFontColor'.
   , naArrScope :: !(IOArr Int)
-  -- ^ The paint scope each node was added under: the theme that a @styled@ or
-  -- @disabledWhen@ block around the node selected, and whether the node is
-  -- disabled. The theme index sits above bit 0, with 0 for the context's
-  -- theme, and bit 0 is the disabled flag. See
-  -- 'NanoUI.Internal.Context.Types.ThemeScopes'.
+  -- ^ The scope each node was added under: the theme that a @styled@ or
+  -- @disabledWhen@ block around the node selected, whether the node is
+  -- disabled, and whether it is inert. Bit 0 is the disabled flag, bit 1 is
+  -- the inert flag, and the theme index sits above bit 1 (0 for the context's
+  -- theme). See 'NanoUI.Internal.Context.Types.ThemeScopes'.
   , naArrImageId :: !(IOArr Int)
   -- ^ Each image node's image id ('setImageId'). Only image nodes set it.
   }
@@ -1059,7 +1059,7 @@ getNodeFontColor na idx = do
   let hasColor = (val .&. 0x100000000) /= 0
   pure (if hasColor then Just (Color (fromIntegral (val .&. 0xFFFFFFFF))) else Nothing)
 
--- | Packed paint scope: theme index above bit 0, disabled flag in bit 0.
+-- | Packed scope: theme index above bit 1, inert flag in bit 1, disabled flag in bit 0.
 {-# INLINE getNodeScope #-}
 getNodeScope :: NodeArena -> NodeIdx -> IO Int
 getNodeScope na idx = arenaArrays na >>= \a -> readPrimArray (naArrScope a) idx

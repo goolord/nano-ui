@@ -20,34 +20,147 @@
 -- stay allocated from one frame to the next. The 'LayoutCache' defined here
 -- lets a frame whose layout inputs did not change skip the solve.
 module NanoUI.Internal.Layout.Arena
-  ( module NanoUI.Internal.Layout.Arena.Types
-  , module NanoUI.Internal.Layout.Arena.Query
-  , module NanoUI.Internal.Layout.Arena.Cache
+  ( NodeIdx
+  , IOArr
+  , NodeType (..)
+  , NodeArenaArrays (..)
+  , isWidgetNode
+  , packsNodeFont
+  , labelFontShift
+  , nodeFontBits
+  , hasCenteredLabel
+  , isContainerNode
+  , isScrollNode
+  , isFloatingNode
+  , NodeClass (..)
+  , SizingTag (..)
+  , DirTag (..)
+  , NodeArena (..)
+  , WidthMemo
+  , IdIndex
+  , FlexScratch (..)
   , newNodeArena
   , resetNodeArena
+  , arenaCount
+  , topModalNode
+  , floatingNodeCount
+  , layeredNodeCount
+  , arenaArrays
+  , GeomCol (..)
+  , StyleCol (..)
+  , TagCol (..)
+  , TreeCol (..)
+  , geomStride
+  , styleStride
+  , tagStride
+  , treeStride
+  , readGeom
+  , writeGeom
+  , readStyle
+  , readTagEnum
+  , writeTagEnum
+  , readTree
+  , writeTree
   , addNode
   , addNodeFromLayout
   , rootAttachParent
   , setNodeText
-  , setImageNode
-  , setImageId
+  , getParent
+  , getFirstChild
+  , getNextSibling
+  , getNodeType
+  , getDirection
+  , getScrollContentW
+  , setScrollContentW
+  , AxisSizing (..)
+  , axisSizing
+  , readAxisSizing
+  , getWidthSizing
+  , getHeightSizing
+  , getPadding
+  , parentIsRow
+  , getAlignX
+  , getAlignY
+  , getFlow
+  , hasPinnedBelow
+  , hasScrollerBelow
+  , getPointerMode
+  , getNodeRect
+  , setRect
+  , getClipRect
+  , getClipBounds
+  , setClipRect
+  , getText
+  , getOptions
   , setOptions
+  , ImageNode (..)
+  , setImageNode
+  , getImageNode
+  , setImageId
+  , getImageId
+  , getWidgetId
   , setWidgetId
   , lookupNodeByWidgetId
   , lookupNodeByKey
+  , getIdSuperseded
+  , getStyleIdx
   , setStyleIdx
+  , getNodeValue
   , setNodeValue
+  , setSolvedValue
+  , getNodeFontSize
+  , getNodeFontColor
+  , getNodeScope
+  , getArenaScope
+  , setArenaScope
+  , getScopeSignature
   , getPaintSignature
   , ensureScratchCapacity
+  , AxisSnapshot (..)
   , ensureAxisSnapshot
   , memoizeWidth
+  , forFloatingNodes_
+  , floatingNodesInPaintOrder
+  , forChildNodes_
+  , foldFlowChildrenM
+  , flowChildrenInOrder
+  , foldPlacedChildrenM
+  , forChildrenInPaintOrder_
+  , childrenTopFirst
+  , firstChildOnTopJustM
+  , drawnOver
+  , AdornRows (..)
+  , adornRows
+  , findNodeRevM
+  , findClassNodeM
+  , findClassNodeRevM
+  , foldClassNodesM
+  , classNodes
+  , foldClassNodeRevM
+  , forClassNodes_
+  , walkFloatingAncestors
+  , findNodeM
+  , foldNodesM
+  , firstChildJustM
+  , walkAncestors
+  , LayoutCache (..)
+  , CustomMeasureRecord
+  , PlacedFloat (..)
+  , newLayoutCache
+  , captureLayoutCache
+  , layoutSigMatches
   , computeSubtreeHashes
   , subtreeArrays
   , positionArrays
+  , restoreLayoutCache
+  , restoreScrollExtents
+  , subtreeSpan
+  , snapshotPlaced
+  , restorePlaced
   ) where
 
 import Control.Monad (forM_, unless, when)
-import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
+import Data.Bits (complement, shiftL, shiftR, xor, (.&.), (.|.))
 import Data.Hashable (Hashable, hash)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
@@ -341,9 +454,12 @@ addNode na nt parent Layout {..} = do
       mixPaintSig na idx 0x4643 (fromIntegral w)
   scope <- readIORef (naScope na)
   writePrimArray (naArrScope a) idx scope
-  when (scope /= 0) $ do
+  -- Bit 1 marks inert (input-only) scopes, which have no visual effect and
+  -- must not trigger paint-scope invalidation.
+  let !paintScope = scope .&. complement 2
+  when (paintScope /= 0) $ do
     sig <- readIORef (naScopeSig na)
-    writeIORef (naScopeSig na) $! (sig * 0x100000001b3) `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral scope)
+    writeIORef (naScopeSig na) $! (sig * 0x100000001b3) `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral paintScope)
   writeArray (naArrOptionsStore a) idx []
 
   when (parent >= 0) $ do
