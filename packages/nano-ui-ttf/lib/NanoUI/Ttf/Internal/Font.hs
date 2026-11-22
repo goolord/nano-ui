@@ -5,6 +5,12 @@
 -- atlas caching. Parameterized over backend-specific atlas operations
 -- ('AtlasOps') and optional platform hooks ('FontHooks') so both desktop SDL
 -- and browser WebGL backends share one implementation.
+--
+-- The names 'SdlFont', 'SdlFontCache' and the @sf@ and @sfc@ field prefixes
+-- date from when this code lived in nano-ui-sdl. Nothing here depends on an
+-- SDL window or renderer: "SDL" names SDL3_ttf, which both nano-ui-sdl and
+-- nano-ui-sdl-web shape and rasterise text with. The names are public API
+-- of both backends' internal modules, so they stay.
 module NanoUI.Ttf.Internal.Font
   ( AtlasOps (..)
   , FontHooks (..)
