@@ -1,0 +1,188 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Suites that need no window, display or GPU. The native suites
+# (nano-ui-render-test, nano-ui-demo-test, the font and RGFW suites) open
+# real windows and run on a developer machine; see
+# book/src/getting-started/development.md.
+env:
+  HEADLESS_SUITES: >-
+    nano-ui:test:nano-ui-test
+    nano-ui:test:text-buffer-spec
+    nano-ui:test:nano-ui-inspection
+    nano-ui-emit:test:nano-ui-emit-test
+    nano-ui-form:test:nano-ui-form-test
+    nano-ui-markdown:test:nano-ui-markdown-test
+    nano-ui-svg:test:nano-ui-svg-test
+    nano-ui-diagrams:test:nano-ui-diagrams-test
+    nano-ui-sdl-web:test:nano-ui-sdl-web-test
+    nano-ui-demo:test:nano-ui-book-test
+  SDL_TAG: release-3.4.0
+  SDL_TTF_TAG: release-3.2.2
+
+jobs:
+  linux:
+    name: Linux / GHC ${{ matrix.ghc }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ghc: ['9.10.3', '9.14.1']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxss-dev libxfixes-dev libxtst-dev libwayland-dev \
+            libxkbcommon-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libdbus-1-dev libudev-dev
+
+      # Ubuntu 24.04 packages no SDL3, so build it (and SDL_ttf with its
+      # vendored FreeType and HarfBuzz) once and cache the install.
+      - name: Cache SDL3
+        id: sdl-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl3
+          key: sdl3-${{ runner.os }}-${{ env.SDL_TAG }}-${{ env.SDL_TTF_TAG }}
+
+      - name: Build SDL3 and SDL3_ttf
+        if: steps.sdl-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$SDL_TAG" https://github.com/libsdl-org/SDL.git /tmp/SDL
+          cmake -S /tmp/SDL -B /tmp/SDL/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/sdl3" \
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+          cmake --build /tmp/SDL/build
+          cmake --install /tmp/SDL/build
+          git clone --depth 1 --recurse-submodules --branch "$SDL_TTF_TAG" \
+            https://github.com/libsdl-org/SDL_ttf.git /tmp/SDL_ttf
+          cmake -S /tmp/SDL_ttf -B /tmp/SDL_ttf/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/sdl3" \
+            -DCMAKE_PREFIX_PATH="$HOME/sdl3" -DSDLTTF_VENDORED=ON \
+            -DSDLTTF_SAMPLES=OFF
+          cmake --build /tmp/SDL_ttf/build
+          cmake --install /tmp/SDL_ttf/build
+
+      - name: Point pkg-config and the loader at SDL3
+        run: |
+          echo "PKG_CONFIG_PATH=$HOME/sdl3/lib/pkgconfig:$HOME/sdl3/lib64/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$HOME/sdl3/lib:$HOME/sdl3/lib64" >> "$GITHUB_ENV"
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: '3.14'
+
+      - name: Install mdbook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: '0.5.4'
+
+      - name: Resolve dependencies
+        run: |
+          cabal update
+          cabal build all --dry-run
+
+      - name: Cache Cabal store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: store-${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: store-${{ runner.os }}-${{ matrix.ghc }}-
+
+      # -j1: parallel optimizing GHC processes run the runner out of memory.
+      - name: Build
+        run: cabal build -j1 all
+
+      - name: Headless test suites
+        run: |
+          for suite in $HEADLESS_SUITES; do
+            echo "::group::$suite"
+            cabal test -j1 "$suite" --test-show-details=failures
+            echo "::endgroup::"
+          done
+
+      - name: cabal check
+        run: |
+          for dir in packages/*/; do
+            echo "== $dir"
+            (cd "$dir" && cabal check)
+          done
+
+      - name: Haddock
+        if: matrix.ghc == '9.14.1'
+        run: cabal haddock -j1 nano-ui
+
+  windows:
+    name: Windows / GHC 9.14.1
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-sdl3-ttf
+            mingw-w64-ucrt-x86_64-pkgconf
+
+      - name: Point pkg-config and the loader at MSYS2
+        run: |
+          root="$(cygpath -w "$RUNNER_TEMP/msys64")"
+          echo "PKG_CONFIG_PATH=$root\\ucrt64\\lib\\pkgconfig" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/msys64/ucrt64/bin" >> "$GITHUB_PATH"
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.14.1'
+          cabal-version: '3.14'
+
+      - name: Resolve dependencies
+        run: |
+          cabal update
+          cabal build all --dry-run
+
+      - name: Cache Cabal store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: store-${{ runner.os }}-9.14.1-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: store-${{ runner.os }}-9.14.1-
+
+      - name: Build
+        run: cabal build -j1 all
+
+      - name: Headless test suites
+        run: |
+          for suite in $HEADLESS_SUITES; do
+            case "$suite" in *book-test) continue ;; esac
+            echo "::group::$suite"
+            cabal test -j1 "$suite" --test-show-details=failures
+            echo "::endgroup::"
+          done
+
+      # The baseline was recorded with GHC 9.14.1 on Windows, so the gate
+      # runs on the same toolchain.
+      - name: Allocation gate
+        run: python scripts/profile/alloc-gate.py

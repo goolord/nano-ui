@@ -12,6 +12,10 @@ packages:
   packages/nano-ui-markdown
   packages/nano-ui-svg
 
+-- Pin the Hackage snapshot so a build resolves the same dependencies until
+-- this line is moved forward on purpose.
+index-state: hackage.haskell.org 2026-10-23T01:04:20Z
+
 tests: True
 benchmarks: True
 

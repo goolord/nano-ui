@@ -1,0 +1,14 @@
+{
+  "tolerance": 0.05,
+  "scenes": {
+    "widgets": 326720568,
+    "canvas": 611341512,
+    "canvas-keyed": 21512424,
+    "textarea": 226696888,
+    "richtext": 1395112032,
+    "form": 1676567920,
+    "grow": 9411495216,
+    "window drag": 1672089544,
+    "pointer": 10930312968
+  }
+}

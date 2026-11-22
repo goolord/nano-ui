@@ -29,16 +29,30 @@ cabal test -j1 all
 | `nano-ui-form-test` | Form validation, reset, and submission |
 | `nano-ui-markdown-test` | Parsing, incremental append against a full parse (QuickCheck), layout |
 | `nano-ui-rgfw-test`, `nano-ui-rgfw-bindings-test` | RGFW input translation, bitmap font, frame delivery |
+| `nano-ui-sdl-web-test` | The browser backend's input decoding and draw batching, run natively |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, shaping, caches, handle lifetimes |
 | `nano-ui-render-test` | Native SDL readback: partial damage, clipping, screenshots |
 | `nano-ui-demo-test`, `nano-ui-terminal-test` | The demos and the terminal in hidden SDL windows |
 | `nano-ui-book-test` | This book: no inline Haskell, `#include` anchors, specimen tags, and an `mdbook` build |
+
+Continuous integration (`.github/workflows/ci.yml`) runs the suites that open no window on Linux with GHC 9.10 and 9.14 and on Windows with GHC 9.14. Run the native suites locally when a change touches rendering, fonts, dialogs or DPI.
 
 One suite, with failure details:
 
 ```sh
 cabal test nano-ui-test --test-show-details=failures
 ```
+
+## Allocation baseline
+
+Each scene of `nano-ui-profile` runs a fixed number of frames, so its allocation total is the same on every run with one GHC version. `scripts/profile/alloc-gate.py` runs the scenes in `scripts/profile/alloc-baseline.json` and fails when one allocates more than 5% over its baseline:
+
+```sh
+python scripts/profile/alloc-gate.py           # check
+python scripts/profile/alloc-gate.py --update  # accept the new totals
+```
+
+The baseline is recorded with GHC 9.14.1 on Windows, where CI runs the gate.
 
 ## Haddocks and Hoogle
 

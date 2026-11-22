@@ -51,6 +51,14 @@ winget-gui) pin this repository as a Cabal `source-repository-package`.
 - `cabal.project` adds `-Werror` for this repository's builds only, and the
   `.cabal` files enable `-Wunused-packages`: remove a stale `build-depends`
   entry along with its last import.
+- No formatter is enforced. Match the surrounding layout by hand, and do not
+  run fourmolu or ormolu over existing files: the result rewrites most of a
+  module.
+- CI (`.github/workflows/ci.yml`) builds everything with GHC 9.10.3 and
+  9.14.1 on Linux and 9.14.1 on Windows, runs the headless suites, and gates
+  allocation with `scripts/profile/alloc-gate.py` against
+  `scripts/profile/alloc-baseline.json`. A change that allocates more on
+  purpose reruns the gate with `--update` and commits the new baseline.
 
 Tests:
 
