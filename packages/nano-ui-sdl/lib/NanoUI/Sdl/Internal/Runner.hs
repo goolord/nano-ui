@@ -28,7 +28,7 @@ import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Error (sdlFail)
 import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass, snapDamage)
-import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), captureFrame, windowZoom, withSdlEnv)
+import NanoUI.Sdl.Internal.Window (PresentProbe (..), Retain (..), SdlEnv (..), captureFrame, notePresent, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Internal.Image as SdlImage
@@ -213,6 +213,7 @@ presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
     then answerScreenshotsAfter ctx (captureFrame env tex) (void (renderPresentSafe ren))
     else void (renderPresentSafe ren)
   t3 <- getMonotonicTime
+  notePresent env t3
   let ms a b = (b - a) * 1000
   noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
     (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
@@ -312,6 +313,8 @@ sdlDebugSnapshot env = do
   refreshDebugSnapshot (sdlDebug env) (sdlDebugPublished env) $ \core -> do
     scale <- readIORef (sdlScaleRef env)
     fontSource <- sdlFontCacheSource (sdlFontCache env)
+    period <- readIORef (sdlRefreshPeriodRef env)
+    probe <- readIORef (sdlPresentProbe env)
     Size ww wh <- queryWindowLogicalSize (sdlWindow env)
     V2 mx my <- queryMouseWindowPos
     let snap =
@@ -320,8 +323,8 @@ sdlDebugSnapshot env = do
             , dbgScale = scale
             , dbgFontPath = fontSourceLabel fontSource
             , dbgRenderer = sdlRendererName env
-            , dbgVsync = sdlVsync env
-            , dbgRefreshHz = round (1 / sdlRefreshPeriod env)
+            , dbgVsync = sdlVsync env && probe /= VsyncIgnored
+            , dbgRefreshHz = round (1 / period)
             }
     when (sdlFrameTrace env) (traceFrame snap)
     pure snap
@@ -343,6 +346,11 @@ setSdlUiScale s = requestDisplay sdlUiScaleRef (if isNaN s then 0 else s)
 
 -- | Hand the display thread a new setting and ask for the frame it is
 -- applied before. Asking for the setting already asked for asks for nothing.
+--
+-- The setting is the session's, and the frame asked for is this window's.
+-- The others follow: the first window syncs its display on every pass of
+-- the loop, which a further window's frame request makes it run, and a
+-- window that draws makes the windows it declared draw.
 requestDisplay :: Eq a => (SdlEnv -> IORef a) -> a -> NanoUI ()
 requestDisplay field new = do
   ctx <- askContext

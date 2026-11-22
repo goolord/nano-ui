@@ -19,7 +19,7 @@ import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Internal.Display (pointerInWindow)
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Runner (resetRenderTextures, sdlDrawFrame)
-import NanoUI.Sdl.Internal.Window (SdlEnv (..), SdlOptions, openChildWindow, sdlPacingMs, syncDisplay, windowZoom)
+import NanoUI.Sdl.Internal.Window (SdlEnv (..), SdlOptions, openChildWindow, refreshDisplayRate, sdlPacingMs, syncDisplay, windowZoom)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_WindowID (..))
 import SDL3.Sys.Video (getWindowID)
@@ -61,13 +61,15 @@ windowId :: SdlEnv -> IO Word32
 windowId env = (\(SDL_WindowID (Uint32 w)) -> w) <$> getWindowID (sdlWindow env)
 
 -- | A batch of a window's events in layout units, as each had them, after
--- noting what they mean for the window: a pointer seen, or a render device
--- reset, which the frame it asks for answers by making the textures again.
+-- noting what they mean for the window: a pointer seen, a render device
+-- reset, which the frame it asks for answers by making the textures again,
+-- or another display, whose refresh rate the window paces by from now on.
 decodeForWindow :: SdlEnv -> [SdlEvent] -> IO [SdlEvent]
 decodeForWindow env evs = do
   zoom <- windowZoom env
   when (hasPointerEvent evs) (writeIORef (sdlPointerSeen env) True)
   when (EvRenderDeviceReset `elem` evs) (resetRenderTextures env)
+  when (EvDisplayChanged `elem` evs) (refreshDisplayRate env)
   pure (scaleEventPositions zoom evs)
 
 -- | Keep the first window's events and queue the others' on their windows.
