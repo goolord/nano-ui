@@ -65,7 +65,7 @@ def main():
         if args.update:
             baseline["scenes"][scene] = got
     if args.update:
-        BASELINE.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
+        BASELINE.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8", newline="\n")
         print(f"wrote {BASELINE}")
         return 0
     if failed:
