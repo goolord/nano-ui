@@ -7,15 +7,12 @@ module NanoUI.Internal.Layout.Arena.Query
   , foldFlowChildrenM
   , flowChildrenInOrder
   , foldPlacedChildrenM
-  , foldChildrenInBoxM
   , forChildrenInPaintOrder_
   , childrenTopFirst
   , firstChildOnTopJustM
   , drawnOver
   , AdornRows (..)
   , adornRows
-  , foldSeqM
-  , findSeqM
   , findNodeRevM
   , findClassNodeM
   , findClassNodeRevM

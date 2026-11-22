@@ -38,7 +38,6 @@ module NanoUI.Internal.Monad.Core
   , styled
   , themed
   , disabledWhen
-  , withPaintScope
   , setUiTheme
   , systemAppearance
   , uiMousePos

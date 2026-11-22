@@ -3,8 +3,7 @@
 -- bounds and mouse selection the text area shares, and input-method
 -- composition for both.
 module NanoUI.Internal.Frame.TextInput
-  ( textInputFieldRect
-  , nodeTextFieldGeom
+  ( nodeTextFieldGeom
   , tagTextInputClippedSpans
   , syncTextInputScroll
   , TextInputFrame (..)

@@ -11,7 +11,6 @@ module NanoUI.Internal.Style.Theme
   , Appearance (..)
   , lightDark
   , themeAppearance
-  , darkColor
   , readableTone
   , toneColor
   , textToneColor
