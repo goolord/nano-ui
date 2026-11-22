@@ -8,6 +8,7 @@ module Spec
   , simSpec
   , pixelSimSpec
   , varSimSpec
+  , propSpec
   , everyControl
   , arenaRects
   , nodeLayout
@@ -36,6 +37,9 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert
 import NanoUI.Testing.Harness
 import NanoUI.Testing.Sim (Sim, runSim)
+import Test.QuickCheck (Args (..), Testable, isSuccess, quickCheckWithResult, stdArgs)
+import Test.QuickCheck qualified as QC
+import Test.QuickCheck.Random (mkQCGen)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena
   ( arenaCount
@@ -67,6 +71,14 @@ pixelSimSpec name w h view script = pixelSpec name (\ctx failed -> runSim ctx fa
 varSimSpec :: String -> Float -> Float -> v -> (Var v -> NanoUI a) -> (Var v -> Sim a ()) -> Spec
 varSimSpec name w h initial view script =
   spec name (\ctx failed -> newVar initial >>= \v -> runSim ctx failed (withInput w h) (view v) (script v))
+
+-- | A QuickCheck property checked on @n@ cases generated from @seed@, so a
+-- run is the same every time. A failure prints QuickCheck's shrunk
+-- counterexample and counts once.
+propSpec :: Testable p => String -> Int -> Int -> p -> Spec
+propSpec name seed n p = spec name $ \_ failed -> do
+  r <- quickCheckWithResult stdArgs {replay = Just (mkQCGen seed, 0), maxSuccess = n, chatty = False} p
+  unless (isSuccess r) $ putStrLn (QC.output r) >> modifyIORef' failed (+ 1)
 
 -- | One of each control a user can focus and work, with its value shown, for
 -- the properties every control has: focus from code, no keys while

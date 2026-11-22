@@ -277,6 +277,7 @@ test-suite nano-ui-test
         Cases.Keyboard
         Cases.Cache
         Cases.LayoutReuse
+        Cases.LayoutProps
         Cases.Runner
         Cases.RichText
         Cases.SIMD
@@ -328,6 +329,7 @@ test-suite nano-ui-test
         filepath ^>=1.5,
         nothunks ^>=0.3,
         primitive ^>=0.9,
+        QuickCheck >=2.14 && <2.19,
         vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   test/integration
