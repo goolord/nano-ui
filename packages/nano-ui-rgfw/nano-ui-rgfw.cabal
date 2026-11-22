@@ -55,6 +55,7 @@ library
         NanoUI.Rgfw.Internal.Debug
         NanoUI.Rgfw.Internal.Font.Cozette
         NanoUI.Rgfw.Internal.Gl
+        NanoUI.Rgfw.Internal.Input
         NanoUI.Rgfw.Internal.Session
     c-sources:        cbits/nano_ui_gl.c
     build-depends:
