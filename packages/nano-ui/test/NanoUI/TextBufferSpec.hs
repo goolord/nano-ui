@@ -11,9 +11,11 @@ import NanoUI.Widgets.TextDocument qualified as TD
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Widgets.TextEditor as TE
 import Test.Hspec
+import Test.Hspec.QuickCheck (modifyMaxSuccess, prop)
+import Test.QuickCheck (Arbitrary (..), Gen, Property, choose, property, conjoin, counterexample, elements, frequency, listOf, oneof, vectorOf, (.&&.), (===))
 
 main :: IO ()
-main = hspec spec
+main = hspec (spec >> editModelSpec)
 
 noMods, ctrlMods, altMods :: Modifiers
 noMods = Modifiers False False False False
@@ -315,3 +317,156 @@ spec = do
               atEndBuf = TB.withCursor (last fwd) start0
               bwd = reverse (walkLeft atEndBuf)
           bwd `shouldBe` fwd
+
+-- | Pieces of text the random edits insert: ASCII, spaces, combining marks,
+-- ZWJ emoji, a skin-toned emoji, flags, CJK and line breaks.
+pieces :: [T.Text]
+pieces =
+  ["a", "xyz", " ", "  ", "e\x0301", "\x0915\x093F", "\x1F469\x200D\x1F4BB", "\x1F44D\x1F3FD", "\x1F1FA\x1F1F8", "\x732B\x72AC", "\n", "a\nb", "foo bar", "\n\n"]
+
+-- | A text built from 'pieces'.
+genText :: Gen T.Text
+genText = T.concat <$> listOf (elements pieces)
+
+-- | A position that may lie past the document's end, which commands clamp.
+genCursor :: Gen TB.Cursor
+genCursor = TB.Cursor <$> choose (-1, 6) <*> choose (-1, 12)
+
+-- | One edit a user or an app makes on a multiline field.
+newtype Step = Step TE.TextCommand
+  deriving (Show)
+
+instance Arbitrary Step where
+  arbitrary =
+    Step
+      <$> frequency
+        [ (6, TE.InsertText <$> elements pieces)
+        , (4, TE.Delete <$> elements [TE.CharLeft, TE.CharRight, TE.WordLeft, TE.WordRight, TE.LineStart, TE.LineEnd])
+        , (3, TE.Move <$> elements [minBound .. maxBound] <*> arbitrary)
+        , (2, TE.Select <$> genCursor <*> genCursor)
+        , (1, pure TE.SelectAll)
+        , (1, TE.Replace <$> genCursor <*> genCursor <*> elements pieces)
+        , (2, pure TE.Undo)
+        , (1, pure TE.Redo)
+        ]
+
+-- | A starting document and the edits made on it.
+data Session = Session T.Text [Step]
+  deriving (Show)
+
+instance Arbitrary Session where
+  arbitrary = Session <$> genText <*> (choose (0, 60) >>= (`vectorOf` arbitrary))
+  shrink (Session t steps) = [Session t s | s <- shrinkList steps]
+    where
+      shrinkList xs = [take i xs <> drop (i + 1) xs | i <- [0 .. length xs - 1]]
+
+-- | The character offset of a position in a text whose lines are @lns@.
+offsetOf :: [T.Text] -> TB.Cursor -> Int
+offsetOf lns (TB.Cursor r c) = sum [T.length l + 1 | l <- take r lns] + c
+
+-- | Whether the editor's caret and anchor lie inside its document.
+insideDocument :: TE.Editor -> Bool
+insideDocument ed =
+  let buf = TE.editorBuffer ed
+      ok (TB.Cursor r c) = r >= 0 && r < TB.getLineCount buf && c >= 0 && c <= T.length (TB.lineAt r buf)
+      (a, cur) = TE.editorSelection ed
+   in ok a && ok cur
+
+-- | The editor's text, and its selection as ordered character offsets.
+flat :: TE.Editor -> (T.Text, Int, Int)
+flat ed =
+  let buf = TE.editorBuffer ed
+      lns = TB.toLines buf
+      (a, c) = TE.editorSelection ed
+      (lo, hi) = TB.selectionRange a c
+   in (TB.toText buf, offsetOf lns lo, offsetOf lns hi)
+
+-- | The caret's character offset.
+caretOffset :: TE.Editor -> Int
+caretOffset ed = let buf = TE.editorBuffer ed in offsetOf (TB.toLines buf) (TB.getCursor buf)
+
+runMulti :: TE.TextCommand -> TE.Editor -> TE.Editor
+runMulti = TE.runCommand TE.multiLineMode
+
+-- | What one step must do, checked against the editor before and after it:
+-- an insert replaces the selection with the text and leaves the caret after
+-- it; a delete removes the selection, or else a run of text that ends (to
+-- the left) or starts (to the right) at the caret; an undo that a redo
+-- follows, or the reverse, gives the text back.
+stepModel :: TE.TextCommand -> TE.Editor -> TE.Editor -> Property
+stepModel cmd prev next =
+  let (old, lo, hi) = flat prev
+      new = TB.toText (TE.editorBuffer next)
+      caret = caretOffset next
+      selected = lo /= hi
+      splice a b ins = T.take a old <> ins <> T.drop b old
+      leftOf = T.take lo old
+   in counterexample (show (cmd, old, lo, hi, new, caret)) $ case cmd of
+        TE.InsertText t -> new === splice lo hi t .&&. caret === lo + T.length t
+        TE.Delete _
+          | selected -> new === splice lo hi "" .&&. caret === lo
+        TE.Delete m
+          | m `elem` [TE.CharLeft, TE.WordLeft, TE.LineStart] ->
+              counterexample "left delete" $
+                caret <= lo .&&. new === T.take caret old <> T.drop lo old
+          | otherwise ->
+              counterexample "right delete" $
+                caret === lo .&&. T.isPrefixOf leftOf new .&&. T.isSuffixOf (T.drop lo new) old
+        TE.Undo
+          | TE.canUndo (TE.editorHistory prev) ->
+              TB.toText (TE.editorBuffer (runMulti TE.Redo next)) === old
+        TE.Redo
+          | TE.canRedo (TE.editorHistory prev) ->
+              TB.toText (TE.editorBuffer (runMulti TE.Undo next)) === old
+        _ | cmd `elem` [TE.Undo, TE.Redo] -> new === old
+        TE.Move _ _ -> new === old
+        TE.Select _ _ -> new === old
+        TE.SelectAll -> new === old
+        _ -> property True
+
+-- | Undo until there is nothing left to undo, and the texts on the way.
+undoAll :: TE.Editor -> [T.Text]
+undoAll ed
+  | TE.canUndo (TE.editorHistory ed) = let ed' = runMulti TE.Undo ed in TB.toText (TE.editorBuffer ed') : undoAll ed'
+  | otherwise = []
+
+-- | Random edit sessions against a plain 'T.Text' model, the history, and
+-- recorded edits.
+editModelSpec :: Spec
+editModelSpec = describe "random edits" $ modifyMaxSuccess (max 300) $ do
+  prop "match a text model, keep the caret in the document, and undo to the start" $ \(Session t0 steps) ->
+    let ed0 = TE.editorFromBuffer (TB.fromText t0)
+        trace = scanl (\ed (Step cmd) -> runMulti cmd ed) ed0 steps
+        final = last trace
+        stepChecks =
+          [ counterexample "caret outside the document" (insideDocument ed') .&&. stepModel cmd ed ed'
+          | (Step cmd, ed, ed') <- zip3 steps trace (drop 1 trace)
+          ]
+        seen = map (TB.toText . TE.editorBuffer) trace
+        undone = undoAll final
+        n = length undone
+        start = iterate (runMulti TE.Undo) final !! n
+        -- As many redos as undos: steps undone before the session ended
+        -- stay on the redo stack past the final text.
+        redone = iterate (runMulti TE.Redo) start !! n
+     in conjoin stepChecks
+          .&&. counterexample "undo reached a text the session never had" (all (`elem` seen) undone)
+          .&&. counterexample "undo all" (TB.toText (TE.editorBuffer start) === t0)
+          .&&. counterexample "redo what was undone" (TB.toText (TE.editorBuffer redone) === TB.toText (TE.editorBuffer final))
+          .&&. counterexample "caret after undo and redo" (insideDocument start .&&. insideDocument redone)
+
+  prop "apply and invert a replace edit between any two positions" $
+    \(Session t0 _) -> do
+      a <- genCursor
+      b <- genCursor
+      ins <- oneof [elements pieces, genText]
+      let buf = TB.fromText t0
+          e = TB.replaceEdit ins a b buf
+          applied = TB.applyEdit e buf
+          lns = TB.toLines buf
+          (lo, hi) = TB.selectionRange (TB.clampCursor buf a) (TB.clampCursor buf b)
+          (olo, ohi) = (offsetOf lns lo, offsetOf lns hi)
+      pure $
+        TB.editRemoved e === T.take (ohi - olo) (T.drop olo t0)
+          .&&. TB.toText applied === T.take olo t0 <> ins <> T.drop ohi t0
+          .&&. TB.toText (TB.applyEdit (TB.invertEdit e) applied) === t0

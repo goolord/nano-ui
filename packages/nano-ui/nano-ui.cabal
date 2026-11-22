@@ -251,6 +251,7 @@ test-suite text-buffer-spec
     main-is:          NanoUI/TextBufferSpec.hs
     build-depends:
         hspec ^>=2.11,
+        QuickCheck >=2.14 && <2.19,
         text ^>=2.1
     hs-source-dirs:   test
 
