@@ -72,11 +72,13 @@ keyedTag = 0xC2B2AE3D27D4EB4F
 enterScope :: Word64 -> IdContext -> (IdContext, IdContext)
 enterScope tag parent = enterChild (siblingId parent) tag parent
 
--- | Return the advanced parent and a child path derived from the key, not the
--- sibling position. Keys must be unique within the parent.
+-- | Return the parent unchanged and a child path derived from the key, not
+-- the sibling position. Keys must be unique within the parent. A keyed scope
+-- takes no sibling position, so the widgets after a keyed list keep their ids
+-- when the list grows or shrinks.
 {-# INLINE enterKeyed #-}
 enterKeyed :: Word64 -> IdContext -> (IdContext, IdContext)
-enterKeyed tag = enterChild tag keyedTag
+enterKeyed tag parent@(IdContext pid _ _) = (parent, scopeIdContext (mix64 (mix64 pid tag) keyedTag))
 
 -- | Advance the parent's sibling counter and derive a child path from the
 -- parent path, @seed@ and @tag@. The child starts both counts at zero; the

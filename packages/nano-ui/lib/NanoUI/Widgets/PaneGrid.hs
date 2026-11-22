@@ -593,11 +593,11 @@ paneLay m = minW m (minH m fillLay)
 -- Rendering
 -- -----------------------------------------------------------------------------
 
--- | Enter a pane's grid-relative id scope. Consumes one sibling slot, like
--- 'withKey'.
+-- | Enter a pane's grid-relative id scope. Like 'withKey', it takes no
+-- sibling position, so panes coming and going never move a later sibling's id.
 withPaneKey :: GridEnv -> Word64 -> NanoUI a -> NanoUI a
 withPaneKey env pid =
-  withIdFrame (\parent -> (parent {siblingId = siblingId parent + 1}, gePaneScope env)) . withKey pid
+  withIdFrame (\parent -> (parent, gePaneScope env)) . withKey pid
 
 -- | Render one pane's content via 'pgViewPane' under the pane's stable key.
 renderPane ::

@@ -284,7 +284,9 @@ scope = withIdFrame (enterScope scopeTag)
 
 -- | Run the action under a key so its widgets keep their ids and state when
 -- earlier siblings change. Keys must be unique among siblings in the same
--- scope; use a stable item key for a list that can be reordered.
+-- scope; use a stable item key for a list that can be reordered. A keyed
+-- scope takes no sibling position, so widgets declared after a keyed list
+-- keep their ids as the list grows and shrinks.
 --
 -- The state kept under a key, by widgets such as a text field and by
 -- 'NanoUI.Var.useVar', lasts as long as the context, also once the key is no

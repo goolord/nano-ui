@@ -2,6 +2,18 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking (ids):** a keyed scope (`withKey`, `keyedTag`, `forEachVar`
+  rows, `PaneGrid` panes) no longer takes a sibling position. A widget
+  declared after a keyed list keeps its id, focus, caret, selection and undo
+  history while the list grows or shrinks. Widgets that follow a keyed scope
+  get new ids once, so their kept state (a field's caret, a section's open
+  state) resets on the first run of this version.
+
+- Keyboard focus leaves a widget the view stops declaring, even when another
+  widget later lands on its positional id. A select's open dropdown and a
+  field's edit menu close when their owner is no longer declared, so Escape
+  reaches the view again and pointer moves stop repainting the window.
+
 - `NanoUI.Testing.Sim`: a scripted user for headless tests. `runSim`
   settles a view, then `click "Save"`, `typeText`, `pressKey`, `chord`,
   `wheel`, `drag` and `expect "text"` drive it frame by frame, aiming at

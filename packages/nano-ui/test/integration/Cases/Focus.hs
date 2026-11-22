@@ -27,7 +27,49 @@ tests =
   , spec "focus-next-previous" runFocusNextPreviousTest
   , simSpec "focus-clear-release" 400 400 clearReleaseUi focusClearRelease
   , varSimSpec "focus-text-command" 400 400 False textCommandUi focusTextCommand
+  , varSimSpec "focus-after-keyed-list" 400 400 [1, 2] keyedListUi focusAfterKeyedList
+  , varSimSpec "focus-widget-gone" 400 400 True goneUi focusWidgetGone
   ]
+
+-- | Focus leaves a field the view stops declaring, so a widget that later
+-- lands on its id does not come back focused.
+goneUi :: Var Bool -> NanoUI WidgetId
+goneUi shown = column $ do
+  on <- readVar shown
+  if on then respId <$> (useVar "" >>= textInput') else WidgetId 0 <$ label "gone"
+
+focusWidgetGone :: Var Bool -> Sim WidgetId ()
+focusWidgetGone shown = do
+  field <- result
+  focusOn field
+  checkEq field =<< focusedId
+  writeV shown False
+  _ <- settle
+  checkEq (WidgetId 0) =<< focusedId
+
+-- | A field declared after a keyed list keeps its id, focus and text while
+-- the list grows and shrinks.
+keyedListUi :: Var [Int] -> NanoUI WidgetId
+keyedListUi rows = column $ do
+  xs <- readVar rows
+  forM_ xs $ \k -> withKey k (label (T.pack ("row " <> show k)))
+  respId <$> (useVar "" >>= textInput')
+
+focusAfterKeyedList :: Var [Int] -> Sim WidgetId ()
+focusAfterKeyedList rows = do
+  field <- result
+  focusOn field
+  _ <- typeText "a"
+  writeV rows [1, 2, 3, 4]
+  _ <- settle
+  checkEq field =<< result
+  checkEq field =<< focusedId
+  _ <- typeText "b"
+  writeV rows [4]
+  _ <- settle
+  checkEq field =<< focusedId
+  _ <- typeText "c"
+  expect "abc"
 
 inp :: Input
 inp = withInputOff 400 400

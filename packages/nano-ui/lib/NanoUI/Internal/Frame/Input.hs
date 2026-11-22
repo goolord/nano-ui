@@ -487,25 +487,34 @@ tabNext cur ids shift =
       | shift -> reverse (if null before then ids else before)
       | otherwise -> after ++ ids
 
--- | Take keyboard focus away from display-only content or a widget outside
--- the top modal, and close a select's dropdown or a field's edit menu the top
--- modal hides, which would otherwise keep Escape from the modal. The frame
--- runs this after the pointer steps, which can move focus, and before
--- 'finalizeTabFocus'.
+-- | Take keyboard focus away from display-only content, a widget outside
+-- the top modal, or a widget this frame did not declare, and close a
+-- select's dropdown or a field's edit menu whose owner the top modal hides or
+-- this frame did not declare. Either would otherwise keep Escape reserved
+-- ('escapeReserved') and repaint on every pointer move with nothing to show.
+-- The frame runs this after the pointer steps, which can move focus, and
+-- before 'finalizeTabFocus'.
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
   focus <- readIORef (ctxFocusId ctx)
   when (hashWidgetId focus /= 0) $
-    unlessM (widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus) <&&> (not <$> isDisabled ctx focus)) $
+    unlessM (declared focus <&&> widgetOverlayAllowed ctx focus <&&> (not <$> isInert ctx focus) <&&> (not <$> isDisabled ctx focus)) $
       writeIORef (ctxFocusId ctx) (WidgetId 0)
   getsInteraction ctx isTextInputMenu >>= mapM_ (\m ->
-    unlessM (widgetOverlayAllowed ctx (textInputMenuWidget m)) $
-      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing}))
+    unlessM (declared (textInputMenuWidget m) <&&> widgetOverlayAllowed ctx (textInputMenuWidget m)) $ do
+      modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+      markDirty ctx)
   store <- getStore ctx
   when (anySelectOpen store) $
-    openSelectNode ctx store >>= mapM_ (\idx -> do
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      unlessM (widgetOverlayAllowed ctx wid) $ setStore ctx (closeSelects store))
+    openSelectNode ctx store >>= \case
+      Nothing -> setStore ctx (closeSelects store) >> markDirty ctx
+      Just idx -> do
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        unlessM (widgetOverlayAllowed ctx wid) $ setStore ctx (closeSelects store)
+ where
+  -- Ids are positional, so another widget can land on a vanished one's id:
+  -- what counts is that a focusable widget holds it this frame.
+  declared = isFocusable ctx
 
 -- | Record in 'isFocusKind' what kind of widget has keyboard focus and which
 -- keys it claims ('KeyClaim'), and in 'isFocusCombo' whether it is a combo

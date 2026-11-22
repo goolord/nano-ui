@@ -11,6 +11,7 @@ tests :: [Spec]
 tests =
   [ pixelSimSpec "slider-cursor" 300 80 (column (withValue 50 (slider' 0 100))) sliderCursor
   , varSimSpec "select-mouse-and-keys" 320 200 1 mouseAndKeysUi selectMouseAndKeys
+  , varSimSpec "select-owner-gone" 320 200 True ownerGoneUi selectOwnerGone
   , simSpec "select-dropdown-paint" 640 480 (column (withValue 0 (select' lowHigh))) selectDropdownPaint
   , spec "select-keys-after-focus-moves" runSelectKeysAfterFocusMovesTest
   , spec "select-dropdown-clips-rows" runSelectDropdownClipsRowsTest
@@ -36,6 +37,26 @@ selectOpen :: Sim a Bool
 selectOpen = do
   inp <- getInput
   any (\(_, t, _, _, _) -> spanLabel t `elem` lowHigh) <$> onContext (`collectOverlayTextSpans` inp)
+
+-- | A select's open dropdown closes when the select is no longer declared,
+-- and Escape then reaches the view instead of staying reserved for it.
+ownerGoneUi :: Var Bool -> NanoUI (Maybe Response, Bool)
+ownerGoneUi shown = column $ do
+  on <- readVar shown
+  r <- if on then Just . fst <$> withValue 0 (select' (SA.smallArrayFromList lowHigh)) else pure Nothing
+  (r,) <$> takeEscape
+
+selectOwnerGone :: Var Bool -> Sim (Maybe Response, Bool) ()
+selectOwnerGone shown = do
+  Just resp <- fst <$> result
+  _ <- press (On resp) >> frame
+  expect "High"
+  writeV shown False
+  _ <- release >> settle
+  expectNot "High"
+  check . snd =<< pressKey KeyEscape
+  _ <- moveTo (At (V2 10 10)) >> advance 1 >> settle
+  check . not =<< wouldRedraw (\i -> i {inputMousePos = V2 20 20})
 
 -- | A slider's track shows the grab cursor, and grabbing while pressed; with
 -- the button up off it, the default.
