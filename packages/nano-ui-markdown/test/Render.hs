@@ -10,6 +10,7 @@ import Data.List (find, groupBy, nub, sortOn)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
+import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Color, DrawOp (..), ImageId (..), NanoUI, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
   , V2 (..), WidgetId, background, checkboxBoxSize, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
@@ -300,8 +301,13 @@ spec = before newMarkdownCache $ do
       [r] <- map snd <$> onContext (nodesOfType NodeImage)
       _ <- moveTo (Within r)
       expectNot "All about cats"
-      -- Hover past the tooltip delay.
-      liftIO (threadDelay 600000)
+      -- Hover until the wake the tooltip asked for, as a backend's loop
+      -- sleeps until it. The delay runs on the monotonic clock, not on
+      -- frame time, so no input delta can stand in for it.
+      wakeAt <- wakeTime
+      check (wakeAt > 0)
+      now <- liftIO getMonotonicTime
+      liftIO (threadDelay (ceiling ((wakeAt - now) * 1e6) + 1000))
       _ <- frame
       expect "All about cats"
       checkEq (Just "https://cats.example") =<< click (Within r)
