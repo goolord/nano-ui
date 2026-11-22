@@ -221,16 +221,20 @@ withWebFonts env ctx = do
   c <- withSdlFontCache (weFonts env) ctx
   pure (withClipboard c (readClipboard (weHost env)) (writeClipboard (weHost env)))
 
--- | Take the queued events, decoded at the zoom.
+-- | Take the queued events, decoded at the zoom. The queue is read in
+-- batches, and a composition whose characters run on into the next batch
+-- is carried over to it whole.
 pollWeb :: WebEnv -> IO [WebEvent]
-pollWeb env = allocaBytes (batch * eventRecordSize) $ \buf -> go buf []
+pollWeb env = allocaBytes (batch * eventRecordSize) $ \buf -> go buf Nothing []
   where
     batch = 256
-    go buf acc = do
+    go buf carried acc = do
       n <- whTakeEvents (weHost env) buf batch
-      evs <- decodeEvents (weZoom env) buf n
+      (evs, partial) <- decodeEventBatch (weZoom env) carried buf n
       let acc' = acc ++ evs
-      if n < batch then pure acc' else go buf acc'
+      if n < batch
+        then pure (acc' ++ maybe [] (pure . finishComposition) partial)
+        else go buf partial acc'
 
 -- | Read the canvas's size, pixel ratio, focus and colour scheme into the
 -- frame's input and the window state. A new pixel ratio reopens the fonts

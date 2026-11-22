@@ -22,6 +22,9 @@
 module NanoUI.SdlWeb.Internal.Input
   ( WebEvent (..)
   , decodeEvents
+  , PartialComposition
+  , decodeEventBatch
+  , finishComposition
   , decodeKey
   , applyWebEvent
   , isButtonEdge
@@ -69,40 +72,73 @@ data WebEvent
   deriving (Eq, Show)
 
 -- | Decode @n@ records from a buffer. CSS pixels become layout units at the
--- zoom: the UI scale on top of the device pixel ratio.
+-- zoom: the UI scale on top of the device pixel ratio. A composition whose
+-- characters run past the buffer ends with those it has; a caller reading
+-- the queue in batches uses 'decodeEventBatch' to carry it on.
 decodeEvents :: Float -> Ptr Word8 -> Int -> IO [WebEvent]
-decodeEvents zoom buf n = go 0
+decodeEvents zoom buf n = do
+  (evs, partial) <- decodeEventBatch zoom Nothing buf n
+  pure (evs ++ maybe [] (pure . finishComposition) partial)
+
+-- | A composition (kind 8) whose characters (kind 9) run past the end of a
+-- batch: how many are still to come, those read so far, newest first, and
+-- the caret and selection length.
+data PartialComposition = PartialComposition !Int ![Char] !Int !Int
+  deriving (Eq, Show)
+
+-- | The composition event for what has arrived of one.
+finishComposition :: PartialComposition -> WebEvent
+finishComposition (PartialComposition _ chars caret len) = EvComposition (T.pack (reverse chars)) caret len
+
+-- | 'decodeEvents' for one batch of a queue read in batches: it continues a
+-- composition the batch before left unfinished, and answers one this batch
+-- leaves unfinished, for the next.
+decodeEventBatch :: Float -> Maybe PartialComposition -> Ptr Word8 -> Int -> IO ([WebEvent], Maybe PartialComposition)
+decodeEventBatch zoom carried buf n = case carried of
+  Nothing -> go 0
+  Just partial -> composing partial 0
   where
-    go i
-      | i >= n = pure []
+    at i k = fromIntegral <$> (peekByteOff buf (i * eventRecordSize + k * 4) :: IO Int32)
+    -- Take a composition's characters from record @i@ on, as far as they
+    -- go in this batch. A record of another kind ends it early.
+    composing p@(PartialComposition left chars caret len) i
+      | left <= 0 = first (finishComposition p :) <$> go i
+      | i >= n = pure ([], Just p)
       | otherwise = do
-          let at k = fromIntegral <$> (peekByteOff buf (i * eventRecordSize + k * 4) :: IO Int32)
-              float k = peekByteOff buf (i * eventRecordSize + k * 4) :: IO Float
-          kind <- at 0
-          a <- at 1
-          b <- at 2
-          c <- at 3
-          mods <- (\m -> modifiersFromBits (m :: Int) 1 2 4 8) <$> at 4
-          numLock <- (\m -> m .&. (16 :: Int) /= 0) <$> at 4
+          kind <- at i 0
+          if kind /= (9 :: Int)
+            then first (finishComposition p :) <$> go i
+            else do
+              ch <- chr . clampChar <$> at i 1
+              composing (PartialComposition (left - 1) (ch : chars) caret len) (i + 1)
+    first f (a, b) = (f a, b)
+    go i
+      | i >= n = pure ([], Nothing)
+      | otherwise = do
+          let float k = peekByteOff buf (i * eventRecordSize + k * 4) :: IO Float
+              next ev = first (ev :) <$> go (i + 1)
+          kind <- at i 0
+          a <- at i 1
+          b <- at i 2
+          c <- at i 3
+          mods <- (\m -> modifiersFromBits (m :: Int) 1 2 4 8) <$> at i 4
+          numLock <- (\m -> m .&. (16 :: Int) /= 0) <$> at i 4
           x <- float 5
           y <- float 6
           case kind :: Int of
-            1 -> (EvResize :) <$> go (i + 1)
-            2 -> (EvMotion (x / zoom) (y / zoom) mods :) <$> go (i + 1)
-            3 -> (EvButton a (b /= 0) mods :) <$> go (i + 1)
-            4 -> (EvLeave :) <$> go (i + 1)
-            5 -> (EvScroll x y :) <$> go (i + 1)
-            6 -> (EvKey (decodeKey numLock a) (b /= 0) mods :) <$> go (i + 1)
+            1 -> next EvResize
+            2 -> next (EvMotion (x / zoom) (y / zoom) mods)
+            3 -> next (EvButton a (b /= 0) mods)
+            4 -> next EvLeave
+            5 -> next (EvScroll x y)
+            6 -> next (EvKey (decodeKey numLock a) (b /= 0) mods)
             7
-              | typed a -> (EvChar (chr a) :) <$> go (i + 1)
+              | typed a -> next (EvChar (chr a))
               | otherwise -> go (i + 1)
-            8 -> do
-              -- The composition's characters follow as kind 9 records.
-              let count = max 0 (min a (n - i - 1))
-              chars <- mapM (\j -> chr . clampChar <$> (fromIntegral <$> (peekByteOff buf ((i + 1 + j) * eventRecordSize + 4) :: IO Int32))) [0 .. count - 1]
-              (EvComposition (T.pack chars) b c :) <$> go (i + 1 + count)
-            10 -> (EvFocusLost :) <$> go (i + 1)
-            11 -> (EvRedraw :) <$> go (i + 1)
+            -- The composition's characters follow as kind 9 records.
+            8 -> composing (PartialComposition (max 0 a) [] b c) (i + 1)
+            10 -> next EvFocusLost
+            11 -> next EvRedraw
             _ -> go (i + 1)
     clampChar v = if v < 0 || v > 0x10FFFF then 0xFFFD else v
     -- Control characters type nothing: a chord's key event reports it.
