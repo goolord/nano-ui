@@ -123,6 +123,7 @@ module NanoUI.Testing
   , takeDamagePieces
   , damagePieces
   , damageIsEmpty
+  , clipPixelEdges
     -- * View
   , askContext
   , askInput
@@ -145,7 +146,7 @@ module NanoUI.Testing
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Internal.Draw
-import NanoUI.Internal.Damage (damagePieces, floatingPanelRects)
+import NanoUI.Internal.Damage (clipPixelEdges, damagePieces, floatingPanelRects)
 import NanoUI.Internal.Font (ScrollBarSlot (..), WrapResult (..), caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX, wrapTextIO, wrapTextLinesIO)
 import NanoUI.Internal.Widgets.ColorPicker
 import NanoUI.Internal.Frame (runFrame)

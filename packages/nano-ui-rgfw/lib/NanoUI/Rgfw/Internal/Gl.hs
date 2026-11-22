@@ -240,6 +240,14 @@ drawCmd h !scale !fbW !fbH cmd
 
 -- | Scale logical x/y/width/height to physical pixels, snapping both edges
 -- with half-up rounding. Returns x/y/width/height with non-negative extents.
+--
+-- The SDL and web backends round a clip outwards instead
+-- ('NanoUI.Testing.clipPixelEdges'), to cover the pixels of damage they
+-- snapped outwards ('NanoUI.Backend.snapDamage'). This backend snaps no
+-- damage: it repaints a logical pixel past it ('damageBox'), and rounds
+-- each scissor edge to the pixel 'roundHalfUp' snaps geometry and Cozette
+-- glyph pens to, so a scissor edge falls where the shapes it cuts end, and
+-- two clips that meet share an edge with no pixel between or under both.
 {-# INLINE toPhysRect #-}
 toPhysRect :: Float -> Float -> Float -> Float -> Float -> (Int, Int, Int, Int)
 toPhysRect !scale !rx !ry !rw !rh =

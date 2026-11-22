@@ -10,6 +10,7 @@ module NanoUI.Internal.Damage
   , writeDamage
   , damagePieces
   , pixelEdges
+  , clipPixelEdges
   , snapDamage
   ) where
 
@@ -1036,6 +1037,21 @@ ownerSlots =
 pixelEdges :: Float -> Rect -> (Int, Int, Int, Int)
 pixelEdges s (Rect x y w h) =
   (floor (x * s), floor (y * s), ceiling ((x + w) * s), ceiling ((y + h) * s))
+
+-- | The device pixels a clip covers at a scale, as left, top, right and
+-- bottom edges: 'pixelEdges' with a tolerance of a thousandth of a pixel.
+-- An edge 'snapDamage' put on a pixel comes back from layout units a
+-- rounding error to either side of it, and 'pixelEdges' would then round it
+-- out to take in the next pixel, past the repainted damage. This rule keeps
+-- such an edge on its pixel; an edge further inside a pixel still rounds
+-- outwards. The SDL and web backends clip with it.
+{-# INLINE clipPixelEdges #-}
+clipPixelEdges :: Float -> Rect -> (Int, Int, Int, Int)
+clipPixelEdges s (Rect x y w h) =
+  (lower (x * s), lower (y * s), upper ((x + w) * s), upper ((y + h) * s))
+  where
+    lower v = floor (v + 1.0e-3)
+    upper v = ceiling (v - 1.0e-3)
 
 -- | Grow damage to whole device pixels so its clip covers every pixel the
 -- changed rect touches.
