@@ -28,6 +28,21 @@ function, as `runSdlAppReduce` does. `SdlWebOptions` sets the title
 `prefers-color-scheme` (`webThemeFor`), fonts, the base font size, and a UI
 scale on top of the device pixel ratio.
 
+## The page
+
+The page provides a `<canvas>` whose CSS box (its `width` and `height`
+in CSS pixels) the page sets: a stylesheet rule, an inline style, or a
+container it fills. The session makes the drawing buffer that box times
+`devicePixelRatio` and follows the box as it changes. `web/index.html`
+fills the viewport with `canvas { display: block; width: 100vw; height:
+100vh; }`.
+
+A canvas with no CSS size takes its box from its drawing buffer, which the
+session sets, so its size could not follow the page. When the session
+starts, the runtime fixes such a canvas's CSS width or height at the size
+it has then: the `width` and `height` attributes, or the browser's 300x150
+default. It keeps that size whatever the window does.
+
 ## How it runs
 
 The program is a WebAssembly reactor module. `web/main.js` instantiates it
