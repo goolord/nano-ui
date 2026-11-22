@@ -642,14 +642,20 @@ data RgfwChild = RgfwChild
 childOps :: RgfwShared -> WindowOps RgfwChild RgfwEvent
 childOps sh =
   WindowOps
-    { woOpen = \parentCtx settings -> do
+    { -- A step that throws undoes those before it, in reverse: the
+      -- renderer is freed with its window's OpenGL context current, the
+      -- view's context closed, and the window closed, as 'woClose' does.
+      woOpen = \parentCtx settings -> do
         win <- createRgfwWindow sh settings
-        rw <- setupRgfwWindow sh settings win `onException` R.closeWindow win
-        ctx <- newRgfwWindowContext =<< readIORef (ctxTheme parentCtx)
-        renderer <- newGlRenderer `onException` R.closeWindow win
-        installRgfwHost settings rw ctx
-        setBackendSession ctx rgfwSession (rwDebug rw)
-        pure (RgfwChild rw renderer ctx, ctx)
+        (`onException` (R.closeWindow win >> writeIORef (rsCurrent sh) Nothing)) $ do
+          rw <- setupRgfwWindow sh settings win
+          ctx <- newRgfwWindowContext =<< readIORef (ctxTheme parentCtx)
+          (`onException` closeRgfwContext ctx) $ do
+            renderer <- newGlRenderer
+            (`onException` (useGl sh win >> freeGlRenderer renderer)) $ do
+              installRgfwHost settings rw ctx
+              setBackendSession ctx rgfwSession (rwDebug rw)
+              pure (RgfwChild rw renderer ctx, ctx)
     , woClose = \c -> do
         let win = rwWin (rcWindow c)
         closeRgfwContext (rcContext c) `finally` do
