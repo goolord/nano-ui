@@ -40,30 +40,8 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Word (Word64)
+import NanoUI.Internal.GridNode (GridAxis (..), GridNode (..))
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, clamp01, rectContains, rectH, rectNonEmpty, rectW, rectX, rectY)
-
--- | Divider orientation. 'AxisV' draws a vertical divider (panes left/right),
--- 'AxisH' draws a horizontal divider (panes stacked top/bottom).
-data GridAxis = AxisV | AxisH
-  deriving (Eq, Ord, Show, Read, Enum, Bounded)
-
--- | Binary split tree node. Pane and split ids share one monotonic counter.
-data GridNode
-  = Split
-      !Word64
-      -- ^ Split id.
-      !GridAxis
-      -- ^ Orientation of the divider.
-      !Float
-      -- ^ Ratio in @[0,1]@ for the A side.
-      !GridNode
-      -- ^ Left / top subtree.
-      !GridNode
-      -- ^ Right / bottom subtree.
-  | Pane
-      !Word64
-      -- ^ Pane id.
-  deriving (Eq, Show, Read)
 
 -- | Result of dropping a dragged pane on a target pane.
 data PaneDrop

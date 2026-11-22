@@ -5,9 +5,9 @@ module NanoUI.Internal.Store.Types (GridState (..), Gesture (..), LineWidths (..
 import Data.Sequence (Seq)
 import Data.Text (Text)
 import Data.Word (Word64)
+import NanoUI.Internal.GridNode (GridNode)
 import NanoUI.Internal.TextEditor.Types (EditHistory)
 import NanoUI.Internal.Types (V2)
-import NanoUI.Internal.Widgets.SplitPane (GridNode)
 
 -- | A grid's state between frames, under its widget id.
 data GridState = GridState
