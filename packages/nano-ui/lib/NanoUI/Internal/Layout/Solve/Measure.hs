@@ -29,6 +29,7 @@ module NanoUI.Internal.Layout.Solve.Measure
   , scrollBarSlotOf
   , hasPanelAncestor
   , drawingHeightAt
+  , measuredHeightAt
   , wrapLineCross
   ) where
 
@@ -48,7 +49,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Style (AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), hasExplicitMin)
-import NanoUI.Internal.Types (Rect (..), clamp, foldUpTo, newZeroedPrimArray)
+import NanoUI.Internal.Types (Rect (..), clamp, foldUpTo, newZeroedPrimArray, isBounded, isUnbounded, noLimit)
 import NanoUI.Internal.WidgetText
 
 -- | Resolve size, weight, slant, and variant to metrics plus logical-pixel
@@ -361,12 +362,12 @@ customMeasure fm measureFn wAx hAx =
    in ((mw, mh), (aw', ah', mw', mh'))
 
 -- | The space a custom measure is offered along an axis: its fixed size, or
--- else its maximum when that is finite (under 1e8), and 1e9 otherwise.
+-- else its maximum when that is finite ('isBounded'), and 'noLimit' otherwise.
 {-# INLINE offeredExtent #-}
 offeredExtent :: AxisSizing -> Float
 offeredExtent (AxisSizing tag val lo hi)
   | tag == SizingFixed = clamp lo hi val
-  | otherwise = if hi < 1e8 then hi else 1e9
+  | otherwise = if isBounded hi then hi else noLimit
 
 -- | The axis's fixed size or else @content@, within its limits.
 {-# INLINE sizeWithin #-}
@@ -380,8 +381,14 @@ drawingHeightAt :: SolveEnv -> NodeIdx -> Float -> AxisSizing -> Float -> IO Flo
 drawingHeightAt SolveEnv {seArena = na, seMs = ms} idx w hAx fallback = do
   wid <- getWidgetId na idx
   msLookupMeasure ms wid >>= \case
-    Just measure -> pure (clamp (axMin hAx) (axMax hAx) (snd (measure (msFm ms) (w, offeredExtent hAx))))
+    Just measure -> pure (measuredHeightAt (msFm ms) measure w hAx)
     Nothing -> pure fallback
+
+-- | The height a custom measure gives a drawing laid out at width @w@,
+-- clamped to @hAx@: what the position pass sets ('drawingHeightAt').
+{-# INLINE measuredHeightAt #-}
+measuredHeightAt :: FontMetrics -> CustomMeasureFn -> Float -> AxisSizing -> Float
+measuredHeightAt fm measure w hAx = clamp (axMin hAx) (axMax hAx) (snd (measure fm (w, offeredExtent hAx)))
 
 -- | The width a text node that is not a row's child wraps at, from its
 -- effective max width, width sizing and assigned width: 1e8 or more when
@@ -394,21 +401,21 @@ textWrapCap effMaxW wTag w
   | otherwise = max 0 effMaxW
 
 -- | Find the nearest ancestor's fixed or finite maximum width, subtracting
--- accumulated horizontal padding. Returns 1e9 when none constrains the node.
+-- accumulated horizontal padding. Returns 'noLimit' when none constrains the node.
 findAncestorMaxW :: NodeArena -> NodeIdx -> IO Float
 findAncestorMaxW na idx = go idx 0
   where
     go cur !padAccum = do
       p <- getParent na cur
       if p < 0
-        then pure 1e9
+        then pure noLimit
         else do
           pad <- getPadding na p
           let padAccum' = padAccum + padL pad + padR pad
           AxisSizing pwTag pwVal pMinW pMaxW <- getWidthSizing na p
           if pwTag == SizingFixed
             then pure (max 0 (clamp pMinW pMaxW pwVal - padAccum'))
-            else if pMaxW < 1e8
+            else if isBounded pMaxW
               then pure (max 0 (pMaxW - padAccum'))
               else go p padAccum'
 
@@ -424,10 +431,10 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
   effMaxW <-
     if wTag == SizingFixed
       then pure (clamp minW maxW wVal)
-      else if maxW < 1e8
+      else if isBounded maxW
         then pure maxW
         else findAncestorMaxW na idx
-  let canWrap = not isRowChild && effMaxW < 1e8
+  let canWrap = not isRowChild && isBounded effMaxW
   TextBox {tbW = tw, tbH = th, tbLineH = lineH} <-
     measureTextNodeAt env idx txt effMaxW (\_ lineW -> canWrap && effMaxW + 0.5 < lineW)
   let reportedW = sizeWithin wAx (if wTag == SizingGrow && parentAssigns then 0 else tw)
@@ -706,15 +713,15 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
   -- is not known yet.
   bound <-
     if not vertical
-      then pure 1e9
+      then pure noLimit
       else if wTag == SizingFixed
         then pure (clamp wMin wMax wVal)
         else (\w -> min wMax (if wTag == SizingPercent then w * wVal / 100 else w)) <$> findAncestorMaxW na idx
   (contentW, contentH) <-
-    if bound >= 1e8 && not (vertical && fitsContent)
+    if isUnbounded bound && not (vertical && fitsContent)
       then foldChildDimsFromParent env idx dir gap
       else do
-        naturalW <- if fitsContent then fst <$> foldChildDimsFromParent env idx dir gap else pure 1e9
+        naturalW <- if fitsContent then fst <$> foldChildDimsFromParent env idx dir gap else pure noLimit
         let viewAt gutter = min naturalW (max 0 (bound - padX - gutter))
             stackAt viewW = do
               let step (FlowAcc count maxW sumH) ci = do
@@ -783,7 +790,7 @@ measureWrap :: SolveEnv -> NodeIdx -> DirTag -> Float -> Float -> IO (Float, Flo
 measureWrap env@SolveEnv {seArena = na} idx dir gap bound = do
   kids <- mapM (\ci -> (\(Rect _ _ w h) -> (ci, (w, h))) <$> getNodeRect na ci) =<< flowChildrenInOrder na idx
   limit <-
-    if dir == DirRow && bound >= 1e8
+    if dir == DirRow && isUnbounded bound
       then do
         pad <- getPadding na idx
         (\w -> max 0 (w - padL pad - padR pad)) <$> findAncestorMaxW na idx
@@ -791,7 +798,7 @@ measureWrap env@SolveEnv {seArena = na} idx dir gap bound = do
   (along, across) <- wrapExtent env idx dir gap limit kids
   wTag <- axTag <$> getWidthSizing na idx
   assigned <-
-    if dir == DirRow && limit >= 1e8 && wTag == SizingGrow then growParent na idx else pure False
+    if dir == DirRow && isUnbounded limit && wTag == SizingGrow then growParent na idx else pure False
   let widest = foldl' (\m (_, (w, _)) -> max m w) 0 kids
   pure (if dir == DirRow then (if assigned then widest else along, across) else (across, along))
 
@@ -845,7 +852,7 @@ measureGridScratch ::
   Float ->
   IO (Float, Float)
 measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap = do
-  let bounded = innerMaxW < 1e8
+  let bounded = isBounded innerMaxW
       cols = gridColumnCount gCols minColW (if bounded then innerMaxW else 0) gap
       colW = max 0 ((innerMaxW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
   n <- loadChildrenScratch (seArena env) idx (flowChildSize env bounded (if bounded then colW else innerMaxW) innerAvailH)
@@ -862,7 +869,7 @@ measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap = do
       totalH <- foldUpTo numRows (\t r -> (t +) <$> gridRowHeight hArr n rowCols r) 0
       let contentH = totalH + gap * fromIntegral (max 0 (numRows - 1))
       contentW <-
-        if innerMaxW > 0 && innerMaxW < 1e8
+        if innerMaxW > 0 && isBounded innerMaxW
           then pure innerMaxW
           else if minColW > 0
             then pure (fromIntegral cols * minColW + gap * fromIntegral (max 0 (cols - 1)))
@@ -921,7 +928,7 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
                 childH w ci = do
                   subAx <- getWidthSizing na ci
                   let subW = widthOf subAx w
-                  recomputeFitHeightAtWidth env ci (if axMax subAx < 1e8 then min subW (axMax subAx) else subW)
+                  recomputeFitHeightAtWidth env ci (if isBounded (axMax subAx) then min subW (axMax subAx) else subW)
                 padded h = pure (clamp minH maxH (h + padT pad + padB pad))
             if gCols > 0 || minColW > 0
               then do
@@ -1009,7 +1016,7 @@ flowChildSize env refit availW availH ci = do
 {-# INLINE percentOr #-}
 percentOr :: AxisSizing -> Float -> Float -> Float
 percentOr (AxisSizing tag val lo hi) avail size =
-  if tag == SizingPercent && avail < 1e8 then clamp lo hi (avail * val / 100) else size
+  if tag == SizingPercent && isBounded avail then clamp lo hi (avail * val / 100) else size
 
 -- | Distance from the top of node @ci@, laid out @h@ tall, to its first
 -- baseline, as in CSS:
@@ -1044,10 +1051,10 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
                 AxisSizing wTag _ _ maxW <- getWidthSizing na ci
                 Rect _ _ w _ <- getNodeRect na ci
                 -- Only fit text wraps at the ancestor cap ('textWrapCap').
-                effMaxW <- if maxW < 1e8 || (wTag /= SizingFit && w > 0) then pure maxW else findAncestorMaxW na ci
+                effMaxW <- if isBounded maxW || (wTag /= SizingFit && w > 0) then pure maxW else findAncestorMaxW na ci
                 let cap = textWrapCap effMaxW wTag w
                 (tw, _) <- measureFontLine measurer raw
-                pure (cap < 1e8 && cap + 0.5 < tw)
+                pure (isBounded cap && cap + 0.5 < tw)
           pure (textBaseline fm (if wrapped then fmLineHeight fm else h))
     _
       | hasCenteredLabel nt && not (nt == NodeButton && hasFlag buttonFlagClose si) -> do

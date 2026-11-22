@@ -26,6 +26,8 @@ import NanoUI.Testing.Sim
 tests :: [Spec]
 tests =
   [ spec "layout-flow" runLayoutFlowTest
+  , spec "wrap-matches-paint" runWrapMatchesPaintTest
+  , simSpec "aspect-bad-ratio" 400 400 badRatioUi badRatio
   , spec "flex-sizing" runFlexSizingTest
   , pixelSpec "label-align-end" runLabelAlignEndTest
   , spec "empty-frame" runEmptyFrameTest
@@ -516,6 +518,34 @@ runLabelAlignEndTest ctx failed = do
 -- | Nesting past the level array's first capacity lays out, a responsive row
 -- stacks only below its breakpoint, and a multi-line kv value pushes the next
 -- row down.
+-- | A width/height ratio that is zero, negative or infinite gives a square
+-- instead of an infinite or negative side.
+badRatioUi :: NanoUI [Rect]
+badRatioUi = column $ forM [fixedAspectW 40 0, fixedAspectW 40 (-2), fixedAspectH 40 (1 / 0)] $ \f ->
+  respRect <$> buttonWith' f "x"
+
+badRatio :: Sim [Rect] ()
+badRatio = mapM_ (\(Rect _ _ w h) -> checkEq (40, 40) (w, h)) =<< result
+
+-- | A wrapping label is laid out as tall as the lines paint draws for it, at
+-- fractional positions and widths: the solve wraps at the width the node
+-- snaps to, as paint does, so the next label never overlaps its last line
+-- and no blank line is left above it.
+runWrapMatchesPaintTest :: Context -> IORef Int -> IO ()
+runWrapMatchesPaintTest _ failed =
+  forM_ [(s, p, w) | s <- [1, 1.5], p <- [10, 10.15 .. 11], w <- [150, 151.3 .. 175]] $ \(s, p, w) -> do
+    ctx <- (`withFontMetrics` (monospaceMetrics 12) {fmSnapScale = s}) <$> newContext
+    let ui = columnWith (fixedW w . gap 0 . \l -> l {layoutPadding = Padding p p 0 0}) $ do
+          labelWith fillW "the quick brown fox jumps over the lazy dog"
+          label "END"
+    runSim ctx failed (withInput 400 400) ui $ do
+      shown <- spans
+      let lineRects = [r | (r, t, _, _, _) <- shown, T.strip t /= "END"]
+          bottom = maximum (0 : [rectY r + rectH r | r <- lineRects])
+      Rect _ endY _ _ <- rectOf "END"
+      check (not (null lineRects))
+      checkEq (s, p, w, True) (s, p, w, endY + 1.0e-3 >= bottom && endY - bottom < 2)
+
 runLayoutFlowTest :: Context -> IORef Int -> IO ()
 runLayoutFlowTest ctx failed = do
   let nest :: Int -> NanoUI ()

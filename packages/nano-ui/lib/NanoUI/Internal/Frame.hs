@@ -10,6 +10,7 @@ import Control.Monad (unless, when, (<$!>))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (isJust, isNothing)
+import Data.Primitive.PrimArray (readPrimArray)
 import Data.Primitive.PrimVar (writePrimVar)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Atlas (atlasToken)
@@ -30,7 +31,7 @@ import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Id.Cursor (writeIdCursor)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Layout.Solve (placeFloatingNodes, runCustomMeasure, solveLayout)
+import NanoUI.Internal.Layout.Solve (measuredHeightAt, placeFloatingNodes, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI (..), Ui, runUi, whenM)
 import NanoUI.Internal.NativeWindow (clearWindowClose)
 import NanoUI.Internal.Store (ptrEq)
@@ -476,7 +477,21 @@ layoutReuseValid ctx@Context {ctxNodeArena = na} lc = do
           else do
             mFn <- lookupCustomMeasure ctx =<< getWidgetId na idx
             traverse (\fn -> runCustomMeasure na (ctxFontMetrics ctx) fn idx) mFn
-      stable (idx, r) rest = measureOf idx >>= \c -> if c == Just r then rest else pure False
+      stable (idx, r) rest = measureOf idx >>= \c -> if c == Just r then placedStable idx >>= \ok -> if ok then rest else pure False else pure False
+      -- The solve also ran the measure at the width the drawing was placed
+      -- at, when that differs from its measured width ('drawingHeightAt'),
+      -- and a closure reading outside state can answer differently there
+      -- with the same answer at the offered width.
+      placedStable idx = do
+        hAx <- getHeightSizing na idx
+        mFn <- lookupCustomMeasure ctx =<< getWidgetId na idx
+        case mFn of
+          Just fn | axTag hAx == SizingFit -> do
+            measuredW <- readPrimArray (lcMeasured lc) (idx * 2)
+            placedW <- readPrimArray (lcUnsnapped lc) (idx * 4 + 2)
+            placedH <- readPrimArray (lcUnsnapped lc) (idx * 4 + 3)
+            pure (placedW == measuredW || measuredHeightAt (ctxFontMetrics ctx) fn placedW hAx == placedH)
+          _ -> pure True
   if not okSig || hooks /= lcMeasureHooks lc
     then pure False
     else foldr stable (pure True) (IM.toList (lcMeasures lc))

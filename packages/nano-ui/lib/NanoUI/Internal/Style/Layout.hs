@@ -100,7 +100,7 @@ import Data.Proxy (Proxy (..))
 import Data.Word (Word8)
 import GHC.Enum (boundedEnumFrom, boundedEnumFromThen, predError, succError, toEnumError)
 import GHC.TypeLits (KnownNat, Nat, natVal)
-import NanoUI.Internal.Types (Color (..), V2 (..))
+import NanoUI.Internal.Types (Color (..), V2 (..), noLimit)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
 -- are relative weights, and percentages use 100 for the full available size.
@@ -274,8 +274,8 @@ defaultLayout =
     , layoutAlignY = AlignTop
     , layoutMinW = 0
     , layoutMinH = 0
-    , layoutMaxW = 1e9
-    , layoutMaxH = 1e9
+    , layoutMaxW = noLimit
+    , layoutMaxH = noLimit
     , layoutFontVariant = FontRegular
     , layoutGridCols = 0
     , layoutGridMinColW = 0
@@ -417,13 +417,19 @@ percent p l = l {layoutWidth = Percent p}
 gridMinColW :: Float -> Layout -> Layout
 gridMinColW w l = l {layoutGridMinColW = max 0 w}
 
--- | Fixed width and width/height ratio; the height is derived.
+-- | Fixed width and width/height ratio; the height is derived. A ratio that
+-- is not positive and finite gives a square, as 'aspect' ignores one.
 fixedAspectW :: Float -> Float -> Layout -> Layout
-fixedAspectW w ratio = fixedWH w (w / ratio)
+fixedAspectW w ratio = fixedWH w (w / validRatio ratio)
 
--- | Fixed height and width/height ratio; the width is derived.
+-- | Fixed height and width/height ratio; the width is derived. A ratio that
+-- is not positive and finite gives a square.
 fixedAspectH :: Float -> Float -> Layout -> Layout
-fixedAspectH h ratio = fixedWH (h * ratio) h
+fixedAspectH h ratio = fixedWH (h * validRatio ratio) h
+
+-- | The ratio when it is positive and finite, otherwise 1.
+validRatio :: Float -> Float
+validRatio r = if r > 0 && not (isInfinite r) then r else 1
 
 -- | Keep width / height at @ratio@.
 aspect :: Float -> Layout -> Layout

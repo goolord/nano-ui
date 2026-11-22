@@ -2,6 +2,15 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Layout fixes: modals, windows and popups snap to the device pixel grid
+  as the page does, so fractional widths inside them no longer leave a
+  one-pixel seam. A wrapping label is laid out at the width it is drawn at,
+  so it is never a line shorter or taller than its text. A cached layout is
+  not reused when a custom measure gives a different height at the width the
+  drawing was placed at. `fixedAspectW` and `fixedAspectH` treat a ratio that
+  is not positive and finite as 1, and a one-axis scroll area shorter than
+  its scrollbar offers its content no negative size.
+
 - **Breaking (ids):** a keyed scope (`withKey`, `keyedTag`, `forEachVar`
   rows, `PaneGrid` panes) no longer takes a sibling position. A widget
   declared after a keyed list keeps its id, focus, caret, selection and undo

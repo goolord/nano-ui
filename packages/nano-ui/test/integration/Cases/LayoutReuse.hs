@@ -8,10 +8,49 @@ import Data.Bits (shiftR, xor)
 import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Adornment (affix, leading, trailing)
+import NanoUI.Testing.Sim (Sim, checkEq, settle, writeV)
 
 tests :: [Spec]
 tests =
-  [spec "position-reuse" runPositionReuseTest]
+  [ spec "position-reuse" runPositionReuseTest
+  , varSimSpec "reuse-rechecks-placed-measure" 300 200 "abcdefg hi j" placedMeasureUi placedMeasure
+  ]
+
+-- | A measured drawing whose measure gives the same size at the offered
+-- width but a different height at the width it is placed at must not keep
+-- the cached height. Both texts are one 120 px line unwrapped; at 70 px the
+-- first wraps to two lines and the second to three.
+placedMeasureUi :: Var T.Text -> NanoUI Rect
+placedMeasureUi ref = columnWith (fixedW 70 . gap 0 . \l -> l {layoutPadding = Padding 0 0 0 0}) $ do
+  txt <- readVar ref
+  respRect . fst <$> customWidget defaultCustomWidgetSpec
+    { widgetMeasure = Just (\_ (w, _) -> (min w (charW * fromIntegral (T.length txt)), lineH * fromIntegral (linesAt w txt)))
+    , widgetLayout = fillW defaultLayout
+    }
+
+placedMeasure :: Var T.Text -> Sim Rect ()
+placedMeasure ref = do
+  checkEq (2 * lineH) . rectH =<< settle
+  writeV ref "abc defghi j"
+  checkEq (3 * lineH) . rectH =<< settle
+
+charW, lineH :: Float
+charW = 10
+lineH = 14
+
+-- | Greedy word wrap of @t@ at width @w@ with 'charW' per character: the
+-- line count, or 1 when @w@ is unbounded.
+linesAt :: Float -> T.Text -> Int
+linesAt w t
+  | w >= 1.0e8 = 1
+  | otherwise = go (0 :: Float) 1 (T.words t)
+  where
+    go _ n [] = n
+    go cur n (x : xs)
+      | cur == 0 = go (len x) n xs
+      | cur + charW + len x <= w = go (cur + charW + len x) n xs
+      | otherwise = go (len x) (n + 1) xs
+    len x = charW * fromIntegral (T.length x)
 
 -- | Run each frame on a context that keeps its layout cache and on one that
 -- solves every frame from scratch, and check they lay out the same.

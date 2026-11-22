@@ -64,7 +64,7 @@ import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldF
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.), shiftL)
 import Data.String (IsString (..))
-import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains)
+import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains, noLimit)
 import NanoUI.Internal.WidgetText (buttonFlagTable, rowStripe, stripeBits, tableHeaderPadX)
 import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
@@ -511,7 +511,7 @@ numCellLayout =
 -- of a table that fills its width with no stretch column.
 colBoxLayout :: Bool -> Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
 colBoxLayout squeeze fillInner hasStretch sizes contentWs stored i
-  | squeeze = box {layoutWidth = Grow pinned, layoutMinW = minColW, layoutMaxW = if grows then 1e9 else pinned}
+  | squeeze = box {layoutWidth = Grow pinned, layoutMinW = minColW, layoutMaxW = if grows then noLimit else pinned}
   | saved > 0 = fixed (max floorW saved)
   | grows, ColStretch <- size = minW 0 box {layoutWidth = Grow 1}
   | grows = box {layoutWidth = Grow 1}

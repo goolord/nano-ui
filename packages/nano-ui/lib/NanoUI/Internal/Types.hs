@@ -21,6 +21,9 @@ module NanoUI.Internal.Types
   , hsvToRgb
   , clamp
   , clamp01
+  , noLimit
+  , isBounded
+  , isUnbounded
   , finite
   , onGrid
   , gridSpan
@@ -156,6 +159,23 @@ colorA (Color w) = fromIntegral (w .&. 0xFF)
 {-# INLINE clamp #-}
 clamp :: Ord a => a -> a -> a -> a
 clamp lo hi x = max lo (min hi x)
+
+-- | The size limit that means none: the default maximum width and height,
+-- and the space a measure is offered along an unbounded axis.
+noLimit :: Float
+noLimit = 1e9
+
+-- | Whether a size limit constrains anything. Limits of 1e8 or more, such as
+-- 'noLimit', mean no limit, so a sum or a padding added to 'noLimit' still
+-- reads as unbounded.
+{-# INLINE isBounded #-}
+isBounded :: Float -> Bool
+isBounded v = v < 1e8
+
+-- | @not . 'isBounded'@.
+{-# INLINE isUnbounded #-}
+isUnbounded :: Float -> Bool
+isUnbounded v = v >= 1e8
 
 -- | Restrict a value to the inclusive range 0-1.
 {-# INLINE clamp01 #-}

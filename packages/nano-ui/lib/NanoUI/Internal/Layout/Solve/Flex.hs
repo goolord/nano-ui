@@ -24,7 +24,7 @@ import Data.Primitive.PrimArray (copyMutablePrimArray, readPrimArray, writePrimA
 import NanoUI.Internal.Frame.Scroll.Geometry (isScrollStyle2D)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Padding (..), alignXFraction, alignYFraction)
-import NanoUI.Internal.Types (foldUpTo, forUpTo_)
+import NanoUI.Internal.Types (foldUpTo, forUpTo_, isBounded)
 
 -- | Strict accumulator for flow-child folds: a child count and two running
 -- sums or extents. The strict fields keep the folds unboxed.
@@ -117,7 +117,7 @@ distributeScratch na n avail gapSum horizontal = do
         AxisSizing tag val _ hi <- sizingAt i
         let gf = if tag == SizingGrow && val > 0 then val else 0
         writePrimArray gfArr i gf
-        pure (FlowAcc (if gf > 0 && hi < 1e8 then c + 1 else c) (acc + gf) 0)) (FlowAcc 0 0 0)
+        pure (FlowAcc (if gf > 0 && isBounded hi then c + 1 else c) (acc + gf) 0)) (FlowAcc 0 0 0)
       when (growTotal > 0) $ do
         (free, gfSum) <-
           if capped > 0

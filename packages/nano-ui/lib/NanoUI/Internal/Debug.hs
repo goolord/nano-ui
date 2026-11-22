@@ -27,7 +27,7 @@ import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled
 import NanoUI.Internal.Context.Types (ExplainedNode (..))
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Style (Padding (..), PointerMode (..), Sizing (..))
-import NanoUI.Internal.Types (Rect (..), V2 (..))
+import NanoUI.Internal.Types (Rect (..), V2 (..), isBounded)
 import Text.Printf (printf)
 
 -- | Minimum interval between published snapshots, in seconds (0.25).
@@ -258,7 +258,7 @@ formatExplainRows (Just node) =
 -- counts as no limit.
 sizingText :: Sizing -> Float -> Float -> Text
 sizingText sizing lo hi =
-  T.pack (base <> (if lo > 0 then printf ", min %.1f" lo else "") <> (if hi < 1e8 then printf ", max %.1f" hi else ""))
+  T.pack (base <> (if lo > 0 then printf ", min %.1f" lo else "") <> (if isBounded hi then printf ", max %.1f" hi else ""))
   where
     base :: String
     base = case sizing of

@@ -14,6 +14,7 @@ tests =
   , spec "modal-nested-dismiss" runModalNestedDismissTest
   , simSpec "modal-over-inner-window" 500 400 innerWindowUi modalOverInnerWindow
   , spec "modal-fractional-scale-no-scroll" runModalFractionalScaleNoScrollTest
+  , spec "modal-snaps-to-device-pixels" runModalSnapsTest
   , spec "modal-fill-label-fits" runModalFillLabelFitsTest
   , spec "modal-tree-selection" runModalTreeSelectionTest
   ]
@@ -148,6 +149,23 @@ runModalFractionalScaleNoScrollTest _ failed = forM_ cases $ \(s, n, nested) -> 
   assertEq failed True =<< scrolls 300
   where
     cases = [(s, n, nested) | s <- [1, 1.25, 1.5, 1.75], n <- [4 .. 8 :: Int], nested <- [False, True]]
+
+-- | A modal's content lands on the device pixel grid at fractional scales,
+-- as the page's does: grow shares of an odd width split into cells whose
+-- edges are whole device pixels and meet with no column left between them.
+runModalSnapsTest :: Context -> IORef Int -> IO ()
+runModalSnapsTest _ failed = forM_ [1.25, 1.5, 1.75] $ \s -> do
+  ctx <- (`withFontMetrics` (monospaceMetrics 12) {fmSnapScale = s}) <$> newContext
+  let cell t = respRect <$> buttonWith' (fillW . minW 0) t
+      body = rowWith (fixedW 301.3 . gap 0) (sequence [cell "a", cell "b", cell "c"])
+      onGridAt v = abs (v * s - fromIntegral (round (v * s) :: Int)) < 1.0e-3
+  runSim ctx failed (withInput 1000 600) (snd <$> modal' (constVar True) "Cells" body) $ do
+    mRects <- result
+    case mRects of
+      Nothing -> check False
+      Just rects -> do
+        forM_ rects $ \(Rect x y w h) -> check (all onGridAt [x, y, x + w, y + h])
+        forM_ (zip rects (drop 1 rects)) $ \(Rect x _ w _, Rect x' _ _ _) -> check (abs (x + w - x') < 1.0e-3)
 
 -- | A modal measures each label in its requested font size and keeps the last
 -- row visible when the measured body fits.

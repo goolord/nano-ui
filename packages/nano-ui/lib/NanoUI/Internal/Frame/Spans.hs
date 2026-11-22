@@ -32,7 +32,7 @@ import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
 import NanoUI.Internal.Style (AlignX (..), Style (..), Theme (..), textToneColor)
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, lerpColor, onGrid, rectIntersect)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, lerpColor, onGrid, rectIntersect, isBounded)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
 
@@ -171,7 +171,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
   effMaxW <-
     if wTag == SizingFixed
       then pure (clamp minW maxW wVal)
-      else if maxW < 1e8 || (if isRowChild then not (T.any (== '\n') raw) else wTag /= SizingFit && w > 0)
+      else if isBounded maxW || (if isRowChild then not (T.any (== '\n') raw) else wTag /= SizingFit && w > 0)
         then pure maxW
         else findAncestorMaxW arena idx
   let rect = Rect x y w h
@@ -241,7 +241,7 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
           -- A row child wraps only at its newlines, where it was measured.
           wrapCap = if isRowChild then effMaxW else textWrapCap effMaxW wTag w
       tw <- measureW raw
-      if T.any (== '\n') raw || (not isRowChild && wrapCap < 1e8 && wrapCap + 0.5 < tw)
+      if T.any (== '\n') raw || (not isRowChild && isBounded wrapCap && wrapCap + 0.5 < tw)
         then do
           wrap <- cachedWrapText ctx (textNodeFontKey fontSize si) measureW raw (max 0 (wrapCap - 2 * ix))
           prepared <- forM (wrLines wrap) $ \line -> (,) line <$> prepareFontMetrics fm line
@@ -250,7 +250,7 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
           -- Half a pixel over the width is no reason to cut, as it is none
           -- to wrap.
           shown <-
-            if tw > contentW + 0.5 && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
+            if tw > contentW + 0.5 && contentW > 0 && (wTag == SizingGrow || isBounded maxW)
               then truncateTextIO measureW contentW raw
               else pure raw
           (,) fm . SpanSingle shown <$> prepareFontMetrics fm shown

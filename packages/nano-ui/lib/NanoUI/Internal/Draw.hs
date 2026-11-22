@@ -83,7 +83,7 @@ import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
 import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg)
-import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect)
+import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect, isUnbounded)
 
 -- | The line box, in logical pixels, that a 'DrawText' of the text anchored
 -- at @(x, y)@ by @ax@ and @ay@ occupies, measured with @fm@'s advances.
@@ -106,7 +106,7 @@ textBoxTop fm y ay
 cmdEffectiveClip :: Maybe Rect -> DrawCmd -> Maybe (Maybe Rect)
 cmdEffectiveClip mDamage cmd =
   let !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
-      !cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
+      !cmdOpen = isUnbounded (cmdClipW cmd) || isUnbounded (cmdClipH cmd)
    in case (mDamage, cmdOpen) of
         (Nothing, True) -> Just Nothing
         (Nothing, False) -> Just (Just cmdRect)

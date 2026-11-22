@@ -788,8 +788,9 @@ newAxisSnapshot :: Int -> IO AxisSnapshot
 newAxisSnapshot cap = AxisSnapshot <$> newPrimArray cap <*> newPrimArray cap
 
 -- | Memoize @compute@ for node @idx@ at width @key@ in one of the arena's
--- per-frame memos. Widths within 0.25 px share an entry so near-identical
--- reflows still hit.
+-- per-frame memos. Only float noise (under a thousandth of a pixel) shares
+-- an entry: text that fits 144 px exactly wraps at 143.8, so a wider
+-- tolerance can hand back a different line count than paint draws.
 {-# INLINE memoizeWidth #-}
 memoizeWidth :: NodeArena -> IORef WidthMemo -> NodeIdx -> Float -> IO (Float, Float) -> IO (Float, Float)
 memoizeWidth na ref idx key compute = do
@@ -802,7 +803,7 @@ memoizeWidth na ref idx key compute = do
       then pure False
       else do
         k <- readPrimArray slots base
-        pure (abs (k - key) <= 0.25)
+        pure (abs (k - key) <= 1.0e-3)
   if hit
     then (,) <$> readPrimArray slots (base + 1) <*> readPrimArray slots (base + 2)
     else do

@@ -20,7 +20,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Layout.Solve.Measure
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), Padding (..), lineAlignFraction, windowMargin)
-import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_)
+import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan)
 import NanoUI.Internal.WidgetText
 
 -- | Place a widget's adornment rows ('adornRows'), each centred on its
@@ -124,10 +124,14 @@ positionNode env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y ava
   h <- case nt of
     -- A fit height with an aspect ratio follows the assigned width.
     _ | ratio > 0 -> pure (clamp minH maxH (w / ratio))
-    -- Text outside a row wraps at the assigned width.
+    -- Text outside a row wraps at the assigned width, as quantization will
+    -- snap it: paint wraps at the snapped width, and a height worked out at
+    -- the raw one can be a line short (or long) of what paint draws.
     NodeText | hTag /= SizingFixed -> do
       isRowChild <- parentIsRow na idx
-      if isRowChild then pure resolvedH else textHeightAt env idx hAx w (axTag wAx /= SizingFit) resolvedH
+      let s = fmSnapScale (msFm (seMs env))
+          wrapW = if s > 0 then max 0 (gridSpan s x (x + w)) else w
+      if isRowChild then pure resolvedH else textHeightAt env idx hAx wrapW (axTag wAx /= SizingFit) resolvedH
     _ | (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit -> pure (clamp minH maxH (max intrinsicH availH))
     -- A measured drawing laid out at a new width recomputes its height.
     NodeDrawing | hTag == SizingFit && w /= intrinsicW -> drawingHeightAt env idx w hAx resolvedH
@@ -200,10 +204,10 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
         DirRow -> do
           wTag <- axTag <$> getWidthSizing na idx
           let rowMain = if wTag == SizingGrow then max contentSize innerW else contentSize
-              b = Rect cx cy rowMain (innerH - gutterRow)
+              b = Rect cx cy rowMain (max 0 (innerH - gutterRow))
           b <$ positionRowFromParent env depth idx gap b
         DirColumn -> do
-          let viewW = innerW - gutterCol
+          let viewW = max 0 (innerW - gutterCol)
               b = Rect cx cy viewW innerH
           b <$ positionColumn env depth idx gap False (Just contentSize) cx viewW b
       positionLayered env depth idx False box
