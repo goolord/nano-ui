@@ -12,6 +12,18 @@ typedef struct {
     /* The pending indices less the first vertex they use (see narrow). */
     int *rebased;
     int rebased_cap;
+    /* Device pixels per layout unit for the pass (nano_ui_batch_begin). The
+     * renderer draws at scale 1, so clip rects are whole device pixels, and
+     * positions are multiplied here instead of by SDL's render scale. */
+    float scale;
+    /* Scaled x, y pairs of the pass's vertices, by vertex index. Only the
+     * vertices [xy_lo, xy_hi) of xy_verts are filled: a flush extends the
+     * range to the vertices its indices use. */
+    float *xy;
+    int xy_cap;
+    int xy_lo;
+    int xy_hi;
+    const uint8_t *xy_verts;
 } NanoUiBatch;
 
 NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
@@ -24,6 +36,7 @@ NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
         return NULL;
     }
     batch->renderer = renderer;
+    batch->scale = 1.f;
 #if SDL_VERSION_ATLEAST(3, 4, 0)
     /* Every UV the batches submit lies in [0, 1]. Left on AUTO, SDL scans all
      * of a call's vertices on every textured call to choose between clamp
@@ -74,6 +87,79 @@ static void narrow(NanoUiBatch *batch, const SDL_Vertex **v, const int **idx, in
 }
 #endif
 
+/* Start a pass at a scale: forget the positions scaled for an earlier pass,
+ * whose buffer may hold other vertices now. */
+void nano_ui_batch_begin(NanoUiBatch *batch, float scale)
+{
+    if (batch) {
+        batch->scale = scale > 0.f ? scale : 1.f;
+        batch->xy_verts = NULL;
+        batch->xy_lo = batch->xy_hi = 0;
+    }
+}
+
+static void scale_range(NanoUiBatch *batch, const SDL_Vertex *v, int from, int to)
+{
+    const float s = batch->scale;
+    for (int i = from; i < to; i++) {
+        batch->xy[2 * i] = v[i].position.x * s;
+        batch->xy[2 * i + 1] = v[i].position.y * s;
+    }
+}
+
+/* Scaled positions covering the vertices the n indices idx use, which count
+ * from vertex off of the batch's buffer, as a pointer for vertex off; NULL
+ * when there is no memory for them. Indices outside the buffer are left for
+ * SDL to reject. */
+static const float *scaled_positions(NanoUiBatch *batch, int off, const int *idx, int n)
+{
+    const int total = batch->vert_count;
+    if (batch->xy_cap < total) {
+        float *grown = (float *)realloc(batch->xy, sizeof(float) * 2 * (size_t)total);
+        if (!grown) {
+            return NULL;
+        }
+        batch->xy = grown;
+        batch->xy_cap = total;
+    }
+    int lo = idx[0], hi = idx[0];
+    for (int k = 1; k < n; k++) {
+        lo = idx[k] < lo ? idx[k] : lo;
+        hi = idx[k] > hi ? idx[k] : hi;
+    }
+    lo += off;
+    hi += off + 1;
+    lo = lo < 0 ? 0 : lo;
+    hi = hi > total ? total : hi;
+    const SDL_Vertex *all = (const SDL_Vertex *)batch->verts;
+    if (batch->xy_verts != batch->verts || batch->xy_lo >= batch->xy_hi) {
+        scale_range(batch, all, lo, hi);
+        batch->xy_verts = batch->verts;
+        batch->xy_lo = lo;
+        batch->xy_hi = hi;
+    } else {
+        if (lo < batch->xy_lo) {
+            scale_range(batch, all, lo, batch->xy_lo);
+            batch->xy_lo = lo;
+        }
+        if (hi > batch->xy_hi) {
+            scale_range(batch, all, batch->xy_hi, hi);
+            batch->xy_hi = hi;
+        }
+    }
+    return batch->xy + 2 * (size_t)off;
+}
+
+/* Drop the pending batch without drawing it: a pass that failed part way. */
+void nano_ui_batch_discard(NanoUiBatch *batch)
+{
+    if (batch) {
+        batch->pending_n = 0;
+        batch->pending_start = 0;
+        batch->pending_texture = NULL;
+    }
+}
+
 void nano_ui_batch_flush(NanoUiBatch *batch)
 {
     if (!batch || !batch->renderer || batch->pending_n < 3) {
@@ -93,8 +179,18 @@ void nano_ui_batch_flush(NanoUiBatch *batch)
     narrow(batch, &v, &idx, &nv);
 #endif
     const int stride = (int)sizeof(SDL_Vertex);
+    const float *xy = &v->position.x;
+    int xy_stride = stride;
+    if (batch->scale != 1.f) {
+        xy = scaled_positions(batch, (int)(v - (const SDL_Vertex *)batch->verts), idx, batch->pending_n);
+        xy_stride = (int)(2 * sizeof(float));
+        if (!xy) {
+            nano_ui_batch_discard(batch);
+            return;
+        }
+    }
     SDL_RenderGeometryRaw(batch->renderer, batch->pending_texture,
-                          &v->position.x, stride, &v->color, stride,
+                          xy, xy_stride, &v->color, stride,
                           batch->pending_texture ? &v->tex_coord.x : NULL, stride,
                           nv, idx, batch->pending_n, (int)sizeof(int));
     batch->pending_n = 0;
@@ -107,6 +203,7 @@ void nano_ui_batch_destroy(NanoUiBatch *batch)
     if (batch) {
         nano_ui_batch_flush(batch);
         free(batch->rebased);
+        free(batch->xy);
         free(batch);
     }
 }

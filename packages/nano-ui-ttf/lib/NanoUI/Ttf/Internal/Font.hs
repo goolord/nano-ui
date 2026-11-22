@@ -522,7 +522,7 @@ buildGlyphFontMetrics hooks ga sf scale = do
 withTtf :: FontHooks -> IO a -> IO a
 withTtf hooks =
   bracket_
-    (unlessM ttfInit (fail "TTF_Init failed"))
+    (unlessM ttfInit (ttfFail "TTF_Init failed"))
     (fhOnTtfQuit hooks >> ttfQuit)
 
 -- | Open a font at a point size, or bundled Inter when it will not open.
@@ -539,9 +539,17 @@ openFontSource hooks grid source ptsize =
         FontFromPath path -> openFontPath hooks path pt
         FontFromMemory bs _ ->
           unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
-      when (font == nullPtr) $ fail ("TTF_OpenFont failed for " ++ fontSourceLabel src)
+      when (font == nullPtr) $ ttfFail ("TTF_OpenFont failed for " ++ fontSourceLabel src)
       when grid (ttfHintForGrid font)
       (src,) <$> readSdlFont ptsize font
+
+-- | Throw an 'IOError' for a failed SDL_ttf call, with SDL's last error
+-- message appended when there is one.
+ttfFail :: String -> IO a
+ttfFail what = do
+  p <- sdlGetError
+  err <- if p == nullPtr then pure "" else GHC.peekCString utf8 p
+  ioError (userError (if null err then what else what ++ ": " ++ err))
 
 -- | Open a font file at a point size using the configured path encoding.
 openFontPath :: FontHooks -> FilePath -> CFloat -> IO (Ptr ())
@@ -737,6 +745,9 @@ foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_Init"
 
 foreign import capi unsafe "SDL3_ttf/SDL_ttf.h TTF_Quit"
   ttfQuit :: IO ()
+
+foreign import ccall unsafe "SDL_GetError"
+  sdlGetError :: IO CString
 
 foreign import capi unsafe "SDL3/SDL.h SDL_DestroySurface"
   sdlDestroySurface :: Ptr () -> IO ()

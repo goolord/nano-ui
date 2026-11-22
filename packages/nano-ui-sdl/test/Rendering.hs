@@ -27,9 +27,10 @@ import NanoUI
   , drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark, pageColor, respRect
   )
 import NanoUI.Path qualified as P
-import NanoUI.Backend (Appearance (..), cursorFallback, emptyInput, getSystemAppearance, setSystemAppearance)
+import NanoUI.Backend (Appearance (..), cursorFallback, emptyInput, getSystemAppearance, setSystemAppearance, snapDamage)
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors, sdlSystemCursor, showCursorKind)
+import NanoUI.Sdl.Internal.Error (sdlErrorText)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, syncImageAtlas)
 import NanoUI.Sdl.Internal.Render (destroyRenderBatch, flushRenderBatch, newRenderBatch, renderDrawDataPass)
 import NanoUI.Testing
@@ -42,6 +43,7 @@ import SDL3.Sys.Bindgen.Mouse qualified as M
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video qualified as Video
+import SDL3.Sys.Error (clearError)
 import SDL3.Sys.Mouse (cursorVisibleSafe)
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
 import SDL3.Sys.Video (getSystemTheme)
@@ -140,6 +142,43 @@ imageChecks env ctx images draw = do
   solid 4 300 2 (0, 255, 255)
   sample "added by growing" 4 (0, 255, 255)
   sample "kept across growth" 1 (0, 0, 255)
+
+-- | An atlas texture SDL will not make (here, for want of a renderer) is
+-- asked for once per atlas generation: the second sync makes no SDL call,
+-- so SDL's error, cleared between them, stays clear.
+imageFailureChecks :: IO ()
+imageFailureChecks = do
+  ctx <- newPixelContext
+  registerImage ctx (ImageId 1) 2 2 (BS.replicate 16 255) >>= (`unless` fail "image registration failed")
+  bracket newImageAtlas destroyImageAtlas $ \atlas -> do
+    syncImageAtlas nullPtr atlas ctx
+    first <- sdlErrorText
+    void clearError
+    syncImageAtlas nullPtr atlas ctx
+    again <- sdlErrorText
+    unless (not (null first) && null again) $
+      fail ("failed image atlas upload retried: " ++ show (first, again))
+
+-- | At a fractional scale the pass clips to the device pixels the damage
+-- was snapped to, and draws geometry at that scale: a red quad over layout
+-- units 7 to 13 of damage at scale 1.5 fills device pixels 10 to 19 only.
+fractionalScaleChecks :: SdlEnv -> (Float -> DrawData -> Damage -> IO ()) -> IO ()
+fractionalScaleChecks env draw = do
+  let scale = 1.5
+      quad x0 y0 x1 y1 = [(x0, y0), (x1, y0), (x0, y1), (x1, y0), (x1, y1), (x0, y1)]
+      row name xs expected = do
+        got <- mapM (\x -> pixel env x 15) xs
+        unless (got == expected) (fail (name ++ ": " ++ show (zip xs got)))
+      red = (255, 0, 0)
+      black = (0, 0, 0)
+  empty <- geometry []
+  draw 1 empty DamageFull
+  big <- geometry (quad 0 0 60 60)
+  draw scale big (snapDamage scale (DamageClip (Rect 7 7 6 6)))
+  row "damage clip at scale 1.5" [9, 10, 19, 20] [black, red, red, black]
+  small <- geometry (quad 0 0 20 20)
+  draw scale small DamageFull
+  row "geometry at scale 1.5" [29, 30] [red, black]
 
 -- | A translucent canvas line as SDL draws it has even alpha across its
 -- round caps and join: a cap drawn over the line's end would darken it.
@@ -278,8 +317,9 @@ main = do
   getTheme ctx >>= setTheme ctx . pageColor colorBlack
   withSdlBench ctx $ \_ env -> bracket newImageAtlas destroyImageAtlas $ \images ->
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do
-      let drawWithGlyph glyphs dd dmg =
-            renderDrawDataPass batch (sdlRenderer env) dd images glyphs dmg >> flushRenderBatch batch
+      let drawScaled scale glyphs dd dmg =
+            renderDrawDataPass batch (sdlRenderer env) scale dd images glyphs dmg >> flushRenderBatch batch
+          drawWithGlyph = drawScaled 1
           draw = drawWithGlyph nullPtr
           damage = DamageClip (Rect 15 15 10 10)
           step name act = act >> putStrLn ("SDL " ++ name ++ ": ok")
@@ -316,6 +356,8 @@ main = do
           step "glyph upload, padding and reset readback" $
             atlasChecks env (\glyphs dd -> drawWithGlyph glyphs dd DamageFull)
           step "image atlas upload readback" (imageChecks env ctx images (`draw` DamageFull))
+          step "failed image atlas upload reported once" imageFailureChecks
+          step "fractional-scale clip and geometry readback" (fractionalScaleChecks env (\s -> drawScaled s nullPtr))
           step "canvas line caps and joins readback" (pathChecks env ctx (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks
           step "native events and the system theme" (queueChecks >> systemThemeChecks env ctx)

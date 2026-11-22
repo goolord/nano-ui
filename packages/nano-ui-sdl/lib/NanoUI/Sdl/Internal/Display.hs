@@ -32,6 +32,7 @@ import Data.Int (Int32)
 import Data.Word (Word32)
 import NanoUI (Appearance (..), Size (..), V2 (..), ifM)
 import NanoUI.Monad ((<&&>))
+import NanoUI.Sdl.Internal.Error (sdlFail)
 import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -39,7 +40,7 @@ import SDL3.Sys.Bindgen.Video qualified as Video
 import SDL3.Sys.Events (pushEventSafe, registerEvents)
 import SDL3.Sys.Mouse (getMouseState)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
-import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getSystemTheme, getWindowPixelDensity, getWindowSize, setWindowPosition, setWindowSize)
+import SDL3.Sys.Video (getDisplayForWindow, getDisplayUsableBounds, getSystemTheme, getWindowPixelDensity, getWindowSize, setWindowPositionSafe, setWindowSizeSafe)
 import System.IO.Unsafe (unsafePerformIO)
 
 -- | Backbuffer pixels per window coordinate: the factor the retained
@@ -97,7 +98,7 @@ installResizeWatch win act = do
   handle <- installResizeWatchC win fp
   when (handle == nullPtr) $ do
     freeHaskellFunPtr fp
-    fail "SDL_AddEventWatch failed"
+    sdlFail "SDL_AddEventWatch failed"
   pure $ do
     removeResizeWatchC handle
     freeHaskellFunPtr fp
@@ -188,8 +189,10 @@ zoomWindow win (Size w h) zoom = do
   let fit want avail = if avail > 0 then min want (fromIntegral avail) else want
       zw = fit (w * zoom) usable.w
       zh = fit (h * zoom) usable.h
-  void $ setWindowSize win (round zw) (round zh)
-  void $ setWindowPosition win windowPosCentered windowPosCentered
+  -- Safe calls: Windows sends the window its size and position messages
+  -- from inside both, and SDL's window procedure runs the resize watch.
+  void $ setWindowSizeSafe win (round zw) (round zh)
+  void $ setWindowPositionSafe win windowPosCentered windowPosCentered
 
 -- | SDL_WINDOWPOS_CENTERED: the centring mask with display 0.
 windowPosCentered :: Int32

@@ -8,6 +8,7 @@
 module NanoUI.Sdl.Internal.Window
   ( RgbaImage (..)
   , SdlEnv (..)
+  , PresentProbe (..)
   , Retain (..)
   , SdlOptions (..)
   , RenderDriver (..)
@@ -17,6 +18,11 @@ module NanoUI.Sdl.Internal.Window
   , openChildWindow
   , registerAppImages
   , sdlPacingMs
+  , sdlLivePacingMs
+  , refreshDisplayRate
+  , notePresent
+  , restartPresentProbe
+  , presentPaces
   , askSdlEnv
   , withSdlEnv
   , syncDisplay
@@ -39,7 +45,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust, isNothing)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
 import System.Info (os)
 import Text.Read (readMaybe)
@@ -57,11 +63,12 @@ import NanoUI.Backend (Backend (..), BackendSession, SBackend (..), askBackendSe
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, newPixelContext, registerImage, withClipboard, withTheme)
 import NanoUI.Sdl.Internal.Display
+import NanoUI.Sdl.Internal.Error (sdlFail)
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
-import NanoUI.Sdl.Internal.Font.Search (searchFonts)
+import NanoUI.Sdl.Internal.Font.Search (searchFonts, startFontIndex)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot)
@@ -84,7 +91,7 @@ import SDL3.Sys.Bindgen.Surface qualified as Surface
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags)
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
-import SDL3.Sys.Clipboard (getClipboardTextSafe, setClipboardText)
+import SDL3.Sys.Clipboard (getClipboardTextSafe, setClipboardTextSafe)
 import SDL3.Sys.Hints (resetHint, setHint)
 import SDL3.Sys.Blendmode (SDL_BlendMode, composeCustomBlendMode)
 import SDL3.Sys.Blendmode qualified as Blend
@@ -99,7 +106,7 @@ import SDL3.Sys.Render
   , setRenderDrawBlendMode
   , setRenderScale
   , setRenderTarget
-  , setRenderVSync
+  , setRenderVSyncSafe
   )
 import SDL3.Sys.Stdinc (free)
 import SDL3.Sys.Surface (convertPixels, destroySurface, saveBMP)
@@ -258,6 +265,15 @@ data SdlEnv = SdlEnv
   , sdlLastPresented :: IORef Bool
   , sdlVsync :: !Bool
   , sdlRefreshPeriod :: !Double
+  -- ^ The refresh period of the window's display when it opened, in
+  -- seconds; 'sdlRefreshPeriodRef' follows it to other displays.
+  , sdlRefreshPeriodRef :: !(IORef Double)
+  -- ^ The refresh period of the window's current display, in seconds, read
+  -- again when the window moves to another display or the display's mode
+  -- changes ('refreshDisplayRate').
+  , sdlPresentProbe :: !(IORef PresentProbe)
+  -- ^ Whether presents wait for vertical sync as 'sdlVsync' asks
+  -- ('notePresent').
   , sdlContinuous :: !Bool
   , sdlTransparent :: !(Maybe (SDL_BlendMode, SDL_BlendMode))
   -- ^ For a transparent window, the blend modes for drawing and for
@@ -280,6 +296,67 @@ data SdlEnv = SdlEnv
   -- ^ Whether the limits last sent from 'sdlSizeLimits' were any, so none
   -- are sent again only to clear them.
   }
+
+-- | What a session with 'sdlVsync' has seen of its presents. A driver can
+-- turn vertical sync off whatever the application asks, and then a present
+-- returns at once; a loop that trusted it to wait would draw an animation
+-- as fast as it can.
+data PresentProbe
+  = PresentProbe !Double !Int
+  -- ^ When the last present returned ('GHC.Clock.getMonotonicTime'), and
+  -- how many presents in a row came less than half a refresh after the one
+  -- before.
+  | VsyncIgnored
+  -- ^ 'vsyncProbeFrames' presents in a row came that soon: presents do not
+  -- wait, and the session paces animation by time instead.
+  deriving (Eq, Show)
+
+-- | Presents in a row, each less than half a refresh after the last, that
+-- show vertical sync is not honoured. A driver may queue two or three
+-- frames before a present blocks, so a few fast presents prove nothing.
+vsyncProbeFrames :: Int
+vsyncProbeFrames = 10
+
+-- | Note a present that returned at time @t@ (a session with 'sdlVsync'
+-- only), and give up on vertical sync once 'vsyncProbeFrames' presents in a
+-- row returned sooner than half a refresh apart.
+notePresent :: SdlEnv -> Double -> IO ()
+notePresent env t = when (sdlVsync env) $
+  readIORef (sdlPresentProbe env) >>= \case
+    VsyncIgnored -> pure ()
+    PresentProbe lastT n -> do
+      period <- readIORef (sdlRefreshPeriodRef env)
+      let n' = if t - lastT < period / 2 then n + 1 else 0
+      writeIORef (sdlPresentProbe env) $! if n' >= vsyncProbeFrames then VsyncIgnored else PresentProbe t n'
+
+-- | Start counting presents afresh, after presents that ran with vertical
+-- sync off on purpose (the resize watch's). A finding that vertical sync is
+-- not honoured stays.
+restartPresentProbe :: SdlEnv -> IO ()
+restartPresentProbe env = modifyIORef' (sdlPresentProbe env) $ \case
+  VsyncIgnored -> VsyncIgnored
+  PresentProbe _ _ -> PresentProbe 0 0
+
+-- | Whether the last frame's present waited for the display: it presented,
+-- 'sdlVsync' asked for vertical sync, and the presents so far have not
+-- shown that the driver ignores it.
+presentPaces :: SdlEnv -> IO Bool
+presentPaces env
+  | sdlVsync env = (&&) <$> readIORef (sdlLastPresented env) <*> ((/= VsyncIgnored) <$> readIORef (sdlPresentProbe env))
+  | otherwise = pure False
+
+-- | Read the window's refresh rate again, after it moved to another display
+-- or its display changed mode, and start the vertical sync probe afresh:
+-- another display's driver may honour it.
+refreshDisplayRate :: SdlEnv -> IO ()
+refreshDisplayRate env = do
+  writeIORef (sdlRefreshPeriodRef env) =<< refreshPeriodOf (sdlWindow env)
+  writeIORef (sdlPresentProbe env) (PresentProbe 0 0)
+
+-- | The refresh period of a window's display, in seconds; 60 Hz's when SDL
+-- cannot say.
+refreshPeriodOf :: Ptr SDL_Window -> IO Double
+refreshPeriodOf win = (\hz -> if hz > 0 then 1 / realToFrac hz else 1 / 60) <$> queryWindowRefreshHz win
 
 -- | The retained framebuffer. The texture is allocated in blocks larger than
 -- the window, so a resize drag reuses it instead of creating a render target
@@ -324,7 +401,7 @@ syncDisplay ctx env inp = do
   when scaleChanged $ do
     -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
     -- pixel density moves.
-    unlessM (setRenderScale (sdlRenderer env) 1 1) (fail "SDL_SetRenderScale failed")
+    unlessM (setRenderScale (sdlRenderer env) 1 1) (sdlFail "SDL_SetRenderScale failed")
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
   -- Runtime font-family switch: the app publishes its requested family through
@@ -466,6 +543,10 @@ withRenderDriver driver create = do
 withSdlWindow :: IO () -> SDL_WindowFlags -> SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlWindow hints flags opts ctx act =
   inBoundThread $ withTtf $ do
+    -- The font directories are walked on a thread of their own from here,
+    -- so the first character no loaded font has does not wait for the walk
+    -- inside a frame.
+    void startFontIndex
     hints
     fontSource <- resolveNanoUIFont (sdlAppFont opts)
     monoSource <- resolveNanoUIFont (sdlAppMonoFont opts)
@@ -502,7 +583,7 @@ acquireWindowAndRenderer opts flags =
         TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
           (ok, win, ren) <-
             outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
-          unless ok $ fail "SDL_CreateWindowAndRenderer failed"
+          unless ok $ sdlFail "SDL_CreateWindowAndRenderer failed"
           pure (win, ren)
     )
     ( \(win, ren) -> do
@@ -519,9 +600,9 @@ acquireWindowAndRenderer opts flags =
 startSdl :: Acquire ()
 startSdl = do
   mkAcquire
-    (unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) (fail "SDL_Init(SDL_INIT_VIDEO) failed"))
+    (unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) (sdlFail "SDL_Init(SDL_INIT_VIDEO) failed"))
     (const quitSafe)
-  liftIO $ unlessM initRefreshEvent (fail "SDL_RegisterEvents failed for refresh wake")
+  liftIO $ unlessM initRefreshEvent (sdlFail "SDL_RegisterEvents failed for refresh wake")
 
 -- | Open a window, its renderer and what draws into it. A further window
 -- shares its session's first window's cursors and its font and UI scale
@@ -548,7 +629,9 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
-  refreshHz <- liftIO $ queryWindowRefreshHz sdlWindow
+  sdlRefreshPeriod <- liftIO $ refreshPeriodOf sdlWindow
+  sdlRefreshPeriodRef <- liftIO $ newIORef sdlRefreshPeriod
+  sdlPresentProbe <- liftIO $ newIORef (PresentProbe 0 0)
   sdlRendererName <-
     liftIO $ fromMaybe "unknown" <$> (maybePeek TextForeign.peekCString . PtrConst.unsafeToPtr =<< getRendererName sdlRenderer)
   sdlScaleRef <- liftIO $ newIORef scale
@@ -572,7 +655,6 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
   sdlCachedCtx <-
     liftIO $ newIORef . withSdlClipboard =<< withSdlFontCache sdlFontCache ctx
   let
-    sdlRefreshPeriod = if refreshHz > 0 then 1 / realToFrac refreshHz else 1 / 60
     sdlVsync = sdlAppVsync opts
     sdlContinuous = sdlAppContinuous opts
   sdlTransparent <-
@@ -580,11 +662,11 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
       if wsTransparent settings
         then Just <$> transparentBlends sdlRenderer
         else pure Nothing
-  liftIO $ unlessM (setRenderScale sdlRenderer 1 1) (fail "SDL_SetRenderScale failed")
+  liftIO $ unlessM (setRenderScale sdlRenderer 1 1) (sdlFail "SDL_SetRenderScale failed")
   -- Text input runs only while a widget takes text ('syncTextInput'); this
   -- stops it when the session ends.
   mkAcquire
-    (void (setRenderVSync sdlRenderer (fromBool sdlVsync)))
+    (void (setRenderVSyncSafe sdlRenderer (fromBool sdlVsync)))
     (const (void (stopTextInputSafe sdlWindow)))
   sdlLastPresented <- liftIO $ newIORef False
   sdlTextInput <- liftIO newTextInputSync
@@ -653,6 +735,12 @@ registerAppImages opts ctx =
   forM_ (sdlAppImages opts) $ \(RgbaImage image w h pixels) ->
     unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
 
+-- | 'sdlPacingMs' for the window's current display ('sdlRefreshPeriodRef'),
+-- whether or not presents wait for vertical sync: the wait for a frame that
+-- presents nothing, or whose present does not wait.
+sdlLivePacingMs :: SdlEnv -> IO Int
+sdlLivePacingMs env = (\period -> max 1 (floor (period * 1000) - 2)) <$> readIORef (sdlRefreshPeriodRef env)
+
 -- | The event wait while a window animates. With vsync on, presents throttle
 -- the loop. With vsync off a live animation would spin at max speed, so wait
 -- ~2 ms short of the frame period, leaving the slack for alignFrameStart:
@@ -708,9 +796,11 @@ resolveNanoUIFont = \case
 withSdlClipboard :: Context -> Context
 withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
   where
-    writeClipboard txt = TextForeign.withCString txt (setClipboardText . PtrConst.unsafeFromPtr)
-    -- The safe call: on X11 SDL pumps events while the clipboard's owner
-    -- answers, which can run this program's resize and hit-test callbacks.
+    -- Both are safe calls. Taking the clipboard on Windows sends the window
+    -- WM_DESTROYCLIPBOARD and clipboard-update messages, and on X11 SDL pumps
+    -- events while the clipboard's owner answers: either can run this
+    -- program's resize and hit-test callbacks.
+    writeClipboard txt = TextForeign.withCString txt (setClipboardTextSafe . PtrConst.unsafeFromPtr)
     -- Another program's text need not be valid UTF-8.
     readClipboard = do
       ptr <- getClipboardTextSafe

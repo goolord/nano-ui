@@ -85,6 +85,7 @@ library
         NanoUI.Sdl.Internal.Chrome.Types
         NanoUI.Sdl.Internal.Frame
         NanoUI.Sdl.Internal.Display
+        NanoUI.Sdl.Internal.Error
         NanoUI.Sdl.Internal.Font
         NanoUI.Sdl.Internal.Font.Search
         NanoUI.Sdl.Internal.Image
@@ -128,7 +129,7 @@ test-suite nano-ui-render-test
     type:             exitcode-stdio-1.0
     main-is:          Rendering.hs
     hs-source-dirs:   test, lib
-    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Image, NanoUI.Sdl.Internal.Cursor, NanoUI.Sdl.Internal.DialogState, Input, WindowChecks
+    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Error, NanoUI.Sdl.Internal.Image, NanoUI.Sdl.Internal.Cursor, NanoUI.Sdl.Internal.DialogState, Input, WindowChecks
     if os(windows)
         ghc-options: -optl-mconsole
     build-depends:

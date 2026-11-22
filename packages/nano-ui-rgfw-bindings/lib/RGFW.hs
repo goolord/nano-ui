@@ -53,7 +53,6 @@ import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Text.Foreign qualified as TF
 import Data.Word (Word32, Word8)
-import Foreign.C.String (withCString)
 import Foreign.C.Types (CInt, CSize (..), CUChar (..), CUInt (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
@@ -88,11 +87,12 @@ data Event
 
 -- | Create a window with a core-profile OpenGL context of at least the
 -- given major/minor version made current on the calling OS thread. 'Nothing'
--- when the window or the context cannot be created.
+-- when the window or the context cannot be created. The title goes to RGFW
+-- as UTF-8, as 'setWindowName' sends it, whatever the process locale.
 createWindowGL ::
   String -> Int -> Int -> Int -> Int -> Word32 -> Int -> Int -> IO (Maybe Window)
 createWindowGL title x y w h flags major minor =
-  withCString title $ \cTitle -> do
+  TF.withCString (T.pack title) $ \cTitle -> do
     ptr <-
       c_rgfw_create_window_gl
         cTitle

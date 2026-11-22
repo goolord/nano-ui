@@ -6,15 +6,16 @@
 module WindowChecks (windowChecks) where
 
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, onException, try)
 import Control.Monad (replicateM_, unless, void, when)
 import Data.Bits (zeroBits, (.&.))
 import Data.ByteString qualified as BS
-import Data.Foldable (for_)
+import Data.Foldable (for_, traverse_)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, nub)
 import Data.Maybe (fromJust, isNothing)
 import Data.Primitive.SmallArray (smallArrayFromList)
+import Data.String (fromString)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CBool (..))
 import Foreign.Marshal.Alloc (alloca)
@@ -36,13 +37,14 @@ import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_MIDDLE, sDL_BUTTON_X1)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Events (pushEventSafe)
+import SDL3.Sys.Render (setRenderVSyncSafe)
 import SDL3.Sys.Video
   (getWindowFlags, getWindowMaximumSize, getWindowMinimumSize, getWindowOpacity, getWindowSize, getWindowTitle)
 import SDL3.Sys.Video qualified as SDL
 import System.Environment (lookupEnv)
 import System.Timeout (timeout)
 import "nano-ui-sdl" NanoUI.Backend.Sdl
-import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlUiScaleRef, sdlWindow, sdlTransparent)
+import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlRenderer, sdlScaleRef, sdlUiScaleRef, sdlWindow, sdlTransparent)
 
 -- | Run all checks. @gpu@ means a real display with a GPU renderer, which
 -- adds checks the dummy driver cannot support: icon, opacity, position, and
@@ -56,6 +58,9 @@ windowChecks drivers gpu = do
   openingFramesCheck
   openingCloseCheck
   childWindowCheck
+  childScaleCheck
+  openingQuitChildCheck
+  fakeVsyncCheck
   resizeFailureCheck
   uiScaleNaNCheck
   dialogStateChecks
@@ -223,6 +228,61 @@ childWindowCheck = do
   readVarIO open >>= require "the close request writes False" . not
   lag <- (\a b -> (-) <$> b <*> a) <$> readIORef closedAt <*> readIORef noticedAt
   require "the first window shows the close at once" (maybe False (< 1) lag)
+
+-- | A UI scale set from the second window's view is the session's: the
+-- first window, which nothing else wakes, applies it at once (a watchdog
+-- wakes it after five seconds, so a regression fails rather than hangs).
+childScaleCheck :: IO ()
+childScaleCheck = do
+  open <- newVar True
+  passes <- newIORef 0
+  setAt <- newIORef Nothing
+  seenAt <- newIORef Nothing
+  runSdlApp options $ do
+    n <- countPass passes
+    when (n == 1) $ askWake >>= \wake -> liftIO (void (forkIO (threadDelay 5000000 >> wake)))
+    scale <- askSdlEnv >>= liftIO . traverse (readIORef . sdlScaleRef)
+    when (scale == Just 2) $ liftIO (getMonotonicTime >>= writeIORef seenAt . Just) >> quitUi
+    nativeWindow open (sdlWindowSettings options) {wsTitle = "second"} $ do
+      sent <- liftIO (readIORef setAt)
+      when (isNothing sent) $ liftIO (getMonotonicTime >>= writeIORef setAt . Just) >> setSdlUiScale 2
+  lag <- (\a b -> (-) <$> b <*> a) <$> readIORef setAt <*> readIORef seenAt
+  require "a UI scale set in the second window reaches the first at once" (maybe False (< 1) lag)
+
+-- | A window the opening frames open closes with the session when those
+-- frames also take a close request: its view's background job is
+-- cancelled, which closing the window does.
+openingQuitChildCheck :: IO ()
+openingQuitChildCheck = do
+  open <- newVar True
+  job <- newTask
+  passes <- newIORef 0
+  cancelled <- newIORef False
+  runSdlApp options $ do
+    n <- countPass passes
+    when (n == 1) $ liftIO (push (SDL_QuitEvent Events.SDL_EVENT_QUIT 0 0))
+    nativeWindow open (sdlWindowSettings options) {wsTitle = "second"} $
+      void $ useTask job () (threadDelay 10000000 `onException` writeIORef cancelled True)
+  readIORef cancelled >>= require "a window the opening frames opened closes on their close request"
+
+-- | A driver may turn vsync off whatever the session asks, and then a
+-- present returns at once (here the test turns it off behind the session's
+-- back). After a few such presents the session paces an animation by time:
+-- half a second of it draws about 30 frames at the dummy display's 60 Hz,
+-- not as many as the loop can.
+fakeVsyncCheck :: IO ()
+fakeVsyncCheck = do
+  passes <- newIORef 0
+  started <- newIORef Nothing
+  runSdlApp options {sdlAppVsync = True} $ do
+    n <- countPass passes
+    when (n == 1) $ askSdlEnv >>= liftIO . traverse_ (\env -> setRenderVSyncSafe (sdlRenderer env) 0)
+    now <- liftIO getMonotonicTime
+    t0 <- liftIO $ readIORef started >>= maybe (now <$ writeIORef started (Just now)) pure
+    keepAnimating =<< label' (fromString (show n))
+    when (now - t0 > 0.5) quitUi
+  n <- readIORef passes
+  require ("an animation whose presents do not wait is paced by time: " ++ show n ++ " frames in half a second") (n < 150)
 
 -- | A frame the resize watch draws (a live resize) that throws ends the
 -- session with the exception, as a frame of the loop's own does, rather

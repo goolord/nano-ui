@@ -35,6 +35,20 @@ int rgfw_test_win32_drag(RGFW_window *win, int x, int y, int lose)
 #endif
 }
 
+/* 1 when the window's title, as Windows reads it back, is "nano \u00e9\u4e2d",
+   0 when not, -1 off Windows. RGFW decodes titles as UTF-8. */
+int rgfw_test_win32_title(RGFW_window *win)
+{
+#ifdef _WIN32
+    wchar_t got[64];
+    GetWindowTextW((HWND)RGFW_window_getHWND(win), got, 64);
+    return wcscmp(got, L"nano \u00e9\u4e2d") == 0;
+#else
+    (void)win;
+    return -1;
+#endif
+}
+
 /* Write through the native types, independently of the Haskell offsets. */
 void rgfw_test_event(RGFW_event *e, int kind)
 {

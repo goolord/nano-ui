@@ -158,6 +158,9 @@ data SdlEvent
   -- ^ The desktop asked to close one window. With one window open SDL asks
   -- to quit as well ('EvQuit'), which is what ends a session; with more, it
   -- is how a window learns it should close.
+  | EvDisplayChanged
+  -- ^ The window moved to another display, or a display's mode changed:
+  -- the session reads the window's refresh rate again.
   deriving (Eq, Show)
 
 -- | Drain every pending event, oldest first.
@@ -200,6 +203,12 @@ decodeWindowEvent refreshTy p =
     EvQuit -> pure (0, EvQuit)
     EvRefresh -> pure (0, EvRefresh)
     EvSystemThemeChanged -> pure (0, EvSystemThemeChanged)
+    -- A display's mode change names the display, not a window: it is for
+    -- every window.
+    EvDisplayChanged -> peek p.type' >>= \(Uint32 ty) ->
+      if SDL_EventType (fromIntegral ty) == Events.SDL_EVENT_WINDOW_DISPLAY_CHANGED
+        then (,EvDisplayChanged) <$> peekByteOff p 16
+        else pure (0, EvDisplayChanged)
     ev -> (,ev) <$> peekByteOff p 16)
 
 -- | Translate one SDL event, given the refresh event type; 'Nothing' for
@@ -216,6 +225,8 @@ decodeEvent refreshTy p = do
       Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> pure (Just EvWindowChanged)
       Events.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> pure (Just EvWindowChanged)
       Events.SDL_EVENT_SYSTEM_THEME_CHANGED -> pure (Just EvSystemThemeChanged)
+      Events.SDL_EVENT_WINDOW_DISPLAY_CHANGED -> pure (Just EvDisplayChanged)
+      Events.SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED -> pure (Just EvDisplayChanged)
       -- The window manager damaged our window surface (occlusion, compositor
       -- effects, restore). The backbuffer contents are gone; the next present
       -- must be full or stale regions flash.
@@ -392,6 +403,7 @@ applyEvent inp ev =
     EvCloseRequested -> inp
     EvWindowChanged -> inp
     EvSystemThemeChanged -> inp
+    EvDisplayChanged -> inp
 
 -- | Events with their pointer and drop positions moved from window
 -- coordinates into layout units, which a UI zoom divides. Each event keeps

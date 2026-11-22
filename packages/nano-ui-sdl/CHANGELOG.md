@@ -2,6 +2,26 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- When a driver turns vsync off although the session asked for it, presents
+  return at once. After ten such presents in a row the session paces
+  animation by time instead of drawing as fast as it can.
+
+- The refresh rate that paces animation follows the window to another
+  display, or a display mode change (`EvDisplayChanged`,
+  `sdlRefreshPeriodRef`).
+
+- Font search ranks a family's own files above a longer family that starts
+  with its name: "Roboto" no longer finds `RobotoMono[wght].ttf` before
+  `Roboto[wdth,wght].ttf`. The font directory walk follows a symbolic link
+  to a directory once, and starts on a background thread when a session
+  opens.
+
+- SDL and SDL_ttf failures carry `SDL_GetError()`'s text. An image atlas
+  texture SDL will not make is reported once, not tried again every frame.
+
+- Clips are whole device pixels at any UI scale, so a partial frame at a
+  fractional scale no longer paints a pixel past its damage.
+
 - The mono font is hinted fully, so its advances are whole pixels: a shaped
   run's glyphs sit evenly on a grid of cells, with their stems on pixels,
   instead of 8, 8, 8, 9 pixels apart (Consolas at 15 px under light hinting).

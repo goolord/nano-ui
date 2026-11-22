@@ -103,11 +103,38 @@ class NanoUiSdlWeb {
     });
     this.listenPointer(canvas);
     this.listenKeys(this.input);
-    new ResizeObserver(() => this.push(EV_RESIZE)).observe(canvas);
+    this.pinCssSize(canvas);
+    // Only a change of the CSS box is a resize: the session sets the
+    // drawing buffer from it, and must not hear back from its own change.
+    let box = [canvas.clientWidth, canvas.clientHeight];
+    new ResizeObserver(() => {
+      const now = [canvas.clientWidth, canvas.clientHeight];
+      if (now[0] === box[0] && now[1] === box[1]) return;
+      box = now;
+      this.push(EV_RESIZE);
+    }).observe(canvas);
     this.watchPixelRatio();
     const scheme = window.matchMedia("(prefers-color-scheme: dark)");
     scheme.addEventListener("change", () => this.push(EV_RESIZE));
     this.focusInput();
+  }
+
+  // The session sizes the drawing buffer from the canvas's CSS box, times
+  // devicePixelRatio. A canvas the page gives no CSS width or height takes
+  // its box from the drawing buffer, so each resize would grow the next
+  // (doubling at a ratio of 2). An axis whose box follows the buffer is
+  // fixed at the size it has now.
+  pinCssSize(canvas) {
+    const [w, h] = [canvas.width, canvas.height];
+    const [cw, ch] = [canvas.clientWidth, canvas.clientHeight];
+    canvas.width = w + 16;
+    canvas.height = h + 16;
+    const followsW = canvas.clientWidth !== cw;
+    const followsH = canvas.clientHeight !== ch;
+    canvas.width = w;
+    canvas.height = h;
+    if (followsW) canvas.style.width = `${cw}px`;
+    if (followsH) canvas.style.height = `${ch}px`;
   }
 
   // The element keys and text go through. A textarea receives typed text,

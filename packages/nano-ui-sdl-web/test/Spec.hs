@@ -17,8 +17,8 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (newForeignPtr_)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff, pokeElemOff)
-import NanoUI (NanoUI, Rect (..), UiCursorKind (..), button, column, label, colorRGB)
-import NanoUI.Backend (Damage (..), DrawCmd (..), DrawData (..), Key (..), Layer (..), glyphPageTextureId)
+import NanoUI (NanoUI, Rect (..), UiCursorKind (..), askInput, button, column, label, colorRGB)
+import NanoUI.Backend (Composition (..), Damage (..), DrawCmd (..), DrawData (..), Input (..), Key (..), Layer (..), glyphPageTextureId)
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input (cssCursor, decodeKey)
 import NanoUI.SdlWeb.Internal.Render (DrawCommand (..), drawCommands')
@@ -165,6 +165,7 @@ main = do
   openingFrame
   clickFrame
   pixelRatioChange
+  longComposition
 
 pureChecks :: IO ()
 pureChecks = do
@@ -244,6 +245,21 @@ clickFrame = do
   assert "click: later frames paint their damage only" (any (not . frClear) (drop 1 frames))
   assert "click: partial frames are scissored" (all (\f -> frClear f || all (\(_, _, _, s) -> s /= Nothing) (frDraws f)) frames)
   assert "click: the button sets a CSS cursor" (any (`elem` ["pointer", "default"]) cursors)
+
+-- | A composition longer than the 256 records the session reads at a time
+-- arrives whole, though its characters run on into the next batch.
+longComposition :: IO ()
+longComposition = do
+  seen <- newIORef []
+  let txt = take 300 (cycle ['\x3042' .. '\x3093'])
+      composition = (8, length txt, 2, 1, 0, 0, 0, 0) : [(9, fromEnum ch, 0, 0, 0, 0, 0, 0) | ch <- txt]
+      view = do
+        inp <- askInput
+        liftIO (modifyIORef' seen (inputComposition inp :))
+        label "Composing"
+  _ <- runScript (800, 600, 1) [events (composition ++ [motion 5 5])] (viewFrame view)
+  got <- readIORef seen
+  assert "composition: one longer than a batch arrives whole" (Just (Composition (T.pack txt) 2 1) `elem` got)
 
 pixelRatioChange :: IO ()
 pixelRatioChange = do

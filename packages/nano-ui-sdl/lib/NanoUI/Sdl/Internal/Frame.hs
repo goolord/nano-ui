@@ -196,10 +196,13 @@ dwmwaCornerPreference = 33
 dwmwcpDefault = 0
 dwmwcpDoNotRound = 1
 
-foreign import ccall unsafe "DwmExtendFrameIntoClientArea"
+-- | The DWM calls are safe foreign calls: a frame or rendering-policy change
+-- sends the window @WM_NCCALCSIZE@ and @WM_DWMNCRENDERINGCHANGED@ from inside
+-- the call, and SDL's window procedure can run Haskell callbacks.
+foreign import ccall safe "DwmExtendFrameIntoClientArea"
   dwmExtendFrameIntoClientArea :: Ptr () -> Ptr CInt -> IO Int32
 
-foreign import ccall unsafe "DwmSetWindowAttribute"
+foreign import ccall safe "DwmSetWindowAttribute"
   dwmSetWindowAttribute :: Ptr () -> Word32 -> Ptr () -> Word32 -> IO Int32
 
 -- | @DWMWA_NCRENDERING_POLICY@, and the two policies it is set to here.
