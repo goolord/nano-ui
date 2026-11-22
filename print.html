@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-b23e22b4.js";
+            window.path_to_searchindex_js = "searchindex-ed377124.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -2412,7 +2412,7 @@ dockPanes cfg gesture = do
 <tr><td><code>toggleSwitch</code></td><td><code>Var Bool -&gt; NanoUI ()</code></td><td>44×24</td><td>Click, Space, or Enter toggles</td></tr>
 <tr><td><code>circularProgress</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>32×32</td><td>Fraction in <code>[0, 1]</code></td></tr>
 <tr><td><code>progressBar</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>fills width, 12 high</td><td>Fraction in <code>[0, 1]</code></td></tr>
-<tr><td><code>spinner</code></td><td><code>NanoUI ()</code></td><td>18×18</td><td>Indeterminate; requests animation frames while declared</td></tr>
+<tr><td><code>spinner</code></td><td><code>NanoUI ()</code></td><td>18×18</td><td>Indeterminate; wakes the loop 60 times a second while on screen</td></tr>
 <tr><td><code>sparkline</code></td><td><code>[Float] -&gt; NanoUI ()</code></td><td>80×24</td><td>Scales to the values’ range</td></tr>
 </tbody>
 </table>
@@ -2442,7 +2442,7 @@ settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
   labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
 </code></pre>
 <p>The <code>fixedW</code> on the changing number keeps the controls from shifting. Read the value <em>below</em> the knob so a drag resolves in one pass.</p>
-<p><code>spinner</code> calls <code>keepAnimating</code> internally while it is drawn. Do not add a global <code>keepAnimating</code>; that would keep the loop running when the spinner is not visible.</p>
+<p><code>spinner</code> asks for a frame for each of its 60 steps a second (<code>wakeAfter</code>) while any of it is on screen, and for none once it is scrolled or clipped out of view. Do not add a global <code>keepAnimating</code>; that would run frames at the display rate whether or not the spinner shows.</p>
 <h3 id="implementing-custom-controls"><a class="header" href="#implementing-custom-controls">Implementing custom controls</a></h3>
 <p>Each control in <code>NanoUI.Widgets.Custom</code> follows the same steps:</p>
 <ol>
@@ -3707,15 +3707,16 @@ cabal test -j1 all
 <tr><th>Suite</th><th>Covers</th></tr>
 </thead>
 <tbody>
-<tr><td><code>nano-ui-test</code></td><td>Widgets, layout, input, focus, damage, and draw lists, frame by frame and headless</td></tr>
-<tr><td><code>text-buffer-spec</code></td><td>Text buffer and document edits: lines, graphemes, carets, undoable edits</td></tr>
+<tr><td><code>nano-ui-test</code></td><td>Widgets, layout, input, focus, damage, and draw lists, frame by frame and headless; seeded QuickCheck runs over random layout trees, damage against repaints, and input streams</td></tr>
+<tr><td><code>text-buffer-spec</code></td><td>Text buffer and document edits: lines, graphemes, carets, undoable edits, random edit sessions against a plain <code>Text</code> (QuickCheck)</td></tr>
 <tr><td><code>nano-ui-inspection</code></td><td>Hot paths (quad writers, store and focus access, canvas) still optimize as written</td></tr>
 <tr><td><code>nano-ui-emit-test</code></td><td>Emitting views, adapters, and reducers</td></tr>
-<tr><td><code>nano-ui-svg-test</code></td><td><code>DrawOp</code>-to-SVG: clips, gradients, escaping, rasterization</td></tr>
+<tr><td><code>nano-ui-svg-test</code></td><td><code>DrawOp</code>-to-SVG: clips, gradients, escaping, rasterization, whole frames against golden documents in <code>test/golden</code></td></tr>
 <tr><td><code>nano-ui-diagrams-test</code></td><td>Chart and diagrams-lib rendering</td></tr>
 <tr><td><code>nano-ui-form-test</code></td><td>Form validation, reset, and submission</td></tr>
 <tr><td><code>nano-ui-markdown-test</code></td><td>Parsing, incremental append against a full parse (QuickCheck), layout</td></tr>
 <tr><td><code>nano-ui-rgfw-test</code>, <code>nano-ui-rgfw-bindings-test</code></td><td>RGFW input translation, bitmap font, frame delivery</td></tr>
+<tr><td><code>nano-ui-sdl-web-test</code></td><td>The browser backend’s input decoding and draw batching, run natively</td></tr>
 <tr><td><code>nano-ui-font-search-test</code>, <code>nano-ui-font-effects-test</code></td><td>SDL font discovery, shaping, caches, handle lifetimes</td></tr>
 <tr><td><code>nano-ui-render-test</code></td><td>Native SDL readback: partial damage, clipping, screenshots</td></tr>
 <tr><td><code>nano-ui-demo-test</code>, <code>nano-ui-terminal-test</code></td><td>The demos and the terminal in hidden SDL windows</td></tr>
@@ -3723,9 +3724,22 @@ cabal test -j1 all
 </tbody>
 </table>
 </div>
+<p>Continuous integration (<code>.github/workflows/ci.yml</code>) runs the suites that open no window on Linux with GHC 9.10 and 9.14 and on Windows with GHC 9.14. Run the native suites locally when a change touches rendering, fonts, dialogs or DPI.</p>
 <p>One suite, with failure details:</p>
 <pre><code class="language-sh">cabal test nano-ui-test --test-show-details=failures
 </code></pre>
+<p><code>nano-ui-test</code> also holds specs named <code>known-bug-*</code>, which fail on the current library. They run only when named:</p>
+<pre><code class="language-sh">$(cabal list-bin nano-ui:test:nano-ui-test) known-bug-wrap-row-height
+</code></pre>
+<p>After a change meant to alter SVG export, rewrite the golden documents from <code>packages/nano-ui-svg</code>:</p>
+<pre><code class="language-sh">NANO_UI_UPDATE_GOLDEN=1 cabal test nano-ui-svg-test
+</code></pre>
+<h2 id="allocation-baseline"><a class="header" href="#allocation-baseline">Allocation baseline</a></h2>
+<p>Each scene of <code>nano-ui-profile</code> runs a fixed number of frames, so its allocation total is the same on every run with one GHC version. <code>scripts/profile/alloc-gate.py</code> runs the scenes in <code>scripts/profile/alloc-baseline.json</code> and fails when one allocates more than 5% over its baseline:</p>
+<pre><code class="language-sh">python scripts/profile/alloc-gate.py           # check
+python scripts/profile/alloc-gate.py --update  # accept the new totals
+</code></pre>
+<p>The baseline is recorded with GHC 9.14.1 on Windows, where CI runs the gate.</p>
 <h2 id="haddocks-and-hoogle-1"><a class="header" href="#haddocks-and-hoogle-1">Haddocks and Hoogle</a></h2>
 <p>Released packages have Haddock pages on Hackage. To build documentation for the current checkout:</p>
 <pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle

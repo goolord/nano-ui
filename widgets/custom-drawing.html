@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-b23e22b4.js";
+            window.path_to_searchindex_js = "../searchindex-ed377124.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -192,7 +192,7 @@
 <tr><td><code>toggleSwitch</code></td><td><code>Var Bool -&gt; NanoUI ()</code></td><td>44×24</td><td>Click, Space, or Enter toggles</td></tr>
 <tr><td><code>circularProgress</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>32×32</td><td>Fraction in <code>[0, 1]</code></td></tr>
 <tr><td><code>progressBar</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>fills width, 12 high</td><td>Fraction in <code>[0, 1]</code></td></tr>
-<tr><td><code>spinner</code></td><td><code>NanoUI ()</code></td><td>18×18</td><td>Indeterminate; requests animation frames while declared</td></tr>
+<tr><td><code>spinner</code></td><td><code>NanoUI ()</code></td><td>18×18</td><td>Indeterminate; wakes the loop 60 times a second while on screen</td></tr>
 <tr><td><code>sparkline</code></td><td><code>[Float] -&gt; NanoUI ()</code></td><td>80×24</td><td>Scales to the values’ range</td></tr>
 </tbody>
 </table>
@@ -222,7 +222,7 @@ settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
   labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
 </code></pre>
 <p>The <code>fixedW</code> on the changing number keeps the controls from shifting. Read the value <em>below</em> the knob so a drag resolves in one pass.</p>
-<p><code>spinner</code> calls <code>keepAnimating</code> internally while it is drawn. Do not add a global <code>keepAnimating</code>; that would keep the loop running when the spinner is not visible.</p>
+<p><code>spinner</code> asks for a frame for each of its 60 steps a second (<code>wakeAfter</code>) while any of it is on screen, and for none once it is scrolled or clipped out of view. Do not add a global <code>keepAnimating</code>; that would run frames at the display rate whether or not the spinner shows.</p>
 <h3 id="implementing-custom-controls"><a class="header" href="#implementing-custom-controls">Implementing custom controls</a></h3>
 <p>Each control in <code>NanoUI.Widgets.Custom</code> follows the same steps:</p>
 <ol>
