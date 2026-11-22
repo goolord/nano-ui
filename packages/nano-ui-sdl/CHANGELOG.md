@@ -4,7 +4,9 @@
 
 - When a driver turns vsync off although the session asked for it, presents
   return at once. After ten such presents in a row the session paces
-  animation by time instead of drawing as fast as it can.
+  animation by time instead of drawing as fast as it can. A continuous
+  session (`sdlAppContinuous`) is paced the same way, at the display's
+  refresh period; with `sdlAppVsync` off it still draws without waiting.
 
 - The refresh rate that paces animation follows the window to another
   display, or a display mode change (`EvDisplayChanged`,

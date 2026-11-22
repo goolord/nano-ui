@@ -25,6 +25,7 @@ backendApiCheck = do
         , sdSyncDisplay = \c i -> pure (c, i)
         , sdDebug = debug
         , sdContinuous = False
+        , sdVsyncOff = False
         , sdPacingMs = 16
         , sdPresentPaces = pure False
         , sdAlignSec = 0

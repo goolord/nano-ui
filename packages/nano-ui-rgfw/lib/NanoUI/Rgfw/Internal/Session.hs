@@ -368,6 +368,7 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
                     syncRgfwDisplay sh rw c inp
                 , sdDebug         = rdsSampler (rwDebug rw)
                 , sdContinuous    = False
+                , sdVsyncOff      = True
                   -- Presents are unthrottled (swap interval 0, no vsync), so a
                   -- live in-view animation is paced at the refresh period
                   -- instead of spinning.

@@ -173,6 +173,7 @@ runSdlSession options drawFn = do
                   synced <$ writeIORef prev inp'
               , sdDebug         = sdlDebug env
               , sdContinuous    = sdlContinuous env
+              , sdVsyncOff      = not (sdlVsync env)
               , sdPacingMs      = sdlPacingMs env
                 -- A frame that skipped (empty damage, e.g. an animation scrolled
                 -- out of view) did not wait for vblank, so it must not loop

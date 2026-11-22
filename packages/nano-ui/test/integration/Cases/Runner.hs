@@ -23,6 +23,7 @@ tests =
   , spec "session-loop-keys" runSessionLoopKeysTest
   , spec "session-loop-close" runSessionLoopCloseTest
   , spec "session-loop-clicks" runSessionLoopClicksTest
+  , spec "session-loop-continuous" runSessionLoopContinuousTest
   , spec "drawing-lock" runDrawingLockTest
   ]
 
@@ -39,6 +40,7 @@ quietDriver debug =
     , sdSyncDisplay = \c inp -> pure (c, inp)
     , sdDebug = debug
     , sdContinuous = False
+    , sdVsyncOff = False
     , sdPacingMs = 16
     , sdPresentPaces = pure False
     , sdAlignSec = 0
@@ -208,6 +210,32 @@ runSessionLoopWakesTest ctx failed = do
   runSessionLoop farWake ctx emptyInput
   ts <- readIORef timeouts
   assert failed (not (null ts) && all (\t -> t > 0 && t <= 2147483647) ts)
+
+-- | A continuous session waits 0 ms between passes while its presents wait
+-- for the display or vsync is off on purpose, and the pacing wait when the
+-- presents do not wait though vsync was asked for. A session that is not
+-- continuous still blocks.
+runSessionLoopContinuousTest :: Context -> IORef Int -> IO ()
+runSessionLoopContinuousTest ctx failed = do
+  let firstWait continuous paces vsyncOff = do
+        timeouts <- newIORef []
+        waits <- batchedWaits [[], [3]]
+        runLoop
+          ctx
+          ( \d ->
+              d
+                { sdContinuous = continuous
+                , sdVsyncOff = vsyncOff
+                , sdPresentPaces = pure paces
+                , sdWaitEvents = \t -> modifyIORef' timeouts (<> [t]) >> waits t
+                }
+          )
+          []
+        take 1 <$> readIORef timeouts
+  assertEq failed [0] =<< firstWait True True False
+  assertEq failed [0] =<< firstWait True False True
+  assertEq failed [16] =<< firstWait True False False
+  assertEq failed [-1] =<< firstWait False False False
 
 -- | Ctrl+C quits after its frame (Ctrl released later in the batch too, a
 -- bare c not), unless a shortcut or a focused text field takes it; with

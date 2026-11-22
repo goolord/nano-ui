@@ -166,7 +166,14 @@ data SessionDriver ev = SessionDriver
     -- ^ The session's debug sampler: loop timing, skips, and the 4 Hz
     -- readout refresh.
   , sdContinuous    :: !Bool
-    -- ^ Redraw every pass without waiting for events.
+    -- ^ Redraw every pass without waiting for events. The loop waits 0 ms
+    -- between passes while 'sdPresentPaces' holds or 'sdVsyncOff' is set,
+    -- and 'sdPacingMs' otherwise, as for an animation.
+  , sdVsyncOff      :: !Bool
+    -- ^ Whether the backend turned vertical sync off on purpose, so a
+    -- continuous session draws as fast as it can. With this 'False', a
+    -- continuous session whose presents stop waiting for the display (a
+    -- driver ignoring vsync) is paced at 'sdPacingMs' instead.
   , sdPacingMs      :: !Int
     -- ^ Event wait in milliseconds while something animates.
   , sdPresentPaces  :: IO Bool
@@ -338,13 +345,17 @@ runSessionLoop drv ctx0 inp0 = do
                   | not debugActive = wakeMs
                   | wakeMs < 0 = debugHudTimeout
                   | otherwise = min debugHudTimeout wakeMs
+                -- A continuous session whose presents do not wait for the
+                -- display, though vsync was asked for, is paced by time.
+                continuousPaced = sdContinuous drv && not presentPaces && not (sdVsyncOff drv)
                 own
-                  | sdContinuous drv || dueNow || dirty || woken || (animating && presentPaces) = 0
-                  | wasAnim || animating = sdPacingMs drv
+                  | dueNow || dirty || woken || (animating && presentPaces) = 0
+                  | sdContinuous drv && not continuousPaced = 0
+                  | wasAnim || animating || continuousPaced = sdPacingMs drv
                   | otherwise = idleMs
                 timeout = shorterWait own others
                 -- A wait another window shortened ends off this one's grid.
-                paced = (wasAnim || animating) && timeout == own
+                paced = (wasAnim || animating || continuousPaced) && timeout == own
             events <- waitForEvents timeout paced lastT
             wakeDue <- takeDueWake ctx
             let hudDue = timeout == debugHudTimeout && debugActive && null events

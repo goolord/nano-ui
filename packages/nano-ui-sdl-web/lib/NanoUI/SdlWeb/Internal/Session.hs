@@ -193,6 +193,7 @@ runWebSession host opts frame = do
                   , sdSyncDisplay = syncWeb env
                   , sdDebug = weDebug env
                   , sdContinuous = False
+                  , sdVsyncOff = False
                   , sdPacingMs = max 1 (1000 `div` refreshHz - 2)
                   , sdPresentPaces = pure False
                   , sdShouldDraw = \c prevInp inp wasAnim refreshDue -> shouldRedrawFrame c prevInp inp wasAnim False refreshDue

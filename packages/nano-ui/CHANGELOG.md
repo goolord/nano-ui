@@ -2,6 +2,13 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- **Breaking (backends):** `SessionDriver` has a field `sdVsyncOff`, set
+  when the backend turned vertical sync off on purpose. A continuous
+  session (`sdContinuous`) waits 0 ms between passes only while
+  `sdPresentPaces` holds or `sdVsyncOff` is set; when presents stop waiting
+  for the display though vsync was asked for, it waits `sdPacingMs` as an
+  animation does, instead of running unpaced at full CPU.
+
 - `panelWith'`, `calloutWith'`, `gridWith'` and `layersWith'` return the
   container's `Response` with the body's result, as `rowWith'` and
   `columnWith'` do.
