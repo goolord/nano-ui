@@ -2,9 +2,11 @@
 module NanoUI.Internal.Widgets.Layout
   ( panel
   , panelWith
+  , panelWith'
   , panel'
   , callout
   , calloutWith
+  , calloutWith'
   , row
   , rowWith
   , rowWith'
@@ -15,6 +17,7 @@ module NanoUI.Internal.Widgets.Layout
   , column'
   , layers
   , layersWith
+  , layersWith'
   , layers'
   , hstack
   , vstack
@@ -35,6 +38,7 @@ module NanoUI.Internal.Widgets.Layout
   , scrollAreaIdConfigured
   , grid
   , gridWith
+  , gridWith'
   , responsive
   , responsiveRowCol
   , center
@@ -73,6 +77,11 @@ panelWith = (`withDefaultWith` panel')
 panel' :: Layout -> NanoUI a -> NanoUI a
 panel' = container NodePanel
 
+-- | 'panelWith' returning its 'Response', as 'rowWith'' does. It takes an
+-- id, like a widget.
+panelWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
+panelWith' f = withDefaultWith f (containerResponse NodePanel)
+
 -- | Full-width panel tinted by a colour, with a matching border. See 'calloutWith'.
 {-# INLINE callout #-}
 callout :: Color -> NanoUI a -> NanoUI a
@@ -87,6 +96,13 @@ calloutWith col f =
   styled
     (\t -> panelStyle (Style.background (lerpColor col (Style.styleBg (Style.themePanel t)) 0.88) . Style.borderColor col) t)
     . panelWith (f . padXY 10 6 . gap 8 . fillW)
+
+-- | 'calloutWith' returning its 'Response', as 'rowWith'' does.
+calloutWith' :: Color -> (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
+calloutWith' col f =
+  styled
+    (\t -> panelStyle (Style.background (lerpColor col (Style.styleBg (Style.themePanel t)) 0.88) . Style.borderColor col) t)
+    . panelWith' (f . padXY 10 6 . gap 8 . fillW)
 
 -- | Lay out children left to right, using current defaults and a child id scope.
 {-# INLINE row #-}
@@ -158,6 +174,10 @@ layersWith = (`withDefaultWith` layers')
 layers' :: Layout -> NanoUI a -> NanoUI a
 layers' = container NodeContainer . layered
 
+-- | 'layersWith' returning its 'Response', as 'rowWith'' does.
+layersWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
+layersWith' f = withDefaultWith (layered . f) (containerResponse NodeContainer)
+
 -- | Run a collection of widgets side by side, as in @hstack (map label names)@.
 {-# INLINE hstack #-}
 hstack :: Foldable f => f (NanoUI ()) -> NanoUI ()
@@ -178,6 +198,11 @@ grid n = gridWith n id
 gridWith :: Int -> (Layout -> Layout) -> NanoUI a -> NanoUI a
 gridWith n f =
   withDefaultWith f $ \layout -> container NodeContainer layout {layoutGridCols = max 1 n}
+
+-- | 'gridWith' returning its 'Response', as 'rowWith'' does.
+gridWith' :: Int -> (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
+gridWith' n f =
+  withDefaultWith f $ \layout -> containerResponse NodeContainer layout {layoutGridCols = max 1 n}
 
 -- | Choose between two container builders based on window width.
 {-# INLINE responsive #-}

@@ -145,11 +145,14 @@ module NanoUI
   , vstack
   , grid
   , gridWith
+  , gridWith'
   , panel
   , panelWith
+  , panelWith'
   , card
   , callout
   , calloutWith
+  , calloutWith'
   , toolbar
   , center
   , responsive
@@ -165,6 +168,7 @@ module NanoUI
   , flex
   , layers
   , layersWith
+  , layersWith'
   , mouseArea
 
     -- * Text

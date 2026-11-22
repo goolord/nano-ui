@@ -2,6 +2,10 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- `panelWith'`, `calloutWith'`, `gridWith'` and `layersWith'` return the
+  container's `Response` with the body's result, as `rowWith'` and
+  `columnWith'` do.
+
 - `releaseAllKeys`, which backends call when the window loses focus, also
   releases held mouse buttons, so a drag or a held stepper arrow stops when
   its release goes to another window. A hovered widget the view stops

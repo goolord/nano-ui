@@ -28,6 +28,7 @@ tests =
   [ spec "layout-flow" runLayoutFlowTest
   , spec "wrap-matches-paint" runWrapMatchesPaintTest
   , simSpec "aspect-bad-ratio" 400 400 badRatioUi badRatio
+  , simSpec "primed-containers" 400 400 primedUi primedRects
   , spec "flex-sizing" runFlexSizingTest
   , pixelSpec "label-align-end" runLabelAlignEndTest
   , spec "empty-frame" runEmptyFrameTest
@@ -518,6 +519,23 @@ runLabelAlignEndTest ctx failed = do
 -- | Nesting past the level array's first capacity lays out, a responsive row
 -- stacks only below its breakpoint, and a multi-line kv value pushes the next
 -- row down.
+-- | The primed containers report where they were laid out, around the label
+-- inside each.
+primedUi :: NanoUI [(Rect, Rect)]
+primedUi = column $ do
+  let inside f = f (respRect <$> buttonWith' id "x")
+  p <- inside (panelWith' id)
+  c <- inside (calloutWith' (colorRGBA 200 0 0 255) id)
+  g <- inside (gridWith' 2 id)
+  l <- inside (layersWith' id)
+  pure [(b, respRect r) | (b, r) <- [p, c, g, l]]
+
+primedRects :: Sim [(Rect, Rect)] ()
+primedRects = do
+  rs <- result
+  checkEq 4 (length rs)
+  mapM_ (\(Rect bx by bw bh, Rect x y w h) -> check (bw > 0 && bx >= x && by >= y && bx + bw <= x + w + 1.0e-3 && by + bh <= y + h + 1.0e-3)) rs
+
 -- | A width/height ratio that is zero, negative or infinite gives a square
 -- instead of an infinite or negative side.
 badRatioUi :: NanoUI [Rect]
