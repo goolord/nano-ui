@@ -13,6 +13,10 @@ module NanoUI.Sdl.Internal.Display
   , zoomWindow
   , windowPosCentered
   , installResizeWatch
+  , ResizeWatches (..)
+  , newResizeWatches
+  , watchResizes
+  , rethrowResizeFailure
   , waylandToplevel
   , sendWaylandSizeLimits
   , refreshEventType
@@ -22,7 +26,12 @@ module NanoUI.Sdl.Internal.Display
   , querySystemAppearance
   ) where
 
+import Control.Exception (SomeException, throwIO)
+import Control.Exception qualified as E
 import Control.Monad (void, when)
+import Data.Foldable (traverse_)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (isNothing)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..))
 import Foreign.Marshal.Alloc (alloca, callocBytes)
 import Foreign.Marshal.Utils (with)
@@ -30,8 +39,9 @@ import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (Storable, peek, poke, sizeOf)
 import Data.Int (Int32)
 import Data.Word (Word32)
-import NanoUI (Appearance (..), Size (..), V2 (..), ifM)
+import NanoUI (Appearance (..), Size (..), V2 (..), ifM, whenM)
 import NanoUI.Monad ((<&&>))
+import NanoUI.Runner (DrawingLock, newDrawingLock, tryWithDrawingLock)
 import NanoUI.Sdl.Internal.Error (sdlFail)
 import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
@@ -102,6 +112,36 @@ installResizeWatch win act = do
   pure $ do
     removeResizeWatchC handle
     freeHaskellFunPtr fp
+
+-- | What the resize watches of a session's windows share.
+data ResizeWatches = ResizeWatches
+  { rwDrawing :: !DrawingLock
+  -- ^ Held by every frame the loop draws, in any window, and by every
+  -- watch frame. A watch can run inside an SDL call a frame makes (a window
+  -- resized from the view), and the frame it would draw is then skipped.
+  , rwFailure :: !(IORef (Maybe SomeException))
+  -- ^ The first exception a watch frame threw. It cannot unwind past the C
+  -- that called the watch: GHC would end the process there, past every
+  -- handler and release. The loop's next pass throws it
+  -- ('rethrowResizeFailure'), and no watch draws again.
+  }
+
+-- | A free drawing lock and no failure.
+newResizeWatches :: IO ResizeWatches
+newResizeWatches = ResizeWatches <$> newDrawingLock <*> newIORef Nothing
+
+-- | Install a resize watch on a window ('installResizeWatch') whose action
+-- runs under the drawing lock and keeps its exception for the loop; answer
+-- the action that removes it.
+watchResizes :: ResizeWatches -> Ptr SDL_Window -> IO () -> IO (IO ())
+watchResizes rws win frame =
+  installResizeWatch win $ whenM (isNothing <$> readIORef (rwFailure rws)) $
+    E.handle (\(e :: SomeException) -> writeIORef (rwFailure rws) (Just e)) $
+      void (tryWithDrawingLock (rwDrawing rws) frame)
+
+-- | Throw the exception a watch frame threw, if any, on the loop's thread.
+rethrowResizeFailure :: ResizeWatches -> IO ()
+rethrowResizeFailure rws = readIORef (rwFailure rws) >>= traverse_ throwIO
 
 -- | The event 'pushRefreshEvent' sends, filled in once by 'initRefreshEvent',
 -- so a push does not allocate.

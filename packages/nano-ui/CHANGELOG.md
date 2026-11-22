@@ -9,6 +9,11 @@
   for the display though vsync was asked for, it waits `sdPacingMs` as an
   animation does, instead of running unpaced at full CPU.
 
+- **Breaking (backends):** `WindowOps` has a field `woWatchResize`, which
+  installs a watch that draws a further window at each new size while the
+  host holds the first window's loop in a modal size loop. A backend whose
+  loop keeps running during a resize answers `\_ _ -> pure (pure ())`.
+
 - `panelWith'`, `calloutWith'`, `gridWith'` and `layersWith'` return the
   container's `Response` with the body's result, as `rowWith'` and
   `columnWith'` do.

@@ -672,6 +672,8 @@ childOps sh =
       -- Each window has its own cursor.
     , woCursor = syncRgfwCursor . rcWindow
     , woPacingMs = \_ -> rgfwPacingMs (rsOpts sh)
+      -- Resizes are drawn by the loop's passes only.
+    , woWatchResize = \_ _ -> pure (pure ())
     }
 
 -- | Take every window's events: the first window's are answered, and each
