@@ -15,7 +15,7 @@ import Data.Primitive.PrimVar (writePrimVar)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Atlas (atlasToken)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Damage (captureFrameSnapshot, updatePrevRects, writeDamage)
+import NanoUI.Internal.Damage (captureFrameSnapshot, pruneUnmountedCaches, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Frame.Input
 import NanoUI.Internal.Frame.Chrome (floatingSurface, paintMenuPanel)
@@ -140,7 +140,7 @@ runFrameEff unlift ctx rawInp ui = do
   finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
-  updatePrevRects ctx size
+  pruneUnmountedCaches ctx =<< updatePrevRects ctx size
   -- With the layout recorded, what the view read of the last one is checked
   -- against it. A check that publishes a float it measured (a tab strip's
   -- range) marks the frame as a layout change, not a scroll, for its damage.
