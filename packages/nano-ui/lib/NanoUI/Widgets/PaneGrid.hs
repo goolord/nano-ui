@@ -80,7 +80,10 @@ data PaneTree = InitialTree !(Maybe GridNode) | ControlledTree !(Var (Maybe Grid
 
 -- | Validate a persisted/application-built tree before using it. Pane and split
 -- ids share one namespace; ratios must be finite and between zero and one.
--- 'paneGrid' also validates any tree it adopts, failing before rendering it.
+-- 'paneGrid' also validates any tree it adopts and throws an 'IOError'
+-- ('userError') from the view for an invalid one, which ends the session
+-- unless the view catches it ('NanoUI.Monad.catchView'). Validate a tree
+-- that comes from a file or the user with this first.
 validateGridTree :: GridNode -> Either String ()
 validateGridTree tree = void (walk S.empty tree)
   where

@@ -2,6 +2,15 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- `releaseAllKeys`, which backends call when the window loses focus, also
+  releases held mouse buttons, so a drag or a held stepper arrow stops when
+  its release goes to another window. A hovered widget the view stops
+  declaring starts no fade-out, which repainted the window and ran frames
+  for 0.12 s. `TextBuffer.snapToCluster` moves a position to the start of
+  the character it falls inside; a text area keeping its caret across a
+  replaced document, and the editor's `Select` command, use it, so an
+  insert there no longer splits an accented letter or an emoji sequence.
+
 - `catchView` (`NanoUI.Monad`) runs part of a view and a handler after it if
   it throws, with the view's open containers, id scope and paint scope put
   back as they were, so the handler and the rest of the view are laid out

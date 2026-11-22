@@ -315,3 +315,17 @@ spec = do
               atEndBuf = TB.withCursor (last fwd) start0
               bwd = reverse (walkLeft atEndBuf)
           bwd `shouldBe` fwd
+
+  describe "snapToCluster" $
+    it "lands on the start of the character it falls inside" $
+      forM_
+        [ ("cafe\x0301x", 4, 3)
+        , ("cafe\x0301x", 5, 5)
+        , ("a\x1F468\x200D\x1F469\&b", 3, 1)
+        , ("\x1F1FA\x1F1F8\x1F1EC\x1F1E7", 1, 0)
+        , ("\x1F1FA\x1F1F8\x1F1EC\x1F1E7", 3, 2)
+        , ("abc", 2, 2)
+        , ("abc", 9, 3)
+        ]
+        $ \(t, col, want) ->
+          (t, col, TB.cursorCol (TB.snapToCluster (TB.fromText t) (TB.Cursor 0 col))) `shouldBe` (t, col, want)

@@ -24,6 +24,7 @@ module NanoUI.Widgets.TextBuffer
   , getLineCount
   , withCursor
   , clampCursor
+  , snapToCluster
   , changedLines
   , markLinesSeen
 
@@ -176,6 +177,21 @@ clampCursor buf (Cursor row col) =
   let !r = clamp 0 (getLineCount buf - 1) row
       !c = clamp 0 (T.length (lineAt r buf)) col
    in Cursor r c
+
+-- | 'clampCursor', then back to the start of the user-perceived character
+-- the position falls inside ('clusterLength'). Use it for a position that
+-- comes from outside the editing commands, such as a caret kept across a
+-- replaced document or a selection set by the application: there it can
+-- land between a letter and its accent or inside an emoji sequence, and an
+-- insert would split the character. The editing commands themselves stop
+-- inside a cluster on purpose (Backspace removes a vowel sign alone), so
+-- they keep 'clampCursor'.
+snapToCluster :: TextBuffer -> Cursor -> Cursor
+snapToCluster buf cur =
+  let Cursor r c = clampCursor buf cur
+      line = lineAt r buf
+      p = prevClusterStart line c
+   in if c <= 0 || p + clusterLength (T.drop p line) <= c then Cursor r c else Cursor r p
 
 -- | Move to a position, clamped into the document, without changing text.
 withCursor :: Cursor -> TextBuffer -> TextBuffer

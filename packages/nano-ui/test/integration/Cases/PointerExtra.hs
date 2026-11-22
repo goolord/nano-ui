@@ -14,6 +14,8 @@ import NanoUI.Testing.Sim
 tests :: [Spec]
 tests =
   [ spec "pointer-button-sets" runButtonSetsTest
+  , spec "focus-loss-releases-buttons" runFocusLossReleasesButtonsTest
+  , varSimSpec "hovered-widget-gone" 300 200 True hoverGoneUi hoverGone
   , spec "pointer-held-ownership" runHeldOwnershipTest
   , spec "pointer-blocked" runBlockedTest
   , simSpec "pointer-middle-click" 400 300 middleUi middleClicks
@@ -23,6 +25,31 @@ tests =
 -- | Button sets track every button, extras by number. Presses and releases
 -- appear only in the frame they happen in. Any held button counts as a held
 -- pointer, and a press or release frame redraws.
+-- | Losing focus releases held mouse buttons as it releases keys, so a drag
+-- or a held stepper arrow does not outlive a release sent to another window.
+runFocusLossReleasesButtonsTest :: Context -> IORef Int -> IO ()
+runFocusLossReleasesButtonsTest _ failed = do
+  let pressed = applyMouseButton MouseLeft True emptyInput
+      blurred = releaseAllKeys pressed
+  assertEq failed False (heldIn MouseLeft blurred)
+  assertEq failed True (releasedIn MouseLeft blurred)
+
+-- | A hovered widget the view stops declaring starts no fade-out: nothing
+-- animates and the loop can sleep at once.
+hoverGoneUi :: Var Bool -> NanoUI ()
+hoverGoneUi shown = column $ do
+  on <- readVar shown
+  when on (void (button "Delete"))
+  label "rest"
+
+hoverGone :: Var Bool -> Sim () ()
+hoverGone shown = do
+  _ <- moveTo "Delete" >> advance 1 >> settle
+  writeV shown False
+  _ <- settle
+  check . not =<< onContext anyAnimating
+  check . not =<< wantsFrame
+
 runButtonSetsTest :: Context -> IORef Int -> IO ()
 runButtonSetsTest _ failed = do
   let every = [MouseLeft, MouseRight, MouseMiddle, MouseBack, MouseForward, MouseOther 6, MouseOther 32]

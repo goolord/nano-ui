@@ -188,7 +188,7 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
        in Editor moved (if extend then anchor else TB.getCursor moved) (sealHistory hist)
     SelectAll -> runCommand mode (Select (Cursor 0 0) (TB.documentEnd buf)) ed
     Select a c ->
-      Editor (TB.withCursor c buf) (TB.clampCursor buf a) (sealHistory hist)
+      Editor (TB.withCursor (TB.snapToCluster buf c) buf) (TB.snapToCluster buf a) (sealHistory hist)
     Replace a b txt
       | modeEditable mode -> edit EditOther (TB.replaceEdit (singleLine txt) a b buf)
     ReplaceAll txt -> runCommand mode (Replace (Cursor 0 0) (TB.documentEnd buf) txt) ed

@@ -158,7 +158,10 @@ refreshHover ctx inp = do
   when (prevHot /= newHot) $ do
     prevMenu <- isMenuButtonWidget ctx prevHot
     newMenu <- isMenuButtonWidget ctx newHot
-    when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
+    -- A widget the view no longer declares has nothing to fade: starting its
+    -- fade-out would repaint the window and pace frames for nothing.
+    prevShown <- isJust <$> findNodeByWidgetId ctx prevHot
+    when (hashWidgetId prevHot /= 0 && prevShown && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
     when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
 -- | Capture the press point and reached control before rebuilding the arena.

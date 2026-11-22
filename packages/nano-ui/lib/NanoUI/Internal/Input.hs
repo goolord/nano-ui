@@ -525,15 +525,19 @@ applyKey k False inp =
   where
     held = inputKeysHeld inp
 
--- | Release every held key and modifier. Backends call this when the window
--- loses keyboard focus, since keys released elsewhere send no release event.
--- Held keys join 'inputKeysReleased'.
+-- | Release every held key, modifier and mouse button. Backends call this
+-- when the window loses keyboard focus, since a key or button released
+-- elsewhere sends no release event: a button left held would keep a drag
+-- going, or a stepper arrow repeating, until the next click. Held keys join
+-- 'inputKeysReleased' and held buttons 'inputButtonsReleased'.
 releaseAllKeys :: Input -> Input
 releaseAllKeys inp =
   inp
     { inputKeysReleased = inputKeysReleased inp <> inputKeysHeld inp
     , inputKeysHeld = mempty
     , inputModifiers = noModifiers
+    , inputButtonsReleased = inputButtonsReleased inp <> inputButtonsHeld inp
+    , inputButtonsHeld = noButtons
     }
 
 -- | The drops with one more at the end.

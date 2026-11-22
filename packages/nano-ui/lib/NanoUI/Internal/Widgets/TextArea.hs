@@ -223,7 +223,7 @@ textAreaCore f wid value = do
         | otherwise =
             insertSlot fieldBuffer bufKey (maybe id keepCaret stored (documentBuffer value))
               . deleteSlot fieldHistory (slotKey SlotTextHistory key)
-      keepCaret old new = (TB.withCursor (TB.getCursor old) new) {TB.preferredCol = TB.preferredCol old}
+      keepCaret old new = (TB.withCursor (TB.snapToCluster new (TB.getCursor old)) new) {TB.preferredCol = TB.preferredCol old}
   -- Adopt the caller's document the way 'adoptSlot' does. Comparing the
   -- document the caller passes back with the stored one is O(1) ('==' checks
   -- identity first). A replaced document gets a buffer over its lines, whose
