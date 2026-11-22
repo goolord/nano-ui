@@ -19,8 +19,6 @@
 - Widgets and view functions have `NanoUI` types instead of
   `Ui :> es => Eff es`, and the package no longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
-- The library imports `NanoUI.Internal` modules, which change without
-  notice, so it allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`).
 - A bar chart's x axis is labelled with its category names, and its bars
   stand on zero on the chart's y axis. Each bar series was scaled to its own
   largest value from the bottom of the box, so a bar's top disagreed with the

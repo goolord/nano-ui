@@ -9,8 +9,6 @@
 
 - No longer depends on `effectful-core`.
 - Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
-- The library imports `NanoUI.Internal` modules, which change without
-  notice, so it allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`).
 - The `sdl` flag, which builds the SDL example, is off by default, so
   depending on the library no longer needs nano-ui-sdl or SDL3.
 - `markSubmitted` counts a form as submitted from the app's own button, so a

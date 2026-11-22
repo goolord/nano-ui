@@ -51,10 +51,9 @@ winget-gui) pin this repository as a Cabal `source-repository-package`.
 - `cabal.project` adds `-Werror` for this repository's builds only, and the
   `.cabal` files enable `-Wunused-packages`: remove a stale `build-depends`
   entry along with its last import.
-- Every companion package imports `NanoUI.Internal.*` modules, which may
-  change in a minor release, so each pins `nano-ui` to one minor version
-  (`>=0.2.0 && <0.2.1`). Keep those pins; a `nano-ui` minor release means
-  releasing the companions with it.
+- Companion packages depend on `nano-ui ^>=0.2`. They also import
+  `NanoUI.Internal.*` modules; change those modules and their companion
+  callers in the same commit.
 - No formatter is enforced. Match the surrounding layout by hand, and do not
   run fourmolu or ormolu over existing files: the result rewrites most of a
   module.

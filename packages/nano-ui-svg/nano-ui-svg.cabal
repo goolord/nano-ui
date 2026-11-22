@@ -57,12 +57,10 @@ library
         NanoUI.Draw.FrameSvg
     other-modules:
         NanoUI.Draw.Svg.Attr
-    -- The library imports NanoUI.Internal modules, which change without
-    -- notice, so it allows only nano-ui's 0.2.0.x patch releases.
     build-depends:
         base >=4.20 && <4.23,
         containers >=0.7 && <0.9,
-        nano-ui >=0.2.0 && <0.2.1,
+        nano-ui ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   lib

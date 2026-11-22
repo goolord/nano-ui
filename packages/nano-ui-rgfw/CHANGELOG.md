@@ -7,8 +7,7 @@
 - First release: `NanoUI.Backend.Rgfw` runs nano-ui views in a native window
   through RGFW and OpenGL 3.2, with the bundled Cozette bitmap font, whose
   MIT notice ships in `LICENSE-Cozette`. Builds with GHC 9.10 through 9.14
-  (`base >=4.20 && <4.23`). It imports `NanoUI.Internal` modules, so it
-  allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`). The runners throw an
+  (`base >=4.20 && <4.23`). The runners throw an
   `IOError` when the window or its OpenGL 3.2 context cannot be created.
 - Text of every size and face is laid out in the Cozette cell it is drawn
   in: `fontSize` and `fontMono` change nothing under this backend. Text in

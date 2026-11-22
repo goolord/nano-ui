@@ -197,8 +197,6 @@
 - The licence is `MIT AND OFL-1.1`. The bundled Inter is under the SIL Open
   Font License 1.1, whose text ships in `LICENSE-Inter`; an application that
   embeds the font ships it too.
-- The library imports `NanoUI.Internal` modules, which change without
-  notice, so it allows only nano-ui 0.2.0.x (`>=0.2.0 && <0.2.1`).
 - On Linux and other Unix systems fonts are searched where fontconfig looks:
   `fonts` under `$XDG_DATA_HOME` and each absolute `$XDG_DATA_DIRS` entry,
   `~/.fonts`, and `/usr/local/share/fonts` and `/usr/share/fonts` whatever
