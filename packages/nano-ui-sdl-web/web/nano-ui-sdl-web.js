@@ -190,6 +190,10 @@ class NanoUiSdlWeb {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     // A vertex is 32 bytes: position, colour (0 to 1) and UV, as floats.
+    // The stride is the core's vertexSize (NanoUI.Internal.Draw.Types) and
+    // NANO_UI_VERTEX_BYTES in nano-ui-ttf's nano_ui_ttf_shared.h; JavaScript
+    // cannot read either, so nano-ui-sdl-web-test checks only that those two
+    // agree. Change all three together.
     const attrs = [["aPos", 2, 0], ["aColor", 4, 8], ["aUv", 2, 24]];
     for (const [name, size, offset] of attrs) {
       const loc = gl.getAttribLocation(program, name);

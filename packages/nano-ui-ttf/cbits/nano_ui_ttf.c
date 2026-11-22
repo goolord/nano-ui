@@ -5,6 +5,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "nano_ui_ttf_shared.h"
+
+/* The header spells SDL_ttf's direction values out so it compiles without
+ * SDL's flags; these keep them equal. */
+_Static_assert(NANO_UI_DIRECTION_LTR == TTF_DIRECTION_LTR, "NANO_UI_DIRECTION_LTR is TTF_DIRECTION_LTR");
+_Static_assert(NANO_UI_DIRECTION_RTL == TTF_DIRECTION_RTL, "NANO_UI_DIRECTION_RTL is TTF_DIRECTION_RTL");
+_Static_assert(NANO_UI_DIRECTION_MASK == TTF_SUBSTRING_DIRECTION_MASK, "NANO_UI_DIRECTION_MASK is TTF_SUBSTRING_DIRECTION_MASK");
+
 /* Kerning is on by default; pin it so shaping survives defaults changing.
  * Direction and script stay unset: shaping detects them per run, so
  * right-to-left and complex scripts shape as themselves. Light grid-fitting
@@ -146,9 +154,10 @@ int nano_ui_ttf_get_kerning(TTF_Font *font, Uint32 prev_cp, Uint32 cp)
 /* ------------------------------------------------------------------------ */
 
 /* One shaped line, copied out of SDL_ttf's text layout: per glyph
- * (text offset, glyph index, dst x y w h, src x y w h) and its font; per
- * cluster (byte offset, byte length, x, width, flags). Coordinates are
- * pixels from the top left of the line. */
+ * NANO_UI_SHAPED_GLYPH_INTS ints (text offset, glyph index, dst x y w h,
+ * src x y w h) and its font; per cluster NANO_UI_SHAPED_CLUSTER_INTS ints
+ * (byte offset, byte length, x, width, flags). Coordinates are pixels from
+ * the top left of the line. nano_ui_ttf_shared.h names each int. */
 typedef struct NanoUIShaped {
     int w;
     int h;
@@ -171,9 +180,9 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
     size_t cluster_cap = d->num_clusters > 0 ? (size_t)d->num_clusters : 1;
     out->w = d->w;
     out->h = d->h;
-    out->glyphs = (int *)SDL_calloc(op_cap, 10 * sizeof(int));
+    out->glyphs = (int *)SDL_calloc(op_cap, NANO_UI_SHAPED_GLYPH_INTS * sizeof(int));
     out->glyph_fonts = (TTF_Font **)SDL_calloc(op_cap, sizeof(TTF_Font *));
-    out->clusters = (int *)SDL_calloc(cluster_cap, 5 * sizeof(int));
+    out->clusters = (int *)SDL_calloc(cluster_cap, NANO_UI_SHAPED_CLUSTER_INTS * sizeof(int));
     if (!out->glyphs || !out->glyph_fonts || !out->clusters) {
         return false;
     }
@@ -200,20 +209,20 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
         if (op->cmd != TTF_DRAW_COMMAND_COPY || op->copy.text_offset >= out->text_len) {
             continue;
         }
-        int *slot = out->glyphs + g * 10;
-        slot[0] = op->copy.text_offset;
-        slot[1] = (int)op->copy.glyph_index;
-        slot[2] = op->copy.dst.x - shift;
+        int *slot = out->glyphs + g * NANO_UI_SHAPED_GLYPH_INTS;
+        slot[NANO_UI_GLYPH_TEXT_OFFSET] = op->copy.text_offset;
+        slot[NANO_UI_GLYPH_INDEX] = (int)op->copy.glyph_index;
+        slot[NANO_UI_GLYPH_DST_X] = op->copy.dst.x - shift;
         /* SDL_ttf places a fallback font's glyphs from that font's own
          * ascent; align them to the line's font's baseline instead, which
          * sits half the line gap down. */
-        slot[3] = op->copy.dst.y - (TTF_GetFontAscent(op->copy.glyph_font) - TTF_GetFontAscent(d->font)) + lead;
-        slot[4] = op->copy.dst.w;
-        slot[5] = op->copy.dst.h;
-        slot[6] = op->copy.src.x;
-        slot[7] = op->copy.src.y;
-        slot[8] = op->copy.src.w;
-        slot[9] = op->copy.src.h;
+        slot[NANO_UI_GLYPH_DST_Y] = op->copy.dst.y - (TTF_GetFontAscent(op->copy.glyph_font) - TTF_GetFontAscent(d->font)) + lead;
+        slot[NANO_UI_GLYPH_DST_W] = op->copy.dst.w;
+        slot[NANO_UI_GLYPH_DST_H] = op->copy.dst.h;
+        slot[NANO_UI_GLYPH_SRC_X] = op->copy.src.x;
+        slot[NANO_UI_GLYPH_SRC_Y] = op->copy.src.y;
+        slot[NANO_UI_GLYPH_SRC_W] = op->copy.src.w;
+        slot[NANO_UI_GLYPH_SRC_H] = op->copy.src.h;
         out->glyph_fonts[g] = op->copy.glyph_font;
         g++;
     }
@@ -224,12 +233,12 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
         if (c->offset >= out->text_len) {
             continue;
         }
-        int *slot = out->clusters + k * 5;
-        slot[0] = c->offset;
-        slot[1] = c->length;
-        slot[2] = c->rect.x - shift;
-        slot[3] = c->rect.w;
-        slot[4] = (int)c->flags;
+        int *slot = out->clusters + k * NANO_UI_SHAPED_CLUSTER_INTS;
+        slot[NANO_UI_CLUSTER_OFFSET] = c->offset;
+        slot[NANO_UI_CLUSTER_LENGTH] = c->length;
+        slot[NANO_UI_CLUSTER_X] = c->rect.x - shift;
+        slot[NANO_UI_CLUSTER_WIDTH] = c->rect.w;
+        slot[NANO_UI_CLUSTER_FLAGS] = (int)c->flags;
         k++;
     }
     out->num_clusters = k;
@@ -269,7 +278,7 @@ static bool shape_with_sentinel(TTF_Font *font, const char *text, size_t len, co
     if (!t) {
         return false;
     }
-    if (direction != 0) {
+    if (direction != NANO_UI_DIRECTION_AUTO) {
         TTF_SetTextDirection(t, (TTF_Direction)direction);
     }
     /* Laying the text out hands it to the engine, which copies it. */
@@ -282,8 +291,9 @@ static bool shape_with_sentinel(TTF_Font *font, const char *text, size_t len, co
     return ok;
 }
 
-/* Shape one line with the font and its fallbacks, in a direction (0 lets
- * SDL_ttf pick, TTF_DIRECTION_LTR or TTF_DIRECTION_RTL). The caller frees
+/* Shape one line with the font and its fallbacks, in a direction
+ * (NANO_UI_DIRECTION_AUTO lets SDL_ttf pick, NANO_UI_DIRECTION_LTR or
+ * NANO_UI_DIRECTION_RTL). The caller frees
  * the result with nano_ui_ttf_shaped_free.
  *
  * The line is shaped with a sentinel after it, whose glyph and cluster are
@@ -327,25 +337,25 @@ size_t nano_ui_ttf_shaped_size(void)
     return sizeof(NanoUIShaped);
 }
 
-/* Fields of a shaped line: 0 width, 1 height, 2 glyph count, 3 cluster count. */
+/* Fields of a shaped line: width, height, glyph count, cluster count. */
 int nano_ui_ttf_shaped_int(const NanoUIShaped *shaped, int field)
 {
     switch (field) {
-    case 0: return shaped->w;
-    case 1: return shaped->h;
-    case 2: return shaped->num_glyphs;
-    case 3: return shaped->num_clusters;
+    case NANO_UI_SHAPED_WIDTH: return shaped->w;
+    case NANO_UI_SHAPED_HEIGHT: return shaped->h;
+    case NANO_UI_SHAPED_GLYPH_COUNT: return shaped->num_glyphs;
+    case NANO_UI_SHAPED_CLUSTER_COUNT: return shaped->num_clusters;
     default: return 0;
     }
 }
 
-/* 0 glyphs, 1 glyph fonts, 2 clusters. */
+/* Arrays of a shaped line: glyphs, glyph fonts, clusters. */
 void *nano_ui_ttf_shaped_ptr(const NanoUIShaped *shaped, int field)
 {
     switch (field) {
-    case 0: return shaped->glyphs;
-    case 1: return (void *)shaped->glyph_fonts;
-    case 2: return shaped->clusters;
+    case NANO_UI_SHAPED_GLYPHS: return shaped->glyphs;
+    case NANO_UI_SHAPED_GLYPH_FONTS: return (void *)shaped->glyph_fonts;
+    case NANO_UI_SHAPED_CLUSTERS: return shaped->clusters;
     default: return NULL;
     }
 }

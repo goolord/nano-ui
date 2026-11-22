@@ -18,12 +18,16 @@ import Foreign.ForeignPtr (newForeignPtr_)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff, pokeElemOff)
 import NanoUI (NanoUI, Rect (..), UiCursorKind (..), askInput, button, column, label, colorRGB)
-import NanoUI.Backend (Composition (..), Damage (..), DrawCmd (..), DrawData (..), Input (..), Key (..), Layer (..), glyphPageTextureId)
+import NanoUI.Backend
+  ( Composition (..), Damage (..), DrawCmd (..), DrawData (..), Input (..), Key (..), Layer (..), glyphAtlasPages
+  , glyphPageTextureId, pixelEdges, snapDamage, vertexSize
+  )
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input (cssCursor, decodeKey)
 import NanoUI.SdlWeb.Internal.Render (DrawCommand (..), drawCommands')
 import NanoUI.SdlWeb.Internal.Session (WebFrame, defaultSdlWebOptions, runWebSession)
 import NanoUI.Testing (runFrame)
+import NanoUI.Ttf.Internal.Header (glyphAtlasPageCount, vertexBytes)
 import System.Exit (exitFailure)
 
 assert :: String -> Bool -> IO ()
@@ -193,6 +197,20 @@ pureChecks = do
   let partial = drawCommands' 2 (800, 600) (DamageClip (Rect 10 10 20 20)) dd
   assert "drawCommands' drops commands outside the damage" (length partial == 2)
   assert "drawCommands' scissors to the damage in pixels" (all ((== Just (20, 20, 40, 40)) . dcScissor) partial)
+  -- Damage snapped to whole pixels comes back from layout units a rounding
+  -- error off them at some scales; the scissor stays on the snapped pixels.
+  let cases = [(s, Rect x x 20.3 7.9) | s <- [1, 1.1, 1.2, 1.25, 1.3, 1.4, 1.5, 1.75, 2.25, 3], x <- [0.3, 3.7, 10.1, 33.3, 77.7]]
+      snapped s r = case snapDamage s (DamageClip r) of
+        DamageClip r' -> r'
+        DamageFull -> r
+      want s r = let (x0, y0, x1, y1) = pixelEdges s r in Just (x0, y0, x1 - x0, y1 - y0)
+      scissorOf s r = map dcScissor (drawCommands' s (800, 600) (DamageClip (snapped s r)) dd)
+  assert "drawCommands' test cases include a damage edge a rounding error off its pixel"
+    (any (\(s, r) -> pixelEdges s (snapped s r) /= pixelEdges s r) cases)
+  assert "drawCommands' scissors snapped damage to its own pixels at fractional scales"
+    (all (\(s, r) -> all (== want s r) (take 1 (scissorOf s r))) cases)
+  assert "nano_ui_ttf_shared.h: NANO_UI_VERTEX_BYTES is the core's vertexSize" (vertexBytes == vertexSize)
+  assert "nano_ui_ttf_shared.h: NANO_UI_GLYPH_ATLAS_PAGES is the core's glyphAtlasPages" (glyphAtlasPageCount == glyphAtlasPages)
 
 fakeDrawData :: [DrawCmd] -> IO DrawData
 fakeDrawData cmds = do

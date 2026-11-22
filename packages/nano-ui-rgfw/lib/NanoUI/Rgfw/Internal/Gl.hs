@@ -29,6 +29,7 @@ module NanoUI.Rgfw.Internal.Gl
   , writeSpanQuads
   , toPhysRect
   , physClip
+  , glBufferStrides
   ) where
 
 import Control.Exception (bracket)
@@ -107,6 +108,18 @@ foreign import ccall unsafe "nano_ui_gl_draw_geometry"
 
 foreign import ccall unsafe "nano_ui_gl_draw_text"
   c_drawText :: Ptr NanoUiGl -> Int32 -> Int32 -> IO ()
+
+foreign import ccall unsafe "nano_ui_gl_vertex_bytes"
+  c_vertexBytes :: IO Int32
+
+foreign import ccall unsafe "nano_ui_gl_index_bytes"
+  c_indexBytes :: IO Int32
+
+-- | The vertex and index strides in bytes nano_ui_gl.c reads the draw
+-- buffers with. They must equal the core's 'vertexSize' and
+-- 'NanoUI.Testing.indexSize'; nano-ui-rgfw-test checks.
+glBufferStrides :: IO (Int, Int)
+glBufferStrides = (,) <$> (fromIntegral <$> c_vertexBytes) <*> (fromIntegral <$> c_indexBytes)
 
 -- | GPU resources and glyph scratch storage owned by one OpenGL context.
 -- Release with 'freeGlRenderer' while that context is still current.

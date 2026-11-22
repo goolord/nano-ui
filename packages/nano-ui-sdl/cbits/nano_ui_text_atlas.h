@@ -4,9 +4,11 @@
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 
-/* Pages the atlas opens before it is out of space. Mirrors glyphAtlasPages
- * in NanoUI.Internal.Draw.Types. */
-#define NANO_UI_TEXT_ATLAS_PAGES 4
+#include "nano_ui_ttf_shared.h"
+
+/* Pages the atlas opens before it is out of space: nano-ui-ttf's, which
+ * nano-ui-sdl-web's atlas uses too. */
+#define NANO_UI_TEXT_ATLAS_PAGES NANO_UI_GLYPH_ATLAS_PAGES
 
 typedef struct NanoUiTextAtlas NanoUiTextAtlas;
 
