@@ -35,7 +35,7 @@ cabal test -j1 all
 | `nano-ui-demo-test`, `nano-ui-terminal-test` | The demos and the terminal in hidden SDL windows |
 | `nano-ui-book-test` | This book: no inline Haskell, `#include` anchors, specimen tags, and an `mdbook` build |
 
-Continuous integration (`.github/workflows/ci.yml`) runs the suites that open no window on Linux with GHC 9.10 and 9.14 and on Windows with GHC 9.14. Run the native suites locally when a change touches rendering, fonts, dialogs or DPI.
+Continuous integration (`.github/workflows/ci.yml`) runs the suites that open no window on Linux with GHC 9.10 and 9.14 and on Windows with GHC 9.14. On Linux with GHC 9.14 it also runs the render, demo, terminal and RGFW suites under Xvfb with Mesa's software GL; until that step has passed on the runner, its failures are reported without failing the job. Run the native suites locally when a change touches rendering, fonts, dialogs or DPI.
 
 One suite, with failure details:
 

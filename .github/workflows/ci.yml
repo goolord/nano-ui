@@ -117,6 +117,23 @@ jobs:
             echo "::endgroup::"
           done
 
+      # The suites that open windows, in an X server with Mesa's software
+      # GL. Not yet seen passing on this runner, so a failure reports
+      # without failing the job; drop continue-on-error once it is green.
+      - name: Native test suites (Xvfb)
+        if: matrix.ghc == '9.14.1'
+        continue-on-error: true
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb xauth libgl1-mesa-dri fonts-dejavu-core
+          for suite in nano-ui-sdl:test:nano-ui-render-test nano-ui-demo:test:nano-ui-demo-test \
+                       nano-ui-demo:test:nano-ui-terminal-test nano-ui-rgfw:test:nano-ui-rgfw-test; do
+            echo "::group::$suite"
+            xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 "$suite" --test-show-details=failures
+            echo "::endgroup::"
+          done
+
       - name: cabal check
         run: |
           for dir in packages/*/; do

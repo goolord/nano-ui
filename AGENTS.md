@@ -58,7 +58,8 @@ winget-gui) pin this repository as a Cabal `source-repository-package`.
   run fourmolu or ormolu over existing files: the result rewrites most of a
   module.
 - CI (`.github/workflows/ci.yml`) builds everything with GHC 9.10.3 and
-  9.14.1 on Linux and 9.14.1 on Windows, runs the headless suites, and gates
+  9.14.1 on Linux and 9.14.1 on Windows, runs the headless suites (and the
+  native ones under Xvfb on Linux 9.14, not yet blocking), and gates
   allocation with `scripts/profile/alloc-gate.py` against
   `scripts/profile/alloc-baseline.json`. A change that allocates more on
   purpose reruns the gate with `--update` and commits the new baseline.
