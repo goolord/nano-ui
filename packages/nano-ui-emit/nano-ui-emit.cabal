@@ -19,9 +19,23 @@ source-repository head
     location:       https://github.com/goolord/nano-ui.git
     subdir:         packages/nano-ui-emit
 
+common warnings
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-export-lists
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
+        -Wunused-packages
+
 library
+    import:           warnings
     default-language: GHC2024
-    ghc-options:      -Wall -Wcompat -Wredundant-constraints
     exposed-modules:
         NanoUI.Emit
         NanoUI.Emit.Widgets
@@ -33,10 +47,10 @@ library
         nano-ui ^>=0.2
 
 test-suite nano-ui-emit-test
+    import:           warnings
     type:             exitcode-stdio-1.0
     default-language: GHC2024
     default-extensions: OverloadedStrings
-    ghc-options:      -Wall -Wcompat -Wredundant-constraints
     main-is:          Main.hs
     other-modules:    DeferredWrongMessage
     hs-source-dirs:   test
