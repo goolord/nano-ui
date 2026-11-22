@@ -20,11 +20,11 @@ cabal test -j1 all
 
 | Suite | Covers |
 | --- | --- |
-| `nano-ui-test` | Widgets, layout, input, focus, damage, and draw lists, frame by frame and headless |
-| `text-buffer-spec` | Text buffer and document edits: lines, graphemes, carets, undoable edits |
+| `nano-ui-test` | Widgets, layout, input, focus, damage, and draw lists, frame by frame and headless; seeded QuickCheck runs over random layout trees, damage against repaints, and input streams |
+| `text-buffer-spec` | Text buffer and document edits: lines, graphemes, carets, undoable edits, random edit sessions against a plain `Text` (QuickCheck) |
 | `nano-ui-inspection` | Hot paths (quad writers, store and focus access, canvas) still optimize as written |
 | `nano-ui-emit-test` | Emitting views, adapters, and reducers |
-| `nano-ui-svg-test` | `DrawOp`-to-SVG: clips, gradients, escaping, rasterization |
+| `nano-ui-svg-test` | `DrawOp`-to-SVG: clips, gradients, escaping, rasterization, whole frames against golden documents in `test/golden` |
 | `nano-ui-diagrams-test` | Chart and diagrams-lib rendering |
 | `nano-ui-form-test` | Form validation, reset, and submission |
 | `nano-ui-markdown-test` | Parsing, incremental append against a full parse (QuickCheck), layout |
@@ -38,6 +38,18 @@ One suite, with failure details:
 
 ```sh
 cabal test nano-ui-test --test-show-details=failures
+```
+
+`nano-ui-test` also holds specs named `known-bug-*`, which fail on the current library. They run only when named:
+
+```sh
+$(cabal list-bin nano-ui:test:nano-ui-test) known-bug-wrap-row-height
+```
+
+After a change meant to alter SVG export, rewrite the golden documents from `packages/nano-ui-svg`:
+
+```sh
+NANO_UI_UPDATE_GOLDEN=1 cabal test nano-ui-svg-test
 ```
 
 ## Haddocks and Hoogle
