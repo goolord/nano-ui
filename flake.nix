@@ -31,8 +31,10 @@
 
           # haskell-flake's default tools include cabal-install and
           # haskell-language-server.
+          # mdbook builds the book (nano-ui-book-test runs it); python3 runs
+          # the scripts under scripts/.
           devShell.mkShellArgs = {
-            nativeBuildInputs = with pkgs; [ pkg-config ];
+            nativeBuildInputs = with pkgs; [ pkg-config mdbook python3 ];
             buildInputs = with pkgs; [ sdl3 sdl3-ttf ];
           };
 
