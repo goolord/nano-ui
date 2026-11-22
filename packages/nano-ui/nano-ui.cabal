@@ -255,6 +255,7 @@ test-suite text-buffer-spec
     main-is:          NanoUI/TextBufferSpec.hs
     build-depends:
         hspec ^>=2.11,
+        QuickCheck >=2.15 && <2.19,
         text ^>=2.1
     hs-source-dirs:   test
 
@@ -274,12 +275,16 @@ test-suite nano-ui-test
         Cases.Atlas
         Cases.Combo
         Cases.Damage
+        Cases.DamageProps
+        Cases.SimFuzz
+        Cases.ApiSmoke
         Cases.Demo
         Cases.Grid
         Cases.HostDraw
         Cases.Keyboard
         Cases.Cache
         Cases.LayoutReuse
+        Cases.LayoutProps
         Cases.Runner
         Cases.RichText
         Cases.SIMD
@@ -331,6 +336,7 @@ test-suite nano-ui-test
         filepath ^>=1.5,
         nothunks ^>=0.3,
         primitive ^>=0.9,
+        QuickCheck >=2.15 && <2.19,
         vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   test/integration

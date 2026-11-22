@@ -63,6 +63,7 @@ module NanoUI.Testing.Harness
   , indexedVertices
   , textureVertices
   , drawTriangles
+  , trianglePicture
   , nodesOfType
   , newWakeSignal
   , measureRuns
@@ -70,9 +71,11 @@ module NanoUI.Testing.Harness
 
 import Control.Applicative ((<|>))
 import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
-import Control.Monad (filterM, forM, forM_, replicateM_, unless, void, when)
+import Control.Monad (filterM, foldM, forM, forM_, replicateM_, unless, void, when)
+import Data.Hashable (hash, hashWithSalt)
 import Data.IORef (IORef, writeIORef)
 import Data.List (maximumBy)
+import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text qualified as T
@@ -144,6 +147,35 @@ drawTriangles dd = triples <$> indexedVertices dd [0 .. drawIndexCount dd - 1]
   where
     triples (a : b : c : rest) = (a, b, c) : triples rest
     triples _ = []
+
+-- | A frame's draw triangles as a multiset, for comparing the pictures of
+-- two frames. Each key hashes a triangle's vertices with the texture and
+-- clip of the command that draws it, and maps to how many such triangles
+-- the frame draws and the part of their bounding box inside that clip. The
+-- draw buffers are borrowed: read them before the context's next frame.
+trianglePicture :: DrawData -> IO (M.Map Int (Int, Rect))
+trianglePicture dd =
+  withForeignPtr (drawVertices dd) $ \vp -> withForeignPtr (drawIndices dd) $ \ip ->
+    foldM (addCmd vp ip) M.empty (drawCmdElems dd)
+  where
+    addCmd vp ip acc c = do
+      let clip = Rect (cmdClipX c) (cmdClipY c) (cmdClipW c) (cmdClipH c)
+          salt = hash (cmdTextureId c, (cmdClipX c, cmdClipY c, cmdClipW c, cmdClipH c))
+          start = fromIntegral (cmdIndexOffset c) :: Int
+          corner t k = (peekByteOff ip ((start + 3 * t + k) * indexSize) :: IO Word32) >>= vertexAt vp . fromIntegral
+          add m t = do
+            vs <- mapM (corner t) [0, 1, 2]
+            let xs = map vX vs
+                ys = map vY vs
+                bounds = Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
+                shown = fromMaybe (Rect 0 0 0 0) (rectIntersect bounds clip)
+                key = foldl' hashVertex salt vs
+            pure $! M.insertWith (\(i, r) (j, _) -> (i + j, r)) key (1, shown) m
+      foldM add acc [0 .. fromIntegral (cmdIndexCount c) `quot` 3 - 1]
+    hashVertex s v =
+      let (r, g, b) = vRgb v
+       in s `hashWithSalt` vX v `hashWithSalt` vY v `hashWithSalt` r `hashWithSalt` g `hashWithSalt` b
+            `hashWithSalt` vA v `hashWithSalt` vU v `hashWithSalt` vV v
 
 -- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
 -- six-index quad, in draw order. Unlike span and arena queries, this includes

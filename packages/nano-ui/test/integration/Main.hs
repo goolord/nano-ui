@@ -10,6 +10,7 @@ import Cases.Passes qualified
 import Cases.Window qualified
 import Cases.Cache qualified
 import Cases.LayoutReuse qualified
+import Cases.LayoutProps qualified
 import Cases.Grid qualified
 import Cases.PaneGrid qualified
 import Cases.Labels qualified
@@ -22,6 +23,9 @@ import Cases.Svg qualified
 import Cases.Adornment qualified
 import Cases.Atlas qualified
 import Cases.Damage qualified
+import Cases.ApiSmoke qualified
+import Cases.SimFuzz qualified
+import Cases.DamageProps qualified
 import Cases.Tabs qualified
 import Cases.TextInput qualified
 import Cases.Animation qualified
@@ -55,11 +59,16 @@ import Cases.Theming qualified
 import Cases.NativeWindow qualified
 import Cases.Tasks qualified
 import NanoUI.Testing.Runner (runTests)
+import System.Environment (getArgs)
 
 main :: IO ()
 main = do
   backendApiCheck
-  runTests . concat $
+  args <- getArgs
+  -- Specs named known-bug-* fail on the current library: they run only when
+  -- named on the command line, so the suite passes while the bug is open.
+  let named = filter (\(name, _, _) -> name `elem` args) (concat [Cases.LayoutProps.knownBugs])
+  runTests . (<> named) . concat $
     [ Cases.Runner.tests
     , Cases.SIMD.tests
     , Cases.NoThunks.tests
@@ -68,6 +77,7 @@ main = do
     , Cases.Window.tests
     , Cases.Cache.tests
     , Cases.LayoutReuse.tests
+    , Cases.LayoutProps.tests
     , Cases.Grid.tests
     , Cases.ViewApi.tests
     , Cases.PaneGrid.tests
@@ -80,6 +90,9 @@ main = do
     , Cases.Adornment.tests
     , Cases.Atlas.tests
     , Cases.Damage.tests
+    , Cases.DamageProps.tests
+    , Cases.SimFuzz.tests
+    , Cases.ApiSmoke.tests
     , Cases.Tabs.tests
     , Cases.TextInput.tests
     , Cases.Animation.tests

@@ -21,6 +21,9 @@ extra-doc-files:
 data-files:
     assets/glossary.css
     assets/glossary.js
+-- The golden documents nano-ui-svg-test compares exported frames with.
+extra-source-files:
+    test/golden/*.svg
 
 source-repository head
     type:     git
