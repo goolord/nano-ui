@@ -88,7 +88,6 @@ def main():
     else:
         # Check standard locations
         candidates = [
-            Path(r"C:\Users\zach\Downloads\cozette.otb"),
             root / "packages" / "nano-ui-rgfw" / "data" / "cozette.otb",
             Path("cozette.otb"),
         ]

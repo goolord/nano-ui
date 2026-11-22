@@ -36,18 +36,18 @@ common extensions
         OverloadedStrings
 
 common warnings
-  ghc-options:
-    -Wall
-    -Wextra
-    -Wcompat
-    -Widentities
-    -Wincomplete-record-updates
-    -Wincomplete-uni-patterns
-    -Wmissing-export-lists
-    -Wmissing-home-modules
-    -Wpartial-fields
-    -Wredundant-constraints
-    -Wunused-packages
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-export-lists
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
+        -Wunused-packages
 
 library
     import:           extensions
@@ -87,6 +87,10 @@ executable nano-ui-svg-glossary
     main-is:          Glossary.hs
     other-modules:    CanvasExamples
                       ChartExamples
+                      Glossary.BookVisuals
+                      Glossary.Html
+                      Glossary.Render
+                      Glossary.Specimens
                       LayoutExamples
                       Paths_nano_ui_svg
     autogen-modules:  Paths_nano_ui_svg

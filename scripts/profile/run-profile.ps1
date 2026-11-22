@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-Write-Host "Building nano-ui-profile (late cost centres, -O2)..."
+Write-Host "Building nano-ui-profile (profiling, late cost centres, default -O1)..."
 cabal build --enable-profiling --enable-executable-profiling nano-ui-profile
 
 Write-Host "JSON profile for speedscope..."

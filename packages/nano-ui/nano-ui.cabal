@@ -43,24 +43,23 @@ common test-rts-options
     ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m -K128m -T"
 
 common warnings
-  ghc-options:
-    -Wall
-    -Wextra
-    -Wcompat
-    -Widentities
-    -Wincomplete-record-updates
-    -Wincomplete-uni-patterns
-    -Wmissing-export-lists
-    -Wmissing-home-modules
-    -Wpartial-fields
-    -Wredundant-constraints
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-export-lists
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
+        -Wunused-packages
 
--- Tests, benchmarks and executables build against the library and also
--- reject dependencies they never import.
+-- Tests, benchmarks and executables build against the library.
 common downstream
     import:           extensions
     import:           warnings
-    ghc-options:      -Wunused-packages
     build-depends:
         base >=4.20 && <4.23,
         nano-ui

@@ -18,7 +18,10 @@ text editing and windows.
 | --- | --- |
 | `packages/nano-ui` | Core: widgets, layout, input, theming, draw list. `lib/NanoUI.hs` is the full public export list |
 | `packages/nano-ui-sdl` | SDL3 backend: TrueType fonts, installed-font lookup, native file dialogs, custom title bars |
+| `packages/nano-ui-ttf` | The SDL3_ttf text layer both SDL backends share: shaping, glyph atlas, font and line caches, bundled Inter. Internal modules only |
+| `packages/nano-ui-sdl-web` | Browser backend for GHC's wasm32 target: SDL_ttf text, WebGL2 drawing. Its test suite runs natively |
 | `packages/nano-ui-rgfw` | RGFW + OpenGL 3.2 backend with a bundled bitmap font (no system deps) |
+| `packages/nano-ui-rgfw-bindings` | Haskell bindings to RGFW, with the C source bundled |
 | `packages/nano-ui-emit` | Elm-style typed messages: `NanoUIE msg a` views + reducer runners |
 | `packages/nano-ui-diagrams` | Line/bar/scatter/area charts (`NanoUI.Plot`) and diagrams-lib drawing |
 | `packages/nano-ui-form` | Validated applicative forms on ditto |
@@ -35,9 +38,9 @@ winget-gui) pin this repository as a Cabal `source-repository-package`.
 ## Building and testing
 
 - GHC 9.10 to 9.14 (development uses 9.14), `default-language: GHC2024`.
-  `nix develop` provides GHC, Cabal, SDL3, SDL3_ttf and pkg-config. On Windows,
-  install SDL3 and SDL3_ttf 3.2+ through MSYS2 UCRT64 and point
-  `PKG_CONFIG_PATH` at its `ucrt64\lib\pkgconfig`
+  `nix develop` provides GHC, Cabal, SDL3, SDL3_ttf, pkg-config, mdbook and
+  Python 3. On Windows, install SDL3 and SDL3_ttf 3.2+ through MSYS2 UCRT64
+  and point `PKG_CONFIG_PATH` at its `ucrt64\lib\pkgconfig`
   (`C:\msys64\ucrt64\lib\pkgconfig` on a default install).
 - `cabal build -j1 all` and `cabal test -j1 all`. Keep `-j1`: parallel
   optimizing GHC processes exhaust memory.
@@ -48,9 +51,11 @@ winget-gui) pin this repository as a Cabal `source-repository-package`.
   `base` API, check it exists in GHC 9.10 / base 4.20 (`OrPatterns` and
   `import M (data P)` do not), and verify with
   `cabal build all -w ghc-9.10.3 --builddir=dist-newstyle-910`.
-- `cabal.project` adds `-Werror` for this repository's builds only, and the
-  `.cabal` files enable `-Wunused-packages`: remove a stale `build-depends`
-  entry along with its last import.
+- `cabal.project` adds `-Werror` for this repository's builds only, and
+  every component imports the `common warnings` stanza, which enables
+  `-Wunused-packages`: remove a stale `build-depends` entry along with its
+  last import. The stanza is copied into each `.cabal` file;
+  `scripts/check-cabal-common.py` (run in CI) fails when the copies differ.
 - Companion packages depend on `nano-ui ^>=0.2`. They also import
   `NanoUI.Internal.*` modules; change those modules and their companion
   callers in the same commit.
@@ -59,8 +64,8 @@ winget-gui) pin this repository as a Cabal `source-repository-package`.
   module.
 - CI (`.github/workflows/ci.yml`) builds everything with GHC 9.10.3 and
   9.14.1 on Linux and 9.14.1 on Windows, runs the headless suites (and the
-  native ones under Xvfb on Linux 9.14, not yet blocking), and gates
-  allocation with `scripts/profile/alloc-gate.py` against
+  native ones under Xvfb on Linux 9.14, one step per suite, not yet
+  blocking), and gates allocation with `scripts/profile/alloc-gate.py` against
   `scripts/profile/alloc-baseline.json`. A change that allocates more on
   purpose reruns the gate with `--update` and commits the new baseline.
 
@@ -71,6 +76,9 @@ Tests:
   qualified; its short names clash with locals under `-Wname-shadowing`.
 - Merge checks that share a setup into one script rather than adding a spec
   per assertion.
+- Suites on `NanoUI.Testing.Runner` take spec names or name prefixes as
+  arguments, and `--list` prints what they select:
+  `cabal run -v0 nano-ui:test:nano-ui-test -- --list scroll-`.
 - Headless tests cover layout, state and input. When touching rendering, fonts,
   dialogs or DPI, also run the native suites (`nano-ui-render-test`,
   `nano-ui-demo-test`, the font suites) and the demos.
@@ -144,7 +152,8 @@ prose has a recognizable accent; do not reproduce it.
 
 - No em dashes or en dashes anywhere in the repository. Use a colon, a comma,
   parentheses, or a second sentence. This includes the book strings in
-  `Glossary.hs`, which generate `book/theme/nano-ui-banks.js`. A docs edit is
+  `packages/nano-ui-svg/app/Glossary/Specimens.hs`, which generate
+  `book/theme/nano-ui-banks.js`. A docs edit is
   not done until `rg '[\x{2013}\x{2014}]' book/src skills AGENTS.md` finds
   nothing.
 - Drop the "not X, but Y" and "isn't just X, it's Y" cadence, rhetorical

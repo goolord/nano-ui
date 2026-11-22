@@ -24,11 +24,7 @@ import NanoUI.SdlWeb.Internal.Input (cssCursor, decodeKey)
 import NanoUI.SdlWeb.Internal.Render (DrawCommand (..), drawCommands')
 import NanoUI.SdlWeb.Internal.Session (WebFrame, defaultSdlWebOptions, runWebSession)
 import NanoUI.Testing (runFrame)
-import System.Exit (exitFailure)
-
-assert :: String -> Bool -> IO ()
-assert name True = putStrLn ("[PASS] " ++ name)
-assert name False = putStrLn ("[FAIL] " ++ name) >> exitFailure
+import NanoUI.Testing.Runner (check, runChecks)
 
 -- ---------------------------------------------------------------------------
 -- The scripted host
@@ -160,25 +156,27 @@ events evs = (Nothing, evs)
 -- ---------------------------------------------------------------------------
 
 main :: IO ()
-main = do
-  pureChecks
-  openingFrame
-  clickFrame
-  pixelRatioChange
-  longComposition
+main =
+  runChecks
+    [ ("pure", pureChecks)
+    , ("opening", openingFrame)
+    , ("click", clickFrame)
+    , ("pixel-ratio", pixelRatioChange)
+    , ("long-composition", longComposition)
+    ]
 
-pureChecks :: IO ()
-pureChecks = do
-  assert "cssCursor nwse-resize" (cssCursor UiCursorNwseResize == "nwse-resize")
-  assert "cssCursor context-menu" (cssCursor UiCursorContextMenu == "context-menu")
-  assert "cssCursor hidden is none" (cssCursor UiCursorHidden == "none")
-  assert "decodeKey character" (decodeKey False 97 == Just (KeyChar 'a'))
-  assert "decodeKey uppercase lowers" (decodeKey False 65 == Just (KeyChar 'a'))
-  assert "decodeKey named" (decodeKey False (-1) == Just KeyBackspace && decodeKey False (-21) == Just KeyMenu)
-  assert "decodeKey F5" (decodeKey False (-105) == Just (KeyF 5))
-  assert "decodeKey keypad under Num Lock" (decodeKey True (-(300 + 55)) == Just (KeyChar '7'))
-  assert "decodeKey keypad without Num Lock" (decodeKey False (-(300 + 55)) == Just KeyHome)
-  assert "decodeKey modifier" (decodeKey False 0 == Nothing)
+pureChecks :: IORef Int -> IO ()
+pureChecks failed = do
+  check failed "cssCursor nwse-resize" (cssCursor UiCursorNwseResize == "nwse-resize")
+  check failed "cssCursor context-menu" (cssCursor UiCursorContextMenu == "context-menu")
+  check failed "cssCursor hidden is none" (cssCursor UiCursorHidden == "none")
+  check failed "decodeKey character" (decodeKey False 97 == Just (KeyChar 'a'))
+  check failed "decodeKey uppercase lowers" (decodeKey False 65 == Just (KeyChar 'a'))
+  check failed "decodeKey named" (decodeKey False (-1) == Just KeyBackspace && decodeKey False (-21) == Just KeyMenu)
+  check failed "decodeKey F5" (decodeKey False (-105) == Just (KeyF 5))
+  check failed "decodeKey keypad under Num Lock" (decodeKey True (-(300 + 55)) == Just (KeyChar '7'))
+  check failed "decodeKey keypad without Num Lock" (decodeKey False (-(300 + 55)) == Just KeyHome)
+  check failed "decodeKey modifier" (decodeKey False 0 == Nothing)
   -- Commands that continue each other's indices with one texture and clip
   -- join; a command outside the damage is dropped.
   dd <- fakeDrawData
@@ -188,11 +186,11 @@ pureChecks = do
     , DrawCmd 500 500 10 10 (glyphPageTextureId 1) 18 6 LayerContent
     ]
   let full = drawCommands' 1 (800, 600) DamageFull dd
-  assert "drawCommands' joins neighbours" (map dcCount full == [12, 6, 6])
-  assert "drawCommands' slots" (map dcSlot full == [0, 1, 1])
+  check failed "drawCommands' joins neighbours" (map dcCount full == [12, 6, 6])
+  check failed "drawCommands' slots" (map dcSlot full == [0, 1, 1])
   let partial = drawCommands' 2 (800, 600) (DamageClip (Rect 10 10 20 20)) dd
-  assert "drawCommands' drops commands outside the damage" (length partial == 2)
-  assert "drawCommands' scissors to the damage in pixels" (all ((== Just (20, 20, 40, 40)) . dcScissor) partial)
+  check failed "drawCommands' drops commands outside the damage" (length partial == 2)
+  check failed "drawCommands' scissors to the damage in pixels" (all ((== Just (20, 20, 40, 40)) . dcScissor) partial)
 
 fakeDrawData :: [DrawCmd] -> IO DrawData
 fakeDrawData cmds = do
@@ -208,29 +206,29 @@ fakeDrawData cmds = do
       , drawClear = colorRGB 0 0 0
       }
 
-openingFrame :: IO ()
-openingFrame = do
+openingFrame :: IORef Int -> IO ()
+openingFrame failed = do
   rec <- runScript (800, 600, 1) [] (viewFrame (column (label "Hello from SDL_ttf")))
   frames <- reverse <$> readIORef (recFrames rec)
   uploads <- reverse <$> readIORef (recUploads rec)
   backing <- readIORef (recBacking rec)
   titles <- readIORef (recTitle rec)
-  assert "opening: drawing buffer sized to the canvas" (backing == [(800, 600)])
-  assert "opening: title set" (titles == ["nano-ui"])
+  check failed "opening: drawing buffer sized to the canvas" (backing == [(800, 600)])
+  check failed "opening: title set" (titles == ["nano-ui"])
   case frames of
     f : _ -> do
-      assert "opening: first frame clears" (frClear f)
-      assert "opening: first frame draws" (not (null (frDraws f)))
-      assert "opening: draws stay inside the indices" (all (\(_, first, n, _) -> first >= 0 && first + n <= frIndexCount f) (frDraws f))
-      assert "opening: draws use glyph pages, the image atlas or no texture" (all (\(s, _, _, _) -> s >= -1 && s <= 4) (frDraws f))
-      assert "opening: text draws from glyph page 0" (any (\(s, _, _, _) -> s == 0) (frDraws f))
-    [] -> assert "opening: a frame was drawn" False
+      check failed "opening: first frame clears" (frClear f)
+      check failed "opening: first frame draws" (not (null (frDraws f)))
+      check failed "opening: draws stay inside the indices" (all (\(_, first, n, _) -> first >= 0 && first + n <= frIndexCount f) (frDraws f))
+      check failed "opening: draws use glyph pages, the image atlas or no texture" (all (\(s, _, _, _) -> s >= -1 && s <= 4) (frDraws f))
+      check failed "opening: text draws from glyph page 0" (any (\(s, _, _, _) -> s == 0) (frDraws f))
+    [] -> check failed "opening: a frame was drawn" False
   let page0 = filter ((== 0) . upSlot) uploads
-  assert "opening: glyph page 0 uploaded at 2048" (not (null page0) && all ((== 2048) . upW) page0)
-  assert "opening: glyph page 0 holds rasterised glyphs" (any upInk page0)
+  check failed "opening: glyph page 0 uploaded at 2048" (not (null page0) && all ((== 2048) . upW) page0)
+  check failed "opening: glyph page 0 holds rasterised glyphs" (any upInk page0)
 
-clickFrame :: IO ()
-clickFrame = do
+clickFrame :: IORef Int -> IO ()
+clickFrame failed = do
   clicks <- newIORef (0 :: Int)
   let view = column $ do
         clicked <- button "Press"
@@ -241,15 +239,15 @@ clickFrame = do
   n <- readIORef clicks
   frames <- reverse <$> readIORef (recFrames rec)
   cursors <- readIORef (recCursor rec)
-  assert "click: one click" (n == 1)
-  assert "click: later frames paint their damage only" (any (not . frClear) (drop 1 frames))
-  assert "click: partial frames are scissored" (all (\f -> frClear f || all (\(_, _, _, s) -> s /= Nothing) (frDraws f)) frames)
-  assert "click: the button sets a CSS cursor" (any (`elem` ["pointer", "default"]) cursors)
+  check failed "click: one click" (n == 1)
+  check failed "click: later frames paint their damage only" (any (not . frClear) (drop 1 frames))
+  check failed "click: partial frames are scissored" (all (\f -> frClear f || all (\(_, _, _, s) -> s /= Nothing) (frDraws f)) frames)
+  check failed "click: the button sets a CSS cursor" (any (`elem` ["pointer", "default"]) cursors)
 
 -- | A composition longer than the 256 records the session reads at a time
 -- arrives whole, though its characters run on into the next batch.
-longComposition :: IO ()
-longComposition = do
+longComposition :: IORef Int -> IO ()
+longComposition failed = do
   seen <- newIORef []
   let txt = take 300 (cycle ['\x3042' .. '\x3093'])
       composition = (8, length txt, 2, 1, 0, 0, 0, 0) : [(9, fromEnum ch, 0, 0, 0, 0, 0, 0) | ch <- txt]
@@ -259,10 +257,10 @@ longComposition = do
         label "Composing"
   _ <- runScript (800, 600, 1) [events (composition ++ [motion 5 5])] (viewFrame view)
   got <- readIORef seen
-  assert "composition: one longer than a batch arrives whole" (Just (Composition (T.pack txt) 2 1) `elem` got)
+  check failed "composition: one longer than a batch arrives whole" (Just (Composition (T.pack txt) 2 1) `elem` got)
 
-pixelRatioChange :: IO ()
-pixelRatioChange = do
+pixelRatioChange :: IORef Int -> IO ()
+pixelRatioChange failed = do
   -- The second step moves the canvas to a pixel ratio of 2, as a browser
   -- zoom or a move to another display does.
   rec <- runScript (800, 600, 1) [events [motion 5 5], (Just (800, 600, 2), [resize])] (viewFrame (label "Scaled"))
@@ -270,6 +268,6 @@ pixelRatioChange = do
   backing <- reverse <$> readIORef (recBacking rec)
   uploads <- readIORef (recUploads rec)
   let scaled = dropWhile ((/= 2) . frScale) frames
-  assert "ratio: drawing buffer resized to device pixels" (backing == [(800, 600), (1600, 1200)])
-  assert "ratio: the first frame at scale 2 clears and draws" (case scaled of f : _ -> frClear f && not (null (frDraws f)); [] -> False)
-  assert "ratio: glyph page 0 uploaded again for the new size" (length (filter ((== 0) . upSlot) uploads) >= 2)
+  check failed "ratio: drawing buffer resized to device pixels" (backing == [(800, 600), (1600, 1200)])
+  check failed "ratio: the first frame at scale 2 clears and draws" (case scaled of f : _ -> frClear f && not (null (frDraws f)); [] -> False)
+  check failed "ratio: glyph page 0 uploaded again for the new size" (length (filter ((== 0) . upSlot) uploads) >= 2)

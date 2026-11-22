@@ -4,6 +4,7 @@ import Control.Exception (bracket)
 import Control.Monad (filterM, forM_, void)
 import Data.Bits ((.|.))
 import Data.Foldable (toList)
+import Data.IORef (IORef)
 import Data.List (nub)
 import Data.Text qualified as T
 import Data.Word (Word32)
@@ -34,17 +35,13 @@ import NanoUI.Rgfw.Window (testChildWindow, testGlWindow, testSessionWindow)
 import NanoUI.Testing (Context, collectRasterSpans)
 import NanoUI.Testing.Assert (run2Frames)
 import NanoUI.Testing.Harness (DemoSpan, nodesOfType, withInputOff)
+import NanoUI.Testing.Runner (check, runChecks)
 import RGFW (Event (..))
 import RGFW.Raw qualified as R
-import System.Exit (exitFailure)
-
-assert :: String -> Bool -> IO ()
-assert name True = putStrLn ("[PASS] " ++ name)
-assert name False = putStrLn ("[FAIL] " ++ name) >> exitFailure
 
 -- | Each named check, under a common prefix.
-asserts :: String -> [(String, Bool)] -> IO ()
-asserts prefix = mapM_ (\(name, ok) -> assert (prefix ++ name) ok)
+checks :: IORef Int -> String -> [(String, Bool)] -> IO ()
+checks failed prefix = mapM_ (\(name, ok) -> check failed (prefix ++ name) ok)
 
 type Pixels = Int -> Int -> IO Word32
 
@@ -89,12 +86,12 @@ scale2x w h get c2 r2
 
 -- | The scaled glyph tables, the OpenGL glyph atlas, span quads, and the
 -- physical rects of fractional scales.
-testGlyphs :: IO ()
-testGlyphs = do
+testGlyphs :: IORef Int -> IO ()
+testGlyphs failed = do
   let font = getCozetteFont
   -- The 14x26 table is Scale2x of the 7x13 one, and 28x52 of 14x26.
   forM_ [(2, 1, 7, 13), (4, 2, 14, 26)] $ \(scale, from, w, h) -> forM_ [1, 2, 34, 36, 65, 95] $ \gid ->
-    assert ("Scale" ++ show scale ++ "x table matches scale2x for glyph " ++ show gid) $
+    check failed ("Scale" ++ show scale ++ "x table matches scale2x for glyph " ++ show gid) $
       and
         [ cozetteGlyphBit font scale gid x y == scale2x w h (cozetteGlyphBit font from gid) x y
         | y <- [0 .. 2 * h - 1]
@@ -102,16 +99,16 @@ testGlyphs = do
         ]
   let (x1, _, w1, _) = toPhysRect 1.33 0 0 63.7 30
       (x2, _, _, _) = toPhysRect 1.33 63.7 0 63.7 30
-  assert "Adjacent widgets at fractional scale have zero gap/overlap" (x1 + w1 == x2)
+  check failed "Adjacent widgets at fractional scale have zero gap/overlap" (x1 + w1 == x2)
   -- The atlas holds every glyph as the software blitter stamps it at that
   -- scale; below 1x the pens close up, so the glyphs shrink with them.
-  assert "glyphs below 1x shrink with the pen grid" $
+  check failed "glyphs below 1x shrink with the pen grid" $
     map cozetteGlyphFootprint [0.5, 0.75, 1.0] == [(4, 6), (5, 10), (7, 13)]
   forM_ [0.5, 1.0, 1.5, 2.0, 3.0, 4.0] $ \scale -> do
     let ga = glyphAtlasFor font scale
         (cw, ch) = (gaCellW ga, gaCellH ga)
         at = " at scale " ++ show scale
-    assert ("glyph atlas grid fits every glyph" ++ at)
+    check failed ("glyph atlas grid fits every glyph" ++ at)
       (gaCols ga * (gaHeight ga `div` ch) >= cfNumGlyphs font && gaWidth ga == gaCols ga * cw)
     bakeGlyphAtlas font ga $ \atlas -> forM_ ("A@#|" :: String) $ \c -> do
       let gid = fromIntegral (charToGlyphId font c)
@@ -121,7 +118,7 @@ testGlyphs = do
         cell <- sequence
           [peekElemOff atlas (row * gaWidth ga + col) | row <- [ay .. ay + ch - 1], col <- [ax .. ax + cw - 1]]
         expected <- mapM (peekElemOff solo) [0 .. cw * ch - 1]
-        assert ("glyph atlas cell " ++ show c ++ " matches the blitter" ++ at) $
+        check failed ("glyph atlas cell " ++ show c ++ " matches the blitter" ++ at) $
           cell == expected && any (/= 0) expected
   -- Span quads land on the software pen positions (spaces skipped, newlines
   -- reset the column) and clipping trims positions and UVs together.
@@ -140,7 +137,7 @@ testGlyphs = do
   (n3, _) <- quads ga at10 "A" (Rect 150 80 10 10)
   -- At 1.5x a span at (11, 7) puts its pen at (16.5, 10.5), which rounds up.
   (_, v4) <- quads (glyphAtlasFor font 1.5) (Rect 11 7 0 0) "A" (Rect 0 0 100 50)
-  asserts "span quads: "
+  checks failed "span quads: "
     [ ("one quad per visible glyph", n1 == 18)
     , ("first glyph at the scaled pen", take 1 v1 == [[20, 10] ++ uv ax ay])
     , ("newline resets the column", map (take 2) (take 1 (drop 12 v1)) == [[20, 36]])
@@ -151,8 +148,8 @@ testGlyphs = do
 
 -- | An RGFW context renders square, themed widgets, and stamps widget,
 -- sized, monospace, canvas and rich text as glyphs in the Cozette cell.
-testThemedRaster :: IO ()
-testThemedRaster = do
+testThemedRaster :: IORef Int -> IO ()
+testThemedRaster failed = do
   let theme = tomorrowNightMinDarkTheme
       ink = colorRGBA 0x12 0xEE 0x34 255
       ui = column $ do
@@ -169,15 +166,15 @@ testThemedRaster = do
         let (x0, y0, x1, y1) = (round bx, round by, round (bx + bw) - 1, round (by + bh) - 1)
         corners <- mapM (uncurry px) [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
         fill <- px (x0 + 2) (y0 + 2)
-        assert "Button corners are square (border colour)" $
+        check failed "Button corners are square (border colour)" $
           all (== packColor (styleBorder (themeButton theme))) corners
-        assert "Button fill uses the theme" (fill == packColor (styleBg (themeButton theme)))
-      [] -> assert "Button node present" False
+        check failed "Button fill uses the theme" (fill == packColor (styleBg (themeButton theme)))
+      [] -> check failed "Button node present" False
     labelInk <- sequence [inkIn px (packColor fg) r | (r, "Checkbox label", fg, _, _) <- base]
-    assert "Checkbox label is glyphs, not solid boxes" (map glyphs labelInk == [True])
+    check failed "Checkbox label is glyphs, not solid boxes" (map glyphs labelInk == [True])
     -- Cozette stamps every span from its one cell, so each span is as wide
     -- as the glyphs drawn in it.
-    assert "Sized and monospace text spans measure the Cozette cell" $
+    check failed "Sized and monospace text spans measure the Cozette cell" $
       [(t, w, h) | (Rect _ _ w h, t, _, _, _) <- base, t `elem` ["Title", "1234"]]
         == [("Title", 30, 13), ("1234", 24, 13)]
     drawings <- map snd <$> nodesOfType NodeDrawing ctx
@@ -186,14 +183,14 @@ testThemedRaster = do
           fromIntegral x >= rx && fromIntegral x < rx + rw && fromIntegral y >= ry && fromIntegral y < ry + rh
     inked <- filterM (\(x, y) -> (== packColor ink) <$> px x y) [(x, y) | y <- [0 .. 199], x <- [0 .. 239]]
     drawingInk <- mapM (inkIn px (packColor ink)) inkSpans
-    assert "Canvas and rich text are glyphs, not solid boxes" (length inkSpans >= 2 && all glyphs drawingInk)
-    assert "No drawing text outside its drawing" (all (\p -> any (`inside` p) drawings) inked)
+    check failed "Canvas and rich text are glyphs, not solid boxes" (length inkSpans >= 2 && all glyphs drawingInk)
+    check failed "No drawing text outside its drawing" (all (\p -> any (`inside` p) drawings) inked)
 
 -- | A floating window paints over the page: its chrome is the theme's, the
 -- page's drawing text under it is hidden, and its own drawing text shows
 -- over its background.
-testWindowLayer :: IO ()
-testWindowLayer = do
+testWindowLayer :: IORef Int -> IO ()
+testWindowLayer failed = do
   let theme = tomorrowNightMinDarkTheme
       under = colorRGBA 0x12 0xEE 0x34 255
       over = colorRGBA 0xEE 0x12 0x34 255
@@ -217,17 +214,17 @@ testWindowLayer = do
         shown <- inkAt under px covered
         chrome <- px (round (wx + ww / 2)) (round wy + 4)
         overInk <- mapM (inkIn px (packColor over)) [r | (r, _, fg, _, _) <- overlay, fg == over]
-        assert "A floating window paints its theme's chrome over the page" $
+        check failed "A floating window paints its theme's chrome over the page" $
           chrome == packColor (styleBg (themeFloatingWindow theme))
-        assert "A floating window covers the page's drawing text" (not (null covered) && null shown)
-        assert "Drawing text in a floating window shows over its background" (map glyphs overInk == [True])
-      [] -> assert "Floating window node present in arena" False
+        check failed "A floating window covers the page's drawing text" (not (null covered) && null shown)
+        check failed "Drawing text in a floating window shows over its background" (map glyphs overInk == [True])
+      [] -> check failed "Floating window node present in arena" False
 
 -- | RGFW keyboard translation. A Ctrl+letter keystroke is a chord that
 -- types nothing, whichever of its key-char and key-press events RGFW queues
 -- first.
-testRgfwKeys :: IO ()
-testRgfwKeys = do
+testRgfwKeys :: IORef Int -> IO ()
+testRgfwKeys failed = do
   let chars = inputChars . applied
       keys = toList . inputKeys . applied
       mods = inputModifiers . applied
@@ -239,7 +236,7 @@ testRgfwKeys = do
       blurred = applied [EventKeyPress keyL R.rgfw_modControl, EventOther R.rgfw_windowFocusOut]
       pad1 = R.rgfw_keyPad1 + 1
       shift = noModifiers {modShift = True}
-  asserts "RGFW keys: "
+  checks failed "RGFW keys: "
     [ ("repeated key-char events all type", chars [EventKeyChar 'l', EventKeyChar 'l'] == "ll")
     , ( "a joiner types, and macOS arrow-key characters do not"
       , chars [EventKeyChar '\x200C', EventKeyChar '\xF702'] == "\x200C"
@@ -280,14 +277,14 @@ testRgfwKeys = do
     ]
 
 -- | RGFW pointer translation, window repaints, and cursor shapes.
-testRgfwPointer :: IO ()
-testRgfwPointer = do
+testRgfwPointer :: IORef Int -> IO ()
+testRgfwPointer failed = do
   let pressedBy b = buttonsToList (inputButtonsPressed (applied [EventMouseButton b True]))
       buttons = R.rgfw_mouseMiddle : R.rgfw_mouseMisc1 : [R.rgfw_mouseMisc2 .. R.rgfw_mouseMisc2 + 3]
       gone = applied [EventMouseMotion 30 40, EventOther R.rgfw_mouseLeave]
       redraws evs = inputWindowRedraw (applied evs)
       wheel = inputScroll . applied . map (uncurry EventMouseScroll)
-  asserts "RGFW pointer: "
+  checks failed "RGFW pointer: "
     [ -- RGFW's wheel is positive up and left, the input's down and right.
       ("a batch of wheel events accumulates", wheel [(0, 1), (0.5, 2)] == V2 (-0.5) (-3))
     , ("the wheel turned down and right scrolls down and right", wheel [(-1, -1)] == V2 1 1)
@@ -304,21 +301,21 @@ testRgfwPointer = do
   -- shows a cursor of its own.
   let kinds = [minBound .. maxBound]
       native = [mapRgfwCursor k | k <- kinds, cursorFallback k == k, k /= UiCursorHidden]
-  asserts "RGFW cursors: "
+  checks failed "RGFW cursors: "
     [ ("each native shape shows its own cursor", length (nub native) == length native)
     , ("every other kind falls back to a native one", all ((`elem` native) . mapRgfwCursor) kinds)
     ]
 
 main :: IO ()
-main = do
-  putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
-  testRgfwKeys
-  testRgfwPointer
-  testGlyphs
-  testThemedRaster
-  testWindowLayer
-  testGlWindow assert
-  testSessionWindow assert
-  testChildWindow assert
-  testRgfwWake
-  putStrLn "=== All tests passed successfully! ==="
+main =
+  runChecks
+    [ ("keys", testRgfwKeys)
+    , ("pointer", testRgfwPointer)
+    , ("glyphs", testGlyphs)
+    , ("themed-raster", testThemedRaster)
+    , ("window-layer", testWindowLayer)
+    , ("gl-window", testGlWindow . check)
+    , ("session-window", testSessionWindow . check)
+    , ("child-window", testChildWindow . check)
+    , ("wake", const testRgfwWake)
+    ]
