@@ -16,7 +16,6 @@ import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import GHC.Float (castFloatToWord32, castWord32ToFloat)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Derived (ComboMatches (..), comboCache)
 import NanoUI.Internal.Font (menuItemRowH)
@@ -26,7 +25,8 @@ import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), inputMousePos, inputScroll, inputWindowSize)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
-import NanoUI.Internal.Store (boolInt, ptrEq, deleteSlot, fieldFloat, fieldInt, fieldQuiet, fieldText, findSlot, flagSlot, insertSlot, lookupSlot, setFieldSelection)
+import NanoUI.Internal.Store (SlotSpec, deleteSpec, fieldText, findSpec, insertSlot, insertSpec, lookupSpec, ptrEq, setFieldSelection)
+import NanoUI.Internal.Store.Slots (slotComboCommitted, slotComboContentW, slotComboCount, slotComboDrag, slotComboDragOff, slotComboFocus, slotComboHighlight, slotComboLive, slotComboNavX, slotComboNavY, slotComboScrollX, slotComboWheelRem, slotComboWindow)
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectNonEmpty, v2X, v2Y)
@@ -306,51 +306,46 @@ comboBox' placeholder options v = bindVar RenderFinal v (comboBoxCore placeholde
 loadComboState :: WidgetStore -> Int -> Text -> Text -> ComboState
 loadComboState store key value text =
   ComboState
-    { csHighlight = findSlot fieldInt (-1) (slotKey SlotComboHighlight key) store
-    , csWindow = findSlot fieldInt 0 (slotKey SlotComboScroll key) store
-    , csScrollX = findSlot fieldFloat 0 (slotKey SlotComboScrollX key) store
-    , csContentW = findSlot fieldFloat 0 (slotKey SlotComboContentW key) store
-    , csDrag = findSlot fieldInt 0 (slotKey SlotComboDrag key) store
-    , csDragOff = findSlot fieldFloat 0 (slotKey SlotComboDragOff key) store
-    , csWheelRem = fromMaybe 0 (quietFloat SlotComboScrollX)
-    , csCommitted = findSlot fieldText value (slotKey SlotComboCommitted key) store
-    , csLive = findSlot fieldText text (slotKey SlotComboLive key) store
-    , csFocused = flagSlot (slotKey SlotComboFocus key) store
-    , csNavPointer = V2 <$> quietFloat SlotComboHighlight <*> quietFloat SlotComboScroll
-    }
-  where
+    { csHighlight = findSpec slotComboHighlight (-1) key store
+    , csWindow = findSpec slotComboWindow 0 key store
+    , csScrollX = findSpec slotComboScrollX 0 key store
+    , csContentW = findSpec slotComboContentW 0 key store
+    , csDrag = findSpec slotComboDrag 0 key store
+    , csDragOff = findSpec slotComboDragOff 0 key store
+    , csWheelRem = findSpec slotComboWheelRem 0 key store
+    , csCommitted = findSpec slotComboCommitted value key store
+    , csLive = findSpec slotComboLive text key store
+    , csFocused = findSpec slotComboFocus False key store
     -- The resting pointer and the wheel's leftover are bookkeeping no paint
-    -- reads, so they live in quiet slots (as float bits), which neither
-    -- damage nor wake.
-    quietFloat slot = castWord32ToFloat . fromIntegral <$> lookupSlot fieldQuiet (slotKey slot key) store
+    -- reads, so they live in quiet slots, which neither damage nor wake.
+    , csNavPointer = V2 <$> lookupSpec slotComboNavX key store <*> lookupSpec slotComboNavY key store
+    }
 
 -- | Persist @cs@ and option count @matchCount@ for @key@, moving the caret to
 -- the end when @picked@ is 'True'.
 saveComboState :: Int -> Int -> Bool -> ComboState -> WidgetStore -> WidgetStore
 saveComboState key matchCount picked cs =
   caretToEnd
-    . insertSlot fieldInt (slotKey SlotComboHighlight key) (csHighlight cs)
-    . navPointerAt SlotComboHighlight v2X (csNavPointer cs)
-    . navPointerAt SlotComboScroll v2Y (csNavPointer cs)
-    . insertSlot fieldQuiet (slotKey SlotComboScrollX key) (fromIntegral (castFloatToWord32 (csWheelRem cs)))
-    . insertSlot fieldInt (slotKey SlotComboScroll key) (csWindow cs)
-    . insertSlot fieldInt (slotKey SlotComboCount key) matchCount
-    . insertSlot fieldInt (slotKey SlotComboFocus key) (boolInt (csFocused cs))
-    . insertSlot fieldInt (slotKey SlotComboDrag key) (csDrag cs)
-    . insertSlot fieldFloat (slotKey SlotComboScrollX key) (csScrollX cs)
-    . insertSlot fieldFloat (slotKey SlotComboContentW key) (csContentW cs)
-    . insertSlot fieldFloat (slotKey SlotComboDragOff key) (csDragOff cs)
-    . insertSlot fieldText (slotKey SlotComboLive key) finalText
-    . insertSlot fieldText (slotKey SlotComboCommitted key) (csCommitted cs)
+    . insertSpec slotComboHighlight key (csHighlight cs)
+    . navPointerAt slotComboNavX v2X (csNavPointer cs)
+    . navPointerAt slotComboNavY v2Y (csNavPointer cs)
+    . insertSpec slotComboWheelRem key (csWheelRem cs)
+    . insertSpec slotComboWindow key (csWindow cs)
+    . insertSpec slotComboCount key matchCount
+    . insertSpec slotComboFocus key (csFocused cs)
+    . insertSpec slotComboDrag key (csDrag cs)
+    . insertSpec slotComboScrollX key (csScrollX cs)
+    . insertSpec slotComboContentW key (csContentW cs)
+    . insertSpec slotComboDragOff key (csDragOff cs)
+    . insertSpec slotComboLive key finalText
+    . insertSpec slotComboCommitted key (csCommitted cs)
     . insertSlot fieldText key finalText
   where
     finalText = csLive cs
     len = T.length finalText
     caretToEnd = if picked then setFieldSelection key len len else id
-    navPointerAt slot coord =
-      maybe
-        (deleteSlot fieldQuiet (slotKey slot key))
-        (insertSlot fieldQuiet (slotKey slot key) . fromIntegral . castFloatToWord32 . coord)
+    navPointerAt :: SlotSpec Float -> (V2 -> Float) -> Maybe V2 -> WidgetStore -> WidgetStore
+    navPointerAt spec coord = maybe (deleteSpec spec key) (insertSpec spec key . coord)
 
 comboBoxCore :: Foldable f => Text -> f Text -> Text -> NanoUI (Response, Text)
 comboBoxCore placeholder options value = do

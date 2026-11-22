@@ -186,6 +186,7 @@ library
         NanoUI.Internal.Style.Presets
         NanoUI.Internal.Style.Theme
         NanoUI.Internal.StyleBits
+        NanoUI.Internal.Store.Slots
         NanoUI.Internal.Types
         NanoUI.Internal.WidgetText
         NanoUI.Internal.Widgets.Node

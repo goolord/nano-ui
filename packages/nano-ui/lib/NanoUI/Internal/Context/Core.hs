@@ -83,6 +83,7 @@ import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Layout.Arena (NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
 import NanoUI.Internal.Store
+import NanoUI.Internal.Store.Slots (slotSeen)
 import NanoUI.Internal.Style (Theme, disabledTheme)
 import NanoUI.Internal.Types (Damage, DamageBounds (..), Rect (..), defaultDamageSlop, rectH, rectW)
 import NanoUI.Widgets.TextCommand (TextCommand)
@@ -483,11 +484,10 @@ adoptSlot :: Eq a => Field a -> Context -> WidgetId -> a -> IO a
 adoptSlot field ctx owner v = do
   st <- readIORef (ctxStore ctx)
   let k = intKey owner
-      seenK = slotKey SlotSeen k
-  if lookupSlot field seenK st == Just v
+  if lookupSpec (slotSeen field) k st == Just v
     then pure $! findSlot field v k st
     else do
-      writeIORef (ctxStore ctx) $! insertSlot field seenK v (insertSlot field k v st)
+      writeIORef (ctxStore ctx) $! insertSpec (slotSeen field) k v (insertSlot field k v st)
       when (lookupSlot field k st /= Just v) $ do
         damageWidget ctx owner DamageSelf
         markDirtyCovered ctx
@@ -498,9 +498,8 @@ adoptSlot field ctx owner v = do
 recordSlot :: Eq a => Field a -> Context -> Int -> a -> IO ()
 recordSlot field ctx k v = do
   st <- readIORef (ctxStore ctx)
-  let seenK = slotKey SlotSeen k
-  when (lookupSlot field seenK st /= Just v) $
-    writeIORef (ctxStore ctx) $! insertSlot field seenK v st
+  when (lookupSpec (slotSeen field) k st /= Just v) $
+    writeIORef (ctxStore ctx) $! insertSpec (slotSeen field) k v st
 
 -- | Whether @wid@ is in a disabled scope. Falls back to the arena's active
 -- scope when called before the widget's node is allocated.

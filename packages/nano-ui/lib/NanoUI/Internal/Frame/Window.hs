@@ -25,7 +25,8 @@ import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCu
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (Measurers (..), windowBodyScroller)
 import NanoUI.Internal.Monad ((<&&>))
-import NanoUI.Internal.Store (fieldPoint, insertSlot, lookupSlot, ptrEq)
+import NanoUI.Internal.Store (fieldPoint, insertSlot, insertSpec, lookupSlot, lookupSpec, ptrEq)
+import NanoUI.Internal.Store.Slots (slotWinSize)
 import NanoUI.Internal.Style (Padding (..))
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), clamp, rectContains, rectInflate, rectNonEmpty)
 
@@ -35,7 +36,7 @@ lookupWindowPos ctx wid = fmap (\(V2 x y) -> (x, y)) . lookupSlot fieldPoint (in
 
 -- | Saved floating-window width/height in logical pixels, or 'Nothing'.
 lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
-lookupWindowSize ctx wid = fmap (\(V2 w h) -> (w, h)) . lookupSlot fieldPoint (slotKey SlotWinSize (intKey wid)) <$> getStore ctx
+lookupWindowSize ctx wid = fmap (\(V2 w h) -> (w, h)) . lookupSpec slotWinSize (intKey wid) <$> getStore ctx
 
 -- | Save solved floating-window positions and sizes to the store for later frames.
 persistWindowPositions :: Context -> IO ()
@@ -49,15 +50,14 @@ persistWindowPositions ctx = floatingNodeCount na >>= \floating -> when (floatin
             wid <- getWidgetId na idx
             Rect x y w h <- getNodeRect na idx
             let k = intKey wid
-                sizeKey = slotKey SlotWinSize k
                 posV = V2 x y
                 sizeV = V2 w h
             -- Keep an unchanged store as is: the write below is skipped
             -- when it is the same object.
             pure $
-              if lookupSlot fieldPoint k acc == Just posV && lookupSlot fieldPoint sizeKey acc == Just sizeV
+              if lookupSlot fieldPoint k acc == Just posV && lookupSpec slotWinSize k acc == Just sizeV
                 then acc
-                else insertSlot fieldPoint k posV (insertSlot fieldPoint sizeKey sizeV acc)
+                else insertSlot fieldPoint k posV (insertSpec slotWinSize k sizeV acc)
   !store1 <- foldClassNodesM na FloatingNodes record store0
   unless (ptrEq store1 store0) $ setStore ctx store1
  where
@@ -177,7 +177,7 @@ updateWindowResize ctx inp winW winH =
       pos <- lookupWindowPos ctx wid
       let moved = size /= Just (nw, nh) || pos /= Just (nx, ny)
       when moved $
-        modifyStore ctx (insertSlot fieldPoint (slotKey SlotWinSize key) (V2 nw nh) . insertSlot fieldPoint key (V2 nx ny))
+        modifyStore ctx (insertSpec slotWinSize key (V2 nw nh) . insertSlot fieldPoint key (V2 nx ny))
       pure moved
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,

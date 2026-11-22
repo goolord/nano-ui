@@ -32,7 +32,8 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), addNodeFromLayout)
 import NanoUI.Internal.Monad
-import NanoUI.Internal.Store (deleteSlot, fieldQuiet, findSlot, insertSlot)
+import NanoUI.Internal.Store (deleteSpec, findSpec, insertSpec)
+import NanoUI.Internal.Store.Slots (slotTooltipShow)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Tasks (holdAction)
 import NanoUI.Internal.Types
@@ -242,7 +243,7 @@ tooltipWidgetConfigured cfg target child = do
   -- rather than opening immediately or ending other tooltips' delays. The
   -- hook consumes one id on both branches.
   if armed
-    then scope (holdAction (modifyStore ctx (deleteSlot fieldQuiet (slotKey SlotTooltipShow (intKey wid)))))
+    then scope (holdAction (modifyStore ctx (deleteSpec slotTooltipShow (intKey wid))))
     else burstNextIds 1
   pure result
 
@@ -264,10 +265,8 @@ pointerClearance = 16
 tooltipTimer :: Context -> TooltipConfig -> Int -> Bool -> Input -> IO (Bool, Bool)
 tooltipTimer ctx cfg k hovered inp = do
   store <- getStore ctx
-  let showK = slotKey SlotTooltipShow k
-      lastK = slotKey SlotTooltipShow 0
-      showAt0 = findSlot fieldQuiet 0 showK store
-      lastUp0 = findSlot fieldQuiet 0 lastK store
+  let showAt0 = findSpec slotTooltipShow 0 k store
+      lastUp0 = findSpec slotTooltipShow 0 0 store
       held = inputPointerHeld inp
       interrupted = anyButtonPressed inp || inputScroll inp /= V2 0 0
   -- Fast path: most targets are not near the pointer.
@@ -285,7 +284,7 @@ tooltipTimer ctx cfg k hovered inp = do
           starting = hovered && not held && not interrupted && showAt0 == 0
           -- A tooltip open last frame whose call comes after this one has
           -- not yet recorded closing.
-          otherUp = any (\k' -> k' /= k && findSlot fieldQuiet 0 (slotKey SlotTooltipShow k') store > 0) . IM.keys
+          otherUp = any (\k' -> k' /= k && findSpec slotTooltipShow 0 k' store > 0) . IM.keys
       warm <-
         if not starting || graceUs <= 0 || lastUp0 == 0
           then pure False
@@ -301,9 +300,9 @@ tooltipTimer ctx cfg k hovered inp = do
             | interrupted = 0
             | open || wasUp = nowUs
             | otherwise = lastUp0
-          set key v = if v > 0 then insertSlot fieldQuiet key v else deleteSlot fieldQuiet key
+          set key v = if v > 0 then insertSpec slotTooltipShow key v else deleteSpec slotTooltipShow key
       when (showAt /= showAt0 || lastUp /= lastUp0) $
-        modifyStore ctx (set showK showAt . set lastK lastUp)
+        modifyStore ctx (set k showAt . set 0 lastUp)
       when (showAt > 0 && not open) $
         requestWakeAt ctx (fromIntegral showAt / 1e6)
       pure (open, showAt > 0)

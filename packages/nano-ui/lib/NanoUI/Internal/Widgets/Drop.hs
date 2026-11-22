@@ -28,7 +28,8 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, takeEscape, withContext)
-import NanoUI.Internal.Store (deleteSlot, fieldPoint, flagSlot, insertSlot, lookupSlot, setFlagSlot)
+import NanoUI.Internal.Store (deleteSpec, findSpec, insertSpec, lookupSpec)
+import NanoUI.Internal.Store.Slots (setFlagSpec, slotDrop, slotDropPos)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectIntersect)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -137,11 +138,9 @@ useDrop bounds = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
-      activeK = slotKey SlotDrop key
-      posK = slotKey SlotDropPos key
   store <- liftIO (getStore ctx)
-  let active0 = flagSlot activeK store
-      lastPos0 = lookupSlot fieldPoint posK store
+  let active0 = findSpec slotDrop False key store
+      lastPos0 = lookupSpec slotDropPos key store
       -- A drag is active from 'DropBegin' until 'DropComplete'. A payload
       -- uses the position current at its point in the sequence.
       step (active, pos, fs, ts) ev = case dropEventType ev of
@@ -161,8 +160,8 @@ useDrop bounds = do
       stored1 = if active1 then lastPos1 else Nothing
   when (active1 /= active0 || stored1 /= lastPos0) $
     liftIO . modifyStore ctx $
-      setFlagSlot activeK active1
-        . maybe (deleteSlot fieldPoint posK) (insertSlot fieldPoint posK) stored1
+      setFlagSpec slotDrop key active1
+        . maybe (deleteSpec slotDropPos key) (insertSpec slotDropPos key) stored1
   pure
     DropTarget
       { dropHovered = hovered

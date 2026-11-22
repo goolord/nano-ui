@@ -35,6 +35,19 @@ module NanoUI.Internal.Store
   , slotWriteOr
   , slotKey
   , Slot (..)
+  , SlotSpec (..)
+  , slotSpec
+  , ownSlotSpec
+  , encodedSpec
+  , floatBitsSpec
+  , specKey
+  , lookupSpec
+  , findSpec
+  , memberSpec
+  , insertSpec
+  , deleteSpec
+  , specWrite
+  , specWriteOr
   , fieldSelection
   , fieldSelectionWrite
   , setFieldSelection
@@ -58,6 +71,7 @@ import Data.IntMap.Strict (IntMap)
 import Data.IntSet (IntSet)
 import Data.Text (Text)
 import Data.Word (Word64)
+import GHC.Float (castFloatToWord32, castWord32ToFloat)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Internal.Id (mix64)
@@ -288,6 +302,80 @@ slotWrite field k v = SlotWrites (\st -> lookupSlot field k st == Just v) (inser
 slotWriteOr :: Eq a => Field a -> a -> Int -> a -> SlotWrites
 slotWriteOr field def k v = SlotWrites (\st -> findSlot field def k st == v) (insertSlot field k v)
 
+-- | Where one value of a widget's state lives: the key it is stored under,
+-- as a function of the widget's key, the 'Field' map that holds it, and how
+-- the value is kept there (decode, encode). A spec names the map and the
+-- stored encoding once, so a reader and a writer of the same state cannot
+-- disagree on either. "NanoUI.Internal.Store.Slots" lists the built-in
+-- ones.
+--
+-- The functions over a spec inline at a constant one: @insertSpec
+-- (slotSpec SlotCursor fieldInt) k v@ compiles to @insertSlot fieldInt
+-- (slotKey SlotCursor k) v@ (checked by the @nano-ui-inspection@ suite).
+data SlotSpec a = forall s. SlotSpec (Int -> Int) (Field s) (s -> a) (a -> s)
+
+-- | Slot @s@ of a widget in map @field@, stored as it is.
+{-# INLINE slotSpec #-}
+slotSpec :: Slot -> Field a -> SlotSpec a
+slotSpec s field = SlotSpec (slotKey s) field id id
+
+-- | The widget's own key in map @field@, stored as it is.
+{-# INLINE ownSlotSpec #-}
+ownSlotSpec :: Field a -> SlotSpec a
+ownSlotSpec field = SlotSpec id field id id
+
+-- | A spec whose values are stored as @spec@'s, through @dec@ and @enc@.
+-- @dec . enc@ must be 'id'.
+{-# INLINE encodedSpec #-}
+encodedSpec :: (s -> a) -> (a -> s) -> SlotSpec s -> SlotSpec a
+encodedSpec dec enc (SlotSpec key field d e) = SlotSpec key field (dec . d) (e . enc)
+
+-- | A 'Float' kept as its 32 bits in an 'Int' slot, such as one in
+-- 'fieldQuiet'.
+{-# INLINE floatBitsSpec #-}
+floatBitsSpec :: SlotSpec Int -> SlotSpec Float
+floatBitsSpec = encodedSpec (castWord32ToFloat . fromIntegral) (fromIntegral . castFloatToWord32)
+
+-- | The store key of a widget key's value.
+{-# INLINE specKey #-}
+specKey :: SlotSpec a -> Int -> Int
+specKey (SlotSpec key _ _ _) = key
+
+-- | 'lookupSlot' through a spec.
+{-# INLINE lookupSpec #-}
+lookupSpec :: SlotSpec a -> Int -> WidgetStore -> Maybe a
+lookupSpec (SlotSpec key field dec _) k st = dec <$> lookupSlot field (key k) st
+
+-- | 'findSlot' through a spec: the value, or @def@ while there is none.
+{-# INLINE findSpec #-}
+findSpec :: SlotSpec a -> a -> Int -> WidgetStore -> a
+findSpec (SlotSpec key field dec enc) def k st = dec (findSlot field (enc def) (key k) st)
+
+-- | 'memberSlot' through a spec.
+{-# INLINE memberSpec #-}
+memberSpec :: SlotSpec a -> Int -> WidgetStore -> Bool
+memberSpec (SlotSpec key field _ _) k = memberSlot field (key k)
+
+-- | 'insertSlot' through a spec.
+{-# INLINE insertSpec #-}
+insertSpec :: SlotSpec a -> Int -> a -> WidgetStore -> WidgetStore
+insertSpec (SlotSpec key field _ enc) k v = insertSlot field (key k) (enc v)
+
+-- | 'deleteSlot' through a spec.
+{-# INLINE deleteSpec #-}
+deleteSpec :: SlotSpec a -> Int -> WidgetStore -> WidgetStore
+deleteSpec (SlotSpec key field _ _) k = deleteSlot field (key k)
+
+-- | 'slotWrite' through a spec.
+{-# INLINE specWrite #-}
+specWrite :: Eq a => SlotSpec a -> Int -> a -> SlotWrites
+specWrite spec k v = SlotWrites (\st -> lookupSpec spec k st == Just v) (insertSpec spec k v)
+
+-- | 'slotWriteOr' through a spec.
+{-# INLINE specWriteOr #-}
+specWriteOr :: Eq a => SlotSpec a -> a -> Int -> a -> SlotWrites
+specWriteOr spec def k v = SlotWrites (\st -> findSpec spec def k st == v) (insertSpec spec k v)
+
 -- | Empty maps and no open select.
 emptyWidgetStore :: WidgetStore
 emptyWidgetStore =
@@ -344,7 +432,9 @@ setFieldSelection key anchor cursor =
 collapseFieldSelection :: Int -> WidgetStore -> WidgetStore
 collapseFieldSelection key = deleteSlot fieldInt (slotKey SlotAnchor key)
 
--- | Every built-in slot.
+-- | Every built-in slot. The map each slot's values live in, and how they
+-- are stored there, is in its 'SlotSpec' in "NanoUI.Internal.Store.Slots";
+-- read and write a slot through that spec.
 data Slot
   = SlotCursor
   | SlotAnchor
@@ -409,15 +499,15 @@ data Slot
     -- (storeDouble).
     SlotSearchCommitted
   | SlotSearchAge
-  | -- | Combo box suggestion state (storeInt/storeFloat, keyed by the field
-    -- widget): the highlighted option index (absolute into the filtered list),
-    -- the start of the visible window slice (keyboard / wheel / scrollbar
-    -- scrolling), and the scrollbar bookkeeping the overlay painter and the
-    -- widget's thumb-drag gesture share (total filtered count, widest row, x
-    -- offset, drag axis + grab offset). In 'storeQuiet', as float bits: the
-    -- pointer when Up or Down last moved the highlight (x under
-    -- 'SlotComboHighlight', y under 'SlotComboScroll') and the wheel's
-    -- leftover rows (under 'SlotComboScrollX').
+  | -- | Combo box suggestion state, keyed by the field widget: the
+    -- highlighted option index (absolute into the filtered list), the start
+    -- of the visible window slice (keyboard / wheel / scrollbar scrolling),
+    -- and the scrollbar bookkeeping the overlay painter and the widget's
+    -- thumb-drag gesture share (total filtered count, widest row, x offset,
+    -- drag axis + grab offset). The quiet slots under the same keys hold the
+    -- pointer when Up or Down last moved the highlight and the wheel's
+    -- leftover rows ('NanoUI.Internal.Store.Slots.slotComboNavX',
+    -- 'NanoUI.Internal.Store.Slots.slotComboWheelRem').
     SlotComboHighlight
   | SlotComboScroll
   | SlotComboCount

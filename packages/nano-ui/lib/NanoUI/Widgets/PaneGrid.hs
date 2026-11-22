@@ -55,7 +55,8 @@ import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Layout.ScrollGeometry (padContentClip)
 import NanoUI.Internal.Shortcut qualified as Shortcut
-import NanoUI.Internal.Store (fieldGrid, fieldQuiet, findSlot, insertSlot, lookupSlot)
+import NanoUI.Internal.Store (fieldGrid, findSpec, insertSlot, insertSpec, lookupSlot)
+import NanoUI.Internal.Store.Slots (slotDragPress)
 import NanoUI.Internal.Store.Types (GridState (..), Gesture (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
@@ -369,7 +370,7 @@ paneGridCore cfg controlled given = do
   -- A gesture lasts only under the press it started with ('runGestures'),
   -- so one whose release the grid did not see is over.
   live <- case stored of
-    Just s | gsGesture s /= NoGesture -> (== findSlot fieldQuiet 0 (slotKey SlotDrag key) store0) <$> liftIO (leftPress ctx)
+    Just s | gsGesture s /= NoGesture -> (== findSpec slotDragPress 0 key store0) <$> liftIO (leftPress ctx)
     _ -> pure True
   let adopt
         | controlled = maybe True ((/= given) . gsTree) stored
@@ -773,7 +774,7 @@ runGestures wid env dividers rendered moved zone = do
       -- A gesture keeps the press it starts with, for 'paneGridCore' to end
       -- it once that press is gone.
       start g = do
-        liftIO (leftPress (geCtx env) >>= modifyStore (geCtx env) . insertSlot fieldQuiet (slotKey SlotDrag (geKey env)))
+        liftIO (leftPress (geCtx env) >>= modifyStore (geCtx env) . insertSpec slotDragPress (geKey env))
         setGesture True g
       -- diBand already includes the leeway; inflating it would steal presses
       -- from neighbouring panes.

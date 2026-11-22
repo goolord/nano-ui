@@ -60,7 +60,8 @@ import NanoUI.Internal.Font (FontMetrics (..), ScrollBarSlot (..), scrollBarGutt
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
-import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
+import NanoUI.Internal.Store (SlotSpec, encodedSpec, eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSpec, lookupSpec, ownSlotSpec, specKey, specWrite)
+import NanoUI.Internal.Store.Slots (slotDragItem, slotDragStartW, slotScrollRange)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.))
 import Data.String (IsString (..))
@@ -134,6 +135,36 @@ sortMarkStyle sort idx
 
 minColW :: Float
 minColW = 40
+
+-- | The table's column order and the widths columns were dragged to, under
+-- the table's own key.
+{-# INLINE tableColumnsSlot #-}
+tableColumnsSlot :: SlotSpec ([Int], [Float])
+tableColumnsSlot = ownSlotSpec fieldTableColumns
+
+-- | The table's hidden columns, under its own key.
+{-# INLINE tableHiddenSlot #-}
+tableHiddenSlot :: SlotSpec IntSet
+tableHiddenSlot = ownSlotSpec fieldIntSet
+
+-- | The column a header-edge drag resizes, or -1. Stored plus one, so an
+-- empty slot reads as idle.
+{-# INLINE tableResizeColSlot #-}
+tableResizeColSlot :: SlotSpec Int
+tableResizeColSlot = encodedSpec (subtract 1) (+ 1) slotDragItem
+
+-- | The pointer's x when a column resize started, under the table's own key.
+{-# INLINE tableResizeXSlot #-}
+tableResizeXSlot :: SlotSpec Float
+tableResizeXSlot = ownSlotSpec fieldFloat
+
+-- | The sort the headers show, as an int on the table's container: twice the
+-- column, plus one when descending. The headers show the sort only through
+-- their style, which no diff covers, so a change of this slot repaints the
+-- table.
+{-# INLINE sortShownCode #-}
+sortShownCode :: SortCol -> Int
+sortShownCode sort = 2 * sortColIndex sort + fromEnum (sortColDir sort == SortDesc)
 
 -- | What one table cell (or header) shows.
 data Cell = Cell
@@ -635,15 +666,14 @@ tableCore cfg f key cols inputRows curSort =
       liftIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
         -- The column order and the widths columns were dragged to.
-        (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupSlot fieldTableColumns stateKey st0)
+        (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupSpec tableColumnsSlot stateKey st0)
         order0 = normalizeOrder n storedOrder
-        hidden0 = findSlot fieldIntSet (tableHidden cfg) stateKey st0
+        hidden0 = findSpec tableHiddenSlot (tableHidden cfg) stateKey st0
         widths0 = take n (storedWidths ++ repeat 0 :: [Float])
-        -- The column being resized, or -1. The drag slot holds it plus one,
-        -- so an empty slot reads as idle.
-        drag0 = findSlot fieldInt 0 (slotKey SlotDrag stateKey) st0 - 1
-        dragX0 = findSlot fieldFloat 0 stateKey st0
-        dragW0 = findSlot fieldFloat 0 (slotKey SlotDragW stateKey) st0
+        -- The column being resized, or -1.
+        drag0 = findSpec tableResizeColSlot (-1) stateKey st0
+        dragX0 = findSpec tableResizeXSlot 0 stateKey st0
+        dragW0 = findSpec slotDragStartW 0 stateKey st0
         mx = v2X (inputMousePos inp)
         widths1
           | drag0 >= 0 && heldIn MouseLeft inp =
@@ -659,7 +689,7 @@ tableCore cfg f key cols inputRows curSort =
     hasVertBar <- liftIO $ do
       let barOf = maybe False ((> 0) . v2Y . scrollRange)
       bar <- barOf <$> readScrollMetrics ctx vWid
-      recordLayoutRead ctx (slotKey SlotScrollRange (intKey vWid)) ((/= bar) . barOf <$> readScrollMetrics ctx vWid)
+      recordLayoutRead ctx (specKey slotScrollRange (intKey vWid)) ((/= bar) . barOf <$> readScrollMetrics ctx vWid)
       pure bar
     let nRows = sizeofSmallArray encoded
         widths1Arr = primArrayFromList widths1
@@ -867,15 +897,14 @@ tableCore cfg f key cols inputRows curSort =
               setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
       -- Compare before writing, so an idle table writes nothing.
       liftIO . writeSlots ctx $
-        SlotWrites (\st -> lookupSlot fieldTableColumns stateKey st == Just (nextOrder, widths1)) (insertSlot fieldTableColumns stateKey (nextOrder, widths1))
-          <> slotWrite fieldIntSet stateKey nextHidden
-          <> slotWrite fieldInt (slotKey SlotDrag stateKey) (nextDrag + 1)
-          <> slotWrite fieldFloat stateKey nextDragX
-          <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
-      -- The headers show the sort only through their style, which no diff
-      -- covers, so a slot on the table repaints it when the sort shown
-      -- changes, however it came (a header click or a write to the Var).
-      liftIO (writeSlot fieldInt ctx tableWid (intKey tableWid) (2 * sortColIndex sort0 + fromEnum (sortColDir sort0 == SortDesc)))
+        specWrite tableColumnsSlot stateKey (nextOrder, widths1)
+          <> specWrite tableHiddenSlot stateKey nextHidden
+          <> specWrite tableResizeColSlot stateKey nextDrag
+          <> specWrite tableResizeXSlot stateKey nextDragX
+          <> specWrite slotDragStartW stateKey nextDragW
+      -- Repaints the table when the sort shown changes, however it came (a
+      -- header click or a write to the Var).
+      liftIO (writeSlot fieldInt ctx tableWid (intKey tableWid) (sortShownCode sort0))
       -- Keep the resize cursor for the whole drag, wherever the pointer is.
       when (nextDrag >= 0 && heldIn MouseLeft inp) $
         liftIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))

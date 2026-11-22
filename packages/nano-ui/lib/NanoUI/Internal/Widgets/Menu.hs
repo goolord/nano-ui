@@ -25,7 +25,8 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
 import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos, inputWindowSize)
 import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO, (<&&>))
-import NanoUI.Internal.Store (Slot (..), fieldPoint, findSlot, flagSlot, insertSlot, setFlagSlot, slotKey)
+import NanoUI.Internal.Store (findSpec, insertSpec)
+import NanoUI.Internal.Store.Slots (setFlagSpec, slotMenuOpen, slotMenuPos)
 import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, grow, maxH, minW, padXY, tight, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Size (..), V2 (..))
 import NanoUI.Internal.WidgetText (buttonFlagMenu, buttonFlagMenuBar, hasFlag)
@@ -74,26 +75,25 @@ runContextMenu ::
 runContextMenu (wid, ctx) rightClick child = do
   inp <- askInput
   store <- liftIO (getStore ctx)
-  let openK = slotKey SlotMenuOpen (intKey wid)
-      posK = slotKey SlotMenuPos (intKey wid)
+  let key = intKey wid
       mouse = inputMousePos inp
-      pos = if rightClick then mouse else findSlot fieldPoint (V2 0 0) posK store
+      pos = if rightClick then mouse else findSpec slotMenuPos (V2 0 0) key store
       cfg = (defaultPopupConfig (AnchorPoint pos)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
       -- A menu taller than the window is held inside it, as a modal is, and
       -- its rows scroll.
       Size _ winH = inputWindowSize inp
       fitWindow = maxH (max 1 (winH - 2 * windowMargin))
-  when rightClick $ liftIO (modifyStore ctx (setFlagSlot openK True . insertSlot fieldPoint posK mouse))
+  when rightClick $ liftIO (modifyStore ctx (setFlagSpec slotMenuOpen key True . insertSpec slotMenuPos key mouse))
   -- A left-button release inside the menu popup picks the row the press went
   -- down on. One on a disabled row, a header, a separator or the padding
   -- picks nothing.
   (popupResp, mBody) <-
-    popupWith' (constVar (flagSlot openK store || rightClick)) cfg fitWindow $ do
+    popupWith' (constVar (findSpec slotMenuOpen False key store || rightClick)) cfg fitWindow $ do
       r <- scrollWith (tight . gap 0 . grow) (child pos)
       onRow <- (releasedIn MouseLeft <$> askInput) <&&> liftIO (pressedMenuRow ctx)
       pure (onRow, r)
   let picked = respHovered popupResp && maybe False fst mBody
-  when (respClicked popupResp || picked) $ liftIO (modifyStore ctx (setFlagSlot openK False))
+  when (respClicked popupResp || picked) $ liftIO (modifyStore ctx (setFlagSpec slotMenuOpen key False))
   pure (snd <$> mBody)
 
 -- | Whether the left button went down on a menu row, added this frame.

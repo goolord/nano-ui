@@ -24,7 +24,8 @@ import NanoUI.Internal.Equality (sameDouble)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
-import NanoUI.Internal.Store (Slot (..), deleteSlot, fieldDouble, fieldEditorMode, fieldInt, fieldText, findSlot, insertSlot, lookupSlot, memberSlot, slotKey)
+import NanoUI.Internal.Store (deleteSpec, fieldDouble, fieldText, findSlot, findSpec, insertSlot, insertSpec, lookupSlot, memberSpec)
+import NanoUI.Internal.Store.Slots (slotNumericHeld, slotNumericRepeat, slotTextChanged, slotTextMode)
 import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, packTextNodeStyle, textInputFlagNumeric)
@@ -135,10 +136,8 @@ numericInputCore cfg value = do
       | isFocus && tisText s1 == formatNumber cfg lastValue = lastValue
       | isFocus = maybe lastValue (clampNumber cfg) (parseNumber cfg (tisText s1))
       | otherwise = given
-    heldK = slotKey SlotNumericHeld key
-    repeatK = slotKey SlotNumericRepeat key
-    held0 = findSlot fieldInt 0 heldK store
-    repeatAt0 = findSlot fieldDouble 0 repeatK store
+    held0 = findSpec slotNumericHeld 0 key store
+    repeatAt0 = findSpec slotNumericRepeat 0 key store
   (dir, held1, repeatAt1) <- liftIO (stepNumericStepper resp isFocus inp held0 repeatAt0)
   let
     scale = if modShift (inputModifiers inp) then 10 else 1
@@ -152,14 +151,13 @@ numericInputCore cfg value = do
           let t = formatNumber cfg final
            in TextInputState t (T.length t) (T.length t)
       | otherwise = s1
-    pulseK = slotKey SlotTextAreaChanged key
     dirty =
       stored /= Just (tisText s2)
         || s2 /= s0
         || lookupSlot fieldDouble key store /= Just final
         || held1 /= held0
         || repeatAt1 /= repeatAt0
-        || memberSlot fieldInt pulseK store
+        || memberSpec slotTextChanged key store
   when dirty $
     liftIO $ do
       -- An accepted edit keeps its undo history; a rejected one or a step
@@ -171,11 +169,11 @@ numericInputCore cfg value = do
       -- change pulse an edit of theirs leaves is reported as the value's
       -- change.
       modifyStore ctx $
-        (if held1 == 0 then deleteSlot fieldInt heldK else insertSlot fieldInt heldK held1)
+        (if held1 == 0 then deleteSpec slotNumericHeld key else insertSpec slotNumericHeld key held1)
           . insertSlot fieldDouble key final
-          . insertSlot fieldDouble repeatK repeatAt1
-          . insertSlot fieldEditorMode (slotKey SlotTextMode key) singleLineMode
-          . deleteSlot fieldInt pulseK
+          . insertSpec slotNumericRepeat key repeatAt1
+          . insertSpec slotTextMode key singleLineMode
+          . deleteSpec slotTextChanged key
           . save
   -- A held arrow repeats on a schedule: ask for the frame of its next step
   -- instead of running frames back to back until then.

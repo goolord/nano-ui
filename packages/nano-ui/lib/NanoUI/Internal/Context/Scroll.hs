@@ -57,7 +57,8 @@ import NanoUI.Internal.Context.Core (damageWidget, modifyStore, getPrevRect, get
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Store (Slot (..), SlotWrites (..), WidgetStore, deleteSlot, fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotKey, slotWrite, slotWriteOr)
+import NanoUI.Internal.Store (SlotSpec, SlotWrites (..), WidgetStore, deleteSpec, fieldFloat, findSlot, findSpec, insertSpec, lookupSpec, ownSlotSpec, slotWriteOr, specKey, specWrite, specWriteOr)
+import NanoUI.Internal.Store.Slots (slotScrollAxes, slotScrollCross, slotScrollLinkX, slotScrollLinkY, slotScrollPending, slotScrollRange, slotScrollStep, slotTextAreaScroll)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2Add, v2X, v2Y)
 
 {-# INLINE snapScrollOffset #-}
@@ -75,8 +76,8 @@ snapScrollOffset ctx v = do
 storedScrollOffset :: Int -> WidgetStore -> V2
 storedScrollOffset key s =
   fromMaybe
-    (V2 (findSlot fieldFloat 0 (slotKey SlotScrollCross key) s) (findSlot fieldFloat 0 key s))
-    (lookupSlot fieldPoint (slotKey SlotTextAreaScroll key) s)
+    (V2 (findSpec slotScrollCross 0 key s) (findSlot fieldFloat 0 key s))
+    (lookupSpec slotTextAreaScroll key s)
 
 -- | Pixel-snapped main-axis offset of a 1D scroller, or vertical offset of a
 -- text area/2D scroller. Defaults to zero before state exists.
@@ -116,27 +117,28 @@ writeScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
 writeScrollOffset2D ctx wid off@(V2 x y) = do
   store <- getStore ctx
   let key = intKey wid
-      taKey = slotKey SlotTextAreaScroll key
       -- A linked scroller ('linkScrollAxes') follows along: the header's
       -- main axis is the body's cross axis.
+      {-# INLINE mirror #-}
+      mirror :: SlotSpec Int -> SlotSpec Float -> Float -> SlotWrites
       mirror link to v =
-        let k = findSlot fieldInt 0 (slotKey link key) store
-         in if k == 0 then SlotWrites (const True) id else slotWriteOr fieldFloat 0 (to k) v
+        let k = findSpec link 0 key store
+         in if k == 0 then SlotWrites (const True) id else specWriteOr to 0 k v
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
   -- the container slots below and its offsets are never rendered. Scroll-offset
   -- damage only tracks scroll containers, so a text area damages its own bounds.
-  case lookupSlot fieldPoint taKey store of
+  case lookupSpec slotTextAreaScroll key store of
     Just cur ->
       when (cur /= off) $ do
-        setStore ctx (insertSlot fieldPoint taKey off store)
+        setStore ctx (insertSpec slotTextAreaScroll key off store)
         damageWidget ctx wid DamageSelf
     Nothing ->
       writeSlots ctx $
         slotWriteOr fieldFloat 0 key y
-          <> slotWriteOr fieldFloat 0 (slotKey SlotScrollCross key) x
-          <> mirror SlotScrollLinkX id x
-          <> mirror SlotScrollLinkY (slotKey SlotScrollCross) y
+          <> specWriteOr slotScrollCross 0 key x
+          <> mirror slotScrollLinkX (ownSlotSpec fieldFloat) x
+          <> mirror slotScrollLinkY slotScrollCross y
 
 -- | Link a two-axis body with a separate horizontal scroller, such as a table
 -- header. Arguments are body id then horizontal id; synchronises their x offsets.
@@ -145,8 +147,8 @@ linkScrollAxes ctx yWid xWid = do
   let yKey = intKey yWid
       xKey = intKey xWid
   writeSlots ctx $
-    slotWrite fieldInt (slotKey SlotScrollLinkX yKey) xKey
-      <> slotWrite fieldInt (slotKey SlotScrollLinkY xKey) yKey
+    specWrite slotScrollLinkX yKey xKey
+      <> specWrite slotScrollLinkY xKey yKey
   store <- getStore ctx
   let V2 x2 y = storedScrollOffset yKey store
       x1 = findSlot fieldFloat 0 xKey store
@@ -171,13 +173,13 @@ setScrollTuning ctx tuning =
 
 -- | This scroller's own wheel step, or @0@ when it follows the context's.
 getScrollStep :: Context -> WidgetId -> IO Float
-getScrollStep ctx wid = findSlot fieldFloat 0 (slotKey SlotScrollStep (intKey wid)) <$> getStore ctx
+getScrollStep ctx wid = findSpec slotScrollStep 0 (intKey wid) <$> getStore ctx
 
 -- | Give one scroller its own wheel step, in pixels per notch. @0@ puts it
 -- back on the context's step. A list whose rows are a fixed height reads best
 -- at a whole number of rows per notch.
 setScrollStep :: Context -> WidgetId -> Float -> IO ()
-setScrollStep ctx wid px = writeSlots ctx (slotWriteOr fieldFloat 0 (slotKey SlotScrollStep (intKey wid)) px)
+setScrollStep ctx wid px = writeSlots ctx (specWriteOr slotScrollStep 0 (intKey wid) px)
 
 -- | Pixels one wheel notch scrolls this scroller.
 resolveScrollStep :: Context -> WidgetId -> IO Float
@@ -215,7 +217,7 @@ data ScrollMetrics = ScrollMetrics
 getScrollMetrics :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
 getScrollMetrics ctx wid = do
   m <- readScrollMetrics ctx wid
-  recordLayoutRead ctx (slotKey SlotScrollRange (intKey wid)) ((/= m) <$> readScrollMetrics ctx wid)
+  recordLayoutRead ctx (specKey slotScrollRange (intKey wid)) ((/= m) <$> readScrollMetrics ctx wid)
   pure m
 
 -- | Read 'ScrollMetrics' without recording a layout dependency (used by scroll
@@ -225,9 +227,9 @@ readScrollMetrics ctx wid = do
   s <- getStore ctx
   views <- ssViews <$> readIORef (ctxScrollState ctx)
   let key = intKey wid
-  case (IM.lookup key views, lookupSlot fieldPoint (slotKey SlotScrollRange key) s) of
+  case (IM.lookup key views, lookupSpec slotScrollRange key s) of
     (Just view, Just range) -> do
-      let axes = toEnum (findSlot fieldInt 0 (slotKey SlotScrollAxes key) s)
+      let axes = toEnum (findSpec slotScrollAxes 0 key s)
       off <- getScrollOffsetIn ctx wid axes
       pure $
         Just
@@ -269,8 +271,8 @@ cacheScrollMetrics ctx wid axes viewport range = do
     -- leave a glide heading past the new end.
     clampScrollGlide ctx wid range
     publishLayoutSlots ctx $
-      slotWrite fieldPoint (slotKey SlotScrollRange key) range
-        <> slotWrite fieldInt (slotKey SlotScrollAxes key) (fromEnum axes))
+      specWrite slotScrollRange key range
+        <> specWrite slotScrollAxes key (fromEnum axes))
 
 -- | Record the offset, in window axes, that this layout placed scroller
 -- @wid@'s content at, once 'cacheScrollMetrics' has published its viewport.
@@ -299,18 +301,18 @@ swapAxes _ v = v
 setScrollOffsetPending :: Context -> WidgetId -> V2 -> IO ()
 setScrollOffsetPending ctx wid off = do
   cancelScrollGlide ctx wid
-  modifyStore ctx (insertSlot fieldPoint (slotKey SlotScrollPending (intKey wid)) off)
+  modifyStore ctx (insertSpec slotScrollPending (intKey wid) off)
 
 -- | Apply any pending offset queued by 'setScrollOffsetPending' using the
 -- scroller's resolved axes.
 applyPendingScrollOffset :: Context -> WidgetId -> ScrollAxes -> IO ()
 applyPendingScrollOffset ctx wid axes = do
   store <- getStore ctx
-  let k = slotKey SlotScrollPending (intKey wid)
-  case lookupSlot fieldPoint k store of
+  let key = intKey wid
+  case lookupSpec slotScrollPending key store of
     Nothing -> pure ()
     Just off -> do
-      writeIORef (ctxStore ctx) $! deleteSlot fieldPoint k store
+      writeIORef (ctxStore ctx) $! deleteSpec slotScrollPending key store
       setScrollOffsetIn ctx wid axes off
 
 -- | This scroller's offset in window axes.
