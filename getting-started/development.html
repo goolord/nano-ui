@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-ed377124.js";
+            window.path_to_searchindex_js = "../searchindex-98df013d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -214,7 +214,7 @@ cabal test -j1 all
 </tbody>
 </table>
 </div>
-<p>Continuous integration (<code>.github/workflows/ci.yml</code>) runs the suites that open no window on Linux with GHC 9.10 and 9.14 and on Windows with GHC 9.14. Run the native suites locally when a change touches rendering, fonts, dialogs or DPI.</p>
+<p>Continuous integration (<code>.github/workflows/ci.yml</code>) runs the suites that open no window on Linux with GHC 9.10 and 9.14 and on Windows with GHC 9.14. On Linux with GHC 9.14 it also runs the render, demo, terminal and RGFW suites under Xvfb with Mesa’s software GL; until that step has passed on the runner, its failures are reported without failing the job. Run the native suites locally when a change touches rendering, fonts, dialogs or DPI.</p>
 <p>One suite, with failure details:</p>
 <pre><code class="language-sh">cabal test nano-ui-test --test-show-details=failures
 </code></pre>
