@@ -4,7 +4,11 @@
 -- core owns the backend kind, and this package owns its session type.
 {-# OPTIONS_GHC -Wno-orphans #-}
 
--- | SDL session resources, window options, font/display synchronisation, and screenshots.
+-- | SDL session resources, window options, and font/display synchronisation.
+-- It also re-exports the session record ("NanoUI.Sdl.Internal.Env"), the
+-- present probe and pacing helpers ("NanoUI.Sdl.Internal.Pacing") and the
+-- screenshots ("NanoUI.Sdl.Internal.Screenshot"), so this exposed module
+-- keeps every name it has exported.
 module NanoUI.Sdl.Internal.Window
   ( RgbaImage (..)
   , SdlEnv (..)
@@ -33,7 +37,7 @@ module NanoUI.Sdl.Internal.Window
   ) where
 
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
-import Control.Exception (IOException, bracket, catch, finally, onException)
+import Control.Exception (IOException, catch, finally, onException)
 import Control.Monad (forM_, mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Acquire (Acquire, mkAcquire)
@@ -42,42 +46,45 @@ import Data.Acquire (allocateAcquire)
 import Control.Monad.Trans.Resource (closeInternalState, createInternalState, runInternalState)
 import Data.Bits (zeroBits, (.|.))
 import Data.ByteString qualified as BS
-import Data.ByteString.Internal qualified as BSI
-import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust, isNothing)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import System.Environment (lookupEnv)
 import System.Info (os)
 import Text.Read (readMaybe)
 import Data.Primitive.SmallArray (SmallArray)
-import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.Foreign qualified as TextForeign
-import qualified GHC.Foreign as GHC
-import Foreign.Marshal.Utils (fromBool, maybePeek, with)
-import Foreign.Storable (peek)
+import Foreign.Marshal.Utils (fromBool, maybePeek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import NanoUI (Appearance, ImageId, Input (..), NanoUI, RgbaPixels, Screenshot (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, rgbaPixels, unlessM)
+import NanoUI (Appearance, ImageId, Input (..), NanoUI, Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, unlessM)
 import NanoUI.Backend (Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks, closeWindowHost, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, newPixelContext, registerImage, withClipboard, withTheme)
 import NanoUI.Sdl.Internal.Display
+import NanoUI.Sdl.Internal.Env (PresentProbe (..), Retain (..), SdlEnv (..))
+import NanoUI.Sdl.Internal.Pacing
+  ( notePresent
+  , presentPaces
+  , refreshDisplayRate
+  , refreshPeriodOf
+  , restartPresentProbe
+  , sdlLivePacingMs
+  , sdlPacingMs
+  )
+import NanoUI.Sdl.Internal.Screenshot (captureFrame, captureScreenshot, saveScreenshot)
 import NanoUI.Sdl.Internal.Error (sdlFail)
-import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
+import NanoUI.Sdl.Internal.Chrome.Types (clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
-import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
+import NanoUI.Sdl.Internal.Cursor (destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Font.Search (searchFonts, startFontIndex)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
-import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
-import NanoUI.Runner (pacingMsFor)
-import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot)
-import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
-import NanoUI.Sdl.Internal.Input (TextInputSync, newTextInputSync)
-import NanoUI.Sdl.Internal.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
+import NanoUI.Internal.Debug (newDebugSampler)
+import NanoUI.Sdl.Internal.Image (destroyImageAtlas, newImageAtlas)
+import NanoUI.Sdl.Internal.Input (newTextInputSync)
+import NanoUI.Sdl.Internal.Render (destroyRenderBatch, newRenderBatch)
 import NanoUI.Sdl.Internal.WindowOptions
-import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Hints
   ( sDL_HINT_ASSERT
   , sDL_HINT_IME_IMPLEMENTED_UI
@@ -85,10 +92,7 @@ import SDL3.Sys.Bindgen.Hints
   , sDL_HINT_RENDER_VSYNC
   , sDL_HINT_VIDEO_DRIVER
   )
-import SDL3.Sys.Bindgen.Pixels qualified as Pixels
-import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
-import SDL3.Sys.Bindgen.Surface (SDL_Surface)
-import SDL3.Sys.Bindgen.Surface qualified as Surface
+import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags)
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
@@ -103,14 +107,11 @@ import SDL3.Sys.Render
   , destroyRendererSafe
   , destroyTexture
   , getRendererName
-  , renderReadPixels
   , setRenderDrawBlendMode
   , setRenderScale
-  , setRenderTarget
   , setRenderVSyncSafe
   )
 import SDL3.Sys.Stdinc (free)
-import SDL3.Sys.Surface (convertPixels, destroySurface, saveBMP)
 import SDL3.Sys.Video (destroyWindowSafe, getWindowDisplayScale)
 import SDL3.Sys.Video qualified as SDL
 
@@ -238,142 +239,6 @@ windowFlags opts =
   where
     settings = sdlWindowSettings opts
     flag on bit = if on then bit else zeroBits
-
--- | Native resources owned by a 'withSdl' callback. Window, renderer, and font
--- handles must stay on the display thread and must not outlive the callback.
--- Use the supplied context, which contains this environment as host data.
-data SdlEnv = SdlEnv
-  { sdlWindow :: Ptr SDL_Window
-  , sdlRenderer :: Ptr SDL_Renderer
-  , sdlRendererName :: !Text
-  , sdlBatch :: RenderBatch
-  , sdlFontRequestRef :: !(IORef NanoUIFont)
-  , sdlFontAppliedRef :: !(IORef NanoUIFont)
-  , sdlForcedScale :: !(Maybe Float)
-  -- ^ NANO_FORCE_SCALE override of the pixel density, read at startup.
-  , sdlScaleRef :: IORef Float
-  -- ^ Backbuffer pixels per layout unit: the pixel density times the zoom.
-  , sdlUiScaleRef :: !(IORef Float)
-  -- ^ The requested UI scale; see 'sdlAppUiScale'.
-  , sdlPointerSeen :: !(IORef Bool)
-  -- ^ Whether a pointer event has arrived, so the input's position, which
-  -- the events set in layout units, can be trusted over a query.
-  , sdlImages :: ImageAtlas
-  , sdlCursors :: SdlCursors
-  , sdlDebug :: DebugSamplerRef
-  , sdlDebugPublished :: IORef (Maybe SdlDebugSnapshot)
-  , sdlFrameTrace :: !Bool
-  -- ^ Whether @NANO_FRAME_TRACE@ was set when the session opened.
-  , sdlRetain :: IORef Retain
-  , sdlLastPresented :: IORef Bool
-  , sdlVsync :: !Bool
-  , sdlRefreshPeriod :: !Double
-  -- ^ The refresh period of the window's display when it opened, in
-  -- seconds; 'sdlRefreshPeriodRef' follows it to other displays.
-  , sdlRefreshPeriodRef :: !(IORef Double)
-  -- ^ The refresh period of the window's current display, in seconds, read
-  -- again when the window moves to another display or the display's mode
-  -- changes ('refreshDisplayRate').
-  , sdlPresentProbe :: !(IORef PresentProbe)
-  -- ^ Whether presents wait for vertical sync as 'sdlVsync' asks
-  -- ('notePresent').
-  , sdlContinuous :: !Bool
-  , sdlTransparent :: !(Maybe (SDL_BlendMode, SDL_BlendMode))
-  -- ^ For a transparent window, the blend modes for drawing and for
-  -- presenting the retained frame; 'Nothing' when opaque. See
-  -- 'transparentBlends'.
-  , sdlCachedCtx :: !(IORef Context)
-  , sdlFontCache :: !SdlFontCache
-  , sdlChromeState :: !ChromeState
-  -- ^ What a borderless window's own title bar is for; see
-  -- "NanoUI.Sdl.Internal.Chrome".
-  , sdlTextInput :: !TextInputSync
-  -- ^ The focused-field state last sent to SDL's text input; updated each
-  -- drawn frame.
-  , sdlSizeLimits :: !(Maybe (IORef (Int32, Int32, Int32, Int32)))
-  -- ^ On a 'waylandToplevel' window, its minimum and maximum width and
-  -- height in window coordinates (zero for none), which nano-ui sends to the
-  -- compositor before each present instead of giving them to SDL.
-  -- 'Nothing' elsewhere, where SDL keeps them.
-  , sdlSizeLimitsSent :: !(IORef Bool)
-  -- ^ Whether the limits last sent from 'sdlSizeLimits' were any, so none
-  -- are sent again only to clear them.
-  }
-
--- | What a session with 'sdlVsync' has seen of its presents. A driver can
--- turn vertical sync off whatever the application asks, and then a present
--- returns at once; a loop that trusted it to wait would draw an animation
--- as fast as it can.
-data PresentProbe
-  = PresentProbe !Double !Int
-  -- ^ When the last present returned ('GHC.Clock.getMonotonicTime'), and
-  -- how many presents in a row came less than half a refresh after the one
-  -- before.
-  | VsyncIgnored
-  -- ^ 'vsyncProbeFrames' presents in a row came that soon: presents do not
-  -- wait, and the session paces animation by time instead.
-  deriving (Eq, Show)
-
--- | Presents in a row, each less than half a refresh after the last, that
--- show vertical sync is not honoured. A driver may queue two or three
--- frames before a present blocks, so a few fast presents prove nothing.
-vsyncProbeFrames :: Int
-vsyncProbeFrames = 10
-
--- | Note a present that returned at time @t@ (a session with 'sdlVsync'
--- only), and give up on vertical sync once 'vsyncProbeFrames' presents in a
--- row returned sooner than half a refresh apart.
-notePresent :: SdlEnv -> Double -> IO ()
-notePresent env t = when (sdlVsync env) $
-  readIORef (sdlPresentProbe env) >>= \case
-    VsyncIgnored -> pure ()
-    PresentProbe lastT n -> do
-      period <- readIORef (sdlRefreshPeriodRef env)
-      let n' = if t - lastT < period / 2 then n + 1 else 0
-      writeIORef (sdlPresentProbe env) $! if n' >= vsyncProbeFrames then VsyncIgnored else PresentProbe t n'
-
--- | Start counting presents afresh, after presents that ran with vertical
--- sync off on purpose (the resize watch's). A finding that vertical sync is
--- not honoured stays.
-restartPresentProbe :: SdlEnv -> IO ()
-restartPresentProbe env = modifyIORef' (sdlPresentProbe env) $ \case
-  VsyncIgnored -> VsyncIgnored
-  PresentProbe _ _ -> PresentProbe 0 0
-
--- | Whether the last frame's present waited for the display: it presented,
--- 'sdlVsync' asked for vertical sync, and the presents so far have not
--- shown that the driver ignores it.
-presentPaces :: SdlEnv -> IO Bool
-presentPaces env
-  | sdlVsync env = (&&) <$> readIORef (sdlLastPresented env) <*> ((/= VsyncIgnored) <$> readIORef (sdlPresentProbe env))
-  | otherwise = pure False
-
--- | Read the window's refresh rate again, after it moved to another display
--- or its display changed mode, and start the vertical sync probe afresh:
--- another display's driver may honour it.
-refreshDisplayRate :: SdlEnv -> IO ()
-refreshDisplayRate env = do
-  writeIORef (sdlRefreshPeriodRef env) =<< refreshPeriodOf (sdlWindow env)
-  writeIORef (sdlPresentProbe env) (PresentProbe 0 0)
-
--- | The refresh period of a window's display, in seconds; 60 Hz's when SDL
--- cannot say.
-refreshPeriodOf :: Ptr SDL_Window -> IO Double
-refreshPeriodOf win = (\hz -> if hz > 0 then 1 / realToFrac hz else 1 / 60) <$> queryWindowRefreshHz win
-
--- | The retained framebuffer. The texture is allocated in blocks larger than
--- the window, so a resize drag reuses it instead of creating a render target
--- per pixel of movement; only the top-left used area is drawn and presented.
-data Retain = Retain
-  { retainTexture :: !(Ptr SDL_Texture)
-  , retainCapW :: !Int
-  , retainCapH :: !Int
-  -- ^ The texture's allocated size in pixels.
-  , retainW :: !Int
-  , retainH :: !Int
-  -- ^ The pixel size the last frame used.
-  , retainScale :: !Float
-  }
 
 -- | The zoom a UI scale setting asks for: the setting itself, or for zero or
 -- less the display's content scale beyond the pixel density.
@@ -738,19 +603,6 @@ registerAppImages opts ctx =
   forM_ (sdlAppImages opts) $ \(RgbaImage image w h pixels) ->
     unlessM (registerImage ctx image w h pixels) (fail "registerImage failed")
 
--- | 'sdlPacingMs' for the window's current display ('sdlRefreshPeriodRef'),
--- whether or not presents wait for vertical sync: the wait for a frame that
--- presents nothing, or whose present does not wait.
-sdlLivePacingMs :: SdlEnv -> IO Int
-sdlLivePacingMs env = pacingMsFor <$> readIORef (sdlRefreshPeriodRef env)
-
--- | The event wait while a window animates. With vsync on, presents throttle
--- the loop. With vsync off a live animation would spin at max speed, so wait
--- 'pacingMsFor' the frame period: SDL_WaitEventTimeout overruns by about a
--- millisecond, and the slack keeps the wait from ending past the boundary.
-sdlPacingMs :: SdlEnv -> Int
-sdlPacingMs env = if sdlVsync env then 16 else pacingMsFor (sdlRefreshPeriod env)
-
 -- | The blend modes a transparent window draws and presents with.
 --
 -- A frame can paint the window colour several times (the backdrop, then a
@@ -810,63 +662,3 @@ withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
       txt <- maybePeek (fmap TE.decodeUtf8Lenient . BS.packCString) ptr `finally` free (castPtr ptr)
       pure (mfilter (not . T.null) txt)
 
--- | Write the last presented frame to a BMP file, on the display thread. A
--- retained session reads its retained texture, since SDL leaves the window
--- backbuffer undefined after a present.
---
--- A direct-to-window session ('sdlAppContinuous') has no retained frame and
--- a readable one only between drawing and presenting, so from a view use
--- 'NanoUI.requestScreenshot', which reads it at that point.
-saveScreenshot :: SdlEnv -> FilePath -> IO Bool
-saveScreenshot env path =
-  withSurface (readFrame env . retainTexture =<< readIORef (sdlRetain env)) False $ \surface ->
-    sdlPathEncoding >>= \enc -> GHC.withCString enc path (saveBMP surface . PtrConst.unsafeFromPtr)
-
--- | The last presented frame, as 'NanoUI.requestScreenshot' returns it:
--- window pixels (the backbuffer's size, about the logical size times the
--- pixel density and UI zoom) with the drawn alpha, which is the theme's
--- window colour's alpha where nothing covers it.
--- 'Nothing' when SDL cannot read the frame back. Call on the display thread.
---
--- A direct-to-window session ('sdlAppContinuous') has a readable frame only
--- between drawing and presenting, so from a view use
--- 'NanoUI.requestScreenshot', which reads it at that point.
-captureScreenshot :: SdlEnv -> IO (Maybe Screenshot)
-captureScreenshot env = do
-  scale <- readIORef (sdlScaleRef env)
-  fmap (`Screenshot` scale) <$> (captureFrame env . retainTexture =<< readIORef (sdlRetain env))
-
--- | The frame's pixels from the retained texture, or from the window
--- backbuffer when the target is null (valid only before presenting).
-captureFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Maybe RgbaPixels)
-captureFrame env target = withSurface (readFrame env target) Nothing $ \surface -> do
-  Surface.SDL_Surface _ format sw sh pitch pixels _ _ <- peek surface
-  let w = fromIntegral sw
-      h = fromIntegral sh
-  -- Converted straight into the result, from whatever format was read back;
-  -- a failed conversion leaves too few bytes for 'rgbaPixels'.
-  bytes <- BSI.createUptoN (w * h * 4) $ \dst -> do
-    ok <- convertPixels (fromIntegral w) (fromIntegral h) format (PtrConst.unsafeFromPtr pixels) (fromIntegral pitch) Pixels.SDL_PIXELFORMAT_RGBA32 (castPtr dst) (fromIntegral w * 4)
-    pure (if ok then w * h * 4 else 0)
-  pure (rgbaPixels w h bytes)
-
--- | Run an action on a new surface, and free it after; @none@ when there is
--- no surface.
-withSurface :: IO (Ptr SDL_Surface) -> a -> (Ptr SDL_Surface -> IO a) -> IO a
-withSurface make none act = bracket make destroySurface $ \surface ->
-  if surface == nullPtr then pure none else act surface
-
--- | Read the used area of the retained texture, or the backbuffer for a null
--- target, into a new surface. Null on failure.
-readFrame :: SdlEnv -> Ptr SDL_Texture -> IO (Ptr SDL_Surface)
-readFrame env tex = do
-  r <- readIORef (sdlRetain env)
-  let ren = sdlRenderer env
-  if tex == nullPtr
-    then renderReadPixels ren (PtrConst.unsafeFromPtr nullPtr)
-    else do
-      void $ setRenderTarget ren tex
-      s <- with (SDL_Rect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))) $ \rp ->
-        renderReadPixels ren (PtrConst.unsafeFromPtr rp)
-      void $ setRenderTarget ren nullPtr
-      pure s
