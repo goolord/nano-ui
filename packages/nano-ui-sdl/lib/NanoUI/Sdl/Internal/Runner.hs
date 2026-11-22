@@ -26,7 +26,8 @@ import NanoUI.Sdl.Internal.Display (outPair, queryMouseWindowPos, queryWindowLog
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
-import NanoUI.Sdl.Internal.Render (flushRenderBatch, glyphPageTexture, renderDrawDataPass, snapDamage)
+import NanoUI.Sdl.Internal.Error (sdlFail)
+import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass, snapDamage)
 import NanoUI.Sdl.Internal.Window (Retain (..), SdlEnv (..), captureFrame, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
@@ -186,9 +187,10 @@ presentDamagedFrame ::
   Double ->
   IO ()
 presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
-  -- A null texture draws full-repaint sessions straight to the window.
-  unlessM ((&&) <$> setRenderTarget ren tex <*> setRenderScale ren scale scale) $
-    fail "SDL_SetRenderTarget/Scale failed"
+  -- A null texture draws full-repaint sessions straight to the window. The
+  -- pass scales positions itself, so the renderer stays at scale 1.
+  unlessM ((&&) <$> setRenderTarget ren tex <*> setRenderScale ren 1 1) $
+    sdlFail "SDL_SetRenderTarget/Scale failed"
   let glyphs = glyphAtlasHandle (sdlFontCache env)
   -- A transparent window draws atlas textures with its own blend mode.
   -- Set it after the UI pass, which can create atlas textures.
@@ -197,13 +199,13 @@ presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
     for_ (filter (/= nullPtr) textures) (`setTextureBlendMode` blend)
   -- Full repaints clear the target, including bare backdrop regions.
   -- Partial updates preserve the undamaged part of the retained texture.
-  -- The batch is flushed even when the pass throws, so no geometry leaks
-  -- into the next frame.
-  renderDrawDataPass (sdlBatch env) ren drawData (sdlImages env) glyphs damage
-    `finally` flushRenderBatch (sdlBatch env)
+  -- A pass that throws drops its queued geometry, so none of it reaches the
+  -- next frame.
+  renderDrawDataPass (sdlBatch env) ren scale drawData (sdlImages env) glyphs damage
   t2 <- getMonotonicTime
-  unlessM (if direct then setRenderScale ren 1 1 else copyRetained env tex) $
-    fail "SDL window presentation preparation failed"
+  unless direct $
+    unlessM (copyRetained env tex) $
+      sdlFail "SDL window presentation preparation failed"
   sendSizeLimits env
   -- Read the direct backbuffer before present, but invoke view callbacks
   -- only afterwards, just as for retained frames.
@@ -270,7 +272,7 @@ ensureRetain env w h scale = do
           ch = roundUp h
       -- Allocate before replacing: failure leaves the owned texture valid.
       tex' <- createTexture (sdlRenderer env) Pixels.SDL_PIXELFORMAT_RGBA32 Render.SDL_TEXTUREACCESS_TARGET (fromIntegral cw) (fromIntegral ch)
-      when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
+      when (tex' == nullPtr) $ sdlFail "SDL_CreateTexture(retain) failed"
       void $ setTextureBlendMode tex' (maybe (fromIntegral sDL_BLENDMODE_NONE) snd (sdlTransparent env))
       writeIORef (sdlRetain env) (Retain tex' cw ch w h scale)
       unless (tex == nullPtr) $ destroyTexture tex

@@ -32,6 +32,7 @@ import Data.Int (Int32)
 import Data.Word (Word32)
 import NanoUI (Appearance (..), Size (..), V2 (..), ifM)
 import NanoUI.Monad ((<&&>))
+import NanoUI.Sdl.Internal.Error (sdlFail)
 import SDL3.Sys.Bindgen.Events (SDL_Event)
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -97,7 +98,7 @@ installResizeWatch win act = do
   handle <- installResizeWatchC win fp
   when (handle == nullPtr) $ do
     freeHaskellFunPtr fp
-    fail "SDL_AddEventWatch failed"
+    sdlFail "SDL_AddEventWatch failed"
   pure $ do
     removeResizeWatchC handle
     freeHaskellFunPtr fp

@@ -57,6 +57,7 @@ import NanoUI.Backend (Backend (..), BackendSession, SBackend (..), askBackendSe
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, newPixelContext, registerImage, withClipboard, withTheme)
 import NanoUI.Sdl.Internal.Display
+import NanoUI.Sdl.Internal.Error (sdlFail)
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
@@ -324,7 +325,7 @@ syncDisplay ctx env inp = do
   when scaleChanged $ do
     -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
     -- pixel density moves.
-    unlessM (setRenderScale (sdlRenderer env) 1 1) (fail "SDL_SetRenderScale failed")
+    unlessM (setRenderScale (sdlRenderer env) 1 1) (sdlFail "SDL_SetRenderScale failed")
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
   -- Runtime font-family switch: the app publishes its requested family through
@@ -502,7 +503,7 @@ acquireWindowAndRenderer opts flags =
         TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
           (ok, win, ren) <-
             outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
-          unless ok $ fail "SDL_CreateWindowAndRenderer failed"
+          unless ok $ sdlFail "SDL_CreateWindowAndRenderer failed"
           pure (win, ren)
     )
     ( \(win, ren) -> do
@@ -519,9 +520,9 @@ acquireWindowAndRenderer opts flags =
 startSdl :: Acquire ()
 startSdl = do
   mkAcquire
-    (unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) (fail "SDL_Init(SDL_INIT_VIDEO) failed"))
+    (unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) (sdlFail "SDL_Init(SDL_INIT_VIDEO) failed"))
     (const quitSafe)
-  liftIO $ unlessM initRefreshEvent (fail "SDL_RegisterEvents failed for refresh wake")
+  liftIO $ unlessM initRefreshEvent (sdlFail "SDL_RegisterEvents failed for refresh wake")
 
 -- | Open a window, its renderer and what draws into it. A further window
 -- shares its session's first window's cursors and its font and UI scale
@@ -580,7 +581,7 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
       if wsTransparent settings
         then Just <$> transparentBlends sdlRenderer
         else pure Nothing
-  liftIO $ unlessM (setRenderScale sdlRenderer 1 1) (fail "SDL_SetRenderScale failed")
+  liftIO $ unlessM (setRenderScale sdlRenderer 1 1) (sdlFail "SDL_SetRenderScale failed")
   -- Text input runs only while a widget takes text ('syncTextInput'); this
   -- stops it when the session ends.
   mkAcquire

@@ -4,6 +4,7 @@ module NanoUI.Sdl.Internal.Render
   , newRenderBatch
   , destroyRenderBatch
   , flushRenderBatch
+  , discardRenderBatch
   , renderDrawDataPass
   , glyphPageTexture
   , snapDamage
@@ -22,7 +23,7 @@ import Foreign.Marshal.Alloc (free, malloc)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (poke)
 import NanoUI (Rect (..), colorA, colorB, colorG, colorR)
-import NanoUI.Backend (cmdEffectiveClip, pixelEdges, snapDamage)
+import NanoUI.Backend (cmdEffectiveClip, snapDamage)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, lookupImage)
 import NanoUI.Testing
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
@@ -43,9 +44,24 @@ data ClipState
       {-# UNPACK #-} !Int
   deriving Eq
 
+-- | A layout-unit clip as the device-pixel rect SDL clips to. The pass
+-- draws at render scale 1 ('nano_ui_batch_begin' scales the positions), so
+-- the clip is the same whole pixels the damage was snapped to
+-- ('snapDamage'), whatever the scale.
 {-# INLINE toClipKey #-}
-toClipKey :: Rect -> ClipState
-toClipKey r = let (x0, y0, x1, y1) = pixelEdges 1 r in ClipKey x0 y0 (max 1 (x1 - x0)) (max 1 (y1 - y0))
+toClipKey :: Float -> Rect -> ClipState
+toClipKey scale (Rect x y w h) =
+  let x0 = lower (x * scale)
+      y0 = lower (y * scale)
+      x1 = upper ((x + w) * scale)
+      y1 = upper ((y + h) * scale)
+   in ClipKey x0 y0 (max 1 (x1 - x0)) (max 1 (y1 - y0))
+  where
+    -- An edge 'snapDamage' put on a pixel comes back from layout units a
+    -- rounding error to either side of it; it stays on that pixel rather than
+    -- taking in the next.
+    lower v = floor (v + 1.0e-3)
+    upper v = ceiling (v - 1.0e-3)
 
 applyClipState ::
   RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
@@ -62,17 +78,25 @@ applyClipState batch ref ren next = do
 
 -- | Draw every command in layer order, clipped to its own rect and to
 -- the damage. A full repaint clears the target to 'drawClear' first.
+--
+-- The renderer must be at render scale 1: positions are multiplied by the
+-- scale here, and clips are whole device pixels. The pass submits
+-- everything it queued before it returns, while the draw data's buffers
+-- are held; a pass that throws drops what it had queued instead.
 renderDrawDataPass ::
   RenderBatch
   -> Ptr SDL_Renderer
+  -> Float
+  -- ^ Device pixels per layout unit.
   -> DrawData
   -> ImageAtlas
   -> Ptr ()
   -- ^ The glyph atlas, whose pages text draws from ('glyphPageTexture').
   -> Damage
   -> IO ()
-renderDrawDataPass batch ren drawData images glyphs damage =
+renderDrawDataPass batch ren scale drawData images glyphs damage =
   unless (damageIsEmpty damage) $ do
+    batchBegin (rbBatch batch) (realToFrac scale)
     clipRef <- newIORef ClipNone
     void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
     mDamage <- case damage of
@@ -83,7 +107,7 @@ renderDrawDataPass batch ren drawData images glyphs damage =
         pure Nothing
       -- The draw list starts a clip frame with its own page backdrop, so a
       -- clip needs no clear here.
-      DamageClip r -> Just r <$ applyClipState batch clipRef ren (toClipKey r)
+      DamageClip r -> Just r <$ applyClipState batch clipRef ren (toClipKey scale r)
     let drawCmd vp ip cmd = do
           let !count = fromIntegral (cmdIndexCount cmd)
               -- The C side rejects triangles outside the damage: whether
@@ -92,15 +116,20 @@ renderDrawDataPass batch ren drawData images glyphs damage =
                 Nothing -> (0, 0, 0, 0, 0)
                 Just (Rect x y w h) -> (1, realToFrac x, realToFrac y, realToFrac w, realToFrac h)
           when (count >= 3) $ for_ (cmdEffectiveClip mDamage cmd) $ \mClip -> do
-            applyClipState batch clipRef ren (maybe ClipNone toClipKey mClip)
+            applyClipState batch clipRef ren (maybe ClipNone (toClipKey scale) mClip)
             let !texId = cmdTextureId cmd
             tex <- if textureGlyphPage texId >= 0 then glyphPageTexture glyphs (textureGlyphPage texId) else lookupImage images texId
             batchDrawRange (rbBatch batch) vp (fromIntegral (drawVertexCount drawData)) ip
               (fromIntegral (cmdIndexOffset cmd)) count tex hasDamage dx dy dw dh
-    withForeignPtr (drawVertices drawData) $ \vp ->
-      withForeignPtr (drawIndices drawData) $ \ip ->
-        U.forM_ (drawCommands drawData) (drawCmd vp ip)
-    applyClipState batch clipRef ren ClipNone
+    -- The batch keeps the vertex and index pointers until it flushes, so
+    -- the last flush is inside the buffers' scope.
+    ( withForeignPtr (drawVertices drawData) $ \vp ->
+        withForeignPtr (drawIndices drawData) $ \ip -> do
+          U.forM_ (drawCommands drawData) (drawCmd vp ip)
+          flushRenderBatch batch
+          applyClipState batch clipRef ren ClipNone
+      )
+      `onException` discardRenderBatch batch
 
 -- | The texture of a glyph atlas page: null for a page never opened, one past
 -- the last, or a null atlas.
@@ -123,8 +152,13 @@ newRenderBatch ren = do
 destroyRenderBatch :: RenderBatch -> IO ()
 destroyRenderBatch batch = batchDestroy (rbBatch batch) >> free (rbClipRect batch)
 
+-- | Draw what the batch has queued.
 flushRenderBatch :: RenderBatch -> IO ()
 flushRenderBatch = batchFlush . rbBatch
+
+-- | Drop what the batch has queued without drawing it.
+discardRenderBatch :: RenderBatch -> IO ()
+discardRenderBatch = batchDiscard . rbBatch
 
 foreign import ccall unsafe "nano_ui_text_atlas_texture"
   textAtlasTexture :: Ptr () -> CInt -> IO (Ptr SDL_Texture)
@@ -137,6 +171,13 @@ foreign import ccall unsafe "nano_ui_batch_destroy"
 
 foreign import ccall unsafe "nano_ui_batch_flush"
   batchFlush :: Ptr () -> IO ()
+
+foreign import ccall unsafe "nano_ui_batch_discard"
+  batchDiscard :: Ptr () -> IO ()
+
+-- | Start a pass at a scale, in device pixels per layout unit.
+foreign import ccall unsafe "nano_ui_batch_begin"
+  batchBegin :: Ptr () -> CFloat -> IO ()
 
 -- | Queue a command: the batch, the vertices and their count, the indices,
 -- the command's first index and index count, its texture, then whether to
