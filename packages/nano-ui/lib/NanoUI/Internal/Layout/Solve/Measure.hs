@@ -32,6 +32,9 @@ module NanoUI.Internal.Layout.Solve.Measure
   , measuredHeightAt
   , wrapLineCross
   , rowChildHeightAt
+  , ContainerKind (..)
+  , readContainerKind
+  , readGridColumns
   ) where
 
 import Control.Monad (filterM, foldM, forM_, guard, mfilter, unless, when)
@@ -642,12 +645,51 @@ adornedButtonGroup measurer txt gap (AdornRows li lw ti tw _) = do
   let pieces = fromEnum (li >= 0) + fromEnum (labelW > 0) + fromEnum (ti >= 0)
   pure (labelW, lw + labelW + tw + gap * fromIntegral (max 0 (pieces - 1)))
 
-measureContainer :: SolveEnv -> NodeIdx -> IO ()
-measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
-  (pad, gap, dir) <- containerFlow a idx
+-- | How a container lays out its flow children: in a grid, as layers, or
+-- in lines along its direction ('TagDirection') that wrap or not. Grid
+-- columns ('TreeGridCols' above 0, or 'StyleGridMinColW' above 0) take
+-- precedence over the 'TagFlow'.
+--
+-- The constructors carry no fields, so choosing one allocates nothing even
+-- where GHC passes it to a join point; a grid reads its columns with
+-- 'readGridColumns'. The direction stays a separate case, so that each pass
+-- calls its wrap or line layout from one site and GHC still inlines it.
+data ContainerKind
+  = KGrid
+  | KLayered
+  | KWrap
+  | KLine
+
+-- | Container @idx@'s 'ContainerKind'. The measure and position passes
+-- branch on it, so a new layout mode is a constructor that
+-- @-Wincomplete-patterns@ makes each of them handle.
+{-# INLINE readContainerKind #-}
+readContainerKind :: NodeArenaArrays -> NodeIdx -> IO ContainerKind
+readContainerKind a idx = do
   gCols <- readTree a idx TreeGridCols
   minColW <- readStyle a idx StyleGridMinColW
   flow <- readTagEnum a idx TagFlow
+  pure $
+    if gCols > 0 || minColW > 0
+      then KGrid
+      else case flow of
+        Layered -> KLayered
+        Wrap -> KWrap
+        Line -> KLine
+
+-- | A grid container's column count ('TreeGridCols', 0 to pick it by width)
+-- and minimum column width ('StyleGridMinColW').
+{-# INLINE readGridColumns #-}
+readGridColumns :: NodeArenaArrays -> NodeIdx -> IO (Int, Float)
+readGridColumns a idx = (,) <$> readTree a idx TreeGridCols <*> readStyle a idx StyleGridMinColW
+
+measureContainer :: SolveEnv -> NodeIdx -> IO ()
+measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
+  (pad, gap, dir) <- containerFlow a idx
+  -- Read here rather than in the grid branch: read there, they made the
+  -- grow profile scene, which has no grid, allocate 0.005% more.
+  (gCols, minColW) <- readGridColumns a idx
+  kind <- readContainerKind a idx
   wAx@(AxisSizing wTag _ _ _) <- readAxisSizing a idx True
   hAx <- readAxisSizing a idx False
   nt <- readTagEnum a idx TagNodeType
@@ -658,23 +700,21 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
       inner (AxisSizing tag val lo hi) p = max 0 ((if tag == SizingFixed then clamp lo hi val else hi) - p)
       innerMaxW = inner wAx padX
       innerAvailH = inner hAx padY
-  (contentW, contentH) <-
-    if gCols > 0 || minColW > 0
-      then measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap
-      else case flow of
-        -- Layered children make a box as large as the largest on each axis.
-        Layered -> do
-          let step (FlowAcc count maxW maxH) ci = do
-                Rect _ _ w h <- getNodeRect na ci
-                pure (FlowAcc (count + 1) (max maxW w) (max maxH h))
-          FlowAcc _ layersW layersH <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-          pure (layersW, layersH)
-        Wrap -> measureWrap env idx dir gap (if dir == DirRow then innerMaxW else innerAvailH)
-        Line
-          | dir == DirColumn && chrome -> do
-              n <- loadChildrenScratch na idx (flowChildSize env False innerMaxW innerAvailH)
-              foldChromeColumnScratch na n gap
-          | otherwise -> foldChildDimsFromParent env idx dir gap
+  (contentW, contentH) <- case kind of
+    KGrid -> measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap
+    -- Layered children make a box as large as the largest on each axis.
+    KLayered -> do
+      let step (FlowAcc count maxW maxH) ci = do
+            Rect _ _ w h <- getNodeRect na ci
+            pure (FlowAcc (count + 1) (max maxW w) (max maxH h))
+      FlowAcc _ layersW layersH <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+      pure (layersW, layersH)
+    KWrap -> measureWrap env idx dir gap (if dir == DirRow then innerMaxW else innerAvailH)
+    KLine
+      | dir == DirColumn && chrome -> do
+          n <- loadChildrenScratch na idx (flowChildSize env False innerMaxW innerAvailH)
+          foldChromeColumnScratch na n gap
+      | otherwise -> foldChildDimsFromParent env idx dir gap
   minAssignedW <- minAssignedOn na nt True idx wAx
   minAssignedH <- minAssignedOn na nt False idx hAx
   let h = sizeWithin hAx (if minAssignedH then 0 else contentH + padY)
@@ -981,8 +1021,7 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
 
       _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
             (pad, gap, dir) <- containerFlow a idx
-            gCols <- readTree a idx TreeGridCols
-            minColW <- readStyle a idx StyleGridMinColW
+            kind <- readContainerKind a idx
             let innerW = max 0 (effW' - padL pad - padR pad)
                 -- A child's height when @w@ is offered to it, kept to its max width.
                 childH w ci = do
@@ -991,10 +1030,11 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
                   let subW = widthOf subAx iw w
                   recomputeFitHeightAtWidth env ci (if isBounded (axMax subAx) then min subW (axMax subAx) else subW)
                 padded h = pure (clamp minH maxH (h + padT pad + padB pad))
-            if gCols > 0 || minColW > 0
-              then do
-                -- A grid stacks rows, each as tall as its tallest cell at the
-                -- column width, not every cell.
+            case kind of
+              -- A grid stacks rows, each as tall as its tallest cell at the
+              -- column width, not every cell.
+              KGrid -> do
+                (gCols, minColW) <- readGridColumns a idx
                 let cols = gridColumnCount gCols minColW innerW gap
                     colW = max 0 ((innerW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
                     rows [] = []
@@ -1002,40 +1042,37 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
                 hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
                 let rowHs = map (foldl' max 0) (rows hs)
                 padded (if null rowHs then 0 else sum rowHs + gap * fromIntegral (length rowHs - 1))
-              else do
-                flow <- readTagEnum a idx TagFlow
-                case flow of
-                  -- Layers are as tall as the tallest child at this width.
-                  Layered -> padded . foldl' max 0 =<< mapM (childH innerW) =<< flowChildrenInOrder na idx
-                  -- A wrapping row is as tall as the lines this width breaks
-                  -- it into, with percentages resolved against the width. A
-                  -- wrapping column's height does not depend on its width.
-                  Wrap
-                    | dir == DirRow -> do
-                        let sized ci = do
-                              subAx <- getWidthSizing na ci
-                              Rect _ _ w h <- getNodeRect na ci
-                              pure (ci, (percentOr subAx innerW w, h))
-                        kids <- mapM sized =<< flowChildrenInOrder na idx
-                        lineGap <- readStyle a idx StyleLineGap
-                        -- A line is as thick as its measured children
-                        -- ('wrapLineCross') or what they grow to at their
-                        -- shares of it, as 'positionWrap' places it.
-                        let lns = wrapLines innerW gap (fst . snd) kids
-                            lineCross l = do
-                              measured <- wrapLineCross env dir l
-                              maybe measured (max measured) <$> lineHeightAt env l innerW gap
-                        crosses <- mapM lineCross lns
-                        padded (sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
-                    | otherwise -> pure oldH
-                  Line
-                    | dir == DirRow -> rowHeightAt env idx innerW gap >>= maybe (pure oldH) padded
-                    | otherwise -> do
-                        let step (FlowAcc count contentH _) ci = do
-                              subH <- childH innerW ci
-                              pure (FlowAcc (count + 1) (contentH + subH) 0)
-                        FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
-                        padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
+              -- Layers are as tall as the tallest child at this width.
+              KLayered -> padded . foldl' max 0 =<< mapM (childH innerW) =<< flowChildrenInOrder na idx
+              -- A wrapping row is as tall as the lines this width breaks it
+              -- into, with percentages resolved against the width. A
+              -- wrapping column's height does not depend on its width.
+              KWrap
+                | dir == DirRow -> do
+                    let sized ci = do
+                          subAx <- getWidthSizing na ci
+                          Rect _ _ w h <- getNodeRect na ci
+                          pure (ci, (percentOr subAx innerW w, h))
+                    kids <- mapM sized =<< flowChildrenInOrder na idx
+                    lineGap <- readStyle a idx StyleLineGap
+                    -- A line is as thick as its measured children
+                    -- ('wrapLineCross') or what they grow to at their shares
+                    -- of it, as 'positionWrap' places it.
+                    let lns = wrapLines innerW gap (fst . snd) kids
+                        lineCross l = do
+                          measured <- wrapLineCross env dir l
+                          maybe measured (max measured) <$> lineHeightAt env l innerW gap
+                    crosses <- mapM lineCross lns
+                    padded (sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
+                | otherwise -> pure oldH
+              KLine
+                | dir == DirRow -> rowHeightAt env idx innerW gap >>= maybe (pure oldH) padded
+                | otherwise -> do
+                    let step (FlowAcc count contentH _) ci = do
+                          subH <- childH innerW ci
+                          pure (FlowAcc (count + 1) (contentH + subH) 0)
+                    FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
+                    padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
 
       _ -> pure oldH
 
@@ -1166,10 +1203,16 @@ markSteadyHeight env@SolveEnv {seArena = na, seArrays = a} idx = do
           NodeDrawing -> not . isJust <$> (msLookupMeasure (seMs env) =<< getWidgetId na idx)
           _
             | nt == NodeContainer || nt == NodePanel -> do
-                flow <- readTagEnum a idx TagFlow
-                minColW <- readStyle a idx StyleGridMinColW
+                kind <- readContainerKind a idx
                 childMark <- readTagEnum a idx TagSteadyHeight
-                pure (flow /= Wrap && minColW <= 0 && childMark /= (2 :: Int))
+                -- Wrapping lines and a grid that picks its column count by
+                -- width can change height with width.
+                byWidth <- case kind of
+                  KGrid -> (> 0) <$> readStyle a idx StyleGridMinColW
+                  KLayered -> pure False
+                  KWrap -> pure True
+                  KLine -> pure False
+                pure (not byWidth && childMark /= (2 :: Int))
             | otherwise -> pure True
   writeTagEnum a idx TagSteadyHeight steady
   unless (steady || isFloatingNode nt) $ do
