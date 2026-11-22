@@ -22,6 +22,9 @@ foreign import ccall unsafe "rgfw_test_event"
 foreign import ccall unsafe "rgfw_test_win32_drag"
   win32Drag :: Ptr RGFW_window -> CInt -> CInt -> CInt -> IO CInt
 
+foreign import ccall unsafe "rgfw_test_win32_title"
+  win32Title :: Ptr RGFW_window -> IO CInt
+
 foreign import ccall unsafe "rgfw_test_enter"
   queueEnter :: Ptr RGFW_window -> CInt -> CInt -> IO ()
 
@@ -72,6 +75,7 @@ main = withEventBuffer $ \event -> do
       printf "event-key: %.6f ns/read | %.3f B/read\n" (perRead (t1 - t0)) (perRead (before - after))
     _ -> do
       putStrLn "RGFW native event ABI: ok"
+      titleCheck
       stopWaitCheck event
       enterCheck event
       captureCheck event
@@ -99,6 +103,14 @@ stopWaitCheck event = withTestWindow "stop wait" $ \win -> do
   waited <- mapM (const (timedWait 100)) [1 .. 3 :: Int]
   unless (any (>= 0.07) waited) $
     fail ("RGFW stop wait: the waits after the drain returned at once: " ++ show waited)
+
+-- | A title outside ASCII reaches the window as UTF-8, whatever the
+-- process locale. Windows only, where the title can be read back.
+titleCheck :: IO ()
+titleCheck
+  | os /= "mingw32" = pure ()
+  | otherwise = withTestWindowTitled "title" "nano \x00e9\x4e2d" $ \(Window ptr) ->
+      win32Title ptr >>= \ok -> unless (ok == 1) (fail "RGFW title: the window title is not the UTF-8 title asked for")
 
 -- | The pointer entering the window comes as motion to where it entered:
 -- until it moves, nothing else reports where it is.
@@ -142,11 +154,15 @@ events win event =
 -- close it and report "RGFW <name>: ok". Skipped on Linux without an X
 -- display, and without such a window.
 withTestWindow :: String -> (Window -> IO ()) -> IO ()
-withTestWindow name body = do
+withTestWindow name = withTestWindowTitled name name
+
+-- | 'withTestWindow' with a window title other than the check's name.
+withTestWindowTitled :: String -> String -> (Window -> IO ()) -> IO ()
+withTestWindowTitled name title body = do
   display <- lookupEnv "DISPLAY"
   if os == "linux" && maybe True null display
     then putStrLn ("RGFW " ++ name ++ ": skipped (no X display)")
     else
-      createWindowGL name 0 0 64 64 rgfw_windowHide 3 2 >>= \case
+      createWindowGL title 0 0 64 64 rgfw_windowHide 3 2 >>= \case
         Nothing -> putStrLn ("RGFW " ++ name ++ ": skipped (no OpenGL 3.2 window)")
         Just win -> body win >> closeWindow win >> putStrLn ("RGFW " ++ name ++ ": ok")
