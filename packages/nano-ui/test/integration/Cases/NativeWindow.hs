@@ -356,6 +356,12 @@ runWindowsRunnerTest ctx failed = do
   frames <- newIORef (0 :: Int)
   childSaw <- newIORef []
   closed <- newIORef []
+  -- The size the host gives the window, its resize watch, whether the watch
+  -- was removed, and each frame's size and full-repaint flag, newest first.
+  hostSize <- newIORef Nothing
+  watch <- newIORef (pure ())
+  unwatched <- newIORef False
+  childDraws <- newIORef []
   let ops =
         WindowOps
           { woOpen = \_ settings -> (,) (wsTitle settings) <$> newContext
@@ -363,10 +369,13 @@ runWindowsRunnerTest ctx failed = do
           , woApplyEvent = const
           , woIsButtonEdge = const False
           , woIsClose = id
-          , woSync = \_ c i -> pure (c, i)
-          , woDraw = \_ c v i _ -> (\(_, _, more) -> more) <$> runFrame c i v
+          , woSync = \_ c i -> (\s -> (c, maybe i (\sz -> i {inputWindowSize = sz}) s)) <$> readIORef hostSize
+          , woDraw = \_ c v i force -> do
+              modifyIORef' childDraws ((inputWindowSize i, force) :)
+              (\(_, _, more) -> more) <$> runFrame c i v
           , woCursor = \_ _ _ -> pure ()
           , woPacingMs = const 16
+          , woWatchResize = \_ act -> writeIORef unwatched False >> writeIORef watch act >> pure (writeIORef unwatched True)
           }
       firstFrame = do
         n <- liftIO (atomicModifyIORef' frames (\k -> (k + 1, k + 1)))
@@ -386,6 +395,12 @@ runWindowsRunnerTest ctx failed = do
   assertEq failed [2] . take 1 =<< readIORef childSaw
   quiet <- settled
   assertEq failed quiet =<< settled
+  -- With the loop held (a modal size loop), the resize watch draws the
+  -- window at its new size, repainting it whole.
+  before <- length <$> readIORef childDraws
+  writeIORef hostSize (Just (Size 300 200))
+  join (readIORef watch)
+  assertEq failed [(Size 300 200, True)] . (\ds -> take (length ds - before) ds) =<< readIORef childDraws
   assertEq failed False =<< lwFirstDue lw
   _ <- mainFrame
   step
@@ -394,3 +409,4 @@ runWindowsRunnerTest ctx failed = do
   queue True
   step
   assertEq failed (["second"], False, 0) =<< (,,) <$> readIORef closed <*> readVarIO open <*> (length <$> openWindows windows)
+  assertEq failed True =<< readIORef unwatched

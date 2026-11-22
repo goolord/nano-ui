@@ -4,19 +4,22 @@
 module NanoUI.Sdl.Internal.Children
   ( SdlWindows (..)
   , newSdlWindows
+  , afterFirstPass
+  , sdlLoopWindows
   , decodeForWindow
   , routeEvents
   , syncFirstCursor
   ) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.IORef (writeIORef)
 import Data.Word (Word32)
 import NanoUI (whenM)
 import NanoUI.Backend (Context, Input)
-import NanoUI.Runner.Windows (WindowOps (..), Windows, hasWindows, newWindows, openWindows)
+import NanoUI.Runner (LoopWindows (..), tryWithDrawingLock)
+import NanoUI.Runner.Windows (WindowOps (..), Windows, afterMainPass, hasWindows, loopWindows, newWindows, openWindows)
 import NanoUI.Sdl.Internal.Cursor (syncPointerCursor)
-import NanoUI.Sdl.Internal.Display (pointerInWindow)
+import NanoUI.Sdl.Internal.Display (ResizeWatches (..), pointerInWindow, watchResizes)
 import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Runner (resetRenderTextures, sdlDrawFrame)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), SdlOptions, openChildWindow, refreshDisplayRate, sdlPacingMs, syncDisplay, windowZoom)
@@ -36,10 +39,15 @@ data SdlWindows = SdlWindows
   { swFirst :: !SdlEnv
   , swFirstId :: !Word32
   , swWindows :: !(Windows SdlChild SdlEvent)
+  , swWatches :: !ResizeWatches
+  -- ^ The session's resize watches, the first window's among them.
   }
 
-newSdlWindows :: SdlOptions -> SdlEnv -> IO SdlWindows
-newSdlWindows opts first = SdlWindows first <$> windowId first <*> newWindows ops
+-- | The further windows of the session whose first window is @first@. Each
+-- has a resize watch from @watches@, which draws it while Windows' modal
+-- size loop holds the event loop, as the first window's watch does.
+newSdlWindows :: SdlOptions -> SdlEnv -> ResizeWatches -> IO SdlWindows
+newSdlWindows opts first watches = (\wid ws -> SdlWindows first wid ws watches) <$> windowId first <*> newWindows ops
   where
     ops =
       WindowOps
@@ -55,7 +63,21 @@ newSdlWindows opts first = SdlWindows first <$> windowId first <*> newWindows op
         , woDraw = \c ctx view inp force -> sdlDrawFrame ctx view (scEnv c) inp force
         , woCursor = \c ctx inp -> syncCursorIn (scEnv c) ctx inp
         , woPacingMs = sdlPacingMs . scEnv
+          -- A further window has vsync off, so its watch frames need no
+          -- vsync pause.
+        , woWatchResize = watchResizes watches . sdlWindow . scEnv
         }
+
+-- | 'afterMainPass' under the drawing lock: a further window's frame drawn
+-- by the loop and one drawn by its resize watch exclude each other, as the
+-- first window's do.
+afterFirstPass :: SdlWindows -> Context -> IO ()
+afterFirstPass w ctx = void (tryWithDrawingLock (rwDrawing (swWatches w)) (afterMainPass (swWindows w) ctx))
+
+-- | The windows for 'NanoUI.Runner.sdWindows', running their passes with
+-- 'afterFirstPass'.
+sdlLoopWindows :: SdlWindows -> LoopWindows
+sdlLoopWindows w = (loopWindows (swWindows w)) {lwAfterPass = afterFirstPass w}
 
 windowId :: SdlEnv -> IO Word32
 windowId env = (\(SDL_WindowID (Uint32 w)) -> w) <$> getWindowID (sdlWindow env)

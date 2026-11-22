@@ -4,9 +4,8 @@ module NanoUI.Sdl.Internal.Session
   ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (SomeException, bracket, finally, handle, throwIO)
+import Control.Exception (bracket, finally)
 import Control.Monad (forM_, unless, void, when)
-import Data.Foldable (traverse_)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
@@ -15,10 +14,10 @@ import NanoUI (WindowSettings (..), followSystemTheme, whenM)
 import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
 import NanoUI.Runner
 import NanoUI.Testing (Context, newPixelContext, withTheme)
-import NanoUI.Runner.Windows (afterMainPass, closeWindows, loopWindows)
+import NanoUI.Runner.Windows (closeWindows)
 import NanoUI.Sdl.Internal.Children
 import NanoUI.Sdl.Internal.Input
-import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
+import NanoUI.Sdl.Internal.Display (ResizeWatches (..), newResizeWatches, pushRefreshEvent, rethrowResizeFailure, scaleMoved, watchResizes)
 import NanoUI.Sdl.Internal.Window
   (SdlEnv (..), SdlOptions (..), presentPaces, registerAppImages, restartPresentProbe, sdlLivePacingMs, sdlPacingMs, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
@@ -36,14 +35,17 @@ runSdlSession options drawFn = do
   setExplainLayout ctx (sdlExplainLayout options)
   registerAppImages options ctx
   withSdl options ctx $ \ctx0 env -> do
+    -- Each window's resize watch draws it while Windows' modal size loop
+    -- holds the event loop. They share the loop's drawing lock.
+    watches <- newResizeWatches
+    let drawing = rwDrawing watches
     -- Windows the view opens beside this one ('NanoUI.nativeWindow').
-    windows <- newSdlWindows options env
+    windows <- newSdlWindows options env watches
     -- Every exit closes the further windows, those the opening frames
     -- opened among them, and while SDL is still running.
     flip finally (closeWindows (swWindows windows)) $ do
       void $ setRenderDrawBlendModeSafe (sdlRenderer env) (maybe (fromIntegral sDL_BLENDMODE_BLEND) fst (sdlTransparent env))
       prev <- newIORef emptyInput
-      drawing <- newDrawingLock
       -- The resize watch presents with vsync off: Windows' modal size loop
       -- cannot take the next drag step while a present waits for vblank. The
       -- main loop turns vsync back on before its own frames.
@@ -56,18 +58,14 @@ runSdlSession options drawFn = do
       -- decided whether to draw. That frame already covers the size change and
       -- expose events the loop is about to see.
       resizePresented <- newIORef Nothing
-      -- An exception from a frame drawn here cannot unwind past the C that
-      -- called the watch: GHC would end the process there, past every handler
-      -- and release. It waits for the loop's next pass to throw it, and the
-      -- watch draws nothing more.
-      resizeFailure <- newIORef Nothing
       -- When the watch last drew, or 0 when the loop has drawn since. A watch
       -- frame after another ticks animations by the time between them, not by
       -- the loop's last delta, and the loop's next frame ticks only the time
       -- after the watch's.
       watchDrawnAt <- newIORef 0
       -- The live context is the session's: 'syncDisplay' answers it.
-      let resizeFrame = void $ tryWithDrawingLock drawing $ do
+      -- 'watchResizes' runs this under the drawing lock.
+      let resizeFrame = do
             liveCtx <- readIORef (sdlCachedCtx env)
             inp <- readIORef prev
             scale0 <- readIORef (sdlScaleRef env)
@@ -86,8 +84,6 @@ runSdlSession options drawFn = do
               -- whether the driver honours vsync.
               restartPresentProbe env
               writeIORef resizePresented (Just (inputWindowSize inpSynced))
-          onResize = whenM (isNothing <$> readIORef resizeFailure) $
-            handle (\(e :: SomeException) -> writeIORef resizeFailure (Just e)) resizeFrame
       -- A wake (a background thread changed what the view reads, a file dialog
       -- finished) asks for a frame. What that frame presents is up to its
       -- damage: a wake that changed nothing on screen costs the UI pass and no
@@ -133,7 +129,7 @@ runSdlSession options drawFn = do
       writeIORef prev inp1
       -- Open the windows the opening frames declared, which the loop would
       -- otherwise leave for its first pass, after waiting for input.
-      afterMainPass (swWindows windows) ctx2
+      afterFirstPass windows ctx2
       -- The last opening frame may have asked for another: it marked the
       -- context dirty, which the loop sees by itself, or a wake arrived after
       -- it began, which the drains above took off the queue. Queue that wake
@@ -167,12 +163,13 @@ runSdlSession options drawFn = do
               , sdIsSessionQuit = (== EvQuit)
               , sdSyncDisplay   = \c inp -> do
                   writeIORef passStart =<< getMonotonicTime
-                  readIORef resizeFailure >>= traverse_ throwIO
+                  rethrowResizeFailure watches
                   pauseVsync False
                   synced@(_, inp') <- syncDisplay c env inp
                   synced <$ writeIORef prev inp'
               , sdDebug         = sdlDebug env
               , sdContinuous    = sdlContinuous env
+              , sdVsyncOff      = not (sdlVsync env)
               , sdPacingMs      = sdlPacingMs env
                 -- A frame that skipped (empty damage, e.g. an animation scrolled
                 -- out of view) did not wait for vblank, so it must not loop
@@ -210,7 +207,7 @@ runSdlSession options drawFn = do
                 -- The paced wait above aligns frames itself.
               , sdAlignSec      = 0
               , sdShouldQuit    = sdlAppShouldQuit options
-              , sdWindows       = Just (loopWindows (swWindows windows))
+              , sdWindows       = Just (sdlLoopWindows windows)
               }
       -- A close request the opening frames took, which the loop would not see:
       -- it ends the session here, or with exits off the loop's first frame
@@ -218,7 +215,7 @@ runSdlSession options drawFn = do
       quit <- readIORef quitTaken
       closeNow <- if quit then requestWindowClose ctx2 else pure False
       unless closeNow $
-        bracket (installResizeWatch (sdlWindow env) onResize) id $ \_ ->
+        bracket (watchResizes watches (sdlWindow env) resizeFrame) id $ \_ ->
           runSessionLoop drv ctx2 inp1
 
 -- | Wait until a time ('getMonotonicTime'): sleep for most of it, then spin

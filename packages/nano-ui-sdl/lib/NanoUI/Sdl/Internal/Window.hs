@@ -151,7 +151,9 @@ data SdlOptions = SdlOptions
   -- An @SDL_RENDER_DRIVER@ in the environment wins over this.
   , sdlAppContinuous :: !Bool
   -- ^ Redraw on every pass without waiting for events, paced by vsync when
-  -- 'sdlAppVsync' is on (default: 'False').
+  -- 'sdlAppVsync' is on, or by the display's refresh period when the driver
+  -- ignores vsync (default: 'False'). With 'sdlAppVsync' off the passes
+  -- run without waiting.
   , sdlExplainLayout :: !Bool
   -- ^ Start with the layout overlay on (default: 'False'). A view toggles
   -- it with @explainLayout@.

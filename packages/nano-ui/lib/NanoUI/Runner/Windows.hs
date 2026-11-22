@@ -23,8 +23,8 @@ module NanoUI.Runner.Windows
   ) where
 
 import Control.Concurrent (myThreadId)
-import Control.Exception (onException)
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Exception (finally, onException)
+import Control.Monad (filterM, forM_, join, unless, when)
 import Data.Foldable (foldlM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find)
@@ -63,6 +63,12 @@ data WindowOps w ev = WindowOps
   -- ^ Sync the cursor, after every pass of the window.
   , woPacingMs :: w -> Int
   -- ^ The wait between frames while the window animates.
+  , woWatchResize :: w -> IO () -> IO (IO ())
+  -- ^ Run the action whenever the host resizes the window, including while
+  -- it holds the first window's loop in a modal size loop (Windows does
+  -- while a window border is dragged); answer the action that stops it. The
+  -- action draws the window at its new size. A backend whose loop keeps
+  -- running during a resize answers @\\_ _ -> pure (pure ())@.
   }
 
 -- | Active set of secondary native windows owned by a session runner.
@@ -89,6 +95,8 @@ data Child w ev = Child
   -- ^ Events not yet taken, newest first.
   , chClicks :: !ClickTracker
   , chLoop :: !(IORef ChildLoop)
+  , chUnwatch :: !(IORef (IO ()))
+  -- ^ Stops its resize watch ('woWatchResize').
   }
 
 -- | A further window's loop state between its passes.
@@ -107,6 +115,9 @@ data ChildLoop = ChildLoop
   -- ^ 'varChangeCount' when its view last ran.
   , clParentFrame :: !Int
   -- ^ The declaring window's frame number at the last sync.
+  , clResized :: !Bool
+  -- ^ A resize watch frame ('liveResize') drew the window since its last
+  -- pass.
   }
 
 -- | Create an empty 'Windows' manager using the given backend callbacks.
@@ -203,14 +214,18 @@ openChild w parent siblings frame decl = do
   myThreadId >>= writeIORef (ctxLoopThread ctx) . Just
   now <- getMonotonicTime
   let inp = applyPointerLeave emptyInput {inputWindowSize = wsSize (childSettings decl)}
-  Child (childKey decl) win parent
-    <$> newIORef decl
-    <*> newIORef False
-    <*> pure siblings
-    <*> newIORef []
-    <*> newIORef []
-    <*> newClickTracker
-    <*> newIORef (ChildLoop ctx inp now False False 2 0 frame)
+  c <-
+    Child (childKey decl) win parent
+      <$> newIORef decl
+      <*> newIORef False
+      <*> pure siblings
+      <*> newIORef []
+      <*> newIORef []
+      <*> newClickTracker
+      <*> newIORef (ChildLoop ctx inp now False False 2 0 frame False)
+      <*> newIORef (pure ())
+  unwatch <- woWatchResize (wOps w) win (liveResize w c) `onException` woClose (wOps w) win
+  c <$ writeIORef (chUnwatch c) unwatch
 
 -- | Close a window and those it declared.
 closeChild :: Windows w ev -> Child w ev -> IO ()
@@ -218,7 +233,7 @@ closeChild w c = unlessM (readIORef (chClosed c)) $ do
   writeIORef (chClosed c) True
   mapM_ (closeChild w) =<< readIORef (chChildren c)
   writeIORef (chChildren c) []
-  woClose (wOps w) (chWin c)
+  join (readIORef (chUnwatch c)) `finally` woClose (wOps w) (chWin c)
 
 -- | Close every further window, when the session ends.
 closeWindows :: Windows w ev -> IO ()
@@ -262,7 +277,13 @@ stepChild w c = do
       then closeRequested w c
       else do
         stamped <- stampClicks (chClicks c) frameInp
-        (ctx', synced) <- woSync ops win ctx stamped
+        (ctx', syncedRaw) <- woSync ops win ctx stamped
+        -- A resize watch frame since the last pass drew this size already,
+        -- which covers the redraw requests the resize queued.
+        let synced
+              | clResized cl && inputWindowSize syncedRaw == inputWindowSize (clInput cl) =
+                  syncedRaw {inputWindowRedraw = False}
+              | otherwise = syncedRaw
         forced <- mustDraw cl
         draw <- if forced then pure True else shouldRedrawFrame ctx' (clInput cl) synced (clWasAnim cl) False wakeDue
         animNow <- anyAnimating ctx'
@@ -274,10 +295,44 @@ stepChild w c = do
               seen <- varChangeCount
               pure cl {clDraw = more, clSettle = max 0 (clSettle cl - 1), clSeen = seen}
             else pure cl
-        writeIORef (chLoop c) $! cl' {clCtx = ctx', clInput = synced, clLastT = now, clWasAnim = animNow}
+        writeIORef (chLoop c) $! cl' {clCtx = ctx', clInput = synced, clLastT = now, clWasAnim = animNow, clResized = False}
         woCursor ops win ctx' synced
         quit <- quitRequested ctx'
         if quit then closeRequested w c else syncChildren w ctx' (chChildren c)
+  where
+    ops = wOps w
+    win = chWin c
+
+-- | A frame of a further window run by its resize watch ('woWatchResize').
+-- While the host holds the first window's loop in a modal size loop,
+-- 'stepChild' does not run, so the watch draws the window at each new size
+-- as the first window's own watch does. It syncs the window and draws when
+-- its size changed or its context is dirty (a display scale change marks
+-- it); the next 'stepChild' then takes the resize's events without drawing
+-- that size again.
+liveResize :: Windows w ev -> Child w ev -> IO ()
+liveResize w c = unlessM (readIORef (chClosed c)) $ do
+  cl <- readIORef (chLoop c)
+  (ctx', synced) <- woSync ops win (clCtx cl) (clearEphemeral (clInput cl))
+  dirty <- isDirty ctx'
+  when (dirty || inputWindowSize synced /= inputWindowSize (clInput cl)) $ do
+    now <- getMonotonicTime
+    view <- childView <$> readIORef (chDecl c)
+    let dt = min maxFrameDt (realToFrac (now - clLastT cl))
+    more <- woDraw ops win ctx' view synced {inputDeltaTime = dt} True
+    seen <- varChangeCount
+    animNow <- anyAnimating ctx'
+    writeIORef (chLoop c) $!
+      cl
+        { clCtx = ctx'
+        , clInput = synced
+        , clLastT = now
+        , clWasAnim = animNow
+        , clDraw = more
+        , clSettle = max 0 (clSettle cl - 1)
+        , clSeen = seen
+        , clResized = True
+        }
   where
     ops = wOps w
     win = chWin c
