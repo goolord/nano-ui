@@ -890,11 +890,27 @@ initialInteractionState = InteractionState
 -- | Mutable state for one UI session. Construct with @newContext@ and use it
 -- serially on the UI thread. Record copies share arenas, stores, and IORefs;
 -- a font-configured copy is not an independent session.
+--
+-- A field whose comment ends with the tag sentence naming
+-- 'NanoUI.Internal.Frame.resetUiBuild' holds what one view run builds:
+-- that function writes the field's initial value before each run. The
+-- nano-ui-test case @per-build-reset@ checks each tagged field and fails
+-- when the number of tags here differs from the fields it checks.
 data Context = Context
   { ctxNodeArena :: NodeArena
+  -- ^ The nodes the view declares, which layout solves and the paint pass
+  -- walks. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxDrawArena :: DrawArena
+  -- ^ The frame's draw commands and vertices, emptied before each paint.
   , ctxHotId :: IORef WidgetId
+  -- ^ The widget under the pointer after this frame's layout
+  -- ('NanoUI.Internal.Frame.Input.refreshHover'), or @WidgetId 0@ for none.
+  -- It is @WidgetId 0@ while the view runs, and the paint pass and the
+  -- draw-reuse key read it. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxLastHotId :: IORef WidgetId
+  -- ^ The same widget as 'ctxHotId', kept through the next view run: the
+  -- next 'NanoUI.Internal.Frame.Input.refreshHover' compares against it to
+  -- start hover fades, and the idle check probes the pointer against it.
   -- | 'intKey's of the topmost pointer-taking node under the pointer and its
   -- ancestors, in the frame the user saw
   -- ('NanoUI.Internal.Frame.Input.recordCoveredWidgets'). Other nodes under
@@ -903,8 +919,20 @@ data Context = Context
   -- is covered.
   , ctxPointerReach :: !(IORef (Maybe IntSet))
   , ctxActiveId :: IORef WidgetId
+  -- ^ The widget holding the left button: set on a press after layout
+  -- ('NanoUI.Internal.Frame.Input.finalizePointerPress') or by a drag, and
+  -- cleared to @WidgetId 0@ on the release
+  -- ('NanoUI.Internal.Frame.Input.finalizePointerRelease'). While it is set,
+  -- no other widget is hovered.
   , ctxClickedId :: IORef WidgetId
+  -- ^ A click the view missed: a release on the active widget's solved rect
+  -- that its last-frame rect did not contain. The widget reports it on the
+  -- next view run ('NanoUI.Internal.Widgets.Node.resolveInteraction'),
+  -- which clears it after the first pass.
   , ctxReleaseClickedId :: IORef WidgetId
+  -- ^ The widget that reported a left click in this view run, so
+  -- 'NanoUI.Internal.Frame.Input.finalizePointerRelease' posts no second
+  -- click for the same release. Cleared before each frame's view.
   -- | Press position of each held button, and the identity of the control
   -- it reached, updated on press and release
   -- ('NanoUI.Internal.Frame.Input.armPointerPress'). Clicks and holds belong
@@ -914,6 +942,7 @@ data Context = Context
   -- gesture geometrically.
   , ctxPressPos :: IORef (Map MouseButton (V2, Maybe WidgetId))
   , ctxFocusId :: IORef WidgetId
+  -- ^ The widget with keyboard focus, or @WidgetId 0@ for none.
   -- | Focus last moved by keyboard or code, so the focused widget shows its
   -- ring. A pointer press hides it.
   , ctxFocusVisible :: IORef Bool
@@ -925,6 +954,7 @@ data Context = Context
   -- next frame routes the composition to it
   -- ('NanoUI.Internal.Frame.TextInput.claimComposition'), and backends read
   -- the text input area from it ('NanoUI.Internal.Frame.TextArea.textInputArea').
+  -- Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxInputMethod :: !(IORef (Maybe InputMethodRequest))
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
@@ -934,6 +964,9 @@ data Context = Context
   , ctxScrollState :: !(IORef ScrollState)
   , ctxDrawingCache :: IORef DrawingCacheState
   , ctxIdCursor :: !IdCursor
+  -- ^ The id path and sibling position the next declared widget takes its
+  -- id from. Starts at 'NanoUI.Internal.Id.initialIdContext'. Reset by
+  -- 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxVarFrame :: !(MutablePrimArray RealWorld Word64)
   -- ^ Var bookkeeping for the frame being built: current pass tick, frame
   -- base tick, pass number, flags, and the passes the last frame ran
@@ -997,7 +1030,8 @@ data Context = Context
   -- 'DamageFull' too, so its clip frames repaint the whole window. True by
   -- default.
   , ctxDamageWanted :: !(IORef Bool)
-  -- | Layout overlay state.
+  -- | Layout overlay state. Its 'esScopes' are ranges of this run's node
+  -- arena. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)
   -- ^ Base theme; scoped themes live in 'ctxThemeScopes'.
@@ -1010,20 +1044,28 @@ data Context = Context
   -- ('NanoUI.Internal.Context.followSystemTheme'); 'Nothing' for a fixed
   -- base theme.
   , ctxContainerStack :: IORef [Int]
+  -- ^ Node indices of the containers open at this point of the view,
+  -- innermost first; a widget's parent is the head. Reset by
+  -- 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
+  -- ^ The run's focus order ('NanoUI.Internal.Context.registerFocusable'),
+  -- in its first 'ctxFocusablesCount' slots. The array is kept between runs
+  -- and grows by doubling.
   , ctxFocusablesCount :: !(PrimVar RealWorld Int)
+  -- ^ How many slots of 'ctxFocusables' this run filled. Reset by
+  -- 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxSpanBase :: SpanArena
   -- ^ Base-layer text spans for the current frame, reused on the next frame.
   , ctxSpanOverlay :: SpanArena
   -- ^ Overlay text spans for the current frame, reused on the next frame.
   , ctxInteractionState :: !(IORef InteractionState)
   -- | Rects the view asked a cursor for this build, newest first: a table's
-  -- column edges. Each build starts empty.
+  -- column edges. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxCursorZones :: !(IORef [(Rect, UiCursorKind)])
   -- | Node ranges [from, below) of this build's
   -- 'NanoUI.withCursorShape' scopes, newest first.
   -- Scopes are pushed when they end, so an outer scope precedes its inner
-  -- ones. Each build starts empty.
+  -- ones. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
   , ctxCursorRegions :: !(IORef [(Int, Int, UiCursorKind)])
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
@@ -1047,8 +1089,8 @@ data Context = Context
   -- timers re-register each frame and the loop can sleep until the next timer.
   , ctxChildWindows :: !(IORef [ChildWindow])
   -- ^ The open native windows the last view run declared
-  -- ('NanoUI.Internal.ChildWindow.nativeWindow'), newest first. Each run
-  -- starts empty.
+  -- ('NanoUI.Internal.ChildWindow.nativeWindow'), newest first. Reset by
+  -- 'NanoUI.Internal.Frame.resetUiBuild'.
   }
 
 -- | A native window a view declared open this frame, for the backend to open
@@ -1060,6 +1102,12 @@ data ChildWindow = ChildWindow
   , childOpen :: !(Var Bool)
   , childSettings :: !WindowSettings
   , childRun :: Context -> Input -> IO ()
+  -- ^ The declared body, as @\\c inp -> 'NanoUI.Internal.Monad.runNanoUI' c inp body@
+  -- ('NanoUI.Internal.ChildWindow.nativeWindow'). A function field because
+  -- the 'NanoUI.NanoUI' type is defined in "NanoUI.Internal.Monad.Core",
+  -- which imports "NanoUI.Internal.Context", which imports this module: a
+  -- @NanoUI ()@ field here would make an import cycle. The backend runs it
+  -- through 'NanoUI.Internal.ChildWindow.childView'.
   }
 
 -- | Convert a widget's hash to its store key. The representation assumes a

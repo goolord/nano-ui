@@ -3,13 +3,21 @@
 
 -- | What one interaction costs: view passes in the frame that saw it, the
 -- kind of damage it produced, and the frames that followed before the view
--- settled. Each row runs on a fresh context.
+-- settled. Each row runs on a fresh context. Also what every view run
+-- starts from.
 module Cases.Passes (tests) where
 
 import Spec
+import Data.Primitive.PrimVar (readPrimVar)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.IO.Utf8 qualified as TIO
 import GHC.Generics (Generic)
+import NanoUI.Internal.Context (Context (..), ExplainState (..), InputMethodRequest (..))
+import NanoUI.Internal.Id.Cursor (readIdCursor)
+import NanoUI.Internal.Layout.Arena (arenaCount)
+import System.Directory (doesDirectoryExist)
+import System.FilePath ((</>))
 
 -- | A model kept whole in one Var, for the rows that focus its fields.
 data Model = Model {title :: !Text, volume :: !Float, name :: !Text}
@@ -30,7 +38,72 @@ fourth hits ui = do
   pure (reverse rs !! 3)
 
 tests :: [Spec]
-tests = [spec "passes-per-interaction" runPassesTest]
+tests =
+  [ spec "passes-per-interaction" runPassesTest
+  , spec "per-build-reset" runPerBuildResetTest
+  ]
+
+-- | Each 'Context' field "NanoUI.Internal.Context.Types" tags as reset by
+-- @resetUiBuild@, shown. A field tagged there needs an entry here.
+perBuild :: Context -> IO [(String, String)]
+perBuild ctx =
+  mapM sequenceA
+    [ ("ctxNodeArena", show <$> arenaCount (ctxNodeArena ctx))
+    , ("ctxHotId", show <$> readIORef (ctxHotId ctx))
+    , ("ctxInputMethod", show <$> readIORef (ctxInputMethod ctx))
+    , ("ctxIdCursor", show <$> readIdCursor (ctxIdCursor ctx))
+    , ("ctxExplain", show . esScopes <$> readIORef (ctxExplain ctx))
+    , ("ctxContainerStack", show <$> readIORef (ctxContainerStack ctx))
+    , ("ctxFocusablesCount", show <$> readPrimVar (ctxFocusablesCount ctx))
+    , ("ctxCursorZones", show <$> readIORef (ctxCursorZones ctx))
+    , ("ctxCursorRegions", show <$> readIORef (ctxCursorRegions ctx))
+    , ("ctxChildWindows", show . length <$> readIORef (ctxChildWindows ctx))
+    ]
+
+-- | Every view run starts with each per-build field at its value in a fresh
+-- context. The view sets each field (a button, a native window, writes at
+-- its end) and the pointer hovers the button, so between frames none is at
+-- that value. The number of fields checked must match the number of tags in
+-- the 'Context' record.
+runPerBuildResetTest :: Context -> IORef Int -> IO ()
+runPerBuildResetTest ctx failed = do
+  fresh <- perBuild ctx
+  starts <- newIORef []
+  let view = do
+        c <- askContext
+        liftIO (perBuild c >>= \s -> modifyIORef starts (s :))
+        _ <- button' "Press"
+        nativeWindow (constVar True) defaultWindowSettings (pure ())
+        liftIO $ do
+          -- For the focused widget, which the frame's end keeps.
+          focus <- readIORef (ctxFocusId c)
+          writeIORef (ctxInputMethod c) (Just (InputMethodRequest focus Nothing InputNormal))
+          modifyIORef' (ctxExplain c) (\es -> es {esScopes = [(0, 1)]})
+          writeIORef (ctxContainerStack c) [0]
+          writeIORef (ctxCursorZones c) [(Rect 0 0 1 1, UiCursorMove)]
+          writeIORef (ctxCursorRegions c) [(0, 1, UiCursorMove)]
+      inp = withInput 400 300
+  _ <- runFrame ctx inp view
+  buttons <- nodesOfType NodeButton ctx
+  let over = case buttons of
+        (_, r) : _ -> inp {inputMousePos = spanCenter r}
+        [] -> inp
+  replicateM_ 2 (runFrame ctx over view)
+  between <- perBuild ctx
+  _ <- runFrame ctx over view
+  seen <- reverse <$> readIORef starts
+  forM_ (zip [1 :: Int ..] seen) $ \(i, s) ->
+    forM_ (zip fresh s) $ \((name, want), (_, got)) ->
+      when (want /= got) $ complain ("view run " <> show i <> " starts with " <> name <> " = " <> got <> ", not " <> want)
+  forM_ (zip fresh between) $ \((name, want), (_, got)) ->
+    when (want == got) $ complain ("the test view leaves " <> name <> " at its initial value " <> want)
+  root : _ <- filterM doesDirectoryExist ["lib", "packages/nano-ui/lib"]
+  src <- TIO.readFile (root </> "NanoUI" </> "Internal" </> "Context" </> "Types.hs")
+  let tags = T.count "Reset by 'NanoUI.Internal.Frame.resetUiBuild'." (T.unwords (filter (/= "--") (T.words src)))
+  when (tags /= length fresh) $
+    complain (show tags <> " Context fields are tagged as reset per build; this test checks " <> show (length fresh))
+  where
+    complain msg = putStrLn ("  " <> msg) >> bump failed
 
 data Kind = Full | Clip | NoDamage
   deriving (Eq, Show)

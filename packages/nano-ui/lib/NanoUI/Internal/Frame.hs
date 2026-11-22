@@ -370,6 +370,11 @@ paintFrame ctx frameInp size explain paintFull clear = do
 -- layout-overlay scopes. A second run after a backwards Var write
 -- (@newFrame@ 'False') keeps the store, animations, prev rects, and the
 -- theme scopes it compares against.
+--
+-- Each 'Context' field this resets in full ends its Haddock with the
+-- sentence "Reset by" and this function's qualified name. A field added
+-- here gets that sentence and an entry in the nano-ui-test case
+-- @per-build-reset@, which counts the sentences.
 resetUiBuild :: Context -> Bool -> IO ()
 resetUiBuild ctx newFrame = do
   beginThemeScopes ctx newFrame
