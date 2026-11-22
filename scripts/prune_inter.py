@@ -13,8 +13,10 @@ def main():
     import sys
     from pathlib import Path
 
+    if len(sys.argv) != 2:
+        sys.exit("usage: prune_inter.py path/to/Inter.ttf")
     root = Path(__file__).resolve().parent.parent
-    src = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(r"C:\Users\zach\Downloads\Inter.ttf")
+    src = Path(sys.argv[1])
     out = root / "packages" / "nano-ui-sdl" / "data" / "inter.ttf"
 
     options = subset.Options()
