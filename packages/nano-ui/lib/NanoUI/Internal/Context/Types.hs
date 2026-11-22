@@ -143,6 +143,7 @@ data ThemeScopes = ThemeScopes
 -- tree.
 data GenCache k v = GenCache !(HashMap k v) !Int !(HashMap k v)
 
+-- | A cache with both generations empty.
 emptyGenCache :: GenCache k v
 emptyGenCache = GenCache HashMap.empty 0 HashMap.empty
 
@@ -300,6 +301,7 @@ data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
 noImagePaint :: ImagePaint
 noImagePaint = ImagePaint 0 Nothing
 
+-- | A 'PrevFrame' with no recorded nodes, as before the first frame.
 emptyPrevFrame :: PrevFrame
 emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
 

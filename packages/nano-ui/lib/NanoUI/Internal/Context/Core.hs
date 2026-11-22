@@ -91,6 +91,7 @@ import NanoUI.Widgets.TextCommand (TextCommand)
 -- State records
 -- =============================================================================
 
+-- | Read a projection of the interaction state.
 {-# INLINE getsInteraction #-}
 getsInteraction :: Context -> (InteractionState -> a) -> IO a
 getsInteraction ctx f = f <$> readIORef (ctxInteractionState ctx)
@@ -100,6 +101,7 @@ getsInteraction ctx f = f <$> readIORef (ctxInteractionState ctx)
 modifyInteraction :: Context -> (InteractionState -> InteractionState) -> IO ()
 modifyInteraction ctx = modifyIORef' (ctxInteractionState ctx)
 
+-- | Read a projection of the overlay state.
 {-# INLINE getsOverlay #-}
 getsOverlay :: Context -> (OverlayState -> a) -> IO a
 getsOverlay ctx f = f <$> readIORef (ctxOverlayState ctx)
@@ -109,6 +111,7 @@ getsOverlay ctx f = f <$> readIORef (ctxOverlayState ctx)
 modifyOverlay :: Context -> (OverlayState -> OverlayState) -> IO ()
 modifyOverlay ctx = modifyIORef' (ctxOverlayState ctx)
 
+-- | Read a projection of the damage bookkeeping.
 {-# INLINE getsDamage #-}
 getsDamage :: Context -> (DamageState -> a) -> IO a
 getsDamage ctx f = f <$> readIORef (ctxDamageState ctx)

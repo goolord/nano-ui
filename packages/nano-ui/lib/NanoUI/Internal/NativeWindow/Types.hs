@@ -21,7 +21,9 @@ import NanoUI.Internal.Types (Size)
 -- through 'NanoUI.rgbaPixels' to check the byte count.
 data RgbaPixels = RgbaPixels
   { rgbaWidth :: !Int
+  -- ^ Width in pixels.
   , rgbaHeight :: !Int
+  -- ^ Height in pixels.
   , rgbaBytes :: !ByteString
   -- ^ Exactly four bytes per pixel.
   }
@@ -65,14 +67,18 @@ data WindowSettings = WindowSettings
   }
   deriving (Eq, Show)
 
+-- | Where a new window opens.
 data WindowPosition
   = -- | Desktop placement (centred by RGFW).
     WindowPositionDefault
-  | WindowPositionCentered
+  | -- | The centre of the desktop.
+    WindowPositionCentered
   | -- | Top-left corner in desktop coordinates.
     WindowPositionAt !Int !Int
   deriving (Eq, Show)
 
+-- | Display state of a window: an ordinary window, a fullscreen window, or a
+-- window that is not shown.
 data WindowMode = Windowed | Fullscreen | Hidden
   deriving (Eq, Ord, Show, Enum, Bounded)
 

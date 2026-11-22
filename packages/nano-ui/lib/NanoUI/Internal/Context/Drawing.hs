@@ -91,6 +91,7 @@ registerDrawing :: Context -> WidgetId -> Int -> DrawingBuild -> IO ()
 registerDrawing ctx wid content build =
   registerIn dcsDrawings (\m dc -> dc {dcsDrawings = m}) ctx wid (DrawingEntry content build)
 
+-- | The 'DrawingEntry' registered for the widget, if any.
 {-# INLINE lookupDrawing #-}
 lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
 lookupDrawing = lookupIn dcsDrawings
@@ -208,10 +209,12 @@ registerCustomDrawing :: Context -> WidgetId -> Int -> CustomDrawBuild -> IO ()
 registerCustomDrawing ctx wid content build =
   registerCustomEntry ctx wid (CustomDrawingEntry content build Nothing 0 False KeysNone)
 
+-- | Store the widget's 'CustomDrawingEntry', replacing any earlier one.
 {-# INLINE registerCustomEntry #-}
 registerCustomEntry :: Context -> WidgetId -> CustomDrawingEntry -> IO ()
 registerCustomEntry = registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m})
 
+-- | The 'CustomDrawingEntry' registered for the widget, if any.
 {-# INLINE lookupCustomDrawing #-}
 lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawingEntry)
 lookupCustomDrawing = lookupIn dcsCustomDrawings

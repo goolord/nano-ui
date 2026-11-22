@@ -204,6 +204,8 @@ textAreaDocumentWith' f v = bindVarBy sameDocument RenderFinal v $ \value -> do
   wid <- nextId
   textAreaCore f wid value
 
+-- | The text area at @wid@ over a document, returning its 'Response' and the
+-- edited document. The text-area entry points share it after taking an id.
 textAreaCore :: (Layout -> Layout) -> WidgetId -> TextDocument -> NanoUI (Response, TextDocument)
 textAreaCore f wid value = do
   ctx <- askContext

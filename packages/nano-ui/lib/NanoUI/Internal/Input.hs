@@ -310,6 +310,7 @@ inputMouseDown = heldIn MouseLeft
 inputMousePressed = pressedIn MouseLeft
 inputMouseReleased = releasedIn MouseLeft
 
+-- | The right button is held, went down this frame, or came up this frame.
 inputMouseRightDown, inputMouseRightPressed, inputMouseRightReleased :: Input -> Bool
 inputMouseRightDown = heldIn MouseRight
 inputMouseRightPressed = pressedIn MouseRight

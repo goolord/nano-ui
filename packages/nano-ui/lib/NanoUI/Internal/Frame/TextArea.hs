@@ -192,6 +192,8 @@ data TextAreaBars = TextAreaBars
   , tabContent :: {-# UNPACK #-} !V2
   }
 
+-- | The bars for a text area with font metrics @fm@ and field rect, whose
+-- widest line is @widestW@ and whose lines are @contentH@ tall in total.
 {-# INLINE textAreaBars #-}
 textAreaBars :: FontMetrics -> Rect -> Float -> Float -> TextAreaBars
 textAreaBars fm (Rect _ _ fw fh) widestW contentH =
