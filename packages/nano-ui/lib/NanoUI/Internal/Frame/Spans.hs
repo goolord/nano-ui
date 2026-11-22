@@ -174,7 +174,12 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
       else if isBounded maxW || (if isRowChild then not (T.any (== '\n') raw) else wTag /= SizingFit && w > 0)
         then pure maxW
         else findAncestorMaxW arena idx
+  -- Wrap at the width layout laid the node out at, before its edges
+  -- snapped ('GeomLaidW'), where layout wrapped it. A node restored or placed
+  -- without snapping has none recorded.
+  laid <- arenaArrays arena >>= \a -> readGeom a idx GeomLaidW
   let rect = Rect x y w h
+      !laidW = if laid > 0 then laid else w
       mStripe = tableStripeColor theme si
       fg = fromMaybe (textToneColor theme (textNodeFontVariant si) (textNodeFontTone si)) mCustomCol
       bg = fromMaybe (styleBg (themePanel theme)) mStripe
@@ -189,6 +194,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
           && sceFontSize e == fontSize
           && sceWidthTag e == fromEnum wTag
           && rectW (sceRect e) == w
+          && sceLaidW e == laidW
           && sceEffMaxW e == effMaxW
           && sceRowChild e == isRowChild
           && sceInset e == ix
@@ -204,7 +210,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
     mEntry -> do
       (fm, textLines) <- case mEntry of
         Just e | sameLines e -> pure (sceFont e, sceLines e)
-        _ -> nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
+        _ -> nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix laidW
       let spans = [(r, line, fg, bg) | (r, line) <- placeSpanLines ax fm ix x y w h textLines]
           entry =
             SpanCacheEntry
@@ -216,6 +222,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
               , sceAlign = fromEnum ax
               , sceWidthTag = fromEnum wTag
               , sceRect = rect
+              , sceLaidW = laidW
               , sceEffMaxW = effMaxW
               , sceRowChild = isRowChild
               , sceInset = ix

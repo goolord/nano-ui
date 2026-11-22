@@ -59,16 +59,11 @@ import Cases.Theming qualified
 import Cases.NativeWindow qualified
 import Cases.Tasks qualified
 import NanoUI.Testing.Runner (runTests)
-import System.Environment (getArgs)
 
 main :: IO ()
 main = do
   backendApiCheck
-  args <- getArgs
-  -- Specs named known-bug-* fail on the current library: they run only when
-  -- named on the command line, so the suite passes while the bug is open.
-  let named = filter (\(name, _, _) -> name `elem` args) (concat [Cases.LayoutProps.knownBugs])
-  runTests . (<> named) . concat $
+  runTests . concat $
     [ Cases.Runner.tests
     , Cases.SIMD.tests
     , Cases.NoThunks.tests

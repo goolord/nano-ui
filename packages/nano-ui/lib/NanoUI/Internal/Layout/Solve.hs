@@ -116,6 +116,7 @@ snapNode na a s i = do
   -- its own can push a node's far edge a pixel past the snapped origin of
   -- the sibling that starts there, and the node then paints over it (a
   -- table cell over the column rule beside it).
+  writeGeom a i GeomLaidW w
   writeGeom a i GeomX (onGrid s x)
   writeGeom a i GeomY (onGrid s y)
   writeGeom a i GeomW (max 0 (gridSpan s x (x + w)))

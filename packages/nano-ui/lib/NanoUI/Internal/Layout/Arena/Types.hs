@@ -494,7 +494,7 @@ initialCapacity = 256
 -- 'naArrTree'. Each is at least the number of columns of 'GeomCol',
 -- 'StyleCol', 'TagCol' and 'TreeCol', and the columns past those are unused.
 geomStride, styleStride, tagStride, treeStride :: Int
-geomStride = 8
+geomStride = 9
 styleStride = 20
 tagStride = 16
 treeStride = 8
@@ -508,9 +508,14 @@ treeStride = 8
 --   of the scroll containers around the node.
 -- * 'GeomClipX', 'GeomClipY', 'GeomClipW', 'GeomClipH': the node's clip rect,
 --   in window coordinates. See 'getClipRect'.
+-- * 'GeomLaidW': the width the node was laid out at, before
+--   'NanoUI.Internal.Layout.Solve.snapNode' snapped its edges to the device
+--   pixel grid. Text decides where it wraps at this width in layout and in
+--   paint, so both break it into the same lines, wherever its edges snap.
 data GeomCol
   = GeomX | GeomY | GeomW | GeomH
   | GeomClipX | GeomClipY | GeomClipW | GeomClipH
+  | GeomLaidW
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrStyle': the numbers the node was laid out with, in
@@ -573,11 +578,15 @@ data StyleCol
 --   container, a text area or a 'PointerBlock' node, as a 'Bool', set when
 --   that node is added ('hasScrollerBelow'). Wheel routing looks for its
 --   target only under such a node.
+-- * 'TagSteadyHeight': whether the node's height is the same at every width
+--   it can be laid out at, as a 'Bool'. The solver's measure pass writes it
+--   ('NanoUI.Internal.Layout.Solve.Measure.markSteadyHeight'); 'False' until
+--   then, which only costs a refit.
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
   | TagFlow | TagPinned | TagPinnedBelow | TagPointer | TagLineAlign
-  | TagScrollerBelow
+  | TagScrollerBelow | TagSteadyHeight
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.

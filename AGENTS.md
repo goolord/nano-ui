@@ -97,6 +97,15 @@ These are decisions already made; do not re-propose the alternatives.
 - **Explicit export lists.** `module X` re-exports only where a public module
   re-exports another public module (the `NanoUI` facade). Internal modules list
   their exports.
+- **A node's height is its height at the width it is laid out at.** The
+  measure pass records each container's height at its measured width
+  (`recomputeFitHeightAtWidth`); the position pass and every parent's refit
+  (`flowChildSize`, `rowChildHeightAt`) ask for the height at the width they
+  give. A parent shares out its space from those heights, so any path that
+  works a height out another way (a stale measure, a snapped width) overruns
+  the parent. `TagSteadyHeight` marks nodes whose height cannot change with
+  width so the refits cost nothing there. `Cases.LayoutProps` checks the
+  rule over random trees; run more seeds when changing the solve.
 - **Do not merge small modules** to save header and import lines; separate
   modules compile in parallel.
 - **Do not rebuild existing widgets as custom widgets or adornments.** Custom

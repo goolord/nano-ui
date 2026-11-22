@@ -336,8 +336,11 @@ runWindowCustomMeasurePlacementTest ctx failed = do
   cache <- cacheName
   _ <- runFrame ctx inp (ui 60)
   assert failed . (== cache) =<< cacheName
+  -- A window keeps the size it was first solved at, so the fresh solve
+  -- runs after the same frames.
   fresh <- newContext
-  _ <- warmup2 fresh inp (ui 60)
+  _ <- warmup2 fresh inp (ui 30)
+  _ <- runFrame fresh inp (ui 60)
   assertEq failed 60 . heightOf =<< sameAsFreshSolve failed fresh ctx inp (ui 60)
 
 -- | The wheel over a window scrolls it, not the page, declared in a page scroller or beside.

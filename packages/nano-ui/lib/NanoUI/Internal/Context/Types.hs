@@ -611,6 +611,8 @@ data SpanCacheEntry = SpanCacheEntry
   , sceAlign :: {-# UNPACK #-} !Int
   , sceWidthTag :: {-# UNPACK #-} !Int
   , sceRect :: !Rect
+  , sceLaidW :: {-# UNPACK #-} !Float
+  -- ^ The width the lines were wrapped for ('GeomLaidW').
   , sceEffMaxW :: {-# UNPACK #-} !Float
   , sceRowChild :: {-# UNPACK #-} !Bool
   , sceInset :: {-# UNPACK #-} !Float

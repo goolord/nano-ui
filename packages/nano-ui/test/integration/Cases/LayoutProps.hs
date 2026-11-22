@@ -3,7 +3,7 @@
 -- stay inside their parents, siblings in a line do not overlap, grow
 -- children share the leftover space by factor, and every edge lands on the
 -- device pixel grid.
-module Cases.LayoutProps (tests, knownBugs) where
+module Cases.LayoutProps (tests) where
 
 import Spec
 import Data.Text qualified as T
@@ -31,53 +31,55 @@ import NanoUI.Internal.Layout.Arena
   , readTree
   )
 import NanoUI.Testing.Sim qualified as Sim
-import Test.QuickCheck (Arbitrary (..), Gen, Property, choose, counterexample, elements, frequency, ioProperty, sized, suchThat, vectorOf)
+import Test.QuickCheck (Arbitrary (..), Gen, Property, choose, counterexample, elements, frequency, ioProperty, sized, vectorOf)
 
 tests :: [Spec]
 tests =
-  [propSpec "layout-props" 7 400 layoutProperties]
+  [ propSpec "layout-props" 7 400 layoutProperties
+  , sceneSpec "wrap-row-height" wrapRowScene
+  , sceneSpec "grid-cell-height" gridCellScene
+  , sceneSpec "fill-label-height" fillLabelScene
+  , sceneSpec "wrap-percent-height" wrapPercentScene
+  , sceneSpec "wrap-row-in-row-alignment" wrapInRowScene
+  ]
 
--- | Specs that fail on the current solve. "Main" runs them only when named
--- on the command line.
+-- Scenes whose heights depend on width, measured at one width and laid out
+-- at another. Each broke a property before the solve refit heights at the
+-- width a node is laid out at.
 --
 -- A fit column in a 51 px row measures its wrapped row at 51 px (two lines,
 -- 72 px tall) but lays it out at the 138 px its content asks for (one line,
--- 42 px of content). The column hands its grow row the leftover of the
--- one-line height (46 px) and places it after the two-line one, so the grow
--- row ends 27 px below the column.
+-- 42 px of content).
 --
--- A 72 px column holds a two-column grid with a filling label. The column's
--- measured height counts the label a line shorter (36 px) than it lays out
--- in its 25 px cell (48 px), so a grow sibling takes 12 px too many, and the
--- column ends 12 px below its parent (and the window).
+-- A 72 px column holds a two-column grid with a filling label, which lays
+-- out a line taller in its 25 px cell than the column measured it.
 --
 -- A fit column in a 148 px wrapped row holds a filling label in a grow
--- column, a grow spacer and a label. The label lays out more lines than the
--- column measured, so the spacer, which takes the measured leftover (20 px),
--- pushes the last row 12 px past the column's end.
+-- column, which lays out fewer lines at the column's width than it measured
+-- at the row's.
 --
--- A 235 px wrapped row holds a 44 % column, a checkbox and a button. The
--- column above it measures the row a line shorter (16 px) than it lays out,
--- so a grow spacer above takes 16 px too many and the row ends below the
--- column.
+-- A 235 px wrapped row holds a 44 % column, a checkbox and a button: the
+-- percentage of the line breaks it into two lines.
 --
--- All four are one fault: a height that depends on width is measured at
--- one width and laid out at another. The random trees in 'tests' leave out
--- filling labels, give wrapped rows and grids fixed widths, and fill them
--- with leaves of steady height.
-knownBugs :: [Spec]
-knownBugs =
-  [ sceneSpec "known-bug-wrap-row-height" wrapRowScene
-  , sceneSpec "known-bug-grid-cell-height" gridCellScene
-  , sceneSpec "known-bug-fill-label-height" fillLabelScene
-  , sceneSpec "known-bug-wrap-percent-height" wrapPercentScene
-  ]
+-- A grow wrapped row in a row is 40 px wide, where its filling label takes
+-- four lines, and is centred in the row at that height.
 
 -- | Check one scene at snap scale 1, printing what it breaks.
 sceneSpec :: String -> Scene -> Spec
 sceneSpec name scene = spec name $ \_ failed -> do
   problems <- violations 1 <$> sceneNodes 1 scene
   unless (null problems) (mapM_ putStrLn problems >> modifyIORef' failed (+ 1))
+
+wrapInRowScene :: Scene
+wrapInRowScene =
+  Scene 900 700 $
+    Box KRow (Mods SFit SFit 10 3 2)
+      [ Box KCol (Mods SFit SFit 0 3 2) [Leaf LCheck, Leaf LCheck, Box KRow (Mods SFit SFit 4 0 1) [Leaf LSep]]
+      , Box KRow (Mods SFit SFill 4 0 0)
+          [ Box KRow (Mods (SPercent 87) SFit 4 0 3) []
+          , Box KWrap (Mods (SGrow 3) SFit 0 8 1) [Leaf (LGrow 2), Leaf (LGrow 4), Leaf (LLabelFill 27)]
+          ]
+      ]
 
 gridCellScene :: Scene
 gridCellScene =
@@ -161,15 +163,10 @@ shrinkBox = \case
       <> [Box k m (take i kids <> drop (i + 1) kids) | i <- [0 .. length kids - 1]]
       <> [Box k m (take i kids <> [kid'] <> drop (i + 1) kids) | (i, kid) <- zip [0 ..] kids, kid' <- shrinkBox kid]
       <> [Box k (m {mH = SFit}) kids | not (isFit (mH m))]
-      <> [Box k (m {mW = SFit}) kids | not (isFit (mW m)), fitWidthOk k]
+      <> [Box k (m {mW = SFit}) kids | not (isFit (mW m))]
   where
     isFit SFit = True
     isFit _ = False
-    -- 'genMods' gives wrapped rows and grids fixed widths.
-    fitWidthOk = \case
-      KWrap -> False
-      KGrid _ -> False
-      _ -> True
 
 genBox :: Int -> Gen Box
 genBox depth
@@ -177,20 +174,14 @@ genBox depth
   | otherwise =
       frequency
         [ (1, Leaf <$> genLeaf)
-        , (3, genKind >>= \k -> Box k <$> genMods k <*> (choose (1, 5) >>= (`vectorOf` genChild k)))
+        , (3, genKind >>= \k -> Box k <$> genMods <*> (choose (1, 5) >>= (`vectorOf` genChild k)))
         ]
 
   where
-    -- A grid or a wrapped row holds leaves whose height does not depend
-    -- on their width ('knownBugs').
     genChild = \case
-      KGrid _ -> Leaf <$> genLeaf `suchThat` steadyHeight
-      KWrap -> Leaf <$> genLeaf `suchThat` steadyHeight
+      KGrid _ -> Leaf <$> genLeaf
+      KWrap -> Leaf <$> genLeaf
       _ -> genBox (depth - 1)
-    steadyHeight = \case
-      LLabelFill _ -> False
-      LMeasured _ _ -> False
-      _ -> True
 
 genKind :: Gen Kind
 genKind = frequency [(4, pure KRow), (4, pure KCol), (1, KGrid <$> choose (1, 4)), (1, pure KWrap), (1, pure KScroll)]
@@ -199,6 +190,7 @@ genLeaf :: Gen Leaf
 genLeaf =
   frequency
     [ (3, LLabel <$> choose (0, 99))
+    , (1, LLabelFill <$> choose (0, 99))
     , (2, LButton <$> choose (0, 99))
     , (2, LSpacer <$> choose (0, 60) <*> choose (0, 40))
     , (3, LGrow <$> choose (1, 4))
@@ -207,18 +199,11 @@ genLeaf =
     , (1, pure LSep)
     ]
 
--- | A container's sizes and spacing. A wrapped row gets a fixed width: one
--- that takes its width from its parent can be measured at one width and laid
--- out at another ('knownBugs'). A grid gets 260 px per column, so no label
--- or button in it wraps.
-genMods :: Kind -> Gen Mods
-genMods kind =
+-- | A container's sizes and spacing.
+genMods :: Gen Mods
+genMods =
   Mods
-    <$> ( case kind of
-            KWrap -> SFixed <$> choose (40, 400)
-            KGrid n -> pure (SFixed (260 * n))
-            _ -> genWidth
-        )
+    <$> genWidth
     <*> frequency [(5, pure SFit), (1, pure SFill), (1, SGrow <$> choose (1, 3)), (1, SFixed <$> choose (30, 300))]
     <*> elements [0, 0, 4, 10]
     <*> elements [0, 0, 3, 8]

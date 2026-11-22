@@ -31,13 +31,14 @@ module NanoUI.Internal.Layout.Solve.Measure
   , drawingHeightAt
   , measuredHeightAt
   , wrapLineCross
+  , rowChildHeightAt
   ) where
 
 import Control.Monad (filterM, foldM, forM_, guard, mfilter, unless, when)
-import Data.IORef (IORef, modifyIORef', readIORef)
+import Data.IORef (IORef, modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray (copyMutablePrimArray, readPrimArray, writePrimArray)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -47,6 +48,7 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Layout.Arena.Types (newFlexScratch)
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Style (AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), hasExplicitMin)
 import NanoUI.Internal.Types (Rect (..), clamp, foldUpTo, newZeroedPrimArray, isBounded, isUnbounded, noLimit)
@@ -204,42 +206,71 @@ textHeightAt env !idx (AxisSizing hTag _ minH maxH) !w allowed !fallback = do
       pure (if tbWrapped || (allowed && hTag == SizingFit && w > 0) then clamp minH maxH (max tbLineH tbH) else fallback)
 
 measurePass :: SolveEnv -> Int -> IO ()
-measurePass env count = case seCache env of
-  Nothing -> forDown $ \idx -> measureNode env idx >> () <$ recordMeasured env idx
-  Just lc -> do
-    -- Per node, 1 once some child came out a different size than the
-    -- capture recorded for it, so the node cannot take its captured size.
-    moved <- newZeroedPrimArray count :: IO (IOArr Word8)
-    forDown $ \idx -> do
-      hit <-
-        if idx < lcCount lc
-          then (==) <$> readPrimArray (seSub env) idx <*> readPrimArray (lcSub lc) idx
-          else pure False
-      restored <- restoreMeasured env lc moved hit idx
-      unless restored (measureNode env idx)
-      (w, h) <- recordMeasured env idx
-      same <-
-        if restored || idx >= lcCount lc
-          then pure restored
-          else do
-            cw <- readPrimArray (lcMeasured lc) (idx * 2)
-            ch <- readPrimArray (lcMeasured lc) (idx * 2 + 1)
-            pure (cw == w && ch == h)
-      unless same $ do
-        p <- readTree (seArrays env) idx TreeParent
-        when (p >= 0) $ writePrimArray moved p 1
-      -- The captured solve placed the subtree as this one will when the
-      -- node's key hit and it came out its captured size, as did every node
-      -- below it, and it holds no drawing, whose custom measure may return a
-      -- different size with nothing in the arena changed.
-      forM_ (sePositions env) $ \PositionLog {plSpans} -> do
-        nt <- readTagEnum (seArrays env) idx TagNodeType
-        end <- if hit && same && nt /= NodeDrawing then subtreeEnd (seArrays env) plSpans idx else pure (-1)
-        writePrimArray plSpans idx end
-  where
-    -- Children follow their parent in the arena, so a descending walk
-    -- measures every child before its parent.
-    forDown f = let go !idx = when (idx >= 0) (f idx >> go (idx - 1)) in go (count - 1)
+measurePass env count = do
+  -- Which nodes keep their height at any width ('markSteadyHeight'), before
+  -- any is measured: a container's measure reads its own mark. Children
+  -- follow their parent in the arena, so walking down from the last node
+  -- reaches every child before its parent. A pass of its own: marking inside
+  -- the measure loop below allocated a box per node.
+  let steadyPass !i = when (i >= 0) (markSteadyHeight env i >> steadyPass (i - 1))
+  steadyPass (count - 1)
+  case seCache env of
+    Nothing ->
+      let go !idx = when (idx >= 0) (measureNode env idx >> recordMeasured env idx >> go (idx - 1))
+       in go (count - 1)
+    Just lc -> do
+      -- Per node, 1 once some child came out a different size than the
+      -- capture recorded for it, and 2 when a drawing with a custom measure
+      -- is below it, so the node cannot take its captured size.
+      moved <- newZeroedPrimArray count :: IO (IOArr Word8)
+      let go !idx = when (idx >= 0) (measureCachedNode env lc moved idx >> go (idx - 1))
+      go (count - 1)
+
+-- | Measure node @idx@ in a solve with a layout cache, or put back its
+-- captured size ('restoreMeasured'), and record for its parent whether it
+-- came out its captured size. Children follow their parent in the arena,
+-- so 'measurePass' walks down from the last node and measures every child
+-- before its parent.
+measureCachedNode :: SolveEnv -> LayoutCache -> IOArr Word8 -> NodeIdx -> IO ()
+measureCachedNode env lc moved !idx = do
+  hit <-
+    if idx < lcCount lc
+      then (==) <$> readPrimArray (seSub env) idx <*> readPrimArray (lcSub lc) idx
+      else pure False
+  restored <- restoreMeasured env lc moved hit idx
+  unless restored (measureNode env idx)
+  (w, h) <- recordMeasured env idx
+  same <-
+    if restored || idx >= lcCount lc
+      then pure restored
+      else do
+        cw <- readPrimArray (lcMeasured lc) (idx * 2)
+        ch <- readPrimArray (lcMeasured lc) (idx * 2 + 1)
+        pure (cw == w && ch == h)
+  -- 2 marks a node above a drawing with a custom measure: its measured
+  -- height runs that measure at its children's widths
+  -- ('recomputeFitHeightAtWidth'), which the cache does not record, so
+  -- it measures again however its children came out.
+  nt <- readTagEnum (seArrays env) idx TagNodeType
+  aboveMeasure <-
+    if nt == NodeDrawing
+      then getWidgetId (seArena env) idx >>= fmap isJust . msLookupMeasure (seMs env)
+      else (== 2) <$> readPrimArray moved idx
+  p <- readTree (seArrays env) idx TreeParent
+  when (p >= 0) $ do
+    m <- readPrimArray moved p
+    if aboveMeasure
+      then writePrimArray moved p 2
+      else when (not same && m == 0) (writePrimArray moved p 1)
+  -- The captured solve placed the subtree as this one will when the
+  -- node's key hit and it came out its captured size, as did every node
+  -- below it, and it holds no drawing, whose custom measure may return a
+  -- different size with nothing in the arena changed.
+  case sePositions env of
+    Nothing -> pure ()
+    Just PositionLog {plSpans} -> do
+      end <- if hit && same && nt /= NodeDrawing then subtreeEnd (seArrays env) plSpans idx else pure (-1)
+      writePrimArray plSpans idx end
 
 -- | Put back the measured size the captured solve recorded for a node, when
 -- that solve measured it the same way: its restore key
@@ -251,6 +282,7 @@ measurePass env count = case seCache env of
 -- changes what the size means. Scroll containers always measure too, cheaply
 -- from their children: the capture holds their content extent as the position
 -- pass left it, not as measured.
+{-# INLINE restoreMeasured #-}
 restoreMeasured :: SolveEnv -> LayoutCache -> IOArr Word8 -> Bool -> NodeIdx -> IO Bool
 restoreMeasured env lc moved hit idx
   | not hit = pure False
@@ -282,6 +314,7 @@ subtreeEnd a spans idx = do
 
 -- | Record the node's measured size for the next capture, whether it was
 -- just measured or restored, and return it.
+{-# INLINE recordMeasured #-}
 recordMeasured :: SolveEnv -> NodeIdx -> IO (Float, Float)
 recordMeasured env idx = do
   Rect _ _ w h <- getNodeRect (seArena env) idx
@@ -652,7 +685,16 @@ measureContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
     if chrome && wTag /= SizingFixed
       then floatingBodyGutter na idx (contentH + padY - h)
       else pure 0
-  setRect na idx 0 0 (sizeWithin wAx (if minAssignedW then 0 else contentW + padX + bodyGutter)) h
+  let measuredW = sizeWithin wAx (if minAssignedW then 0 else contentW + padX + bodyGutter)
+  setRect na idx 0 0 measuredW h
+  -- A parent lays a container out at the width it measured at without
+  -- refitting its height ('flowChildSize', 'rowChildHeightAt'). Its children
+  -- measured at widths of their own (an ancestor's cap, a grid cell unknown
+  -- here, none for a filling label), so the measured height is the refit at
+  -- the measured width, the height placement gives it there.
+  steady <- readTagEnum a idx TagSteadyHeight
+  when (axTag hAx == SizingFit && (nt == NodeContainer || nt == NodePanel) && not minAssignedH && not steady) $
+    recomputeFitHeightAtWidth env idx measuredW >>= setRect na idx 0 0 measuredW
 
 -- | Width the scrollbar of window or modal @idx@'s body takes when the
 -- window is @overflow@ shorter than its content.
@@ -788,13 +830,19 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
 -- placement ('adjustFitHeight').
 measureWrap :: SolveEnv -> NodeIdx -> DirTag -> Float -> Float -> IO (Float, Float)
 measureWrap env@SolveEnv {seArena = na} idx dir gap bound = do
-  kids <- mapM (\ci -> (\(Rect _ _ w h) -> (ci, (w, h))) <$> getNodeRect na ci) =<< flowChildrenInOrder na idx
   limit <-
     if dir == DirRow && isUnbounded bound
       then do
         pad <- getPadding na idx
         (\w -> max 0 (w - padL pad - padR pad)) <$> findAncestorMaxW na idx
       else pure bound
+  -- A percentage width is of the line length, as placement resolves it
+  -- ('positionWrap').
+  let sized ci = do
+        Rect _ _ w h <- getNodeRect na ci
+        w' <- if dir == DirRow then (\ax -> percentOr ax limit w) <$> getWidthSizing na ci else pure w
+        pure (ci, (w', h))
+  kids <- mapM sized =<< flowChildrenInOrder na idx
   (along, across) <- wrapExtent env idx dir gap limit kids
   wTag <- axTag <$> getWidthSizing na idx
   assigned <-
@@ -882,17 +930,27 @@ measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap = do
 -- measured drawing can wrap taller when narrower, and so can a column that
 -- holds them. Memoized per node and width for the frame.
 recomputeFitHeightAtWidth :: SolveEnv -> NodeIdx -> Float -> IO Float
-recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
+recomputeFitHeightAtWidth env@SolveEnv {seArrays = a} idx availW =
+  readTagEnum a idx TagSteadyHeight >>= \case
+    -- Its measured height, at any width ('markSteadyHeight').
+    True -> readPrimArray (seMeasured env) (idx * 2 + 1)
+    False -> recomputeUnsteady env idx availW
+
+recomputeUnsteady :: SolveEnv -> NodeIdx -> Float -> IO Float
+recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
   fmap snd . memoizeWidth na (naFitMemo na) idx availW . fmap ((,) 0) $ do
     nt <- getNodeType na idx
     AxisSizing wTag wVal minW maxW <- getWidthSizing na idx
     hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
-    Rect _ _ _ oldH <- getNodeRect na idx
-    let -- The width a node takes of @avail@: fixed, a percentage, or all of it.
-        widthOf (AxisSizing tag val lo hi) avail = case tag of
+    Rect _ _ oldW oldH <- getNodeRect na idx
+    let -- The width a node measured @iw@ wide takes of @avail@, as a
+        -- column places it ('columnChildX'): fixed, a percentage, all of it
+        -- when it grows, or else its measured width, narrowed to @avail@.
+        widthOf (AxisSizing tag val lo hi) iw avail = case tag of
           SizingPercent -> avail * val / 100
           SizingFixed -> clamp lo hi val
-          _ -> avail
+          SizingGrow -> avail
+          _ -> min iw avail
         -- Every caller offers this node a percentage already resolved, as
         -- 'childH' below does, so only a fixed width replaces the offer.
         effW' = clamp minW maxW (if wTag == SizingFixed then wVal else availW)
@@ -911,8 +969,10 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
         | otherwise -> pure oldH
 
       -- A measured drawing, like wrapped text, can be taller when narrower.
+      -- At the width it measured at, it keeps its measured height, as
+      -- 'positionNode' does: its measure was offered no width limit there.
       NodeDrawing
-        | hTag == SizingFit -> drawingHeightAt env idx effW' hAx oldH
+        | hTag == SizingFit && abs (effW' - oldW) > 1.0e-3 -> drawingHeightAt env idx effW' hAx oldH
         | otherwise -> pure oldH
 
       -- A container that reports its minimum height ('minAssignedOn') is as
@@ -927,7 +987,8 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
                 -- A child's height when @w@ is offered to it, kept to its max width.
                 childH w ci = do
                   subAx <- getWidthSizing na ci
-                  let subW = widthOf subAx w
+                  Rect _ _ iw _ <- getNodeRect na ci
+                  let subW = widthOf subAx iw w
                   recomputeFitHeightAtWidth env ci (if isBounded (axMax subAx) then min subW (axMax subAx) else subW)
                 padded h = pure (clamp minH maxH (h + padT pad + padB pad))
             if gCols > 0 || minColW > 0
@@ -956,10 +1017,19 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
                               Rect _ _ w h <- getNodeRect na ci
                               pure (ci, (percentOr subAx innerW w, h))
                         kids <- mapM sized =<< flowChildrenInOrder na idx
-                        padded . snd =<< wrapExtent env idx dir gap innerW kids
+                        lineGap <- readStyle a idx StyleLineGap
+                        -- A line is as thick as its measured children
+                        -- ('wrapLineCross') or what they grow to at their
+                        -- shares of it, as 'positionWrap' places it.
+                        let lns = wrapLines innerW gap (fst . snd) kids
+                            lineCross l = do
+                              measured <- wrapLineCross env dir l
+                              maybe measured (max measured) <$> lineHeightAt env l innerW gap
+                        crosses <- mapM lineCross lns
+                        padded (sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
                     | otherwise -> pure oldH
                   Line
-                    | dir == DirRow -> pure oldH
+                    | dir == DirRow -> rowHeightAt env idx innerW gap >>= maybe (pure oldH) padded
                     | otherwise -> do
                         let step (FlowAcc count contentH _) ci = do
                               subH <- childH innerW ci
@@ -968,6 +1038,143 @@ recomputeFitHeightAtWidth env@SolveEnv {seArena = na, seArrays = a} idx availW =
                         padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
 
       _ -> pure oldH
+
+-- | The content height of row @idx@ laid out @innerW@ wide inside its
+-- padding ('lineHeightAt'), or 'Nothing' when every child keeps its
+-- measured width there.
+rowHeightAt :: SolveEnv -> NodeIdx -> Float -> Float -> IO (Maybe Float)
+rowHeightAt env@SolveEnv {seArena = na} idx innerW gap = do
+  anyFlex <- foldFlowChildrenM na idx (\acc ci -> if acc then pure True else flexesAlongRow env ci) False
+  if not anyFlex
+    then pure Nothing
+    else do
+      kids <- mapM (\ci -> (ci,) <$> flowChildSize env False innerW noLimit ci) =<< flowChildrenInOrder na idx
+      lineHeightAt env kids innerW gap
+
+-- | Whether a row's child can come out another width than it measured: it
+-- grows, shrinks, takes a percentage or scrolls.
+flexesAlongRow :: SolveEnv -> NodeIdx -> IO Bool
+flexesAlongRow SolveEnv {seArrays = a} ci = do
+  tag <- axTag <$> readAxisSizing a ci True
+  nt <- readTagEnum a ci TagNodeType
+  steady <- readTagEnum a ci TagSteadyHeight
+  pure (not steady && ((tag /= SizingFit && tag /= SizingFixed) || nt == NodeScrollContainer))
+
+-- | The height of a line of a row's children @kids@, each with its size
+-- before the sharing, laid out @avail@ wide with @gap@ between them, or
+-- 'Nothing' when every child keeps its measured width there. The line
+-- shares the width out as 'positionRowFromParent' and 'positionWrap' do. A
+-- child given another width than it measured at takes its height at that
+-- width ('recomputeFitHeightAtWidth'), a fit container no less than it
+-- measured, since 'placeRowLine' offers it that. Baseline-aligned children
+-- stand on one line, as in 'foldChildDimsFromParent'.
+--
+-- The sharing runs in a scratch of its own: a parent can ask for this height
+-- while it is filling the arena's scratch with its children's sizes.
+lineHeightAt :: SolveEnv -> [(NodeIdx, (Float, Float))] -> Float -> Float -> IO (Maybe Float)
+lineHeightAt env@SolveEnv {seArena = na, seArrays = a} kids avail gap = do
+  anyFlex <- foldM (\acc (ci, _) -> if acc then pure True else flexesAlongRow env ci) False kids
+  if not anyFlex
+    then pure Nothing
+    else do
+      let n = length kids
+      saved <- readIORef (naScratch na)
+      scratch@FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr, fsOut = outArr} <- newFlexScratch (max 1 n)
+      writeIORef (naScratch na) scratch
+      forM_ (zip [0 ..] kids) $ \(i, (ci, (w, h))) ->
+        writePrimArray idxArr i ci >> writePrimArray wArr i w >> writePrimArray hArr i h
+      distributeScratch na n avail (gap * fromIntegral (max 0 (n - 1))) True
+      shares <- mapM (\i -> (,) <$> readPrimArray idxArr i <*> readPrimArray outArr i) [0 .. n - 1]
+      writeIORef (naScratch na) saved
+      let heightAt (!changed, hs) (ci, share) =
+            rowChildHeightAt env ci share >>= \case
+              Just h -> pure (True, (ci, h) : hs)
+              Nothing -> (\h -> (changed, (ci, h) : hs)) <$> readGeom a ci GeomH
+      (changed, hs) <- foldM heightAt (False, []) shares
+      if not changed
+        then pure Nothing
+        else do
+          let across = foldl' (\m (_, h) -> max m h) 0 hs
+              baselineStep acc@(!above, !below) (ci, h) = do
+                ay <- getAlignY na ci
+                if ay /= AlignBaseline
+                  then pure acc
+                  else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
+          (above, below) <- foldM baselineStep (0, 0) hs
+          pure (Just (max across (above + below)))
+
+-- | The height row child @ci@ comes out when its row gives it @share@ of
+-- its width, or 'Nothing' when it keeps its measured height: it keeps its
+-- measured width there, or its height is fixed, a percentage or grows. Its
+-- height at its new width ('recomputeFitHeightAtWidth'), and for a fit
+-- container no less than it measured, since 'placeRowLine' offers it that.
+rowChildHeightAt :: SolveEnv -> NodeIdx -> Float -> IO (Maybe Float)
+rowChildHeightAt env@SolveEnv {seArrays = a} ci share = readTagEnum a ci TagSteadyHeight >>= \case
+  True -> pure Nothing
+  False -> rowChildHeightAtUnsteady env ci share
+
+rowChildHeightAtUnsteady :: SolveEnv -> NodeIdx -> Float -> IO (Maybe Float)
+rowChildHeightAtUnsteady env@SolveEnv {seArrays = a} ci share = do
+  AxisSizing wTag wVal lo hi <- readAxisSizing a ci True
+  hTag <- axTag <$> readAxisSizing a ci False
+  iw <- readGeom a ci GeomW
+  -- The width 'positionNode' gives a child offered its share.
+  let w = clamp lo hi $ case wTag of
+        SizingFixed -> wVal
+        SizingGrow -> min share hi
+        SizingPercent -> min share hi
+        _ -> min iw share
+  if abs (w - iw) <= 1.0e-3 || (hTag /= SizingFit && hTag /= SizingShrink)
+    then pure Nothing
+    else do
+      nt <- readTagEnum a ci TagNodeType
+      r <- recomputeFitHeightAtWidth env ci w
+      if nt == NodeContainer || nt == NodePanel
+        then Just . max r <$> readGeom a ci GeomH
+        else pure (Just r)
+
+-- | Record whether node @idx@ is as tall at every width it can be laid out
+-- at ('TagSteadyHeight'), once its children are recorded. Then the refits
+-- ('recomputeFitHeightAtWidth', 'rowChildHeightAt') take its measured height
+-- instead of working it out again. A fixed or percentage height is steady,
+-- as is a node with no content that wraps: text wraps unless it is empty,
+-- has no newline and is fit or a row's child ('textHeightAt'); a drawing
+-- with a custom measure, an aspect ratio, a wrapping container and a grid
+-- that picks its column count by width can all change height with width;
+-- and a container is steady when its flow children all are.
+--
+-- A child that is not steady leaves 2 in its parent's column, so a
+-- container need not walk its children: 'measurePass' marks every child
+-- before its parent. A floating child is laid out apart from the flow, so
+-- it leaves no mark.
+markSteadyHeight :: SolveEnv -> NodeIdx -> IO ()
+markSteadyHeight env@SolveEnv {seArena = na, seArrays = a} idx = do
+  hTag <- readTagEnum a idx TagHSizing
+  nt <- readTagEnum a idx TagNodeType
+  ratio <- readStyle a idx StyleAspect
+  steady <-
+    if hTag == SizingFixed || hTag == SizingPercent
+      then pure True
+      else if ratio > 0
+        then pure False
+        else case nt of
+          NodeText -> do
+            txt <- getText na idx
+            wTag <- readTagEnum a idx TagWSizing
+            rowChild <- parentIsRow na idx
+            pure (T.null txt || (not (T.any (== '\n') txt) && (wTag == SizingFit || rowChild)))
+          NodeDrawing -> not . isJust <$> (msLookupMeasure (seMs env) =<< getWidgetId na idx)
+          _
+            | nt == NodeContainer || nt == NodePanel -> do
+                flow <- readTagEnum a idx TagFlow
+                minColW <- readStyle a idx StyleGridMinColW
+                childMark <- readTagEnum a idx TagSteadyHeight
+                pure (flow /= Wrap && minColW <= 0 && childMark /= (2 :: Int))
+            | otherwise -> pure True
+  writeTagEnum a idx TagSteadyHeight steady
+  unless (steady || isFloatingNode nt) $ do
+    p <- readTree a idx TreeParent
+    when (p >= 0) $ writeTagEnum a p TagSteadyHeight (2 :: Int)
 
 -- | Load a parent's flow children into the flex scratch in child order, with
 -- each child's (width, height) from @sizeOf@. Returns the child count.

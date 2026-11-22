@@ -2,6 +2,25 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- A container is as tall as its content at the width it is laid out at.
+  Content whose height depends on its width (wrapping text, a filling
+  label, a wrapped row, a grid's cells, a percentage width in a wrapped
+  row, a drawing with a custom measure) was measured at one width and laid
+  out at another, so a column handed its grow children space the content
+  then took, and the content ended past the column's edge. The measure pass
+  now records each container's height at its measured width, a row shares
+  out its width before it works out its height, and a row aligns a child at
+  the height the child is laid out at. A node whose height cannot change
+  with its width skips the refits (`TagSteadyHeight`), so layouts without
+  wrapping content solve as before.
+
+- Text decides where it wraps at the width it was laid out at, before its
+  edges snap to the device pixel grid, in layout and in paint (`GeomLaidW`).
+  At a fractional scale, a label that fit its width could wrap at the
+  snapped width, a pixel narrower, and come out a line taller than its
+  parent made room for. A line within half a pixel of the width now stays
+  one line and may reach up to one device pixel past the snapped edge.
+
 - `panelWith'`, `calloutWith'`, `gridWith'` and `layersWith'` return the
   container's `Response` with the body's result, as `rowWith'` and
   `columnWith'` do.

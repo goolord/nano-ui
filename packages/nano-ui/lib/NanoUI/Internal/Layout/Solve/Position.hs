@@ -20,7 +20,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Layout.Solve.Measure
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), Padding (..), lineAlignFraction, windowMargin)
-import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_, gridSpan)
+import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_)
 import NanoUI.Internal.WidgetText
 
 -- | Place a widget's adornment rows ('adornRows'), each centred on its
@@ -124,15 +124,22 @@ positionNode env@SolveEnv {seArena = na, seArrays = a} !depth !idx (Rect x y ava
   h <- case nt of
     -- A fit height with an aspect ratio follows the assigned width.
     _ | ratio > 0 -> pure (clamp minH maxH (w / ratio))
-    -- Text outside a row wraps at the assigned width, as quantization will
-    -- snap it: paint wraps at the snapped width, and a height worked out at
-    -- the raw one can be a line short (or long) of what paint draws.
+    -- Text outside a row wraps at the assigned width, before its edges snap
+    -- to the pixel grid, as its parent's refit wraps it
+    -- ('recomputeFitHeightAtWidth'). Paint wraps it there too ('GeomLaidW').
     NodeText | hTag /= SizingFixed -> do
       isRowChild <- parentIsRow na idx
-      let s = fmSnapScale (msFm (seMs env))
-          wrapW = if s > 0 then max 0 (gridSpan s x (x + w)) else w
-      if isRowChild then pure resolvedH else textHeightAt env idx hAx wrapW (axTag wAx /= SizingFit) resolvedH
-    _ | (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit -> pure (clamp minH maxH (max intrinsicH availH))
+      if isRowChild then pure resolvedH else textHeightAt env idx hAx w (axTag wAx /= SizingFit) resolvedH
+    -- A fit container laid out at another width than it measured at is as
+    -- tall as its content at that width, as its parent's share assumed
+    -- ('flowChildSize'). The measured height can be a line taller or shorter.
+    _ | (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit -> do
+      steady <- readTagEnum a idx TagSteadyHeight
+      content <-
+        if steady || abs (w - intrinsicW) <= 1.0e-3
+          then pure intrinsicH
+          else recomputeFitHeightAtWidth env idx w
+      pure (clamp minH maxH (max content availH))
     -- A measured drawing laid out at a new width recomputes its height.
     NodeDrawing | hTag == SizingFit && w /= intrinsicW -> drawingHeightAt env idx w hAx resolvedH
     _ -> pure resolvedH
@@ -340,12 +347,19 @@ positionRowFromParent env@SolveEnv {seArena = na} depth parent gap (Rect cx cy c
 -- child with the tallest ascent touches the top.
 placeRowLine :: SolveEnv -> Int -> IOArr Int -> IOArr Float -> Int -> Float -> Float -> Float -> Float -> IO ()
 placeRowLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap !x0 !top !cross = do
+  -- A child is aligned at the height it is laid out at: its height at its
+  -- share of the width when that is not the width it measured at.
   let lowestBaseline acc i = do
         ci <- readPrimArray idxSnap i
         ay <- getAlignY na ci
         if ay /= AlignBaseline
           then pure acc
-          else max acc <$> (childRowCrossSize na ci cross >>= childBaseline env ci)
+          else do
+            fw <- readPrimArray outSnap i
+            h <- childRowCrossSize na ci cross
+            steady <- readTagEnum (seArrays env) ci TagSteadyHeight
+            crossH <- if steady then pure h else fromMaybe h <$> rowChildHeightAt env ci fw
+            max acc <$> childBaseline env ci crossH
   base <- foldUpTo k lowestBaseline 0
   -- The cursor stays in raw floats, never snapped: rounding it re-compounds
   -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
@@ -355,7 +369,9 @@ placeRowLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap !x0 !top
           ci <- readPrimArray idxSnap i
           fw <- readPrimArray outSnap i
           -- Fit/fixed children keep content height. Only Grow/Percent eat `cross`.
-          crossH <- childRowCrossSize na ci cross
+          crossH0 <- childRowCrossSize na ci cross
+          steady <- readTagEnum (seArrays env) ci TagSteadyHeight
+          crossH <- if steady then pure crossH0 else fromMaybe crossH0 <$> rowChildHeightAt env ci fw
           ay <- getAlignY na ci
           fy <-
             if ay == AlignBaseline
