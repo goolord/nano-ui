@@ -8,6 +8,7 @@ module NanoUI.Monad
     NanoUI
   , liftIO
   , withUiResource
+  , catchView
 
     -- | The functions of "NanoUI" that take a 'Context' (scrolling, themes)
     -- take the view's from 'askContext'.

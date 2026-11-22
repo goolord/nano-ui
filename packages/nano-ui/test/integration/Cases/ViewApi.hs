@@ -7,7 +7,8 @@ module Cases.ViewApi (tests) where
 import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
-import NanoUI.Monad (focusedWidget, releaseFocus)
+import Control.Exception (ErrorCall (..), throwIO)
+import NanoUI.Monad (catchView, focusedWidget, releaseFocus)
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
@@ -19,7 +20,26 @@ tests =
   , spec "pane-grid-initial" runPaneGridInitialTest
   , spec "scroll-ui" runScrollUiTest
   , simSpec "take-escape" 400 300 escapeUi takeEscapeOnce
+  , simSpec "catch-view-restores-build" 400 300 catchUi catchRestores
   ]
+
+-- | After a part of the view throws from inside a row, the handler and what
+-- follows are laid out where they are declared: in the outer column, below
+-- the row, not inside it.
+catchUi :: NanoUI ()
+catchUi = column $ do
+  label "before"
+  catchView (row (label "inner" >> liftIO (throwIO (ErrorCall "boom")))) $ \(ErrorCall _) -> label "fallback"
+  label "after"
+
+catchRestores :: Sim () ()
+catchRestores = do
+  Rect bx _ _ _ <- rectOf "before"
+  Rect _ by _ bh <- rectOf "inner"
+  Rect fx fy _ fh <- rectOf "fallback"
+  Rect ax ay _ _ <- rectOf "after"
+  checkEq (bx, bx) (fx, ax)
+  check (fy >= by + bh && ay >= fy + fh)
 
 -- | A custom widget of a fixed size, focusable or not.
 sizedWidget :: Float -> Float -> Bool -> CustomWidgetSpec ()

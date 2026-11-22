@@ -128,7 +128,7 @@ import NanoUI.Internal.Font (checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO, uiTime)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO, uiTime, withContext)
 import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style
@@ -138,7 +138,9 @@ import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (leftPress, navStep, useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle)
 import NanoUI.Internal.Widgets.Node
-import NanoUI.Internal.Widgets.Animate (keepAnimating)
+import NanoUI.Internal.Widgets.Animate (wakeAfter)
+import NanoUI.Internal.Sensor.Types (Watch (..))
+import NanoUI.Internal.Widgets.Sensor (Visibility (..), defaultSensorConfig, watchSensor)
 import NanoUI.Internal.Widgets.Custom (customDrawContext)
 
 -- -----------------------------------------------------------------------------
@@ -558,7 +560,9 @@ circularProgressWith' f diameter frac =
     }
 
 -- | An indeterminate loading indicator, 18 px across: an accent arc turning
--- over a faint ring. It keeps the frame loop running while on screen.
+-- over a faint ring. While any of it is on screen it wakes the frame loop
+-- for each of its 60 steps a second; scrolled or clipped out of view, it
+-- wakes nothing.
 {-# INLINE spinner #-}
 spinner :: NanoUI ()
 spinner = void (spinnerWith' id 18)
@@ -572,7 +576,9 @@ spinnerWith :: (Layout -> Layout) -> Float -> NanoUI ()
 spinnerWith f = void . spinnerWith' f
 
 -- | 'spinner' with a layout modifier and a diameter in pixels, returning its
--- response. It requests animation frames while declared.
+-- response. It requests a frame for its next step ('wakeAfter') while any of
+-- it is on screen, so it costs 60 frames a second however fast the display
+-- refreshes, and none while hidden.
 spinnerWith' :: (Layout -> Layout) -> Float -> NanoUI Response
 spinnerWith' f diameter = do
   t <- uiTime
@@ -593,8 +599,13 @@ spinnerWith' f diameter = do
           drawStrokeCircle (V2 cx cy) r thick (fadeAlpha (themeAccent theme) 48)
           drawStrokePath (P.arc (V2 cx cy) r start (pi / 2)) thick (themeAccent theme)
       }
-  keepAnimating resp
+  -- The sensor is keyed by the spinner's own id, so it takes no sibling id.
+  vis <- withContext $ \ctx -> watchSensor ctx (respId resp) (Watch (respId resp) defaultSensorConfig)
+  when (visVisible vis) $
+    wakeAfter (max 1.0e-3 (fromIntegral (floor (t * stepsPerSec) + 1 :: Int) / stepsPerSec - t))
   pure resp
+  where
+    stepsPerSec = 48 / 0.8 :: Double
 
 -- | Horizontal progress bar for a fraction in @[0, 1]@. It fills the
 -- available width at a fixed height.

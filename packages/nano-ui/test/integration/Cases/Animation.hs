@@ -16,6 +16,7 @@ tests =
   , spec "button-animation" runButtonHoverAnimTest
   , spec "animated-drawings" runSpinnerTest
   , spec "animation-left-out" runAnimationLeftOutTest
+  , spec "spinner-out-of-view" runSpinnerOutOfViewTest
   , spec "wake-after" runWakeAfterTest
   ]
 
@@ -171,7 +172,8 @@ runButtonHoverAnimTest ctx failed = do
   assert failed =<< anyAnimating leased
   assert failed =<< needsRedraw leased hover hover
 
--- | A spinner keeps the loop drawing, repaints only around itself, and turns.
+-- | A spinner wakes the loop for its next step (60 a second), repaints only
+-- around itself, and turns.
 -- An unversioned drawing rebuilds on the frame its animation ends, which
 -- once replayed the last animated frame's ops for good.
 runSpinnerTest :: Context -> IORef Int -> IO ()
@@ -184,7 +186,9 @@ runSpinnerTest ctx failed = do
       arc qs = [q | (q, c) <- qs, c == themeAccent theme]
   _ <- runFrame ctx inp ui
   (resp, draw0, _) <- runFrame ctx inp ui
-  assert failed =<< needsRedraw ctx inp inp
+  now <- getMonotonicTime
+  wake <- getWakeAt ctx
+  assert failed (wake > 0 && wake - now <= 1 / 60 + 2.0e-3)
   quads0 <- drawQuads draw0
   assert failed (not (null (arc quads0)))
   threadDelay 60000
@@ -205,8 +209,8 @@ runSpinnerTest ctx failed = do
   assert failed (stopped `elem` quads && running `notElem` quads)
 
 -- | An animation the view stops building stops drawing frames and runs again
--- when shown: a spinner's 'keepAnimating', and a long tween or undamped
--- spring behind a tab switch, which once drew for minutes or for good.
+-- when shown: a spinner's step wakes, and a long tween or undamped spring
+-- behind a tab switch, which once drew for minutes or for good.
 runAnimationLeftOutTest :: Context -> IORef Int -> IO ()
 runAnimationLeftOutTest _ failed = do
   let tweenAndSpring = do
@@ -217,14 +221,28 @@ runAnimationLeftOutTest _ failed = do
   forM_ [(loading, column (label "Loaded")), (tweenAndSpring, label "other")] $ \(shown, other) -> do
     ctx <- newContext
     let inp = withDelta 400 300 0.016
+        -- Drawing more frames: an animation, or a wake for a spinner's step.
+        alive c = (||) <$> anyAnimating c <*> ((> 0) <$> getWakeAt c)
     replicateM_ 5 (runFrame ctx inp shown)
-    assert failed =<< anyAnimating ctx
+    assert failed =<< alive ctx
     _ <- runFrame ctx inp other
-    assert failed . not =<< anyAnimating ctx
     _ <- runFrame ctx inp other
+    assert failed . not =<< alive ctx
     assert failed . not =<< needsRedraw ctx inp inp
     _ <- runFrame ctx inp shown
-    assert failed =<< anyAnimating ctx
+    _ <- runFrame ctx inp shown
+    assert failed =<< alive ctx
+
+-- | A spinner scrolled out of its scroll area's view wakes nothing.
+runSpinnerOutOfViewTest :: Context -> IORef Int -> IO ()
+runSpinnerOutOfViewTest ctx failed = do
+  let inp = withDelta 400 300 0.016
+      ui = column $ void $ scrollWith (fixedH 60) $ column $ do
+        spacer (Fixed 10) (Fixed 400)
+        spinner
+  replicateM_ 4 (runFrame ctx inp ui)
+  assertEq failed 0 =<< getWakeAt ctx
+  assert failed . not =<< anyAnimating ctx
 
 -- | 'wakeAfter' schedules one frame, the earliest request winning.
 runWakeAfterTest :: Context -> IORef Int -> IO ()

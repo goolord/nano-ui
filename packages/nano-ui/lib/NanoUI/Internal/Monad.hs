@@ -15,6 +15,8 @@ module NanoUI.Internal.Monad
   , liftIO
   , withContext
   , withUiResource
+  , withBuildScope
+  , catchView
   , withKey
   , keyedTag
   , scope
@@ -89,10 +91,11 @@ module NanoUI.Internal.Monad
   )
 where
 
-import Control.Exception (bracket)
+import Control.Exception (Exception, bracket)
 import Control.Monad (unless, when, (<$!>))
 import Control.Monad.Base (MonadBase)
 import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
+import Control.Monad.Catch qualified as Catch
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.IO.Unlift (MonadUnliftIO)
@@ -100,7 +103,7 @@ import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bits ((.&.), (.|.))
 import Data.Hashable (Hashable, hash)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
-import Data.IORef (modifyIORef', writeIORef)
+import Data.IORef (modifyIORef', writeIORef, readIORef)
 import Data.Monoid (Ap (..))
 import Data.Text (Text)
 import Data.Word (Word64)
@@ -232,6 +235,46 @@ withUiResource :: IO a -> (a -> IO ()) -> NanoUI b -> NanoUI b
 withUiResource acquire release (NanoUI action) =
   NanoUI (unsafeEff $ \es -> bracket acquire release (\_ -> unEff action es))
 
+-- | Enter a view build scope (an id scope, a container, a paint scope), run
+-- the action, and leave it. No exception handler is installed: an exception
+-- that escapes the action leaves the scope entered for the rest of the pass,
+-- which 'catchView' undoes for a view that recovers, and the next pass starts
+-- from a clean build ('NanoUI.Internal.Frame.resetUiBuild'). Every row,
+-- column, 'scope', 'withKey' row and 'styled' call goes through here, where a
+-- handler would cost an allocation each.
+{-# INLINE withBuildScope #-}
+withBuildScope :: IO a -> (a -> IO ()) -> NanoUI b -> NanoUI b
+withBuildScope acquire release m = do
+  a <- liftIO acquire
+  r <- m
+  liftIO (release a)
+  pure r
+
+-- | Run part of a view, and run the handler after it if it throws. The view's
+-- build state (open containers, the id scope, the paint scope) is put back
+-- as it was before the part ran, so the handler and the rest of the view are
+-- laid out where they are declared. What the part declared before it threw
+-- stays in the frame:
+--
+-- > catchView (column (riskyPanel model)) $ \(e :: SomeException) ->
+-- >   label ("Could not show the panel: " <> T.pack (displayException e))
+--
+-- Catching with 'Control.Monad.Catch.catch' or 'Control.Monad.Catch.try'
+-- instead works, but leaves whatever containers the part had open around
+-- the rest of the view until the next frame.
+catchView :: Exception e => NanoUI a -> (e -> NanoUI a) -> NanoUI a
+catchView m handler = do
+  ctx <- askContext
+  let na = ctxNodeArena ctx
+  saved <- liftIO $ (,,) <$> readIORef (ctxContainerStack ctx) <*> readIdCursor (ctxIdCursor ctx) <*> getArenaScope na
+  m `Catch.catch` \e -> do
+    liftIO $ case saved of
+      (stack, ids, sc) -> do
+        writeIORef (ctxContainerStack ctx) stack
+        writeIdCursor (ctxIdCursor ctx) ids
+        setArenaScope na sc
+    handler e
+
 -- | The id 'nextId' would issue, without consuming it.
 {-# INLINE currentId #-}
 currentId :: NanoUI WidgetId
@@ -265,7 +308,7 @@ withIdFrame ::
   (IdContext -> (IdContext, IdContext)) -> NanoUI a -> NanoUI a
 withIdFrame enter m = do
   ctx <- askContext
-  withUiResource
+  withBuildScope
     ( do
         old <- readIdCursor (ctxIdCursor ctx)
         let
@@ -418,7 +461,7 @@ withPaintScope enter m = do
   ctx <- askContext
   let
     na = ctxNodeArena ctx
-  withUiResource
+  withBuildScope
     ( do
         old <- getArenaScope na
         setArenaScope na =<< enter ctx old

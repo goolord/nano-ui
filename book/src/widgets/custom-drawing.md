@@ -12,7 +12,7 @@ When the built-in widgets do not fit, draw the control with the canvas API. The 
 | `toggleSwitch` | `Var Bool -> NanoUI ()` | 44×24 | Click, Space, or Enter toggles |
 | `circularProgress` | `Float -> NanoUI ()` | 32×32 | Fraction in `[0, 1]` |
 | `progressBar` | `Float -> NanoUI ()` | fills width, 12 high | Fraction in `[0, 1]` |
-| `spinner` | `NanoUI ()` | 18×18 | Indeterminate; requests animation frames while declared |
+| `spinner` | `NanoUI ()` | 18×18 | Indeterminate; wakes the loop 60 times a second while on screen |
 | `sparkline` | `[Float] -> NanoUI ()` | 80×24 | Scales to the values' range |
 
 Each has a primed form returning `Response` (`knob'`, `toggleSwitch'`, ...) and a `...With` form that takes a layout modifier and size parameters:
@@ -39,7 +39,7 @@ A settings row:
 
 The `fixedW` on the changing number keeps the controls from shifting. Read the value *below* the knob so a drag resolves in one pass.
 
-`spinner` calls `keepAnimating` internally while it is drawn. Do not add a global `keepAnimating`; that would keep the loop running when the spinner is not visible.
+`spinner` asks for a frame for each of its 60 steps a second (`wakeAfter`) while any of it is on screen, and for none once it is scrolled or clipped out of view. Do not add a global `keepAnimating`; that would run frames at the display rate whether or not the spinner shows.
 
 ### Implementing custom controls
 

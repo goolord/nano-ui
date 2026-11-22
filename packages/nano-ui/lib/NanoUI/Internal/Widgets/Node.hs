@@ -254,6 +254,10 @@ mouseArea f body = do
 -- @child@ inside it, then pop. @scoped@ also runs the children in a fresh id
 -- scope; it changes the children's widget ids (and so their store keys), so
 -- callers pick it explicitly: plain containers scope, scroll containers do not.
+--
+-- Like every view build scope, it installs no exception handler
+-- ('NanoUI.Internal.Monad.withBuildScope'); 'NanoUI.Internal.Monad.catchView'
+-- restores the container stack for a view that recovers.
 withContainerNode :: Bool -> NodeIdx -> NanoUI a -> NanoUI a
 withContainerNode scoped idx child = do
   ctx <- askContext

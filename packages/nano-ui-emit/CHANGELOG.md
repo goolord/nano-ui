@@ -2,6 +2,10 @@
 
 ## 0.1.0.0 -- Unreleased
 
+- `reduceFrame` keeps the late messages it took when the view throws, so
+  they are reduced on the next frame instead of being lost, and drops the
+  messages the failed frame emitted.
+
 - `NanoUIE msg a` is now a `NanoUI a` action with the view's message sink in
   scope as the implicit parameter `?emit`, so every core widget, container,
   overlay and callback-taking widget runs in an emitting view unchanged.

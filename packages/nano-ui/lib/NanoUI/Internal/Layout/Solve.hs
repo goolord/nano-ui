@@ -91,6 +91,7 @@ snapFloatingSubtrees na s = do
 -- | Visit the @count@ nodes in arena order with whether each is a floating
 -- node or inside one. A parent always precedes its children, so one pass
 -- marks each node from its parent.
+{-# INLINE forFloatingMarks #-}
 forFloatingMarks :: NodeArenaArrays -> Int -> (Int -> Bool -> IO ()) -> IO ()
 forFloatingMarks a count k = do
   floating <- newPrimArray count :: IO (IOArr Word8)

@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Exception (TypeError (..), evaluate, try)
+import Control.Exception (TypeError (..), evaluate, throwIO, try)
 import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
@@ -8,7 +8,7 @@ import Data.Text qualified as T
 import DeferredWrongMessage (wrongMessage)
 import NanoUI qualified as UI
 import NanoUI.Emit
-import NanoUI.Testing (Context, isDirty, newContext, runFrame)
+import NanoUI.Testing (Context, DrawData, isDirty, newContext, runFrame)
 import NanoUI.Testing.Assert (require, requireEq, withInput)
 import NanoUI.Testing.Harness (centerOf)
 import NanoUI.Testing.Sim hiding (result)
@@ -168,3 +168,9 @@ testLateMessages = do
   _ <- reduceFrame reducer ctx inp view
   reducerModel reducer >>= requireEq "the next frame reduces it" 1
   readIORef seen >>= requireEq "and draws the reduced model" [1, 0]
+  -- A frame that throws keeps the late messages it took and drops its own.
+  _ <- runFrame other inp late
+  thrown <- try (reduceFrame reducer ctx inp (\_ -> emit Dec >> UI.liftIO (throwIO (userError "view failed"))))
+  require "the failing frame throws" (either (const True) (const False) (thrown :: Either IOError ((), DrawData, Bool)))
+  _ <- reduceFrame reducer ctx inp view
+  reducerModel reducer >>= requireEq "a failed frame loses no late message" 2

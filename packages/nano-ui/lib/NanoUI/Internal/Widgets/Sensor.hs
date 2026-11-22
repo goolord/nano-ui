@@ -20,6 +20,7 @@ module NanoUI.Internal.Widgets.Sensor
   , sensorWith
   , sensorConfigured
   , useVisibility
+  , watchSensor
   , beginSensors
   , updateSensors
   ) where

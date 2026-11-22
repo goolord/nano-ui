@@ -2,6 +2,19 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- `catchView` (`NanoUI.Monad`) runs part of a view and a handler after it if
+  it throws, with the view's open containers, id scope and paint scope put
+  back as they were, so the handler and the rest of the view are laid out
+  where they are declared. Scopes (`scope`, `withKey`, `styled`, rows and
+  columns) no longer install an exception handler each; catching with
+  `try` or `catch` leaves the failed part's containers open until the next
+  frame. The form profile scene allocates 17% less.
+
+- `spinner` wakes the loop for each of its 60 steps a second instead of
+  requesting a frame at every display refresh, and wakes nothing while it
+  is scrolled or clipped out of view. A 144 Hz display runs 60 view passes
+  a second for a spinner instead of 144.
+
 - Layout fixes: modals, windows and popups snap to the device pixel grid
   as the page does, so fractional widths inside them no longer leave a
   one-pixel seam. A wrapping label is laid out at the width it is drawn at,

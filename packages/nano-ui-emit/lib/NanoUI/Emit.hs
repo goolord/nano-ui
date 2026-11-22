@@ -40,6 +40,7 @@ module NanoUI.Emit
   )
 where
 
+import Control.Exception (onException)
 import Control.Monad (unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
@@ -167,6 +168,7 @@ data Reducer msg model = Reducer
   -- ^ Messages emitted between frames, newest first.
   }
 
+-- | A reducer session starting from @model@, with no messages pending.
 newReducer :: (msg -> model -> model) -> model -> IO (Reducer msg model)
 newReducer update model = Reducer update <$> newIORef model <*> newIORef Nothing <*> newIORef []
 
@@ -177,14 +179,18 @@ reducerModel = readIORef . rModel
 -- | Run a frame of the view on the model, as 'runFrameReduce' does, and keep
 -- the result. Messages emitted after an earlier frame ended are reduced
 -- first, so the frame draws them; a message emitted after this frame ends
--- asks the context for another.
+-- asks the context for another. If the frame throws, the messages it emitted
+-- are dropped and the earlier late ones are kept for the next frame.
 reduceFrame :: Eq model => Reducer msg model -> Context -> Input -> (model -> NanoUIE msg a) -> IO (a, DrawData, Bool)
 reduceFrame r ctx inp view = do
   late <- readIORef (rLate r)
   unless (null late) (writeIORef (rLate r) [])
   model <- reduceMessages (rUpdate r) <$> readIORef (rModel r) <*> pure (reverse late)
   writeIORef (rFrame r) (Just [])
-  (a, draw, dirty) <- runFrame ctx inp (withSink sink (view model))
+  let restore = do
+        writeIORef (rFrame r) Nothing
+        modifyIORef' (rLate r) (++ late)
+  (a, draw, dirty) <- runFrame ctx inp (withSink sink (view model)) `onException` restore
   msgs <- maybe [] reverse <$> readIORef (rFrame r)
   writeIORef (rFrame r) Nothing
   (model', dirty') <- reduceAfterFrame (rUpdate r) ctx model msgs dirty
