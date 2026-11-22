@@ -1,12 +1,14 @@
 module Main (main) where
 
 import Control.Exception (IOException, try)
-import Control.Monad (forM_)
+import Control.Monad (forM_, unless, void, when)
 import Data.ByteString qualified as BS
+import Data.Maybe (isJust)
 import Data.Primitive.PrimArray (primArrayFromList)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import NanoUI
 import NanoUI.Backend (monospaceMetrics)
 import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
@@ -16,6 +18,7 @@ import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
 import NanoUI.Testing (newPixelContext)
 import NanoUI.Testing.Assert (require, run2Frames, withInput)
+import System.Environment (lookupEnv)
 
 -- | Fail on the first needle the document lacks.
 contains :: Text -> [Text] -> IO ()
@@ -29,6 +32,7 @@ main = do
   testGradientsAndClips
   testTextAndImages
   testFrameToSvg
+  testGoldens
   putStrLn "nano-ui-svg tests passed."
 
 cdc :: CustomDrawContext
@@ -278,3 +282,95 @@ testFrameToSvg = do
     pure i
   imageSvg <- exportOf ctx defaultFrameSvgConfig {fsImageUri = \_ -> Just "data:image/png;base64,AA=="} (image (fixedWH 20 20) iid)
   require "widget image under its id" (T.isInfixOf "<image " imageSvg)
+
+-- | Whole frames of representative views, exported headlessly and compared
+-- with the documents committed under @test/golden@. With
+-- @NANO_UI_UPDATE_GOLDEN=1@ set, the documents are written instead, for a
+-- change that means to alter the export. Line ends are compared as @\n@,
+-- whatever a checkout made of them.
+testGoldens :: IO ()
+testGoldens = do
+  update <- isJust <$> lookupEnv "NANO_UI_UPDATE_GOLDEN"
+  forM_ goldenViews $ \(name, w, h, ui) -> do
+    ctx <- newPixelContext
+    enableSvgExport ctx
+    -- The pointer is off the window, so nothing shows a hover.
+    let inp = (withInput w h) {inputMousePos = V2 (-10) (-10)}
+    (_, dd, _) <- run2Frames ctx inp ui
+    svg <- frameToSvg defaultFrameSvgConfig ctx inp dd
+    let path = "test/golden/" <> name <> ".svg"
+        normal = T.replace "\r\n" "\n"
+    if update
+      then BS.writeFile path (TE.encodeUtf8 (svg <> "\n"))
+      else do
+        found <- try @IOException (BS.readFile path)
+        case found of
+          Left _ -> require ("missing golden " <> path <> "; run with NANO_UI_UPDATE_GOLDEN=1 to write it") False
+          Right bytes -> do
+            let want = T.stripEnd (normal (TE.decodeUtf8 bytes))
+                got = normal svg
+            unless (want == got) $ do
+              let common = length (takeWhile id (zipWith (==) (T.unpack want) (T.unpack got)))
+                  around t = T.take 160 (T.drop (max 0 (common - 40)) t)
+              putStrLn ("golden " <> path <> " differs at character " <> show common)
+              putStrLn ("  want: " <> T.unpack (around want))
+              putStrLn ("  got:  " <> T.unpack (around got))
+              require ("golden " <> path <> " differs; run with NANO_UI_UPDATE_GOLDEN=1 if the change is meant") False
+  when update (putStrLn "golden documents written")
+
+-- | Five views: a form, a table under tabs, a modal over a page, nested
+-- layout containers, and a canvas beside a tree and a select.
+goldenViews :: [(FilePath, Float, Float, NanoUI ())]
+goldenViews =
+  [ ( "form"
+    , 320
+    , 240
+    , columnWith (padAll 10 . gap 6) $ do
+        labelWith fontBold "Settings"
+        textInput (constVar "name")
+        checkbox "Enabled" (constVar True)
+        slider 0 100 (constVar 40)
+        rowWith (gap 6) (void (button "Save") >> void (button "Cancel"))
+    )
+  , ( "tabs-table"
+    , 360
+    , 200
+    , tabs (constVar (0 :: Int))
+        [ tab 0 "People" (table "people" (headed "Name" fst <> headed "City" snd) [("Ada" :: Text, "London" :: Text), ("Lin", "Taipei"), ("Sam", "Lagos")] (constVar (SortCol 0 SortAsc)))
+        , tab 1 "Other" (label "other")
+        ]
+    )
+  , ( "modal"
+    , 320
+    , 240
+    , column $ do
+        label "Behind the dialog"
+        void (button "Behind")
+        modal (constVar True) "Confirm" $ do
+          label "Delete the file?"
+          rowWith (gap 6) (void (button "Delete") >> void (button "Keep"))
+    )
+  , ( "layout"
+    , 320
+    , 240
+    , columnWith (padAll 8 . gap 6 . fillW) $ do
+        rowWith (gap 4 . fillW) $ do
+          panelWith (fixedWH 60 40) (label "A")
+          spacer (Grow 1) (Fixed 10)
+          panelWith (fixedWH 60 40) (label "B")
+        separator
+        gridWith 3 (gap 4 . fillW) (mapM_ (\i -> label (T.pack ("cell " <> show i))) [1 .. 6 :: Int])
+        callout (colorRGBA 40 120 200 255) (label "A note in a callout")
+    )
+  , ( "canvas"
+    , 320
+    , 200
+    , rowWith (padAll 8 . gap 8) $ do
+        _ <- canvas (fixedWH 80 80) $ \(Rect x y w h) -> do
+          drawCircle (V2 (x + w / 2) (y + h / 2)) 30 (colorRGBA 220 60 60 255)
+          drawRect (Rect (x + 10) (y + 10) 20 20) (colorRGBA 40 160 80 255)
+        column $ do
+          tree "files" (smallArrayFromList [TreeItem "src" [TreeItem "Main.hs" []], TreeItem "README" []]) (constVar 1)
+          selectWith (fixedW 120) ["one", "two", "three"] (constVar 1)
+    )
+  ]
