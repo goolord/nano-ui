@@ -211,8 +211,25 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
       ButtonClose
         | buttonVisualStyle si == buttonCloseTab -> paintTabClose env idx (Rect x y w h)
         | otherwise -> drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
-      _ -> pure ()
-    _ -> pure ()
+      ButtonPlain -> pure ()
+      ButtonMenuBar -> pure ()
+      ButtonContent -> pure ()
+    -- 'NanoUI.Internal.Frame.Paint.lowerNodeVisible' paints the other node
+    -- types itself and calls this only for the four above.
+    NodeContainer -> pure ()
+    NodeText -> pure ()
+    NodeSpacer -> pure ()
+    NodeSeparator -> pure ()
+    NodeTextInput -> pure ()
+    NodeTextArea -> pure ()
+    NodeScrollContainer -> pure ()
+    NodeModal -> pure ()
+    NodeImage -> pure ()
+    NodePanel -> pure ()
+    NodeWindow -> pure ()
+    NodeBox -> pure ()
+    NodePopup -> pure ()
+    NodeDrawing -> pure ()
 
 -- | A tab header's close button: its cross in the header's label colour
 -- ('NanoUI.Internal.Style.fontColor'), dimmed until the pointer is over it,

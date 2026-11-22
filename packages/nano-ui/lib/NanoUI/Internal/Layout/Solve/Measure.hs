@@ -347,6 +347,11 @@ measureAspect a idx = do
 measureContent :: SolveEnv -> NodeIdx -> IO ()
 measureContent env@SolveEnv {seArena = na} idx = do
   nt <- readTagEnum (seArrays env) idx TagNodeType
+  -- Each is called once below, so it is inlined there.
+  let container = do
+        measureContainer env idx
+        when (nt == NodeModal) $ setSolvedValue na idx 0
+      widget = measureWidget env idx
   case nt of
     NodeText -> measureTextNode env idx
     -- Non-fixed spacers reserve the default 8px extent.
@@ -358,11 +363,17 @@ measureContent env@SolveEnv {seArena = na} idx = do
     NodeDrawing -> do
       wid <- getWidgetId na idx
       msLookupMeasure (seMs env) wid >>= maybe (measureImage na idx Nothing) (\fn -> measureCustomNode env fn idx)
-    _
-      | isContainerNode nt -> do
-          measureContainer env idx
-          when (nt == NodeModal) $ setSolvedValue na idx 0
-      | otherwise -> measureWidget env idx
+    NodeContainer -> container
+    NodePanel -> container
+    NodeModal -> container
+    NodeWindow -> container
+    NodePopup -> container
+    NodeButton -> widget
+    NodeSlider -> widget
+    NodeTextInput -> widget
+    NodeTextArea -> widget
+    NodeSelect -> widget
+    NodeColorPicker -> widget
 
 measureCustomNode :: SolveEnv -> CustomMeasureFn -> NodeIdx -> IO ()
 measureCustomNode env@SolveEnv {seArena = na} measureFn idx = do
@@ -606,6 +617,9 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
                 _ -> buttonPadding fm
           (mw, mh) <- measure body
           pure (mw + padX, mh + padY)
+      -- 'measureContent' sends only widgets here, and decides per node
+      -- type which ones; another widget is measured as a label with the
+      -- widget padding.
       _ -> do
         let body = if T.null txt then " " else txt
             (padX, padY) = widgetPadding fm
@@ -628,6 +642,8 @@ measureAdorned SolveEnv {seArena = na, seArrays = a} measurer@TextMeasurer {tmMe
     NodeTextInput ->
       let sides = fromIntegral (fromEnum (li >= 0) + fromEnum (ti >= 0))
        in pure (rawW + lw + tw + gap * sides, max rawH (rowH + rawH - fmLineHeight fm))
+    -- A text field widens by its adornments; every other widget fits them
+    -- in one group with its label.
     _ -> do
       (labelW, groupW) <- adornedButtonGroup measurer txt gap rows
       let (padX, padY)
@@ -998,28 +1014,11 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
     ratio <- if hTag == SizingFit then readStyle a idx StyleAspect else pure 0
     minAssignedH <-
       if nt == NodeContainer || nt == NodePanel then minAssignedOn na nt False idx hAx else pure False
-    case nt of
-      -- A fit height with an aspect ratio is width / ratio.
-      _ | ratio > 0 -> pure (clamp minH maxH (effW' / ratio))
-
-      NodeText
-        | hTag /= SizingFixed -> do
-            isRowChild <- parentIsRow na idx
-            textHeightAt env idx hAx effW' (wTag /= SizingFit && not isRowChild) oldH
-        | otherwise -> pure oldH
-
-      -- A measured drawing, like wrapped text, can be taller when narrower.
-      -- At the width it measured at, it keeps its measured height, as
-      -- 'positionNode' does: its measure was offered no width limit there.
-      NodeDrawing
-        | hTag == SizingFit && abs (effW' - oldW) > 1.0e-3 -> drawingHeightAt env idx effW' hAx oldH
-        | otherwise -> pure oldH
-
-      -- A container that reports its minimum height ('minAssignedOn') is as
-      -- tall as it is given, whatever it holds.
-      _ | minAssignedH -> pure oldH
-
-      _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
+    let -- A container's height at this width. Called from two alternatives
+        -- below, both tail calls, so it compiles to a join point.
+        refit
+          | hTag == SizingFixed = pure oldH
+          | otherwise = do
             (pad, gap, dir) <- containerFlow a idx
             kind <- readContainerKind a idx
             let innerW = max 0 (effW' - padL pad - padR pad)
@@ -1073,8 +1072,43 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
                           pure (FlowAcc (count + 1) (contentH + subH) 0)
                     FlowAcc count contentH _ <- foldFlowChildrenM na idx step (FlowAcc 0 0 0)
                     padded (if count <= 0 then 0 else contentH + gap * fromIntegral (count - 1))
+    case nt of
+      -- A fit height with an aspect ratio is width / ratio.
+      _ | ratio > 0 -> pure (clamp minH maxH (effW' / ratio))
 
-      _ -> pure oldH
+      NodeText
+        | hTag /= SizingFixed -> do
+            isRowChild <- parentIsRow na idx
+            textHeightAt env idx hAx effW' (wTag /= SizingFit && not isRowChild) oldH
+        | otherwise -> pure oldH
+
+      -- A measured drawing, like wrapped text, can be taller when narrower.
+      -- At the width it measured at, it keeps its measured height, as
+      -- 'positionNode' does: its measure was offered no width limit there.
+      NodeDrawing
+        | hTag == SizingFit && abs (effW' - oldW) > 1.0e-3 -> drawingHeightAt env idx effW' hAx oldH
+        | otherwise -> pure oldH
+
+      -- A container that reports its minimum height ('minAssignedOn') is as
+      -- tall as it is given, whatever it holds.
+      _ | minAssignedH -> pure oldH
+
+      NodeContainer -> refit
+      NodePanel -> refit
+      NodeSpacer -> pure oldH
+      NodeSeparator -> pure oldH
+      NodeButton -> pure oldH
+      NodeSlider -> pure oldH
+      NodeTextInput -> pure oldH
+      NodeTextArea -> pure oldH
+      NodeScrollContainer -> pure oldH
+      NodeSelect -> pure oldH
+      NodeModal -> pure oldH
+      NodeImage -> pure oldH
+      NodeWindow -> pure oldH
+      NodeBox -> pure oldH
+      NodeColorPicker -> pure oldH
+      NodePopup -> pure oldH
 
 -- | The content height of row @idx@ laid out @innerW@ wide inside its
 -- padding ('lineHeightAt'), or 'Nothing' when every child keeps its
@@ -1189,6 +1223,17 @@ markSteadyHeight env@SolveEnv {seArena = na, seArrays = a} idx = do
   hTag <- readTagEnum a idx TagHSizing
   nt <- readTagEnum a idx TagNodeType
   ratio <- readStyle a idx StyleAspect
+  let container = do
+        kind <- readContainerKind a idx
+        childMark <- readTagEnum a idx TagSteadyHeight
+        -- Wrapping lines and a grid that picks its column count by width
+        -- can change height with width.
+        byWidth <- case kind of
+          KGrid -> (> 0) <$> readStyle a idx StyleGridMinColW
+          KLayered -> pure False
+          KWrap -> pure True
+          KLine -> pure False
+        pure (not byWidth && childMark /= (2 :: Int))
   steady <-
     if hTag == SizingFixed || hTag == SizingPercent
       then pure True
@@ -1201,19 +1246,22 @@ markSteadyHeight env@SolveEnv {seArena = na, seArrays = a} idx = do
             rowChild <- parentIsRow na idx
             pure (T.null txt || (not (T.any (== '\n') txt) && (wTag == SizingFit || rowChild)))
           NodeDrawing -> not . isJust <$> (msLookupMeasure (seMs env) =<< getWidgetId na idx)
-          _
-            | nt == NodeContainer || nt == NodePanel -> do
-                kind <- readContainerKind a idx
-                childMark <- readTagEnum a idx TagSteadyHeight
-                -- Wrapping lines and a grid that picks its column count by
-                -- width can change height with width.
-                byWidth <- case kind of
-                  KGrid -> (> 0) <$> readStyle a idx StyleGridMinColW
-                  KLayered -> pure False
-                  KWrap -> pure True
-                  KLine -> pure False
-                pure (not byWidth && childMark /= (2 :: Int))
-            | otherwise -> pure True
+          NodeContainer -> container
+          NodePanel -> container
+          NodeSpacer -> pure True
+          NodeSeparator -> pure True
+          NodeButton -> pure True
+          NodeSlider -> pure True
+          NodeTextInput -> pure True
+          NodeTextArea -> pure True
+          NodeScrollContainer -> pure True
+          NodeSelect -> pure True
+          NodeModal -> pure True
+          NodeImage -> pure True
+          NodeWindow -> pure True
+          NodeBox -> pure True
+          NodeColorPicker -> pure True
+          NodePopup -> pure True
   writeTagEnum a idx TagSteadyHeight steady
   unless (steady || isFloatingNode nt) $ do
     p <- readTree a idx TreeParent
@@ -1285,6 +1333,28 @@ childBaseline :: SolveEnv -> NodeIdx -> Float -> IO Float
 childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
   nt <- getNodeType na ci
   si <- getStyleIdx na ci
+  let -- Widget labels take the node's font size in the default face.
+      label = do
+        fm <- tmMetrics <$> nodeMeasurer env ci nt si
+        pure (textBaseline fm h)
+      container = do
+        kids <- flowChildrenInOrder na ci
+        case kids of
+          [] -> pure h
+          first : _ -> do
+            (pad, _, dir) <- containerFlow a ci
+            let innerH = max 0 (h - padT pad - padB pad)
+                heightOf k = rectH <$> getNodeRect na k
+            aligned <-
+              if dir == DirRow then filterM (fmap (== AlignBaseline) . getAlignY na) kids else pure []
+            grouped <- mapM (\k -> heightOf k >>= childBaseline env k) aligned
+            (padT pad +) <$> case grouped of
+              _ : _ -> pure (maximum grouped)
+              [] -> do
+                fh <- heightOf first
+                flow <- getFlow na ci
+                ay <- if dir == DirRow || flow == Layered then getAlignY na first else pure AlignTop
+                (alignY ay 0 innerH fh +) <$> childBaseline env first fh
   case nt of
     NodeText -> do
       raw <- getText na ci
@@ -1306,30 +1376,26 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
                 (tw, _) <- measureFontLine measurer raw
                 pure (isBounded cap && cap + 0.5 < tw)
           pure (textBaseline fm (if wrapped then fmLineHeight fm else h))
-    _
-      | hasCenteredLabel nt && not (nt == NodeButton && hasFlag buttonFlagClose si) -> do
-          -- Widget labels take the node's font size in the default face.
-          fm <- tmMetrics <$> nodeMeasurer env ci nt si
-          pure (textBaseline fm h)
-      | isContainerNode nt -> do
-          kids <- flowChildrenInOrder na ci
-          case kids of
-            [] -> pure h
-            first : _ -> do
-              (pad, _, dir) <- containerFlow a ci
-              let innerH = max 0 (h - padT pad - padB pad)
-                  heightOf k = rectH <$> getNodeRect na k
-              aligned <-
-                if dir == DirRow then filterM (fmap (== AlignBaseline) . getAlignY na) kids else pure []
-              grouped <- mapM (\k -> heightOf k >>= childBaseline env k) aligned
-              (padT pad +) <$> case grouped of
-                _ : _ -> pure (maximum grouped)
-                [] -> do
-                  fh <- heightOf first
-                  flow <- getFlow na ci
-                  ay <- if dir == DirRow || flow == Layered then getAlignY na first else pure AlignTop
-                  (alignY ay 0 innerH fh +) <$> childBaseline env first fh
-      | otherwise -> pure h
+    -- A close button's cross is no label.
+    NodeButton
+      | hasFlag buttonFlagClose si -> pure h
+      | otherwise -> label
+    NodeSelect -> label
+    NodeContainer -> container
+    NodeScrollContainer -> container
+    NodeModal -> container
+    NodePanel -> container
+    NodeWindow -> container
+    NodePopup -> container
+    NodeSpacer -> pure h
+    NodeSeparator -> pure h
+    NodeSlider -> pure h
+    NodeTextInput -> pure h
+    NodeTextArea -> pure h
+    NodeImage -> pure h
+    NodeBox -> pure h
+    NodeColorPicker -> pure h
+    NodeDrawing -> pure h
   where
     textBaseline fm boxH = centeredTextY fm 0 boxH (fmLineHeight fm) + fmAscent fm
 

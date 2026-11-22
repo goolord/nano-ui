@@ -140,6 +140,37 @@ type IOArr = MutablePrimArray RealWorld
 -- draws it. Stored as a 'Word8' ('TagNodeType') through the derived 'Enum'
 -- instance, so there can be at most 256 constructors. Several types store
 -- type-specific data in the node's style index ('getStyleIdx').
+--
+-- == Adding a NodeType
+--
+-- The dispatches that decide per node type list every constructor, so
+-- @-Wincomplete-patterns@ (an error under @-Werror@) points at most of
+-- the places a new type needs a decision:
+--
+-- * this module: 'isWidgetNode' and 'isContainerNode'; and, since they
+--   compare against named types, 'packsNodeFont', 'hasCenteredLabel',
+--   'isScrollNode', 'isFloatingNode' and the 'NodeClass' lists the arena
+--   keeps.
+-- * "NanoUI.Internal.StyleBits": the fields the type packs into its style
+--   index, and its entry in @styleLayouts@.
+-- * "NanoUI.Internal.Layout.Solve.Measure": @measureContent@,
+--   @recomputeUnsteady@, @markSteadyHeight@ and @childBaseline@; also
+--   @measureWidget@ and @measureAdorned@ for a widget.
+-- * "NanoUI.Internal.Layout.Solve.Position" and
+--   "NanoUI.Internal.Layout.Solve.Flex", where a type is placed apart from
+--   its siblings (a separator in a column, a floating node).
+-- * "NanoUI.Internal.Frame.Paint" (@lowerNodeVisible@) and, for a widget,
+--   "NanoUI.Internal.Frame.Paint.Widgets" (@paintWidget@).
+-- * "NanoUI.Internal.Frame.Spans": @collectClippedSpans@ and
+--   @computeWidgetTextPlacements@.
+-- * "NanoUI.Internal.Frame.Chrome": @displayText@ and
+--   @widgetVisualStyleWith@.
+-- * "NanoUI.Internal.Frame.Input" (focus kind, hit rect),
+--   "NanoUI.Internal.Frame.Cursor" (pointer cursor) and
+--   "NanoUI.Internal.Frame.Hit".
+-- * "NanoUI.Internal.Damage", which lists the types that repaint from the
+--   store and the ones that never need damage of their own.
+-- * @NanoUI.Draw.FrameSvg@ in nano-ui-svg, the SVG export of a frame.
 data NodeType
   = NodeContainer
   -- ^ A row, column or grid.
@@ -200,7 +231,17 @@ isWidgetNode nt =
     NodeSelect -> True
     NodeColorPicker -> True
     NodeDrawing -> True
-    _ -> False
+    NodeContainer -> False
+    NodeText -> False
+    NodeSpacer -> False
+    NodeSeparator -> False
+    NodeScrollContainer -> False
+    NodeModal -> False
+    NodeImage -> False
+    NodePanel -> False
+    NodeWindow -> False
+    NodeBox -> False
+    NodePopup -> False
 
 -- | Whether the node packs a font into its style index that the solver and
 -- @resolveFontFor@ read: a label or a text field. A text area packs one too,
@@ -251,7 +292,18 @@ isContainerNode nt =
     NodePanel -> True
     NodeWindow -> True
     NodePopup -> True
-    _ -> False
+    NodeText -> False
+    NodeSpacer -> False
+    NodeSeparator -> False
+    NodeButton -> False
+    NodeSlider -> False
+    NodeTextInput -> False
+    NodeTextArea -> False
+    NodeSelect -> False
+    NodeImage -> False
+    NodeBox -> False
+    NodeColorPicker -> False
+    NodeDrawing -> False
 
 -- | Whether the node is a 'NodeScrollContainer'. A text area scrolls its own
 -- content and does not count.

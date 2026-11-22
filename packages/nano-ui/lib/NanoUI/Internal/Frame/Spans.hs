@@ -129,7 +129,21 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
             (textClip, rows) <- textAreaTextPlacements ctx idx (Rect x y w h)
             rowSpans <- placedTextSpans ctx nt idx rows
             pure (maybe [] (`tagClippedSpans` rowSpans) (rectIntersect clipHere textClip))
-          _ -> pure (tagClippedSpans clipHere spans)
+          NodeContainer -> pure (tagClippedSpans clipHere spans)
+          NodeText -> pure (tagClippedSpans clipHere spans)
+          NodeSpacer -> pure (tagClippedSpans clipHere spans)
+          NodeSeparator -> pure (tagClippedSpans clipHere spans)
+          NodeButton -> pure (tagClippedSpans clipHere spans)
+          NodeSlider -> pure (tagClippedSpans clipHere spans)
+          NodeScrollContainer -> pure (tagClippedSpans clipHere spans)
+          NodeModal -> pure (tagClippedSpans clipHere spans)
+          NodeImage -> pure (tagClippedSpans clipHere spans)
+          NodePanel -> pure (tagClippedSpans clipHere spans)
+          NodeWindow -> pure (tagClippedSpans clipHere spans)
+          NodeBox -> pure (tagClippedSpans clipHere spans)
+          NodeColorPicker -> pure (tagClippedSpans clipHere spans)
+          NodePopup -> pure (tagClippedSpans clipHere spans)
+          NodeDrawing -> pure (tagClippedSpans clipHere spans)
       pushSpans arena here
       kids <- getFirstChild (ctxNodeArena ctx) idx
       -- A widget clips its children, as paint does.
@@ -301,6 +315,8 @@ placedTextSpans ctx nt idx placements = do
     NodeTextInput -> do
       fg <- textInputFg ctx style idx =<< textInputFocused ctx idx
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements]
+    -- Only a text field fades its text while empty; every other widget's
+    -- text takes its node's colour.
     _ -> do
       fg <- nodeTextColor ctx nt idx (styleFg style)
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
@@ -475,10 +491,27 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fieldTxt, penX, penY, _) <- plainFieldPen ctx idx si fm x y w h
           (fw, _) <- measureTxt fieldTxt
           pure [(fieldTxt, penX, penY, fw, lineH)]
-    -- Sliders, drawings and plain widgets carry no text; text areas place
-    -- their rows with their clip ('textAreaTextPlacements'), and the other
-    -- widgets have centred labels ('cachedWidgetLabel').
-    _ -> pure []
+    -- Text areas place their rows with their clip
+    -- ('textAreaTextPlacements'), and buttons and selects have centred
+    -- labels ('cachedWidgetLabel').
+    NodeTextArea -> pure []
+    NodeButton -> pure []
+    NodeSelect -> pure []
+    -- Sliders and drawings carry no text, and the other node types are not
+    -- widgets.
+    NodeContainer -> pure []
+    NodeText -> pure []
+    NodeSpacer -> pure []
+    NodeSeparator -> pure []
+    NodeSlider -> pure []
+    NodeScrollContainer -> pure []
+    NodeModal -> pure []
+    NodeImage -> pure []
+    NodePanel -> pure []
+    NodeWindow -> pure []
+    NodeBox -> pure []
+    NodePopup -> pure []
+    NodeDrawing -> pure []
 
 -- | Spans inside every floating panel of one kind, clipped to its content box.
 collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()
