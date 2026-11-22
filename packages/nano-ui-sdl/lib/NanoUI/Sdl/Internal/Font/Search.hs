@@ -6,18 +6,22 @@ module NanoUI.Sdl.Internal.Font.Search
   , searchFontFamilies
   , listFontFamilies
   , boldFaceCandidates
+  , startFontIndex
+  , fontFilesUnder
   ) where
 
-import Control.Exception (IOException, catch)
-import Control.Monad (filterM, mfilter)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (MVar, modifyMVar, newEmptyMVar, newMVar, putMVar, readMVar)
+import Control.Exception (IOException, SomeException, catch, throwIO, try)
+import Control.Monad (filterM, mfilter, void)
 import Data.Containers.ListUtils (nubOrd)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
-import Data.List (elemIndex, isInfixOf, partition, sort, sortOn, stripPrefix)
+import Data.List (elemIndex, find, isInfixOf, isPrefixOf, partition, sort, sortOn, stripPrefix, tails)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Set as Set
-import System.Directory (doesDirectoryExist, getHomeDirectory, listDirectory)
+import System.Directory (canonicalizePath, doesDirectoryExist, getHomeDirectory, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (isAbsolute, splitSearchPath, takeBaseName, takeDirectory, takeExtension, (</>))
 import System.Info (os)
@@ -87,32 +91,59 @@ prettyFamily file = concat (zipWith separate (' ' : stem) stem)
 -- with its normalised name, normalised once for all the families matched
 -- against it. User directories come first so that user-installed fonts win
 -- over system ones; missing or unreadable roots are skipped. The directories
--- are walked once per process.
+-- are walked once per process, on a thread of their own ('startFontIndex');
+-- this waits for that walk only while it is still running.
 fontStems :: IO [(String, FilePath)]
-fontStems =
-  readIORef fontStemsRef >>= \case
-    Just stems -> pure stems
-    Nothing -> do
-      roots <- defaultFontDirs
-      files <- concat <$> mapM (fmap sort . fontFilesBelow) roots
-      let stems = map (\path -> (normalize (takeBaseName path), path)) files
-      writeIORef fontStemsRef (Just stems)
-      pure stems
+fontStems = startFontIndex >>= readMVar >>= either throwIO pure
 
-{-# NOINLINE fontStemsRef #-}
-fontStemsRef :: IORef (Maybe [(String, FilePath)])
-fontStemsRef = unsafePerformIO (newIORef Nothing)
+-- | Start walking the font directories on a background thread, unless a walk
+-- has started already, and answer where its result goes. A session calls it
+-- when it opens, so the first search, or the first character no loaded font
+-- has, finds the walk done or under way.
+startFontIndex :: IO (MVar (Either SomeException [(String, FilePath)]))
+startFontIndex = modifyMVar fontIndexRef $ \case
+  Just done -> pure (Just done, done)
+  Nothing -> do
+    done <- newEmptyMVar
+    void $ forkIO $ putMVar done =<< try walk
+    pure (Just done, done)
+  where
+    walk = do
+      files <- fontFilesUnder =<< defaultFontDirs
+      let stems = map (\path -> (normalize (takeBaseName path), path)) files
+      -- Forced here, so a search that waits finds the work done.
+      stems <$ mapM_ (\(stem, _) -> length stem `seq` pure ()) stems
+
+{-# NOINLINE fontIndexRef #-}
+fontIndexRef :: MVar (Maybe (MVar (Either SomeException [(String, FilePath)])))
+fontIndexRef = unsafePerformIO (newMVar Nothing)
+
+-- | Every font file under each of the directories, in their order, each
+-- directory's sorted. A directory reached twice, by a symbolic link or as
+-- two of the roots, is walked once.
+fontFilesUnder :: [FilePath] -> IO [FilePath]
+fontFilesUnder roots = do
+  seen <- newIORef Set.empty
+  concat <$> mapM (fmap sort . fontFilesBelow seen) roots
 
 -- | Every font file under a directory; returns @[]@ if the directory cannot be
--- read. Only entries that do not match 'isFontFile' are checked with
--- 'doesDirectoryExist' to avoid redundant @stat@ calls in large font
--- directories.
-fontFilesBelow :: FilePath -> IO [FilePath]
-fontFilesBelow dir = do
-  entries <- map (dir </>) <$> listDirectory dir `catch` \(_ :: IOException) -> pure []
-  let (fonts, others) = partition isFontFile entries
-  subdirs <- filterM doesDirectoryExist others
-  (fonts ++) . concat <$> mapM fontFilesBelow subdirs
+-- read, or was walked already under any name: @seen@ holds the canonical
+-- paths walked, so a symbolic link back up the tree ends the walk there and
+-- a directory linked from two places is walked once. Only entries that do
+-- not match 'isFontFile' are checked with 'doesDirectoryExist' to avoid
+-- redundant @stat@ calls in large font directories.
+fontFilesBelow :: IORef (Set.Set FilePath) -> FilePath -> IO [FilePath]
+fontFilesBelow seen dir = do
+  canonical <- canonicalizePath dir `catch` \(_ :: IOException) -> pure dir
+  walked <- Set.member canonical <$> readIORef seen
+  if walked
+    then pure []
+    else do
+      modifyIORef' seen (Set.insert canonical)
+      entries <- map (dir </>) <$> listDirectory dir `catch` \(_ :: IOException) -> pure []
+      let (fonts, others) = partition isFontFile entries
+      subdirs <- filterM doesDirectoryExist others
+      (fonts ++) . concat <$> mapM (fontFilesBelow seen) subdirs
 
 defaultFontDirs :: IO [FilePath]
 defaultFontDirs =
@@ -151,19 +182,54 @@ bestMatch norm files =
     scored = [(score, path) | (stem, path) <- files, Just score <- [maximum (Nothing : map (`matchScore` stem) candidates)]]
     candidates = norm : familyAliases norm
 
+-- | How well a file stem matches a normalised family name: 'Nothing' unless
+-- the stem starts with it. What follows the name is a style (@Regular@,
+-- @Bold Italic@, axes in brackets) or the rest of a longer family's name
+-- and then a style (@Mono@ in @RobotoMono-Regular@, @Hebrew@ in
+-- @OpenSansHebrew-Regular@). Every file of the family itself outranks every
+-- file of a longer one, whatever their styles; within each, the style
+-- ranks the files.
 matchScore :: String -> String -> Maybe Int
 matchScore "" _ = Nothing
 matchScore norm stem = score <$> stripPrefix norm stem
   where
+    score t =
+      let style = fromMaybe "" (find isStyleTail (tails t))
+          longer = length style < length t
+       in styleScore style - (if longer then 200 else 0)
     -- A slanted file ranks just below its upright twin, which by name can
     -- sort after it (@X-Italic[wght]@ before @X[wght]@).
-    score t = base t - fromEnum ("italic" `isInfixOf` t || "oblique" `isInfixOf` t)
+    styleScore t = base t - fromEnum ("italic" `isInfixOf` t || "oblique" `isInfixOf` t)
     base t
       | null t = 100
       | Just i <- elemIndex t regularTails = 90 - i
       | t `elem` otherTails = 70
       | "variable" `isInfixOf` t = 20
       | otherwise = 60
+
+-- | Whether a normalised tail after a family name names only a style: style
+-- words, optionally followed by variable-font axes (@[wght]@,
+-- @VariableFont_wght@), or one of Windows' one- and two-letter style
+-- suffixes (@arialbd@, @consolaz@). @Mono@, @Condensed@ or a script name
+-- in it make it the rest of a longer family's name.
+isStyleTail :: String -> Bool
+isStyleTail t = t `elem` ["", "r", "b", "bd", "i", "bi", "z"] || styleWords (dropAxes t)
+  where
+    dropAxes s
+      | (before, '[' : _) <- break (== '[') s = dropVariable before
+      | otherwise = dropVariable s
+    dropVariable s = case [take n s | n <- [0 .. length s], "variable" `isPrefixOf` drop n s] of
+      before : _ -> before
+      [] -> s
+    styleWords "" = True
+    styleWords s = any (\w -> maybe False styleWords (stripPrefix w s)) styleVocabulary
+
+-- | Words a style tail is made of.
+styleVocabulary :: [String]
+styleVocabulary =
+  [ "regular", "normal", "book", "roman", "text", "medium", "bold", "italic", "oblique", "light"
+  , "thin", "black", "heavy", "semi", "demi", "extra", "ultra"
+  ]
 
 -- | Style tails that indicate the regular weight of a family, the likeliest
 -- first: of a family's files, the one whose tail comes first wins.

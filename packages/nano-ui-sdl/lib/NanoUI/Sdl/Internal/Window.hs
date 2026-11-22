@@ -68,7 +68,7 @@ import NanoUI.Sdl.Internal.Chrome.Types (ChromeState, clearChromeState, newChrom
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
-import NanoUI.Sdl.Internal.Font.Search (searchFonts)
+import NanoUI.Sdl.Internal.Font.Search (searchFonts, startFontIndex)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot)
@@ -543,6 +543,10 @@ withRenderDriver driver create = do
 withSdlWindow :: IO () -> SDL_WindowFlags -> SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlWindow hints flags opts ctx act =
   inBoundThread $ withTtf $ do
+    -- The font directories are walked on a thread of their own from here,
+    -- so the first character no loaded font has does not wait for the walk
+    -- inside a frame.
+    void startFontIndex
     hints
     fontSource <- resolveNanoUIFont (sdlAppFont opts)
     monoSource <- resolveNanoUIFont (sdlAppMonoFont opts)

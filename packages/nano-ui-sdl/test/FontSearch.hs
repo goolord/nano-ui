@@ -2,12 +2,15 @@
 -- directory: discovery reads only file names, so no display or font data.
 module Main (main) where
 
-import Control.Exception (bracket)
+import Control.Exception (IOException, bracket, try)
 import Control.Monad (unless)
 import Data.Maybe (isJust)
-import NanoUI.Sdl.Internal.Font.Search (boldFaceCandidates, listFontFamilies, searchFonts)
+import NanoUI.Sdl.Internal.Font.Search (boldFaceCandidates, fontFilesUnder, listFontFamilies, searchFonts)
 import System.Directory
-  (createDirectory, createDirectoryIfMissing, getTemporaryDirectory, removeFile, removePathForcibly)
+  ( createDirectory, createDirectoryIfMissing, createDirectoryLink, getTemporaryDirectory, removeFile
+  , removePathForcibly
+  )
+import System.Timeout (timeout)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
@@ -43,11 +46,18 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
           , ("empty request", [], Nothing)
           , ("missing family", ["NanoMissingFixture"], Nothing)
           , ("non-regular fallback", ["NanoBoldOnlyFixture"], found "NanoBoldOnlyFixture-Bold.ttf")
+          , -- The family itself over a longer one that starts with its name,
+            -- though the longer one's file sorts first.
+            ("family over a longer family", ["NanoAxesFixture"], found "NanoAxesFixture[wdth,wght].ttf")
+          , ("family italic over a longer family's regular", ["NanoSlantFixture"], found "NanoSlantFixture-Italic.ttf")
+          , ("a longer family when it is the only one", ["NanoOnlyLongerFixture"], found "NanoOnlyLongerFixtureSC-Regular.otf")
           ]
         others =
           [ "NanoSearchFixture-Bold.ttf", "NanoBookFixture-Bold.ttf", "NanoBracketFixture-Italic[wght].ttf"
           , "NanoVariableFixture-Italic-VariableFont_wght.ttf", "NanoWeightFixture-Medium.ttf", "times.ttf"
           , "nanoshort.ttf", "nanoshortbd.ttf", "nanoshortb.ttf", "nanoshortz.ttf"
+          , "NanoAxesFixtureMono[wght].ttf", "NanoAxesFixture-Italic[wdth,wght].ttf"
+          , "NanoSlantFixtureCondensed-Regular.ttf", "NanoSlantFixtureHebrew-Regular.ttf"
           ]
     setEnv "XDG_DATA_DIRS" (root </> "xdg")
     unsetEnv "XDG_DATA_HOME"
@@ -67,7 +77,24 @@ main = bracket temporaryRoot removePathForcibly $ \root ->
       , ("short-name bold", "nanoshort.ttf", ["nanoshortbd.ttf", "nanoshortb.ttf"])
       , ("no bold", "NanoFallbackFixture.otf", [])
       ]
+    linkChecks root
     putStrLn "font search: ok"
+
+-- | A symbolic link back up the tree ends the walk there, and a directory
+-- linked from another one walked is walked once. Skipped where links cannot
+-- be made (Windows without the privilege to make them).
+linkChecks :: FilePath -> IO ()
+linkChecks root = do
+  let walked = root </> "walk"
+      shared = root </> "shared"
+  mapM_ (createDirectoryIfMissing True) [walked, shared]
+  mapM_ (`writeFile` "") [walked </> "a.ttf", shared </> "b.ttf"]
+  made <- try (createDirectoryLink walked (walked </> "loop") >> createDirectoryLink shared (walked </> "linked"))
+  case made of
+    Left (e :: IOException) -> putStrLn ("font search links: skipped (" ++ show e ++ ")")
+    Right () -> do
+      files <- timeout 10000000 (fontFilesUnder [walked, shared])
+      expect "each directory walked once" (Just 2) (length <$> files)
 
 expect :: (Eq a, Show a) => String -> a -> a -> IO ()
 expect name want got = unless (got == want) (fail (name ++ ": expected " ++ show want ++ ", got " ++ show got))
