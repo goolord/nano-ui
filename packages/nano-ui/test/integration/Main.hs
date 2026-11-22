@@ -23,6 +23,7 @@ import Cases.Svg qualified
 import Cases.Adornment qualified
 import Cases.Atlas qualified
 import Cases.Damage qualified
+import Cases.DamageProps qualified
 import Cases.Tabs qualified
 import Cases.TextInput qualified
 import Cases.Animation qualified
@@ -87,6 +88,7 @@ main = do
     , Cases.Adornment.tests
     , Cases.Atlas.tests
     , Cases.Damage.tests
+    , Cases.DamageProps.tests
     , Cases.Tabs.tests
     , Cases.TextInput.tests
     , Cases.Animation.tests

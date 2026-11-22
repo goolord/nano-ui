@@ -271,6 +271,7 @@ test-suite nano-ui-test
         Cases.Atlas
         Cases.Combo
         Cases.Damage
+        Cases.DamageProps
         Cases.Demo
         Cases.Grid
         Cases.HostDraw
