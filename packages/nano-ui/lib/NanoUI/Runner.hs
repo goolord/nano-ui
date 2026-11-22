@@ -16,6 +16,9 @@ module NanoUI.Runner
   , shorterWait
   , windowTimeoutMs
   , takeDueWake
+    -- * Frame pacing
+  , pacingMsFor
+  , waitUntil
     -- * Session loop
   , SessionDriver (..)
   , LoopWindows (..)
@@ -58,23 +61,41 @@ maxFrameDt = 0.05
 -- When pacing is active the backend requests a wait of ~period, but a one-shot
 -- sleep lets frame starts drift by the scheduler's timer granularity (and land
 -- late whenever the event waiter overruns), which reads as choppy animation on
--- uneven frame times. Sleep the bulk, then busy-wind the ≤1ms tail so frame
+-- uneven frame times. 'waitUntil' sleeps the bulk and spins the tail, so frame
 -- starts fall on uniform slices of the pacing period. The spin only runs when
 -- an animation is actively presenting without vsync, and is bounded to about a
 -- millisecond.
+--
+-- The grid starts at @lastT@, when the loop took the previous pass's events.
+-- SDL aligns in its own 'sdPacedWait' instead, from when its pass began and
+-- by the refresh period of the display the window is on now, which a fixed
+-- 'sdAlignSec' cannot follow.
 alignFrameStart :: Double -> Double -> IO ()
-alignFrameStart periodSec lastT = do
+alignFrameStart periodSec lastT = waitUntil (lastT + periodSec)
+
+-- | Wait until a 'getMonotonicTime' time: sleep for most of it, then spin
+-- the last quarter millisecond, which a sleep overshoots. Returns at once for
+-- a time already past.
+waitUntil :: Double -> IO ()
+waitUntil target = do
   t0 <- getMonotonicTime
-  let target = lastT + periodSec
-      remain = target - t0
-      bulkUs = max 0 (round ((remain - tailSlack) * 1e6))
+  let bulkUs = round ((target - t0 - tailSlack) * 1e6) :: Int
   when (bulkUs > 0) (threadDelay bulkUs)
-  fullSpin target
+  spin
   where
     tailSlack = 2.5e-4
-    fullSpin target = do
+    spin = do
       now <- getMonotonicTime
-      when (now < target) (fullSpin target)
+      when (now < target) spin
+
+-- | The event wait, in milliseconds, between the frames of an animation
+-- whose presents do not wait for the display, for a refresh period in
+-- seconds: 2 ms short of the period, at least 1. An event wait can overrun
+-- by about a millisecond, and a wait that returns past the frame boundary
+-- makes the frame late; the loop spins the rest of the way to the boundary
+-- ('waitUntil').
+pacingMsFor :: Double -> Int
+pacingMsFor period = max 1 (floor (period * 1000) - 2)
 
 -- | The previous press's time, position, buttons and click count.
 type ClickTracker = IORef (Double, V2, MouseButtons, Int)
@@ -150,6 +171,14 @@ data SessionDriver ev = SessionDriver
     -- ^ Non-blocking poll for pending backend events.
   , sdWaitEvents    :: Int -> IO [ev]
     -- ^ Wait for events with a timeout in milliseconds (-1 indicates blocking wait).
+  , sdPacedWait     :: Maybe (Int -> IO [ev])
+    -- ^ The backend's own wait between the frames of a running animation,
+    -- if it has one. The loop calls it in place of 'sdWaitEvents' when its
+    -- timeout is this window's 'sdPacingMs' wait for an animation (or a
+    -- continuous session paced by time), and does not wind a frame it
+    -- times out of onto 'sdAlignSec': the backend's wait starts the next
+    -- frame on its own grid. With 'Nothing' the loop calls 'sdWaitEvents'
+    -- and aligns the frame itself.
   , sdApplyEvent    :: Input -> ev -> Input
     -- ^ Fold an event into the 'Input' state.
   , sdIsButtonEdge  :: ev -> Bool
@@ -322,11 +351,13 @@ runSessionLoop drv ctx0 inp0 = do
             polled <- sdPollEvents drv
             if not (null polled)
               then pure polled
-              else do
-                events <- sdWaitEvents drv timeout
-                when (paced && timeout > 0 && null events) $
-                  alignFrameStart (sdAlignSec drv) lastT
-                pure events
+              else case sdPacedWait drv of
+                Just pacedWait | paced && timeout > 0 -> pacedWait timeout
+                _ -> do
+                  events <- sdWaitEvents drv timeout
+                  when (paced && timeout > 0 && null events) $
+                    alignFrameStart (sdAlignSec drv) lastT
+                  pure events
 
       nextBatch ctx queued lastT pendingDirty wasAnim
         | not (null queued) = pure (queued, False)

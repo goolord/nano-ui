@@ -103,6 +103,7 @@ import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
 import NanoUI.Emit (NanoUIE, newReducer, reduceFrame, reducerModel)
 import NanoUI.Runner
   ( SessionDriver (..)
+  , pacingMsFor
   , runSessionLoop
   , shouldRedrawFrame
   )
@@ -359,6 +360,7 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
               SessionDriver
                 { sdPollEvents    = pollMain
                 , sdWaitEvents    = \t -> R.waitForEvent t >> pollMain
+                , sdPacedWait     = Nothing
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = isRgfwButtonEdge
                 , sdIsSessionQuit = isRgfwClose
@@ -419,7 +421,7 @@ rgfwRefreshHz :: RgfwOptions -> Int
 rgfwRefreshHz opts = if optRefreshHz opts > 0 then optRefreshHz opts else 60
 
 rgfwPacingMs :: RgfwOptions -> Int
-rgfwPacingMs opts = max 1 (floor (1000 / fromIntegral (rgfwRefreshHz opts) :: Double) - 2)
+rgfwPacingMs opts = pacingMsFor (1 / fromIntegral (rgfwRefreshHz opts))
 
 -- | The model's scale, else the options', else the monitor's.
 resolveScale :: RgfwOptions -> Float -> Float -> Float

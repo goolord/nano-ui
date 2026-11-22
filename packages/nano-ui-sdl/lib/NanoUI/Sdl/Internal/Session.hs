@@ -3,7 +3,6 @@ module NanoUI.Sdl.Internal.Session
   ( runSdlSession
   ) where
 
-import Control.Concurrent (threadDelay)
 import Control.Exception (bracket, finally)
 import Control.Monad (forM_, unless, void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -142,22 +141,25 @@ runSdlSession options drawFn = do
           -- one pass sees a whole burst (a resize queues several window
           -- events at once).
           waitBatch t = waitWindowEvent t >>= maybe (pure []) (\ev -> routeEvents windows . (ev :) =<< pollWindowEvents) >>= decode
-          -- The loop waits 'sdlPacingMs' between the frames of an animation
-          -- whose presents do not wait for the display. The pacing here
-          -- follows the display the window is on now ('sdlRefreshPeriodRef')
-          -- rather than the one it opened on: the wait is that display's,
-          -- and a wait that times out starts the frame a refresh after the
-          -- last pass began, as 'sdAlignSec' would.
+          -- The loop's 'sdPacedWait': the wait between the frames of an
+          -- animation whose presents do not wait for the display. It follows
+          -- the display the window is on now ('sdlRefreshPeriodRef') rather
+          -- than the one it opened on: the wait is that display's, and a wait
+          -- that times out starts the frame a refresh after the pass began
+          -- ('passStart'). The loop's own alignment ('sdAlignSec') winds
+          -- onto a fixed period, which cannot follow the window to another
+          -- display.
           pacedWait = do
             evs <- waitBatch =<< sdlLivePacingMs env
             when (null evs) $ do
               period <- readIORef (sdlRefreshPeriodRef env)
-              alignTo . (+ period) =<< readIORef passStart
+              waitUntil . (+ period) =<< readIORef passStart
             pure evs
           drv =
             SessionDriver
               { sdPollEvents    = poll
-              , sdWaitEvents    = \t -> if t > 0 && t == sdlPacingMs env then pacedWait else waitBatch t
+              , sdWaitEvents    = waitBatch
+              , sdPacedWait     = Just (\_ -> pacedWait)
               , sdApplyEvent    = applyEvent
               , sdIsButtonEdge  = isButtonEdge
               , sdIsSessionQuit = (== EvQuit)
@@ -204,7 +206,7 @@ runSdlSession options drawFn = do
                   when (isNothing drawn) $ whenM (readIORef wakeRef) pushRefreshEvent
                   pure (fromMaybe False drawn)
               , sdOnCursor      = syncFirstCursor windows
-                -- The paced wait above aligns frames itself.
+                -- Unused: 'sdPacedWait' aligns frames itself.
               , sdAlignSec      = 0
               , sdShouldQuit    = sdlAppShouldQuit options
               , sdWindows       = Just (sdlLoopWindows windows)
@@ -217,13 +219,3 @@ runSdlSession options drawFn = do
       unless closeNow $
         bracket (watchResizes watches (sdlWindow env) resizeFrame) id $ \_ ->
           runSessionLoop drv ctx2 inp1
-
--- | Wait until a time ('getMonotonicTime'): sleep for most of it, then spin
--- the last quarter millisecond, which a sleep overshoots.
-alignTo :: Double -> IO ()
-alignTo target = do
-  now <- getMonotonicTime
-  let bulkUs = round ((target - now - 2.5e-4) * 1e6) :: Int
-  when (bulkUs > 0) (threadDelay bulkUs)
-  let spin = whenM ((< target) <$> getMonotonicTime) spin
-  spin

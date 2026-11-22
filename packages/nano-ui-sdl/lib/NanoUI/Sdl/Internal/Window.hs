@@ -71,6 +71,7 @@ import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Font.Search (searchFonts, startFontIndex)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Internal.Debug (DebugSamplerRef, newDebugSampler)
+import NanoUI.Runner (pacingMsFor)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import NanoUI.Sdl.Internal.Input (TextInputSync, newTextInputSync)
@@ -741,15 +742,14 @@ registerAppImages opts ctx =
 -- whether or not presents wait for vertical sync: the wait for a frame that
 -- presents nothing, or whose present does not wait.
 sdlLivePacingMs :: SdlEnv -> IO Int
-sdlLivePacingMs env = (\period -> max 1 (floor (period * 1000) - 2)) <$> readIORef (sdlRefreshPeriodRef env)
+sdlLivePacingMs env = pacingMsFor <$> readIORef (sdlRefreshPeriodRef env)
 
 -- | The event wait while a window animates. With vsync on, presents throttle
 -- the loop. With vsync off a live animation would spin at max speed, so wait
--- ~2 ms short of the frame period, leaving the slack for alignFrameStart:
--- SDL_WaitEventTimeout overruns by ~1 ms, and a wait that returns past the
--- boundary makes the frame late.
+-- 'pacingMsFor' the frame period: SDL_WaitEventTimeout overruns by about a
+-- millisecond, and the slack keeps the wait from ending past the boundary.
 sdlPacingMs :: SdlEnv -> Int
-sdlPacingMs env = if sdlVsync env then 16 else max 1 (floor (sdlRefreshPeriod env * 1000) - 2)
+sdlPacingMs env = if sdlVsync env then 16 else pacingMsFor (sdlRefreshPeriod env)
 
 -- | The blend modes a transparent window draws and presents with.
 --
