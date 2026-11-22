@@ -273,6 +273,7 @@ test-suite nano-ui-test
         Cases.Damage
         Cases.DamageProps
         Cases.SimFuzz
+        Cases.ApiSmoke
         Cases.Demo
         Cases.Grid
         Cases.HostDraw
