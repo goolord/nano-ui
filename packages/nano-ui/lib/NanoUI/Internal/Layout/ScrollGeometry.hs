@@ -31,13 +31,14 @@ module NanoUI.Internal.Layout.ScrollGeometry
   , borderContentClip
   ) where
 
-import Data.Bits (shiftL, shiftR, testBit, (.&.), (.|.))
+import Data.Bits ((.|.))
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), clamp, rectContains, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Internal.Layout.Arena (DirTag (..))
 import NanoUI.Internal.Style (Direction (..), Padding (..), Side (..), Style (..), styleBorderWidth, styleHasSide, windowPad)
+import qualified NanoUI.Internal.StyleBits as SB
 
 -- | Axis scrollbar visibility and interaction policy.
 data ScrollPolicy
@@ -66,14 +67,21 @@ defaultScrollConfig = ScrollConfig ScrollAuto ScrollAuto False
 scrollConfigNative2D :: ScrollConfig -> Bool
 scrollConfigNative2D cfg = scrollPolicyX cfg /= ScrollNone && scrollPolicyY cfg /= ScrollNone
 
--- | A scroll node's style index. Bit 4 is always set, so that no scroll
--- node's style index is 0.
+-- | A scroll node's style index. 'SB.scrollMarker' is always set, so that
+-- no scroll node's style index is 0.
 encodeScrollConfig :: ScrollConfig -> Int
 encodeScrollConfig (ScrollConfig px py bare) =
-  16 .|. fromEnum px .|. shiftL (fromEnum py) 2 .|. (if bare then 32 else 0)
+  SB.fieldMask SB.scrollMarker
+    .|. SB.placeField SB.scrollPolicyX (fromEnum px)
+    .|. SB.placeField SB.scrollPolicyY (fromEnum py)
+    .|. (if bare then SB.fieldMask SB.scrollBare else 0)
 
 decodeScrollConfig :: Int -> ScrollConfig
-decodeScrollConfig bits = ScrollConfig (toEnum (bits .&. 3)) (toEnum (shiftR bits 2 .&. 3)) (testBit bits 5)
+decodeScrollConfig bits =
+  ScrollConfig
+    (toEnum (SB.getField SB.scrollPolicyX bits))
+    (toEnum (SB.getField SB.scrollPolicyY bits))
+    (SB.testField SB.scrollBare bits)
 
 scrollDefault1D :: Direction -> ScrollConfig
 scrollDefault1D Column = scrollVerticalAuto

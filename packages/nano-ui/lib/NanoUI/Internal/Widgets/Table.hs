@@ -62,10 +62,11 @@ import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
 import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
-import Data.Bits ((.|.), shiftL)
+import Data.Bits ((.|.))
 import Data.String (IsString (..))
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains, noLimit)
 import NanoUI.Internal.WidgetText (buttonFlagTable, rowStripe, stripeBits, tableHeaderPadX)
+import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
@@ -123,12 +124,13 @@ tableHiddenIndices = IS.toAscList . tableHiddenCols
 clampSortCol :: Int -> SortCol -> SortCol
 clampSortCol n (SortCol idx dir) = SortCol (clamp 0 (max 0 (n - 1)) idx) dir
 
--- The sort mark uses bits 16-17 (see tableSortMarkOf), above the font fields.
+-- The sort mark of column @idx@ in its header's style ('SB.headerSortMark',
+-- read back by 'NanoUI.Internal.WidgetText.tableSortMarkOf').
 sortMarkStyle :: SortCol -> Int -> Int
 sortMarkStyle sort idx
   | sortColIndex sort /= idx = 0
-  | sortColDir sort == SortDesc = 2 `shiftL` 16
-  | otherwise = 1 `shiftL` 16
+  | sortColDir sort == SortDesc = SB.placeField SB.headerSortMark 2
+  | otherwise = SB.placeField SB.headerSortMark 1
 
 minColW :: Float
 minColW = 40

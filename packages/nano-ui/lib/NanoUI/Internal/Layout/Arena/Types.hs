@@ -124,6 +124,8 @@ import GHC.Exts (RealWorld)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Image (ImageLook, defaultImageConfig, imageLook)
 import NanoUI.Internal.Style (AlignX (..), AlignY, Flow (..), Padding (..), PointerMode (..), Sizing (..))
+import NanoUI.Internal.StyleBits (BitField (..))
+import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Types (Color (..), Rect (..), newZeroedPrimArray, rectNonEmpty)
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
@@ -214,9 +216,11 @@ packsNodeFont :: NodeType -> Bool
 packsNodeFont nt = nt == NodeText || nt == NodeTextInput
 
 -- | Where a button's or select's style index keeps its label's font, packed
--- as a text node packs one: above the 32 bits its own data uses.
+-- as a text node packs one: above the 32 bits its own data uses
+-- ('SB.labelFont').
+{-# INLINE labelFontShift #-}
 labelFontShift :: Int
-labelFontShift = 32
+labelFontShift = bfShift SB.labelFont
 
 -- | The font bits of a node's style index @si@, in a text node's packing:
 -- all of a text node's or text field's, the label font of a button or select

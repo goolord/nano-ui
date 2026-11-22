@@ -18,7 +18,6 @@ module NanoUI.Internal.Widgets.ColorPicker
 where
 
 import Control.Monad (forM_, guard, void, when)
-import Data.Bits ((.&.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Word (Word8)
@@ -33,6 +32,7 @@ import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insert
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
+import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Widgets.Behavior
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Var (Binding (..), bindVar)
@@ -54,7 +54,7 @@ data ColorPickerPart = PickerSv | PickerHue | PickerAlpha | PickerPreview
 
 {-# INLINE colorPickerPartOf #-}
 colorPickerPartOf :: Int -> ColorPickerPart
-colorPickerPartOf si = toEnum (si .&. 3)
+colorPickerPartOf si = toEnum (SB.getField SB.pickerPart si)
 
 -- | The id of the container holding a picker's parts, derived from the
 -- field's id. The picker's state is keyed on it: every part reads that state

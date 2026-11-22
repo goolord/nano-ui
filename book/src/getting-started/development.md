@@ -22,6 +22,7 @@ cabal test -j1 all
 | --- | --- |
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and draw lists, frame by frame and headless; seeded QuickCheck runs over random layout trees, damage against repaints, and input streams |
 | `text-buffer-spec` | Text buffer and document edits: lines, graphemes, carets, undoable edits, random edit sessions against a plain `Text` (QuickCheck) |
+| `style-bits-spec` | The bit fields each node type packs into its style index (`NanoUI.Internal.StyleBits`) do not overlap and fit in 64 bits |
 | `nano-ui-inspection` | Hot paths (quad writers, store and focus access, canvas) still optimize as written |
 | `nano-ui-emit-test` | Emitting views, adapters, and reducers |
 | `nano-ui-svg-test` | `DrawOp`-to-SVG: clips, gradients, escaping, rasterization, whole frames against golden documents in `test/golden` |

@@ -185,6 +185,7 @@ library
         NanoUI.Internal.Style.Layout
         NanoUI.Internal.Style.Presets
         NanoUI.Internal.Style.Theme
+        NanoUI.Internal.StyleBits
         NanoUI.Internal.Types
         NanoUI.Internal.WidgetText
         NanoUI.Internal.Widgets.Node
@@ -258,6 +259,20 @@ test-suite text-buffer-spec
         QuickCheck >=2.15 && <2.19,
         text ^>=2.1
     hs-source-dirs:   test
+
+-- Compiles NanoUI.Internal.StyleBits from the library's source (it imports
+-- only base) and checks that the style-index fields of each node type are
+-- disjoint and fit in 64 bits.
+test-suite style-bits-spec
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          StyleBitsSpec.hs
+    other-modules:    NanoUI.Internal.StyleBits
+    ghc-options:      -Wunused-packages
+    build-depends:
+        base >=4.20 && <4.23
+    hs-source-dirs:   test/style-bits lib
 
 test-suite nano-ui-test
     import:           downstream

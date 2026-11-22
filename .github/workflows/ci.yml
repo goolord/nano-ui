@@ -18,6 +18,7 @@ env:
   HEADLESS_SUITES: >-
     nano-ui:test:nano-ui-test
     nano-ui:test:text-buffer-spec
+    nano-ui:test:style-bits-spec
     nano-ui:test:nano-ui-inspection
     nano-ui-emit:test:nano-ui-emit-test
     nano-ui-form:test:nano-ui-form-test
