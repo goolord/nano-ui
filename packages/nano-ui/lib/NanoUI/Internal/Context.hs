@@ -10,11 +10,166 @@ module NanoUI.Internal.Context
   , setBackendSession
   , backendSession
   , frameNumber
-  , module NanoUI.Internal.Context.Core
-  , module NanoUI.Internal.Context.Scroll
-  , module NanoUI.Internal.Context.Animation
-  , module NanoUI.Internal.Context.Drawing
-  , module NanoUI.Internal.Context.Overlay
+  -- Accessors, interaction, damage and wakes ("NanoUI.Internal.Context.Core")
+  , getsInteraction
+  , modifyInteraction
+  , getsOverlay
+  , modifyOverlay
+  , getsDamage
+  , modifyDamage
+  -- Interaction
+  , takeTextEditLastAction
+  , pointerHeldOffLayers
+  -- Damage
+  , markDirty
+  , markDirtyCovered
+  , recordLayoutRead
+  , settleLayoutReads
+  , clearDirty
+  , isDirty
+  , setWakeLoop
+  , setWakeLoopChecked
+  , wakeAction
+  , wakeFromThread
+  , takeWakes
+  , takeThreadWake
+  , requestWakeAt
+  , requestWakeAfter
+  , getWakeAt
+  , clearWakeAt
+  , takeDamage
+  , takeDamagePieces
+  , requestDamage
+  , damageWidget
+  , damageKey
+  , damageRect
+  , damagePeers
+  , damageFull
+  , getPrevRect
+  , getPrevRectAt
+  , pointerCovered
+  , getPrevClipRect
+  -- Store
+  , getStore
+  , setStore
+  , modifyStore
+  , writeSlots
+  , publishLayoutSlots
+  , writeSlot
+  , adoptSlot
+  , recordSlot
+  , writeStoreBool
+  , isDisabled
+  , isInert
+  -- Theme scopes
+  , newThemeScopes
+  , beginThemeScopes
+  , pushThemeScope
+  , themeScopesChanged
+  , scopeTheme
+  , scopeRawTheme
+  , currentTheme
+  , nodeTheme
+  , widgetTheme
+  -- Scroll offsets ("NanoUI.Internal.Context.Scroll")
+  , getScrollOffset
+  , setScrollOffset
+  , getScrollOffset2D
+  , setScrollOffset2D
+  , linkScrollAxes
+  -- Scroll tuning
+  , ScrollTuning (..)
+  , defaultScrollTuning
+  , getScrollTuning
+  , setScrollTuning
+  , getScrollStep
+  , setScrollStep
+  , resolveScrollStep
+  -- Scroll geometry
+  , ScrollAxes (..)
+  , ScrollMetrics (..)
+  , getScrollMetrics
+  , readScrollMetrics
+  , cacheScrollMetrics
+  , placeScrollContent
+  , beginScrollMetrics
+  , getScrollOffsetIn
+  , setScrollOffsetIn
+  , setScrollOffsetPending
+  , applyPendingScrollOffset
+  -- Scroll commands
+  , ScrollBehavior (..)
+  , ScrollAlign (..)
+  , scrollTo
+  , scrollBy
+  , scrollPages
+  , scrollToStart
+  , scrollToEnd
+  , scrollIntoView
+  , scrollRectIntoView
+  -- Scroll glide
+  , applyScrollTarget
+  , scrollTargetOffset
+  , scrollGliding
+  , clampScrollGlide
+  , clampScrollOffset
+  , stepScrollGlides
+  -- Animations ("NanoUI.Internal.Context.Animation")
+  , anyAnimating
+  , getLiveAnimations
+  , takeAnimSettled
+  , lookupAnimation
+  , startAnimation
+  , startAnimationEase
+  , startAnimationEaseDelay
+  , startSpring
+  , keepAnimationAlive
+  , repaintIfOrphan
+  , setAnimationValue
+  , tickAnimations
+  , getAnimationValue
+  , getViewAnimationValue
+  -- Popups, hover zones, drawing caches ("NanoUI.Internal.Context.Drawing")
+  , registerPopupConfig
+  , lookupPopupConfig
+  , registerHoverZone
+  , hoverZoneCrossed
+  , registerDrawing
+  , lookupDrawing
+  , cachedDrawingOps
+  , cachedWidgetLayout
+  , lookupDrawFitEnvelope
+  , pruneDrawOpCache
+  , registerCustomDrawing
+  , registerCustomEntry
+  , lookupCustomDrawing
+  , cachedCustomDrawingOps
+  , refreshCustomDrawingOps
+  , drawingOpsStale
+  , registerCustomMeasure
+  , lookupCustomMeasure
+  , customMeasureHooks
+  , lookupCustomDamageSlop
+  , resetDrawingScopeCache
+  -- Overlays, modals and key routing ("NanoUI.Internal.Context.Overlay")
+  , textInputEditActive
+  , modalActive
+  , overlayConsumesQuit
+  , escapeReserved
+  , markEscapeConsumed
+  , markTabConsumed
+  , tabConsumed
+  , pointerBlockedByModal
+  , routedInput
+  , floatingLayerAt
+  , seedFloatingPanel
+  , beginModal
+  , endModal
+  , beginFrameModal
+  , modalDamageFlip
+  , takeKeyPress
+  -- State records ("NanoUI.Internal.Context.Types"), images, fonts, theme,
+  -- the layout overlay and host hooks
   , TextInputMenu (..)
   , TextInputDrag (..)
   , TextFieldClickCell (..)

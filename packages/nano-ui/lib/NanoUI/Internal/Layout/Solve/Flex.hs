@@ -10,8 +10,6 @@ module NanoUI.Internal.Layout.Solve.Flex
   , gridRowHeight
   , wrapLines
   , distributeScratch
-  , shrinkScratch
-  , shrinkFactor
   , alignX
   , alignY
   ) where

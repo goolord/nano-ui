@@ -22,8 +22,6 @@ module NanoUI.Internal.Font.Types
   , monospaceMetrics
   , scaleFontMetrics
   , lineWidth
-  , kernedAdvance
-  , monospaceAdvance
   , textIndexAtX
   , centeredTextY
   , alignedTextPen

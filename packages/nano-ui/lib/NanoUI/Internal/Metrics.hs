@@ -13,18 +13,12 @@ module NanoUI.Internal.Metrics
   , checkboxBoxSize
   , checkboxLeading
   , treeItemPadding
-  , treeIndentStep
-  , treeChevronLeading
   , treeRowLeading
   , treeChevronRect
-  , sliderTrackHeight
   , sliderHandleDiameter
-  , sliderHandleSlack
   , sliderTrackBounds
   , sliderHitBounds
   , scrollBarWidth
-  , scrollBarSlimWidth
-  , scrollBarMargin
   , scrollBarSideGap
   , scrollBarGeomFor
   , ScrollBarSlot (..)

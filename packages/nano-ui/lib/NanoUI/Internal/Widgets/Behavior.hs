@@ -17,7 +17,6 @@ module NanoUI.Internal.Widgets.Behavior
   , KeyNav (..)
   , navStep
   , useDismissable
-  , dragThresholdPx
   , pastDragThreshold
   )
 where

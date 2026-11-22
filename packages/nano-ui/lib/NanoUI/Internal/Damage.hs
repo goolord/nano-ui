@@ -4,6 +4,7 @@
 -- Damage is computed before painting so retained backends can redraw only a clip.
 module NanoUI.Internal.Damage
   ( updatePrevRects
+  , pruneUnmountedCaches
   , floatingPanelRects
   , FrameSnapshot (..)
   , captureFrameSnapshot
@@ -15,7 +16,7 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, void, when)
+import Control.Monad (filterM, forM_, unless, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
 import Data.Bits (complement, xor, (.&.), (.|.))
@@ -157,13 +158,17 @@ scanBackdropPrevRects na window oldRects oldOuters = do
                 containers (j + 1) m' om' fOld' fOuter' drop'
   containers 0 oldRects oldOuters 0 0 False
 
-updatePrevRects :: Context -> Size -> IO ()
+-- | Record this frame's solved rects, clips, texts and images by widget key
+-- ('dsPrev') for the next frame's damage to diff against. Returns the rects
+-- of the widgets this frame mounted, by key: the map 'dsPrev' now holds, or
+-- an empty map for an empty arena. 'pruneUnmountedCaches' takes it.
+updatePrevRects :: Context -> Size -> IO (IM.IntMap Rect)
 updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
   PrevFrame oldRects oldClips oldOuters oldTexts oldImages <- getsDamage ctx dsPrev
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
-    then setPrev emptyPrevFrame >> void (prevWalkFor ctx 0 IM.empty)
+    then IM.empty <$ (setPrev emptyPrevFrame >> prevWalkFor ctx 0 IM.empty)
     else do
       (m0, om, foundContainers, foundOuter, droppedContainer) <-
         scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters
@@ -192,16 +197,7 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                     writePrimVar (pwValid walk) count
                     unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldImages) $
                       setPrev (PrevFrame m cm om tm lm)
-                    -- Evict stale unmounted entries from unbounded view/selection caches.
-                    -- Scale the threshold with the live node map so views with more than
-                    -- 256 active widgets do not re-intersect on every frame.
-                    let !pruneLimit = max 256 (2 * IM.size m)
-                    ss <- readIORef (ctxScrollState ctx)
-                    when (IM.size (ssViews ss) > pruneLimit) $
-                      writeIORef (ctxScrollState ctx) $! ss {ssViews = IM.intersection (ssViews ss) m}
-                    st <- readIORef (ctxStore ctx)
-                    when (IM.size (storeRichSelection st) > pruneLimit) $
-                      writeIORef (ctxStore ctx) $! st {storeRichSelection = IM.intersection (storeRichSelection st) m}
+                    pure m
             | otherwise = do
                 wid <- getWidgetId na i
                 superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
@@ -264,6 +260,24 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                                   )
                         go (i + 1) m' cm' tm' lm' fOld' dropped
       go 0 m0 oldClips oldTexts oldImages foundContainers droppedContainer
+
+-- | Drop the scroll views ('ssViews') and rich-text selections
+-- ('storeRichSelection') of widgets not in @live@, the map
+-- 'updatePrevRects' returned. Those maps keep an entry for every widget
+-- ever shown. The limit scales with @live@, so a view with more than 256
+-- mounted widgets does not intersect the maps every frame. An empty arena
+-- prunes nothing.
+pruneUnmountedCaches :: Context -> IM.IntMap Rect -> IO ()
+pruneUnmountedCaches ctx live = do
+  count <- arenaCount (ctxNodeArena ctx)
+  when (count > 0) $ do
+    let !pruneLimit = max 256 (2 * IM.size live)
+    ss <- readIORef (ctxScrollState ctx)
+    when (IM.size (ssViews ss) > pruneLimit) $
+      writeIORef (ctxScrollState ctx) $! ss {ssViews = IM.intersection (ssViews ss) live}
+    st <- readIORef (ctxStore ctx)
+    when (IM.size (storeRichSelection st) > pruneLimit) $
+      writeIORef (ctxStore ctx) $! st {storeRichSelection = IM.intersection (storeRichSelection st) live}
 
 -- | The last walk's record, with room for @count@ nodes, and how many of its
 -- indices describe @oldRects@. It reads as empty until this walk completes,
