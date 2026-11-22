@@ -84,7 +84,7 @@ import SDL3.Sys.Bindgen.Surface qualified as Surface
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags)
 import SDL3.Sys.Bindgen.Init (SDL_InitFlags (..), sDL_INIT_VIDEO)
-import SDL3.Sys.Clipboard (getClipboardTextSafe, setClipboardText)
+import SDL3.Sys.Clipboard (getClipboardTextSafe, setClipboardTextSafe)
 import SDL3.Sys.Hints (resetHint, setHint)
 import SDL3.Sys.Blendmode (SDL_BlendMode, composeCustomBlendMode)
 import SDL3.Sys.Blendmode qualified as Blend
@@ -99,7 +99,7 @@ import SDL3.Sys.Render
   , setRenderDrawBlendMode
   , setRenderScale
   , setRenderTarget
-  , setRenderVSync
+  , setRenderVSyncSafe
   )
 import SDL3.Sys.Stdinc (free)
 import SDL3.Sys.Surface (convertPixels, destroySurface, saveBMP)
@@ -584,7 +584,7 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
   -- Text input runs only while a widget takes text ('syncTextInput'); this
   -- stops it when the session ends.
   mkAcquire
-    (void (setRenderVSync sdlRenderer (fromBool sdlVsync)))
+    (void (setRenderVSyncSafe sdlRenderer (fromBool sdlVsync)))
     (const (void (stopTextInputSafe sdlWindow)))
   sdlLastPresented <- liftIO $ newIORef False
   sdlTextInput <- liftIO newTextInputSync
@@ -708,9 +708,11 @@ resolveNanoUIFont = \case
 withSdlClipboard :: Context -> Context
 withSdlClipboard ctx = withClipboard ctx readClipboard writeClipboard
   where
-    writeClipboard txt = TextForeign.withCString txt (setClipboardText . PtrConst.unsafeFromPtr)
-    -- The safe call: on X11 SDL pumps events while the clipboard's owner
-    -- answers, which can run this program's resize and hit-test callbacks.
+    -- Both are safe calls. Taking the clipboard on Windows sends the window
+    -- WM_DESTROYCLIPBOARD and clipboard-update messages, and on X11 SDL pumps
+    -- events while the clipboard's owner answers: either can run this
+    -- program's resize and hit-test callbacks.
+    writeClipboard txt = TextForeign.withCString txt (setClipboardTextSafe . PtrConst.unsafeFromPtr)
     -- Another program's text need not be valid UTF-8.
     readClipboard = do
       ptr <- getClipboardTextSafe

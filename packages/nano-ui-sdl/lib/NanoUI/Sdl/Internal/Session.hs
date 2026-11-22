@@ -20,7 +20,7 @@ import NanoUI.Sdl.Internal.Input
 import NanoUI.Sdl.Internal.Display (installResizeWatch, pushRefreshEvent, scaleMoved)
 import NanoUI.Sdl.Internal.Window (SdlEnv (..), SdlOptions (..), registerAppImages, sdlPacingMs, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
-import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSync)
+import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSyncSafe)
 
 -- | Open a window for the options, with their theme and images, and run the
 -- event loop until it closes or 'sdlAppShouldQuit' says so. @drawFn@ draws a
@@ -45,7 +45,7 @@ runSdlSession options drawFn = do
     vsyncPaused <- newIORef False
     let pauseVsync paused =
           when (sdlVsync env) $ whenM ((/= paused) <$> readIORef vsyncPaused) $ do
-            void $ setRenderVSync (sdlRenderer env) (fromBool (not paused))
+            void $ setRenderVSyncSafe (sdlRenderer env) (fromBool (not paused))
             writeIORef vsyncPaused paused
     -- Window size the resize watch presented since the main loop last
     -- decided whether to draw. That frame already covers the size change and
