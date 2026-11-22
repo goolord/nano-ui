@@ -23,6 +23,7 @@ import Cases.Svg qualified
 import Cases.Adornment qualified
 import Cases.Atlas qualified
 import Cases.Damage qualified
+import Cases.SimFuzz qualified
 import Cases.DamageProps qualified
 import Cases.Tabs qualified
 import Cases.TextInput qualified
@@ -89,6 +90,7 @@ main = do
     , Cases.Atlas.tests
     , Cases.Damage.tests
     , Cases.DamageProps.tests
+    , Cases.SimFuzz.tests
     , Cases.Tabs.tests
     , Cases.TextInput.tests
     , Cases.Animation.tests
