@@ -84,6 +84,8 @@ module NanoUI.Internal.Context
   , setHost
   , Host
   , newHost
+  , withFramePaint
+  , retainedFrameStale
   , setDrawSnapScale
   , setDrawSquareGeometry
   , setDrawExternalText
@@ -134,7 +136,7 @@ import NanoUI.Internal.Resource (Held (..), newHeld)
 import Data.Primitive.PrimVar (readPrimVar)
 import NanoUI.Internal.Host (Host, newHost, setHost, clearHost, askHostIO, hostOrInit)
 import Data.List (find)
-import Control.Exception (bracket)
+import Control.Exception (bracket, finally)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend, SomeBackendSession (..), sessionFor)
 import Data.Maybe (fromMaybe, isJust)
 import Data.HashMap.Strict qualified as HashMap
@@ -168,7 +170,7 @@ import NanoUI.Internal.Font (FontMetrics, WrapResult (..), fmLineHeight, measure
 import NanoUI.Internal.Frame.SpanArena (newSpanArena)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId, initialIdContext)
 import NanoUI.Internal.Id.Cursor (newIdCursor)
-import NanoUI.Internal.Input (Composition, InputPurpose)
+import NanoUI.Internal.Input (Composition, Input (..), InputPurpose)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Appearance (..), FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
@@ -533,6 +535,28 @@ enableMeasureCache ctx =
       ref <- newIORef emptyGenCache
       let ctx' = ctx {ctxMeasureCache = Just ref, ctxMeasureText = cacheMeasureText ref 0 (ctxMeasureText ctx)}
       pure (trackMetricSource ctx' {ctxResolveMeasure = defaultResolveMeasure ctx'})
+
+-- | Run a frame's UI pass for a host that draws it whole when @paintFull@
+-- holds ('ctxPaintFull'), and repaints the whole window, whatever the
+-- frame's damage, when @presentFull@ holds. A frame presented whole works
+-- out no damage ('ctxDamageWanted' is off for its pass), since the host
+-- would not read it. The context wants damage again after the pass, even
+-- one that throws, so frames run outside a draw still work it out.
+{-# INLINE withFramePaint #-}
+withFramePaint :: Context -> Bool -> Bool -> IO a -> IO a
+withFramePaint ctx paintFull presentFull pass = do
+  writeIORef (ctxPaintFull ctx) paintFull
+  writeIORef (ctxDamageWanted ctx) (not presentFull)
+  pass `finally` writeIORef (ctxDamageWanted ctx) True
+
+-- | Whether a host that keeps its last presented frame must paint this one
+-- whole: the caller forces it, the window asked to be redrawn
+-- ('inputWindowRedraw'), or the kept frame's pixel width, height and scale
+-- (@presented@) differ from this frame's (@current@), so it holds nothing
+-- this frame can keep.
+{-# INLINE retainedFrameStale #-}
+retainedFrameStale :: Bool -> Input -> (Int, Int, Float) -> (Int, Int, Float) -> Bool
+retainedFrameStale force inp presented current = force || inputWindowRedraw inp || presented /= current
 
 -- | Set the device pixel scale used to snap geometry origins/endpoints to
 -- whole pixels. The SDL backend calls this when the window pixel density is synced.

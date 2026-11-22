@@ -33,7 +33,6 @@ import NanoUI
   , WindowSettings (..)
   , defaultWindowSettings
   , followSystemTheme
-  , whenM
   )
 import NanoUI.Backend
   ( Damage (..)
@@ -49,7 +48,6 @@ import NanoUI.Backend
   , damageIsEmpty
   , defaultWindowHost
   , defaultWindowState
-  , drawCmdCount
   , emptyInput
   , installWindowHost
   , markDirty
@@ -65,14 +63,15 @@ import NanoUI.Backend
   , WindowCapabilities (..)
   , applyPointerLeave
   )
-import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
-import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
+import NanoUI.Internal.Context (Context, retainedFrameStale, setDrawSnapScale, withFramePaint)
+import NanoUI.Internal.Debug (noteDebugFrame, noteDebugSkip)
 import NanoUI.Runner (DebugSamplerRef, SessionDriver (..), newDebugSampler, runSessionLoop, shouldRedrawFrame)
 import NanoUI.Testing (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
 import NanoUI.SdlWeb.Internal.Font
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input
 import NanoUI.SdlWeb.Internal.Render
+import NanoUI.Ttf.Internal.Font (beginTtfFrame, ttfFrameDropped)
 
 -- | A font for the web runners. The browser has no font directories, so a
 -- font other than the bundled Inter comes as the bytes of a TrueType or
@@ -280,38 +279,32 @@ drawWeb :: WebEnv -> Context -> Input -> Bool -> IO (DrawData, Bool) -> IO Bool
 drawWeb env ctx inp force evaluateUi = do
   let fonts = weFonts env
       glyphs = sfcGlyphAtlas fonts
-  freshAtlas <- prepareGlyphAtlasForFrame fonts
-  when freshAtlas (damageFull ctx)
-  whenM (closeEvictedFonts fonts) (clearMeasureCache ctx)
+  freshAtlas <- beginTtfFrame fonts ctx
   scale <- readIORef (weScale env)
   (pw, ph) <- readIORef (weBacking env)
   presented <- readIORef (wePresented env)
-  let paintFull = force || presented /= (pw, ph, scale) || inputWindowRedraw inp
+  let paintFull = retainedFrameStale force inp presented (pw, ph, scale)
   when (inputWindowRedraw inp) $ do
     -- A restored GL context lost every texture.
     markGlyphPagesDirty glyphs
     forgetTextures (weRenderer env)
-  writeIORef (ctxPaintFull ctx) paintFull
   t0 <- getMonotonicTime
-  (drawData, dirty) <- evaluateUi
+  -- A full frame draws whole whatever its damage, so its pass works none
+  -- out.
+  (drawData, dirty) <- withFramePaint ctx paintFull paintFull evaluateUi
   t1 <- getMonotonicTime
   syncTextInput env ctx
   damage <- takeDamage ctx
-  atlasReset <- (&& not freshAtlas) <$> glyphAtlasFull fonts
+  atlasReset <- ttfFrameDropped fonts ctx freshAtlas
   if
-    | atlasReset -> do
-        damageFull ctx
-        markDirty ctx
-        True <$ noteDebugSkip (weDebug env)
+    | atlasReset -> True <$ noteDebugSkip (weDebug env)
     | damageIsEmpty damage && not paintFull -> dirty <$ noteDebugSkip (weDebug env)
     | otherwise -> do
         syncTextures (weHost env) (weRenderer env) glyphs ctx
         renderDrawData (weHost env) (weRenderer env) scale (pw, ph) (if paintFull then DamageFull else snapDamage scale damage) drawData
         writeIORef (wePresented env) (pw, ph, scale)
         t2 <- getMonotonicTime
-        let ms a b = (b - a) * 1000
-        noteDebugPresent (weDebug env) (ms t0 t1) (ms t1 t2) 0 (ms t0 t2)
-          (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
+        noteDebugFrame (weDebug env) t0 t1 t2 t2 drawData
         pure dirty
 
 -- | Start, move or stop the page's text input to match the focused text

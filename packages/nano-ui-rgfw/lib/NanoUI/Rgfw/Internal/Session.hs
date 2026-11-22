@@ -75,8 +75,10 @@ import NanoUI.Backend
   )
 import NanoUI.Internal.Context
   ( Context (..)
+  , retainedFrameStale
   , setBackendSession
   , withClipboard
+  , withFramePaint
   )
 import NanoUI.Testing
   ( DrawData (..)
@@ -84,12 +86,11 @@ import NanoUI.Testing
   , runFrame
   , collectRasterSpans
   , damageIsEmpty
-  , drawCmdCount
   , takeDamage
   , takeDamagePieces
   , uiCursorKind
   )
-import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
+import NanoUI.Internal.Debug (noteDebugFrame, noteDebugSkip)
 import NanoUI.Emit (NanoUIE, newReducer, reduceFrame, reducerModel)
 import NanoUI.Runner
   ( SessionDriver (..)
@@ -482,9 +483,10 @@ presentRgfw sh rw renderer force c curInp runUi = do
   curScale <- readIORef (rwScale rw)
   (pw, ph) <- readIORef (rwSize rw)
   presented <- readIORef (rwPresented rw)
-  let !paintFull = force || presented /= (pw, ph, curScale) || inputWindowRedraw curInp
-  writeIORef (ctxPaintFull c) paintFull
-  (_, drawData, dirtyAfterUi) <- runUi
+  let !paintFull = retainedFrameStale force curInp presented (pw, ph, curScale)
+  -- A full frame draws whole whatever its damage, so its pass works none
+  -- out.
+  (_, drawData, dirtyAfterUi) <- withFramePaint c paintFull paintFull runUi
   tUiEnd <- getMonotonicTime
   damage <- takeDamage c
   if damageIsEmpty damage && not paintFull
@@ -494,7 +496,6 @@ presentRgfw sh rw renderer force c curInp runUi = do
       answerScreenshots c (retainedPixels renderer pw ph)
       pure dirtyAfterUi
     else do
-      tRenderStart <- getMonotonicTime
       curMonScale <- readIORef (rwMonScale rw)
       (baseSpans, overlaySpans) <- collectRasterSpans c curInp
       pieces <- if paintFull then pure [] else takeDamagePieces c
@@ -509,10 +510,7 @@ presentRgfw sh rw renderer force c curInp runUi = do
       tSwapEnd <- getMonotonicTime
       answerScreenshots c (retainedPixels renderer pw ph)
       nodes <- arenaCount (ctxNodeArena c)
-      let ms a b = (b - a) * 1000
-      noteDebugPresent (rdsSampler debugSampler) (ms tUiStart tUiEnd) (ms tRenderStart tSwapStart)
-        (ms tSwapStart tSwapEnd) (ms tUiStart tSwapEnd)
-        (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
+      noteDebugFrame (rdsSampler debugSampler) tUiStart tUiEnd tSwapStart tSwapEnd drawData
       writeIORef (rdsFrame debugSampler)
         RgfwFrameStats
           { fsNodes = nodes

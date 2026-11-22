@@ -25,6 +25,8 @@ module NanoUI.Ttf.Internal.Font
   , destroySdlFontCache
   , reloadSdlFontCache
   , prepareGlyphAtlasForFrame
+  , beginTtfFrame
+  , ttfFrameDropped
   , closeEvictedFonts
   , sdlFontCacheSource
   , sdlFontCacheMonoSource
@@ -758,6 +760,36 @@ prepareGlyphAtlasForFrame cache = do
   modifyIORef' (gaFrame (sfcGlyphAtlas cache)) (+ 1)
   full <- glyphAtlasFull cache
   full <$ when full (resetGlyphAtlas cache)
+
+-- | The font work a backend does before a frame's UI pass records any text,
+-- answering whether the glyph atlas was reset ('prepareGlyphAtlasForFrame').
+-- A reset emptied the glyph slots a kept draw's text points at, so the
+-- frame repaints whole ('damageFull') rather than reuse one. Fonts the size
+-- cache evicted close now, and the measure caches that can still hold their
+-- metrics are dropped ('clearMeasureCache'), before the pass measures text.
+beginTtfFrame :: SdlFontCache -> Context -> IO Bool
+beginTtfFrame cache ctx = do
+  fresh <- prepareGlyphAtlasForFrame cache
+  when fresh (damageFull ctx)
+  whenM (closeEvictedFonts cache) (clearMeasureCache ctx)
+  pure fresh
+
+-- | Whether to drop the frame just built instead of presenting it: its UI
+-- pass ran out of glyph atlas room, so some of its text has no quads. A
+-- dropped frame damages the whole window and marks the context dirty, so
+-- the next frame, after 'beginTtfFrame' resets the atlas, repaints it all
+-- and the screen keeps the last good frame meanwhile. @fresh@ is what
+-- 'beginTtfFrame' answered for this frame: a frame that filled an atlas
+-- reset at its own start (a glyph larger than a page, or more glyphs than
+-- the pages hold) would fill it again after every reset, so it is presented
+-- with those glyphs missing instead.
+ttfFrameDropped :: SdlFontCache -> Context -> Bool -> IO Bool
+ttfFrameDropped cache ctx fresh = do
+  dropped <- (&& not fresh) <$> glyphAtlasFull cache
+  when dropped $ do
+    damageFull ctx
+    markDirty ctx
+  pure dropped
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource
