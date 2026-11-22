@@ -78,6 +78,8 @@ data Cell s = Cell
 data Sig = Sig {-# UNPACK #-} !Word64 {-# UNPACK #-} !Word64 !Bool
   deriving (Eq)
 
+-- | A second-level mask with every bit set, meaning the path stops at the
+-- first level ('Sig').
 allBits :: Word64
 allBits = complement 0
 
@@ -110,9 +112,11 @@ flagSlot = 3
 lastPassesSlot = 4
 frameSlots = 5
 
+-- | A zeroed array of @n@ stamp words.
 newStamps :: Int -> IO (MutablePrimArray RealWorld Word64)
 newStamps = newZeroedPrimArray
 
+-- | A cell holding @s@, with its own zeroed stamps and an empty change set.
 newCell :: s -> IO (Cell s)
 newCell s = Cell <$> newIORef s <*> newStamps stampWords <*> newIORef emptyChangeSet
 
@@ -126,11 +130,14 @@ inertStamps = unsafePerformIO (newStamps stampWords)
 inertChanges :: IORef ChangeSet
 inertChanges = unsafePerformIO (newIORef emptyChangeSet)
 
+-- | A cell holding @s@ that uses 'inertStamps' and 'inertChanges', so it
+-- records no observation or change.
 newInertCell :: s -> IO (Cell s)
 newInertCell s = do
   ref <- newIORef s
   pure (Cell ref inertStamps inertChanges)
 
+-- | Whether the cell was made by 'newInertCell'.
 {-# INLINE isInert #-}
 isInert :: Cell s -> Bool
 isInert (Cell _ stamps _) = sameMutablePrimArray stamps inertStamps

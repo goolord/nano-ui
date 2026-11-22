@@ -23,6 +23,8 @@ eqByPtr !a !b = ptrEq a b || a == b
 sameFloat :: Float -> Float -> Bool
 sameFloat a b = a == b || castFloatToWord32 a == castFloatToWord32 b
 
+-- | 'sameFloat' for 'Double': equal values, or identical bits (so a NaN
+-- equals itself).
 {-# INLINE sameDouble #-}
 sameDouble :: Double -> Double -> Bool
 sameDouble a b = a == b || castDoubleToWord64 a == castDoubleToWord64 b

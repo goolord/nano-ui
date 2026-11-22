@@ -81,6 +81,8 @@ data Lens s a where
 data ElemCtx s k a where
   ElemCtx :: Hashable k => !(Lens s [a]) -> (a -> k) -> [a] -> !(IORef (Maybe ([a], HM.HashMap k a))) -> ElemCtx s k a
 
+-- | An 'ElemCtx' for the list at the lens, keying elements with @key@, with
+-- an empty key index.
 newElemCtx :: Hashable k => Lens s [a] -> (a -> k) -> [a] -> IO (ElemCtx s k a)
 newElemCtx l key xs = ElemCtx l key xs <$> newIORef Nothing
 

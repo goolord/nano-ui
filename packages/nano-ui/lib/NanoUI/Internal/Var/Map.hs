@@ -23,6 +23,7 @@ import NanoUI.Internal.Var.Types (Var)
 -- across frames until explicitly removed with 'dropVar' or 'retainVars'.
 newtype VarMap k a = VarMap (IORef (HashMap k (Var a)))
 
+-- | An empty map.
 newVarMap :: IO (VarMap k a)
 newVarMap = VarMap <$> newIORef HM.empty
 

@@ -296,6 +296,7 @@ textNodeFontKey size si =
         then fromIntegral w `shiftL` 16 .|. (si .&. 0x3F0F)
         else fromIntegral (w `xor` (w `shiftR` 16)) `shiftL` 14 .|. (si .&. 0x3F0F)
 
+-- | The font variant packed in a text node's style index.
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant
 textNodeFontVariant = decodeStyleEnum 0 0x0F FontRegular

@@ -169,27 +169,36 @@ fieldText = Field storeText (\m st -> st {storeText = m})
 fieldIntSet :: Field IntSet
 fieldIntSet = Field storeIntSet (\m st -> st {storeIntSet = m})
 
+-- | A text area's 'TextBuffer', by widget key.
 fieldBuffer :: Field TextBuffer
 fieldBuffer = Field storeBuffer (\m st -> st {storeBuffer = m})
 
+-- | The 'TextDocument' last passed to or returned from a text area.
 fieldDocument :: Field TextDocument
 fieldDocument = Field storeDocument (\m st -> st {storeDocument = m})
 
+-- | The text last passed to or returned from a text area over 'Text', with
+-- its document.
 fieldTextDocument :: Field (Text, TextDocument)
 fieldTextDocument = Field storeTextDocument (\m st -> st {storeTextDocument = m})
 
+-- | A text area's undo and redo history.
 fieldHistory :: Field TextHistory
 fieldHistory = Field storeHistory (\m st -> st {storeHistory = m})
 
+-- | A text editor's modal editing mode.
 fieldEditorMode :: Field EditorMode
 fieldEditorMode = Field storeEditorMode (\m st -> st {storeEditorMode = m})
 
+-- | A text area's measured line widths.
 fieldLineWidths :: Field LineWidths
 fieldLineWidths = Field storeLineWidths (\m st -> st {storeLineWidths = m})
 
+-- | A grid's state.
 fieldGrid :: Field GridState
 fieldGrid = Field storeGrid (\m st -> st {storeGrid = m})
 
+-- | A table's column ids and their widths.
 fieldTableColumns :: Field ([Int], [Float])
 fieldTableColumns = Field storeTableColumns (\m st -> st {storeTableColumns = m})
 

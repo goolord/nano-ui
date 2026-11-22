@@ -19,6 +19,7 @@ setHost (Host ref) value = writeIORef ref (Just value)
 clearHost :: Host a -> IO ()
 clearHost (Host ref) = writeIORef ref Nothing
 
+-- | The installed value, or 'Nothing' when the slot is empty.
 {-# INLINE askHostIO #-}
 askHostIO :: Host a -> IO (Maybe a)
 askHostIO (Host ref) = readIORef ref

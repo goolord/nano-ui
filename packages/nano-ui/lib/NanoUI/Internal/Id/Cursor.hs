@@ -22,6 +22,7 @@ import NanoUI.Internal.Id (IdContext (..), WidgetId, idContextWidgetId, mix64)
 -- | Slots: 0 path, 1 next widget position, 2 next Var position.
 newtype IdCursor = IdCursor (MutablePrimArray RealWorld Word64)
 
+-- | A cursor positioned at the given 'IdContext'.
 newIdCursor :: IdContext -> IO IdCursor
 newIdCursor ic = do
   arr <- newPrimArray 3
@@ -29,11 +30,13 @@ newIdCursor ic = do
   writeIdCursor cur ic
   pure cur
 
+-- | The cursor's current path and positions as an 'IdContext'.
 {-# INLINE readIdCursor #-}
 readIdCursor :: IdCursor -> IO IdContext
 readIdCursor (IdCursor arr) =
   IdContext <$> readPrimArray arr 0 <*> readPrimArray arr 1 <*> readPrimArray arr 2
 
+-- | Move the cursor to the path and positions of an 'IdContext'.
 {-# INLINE writeIdCursor #-}
 writeIdCursor :: IdCursor -> IdContext -> IO ()
 writeIdCursor (IdCursor arr) (IdContext p s v) = do
@@ -49,6 +52,7 @@ peekWidgetId (IdCursor arr) = do
   s <- readPrimArray arr 1
   pure $! idContextWidgetId (IdContext p s 0)
 
+-- | The id of the next widget; advances the widget position by one.
 {-# INLINE takeWidgetId #-}
 takeWidgetId :: IdCursor -> IO WidgetId
 takeWidgetId (IdCursor arr) = do
@@ -57,6 +61,8 @@ takeWidgetId (IdCursor arr) = do
   writePrimArray arr 1 (s + 1)
   pure $! idContextWidgetId (IdContext p s 0)
 
+-- | Advance the widget position by @n@ without taking ids, for siblings a
+-- reused subtree already accounts for.
 {-# INLINE skipSiblingIds #-}
 skipSiblingIds :: IdCursor -> Int -> IO ()
 skipSiblingIds (IdCursor arr) n = do
