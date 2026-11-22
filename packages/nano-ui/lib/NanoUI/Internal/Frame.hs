@@ -214,6 +214,25 @@ runViewPasses unlift ctx frameInp ui = do
 
 -- | Settle pointer presses/releases, focus transitions, IME, text-edit menu,
 -- and select dropdowns against the solved layout.
+--
+-- The steps run in this order because each reads what the ones before it
+-- settled:
+--
+-- 1. The press and release steps fix the active widget from this frame's
+--    layout ('pressTargets' searches it as hover does).
+-- 2. 'finalizeTextInputFocus' clears focus for a press outside every text
+--    field, so 'finalizeSelectFocus' and 'finalizeDrawingFocus' after it can
+--    give focus to the select or custom widget the press landed on.
+-- 3. The text-edit menu steps close the menu on an outside press before a
+--    right press opens it again, and take a pick before Escape closes it.
+-- 4. 'finalizeFocusRequest' applies focus asked for from code after the
+--    pointer has moved focus, so a request in the view wins over the press.
+-- 5. 'constrainFocusToModal' then drops focus a modal hides or no widget
+--    holds, before 'finalizeTabFocus' moves it, so Tab starts from a widget
+--    that is there.
+-- 6. The select steps act on the dropdown focus now points at.
+-- 7. 'settleInputMethod' runs last: it moves the input-method request to
+--    wherever focus ended up.
 {-# INLINE finalizeFrameInput #-}
 finalizeFrameInput ::
   Context -> Input -> Input -> Input -> Input -> WidgetId -> IO ()
