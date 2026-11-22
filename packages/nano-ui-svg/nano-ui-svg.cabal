@@ -87,6 +87,10 @@ executable nano-ui-svg-glossary
     main-is:          Glossary.hs
     other-modules:    CanvasExamples
                       ChartExamples
+                      Glossary.BookVisuals
+                      Glossary.Html
+                      Glossary.Render
+                      Glossary.Specimens
                       LayoutExamples
                       Paths_nano_ui_svg
     autogen-modules:  Paths_nano_ui_svg

@@ -152,7 +152,8 @@ prose has a recognizable accent; do not reproduce it.
 
 - No em dashes or en dashes anywhere in the repository. Use a colon, a comma,
   parentheses, or a second sentence. This includes the book strings in
-  `Glossary.hs`, which generate `book/theme/nano-ui-banks.js`. A docs edit is
+  `packages/nano-ui-svg/app/Glossary/Specimens.hs`, which generate
+  `book/theme/nano-ui-banks.js`. A docs edit is
   not done until `rg '[\x{2013}\x{2014}]' book/src skills AGENTS.md` finds
   nothing.
 - Drop the "not X, but Y" and "isn't just X, it's Y" cadence, rhetorical
