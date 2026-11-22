@@ -17,6 +17,10 @@ category:           Graphics
 build-type:         Simple
 tested-with:        GHC ==9.10.3 || ==9.14.1
 
+extra-doc-files:
+    CHANGELOG.md
+    README.md
+
 extra-source-files:
     data/inter.ttf
 

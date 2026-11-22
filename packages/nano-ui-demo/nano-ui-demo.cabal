@@ -120,12 +120,12 @@ library book-examples
     build-depends:
         bytestring ^>=0.12,
         nano-ui ^>=0.2,
-        nano-ui-emit,
-        nano-ui-form,
-        nano-ui-markdown,
-        nano-ui-rgfw,
+        nano-ui-emit ^>=0.1,
+        nano-ui-form ^>=0.2,
+        nano-ui-markdown ^>=0.1,
+        nano-ui-rgfw ^>=0.1,
         nano-ui-sdl ^>=0.2,
-        nano-ui-svg,
+        nano-ui-svg ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1
 

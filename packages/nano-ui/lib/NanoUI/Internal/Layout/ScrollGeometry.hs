@@ -1,5 +1,5 @@
 -- | Scrollbar geometry: gutters, viewport clips, and track and thumb layout.
-module NanoUI.Internal.Frame.Scroll.Geometry
+module NanoUI.Internal.Layout.ScrollGeometry
   ( ScrollConfig (..)
   , defaultScrollConfig
   , ScrollBarLayout (..)

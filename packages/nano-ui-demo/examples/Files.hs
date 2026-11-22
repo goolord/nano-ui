@@ -111,7 +111,7 @@ view app = do
   saved <- readVar path
   unsaved <- readVar dirty
   let name = if T.null saved then "Untitled" else T.pack (takeFileName (T.unpack saved))
-  setWindowTitleUi (name <> (if unsaved then "*" else "") <> " — Files")
+  setWindowTitleUi (name <> (if unsaved then "*" else "") <> " - Files")
 
   columnWith (padAll 12 . gap 8 . grow) $ do
     rowWith (tight . gap 8 . alignMid . fillW) $ do

@@ -128,6 +128,10 @@ library
         NanoUI.Internal.Widgets.TextArea
         NanoUI.Internal.Widgets.TextDocument
     other-modules:
+        NanoUI.Internal.Monad.Core
+        NanoUI.Internal.Monad.Explain
+        NanoUI.Internal.Monad.Focus
+        NanoUI.Internal.Monad.Scroll
         NanoUI.Internal.Equality
         NanoUI.Internal.Var.List
         NanoUI.Internal.Var.Map
@@ -164,7 +168,7 @@ library
         NanoUI.Internal.Frame.Paint
         NanoUI.Internal.Frame.Paint.Widgets
         NanoUI.Internal.Frame.Scroll
-        NanoUI.Internal.Frame.Scroll.Geometry
+        NanoUI.Internal.Layout.ScrollGeometry
         NanoUI.Internal.Frame.Select
         NanoUI.Internal.Frame.Node
         NanoUI.Internal.Frame.Spans

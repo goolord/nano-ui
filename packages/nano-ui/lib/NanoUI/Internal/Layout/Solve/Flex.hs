@@ -21,7 +21,7 @@ import Data.IORef (readIORef)
 import Data.List (sortOn)
 import Data.Ord (Down (..))
 import Data.Primitive.PrimArray (copyMutablePrimArray, readPrimArray, writePrimArray)
-import NanoUI.Internal.Frame.Scroll.Geometry (isScrollStyle2D)
+import NanoUI.Internal.Layout.ScrollGeometry (isScrollStyle2D)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Padding (..), alignXFraction, alignYFraction)
 import NanoUI.Internal.Types (foldUpTo, forUpTo_, isBounded)

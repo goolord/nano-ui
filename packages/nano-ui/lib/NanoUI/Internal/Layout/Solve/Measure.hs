@@ -44,7 +44,7 @@ import qualified Data.Text as T
 import Data.Word (Word8, Word64)
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Font
-import NanoUI.Internal.Frame.Scroll.Geometry
+import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex

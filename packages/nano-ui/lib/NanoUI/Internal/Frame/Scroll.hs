@@ -19,7 +19,7 @@ import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, passesPointer)
 import NanoUI.Internal.Frame.Node (childPaintClip, readScrollNode)
-import NanoUI.Internal.Frame.Scroll.Geometry
+import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Font (ScrollBarSlot (..))

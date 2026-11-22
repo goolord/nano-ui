@@ -14,7 +14,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray (copyMutablePrimArray, readPrimArray, writePrimArray)
 import NanoUI.Internal.Font
-import NanoUI.Internal.Frame.Scroll.Geometry
+import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex

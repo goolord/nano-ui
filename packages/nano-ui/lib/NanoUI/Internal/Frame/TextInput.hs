@@ -47,7 +47,7 @@ import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidt
 import NanoUI.Internal.Frame.Chrome (maskPassword, textInputFocused, textInputValue)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics, resolveFontFor)
-import NanoUI.Internal.Frame.Scroll.Geometry (padTextClipRect)
+import NanoUI.Internal.Layout.ScrollGeometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeFontSize, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId, nodeFontBits)

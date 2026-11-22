@@ -38,7 +38,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds)
-import NanoUI.Internal.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
+import NanoUI.Internal.Layout.ScrollGeometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types

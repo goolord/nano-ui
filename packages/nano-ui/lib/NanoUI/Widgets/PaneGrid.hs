@@ -53,7 +53,7 @@ import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId, scopeIdContex
 import NanoUI.Internal.Var (bindVarOn, requestRerun)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
-import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip)
+import NanoUI.Internal.Layout.ScrollGeometry (padContentClip)
 import NanoUI.Internal.Shortcut qualified as Shortcut
 import NanoUI.Internal.Store (fieldGrid, fieldQuiet, findSlot, insertSlot, lookupSlot)
 import NanoUI.Internal.Store.Types (GridState (..), Gesture (..))

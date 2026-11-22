@@ -39,7 +39,7 @@ import NanoUI.Internal.Draw (DrawArena, getDrawSnapScale, withClip)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (paintScrollBars, textInputFocused)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
-import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayoutIn, scrollChromeLane)
+import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..), scrollBarLayoutIn, scrollChromeLane)
 import NanoUI.Internal.Frame.Node (nodeFontMetrics, nodeFontNative, packedTextFont, resolveTextFont)
 import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt, drawLineCaret, drawLinePreedit, drawLineSelection, fieldEditLine, fieldTextColor, nodeTextFieldGeom, preeditSourceIndex, pushFieldText, selectWithMouse, splicePreedit, textInputMouse, textWordBounds)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)

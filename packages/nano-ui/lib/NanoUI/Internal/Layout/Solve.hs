@@ -21,7 +21,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.Primitive.PrimArray (newPrimArray, readPrimArray, setPrimArray, writePrimArray)
 import Data.Word (Word8)
 import NanoUI.Internal.Font (FontMetrics (..))
-import NanoUI.Internal.Frame.Scroll.Geometry (isScrollStyle2D)
+import NanoUI.Internal.Layout.ScrollGeometry (isScrollStyle2D)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Measure
 import NanoUI.Internal.Layout.Solve.Position hiding (placeFloatingNodes)

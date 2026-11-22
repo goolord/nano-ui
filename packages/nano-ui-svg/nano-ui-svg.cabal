@@ -101,8 +101,8 @@ executable nano-ui-svg-glossary
         lucid2 ^>=0.0.20260427,
         microaeson >=0.1 && <0.2,
         nano-ui,
-        nano-ui-diagrams,
-        nano-ui-sdl,
+        nano-ui-diagrams ^>=0.2,
+        nano-ui-sdl ^>=0.2,
         nano-ui-svg,
         text ^>=2.1
     hs-source-dirs:   app

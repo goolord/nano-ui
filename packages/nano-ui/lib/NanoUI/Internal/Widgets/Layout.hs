@@ -44,7 +44,7 @@ where
 import Control.Monad (void)
 import Data.Text (Text)
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Frame.Scroll.Geometry
+import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, nextId, styled, windowWidth, withContext)

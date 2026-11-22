@@ -955,8 +955,8 @@
   the arena, including the sub-slot spellings text fields, text areas, drop
   targets, menus and colour pickers write), and the follow-up frame such a
   write requests clips rather than repaints everything. A write still
-  repaints the whole window when some changed key resolves to no widget — a
-  local hook's key — and so does the frame after a model change from
+  repaints the whole window when some changed key resolves to no widget (a
+  local hook's key), and so does the frame after a model change from
   `runFrameReduce`, a focus change, or `requestFrame`: each may change paint
   state (a colour, a value) that no rect or text diff describes.
 - Modules that are not API moved under `NanoUI.Internal`. `NanoUI.Context`,

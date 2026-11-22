@@ -22,7 +22,7 @@ import NanoUI.Internal.Draw (DrawArena (..))
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
 import NanoUI.Internal.Frame.Node (childPaintClip, nodeAdornmentInsets, readScrollNode, resolveFontFor)
-import NanoUI.Internal.Frame.Scroll.Geometry (padContentClip, padTextClipRect, scrollNodeViewport, tagClippedSpans)
+import NanoUI.Internal.Layout.ScrollGeometry (padContentClip, padTextClipRect, scrollNodeViewport, tagClippedSpans)
 import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)

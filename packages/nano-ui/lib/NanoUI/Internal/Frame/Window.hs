@@ -19,7 +19,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Input (PressTargets (..), probeHotId, targetsAt)
-import NanoUI.Internal.Frame.Scroll.Geometry (scrollChromeLane)
+import NanoUI.Internal.Layout.ScrollGeometry (scrollChromeLane)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
 import NanoUI.Internal.Layout.Arena

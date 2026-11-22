@@ -21,7 +21,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Chrome (tabHeaderVisualStyle)
-import NanoUI.Internal.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
+import NanoUI.Internal.Layout.ScrollGeometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)

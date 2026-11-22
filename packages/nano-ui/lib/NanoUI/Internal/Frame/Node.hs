@@ -16,7 +16,7 @@ import Data.Text (Text)
 import NanoUI.Internal.Context (Context (..), nodeTheme)
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO)
-import NanoUI.Internal.Frame.Scroll.Geometry
+import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), variantFace)

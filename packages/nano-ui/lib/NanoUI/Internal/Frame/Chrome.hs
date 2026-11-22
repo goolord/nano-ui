@@ -30,7 +30,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke, withClip)
-import NanoUI.Internal.Frame.Scroll.Geometry (ScrollBarLayout (..))
+import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..))
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
