@@ -30,7 +30,7 @@ SDL applies a command during the view, and the new window state comes back as an
 
 Window calls read the window from the `NanoUI` context, which exists only while the backend evaluates the view. To change the window from a worker thread, write a `Var` that the view passes to a setter with `writeVarIO`, then run the action `askWake` returns so a frame runs ([State & `Var`](../state/index.md)).
 
-`askWindow :: NanoUI WindowState` returns the record the backend fills before the view runs: size, scale, focus, maximized and fullscreen flags, and `winCloseRequested`. The first call marks the window as read. From then on, every change to the record (focus, a move, maximizing) runs a frame that repaints the whole window instead of the differing rectangles. A view that never calls `askWindow` pays nothing.
+`askWindow :: NanoUI WindowState` returns the record the backend fills before the view runs: size, scale, focus, maximized and fullscreen flags, and `winCloseRequested`. The first call marks the window as read. From then on, every change to the record (focus, a move, maximizing) runs a frame. A view that never calls `askWindow` pays nothing.
 
 ## Confirming before close
 

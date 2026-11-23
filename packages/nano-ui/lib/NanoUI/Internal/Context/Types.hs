@@ -256,10 +256,6 @@ data WindowResizeDrag = WindowResizeDrag
 -- keyed by widget id. Dirty state and pixel damage are tracked separately.
 data DamageState = DamageState
   { dsDirty :: !Bool
-  , dsDirtyOpaque :: !Bool
-  -- ^ Some request since the last frame came through 'markDirty', whose
-  -- effects no diff is known to cover. 'markDirtyCovered' leaves it alone,
-  -- so a covered request never downgrades an opaque one.
   , dsDamage :: !Damage
   , dsDamagePieces :: ![Rect]
   -- ^ Disjoint rects inside a 'DamageClip' that together hold all of its
@@ -333,7 +329,6 @@ newPrevWalk n = do
 initialDamageState :: DamageState
 initialDamageState = DamageState
   { dsDirty = True
-  , dsDirtyOpaque = False
   , dsDamage = DamageFull
   , dsDamagePieces = []
   , dsRequests = []

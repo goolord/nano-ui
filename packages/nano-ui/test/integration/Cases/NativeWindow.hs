@@ -313,7 +313,8 @@ runCommandsTest ctx failed = do
   assert failed . (/= DamageFull) =<< takeDamage c
   assertEq failed True =<< changed reported {winFocused = True}
   _ <- runFrame c inp ui
-  assertEq failed DamageFull =<< takeDamage c
+  -- The box that shows focus repaints, not the window.
+  assert failed . (\d -> d /= DamageFull && not (damageIsEmpty d)) =<< takeDamage c
 
 -- | A view declares a further window while its 'Var' holds 'True', under the
 -- same key each frame; the declared view runs on a context of its own. A

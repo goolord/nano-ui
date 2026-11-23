@@ -2,6 +2,19 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Model changes repaint what they changed, not the window. Each node keeps
+  a hash of what the view gave it that paint reads (text, value, style,
+  colours, scope, image, options), and a node whose hash changed repaints
+  where it was and where it is. A `Var` that a `readVar` showed, a write
+  from a worker thread followed by the `askWake` action, and a frame asked
+  for with `requestFrame` no longer repaint the whole window, and a frame
+  that changes nothing repaints nothing. Set `NANO_DAMAGE_TRACE` to print
+  each frame's damage and why a frame repainted whole.
+- **Breaking (backends):** `markDirty` no longer implies a whole-window
+  repaint; its follow-up frame repaints what that frame's diff finds
+  changed. A backend whose change no node, store key or widget id describes
+  (glyphs reloaded, a new theme) calls `damageFull`, as `syncDisplay`
+  already does. `markDirtyCovered` is now the same function.
 - Clicks work on targets whose `Int` is 32 bits (wasm32). The node arena
   and the store keep widget ids in `Int` slots, which cut a 64-bit id to
   its low word, so a press made a different id active than the one its

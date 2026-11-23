@@ -89,7 +89,7 @@ runExplicitDamageTest ctx failed = do
   markDirty ctx
   clearDirty ctx
   assert failed . not =<< isDirty ctx
-  assertEq failed DamageFull =<< damageOf 2 none
+  -- A dirty mark asks for a frame and repaints only what that frame changes.
   isEmpty 2
   writeIORef (ctxDamageWanted ctx) False
   assertEq failed DamageFull =<< damageOf 3 none

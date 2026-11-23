@@ -82,7 +82,7 @@ Two habits follow:
 A freshly computed `NaN` is never unchanged (`NaN /= NaN`), so writing one every pass redraws forever. Guard the write.
 
 > [!TIP]
-> When an input widget is bound to a `Var` and nothing in the view calls `readVar` on it, only that widget repaints on change. A `readVar` promotes the write to a full-window repaint.
+> A change to a `Var` repaints only the widgets whose text, value or style it altered, whether they are bound to the `Var` or show what a `readVar` returned.
 
 `peekVar` reads without recording a dependency. `readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe versions; after a background write, call the callback from `askWake` to schedule a frame. Never touch the UI `Context` from a worker thread.
 

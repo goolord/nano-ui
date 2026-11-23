@@ -194,7 +194,7 @@ runWindowDamageTest _ failed = do
   _ <- runFrame dirtied inp about
   markDirty dirtied
   assert failed =<< needsRedraw dirtied inp inp
-  assertEq failed DamageFull =<< damageOf dirtied inp about
+  assert failed . damageIsEmpty =<< damageOf dirtied inp about
   let scrolling = debug True (column (numbered 30))
       visible (Rect _ _ w h) = w > 0 && h > 0
   (scrolled, win) <- fresh scrolling

@@ -377,12 +377,7 @@ floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
 -- | State 'NanoUI.Internal.Frame' captures before the UI pass; 'writeDamage' compares
 -- it against the finished frame.
 data FrameSnapshot = FrameSnapshot
-  { fsOpaqueFollow :: !Bool
-  -- ^ The previous frame asked for this one through 'markDirty' (a model
-  -- change), not only 'markDirtyCovered' (store writes, which damaged their
-  -- effects per key). Such a frame repaints all, since the change it follows
-  -- may have altered any pixel.
-  , fsSize :: !Size
+  { fsSize :: !Size
   , fsStore :: !WidgetStore
   , fsHot :: !WidgetId
   , fsActive :: !WidgetId
@@ -393,13 +388,12 @@ data FrameSnapshot = FrameSnapshot
   , fsAnimKeys :: !IS.IntSet
   }
 
--- | Read the 'FrameSnapshot' before the UI pass, ahead of the frame's reset
--- of the dirty flags, 'dsDirtyOpaque' among them.
+-- | Read the 'FrameSnapshot' before the UI pass.
 captureFrameSnapshot :: Context -> IO FrameSnapshot
 captureFrameSnapshot ctx = do
   ds <- readIORef (ctxDamageState ctx)
   evaluate
-    =<< FrameSnapshot (dsDirtyOpaque ds) (dsLastWindowSize ds)
+    =<< FrameSnapshot (dsLastWindowSize ds)
       <$> getStore ctx
       <*> readIORef (ctxLastHotId ctx)
       <*> readIORef (ctxActiveId ctx)
@@ -593,19 +587,14 @@ refreshCustomDrawings ctx@Context {ctxNodeArena = na} = do
 -- | The check that makes the frame repaint the whole window rather than a
 -- clip, or the empty string for none. 'traceDamage' prints it.
 --
--- Store writes are repainted per key instead ('storeKeyChanges');
--- 'writeDamage' escalates a frame whose changed keys do not all resolve to a
--- node after this check. A follow-up frame requested by a model change
--- ('fsOpaqueFollow') repaints whole: the change may alter paint state no
--- diff describes (a box's colour, a node value), so a non-empty rect or text
--- diff does not show it is covered.
+-- Store writes and nodes whose paint inputs changed are repainted per key
+-- instead ('storeKeyChanges', 'clipDamage'); 'writeDamage' escalates a
+-- frame whose changed store keys do not all resolve to a node after this
+-- check.
 fullDamageCause :: FrameSnapshot -> FrameDelta -> String
 fullDamageCause snap d
   | ReqFull `elem` fdRequests d = "request"
   | neverPainted = "first"
-  -- Even when the frame's only store change is in 'storeFloat', which also
-  -- holds slider and knob values, not just scroll offsets.
-  | fsOpaqueFollow snap = "mark-dirty"
   -- A resize, a modal opening or closing (its dim covers the window, and a
   -- Var-bound modal writes nothing to the store) and a live window drag are
   -- window-wide whatever scrolled in the same frame.

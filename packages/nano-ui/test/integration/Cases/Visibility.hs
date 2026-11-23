@@ -97,8 +97,8 @@ runScrollTest ctx failed = do
   -- Row 10 now starts 70 pixels down the 100-pixel viewport.
   setScrollOffset ctx sid 330
   [_, (_, v2)] <- go [(off, True), (cameIn, False)]
-  -- The view may react to the event arbitrarily, so that frame repaints fully.
-  takeDamage ctx >>= assertEq failed DamageFull
+  -- The view shows nothing new for the event, so that frame repaints nothing.
+  assert failed . damageIsEmpty =<< takeDamage ctx
   assert failed (rectH (visRect v2) > 0 && rectH (visRect v2) < 40)
   assertEq failed (40, Just (visRect v2)) (rectH (visBounds v2), rectIntersect (visBounds v2) (visRect v2))
   assertJustM failed (getPrevRect ctx sid) $ \viewport ->

@@ -89,9 +89,9 @@ region is painted. Consequences:
   view (`liftIO (newVar x)` allocates every pass), and put every side effect
   behind an event: `whenM (button "Save") saveDocument`.
 - **Where `readVar` sits matters.** Read a `Var` below the input that edits
-  it and typing costs one pass; read it above and each change costs two. A
-  `Var` bound only to widgets (no `readVar`) repaints just those widgets; any
-  `readVar` makes a write repaint the window.
+  it and typing costs one pass; read it above and each change costs two.
+  Either way a write repaints only the widgets whose text, value or style it
+  altered.
 - **Geometry lags one frame.** Layout is solved after the view runs, so
   `respRect` is the previous frame's rectangle (empty on first appearance).
 - **Idle costs nothing.** The loop blocks on events unless animation, a timed

@@ -208,7 +208,10 @@ traceDamage msg = when damageTraceOn (hPutStrLn stderr msg)
 -- | Request another view pass and wake the event loop, unless this is the
 -- loop's own thread, which checks the flag before it waits.
 -- Dirty state schedules work; damage determines which pixels are repainted.
--- The request is opaque: its follow-up frame repaints the whole window.
+-- The follow-up frame repaints what its diff finds changed: nodes whose
+-- rect or paint inputs changed, store keys, and the hot, active and focused
+-- widgets. A change to anything else nano-ui paints from also needs
+-- 'damageFull'.
 --
 -- Call it on the thread that runs frames, or on one that thread is blocked
 -- on (as SDL's resize watch is): the flag shares a plain 'IORef' with the
@@ -217,19 +220,14 @@ traceDamage msg = when damageTraceOn (hPutStrLn stderr msg)
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
-  modifyDamage ctx (\ds -> ds {dsDirty = True, dsDirtyOpaque = True})
-  wakeOffLoop ctx
-
--- | 'markDirty' for a request whose visible effects the frame's own damage
--- machinery already covers: store writes are damaged per key ('modifyStore',
--- 'writeSlot', 'adoptSlot'). The follow-up frame these request clips instead
--- of repainting the whole window. The same threads may call it as
--- 'markDirty'.
-{-# INLINE markDirtyCovered #-}
-markDirtyCovered :: Context -> IO ()
-markDirtyCovered ctx = do
   modifyDamage ctx (\ds -> ds {dsDirty = True})
   wakeOffLoop ctx
+
+-- | 'markDirty', under the name the core uses where a store write's damage
+-- covers what the frame changes.
+{-# INLINE markDirtyCovered #-}
+markDirtyCovered :: Context -> IO ()
+markDirtyCovered = markDirty
 
 -- | Record a layout read for key @k@ during view construction. After layout
 -- completes, 'settleLayoutReads' runs @stale@ to check whether the newly

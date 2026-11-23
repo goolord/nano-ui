@@ -20,7 +20,7 @@ The view runs before layout, so `respRect` is the **previous** frame's rectangle
 ## Consequences
 
 - The view can run more than once per frame. A write to a `Var` read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (`whenM (button ...)`), and never allocate frame-lived resources inside the view.
-- `readVar` placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. A `Var` bound to a widget with no `readVar` repaints only that widget; a `readVar` promotes the change to a full-window repaint.
+- `readVar` placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. Either way a change repaints only the widgets whose text, value or style it altered.
 - Geometry lags one frame. `respRect` is empty on a widget's first appearance. Tests warm up before targeting rectangles.
 - Widget ids are positional. Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. `scope` and `withKey` keep the counts stable; see [Widget Identity & Keys](../state/identity.md).
 - An idle window costs nothing. With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.

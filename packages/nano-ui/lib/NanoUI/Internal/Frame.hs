@@ -62,8 +62,7 @@ runFrameEff unlift ctx rawInp ui = do
   ensureMetricCaches ctx
   snap <- captureFrameSnapshot ctx
   themeBefore <- readIORef (ctxTheme ctx)
-  -- The snapshot took the queued whole-window repaint.
-  modifyDamage ctx (\ds -> ds {dsDirty = False, dsDirtyOpaque = False})
+  modifyDamage ctx (\ds -> ds {dsDirty = False})
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
   -- A thread may have changed what the view reads before waking the loop,

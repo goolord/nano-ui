@@ -49,7 +49,7 @@ The producer receives `update :: (s -> s) -> IO ()` and returns when done, cance
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:wake}}
 ```
 
-`readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe `Var` operations. The wake repaints the whole window, because it carries no record of which widget changed. Use a `Stream` for frequent updates.
+`readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe `Var` operations. The frame the wake runs repaints the widgets whose text, value or style the change altered. Use a `Stream` for frequent updates.
 
 ## Animation
 

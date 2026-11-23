@@ -96,8 +96,8 @@ These are decisions already made; do not re-propose the alternatives.
   with `NANO_LOOP_TRACE=1` (passes per second and why; idle prints nothing).
   Frame times and throughput must not regress.
 - **Users never add damage.** Application code never calls `damageWidget` or
-  `damageRect`, and docs never tell it to. A change no rect or text diff
-  describes repaints the whole window. Only custom-widget authors and backends
+  `damageRect`, and docs never tell it to. A change no rect, paint-hash or
+  store diff describes repaints the whole window. Only custom-widget authors and backends
   touch damage.
 - **Public API stays.** "No caller in this repo" does not make a function dead:
   nano-ui is a library. The line is `exposed-modules` in each `.cabal` file,
