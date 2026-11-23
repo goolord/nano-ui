@@ -2,6 +2,14 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- A text field's edit menu is a popup with menu rows, declared by the frame
+  after the view, instead of an overlay the frame painted and routed itself.
+  A row picks on its release, as context-menu rows do, and the field shows
+  the edit on the next frame; a command the field cannot run is a dimmed
+  row. Opening and closing it repaint the window, as any popup does.
+  `takeTextEditLastAction` still reports the command. `TextInputMenu` gains
+  the point the menu opened at (`textInputMenuAt`), and `PointerRoute` loses
+  `RouteTextMenu`.
 - A custom widget's registrations are kept on its node instead of in maps
   rebuilt every frame: 1000 custom widgets cost a fifth less allocation and
   time a frame. In `NanoUI.Internal.Context`, `DrawingCacheState` no longer

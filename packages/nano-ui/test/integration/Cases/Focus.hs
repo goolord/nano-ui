@@ -244,7 +244,7 @@ focusTabClosesMenus index = do
   forM_ [void (pressKey KeyTab), void (askFocus [respId sel])] $ \leave -> do
     check =<< (rightClick (On field) >> labelShown "Paste")
     checkEq (respId sel) =<< (leave >> focusedId)
-    check . not =<< labelShown "Paste"
+    check . not =<< (frame >> labelShown "Paste")
 
 -- | Tab, Shift+Tab and a focus request scroll the widget they focus into
 -- its scroller's view, from below the fold, back up when Tab wraps, and

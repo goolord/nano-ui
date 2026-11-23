@@ -117,10 +117,12 @@ editCases =
     )
   , -- The edit menu offers Paste unfocused, and its Paste and Cut edit through
     -- the clipboard, surviving the caller passing back the frame before's value.
+    -- A row picks on its release, after the field drew, so the field shows
+    -- the edit on the frame after.
     ( textInput'
     , "hello"
-    , [ rightClick "hello", settle, click "Paste", is "helloclip"
-      , rightClick "helloclip", settle, click "Cut", is "", clipIs "helloclip"
+    , [ rightClick "hello", settle, click "Paste", frame, is "helloclip"
+      , rightClick "helloclip", settle, click "Cut", frame, is "", clipIs "helloclip"
       , frame, expectNot "Cut" >> result
       ]
     )
@@ -241,7 +243,7 @@ runSearchClearTest _ failed =
 
 -- | An open edit menu paints and hovers its Paste row without reading the
 -- clipboard, a round trip to its owner on X11. A press on a row that cannot
--- run (nothing to undo) closes the menu with no full repaint.
+-- run (nothing to undo) closes the menu.
 runMenuClipboardTest :: Context -> IORef Int -> IO ()
 runMenuClipboardTest base failed = do
   clipReads <- newIORef (0 :: Int)
@@ -251,8 +253,7 @@ runMenuClipboardTest base failed = do
     Rect px py pw ph <- rectOf "Paste"
     mapM_ (\x -> moveTo (At (V2 x (py + ph / 2)))) [px + 2, px + pw / 2]
     checkEq 0 =<< liftIO (readIORef clipReads)
-    _ <- click "Undo"
-    check . (/= DamageFull) =<< frameDamage
+    _ <- click "Undo" >> frame
     expectNot "Undo"
 
 -- | Text widgets let the loop sleep: a focused field asks for no frame or
@@ -500,8 +501,8 @@ runTextAreaRemountScrollTest ctx failed = do
 -- | The edit menu edits a text area with no key or text on the frame. Select
 -- All keeps the whole document selected once the button comes up (the
 -- gesture moves no caret and starts no drag), so Cut empties it, pulsing
--- 'respChanged' once, on its release frame. A command that only selects
--- pulses nothing.
+-- 'respChanged' once, on the frame after its release, the first the field
+-- draws after the pick. A command that only selects pulses nothing.
 runTextAreaMenuTest :: Context -> IORef Int -> IO ()
 runTextAreaMenuTest ctx failed = do
   let original = T.intercalate "\n" ["line " <> T.pack (show i) | i <- [0 .. 200 :: Int]]
@@ -515,7 +516,7 @@ runTextAreaMenuTest ctx failed = do
     _ <- click mid
     afterView (runTextCommand (respId resp) SelectAll)
     checkEq (False, original) . changedValue =<< frame
-    checkEq (True, "") . changedValue =<< (pick "Select All" >> pick "Cut")
+    checkEq (True, "") . changedValue =<< (pick "Select All" >> pick "Cut" >> frame)
     checkEq (False, "") . changedValue =<< frame
 
 -- | A text area keeps its caret in view: typing past its right edge scrolls

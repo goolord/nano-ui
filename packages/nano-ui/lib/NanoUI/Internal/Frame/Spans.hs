@@ -26,7 +26,6 @@ import NanoUI.Internal.Layout.ScrollGeometry (padContentClip, padTextClipRect, s
 import NanoUI.Internal.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
-import NanoUI.Internal.Frame.TextEdit (collectTextEditMenuSpans)
 import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextColor, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
@@ -55,7 +54,6 @@ collectOverlayTextSpans ctx@Context {ctxSpanOverlay = arena} inp = do
   resetSpanArena arena
   mapM_ (\nt -> collectFloatingSpansInto ctx nt arena) [NodeWindow, NodeModal, NodePopup]
   collectSelectDropdownSpans ctx inp >>= pushSpans arena
-  collectTextEditMenuSpans ctx inp >>= pushSpans arena
   spanArenaToList IM.empty arena
 
 -- | Collect base and overlay text separately for a host that rasterises text itself.

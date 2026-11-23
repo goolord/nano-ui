@@ -57,14 +57,11 @@ data Dropdown = Dropdown
   -- 2 horizontal.
   }
 
--- | Painted bounds of every open dropdown and of the text-edit menu. The
--- overlays paint over the page in the retained texture, so a clip frame must
--- repaint where they are and where they were.
+-- | Painted bounds of every open dropdown. The overlays paint over the page
+-- in the retained texture, so a clip frame must repaint where they are and
+-- where they were.
 overlayMenuRects :: Context -> IO [Rect]
-overlayMenuRects ctx = do
-  dropdowns <- openDropdowns ctx
-  menu <- getsInteraction ctx isTextInputMenu
-  pure (map menuPanelBounds (map ddRect dropdowns ++ maybe [] (pure . textInputMenuRect) menu))
+overlayMenuRects ctx = map (menuPanelBounds . ddRect) <$> openDropdowns ctx
 
 -- | Every open dropdown, in arena order.
 openDropdowns :: Context -> IO [Dropdown]
@@ -151,32 +148,21 @@ dropdownRows fm theme mouse dd =
               | otherwise = Nothing
       ]
 
--- | The widget whose menu or dropdown is on top at @mouse@.
+-- | The widget whose dropdown is on top at @mouse@.
 overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
 overlayMenuOwnerAt ctx mouse =
   overlayRouteAt ctx mouse >>= \case
-    Just RouteTextMenu -> fmap textInputMenuWidget <$> getsInteraction ctx isTextInputMenu
     Just (RouteDropdown wid) -> pure (Just wid)
     _ -> pure Nothing
 
--- | Pointer route for overlays drawn above all layers at @mouse@: first the
--- text-edit context menu, then an open dropdown allowed by the modal state.
--- These overlays are painted directly rather than placed in the layout arena,
--- so hit-testing checks their rects explicitly here.
+-- | Pointer route for an open dropdown allowed by the modal state at
+-- @mouse@. Dropdowns are painted directly rather than placed in the layout
+-- arena, so hit-testing checks their rects explicitly here.
 overlayRouteAt :: Context -> V2 -> IO (Maybe PointerRoute)
 overlayRouteAt ctx mouse = do
-  mMenu <- getsInteraction ctx isTextInputMenu
-  -- A menu the modal state hides (its field is behind a modal opened since)
-  -- is not painted, so it takes nothing either.
-  menuShown <- case mMenu of
-    Just m | rectContains (textInputMenuRect m) mouse -> widgetOverlayAllowed ctx (textInputMenuWidget m)
-    _ -> pure False
-  if menuShown
-    then pure (Just RouteTextMenu)
-    else do
-      dropdowns <- openDropdowns ctx
-      let under = [ddWidget dd | dd <- reverse dropdowns, rectContains (ddRect dd) mouse]
-      fmap RouteDropdown . listToMaybe <$> filterM (widgetOverlayAllowed ctx) under
+  dropdowns <- openDropdowns ctx
+  let under = [ddWidget dd | dd <- reverse dropdowns, rectContains (ddRect dd) mouse]
+  fmap RouteDropdown . listToMaybe <$> filterM (widgetOverlayAllowed ctx) under
 
 -- | Decide where this frame's pointer goes, before the view runs. A button
 -- that is already down keeps the route it went down with, through its

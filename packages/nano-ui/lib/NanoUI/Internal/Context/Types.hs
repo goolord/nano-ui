@@ -219,9 +219,12 @@ data DamageRequest
   | ReqFull                                -- ^ Force full window invalidation
   deriving (Eq, Show)
 
--- | Text field owning the edit menu and its logical window-space bounds.
+-- | The text field an open edit menu belongs to, the point the menu opened
+-- at, and the rect its popup was drawn at (empty before it is drawn), in
+-- logical window coordinates.
 data TextInputMenu = TextInputMenu
   { textInputMenuWidget :: WidgetId
+  , textInputMenuAt :: V2
   , textInputMenuRect :: Rect
   }
   deriving (Eq, Show)
@@ -789,10 +792,8 @@ data PointerRoute
   = -- | The widgets of one layer: 0 is the page, anything else the key of the
     -- floating panel (window, popup or modal) on top under the pointer.
     RouteLayer !Int
-  | -- | The text-edit context menu, which the frame draws over every layer.
-    RouteTextMenu
-  | -- | An open select or combo dropdown, drawn the same way, and the widget
-    -- it belongs to.
+  | -- | An open select or combo dropdown, which the frame draws over every
+    -- layer, and the widget it belongs to.
     RouteDropdown !WidgetId
   deriving (Eq, Show)
 

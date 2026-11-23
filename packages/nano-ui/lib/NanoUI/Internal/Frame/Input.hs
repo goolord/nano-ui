@@ -352,7 +352,9 @@ finalizeTextInputFocus ctx inp targets =
         onMenu <- maybe (pure False) (isMenuButtonWidget ctx) (ptInteractive targets)
         unless onMenu $ collapseTextFieldSelection ctx prevFocus
         writeIORef (ctxFocusId ctx) (WidgetId 0)
-        modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
+        -- A press on a menu row, the edit menu's own among them, leaves the
+        -- menu to the release that picks the row.
+        unless onMenu $ modifyInteraction ctx (\s -> s {isTextInputMenu = Nothing})
       Just wid -> focusWidget ctx wid
 
 -- | On a left press on an enabled select's field, give the select keyboard
@@ -564,14 +566,13 @@ focusedNodeIs ctx ref p = do
   wid <- readIORef (ref ctx)
   withWidgetNode ctx wid False $ \idx -> p <$> getNodeType (ctxNodeArena ctx) idx
 
--- Select dropdown or text-input menu is open. Overlay hover is not a widget id,
--- so while one is up every pointer move needs a frame. A focused combo (a
--- search-style field carrying options) also owns an open dropdown.
+-- Select dropdown is open. Its hover is not a widget id, so while one is up
+-- every pointer move needs a frame. A focused combo (a search-style field
+-- carrying options) also owns an open dropdown.
 overlayMenuOpen :: Context -> IO Bool
 overlayMenuOpen ctx = do
   store <- getStore ctx
-  menu <- getsInteraction ctx isTextInputMenu
-  if anySelectOpen store || isJust menu
+  if anySelectOpen store
     then pure True
     else isJust <$> focusedComboNode ctx
 

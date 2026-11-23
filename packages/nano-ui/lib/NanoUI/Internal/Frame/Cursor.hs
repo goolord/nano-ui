@@ -36,8 +36,7 @@ uiCursorKind ctx inp =
   -- The first non-'UiCursorDefault' query wins; later queries do not run.
   -- 'withCursorShape' scopes apply only as a fallback.
   fmap (fromMaybe UiCursorDefault) . runMaybeT . asum . map MaybeT $
-    [ textEditMenuCursorKind ctx inp
-    , selectDropdownCursorKind ctx inp
+    [ selectDropdownCursorKind ctx inp
     , windowResizeCursorKind ctx inp
     , cursorZoneKind ctx inp
     , scrollThumbCursorKind ctx inp
@@ -62,8 +61,7 @@ selectDropdownCursorKind ctx inp = do
   if pickHeld
     then pure (Just UiCursorPointer)
     else
-      -- Over an open select's menu or a focused combo's. The text-edit menu
-      -- never gets here: textEditMenuCursorKind runs first in uiCursorKind.
+      -- Over an open select's menu or a focused combo's.
       (UiCursorPointer <$) <$> overlayMenuOwnerAt ctx (inputMousePos inp)
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)

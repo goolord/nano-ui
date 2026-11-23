@@ -32,7 +32,7 @@ import NanoUI.Internal.Id.Cursor (writeIdCursor)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (measuredHeightAt, placeFloatingNodes, runCustomMeasure, solveLayout)
-import NanoUI.Internal.Monad (NanoUI (..), Ui, runUi, whenM)
+import NanoUI.Internal.Monad (NanoUI (..), Ui, embedNanoUI, runUi, whenM)
 import NanoUI.Internal.NativeWindow (clearWindowClose)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (Padding (..), Theme (..), pageBackground, themeOverlayDim, themeSeparator)
@@ -72,8 +72,7 @@ runFrameEff unlift ctx rawInp ui = do
   -- Route pointer input before the view runs, against the previous frame's
   -- geometry. Each pass below receives input filtered to its target layer
   -- ('withoutPointer' when the pointer is routed elsewhere): @layerInp@ for
-  -- scrolling, windows, presses, focus and text fields, @menuInp@ for the
-  -- text-edit menu, and @dropInp@ for dropdowns. @frameInp@ retains the
+  -- scrolling, windows, presses, focus and text fields. @frameInp@ retains the
   -- unmasked pointer for window-wide checks (outside-click dismissal, hover,
   -- and overlay painting).
   route <- routePointer ctx frameInp
@@ -81,8 +80,6 @@ runFrameEff unlift ctx rawInp ui = do
   recordCoveredWidgets ctx route frameInp
   let routedIf mine = if mine then frameInp else withoutPointer frameInp
       layerInp = routedIf (case route of RouteLayer _ -> True; _ -> False)
-      menuInp = routedIf (route == RouteTextMenu)
-      dropInp = routedIf (route /= RouteTextMenu)
   -- Wheel and thumb-drag input targets the previous frame's layout, so apply
   -- it while that arena is still intact, before it is reset for the new
   -- build. Settling offsets before the UI pass keeps build-time
@@ -140,7 +137,7 @@ runFrameEff unlift ctx rawInp ui = do
     layoutArena ctx size False
     applyScrollOffsets ctx size
   persistWindowPositions ctx
-  finalizeFrameInput ctx frameInp layerInp menuInp dropInp targets focusBefore
+  finalizeFrameInput ctx frameInp layerInp targets focusBefore
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
   pruneUnmountedCaches ctx =<< updatePrevRects ctx size
@@ -199,7 +196,10 @@ runViewPasses ::
   IO a
 runViewPasses unlift ctx frameInp ui = do
   beginVarPass ctx 1
-  result0 <- unlift (runUi ctx frameInp ui)
+  -- Opened only after layout, so whether it shows is known before the view.
+  menuOpen <- isJust <$> getsInteraction ctx isTextInputMenu
+  let withMenu = if menuOpen then withTextEditMenu else id
+  result0 <- unlift (runUi ctx frameInp (withMenu ui))
   -- Pending click is one-shot. Clear before a rerun so toggles do not fire twice.
   writeIORef (ctxClickedId ctx) (WidgetId 0)
   rerun <- takeVarRerun ctx
@@ -210,10 +210,16 @@ runViewPasses unlift ctx frameInp ui = do
         -- A modal is active only if this pass builds it.
         modifyOverlay ctx (\os -> os {osModalActive = False, osModalDepth = 0})
         beginVarPass ctx 2
-        unlift (runUi ctx (stripInteractionInput frameInp) ui)
+        unlift (runUi ctx (stripInteractionInput frameInp) (withMenu ui))
       else pure result0
   endVarFrame ctx
   pure r
+
+-- | The view, then the open text-edit menu ('textEditMenuView'), which
+-- belongs to no widget of the view.
+{-# INLINE withTextEditMenu #-}
+withTextEditMenu :: Eff (Ui : es) a -> Eff (Ui : es) a
+withTextEditMenu ui = ui <* embedNanoUI textEditMenuView
 
 -- | Settle pointer presses/releases, focus transitions, IME, text-edit menu,
 -- and select dropdowns against the solved layout.
@@ -239,8 +245,8 @@ runViewPasses unlift ctx frameInp ui = do
 --    wherever focus ended up.
 {-# INLINE finalizeFrameInput #-}
 finalizeFrameInput ::
-  Context -> Input -> Input -> Input -> Input -> PressTargets -> WidgetId -> IO ()
-finalizeFrameInput ctx frameInp layerInp menuInp dropInp targets focusBefore = do
+  Context -> Input -> Input -> PressTargets -> WidgetId -> IO ()
+finalizeFrameInput ctx frameInp layerInp targets focusBefore = do
   finalizePointerRelease ctx layerInp
   disarmPointerPress ctx frameInp
   finalizeTextInputFocus ctx layerInp targets
@@ -249,13 +255,12 @@ finalizeFrameInput ctx frameInp layerInp menuInp dropInp targets focusBefore = d
   finalizeTextFieldMouse ctx layerInp (ptFieldControl targets)
   closeTextEditMenuOnOutsideClick ctx frameInp
   openTextEditMenu ctx layerInp
-  finalizeTextEditMenuPick ctx menuInp
   closeTextEditMenuOnEscape ctx frameInp
   finalizeFocusRequest ctx
   constrainFocusToModal ctx
   finalizeTabFocus ctx frameInp
   finalizeSelectKeyboard ctx frameInp
-  finalizeSelectPick ctx dropInp
+  finalizeSelectPick ctx frameInp
   closeSelectOnOutsideClick ctx frameInp
   settleInputMethod ctx focusBefore
 
@@ -354,7 +359,6 @@ paintFrame ctx frameInp size explain paintFull clear = do
   beginLayer da LayerOverlay
   drawFloatingPanels ctx size explain
   drawSelectOverlays ctx frameInp
-  drawTextEditMenuOverlays ctx frameInp
   when explain (paintExplainHover ctx)
   finishDraw da
 

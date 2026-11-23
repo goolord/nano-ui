@@ -14,6 +14,7 @@ import NanoUI.Internal.Context
   , InteractionState (..)
   , getsInteraction
   , intKey
+  , textInputMenuRect
   , textInputMenuWidget
   )
 import NanoUI.Internal.Store (Slot (..), WidgetStore (..), isSelectOpen, slotKey)
@@ -81,7 +82,7 @@ overlays :: [Overlay]
 overlays =
   [ -- A right click low in the field and left of the hot point, so the menu
     -- opens down and to the right, over it.
-    Overlay "text-menu" (fst <$> withValue "source text" textInput') openMenu spanPanelRect
+    Overlay "text-menu" (fst <$> withValue "source text" textInput') openMenu menuPanelRect
   , Overlay "select-dropdown" (fst <$> withValue 0 (selectWith' fillW options)) clickSource spanPanelRect
   , Overlay "combo-dropdown" (fst <$> withValue "" (comboBox' "pick" options)) clickSource spanPanelRect
   , Overlay "popup" popupSource alreadyOpen nodePanelRect
@@ -105,6 +106,10 @@ overlays =
       listToMaybe . map (\(_, _, _, _, r) -> r) <$> onContext (`collectOverlayTextSpans` inp)
     -- Floating panels, which are layout nodes.
     nodePanelRect src = onContext (`getPrevRect` respId src)
+    -- The text-edit menu's popup, at the rect it was drawn at.
+    menuPanelRect _ = do
+      _ <- frame
+      onContext (\ctx -> (>>= \m -> if rectW (textInputMenuRect m) > 0 then Just (textInputMenuRect m) else Nothing) <$> getsInteraction ctx isTextInputMenu)
 
 victims :: IO [Victim]
 victims = do
