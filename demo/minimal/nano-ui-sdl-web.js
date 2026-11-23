@@ -88,6 +88,7 @@ class NanoUiSdlWeb {
     this.localFonts = null;
     this.fontList = new Uint8Array(0);
     this.fontBytes = new Uint8Array(0);
+    this.picked = new Uint8Array(0);
   }
 
   // ---------------------------------------------------------------- setup
@@ -605,6 +606,115 @@ class NanoUiSdlWeb {
   takeFontBytes(ptr) {
     this.bytes(ptr, this.fontBytes.length).set(this.fontBytes);
     this.fontBytes = new Uint8Array(0);
+  }
+
+  // ---------------------------------------------------------------- files
+
+  // Filters as Haskell sends them, a line each of a name, a tab and a
+  // semicolon-separated extension list, as names with ".ext" lists. "*"
+  // stands for any file, so a filter holding it lists none.
+  static parseFilters(text) {
+    return text.split("\n").filter((line) => line.includes("\t")).map((line) => {
+      const [name, pattern] = line.split("\t");
+      const exts = pattern.split(";").map((e) => e.trim()).filter((e) => e);
+      return { name, extensions: exts.includes("*") ? [] : exts.map((e) => `.${e.replace(/^\./, "")}`) };
+    });
+  }
+
+  // Keep bytes for takePicked; answer their length.
+  setPicked(bytes) {
+    this.picked = bytes;
+    return bytes.length;
+  }
+
+  takePicked(ptr) {
+    this.bytes(ptr, this.picked.length).set(this.picked);
+    this.picked = new Uint8Array(0);
+  }
+
+  // The file chooser: files (mode 0) or every file in a folder (mode 1).
+  // The chosen files are read and packed, each a little-endian 32-bit name
+  // length, the UTF-8 name, a 32-bit length and the bytes. -1 cancelled,
+  // -2 failed.
+  async pickFiles(mode, many, ptr, len) {
+    const filters = NanoUiSdlWeb.parseFilters(this.text(ptr, len));
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = many !== 0;
+    if (mode === 1) {
+      input.webkitdirectory = true;
+    } else {
+      const exts = filters.flatMap((f) => f.extensions);
+      if (exts.length && !filters.some((f) => f.extensions.length === 0)) input.accept = exts.join(",");
+    }
+    input.style.display = "none";
+    document.body.appendChild(input);
+    try {
+      const files = await new Promise((resolve) => {
+        input.addEventListener("change", () => resolve([...input.files]), { once: true });
+        input.addEventListener("cancel", () => resolve(null), { once: true });
+        input.click();
+      });
+      if (!files) return -1;
+      const parts = [];
+      for (const file of files) {
+        parts.push(this.encoder.encode(file.webkitRelativePath || file.name));
+        parts.push(new Uint8Array(await file.arrayBuffer()));
+      }
+      const out = new Uint8Array(parts.reduce((n, p) => n + 4 + p.length, 0));
+      const view = new DataView(out.buffer);
+      let o = 0;
+      for (const p of parts) {
+        view.setUint32(o, p.length, true);
+        out.set(p, o + 4);
+        o += 4 + p.length;
+      }
+      return this.setPicked(out);
+    } catch (e) {
+      console.warn("nano-ui-sdl-web: the file chooser failed:", e);
+      return -2;
+    } finally {
+      input.remove();
+    }
+  }
+
+  // Save bytes: through the browser's save dialog where it has one, else as
+  // a download under the suggested name. Answers the length of the name it
+  // was saved under, for takePicked; -1 cancelled, -2 failed.
+  async saveFile(namePtr, nameLen, filtersPtr, filtersLen, dataPtr, dataLen) {
+    const name = this.text(namePtr, nameLen);
+    const filters = NanoUiSdlWeb.parseFilters(this.text(filtersPtr, filtersLen));
+    // Copied now: the module's memory may move while the dialog is open.
+    const data = this.bytes(dataPtr, dataLen).slice();
+    try {
+      if (typeof window.showSaveFilePicker === "function") {
+        const types = filters.filter((f) => f.extensions.length)
+          .map((f) => ({ description: f.name, accept: { "application/octet-stream": f.extensions } }));
+        let handle;
+        try {
+          handle = await window.showSaveFilePicker({ suggestedName: name, types: types.length ? types : undefined });
+        } catch (e) {
+          if (e.name === "AbortError") return -1;
+          throw e;
+        }
+        const writable = await handle.createWritable();
+        await writable.write(data);
+        await writable.close();
+        return this.setPicked(this.encoder.encode(handle.name));
+      }
+      const url = URL.createObjectURL(new Blob([data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return this.setPicked(this.encoder.encode(name));
+    } catch (e) {
+      console.warn("nano-ui-sdl-web: saving failed:", e);
+      return -2;
+    }
   }
 }
 
