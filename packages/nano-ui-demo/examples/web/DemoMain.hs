@@ -7,7 +7,7 @@
 module Main (main) where
 
 import NanoUI
-import NanoUI.Backend.SdlWeb (SdlWebOptions (..), defaultSdlWebOptions, runSdlWebApp)
+import NanoUI.Backend.SdlWeb (SdlWebOptions (..), WebFontService (..), defaultSdlWebOptions, runSdlWebApp)
 
 import Demo (demoUi, newDemo)
 
@@ -18,11 +18,13 @@ main = runSdlWebApp webOptions . demoUi =<< newDemo
 foreign export javascript "nanoMain" main :: IO ()
 #endif
 
--- | The desktop demo's theme and title. The canvas is the page's, so there
--- is no window size, and the page has nothing to quit to.
+-- | The desktop demo's theme and title, and Fontsource for the font list:
+-- Firefox and Safari give a page no installed fonts. The canvas is the
+-- page's, so there is no window size, and the page has nothing to quit to.
 webOptions :: SdlWebOptions
 webOptions =
   defaultSdlWebOptions
     { webTheme = Just defaultTheme
     , webWindowSettings = defaultWindowSettings {wsTitle = "nano-ui widget cookbook"}
+    , webFontService = Just Fontsource
     }
