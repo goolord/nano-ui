@@ -180,6 +180,7 @@ module NanoUI.Internal.Context
   , PrevFrame (..)
   , emptyPrevFrame
   , PrevWalk (..)
+  , PressPoint (..)
   , OverlayState (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
@@ -764,7 +765,6 @@ newContext = do
   ctxPointerReach <- newIORef Nothing
   ctxActiveId <- newIORef (WidgetId 0)
   ctxClickedId <- newIORef (WidgetId 0)
-  ctxReleaseClickedId <- newIORef (WidgetId 0)
   ctxPressPos <- newIORef Map.empty
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False

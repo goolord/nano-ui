@@ -12,7 +12,7 @@ module NanoUI.Internal.Frame.Input
   , armPointerPress
   , disarmPointerPress
   , pressTargets
-  , finalizePointerPress
+  , armPointerTarget
   , finalizePointerRelease
   , finalizeTextInputFocus
   , finalizeSelectFocus
@@ -32,7 +32,6 @@ module NanoUI.Internal.Frame.Input
   , recordCoveredWidgets
   ) where
 
-import Control.Applicative ((<|>))
 import Control.Monad (filterM, guard, mfilter, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as M
@@ -50,7 +49,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
-import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains, rectFullyInside)
+import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectFullyInside)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Shortcut (focusTakesChord)
 
@@ -164,17 +163,22 @@ refreshHover ctx inp = do
     when (hashWidgetId prevHot /= 0 && prevShown && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
     when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
--- | Capture the press point and reached control before rebuilding the arena.
--- Non-left buttons retain this owner through movement and reordering; passive
--- content still bubbles to mouse areas. 'disarmPointerPress' clears releases.
+-- | Capture the press point and the node it reached ('PressPoint') in the
+-- frame the user saw, before the arena is rebuilt. A click belongs to the
+-- reached widget and its ancestors whatever moves under the pointer later;
+-- passive content still bubbles to mouse areas. 'disarmPointerPress' clears
+-- releases.
 armPointerPress :: Context -> Input -> IO ()
 armPointerPress ctx inp =
   when (anyButtonPressed inp) $ do
     let here = inputMousePos inp
-    owner <- getsInteraction ctx isPointerRoute >>= \case
-      RouteLayer _ -> reachedAt ctx here >>= traverse (getWidgetId (ctxNodeArena ctx))
-      _ -> pure (Just (WidgetId 0))
-    modifyIORef' (ctxPressPos ctx) $ \m -> foldr (`M.insert` (here, owner)) m (buttonsToList (inputButtonsPressed inp))
+    pp <- getsInteraction ctx isPointerRoute >>= \case
+      RouteLayer _ ->
+        reachedAt ctx here >>= \case
+          Nothing -> pure (PressPoint here Nothing IS.empty)
+          Just i -> PressPoint here <$> (Just <$> getWidgetId (ctxNodeArena ctx) i) <*> reachedIds ctx here i
+      _ -> pure (PressPoint here (Just (WidgetId 0)) IS.empty)
+    modifyIORef' (ctxPressPos ctx) $ \m -> foldr (`M.insert` pp) m (buttonsToList (inputButtonsPressed inp))
     -- A pointer press hides the keyboard focus ring.
     when (pressedIn MouseLeft inp) $ writeIORef (ctxFocusVisible ctx) False
 
@@ -269,11 +273,12 @@ none :: PressTargets
 none = PressTargets Nothing Nothing Nothing False
 
 -- | On a left press, make the interactive widget under the pointer the active
--- widget, unless it is disabled. Runs after layout. 'pressTargets' searches
--- the arena in the same order as hover ('refreshHover'), so where widgets
--- overlap both pick the one on top.
-finalizePointerPress :: Context -> PressTargets -> IO ()
-finalizePointerPress ctx targets =
+-- widget, unless it is disabled. Runs before the view, against the layout the
+-- user saw, so a widget that first appears in the press's frame does not
+-- become active. 'pressTargets' searches the arena in the same order as
+-- hover ('refreshHover'), so where widgets overlap both pick the one on top.
+armPointerTarget :: Context -> PressTargets -> IO ()
+armPointerTarget ctx targets =
   enabledTarget ctx (ptInteractive targets) >>= mapM_ (writeIORef (ctxActiveId ctx))
 
 -- | Whether a press at @mouse@ lands on node @idx@ of type @nt@: the point is
@@ -298,80 +303,30 @@ widgetHitRect ctx nt idx x y w h = case nt of
   -- Only a text field's box is smaller than its node.
   _ -> pure (Rect x y w h)
 
--- | Resolve a left-button release against this frame's solved rects, and
--- clear the active widget. Runs after layout.
+-- | Clear the active widget on a left release. Runs after layout. The view
+-- judged the release against the layout the user saw, so a widget that
+-- moved under the pointer in the release's own frame is not clicked: the
+-- user did not see it there.
 --
--- During the view a widget tests the pointer against its rect from the
--- previous frame, so it misses a release when it has moved since, or when
--- this is its first frame. This step repeats the test with the solved rect.
--- When the release is on the active widget and the view did not see it there,
--- the widget's id goes into 'ctxClickedId', and the widget reports the click
--- on the next frame, which this asks for. Only the node types in
--- 'postsLayoutClick' get one. A radio option, tree row or tab header reports
--- it like any other click, and its group picks it on that frame. A release
--- in its press's frame gets none: the view judged both against the layout
--- the user saw, and the widget under the pointer now may be one that a
--- scroll or the click itself moved there. Nor does a widget that a modal
--- opened since the press hides ('nodePastModals').
---
--- A release on the widget also sets its hover animation to 1, so it paints as
--- fully hovered at once.
+-- A release on the widget's solved rect also sets its hover animation to 1,
+-- so it paints as fully hovered at once.
 finalizePointerRelease :: Context -> Input -> IO ()
 finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
   when (releasedIn MouseLeft inp) $ do
     let mouse = inputMousePos inp
     active <- readIORef (ctxActiveId ctx)
     when (hashWidgetId active /= 0) $ do
-      releasedClicked <- readIORef (ctxReleaseClickedId ctx)
-      -- Several nodes can carry the active id. Every one of them that the
-      -- release is on handles it. Whether the pointer came up over the widget
-      -- is decided by the first node with the id, in arena order.
+      -- Whether the pointer came up over the widget is decided by the first
+      -- node with its id, in arena order.
       let release over idx = do
             wid <- getWidgetId na idx
-            if wid /= active
+            if wid /= active || isJust over
               then pure over
-              else do
-                nt <- getNodeType na idx
-                rect <- getNodeRect na idx
-                visible <- nodeClippedHit ctx idx rect mouse
-                let posts = visible && postsLayoutClick nt && releasedClicked /= active && not (pressedIn MouseLeft inp)
-                whenM (pure posts <&&> nodePastModals ctx idx) $
-                  unlessM (inUiClickHit ctx active mouse) $ do
-                    writeIORef (ctxClickedId ctx) active
-                    -- Covered: whatever the click changes is damaged on the
-                    -- frame that reports it.
-                    markDirtyCovered ctx
-                pure (over <|> Just visible)
+              else Just <$> (getNodeRect na idx >>= \rect -> nodeClippedHit ctx idx rect mouse)
       releasedOver <- foldNodesM na release Nothing
       writeIORef (ctxActiveId ctx) (WidgetId 0)
       when (releasedOver == Just True) $
         setAnimationValue ctx active 1
-
--- | The node types for which 'finalizePointerRelease' turns a release the view
--- missed into a click on the next frame.
-postsLayoutClick :: NodeType -> Bool
-postsLayoutClick nt = nt == NodeButton || nt == NodeSelect
-
--- | Whether the view's own hit test saw a release at @mouse@ on widget @wid@.
--- It repeats the test of 'NanoUI.Internal.Widgets.Node.resolveInteraction': the widget
--- is enabled, the frame routed the pointer to its layer, and the point is
--- inside its rect from the previous frame and inside the scroll viewports
--- above it. A covered widget ('NanoUI.Internal.Context.Core.pointerCovered') also passes: the view
--- already saw that release and rejected it. So does a disabled one, which
--- the view rejects too: a click posted to it would reach widgets (checkboxes,
--- radio options, tree rows) that read 'ctxClickedId' directly.
-inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
-inUiClickHit ctx wid mouse = do
-  disabled <- isDisabled ctx wid
-  mrect <- getPrevRect ctx wid
-  case mrect of
-    _ | disabled -> pure True
-    Just r ->
-      -- The view saw the release only if the frame routed the pointer to
-      -- this node's layer.
-      withWidgetNode ctx wid (rectContains r mouse) $ \idx ->
-        nodeOwnsPointer ctx idx <&&> nodeInteractionHit ctx idx r mouse
-    _ -> pure False
 
 -- | Focus the enabled text field under a left press using solved geometry.
 -- A press elsewhere clears focus, collapses the prior selection, and closes
@@ -670,7 +625,7 @@ recordCoveredWidgets :: Context -> PointerRoute -> Input -> IO ()
 recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
   layered <- layeredNodeCount na
   reach <- case route of
-    RouteLayer _ | layered > 0 -> traverse reachIds =<< reachedAt ctx mouse
+    RouteLayer _ | layered > 0 -> traverse (reachedIds ctx mouse) =<< reachedAt ctx mouse
     _ -> pure Nothing
   -- Most frames have nothing covered before or after, and write nothing.
   old <- readIORef (ctxPointerReach ctx)
@@ -678,15 +633,19 @@ recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
     writeIORef (ctxPointerReach ctx) $! reach
  where
   mouse = inputMousePos inp
-  -- A node reached with no widget of its own under the pointer (a
-  -- 'PointerBlock' container) covers nothing it contains there: the tagged
-  -- containers under the pointer inside it (a mouse area, a drop target) are
-  -- reached too.
-  reachIds i = do
-    up <- idsUpFrom IS.empty i
-    nt <- getNodeType na i
-    if isWidgetNode nt then pure up else idsDownFrom up i
-  idsDownFrom !acc i = foldPlacedChildrenM na i step acc
+
+-- | The keys of node @i@, reached at @mouse@ ('reachedAt'), and of its
+-- ancestors. A node reached with no widget of its own under the pointer (a
+-- 'PointerBlock' container) covers nothing it contains there: the tagged
+-- containers under the pointer inside it (a mouse area, a drop target) are
+-- reached too.
+reachedIds :: Context -> V2 -> NodeIdx -> IO IS.IntSet
+reachedIds ctx@Context {ctxNodeArena = na} mouse i = do
+  up <- idsUpFrom IS.empty i
+  nt <- getNodeType na i
+  if isWidgetNode nt then pure up else idsDownFrom up i
+ where
+  idsDownFrom !acc j = foldPlacedChildrenM na j step acc
    where
     step a d =
       ifM
@@ -695,9 +654,9 @@ recordCoveredWidgets ctx@Context {ctxNodeArena = na} route inp = do
         (pure a)
   -- Ids of node @i@ and its ancestors. A node sharing one of these ids is
   -- not covered either.
-  idsUpFrom !acc i
-    | i < 0 = pure acc
+  idsUpFrom !acc j
+    | j < 0 = pure acc
     | otherwise = do
-        wid <- getWidgetId na i
+        wid <- getWidgetId na j
         let acc' = if hashWidgetId wid == 0 then acc else IS.insert (intKey wid) acc
-        getParent na i >>= idsUpFrom acc'
+        getParent na j >>= idsUpFrom acc'

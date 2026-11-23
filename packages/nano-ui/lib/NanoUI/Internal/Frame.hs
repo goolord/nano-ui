@@ -96,6 +96,13 @@ runFrameEff unlift ctx rawInp ui = do
   -- Read from the last frame's nodes, before the build resets them.
   recordFocusKind ctx imeKeys
   armPointerPress ctx frameInp
+  -- A left press makes active the widget the user saw under the pointer. A
+  -- press on a menu or dropdown leaves nothing active, whatever a release
+  -- that never arrived left behind.
+  when (pressedIn MouseLeft frameInp && not (pressedIn MouseLeft layerInp)) $
+    writeIORef (ctxActiveId ctx) (WidgetId 0)
+  targets <- pressTargets ctx layerInp
+  armPointerTarget ctx targets
   resetUiBuild ctx True
   escTaken <- getsOverlay ctx osEscapeConsumed
   beginFrameModal ctx
@@ -106,7 +113,6 @@ runFrameEff unlift ctx rawInp ui = do
   -- release, so no key listener acts on the rest of it.
   when (escTaken && not (pressedOnceIn KeyEscape rawInp) && (heldIn KeyEscape rawInp || releasedIn KeyEscape rawInp)) $
     markEscapeConsumed ctx
-  writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   focusBefore <- readIORef (ctxFocusId ctx)
   result <- runViewPasses unlift ctx frameInp ui
   -- Clear the one-shot close request ('NanoUI.winCloseRequested') after the
@@ -134,7 +140,7 @@ runFrameEff unlift ctx rawInp ui = do
     layoutArena ctx size False
     applyScrollOffsets ctx size
   persistWindowPositions ctx
-  finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore
+  finalizeFrameInput ctx frameInp layerInp menuInp dropInp targets focusBefore
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
   pruneUnmountedCaches ctx =<< updatePrevRects ctx size
@@ -215,8 +221,9 @@ runViewPasses unlift ctx frameInp ui = do
 -- The steps run in this order because each reads what the ones before it
 -- settled:
 --
--- 1. The press and release steps fix the active widget from this frame's
---    layout ('pressTargets' searches it as hover does).
+-- 1. The release step clears the active widget, which the press set before
+--    the view from the layout the user saw ('pressTargets', which also
+--    gives @targets@ for the focus steps).
 -- 2. 'finalizeTextInputFocus' clears focus for a press outside every text
 --    field, so 'finalizeSelectFocus' and 'finalizeDrawingFocus' after it can
 --    give focus to the select or custom widget the press landed on.
@@ -232,14 +239,8 @@ runViewPasses unlift ctx frameInp ui = do
 --    wherever focus ended up.
 {-# INLINE finalizeFrameInput #-}
 finalizeFrameInput ::
-  Context -> Input -> Input -> Input -> Input -> WidgetId -> IO ()
-finalizeFrameInput ctx frameInp layerInp menuInp dropInp focusBefore = do
-  -- A press on a menu or dropdown leaves nothing active, whatever a release
-  -- that never arrived left behind.
-  when (pressedIn MouseLeft frameInp && not (pressedIn MouseLeft layerInp)) $
-    writeIORef (ctxActiveId ctx) (WidgetId 0)
-  targets <- pressTargets ctx layerInp
-  finalizePointerPress ctx targets
+  Context -> Input -> Input -> Input -> Input -> PressTargets -> WidgetId -> IO ()
+finalizeFrameInput ctx frameInp layerInp menuInp dropInp targets focusBefore = do
   finalizePointerRelease ctx layerInp
   disarmPointerPress ctx frameInp
   finalizeTextInputFocus ctx layerInp targets

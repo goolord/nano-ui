@@ -2,6 +2,14 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- A press is resolved against the layout the user saw, before the view
+  runs. The widget it reaches becomes active then, and a left click belongs
+  to that widget and the containers around it wherever they move while the
+  button is held: a release on a control that moved under the pointer in an
+  earlier frame clicks it in the release's own frame. A release on a control
+  that moved there in the release's own frame no longer clicks it a frame
+  later, and a press in the frame a widget first appears does not make it
+  active. A mouse area keeps its hover while a button inside it is held.
 - Model changes repaint what they changed, not the window. Each node keeps
   a hash of what the view gave it that paint reads (text, value, style,
   colours, scope, image, options), and a node whose hash changed repaints

@@ -17,6 +17,7 @@ module NanoUI.Internal.Context.Types
   , WindowResizeEdge (..)
   , WindowResizeDrag (..)
   , DamageRequest (..)
+  , PressPoint (..)
   , DamageState (..)
   , initialDamageState
   , PrevFrame (..)
@@ -193,6 +194,18 @@ data MetricSource
       !(Text -> IO (Float, Float))
       !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
       !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
+
+-- | Where a button went down, in the frame the user saw.
+data PressPoint = PressPoint
+  { ppPos :: !V2
+  , ppOwner :: !(Maybe WidgetId)
+  -- ^ The widget the press reached, @WidgetId 0@ for a node that takes the
+  -- pointer with no widget of its own, or 'Nothing' when it reached none:
+  -- passive content, whose mouse area judges the press by its rect.
+  , ppReached :: !IntSet
+  -- ^ The keys of the reached node and its ancestors ('ppOwner'), which
+  -- the press went down on: a left click belongs to these.
+  }
 
 -- | Explicit damage invalidation request queued during frame evaluation.
 data DamageRequest
@@ -912,18 +925,11 @@ data Context = Context
   -- that its last-frame rect did not contain. The widget reports it on the
   -- next view run ('NanoUI.Internal.Widgets.Node.resolveInteraction'),
   -- which clears it after the first pass.
-  , ctxReleaseClickedId :: IORef WidgetId
-  -- ^ The widget that reported a left click in this view run, so
-  -- 'NanoUI.Internal.Frame.Input.finalizePointerRelease' posts no second
-  -- click for the same release. Cleared before each frame's view.
-  -- | Press position of each held button, and the identity of the control
-  -- it reached, updated on press and release
+  -- | The press of each held button, updated on press and release
   -- ('NanoUI.Internal.Frame.Input.armPointerPress'). Clicks and holds belong
-  -- to the widget pressed, so widgets hit-test this as well as the pointer.
-  -- A button with no entry (release without a press) is judged alone.
-  -- Passive content has no owner; its containing mouse area can handle the
-  -- gesture geometrically.
-  , ctxPressPos :: IORef (Map MouseButton (V2, Maybe WidgetId))
+  -- to the widget pressed, so widgets check this as well as the pointer. A
+  -- button with no entry (release without a press) is judged alone.
+  , ctxPressPos :: IORef (Map MouseButton PressPoint)
   , ctxFocusId :: IORef WidgetId
   -- ^ The widget with keyboard focus, or @WidgetId 0@ for none.
   -- | Focus last moved by keyboard or code, so the focused widget shows its

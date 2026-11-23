@@ -19,7 +19,7 @@ import Control.Monad (void, when)
 import Data.IORef (readIORef)
 import Data.Map.Strict qualified as M
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (..), getStore, intKey, modifyStore)
+import NanoUI.Internal.Context (Context (..), PressPoint (..), getStore, intKey, modifyStore)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
@@ -102,7 +102,7 @@ pressedMenuRow ctx = do
   let na = ctxNodeArena ctx
   presses <- readIORef (ctxPressPos ctx)
   case M.lookup MouseLeft presses of
-    Just (_, Just row) ->
+    Just PressPoint {ppOwner = Just row} ->
       withWidgetNode ctx row False $ \idx ->
         ((== NodeButton) <$> getNodeType na idx) <&&> (hasFlag buttonFlagMenu <$> getStyleIdx na idx)
     _ -> pure False

@@ -43,6 +43,7 @@ where
 import Control.Monad (forM, forM_, unless, when)
 import Data.Bits ((.|.))
 import Data.IORef (readIORef, writeIORef)
+import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
@@ -411,17 +412,26 @@ resolveInteraction ctx inp idx wid = do
       mIdx <- findNodeByWidgetId ctx wid
       presses <- readIORef (ctxPressPos ctx)
       let
-        -- Whether the button press started on this widget. If no press
-        -- position was recorded (synthesized or swallowed input), allow it.
+        -- Whether the button press started on this widget, in the frame the
+        -- user saw: a left press on the widget it reached or one of its
+        -- ancestors, another button only on the widget itself. A press that
+        -- reached nothing (passive content) is judged by this widget's
+        -- rect, and one with no record (synthesized or swallowed input) is
+        -- allowed.
         startedHere b = case M.lookup b presses of
-          Just (_, Just owner) | b /= MouseLeft -> pure (owner == wid)
-          Just (p, _) -> widgetHit ctx mIdx rect p
+          Just PressPoint {ppOwner = Just owner, ppReached = reached}
+            | b /= MouseLeft -> pure (owner == wid)
+            | otherwise -> pure (IS.member (intKey wid) reached)
+          Just PressPoint {ppPos = p} -> widgetHit ctx mIdx rect p
           Nothing -> pure True
       -- A held left button belongs to the widget it went down on; others
       -- the drag passes over are not hovered.
+      -- A container the press went down inside (a mouse area around the
+      -- pressed button) keeps its hover.
+      enclosing <- maybe (pure False) (fmap (not . isWidgetNode) . getNodeType (ctxNodeArena ctx)) mIdx
       captured <-
         pure (heldIn MouseLeft inp)
-          <&&> if hashWidgetId active /= 0 && active /= wid
+          <&&> if hashWidgetId active /= 0 && active /= wid && not enclosing
             then pure True
             else not <$> startedHere MouseLeft
       -- Covered widgets and 'PointerPass' nodes get no hover.
@@ -435,14 +445,11 @@ resolveInteraction ctx inp idx wid = do
       -- The click belongs to whatever the press went down on: a release that
       -- drifted here from a neighbouring widget is not this widget's click,
       -- nor is one on a widget that moved under the pointer after another
-      -- widget took the press. A press and release in one frame have set no
-      -- active widget yet.
-      let ownsRelease = hashWidgetId active == 0 || active == wid || pressedIn MouseLeft inp
+      -- widget took the press.
+      let ownsRelease = hashWidgetId active == 0 || active == wid
           clickedWith = if ownsRelease then released else buttonsDelete MouseLeft released
           leftClicked = buttonsMember MouseLeft clickedWith
-      when (leftClicked && wid == active) $
-        writeIORef (ctxReleaseClickedId ctx) wid
-      let clicked = leftClicked || pending == wid
+          clicked = leftClicked || pending == wid
       pure $! Response wid rect hovered clicked False False held clickedWith
 
 -- | Set the value of widget @wid@'s node, added this frame: a checkbox

@@ -99,7 +99,7 @@ useDrag1D axis owner lo hi current track = do
 -- coordinates; 0 while it is up. A drag that keeps the one it started under
 -- lasts only under that press.
 leftPress :: Context -> IO Int
-leftPress ctx = maybe 0 (\(V2 x y, _) -> (fromIntegral (castFloatToWord32 x) `shiftL` 32 .|. fromIntegral (castFloatToWord32 y)) + 1) . M.lookup MouseLeft <$> readIORef (ctxPressPos ctx)
+leftPress ctx = maybe 0 (\PressPoint {ppPos = V2 x y} -> (fromIntegral (castFloatToWord32 x) `shiftL` 32 .|. fromIntegral (castFloatToWord32 y)) + 1) . M.lookup MouseLeft <$> readIORef (ctxPressPos ctx)
 
 -- | Whether a press at @mouse@ on a track of widget @owner@ is covered
 -- ('pointerCovered'). A track wider than its owner (a colour picker's bar)

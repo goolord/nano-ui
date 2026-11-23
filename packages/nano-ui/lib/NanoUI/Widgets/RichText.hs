@@ -224,7 +224,7 @@ richTextWithMode' selectable f pieces = do
         -- recorded through the release frame.
         presses <- liftIO (readIORef (ctxPressPos ctx))
         pure $
-          if maybe True ((== hoveredRun) . runAt . fst) (M.lookup MouseLeft presses)
+          if maybe True ((== hoveredRun) . runAt . ppPos) (M.lookup MouseLeft presses)
             then hoveredRun >>= runTarget . indexSmallArray runs
             else Nothing
       else pure Nothing

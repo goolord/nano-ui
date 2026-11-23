@@ -58,26 +58,29 @@ runReleaseElsewhereTest ctx failed = do
     ups <- sequence [press (on 6), release]
     check (not (or [respHovered t || respClicked t | (xs, _, _) <- ups, t <- drop 6 xs]))
 
--- | A release where the pressed control moved to on that frame misses it in
--- the view, so the frame posts the click and asks for another to report it.
+-- | A release on a control that moved there in the release's own frame does
+-- not click it: the user did not see it there. A release on a control that
+-- moved in an earlier frame, while the button was held, clicks it in the
+-- release's own frame.
 runReleaseMovedTest :: Context -> IORef Int -> IO ()
 runReleaseMovedTest _ failed = do
-  sel <- newVar (0 :: Int)
-  cur <- newVar (0 :: Int)
-  let radioUi = snd <$> held sel (radio' ["one", "two", "three"])
-      tabsUi = snd <$> held cur (`tabBar'` [tab 0 "Alpha" (), tab 1 "Beta" ()])
-  forM_ [("two", radioUi), ("Beta", tabsUi)] $ \(lbl, body) -> do
-    ctx <- newContext
-    shift <- newIORef 0
-    let ui = column (liftIO (readIORef shift) >>= \d -> columnWith (fixedH d . fillW) (pure ()) >> body)
-    runSim ctx failed (withInput 320 240) ui $ do
-      V2 px py <- targetPoint (Labelled lbl)
-      _ <- press (At (V2 px py))
-      liftIO (writeIORef shift 100)
-      missed <- frameWith (releaseWith MouseLeft . \i -> i {inputMousePos = V2 px (py + 100)})
-      check (missed /= 1)
-      check =<< wantsFrame
-      checkEq 1 =<< frame
+  forM_ [False, True] $ \earlier -> do
+    sel <- newVar (0 :: Int)
+    cur <- newVar (0 :: Int)
+    let radioUi = snd <$> held sel (radio' ["one", "two", "three"])
+        tabsUi = snd <$> held cur (`tabBar'` [tab 0 "Alpha" (), tab 1 "Beta" ()])
+    forM_ [("two", radioUi), ("Beta", tabsUi)] $ \(lbl, body) -> do
+      ctx <- newContext
+      shift <- newIORef 0
+      let ui = column (liftIO (readIORef shift) >>= \d -> columnWith (fixedH d . fillW) (pure ()) >> body)
+      runSim ctx failed (withInput 320 240) ui $ do
+        V2 px py <- targetPoint (Labelled lbl)
+        _ <- press (At (V2 px py))
+        liftIO (writeIORef shift 100)
+        when earlier $ void (moveTo (At (V2 px (py + 100))))
+        released <- frameWith (releaseWith MouseLeft . \i -> i {inputMousePos = V2 px (py + 100)})
+        after <- frame
+        checkEq (if earlier then (1, 1) else (0, 0)) (released, after)
 
 -- | A press and release in one frame clicks the button the user saw, not the
 -- keyed one the click moves there. A modal that opens while a page button is
