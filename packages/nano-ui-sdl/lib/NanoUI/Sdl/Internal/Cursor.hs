@@ -14,7 +14,7 @@ import Data.Maybe (isJust)
 import Foreign.Ptr (Ptr, nullPtr)
 import NanoUI (Input (..))
 import NanoUI.Backend (cursorFallback, syncCursorKind)
-import NanoUI.Testing (Context, UiCursorKind (..), uiCursorKind)
+import NanoUI.Backend (Context, UiCursorKind (..), uiCursorKind)
 import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 import qualified SDL3.Sys.Bindgen.Mouse as Mouse

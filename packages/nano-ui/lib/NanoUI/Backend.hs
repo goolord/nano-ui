@@ -37,6 +37,7 @@ module NanoUI.Backend
   , withFontResolver
   , withFontSize
   , withClipboard
+  , withTheme
   , markDirty
   , clearDirty
   , isDirty
@@ -171,7 +172,9 @@ module NanoUI.Backend
     -- returns a snapshot with shaped metrics for a specific 'Text' (or the
     -- original metrics when 'fmBackend' is 'Nothing'). 'drawShaped' shapes a
     -- run into 'ShapedGlyphs', and 'drawGlyph' looks up a single glyph's
-    -- 'GlyphQuad' from the snapshot.
+    -- 'GlyphQuad' from the snapshot. A backend that loads other fonts or
+    -- rasterizes at a new scale calls 'clearMeasureCache', so text is
+    -- measured again with the new metrics.
   , FontMetrics (..)
   , FontBackend (..)
   , prepareFontMetrics
@@ -188,6 +191,7 @@ module NanoUI.Backend
   , GlyphQuad (..)
   , ShapedText (..)
   , ShapedGlyphs (..)
+  , clearMeasureCache
 
     -- * Damage
 
@@ -195,7 +199,8 @@ module NanoUI.Backend
     -- the window instead of all of it. 'takeDamage'
     -- reads the frame's damage; the @Now@ functions mark a rectangle from
     -- inside a view, which a custom widget that paints outside its own node
-    -- needs.
+    -- needs. 'damageFull' queues a whole-window repaint from outside a view,
+    -- as after a font change, when glyphs change under rects that did not.
   , Damage (..)
   , DamageBounds (..)
   , defaultDamageSlop
@@ -207,6 +212,7 @@ module NanoUI.Backend
   , damageRectNow
   , damageGroupNow
   , damageFullNow
+  , damageFull
 
     -- * Frame metrics
 
@@ -370,7 +376,8 @@ import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
 import NanoUI.Internal.BackendSession (Backend (..), BackendSession, SBackend (..))
 import NanoUI.Internal.Context
   ( Context, newContext, newPixelContext, withFontMetrics, withMonoFontMetrics
-  , withMeasureText, withFontResolver, withFontSize, withClipboard
+  , withMeasureText, withFontResolver, withFontSize, withClipboard, withTheme
+  , clearMeasureCache, damageFull
   , markDirty, clearDirty, isDirty, requestWakeAt, requestWakeAfter, getWakeAt
   , takeDamage, takeDamagePieces, registerImage, registerImages, releaseImage
   , atlasTextureId, atlasSnapshot, atlasChanges, AtlasUpload (..)

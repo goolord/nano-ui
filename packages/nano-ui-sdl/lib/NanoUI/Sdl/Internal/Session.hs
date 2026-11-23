@@ -16,9 +16,8 @@ import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
 import GHC.Clock (getMonotonicTime)
 import NanoUI (Size, WindowSettings (..), followSystemTheme, whenM)
-import NanoUI.Backend (Input (..), clearEphemeral, emptyInput, requestWindowClose, setExplainLayout)
+import NanoUI.Backend (Context, Input (..), clearEphemeral, emptyInput, newPixelContext, requestWindowClose, setExplainLayout, withTheme)
 import NanoUI.Runner
-import NanoUI.Testing (Context, newPixelContext, withTheme)
 import NanoUI.Runner.Windows (closeWindows)
 import NanoUI.Sdl.Internal.Children
 import NanoUI.Sdl.Internal.Input

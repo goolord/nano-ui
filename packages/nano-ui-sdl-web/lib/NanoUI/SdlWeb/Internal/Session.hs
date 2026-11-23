@@ -68,7 +68,7 @@ import NanoUI.Backend
 import NanoUI.Internal.Context (Context (..), setDrawSnapScale)
 import NanoUI.Internal.Debug (noteDebugPresent, noteDebugSkip)
 import NanoUI.Runner (DebugSamplerRef, SessionDriver (..), newDebugSampler, pacingMsFor, runSessionLoop, shouldRedrawFrame)
-import NanoUI.Testing (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
+import NanoUI.Backend (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
 import NanoUI.SdlWeb.Internal.Font
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input

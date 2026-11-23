@@ -21,7 +21,7 @@ module NanoUI.Backend.SdlWeb
 
 import NanoUI (NanoUI)
 import NanoUI.Emit (NanoUIE, newReducer, reduceFrame)
-import NanoUI.Testing (runFrame)
+import NanoUI.Backend (runFrame)
 import NanoUI.SdlWeb.Internal.Host (browserAvailable, browserHost)
 import NanoUI.SdlWeb.Internal.Session (SdlWebOptions (..), WebFont (..), defaultSdlWebOptions, runWebSession)
 

@@ -20,7 +20,7 @@ import NanoUI.Internal.Context
   , withMonoFontMetrics
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (cozetteMetrics)
-import NanoUI.Testing (Layer (..), newPixelContext)
+import NanoUI.Backend (Layer (..), newPixelContext)
 
 -- | Pixel context configured for RGFW: Cozette metrics, square geometry
 -- (every primitive reaches the renderer as a flat quad or triangle), text

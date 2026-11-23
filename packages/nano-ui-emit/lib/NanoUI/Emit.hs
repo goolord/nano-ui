@@ -45,7 +45,7 @@ import Control.Monad (unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
 import NanoUI.Internal.Context (isDirty, markDirty)
-import NanoUI.Testing (Context, DrawData, runFrame)
+import NanoUI.Backend (Context, DrawData, runFrame)
 import NanoUI.Testing.Harness (clickPair)
 
 import NanoUI.Emit.Internal

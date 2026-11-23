@@ -88,7 +88,7 @@ import NanoUI.Internal.Context
   , setBackendSession
   , withClipboard
   )
-import NanoUI.Testing
+import NanoUI.Backend
   ( DrawData (..)
   , UiCursorKind (..)
   , runFrame

@@ -58,9 +58,12 @@ import Data.Text.Foreign qualified as TextForeign
 import Foreign.Marshal.Utils (fromBool, maybePeek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (Appearance, ImageId, Input (..), NanoUI, Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, unlessM)
-import NanoUI.Backend (Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks, closeWindowHost, installWindowHost, reportWindowState, setSystemAppearance, setWakeLoopChecked)
+import NanoUI.Backend
+  ( Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks, clearMeasureCache
+  , closeWindowHost, damageFull, installWindowHost, markDirty, newPixelContext, registerImage, reportWindowState, setSystemAppearance
+  , setWakeLoopChecked, withClipboard, withTheme
+  )
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
-import NanoUI.Testing (clearMeasureCache, damageFull, markDirty, newPixelContext, registerImage, withClipboard, withTheme)
 import NanoUI.Sdl.Internal.Display
 import NanoUI.Sdl.Internal.Env (PresentProbe (..), Retain (..), SdlEnv (..))
 import NanoUI.Sdl.Internal.Pacing

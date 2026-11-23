@@ -16,9 +16,9 @@ import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Maybe (isJust, isNothing)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-import NanoUI.Backend (answerScreenshots, answerScreenshotsAfter)
-import NanoUI.Testing
-import NanoUI.Internal.Context (Context (ctxDamageWanted), markDirtyCovered)
+import NanoUI.Backend
+import NanoUI.Internal.Context (Context (ctxDamageWanted, ctxPaintFull), markDirtyCovered)
+import NanoUI.Internal.Monad (askContext)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState (..), defaultWindowChrome)
 import NanoUI.Sdl.Internal.Debug
@@ -27,7 +27,7 @@ import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Error (sdlFail)
-import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass, snapDamage)
+import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass)
 import NanoUI.Sdl.Internal.Window (PresentProbe (..), Retain (..), SdlEnv (..), captureFrame, notePresent, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)

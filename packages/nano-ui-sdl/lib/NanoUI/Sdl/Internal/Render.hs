@@ -23,9 +23,8 @@ import Foreign.Marshal.Alloc (free, malloc)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (poke)
 import NanoUI (Rect (..), colorA, colorB, colorG, colorR)
-import NanoUI.Backend (cmdEffectiveClip, snapDamage)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, lookupImage)
-import NanoUI.Testing
+import NanoUI.Backend
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst

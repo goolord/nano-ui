@@ -16,7 +16,7 @@ import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import NanoUI.Sdl.Internal.Error (withSdlError)
-import NanoUI.Testing (AtlasUpload (..), Context, atlasChanges, atlasTextureId)
+import NanoUI.Backend (AtlasUpload (..), Context, atlasChanges, atlasTextureId)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
