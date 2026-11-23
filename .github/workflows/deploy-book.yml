@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
-    # The book, and everything the browser demo under demo/ builds from.
+    # The book, the landing page, and everything the browser demos under
+    # demo/ build from.
     paths:
       - 'book/**'
+      - 'site/**'
       - 'packages/nano-ui/**'
       - 'packages/nano-ui-emit/**'
       - 'packages/nano-ui-ttf/**'
@@ -50,6 +52,12 @@ jobs:
 
       - name: Build with mdBook
         run: mdbook build book
+
+      # mdBook writes its first chapter as both introduction.html and
+      # index.html. The landing page replaces the second, so the site opens
+      # on it and the book keeps every chapter's address.
+      - name: Put the landing page at the site's root
+        run: cp -r site/. book/book/
 
       # Pages takes one artifact per deployment, so the demo goes inside the
       # book's site.

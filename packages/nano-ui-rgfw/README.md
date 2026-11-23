@@ -85,7 +85,7 @@ features are required.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+- [The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html): the comprehensive
   online guide, tutorials, and ecosystem overview.
 - [Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html):
   headless tests and native rendering checks.

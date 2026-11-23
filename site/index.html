@@ -1,0 +1,253 @@
+<!doctype html>
+<!--
+  The project's landing page. The Pages workflow (deploy-book.yml) copies
+  this directory over the built book, so this file is the site's index.html
+  and the book's first chapter is introduction.html beside it.
+
+  The colours are NanoUI.Internal.Style.Presets' defaultTheme and
+  defaultLightTheme. The canvas runs packages/nano-ui-demo/examples/Bloom.hs,
+  which the Web workflow builds into demo/bloom/. The code sample is the
+  README's counter.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The demo sets the document's title to its own (examples/web/BloomMain.hs); keep the two the same. -->
+  <title>nano-ui: an immediate-mode GUI toolkit for Haskell</title>
+  <meta name="description" content="An immediate-mode GUI toolkit for Haskell.">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23589cf6'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --window: #18181b;
+      --panel: #222226;
+      --panel-border: #36363e;
+      --text: #eceae6;
+      --muted: #b0aca4;
+      --button: #34343a;
+      --button-border: #4a4c54;
+      --button-hover: #44464e;
+      --button-text: #f8f7f5;
+      --input: #121215;
+      --separator: #3e4048;
+      --accent: #589cf6;
+      --on-accent: #121215;
+      --link: #7cb2fa;
+      --purple: #b08cdc;
+      --green: #68a87c;
+      --orange: #d88c48;
+      --mono: "Cascadia Mono", "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --window: #f4f4f2;
+        --panel: #fcfcfb;
+        --panel-border: #dcdcd8;
+        --text: #242428;
+        --muted: #6c6964;
+        --button: #eaeae7;
+        --button-border: #c4c4c0;
+        --button-hover: #deded9;
+        --button-text: #18181b;
+        --input: #ffffff;
+        --separator: #d6d6d2;
+        --accent: #2563eb;
+        --on-accent: #ffffff;
+        --link: #1d4ed8;
+        --purple: #8046be;
+        --green: #1e8046;
+        --orange: #b8520e;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--window);
+      color: var(--text);
+      font: 16px/1.55 Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    main, header, footer { max-width: 1072px; margin: 0 auto; padding: 0 16px; }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    code { font-family: var(--mono); font-size: 0.9em; }
+
+    header { display: flex; align-items: center; gap: 20px; padding-top: 16px; padding-bottom: 16px; }
+    header .name { font-weight: 600; color: var(--text); margin-right: auto; }
+
+    h1 { font-size: clamp(28px, 5vw, 44px); line-height: 1.15; font-weight: 600; margin: 40px 0 12px; letter-spacing: -0.01em; }
+    .lede { max-width: 62ch; margin: 0 0 20px; color: var(--muted); font-size: 18px; }
+    .lede code { color: var(--text); }
+    h2 { font-size: 14px; font-weight: 500; color: var(--muted); margin: 56px 0 12px; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+    .button {
+      display: inline-block; padding: 6px 14px; border-radius: 2px;
+      background: var(--button); border: 1px solid var(--button-border); color: var(--button-text);
+    }
+    .button:hover { background: var(--button-hover); text-decoration: none; }
+    .button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    .button.primary:hover { filter: brightness(1.1); }
+
+    /* The canvas takes its size from this box. It stays hidden until the
+       program draws its first frame, with the status line under it. */
+    #stage {
+      position: relative; height: 520px;
+      border: 1px solid var(--panel-border); border-radius: 2px; overflow: hidden;
+    }
+    #stage canvas { display: block; width: 100%; height: 100%; opacity: 0; }
+    #stage.live canvas { opacity: 1; }
+    #status {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      padding: 16px; text-align: center; color: var(--muted);
+    }
+    #stage.live #status { display: none; }
+    .caption { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+
+    .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 2px; }
+    .program { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 9fr); gap: 16px; }
+    pre {
+      margin: 0; padding: 16px; overflow-x: auto;
+      background: var(--input); border: 1px solid var(--panel-border); border-radius: 2px;
+      font: 14px/1.6 var(--mono);
+    }
+    .k { color: var(--purple); }
+    .s { color: var(--green); }
+    .t { color: var(--accent); }
+    .n { color: var(--orange); }
+    .notes { padding: 4px 16px; }
+    .notes p { margin: 12px 0; }
+
+    dl { margin: 0; padding: 4px 16px; }
+    dl div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; padding: 9px 0; }
+    dl div + div { border-top: 1px solid var(--separator); }
+    dt { color: var(--muted); }
+    dd { margin: 0; }
+
+    footer { display: flex; flex-wrap: wrap; gap: 20px; padding-top: 28px; padding-bottom: 40px; margin-top: 56px; color: var(--muted); font-size: 14px; }
+    footer span { margin-right: auto; }
+
+    @media (max-width: 720px) {
+      /* Below 640 pixels the demo stacks its controls over its canvas. The
+         box is shorter than the screen so the page scrolls past it by touch. */
+      #stage { height: min(560px, 76svh); }
+      .program { grid-template-columns: minmax(0, 1fr); }
+      dl div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+      h1 { margin-top: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="name" href="./">nano-ui</a>
+    <a href="introduction.html">Book</a>
+    <a href="demo/">Cookbook</a>
+    <a href="https://github.com/goolord/nano-ui">GitHub</a>
+  </header>
+
+  <main>
+    <h1>An immediate-mode GUI toolkit for Haskell</h1>
+    <p class="lede">
+      You write the window as one action, and it runs again on every frame.
+      <code>button</code> returns a <code>Bool</code>, state is held in
+      <code>Var</code>s, and the loop sleeps until the next input.
+    </p>
+    <div class="actions">
+      <a class="button primary" href="getting-started/quickstart.html">Quick start</a>
+      <a class="button" href="introduction.html">Read the book</a>
+      <a class="button" href="demo/">Widget cookbook</a>
+    </div>
+
+    <div id="stage">
+      <div id="status">Loading the demo</div>
+      <canvas id="nano-ui" aria-label="A nano-ui program: sliders and a Shuffle button that reshape a drawing of a flower"></canvas>
+    </div>
+    <p class="caption">
+      This canvas is a nano-ui program,
+      <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Bloom.hs">Bloom.hs</a>,
+      compiled to WebAssembly. The same view opens in a desktop window on SDL3.
+    </p>
+
+    <h2>A complete program</h2>
+    <div class="program">
+<pre><code><span class="k">import</span> Data.Text <span class="k">qualified as</span> T
+<span class="k">import</span> NanoUI
+<span class="k">import</span> NanoUI.Backend.Sdl (defaultSdlOptions, runSdlApp)
+
+main :: <span class="t">IO</span> ()
+main = runSdlApp defaultSdlOptions counter
+
+counter :: <span class="t">NanoUI</span> ()
+counter = row <span class="k">$ do</span>
+  n &lt;- useVar (<span class="n">0</span> :: <span class="t">Int</span>)
+  whenM (button <span class="s">"-"</span>) (modifyVar n (subtract <span class="n">1</span>))
+  label . T.pack . show =&lt;&lt; readVar n
+  whenM (button <span class="s">"+"</span>) (modifyVar n (+ <span class="n">1</span>))</code></pre>
+      <div class="panel notes">
+        <p><code>button</code> draws a button and returns whether it was clicked. There are no callbacks to register and no widget objects to update.</p>
+        <p><code>useVar</code> keeps a value between frames. An input widget takes a <code>Var</code> and edits it: <code>slider 0 100 volume</code>.</p>
+        <p>Control flow is Haskell's: <code>when</code>, <code>case</code>, <code>for_</code>. A component is a function.</p>
+      </div>
+    </div>
+
+    <h2>What is in it</h2>
+    <dl class="panel">
+      <div><dt>Widgets</dt><dd>Text editing with IME, tables, trees, tabs, menus, modals, floating windows, pane grids, charts, Markdown.</dd></div>
+      <div><dt>Layout</dt><dd>Rows, columns, grids, layers, wrapping and scrolling, sized by <code>Layout -&gt; Layout</code> modifiers composed with <code>(.)</code>.</dd></div>
+      <div><dt>State</dt><dd><code>Var</code>s that widgets read and write, or an Elm-style message and update loop.</dd></div>
+      <div><dt>Text</dt><dd>TrueType fonts shaped by HarfBuzz, bidirectional text, fallback fonts, rich text.</dd></div>
+      <div><dt>Drawing</dt><dd>A canvas with vector paths and gradients, images, SVG icons, tweens and springs.</dd></div>
+      <div><dt>Themes</dt><dd>Light and dark, Base16 palettes, system appearance, styles scoped to a subtree.</dd></div>
+      <div><dt>Idle cost</dt><dd>The loop blocks until input, a timer or a background task wakes it. A frame repaints the region that changed.</dd></div>
+      <div><dt>Backends</dt><dd>SDL3. RGFW with OpenGL and a bundled bitmap font. The browser, through GHC's WebAssembly backend and WebGL2.</dd></div>
+      <div><dt>Tests</dt><dd>Frames run without a window, with scripted input. Frames export to SVG.</dd></div>
+      <div><dt>Requires</dt><dd>GHC 9.10 to 9.14. MIT licence.</dd></div>
+    </dl>
+  </main>
+
+  <footer>
+    <span>nano-ui</span>
+    <a href="introduction.html">Book</a>
+    <a href="tutorials/index.html">Tutorials</a>
+    <a href="demo/">Cookbook</a>
+    <a href="https://github.com/goolord/nano-ui">GitHub</a>
+  </footer>
+
+  <script src="demo/bloom/nano-ui-sdl-web.js"></script>
+  <script type="module">
+    const stage = document.getElementById("stage");
+    const canvas = document.getElementById("nano-ui");
+    const status = document.getElementById("status");
+
+    // The runtime cancels every wheel event on its canvas. Bloom has
+    // nothing to scroll, so the event stops here and scrolls the page.
+    stage.addEventListener("wheel", (e) => e.stopPropagation(), { capture: true });
+
+    try {
+      const ui = globalThis.nanoUiSdlWeb;
+      if (!ui) throw new Error("demo/bloom/nano-ui-sdl-web.js did not load");
+      const { start } = await import("./demo/bloom/main.js");
+      // start sets the canvas up before its first await.
+      const running = start(canvas, "demo/bloom/main.wasm");
+      // Setup focuses the runtime's text input, which takes Tab for the
+      // program's own focus order. The page keeps Tab until the canvas is
+      // pressed, which focuses the input again.
+      if (ui.input) ui.input.blur();
+      // The canvas shows once the program draws.
+      ui.draw = function (...args) {
+        delete ui.draw;
+        stage.classList.add("live");
+        return ui.draw(...args);
+      };
+      await running;
+    } catch (e) {
+      console.error(e);
+      stage.classList.remove("live");
+      status.textContent = "The demo did not start. It needs WebAssembly and WebGL2.";
+    }
+  </script>
+</body>
+</html>
