@@ -72,6 +72,7 @@ library
         NanoUI.SdlWeb.Internal.Session
         NanoUI.SdlWeb.Internal.Font
         NanoUI.SdlWeb.Internal.Fonts
+        NanoUI.SdlWeb.Internal.Files
         NanoUI.SdlWeb.Internal.Debug
     build-depends:
         base >=4.20 && <4.23,

@@ -8,10 +8,10 @@
 -- run against a 'WebHost' of their own.
 --
 -- FFI conventions. The JavaScript imports are @unsafe@, synchronous calls,
--- except the wait for events and the font queries: a @safe@ import runs as
--- an async function, so the calling Haskell thread waits for its promise
--- while the browser's event loop runs and delivers the events. Pointers passed to the page point into
--- the module's memory, which the page reads and writes through views of it.
+-- except the wait for events, the font queries and the file dialogs: a
+-- @safe@ import runs as an async function, so the calling Haskell thread
+-- waits for its promise while the browser's event loop runs and delivers
+-- the events. Pointers passed to the page point into the module's memory, which the page reads and writes through views of it.
 -- Text crosses as UTF-8 bytes and a length. The wake ('whWake') is safe from
 -- any Haskell thread. The C imports in "NanoUI.SdlWeb.Internal.Font" are
 -- @unsafe@ calls into the text atlas.
@@ -95,6 +95,21 @@ data WebHost = WebHost
   -- 'whTakeFontBytes', or -1 when it could not be loaded.
   , whTakeFontBytes :: Ptr Word8 -> IO ()
   -- ^ Copy the bytes 'whLoadFont' loaded into the buffer.
+  , whPickFiles :: Int -> Bool -> Ptr Word8 -> Int -> IO Int
+  -- ^ Show the browser's file chooser: files (mode 0) or a folder's files
+  -- (mode 1), several or one, with the filters as UTF-8 lines of a name, a
+  -- tab and a semicolon-separated extension list. Answers the byte length
+  -- of the files it read, for 'whTakePicked': each a 32-bit little-endian
+  -- name length, the name, a 32-bit length and the bytes. -1 when the user
+  -- cancelled, -2 when it failed.
+  , whSaveFile :: Ptr Word8 -> Int -> Ptr Word8 -> Int -> Ptr Word8 -> Int -> IO Int
+  -- ^ Save bytes as a file: the suggested name, the filters (as for
+  -- 'whPickFiles'), then the bytes. Where the browser has a save dialog it
+  -- shows it, else it downloads the file under the suggested name. Answers
+  -- the byte length of the name saved under, for 'whTakePicked'; -1 when
+  -- the user cancelled, -2 when it failed.
+  , whTakePicked :: Ptr Word8 -> IO ()
+  -- ^ Copy what 'whPickFiles' or 'whSaveFile' answered into the buffer.
   }
 
 -- | Bytes in one event record: kind, three integer fields and the
@@ -162,6 +177,9 @@ browserHost = do
       , whTakeFontList = jsTakeFontList
       , whLoadFont = \kind p n -> evaluate =<< jsLoadFont kind p n
       , whTakeFontBytes = jsTakeFontBytes
+      , whPickFiles = \mode many p n -> evaluate =<< jsPickFiles mode (fromEnum many) p n
+      , whSaveFile = \np nn fp fn dp dn -> evaluate =<< jsSaveFile np nn fp fn dp dn
+      , whTakePicked = jsTakePicked
       }
 
 foreign import javascript unsafe "globalThis.nanoUiSdlWeb.attach(__exports.memory)"
@@ -223,6 +241,15 @@ foreign import javascript safe "return await globalThis.nanoUiSdlWeb.loadFont($1
 
 foreign import javascript unsafe "globalThis.nanoUiSdlWeb.takeFontBytes($1)"
   jsTakeFontBytes :: Ptr Word8 -> IO ()
+
+foreign import javascript safe "return await globalThis.nanoUiSdlWeb.pickFiles($1, $2, $3, $4);"
+  jsPickFiles :: Int -> Int -> Ptr Word8 -> Int -> IO Int
+
+foreign import javascript safe "return await globalThis.nanoUiSdlWeb.saveFile($1, $2, $3, $4, $5, $6);"
+  jsSaveFile :: Ptr Word8 -> Int -> Ptr Word8 -> Int -> Ptr Word8 -> Int -> IO Int
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.takePicked($1)"
+  jsTakePicked :: Ptr Word8 -> IO ()
 #else
 browserAvailable = False
 

@@ -7,6 +7,17 @@ import Control.Exception (Exception, catch, throwIO)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Foreign.Marshal.Utils (copyBytes)
 import NanoUI.Backend.SdlWeb (SdlWebDebugSnapshot (..), CoreDebugSnapshot (..), WebFont (..), askSdlWebDebug, listWebFontFamilies, setSdlWebUiFont)
+import NanoUI.SdlWeb.Internal.Files
+  ( FileDialogMode (..)
+  , FileDialogOptions (..)
+  , FileFilter (..)
+  , WebFile (..)
+  , decodePicked
+  , defaultFileDialogOptions
+  , openWebFiles
+  , pickFiles
+  , saveFile
+  )
 import NanoUI.SdlWeb.Internal.Fonts (findFontFamilies)
 import NanoUI.Ttf.Internal.Inter (fontInterBytes, fontInterLabel)
 import Control.Monad (forM_, when)
@@ -58,6 +69,8 @@ data Recorded = Recorded
   , recCursor :: IORef [T.Text]
   , recTitle :: IORef [T.Text]
   , recFontsAsked :: IORef [String]
+  , recFilters :: IORef [T.Text]
+  , recSaved :: IORef [(T.Text, BS.ByteString)]
   }
 
 data ScriptDone = ScriptDone deriving (Show)
@@ -73,8 +86,9 @@ scriptedHost canvas steps0 = do
   steps <- newIORef steps0
   queue <- newIORef []
   idle <- newIORef (0 :: Int)
-  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
+  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
   pendingFont <- newIORef BS.empty
+  picked <- newIORef BS.empty
   let take' buf n = do
         evs <- readIORef queue
         let (now, later) = splitAt n evs
@@ -133,6 +147,20 @@ scriptedHost canvas steps0 = do
                 then BS.length fontInterBytes <$ writeIORef pendingFont fontInterBytes
                 else pure (-1)
           , whTakeFontBytes = \p -> readIORef pendingFont >>= \b -> () <$ copyOut p (BS.length b) b
+          -- The chooser picks two files, or is cancelled when asked for a
+          -- folder.
+          , whPickFiles = \mode _ p n -> do
+              utf8 p n >>= \t -> modifyIORef' (recFilters rec) (t :)
+              if mode == 1
+                then pure (-1)
+                else BS.length testPicked <$ writeIORef picked testPicked
+          , whSaveFile = \np nn _ _ dp dn -> do
+              name <- utf8 np nn
+              bytes <- BS.packCStringLen (castPtr dp, dn)
+              modifyIORef' (recSaved rec) ((name, bytes) :)
+              let saved = TE.encodeUtf8 name
+              BS.length saved <$ writeIORef picked saved
+          , whTakePicked = \p -> readIORef picked >>= \b -> () <$ copyOut p (BS.length b) b
           }
   pure (host, rec)
 
@@ -141,6 +169,14 @@ scriptedHost canvas steps0 = do
 testRenderer, testFamilies :: BS.ByteString
 testRenderer = "WebGL2, Scripted"
 testFamilies = "Inter\nNoto Sans\nInter"
+
+-- | Two files as the page packs them: a 32-bit little-endian name length,
+-- the name, a 32-bit length and the bytes, each.
+testPicked :: BS.ByteString
+testPicked = BS.concat [record "notes.txt" "hello", record "d/\195\169.bin" "\0\1\2"]
+  where
+    record name bytes = BS.concat [le (BS.length name), name, le (BS.length bytes), bytes]
+    le n = BS.pack [fromIntegral (n `div` (256 ^ k)) | k <- [0 .. 3 :: Int]]
 
 -- | Copy up to @n@ bytes of @b@ to @p@, and answer @b@'s full length.
 copyOut :: Ptr Word8 -> Int -> BS.ByteString -> IO Int
@@ -199,6 +235,7 @@ main =
     , ("pixel-ratio", pixelRatioChange)
     , ("long-composition", longComposition)
     , ("fonts-and-debug", fontsAndDebug)
+    , ("file-dialogs", fileDialogs)
     ]
 
 pureChecks :: IORef Int -> IO ()
@@ -311,6 +348,27 @@ fontsAndDebug failed = do
   check failed "fonts: the family list drops repeats" (families == Right ["Inter", "Noto Sans"])
   outside <- listWebFontFamilies
   check failed "fonts: listing needs a browser" (either (const True) (const False) outside)
+
+-- | The file chooser's files come back decoded with UTF-8 names, the
+-- filters reach the page as lines, a cancel is 'Nothing', saving hands the
+-- page the name and bytes, and outside a browser nothing opens.
+fileDialogs :: IORef Int -> IO ()
+fileDialogs failed = do
+  (host, rec) <- newIORef (800, 600, 1) >>= \c -> scriptedHost c []
+  let opts = defaultFileDialogOptions {dialogFilters = [FileFilter "Text" "txt;md"], dialogAllowMany = True}
+  files <- pickFiles host PickFiles opts
+  check failed "files: both files, in order, with their bytes"
+    (files == Just [WebFile "notes.txt" "hello", WebFile "d/\233.bin" "\0\1\2"])
+  filters <- readIORef (recFilters rec)
+  check failed "files: filters reach the page as name, tab, extensions" (filters == ["Text\ttxt;md"])
+  folder <- pickFiles host PickFolder defaultFileDialogOptions
+  check failed "files: a cancelled chooser is Nothing" (folder == Nothing)
+  saved <- saveFile host opts "out.txt" "bytes"
+  check failed "files: saving answers the name saved under" (saved == Just "out.txt")
+  readIORef (recSaved rec) >>= check failed "files: the page gets the name and bytes" . (== [("out.txt", "bytes")])
+  check failed "files: a truncated record ends the list" (decodePicked (BS.take 10 testPicked) == [])
+  outside <- openWebFiles opts
+  check failed "files: nothing opens outside a browser" (outside == Nothing)
 
 clickFrame :: IORef Int -> IO ()
 clickFrame failed = do

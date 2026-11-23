@@ -47,6 +47,24 @@ from the view with `setSdlWebUiFont`, which loads it before the next frame as
 `setSdlUiFont` does on the desktop. A font that will not load is the bundled
 Inter, with a warning on the browser console.
 
+## File dialogs
+
+A page sees no paths, so the dialogs trade in contents:
+
+- `openWebFiles opts` lets the user choose files and answers each one's
+  name and bytes (`WebFile`), or `Nothing` when they cancel. `opts` is a
+  `FileDialogOptions` with nano-ui-sdl's `dialogFilters` and
+  `dialogAllowMany`.
+- `openWebFolder` reads every file in a folder the user chooses, named by its
+  path inside the folder.
+- `saveWebFile opts name bytes` shows the browser's save dialog where it has
+  one (Chromium-based browsers) and downloads the file under `name`
+  elsewhere. It answers the name the file was saved under.
+
+Browsers show these only right after a click or key press on the page, so
+run them from a task the press starts (`useTask`), as the cookbook's File
+Dialogs section does. Opening reads whole files into memory.
+
 ## Debugging
 
 `askSdlWebDebug` returns the session's frame timings (the core's
@@ -166,8 +184,10 @@ command merging, and whole sessions on the scripted host (opening frame, a
 click on a button, a pixel ratio change reopening the fonts).
 
 In Chromium, the cookbook's Diagnostics tab shows the session's frame
-statistics, and its font picker lists the installed families and switches
-the UI to one of them.
+statistics, its font picker lists the installed families and switches the
+UI to one of them, and its File Dialogs section opens files and folders and
+saves (checked with Playwright supplying the files and a stand-in save
+dialog, and with the download a browser without one falls back to).
 
 Not yet checked: pixel comparison with nano-ui-sdl, input methods, and
 browsers other than Chromium.
@@ -182,5 +202,6 @@ browsers other than Chromium.
   with `navigator.clipboard`. A view's clipboard read sees only what was last
   pasted or copied on the page.
 - The window is the canvas: only the title (`setWindowTitleUi`) is
-  supported. There are no file dialogs, file drops, further windows
-  (`nativeWindow`), or screenshots.
+  supported. There are no file drops, further windows (`nativeWindow`), or
+  screenshots, and the file dialogs work on contents, not paths (see
+  [File dialogs](#file-dialogs)).
