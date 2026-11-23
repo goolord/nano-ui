@@ -88,6 +88,7 @@ class NanoUiSdlWeb {
     this.settleTimer = null;
     this.clipboard = null;
     this.focused = false;
+    this.colorScheme = null;
     this.composing = false;
     this.textInputOn = false;
     this.scale = 1;
@@ -433,15 +434,26 @@ class NanoUiSdlWeb {
     return this.decoder.decode(this.bytes(ptr, len).slice());
   }
 
+  setColorScheme(scheme) {
+    this.colorScheme = scheme === "dark" || scheme === "light" ? scheme : null;
+    if (this.canvas) this.push(EV_RESIZE);
+  }
+
   queryCanvas(ptr) {
     const out = new Float32Array(this.memory.buffer, ptr, 5);
     out[0] = this.canvas.clientWidth;
     out[1] = this.canvas.clientHeight;
     out[2] = window.devicePixelRatio || 1;
     out[3] = this.focused && document.hasFocus() ? 1 : 0;
-    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const light = window.matchMedia("(prefers-color-scheme: light)").matches;
-    out[4] = dark ? 2 : light ? 1 : 0;
+    if (this.colorScheme === "dark") {
+      out[4] = 2;
+    } else if (this.colorScheme === "light") {
+      out[4] = 1;
+    } else {
+      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const light = window.matchMedia("(prefers-color-scheme: light)").matches;
+      out[4] = dark ? 2 : light ? 1 : 0;
+    }
   }
 
   takeEvents(ptr, n) {
