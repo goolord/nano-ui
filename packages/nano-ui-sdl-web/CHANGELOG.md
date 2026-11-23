@@ -16,3 +16,10 @@
   built page in headless Chromium and checks it draws and takes a click.
 - `formatExplainRows`, for showing the layout overlay's node, as
   nano-ui-sdl exports it.
+- Installed fonts and fonts by URL: `WebFontInstalled` and `WebFontUrl`,
+  `listWebFontFamilies` (the Local Font Access API, in Chromium-based
+  browsers), and `setSdlWebUiFont` to change the UI font from the view. A
+  font that will not load falls back to the bundled Inter.
+- `askSdlWebDebug` and `SdlWebDebugSnapshot`: frame timings, canvas, pixel
+  ratio, font and WebGL renderer, with `formatFpsRows` and `formatDrawRows`
+  re-exported, as nano-ui-sdl has `askSdlDebug`.

@@ -85,6 +85,9 @@ class NanoUiSdlWeb {
     this.textureSizes = [];
     this.encoder = new TextEncoder();
     this.decoder = new TextDecoder();
+    this.localFonts = null;
+    this.fontList = new Uint8Array(0);
+    this.fontBytes = new Uint8Array(0);
   }
 
   // ---------------------------------------------------------------- setup
@@ -529,6 +532,79 @@ class NanoUiSdlWeb {
 
   setTitle(ptr, len) {
     document.title = this.text(ptr, len);
+  }
+
+  // Copy up to n bytes of encoded text to ptr; answer its full length.
+  writeText(text, ptr, n) {
+    const encoded = this.encoder.encode(text);
+    if (n > 0) this.bytes(ptr, Math.min(n, encoded.length)).set(encoded.subarray(0, n));
+    return encoded.length;
+  }
+
+  // The WebGL renderer's name: the unmasked one where the browser gives it.
+  rendererInfo(ptr, n) {
+    const gl = this.gl;
+    let name = gl.getParameter(gl.RENDERER);
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    if (info) name = gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || name;
+    return this.writeText(`WebGL2, ${name}`, ptr, n);
+  }
+
+  // ---------------------------------------------------------------- fonts
+
+  // The installed fonts, through the Local Font Access API. The browser asks
+  // the user the first time, and only during a click or key press, which a
+  // view's press still counts as. Answers the length of the sorted family
+  // names, one a line, for takeFontList; -1 without the API, -2 declined.
+  async findFonts() {
+    if (typeof window.queryLocalFonts !== "function") return -1;
+    try {
+      this.localFonts = await window.queryLocalFonts();
+    } catch (e) {
+      console.warn("nano-ui-sdl-web: installed fonts not available:", e);
+      return -2;
+    }
+    const families = [...new Set(this.localFonts.map((f) => f.family))].sort();
+    this.fontList = this.encoder.encode(families.join("\n"));
+    return this.fontList.length;
+  }
+
+  takeFontList(ptr) {
+    this.bytes(ptr, this.fontList.length).set(this.fontList);
+    this.fontList = new Uint8Array(0);
+  }
+
+  // A font file's bytes: an installed family's regular face (kind 0), or a
+  // URL (kind 1). Answers their length for takeFontBytes, or -1.
+  async loadFont(kind, ptr, len) {
+    const name = this.text(ptr, len);
+    try {
+      let blob;
+      if (kind === 0) {
+        if (!this.localFonts) {
+          if (typeof window.queryLocalFonts !== "function") return -1;
+          this.localFonts = await window.queryLocalFonts();
+        }
+        const faces = this.localFonts.filter((f) => f.family === name);
+        const face = faces.find((f) => /^(regular|normal|book|roman)$/i.test(f.style)) || faces[0];
+        if (!face) return -1;
+        blob = await face.blob();
+      } else {
+        const response = await fetch(name);
+        if (!response.ok) return -1;
+        blob = await response.blob();
+      }
+      this.fontBytes = new Uint8Array(await blob.arrayBuffer());
+      return this.fontBytes.length;
+    } catch (e) {
+      console.warn(`nano-ui-sdl-web: could not load the font ${name}:`, e);
+      return -1;
+    }
+  }
+
+  takeFontBytes(ptr) {
+    this.bytes(ptr, this.fontBytes.length).set(this.fontBytes);
+    this.fontBytes = new Uint8Array(0);
   }
 }
 

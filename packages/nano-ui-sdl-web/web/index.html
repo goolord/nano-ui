@@ -14,7 +14,7 @@
   <script src="nano-ui-sdl-web.js"></script>
   <script type="module">
     import { start } from "./main.js";
-    start(document.getElementById("nano-ui"), "main.wasm")
+    start(document.getElementById("nano-ui"), "main.wasm", { rtsFlags: "-T" })
       .catch((e) => { console.error(e); document.body.textContent = String(e); });
   </script>
 </body>

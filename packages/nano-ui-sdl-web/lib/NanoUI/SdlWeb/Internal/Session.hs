@@ -1,4 +1,9 @@
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE TypeFamilies #-}
+-- The 'BackendSession' instance for the browser session is an orphan by
+-- construction: the core owns the backend kind, and this package owns its
+-- session.
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 -- | The browser session: options, the event loop over a 'WebHost', display
 -- sync, and frame presentation. The loop is "NanoUI.Runner"'s, as on the
@@ -10,6 +15,10 @@ module NanoUI.SdlWeb.Internal.Session
   , WebFont (..)
   , runWebSession
   , WebFrame
+    -- * From the view
+  , setSdlWebUiFont
+  , askSdlWebDebug
+  , listWebFontFamilies
   ) where
 
 import Control.Exception (bracket, finally)
@@ -18,6 +27,8 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import GHC.TypeLits (symbolSing)
+import System.IO (hPutStrLn, stderr)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
@@ -27,6 +38,7 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Appearance (..)
+  , NanoUI
   , Rect (..)
   , Size (..)
   , Theme
@@ -35,7 +47,9 @@ import NanoUI
   , followSystemTheme
   )
 import NanoUI.Backend
-  ( Damage (..)
+  ( Backend (..)
+  , BackendSession
+  , Damage (..)
   , DrawData (..)
   , Input (..)
   , InputPurpose (..)
@@ -61,26 +75,41 @@ import NanoUI.Backend
   , textInputArea
   , uiCursorKind
   , WindowCapabilities (..)
+  , SBackend (..)
   , applyPointerLeave
+  , askBackendSession
+  , setBackendSession
   )
-import NanoUI.Internal.Context (Context, retainedFrameStale, setDrawSnapScale, withFramePaint)
-import NanoUI.Internal.Debug (noteDebugFrame, noteDebugSkip)
+import NanoUI.Internal.Context (Context, markDirtyCovered, retainedFrameStale, setDrawSnapScale, withFramePaint)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugFrame, noteDebugSkip, refreshDebugSnapshot)
+import NanoUI.Monad (askContext, liftIO)
 import NanoUI.Runner (DebugSamplerRef, SessionDriver (..), newDebugSampler, pacingMsFor, runSessionLoop, shouldRedrawFrame)
 import NanoUI.Backend (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
+import NanoUI.SdlWeb.Internal.Debug (SdlWebDebugSnapshot (..))
 import NanoUI.SdlWeb.Internal.Font
+import NanoUI.SdlWeb.Internal.Fonts (FontOrigin (..), findFontFamilies, loadFontBytes, rendererName)
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input
 import NanoUI.SdlWeb.Internal.Render
 import NanoUI.Ttf.Internal.Font (beginTtfFrame, ttfFrameDropped)
 
--- | A font for the web runners. The browser has no font directories, so a
--- font other than the bundled Inter comes as the bytes of a TrueType or
--- OpenType file, fetched or embedded by the program.
+-- | A font for the web runners. The browser has no font directories: a
+-- font other than the bundled Inter is an installed family the browser hands
+-- over (see 'listWebFontFamilies'), a file fetched by URL, or bytes the
+-- program embeds. A font that cannot be loaded falls back to Inter, as a
+-- missing font does on the desktop.
 data WebFont
   = WebFontInter
   -- ^ The bundled Inter subset.
   | WebFontBytes !ByteString !String
   -- ^ A font file's bytes and a label for it.
+  | WebFontInstalled !String
+  -- ^ An installed family by name, through the Local Font Access API
+  -- (Chromium-based browsers, after the user allows it). Its regular face,
+  -- else the first the browser lists.
+  | WebFontUrl !String
+  -- ^ A TrueType or OpenType file at a URL. Another origin must allow the
+  -- page to read it (CORS).
   deriving (Eq, Show)
 
 -- | Options for the web runners. The canvas's size is the page's, so the
@@ -148,7 +177,21 @@ data WebEnv = WebEnv
   , weCursor :: !(IORef UiCursorKind)
   , weTextInput :: !(IORef (Maybe (InputPurpose, Rect)))
   , weDebug :: !DebugSamplerRef
+  , weDebugPublished :: !(IORef (Maybe SdlWebDebugSnapshot))
+  , weFontRequest :: !(IORef WebFont)
+  -- ^ The UI font the view asked for ('setSdlWebUiFont').
+  , weFontApplied :: !(IORef WebFont)
+  -- ^ The UI font the font cache has open.
+  , weRendererName :: !Text
+  , weRefreshHz :: !Int
   }
+
+-- | A browser session keeps its environment on the context, so the view's
+-- calls ('setSdlWebUiFont', 'askSdlWebDebug') find it without a handle.
+type instance BackendSession ('Custom "sdl-web") = WebEnv
+
+webSession :: SBackend ('Custom "sdl-web")
+webSession = SCustom symbolSing
 
 -- | Run a session on a host until the view quits or 'webShouldQuit' holds.
 runWebSession :: WebHost -> SdlWebOptions -> WebFrame -> IO ()
@@ -160,9 +203,12 @@ runWebSession host opts frame = do
   canvas <- queryCanvas host
   let zoom = if webUiScale opts > 0 then webUiScale opts else 1
   scaleRef <- newIORef (ciPixelRatio canvas * zoom)
+  sans <- resolveWebFont host (webFont opts)
+  mono <- resolveWebFont host (webMonoFont opts)
+  rendererLabel <- rendererName host
   withTtf $
     bracket newGlyphAtlas destroyGlyphAtlas $ \glyphs ->
-      bracket (newSdlFontCache (fontSource (webFont opts)) (fontSource (webMonoFont opts)) glyphs (webFontSize opts) scaleRef) destroySdlFontCache $ \fonts ->
+      bracket (newSdlFontCache sans mono glyphs (webFontSize opts) scaleRef) destroySdlFontCache $ \fonts ->
         bracket newRenderer freeRenderer $ \renderer -> do
           env <-
             WebEnv host fonts renderer scaleRef zoom
@@ -171,7 +217,13 @@ runWebSession host opts frame = do
               <*> newIORef UiCursorDefault
               <*> newIORef Nothing
               <*> newDebugSampler
+              <*> newIORef Nothing
+              <*> newIORef (webFont opts)
+              <*> newIORef (webFont opts)
+              <*> pure rendererLabel
+              <*> pure refreshHz
           ctx1 <- withWebFonts env ctx0
+          setBackendSession ctx1 webSession env
           setDrawSnapScale ctx1 =<< readIORef scaleRef
           setWakeLoop ctx1 (whWake host)
           installWindowHost ctx1 (webWindowSettings opts) $
@@ -211,9 +263,70 @@ runWebSession host opts frame = do
             `finally` (closeWindowHost ctx2 `finally` cancelTasks ctx2)
   where
     refreshHz = if webRefreshHz opts > 0 then webRefreshHz opts else 60
-    fontSource = \case
-      WebFontInter -> embeddedFontSource
-      WebFontBytes bytes label -> FontFromMemory bytes label
+
+-- | The font source for a 'WebFont', loading an installed family or a URL
+-- through the page. One that cannot be loaded is the bundled Inter, with a
+-- warning on the console.
+resolveWebFont :: WebHost -> WebFont -> IO FontSource
+resolveWebFont host = \case
+  WebFontInter -> pure embeddedFontSource
+  WebFontBytes bytes label -> pure (FontFromMemory bytes label)
+  WebFontInstalled family -> load InstalledFamily family
+  WebFontUrl url -> load FontUrl url
+  where
+    load origin name =
+      loadFontBytes host origin name >>= \case
+        Just bytes -> pure (FontFromMemory bytes name)
+        Nothing -> do
+          hPutStrLn stderr ("nano-ui-sdl-web: could not load the font " <> show name <> "; using Inter")
+          pure embeddedFontSource
+
+-- | Ask for a UI font. The session loads and applies it before the next
+-- frame, which this asks for: the glyph atlas, metrics and text all change
+-- together, as 'NanoUI.Backend.Sdl.setSdlUiFont' does on the desktop.
+-- Loading an installed family or a URL waits for the page, so that frame
+-- comes when the font is in. Asking for the font already asked for does
+-- nothing.
+setSdlWebUiFont :: WebFont -> NanoUI ()
+setSdlWebUiFont font = do
+  ctx <- askContext
+  askBackendSession webSession >>= mapM_ (\env -> liftIO $ do
+    cur <- readIORef (weFontRequest env)
+    unless (cur == font) $ writeIORef (weFontRequest env) font >> markDirtyCovered ctx)
+
+-- | The session's frame statistics, canvas, font and renderer, refreshed at
+-- most four times a second; 'Nothing' outside a browser session. Asking
+-- keeps the sampler running and asks for frames at its rate, so ask only
+-- while the numbers are on screen.
+askSdlWebDebug :: NanoUI (Maybe SdlWebDebugSnapshot)
+askSdlWebDebug =
+  askBackendSession webSession >>= traverse (\env -> liftIO $
+    refreshDebugSnapshot (weDebug env) (weDebugPublished env) $ \core -> do
+      canvas <- queryCanvas (weHost env)
+      scale <- readIORef (weScale env)
+      source <- sdlFontCacheSource (weFonts env)
+      let zoom = weZoom env
+      pure
+        SdlWebDebugSnapshot
+          { dbgCore = core {dbgWinW = ciWidth canvas / zoom, dbgWinH = ciHeight canvas / zoom}
+          , dbgScale = scale
+          , dbgPixelRatio = ciPixelRatio canvas
+          , dbgFont = fontSourceLabel source
+          , dbgRenderer = weRendererName env
+          , dbgRefreshHz = weRefreshHz env
+          })
+
+-- | The font families installed on the machine, sorted, for
+-- 'WebFontInstalled'; or why they cannot be listed: the browser has no Local
+-- Font Access API (only Chromium-based browsers have it), the user declined,
+-- or this is not a browser. The browser asks the user the first time, and
+-- shows that question only right after a click or key press on the page, so
+-- call this from a task the press starts ('NanoUI.useTask'). It waits for
+-- the user's answer.
+listWebFontFamilies :: IO (Either String [String])
+listWebFontFamilies
+  | browserAvailable = findFontFamilies =<< browserHost
+  | otherwise = pure (Left "installed fonts are listed in a browser only")
 
 -- | The context with the font cache's metrics and resolver, and the page's
 -- clipboard.
@@ -238,8 +351,9 @@ pollWeb env = allocaBytes (batch * eventRecordSize) $ \buf -> go buf Nothing []
         else go buf partial acc'
 
 -- | Read the canvas's size, pixel ratio, focus and colour scheme into the
--- frame's input and the window state. A new pixel ratio reopens the fonts
--- at it, which hands back a new context and repaints everything.
+-- frame's input and the window state. A new pixel ratio, or a UI font the
+-- view asked for, reopens the fonts, which hands back a new context and
+-- repaints everything.
 syncWeb :: WebEnv -> Context -> Input -> IO (Context, Input)
 syncWeb env ctx inp = do
   canvas <- queryCanvas (weHost env)
@@ -248,12 +362,21 @@ syncWeb env ctx inp = do
       pw = max 1 (round (ciWidth canvas * ciPixelRatio canvas))
       ph = max 1 (round (ciHeight canvas * ciPixelRatio canvas))
   oldScale <- readIORef (weScale env)
+  requested <- readIORef (weFontRequest env)
+  applied <- readIORef (weFontApplied env)
+  let scaleChanged = abs (scale - oldScale) > 1e-4
+      fontChanged = requested /= applied
   ctx' <-
-    if abs (scale - oldScale) > 1e-4
+    if scaleChanged || fontChanged
       then do
         writeIORef (weScale env) scale
         setDrawSnapScale ctx scale
-        reloadSdlFontCache (weFonts env) =<< sdlFontCacheSource (weFonts env)
+        source <-
+          if fontChanged
+            then resolveWebFont (weHost env) requested
+            else sdlFontCacheSource (weFonts env)
+        writeIORef (weFontApplied env) requested
+        reloadSdlFontCache (weFonts env) source
         c <- withWebFonts env ctx
         clearMeasureCache ctx
         -- Glyphs change under rects and texts that may not: repaint all.

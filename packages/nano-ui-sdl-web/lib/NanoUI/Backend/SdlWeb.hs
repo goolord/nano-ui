@@ -18,16 +18,34 @@ module NanoUI.Backend.SdlWeb
   , WebFont (..)
   , browserAvailable
 
+    -- * Fonts
+  , setSdlWebUiFont
+  , listWebFontFamilies
+
     -- * Debugging
+  , SdlWebDebugSnapshot (..)
+  , CoreDebugSnapshot (..)
+  , askSdlWebDebug
+  , formatFpsRows
+  , formatDrawRows
   , formatExplainRows
   ) where
 
 import NanoUI (NanoUI)
 import NanoUI.Emit (NanoUIE, newReducer, reduceFrame)
 import NanoUI.Backend (runFrame)
-import NanoUI.Internal.Debug (formatExplainRows)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
+import NanoUI.SdlWeb.Internal.Debug (SdlWebDebugSnapshot (..))
 import NanoUI.SdlWeb.Internal.Host (browserAvailable, browserHost)
-import NanoUI.SdlWeb.Internal.Session (SdlWebOptions (..), WebFont (..), defaultSdlWebOptions, runWebSession)
+import NanoUI.SdlWeb.Internal.Session
+  ( SdlWebOptions (..)
+  , WebFont (..)
+  , askSdlWebDebug
+  , defaultSdlWebOptions
+  , listWebFontFamilies
+  , runWebSession
+  , setSdlWebUiFont
+  )
 
 -- | Run a view in the page's canvas until it quits. The view is rebuilt for
 -- each frame. In a native build this throws: the program runs only as
