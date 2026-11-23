@@ -5,6 +5,14 @@
 // nanoUiSdlWeb.setup(canvas).
 
 const EVENT_WORDS = 8; // eventRecordSize / 4
+
+// A timed wait this short paces an animation (two frames at 60 Hz), and
+// ends on one of the display's frames. FRAME_SLACK_MS is how far before its
+// time such a wait may end: the session measures a frame from its own start,
+// a little after the display's, so the frame it is waiting for comes a
+// little early.
+const FRAME_WAIT_MS = 34;
+const FRAME_SLACK_MS = 4;
 const COMMAND_WORDS = 8; // commandRecordSize / 4
 
 const EV_RESIZE = 1;
@@ -73,6 +81,7 @@ class NanoUiSdlWeb {
     this.queue = [];
     this.waiter = null;
     this.waitTimer = null;
+    this.waitFrame = null;
     this.shown = true;
     this.held = false;
     this.wakePending = false;
@@ -278,6 +287,10 @@ class NanoUiSdlWeb {
       clearTimeout(this.waitTimer);
       this.waitTimer = null;
     }
+    if (this.waitFrame !== null) {
+      cancelAnimationFrame(this.waitFrame);
+      this.waitFrame = null;
+    }
     if (resolve) resolve();
   }
 
@@ -458,10 +471,28 @@ class NanoUiSdlWeb {
         this.wakePending = false;
         resolve();
       };
-      // A timed wait paces frames. Out of view there is no frame to show,
-      // so it waits for an event or for the canvas to come back.
-      if (ms >= 0 && this.shown) this.waitTimer = setTimeout(() => this.release(), ms);
-      else if (ms >= 0) this.held = true;
+      if (ms < 0) return;
+      // Out of view there is no frame to show, so a timed wait holds for an
+      // event or for the canvas to come back.
+      if (!this.shown) {
+        this.held = true;
+        return;
+      }
+      // A longer wait is a timer. A frame's wait ends on the display's
+      // first frame at or after its time: a timer's steps are coarser than
+      // a frame (15.6 ms on Windows), which drops every other one, and the
+      // display's frames stop while the tab is hidden.
+      if (ms > FRAME_WAIT_MS) {
+        this.waitTimer = setTimeout(() => this.release(), ms);
+        return;
+      }
+      const due = performance.now() + ms - FRAME_SLACK_MS;
+      const onFrame = () => {
+        this.waitFrame = null;
+        if (performance.now() >= due) this.release();
+        else this.waitFrame = requestAnimationFrame(onFrame);
+      };
+      this.waitFrame = requestAnimationFrame(onFrame);
     });
   }
 

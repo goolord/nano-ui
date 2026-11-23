@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>nano-ui</title>
+  <!-- The module is fetched by main.js, which the page reaches three
+       imports in. These start its download, and the loader's, at once. -->
+  <link rel="preload" href="main.wasm" as="fetch" type="application/wasm" crossorigin>
+  <link rel="modulepreload" href="main.js">
+  <link rel="modulepreload" href="ghc_wasm_jsffi.js">
+  <link rel="modulepreload" href="browser_wasi_shim/index.js">
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #1d1f21; }
     canvas { display: block; width: 100vw; height: 100vh; }
