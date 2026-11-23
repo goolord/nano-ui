@@ -31,9 +31,9 @@
 - **Breaking (backends):** `SessionDriver` has a field `sdPacedWait`, the
   backend's own wait between the frames of an animation paced by time, or
   `Nothing` to keep `sdWaitEvents` and the loop's alignment to
-  `sdAlignSec`. The loop decides when a wait is paced and calls it then; SDL
-  used to guess from the timeout, so a timed wake as long as the pacing wait
-  was aligned to the animation grid. `NanoUI.Runner` also exports
+  `sdAlignSec`. `runSessionLoop` calls it for the waits it paces. SDL used
+  to compare the timeout with its pacing wait instead, so a timed wake of
+  the same length was aligned to the animation grid. `NanoUI.Runner` also exports
   `pacingMsFor`, the pacing wait for a refresh period, and `waitUntil`, the
   sleep-then-spin wait the alignment uses.
 
