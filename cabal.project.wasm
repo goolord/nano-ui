@@ -17,6 +17,13 @@ index-state: hackage.haskell.org 2026-10-23T01:04:20Z
 tests: False
 benchmarks: False
 
+-- A page downloads the whole module, so the linker should drop what the
+-- program does not reach. Without this GHC links a module's code whenever
+-- one of its bindings is used; with a section for each binding, only the
+-- bindings that are reached. It applies to the dependencies built here too.
+package *
+  split-sections: True
+
 package nano-ui-ttf
   flags: +sdl
 
