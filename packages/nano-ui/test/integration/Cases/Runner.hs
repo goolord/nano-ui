@@ -24,6 +24,7 @@ tests =
   , spec "session-loop-close" runSessionLoopCloseTest
   , spec "session-loop-clicks" runSessionLoopClicksTest
   , spec "session-loop-continuous" runSessionLoopContinuousTest
+  , spec "session-loop-paced-wait" runSessionLoopPacedWaitTest
   , spec "drawing-lock" runDrawingLockTest
   ]
 
@@ -34,6 +35,7 @@ quietDriver debug =
   SessionDriver
     { sdPollEvents = pure []
     , sdWaitEvents = \_ -> pure [3]
+    , sdPacedWait = Nothing
     , sdApplyEvent = \inp _ -> inp
     , sdIsButtonEdge = const False
     , sdIsSessionQuit = (== 3)
@@ -236,6 +238,21 @@ runSessionLoopContinuousTest ctx failed = do
   assertEq failed [0] =<< firstWait True False True
   assertEq failed [16] =<< firstWait True False False
   assertEq failed [-1] =<< firstWait False False False
+
+-- | The loop hands the wait for a frame paced by time to the backend's
+-- 'sdPacedWait', and any other wait, a timed wake as long as the pacing wait
+-- among them, to 'sdWaitEvents'.
+runSessionLoopPacedWaitTest :: Context -> IORef Int -> IO ()
+runSessionLoopPacedWaitTest ctx failed = do
+  let firstWait continuous = do
+        calls <- newIORef []
+        waits <- batchedWaits [[], [3]]
+        let noted (how :: String) t = modifyIORef' calls (<> [(how, t)]) >> waits t
+        runLoop ctx (\d -> d {sdContinuous = continuous, sdPacedWait = Just (noted "paced"), sdWaitEvents = noted "plain"}) []
+        take 1 <$> readIORef calls
+  assertEq failed [("paced", 16 :: Int)] =<< firstWait True
+  requestWakeAfter ctx 0.014
+  assertEq failed ["plain"] . map fst =<< firstWait False
 
 -- | Ctrl+C quits after its frame (Ctrl released later in the batch too, a
 -- bare c not), unless a shortcut or a focused text field takes it; with

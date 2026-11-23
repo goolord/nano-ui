@@ -28,6 +28,19 @@
   for the display though vsync was asked for, it waits `sdPacingMs` as an
   animation does, instead of running unpaced at full CPU.
 
+- **Breaking (backends):** `SessionDriver` has a field `sdPacedWait`, the
+  backend's own wait between the frames of an animation paced by time, or
+  `Nothing` to keep `sdWaitEvents` and the loop's alignment to
+  `sdAlignSec`. `runSessionLoop` calls it for the waits it paces. SDL used
+  to compare the timeout with its pacing wait instead, so a timed wake of
+  the same length was aligned to the animation grid. `NanoUI.Runner` also exports
+  `pacingMsFor`, the pacing wait for a refresh period, and `waitUntil`, the
+  sleep-then-spin wait the alignment uses.
+
+- `NanoUI.Backend` also exports `withTheme`, `clearMeasureCache`,
+  `damageFull` and `inBoundThread`, so a backend needs nothing from
+  `NanoUI.Testing`.
+
 - **Breaking (backends):** `WindowOps` has a field `woWatchResize`, which
   installs a watch that draws a further window at each new size while the
   host holds the first window's loop in a modal size loop. A backend whose

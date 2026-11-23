@@ -34,7 +34,7 @@ import NanoUI.Backend
   , mouseButtonNumber
   , releaseAllKeys
   )
-import NanoUI.Testing (UiCursorKind (..))
+import NanoUI.Backend (UiCursorKind (..))
 import qualified RGFW as R
 
 -- | The key for an RGFW key code and its modifier bits.

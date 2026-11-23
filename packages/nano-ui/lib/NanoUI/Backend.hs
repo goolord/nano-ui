@@ -37,6 +37,7 @@ module NanoUI.Backend
   , withFontResolver
   , withFontSize
   , withClipboard
+  , withTheme
   , markDirty
   , clearDirty
   , isDirty
@@ -63,6 +64,7 @@ module NanoUI.Backend
   , damagePieces
   , damageIsEmpty
   , pixelEdges
+  , clipPixelEdges
   , snapDamage
   , registerImage
   , registerImages
@@ -171,7 +173,9 @@ module NanoUI.Backend
     -- returns a snapshot with shaped metrics for a specific 'Text' (or the
     -- original metrics when 'fmBackend' is 'Nothing'). 'drawShaped' shapes a
     -- run into 'ShapedGlyphs', and 'drawGlyph' looks up a single glyph's
-    -- 'GlyphQuad' from the snapshot.
+    -- 'GlyphQuad' from the snapshot. A backend that loads other fonts or
+    -- rasterizes at a new scale calls 'clearMeasureCache', so text is
+    -- measured again with the new metrics.
   , FontMetrics (..)
   , FontBackend (..)
   , prepareFontMetrics
@@ -188,6 +192,7 @@ module NanoUI.Backend
   , GlyphQuad (..)
   , ShapedText (..)
   , ShapedGlyphs (..)
+  , clearMeasureCache
 
     -- * Damage
 
@@ -195,7 +200,8 @@ module NanoUI.Backend
     -- the window instead of all of it. 'takeDamage'
     -- reads the frame's damage; the @Now@ functions mark a rectangle from
     -- inside a view, which a custom widget that paints outside its own node
-    -- needs.
+    -- needs. 'damageFull' queues a whole-window repaint from outside a view,
+    -- as after a font change, when glyphs change under rects that did not.
   , Damage (..)
   , DamageBounds (..)
   , defaultDamageSlop
@@ -207,6 +213,7 @@ module NanoUI.Backend
   , damageRectNow
   , damageGroupNow
   , damageFullNow
+  , damageFull
 
     -- * Frame metrics
 
@@ -363,14 +370,20 @@ module NanoUI.Backend
   , setWakeLoop
   , setWakeLoopChecked
   , cancelTasks
+
+    -- * Threads
+  , inBoundThread
   )
 where
+
+import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 
 import NanoUI.Internal.Compact (Compact, askCompact, compactHost)
 import NanoUI.Internal.BackendSession (Backend (..), BackendSession, SBackend (..))
 import NanoUI.Internal.Context
   ( Context, newContext, newPixelContext, withFontMetrics, withMonoFontMetrics
-  , withMeasureText, withFontResolver, withFontSize, withClipboard
+  , withMeasureText, withFontResolver, withFontSize, withClipboard, withTheme
+  , clearMeasureCache, damageFull
   , markDirty, clearDirty, isDirty, requestWakeAt, requestWakeAfter, getWakeAt
   , takeDamage, takeDamagePieces, registerImage, registerImages, releaseImage
   , atlasTextureId, atlasSnapshot, atlasChanges, AtlasUpload (..)
@@ -383,7 +396,7 @@ import NanoUI.Internal.ChildWindow (ChildWindow (..), childView, childWindows)
 import NanoUI.Internal.Var.Cell (varChangeCount)
 import NanoUI.Internal.Frame.Spans (collectRasterSpans)
 import NanoUI.Internal.Frame.Cursor (uiCursorKind)
-import NanoUI.Internal.Damage (damagePieces, pixelEdges, snapDamage)
+import NanoUI.Internal.Damage (clipPixelEdges, damagePieces, pixelEdges, snapDamage)
 import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
@@ -411,3 +424,13 @@ import NanoUI.Internal.NativeWindow
 import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
 import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types
+
+-- | Run an action on a bound thread, one OS thread for the whole run, or
+-- as it is under the non-threaded runtime, which runs Haskell on one OS
+-- thread anyway. A backend runs its session in it when native state belongs
+-- to the OS thread that made it: an OpenGL context is current only on the
+-- thread that made it current, and on Windows the thread that creates a
+-- window pumps its messages. An unbound Haskell thread can move to another
+-- OS thread across a safe foreign call.
+inBoundThread :: IO a -> IO a
+inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act

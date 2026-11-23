@@ -1,6 +1,33 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
 -- | SDL window dimensions, display scale, refresh timing, and event-loop wake support.
+--
+-- FFI conventions. nano-ui-sdl calls SDL through the @sdl3@ bindings, and its
+-- own C in @cbits@ through the @foreign import@s here and in
+-- "NanoUI.Sdl.Internal.Font", "NanoUI.Sdl.Internal.Render",
+-- "NanoUI.Sdl.Internal.Frame", "NanoUI.Sdl.Internal.Chrome" and
+-- "NanoUI.Sdl.Internal.Dialog".
+--
+-- * Window, renderer, texture and font handles stay on the display thread,
+--   the bound thread 'NanoUI.Sdl.Internal.Window.withSdl' runs the session
+--   on, and do not outlive the session. The calls made from other threads
+--   are the wake ('pushRefreshEvent') and
+--   'NanoUI.Sdl.Internal.Dialog.cancelFileDialog'.
+-- * An import is @unsafe@ unless Haskell can run before it returns. Windows
+--   sends the window messages from inside the calls that resize, move,
+--   reframe or restyle it, change its hit test, or take the clipboard, and
+--   SDL's window procedure then runs the resize watch or the hit test, which
+--   are Haskell: a callback into the runtime from inside an unsafe call
+--   cannot run and wedges the message pump. Those calls use the @sdl3@
+--   bindings' @...Safe@ variants or a @safe@ import. 'pushRefreshEvent' is
+--   safe for another reason: SDL_PushEvent waits for the lock SDL holds
+--   while the resize watch runs.
+-- * A callback made with a @wrapper@ import is freed with
+--   'freeHaskellFunPtr' when it is removed ('installResizeWatch'); the file
+--   dialog's callback is made once per process, so SDL can never call a freed
+--   one. The C objects nano-ui creates (render batch, text atlas) are
+--   destroyed by the session that created them, and text SDL returns (the
+--   clipboard) is freed with @SDL_free@.
 module NanoUI.Sdl.Internal.Display
   ( queryWindowPixelDensity
   , scaleMoved

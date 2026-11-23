@@ -65,8 +65,8 @@ import NanoUI.Backend
   )
 import NanoUI.Internal.Context (Context, retainedFrameStale, setDrawSnapScale, withFramePaint)
 import NanoUI.Internal.Debug (noteDebugFrame, noteDebugSkip)
-import NanoUI.Runner (DebugSamplerRef, SessionDriver (..), newDebugSampler, runSessionLoop, shouldRedrawFrame)
-import NanoUI.Testing (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
+import NanoUI.Runner (DebugSamplerRef, SessionDriver (..), newDebugSampler, pacingMsFor, runSessionLoop, shouldRedrawFrame)
+import NanoUI.Backend (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
 import NanoUI.SdlWeb.Internal.Font
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input
@@ -186,6 +186,7 @@ runWebSession host opts frame = do
                 SessionDriver
                   { sdPollEvents = pollWeb env
                   , sdWaitEvents = \t -> whWaitEvents host t >> pollWeb env
+                  , sdPacedWait = Nothing
                   , sdApplyEvent = applyWebEvent
                   , sdIsButtonEdge = isButtonEdge
                   , sdIsSessionQuit = const False
@@ -193,7 +194,7 @@ runWebSession host opts frame = do
                   , sdDebug = weDebug env
                   , sdContinuous = False
                   , sdVsyncOff = False
-                  , sdPacingMs = max 1 (1000 `div` refreshHz - 2)
+                  , sdPacingMs = pacingMsFor (1 / fromIntegral refreshHz)
                   , sdPresentPaces = pure False
                   , sdShouldDraw = \c prevInp inp wasAnim refreshDue -> shouldRedrawFrame c prevInp inp wasAnim False refreshDue
                   , sdDraw = draw

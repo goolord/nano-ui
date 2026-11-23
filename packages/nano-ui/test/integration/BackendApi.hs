@@ -19,6 +19,7 @@ backendApiCheck = do
   let driver = SessionDriver
         { sdPollEvents = pure [()]
         , sdWaitEvents = \_ -> pure [()]
+        , sdPacedWait = Nothing
         , sdApplyEvent = const
         , sdIsButtonEdge = const False
         , sdIsSessionQuit = const True

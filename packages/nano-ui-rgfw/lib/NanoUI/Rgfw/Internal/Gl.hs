@@ -59,7 +59,7 @@ import NanoUI.Rgfw.Internal.Font.Cozette
   , foldPenPositions
   , renderGlyphScaledToBuffer
   )
-import NanoUI.Testing
+import NanoUI.Backend
   ( AtlasUpload (..)
   , Context
   , DrawCmd (..)

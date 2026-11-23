@@ -53,7 +53,8 @@ import NanoUI.Sdl.Internal.WindowOptions (queryWindowState)
 import NanoUI.Backend (WindowState (..))
 
 import NanoUI.Internal.Monad (NanoUI, askContext)
-import NanoUI.Testing (Context, markDirty, liftIO)
+import NanoUI.Backend (Context, markDirty)
+import Control.Monad.IO.Class (liftIO)
 import NanoUI.Var (Var, readVar, writeVar)
 import SDL3.Sys.Bindgen.Dialog (SDL_DialogFileCallback (..), SDL_DialogFileFilter (..))
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst

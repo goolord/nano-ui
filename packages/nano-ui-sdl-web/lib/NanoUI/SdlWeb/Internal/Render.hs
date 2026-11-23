@@ -33,7 +33,7 @@ import NanoUI.Backend
   , snapDamage
   , textureGlyphPage
   )
-import NanoUI.Testing (Context, atlasChanges, clipPixelEdges)
+import NanoUI.Backend (Context, atlasChanges, clipPixelEdges)
 import NanoUI.SdlWeb.Internal.Font (GlyphAtlas, glyphAtlasSize, glyphPageUploads)
 import NanoUI.SdlWeb.Internal.Host (WebHost (..), commandRecordSize, imageAtlasSlot)
 

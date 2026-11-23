@@ -26,7 +26,6 @@ module NanoUI.Rgfw.Internal.Session
   , mapRgfwCursor
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket, finally, onException)
 import Control.Monad (forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.))
@@ -65,6 +64,7 @@ import NanoUI.Backend
   , defaultWindowHost
   , defaultWindowState
   , emptyInput
+  , inBoundThread
   , installWindowHost
   , reportWindowState
   , setExplainLayout
@@ -80,7 +80,7 @@ import NanoUI.Internal.Context
   , withClipboard
   , withFramePaint
   )
-import NanoUI.Testing
+import NanoUI.Backend
   ( DrawData (..)
   , UiCursorKind (..)
   , runFrame
@@ -94,6 +94,7 @@ import NanoUI.Internal.Debug (noteDebugFrame, noteDebugSkip)
 import NanoUI.Emit (NanoUIE, newReducer, reduceFrame, reducerModel)
 import NanoUI.Runner
   ( SessionDriver (..)
+  , pacingMsFor
   , runSessionLoop
   , shouldRedrawFrame
   )
@@ -219,8 +220,6 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
   bracket (createRgfwWindow sh settings) R.closeWindow (runWindow sh)
   where
     settings = optWindow opts
-    -- The GL context is current only on the OS thread that created it.
-    inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act
     runWindow sh win = do
       rw <- setupRgfwWindow sh settings win
       reducer <- newReducer updateModel initialModel
@@ -261,6 +260,7 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
               SessionDriver
                 { sdPollEvents    = pollMain
                 , sdWaitEvents    = \t -> R.waitForEvent t >> pollMain
+                , sdPacedWait     = Nothing
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = isRgfwButtonEdge
                 , sdIsSessionQuit = isRgfwClose
@@ -321,7 +321,7 @@ rgfwRefreshHz :: RgfwOptions -> Int
 rgfwRefreshHz opts = if optRefreshHz opts > 0 then optRefreshHz opts else 60
 
 rgfwPacingMs :: RgfwOptions -> Int
-rgfwPacingMs opts = max 1 (floor (1000 / fromIntegral (rgfwRefreshHz opts) :: Double) - 2)
+rgfwPacingMs opts = pacingMsFor (1 / fromIntegral (rgfwRefreshHz opts))
 
 -- | The model's scale, else the options', else the monitor's.
 resolveScale :: RgfwOptions -> Float -> Float -> Float
