@@ -1,8 +1,9 @@
 <!doctype html>
 <!--
-  Pages serves this for an address with no file. The book was at the site's
-  root before it moved under book/, so an address from then is sent to the
-  same page there. Links are absolute: this page is served at any depth.
+  GitHub Pages 404 fallback. The book previously lived at the site root before
+  moving under book/, so any missing path outside book/ and demo/ redirects
+  there automatically. Links are absolute because 404.html can be served at
+  any path depth.
 -->
 <html lang="en">
 <head>
@@ -17,7 +18,7 @@
       if (!location.pathname.startsWith(root)) return;
       const rest = location.pathname.slice(root.length);
       const first = rest.split("/")[0];
-      // A miss under book/ or demo/ is a miss; sending it on would loop.
+      // Avoid redirect loops for genuinely missing paths under book/ or demo/.
       if (rest && first !== "book" && first !== "demo") {
         location.replace(root + "book/" + rest + location.search + location.hash);
       }
@@ -44,7 +45,7 @@
 <body>
   <main>
     <h1>Page not found</h1>
-    <p>No page of nano-ui's site has this address.</p>
+    <p>There is no page at this address on the nano-ui site.</p>
     <nav aria-label="Site">
       <a href="/nano-ui/">Home</a>
       <a href="/nano-ui/book/">Book</a>

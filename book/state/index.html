@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="state--var"><a class="header" href="#state--var">State &amp; <code>Var</code></a></h1>
-<p>The view runs every frame, and nothing survives between frames except state you keep. Most state lives in a <code>Var</code>, a typed mutable reference. Input widgets take the <code>Var</code> they display and mutate it directly, with no callback.</p>
+<p>Because a view runs fresh on every frame, any value that needs to survive from one frame to the next must be stored explicitly. In <code>nano-ui</code>, most mutable state lives in a <code>Var</code>, a typed mutable reference. Input widgets take a <code>Var</code> directly and update it in place, so you do not need to wire up <code>onChange</code> callbacks.</p>
 <pre><code class="language-haskell">counter :: NanoUI ()
 counter = rowWith (gap 8 . alignMid) $ do
   n &lt;- useVar (0 :: Int)
@@ -187,8 +187,8 @@ counter = rowWith (gap 8 . alignMid) $ do
   label . T.pack . show =&lt;&lt; readVar n
   whenM (button "+") (modifyVar n (+ 1))
 </code></pre>
-<h2 id="keep-state-derive-values"><a class="header" href="#keep-state-derive-values">Keep state, derive values</a></h2>
-<p>A value that changes over time and cannot be recomputed belongs in a <code>Var</code>. A value that <em>can</em> be recomputed belongs in a local binding, computed fresh every frame:</p>
+<h2 id="store-state-derive-everything-else"><a class="header" href="#store-state-derive-everything-else">Store state, derive everything else</a></h2>
+<p>Keep a value in a <code>Var</code> only when it cannot be recomputed from other state. Anything you <em>can</em> calculate from existing state belongs in a regular Haskell binding computed fresh each frame:</p>
 <pre><code class="language-haskell">appView :: App -&gt; NanoUI ()
 appView app = do
   -- Keep: the inputs to the next frame.
@@ -201,23 +201,23 @@ appView app = do
   label ("Signed in as " &lt;&gt; settings.nickname)
   label ("Draft: " &lt;&gt; T.pack (show len) &lt;&gt; " characters")
 </code></pre>
-<p>A derived value copied into a second <code>Var</code> drifts as soon as one writer forgets to update it.</p>
-<h2 id="allocating-state"><a class="header" href="#allocating-state">Allocating state</a></h2>
-<p>There are two ways to create a <code>Var</code>, plus one for dynamic collections:</p>
+<p>Duplicating a derived value into a second <code>Var</code> invites bugs as soon as one code path updates the source and forgets the copy.</p>
+<h2 id="creating-vars"><a class="header" href="#creating-vars">Creating <code>Var</code>s</a></h2>
+<p>You have two main ways to create a <code>Var</code>, plus <code>VarMap</code> for dynamic keyed collections:</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th></th><th><code>useVar</code></th><th><code>newVar</code></th></tr>
 </thead>
 <tbody>
-<tr><td>Where</td><td>Inside the view</td><td>In <code>IO</code>, during setup</td></tr>
-<tr><td>Types</td><td><code>Int</code>, <code>Float</code>, <code>Double</code>, <code>Bool</code>, <code>Text</code>, <code>SortCol</code> (<code>useEnumVar</code> for any <code>Bounded</code>/<code>Enum</code> type)</td><td>Any type</td></tr>
-<tr><td>Identity</td><td>The call site, counted in call order</td><td>The reference itself</td></tr>
-<tr><td>Best for</td><td>View-local state: a draft, an open flag, a filter</td><td>Application state: a document, a list, a settings record, a task</td></tr>
+<tr><td>Where you call it</td><td>Inside the view</td><td>In <code>IO</code>, during setup</td></tr>
+<tr><td>Supported types</td><td><code>Int</code>, <code>Float</code>, <code>Double</code>, <code>Bool</code>, <code>Text</code>, <code>SortCol</code> (<code>useEnumVar</code> handles any <code>Bounded</code>/<code>Enum</code> type)</td><td>Any type</td></tr>
+<tr><td>Identity</td><td>Call position in the view</td><td>The reference itself</td></tr>
+<tr><td>Good fit for</td><td>View-local state (input drafts, open flags, filters)</td><td>Shared or app-wide state (documents, lists, settings records)</td></tr>
 </tbody>
 </table>
 </div>
-<p><code>useVar</code> needs no setup. Its initial value is used only when the slot is first created; call <code>writeVar</code> to reset it later. Its slots are counted separately from widget ids, but a <strong>conditional <code>useVar</code></strong> still needs <code>scope</code> so later slots keep their positions:</p>
+<p><code>useVar</code> needs no boilerplate. Its initial value is only used the first time that slot is created; to reset it later, call <code>writeVar</code>. Although <code>useVar</code> tracks its slots separately from widget IDs, a <strong>conditional <code>useVar</code></strong> still needs <code>scope</code> so slots after it keep their positions:</p>
 <pre><code class="language-haskell">advanced :: NanoUI ()
 advanced = do
   showAdvanced &lt;- useVar False
@@ -226,7 +226,7 @@ advanced = do
     level &lt;- useVar (3 :: Float)
     slider 0 10 level
 </code></pre>
-<p><code>newVar</code> can hold any type. Allocate it once in <code>IO</code> and pass it into the view:</p>
+<p><code>newVar</code> works for any Haskell type. Create it once in <code>IO</code> before starting the window loop and pass it into your view:</p>
 <pre><code class="language-haskell">data App = App
   { appSettings :: Var Settings
   , appTodos :: Var [Todo]
@@ -241,8 +241,8 @@ main = do
   app &lt;- newApp
   runSdlApp defaultSdlOptions (appView app)
 </code></pre>
-<p>Passing the same <code>Var</code> to two widgets shares their state. Allocating a <code>Var</code> <em>inside</em> the view creates a fresh one on every pass.</p>
-<p>For dynamic collections, <code>VarMap</code> gives one <code>Var</code> per key:</p>
+<p>Passing the same <code>Var</code> to multiple widgets lets them share state directly. Never call <code>liftIO (newVar ...)</code> inside the view, or you will allocate a brand-new <code>Var</code> on every pass.</p>
+<p>For collections whose items come and go, <code>VarMap</code> stores one <code>Var</code> per key:</p>
 <pre><code class="language-haskell">data RowState = RowState {editing :: Bool, rowDraft :: Text}
   deriving (Eq, Generic)
 
@@ -256,9 +256,9 @@ todoRows rows liveIds = do
     checkbox "Editing" rowState.editing
   retainVars (`elem` liveIds) rows
 </code></pre>
-<p><code>varAt</code> returns the existing <code>Var</code> for a key or creates it. <code>dropVar</code> removes one; <code>retainVars keep</code> prunes everything whose key fails the predicate.</p>
+<p><code>varAt</code> looks up the <code>Var</code> for a key (allocating one if needed), <code>dropVar</code> removes a single entry, and <code>retainVars keep</code> clears out any key that fails the predicate.</p>
 <h2 id="projections-and-read-only-views"><a class="header" href="#projections-and-read-only-views">Projections and read-only views</a></h2>
-<p>A record in a <code>Var</code> gives a <code>Var</code> for each field. With <code>Generic</code> and <code>OverloadedRecordDot</code>:</p>
+<p>If a <code>Var</code> holds a record that derives <code>Generic</code>, <code>OverloadedRecordDot</code> projects individual fields into their own <code>Var</code>s:</p>
 <pre><code class="language-haskell">data Settings = Settings
   { volume :: !Float
   , silent :: !Bool
@@ -272,40 +272,41 @@ settingsView settings = do
   checkbox "Silent" settings.silent
   textInput settings.nickname
 </code></pre>
-<p><code>settings.volume</code> is a <code>Var Float</code> projecting one field. Editing it does not repaint what reads only <code>settings.nickname</code>.</p>
+<p>Here <code>settings.volume</code> is a <code>Var Float</code> targeting just that field. Dragging the volume slider will not repaint widgets that only read <code>settings.nickname</code>.</p>
+<p>Several helpers cover other shapes:</p>
 <ul>
-<li><code>constVar x</code> is read-only; writes are no-ops. Use it for a derived value shown in an input widget.</li>
-<li><code>withValue val widget</code> runs a <code>Var</code> widget against a temporary <code>Var</code> and returns the result and final value. <code>nano-ui-emit</code> uses it for <code>emitChanged</code>.</li>
-<li><code>zoomVar getter setter</code> projects a computed part of a larger <code>Var</code>; <code>zoomVarL</code> does the same from a lens.</li>
-<li><code>forEachVar key list body</code> gives per-element <code>Var</code>s that follow their keys across reorders. <code>withElemVars</code> is the variant for filtering or sorting yourself.</li>
+<li><code>constVar x</code> builds a read-only <code>Var</code> whose writes are no-ops. Use it when you want to display a derived value inside an input widget and handle changes through the widget’s primed <code>Response</code>.</li>
+<li><code>withValue val widget</code> runs a <code>Var</code>-based widget against a temporary <code>Var</code> and returns both the widget result and the updated value. <code>nano-ui-emit</code> uses this under the hood for <code>emitChanged</code>.</li>
+<li><code>zoomVar getter setter</code> projects a custom slice of a larger <code>Var</code>, and <code>zoomVarL</code> does the same using a lens.</li>
+<li><code>forEachVar key list body</code> gives each item of a <code>Var [a]</code> its own <code>Var a</code> keyed across reorders. Use <code>withElemVars</code> when you need to filter or sort the list yourself before drawing.</li>
 </ul>
 <h2 id="what-a-write-costs"><a class="header" href="#what-a-write-costs">What a write costs</a></h2>
-<p><code>readVar</code> records a dependency for the current pass. When the value changes, nano-ui classifies the write:</p>
+<p>Calling <code>readVar</code> records a dependency for the current frame pass. Whenever a write changes the stored value, <code>nano-ui</code> handles it in one of three ways:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Write</th><th>When</th><th>Cost</th></tr>
+<tr><th>Write kind</th><th>When it happens</th><th>Cost</th></tr>
 </thead>
 <tbody>
-<tr><td><strong>Forward</strong></td><td>Written before any read this pass</td><td>One pass; later reads see the new value</td></tr>
-<tr><td><strong>Backward</strong></td><td>Written after being read earlier this pass</td><td>A second view pass, with one-shot input events cleared</td></tr>
-<tr><td><strong>Unchanged</strong></td><td>New value <code>==</code> old value</td><td>No-op: no pass, no repaint</td></tr>
+<tr><td><strong>Forward</strong></td><td>Written before anything reads it this pass</td><td>Single pass; later reads immediately see the new value</td></tr>
+<tr><td><strong>Backward</strong></td><td>Written after being read earlier in the same pass</td><td>Triggers a second view pass (with one-shot input events cleared)</td></tr>
+<tr><td><strong>Unchanged</strong></td><td>New value equals (<code>==</code>) old value</td><td>No-op: no extra pass and no repaint</td></tr>
 </tbody>
 </table>
 </div>
-<p>Two habits follow:</p>
+<p>Two practical habits follow from this:</p>
 <ul>
-<li>Place <code>readVar</code> <strong>below</strong> the widget that edits the value when the order is free. Typing then resolves in one pass; reading above it costs a second pass per change.</li>
-<li>Do not <code>readVar</code> a value only to pass it back into the same widget. Passing the <code>Var</code> is enough.</li>
+<li>Put <code>readVar</code> <strong>below</strong> the widget that edits the value whenever the layout allows it. Typing or dragging then finishes in a single pass rather than running a second pass per change.</li>
+<li>Do not call <code>readVar</code> just to pass the value back into a widget that already takes the <code>Var</code>.</li>
 </ul>
-<p>A freshly computed <code>NaN</code> is never unchanged (<code>NaN /= NaN</code>), so writing one every pass redraws forever. Guard the write.</p>
+<p>Watch out for floating-point <code>NaN</code>: since <code>NaN /= NaN</code>, writing a freshly computed <code>NaN</code> every frame looks like a new value each time and keeps the window redrawing endlessly. Guard float calculations that can produce <code>NaN</code>.</p>
 <blockquote class="blockquote-tag blockquote-tag-tip">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
-<p>A change to a <code>Var</code> repaints only the widgets whose text, value or style it altered, whether they are bound to the <code>Var</code> or show what a <code>readVar</code> returned.</p>
+<p>Updating a <code>Var</code> only repaints the widgets whose text, value, or style actually changed, whether they are bound to the <code>Var</code> directly or render something computed from <code>readVar</code>.</p>
 </blockquote>
-<p><code>peekVar</code> reads without recording a dependency. <code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe versions; after a background write, call the callback from <code>askWake</code> to schedule a frame. Never touch the UI <code>Context</code> from a worker thread.</p>
-<h2 id="lifetime-and-resources"><a class="header" href="#lifetime-and-resources">Lifetime and resources</a></h2>
-<p>Tasks, streams, image handles, drag handles, plot caches, and file-dialog ids are allocated in <code>IO</code> during setup and stored in the application record, exactly like a <code>newVar</code>:</p>
+<p>If you need to inspect a <code>Var</code> without recording a read dependency, use <code>peekVar</code>. From worker threads or plain <code>IO</code>, use the thread-safe functions <code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code>, then invoke the wake callback from <code>askWake</code> to schedule a frame. Never touch the UI <code>Context</code> from a background thread.</p>
+<h2 id="lifetimes-and-external-handles"><a class="header" href="#lifetimes-and-external-handles">Lifetimes and external handles</a></h2>
+<p>Tasks, streams, image handles, drag handles, plot caches, and file-dialog IDs follow the same rule as <code>newVar</code>: create them once in <code>IO</code> during setup and keep them in your application state record.</p>
 <pre><code class="language-haskell">data Editor = Editor
   { editorDocument :: Var TextDocument
   , editorSearch :: Task Text [Text]
@@ -314,23 +315,23 @@ settingsView settings = do
 newEditor :: IO Editor
 newEditor = Editor &lt;$&gt; newVar emptyDocument &lt;*&gt; newTask
 </code></pre>
-<p>A handle allocated inside the view is a per-frame leak. If the view needs a new handle when a key changes, allocate it in setup and key its use, or use a hook that owns its lifetime (<code>useTask</code>, <code>useStream</code>, <code>useImageRgba</code>).</p>
-<h2 id="where-should-this-value-live"><a class="header" href="#where-should-this-value-live">Where should this value live?</a></h2>
+<p>Allocating any of these inside the view leaks resources on every frame. When a resource needs to track dynamic keys, either allocate the handle at setup and key its hook (<code>useTask</code>, <code>useStream</code>, <code>useImageRgba</code>), or let a <code>VarMap</code> manage it.</p>
+<h2 id="where-should-a-piece-of-state-live"><a class="header" href="#where-should-a-piece-of-state-live">Where should a piece of state live?</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>The value…</th><th>Put it in</th></tr>
+<tr><th>If the value…</th><th>Store it in</th></tr>
 </thead>
 <tbody>
-<tr><td>Is a draft, open flag, selection, or filter used by one view</td><td><code>useVar</code> / <code>useEnumVar</code></td></tr>
-<tr><td>Is a list, document, settings record, or handle</td><td><code>newVar</code> in <code>IO</code>, stored in the app record</td></tr>
-<tr><td>Belongs to one row of a dynamic list</td><td>A keyed <code>Var</code> (<code>forEachVar</code>, <code>withElemVars</code>, <code>VarMap</code>)</td></tr>
-<tr><td>Already lives outside the UI</td><td>An <code>IORef</code> or app record, woken with <code>askWake</code></td></tr>
-<tr><td>Is a pure state machine with a clear <code>msg -&gt; model -&gt; model</code></td><td>The <a href="elm.html">Elm-style reducer</a></td></tr>
+<tr><td>Is a local draft, toggle, selection, or filter for one view</td><td><code>useVar</code> or <code>useEnumVar</code></td></tr>
+<tr><td>Is a list, document, settings record, or async handle</td><td><code>newVar</code> in <code>IO</code>, held in your app record</td></tr>
+<tr><td>Belongs to a single row in a dynamic list</td><td>A keyed <code>Var</code> (<code>forEachVar</code>, <code>withElemVars</code>, or <code>VarMap</code>)</td></tr>
+<tr><td>Already lives in an external store or worker</td><td>An <code>IORef</code> or app record, waking the UI with <code>askWake</code></td></tr>
+<tr><td>Fits a pure <code>msg -&gt; model -&gt; model</code> state machine</td><td>An <a href="elm.html">Elm-style reducer</a></td></tr>
 </tbody>
 </table>
 </div>
-<p>Next: <a href="identity.html">Widget Identity &amp; Keys</a> for keyed lists and conditional UI, or <a href="elm.html">Elm-Style State</a> for the reducer alternative.</p>
+<p>Next: read <a href="identity.html">Widget Identity &amp; Keys</a> to see how keyed lists and conditional UI preserve widget state, or check out <a href="elm.html">Elm-Style State</a> for the reducer alternative.</p>
 
                     </main>
 
@@ -383,8 +384,8 @@ newEditor = Editor &lt;$&gt; newVar emptyDocument &lt;*&gt; newTask
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

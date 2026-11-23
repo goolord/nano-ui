@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,91 +179,90 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="development-setup"><a class="header" href="#development-setup">Development Setup</a></h1>
-<p>Working on nano-ui itself. To use it in an application, see the <a href="quickstart.html">Quick Start</a>.</p>
+<p>This page covers building, testing, and profiling <code>nano-ui</code> itself. If you are building an application with the library, start at the <a href="quickstart.html">Quick Start</a>.</p>
 <h2 id="setup"><a class="header" href="#setup">Setup</a></h2>
-<p>This repository’s <code>nix develop</code> shell provides GHC 9.14, Cabal, SDL3, SDL3_ttf, pkg-config, mdbook (for <code>nano-ui-book-test</code>), and Python 3 (for <code>scripts/</code>). Outside it, install the same tools listed under <a href="quickstart.html#prerequisites">Quick Start prerequisites</a>.</p>
+<p>The repository’s <code>nix develop</code> shell provides GHC 9.14, Cabal, SDL3, SDL3_ttf, <code>pkg-config</code>, <code>mdbook</code> (used by <code>nano-ui-book-test</code>), and Python 3 (used by <code>scripts/</code>). Outside Nix, install the same dependencies listed under <a href="quickstart.html#prerequisites">Quick Start prerequisites</a>.</p>
 <h2 id="building-and-testing"><a class="header" href="#building-and-testing">Building and testing</a></h2>
 <pre><code class="language-sh">cabal build -j1 all
 cabal test -j1 all
 </code></pre>
 <blockquote class="blockquote-tag blockquote-tag-warning">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
-<p>Build with <code>-j1</code>. Parallel optimizing GHC processes can exhaust memory. For a hard cap, prefix with <code>GHCRTS=-M4G</code>.</p>
+<p>Always pass <code>-j1</code> when building the whole workspace. Parallel optimizing GHC jobs can quickly exhaust system RAM. If you want a hard memory ceiling, prefix the command with <code>GHCRTS=-M4G</code>.</p>
 </blockquote>
 <h3 id="test-suites"><a class="header" href="#test-suites">Test suites</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Suite</th><th>Covers</th></tr>
+<tr><th>Suite</th><th>What it tests</th></tr>
 </thead>
 <tbody>
-<tr><td><code>nano-ui-test</code></td><td>Widgets, layout, input, focus, damage, and draw lists, frame by frame and headless; seeded QuickCheck runs over random layout trees, damage against repaints, and input streams</td></tr>
-<tr><td><code>text-buffer-spec</code></td><td>Text buffer and document edits: lines, graphemes, carets, undoable edits, random edit sessions against a plain <code>Text</code> (QuickCheck)</td></tr>
-<tr><td><code>style-bits-spec</code></td><td>The bit fields each node type packs into its style index (<code>NanoUI.Internal.StyleBits</code>) do not overlap and fit in 64 bits</td></tr>
-<tr><td><code>nano-ui-inspection</code></td><td>Hot paths (quad writers, store and focus access, canvas) still optimize as written</td></tr>
-<tr><td><code>nano-ui-emit-test</code></td><td>Emitting views, adapters, and reducers</td></tr>
-<tr><td><code>nano-ui-svg-test</code></td><td><code>DrawOp</code>-to-SVG: clips, gradients, escaping, rasterization, whole frames against golden documents in <code>test/golden</code></td></tr>
-<tr><td><code>nano-ui-diagrams-test</code></td><td>Chart and diagrams-lib rendering</td></tr>
-<tr><td><code>nano-ui-form-test</code></td><td>Form validation, reset, and submission</td></tr>
-<tr><td><code>nano-ui-markdown-test</code></td><td>Parsing, incremental append against a full parse (QuickCheck), layout</td></tr>
-<tr><td><code>nano-ui-rgfw-test</code>, <code>nano-ui-rgfw-bindings-test</code></td><td>RGFW input translation, bitmap font, frame delivery</td></tr>
-<tr><td><code>nano-ui-sdl-web-test</code></td><td>The browser backend’s input decoding, draw batching, font loading, file dialogs and debug snapshot, run natively</td></tr>
-<tr><td><code>nano-ui-font-search-test</code>, <code>nano-ui-font-effects-test</code></td><td>SDL font discovery, shaping, caches, handle lifetimes</td></tr>
-<tr><td><code>nano-ui-render-test</code></td><td>Native SDL readback: partial damage, clipping, screenshots</td></tr>
-<tr><td><code>nano-ui-demo-test</code>, <code>nano-ui-terminal-test</code></td><td>The demos and the terminal in hidden SDL windows</td></tr>
-<tr><td><code>nano-ui-book-test</code></td><td>This book: no inline Haskell, <code>#include</code> anchors, specimen tags, and an <code>mdbook</code> build</td></tr>
+<tr><td><code>nano-ui-test</code></td><td>Headless frame-by-frame tests for widgets, layout, input, focus, damage, and draw lists, plus seeded QuickCheck properties over random layout trees, damage diffs, and input streams.</td></tr>
+<tr><td><code>text-buffer-spec</code></td><td>Text buffers and documents: lines, grapheme clusters, carets, undo history, and QuickCheck random edit sessions compared against plain <code>Text</code>.</td></tr>
+<tr><td><code>style-bits-spec</code></td><td>Verifies that the packed bit fields each node type stores in <code>NanoUI.Internal.StyleBits</code> never overlap and fit within 64 bits.</td></tr>
+<tr><td><code>nano-ui-inspection</code></td><td>Checks with <code>inspection-testing</code> that hot paths (quad writers, store and focus lookups, canvas helpers) compile without unexpected dictionaries or allocations.</td></tr>
+<tr><td><code>nano-ui-emit-test</code></td><td>Typed emitting views, widget adapters, and message reducers.</td></tr>
+<tr><td><code>nano-ui-svg-test</code></td><td><code>DrawOp</code>-to-SVG export (clips, gradients, XML escaping, rasterization) and full-frame comparisons against golden SVGs in <code>test/golden</code>.</td></tr>
+<tr><td><code>nano-ui-diagrams-test</code></td><td>Chart rendering and <code>diagrams-lib</code> conversion.</td></tr>
+<tr><td><code>nano-ui-form-test</code></td><td>Form validation, submission lifecycles, and resets.</td></tr>
+<tr><td><code>nano-ui-markdown-test</code></td><td>CommonMark parsing, layout, and QuickCheck equivalence between incremental appends and full parses.</td></tr>
+<tr><td><code>nano-ui-rgfw-test</code>, <code>nano-ui-rgfw-bindings-test</code></td><td>RGFW input translation, bitmap font metrics, and frame delivery.</td></tr>
+<tr><td><code>nano-ui-sdl-web-test</code></td><td>Browser backend input decoding, draw batching, font loading, file dialogs, and debug snapshots (run natively against a scripted host).</td></tr>
+<tr><td><code>nano-ui-font-search-test</code>, <code>nano-ui-font-effects-test</code></td><td>SDL font discovery, text shaping, line caches, and handle lifetimes.</td></tr>
+<tr><td><code>nano-ui-render-test</code></td><td>Native SDL readback checks for partial damage, clipping, and screenshots.</td></tr>
+<tr><td><code>nano-ui-demo-test</code>, <code>nano-ui-terminal-test</code></td><td>End-to-end tests of the demo apps and terminal emulator in hidden SDL windows.</td></tr>
+<tr><td><code>nano-ui-book-test</code></td><td>Validates this book: rejects inline Haskell, checks <code>#include</code> anchors and specimen tags, and runs <code>mdbook build</code>.</td></tr>
 </tbody>
 </table>
 </div>
-<p>Continuous integration (<code>.github/workflows/ci.yml</code>) runs the suites that open no window (its <code>HEADLESS_SUITES</code> list) on Linux with GHC 9.10 and 9.14 and on Windows with GHC 9.14. On Linux with GHC 9.14 it also runs <code>nano-ui-render-test</code>, <code>nano-ui-font-effects-test</code>, <code>nano-ui-demo-test</code>, <code>nano-ui-terminal-test</code>, <code>nano-ui-rgfw-test</code> and <code>nano-ui-rgfw-bindings-test</code> under Xvfb with Mesa’s software GL, one step per suite. Each of those steps has <code>continue-on-error</code> until its suite has passed on the runner, so a failure there is reported without failing the job. Run the native suites locally when a change touches rendering, fonts, dialogs or DPI.</p>
-<p>One suite, with failure details:</p>
+<p>CI (<code>.github/workflows/ci.yml</code>) runs every headless suite (<code>HEADLESS_SUITES</code>) on Linux with GHC 9.10 and 9.14, and on Windows with GHC 9.14. On Linux 9.14 it also runs the native window suites (<code>nano-ui-render-test</code>, <code>nano-ui-font-effects-test</code>, <code>nano-ui-demo-test</code>, <code>nano-ui-terminal-test</code>, <code>nano-ui-rgfw-test</code>, and <code>nano-ui-rgfw-bindings-test</code>) under Xvfb with Mesa’s software GL. Those steps currently use <code>continue-on-error</code> so failures are visible without blocking PRs while runner stability is verified. Whenever you change rendering, fonts, file dialogs, or DPI scaling, run the native suites locally.</p>
+<p>To run a single suite and see failure details immediately:</p>
 <pre><code class="language-sh">cabal test nano-ui-test --test-show-details=failures
 </code></pre>
-<p><code>nano-ui-test</code>, <code>nano-ui-rgfw-test</code>, <code>nano-ui-sdl-web-test</code> and <code>nano-ui-font-effects-test</code> run their specs through <code>NanoUI.Testing.Runner</code>, so their arguments pick specs by name. A spec’s full name runs that spec, any other argument runs every spec whose name starts with it, and <code>--list</code> prints the names the other arguments pick without running them:</p>
+<p><code>nano-ui-test</code>, <code>nano-ui-rgfw-test</code>, <code>nano-ui-sdl-web-test</code>, and <code>nano-ui-font-effects-test</code> all use <code>NanoUI.Testing.Runner</code>, which lets you filter specs by name or prefix. Passing <code>--list</code> shows what your filters match without running anything:</p>
 <pre><code class="language-sh">cabal run -v0 nano-ui:test:nano-ui-test -- --list scroll-
 cabal run -v0 nano-ui:test:nano-ui-test -- scroll- page-backdrop
 </code></pre>
-<p>A failed check in these suites is counted and the run goes on, so one run reports every failure. In <code>packages/nano-ui/test/integration/Main.hs</code>, keep the <code>Cases.*</code> imports and the <code>tests</code> list in alphabetical order.</p>
-<p>After a change meant to alter SVG export, rewrite the golden documents from <code>packages/nano-ui-svg</code>:</p>
+<p>Failed assertions are tallied while the suite finishes, so a single run surfaces every failure at once. In <code>packages/nano-ui/test/integration/Main.hs</code>, keep the <code>Cases.*</code> imports and the <code>tests</code> list sorted alphabetically.</p>
+<p>When an intentional change alters SVG output, regenerate the golden files from <code>packages/nano-ui-svg</code>:</p>
 <pre><code class="language-sh">NANO_UI_UPDATE_GOLDEN=1 cabal test nano-ui-svg-test
 </code></pre>
 <h2 id="profiling"><a class="header" href="#profiling">Profiling</a></h2>
-<p>The scripts are in <code>scripts/profile/</code>; <code>scripts/README.md</code> has one line on each.</p>
+<p>Profiling helpers live in <code>scripts/profile/</code>, with a one-line summary of each in <code>scripts/README.md</code>.</p>
 <h3 id="allocation-gate"><a class="header" href="#allocation-gate">Allocation gate</a></h3>
-<p>Each scene of <code>nano-ui-profile</code> runs a fixed number of frames, so its allocation total is the same on every run with one GHC version. <code>alloc-gate.py</code> runs the scenes in <code>scripts/profile/alloc-baseline.json</code> and fails when one allocates more than 5% over its baseline:</p>
-<pre><code class="language-sh">python scripts/profile/alloc-gate.py                              # check
-python scripts/profile/alloc-gate.py --update                     # accept the new totals
-python scripts/profile/alloc-gate.py --exe path/to/nano-ui-profile  # check another binary
+<p>Each scene in <code>nano-ui-profile</code> runs a fixed number of frames, making total bytes allocated deterministic for a given GHC version. <code>alloc-gate.py</code> runs every scene recorded in <code>scripts/profile/alloc-baseline.json</code> and fails if any scene allocates more than 5% above baseline:</p>
+<pre><code class="language-sh">python scripts/profile/alloc-gate.py                              # verify against baseline
+python scripts/profile/alloc-gate.py --update                     # update baseline totals
+python scripts/profile/alloc-gate.py --exe path/to/nano-ui-profile  # test a specific binary
 </code></pre>
-<p>The baseline is recorded with GHC 9.14.1 on Windows, where CI runs the gate. A change that allocates more on purpose reruns the gate with <code>--update</code> and commits the new baseline.</p>
+<p>The baseline is recorded on Windows with GHC 9.14.1, matching the CI gate. If a change intentionally increases allocation, rerun the script with <code>--update</code> and commit the updated JSON file.</p>
 <h3 id="comparing-two-builds"><a class="header" href="#comparing-two-builds">Comparing two builds</a></h3>
-<p><code>compare-builds.py</code> times two trees that are already built, alternating between them for <code>--runs</code> rounds (7 by default), and prints the median of each metric with the change in percent. Build the candidate into its own directory with <code>--builddir</code>, then:</p>
+<p><code>compare-builds.py</code> benchmarks two already-compiled build trees by alternating runs between them (<code>--runs 7</code> by default) and reporting median times and percentage deltas. Compile your candidate branch into a separate <code>--builddir</code>, then run:</p>
 <pre><code class="language-sh">python scripts/profile/compare-builds.py dist-newstyle ../candidate/dist-newstyle --suite core --output core.json
 </code></pre>
-<p><code>--suite</code> picks the binary: <code>core</code> runs the <code>nano-ui-profile</code> scenes (time and allocation), <code>sdl</code> runs <code>nano-ui-sdl-profile</code>, <code>render</code> and <code>atlas</code> run <code>nano-ui-render-test</code>’s benchmarks, and <code>events</code> runs <code>nano-ui-rgfw-bindings-test --bench</code>. With <code>--executables</code>, the two positional arguments are paths to binaries instead of build directories. The JSON output holds every run.</p>
-<h3 id="cost-centre-profiles"><a class="header" href="#cost-centre-profiles">Cost-centre profiles</a></h3>
-<p><code>run-profile.ps1</code> builds <code>nano-ui-profile</code> with profiling at the project’s default <code>-O1</code> and <code>run-sdl-profile.ps1</code> builds <code>nano-ui-sdl-profile</code> with profiling at <code>-O2</code> (Windows with MSYS2 UCRT64 only). Each writes a JSON profile for <a href="https://www.speedscope.app/">speedscope</a> and a text profile into <code>scripts/profile/</code>, then runs <code>summarize_prof.py</code>, which prints the 40 cost centres with the most ticks and the megabytes each allocated:</p>
+<p>Use <code>--suite</code> to select the benchmark binary: <code>core</code> runs <code>nano-ui-profile</code> (time and allocations), <code>sdl</code> runs <code>nano-ui-sdl-profile</code>, <code>render</code> and <code>atlas</code> run benchmarks inside <code>nano-ui-render-test</code>, and <code>events</code> runs <code>nano-ui-rgfw-bindings-test --bench</code>. Pass <code>--executables</code> if you want to give binary paths directly instead of build directories. Every individual measurement is saved to the JSON output file.</p>
+<h3 id="cost-center-profiles"><a class="header" href="#cost-center-profiles">Cost-center profiles</a></h3>
+<p>On Windows (with MSYS2 UCRT64), <code>run-profile.ps1</code> builds <code>nano-ui-profile</code> with profiling at <code>-O1</code>, and <code>run-sdl-profile.ps1</code> builds <code>nano-ui-sdl-profile</code> with profiling at <code>-O2</code>. Both write a text profile and a JSON profile for <a href="https://www.speedscope.app/">speedscope</a> into <code>scripts/profile/</code>, then invoke <code>summarize_prof.py</code> to list the top 40 cost centers by time ticks alongside their megabytes allocated:</p>
 <pre><code class="language-sh">pwsh scripts/profile/run-profile.ps1
 python scripts/profile/summarize_prof.py profile-json.prof
 </code></pre>
-<p><code>cabal.project</code> sets <code>profiling-detail: late</code>, so cost centres sit on top-level functions after optimisation and do not change what GHC inlines.</p>
+<p><code>cabal.project</code> sets <code>profiling-detail: late</code>, placing cost centers on top-level functions after optimization so profiling does not distort GHC’s inlining decisions.</p>
 <h3 id="continuous-frame-rate-on-linux"><a class="header" href="#continuous-frame-rate-on-linux">Continuous frame rate on Linux</a></h3>
-<p><code>continuous-meter.c</code> is an <code>LD_PRELOAD</code> library that counts <code>SDL_RenderPresent</code> calls in the SDL demo’s <code>--continuous</code> mode. After 1,000 warm-up frames it times 10,000 more, prints wall and CPU milliseconds per frame, frames per second and the 50th, 95th and 99th percentile frame times to stderr, and exits the demo. The build and run commands are in its header comment. Compare alternating runs with the same renderer, window size, DPI and RTS options.</p>
+<p><code>continuous-meter.c</code> is an <code>LD_PRELOAD</code> helper for timing <code>SDL_RenderPresent</code> calls in the SDL demo’s <code>--continuous</code> mode. It skips 1,000 warm-up frames, times the next 10,000, prints wall time, CPU time, FPS, and p50/p95/p99 frame times to stderr, and exits. Build and run commands are documented at the top of the C file. For fair comparisons, alternate runs using the same renderer, window size, DPI, and RTS flags.</p>
 <h3 id="source-line-budget"><a class="header" href="#source-line-budget">Source line budget</a></h3>
-<p><code>source-budget.py &lt;git-rev&gt;</code> counts the net lines of library code (<code>packages/*/lib</code> and <code>cbits</code>, without <code>nano-ui-demo</code>) changed since a revision, both as written and after running each changed Haskell file through <code>fourmolu</code> to its fixed point, so a reformat does not count as a saving. It needs <code>fourmolu</code> on <code>PATH</code>, passes source through it on stdin only, and never rewrites a file.</p>
+<p><code>source-budget.py &lt;git-rev&gt;</code> reports the net lines of library code changed since a given commit (<code>packages/*/lib</code> and <code>cbits</code>, excluding <code>nano-ui-demo</code>). It counts both raw lines and lines after formatting each modified Haskell file through <code>fourmolu</code> on stdin, ensuring pure reformatting does not masquerade as code reduction. It requires <code>fourmolu</code> on <code>PATH</code> and never modifies files on disk.</p>
 <h2 id="haddocks-and-hoogle"><a class="header" href="#haddocks-and-hoogle">Haddocks and Hoogle</a></h2>
-<p>Released packages have Haddock pages on Hackage. To build documentation for the current checkout:</p>
+<p>Released packages have Haddock documentation on Hackage. To generate docs for the whole checkout locally:</p>
 <pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle
 </code></pre>
-<p>The index is <code>haddocks/index.html</code>; <code>--hoogle</code> also writes Hoogle input files there. One package, with less memory:</p>
+<p>Open <code>haddocks/index.html</code> in a browser; <code>--hoogle</code> also writes Hoogle database files into the same directory. To build documentation for just one package with less memory:</p>
 <pre><code class="language-sh">cabal haddock nano-ui --haddock-hoogle
 </code></pre>
-<p>Its output is under <code>dist-newstyle/.../doc/html/nano-ui/</code>.</p>
-<p>To search locally, point <code>hoogle generate --local=...</code> at the directory holding the generated <code>.txt</code> files. See <a href="https://github.com/ndmitchell/hoogle/blob/master/docs/Install.md">Installing Hoogle locally</a>.</p>
+<p>That writes HTML under <code>dist-newstyle/.../doc/html/nano-ui/</code>. To build a local Hoogle index from the generated <code>.txt</code> files, run <code>hoogle generate --local=...</code> (see <a href="https://github.com/ndmitchell/hoogle/blob/master/docs/Install.md">Installing Hoogle locally</a>).</p>
 <h2 id="book-code"><a class="header" href="#book-code">Book code</a></h2>
-<p>The book’s snippets are anchored regions of compiled modules: <code>packages/nano-ui-demo/book/Book/*.hs</code>, or <code>packages/nano-ui-svg/app/*Examples.hs</code> for code drawn to a picture. Include them with an anchored <code>#include</code>; <code>nano-ui-book-test</code> rejects Haskell written inline.</p>
+<p>Every Haskell snippet in this book comes from an anchored region of a compiled module: either <code>packages/nano-ui-demo/book/Book/*.hs</code> for regular chapters, or <code>packages/nano-ui-svg/app/*Examples.hs</code> for snippets paired with rendered diagrams. Include them with an anchored <code>#include</code> directive; <code>nano-ui-book-test</code> fails if any Haskell is written inline in a Markdown file.</p>
 <h2 id="module-conventions"><a class="header" href="#module-conventions">Module conventions</a></h2>
-<p>The companion packages are listed in <a href="../packages/index.html">Ecosystem Packages</a>. In <code>packages/nano-ui/lib</code>, the public API is <code>NanoUI</code> and <code>NanoUI.Widgets.*</code>; <code>packages/nano-ui/lib/NanoUI.hs</code> is the full export list. <code>NanoUI.Internal.*</code> is exposed for backends and tests and may change between minor releases.</p>
+<p>See <a href="../packages/index.html">Ecosystem Packages</a> for the companion packages. In <code>packages/nano-ui/lib</code>, the public API consists of <code>NanoUI</code> (with <code>packages/nano-ui/lib/NanoUI.hs</code> holding the full export list) and <code>NanoUI.Widgets.*</code>. Modules under <code>NanoUI.Internal.*</code> are exposed for backends and tests and may change without notice between minor releases.</p>
 
                     </main>
 
@@ -316,8 +315,8 @@ python scripts/profile/summarize_prof.py profile-json.prof
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

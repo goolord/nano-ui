@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,24 +179,24 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="ecosystem-packages"><a class="header" href="#ecosystem-packages">Ecosystem Packages</a></h1>
-<p>Each package adds a backend or one capability to <code>nano-ui</code>. Pin them from source as in the <a href="../getting-started/quickstart.html">Quick Start</a>.</p>
+<p>The <code>nano-ui</code> workspace splits optional backends and domain widgets into focused companion packages. Pin whichever ones you need in <code>cabal.project</code> alongside <code>nano-ui</code>, as shown in the <a href="../getting-started/quickstart.html">Quick Start</a>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Package</th><th>What it adds</th></tr>
 </thead>
 <tbody>
-<tr><td><code>nano-ui-sdl</code></td><td>SDL3 window backend, TrueType fonts, native file dialogs, custom chrome</td></tr>
-<tr><td><code>nano-ui-rgfw</code></td><td>RGFW + OpenGL 3.2 backend with a bundled bitmap font</td></tr>
-<tr><td><code>nano-ui-diagrams</code></td><td>Line/bar/scatter/area charts and diagrams-lib content</td></tr>
-<tr><td><code>nano-ui-form</code></td><td>Validated applicative forms built on ditto</td></tr>
-<tr><td><code>nano-ui-markdown</code></td><td>CommonMark rendering, appendable for streamed replies</td></tr>
-<tr><td><code>nano-ui-svg</code></td><td><code>DrawOp</code>-to-SVG and whole-frame SVG export</td></tr>
+<tr><td><code>nano-ui-sdl</code></td><td>Desktop SDL3 backend with TrueType fonts, native file dialogs, and custom title bars</td></tr>
+<tr><td><code>nano-ui-rgfw</code></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font</td></tr>
+<tr><td><code>nano-ui-diagrams</code></td><td>Line, bar, scatter, area, and step charts plus <code>diagrams-lib</code> widgets</td></tr>
+<tr><td><code>nano-ui-form</code></td><td>Validated applicative forms built on <code>ditto</code></td></tr>
+<tr><td><code>nano-ui-markdown</code></td><td>CommonMark rendering with incremental appends for streaming</td></tr>
+<tr><td><code>nano-ui-svg</code></td><td><code>DrawOp</code>-to-SVG and full-frame SVG export</td></tr>
 </tbody>
 </table>
 </div>
 <h2 id="backends"><a class="header" href="#backends">Backends</a></h2>
-<p><code>nano-ui-sdl</code> is the primary desktop backend:</p>
+<p><code>nano-ui-sdl</code> is the main desktop backend:</p>
 <pre><code class="language-haskell">sdlMain :: IO ()
 sdlMain = Sdl.runSdlApp
   Sdl.defaultSdlOptions
@@ -207,14 +207,14 @@ sdlMain = Sdl.runSdlApp
     }
   appView
 </code></pre>
-<p>It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (<code>useFileDialog</code>), custom title bars (<code>windowCaption</code>), and screenshots (<code>saveScreenshot</code>, <code>captureScreenshot</code>). See <a href="../advanced/window-management.html">Desktop Windows</a> for the window side.</p>
-<p><code>nano-ui-rgfw</code> is the alternative with no system dependencies:</p>
+<p>It provides HarfBuzz text shaping, system font discovery, high-DPI scaling, non-blocking native file dialogs (<code>useFileDialog</code>), custom title bars (<code>windowCaption</code>), and screenshot capture (<code>saveScreenshot</code>, <code>captureScreenshot</code>). See <a href="../advanced/window-management.html">Desktop Windows</a> for window management details.</p>
+<p><code>nano-ui-rgfw</code> is a lightweight alternative with no SDL dependencies:</p>
 <pre><code class="language-haskell">rgfwMain :: IO ()
 rgfwMain = Rgfw.runRgfwApp Rgfw.defaultRgfwOptions appView
 </code></pre>
-<p>It links RGFW statically and bundles a bitmap font, so binaries are small and standalone. Use it where SDL3 is not available.</p>
+<p>It compiles RGFW statically and ships with a bundled bitmap font, producing small standalone binaries whenever SDL3 is unavailable or unwanted.</p>
 <h2 id="charts-and-diagrams"><a class="header" href="#charts-and-diagrams">Charts and diagrams</a></h2>
-<p><code>nano-ui-diagrams</code> provides <code>NanoUI.Plot</code> and the diagrams-lib widget. <code>import NanoUI.Diagrams</code> brings in both. A chart is a plain <code>Chart</code> value; <code>plot</code> draws it, sized by a layout modifier:</p>
+<p><code>nano-ui-diagrams</code> provides both the <code>NanoUI.Plot</code> charting library and a widget for embedding <code>diagrams-lib</code> graphics (<code>import NanoUI.Diagrams</code> exports both). Build a plain <code>Chart</code> value and draw it with <code>plot</code>:</p>
 <pre><code class="language-haskell">cpuChart :: PlotCache -&gt; [(Double, Double)] -&gt; NanoUI ()
 cpuChart cache samples =
   void $ plot cache (fillW . fixedH 220) $
@@ -225,9 +225,9 @@ cpuChart cache samples =
       $ chart [line "cpu" samples]
 </code></pre>
 <img src="../images/charts/cpu-chart.svg" alt="A framed line chart of CPU load over sixty seconds, with a grid, numbered axes, and the titles time (s) and CPU %.">
-<p>Allocate the <code>PlotCache</code> once in <code>IO</code> with <code>newPlotCache</code> and keep it in the application record. It rebuilds a chart’s drawing only when the chart or the theme changes, so building the <code>Chart</code> value every frame is cheap.</p>
-<p>A chart keeps its drawing’s proportions. With <code>fillW</code> the frame fills the width and the chart is centred in it; with only <code>fixedH</code> the widget takes the width the proportions give. A chart whose labels would overlap at the requested size is drawn larger, up to twice the size.</p>
-<p>The examples below are compiled from <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs"><code>ChartExamples.hs</code></a>, which <code>nano-ui-svg-glossary</code> also renders to the images. They share this data:</p>
+<p>Create a <code>PlotCache</code> once in <code>IO</code> with <code>newPlotCache</code> and keep it in your app record. The cache only rebuilds vector geometry when the chart data or active theme changes, so constructing <code>Chart</code> values inside the view is cheap.</p>
+<p>Charts preserve their aspect ratio automatically. With <code>fillW</code>, the outer frame expands to fill available width and centers the chart inside; with only <code>fixedH</code>, the chart takes the width implied by its proportions. If axis labels would collide at the requested size, the chart scales up (up to 2x) to keep labels legible.</p>
+<p>The examples below come from <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs"><code>ChartExamples.hs</code></a>, rendered to SVG by <code>nano-ui-svg-glossary</code>. They share this sample dataset:</p>
 <pre><code class="language-haskell">wave :: [(Double, Double)]
 wave = [(x, 3 + sin x + 0.5 * sin (2.3 * x)) | x &lt;- [0, 0.3 .. 2 * pi]]
 
@@ -238,8 +238,8 @@ quarters :: [(Text, Double)]
 quarters = [("Q1", 3), ("Q2", 5), ("Q3", 4), ("Q4", 7)]
 </code></pre>
 <h3 id="series"><a class="header" href="#series">Series</a></h3>
-<p>Series constructors take a name and the points: <code>(x, y)</code> pairs, or <code>(label, value)</code> pairs for <code>bar</code>. Each cell below plots <code>withLegend LegendNone (chart [s])</code>.</p>
-<img src="../images/charts/series.svg" alt="Five small charts: a line through a wave, the same wave as dots, the wave filled down to zero, a staircase through eight counts, and four bars labelled Q1 to Q4.">
+<p>Each series constructor takes a label and a list of <code>(x, y)</code> points (or <code>(category, value)</code> pairs for <code>bar</code>). Every cell below renders <code>withLegend LegendNone (chart [s])</code>:</p>
+<img src="../images/charts/series.svg" alt="Five small charts: a line through a wave, the same wave as dots, the wave filled down to zero, a staircase through eight counts, and four bars labeled Q1 to Q4.">
 <pre><code class="language-haskell">seriesKinds :: [(Text, Series)]
 seriesKinds =
   [ ("line", line "line" wave)
@@ -249,8 +249,8 @@ seriesKinds =
   , ("bar", bar "bar" quarters)
   ]
 </code></pre>
-<p>Lines and steps join the points in the order given, so sort them first if they are not already in x order. An area fills down to zero. Bars sit in category order, each taking 72% of its slot. <code>lineChart</code>, <code>barChart</code>, <code>scatterChart</code>, and <code>areaChart</code> are one-series shortcuts that plot a list with a grid and no legend.</p>
-<p>Series without a colour take the theme’s series colours in order. The modifiers override the colour and size:</p>
+<p><code>line</code> and <code>step</code> connect points in list order, so sort by <code>x</code> beforehand if your input is unordered. <code>area</code> fills down to <code>y = 0</code> by default, and <code>bar</code> places categories in order, with each bar occupying 72% of its slot. For quick single-series plots with a grid and no legend, use <code>lineChart</code>, <code>barChart</code>, <code>scatterChart</code>, or <code>areaChart</code>.</p>
+<p>Series automatically pull colors in order from the active theme’s series palette unless you override them with modifiers:</p>
 <img src="../images/charts/styles.svg" alt="Four charts: a teal line, a thick line, a line with a dot on every point, and an area filled up and down to the line y equals 3.">
 <pre><code class="language-haskell">seriesStyles :: [(Text, Series)]
 seriesStyles =
@@ -260,7 +260,7 @@ seriesStyles =
   , ("withBaseline 3", withBaseline 3 (area "s" wave))
   ]
 </code></pre>
-<p><code>withStrokeWidth</code> means the line width for a line or step, the marker size for a scatter, and the slot fraction for a bar. <code>withBaseline</code> sets where an area fills to, in data units, so values below it fill downward. A line’s markers are twice its stroke width; a scatter’s markers are its stroke width, 3 by default:</p>
+<p><code>withStrokeWidth</code> sets line thickness for <code>line</code> and <code>step</code>, marker diameter for <code>scatter</code>, and slot width fraction for <code>bar</code>. <code>withBaseline</code> changes the horizontal baseline an area fills toward (in data coordinates), so points below the baseline fill downward. On a <code>line</code>, markers default to twice the stroke width; on a <code>scatter</code>, they match the stroke width (3 px by default):</p>
 <img src="../images/charts/markers.svg" alt="Five scatter charts of the same counts drawn with circles, squares, diamonds, triangles, and crosses.">
 <pre><code class="language-haskell">markers :: [(Text, Series)]
 markers =
@@ -274,8 +274,8 @@ markers =
       ]
   ]
 </code></pre>
-<h3 id="grid-titles-and-legend"><a class="header" href="#grid-titles-and-legend">Grid, titles, and legend</a></h3>
-<p><code>withGrid</code> picks the grid lines drawn through the data box. Ticks and their labels stay either way.</p>
+<h3 id="grid-titles-and-legends"><a class="header" href="#grid-titles-and-legends">Grid, titles, and legends</a></h3>
+<p><code>withGrid</code> chooses which grid lines appear behind the plot area while keeping ticks and tick labels visible:</p>
 <img src="../images/charts/grids.svg" alt="The same wave four times: with horizontal and vertical grid lines, horizontal only, vertical only, and no grid.">
 <pre><code class="language-haskell">grids :: [(Text, Chart)]
 grids =
@@ -284,7 +284,7 @@ grids =
       [("GridBoth", GridBoth), ("GridHorizontal", GridHorizontal), ("GridVertical", GridVertical), ("GridNone", GridNone)]
   ]
 </code></pre>
-<p><code>withTitle</code>, <code>withXAxis</code>, and <code>withYAxis</code> add titles. <code>withLegend</code> places the legend, which is on the right by default. At this height the bottom and inside legends would overlap other labels, so those two charts are drawn larger.</p>
+<p>Add titles with <code>withTitle</code>, <code>withXAxis</code>, and <code>withYAxis</code>, and position the legend with <code>withLegend</code> (it sits on the right by default). In the preview below, the bottom and inside-top-left variants expand automatically so their legends do not collide with tick labels:</p>
 <img src="../images/charts/legends.svg" alt="Five charts titled Latency with lines p50 and p99: the legend on the right, along the top, absent, along the bottom of a larger chart, and inside the top left corner of a larger chart.">
 <pre><code class="language-haskell">latency :: Chart
 latency =
@@ -303,8 +303,8 @@ legends =
       ]
   ]
 </code></pre>
-<h3 id="hover"><a class="header" href="#hover">Hover</a></h3>
-<p><code>plot</code> returns a <code>PlotResponse</code>. Its <code>plotHover</code> is the point nearest the pointer, in data units, while the pointer is inside the data box:</p>
+<h3 id="hover-inspection"><a class="header" href="#hover-inspection">Hover inspection</a></h3>
+<p><code>plot</code> returns a <code>PlotResponse</code> whose <code>plotHover</code> field reports the data point closest to the cursor (in data coordinates) whenever the pointer is over the plot box:</p>
 <pre><code class="language-haskell">requests :: [(Double, Double)]
 requests = zip [0 ..] [120, 180, 150, 260, 210, 300, 240, 280]
 
@@ -316,9 +316,9 @@ hoverReadout cache = columnWith (gap 8) $ do
     Just h -&gt; kv "value" (T.pack (show (round (hoverDataY h) :: Int)))
 </code></pre>
 <img src="../images/charts/hover.svg" alt="A line chart of eight request counts with the pointer by the seventh point; below it the readout value 240.">
-<p>The pointer rests by the seventh point, so the readout shows its 240. <code>hoverSeriesIdx</code> and <code>hoverPointIdx</code> hold the index of its series and point. Wrap the chart in <code>withCursorShape UiCursorCrosshair</code> to give the pointer a crosshair.</p>
-<h3 id="diagrams"><a class="header" href="#diagrams">Diagrams</a></h3>
-<p><code>diagram</code> places any diagrams-lib <code>Diagram B</code> in the layout, framed like a chart and scaled to fit the layout modifier with its proportions kept. Colour it from the theme with <code>colourOf</code>, or take the chart colours from <code>uiPlotStyle</code>:</p>
+<p>Here the pointer hovers near the seventh point, so the readout shows <code>240</code>. <code>hoverSeriesIdx</code> and <code>hoverPointIdx</code> identify the exact series and point index. Wrap the chart in <code>withCursorShape UiCursorCrosshair</code> to show a crosshair while hovering.</p>
+<h3 id="embedding-diagrams-lib-graphics"><a class="header" href="#embedding-diagrams-lib-graphics">Embedding <code>diagrams-lib</code> graphics</a></h3>
+<p><code>diagram</code> renders any <code>diagrams-lib</code> <code>Diagram B</code> inside a layout container, scaling proportionally to fit your layout modifier. Pull colors from the active <code>Theme</code> using <code>colourOf</code>, or reuse chart palette colors from <code>uiPlotStyle</code>:</p>
 <pre><code class="language-haskell">-- | Three labelled boxes joined by arrows, coloured from the theme.
 stages :: Theme -&gt; Diagram B
 stages t = (mconcat (zipWith stage [0 ..] ["view", "layout", "paint"]) &lt;&gt; arrows) # frame 0.25
@@ -336,10 +336,10 @@ stages t = (mconcat (zipWith stage [0 ..] ["view", "layout", "paint"]) &lt;&gt; 
 pipelineDiagram :: NanoUI ()
 pipelineDiagram = void $ diagram (fixedWH 360 72) . stages =&lt;&lt; uiTheme
 </code></pre>
-<img src="../images/charts/diagram.svg" alt="Three blue rounded boxes labelled view, layout, and paint, joined left to right by white arrows.">
-<p>Text in a diagram is measured with the current font so labels fit. The cache key is the theme and the size only, so for a diagram whose content changes, use <code>diagramWithKeyAndEnvelope</code> with a key that changes with it. The live chart tutorial feeds a chart from a <code>Stream</code>: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>.</p>
+<img src="../images/charts/diagram.svg" alt="Three blue rounded boxes labeled view, layout, and paint, joined left to right by white arrows.">
+<p>Text inside a <code>Diagram</code> is measured with the active UI font so labels fit accurately. By default, <code>diagram</code> caches only by theme and size; if your diagram’s content changes dynamically, use <code>diagramWithKeyAndEnvelope</code> with an explicit key. For an example feeding a chart from a live background stream, see <a href="../tutorials/live-data.html">Tutorial 3: Live Data &amp; Background Work</a>.</p>
 <h2 id="validated-forms"><a class="header" href="#validated-forms">Validated forms</a></h2>
-<p><code>nano-ui-form</code> builds applicative forms on ditto. A <code>Form Text a</code> has <code>Text</code> errors and returns <code>a</code>:</p>
+<p><code>nano-ui-form</code> builds type-safe applicative forms on top of <code>ditto</code>. A <code>Form Text a</code> collects <code>Text</code> validation errors and yields a parsed value of type <code>a</code>:</p>
 <pre><code class="language-haskell">data Signup = Signup Text Text
 
 signup :: Form Text Signup
@@ -348,7 +348,7 @@ signup =
     &lt;$&gt; withFieldErrors (inputText "Name" "" `prove` notEmpty "Name is required")
     &lt;*&gt; withFieldErrors (inputText "Email" "" `prove` validEmail (const "Not an email address"))
 </code></pre>
-<p>Allocate <code>owner &lt;- newFormState</code> once, then run it with a stable prefix:</p>
+<p>Allocate <code>owner &lt;- newFormState</code> once during setup, then render the form under a stable key:</p>
 <pre><code class="language-haskell">signupView :: FormState -&gt; NanoUI ()
 signupView owner = do -- owner &lt;- newFormState in setup
   submitted &lt;- nanoFormSubmit owner "signup" "Sign up" signup
@@ -356,9 +356,9 @@ signupView owner = do -- owner &lt;- newFormState in setup
     Just (Signup name _) -&gt; label ("Welcome, " &lt;&gt; name)
     Nothing              -&gt; pure ()
 </code></pre>
-<p><code>nanoFormLive</code> returns <code>Just a</code> whenever the form is valid; <code>nanoFormEx</code> takes a <code>FormConfig</code>; <code>runNanoForm</code> returns the view and result separately. Inputs include <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputRadio</code>, and <code>inputColor</code>. Validation includes <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. <code>inputWidget</code> adapts any <code>Var a -&gt; NanoUI Response</code> widget, with a publication policy (<code>OnChange</code>, <code>OnChangeOr</code>, <code>OnlyWhen</code>).</p>
+<p><code>nanoFormLive</code> returns <code>Just a</code> continuously whenever the form is valid, <code>nanoFormEx</code> accepts a <code>FormConfig</code>, and <code>runNanoForm</code> separates the rendered view from its result. Built-in inputs cover <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputRadio</code>, and <code>inputColor</code>, paired with validators such as <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. Wrap any custom <code>Var a -&gt; NanoUI Response</code> widget with <code>inputWidget</code>, choosing when edits publish (<code>OnChange</code>, <code>OnChangeOr</code>, or <code>OnlyWhen</code>).</p>
 <h2 id="markdown"><a class="header" href="#markdown">Markdown</a></h2>
-<p><code>nano-ui-markdown</code> parses with commonmark and draws with rich text:</p>
+<p><code>nano-ui-markdown</code> parses CommonMark (with GitHub tables, task lists, strikethrough, and autolinks) and renders it as selectable rich text:</p>
 <pre><code class="language-haskell">doc :: MarkdownDoc
 doc = parseMarkdown "# Hello\n\nSome *emphasis* and `code`."
 
@@ -367,19 +367,19 @@ view cache = do -- cache &lt;- newMarkdownCache in setup
   clicked &lt;- markdown cache doc
   for_ clicked $ \url -&gt; liftIO (void (Sdl.openUrl url))
 </code></pre>
-<p>Allocate <code>cache &lt;- newMarkdownCache</code> once. <code>markdown</code> returns the link clicked this frame. For streaming, append without reparsing the whole document:</p>
+<p>Allocate <code>cache &lt;- newMarkdownCache</code> once during setup. <code>markdown</code> returns the URL of any link clicked on the current frame. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:</p>
 <pre><code class="language-haskell">reply :: Stream Int MarkdownDoc -&gt; MarkdownCache -&gt; Int -&gt; NanoUI ()
 reply stream cache replyId = do
   answer &lt;- useStream stream replyId emptyMarkdown $ \update -&gt;
     onToken (\token -&gt; update (appendMarkdown token))
   void (markdown cache answer)
 </code></pre>
-<p>When appending on the UI thread, append a frame’s tokens in one call. The parser reparses only the tail block, with a few documented exceptions (a long unsplittable final block, or a link-reference definition). <code>MarkdownConfig.mdBlock</code> overrides block drawing, for example to syntax-highlight code.</p>
+<p>If tokens arrive on the UI thread, concatenate each frame’s batch into a single <code>appendMarkdown</code> call. The incremental parser only reparses the trailing block (except when a chunk completes an unsplittable block or adds a link-reference definition). To customize rendering for specific elements (such as adding syntax highlighting to fenced code blocks), override <code>MarkdownConfig.mdBlock</code>.</p>
 <h2 id="svg-export"><a class="header" href="#svg-export">SVG export</a></h2>
-<p><code>nano-ui-svg</code> has two levels:</p>
+<p><code>nano-ui-svg</code> exports graphics at two levels:</p>
 <ul>
-<li><code>NanoUI.Draw.Svg</code> exports <code>DrawOp</code> sequences: <code>drawOpsToSvg bounds ops</code> or <code>renderDrawOpsSvg config</code>.</li>
-<li><code>NanoUI.Draw.FrameSvg</code> re-renders a whole frame: <code>frameToSvg config ctx input drawData</code>.</li>
+<li><code>NanoUI.Draw.Svg</code> exports raw <code>DrawOp</code> lists via <code>drawOpsToSvg bounds ops</code> or <code>renderDrawOpsSvg config</code>.</li>
+<li><code>NanoUI.Draw.FrameSvg</code> exports an entire rendered UI frame via <code>frameToSvg config ctx input drawData</code>.</li>
 </ul>
 <pre><code class="language-haskell">exportViewToSvg :: NanoUI () -&gt; IO Text
 exportViewToSvg v = do
@@ -389,7 +389,7 @@ exportViewToSvg v = do
   (_, drawData, _) &lt;- runFrame ctx inp v
   frameToSvg defaultFrameSvgConfig ctx inp drawData
 </code></pre>
-<p><code>enableSvgExport</code> records the shapes paint draws and the text spans the exporter reads; <code>frameToSvg</code> fails on a context without it. Ids in the document take a prefix from its hash, so several SVGs can share a page. A <code>newPixelContext</code> measures text on a 16 px monospace grid; run the frames inside <code>withSdl</code> to measure in the real font. The specimens in this book are made this way.</p>
+<p>Call <code>enableSvgExport</code> on your context beforehand so paint passes record vector shapes and text spans (<code>frameToSvg</code> fails without it). Generated clip and gradient IDs are prefixed from a hash of the SVG document, so multiple exported SVGs can live safely on the same HTML page. A headless <code>newPixelContext</code> measures text on a 16 px monospace grid; run your frames inside <code>withSdl</code> if you want real TrueType font metrics (which is how all the illustrations in this book are generated).</p>
 
                     </main>
 
@@ -442,8 +442,8 @@ exportViewToSvg v = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

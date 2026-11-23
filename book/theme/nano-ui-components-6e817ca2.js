@@ -53,10 +53,10 @@
         <div class="nano-wb-header">
           <div class="nano-wb-title">
             <span>${title}</span>
-            <span class="nano-wb-badge">Interactive Specimen</span>
+            <span class="nano-wb-badge">Live preview</span>
           </div>
           <div class="nano-chip-group">
-            <button type="button" class="nano-chip chip-compare" id="btn-compare">Toggle Compare Baseline</button>
+            <button type="button" class="nano-chip chip-compare" id="btn-compare">Compare baseline</button>
             <button type="button" class="nano-chip" id="btn-reset">Reset</button>
           </div>
         </div>
@@ -79,7 +79,7 @@
               ${this.compare ? `<div class="svg-well">${unpackSvg(this.widgetId, 0)}</div>` : ''}
             </div>
             <div class="nano-svg-pane">
-              ${this.compare ? '<span class="nano-pane-label">Active Configuration</span>' : ''}
+              ${this.compare ? '<span class="nano-pane-label">With modifiers</span>' : ''}
               <div class="svg-well" id="active-well">${unpackSvg(this.widgetId, this.mask)}</div>
             </div>
           </div>
@@ -102,7 +102,7 @@
       if (!meta || !meta.notes) return '';
       const activeNotes = meta.notes.filter(n => (this.mask & (1 << n.bit)) !== 0);
       if (activeNotes.length === 0) {
-        return '<div style="opacity:0.6;font-style:italic">Select one or more styling modifiers above to inspect how nano-ui routes them to this widget.</div>';
+        return '<div style="opacity:0.6;font-style:italic">Toggle any modifier above to see how it affects this widget.</div>';
       }
       return activeNotes.map(n => `
         <div class="nano-note-item">
@@ -182,8 +182,8 @@
       this.innerHTML = `
         <div class="nano-wb-header">
           <div class="nano-wb-title">
-            <span>Surface Routing Overview & Semantic Tones</span>
-            <span class="nano-wb-badge">Theme Surface Matrix</span>
+            <span>Theme Surfaces &amp; Semantic Tones</span>
+            <span class="nano-wb-badge">Live preview</span>
           </div>
           <div class="nano-chip-group">
             <button type="button" class="nano-chip" id="hero-all">All Surfaces</button>
@@ -241,7 +241,7 @@
       this.innerHTML = `
         <div class="nano-wb-header">
           <div class="nano-wb-title">
-            <span>Interaction State Strip (Default -> Hover -> Pressed -> Disabled)</span>
+            <span>Interaction States (Default, Hover, Pressed, Disabled)</span>
             <span class="nano-wb-badge">4 States</span>
           </div>
           <div class="nano-chip-group">
@@ -276,7 +276,7 @@
       this.innerHTML = `
         <div class="nano-wb-header">
           <div class="nano-wb-title">
-            <span>Typography Modifiers & Hierarchy</span>
+            <span>Typography Modifiers</span>
             <span class="nano-wb-badge">Font Options</span>
           </div>
           <div class="nano-chip-group">
@@ -345,7 +345,7 @@
       const title = trap.title || '';
       const where = trap.where || '';
       const whyHtml = trap.why ? `<strong>Why it happens:</strong> ${formatProse(trap.why)}` : '';
-      const fixHtml = trap.fix ? `<strong>Recommended fix:</strong> ${formatProse(trap.fix)}` : '';
+      const fixHtml = trap.fix ? `<strong>Fix:</strong> ${formatProse(trap.fix)}` : '';
       const blocks = trap.blocks || [whyHtml, fixHtml].filter(Boolean);
 
       const badCode = (trap.bad && trap.bad.code) || trap.codeBad || '';
@@ -377,11 +377,11 @@
 
         <div class="nano-trap-code-grid">
           <div class="nano-code-card">
-            <div class="nano-code-card-header bad">Gotcha / Trap Pattern</div>
+            <div class="nano-code-card-header bad">Surprise</div>
             <pre><code>${escapeHtml(badCode)}</code></pre>
           </div>
           <div class="nano-code-card">
-            <div class="nano-code-card-header good">Recommended Fix</div>
+            <div class="nano-code-card-header good">Fix</div>
             <pre><code>${escapeHtml(goodCode)}</code></pre>
           </div>
         </div>
@@ -430,7 +430,7 @@
   customElements.define('nano-ui-typo-lab', NanoUiTypoLab);
   customElements.define('nano-ui-trap', NanoUiTrap);
 
-  // Label theme options to highlight nano-ui identity
+  // Rename the mdBook theme picker entries for nano-ui
   function labelThemePicker() {
     const coalBtn = document.getElementById('mdbook-theme-coal');
     if (coalBtn) coalBtn.textContent = 'Nano Dark (Default)';

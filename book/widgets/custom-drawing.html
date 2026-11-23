@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,40 +179,40 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="custom-drawing--controls"><a class="header" href="#custom-drawing--controls">Custom Drawing &amp; Controls</a></h1>
-<p>When the built-in widgets do not fit, draw the control with the canvas API. The six controls in <code>NanoUI.Widgets.Custom</code> are built on it, and their source is the example to copy.</p>
-<h2 id="reference-custom-controls"><a class="header" href="#reference-custom-controls">Reference custom controls</a></h2>
-<p><code>NanoUI</code> exports them from <code>NanoUI.Widgets.Custom</code>.</p>
+<p>When the built-in widgets do not cover what you need, you can draw directly with the 2D canvas API. The six controls in <code>NanoUI.Widgets.Custom</code> are built on this same API and double as clean templates for your own widgets.</p>
+<h2 id="built-in-custom-controls"><a class="header" href="#built-in-custom-controls">Built-in custom controls</a></h2>
+<p><code>NanoUI</code> re-exports all six from <code>NanoUI.Widgets.Custom</code>:</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Control</th><th>Signature</th><th>Default size</th><th>Notes</th></tr>
 </thead>
 <tbody>
-<tr><td><code>knob</code></td><td><code>Float -&gt; Float -&gt; Var Float -&gt; NanoUI ()</code></td><td>36×36</td><td>Min, max, value; vertical drag, wheel, arrows</td></tr>
-<tr><td><code>toggleSwitch</code></td><td><code>Var Bool -&gt; NanoUI ()</code></td><td>44×24</td><td>Click, Space, or Enter toggles</td></tr>
-<tr><td><code>circularProgress</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>32×32</td><td>Fraction in <code>[0, 1]</code></td></tr>
-<tr><td><code>progressBar</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>fills width, 12 high</td><td>Fraction in <code>[0, 1]</code></td></tr>
-<tr><td><code>spinner</code></td><td><code>NanoUI ()</code></td><td>18×18</td><td>Indeterminate; wakes the loop 60 times a second while on screen</td></tr>
-<tr><td><code>sparkline</code></td><td><code>[Float] -&gt; NanoUI ()</code></td><td>80×24</td><td>Scales to the values’ range</td></tr>
+<tr><td><code>knob</code></td><td><code>Float -&gt; Float -&gt; Var Float -&gt; NanoUI ()</code></td><td>36x36</td><td>Min, max, value; drag vertically, scroll wheel, or use arrow keys</td></tr>
+<tr><td><code>toggleSwitch</code></td><td><code>Var Bool -&gt; NanoUI ()</code></td><td>44x24</td><td>Toggle with click, Space, or Enter</td></tr>
+<tr><td><code>circularProgress</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>32x32</td><td>Progress fraction in <code>[0, 1]</code></td></tr>
+<tr><td><code>progressBar</code></td><td><code>Float -&gt; NanoUI ()</code></td><td>full width, 12 high</td><td>Progress fraction in <code>[0, 1]</code></td></tr>
+<tr><td><code>spinner</code></td><td><code>NanoUI ()</code></td><td>18x18</td><td>Indeterminate spinner; wakes the loop at 60 Hz while visible</td></tr>
+<tr><td><code>sparkline</code></td><td><code>[Float] -&gt; NanoUI ()</code></td><td>80x24</td><td>Auto-scales vertically to the input range</td></tr>
 </tbody>
 </table>
 </div>
-<p>Each has a primed form returning <code>Response</code> (<code>knob'</code>, <code>toggleSwitch'</code>, …) and a <code>...With</code> form that takes a layout modifier and size parameters:</p>
+<p>Every control provides a primed form (<code>knob'</code>, <code>toggleSwitch'</code>, and so on) returning a <code>Response</code>, plus a <code>...With</code> variant accepting a layout modifier and custom dimensions:</p>
 <pre><code class="language-haskell">controls :: Var Float -&gt; Float -&gt; [Float] -&gt; NanoUI ()
 controls volume progress samples = do
   knobWith alignMid 48 0 100 volume
   progressBarWith fillW 6 progress
   sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
-<p><code>sparkline</code> maps the smallest value to the bottom of its plot area and the largest to the top, so two series of different magnitude can draw the same line. At its default size and with <code>sparklineWith</code>:</p>
+<p><code>sparkline</code> stretches the minimum value to the bottom of its plot box and the maximum to the top, so series of different scales remain readable in a tight strip. Here is a sparkline at its default size next to a wider <code>sparklineWith</code>:</p>
 <pre><code class="language-haskell">sparklines :: [Float] -&gt; NanoUI ()
 sparklines samples = rowWith (gap 16 . alignMid) $ do
   sparkline samples
   sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
 <img src="../images/charts/sparkline.svg" alt="Two small boxed blue line graphs of the same wavy series, the second wider and taller.">
-<p>For a chart with axes, a legend, and hover, use <code>plot</code> from <code>nano-ui-diagrams</code> (see <a href="../packages/index.html#charts-and-diagrams">Ecosystem Packages</a>).</p>
-<p>A settings row:</p>
+<p>If you need axes, legends, or hover readouts, use <code>plot</code> from <code>nano-ui-diagrams</code> instead (see <a href="../packages/index.html#charts-and-diagrams">Charts and diagrams</a>).</p>
+<p>Here is a compact settings row combining a knob and a live readout:</p>
 <pre><code class="language-haskell">settingsRow :: Var Bool -&gt; Var Float -&gt; NanoUI ()
 settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
   toggleSwitch enabled
@@ -221,18 +221,18 @@ settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
   v &lt;- readVar volume
   labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
 </code></pre>
-<p>The <code>fixedW</code> on the changing number keeps the controls from shifting. Read the value <em>below</em> the knob so a drag resolves in one pass.</p>
-<p><code>spinner</code> asks for a frame for each of its 60 steps a second (<code>wakeAfter</code>) while any of it is on screen, and for none once it is scrolled or clipped out of view. Do not add a global <code>keepAnimating</code>; that would run frames at the display rate whether or not the spinner shows.</p>
-<h3 id="implementing-custom-controls"><a class="header" href="#implementing-custom-controls">Implementing custom controls</a></h3>
-<p>Each control in <code>NanoUI.Widgets.Custom</code> follows the same steps:</p>
+<p>Pinning the numeric label with <code>fixedW</code> prevents the row from jittering as digits change, and reading the <code>Var</code> <em>below</em> the knob keeps drags to a single pass.</p>
+<p><code>spinner</code> paces itself with <code>wakeAfter</code> (60 steps per second) only while it is visible on screen; once scrolled or clipped out of view, it stops requesting frames. Avoid calling a global <code>keepAnimating</code>, which would keep the event loop spinning even when no spinner is on screen.</p>
+<h3 id="how-custom-controls-are-structured"><a class="header" href="#how-custom-controls-are-structured">How custom controls are structured</a></h3>
+<p>Each control in <code>NanoUI.Widgets.Custom</code> follows the same four steps:</p>
 <ol>
-<li>Take an id with <code>freshWidget</code>.</li>
-<li>Size and draw through a <code>CustomWidgetSpec</code> and <code>runCanvasFor</code>.</li>
-<li>Turn input into a change of value with <code>useDrag2DOn</code>, <code>useWheelDeltaOn</code>, and <code>useKeyNav</code>.</li>
-<li>Write the result to the caller’s <code>Var</code> with <code>bindVar</code> or <code>finishInput</code>.</li>
+<li>Claim an ID with <code>freshWidget</code>.</li>
+<li>Size and render it via <code>CustomWidgetSpec</code> and <code>runCanvasFor</code>.</li>
+<li>Handle user input with <code>useDrag2DOn</code>, <code>useWheelDeltaOn</code>, and <code>useKeyNav</code>.</li>
+<li>Commit edits back to the caller’s <code>Var</code> with <code>bindVar</code> or <code>finishInput</code>.</li>
 </ol>
 <h2 id="canvas-drawing"><a class="header" href="#canvas-drawing">Canvas drawing</a></h2>
-<p><code>canvas</code> sizes a rectangle with a layout modifier and runs a <code>CanvasM</code> drawing in it. The rectangle is the widget’s place in the window, so draw relative to it:</p>
+<p><code>canvas</code> reserves a rectangle using a layout modifier and runs a <code>CanvasM</code> block inside it. The rectangle passed to your drawing callback is in window coordinates, so draw relative to its <code>Rect x y w h</code>:</p>
 <pre><code class="language-haskell">import NanoUI.Path qualified as P
 
 badge :: NanoUI ()
@@ -242,7 +242,7 @@ badge = void $ canvas (fixedWH 120 40) $ \r@(Rect x y _ h) -&gt; do
   drawText (V2 (x + 68) (y + h / 2)) AlignCenter AlignMiddle "Ready" colorWhite
 </code></pre>
 <img src="../images/canvas/badge.svg" alt="A blue rounded badge with a white ring on the left and the word Ready.">
-<p><code>canvas</code> returns the widget’s <code>Response</code>; discard it with <code>void</code> when the drawing needs no hover or clicks. <code>canvasConfigured</code> adds a content key, a cursor, and pointer tracking. For full control, use <code>customWidget</code> with a <code>CustomWidgetSpec</code>:</p>
+<p><code>canvas</code> returns a <code>Response</code>; wrap it in <code>void</code> if your drawing is purely decorative. <code>canvasConfigured</code> adds content-key caching, custom cursor shapes, and pointer tracking. When you need full control over sizing, keyboard handling, or focus, drop down to <code>customWidget</code> with a <code>CustomWidgetSpec</code>:</p>
 <pre><code class="language-haskell">dot :: Float -&gt; Float -&gt; NanoUI Response
 dot angle volume = do
   (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
@@ -254,9 +254,9 @@ dot angle volume = do
     }
   pure resp
 </code></pre>
-<p><code>runCanvasFor</code> adapts tessellation to the display scale inside <code>widgetDraw</code>. <code>drawContext</code> / <code>cdcTheme</code> supply the active theme, font, hover, and press state.</p>
-<h3 id="reading-the-examples"><a class="header" href="#reading-the-examples">Reading the examples</a></h3>
-<p>The rest of this section is compiled from <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/CanvasExamples.hs"><code>CanvasExamples.hs</code></a>, and <code>nano-ui-svg-glossary</code> renders the same definitions to the images. Each list pairs a caption with a drawing, and the drawing gets one cell’s rectangle. They share a palette and a helper:</p>
+<p>Inside <code>widgetDraw</code>, <code>runCanvasFor</code> adjusts curve tessellation automatically for the display’s DPI scale, and <code>drawContext</code> / <code>cdcTheme</code> give you the active <code>Theme</code>, font metrics, and hover/press state.</p>
+<h3 id="reading-the-canvas-examples"><a class="header" href="#reading-the-canvas-examples">Reading the canvas examples</a></h3>
+<p>The visual reference below comes straight from <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/CanvasExamples.hs"><code>CanvasExamples.hs</code></a>, rendered directly to SVG by <code>nano-ui-svg-glossary</code>. Each list pairs a label with a drawing callback, sharing these colors and helper:</p>
 <pre><code class="language-haskell">ink, blue, teal, amber, rose :: Color
 ink = colorRGB 226 232 240
 blue = colorRGB 59 130 246
@@ -267,10 +267,10 @@ rose = colorRGB 244 63 94
 centre :: Rect -&gt; V2
 centre (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
 </code></pre>
-<p>Thin grey lines, small dots, dashed outlines, and the red crosshair in the images are annotations drawn on top. They are not part of the example code.</p>
+<p>Thin gray guides, dots, dashed outlines, and red crosshairs in the images below are reference annotations overlaid by the generator, not part of the snippets themselves.</p>
 <h3 id="rectangles-circles-and-gradients"><a class="header" href="#rectangles-circles-and-gradients">Rectangles, circles, and gradients</a></h3>
-<p>The basic ops take a rectangle or a centre and radius. They need no <code>NanoUI.Path</code> import.</p>
-<img src="../images/canvas/primitives.svg" alt="Eight cells: a blue rectangle, a teal rounded rectangle, an amber disc, a rose ring, a diagonal line, a horizontal blue-to-teal gradient, a vertical amber-to-rose gradient, and a four-colour corner gradient.">
+<p>The basic drawing primitives take a rectangle or a center and radius, with no <code>NanoUI.Path</code> import required.</p>
+<img src="../images/canvas/primitives.svg" alt="Eight cells: a blue rectangle, a teal rounded rectangle, an amber disc, a rose ring, a diagonal line, a horizontal blue-to-teal gradient, a vertical amber-to-rose gradient, and a four-color corner gradient.">
 <pre><code class="language-haskell">primitives :: [(Text, Rect -&gt; CanvasM ())]
 primitives =
   [ ("drawRect", \r -&gt; drawRect r blue)
@@ -283,10 +283,10 @@ primitives =
   , ("drawQuadGradient", \r -&gt; drawQuadGradient r blue teal amber rose)
   ]
 </code></pre>
-<p><code>drawStrokeCircle</code> keeps its border inside the radius. <code>drawStrokeAA</code> is an anti-aliased line with square ends; <code>drawStroke</code> is the same line without anti-aliasing, for axis-aligned rules. <code>drawQuadGradient</code> takes its colours clockwise from the top left.</p>
+<p><code>drawStrokeCircle</code> insets its stroke inside the radius. <code>drawStrokeAA</code> draws an anti-aliased segment with square ends, while <code>drawStroke</code> skips anti-aliasing for crisp horizontal or vertical rules. <code>drawQuadGradient</code> takes its four corner colors clockwise starting from the top-left.</p>
 <h3 id="paths"><a class="header" href="#paths">Paths</a></h3>
-<p>A <code>Path</code> is a list of steps joined with <code>&lt;&gt;</code>. <code>moveTo</code> starts a subpath. <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code> extend it from the current point, and <code>close</code> draws a line back to where it started. Each path below is stroked with <code>drawStrokePath (path r) 3 blue</code>. Filled dots are points on the path; hollow dots are control points and arc centres.</p>
-<img src="../images/canvas/segments.svg" alt="Five cells: a two-segment peak, a quadratic curve with its control point above, an S-shaped cubic curve with two control points, a three-quarter arc, and the same arc closed through its centre into a pie slice.">
+<p>A <code>Path</code> is a sequence of commands combined with <code>&lt;&gt;</code>. Start a subpath with <code>moveTo</code>, extend it with <code>lineTo</code>, <code>quadTo</code>, <code>cubicTo</code>, and <code>arc</code>, and connect back to the start with <code>close</code>. Below, each path is stroked with <code>drawStrokePath (path r) 3 blue</code>; solid dots mark path vertices, while hollow rings mark control points and arc centers.</p>
+<img src="../images/canvas/segments.svg" alt="Five cells: a two-segment peak, a quadratic curve with its control point above, an S-shaped cubic curve with two control points, a three-quarter arc, and the same arc closed through its center into a pie slice.">
 <pre><code class="language-haskell">segments :: [(Text, Rect -&gt; P.Path)]
 segments =
   [ ("lineTo", \(Rect x y w h) -&gt;
@@ -299,8 +299,8 @@ segments =
   , ("moveTo, arc, close", \r -&gt; P.moveTo (centre r) &lt;&gt; P.arc (centre r) 28 0 (3 * pi / 2) &lt;&gt; P.close)
   ]
 </code></pre>
-<p>Angles are in radians. Because y points down, a positive sweep turns clockwise on screen: the arc starts at 3 o’clock and runs three quarters of the way round. An <code>arc</code> after <code>moveTo</code> joins the current point to its start with a line, which is how the last cell draws a pie slice.</p>
-<p>Shape helpers build whole subpaths. They never join onto what comes before them, so <code>&lt;&gt;</code> combines them into one path with several subpaths.</p>
+<p>Angles are in radians. Because <code>y</code> increases downward, positive angles sweep clockwise: <code>0</code> points to 3 o’clock, so a positive sweep of <code>3 * pi / 2</code> runs three-quarters of the way around clockwise. Calling <code>arc</code> after <code>moveTo</code> draws a straight line from the current point to the start of the arc, which makes pie wedges trivial.</p>
+<p>Shape constructors build complete standalone subpaths. They never connect to prior subpaths, so joining them with <code>&lt;&gt;</code> builds a single multi-subpath shape:</p>
 <img src="../images/canvas/shapes.svg" alt="Seven cells, each a translucent blue fill with a blue outline: a rectangle, a rounded rectangle, a rectangle with two large and two small corner radii, a circle, a wide ellipse, a triangle, and an open zigzag line.">
 <pre><code class="language-haskell">shapes :: [(Text, Rect -&gt; CanvasM ())]
 shapes =
@@ -316,9 +316,9 @@ shapes =
   where
     shape p = drawPath p (withAlpha blue 0.35) &gt;&gt; drawStrokePath p 2 blue
 </code></pre>
-<p><code>roundedRectCorners</code> takes its radii in CSS <code>border-radius</code> order: top left, top right, bottom right, bottom left. <code>polygon</code> closes its outline and <code>polyline</code> leaves it open, so the polyline is only stroked here. A fill closes every subpath.</p>
+<p><code>roundedRectCorners</code> takes corner radii in CSS <code>border-radius</code> order: top-left, top-right, bottom-right, bottom-left. <code>polygon</code> closes the contour while <code>polyline</code> leaves it open (so the polyline is only stroked above). Filling a path implicitly closes every subpath.</p>
 <h3 id="fill-rules"><a class="header" href="#fill-rules">Fill rules</a></h3>
-<p><code>drawPath</code> fills with <code>P.NonZero</code>. <code>drawPathWith</code> takes the rule and a paint. All three cells fill three concentric circles:</p>
+<p><code>drawPath</code> fills using <code>P.NonZero</code>, while <code>drawPathWith</code> lets you choose both the fill rule and paint. All three cells below fill three concentric circles:</p>
 <img src="../images/canvas/fill-rules.svg" alt="Three cells of teal concentric circles: NonZero fills a solid disc; NonZero with the middle circle reversed and EvenOdd both show a ring around a dot.">
 <pre><code class="language-haskell">fillRules :: [(Text, Rect -&gt; CanvasM ())]
 fillRules =
@@ -336,9 +336,9 @@ fillRules =
         &lt;&gt; P.close
         &lt;&gt; P.circle (centre r) 9
 </code></pre>
-<p><code>P.circle</code> always runs clockwise, so under <code>NonZero</code> the inner circles add to the outer one and the disc is solid. Running the middle circle the other way cancels it out, cutting a hole. <code>EvenOdd</code> ignores direction: each nested subpath toggles between filled and empty. Crossing subpaths are not resolved against each other, so keep holes inside the shape they cut.</p>
+<p>Because <code>P.circle</code> always winds clockwise, all three circles add together under <code>NonZero</code> to produce a solid disc. Reversing the middle circle cancels out its interior and punches a hole. <code>EvenOdd</code> ignores winding direction and simply alternates filled and empty as subpaths nest. Note that self-intersecting or crossing subpaths are not resolved against each other, so keep cutouts strictly inside their enclosing contour.</p>
 <h3 id="paints"><a class="header" href="#paints">Paints</a></h3>
-<p><code>P.Solid</code> is one colour. <code>P.Linear from to stops</code> is a gradient along the line from <code>from</code> (offset 0) to <code>to</code> (offset 1).</p>
+<p><code>P.Solid</code> fills with a flat color. <code>P.Linear from to stops</code> interpolates color stops along the segment from <code>from</code> (offset <code>0</code>) to <code>to</code> (offset <code>1</code>):</p>
 <img src="../images/canvas/paints.svg" alt="Four cells: a solid blue rounded rectangle, a blue-to-teal gradient across the full width, the same gradient squeezed into the middle third with solid ends, and a disc shading amber to rose to blue along its diagonal.">
 <pre><code class="language-haskell">paints :: [(Text, Rect -&gt; CanvasM ())]
 paints =
@@ -351,10 +351,10 @@ paints =
       drawPathWith P.NonZero (P.circle (centre r) 30) (P.Linear (V2 x y) (V2 (x + w) (y + h)) [(0, amber), (0.5, rose), (1, blue)]))
   ]
 </code></pre>
-<p>Past the first and last stop the gradient keeps their colours, which the short span shows. Strokes take a <code>Paint</code> too, so a gradient can run along an outline.</p>
+<p>Outside the first and last stops, the gradient clamps to the endpoint colors (visible in the middle-third example). Strokes accept <code>Paint</code> values too, so outlines can use gradients just like fills.</p>
 <h3 id="strokes"><a class="header" href="#strokes">Strokes</a></h3>
-<p><code>drawStrokePathWith</code> takes a <code>P.Stroke</code>. Start from <code>P.stroke width</code> (butt caps, miter joins, solid) and override fields with record update. Strokes are centred on the path.</p>
-<p>Caps finish the ends of open subpaths and of every dash. The thin line is the path; butt caps stop at its end points, round and square caps extend past them by half the width.</p>
+<p><code>drawStrokePathWith</code> accepts a <code>P.Stroke</code> record. Start with <code>P.stroke width</code> (butt caps, miter joins, solid line) and update the fields you need. Path strokes are always centered on the path geometry.</p>
+<p>Line caps control how open path ends and individual dashes terminate. Compared against the thin path guide, <code>ButtCap</code> stops flush at the endpoints, while <code>RoundCap</code> and <code>SquareCap</code> extend past them by half the stroke width:</p>
 <img src="../images/canvas/caps.svg" alt="Three thick blue lines over a thin guide line: ButtCap ends flush with the end points, RoundCap ends in semicircles past them, SquareCap ends in squares past them.">
 <pre><code class="language-haskell">capLine :: Rect -&gt; P.Path
 capLine (Rect x y w h) = P.moveTo (V2 (x + 16) (y + h / 2)) &lt;&gt; P.lineTo (V2 (x + w - 16) (y + h / 2))
@@ -365,7 +365,7 @@ caps =
   | (name, cap) &lt;- [("ButtCap", P.ButtCap), ("RoundCap", P.RoundCap), ("SquareCap", P.SquareCap)]
   ]
 </code></pre>
-<p>Joins shape the corners between segments. A miter longer than <code>strokeMiterLimit</code> times the width falls back to a bevel, which the last cell forces with a limit of 1.5.</p>
+<p>Line joins control corners between consecutive segments. If a sharp miter point would stretch farther than <code>strokeMiterLimit * width</code>, it falls back to a flat bevel (demonstrated in the fourth cell with a miter limit of <code>1.5</code>):</p>
 <img src="../images/canvas/joins.svg" alt="Four thick teal zigzags over a thin guide: a pointed miter corner, a rounded corner, a cut-off bevel corner, and a miter beveled by a low miter limit.">
 <pre><code class="language-haskell">zigzag :: Rect -&gt; P.Path
 zigzag (Rect x y w h) = P.polyline [V2 (x + w / 4) (y + h - 4), V2 (x + w / 2) (y + 10), V2 (x + 3 * w / 4) (y + h - 4)]
@@ -380,7 +380,7 @@ joins =
   where
     withJoin st r = drawStrokePathWith st (zigzag r) (P.Solid teal)
 </code></pre>
-<p><code>strokeDash</code> lists alternating dash and gap lengths, repeated along each subpath. <code>strokeDashOffset</code> starts the pattern part of the way in. A zero-length dash with round caps draws a dot.</p>
+<p><code>strokeDash</code> takes alternating dash and gap lengths that repeat along each subpath, and <code>strokeDashOffset</code> shifts where the pattern begins. Combining a zero-length dash with <code>RoundCap</code> produces round dots:</p>
 <img src="../images/canvas/dashes.svg" alt="Four amber dashed rounded rectangles: even dashes, the same dashes shifted along, a long-short dash-dot pattern, and a row of round dots.">
 <pre><code class="language-haskell">dashes :: [(Text, Rect -&gt; CanvasM ())]
 dashes =
@@ -393,8 +393,8 @@ dashes =
     dashed st r = drawStrokePathWith st (P.roundedRect r 12) (P.Solid amber)
 </code></pre>
 <h3 id="transforms"><a class="header" href="#transforms">Transforms</a></h3>
-<p><code>withTransform</code> draws a block through a <code>P.Transform</code>. Transforms compose with <code>&lt;&gt;</code>, and the right-hand one applies first. The dashed outline is the arrow before the transform.</p>
-<img src="../images/canvas/transforms.svg" alt="Four cells with a teal arrow and a dashed outline of its starting position: moved right and down, rotated 45 degrees about its centre, scaled 1.5 times about its centre with a thicker outline, and mirrored to point left.">
+<p><code>withTransform</code> applies a <code>P.Transform</code> to everything drawn inside its block. Transforms compose with <code>&lt;&gt;</code> right-to-left (the right-hand transform runs first). The dashed outline below shows the arrow’s untransformed position:</p>
+<img src="../images/canvas/transforms.svg" alt="Four cells with a teal arrow and a dashed outline of its starting position: moved right and down, rotated 45 degrees about its center, scaled 1.5 times about its center with a thicker outline, and mirrored to point left.">
 <pre><code class="language-haskell">arrowPath :: Rect -&gt; P.Path
 arrowPath r =
   let V2 cx cy = centre r
@@ -415,9 +415,9 @@ transforms =
   , ("scaleAround c (-1) 1", \r -&gt; withTransform (scaleAround (centre r) (-1) 1) (arrow r))
   ]
 </code></pre>
-<p><code>P.rotate</code> and <code>P.scale</code> work about the window origin (0, 0). Move the pivot to the origin first: <code>P.rotateAround</code> does that for rotation, and <code>scaleAround</code> above does it for scale. Stroke widths and dashes scale with the transform, so the enlarged arrow’s outline is thicker. Text moves its anchor and scales, but glyphs do not rotate.</p>
+<p><code>P.rotate</code> and <code>P.scale</code> pivot around the window origin <code>(0, 0)</code>. To pivot around a shape’s center instead, translate it to the origin first (<code>P.rotateAround</code> does this for rotation, and <code>scaleAround</code> above shows the equivalent for scaling). Stroke widths and dash patterns scale with the transform, which is why the scaled arrow has a thicker outline. Text positions and scales under transforms, though individual glyphs do not rotate.</p>
 <h3 id="clipping"><a class="header" href="#clipping">Clipping</a></h3>
-<p><code>withClip rect</code> clips a block to <code>rect</code>, intersected with the current clip. The current clip is at most the widget’s rectangle, so a canvas never draws outside its own bounds.</p>
+<p><code>withClip rect</code> restricts drawing inside its block to the intersection of <code>rect</code> and the active clip region. Every canvas starts clipped to its own widget bounds, so drawings can never accidentally spill outside their widget.</p>
 <img src="../images/canvas/clip.svg" alt="Two cells with a rose disc and the text &#39;text past the edge&#39;: without a clip both spill past a dashed box; with withClip they are cut at the box.">
 <pre><code class="language-haskell">clipped :: Rect -&gt; CanvasM ()
 clipped r@(Rect x y _ h) = do
@@ -434,8 +434,8 @@ clips =
   ]
 </code></pre>
 <h3 id="text"><a class="header" href="#text">Text</a></h3>
-<p><code>drawText pos alignX alignY txt colour</code> anchors text to a point. The alignment selects which part of the text sits on the point (the red dot): <code>AlignStart</code> puts the point at the left edge, <code>AlignTop</code> at the top of the line, <code>AlignBaseline</code> on the baseline. <code>drawTextWith</code> takes a <code>TextFont</code> for size, variant, weight, and slant.</p>
-<img src="../images/canvas/text.svg" alt="Eight cells showing the word Anchor placed against a red dot: left, centre and right aligned; then top, middle, baseline and bottom aligned; and a large bold amber 42.">
+<p><code>drawText pos alignX alignY txt color</code> places text relative to an anchor point (the red dot below). Alignment specifies which part of the text sits on that point: <code>AlignStart</code> anchors the left edge, <code>AlignTop</code> anchors the top of the line box, and <code>AlignBaseline</code> anchors the text baseline. Use <code>drawTextWith</code> with a <code>TextFont</code> to customize size, variant, weight, or slant.</p>
+<img src="../images/canvas/text.svg" alt="Eight cells showing the word Anchor placed against a red dot: left, center and right aligned; then top, middle, baseline and bottom aligned; and a large bold amber 42.">
 <pre><code class="language-haskell">textAnchors :: [(Text, Rect -&gt; CanvasM ())]
 textAnchors =
   [ (name, \r -&gt; drawText (centre r) ax AlignMiddle "Anchor" ink)
@@ -448,9 +448,9 @@ textAnchors =
           drawTextWith defaultTextFont {textFontSize = 24, textFontWeight = WeightBold} (centre r) AlignCenter AlignMiddle "42" amber)
        ]
 </code></pre>
-<p>Measure text in the view with <code>lineWidthUi</code> and <code>uiFontMetrics</code>, cut it to a width with <code>truncateTextUi</code>, and pass the results to the drawing. Both load the glyphs the text needs first. The pure <code>lineWidth</code> is exact only for text the metrics have already measured or drawn; for other text it adds per-glyph advances. Measure a whole run rather than adding per-glyph advances yourself, because a shaping backend lays runs out by unrounded advances.</p>
-<h3 id="borders-inset-or-centred"><a class="header" href="#borders-inset-or-centred">Borders: inset or centred</a></h3>
-<p><code>drawStrokeRoundedRect</code> keeps its border inside the rectangle. A path stroke is centred on the path, so half its width falls outside. The thin outline is the rectangle both cells were given.</p>
+<p>Measure strings inside the view using <code>lineWidthUi</code> and <code>uiFontMetrics</code> (or trim them to fit with <code>truncateTextUi</code>) and pass those measurements into your drawing callback. Both helpers ensure the needed glyphs are loaded first. The pure <code>lineWidth</code> is only exact for text that has already been measured or drawn; otherwise it falls back to summing per-glyph advances, which drifts from HarfBuzz’s unrounded shaped runs over long strings.</p>
+<h3 id="borders-inset-vs-centered"><a class="header" href="#borders-inset-vs-centered">Borders: inset vs. centered</a></h3>
+<p><code>drawStrokeRoundedRect</code> draws its entire border inside the given rectangle. By contrast, <code>drawStrokePath</code> centers the stroke on the path edge, pushing half the border width outside the rectangle. The thin guide below shows the exact rectangle passed to each call:</p>
 <img src="../images/canvas/borders.svg" alt="Two blue rounded borders over a thin guide rectangle: drawStrokeRoundedRect sits entirely inside it, drawStrokePath straddles it.">
 <pre><code class="language-haskell">borders :: [(Text, Rect -&gt; CanvasM ())]
 borders =
@@ -458,9 +458,9 @@ borders =
   , ("drawStrokePath", \r -&gt; drawStrokePath (P.roundedRect r 12) 8 (withAlpha blue 0.8))
   ]
 </code></pre>
-<p>Use the inset form for a widget’s own border, so it never paints past the widget’s rectangle.</p>
+<p>Always use <code>drawStrokeRoundedRect</code> (or inset your path by half the stroke width) when stroking a widget’s outer border so the edges do not get clipped by the widget bounds.</p>
 <h3 id="content-keys-and-caching"><a class="header" href="#content-keys-and-caching">Content keys and caching</a></h3>
-<p>Without <code>widgetContent</code>, a custom widget’s draw ops are rebuilt and diffed every frame. With a key, unchanged frames skip rebuild and repaint, but the key must cover <strong>everything the drawing reads</strong>:</p>
+<p>Without a <code>widgetContent</code> key, <code>nano-ui</code> rebuilds and diffs a custom widget’s draw ops on every frame. Adding a content key lets unchanged frames skip both rebuild and repaint, <strong>as long as the key includes every input the drawing reads</strong>:</p>
 <pre><code class="language-haskell">gauge :: Float -&gt; Float -&gt; Float -&gt; NanoUI Response
 gauge angle volume scrollY = do
   (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
@@ -470,15 +470,15 @@ gauge angle volume scrollY = do
     }
   pure resp
 </code></pre>
-<p>A key that misses an input shows stale pixels. See <a href="../styling/gotchas.html">Styling Gotchas</a>.</p>
-<p>A drawing whose layout rectangle never changes (a drag ghost pinned under the pointer with <code>pinAt</code>) gets no layout change when it moves. Give it an explicit version that includes what moves it:</p>
+<p>If you forget an input in the key, the canvas will freeze on stale pixels until something else forces a rebuild. See <a href="../troubleshooting/recurring-bugs.html#4-stale-cached-drawings">Stale cached drawings</a>.</p>
+<p>A drawing whose layout bounds never change (such as a drag ghost moved via <code>pinAt</code> under the pointer) receives no layout diff when it moves. Give it an explicit version hash covering whatever drives its movement:</p>
 <pre><code class="language-haskell">-- ghostOps :: Rect -&gt; SmallArray DrawOp
 dragGhost :: Float -&gt; Float -&gt; NanoUI Response
 dragGhost mx my = drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOps
 </code></pre>
-<p>Otherwise it keeps the ops of the frame it first appeared in.</p>
-<h2 id="svg"><a class="header" href="#svg">SVG</a></h2>
-<p><code>parseSvg</code> reads SVG text and <code>loadSvg</code> reads a file. An icon that strokes or fills with <code>currentColor</code> takes the text colour, so <code>fontColor</code> and the semantic styles tint it; other colours are kept.</p>
+<p>Without a version key, it stays frozen on the draw ops from its very first frame.</p>
+<h2 id="svg-icons"><a class="header" href="#svg-icons">SVG icons</a></h2>
+<p>Parse inline SVG markup with <code>parseSvg</code> or load a file once at startup with <code>loadSvg</code>. Any stroke or fill using <code>currentColor</code> automatically inherits the active text color (so <code>fontColor</code> and semantic tones tint it cleanly), while hard-coded colors in the SVG stay untouched:</p>
 <pre><code class="language-haskell">icons :: Svg -&gt; Color -&gt; NanoUI ()
 icons star accent = do
   svgIcon 24 star
@@ -486,14 +486,14 @@ icons star accent = do
   whenM (iconButton star "Star") starItem
 </code></pre>
 <p><code>svgIconConfigured</code> takes an <code>ImageConfig</code> for CSS-style fitting (<code>FitContain</code>, <code>FitCover</code>, <code>FitFill</code>).</p>
-<p>Inside a canvas, rasterize the SVG with <code>rasterizeSvg</code> from <code>NanoUI.Svg</code>, lease the pixels with <code>useImageRgba</code>, and draw the image. Key the lease on everything the pixels depend on, here the tint:</p>
+<p>To paint an SVG inside a custom <code>canvas</code>, rasterize it with <code>rasterizeSvg</code> from <code>NanoUI.Svg</code>, upload it with <code>useImageRgba</code>, and draw the resulting <code>ImageId</code>. Make sure the lease key covers everything that changes the rasterized pixels (like the tint color):</p>
 <pre><code class="language-haskell">starBadge :: ImageHandle Color -&gt; Svg -&gt; Color -&gt; NanoUI Response
 starBadge owner star tint = do
   iid &lt;- useImageRgba owner tint 32 32 (rasterizeSvg 32 32 tint star)
   canvas (fixedWH 140 44) $ \(Rect x y _ _) -&gt;
     for_ iid $ \i -&gt; drawImage (Rect (x + 8) (y + 6) 32 32) i colorWhite
 </code></pre>
-<p><code>nano-ui-svg</code> goes the other way and exports draw ops as SVG; see <a href="../packages/index.html#svg-export">SVG export</a>.</p>
+<p>For going in the other direction (exporting <code>nano-ui</code> draw ops or entire frames to SVG), see <a href="../packages/index.html#svg-export">SVG export</a>.</p>
 
                     </main>
 
@@ -546,8 +546,8 @@ starBadge owner star tint = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

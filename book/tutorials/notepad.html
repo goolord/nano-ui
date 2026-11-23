@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,12 +179,12 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="tutorial-2-build-a-notepad"><a class="header" href="#tutorial-2-build-a-notepad">Tutorial 2: Build a Notepad</a></h1>
-<p>A menu bar, file dialogs, a text document with undo, a status bar, and a prompt before losing unsaved work.</p>
-<p>The complete program is <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Notepad.hs"><code>packages/nano-ui-demo/examples/Notepad.hs</code></a>. Run it with:</p>
+<p>In this tutorial, you will build a plain-text editor with a menu bar, keyboard shortcuts, asynchronous file dialogs, undo/redo history, a status bar, and a warning prompt when closing with unsaved edits.</p>
+<p>The complete program is in <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Notepad.hs"><code>packages/nano-ui-demo/examples/Notepad.hs</code></a>. Run it with:</p>
 <pre><code class="language-sh">cabal run nano-ui-sdl-notepad
 </code></pre>
-<h2 id="1-state-that-belongs-to-the-session"><a class="header" href="#1-state-that-belongs-to-the-session">1. State that belongs to the session</a></h2>
-<p>A text document is not a type <code>useVar</code> can hold, and the editor’s identity must outlive any single frame, so both live in a record allocated once:</p>
+<h2 id="1-session-level-state"><a class="header" href="#1-session-level-state">1. Session-level state</a></h2>
+<p><code>TextDocument</code> is not one of the primitive types <code>useVar</code> supports, and our menu commands need a stable reference to the editor’s widget ID. Both belong in a state record allocated once during setup:</p>
 <pre><code class="language-haskell">data NotepadState = NotepadState
   { doc :: !(Var TextDocument)
   , editorId :: !(Var WidgetId)
@@ -202,9 +202,9 @@ newNotepad = do
   saveDlg &lt;- newVar Nothing
   pure NotepadState {..}
 </code></pre>
-<p>The menu state, path, dirty flag, zoom, and transient messages are simpler and can be <code>useVar</code>s inside the view. Allocate in <code>IO</code> what other code needs a handle to (a document, a task, a dialog), and use <code>useVar</code> for view-local state.</p>
+<p>Simpler view-local values (which menu is open, the current file path, the dirty flag, zoom level, and status messages) can live in <code>useVar</code> calls inside the view. As a rule of thumb, allocate shared or handle-based state (documents, tasks, dialogs) in <code>IO</code> before starting the app, and keep local UI flags in <code>useVar</code>.</p>
 <h2 id="2-close-confirmation"><a class="header" href="#2-close-confirmation">2. Close confirmation</a></h2>
-<p>By default the window closes as soon as the close button is pressed. To prompt about unsaved changes first, the notepad creates the window with <code>wsExitOnCloseRequest = False</code>:</p>
+<p>Normally, clicking the window’s close button exits immediately. To catch unsaved changes first, disable automatic exit with <code>wsExitOnCloseRequest = False</code>:</p>
 <pre><code class="language-haskell">main :: IO ()
 main = do
   state &lt;- newNotepad
@@ -221,13 +221,13 @@ main = do
       }
     (notepadUi state)
 </code></pre>
-<p>With exit-on-close off, <code>winCloseRequested &lt;$&gt; askWindow</code> reports the request inside the view, where it can open a confirmation modal instead of quitting:</p>
+<p>With that option disabled, <code>winCloseRequested &lt;$&gt; askWindow</code> becomes <code>True</code> on the frame the user tries to close the window. Instead of quitting immediately, the view calls <code>exitApp</code>:</p>
 <pre><code class="language-haskell">  item (winCloseRequested &lt;$&gt; askWindow) exitApp
 </code></pre>
-<p><code>exitApp</code> quits immediately when the document is clean, and opens a modal when it is not. The full wiring is in section 7.</p>
-<h2 id="3-a-menu-bar-from-primitives"><a class="header" href="#3-a-menu-bar-from-primitives">3. A menu bar from primitives</a></h2>
-<p>There is no <code>menuBar</code> widget. A menu bar is a row of <code>menuButton'</code>s, each paired with a <code>popup'</code> anchored to the button’s rectangle, so a menu’s contents are ordinary <code>NanoUI ()</code>.</p>
-<p><code>openMenu</code> holds the label of the open menu (empty when all are closed):</p>
+<p>When the document has no unsaved edits, <code>exitApp</code> closes the window right away; otherwise it opens a confirmation modal. We will wire up the modal in section 7.</p>
+<h2 id="3-building-a-menu-bar-from-primitives"><a class="header" href="#3-building-a-menu-bar-from-primitives">3. Building a menu bar from primitives</a></h2>
+<p><code>nano-ui</code> does not have a dedicated <code>menuBar</code> widget. Instead, you compose a row of <code>menuButton'</code> widgets, each paired with a <code>popup'</code> anchored to its button rectangle. Because a popup’s body is plain <code>NanoUI ()</code>, menus can contain any combination of items, separators, or custom rows.</p>
+<p><code>openMenu</code> stores the title of whichever menu is currently open (or an empty string when all menus are closed):</p>
 <pre><code class="language-haskell">menuBar :: Var Text -&gt; [(Text, NanoUI ())] -&gt; NanoUI ()
 menuBar openMenu entries = do
   current &lt;- readVar openMenu
@@ -252,13 +252,13 @@ menuBar openMenu entries = do
       (popupResp, _) &lt;- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (writeVar openMenu "")
 </code></pre>
-<p><code>popup'</code> needs a <code>Var Bool</code> for whether it is open, but the state is derived from <code>openMenu</code> (“is this label the open one?”). <code>constVar isOpen</code> supplies a read-only <code>Var</code>; writes to it are no-ops. When the popup reports a click, the code writes the real state (<code>openMenu</code>) instead.</p>
+<p><code>popup'</code> expects a <code>Var Bool</code> for its open state, while our source of truth is <code>openMenu</code>. Passing <code>constVar isOpen</code> supplies a read-only <code>Var</code> (writes to it are ignored), and when the popup reports a click or dismissal via its response, we update <code>openMenu</code> directly.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
-<p>Call overlays unconditionally. <code>popup'</code> is called for every title on every frame, even when closed; it draws nothing while closed. Wrapping it in <code>when isOpen</code> would change the widget ids of later siblings each time a menu opens.</p>
+<p>Always call overlays unconditionally. Notice that <code>popup'</code> runs for every menu on every frame, even when closed; while closed it draws nothing. Putting <code>popup'</code> inside <code>when isOpen</code> would shift the widget IDs of following siblings whenever a menu opens or closes.</p>
 </blockquote>
 <h2 id="4-commands-menus-and-shortcuts"><a class="header" href="#4-commands-menus-and-shortcuts">4. Commands, menus, and shortcuts</a></h2>
-<p>Each menu row is a <code>menuItem</code> / <code>menuItemShortcut</code>. The row reports activation, and the action runs in the same frame:</p>
+<p>Menu rows use <code>menuItem</code> and <code>menuItemShortcut</code>. Each returns <code>True</code> on the frame it is activated, so the command runs right away:</p>
 <pre><code class="language-haskell">    item menuRow action = whenM menuRow (writeVar openMenu "" &gt;&gt; action)
 
     fileMenu = do
@@ -269,18 +269,18 @@ menuBar openMenu entries = do
       menuSeparator
       commandItem exitCmd
 </code></pre>
-<p>(<code>newDocument</code>, <code>openDocument</code>, <code>saveDocument</code>, and <code>exitApp</code> are ordinary <code>NanoUI ()</code> actions defined in the full source; <code>openDocument</code> starts a non-blocking <code>askOpenFileDialog</code>.)</p>
-<p><code>menuItemShortcut</code> shows the chord label and binds it <strong>while the menu is open</strong>. To make the command work with the menu closed, bind the same chord with <code>shortcut</code> outside the menu:</p>
+<p>(<code>newDocument</code>, <code>openDocument</code>, <code>saveDocument</code>, and <code>exitApp</code> are plain <code>NanoUI ()</code> helpers defined in the full source; <code>openDocument</code> launches a non-blocking dialog with <code>askOpenFileDialog</code>.)</p>
+<p><code>menuItemShortcut</code> displays the shortcut hint on the row and listens for that chord <strong>only while the menu is open</strong>. To make shortcuts work when the menu is closed too, register the same chords with <code>shortcut</code> outside the menu:</p>
 <pre><code class="language-haskell">  for_ [newCmd, openCmd, saveCmd, saveAsCmd, exitCmd] $
     \(_, chord, action) -&gt; item (shortcut chord) action
 </code></pre>
-<p>Only the first binding of a chord in a frame fires, so the menu row and the view binding never both run it. The menu row is declared first, so while the menu is open its row wins.</p>
+<p>Only the first matching binding in a frame fires, so the menu item and the top-level shortcut will never trigger twice. Because the menu is declared earlier in the view, its item handles the chord whenever it is open.</p>
 <ul>
-<li><code>menuItemDisabled "Undo"</code> draws a dimmed row that cannot be clicked. The Edit menu draws a real item or a disabled one depending on <code>textCanUndo</code> / <code>textCanRedo</code>.</li>
-<li>An action that opens a file dialog writes the new <code>FileDialogId</code> into a <code>Var</code>; dialogs are non-blocking, so the view is not interrupted.</li>
+<li><code>menuItemDisabled "Undo"</code> draws a dimmed, non-interactive row. The Edit menu switches between a normal item and a disabled one based on <code>textCanUndo</code> and <code>textCanRedo</code>.</li>
+<li>Opening a file dialog stores the returned <code>FileDialogId</code> in a <code>Var</code>. Dialogs run asynchronously, so the UI keeps responding while the OS dialog is open.</li>
 </ul>
 <h2 id="5-opening-and-saving-files"><a class="header" href="#5-opening-and-saving-files">5. Opening and saving files</a></h2>
-<p>The SDL backend’s file dialogs are asynchronous. <code>useFileDialog</code> polls a <code>Var (Maybe FileDialogId)</code>, consumes the finished result once, and restores focus afterwards:</p>
+<p>In <code>nano-ui-sdl</code>, file dialogs never block the render loop. <code>useFileDialog</code> polls a <code>Var (Maybe FileDialogId)</code>, passes the selected paths to your callback once the dialog closes, and restores focus to the main window:</p>
 <pre><code class="language-haskell">  useFileDialog openDlg $ \chosenPaths -&gt;
     for_ (listToMaybe chosenPaths) $ \filePath -&gt; do
       loaded &lt;-
@@ -305,14 +305,14 @@ menuBar openMenu entries = do
           writeVar statusMsg ("Saved " &lt;&gt; T.pack filePath)
         else writeVar statusMsg ("Could not save " &lt;&gt; T.pack filePath)
 </code></pre>
-<p>The Open command starts one and keeps its id:</p>
+<p>Clicking Open starts a dialog and saves its handle:</p>
 <pre><code class="language-haskell">    openCmd =
       ( "Open..."
       , cmdOrCtrl &lt;&gt; key 'o'
       , writeVar openDlg . Just =&lt;&lt; askOpenFileDialog defaultFileDialogOptions
       )
 </code></pre>
-<p><code>writeDocument</code> is ordinary Haskell around <code>liftIO</code>, because file I/O is an event-driven side effect:</p>
+<p>Saving is ordinary <code>IO</code> wrapped in <code>liftIO</code>, triggered only by an event:</p>
 <pre><code class="language-haskell">writeDocument :: FilePath -&gt; TextDocument -&gt; NanoUI Bool
 writeDocument filePath doc = do
   result &lt;-
@@ -322,9 +322,9 @@ writeDocument filePath doc = do
       )
   pure (isRight result)
 </code></pre>
-<p>Only <code>documentText</code> converts the document to a <code>Text</code>; editing works on the document directly and never rebuilds the whole string per keystroke.</p>
+<p>Only call <code>documentText</code> when you actually need a flat <code>Text</code> value (such as when saving). During normal typing, <code>TextDocument</code> updates individual lines without rebuilding the full string on every keystroke.</p>
 <h2 id="6-the-editor"><a class="header" href="#6-the-editor">6. The editor</a></h2>
-<p><code>textAreaDocument</code> edits a <code>Var TextDocument</code> with line-sharing and an undo history. The primed variant supplies the <code>Response</code> the application needs:</p>
+<p><code>textAreaDocument</code> edits a <code>Var TextDocument</code> with structural line sharing and built-in undo history. Its primed variant (<code>textAreaDocument'</code>) returns the <code>Response</code> we need for dirty tracking and menu commands:</p>
 <pre><code class="language-haskell">    editorResp &lt;-
       withKey gen $
         textAreaDocumentWith'
@@ -335,13 +335,13 @@ writeDocument filePath doc = do
     writeVar editorId (respId editorResp)
 </code></pre>
 <ul>
-<li><code>withKey gen</code> changes the editor’s key when the document is replaced, so a new document gets a fresh caret, selection, and undo stack. Editing does not change <code>gen</code>.</li>
-<li><code>respChanged</code> is <code>True</code> after an edit and <code>False</code> after a caret move alone. Marking dirty on caret movement would make a read-only inspection look like a modification.</li>
-<li><code>respId</code> is saved for menu commands, which call <code>runTextCommand editor Undo</code> and the other <code>TextCommand</code>s.</li>
+<li><code>withKey gen</code> resets the editor’s internal state whenever a new file is loaded or created by bumping <code>gen</code>, giving the new document a clean caret, selection, and undo stack. Normal edits leave <code>gen</code> unchanged.</li>
+<li><code>respChanged</code> is <code>True</code> only when text is modified, not when the user merely moves the cursor or selects text. That prevents inspecting a file from marking it dirty.</li>
+<li>Saving <code>respId</code> lets our Edit menu target the editor with <code>runTextCommand editor Undo</code> and other <code>TextCommand</code> actions.</li>
 </ul>
-<p><code>fontSizeScale zoomVal</code> zooms the text without touching the document. The zoom commands are ordinary <code>modifyVar</code> calls clamped to a sane range.</p>
-<h2 id="7-dirty-state-title-and-the-close-prompt"><a class="header" href="#7-dirty-state-title-and-the-close-prompt">7. Dirty state, title, and the close prompt</a></h2>
-<p>The title is derived every frame from the path and the dirty flag, and set declaratively:</p>
+<p><code>fontSizeScale zoomVal</code> adjusts display size without altering the document, so the zoom actions are simple clamped <code>modifyVar</code> updates.</p>
+<h2 id="7-dirty-state-window-title-and-the-close-prompt"><a class="header" href="#7-dirty-state-window-title-and-the-close-prompt">7. Dirty state, window title, and the close prompt</a></h2>
+<p>The window title is computed from the current file name and dirty flag on every frame, then passed to <code>setWindowTitleUi</code>:</p>
 <pre><code class="language-haskell">    path &lt;- readVar docPath
     dirty &lt;- readVar docDirty
     let
@@ -350,8 +350,8 @@ writeDocument filePath doc = do
 -- ...after the layout, which returns the name as docName:
   setWindowTitleUi (docName &lt;&gt; " - nano-ui Notepad")
 </code></pre>
-<p><code>setWindowTitleUi</code> does nothing when the title has not changed, so it is safe to call unconditionally. The imperative window actions (<code>resizeWindowUi</code>, <code>maximizeWindowUi</code>) are different: they run on every call and belong behind events.</p>
-<p>The close request and the modal fit together like this:</p>
+<p><code>setWindowTitleUi</code> caches the last title and skips the OS call when nothing changed, so calling it unconditionally on every frame is safe and free. Imperative window commands like <code>resizeWindowUi</code> or <code>maximizeWindowUi</code> run on every call and must always sit behind an event check.</p>
+<p>Here is how <code>exitApp</code> and the confirmation modal connect:</p>
 <pre><code class="language-haskell">    exitApp = do
       dirty &lt;- readVar docDirty
       if dirty then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True else quitUi
@@ -364,9 +364,9 @@ writeDocument filePath doc = do
       whenM (button "Discard") quitUi
       whenM (button "Cancel") (writeVar confirmExit False)
 </code></pre>
-<p>There is one modal at a time: opening the exit prompt closes the About modal first. Overlay state is a <code>Var Bool</code>, and the modal call itself is unconditional.</p>
-<h2 id="8-undo-redo-and-the-rest-of-the-editing-commands"><a class="header" href="#8-undo-redo-and-the-rest-of-the-editing-commands">8. Undo, redo, and the rest of the editing commands</a></h2>
-<p>The document keeps one undo history shared by typing, context-menu actions, and programmatic commands. The Edit menu reads the history state and runs commands by widget id:</p>
+<p>Opening the exit prompt closes the About modal first so only one modal appears at a time. Like popups, <code>modal</code> is called unconditionally every frame and controlled by its <code>Var Bool</code>.</p>
+<h2 id="8-undo-redo-and-editing-commands"><a class="header" href="#8-undo-redo-and-editing-commands">8. Undo, redo, and editing commands</a></h2>
+<p>Typing, right-click menu actions, and programmatic commands all flow through <code>TextCommand</code>, so they share a single undo stack. The Edit menu queries <code>textCanUndo</code> and <code>textCanRedo</code>, then dispatches commands using the editor’s widget ID:</p>
 <pre><code class="language-haskell">    editMenu = do
       editor &lt;- readVar editorId
       canUndo &lt;- textCanUndo editor
@@ -384,13 +384,13 @@ writeDocument filePath doc = do
       menuSeparator
       editItem "Select All" (cmdOrCtrl &lt;&gt; key 'a') SelectAll
 </code></pre>
-<p><code>TextCommand</code> covers <code>InsertText</code>, <code>Delete</code>, <code>Move</code>, <code>Select</code>, <code>Replace</code>, <code>ReplaceAll</code>, <code>Undo</code>, <code>Redo</code>, <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, and <code>SelectAll</code>. Using commands rather than writing the <code>Var</code> keeps undo intact; assigning a freshly computed <code>TextDocument</code> to <code>doc</code> clears the history.</p>
+<p><code>TextCommand</code> includes <code>InsertText</code>, <code>Delete</code>, <code>Move</code>, <code>Select</code>, <code>Replace</code>, <code>ReplaceAll</code>, <code>Undo</code>, <code>Redo</code>, <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, and <code>SelectAll</code>. Dispatching commands preserves undo history; overwriting the <code>Var TextDocument</code> directly resets it.</p>
 <blockquote class="blockquote-tag blockquote-tag-tip">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
-<p>A focused text editor claims its editing chords (Ctrl+Z, Ctrl+X, and so on), and <code>shortcut</code> skips claimed keys. The menu items still work because they run explicit commands, and the top-level bindings fire when focus is elsewhere.</p>
+<p>While a text editor has focus, it claims its own editing shortcuts (Ctrl+Z, Ctrl+X, Ctrl+C, and so on), and <code>shortcut</code> ignores claimed keys. Menu rows still work because they dispatch commands directly, while the top-level shortcuts handle cases where focus is outside the editor.</p>
 </blockquote>
 <h2 id="9-the-status-bar"><a class="header" href="#9-the-status-bar">9. The status bar</a></h2>
-<p>The status bar is a row of muted labels. Line count comes from the document without materializing its text; word and character counts are computed on demand from <code>documentText</code>:</p>
+<p>The status bar is a row of muted labels. Reading <code>documentLineCount</code> does not flatten the document into a single <code>Text</code>; word and character counts are computed from <code>documentText</code>:</p>
 <pre><code class="language-haskell">statusBar :: Text -&gt; Var TextDocument -&gt; Var Text -&gt; Float -&gt; NanoUI ()
 statusBar docName docVar statusMsg zoomVal = do
   doc &lt;- readVar docVar
@@ -406,15 +406,15 @@ statusBar docName docVar statusMsg zoomVal = do
       (tight . fontMuted)
       ("Zoom: " &lt;&gt; T.pack (show (round (zoomVal * 100) :: Int)) &lt;&gt; "%")
 </code></pre>
-<p>Reading <code>doc</code> here records a dependency: every edit repaints the status bar. That is intentional, because the line count changes. If the label’s text length changes often, pin its width with <code>fixedW</code> so the rest of the bar does not shift (see <a href="../troubleshooting/recurring-bugs.html">Recurring Bugs</a>).</p>
-<h2 id="10-try-it"><a class="header" href="#10-try-it">10. Try it</a></h2>
+<p>Reading <code>doc</code> here causes the status bar to repaint whenever the document changes, which is what we want so the counters stay current. If a counter’s width fluctuates as digits are added, pin it with <code>fixedW</code> so adjacent status labels do not shift sideways (see <a href="../troubleshooting/recurring-bugs.html">Recurring Bugs</a>).</p>
+<h2 id="10-things-to-try-next"><a class="header" href="#10-things-to-try-next">10. Things to try next</a></h2>
 <ul>
-<li>Add a recent-files list persisted between runs.</li>
-<li>Replace the About modal with a floating <code>window</code> that can be moved and resized.</li>
-<li>Add word wrap using the editor’s layout options.</li>
-<li>Build a custom title bar with <code>captionButtons</code> and <code>dragSpans</code> (see <a href="../advanced/window-management.html">Desktop Windows</a>).</li>
+<li>Persist a list of recently opened files across launches.</li>
+<li>Turn the About dialog into a draggable, resizable floating <code>window</code>.</li>
+<li>Toggle word wrap through the editor’s configuration.</li>
+<li>Replace the OS title bar with a custom one using <code>windowCaption</code> and <code>windowFrame</code> (see <a href="../advanced/window-management.html">Desktop Windows</a>).</li>
 </ul>
-<p>Next: <a href="live-data.html">Tutorial 3: Live Data &amp; Background Work</a> moves slow work off the frame and streams results back.</p>
+<p>Next: <a href="live-data.html">Tutorial 3: Live Data &amp; Background Work</a> moves slow I/O onto worker threads and plots streamed values in real time.</p>
 
                     </main>
 
@@ -467,8 +467,8 @@ statusBar docName docVar statusMsg zoomVal = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

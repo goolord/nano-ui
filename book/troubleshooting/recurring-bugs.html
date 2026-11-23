@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="recurring-bugs--fixes"><a class="header" href="#recurring-bugs--fixes">Recurring Bugs &amp; Fixes</a></h1>
-<p>Bugs and fixes from the git histories of nano-ui applications (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Each entry starts with the symptom.</p>
+<p>These issues showed up repeatedly while building real applications with <code>nano-ui</code> (<code>ned</code>, <code>stronghead</code>, and <code>winget-gui</code>). Scan the symptom table to jump straight to what you are seeing.</p>
 <h2 id="symptom-index"><a class="header" href="#symptom-index">Symptom index</a></h2>
 <div class="table-wrapper">
 <table>
@@ -187,40 +187,40 @@
 <tr><th>Symptom</th><th>Section</th></tr>
 </thead>
 <tbody>
-<tr><td>Buttons and labels shift every frame</td><td><a href="#1-layout-shifting--jitter">Layout jitter</a></td></tr>
-<tr><td>A list scrolls sideways when one row is long</td><td><a href="#1-layout-shifting--jitter">Layout jitter</a></td></tr>
-<tr><td>A dropdown clips its longest option</td><td><a href="#1-layout-shifting--jitter">Layout jitter</a></td></tr>
-<tr><td>A box inside a box inside a dialog</td><td><a href="#2-double-borders--box-in-a-box">Double borders</a></td></tr>
-<tr><td>Text shimmers while scrolling at 125% scaling</td><td><a href="#3-text-metrics--the-pixel-grid">Text metrics</a></td></tr>
-<tr><td>A custom drawing does not update</td><td><a href="#4-stale-cached-drawings">Stale cached drawings</a></td></tr>
+<tr><td>Buttons and labels jitter sideways every frame</td><td><a href="#1-layout-shifting--jitter">Layout shifting &amp; jitter</a></td></tr>
+<tr><td>A list starts scrolling sideways when one row is wide</td><td><a href="#1-layout-shifting--jitter">Layout shifting &amp; jitter</a></td></tr>
+<tr><td>A dropdown cuts off its longest option</td><td><a href="#1-layout-shifting--jitter">Layout shifting &amp; jitter</a></td></tr>
+<tr><td>A box appears inside another box in a dialog</td><td><a href="#2-double-borders--box-in-a-box">Double borders &amp; box in a box</a></td></tr>
+<tr><td>Text shimmers while scrolling at 125% DPI scaling</td><td><a href="#3-text-metrics--the-pixel-grid">Text metrics &amp; the pixel grid</a></td></tr>
+<tr><td>A custom canvas stops updating</td><td><a href="#4-stale-cached-drawings">Stale cached drawings</a></td></tr>
 <tr><td>A drag ghost freezes where it first appeared</td><td><a href="#4-stale-cached-drawings">Stale cached drawings</a></td></tr>
-<tr><td>Content runs under the scrollbar</td><td><a href="#5-scroll-details">Scroll details</a></td></tr>
-<tr><td>Ctrl+A fires while typing</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
-<tr><td>Escape does not close anything while a field is focused</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
-<tr><td>Typed keys never reach a custom widget</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
-<tr><td>A drag selects one character leftward</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
-<tr><td>SVG clip paths collide</td><td><a href="#7-svg-export">SVG export</a></td></tr>
+<tr><td>List content slides underneath the scrollbar</td><td><a href="#5-scroll-details">Scroll details</a></td></tr>
+<tr><td>Ctrl+A selects everything while typing in a search box</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
+<tr><td>Escape stops working while a text field is focused</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
+<tr><td>Typed characters never reach a custom widget</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
+<tr><td>Dragging slowly leftward only selects one character</td><td><a href="#6-focus-and-input-ordering">Focus and input ordering</a></td></tr>
+<tr><td>SVG clip paths collide on the same page</td><td><a href="#7-svg-export">SVG export</a></td></tr>
 </tbody>
 </table>
 </div>
 <h2 id="1-layout-shifting--jitter"><a class="header" href="#1-layout-shifting--jitter">1. Layout shifting &amp; jitter</a></h2>
-<h3 id="a-label-whose-text-changes-length-moves-its-siblings-every-frame"><a class="header" href="#a-label-whose-text-changes-length-moves-its-siblings-every-frame">A label whose text changes length moves its siblings every frame</a></h3>
-<p>A counter going <code>9 -&gt; 10 -&gt; 100</code>, a timer, or a byte total changes the label’s natural width, which re-flows the row on every tick.</p>
-<p><strong>Fix:</strong> pin the label to the width of its widest expected value:</p>
+<h3 id="a-changing-label-pushes-its-siblings-around"><a class="header" href="#a-changing-label-pushes-its-siblings-around">A changing label pushes its siblings around</a></h3>
+<p>Counters (<code>9 -&gt; 10 -&gt; 100</code>), timers, and byte totals change width as their text grows or shrinks, causing the whole row to reflow on every tick.</p>
+<p><strong>Fix:</strong> reserve enough width for the widest value you expect:</p>
 <pre><code class="language-haskell">count :: Int -&gt; NanoUI ()
 count n = labelWith (fixedW 48 . alignEnd) (T.pack (show n))
 </code></pre>
-<p><code>stronghead</code> made this fix more than once (“fix markers count to fixed width”).</p>
-<h3 id="a-long-value-inside-a-scrolling-list-widens-the-whole-list"><a class="header" href="#a-long-value-inside-a-scrolling-list-widens-the-whole-list">A long value inside a scrolling list widens the whole list</a></h3>
-<p>One long row increases the column’s natural width, the list grows a horizontal scrollbar, and the bar appears and disappears as wide rows enter and leave.</p>
-<p><strong>Fix:</strong> make the cell fill its column instead of contributing natural width, and ellipsize the text:</p>
+<p><code>stronghead</code> ran into this repeatedly on live marker counters until they were pinned with <code>fixedW</code>.</p>
+<h3 id="one-long-row-makes-a-scrolling-list-scroll-horizontally"><a class="header" href="#one-long-row-makes-a-scrolling-list-scroll-horizontally">One long row makes a scrolling list scroll horizontally</a></h3>
+<p>A single wide label stretches its column’s natural width, causing a horizontal scrollbar to pop in and out as wide rows scroll through the viewport.</p>
+<p><strong>Fix:</strong> give the cell <code>fillW</code> so it fits within the column instead of widening it, letting <code>label</code> truncate overflow with <code>...</code>:</p>
 <pre><code class="language-haskell">-- In a row, a label too narrow for its text cuts it off rather than wrapping.
 nameLine :: (Layout -&gt; Layout) -&gt; Text -&gt; NanoUI ()
 nameLine f = rowWith (fillW . tight) . labelWith (fillW . f)
 </code></pre>
-<h3 id="a-drop-down-clips-its-longest-option"><a class="header" href="#a-drop-down-clips-its-longest-option">A drop-down clips its longest option</a></h3>
-<p>A fixed width guessed for a select breaks when an option is long (<code>"Unknown disk · 113 apps · 9.24 GB"</code>).</p>
-<p><strong>Fix:</strong> measure the options with the font and add the chrome:</p>
+<h3 id="a-dropdown-clips-its-longest-option"><a class="header" href="#a-dropdown-clips-its-longest-option">A dropdown clips its longest option</a></h3>
+<p>Hardcoding a guessed width for <code>select</code> breaks as soon as an option is longer than expected (such as <code>"Unknown disk · 113 apps · 9.24 GB"</code>).</p>
+<p><strong>Fix:</strong> measure the options with the active font and add room for padding and the dropdown arrow:</p>
 <pre><code class="language-haskell">diskSelect :: [Text] -&gt; Var Int -&gt; NanoUI ()
 diskSelect options selectedVar = do
   fm &lt;- uiFontMetrics
@@ -228,96 +228,94 @@ diskSelect options selectedVar = do
   let w = maximum (0 : widths) + 56
   selectWith (fixedW w) options selectedVar
 </code></pre>
-<h3 id="content-derived-geometry-recomputes-and-jitters"><a class="header" href="#content-derived-geometry-recomputes-and-jitters">Content-derived geometry recomputes and jitters</a></h3>
-<p>Tree column widths, row heights, and pane splits that are derived from the current content every frame move when the content changes.</p>
-<p><strong>Fix:</strong> lock the geometry. Use a constant row height, and store a pane split the user chose in saved layout state (<code>ned</code>’s “grid size locking”).</p>
-<h3 id="flex-around-the-wrong-child"><a class="header" href="#flex-around-the-wrong-child"><code>flex</code> around the wrong child</a></h3>
-<p>Make the one growable child <code>fillW</code> instead. <code>stronghead</code> replaced <code>fixedW 90</code> + <code>flex</code> around a filter box with <code>fillW</code>, which also removed dead space.</p>
+<h3 id="content-driven-column-widths-jitter-as-rows-change"><a class="header" href="#content-driven-column-widths-jitter-as-rows-change">Content-driven column widths jitter as rows change</a></h3>
+<p>Deriving tree column widths, row heights, or pane splits from the currently visible rows makes the layout jump whenever the visible set changes.</p>
+<p><strong>Fix:</strong> keep structural geometry stable. Use constant row heights, and store user-adjusted column widths or pane splits in state (as <code>ned</code> does for its locked grid layout).</p>
+<h3 id="using-flex-where-fillw-belongs"><a class="header" href="#using-flex-where-fillw-belongs">Using <code>flex</code> where <code>fillW</code> belongs</a></h3>
+<p>When only one child in a row should grow (such as a filter box), give that widget <code>fillW</code> directly instead of pairing <code>fixedW</code> with a <code>flex</code> spacer. Doing so in <code>stronghead</code> both simplified the row and removed awkward dead space.</p>
 <h2 id="2-double-borders--box-in-a-box"><a class="header" href="#2-double-borders--box-in-a-box">2. Double borders &amp; box in a box</a></h2>
-<p>nano-ui fills padded containers with the panel color, and <code>scrollArea</code>, <code>panel</code>, and <code>card</code> each draw their own background, border, and radius. Nesting them inside popups, dialogs, and panes draws a box inside a box.</p>
-<p>Symptoms:</p>
+<p>Padded containers paint the panel surface, and <code>scrollArea</code>, <code>panel</code>, and <code>card</code> each draw their own background, border, and corner radius. Nesting them inside popups, modals, or panes quickly creates nested boxes.</p>
+<p>Common signs:</p>
 <ul>
-<li>A <code>scrollArea</code> in a popup shows a bordered well inside the dialog.</li>
-<li>A dialog has two concentric borders.</li>
-<li>A pane with a panel inside a card looks recessed twice.</li>
+<li>A <code>scrollArea</code> inside a popup renders a recessed bordered box inside the popup frame.</li>
+<li>A dialog shows two concentric borders.</li>
+<li>A <code>panel</code> inside a <code>card</code> looks double-framed.</li>
 </ul>
-<p><strong>Fix:</strong> one level supplies the chrome.</p>
+<p><strong>Fix:</strong> let only one layer own the chrome.</p>
 <ul>
 <li>
-<p>Give the outer dialog <code>padAll 0</code> and move the padding to the inner <code>columnWith (fillW . padAll 12 ...)</code>.</p>
+<p>Set <code>padAll 0</code> on the outer dialog and put the padding on an inner <code>columnWith (fillW . padAll 12 ...)</code>.</p>
 </li>
 <li>
-<p>Or strip the inner surface:</p>
+<p>Or strip the inner surface’s background and border:</p>
 <pre><code class="language-haskell"></code></pre>
 </li>
 </ul>
 <p>flatList :: NanoUI () -&gt; NanoUI ()
 flatList = styled (inputStyle (background colorTransparent . borderWidth 0))</p>
 <pre><code>
-- Set `themeFloatingWindow` and `themePopup` to the panel surface, so a padded body does not show a panel box inside the dialog.
-- Between two chrome regions, draw one `separator` at the seam instead of a border on the bottom of one and the top of the other.
+- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends cleanly into the dialog.
+- Between adjacent chrome regions, place a single `separator` in the parent instead of drawing touching borders on both sides.
 
-`stronghead` ("Remove duplicate borders from workspace popovers and notifications") and `winget-gui`'s dialogs both made this fix.
+Both `stronghead` and `winget-gui` adopted these patterns to eliminate duplicate popover and dialog borders.
 
 ## 3. Text metrics &amp; the pixel grid
 
-### Glyphs drift over a long run
+### Character positions drift over long lines
 
-`fmAdvance` per glyph multiplied by the character count is not the shaped width of a run. A shaping backend lays a run out by unrounded advances (8 vs 8.25 px at size 15), so per-glyph arithmetic drifts a cell every ~32 characters and long runs overdraw what follows.
+Multiplying a single glyph's `fmAdvance` by the character count does not match a shaped run's true width. HarfBuzz lays runs out with fractional advances (for example, 8.25 px vs. 8 px at size 15), so per-glyph math drifts by a full cell every ~32 characters and causes text to overlap whatever follows.
 
-**Fix:** measure the whole run in the view, where the metrics can load its glyphs first:
+**Fix:** measure the entire run in the view so the font backend shapes and caches the glyphs first:
 
 ```haskell
 runWidth :: FontMetrics -&gt; Text -&gt; NanoUI Float
 runWidth fm run = lineWidthUi fm run
 </code></pre>
-<p>(<code>ned</code>: “text stays on the cell grid along a long run”.)</p>
-<h3 id="text-shimmers-at-fractional-dpi-scales"><a class="header" href="#text-shimmers-at-fractional-dpi-scales">Text shimmers at fractional DPI scales</a></h3>
-<p>At 125% scaling, rows of 22.4 px stack as 22, 23, 22, 23 and text shimmers while scrolling. Positions and row heights must be whole device pixels.</p>
-<p><strong>Fix:</strong> snap with the font’s snap scale:</p>
+<h3 id="text-shimmers-while-scrolling-at-fractional-dpi-scales"><a class="header" href="#text-shimmers-while-scrolling-at-fractional-dpi-scales">Text shimmers while scrolling at fractional DPI scales</a></h3>
+<p>At 125% Windows display scaling, rows of 22.4 logical pixels round unevenly to 22, 23, 22, 23 physical pixels, making glyphs shimmer as the list scrolls. Row heights and positions need to land on whole device pixels.</p>
+<p><strong>Fix:</strong> snap coordinates with <code>fmSnapScale</code> (the pattern <code>winget-gui</code> uses in <code>rowButton</code>):</p>
 <pre><code class="language-haskell">snap :: FontMetrics -&gt; Float -&gt; Float
 snap f v = let k = max 1 (fmSnapScale f) in fromIntegral (round (v * k) :: Int) / k
 </code></pre>
-<p><code>winget-gui</code>’s <code>rowButton</code> does this.</p>
-<h3 id="box-centred-is-not-optically-centred"><a class="header" href="#box-centred-is-not-optically-centred">Box-centred is not optically centred</a></h3>
-<p>A large label over a small one centres by line boxes, which leave more room under the smaller line, so the block reads about 4 px high. Nudge it with <code>padTop</code>, or centre on the ink: measure the ink span and the cap/x-height midpoints from <code>FontMetrics</code> glyphs.</p>
-<h3 id="alignmid-on-a-row-positions-the-row-not-its-contents"><a class="header" href="#alignmid-on-a-row-positions-the-row-not-its-contents"><code>alignMid</code> on a row positions the row, not its contents</a></h3>
-<p>Centring the row’s <em>contents</em> takes <code>alignMid</code> on each child. This was <code>stronghead</code>’s “header dead space” fix.</p>
+<h3 id="geometric-centering-looks-slightly-high"><a class="header" href="#geometric-centering-looks-slightly-high">Geometric centering looks slightly high</a></h3>
+<p>Stacking a large label over a smaller label and centering by line boxes leaves extra empty space beneath the smaller line’s baseline, making the pair look roughly 4 px too high. Either nudge it with <code>padTop</code>, or compute optical centering from the ink bounds and cap/x-height midpoints exposed by <code>FontMetrics</code>.</p>
+<h3 id="alignmid-on-a-row-aligns-the-row-itself-not-its-children"><a class="header" href="#alignmid-on-a-row-aligns-the-row-itself-not-its-children"><code>alignMid</code> on a row aligns the row itself, not its children</a></h3>
+<p>Applying <code>alignMid</code> to a <code>row</code> centers the row inside its parent. To vertically center items <em>inside</em> the row, put <code>alignMid</code> on each child instead.</p>
 <h2 id="4-stale-cached-drawings"><a class="header" href="#4-stale-cached-drawings">4. Stale cached drawings</a></h2>
-<p>Without a content key, a custom widget’s ops are rebuilt and diffed every frame. With a key, unchanged frames skip both, so a key that misses an input shows stale pixels.</p>
-<h3 id="the-drawing-freezes-on-an-input-the-key-missed"><a class="header" href="#the-drawing-freezes-on-an-input-the-key-missed">The drawing freezes on an input the key missed</a></h3>
-<p><code>winget-gui</code>’s sort arrow stayed on the old column until the key covered everything the drawing read.</p>
-<p><strong>Fix:</strong> key on every input: values, colours, text, theme, scroll viewport width, animation state. <code>contentKey</code> hashes numbers; fold colours and text in with <code>mix64</code> from <code>NanoUI.Backend</code>.</p>
+<p>Unkeyed custom widgets rebuild and diff their draw ops every frame. Adding a content key avoids that work on unchanged frames, which means anything missing from the key will never trigger a redraw.</p>
+<h3 id="a-keyed-canvas-freezes-when-an-input-changes"><a class="header" href="#a-keyed-canvas-freezes-when-an-input-changes">A keyed canvas freezes when an input changes</a></h3>
+<p>In <code>winget-gui</code>, a custom sort arrow stayed stuck on the previous column until its key included every value read during painting.</p>
+<p><strong>Fix:</strong> include every dynamic input in the key: values, colors, strings, theme, scroll viewport width, and animation state. Hash floats with <code>contentKey</code>, and fold in colors or text with <code>mix64</code> from <code>NanoUI.Backend</code>:</p>
 <pre><code class="language-haskell">sortArrow :: Int -&gt; Bool -&gt; Float -&gt; NanoUI Response
 sortArrow col ascending scrollY =
   drawingVersioned (contentKey [fromIntegral col, if ascending then 1 else 0, scrollY]) (fixedWH 12 12) arrowOps
 </code></pre>
-<h3 id="a-pinned-overlay-keeps-its-first-frames-ops"><a class="header" href="#a-pinned-overlay-keeps-its-first-frames-ops">A pinned overlay keeps its first frame’s ops</a></h3>
-<p>A drag ghost pinned under the pointer never changes its layout rectangle, so an unversioned drawing keeps the frame it appeared in (<code>ned</code>’s “tab ghost”).</p>
-<p><strong>Fix:</strong> version it by what moves it:</p>
+<h3 id="a-pinned-overlay-freezes-on-its-first-frame"><a class="header" href="#a-pinned-overlay-freezes-on-its-first-frame">A pinned overlay freezes on its first frame</a></h3>
+<p>An overlay positioned with <code>pinAt</code> (such as a drag ghost following the cursor) keeps the same layout rectangle even as it moves, so an unversioned drawing stays stuck on its first frame’s draw ops.</p>
+<p><strong>Fix:</strong> wrap it in <code>drawingVersioned</code> keyed by the coordinates or state that move it:</p>
 <pre><code class="language-haskell">-- ghostOps :: Rect -&gt; SmallArray DrawOp
 dragGhost :: Float -&gt; Float -&gt; NanoUI Response
 dragGhost mx my = drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOps
 </code></pre>
-<h3 id="widths-from-the-scroll-viewport-belong-in-the-key"><a class="header" href="#widths-from-the-scroll-viewport-belong-in-the-key">Widths from the scroll viewport belong in the key</a></h3>
-<p><code>ned</code>’s finder rows clamp to <code>rectW (scrollViewport metrics)</code> and key on it, so the drawing follows the viewport when the scrollbar appears.</p>
+<h3 id="scroll-viewport-width-belongs-in-the-key-too"><a class="header" href="#scroll-viewport-width-belongs-in-the-key-too">Scroll viewport width belongs in the key too</a></h3>
+<p>If a custom drawing clamps rows to <code>rectW (scrollViewport metrics)</code>, include that width in its content key so rows re-render properly when a scrollbar appears or disappears (as <code>ned</code> does in its finder).</p>
 <h2 id="5-scroll-details"><a class="header" href="#5-scroll-details">5. Scroll details</a></h2>
-<h3 id="content-runs-under-the-scrollbar"><a class="header" href="#content-runs-under-the-scrollbar">Content runs under the scrollbar</a></h3>
-<p>The scrollbar keeps a lane out of the viewport. A wide row drawn to the widget’s full width runs beneath the bar. Clamp content and hit targets to the viewport width, but keep the backdrop filling the widget or its edge shows as a seam down the lane (<code>ned</code>’s “hold the finder’s rows out of its scrollbar’s lane”).</p>
-<h3 id="the-wheel-step-does-not-match-the-row-height"><a class="header" href="#the-wheel-step-does-not-match-the-row-height">The wheel step does not match the row height</a></h3>
-<p>The default notch (60 px) jumps about one row of 54 px or three smaller rows. Set the step so a notch is one row:</p>
+<h3 id="rows-draw-underneath-the-scrollbar"><a class="header" href="#rows-draw-underneath-the-scrollbar">Rows draw underneath the scrollbar</a></h3>
+<p>The scrollbar reserves a vertical lane out of the scroll viewport. If you paint custom rows across the widget’s full width, content and click targets extend behind the scrollbar. Clamp row content and hit targets to <code>scrollViewport</code>, while letting background highlights span the full width so no vertical gap appears along the scrollbar edge.</p>
+<h3 id="mouse-wheel-scrolling-feels-misaligned-with-row-height"><a class="header" href="#mouse-wheel-scrolling-feels-misaligned-with-row-height">Mouse-wheel scrolling feels misaligned with row height</a></h3>
+<p>The default wheel notch scrolls 60 logical pixels, which can feel awkward over 54 px rows or dense lists. Match the step to your row height:</p>
 <pre><code class="language-haskell">oneRowPerNotch :: Float -&gt; NanoUI ()
 oneRowPerNotch rowHeight = do
   ctx &lt;- askContext
   liftIO $ setScrollTuning ctx defaultScrollTuning
     {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
 </code></pre>
-<p>A scroller can also set its own step with <code>setScrollStepUi</code>; <code>0</code> returns it to the context step.</p>
+<p>You can also override one scroller at a time with <code>setScrollStepUi</code>; pass <code>0</code> to revert to the context default.</p>
 <h2 id="6-focus-and-input-ordering"><a class="header" href="#6-focus-and-input-ordering">6. Focus and input ordering</a></h2>
-<h3 id="focus-queries-at-the-top-of-the-view-always-return-false"><a class="header" href="#focus-queries-at-the-top-of-the-view-always-return-false">Focus queries at the top of the view always return <code>False</code></a></h3>
-<p>The node arena is reset before the view runs, so <code>isFocused</code> (or any check of editing state) at the top of <code>appView</code> returns <code>False</code> every frame.</p>
-<p><strong>Symptom:</strong> Ctrl+A selects every item while the search box is being typed into; Delete opens the uninstall dialog.</p>
-<p><strong>Fix:</strong> read focus and place shortcuts at the <strong>end</strong> of the view, after the widgets have run:</p>
+<h3 id="focus-checks-at-the-top-of-the-view-always-return-false"><a class="header" href="#focus-checks-at-the-top-of-the-view-always-return-false">Focus checks at the top of the view always return <code>False</code></a></h3>
+<p>The layout arena clears before your view runs, so calling <code>isFocused</code> at the top of <code>appView</code> always reports <code>False</code>.</p>
+<p><strong>Symptom:</strong> pressing Ctrl+A selects all rows even while typing in a search input, or pressing Delete triggers an item-delete dialog instead of deleting a character.</p>
+<p><strong>Fix:</strong> run focus queries and focus-dependent shortcuts at the <strong>end</strong> of your view, after all widgets have been declared:</p>
 <pre><code class="language-haskell">appView :: Var Text -&gt; NanoUI ()
 appView query = do
   searchResp &lt;- searchInput' "Search" query
@@ -325,11 +323,11 @@ appView query = do
   searching &lt;- isFocused (respId searchResp)
   unless searching $ whenM (shortcut (key KeyDelete)) deleteSelected
 </code></pre>
-<h3 id="escape-behind-the-same-guard-as-ctrla"><a class="header" href="#escape-behind-the-same-guard-as-ctrla">Escape behind the same guard as Ctrl+A</a></h3>
-<p>Text inputs do not claim Escape. If Escape shares the “a field is editing” guard with Ctrl+A and Delete, Escape can never clear a selection once a field has focus.</p>
-<p><strong>Fix:</strong> give Escape its own condition.</p>
-<h3 id="typed-keys-never-reach-a-custom-widget"><a class="header" href="#typed-keys-never-reach-a-custom-widget">Typed keys never reach a custom widget</a></h3>
-<p>A focused widget that reads <code>inputChars</code> must call <code>useInputMethod</code> every frame it accepts text, even when it is not a text field. <code>ned</code>’s file tree takes vim’s <code>j</code>/<code>k</code> as typed text; only the editor called <code>useInputMethod</code>, so the keys never reached the tree.</p>
+<h3 id="escape-shares-the-same-guard-as-ctrla-or-delete"><a class="header" href="#escape-shares-the-same-guard-as-ctrla-or-delete">Escape shares the same guard as Ctrl+A or Delete</a></h3>
+<p>Built-in text inputs intentionally leave Escape unclaimed. If you disable Escape whenever “a field is focused” (using the same guard as Ctrl+A or Delete), Escape stops clearing selections or closing panels while typing.</p>
+<p><strong>Fix:</strong> handle Escape with its own condition instead of tying it to text-field focus.</p>
+<h3 id="typed-characters-never-reach-a-custom-widget"><a class="header" href="#typed-characters-never-reach-a-custom-widget">Typed characters never reach a custom widget</a></h3>
+<p>Backends only enable OS text input on frames where <code>useInputMethod</code> is called. Even if a custom widget is not a traditional text box (like <code>ned</code>’s file tree accepting <code>j</code>/<code>k</code> vim keys as characters), it must call <code>useInputMethod</code> on every focused frame to receive <code>inputChars</code>.</p>
 <p><strong>Fix:</strong></p>
 <pre><code class="language-haskell">-- Every frame the widget accepts text:
 composition :: WidgetId -&gt; Rect -&gt; NanoUI ()
@@ -337,39 +335,38 @@ composition wid caretRect = do
   preedit &lt;- useInputMethod wid InputNormal caretRect
   for_ preedit drawCompositionAtCaret
 </code></pre>
-<h3 id="a-slow-leftward-drag-selects-one-character"><a class="header" href="#a-slow-leftward-drag-selects-one-character">A slow leftward drag selects one character</a></h3>
-<p>A one-character selection’s anchor sits on its left, so re-deriving the anchor from the selection each frame carries it along with a leftward drag (<code>ned</code>’s “slow leftward drags”).</p>
-<p><strong>Fix:</strong> keep the anchor from the press.</p>
-<h3 id="a-widget-that-appears-next-frame-cannot-be-focused-this-frame"><a class="header" href="#a-widget-that-appears-next-frame-cannot-be-focused-this-frame">A widget that appears next frame cannot be focused this frame</a></h3>
-<p><code>requestFocus</code> resolves after layout, but only for widgets declared on that pass. If a field appears because of a state change, request focus on the pass that declares it (store a <code>focusPending</code> flag). See <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>
-<h3 id="conditional-widgets-shift-ids"><a class="header" href="#conditional-widgets-shift-ids">Conditional widgets shift ids</a></h3>
-<p>A branch that declares different widgets than its alternative changes the id count for everything after it; widgets appear to swap caret state. Wrap the branch in <code>scope</code>, and keep overlays unconditional. See <a href="../state/identity.html">Widget Identity &amp; Keys</a>.</p>
+<h3 id="dragging-slowly-leftward-only-selects-one-character"><a class="header" href="#dragging-slowly-leftward-only-selects-one-character">Dragging slowly leftward only selects one character</a></h3>
+<p>If you re-derive a text drag’s anchor from the current selection on every frame, a one-character selection anchors at its left edge and drags that anchor along with the cursor as you move left.</p>
+<p><strong>Fix:</strong> store the original anchor from the initial mouse press and hold it constant for the rest of the drag.</p>
+<h3 id="focusing-a-widget-that-has-not-appeared-yet-fails"><a class="header" href="#focusing-a-widget-that-has-not-appeared-yet-fails">Focusing a widget that has not appeared yet fails</a></h3>
+<p><code>requestFocus</code> only resolves widgets declared during the current pass. When clicking a button reveals a new text input on the <em>next</em> pass, store a <code>focusPending</code> flag and call <code>requestFocus</code> on the frame that actually declares the input. See <a href="../input/index.html">Keyboard, Focus &amp; IME</a>.</p>
+<h3 id="conditional-widgets-scramble-sibling-state"><a class="header" href="#conditional-widgets-scramble-sibling-state">Conditional widgets scramble sibling state</a></h3>
+<p>Any branch that runs different widget calls than its alternative shifts sibling IDs for everything after it, making unrelated fields swap carets or focus. Wrap conditional subtrees in <code>scope</code> and call overlays unconditionally. See <a href="../state/identity.html">Widget Identity &amp; Keys</a>.</p>
 <h2 id="7-svg-export"><a class="header" href="#7-svg-export">7. SVG export</a></h2>
 <ul>
-<li>Several canvas drawings in one frame emit colliding <code>clip_</code>/<code>grad_</code> element ids. Scope them per drawing (prefix each <code>&lt;g&gt;&lt;defs&gt;</code> block with an index), as <code>stronghead</code> does.</li>
-<li>Right-aligned numerals lose their anchor: <code>text-anchor</code>/<code>textLength</code> may need post-processing, and tabular numbers help readouts (<code>font-variant-numeric: tabular-nums</code> at the root).</li>
+<li>Exporting several canvas drawings onto one HTML page can create colliding <code>clip_</code> and <code>grad_</code> IDs unless each SVG uses a unique prefix (handled automatically by <code>frameToSvg</code>’s document hash, or by passing <code>svgIdPrefix</code> / prefixing each <code>&lt;g&gt;&lt;defs&gt;</code> block with an index as <code>stronghead</code> does).</li>
+<li>Right-aligned numerals can lose their anchor depending on browser font rendering: <code>text-anchor</code> and <code>textLength</code> may need post-processing, and <code>font-variant-numeric: tabular-nums</code> at the document root keeps numeric columns aligned.</li>
 </ul>
-<h2 id="quick-checklist"><a class="header" href="#quick-checklist">Quick checklist</a></h2>
+<h2 id="quick-debugging-checklist"><a class="header" href="#quick-debugging-checklist">Quick debugging checklist</a></h2>
 <ul>
-<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside a view: allocates every pass. Move it to setup.</li>
-<li><input disabled="" type="checkbox"> Unguarded side effects: the view re-runs. Wrap them in <code>whenM (button ...)</code>.</li>
-<li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code>s without <code>scope</code>; keyed lists using indices.</li>
-<li><input disabled="" type="checkbox"> Overlays called conditionally instead of unconditionally with a <code>Var Bool</code>.</li>
-<li><input disabled="" type="checkbox"> <code>useTask</code> inside a tab or branch: the task is cancelled when hidden.</li>
-<li><input disabled="" type="checkbox"> <code>keepAnimating</code> at an always-run top level: a busy loop. Call it in the animating widget; use <code>wakeAfter</code> for timers.</li>
-<li><input disabled="" type="checkbox"> Writing a freshly computed <code>NaN</code> to a <code>Var Float</code>: <code>NaN /= NaN</code>, so it redraws forever. Guard the write.</li>
-<li><input disabled="" type="checkbox"> A custom widget’s content key missing an input: stale pixels or a frozen drawing.</li>
-<li><input disabled="" type="checkbox"> A changing label without <code>fixedW</code>: its siblings shift every frame.</li>
-<li><input disabled="" type="checkbox"> A wide cell in a scrolling list without <code>fillW</code>: the list scrolls sideways.</li>
-<li><input disabled="" type="checkbox"> A <code>scrollArea</code> / <code>panel</code> / <code>card</code> nested in a popup: a box inside a box.</li>
-<li><input disabled="" type="checkbox"> Focus queries at the top of the view: the arena was reset; read them at the end.</li>
-<li><input disabled="" type="checkbox"> Escape behind the same guard as Ctrl+A/Delete: text inputs do not claim Escape.</li>
-<li><input disabled="" type="checkbox"> A focused widget reading <code>inputChars</code> without <code>useInputMethod</code>: typed text never arrives.</li>
-<li><input disabled="" type="checkbox"> Per-glyph advance × count for a long run: use <code>lineWidthUi</code>.</li>
-<li><input disabled="" type="checkbox"> Parsing or rebuilding documents per frame: parse once and keep the result outside the view.</li>
-<li><input disabled="" type="checkbox"> <code>readVar</code> above the widget that edits the <code>Var</code>: an extra pass per change.</li>
-<li><input disabled="" type="checkbox"> Missing <code>-threaded</code>.</li>
-<li><input disabled="" type="checkbox"> Touching <code>Context</code> from a worker thread: wake with <code>askWake</code> instead.</li>
+<li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside the view allocates a fresh <code>Var</code> every pass; move it to setup.</li>
+<li><input disabled="" type="checkbox"> Unguarded side effects run every frame; wrap them in <code>whenM (button ...)</code> or an explicit event check.</li>
+<li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code> calls need <code>scope</code>; dynamic lists need <code>withKey</code> with stable IDs (never indices).</li>
+<li><input disabled="" type="checkbox"> Call <code>modal</code>, <code>window</code>, and <code>popup</code> unconditionally every frame with a <code>Var Bool</code>.</li>
+<li><input disabled="" type="checkbox"> Putting <code>useTask</code> inside a tab or conditional cancels the worker as soon as it is hidden.</li>
+<li><input disabled="" type="checkbox"> Calling <code>keepAnimating</code> unconditionally at the top level creates a busy loop; call it inside the animating widget, and use <code>wakeAfter</code> for timers.</li>
+<li><input disabled="" type="checkbox"> Writing a computed <code>NaN</code> to a <code>Var Float</code> redraws endlessly (<code>NaN /= NaN</code>); guard float math.</li>
+<li><input disabled="" type="checkbox"> Missing an input from a custom widget’s content key produces stale or frozen pixels.</li>
+<li><input disabled="" type="checkbox"> Changing labels without <code>fixedW</code> shift their siblings; wide list cells without <code>fillW</code> trigger horizontal scrolling.</li>
+<li><input disabled="" type="checkbox"> Nesting <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a popup creates double borders; let one layer own the chrome.</li>
+<li><input disabled="" type="checkbox"> Check <code>isFocused</code> and focus-sensitive shortcuts at the end of the view, not the top.</li>
+<li><input disabled="" type="checkbox"> Give Escape its own guard instead of sharing the text-editing guard used for Ctrl+A or Delete.</li>
+<li><input disabled="" type="checkbox"> Custom widgets reading <code>inputChars</code> must call <code>useInputMethod</code> on every focused frame.</li>
+<li><input disabled="" type="checkbox"> Measure long text runs with <code>lineWidthUi</code> instead of multiplying single-glyph advance by length.</li>
+<li><input disabled="" type="checkbox"> Parse documents and compute expensive data outside the view, updating only when inputs change.</li>
+<li><input disabled="" type="checkbox"> Place <code>readVar</code> below the widget that edits it to avoid an extra pass per change.</li>
+<li><input disabled="" type="checkbox"> Compile executables with <code>-threaded</code>.</li>
+<li><input disabled="" type="checkbox"> Never touch <code>Context</code> from a worker thread; use <code>writeVarIO</code> and <code>askWake</code> instead.</li>
 </ul>
 
                     </main>
@@ -423,8 +420,8 @@ composition wid caretRect = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

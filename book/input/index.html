@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="keyboard-focus--ime"><a class="header" href="#keyboard-focus--ime">Keyboard, Focus &amp; IME</a></h1>
-<p>The view reads keyboard input during the frame; there are no key handlers to register. A focused widget claims the keys it uses, and shortcuts and key queries skip claimed keys.</p>
+<p>Views check keyboard input inline during each frame rather than registering key listeners. Whenever a widget holds focus, it claims the keys it handles, and higher-level shortcuts and key queries automatically ignore claimed keys.</p>
 <h2 id="shortcuts"><a class="header" href="#shortcuts">Shortcuts</a></h2>
 <pre><code class="language-haskell">import NanoUI.Shortcut
 
@@ -189,7 +189,7 @@ saveChord = cmdOrCtrl &lt;&gt; key 's'
 saveCommand :: NanoUI ()
 saveCommand = whenM (shortcut saveChord) saveDocument
 </code></pre>
-<p><code>&lt;&gt;</code> unions modifiers and keeps the right-hand key. <code>key</code> accepts a <code>Key</code> or a <code>Char</code>; letters are case-insensitive, and space maps to <code>KeySpace</code>:</p>
+<p>Combine modifiers and a key with <code>&lt;&gt;</code>. <code>key</code> accepts either a <code>Key</code> constructor or a <code>Char</code> (letters are case-insensitive, and <code>' '</code> maps to <code>KeySpace</code>):</p>
 <pre><code class="language-haskell">chords :: [Shortcut]
 chords =
   [ ctrl &lt;&gt; key 's'                 -- Ctrl+S
@@ -198,63 +198,63 @@ chords =
   , key (KeyF 5)                    -- F5
   ]
 </code></pre>
-<p>Use <code>cmdOrCtrl</code> for application commands. <code>ctrl</code>, <code>shift</code>, <code>alt</code>, and <code>super</code> are exact: <code>ctrl &lt;&gt; key 's'</code> does <strong>not</strong> match Ctrl+Shift+S.</p>
+<p>Prefer <code>cmdOrCtrl</code> for cross-platform application commands (Command on macOS, Ctrl elsewhere). All four modifier combinators (<code>ctrl</code>, <code>shift</code>, <code>alt</code>, and <code>super</code>) match strictly: <code>ctrl &lt;&gt; key 's'</code> will <strong>not</strong> trigger on Ctrl+Shift+S.</p>
 <ul>
-<li><code>shortcut</code> fires on the frame the chord goes down, including auto-repeat (holding Ctrl+Z repeats undo).</li>
-<li><code>shortcutOnce</code> ignores auto-repeat. Use it for toggles and one-shot commands.</li>
+<li><code>shortcut</code> fires on the initial press and on OS key repeats (useful for holding Ctrl+Z to repeat undo).</li>
+<li><code>shortcutOnce</code> fires only on the initial press and ignores repeats (useful for toggles and dialogs).</li>
 </ul>
-<p>Only the <strong>first</strong> matching <code>shortcut</code> call in a frame fires. It consumes that key’s presses for the frame, so two bindings of the same chord never both run. Declaration order is priority order.</p>
-<h2 id="what-suppresses-a-shortcut"><a class="header" href="#what-suppresses-a-shortcut">What suppresses a shortcut</a></h2>
-<p>A chord does not fire:</p>
+<p>Only the <strong>first</strong> matching <code>shortcut</code> call in a frame fires. Once it matches, that key press is consumed for the rest of the frame, so duplicate bindings never both run. Priority follows declaration order in your view.</p>
+<h2 id="when-shortcuts-are-suppressed"><a class="header" href="#when-shortcuts-are-suppressed">When shortcuts are suppressed</a></h2>
+<p>A shortcut will not fire:</p>
 <ul>
 <li>behind an open modal;</li>
-<li>inside <code>disabledWhen True</code>;</li>
-<li>when the focused widget claims the key: a text field keeps typing, cursor, and editing chords such as Ctrl+A and Ctrl+Z; buttons keep Enter and Space; sliders, selects, and lists keep arrows, Home, End, Page Up, and Page Down;</li>
-<li>for Escape when <code>takeEscape</code> fails, or when an open overlay takes it first.</li>
+<li>inside a <code>disabledWhen True</code> subtree;</li>
+<li>when the focused widget claims the key (text fields claim typing, cursor movement, and editing chords like Ctrl+A/Ctrl+Z; buttons claim Enter and Space; sliders, selects, and lists claim arrows, Home, End, Page Up, and Page Down);</li>
+<li>on Escape when an open overlay already dismissed itself or an earlier <code>takeEscape</code> claimed it.</li>
 </ul>
-<p>Focused widgets claim only their own unmodified or Shift-modified keys, so modified chords such as <code>Ctrl+Enter</code>, <code>Alt+Left</code>, or <code>Ctrl+S</code> still reach the application while a field is focused. The matching low-level functions are filtered the same way: <code>keyPressed</code>, <code>keyPressedOnce</code>, <code>keyReleased</code>, and <code>keyHeld</code>. Use raw <code>pressedIn</code> only when implementing a custom widget.</p>
+<p>Because focused widgets only claim unmodified and Shift-modified navigation keys (plus their own editing chords), application shortcuts like <code>Ctrl+Enter</code>, <code>Alt+Left</code>, or <code>Ctrl+S</code> still work while typing in a text field. The view-level key queries (<code>keyPressed</code>, <code>keyPressedOnce</code>, <code>keyReleased</code>, <code>keyHeld</code>) apply the exact same filtering. Only drop down to raw <code>pressedIn</code> when writing a custom widget.</p>
 <h2 id="menus-and-shortcuts"><a class="header" href="#menus-and-shortcuts">Menus and shortcuts</a></h2>
-<p><code>menuItemShortcut</code> shows a chord beside a menu row and binds it <strong>while the menu is open</strong>. Bind the same chord outside the menu for when it is closed:</p>
+<p><code>menuItemShortcut</code> prints the chord next to the menu item and activates it <strong>only while the menu is open</strong>. To make the shortcut available when the menu is closed too, declare a matching <code>shortcut</code> outside the menu:</p>
 <pre><code class="language-haskell">saveBindings :: NanoUI ()
 saveBindings = do
   whenM (menuItemShortcut "Save" saveChord) saveDocument
   whenM (shortcut saveChord) saveDocument
 </code></pre>
-<p>The open menu’s row is declared first, so it wins.</p>
-<h2 id="escape"><a class="header" href="#escape">Escape</a></h2>
-<p>Text fields do not claim Escape, so Escape can still close a popup, clear a selection, or leave a mode while the caret is in a field. That also means every Escape handler needs its own condition. Do not share the “a field is editing” guard used for Ctrl+A or Delete.</p>
-<p><code>takeEscape</code> claims a press for the current handler:</p>
+<p>Because the menu row runs before the fallback binding, it handles the chord first whenever the menu is open.</p>
+<h2 id="handling-escape"><a class="header" href="#handling-escape">Handling Escape</a></h2>
+<p>Text fields deliberately leave Escape unclaimed so Escape can close popups, clear filters, or exit a mode even while the cursor is inside a field. For the same reason, do not gate Escape behind an “a field is focused” guard that you use for Ctrl+A or Delete.</p>
+<p>Use <code>takeEscape</code> to claim Escape for the current handler:</p>
 <pre><code class="language-haskell">escapes :: Bool -&gt; Var Bool -&gt; NanoUI ()
 escapes isEditing editing = do
   when isEditing (whenM takeEscape (writeVar editing False))
   whenM takeEscape clearFocus
 </code></pre>
-<p>The first call that succeeds wins. An open popup, dropdown, or text-edit menu reserves Escape before the view’s own handlers run.</p>
-<h2 id="user-configurable-chords"><a class="header" href="#user-configurable-chords">User-configurable chords</a></h2>
-<p><code>parseShortcut</code> reads a chord from text, for a settings file or keymap editor:</p>
+<p>The first call that runs takes the press. Open popups, dropdowns, and text context menus claim Escape before your view’s handlers see it.</p>
+<h2 id="user-configurable-shortcuts"><a class="header" href="#user-configurable-shortcuts">User-configurable shortcuts</a></h2>
+<p>If your app reads keybindings from a config file or lets users customize shortcuts, parse chords from text with <code>parseShortcut</code>:</p>
 <pre><code class="language-haskell">keymapEntry :: Text -&gt; NanoUI ()
 keymapEntry txt =
   case parseShortcut txt of -- "C-S-s"
     Right chord -&gt; label (shortcutLabel chord)
     Left err    -&gt; showError err
 </code></pre>
-<p>The syntax is modifier prefixes followed by a key: <code>C-</code> Ctrl, <code>S-</code> Shift, <code>A-</code> Alt/Option, <code>s-</code> Super, <code>M-</code> Command on macOS and Ctrl elsewhere. A key is one character as typed without Shift, or a named key in angle brackets: <code>C-s</code>, <code>M-S-p</code>, <code>A-&lt;Enter&gt;</code>, <code>&lt;F5&gt;</code>, <code>C--</code>, <code>C-S-=</code>. Name a symbol by its unshifted key, so Ctrl++ on a US layout is <code>C-S-=</code>.</p>
-<p><code>shortcutLabel</code> renders a chord for menus and tooltips.</p>
+<p>The format uses modifier prefixes followed by a key: <code>C-</code> (Ctrl), <code>S-</code> (Shift), <code>A-</code> (Alt/Option), <code>s-</code> (Super), and <code>M-</code> (Command on macOS, Ctrl elsewhere). Keys are written as an unshifted character or a named key in angle brackets: <code>C-s</code>, <code>M-S-p</code>, <code>A-&lt;Enter&gt;</code>, <code>&lt;F5&gt;</code>, <code>C--</code>, <code>C-S-=</code>. Always write symbols using their unshifted key (so Ctrl++ on a US keyboard is <code>C-S-=</code>).</p>
+<p>Use <code>shortcutLabel</code> to format any parsed or constructed chord for menus and tooltips.</p>
 <h2 id="focus"><a class="header" href="#focus">Focus</a></h2>
 <ul>
-<li>Clicking a text field, select, slider, or focusable custom widget focuses it. Clicking elsewhere unfocuses the current field.</li>
-<li>Tab moves to the next focusable widget; Shift+Tab moves to the previous one.</li>
-<li><code>requestFocus (respId resp)</code> focuses a widget. <code>focusNext</code> and <code>focusPrevious</code> move focus like Tab and Shift+Tab. <code>clearFocus</code> drops focus at the end of the frame.</li>
-<li><code>holdFocus wid</code> claims focus every frame for a view that handles input itself; it also consumes Tab so an editor can indent with it.</li>
+<li>Clicking a text field, select, slider, or focusable custom widget focuses it; clicking empty background removes focus.</li>
+<li>Tab advances to the next focusable widget, and Shift+Tab moves backward.</li>
+<li><code>requestFocus (respId resp)</code> moves focus programmatically, <code>focusNext</code> and <code>focusPrevious</code> step through the Tab order, and <code>clearFocus</code> clears focus at the end of the frame.</li>
+<li><code>holdFocus wid</code> keeps focus locked onto a custom view (such as a code editor or terminal) and intercepts Tab so the widget can handle indentation itself.</li>
 </ul>
-<p>Focus requests are applied <strong>at the end of the frame</strong>, against that frame’s layout. A focus move is visible on the next frame:</p>
+<p>Focus requests take effect <strong>at the end of the frame</strong> against that frame’s solved layout, so the new focus state becomes visible on the next frame:</p>
 <pre><code class="language-haskell">findField :: Var Text -&gt; NanoUI ()
 findField query = do
   resp &lt;- searchInput' "Find" query
   whenM (shortcut (cmdOrCtrl &lt;&gt; key 'f')) (requestFocus (respId resp))
   -- next frame: the focus ring is drawn and isFocused answers True
 </code></pre>
-<p>A request can name a widget declared later in the same pass (for example with <code>currentId</code> just before it), but not one that is not declared on this pass at all. A widget that appears after a state change needs a delayed request:</p>
+<p>You can call <code>requestFocus</code> for a widget declared later in the same pass (for instance, by reading <code>currentId</code> right before calling it), but not for a widget that does not appear at all on the current pass. When a state change reveals a new field, save a <code>focusPending</code> flag and request focus on the pass that actually renders the field:</p>
 <pre><code class="language-haskell">editableName :: Var Text -&gt; NanoUI ()
 editableName draft = do
   editing &lt;- useVar False
@@ -276,23 +276,23 @@ editableName draft = do
 </code></pre>
 <blockquote class="blockquote-tag blockquote-tag-warning">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p>
-<p>Query focus at the <strong>end</strong> of the view. The node arena is reset before the view runs, so <code>isFocused</code> at the top always returns <code>False</code>. Keyboard shortcuts that depend on focus belong after the widgets have run.</p>
+<p>Always check focus at the <strong>end</strong> of your view. The node arena resets before the view runs, so calling <code>isFocused</code> at the top always returns <code>False</code>. Place focus-dependent keyboard shortcuts after the widgets have been declared.</p>
 </blockquote>
-<p>A focus request is ignored for a disabled widget, a widget behind an open modal, one not declared this pass, or a group response that is not itself a Tab stop. A widget in an inactive tab is not declared, so it cannot keep focus; request focus again when the tab is shown.</p>
-<p><code>disabledWhen</code> dims a subtree and blocks interaction without changing layout or state. The focus ring is themed by <code>themeFocusRing</code>.</p>
-<h2 id="ime"><a class="header" href="#ime">IME</a></h2>
-<p>Input method editors compose text before committing it. Built-in text fields handle the whole cycle, including caret rendering and suppressing shortcuts mid-composition.</p>
-<p>A custom widget that reads committed characters from <code>inputChars</code> must opt in every frame it accepts text:</p>
+<p>Focus requests are ignored if the target widget is disabled, covered by an open modal, missing from the current pass, or not a Tab stop. Because inactive tab bodies do not run, widgets inside them lose focus when you switch away; call <code>requestFocus</code> again when switching back if needed.</p>
+<p><code>disabledWhen</code> dims a subtree and blocks focus and input without disturbing layout. Customize the focus outline color through <code>themeFocusRing</code>.</p>
+<h2 id="input-method-editors-ime"><a class="header" href="#input-method-editors-ime">Input Method Editors (IME)</a></h2>
+<p>Built-in text inputs and text areas support IME composition out of the box, rendering pre-edit text at the caret and suppressing shortcuts until composition commits.</p>
+<p>If you build a custom widget that reads typed characters from <code>inputChars</code>, opt into text input on every frame it can accept text:</p>
 <pre><code class="language-haskell">-- Every frame the widget accepts text:
 composition :: WidgetId -&gt; Rect -&gt; NanoUI ()
 composition wid caretRect = do
   preedit &lt;- useInputMethod wid InputNormal caretRect
   for_ preedit drawCompositionAtCaret
 </code></pre>
-<p><code>useInputMethod :: WidgetId -&gt; InputPurpose -&gt; Rect -&gt; NanoUI (Maybe Composition)</code> places the candidate window at the caret and returns the in-progress composition to draw. Pass the caret rectangle, not the whole widget. It checks focus itself, so a separate <code>isFocused</code> guard is unnecessary.</p>
-<p>Raw input fields: <code>inputChars</code> (committed text), <code>inputKeys</code> (pressed, including repeats), <code>inputKeysNew</code> (initial presses), <code>inputKeysHeld</code>, <code>inputKeysReleased</code>, and <code>inputComposition</code>. The terminal demo in <code>packages/nano-ui-demo/examples/Terminal.hs</code> is a complete custom text widget.</p>
-<h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
-<p><code>NanoUI.Testing.Sim</code> drives a view headlessly the way a user would. <code>runSim</code> settles the view, then the script clicks text, types, and presses keys, each action running the frames a real event would:</p>
+<p><code>useInputMethod :: WidgetId -&gt; InputPurpose -&gt; Rect -&gt; NanoUI (Maybe Composition)</code> tells the OS where to place the candidate popup and returns any active composition string for you to render. Pass the <em>caret</em> rectangle rather than the entire widget rectangle. <code>useInputMethod</code> checks focus internally, so you do not need a separate <code>isFocused</code> guard.</p>
+<p>For low-level custom widgets, <code>Input</code> exposes <code>inputChars</code> (committed text), <code>inputKeys</code> (pressed keys including repeats), <code>inputKeysNew</code> (initial presses only), <code>inputKeysHeld</code>, <code>inputKeysReleased</code>, and <code>inputComposition</code>. See <code>packages/nano-ui-demo/examples/Terminal.hs</code> for a full custom widget using IME.</p>
+<h2 id="testing-input-headlessly"><a class="header" href="#testing-input-headlessly">Testing input headlessly</a></h2>
+<p><code>NanoUI.Testing.Sim</code> scripts a view without opening a window. <code>runSim</code> settles the layout, then runs high-level user actions like clicking labels, typing strings, and pressing shortcuts across the exact frames real input would trigger:</p>
 <pre><code class="language-haskell">renameTest :: IO ()
 renameTest = do
   ctx &lt;- newContext
@@ -303,8 +303,8 @@ renameTest = do
     pressKey KeyEnter
     expect "notes.txt"
 </code></pre>
-<p>A string literal aims at the visible text with that label. <code>At p</code>, <code>Within rect</code>, <code>On response</code> and <code>OnWidget wid</code> aim elsewhere. <code>check</code> and <code>checkEq</code> count failures on <code>failed</code>.</p>
-<p>For lower-level tests, <code>runFrame ctx input view</code> runs one frame. Focus changes apply on the next frame, and geometry lags one frame, so warm up with <code>warmup2</code> before targeting a widget by <code>respRect</code>. <code>keyInp</code> / <code>chordInp</code> from <code>NanoUI.Testing.Harness</code> build key input.</p>
+<p>String targets match visible text labels. For unlabeled widgets or specific points, target with <code>At p</code>, <code>Within rect</code>, <code>On response</code>, or <code>OnWidget wid</code>. <code>check</code> and <code>checkEq</code> increment the <code>failed</code> counter on mismatches.</p>
+<p>For lower-level frame tests, call <code>runFrame ctx input view</code> directly. Because layout geometry lags by one frame and focus updates apply at frame end, run <code>warmup2</code> before clicking a widget by its <code>respRect</code>, and build keyboard inputs with <code>keyInp</code> and <code>chordInp</code> from <code>NanoUI.Testing.Harness</code>.</p>
 
                     </main>
 
@@ -357,8 +357,8 @@ renameTest = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

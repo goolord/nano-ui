@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,25 +179,26 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h1>
-<p>Set up a project and open a window. The <a href="../tutorials/index.html">tutorials</a> continue from here.</p>
+<p>This page walks through installing dependencies, adding <code>nano-ui</code> to a Cabal project, and opening your first window. Once it runs, head to the <a href="../tutorials/index.html">tutorials</a> to build complete applications.</p>
 <h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<p>You will need:</p>
 <ul>
 <li>GHC 9.10 through 9.14 (development uses 9.14)</li>
-<li>Cabal 3.12+</li>
-<li>SDL3 and SDL3_ttf 3.2+ for the SDL backend</li>
-<li>pkg-config</li>
+<li>Cabal 3.12 or newer</li>
+<li>SDL3 and SDL3_ttf 3.2+ (for the SDL desktop backend)</li>
+<li><code>pkg-config</code></li>
 </ul>
-<h3 id="nix-linux--macos"><a class="header" href="#nix-linux--macos">Nix (Linux / macOS)</a></h3>
-<p>In the nano-ui repository, <code>nix develop</code> provides GHC, Cabal, SDL3, SDL3_ttf, and pkg-config.</p>
+<h3 id="nix-linux-and-macos"><a class="header" href="#nix-linux-and-macos">Nix (Linux and macOS)</a></h3>
+<p>Inside a checkout of the <code>nano-ui</code> repository, <code>nix develop</code> drops you into a shell with GHC, Cabal, SDL3, SDL3_ttf, and <code>pkg-config</code> already configured.</p>
 <h3 id="windows"><a class="header" href="#windows">Windows</a></h3>
 <p>Install SDL3 and SDL3_ttf through MSYS2 UCRT64:</p>
 <pre><code class="language-sh">pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
 </code></pre>
-<p>Then point <code>PKG_CONFIG_PATH</code> at MSYS2’s pkgconfig directory:</p>
+<p>Then point <code>PKG_CONFIG_PATH</code> at the MSYS2 <code>pkgconfig</code> directory:</p>
 <pre><code class="language-powershell">$env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 </code></pre>
-<h2 id="add-nano-ui-to-a-project"><a class="header" href="#add-nano-ui-to-a-project">Add nano-ui to a project</a></h2>
-<p><code>nano-ui</code> is on Hackage, but this book follows the repository, which may be ahead of the release. Pin the source in <code>cabal.project</code>:</p>
+<h2 id="adding-nano-ui-to-your-project"><a class="header" href="#adding-nano-ui-to-your-project">Adding nano-ui to your project</a></h2>
+<p>Although <code>nano-ui</code> is published on Hackage, this book tracks the git repository, which is often ahead of the latest release. Pin the repository in your <code>cabal.project</code>:</p>
 <pre><code class="language-cabal">source-repository-package
   type: git
   location: https://github.com/goolord/nano-ui
@@ -208,8 +209,8 @@
 package nano-ui-sdl
   flags: +sdl
 </code></pre>
-<p>Add the other packages you need (<code>nano-ui-emit</code>, <code>nano-ui-diagrams</code>, and so on) to the <code>subdir</code> list and to your <code>.cabal</code> dependencies.</p>
-<p>In <code>my-app.cabal</code>:</p>
+<p>If you want optional companion packages such as <code>nano-ui-emit</code> or <code>nano-ui-diagrams</code>, list them in both <code>subdir</code> and your <code>.cabal</code> file’s <code>build-depends</code>.</p>
+<p>Next, configure your executable in <code>my-app.cabal</code>:</p>
 <pre><code class="language-cabal">executable my-app
   main-is: Main.hs
   default-language: GHC2024
@@ -221,15 +222,15 @@ package nano-ui-sdl
     , nano-ui-sdl
     , text
 </code></pre>
-<h3 id="haddocks-and-hoogle"><a class="header" href="#haddocks-and-hoogle">Haddocks and Hoogle</a></h3>
-<p>Hackage has Haddocks for the released version. For the current source, from a checkout:</p>
-<pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle
-</code></pre>
-<p>Open <code>haddocks/index.html</code>. Building every package is memory-heavy; <code>cabal haddock nano-ui --haddock-hoogle</code> builds one. See <a href="development.html#haddocks-and-hoogle">Development Setup</a> for Hoogle indexing.</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
-<p>Compile executables with <code>-threaded</code>. Between frames the backend blocks in SDL’s event wait, a foreign call. Under the non-threaded runtime that call stops every Haskell thread, so <code>Task</code> and <code>Stream</code> workers make no progress while the window is idle.</p>
+<p>Always compile executables with <code>-threaded</code>. Between frames, the backend sleeps inside SDL’s foreign event-wait call. On the non-threaded runtime, that foreign call stalls every Haskell thread, so <code>Task</code> and <code>Stream</code> workers freeze whenever the window is idle.</p>
 </blockquote>
+<h3 id="haddocks-and-hoogle"><a class="header" href="#haddocks-and-hoogle">Haddocks and Hoogle</a></h3>
+<p>Hackage hosts Haddock pages for the released version. To build local documentation from a git checkout, run:</p>
+<pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle
+</code></pre>
+<p>Then open <code>haddocks/index.html</code>. Building docs for the entire workspace takes substantial memory; run <code>cabal haddock nano-ui --haddock-hoogle</code> if you only need the core library. See <a href="development.html#haddocks-and-hoogle">Development Setup</a> for indexing the output with Hoogle.</p>
 <h2 id="your-first-application"><a class="header" href="#your-first-application">Your first application</a></h2>
 <p>Create <code>Main.hs</code>:</p>
 <pre><code class="language-haskell">module Main (main) where
@@ -264,24 +265,24 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
 
   whenM (button "Reset") (writeVar n 0)
 </code></pre>
-<p>Run it:</p>
+<p>Build and run it:</p>
 <pre><code class="language-sh">cabal run -j1 my-app
 </code></pre>
-<p><code>-j1</code> keeps memory down; a normal project can use cabal’s defaults.</p>
+<p>Passing <code>-j1</code> keeps GHC’s peak memory usage modest during the initial build of the library. Once dependencies are built, regular <code>cabal run</code> works fine.</p>
 <h2 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h2>
 <ol>
-<li><code>runSdlApp</code> initializes SDL3, creates a window with TrueType font rendering, and starts the frame loop.</li>
-<li><code>columnWith</code> and <code>rowWith</code> are layout containers. Their argument composes layout modifiers (<code>gap 12 . padAll 20</code>); the leftmost modifier wins when two set the same property.</li>
-<li><code>useVar (0 :: Int)</code> allocates a <code>Var</code> on the first frame and returns the same <code>Var</code> on later frames, matched by its call position in the view. The initial value is used only on the first frame.</li>
-<li><code>button "+"</code> draws an interactive button and returns <code>True</code> only on the frame it is activated.</li>
-<li><code>modifyVar n (+ 1)</code> updates the value. Reading <code>n</code> below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.</li>
+<li><code>runSdlApp</code> initializes SDL3, opens a window with TrueType text rendering, and starts the event loop.</li>
+<li><code>columnWith</code> and <code>rowWith</code> are layout containers. Their first argument is a chain of layout modifiers (<code>gap 12 . padAll 20</code>). When two modifiers set the same field, the leftmost one wins.</li>
+<li><code>useVar (0 :: Int)</code> creates a <code>Var</code> on the first frame and returns that same <code>Var</code> on every frame after, matched by its call position. The initial value is only used on frame one.</li>
+<li><code>button "+"</code> draws the button and returns <code>True</code> on the frame the user clicks it (or presses Enter/Space while it has focus).</li>
+<li><code>modifyVar n (+ 1)</code> updates the counter. Because <code>readVar n</code> runs <em>after</em> the buttons, the label immediately displays the new value in the same pass. Reading above the buttons would require a second pass.</li>
 </ol>
-<p>The view runs every frame, so two rules follow:</p>
+<p>Since the view runs on every frame, keep two habits in mind from the start:</p>
 <ul>
-<li>Guard side effects with an event: <code>whenM (button "Save") save</code>. <code>button "Save" &gt;&gt; save</code> saves every frame.</li>
-<li>Allocate long-lived resources (<code>newVar</code>, tasks, caches) in <code>IO</code> before <code>runSdlApp</code>, never inside the view.</li>
+<li>Gate side effects behind events: write <code>whenM (button "Save") save</code>, never <code>button "Save" &gt;&gt; save</code> (which would save on every frame).</li>
+<li>Create long-lived resources (<code>newVar</code>, background tasks, caches) once in <code>IO</code> before calling <code>runSdlApp</code>, not inside the view.</li>
 </ul>
-<p>Next: <a href="../tutorials/todo-list.html">Tutorial 1: Build a Todo List</a>.</p>
+<p>Next up: <a href="../tutorials/todo-list.html">Tutorial 1: Build a Todo List</a>.</p>
 
                     </main>
 
@@ -334,8 +335,8 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

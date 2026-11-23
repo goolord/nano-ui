@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,9 +179,9 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="drag--drop"><a class="header" href="#drag--drop">Drag &amp; Drop</a></h1>
-<p>There are two kinds of drag: a pointer drag inside the window (reordering a list, moving tabs, docking panes), and files or text dropped in from another application. The hooks only report what happened. Applying a drop to your data is up to you.</p>
+<p>Drag and drop in <code>nano-ui</code> falls into two categories: pointer drags inside the window (reordering rows, dragging tabs, docking panes) and external files or text dragged in from other apps. In every case, the hooks only report drag state and drop locations; updating your application data is up to you.</p>
 <h2 id="reordering-a-list"><a class="header" href="#reordering-a-list">Reordering a list</a></h2>
-<p><code>useReorder</code> takes the current order of item ids and each item’s response, in drawn order:</p>
+<p>Pass the current list of item IDs and each item’s drawn <code>Response</code> (in render order) to <code>useReorder</code>:</p>
 <pre><code class="language-haskell">chips :: Var [Int] -&gt; NanoUI ()
 chips orderVar = rowWith (gap 6) $ do
   order &lt;- readVar orderVar -- orderVar &lt;- newVar [0 .. 4] in setup
@@ -189,9 +189,9 @@ chips orderVar = rowWith (gap 6) $ do
   r &lt;- useReorder order drawn
   writeVar orderVar (reorderOrder r)
 </code></pre>
-<p><code>reorderOrder</code> changes on the frame the item is dropped. Draw from <code>reorderPreview</code> instead to move the other items aside during the drag. <code>reorderDragging</code> is the held item, and <code>reorderMoved</code> is set once the press has moved past the drag threshold, so a click can be ignored.</p>
-<h2 id="gestures-with-usedrag"><a class="header" href="#gestures-with-usedrag">Gestures with <code>useDrag</code></a></h2>
-<p>For anything else, <code>useDrag</code> tracks a thresholded drag across keyed sources. Allocate the handle once with <code>newDrag</code> in setup. Here it reorders tabs, with <code>insertionIndex</code> turning the pointer into a slot in the strip (<code>Nothing</code> outside it):</p>
+<p><code>reorderOrder</code> returns the final order on the frame the user drops an item. Render from <code>reorderPreview</code> instead if you want surrounding rows to shift live during the drag. <code>reorderDragging</code> identifies the item currently held, and <code>reorderMoved</code> turns <code>True</code> once the cursor passes the drag threshold so you can suppress normal click handlers.</p>
+<h2 id="general-gestures-with-usedrag"><a class="header" href="#general-gestures-with-usedrag">General gestures with <code>useDrag</code></a></h2>
+<p>For custom drag interactions (like dragging tabs or moving items between containers), use <code>useDrag</code>. Allocate a drag handle once in setup with <code>newDrag</code>. In the example below, <code>insertionIndex</code> converts the pointer coordinates into a target slot along a tab bar (returning <code>Nothing</code> when outside):</p>
 <pre><code class="language-haskell">tabStrip :: DragHandle Text -&gt; Var Text -&gt; [Tab Text ()] -&gt; NanoUI ()
 tabStrip dragHandle active documents = do
   headers &lt;- tabBar' active documents
@@ -201,17 +201,17 @@ tabStrip dragHandle active documents = do
     for_ (insertionIndex DragAxisX (tabStripRect headers) (map (respRect . snd) rest) (dragAt d)) $
       moveTab (dragPayload d)
 </code></pre>
-<p><code>dragPhase</code> is <code>DragStarted</code>, <code>Dragging</code>, <code>DragReleased</code>, or <code>DragCancelled</code> (Escape, a lost hold, or the source disappearing). The last two last one frame. Commit only on <code>DragReleased</code>.</p>
-<h2 id="files-and-text-from-other-applications"><a class="header" href="#files-and-text-from-other-applications">Files and text from other applications</a></h2>
-<p>The SDL backend delivers the operating system’s drag and drop; the RGFW backend does not. <code>dropZone</code> draws a panel and reports the files and text dropped on it:</p>
+<p><code>dragPhase</code> transitions through <code>DragStarted</code>, <code>Dragging</code>, and either <code>DragReleased</code> or <code>DragCancelled</code> (triggered by Escape, losing capture, or the dragged source disappearing). Both terminal phases last a single frame; commit changes only on <code>DragReleased</code>.</p>
+<h2 id="files-and-text-dropped-from-other-apps"><a class="header" href="#files-and-text-dropped-from-other-apps">Files and text dropped from other apps</a></h2>
+<p>The SDL backend forwards OS drag-and-drop events (the RGFW backend does not). <code>dropZone</code> draws a panel that tracks hover state and reports dropped files or text:</p>
 <pre><code class="language-haskell">fileDrop :: NanoUI ()
 fileDrop = do
   (_, _, target) &lt;- dropZone (fillW . padAll 12) (label "Drop files here")
   when (dropReceived target) (mapM_ openFile (dropFiles target))
 </code></pre>
-<p><code>dropHovered</code> is true while a drag is over the zone. <code>useDrop rect</code> does the same for any rectangle. Only the topmost layer receives the drop, so a zone behind a modal gets nothing.</p>
-<h2 id="pane-grids"><a class="header" href="#pane-grids">Pane grids</a></h2>
-<p><code>paneGrid</code> lays out dockable, splittable panes. Its response’s <code>pgrDropTarget</code> is the destination under the pointer, which pairs with a <code>useDrag</code> gesture:</p>
+<p><code>dropHovered</code> is <code>True</code> while an external drag hovers over the zone. If you want drop detection on a custom region without drawing a panel, call <code>useDrop rect</code>. Drop events respect layering, so a drop zone covered by an open modal receives nothing.</p>
+<h2 id="dockable-pane-grids"><a class="header" href="#dockable-pane-grids">Dockable pane grids</a></h2>
+<p><code>paneGrid</code> manages splittable, resizable pane layouts. Its response includes <code>pgrDropTarget</code>, which reports where a dragged pane or tab would dock under the cursor and pairs naturally with <code>useDrag</code>:</p>
 <pre><code class="language-haskell">dockPanes :: PaneGridConfig -&gt; Maybe (Drag Word64) -&gt; NanoUI ()
 dockPanes cfg gesture = do
   panes &lt;- paneGrid cfg
@@ -219,7 +219,7 @@ dockPanes cfg gesture = do
     (Just d, Just target) | dragPhase d == DragReleased -&gt; void (commitPaneDrop target)
     _ -&gt; pure ()
 </code></pre>
-<p><code>pgdLocation</code> is <code>BesidePane paneId edge</code> or <code>OutsideGrid edge</code>; <code>pgdRect</code> and <code>pgdPane</code> help validate the drop. Save <code>pgrTree</code> when <code>pgrCommitted</code> is set.</p>
+<p><code>pgdLocation</code> is either <code>BesidePane paneId edge</code> or <code>OutsideGrid edge</code>, and <code>pgdRect</code> / <code>pgdPane</code> let you validate or highlight the target. Save <code>pgrTree</code> whenever <code>pgrCommitted</code> is <code>True</code>.</p>
 
                     </main>
 
@@ -272,8 +272,8 @@ dockPanes cfg gesture = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 

@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
+            window.path_to_searchindex_js = "../searchindex-b875eeac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -179,9 +179,9 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="async-work--animation"><a class="header" href="#async-work--animation">Async Work &amp; Animation</a></h1>
-<p>The view must never block, and nothing should redraw while nothing moves. Slow work runs on a worker, timed work on a wake, and the frame loop sleeps in between. Compile with <code>-threaded</code>.</p>
-<h2 id="task-one-job-per-key"><a class="header" href="#task-one-job-per-key"><code>Task</code>: one job per key</a></h2>
-<p>Allocate the handles once in <code>IO</code>:</p>
+<p>Two rules keep a <code>nano-ui</code> application feeling snappy and quiet: never block inside the view, and never redraw when nothing is changing. Move slow I/O onto worker threads, schedule delayed updates with timers, and let the event loop sleep in between. Always compile executables with <code>-threaded</code>.</p>
+<h2 id="task-one-background-job-per-key"><a class="header" href="#task-one-background-job-per-key"><code>Task</code>: one background job per key</a></h2>
+<p>Allocate <code>Task</code> and <code>Stream</code> handles once in <code>IO</code> during startup:</p>
 <pre><code class="language-haskell">data App = App
   { appSearch :: Task Text [Text]
   , appFile :: Task Text Text
@@ -191,7 +191,7 @@
 newApp :: IO App
 newApp = App &lt;$&gt; newTask &lt;*&gt; newTask &lt;*&gt; newStream
 </code></pre>
-<p>In the view:</p>
+<p>Inside the view, call <code>useTaskStatus</code> to run a job and inspect whether it is loading, finished, or failed:</p>
 <pre><code class="language-haskell">results :: App -&gt; Text -&gt; NanoUI ()
 results app queryKey = do
   status &lt;- useTaskStatus (appSearch app) queryKey (fetchSearchResults queryKey)
@@ -201,22 +201,23 @@ results app queryKey = do
     TaskDone found       -&gt; renderResults found
     TaskFailed err _     -&gt; danger (T.pack (displayException err))
 </code></pre>
-<p>When only the latest result matters, use <code>useTask</code>:</p>
+<p>If you only care about the most recent completed result, <code>useTask</code> is simpler:</p>
 <pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
 fileView app path = do
   contents &lt;- useTask (appFile app) path (T.readFile (T.unpack path))
   label (fromMaybe "Loading..." contents)
 </code></pre>
+<p>How task lifecycles work:</p>
 <ul>
-<li>The key identifies the job. A new key starts a worker and cancels the old job with an asynchronous exception.</li>
-<li>A skipped hook cancels the job. If the view does not call <code>useTask</code> for a full frame, because the pane is in an inactive tab or inside a branch, the work is released. Keep the hook outside tabs when work must continue while hidden.</li>
-<li>To retrigger the same input, put a counter in the key. A Retry button must change the key or the job never reruns.</li>
-<li>Cancellation is an async exception. Use <code>bracket</code> or <code>withFile</code> inside the job so resources are released when the user changes the query.</li>
-<li>The result is forced on the worker. Return a value in weak head normal form; force a list’s spine with <code>length found \</code>seq` pure found`.</li>
-<li><code>TaskRunning previous</code> carries the last result, so a list does not flash empty while the next query runs.</li>
+<li><strong>Key changes restart the job.</strong> Whenever the key changes, <code>nano-ui</code> cancels the previous worker with an asynchronous exception and starts a new one.</li>
+<li><strong>Skipping the hook cancels the job.</strong> If a full frame runs without calling <code>useTask</code> (for instance, because the user switched to another tab or hid a conditional panel), the running worker is cancelled. Call <code>useTask</code> outside the tab or branch if work should keep going while hidden.</li>
+<li><strong>Include a counter in the key to support retries.</strong> Pressing Retry on the same input only restarts the task if the key changes (for example, <code>(query, attempt)</code>).</li>
+<li><strong>Clean up resources with <code>bracket</code>.</strong> Because cancellation arrives as an asynchronous exception, acquire files, sockets, or database handles inside <code>bracket</code> or <code>withFile</code>.</li>
+<li><strong>Force results on the worker thread.</strong> <code>useTask</code> evaluates the result to weak head normal form on the worker; if you return a lazy list, force its spine (<code>length found \</code>seq` pure found`) before returning so evaluation does not happen on the UI thread.</li>
+<li><strong>Keep old results visible while loading.</strong> <code>TaskRunning previous</code> carries the last completed result so search lists do not flash blank on every new query.</li>
 </ul>
-<h2 id="stream-repeated-pushes"><a class="header" href="#stream-repeated-pushes"><code>Stream</code>: repeated pushes</a></h2>
-<p>A <code>Stream</code> is for sensors, downloads, token streams, and anything else that pushes repeatedly:</p>
+<h2 id="stream-continuous-pushed-updates"><a class="header" href="#stream-continuous-pushed-updates"><code>Stream</code>: continuous pushed updates</a></h2>
+<p>Use <code>Stream</code> for background producers that emit values over time: download progress, sensor telemetry, log tails, or streamed model responses.</p>
 <pre><code class="language-haskell">progress :: App -&gt; NanoUI ()
 progress app = do
   pct &lt;- useStream (appProgress app) () (0 :: Int) $ \update -&gt;
@@ -225,13 +226,14 @@ progress app = do
       update (const i)
   progressBar (fromIntegral pct / 100)
 </code></pre>
-<p>The producer receives <code>update :: (s -&gt; s) -&gt; IO ()</code> and returns when done, cancelled, or throwing. Each update wakes the loop; updates between frames coalesce into one frame.</p>
+<p>The producer receives <code>update :: (s -&gt; s) -&gt; IO ()</code> and runs until it returns, throws, or gets cancelled. Each call to <code>update</code> wakes the frame loop; multiple pushes between frames coalesce automatically into a single redraw.</p>
 <ul>
-<li>Stop by not calling the hook. <code>when isRunning (useStream ...)</code> releases the producer.</li>
-<li>Stopping discards the accumulated state. Save it outside and pass it as the next initial value to resume.</li>
-<li>Producers must not touch the UI. They may call <code>update</code> from their thread or threads they start; never touch the UI <code>Context</code>.</li>
+<li><strong>Stop by skipping the call.</strong> Guarding <code>useStream</code> with <code>when isRunning</code> cancels the producer as soon as <code>isRunning</code> becomes <code>False</code>.</li>
+<li><strong>Save state outside if you want pause/resume.</strong> Stopping a stream discards its internal accumulator and restarts from the initial value next time.</li>
+<li><strong>Never touch the UI <code>Context</code> from a producer.</strong> Only call <code>update</code> from the producer thread (or threads it spawns).</li>
 </ul>
-<h2 id="threads-outside-those-handles"><a class="header" href="#threads-outside-those-handles">Threads outside those handles</a></h2>
+<h2 id="integrating-your-own-threads"><a class="header" href="#integrating-your-own-threads">Integrating your own threads</a></h2>
+<p>If you already manage worker threads outside <code>Task</code> and <code>Stream</code>, mutate shared <code>Var</code>s with the thread-safe <code>IO</code> functions and wake the loop with the callback from <code>askWake</code>:</p>
 <pre><code class="language-haskell">refreshInBackground :: Var [Text] -&gt; NanoUI ()
 refreshInBackground queryResult = do
   wake &lt;- askWake -- in the view, once
@@ -241,9 +243,9 @@ refreshInBackground queryResult = do
     writeVarIO queryResult result
     wake -- schedule one frame
 </code></pre>
-<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The frame the wake runs repaints the widgets whose text, value or style the change altered. Use a <code>Stream</code> for frequent updates.</p>
+<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are safe from any thread. Calling <code>wake</code> schedules a frame that repaints only the widgets whose text, value, or style changed. For high-frequency updates, prefer <code>Stream</code>.</p>
 <h2 id="animation"><a class="header" href="#animation">Animation</a></h2>
-<p><code>animateTo</code> moves a value toward a target:</p>
+<p><code>animateTo</code> smoothly transitions a float toward a target value across frames:</p>
 <pre><code class="language-haskell">sidebar :: Float -&gt; NanoUI ()
 sidebar targetWidth = do
   currentWidth &lt;- animateTo (Tween EaseOutQuad 0.25 0) targetWidth
@@ -251,19 +253,19 @@ sidebar targetWidth = do
 </code></pre>
 <p>A <code>Transition</code> is either:</p>
 <ul>
-<li><code>Tween ease duration delay</code>, in seconds. Curves include <code>EaseOutQuad</code>, <code>EaseInOutCubic</code>, <code>EaseOutBack</code>, and <code>EaseCubicBezier</code>.</li>
-<li><code>Spring params</code>, a damped spring. <code>presetSmooth</code>, <code>presetBouncy</code>, and <code>presetStiff</code> are the presets.</li>
+<li><code>Tween ease duration delay</code> (durations in seconds), with easing curves including <code>EaseOutQuad</code>, <code>EaseInOutCubic</code>, <code>EaseOutBack</code>, and <code>EaseCubicBezier</code>.</li>
+<li><code>Spring params</code> for damped spring physics, with presets <code>presetSmooth</code>, <code>presetBouncy</code>, and <code>presetStiff</code>.</li>
 </ul>
 <pre><code class="language-haskell">follow :: Float -&gt; Float -&gt; NanoUI V2
 follow targetX targetY = animateToA (Spring presetSmooth) (V2 targetX targetY)
 </code></pre>
-<p>Springs retarget mid-flight from their current position and velocity. <code>animateToA</code> animates any <code>Animatable</code> value (<code>Float</code>, <code>Double</code>, <code>V2</code>, or <code>Color</code>) channel by channel.</p>
-<h3 id="continuous-animation"><a class="header" href="#continuous-animation">Continuous animation</a></h3>
-<p><code>pulse</code> returns a value oscillating in <code>[0, 1]</code> with the given period in seconds:</p>
+<p>Springs preserve velocity when retargeted mid-flight, so toggling a state back and forth never snaps abruptly. To animate any <code>Animatable</code> value channel by channel (<code>Float</code>, <code>Double</code>, <code>V2</code>, or <code>Color</code>), use <code>animateToA</code>. Once a tween or spring settles, it stops requesting frames and the loop goes back to sleep.</p>
+<h3 id="continuous-animations"><a class="header" href="#continuous-animations">Continuous animations</a></h3>
+<p><code>pulse</code> returns a value oscillating smoothly between <code>0</code> and <code>1</code> with a given period in seconds:</p>
 <pre><code class="language-haskell">fading :: NanoUI Float
 fading = pulse 1.2
 </code></pre>
-<p>Clock-driven values do not, by themselves, keep the loop awake. A widget that draws from them must call <code>keepAnimating</code> <strong>with its own response</strong>, every frame it is on screen:</p>
+<p>Unlike <code>animateTo</code>, clock-based values like <code>pulse</code> do not wake the loop by themselves. Any widget that draws from a continuous animation must call <code>keepAnimating</code> <strong>with its own <code>Response</code></strong> on every frame it is on screen:</p>
 <pre><code class="language-haskell">breathingDot :: NanoUI ()
 breathingDot = do
   t &lt;- pulse 1.2
@@ -275,36 +277,36 @@ breathingDot = do
     }
   keepAnimating resp
 </code></pre>
-<p>The loop goes back to sleep on the first frame that leaves it out.</p>
+<p>As soon as a frame stops calling <code>keepAnimating</code>, the loop goes right back to sleep.</p>
 <blockquote class="blockquote-tag blockquote-tag-caution">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
-<p>Never force redraws by dirtying the context every frame. That is an unpaced busy loop.</p>
+<p>Never force animation frames by marking the context dirty every frame. That creates an unpaced busy loop and burns CPU even when nothing is moving.</p>
 </blockquote>
 <h3 id="timers"><a class="header" href="#timers">Timers</a></h3>
-<p><code>wakeAfter</code> requests one frame after a delay in <strong>seconds</strong>:</p>
+<p>Call <code>wakeAfter</code> to schedule a single future frame after a delay in <strong>seconds</strong>:</p>
 <pre><code class="language-haskell">clock :: NanoUI ()
 clock = do
   label =&lt;&lt; currentTimeText
   wakeAfter 1
 </code></pre>
-<p>Call it on every frame that still needs the wake; pending wakes reset each frame.</p>
-<h2 id="choosing-a-tool"><a class="header" href="#choosing-a-tool">Choosing a tool</a></h2>
+<p>Pending wakes clear after every frame, so keep calling <code>wakeAfter</code> on each frame while the timer is still active.</p>
+<h2 id="picking-the-right-primitive"><a class="header" href="#picking-the-right-primitive">Picking the right primitive</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>The work…</th><th>Use</th></tr>
+<tr><th>What you need</th><th>Primitive to use</th></tr>
 </thead>
 <tbody>
-<tr><td>Returns one result for an input</td><td><code>Task</code> + <code>useTask</code> / <code>useTaskStatus</code></td></tr>
-<tr><td>Pushes many updates</td><td><code>Stream</code> + <code>useStream</code></td></tr>
-<tr><td>Is already running in a thread you own</td><td><code>Var</code> IO operations + <code>askWake</code></td></tr>
-<tr><td>Must keep running while its pane is hidden</td><td>Keep the hook outside the tab or branch</td></tr>
-<tr><td>Changes on a schedule</td><td><code>wakeAfter</code></td></tr>
-<tr><td>Animates continuously</td><td><code>animateTo</code> / <code>pulse</code> + <code>keepAnimating</code></td></tr>
+<tr><td>Fetch or compute one result for a given input</td><td><code>Task</code> with <code>useTask</code> or <code>useTaskStatus</code></td></tr>
+<tr><td>Receive a stream of updates over time</td><td><code>Stream</code> with <code>useStream</code></td></tr>
+<tr><td>Push updates from an existing background thread</td><td><code>writeVarIO</code> / <code>modifyVarIO</code> plus <code>askWake</code></td></tr>
+<tr><td>Keep work running when its tab or panel is hidden</td><td>Place <code>useTask</code> / <code>useStream</code> outside the tab or branch</td></tr>
+<tr><td>Trigger periodic or delayed refreshes</td><td><code>wakeAfter</code></td></tr>
+<tr><td>Animate values smoothly or continuously</td><td><code>animateTo</code> / <code>animateToA</code>, or <code>pulse</code> with <code>keepAnimating</code></td></tr>
 </tbody>
 </table>
 </div>
-<p>Runnable versions: <a href="../tutorials/live-data.html">Live Data &amp; Background Work</a>, <code>Tasks.hs</code>, <code>LiveChart.hs</code>, <code>Animation.hs</code>.</p>
+<p>For runnable programs, see <a href="../tutorials/live-data.html">Tutorial 3: Live Data &amp; Background Work</a> along with <code>Tasks.hs</code>, <code>LiveChart.hs</code>, and <code>Animation.hs</code>.</p>
 
                     </main>
 
@@ -357,8 +359,8 @@ clock = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-0969b910.js"></script>
-        <script src="../theme/nano-ui-components-b3281698.js"></script>
+        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
 
