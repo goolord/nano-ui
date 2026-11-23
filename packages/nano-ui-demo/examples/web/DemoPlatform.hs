@@ -1,9 +1,9 @@
 -- | What the widget cookbook ("Demo") takes from the browser backend. The
--- page has no font directories, file system or native dialogs: the font
--- list starts with the bundled Inter and adds the installed families once
--- the user lets the browser list them, the data files are compiled into
--- the module, and the File Dialogs section says what it would do on the
--- desktop. The SDL build has a module of the same name in @examples/sdl@
+-- page has no font directories or file system: the font list starts with
+-- the bundled Inter and adds the installed families once the user lets the
+-- browser list them, the data files are compiled into the module, and the
+-- File Dialogs section opens files and folders by their contents and
+-- saves through the browser. The SDL build has a module of the same name in @examples/sdl@
 -- with the same exports.
 module DemoPlatform
   ( backendLabel
@@ -21,6 +21,7 @@ module DemoPlatform
   , formatExplainRows
   ) where
 
+import Control.Exception (displayException)
 import Control.Monad (unless, when)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
@@ -30,8 +31,14 @@ import NanoUI
 import NanoUI.Backend.SdlWeb
   ( CoreDebugSnapshot (..)
   , SdlWebDebugSnapshot (..)
+  , WebFile (..)
   , WebFont (..)
   , askSdlWebDebug
+  , defaultFileDialogOptions
+  , FileDialogOptions (..)
+  , openWebFiles
+  , openWebFolder
+  , saveWebFile
   , formatDrawRows
   , formatExplainRows
   , formatFpsRows
@@ -102,18 +109,66 @@ readDataFile path =
   maybe (ioError (userError (path <> ": not embedded in the web build"))) pure $
     lookup path [("data/" <> name, bytes) | (name, bytes) <- dataFiles]
 
--- | The browser has no native file dialogs, so there is no state to keep.
+-- | What a dialog button asks the browser for.
+data DialogAction = OpenFiles | OpenFolder | SaveFile
+  deriving (Eq, Show)
+
+-- | How a dialog ended.
+data DialogOutcome = Opened [WebFile] | Saved String | Cancelled
+
+-- | The dialog the section has open: each press numbers a request, the
+-- task runs the latest, and the view takes each request's answer once.
 data FileDialogState = FileDialogState
+  { fdTask :: !(Task (Int, DialogAction) DialogOutcome)
+  , fdRequest :: !(Var (Int, DialogAction))
+  , fdTaken :: !(Var Int)
+  , fdStatus :: !(Var Text)
+  }
 
--- | The (empty) state.
+-- | No dialog asked for yet.
 newFileDialogState :: IO FileDialogState
-newFileDialogState = pure FileDialogState
+newFileDialogState = FileDialogState <$> newTask <*> newVar (0, OpenFiles) <*> newVar 0 <*> newVar ""
 
--- | The section the desktop build fills with an Open File button.
+-- | Open files or a folder, which the browser hands over by name and
+-- contents, or save a file through the browser. The browser shows its
+-- dialog only right after a press, so each runs on a task the press starts.
+-- The names opened go to @opened@.
 fileDialogSection :: FileDialogState -> Var Text -> NanoUI ()
-fileDialogSection FileDialogState _ = do
+fileDialogSection st opened = do
+  request@(n, _) <- readVar (fdRequest st)
+  when (n > 0) $ do
+    -- The status, not the latest result: while a new request runs, the
+    -- latest result is still the previous request's.
+    status <- useTaskStatus (fdTask st) request (runDialog request)
+    taken <- readVar (fdTaken st)
+    let take' act = when (taken /= n) (writeVar (fdTaken st) n >> act)
+    case status of
+      TaskRunning _ -> pure ()
+      TaskFailed err _ -> take' (writeVar (fdStatus st) ("Failed: " <> T.pack (displayException err)))
+      TaskDone outcome -> take' $ case outcome of
+        Opened files -> do
+          writeVar opened (T.intercalate ", " (map describe files))
+          writeVar (fdStatus st) (T.pack (show (length files) <> " opened"))
+        Saved name -> writeVar (fdStatus st) ("Saved as " <> T.pack name)
+        Cancelled -> writeVar (fdStatus st) "Cancelled"
   heading "File Dialogs"
-  muted "Native file dialogs open from the desktop build (nano-ui-sdl). A page has none."
+  muted "A page sees no paths: the browser hands over the files you pick, and saves where you say."
+  rowWith (tight . gap 12 . alignMid . fillW) $ do
+    let ask action = modifyVar (fdRequest st) (\(k, _) -> (k + 1, action))
+    whenM (button "Open File...") (ask OpenFiles)
+    whenM (button "Open Folder...") (ask OpenFolder)
+    whenM (button "Save...") (ask SaveFile)
+    status <- readVar (fdStatus st)
+    unless (T.null status) (muted status)
+  names <- readVar opened
+  kv "Opened" (if T.null names then "-" else names)
+  where
+    describe f = T.pack (webFileName f) <> " (" <> T.pack (show (BS.length (webFileBytes f))) <> " bytes)"
+    runDialog (_, action) = case action of
+      OpenFiles -> maybe Cancelled Opened <$> openWebFiles defaultFileDialogOptions {dialogAllowMany = True}
+      OpenFolder -> maybe Cancelled Opened <$> openWebFolder
+      SaveFile -> maybe Cancelled Saved <$> saveWebFile defaultFileDialogOptions "nano-ui-cookbook.txt" saved
+    saved = "Saved from the nano-ui widget cookbook in the browser.\n"
 
 -- | The web backend's frame statistics, which it samples four times a second
 -- while something asks for them, as the Debug window's sections.
