@@ -17,7 +17,7 @@ import Data.Maybe (isJust, isNothing)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Internal.Context (Context (ctxPaintFull), markDirtyCovered, withFramePaint)
+import NanoUI.Internal.Context (markDirtyCovered, withFramePaint)
 import NanoUI.Internal.Monad (askContext)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugFrame, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState (..), defaultWindowChrome)
