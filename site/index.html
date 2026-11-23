@@ -124,7 +124,6 @@
       position: relative; height: clamp(440px, calc(100svh - 300px), 620px);
       border: 1px solid var(--panel-border); border-radius: 2px; overflow: hidden;
     }
-    #stage.active { outline: 2px solid var(--accent); outline-offset: 2px; }
     #stage canvas { display: block; width: 100%; height: 100%; opacity: 0; }
     #stage.live canvas { opacity: 1; }
     #status {
@@ -334,12 +333,18 @@ cabal run nano-ui-sdl-demo</code></pre>
     const canvas = document.getElementById("nano-ui");
     const statusText = document.getElementById("status-text");
 
-    // The runtime cancels every wheel event on its canvas. The demo has
-    // nothing to scroll, so the event stops here and scrolls the page.
-    stage.addEventListener("wheel", (e) => e.stopPropagation(), { capture: true });
+    const ui = globalThis.nanoUiSdlWeb;
+
+    // The runtime cancels every wheel event on its canvas, which would stop
+    // the page scrolling whenever the pointer is over the demo. The wheel
+    // goes to the demo only while it has the keyboard (after a press on the
+    // canvas, or Enter on the stage): its lists and text areas scroll then.
+    // Otherwise the event stops here and scrolls the page.
+    stage.addEventListener("wheel", (e) => {
+      if (!ui || document.activeElement !== ui.input) e.stopPropagation();
+    }, { capture: true });
 
     try {
-      const ui = globalThis.nanoUiSdlWeb;
       if (!ui) throw new Error("demo/landing/nano-ui-sdl-web.js did not load");
       const { start } = await import("./demo/landing/main.js");
       // The program reads this before its first frame: Bloom starts with
@@ -351,13 +356,12 @@ cabal run nano-ui-sdl-demo</code></pre>
       // The runtime's text input takes every key while it has focus, Tab
       // included. Setup focuses it; the page takes focus back, so Tab walks
       // the page. The demo gets the keyboard on a press of its canvas or on
-      // Enter while the stage has focus, and Escape hands it back. The
-      // program still sees that Escape, and closes a dropdown with it.
+      // Enter while the stage has focus, and Escape hands it back, as does
+      // a press anywhere else on the page. The program still sees that
+      // Escape, and closes a dropdown with it.
       const input = ui.input;
       if (input) {
         input.blur();
-        input.addEventListener("focus", () => stage.classList.add("active"));
-        input.addEventListener("blur", () => stage.classList.remove("active"));
         input.addEventListener("keydown", (e) => { if (e.key === "Escape") stage.focus(); });
         stage.addEventListener("keydown", (e) => {
           if (e.target !== stage || (e.key !== "Enter" && e.key !== " ")) return;
