@@ -17,24 +17,23 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad (forM_, unless, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
-import Data.Bits (complement, xor, (.&.), (.|.))
+import Data.Bits (xor)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
-import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Data.Hashable (hashWithSalt)
-import Data.Primitive.Array (MutableArray, readArray, sizeofMutableArray, writeArray)
+import Data.Primitive.Array (readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, writePrimArray)
 import Data.Primitive.PrimVar (readPrimVar, writePrimVar)
-import Data.Text (Text)
-import Data.Text qualified as T
+import Data.Word (Word64)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Context.Types (ScrollState (..), newPrevWalk, noImagePaint)
+import NanoUI.Internal.Context.Types (ScrollState (..), newPrevWalk)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
@@ -120,59 +119,70 @@ getNonzeroRect arena i = do
 
 -- | First pass of 'updatePrevRects', over scroll containers and panels
 -- ('BackdropNodes'): record the clip each is painted in, and for a painting
--- container with no widget id (such as a panel) record its rect under
--- 'containerKey' so moving or resizing it repaints where it was.
+-- container with no widget id (such as a panel) record its rect and paint
+-- hash under 'containerKey', so moving, resizing or restyling it repaints
+-- where it was.
 {-# INLINE scanBackdropPrevRects #-}
 scanBackdropPrevRects ::
   NodeArena ->
   Rect ->
   IM.IntMap Rect ->
   IM.IntMap Rect ->
-  IO (IM.IntMap Rect, IM.IntMap Rect, Int, Int, Bool)
-scanBackdropPrevRects na window oldRects oldOuters = do
+  IM.IntMap Word64 ->
+  IO (IM.IntMap Rect, IM.IntMap Rect, IM.IntMap Word64, Int, Int, Bool)
+scanBackdropPrevRects na window oldRects oldOuters oldHashes = do
   (containerCount, containerAt) <- classNodes na BackdropNodes
-  let containers !j !m !om !foundOld !foundOuter !dropped
-        | j >= containerCount = pure (m, om, foundOld, foundOuter, dropped)
+  let containers !j !m !om !hm !foundOld !foundOuter !dropped
+        | j >= containerCount = pure (m, om, hm, foundOld, foundOuter, dropped)
         | otherwise = do
             idx <- containerAt j
             wid <- getWidgetId na idx
             let keyless = hashWidgetId wid == 0
             skip <- if keyless then not <$> (containerPaints na idx =<< getNodeType na idx) else getIdSuperseded na idx
             if skip
-              then containers (j + 1) m om foundOld foundOuter dropped
+              then containers (j + 1) m om hm foundOld foundOuter dropped
               else do
                 k <- if keyless then containerKey na idx else pure (intKey wid)
                 let isOld = keyless && IM.member k oldRects
                 mRect <- getNonzeroRect na idx
-                (m', om', fOld', fOuter', drop') <- case mRect of
+                (m', om', hm', fOld', fOuter', drop') <- case mRect of
                   Nothing ->
-                    pure (if isOld then IM.delete k m else m, dropKey k om, foundOld, foundOuter, dropped || isOld)
+                    pure
+                      ( if isOld then IM.delete k m else m
+                      , dropKey k om
+                      , if keyless then dropKey k hm else hm
+                      , foundOld
+                      , foundOuter
+                      , dropped || isOld
+                      )
                   Just r -> do
                     o <- outerClip na window idx
+                    h <- if keyless then getNodePaintHash na idx else pure 0
                     pure
                       ( if keyless then putNew k r m else m
                       , putNew k o om
+                      , if keyless then putNew k h hm else hm
                       , foundOld + if isOld then 1 else 0
                       , foundOuter + if IM.member k oldOuters then 1 else 0
                       , dropped
                       )
-                containers (j + 1) m' om' fOld' fOuter' drop'
-  containers 0 oldRects oldOuters 0 0 False
+                containers (j + 1) m' om' hm' fOld' fOuter' drop'
+  containers 0 oldRects oldOuters oldHashes 0 0 False
 
--- | Record this frame's solved rects, clips, texts and images by widget key
+-- | Record this frame's solved rects, clips and paint hashes by widget key
 -- ('dsPrev') for the next frame's damage to diff against. Returns the rects
 -- of the widgets this frame mounted, by key: the map 'dsPrev' now holds, or
 -- an empty map for an empty arena. 'pruneUnmountedCaches' takes it.
 updatePrevRects :: Context -> Size -> IO (IM.IntMap Rect)
 updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
-  PrevFrame oldRects oldClips oldOuters oldTexts oldImages <- getsDamage ctx dsPrev
+  PrevFrame oldRects oldClips oldOuters oldHashes <- getsDamage ctx dsPrev
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
     then IM.empty <$ (setPrev emptyPrevFrame >> prevWalkFor ctx 0 IM.empty)
     else do
-      (m0, om, foundContainers, foundOuter, droppedContainer) <-
-        scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters
+      (m0, om, hm0, foundContainers, foundOuter, droppedContainer) <-
+        scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters oldHashes
       -- Second pass, every node with a widget id. Seeded with last frame's
       -- maps and touching only changed entries, so frames with stable rects
       -- (hover, text churn, animations) allocate nothing. The walk cannot
@@ -189,21 +199,24 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
       -- entries that changed. The record's keys and rects also answer
       -- 'NanoUI.Internal.Context.Core.getPrevRectAt'.
       (walk, known) <- prevWalkFor ctx count oldRects
-      let go !i !m !cm !tm !lm !foundOld !dropped
+      -- A scroll node's content size, which sizes its bars, reaches damage
+      -- through the range it publishes ('scrollOffsetDamage').
+      hashes <- readIORef (naPaintHash na)
+      let go !i !m !cm !hm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
                   then setPrev emptyPrevFrame >> updatePrevRects ctx size
                   else do
                     writeIORef (pwFor walk) m
                     writePrimVar (pwValid walk) count
-                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq tm oldTexts && ptrEq lm oldImages) $
-                      setPrev (PrevFrame m cm om tm lm)
+                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq hm oldHashes) $
+                      setPrev (PrevFrame m cm om hm)
                     pure m
             | otherwise = do
                 wid <- getWidgetId na i
                 superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
                 if superseded
-                  then forgetAt walk i >> go (i + 1) m cm tm lm foundOld dropped
+                  then forgetAt walk i >> go (i + 1) m cm hm foundOld dropped
                   else do
                     let !k = intKey wid
                     r <- getNodeRect na i
@@ -211,14 +224,10 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                       then do
                         forgetAt walk i
                         let !isOld = IM.member k oldRects
-                        go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k tm) (dropKey k lm) foundOld (dropped || isOld)
+                        go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k hm) foundOld (dropped || isOld)
                       else do
                         mClip <- getClipBounds na i
-                        nt <- getNodeType na i
-                        let hasText = nt == NodeText
-                            isImage = nt == NodeImage
-                            !tag = maybe 0 (const entryClip) mClip .|. (if hasText then entryText else 0) .|. (if isImage then entryImage else 0)
-                        same <- keepKeyAt walk known i k tag
+                        same <- keepKeyAt walk known i k (maybe 0 (const 1) mClip)
                         -- An unchanged rect keeps the object already
                         -- stored, so a still frame allocates nothing; a new
                         -- one is read back so it is boxed only here, and the
@@ -226,41 +235,27 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                         was <- readArray (pwRects walk) i
                         now <- if was == r then pure was else writeArray (pwRects walk) i r >> readArray (pwRects walk) i
                         clipMoved <- maybe (pure False) (\(Rect cx cy cw ch) -> swapClip (pwClips walk) i cx cy cw ch) mClip
-                        txt <- if hasText then getText na i else pure T.empty
-                        textChanged <- if hasText then swapText (pwTexts walk) i txt else pure False
-                        -- Switching an image, or how it is drawn, repaints
-                        -- it like new text. What it draws is compared
-                        -- before an entry is built, so an unchanged image
-                        -- allocates nothing.
-                        oldImage <- if isImage then readArray (pwImages walk) i else pure noImagePaint
-                        tid <- if isImage then getImageId na i else pure 0
-                        node <- if isImage then getImageNode na i else pure Nothing
-                        let imageSame = sameImage oldImage tid node
-                        img <-
-                          if imageSame
-                            then pure oldImage
-                            else do
-                              let !p = imagePaint tid node
-                              p <$ writeArray (pwImages walk) i p
+                        h <- readPrimArray hashes i
+                        h0 <- readPrimArray (pwHashes walk) i
+                        unless (h == h0) (writePrimArray (pwHashes walk) i h)
                         let put :: Bool -> a -> IM.IntMap a -> IM.IntMap a
                             put changed v mp = if changed then IM.insert k v mp else mp
-                            (m', cm', tm', lm', fOld')
+                            (m', cm', fOld')
                               | not same =
                                   ( putNew k now m
                                   , maybe (dropKey k cm) (\c -> putNew k c cm) mClip
-                                  , if hasText then putNew k txt tm else dropKey k tm
-                                  , if isImage then putNew k img lm else dropKey k lm
                                   , foundOld + if IM.member k oldRects then 1 else 0
                                   )
                               | otherwise =
                                   ( put (not (ptrEq now was)) now m
                                   , maybe cm (\c -> put clipMoved c cm) mClip
-                                  , if hasText then put textChanged txt tm else tm
-                                  , if isImage then put (not imageSame) img lm else lm
                                   , foundOld + 1
                                   )
-                        go (i + 1) m' cm' tm' lm' fOld' dropped
-      go 0 m0 oldClips oldTexts oldImages foundContainers droppedContainer
+                            !hm'
+                              | not same || h /= h0 = putHash k h hm
+                              | otherwise = hm
+                        go (i + 1) m' cm' hm' fOld' dropped
+      go 0 m0 oldClips hm0 foundContainers droppedContainer
 
 -- | Drop the scroll views ('ssViews') and rich-text selections
 -- ('storeRichSelection') of widgets not in @live@, the map
@@ -304,27 +299,17 @@ prevWalkFor ctx count oldRects = do
 forgetFrom :: PrevWalk -> Int -> Int -> IO ()
 forgetFrom walk !i !n = when (i < n) (forgetAt walk i >> forgetFrom walk (i + 1) n)
 
--- | Kinds of entry a node has ('pwTags').
-entryClip, entryText, entryImage :: Int
-entryClip = 1
-entryText = 2
-entryImage = 4
-
--- | Record that the walk made no entries for node @i@, clearing any text or
--- image it held.
+-- | Record that the walk made no entries for node @i@.
 {-# INLINE forgetAt #-}
 forgetAt :: PrevWalk -> Int -> IO ()
 forgetAt walk i = do
   k0 <- readPrimArray (pwKeys walk) i
   unless (k0 == 0) $ do
-    t0 <- readPrimArray (pwTags walk) i
     writePrimArray (pwKeys walk) i 0
     writePrimArray (pwTags walk) i 0
-    dropEntries walk i t0
 
--- | Record key @k@ and entry kinds @tag@ for node @i@, returning whether the
--- last walk recorded the same there (below @known@). Clears any entry kinds
--- the node no longer has.
+-- | Record key @k@, and @tag@ (1 when the node has a clip), for node @i@,
+-- returning whether the last walk recorded the same there (below @known@).
 {-# INLINE keepKeyAt #-}
 keepKeyAt :: PrevWalk -> Int -> Int -> Int -> Int -> IO Bool
 keepKeyAt walk known i k tag = do
@@ -335,15 +320,7 @@ keepKeyAt walk known i k tag = do
     else do
       writePrimArray (pwKeys walk) i k
       writePrimArray (pwTags walk) i tag
-      dropEntries walk i (t0 .&. complement tag)
       pure False
-
--- | Clear the text and image entries in @kinds@ at node @i@.
-{-# INLINE dropEntries #-}
-dropEntries :: PrevWalk -> Int -> Int -> IO ()
-dropEntries walk i kinds = do
-  when (kinds .&. entryText /= 0) $ writeArray (pwTexts walk) i T.empty
-  when (kinds .&. entryImage /= 0) $ writeArray (pwImages walk) i noImagePaint
 
 -- | Write node @i@'s clip if it changed, and return whether it changed.
 {-# INLINE swapClip #-}
@@ -363,28 +340,17 @@ swapClip clips i x y w h = do
       writePrimArray clips (o + 3) h
       pure True
 
--- | Write node @i@'s text if it changed, and return whether it changed.
-{-# INLINE swapText #-}
-swapText :: MutableArray RealWorld Text -> Int -> Text -> IO Bool
-swapText arr i txt = do
-  old <- readArray arr i
-  if eqByPtr old txt then pure False else True <$ writeArray arr i txt
-
--- | Whether an image node drawing image @tid@ with @node@'s look draws what
--- @p@ describes. A node that is no image passes id 0 and no look.
-{-# INLINE sameImage #-}
-sameImage :: ImagePaint -> Int -> Maybe ImageNode -> Bool
-sameImage (ImagePaint t look) tid node = t == tid && look == fmap inLook node
-
--- | What an image node drawing image @tid@ with @node@'s look draws.
-imagePaint :: Int -> Maybe ImageNode -> ImagePaint
-imagePaint tid node = ImagePaint tid (inLook <$> node)
-
 -- | Insert, returning @m@ itself when @k@ already maps to @v@, so pointer
 -- equality survives an unchanged frame.
 {-# INLINE putNew #-}
 putNew :: Eq a => Int -> a -> IM.IntMap a -> IM.IntMap a
 putNew k v m = if IM.lookup k m == Just v then m else IM.insert k v m
+
+-- | 'putNew' for a paint hash. Not inlined: inlined, the walk boxed every
+-- node's hash whether or not it was stored.
+{-# NOINLINE putHash #-}
+putHash :: Int -> Word64 -> IM.IntMap Word64 -> IM.IntMap Word64
+putHash = putNew
 
 -- | Delete, returning @m@ itself when @k@ is absent.
 {-# INLINE dropKey #-}
@@ -421,6 +387,7 @@ data FrameSnapshot = FrameSnapshot
   , fsHot :: !WidgetId
   , fsActive :: !WidgetId
   , fsFocus :: !WidgetId
+  , fsFocusVisible :: !Bool
   , fsFloatingRects :: !(IM.IntMap Rect)
   , fsPrev :: !PrevFrame
   , fsAnimKeys :: !IS.IntSet
@@ -437,6 +404,7 @@ captureFrameSnapshot ctx = do
       <*> readIORef (ctxLastHotId ctx)
       <*> readIORef (ctxActiveId ctx)
       <*> readIORef (ctxFocusId ctx)
+      <*> readIORef (ctxFocusVisible ctx)
       <*> getsOverlay ctx osPrevFloatingRects
       <*> pure (dsPrev ds)
       <*> (IM.keysSet <$> getLiveAnimations ctx)
@@ -587,8 +555,8 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
 -- | Whether 'updatePrevRects' left every map of @old@ as it was. Compared by
 -- map, not by record: GHC may rebuild a record passed unboxed.
 samePrev :: PrevFrame -> PrevFrame -> Bool
-samePrev (PrevFrame !r0 !c0 !o0 !t0 !i0) (PrevFrame !r1 !c1 !o1 !t1 !i1) =
-  ptrEq r0 r1 && ptrEq c0 c1 && ptrEq o0 o1 && ptrEq t0 t1 && ptrEq i0 i1
+samePrev (PrevFrame !r0 !c0 !o0 !h0) (PrevFrame !r1 !c1 !o1 !h1) =
+  ptrEq r0 r1 && ptrEq c0 c1 && ptrEq o0 o1 && ptrEq h0 h1
 
 -- | Settle every drawing's ops for this frame and return the keys of those
 -- that now draw something else at an unchanged rect. A drawing follows state
@@ -741,11 +709,8 @@ clipDamage ctx snap d owners = do
       -- DamageFull whenever the hot widget sat inside a panel whose backdrop
       -- covered over half the window.
       role oldW newW = when (oldW /= newW || rectIn old oldW /= rectIn new newW) $ addInteraction oldW >> addInteraction newW
-      addText k = addDamageKeyGrow new k id
-      !newTexts = pfTexts new
-      !oldTexts = pfTexts old
-      !newImages = pfImages new
-      !oldImages = pfImages old
+      !newHashes = pfHashes new
+      !oldHashes = pfHashes old
   added <- collectDamage $ do
     forM_ (fdRequests d) $ \case
       ReqFull -> pure ()
@@ -755,17 +720,21 @@ clipDamage ctx snap d owners = do
       ReqPeers wids bounds -> forM_ wids $ \wid -> resolveKey (intKey wid) bounds
     role (fsHot snap) =<< liftIO (getHotId ctx)
     role (fsActive snap) =<< liftIO (readIORef (ctxActiveId ctx))
-    role (fsFocus snap) =<< liftIO (readIORef (ctxFocusId ctx))
+    focus <- liftIO (readIORef (ctxFocusId ctx))
+    role (fsFocus snap) focus
+    -- The focus ring shows or hides on the same widget.
+    focusVisible <- liftIO (readIORef (ctxFocusVisible ctx))
+    when (focusVisible /= fsFocusVisible snap && focus == fsFocus snap) (addInteraction focus)
     when (fdScrollChanged d || fdPointsChanged d) $
       scrollOffsetDamage ctx (fsStore snap) (fdStore d)
     forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx ->
       resolveSlop . intKey =<< liftIO (getWidgetId (ctxNodeArena ctx) idx)
     forM_ (IS.toList (fsAnimKeys snap <> IM.keysSet (fdLiveAnims d))) $ \k ->
       unless (k == 0) (resolveSlop k)
-    unless (ptrEq newTexts oldTexts) $
-      forM_ (IM.keys (IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newTexts oldTexts)) addText
-    unless (ptrEq newImages oldImages) $
-      forM_ (IM.keys (IM.mergeWithKey (\_ n o -> if n /= o then Just n else Nothing) id id newImages oldImages)) addText
+    -- A node the view gave other paint inputs (text, value, style, colour,
+    -- scope, image) repaints with its halo, where it was and where it is.
+    unless (ptrEq newHashes oldHashes) $
+      forM_ (IM.keys (IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newHashes oldHashes)) resolveSlop
     forM_ (fdRedrawn d) $ \k -> addDamageKeyGrow new k id
     -- Also on a scroll-only frame: 'storeFloat' holds slider values too, and
     -- a label showing one can shrink or move what follows it. A scroll's own
@@ -965,16 +934,19 @@ scrollOffsetDamage Context {ctxNodeArena = na} oldStore newStore =
                 IM.insertWith (++) (slotKey SlotScrollRange widKey) one m
 
 -- | The store keys (outside the scroll offsets) whose value changed and that
--- are not themselves widget keys, with the node each owns through a sub-slot
--- spelling. Changed widget keys were already damaged by their 'ReqKey'
--- requests. The owners fold runs only when some key needs it.
+-- are not themselves widget keys, with the node each changed key belongs to:
+-- a widget key's own node, or the node that owns a sub-slot spelling. A
+-- write through 'setStore' requests no damage of its own, so a changed
+-- widget key is damaged here too. The owners fold runs only when some key
+-- is no widget key.
 storeKeyChanges :: Context -> WidgetStore -> WidgetStore -> IO ([Int], IM.IntMap NodeIdx)
 storeKeyChanges ctx oldStore newStore = do
-  misses <-
-    filterM (\k -> isNothing <$> lookupNodeByKey (ctxNodeArena ctx) k) (slotChangedKeys oldStore newStore)
-  owners <-
-    if null misses then pure IM.empty else storeKeyOwners (ctxNodeArena ctx) (IS.fromList misses)
-  pure (misses, owners)
+  let na = ctxNodeArena ctx
+  resolved <- mapM (\k -> (k,) <$> lookupNodeByKey na k) (slotChangedKeys oldStore newStore)
+  let direct = IM.fromList [(k, i) | (k, Just i) <- resolved]
+      misses = [k | (k, Nothing) <- resolved]
+  owners <- if null misses then pure IM.empty else storeKeyOwners na (IS.fromList misses)
+  pure (misses, IM.union direct owners)
 
 -- | Each of @wanted@ that maps to a node this frame, keyed to the node that
 -- owns it: each widget's base key plus the sub-slot spellings its reads and

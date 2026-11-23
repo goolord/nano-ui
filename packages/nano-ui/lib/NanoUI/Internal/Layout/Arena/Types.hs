@@ -55,6 +55,7 @@ module NanoUI.Internal.Layout.Arena.Types
   , mixInputSig
   , mixPaintSig
   , mixNodeInput
+  , getNodePaintHash
   , growPrimArrayCopy
   , growBoxedStoreCopy
   , AxisSizing (..)
@@ -443,8 +444,16 @@ data NodeArena = NodeArena
   , naOptionsHash :: IORef (IOArr Word64)
   -- ^ Per node, the hash of the option list the last 'setOptions' stored.
   , naOwnHash :: IORef (IOArr Word64)
-  -- ^ Per node, the hash of the node's own creation inputs, as 'addNode'
-  -- wrote it. 'computeSubtreeHashes' folds these into 'naSubHash'.
+  -- ^ Per node, the hash of the node's own creation inputs, its index and its
+  -- parent's, as 'addNode' wrote it, with every later input
+  -- ('mixNodeInput'). 'computeSubtreeHashes' folds these into 'naSubHash'.
+  , naPaintHash :: IORef (IOArr Word64)
+  -- ^ Per node, a hash of everything the view gave the node that paint
+  -- reads: its creation inputs, scope and font colour, then every later input
+  -- ('mixNodeInput') and paint state ('mixPaintSig'). It leaves out the
+  -- node's index and parent, so a node keeps its hash when nodes before it
+  -- come and go. 'NanoUI.Internal.Damage.updatePrevRects' records it by
+  -- widget key and damages a key whose hash changed.
   , naSubHash :: IORef (IOArr Word64)
   -- ^ Per node, the key the solve restores its measurement by: a hash of its
   -- own inputs, its ancestors' (text wraps at an ancestor's width, a scroll
@@ -767,24 +776,41 @@ mixInputSig na tag v = do
   sig <- readPrimArray (naInputSig na) 0
   writePrimArray (naInputSig na) 0 (mixTagged sig tag v)
 
--- | Fold node @idx@'s paint state under @tag@ into 'naPaintSig'. The index
--- goes in with the tag, so the same value on another node mixes differently.
+-- | Fold node @idx@'s paint state under @tag@ into 'naPaintSig' and the
+-- node's 'naPaintHash'. The index goes into the frame's signature with the
+-- tag, so the same value on another node mixes differently.
 {-# INLINE mixPaintSig #-}
 mixPaintSig :: NodeArena -> NodeIdx -> Word64 -> Word64 -> IO ()
 mixPaintSig na idx tag v = do
   sig <- readPrimArray (naPaintSig na) 0
   writePrimArray (naPaintSig na) 0 (mixTagged sig (tag `xor` (fromIntegral idx `shiftL` 16)) v)
+  mixNodePaint na idx tag v
 
--- | Fold a post-creation input change into the node's own hash and the
--- frame's input signature. The subtree hash a later solve compares against
--- is built from the own hashes, so a change must reach both.
+-- | Fold a post-creation input change into the node's own hash, its paint
+-- hash and the frame's input signature. The subtree hash a later solve
+-- compares against is built from the own hashes, so a change must reach
+-- both.
 {-# INLINE mixNodeInput #-}
 mixNodeInput :: NodeArena -> NodeIdx -> Word64 -> Word64 -> IO ()
 mixNodeInput na idx tag v = do
   own <- readIORef (naOwnHash na)
   o <- readPrimArray own idx
   writePrimArray own idx (mixTagged o tag v)
+  mixNodePaint na idx tag v
   mixInputSig na tag v
+
+-- | Fold @v@ under @tag@ into node @idx@'s 'naPaintHash'.
+{-# INLINE mixNodePaint #-}
+mixNodePaint :: NodeArena -> NodeIdx -> Word64 -> Word64 -> IO ()
+mixNodePaint na idx tag v = do
+  ph <- readIORef (naPaintHash na)
+  p <- readPrimArray ph idx
+  writePrimArray ph idx (mixTagged p tag v)
+
+-- | Node @idx@'s 'naPaintHash'.
+{-# INLINE getNodePaintHash #-}
+getNodePaintHash :: NodeArena -> NodeIdx -> IO Word64
+getNodePaintHash na idx = readIORef (naPaintHash na) >>= \ph -> readPrimArray ph idx
 
 -- | Number of modal, window, and popup nodes added since the last reset.
 {-# INLINE floatingNodeCount #-}

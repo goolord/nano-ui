@@ -20,8 +20,6 @@ module NanoUI.Internal.Context.Types
   , DamageState (..)
   , initialDamageState
   , PrevFrame (..)
-  , ImagePaint (..)
-  , noImagePaint
   , emptyPrevFrame
   , PrevWalk (..)
   , newPrevWalk
@@ -102,7 +100,6 @@ import NanoUI.Internal.Frame.SpanArena (SpanArena)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Id.Cursor (IdCursor)
 import NanoUI.Internal.Var.Types (SlotVar, Var)
-import NanoUI.Internal.Image (ImageLook)
 import NanoUI.Internal.Input (Composition, Input, InputPurpose, MouseButton, UiCursorKind)
 import NanoUI.Internal.Shortcut (Shortcut)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
@@ -286,28 +283,20 @@ data PrevFrame = PrevFrame
   , pfOuterClips :: !(IntMap Rect)
   -- ^ Scroll containers and panels: the enclosing clip they paint in.
   -- 'pfClips' holds their inner content clip.
-  , pfTexts :: !(IntMap Text)
-  -- ^ Text of text nodes.
-  , pfImages :: !(IntMap ImagePaint)
-  -- ^ What image nodes draw.
+  , pfHashes :: !(IntMap Word64)
+  -- ^ What the view gave each key's node that paint reads
+  -- ('NanoUI.Internal.Layout.Arena.getNodePaintHash'): its text, value,
+  -- style, colours, scope, image and options. A key whose hash changed is
+  -- repainted.
   }
-
--- | What an image node draws: its image id, and its look ('Nothing' for a
--- plain image).
-data ImagePaint = ImagePaint !Int !(Maybe ImageLook)
-  deriving (Eq, Show)
-
--- | Empty 'ImagePaint' for non-image nodes (id 0 and no look).
-noImagePaint :: ImagePaint
-noImagePaint = ImagePaint 0 Nothing
 
 -- | A 'PrevFrame' with no recorded nodes, as before the first frame.
 emptyPrevFrame :: PrevFrame
-emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
+emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty
 
 -- | What the last completed 'NanoUI.Internal.Damage.updatePrevRects' walk
--- recorded at each arena index: the key and the rect, clip, text and image
--- it gave the 'PrevFrame' maps. A node that has not changed since skips the
+-- recorded at each arena index: the key and the rect, clip and paint hash it
+-- gave the 'PrevFrame' maps. A node that has not changed since skips the
 -- maps, which already hold its entries, and a widget declared where it was
 -- reads its last rect here ('NanoUI.Internal.Context.Core.getPrevRectAt').
 -- The first 'pwValid' indices hold the walk that built 'dsPrev' (its rects
@@ -317,14 +306,14 @@ data PrevWalk = PrevWalk
   { pwKeys :: !(MutablePrimArray RealWorld Int)
   -- ^ The node's key, or 0 where the walk made no entries.
   , pwTags :: !(MutablePrimArray RealWorld Int)
-  -- ^ Which of a clip, text and image the node has.
+  -- ^ Whether the node has a clip.
   , pwRects :: !(MutableArray RealWorld Rect)
   -- ^ The node's rect, the object its 'pfRects' entry holds unless the
   -- entry was already equal.
   , pwClips :: !(MutablePrimArray RealWorld Float)
   -- ^ Four per index: the node's clip.
-  , pwTexts :: !(MutableArray RealWorld Text)
-  , pwImages :: !(MutableArray RealWorld ImagePaint)
+  , pwHashes :: !(MutablePrimArray RealWorld Word64)
+  -- ^ The node's paint hash.
   , pwValid :: !(PrimVar RealWorld Int)
   -- ^ How many indices hold the walk: none while a walk is under way.
   , pwFor :: !(IORef (IntMap Rect))
@@ -337,9 +326,8 @@ newPrevWalk n = do
   tags <- newZeroedPrimArray n
   rects <- newArray n (Rect 0 0 0 0)
   clips <- newZeroedPrimArray (4 * n)
-  texts <- newArray n mempty
-  images <- newArray n noImagePaint
-  PrevWalk keys tags rects clips texts images <$> newPrimVar 0 <*> newIORef IM.empty
+  hashes <- newZeroedPrimArray n
+  PrevWalk keys tags rects clips hashes <$> newPrimVar 0 <*> newIORef IM.empty
 
 -- | Require a first frame and full repaint, with no previous geometry.
 initialDamageState :: DamageState

@@ -114,6 +114,7 @@ module NanoUI.Internal.Layout.Arena
   , getArenaScope
   , setArenaScope
   , getScopeSignature
+  , getNodePaintHash
   , getPaintSignature
   , ensureScratchCapacity
   , AxisSnapshot (..)
@@ -211,6 +212,7 @@ newNodeArena = do
   naTextHash <- newIORef =<< newZeroedPrimArray cap
   naOptionsHash <- newIORef =<< newZeroedPrimArray cap
   naOwnHash <- newIORef =<< newPrimArray cap
+  naPaintHash <- newIORef =<< newPrimArray cap
   naSubHash <- newIORef =<< newPrimArray cap
   naMeasured <- newIORef =<< newPrimArray (cap * 2)
   naOffered <- newIORef =<< newPrimArray (cap * 4)
@@ -299,6 +301,7 @@ ensureCapacity na needed = do
     growRef (naTextHash na) cap newCap
     growRef (naOptionsHash na) cap newCap
     growRef (naOwnHash na) cap newCap
+    growRef (naPaintHash na) cap newCap
     growRef (naSubHash na) cap newCap
     growRef (naMeasured na) (cap * 2) (newCap * 2)
     growRef (naOffered na) (cap * 4) (newCap * 4)
@@ -410,10 +413,13 @@ addNode na nt parent Layout {..} = do
   writeTree a idx TreeTextIdx (-1)
   writeTree a idx TreeGridCols layoutGridCols
 
-  let !nodeSig =
+  -- The creation inputs from a constant seed, with no position: the node's
+  -- paint hash starts here. Its own hash, the layout cache's key, adds its
+  -- index and parent.
+  let !content =
         foldl'
           (\acc (t, v) -> mixTagged acc t v)
-          (fromIntegral idx `shiftL` 32 .|. fromIntegral (idx + 1) :: Word64)
+          (0x6E616E6F2D7569 :: Word64)
           [ (0x4e54, fromIntegral (fromEnum nt))
           , (0x4449, fromIntegral (fromEnum layoutDirection))
           , (0x5754, fromIntegral (fromEnum wTag))
@@ -440,11 +446,18 @@ addNode na nt parent Layout {..} = do
           , (0x5058, fromIntegral (castFloatToWord32 pinX))
           , (0x5059, fromIntegral (castFloatToWord32 pinY))
           , (0x4153, fromIntegral (castFloatToWord32 layoutAspect) .|. fromIntegral (fromEnum layoutLineAlign) `shiftL` 32)
-          , (0x5041, fromIntegral (parent + 1))
           ]
+      !nodeSig = mixTagged (mixTagged content 0x4958 (fromIntegral idx)) 0x5041 (fromIntegral (parent + 1))
   mixInputSig na 0x4e4f nodeSig
   ownA <- readIORef (naOwnHash na)
   writePrimArray ownA idx nodeSig
+  scope <- readIORef (naScope na)
+  writePrimArray (naArrScope a) idx scope
+  -- Bit 1 marks inert (input-only) scopes, which have no visual effect and
+  -- must not trigger paint-scope invalidation.
+  let !paintScope = scope .&. complement 2
+  paintA <- readIORef (naPaintHash na)
+  writePrimArray paintA idx (mixTagged content 0x5343 (fromIntegral paintScope))
 
   -- The font colour is paint state, so the input signature leaves it out.
   case layoutFontColor of
@@ -452,11 +465,6 @@ addNode na nt parent Layout {..} = do
     Just (Color w) -> do
       writePrimArray (naArrFontColor a) idx (0x100000000 .|. fromIntegral w)
       mixPaintSig na idx 0x4643 (fromIntegral w)
-  scope <- readIORef (naScope na)
-  writePrimArray (naArrScope a) idx scope
-  -- Bit 1 marks inert (input-only) scopes, which have no visual effect and
-  -- must not trigger paint-scope invalidation.
-  let !paintScope = scope .&. complement 2
   when (paintScope /= 0) $ do
     sig <- readIORef (naScopeSig na)
     writeIORef (naScopeSig na) $! (sig * 0x100000001b3) `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral paintScope)

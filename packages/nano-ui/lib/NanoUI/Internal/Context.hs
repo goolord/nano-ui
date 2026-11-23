@@ -178,7 +178,6 @@ module NanoUI.Internal.Context
   , WindowResizeDrag (..)
   , DamageState (..)
   , PrevFrame (..)
-  , ImagePaint (..)
   , emptyPrevFrame
   , PrevWalk (..)
   , OverlayState (..)

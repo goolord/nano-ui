@@ -307,7 +307,7 @@ runPrevFrameFreshWalkTest ctx failed = do
         void $ scrollWith (fixedWH 200 (if even (f `div` 3) then 100 else 80)) $ column $
           forM_ (if f `mod` 7 < 3 then [1 .. 6 :: Int] else reverse [2 .. 5]) $ \k -> withKey k (void (button (T.pack (show k))))
         when (f `mod` 8 < 4) $ forM_ [1 .. 3 :: Int] $ \k -> label (T.pack (show k))
-      maps c = (\p -> (pfRects p, pfClips p, pfOuterClips p, pfTexts p, pfImages p)) <$> getsDamage c dsPrev
+      maps c = (\p -> (pfRects p, pfClips p, pfOuterClips p, pfHashes p)) <$> getsDamage c dsPrev
   forM_ [ctx, ref] $ \c -> forM_ [img, img2] $ \i -> assert failed =<< registerImage c i 8 8 (BS.replicate (8 * 8 * 4) 200)
   forM_ [0 .. 47] $ \f -> do
     _ <- runFrame ctx inp (ui f)
