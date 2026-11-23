@@ -72,12 +72,12 @@ settled ctx failed ui v = do
   (a, _, dirty) <- runFrame ctx inp ui
   assertEq failed (v, False) (a, dirty)
 
--- | The frame that picks up a job's result shows @v@ and repaints fully,
--- since nothing says which widgets depend on it. The next frame is idle.
+-- | The frame that picks up a job's result shows @v@ and repaints the widget
+-- that shows it, not the whole window. The next frame is idle.
 takesNews :: (Eq a, Show a) => Context -> IORef Int -> NanoUI a -> a -> IO ()
 takesNews ctx failed ui v = do
   assertEq failed v =<< evalUi ctx inp ui
-  assertEq failed DamageFull =<< takeDamage ctx
+  assert failed . (\d -> d /= DamageFull && not (damageIsEmpty d)) =<< takeDamage ctx
   settled ctx failed ui v
   assert failed . damageIsEmpty =<< takeDamage ctx
 

@@ -325,21 +325,19 @@ wakeAction ctx =
               unless queued (atomicWriteIORef pendingRef False)
 
 -- | Wake the loop from any thread after changing state the view reads.
--- Publish the change first. The next frame repaints the whole window
--- ('takeThreadWake'), since the affected widgets are unknown.
+-- Publish the change first. The next frame runs the view, and its diff
+-- repaints what the change altered.
 wakeFromThread :: Context -> IO ()
 wakeFromThread = wakeAction
 
 -- | At frame start, before the view runs: take the wakes so far
--- ('takeWakes'), and queue a full repaint if 'wakeFromThread' was called
--- since the last frame. Calls made while the view runs are left for the
--- frame they wake.
+-- ('takeWakes'), and clear the record of a 'wakeFromThread' call. Calls made
+-- while the view runs are left for the frame they wake.
 {-# INLINE takeThreadWake #-}
 takeThreadWake :: Context -> IO ()
 takeThreadWake ctx = do
   takeWakes ctx
-  woken <- atomicModifyIORef' (ctxWoken ctx) (False,)
-  when woken (damageFull ctx >> traceDamage "DAMAGE-REQ thread-wake")
+  atomicWriteIORef (ctxWoken ctx) False
 
 -- | Schedule a frame at a monotonic timestamp ('getMonotonicTime') even if no
 -- input arrives. The earliest deadline wins. Cleared at the start of each
