@@ -24,7 +24,7 @@ import Data.Word (Word8)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
-import NanoUI.Internal.Id (WidgetId (..), mix64)
+import NanoUI.Internal.Id (WidgetId (..), mix64, mkWidgetId)
 import NanoUI.Internal.Input (Input (..), Key (..), Pressable (..), inputModifiers, modShift, shiftAtMost)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, freshWidget, nextId, liftIO, withKey)
@@ -63,7 +63,7 @@ colorPickerPartOf si = toEnum (SB.getField SB.pickerPart si)
 -- rect, which covers them all. Readers take the field's id (the picker's
 -- response id) and map it here.
 pickerStateId :: WidgetId -> WidgetId
-pickerStateId (WidgetId w) = WidgetId (mix64 w 0x434F4C5243414E56)
+pickerStateId (WidgetId w) = mkWidgetId (mix64 w 0x434F4C5243414E56)
 
 pickerKey :: WidgetId -> Int
 pickerKey = intKey . pickerStateId

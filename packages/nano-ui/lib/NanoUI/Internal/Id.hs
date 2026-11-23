@@ -4,6 +4,7 @@
 -- "Widget identity" section of "NanoUI" for how ids are assigned.
 module NanoUI.Internal.Id
   ( WidgetId (..)
+  , mkWidgetId
   , IdContext (..)
   , initialIdContext
   , idContextWidgetId
@@ -26,9 +27,20 @@ import Data.Word (Word64, Word8)
 import GHC.Stack (HasCallStack, SrcLoc (..), callStack, getCallStack)
 
 -- | Stable store and interaction identity. Zero is reserved for no widget.
+-- Make one from a hash with 'mkWidgetId', which keeps it in the range an
+-- 'Int' holds.
 newtype WidgetId = WidgetId Word64
   deriving stock (Eq, Ord, Show)
   deriving newtype (Hashable, Prim)
+
+-- | The id for a hash. The node arena and the store keep ids in 'Int'
+-- slots, so an id must come back unchanged from a trip through 'Int'. On a
+-- 64-bit target that holds for every hash, and this is the hash itself. On a
+-- target whose 'Int' is 32 bits (wasm32) the id is the hash's low 32 bits,
+-- sign-extended as converting that 'Int' back does.
+{-# INLINE mkWidgetId #-}
+mkWidgetId :: Word64 -> WidgetId
+mkWidgetId h = WidgetId (fromIntegral (fromIntegral h :: Int))
 
 -- | Parent-path hash, the next sibling widget's position within that path,
 -- and the next positional Var's position, counted separately so widgets
@@ -49,15 +61,15 @@ initialIdContext = IdContext 0x243F6A8885A308D3 0 0
 scopeIdContext :: Word64 -> IdContext
 scopeIdContext p = IdContext p 0 0
 
--- | Id of the next sibling in this context. A zero hash becomes 1, so
+-- | Id of the next sibling in this context. A zero id becomes 1, so
 -- @WidgetId 0@ never names a real widget.
 {-# INLINE idContextWidgetId #-}
 idContextWidgetId :: IdContext -> WidgetId
 idContextWidgetId (IdContext cid sid _) =
   let
-    raw = mix64 cid sid
+    wid = mkWidgetId (mix64 cid sid)
    in
-    if raw == 0 then WidgetId 1 else WidgetId raw
+    if wid == WidgetId 0 then WidgetId 1 else wid
 
 -- | Hash salt distinguishing an ordinary child scope from a keyed scope.
 scopeTag :: Word64
@@ -103,7 +115,7 @@ widgetId =
 
 hashSrcLoc :: SrcLoc -> WidgetId
 hashSrcLoc loc =
-  WidgetId $
+  mkWidgetId $
     fnv1a (srcLocPackage loc)
       `mixFnv` fnv1a (srcLocModule loc)
       `mixFnv` fnv1a (srcLocFile loc)
