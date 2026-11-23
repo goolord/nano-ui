@@ -6,6 +6,15 @@
 -- with @wasm32-wasi-ghc@. A native build has the same module with every
 -- browser call failing, so the rest of the package builds and its tests
 -- run against a 'WebHost' of their own.
+--
+-- FFI conventions. The JavaScript imports are @unsafe@, synchronous calls,
+-- except the wait for events: a @safe@ import runs as an async function, so
+-- the calling Haskell thread waits for its promise while the browser's event
+-- loop runs and delivers the events. Pointers passed to the page point into
+-- the module's memory, which the page reads and writes through views of it.
+-- Text crosses as UTF-8 bytes and a length. The wake ('whWake') is safe from
+-- any Haskell thread. The C imports in "NanoUI.SdlWeb.Internal.Font" are
+-- @unsafe@ calls into the text atlas.
 module NanoUI.SdlWeb.Internal.Host
   ( WebHost (..)
   , browserHost

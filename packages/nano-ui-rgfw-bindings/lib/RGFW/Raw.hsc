@@ -1,5 +1,21 @@
 -- | RGFW imports and header-derived event accessors and constants. The C
 -- compiler supplies field offsets and enum values from the bundled header.
+--
+-- FFI conventions:
+--
+-- * The thread that creates a window owns it and its OpenGL context, which
+--   is current only on that OS thread; window, event and OpenGL calls belong
+--   there. 'c_RGFW_stopCheckEvents' is the one call for any thread.
+-- * Imports are safe (plain @ccall@) by default: on Windows the event calls
+--   dispatch the window's messages, and dragging the title bar runs the
+--   system's move loop inside them, and 'c_RGFW_waitForEvent' blocks.
+--   @unsafe@ marks only calls that read state RGFW cached from events or
+--   map a key ('c_RGFW_window_getFlags', 'c_rgfw_window_w',
+--   'c_RGFW_isKeyDown').
+-- * The caller allocates event storage ('c_rgfw_event_size' bytes). Text
+--   written to the clipboard only has to live through the call; clipboard
+--   text that RGFW returns is RGFW's until the next read: copy it before
+--   then. 'c_RGFW_window_close' frees the window and its context.
 module RGFW.Raw
   ( RGFW_window
   , RGFW_event
