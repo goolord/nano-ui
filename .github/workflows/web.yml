@@ -1,8 +1,11 @@
 name: Web
 
-# Builds the web backend's demo with GHC's wasm backend (ghc-wasm-meta) and
-# the WASI builds of FreeType, HarfBuzz, SDL3 and SDL3_ttf, loads the page in
-# headless Chrome, and uploads the site as the web-demo artifact.
+# Builds the browser demos with GHC's wasm backend (ghc-wasm-meta) and the
+# WASI builds of FreeType, HarfBuzz, SDL3 and SDL3_ttf, loads each page in
+# headless Chrome, and uploads the site as the web-demo artifact: the
+# cookbook at its root, the web backend's own demo under minimal/. The Pages
+# workflow (deploy-book.yml) calls this one and publishes the artifact under
+# the book's demo/ directory.
 
 on:
   push:
@@ -11,7 +14,7 @@ on:
   workflow_dispatch:
   workflow_call:
 
-# github.workflow is the caller's name when another workflow calls this, so
+# github.workflow is the caller's name when deploy-book.yml calls this, so
 # that run and this workflow's own push run do not cancel each other.
 concurrency:
   group: web-${{ github.workflow }}-${{ github.ref }}
@@ -80,7 +83,7 @@ jobs:
         run: |
           wasm32-wasi-cabal update
           wasm32-wasi-cabal build --project-file=cabal.project.wasm --dry-run \
-            nano-ui-sdl-web:exe:nano-ui-sdl-web-demo
+            nano-ui-sdl-web:exe:nano-ui-sdl-web-demo nano-ui-demo:exe:nano-ui-web-cookbook
 
       - name: Cache the wasm Cabal store
         uses: actions/cache@v4
@@ -91,18 +94,24 @@ jobs:
           key: wasm-store-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
           restore-keys: wasm-store-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-
 
-      - name: Build the web backend's demo
-        run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web
+      - name: Build the cookbook
+        run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-cookbook
 
-      # Loads the page in the runner's Chrome with Playwright (from
+      - name: Build the web backend's demo
+        run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web/minimal
+
+      # Loads each page in the runner's Chrome with Playwright (from
       # ghc-wasm-meta's Node.js packages): the first frame must draw, a click
-      # on the counter's + must redraw it, and the page must log no errors.
-      - name: Load the page in headless Chrome
-        run: node packages/nano-ui-sdl-web/scripts/smoke-test.cjs dist-web 80 104 smoke.png
+      # must redraw it (the cookbook's About button, the counter's +), and
+      # the page must log no errors.
+      - name: Load the pages in headless Chrome
+        run: |
+          node packages/nano-ui-sdl-web/scripts/smoke-test.cjs dist-web 1144 35 smoke-cookbook.png
+          node packages/nano-ui-sdl-web/scripts/smoke-test.cjs dist-web/minimal 80 104 smoke-minimal.png
         env:
           SMOKE_CHROME: /usr/bin/google-chrome
 
-      - name: Upload the smoke test's screenshot
+      - name: Upload the smoke test's screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:

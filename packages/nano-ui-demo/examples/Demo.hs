@@ -13,17 +13,21 @@
 -- the pane and the tabs so they share the same 'Var's.
 --
 -- The toolbar opens an About modal (F1) and a Debug window (F12) with the
--- SDL backend's frame statistics and the layout overlay; the Diagnostics tab
+-- backend's frame statistics and the layout overlay; the Diagnostics tab
 -- shows the headline numbers. The @nano-ui-demo-test@ suite drives this demo.
+--
+-- The view runs on the SDL backend (@examples/sdl/DemoMain.hs@) and in a
+-- browser (@examples/web/DemoMain.hs@). What differs between them (fonts,
+-- data files, file dialogs, frame statistics) comes from "DemoPlatform",
+-- which each build takes from its own directory.
 module Demo
-  ( main
-  , DemoState
+  ( DemoState
   , newDemo
   , demoUi
   ) where
 
 import Codec.Picture qualified as JP
-import Control.Exception (SomeException, displayException, evaluate, try)
+import Control.Exception (IOException, SomeException, displayException, evaluate, try)
 import Control.Monad (forM, unless, void, when)
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
@@ -36,68 +40,21 @@ import Data.Word (Word64)
 import Diagrams.Prelude (Diagram, circle, fc, fromVertices, lc, lw, lwO, none, p2, (#))
 import NanoUI
 import NanoUI.Adornment qualified as A
-import NanoUI.Backend.Sdl
 import NanoUI.Diagrams
 import NanoUI.Path qualified as P
 import NanoUI.Shortcut
-import Paths_nano_ui_demo (getDataFileName)
-import System.Console.GetOpt (ArgDescr (..), ArgOrder (Permute), OptDescr (..), getOpt, usageInfo)
-import System.Environment (getArgs, lookupEnv)
+import System.Environment (lookupEnv)
 import Text.Printf (printf)
-import Text.Read (readMaybe)
 
 import DemoData
-import SdlRecord qualified
-
--- Running ---------------------------------------------------------------------
-
--- | Run @cabal run nano-ui-sdl-demo -- --help@ for the options. @--record DIR@
--- records the README video's frames instead (see "SdlRecord").
-main :: IO ()
-main = do
-  args <- getArgs
-  case dropWhile (/= "--record") args of
-    _ : dir : _ -> SdlRecord.record dir . demoUi =<< newDemo
-    _ -> case getOpt Permute options args of
-      (updates, [], []) | Just fs <- sequence updates -> runSdlApp (foldl' (flip id) demoOptions fs) . demoUi =<< newDemo
-      (_, _, errors) -> putStr (concat errors <> usageInfo usage options)
-  where
-    usage = "Usage: nano-ui-sdl-demo [OPTIONS]\n       nano-ui-sdl-demo --record DIR  (record the README video's frames)"
-
-demoOptions :: SdlOptions
-demoOptions =
-  defaultSdlOptions
-    { sdlAppShouldQuit = pressedOnceIn KeyEscape
-    , sdlAppTheme = Just defaultTheme
-    , sdlWindowSettings = defaultWindowSettings {wsSize = Size 1280 800, wsMinSize = Just (Size 480 360)}
-    }
-
--- | Each option's change to 'demoOptions'; 'Nothing' asks for the help text,
--- as does a size that is not a number.
-options :: [OptDescr (Maybe (SdlOptions -> SdlOptions))]
-options =
-  [ Option "v" ["vsync"] (ReqArg (\s -> Just (\o -> o {sdlAppVsync = s `elem` ["true", "True", "1"]})) "BOOL")
-      "Turn vsync on or off (default: true)"
-  , Option "cbf" ["continuous", "benchmark", "fps"] (NoArg (Just (\o -> o {sdlAppContinuous = True, sdlAppVsync = False})))
-      "Render continuously without vsync, to show uncapped FPS"
-  , Option "" ["explain"] (NoArg (Just (\o -> o {sdlExplainLayout = True})))
-      "Start with the layout overlay on"
-  , Option "F" ["fullscreen"] (NoArg (Just (onWindow (\w -> w {wsMode = Fullscreen}))))
-      "Start fullscreen"
-  , Option "W" ["width"] (ReqArg (resize (\px sz -> sz {sizeW = px})) "PX") "Initial window width (default: 1280)"
-  , Option "H" ["height"] (ReqArg (resize (\px sz -> sz {sizeH = px})) "PX") "Initial window height (default: 800)"
-  , Option "h?" ["help"] (NoArg Nothing) "Show this help"
-  ]
-  where
-    onWindow f o = o {sdlWindowSettings = f (sdlWindowSettings o)}
-    resize f s = (\px -> onWindow (\w -> w {wsSize = f px (wsSize w)})) <$> readMaybe s
+import DemoPlatform
 
 -- State -----------------------------------------------------------------------
 
 -- | What the tabs keep beyond their positional Vars, made once by 'newDemo'.
 data DemoState = DemoState
   { demoAccentColor :: !(Var Color)
-  , demoOpenDialog :: !(Var (Maybe FileDialogId))
+  , demoOpenDialog :: !FileDialogState
   , demoDocs :: !(Var [Int])
   , demoIcons :: !(Either String Icons)
   , demoGifTask :: !(Task () (Either String [GifFrame]))
@@ -119,33 +76,34 @@ data GifFrame = GifFrame !(ImageHandle ()) !Int !Int !BS.ByteString
 newDemo :: IO DemoState
 newDemo = do
   demoAccentColor <- newVar (colorRGBA 204 102 102 255)
-  demoOpenDialog <- newVar Nothing
+  demoOpenDialog <- newFileDialogState
   demoDocs <- newVar [1, 2, 3]
   demoIcons <- loadIcons
   demoGifTask <- newTask
   demoSwatchImages <- mapM (const newImageHandle) demoSwatches
   demoLandscapeImage <- newImageHandle
   demoPlotCache <- newPlotCache
-  families <- map T.pack <$> listFontFamilies
-  let demoFontFamilies = if null families then ["Inter"] else families
+  demoFontFamilies <- uiFontFamilies
   demoDebugAtStart <- isJust <$> lookupEnv "NANO_DEBUG_OPEN"
   pure DemoState {..}
 
 loadIcons :: IO (Either String Icons)
 loadIcons = do
-  svgs <- mapM (\name -> loadSvg =<< getDataFileName ("data/icons/" <> name <> ".svg")) ["clock", "check", "star", "face"]
+  svgs <- mapM (\name -> loadIcon ("data/icons/" <> name <> ".svg")) ["clock", "check", "star", "face"]
   pure $ case sequence svgs of
     Right [clock, check, star, face] -> Right (Icons clock check star face)
     Right _ -> Left "expected four icons"
     Left err -> Left err
+  where
+    loadIcon path = either (\(err :: IOException) -> Left (show err)) parseSvg <$> try (readDataFile path)
 
--- | Decode a GIF with JuicyPixels into its frames, each with an image handle
--- of its own, or an error message. It runs on a task's worker thread, so
--- the pixels are decoded there and registering them only copies.
+-- | Decode a GIF data file with JuicyPixels into its frames, each with an
+-- image handle of its own, or an error message. It runs on a task's worker
+-- thread, so the pixels are decoded there and registering them only copies.
 loadGif :: FilePath -> IO (Either String [GifFrame])
 loadGif path = do
   result <- try $ do
-    images <- either fail pure . JP.decodeGifImages =<< BS.readFile path
+    images <- either fail pure . JP.decodeGifImages =<< readDataFile path
     when (null images) (fail "the file has no frames")
     forM images $ \img -> do
       let rgba = JP.convertRGBA8 img
@@ -208,7 +166,7 @@ demoUi st = do
       panelWith (padXY 16 12 . fillW) $
         rowWith (tight . gap 12 . alignMid . fillW) $ do
           labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
-          labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
+          labelWith (tight . alignMid . fontMuted) (backendLabel <> " / Widget cookbook")
           flex
           -- F1 and F12 do what the buttons do.
           about <- button "About"
@@ -326,7 +284,7 @@ controlsTab st vals@Values {..} = do
   separator
   popupsAndMenus valPicked
   separator
-  fileDialog (demoOpenDialog st) valOpened
+  fileDialogSection (demoOpenDialog st) valOpened
   separator
   dragAndDrop valDropped
 
@@ -365,7 +323,7 @@ appearanceControls st theme font = do
   tooltip fontResp "Type to filter; Enter applies, Esc reverts."
   when (respChanged fontResp) $ do
     family <- readVar font
-    unless (T.null family) (setSdlUiFont (FontSearch [T.unpack family]))
+    unless (T.null family) (setUiFontFamily family)
   separator
   heading "Accent"
   muted "Choose a color or enter an exact value."
@@ -391,17 +349,6 @@ popupsAndMenus picked = do
       menuItemDisabled "Disabled Option"
     choice <- readVar picked
     unless (T.null choice) (muted ("Picked " <> choice))
-
--- | A native file dialog runs outside the view: ask for one, keep its handle,
--- and 'useFileDialog' polls it until it answers.
-fileDialog :: Var (Maybe FileDialogId) -> Var Text -> NanoUI ()
-fileDialog dialog opened = do
-  useFileDialog dialog (writeVar opened . T.intercalate ", " . map T.pack)
-  heading "File Dialogs"
-  whenM (button "Open File…") $
-    writeVar dialog . Just =<< askOpenFileDialog defaultFileDialogOptions {dialogAllowMany = True}
-  paths <- readVar opened
-  kv "Opened" (if T.null paths then "-" else paths)
 
 -- | A drop zone reports the files and text dropped on it.
 dragAndDrop :: Var Text -> NanoUI ()
@@ -532,7 +479,7 @@ iconsAndAdornments (Right Icons {..}) = do
 -- the view wakes for the next one only while the GIF is on screen.
 animatedGif :: Task () (Either String [GifFrame]) -> NanoUI ()
 animatedGif task = do
-  decoded <- useTask task () (loadGif =<< getDataFileName "data/lick.gif")
+  decoded <- useTask task () (loadGif "data/lick.gif")
   scope $ case decoded of
     Nothing -> muted "Loading lick.gif..."
     Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
@@ -842,18 +789,13 @@ pathSample theme (Rect x y _ h) = do
 
 -- The Debug window ------------------------------------------------------------
 
--- | The SDL backend's frame statistics, which it samples four times a second
--- while something asks for them (here, while the window is open), and the
--- layout overlay.
+-- | The backend's frame statistics ('debugStats'), which the SDL backend
+-- samples four times a second while something asks for them (here, while
+-- the window is open), and the layout overlay.
 debugBody :: NanoUI ()
 debugBody =
   columnWith (tight . gap 4 . minW 300 . fillW) $ do
-    stats <- askSdlDebug
-    scope . for_ stats $ \s ->
-      for_ (debugSections s) $ \(title, rows) -> do
-        heading title
-        mapM_ (uncurry kvMono) rows
-        separator
+    debugStats
     -- The overlay outlines every layout node; the rows describe the one under
     -- the pointer. Its switch lives in the context, so the checkbox edits a
     -- copy.
@@ -862,26 +804,6 @@ debugBody =
     (_, explain) <- withValue on (checkbox "Outline layout nodes")
     explainLayout explain
     scope $ when explain (mapM_ (uncurry kvMono) . formatExplainRows =<< explainedNode)
-
-debugSections :: SdlDebugSnapshot -> [(Text, [(Text, Text)])]
-debugSections s =
-  [ ("Frame", formatFpsRows c)
-  , ("Draw", formatDrawRows c)
-  , ( "Display"
-    , [ ("window", T.pack (printf "%.0f x %.0f" (dbgWinW c) (dbgWinH c)))
-      , ("refresh", T.pack (printf "%d Hz" (dbgRefreshHz s)))
-      , ("scale", T.pack (printf "%.2f" (dbgScale s)))
-      , ("renderer", rendererText s)
-      , ("font", T.pack (dbgFontPath s))
-      ]
-    )
-  , ("Runtime", dbgRts c)
-  ]
-  where
-    c = dbgCore s
-
-rendererText :: SdlDebugSnapshot -> Text
-rendererText s = dbgRenderer s <> if dbgVsync s then ", vsync on" else ", vsync off"
 
 -- Diagnostics -----------------------------------------------------------------
 
@@ -892,16 +814,4 @@ diagnosticsTab = do
   heading "Diagnostics"
   muted "Sampled four times a second while this tab shows. F12 opens the Debug window with the rest."
   separator
-  askSdlDebug >>= \case
-    Nothing -> muted "No SDL session."
-    Just s -> do
-      let c = dbgCore s
-      kv "Present FPS" (T.pack (printf "%.1f fps" (dbgPresentFps c)))
-      kv "Loop FPS" (T.pack (printf "%.1f fps" (dbgLoopFps c)))
-      kv "Display" (T.pack (printf "%d Hz" (dbgRefreshHz s)))
-      kv "Frame time" (T.pack (printf "%.2f ms" (dbgFrameMs c)))
-      kv "Haskell time" (T.pack (printf "%.2f ms (UI %.2f, render %.2f)" (dbgUiMs c + dbgRenderMs c) (dbgUiMs c) (dbgRenderMs c)))
-      kv "SDL present" (T.pack (printf "%.2f ms" (dbgPresentMs c)))
-      kv "Draw calls" (T.pack (show (dbgCmds c)))
-      kv "Vertices / indices" (T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
-      kv "Renderer" (rendererText s)
+  diagnosticsRows

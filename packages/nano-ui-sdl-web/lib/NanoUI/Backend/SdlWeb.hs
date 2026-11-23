@@ -17,11 +17,15 @@ module NanoUI.Backend.SdlWeb
   , defaultSdlWebOptions
   , WebFont (..)
   , browserAvailable
+
+    -- * Debugging
+  , formatExplainRows
   ) where
 
 import NanoUI (NanoUI)
 import NanoUI.Emit (NanoUIE, newReducer, reduceFrame)
 import NanoUI.Backend (runFrame)
+import NanoUI.Internal.Debug (formatExplainRows)
 import NanoUI.SdlWeb.Internal.Host (browserAvailable, browserHost)
 import NanoUI.SdlWeb.Internal.Session (SdlWebOptions (..), WebFont (..), defaultSdlWebOptions, runWebSession)
 

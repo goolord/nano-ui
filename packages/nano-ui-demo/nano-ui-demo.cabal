@@ -29,6 +29,11 @@ flag sdl
     manual: True
     default: True
 
+flag web
+    description: Build the browser cookbook (nano-ui-web-cookbook) with nano-ui-sdl-web. Needs SDL3, SDL3_ttf, and pkg-config.
+    manual: True
+    default: True
+
 common extensions
     default-language: GHC2024
     default-extensions:
@@ -129,9 +134,11 @@ library book-examples
         primitive ^>=0.9,
         text ^>=2.1
 
--- What examples/Demo.hs needs, for each component that compiles it.
+-- What examples/Demo.hs needs, for each SDL component that compiles it.
+-- Its backend's pieces come from examples/sdl/DemoPlatform.hs.
 common demo-module
-    other-modules:    Paths_nano_ui_demo
+    hs-source-dirs:   examples/sdl
+    other-modules:    Paths_nano_ui_demo, DemoPlatform
     autogen-modules:  Paths_nano_ui_demo
     build-depends:
         bytestring ^>=0.12,
@@ -163,8 +170,51 @@ common terminal
 executable nano-ui-sdl-demo
     import:           sdl-exe
     import:           demo-module
-    main-is:          Demo.hs
-    ghc-options:      -main-is Demo
+    main-is:          DemoMain.hs
+    other-modules:    Demo
+
+-- The data files the browser cookbook embeds. A library of its own, with no
+-- C libraries, because GHC's wasm backend runs Template Haskell with all of
+-- a component's C libraries loaded, and the web backend's cannot be.
+library cookbook-files
+    import:           extensions
+    import:           warnings
+    visibility:       private
+    hs-source-dirs:   examples/web-files
+    exposed-modules:  DemoFiles
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        file-embed ^>=0.0.16
+    if !flag(web)
+        buildable: False
+
+-- The widget cookbook in a browser canvas. Under wasm32 it is a reactor
+-- module whose nanoMain export nano-ui-sdl-web's page calls; build it with
+-- cabal.project.wasm through nano-ui-sdl-web's scripts/build-web.sh. A
+-- native build only checks that it compiles. Its backend's pieces come from
+-- examples/web/DemoPlatform.hs, and cookbook-files embeds the data files.
+executable nano-ui-web-cookbook
+    import:           extensions
+    import:           warnings
+    hs-source-dirs:   examples, examples/web, lib
+    main-is:          DemoMain.hs
+    other-modules:    Demo, DemoData, DemoPlatform
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
+        JuicyPixels ^>=3.3,
+        nano-ui ^>=0.2,
+        nano-ui-demo:cookbook-files,
+        nano-ui-diagrams ^>=0.2,
+        nano-ui-sdl-web ^>=0.1,
+        text ^>=2.1,
+        vector ^>=0.13
+    if arch(wasm32)
+        ghc-options: -no-hs-main -optl-mexec-model=reactor "-optl-Wl,--export=hs_init,--export=nanoMain"
+    if !flag(web)
+        buildable: False
 
 executable nano-ui-sdl-profile
     import:           sdl-exe
