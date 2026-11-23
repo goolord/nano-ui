@@ -1,0 +1,118 @@
+name: Web
+
+# Builds the web backend's demo with GHC's wasm backend (ghc-wasm-meta) and
+# the WASI builds of FreeType, HarfBuzz, SDL3 and SDL3_ttf, loads the page in
+# headless Chrome, and uploads the site as the web-demo artifact.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+# github.workflow is the caller's name when another workflow calls this, so
+# that run and this workflow's own push run do not cancel each other.
+concurrency:
+  group: web-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ghc-wasm-meta's commit and GHC flavour. Moving either rebuilds the
+  # toolchain and everything cached after it.
+  GHC_WASM_META_REV: 8079eb96bbc63823d99ad8acaff0765532625474
+  GHC_WASM_FLAVOUR: '9.14'
+  WASI_PREFIX: /home/runner/.nano-ui-wasi
+
+jobs:
+  web:
+    name: Web / wasm32 GHC 9.14
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config jq zstd unzip
+
+      - name: Cache ghc-wasm-meta
+        id: ghc-wasm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ghc-wasm
+            !~/.ghc-wasm/.cabal/store
+            !~/.ghc-wasm/.cabal/packages
+          key: ghc-wasm-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-${{ env.GHC_WASM_FLAVOUR }}
+
+      - name: Install ghc-wasm-meta
+        if: steps.ghc-wasm-cache.outputs.cache-hit != 'true'
+        run: |
+          git init /tmp/ghc-wasm-meta
+          git -C /tmp/ghc-wasm-meta fetch --depth 1 https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta.git "$GHC_WASM_META_REV"
+          git -C /tmp/ghc-wasm-meta checkout FETCH_HEAD
+          FLAVOUR="$GHC_WASM_FLAVOUR" /tmp/ghc-wasm-meta/setup.sh
+
+      - name: Put ghc-wasm-meta on the path
+        run: ~/.ghc-wasm/add_to_github_path.sh
+
+      # The script's hash covers the library tags it fetches and the flags
+      # it builds them with.
+      - name: Cache the WASI libraries
+        id: wasi-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WASI_PREFIX }}/include
+            ${{ env.WASI_PREFIX }}/lib
+            ${{ env.WASI_PREFIX }}/share
+          key: wasi-deps-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-${{ hashFiles('packages/nano-ui-sdl-web/scripts/build-wasi-deps.sh') }}
+
+      - name: Build FreeType, HarfBuzz, SDL3 and SDL3_ttf for wasm32-wasi
+        if: steps.wasi-cache.outputs.cache-hit != 'true'
+        run: packages/nano-ui-sdl-web/scripts/build-wasi-deps.sh "$WASI_PREFIX"
+
+      - name: Point pkg-config at the WASI libraries
+        run: echo "PKG_CONFIG_PATH=$WASI_PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Resolve dependencies
+        run: |
+          wasm32-wasi-cabal update
+          wasm32-wasi-cabal build --project-file=cabal.project.wasm --dry-run \
+            nano-ui-sdl-web:exe:nano-ui-sdl-web-demo
+
+      - name: Cache the wasm Cabal store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ghc-wasm/.cabal/store
+            ~/.ghc-wasm/.cabal/packages
+          key: wasm-store-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: wasm-store-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-
+
+      - name: Build the web backend's demo
+        run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web
+
+      # Loads the page in the runner's Chrome with Playwright (from
+      # ghc-wasm-meta's Node.js packages): the first frame must draw, a click
+      # on the counter's + must redraw it, and the page must log no errors.
+      - name: Load the page in headless Chrome
+        run: node packages/nano-ui-sdl-web/scripts/smoke-test.cjs dist-web 80 104 smoke.png
+        env:
+          SMOKE_CHROME: /usr/bin/google-chrome
+
+      - name: Upload the smoke test's screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke-screenshots
+          path: smoke*.png
+          if-no-files-found: ignore
+
+      - name: Upload the site
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-demo
+          path: dist-web
+          if-no-files-found: error
