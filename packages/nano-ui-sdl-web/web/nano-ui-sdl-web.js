@@ -333,11 +333,13 @@ class NanoUiSdlWeb {
       const code = NanoUiSdlWeb.keyCode(e);
       if (code === null) return;
       this.push(EV_KEY, code, down ? 1 : 0, 0, NanoUiSdlWeb.mods(e));
-      // Let typing reach the textarea, and Ctrl/Cmd+C, X and V raise their
+      // Let typing reach the textarea (Space too: it is a named key that
+      // also types, as SDL reports it), and Ctrl/Cmd+C, X and V raise their
       // clipboard events; everything else is the view's.
       const chord = e.ctrlKey || e.metaKey;
       const clip = chord && ["KeyC", "KeyX", "KeyV"].includes(e.code);
-      if (down && (code < 0 || (chord && !clip))) e.preventDefault();
+      const types = e.code === "Space" && !chord && !e.altKey;
+      if (down && ((code < 0 && !types) || (chord && !clip))) e.preventDefault();
     };
     ta.addEventListener("keydown", (e) => key(e, true));
     ta.addEventListener("keyup", (e) => key(e, false));

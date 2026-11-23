@@ -6,10 +6,17 @@
 packages:
   packages/nano-ui
   packages/nano-ui-emit
+  packages/nano-ui-ttf
   packages/nano-ui-sdl-web
+
+-- The Hackage snapshot cabal.project pins.
+index-state: hackage.haskell.org 2026-10-23T01:04:20Z
 
 tests: False
 benchmarks: False
+
+package nano-ui-ttf
+  flags: +sdl
 
 package nano-ui-sdl-web
   flags: +sdl
