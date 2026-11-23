@@ -934,8 +934,8 @@ data Context = Context
   -- is covered.
   , ctxPointerReach :: !(IORef (Maybe IntSet))
   , ctxActiveId :: IORef WidgetId
-  -- ^ The widget holding the left button: set on a press after layout
-  -- ('NanoUI.Internal.Frame.Input.finalizePointerPress') or by a drag, and
+  -- ^ The widget holding the left button: set on a press before the view
+  -- ('NanoUI.Internal.Frame.Input.armPointerTarget') or by a drag, and
   -- cleared to @WidgetId 0@ on the release
   -- ('NanoUI.Internal.Frame.Input.finalizePointerRelease'). While it is set,
   -- no other widget is hovered.
