@@ -317,6 +317,28 @@ main = do
       forM_ [1 .. frames] $ \i -> void (runFrame ctx (inp i) richTextScene)
       t1 <- getMonotonicTime
       putStrLn ("profiled " ++ show frames ++ " richtext frames" ++ (if resize then ", resizing" else "") ++ ": " ++ show ((t1 - t0) * 1000 / fromIntegral frames) ++ " ms/frame")
+    ("dropdowns" : _) -> do
+      -- An open select of 200 options, then a focused combo box of the same
+      -- options, each with the pointer moving down its rows for 1000 frames.
+      sel <- newVar (0 :: Int)
+      txt <- newVar ""
+      let inp = emptyInput {inputWindowSize = Size 1280 800, inputDeltaTime = 0.016}
+          opts = [T.pack ("option " <> show i) | i <- [1 .. 200 :: Int]]
+          ui = columnWith (gap 8) ((,) <$> selectWith' (fixedW 200) opts sel <*> comboBox' "pick" opts txt)
+          centre r = let Rect x y w h = respRect r in V2 (x + w / 2) (y + h / 2)
+          click p = do
+            _ <- runFrame ctx (applyMouseButton MouseLeft True inp {inputMousePos = p}) ui
+            void (runFrame ctx (applyMouseButton MouseLeft False inp {inputMousePos = p}) ui)
+          sweep (V2 x y) = forM_ [1 .. 1000 :: Int] $ \i ->
+            runFrame ctx inp {inputMousePos = V2 x (y + 30 + fromIntegral (i `mod` 300))} ui
+      replicateM_ 3 (void (runFrame ctx inp ui))
+      ((selR, comboR), _, _) <- runFrame ctx inp ui
+      click (centre selR)
+      sweep (centre selR)
+      _ <- runFrame ctx (inp {inputKeys = inputKeysFromList [KeyEscape], inputKeysNew = inputKeysFromList [KeyEscape]}) ui
+      click (centre comboR)
+      sweep (centre comboR)
+      putStrLn "profiled 2000 open-dropdown frames"
     ("form" : _) -> do
       -- Tab into row 1's field and type 500 characters, drag row 1's slider
       -- for 500 frames, then click its checkbox 100 times. After each input,
