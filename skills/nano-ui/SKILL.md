@@ -5,10 +5,7 @@ description: Build desktop user interfaces in Haskell with nano-ui, an immediate
 
 # Writing user interfaces with nano-ui
 
-A view is a `NanoUI ()` action the backend re-runs every frame. Widgets return
-what the user did this frame (`button` returns `Bool`), input widgets take a
-mutable `Var` holding their state, and layout is a modifier argument. Views are
-ordinary Haskell: functions, `do` notation, `if`/`case`/`for_`.
+A view is a `NanoUI ()` action that the backend runs on every frame. Widgets return what happened on the current frame (`button` returns `Bool`), input widgets take a mutable `Var` holding their state, and layout is passed as composable modifier functions. Views are ordinary Haskell: plain functions, `do` blocks, and standard control flow (`if`, `case`, `for_`).
 
 ```haskell
 counter :: NanoUI ()
@@ -19,41 +16,21 @@ counter = row $ do
   whenM (button "+") (modifyVar n (+ 1))
 ```
 
-Reference files in this skill, read when the task needs them:
+Reference files in this skill (read on demand):
 
-- `references/html-css-mapping.md`: HTML elements, CSS properties, DOM events
-  and React habits mapped to nano-ui. Read it before porting a web design or
-  when reaching for a web idiom (margins, `display: none`, `z-index`).
-- `references/recurring-bugs.md`: bugs real nano-ui apps made and how each was
-  fixed (layout jitter, boxes in boxes, stale drawings, focus ordering). Check
-  it before debugging a visual or input symptom.
-- `references/advanced.md`: custom drawing and content keys, images and SVG,
-  text editing, native windows, SDL specifics.
+- `references/html-css-mapping.md`: Maps HTML elements, CSS properties, DOM events, and React habits to `nano-ui`. Read before porting a web UI or reaching for web idioms (margins, `display: none`, `z-index`).
+- `references/recurring-bugs.md`: Common pitfalls found in real `nano-ui` apps (`ned`, `stronghead`, `winget-gui`) and their fixes (layout jitter, nested borders, stale canvases, focus ordering). Check before debugging a visual or input bug.
+- `references/advanced.md`: Custom drawing and content keys, images and SVG, multi-line text editing, native windows, and SDL specifics.
 
 ## Finding the API
 
-- `NanoUI.hs` is the whole public view API with Haddock overviews per group.
-  Read it first to learn what exists; do not guess names.
-- A consumer project pins the library as a Cabal `source-repository-package`
-  (github.com/goolord/nano-ui, `subdir: packages/nano-ui packages/nano-ui-sdl ...`,
-  plus `package nano-ui-sdl` with `flags: +sdl`). Cabal fetches it into
-  `dist-newstyle/src/nano-ui-<hash>/`; read the source and export lists there.
-  The Hackage release may lag the source.
-- The book (https://goolord.github.io/nano-ui/book/, or `book/src` in the repo)
-  covers state, layout, every widget family, styling, input and async work.
-  `packages/nano-ui-demo/examples/` has one concept per file (`Hello`,
-  `State`, `Layout`, `Components`, `Forms`, `TodoList`, `Keyboard`,
-  `Overlays`, `Theming`, `Animation`, `Images`, `Canvas`, `Tasks`, `Files`,
-  `LongList`, `LiveChart`) and full apps (`Demo`, `Notepad`, `Logs`,
-  `Terminal`), all usable as starting points.
+- `NanoUI.hs` is the full public view API, grouped with Haddock overviews. Read it first to confirm exact names instead of guessing.
+- Downstream projects pin the repository as a Cabal `source-repository-package` (`github.com/goolord/nano-ui`, `subdir: packages/nano-ui packages/nano-ui-sdl ...`, plus `package nano-ui-sdl` with `flags: +sdl`). Cabal downloads sources into `dist-newstyle/src/nano-ui-<hash>/`, where you can read export lists directly. The Hackage release may trail git `main`.
+- The book (`https://goolord.github.io/nano-ui/book/`, or `book/src` locally) covers state, layout, every widget family, styling, input, and async tasks. `packages/nano-ui-demo/examples/` contains single-topic programs (`Hello`, `State`, `Layout`, `Components`, `Forms`, `TodoList`, `Keyboard`, `Overlays`, `Theming`, `Animation`, `Images`, `Canvas`, `Bloom`, `Tasks`, `Files`, `LongList`, `LiveChart`) and full apps (`Demo`, `Notepad`, `Logs`, `Terminal`).
 
 ## Project setup
 
-GHC 9.10 to 9.14, `default-language: GHC2024`, `OverloadedStrings`, and
-`-threaded` on executables. The SDL backend needs SDL3 and SDL3_ttf 3.2+ found
-through pkg-config (on Windows: MSYS2 UCRT64, with `PKG_CONFIG_PATH` pointing at
-`C:\msys64\ucrt64\lib\pkgconfig`). The RGFW backend needs no system libraries
-and bundles a bitmap font.
+Target GHC 9.10 through 9.14, `default-language: GHC2024`, `OverloadedStrings`, and `-threaded` on executables. `nano-ui-sdl` requires SDL3 and SDL3_ttf 3.2+ via `pkg-config` (on Windows: MSYS2 UCRT64 with `PKG_CONFIG_PATH=C:\msys64\ucrt64\lib\pkgconfig`). `nano-ui-rgfw` requires no extra system libraries and bundles a bitmap font.
 
 ```haskell
 import NanoUI
@@ -61,7 +38,7 @@ import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 
 main :: IO ()
 main = do
-  app <- newAppState -- every newVar / newTask / newImageHandle happens here
+  app <- newAppState -- allocate newVar / newTask / newImageHandle here once
   runSdlApp
     defaultSdlOptions
       { sdlWindowSettings = defaultWindowSettings {wsTitle = "Inbox", wsSize = Size 960 640}
@@ -70,41 +47,25 @@ main = do
     (appView app)
 ```
 
-Packages: `nano-ui` (core), `nano-ui-sdl` (TrueType fonts, installed-font
-lookup, file dialogs, custom title bars), `nano-ui-rgfw` (OpenGL, no system
-deps), `nano-ui-emit` (Elm-style messages), `nano-ui-diagrams` (charts in
-`NanoUI.Plot`), `nano-ui-form` (validated forms), `nano-ui-markdown`
-(streamable Markdown), `nano-ui-svg` (export any view to SVG).
+Workspace packages: `nano-ui` (core), `nano-ui-sdl` (SDL3, TrueType fonts, system font search, native file dialogs, custom title bars), `nano-ui-rgfw` (OpenGL, zero extra dependencies), `nano-ui-sdl-web` (Wasm/WebGL2 browser backend), `nano-ui-emit` (Elm-style messages), `nano-ui-diagrams` (charts in `NanoUI.Plot`), `nano-ui-form` (validated forms), `nano-ui-markdown` (streamable Markdown), `nano-ui-svg` (SVG export).
 
 ## The frame model
 
-Each frame: the view runs (adding layout nodes, reading input, reading and
-writing `Var`s), layout is solved, pointer/keyboard/focus resolve against the
-new geometry, damage is computed against the previous frame, and the damaged
-region is painted. Consequences:
+Each frame runs your view action (building layout nodes, reading input, updating `Var`s), solves layout, resolves pointer/keyboard/focus states against the solved geometry, diffs damage against the previous frame, and repaints only the damaged region.
 
-- **The view can run more than once per frame.** Writing a `Var` that was
-  already read earlier in the pass re-runs the view once with one-shot input
-  cleared, so clicks and key presses don't fire twice. Never allocate inside a
-  view (`liftIO (newVar x)` allocates every pass), and put every side effect
-  behind an event: `whenM (button "Save") saveDocument`.
-- **Where `readVar` sits matters.** Read a `Var` below the input that edits
-  it and typing costs one pass; read it above and each change costs two.
-  Either way a write repaints only the widgets whose text, value or style it
-  altered.
-- **Geometry lags one frame.** Layout is solved after the view runs, so
-  `respRect` is the previous frame's rectangle (empty on first appearance).
-- **Idle costs nothing.** The loop blocks on events unless animation, a timed
-  wake, or input is pending. Never force continuous redraws.
+- **Views can run twice per frame.** Writing to a `Var` that was already read earlier in the same pass triggers one extra pass (with one-shot input events cleared so clicks and key presses never fire twice). Never allocate inside a view (`liftIO (newVar x)` leaks every pass), and guard every side effect behind an event (`whenM (button "Save") saveDocument`).
+- **`readVar` placement matters.** Reading a `Var` below the input widget that edits it keeps updates to one pass; reading above it takes two passes. Either way, damage tracking only repaints widgets whose text, value, or style changed.
+- **Geometry lags by one frame.** Layout solves after the view returns, so `respRect` reflects the previous frame's bounds (empty on first appearance).
+- **Idle windows cost nothing.** The event loop sleeps on OS events when no animation, timer, or task is active. Never dirty the context every frame to force redraws.
 
-## Widget naming
+## Widget conventions
 
 | Form | Meaning |
 | --- | --- |
-| `button "Save"` | Base: returns `Bool` (activated) or `()` |
-| `button'` | Primed: also or instead returns a `Response` |
+| `button "Save"` | Base form: returns `Bool` (activated) or `()` |
+| `button'` | Primed form: returns a `Response` |
 | `buttonWith (fixedW 120)` | Takes a `Layout -> Layout` modifier first |
-| `buttonConfigured cfg` | Takes a config record; each has a `default...Config` |
+| `buttonConfigured cfg` | Takes a config record (every config has a `default...Config`) |
 
 ```haskell
 button    :: Text -> NanoUI Bool
@@ -113,84 +74,40 @@ checkbox  :: Text -> Var Bool -> NanoUI ()
 slider    :: Float -> Float -> Var Float -> NanoUI ()   -- min max
 textInput :: Var Text -> NanoUI ()
 select    :: Foldable f => f Text -> Var Int -> NanoUI ()
-modal     :: Var Bool -> Text -> NanoUI () -> NanoUI ()  -- open state, title, body
+modal     :: Var Bool -> Text -> NanoUI () -> NanoUI () -- open flag, title, body
 tabs      :: (Foldable f, Hashable a) => Var a -> f (Tab a (NanoUI ())) -> NanoUI ()
 ```
 
-Input widgets take the `Var` they show and edit; there are no callbacks. To
-react to an edit, use the primed variant's `Response`: `respClicked` (left
-click or Enter), `respChanged` (value edited), `respSubmitted` (Enter in a
-field), `respHovered`, `respPressed` (held down), `respRightClicked`,
-`respClickedWith`/`respHeldWith` (which `MouseButton`), `respRect`, `respId`.
-`searchInput'` debounces `respChanged`, so trigger expensive work on it.
+Input widgets mutate their `Var` directly without callbacks. To react to edits, inspect the primed variant's `Response`: `respClicked` (left click or Enter/Space), `respChanged` (value edited), `respSubmitted` (Enter in a text field), `respHovered`, `respPressed` (button held down), `respRightClicked`, `respClickedWith` / `respHeldWith` (specific `MouseButton`), `respRect`, and `respId`. `searchInput'` debounces `respChanged`, making it ideal for triggering expensive searches.
 
-Inventory, all from `NanoUI`: containers (`row`, `column`, `grid`, `panel`,
-`card`, `callout`, `toolbar`, `center`, `responsive`, `scroll`, `scroll2D`,
-`layers`, `mouseArea`, `separator`, `spacer`), text (`label`, `heading`,
-`muted`, `mono`, `danger`, `kv`, `selectableText`, `richText`), buttons and
-menus (`button`, `iconButton`, `buttonContent`, `menuButton`, `menuItem`,
-`menuSeparator`, `contextMenu`), inputs (`checkbox`, `toggleButton`,
-`radio`/`enumRadio`, `select`/`enumSelect`, `slider`, `textInput`,
-`searchInput`, `numericInput`, `comboBox`, `textArea`, `textAreaDocument`,
-`colorPicker`), `tabs`/`tabBar`, `tree`, `table`/`simpleTable` (Colonnade,
-sortable by `Var SortCol`), overlays (`modal`, `window`, `popup`, `tooltip`),
-`paneGrid`, images and SVG icons, drag and drop (`useDrag`, `useDrop`,
-`dropZone`, `useReorder`), and canvas-drawn controls in
-`NanoUI.Widgets.Custom` (`toggleSwitch`, `knob`, `progressBar`,
-`circularProgress`, `spinner`, `sparkline`), which double as reference
-implementations for your own custom widgets.
+Public widget inventory (all exported from `NanoUI`): containers (`row`, `column`, `grid`, `panel`, `card`, `callout`, `toolbar`, `center`, `responsive`, `scroll`, `scroll2D`, `layers`, `mouseArea`, `separator`, `spacer`), text (`label`, `heading`, `muted`, `mono`, `danger`, `kv`, `selectableText`, `richText`), buttons and menus (`button`, `iconButton`, `buttonContent`, `menuButton`, `menuItem`, `menuSeparator`, `contextMenu`), inputs (`checkbox`, `toggleButton`, `radio`/`enumRadio`, `select`/`enumSelect`, `slider`, `textInput`, `searchInput`, `numericInput`, `comboBox`, `textArea`, `textAreaDocument`, `colorPicker`), `tabs`/`tabBar`, `tree`, `table`/`simpleTable` (Colonnade, sortable by `Var SortCol`), overlays (`modal`, `window`, `popup`, `tooltip`), `paneGrid`, images and SVG icons, drag and drop (`useDrag`, `useDrop`, `dropZone`, `useReorder`), and canvas controls in `NanoUI.Widgets.Custom` (`toggleSwitch`, `knob`, `progressBar`, `circularProgress`, `spinner`, `sparkline`).
 
 ## State: `Var`
 
-- `useVar initial`: positional, allocated inside the view, no setup. Only
-  `Int`, `Double`, `Float`, `Bool`, `Text`, `SortCol` (`useEnumVar` for any
-  `Enum`). The initial value is used once; reset later with `writeVar`.
-- `newVar initial`: in `IO`, any type. Allocate at setup, keep it in an app
-  record, pass it to the view. Two widgets given the same `Var` share state.
-- `VarMap` with `varAt`/`dropVar`/`retainVars`: one `Var` per key for dynamic
-  collections.
-- `constVar x`: a read-only `Var`; show a derived value in an input and handle
-  edits through the primed `Response`.
-- `withValue v widget`: run a `Var` widget against a plain value and get the
-  result and the edited value back.
-- Record fields: with `Generic` and `OverloadedRecordDot`, `settings.volume` is
-  a `Var Float` for one field, tracked apart from the others. `zoomVar`
-  (getter/setter) and `zoomVarL` (lens) for other projections.
-- Lists: `forEachVar key list body` gives per-element `Var`s that follow their
-  keys across reorders; `withElemVars` when you filter or sort yourself.
-- In the view: `readVar`, `writeVar`, `modifyVar` (equal writes are no-ops),
-  `peekVar` from `NanoUI.Var` (read without a dependency). From `IO` or another thread:
-  `readVarIO`, `writeVarIO`, `modifyVarIO`, then call the callback from
-  `askWake` to schedule a frame.
+- `useVar initial`: View-local positional slot, no setup required. Supports `Int`, `Double`, `Float`, `Bool`, `Text`, `SortCol` (plus `useEnumVar` for any `Bounded`/`Enum` type). The initial value applies on frame 1 only; call `writeVar` to reset later.
+- `newVar initial`: Allocates a `Var` of any type in `IO` during setup. Store in an app record and pass into views; sharing a `Var` shares state.
+- `VarMap` (`varAt`, `dropVar`, `retainVars`): Keyed per-item `Var` map for dynamic collections.
+- `constVar x`: Read-only `Var` for showing derived values in input widgets while handling edits via the primed `Response`.
+- `withValue v widget`: Runs a `Var`-based widget on a temporary `Var` and returns both the result and updated value.
+- Record projections: With `Generic` and `OverloadedRecordDot`, `settings.volume` projects a `Var Float` for that single field, tracked independently of sibling fields. Use `zoomVar` (getter/setter) or `zoomVarL` (lens) for custom projections.
+- Dynamic lists: `forEachVar key list body` supplies per-element `Var`s keyed across reorders; use `withElemVars` when filtering or sorting the list yourself.
+- Reading and writing: `readVar`, `writeVar`, `modifyVar` (writes with equal `==` values are no-ops), and `peekVar` from `NanoUI.Var` (read without recording a dependency). From worker threads or plain `IO`, use `readVarIO`, `writeVarIO`, and `modifyVarIO`, then invoke the callback from `askWake`.
 
-Elm-style alternative: `nano-ui-emit`'s `NanoUIE msg a` is a `NanoUI` action
-with the message sink in scope as `?emit`. Core widgets work unchanged
-(`NanoUI.Emit` re-exports `NanoUI`). Emit with `emit`,
-`emitWhen (button "Save") Save`, `emitChanged (slider 0 100) v SetV`;
-`mapMessages` for child components. Views are `Model -> NanoUIE Msg ()`; run
-with `runSdlAppReduce options update model view`.
+Elm-style option: `nano-ui-emit` defines `NanoUIE msg a` as a `NanoUI a` action with an implicit `?emit` sink (`NanoUI.Emit` re-exports all of `NanoUI`). Emit with `emit`, `emitWhen (button "Save") Save`, `emitChanged (slider 0 100) v SetV`, and compose children with `mapMessages`. Give views an explicit signature (`Model -> NanoUIE Msg ()`) and run them with `runSdlAppReduce options update model view`.
 
 ## Stable widget identity
 
-Widget ids count up in call order among siblings, and internal state (caret,
-selection, open dropdown) is keyed by them.
+Widget IDs count sequentially among siblings inside each container, backing carets, text selections, scroll offsets, and open dropdowns.
 
-- Keep call order the same from frame to frame.
-- Wrap a **conditional subtree** in `scope`: it takes one slot whether or not
-  its body runs, so later siblings keep their ids. `useVar` has its own counter,
-  but a conditional `useVar` still needs `scope`.
-- Wrap **items of a dynamic or reorderable list** in `withKey` with a stable,
-  sibling-unique key. Never the list index.
-- Task, stream and image calls take no widget ids; calling them conditionally
-  is safe for identity.
-- Hidden content keeps its state. For ever-growing keyed collections keep row
-  state in a `VarMap` and `retainVars` what is gone.
+- Keep sibling call order stable across frames.
+- Wrap **conditional subtrees** in `scope` so they consume one consistent slot whether or not their body runs. `useVar` has its own separate counter, but conditional `useVar` calls still require `scope`.
+- Wrap **dynamic or reorderable list rows** in `withKey` using a stable, sibling-unique key (never the list index).
+- `useTask`, `useStream`, and `useImageRgba` do not consume widget IDs, so calling them conditionally does not disturb sibling identity.
+- Hidden keyed state remains in memory; for unbounded growing collections, keep row state in a `VarMap` and prune deleted keys with `retainVars`.
 
 ## Layout
 
-Logical pixels, origin top-left, `y` down; backends handle DPI. Modifiers are
-`Layout -> Layout` functions composed with `(.)`, and **the leftmost wins**
-when two set the same property.
+Logical pixels, origin top-left, `y` downward; backends apply DPI scaling automatically. Layout modifiers are `Layout -> Layout` functions composed with `(.)`, where the **leftmost modifier wins** when two set the same property.
 
 ```haskell
 columnWith (gap 8 . padAll 12 . fillW) $ do
@@ -198,113 +115,46 @@ columnWith (gap 8 . padAll 12 . fillW) $ do
   buttonWith (fixedW 120) "Apply"
 ```
 
-- Sizing: `fillW`, `fillH`, `grow` (both), `fixedW`/`fixedH`/`fixedWH`,
-  `minW`/`maxW`/`minH`/`maxH`, `percent 50` (of the parent's width),
-  `aspect r`. Everything else is fit to content.
-- Spacing: `padAll`, `padXY`, `padLeft`/`padRight`/`padTop`/`padBottom`,
-  `padLRTB`, `gap`, `tight` (zero padding, keeps the gap). Containers default
-  to 3 px padding and an 8 px gap.
-- Alignment: `alignStart`/`alignCenter`/`alignEnd` across a column,
-  `alignTop`/`alignMid`/`alignBottom`/`alignBaseline` down a row. A child
-  aligns itself: `alignMid` on a row positions the row, not its contents.
-- `wrap` (with `lineGap`, `lineAlign`), `gridCols`, `layered`.
-- `spacer (Grow 1) Fit` or `flex` pushes siblings apart.
-- `layers` stacks children in one box, later on top. `pinAt x y` takes a child
-  out of flow; `pinAt 0 0 . grow` covers the parent (scrims, overlays).
-- Scrollers need a bounded viewport: `scrollWith (fixedH 240 . fillW) body`.
-  `scrollArea` also returns the scroller's `WidgetId` for programmatic control.
-- Huge lists: `sid <- currentId` before the scroller, `getScrollMetricsUi sid`
-  for offset and viewport, build only visible rows between spacers, and
-  `scrollRectIntoViewUi` to follow the selection (`examples/LongList.hs`).
-- Pointer: interactive widgets take pointer events, panels and labels don't.
-  `pointer PointerBlock` makes a region eat clicks; `pointer PointerPass` makes
-  decoration click-through. `mouseArea` reports hover and clicks for a whole
-  region (list rows, cards).
-- Natural size follows content, so a label whose text changes length moves its
-  siblings. Pin changing labels (counts, timers, byte totals) with a `fixedW`
-  sized to the widest value; in a scrolling list make cells `fillW` so a long
-  value cannot widen the list.
-- `explainLayout True` outlines every node and reports the one under the pointer
-  when a layout surprises you.
+- **Sizing:** `fillW`, `fillH`, `grow` (both), `fixedW` / `fixedH` / `fixedWH`, `minW` / `maxW` / `minH` / `maxH`, `percent 50` (percentage of parent width), `aspect r`. Default sizing fits content.
+- **Spacing:** `padAll`, `padXY` (horizontal, then vertical), `padLeft` / `padRight` / `padTop` / `padBottom`, `padLRTB`, `gap`, `tight` (zero padding, keeps gap). Default containers have 3 px padding and an 8 px gap.
+- **Alignment:** `alignStart` / `alignCenter` / `alignEnd` horizontally inside a column; `alignTop` / `alignMid` / `alignBottom` / `alignBaseline` vertically inside a row. Alignment modifiers position the node they are placed on: `alignMid` on a row aligns the row itself, not its children.
+- **Flow:** `wrap` (with `lineGap`, `lineAlign`), `gridCols`, `layered`, and `spacer (Grow 1) Fit` (or `flex`) to push siblings apart.
+- **Stacking and pinning:** `layers` stacks children in one box with later children on top. `pinAt x y` takes a child out of flow; `pinAt 0 0 . grow` covers the parent (useful for scrims or highlights).
+- **Scrolling:** Scrollers need a bounded viewport along their scroll axis (`scrollWith (fixedH 240 . fillW) body`). `scrollArea` also returns the scroller's `WidgetId`.
+- **Large lists:** Grab `sid <- currentId` before the scroller, query `getScrollMetricsUi sid`, build only visible rows between spacers, and jump to selections with `scrollRectIntoViewUi` (`examples/LongList.hs`).
+- **Pointer routing:** Interactive controls capture pointer events while panels and labels let them pass through. Override with `pointer PointerBlock` or `pointer PointerPass`. Use `mouseArea` for clickable rows or cards.
+- **Preventing jitter:** Pin dynamic labels (counters, timers) with `fixedW`; give wide cells inside scrolling lists `fillW` so they truncate with `...` instead of triggering horizontal scrollbars.
+- **Debugging:** Enable `explainLayout True` to draw layout outlines and inspect the node under the pointer.
 
 ## Theming and styling
 
-A `Theme` holds a `Style` per surface (`themeButton`, `themeInput`,
-`themePanel`, `themeFloatingWindow`, `themePopup`) and semantic colours
-(`themeAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`,
-`themeWindow`, `themeSeparator`, success/warning/danger). A `Style` is
-bg/fg/border/borderWidth/cornerRadius/hoverBg/activeBg.
+A `Theme` holds five surface `Style` records (`themeButton`, `themeInput`, `themePanel`, `themeFloatingWindow`, `themePopup`) and semantic colors (`themeAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, success/warning/danger). Each `Style` defines `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`.
 
-- Built-in themes: `defaultTheme` (dark), `defaultLightTheme`, Tomorrow
-  variants, `themeFromBase16`/`themeFromBase16Dark`/`themeFromBase16Light`.
-- Set once with `sdlAppTheme = Just appTheme`, or per frame with `setUiTheme`.
-  Follow the OS: `setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance`.
-- Scope a change with `styled (Theme -> Theme) subtree`; modifiers compose with
-  `(.)` and nest. `themed theme subtree` replaces the theme. Theme scopes change
-  painting only, never layout.
-- Style modifiers: `background`, `foreground`, `borderColor`, `borderWidth`,
-  `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`,
-  `fillColor`. Theme modifiers: `buttonStyle`, `inputStyle`, `panelStyle`,
-  `everyStyle`, `accentColor`, `textColor`, `pageColor`, `panelPage`,
-  `rounded`, `subtle`, `tinted`, `readableOn`. Semantic: `primary`,
-  `destructive`, `success`, `warning`, `tone Danger`; `toneColor Warning` for
-  custom drawing.
-- Text style modifiers go on the text widget itself: `labelWith (fontSize 20 . fontBold)`,
-  `fontMono`, `fontTone Warning`, `fontColor c`, `fontItalic`,
-  `fontUnderline`, `fontStrike`.
-- The page behind a view is `themeWindow` unless `themePage` is set
-  (`pageColor`). `panelPage` gives a view with no panel of its own the panel
-  surface. A full-window scroller (`scrollWith grow`) paints the page colour.
-- `disabledWhen cond subtree` disables input and dims it, keeping layout and
-  state.
-- `uiTheme` reads the active theme in a view.
+- **Built-in themes:** `defaultTheme` (dark), `defaultLightTheme`, Tomorrow variants, and `themeFromBase16` / `themeFromBase16Dark` / `themeFromBase16Light`. Set at startup with `sdlAppTheme = Just appTheme`, switch per frame with `setUiTheme`, or track OS appearance via `setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance`.
+- **Scoped overrides:** `styled (Theme -> Theme) subtree` adjusts the theme for a subtree (modifiers compose with `(.)` and nested `styled` calls stack outside in); `themed theme subtree` swaps the whole theme. Theme scopes affect painting only, never layout geometry.
+- **Modifiers:** Style modifiers (`background`, `foreground`, `borderColor`, `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`, `fillColor`), theme modifiers (`buttonStyle`, `inputStyle`, `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `pageColor`, `panelPage`, `rounded`, `subtle`, `tinted`, `readableOn`), and semantic tones (`primary`, `destructive`, `success`, `warning`, `tone Danger`, plus `toneColor Warning` for canvas drawing).
+- **Typography:** Apply font modifiers directly to text widgets (`labelWith (fontSize 20 . fontBold)`): `fontMono`, `fontTone Warning`, `fontColor c`, `fontItalic`, `fontUnderline`, `fontStrike`. Font modifiers do not cascade from containers.
+- **Page backdrop:** Defaults to `themeWindow` unless `themePage` is set (`pageColor`). `panelPage` puts a borderless view directly on `themePanel`, and `scrollWith grow` paints using this page color.
+- **Disabled state:** `disabledWhen cond subtree` dims controls and suppresses input while keeping layout and state intact. Read the active theme inside a view with `uiTheme`.
 
-For a fully custom look: a `Palette` record of literal colours, a complete
-`Theme` built from it, then small helpers, e.g.
-`quiet = subtle . buttonStyle (foreground muted)` for borderless buttons and
-`surface bg border radius = styled (panelStyle (background bg . ...)) . panelWith`
-for chrome. Three surface levels (well, shelf, controls) and colour kept for
-meaning go a long way.
+For custom themes, define a `Palette` record, construct a full `Theme` from it, and wrap repeated treatments in small Haskell helpers (such as `quiet = subtle . buttonStyle (foreground muted)`). Three clear surface levels (well, shelf, controls) with restrained accent colors keep dense desktop UIs legible.
 
-Fonts (SDL): bundled Inter by default; `sdlAppFont = FontSearch ["Segoe UI"]`,
-`sdlAppMonoFont = FontSearch ["Cascadia Mono"]`, `sdlAppFontSize`, and
-`setSdlUiFont` mid-session. `sdlAppUiScale = 0` follows desktop scaling.
+SDL fonts default to bundled Inter. Search system fonts with `sdlAppFont = FontSearch ["Segoe UI"]`, `sdlAppMonoFont = FontSearch ["Cascadia Mono"]`, `sdlAppFontSize`, and swap mid-session with `setSdlUiFont`. Set `sdlAppUiScale = 0` on Windows to track desktop scaling.
 
-## Keyboard, mouse and focus
+## Keyboard, mouse, and focus
 
-- Chords from `NanoUI.Shortcut`: `shortcut (ctrl <> key 's')`,
-  `shortcutOnce (cmdOrCtrl <> shift <> key 'p')` (ignores key repeat),
-  `parseShortcut "C-s"` for user config. Only the first matching `shortcut`
-  call in a frame fires.
-- Suppression is automatic: shortcuts and key queries are blocked behind an
-  open modal, inside `disabledWhen`, and when the focused widget claims the key
-  (typing in a field, arrows on a slider). Modified chords (Ctrl+Enter,
-  Alt+Left) still pass. `menuItemShortcut` binds only while its menu is open,
-  so add a top-level `shortcut` for the closed-menu binding.
-- Focus: clicking focuses fields and selects, Tab and Shift+Tab cycle.
-  `requestFocus (respId resp)` (or `currentId` just before the widget),
-  `focusNext`, `clearFocus`, `isFocused`. Focus changes apply at the end of the
-  frame.
-- **Ask focus questions at the end of the view**, after the widgets have run.
-  At the top of the view the node arena is empty and "is a field focused?"
-  always answers no. Keyboard shortcuts that depend on focus go last.
-- Text inputs do not claim Escape. Give Escape its own guard rather than
-  sharing the "a field is editing" guard used for Ctrl+A or Delete.
-- Raw input: `keyPressed`, `keyPressedOnce`, `keyHeld`, `keyReleased`;
-  `mousePressed MouseBack` and friends; `askInput` for the whole `Input`
-  record (`inputKeys`, `inputKeysNew`, `inputChars`, ...).
-- A custom widget that reads `inputChars` must call `useInputMethod` on every
-  focused frame or typed text never reaches it.
-- Cursors: built-ins set their own; `withCursorShape UiCursorCrosshair subtree`
-  for a region, `widgetCursor` in a custom widget spec.
-- Clipboard: `getClipboard`, `setClipboard`.
+- **Shortcuts (`NanoUI.Shortcut`):** `shortcut (ctrl <> key 's')`, `shortcutOnce (cmdOrCtrl <> shift <> key 'p')` (ignores key repeats), `parseShortcut "C-s"` for config files. Only the first matching `shortcut` call in a frame fires.
+- **Automatic suppression:** Shortcuts and view-level key queries are suppressed behind open modals, inside `disabledWhen`, and when a focused widget claims the key (typing in a text field, arrows on a slider). Modified chords (`Ctrl+Enter`, `Alt+Left`) still pass through. `menuItemShortcut` activates only while its menu is open, so pair it with a top-level `shortcut` for closed-menu access.
+- **Focus:** Clicking focuses fields, selects, and focusable custom widgets; Tab and Shift+Tab cycle focus. Programmatic helpers: `requestFocus (respId resp)` (or `currentId` before declaring the widget), `focusNext`, `clearFocus`, and `isFocused`. Focus updates apply at the end of the frame.
+- **Check focus at the end of the view.** The layout arena resets before the view runs, so calling `isFocused` at the top always returns `False`. Put focus-dependent shortcuts after all widgets.
+- **Escape is unclaimed by text fields.** Give Escape its own guard instead of reusing an "a field is focused" guard written for Ctrl+A or Delete.
+- **Low-level queries:** `keyPressed`, `keyPressedOnce`, `keyHeld`, `keyReleased`, `mousePressed MouseBack`, and `askInput` for raw `Input` fields (`inputKeys`, `inputKeysNew`, `inputChars`, and so on).
+- **Custom text input:** Any focused custom widget reading `inputChars` must call `useInputMethod` every frame so OS text input stays enabled.
+- **Cursors and clipboard:** Override cursors for a subtree with `withCursorShape UiCursorCrosshair`, or per custom widget via `widgetCursor`. Read/write the clipboard with `getClipboard` and `setClipboard`.
 
 ## Overlays
 
-`modal`, `window` and `popup` take a `Var Bool` for open state; Escape, an
-outside click and the close button write `False`. Call them **every frame,
-unconditionally** (inside `when` they shift sibling ids); they draw nothing
-while closed.
+`modal`, `window`, and `popup` take a `Var Bool` for open state. Pressing Escape, clicking outside, or clicking the close button writes `False` (floating `window`s close only via their close button). Call every overlay **unconditionally on every frame** so sibling IDs never shift; closed overlays draw nothing.
 
 ```haskell
 confirm <- useVar False
@@ -313,62 +163,32 @@ modal confirm "Delete the file?" $
   whenM (button "Delete") (deleteFile >> writeVar confirm False)
 ```
 
-For derived open state or dialogs that must not auto-dismiss, pass `constVar`
-and use the primed variants (`modal'`, `window'`, `popup'`) with
-`respClicked`. Tooltips are stateless: `tooltip resp "text"`, `withTooltip`,
-`tooltipConfigured` for delay and placement. Right-click menus:
-`contextMenu resp body` or `contextMenuArea`.
+For derived open flags or non-auto-dismissing dialogs, pass `constVar` and handle close clicks from `respClicked` on `modal'`, `window'`, or `popup'`. Tooltips are stateless (`tooltip resp "text"`, `withTooltip`, `tooltipConfigured`). Right-click menus use `contextMenu resp body` or `contextMenuArea`.
 
 ## Background work
 
-- `task <- newTask` at setup, then `useTaskStatus task key action`
-  (`TaskRunning`/`TaskDone`/`TaskFailed`) or `useTask task key action` (`Maybe a`,
-  keeps the previous result while a new key runs). A task runs once per key,
-  restarts when the key changes (cancelled by async exception, so use `bracket`
-  inside for resources), and **is cancelled when its call is skipped for a
-  frame**. Keep `useTask` outside tabs and conditionals when work must continue
-  while hidden. Put a retry counter in the key to run it again.
-- `stream <- newStream` and `useStream stream key initial producer` for pushed
-  updates (progress, sensors, token streams); updates between frames coalesce.
-- Other threads: write state with `writeVarIO`/`modifyVarIO` or your own
-  `IORef`, then call the `askWake` callback. Never touch the `Context` from
-  another thread.
+- **`Task`:** Allocate `task <- newTask` at setup, then call `useTaskStatus task key action` (`TaskRunning` / `TaskDone` / `TaskFailed`) or `useTask task key action` (`Maybe a`, preserving the previous result while loading). Changing the key cancels the previous worker with an async exception (use `bracket` inside jobs) and starts a new one. **Skipping the call for a full frame cancels the task**, so keep `useTask` outside tabs and branches when work should continue while hidden. Put an attempt counter in the key to support retries.
+- **`Stream`:** Allocate `stream <- newStream` at setup and call `useStream stream key initial producer` for repeated pushes (progress, telemetry, token streams). Multiple pushes between frames coalesce automatically.
+- **External threads:** Write via `writeVarIO` / `modifyVarIO` (or your own `IORef`), then call the callback from `askWake`. Never access the UI `Context` from another thread.
 
-## Animation and time
+## Animation and timers
 
-`animateTo`/`animateToA` move a value toward a target with a `Tween ease
-duration delay` or a `Spring` (`presetBouncy`, `presetSmooth`, `presetStiff`),
-retargeting mid-flight. `animate`/`pulse` oscillate. Call `keepAnimating`
-inside the animating widget, only while it is on screen. Timers, clocks and
-debounces call `wakeAfter seconds` on every frame that still needs a future
-wake (pending wakes reset each frame) and read `uiTime`. Never mark the
-window dirty every frame to keep it moving: that is an unpaced busy loop.
+`animateTo` and `animateToA` smoothly animate values toward targets using `Tween ease duration delay` or `Spring` (`presetBouncy`, `presetSmooth`, `presetStiff`), retargeting mid-flight and sleeping automatically once settled. Clock-driven helpers like `animate` and `pulse` require calling `keepAnimating resp` inside the visible animating widget on every frame. For timers, clocks, and debounces, call `wakeAfter seconds` on every frame that needs a future wake (wakes reset each frame) and read `uiTime`. Never dirty the window every frame to fake animation.
 
 ## Application structure
 
-Set up once in `IO`, then run. Everything frame-lived is a `Var` or inside the
-view.
+Allocate once in `IO`, then run. Views never take a backend handle.
 
-- Setup returns a plain state record (`newApp :: IO App`) of `Var`s, tasks,
-  image handles and caches; `main` passes it to the view. Views never take a
-  backend handle.
-- winget-gui keeps app state in an `IORef AppState` and installs the `askWake`
-  callback into an `IORef (IO ())` on the first frame; worker threads update
-  state and then wake. Each frame gathers its reads into one record before
-  building the window top to bottom, keyboard shortcuts last. Derived
-  collections are memoized in `IORef (Maybe (key, value))` caches keyed by a
-  revision counter.
-- stronghead uses a large `App` record of `Var`s with one state type per
-  panel module, plus a command palette and floating panes.
-- ned keeps state in a plain `IORef App` the toolkit knows nothing about, and
-  calls `requestFrame` when what was drawn no longer matches state.
-- Elm-style (`nano-ui-emit`) when a pure model and an update function fit.
-- Headless modes are cheap: a `--screenshot path` or `--selftest dir` flag that
-  runs the real view against real data in a hidden window.
+- Build a plain state record (`newApp :: IO App`) holding `Var`s, tasks, image handles, and caches, and pass it to the view.
+- `winget-gui` keeps domain state in an `IORef AppState`, saves the `askWake` callback on frame 1, snapshots state at the top of each frame, memoizes derived lists by revision counter, and runs shortcuts last.
+- `stronghead` uses a record of `Var`s split across per-panel state types, paired with a command palette and floating panes.
+- `ned` keeps editor state in a plain `IORef App` outside `nano-ui` and calls `requestFrame` whenever an edit invalidates what was just drawn.
+- Use `nano-ui-emit` when a pure `Msg -> Model -> Model` reducer fits best.
+- Add cheap `--screenshot path` or `--selftest dir` flags that drive your real view against sample data in a hidden window.
 
-## Testing
+## Headless testing
 
-`NanoUI.Testing.Sim` drives a view like a user:
+`NanoUI.Testing.Sim` scripts a view like a real user:
 
 ```haskell
 runSim ctx failed (withInput 300 200) counterView $ do
@@ -377,44 +197,26 @@ runSim ctx failed (withInput 300 200) counterView $ do
   expect "2"
 ```
 
-`withInput w h` (from `NanoUI.Testing.Assert`) is an empty input at that window
-size; `failed` is an `IORef Int` counting failed checks. `runSim` settles the
-view first. Targets: string literals aim at visible text;
-`At p`, `Within rect`, `On resp`, `OnWidget wid` otherwise. Actions: `click`,
-`rightClick`, `doubleClick`, `typeText`, `pressKey`, `chord`, `wheel`, `drag`,
-`settle`; checks: `expect`, `check`, `checkEq`. Import it explicitly or
-qualified, since its short names clash with locals.
+`withInput w h` (from `NanoUI.Testing.Assert`) creates an empty input at that size, and `failed` is an `IORef Int` counting mismatches. `runSim` settles the initial layout automatically. Targets accept string literals (matching visible labels), `At p`, `Within rect`, `On resp`, or `OnWidget wid`. Actions include `click`, `rightClick`, `doubleClick`, `typeText`, `pressKey`, `chord`, `wheel`, `drag`, and `settle`; assertions include `expect`, `check`, and `checkEq`. Import `NanoUI.Testing.Sim` explicitly or qualified so its short names do not shadow locals.
 
-Lower level, `NanoUI.Testing`: `newContext`, `runFrame ctx input view` (result,
-draw data, whether another frame was requested), `runFrameE` for emit views,
-and `NanoUI.Testing.Harness` helpers (`warmup2`, `clickPair`, `held`,
-`spanRect`). Warm up a frame before targeting `respRect`, set `tooltipDelay = 0`
-in tooltip tests, use `newWakeSignal` for deterministic task wake-ups, and
-`cancelTasks` in teardown. Custom-drawn widgets have no
-text spans: click them, screenshot, and assert on the image.
+For lower-level tests, `NanoUI.Testing` exports `newContext` and `runFrame ctx input view` (`runFrameE` for emit views), alongside `NanoUI.Testing.Harness` (`warmup2`, `clickPair`, `held`, `spanRect`). Warm up before clicking `respRect`, set `tooltipDelay = 0` in tooltip tests, use `newWakeSignal` for deterministic task wakes, and call `cancelTasks` in teardown. Custom-drawn widgets produce no text spans, so test them by clicking and asserting on rendered screenshots.
 
-## Pitfalls checklist
+## Quick pitfalls checklist
 
-- `liftIO (newVar ...)` in a view allocates every pass. Move it to setup.
-- Side effects not behind an event run on every pass. `whenM (button ...)`.
-- Conditional widgets or `useVar`s without `scope`; list rows keyed by index.
-- Overlays called inside `when` instead of every frame with a `Var Bool`.
-- `useTask` inside a tab or branch is cancelled while hidden.
-- `keepAnimating` from an always-run top level is a busy loop.
-- Writing a freshly computed `NaN` to a `Var` you read redraws forever
-  (`NaN /= NaN`). Guard the write.
-- A custom widget's content key missing something the drawing reads draws
-  stale pixels.
-- A changing label without `fixedW` shifts its siblings; a wide cell in a
-  scrolling list without `fillW` makes the list scroll sideways.
-- A `scrollArea`, `panel` or `card` inside a popup or dialog is a box in a box.
-  Let one level own the chrome.
-- Focus queries at the top of the view always answer no.
-- Escape behind the same guard as Ctrl+A or Delete stops working in fields.
-- A custom widget reading `inputChars` without `useInputMethod` gets no text.
-- Per-glyph advance times count drifts from a shaped run; measure the run with
-  `lineWidthUi`.
-- Parsing or rebuilding large data every frame; keep it outside the view and
-  recompute only when its inputs change.
-- `readVar` above the widget that edits the `Var` costs an extra pass.
-- Missing `-threaded`.
+- `liftIO (newVar ...)` inside a view allocates every pass; move it to setup.
+- Unguarded side effects run every frame; wrap them in `whenM (button ...)`.
+- Conditional widgets or `useVar` calls need `scope`; dynamic list rows need `withKey` with stable IDs.
+- Call overlays unconditionally every frame with a `Var Bool`, never inside `when`.
+- `useTask` inside a tab or branch cancels whenever that view is hidden.
+- Top-level unconditional `keepAnimating` creates a busy loop.
+- Writing computed `NaN` to a `Var Float` redraws forever (`NaN /= NaN`); guard float writes.
+- A custom widget content key missing an input freezes on stale pixels.
+- Changing labels without `fixedW` jitter siblings; wide list cells without `fillW` trigger horizontal scrollbars.
+- Nesting `scrollArea`, `panel`, or `card` inside a popup creates double borders; let one level own the chrome.
+- Focus queries at the top of the view always return `False`; run them at the end.
+- Do not put Escape behind the same text-editing guard as Ctrl+A or Delete.
+- Custom widgets reading `inputChars` must call `useInputMethod` every focused frame.
+- Measure long shaped text runs with `lineWidthUi` rather than per-glyph advance times count.
+- Parse documents and run heavy derivations outside the view, updating only when inputs change.
+- Put `readVar` below the widget that edits it to avoid an extra pass per change.
+- Always compile executables with `-threaded`.

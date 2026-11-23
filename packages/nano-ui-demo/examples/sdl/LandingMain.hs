@@ -1,4 +1,4 @@
--- | The landing page's program in an SDL window. Run it with
+-- | Native SDL3 entry point for the landing-page demo. Run with
 -- @cabal run nano-ui-sdl-landing@.
 module Main (main) where
 

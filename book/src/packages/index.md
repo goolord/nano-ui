@@ -1,37 +1,37 @@
 # Ecosystem Packages
 
-Each package adds a backend or one capability to `nano-ui`. Pin them from source as in the [Quick Start](../getting-started/quickstart.md).
+The `nano-ui` workspace splits optional backends and domain widgets into focused companion packages. Pin whichever ones you need in `cabal.project` alongside `nano-ui`, as shown in the [Quick Start](../getting-started/quickstart.md).
 
 | Package | What it adds |
 | --- | --- |
-| `nano-ui-sdl` | SDL3 window backend, TrueType fonts, native file dialogs, custom chrome |
-| `nano-ui-rgfw` | RGFW + OpenGL 3.2 backend with a bundled bitmap font |
-| `nano-ui-diagrams` | Line/bar/scatter/area charts and diagrams-lib content |
-| `nano-ui-form` | Validated applicative forms built on ditto |
-| `nano-ui-markdown` | CommonMark rendering, appendable for streamed replies |
-| `nano-ui-svg` | `DrawOp`-to-SVG and whole-frame SVG export |
+| `nano-ui-sdl` | Desktop SDL3 backend with TrueType fonts, native file dialogs, and custom title bars |
+| `nano-ui-rgfw` | Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font |
+| `nano-ui-diagrams` | Line, bar, scatter, area, and step charts plus `diagrams-lib` widgets |
+| `nano-ui-form` | Validated applicative forms built on `ditto` |
+| `nano-ui-markdown` | CommonMark rendering with incremental appends for streaming |
+| `nano-ui-svg` | `DrawOp`-to-SVG and full-frame SVG export |
 
 ## Backends
 
-`nano-ui-sdl` is the primary desktop backend:
+`nano-ui-sdl` is the main desktop backend:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:sdl}}
 ```
 
-It adds HarfBuzz shaping, installed-font lookup, high-DPI handling, non-blocking native file dialogs (`useFileDialog`), custom title bars (`windowCaption`), and screenshots (`saveScreenshot`, `captureScreenshot`). See [Desktop Windows](../advanced/window-management.md) for the window side.
+It provides HarfBuzz text shaping, system font discovery, high-DPI scaling, non-blocking native file dialogs (`useFileDialog`), custom title bars (`windowCaption`), and screenshot capture (`saveScreenshot`, `captureScreenshot`). See [Desktop Windows](../advanced/window-management.md) for window management details.
 
-`nano-ui-rgfw` is the alternative with no system dependencies:
+`nano-ui-rgfw` is a lightweight alternative with no SDL dependencies:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:rgfw}}
 ```
 
-It links RGFW statically and bundles a bitmap font, so binaries are small and standalone. Use it where SDL3 is not available.
+It compiles RGFW statically and ships with a bundled bitmap font, producing small standalone binaries whenever SDL3 is unavailable or unwanted.
 
 ## Charts and diagrams
 
-`nano-ui-diagrams` provides `NanoUI.Plot` and the diagrams-lib widget. `import NanoUI.Diagrams` brings in both. A chart is a plain `Chart` value; `plot` draws it, sized by a layout modifier:
+`nano-ui-diagrams` provides both the `NanoUI.Plot` charting library and a widget for embedding `diagrams-lib` graphics (`import NanoUI.Diagrams` exports both). Build a plain `Chart` value and draw it with `plot`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:cpu_chart}}
@@ -39,11 +39,11 @@ It links RGFW statically and bundles a bitmap font, so binaries are small and st
 
 <img src="../images/charts/cpu-chart.svg" alt="A framed line chart of CPU load over sixty seconds, with a grid, numbered axes, and the titles time (s) and CPU %.">
 
-Allocate the `PlotCache` once in `IO` with `newPlotCache` and keep it in the application record. It rebuilds a chart's drawing only when the chart or the theme changes, so building the `Chart` value every frame is cheap.
+Create a `PlotCache` once in `IO` with `newPlotCache` and keep it in your app record. The cache only rebuilds vector geometry when the chart data or active theme changes, so constructing `Chart` values inside the view is cheap.
 
-A chart keeps its drawing's proportions. With `fillW` the frame fills the width and the chart is centred in it; with only `fixedH` the widget takes the width the proportions give. A chart whose labels would overlap at the requested size is drawn larger, up to twice the size.
+Charts preserve their aspect ratio automatically. With `fillW`, the outer frame expands to fill available width and centers the chart inside; with only `fixedH`, the chart takes the width implied by its proportions. If axis labels would collide at the requested size, the chart scales up (up to 2x) to keep labels legible.
 
-The examples below are compiled from [`ChartExamples.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs), which `nano-ui-svg-glossary` also renders to the images. They share this data:
+The examples below come from [`ChartExamples.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-svg/app/ChartExamples.hs), rendered to SVG by `nano-ui-svg-glossary`. They share this sample dataset:
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:data}}
@@ -51,17 +51,17 @@ The examples below are compiled from [`ChartExamples.hs`](https://github.com/goo
 
 ### Series
 
-Series constructors take a name and the points: `(x, y)` pairs, or `(label, value)` pairs for `bar`. Each cell below plots `withLegend LegendNone (chart [s])`.
+Each series constructor takes a label and a list of `(x, y)` points (or `(category, value)` pairs for `bar`). Every cell below renders `withLegend LegendNone (chart [s])`:
 
-<img src="../images/charts/series.svg" alt="Five small charts: a line through a wave, the same wave as dots, the wave filled down to zero, a staircase through eight counts, and four bars labelled Q1 to Q4.">
+<img src="../images/charts/series.svg" alt="Five small charts: a line through a wave, the same wave as dots, the wave filled down to zero, a staircase through eight counts, and four bars labeled Q1 to Q4.">
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:series}}
 ```
 
-Lines and steps join the points in the order given, so sort them first if they are not already in x order. An area fills down to zero. Bars sit in category order, each taking 72% of its slot. `lineChart`, `barChart`, `scatterChart`, and `areaChart` are one-series shortcuts that plot a list with a grid and no legend.
+`line` and `step` connect points in list order, so sort by `x` beforehand if your input is unordered. `area` fills down to `y = 0` by default, and `bar` places categories in order, with each bar occupying 72% of its slot. For quick single-series plots with a grid and no legend, use `lineChart`, `barChart`, `scatterChart`, or `areaChart`.
 
-Series without a colour take the theme's series colours in order. The modifiers override the colour and size:
+Series automatically pull colors in order from the active theme's series palette unless you override them with modifiers:
 
 <img src="../images/charts/styles.svg" alt="Four charts: a teal line, a thick line, a line with a dot on every point, and an area filled up and down to the line y equals 3.">
 
@@ -69,7 +69,7 @@ Series without a colour take the theme's series colours in order. The modifiers 
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:styles}}
 ```
 
-`withStrokeWidth` means the line width for a line or step, the marker size for a scatter, and the slot fraction for a bar. `withBaseline` sets where an area fills to, in data units, so values below it fill downward. A line's markers are twice its stroke width; a scatter's markers are its stroke width, 3 by default:
+`withStrokeWidth` sets line thickness for `line` and `step`, marker diameter for `scatter`, and slot width fraction for `bar`. `withBaseline` changes the horizontal baseline an area fills toward (in data coordinates), so points below the baseline fill downward. On a `line`, markers default to twice the stroke width; on a `scatter`, they match the stroke width (3 px by default):
 
 <img src="../images/charts/markers.svg" alt="Five scatter charts of the same counts drawn with circles, squares, diamonds, triangles, and crosses.">
 
@@ -77,9 +77,9 @@ Series without a colour take the theme's series colours in order. The modifiers 
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:markers}}
 ```
 
-### Grid, titles, and legend
+### Grid, titles, and legends
 
-`withGrid` picks the grid lines drawn through the data box. Ticks and their labels stay either way.
+`withGrid` chooses which grid lines appear behind the plot area while keeping ticks and tick labels visible:
 
 <img src="../images/charts/grids.svg" alt="The same wave four times: with horizontal and vertical grid lines, horizontal only, vertical only, and no grid.">
 
@@ -87,7 +87,7 @@ Series without a colour take the theme's series colours in order. The modifiers 
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:grids}}
 ```
 
-`withTitle`, `withXAxis`, and `withYAxis` add titles. `withLegend` places the legend, which is on the right by default. At this height the bottom and inside legends would overlap other labels, so those two charts are drawn larger.
+Add titles with `withTitle`, `withXAxis`, and `withYAxis`, and position the legend with `withLegend` (it sits on the right by default). In the preview below, the bottom and inside-top-left variants expand automatically so their legends do not collide with tick labels:
 
 <img src="../images/charts/legends.svg" alt="Five charts titled Latency with lines p50 and p99: the legend on the right, along the top, absent, along the bottom of a larger chart, and inside the top left corner of a larger chart.">
 
@@ -95,9 +95,9 @@ Series without a colour take the theme's series colours in order. The modifiers 
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:legends}}
 ```
 
-### Hover
+### Hover inspection
 
-`plot` returns a `PlotResponse`. Its `plotHover` is the point nearest the pointer, in data units, while the pointer is inside the data box:
+`plot` returns a `PlotResponse` whose `plotHover` field reports the data point closest to the cursor (in data coordinates) whenever the pointer is over the plot box:
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:hover}}
@@ -105,61 +105,61 @@ Series without a colour take the theme's series colours in order. The modifiers 
 
 <img src="../images/charts/hover.svg" alt="A line chart of eight request counts with the pointer by the seventh point; below it the readout value 240.">
 
-The pointer rests by the seventh point, so the readout shows its 240. `hoverSeriesIdx` and `hoverPointIdx` hold the index of its series and point. Wrap the chart in `withCursorShape UiCursorCrosshair` to give the pointer a crosshair.
+Here the pointer hovers near the seventh point, so the readout shows `240`. `hoverSeriesIdx` and `hoverPointIdx` identify the exact series and point index. Wrap the chart in `withCursorShape UiCursorCrosshair` to show a crosshair while hovering.
 
-### Diagrams
+### Embedding `diagrams-lib` graphics
 
-`diagram` places any diagrams-lib `Diagram B` in the layout, framed like a chart and scaled to fit the layout modifier with its proportions kept. Colour it from the theme with `colourOf`, or take the chart colours from `uiPlotStyle`:
+`diagram` renders any `diagrams-lib` `Diagram B` inside a layout container, scaling proportionally to fit your layout modifier. Pull colors from the active `Theme` using `colourOf`, or reuse chart palette colors from `uiPlotStyle`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/ChartExamples.hs:diagram}}
 ```
 
-<img src="../images/charts/diagram.svg" alt="Three blue rounded boxes labelled view, layout, and paint, joined left to right by white arrows.">
+<img src="../images/charts/diagram.svg" alt="Three blue rounded boxes labeled view, layout, and paint, joined left to right by white arrows.">
 
-Text in a diagram is measured with the current font so labels fit. The cache key is the theme and the size only, so for a diagram whose content changes, use `diagramWithKeyAndEnvelope` with a key that changes with it. The live chart tutorial feeds a chart from a `Stream`: [Live Data & Background Work](../tutorials/live-data.md).
+Text inside a `Diagram` is measured with the active UI font so labels fit accurately. By default, `diagram` caches only by theme and size; if your diagram's content changes dynamically, use `diagramWithKeyAndEnvelope` with an explicit key. For an example feeding a chart from a live background stream, see [Tutorial 3: Live Data & Background Work](../tutorials/live-data.md).
 
 ## Validated forms
 
-`nano-ui-form` builds applicative forms on ditto. A `Form Text a` has `Text` errors and returns `a`:
+`nano-ui-form` builds type-safe applicative forms on top of `ditto`. A `Form Text a` collects `Text` validation errors and yields a parsed value of type `a`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:form}}
 ```
 
-Allocate `owner <- newFormState` once, then run it with a stable prefix:
+Allocate `owner <- newFormState` once during setup, then render the form under a stable key:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:form_submit}}
 ```
 
-`nanoFormLive` returns `Just a` whenever the form is valid; `nanoFormEx` takes a `FormConfig`; `runNanoForm` returns the view and result separately. Inputs include `inputText`, `inputPassword`, `inputTextArea`, `inputCheckbox`, `inputSlider`, `inputSelect`, `inputRadio`, and `inputColor`. Validation includes `notEmpty`, `minLength`, `maxLength`, `inRange`, `validEmail`, `matches`, and `customProof`. `inputWidget` adapts any `Var a -> NanoUI Response` widget, with a publication policy (`OnChange`, `OnChangeOr`, `OnlyWhen`).
+`nanoFormLive` returns `Just a` continuously whenever the form is valid, `nanoFormEx` accepts a `FormConfig`, and `runNanoForm` separates the rendered view from its result. Built-in inputs cover `inputText`, `inputPassword`, `inputTextArea`, `inputCheckbox`, `inputSlider`, `inputSelect`, `inputRadio`, and `inputColor`, paired with validators such as `notEmpty`, `minLength`, `maxLength`, `inRange`, `validEmail`, `matches`, and `customProof`. Wrap any custom `Var a -> NanoUI Response` widget with `inputWidget`, choosing when edits publish (`OnChange`, `OnChangeOr`, or `OnlyWhen`).
 
 ## Markdown
 
-`nano-ui-markdown` parses with commonmark and draws with rich text:
+`nano-ui-markdown` parses CommonMark (with GitHub tables, task lists, strikethrough, and autolinks) and renders it as selectable rich text:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:markdown}}
 ```
 
-Allocate `cache <- newMarkdownCache` once. `markdown` returns the link clicked this frame. For streaming, append without reparsing the whole document:
+Allocate `cache <- newMarkdownCache` once during setup. `markdown` returns the URL of any link clicked on the current frame. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:markdown_stream}}
 ```
 
-When appending on the UI thread, append a frame's tokens in one call. The parser reparses only the tail block, with a few documented exceptions (a long unsplittable final block, or a link-reference definition). `MarkdownConfig.mdBlock` overrides block drawing, for example to syntax-highlight code.
+If tokens arrive on the UI thread, concatenate each frame's batch into a single `appendMarkdown` call. The incremental parser only reparses the trailing block (except when a chunk completes an unsplittable block or adds a link-reference definition). To customize rendering for specific elements (such as adding syntax highlighting to fenced code blocks), override `MarkdownConfig.mdBlock`.
 
 ## SVG export
 
-`nano-ui-svg` has two levels:
+`nano-ui-svg` exports graphics at two levels:
 
-- `NanoUI.Draw.Svg` exports `DrawOp` sequences: `drawOpsToSvg bounds ops` or `renderDrawOpsSvg config`.
-- `NanoUI.Draw.FrameSvg` re-renders a whole frame: `frameToSvg config ctx input drawData`.
+- `NanoUI.Draw.Svg` exports raw `DrawOp` lists via `drawOpsToSvg bounds ops` or `renderDrawOpsSvg config`.
+- `NanoUI.Draw.FrameSvg` exports an entire rendered UI frame via `frameToSvg config ctx input drawData`.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:frame_svg}}
 ```
 
-`enableSvgExport` records the shapes paint draws and the text spans the exporter reads; `frameToSvg` fails on a context without it. Ids in the document take a prefix from its hash, so several SVGs can share a page. A `newPixelContext` measures text on a 16 px monospace grid; run the frames inside `withSdl` to measure in the real font. The specimens in this book are made this way.
+Call `enableSvgExport` on your context beforehand so paint passes record vector shapes and text spans (`frameToSvg` fails without it). Generated clip and gradient IDs are prefixed from a hash of the SVG document, so multiple exported SVGs can live safely on the same HTML page. A headless `newPixelContext` measures text on a 16 px monospace grid; run your frames inside `withSdl` if you want real TrueType font metrics (which is how all the illustrations in this book are generated).

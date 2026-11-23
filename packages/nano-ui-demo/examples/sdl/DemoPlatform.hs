@@ -105,8 +105,8 @@ debugSections s =
 rendererText :: SdlDebugSnapshot -> Text
 rendererText s = dbgRenderer s <> if dbgVsync s then ", vsync on" else ", vsync off"
 
--- | The headline frame statistics for the Diagnostics tab. Asking for them
--- keeps the backend sampling, so only while the tab shows.
+-- | Headline frame statistics for the Diagnostics tab. Querying stats keeps
+-- sampling active only while the tab is open.
 diagnosticsRows :: NanoUI ()
 diagnosticsRows =
   askSdlDebug >>= \case

@@ -1,10 +1,6 @@
 # nano-ui
 
-An immediate-mode GUI toolkit for Haskell. Because each frame is a monadic
-action, you can build interfaces with ordinary functions, `do` notation, and
-standard control flow (`if`, `case`, `for_`). Widgets return values directly
-(such as `Bool` from `button`), and persistent state is held in `Var`s, mutable
-variables in the `NanoUI` monad.
+`nano-ui` is an immediate-mode GUI toolkit for Haskell. You describe a window as a single monadic action that runs on every frame, using ordinary functions, `do` blocks, and standard control flow (`if`, `case`, `for_`). Widgets return results directly (for example, `button` returns `Bool`), and mutable state lives in typed `Var` references inside the `NanoUI` monad.
 
 https://github.com/user-attachments/assets/92436ce7-1202-4e51-8df7-b34ee0a31d93
 
@@ -28,116 +24,87 @@ counter = row $ do
 
 ## Features
 
-- Built-in widgets (text inputs, tables, trees, menus, modals, floating windows,
-  pane grids, charts, and more)
-- Custom widgets and a 2D canvas for vector drawing
-- Row, column, grid, and layered layout with composable modifiers, scrolling,
-  wrapping, and debug outlines
-- Rich text, bidirectional text shaping, fallback fonts, images, and SVG icons
-- Keyboard navigation, composable shortcuts, and IME input
-- Custom themes (defined directly, composed from built-in light and dark themes,
-  or generated from a Base16 palette), automatic system light/dark mode
-  switching, and composable, scoped styling
-- Animations with easing curves and spring physics
-- First-class support for background tasks and streams
-- Idle sleep and per-frame damage tracking
-- Direct mutable state or an Elm-style message/update loop
-- Headless testing with scripted input
-- Modular backends, with built-in support for SDL3 and RGFW+OpenGL
+- Built-in widgets: text inputs, multi-line documents with undo, sortable tables, trees, tabs, menus, modals, floating windows, dockable pane grids, charts, and Markdown
+- Custom widgets and a 2D vector canvas with paths, strokes, gradients, clips, and transforms
+- Row, column, grid, wrapping, and layered layouts driven by composable modifiers, with scrolling and an interactive layout inspector
+- Rich text, HarfBuzz bidirectional text shaping, fallback fonts, images, and SVG icons
+- Keyboard focus, composable shortcuts, and IME composition
+- Built-in light and dark themes, Base16 palettes, OS light/dark tracking, and subtree-scoped styling
+- Eased tween and spring-physics animations
+- Background `Task` and `Stream` workers with automatic cancellation
+- Zero-CPU idle sleep and per-frame damage tracking
+- Direct `Var` state or an optional Elm-style message/reducer architecture (`nano-ui-emit`)
+- Headless testing with scripted user input and SVG frame export
+- Desktop backends for SDL3 and RGFW+OpenGL, plus a browser WebAssembly backend
 
-## Examples
+## Live demos and examples
 
-The widget cookbook runs in the browser at
-**[goolord.github.io/nano-ui/demo](https://goolord.github.io/nano-ui/demo/)**,
-and a smaller demo on the [landing page](https://goolord.github.io/nano-ui/).
-It is the same view as `nano-ui-sdl-demo`, compiled with GHC's WebAssembly
-backend and drawn by [`nano-ui-sdl-web`](packages/nano-ui-sdl-web/README.md).
+Try the full widget cookbook in your browser at **[goolord.github.io/nano-ui/demo](https://goolord.github.io/nano-ui/demo/)**, or explore the interactive landing page demo at **[goolord.github.io/nano-ui](https://goolord.github.io/nano-ui/)**. Both compile the desktop Haskell views to WebAssembly using [`nano-ui-sdl-web`](packages/nano-ui-sdl-web/README.md).
 
-See [`nano-ui-demo`](packages/nano-ui-demo/README.md) for full demo
-applications and single-topic examples.
+Browse [`nano-ui-demo`](packages/nano-ui-demo/README.md) for all full apps and focused single-topic examples.
 
-Running the demos requires GHC 9.10 through 9.14 (development uses 9.14) and
-Cabal. The SDL backend also requires SDL3, SDL3_ttf, and pkg-config, all of
-which are provided in the `nix develop` shell.
+Building locally requires GHC 9.10 through 9.14 (development uses 9.14) and Cabal. The SDL backend also requires SDL3, SDL3_ttf 3.2+, and `pkg-config`, all included in the `nix develop` shell.
 
 ```sh
-cabal run nano-ui-sdl-demo       # widget and chart tour
-cabal run nano-ui-sdl-notepad    # text editor with menus and file dialogs
-cabal run nano-ui-sdl-logs       # streaming log viewer
-cabal run nano-ui-sdl-terminal   # terminal on /bin/sh (Linux and macOS)
-cabal run nano-ui-rgfw-demo      # the RGFW backend
-cabal run nano-ui-markdown-example  # a Markdown chat reply streaming in
-cabal run nano-ui-example-hello  # the first of the single-topic examples
+cabal run nano-ui-sdl-demo          # full widget and chart cookbook
+cabal run nano-ui-sdl-notepad       # text editor with menus and native file dialogs
+cabal run nano-ui-sdl-logs          # streaming log viewer
+cabal run nano-ui-sdl-terminal      # PTY terminal emulator (Linux and macOS)
+cabal run nano-ui-rgfw-demo         # lightweight RGFW + OpenGL backend
+cabal run nano-ui-markdown-example  # streamed Markdown chat reply
+cabal run nano-ui-example-hello     # first single-topic example
 ```
 
-The [single-topic examples](packages/nano-ui-demo/README.md#examples) are
-short, self-contained programs, each focused on one concept: state, layout,
-form validation, background tasks, virtualized lists of 100,000 rows, and so
-on.
+The [single-topic examples](packages/nano-ui-demo/README.md#examples) are small standalone programs covering one topic each: state, layout, form validation, background tasks, 100,000-row virtualized lists, and more.
 
-## How it works
+## How a frame runs
 
-`NanoUI` has `MonadIO` and `MonadUnliftIO` instances, and exception handling
-from `exceptions`. It is built on
-[effectful](https://hackage.haskell.org/package/effectful), with the underlying
-`Eff` stack exported in `NanoUI.Effectful` if you want to share effects with the
-rest of your application. Each frame:
+`NanoUI` has `MonadIO`, `MonadUnliftIO`, and `exceptions` instances. Internally it runs on [effectful](https://hackage.haskell.org/package/effectful), with the raw `Eff` stack exposed in `NanoUI.Effectful` when you want to combine it with your own effects.
 
-1. Pointer input is routed to the topmost layer at the cursor (a menu,
-   dropdown, frontmost floating panel, or the main page), the node and vertex
-   arenas are reset, and the UI action runs. Widget calls append layout nodes
-   and read from or update the widget store; layers that do not receive the
-   pointer get no pointer events.
-2. Layout is solved.
-3. Pointer, keyboard, and focus states are resolved against the new geometry.
-4. Damage is computed against the previous frame from geometry, state, theme,
-   and animation changes.
-5. The damaged region is painted into pinned vertex and index buffers in the
-   background, content, overlay, and chrome layers to build the backend draw
-   list.
+On each frame:
 
-See [docs/rendering-pipeline.svg](docs/rendering-pipeline.svg) for a diagram of
-the pipeline. Per-frame code is profiled for allocation, and
-[inspection-testing](https://hackage.haskell.org/package/inspection-testing) is
-used to check that the vertex writers compile without dictionaries or tuples.
+1. Pointer input routes to the topmost layer under the cursor (an open menu, dropdown, frontmost floating window, or the main page), the layout and vertex arenas reset, and your view action runs. Covered layers receive no pointer events.
+2. The layout solver calculates exact bounds for every widget.
+3. Pointer, keyboard, and focus states resolve against the new geometry.
+4. Damage tracking diffs the frame against the previous one to find changed regions.
+5. Only damaged regions rasterize into pinned vertex and index buffers across the background, content, overlay, and chrome layers.
+
+See [docs/rendering-pipeline.svg](docs/rendering-pipeline.svg) for the full pipeline diagram. Hot per-frame paths are tracked by an allocation regression gate, and [inspection-testing](https://hackage.haskell.org/package/inspection-testing) verifies that vertex writers compile without dictionary passing or intermediate tuples.
 
 ## Packages
 
-| Package | What it is |
+| Package | Description |
 | --- | --- |
-| `nano-ui` | Widgets, layout, input handling, and the draw list |
-| `nano-ui-sdl` | Window backend on SDL3, with TrueType fonts, installed-font lookup, and native file dialogs |
-| `nano-ui-rgfw` | Window backend on RGFW and OpenGL 3.2, with a bundled bitmap font and no system dependencies beyond windowing |
-| `nano-ui-rgfw-bindings` | Haskell bindings to RGFW |
-| `nano-ui-sdl-web` | Browser backend for GHC's WebAssembly target, with SDL_ttf text and WebGL2 |
-| `nano-ui-diagrams` | Line, bar, scatter, and area charts, and drawing with [diagrams](https://diagrams.github.io/) |
-| `nano-ui-form` | Validated forms built on [ditto](https://hackage.haskell.org/package/ditto) |
-| `nano-ui-emit` | Statically typed emitting views, widget adapters, and reducers |
-| `nano-ui-markdown` | Markdown documents drawn with rich text, parsed incrementally for streamed chat replies |
-| `nano-ui-demo` | Example applications |
+| `nano-ui` | Core widgets, layout solver, input handling, theming, and draw lists |
+| `nano-ui-sdl` | Desktop SDL3 backend with TrueType fonts, system font lookup, and native file dialogs |
+| `nano-ui-rgfw` | RGFW + OpenGL 3.2 backend with a bundled bitmap font and no extra library dependencies |
+| `nano-ui-rgfw-bindings` | Haskell bindings to RGFW (C source bundled) |
+| `nano-ui-sdl-web` | Browser backend for GHC's WebAssembly target using SDL_ttf and WebGL2 |
+| `nano-ui-diagrams` | Line, bar, scatter, area, and step charts, plus [diagrams](https://diagrams.github.io/) widgets |
+| `nano-ui-form` | Validated applicative forms built on [ditto](https://hackage.haskell.org/package/ditto) |
+| `nano-ui-emit` | Statically typed emitting views, widget adapters, and pure reducers |
+| `nano-ui-markdown` | CommonMark rendering with incremental appends for streamed text |
+| `nano-ui-svg` | `DrawOp` and full-frame SVG export |
+| `nano-ui-demo` | Full example applications and single-topic tutorials |
 
-[`nano-ui`](https://hackage.haskell.org/package/nano-ui) is on Hackage. The repository may be ahead of the released API.
+[`nano-ui`](https://hackage.haskell.org/package/nano-ui) is published on Hackage; this repository may be ahead of the latest release.
 
 ## Documentation
 
-Comprehensive documentation is available in **[The nano-ui Book](https://goolord.github.io/nano-ui/book/)** (and offline in the [`book/`](book/) directory):
+Read **[The nano-ui Book](https://goolord.github.io/nano-ui/book/)** online (or in [`book/`](book/)):
 
-- **[Quick Start](https://goolord.github.io/nano-ui/book/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
-- **[Tutorials](https://goolord.github.io/nano-ui/book/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.
-- **[State & `Var`](https://goolord.github.io/nano-ui/book/state/index.html)** and **[Elm-Style State](https://goolord.github.io/nano-ui/book/state/elm.html)**: Where state lives, write costs, `VarMap`, and typed reducers.
-- **[Layout & Scrolling](https://goolord.github.io/nano-ui/book/layout/index.html)**: Containers, modifiers, and 100,000-row list virtualization.
-- **[Widget Gallery](https://goolord.github.io/nano-ui/book/widgets/index.html)** and **[Styling & Theming](https://goolord.github.io/nano-ui/book/styling/index.html)**: One guide to every widget, plus theming, states, typography, and the [styling lab](https://goolord.github.io/nano-ui/book/styling/lab.html).
-- **[Keyboard, Focus & IME](https://goolord.github.io/nano-ui/book/input/index.html)**: Shortcuts, focus, and text input.
-- **[Async Work & Animation](https://goolord.github.io/nano-ui/book/advanced/async.html)** and **[Ecosystem Packages](https://goolord.github.io/nano-ui/book/packages/index.html)**: Background work, charts, forms, markdown, SVG, and backends.
-- **[Troubleshooting](https://goolord.github.io/nano-ui/book/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and their fixes.
-- **[Architecture & Internals](https://goolord.github.io/nano-ui/book/architecture/index.html)**: Frame lifecycle, application patterns, and internals.
-- **[Development Guide](https://goolord.github.io/nano-ui/book/getting-started/development.html)**: Building, testing, profiling, and repository conventions.
-- **[`NanoUI` Haddock](https://hackage.haskell.org/package/nano-ui)**: Released API documentation. For the current source, run `cabal haddock-project --output=haddocks --hoogle`.
+- **[Quick Start](https://goolord.github.io/nano-ui/book/getting-started/quickstart.html)**: Setting up a windowed app with Cabal, Nix, or Windows MSYS2.
+- **[Tutorials](https://goolord.github.io/nano-ui/book/tutorials/index.html)**: Step-by-step builds of a todo list, a notepad, and a live-data chart.
+- **[State & `Var`](https://goolord.github.io/nano-ui/book/state/index.html)** and **[Elm-Style State](https://goolord.github.io/nano-ui/book/state/elm.html)**: State lifetimes, write costs, `VarMap`, and typed reducers.
+- **[Layout & Scrolling](https://goolord.github.io/nano-ui/book/layout/index.html)**: Containers, modifiers, and virtualizing 100,000-row lists.
+- **[Widget Gallery](https://goolord.github.io/nano-ui/book/widgets/index.html)** and **[Styling & Theming](https://goolord.github.io/nano-ui/book/styling/index.html)**: Reference for every widget family, themes, typography, and the [Interactive Styling Lab](https://goolord.github.io/nano-ui/book/styling/lab.html).
+- **[Keyboard, Focus & IME](https://goolord.github.io/nano-ui/book/input/index.html)**: Shortcuts, focus rules, and custom text input.
+- **[Async Work & Animation](https://goolord.github.io/nano-ui/book/advanced/async.html)** and **[Ecosystem Packages](https://goolord.github.io/nano-ui/book/packages/index.html)**: Background tasks, streams, charts, forms, Markdown, SVG export, and backends.
+- **[Troubleshooting](https://goolord.github.io/nano-ui/book/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and how to fix them.
+- **[Architecture & Internals](https://goolord.github.io/nano-ui/book/architecture/index.html)**: Frame lifecycle and application patterns.
+- **[Development Setup](https://goolord.github.io/nano-ui/book/getting-started/development.html)**: Building, testing, profiling, and repo conventions.
+- **[`NanoUI` Haddock](https://hackage.haskell.org/package/nano-ui)**: API reference for the released version. For the current checkout, run `cabal haddock-project --output=haddocks --hoogle`.
 
 ## License
 
-MIT, except the bundled Inter font (SIL Open Font License 1.1,
-[`LICENSE-Inter`](packages/nano-ui-sdl/LICENSE-Inter)), the bundled Cozette
-font (MIT by its author,
-[`LICENSE-Cozette`](packages/nano-ui-rgfw/LICENSE-Cozette)) and the bundled
-RGFW (zlib, [`LICENSE-RGFW`](packages/nano-ui-rgfw-bindings/LICENSE-RGFW)).
+MIT, except the bundled Inter font (SIL Open Font License 1.1, [`LICENSE-Inter`](packages/nano-ui-sdl/LICENSE-Inter)), the bundled Cozette bitmap font (MIT, [`LICENSE-Cozette`](packages/nano-ui-rgfw/LICENSE-Cozette)), and the bundled RGFW library (zlib, [`LICENSE-RGFW`](packages/nano-ui-rgfw-bindings/LICENSE-RGFW)).

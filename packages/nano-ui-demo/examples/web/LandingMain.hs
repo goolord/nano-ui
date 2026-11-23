@@ -1,9 +1,8 @@
 {-# LANGUAGE CPP #-}
 
--- | The program on the project's landing page (@site/index.html@), in a
--- browser canvas. Built with @wasm32-wasi-ghc@ it is a reactor module whose
--- @nanoMain@ export the page calls; a native build only checks that it
--- compiles.
+-- | WebAssembly entry point for the landing-page demo (@site/index.html@).
+-- Built with @wasm32-wasi-ghc@ as a reactor module whose @nanoMain@ export
+-- the page invokes; native builds simply verify compilation.
 module Main (main) where
 
 import Data.Maybe (isNothing)
@@ -13,9 +12,8 @@ import System.Environment (lookupEnv)
 
 import Landing (landingView)
 
--- | The page sets @NANO_UI_REDUCED_MOTION@ in the program's environment
--- when the browser asks for reduced motion, and Bloom then starts with its
--- spin off.
+-- | @site/index.html@ passes @NANO_UI_REDUCED_MOTION=1@ when the browser
+-- requests reduced motion, starting Bloom with rotation turned off.
 main :: IO ()
 main = do
   still <- lookupEnv "NANO_UI_REDUCED_MOTION"
@@ -25,11 +23,10 @@ main = do
 foreign export javascript "nanoMain" main :: IO ()
 #endif
 
--- | The theme follows the page's colour scheme, as the landing page's own
--- colours do. The backend sets the document's title, so the title here is
--- the landing page's own @<title>@; keep the two the same. The view's text
--- is ASCII, which the bundled Inter covers, so no fallback font is fetched
--- and the page needs no font file beside it.
+-- | Follow the browser's light/dark preference to match @site/index.html@.
+-- Keep @wsTitle@ identical to the page's @<title>@. Because the demo uses
+-- ASCII-only text covered by the bundled Inter font, no fallback font needs
+-- to be fetched.
 webOptions :: SdlWebOptions
 webOptions =
   defaultSdlWebOptions

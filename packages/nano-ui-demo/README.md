@@ -1,34 +1,27 @@
 # nano-ui-demo
 
-Example applications and single-topic tutorials for
-[nano-ui](https://github.com/goolord/nano-ui), built on the SDL3 backend
-(`nano-ui-sdl`).
+Example applications and single-topic tutorials for [nano-ui](https://github.com/goolord/nano-ui), built primarily on the SDL3 backend (`nano-ui-sdl`).
 
-The package is split into two parts:
+The package is organized into two parts:
 
-1. **Full applications** that combine multiple features into complete programs
-   (a widget and chart showcase, a text editor, a streaming log viewer, and a
-   terminal emulator).
-2. **Single-topic examples** in [`examples/`](examples/): short, self-contained
-   programs that each focus on one concept (`Var` state, layout modifiers,
-   forms, keyboard shortcuts, overlays, theming, animations, background tasks,
-   and so on).
+1. **Full applications** combining multiple features into complete programs: a widget and chart cookbook, a text editor, a streaming log viewer, and a terminal emulator.
+2. **Single-topic examples** in [`examples/`](examples/): short, self-contained programs focused on one concept each (`Var` state, layout modifiers, forms, shortcuts, overlays, theming, animations, background tasks, and more).
 
 ## Full applications
 
 | Executable | Source | Description |
 | --- | --- | --- |
-| `nano-ui-sdl-demo` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/sdl/`](examples/sdl/), [`lib/DemoData.hs`](lib/DemoData.hs) | Multi-tab showcase of built-in widgets, layout containers, custom 2D vector graphics, animated GIFs, rich text, trees, sortable tables, dynamic tabs, split panes, and `nano-ui-diagrams` charts. Includes a live state sidebar showing current `Var` values across tabs, an `About` modal (`F1`), and a `Debug` window (`F12`) with frame timings, damage statistics, and an interactive layout overlay. |
-| `nano-ui-web-cookbook` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/web/`](examples/web/) | The same cookbook in a browser canvas with `nano-ui-sdl-web`, [published on the project's site](https://goolord.github.io/nano-ui/demo/). `DemoPlatform` in `examples/sdl` and `examples/web` holds what differs: the web build embeds the data files, lists installed fonts (Chromium, once allowed) and Fontsource's, and opens and saves files by their contents. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-cookbook` (see that package's README). |
-| `nano-ui-sdl-landing` | [`examples/Landing.hs`](examples/Landing.hs), [`examples/Bloom.hs`](examples/Bloom.hs), [`examples/sdl/LandingMain.hs`](examples/sdl/LandingMain.hs) | The program on the [landing page](https://goolord.github.io/nano-ui/), in an SDL window: four tabs sized to fit a phone's screen. Bloom is the drawing; Controls, Text and Data hold buttons, a modal, a tooltip, choices, a slider, a numeric input, text fields, a combo box, a text area, a table and a tree. |
-| `nano-ui-web-landing` | the same, with [`examples/web/LandingMain.hs`](examples/web/LandingMain.hs) | The browser build that [`site/index.html`](../../site/index.html) loads, with only `nano-ui` and `nano-ui-sdl-web` as dependencies. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web/landing nano-ui-demo:exe:nano-ui-web-landing`. |
-| `nano-ui-sdl-notepad` | [`examples/Notepad.hs`](examples/Notepad.hs) | Plain-text editor with a menu bar built on `popup`, keyboard shortcuts, unsaved-change tracking in the window title, and asynchronous native open/save file dialogs. |
-| `nano-ui-sdl-logs` | [`examples/Logs.hs`](examples/Logs.hs) | Streaming log viewer backed by a bounded ring buffer, with severity filtering, selectable log lines, Select All / Copy All, and auto-scroll that pauses when the user scrolls up. |
-| `nano-ui-sdl-terminal` | [`examples/Terminal.hs`](examples/Terminal.hs) | 80×24 terminal emulator attached to `/bin/sh` over a PTY (Linux and macOS only). Supports UTF-8, 16 ANSI colors with bold and inverse attributes, cursor movement, screen erasing, inserting and deleting characters and lines, scrolling, repeated characters, 2,000 lines of scrollback, and inline IME composition at the cursor via `useInputMethod` (`TERM=ansi`). |
+| `nano-ui-sdl-demo` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/sdl/`](examples/sdl/), [`lib/DemoData.hs`](lib/DemoData.hs) | Multi-tab cookbook covering built-in widgets, layouts, custom 2D vector graphics, animated GIFs, rich text, trees, sortable tables, closable tabs, dockable split panes, and `nano-ui-diagrams` charts. Includes a live State sidebar, an About dialog (`F1`), and a Debug window (`F12`) with frame timings, damage counters, and an interactive layout inspector. |
+| `nano-ui-web-cookbook` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/web/`](examples/web/) | The same cookbook compiled to WebAssembly with `nano-ui-sdl-web` and [published online](https://goolord.github.io/nano-ui/demo/). Platform-specific adapters live in `DemoPlatform` under `examples/sdl` and `examples/web`: the web build embeds assets, loads Fontsource and Chromium local fonts, and opens/saves files by contents. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-cookbook`. |
+| `nano-ui-sdl-landing` | [`examples/Landing.hs`](examples/Landing.hs), [`examples/Bloom.hs`](examples/Bloom.hs), [`examples/sdl/LandingMain.hs`](examples/sdl/LandingMain.hs) | Desktop SDL3 build of the four-tab [landing page](https://goolord.github.io/nano-ui/) demo, sized to fit mobile viewports without scrolling. Includes the animated Bloom canvas plus Controls, Text, and Data tabs. |
+| `nano-ui-web-landing` | Same sources with [`examples/web/LandingMain.hs`](examples/web/LandingMain.hs) | Browser build loaded by [`site/index.html`](../../site/index.html), depending only on `nano-ui` and `nano-ui-sdl-web`. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web/landing nano-ui-demo:exe:nano-ui-web-landing`. |
+| `nano-ui-sdl-notepad` | [`examples/Notepad.hs`](examples/Notepad.hs) | Plain-text editor with a `popup`-based menu bar, keyboard shortcuts, unsaved-change indicator in the window title, and non-blocking native open/save file dialogs. |
+| `nano-ui-sdl-logs` | [`examples/Logs.hs`](examples/Logs.hs) | Streaming log viewer backed by a bounded ring buffer, with severity filters, selectable log lines, Select All / Copy All, and auto-scroll that pauses when you scroll up. |
+| `nano-ui-sdl-terminal` | [`examples/Terminal.hs`](examples/Terminal.hs) | 80x24 terminal emulator attached to `/bin/sh` over a PTY (Linux and macOS only). Supports UTF-8, 16 ANSI colors with bold and inverse video, cursor motion, line/character edits, 2,000 lines of scrollback, and inline IME composition via `useInputMethod` (`TERM=ansi`). |
 | `nano-ui-sdl-profile` | [`examples/Profile.hs`](examples/Profile.hs) | Frame-time and allocation benchmark runner for the demo UI. |
-| `nano-ui-demo-svg` | [`examples/DemoSvg.hs`](examples/DemoSvg.hs) | Renders the demo's Plots tab headlessly to an SVG file with `nano-ui-svg`'s `frameToSvg`: widget chrome from the frame's vertex buffer, plots and canvas drawings from their cached draw ops, and text from the raster spans. Run `cabal run nano-ui-demo-svg -- out.svg`. |
+| `nano-ui-demo-svg` | [`examples/DemoSvg.hs`](examples/DemoSvg.hs) | Renders the demo's Plots tab headlessly to an SVG file using `nano-ui-svg`'s `frameToSvg`. Run with `cabal run nano-ui-demo-svg -- out.svg`. |
 
-Run any application with `cabal run`:
+Launch any application with `cabal run`:
 
 ```sh
 cabal run nano-ui-sdl-demo
@@ -42,42 +35,38 @@ Pass CLI flags to `nano-ui-sdl-demo` after `--`:
 
 ```sh
 cabal run nano-ui-sdl-demo -- --help
-cabal run nano-ui-sdl-demo -- --explain      # start with the layout inspector overlay enabled
+cabal run nano-ui-sdl-demo -- --explain      # start with the layout inspector enabled
 cabal run nano-ui-sdl-demo -- --continuous   # render continuously without vsync
-cabal run nano-ui-sdl-demo -- --fullscreen   # start in fullscreen mode
+cabal run nano-ui-sdl-demo -- --fullscreen   # launch in fullscreen mode
 ```
 
 ## Examples
 
-Each file below is a standalone executable that depends only on the public
-library packages (`nano-ui`, `nano-ui-sdl`, and `nano-ui-diagrams` where
-needed), never on internal demo helpers. You can copy any file directly into a
-new project as a starting point, and each file's module header explains the
-concepts it demonstrates.
+Each single-topic example is a standalone executable that depends only on public library packages (`nano-ui`, `nano-ui-sdl`, and `nano-ui-diagrams` where needed), with no internal demo helpers. Copy any file straight into your own project as a starting point; the module header at the top explains what it demonstrates.
 
-They are listed in roughly the order you would read them as a tutorial:
+They are ordered roughly as a learning path:
 
 | Source | Executable | Topics covered |
 | --- | --- | --- |
-| [`Hello.hs`](examples/Hello.hs) | `nano-ui-example-hello` | Minimal application setup, the per-frame execution model, and local state with `useVar`. |
-| [`State.hs`](examples/State.hs) | `nano-ui-example-state` | View-local state (`useVar`, `useEnumVar`), application-owned state (`newVar`), record field projection with `OverloadedRecordDot` (`state.field`), conditional widget scopes (`scope`), and keyed list state (`withKey`). |
-| [`Layout.hs`](examples/Layout.hs) | `nano-ui-example-layout` | `row`, `column`, and `grid` containers, composable `Layout -> Layout` modifiers, width/height sizing (`Fit`, `fixedW`, `fillW`, `grow`), cross-axis alignment, wrapping, badges, and the interactive layout inspector (`explainLayout`). |
-| [`Components.hs`](examples/Components.hs) | `nano-ui-example-components` | Defining reusable custom widgets from built-in primitives, isolating internal widget IDs, exposing `Response` (`'`) and `LayoutModifier` (`With`) variants, and choosing between internal and caller-owned `Var`s. |
-| [`Forms.hs`](examples/Forms.hs) | `nano-ui-example-forms` | Keeping form state in a single record `Var`, projecting per-field `Var`s, validating fields after the first submit attempt, disabling buttons with `disabledWhen`, submitting on `Enter` (`respSubmitted`), and resetting to defaults. |
-| [`TodoList.hs`](examples/TodoList.hs) | `nano-ui-example-todo-list` | Adding, inline-editing, filtering, and reordering list items while preserving per-item `Var`s (`withElemVars`) and local widget state across list mutations (`withKey`). |
-| [`Keyboard.hs`](examples/Keyboard.hs) | `nano-ui-example-keyboard` | Key chords (`shortcut`, `shortcutOnce`, `cmdOrCtrl`), arrow-key navigation, how focused text inputs claim key events automatically, programmatic focus (`requestFocus`, `clearFocus`, `takeEscape`), and menu shortcuts. |
-| [`Overlays.hs`](examples/Overlays.hs) | `nano-ui-example-overlays` | Menu bars, filter popovers (`popup`), right-click context menus (`contextMenu`), hover tooltips (`tooltip`, `withTooltip`), modal dialogs (`modal`), draggable/resizable floating windows (`window`), and intercepting window close requests (`wsExitOnCloseRequest`). |
-| [`Theming.hs`](examples/Theming.hs) | `nano-ui-example-theming` | Switching between built-in and Base16 themes (`setUiTheme`), following system light/dark mode (`systemAppearance`, `lightDark`), scoped style overrides (`styled`), and reading theme colors for custom drawing (`uiTheme`). |
-| [`Animation.hs`](examples/Animation.hs) | `nano-ui-example-animation` | Eased tweens (`Tween`) and spring physics (`Spring`) with `animateTo` and `animateToA`, smooth mid-flight retargeting, animated colors, continuous animations (`pulse`, `keepAnimating`), and idle loop sleep once animations settle. |
-| [`Images.hs`](examples/Images.hs) | `nano-ui-example-images` | Leasing procedural RGBA textures in the backend atlas (`useImageRgba`), lazy regeneration via cache keys, content fit modes (`imageConfigured`), and tinted SVG icons (`parseSvg`, `svgIcon`, `iconButton`). |
-| [`Canvas.hs`](examples/Canvas.hs) | `nano-ui-example-canvas` | Interactive 2D vector drawing with `NanoUI.Path` (`canvasConfigured`, `useDrag2DOn`), pointer capture for freehand strokes, and path caching via `canvasContent`. |
-| [`Bloom.hs`](examples/Bloom.hs) | `nano-ui-example-bloom` | Springs and a canvas together: sliders write `Var`s, `animateTo` with a `Spring` follows each one, and a `canvasConfigured` drawing of layered rose curves reads the animated values. A drag on the canvas turns the drawing (`useDrag2DOn`). The view is a module, also the first tab of `nano-ui-sdl-landing`; `examples/sdl/BloomMain.hs` is its `main`. |
-| [`Tasks.hs`](examples/Tasks.hs) | `nano-ui-example-tasks` | Running blocking IO on background worker threads (`useTask`, `useTaskStatus`), key-driven cancellation and restarts, error handling and retries, and incremental streams (`useStream`). |
-| [`Files.hs`](examples/Files.hs) | `nano-ui-example-files` | Non-blocking native open/save file dialogs (`useFileDialog`), loading file contents asynchronously with `useTaskStatus`, drag-and-drop file paths, and dynamic window titles (`setWindowTitleUi`). |
-| [`LongList.hs`](examples/LongList.hs) | `nano-ui-example-long-list` | Viewport virtualization for a 100,000-row list using `getScrollMetricsUi`, top/bottom spacer nodes, and programmatic scrolling by content rectangle (`scrollRectIntoViewUi`). |
-| [`LiveChart.hs`](examples/LiveChart.hs) | `nano-ui-example-live-chart` | Real-time line chart rendered with `nano-ui-diagrams` (`plot`, `PlotCache`), driven by a background `useStream` producer that sleeps at zero CPU cost when paused. |
+| [`Hello.hs`](examples/Hello.hs) | `nano-ui-example-hello` | Minimal app setup, the per-frame view model, and local state with `useVar`. |
+| [`State.hs`](examples/State.hs) | `nano-ui-example-state` | View-local state (`useVar`, `useEnumVar`), app-owned state (`newVar`), record field projections (`state.field`), conditional scopes (`scope`), and keyed list state (`withKey`). |
+| [`Layout.hs`](examples/Layout.hs) | `nano-ui-example-layout` | `row`, `column`, and `grid` containers, composable `Layout -> Layout` modifiers, sizing (`Fit`, `fixedW`, `fillW`, `grow`), alignment, wrapping, badges, and `explainLayout`. |
+| [`Components.hs`](examples/Components.hs) | `nano-ui-example-components` | Building reusable widgets from primitives, isolating internal widget IDs, exposing primed (`'`) and `With` variants, and deciding between internal vs. caller-owned `Var`s. |
+| [`Forms.hs`](examples/Forms.hs) | `nano-ui-example-forms` | Storing form state in a single record `Var`, projecting field `Var`s, validating after first submission, disabling controls with `disabledWhen`, submitting on Enter (`respSubmitted`), and resetting defaults. |
+| [`TodoList.hs`](examples/TodoList.hs) | `nano-ui-example-todo-list` | Adding, inline-editing, filtering, and reordering rows while keeping per-item `Var`s (`withElemVars`) and local widget state attached across mutations (`withKey`). |
+| [`Keyboard.hs`](examples/Keyboard.hs) | `nano-ui-example-keyboard` | Chords (`shortcut`, `shortcutOnce`, `cmdOrCtrl`), arrow navigation, automatic key claiming by focused text fields, programmatic focus (`requestFocus`, `clearFocus`, `takeEscape`), and menu shortcuts. |
+| [`Overlays.hs`](examples/Overlays.hs) | `nano-ui-example-overlays` | Menu bars, filter popups (`popup`), right-click context menus (`contextMenu`), tooltips (`tooltip`, `withTooltip`), modals (`modal`), floating windows (`window`), and intercepting close requests (`wsExitOnCloseRequest`). |
+| [`Theming.hs`](examples/Theming.hs) | `nano-ui-example-theming` | Switching built-in and Base16 themes (`setUiTheme`), following OS light/dark appearance (`systemAppearance`, `lightDark`), scoped overrides (`styled`), and reading theme colors for custom drawing (`uiTheme`). |
+| [`Animation.hs`](examples/Animation.hs) | `nano-ui-example-animation` | Eased tweens (`Tween`) and spring physics (`Spring`) with `animateTo` and `animateToA`, smooth mid-flight retargeting, animated colors, continuous motion (`pulse`, `keepAnimating`), and idle sleep after animations settle. |
+| [`Images.hs`](examples/Images.hs) | `nano-ui-example-images` | Leasing procedural RGBA textures in the atlas (`useImageRgba`), lazy regeneration via cache keys, CSS-style fit modes (`imageConfigured`), and tinted SVG icons (`parseSvg`, `svgIcon`, `iconButton`). |
+| [`Canvas.hs`](examples/Canvas.hs) | `nano-ui-example-canvas` | Freehand 2D vector drawing with `NanoUI.Path` (`canvasConfigured`, `useDrag2DOn`), pointer capture during drags, and path caching with `canvasContent`. |
+| [`Bloom.hs`](examples/Bloom.hs) | `nano-ui-example-bloom` | Spring physics driving a 2D rose-curve canvas: sliders write plain `Var`s, `animateTo` springs follow them, and dragging rotates the flower (`useDrag2DOn`). Also serves as the first tab of `nano-ui-sdl-landing` (`examples/sdl/BloomMain.hs` provides its standalone `main`). |
+| [`Tasks.hs`](examples/Tasks.hs) | `nano-ui-example-tasks` | Running blocking I/O on worker threads (`useTask`, `useTaskStatus`), key-based cancellation and restarts, error retries, and continuous streams (`useStream`). |
+| [`Files.hs`](examples/Files.hs) | `nano-ui-example-files` | Non-blocking native file dialogs (`useFileDialog`), asynchronous file reads (`useTaskStatus`), drag-and-drop file paths, and dynamic window titles (`setWindowTitleUi`). |
+| [`LongList.hs`](examples/LongList.hs) | `nano-ui-example-long-list` | Virtualizing a 100,000-row list with `getScrollMetricsUi`, top/bottom spacers, and programmatic scrolling (`scrollRectIntoViewUi`). |
+| [`LiveChart.hs`](examples/LiveChart.hs) | `nano-ui-example-live-chart` | Real-time line chart built with `nano-ui-diagrams` (`plot`, `PlotCache`), driven by a background `useStream` producer that sleeps at zero CPU when paused. |
 
-Run any example by its executable name:
+Run any example by name:
 
 ```sh
 cabal run nano-ui-example-hello
@@ -87,23 +76,16 @@ cabal run nano-ui-example-layout
 
 ## Building and testing
 
-Requires GHC 9.10 through 9.14 (development uses GHC 9.14), Cabal, SDL3,
-SDL3_ttf 3.2+, and `pkg-config`. In a repository checkout, `nix develop`
-provides the full toolchain and native dependencies; see the
-[development guide](https://goolord.github.io/nano-ui/book/getting-started/development.html#setup)
-for details. All executables are gated behind the package's `sdl` Cabal flag
-(enabled by default).
+Building requires GHC 9.10 through 9.14 (development uses 9.14), Cabal, SDL3, SDL3_ttf 3.2+, and `pkg-config`. Inside a repository checkout, `nix develop` supplies the entire toolchain; see [Development Setup](https://goolord.github.io/nano-ui/book/getting-started/development.html#setup) for Windows and manual setup. Executables are gated behind the `sdl` Cabal flag (enabled by default).
 
-Two test suites exercise the demo applications:
+Two test suites exercise the demo apps:
 
 ```sh
-cabal test nano-ui-demo-test      # runs the widget demo, notepad, log viewer, and IME checks in hidden SDL windows
+cabal test nano-ui-demo-test      # drives the cookbook, notepad, log viewer, and IME checks in hidden SDL windows
 cabal test nano-ui-terminal-test  # tests the terminal emulator's ANSI parser and PTY integration (Linux and macOS)
 ```
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
-  online guide, tutorials, and widget gallery.
-- [Development Guide](https://goolord.github.io/nano-ui/book/getting-started/development.html#setup):
-  toolchain setup, build instructions, and testing.
+- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): Tutorials, widget gallery, interactive styling lab, and architecture reference.
+- [Development Setup](https://goolord.github.io/nano-ui/book/getting-started/development.html#setup): Toolchain installation, build commands, and profiling.

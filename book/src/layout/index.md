@@ -1,21 +1,21 @@
 # Layout & Scrolling
 
-Every container takes its layout as an argument: `row` and `column` take a layout, and `rowWith`/`columnWith` take a `Layout -> Layout` function first. Modifiers compose with `(.)`, and **when two set the same property, the leftmost wins**.
+Every layout container arranges the widgets declared inside its `do` block. Plain forms like `row` and `column` use the default layout, while `rowWith` and `columnWith` take a `Layout -> Layout` modifier function first. Modifiers compose with `(.)`, and **when two modifiers set the same property, the leftmost one wins**.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:modifiers}}
 ```
 
-Logical pixels, origin top-left, `y` downward. Backends handle DPI scaling.
+All coordinates and sizes use logical pixels with the origin at the top-left and `y` increasing downward. Backends handle DPI scaling automatically.
 
-Each example below expands to its code and the frame it renders. The frames add `padAll 14` and fill the window so the spacing shows.
+Expand any example below to inspect its Haskell source alongside the rendered output. Each frame adds `padAll 14` and fills the preview window so padding and alignment are easy to see.
 
 ## Containers
 
-A container wraps a `NanoUI` block and arranges the widgets it draws. The plain form (`row`) uses the inherited layout; the `...With` form takes a modifier function.
+A container wraps a `NanoUI` action and positions its children. Use the plain form (`row`, `column`, `panel`) for defaults, or the `...With` variant to apply modifiers.
 
 <details class="nano-example">
-<summary><code>row</code> / <code>rowWith</code>: children left to right</summary>
+<summary><code>row</code> / <code>rowWith</code>: arrange children left to right</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:row}}
@@ -26,7 +26,7 @@ A container wraps a `NanoUI` block and arranges the widgets it draws. The plain 
 </details>
 
 <details class="nano-example">
-<summary><code>column</code> / <code>columnWith</code>: children top to bottom</summary>
+<summary><code>column</code> / <code>columnWith</code>: stack children top to bottom</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:column}}
@@ -37,7 +37,7 @@ A container wraps a `NanoUI` block and arranges the widgets it draws. The plain 
 </details>
 
 <details class="nano-example">
-<summary><code>grid</code> / <code>gridWith</code>: rows of equal columns</summary>
+<summary><code>grid</code> / <code>gridWith</code>: place children in equal-width columns</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:grid}}
@@ -48,7 +48,7 @@ A container wraps a `NanoUI` block and arranges the widgets it draws. The plain 
 </details>
 
 <details class="nano-example">
-<summary><code>panel</code> / <code>panelWith</code>: a styled surface</summary>
+<summary><code>panel</code> / <code>panelWith</code>: a container with a background and border</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:panel}}
@@ -70,7 +70,7 @@ A container wraps a `NanoUI` block and arranges the widgets it draws. The plain 
 </details>
 
 <details class="nano-example">
-<summary><code>callout</code>: a panel tinted by a semantic colour</summary>
+<summary><code>callout</code>: a panel tinted with a semantic color</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:callout}}
@@ -81,7 +81,7 @@ A container wraps a `NanoUI` block and arranges the widgets it draws. The plain 
 </details>
 
 <details class="nano-example">
-<summary><code>layers</code>: children stacked in one box, later on top</summary>
+<summary><code>layers</code>: stack children in one box, later children on top</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:layers}}
@@ -92,37 +92,37 @@ A container wraps a `NanoUI` block and arranges the widgets it draws. The plain 
 </details>
 
 <details class="nano-example">
-<summary><code>center</code>: content centred on both axes</summary>
+<summary><code>center</code>: center content on both axes</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:center}}
 ```
 
-<img class="nano-example-shot" src="../images/layout/center.svg" alt="A label centred in a large panel.">
+<img class="nano-example-shot" src="../images/layout/center.svg" alt="A label centered in a large panel.">
 
 </details>
 
 <details class="nano-example">
-<summary><code>responsive</code> / <code>responsiveRowCol</code>: one layout when wide, another when narrow</summary>
+<summary><code>responsive</code> / <code>responsiveRowCol</code>: switch layouts at a breakpoint</summary>
 
-`responsive breakpoint wide narrow body` picks a container by window width; `responsiveRowCol` is the common row/column pair.
+`responsive breakpoint wide narrow body` chooses between two containers based on window width; `responsiveRowCol` switches between a row and a column.
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:responsive}}
 ```
 
-A 420 px window:
+At 420 px wide:
 
 <img class="nano-example-shot" src="../images/layout/responsive-narrow.svg" alt="Sidebar and Content stacked vertically at 420 pixels wide.">
 
-The same view at 760 px:
+The same view at 760 px wide:
 
 <img class="nano-example-shot" src="../images/layout/responsive-wide.svg" alt="Sidebar and Content side by side at 760 pixels wide.">
 
 </details>
 
 <details class="nano-example">
-<summary><code>mouseArea</code>: hover and clicks for a whole region</summary>
+<summary><code>mouseArea</code>: track hover and clicks across a whole region</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:mousearea}}
@@ -133,7 +133,7 @@ The same view at 760 px:
 </details>
 
 <details class="nano-example">
-<summary><code>separator</code>: a one-pixel rule</summary>
+<summary><code>separator</code>: draw a one-pixel divider rule</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:separator}}
@@ -144,7 +144,7 @@ The same view at 760 px:
 </details>
 
 <details class="nano-example">
-<summary><code>spacer</code>: flexible space between siblings</summary>
+<summary><code>spacer</code>: insert flexible space between siblings</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:spacer}}
@@ -156,12 +156,12 @@ The same view at 760 px:
 
 ## Modifiers
 
-Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmost wins when two set the same property, so `tight . padAll 14` has no padding while `padAll 14 . tight` keeps it.
+Modifiers are plain `Layout -> Layout` functions chained with `(.)`. Because the leftmost function runs last in `(f . g) x`, it overrides anything to its right: `tight . padAll 14` zeroes padding out, while `padAll 14 . tight` keeps the 14 px padding.
 
 ### Sizing
 
 <details class="nano-example">
-<summary><code>fillW</code>: take all remaining width</summary>
+<summary><code>fillW</code>: take all remaining horizontal space</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:fillw}}
@@ -172,7 +172,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>fillH</code>: take all remaining height</summary>
+<summary><code>fillH</code>: take all remaining vertical space</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:fillh}}
@@ -194,7 +194,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>fixedW</code>: an exact width</summary>
+<summary><code>fixedW</code>: set an exact width</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:fixedw}}
@@ -205,7 +205,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>fixedH</code>: an exact height</summary>
+<summary><code>fixedH</code>: set an exact height</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:fixedh}}
@@ -216,7 +216,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>fixedWH</code>: an exact width and height</summary>
+<summary><code>fixedWH</code>: set an exact width and height</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:fixedwh}}
@@ -227,7 +227,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>minW</code>: a lower width bound</summary>
+<summary><code>minW</code>: set a minimum width</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:minw}}
@@ -238,7 +238,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>maxW</code>: an upper width bound</summary>
+<summary><code>maxW</code>: cap width at an upper bound</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:maxw}}
@@ -249,7 +249,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>minH</code>: a lower height bound</summary>
+<summary><code>minH</code>: set a minimum height</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:minh}}
@@ -260,7 +260,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>maxH</code>: an upper height bound</summary>
+<summary><code>maxH</code>: cap height at an upper bound</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:maxh}}
@@ -271,7 +271,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>percent</code>: a percentage of the parent's width</summary>
+<summary><code>percent</code>: take a percentage of the parent's width</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:percent}}
@@ -282,7 +282,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>aspect</code>: keep a width / height ratio</summary>
+<summary><code>aspect</code>: preserve a width-to-height ratio</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:aspect}}
@@ -295,7 +295,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 ### Spacing
 
 <details class="nano-example">
-<summary><code>padAll</code>: equal padding on all four edges</summary>
+<summary><code>padAll</code>: equal padding on all four sides</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:padall}}
@@ -306,7 +306,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>padXY</code>: horizontal, then vertical, padding</summary>
+<summary><code>padXY</code>: horizontal padding first, then vertical</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:padxy}}
@@ -361,7 +361,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>padLRTB</code>: left, right, top, bottom padding</summary>
+<summary><code>padLRTB</code>: individual left, right, top, and bottom padding</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:padlrtb}}
@@ -372,7 +372,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>gap</code>: space between children</summary>
+<summary><code>gap</code>: spacing between adjacent children</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:gap}}
@@ -383,7 +383,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>tight</code>: remove container padding, keep the gap</summary>
+<summary><code>tight</code>: zero container padding while keeping its gap</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:tight}}
@@ -395,10 +395,12 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 
 ### Alignment and wrapping
 
-`alignStart`, `alignCenter`, and `alignEnd` place a child across a column. `alignTop`, `alignMid`, and `alignBottom` place it down a row. An alignment modifier positions the node it is applied to inside its parent. `alignMid` on a row moves the row; to centre the row's children, put `alignMid` on each child.
+`alignStart`, `alignCenter`, and `alignEnd` position a child horizontally inside a column. `alignTop`, `alignMid`, and `alignBottom` position a child vertically inside a row.
+
+Every alignment modifier applies to the node it is placed on, not to that node's children. Putting `alignMid` on a `row` centers the row inside its parent; to vertically center the items *inside* the row, apply `alignMid` to each child.
 
 <details class="nano-example">
-<summary><code>alignStart</code>: the left edge</summary>
+<summary><code>alignStart</code>: align to the left edge</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:alignstart}}
@@ -409,18 +411,18 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>alignCenter</code>: the horizontal centre</summary>
+<summary><code>alignCenter</code>: center horizontally</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:aligncenter}}
 ```
 
-<img class="nano-example-shot" src="../images/layout/aligncenter.svg" alt="A button centred horizontally in a panel.">
+<img class="nano-example-shot" src="../images/layout/aligncenter.svg" alt="A button centered horizontally in a panel.">
 
 </details>
 
 <details class="nano-example">
-<summary><code>alignEnd</code>: the right edge</summary>
+<summary><code>alignEnd</code>: align to the right edge</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:alignend}}
@@ -431,7 +433,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>alignTop</code>: the top edge</summary>
+<summary><code>alignTop</code>: align to the top edge</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:aligntop}}
@@ -442,18 +444,18 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>alignMid</code>: the vertical centre</summary>
+<summary><code>alignMid</code>: center vertically</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:alignmid}}
 ```
 
-<img class="nano-example-shot" src="../images/layout/alignmid.svg" alt="A button centred vertically in a tall row.">
+<img class="nano-example-shot" src="../images/layout/alignmid.svg" alt="A button centered vertically in a tall row.">
 
 </details>
 
 <details class="nano-example">
-<summary><code>alignBottom</code>: the bottom edge</summary>
+<summary><code>alignBottom</code>: align to the bottom edge</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:alignbottom}}
@@ -464,7 +466,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>alignBaseline</code>: share the first baseline</summary>
+<summary><code>alignBaseline</code>: line up on the first text baseline</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:alignbaseline}}
@@ -475,7 +477,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>wrap</code>: start a new line when a child does not fit</summary>
+<summary><code>wrap</code>: wrap overflowing children onto the next line</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:wrap}}
@@ -486,7 +488,7 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>lineGap</code>: space between wrapped lines</summary>
+<summary><code>lineGap</code>: spacing between wrapped lines</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:linegap}}
@@ -497,19 +499,19 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>lineAlign</code>: align wrapped lines in the container</summary>
+<summary><code>lineAlign</code>: align wrapped lines across the container</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:linealign}}
 ```
 
-<img class="nano-example-shot" src="../images/layout/linealign.svg" alt="Wrapped buttons with the final line centred.">
+<img class="nano-example-shot" src="../images/layout/linealign.svg" alt="Wrapped buttons with the final line centered.">
 
 </details>
 
 ### Positioning and pointer behavior
 
-`pinAt` takes a child out of the flow. `pointer` sets whether an overlapping region consumes pointer events (`PointerBlock`) or passes them to what is underneath (`PointerPass`). The pointer examples park the pointer over the overlay.
+`pinAt` pulls a child out of normal flow and positions it at an offset from its alignment corner inside its parent. `pointer` controls whether an overlapping element intercepts clicks (`PointerBlock`) or lets them pass through to widgets underneath (`PointerPass`). In the pointer examples below, the cursor is parked directly over the overlay.
 
 <details class="nano-example">
 <summary><code>pinAt</code>: position absolutely inside the parent</summary>
@@ -523,18 +525,18 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 </details>
 
 <details class="nano-example">
-<summary><code>pointer PointerBlock</code>: consume pointer events over a region</summary>
+<summary><code>pointer PointerBlock</code>: absorb pointer events over a region</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:pointerblock}}
 ```
 
-<img class="nano-example-shot" src="../images/layout/pointer-block.svg" alt="A dimming scrim over a button labelled Open logs.">
+<img class="nano-example-shot" src="../images/layout/pointer-block.svg" alt="A dimming scrim over a button labeled Open logs.">
 
 </details>
 
 <details class="nano-example">
-<summary><code>pointer PointerPass</code>: let pointer events through</summary>
+<summary><code>pointer PointerPass</code>: let pointer events pass through</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:pointerpass}}
@@ -546,51 +548,49 @@ Modifiers are `Layout -> Layout` functions, so they chain with `(.)`. The leftmo
 
 ## Scrolling
 
-A scroll container needs a bounded viewport on its scrolling axis:
+A scroll container must have a bounded viewport along its scroll axis:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:scroll}}
 ```
 
-Without a bounded ancestor, `grow` can leave a scroller with nothing to size against.
+If none of the scroller's ancestors constrain its size, `grow` leaves it with nothing to measure against.
 
-- `scrollWith` returns the body's result.
-- `scrollArea` also returns the scroller's `WidgetId`, for programmatic control.
-- `scroll2DWith` / `scrollArea2D` scroll both axes.
-- A scroller that fills both axes (`grow`) drops its well and paints the page
-  background (`pageBackground`, `themeWindow` by default). Scope a view in
-  `styled panelPage` for a page on the panel surface.
+- `scrollWith` scrolls vertically and returns its body's result.
+- `scrollArea` also returns the scroller's `WidgetId` for programmatic scrolling.
+- `scroll2DWith` and `scrollArea2D` scroll both horizontally and vertically.
+- A full-viewport scroller (`scrollWith grow`) drops its bordered input well and fills with `pageBackground` (`themeWindow` by default). Wrap the view in `styled panelPage` if you want the page background to match the panel surface instead.
 
 ### Virtualization
 
-For 10,000+ rows, build only the visible slice and use spacers for the rest. Capture the scroller id and read the previous layout with `getScrollMetricsUi`:
+For lists with tens of thousands of rows, build only the rows currently inside the viewport and pad above and below them with spacers. Grab the scroller's ID first and read its previous-frame layout with `getScrollMetricsUi`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:virtualized}}
 ```
 
-`scrollViewport` excludes padding and the scrollbar lane; use it instead of the container rectangle for the visible height. `scrollOffset` is the current offset. The metrics read registers a layout dependency, so a resize triggers another frame.
+Use `scrollViewport` rather than the outer container rectangle for the visible height, since `scrollViewport` already subtracts padding and the scrollbar lane. `scrollOffset` gives the current scroll position. Calling `getScrollMetricsUi` registers a layout dependency, so resizing the window triggers a fresh frame automatically.
 
-See `packages/nano-ui-demo/examples/LongList.hs` (100,000 rows) and `Logs.hs` (sticky-to-bottom).
+For complete examples, look at `packages/nano-ui-demo/examples/LongList.hs` (100,000 rows) and `Logs.hs` (auto-scrolling log tail).
 
-### Programmatic scrolling and wheel tuning
+### Programmatic scrolling and mouse-wheel step
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:reveal}}
 ```
 
-From a view: `scrollToUi`, `scrollByUi`, `scrollPagesUi`, `scrollRectIntoViewUi`, `setScrollOffsetUi`, `setScrollStepUi`. The `Context` variants (`scrollTo`, `getScrollOffset2D`, ...) are for `IO`.
+Inside a view, you can drive scrolling with `scrollToUi`, `scrollByUi`, `scrollPagesUi`, `scrollRectIntoViewUi`, `setScrollOffsetUi`, and `setScrollStepUi`. Matching `Context` variants (`scrollTo`, `getScrollOffset2D`, and so on) are available in `IO`.
 
-One wheel notch scrolls 60 logical pixels by default. For fixed-height rows, set the step so a notch is one row (`askContext` is in `NanoUI.Monad`):
+By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row (`askContext` lives in `NanoUI.Monad`):
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:wheel_step}}
 ```
 
-`setScrollStepUi sid px` overrides one scroller; `0` restores the context step.
+You can also override the wheel step for a single scroller with `setScrollStepUi sid px`; passing `0` restores the context default.
 
 ## Nesting and chrome
 
-`scrollArea`, `panel`, and `card` each draw a background, border, and radius. Nesting them inside a popup or dialog draws a box in a box. Draw the chrome at one level only: flatten the inner surface with `styled (inputStyle (background colorTransparent . borderWidth 0))`, or give the outer dialog `padAll 0` and pad the inner body.
+`scrollArea`, `panel`, and `card` each paint their own background, border, and corner radius. Nesting one inside a popup or modal produces an awkward box-within-a-box. Keep the frame at one level: either strip the inner surface with `styled (inputStyle (background colorTransparent . borderWidth 0))`, or set `padAll 0` on the outer dialog and put the padding on the inner body instead.
 
-See [Styling Gotchas](../styling/gotchas.md) and [Troubleshooting](../troubleshooting/recurring-bugs.md) for the recurring cases.
+See [Styling Gotchas](../styling/gotchas.md) and [Troubleshooting](../troubleshooting/recurring-bugs.md) for more examples.

@@ -1,18 +1,12 @@
 # nano-ui-rgfw-bindings
 
-Haskell bindings to [RGFW](https://github.com/ColleagueRiley/RGFW), a
-single-header C library for windows, input, and OpenGL contexts. The C source
-is bundled and compiled with the package.
+Haskell bindings to [RGFW](https://github.com/ColleagueRiley/RGFW), a single-header C library for native windows, input handling, and OpenGL contexts. The C source is bundled and compiled directly with this package.
 
-`RGFW` is the wrapped API that `nano-ui-rgfw` uses; `RGFW.Raw` is the direct
-native layer. The bindings cover what the backend needs: OpenGL windows, events,
-window size and scale, cursors, and the clipboard.
+`RGFW` provides the higher-level wrapper used by `nano-ui-rgfw`, while `RGFW.Raw` exposes the direct C FFI. Coverage focuses on what `nano-ui` needs: OpenGL windows, events, window geometry and display scale, cursors, and clipboard access.
 
 ## Window lifetime
 
-Create, use, and close a window on the same bound OS thread. The OpenGL
-context is current on the thread that calls `createWindowGL`. A `Window`
-has no finalizer: close it exactly once and do not use it afterwards.
+Create, drive, and close every `Window` on the same bound OS thread (where `createWindowGL` makes the OpenGL context current). `Window` values do not attach GC finalizers: close each window exactly once and avoid using it afterward.
 
 ```haskell
 import Control.Concurrent (runInBoundThread)
@@ -35,30 +29,20 @@ main = runInBoundThread $
         _ -> loop w events
 ```
 
-`withEventBuffer` owns the temporary event storage. Its pointer is valid only
-inside the callback. `pollEvent` copies event data into a Haskell value; keep
-polling until `EventNone`, then wait. The example handles events without
-drawing; a renderer must draw and call `swapBuffersGL` to present a frame.
+`withEventBuffer` allocates temporary storage valid only inside its callback. `pollEvent` copies each pending event into a Haskell value; drain events until `EventNone`, then wait or render and call `swapBuffersGL`.
 
-`RGFW.Raw` exposes unchecked pointers and C constants. Prefer `RGFW` unless
-you need a native operation that the wrapper does not provide.
+Prefer `RGFW` over `RGFW.Raw` unless you need an unchecked C operation that the wrapper does not expose. Event offsets and constants are generated from `RGFW.h` via `hsc2hs`, avoiding FFI calls for field reads and matching each platform's exact C struct layout. Always check an event's tag before reading its union payload. Existing raw accessor signatures are preserved for compatibility, including widening RGFW's byte-sized physical key to `CUInt`.
 
-Event accessors and constants are derived from `RGFW.h` by `hsc2hs`, so field
-reads do not cross the FFI and offsets follow the platform's C layout. Inspect
-an event's tag before reading a union member. Existing raw accessor signatures
-are retained, including widening RGFW's byte-sized physical key to `CUInt`.
+## Linked system libraries
 
-## Requirements
-
-Linked system libraries: X11, Xcursor, Xrandr, and Xi on Linux; Cocoa on
-macOS; gdi32, user32, and shell32 on Windows.
+- **Linux:** X11, Xcursor, Xrandr, Xi
+- **macOS:** Cocoa
+- **Windows:** `gdi32`, `user32`, `shell32`
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
-  online guide, tutorials, and ecosystem overview.
+- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): Overview, tutorials, and backend documentation.
 
 ## License
 
-MIT, except the bundled RGFW, which is under the zlib licence
-(`LICENSE-RGFW`).
+MIT, except the bundled RGFW header, which is under the zlib license (`LICENSE-RGFW`).

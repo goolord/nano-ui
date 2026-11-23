@@ -123,7 +123,7 @@ fileDialogSection st opened = do
         Saved name -> writeVar (fdStatus st) ("Saved as " <> T.pack name)
         Cancelled -> writeVar (fdStatus st) "Cancelled"
   heading "File Dialogs"
-  muted "A page sees no paths: the browser hands over the files you pick, and saves where you say."
+  muted "Browsers do not expose local file paths, so files open by contents and save through the browser."
   rowWith (tight . gap 12 . alignMid . fillW) $ do
     let ask action = modifyVar (fdRequest st) (\(k, _) -> (k + 1, action))
     whenM (button "Open File…") (ask OpenFiles)
@@ -170,8 +170,8 @@ debugSections s =
   where
     c = dbgCore s
 
--- | The headline frame statistics for the Diagnostics tab. Asking for them
--- keeps the backend sampling, so only while the tab shows.
+-- | Headline frame statistics for the Diagnostics tab. Querying stats keeps
+-- sampling active only while the tab is open.
 diagnosticsRows :: NanoUI ()
 diagnosticsRows =
   askSdlWebDebug >>= \case

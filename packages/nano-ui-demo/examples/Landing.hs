@@ -1,20 +1,18 @@
--- | The program on the project's landing page: four tabs in one window.
+-- | Interactive four-tab demo embedded on the nano-ui landing page.
 --
--- "Bloom" is the drawing from "Bloom". The other three are the stock
--- widgets, grouped so that a page fits a phone's screen with nothing to
--- scroll: buttons, choices and numbers on "Controls", text entry on
--- "Text", a table and a tree on "Data".
+-- The Bloom tab runs the animated rose-curve canvas from "Bloom". Controls,
+-- Text, and Data showcase built-in widgets grouped into compact panels that
+-- fit on mobile viewports without scrolling.
 --
--- Every widget here is bound to a positional 'useVar', and each group reads
--- its own 'Var's back to show the value a control wrote: the slider's
--- number beside it, the name typed into the greeting, the tree's selected
--- row. Only the open tab's body runs, so a hidden tab costs nothing and
--- Bloom's spin asks for frames only while Bloom shows.
+-- Every control binds to a view-local 'useVar' and reads it back in the same
+-- pass so live readouts update immediately (slider percentage, greeting text,
+-- word count, selected tree row). Only the active tab's body runs, so hidden
+-- tabs cost nothing and Bloom only animates while its tab is open.
 --
--- The view is shared by two programs: @cabal run nano-ui-sdl-landing@ opens
--- it in an SDL window, and @nano-ui-web-landing@ is the canvas on the
--- landing page (@site/index.html@), which quotes 'numbers' as its code
--- sample.
+-- Shared by two executables: @cabal run nano-ui-sdl-landing@ opens it in a
+-- native SDL3 window, and @nano-ui-web-landing@ compiles it to WebAssembly
+-- for @site/index.html@ (which also quotes 'numbers' verbatim as a code sample).
+-- Keep all visible strings pure ASCII so the web build needs no fallback font.
 module Landing (landingView) where
 
 import Control.Monad (void)
@@ -23,31 +21,31 @@ import NanoUI
 
 import Bloom (bloomViewWith)
 
--- | The tabs, in order. 'enumTabBar' labels a tab with its constructor.
+-- | Landing demo tabs in display order. 'enumTabBar' uses constructor names
+-- directly as tab labels.
 data Page = Bloom | Controls | Text | Data
   deriving (Bounded, Enum, Eq, Show)
 
--- | The landing page's view. The argument is whether Bloom starts spinning.
+-- | Root view for the landing page demo. Pass 'False' to start Bloom paused
+-- (used when the browser prefers reduced motion).
 landingView :: Bool -> NanoUI ()
 landingView spin = do
   page <- useEnumVar Bloom
   wide <- (>= 640) <$> windowWidth
   columnWith (tight . grow) $ do
     enumTabBar page
-    -- 'enumTabs' would run the body too, in a column as tall as its
-    -- content. Bloom's canvas takes the height left under the headers, so
-    -- the body is run here, in a column that grows. Each page runs under
-    -- its own key, as 'enumTabs' runs its bodies, so one page's positional
-    -- 'Var's are not the next page's.
+    -- Run the active tab body manually inside a growing column so Bloom's
+    -- canvas expands to fill the remaining height beneath the tab bar. Keying
+    -- by tab index keeps each page's positional 'useVar' slots isolated.
     shown <- readVar page
     columnWith (tight . grow) . withKey (fromEnum shown) $ case shown of
       Bloom -> bloomViewWith spin
       Controls -> groups wide [("Buttons", buttons), ("Choices", choices), ("Numbers", numbers)]
       Text -> groups wide [("Fields", fields), ("Notes", notes)]
-      Data -> groups wide [("Table: click a header to sort", peakTable wide), ("Tree", fileTree)]
+      Data -> groups wide [("Table (click a header to sort)", peakTable wide), ("Tree", fileTree)]
 
--- | A page of titled panels: side by side and equally tall in a wide
--- window, stacked in a narrow one.
+-- | Lay out titled panels side by side at equal height on wide viewports, or
+-- stacked vertically on narrow ones.
 groups :: Bool -> [(T.Text, NanoUI ())] -> NanoUI ()
 groups wide panels =
   (if wide then rowWith (fillW . padAll 16 . gap 16) else columnWith (fillW . padAll 12 . gap 10)) $
@@ -57,7 +55,7 @@ groups wide panels =
       labelWith (tight . fontMuted . fontMedium) title
       body
 
--- | A caption over a widget.
+-- | Render a muted caption directly above a control.
 field :: T.Text -> NanoUI a -> NanoUI a
 field caption widget = columnWith (tight . gap 3 . fillW) $ do
   labelWith (tight . fontMuted) caption
@@ -77,13 +75,13 @@ buttons = do
     toggleButton Accent "Pin" pinned
     disabledWhen True (void (button "Disabled"))
     hint <- button' "Hover me"
-    tooltip hint "A tooltip opens when the pointer rests here."
+    tooltip hint "Tooltips appear when you rest the pointer over a widget."
   n <- readVar clicks
   isPinned <- readVar pinned
   muted (T.pack (show n) <> (if n == 1 then " click" else " clicks") <> (if isPinned then ", pinned" else ""))
-  -- The dialog is declared on every frame; the Var says whether it shows.
-  modal asking "Reset the count?" $ do
-    label "A modal blocks the page behind it until it closes."
+  -- Always call modals unconditionally; the Var controls visibility.
+  modal asking "Reset click count?" $ do
+    label "Modals pause interaction with the page behind them until dismissed."
     rowWith (tight . gap 8) $ do
       whenM (styled (tone Danger) (button "Reset")) (writeVar clicks 0 >> writeVar asking False)
       whenM (button "Cancel") (writeVar asking False)
@@ -108,9 +106,9 @@ numbers = do
   field "Volume" $ rowWith (tight . gap 10 . alignMid . fillW) $ do
     sliderWith fillW 0 100 volume
     labelWith (tight . fixedW 36 . alignEnd) . percentage =<< readVar volume
-  -- A bar drawn from the value the slider wrote on this frame.
+  -- Reads the value written by the slider in the same frame.
   progressBar . (/ 100) =<< readVar volume
-  field "Count: type, or step with the arrow keys" (numericInput count)
+  field "Count (type or use arrow keys)" (numericInput count)
   where
     percentage v = T.pack (show (round v :: Int)) <> "%"
 
@@ -125,11 +123,11 @@ fields = do
   typed <- readVar name
   labelWith (tight . fontSize 20 . fontMedium) ("Hello, " <> (if T.null typed then "you" else typed) <> ".")
   field "Password" (textInputConfigured defaultTextInputConfig {ticPassword = True} secret)
-  field "City: type to filter the list" (comboBox "City" cities city)
+  field "City (type to filter)" (comboBox "City" cities city)
 
 notes :: NanoUI ()
 notes = do
-  text <- useVar "Select with the mouse, or with Shift\nand the arrow keys. Ctrl+Z undoes.\n\nCounts below update as you type."
+  text <- useVar "Select text with the mouse, or with Shift\nand the arrow keys. Press Ctrl+Z to undo.\n\nWord and line counts below update live."
   textAreaWith (fillW . fixedH 120) text
   written <- readVar text
   muted (count (T.words written) "word" <> ", " <> count (T.lines written) "line")
@@ -141,12 +139,12 @@ cities = ["Amsterdam", "Berlin", "Copenhagen", "Dublin", "Edinburgh", "Helsinki"
 
 -- Data ------------------------------------------------------------------------
 
--- | A narrow window drops the middle column and the lower rows, so the
--- table and the tree under it both fit.
+-- | On narrow viewports, drop the middle column and bottom rows so the table
+-- and tree both fit cleanly without scrolling.
 peakTable :: Bool -> NanoUI ()
 peakTable wide
-  | wide = void (simpleTable ["Peak", "Range", "Metres"] peaks)
-  | otherwise = void (simpleTable ["Peak", "Metres"] [[peak, metres] | [peak, _, metres] <- take 5 peaks])
+  | wide = void (simpleTable ["Peak", "Range", "Meters"] peaks)
+  | otherwise = void (simpleTable ["Peak", "Meters"] [[peak, meters] | [peak, _, meters] <- take 5 peaks])
 
 fileTree :: NanoUI ()
 fileTree = do

@@ -1,109 +1,111 @@
 # State & `Var`
 
-The view runs every frame, and nothing survives between frames except state you keep. Most state lives in a `Var`, a typed mutable reference. Input widgets take the `Var` they display and mutate it directly, with no callback.
+Because a view runs fresh on every frame, any value that needs to survive from one frame to the next must be stored explicitly. In `nano-ui`, most mutable state lives in a `Var`, a typed mutable reference. Input widgets take a `Var` directly and update it in place, so you do not need to wire up `onChange` callbacks.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:counter}}
 ```
 
-## Keep state, derive values
+## Store state, derive everything else
 
-A value that changes over time and cannot be recomputed belongs in a `Var`. A value that *can* be recomputed belongs in a local binding, computed fresh every frame:
+Keep a value in a `Var` only when it cannot be recomputed from other state. Anything you *can* calculate from existing state belongs in a regular Haskell binding computed fresh each frame:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:keep_derive}}
 ```
 
-A derived value copied into a second `Var` drifts as soon as one writer forgets to update it.
+Duplicating a derived value into a second `Var` invites bugs as soon as one code path updates the source and forgets the copy.
 
-## Allocating state
+## Creating `Var`s
 
-There are two ways to create a `Var`, plus one for dynamic collections:
+You have two main ways to create a `Var`, plus `VarMap` for dynamic keyed collections:
 
 | | `useVar` | `newVar` |
 | --- | --- | --- |
-| Where | Inside the view | In `IO`, during setup |
-| Types | `Int`, `Float`, `Double`, `Bool`, `Text`, `SortCol` (`useEnumVar` for any `Bounded`/`Enum` type) | Any type |
-| Identity | The call site, counted in call order | The reference itself |
-| Best for | View-local state: a draft, an open flag, a filter | Application state: a document, a list, a settings record, a task |
+| Where you call it | Inside the view | In `IO`, during setup |
+| Supported types | `Int`, `Float`, `Double`, `Bool`, `Text`, `SortCol` (`useEnumVar` handles any `Bounded`/`Enum` type) | Any type |
+| Identity | Call position in the view | The reference itself |
+| Good fit for | View-local state (input drafts, open flags, filters) | Shared or app-wide state (documents, lists, settings records) |
 
-`useVar` needs no setup. Its initial value is used only when the slot is first created; call `writeVar` to reset it later. Its slots are counted separately from widget ids, but a **conditional `useVar`** still needs `scope` so later slots keep their positions:
+`useVar` needs no boilerplate. Its initial value is only used the first time that slot is created; to reset it later, call `writeVar`. Although `useVar` tracks its slots separately from widget IDs, a **conditional `useVar`** still needs `scope` so slots after it keep their positions:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:conditional_use_var}}
 ```
 
-`newVar` can hold any type. Allocate it once in `IO` and pass it into the view:
+`newVar` works for any Haskell type. Create it once in `IO` before starting the window loop and pass it into your view:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:new_var}}
 ```
 
-Passing the same `Var` to two widgets shares their state. Allocating a `Var` *inside* the view creates a fresh one on every pass.
+Passing the same `Var` to multiple widgets lets them share state directly. Never call `liftIO (newVar ...)` inside the view, or you will allocate a brand-new `Var` on every pass.
 
-For dynamic collections, `VarMap` gives one `Var` per key:
+For collections whose items come and go, `VarMap` stores one `Var` per key:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:var_map}}
 ```
 
-`varAt` returns the existing `Var` for a key or creates it. `dropVar` removes one; `retainVars keep` prunes everything whose key fails the predicate.
+`varAt` looks up the `Var` for a key (allocating one if needed), `dropVar` removes a single entry, and `retainVars keep` clears out any key that fails the predicate.
 
 ## Projections and read-only views
 
-A record in a `Var` gives a `Var` for each field. With `Generic` and `OverloadedRecordDot`:
+If a `Var` holds a record that derives `Generic`, `OverloadedRecordDot` projects individual fields into their own `Var`s:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:projections}}
 ```
 
-`settings.volume` is a `Var Float` projecting one field. Editing it does not repaint what reads only `settings.nickname`.
+Here `settings.volume` is a `Var Float` targeting just that field. Dragging the volume slider will not repaint widgets that only read `settings.nickname`.
 
-- `constVar x` is read-only; writes are no-ops. Use it for a derived value shown in an input widget.
-- `withValue val widget` runs a `Var` widget against a temporary `Var` and returns the result and final value. `nano-ui-emit` uses it for `emitChanged`.
-- `zoomVar getter setter` projects a computed part of a larger `Var`; `zoomVarL` does the same from a lens.
-- `forEachVar key list body` gives per-element `Var`s that follow their keys across reorders. `withElemVars` is the variant for filtering or sorting yourself.
+Several helpers cover other shapes:
+
+- `constVar x` builds a read-only `Var` whose writes are no-ops. Use it when you want to display a derived value inside an input widget and handle changes through the widget's primed `Response`.
+- `withValue val widget` runs a `Var`-based widget against a temporary `Var` and returns both the widget result and the updated value. `nano-ui-emit` uses this under the hood for `emitChanged`.
+- `zoomVar getter setter` projects a custom slice of a larger `Var`, and `zoomVarL` does the same using a lens.
+- `forEachVar key list body` gives each item of a `Var [a]` its own `Var a` keyed across reorders. Use `withElemVars` when you need to filter or sort the list yourself before drawing.
 
 ## What a write costs
 
-`readVar` records a dependency for the current pass. When the value changes, nano-ui classifies the write:
+Calling `readVar` records a dependency for the current frame pass. Whenever a write changes the stored value, `nano-ui` handles it in one of three ways:
 
-| Write | When | Cost |
+| Write kind | When it happens | Cost |
 | --- | --- | --- |
-| **Forward** | Written before any read this pass | One pass; later reads see the new value |
-| **Backward** | Written after being read earlier this pass | A second view pass, with one-shot input events cleared |
-| **Unchanged** | New value `==` old value | No-op: no pass, no repaint |
+| **Forward** | Written before anything reads it this pass | Single pass; later reads immediately see the new value |
+| **Backward** | Written after being read earlier in the same pass | Triggers a second view pass (with one-shot input events cleared) |
+| **Unchanged** | New value equals (`==`) old value | No-op: no extra pass and no repaint |
 
-Two habits follow:
+Two practical habits follow from this:
 
-- Place `readVar` **below** the widget that edits the value when the order is free. Typing then resolves in one pass; reading above it costs a second pass per change.
-- Do not `readVar` a value only to pass it back into the same widget. Passing the `Var` is enough.
+- Put `readVar` **below** the widget that edits the value whenever the layout allows it. Typing or dragging then finishes in a single pass rather than running a second pass per change.
+- Do not call `readVar` just to pass the value back into a widget that already takes the `Var`.
 
-A freshly computed `NaN` is never unchanged (`NaN /= NaN`), so writing one every pass redraws forever. Guard the write.
+Watch out for floating-point `NaN`: since `NaN /= NaN`, writing a freshly computed `NaN` every frame looks like a new value each time and keeps the window redrawing endlessly. Guard float calculations that can produce `NaN`.
 
 > [!TIP]
-> A change to a `Var` repaints only the widgets whose text, value or style it altered, whether they are bound to the `Var` or show what a `readVar` returned.
+> Updating a `Var` only repaints the widgets whose text, value, or style actually changed, whether they are bound to the `Var` directly or render something computed from `readVar`.
 
-`peekVar` reads without recording a dependency. `readVarIO`, `writeVarIO`, and `modifyVarIO` are the thread-safe versions; after a background write, call the callback from `askWake` to schedule a frame. Never touch the UI `Context` from a worker thread.
+If you need to inspect a `Var` without recording a read dependency, use `peekVar`. From worker threads or plain `IO`, use the thread-safe functions `readVarIO`, `writeVarIO`, and `modifyVarIO`, then invoke the wake callback from `askWake` to schedule a frame. Never touch the UI `Context` from a background thread.
 
-## Lifetime and resources
+## Lifetimes and external handles
 
-Tasks, streams, image handles, drag handles, plot caches, and file-dialog ids are allocated in `IO` during setup and stored in the application record, exactly like a `newVar`:
+Tasks, streams, image handles, drag handles, plot caches, and file-dialog IDs follow the same rule as `newVar`: create them once in `IO` during setup and keep them in your application state record.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/State.hs:handles}}
 ```
 
-A handle allocated inside the view is a per-frame leak. If the view needs a new handle when a key changes, allocate it in setup and key its use, or use a hook that owns its lifetime (`useTask`, `useStream`, `useImageRgba`).
+Allocating any of these inside the view leaks resources on every frame. When a resource needs to track dynamic keys, either allocate the handle at setup and key its hook (`useTask`, `useStream`, `useImageRgba`), or let a `VarMap` manage it.
 
-## Where should this value live?
+## Where should a piece of state live?
 
-| The value… | Put it in |
+| If the value... | Store it in |
 | --- | --- |
-| Is a draft, open flag, selection, or filter used by one view | `useVar` / `useEnumVar` |
-| Is a list, document, settings record, or handle | `newVar` in `IO`, stored in the app record |
-| Belongs to one row of a dynamic list | A keyed `Var` (`forEachVar`, `withElemVars`, `VarMap`) |
-| Already lives outside the UI | An `IORef` or app record, woken with `askWake` |
-| Is a pure state machine with a clear `msg -> model -> model` | The [Elm-style reducer](elm.md) |
+| Is a local draft, toggle, selection, or filter for one view | `useVar` or `useEnumVar` |
+| Is a list, document, settings record, or async handle | `newVar` in `IO`, held in your app record |
+| Belongs to a single row in a dynamic list | A keyed `Var` (`forEachVar`, `withElemVars`, or `VarMap`) |
+| Already lives in an external store or worker | An `IORef` or app record, waking the UI with `askWake` |
+| Fits a pure `msg -> model -> model` state machine | An [Elm-style reducer](elm.md) |
 
-Next: [Widget Identity & Keys](identity.md) for keyed lists and conditional UI, or [Elm-Style State](elm.md) for the reducer alternative.
+Next: read [Widget Identity & Keys](identity.md) to see how keyed lists and conditional UI preserve widget state, or check out [Elm-Style State](elm.md) for the reducer alternative.

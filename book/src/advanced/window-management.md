@@ -1,84 +1,106 @@
 # Desktop Windows
 
-## A window program
+This chapter covers configuring native windows, reacting to window events, opening secondary OS windows, building frameless custom title bars, and capturing screenshots.
+
+## Configuring and running a window
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:settings}}
 ```
 
-`runSdlApp :: SdlOptions -> NanoUI () -> IO ()` creates the window from `opts`, then runs frames until the window closes. A frame evaluates the view (`editor`) on the display thread, the OS thread that runs SDL; lays out the widgets the view declared; compares the resulting draw commands with the previous frame's; and repaints the rectangles that differ. The view is evaluated a second time in the same frame when it writes a `Var` it already read.
+`runSdlApp :: SdlOptions -> NanoUI () -> IO ()` opens a native window using `opts` and runs the event loop until the window closes. On each frame, it runs your view on the main display thread, solves layout, diffs the draw commands against the previous frame, and repaints only the changed rectangles. (If your view modifies a `Var` it already read earlier in the same pass, it runs a second pass before layout.)
 
-A frame runs when SDL delivers an input or window event, or a timer or task wakes the loop. An idle window runs none. `button :: Text -> NanoUI Bool` reads the input events SDL delivered since the previous frame and returns `True` on the frame that delivers its click. `whenM :: Monad m => m Bool -> m () -> m ()` runs the second action on that frame only.
+Frames only run when an input event, window event, timer, animation, or background task wakes the loop. When a window sits idle, no frames run at all.
 
-`NanoUI` is a newtype over an `effectful` `Eff` stack that carries the frame's input, layout tree and window. Only a backend runner or `NanoUI.Testing` can run it, so state that must outlive a frame lives outside it: `main` allocates `docName :: Var Text` with `newVar` in `IO` and passes it to `editor`.
+`NanoUI` wraps an `effectful` `Eff` stack carrying frame input, the layout tree, and window handles. Because only a backend runner (or `NanoUI.Testing`) executes it, allocate long-lived state like `docName` in `IO` before starting the loop and pass it into your view.
 
-Sizes are in layout units. Physical pixels are layout units times `winScale`, which the backend reads from the display. With the default `wsPosition` (`WindowPositionDefault`) the OS places the window. `wsOpacity` (SDL only) sets the opacity of the whole window.
+All window dimensions use logical layout units. Physical pixel dimensions are logical units multiplied by `winScale`, which the backend queries from the OS display. Leaving `wsPosition` at `WindowPositionDefault` lets the window manager choose the initial placement. On SDL, `wsOpacity` controls overall window translucency.
 
-## Changing the window from a view
+## Controlling the window from a view
 
-The OS window lasts for the whole run, and the view is evaluated again on every frame, so window calls differ in what a repeated call does. `editor` above uses one of each kind.
+Because the OS window persists across the entire session while your view runs every frame, window actions fall into two groups: **declarative setters** and **imperative commands**.
 
-Setters store the value they last applied and call SDL only when the new value differs. A frame that skips a setter leaves the last value in place. `editor` calls `setWindowTitleUi` every frame with a title computed from `docName`, so the title changes on the same frame as each edit (`textInput` writes `docName` before `readVar` reads it): `setWindowTitleUi`, `setWindowModeUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`, `setWindowOpacityUi`, `setWindowIconUi`.
+### Declarative setters
 
-A repeated setter call costs one `Eq` comparison. For `setWindowIconUi`, build the `RgbaPixels` once in setup and pass the same value each frame: `ByteString` equality returns at once for the same buffer, and compares every byte of a freshly decoded one.
+Setters remember the last value they sent to the OS and skip the backend call when nothing changed. You can call them unconditionally on every frame (as `editor` above does with `setWindowTitleUi`), and skipping a setter simply leaves the current value in place:
 
-Commands call SDL every time they are evaluated, because the user can also move, resize or maximize the window and there is no last value to compare against. Guard them with a widget result that is `True` on one frame only, such as `button`: `moveWindowUi`, `centerWindowUi`, `resizeWindowUi`, `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`.
+- `setWindowTitleUi`
+- `setWindowModeUi`
+- `setWindowMinSizeUi` / `setWindowMaxSizeUi`
+- `setWindowOpacityUi`
+- `setWindowIconUi`
 
-SDL applies a command during the view, and the new window state comes back as an SDL event. `askWindow` in the same frame still returns the old size; a later frame returns the new one. `moveWindowUi` takes desktop coordinates on SDL and pixels on RGFW.
+A repeated setter call costs only an `Eq` check. For `setWindowIconUi`, build the `RgbaPixels` once at startup and reuse that same value every frame: `ByteString` equality returns immediately when both sides share the same buffer, whereas freshly decoded icons compare byte by byte.
 
-`quitUi` closes the window after the current frame is painted, and `runSdlApp` returns. Inside a `nativeWindow` body it closes only that window.
+### Imperative commands
 
-Window calls read the window from the `NanoUI` context, which exists only while the backend evaluates the view. To change the window from a worker thread, write a `Var` that the view passes to a setter with `writeVarIO`, then run the action `askWake` returns so a frame runs ([State & `Var`](../state/index.md)).
+Commands forward directly to the OS on every call, because the user can also move, resize, or maximize the window independently and there is no single desired value to cache. Always guard commands behind one-shot events such as `button`:
 
-`askWindow :: NanoUI WindowState` returns the record the backend fills before the view runs: size, scale, focus, maximized and fullscreen flags, and `winCloseRequested`. The first call marks the window as read. From then on, every change to the record (focus, a move, maximizing) runs a frame. A view that never calls `askWindow` pays nothing.
+- `moveWindowUi` (takes desktop coordinates on SDL, physical pixels on RGFW)
+- `centerWindowUi`
+- `resizeWindowUi`
+- `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`
 
-## Confirming before close
+Keep in mind that SDL applies commands asynchronously and reports the updated geometry back through an OS event, so `askWindow` still sees the old size during the frame the command ran and updates on the following frame.
 
-Set `wsExitOnCloseRequest = False`. On a close request the backend leaves the window open, sets `winCloseRequested`, runs one frame, and clears the flag after it. The confirmation has to outlive that frame, so the view copies the flag into a `Var`:
+Call `quitUi` to close the window after the current frame finishes painting (`runSdlApp` then returns). Inside a secondary `nativeWindow`, `quitUi` closes only that child window.
+
+### Reading window state and updating from worker threads
+
+Window operations read the active session from `NanoUI`, which is only live on the UI thread during a frame. To update a window from a background thread, write to a `Var` with `writeVarIO`, wake the loop with `askWake`, and let the view apply the setter on the next frame (see [State & `Var`](../state/index.md)).
+
+`askWindow :: NanoUI WindowState` returns the current window metrics captured at the start of the frame: logical size, display scale, focus, maximized/fullscreen flags, and `winCloseRequested`. Calling `askWindow` opts your view into redrawing whenever window metadata changes (focus, moves, maximize toggles). Views that never call `askWindow` skip those redraws completely.
+
+## Confirming before closing
+
+By default, clicking the OS close button ends the session immediately. To show an "unsaved changes" prompt instead, set `wsExitOnCloseRequest = False`.
+
+When the user requests a close, the backend keeps the window open, sets `winCloseRequested` to `True` for a single frame, and then clears it. Copy that signal into a `Var` so your confirmation modal stays open across subsequent frames:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:close_request}}
 ```
 
-`useVar False` allocates the `Var` on the first frame and returns the same `Var` on later frames, matched by its call position in the view. `modal confirming title body` evaluates `body` as a modal dialog on every frame where `confirming` holds `True`.
+For a full example that only prompts when the buffer is dirty, see [Tutorial 2: Build a Notepad](../tutorials/notepad.md).
 
-[Build a Notepad](../tutorials/notepad.md) asks only when the document has unsaved changes.
+## Multiple native windows
 
-## More windows
-
-`nativeWindow :: Var Bool -> WindowSettings -> NanoUI () -> NanoUI ()` shows a second window while the `Var` holds `True`. `body` is an unevaluated `NanoUI ()` action; the backend evaluates it as the view of the second window's frames. Call `nativeWindow` every frame, like `modal`: the backend opens an OS window on the first frame that calls it with the `Var` set, and destroys it on the first frame that does not. The close button writes `False` to the `Var`.
+`nativeWindow :: Var Bool -> WindowSettings -> NanoUI () -> NanoUI ()` opens a second OS window whenever its `Var Bool` is `True` and runs `body` as that window's view. Just like `modal`, call `nativeWindow` unconditionally on every frame. The backend creates the OS window on the first frame the flag turns `True` and destroys it when the flag turns `False` (or if a frame skips calling it). Clicking the secondary window's close button sets the `Var` back to `False`.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:native_window}}
 ```
 
-- Each window has its own keyboard focus and widget state (text cursors, scroll offsets, hover). `useVar` calls in `body` are numbered from the start of `body`, so they do not shift ids in the parent view.
-- `nativeWindow` reads `settings` once, when it opens the window. To change the title later, call `setWindowTitleUi` inside `body`.
-- `body` is a closure over the parent view's bindings. Each open window evaluates it again after every frame of the parent view, so captured values are those of the parent's latest frame.
-- Child cost scales with the parent's frame rate: a parent animating at 60 fps evaluates and lays out every open `body` 60 times a second. A child repaints only when its draw commands differ from its previous frame's.
-- `body` can open more windows.
-- Windows share state through `Var`s. A `Var` written in one window shows in the others on their next frame.
-- With `NanoUIE` ([Elm-Style State](../state/elm.md)), `body` emits to the same reducer. To keep the open flag in your model, pass `constVar model.inspectorOpen`, set `wsExitOnCloseRequest = False`, and emit a close message when `winCloseRequested` is set.
-- The SDL and RGFW backends open the window. Under `NanoUI.Testing` no window opens and `body` does not run.
-- On Windows, other windows stop redrawing while one is being resized, because Win32 blocks the event loop during a resize drag.
+A few important details about secondary windows:
 
-`nano-ui-example-windows` has three windows sharing state.
+- **Independent focus and IDs.** Each native window owns its own keyboard focus, text carets, scroll positions, and hover state. `useVar` calls inside `body` count from zero independently of the parent window.
+- **Initial settings apply once.** `nativeWindow` reads `WindowSettings` only when opening the window. To update the title or mode afterward, call setters like `setWindowTitleUi` inside `body`.
+- **Closures stay fresh.** Every frame of the parent view also re-evaluates each open child `body`, so any local values captured from the parent stay up to date.
+- **Watch parent animation rates.** Because child views re-evaluate when the parent renders, a parent animating at 60 fps also lays out open child windows at 60 fps (though a child only repaints pixels when its draw list actually changes).
+- **Nesting and shared state.** Child windows can open further windows of their own, and all windows share state cleanly through `Var`s (a write in one window shows up in the others on their next frame).
+- **Elm-style usage.** With `NanoUIE` ([Elm-Style State](../state/elm.md)), child windows emit to the same reducer. To store the open flag in your model, pass `constVar model.inspectorOpen`, set `wsExitOnCloseRequest = False`, and emit a close message when `winCloseRequested` fires.
+- **Platform notes.** Both SDL and RGFW support `nativeWindow`, while headless `NanoUI.Testing` ignores it without running `body`. On Windows, Win32 blocks the message pump during a window resize drag, so sibling windows pause redrawing until the drag ends.
+
+Run `cabal run nano-ui-example-windows` to try a three-window example with shared state.
 
 ## Custom title bars
 
-`sdlWindowDecorations` removes the OS title bar. `windowCaption :: [Rect] -> NanoUI Bool` (from `nano-ui-sdl`) draws minimize, maximize, and close buttons and returns `True` on the frame close is clicked. Minimize and maximize act inside `windowCaption`.
+On SDL, `sdlWindowDecorations` hides the default OS title bar so you can draw your own. Pair it with `windowCaption :: [Rect] -> NanoUI Bool` (exported from `nano-ui-sdl`), which renders minimize, maximize, and close buttons and returns `True` when the close button is clicked (minimize and maximize are handled automatically):
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:title_bar}}
 ```
 
-The rest of the bar drags the window. `windowCaption` takes the row at the caption buttons' height across the full window width, removes the rects you pass, the buttons and any floating panels (an open menu, a modal), and stores the remaining spans. SDL calls a hit-test callback with the pointer position on each press; the callback returns "drag" inside a stored span, and the OS then moves the window without delivering the press to the view. Pass the rect of every clickable widget in the bar. `button'` returns a `Response` instead of a `Bool`, and `respRect` takes its rectangle.
+Any remaining strip across the top of the window acts as a native drag handle. Specifically, `windowCaption` starts with the full width of the caption row, subtracts the caption buttons, any open floating panels (menus or modals), and the interactive exclusion rectangles you pass in (`[respRect menuResp]` above), and registers the leftover spans with SDL's hit-test callback. When the user drags one of those spans, the OS moves the window natively without sending a press to the view.
 
-The rects are in layout units with the origin at the window's top-left corner. `windowCaption` multiplies them by the window's scale before storing them. The callback runs during SDL's event handling, outside any frame, against the spans the last frame stored. `respRect` returns the previous frame's rectangle, so the exclusions trail a moving widget by one frame. A frame that does not call `windowCaption` removes the spans.
+Pass the `respRect` of every clickable control sitting in your custom title bar. `windowCaption` scales those logical rectangles by `winScale` automatically. Note that because `respRect` reflects the previous frame's layout, exclusion zones trail a moving widget by one frame, and any frame that omits `windowCaption` clears the drag spans.
 
-`DecorationsFrame` removes the title bar but keeps the OS resize border. `DecorationsNone` removes both. On a resizable window, the outer edges resize instead of drag. `windowCaptionWith` customizes the buttons and resize border.
+Choose between two decoration modes:
 
-`windowFrame` wraps the view in a panel that fills the window, draws a rounded border `frameWidth` thick, and insets the view by `frameWidth`:
+- `DecorationsFrame` hides the title bar while preserving the native OS resize border.
+- `DecorationsNone` removes both the title bar and OS border (on resizable windows, the outer edges still act as resize borders).
+
+Use `windowCaptionWith` to customize button appearance or resize border thickness. `windowFrame` wraps your view in a full-window panel with a rounded border `frameWidth` thick and insets the view by `frameWidth`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:window_frame}}
@@ -86,24 +108,32 @@ The rects are in layout units with the origin at the window's top-left corner. `
 
 ## Screenshots
 
-`requestScreenshot :: (Maybe Screenshot -> IO ()) -> NanoUI ()` queues a callback for the frame the view is building. After the backend presents that frame to the screen, it reads the pixels back and calls the callback, with `Nothing` if the backend can't capture. The callback is `IO`, since it runs after the view has finished:
+`nano-ui` gives you three ways to capture rendered frames, depending on where you handle the pixels.
+
+### Fire-and-forget callback (`requestScreenshot`)
+
+`requestScreenshot :: (Maybe Screenshot -> IO ()) -> NanoUI ()` schedules a pixel readback for the frame currently being built. Right after presenting the frame to the screen, the backend copies the pixels and invokes your callback (passing `Nothing` on headless or unsupported backends):
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:request_screenshot}}
 ```
 
-A capture copies the whole frame from the GPU at 4 bytes per physical pixel, about 16 MB for a 1280 by 800 window at scale 2. The callback runs on the display thread before the next frame starts, and that frame waits for it. Keep it short: write an `IORef` or `forkIO` the encoding.
+Reading back a full GPU frame copies 4 bytes per physical pixel (around 16 MB for a 1280x800 window at 2x scale). Because the callback runs on the display thread before the next frame begins, keep it brief: stash the pixels in an `IORef` or `forkIO` the image encoding.
 
-`askScreenshot :: NanoUI (IO (Maybe Screenshot))` reads the current window in the view and returns an `IO` action bound to it. Run that action on a background thread: it wakes the loop and blocks until the next frame is presented. Running it on the display thread deadlocks.
+### Background capture (`askScreenshot`)
 
-`useScreenshot :: Eq k => Task k (Maybe Screenshot) -> k -> NanoUI (Maybe Screenshot)` takes one screenshot per key and returns it to the view. The `Task` holds the result across frames, so `newApp` allocates it in `IO`. On a frame with a new key `useScreenshot` starts a capture and returns the previous key's result until the capture arrives a frame or two later, as `useTask` does (see [Async Work & Animation](async.md)):
+`askScreenshot :: NanoUI (IO (Maybe Screenshot))` returns a blocking `IO` action bound to the current window. Call that action from a **background thread**: it wakes the loop and waits until the next frame is presented. Never invoke it on the display thread, or the loop will deadlock waiting for itself.
+
+### Declarative capture (`useScreenshot`)
+
+`useScreenshot :: Eq k => Task k (Maybe Screenshot) -> k -> NanoUI (Maybe Screenshot)` captures one screenshot per key and hands the result back inside your view, using a `Task` allocated during setup. When the key changes, it kicks off a capture and returns the previous screenshot until the new one finishes a frame or two later:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:use_screenshot}}
 ```
 
-`nano-ui-sdl` also has `saveScreenshot env path` (BMP) and `captureScreenshot env` (pixels), which read the last presented frame. `env` is the `SdlEnv` that `askSdlEnv` returns. Call both on the display thread. For PNG, encode with `JuicyPixels` on another thread.
+If you are working directly with `SdlEnv` (from `askSdlEnv`), `nano-ui-sdl` also exposes `saveScreenshot env path` (writes a BMP file) and `captureScreenshot env` (returns raw pixels) for the last presented frame. Call both on the display thread, and encode formats like PNG with `JuicyPixels` on a worker thread.
 
-## Testing
+## Testing views that use window APIs
 
-Window actions do nothing when no backend window is attached, so views that use them run under `NanoUI.Testing`. Screenshots and custom title bars need a real SDL window, as in `nano-ui-demo`'s hidden-window tests.
+Window setters and commands become no-ops when no OS window is attached, so views that call them still run cleanly under headless `NanoUI.Testing`. Testing screenshots or custom title bars requires a real SDL window (see the hidden-window tests in `nano-ui-demo`).

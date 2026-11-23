@@ -17,9 +17,9 @@
 -- 'image' stretches an image to its rect. 'imageConfigured' fits it like CSS
 -- @object-fit@ ('ContentFit'), and can also crop, fade, rotate and zoom.
 --
--- SVG icons come from 'parseSvg' (or 'loadSvg' for a file). A one-colour
--- icon draws in the text colour, so a 'fontColor' tints it, and
--- 'iconButton' puts one in a button.
+-- SVG icons come from 'parseSvg' (or 'loadSvg' for a file). A single-color
+-- icon inherits the text color, so 'fontColor' tints it cleanly, and
+-- 'iconButton' pairs an icon with a button label.
 --
 -- Run it with @cabal run nano-ui-example-images@.
 module Main (main) where
@@ -67,7 +67,7 @@ checker :: Int -> BS.ByteString
 checker cell = rgba 64 64 $ \x y ->
   if odd ((x `div` cell) `xor` (y `div` cell)) then (235, 235, 235, 255) else (60, 64, 72, 255)
 
--- | A one-colour star: with no fill given, the icon takes the text colour.
+-- | A single-color star: without an explicit fill, it inherits the text color.
 star :: Either String Svg
 star =
   parseSvg
@@ -119,10 +119,10 @@ view images = do
         Right icon -> do
           rowWith (tight . gap 10 . alignMid) $ do
             svgIcon 24 icon
-            -- Each colour (and size) rasterises once and is then cached.
+            -- Each color and size rasterizes once and stays cached.
             forM_ (themeSeries theme) $ \c -> svgIconWith (fixedWH 32 32 . fontColor c) icon
           rowWith (tight . gap 8 . alignMid) $ do
-            _ <- iconButton icon "Favourite"
+            _ <- iconButton icon "Favorite"
             _ <- iconButton icon ""
             _ <- styled primary (iconButton icon "Starred")
             pure ()

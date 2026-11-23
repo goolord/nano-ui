@@ -1,17 +1,19 @@
 # Quick Start
 
-Set up a project and open a window. The [tutorials](../tutorials/index.md) continue from here.
+This page walks through installing dependencies, adding `nano-ui` to a Cabal project, and opening your first window. Once it runs, head to the [tutorials](../tutorials/index.md) to build complete applications.
 
 ## Prerequisites
 
+You will need:
+
 - GHC 9.10 through 9.14 (development uses 9.14)
-- Cabal 3.12+
-- SDL3 and SDL3_ttf 3.2+ for the SDL backend
-- pkg-config
+- Cabal 3.12 or newer
+- SDL3 and SDL3_ttf 3.2+ (for the SDL desktop backend)
+- `pkg-config`
 
-### Nix (Linux / macOS)
+### Nix (Linux and macOS)
 
-In the nano-ui repository, `nix develop` provides GHC, Cabal, SDL3, SDL3_ttf, and pkg-config.
+Inside a checkout of the `nano-ui` repository, `nix develop` drops you into a shell with GHC, Cabal, SDL3, SDL3_ttf, and `pkg-config` already configured.
 
 ### Windows
 
@@ -21,15 +23,15 @@ Install SDL3 and SDL3_ttf through MSYS2 UCRT64:
 pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
 ```
 
-Then point `PKG_CONFIG_PATH` at MSYS2's pkgconfig directory:
+Then point `PKG_CONFIG_PATH` at the MSYS2 `pkgconfig` directory:
 
 ```powershell
 $env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 ```
 
-## Add nano-ui to a project
+## Adding nano-ui to your project
 
-`nano-ui` is on Hackage, but this book follows the repository, which may be ahead of the release. Pin the source in `cabal.project`:
+Although `nano-ui` is published on Hackage, this book tracks the git repository, which is often ahead of the latest release. Pin the repository in your `cabal.project`:
 
 ```cabal
 source-repository-package
@@ -43,9 +45,9 @@ package nano-ui-sdl
   flags: +sdl
 ```
 
-Add the other packages you need (`nano-ui-emit`, `nano-ui-diagrams`, and so on) to the `subdir` list and to your `.cabal` dependencies.
+If you want optional companion packages such as `nano-ui-emit` or `nano-ui-diagrams`, list them in both `subdir` and your `.cabal` file's `build-depends`.
 
-In `my-app.cabal`:
+Next, configure your executable in `my-app.cabal`:
 
 ```cabal
 executable my-app
@@ -60,18 +62,18 @@ executable my-app
     , text
 ```
 
+> [!IMPORTANT]
+> Always compile executables with `-threaded`. Between frames, the backend sleeps inside SDL's foreign event-wait call. On the non-threaded runtime, that foreign call stalls every Haskell thread, so `Task` and `Stream` workers freeze whenever the window is idle.
+
 ### Haddocks and Hoogle
 
-Hackage has Haddocks for the released version. For the current source, from a checkout:
+Hackage hosts Haddock pages for the released version. To build local documentation from a git checkout, run:
 
 ```sh
 cabal haddock-project --output=haddocks --hoogle
 ```
 
-Open `haddocks/index.html`. Building every package is memory-heavy; `cabal haddock nano-ui --haddock-hoogle` builds one. See [Development Setup](development.md#haddocks-and-hoogle) for Hoogle indexing.
-
-> [!IMPORTANT]
-> Compile executables with `-threaded`. Between frames the backend blocks in SDL's event wait, a foreign call. Under the non-threaded runtime that call stops every Haskell thread, so `Task` and `Stream` workers make no progress while the window is idle.
+Then open `haddocks/index.html`. Building docs for the entire workspace takes substantial memory; run `cabal haddock nano-ui --haddock-hoogle` if you only need the core library. See [Development Setup](development.md#haddocks-and-hoogle) for indexing the output with Hoogle.
 
 ## Your first application
 
@@ -81,25 +83,25 @@ Create `Main.hs`:
 {{#include ../../../packages/nano-ui-demo/examples/Quickstart.hs:quickstart}}
 ```
 
-Run it:
+Build and run it:
 
 ```sh
 cabal run -j1 my-app
 ```
 
-`-j1` keeps memory down; a normal project can use cabal's defaults.
+Passing `-j1` keeps GHC's peak memory usage modest during the initial build of the library. Once dependencies are built, regular `cabal run` works fine.
 
 ## How it works
 
-1. `runSdlApp` initializes SDL3, creates a window with TrueType font rendering, and starts the frame loop.
-2. `columnWith` and `rowWith` are layout containers. Their argument composes layout modifiers (`gap 12 . padAll 20`); the leftmost modifier wins when two set the same property.
-3. `useVar (0 :: Int)` allocates a `Var` on the first frame and returns the same `Var` on later frames, matched by its call position in the view. The initial value is used only on the first frame.
-4. `button "+"` draws an interactive button and returns `True` only on the frame it is activated.
-5. `modifyVar n (+ 1)` updates the value. Reading `n` below the buttons means the label shows the new value in the same pass; reading it above them would cost a second pass.
+1. `runSdlApp` initializes SDL3, opens a window with TrueType text rendering, and starts the event loop.
+2. `columnWith` and `rowWith` are layout containers. Their first argument is a chain of layout modifiers (`gap 12 . padAll 20`). When two modifiers set the same field, the leftmost one wins.
+3. `useVar (0 :: Int)` creates a `Var` on the first frame and returns that same `Var` on every frame after, matched by its call position. The initial value is only used on frame one.
+4. `button "+"` draws the button and returns `True` on the frame the user clicks it (or presses Enter/Space while it has focus).
+5. `modifyVar n (+ 1)` updates the counter. Because `readVar n` runs *after* the buttons, the label immediately displays the new value in the same pass. Reading above the buttons would require a second pass.
 
-The view runs every frame, so two rules follow:
+Since the view runs on every frame, keep two habits in mind from the start:
 
-- Guard side effects with an event: `whenM (button "Save") save`. `button "Save" >> save` saves every frame.
-- Allocate long-lived resources (`newVar`, tasks, caches) in `IO` before `runSdlApp`, never inside the view.
+- Gate side effects behind events: write `whenM (button "Save") save`, never `button "Save" >> save` (which would save on every frame).
+- Create long-lived resources (`newVar`, background tasks, caches) once in `IO` before calling `runSdlApp`, not inside the view.
 
-Next: [Tutorial 1: Build a Todo List](../tutorials/todo-list.md).
+Next up: [Tutorial 1: Build a Todo List](../tutorials/todo-list.md).

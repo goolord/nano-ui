@@ -1,51 +1,51 @@
 # Widget Gallery
 
-Every widget is an ordinary function exported from `NanoUI`.
+Every widget in `nano-ui` is an ordinary Haskell function exported from `NanoUI`.
 
 <figure class="nano-figure">
 <img src="../images/gallery-controls.svg" alt="Buttons, a checkbox, text field, select, slider, switch, knob, spinner, progress bar, and sparkline in one nano-ui row.">
-<figcaption>Buttons, inputs, and canvas controls in one frame. Rendered with nano-ui-svg.</figcaption>
+<figcaption>Buttons, inputs, and canvas controls in one frame, rendered with nano-ui-svg.</figcaption>
 </figure>
 
-## Find a widget by task
+## Finding the right widget
 
-| You need… | Read |
+| What you need | Chapter |
 | --- | --- |
-| Buttons, menus, checkboxes, toggles, radios, selects, combo boxes, sliders, numeric fields, text fields, color pickers | [Buttons, Menus & Inputs](controls.md) |
-| Multi-line text, documents, undo history, IME-aware editing | [Text Editing](text-editing.md) |
-| Tabs, sortable tables, trees | [Tabs, Tables & Trees](data-views.md) |
+| Buttons, menus, checkboxes, toggles, radio groups, selects, combo boxes, sliders, numeric fields, single-line text inputs, color pickers | [Buttons, Menus & Inputs](controls.md) |
+| Multi-line text editing, documents, undo history, IME composition | [Text Editing](text-editing.md) |
+| Tabs, sortable tables, tree views | [Tabs, Tables & Trees](data-views.md) |
 | Modals, floating windows, popups, tooltips, context menus | [Overlays & Windows](overlays.md) |
-| Drag-and-drop, tab reordering, dockable pane grids | [Drag & Drop](drag-and-drop.md) |
-| Knobs, switches, progress bars, spinners, sparklines, canvas drawing | [Custom Drawing & Controls](custom-drawing.md) |
+| Drag-and-drop, list/tab reordering, dockable pane grids | [Drag & Drop](drag-and-drop.md) |
+| Knobs, switches, progress bars, spinners, sparklines, custom 2D canvas drawing | [Custom Drawing & Controls](custom-drawing.md) |
 | Colors, themes, interaction states, fonts | [Styling & Theming](../styling/index.md) |
-| Live examples of every styling modifier | [Interactive Styling Lab](../styling/lab.md) |
-| Non-obvious styling behavior | [Styling Gotchas](../styling/gotchas.md) |
+| Interactive previews of styling modifiers | [Interactive Styling Lab](../styling/lab.md) |
+| Subtle styling rules and edge cases | [Styling Gotchas](../styling/gotchas.md) |
 
-Containers (`row`, `column`, `grid`, `panel`, `card`, `layers`, ...) and sizing are covered once in [Layout & Scrolling](../layout/index.md).
+Layout containers (`row`, `column`, `grid`, `panel`, `card`, `layers`, and so on) and sizing modifiers are covered in [Layout & Scrolling](../layout/index.md).
 
-## How widget names work
+## Widget naming conventions
 
-The same four forms appear across the library:
+Most widgets follow the same four-function naming pattern:
 
-| Form | Meaning |
+| Form | What it does |
 | --- | --- |
-| `button "Save"` | Base form. Returns `Bool` (activated) or `()` |
-| `button'` | Primed form. Returns a `Response` |
-| `buttonWith (fixedW 120)` | Takes a `Layout -> Layout` modifier first |
-| `buttonConfigured cfg` | Takes a config record; every config has a `default...Config` |
+| `button "Save"` | Base form. Returns `Bool` (when activated) or `()`. |
+| `button'` | Primed form. Returns a full `Response`. |
+| `buttonWith (fixedW 120)` | Takes a `Layout -> Layout` modifier as its first argument. |
+| `buttonConfigured cfg` | Takes a configuration record (every config has a matching `default...Config`). |
 
-A `Response` carries identity and interaction state:
+A `Response` holds the widget's identity, layout bounds, and interaction flags for the current frame:
 
-| Field / helper | Meaning |
+| Field or helper | Meaning |
 | --- | --- |
-| `respId` | The widget's `WidgetId` (focus, menus, scroll targets) |
-| `respRect` | The widget's rectangle from the **previous** frame |
-| `respHovered` | Pointer is over the widget |
-| `respPressed` | Held down, not yet released |
-| `respClicked` | Activated: left click, Enter, or Space |
-| `respChanged` | The value was edited |
-| `respSubmitted` | Committed, for example Enter in a text field |
-| `respHeldWith` / `respClickedWith` | Which `MouseButton` is held / clicked |
-| `respRightPressed` / `respRightClicked` | Secondary-button variants |
+| `respId` | The widget's `WidgetId` (used for focus, menus, and scroll targets). |
+| `respRect` | The widget's bounding rectangle from the **previous** frame. |
+| `respHovered` | `True` while the pointer is over the widget. |
+| `respPressed` | `True` while the mouse button is held down on the widget. |
+| `respClicked` | `True` on the frame the widget is activated (left click, Enter, or Space). |
+| `respChanged` | `True` on the frame the user edited the widget's value. |
+| `respSubmitted` | `True` on the frame the user committed the field (for example, pressing Enter). |
+| `respHeldWith` / `respClickedWith` | Check which specific `MouseButton` is held or clicked. |
+| `respRightPressed` / `respRightClicked` | Shorthands for right-button interactions. |
 
-Anything with a `Response` can be passed to `tooltip`, `contextMenu`, and the focus helpers.
+Any widget that returns a `Response` can be wired to `tooltip`, `contextMenu`, and the focus helpers.

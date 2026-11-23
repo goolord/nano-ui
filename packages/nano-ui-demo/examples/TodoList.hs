@@ -149,8 +149,7 @@ todoList items filt = do
       withElemVars todoId items $ \todos at -> do
         let
           shown = filter (matches shownFilter) todos
-        -- Each row gets its visible neighbours, so Up and Down skip rows
-        -- the filter hides.
+        -- Pass each row its visible neighbors so Up and Down skip filtered-out rows.
         forM_
           (zip3 shown (Nothing : map Just shown) (map Just (drop 1 shown) <> [Nothing])) $ \(todo, above, below) ->
           withKey (todoId todo) (todoRow items (at todo) above below)

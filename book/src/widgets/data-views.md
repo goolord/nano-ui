@@ -1,59 +1,61 @@
 # Tabs, Tables & Trees
 
+For structured navigation and multi-item data, `nano-ui` includes tabs, sortable virtualized tables, and collapsible tree views.
+
 <figure class="nano-figure">
 <img src="../images/gallery-data.svg" alt="A nano-ui frame with a tab strip, a sortable service table, and a file tree.">
-<figcaption>A tab strip, sortable table, and tree in one frame. Rendered with nano-ui-svg.</figcaption>
+<figcaption>A tab strip, sortable table, and tree in one frame, rendered with nano-ui-svg.</figcaption>
 </figure>
 
 ## Tabs
 
-A tab strip binds the active key to a `Var`; only the selected tab's body runs:
+A tab container stores the active tab's key in a `Var` and runs only the selected tab's body:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:bounded_tabs}}
 ```
 
-`tab` creates a plain header; `closableTab` adds a close button and reports the close through the primed response:
+Use `tab` for a standard tab, or `closableTab` to add a close button and middle-click dismissal. With `tabs'`, closing a tab reports the key in `tabClosed` without mutating your tab list, leaving you in charge of removing it and picking the next active tab:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:closable_tabs}}
 ```
 
-`tabs'` reports `tabClosed` and leaves the tab in place; the caller removes it from its list. A key no tab has selects the first tab and writes that key back to the `Var`.
+If the `Var` ever holds a key that does not match any current tab, `tabs` automatically selects the first tab and updates the `Var`.
 
-`tabBar` / `tabBar'` draw headers only and leave the body to the caller. `tabsConfigured` / `tabBarConfigured` take a `TabsConfig`:
+If you want to render tab headers in one place and lay out the active body yourself, use `tabBar` or `tabBar'`. Both `tabsConfigured` and `tabBarConfigured` take a `TabsConfig`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:tabs_config}}
 ```
 
-The four `TabStyle`s, with a different tab selected in each:
+Here are all four built-in `TabStyle` options, each with a different tab active:
 
 <figure class="nano-figure">
 <img src="../images/tab-styles.svg" alt="Four tab strips: underline, pill, segmented, and contained, each with a different selected tab.">
-<figcaption>The four `TabStyle` values, rendered with nano-ui-svg.</figcaption>
+<figcaption>The four `TabStyle` variants, rendered with nano-ui-svg.</figcaption>
 </figure>
 
-| Style | Header treatment |
+| Style | Visual appearance |
 | --- | --- |
-| `TabUnderline` | Headers on a rule; the selected header has an accent bar |
-| `TabPill` | The selected header is filled with the accent color |
-| `TabSegmented` | Headers sit in a rounded track; the selected one is raised |
-| `TabContained` | Folder tabs; the selected header opens onto a bordered body |
+| `TabUnderline` | Headers along a hairline rule, with an accent indicator under the active tab |
+| `TabPill` | Rounded pill headers, with the active tab filled in the accent color |
+| `TabSegmented` | Segmented control inside a rounded track, with the active segment raised |
+| `TabContained` | Classic folder tabs whose active header opens directly into a bordered body |
 
-Placements: `TabTop`, `TabBottom`, `TabLeft`, `TabRight`. `boundedTabs` / `boundedTabBar` generate a tab per enum value.
+Set `tabsOrientation` to `TabTop`, `TabBottom`, `TabLeft`, or `TabRight`. For enum-backed tabs, `boundedTabs` and `boundedTabBar` generate one tab per constructor automatically.
 
 ## Tables
 
-`table` renders Colonnade columns. Header clicks sort through a `Var SortCol`:
+`table` renders structured columns built with `Colonnade`, with click-to-sort headers backed by a `Var SortCol`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:table}}
 ```
 
-`SortCol` holds the active column and direction. `simpleTable headers rows` renders a table of text rows. `table'` returns a `TableResponse` with the updated sort, column order, and hidden columns; `tableConfigured` adds frozen rows/columns, fixed column widths, and hidden columns through `TableConfig`. Rows are virtualized internally.
+`SortCol` stores the active column index and sort direction. For quick text-only tables, `simpleTable headers rows` skips the Colonnade boilerplate. The primed `table'` returns a `TableResponse` with updated sort state, reordered columns, and hidden column indices; `tableConfigured` adds frozen rows/columns, fixed widths, and visibility options through `TableConfig`. Row rendering is virtualized internally.
 
-Cell helpers: `textCell`, `cellWidget`, `widgetCell`, and `Cell` with an explicit sort key (`cellKey`). A cell with a widget view still needs `cellText` if its natural width should be measured.
+When building custom cells, you can use `textCell`, `cellWidget`, `widgetCell`, or construct a `Cell` with an explicit sort key (`cellKey`). If a cell renders a custom widget, still populate `cellText` when you want automatic column width measurement to account for it.
 
 ## Trees
 
@@ -61,8 +63,8 @@ Cell helpers: `textCell`, `cellWidget`, `widgetCell`, and `Cell` with an explici
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:tree}}
 ```
 
-`tree` takes the library's `TreeItem` type (`treeItemLabel`, `treeItemChildren`). The `Var Int` holds the selected item's **pre-order index**. Build the index in the same pre-order when you need to map a selection back to an item. Collapsed nodes keep their state; rows are drawn as focusable buttons and support arrow-key navigation.
+`tree` renders a list of `TreeItem` values (`treeItemLabel` and `treeItemChildren`) and tracks selection in a `Var Int` as a **pre-order index**. Walk your tree in the same pre-order traversal whenever you map that index back to a domain object. Collapsed branches preserve their sub-branch expansion state, and rows behave like focusable buttons with arrow-key navigation.
 
-For large trees, keep the expansion set in a `VarMap` keyed by a stable path, and rebuild the visible items before calling `tree`.
+For very large trees, store the set of expanded nodes in a `VarMap` keyed by a stable path and build only the visible slice before passing it to `tree`.
 
-To reorder tabs by dragging, see [Drag & Drop](drag-and-drop.md).
+To let users reorder tabs by dragging, see [Drag & Drop](drag-and-drop.md).

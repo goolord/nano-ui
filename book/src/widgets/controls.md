@@ -1,55 +1,57 @@
 # Buttons, Menus & Inputs
 
+This chapter covers the everyday interactive controls: buttons, menus, choice widgets, sliders, numeric fields, single-line text inputs, and color pickers.
+
 ## Buttons
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Signatures.hs:buttons}}
 ```
 
-`button` returns `True` only on the frame it is activated, by left click or by Enter/Space while focused:
+`button` draws a clickable button and returns `True` on the single frame it is activated (either by a left click, or by pressing Enter or Space while focused):
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:button}}
 ```
 
-Use the primed form when you need the response: hover state, a rectangle for an anchored popup, or a tooltip.
+Reach for the primed variant (`button'`) whenever you need the `Response` for hover checks, anchoring a popup, or attaching a tooltip:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:button_response}}
 ```
 
-`buttonContent` puts any view inside a button. The content is for display; a click anywhere on the button activates it:
+`buttonContent` wraps an arbitrary `NanoUI ()` view inside a clickable button. The inner widgets are purely visual; clicking anywhere on the button activates it:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:button_content}}
 ```
 
-`iconButton` puts an icon before the label; an empty label gives an icon-only square button.
+`iconButton` draws an SVG icon next to a label. Passing an empty string `""` produces a square icon-only button.
 
 ## Menus
 
-`menuItem` draws a row and returns `True` when clicked. `menuItemShortcut` also displays a chord and binds it while the menu is open. `menuSeparator` and `menuItemDisabled` complete the row set.
+Menu rows are built from `menuItem` (returns `True` when clicked), `menuItemShortcut` (shows a shortcut label and activates on that chord while the menu is open), `menuSeparator`, and `menuItemDisabled`.
 
-A menu bar is a `menuButton'` plus a `popup'` anchored to its rectangle:
+Build a menu bar by pairing `menuButton'` triggers with `popup'` overlays anchored to each button's rectangle:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:menu_bar}}
 ```
 
-`constVar` supplies a read-only open flag derived from the menu state, and the code writes a click on the popup back to the real `Var`.
+Here `constVar` passes a read-only open flag derived from `openMenu`, and clicks on the popup update `openMenu` directly.
 
 > [!IMPORTANT]
-> Call overlays unconditionally. `popup'` draws nothing while closed, but wrapping it in `when isOpen` changes later widget ids each time the menu opens.
+> Call overlays unconditionally on every frame. A closed `popup'` renders nothing, whereas wrapping it in `when isOpen` shifts sibling widget IDs every time a menu opens or closes.
 
-Bind a command chord **outside** the menu as well as on its row, so it works with the menu closed:
+Because `menuItemShortcut` only listens while its menu is open, bind the same chord outside the menu with `shortcut` if you want it to work when the menu is closed:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Input.hs:menu_and_shortcut}}
 ```
 
-Only the first binding of a chord in a frame fires, so the open menu's row wins. A complete menu bar is built in [Build a Notepad](../tutorials/notepad.md).
+Only the first matching binding in a frame fires, so the open menu item naturally takes priority over the fallback shortcut. For a complete menu bar implementation, see [Tutorial 2: Build a Notepad](../tutorials/notepad.md).
 
-`contextMenu` attaches a right-click menu to any widget with a `Response`:
+Attach a right-click menu to any widget with a `Response` using `contextMenu`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:context_menu}}
@@ -57,24 +59,24 @@ Only the first binding of a chord in a frame fires, so the open menu's row wins.
 
 ## Input widgets
 
-Input widgets read and write the `Var` they display, and store caret and selection state under their widget id. To reset a field, write the `Var`; to react to an edit, use the primed form's `Response`.
+Input widgets display a `Var` and mutate it in place, keeping transient editing state (caret position, text selection, open dropdowns) under their own widget ID. Write to the `Var` directly to reset or overwrite a field, and use the primed variant's `Response` when you need to react to edits.
 
-| Widget | Signature | Description |
+| Widget | Signature | Purpose |
 | --- | --- | --- |
-| `checkbox` | `Text -> Var Bool -> NanoUI ()` | Two-state box with a label |
-| `toggleButton` | `Tone -> Text -> Var Bool -> NanoUI ()` | Two-state button, filled in the tone while on |
-| `radio` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Radio group over indexed options |
-| `boundedRadio` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Radio group over every enum value |
-| `select` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Drop-down select by index |
-| `boundedSelect` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Drop-down over every enum value |
-| `comboBox` | `Foldable f => Text -> f Text -> Var Text -> NanoUI ()` | Placeholder, suggestions, free-text value |
-| `slider` | `Float -> Float -> Var Float -> NanoUI ()` | Min, max, value |
-| `textInput` | `Var Text -> NanoUI ()` | Single-line editable text |
-| `searchInput` | `Text -> Var Text -> NanoUI ()` | Placeholder + search field with a clear button |
-| `numericInput` | `Var Double -> NanoUI ()` | Numeric field with steppers |
-| `colorPicker` | `Var Color -> NanoUI ()` | Saturation/value field and hue bar |
+| `checkbox` | `Text -> Var Bool -> NanoUI ()` | Checkbox with a label |
+| `toggleButton` | `Tone -> Text -> Var Bool -> NanoUI ()` | Two-state button filled with its tone color when active |
+| `radio` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Radio button group indexed by position |
+| `boundedRadio` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Radio group covering every constructor of an enum |
+| `select` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Dropdown selector indexed by position |
+| `boundedSelect` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Dropdown selector over every constructor of an enum |
+| `comboBox` | `Foldable f => Text -> f Text -> Var Text -> NanoUI ()` | Free-text field with filterable autocomplete suggestions |
+| `slider` | `Float -> Float -> Var Float -> NanoUI ()` | Continuous horizontal slider between min and max |
+| `textInput` | `Var Text -> NanoUI ()` | Single-line text input |
+| `searchInput` | `Text -> Var Text -> NanoUI ()` | Search field with placeholder, clear button, and debounced changes |
+| `numericInput` | `Var Double -> NanoUI ()` | Numeric input with increment/decrement steppers |
+| `colorPicker` | `Var Color -> NanoUI ()` | Saturation/value square and hue slider |
 
-Every widget has the usual variants: primed (`...'`) returns a `Response`, `...With` takes a layout modifier, and `...Configured` takes a config record. For example:
+Every widget in this table provides the standard variants: primed (`...'`) returns a `Response`, `...With` accepts a layout modifier, and `...Configured` accepts a config record:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:configured}}
@@ -86,7 +88,7 @@ Every widget has the usual variants: primed (`...'`) returns a `Response`, `...W
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:text_input}}
 ```
 
-`respChanged` fires on every edit; `respSubmitted` fires on Enter. For expensive work use `searchInput'`, whose `respChanged` is debounced (300 ms by default) and fires immediately when the field is cleared:
+On `textInput'`, `respChanged` is `True` on every edit and `respSubmitted` is `True` when the user presses Enter. When an edit triggers expensive work like filtering a database or calling an API, use `searchInput'` instead: its `respChanged` is debounced (300 ms by default) and fires immediately when the clear button is clicked:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:search_input}}
@@ -98,18 +100,18 @@ Every widget has the usual variants: primed (`...'`) returns a `Response`, `...W
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:choices}}
 ```
 
-`select` is index-based for data-driven options:
+Use `select` when the options come from runtime data rather than a fixed enum:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:select}}
 ```
 
-`comboBox` takes free text plus suggestions; its `respChanged` fires on commit; a model write alone does not set it.
+`comboBox` accepts both suggested options and arbitrary text. Its `respChanged` flag fires only when the user commits a choice, not when your code updates the `Var` externally.
 
-### Sliders, numbers, color
+### Sliders, numbers, and color
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:values}}
 ```
 
-`numericInput` accepts digits and a leading minus when the range allows it; arrow keys step, and `Shift` steps ten times as far. `nicDecimals` controls display and accepted precision. `colorPickerRGBA` adds an alpha bar.
+`numericInput` accepts digits (plus a leading minus sign when negative numbers are allowed). Pressing Up or Down steps the value, and holding Shift multiplies the step by 10. Set `nicDecimals` to control both formatting and precision. For colors with transparency, use `colorPickerRGBA`, which adds an alpha bar.

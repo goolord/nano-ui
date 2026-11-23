@@ -352,13 +352,13 @@ legendRow bg border rowLabel =
     span_ [class_ "swatch", style_ ("background:" <> bg <> ";border:2px solid " <> border)] mempty
     span_ (toHtml rowLabel)
 
--- | The fixed sidebar: brand, probe colour key, and section/trap links.
+-- | The fixed sidebar: brand, probe color key, and section/trap links.
 sidebarNav :: Html ()
 sidebarNav = do
-  div_ [class_ "brand-kicker"] "nano-ui-svg Interactive Lab"
+  div_ [class_ "brand-kicker"] "nano-ui-svg Styling Lab"
   h1_ [class_ "brand-title"] "Styling & Surface Glossary"
   p_ [class_ "brand-sub"] $ do
-    txt "Toggle any combination of styles. Every state is a real headless "
+    txt "Toggle any combination of modifiers below. Every preview is a real headless "
     code_ "NanoUI ()"
     txt " frame exported with "
     code_ "frameToSvg"

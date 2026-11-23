@@ -1,10 +1,6 @@
 # nano-ui-rgfw
 
-Window backend for [nano-ui](https://github.com/goolord/nano-ui) on
-[RGFW](https://github.com/ColleagueRiley/RGFW) and OpenGL 3.2. RGFW is compiled
-with the package, and text uses the bundled
-[Cozette](https://github.com/slavfox/Cozette) bitmap font, so it needs no
-libraries beyond the platform's windowing and OpenGL.
+Lightweight desktop backend for [nano-ui](https://github.com/goolord/nano-ui) built on [RGFW](https://github.com/ColleagueRiley/RGFW) and OpenGL 3.2. RGFW's C source compiles directly with the package and text renders with the bundled [Cozette](https://github.com/slavfox/Cozette) bitmap font, so you need no libraries beyond native OS windowing and OpenGL.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -16,82 +12,41 @@ main :: IO ()
 main = runRgfwApp defaultRgfwOptions {optScale = 2} (label "Hello")
 ```
 
-`runRgfwAppReduce` pairs a `model -> NanoUIE msg ()` view with an update function
-`msg -> model -> model`. Add `nano-ui-emit` and import `NanoUI.Emit` for typed
-emission and widget adapters. `RgfwOptions` sets the window (`optWindow`, the core's
-`WindowSettings`, which the SDL backend takes too, with its size in layout
-units), the theme, the UI scale, and the refresh rate used for pacing
-animations. RGFW centres windows that use default desktop placement.
-RGFW windows are opaque and do not fade: `wsTransparent`,
-`wsOpacity` and `setWindowOpacityUi` do nothing here. The SDL backend has
-transparent and faded windows.
+For Elm-style views, `runRgfwAppReduce` pairs a `model -> NanoUIE msg ()` view with an update function `msg -> model -> model` (add `nano-ui-emit` and import `NanoUI.Emit`). Configure the window (`optWindow`, using the same `WindowSettings` as `nano-ui-sdl`), theme, UI scale, and animation refresh rate through `RgfwOptions`. RGFW centers windows that leave `wsPosition` at its default, and all RGFW windows are opaque (`wsTransparent`, `wsOpacity`, and `setWindowOpacityUi` are no-ops; use `nano-ui-sdl` if you need translucent windows).
 
-`askRgfwDebug` reads the session's frame timings and display facts, and
-`debugWindowBody` shows them; views take no session handle, as with the SDL
-backend's `askSdlDebug`. `runRgfwAppWith` and `runRgfwAppReduceCustomWith` run
-a setup action once the window exists and before the first frame.
+Call `askRgfwDebug` inside a view to inspect frame timings and display stats, or render them directly with `debugWindowBody`. To run custom initialization after window creation and before frame 1, use `runRgfwAppWith` or `runRgfwAppReduceCustomWith`.
 
-The theme is any core `Theme`. The backend draws it with square corners and 1px
-borders (`applyRgfwTheme`), since geometry is drawn as flat quads. The font is
-drawn from its 7x13 bitmap at 1x, from EPX-scaled bitmaps at 2x and 4x, and
-box-averaged from those at other scales. A scale of `0` follows the monitor.
-Text has that one size: `fontSize` and `fontMono` change nothing here, and
-text of every size is laid out as it is drawn.
+Any core `Theme` works here, adjusted automatically by `applyRgfwTheme` to square corners and 1 px borders to fit flat-quad rendering. Cozette renders at 7x13 px at 1x scale, EPX-upscaled at 2x and 4x, and box-filtered at intermediate scales (set `optScale = 0` to follow the monitor scale). Because Cozette is a single fixed-size bitmap font, `fontSize` and `fontMono` do not change glyph size, and layout measures every string using that exact bitmap size.
 
-## Running
+## Running examples
 
 ```sh
 cabal run nano-ui-rgfw-demo     # widget demo
-cabal run nano-ui-rgfw-profile  # demo frame loop in a hidden window, for +RTS -p
+cabal run nano-ui-rgfw-profile  # hidden-window benchmark for +RTS -p
 ```
 
-## Requirements
+## System requirements
 
-X11, Xcursor, Xrandr, and Xi on Linux; Cocoa on macOS; gdi32, user32, and
-shell32 on Windows. All need OpenGL 3.2.
+- **Linux:** X11, Xcursor, Xrandr, and Xi development headers, plus OpenGL 3.2
+- **macOS:** Cocoa and OpenGL 3.2
+- **Windows:** `gdi32`, `user32`, `shell32`, and OpenGL 3.2
 
-Use GHC 9.10 through 9.14 (development uses 9.14) and add `nano-ui` and
-`nano-ui-rgfw` to your application's `build-depends`. Build the executable
-with `-threaded`: otherwise the idle wait for events blocks the whole
-runtime, and background tasks make no progress until input arrives. The
-example uses `GHC2024` and `OverloadedStrings`.
-On Linux, install the development packages for the listed X11 libraries;
-RGFW itself is bundled by `nano-ui-rgfw-bindings`.
+Target GHC 9.10 through 9.14 with `GHC2024` and `OverloadedStrings`, add `nano-ui` and `nano-ui-rgfw` to `build-depends`, and compile executables with `-threaded` so background tasks keep running while the event loop sleeps. RGFW itself is bundled inside `nano-ui-rgfw-bindings`.
 
-## Sessions and rendering
+## Sessions and limitations
 
-`runRgfwApp` owns the window and OpenGL context until the window closes.
-`runRgfwAppReduceCustom` can derive the theme and scale from your model.
-For a custom event loop, the internal modules `NanoUI.Rgfw.Internal.Context`
-and `NanoUI.Rgfw.Internal.Gl`, with the RGFW bindings, expose context setup and
-rendering. OpenGL operations must run on the OS thread where the context is
-current, and native resources must be closed on that thread. Run every
-session on the OS thread that opened the first one, such as the main thread
-under `-threaded`: on Windows, a background task's wake reaches only that
-thread.
+`runRgfwApp` owns the native window and OpenGL context until exit, and `runRgfwAppReduceCustom` lets you derive theme and scale dynamically from your model. For custom event loops, `NanoUI.Rgfw.Internal.Context` and `NanoUI.Rgfw.Internal.Gl` expose lower-level setup. Keep all OpenGL calls and cleanup on the bound OS thread that created the context, and reuse that same OS thread across sessions (on Windows, background task wakes only reach the original thread).
 
-Layout and input use logical coordinates; `optScale` controls their mapping
-to physical pixels. RGFW reports no input-method composition: an input
-method draws its own composition. Files dropped on the window are not
-reported, so `dropZone` and `useDrop` see no drops under this backend.
-The bitmap font does not provide the SDL backend's installed-font lookup or
-HarfBuzz shaping. Text in a `drawing` or canvas (`richText`, Markdown, chart
-labels, canvas `drawText`, the pane grid's drag title) is drawn in the
-Cozette cell like widget text, above every shape of its layer, including
-shapes its own drawing draws later. Font size, scale, weight, slant and font
-decoration are not rendered; `richText` and Markdown draw their underlines
-and strikes as shapes, so those show. Choose the SDL backend when those text
-features are required.
+Coordinates are in logical pixels scaled by `optScale`. Note a few intentional simplifications compared to `nano-ui-sdl`:
+
+- **No OS IME pre-edit or file drops:** Input methods draw their own system composition UI, and `dropZone`/`useDrop` receive no external drops.
+- **Bitmap text only:** There is no system font discovery, HarfBuzz shaping, or variable font sizes/weights/italics. Text drawn inside canvases (`richText`, Markdown, chart labels, `drawText`, pane drag titles) renders in Cozette above vector shapes in its layer (`richText` and Markdown still draw underlines and strikethroughs as vector lines). Choose `nano-ui-sdl` whenever rich TrueType typography is needed.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
-  online guide, tutorials, and ecosystem overview.
-- [Development Guide](https://goolord.github.io/nano-ui/book/getting-started/development.html):
-  headless tests and native rendering checks.
+- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): Tutorials, widget gallery, and backend overview.
+- [Development Setup](https://goolord.github.io/nano-ui/book/getting-started/development.html): Running headless and native rendering tests.
 
 ## License
 
-MIT. The bundled Cozette font is MIT-licensed by its author
-(`LICENSE-Cozette`); every application built with this package embeds it, so
-ship that notice with it.
+MIT. The bundled Cozette bitmap font is MIT-licensed by its author (`LICENSE-Cozette`); include that notice with applications built against `nano-ui-rgfw`.

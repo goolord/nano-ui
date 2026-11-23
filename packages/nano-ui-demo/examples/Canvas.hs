@@ -1,4 +1,4 @@
--- | Canvas: a tiny paint program with freehand strokes, colours, undo and clear.
+-- | Canvas: a small paint app with freehand strokes, colors, undo, and clear.
 --
 -- A canvas is a widget whose drawing you write with 'CanvasM': here, each
 -- stroke is a "NanoUI.Path" polyline stroked with round caps and joins. The
@@ -41,8 +41,8 @@ main = do
       }
     (view st)
 
--- | One stroke: its colour, width, and points relative to the canvas
--- corner, newest first (adding a point is a cons).
+-- | One stroke: its color, width, and points relative to the canvas
+-- corner, stored newest first for O(1) consing.
 data Ink = Ink
   { inkColor :: !Color
   , inkWidth :: !Float
@@ -96,8 +96,8 @@ view st = do
       colour = palette !! colourIx
   columnWith (padAll 16 . gap 12 . grow) $ do
     rowWith (tight . gap 8 . alignMid . fillW) $ do
-      -- Swatches are ordinary buttons filled with their colour; the chosen
-      -- one gets a border in the theme's text colour.
+      -- Swatches are plain buttons filled with their color; the active
+      -- swatch gets a border in the theme's text color.
       forM_ (zip [0 ..] palette) $ \(i, c) -> do
         let ring = if i == colourIx then buttonStyle (borderWidth 3 . borderColor (styleFg (themePanel theme))) else id
         whenM (styled (ring . tinted (const c)) (buttonWith (fixedWH 28 28) "")) (writeVar colourVar i)
@@ -109,8 +109,8 @@ view st = do
         whenM (button "Clear") (modifyVar (sketchVar st) (edit (const [])))
     whenM (shortcut (cmdOrCtrl <> key 'z')) undo
 
-    -- Everything the drawing reads: the finished strokes (by revision) and
-    -- the live stroke's shape. The paper colour is a constant.
+    -- Everything the drawing reads: finished strokes (by revision) and the
+    -- live stroke's shape. The paper background color is constant.
     let liveKey = fmap (\s -> (colorToWord32 (inkColor s), inkWidth s, length (inkPoints s))) live
         cfg =
           defaultCanvasConfig

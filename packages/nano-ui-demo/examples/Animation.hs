@@ -1,27 +1,25 @@
--- | Animation: tweens, springs, animated colours, hover effects and a looping indicator.
+-- | Animation: tweens, springs, animated colors, hover effects, and a looping indicator.
 --
--- An animation returns this frame's value; you build the view from it
--- like any other number. 'animateTo' moves toward a target: an unchanged
--- target keeps the running animation, a new one retargets from wherever the
--- value is now, so flipping a toggle mid-flight reverses smoothly. A 'Tween'
--- follows an 'Ease' curve over a fixed time; a 'Spring' carries its velocity
--- into a retarget and may overshoot ('presetBouncy') or not ('presetStiff').
--- 'animateToA' animates every channel of an 'Animatable' value, such as a
--- 'Color' or a 'V2'.
+-- An animation returns this frame's interpolated value, which you use just
+-- like any other number in your view. 'animateTo' moves toward a target:
+-- keeping the target constant continues the running transition, while giving
+-- it a new target redirects from the current value so flipping a toggle
+-- mid-flight reverses smoothly. A 'Tween' follows an 'Ease' curve over a
+-- fixed duration; a 'Spring' preserves velocity on retargeting and can
+-- overshoot ('presetBouncy') or settle cleanly ('presetStiff'). 'animateToA'
+-- animates every channel of an 'Animatable' value such as 'Color' or 'V2'.
 --
--- Animations take a widget id like any widget, so they must run on every
--- frame in the same order. Each one here runs under 'withKey': its
--- state then follows the key rather than its position, and a widget added
--- above it later does not restart it.
+-- Animations consume a widget ID like widgets, so call them in consistent
+-- order on every frame. Wrapping each one in 'withKey' ties its state to a
+-- stable key rather than position, so adding widgets above will not restart it.
 --
--- Idle cost: the loop draws frames only while something moves. A tween or
--- spring asks for frames until it lands, then the loop sleeps until the
--- next input. 'pulse' is different: it reads the clock and asks for nothing,
--- so 'keepAnimating' keeps frames coming, and only on frames that call it.
--- Untick "Run" and the app goes back to sleep. See Theming.hs for colours
--- taken from the theme.
+-- Idle cost: frames only run while something is moving. Tweens and springs
+-- request frames automatically until they settle, after which the loop sleeps
+-- until the next input. 'pulse' reads the clock without waking the loop on its
+-- own, so call 'keepAnimating' on every frame the indicator is visible.
+-- Uncheck "Run" and the app goes back to sleep. See Theming.hs for theme colors.
 --
--- Run it with @cabal run nano-ui-example-animation@.
+-- Run with @cabal run nano-ui-example-animation@.
 module Main (main) where
 
 import Control.Monad (when)
@@ -56,28 +54,28 @@ view = do
       checkbox "Show details" open
       isOpen <- readVar open
       openT <- keyed "details" (animateTo (Tween EaseOutCubic 0.3 0) (if isOpen then 1 else 0))
-      -- The panel exists only while any of it shows, so 'scope' keeps the
-      -- ids after it stable whether or not it is declared.
+      -- The panel is only declared while openT > 0.005, so 'scope' keeps
+      -- sibling IDs below it stable whether or not it appears.
       scope . when (openT > 0.005) $
         panelWith (fillW . fixedH (96 * openT) . padXY 12 10 . gap 6) $ do
           let ink = withAlpha (styleFg (themePanel theme)) openT
           labelWith (tight . fontColor ink . fontMedium) "Details"
-          labelWith (tight . fontColor ink) "The height and the text alpha follow one tween."
-          labelWith (tight . fontColor ink) "Untick the box mid-way: it reverses from where it is."
+          labelWith (tight . fontColor ink) "Height and text opacity both follow the same tween."
+          labelWith (tight . fontColor ink) "Uncheck the box mid-way to see it reverse smoothly."
 
-      -- 2. Springs: the same target, two feels. Click "Move" quickly a few
-      -- times: a spring keeps its speed when retargeted.
+      -- 2. Springs: same target, two feels. Click "Move" rapidly to watch
+      -- velocity carry smoothly through a retarget.
       rowWith (tight . gap 12 . alignMid) $ do
         whenM (button "Move") (modifyVar right not)
-        muted "Bouncy overshoots; stiff settles without."
+        muted "Bouncy overshoots; stiff settles cleanly."
       isRight <- readVar right
       bouncy <- keyed "bouncy" (animateTo (Spring presetBouncy) (if isRight then 1 else 0))
       stiff <- keyed "stiff" (animateTo (Spring presetStiff) (if isRight then 1 else 0))
       rail "Bouncy" bouncy
       rail "Stiff" stiff
 
-      -- 3. A colour: 'animateToA' tweens each RGBA channel. To blend between
-      -- two fixed colours, animating one Float and using 'lerpColor' works too.
+      -- 3. Animated color: 'animateToA' interpolates each RGBA channel.
+      -- Animating one Float and blending with 'lerpColor' works too.
       isWarm <- readVar warm
       swatch <- keyed "swatch" (animateToA (Tween EaseInOutCubic 0.6 0) (if isWarm then themeOrange theme else themeAccent theme))
       rowWith (tight . gap 12 . alignMid) $ do

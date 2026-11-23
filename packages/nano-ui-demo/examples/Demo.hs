@@ -1,25 +1,25 @@
 {-# LANGUAGE RecordWildCards #-}
 
--- | The nano-ui widget cookbook: one tab per widget family. Each tab is a
--- function below that keeps its state next to the widgets using it. For
--- short programs about one topic each (state, layout, forms, shortcuts,
--- background work, ...), see this package's @examples@ directory.
+-- | Interactive widget cookbook with one tab per widget family. Each tab
+-- keeps its state right beside the controls that use it. For smaller
+-- single-topic programs (state, layout, forms, shortcuts, background tasks,
+-- and so on), look in this package's @examples/@ directory.
 --
--- Input widgets mutate a 'Var' in place: @slider 0 100 volume@ draws and
--- updates @volume@, and @readVar volume@ reads its current value. 'useVar'
--- allocates call-site-scoped mutable state inside the view; larger or shared
--- resources (a list, an image handle, a plot cache) are allocated once in
--- 'newDemo'. The values shown in the State pane are declared once above both
--- the pane and the tabs so they share the same 'Var's.
+-- Input widgets mutate a 'Var' in place: @slider 0 100 volume@ renders and
+-- updates @volume@, and @readVar volume@ reads its latest value. 'useVar'
+-- creates view-local mutable state at its call site, while shared or
+-- handle-based resources (lists, image handles, plot caches) are allocated
+-- once in 'newDemo'. Values shown in the State sidebar are created above both
+-- the sidebar and the tabs so they share the same 'Var's.
 --
--- The toolbar opens an About modal (F1) and a Debug window (F12) with the
--- backend's frame statistics and the layout overlay; the Diagnostics tab
--- shows the headline numbers. The @nano-ui-demo-test@ suite drives this demo.
+-- The toolbar opens an About dialog (F1) and a Debug window (F12) with frame
+-- statistics and the interactive layout overlay; the Diagnostics tab shows
+-- the main counters inline. The @nano-ui-demo-test@ suite exercises this demo.
 --
--- The view runs on the SDL backend (@examples/sdl/DemoMain.hs@) and in a
--- browser (@examples/web/DemoMain.hs@). What differs between them (finding
--- fonts, data files, file dialogs, frame statistics) comes from
--- "DemoPlatform", which each build takes from its own directory.
+-- This view runs on both desktop SDL3 (@examples/sdl/DemoMain.hs@) and the
+-- browser (@examples/web/DemoMain.hs@). Platform-specific pieces (font lists,
+-- bundled data files, file dialogs, and debug stats) come from "DemoPlatform",
+-- resolved from each build's directory.
 module Demo
   ( DemoState
   , newDemo
@@ -379,8 +379,8 @@ graphicsTab st = do
   separator
   pulsingBar
 
--- | Generated RGBA images, registered only while this tab shows, with a
--- badge layered on each one's corner.
+-- | Generated RGBA images, leased only while this tab is open, with a corner
+-- badge layered over each swatch.
 swatchGallery :: DemoState -> NanoUI ()
 swatchGallery st =
   rowWith (wrap . lineAlign LinesCenter . tight . gap 12 . fillW) $
@@ -443,7 +443,7 @@ iconsAndAdornments (Right Icons {..}) = do
   weight <- useVar ""
   secret <- useVar ""
   secretShown <- useVar False
-  -- A one-colour icon takes the text colour, or a fontColor.
+  -- Single-color SVGs inherit the current text color or fontColor.
   tint <- themeAccent <$> uiTheme
   rowWith (tight . gap 12 . alignMid) $
     for_ [iconClock, iconCheck, iconStar, iconFace] $ \icon -> do
@@ -475,9 +475,9 @@ iconsAndAdornments (Right Icons {..}) = do
         }
       secret
 
--- | An animated GIF, decoded on a worker thread ('useTask') while this tab
--- shows. Each frame is its own image; the clock picks one every 100 ms, and
--- the view wakes for the next one only while the GIF is on screen.
+-- | An animated GIF decoded on a worker thread ('useTask') while this tab is
+-- open. Each frame gets its own image handle; the clock steps every 100 ms,
+-- scheduling the next wake only while the GIF is visible on screen.
 animatedGif :: Task () (Either String [GifFrame]) -> NanoUI ()
 animatedGif task = do
   decoded <- useTask task () (loadGif "data/lick.gif")
@@ -515,7 +515,7 @@ typographyTab = do
   isUnderlined <- useVar False
   isStruck <- useVar False
   heading "Typography & Font Styling"
-  muted "Sizes, weights, slant and decorations are style modifiers, composed like layout ones."
+  muted "Sizes, weights, slant, and decorations compose just like layout modifiers."
   separator
   heading "Live Playground"
   columnWith (tight . gap 12 . fillW) $ do
@@ -580,7 +580,7 @@ richTextSample = do
   clicked <-
     richTextWith fillW
       [ "A paragraph can mix ", strong "bold", ", ", emphasis "italic", ", "
-      , inlineCode "monospace", " and ", inlineWith (fontSemiBold . fontColor (colorRGBA 229 192 123 255)) "coloured"
+      , inlineCode "monospace", " and ", inlineWith (fontSemiBold . fontColor (colorRGBA 229 192 123 255)) "colored"
       , " pieces, ", inlineWith (fontSize 20) "larger", " ones on the same baseline, and links such as "
       , hyperlink "documentation" "the documentation", " or ", hyperlink "changelog" "the changelog"
       , ". It wraps at the width of its column."
@@ -653,19 +653,19 @@ tabsTab docsVar = do
   place <- useEnumVar TabTop
   active <- useVar (1 :: Int)
   heading "Tabs"
-  muted "A middle click also closes a tab. Only the selected tab's body runs."
-  -- Two header-only strips pick the look of the one below.
+  muted "Middle-click closes a tab. Only the active tab's body runs."
+  -- Two header-only strips control the style and placement of the tab view below.
   let segmented = defaultTabsConfig {tabsStyle = TabSegmented}
   responsiveRowCol 760 (tight . gap 12 . fillW) $ do
     field "Style" (boundedTabBarConfigured segmented enumLabel look)
     field "Placement" (boundedTabBarConfigured segmented enumLabel place)
   docs <- readVar docsVar
   let fresh = 1 + maximum (3 : docs)
-      -- Actions on the whole strip go after its headers.
+      -- Trailing actions sit right after the tab headers.
       newDoc = whenM (styled subtle (buttonWith (tight . fixedWH 28 28) "+")) $ do
         writeVar docsVar (docs <> [fresh])
         writeVar active fresh
-      docTab d = closableTab d (docName d) (muted ("The body of " <> docName d <> ", which runs only while its tab is selected."))
+      docTab d = closableTab d (docName d) (muted ("Contents of " <> docName d <> " (evaluated only while this tab is active)."))
       problems = (tab 0 "Problems" (muted "Three problems.")) {tabBadge = Just "3"}
   style <- readVar look
   orientation <- readVar place
@@ -740,9 +740,8 @@ plotsTab cache = do
     figure "Sleep vs focus" (plot cache (minH 240 . fillW) sleepFocusChart)
     figure "Area" (areaChart cache (minH 240 . fillW) areaData)
   figure "Drawing" (diagram (fillW . maxH 200) . drawingSample =<< uiPlotStyle)
-  -- The canvas draws from the theme's series colours and its rect alone, so
-  -- it is keyed by those colours: its paths are triangulated once, not on
-  -- every frame.
+  -- Keyed by the theme's series colors so paths are triangulated once instead
+  -- of on every frame.
   figure "Canvas paths" $ do
     theme <- uiTheme
     canvasConfigured
@@ -808,11 +807,11 @@ debugBody =
 
 -- Diagnostics -----------------------------------------------------------------
 
--- | The headline frame statistics, without opening the Debug window. Asking
--- for them keeps the backend sampling, so only while this tab shows.
+-- | Headline frame statistics displayed inline without opening the Debug
+-- window. Reading stats keeps backend sampling active only while this tab is open.
 diagnosticsTab :: NanoUI ()
 diagnosticsTab = do
   heading "Diagnostics"
-  muted "Sampled four times a second while this tab shows. F12 opens the Debug window with the rest."
+  muted "Updated four times a second while this tab is open. Press F12 for the full Debug window."
   separator
   diagnosticsRows

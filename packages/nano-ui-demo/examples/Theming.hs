@@ -1,23 +1,20 @@
--- | Theming: pick a theme, restyle part of a view, and colour your own drawing from the theme.
+-- | Theming: switch themes, restyle subtrees, and read theme colors for custom drawing.
 --
--- The context holds one base theme for the whole app. This example sets it
--- with 'setUiTheme' on every frame, from the radio choice. That is free: an
--- unchanged theme is a no-op, and only a real change repaints the window.
--- "Follow system" reads the desktop's light/dark preference with
--- 'systemAppearance' and maps it to a theme with 'lightDark'.
+-- The context holds one base theme for the entire app. Here 'setUiTheme' runs
+-- every frame from the radio selection, which is free because an unchanged
+-- theme is a no-op and only actual changes repaint the window. "Follow system"
+-- queries the desktop's light/dark setting via 'systemAppearance' and selects
+-- a theme with 'lightDark'.
 --
--- Everything else is a theme modifier, a plain @Theme -> Theme@ function.
--- 'styled' applies one to a part of the view, scopes nest, and modifiers
--- compose with @(.)@ like layout modifiers do. Because a modifier changes
--- whatever theme is around it rather than naming colours of its own, the
--- same 'primary' or 'pill' looks right in every theme in the list. Flip
--- through them and watch the buttons and the "Brand" panel follow along.
+-- Subtree overrides are plain @Theme -> Theme@ functions applied with 'styled'.
+-- Scopes nest and modifiers compose with @(.)@ just like layout modifiers.
+-- Because modifiers adapt whatever theme is active rather than hardcoding
+-- colors, helpers like 'primary' and 'pill' look right across every theme.
 --
--- Your own drawing ('box', a 'fontColor' label) has no theme of its own, so
--- read the theme with 'uiTheme' and take colours from it ('themeAccent',
--- 'themeSeries'). See Animation.hs for animating a colour.
+-- Custom graphics ('box', 'fontColor' labels) read colors directly from
+-- 'uiTheme' ('themeAccent', 'themeSeries'). See Animation.hs for animating colors.
 --
--- Run it with @cabal run nano-ui-example-theming@.
+-- Run with @cabal run nano-ui-example-theming@.
 module Main (main) where
 
 import Control.Monad (forM_)
@@ -67,9 +64,9 @@ choiceTheme = \case
   TomorrowMidnight -> pure tomorrowMidnightMinDarkTheme
   Gruvbox -> pure gruvboxTheme
 
--- | A whole theme from 16 colours. 'themeFromBase16' picks the dark or light
--- mapping by comparing the background with the foreground. A top-level
--- value, so it is built once rather than every frame.
+-- | A complete theme derived from 16 Base16 colors. 'themeFromBase16' picks
+-- the dark or light mapping by comparing background and foreground luminance.
+-- Defined at top level so it is built once rather than on every frame.
 gruvboxTheme :: Theme
 gruvboxTheme =
   themeFromBase16
@@ -142,11 +139,11 @@ view = do
           heading "Brand section"
           checkbox "Uses the brand accent" agree
           slider 0 100 level
-          _ <- styled pill (button "Pill, in brand colours")
+          _ <- styled pill (button "Pill, in brand colors")
           pure ()
 
-      -- Colours read from the theme, for things the theme does not style
-      -- itself. They change with the theme like the widgets do.
+      -- Read colors from the active theme for custom drawing so they adapt
+      -- automatically whenever the theme changes.
       theme <- uiTheme
       card $ do
         labelWith (tight . fontColor (themeAccent theme) . fontMedium) "Drawn in themeAccent"

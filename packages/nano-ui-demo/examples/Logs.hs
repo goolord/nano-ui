@@ -198,7 +198,7 @@ green = colorRGBA 163 190 140 255
 status :: Color -> Text -> NanoUI ()
 status c = labelWith (fontMono . fontBold . fontColor c . tight)
 
--- | A panel with custom background and border colours.
+-- | A panel with custom background and border colors.
 tintedPanel :: Color -> Color -> (Layout -> Layout) -> NanoUI a -> NanoUI a
 tintedPanel bg border f = styled (panelStyle (background bg . borderColor border)) . panelWith f
 

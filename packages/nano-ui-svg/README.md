@@ -1,10 +1,8 @@
 # nano-ui-svg
 
-SVG export for [nano-ui](https://github.com/goolord/nano-ui): render `DrawOp`s
-from canvases, custom widgets and `nano-ui-diagrams` charts, or a whole
-painted frame of any view.
+SVG exporter for [nano-ui](https://github.com/goolord/nano-ui). Export either raw `DrawOp` lists (from canvases, custom widgets, and `nano-ui-diagrams` charts) or full rendered frames of any UI view.
 
-## Draw ops
+## Exporting draw ops
 
 ```haskell
 import Data.Text (Text)
@@ -21,32 +19,29 @@ badgeSvg cdc = drawOpsToSvg bounds $ runCanvasFor cdc $ do
     bounds = Rect 0 0 120 40
 ```
 
-`renderDrawOpsSvg` takes an `SvgConfig`: `svgStandalone = False` emits a `<g>`
-fragment instead of an `<svg>` document, `svgPrecision` sets coordinate
-digits, `svgImageUri` maps image ids to URIs (unresolved images are dropped),
-and `svgIdPrefix` keeps clip and gradient ids apart when several renders share
-a page.
+For finer control, `renderDrawOpsSvg` takes an `SvgConfig`:
 
-## Whole frames
+- `svgStandalone = False` emits an inline `<g>` fragment instead of a full `<svg>` document.
+- `svgPrecision` caps coordinate decimal places.
+- `svgImageUri` maps `ImageId` values to `href` URLs or data URIs (unmapped images are omitted).
+- `svgIdPrefix` namespaces clip-path and gradient IDs so multiple SVGs can share one HTML page safely.
+
+## Exporting entire UI frames
 
 ```haskell
 import NanoUI.Draw.FrameSvg (defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 
-enableSvgExport ctx -- once, before running frames
+enableSvgExport ctx -- call once before running frames
 (_, drawData, _) <- runFrame ctx inp view
 svg <- frameToSvg defaultFrameSvgConfig ctx inp drawData
 ```
 
-Widgets paint straight to the vertex buffer, so `enableSvgExport` turns on
-recording of the shapes they draw and moves text onto spans. `frameToSvg`
-fails on a context without it.
+Normally, widgets paint straight into vertex buffers. Calling `enableSvgExport` tells the paint pass to also record vector shapes and text spans (`frameToSvg` fails on a context where recording was not enabled).
 
-Text is fitted to the widths the context measured. A headless test context
-measures in a 16 px monospace grid, so run frames inside an SDL session
-(`withSdl`) when the text should read like the app's.
+Exported text aligns to the metrics measured during the frame. Headless test contexts (`newPixelContext`) measure text on a 16 px monospace grid; wrap your frames in `withSdl` if you want exact TrueType metrics matching your desktop app.
 
-`nano-ui-demo-svg` in `nano-ui-demo` is a working example.
+See `nano-ui-demo-svg` in `nano-ui-demo` for a complete runnable example.
 
 ## Documentation
 
-[The nano-ui Book](https://goolord.github.io/nano-ui/book/)
+- [The nano-ui Book: SVG export](https://goolord.github.io/nano-ui/book/packages/index.html#svg-export)

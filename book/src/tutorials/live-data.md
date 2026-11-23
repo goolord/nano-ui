@@ -1,8 +1,8 @@
 # Tutorial 3: Live Data & Background Work
 
-A frame must finish quickly. Searching a database, downloading a file, or waiting for a sensor cannot happen inside the view, or the window stops responding while the work runs. nano-ui moves that work to worker threads behind two handles, `Task` and `Stream`, and wakes the frame loop when there is something new to draw.
+A view must finish quickly so the interface stays responsive. Slow work like querying a database, fetching a URL, or reading from a sensor cannot block inside `NanoUI`. Instead, `nano-ui` runs background work on Haskell worker threads through two handles, `Task` and `Stream`, and wakes the event loop whenever new results arrive.
 
-This tutorial builds three small panes from [`packages/nano-ui-demo/examples/Tasks.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Tasks.hs) plus the live chart from [`LiveChart.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/LiveChart.hs). Run them with:
+This tutorial walks through three panes from [`packages/nano-ui-demo/examples/Tasks.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Tasks.hs) and the real-time chart in [`LiveChart.hs`](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/LiveChart.hs). Run them with:
 
 ```sh
 cabal run nano-ui-example-tasks
@@ -10,40 +10,40 @@ cabal run nano-ui-example-live-chart
 ```
 
 > [!IMPORTANT]
-> Compile with `-threaded`. The frame loop sleeps while a job runs, and the job runs on a Haskell thread while the loop is blocked.
+> Always compile executables with `-threaded`. While a background job runs, the main loop sleeps in the OS event wait; without the threaded runtime, that wait blocks worker threads too.
 
 ## 1. Allocate handles once
 
-A `Task` runs one typed job; a `Stream` carries one typed push channel. Both are created during setup, like a `Var`:
+A `Task` runs a single keyed job to completion, while a `Stream` pushes a series of updates over time. Allocate both once in `IO` during startup, just like `newVar`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:handles}}
 ```
 
-The handle fixes the key and result types, so a task cannot be reused for a different job.
+Each handle locks in its key and result types, keeping unrelated jobs separate.
 
-## 2. A background search
+## 2. Background search
 
-The query field is debounced: `searchInput'` reports `respChanged` once typing pauses, not on every keystroke. The committed query becomes the task's key:
+We debounce user input with `searchInput'`, which only sets `respChanged` once typing pauses instead of firing on every keystroke. The committed query then becomes the task's key:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:search_card}}
 ```
 
-`slowSearch` is ordinary blocking IO:
+`slowSearch` is ordinary blocking `IO`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:slow_search}}
 ```
 
-What the loop does with it:
+Here is how `useTaskStatus` coordinates the worker with the UI loop:
 
-- The first frame calls `useTaskStatus` with a new key, which starts a worker thread.
-- Later frames return immediately. `TaskRunning previous` carries the last completed result, so the list does not flash empty when a new query starts.
-- The worker finishes and wakes the loop for a frame. The next call reports `TaskDone`.
-- Changing the key (typing a new committed query) cancels the old worker with an asynchronous exception and starts the new one.
+- On the first frame with a new key, it spawns a worker thread for that key.
+- On subsequent frames while the worker runs, it returns immediately with `TaskRunning previous`. Keeping the previous result lets the UI show existing rows instead of flashing empty.
+- When the worker completes, it wakes the loop so the next frame receives `TaskDone`.
+- If the key changes before the worker finishes (for instance, the user commits a new search), the old thread is cancelled with an asynchronous exception and a fresh worker starts.
 
-When only the latest result matters, use `useTask`:
+If you only need the latest available value and do not care about distinguishing loading or error states, `useTask` is shorter:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:use_task}}
@@ -51,18 +51,18 @@ When only the latest result matters, use `useTask`:
 
 ## 3. Retrying a failed job
 
-A job that throws becomes `TaskFailed err previous`. The exception is shown and the key includes an attempt counter, so pressing Retry reruns the *same* input:
+If a task throws a synchronous exception, `useTaskStatus` returns `TaskFailed err previous`. To let a Retry button rerun the *same* input, include an attempt counter in the key:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:flaky_card}}
 ```
 
-Two rules are visible here:
+Two rules stand out here:
 
-- The key must change to rerun. Keying by the input alone would never restart an identical request, so the attempt number is part of the key.
-- Each branch is a whole `scope`. The branches declare different widgets, and the scope keeps the widget ids after the card stable as the status changes.
+- **Keys control restarts.** A task only restarts when its key changes. Including an integer attempt counter guarantees that clicking Retry always produces a fresh key.
+- **Wrap status branches in `scope`.** Each `case` branch renders different widgets, so `scope` keeps widget IDs stable for everything that comes after the card.
 
-Cancellation is an asynchronous exception, so acquire resources inside the job with `bracket`:
+Because cancellation delivers an asynchronous exception, always manage external resources inside a job with `bracket`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Tutorials.hs:bracket}}
@@ -70,56 +70,56 @@ Cancellation is an asynchronous exception, so acquire resources inside the job w
 
 ## 4. Streams: many updates, one frame
 
-A `Stream` is for work that pushes many times per job: progress ticks, sensor readings, tokens from a model. Its producer receives `update` and runs until it returns or is cancelled:
+Use a `Stream` when a background producer pushes values repeatedly, such as progress updates, live telemetry, or streamed LLM tokens. The producer receives an `update` callback and runs until it returns or is cancelled:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:progress_card}}
 ```
 
-- To stop the stream, stop calling the hook. When `isRunning` is false, `useStream` is not called, and the producer is cancelled.
-- Updates coalesce. If the producer pushes five values between two frames, one frame runs and draws the latest value.
-- The stream's state starts from the initial value. Restarting after a pause begins at `0` here, which is why the label explains how to start over. To resume from the last state, save it outside and pass it as the initial value (the live chart below does this).
-- Keep the hook outside tabs when the stream must keep running. Like a task, a stream is released when its hook is skipped for a whole frame.
+- **Stop a stream by stopping its call.** When `isRunning` becomes `False`, skipping `useStream` for a frame automatically cancels the producer thread.
+- **Updates coalesce automatically.** If the producer calls `update` five times before the next frame renders, `nano-ui` runs one frame with the latest value.
+- **Stopping resets stream state.** When the stream restarts, it starts back from its initial value (`0` here). If you want pause and resume instead of restart, save the latest value outside the stream and pass it back in as the initial value (as the live chart below does).
+- **Keep persistent hooks outside tabs.** Just like `useTask`, a `useStream` call that is skipped for an entire frame cancels its worker.
 
-A paused progress pane costs no frames.
+When the progress stream is paused, the window stops redrawing and uses no CPU.
 
 ## 5. A live chart
 
-A `Stream` feeds the chart through a `PlotCache`. The cache is allocated once and passed to `plot`, which compares the chart with the one stored in the cache and rebuilds the diagram only when the data or theme changes:
+To plot streaming data, pair a `Stream` with a `PlotCache`. Allocate the cache once in `IO` and pass it to `plot`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:chart_handles}}
 ```
 
-The view pauses by not calling the stream, and resumes from the saved feed:
+When paused, the view skips `useStream` and draws the last saved feed; resuming starts a new stream seeded with that saved state:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:chart_card}}
 ```
 
-`Feed`, `advance`, and `fmt` are in `LiveChart.hs`; `walkChart` builds the chart value:
+`Feed`, `advance`, and `fmt` live in `LiveChart.hs`, and `walkChart` constructs the `Chart` value:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/LiveChart.hs:walk_chart}}
 ```
 
-This is the chart after its first 200 samples, when the window is full:
+After 200 samples fill the rolling window, the chart looks like this:
 
 <img src="../images/charts/live-chart.svg" alt="A line chart of a 200-sample random walk with a grid, the x axis titled sample and the y axis titled value.">
 
-The chart API is small:
+The plotting API is compact:
 
-- `line`, `scatter`, `bar`, `area`, and `step` build series from points (or category/value pairs for bars).
-- `chart` takes the list of series; `withGrid`, `withLegend`, `withXAxis`, `withYAxis`, and `withTitle` decorate it.
-- `plot cache layout theChart` draws it and returns a `PlotResponse` whose `plotHover` is the nearest data point under the pointer.
+- `line`, `scatter`, `bar`, `area`, and `step` construct series from `(x, y)` points (or `(label, value)` pairs for bars).
+- `chart` combines a list of series, and `withGrid`, `withLegend`, `withXAxis`, `withYAxis`, and `withTitle` configure axes and labels.
+- `plot cache layout theChart` renders the chart and returns a `PlotResponse` whose `plotHover` field gives the data point closest to the pointer.
 
-Building the `Chart` value every frame is cheap: it is a plain value, and comparing a few hundred points costs little. Rebuilding the *diagram* is expensive, and the `PlotCache` skips it when the chart and theme are unchanged.
+Constructing a `Chart` value on every frame is cheap, and comparing a few hundred points takes almost no time. Rebuilding the underlying vector geometry is the expensive part, and `PlotCache` skips that rebuild whenever the chart and theme match the previous frame.
 
-## 6. Try it
+## 6. Things to try next
 
-- Add a search that runs on every keystroke (key by the query) and compare the cancellation behaviour with `searchInput'`.
-- Stream markdown tokens into `NanoUI.Markdown` and append them incrementally (see [Ecosystem Packages](../packages/index.md)).
-- Virtualize a 100,000-row log list using `getScrollMetricsUi` (see [Layout & Scrolling](../layout/index.md) and the `Logs.hs` example).
-- Replace the streamed chart with a `Task` that loads a whole dataset once.
+- Key a search task directly on the live query text (without debouncing) and observe how cancellation behaves compared to `searchInput'`.
+- Stream Markdown tokens into `NanoUI.Markdown` with incremental appends (see [Ecosystem Packages](../packages/index.md)).
+- Virtualize a 100,000-row log view using `getScrollMetricsUi` (see [Layout & Scrolling](../layout/index.md) and `Logs.hs`).
+- Swap the streaming chart for a one-shot `Task` that loads a full dataset from disk.
 
-The full lifecycle reference is [Async Work & Animation](../advanced/async.md).
+For the full lifecycle details of tasks, streams, animations, and timers, see [Async Work & Animation](../advanced/async.md).

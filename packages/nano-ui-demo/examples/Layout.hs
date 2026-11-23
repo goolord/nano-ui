@@ -11,7 +11,7 @@
 -- also places itself, by its own alignment, across its parent's axis.
 --
 -- The page below is one long scroller of captioned sections. Turn on
--- "Explain layout" at the top to outline every layout node, coloured by
+-- "Explain layout" at the top to outline every layout node, colored by
 -- depth; the node under the pointer is tinted with its content box
 -- outlined. It changes nothing else, so it is safe to leave in a debug menu.
 --
@@ -78,7 +78,7 @@ view =
           flex
           btn id "Share"
           btn id "Download"
-        -- Two flexes split the room, centring what sits between them.
+        -- Two flex spacers split remaining space, centering what sits between them.
         toolbar $ do
           btn id "Back"
           flex
@@ -86,7 +86,7 @@ view =
           flex
           btn id "Next"
 
-      section "Centring" "A child aligns itself: alignCenter across a column, alignMid down a row. Layers place a child by its alignment on both axes." $ do
+      section "Centering" "A child aligns itself: alignCenter across a column, alignMid down a row. Layers place a child by its alignment on both axes." $ do
         columnWith (tight . fillW) $ btn alignCenter "alignCenter in a column"
         rowWith (tight . gap 8 . fillW . fixedH 56) $ do
           btn alignTop "alignTop"

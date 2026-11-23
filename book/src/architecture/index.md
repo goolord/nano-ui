@@ -1,85 +1,87 @@
 # Architecture & Internals
 
-How a frame runs, and how applications are structured around it. None of this is needed to write a view; it explains what `readVar`, focus, and damage cost.
+You do not need to memorize internals to build apps with `nano-ui`, but knowing how a frame executes explains why `readVar` placement, focus ordering, and damage tracking behave the way they do.
 
 ## The frame lifecycle
 
 ![Frame lifecycle](../images/rendering-pipeline.svg)
 
-Each frame:
+Every frame runs through six steps:
 
-1. The `NanoUI ()` action runs top-to-bottom, appending layout nodes, reading input, and reading and writing `Var`s.
-2. If a `Var` was written after it was read this pass, the action runs again with one-shot input events cleared.
-3. The layout pass computes a rectangle for every node from flex weights, gaps, padding, and constraints.
-4. Pointer coordinates, hover, press, shortcuts, and Tab order are resolved against the new geometry.
-5. The new geometry and draw ops are diffed against the previous frame's to find the damaged region.
-6. The backend rasterizes and presents only the damaged region.
+1. **Run the view.** Your `NanoUI ()` action executes top to bottom, declaring layout nodes, reading input events, and reading or updating `Var`s.
+2. **Optional second pass.** If the view wrote to a `Var` that it had already read earlier in the same pass, `nano-ui` runs the view one more time (with one-shot clicks and key presses cleared) so earlier widgets pick up the new value.
+3. **Solve layout.** The layout solver computes exact rectangles for every node from sizing rules, flex weights, gaps, and padding.
+4. **Resolve input and focus.** Pointer hit-testing, hover/press states, keyboard shortcuts, and Tab focus order are resolved against the newly solved geometry.
+5. **Compute damage.** Geometry, widget state, theme, and draw commands are diffed against the previous frame to find the minimal rectangles that actually changed.
+6. **Paint and present.** The backend rasterizes only the damaged region into vertex and index buffers and presents it to the window.
 
-The view runs before layout, so `respRect` is the **previous** frame's rectangle. Focus is resolved after the view, so a focus request takes effect next frame.
+Because layout runs *after* your view executes, `respRect` always reflects the **previous** frame's rectangle. Likewise, focus requests resolve at the end of the frame and appear focused on the next frame.
 
-## Consequences
+## Practical consequences
 
-- The view can run more than once per frame. A write to a `Var` read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (`whenM (button ...)`), and never allocate frame-lived resources inside the view.
-- `readVar` placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. Either way a change repaints only the widgets whose text, value or style it altered.
-- Geometry lags one frame. `respRect` is empty on a widget's first appearance. Tests warm up before targeting rectangles.
-- Widget ids are positional. Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. `scope` and `withKey` keep the counts stable; see [Widget Identity & Keys](../state/identity.md).
-- An idle window costs nothing. With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.
+- **Views can run twice in one frame.** Always guard side effects behind events (`whenM (button ...)`), and never allocate persistent state or handles inside the view.
+- **`readVar` placement affects pass count.** Putting `readVar` below the widget that edits it resolves edits in a single pass; reading above it triggers a second pass. Either way, damage tracking only repaints the widgets whose visual output changed.
+- **Geometry lags by one frame.** On the very first frame a widget appears, `respRect` is empty. Headless tests warm up a frame before clicking computed rectangles.
+- **Widget IDs come from sibling order.** Conditional widgets, reordered lists, and conditional overlays shift subsequent IDs unless stabilized with `scope`, `withKey`, and unconditional overlay calls. See [Widget Identity & Keys](../state/identity.md).
+- **Idle windows use zero CPU and GPU.** When no animation, timer, task, or input event is active, the loop blocks in the OS event queue. Never dirty the context every frame to force redraws.
 
-## Application patterns
+## Application architecture patterns
 
-Three applications (`ned`, `stronghead`, `winget-gui`) share one rule, **set up once in `IO`, then run**, and differ in where durable state lives.
+Real `nano-ui` applications (`ned`, `stronghead`, and `winget-gui`) all follow the same entry rule (**allocate once in `IO`, then run**), while choosing different structures for durable state.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:main}}
 ```
 
-### Pattern A: one domain state and a wake channel
+### Pattern A: single domain `IORef` plus a wake channel
 
-`winget-gui` keeps package-manager results in one `IORef` and snapshots it at frame start:
+`winget-gui` stores package-manager state in one `IORef` and snapshots it at the top of each frame:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_a}}
 ```
 
-Gather every read into one `Frame` record before building the window, memoize derived collections in `IORef (Maybe (key, value))` caches keyed by a revision counter, and read shortcuts after the widgets. Use this when the domain state is shared with workers, a database, or a protocol.
+Snapshot everything into a plain `Frame` record before drawing, cache expensive derived lists in `IORef (Maybe (rev, value))` keyed by a revision counter, and handle keyboard shortcuts at the bottom of the view. This pattern works especially well when domain state is shared across worker threads, subprocesses, or network clients.
 
 ### Pattern B: an app record of `Var`s
 
-`stronghead` has many independent panels, each with its own view state:
+`stronghead` organizes many independent panels by storing their view state in a top-level record of `Var`s:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_b}}
 ```
 
-Panel modules take the slice they own. Use this when the application is mostly interactive UI state with little external I/O.
+Each panel module receives only the slice of `Var`s it owns. Choose this when your application is mostly interactive UI state with lightweight external I/O.
 
 ### Pattern C: application-owned state
 
-`ned` keeps a plain `IORef App` that nano-ui holds no reference to. The view projects slices and re-reads after anything that may change the model:
+`ned` keeps its entire editor state inside an `IORef App` that `nano-ui` knows nothing about. The view reads slices as needed and checks after input whether the view needs another frame:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Architecture.hs:pattern_c}}
 ```
 
-`requestFrame` schedules one more frame; call it when what was drawn no longer matches the state. Use this for editors, terminals, games, and models that already exist as a library.
+Calling `requestFrame` schedules one immediate follow-up frame whenever an action invalidated what was just drawn. This fits text editors, terminals, emulators, and apps wrapping an existing headless library.
 
-### Choosing
+### Choosing a pattern
 
-| The application… | Pattern |
+| If your application... | Good fit |
 | --- | --- |
-| Has one domain state, uses worker threads, runs commands | A: `IORef` + `askWake` |
-| Is a large set of interactive panes and tools | B: record of `Var`s |
-| Has a model that predates the UI or is shared with a library | C: app-owned `IORef` + `requestFrame` |
-| Is a state machine with explicit transitions | Elm-style (`nano-ui-emit`) |
-| Is a small tool | Whatever is simplest; a handful of `useVar`s is fine |
+| Has one central domain state updated by workers or CLI commands | Pattern A (`IORef` + `askWake`) |
+| Consists of many interactive tool panes and inspectors | Pattern B (record of `Var`s) |
+| Wraps an existing domain model or library | Pattern C (app-owned `IORef` + `requestFrame`) |
+| Models cleanly as pure `Msg -> Model -> Model` transitions | Elm-style (`nano-ui-emit`) |
+| Is a small utility or prototype | Keep it simple: a few `useVar` calls are plenty |
 
-Patterns mix. An `IORef` domain state with `Var` view state is normal; an Elm reducer can sit inside one pane of a `Var`-based application.
+These patterns mix freely. Combining an `IORef` for domain data with `useVar` for view-local flags is standard, and an Elm-style reducer can happily run a single pane inside a larger `Var`-based app.
 
-## The shared view discipline
+## View-writing discipline
 
-1. Read state once at the top, or immediately before the subtree that uses it.
-2. Build top-to-bottom. Layout is solved after the view.
-3. Read after the parts that may write.
-4. Run keyboard and focus queries last.
-5. Guard effects with events. The view can run more than once per frame.
-6. Keep derived values derived. Cache expensive work by revision, not by copying fields.
+Across every pattern, six habits keep views clean and fast:
+
+1. Read state once at the top, or right before the section that needs it.
+2. Build layout top to bottom (remembering that layout solves after the view returns).
+3. Place `readVar` below the widgets that edit it when possible.
+4. Run focus queries and focus-dependent keyboard shortcuts last.
+5. Guard every side effect behind an event check.
+6. Derive computed values fresh each frame, caching only genuinely expensive derivations by revision counter.

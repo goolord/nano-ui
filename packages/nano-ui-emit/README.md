@@ -1,7 +1,6 @@
 # nano-ui-emit
 
-Typed messages and reducers for [nano-ui](https://github.com/goolord/nano-ui).
-Add `nano-ui-emit` to your Cabal dependencies and import `NanoUI.Emit`.
+Statically typed message emission and Elm-style reducers for [nano-ui](https://github.com/goolord/nano-ui). Add `nano-ui-emit` to your `build-depends` and import `NanoUI.Emit`.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -17,71 +16,44 @@ view volume = column $ do
   emitWhen (button "Save") Save
 ```
 
-`NanoUIE msg a` fixes the message type for a view. It is an ordinary
-`NanoUI a` action with the view's message sink in scope as the implicit
-parameter `?emit`, so every widget exported by `nano-ui` runs in it unchanged:
-containers, controls, overlays, scopes, and widgets that take callbacks or
-several bodies. `NanoUI.Emit` re-exports `NanoUI`. `emit :: msg -> NanoUIE
-msg ()` needs no `Typeable` constraint: emitting a different type is a compile
-error. Function-valued messages and polymorphic message types work too.
+`NanoUIE msg a` is a regular `NanoUI a` action with a typed message sink in scope via the implicit parameter `?emit`. Because `NanoUI.Emit` re-exports all of `NanoUI`, every built-in container, control, overlay, and scope runs inside `NanoUIE` unchanged. `emit :: msg -> NanoUIE msg ()` requires no `Typeable` constraint, so emitting a mismatched message type fails at compile time, and polymorphic or function-valued messages work out of the box.
 
-Use `mapMessages ChildMessage childView` to embed a reusable component's
-message type in a parent message type. It preserves the result and sends
-messages directly to the parent in order, without a nested collection queue.
+Embed reusable child components using `mapMessages ChildMsg childView`, which forwards messages directly to the parent's sink in traversal order without allocating an intermediate queue.
 
-- `emitWhen` emits when a widget such as `button` activates.
-- `emitChanged` runs a `Var`-based widget on a temporary `Var` initialized to
-  the current model value and emits only when the value differs.
-- `emitEdited` additionally requires `respChanged`.
+Widget adapters cover the common interaction cases:
 
-Each adapter runs its widget once per view pass.
+- `emitWhen widget msg`: Emits `msg` when a `NanoUI Bool` control (such as `button`) activates.
+- `emitChanged widget old toMsg`: Runs a `Var`-based widget on a temporary `Var` seeded with `old`, emitting `toMsg new` whenever the resulting value differs.
+- `emitEdited widget old toMsg`: Like `emitChanged`, but also checks `respChanged` so programmatic updates are not mistaken for user edits.
 
-Give views a signature, `view :: Model -> NanoUIE Msg ()`: the runners take
-views of that shape, and a binding outside any view has no sink for its
-`emit` without one. A widget that emits itself, passed by name to
-`emitChanged`, needs a lambda (`emitChanged (\v -> myInput v) old SetValue`).
+Always annotate top-level views and helpers that call `emit` with their explicit `NanoUIE Msg a` signature so GHC knows the message sink is in scope. When passing a widget that itself emits into `emitChanged`, eta-expand it (`emitChanged (\v -> myInput v) old SetValue`).
 
-## Running
+## Running and testing
 
-The SDL and RGFW reducer runners accept `model -> NanoUIE msg ()`, paired
-with an update function `msg -> model -> model`.
+Desktop reducer runners (`runSdlAppReduce`, `runRgfwAppReduce`, `runSdlWebAppReduce`) pair a `model -> NanoUIE msg ()` view with a pure update function `msg -> model -> model`.
 
-For headless frames, `runFrameE` returns `(result, [msg], drawData, dirty)`.
-`runFrameReduce` returns `(result, model, [msg], drawData, dirty)` and requests
-another frame when the reduced model changes. Drawing uses the model from
-before reduction, as with the backend runners. `runClickReduce` drives a
-press/release pair in tests.
+For headless tests and custom loops:
 
-Messages are collected in emission order across all passes of a frame,
-including local-state rebuilds. Each invocation owns its queue; exceptions
-cannot leave messages for the next frame. Guard event-driven emissions with
-an event, since unconditional emissions run on every pass.
+- `runFrameE` runs one frame and returns `(result, [msg], drawData, dirty)`.
+- `runFrameReduce` folds emitted messages into the model, returning `(result, model, [msg], drawData, dirty)` and flagging another frame whenever the model changes. (Just like desktop runners, `drawData` reflects the model before reduction.)
+- `runClickReduce` drives a press/release click pair in tests.
 
-`runNanoUIE` collects messages from a single `NanoUI` action. For a complete
-frame, use `runFrameE` rather than putting `runNanoUIE` inside `runFrame`:
-the latter only returns the final pass's messages if the view rebuilds.
+Messages emitted across all passes of a frame (including local-`Var` second passes) are collected in order, and exceptions cannot leak leftover messages into the next frame. Never call `emit` unconditionally at the top level of a view, or it will fire on every pass.
 
-## Migrating from core emission
+`runNanoUIE` collects messages from a single `NanoUI` action. For full frames, prefer `runFrameE` over nesting `runNanoUIE` inside `runFrame`, since the latter would drop messages from an earlier pass if the view runs twice.
 
-- Add the `nano-ui-emit` dependency; `NanoUI.Emit` now lives here.
-- Change emitting views from `NanoUI a` to `NanoUIE Msg a`, lift ordinary
-  actions, and wrap containers as above.
-- Import `emit`, `runFrameReduce`, `runClickReduce`, `reduceMessages`, and
-  `reduceUpdates` from `NanoUI.Emit`.
-- `FrameMsg` and `decodeMessages` are gone. Messages are already typed; no
-  messages are silently ignored by runtime type.
-- Core `runFrame`, `runFrameEff`, and `run2Frames` now return
-  `(result, drawData, dirty)`. Use `runFrameE` for a typed message list.
-- The old runtime-typed `runFrameReduceEff` has been removed. Ordinary
-  effectful views still use `NanoUI.Effectful` and `runFrameEff`.
+## Migrating from older core emission
 
-## Documentation
-
-- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
-  online guide, tutorials, and Elm-style state documentation.
+- Add `nano-ui-emit` to `build-depends` and import `emit`, `runFrameReduce`, `runClickReduce`, `reduceMessages`, and `reduceUpdates` from `NanoUI.Emit`.
+- Change emitting view signatures from `NanoUI a` to `NanoUIE Msg a`.
+- `FrameMsg` and `decodeMessages` are gone because messages are statically typed.
+- Core `runFrame`, `runFrameEff`, and `run2Frames` return `(result, drawData, dirty)`; use `runFrameE` when you need emitted messages.
+- The old runtime-typed `runFrameReduceEff` has been removed. Effectful views continue to use `NanoUI.Effectful` and `runFrameEff`.
 
 ## Verification
 
-Run `cabal test nano-ui-emit-test`. The suite compiles a view that emits a
-`Bool` from an `Int` view with its type error deferred, and checks that the
-error fires with an `Int`/`Bool` mismatch.
+Run `cabal test nano-ui-emit-test`. Among other checks, the suite compiles a view emitting `Bool` inside an `Int` view using deferred type errors and verifies that GHC reports the type mismatch.
+
+## Documentation
+
+- [The nano-ui Book: Elm-Style State](https://goolord.github.io/nano-ui/book/state/elm.html): Patterns for combining `NanoUIE` with local `Var` state and testing reducers.

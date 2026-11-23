@@ -1,194 +1,190 @@
 # Recurring Bugs & Fixes
 
-Bugs and fixes from the git histories of nano-ui applications (`ned`, `stronghead`, and `winget-gui`). Each entry starts with the symptom.
+These issues showed up repeatedly while building real applications with `nano-ui` (`ned`, `stronghead`, and `winget-gui`). Scan the symptom table to jump straight to what you are seeing.
 
 ## Symptom index
 
 | Symptom | Section |
 | --- | --- |
-| Buttons and labels shift every frame | [Layout jitter](#1-layout-shifting--jitter) |
-| A list scrolls sideways when one row is long | [Layout jitter](#1-layout-shifting--jitter) |
-| A dropdown clips its longest option | [Layout jitter](#1-layout-shifting--jitter) |
-| A box inside a box inside a dialog | [Double borders](#2-double-borders--box-in-a-box) |
-| Text shimmers while scrolling at 125% scaling | [Text metrics](#3-text-metrics--the-pixel-grid) |
-| A custom drawing does not update | [Stale cached drawings](#4-stale-cached-drawings) |
+| Buttons and labels jitter sideways every frame | [Layout shifting & jitter](#1-layout-shifting--jitter) |
+| A list starts scrolling sideways when one row is wide | [Layout shifting & jitter](#1-layout-shifting--jitter) |
+| A dropdown cuts off its longest option | [Layout shifting & jitter](#1-layout-shifting--jitter) |
+| A box appears inside another box in a dialog | [Double borders & box in a box](#2-double-borders--box-in-a-box) |
+| Text shimmers while scrolling at 125% DPI scaling | [Text metrics & the pixel grid](#3-text-metrics--the-pixel-grid) |
+| A custom canvas stops updating | [Stale cached drawings](#4-stale-cached-drawings) |
 | A drag ghost freezes where it first appeared | [Stale cached drawings](#4-stale-cached-drawings) |
-| Content runs under the scrollbar | [Scroll details](#5-scroll-details) |
-| Ctrl+A fires while typing | [Focus and input ordering](#6-focus-and-input-ordering) |
-| Escape does not close anything while a field is focused | [Focus and input ordering](#6-focus-and-input-ordering) |
-| Typed keys never reach a custom widget | [Focus and input ordering](#6-focus-and-input-ordering) |
-| A drag selects one character leftward | [Focus and input ordering](#6-focus-and-input-ordering) |
-| SVG clip paths collide | [SVG export](#7-svg-export) |
+| List content slides underneath the scrollbar | [Scroll details](#5-scroll-details) |
+| Ctrl+A selects everything while typing in a search box | [Focus and input ordering](#6-focus-and-input-ordering) |
+| Escape stops working while a text field is focused | [Focus and input ordering](#6-focus-and-input-ordering) |
+| Typed characters never reach a custom widget | [Focus and input ordering](#6-focus-and-input-ordering) |
+| Dragging slowly leftward only selects one character | [Focus and input ordering](#6-focus-and-input-ordering) |
+| SVG clip paths collide on the same page | [SVG export](#7-svg-export) |
 
 ## 1. Layout shifting & jitter
 
-### A label whose text changes length moves its siblings every frame
+### A changing label pushes its siblings around
 
-A counter going `9 -> 10 -> 100`, a timer, or a byte total changes the label's natural width, which re-flows the row on every tick.
+Counters (`9 -> 10 -> 100`), timers, and byte totals change width as their text grows or shrinks, causing the whole row to reflow on every tick.
 
-**Fix:** pin the label to the width of its widest expected value:
+**Fix:** reserve enough width for the widest value you expect:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:fixed_width}}
 ```
 
-`stronghead` made this fix more than once ("fix markers count to fixed width").
+`stronghead` ran into this repeatedly on live marker counters until they were pinned with `fixedW`.
 
-### A long value inside a scrolling list widens the whole list
+### One long row makes a scrolling list scroll horizontally
 
-One long row increases the column's natural width, the list grows a horizontal scrollbar, and the bar appears and disappears as wide rows enter and leave.
+A single wide label stretches its column's natural width, causing a horizontal scrollbar to pop in and out as wide rows scroll through the viewport.
 
-**Fix:** make the cell fill its column instead of contributing natural width, and ellipsize the text:
+**Fix:** give the cell `fillW` so it fits within the column instead of widening it, letting `label` truncate overflow with `...`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:name_line}}
 ```
 
-### A drop-down clips its longest option
+### A dropdown clips its longest option
 
-A fixed width guessed for a select breaks when an option is long (`"Unknown disk · 113 apps · 9.24 GB"`).
+Hardcoding a guessed width for `select` breaks as soon as an option is longer than expected (such as `"Unknown disk · 113 apps · 9.24 GB"`).
 
-**Fix:** measure the options with the font and add the chrome:
+**Fix:** measure the options with the active font and add room for padding and the dropdown arrow:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:measured_select}}
 ```
 
-### Content-derived geometry recomputes and jitters
+### Content-driven column widths jitter as rows change
 
-Tree column widths, row heights, and pane splits that are derived from the current content every frame move when the content changes.
+Deriving tree column widths, row heights, or pane splits from the currently visible rows makes the layout jump whenever the visible set changes.
 
-**Fix:** lock the geometry. Use a constant row height, and store a pane split the user chose in saved layout state (`ned`'s "grid size locking").
+**Fix:** keep structural geometry stable. Use constant row heights, and store user-adjusted column widths or pane splits in state (as `ned` does for its locked grid layout).
 
-### `flex` around the wrong child
+### Using `flex` where `fillW` belongs
 
-Make the one growable child `fillW` instead. `stronghead` replaced `fixedW 90` + `flex` around a filter box with `fillW`, which also removed dead space.
+When only one child in a row should grow (such as a filter box), give that widget `fillW` directly instead of pairing `fixedW` with a `flex` spacer. Doing so in `stronghead` both simplified the row and removed awkward dead space.
 
 ## 2. Double borders & box in a box
 
-nano-ui fills padded containers with the panel color, and `scrollArea`, `panel`, and `card` each draw their own background, border, and radius. Nesting them inside popups, dialogs, and panes draws a box inside a box.
+Padded containers paint the panel surface, and `scrollArea`, `panel`, and `card` each draw their own background, border, and corner radius. Nesting them inside popups, modals, or panes quickly creates nested boxes.
 
-Symptoms:
+Common signs:
 
-- A `scrollArea` in a popup shows a bordered well inside the dialog.
-- A dialog has two concentric borders.
-- A pane with a panel inside a card looks recessed twice.
+- A `scrollArea` inside a popup renders a recessed bordered box inside the popup frame.
+- A dialog shows two concentric borders.
+- A `panel` inside a `card` looks double-framed.
 
-**Fix:** one level supplies the chrome.
+**Fix:** let only one layer own the chrome.
 
-- Give the outer dialog `padAll 0` and move the padding to the inner `columnWith (fillW . padAll 12 ...)`.
-- Or strip the inner surface:
+- Set `padAll 0` on the outer dialog and put the padding on an inner `columnWith (fillW . padAll 12 ...)`.
+- Or strip the inner surface's background and border:
 
   ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:strip_chrome}}
 ```
 
-- Set `themeFloatingWindow` and `themePopup` to the panel surface, so a padded body does not show a panel box inside the dialog.
-- Between two chrome regions, draw one `separator` at the seam instead of a border on the bottom of one and the top of the other.
+- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends cleanly into the dialog.
+- Between adjacent chrome regions, place a single `separator` in the parent instead of drawing touching borders on both sides.
 
-`stronghead` ("Remove duplicate borders from workspace popovers and notifications") and `winget-gui`'s dialogs both made this fix.
+Both `stronghead` and `winget-gui` adopted these patterns to eliminate duplicate popover and dialog borders.
 
 ## 3. Text metrics & the pixel grid
 
-### Glyphs drift over a long run
+### Character positions drift over long lines
 
-`fmAdvance` per glyph multiplied by the character count is not the shaped width of a run. A shaping backend lays a run out by unrounded advances (8 vs 8.25 px at size 15), so per-glyph arithmetic drifts a cell every ~32 characters and long runs overdraw what follows.
+Multiplying a single glyph's `fmAdvance` by the character count does not match a shaped run's true width. HarfBuzz lays runs out with fractional advances (for example, 8.25 px vs. 8 px at size 15), so per-glyph math drifts by a full cell every ~32 characters and causes text to overlap whatever follows.
 
-**Fix:** measure the whole run in the view, where the metrics can load its glyphs first:
+**Fix:** measure the entire run in the view so the font backend shapes and caches the glyphs first:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:run_width}}
 ```
 
-(`ned`: "text stays on the cell grid along a long run".)
+### Text shimmers while scrolling at fractional DPI scales
 
-### Text shimmers at fractional DPI scales
+At 125% Windows display scaling, rows of 22.4 logical pixels round unevenly to 22, 23, 22, 23 physical pixels, making glyphs shimmer as the list scrolls. Row heights and positions need to land on whole device pixels.
 
-At 125% scaling, rows of 22.4 px stack as 22, 23, 22, 23 and text shimmers while scrolling. Positions and row heights must be whole device pixels.
-
-**Fix:** snap with the font's snap scale:
+**Fix:** snap coordinates with `fmSnapScale` (the pattern `winget-gui` uses in `rowButton`):
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:snap}}
 ```
 
-`winget-gui`'s `rowButton` does this.
+### Geometric centering looks slightly high
 
-### Box-centred is not optically centred
+Stacking a large label over a smaller label and centering by line boxes leaves extra empty space beneath the smaller line's baseline, making the pair look roughly 4 px too high. Either nudge it with `padTop`, or compute optical centering from the ink bounds and cap/x-height midpoints exposed by `FontMetrics`.
 
-A large label over a small one centres by line boxes, which leave more room under the smaller line, so the block reads about 4 px high. Nudge it with `padTop`, or centre on the ink: measure the ink span and the cap/x-height midpoints from `FontMetrics` glyphs.
+### `alignMid` on a row aligns the row itself, not its children
 
-### `alignMid` on a row positions the row, not its contents
-
-Centring the row's *contents* takes `alignMid` on each child. This was `stronghead`'s "header dead space" fix.
+Applying `alignMid` to a `row` centers the row inside its parent. To vertically center items *inside* the row, put `alignMid` on each child instead.
 
 ## 4. Stale cached drawings
 
-Without a content key, a custom widget's ops are rebuilt and diffed every frame. With a key, unchanged frames skip both, so a key that misses an input shows stale pixels.
+Unkeyed custom widgets rebuild and diff their draw ops every frame. Adding a content key avoids that work on unchanged frames, which means anything missing from the key will never trigger a redraw.
 
-### The drawing freezes on an input the key missed
+### A keyed canvas freezes when an input changes
 
-`winget-gui`'s sort arrow stayed on the old column until the key covered everything the drawing read.
+In `winget-gui`, a custom sort arrow stayed stuck on the previous column until its key included every value read during painting.
 
-**Fix:** key on every input: values, colours, text, theme, scroll viewport width, animation state. `contentKey` hashes numbers; fold colours and text in with `mix64` from `NanoUI.Backend`.
+**Fix:** include every dynamic input in the key: values, colors, strings, theme, scroll viewport width, and animation state. Hash floats with `contentKey`, and fold in colors or text with `mix64` from `NanoUI.Backend`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:sort_arrow}}
 ```
 
-### A pinned overlay keeps its first frame's ops
+### A pinned overlay freezes on its first frame
 
-A drag ghost pinned under the pointer never changes its layout rectangle, so an unversioned drawing keeps the frame it appeared in (`ned`'s "tab ghost").
+An overlay positioned with `pinAt` (such as a drag ghost following the cursor) keeps the same layout rectangle even as it moves, so an unversioned drawing stays stuck on its first frame's draw ops.
 
-**Fix:** version it by what moves it:
+**Fix:** wrap it in `drawingVersioned` keyed by the coordinates or state that move it:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:versioned}}
 ```
 
-### Widths from the scroll viewport belong in the key
+### Scroll viewport width belongs in the key too
 
-`ned`'s finder rows clamp to `rectW (scrollViewport metrics)` and key on it, so the drawing follows the viewport when the scrollbar appears.
+If a custom drawing clamps rows to `rectW (scrollViewport metrics)`, include that width in its content key so rows re-render properly when a scrollbar appears or disappears (as `ned` does in its finder).
 
 ## 5. Scroll details
 
-### Content runs under the scrollbar
+### Rows draw underneath the scrollbar
 
-The scrollbar keeps a lane out of the viewport. A wide row drawn to the widget's full width runs beneath the bar. Clamp content and hit targets to the viewport width, but keep the backdrop filling the widget or its edge shows as a seam down the lane (`ned`'s "hold the finder's rows out of its scrollbar's lane").
+The scrollbar reserves a vertical lane out of the scroll viewport. If you paint custom rows across the widget's full width, content and click targets extend behind the scrollbar. Clamp row content and hit targets to `scrollViewport`, while letting background highlights span the full width so no vertical gap appears along the scrollbar edge.
 
-### The wheel step does not match the row height
+### Mouse-wheel scrolling feels misaligned with row height
 
-The default notch (60 px) jumps about one row of 54 px or three smaller rows. Set the step so a notch is one row:
+The default wheel notch scrolls 60 logical pixels, which can feel awkward over 54 px rows or dense lists. Match the step to your row height:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:wheel_step}}
 ```
 
-A scroller can also set its own step with `setScrollStepUi`; `0` returns it to the context step.
+You can also override one scroller at a time with `setScrollStepUi`; pass `0` to revert to the context default.
 
 ## 6. Focus and input ordering
 
-### Focus queries at the top of the view always return `False`
+### Focus checks at the top of the view always return `False`
 
-The node arena is reset before the view runs, so `isFocused` (or any check of editing state) at the top of `appView` returns `False` every frame.
+The layout arena clears before your view runs, so calling `isFocused` at the top of `appView` always reports `False`.
 
-**Symptom:** Ctrl+A selects every item while the search box is being typed into; Delete opens the uninstall dialog.
+**Symptom:** pressing Ctrl+A selects all rows even while typing in a search input, or pressing Delete triggers an item-delete dialog instead of deleting a character.
 
-**Fix:** read focus and place shortcuts at the **end** of the view, after the widgets have run:
+**Fix:** run focus queries and focus-dependent shortcuts at the **end** of your view, after all widgets have been declared:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:focus_at_end}}
 ```
 
-### Escape behind the same guard as Ctrl+A
+### Escape shares the same guard as Ctrl+A or Delete
 
-Text inputs do not claim Escape. If Escape shares the "a field is editing" guard with Ctrl+A and Delete, Escape can never clear a selection once a field has focus.
+Built-in text inputs intentionally leave Escape unclaimed. If you disable Escape whenever "a field is focused" (using the same guard as Ctrl+A or Delete), Escape stops clearing selections or closing panels while typing.
 
-**Fix:** give Escape its own condition.
+**Fix:** handle Escape with its own condition instead of tying it to text-field focus.
 
-### Typed keys never reach a custom widget
+### Typed characters never reach a custom widget
 
-A focused widget that reads `inputChars` must call `useInputMethod` every frame it accepts text, even when it is not a text field. `ned`'s file tree takes vim's `j`/`k` as typed text; only the editor called `useInputMethod`, so the keys never reached the tree.
+Backends only enable OS text input on frames where `useInputMethod` is called. Even if a custom widget is not a traditional text box (like `ned`'s file tree accepting `j`/`k` vim keys as characters), it must call `useInputMethod` on every focused frame to receive `inputChars`.
 
 **Fix:**
 
@@ -196,43 +192,42 @@ A focused widget that reads `inputChars` must call `useInputMethod` every frame 
 {{#include ../../../packages/nano-ui-demo/book/Book/Input.hs:input_method}}
 ```
 
-### A slow leftward drag selects one character
+### Dragging slowly leftward only selects one character
 
-A one-character selection's anchor sits on its left, so re-deriving the anchor from the selection each frame carries it along with a leftward drag (`ned`'s "slow leftward drags").
+If you re-derive a text drag's anchor from the current selection on every frame, a one-character selection anchors at its left edge and drags that anchor along with the cursor as you move left.
 
-**Fix:** keep the anchor from the press.
+**Fix:** store the original anchor from the initial mouse press and hold it constant for the rest of the drag.
 
-### A widget that appears next frame cannot be focused this frame
+### Focusing a widget that has not appeared yet fails
 
-`requestFocus` resolves after layout, but only for widgets declared on that pass. If a field appears because of a state change, request focus on the pass that declares it (store a `focusPending` flag). See [Keyboard, Focus & IME](../input/index.md).
+`requestFocus` only resolves widgets declared during the current pass. When clicking a button reveals a new text input on the *next* pass, store a `focusPending` flag and call `requestFocus` on the frame that actually declares the input. See [Keyboard, Focus & IME](../input/index.md).
 
-### Conditional widgets shift ids
+### Conditional widgets scramble sibling state
 
-A branch that declares different widgets than its alternative changes the id count for everything after it; widgets appear to swap caret state. Wrap the branch in `scope`, and keep overlays unconditional. See [Widget Identity & Keys](../state/identity.md).
+Any branch that runs different widget calls than its alternative shifts sibling IDs for everything after it, making unrelated fields swap carets or focus. Wrap conditional subtrees in `scope` and call overlays unconditionally. See [Widget Identity & Keys](../state/identity.md).
 
 ## 7. SVG export
 
-- Several canvas drawings in one frame emit colliding `clip_`/`grad_` element ids. Scope them per drawing (prefix each `<g><defs>` block with an index), as `stronghead` does.
-- Right-aligned numerals lose their anchor: `text-anchor`/`textLength` may need post-processing, and tabular numbers help readouts (`font-variant-numeric: tabular-nums` at the root).
+- Exporting several canvas drawings onto one HTML page can create colliding `clip_` and `grad_` IDs unless each SVG uses a unique prefix (handled automatically by `frameToSvg`'s document hash, or by passing `svgIdPrefix` / prefixing each `<g><defs>` block with an index as `stronghead` does).
+- Right-aligned numerals can lose their anchor depending on browser font rendering: `text-anchor` and `textLength` may need post-processing, and `font-variant-numeric: tabular-nums` at the document root keeps numeric columns aligned.
 
-## Quick checklist
+## Quick debugging checklist
 
-- [ ] `liftIO (newVar ...)` inside a view: allocates every pass. Move it to setup.
-- [ ] Unguarded side effects: the view re-runs. Wrap them in `whenM (button ...)`.
-- [ ] Conditional widgets or `useVar`s without `scope`; keyed lists using indices.
-- [ ] Overlays called conditionally instead of unconditionally with a `Var Bool`.
-- [ ] `useTask` inside a tab or branch: the task is cancelled when hidden.
-- [ ] `keepAnimating` at an always-run top level: a busy loop. Call it in the animating widget; use `wakeAfter` for timers.
-- [ ] Writing a freshly computed `NaN` to a `Var Float`: `NaN /= NaN`, so it redraws forever. Guard the write.
-- [ ] A custom widget's content key missing an input: stale pixels or a frozen drawing.
-- [ ] A changing label without `fixedW`: its siblings shift every frame.
-- [ ] A wide cell in a scrolling list without `fillW`: the list scrolls sideways.
-- [ ] A `scrollArea` / `panel` / `card` nested in a popup: a box inside a box.
-- [ ] Focus queries at the top of the view: the arena was reset; read them at the end.
-- [ ] Escape behind the same guard as Ctrl+A/Delete: text inputs do not claim Escape.
-- [ ] A focused widget reading `inputChars` without `useInputMethod`: typed text never arrives.
-- [ ] Per-glyph advance × count for a long run: use `lineWidthUi`.
-- [ ] Parsing or rebuilding documents per frame: parse once and keep the result outside the view.
-- [ ] `readVar` above the widget that edits the `Var`: an extra pass per change.
-- [ ] Missing `-threaded`.
-- [ ] Touching `Context` from a worker thread: wake with `askWake` instead.
+- [ ] `liftIO (newVar ...)` inside the view allocates a fresh `Var` every pass; move it to setup.
+- [ ] Unguarded side effects run every frame; wrap them in `whenM (button ...)` or an explicit event check.
+- [ ] Conditional widgets or `useVar` calls need `scope`; dynamic lists need `withKey` with stable IDs (never indices).
+- [ ] Call `modal`, `window`, and `popup` unconditionally every frame with a `Var Bool`.
+- [ ] Putting `useTask` inside a tab or conditional cancels the worker as soon as it is hidden.
+- [ ] Calling `keepAnimating` unconditionally at the top level creates a busy loop; call it inside the animating widget, and use `wakeAfter` for timers.
+- [ ] Writing a computed `NaN` to a `Var Float` redraws endlessly (`NaN /= NaN`); guard float math.
+- [ ] Missing an input from a custom widget's content key produces stale or frozen pixels.
+- [ ] Changing labels without `fixedW` shift their siblings; wide list cells without `fillW` trigger horizontal scrolling.
+- [ ] Nesting `scrollArea`, `panel`, or `card` inside a popup creates double borders; let one layer own the chrome.
+- [ ] Check `isFocused` and focus-sensitive shortcuts at the end of the view, not the top.
+- [ ] Give Escape its own guard instead of sharing the text-editing guard used for Ctrl+A or Delete.
+- [ ] Custom widgets reading `inputChars` must call `useInputMethod` on every focused frame.
+- [ ] Measure long text runs with `lineWidthUi` instead of multiplying single-glyph advance by length.
+- [ ] Parse documents and compute expensive data outside the view, updating only when inputs change.
+- [ ] Place `readVar` below the widget that edits it to avoid an extra pass per change.
+- [ ] Compile executables with `-threaded`.
+- [ ] Never touch `Context` from a worker thread; use `writeVarIO` and `askWake` instead.

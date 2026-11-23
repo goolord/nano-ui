@@ -1,82 +1,82 @@
 # Overlays & Windows
 
-Modals, floating windows, and popups are ordinary `NanoUI` actions that take a `Var Bool` for their open state.
+Modals, floating in-app windows, and popups are regular `NanoUI` actions controlled by a `Var Bool` that tracks whether they are open.
 
-## Call overlays unconditionally
+## Always call overlays unconditionally
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Signatures.hs:overlays}}
 ```
 
 > [!CAUTION]
-> Always call an overlay on every frame. Wrapping it in `when isShown (modal ...)` shifts widget ids for all subsequent siblings when it opens or closes, which moves focus, carets, and per-row state. Overlays draw nothing while their `Var Bool` is `False`.
+> Call every overlay on every frame, even when it is closed. Wrapping `modal`, `window`, or `popup` inside `when isShown` shifts the widget IDs of every sibling after it whenever it opens or closes, breaking focus, carets, and per-row state. Closed overlays draw nothing.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:modal}}
 ```
 
-Escape, a click outside, and the close button write `False` to the `Var`, so the dialog closes in the same frame. A modal blocks interaction with the content behind it and is drawn above it.
+A modal draws above the page and blocks pointer and keyboard input behind it. Pressing Escape, clicking outside the dialog, or clicking its close button sets the `Var Bool` to `False`, closing the modal in the same frame.
 
 ## Modals
 
-`modal` renders a titled panel with a close button, centered in the window and limited to the window's bounds. The body is not scrolled automatically; wrap it in `scrollWith` for long content, and give the panel a size with `modalWith` when the body needs to fill it:
+`modal` draws a centered panel with a title bar and close button, clamped to fit inside the viewport. Its body does not scroll automatically: wrap long content in `scrollWith`, and give the modal an explicit size with `modalWith` when the body needs to fill it:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:modal_with}}
 ```
 
-`modal'` returns `(Response, Maybe a)` and reports a close request as a click. When the open flag is derived from other state, pass `constVar` and write the real flag from the response:
+`modal'` returns `(Response, Maybe a)` and reports dismissal attempts through `respClicked`. When your open state is derived from another value (rather than stored directly in a `Var Bool`), pass `constVar` and update your real state from the response:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:modal_derived}}
 ```
 
-For a modal without a title bar or close button, use `modalPanel` / `modalPanel'`; the panel surface and backdrop remain, and Escape or an outside click still writes `False`.
+If you want a modal backdrop and panel without a title bar or close button, use `modalPanel` or `modalPanel'`. Pressing Escape or clicking outside still closes it.
 
 ## Floating windows
 
-`window` draws a draggable, resizable in-app window with a scrolling body. Other windows and the page remain interactive outside its bounds:
+`window` creates a draggable, resizable floating panel with a scrollable body. Unlike a modal, the main UI and any other open floating windows remain interactive around it:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:window}}
 ```
 
-`window'` returns the body result and a response. Use `window` for panels that coexist with the main content, `modal` when the user must answer first.
+`window'` returns both the body's result and a `Response`. Use `window` for inspectors, palettes, and tool panels that sit alongside the main view; use `modal` when the user needs to finish an interaction before returning to the page.
 
 ## Popups
 
-`popup` is a floating panel placed by a `PopupConfig`:
+`popup` draws a floating panel positioned by a `PopupConfig`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:popup}}
 ```
 
-A press on the anchor counts as inside the popup, so the button that toggles the popup does not immediately reopen it.
+Clicks on the anchor rectangle count as clicks inside the popup, so clicking the trigger button to dismiss a popup will not immediately pop it back open on the same press.
 
-Popup placement:
+Key placement options:
 
-- `AnchorRect (respRect r)` anchors to a widget; `AnchorPoint pos` anchors to a coordinate.
-- `cfgPlacement` chooses `PlacementAuto`, `PlacementBelow`, `PlacementAbove`, `PlacementAtCursor`, and the other placements.
-- `cfgOffset` is the gap from the anchor.
-- `cfgDismissable = False` disables Escape/outside-click closing; act on the response from `popup'` instead.
+- `AnchorRect (respRect r)` anchors the popup to a widget; `AnchorPoint pos` anchors it to a specific coordinate.
+- `cfgPlacement` chooses where the popup opens (`PlacementAuto`, `PlacementBelow`, `PlacementAbove`, `PlacementAtCursor`, and others).
+- `cfgOffset` sets the pixel gap between the anchor and the popup.
+- `cfgDismissable = False` prevents automatic closing on Escape or outside clicks so you can handle dismissal explicitly via `popup'`.
 
-An anchored popup positions against the previous frame's `respRect`, so warm a frame before relying on it in tests. For long popup bodies, cap the height with `popupWith (maxH ...)` and scroll the body.
+Because anchored popups read `respRect` (which comes from the previous frame), warm up one frame in headless tests before clicking to open them. For tall popup menus, cap the height with `popupWith (maxH ...)` and place a scroller inside.
 
 ## Tooltips
 
-Tooltips are stateless and attach to any widget with a `Response`:
+Tooltips require no state `Var` and attach directly to any widget's `Response`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:tooltips}}
 ```
 
-The default delay is half a second; `TooltipConfig` sets the delay and placement. `withTooltip` attaches a rich tooltip widget instead of text.
+By default, tooltips appear after hovering for 0.5 seconds. Pass a `TooltipConfig` to `tooltipConfigured` to change the delay or placement, or use `withTooltip` to render a custom widget subtree inside the tooltip instead of plain text.
 
-## Rules
+## Keep in mind
 
-- Modals stack. Escape closes the innermost first; side-by-side modals close in declaration order.
-- Allocate the open flag in the view that opens and closes the overlay, outside any child that may be skipped.
-- Read focus after the overlay call.
-- A `scrollArea`, `panel`, or `card` inside a dialog body draws a box in a box; strip its chrome (see [Double borders](../troubleshooting/recurring-bugs.md#2-double-borders--box-in-a-box)).
+- **Modals stack cleanly.** Escape dismisses the innermost modal first; sibling modals close in declaration order.
+- **Keep the open `Var` alive outside conditional branches.** Allocate or read it in a scope that runs even while the overlay is hidden.
+- **Check focus after overlay calls** so focus queries see widgets declared inside open overlays.
+- **Avoid nested borders.** Putting a `scrollArea`, `panel`, or `card` inside a modal or popup draws a box inside a box; strip the inner chrome (see [Double borders](../troubleshooting/recurring-bugs.md#2-double-borders--box-in-a-box)).
 
-[Build a Notepad](../tutorials/notepad.md) wires a modal to the window's close request and builds a menu bar from `popup'`.
+For a complete example connecting a menu bar of `popup'` panels and a close-confirmation `modal`, see [Tutorial 2: Build a Notepad](../tutorials/notepad.md).

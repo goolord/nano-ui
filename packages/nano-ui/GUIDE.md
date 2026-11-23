@@ -144,12 +144,7 @@ list element, plus a nested field within it). With a record in a single `Var`,
 `m.title` and `m.volume` are tracked separately, so reading `m.title` above a
 slider bound to `m.volume` does not trigger a second pass when the slider moves.
 Reading the entire record `m` or projecting through `zoomVar` marks all fields
-as read. `forEachVar` only reads the list's keys and order, so editing a single
-row's `Var` does not invalidate earlier rows; `withElemVars` returns the
-elements directly and therefore marks the whole list as read. Rows are told
-apart by one of 63 bits of their key's hash, so past about 63 rows, or for keys
-that share a bit (such as `Int` keys 64 apart), a row's edit can still cost a
-second pass, and a full repaint when the rows `readVar` the field it edits.
+as read. `forEachVar` only reads the list's keys and order, so editing a single row's `Var` does not invalidate earlier rows; `withElemVars` returns the elements directly and therefore marks the whole list as read. Rows are distinguished using 63 hash bits of their keys, so past ~63 rows (or for keys that collide on the same bit, such as `Int` keys 64 apart), editing a row may trigger a second pass and a full repaint if sibling rows call `readVar` on that field.
 
 Primed widget variants (`button'`, `textInput'`, `slider'`) return a `Response`:
 `respChanged` is `True` when the value was edited, `respSubmitted` when
@@ -189,11 +184,7 @@ names entries = column $
     checkbox name checked
 ```
 
-State kept under a key, by `useVar` or by a widget such as a text field, lasts
-as long as the context, even once the key is no longer shown, so hidden content
-keeps its state. For a collection whose keys keep coming, such as a chat log,
-keep each row's state in a `VarMap` rather than `useVar`, and drop the rows
-that are gone with `retainVars`.
+Keyed state stored by `useVar` or by widgets like text fields remains alive for the lifetime of the context, even while its key is hidden, so temporarily hidden content preserves its state. For unbounded collections whose keys keep growing (such as a chat log), store per-row state in a `VarMap` rather than `useVar`, and prune removed keys with `retainVars`.
 
 ## Layout and coordinates
 
@@ -220,7 +211,7 @@ be changed to `Wrap` or `Layered`:
 
 - `layers` stacks its children in a shared box sized to the largest child; each
   child is placed according to its alignment, and later children are drawn on
-  top. The `layered` modifier applies the same behaviour to a panel or card,
+  top. The `layered` modifier applies the same behavior to a panel or card,
   e.g. `panelWith (layered . fixedWH 240 160)`.
 - `wrap` wraps a row or column onto additional lines when children exceed the
   available main-axis size, e.g.
@@ -239,7 +230,7 @@ be changed to `Wrap` or `Layered`:
 When layers or pinned nodes overlap, pointer input goes to the topmost
 interactive control (buttons, inputs, sliders, custom drawings) at the cursor,
 while panels, labels, images, and layout containers do not intercept pointer
-events. Override this behaviour with `pointer PointerBlock` (so a panel or
+events. Override this behavior with `pointer PointerBlock` (so a panel or
 overlay scrim blocks pointer events over its full rectangle) or
 `pointer PointerPass` (so a decorative drawing does not intercept pointer
 events):
@@ -285,13 +276,13 @@ headless pointer tests.
 ## Themes, overlays, and input
 
 Use `styled` to modify the active theme for a subtree, or `themed` to replace
-it completely. Theme scopes affect colours and painting only, not layout
+it completely. Theme scopes affect colors and painting only, not layout
 metrics (font sizes are set via layout modifiers). `disabledWhen condition`
 disables interaction and applies disabled styling across a subtree while
 preserving layout geometry and widget state.
 
-Semantic status colours are applied with tones: `fontTone Warning` sets a
-label's text colour (combining with font faces like `fontMono . fontTone Danger`),
+Semantic status colors are applied with tones: `fontTone Warning` sets a
+label's text color (combining with font faces like `fontMono . fontTone Danger`),
 `tone Danger` styles buttons, and `toneColor` retrieves the `Color` value for
 custom drawing. Legacy helpers (`fontMuted`, `fontDanger`, `primary`,
 `destructive`, `success`, `warning`) are aliases for the corresponding tones.
@@ -396,9 +387,7 @@ auto-repeats. Shortcuts and view-level key queries (`keyPressed`,
 `disabledWhen`, or when handled by the focused widget (for example, typing or
 Ctrl+A in a text input, Enter/Space on a focused button, or arrow keys on a
 focused slider or list; modified chords like Ctrl+Enter or Alt+Left still pass
-through to shortcuts). An Escape that closes an open dropdown, a focused combo
-box's list or a text field's edit menu reaches neither, and nor do its repeats
-and release (`keyHeld`, `keyReleased`). Custom widgets specify
+through to shortcuts). An Escape press that dismisses an open dropdown, a focused combo box list, or a text field's context menu is consumed before reaching either shortcuts or key queries, along with its key repeats and release (`keyHeld`, `keyReleased`). Custom widgets specify
 which keys they handle via `widgetKeys` (for example, a terminal widget sets
 `KeysAll`); one that claims Tab this way keeps focus when Tab is pressed.
 `menuItemShortcut` only matches while its menu is open; to make the shortcut
@@ -556,7 +545,7 @@ gauge level =
 
 Path fills do not compute self-intersections: intersecting subpaths are filled
 independently, and self-intersecting contours may not fill as expected. Path
-strokes are centred on the path geometry, whereas `drawStrokeRoundedRect` and
+strokes are centered on the path geometry, whereas `drawStrokeRoundedRect` and
 `drawStrokeCircle` inset their border inside the shape bounds (matching panel
 borders).
 
@@ -603,7 +592,7 @@ thumbnail owner path w h pixels = do
 
 ## Inspecting layout
 
-Calling `explainLayout True` draws depth-coloured outlines around every layout
+Calling `explainLayout True` draws depth-colored outlines around every layout
 node and highlights the node under the cursor. `explainedNode` returns metadata
 for the hovered node: its `WidgetId`, solved rectangle, padding, width/height
 `Sizing` constraints, gap, layout direction, `Flow`, pin offset, and

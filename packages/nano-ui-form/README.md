@@ -1,10 +1,8 @@
 # nano-ui-form
 
-Forms for [nano-ui](https://github.com/goolord/nano-ui), built on
-[ditto](https://hackage.haskell.org/package/ditto).
+Validated applicative forms for [nano-ui](https://github.com/goolord/nano-ui), built on [ditto](https://hackage.haskell.org/package/ditto).
 
-A form is an applicative value. Each input draws a nano-ui widget and parses
-its value; validators attach errors that appear under the field.
+Each form combines widget rendering, parsing, and validation in one applicative value, attaching field-level error messages directly beneath invalid inputs.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -21,7 +19,7 @@ signup =
     <$> withFieldErrors (inputText "Name" "" `prove` notEmpty "Name is required")
     <*> withFieldErrors (inputText "Email" "" `prove` validEmail (const "Not an email address"))
 
--- Allocate owner <- newFormState once before running the view.
+-- Allocate owner <- newFormState once during setup.
 view :: FormState -> NanoUI ()
 view owner = do
   submitted <- nanoFormSubmit owner "signup" "Sign up" signup
@@ -30,60 +28,36 @@ view owner = do
     Nothing -> pure ()
 ```
 
-`nanoFormSubmit` adds a submit button and yields the value on the frame the form
-is submitted. `nanoFormLive` yields the value whenever the form is valid,
-`nanoFormEx` takes a `FormConfig`, and `runNanoForm` returns the form's view and
-result separately. A `FormOnSubmit` form shows its errors once submitted; call
-`markSubmitted` from your own submit button.
+`nanoFormSubmit` renders a submit button and returns `Just a` on the single frame the form submits validly. `nanoFormLive` returns `Just a` continuously whenever all fields are valid, `nanoFormEx` accepts a `FormConfig`, and `runNanoForm` separates rendering from extracting the result. When using `FormOnSubmit` error display with your own custom submit button, call `markSubmitted` on click.
 
-## Running
+## Running the example
 
 ```sh
 cabal run nano-ui-form-example
 ```
 
-The example needs `nano-ui-sdl`, behind this package's `sdl` flag (off by
-default; the repository's `cabal.project` turns it on). The library itself
-does not depend on a backend.
+The example depends on `nano-ui-sdl` behind the `sdl` Cabal flag (off by default on Hackage; enabled in this repository's `cabal.project`). The library itself has no backend dependency.
 
-## Form identity and results
+## Form state and field identity
 
-Give each form a stable key, such as `"signup"`, and use different keys for
-independent forms in the same view. Allocate `newFormState` once per component
-or session and pass it as the first argument to each runner and `resetForm`.
-The typed owner keeps field values and
-validation state between frames under that identity. Call `resetForm` when
-starting a new entry with the same form.
+Give each form a unique stable key (such as `"signup"`). Allocate `newFormState` once per component or session and pass it to every runner and to `resetForm` when clearing the form for a new entry. Deferred field views capture their `FormState` automatically, so nesting or moving rendered fragments never loses track of which form they belong to.
 
-Deferred field views capture their owner during evaluation. Rendering them
-later or inside another form still updates the original form; there is no
-ambient form-prefix store to restore.
+Remember that `Just value` from `nanoFormSubmit` is a single-frame event: store the result in a `Var` or handle it immediately if it needs to stay visible after the click frame. Use `nanoFormLive` when you want live previews on every frame.
 
-The `Just` returned by `nanoFormSubmit` is an event for that frame. Store the
-submitted value if it must remain visible later. In the example, the welcome
-label appears only on the submission frame. `nanoFormLive` is for previews or
-other views that need the current valid value on every frame.
-
-Use `withFieldErrors` around a validated field to display its errors.
-`NanoUI.Form.Validation` supplies common validators. `NanoUI.Form.Input`
-provides one input family for named and positional fields:
+Wrap validated fields in `withFieldErrors` to display errors from `NanoUI.Form.Validation`. `NanoUI.Form.Input` supports both named and positional fields through one unified API:
 
 ```haskell
-inputText "name" "Ada"                    -- stable key and caption
-inputText unnamed "Ada"                   -- numbered, no caption
+inputText "name" "Ada"                    -- stable key and visible caption
+inputText unnamed "Ada"                   -- positional key, no caption
 inputCheckbox (unnamed {fieldLabel = Just "Accept"}) False
 inputText ((named "login") {fieldLabel = Just "User name"}) "Ada"
 ```
 
-String-literal names keep the usual syntax with `OverloadedStrings`. Wrap a
-computed `Text` in `named`. Changing `fieldLabel` does not change the stored
-form key; `fieldKey = Nothing` selects positional identity.
+With `OverloadedStrings`, plain string literals set both key and caption; wrap dynamic `Text` keys in `named`. Changing `fieldLabel` never alters the stored key, and `fieldKey = Nothing` selects positional identity.
 
-## Adapting a widget
+## Adapting custom widgets
 
-`inputWidget` adapts any input of type `Var a -> NanoUI Response`, such as a
-primed widget with its other arguments applied. The form runs it on a
-temporary `Var` holding the field's value and reads the edit back:
+Use `inputWidget` to turn any `Var a -> NanoUI Response` widget (such as a primed control) into a form field. The form runs the widget against a temporary `Var` and writes edits back according to your publication policy:
 
 ```haskell
 import NanoUI qualified as UI
@@ -96,26 +70,16 @@ volume = inputWidget (Just "volume") decode (OnChangeOr UI.respChanged) FormInpu
     decode _ = Left "Expected a volume"
 ```
 
-The arguments are the optional stable name, decoder, publication policy,
-encoder, widget, and initial value. `Nothing` selects positional naming.
-Naming does not add a visible label; compose one into the widget action if
-wanted. The policy controls when an edit is committed to the form:
+Arguments are: optional stable key (`Nothing` for positional), decoder, publication policy, encoder, widget, and initial value. Add a label inside the widget action itself if you want one displayed. Publication policies control when edits commit to the form:
 
-- `OnChange` publishes whenever the widget mutates the `Var` to a different value.
-- `OnChangeOr p` also publishes when `p` holds for the response, for
-  controls that report an edit without changing the value.
-- `OnlyWhen p` publishes only when `p` holds, such as
-  `OnlyWhen UI.respSubmitted` for a field that commits on Enter. Uncommitted
-  edits are retained in the field state across frames until committed; an
-  external change to the field's value or a reset discards them.
+- `OnChange`: Publishes whenever the widget writes a different value to its `Var`.
+- `OnChangeOr p`: Also publishes whenever predicate `p` holds on the `Response`.
+- `OnlyWhen p`: Publishes only when `p` holds (such as `OnlyWhen UI.respSubmitted` to commit on Enter). Uncommitted edits persist in field state until committed, overwritten externally, or reset.
 
-## Build
+## Building
 
-Use GHC 9.10 through 9.14 and add `nano-ui`, `nano-ui-form`, and `text` to your
-application's `build-depends`. The form library requires ditto 0.5 from Hackage.
-To build only the form library without SDL, use `cabal build lib:nano-ui-form`.
+Target GHC 9.10 through 9.14 and add `nano-ui`, `nano-ui-form`, and `text` to `build-depends` (requires `ditto >= 0.5` from Hackage). Build just the backend-independent library with `cabal build lib:nano-ui-form`.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
-  online guide, tutorials, and form documentation.
+- [The nano-ui Book: Validated Forms](https://goolord.github.io/nano-ui/book/packages/index.html#validated-forms): Overview and companion package guide.

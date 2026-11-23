@@ -1,6 +1,6 @@
 # Interactive Styling Lab
 
-Toggle styling modifiers and themes on each widget family. **Toggle Compare Baseline** shows the unstyled widget beside it, and the generated Haskell can be copied. The concepts are in [Styling & Theming](index.md) and [Styling Gotchas](gotchas.md).
+Click any modifier chip below to see how themes and surface styles affect each widget family. Click **Compare baseline** to place the unstyled widget next to your customized version, and use **Copy Code** to grab the matching Haskell expression. For background and edge cases, see [Styling & Theming](index.md) and [Styling Gotchas](gotchas.md).
 
 ## Buttons
 
@@ -12,7 +12,7 @@ Toggle styling modifiers and themes on each widget family. **Toggle Compare Base
 
 ## Checkboxes
 
-Three surfaces: the box well (`themeInput`), the check (`themeAccent`), and the label.
+Checkboxes read three different surfaces: the unchecked box (`themeInput`), the checked fill (`themeAccent`), and the border and label (`themeButton`).
 
 <nano-ui-workbench widget="checkbox" title="Checkboxes"></nano-ui-workbench>
 
@@ -30,7 +30,7 @@ Three surfaces: the box well (`themeInput`), the check (`themeAccent`), and the 
 
 ## Select and combo box
 
-`select` draws its trigger with `themeButton`; `comboBox` uses `themeInput`.
+`select` draws its trigger using `themeButton`, while `comboBox` uses `themeInput`.
 
 <nano-ui-workbench widget="select-vs-combo" title="Dropdown Select & ComboBox"></nano-ui-workbench>
 
@@ -44,7 +44,7 @@ Three surfaces: the box well (`themeInput`), the check (`themeAccent`), and the 
 
 ## Custom controls
 
-Switches, knobs, and spinners from `NanoUI.Widgets.Custom`.
+Switches, progress bars, knobs, and sparklines from `NanoUI.Widgets.Custom`.
 
 <nano-ui-workbench widget="custom-controls" title="Custom Vector Controls"></nano-ui-workbench>
 

@@ -1,12 +1,6 @@
 # nano-ui-sdl-web
 
-Browser backend for [nano-ui](https://github.com/goolord/nano-ui), built with
-GHC's WebAssembly backend. Text goes through the same SDL_ttf font engine as
-[nano-ui-sdl](../nano-ui-sdl): SDL_ttf shapes lines with HarfBuzz and
-rasterises glyphs with FreeType into a glyph atlas laid out as on the desktop.
-WebGL2 draws the frame's triangles with the blending and linear filtering that
-`SDL_RenderGeometry` uses in nano-ui-sdl. The two backends' pixels have not
-been compared yet.
+Browser backend for [nano-ui](https://github.com/goolord/nano-ui), targeting GHC's WebAssembly backend. Text shaping uses the same SDL3_ttf engine as [nano-ui-sdl](../nano-ui-sdl): HarfBuzz shapes lines, FreeType rasterizes glyphs into an in-memory texture atlas, and WebGL2 renders the frame's triangles with matching alpha blending and linear filtering.
 
 ```haskell
 {-# LANGUAGE CPP, OverloadedStrings #-}
@@ -22,250 +16,85 @@ foreign export javascript "nanoMain" main :: IO ()
 #endif
 ```
 
-`runSdlWebAppReduce` takes a `model -> NanoUIE msg ()` view and an update
-function, as `runSdlAppReduce` does. `SdlWebOptions` sets the title
-(`webWindowSettings`), the theme or a theme that follows the page's
-`prefers-color-scheme` (`webThemeFor`), fonts, the base font size, and a UI
-scale on top of the device pixel ratio.
+For Elm-style views, `runSdlWebAppReduce` pairs `model -> NanoUIE msg ()` with an update function, just like `runSdlAppReduce`. Configure page title (`webWindowSettings`), themes or `prefers-color-scheme` tracking (`webThemeFor`), fonts, base font size, and additional UI scale on top of `devicePixelRatio` through `SdlWebOptions`.
 
 ## Fonts
 
-Fonts work as on the desktop. `webFontFamilies` lists the families there
-are, as `listFontFamilies` does, and `WebFontSearch ["Noto Sans", "sans-serif"]`
-uses the first that can be had, as `FontSearch` does, else the bundled Inter
-(`WebFontInter`, the default). Names compare ignoring case, spaces, `-` and
-`_`, and `sans-serif`, `serif` and `monospace` stand for the desktop's lists
-of common families. Pass a search as `webFont` or `webMonoFont`, or change the
-UI font from the view with `setSdlWebUiFont`, which loads it before the next
-frame as `setSdlUiFont` does.
+Font selection mirrors the desktop backend. `webFontFamilies` lists available families, and `WebFontSearch ["Noto Sans", "sans-serif"]` picks the first available match before falling back to the bundled Inter (`WebFontInter`). Matching ignores case, spaces, hyphens, and underscores, and generic keywords (`sans-serif`, `serif`, `monospace`) expand to the desktop fallback lists. Pass searches via `webFont` / `webMonoFont`, or switch fonts at runtime with `setSdlWebUiFont`.
 
-A page cannot read font files from disk, so the families come from two
-places:
+Because web pages cannot scan local font directories directly, font families come from two sources:
 
-- Installed families, through the Local Font Access API, in Chromium-based
-  browsers. The first time `webFontFamilies` is asked, the browser has not
-  asked the user yet, and it can ask only during a click or key press, so
-  the session asks at the user's next press on the page; that press works
-  as usual. The browser keeps the answer for the site, so on later visits
-  the installed families are there at once.
-- A font service (`webFontService = Just Fontsource`): about 2,100
-  open-licence families from fontsource.org, loaded by name as TrueType from
-  its CDN. This is what Firefox and Safari have, since they give a page no
-  installed fonts, and what Chromium has until the user allows installed
-  ones. It is off by default, since the page then fetches the catalogue and
-  fonts from a third party.
+- **Installed system fonts (Chromium browsers):** Accessed via the Local Font Access API. Because browsers only allow permission prompts during a user gesture, the first call to `webFontFamilies` defers the prompt until the user's next click or key press on the canvas (without disrupting that interaction). Once granted, installed families appear immediately on subsequent visits.
+- **Remote font catalog (`webFontService = Just Fontsource`):** Loads ~2,100 open-license TrueType families on demand from Fontsource's CDN. This provides fonts in Firefox and Safari (which do not implement Local Font Access) as well as in Chromium before permission is granted. It defaults to `Nothing` so apps never make third-party network requests unless you opt in.
 
-A font can also be named by where it is: `WebFontInstalled "Noto Sans"` (an
-installed family only), `WebFontUrl "fonts/Literata.ttf"` (a TrueType or
-OpenType file the page fetches; another origin needs CORS headers that allow
-the page), or `WebFontBytes bytes "label"` (a file the program embeds).
-`listWebFontFamilies` asks for the installed families at once, from a task
-a press starts, for a page that wants to ask at a moment of its choosing.
+You can also load fonts explicitly with `WebFontInstalled "Noto Sans"` (local fonts only), `WebFontUrl "fonts/Literata.ttf"` (fetched over HTTP; cross-origin URLs require CORS headers), or `WebFontBytes bytes "label"` (embedded directly in the binary). To request Local Font Access permission on a specific button click instead of lazily, call `listWebFontFamilies` inside a task started by that click.
 
-The bundled Inter covers printable ASCII only. For everything else (accented
-Latin, Greek, Cyrillic, the ellipsis, dashes and curly quotes, currency,
-arrows, common symbols) the session attaches fallback fonts, as the desktop
-attaches system fonts: `webFallbackFonts`, by default
-`fonts/inter-extended.ttf`, a wider subset of the same Inter that
-`build-web.sh` serves beside the page (154 KB, made with
-`scripts/prune_inter.py --web`). A page served some other way serves that
-file too, or sets `webFallbackFonts`. Combining accents typed apart from
-their letter still have no font that places them.
+To keep the initial `.wasm` binary small, the embedded Inter covers printable ASCII only. Extended glyphs (accented Latin, Greek, Cyrillic, ellipses, dashes, curly quotes, currency symbols, and arrows) come from `webFallbackFonts`, which defaults to `fonts/inter-extended.ttf` (a 154 KB subset generated by `scripts/prune_inter.py --web` and copied into output directories by `build-web.sh`). If you serve your build with a custom setup, include that file or configure `webFallbackFonts` accordingly. Standalone combining accents are not currently supported.
 
-A font that will not load is the bundled Inter, with a warning on the
-browser console.
+If any requested font fails to load, the session falls back to bundled Inter and logs a warning to the browser console.
 
 ## File dialogs
 
-A page sees no paths, so the dialogs trade in contents:
+Because browsers do not expose local filesystem paths, web file dialogs work directly on filenames and byte contents:
 
-- `openWebFiles opts` lets the user choose files and answers each one's
-  name and bytes (`WebFile`), or `Nothing` when they cancel. `opts` is a
-  `FileDialogOptions` with nano-ui-sdl's `dialogFilters` and
-  `dialogAllowMany`.
-- `openWebFolder` reads every file in a folder the user chooses, named by its
-  path inside the folder.
-- `saveWebFile opts name bytes` shows the browser's save dialog where it has
-  one and downloads the file under `name` elsewhere. It answers the name the
-  file was saved under. The dialog is the File System Access API's
-  `showSaveFilePicker`, which only Chromium-based browsers implement; Firefox
-  and Safari have no API that lets a page open their save dialog. Firefox
-  asks where to save a download when its "Always ask you where to save
-  files" setting is on, and otherwise saves to the Downloads folder.
+- `openWebFiles opts` opens a file picker and returns each chosen file's name and bytes (`WebFile`), or `Nothing` if cancelled. `opts` accepts the same `FileDialogOptions` (`dialogFilters`, `dialogAllowMany`) as `nano-ui-sdl`.
+- `openWebFolder` reads every file in a selected directory, preserving relative paths inside that folder.
+- `saveWebFile opts name bytes` opens a native Save dialog in Chromium browsers (via `showSaveFilePicker`) and falls back to a standard browser download in Firefox and Safari, returning the saved filename. (Firefox prompts for a destination if its "Always ask you where to save files" setting is enabled, and otherwise saves straight to Downloads.)
 
-Browsers show these only right after a click or key press on the page, so
-run them from a task the press starts (`useTask`), as the cookbook's File
-Dialogs section does. Opening reads whole files into memory.
+Browsers require file pickers to launch inside a user gesture, so trigger them from a `useTask` kicked off by a button click (see the cookbook's File Dialogs section). Note that opening reads entire selected files into memory.
 
 ## Debugging
 
-`askSdlWebDebug` returns the session's frame timings (the core's
-`CoreDebugSnapshot`, as `askSdlDebug` has), the canvas size, pixel ratio,
-scale, UI font and the WebGL renderer's name. It refreshes at most four
-times a second while a view asks, so ask only while the numbers are on
-screen. `formatFpsRows`, `formatDrawRows` and `formatExplainRows` lay them
-out as the SDL backend's Debug window does. WebGL calls return before the GPU
-runs them, so the present time is zero and the render time is the whole of a
-frame's cost. The runtime rows need GHC's `-T`: a reactor module takes no
-command line, so `start` in `web/main.js` passes `rtsFlags` (the demo page's
-`"-T"`) through `GHCRTS`.
+`askSdlWebDebug` returns frame timings (`CoreDebugSnapshot`), canvas size, device pixel ratio, scale, active font, and WebGL renderer name. Metrics refresh up to four times per second while queried, so only call `askSdlWebDebug` when your debug UI is visible. Format rows for display with `formatFpsRows`, `formatDrawRows`, and `formatExplainRows`.
 
-## The page
+Because WebGL draw calls return asynchronously before the GPU finishes, reported present time is `0` and render time accounts for the CPU submission cost. Runtime GC/allocation rows require GHC's `-T` RTS flag; pass `rtsFlags: "-T"` to `start()` in `web/main.js` (which injects it via `GHCRTS`).
 
-The page provides a `<canvas>` whose CSS box (its `width` and `height`
-in CSS pixels) the page sets: a stylesheet rule, an inline style, or a
-container it fills. The session makes the drawing buffer that box times
-`devicePixelRatio` and follows the box as it changes. `web/index.html`
-fills the viewport with `canvas { display: block; width: 100vw; height:
-100vh; }`.
+## Canvas sizing
 
-A canvas with no CSS size takes its box from its drawing buffer, which the
-session sets, so its size could not follow the page. When the session
-starts, the runtime fixes such a canvas's CSS width or height at the size
-it has then: the `width` and `height` attributes, or the browser's 300x150
-default. It keeps that size whatever the window does.
+Give your `<canvas>` an explicit CSS size through a stylesheet, inline style, or containing layout (for example, `web/index.html` uses `width: 100vw; height: 100vh`). The backend matches the WebGL drawing buffer to that CSS box multiplied by `devicePixelRatio` and tracks resizes automatically.
 
-## How it runs
+If a canvas has no CSS dimensions at startup, the runtime locks its CSS width and height to its initial size (its HTML `width`/`height` attributes, or the browser's 300x150 default) so resizing the drawing buffer does not trigger feedback loops.
 
-The program is a WebAssembly reactor module. `web/main.js` instantiates it
-with a WASI shim and the JSFFI glue GHC generates, then calls its `nanoMain`
-export. The session is `NanoUI.Runner.runSessionLoop`, the loop the desktop
-backends use. Its wait for events awaits a JavaScript promise, which
-suspends the Haskell thread and returns control to the browser until the
-canvas queues an event or a background thread wakes the loop.
+## Architecture and runtime details
 
-`web/nano-ui-sdl-web.js` holds the page's side:
+The compiled output is a WebAssembly reactor module. `web/main.js` instantiates it with `browser_wasi_shim` and GHC's generated JSFFI glue, then calls `nanoMain`. Inside Haskell, the app runs the exact same `NanoUI.Runner.runSessionLoop` used on desktop; waiting for the next event simply awaits a JavaScript Promise, suspending the Haskell thread until an event or background wake arrives.
 
-- WebGL2 draws from the module's memory in place: the 32-byte vertices, the
-  32-bit indices, and one draw per merged command, scissored to the frame's
-  damage. The drawing buffer is preserved between frames, so a frame repaints
-  only its damage, as nano-ui-sdl's retained texture allows.
-- The glyph atlas pages are 2048x2048 RGBA in the module's memory. Only the
-  rect a frame added to goes to the GPU.
-- Pointer, wheel and key events become fixed-size records the session reads
-  (`NanoUI.SdlWeb.Internal.Input` lists them). A hidden textarea receives
-  typed text, input method compositions and pastes. While a text field has
-  focus, the textarea sits over its caret, so the input method's window and
-  the on-screen keyboard open there.
-- The cursor is the canvas's CSS `cursor`. Browsers have every cursor kind,
-  so none falls back.
-- A touch goes to the program: the runtime sets the canvas's `touch-action`
-  to `none`. A canvas inside a page that scrolls can carry an inline
-  `style="touch-action: pan-y"` instead, which the runtime keeps. A vertical
-  swipe that starts on the canvas then scrolls the page, and the press it
-  began with is released away from the canvas, so it clicks nothing.
-- Animation frames are paced by `requestAnimationFrame`: a timed wait of up
-  to 34 ms ends on the display's first frame at or after its time, less
-  4 ms. `webRefreshHz` is then a floor on the interval rather than a timer:
-  at 60 a 60 Hz display draws every frame and a 144 Hz one every second
-  frame. The browser stops these frames while the tab is hidden. Longer
-  waits (`wakeAfter`, a caret's blink) are timers.
-- While the canvas is scrolled out of the viewport, timed waits are held:
-  animation frames, `wakeAfter` and tooltip delays stop, and events and
-  background tasks still wake the session. One frame is drawn when the
-  canvas comes back into view.
-- `start(canvas, wasmUrl, { rtsFlags, env })` in `web/main.js` loads the
-  program. `env` is an object of environment variables, for what the page
-  must tell the program before it starts (`{ NANO_UI_REDUCED_MOTION: "1" }`
-  on the landing page); the program reads them with `lookupEnv`.
+`web/nano-ui-sdl-web.js` handles the browser bridge:
+
+- **WebGL2 rendering:** Reads 32-byte vertices and 32-bit indices directly from linear Wasm memory, issuing one scissored draw call per merged command batch. Because the drawing buffer is preserved between frames, only damaged rectangles repaint.
+- **Incremental atlas uploads:** Glyph atlas pages live as 2048x2048 RGBA buffers in Wasm memory, uploading only newly rasterized sub-rectangles to the GPU.
+- **Input and IME:** Pointer, wheel, and keyboard events are packed into fixed-size records (`NanoUI.SdlWeb.Internal.Input`). A hidden `<textarea>` handles typed text, paste events, and IME composition; when a text input is focused, the textarea tracks the caret position so IME candidate popups and mobile keyboards open in the right spot.
+- **Cursors and touch:** CSS `cursor` maps directly to all `nano-ui` cursor shapes. By default the runtime sets `touch-action: none` so touch drags reach the canvas, while preserving an explicit inline `style="touch-action: pan-y"` for embedded demos on scrollable pages.
+- **Frame pacing and visibility:** Short waits (up to 34 ms) align to `requestAnimationFrame`, using `webRefreshHz` as a minimum frame interval (so 60 Hz pacing runs every frame on a 60 Hz screen and every other frame on a 144 Hz screen). Longer delays (`wakeAfter`, caret blink) use regular timers. Both animation frames and timers pause automatically while the browser tab is hidden or the canvas is scrolled off-screen, waking immediately on events or when the canvas scrolls back into view.
+- **Startup environment:** `start(canvas, wasmUrl, { rtsFlags, env })` injects key/value pairs readable from Haskell via `lookupEnv` (used by the landing page to pass `NANO_UI_REDUCED_MOTION=1`).
 
 ## Building for the browser
 
-On Linux or macOS with [ghc-wasm-meta](https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta)
-(its default 9.14 flavour, with the cabal 3.14 it installs):
+On Linux or macOS with [ghc-wasm-meta](https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta) (default GHC 9.14 toolchain and Cabal 3.14):
 
 ```bash
 source ~/.ghc-wasm/env
-```
-
-```bash
 packages/nano-ui-sdl-web/scripts/build-wasi-deps.sh
-```
-
-```bash
 PKG_CONFIG_PATH=~/.nano-ui-wasi/lib/pkgconfig packages/nano-ui-sdl-web/scripts/build-web.sh
-```
-
-```bash
 python3 -m http.server -d dist-web 8000
 ```
 
-`build-wasi-deps.sh` builds FreeType, HarfBuzz, SDL3 and SDL3_ttf with the
-wasm toolchain's clang into `~/.nano-ui-wasi`. SDL has no WASI platform, so
-the script patches three spots in SDL's sources (the threadless build CMake
-allows only for Emscripten, the dynamic API, the Unix URL opener) and builds
-it as a console Unix build. FreeType's setjmp needs WebAssembly exception
-handling (`-mllvm -wasm-enable-sjlj`), which every current browser has.
-Everything is built with `-fPIC`, since ghc-wasm-meta's Cabal config links
-each Haskell library as a shared module for Template Haskell.
+`build-wasi-deps.sh` cross-compiles FreeType, HarfBuzz, SDL3, and SDL3_ttf into `~/.nano-ui-wasi` with `-fPIC` (required for ghc-wasm-meta's shared Template Haskell linking) and Wasm exception handling (`-mllvm -wasm-enable-sjlj`, needed by FreeType's `setjmp`). Because SDL3 does not yet have a dedicated WASI target, the script patches three spots in SDL to build it cleanly as a single-threaded console Unix build.
 
-`build-web.sh [out-dir [cabal-target]]` builds a program with
-`cabal.project.wasm` (by default this package's `nano-ui-sdl-web-demo`; the
-widget cookbook is `nano-ui-demo:exe:nano-ui-web-cookbook`), shrinks it with
-`wasm-opt`, and lays out `out-dir` (default `dist-web/`): the page, the
-runtime, the module as `main.wasm`, GHC's JSFFI glue, and the
-[browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) it is loaded
-with, fetched from npm.
+`build-web.sh [out-dir [cabal-target]]` compiles the target with `cabal.project.wasm` (defaulting to `nano-ui-sdl-web-demo`; pass `nano-ui-demo:exe:nano-ui-web-cookbook` for the full cookbook), optimizes the Wasm binary with `wasm-opt -O2` (override via `WASM_OPT_FLAGS`), and writes the HTML page, JS runtime, `main.wasm`, JSFFI glue, and [browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) into `out-dir` (`dist-web/` by default). `cabal.project.wasm` enables `split-sections` so unused code strips cleanly; in the landing demo, roughly 2 MB of the binary is C libraries (FreeType, HarfBuzz, SDL, SDL_ttf, RTS, libc) and the rest is Haskell. Make sure `node` is on `PATH`, since Template Haskell embeds the bundled Inter font via Node.js.
 
-The module is the page's whole download, so the build is set up for size.
-`cabal.project.wasm` builds every package with `split-sections`, which
-lets the linker drop the bindings a program does not reach. `wasm-opt` runs
-with `-O2`, or with the flags in `WASM_OPT_FLAGS`. The script ends by
-printing the module's size as linked, as served, and under gzip. In the
-landing page's module, about 2 MB of the code is the C side (FreeType,
-HarfBuzz, SDL, SDL_ttf, GHC's runtime and libc) and the rest is Haskell.
+Verify a built directory in headless Chromium with `scripts/smoke-test.cjs <dir> <x> <y>`, which checks that the app updates the document title, renders text, and redraws cleanly after a click with zero console errors. CI runs this pipeline in `.github/workflows/web.yml` and publishes the output to GitHub Pages.
 
-The bundled Inter is embedded with Template Haskell, which GHC's wasm
-backend runs through Node.js, so `node` must be on `PATH` while building.
+## Building and testing natively
 
-`scripts/smoke-test.cjs <dir> <x> <y>` loads a built directory in headless
-Chromium with Playwright: the program must set the page title, draw a frame
-with text, and redraw after a click at the point given, with no errors
-logged. CI's Web workflow (`.github/workflows/web.yml`) runs all of this and
-publishes the cookbook with the book.
+With native SDL3 and SDL3_ttf installed, `nano-ui-sdl-web` compiles alongside the rest of the workspace. Calling `runSdlWebApp` natively throws an error (`browserAvailable == False`), while `cabal test nano-ui-sdl-web-test` exercises text shaping, glyph atlas rasterization, event decoding, damage clipping, command batching, and full interactive sessions natively against a scripted mock host.
 
-## Building natively
+## Current status and desktop differences
 
-With SDL3 and SDL3_ttf installed, as for nano-ui-sdl, the package builds
-with the rest of the repository. A native `runSdlWebApp` throws, since there
-is no page to run in (`browserAvailable` is `False`). The test suite runs
-sessions against a scripted host instead of a browser: it queues events and
-records each texture upload and draw.
+Tested end to end in headless Chromium (WebGL2/SwiftShader) on GHC 9.14 Wasm and natively on GHC 9.10 and 9.14: the cookbook's Diagnostics tab reports live stats, the font picker switches across both installed and Fontsource families (including fallback to Fontsource alone when Local Font Access is absent, as in Firefox and Safari), and Playwright verifies file/folder open and both save-picker and fallback download paths. Pixel-exact diffing against `nano-ui-sdl`, real IME input testing, and cross-browser QA outside Chromium remain on the roadmap.
 
-## Status
+Key differences from `nano-ui-sdl`:
 
-Built and run in headless Chromium (WebGL2 on SwiftShader) with GHC 9.14's
-wasm backend: this package's demo and the widget cookbook draw their text and
-widgets, and take clicks, drags and typing. Natively, with GHC 9.10.3 and
-9.14.1, the test suite checks the font engine (SDL_ttf shaping, glyph
-rasterisation into the in-memory atlas), event decoding, damage clipping and
-command merging, and whole sessions on the scripted host (opening frame, a
-click on a button, a pixel ratio change reopening the fonts).
-
-In Chromium, the cookbook's Diagnostics tab shows the session's frame
-statistics; its font picker lists the installed families and Fontsource's,
-and switches the UI to either (and, with the Local Font Access API removed
-as Firefox and Safari lack it, lists and uses Fontsource's); and its File
-Dialogs section opens files and folders and
-saves (checked with Playwright supplying the files and a stand-in save
-dialog, and with the download a browser without one falls back to).
-
-Not yet checked: pixel comparison with nano-ui-sdl, input methods, and
-browsers other than Chromium.
-
-## Differences from nano-ui-sdl
-
-- There are no font directories. Installed families come only through the
-  Local Font Access API, in Chromium-based browsers after the user allows
-  it, and a font service stands in elsewhere (see [Fonts](#fonts)). Fallback
-  fonts are the ones
-  the session loads (the wider Inter by default) rather than the system's,
-  and no bold face is found beside a font file: bold and italic are drawn
-  synthetically.
-- Pasting reads the text of the page's `paste` event, and copying writes
-  with `navigator.clipboard`. A view's clipboard read sees only what was last
-  pasted or copied on the page.
-- The window is the canvas: only the title (`setWindowTitleUi`) is
-  supported. There are no file drops, further windows (`nativeWindow`), or
-  screenshots, and the file dialogs work on contents, not paths (see
-  [File dialogs](#file-dialogs)).
+- **Fonts:** No local font directories; fonts come from Chromium's Local Font Access API or a configured web font service (see [Fonts](#fonts)), fallbacks come from `webFallbackFonts`, and bold/italic weights are synthesized when separate face files are absent.
+- **Clipboard:** Paste reads the browser's `paste` event and copy writes via `navigator.clipboard`; clipboard reads from Haskell only see text previously copied or pasted inside the page.
+- **Windowing:** The browser `<canvas>` acts as the single window. `setWindowTitleUi` updates `document.title`, while `nativeWindow`, screenshots, and OS file drops are unsupported, and file dialogs operate on bytes rather than paths (see [File dialogs](#file-dialogs)).

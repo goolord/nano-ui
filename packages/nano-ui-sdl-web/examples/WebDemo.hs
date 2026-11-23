@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 
--- | A page for checking the web backend: a counter, text entry, a slider
--- that sets a font size, and a checkbox, in the bundled Inter.
+-- | Minimal smoke-test view for the browser backend: a counter, text input,
+-- font-size slider, and checkbox rendered with the bundled Inter font.
 module Main (main) where
 
 import Data.Text qualified as T
@@ -21,7 +21,7 @@ foreign export javascript "nanoMain" main :: IO ()
 demo :: NanoUI ()
 demo = columnWith (gap 12 . padAll 24) $ do
   heading "nano-ui-sdl-web"
-  label "SDL_ttf shapes this text; WebGL2 draws it."
+  label "Text shaped by SDL_ttf, rendered with WebGL2."
   row $ do
     n <- useVar (0 :: Int)
     whenM (button "-") (modifyVar n (subtract 1))

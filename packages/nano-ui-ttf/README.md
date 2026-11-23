@@ -1,17 +1,9 @@
 # nano-ui-ttf
 
-The SDL3_ttf text layer that [nano-ui-sdl](../nano-ui-sdl) and
-[nano-ui-sdl-web](../nano-ui-sdl-web) share: shaping a line with SDL_ttf,
-placing glyphs in a texture atlas, caching shaped lines and opened fonts, and
-the bundled Inter font (`NanoUI.Ttf.Internal.Inter`).
+Shared SDL3_ttf text rendering layer used internally by both [nano-ui-sdl](../nano-ui-sdl) and [nano-ui-sdl-web](../nano-ui-sdl-web). It handles HarfBuzz line shaping via SDL_ttf, glyph atlas packing, shaped-line and font handle caching, and embeds the default Inter font (`NanoUI.Ttf.Internal.Inter`).
 
-Applications do not depend on this package. Use a backend, which picks fonts
-and draws text through it. Both modules are `Internal` and change between
-minor releases along with the backends.
+Applications should not depend on `nano-ui-ttf` directly; depend on a backend package instead. All exposed modules are `Internal` and may change alongside the backends between minor releases.
 
-Building it needs SDL3, SDL3_ttf 3.2 or newer, and pkg-config. The `sdl`
-flag is on by default; turning it off marks the library unbuildable, so a
-package set without SDL can still resolve.
+Building requires SDL3, SDL3_ttf 3.2+, and `pkg-config`. The `sdl` Cabal flag is enabled by default; disabling it marks the library unbuildable so solver plans without SDL can still resolve.
 
-Inter is distributed under the SIL Open Font License 1.1 (`LICENSE-Inter`);
-the code is MIT (`LICENSE`).
+Code is MIT-licensed (`LICENSE`); the bundled Inter font is under the SIL Open Font License 1.1 (`LICENSE-Inter`).

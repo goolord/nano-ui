@@ -1,4 +1,5 @@
--- | "Bloom" in an SDL window. Run it with @cabal run nano-ui-example-bloom@.
+-- | Native SDL3 entry point for the Bloom demo. Run with
+-- @cabal run nano-ui-example-bloom@.
 module Main (main) where
 
 import NanoUI

@@ -1,30 +1,30 @@
 # Styling & Theming
 
-Styling in nano-ui is scoped: a `Theme` holds a `Style` per surface kind, and `styled`/`themed` modify that theme for a subtree. There is no per-widget CSS and no global mutable stylesheet.
+Styling in `nano-ui` is scoped rather than selector-based. A `Theme` holds a `Style` record for each surface kind, and `styled` or `themed` adjusts that theme for a subtree. There is no per-widget CSS and no global mutable stylesheet.
 
-For a live tour of the modifiers, see the [Interactive Styling Lab](lab.md). For non-obvious behavior, see [Styling Gotchas](gotchas.md).
+To experiment with modifiers live, open the [Interactive Styling Lab](lab.md). For subtle surface interactions, check [Styling Gotchas](gotchas.md).
 
-## The theme's five surfaces
+## The five theme surfaces
 
-| Field | Used by |
+| Theme field | Widgets that read it |
 | --- | --- |
 | `themeButton` | Buttons, toggles, dropdown triggers |
 | `themeInput` | Text fields, search boxes, numeric inputs, sliders |
-| `themePanel` | Cards, containers, sidebars, toolbars |
-| `themePopup` | Dropdowns, context menus, select popouts |
+| `themePanel` | Panels, cards, containers, sidebars, toolbars |
+| `themePopup` | Dropdown menus, context menus, popups |
 | `themeFloatingWindow` | Modals, floating windows, inspectors |
 
-A `Style` sets `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`. A `Theme` also defines semantic colors: `themeAccent` / `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success/warning/danger tones.
+Each `Style` sets `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`. Beyond those five surfaces, a `Theme` defines shared semantic colors: `themeAccent`, `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success, warning, and danger tones.
 
-The page behind the view is `pageBackground`: `themeWindow`, unless the theme sets `themePage`. `pageColor` sets one. `panelPage` puts a view that draws no panel of its own on the panel surface. The page sits over the window background, which shows in the gaps between panels:
+The backdrop behind your view is `pageBackground`, which defaults to `themeWindow` unless the theme sets `themePage` (via `pageColor`). Calling `styled panelPage` puts a borderless view directly on the panel surface. The window color itself still peeks through gaps between panels:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:panel_page}}
 ```
 
-A full-window scroller (`scrollWith grow`) fills the page colour.
+A full-window scroller (`scrollWith grow`) paints using this page color instead of drawing a bordered well.
 
-Built-in themes: `defaultTheme` (dark), `defaultLightTheme`, the Tomorrow variants, and `themeFromBase16` / `themeFromBase16Dark` / `themeFromBase16Light`. Set one at startup with `sdlAppTheme = Just appTheme`, switch per frame with `setUiTheme`, or follow the OS with `followSystemTheme` / `lightDark`.
+Built-in themes include `defaultTheme` (dark), `defaultLightTheme`, the Tomorrow variants, and Base16 generators (`themeFromBase16`, `themeFromBase16Dark`, `themeFromBase16Light`). Set a theme at startup with `sdlAppTheme = Just appTheme`, change it dynamically per frame with `setUiTheme`, or match the OS appearance automatically with `followSystemTheme` or `lightDark`.
 
 ## Scoped styling
 
@@ -32,62 +32,62 @@ Built-in themes: `defaultTheme` (dark), `defaultLightTheme`, the Tomorrow varian
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:scoped}}
 ```
 
-Modifiers compose with `(.)`; nested scopes inherit the outer modification. Theme scopes affect painting only, never layout metrics.
+Style and theme modifiers compose with `(.)`, and nested `styled` blocks build on top of outer overrides. Theme changes affect painting only and never alter layout sizes.
 
-- `background`, `foreground`, `borderColor`, `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`, and `fillColor` set `Style` fields.
-- `buttonStyle`, `inputStyle`, `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `rounded`, `subtle`, `tinted`, and `readableOn` modify the `Theme`.
-- `primary`, `destructive`, `success`, `warning`, `tone Danger`, and `toneColor Warning` apply semantic colours.
+- **Style modifiers** (`Style -> Style`): `background`, `foreground`, `borderColor`, `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`, and `fillColor`.
+- **Theme modifiers** (`Theme -> Theme`): `buttonStyle`, `inputStyle`, `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `rounded`, `subtle`, `tinted`, and `readableOn`.
+- **Semantic shortcuts**: `primary`, `destructive`, `success`, `warning`, `tone Danger`, and `toneColor Warning`.
 
-A quiet button:
+For example, here is a quiet, borderless button helper:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:quiet}}
 ```
 
-For a fully custom look, define a palette record, build a `Theme` from it, and derive scoped helpers. Keep three surface levels (well, shelf, controls) and reserve color for meaning.
+When designing a custom visual identity, start with a palette record, construct one complete `Theme` from it, and build small scoped helpers on top. Keeping three clear surface levels (recessed wells, panel surfaces, and elevated controls) while reserving accent color for meaning keeps interfaces clean and readable.
 
 ## Interaction states
 
-A widget is drawn in one of four states:
+Every interactive widget renders in one of four visual states:
 
-| State | Drawn with |
+| State | Visual treatment |
 | --- | --- |
 | Default | `styleBg`, `styleFg`, `styleBorder` |
 | Hover | `styleHoverBg` |
-| Pressed | `styleActiveBg`, while the primary button is held inside the widget |
-| Disabled | Dimmed colours; pointer and keyboard input are ignored |
+| Pressed | `styleActiveBg` while the primary mouse button is held on the widget |
+| Disabled | Dimmed colors with all pointer and keyboard input ignored |
 
-`disabledWhen cond subtree` disables interaction and dims rendering while preserving layout and state:
+Wrap any subtree in `disabledWhen cond` to dim it and disable interaction without changing layout or losing state:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:disabled}}
 ```
 
-Shortcuts and pointer events inside a disabled subtree are suppressed automatically.
+Shortcuts and mouse events inside a disabled subtree are blocked automatically.
 
-All four states, light and dark:
+Compare all four states across dark and light themes:
 
 <nano-ui-state-lab></nano-ui-state-lab>
 
 ## Typography and fonts
 
-Font modifiers apply to any text-capable widget (`labelWith`, `headingWith`, `textInputWith`, `buttonWith`, ...):
+Font modifiers compose right alongside layout modifiers on any text widget (`labelWith`, `headingWith`, `textInputWith`, `buttonWith`, and so on):
 
-- `fontSize px`, `fontMono`, `fontBold` (`fontWeight`), `fontItalic`, `fontUnderline`, `fontStrike`.
-- `fontTone Warning`, `fontColor color`.
+- `fontSize px`, `fontMono`, `fontBold` (or `fontWeight`), `fontItalic`, `fontUnderline`, `fontStrike`
+- `fontTone Warning`, `fontColor color`
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:font_modifiers}}
 ```
 
-The SDL backend bundles Inter and finds installed fonts by family name:
+The SDL backend bundles Inter as its default font and can also search installed system fonts by family name:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:fonts}}
 ```
 
-`setSdlUiFont` changes fonts mid-session. `sdlAppUiScale = 0` follows the desktop scale on Windows. Measure text with `lineWidthUi`, `fmLineHeight`, and `fmSnapScale`, not by summing per-glyph advances.
+Call `setSdlUiFont` to swap fonts mid-session, and set `sdlAppUiScale = 0` on Windows to follow the OS display scale. Whenever you need exact string widths or line metrics, use `lineWidthUi`, `fmLineHeight`, and `fmSnapScale` instead of adding per-glyph advances by hand.
 
-The font modifiers side by side:
+Preview the font modifiers side by side:
 
 <nano-ui-typo-lab></nano-ui-typo-lab>

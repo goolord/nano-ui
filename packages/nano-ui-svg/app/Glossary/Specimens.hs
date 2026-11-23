@@ -145,18 +145,18 @@ generateProbeMatrix =
         "button (normal, subtle)"
         "button :: Text -> NanoUI Bool"
         "themeButton"
-        "Reads `styleBg`, `styleHoverBg`, `styleActiveBg`, `styleFg`, `styleBorder`, `styleBorderWidth` and `styleCornerRadius` from `themeButton`. Focus adds a 2px `themeFocusRing` stroke."
+        "Reads `styleBg`, `styleHoverBg`, `styleActiveBg`, `styleFg`, `styleBorder`, `styleBorderWidth`, and `styleCornerRadius` from `themeButton`. Focus adds a 2px `themeFocusRing` outline."
         "rowWith (gap 8) $ button \"Save\" >> styled subtle (button \"Subtle\")"
         False
         236
         54
         [ (ImpactPrimary, "Switches the base theme to `defaultLightTheme` before scoped modifiers run.")
-        , (ImpactPrimary, "Colors `Save` (`styleBg`, `styleBorder`, `styleFg`). `Subtle` keeps only its text color because its own `styled subtle` runs after the outer `buttonStyle` and clears the background and border.")
-        , (ImpactNoOp, "No effect: the button never reads `themeInput`.")
-        , (ImpactNoOp, "No effect: the button never reads `themePanel`.")
-        , (ImpactNoOp, "No effect. `button` ignores `themeAccent`; use `styled primary` or `toggleButton` to bind it.")
-        , (ImpactPrimary, "Sets `styleCornerRadius` to 999, so the button becomes a pill (`rx` = half the height).")
-        , (ImpactPrimary, "Dims the fill, border and label, and blocks clicks and focus.")
+        , (ImpactPrimary, "Colors `Save` (`styleBg`, `styleBorder`, `styleFg`). `Subtle` keeps only its text color because its inner `styled subtle` clears the background and border.")
+        , (ImpactNoOp, "No effect: buttons do not read `themeInput`.")
+        , (ImpactNoOp, "No effect: buttons do not read `themePanel`.")
+        , (ImpactNoOp, "No effect: plain `button` ignores `themeAccent`. Use `styled primary` or `toggleButton` instead.")
+        , (ImpactPrimary, "Sets `styleCornerRadius` to 999, turning the button into a pill (`rx` = half the height).")
+        , (ImpactPrimary, "Dims the fill, border, and label, and blocks clicks and focus.")
         ]
         ( rowWith (gap 8 . alignMid) $ do
             void (button "Save")
@@ -168,17 +168,17 @@ generateProbeMatrix =
         "toggleButton off and on"
         "toggleButton :: Tone -> Text -> Var Bool -> NanoUI ()"
         "themeButton + Tone"
-        "Off uses `themeButton`, so `buttonStyle` applies. On replaces the fill, hover fill and border with `toneColor`, and the text with `readableOn`, so `buttonStyle` colors stop applying."
+        "While off, reads `themeButton` so `buttonStyle` applies. While on, replaces the fill, hover fill, and border with `toneColor`, and picks contrasting text with `readableOn`, overriding `buttonStyle` colors."
         "toggleButton Accent \"Off\" vOff >> toggleButton Accent \"On\" vOn"
         False
         236
         54
-        [ (ImpactPrimary, "Switches the base theme. `readableOn` recomputes the on-state text color against the tone color.")
-        , (ImpactPartial, "Affects the off state only. On, `widgetVisualStyle` replaces the fill, hover fill and border with `toneColor`, and the text with `readableOn`.")
-        , (ImpactNoOp, "No effect: `toggleButton` never reads `themeInput`.")
-        , (ImpactNoOp, "No effect: `toggleButton` never reads `themePanel`.")
-        , (ImpactPrimary, "Colors the on state when the tone is `Accent`; `readableOn` picks black or white text.")
-        , (ImpactPrimary, "Applies radius 999 to both states. The on state keeps `styleCornerRadius` from `themeButton`.")
+        [ (ImpactPrimary, "Switches the base theme. `readableOn` recomputes the active text color against the tone fill.")
+        , (ImpactPartial, "Styles the off state only. While on, `toneColor` replaces the fill, hover fill, and border, and `readableOn` sets the text color.")
+        , (ImpactNoOp, "No effect: `toggleButton` does not read `themeInput`.")
+        , (ImpactNoOp, "No effect: `toggleButton` does not read `themePanel`.")
+        , (ImpactPrimary, "Colors the active state when the tone is `Accent`; `readableOn` picks dark or light text.")
+        , (ImpactPrimary, "Rounds both states into pills. The active state keeps `styleCornerRadius` from `themeButton`.")
         , (ImpactPrimary, "Dims both states and blocks toggling.")
         ]
         ( rowWith (gap 8 . alignMid) $ do
@@ -193,18 +193,18 @@ generateProbeMatrix =
         "checkbox"
         "checkbox :: Text -> Var Bool -> NanoUI ()"
         "themeButton + themeInput + themeAccent"
-        "Label and unchecked outline come from `themeButton` (`styleFg`, `styleBorder`). The unchecked fill comes from `themeInput` (`styleBg`). The checked box uses `themeAccent` and `themeOnAccent`. `clearStyle` removes the button background."
+        "The label and unchecked border come from `themeButton` (`styleFg`, `styleBorder`), the unchecked interior comes from `themeInput` (`styleBg`), and the checked fill uses `themeAccent` and `themeOnAccent`."
         "checkbox \"Unchecked\" vOff >> checkbox \"Checked\" vOn"
         False
         236
         68
-        [ (ImpactPrimary, "Switches the base theme: light unchecked well, dark label.")
-        , (ImpactPartial, "Colors the label and unchecked outline. `clearStyle` removes the background, so no button box is drawn.")
-        , (ImpactPartial, "Colors only the 14x14 unchecked well.")
-        , (ImpactNoOp, "No effect: `checkbox` never reads `themePanel`.")
+        [ (ImpactPrimary, "Switches the base theme to light unchecked boxes and dark labels.")
+        , (ImpactPartial, "Colors the label and unchecked border. The button background is cleared so no button frame draws behind the checkbox.")
+        , (ImpactPartial, "Colors only the 14x14 unchecked interior.")
+        , (ImpactNoOp, "No effect: `checkbox` does not read `themePanel`.")
         , (ImpactPrimary, "Colors the checked box fill and border; the checkmark uses `themeOnAccent`.")
-        , (ImpactSurprise, "Ignored. `paintChoiceIndicator` hardcodes the radius to `min 3 (boxS * 0.2)`.")
-        , (ImpactPrimary, "Dims the boxes, checkmark and label.")
+        , (ImpactSurprise, "Ignored: checkbox corners use a fixed small radius proportional to box size.")
+        , (ImpactPrimary, "Dims the boxes, checkmark, and label.")
         ]
         ( columnWith (gap 4 . tight) $ do
             vOff <- useVar False
@@ -218,18 +218,18 @@ generateProbeMatrix =
         "radio"
         "radio :: Foldable f => f Text -> Var Int -> NanoUI ()"
         "themeButton + themeInput + themeAccent"
-        "Shares the checkbox path. The unselected ring fill uses `themeInput`, the ring stroke and label use `themeButton`, and the selected dot and ring use `themeAccent`."
+        "Follows the same three-surface split as `checkbox`: the unselected ring interior uses `themeInput`, the ring border and label use `themeButton`, and the selected ring and dot use `themeAccent`."
         "radio [\"Option A\", \"Option B\"] vSelected"
         False
         236
         68
         [ (ImpactPrimary, "Switches the base theme.")
-        , (ImpactPartial, "Colors the labels and the unselected ring stroke. `clearStyle` removes the background.")
-        , (ImpactPartial, "Colors only the unselected ring fill.")
-        , (ImpactNoOp, "No effect: `radio` never reads `themePanel`.")
-        , (ImpactPrimary, "Colors the selected ring and dot.")
-        , (ImpactSurprise, "No effect: radio indicators are always circles (`r = boxS / 2`).")
-        , (ImpactPrimary, "Dims the rings, dot and labels.")
+        , (ImpactPartial, "Colors the labels and unselected ring borders; the button background is cleared.")
+        , (ImpactPartial, "Colors only the unselected ring interior.")
+        , (ImpactNoOp, "No effect: `radio` does not read `themePanel`.")
+        , (ImpactPrimary, "Colors the selected ring and inner dot.")
+        , (ImpactSurprise, "No effect: radio indicators are always circular.")
+        , (ImpactPrimary, "Dims the rings, dot, and labels.")
         ]
         ( columnWith (gap 4 . tight) $ do
             vSel <- useVar (1 :: Int)
@@ -291,18 +291,18 @@ generateProbeMatrix =
         "select and comboBox"
         "select :: f Text -> Var Int -> NanoUI ()"
         "select: themeButton | comboBox: themeInput"
-        "`select` is a `NodeSelect` painted with `themeButton`; `comboBox` is a `NodeTextInput` painted with `themeInput`. Both open menus on `themePopup`."
+        "`select` paints its closed trigger from `themeButton`, while `comboBox` is built on `textInput` and paints from `themeInput`. Both draw their open dropdown menus from `themePopup`."
         "selectWith fillW [\"Select (btn)\", ...] vIdx >> comboBox \"Pick...\" [...] vCombo"
         False
         236
         84
         [ (ImpactPrimary, "Switches the base theme on both controls.")
-        , (ImpactPartial, "Styles `select` only. `comboBox` is a `NodeTextInput` and ignores `buttonStyle`.")
-        , (ImpactPartial, "Styles `comboBox` only. `select` is a `NodeSelect` and ignores `inputStyle`.")
-        , (ImpactNoOp, "No effect on closed controls; open menus read `themePopup`.")
+        , (ImpactPartial, "Styles `select` only. `comboBox` reads `themeInput` and ignores `buttonStyle`.")
+        , (ImpactPartial, "Styles `comboBox` only. `select` reads `themeButton` and ignores `inputStyle`.")
+        , (ImpactNoOp, "No effect while closed; open menus read `themePopup`.")
         , (ImpactPartial, "Highlights the selected row in an open menu and the focused `comboBox` border.")
-        , (ImpactPrimary, "Rounds `select` via `themeButton` and `comboBox` via `themeInput`.")
-        , (ImpactPrimary, "Dims both controls and blocks opening their menus.")
+        , (ImpactPrimary, "Rounds `select` through `themeButton` and `comboBox` through `themeInput`.")
+        , (ImpactPrimary, "Dims both controls and prevents opening their menus.")
         ]
         ( columnWith (gap 6 . fillW . tight) $ do
             vIdx <- useVar (0 :: Int)
@@ -349,8 +349,8 @@ generateProbeMatrix =
         , (ImpactPartial, "Colors the track outline and thumb border, and blends the unfilled track 35% from `styleBg` toward the border.")
         , (ImpactNoOp, "No effect: `slider` never reads `themePanel`.")
         , (ImpactPrimary, "Colors the filled track; the thumb interior uses `themeOnAccent`.")
-        , (ImpactSurprise, "Ignored. `paintSliderNode` hardcodes track radius 3 and border width 1.")
-        , (ImpactPrimary, "Dims the track, fill and thumb.")
+        , (ImpactSurprise, "Ignored: slider tracks always use a 3px corner radius and 1px border.")
+        , (ImpactPrimary, "Dims the track, fill, and thumb.")
         ]
         ( do
             vVal <- useVar (64 :: Float)
@@ -410,18 +410,18 @@ generateProbeMatrix =
         "scrollWith (bounded)"
         "scrollWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a"
         "themeInput (cornerRadius = 0)"
-        "With a `Fixed` or `Fit` axis, `paintScrollSurface` draws a bordered `themeInput` well with `styleCornerRadius` forced to 0. The scrollbar blends `themeInput` with `themeSeparator`."
+        "When either axis has a `Fixed` or `Fit` size, `scrollWith` draws a bordered `themeInput` well with square corners (`cornerRadius = 0`). The scrollbar blends `themeInput` with `themeSeparator`."
         "scrollWith (fillW . fixedH 64 . padAll 6) $ label \"Row 1\" >> ..."
         False
         236
         82
         [ (ImpactPrimary, "Switches the base theme.")
-        , (ImpactNoOp, "No effect: scroll wells never read `themeButton`.")
-        , (ImpactPrimary, "Unexpected: bounded scroll wells use `themeInput`, not `themePanel`, and blend the scrollbar with it.")
-        , (ImpactNoOp, "Unexpected no-op: the well ignores `panelStyle`; only the child label text reads `themePanel`'s `styleFg`.")
+        , (ImpactNoOp, "No effect: scroll wells do not read `themeButton`.")
+        , (ImpactPrimary, "Surprise: bounded scroll wells read `themeInput`, not `themePanel`, and blend the scrollbar from it.")
+        , (ImpactNoOp, "Surprise no-op: the scroll well ignores `panelStyle`; only child labels read `styleFg` from `themePanel`.")
         , (ImpactNoOp, "No effect: the scrollbar blends `themeInput` and `themeSeparator`.")
-        , (ImpactSurprise, "Ignored. `paintScrollSurface` forces `styleCornerRadius = 0`, so the well is always square.")
-        , (ImpactPrimary, "Dims the well, scrollbar and labels.")
+        , (ImpactSurprise, "Ignored: bounded scroll wells always draw with square corners (`cornerRadius = 0`).")
+        , (ImpactPrimary, "Dims the well, scrollbar, and child labels.")
         ]
         ( scrollWith (fillW . fixedH 64 . padAll 6 . gap 4) $ do
             label "Row 1 in scroll well"
@@ -435,18 +435,18 @@ generateProbeMatrix =
         "tabBar styles"
         "tabBarConfigured :: TabsConfig -> Var a -> f (Tab a b) -> NanoUI ()"
         "themePanel + themeAccent (+ themeButton)"
-        "Tab headers are `NodeButton`s, but `tabHeaderVisualStyle` reads `themePanel` and `themeAccent`. Only `TabSegmented` reads `styleBorder` from `themeButton` and compares its luminance with `themePanel`."
+        "Tab headers behave like buttons, yet read `themePanel` and `themeAccent`. Only `TabSegmented` reads `styleBorder` from `themeButton` for its active segment border."
         "tabBarConfigured (defaultTabsConfig {tabsStyle = ...}) vTab [tab 0 \"Code\" (), tab 1 \"AST\" ()]"
         False
         236
         106
         [ (ImpactPrimary, "Switches the base theme.")
-        , (ImpactSurprise, "Ignored by `TabUnderline` and `TabPill`. `tabHeaderVisualStyle` reads `themePanel`; only `TabSegmented` reads `styleBorder` from `themeButton`.")
-        , (ImpactNoOp, "No effect: `tabBar` never reads `themeInput`.")
-        , (ImpactPrimary, "Colors inactive and active tab text, the underline rule and the `TabSegmented` well.")
-        , (ImpactPrimary, "Colors the underline bar in `TabUnderline` and the active pill fill in `TabPill`.")
-        , (ImpactPartial, "Rounds the `TabSegmented` well and active segment. `TabUnderline` is unaffected; `TabPill` already uses half the height.")
-        , (ImpactPrimary, "Dims the tab styles and blocks switching.")
+        , (ImpactSurprise, "Ignored by `TabUnderline` and `TabPill`. Tab headers read `themePanel`; only `TabSegmented` reads `styleBorder` from `themeButton`.")
+        , (ImpactNoOp, "No effect: `tabBar` does not read `themeInput`.")
+        , (ImpactPrimary, "Colors inactive and active tab labels, the underline rule, and the `TabSegmented` track.")
+        , (ImpactPrimary, "Colors the active indicator in `TabUnderline` and the active fill in `TabPill`.")
+        , (ImpactPartial, "Rounds the `TabSegmented` track and active segment. `TabUnderline` is unaffected, and `TabPill` is always a full pill.")
+        , (ImpactPrimary, "Dims the tab strip and blocks switching.")
         ]
         ( columnWith (gap 4 . fillW . tight) $ do
             vTab <- useVar (0 :: Int)
@@ -802,104 +802,104 @@ generateInteractions = do
         "surface-button surface-input surface-popup"
         "checkbox and radio span three surfaces"
         "NanoUI.Internal.Frame.Chrome (widgetVisualStyle), NanoUI.Internal.Frame.Paint.Widgets (paintCheckboxNode)"
-        "Choice widgets run `clearStyle (modalAware (themeButton theme))`, which zeroes `styleBg`, `styleHoverBg`, `styleActiveBg` and `styleBorderWidth`. Paint then reads the unchecked well fill from `styleBg (themeInput theme)`, the ring and label from `themeButton`'s `styleBorder` and `styleFg`, and the checked fill and mark from `themeAccent` and `themeOnAccent`. Inside a `modal`, `modalAware` swaps the ring and label to `themePopup`."
-        "Set `inputStyle` for the unchecked well, `buttonStyle` for the ring and label (plus `popupStyle` inside modals), and `accentColor` for the checked state."
-        "-- buttonStyle background is stripped by clearStyle\nstyled (buttonStyle (background red)) (checkbox \"Opt\" v)"
+        "Checkboxes and radios strip the button background and read three different theme slots: the unchecked interior comes from `themeInput` (`styleBg`), the outline and label come from `themeButton` (`styleBorder` and `styleFg`), and the checked fill and mark come from `themeAccent` and `themeOnAccent`. Inside a `modal`, the outline and label switch from `themeButton` to `themePopup`."
+        "Style `inputStyle` for the unchecked interior, `buttonStyle` for the border and label (plus `popupStyle` inside modals), and `accentColor` for the checked state."
+        "-- buttonStyle background is stripped for checkboxes\nstyled (buttonStyle (background red)) (checkbox \"Opt\" v)"
         "styled (inputStyle (background wellBg)\n      . buttonStyle (borderColor ringCol . foreground txtCol)\n      . accentColor checkCol) (checkbox \"Opt\" v)"
-        "inputStyle well, buttonStyle ring and text, accentColor check"
+        "inputStyle interior, buttonStyle border and text, accentColor check"
         i3Bad
-        "inside a modal, ring and label use popupStyle"
+        "inside a modal, border and label switch to popupStyle"
         i3Good
     , InteractionCard
         "02"
         "surface-button surface-input"
         "select and comboBox use different surfaces"
         "NanoUI.Internal.Frame.Chrome (widgetVisualStyle)"
-        "Both look the same when closed. `select` is a `NodeSelect` painted with `themeButton`; `comboBox` is a `NodeTextInput` painted with `themeInput`. An `inputStyle` scope styles `textInput`, `numericInput` and `comboBox`, so `select` is left mismatched."
-        "Apply the same style to `inputStyle` and `buttonStyle`, or wrap `select` in `styled (buttonStyle ...)`."
+        "Even though they look alike when closed, `select` paints from `themeButton` while `comboBox` is built on `textInput` and paints from `themeInput`. Applying `inputStyle` to a form styles `textInput`, `numericInput`, and `comboBox`, leaving `select` unstyled."
+        "Apply your field style to both `inputStyle` and `buttonStyle`, or wrap `select` in `styled (buttonStyle ...)`."
         "-- select stays on themeButton under inputStyle\nstyled (inputStyle myFieldStyle) $ do\n  comboBox opts vCombo\n  select opts vIdx"
         "styled (inputStyle myFieldStyle . buttonStyle myFieldStyle) $ do\n  comboBox opts vCombo\n  select opts vIdx"
-        "inputStyle only: comboBox changes, select stays"
+        "inputStyle only: comboBox changes, select stays default"
         i4Bad
-        "inputStyle and buttonStyle match"
+        "inputStyle and buttonStyle matched"
         i4Good
     , InteractionCard
         "03"
         "surface-input surface-panel"
-        "scrollWith changes surface with its sizing"
+        "scrollWith changes surface depending on its size"
         "NanoUI.Internal.Frame.Paint (paintScrollSurface)"
-        "When either axis is `Fixed` or `Fit`, `paintScrollSurface` draws a bordered `themeInput` well with `styleCornerRadius` forced to 0. When both axes are `Fill` (`scrollWith grow`), it treats the scroller as a full-window page scroller: it drops the border and fills with the page background (`pageBackground`, `themeWindow` by default)."
-        "Give embedded scrollers a fixed or bounded height (`fixedH`, `maxH`), or wrap a `grow` scroller in a styled `panelWith`."
+        "When either axis has a fixed or fit size, `scrollWith` draws a square-cornered, bordered `themeInput` well. When both axes fill (`scrollWith grow`), it acts as a full-page scroller, dropping the border and filling with `pageBackground` (`themeWindow` by default)."
+        "Give embedded scroll boxes a bounded height (`fixedH`, `maxH`), or wrap a `grow` scroller inside a styled `panelWith`."
         "-- both axes fill: no well, no border\nscrollWith (grow . padAll 6) body"
         "-- bounded height keeps the themeInput well\nscrollWith (fillW . fixedH 80 . padAll 6) body"
-        "grow: no well, no border, page background fill"
-        i5Bad
-        "fixedH 80: bordered themeInput well, radius 0"
+        "grow: no well or border, fills with page background"
         i5Good
+        "fixedH 80: bordered themeInput well with square corners"
+        i5Bad
     , InteractionCard
         "04"
         "surface-panel"
         "callout tints nested panels"
         "NanoUI.Internal.Widgets.Layout (calloutWith)"
-        "`calloutWith` wraps its body in `styled (panelStyle ...)`, so every `panel` or `card` inside the callout inherits the tinted background and border. `modal` and `popup` read `themePopup`, so their children keep the normal `themePanel`."
-        "Capture `basePanel <- themePanel <$> uiTheme` before the callout and wrap inner panels in `styled (\\t -> t {themePanel = basePanel})`."
+        "`calloutWith` wraps its children in `styled (panelStyle ...)`, so any `panel` or `card` inside the callout inherits its tinted background and border. `modal` and `popup` read `themePopup`, so overlays keep the normal `themePanel`."
+        "Save `basePanel <- themePanel <$> uiTheme` before the callout and restore it around inner panels with `styled (\\t -> t {themePanel = basePanel})`."
         "callout Warning $ do\n  label \"Warning\"\n  card (label \"Inner card turns yellow\")"
         "basePanel <- themePanel <$> uiTheme\ncallout Warning $ do\n  label \"Warning\"\n  styled (\\t -> t {themePanel = basePanel}) (card (label \"Clean card\"))"
-        "nested card inherits the Warning tint"
+        "nested card inherits the callout tint"
         i6Bad
         "themePanel restored inside the callout"
         i6Good
     , InteractionCard
         "05"
         "surface-button"
-        "toggleButton ignores buttonStyle when on"
+        "toggleButton ignores buttonStyle when active"
         "NanoUI.Internal.Frame.Chrome (widgetVisualStyle)"
-        "When `toggleButton` is off, `widgetVisualStyle` returns `themeButton`, so `buttonStyle` applies. When it is on, `widgetVisualStyle` overwrites `styleBg`, `styleHoverBg` and `styleBorder` with `toneColor theme tone`, and `styleFg` with `readableOn theme c`."
-        "Change the tone field (`accentColor` for `Accent`, or the matching tone) to color the on state."
-        "-- buttonStyle only reaches the off state\nstyled (buttonStyle (fillColor blue)) (toggleButton Warning \" On\" vTrue)"
+        "While off, `toggleButton` reads `themeButton`, so `buttonStyle` applies normally. While on, it replaces `styleBg`, `styleHoverBg`, and `styleBorder` with its tone color (`toneColor`) and computes contrasting text via `readableOn`, overriding `buttonStyle`."
+        "Change the tone color (`accentColor` for `Accent`, or the matching tone) to customize the active state."
+        "-- buttonStyle only styles the off state\nstyled (buttonStyle (fillColor blue)) (toggleButton Warning \"On\" vTrue)"
         "-- pair buttonStyle (off) with accentColor (on)\nstyled (buttonStyle (fillColor blue) . accentColor rose)\n  (toggleButton Accent \"On\" vTrue)"
-        "on state ignores buttonStyle"
+        "active state ignores buttonStyle"
         i7Bad
         "buttonStyle for off, accentColor for on"
         i7Good
     , InteractionCard
         "06"
         "surface-panel"
-        "borderWidth does not add layout space"
+        "borderWidth does not reserve layout padding"
         "NanoUI.Internal.Frame.Chrome (strokeStyledSides), NanoUI.Internal.Layout.Solve"
-        "Theme scopes never change layout geometry. `borderWidth 8` draws an 8px inset stroke without adding padding, so on a `tight` container it paints over child text. When `borderSides` is not all four sides, `strokeStyledSides` draws flat edge quads and ignores `cornerRadius`."
-        "Add matching padding (`padAll`, `padLeft`, `padLRTB`) when you increase `borderWidth`."
+        "Theme scopes never alter layout geometry. `borderWidth 8` draws an 8px inset stroke without adding padding, so inside a `tight` container it paints right over child text. When `borderSides` draws fewer than all four sides, corners are drawn flat and ignore `cornerRadius`."
+        "Add matching padding (`padAll`, `padLeft`, or `padLRTB`) whenever you draw thick borders."
         "styled (panelStyle (borderWidth 8)) $\n  panelWith tight (label \"Overlapped\")"
-        "styled (panelStyle (borderWidth 6 . borderLeft)) $\n  panelWith (padLRTB 12 8 8 8) (label \"Padded\")"
-        "borderWidth 8 on tight: stroke over text"
+        "styled (panelStyle (borderLeft 6 rose)) $\n  panelWith (padLRTB 12 8 8 8) (label \"Padded\")"
+        "borderWidth 8 on tight overlaps text"
         i9Bad
-        "borderLeft 6 with padLRTB 12 8 8 8"
+        "borderLeft 6 with padLRTB 12 8 8 8 clears text"
         i9Good
     , InteractionCard
         "07"
         "surface-button"
-        "modifier order in (.) and styled"
+        "modifier order in (.) vs. nested styled"
         "NanoUI.Internal.Style, function composition"
-        "Modifiers are functions. In `(f . g) x`, `g` runs first, then `f`, so the leftmost modifier wins: `primary . destructive` is `primary`, and `fixedW 110 . fixedW 220` is 110. Nested scopes run outside in: `styled outer (styled inner view)` makes the inner scope win."
-        "Put the winning override on the left in a `(.)` chain, and innermost when nesting `styled`."
+        "Modifiers are plain Haskell functions. In `(f . g) x`, `g` runs first and `f` runs second, so the leftmost modifier wins: `primary . destructive` resolves to `primary`, and `fixedW 110 . fixedW 220` resolves to 110. Nested scopes run outside in, so `styled outer (styled inner view)` lets the inner scope win."
+        "Put the winning override on the left in a `(.)` chain, and innermost when nesting `styled` calls."
         "styled (primary . destructive) (button \"Which wins?\") -- primary\nbuttonWith (fixedW 110 . fixedW 220) \"Width?\"        -- 110px"
         "styled primary $ styled destructive $ button \"Inner destructive wins\""
-        "(.) chain: leftmost runs last and wins"
+        "(.) chain: leftmost modifier wins"
         i10Bad
-        "nested styled: innermost wins"
+        "nested styled: innermost scope wins"
         i10Good
     , InteractionCard
         "08"
         "surface-panel surface-button"
         "tabs read themePanel, not themeButton"
         "NanoUI.Internal.Frame.Chrome (tabHeaderVisualStyle)"
-        "Tab headers are `NodeButton`s, but `tabHeaderVisualStyle` computes their colors from `themePanel` and `themeAccent`. `buttonStyle` has no effect on `TabUnderline`, `TabPill` or `TabContained`; only `TabSegmented` reads `styleBorder` from `themeButton` for its active border and luminance comparison."
-        "Style tabs with `panelStyle` and `accentColor`."
-        "-- buttonStyle does not reach TabUnderline or TabContained\nstyled (buttonStyle myStyle) (tabBar active tabsList)"
+        "Even though tab headers behave like buttons, they take their colors from `themePanel` and `themeAccent`. `buttonStyle` has no effect on `TabUnderline`, `TabPill`, or `TabContained`; only `TabSegmented` reads `styleBorder` from `themeButton` for its active border."
+        "Style tabs through `panelStyle` and `accentColor`."
+        "-- buttonStyle does not affect TabUnderline or TabContained\nstyled (buttonStyle myStyle) (tabBar active tabsList)"
         "-- panelStyle and accentColor style the tab strip\nstyled (panelStyle myPanel . accentColor myAccent) (tabBar active tabsList)"
-        "buttonStyle: TabUnderline and TabContained unchanged"
+        "buttonStyle leaves TabUnderline and TabContained unchanged"
         i11Bad
-        "panelStyle and accentColor: headers respond"
+        "panelStyle and accentColor style the headers"
         i11Good
     ]
 

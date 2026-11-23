@@ -1,53 +1,55 @@
 # Text Editing
 
-- `textArea` edits a `Var Text`. Use it for short text: notes, descriptions, commit messages.
-- `textAreaDocument` edits a `Var TextDocument`, which shares unchanged lines between edits. Use it for files and code buffers.
+`nano-ui` provides two multi-line text editors depending on how much text you are editing:
 
-## `textArea` for short text
+- `textArea` edits a plain `Var Text`. Use it for short fields like notes, comments, or commit messages.
+- `textAreaDocument` edits a `Var TextDocument`, which shares unchanged lines across edits. Use it for files, code buffers, and large documents.
+
+## Short text with `textArea`
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:text_area}}
 ```
 
-Every edit builds a new `Text`, which is cheap for a few kilobytes.
+Each keystroke produces a new flat `Text`, which is fast and convenient for a few kilobytes of text.
 
-## `textAreaDocument` for documents
+## Large documents with `textAreaDocument`
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:document}}
 ```
 
-Only the edited lines are copied; unchanged lines are shared. `documentText` materializes the whole text; call it when saving instead of on every edit.
+`TextDocument` copies only the lines touched by an edit and shares everything else. Call `documentText` to flatten the document back into a single `Text` when saving or exporting, rather than on every edit:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:save}}
 ```
 
-`documentLineCount` is cheap enough for a status bar.
+For status bars, `documentLineCount` runs without flattening the text.
 
-## One undo history
+## Unified undo history
 
-Keyboard edits, mouse selection, the right-click menu, and programmatic commands all dispatch `TextCommand`s, so they share one undo history:
+Keyboard typing, mouse selection, right-click context menu actions, and programmatic commands all run through `TextCommand`, so everything shares a single undo/redo stack:
 
 ```haskell
 {{#include ../../../packages/nano-ui/lib/NanoUI/Widgets/TextCommand.hs:text_command}}
 ```
 
-Run a command against a field by its `WidgetId`:
+Dispatch a command to any text field or editor by its `WidgetId`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:commands}}
 ```
 
-Query history state for menu enablement:
+Query undo/redo availability to enable or disable Edit menu entries:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:history}}
 ```
 
-A complete Edit menu built this way is in [Build a Notepad](../tutorials/notepad.md).
+See [Tutorial 2: Build a Notepad](../tutorials/notepad.md) for a full Edit menu wired up this way.
 
 > [!TIP]
-> Directly overwriting the `Var Text` or `Var TextDocument` from outside resets the undo stack. To make a programmatic edit undoable, issue a `TextCommand` (`InsertText`, `ReplaceAll`, and so on) instead of writing the `Var`.
+> Overwriting a `Var Text` or `Var TextDocument` directly from outside the widget clears its undo stack. If you want a programmatic edit to be undoable, dispatch a `TextCommand` (`InsertText`, `ReplaceAll`, and so on) instead.
 
-In the primed variants' `Response`, `respChanged` is `True` after an edit and `False` after a caret move alone, so use it to mark a document dirty. `respId` names the editor for commands and focus.
+When using primed variants (`textArea'`, `textAreaDocument'`), `respChanged` is `True` after actual text edits and `False` after cursor movement or selection changes, making it safe to use for dirty-state tracking. Keep `respId` to target the editor with `runTextCommand` or `requestFocus`.
