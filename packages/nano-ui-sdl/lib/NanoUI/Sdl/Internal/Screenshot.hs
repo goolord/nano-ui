@@ -18,6 +18,7 @@ import Foreign.Storable (peek)
 import NanoUI (RgbaPixels, Screenshot (..), rgbaPixels)
 import NanoUI.Sdl.Internal.Env (Retain (..), SdlEnv (..))
 import NanoUI.Sdl.Internal.Font (sdlPathEncoding)
+import NanoUI.Sdl.Internal.Target (setRetainTarget)
 import SDL3.Sys.Bindgen.Pixels qualified as Pixels
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Texture)
@@ -82,7 +83,7 @@ readFrame env tex = do
   if tex == nullPtr
     then renderReadPixels ren (PtrConst.unsafeFromPtr nullPtr)
     else do
-      void $ setRenderTarget ren tex
+      void $ setRetainTarget env tex
       s <- with (SDL_Rect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))) $ \rp ->
         renderReadPixels ren (PtrConst.unsafeFromPtr rp)
       void $ setRenderTarget ren nullPtr
