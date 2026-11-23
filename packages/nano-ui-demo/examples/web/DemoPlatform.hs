@@ -1,8 +1,8 @@
 -- | What the widget cookbook ("Demo") takes from the browser backend. The
--- page has no font directories or file system: the font list starts with
--- the bundled Inter and adds the installed families once the user lets the
--- browser list them, the data files are compiled into the module, and the
--- File Dialogs section opens files and folders by their contents and
+-- page has no font directories or file system: the font list is the bundled
+-- Inter, the installed families once the user lets the browser list them,
+-- and the font service's; the data files are compiled into the module; and
+-- the File Dialogs section opens files and folders by their contents and
 -- saves through the browser. The SDL build has a module of the same name in @examples/sdl@
 -- with the same exports.
 module DemoPlatform
@@ -10,7 +10,6 @@ module DemoPlatform
   , FontList
   , newFontList
   , fontFamilies
-  , fontFinder
   , setUiFontFamily
   , readDataFile
   , FileDialogState
@@ -42,8 +41,8 @@ import NanoUI.Backend.SdlWeb
   , formatDrawRows
   , formatExplainRows
   , formatFpsRows
-  , listWebFontFamilies
   , setSdlWebUiFont
+  , webFontFamilies
   )
 import Text.Printf (printf)
 
@@ -53,53 +52,25 @@ import DemoFiles (dataFiles)
 backendLabel :: Text
 backendLabel = "Web"
 
--- | The font families to choose from: Inter, and the installed families
--- once 'fontFinder' has found them.
+-- | Nothing to keep: the session finds the families.
 data FontList = FontList
-  { flTask :: !(Task Int (Either String [String]))
-  , flAsked :: !(Var Int)
-  -- ^ How many times the button was pressed; each press asks again.
-  , flFound :: !(Var (Maybe (Either String [String])))
-  -- ^ The last answer, kept while the Controls tab is away.
-  }
 
--- | Nothing found yet.
+-- | The (empty) list state.
 newFontList :: IO FontList
-newFontList = FontList <$> newTask <*> newVar 0 <*> newVar Nothing
+newFontList = pure FontList
 
--- | Inter, then the installed families found so far.
+-- | Inter, then the families the browser and the font service offer
+-- ('webFontFamilies'). The installed ones arrive after the user's next
+-- press, when the browser asks them, and in Chromium-based browsers only.
 fontFamilies :: FontList -> NanoUI [Text]
-fontFamilies fl = do
-  installed <- readVar (flFound fl) >>= \case
-    Just (Right families) -> pure (map T.pack families)
-    _ -> pure []
-  pure ("Inter" : filter (/= "Inter") installed)
+fontFamilies FontList = ("Inter" :) . filter (/= "Inter") . map T.pack <$> webFontFamilies
 
--- | A button that asks the browser for the installed families, and what it
--- answered. The browser asks the user first, and only right after a press,
--- so the task starts on the button's frame.
-fontFinder :: FontList -> NanoUI ()
-fontFinder fl = do
-  asked <- readVar (flAsked fl)
-  when (asked > 0) $ do
-    answer <- useTask (flTask fl) asked listWebFontFamilies
-    found <- readVar (flFound fl)
-    for_ answer $ \a -> unless (found == Just a) (writeVar (flFound fl) (Just a))
-  found <- readVar (flFound fl)
-  rowWith (tight . gap 12 . alignMid . fillW) $ do
-    whenM (button "Find installed fonts") (modifyVar (flAsked fl) (+ 1))
-    muted $ case found of
-      _ | asked > 0 && found == Nothing -> "Waiting for the browser…"
-      Nothing -> "Inter is bundled."
-      Just (Left why) -> T.pack ("None: " <> why)
-      Just (Right families) -> T.pack (show (length families) <> " installed families")
-
--- | Use a family: the bundled Inter, or an installed one, which the session
--- loads through the browser before the next frame.
+-- | Use a family: the bundled Inter, or one found by name, installed or
+-- from the font service, which the session loads before the next frame.
 setUiFontFamily :: Text -> NanoUI ()
 setUiFontFamily family
   | family == "Inter" = setSdlWebUiFont WebFontInter
-  | otherwise = setSdlWebUiFont (WebFontInstalled (T.unpack family))
+  | otherwise = setSdlWebUiFont (WebFontSearch [T.unpack family])
 
 -- | A file from the package's @data@ directory, by its path there
 -- (@data/lick.gif@). A path that was not embedded throws, as reading a

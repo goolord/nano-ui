@@ -7,7 +7,6 @@ module DemoPlatform
   , FontList
   , newFontList
   , fontFamilies
-  , fontFinder
   , setUiFontFamily
   , readDataFile
   , FileDialogState
@@ -46,9 +45,6 @@ newFontList = do
 fontFamilies :: FontList -> NanoUI [Text]
 fontFamilies (FontList families) = pure families
 
--- | Nothing to do: the families were found at start.
-fontFinder :: FontList -> NanoUI ()
-fontFinder _ = pure ()
 
 -- | Use an installed family as the UI font.
 setUiFontFamily :: Text -> NanoUI ()

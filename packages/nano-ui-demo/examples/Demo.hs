@@ -325,7 +325,6 @@ appearanceControls st theme font = do
   when (respChanged fontResp) $ do
     family <- readVar font
     unless (T.null family) (setUiFontFamily family)
-  fontFinder (demoFonts st)
   separator
   heading "Accent"
   muted "Choose a color or enter an exact value."
