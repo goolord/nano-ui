@@ -71,7 +71,7 @@ canvas queues an event or a background thread wakes the loop.
 ## Building for the browser
 
 On Linux or macOS with [ghc-wasm-meta](https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta)
-(its default 9.14 flavour, with cabal 3.14 or earlier):
+(its default 9.14 flavour, with the cabal 3.14 it installs):
 
 ```bash
 source ~/.ghc-wasm/env
@@ -90,12 +90,30 @@ python3 -m http.server -d dist-web 8000
 ```
 
 `build-wasi-deps.sh` builds FreeType, HarfBuzz, SDL3 and SDL3_ttf with the
-wasm toolchain's clang into `~/.nano-ui-wasi`. `build-web.sh` builds the demo
-with `cabal.project.wasm` and copies the page, the runtime, the module and its
-glue into `dist-web/`.
+wasm toolchain's clang into `~/.nano-ui-wasi`. SDL has no WASI platform, so
+the script patches three spots in SDL's sources (the threadless build CMake
+allows only for Emscripten, the dynamic API, the Unix URL opener) and builds
+it as a console Unix build. FreeType's setjmp needs WebAssembly exception
+handling (`-mllvm -wasm-enable-sjlj`), which every current browser has.
+Everything is built with `-fPIC`, since ghc-wasm-meta's Cabal config links
+each Haskell library as a shared module for Template Haskell.
+
+`build-web.sh [out-dir [cabal-target]]` builds a program with
+`cabal.project.wasm` (by default this package's `nano-ui-sdl-web-demo`; the
+widget cookbook is `nano-ui-demo:exe:nano-ui-web-cookbook`), shrinks it with
+`wasm-opt`, and lays out `out-dir` (default `dist-web/`): the page, the
+runtime, the module as `main.wasm`, GHC's JSFFI glue, and the
+[browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) it is loaded
+with, fetched from npm.
 
 The bundled Inter is embedded with Template Haskell, which GHC's wasm
 backend runs through Node.js, so `node` must be on `PATH` while building.
+
+`scripts/smoke-test.cjs <dir> <x> <y>` loads a built directory in headless
+Chromium with Playwright: the program must set the page title, draw a frame
+with text, and redraw after a click at the point given, with no errors
+logged. CI's Web workflow (`.github/workflows/web.yml`) runs all of this and
+publishes the cookbook with the book.
 
 ## Building natively
 
@@ -107,19 +125,16 @@ records each texture upload and draw.
 
 ## Status
 
-Verified natively with GHC 9.10.3 and 9.14.1: the font engine (SDL_ttf
-shaping, glyph rasterisation into the in-memory atlas), event decoding,
-damage clipping and command merging, and whole sessions on the scripted host
-(opening frame, a click on a button, a pixel ratio change reopening the
-fonts).
+Built and run in headless Chromium (WebGL2 on SwiftShader) with GHC 9.14's
+wasm backend: this package's demo and the widget cookbook draw their text and
+widgets, and take clicks, drags and typing. Natively, with GHC 9.10.3 and
+9.14.1, the test suite checks the font engine (SDL_ttf shaping, glyph
+rasterisation into the in-memory atlas), event decoding, damage clipping and
+command merging, and whole sessions on the scripted host (opening frame, a
+click on a button, a pixel ratio change reopening the fonts).
 
-Not yet run:
-
-- the wasm build: SDL has no WASI platform, so `build-wasi-deps.sh`
-  configures SDL3 as a console Unix build without threads, and whether it
-  builds that way is untested
-- the browser runtime, `web/nano-ui-sdl-web.js`, and the promise-based wait
-- `ghc-compact` and `effectful-core` under wasm32-wasi
+Not yet checked: pixel comparison with nano-ui-sdl, input methods, and
+browsers other than Chromium.
 
 ## Differences from nano-ui-sdl
 
