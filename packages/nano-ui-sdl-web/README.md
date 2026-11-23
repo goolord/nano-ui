@@ -149,6 +149,19 @@ canvas queues an event or a background thread wakes the loop.
   the on-screen keyboard open there.
 - The cursor is the canvas's CSS `cursor`. Browsers have every cursor kind,
   so none falls back.
+- A touch goes to the program: the runtime sets the canvas's `touch-action`
+  to `none`. A canvas inside a page that scrolls can carry an inline
+  `style="touch-action: pan-y"` instead, which the runtime keeps. A vertical
+  swipe that starts on the canvas then scrolls the page, and the press it
+  began with is released away from the canvas, so it clicks nothing.
+- While the canvas is scrolled out of the viewport, timed waits are held:
+  animation frames, `wakeAfter` and tooltip delays stop, and events and
+  background tasks still wake the session. One frame is drawn when the
+  canvas comes back into view.
+- `start(canvas, wasmUrl, { rtsFlags, env })` in `web/main.js` loads the
+  program. `env` is an object of environment variables, for what the page
+  must tell the program before it starts (`{ NANO_UI_REDUCED_MOTION: "1" }`
+  on the landing page); the program reads them with `lookupEnv`.
 
 ## Building for the browser
 

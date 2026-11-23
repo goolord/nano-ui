@@ -73,6 +73,8 @@ class NanoUiSdlWeb {
     this.queue = [];
     this.waiter = null;
     this.waitTimer = null;
+    this.shown = true;
+    this.held = false;
     this.wakePending = false;
     this.settleTimer = null;
     this.clipboard = null;
@@ -101,7 +103,10 @@ class NanoUiSdlWeb {
   setup(canvas) {
     this.canvas = canvas;
     canvas.tabIndex = -1;
-    canvas.style.touchAction = "none";
+    // Every touch goes to the program unless the page's inline style says
+    // otherwise: "pan-y" on a canvas in a scrolling page lets a vertical
+    // swipe scroll the page (see pointercancel in listenPointer).
+    if (!canvas.style.touchAction) canvas.style.touchAction = "none";
     canvas.style.outline = "none";
     this.input = this.makeTextInput();
     this.initGl();
@@ -123,6 +128,12 @@ class NanoUiSdlWeb {
       this.push(EV_RESIZE);
     }).observe(canvas);
     this.watchPixelRatio();
+    // A canvas scrolled out of the viewport shows nothing, so its timed
+    // waits are held (waitEvents) and one frame is drawn when it is back.
+    new IntersectionObserver((entries) => {
+      this.shown = entries[entries.length - 1].isIntersecting;
+      if (this.shown && this.held) this.release();
+    }).observe(canvas);
     const scheme = window.matchMedia("(prefers-color-scheme: dark)");
     scheme.addEventListener("change", () => this.push(EV_RESIZE));
     this.focusInput();
@@ -262,6 +273,7 @@ class NanoUiSdlWeb {
   release() {
     const resolve = this.waiter;
     this.waiter = null;
+    this.held = false;
     if (this.waitTimer !== null) {
       clearTimeout(this.waitTimer);
       this.waitTimer = null;
@@ -302,6 +314,15 @@ class NanoUiSdlWeb {
       const [x, y] = this.pointerPos(e);
       this.push(EV_MOTION, 0, 0, 0, NanoUiSdlWeb.mods(e), x, y);
       this.push(EV_BUTTON, e.button, 0, 0, NanoUiSdlWeb.mods(e));
+    });
+    // The browser took the pointer for a gesture of its own, as when a
+    // touch on a canvas whose touch-action allows panning starts to scroll
+    // the page. No pointerup follows. The button is released here, far from
+    // the canvas, so the widget that was pressed gets no click.
+    canvas.addEventListener("pointercancel", (e) => {
+      this.push(EV_MOTION, 0, 0, 0, NanoUiSdlWeb.mods(e), -1e5, -1e5);
+      this.push(EV_BUTTON, Math.max(e.button, 0), 0, 0, NanoUiSdlWeb.mods(e));
+      this.push(EV_LEAVE);
     });
     canvas.addEventListener("pointerleave", () => this.push(EV_LEAVE));
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -437,7 +458,10 @@ class NanoUiSdlWeb {
         this.wakePending = false;
         resolve();
       };
-      if (ms >= 0) this.waitTimer = setTimeout(() => this.release(), ms);
+      // A timed wait paces frames. Out of view there is no frame to show,
+      // so it waits for an event or for the canvas to come back.
+      if (ms >= 0 && this.shown) this.waitTimer = setTimeout(() => this.release(), ms);
+      else if (ms >= 0) this.held = true;
     });
   }
 
