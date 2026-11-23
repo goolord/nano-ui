@@ -86,6 +86,11 @@ class NanoUiSdlWeb {
     this.encoder = new TextEncoder();
     this.decoder = new TextDecoder();
     this.localFonts = null;
+    this.installedFamilies = [];
+    this.serviceFamilies = [];
+    this.fontService = 0;
+    this.fontsVersion = 0;
+    this.discovering = false;
     this.fontList = new Uint8Array(0);
     this.fontBytes = new Uint8Array(0);
     this.picked = new Uint8Array(0);
@@ -553,9 +558,79 @@ class NanoUiSdlWeb {
 
   // ---------------------------------------------------------------- fonts
 
-  // The installed fonts, through the Local Font Access API. The browser asks
-  // the user the first time, and only during a click or key press, which a
-  // view's press still counts as. Answers the length of the sorted family
+  // Font families come from two places. Installed ones, through the Local
+  // Font Access API (Chromium-based browsers): once the user has allowed it
+  // they are read at once; while the browser has not asked yet, the request
+  // waits for the next press on the page, the only moment a browser shows
+  // the question. And a font service's catalogue (1: Fontsource), in every
+  // browser. Each arrival bumps fontsVersion and wakes the session, which
+  // reads the merged list with fontFamilies.
+  startFontDiscovery(service) {
+    if (this.discovering) return;
+    this.discovering = true;
+    this.fontService = service;
+    if (service === 1) {
+      fetch("https://api.fontsource.org/v1/fonts")
+        .then((r) => (r.ok ? r.json() : []))
+        .then((fonts) => {
+          this.serviceFamilies = fonts.map((f) => f.family);
+          this.fontsChanged();
+        })
+        .catch((e) => console.warn("nano-ui-sdl-web: the font service's list is not available:", e));
+    }
+    if (typeof window.queryLocalFonts !== "function" || !navigator.permissions) return;
+    navigator.permissions.query({ name: "local-fonts" }).then((status) => {
+      if (status.state === "granted") {
+        this.readInstalled();
+      } else if (status.state === "prompt") {
+        // The next press asks; its own effect on the page goes on as usual.
+        const ask = () => {
+          this.canvas.removeEventListener("pointerdown", ask, true);
+          this.input.removeEventListener("keydown", ask, true);
+          this.readInstalled();
+        };
+        this.canvas.addEventListener("pointerdown", ask, true);
+        this.input.addEventListener("keydown", ask, true);
+      }
+      status.addEventListener("change", () => { if (status.state === "granted") this.readInstalled(); });
+    }).catch(() => {});
+  }
+
+  readInstalled() {
+    return window.queryLocalFonts().then((fonts) => {
+      this.localFonts = fonts;
+      this.installedFamilies = [...new Set(fonts.map((f) => f.family))];
+      this.fontsChanged();
+    }).catch((e) => console.warn("nano-ui-sdl-web: installed fonts not available:", e));
+  }
+
+  fontsChanged() {
+    this.fontsVersion++;
+    this.wake();
+  }
+
+  fontsVersionNow() {
+    return this.fontsVersion;
+  }
+
+  // The families known so far, installed first, sorted and without repeats,
+  // a line each.
+  fontFamilies(ptr, n) {
+    const seen = new Set();
+    const all = [];
+    for (const f of [...this.installedFamilies].sort().concat([...this.serviceFamilies].sort())) {
+      if (!seen.has(f)) { seen.add(f); all.push(f); }
+    }
+    return this.writeText(all.join("\n"), ptr, n);
+  }
+
+  // A family name as the desktop's font search compares them.
+  static fontKey(name) {
+    return name.toLowerCase().replace(/[\s_-]/g, "");
+  }
+
+  // The installed fonts, through the Local Font Access API, asking the user
+  // if the browser has not yet. Answers the length of the sorted family
   // names, one a line, for takeFontList; -1 without the API, -2 declined.
   async findFonts() {
     if (typeof window.queryLocalFonts !== "function") return -1;
@@ -565,7 +640,8 @@ class NanoUiSdlWeb {
       console.warn("nano-ui-sdl-web: installed fonts not available:", e);
       return -2;
     }
-    const families = [...new Set(this.localFonts.map((f) => f.family))].sort();
+    this.installedFamilies = [...new Set(this.localFonts.map((f) => f.family))];
+    const families = [...this.installedFamilies].sort();
     this.fontList = this.encoder.encode(families.join("\n"));
     return this.fontList.length;
   }
@@ -575,26 +651,58 @@ class NanoUiSdlWeb {
     this.fontList = new Uint8Array(0);
   }
 
-  // A font file's bytes: an installed family's regular face (kind 0), or a
-  // URL (kind 1). Answers their length for takeFontBytes, or -1.
+  // An installed family's regular face, else its first, or null. Reads the
+  // installed fonts first when the user has allowed it but they have not
+  // been read yet; never asks.
+  async installedFace(name) {
+    if (!this.localFonts && typeof window.queryLocalFonts === "function" && navigator.permissions) {
+      try {
+        const status = await navigator.permissions.query({ name: "local-fonts" });
+        if (status.state === "granted") await this.readInstalled();
+      } catch (e) { /* no permission query: nothing installed to read */ }
+    }
+    if (!this.localFonts) return null;
+    const key = NanoUiSdlWeb.fontKey(name);
+    const faces = this.localFonts.filter((f) => NanoUiSdlWeb.fontKey(f.family) === key);
+    return faces.find((f) => /^(regular|normal|book|roman)$/i.test(f.style)) || faces[0] || null;
+  }
+
+  // A family's regular face from the font service, as TrueType, or null.
+  async serviceFace(name) {
+    if (this.fontService !== 1) return null;
+    const id = name.toLowerCase().trim().replace(/[\s_]+/g, "-");
+    const r = await fetch(`https://api.fontsource.org/v1/fonts/${encodeURIComponent(id)}`);
+    if (!r.ok) return null;
+    const font = await r.json();
+    const weight = font.variants["400"] ? "400" : Object.keys(font.variants)[0];
+    const style = font.variants[weight].normal ? "normal" : Object.keys(font.variants[weight])[0];
+    const subsets = font.variants[weight][style];
+    const subset = subsets[font.defSubset] || subsets.latin || Object.values(subsets)[0];
+    const file = await fetch(subset.url.ttf);
+    return file.ok ? file.blob() : null;
+  }
+
+  // A font file's bytes: an installed family's regular face (kind 0), a URL
+  // (kind 1), or a family by name (kind 2): installed if the user has
+  // allowed it, else from the font service. Answers their length for
+  // takeFontBytes, or -1.
   async loadFont(kind, ptr, len) {
     const name = this.text(ptr, len);
     try {
-      let blob;
+      let blob = null;
       if (kind === 0) {
-        if (!this.localFonts) {
-          if (typeof window.queryLocalFonts !== "function") return -1;
+        if (!this.localFonts && typeof window.queryLocalFonts === "function") {
           this.localFonts = await window.queryLocalFonts();
         }
-        const faces = this.localFonts.filter((f) => f.family === name);
-        const face = faces.find((f) => /^(regular|normal|book|roman)$/i.test(f.style)) || faces[0];
-        if (!face) return -1;
-        blob = await face.blob();
-      } else {
+        blob = await this.installedFace(name).then((face) => (face ? face.blob() : null));
+      } else if (kind === 1) {
         const response = await fetch(name);
-        if (!response.ok) return -1;
-        blob = await response.blob();
+        if (response.ok) blob = await response.blob();
+      } else {
+        const face = await this.installedFace(name);
+        blob = face ? await face.blob() : await this.serviceFace(name);
       }
+      if (!blob) return -1;
       this.fontBytes = new Uint8Array(await blob.arrayBuffer());
       return this.fontBytes.length;
     } catch (e) {

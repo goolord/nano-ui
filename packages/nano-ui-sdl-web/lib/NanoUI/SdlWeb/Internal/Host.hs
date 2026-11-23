@@ -91,10 +91,21 @@ data WebHost = WebHost
   -- ^ Copy the names 'whFindFonts' found into the buffer.
   , whLoadFont :: Int -> Ptr Word8 -> Int -> IO Int
   -- ^ Load a font file's bytes: an installed family's regular face (kind
-  -- 0) or a URL (kind 1), named in UTF-8. Answers their length for
-  -- 'whTakeFontBytes', or -1 when it could not be loaded.
+  -- 0), a URL (kind 1), or a family by name (kind 2: installed when the user
+  -- has allowed it, else from the font service), named in UTF-8. Answers
+  -- their length for 'whTakeFontBytes', or -1 when it could not be loaded.
   , whTakeFontBytes :: Ptr Word8 -> IO ()
   -- ^ Copy the bytes 'whLoadFont' loaded into the buffer.
+  , whStartFontDiscovery :: Int -> IO ()
+  -- ^ Start finding font families, once: the installed ones (at once when
+  -- the user has allowed it; while the browser has not asked yet, at the
+  -- next press on the page) and a font service's catalogue (0 none, 1
+  -- Fontsource). Each arrival bumps 'whFontsVersion' and wakes the session.
+  , whFontsVersion :: IO Int
+  -- ^ How many times the known families changed.
+  , whFontFamilies :: Ptr Word8 -> Int -> IO Int
+  -- ^ Copy up to @n@ bytes of the known families (installed first, one a
+  -- line) into the buffer, and answer the full length.
   , whPickFiles :: Int -> Bool -> Ptr Word8 -> Int -> IO Int
   -- ^ Show the browser's file chooser: files (mode 0) or a folder's files
   -- (mode 1), several or one, with the filters as UTF-8 lines of a name, a
@@ -177,6 +188,9 @@ browserHost = do
       , whTakeFontList = jsTakeFontList
       , whLoadFont = \kind p n -> evaluate =<< jsLoadFont kind p n
       , whTakeFontBytes = jsTakeFontBytes
+      , whStartFontDiscovery = jsStartFontDiscovery
+      , whFontsVersion = jsFontsVersion
+      , whFontFamilies = jsFontFamilies
       , whPickFiles = \mode many p n -> evaluate =<< jsPickFiles mode (fromEnum many) p n
       , whSaveFile = \np nn fp fn dp dn -> evaluate =<< jsSaveFile np nn fp fn dp dn
       , whTakePicked = jsTakePicked
@@ -241,6 +255,15 @@ foreign import javascript safe "return await globalThis.nanoUiSdlWeb.loadFont($1
 
 foreign import javascript unsafe "globalThis.nanoUiSdlWeb.takeFontBytes($1)"
   jsTakeFontBytes :: Ptr Word8 -> IO ()
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.startFontDiscovery($1)"
+  jsStartFontDiscovery :: Int -> IO ()
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.fontsVersionNow()"
+  jsFontsVersion :: IO Int
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.fontFamilies($1, $2)"
+  jsFontFamilies :: Ptr Word8 -> Int -> IO Int
 
 foreign import javascript safe "return await globalThis.nanoUiSdlWeb.pickFiles($1, $2, $3, $4);"
   jsPickFiles :: Int -> Int -> Ptr Word8 -> Int -> IO Int

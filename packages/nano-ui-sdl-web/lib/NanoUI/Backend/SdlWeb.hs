@@ -19,6 +19,8 @@ module NanoUI.Backend.SdlWeb
   , browserAvailable
 
     -- * Fonts
+  , WebFontService (..)
+  , webFontFamilies
   , setSdlWebUiFont
   , listWebFontFamilies
 
@@ -58,11 +60,13 @@ import NanoUI.SdlWeb.Internal.Host (browserAvailable, browserHost)
 import NanoUI.SdlWeb.Internal.Session
   ( SdlWebOptions (..)
   , WebFont (..)
+  , WebFontService (..)
   , askSdlWebDebug
   , defaultSdlWebOptions
   , listWebFontFamilies
   , runWebSession
   , setSdlWebUiFont
+  , webFontFamilies
   )
 
 -- | Run a view in the page's canvas until it quits. The view is rebuilt for

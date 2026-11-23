@@ -13,10 +13,12 @@ module NanoUI.SdlWeb.Internal.Session
   ( SdlWebOptions (..)
   , defaultSdlWebOptions
   , WebFont (..)
+  , WebFontService (..)
   , runWebSession
   , WebFrame
     -- * From the view
   , setSdlWebUiFont
+  , webFontFamilies
   , askSdlWebDebug
   , listWebFontFamilies
   ) where
@@ -87,7 +89,7 @@ import NanoUI.Runner (DebugSamplerRef, SessionDriver (..), newDebugSampler, paci
 import NanoUI.Backend (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
 import NanoUI.SdlWeb.Internal.Debug (SdlWebDebugSnapshot (..))
 import NanoUI.SdlWeb.Internal.Font
-import NanoUI.SdlWeb.Internal.Fonts (FontOrigin (..), findFontFamilies, loadFontBytes, rendererName)
+import NanoUI.SdlWeb.Internal.Fonts (FontOrigin (..), findFontFamilies, knownFontFamilies, loadFontBytes, rendererName, searchCandidates)
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input
 import NanoUI.SdlWeb.Internal.Render
@@ -110,6 +112,22 @@ data WebFont
   | WebFontUrl !String
   -- ^ A TrueType or OpenType file at a URL. Another origin must allow the
   -- page to read it (CORS).
+  | WebFontSearch ![String]
+  -- ^ The first of these families that can be had, as
+  -- @NanoUI.Backend.Sdl.FontSearch@ searches the desktop's: installed (once
+  -- the user has let the browser list them), else from the font service
+  -- ('webFontService'). Names compare ignoring case, spaces, @-@ and @_@;
+  -- @sans-serif@, @serif@ and @monospace@ stand for common families. With
+  -- none found, the bundled Inter.
+  deriving (Eq, Show)
+
+-- | Where families come from when they are not installed, or not allowed.
+data WebFontService
+  = Fontsource
+  -- ^ Fontsource (fontsource.org): about 2,100 open-licence families,
+  -- Google Fonts' among them, as TrueType from its CDN (cdn.jsdelivr.net).
+  -- The page fetches the catalogue when 'webFontFamilies' is first asked
+  -- for, and each family's regular face when it is used.
   deriving (Eq, Show)
 
 -- | Options for the web runners. The canvas's size is the page's, so the
@@ -128,6 +146,11 @@ data SdlWebOptions = SdlWebOptions
   , webMonoFont :: !WebFont
   -- ^ Monospace font (default: 'WebFontInter', set on a grid of whole
   -- pixels).
+  , webFontService :: !(Maybe WebFontService)
+  -- ^ A service to list families from and load them by name, in every
+  -- browser (default: 'Nothing': the page contacts no third party). Firefox
+  -- and Safari give a page no installed fonts, so there a service is the
+  -- only source of families beyond the page's own.
   , webFallbackFonts :: ![WebFont]
   -- ^ Fonts for the characters the UI and monospace fonts lack, tried in
   -- order, as the desktop finds them among the system's fonts. Loaded when
@@ -157,6 +180,7 @@ defaultSdlWebOptions =
     , webThemeFor = Nothing
     , webFont = WebFontInter
     , webMonoFont = WebFontInter
+    , webFontService = Nothing
     , webFallbackFonts = [WebFontUrl "fonts/inter-extended.ttf"]
     , webFontSize = 16
     , webUiScale = 1
@@ -193,6 +217,10 @@ data WebEnv = WebEnv
   -- ^ The UI font the font cache has open.
   , weRendererName :: !Text
   , weRefreshHz :: !Int
+  , weFontService :: !(Maybe WebFontService)
+  , weFamilies :: !(IORef (Maybe (Int, [String])))
+  -- ^ The families 'webFontFamilies' last read, at the page's version of
+  -- them; 'Nothing' until a view first asks.
   }
 
 -- | A browser session keeps its environment on the context, so the view's
@@ -212,6 +240,9 @@ runWebSession host opts frame = do
   canvas <- queryCanvas host
   let zoom = if webUiScale opts > 0 then webUiScale opts else 1
   scaleRef <- newIORef (ciPixelRatio canvas * zoom)
+  -- A search by name needs the service named before it loads anything.
+  when (any isSearch [webFont opts, webMonoFont opts]) $
+    whStartFontDiscovery host (serviceCode (webFontService opts))
   sans <- resolveWebFont host (webFont opts)
   mono <- resolveWebFont host (webMonoFont opts)
   fallbacks <- newWebFallbacks . concat =<< mapM (loadFallback host) (webFallbackFonts opts)
@@ -233,6 +264,8 @@ runWebSession host opts frame = do
               <*> newIORef (webFont opts)
               <*> pure rendererLabel
               <*> pure refreshHz
+              <*> pure (webFontService opts)
+              <*> newIORef Nothing
           ctx1 <- withWebFonts env ctx0
           setBackendSession ctx1 webSession env
           setDrawSnapScale ctx1 =<< readIORef scaleRef
@@ -274,6 +307,11 @@ runWebSession host opts frame = do
             `finally` (closeWindowHost ctx2 `finally` cancelTasks ctx2)
   where
     refreshHz = if webRefreshHz opts > 0 then webRefreshHz opts else 60
+    isSearch = \case WebFontSearch _ -> True; _ -> False
+
+-- | The page's code for a font service.
+serviceCode :: Maybe WebFontService -> Int
+serviceCode = \case Nothing -> 0; Just Fontsource -> 1
 
 -- | The font source for a 'WebFont', loading an installed family or a URL
 -- through the page. One that cannot be loaded is the bundled Inter, with a
@@ -284,6 +322,7 @@ resolveWebFont host = \case
   WebFontBytes bytes label -> pure (FontFromMemory bytes label)
   WebFontInstalled family -> load InstalledFamily family
   WebFontUrl url -> load FontUrl url
+  WebFontSearch names -> search (concatMap searchCandidates names)
   where
     load origin name =
       loadFontBytes host origin name >>= \case
@@ -291,6 +330,11 @@ resolveWebFont host = \case
         Nothing -> do
           hPutStrLn stderr ("nano-ui-sdl-web: could not load the font " <> show name <> "; using Inter")
           pure embeddedFontSource
+    search [] = pure embeddedFontSource
+    search (name : rest) =
+      loadFontBytes host FamilyByName name >>= \case
+        Just bytes -> pure (FontFromMemory bytes name)
+        Nothing -> search rest
 
 -- | A fallback font's bytes: none for the bundled Inter, which is the UI
 -- font's own fallback already, or for a font that will not load.
@@ -300,7 +344,11 @@ loadFallback host = \case
   WebFontBytes bytes _ -> pure [bytes]
   WebFontInstalled family -> load InstalledFamily family
   WebFontUrl url -> load FontUrl url
+  WebFontSearch names -> firstOf (concatMap searchCandidates names)
   where
+    firstOf [] = pure []
+    firstOf (name : rest) =
+      loadFontBytes host FamilyByName name >>= maybe (firstOf rest) (pure . pure)
     load origin name =
       loadFontBytes host origin name >>= \case
         Just bytes -> pure [bytes]
@@ -341,13 +389,37 @@ askSdlWebDebug =
           , dbgRefreshHz = weRefreshHz env
           })
 
--- | The font families installed on the machine, sorted, for
--- 'WebFontInstalled'; or why they cannot be listed: the browser has no Local
--- Font Access API (only Chromium-based browsers have it), the user declined,
--- or this is not a browser. The browser asks the user the first time, and
--- shows that question only right after a click or key press on the page, so
--- call this from a task the press starts ('NanoUI.useTask'). It waits for
--- the user's answer.
+-- | The font families there are to choose from, for 'WebFontSearch', as
+-- @NanoUI.Backend.Sdl.listFontFamilies@ lists the desktop's: the installed
+-- ones (Chromium-based browsers, once the user allows it), then the font
+-- service's ('webFontService'). The first call starts finding them and
+-- answers what is known, possibly nothing; the view runs again as more
+-- arrive. While the browser has not asked the user about installed fonts,
+-- it asks at their next click or key press on the page, the only moment a
+-- browser shows that question; the answer is kept for the site, so later
+-- visits list them at once. Firefox and Safari have no installed fonts to
+-- give, so there the list is the service's.
+webFontFamilies :: NanoUI [String]
+webFontFamilies =
+  askBackendSession webSession >>= \case
+    Nothing -> pure []
+    Just env -> liftIO $ do
+      known <- readIORef (weFamilies env)
+      when (known == Nothing) $ whStartFontDiscovery (weHost env) (serviceCode (weFontService env))
+      version <- whFontsVersion (weHost env)
+      case known of
+        Just (seen, families) | seen == version -> pure families
+        _ -> do
+          families <- knownFontFamilies (weHost env)
+          families <$ writeIORef (weFamilies env) (Just (version, families))
+
+-- | The installed font families alone, asking the user now; or why they
+-- cannot be listed: the browser has no Local Font Access API (only
+-- Chromium-based browsers have it), the user declined, or this is not a
+-- browser. 'webFontFamilies' is the usual way, which asks at the user's next
+-- press by itself. A browser shows the question only right after a click or
+-- key press, so call this from a task the press starts ('NanoUI.useTask'). It
+-- waits for the user's answer.
 listWebFontFamilies :: IO (Either String [String])
 listWebFontFamilies
   | browserAvailable = findFontFamilies =<< browserHost
@@ -387,6 +459,10 @@ syncWeb env ctx inp = do
       pw = max 1 (round (ciWidth canvas * ciPixelRatio canvas))
       ph = max 1 (round (ciHeight canvas * ciPixelRatio canvas))
   oldScale <- readIORef (weScale env)
+  -- A view that lists the families runs again when more arrive.
+  readIORef (weFamilies env) >>= mapM_ (\(seen, _) -> do
+    version <- whFontsVersion (weHost env)
+    unless (version == seen) (markDirty ctx))
   requested <- readIORef (weFontRequest env)
   applied <- readIORef (weFontApplied env)
   let scaleChanged = abs (scale - oldScale) > 1e-4
