@@ -28,6 +28,38 @@ function, as `runSdlAppReduce` does. `SdlWebOptions` sets the title
 `prefers-color-scheme` (`webThemeFor`), fonts, the base font size, and a UI
 scale on top of the device pixel ratio.
 
+## Fonts
+
+The bundled Inter is the default (`WebFontInter`). A page cannot read font
+files from disk, so other fonts come three ways:
+
+- `WebFontInstalled "Noto Sans"`: an installed family, which the browser
+  hands over through the Local Font Access API. Chromium-based browsers have
+  it; Firefox and Safari do not. `listWebFontFamilies` lists the families.
+  The browser asks the user the first time, and shows that question only
+  right after a click or key press, so call it from a task a button starts.
+- `WebFontUrl "fonts/Literata.ttf"`: a TrueType or OpenType file the page
+  fetches. A file on another origin needs CORS headers that allow the page.
+- `WebFontBytes bytes "label"`: a file the program embeds.
+
+Set them in `SdlWebOptions` (`webFont`, `webMonoFont`), or change the UI font
+from the view with `setSdlWebUiFont`, which loads it before the next frame as
+`setSdlUiFont` does on the desktop. A font that will not load is the bundled
+Inter, with a warning on the browser console.
+
+## Debugging
+
+`askSdlWebDebug` returns the session's frame timings (the core's
+`CoreDebugSnapshot`, as `askSdlDebug` has), the canvas size, pixel ratio,
+scale, UI font and the WebGL renderer's name. It refreshes at most four
+times a second while a view asks, so ask only while the numbers are on
+screen. `formatFpsRows`, `formatDrawRows` and `formatExplainRows` lay them
+out as the SDL backend's Debug window does. WebGL calls return before the GPU
+runs them, so the present time is zero and the render time is the whole of a
+frame's cost. The runtime rows need GHC's `-T`: a reactor module takes no
+command line, so `start` in `web/main.js` passes `rtsFlags` (the demo page's
+`"-T"`) through `GHCRTS`.
+
 ## The page
 
 The page provides a `<canvas>` whose CSS box (its `width` and `height`
@@ -133,15 +165,19 @@ rasterisation into the in-memory atlas), event decoding, damage clipping and
 command merging, and whole sessions on the scripted host (opening frame, a
 click on a button, a pixel ratio change reopening the fonts).
 
+In Chromium, the cookbook's Diagnostics tab shows the session's frame
+statistics, and its font picker lists the installed families and switches
+the UI to one of them.
+
 Not yet checked: pixel comparison with nano-ui-sdl, input methods, and
 browsers other than Chromium.
 
 ## Differences from nano-ui-sdl
 
-- The browser has no font directories: there is no installed-font search,
-  no fallback fonts for characters Inter lacks, and no bold face found beside
-  a font file. Bold and italic are drawn synthetically. Pass other fonts as
-  bytes with `WebFontBytes`.
+- There are no font directories. Installed families come only through the
+  Local Font Access API (see [Fonts](#fonts)), and there are no fallback
+  fonts for characters the UI font lacks, and no bold face found beside a
+  font file: bold and italic are drawn synthetically.
 - Pasting reads the text of the page's `paste` event, and copying writes
   with `navigator.clipboard`. A view's clipboard read sees only what was last
   pasted or copied on the page.

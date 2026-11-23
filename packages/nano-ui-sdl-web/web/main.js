@@ -5,14 +5,17 @@
 import { WASI, OpenFile, File, ConsoleStdout } from "./browser_wasi_shim/index.js";
 import ghcWasmJsffi from "./ghc_wasm_jsffi.js";
 
-export async function start(canvas, wasmUrl) {
+// rtsFlags are GHC runtime options, read through GHCRTS as a reactor module
+// takes no command line: "-T" keeps the statistics askSdlWebDebug's runtime
+// rows show.
+export async function start(canvas, wasmUrl, { rtsFlags = "" } = {}) {
   globalThis.nanoUiSdlWeb.setup(canvas);
   const fds = [
     new OpenFile(new File([])),
     ConsoleStdout.lineBuffered((msg) => console.log(msg)),
     ConsoleStdout.lineBuffered((msg) => console.warn(msg)),
   ];
-  const wasi = new WASI([], [], fds);
+  const wasi = new WASI([], rtsFlags ? [`GHCRTS=${rtsFlags}`] : [], fds);
   // The glue reads the instance's exports, which exist only once it is
   // instantiated; it is handed the object they are copied into.
   const exports = {};

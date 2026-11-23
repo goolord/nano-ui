@@ -8,9 +8,9 @@
 -- run against a 'WebHost' of their own.
 --
 -- FFI conventions. The JavaScript imports are @unsafe@, synchronous calls,
--- except the wait for events: a @safe@ import runs as an async function, so
--- the calling Haskell thread waits for its promise while the browser's event
--- loop runs and delivers the events. Pointers passed to the page point into
+-- except the wait for events and the font queries: a @safe@ import runs as
+-- an async function, so the calling Haskell thread waits for its promise
+-- while the browser's event loop runs and delivers the events. Pointers passed to the page point into
 -- the module's memory, which the page reads and writes through views of it.
 -- Text crosses as UTF-8 bytes and a length. The wake ('whWake') is safe from
 -- any Haskell thread. The C imports in "NanoUI.SdlWeb.Internal.Font" are
@@ -79,6 +79,22 @@ data WebHost = WebHost
   -- the buffer, and answer its full length, or -1 when it has seen none.
   , whClipboardWrite :: Ptr Word8 -> Int -> IO ()
   , whSetTitle :: Ptr Word8 -> Int -> IO ()
+  , whRendererInfo :: Ptr Word8 -> Int -> IO Int
+  -- ^ Copy up to @n@ bytes of the WebGL renderer's description into the
+  -- buffer, and answer its full length.
+  , whFindFonts :: IO Int
+  -- ^ Ask the browser for the installed font families (the Local Font
+  -- Access API, which asks the user). Answers the byte length of their
+  -- names, one a line, for 'whTakeFontList'; -1 when the browser has no
+  -- such API, -2 when the user or the page's policy declined.
+  , whTakeFontList :: Ptr Word8 -> IO ()
+  -- ^ Copy the names 'whFindFonts' found into the buffer.
+  , whLoadFont :: Int -> Ptr Word8 -> Int -> IO Int
+  -- ^ Load a font file's bytes: an installed family's regular face (kind
+  -- 0) or a URL (kind 1), named in UTF-8. Answers their length for
+  -- 'whTakeFontBytes', or -1 when it could not be loaded.
+  , whTakeFontBytes :: Ptr Word8 -> IO ()
+  -- ^ Copy the bytes 'whLoadFont' loaded into the buffer.
   }
 
 -- | Bytes in one event record: kind, three integer fields and the
@@ -141,6 +157,11 @@ browserHost = do
       , whClipboardRead = jsClipboardRead
       , whClipboardWrite = jsClipboardWrite
       , whSetTitle = jsSetTitle
+      , whRendererInfo = jsRendererInfo
+      , whFindFonts = evaluate =<< jsFindFonts
+      , whTakeFontList = jsTakeFontList
+      , whLoadFont = \kind p n -> evaluate =<< jsLoadFont kind p n
+      , whTakeFontBytes = jsTakeFontBytes
       }
 
 foreign import javascript unsafe "globalThis.nanoUiSdlWeb.attach(__exports.memory)"
@@ -187,6 +208,21 @@ foreign import javascript unsafe "globalThis.nanoUiSdlWeb.clipboardWrite($1, $2)
 
 foreign import javascript unsafe "globalThis.nanoUiSdlWeb.setTitle($1, $2)"
   jsSetTitle :: Ptr Word8 -> Int -> IO ()
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.rendererInfo($1, $2)"
+  jsRendererInfo :: Ptr Word8 -> Int -> IO Int
+
+foreign import javascript safe "return await globalThis.nanoUiSdlWeb.findFonts();"
+  jsFindFonts :: IO Int
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.takeFontList($1)"
+  jsTakeFontList :: Ptr Word8 -> IO ()
+
+foreign import javascript safe "return await globalThis.nanoUiSdlWeb.loadFont($1, $2, $3);"
+  jsLoadFont :: Int -> Ptr Word8 -> Int -> IO Int
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.takeFontBytes($1)"
+  jsTakeFontBytes :: Ptr Word8 -> IO ()
 #else
 browserAvailable = False
 

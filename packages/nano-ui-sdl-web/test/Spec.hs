@@ -4,9 +4,14 @@
 module Main (main) where
 
 import Control.Exception (Exception, catch, throwIO)
+import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
+import Foreign.Marshal.Utils (copyBytes)
+import NanoUI.Backend.SdlWeb (SdlWebDebugSnapshot (..), CoreDebugSnapshot (..), WebFont (..), askSdlWebDebug, listWebFontFamilies, setSdlWebUiFont)
+import NanoUI.SdlWeb.Internal.Fonts (findFontFamilies)
+import NanoUI.Ttf.Internal.Inter (fontInterBytes, fontInterLabel)
 import Control.Monad (forM_, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
 import qualified Data.Primitive.PrimArray as PA
 import qualified Data.Text as T
@@ -52,6 +57,7 @@ data Recorded = Recorded
   , recBacking :: IORef [(Int, Int)]
   , recCursor :: IORef [T.Text]
   , recTitle :: IORef [T.Text]
+  , recFontsAsked :: IORef [String]
   }
 
 data ScriptDone = ScriptDone deriving (Show)
@@ -67,7 +73,8 @@ scriptedHost canvas steps0 = do
   steps <- newIORef steps0
   queue <- newIORef []
   idle <- newIORef (0 :: Int)
-  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
+  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
+  pendingFont <- newIORef BS.empty
   let take' buf n = do
         evs <- readIORef queue
         let (now, later) = splitAt n evs
@@ -114,8 +121,32 @@ scriptedHost canvas steps0 = do
           , whClipboardRead = \_ _ -> pure (-1)
           , whClipboardWrite = \_ _ -> pure ()
           , whSetTitle = \p n -> utf8 p n >>= \t -> modifyIORef' (recTitle rec) (t :)
+          , whRendererInfo = \p n -> copyOut p n testRenderer
+          , whFindFonts = pure (BS.length testFamilies)
+          , whTakeFontList = \p -> () <$ copyOut p (BS.length testFamilies) testFamilies
+          , whLoadFont = \kind p n -> do
+              name <- T.unpack <$> utf8 p n
+              modifyIORef' (recFontsAsked rec) (name :)
+              -- The host serves the bundled Inter at one URL, and has no
+              -- installed families.
+              if kind == 1 && name == "fonts/inter.ttf"
+                then BS.length fontInterBytes <$ writeIORef pendingFont fontInterBytes
+                else pure (-1)
+          , whTakeFontBytes = \p -> readIORef pendingFont >>= \b -> () <$ copyOut p (BS.length b) b
           }
   pure (host, rec)
+
+-- | What the scripted host reports as its WebGL renderer and its installed
+-- font families.
+testRenderer, testFamilies :: BS.ByteString
+testRenderer = "WebGL2, Scripted"
+testFamilies = "Inter\nNoto Sans\nInter"
+
+-- | Copy up to @n@ bytes of @b@ to @p@, and answer @b@'s full length.
+copyOut :: Ptr Word8 -> Int -> BS.ByteString -> IO Int
+copyOut p n b = do
+  when (n > 0) $ unsafeUseAsCStringLen b $ \(src, len) -> copyBytes p (castPtr src) (min n len)
+  pure (BS.length b)
 
 readCommand :: Ptr Word8 -> Int -> IO (Int, Int, Int, Maybe (Int, Int, Int, Int))
 readCommand buf i = do
@@ -167,6 +198,7 @@ main =
     , ("click", clickFrame)
     , ("pixel-ratio", pixelRatioChange)
     , ("long-composition", longComposition)
+    , ("fonts-and-debug", fontsAndDebug)
     ]
 
 pureChecks :: IORef Int -> IO ()
@@ -244,6 +276,41 @@ openingFrame failed = do
   let page0 = filter ((== 0) . upSlot) uploads
   check failed "opening: glyph page 0 uploaded at 2048" (not (null page0) && all ((== 2048) . upW) page0)
   check failed "opening: glyph page 0 holds rasterised glyphs" (any upInk page0)
+
+-- | A UI font asked for from the view is loaded through the host before the
+-- next frame, the debug snapshot names it and the host's renderer, a font
+-- that cannot be loaded falls back to Inter, and the host's family list
+-- comes back sorted out of repeats.
+fontsAndDebug :: IORef Int -> IO ()
+fontsAndDebug failed = do
+  snaps <- newIORef []
+  passes <- newIORef (0 :: Int)
+  let view font = column $ do
+        n <- liftIO (atomicModifyIORef' passes (\k -> (k + 1, k)))
+        if n == 0
+          then setSdlWebUiFont font
+          else askSdlWebDebug >>= mapM_ (\s -> liftIO (modifyIORef' snaps (s :)))
+        label "Fonts"
+      script = [events [motion 5 5], events [motion 6 6]]
+  rec <- runScript (800, 600, 1) script (viewFrame (view (WebFontUrl "fonts/inter.ttf")))
+  asked <- readIORef (recFontsAsked rec)
+  check failed "fonts: the URL is loaded through the host" (asked == ["fonts/inter.ttf"])
+  readIORef snaps >>= \case
+    s : _ -> do
+      check failed ("fonts: the snapshot names the loaded font (" <> dbgFont s <> ")") (dbgFont s == "fonts/inter.ttf")
+      check failed "fonts: the snapshot names the host's renderer" (dbgRenderer s == "WebGL2, Scripted")
+      check failed "fonts: the snapshot has the canvas size" (dbgWinW (dbgCore s) == 800 && dbgWinH (dbgCore s) == 600)
+    [] -> check failed "fonts: askSdlWebDebug answers in a session" False
+  writeIORef snaps [] >> writeIORef passes 0
+  _ <- runScript (800, 600, 1) script (viewFrame (view (WebFontInstalled "Missing Sans")))
+  readIORef snaps >>= \case
+    s : _ -> check failed ("fonts: a missing family falls back to Inter (" <> dbgFont s <> ")") (dbgFont s == fontInterLabel)
+    [] -> check failed "fonts: askSdlWebDebug answers after a failed load" False
+  (host, _) <- newIORef (800, 600, 1) >>= \c -> scriptedHost c []
+  families <- findFontFamilies host
+  check failed "fonts: the family list drops repeats" (families == Right ["Inter", "Noto Sans"])
+  outside <- listWebFontFamilies
+  check failed "fonts: listing needs a browser" (either (const True) (const False) outside)
 
 clickFrame :: IORef Int -> IO ()
 clickFrame failed = do
