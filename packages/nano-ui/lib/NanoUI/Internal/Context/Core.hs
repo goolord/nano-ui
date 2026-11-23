@@ -35,6 +35,7 @@ module NanoUI.Internal.Context.Core
   , damageRect
   , damagePeers
   , damageFull
+  , traceDamage
   , getPrevRect
   , getPrevRectAt
   , pointerCovered
@@ -74,10 +75,13 @@ import Data.Primitive.PrimVar (readPrimVar)
 import Data.Primitive.SmallArray (SmallMutableArray, copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict qualified as IM
 import Data.Foldable (foldlM)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.IntSet qualified as IS
 import GHC.Clock (getMonotonicTime)
 import GHC.Exts (RealWorld)
+import System.Environment (lookupEnv)
+import System.IO (hPutStrLn, stderr)
+import System.IO.Unsafe (unsafePerformIO)
 
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -187,6 +191,19 @@ damagePeers ctx wids bounds =
 {-# INLINE damageFull #-}
 damageFull :: Context -> IO ()
 damageFull ctx = requestDamage ctx ReqFull
+
+-- | Whether @NANO_DAMAGE_TRACE@ is set, read once per process.
+{-# NOINLINE damageTraceOn #-}
+damageTraceOn :: Bool
+damageTraceOn = unsafePerformIO (isJust <$> lookupEnv "NANO_DAMAGE_TRACE")
+
+-- | With @NANO_DAMAGE_TRACE@ set, write a line to stderr. Each frame's damage
+-- pass writes @DAMAGE clip@ or @DAMAGE full@ with the check that chose a
+-- whole-window repaint; the fallbacks that queue one write @DAMAGE-REQ@ with
+-- their name. Counting the lines over a test run shows which checks repaint
+-- the window most.
+traceDamage :: String -> IO ()
+traceDamage msg = when damageTraceOn (hPutStrLn stderr msg)
 
 -- | Request another view pass and wake the event loop, unless this is the
 -- loop's own thread, which checks the flag before it waits.
@@ -322,7 +339,7 @@ takeThreadWake :: Context -> IO ()
 takeThreadWake ctx = do
   takeWakes ctx
   woken <- atomicModifyIORef' (ctxWoken ctx) (False,)
-  when woken (damageFull ctx)
+  when woken (damageFull ctx >> traceDamage "DAMAGE-REQ thread-wake")
 
 -- | Schedule a frame at a monotonic timestamp ('getMonotonicTime') even if no
 -- input arrives. The earliest deadline wins. Cleared at the start of each

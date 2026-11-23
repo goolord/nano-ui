@@ -45,7 +45,7 @@ import Data.Primitive.PrimArray (readPrimArray, writePrimArray)
 import Data.Proxy (Proxy (..))
 import Data.Typeable (Typeable, typeRep)
 import Data.Word (Word64)
-import NanoUI.Internal.Context (Context (..), damageFull, markDirty, markDirtyCovered)
+import NanoUI.Internal.Context (Context (..), damageFull, markDirty, markDirtyCovered, traceDamage)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq)
 import NanoUI.Internal.Id.Cursor (takeVarKey)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO, withContext)
@@ -370,7 +370,7 @@ endVarFrame ctx = do
   writePrimArray arr passSlot 0
   writePrimArray arr flagSlot 0
   writePrimArray arr baseSlot (p + 1)
-  when (fs .&. flagFull /= 0) (damageFull ctx)
+  when (fs .&. flagFull /= 0) (damageFull ctx >> traceDamage "DAMAGE-REQ var-read")
 
 -- | How many view passes the last frame ran.
 lastFramePasses :: Context -> IO Int

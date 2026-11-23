@@ -45,6 +45,7 @@ module NanoUI.Internal.Context
   , damageRect
   , damagePeers
   , damageFull
+  , traceDamage
   , getPrevRect
   , getPrevRectAt
   , pointerCovered

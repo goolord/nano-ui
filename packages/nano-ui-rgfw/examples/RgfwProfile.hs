@@ -18,6 +18,8 @@ import NanoUI
   , Size (..)
   , TextFont (..)
   , V2 (..)
+  , Var
+  , box
   , canvas
   , colorRGBA
   , columnWith
@@ -27,14 +29,18 @@ import NanoUI
   , fillH
   , fillW
   , fixedH
+  , fixedWH
   , flex
   , gap
   , inlineText
   , label
+  , newVar
+  , readVar
   , richText
   , rowWith
   , strong
   , tight
+  , writeVarIO
   )
 import NanoUI.Backend (Damage (..), emptyInput)
 import NanoUI.Testing (ctxPaintFull, collectRasterSpans, damageIsEmpty, runFrame, takeDamage, takeDamagePieces)
@@ -166,6 +172,14 @@ main = do
         forM_ [1 .. 3 :: Int] $ \k -> check ("drawing text " ++ show k) ctxDrawn inp (drawingText k)
         forM_ [40, 140 .. 440 :: Int] $ \y ->
           check ("drawing text, hover at y=" ++ show y) ctxDrawn inp {inputMousePos = V2 120 (fromIntegral y)} (drawingText 3)
+        -- Model state the view reads from a Var, written between frames: a
+        -- counter label, and a box whose colour changes at an unchanged rect.
+        countVar <- newVar (0 :: Int)
+        ctxVar <- newRgfwContext theme
+        _ <- present ctxVar True inp (varView countVar)
+        forM_ [1 .. 5 :: Int] $ \k -> do
+          writeVarIO countVar k
+          check ("var counter " ++ show k) ctxVar inp (varView countVar)
         putStrLn "partial repaints match full ones"
         putStrLn ("profiled RGFW demo frames at " ++ show physW ++ "x" ++ show physH)
   where
@@ -201,6 +215,15 @@ drawingText k = columnWith (tight . gap 4 . fillW) $ do
   forM_ (take 8 paragraphs) $ \p -> richText [inlineText p, strong " and bold"]
   where
     ink = colorRGBA 0xC5 0xC8 0xC6 255
+
+-- | A counter label and a coloured box that follow a Var, above text that
+-- does not.
+varView :: Var Int -> NanoUI ()
+varView v = columnWith (tight . gap 4 . fillW) $ do
+  k <- readVar v
+  label (T.pack ("count " <> show k))
+  box (fixedWH 80 40) (colorRGBA (fromIntegral ((k * 70) `mod` 256)) 90 140 255)
+  forM_ (take 4 paragraphs) label
 
 paragraphs :: [T.Text]
 paragraphs =

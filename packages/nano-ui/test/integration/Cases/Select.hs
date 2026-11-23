@@ -11,6 +11,7 @@ tests :: [Spec]
 tests =
   [ pixelSimSpec "slider-cursor" 300 80 (column (withValue 50 (slider' 0 100))) sliderCursor
   , varSimSpec "select-mouse-and-keys" 320 200 1 mouseAndKeysUi selectMouseAndKeys
+  , varSimSpec "select-drag-pick" 320 200 0 mouseAndKeysUi selectDragPick
   , varSimSpec "select-owner-gone" 320 200 True ownerGoneUi selectOwnerGone
   , simSpec "select-dropdown-paint" 640 480 (column (withValue 0 (select' lowHigh))) selectDropdownPaint
   , spec "select-keys-after-focus-moves" runSelectKeysAfterFocusMovesTest
@@ -37,6 +38,18 @@ selectOpen :: Sim a Bool
 selectOpen = do
   inp <- getInput
   any (\(_, t, _, _, _) -> spanLabel t `elem` lowHigh) <$> onContext (`collectOverlayTextSpans` inp)
+
+-- | A press opens the select, and a release on the row the pointer was
+-- dragged to picks that row and closes the dropdown.
+selectDragPick :: Var Int -> Sim (Response, Int) ()
+selectDragPick ref = do
+  (resp, _) <- result
+  _ <- press (On resp)
+  expect "High"
+  _ <- moveTo "High" >> moveTo "High"
+  _ <- release >> frame
+  checkEq 2 =<< readV ref
+  check . not =<< selectOpen
 
 -- | A select's open dropdown closes when the select is no longer declared,
 -- and Escape then reaches the view instead of staying reserved for it.

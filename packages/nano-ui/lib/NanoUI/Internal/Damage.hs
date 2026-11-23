@@ -522,9 +522,9 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
                 }
         -- The store diff runs only once the cheap checks would clip: a frame
         -- already repainting whole needs no per-key damage.
-        if needsFullDamage snap delta
-          then pure (DamageFull, [])
-          else do
+        case fullDamageCause snap delta of
+          cause@(_ : _) -> (DamageFull, []) <$ traceDamage ("DAMAGE full " <> cause)
+          [] -> do
             (misses, owners) <- storeKeyChanges ctx oldStore newStore
             -- A changed key that resolves to no node (a widget-internal key
             -- nothing in the arena carries) may have changed
@@ -532,7 +532,7 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
             -- is known to cover it. Key 0 names no widget and is damaged by
             -- nothing, so its writes cannot escalate a frame.
             if any (\k -> k /= 0 && IM.notMember k owners) misses
-              then pure (DamageFull, [])
+              then (DamageFull, []) <$ traceDamage "DAMAGE full store-key-without-owner"
               else clipDamage ctx snap delta owners
   -- A host repainting the whole window whatever changed does not read the
   -- damage, so nothing is diffed ('ctxDamageWanted'), unless the frame may
@@ -546,7 +546,7 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
   let Size winW winH = inputWindowSize inp
       inView k = maybe False (rectNonEmpty . clipRectToWindow winW winH . clipToViewport (ownClip new k)) (IM.lookup k (pfRects new))
       diff = wanted || (mayReuse && samePrev (fsPrev snap) new && not (any inView redrawn))
-  (dmg, pieces) <- if diff then changes else pure (DamageFull, [])
+  (dmg, pieces) <- if diff then changes else (DamageFull, []) <$ traceDamage "DAMAGE full not-diffed"
   modifyDamage ctx $ \ds ->
     ds
       { dsDamage = dmg
@@ -622,34 +622,34 @@ refreshCustomDrawings ctx@Context {ctxNodeArena = na} = do
             _ -> pure False
       pure (if changed then intKey wid : acc else acc)
 
--- | Whether the frame repaints the whole window rather than a clip.
+-- | The check that makes the frame repaint the whole window rather than a
+-- clip, or the empty string for none. 'traceDamage' prints it.
 --
--- Store writes are repainted per key instead ('storeKeyChanges',
--- 'storeKeyDamage'); 'writeDamage' escalates a frame whose changed keys do not
--- all resolve to a node after this check. A follow-up frame requested by a
--- model change ('fsOpaqueFollow') repaints whole: the change may alter paint
--- state no diff describes (a box's colour, a node value), so a non-empty rect
--- or text diff does not show it is covered.
-needsFullDamage :: FrameSnapshot -> FrameDelta -> Bool
-needsFullDamage snap d =
-  ReqFull `elem` fdRequests d
-    || neverPainted
-    -- Even when the frame's only store change is in 'storeFloat', which also
-    -- holds slider and knob values, not just scroll offsets.
-    || fsOpaqueFollow snap
-    -- A resize, a modal opening or closing (its dim covers the window, and a
-    -- Var-bound modal writes nothing to the store) and a live window drag are
-    -- window-wide whatever scrolled in the same frame.
-    || sizeChanged
-    || fdModalFlip d
-    || fdWindowLive d
-    || not (fdScrollOnly d)
-      && ( fdFloatingChanged d
-             || (orphanAnim && fdAnimLive d)
-             || keysChanged
-             || layoutSettle
-         )
-    || (missingAnim && fdAnimLive d)
+-- Store writes are repainted per key instead ('storeKeyChanges');
+-- 'writeDamage' escalates a frame whose changed keys do not all resolve to a
+-- node after this check. A follow-up frame requested by a model change
+-- ('fsOpaqueFollow') repaints whole: the change may alter paint state no
+-- diff describes (a box's colour, a node value), so a non-empty rect or text
+-- diff does not show it is covered.
+fullDamageCause :: FrameSnapshot -> FrameDelta -> String
+fullDamageCause snap d
+  | ReqFull `elem` fdRequests d = "request"
+  | neverPainted = "first"
+  -- Even when the frame's only store change is in 'storeFloat', which also
+  -- holds slider and knob values, not just scroll offsets.
+  | fsOpaqueFollow snap = "mark-dirty"
+  -- A resize, a modal opening or closing (its dim covers the window, and a
+  -- Var-bound modal writes nothing to the store) and a live window drag are
+  -- window-wide whatever scrolled in the same frame.
+  | sizeChanged = "resize"
+  | fdModalFlip d = "modal"
+  | fdWindowLive d = "window-gesture"
+  | not (fdScrollOnly d) && fdFloatingChanged d = "floating"
+  | not (fdScrollOnly d) && orphanAnim && fdAnimLive d = "orphan-animation"
+  | not (fdScrollOnly d) && keysChanged = "key-churn"
+  | not (fdScrollOnly d) && layoutSettle = "layout"
+  | missingAnim && fdAnimLive d = "missing-animation"
+  | otherwise = ""
   where
     oldRects = pfRects (fsPrev snap)
     newRects = pfRects (fdPrev d)
@@ -790,10 +790,9 @@ clipDamage ctx snap d owners = do
   -- key was either scroll-clipped out of view (nothing visible
   -- changes; scrolling back in damages via the scroll delta) or
   -- rect-less, which missingAnim already promoted to full.
-  pure $
-    if winArea > 0 && area > winArea * 0.5
-      then (DamageFull, [])
-      else (DamageClip clip, pieces)
+  if winArea > 0 && area > winArea * 0.5
+    then (DamageFull, []) <$ traceDamage "DAMAGE full area"
+    else (DamageClip clip, pieces) <$ traceDamage "DAMAGE clip"
 
 -- | Most rects a frame's damage splits into.
 maxDamagePieces :: Int
