@@ -37,6 +37,10 @@
   `pacingMsFor`, the pacing wait for a refresh period, and `waitUntil`, the
   sleep-then-spin wait the alignment uses.
 
+- `NanoUI.Backend` also exports `withTheme`, `clearMeasureCache`,
+  `damageFull` and `inBoundThread`, so a backend needs nothing from
+  `NanoUI.Testing`.
+
 - **Breaking (backends):** `WindowOps` has a field `woWatchResize`, which
   installs a watch that draws a further window at each new size while the
   host holds the first window's loop in a modal size loop. A backend whose
