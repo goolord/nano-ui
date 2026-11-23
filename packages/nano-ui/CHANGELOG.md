@@ -2,6 +2,13 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- Clicks work on targets whose `Int` is 32 bits (wasm32). The node arena
+  and the store keep widget ids in `Int` slots, which cut a 64-bit id to
+  its low word, so a press made a different id active than the one its
+  release was on. Ids are now made with `mkWidgetId`
+  (`NanoUI.Internal.Id`), which keeps them in `Int`'s range; on 64-bit
+  targets ids are unchanged. Code that builds a `WidgetId` from a hash
+  itself should use it.
 - A container is as tall as its content at the width it is laid out at.
   Content whose height depends on its width (wrapping text, a filling
   label, a wrapped row, a grid's cells, a percentage width in a wrapped
