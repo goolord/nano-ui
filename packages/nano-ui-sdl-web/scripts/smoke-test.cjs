@@ -87,9 +87,14 @@ async function waitFor(what, ms, check) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   try {
     page.on("pageerror", (e) => errors.push(`page error: ${e.message}`));
+    // A failed response is judged by its URL below; the console's own line
+    // for it names none. Browsers ask for /favicon.ico unprompted.
     page.on("console", (m) => {
-      if (m.type() === "error") errors.push(`console error: ${m.text()}`);
-      else console.log(`[page] ${m.text()}`);
+      if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push(`console error: ${m.text()}`);
+      else if (m.type() !== "error") console.log(`[page] ${m.text()}`);
+    });
+    page.on("response", (r) => {
+      if (r.status() >= 400 && new URL(r.url()).pathname !== "/favicon.ico") errors.push(`HTTP ${r.status()}: ${r.url()}`);
     });
     page.on("requestfailed", (r) => errors.push(`request failed: ${r.url()}`));
     await page.goto(url);

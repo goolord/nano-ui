@@ -39,9 +39,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config jq zstd unzip
 
-      - name: Cache ghc-wasm-meta
+      # The toolchain and the WASI libraries are saved as soon as they are
+      # built, so a later failure does not lose them.
+      - name: Restore ghc-wasm-meta
         id: ghc-wasm-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.ghc-wasm
@@ -57,14 +59,24 @@ jobs:
           git -C /tmp/ghc-wasm-meta checkout FETCH_HEAD
           FLAVOUR="$GHC_WASM_FLAVOUR" /tmp/ghc-wasm-meta/setup.sh
 
+      - name: Save ghc-wasm-meta
+        if: steps.ghc-wasm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.ghc-wasm
+            !~/.ghc-wasm/.cabal/store
+            !~/.ghc-wasm/.cabal/packages
+          key: ${{ steps.ghc-wasm-cache.outputs.cache-primary-key }}
+
       - name: Put ghc-wasm-meta on the path
         run: ~/.ghc-wasm/add_to_github_path.sh
 
       # The script's hash covers the library tags it fetches and the flags
       # it builds them with.
-      - name: Cache the WASI libraries
+      - name: Restore the WASI libraries
         id: wasi-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.WASI_PREFIX }}/include
@@ -76,6 +88,16 @@ jobs:
         if: steps.wasi-cache.outputs.cache-hit != 'true'
         run: packages/nano-ui-sdl-web/scripts/build-wasi-deps.sh "$WASI_PREFIX"
 
+      - name: Save the WASI libraries
+        if: steps.wasi-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WASI_PREFIX }}/include
+            ${{ env.WASI_PREFIX }}/lib
+            ${{ env.WASI_PREFIX }}/share
+          key: ${{ steps.wasi-cache.outputs.cache-primary-key }}
+
       - name: Point pkg-config at the WASI libraries
         run: echo "PKG_CONFIG_PATH=$WASI_PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
 
@@ -85,8 +107,9 @@ jobs:
           wasm32-wasi-cabal build --project-file=cabal.project.wasm --dry-run \
             nano-ui-sdl-web:exe:nano-ui-sdl-web-demo nano-ui-demo:exe:nano-ui-web-cookbook
 
-      - name: Cache the wasm Cabal store
-        uses: actions/cache@v4
+      - name: Restore the wasm Cabal store
+        id: store-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.ghc-wasm/.cabal/store
@@ -99,6 +122,15 @@ jobs:
 
       - name: Build the web backend's demo
         run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web/minimal
+
+      - name: Save the wasm Cabal store
+        if: steps.store-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.ghc-wasm/.cabal/store
+            ~/.ghc-wasm/.cabal/packages
+          key: ${{ steps.store-cache.outputs.cache-primary-key }}
 
       # Loads each page in the runner's Chrome with Playwright (from
       # ghc-wasm-meta's Node.js packages): the first frame must draw, a click
