@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nano-ui</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1d1f21; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <canvas id="nano-ui"></canvas>
+  <script src="nano-ui-sdl-web.js"></script>
+  <script type="module">
+    import { start } from "./main.js";
+    start(document.getElementById("nano-ui"), "main.wasm", { rtsFlags: "-T" })
+      .catch((e) => { console.error(e); document.body.textContent = String(e); });
+  </script>
+</body>
+</html>
