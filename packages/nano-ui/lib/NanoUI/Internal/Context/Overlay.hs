@@ -88,9 +88,8 @@ routedInput :: Context -> Int -> Input -> IO Input
 routedInput ctx layer inp = do
   routed <-
     getsInteraction ctx isPointerRoute >>= \case
-      RouteLayer routed | routed == layer -> do
-        blocked <- pointerBlockedByModal ctx
-        pure (if blocked then withoutPointer inp else inp)
+      RouteLayer routed | routed == layer -> unlessBlocked
+      RouteDropdown routed | routed == layer -> unlessBlocked
       _ -> pure (withoutPointer inp)
   if null (inputDrops inp)
     then pure routed
@@ -103,6 +102,10 @@ routedInput ctx layer inp = do
             _ -> pure ev
       drops <- traverse own (inputDrops inp)
       pure routed {inputDrops = drops}
+  where
+    unlessBlocked = do
+      blocked <- pointerBlockedByModal ctx
+      pure (if blocked then withoutPointer inp else inp)
 
 -- | The layer on top at @mouse@, going by where the floating panels were last
 -- frame: the last panel declared that holds the point, or the page.

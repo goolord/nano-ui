@@ -31,7 +31,7 @@ import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
 import NanoUI.Internal.Id.Cursor (writeIdCursor)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Layout.Solve (measuredHeightAt, placeFloatingNodes, runCustomMeasure, solveLayout)
+import NanoUI.Internal.Layout.Solve (measuredHeightAt, placeFloatingNodesWith, runCustomMeasure, solveLayout)
 import NanoUI.Internal.Monad (NanoUI (..), Ui, embedNanoUI, runUi, whenM)
 import NanoUI.Internal.NativeWindow (clearWindowClose)
 import NanoUI.Internal.Store (ptrEq)
@@ -129,6 +129,7 @@ runFrameEff unlift ctx rawInp ui = do
   -- A press that starts a window gesture hit-tests the page where it is
   -- drawn, scrolled and clipped.
   applyScrollOffsets ctx size
+  settleDropdowns ctx size
   movedResize <- updateWindowResize ctx layerInp w h
   movedWindow <- updateWindowDrag ctx layerInp
   -- A window moved or resized changes only where the floating panels go:
@@ -136,8 +137,10 @@ runFrameEff unlift ctx rawInp ui = do
   when (movedResize || movedWindow) $ do
     layoutArena ctx size False
     applyScrollOffsets ctx size
+    settleDropdowns ctx size
   persistWindowPositions ctx
   finalizeFrameInput ctx frameInp layerInp targets focusBefore
+  settleDropdowns ctx size
   -- Layout is final, so the sensors record what the next view reads.
   updateSensors ctx size
   pruneUnmountedCaches ctx =<< updatePrevRects ctx size
@@ -155,15 +158,6 @@ runFrameEff unlift ctx rawInp ui = do
   tickAnimations ctx (inputDeltaTime frameInp)
   sweepHeld ctx
   pruneDrawOpCache ctx
-  -- Dropdowns and the text-edit menu are not in the arena, so the damage pass
-  -- does not track their hover, filter, or scroll changes. Each open one
-  -- repaints in full every frame, and a closed or moved one repaints its
-  -- previous rect.
-  menuRects <- overlayMenuRects ctx
-  prevMenuRects <- getsOverlay ctx osPrevMenuRects
-  unless (null menuRects && null prevMenuRects) $ do
-    mapM_ (damageRect ctx) (menuRects ++ prevMenuRects)
-    modifyOverlay ctx (\os -> os {osPrevMenuRects = menuRects})
   -- The layout overlay damages its own outlines, since the rect diffs below
   -- miss rows and columns that moved.
   explain <- getExplainLayout ctx
@@ -180,7 +174,7 @@ runFrameEff unlift ctx rawInp ui = do
         (Just k, Just (lastKey, _)) -> k == lastKey
         _ -> False
   writeDamage ctx frameInp snap mayReuse layoutFloats
-  drawData <- paintOrReuse ctx frameInp size explain paintFull clear reuse key mayReuse
+  drawData <- paintOrReuse ctx size explain paintFull clear reuse key mayReuse
   dirtyAfterUi <- isDirty ctx
   pure (result, drawData, dirtyAfterUi)
 
@@ -262,7 +256,6 @@ finalizeFrameInput ctx frameInp layerInp targets focusBefore = do
   constrainFocusToModal ctx
   finalizeTabFocus ctx frameInp
   finalizeSelectKeyboard ctx frameInp
-  finalizeSelectPick ctx frameInp
   closeSelectOnOutsideClick ctx frameInp
   settleInputMethod ctx focusBefore
 
@@ -272,8 +265,8 @@ finalizeFrameInput ctx frameInp layerInp targets focusBefore = do
 -- nothing. Other frames paint, and a full frame caches its output for the
 -- next. Paint that reads state nano-ui does not track must call 'damageFull'
 -- when that state changes.
-paintOrReuse :: Context -> Input -> Size -> Bool -> Bool -> Color -> DrawReuse -> Maybe DrawReuseKey -> Bool -> IO DrawData
-paintOrReuse ctx frameInp size explain paintFull clear reuse key mayReuse = do
+paintOrReuse :: Context -> Size -> Bool -> Bool -> Color -> DrawReuse -> Maybe DrawReuseKey -> Bool -> IO DrawData
+paintOrReuse ctx size explain paintFull clear reuse key mayReuse = do
   damage <- getsDamage ctx dsDamage
   case drLast reuse of
     Just (_, lastDraw) | mayReuse && damageIsEmpty damage -> pure lastDraw
@@ -281,7 +274,7 @@ paintOrReuse ctx frameInp size explain paintFull clear reuse key mayReuse = do
       -- The kept draw borrows the draw arena's buffers, which paint
       -- overwrites: drop it first, so a paint that throws leaves none behind.
       when (isJust (drLast reuse)) $ writeIORef (ctxDrawReuse ctx) $! reuse {drLast = Nothing}
-      drawData <- paintFrame ctx frameInp size explain paintFull clear
+      drawData <- paintFrame ctx size explain paintFull clear
       -- Nothing to keep now or before: leave the state as it is.
       unless (isNothing key && isNothing (drLast reuse)) $
         writeIORef (ctxDrawReuse ctx) $! reuse {drLast = (\k -> (k, drawData)) <$!> key}
@@ -344,8 +337,8 @@ blendOver top bottom = fadeAlpha (lerpColor bottom top ta) (round (255 * (ta + b
 -- | Paint the frame. Clip frames repaint the damaged region of the retained
 -- texture, which preserves the other pixels ('paintDamageClip'). Full-present
 -- frames (fresh retain, forced full, continuous) paint everything.
-paintFrame :: Context -> Input -> Size -> Bool -> Bool -> Color -> IO DrawData
-paintFrame ctx frameInp size explain paintFull clear = do
+paintFrame :: Context -> Size -> Bool -> Bool -> Color -> IO DrawData
+paintFrame ctx size explain paintFull clear = do
   let da = ctxDrawArena ctx
   resetDrawArena da
   setDrawClear da clear
@@ -360,7 +353,6 @@ paintFrame ctx frameInp size explain paintFull clear = do
     paintExplainPage ctx
   beginLayer da LayerOverlay
   drawFloatingPanels ctx size explain
-  drawSelectOverlays ctx frameInp
   when explain (paintExplainHover ctx)
   finishDraw da
 
@@ -478,7 +470,7 @@ layoutArena ctx@Context {ctxNodeArena = na} size@(Size w h) check = do
     -- changes every frame solves every frame, and would keep what no frame
     -- puts back.
     placed <- if reused then fmap (\(c, _, _) -> lcPlaced c) <$> readIORef (ctxLayoutCache ctx) else pure Nothing
-    placeFloatingNodes na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx) placed
+    placeFloatingNodesWith na ms w h (lookupWindowPos ctx) (lookupWindowSize ctx) (lookupPopupConfig ctx) (dropdownPlacement ctx size) placed
 
 -- | Layout reuse is sound when the frame's layout inputs hash to what the
 -- cache captured, the same widgets register custom measures, and every custom

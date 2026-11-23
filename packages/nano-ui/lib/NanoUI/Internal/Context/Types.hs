@@ -47,6 +47,7 @@ module NanoUI.Internal.Context.Types
   , noNodeCustom
   , customPassWords
   , PopupConfig (..)
+  , DropdownPopup (..)
   , HoverZone (..)
   , DrawOpCacheEntry (..)
   , CustomDrawingEntry (..)
@@ -369,8 +370,6 @@ data OverlayState = OverlayState
   , osKeysTaken :: !IntSet
   , osPrevFloatingRects :: !(IntMap Rect)
   , osPrevFloatingOrder :: ![Int]
-  -- | Painted bounds of the open dropdowns and text-edit menu last frame.
-  , osPrevMenuRects :: ![Rect]
   }
 
 -- | No modals, floating panels, or consumed key events.
@@ -384,7 +383,6 @@ initialOverlayState = OverlayState
   , osKeysTaken = IS.empty
   , osPrevFloatingRects = IM.empty
   , osPrevFloatingOrder = []
-  , osPrevMenuRects = []
   }
 
 -- | The last full frame's draw data and what it was drawn from, reused when
@@ -732,12 +730,27 @@ customPassWords = 4
 -- across frames. Registrations themselves are per node ('ctxNodeCustom').
 data DrawingCacheState = DrawingCacheState
   { dcsPopupConfigs :: !(IntMap PopupConfig)
+  , dcsDropdowns :: !(IntMap DropdownPopup)
+  -- ^ Dropdown popups by key: placed by their field's rect this frame
+  -- rather than by an anchor.
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
   , dcsHoverZones :: ![HoverZone]
   -- ^ Tooltip targets: entering or leaving them needs a frame even when the
   -- hover probe finds no widget there.
+  }
+
+-- | What the view drew a dropdown popup from.
+data DropdownPopup = DropdownPopup
+  { dpField :: !WidgetId
+  -- ^ The select or combo box the dropdown belongs to.
+  , dpPicked :: {-# UNPACK #-} !Int
+  -- ^ The row drawn picked: the select's value, or the combo's highlight
+  -- within its window; -1 for none.
+  , dpCombo :: !Bool
+  , dpScrollX :: {-# UNPACK #-} !Float
+  -- ^ How far a combo's rows are scrolled left.
   }
 
 -- | A rect whose enter and exit need a frame. The flag is set when every
@@ -778,6 +791,7 @@ data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
 initialDrawingCacheState :: DrawingCacheState
 initialDrawingCacheState = DrawingCacheState
   { dcsPopupConfigs = IM.empty
+  , dcsDropdowns = IM.empty
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty
@@ -792,9 +806,10 @@ data PointerRoute
   = -- | The widgets of one layer: 0 is the page, anything else the key of the
     -- floating panel (window, popup or modal) on top under the pointer.
     RouteLayer !Int
-  | -- | An open select or combo dropdown, which the frame draws over every
-    -- layer, and the widget it belongs to.
-    RouteDropdown !WidgetId
+  | -- | The popup of an open select or combo dropdown, by key: its own
+    -- layer gets the pointer, and the page's pointer steps see none of it,
+    -- as for a menu ('NanoUI.Internal.Context.registerDropdownPopup').
+    RouteDropdown !Int
   deriving (Eq, Show)
 
 -- | Pointer route and active drag/menu gestures shared by the view and frame passes.

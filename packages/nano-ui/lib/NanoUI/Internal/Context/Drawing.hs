@@ -2,6 +2,8 @@
 module NanoUI.Internal.Context.Drawing
   ( registerPopupConfig
   , lookupPopupConfig
+  , registerDropdownPopup
+  , dropdownPopups
   , registerHoverZone
   , hoverZoneCrossed
   , registerDrawing
@@ -77,6 +79,18 @@ lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlaceme
 lookupPopupConfig ctx wid =
   fmap (\(PopupConfig anchor placement offset) -> (anchor, placement, offset))
     <$> lookupIn dcsPopupConfigs ctx wid
+
+-- | Register popup @wid@ as a dropdown for the current view pass:
+-- placement puts it where its field's rect this frame puts its dropdown, not
+-- by an anchor.
+registerDropdownPopup :: Context -> WidgetId -> DropdownPopup -> IO ()
+registerDropdownPopup = registerIn dcsDropdowns (\m dc -> dc {dcsDropdowns = m})
+
+-- | The dropdown popups this pass registered, by popup key
+-- ('registerDropdownPopup').
+{-# INLINE dropdownPopups #-}
+dropdownPopups :: Context -> IO (IntMap DropdownPopup)
+dropdownPopups ctx = dcsDropdowns <$> readIORef (ctxDrawingCache ctx)
 
 -- | Request a frame when the pointer enters or leaves @rect@ this pass. Used
 -- for tooltip targets, which may be non-interactive labels or containers
@@ -447,5 +461,6 @@ resetDrawingScopeCache ctx = do
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
     dc
       { dcsPopupConfigs = IM.empty
+      , dcsDropdowns = IM.empty
       , dcsHoverZones = []
       }

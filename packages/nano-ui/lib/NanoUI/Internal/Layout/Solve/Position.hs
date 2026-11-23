@@ -575,7 +575,8 @@ placeColumnLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap chrom
 -- saved position and size (@lookupPos@, @lookupSize@), by default its
 -- measured size near the top-right corner. A popup goes where its registered
 -- anchor, side and gap put it ('computePopupPosition'), by default at the
--- origin with automatic placement.
+-- origin with automatic placement. A popup that @lookupRect@, given its id
+-- and measured size, returns a rect for goes at that rect instead.
 --
 -- When @mPlaced@ is provided, a floating node whose target rect matches its
 -- cached 'PlacedFloat' restores its cached subtree geometry instead of
@@ -590,9 +591,10 @@ placeFloatingNodes ::
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (Float, Float))) ->
   (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
+  (WidgetId -> Float -> Float -> IO (Maybe Rect)) ->
   Maybe (IORef (IntMap PlacedFloat)) ->
   IO ()
-placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor mPlaced = do
+placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor lookupRect mPlaced = do
   env <- solveEnv na ms Nothing
   let place placed idx = do
         rect <- floatingRect idx
@@ -618,11 +620,14 @@ placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor mPlaced = d
           (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
           mpos <- lookupPos wid
           windowRect na winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - windowMargin, windowMargin) mpos
-        _ -> do
-          mcfg <- lookupAnchor wid
-          let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
-              (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
-          pure (Rect x y iw ih)
+        _ ->
+          lookupRect wid iw ih >>= \case
+            Just r -> pure r
+            Nothing -> do
+              mcfg <- lookupAnchor wid
+              let (anchor, placement, offset) = fromMaybe (AnchorPoint (V2 0 0), PlacementAuto, 4) mcfg
+                  (x, y) = computePopupPosition winW winH windowMargin iw ih anchor placement offset
+              pure (Rect x y iw ih)
 
 -- | Lay out floating node @idx@ and its subtree at @rect@: a window at
 -- exactly that rect, a modal or popup as the solve places a node offered it.

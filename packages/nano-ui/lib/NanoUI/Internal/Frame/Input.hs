@@ -42,7 +42,7 @@ import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Scroll (probeScrollBarHover)
-import NanoUI.Internal.Frame.Select (focusedComboNode, openSelectNode, overlayMenuOwnerAt)
+import NanoUI.Internal.Frame.Select (dropdownOwnerAt, focusedComboNode, openSelectNode)
 import NanoUI.Internal.Frame.TextArea (collapseTextFieldSelection)
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
@@ -605,7 +605,7 @@ probeHotId ctx@Context {ctxNodeArena = na} mouse = do
   if offLayers
     then pure (WidgetId 0)
     else do
-      mOverlay <- overlayMenuOwnerAt ctx mouse
+      mOverlay <- dropdownOwnerAt ctx mouse
       case mOverlay of
         Just wid -> pure wid
         Nothing -> maybe (pure (WidgetId 0)) (getWidgetId na) =<< reachedWidgetAt ctx mouse

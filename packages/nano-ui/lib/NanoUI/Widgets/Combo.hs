@@ -10,30 +10,34 @@ module NanoUI.Widgets.Combo
   )
 where
 
-import Control.Monad (foldM, mfilter, void, when, (<$!>))
+import Control.Monad (foldM, forM_, mfilter, void, when, (<$!>))
 import Data.Foldable (toList)
 import Data.IORef (writeIORef)
-import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
+import Data.Hashable (hash)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
+import NanoUI.Internal.Canvas (drawRect, drawRoundedRect, runCanvasFor, withClip)
 import NanoUI.Internal.Derived (ComboMatches (..), comboCache)
 import NanoUI.Internal.Font (menuItemRowH)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
-import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
+import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom, dropdownPopupRows)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), inputMousePos, inputScroll, inputWindowSize)
+import NanoUI.Internal.Style (scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeInput)
 import NanoUI.Internal.Layout.Arena (setOptions)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
 import NanoUI.Internal.Store (SlotSpec, deleteSpec, fieldText, findSpec, insertSlot, insertSpec, lookupSpec, ptrEq, setFieldSelection)
 import NanoUI.Internal.Store.Slots (slotComboCommitted, slotComboContentW, slotComboCount, slotComboDrag, slotComboDragOff, slotComboFocus, slotComboHighlight, slotComboLive, slotComboNavX, slotComboNavY, slotComboScrollX, slotComboWheelRem, slotComboWindow)
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectNonEmpty, v2X, v2Y)
+import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), clamp, rectContains, rectIntersect, rectNonEmpty, v2X, v2Y)
 import NanoUI.Internal.WidgetText (textInputFlagSearch)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Combinators (readDerived, writeDerived)
-import NanoUI.Internal.Widgets.Node (Response (..), dropdownInput, setChanged)
+import NanoUI.Internal.Widgets.Node (Response (..), dropdownInput, respPressed, setChanged)
+import NanoUI.Internal.Widgets.Select (dropdownPopup, paintDropdownRows)
 import NanoUI.Internal.Widgets.TextInput (buildTextInput, searchInputLayout)
 
 -- | Maximum suggestion rows the combo dropdown shows at once; Up/Down walk
@@ -285,8 +289,8 @@ comboStep ci cs0 =
       | otherwise = text
 
 -- | Combo box: the 'searchInput' with a select-style dropdown of options.
--- While the field holds focus, the shared select dropdown overlay lists the
--- options filtered by the field text (all of them while it is empty). The
+-- While the field holds focus, a dropdown popup lists the options filtered
+-- by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See
 -- 'comboStep' for when the value commits. The 'Var' is mutated on every edit;
 -- @respChanged@ on 'comboBox'' fires only when the user commits a value, not
@@ -356,7 +360,7 @@ comboBoxCore placeholder options value = do
   let wid = rawRespId resp
       key = intKey wid
   isFocus <- keyboardFocused wid
-  -- A field scrolled out of its viewport hangs no list ('openDropdowns'), so
+  -- A field scrolled out of its viewport hangs no list ('settleDropdowns'), so
   -- no row of it takes the pointer.
   shown <- if isFocus then liftIO (maybe True (isJust . rectIntersect (rawRespRect resp)) <$> getPrevClipRect ctx wid) else pure True
   -- The dropdown only shows while the field is focused, so an unfocused
@@ -388,20 +392,70 @@ comboBoxCore placeholder options value = do
           cs0
       cs1 = stepState step
       finalText = csLive cs1
+      win = csWindow cs1
+      rows = take comboBoxMaxVisible (drop win matches)
+      nRows = length rows
+      nMatches = length matches
+      mouse = inputMousePos inp
+      size@(Size _ winH) = inputWindowSize inp
+      Rect rx ry rw rh = rawRespRect resp
+      dropRect = comboDropRect size rx ry rw rh nRows nMatches contentW
+      geom r = comboScrollGeom r nMatches comboBoxMaxVisible win (csScrollX cs1) contentW
+      onLane = let (_, vSb, hSb, _) = geom dropRect in any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
+      -- A left press on a row, not on a scrollbar lane, picks it, so that
+      -- finishing a thumb drag cannot.
+      clickRow
+        | isFocus && shown && nRows > 0 && pressedIn MouseLeft inp && rectContains dropRect mouse && not onLane =
+            comboDropPickIndex dropRect menuItemRowH nRows (v2Y mouse)
+        | otherwise = Nothing
   when (isFocus || stepRedraw step) $
     liftIO $ do
-      modifyStore ctx (saveComboState key (length matches) (stepPicked step) cs1)
+      modifyStore ctx (saveComboState key nMatches (stepPicked step) cs1)
       when (stepDismissed step) $ do
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         markEscapeConsumed ctx
       when (stepRedraw step) $ markDirty ctx
-  -- The dropdown overlay reads its rows from the node's option list: the
-  -- visible window of the filtered list. Unfocused combos set it too, since a
-  -- click that focuses the field this frame shows the dropdown this frame.
+  -- A pick puts the row's text in the field and takes focus away, which
+  -- closes the dropdown; the next frame finds a text the combo did not
+  -- produce, and commits it.
+  liftIO . forM_ clickRow $ \i -> do
+    let picked = fromMaybe "" (listToMaybe (drop i rows))
+        len = T.length picked
+    modifyStore ctx (insertSlot fieldText key picked . setFieldSelection key len len)
+    writeIORef (ctxFocusId ctx) (WidgetId 0)
+    markDirty ctx
+  -- The dropdown's text spans read its rows from the node's option list: the
+  -- visible window of the filtered list.
   liftIO $ do
-    findNodeByWidgetId ctx wid
-      >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx (take comboBoxMaxVisible (drop (csWindow cs1) matches)))
+    findNodeByWidgetId ctx wid >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx rows)
     recordSlot fieldText ctx key finalText
+  -- Focus moves after the view, so a press that focuses the field shows the
+  -- dropdown in its own frame here.
+  let focusing = not isFocus && pressedIn MouseLeft inp && respPressed resp
+  when ((isFocus || focusing) && shown && nRows > 0) $ do
+    let dp = DropdownPopup wid (csHighlight cs1 - win) True (csScrollX cs1)
+        drag = csDrag cs1
+        -- As a scroller's bar: brighter under the pointer or while dragged.
+        hot kind (track, thumb) = drag == kind || drag == 0 && (rectContains track mouse || rectContains thumb mouse)
+    void . dropdownPopup wid dp (rectH dropRect) $ \_ dropR ->
+      let
+        (_, vSb, hSb, _) = geom dropR
+        hovered = if rectContains dropR mouse then comboDropPickIndex dropR menuItemRowH nRows (v2Y mouse) else Nothing
+        content = hash ((win, dpPicked dp, hovered, csScrollX cs1, drag), (hot 1 <$> vSb, hot 2 <$> hSb, contentW, nMatches, hash rows))
+        build cdc rect =
+          let
+            (inner, vBar, hBar, _) = geom rect
+            theme = cdcTheme cdc
+            base = themeInput theme
+            bar kind b@(track, thumb) = do
+              drawRect track (scrollBarTrackColor base theme)
+              drawRoundedRect thumb 3 ((if hot kind b then scrollBarThumbHoverColor else scrollBarThumbColor) base theme)
+           in
+            runCanvasFor cdc $ do
+              withClip inner (paintDropdownRows cdc (dropdownPopupRows (cdcFont cdc) theme winH mouse dp rows rect))
+              mapM_ (bar 1) vBar
+              mapM_ (bar 2) hBar
+       in ((), content, build)
   -- A value the application wrote reaches the field as a text the combo did
   -- not produce, as a row click does, and becomes the committed value; but
   -- it is not the user's commit.

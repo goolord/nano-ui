@@ -6,6 +6,7 @@ module NanoUI.Internal.Layout.Solve
   , measuredHeightAt
   , Measurers (..)
   , placeFloatingNodes
+  , placeFloatingNodesWith
   , computePopupPosition
   , placeWindowNode
   , scrollBarSlotOf
@@ -149,6 +150,23 @@ placeFloatingNodes ::
   (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
   Maybe (IORef (IntMap PlacedFloat)) ->
   IO ()
-placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor mPlaced = do
-  Position.placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor mPlaced
+placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor =
+  placeFloatingNodesWith na ms winW winH lookupPos lookupSize lookupAnchor (\_ _ _ -> pure Nothing)
+
+-- | 'placeFloatingNodes' where @lookupRect@, given a popup's id and measured
+-- width and height, can return the rect it goes at, in place of the one its
+-- anchor gives it.
+placeFloatingNodesWith ::
+  NodeArena ->
+  Measurers ->
+  Float ->
+  Float ->
+  (WidgetId -> IO (Maybe (Float, Float))) ->
+  (WidgetId -> IO (Maybe (Float, Float))) ->
+  (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
+  (WidgetId -> Float -> Float -> IO (Maybe Rect)) ->
+  Maybe (IORef (IntMap PlacedFloat)) ->
+  IO ()
+placeFloatingNodesWith na ms winW winH lookupPos lookupSize lookupAnchor lookupRect mPlaced = do
+  Position.placeFloatingNodes na ms winW winH lookupPos lookupSize lookupAnchor lookupRect mPlaced
   snapFloatingSubtrees na (fmSnapScale (msFm ms))

@@ -133,6 +133,8 @@ module NanoUI.Internal.Context
   -- Popups, hover zones, drawing caches ("NanoUI.Internal.Context.Drawing")
   , registerPopupConfig
   , lookupPopupConfig
+  , registerDropdownPopup
+  , dropdownPopups
   , registerHoverZone
   , hoverZoneCrossed
   , registerDrawing
@@ -205,6 +207,7 @@ module NanoUI.Internal.Context
   , CustomDrawContext (..)
   , CustomDrawBuild
   , CustomDrawingEntry (..)
+  , DropdownPopup (..)
   , atlasTextureId
   , registerImage
   , releaseImage

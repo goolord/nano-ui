@@ -16,7 +16,7 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), probeScrollBarHover, scrollBarsFor)
-import NanoUI.Internal.Frame.Select (overlayMenuOwnerAt)
+import NanoUI.Internal.Frame.Select (dropdownOwnerAt)
 import NanoUI.Internal.Frame.TextArea (isMouseOnTextAreaScrollBarAt)
 import NanoUI.Internal.Frame.TextEdit
 import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom, searchClearHit)
@@ -58,11 +58,10 @@ selectDropdownCursorKind ctx inp = do
     isPointerHeld s && case isPointerRoute s of
       RouteDropdown _ -> True
       _ -> False
-  if pickHeld
-    then pure (Just UiCursorPointer)
-    else
-      -- Over an open select's menu or a focused combo's.
-      (UiCursorPointer <$) <$> overlayMenuOwnerAt ctx (inputMousePos inp)
+  -- Over an open select's dropdown or a focused combo's, also while the
+  -- press that opened a select is held.
+  onPopup <- if pickHeld then pure True else isJust <$> dropdownOwnerAt ctx (inputMousePos inp)
+  pure (if onPopup then Just UiCursorPointer else Nothing)
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx inp = do

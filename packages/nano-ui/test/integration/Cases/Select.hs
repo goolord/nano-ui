@@ -85,8 +85,10 @@ sliderCursor = do
 -- picks that row. Open, the arrows move the pick and Escape closes it, and a
 -- click on its own field closes it and keeps focus. Closed and focused, the
 -- arrows step without opening it, Home and Page Up pick the first option, End
--- and Page Down the last, and Space or Enter opens and closes it. Rows show
--- the pointer cursor, hovered and pressed, and a pick reports one change.
+-- and Page Down the last, and Space or Enter opens and closes it: the
+-- dropdown a key opens shows from the next frame, and one a key closes goes
+-- in the same frame. Rows show the pointer cursor, hovered and pressed, and a
+-- pick reports one change.
 mouseAndKeysUi :: Var Int -> NanoUI (Response, Int)
 mouseAndKeysUi ref = column (held ref (select' (SA.smallArrayFromList lowHigh)))
 
@@ -106,7 +108,7 @@ selectMouseAndKeys ref = do
   checkEq (respId resp) =<< focusedId
   checkEq [1, 0, 2, 0, 2, 0] =<< valuesAfter [KeyRight, KeyLeft, KeyEnd, KeyHome, KeyPageDown, KeyPageUp]
   check . not =<< selectOpen
-  checkEq [True, False, True, False] =<< openAfter (map pressKey [KeySpace, KeySpace, KeyEnter, KeyEnter])
+  checkEq [True, False, True, False] =<< openAfter (map ((>> frame) . pressKey) [KeySpace, KeySpace, KeyEnter, KeyEnter])
   _ <- click (On resp)
   checkEq UiCursorPointer =<< cursorAt "High"
   (pressed, _) <- press "High"

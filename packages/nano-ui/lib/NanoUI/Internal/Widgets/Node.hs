@@ -30,6 +30,8 @@ module NanoUI.Internal.Widgets.Node
   , withWidgetChildren
   , floatingPanel
   , dropdownInput
+  , dropdownBodyInput
+  , inDropdownScope
   , addWidget
   , addWidgetStyled
   , addWidgetNode
@@ -52,7 +54,7 @@ import NanoUI.Internal.Id (WidgetId (..), enterScope, hashWidgetId, initialIdCon
 import NanoUI.Internal.Id.Cursor (readIdCursor, writeIdCursor)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, inertView, localInput, nextId, liftIO, withContext, withIdFrame)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askFrameInput, askInput, currentId, inertView, localInput, nextId, liftIO, withContext, withIdFrame, withKey)
 import NanoUI.Internal.WidgetText (containerFlagClip, containerFlagInert, labelFontStyle, packTextNodeStyle)
 import NanoUI.Internal.Style (Layout (..), tight)
 import NanoUI.Internal.Types (Rect (..), V2, rectContains, rectH, rectUnion, rectW)
@@ -310,14 +312,33 @@ floatingPanel wid addPanel enter body = do
     inp <- liftIO (routedInput ctx (intKey wid) frame)
     localInput inp body
 
--- | The input for widget @wid@'s own dropdown, which the frame draws over
--- every layer: the frame's while the pointer is routed to that dropdown, and
--- the view's otherwise.
+-- | Run @body@ in the keyed scope that holds field @owner@'s dropdown popup:
+-- the popup is the first id the scope issues, so 'dropdownInput' knows its
+-- key before it is declared.
+inDropdownScope :: WidgetId -> NanoUI a -> NanoUI a
+inDropdownScope owner = withKey (intKey owner, dropdownScopeTag)
+
+dropdownScopeTag :: Text
+dropdownScopeTag = "dropdown"
+
+-- | The input for field @owner@ of a dropdown it declares in
+-- 'inDropdownScope': the frame's while the pointer is routed to that
+-- dropdown, and the view's otherwise.
 dropdownInput :: WidgetId -> NanoUI Input
-dropdownInput wid =
+dropdownInput owner = do
+  popup <- inDropdownScope owner currentId
   withContext (\ctx -> getsInteraction ctx isPointerRoute) >>= \case
-    RouteDropdown owner | owner == wid -> askFrameInput
+    RouteDropdown k | k == intKey popup -> askFrameInput
     _ -> askInput
+
+-- | The input for the body of field @owner@'s dropdown popup: its layer's,
+-- or the frame's while the left press that went down on @owner@ is held, so
+-- that a press on the field released on a row picks that row.
+dropdownBodyInput :: WidgetId -> NanoUI Input
+dropdownBodyInput owner = do
+  inp <- askInput
+  active <- withContext (readIORef . ctxActiveId)
+  if active == owner && hashWidgetId owner /= 0 then askFrameInput else pure inp
 
 {-# INLINE addWidget #-}
 addWidget ::

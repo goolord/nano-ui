@@ -10,6 +10,19 @@
   `takeTextEditLastAction` still reports the command. `TextInputMenu` gains
   the point the menu opened at (`textInputMenuAt`), and `PointerRoute` loses
   `RouteTextMenu`.
+- A select's and a combo box's dropdown is a popup holding one drawing,
+  instead of an overlay the frame painted and routed itself. The drawing
+  paints only the rows inside the window and is rebuilt only when they, the
+  hover or the pick change: frames with an open 200-option select and an
+  open combo box allocate a third as much. The dropdown is placed as before (as wide as its field,
+  below or above it, never over it) from where the field is in the frame it
+  is drawn. One that Space or Enter opens shows from the next frame; a key,
+  Tab or a pick that closes one, or a modal opened over its field, hides it
+  in the same frame. In `NanoUI.Internal.Context`, `RouteDropdown` holds the
+  dropdown popup's layer key instead of its field, dropdown popups are
+  registered with `registerDropdownPopup`, and `OverlayState` loses
+  `osPrevMenuRects`. `NanoUI.Internal.Layout.Solve.placeFloatingNodesWith`
+  places a popup at a rect a lookup gives.
 - A custom widget's registrations are kept on its node instead of in maps
   rebuilt every frame: 1000 custom widgets cost a fifth less allocation and
   time a frame. In `NanoUI.Internal.Context`, `DrawingCacheState` no longer
