@@ -6,7 +6,7 @@ shows the profiling ones in use.
 
 - `check-cabal-common.py`: fails when the `common warnings` stanzas of the `packages/*/*.cabal` files differ. CI runs it.
 - `prune_cozette.py [in.otb] [out.otb]`: strips the Cozette bitmap font down to the glyphs `nano-ui-rgfw` bundles as `data/cozette.min.otb`. Needs `fonttools`.
-- `prune_inter.py path/to/Inter.ttf`: subsets Inter to printable ASCII and writes `packages/nano-ui-sdl/data/inter.ttf`. Needs `fonttools`.
+- `prune_inter.py path/to/Inter.ttf`: subsets Inter to printable ASCII and writes `packages/nano-ui-ttf/data/inter.ttf`. With `--web`, writes the browser backend's fallback font, `packages/nano-ui-sdl-web/web/fonts/inter-extended.ttf`, covering Latin beyond ASCII, Greek, Cyrillic, punctuation and common symbols. Both come from Inter 4.1's `extras/ttf/Inter-Regular.ttf`. Needs `fonttools`.
 - `record-demo.sh [out-dir]`: records the SDL demo's scripted tour in a hidden window and encodes `demo.mp4` with ffmpeg.
 - `profile/alloc-gate.py`: runs the `nano-ui-profile` scenes and fails when one allocates more than its baseline in `profile/alloc-baseline.json`; `--update` rewrites the baseline.
 - `profile/alloc-baseline.json`: the per-scene allocation totals the gate compares against, recorded with GHC 9.14.1 on Windows.

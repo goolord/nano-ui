@@ -20,6 +20,10 @@ import NanoUI.SdlWeb.Internal.Files
   )
 import NanoUI.SdlWeb.Internal.Fonts (findFontFamilies)
 import NanoUI.Ttf.Internal.Inter (fontInterBytes, fontInterLabel)
+import NanoUI.Ttf.Internal.Font (FontHooks (..), SdlFont (..), closeFont, openFontBytes, readSdlFont)
+import qualified NanoUI.Ttf.Internal.Font as Ttf
+import NanoUI.SdlWeb.Internal.Font (newWebFallbacks, webFontHooks)
+import qualified Data.IntMap.Strict as IM
 import Control.Monad (forM_, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
@@ -89,6 +93,7 @@ scriptedHost canvas steps0 = do
   rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
   pendingFont <- newIORef BS.empty
   picked <- newIORef BS.empty
+  extended <- BS.readFile extendedFontPath
   let take' buf n = do
         evs <- readIORef queue
         let (now, later) = splitAt n evs
@@ -141,11 +146,14 @@ scriptedHost canvas steps0 = do
           , whLoadFont = \kind p n -> do
               name <- T.unpack <$> utf8 p n
               modifyIORef' (recFontsAsked rec) (name :)
-              -- The host serves the bundled Inter at one URL, and has no
-              -- installed families.
-              if kind == 1 && name == "fonts/inter.ttf"
-                then BS.length fontInterBytes <$ writeIORef pendingFont fontInterBytes
-                else pure (-1)
+              -- The host serves the bundled Inter at one URL and the wider
+              -- fallback Inter where the default options look for it, and
+              -- has no installed families.
+              let serve b = BS.length b <$ writeIORef pendingFont b
+              case (kind, name) of
+                (1, "fonts/inter.ttf") -> serve fontInterBytes
+                (1, "fonts/inter-extended.ttf") -> serve extended
+                _ -> pure (-1)
           , whTakeFontBytes = \p -> readIORef pendingFont >>= \b -> () <$ copyOut p (BS.length b) b
           -- The chooser picks two files, or is cancelled when asked for a
           -- folder.
@@ -163,6 +171,10 @@ scriptedHost canvas steps0 = do
           , whTakePicked = \p -> readIORef picked >>= \b -> () <$ copyOut p (BS.length b) b
           }
   pure (host, rec)
+
+-- | The fallback font the page serves, from the package's sources.
+extendedFontPath :: FilePath
+extendedFontPath = "web/fonts/inter-extended.ttf"
 
 -- | What the scripted host reports as its WebGL renderer and its installed
 -- font families.
@@ -236,6 +248,7 @@ main =
     , ("long-composition", longComposition)
     , ("fonts-and-debug", fontsAndDebug)
     , ("file-dialogs", fileDialogs)
+    , ("fallback-fonts", fallbackFonts)
     ]
 
 pureChecks :: IORef Int -> IO ()
@@ -331,7 +344,7 @@ fontsAndDebug failed = do
       script = [events [motion 5 5], events [motion 6 6]]
   rec <- runScript (800, 600, 1) script (viewFrame (view (WebFontUrl "fonts/inter.ttf")))
   asked <- readIORef (recFontsAsked rec)
-  check failed "fonts: the URL is loaded through the host" (asked == ["fonts/inter.ttf"])
+  check failed "fonts: the fallback at start, then the URL, through the host" (asked == ["fonts/inter.ttf", "fonts/inter-extended.ttf"])
   readIORef snaps >>= \case
     s : _ -> do
       check failed ("fonts: the snapshot names the loaded font (" <> dbgFont s <> ")") (dbgFont s == "fonts/inter.ttf")
@@ -348,6 +361,29 @@ fontsAndDebug failed = do
   check failed "fonts: the family list drops repeats" (families == Right ["Inter", "Noto Sans"])
   outside <- listWebFontFamilies
   check failed "fonts: listing needs a browser" (either (const True) (const False) outside)
+
+-- | A face gets the fallback attached for a character it lacks that the
+-- fallback has (the ellipsis, which the bundled ASCII Inter lacks), and none
+-- for ASCII or for a character neither has.
+fallbackFonts :: IORef Int -> IO ()
+fallbackFonts failed = do
+  extended <- BS.readFile extendedFontPath
+  fallbacks <- newWebFallbacks [extended]
+  let hooks = webFontHooks fallbacks
+  Ttf.withTtf hooks $ do
+    let face = openFontBytes fontInterBytes 16 >>= readSdlFont 16
+        attachedFor txt = do
+          sf <- face
+          fhEnsureCoverage hooks sf txt
+          IM.size <$> readIORef (sfFallbacks sf) <* closeFont sf
+    ascii <- attachedFor "Open File..."
+    check failed "fallback: none for ASCII" (ascii == 0)
+    ellipsis <- attachedFor "Open File\8230"
+    check failed "fallback: attached for the ellipsis" (ellipsis == 1)
+    accents <- attachedFor "caf\233 \945\946\947 \1046"
+    check failed "fallback: one attachment covers accents, Greek and Cyrillic" (accents == 1)
+    han <- attachedFor "\20013"
+    check failed "fallback: none for a character neither font has" (han == 0)
 
 -- | The file chooser's files come back decoded with UTF-8 names, the
 -- filters reach the page as lines, a cancel is 'Nothing', saving hands the

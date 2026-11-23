@@ -46,6 +46,7 @@ import NanoUI.Ttf.Internal.Font
   , GlyphAtlas (..)
   , SdlFont (..)
   , SdlFontCache (..)
+  , attachFallback
   , closeEvictedFonts
   , destroyGlyphAtlas
   , destroySdlFontCache
@@ -54,17 +55,13 @@ import NanoUI.Ttf.Internal.Font
   , glyphAtlasFull
   , glyphAtlasHandle
   , prepareGlyphAtlasForFrame
-  , readSdlFont
   , reloadSdlFontCache
   , sdlFontCacheMonoSource
   , sdlFontCacheSource
-  , ttfAddFallback
   , ttfCloseFont
-  , ttfCopyFont
   , ttfHasGlyph
   , ttfIsBoldOf
   , ttfOpenFont
-  , ttfRemoveFallback
   , withSdlFontCache
   )
 import NanoUI.Ttf.Internal.Font qualified as Ttf
@@ -149,18 +146,6 @@ ensureCoverage sf txt =
       when (ord c >= 128 && isPrint c) $ do
         has <- ttfHasGlyph (sfFont sf) (fromIntegral (ord c))
         unless has $ coverageSourceFor c >>= traverse_ (uncurry (attachFallback sf))
-
-attachFallback :: SdlFont -> Int -> Ptr () -> IO ()
-attachFallback sf source probe = do
-  attached <- readIORef (sfFallbacks sf)
-  unless (IM.member source attached) $ do
-    copy <- ttfCopyFont probe (realToFrac (sfPointSize sf))
-    unless (copy == nullPtr) $ do
-      fallback <- readSdlFont (sfPointSize sf) copy
-      let attached' = IM.insert source fallback attached
-      forM_ attached $ \f -> ttfRemoveFallback (sfFont sf) (sfFont f)
-      forM_ attached' $ \f -> ttfAddFallback (sfFont sf) (sfFont f)
-      writeIORef (sfFallbacks sf) attached'
 
 data Coverage = Coverage
   { covSources :: !(SmallArray SBS.ShortByteString)
