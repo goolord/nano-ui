@@ -1,4 +1,4 @@
--- | Code for the book's introduction (@book/src/introduction.md@).
+-- | Code for the book's introduction (@book/src/README.md@).
 module Book.Intro where
 
 import Data.Text qualified as T

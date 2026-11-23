@@ -5,7 +5,7 @@ language = "en"
 src = "src"
 
 [output.html]
-site-url = "/nano-ui/"
+site-url = "/nano-ui/book/"
 additional-css = ["theme/nano-ui-book.css"]
 additional-js = ["theme/nano-ui-banks.js", "theme/nano-ui-components.js"]
 git-repository-url = "https://github.com/goolord/nano-ui"

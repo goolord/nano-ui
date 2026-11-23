@@ -5,8 +5,8 @@ name: Web
 # headless Chrome, and uploads the site as the web-demo artifact: the
 # cookbook at its root, the web backend's own demo under minimal/, and the
 # landing page's demo under landing/. The Pages workflow (deploy-book.yml)
-# calls this one and publishes the artifact under the book's demo/
-# directory, where the landing page (site/index.html) loads demo/landing/.
+# calls this one and publishes the artifact as the site's demo/ directory,
+# where the landing page (site/index.html) loads demo/landing/.
 
 on:
   push:

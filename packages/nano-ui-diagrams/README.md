@@ -58,5 +58,5 @@ and chart tests. These tests do not require a window.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html): the comprehensive
+- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
   online guide, tutorials, and ecosystem overview.

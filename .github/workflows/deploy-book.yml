@@ -50,22 +50,20 @@ jobs:
         with:
           mdbook-version: '0.5.4'
 
-      - name: Build with mdBook
-        run: mdbook build book
+      # Pages takes one artifact per deployment, so the site is assembled
+      # in _site: the landing page at its root, the book under book/ (the
+      # site-url in book.toml), and the browser demos under demo/.
+      - name: Build the book into book/
+        run: mdbook build book --dest-dir "$GITHUB_WORKSPACE/_site/book"
 
-      # mdBook writes its first chapter as both introduction.html and
-      # index.html. The landing page replaces the second, so the site opens
-      # on it and the book keeps every chapter's address.
       - name: Put the landing page at the site's root
-        run: cp -r site/. book/book/
+        run: cp -r site/. _site/
 
-      # Pages takes one artifact per deployment, so the demo goes inside the
-      # book's site.
-      - name: Add the browser demo under demo/
+      - name: Add the browser demos under demo/
         uses: actions/download-artifact@v4
         with:
           name: web-demo
-          path: book/book/demo
+          path: _site/demo
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -73,7 +71,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: book/book
+          path: _site
 
       # deploy-pages looks the artifact up once, and GitHub's list of a
       # run's artifacts can lag an upload it has already confirmed, which
@@ -100,4 +98,4 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' }}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./book/book
+          publish_dir: ./_site

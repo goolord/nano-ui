@@ -1,6 +1,6 @@
 # Summary
 
-[Introduction](introduction.md)
+[Introduction](README.md)
 
 # Getting Started
 - [Quick Start](getting-started/quickstart.md)
