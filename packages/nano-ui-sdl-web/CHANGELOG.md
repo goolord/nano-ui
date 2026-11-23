@@ -20,6 +20,12 @@
   program's environment variables; an inline `touch-action` on the canvas
   is kept, and a `pointercancel` releases the press away from the canvas;
   timed waits are held while the canvas is scrolled out of the viewport.
+- Animation frames are paced by `requestAnimationFrame` where they were
+  paced by `setTimeout`, whose 15.6 ms steps on Windows dropped about
+  every other frame.
+- `cabal.project.wasm` builds with `split-sections`; `build-web.sh` takes
+  `WASM_OPT_FLAGS` and prints the module's sizes; the demo page preloads
+  the module and its loader.
 - Installed fonts and fonts by URL: `WebFontInstalled` and `WebFontUrl`,
   `listWebFontFamilies` (the Local Font Access API, in Chromium-based
   browsers), and `setSdlWebUiFont` to change the UI font from the view. A

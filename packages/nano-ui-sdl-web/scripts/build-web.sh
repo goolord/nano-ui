@@ -13,6 +13,11 @@
 # target must be an executable built as a reactor module that exports
 # nanoMain (see the nano-ui-sdl-web-demo stanza). Needs node and npm (both
 # come with ghc-wasm-meta) for the JSFFI glue and the shim.
+#
+# WASM_OPT_FLAGS are wasm-opt's optimisation flags (default -O2; -Oz makes a
+# smaller, somewhat slower module). The script ends by printing the module's
+# size as linked, as served, and under gzip, which is how a web server sends
+# it.
 set -euo pipefail
 
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
@@ -39,7 +44,8 @@ cp "$pkg"/LICENSE-Inter "$out/fonts/"
 # before wasm-opt drops the custom section it is read from.
 "$(wasm32-wasi-ghc --print-libdir)/post-link.mjs" -i "$wasm" -o "$out/ghc_wasm_jsffi.js"
 if command -v wasm-opt >/dev/null; then
-  wasm-opt --strip-debug -O2 "$wasm" -o "$out/main.wasm"
+  # shellcheck disable=SC2086
+  wasm-opt --strip-debug ${WASM_OPT_FLAGS:--O2} "$wasm" -o "$out/main.wasm"
 else
   cp "$wasm" "$out/main.wasm"
 fi
@@ -52,5 +58,7 @@ rm -rf "$out/browser_wasi_shim"
 mkdir -p "$out/browser_wasi_shim"
 cp "$tmp"/package/dist/*.js "$tmp"/package/LICENSE-* "$out/browser_wasi_shim/"
 
+echo "Size of $target: $(wc -c <"$wasm") bytes linked," \
+  "$(wc -c <"$out/main.wasm") served, $(gzip -9 -c "$out/main.wasm" | wc -c) under gzip."
 echo "Built $out. Serve it with:"
 echo "  python3 -m http.server -d $out 8000"

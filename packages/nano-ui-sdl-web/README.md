@@ -154,6 +154,12 @@ canvas queues an event or a background thread wakes the loop.
   `style="touch-action: pan-y"` instead, which the runtime keeps. A vertical
   swipe that starts on the canvas then scrolls the page, and the press it
   began with is released away from the canvas, so it clicks nothing.
+- Animation frames are paced by `requestAnimationFrame`: a timed wait of up
+  to 34 ms ends on the display's first frame at or after its time, less
+  4 ms. `webRefreshHz` is then a floor on the interval rather than a timer:
+  at 60 a 60 Hz display draws every frame and a 144 Hz one every second
+  frame. The browser stops these frames while the tab is hidden. Longer
+  waits (`wakeAfter`, a caret's blink) are timers.
 - While the canvas is scrolled out of the viewport, timed waits are held:
   animation frames, `wakeAfter` and tooltip delays stop, and events and
   background tasks still wake the session. One frame is drawn when the
@@ -200,6 +206,14 @@ widget cookbook is `nano-ui-demo:exe:nano-ui-web-cookbook`), shrinks it with
 runtime, the module as `main.wasm`, GHC's JSFFI glue, and the
 [browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) it is loaded
 with, fetched from npm.
+
+The module is the page's whole download, so the build is set up for size.
+`cabal.project.wasm` builds every package with `split-sections`, which
+lets the linker drop the bindings a program does not reach. `wasm-opt` runs
+with `-O2`, or with the flags in `WASM_OPT_FLAGS`. The script ends by
+printing the module's size as linked, as served, and under gzip. In the
+landing page's module, about 2 MB of the code is the C side (FreeType,
+HarfBuzz, SDL, SDL_ttf, GHC's runtime and libc) and the rest is Haskell.
 
 The bundled Inter is embedded with Template Haskell, which GHC's wasm
 backend runs through Node.js, so `node` must be on `PATH` while building.
