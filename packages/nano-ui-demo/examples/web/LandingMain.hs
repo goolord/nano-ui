@@ -1,18 +1,25 @@
 {-# LANGUAGE CPP #-}
 
--- | "Bloom" in a browser canvas: the demo on the project's landing page
--- (@site/index.html@). Built with @wasm32-wasi-ghc@ it is a reactor module
--- whose @nanoMain@ export the page calls; a native build only checks that
--- it compiles.
+-- | The program on the project's landing page (@site/index.html@), in a
+-- browser canvas. Built with @wasm32-wasi-ghc@ it is a reactor module whose
+-- @nanoMain@ export the page calls; a native build only checks that it
+-- compiles.
 module Main (main) where
 
+import Data.Maybe (isNothing)
 import NanoUI
 import NanoUI.Backend.SdlWeb (SdlWebOptions (..), defaultSdlWebOptions, runSdlWebApp)
+import System.Environment (lookupEnv)
 
-import Bloom (bloomView)
+import Landing (landingView)
 
+-- | The page sets @NANO_UI_REDUCED_MOTION@ in the program's environment
+-- when the browser asks for reduced motion, and Bloom then starts with its
+-- spin off.
 main :: IO ()
-main = runSdlWebApp webOptions bloomView
+main = do
+  still <- lookupEnv "NANO_UI_REDUCED_MOTION"
+  runSdlWebApp webOptions (landingView (isNothing still))
 
 #if defined(wasm32_HOST_ARCH)
 foreign export javascript "nanoMain" main :: IO ()
