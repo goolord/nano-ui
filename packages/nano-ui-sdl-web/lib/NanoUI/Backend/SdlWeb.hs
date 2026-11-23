@@ -22,6 +22,15 @@ module NanoUI.Backend.SdlWeb
   , setSdlWebUiFont
   , listWebFontFamilies
 
+    -- * File dialogs
+  , FileFilter (..)
+  , FileDialogOptions (..)
+  , defaultFileDialogOptions
+  , WebFile (..)
+  , openWebFiles
+  , openWebFolder
+  , saveWebFile
+
     -- * Debugging
   , SdlWebDebugSnapshot (..)
   , CoreDebugSnapshot (..)
@@ -36,6 +45,15 @@ import NanoUI.Emit (NanoUIE, newReducer, reduceFrame)
 import NanoUI.Backend (runFrame)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
 import NanoUI.SdlWeb.Internal.Debug (SdlWebDebugSnapshot (..))
+import NanoUI.SdlWeb.Internal.Files
+  ( FileDialogOptions (..)
+  , FileFilter (..)
+  , WebFile (..)
+  , defaultFileDialogOptions
+  , openWebFiles
+  , openWebFolder
+  , saveWebFile
+  )
 import NanoUI.SdlWeb.Internal.Host (browserAvailable, browserHost)
 import NanoUI.SdlWeb.Internal.Session
   ( SdlWebOptions (..)

@@ -20,6 +20,10 @@
   `listWebFontFamilies` (the Local Font Access API, in Chromium-based
   browsers), and `setSdlWebUiFont` to change the UI font from the view. A
   font that will not load falls back to the bundled Inter.
+- File dialogs on contents: `openWebFiles`, `openWebFolder` and
+  `saveWebFile`, with `FileDialogOptions` and `FileFilter` as nano-ui-sdl
+  names them, and `WebFile` for a chosen file's name and bytes. Saving uses
+  the browser's save dialog where it has one and downloads elsewhere.
 - `askSdlWebDebug` and `SdlWebDebugSnapshot`: frame timings, canvas, pixel
   ratio, font and WebGL renderer, with `formatFpsRows` and `formatDrawRows`
   re-exported, as nano-ui-sdl has `askSdlDebug`.
