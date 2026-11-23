@@ -131,6 +131,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO, uiTime, withContext)
 import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
+import NanoUI.Internal.Store.Slots (slotDragPoint, slotDragPress)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
@@ -357,13 +358,13 @@ drag2DFrom bounds onIt = do
   -- damage); the last pointer position goes in a point slot. As in
   -- 'useDrag1D', the drag lasts only under that press, so one released while
   -- this hook did not run does not come back.
-  let dragK = slotKey SlotDrag (intKey wid)
+  let key = intKey wid
       mouse = inputMousePos inp
   store <- liftIO (getStore ctx)
-  let held = findSlot fieldQuiet 0 dragK store
+  let held = findSpec slotDragPress 0 key store
   active0 <- if held == 0 then pure False else (== held) <$> liftIO (leftPress ctx)
   let active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
-      prev = findSlot fieldPoint mouse dragK store
+      prev = findSpec slotDragPoint mouse key store
       delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =
         V2
@@ -373,8 +374,8 @@ drag2DFrom bounds onIt = do
     press <- if active && not active0 then leftPress ctx else pure held
     modifyStore ctx $
       if active
-        then insertSlot fieldQuiet dragK press . insertSlot fieldPoint dragK mouse
-        else deleteSlot fieldQuiet dragK . deleteSlot fieldPoint dragK
+        then insertSpec slotDragPress key press . insertSpec slotDragPoint key mouse
+        else deleteSpec slotDragPress key . deleteSpec slotDragPoint key
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
 -- | This frame's wheel delta while the widget is hovered ('respHovered').

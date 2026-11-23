@@ -51,6 +51,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, nextId, liftIO, withContext)
 import NanoUI.Internal.Store
+import NanoUI.Internal.Store.Slots (slotSearchAge, slotSearchCommitted, slotTextChanged, slotTextHistory, slotTextMode)
 import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, minW)
 import NanoUI.Internal.Types (Color)
@@ -97,7 +98,7 @@ textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
   let buf0 = TB.fromLines (Seq.fromList (T.splitOn "\n" (tisText s)))
       buf = TB.withCursor (cursorAtOffset (tisText s) (tisCursor s)) buf0
-      history = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
+      history = case lookupSpec slotTextHistory key store of
         Just (FieldHistory text h) | text == tisText s -> h
         _ -> emptyHistory
    in Editor buf (cursorAtOffset (tisText s) (tisAnchor s)) history
@@ -131,7 +132,7 @@ cursorAtOffset txt offset =
 saveTextEditor :: Int -> Editor -> WidgetStore -> WidgetStore
 saveTextEditor key ed =
   let s = editorTextState ed
-   in insertSlot fieldHistory (slotKey SlotTextHistory key) (FieldHistory (tisText s) (editorHistory ed)) . saveTextInputState key s
+   in insertSpec slotTextHistory key (FieldHistory (tisText s) (editorHistory ed)) . saveTextInputState key s
 
 -- | Run this frame's commands on a field, or 'Nothing' when it had none.
 editTextInput :: Context -> EditorMode -> Input -> WidgetStore -> Int -> TextInputState -> IO (Maybe Editor)
@@ -262,16 +263,14 @@ editTextField wid mode initial unfocusedText = do
   store <- liftIO (getStore ctx)
   let
     key = intKey wid
-    modeKey = slotKey SlotTextMode key
-    pulseKey = slotKey SlotTextAreaChanged key
     stored = lookupSlot fieldText key store
     s0 = loadTextInputState store key (fromMaybe initial stored)
-    pulse = memberSlot fieldInt pulseKey store
-  when (isNothing stored || lookupSlot fieldEditorMode modeKey store /= Just mode || pulse) $
+    pulse = memberSpec slotTextChanged key store
+  when (isNothing stored || lookupSpec slotTextMode key store /= Just mode || pulse) $
     liftIO . modifyStore ctx $
       (if isNothing stored then insertSlot fieldText key initial else id)
-        . deleteSlot fieldInt pulseKey
-        . insertSlot fieldEditorMode modeKey mode
+        . deleteSpec slotTextChanged key
+        . insertSpec slotTextMode key mode
   -- Password fields request 'InputSecure' so the IME does not display or
   -- record their text.
   isFocus <- focusAndIme ctx wid (modeEditable mode) (if modeCopyable mode then InputNormal else InputSecure)
@@ -327,11 +326,9 @@ debounceSearchChanged :: Context -> Int -> Bool -> Bool -> Float -> IO Bool
 debounceSearchChanged ctx key focused rawChanged ms = do
   store <- getStore ctx
   let
-    committedKey = slotKey SlotSearchCommitted key
-    ageKey = slotKey SlotSearchAge key
     current = findSlot fieldText "" key store
-    committedMissing = not (memberSlot fieldText committedKey store)
-    committed = findSlot fieldText current committedKey store
+    committedMissing = not (memberSpec slotSearchCommitted key store)
+    committed = findSpec slotSearchCommitted current key store
     dirty = current /= committed
     needClock = rawChanged || dirty
   now <- if needClock then getMonotonicTime else pure 0
@@ -339,7 +336,7 @@ debounceSearchChanged ctx key focused rawChanged ms = do
     -- Debounce timing stays in Double: wall-clock seconds as Float lose
     -- resolution at long uptimes (~125 ms at 12 days), which would shift
     -- (or skip) the trailing-edge window.
-    lastEdit = findSlot fieldDouble now ageKey store
+    lastEdit = findSpec slotSearchAge now key store
     deadline = realToFrac ms :: Double
     idleMs = (now - lastEdit) * 1000
     -- An edit this frame has not been idle for any time yet.
@@ -347,11 +344,11 @@ debounceSearchChanged ctx key focused rawChanged ms = do
     -- Text the caller changed, in a field nobody has typed in, has no edit
     -- time to age from. Its pause starts now: left unstamped, every frame
     -- would see a fresh edit, and the commit would never come.
-    stamp = rawChanged || commit || (dirty && not (memberSlot fieldDouble ageKey store))
+    stamp = rawChanged || commit || (dirty && not (memberSpec slotSearchAge key store))
   when (stamp || committedMissing) $
     modifyStore ctx $
-      (if commit || committedMissing then insertSlot fieldText committedKey current else id)
-        . (if stamp then insertSlot fieldDouble ageKey now else id)
+      (if commit || committedMissing then insertSpec slotSearchCommitted key current else id)
+        . (if stamp then insertSpec slotSearchAge key now else id)
   -- Schedule a wake-up at the debounce deadline since no input event will
   -- arrive when the pause expires.
   when (dirty && not commit) $

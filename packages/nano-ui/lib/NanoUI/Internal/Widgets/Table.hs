@@ -58,14 +58,17 @@ import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), tableCache)
 import NanoUI.Internal.Font (FontMetrics (..), ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCursorKind (..))
+import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
-import NanoUI.Internal.Store (Slot (..), SlotWrites (..), eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSlot, insertSlot, lookupSlot, slotKey, slotWrite)
+import NanoUI.Internal.Store (SlotSpec, SlotWrites, WidgetStore, encodedSpec, eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSpec, lookupSpec, ownSlotSpec, specKey, specWrite)
+import NanoUI.Internal.Store.Slots (slotDragItem, slotDragStartW, slotScrollRange)
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
-import Data.Bits ((.|.), shiftL)
+import Data.Bits ((.|.))
 import Data.String (IsString (..))
 import NanoUI.Internal.Types (Rect (..), clamp, rectH, rectW, v2X, V2 (..), rectContains, noLimit)
 import NanoUI.Internal.WidgetText (buttonFlagTable, rowStripe, stripeBits, tableHeaderPadX)
+import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
@@ -123,15 +126,46 @@ tableHiddenIndices = IS.toAscList . tableHiddenCols
 clampSortCol :: Int -> SortCol -> SortCol
 clampSortCol n (SortCol idx dir) = SortCol (clamp 0 (max 0 (n - 1)) idx) dir
 
--- The sort mark uses bits 16-17 (see tableSortMarkOf), above the font fields.
+-- The sort mark of column @idx@ in its header's style ('SB.headerSortMark',
+-- read back by 'NanoUI.Internal.WidgetText.tableSortMarkOf').
 sortMarkStyle :: SortCol -> Int -> Int
 sortMarkStyle sort idx
   | sortColIndex sort /= idx = 0
-  | sortColDir sort == SortDesc = 2 `shiftL` 16
-  | otherwise = 1 `shiftL` 16
+  | sortColDir sort == SortDesc = SB.placeField SB.headerSortMark 2
+  | otherwise = SB.placeField SB.headerSortMark 1
 
 minColW :: Float
 minColW = 40
+
+-- | The table's column order and the widths columns were dragged to, under
+-- the table's own key.
+{-# INLINE tableColumnsSlot #-}
+tableColumnsSlot :: SlotSpec ([Int], [Float])
+tableColumnsSlot = ownSlotSpec fieldTableColumns
+
+-- | The table's hidden columns, under its own key.
+{-# INLINE tableHiddenSlot #-}
+tableHiddenSlot :: SlotSpec IntSet
+tableHiddenSlot = ownSlotSpec fieldIntSet
+
+-- | The column a header-edge drag resizes, or -1. Stored plus one, so an
+-- empty slot reads as idle.
+{-# INLINE tableResizeColSlot #-}
+tableResizeColSlot :: SlotSpec Int
+tableResizeColSlot = encodedSpec (subtract 1) (+ 1) slotDragItem
+
+-- | The pointer's x when a column resize started, under the table's own key.
+{-# INLINE tableResizeXSlot #-}
+tableResizeXSlot :: SlotSpec Float
+tableResizeXSlot = ownSlotSpec fieldFloat
+
+-- | The sort the headers show, as an int on the table's container: twice the
+-- column, plus one when descending. The headers show the sort only through
+-- their style, which no diff covers, so a change of this slot repaints the
+-- table.
+{-# INLINE sortShownCode #-}
+sortShownCode :: SortCol -> Int
+sortShownCode sort = 2 * sortColIndex sort + fromEnum (sortColDir sort == SortDesc)
 
 -- | What one table cell (or header) shows.
 data Cell = Cell
@@ -598,6 +632,351 @@ tableConfigured' ::
 tableConfigured' cfg f key cols rows v =
   bindVarOn Conservative tableSort v (tableCore cfg f key cols rows)
 
+-- | A table's state between frames, as 'readTableState' reads it from the
+-- store and 'writeTableState' writes it back.
+data TableState = TableState
+  { tsOrder :: ![Int]
+  -- ^ Every source column in display order, hidden ones included.
+  , tsWidths :: ![Float]
+  -- ^ The width each source column was dragged to, 0 for none.
+  , tsHidden :: !IntSet
+  , tsResizeCol :: !Int
+  -- ^ The column a header-edge drag resizes, or -1.
+  , tsResizeX :: !Float
+  -- ^ The pointer's x when that resize started.
+  , tsResizeW :: !Float
+  -- ^ The column's width when that resize started.
+  }
+
+-- | The state of a table of @n@ columns under @stateKey@ in @st@.
+readTableState :: TableConfig -> Int -> Int -> WidgetStore -> TableState
+readTableState cfg n stateKey st =
+  let (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupSpec tableColumnsSlot stateKey st)
+   in TableState
+        { tsOrder = normalizeOrder n storedOrder
+        , tsWidths = take n (storedWidths ++ repeat 0)
+        , tsHidden = findSpec tableHiddenSlot (tableHidden cfg) stateKey st
+        , tsResizeCol = findSpec tableResizeColSlot (-1) stateKey st
+        , tsResizeX = findSpec tableResizeXSlot 0 stateKey st
+        , tsResizeW = findSpec slotDragStartW 0 stateKey st
+        }
+
+-- | Writes of @ts@ under @stateKey@. Each compares before it writes, so an
+-- idle table writes nothing.
+writeTableState :: Int -> TableState -> SlotWrites
+writeTableState stateKey ts =
+  specWrite tableColumnsSlot stateKey (tsOrder ts, tsWidths ts)
+    <> specWrite tableHiddenSlot stateKey (tsHidden ts)
+    <> specWrite tableResizeColSlot stateKey (tsResizeCol ts)
+    <> specWrite tableResizeXSlot stateKey (tsResizeX ts)
+    <> specWrite slotDragStartW stateKey (tsResizeW ts)
+
+-- | The column widths this frame lays out: @ts@'s, with the column a held
+-- resize drags set to its start width plus the pointer's travel, never under
+-- its floor ('colFloor').
+resizedWidths :: SmallArray ColSize -> PrimArray Float -> Input -> TableState -> [Float]
+resizedWidths sizes contentWs inp ts
+  | col >= 0 && heldIn MouseLeft inp =
+      setAt col (max (colFloor sizes contentWs col) (tsResizeW ts + v2X (inputMousePos inp) - tsResizeX ts)) (tsWidths ts)
+  | otherwise = tsWidths ts
+  where
+    col = tsResizeCol ts
+
+-- | Where a table's columns go this frame: which show, in which pane, and
+-- each one's box.
+data TableGeometry = TableGeometry
+  { tgOuter :: !Layout
+  -- ^ The layout of the column holding the table.
+  , tgVisible :: ![Int]
+  -- ^ The shown columns in display order.
+  , tgFrozen :: ![Int]
+  -- ^ The shown columns of the frozen pane.
+  , tgUnfrozen :: ![Int]
+  -- ^ The shown columns of the scrolling pane.
+  , tgPinned :: !Int
+  -- ^ Rows pinned under the header.
+  , tgScrolled :: !Int
+  -- ^ Rows in the body below them.
+  , tgFill :: !Bool
+  -- ^ The columns fill the table's width: one stretches or the table grows.
+  , tgRowH :: !Float
+  , tgColBoxes :: !(SmallArray Layout)
+  -- ^ Each source column's box ('colBoxLayout').
+  }
+
+-- | The geometry of a table of @n@ columns and @nRows@ rows under config
+-- @cfg@ and layout modifier @f@, its columns sized @widths@ this frame.
+tableGeometry :: TableConfig -> (Layout -> Layout) -> FontMetrics -> Int -> Int -> SmallArray ColSize -> PrimArray Float -> [Float] -> TableState -> TableGeometry
+tableGeometry cfg f fm n nRows sizes contentWs widths ts =
+  TableGeometry
+    { tgOuter = outerLayout
+    , tgVisible = vis
+    , tgFrozen = frozenIdx
+    , tgUnfrozen = drop freezeN vis
+    , tgPinned = pinnedN
+    , tgScrolled = nRows - pinnedN
+    , tgFill = fillInner
+    , tgRowH = max tableRowMinH (fmLineHeight fm + 6)
+    , tgColBoxes =
+        smallArrayFromList
+          [ colBoxLayout (squeezed i) fillInner hasStretch sizes contentWs widthsArr i
+          | i <- [0 .. n - 1]
+          ]
+    }
+  where
+    widthsArr = primArrayFromList widths
+    outerLayout = f (fillW flatLayout)
+    hidden = tsHidden ts
+    vis = filter (`IS.notMember` hidden) (tsOrder ts)
+    hasStretch = any (\i -> smallAt sizes i ColContent == ColStretch) vis
+    freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
+    frozenIdx = take freezeN vis
+    pinnedN = clamp 0 nRows (tableFreezeRows cfg)
+    fillInner =
+      hasStretch || case layoutWidth outerLayout of
+        Grow _ -> True
+        _ -> False
+    -- Under the squeeze the unfrozen columns shrink to the body in the same
+    -- frame; frozen columns keep their widths.
+    squeezed i = tableSqueeze cfg && i `notElem` frozenIdx
+
+-- | The widgets a table's panes are made of: the body scroller, the bar-less
+-- header scroller that follows it, and the panel holding both panes.
+data TableIds = TableIds
+  { tidBody :: !WidgetId
+  , tidHeader :: !WidgetId
+  , tidPanel :: !WidgetId
+  }
+
+-- | A table's panel: the frozen pane and the scrolling pane, each a header
+-- row, the pinned rows and the body's rows in view. Returns each shown
+-- column's header response.
+tablePanes ::
+  ToCell c =>
+  Context ->
+  TableIds ->
+  V.Vector (Encode.OneColonnade Headed row c) ->
+  V.Vector row ->
+  TableDerived ->
+  TableGeometry ->
+  SortCol ->
+  Bool ->
+  NanoUI [(Int, Response)]
+tablePanes
+  ctx
+  ids
+  encoders
+  rowsVec
+  TableDerived {tdEncoded = encoded, tdSortable = sortable, tdViews = views, tdNumeric = numeric, tdOrder = sorted}
+  TableGeometry {tgFrozen = frozenIdx, tgUnfrozen = unfrozenIdx, tgPinned = pinnedN, tgScrolled = scrollN, tgFill = fillInner, tgRowH = rowH, tgColBoxes = colBoxes}
+  sort0
+  hasVertBar =
+  panel' paneRoot $ do
+    tagContainer (tidPanel ids)
+    row' (paneRoot {layoutGap = 0}) $ do
+      frozenHs <-
+        if null frozenIdx
+          then pure []
+          else zip frozenIdx <$> frozenPane
+      unless (null frozenIdx || null unfrozenIdx) $ void separator
+      unfrozenHs <-
+        if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane
+      pure (frozenHs ++ unfrozenHs)
+  where
+    vWid = tidBody ids
+    hWid = tidHeader ids
+    rowStep = rowH + 1
+    fillIf b = if b then fillW else id
+    colBox i = smallAt colBoxes i (tight defaultLayout)
+    cellLayout i = if smallAt numeric i False then numCellLayout else textCellLayout
+    isSortable i = smallAt sortable i False
+    renderHeader i active cellLay flags = do
+      let oneCol = encoders V.! i
+          hdrCell = toCell (getHeaded (Encode.oneColonnadeHead oneCol))
+          styleIx = if active then 1 else 0
+      case cellView hdrCell of
+        Nothing ->
+          buttonStyledEx True (cellText hdrCell) styleIx cellLay flags
+        Just hdrAct -> buttonContentStyled styleIx flags cellLay hdrAct
+    textCellAt ri i t = do
+      wid <- nextId
+      void (addWidgetStyled wid NodeText t 0 (cellLayout i) (rowStripe ri))
+    -- Text cells show their cached text; only a column with widget views
+    -- encodes its visible cells again, for the views.
+    renderCell ri r i
+      | not (smallAt views i False) = textCellAt ri i (indexSmallArray encoded r V.! i)
+      | otherwise = case cellView (toCell (Encode.oneColonnadeEncode (V.unsafeIndex encoders i) (rowsVec V.! r))) of
+        Nothing -> textCellAt ri i (indexSmallArray encoded r V.! i)
+        -- The cell's panel carries the row fill in its style index
+        -- ('panelSurface'), as a text cell's node does.
+        Just widgetAct -> styledContainer NodePanel (stripeBits (rowStripe ri)) (cellLayout i) widgetAct
+    rowCells rowLay idxs colLays ri =
+      gridColumnsLay rowLay idxs colLays [renderCell ri (indexPrimArray sorted ri) i | i <- idxs]
+    paneRoot = fillIf fillInner (tight (fillH defaultLayout))
+    minSum idxs = sum (map (layoutMinW . colBox) idxs) + fromIntegral (max 0 (length idxs - 1))
+    paneLay fill idxs
+      | fill = fillW (fillH flatLayout)
+      | otherwise = (fillH flatLayout) {layoutMinW = minSum idxs}
+    gridRowLay idxs = fillIf fillInner flatLayout {layoutMinW = minSum idxs}
+    -- Header row and pinned rows, each followed by a rule. Used by both panes.
+    headerBlock idxs = do
+      hs <- row' (gridRowLay idxs) $
+        forM (zip [0 :: Int ..] idxs) $ \(k, i) -> do
+          when (k > 0) $ void separator
+          let isSort = isSortable i
+              isActive = sortColIndex sort0 == i && isSort
+              flags = (if isSort then sortMarkStyle sort0 i else 0) .|. buttonFlagTable
+              hdrLay = (cellLayout i) {layoutFontVariant = FontRegular}
+          withKey i $
+            column' (colBox i) $
+              renderHeader i isActive hdrLay flags
+      void separator
+      let !rowLay = gridRowLay idxs
+          !colLays = map colBox idxs
+      forM_ [0 .. pinnedN - 1] $ \ri -> do
+        let !sourceIdx = indexPrimArray sorted ri
+        withKey ("pin" :: Text, sourceIdx) $ do
+          when (ri > 0) $ void separator
+          rowCells rowLay idxs colLays ri
+      when (pinnedN > 0 && scrollN > 0) $ void separator
+      pure hs
+    bodyBlock idxs = do
+      (lo, hi) <-
+        if scrollN == 0
+          then pure (0, -1)
+          else liftIO $ do
+            V2 _ scrollY <- getScrollOffset2D ctx vWid
+            viewH <- maybe (rowStep * 8) rectH <$> getPrevRect ctx vWid
+            pure (listClipper scrollN scrollY viewH rowStep)
+      let !rowLay = gridRowLay idxs
+          !colLays = map colBox idxs
+          topH = if lo <= 0 then 0 else fromIntegral lo * rowH + fromIntegral (lo - 1)
+          botH = fromIntegral (max 0 (scrollN - hi - 1)) * rowStep
+      column' rowLay $ do
+        when (topH > 0) $ void (spacer Fit (Fixed topH))
+        forM_ [lo .. hi] $ \rowIdx -> do
+          let !ri = rowIdx + pinnedN
+              !sourceIdx = indexPrimArray sorted ri
+          withKey sourceIdx $ do
+            when (rowIdx > 0) $ void separator
+            rowCells rowLay idxs colLays ri
+        when (botH > 0) $ void (spacer Fit (Fixed botH))
+    frozenPane =
+      column' (paneLay False frozenIdx) $ do
+        hs <- headerBlock frozenIdx
+        scrollAreaIdConfigured
+          vWid
+          (fillH flatLayout)
+          (if null unfrozenIdx then scrollVerticalAuto else scrollVerticalHidden)
+          (bodyBlock frozenIdx)
+        pure hs
+    unfrozenPane = do
+      -- Uses last frame's rect, so the header's spacer lags the body's
+      -- vertical bar by one frame when the bar appears or disappears.
+      column' (paneLay fillInner unfrozenIdx) $ do
+        hs <-
+          row' (fillIf fillInner flatLayout) $ do
+            hs' <-
+              scrollAreaIdConfigured
+                hWid
+                ((if fillInner then fillW else minW (minSum unfrozenIdx)) flatLayout {layoutDirection = Row})
+                -- Bar-less scroller that follows the body's horizontal
+                -- offset (linkScrollAxes below) and clips the header row.
+                scrollHorizontalHidden
+                (column' (gridRowLay unfrozenIdx) (headerBlock unfrozenIdx))
+            -- The body scroller has no padding, so its whole lane is gutter.
+            when hasVertBar $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
+            pure hs'
+        liftIO (linkScrollAxes ctx vWid hWid)
+        -- The body owns both scrollbars.
+        scrollAreaIdConfigured
+          vWid
+          (fillIf fillInner (fillH flatLayout))
+          defaultScrollConfig
+          (bodyBlock unfrozenIdx)
+        pure hs
+
+-- | What one frame of a table's headers did, for 'resolveTableInput'.
+data TableInput = TableInput
+  { tiInput :: !Input
+  , tiSort :: !SortCol
+  -- ^ The sort the rows are in.
+  , tiSortable :: !(SmallArray Bool)
+  -- ^ Whether each source column can sort.
+  , tiVisible :: ![Int]
+  -- ^ The shown columns in display order, as laid out.
+  , tiWidths :: ![Float]
+  -- ^ The column widths laid out ('resizedWidths').
+  , tiHeaders :: ![(Int, Response)]
+  -- ^ Each shown column's header response.
+  , tiShowAll :: !(Maybe Response)
+  -- ^ The "Show all columns" button, while a column is hidden.
+  , tiEdge :: !(Maybe (Int, Float))
+  -- ^ The column whose resize edge is under the pointer, and its header's
+  -- width.
+  , tiReorder :: !Reorder
+  }
+
+-- | A table's state after one frame, from 'resolveTableInput'.
+data TableStep = TableStep
+  { tableStepState :: !TableState
+  , tableStepSort :: !SortCol
+  , tableStepSortClicked :: !Bool
+  -- ^ A header click changed the sort.
+  , tableStepChanged :: !Bool
+  -- ^ The sort, order, hidden columns or widths changed.
+  }
+
+-- | One frame of a table's headers: a resize starting, running or ending, a
+-- column reordered, hidden or shown again, and a header click sorting.
+resolveTableInput :: TableInput -> TableState -> TableStep
+resolveTableInput ti ts0 =
+  TableStep
+    { tableStepState =
+        TableState
+          { tsOrder = nextOrder
+          , tsWidths = tiWidths ti
+          , tsHidden = nextHidden
+          , tsResizeCol = nextDrag
+          , tsResizeX = nextDragX
+          , tsResizeW = nextDragW
+          }
+    , tableStepSort = nextSort
+    , tableStepSortClicked = hasChanged && isJust sortClick
+    , tableStepChanged = hasChanged
+    }
+  where
+    inp = tiInput ti
+    sort0 = tiSort ti
+    vis = tiVisible ti
+    order0 = tsOrder ts0
+    hidden0 = tsHidden ts0
+    headerPairs = tiHeaders ti
+    reorder = tiReorder ti
+    edgeCol = fst <$> tiEdge ti
+    isResize = tsResizeCol ts0 >= 0
+    vis' = reorderOrder reorder
+    mReorder = reorderDragging reorder
+    (nextDrag, nextDragX, nextDragW)
+      | pressedIn MouseLeft inp, Just (col, w) <- tiEdge ti = (col, v2X (inputMousePos inp), w)
+      | pressedIn MouseLeft inp || releasedIn MouseLeft inp || not (heldIn MouseLeft inp) || not isResize = (-1, 0, 0)
+      | otherwise = (tsResizeCol ts0, tsResizeX ts0, tsResizeW ts0)
+    nextOrder = if vis' /= vis then rebuildOrder hidden0 vis' order0 else order0
+    -- respRightClicked, not a bare release: a right press that went down
+    -- elsewhere and came up over a header must not hide that column.
+    hideClicked = [i | (i, r) <- headerPairs, respRightClicked r, not isResize, isNothing mReorder]
+    nextHidden = case tiShowAll ti of
+      Just r | respClicked r -> IS.empty
+      _ -> case hideClicked of
+        (i : _) | length vis > 1 -> IS.insert i hidden0
+        _ -> hidden0
+    sortClick =
+      if reorderMoved reorder || isJust mReorder || isResize || (isJust edgeCol && (heldIn MouseLeft inp || releasedIn MouseLeft inp))
+        then Nothing
+        else listToMaybe [i | (i, r) <- headerPairs, respClicked r, smallAt (tiSortable ti) i False]
+    nextSort = maybe sort0 (nextSortCol sort0) sortClick
+    hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || tiWidths ti /= tsWidths ts0
+
 -- | 'tableConfigured' on a plain sort.
 tableCore ::
   (Foldable f, ToCell c) =>
@@ -620,33 +999,15 @@ tableCore cfg f key cols inputRows curSort =
     tableWid <- nextId
     let sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
+        ids = TableIds {tidBody = vWid, tidHeader = hWid, tidPanel = tableWid}
     inp <- askInput
-    st0 <- liftIO (getStore ctx)
-    TableDerived
-      { tdEncoded = encoded
-      , tdSortable = sortable
-      , tdViews = views
-      , tdWidths = contentWs
-      , tdNumeric = numeric
-      , tdOrder = sorted
-      } <-
-      liftIO (tableDerived ctx stateKey cols inputRows sort0)
+    !ts0 <- readTableState cfg n stateKey <$> liftIO (getStore ctx)
+    derived <- liftIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
-        -- The column order and the widths columns were dragged to.
-        (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupSlot fieldTableColumns stateKey st0)
-        order0 = normalizeOrder n storedOrder
-        hidden0 = findSlot fieldIntSet (tableHidden cfg) stateKey st0
-        widths0 = take n (storedWidths ++ repeat 0 :: [Float])
-        -- The column being resized, or -1. The drag slot holds it plus one,
-        -- so an empty slot reads as idle.
-        drag0 = findSlot fieldInt 0 (slotKey SlotDrag stateKey) st0 - 1
-        dragX0 = findSlot fieldFloat 0 stateKey st0
-        dragW0 = findSlot fieldFloat 0 (slotKey SlotDragW stateKey) st0
-        mx = v2X (inputMousePos inp)
-        widths1
-          | drag0 >= 0 && heldIn MouseLeft inp =
-              setAt drag0 (max (colFloor sizes contentWs drag0) (dragW0 + mx - dragX0)) widths0
-          | otherwise = widths0
+        contentWs = tdWidths derived
+        widths1 = resizedWidths sizes contentWs inp ts0
+        geom = tableGeometry cfg f (ctxFontMetrics ctx) n (sizeofSmallArray (tdEncoded derived)) sizes contentWs widths1 ts0
+        vis = tgVisible geom
     -- Last frame's body rect, for the header's resize edges.
     mPrevBody <- lastRect vWid
     -- Whether the body showed its vertical bar last frame. The header then
@@ -657,161 +1018,15 @@ tableCore cfg f key cols inputRows curSort =
     hasVertBar <- liftIO $ do
       let barOf = maybe False ((> 0) . v2Y . scrollRange)
       bar <- barOf <$> readScrollMetrics ctx vWid
-      recordLayoutRead ctx (slotKey SlotScrollRange (intKey vWid)) ((/= bar) . barOf <$> readScrollMetrics ctx vWid)
+      recordLayoutRead ctx (specKey slotScrollRange (intKey vWid)) ((/= bar) . barOf <$> readScrollMetrics ctx vWid)
       pure bar
-    let nRows = sizeofSmallArray encoded
-        widths1Arr = primArrayFromList widths1
-        outerLayout = f (fillW flatLayout)
-        hasStretch = any (\i -> smallAt sizes i ColContent == ColStretch) vis
-        vis = filter (`IS.notMember` hidden0) order0
-        freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
-        frozenIdx = take freezeN vis
-        unfrozenIdx = drop freezeN vis
-        pinnedN = clamp 0 nRows (tableFreezeRows cfg)
-        scrollN = nRows - pinnedN
-        -- Columns fill the table width when one stretches or the table
-        -- grows.
-        fillInner =
-          hasStretch || case layoutWidth outerLayout of
-            Grow _ -> True
-            _ -> False
-        fillIf b = if b then fillW else id
-        rowH = max tableRowMinH (fmLineHeight (ctxFontMetrics ctx) + 6)
-        rowStep = rowH + 1
-        -- Under the squeeze the unfrozen columns shrink to the body in the
-        -- same frame; frozen columns keep their widths.
-        squeezed i = tableSqueeze cfg && i `notElem` frozenIdx
-        colBoxes =
-          smallArrayFromList
-            [ colBoxLayout (squeezed i) fillInner hasStretch sizes contentWs widths1Arr i
-            | i <- [0 .. n - 1]
-            ]
-        colBox i = smallAt colBoxes i (tight defaultLayout)
-        cellLayout i = if smallAt numeric i False then numCellLayout else textCellLayout
-        isSortable i = smallAt sortable i False
-        renderHeader i active cellLay flags = do
-          let oneCol = encoders V.! i
-              hdrCell = toCell (getHeaded (Encode.oneColonnadeHead oneCol))
-              styleIx = if active then 1 else 0
-          case cellView hdrCell of
-            Nothing ->
-              buttonStyledEx True (cellText hdrCell) styleIx cellLay flags
-            Just hdrAct -> buttonContentStyled styleIx flags cellLay hdrAct
-        textCellAt ri i t = do
-          wid <- nextId
-          void (addWidgetStyled wid NodeText t 0 (cellLayout i) (rowStripe ri))
-        -- Text cells show their cached text; only a column with widget
-        -- views encodes its visible cells again, for the views.
-        renderCell ri r i
-          | not (smallAt views i False) = textCellAt ri i (indexSmallArray encoded r V.! i)
-          | otherwise = case cellView (toCell (Encode.oneColonnadeEncode (V.unsafeIndex encoders i) (rowsVec V.! r))) of
-            Nothing -> textCellAt ri i (indexSmallArray encoded r V.! i)
-            -- The cell's panel carries the row fill in its style index
-            -- ('panelSurface'), as a text cell's node does.
-            Just widgetAct -> styledContainer NodePanel (stripeBits (rowStripe ri)) (cellLayout i) widgetAct
-        rowCells rowLay idxs colLays ri =
-          gridColumnsLay rowLay idxs colLays [renderCell ri (indexPrimArray sorted ri) i | i <- idxs]
-        paneRoot = fillIf fillInner (tight (fillH defaultLayout))
-        minSum idxs = sum (map (layoutMinW . colBox) idxs) + fromIntegral (max 0 (length idxs - 1))
-        paneLay fill idxs
-          | fill = fillW (fillH flatLayout)
-          | otherwise = (fillH flatLayout) {layoutMinW = minSum idxs}
-        gridRowLay idxs = fillIf fillInner flatLayout {layoutMinW = minSum idxs}
-        -- Header row and pinned rows, each followed by a rule. Used by both panes.
-        headerBlock idxs = do
-          hs <- row' (gridRowLay idxs) $
-            forM (zip [0 :: Int ..] idxs) $ \(k, i) -> do
-              when (k > 0) $ void separator
-              let isSort = isSortable i
-                  isActive = sortColIndex sort0 == i && isSort
-                  flags = (if isSort then sortMarkStyle sort0 i else 0) .|. buttonFlagTable
-                  hdrLay = (cellLayout i) {layoutFontVariant = FontRegular}
-              withKey i $
-                column' (colBox i) $
-                  renderHeader i isActive hdrLay flags
-          void separator
-          let !rowLay = gridRowLay idxs
-              !colLays = map colBox idxs
-          forM_ [0 .. pinnedN - 1] $ \ri -> do
-            let !sourceIdx = indexPrimArray sorted ri
-            withKey ("pin" :: Text, sourceIdx) $ do
-              when (ri > 0) $ void separator
-              rowCells rowLay idxs colLays ri
-          when (pinnedN > 0 && scrollN > 0) $ void separator
-          pure hs
-        bodyBlock idxs = do
-          (lo, hi) <-
-            if scrollN == 0
-              then pure (0, -1)
-              else liftIO $ do
-                V2 _ scrollY <- getScrollOffset2D ctx vWid
-                viewH <- maybe (rowStep * 8) rectH <$> getPrevRect ctx vWid
-                pure (listClipper scrollN scrollY viewH rowStep)
-          let !rowLay = gridRowLay idxs
-              !colLays = map colBox idxs
-              topH = if lo <= 0 then 0 else fromIntegral lo * rowH + fromIntegral (lo - 1)
-              botH = fromIntegral (max 0 (scrollN - hi - 1)) * rowStep
-          column' rowLay $ do
-            when (topH > 0) $ void (spacer Fit (Fixed topH))
-            forM_ [lo .. hi] $ \rowIdx -> do
-              let !ri = rowIdx + pinnedN
-                  !sourceIdx = indexPrimArray sorted ri
-              withKey sourceIdx $ do
-                when (rowIdx > 0) $ void separator
-                rowCells rowLay idxs colLays ri
-            when (botH > 0) $ void (spacer Fit (Fixed botH))
-        frozenPane =
-          column' (paneLay False frozenIdx) $ do
-            hs <- headerBlock frozenIdx
-            scrollAreaIdConfigured
-              vWid
-              (fillH flatLayout)
-              (if null unfrozenIdx then scrollVerticalAuto else scrollVerticalHidden)
-              (bodyBlock frozenIdx)
-            pure hs
-        unfrozenPane = do
-          -- Uses last frame's rect, so the header's spacer lags the body's
-          -- vertical bar by one frame when the bar appears or disappears.
-          column' (paneLay fillInner unfrozenIdx) $ do
-            hs <-
-              row' (fillIf fillInner flatLayout) $ do
-                hs' <-
-                  scrollAreaIdConfigured
-                    hWid
-                    ((if fillInner then fillW else minW (minSum unfrozenIdx)) flatLayout {layoutDirection = Row})
-                    -- Bar-less scroller that follows the body's horizontal
-                    -- offset (linkScrollAxes below) and clips the header row.
-                    scrollHorizontalHidden
-                    (column' (gridRowLay unfrozenIdx) (headerBlock unfrozenIdx))
-                -- The body scroller has no padding, so its whole lane is gutter.
-                when hasVertBar $ void (spacer (Fixed (scrollBarGutter ScrollBarList 0)) Fit)
-                pure hs'
-            liftIO (linkScrollAxes ctx vWid hWid)
-            -- The body owns both scrollbars.
-            scrollAreaIdConfigured
-              vWid
-              (fillIf fillInner (fillH flatLayout))
-              defaultScrollConfig
-              (bodyBlock unfrozenIdx)
-            pure hs
-    column' outerLayout $ do
+    column' (tgOuter geom) $ do
       showAllResp <-
-        if IS.null hidden0
+        if IS.null (tsHidden ts0)
           then pure Nothing
           else fmap Just $
             buttonStyledEx True "Show all columns" 0 (tight . fillW $ defaultLayout) 0
-      headerPairs <-
-        panel' paneRoot $ do
-          tagContainer tableWid
-          row' (paneRoot {layoutGap = 0}) $ do
-            frozenHs <-
-              if null frozenIdx
-                then pure []
-                else zip frozenIdx <$> frozenPane
-            unless (null frozenIdx || null unfrozenIdx) $ void separator
-            unfrozenHs <-
-              if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane
-            pure (frozenHs ++ unfrozenHs)
+      headerPairs <- tablePanes ctx ids encoders rowsVec derived geom sort0 hasVertBar
       covered <- liftIO (pointerCovered ctx tableWid)
       clip <- liftIO (getPrevClipRect ctx tableWid)
       disabled <- liftIO (isDisabled ctx tableWid)
@@ -826,7 +1041,9 @@ tableCore cfg f key cols inputRows curSort =
           edgeZones = headerEdgeZones 4 mPrevBody shownEdges
           hitCol zones = fst <$> find (\(_, r) -> rectContains r mouse) zones
           edgeCol = if reachable then hitCol edgeZones else Nothing
-          isResize = drag0 >= 0
+          headerW i = case lookup i headerRects of
+            Just r | rectW r > 0 -> rectW r
+            _ -> layoutMinW (smallAt (tgColBoxes geom) i (tight defaultLayout))
       -- A press on an edge resizes and arms no reorder, but a column already
       -- held can still be dropped by an edge.
       reorder <-
@@ -836,48 +1053,31 @@ tableCore cfg f key cols inputRows curSort =
       when (reachable && isNothing (reorderDragging reorder) && not (null edgeZones)) . liftIO $
         -- Strict in the spine and the rects, so no thunk waits in the IORef.
         modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
-      let vis' = reorderOrder reorder
-          mReorder = reorderDragging reorder
-          headerW i = case lookup i headerRects of
-            Just r | rectW r > 0 -> rectW r
-            _ -> layoutMinW (colBox i)
-          (nextDrag, nextDragX, nextDragW)
-            | pressedIn MouseLeft inp, Just col <- edgeCol = (col, mx, headerW col)
-            | pressedIn MouseLeft inp || releasedIn MouseLeft inp || not (heldIn MouseLeft inp) || not isResize = (-1, 0, 0)
-            | otherwise = (drag0, dragX0, dragW0)
-          nextOrder = if vis' /= vis then rebuildOrder hidden0 vis' order0 else order0
-          -- respRightClicked, not a bare release: a right press that went down
-          -- elsewhere and came up over a header must not hide that column.
-          hideClicked = [i | (i, r) <- headerPairs, respRightClicked r, not isResize, isNothing mReorder]
-          nextHidden = case showAllResp of
-            Just r | respClicked r -> IS.empty
-            _ -> case hideClicked of
-              (i : _) | length vis > 1 -> IS.insert i hidden0
-              _ -> hidden0
-          sortClick =
-            if reorderMoved reorder || isJust mReorder || isResize || (isJust edgeCol && (heldIn MouseLeft inp || releasedIn MouseLeft inp))
-              then Nothing
-              else listToMaybe [i | (i, r) <- headerPairs, respClicked r, isSortable i]
-          nextSort = maybe sort0 (nextSortCol sort0) sortClick
-          hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
+      let !(TableStep ts1 nextSort sortClicked hasChanged) =
+            resolveTableInput
+              TableInput
+                { tiInput = inp
+                , tiSort = sort0
+                , tiSortable = tdSortable derived
+                , tiVisible = vis
+                , tiWidths = widths1
+                , tiHeaders = headerPairs
+                , tiShowAll = showAllResp
+                , tiEdge = (\col -> (col, headerW col)) <$> edgeCol
+                , tiReorder = reorder
+                }
+              ts0
           widgetResp =
             setChanged hasChanged $
-              setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
-      -- Compare before writing, so an idle table writes nothing.
-      liftIO . writeSlots ctx $
-        SlotWrites (\st -> lookupSlot fieldTableColumns stateKey st == Just (nextOrder, widths1)) (insertSlot fieldTableColumns stateKey (nextOrder, widths1))
-          <> slotWrite fieldIntSet stateKey nextHidden
-          <> slotWrite fieldInt (slotKey SlotDrag stateKey) (nextDrag + 1)
-          <> slotWrite fieldFloat stateKey nextDragX
-          <> slotWrite fieldFloat (slotKey SlotDragW stateKey) nextDragW
-      -- The headers show the sort only through their style, which no diff
-      -- covers, so a slot on the table repaints it when the sort shown
-      -- changes, however it came (a header click or a write to the Var).
-      liftIO (writeSlot fieldInt ctx tableWid (intKey tableWid) (2 * sortColIndex sort0 + fromEnum (sortColDir sort0 == SortDesc)))
+              setClicked sortClicked (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
+      liftIO (writeSlots ctx (writeTableState stateKey ts1))
+      -- Repaints the table when the sort shown changes, however it came (a
+      -- header click or a write to the Var).
+      liftIO (writeSlot fieldInt ctx tableWid (intKey tableWid) (sortShownCode sort0))
       -- Keep the resize cursor for the whole drag, wherever the pointer is.
-      when (nextDrag >= 0 && heldIn MouseLeft inp) $
+      when (tsResizeCol ts1 >= 0 && heldIn MouseLeft inp) $
         liftIO (modifyInteraction ctx (\s -> s {isColumnResize = True}))
-      pure (TableResponse widgetResp nextSort nextOrder nextHidden)
+      pure (TableResponse widgetResp nextSort (tsOrder ts1) (tsHidden ts1))
 
 -- | One row of cells with custom row layout.
 gridColumnsLay :: Layout -> [Int] -> [Layout] -> [NanoUI ()] -> NanoUI ()

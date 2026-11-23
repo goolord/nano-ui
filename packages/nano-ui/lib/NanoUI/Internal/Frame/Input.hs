@@ -295,6 +295,7 @@ widgetUnderMouse ctx top mouse nt idx = do
 widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 widgetHitRect ctx nt idx x y w h = case nt of
   NodeTextInput -> fst <$> nodeTextFieldGeom ctx idx x y w h
+  -- Only a text field's box is smaller than its node.
   _ -> pure (Rect x y w h)
 
 -- | Resolve a left-button release against this frame's solved rects, and

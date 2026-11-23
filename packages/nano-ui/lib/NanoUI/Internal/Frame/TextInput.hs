@@ -51,7 +51,8 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeFontSize, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId, nodeFontBits)
 import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
-import NanoUI.Internal.Store (fieldFloat, fieldSelection, fieldSelectionWrite, fieldText, findSlot, insertSlot, setFieldSelection)
+import NanoUI.Internal.Store (fieldSelection, fieldSelectionWrite, fieldText, findSpec, insertSlot, insertSpec, setFieldSelection)
+import NanoUI.Internal.Store.Slots (slotTextInputScroll)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), themeSelection, toneColor)
 import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.Internal.WidgetText
@@ -199,7 +200,7 @@ drawLinePreedit da fm p x y lineH fg = do
 -- frame.
 syncTextInputScrollWith :: Context -> Int -> WidgetStore -> FontMetrics -> Bool -> Float -> Text -> Int -> IO Float
 syncTextInputScrollWith ctx key store fm focus viewW shown cursor = do
-  let oldScroll = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
+  let oldScroll = findSpec slotTextInputScroll 0 key store
   newScroll <-
     if not focus || viewW <= 0
       then pure 0
@@ -208,7 +209,7 @@ syncTextInputScrollWith ctx key store fm focus viewW shown cursor = do
         totalTextW <- lineWidthIO fm shown
         pure (revealSpanInViewport oldScroll viewW (totalTextW + 1) caretRelX 1)
   when (newScroll /= oldScroll) $
-    writeIORef (ctxStore ctx) $! insertSlot fieldFloat (slotKey SlotTextInputScroll key) newScroll store
+    writeIORef (ctxStore ctx) $! insertSpec slotTextInputScroll key newScroll store
   pure newScroll
 
 -- | The horizontal scroll that keeps field @idx@'s caret in view, zero while

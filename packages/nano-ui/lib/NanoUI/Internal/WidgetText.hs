@@ -74,7 +74,7 @@ module NanoUI.Internal.WidgetText
   ) where
 
 import Control.Applicative ((<|>))
-import Data.Bits ((.&.), (.|.), complement, finiteBitSize, shiftL, shiftR, xor)
+import Data.Bits ((.&.), (.|.), finiteBitSize, shiftL, shiftR, xor)
 import Data.Char (digitToInt, isHexDigit)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
@@ -84,28 +84,30 @@ import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, tableCellInset, widgetContentInset)
 import NanoUI.Internal.Layout.Arena (labelFontShift)
+import NanoUI.Internal.StyleBits (BitField (..))
+import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), Theme (..), Tone (..), toneColor, variantFace, variantTone)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
--- | A tree row's button style: 'buttonFlagRow', and its depth in bits 0-7,
--- whether it has children in bit 8, is expanded in bit 9, and is an odd row
--- in bit 10.
+-- | A tree row's button style: 'buttonFlagRow', its depth
+-- ('SB.treeDepth'), and whether it has children ('SB.treeHasKids'), is
+-- expanded ('SB.treeExpanded') and is an odd row ('SB.treeOdd').
 treeEncodeStyle :: Int -> Bool -> Bool -> Bool -> Int
 treeEncodeStyle depth hasKids expanded isOdd =
   buttonFlagRow
-    .|. (if isOdd then 0x400 else 0)
-    .|. (if expanded then 0x200 else 0)
-    .|. (if hasKids then 0x100 else 0)
-    .|. (depth .&. 0xff)
+    .|. (if isOdd then SB.fieldMask SB.treeOdd else 0)
+    .|. (if expanded then SB.fieldMask SB.treeExpanded else 0)
+    .|. (if hasKids then SB.fieldMask SB.treeHasKids else 0)
+    .|. SB.packField SB.treeDepth depth
 
 -- | A tree row's depth, and whether it has children and is expanded.
 treeDecodeStyle :: Int -> (Int, Bool, Bool)
-treeDecodeStyle s = (s .&. 0xff, s .&. 0x100 /= 0, s .&. 0x200 /= 0)
+treeDecodeStyle s = (SB.getField SB.treeDepth s, SB.testField SB.treeHasKids s, SB.testField SB.treeExpanded s)
 
 -- | A tree row's stripe code for 'stripeColor', from its odd-row bit.
 treeDecodeStripe :: Int -> Int
-treeDecodeStripe s = if s .&. 0x400 /= 0 then 2 else 1
+treeDecodeStripe s = if SB.testField SB.treeOdd s then 2 else 1
 
 textInputMinWidth :: Float
 textInputMinWidth = 160
@@ -161,25 +163,28 @@ textInputFieldText ph value focused
   | T.null value && not focused = ph
   | otherwise = value
 
--- | Marks a @NodeTextInput@ as a caption-less search field. Lives in the high
--- style bits (like the button flags) so it survives the arena's int storage.
+-- | Marks a @NodeTextInput@ as a caption-less search field ('SB.inputSearch').
+{-# INLINE textInputFlagSearch #-}
 textInputFlagSearch :: Int
-textInputFlagSearch = 0x04000000
+textInputFlagSearch = SB.fieldMask SB.inputSearch
 
 -- | Marks a @NodeTextInput@ as a selectable text label: read-only, caption-less,
 -- chrome-less, sized to its text content, with mouse drag-to-select and copy.
+{-# INLINE textInputFlagSelectable #-}
 textInputFlagSelectable :: Int
-textInputFlagSelectable = 0x10000000
+textInputFlagSelectable = SB.fieldMask SB.inputSelectable
 
 -- | Marks a @NodeTextInput@ as a password field: its value is displayed masked
 -- and is never copied or cut to the clipboard.
+{-# INLINE textInputFlagPassword #-}
 textInputFlagPassword :: Int
-textInputFlagPassword = 0x20000000
+textInputFlagPassword = SB.fieldMask SB.inputPassword
 
 -- | Marks a @NodeTextInput@ as a numeric field: a caption-less box whose text
 -- stops short of an up / down stepper at its right edge.
+{-# INLINE textInputFlagNumeric #-}
 textInputFlagNumeric :: Int
-textInputFlagNumeric = 0x40000000
+textInputFlagNumeric = SB.fieldMask SB.inputNumeric
 
 -- | Width of a numeric field's stepper column.
 numericStepperW :: Float
@@ -264,27 +269,34 @@ colorFromHex txt = do
   pure (colorRGBA r g b (fromMaybe 255 ma))
 
 -- | A text node's style index: the layout's font face, weight, slant and
--- decoration, a row stripe code (see 'stripeColor') in bits 4-7, and the
--- tone in bits 18-20 (the 'Tone' plus one, or 0 for none). A colour-only
--- variant packs as the regular face plus its tone, so it is measured in the
--- base font.
+-- decoration, a row stripe code (see 'stripeColor'), and the tone (the
+-- 'Tone' plus one, or 0 for none). "NanoUI.Internal.StyleBits" places each
+-- field. A colour-only variant packs as the regular face plus its tone, so
+-- it is measured in the base font.
 {-# INLINE packTextNodeStyle #-}
 packTextNodeStyle :: Layout -> Int -> Int
 packTextNodeStyle l stripe =
   stripeBits stripe
-    .|. (fromEnum (variantFace (layoutFontVariant l)) .&. 0x0F)
-    .|. ((fromEnum (layoutFontWeight l) .&. 0x0F) `shiftL` 8)
-    .|. ((fromEnum (layoutFontStyle l) .&. 0x03) `shiftL` 12)
-    .|. ((fromEnum (layoutTextDecoration l) .&. 0x03) `shiftL` 14)
-    .|. (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l <|> variantTone (layoutFontVariant l)) `shiftL` 18)
+    .|. SB.packField SB.textFace (fromEnum (variantFace (layoutFontVariant l)))
+    .|. SB.packField SB.textWeight (fromEnum (layoutFontWeight l))
+    .|. SB.packField SB.textSlant (fromEnum (layoutFontStyle l))
+    .|. SB.packField SB.textDecoration (fromEnum (layoutTextDecoration l))
+    .|. SB.placeField SB.textTone (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l <|> variantTone (layoutFontVariant l)))
 
--- | The enum packed in the style bits at @shift@ under @mask@, or @fallback@
--- when they hold no constructor.
+-- | The enum packed in field @f@ of the style bits, or @fallback@ when the
+-- field holds no constructor.
 {-# INLINE decodeStyleEnum #-}
-decodeStyleEnum :: forall a. (Bounded a, Enum a) => Int -> Int -> a -> Int -> a
-decodeStyleEnum shift mask fallback si =
-  let v = (si `shiftR` shift) .&. mask
+decodeStyleEnum :: forall a. (Bounded a, Enum a) => BitField -> a -> Int -> a
+decodeStyleEnum f fallback si =
+  let v = SB.getField f si
    in if v >= fromEnum (minBound :: a) && v <= fromEnum (maxBound :: a) then toEnum v else fallback
+
+-- | The tone in a field that holds a 'Tone' plus one, 'Nothing' for 0.
+{-# INLINE decodeToneField #-}
+decodeToneField :: BitField -> Int -> Maybe Tone
+decodeToneField f si = case SB.getField f si of
+  0 -> Nothing
+  v -> Just (decodeStyleEnum (BitField 0 (bfWidth f)) Danger (v - 1))
 
 -- | The font a text node of font size @size@ and style index @si@ is measured
 -- in, as one key: the size and the variant, weight and slant bits of the
@@ -293,35 +305,33 @@ textNodeFontKey :: Float -> Int -> Int
 textNodeFontKey size si =
   let w = castFloatToWord32 size
    in if finiteBitSize (0 :: Int) > 32
-        then fromIntegral w `shiftL` 16 .|. (si .&. 0x3F0F)
-        else fromIntegral (w `xor` (w `shiftR` 16)) `shiftL` 14 .|. (si .&. 0x3F0F)
+        then fromIntegral w `shiftL` 16 .|. (si .&. SB.textFontKeyMask)
+        else fromIntegral (w `xor` (w `shiftR` 16)) `shiftL` 14 .|. (si .&. SB.textFontKeyMask)
 
 -- | The font variant packed in a text node's style index.
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant
-textNodeFontVariant = decodeStyleEnum 0 0x0F FontRegular
+textNodeFontVariant = decodeStyleEnum SB.textFace FontRegular
 
 -- | The tone packed in a text node's style index, if any.
 {-# INLINE textNodeFontTone #-}
 textNodeFontTone :: Int -> Maybe Tone
-textNodeFontTone si = case (si `shiftR` 18) .&. 0x07 of
-  0 -> Nothing
-  v -> Just (decodeStyleEnum 0 0x07 Danger (v - 1))
+textNodeFontTone = decodeToneField SB.textTone
 
 -- | Decode weight bits, falling back to normal for an invalid enum value.
 {-# INLINE textNodeFontWeight #-}
 textNodeFontWeight :: Int -> FontWeight
-textNodeFontWeight = decodeStyleEnum 8 0x0F WeightNormal
+textNodeFontWeight = decodeStyleEnum SB.textWeight WeightNormal
 
 -- | Decode slant bits, falling back to upright for an invalid enum value.
 {-# INLINE textNodeFontStyle #-}
 textNodeFontStyle :: Int -> FontStyle
-textNodeFontStyle = decodeStyleEnum 12 0x03 FontStyleNormal
+textNodeFontStyle = decodeStyleEnum SB.textSlant FontStyleNormal
 
 -- | Decode the underline/strikethrough bits of a text node's style code.
 {-# INLINE textNodeTextDecoration #-}
 textNodeTextDecoration :: Int -> TextDecoration
-textNodeTextDecoration = decodeStyleEnum 14 0x03 DecorationNone
+textNodeTextDecoration = decodeStyleEnum SB.textDecoration DecorationNone
 
 -- | Row fill for stripe code 1 (even rows) or 2 (odd rows); 0 is unstriped.
 {-# INLINE stripeColor #-}
@@ -339,11 +349,11 @@ rowStripe ri = if even ri then 1 else 2
 -- | A stripe code in its style-index bits, as 'tableStripeColor' decodes it.
 {-# INLINE stripeBits #-}
 stripeBits :: Int -> Int
-stripeBits s = s `shiftL` 4
+stripeBits = SB.placeField SB.stripe
 
 -- | Row fill decoded from a text node's or a panel's style index.
 tableStripeColor :: Theme -> Int -> Maybe Color
-tableStripeColor theme si = stripeColor theme ((si `shiftR` 4) .&. 0x0F)
+tableStripeColor theme si = stripeColor theme (SB.getField SB.stripe si)
 
 -- | The surface of a panel with style index @si@: the theme's panel, or, for
 -- a table's widget cell, its row fill ('tableStripeColor') with no border or
@@ -358,7 +368,7 @@ panelSurface theme si = case tableStripeColor theme si of
 -- side: a table cell's inset when it has a row fill ('tableStripeColor').
 {-# INLINE tableStripeInset #-}
 tableStripeInset :: Int -> Float
-tableStripeInset si = case (si `shiftR` 4) .&. 0x0F of
+tableStripeInset si = case SB.getField SB.stripe si of
   1 -> tableCellInset
   2 -> tableCellInset
   _ -> 0
@@ -376,14 +386,17 @@ tableSortLane = 14
 tableHeaderPadX :: Float
 tableHeaderPadX = 2 * tableCellInset + tableSortLane
 
--- | Sort direction encoded for a table-header style, in bits 16-17: clear of
--- the font fields in the low bits, which it would otherwise restyle.
+-- | The sort direction a table header's style packs ('SB.headerSortMark'):
+-- 0 none, 1 ascending, 2 descending.
+{-# INLINE tableSortMarkOf #-}
 tableSortMarkOf :: Int -> Int
-tableSortMarkOf styleIdx = (styleIdx `shiftR` 16) .&. 0x03
+tableSortMarkOf = SB.getField SB.headerSortMark
 
--- Type flags live in bits 24-31 so visual style and tab index stay in the low bits.
+-- Type flags live in bits 24-31 so visual style and tab index stay in the
+-- low bits ("NanoUI.Internal.StyleBits").
+{-# INLINE buttonFlagClose #-}
 buttonFlagClose :: Int
-buttonFlagClose = 0x20000000
+buttonFlagClose = SB.fieldMask SB.buttonClose
 
 -- | Visual style of a title-bar close button: its cross sits against the
 -- box's right edge, so it lines up with the panel padding the way the title
@@ -397,43 +410,45 @@ buttonCloseTrailing = 1
 buttonCloseTab :: Int
 buttonCloseTab = 2
 
+{-# INLINE buttonFlagTab #-}
 buttonFlagTab :: Int
-buttonFlagTab = 0x40000000
+buttonFlagTab = SB.fieldMask SB.buttonTab
 
+{-# INLINE buttonFlagTable #-}
 buttonFlagTable :: Int
-buttonFlagTable = 0x80000000
+buttonFlagTable = SB.fieldMask SB.buttonTable
 
 -- Flat menu row / menu-bar entry: transparent at rest, hover highlight, and an
 -- accent marker on hover. Rendered by 'menuItemVisualStyle'.
+{-# INLINE buttonFlagMenu #-}
 buttonFlagMenu :: Int
-buttonFlagMenu = 0x10000000
+buttonFlagMenu = SB.fieldMask SB.buttonMenu
 
 -- Flat menu-bar title: same flat/hover/open fill as a menu row, but centered
 -- text and no hover accent marker (that marker belongs to drop-down rows).
+{-# INLINE buttonFlagMenuBar #-}
 buttonFlagMenuBar :: Int
-buttonFlagMenuBar = 0x08000000
+buttonFlagMenuBar = SB.fieldMask SB.buttonMenuBar
 
 -- | A button whose content is a view of its own ('NanoUI.buttonContent'),
 -- padded as a labelled button is.
+{-# INLINE buttonFlagContent #-}
 buttonFlagContent :: Int
-buttonFlagContent = 0x04000000
+buttonFlagContent = SB.fieldMask SB.buttonContent
 
 -- | A checkbox, or with visual style 1 a radio option: no fill, border or
 -- padding, its box or ring before its label, checked while its value is over
 -- a half.
+{-# INLINE buttonFlagChoice #-}
 buttonFlagChoice :: Int
-buttonFlagChoice = 0x02000000
+buttonFlagChoice = SB.fieldMask SB.buttonChoice
 
 -- | A tree row: square and borderless, its stripe's fill, or the accent's
 -- tint while its value is over a half. Its style packs the rest
 -- ('treeEncodeStyle').
+{-# INLINE buttonFlagRow #-}
 buttonFlagRow :: Int
-buttonFlagRow = 0x01000000
-
-buttonFlagMask :: Int
-buttonFlagMask =
-  buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar .|. buttonFlagContent
-    .|. buttonFlagChoice .|. buttonFlagRow
+buttonFlagRow = SB.fieldMask SB.buttonRow
 
 -- | Mutually exclusive visual role of a 'NodeButton' decoded from its style flags.
 data ButtonKind
@@ -466,24 +481,26 @@ buttonKindOf si
 -- | Marks a @NodeContainer@ whose widgets are for display: the pointer passes
 -- through them to the widget they are drawn in
 -- ('NanoUI.Internal.Frame.Hit.innermostHit').
+{-# INLINE containerFlagInert #-}
 containerFlagInert :: Int
-containerFlagInert = 1
+containerFlagInert = SB.fieldMask SB.containerInert
 
 -- | Marks a @NodeContainer@ that clips its children to its rect, for paint,
 -- text spans and the pointer, as a panel does.
+{-# INLINE containerFlagClip #-}
 containerFlagClip :: Int
-containerFlagClip = 2
+containerFlagClip = SB.fieldMask SB.containerClip
 
 -- | Whether the packed style index @si@ carries @flag@.
 {-# INLINE hasFlag #-}
 hasFlag :: Int -> Int -> Bool
 hasFlag flag si = si .&. flag /= 0
 
--- | A button's own style bits: its low 32 without the type flags, leaving
--- out the label font above them ('labelFontStyle').
+-- | A button's own style bits ('SB.buttonVisual'): those below the type
+-- flags, leaving out the label font above them ('labelFontStyle').
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
-buttonVisualStyle si = si .&. 0xFFFFFFFF .&. complement buttonFlagMask
+buttonVisualStyle = SB.getField SB.buttonVisual
 
 -- | The colour of a widget label in font bits @font@ ('nodeFontBits') on a
 -- surface of @style@: the layout's 'NanoUI.Internal.Style.fontColor', else
@@ -500,28 +517,27 @@ labelFontStyle :: Layout -> Int
 labelFontStyle l = packTextNodeStyle l 0 `shiftL` labelFontShift
 
 -- | A plain button's packed style carrying the 'Tone' it fills with while
--- its value is on, in bits 20-22 (a toggle button's).
+-- its value is on ('SB.buttonTone', a toggle button's).
 {-# INLINE buttonToneStyle #-}
 buttonToneStyle :: Tone -> Int
-buttonToneStyle t = (fromEnum t + 1) `shiftL` 20
+buttonToneStyle t = SB.placeField SB.buttonTone (fromEnum t + 1)
 
 -- | The tone 'buttonToneStyle' packed, 'Nothing' for the accent.
 {-# INLINE buttonToneOf #-}
 buttonToneOf :: Int -> Maybe Tone
-buttonToneOf si = case (si `shiftR` 20) .&. 7 of
-  0 -> Nothing
-  n -> Just (decodeStyleEnum 0 7 Danger (n - 1))
+buttonToneOf = decodeToneField SB.buttonTone
 
--- | A tab header's packed button style: the strip's tab style (0-3) in bits
--- 0-1, its orientation (0-3) in bits 2-3, and 'buttonFlagTab'.
+-- | A tab header's packed button style: the strip's tab style (0-3,
+-- 'SB.tabStyle'), its orientation (0-3, 'SB.tabOrient'), and
+-- 'buttonFlagTab'.
 {-# INLINE tabEncodeStyle #-}
 tabEncodeStyle :: Int -> Int -> Int
-tabEncodeStyle style orient = (style .&. 3) .|. ((orient .&. 3) `shiftL` 2) .|. buttonFlagTab
+tabEncodeStyle style orient = SB.packField SB.tabStyle style .|. SB.packField SB.tabOrient orient .|. buttonFlagTab
 
 -- | The tab style and orientation of a tab header's packed style.
 {-# INLINE tabDecodeStyle #-}
 tabDecodeStyle :: Int -> (Int, Int)
-tabDecodeStyle si = (si .&. 3, (si `shiftR` 2) .&. 3)
+tabDecodeStyle si = (SB.getField SB.tabStyle si, SB.getField SB.tabOrient si)
 
 -- | Space either side of a tab header's label and adornments.
 tabHeaderPadX :: Float
@@ -547,16 +563,15 @@ data TabChrome
   deriving (Eq, Show, Enum, Bounded)
 
 -- | A @NodeContainer@'s style for 'TabChrome' @part@ of a strip with tab
--- style @style@ and orientation @orient@: the part in bits 8-9, the style in
--- bits 10-11 and the orientation in bits 12-13, clear of
--- 'containerFlagInert'.
+-- style @style@ and orientation @orient@ ('SB.chromePart', 'SB.chromeStyle',
+-- 'SB.chromeOrient'), clear of 'containerFlagInert'.
 {-# INLINE tabChromeEncode #-}
 tabChromeEncode :: TabChrome -> Int -> Int -> Int
 tabChromeEncode part style orient =
-  (fromEnum part `shiftL` 8) .|. ((style .&. 3) `shiftL` 10) .|. ((orient .&. 3) `shiftL` 12)
+  SB.placeField SB.chromePart (fromEnum part) .|. SB.packField SB.chromeStyle style .|. SB.packField SB.chromeOrient orient
 
 -- | The chrome part, tab style and orientation a container's style packs.
 {-# INLINE tabChromeDecode #-}
 tabChromeDecode :: Int -> (TabChrome, Int, Int)
 tabChromeDecode si =
-  (decodeStyleEnum 8 3 TabChromeNone si, (si `shiftR` 10) .&. 3, (si `shiftR` 12) .&. 3)
+  (decodeStyleEnum SB.chromePart TabChromeNone si, SB.getField SB.chromeStyle si, SB.getField SB.chromeOrient si)

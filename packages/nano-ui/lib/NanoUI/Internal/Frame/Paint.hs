@@ -164,7 +164,10 @@ lowerNodeVisible env idx nt rect = do
     NodeBox -> paintBoxNode env idx rect
     NodeImage -> paintImageNode env idx rect
     NodeDrawing -> paintDrawingNode env idx rect
-    _ -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
+    NodeButton -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
+    NodeSlider -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
+    NodeSelect -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
+    NodeColorPicker -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
   unless (hashWidgetId (peFocusRing env) == 0) $
     paintFocusRing env idx nt rect
 

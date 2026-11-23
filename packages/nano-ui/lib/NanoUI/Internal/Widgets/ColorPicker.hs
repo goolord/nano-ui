@@ -18,7 +18,6 @@ module NanoUI.Internal.Widgets.ColorPicker
 where
 
 import Control.Monad (forM_, guard, void, when)
-import Data.Bits ((.&.))
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Word (Word8)
@@ -29,10 +28,12 @@ import NanoUI.Internal.Id (WidgetId (..), mix64)
 import NanoUI.Internal.Input (Input (..), Key (..), Pressable (..), inputModifiers, modShift, shiftAtMost)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, freshWidget, nextId, liftIO, withKey)
-import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, lookupSlot, slotWriteOr)
+import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, insertSpec, lookupSlot, lookupSpec, specKey, specWriteOr)
+import NanoUI.Internal.Store.Slots (slotColorBase, slotSeen)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
+import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Widgets.Behavior
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Var (Binding (..), bindVar)
@@ -54,7 +55,7 @@ data ColorPickerPart = PickerSv | PickerHue | PickerAlpha | PickerPreview
 
 {-# INLINE colorPickerPartOf #-}
 colorPickerPartOf :: Int -> ColorPickerPart
-colorPickerPartOf si = toEnum (si .&. 3)
+colorPickerPartOf si = toEnum (SB.getField SB.pickerPart si)
 
 -- | The id of the container holding a picker's parts, derived from the
 -- field's id. The picker's state is keyed on it: every part reads that state
@@ -84,7 +85,7 @@ widgetStoreBaseColor :: WidgetStore -> WidgetId -> Color -> Color
 widgetStoreBaseColor store wid fallback =
   storeColorAt
     store
-    (slotKey SlotColorBase (pickerKey wid))
+    (specKey slotColorBase (pickerKey wid))
     (widgetStoreColor store wid fallback)
 
 -- | The picker's hue, saturation and value. RGB cannot tell hue 0 from 360,
@@ -448,18 +449,17 @@ adoptColorPickerValue ctx wid value = do
   let
     key = pickerKey wid
     packed = packColor value
-    seenKey = slotKey SlotSeen key
-    seen = insertSlot fieldInt seenKey packed store0
-  when (lookupSlot fieldInt seenKey store0 /= Just packed) $
+    seen = insertSpec (slotSeen fieldInt) key packed store0
+  when (lookupSpec (slotSeen fieldInt) key store0 /= Just packed) $
     setStore ctx $
       if lookupSlot fieldInt key store0 == Just packed
         then seen
-        else putColorState key value (rgbToHsv value) (insertSlot fieldInt (slotKey SlotColorBase key) packed seen)
+        else putColorState key value (rgbToHsv value) (insertSpec slotColorBase key packed seen)
 
 commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
 commitColorPickerCurrent ctx wid col =
   let packed = packColor col
-   in writeSlots ctx (slotWriteOr fieldInt packed (slotKey SlotColorBase (pickerKey wid)) packed)
+   in writeSlots ctx (specWriteOr slotColorBase packed (pickerKey wid) packed)
 
 -- | Arrow, Home and End keys on the focused part: the field when @svFocus@,
 -- the hue bar when @hueFocus@, otherwise the alpha bar. Arrows move a part

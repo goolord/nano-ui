@@ -36,7 +36,8 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (getParent, getWidgetId, lookupNodeByKey)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
-import NanoUI.Internal.Store (deleteSlot, fieldInt, fieldPoint, fieldQuiet, findSlot, flagSlot, insertSlot, lookupSlot, setFlagSlot)
+import NanoUI.Internal.Store (deleteSpec, findSpec, insertSpec, lookupSpec)
+import NanoUI.Internal.Store.Slots (setFlagSpec, slotDragItem, slotDragPress, slotDragStartPos, slotDrop)
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectContains, v2X, v2Y)
 import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
 
@@ -73,14 +74,14 @@ useDrag1D ::
 useDrag1D axis owner lo hi current track = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  let dragK = slotKey SlotDrag (intKey wid)
+  let key = intKey wid
       (origin, trackLen, mouse) = case axis of
         DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
         DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
   -- The drag keeps the point of the press that started it in a quiet slot
   -- (0 for none), and lasts only under that press: one released while this
   -- hook did not run does not come back with a later press.
-  held <- findSlot fieldQuiet 0 dragK <$> liftIO (getStore ctx)
+  held <- findSpec slotDragPress 0 key <$> liftIO (getStore ctx)
   active0 <- if held == 0 then pure False else (== held) <$> liftIO (leftPress ctx)
   -- Hit-test against the clipped node so a track scrolled out of its
   -- viewport does not respond at its stale rect.
@@ -90,8 +91,8 @@ useDrag1D axis owner lo hi current track = do
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (if active then not active0 else held /= 0) . liftIO $
     if active
-      then leftPress ctx >>= modifyStore ctx . insertSlot fieldQuiet dragK
-      else modifyStore ctx (deleteSlot fieldQuiet dragK)
+      then leftPress ctx >>= modifyStore ctx . insertSpec slotDragPress key
+      else modifyStore ctx (deleteSpec slotDragPress key)
   pure (if active then lo + frac * (hi - lo) else current, active, active0)
 
 -- | The left button's press point as one nonzero Int, exact in both
@@ -175,9 +176,6 @@ useReorder order responses = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
-      dragK = slotKey SlotDrag key
-      startK = slotKey SlotDragW key
-      movedK = slotKey SlotDrop key
       V2 mx my = inputMousePos inp
       press = pressedIn MouseLeft inp
       hit = fst <$> find (respPressed . snd) responses
@@ -185,17 +183,17 @@ useReorder order responses = do
   store <- liftIO (getStore ctx)
   -- The drag keeps the press that started it ('leftPress') and lasts only
   -- under it: one released while this hook did not run does not come back.
-  let stored = lookupSlot fieldInt dragK store
+  let stored = lookupSpec slotDragItem key store
   token <- if press || isJust stored then liftIO (leftPress ctx) else pure 0
   let dragging
         | press = hit
-        | token == findSlot fieldQuiet 0 dragK store = stored
+        | token == findSpec slotDragPress 0 key store = stored
         | otherwise = Nothing
-      startPos = if press then V2 mx my else findSlot fieldPoint (V2 mx my) startK store
+      startPos = if press then V2 mx my else findSpec slotDragStartPos (V2 mx my) key store
       moved =
         isJust dragging
           && not press
-          && (flagSlot movedK store || pastDragThreshold startPos (V2 mx my))
+          && (findSpec slotDrop False key store || pastDragThreshold startPos (V2 mx my))
       distance (Rect x y w h) =
         let dx = max 0 (max (x - mx) (mx - x - w))
             dy = max 0 (max (y - my) (my - y - h))
@@ -209,11 +207,11 @@ useReorder order responses = do
       released = releasedIn MouseLeft inp
       ended = released || not (heldIn MouseLeft inp)
       next = if ended then Nothing else dragging
-  when (next /= stored || (press && isJust dragging) || moved /= flagSlot movedK store) $
+  when (next /= stored || (press && isJust dragging) || moved /= findSpec slotDrop False key store) $
     liftIO . modifyStore ctx $
       case next of
-        Nothing -> deleteSlot fieldInt dragK . deleteSlot fieldQuiet dragK . deleteSlot fieldPoint startK . setFlagSlot movedK False
-        Just d -> insertSlot fieldInt dragK d . insertSlot fieldQuiet dragK token . insertSlot fieldPoint startK startPos . setFlagSlot movedK moved
+        Nothing -> deleteSpec slotDragItem key . deleteSpec slotDragPress key . deleteSpec slotDragStartPos key . setFlagSpec slotDrop key False
+        Just d -> insertSpec slotDragItem key d . insertSpec slotDragPress key token . insertSpec slotDragStartPos key startPos . setFlagSpec slotDrop key moved
   pure
     Reorder
       { reorderOrder = if released && moved then preview else order

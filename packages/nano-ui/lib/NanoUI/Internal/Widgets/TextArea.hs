@@ -39,6 +39,7 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO)
 import NanoUI.Internal.Store
+import NanoUI.Internal.Store.Slots (slotSeen, slotTextAreaAnchorCol, slotTextAreaAnchorRow, slotTextAreaBuffer, slotTextAreaLineH, slotTextAreaReveal, slotTextAreaScroll, slotTextAreaText, slotTextAreaViewport, slotTextChanged, slotTextHistory, slotTextMode)
 import NanoUI.Internal.Store.Types (TextHistory (..))
 import NanoUI.Internal.Style (Layout (..), defaultLayout, fillW, fixedH, minW)
 import NanoUI.Internal.Types (DamageBounds (..), V2 (..), clamp, onGrid)
@@ -159,10 +160,9 @@ textAreaText :: (Layout -> Layout) -> Text -> NanoUI (Response, Text)
 textAreaText f value = do
   (wid, ctx) <- freshWidget
   store <- liftIO (getStore ctx)
-  let textKey = slotKey SlotTextAreaText (intKey wid)
-      -- The text last passed or returned, and its document: passing it back
+  let -- The text last passed or returned, and its document: passing it back
       -- neither splits it again nor, while nothing is edited, joins it.
-      cached = lookupSlot fieldTextDocument textKey store
+      cached = lookupSpec slotTextAreaText (intKey wid) store
       incoming = case cached of
         Just (t, doc) | t == value -> doc
         _ -> textDocument value
@@ -173,7 +173,7 @@ textAreaText f value = do
       let out
             | sameDocument doc incoming = value
             | otherwise = documentText doc
-      liftIO $ modifyStore ctx (insertSlot fieldTextDocument textKey (out, doc))
+      liftIO $ modifyStore ctx (insertSpec slotTextAreaText (intKey wid) (out, doc))
       pure (resp, out)
 
 -- | Multi-line text editor over a 'TextDocument' bound to mutable state ('Var').
@@ -216,15 +216,12 @@ textAreaCore f wid value = do
       -- The face, weight and slant, packed as a text field's are.
       styleIdx = packTextNodeStyle layout 0
       key = intKey wid
-      seenKey = slotKey SlotSeen key
-      bufKey = slotKey SlotTextAreaBuffer key
-      changedSlotKey = slotKey SlotTextAreaChanged key
-      stored = lookupSlot fieldBuffer bufKey store0
+      stored = lookupSpec slotTextAreaBuffer key store0
       adoptDocument
         | fmap bufferDocument stored == Just value = id
         | otherwise =
-            insertSlot fieldBuffer bufKey (maybe id keepCaret stored (documentBuffer value))
-              . deleteSlot fieldHistory (slotKey SlotTextHistory key)
+            insertSpec slotTextAreaBuffer key (maybe id keepCaret stored (documentBuffer value))
+              . deleteSpec slotTextHistory key
       keepCaret old new = (TB.withCursor (TB.snapToCluster new (TB.getCursor old)) new) {TB.preferredCol = TB.preferredCol old}
   -- Adopt the caller's document the way 'adoptSlot' does. Comparing the
   -- document the caller passes back with the stored one is O(1) ('==' checks
@@ -233,19 +230,19 @@ textAreaCore f wid value = do
   -- undo history, recorded against the old text, goes. Seed the scroll slot
   -- too: the wheel and drag paths write offsets through setScrollOffset2D,
   -- which only updates the text area's slot once it exists.
-  when (lookupSlot fieldDocument seenKey store0 /= Just value) $
+  when (lookupSpec (slotSeen fieldDocument) key store0 /= Just value) $
     liftIO . setStore ctx $
-      insertSlot fieldDocument seenKey value
+      insertSpec (slotSeen fieldDocument) key value
         . adoptDocument
-        . overField fieldPoint (IM.insertWith (\_ old -> old) (slotKey SlotTextAreaScroll key) (V2 0 0))
-        . insertSlot fieldEditorMode (slotKey SlotTextMode key) multiLineMode
+        . overField fieldPoint (IM.insertWith (\_ old -> old) (specKey slotTextAreaScroll key) (V2 0 0))
+        . insertSpec slotTextMode key multiLineMode
         $ store0
   store <- liftIO (getStore ctx)
-  let current = maybe value bufferDocument (lookupSlot fieldBuffer bufKey store)
+  let current = maybe value bufferDocument (lookupSpec slotTextAreaBuffer key store)
       -- Set by commands run outside the frame ('applyTextFieldCommand') that
       -- changed the text; their edits carry no keys or chars, so this is the
       -- caller's respChanged pulse for them. Cleared in the state write below.
-      menuPulse = memberSlot fieldInt changedSlotKey store
+      menuPulse = memberSpec slotTextChanged key store
   isFocus <- keyboardFocused wid
   when isFocus $ liftIO (requestInputMethod ctx wid Nothing InputNormal)
   (newDoc, edited) <-
@@ -282,13 +279,13 @@ textAreaCore f wid value = do
         when changed $
           liftIO $ do
             damageWidget ctx wid DamageSelf
-            modifyStore ctx (deleteSlot fieldInt changedSlotKey . saveTextAreaState key newState)
+            modifyStore ctx (deleteSpec slotTextChanged key . saveTextAreaState key newState)
         pure (doc, edited)
       else do
         -- A command run on the unfocused area ('applyTextFieldCommand') still
         -- pulses this frame's respChanged, once.
         when menuPulse $
-          liftIO $ modifyStore ctx (deleteSlot fieldInt changedSlotKey)
+          liftIO $ modifyStore ctx (deleteSpec slotTextChanged key)
         pure (current, menuPulse)
   -- Record what is returned as seen, so the caller passing it back is not
   -- taken for a replacement. A caller that passes an equal copy each frame
@@ -296,9 +293,9 @@ textAreaCore f wid value = do
   -- damage it and wake the loop forever.
   unless (sameDocument newDoc value) $
     liftIO $ modifyStore ctx $ \st ->
-      case lookupSlot fieldDocument seenKey st of
+      case lookupSpec (slotSeen fieldDocument) key st of
         Just seen | sameDocument seen newDoc -> st
-        _ -> insertSlot fieldDocument seenKey newDoc st
+        _ -> insertSpec (slotSeen fieldDocument) key newDoc st
   resp <- addWidgetStyled wid NodeTextArea "" 0 layout styleIdx
   -- respChanged reports an edit to the text, as on a text input; caret,
   -- selection and scroll moves only repaint the area.
@@ -308,27 +305,27 @@ textAreaCore f wid value = do
 -- widget stores one over the lines of every document it adopts, so it is only
 -- missing for a text area never declared, which holds an empty document.
 textAreaBuffer :: WidgetStore -> Int -> TB.TextBuffer
-textAreaBuffer store key = fromMaybe TB.empty (lookupSlot fieldBuffer (slotKey SlotTextAreaBuffer key) store)
+textAreaBuffer store key = fromMaybe TB.empty (lookupSpec slotTextAreaBuffer key store)
 
 -- | The text area's editor state as stored.
 loadTextAreaState :: WidgetStore -> Int -> TextAreaState
 loadTextAreaState store key =
   let buf = textAreaBuffer store key
       TB.Cursor row col = TB.getCursor buf
-      anchorRow = findSlot fieldInt row (slotKey SlotTextAreaAnchorRow key) store
-      anchorCol = findSlot fieldInt col (slotKey SlotTextAreaAnchorCol key) store
-      V2 sx sy = findSlot fieldPoint (V2 0 0) (slotKey SlotTextAreaScroll key) store
-      V2 vw vh = findSlot fieldPoint (V2 200 96) (slotKey SlotTextAreaViewport key) store
+      anchorRow = findSpec slotTextAreaAnchorRow row key store
+      anchorCol = findSpec slotTextAreaAnchorCol col key store
+      V2 sx sy = findSpec slotTextAreaScroll (V2 0 0) key store
+      V2 vw vh = findSpec slotTextAreaViewport (V2 200 96) key store
    in TextAreaState
         { tasBuffer = buf
         , tasSelectionAnchor = TB.clampCursor buf (TB.Cursor anchorRow anchorCol)
         , tasScrollOffset = (realToFrac sx, realToFrac sy)
         , tasViewportSize = (realToFrac vw, realToFrac vh)
-        , tasLineHeight = realToFrac (findSlot fieldFloat 16 (slotKey SlotTextAreaLineH key) store)
+        , tasLineHeight = realToFrac (findSpec slotTextAreaLineH 16 key store)
 
         , -- Replacing the document drops its history, so the history is
           -- always the current document's.
-          tasHistory = case lookupSlot fieldHistory (slotKey SlotTextHistory key) store of
+          tasHistory = case lookupSpec slotTextHistory key store of
             Just (AreaHistory h) -> h
             _ -> emptyHistory
         }
@@ -338,13 +335,13 @@ loadTextAreaState store key =
 -- font, brings it into view across ('SlotTextAreaReveal').
 saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state =
-  insertSlot fieldPoint (slotKey SlotTextAreaScroll key) (V2 (realToFrac sx) (realToFrac sy))
-    . insertSlot fieldQuiet (slotKey SlotTextAreaReveal key) 1
-    . insertSlot fieldPoint (slotKey SlotTextAreaViewport key) (V2 (realToFrac vw) (realToFrac vh))
-    . insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (tasBuffer state)
-    . insertSlot fieldHistory (slotKey SlotTextHistory key) (AreaHistory (tasHistory state))
-    . insertSlot fieldInt (slotKey SlotTextAreaAnchorRow key) anchorRow
-    . insertSlot fieldInt (slotKey SlotTextAreaAnchorCol key) anchorCol
+  insertSpec slotTextAreaScroll key (V2 (realToFrac sx) (realToFrac sy))
+    . insertSpec slotTextAreaReveal key 1
+    . insertSpec slotTextAreaViewport key (V2 (realToFrac vw) (realToFrac vh))
+    . insertSpec slotTextAreaBuffer key (tasBuffer state)
+    . insertSpec slotTextHistory key (AreaHistory (tasHistory state))
+    . insertSpec slotTextAreaAnchorRow key anchorRow
+    . insertSpec slotTextAreaAnchorCol key anchorCol
   where
     TB.Cursor anchorRow anchorCol = tasSelectionAnchor state
     (sx, sy) = tasScrollOffset state

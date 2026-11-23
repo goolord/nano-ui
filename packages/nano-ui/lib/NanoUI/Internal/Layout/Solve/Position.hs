@@ -19,7 +19,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Layout.Solve.Measure
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Flow (..), Padding (..), lineAlignFraction, windowMargin)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Padding (..), lineAlignFraction, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_)
 import NanoUI.Internal.WidgetText
 
@@ -285,21 +285,23 @@ positionChildren ::
   IO ()
 positionChildren env@SolveEnv {seArrays = a} depth idx dir gap pad (Rect px py pw ph) = do
   nt <- readTagEnum a idx TagNodeType
-  gCols <- readTree a idx TreeGridCols
-  minColW <- readStyle a idx StyleGridMinColW
-  flow <- readTagEnum a idx TagFlow
+  kind <- readContainerKind a idx
   let chrome = isChromeColumn nt dir
       cbox = padContentClip px py pw ph pad
-  if gCols > 0 || minColW > 0
-    then positionGrid env depth idx gCols minColW gap cbox
-    else case flow of
-      -- Layered children are placed with the pinned ones, below.
-      Layered -> pure ()
-      Wrap -> positionWrap env depth idx dir gap cbox
-      Line -> case dir of
-        DirRow -> positionRowFromParent env depth idx gap cbox
-        DirColumn -> positionColumn env depth idx gap chrome Nothing px pw cbox
-  positionLayered env depth idx (flow == Layered) cbox
+      layered = case kind of
+        KLayered -> True
+        _ -> False
+  case kind of
+    KGrid -> do
+      (gCols, minColW) <- readGridColumns a idx
+      positionGrid env depth idx gCols minColW gap cbox
+    -- Layered children are placed with the pinned ones, below.
+    KLayered -> pure ()
+    KWrap -> positionWrap env depth idx dir gap cbox
+    KLine -> case dir of
+      DirRow -> positionRowFromParent env depth idx gap cbox
+      DirColumn -> positionColumn env depth idx gap chrome Nothing px pw cbox
+  positionLayered env depth idx layered cbox
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do

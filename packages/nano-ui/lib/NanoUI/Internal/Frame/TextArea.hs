@@ -45,7 +45,8 @@ import NanoUI.Internal.Frame.TextInput (FieldDoc (..), Preedit (..), drawCaretAt
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Input (Input, InputPurpose, MouseButton (..), Pressable (..), inputMousePos)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Store (collapseFieldSelection, deleteSlot, fieldFloat, fieldInt, fieldQuiet, fieldPoint, fieldBuffer, fieldLineWidths, findSlot, insertSlot, lookupSlot, memberSlot)
+import NanoUI.Internal.Store (collapseFieldSelection, deleteSpec, findSpec, insertSpec, lookupSpec, memberSpec)
+import NanoUI.Internal.Store.Slots (slotTextAreaAnchorCol, slotTextAreaAnchorRow, slotTextAreaBuffer, slotTextAreaLineH, slotTextAreaReveal, slotTextAreaScroll, slotTextAreaViewport, slotTextAreaWidths, slotTextInputScroll)
 import NanoUI.Internal.Store.Types (LineWidths (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, onGrid, rectContains)
@@ -94,7 +95,7 @@ collapseTextFieldSelection ctx wid =
       -- An unstored anchor reads as the cursor ('TA.loadTextAreaState').
       NodeTextArea ->
         modifyStore ctx $
-          deleteSlot fieldInt (slotKey SlotTextAreaAnchorRow key) . deleteSlot fieldInt (slotKey SlotTextAreaAnchorCol key)
+          deleteSpec slotTextAreaAnchorRow key . deleteSpec slotTextAreaAnchorCol key
       _ -> pure ()
  where
   key = intKey wid
@@ -132,7 +133,7 @@ textInputArea ctx@Context {ctxNodeArena = na} =
           (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
           fm <- nodeFontMetrics ctx idx
           -- Read the scroll the frame already settled, without writing it.
-          let scrollX = findSlot fieldFloat 0 (slotKey SlotTextInputScroll key) store
+          let scrollX = findSpec slotTextInputScroll 0 key store
           (line, caret, _, preedit) <- fieldEditLine ctx idx
           Just <$> lineInputArea fm line caret preedit (clipX - scrollX) (centeredTextY fm boxY boxH (fmLineHeight fm)) (fmLineHeight fm) purpose
         NodeTextArea -> do
@@ -259,11 +260,10 @@ textAreaContentMetrics ctx idx = do
   gen <- readIORef (ctxMetricGen ctx)
   let key = intKey wid
       face = textNodeFontKey size si
-      widthsKey = slotKey SlotTextAreaWidths key
       buf = TA.textAreaBuffer store key
       lns = TB.bufferLines buf
       (seenHead, seenTail) = TB.changedLines buf
-      cached = lookupSlot fieldLineWidths widthsKey store
+      cached = lookupSpec slotTextAreaWidths key store
   case cached of
     Just (LineWidths font fontGen _ _ widestW contentH)
       | font == face && fontGen == gen && seenHead >= Seq.length lns -> pure (widestW, contentH)
@@ -296,8 +296,8 @@ textAreaContentMetrics ctx idx = do
       -- Line-width metrics are a derived cache; write directly so cold queries
       -- during paint do not wake a redundant extra frame.
       writeIORef (ctxStore ctx) $!
-        insertSlot fieldLineWidths widthsKey (LineWidths face gen widths widest' contentW contentH)
-          (insertSlot fieldBuffer (slotKey SlotTextAreaBuffer key) (TB.markLinesSeen buf) store)
+        insertSpec slotTextAreaWidths key (LineWidths face gen widths widest' contentW contentH)
+          (insertSpec slotTextAreaBuffer key (TB.markLinesSeen buf) store)
       pure (contentW, contentH)
 
 -- | Field rect and scrollbars of a text area, for its node font and content
@@ -358,10 +358,8 @@ syncTextAreaViewport ctx idx key fm field = do
   store <- getStore ctx
   let bars = textAreaBars fm field contentW contentH
       Rect _ _ viewW viewH = textAreaTextClip fm field bars
-      scrollKey = slotKey SlotTextAreaScroll key
-      revealKey = slotKey SlotTextAreaReveal key
-      V2 sx sy = findSlot fieldPoint (V2 0 0) scrollKey store
-      reveal = memberSlot fieldQuiet revealKey store
+      V2 sx sy = findSpec slotTextAreaScroll (V2 0 0) key store
+      reveal = memberSpec slotTextAreaReveal key store
   wid <- getWidgetId (ctxNodeArena ctx) idx
   let state = TA.loadTextAreaState store key
   mPre <- textAreaPreedit ctx wid state
@@ -377,21 +375,19 @@ syncTextAreaViewport ctx idx key fm field = do
       else pure Nothing
   let revealX at = revealSpanInViewport sx viewW (max contentW (at + 1)) at 1
       V2 sx' sy' = clampScrollOffset (tabRange bars) (V2 (maybe sx revealX caretAt) sy)
-      viewportKey = slotKey SlotTextAreaViewport key
-      lineKey = slotKey SlotTextAreaLineH key
       lineH = textAreaLineHeight fm
       scrolled = sx' /= sx || sy' /= sy
-      resized = lookupSlot fieldPoint viewportKey store /= Just (V2 viewW viewH)
-      relined = lookupSlot fieldFloat lineKey store /= Just lineH
+      resized = lookupSpec slotTextAreaViewport key store /= Just (V2 viewW viewH)
+      relined = lookupSpec slotTextAreaLineH key store /= Just lineH
   -- Commands run between frames keep the caret in view with the viewport
   -- and the row height. Only what changed is written: every keystroke clears
   -- the reveal flag.
   when (reveal || scrolled || resized || relined) $
     writeIORef (ctxStore ctx) $!
-      deleteSlot fieldQuiet revealKey
-        . (if scrolled then insertSlot fieldPoint scrollKey (V2 sx' sy') else id)
-        . (if relined then insertSlot fieldFloat lineKey lineH else id)
-        $ (if resized then insertSlot fieldPoint viewportKey (V2 viewW viewH) store else store)
+      deleteSpec slotTextAreaReveal key
+        . (if scrolled then insertSpec slotTextAreaScroll key (V2 sx' sy') else id)
+        . (if relined then insertSpec slotTextAreaLineH key lineH else id)
+        $ (if resized then insertSpec slotTextAreaViewport key (V2 viewW viewH) store else store)
   -- A glide aimed past a range that shrank (the text got shorter) would
   -- never land, since the offset is clamped back here every frame.
   clampScrollGlide ctx wid (tabRange bars)

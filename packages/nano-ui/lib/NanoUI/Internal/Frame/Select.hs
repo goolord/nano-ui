@@ -33,7 +33,8 @@ import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable 
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getClipBounds, getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
 import NanoUI.Internal.Monad (whenM, (<&&>))
-import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldText, findSlot, insertSlot, setFieldSelection)
+import NanoUI.Internal.Store (fieldInt, fieldText, findSlot, findSpec, insertSlot, setFieldSelection)
+import NanoUI.Internal.Store.Slots (slotComboContentW, slotComboCount, slotComboDrag, slotComboHighlight, slotComboScrollX, slotComboWindow)
 import NanoUI.Internal.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains, rectIntersect)
 
@@ -88,13 +89,11 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
       -- where the dropdown was drawn.
       size <- getsDamage ctx dsLastWindowSize
       let key = intKey wid
-          slotInt slot def = findSlot fieldInt def (slotKey slot key) store
-          slotFloat slot = findSlot fieldFloat 0 (slotKey slot key) store
           nOpts = length opts
-          rows = slotInt SlotComboCount nOpts
-          window = slotInt SlotComboScroll 0
-          scrollX = slotFloat SlotComboScrollX
-          contentW = slotFloat SlotComboContentW
+          rows = findSpec slotComboCount nOpts key store
+          window = findSpec slotComboWindow 0 key store
+          scrollX = findSpec slotComboScrollX 0 key store
+          contentW = findSpec slotComboContentW 0 key store
           rect
             | combo = comboDropRect size x y w h nOpts rows contentW
             | otherwise = selectDropRect size x y w h nOpts
@@ -107,11 +106,11 @@ openDropdowns ctx@Context {ctxNodeArena = na} = do
           , ddRect = rect
           , ddPicked =
               if combo
-                then slotInt SlotComboHighlight (-1) - window
+                then findSpec slotComboHighlight (-1) key store - window
                 else clamp 0 (nOpts - 1) (findSlot fieldInt 0 key store)
           , ddComboScrollX = scrollX
           , ddComboGeom = comboScrollGeom rect rows nOpts window scrollX contentW
-          , ddComboDrag = slotInt SlotComboDrag 0
+          , ddComboDrag = findSpec slotComboDrag 0 key store
           }
 
 -- | The open dropdowns the modal state lets be drawn and picked from, in

@@ -28,7 +28,8 @@ import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
 import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
-import NanoUI.Internal.Store (fieldFloat, fieldInt, findSlot, lookupSlot, slotWrite)
+import NanoUI.Internal.Store (fieldInt, findSpec, lookupSlot, slotWrite, specKey, specWrite)
+import NanoUI.Internal.Store.Slots (slotScrollContent)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
 import NanoUI.Internal.WidgetText (TabChrome (..), buttonCloseTab, buttonFlagClose, tabChromeEncode, tabEncodeStyle)
@@ -217,7 +218,7 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   groupId <- nextId
   scrollWid <- nextId
   trackId <- nextId
-  let rangeKey = slotKey SlotScrollContent (intKey scrollWid)
+  let rangeKey = intKey scrollWid
       segmented = style == TabSegmented
       stripH = if segmented then tabHeaderH + 6 else tabHeaderH
       renderInner =
@@ -233,7 +234,7 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   -- so the frame that changes it counts as a layout change, not a scroll
   -- ('NanoUI.Internal.Damage.writeDamage').
   store <- liftIO (getStore ctx)
-  let maxOff = max 0 (findSlot fieldFloat 0 rangeKey store)
+  let maxOff = max 0 (findSpec slotScrollContent 0 rangeKey store)
       -- The hash of the tab the strip last brought into view, if any: a key
       -- that hashes to 0 is followed too.
       followKey = intKey groupId
@@ -305,10 +306,10 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
   -- follow-up frame only when the overflow or arrow state changes: a width
   -- change that keeps them settles in the frame it happens in. Sub-pixel
   -- churn is ignored so a parked strip never writes.
-  liftIO . recordLayoutRead ctx rangeKey $ do
+  liftIO . recordLayoutRead ctx (specKey slotScrollContent rangeKey) $ do
     (maxOff', o) <- measure
     when (abs (maxOff' - maxOff) > 0.5) $
-      publishLayoutSlots ctx (slotWrite fieldFloat rangeKey maxOff')
+      publishLayoutSlots ctx (specWrite slotScrollContent rangeKey maxOff')
     pure (paging maxOff' o /= paging maxOff off)
   -- While the shown tab is not the one last brought into view, however it
   -- came to be shown (a click, a key, a write to the Var), its header's rect

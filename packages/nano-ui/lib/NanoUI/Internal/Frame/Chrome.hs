@@ -48,7 +48,21 @@ displayText ctx nt idx = do
     NodeTextInput -> textInputFieldText txt <$> textInputValue ctx idx <*> textInputFocused ctx idx
     NodeTextArea -> textInputValue ctx idx
     NodeSelect -> selectDisplayText txt <$> selectCurrentOption ctx idx
-    _ -> pure txt
+    NodeButton -> pure txt
+    NodeText -> pure txt
+    NodeContainer -> pure txt
+    NodeSpacer -> pure txt
+    NodeSeparator -> pure txt
+    NodeSlider -> pure txt
+    NodeScrollContainer -> pure txt
+    NodeModal -> pure txt
+    NodeImage -> pure txt
+    NodePanel -> pure txt
+    NodeWindow -> pure txt
+    NodeBox -> pure txt
+    NodeColorPicker -> pure txt
+    NodePopup -> pure txt
+    NodeDrawing -> pure txt
 
 selectCurrentOption :: Context -> NodeIdx -> IO Text
 selectCurrentOption ctx idx = do
@@ -319,7 +333,20 @@ widgetVisualStyleWith ctx hot active focus nt idx = do
                   , styleBorder = fill
                   }
               | otherwise -> themeButton theme
-          _ -> themeButton theme
+          -- A drawing's chrome, and the default for the node types that
+          -- paint none of their own.
+          NodeDrawing -> themeButton theme
+          NodeContainer -> themeButton theme
+          NodeText -> themeButton theme
+          NodeSpacer -> themeButton theme
+          NodeSeparator -> themeButton theme
+          NodeScrollContainer -> themeButton theme
+          NodeModal -> themeButton theme
+          NodeImage -> themeButton theme
+          NodePanel -> themeButton theme
+          NodeWindow -> themeButton theme
+          NodeBox -> themeButton theme
+          NodePopup -> themeButton theme
       widgetBase =
         case mFloat of
           -- Rows keep their selection and stripes, on the modal's surface.
