@@ -12,17 +12,14 @@ module NanoUI.Internal.Var.Cell
   , obsSet
   , seenSet
   , setHits
-  , passHits
   , seenWhole
   , addToSet
-  , changedSince
-  , addChange
   , orWord
   , nextTick
+  , countChange
   , varChangeCount
   , newStamps
   , passSlot
-  , baseSlot
   , passNoSlot
   , flagSlot
   , lastPassesSlot
@@ -33,7 +30,7 @@ where
 import Control.Monad (when)
 import Control.Monad.Primitive (RealWorld)
 import Data.Bits (complement, (.&.), (.|.))
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, newIORef)
 import Data.Primitive.ByteArray (MutableByteArray (..), newByteArray, writeByteArray)
 import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, sameMutablePrimArray, setPrimArray, writePrimArray)
 import Data.Word (Word64)
@@ -42,28 +39,11 @@ import GHC.IO (IO (..))
 import System.IO.Unsafe (unsafePerformIO)
 import NanoUI.Internal.Types (newZeroedPrimArray)
 
--- | Atomically updated mutation set for a 'Cell': latest change tick, the
--- base tick its bitmasks cover from, and the three path bitmasks ('sigHits').
-data ChangeSet = ChangeSet
-  {-# UNPACK #-} !Word64
-  {-# UNPACK #-} !Word64
-  {-# UNPACK #-} !Word64
-  {-# UNPACK #-} !Word64
-  {-# UNPACK #-} !Word64
-
-emptyChangeSet :: ChangeSet
-emptyChangeSet = ChangeSet 0 0 0 0 0
-
--- | Mutable state and its tracking state:
---
--- * 'obsSet' and 'seenSet' live in the UI-thread stamp array.
--- * The cross-thread mutation set lives in an 'IORef' updated with
---   'atomicModifyIORef'' so concurrent 'modifyVarIO' calls never lose bits
---   or publish a tick ahead of its bitmask.
+-- | Mutable state, and its 'obsSet' and 'seenSet' in a UI-thread stamp
+-- array.
 data Cell s = Cell
   {-# UNPACK #-} !(IORef s)
   {-# UNPACK #-} !(MutablePrimArray RealWorld Word64)
-  {-# UNPACK #-} !(IORef ChangeSet)
 
 -- | Two-level bit signature of the portion of a cell addressed by a lens path:
 -- the first-level record field or list key bitmask, the second-level bitmask
@@ -93,32 +73,29 @@ sigHits whole firsts seconds (Sig a b _)
   | otherwise = whole .&. a /= 0 || (firsts .&. a /= 0 && seconds .&. b /= 0)
 
 -- | Where each set starts: a tick, then the @whole@, @firsts@ and
--- @seconds@ bits ('sigHits'). The change set has one more slot, the tick
--- its bits start from ('changedSince').
+-- @seconds@ bits ('sigHits').
 obsSet, seenSet, stampWords :: Int
 obsSet = 0
 seenSet = 4
 stampWords = 8
 
 -- | Slots of a context's frame record ('NanoUI.Internal.Context.ctxVarFrame'):
--- the current pass's tick (0 outside a pass), the tick changes in this frame
--- are newer than, the pass number, request flags, and the last frame's pass
--- count.
-passSlot, baseSlot, passNoSlot, flagSlot, lastPassesSlot, frameSlots :: Int
+-- the current pass's tick (0 outside a pass), the pass number, request
+-- flags, and the last frame's pass count.
+passSlot, passNoSlot, flagSlot, lastPassesSlot, frameSlots :: Int
 passSlot = 0
-baseSlot = 1
-passNoSlot = 2
-flagSlot = 3
-lastPassesSlot = 4
-frameSlots = 5
+passNoSlot = 1
+flagSlot = 2
+lastPassesSlot = 3
+frameSlots = 4
 
 -- | A zeroed array of @n@ stamp words.
 newStamps :: Int -> IO (MutablePrimArray RealWorld Word64)
 newStamps = newZeroedPrimArray
 
--- | A cell holding @s@, with its own zeroed stamps and an empty change set.
+-- | A cell holding @s@, with its own zeroed stamps.
 newCell :: s -> IO (Cell s)
-newCell s = Cell <$> newIORef s <*> newStamps stampWords <*> newIORef emptyChangeSet
+newCell s = Cell <$> newIORef s <*> newStamps stampWords
 
 -- | Stamps shared by every inert cell and never written: an inert cell
 -- ('NanoUI.Var.withValue') takes part in no rerun, damage or wake.
@@ -126,29 +103,25 @@ newCell s = Cell <$> newIORef s <*> newStamps stampWords <*> newIORef emptyChang
 inertStamps :: MutablePrimArray RealWorld Word64
 inertStamps = unsafePerformIO (newStamps stampWords)
 
-{-# NOINLINE inertChanges #-}
-inertChanges :: IORef ChangeSet
-inertChanges = unsafePerformIO (newIORef emptyChangeSet)
-
--- | A cell holding @s@ that uses 'inertStamps' and 'inertChanges', so it
--- records no observation or change.
+-- | A cell holding @s@ that uses 'inertStamps', so it records no
+-- observation.
 newInertCell :: s -> IO (Cell s)
 newInertCell s = do
   ref <- newIORef s
-  pure (Cell ref inertStamps inertChanges)
+  pure (Cell ref inertStamps)
 
 -- | Whether the cell was made by 'newInertCell'.
 {-# INLINE isInert #-}
 isInert :: Cell s -> Bool
-isInert (Cell _ stamps _) = sameMutablePrimArray stamps inertStamps
+isInert (Cell _ stamps) = sameMutablePrimArray stamps inertStamps
 
 {-# INLINE readStamp #-}
 readStamp :: Cell s -> Int -> IO Word64
-readStamp (Cell _ stamps _) = readPrimArray stamps
+readStamp (Cell _ stamps) = readPrimArray stamps
 
 {-# INLINE writeStamp #-}
 writeStamp :: Cell s -> Int -> Word64 -> IO ()
-writeStamp (Cell _ stamps _) = writePrimArray stamps
+writeStamp (Cell _ stamps) = writePrimArray stamps
 
 -- | Whether the set at @set@, stamped with tick @t@, holds a path that
 -- overlaps @sig@. A set stamped with another tick is empty.
@@ -161,11 +134,6 @@ setHits cell set t sig = do
 bitsHit :: Cell s -> Int -> Sig -> IO Bool
 bitsHit cell at sig =
   sigHits <$> readStamp cell at <*> readStamp cell (at + 1) <*> readStamp cell (at + 2) <*> pure sig
-
--- | Check whether 'obsSet' and 'seenSet' for pass @p@ intersect @sig@.
-{-# INLINE passHits #-}
-passHits :: Cell s -> Word64 -> Sig -> IO (Bool, Bool)
-passHits cell p sig = (,) <$> setHits cell obsSet p sig <*> setHits cell seenSet p sig
 
 -- | Whether 'seenSet' for pass @p@ already covers all first-level bits of a
 -- single-level @sig@, so a repeat read records nothing new.
@@ -189,7 +157,7 @@ addToSet cell set t sig = do
 -- | Add a path's bits to the three bit slots from @at@, clearing them first
 -- when @fresh@.
 addBits :: Cell s -> Int -> Bool -> Sig -> IO ()
-addBits (Cell _ stamps _) at fresh (Sig a b _) = do
+addBits (Cell _ stamps) at fresh (Sig a b _) = do
   when fresh (setPrimArray stamps at 3 0)
   if b == allBits
     then orWord stamps at a
@@ -201,38 +169,6 @@ orWord :: MutablePrimArray RealWorld Word64 -> Int -> Word64 -> IO ()
 orWord arr i x = do
   old <- readPrimArray arr i
   when (old .|. x /= old) (writePrimArray arr i (old .|. x))
-
--- | Whether a part @sig@ overlaps was mutated after tick @base@. When the
--- change set starts later than @base@ (e.g. after a mutation in another
--- session), intermediate changes are not retained, so this returns 'True'.
-changedSince :: Cell s -> Word64 -> Sig -> IO Bool
-changedSince (Cell _ _ chgRef) base sig = do
-  ChangeSet chg from whole firsts seconds <- readIORef chgRef
-  pure $
-    if chg < base
-      then False
-      else from > base || sigHits whole firsts seconds sig
-
--- | Record a mutation to @sig@ at tick @t@. Reset the change set when its
--- previous mutations precede the session's frame-start tick @base@. Direct IO
--- mutations pass @base = 0@ so existing change bits are preserved. The stamp
--- never moves back: a pass's write, stamped with the pass's tick, can follow
--- one from another thread with a later tick.
-addChange :: Cell s -> Word64 -> Word64 -> Sig -> IO ()
-addChange (Cell _ _ chgRef) base t (Sig a b _) = do
-  countChange
-  atomicModifyIORef' chgRef $ \(ChangeSet chg from whole firsts seconds) ->
-    let !fresh = chg < base
-        !chg' = max chg t
-        !from' = if fresh then base else from
-        !w0 = if fresh then 0 else whole
-        !f0 = if fresh then 0 else firsts
-        !s0 = if fresh then 0 else seconds
-        !next =
-          if b == allBits
-            then ChangeSet chg' from' (w0 .|. a) f0 s0
-            else ChangeSet chg' from' w0 (f0 .|. a) (s0 .|. b)
-     in (next, ())
 
 -- | Process-wide monotonic tick counter, then the count of changes any cell
 -- has had ('varChangeCount'), each in a machine word.
@@ -252,6 +188,7 @@ varChangeCount = case tickClock of
   MutableByteArray arr -> IO $ \s -> case atomicReadIntArray# arr 1# s of
     (# s', n #) -> (# s', fromIntegral (I# n) #)
 
+-- | Count a change to a cell ('varChangeCount').
 {-# INLINE countChange #-}
 countChange :: IO ()
 countChange = case tickClock of

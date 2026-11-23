@@ -7,11 +7,9 @@
 -- two levels deep ('lensSig'). A mutation that changes a part observed
 -- earlier in the same pass is a backwards write: an earlier widget already
 -- rendered the old value. In the first pass that reruns the view; in the
--- second it schedules a follow-up frame. A mutation only repaints the whole
--- window when a tracked read observed the old value of its part, or reads the
--- new value later in the frame, since arbitrary view logic depending on
--- 'readVar' cannot be diffed per widget. A widget bound via 'bindVar' damages
--- only its own rect.
+-- second it schedules a follow-up frame. What a change shows is damaged
+-- like any other view output: the nodes whose text, value or style it
+-- changed repaint ('NanoUI.Internal.Damage').
 module NanoUI.Internal.Var
   ( newVar
   , useVar
@@ -45,16 +43,15 @@ import Data.Primitive.PrimArray (readPrimArray, writePrimArray)
 import Data.Proxy (Proxy (..))
 import Data.Typeable (Typeable, typeRep)
 import Data.Word (Word64)
-import NanoUI.Internal.Context (Context (..), damageFull, markDirty, markDirtyCovered, traceDamage)
+import NanoUI.Internal.Context (Context (..), markDirtyCovered)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq)
 import NanoUI.Internal.Id.Cursor (takeVarKey)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO, withContext)
 import NanoUI.Internal.Var.Cell
 import NanoUI.Internal.Var.Types
 
-flagRerun, flagFull :: Word64
+flagRerun :: Word64
 flagRerun = 1
-flagFull = 2
 
 {-# INLINE frameSlot #-}
 frameSlot :: Context -> Int -> IO Word64
@@ -118,10 +115,9 @@ readVar (VarConst a) = pure a
 
 -- | 'readVar' of a cell through a path, recording the read as one of the
 -- part @sig@ of the cell. A part already read whole in this pass records
--- nothing new: its change was checked the first time, and a write since
--- found it seen.
+-- nothing new.
 readCell :: Sig -> Cell s -> Lens s a -> NanoUI a
-readCell !sig cell@(Cell ref _ _) l = withContext $ \ctx -> do
+readCell !sig cell@(Cell ref _) l = withContext $ \ctx -> do
   unless (isInert cell) $ do
     p <- frameSlot ctx passSlot
     when (p /= 0) $ do
@@ -129,9 +125,6 @@ readCell !sig cell@(Cell ref _ _) l = withContext $ \ctx -> do
       unless again $ do
         addToSet cell obsSet p sig
         addToSet cell seenSet p sig
-        base <- frameSlot ctx baseSlot
-        changed <- changedSince cell base sig
-        when changed (setFlag ctx flagFull)
   peekLens l =<< readIORef ref
 
 -- | Read the current value without recording a dependency. Use for
@@ -156,7 +149,7 @@ modifyVar (VarRef cell l) f = withContext $ \ctx -> do
 -- | Read from any thread without recording a dependency.
 readVarIO :: Var a -> IO a
 readVarIO (VarConst a) = pure a
-readVarIO (VarRef (Cell ref _ _) l) = peekLens l =<< readIORef ref
+readVarIO (VarRef (Cell ref _) l) = peekLens l =<< readIORef ref
 
 -- | Mutate a 'Var' from any thread or setup code. Does not wake the event
 -- loop; call the action from 'NanoUI.askWake' after background mutations.
@@ -166,14 +159,14 @@ writeVarIO v a = modifyVarIO v (const a)
 -- | 'modifyVar' from any thread.
 modifyVarIO :: Eq a => Var a -> (a -> a) -> IO ()
 modifyVarIO (VarConst _) _ = pure ()
-modifyVarIO (VarRef cell l) f = mapM_ (stampChange 0 cell) =<< modifyRoot cell l f eqByPtr
+modifyVarIO (VarRef cell l) f = mapM_ (const countChange) =<< modifyRoot cell l f eqByPtr
 
 -- | Run @body@ with a temporary 'Var' initialized to @a@ and return the final
 -- value. Used to adapt a widget that takes a 'Var' to external state;
 -- mutations to this temporary 'Var' do not trigger reruns or damage.
 withValue :: a -> (Var a -> NanoUI r) -> NanoUI (r, a)
 withValue a body = do
-  cell@(Cell ref _ _) <- liftIO (newInertCell a)
+  cell@(Cell ref _) <- liftIO (newInertCell a)
   r <- body (VarRef cell Here)
   a' <- liftIO (readIORef ref)
   pure (r, a')
@@ -184,7 +177,7 @@ withValue a body = do
 -- list, which the write leaves alone.
 {-# INLINE modifyRoot #-}
 modifyRoot :: Cell s -> Lens s a -> (a -> a) -> (a -> a -> Bool) -> IO (Maybe Sig)
-modifyRoot cell@(Cell ref _ _) l f eq
+modifyRoot cell@(Cell ref _) l f eq
   | isInert cell = do
       (root', touched) <- step <$> readIORef ref
       Nothing <$ mapM_ (\_ -> writeIORef ref root') touched
@@ -197,48 +190,33 @@ modifyRoot cell@(Cell ref _ _) l f eq
             case overLensSig l (const new) root of (!root', sig) -> (root', Just sig)
       _ -> (root, Nothing)
 
--- | Stamp the part @sig@ of a cell changed at a new tick, against the frame
--- start @base@ (0 from IO). The next frame's tracked reads of that part see
--- the change as new and repaint whole; widgets bound to it diff themselves.
-stampChange :: Word64 -> Cell s -> Sig -> IO ()
-stampChange base cell sig = nextTick >>= \t -> addChange cell base t sig
-
--- | 'stampChange' against the context's frame start, for a write outside a
--- pass, and a follow-up frame to show it.
-noteOutsidePass :: Context -> Cell s -> Sig -> IO ()
-noteOutsidePass ctx cell sig = do
-  base <- frameSlot ctx baseSlot
-  stampChange base cell sig
-  markDirtyCovered ctx
+-- | A write outside a pass: count it, and ask for a frame to show it.
+noteOutsidePass :: Context -> IO ()
+noteOutsidePass ctx = countChange >> markDirtyCovered ctx
 
 -- | Record a changing write to the part @sig@ made by view code.
 noteWrite :: Context -> Cell s -> Sig -> IO ()
 noteWrite ctx cell sig = do
   p <- frameSlot ctx passSlot
   if p == 0
-    then noteOutsidePass ctx cell sig
-    else do
-      (observed, seen) <- passHits cell p sig
-      noteInPass ctx cell p observed seen sig
+    then noteOutsidePass ctx
+    else noteInPass ctx =<< setHits cell obsSet p sig
 
--- | Record a write to the part @sig@ in pass @p@: rerun if something
--- observed that part earlier in the pass, and repaint whole if a tracked
--- read saw it.
-noteInPass :: Context -> Cell s -> Word64 -> Bool -> Bool -> Sig -> IO ()
-noteInPass ctx cell p observed seen sig = do
-  when observed (backwards ctx seen)
-  when seen (setFlag ctx flagFull)
-  base <- frameSlot ctx baseSlot
-  addChange cell base p sig
+-- | Record a write in a pass, rerunning when @observed@: something observed
+-- the part earlier in the pass.
+noteInPass :: Context -> Bool -> IO ()
+noteInPass ctx observed = do
+  when observed (backwards ctx)
+  countChange
 
 -- | A part observed earlier in this pass was mutated: rerun in pass 1, or
--- schedule a follow-up frame in pass 2 (with full damage if @opaque@).
-backwards :: Context -> Bool -> IO ()
-backwards ctx opaque = do
+-- schedule a follow-up frame in pass 2.
+backwards :: Context -> IO ()
+backwards ctx = do
   passNo <- frameSlot ctx passNoSlot
   if passNo <= 1
     then setFlag ctx flagRerun
-    else if opaque then markDirty ctx else markDirtyCovered ctx
+    else markDirtyCovered ctx
 
 -- | How a widget bound to a Var draws it.
 data Binding
@@ -272,7 +250,7 @@ bindVarOn mode value = bindWith eqByPtr mode id value
 {-# INLINE bindWith #-}
 bindWith :: (a -> a -> Bool) -> Binding -> (x -> r) -> (x -> a) -> Var a -> (a -> NanoUI x) -> NanoUI r
 bindWith _ _ result _ (VarConst a) widget = result <$> widget a
-bindWith eq mode result value (VarRef cell@(Cell ref _ _) l) widget = do
+bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
   ctx <- askContext
   let !sig = lensSig l
   (root0, a0, before) <- liftIO $ do
@@ -294,53 +272,50 @@ bindWith eq mode result value (VarRef cell@(Cell ref _ _) l) widget = do
   pure (result x)
 
 -- | Stamp the part @sig@ of a bound cell observed, returning whether
--- something observed it, and whether a tracked read saw it, earlier in this
--- pass.
-observeBinding :: Context -> Cell s -> Sig -> IO (Bool, Bool)
+-- something observed it earlier in this pass.
+observeBinding :: Context -> Cell s -> Sig -> IO Bool
 observeBinding ctx cell !sig
-  | isInert cell = pure (False, False)
+  | isInert cell = pure False
   | otherwise = do
       p <- frameSlot ctx passSlot
       if p == 0
-        then pure (False, False)
+        then pure False
         else do
-          hits <- passHits cell p sig
+          hit <- setHits cell obsSet p sig
           addToSet cell obsSet p sig
-          pure hits
+          pure hit
 
 -- | Record a bound widget's changing write to the part @wsig@. Its own node
 -- shows the value, so only an earlier observer needs the view rerun. A
 -- write that rekeyed a list element touched more than the widget observed
 -- ('overLensSig'), so it is checked again.
-noteBound :: Context -> Cell s -> Binding -> Sig -> (Bool, Bool) -> Sig -> IO ()
+noteBound :: Context -> Cell s -> Binding -> Sig -> Bool -> Sig -> IO ()
 noteBound ctx cell mode sig before wsig = do
   p <- frameSlot ctx passSlot
   if p == 0
-    then noteOutsidePass ctx cell wsig
+    then noteOutsidePass ctx
     else do
-      (observed, seen) <-
+      observed <-
         if wsig == sig
           then do
             -- A tracked read inside the widget (a tab's body reading the
             -- tab Var) saw the value before this write, so it counts like
             -- one before the widget. The binding's own observation is in
             -- the obs set, so only the seen set can tell.
-            inside <- setHits cell seenSet p sig
-            pure (fst before || inside, snd before || inside)
-          else passHits cell p wsig
-      noteInPass ctx cell p (observed || mode == Conservative) seen wsig
+            (before ||) <$> setHits cell seenSet p sig
+          else setHits cell obsSet p wsig
+      noteInPass ctx (observed || mode == Conservative)
 
--- | Request a same-frame pass rerun, or a follow-up frame with localized
--- damage if already in the second pass.
+-- | Request a same-frame pass rerun, or a follow-up frame if already in the
+-- second pass.
 requestRerun :: Context -> IO ()
 requestRerun ctx = do
   p <- frameSlot ctx passSlot
-  if p == 0 then markDirtyCovered ctx else backwards ctx False
+  if p == 0 then markDirtyCovered ctx else backwards ctx
 
 -- | Start view pass @n@ of a frame. The first pass drops any requests left
--- by a frame an exception cut short; that frame never moved the base, so
--- reads in this one still see its changes as new. No handler is installed
--- per frame, since one costs an allocation every frame.
+-- by a frame an exception cut short. No handler is installed per frame,
+-- since one costs an allocation every frame.
 beginVarPass :: Context -> Int -> IO ()
 beginVarPass ctx n = do
   t <- nextTick
@@ -356,21 +331,14 @@ takeVarRerun ctx = do
   writePrimArray (ctxVarFrame ctx) flagSlot (fs .&. complement flagRerun)
   pure (fs .&. flagRerun /= 0)
 
--- | Finish the frame's passes: queue full damage if a read needs it, and
--- start the next frame's changes just after the last pass's tick. The
--- passes' own writes are stamped with their ticks, so they are not new
--- again; a write from another thread during the pass took a later tick, and
--- may have missed the reads before it, so it is.
+-- | Finish the frame's passes: record how many ran, and leave the pass, so
+-- writes until the next frame count as outside one.
 endVarFrame :: Context -> IO ()
 endVarFrame ctx = do
   let arr = ctxVarFrame ctx
-  fs <- frameSlot ctx flagSlot
-  p <- frameSlot ctx passSlot
   writePrimArray arr lastPassesSlot =<< frameSlot ctx passNoSlot
   writePrimArray arr passSlot 0
   writePrimArray arr flagSlot 0
-  writePrimArray arr baseSlot (p + 1)
-  when (fs .&. flagFull /= 0) (damageFull ctx >> traceDamage "DAMAGE-REQ var-read")
 
 -- | How many view passes the last frame ran.
 lastFramePasses :: Context -> IO Int

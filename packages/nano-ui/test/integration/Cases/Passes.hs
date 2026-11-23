@@ -179,26 +179,26 @@ runPassesTest _ failed = do
       [ ("field", (1, Clip, 1),) <$> fresh "" (\v -> typeInto (column (textInput' v)))
       , ("field, label below", (1, Full, 1),) <$> fresh "" (\v -> typeInto (column (textInput' v <* (label =<< readVar v))))
       , ("field, label above", (2, Full, 1),) <$> fresh "" (\v -> typeInto (column ((label =<< readVar v) >> textInput' v)))
-      , ("field read before, written after", (2, Full, 1),) <$> fresh "" (\v -> typeInto (column (do x <- readVar v; (r, x') <- withValue x textInput'; writeVar v x'; pure r)))
+      , ("field read before, written after", (2, Clip, 1),) <$> fresh "" (\v -> typeInto (column (do x <- readVar v; (r, x') <- withValue x textInput'; writeVar v x'; pure r)))
       , ("withValue field", (1, Clip, 1),) <$> (newIORef ("" :: Text) >>= \ref -> typeInto (column (do x <- liftIO (readIORef ref); (r, x') <- withValue x textInput'; liftIO (writeIORef ref x'); pure r)))
       , ("slider", (1, Clip, 1),) <$> fresh 50 (\v -> dragOn (column (sliderWith' (fixedW 200) 0 100 v)))
       , ("checkbox", (1, Clip, 1),) <$> fresh False (\v -> clickOn (column (checkbox' "Opt" v)))
       , ("plain button", (1, Clip, 0),) <$> clickOn (column (button' "+"))
-      , ("display above", (2, Full, 0),) <$> fresh 0 (clickOn . counter True)
-      , ("display below", (1, Full, 0),) <$> fresh 0 (clickOn . counter False)
+      , ("display above", (2, Clip, 0),) <$> fresh 0 (clickOn . counter True)
+      , ("display below", (1, Clip, 0),) <$> fresh 0 (clickOn . counter False)
       , ("equal writes, idle", (1, NoDamage, 0),) <$> fresh "x" (\v -> idleFrame (column (writeVar v "x" >> textInput' v)))
       , -- One Var holding a record: a field read elsewhere is another part.
         ("model: field above slider", (1, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> dragOn (column (do label =<< readVar m.title; sliderWith' (fixedW 200) 0 100 m.volume)))
       , ("model: field below slider", (1, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> dragOn (column (sliderWith' (fixedW 200) 0 100 m.volume <* (label =<< readVar m.title))))
       , ("model: field above field", (1, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do label =<< readVar m.title; textInput' m.name)))
-      , ("model: whole read above field", (2, Full, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do x <- readVar m; label x.title; textInput' m.name)))
-      , ("model: zoomVar part above field", (2, Full, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do label =<< readVar (zoomVar (.title) (\t x -> x {title = t}) m); textInput' m.name)))
+      , ("model: whole read above field", (2, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do x <- readVar m; label x.title; textInput' m.name)))
+      , ("model: zoomVar part above field", (2, Clip, 1),) <$> fresh (Model "t" 50 "") (\m -> typeInto (column (do label =<< readVar (zoomVar (.title) (\t x -> x {title = t}) m); textInput' m.name)))
       , ("forEachVar rows: click row 3", (1, Clip, 1),) <$> checkRows rows20
       , -- Rows are told apart by one of 63 bits of their key's hash, so
         -- keys 64 apart, as from the 64th row on, share it: the earlier
         -- rows' checkboxes count as showing the one clicked.
         ("forEachVar rows, keys 64 apart: click row 3", (2, Clip, 1),) <$> checkRows (map (\e -> e {rowId = e.rowId * 64}) rows20)
-      , ("withElemVars rows: click row 3", (2, Full, 1),) <$> do
+      , ("withElemVars rows: click row 3", (2, Clip, 1),) <$> do
           v <- newVar rows20
           hits <- newIORef []
           clickOn . fourth hits . column . withElemVars rowId v $ \xs at -> forM_ xs $ \x -> withKey (rowId x) . row $ do

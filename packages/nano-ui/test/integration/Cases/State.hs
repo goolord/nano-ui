@@ -197,9 +197,10 @@ runVarSharedTest ctx failed = do
   _ <- runFrame other inp view
   assert failed . any (\(_, t, _, _, _) -> t == "1") =<< collectTextSpans other
 
--- | Writes a frame's bookkeeping misses repaint the next frame whole: one in
--- a frame an exception cut short (leaving no rerun), and a thread's write
+-- | Writes a frame's bookkeeping misses repaint on the next frame: one in a
+-- frame an exception cut short (leaving no rerun), and a thread's write
 -- landing after the pass read the Var, also beside a write to another part.
+-- The label that shows the new value is damaged, not the whole window.
 runVarLateWritesTest :: Context -> IORef Int -> IO ()
 runVarLateWritesTest ctx failed = do
   v <- newVar (0 :: Int)
@@ -212,7 +213,7 @@ runVarLateWritesTest ctx failed = do
   assert failed (either (const True) (const False) r)
   _ <- runFrame ctx inp view
   assertEq failed 1 =<< lastFramePasses ctx
-  assertEq failed DamageFull =<< takeDamage ctx
+  assert failed . shownOnly =<< takeDamage ctx
   let named = label =<< readVar item.rowName
       -- The thread's write, as if it landed here.
       landing name = liftIO (writeVarIO item.rowName name)
@@ -220,7 +221,13 @@ runVarLateWritesTest ctx failed = do
   forM_ [landing "uno", landing "ein" >> writeVar item.rowDone True] $ \late -> do
     _ <- runFrame ctx inp (named >> late)
     _ <- runFrame ctx inp named
-    assertEq failed DamageFull =<< takeDamage ctx
+    assert failed . shownOnly =<< takeDamage ctx
+
+-- | Damage that repaints a label in the top left and not the whole window.
+shownOnly :: Damage -> Bool
+shownOnly = \case
+  DamageClip (Rect x y w h) -> x < 10 && y < 10 && w > 0 && w < 100 && h > 0 && h < 40
+  DamageFull -> False
 
 -- | Pointer cursor over a button and a (pressed) checkbox only. A checkbox
 -- shows its Var's value before any click stores state, and each click at
