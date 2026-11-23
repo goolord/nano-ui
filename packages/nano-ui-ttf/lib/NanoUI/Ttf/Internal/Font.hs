@@ -96,7 +96,6 @@ import NanoUI (FontStyle (..), FontVariant (..), FontWeight (..), unlessM, whenM
 import NanoUI.Backend
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Internal.Context.Types (GenCache, cachedGen, emptyGenCache)
-import NanoUI.Testing
 import NanoUI.Ttf.Internal.Header
   ( clusterFlags
   , clusterLength

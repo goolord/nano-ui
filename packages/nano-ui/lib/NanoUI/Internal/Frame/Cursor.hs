@@ -161,7 +161,18 @@ cursorKindAt ctx wid mouse inp
                     else do
                       let onTrack (Rect x y w h) = rectContains (sliderHitBounds x y w h) mouse
                       maybe UiCursorDefault (\r -> grabDragKind (onTrack r) False inp) <$> hitRect
-                _ -> pure UiCursorDefault
+                NodeContainer -> pure UiCursorDefault
+                NodeText -> pure UiCursorDefault
+                NodeSpacer -> pure UiCursorDefault
+                NodeSeparator -> pure UiCursorDefault
+                NodeScrollContainer -> pure UiCursorDefault
+                NodeModal -> pure UiCursorDefault
+                NodeImage -> pure UiCursorDefault
+                NodePanel -> pure UiCursorDefault
+                NodeWindow -> pure UiCursorDefault
+                NodeBox -> pure UiCursorDefault
+                NodePopup -> pure UiCursorDefault
+                NodeDrawing -> pure UiCursorDefault
 
 -- | The cursor of the newest zone the view registered under the pointer
 -- ('ctxCursorZones'), or the resize arrow for a whole column-resize drag.

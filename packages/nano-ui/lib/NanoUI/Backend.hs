@@ -193,6 +193,7 @@ module NanoUI.Backend
   , ShapedText (..)
   , ShapedGlyphs (..)
   , clearMeasureCache
+  , wrapMeasureCache
 
     -- * Damage
 
@@ -383,7 +384,7 @@ import NanoUI.Internal.BackendSession (Backend (..), BackendSession, SBackend (.
 import NanoUI.Internal.Context
   ( Context, newContext, newPixelContext, withFontMetrics, withMonoFontMetrics
   , withMeasureText, withFontResolver, withFontSize, withClipboard, withTheme
-  , clearMeasureCache, damageFull
+  , clearMeasureCache, wrapMeasureCache, damageFull
   , markDirty, clearDirty, isDirty, requestWakeAt, requestWakeAfter, getWakeAt
   , takeDamage, takeDamagePieces, registerImage, registerImages, releaseImage
   , atlasTextureId, atlasSnapshot, atlasChanges, AtlasUpload (..)
