@@ -11,6 +11,7 @@ module NanoUI.Internal.Debug
   , noteDebugSkip
   , debugCadence
   , noteDebugPresent
+  , noteDebugFrame
   , refreshDebugSnapshot
   , formatFpsRows
   , formatDrawRows
@@ -25,6 +26,7 @@ import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import NanoUI.Internal.Context.Types (ExplainedNode (..))
+import NanoUI.Internal.Draw.Types (DrawData (..), drawCmdCount)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Style (Padding (..), PointerMode (..), Sizing (..))
 import NanoUI.Internal.Types (Rect (..), V2 (..), isBounded)
@@ -177,6 +179,18 @@ noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds =
       , dbgIndices = indices
       , dbgCmds = cmds
       }
+
+-- | 'noteDebugPresent' from a presented frame's clock readings
+-- ('getMonotonicTime', in seconds) and its draw data. The UI pass ran from
+-- @uiStart@ to @uiEnd@, drawing from @uiEnd@ to @drawEnd@, and the present
+-- from @drawEnd@ to @presentEnd@; a backend whose present is part of its
+-- draw passes @drawEnd@ twice.
+noteDebugFrame :: DebugSamplerRef -> Double -> Double -> Double -> Double -> DrawData -> IO ()
+noteDebugFrame ref uiStart uiEnd drawEnd presentEnd dd =
+  noteDebugPresent ref (ms uiStart uiEnd) (ms uiEnd drawEnd) (ms drawEnd presentEnd) (ms uiStart presentEnd)
+    (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
+  where
+    ms a b = (b - a) * 1000
 
 -- | The published snapshot, rebuilt at most every 'debugRefreshSec' and kept
 -- in the backend's typed reference. A due query samples the core stats for @build@ to add the

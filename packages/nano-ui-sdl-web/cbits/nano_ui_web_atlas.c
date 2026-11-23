@@ -3,23 +3,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum {
-    NANO_UI_WEB_ATLAS_PAD = 1,
-    NANO_UI_WHITE_PATCH_SIZE = 4
-};
-
 /* Glyphs fill page 0, then each later page in turn. A reset empties every
  * page but keeps their memory, and a page is cleared when it is opened
- * again. Placement is nano_ui_text_atlas.c's, so a glyph lands at the same
- * UVs on both backends. */
+ * again. Placement is nano_ui_ttf_shared.h's, which nano_ui_text_atlas.c
+ * uses too, so a glyph lands at the same UVs on both backends. */
 struct NanoUiWebAtlas {
     uint8_t *pixels[NANO_UI_WEB_ATLAS_PAGES];
     /* The changed rect of each page as x0, y0, x1, y1; empty when x1 <= x0. */
     int dirty[NANO_UI_WEB_ATLAS_PAGES][4];
-    int pages; /* pages holding glyphs; the cursor is on the last */
-    int x;
-    int y;
-    int row_h;
+    NanoUiAtlasCursor cur;
 };
 
 static void mark_dirty(NanoUiWebAtlas *atlas, int page, int x, int y, int w, int h)
@@ -52,9 +44,11 @@ static void clear_page(NanoUiWebAtlas *atlas, int page)
 }
 
 /* Start glyphs on page `page`: allocate or clear it and put the cursor
- * after its white patch. */
-static bool open_page(NanoUiWebAtlas *atlas, int page)
+ * after its white patch. The atlas is a void pointer for
+ * nano_ui_atlas_slot_for. */
+static bool open_page(void *self, int page)
 {
+    NanoUiWebAtlas *atlas = (NanoUiWebAtlas *)self;
     if (!atlas->pixels[page]) {
         const size_t size = NANO_UI_WEB_ATLAS_SIZE;
         atlas->pixels[page] = (uint8_t *)malloc(size * size * 4);
@@ -63,43 +57,7 @@ static bool open_page(NanoUiWebAtlas *atlas, int page)
         }
     }
     clear_page(atlas, page);
-    atlas->pages = page + 1;
-    atlas->x = NANO_UI_WHITE_PATCH_SIZE + NANO_UI_WEB_ATLAS_PAD;
-    atlas->y = NANO_UI_WEB_ATLAS_PAD;
-    atlas->row_h = NANO_UI_WHITE_PATCH_SIZE;
-    return true;
-}
-
-/* A place for a gw by gh glyph on the current page, moving to a new row or
- * a new page when it does not fit. */
-static bool slot_for(NanoUiWebAtlas *atlas, int gw, int gh, int *out_page, int *out_x, int *out_y)
-{
-    int pad = NANO_UI_WEB_ATLAS_PAD;
-    int size = NANO_UI_WEB_ATLAS_SIZE;
-    if (gw + 2 * pad > size || gh + 2 * pad > size) {
-        return false;
-    }
-    if (atlas->pages == 0 && !open_page(atlas, 0)) {
-        return false;
-    }
-    for (;;) {
-        if (atlas->x + gw + pad <= size && atlas->y + gh + pad <= size) {
-            break;
-        }
-        int next_y = atlas->y + (atlas->row_h > 0 ? atlas->row_h + pad : pad);
-        if (next_y + gh + pad <= size) {
-            atlas->y = next_y;
-            atlas->x = pad;
-            atlas->row_h = 0;
-            break;
-        }
-        if (atlas->pages >= NANO_UI_WEB_ATLAS_PAGES || !open_page(atlas, atlas->pages)) {
-            return false;
-        }
-    }
-    *out_page = atlas->pages - 1;
-    *out_x = atlas->x;
-    *out_y = atlas->y;
+    nano_ui_atlas_cursor_open(&atlas->cur, page);
     return true;
 }
 
@@ -172,7 +130,7 @@ bool nano_ui_web_atlas_insert_surface(
     int page = 0;
     int x = 0;
     int y = 0;
-    if (!slot_for(atlas, gw, gh, &page, &x, &y)) {
+    if (!nano_ui_atlas_slot_for(&atlas->cur, atlas, open_page, gw, gh, &page, &x, &y)) {
         return false;
     }
     const size_t stride = (size_t)NANO_UI_WEB_ATLAS_SIZE * 4;
@@ -182,15 +140,7 @@ bool nano_ui_web_atlas_insert_surface(
         memcpy(dst + (size_t)row * stride, src + (size_t)row * surface->pitch, (size_t)gw * 4);
     }
     mark_dirty(atlas, page, x, y, gw, gh);
-    atlas->x = x + gw + NANO_UI_WEB_ATLAS_PAD;
-    if (gh > atlas->row_h) {
-        atlas->row_h = gh;
-    }
-    float s = (float)NANO_UI_WEB_ATLAS_SIZE;
-    uv[0] = (float)page + (float)x / s;
-    uv[1] = (float)y / s;
-    uv[2] = uv[0] + (float)gw / s;
-    uv[3] = uv[1] + (float)gh / s;
+    nano_ui_atlas_commit(&atlas->cur, page, x, y, gw, gh, uv);
     return true;
 }
 
@@ -204,6 +154,6 @@ void nano_ui_web_atlas_reset(NanoUiWebAtlas *atlas)
     if (atlas->pixels[0]) {
         open_page(atlas, 0);
     } else {
-        atlas->pages = 0;
+        atlas->cur.pages = 0;
     }
 }

@@ -47,21 +47,13 @@ data ClipState
 -- | A layout-unit clip as the device-pixel rect SDL clips to. The pass
 -- draws at render scale 1 ('nano_ui_batch_begin' scales the positions), so
 -- the clip is the same whole pixels the damage was snapped to
--- ('snapDamage'), whatever the scale.
+-- ('snapDamage'), whatever the scale ('clipPixelEdges'). SDL clips to at
+-- least one pixel each way.
 {-# INLINE toClipKey #-}
 toClipKey :: Float -> Rect -> ClipState
-toClipKey scale (Rect x y w h) =
-  let x0 = lower (x * scale)
-      y0 = lower (y * scale)
-      x1 = upper ((x + w) * scale)
-      y1 = upper ((y + h) * scale)
+toClipKey scale r =
+  let (x0, y0, x1, y1) = clipPixelEdges scale r
    in ClipKey x0 y0 (max 1 (x1 - x0)) (max 1 (y1 - y0))
-  where
-    -- An edge 'snapDamage' put on a pixel comes back from layout units a
-    -- rounding error to either side of it; it stays on that pixel rather than
-    -- taking in the next.
-    lower v = floor (v + 1.0e-3)
-    upper v = ceiling (v - 1.0e-3)
 
 applyClipState ::
   RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()

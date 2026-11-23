@@ -30,11 +30,10 @@ import NanoUI.Backend
   , DrawData (..)
   , atlasTextureId
   , cmdEffectiveClip
-  , pixelEdges
   , snapDamage
   , textureGlyphPage
   )
-import NanoUI.Testing (Context, atlasChanges)
+import NanoUI.Testing (Context, atlasChanges, clipPixelEdges)
 import NanoUI.SdlWeb.Internal.Font (GlyphAtlas, glyphAtlasSize, glyphPageUploads)
 import NanoUI.SdlWeb.Internal.Host (WebHost (..), commandRecordSize, imageAtlasSlot)
 
@@ -94,7 +93,8 @@ data DrawCommand = DrawCommand
 
 -- | The draws for a frame's commands over its damage, at a scale, into a
 -- drawing buffer of a pixel size. Each command is clipped to its own rect
--- and to the damage; one with nothing left is dropped. A command that
+-- and to the damage, in the device pixels 'clipPixelEdges' gives, as
+-- nano-ui-sdl clips; one with nothing left is dropped. A command that
 -- continues the last one's indices with the same texture and scissor joins
 -- it, which turns most of a frame into a few draws.
 drawCommands' :: Float -> (Int, Int) -> Damage -> DrawData -> [DrawCommand]
@@ -119,7 +119,7 @@ drawCommands' scale (pw, ph) damage dd = reverse (U.foldl' step [] (drawCommands
           prev {dcCount = dcCount prev + dcCount c} : rest
     push c acc = c : acc
     toPixels r =
-      let (x0, y0, x1, y1) = pixelEdges scale r
+      let (x0, y0, x1, y1) = clipPixelEdges scale r
           cx0 = max 0 x0
           cy0 = max 0 y0
        in (cx0, cy0, min pw x1 - cx0, min ph y1 - cy0)

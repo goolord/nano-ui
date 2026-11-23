@@ -1,5 +1,16 @@
 #include <SDL3/SDL.h>
+#include <stddef.h>
 #include <stdlib.h>
+
+#include "nano_ui_ttf_shared.h"
+
+/* The batch reads the core's draw buffer in place as SDL_Vertex: x and y,
+ * then red, green, blue and alpha, then u and v, as 32-bit floats. */
+_Static_assert(sizeof(SDL_Vertex) == NANO_UI_VERTEX_BYTES, "SDL_Vertex must be the core's 32-byte vertex");
+_Static_assert(offsetof(SDL_Vertex, position) == 0, "SDL_Vertex starts with its position");
+_Static_assert(offsetof(SDL_Vertex, color) == 8, "SDL_Vertex colour follows the 2-float position");
+_Static_assert(offsetof(SDL_Vertex, tex_coord) == 24, "SDL_Vertex UV follows the 4-float colour");
+_Static_assert(sizeof(SDL_FColor) == 16, "SDL_Vertex colour is four floats");
 
 typedef struct {
     SDL_Renderer *renderer;

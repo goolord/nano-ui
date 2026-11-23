@@ -5,6 +5,12 @@
 -- atlas caching. Parameterized over backend-specific atlas operations
 -- ('AtlasOps') and optional platform hooks ('FontHooks') so both desktop SDL
 -- and browser WebGL backends share one implementation.
+--
+-- The names 'SdlFont', 'SdlFontCache' and the @sf@ and @sfc@ field prefixes
+-- date from when this code lived in nano-ui-sdl. Nothing here depends on an
+-- SDL window or renderer: "SDL" names SDL3_ttf, which both nano-ui-sdl and
+-- nano-ui-sdl-web shape and rasterise text with. The names are public API
+-- of both backends' internal modules, so they stay.
 module NanoUI.Ttf.Internal.Font
   ( AtlasOps (..)
   , FontHooks (..)
@@ -25,6 +31,8 @@ module NanoUI.Ttf.Internal.Font
   , destroySdlFontCache
   , reloadSdlFontCache
   , prepareGlyphAtlasForFrame
+  , beginTtfFrame
+  , ttfFrameDropped
   , closeEvictedFonts
   , sdlFontCacheSource
   , sdlFontCacheMonoSource
@@ -56,7 +64,8 @@ import Data.IntSet qualified as IS
 import Data.List (delete, elemIndex)
 import Data.Maybe (isJust, mapMaybe)
 import Data.Primitive.PrimArray
-  ( PrimArray
+  ( MutablePrimArray
+  , PrimArray
   , indexPrimArray
   , newPrimArray
   , primArrayFromList
@@ -88,6 +97,37 @@ import NanoUI.Backend
 import NanoUI.Bidi (BidiRun (..), bidiRuns, needsBidi)
 import NanoUI.Internal.Context.Types (GenCache, cachedGen, emptyGenCache)
 import NanoUI.Testing
+import NanoUI.Ttf.Internal.Header
+  ( clusterFlags
+  , clusterLength
+  , clusterOffset
+  , clusterWidth
+  , clusterX
+  , directionAuto
+  , directionLtr
+  , directionMask
+  , directionRtl
+  , glyphAtlasPixels
+  , glyphDstH
+  , glyphDstW
+  , glyphDstX
+  , glyphDstY
+  , glyphIndex
+  , glyphSrcH
+  , glyphSrcW
+  , glyphSrcX
+  , glyphSrcY
+  , shapedClusterCount
+  , shapedClusterInts
+  , shapedClusters
+  , shapedGlyphCount
+  , shapedGlyphFonts
+  , shapedGlyphInts
+  , shapedGlyphs
+  , shapedHeight
+  , shapedWidth
+  , whitePatchSize
+  )
 import NanoUI.Ttf.Internal.Inter (fontInterBytes, fontInterLabel)
 
 -- | Native glyph-atlas operations supplied by the concrete backend (SDL
@@ -273,29 +313,51 @@ placeGlyphImage ga font gi = do
           [u0, v0, u1, v1] <- map realToFrac <$> peekArray 4 uv
           pure (Just (GlyphSlot u0 v0 u1 v1))
 
--- | Width and height of the glyph atlas texture; mirrors NANO_UI_TEXT_ATLAS_SIZE.
+-- | Width and height of the glyph atlas texture: NANO_UI_GLYPH_ATLAS_SIZE.
 glyphAtlasSize :: Float
-glyphAtlasSize = 2048
+glyphAtlasSize = fromIntegral glyphAtlasPixels
 
+-- | The UVs of a texel no glyph or shape covers, for a glyph with no slot:
+-- the padding column just right of page 0's white patch, on its bottom row.
 deadU, deadV :: Float
-deadU = 4.5 / glyphAtlasSize
+deadU = (fromIntegral whitePatchSize + 0.5) / glyphAtlasSize
 deadV = (glyphAtlasSize - 0.5) / glyphAtlasSize
 
 data Shaped = Shaped
   { shapedText :: !ShapedText
   , shapedSize :: !(Float, Float)
   , _shapedGlyphs :: !(PrimArray Int32)
+  -- ^ 'glyphRecordInts' ints a glyph: the C side's glyph from 'glyphIndex'
+  -- on, its x moved right by the pen of the piece it was shaped in.
   , _shapedFontIndices :: !(PrimArray Int32)
   , _shapedFonts :: !(SmallArray SdlFont)
   }
 
+-- | Ints a glyph takes in '_shapedGlyphs': the C side's glyph without its
+-- text offset, which nothing after shaping reads.
+glyphRecordInts :: Int
+glyphRecordInts = shapedGlyphInts - glyphIndex
+
+-- | Where an int of the C side's glyph ('glyphDstX' and the rest) is in a
+-- glyph record of '_shapedGlyphs'.
+recordField :: Int -> Int
+recordField k = k - glyphIndex
+
+-- | The runs of a line to shape apart, as start and end characters and the
+-- direction to shape in. Text that needs no bidi runs ('needsBidi') is one
+-- run, whose direction SDL_ttf picks. A right-to-left run is shaped right
+-- to left without its leading and trailing spaces, which shape left to
+-- right.
 shapingRuns :: Text -> [(Int, Int, CInt)]
 shapingRuns txt
   | needsBidi txt = concatMap directed (bidiRuns txt)
-  | otherwise = [(0, T.length txt, 0)]
+  | otherwise = [(0, T.length txt, auto)]
   where
+    auto = fromIntegral directionAuto
+    ltr = fromIntegral directionLtr
+    rtl = fromIntegral directionRtl
     directed r
-      | not (runRightToLeft r) = [(runStart r, runEnd r, 4)]
+      | not (runRightToLeft r) = [(runStart r, runEnd r, ltr)]
       | otherwise =
           let run = T.take (runEnd r - runStart r) (T.drop (runStart r) txt)
               lead = T.length (T.takeWhile isSpace run)
@@ -303,12 +365,16 @@ shapingRuns txt
               coreStart = runStart r + lead
               coreEnd = runEnd r - trail
            in if coreStart >= coreEnd
-                then [(runStart r, runEnd r, 4)]
+                then [(runStart r, runEnd r, ltr)]
                 else
-                  [(coreEnd, runEnd r, 4) | trail > 0]
-                    ++ [(coreStart, coreEnd, 5)]
-                    ++ [(runStart r, coreStart, 4) | lead > 0]
+                  [(coreEnd, runEnd r, ltr) | trail > 0]
+                    ++ [(coreStart, coreEnd, rtl)]
+                    ++ [(runStart r, coreStart, ltr) | lead > 0]
 
+-- | Shape a line run by run ('shapingRuns'), each run after the last, into
+-- its glyphs ('copyShapedGlyphs'), the x of every caret position
+-- ('placeClusters', 'fillCarets'), its size and the right edge of its ink.
+-- Sizes are in layout units: device pixels divided by @inv@.
 shapeLine :: SdlFont -> Float -> Text -> IO Shaped
 shapeLine sf inv txt = do
   ensureAlive sf
@@ -342,8 +408,8 @@ shapeLine sf inv txt = do
         TF.useAsPtr (T.take (end - start) (T.drop start txt)) $ \ptr len -> do
           ok <- ttfShape (sfFont sf) (castPtr ptr) (fromIntegral len) dir (resultOf p)
           when (ok == 0) $ ttfShapedFree (resultOf p)
-      glyphCount <- sum <$> mapM (\p -> fromIntegral <$> ttfShapedInt (resultOf p) 2) [0 .. pieceCount - 1]
-      glyphs <- newPrimArray (glyphCount * 9)
+      glyphCount <- sum <$> mapM (\p -> shapedInt (resultOf p) shapedGlyphCount) [0 .. pieceCount - 1]
+      glyphs <- newPrimArray (glyphCount * glyphRecordInts)
       fontIndices <- newPrimArray glyphCount
       stops <- newPrimArray n
       setPrimArray stops 0 n (0 / 0 :: Float)
@@ -352,90 +418,154 @@ shapeLine sf inv txt = do
             (start, _, _) : rest -> do
               let result = resultOf p
                   byteStart = if ascii then start else lengthWord8 (T.take start txt)
-              w <- fromIntegral <$> ttfShapedInt result 0
-              h <- fromIntegral <$> ttfShapedInt result 1
-              nGlyphs <- fromIntegral <$> ttfShapedInt result 2
-              nClusters <- fromIntegral <$> ttfShapedInt result 3
-              glyphPtr <- castPtr <$> ttfShapedPtr result 0
-              fontPtr <- castPtr <$> ttfShapedPtr result 1
-              clusterPtr <- castPtr <$> ttfShapedPtr result 2
-              let glyphInt :: Int -> IO Int32
-                  glyphInt k = fromIntegral <$> peekElemOff (glyphPtr :: Ptr CInt) k
-                  copyGlyphs !i !ink
-                    | i >= nGlyphs = pure ink
-                    | otherwise = do
-                        let dst = (g0 + i) * 9
-                        forM_ [1 .. 9] $ \k -> do
-                          v <- glyphInt (i * 10 + k)
-                          writePrimArray glyphs (dst + k - 1) (if k == 2 then v + fromIntegral pen else v)
-                        x1 <- readPrimArray glyphs (dst + 1)
-                        gw <- readPrimArray glyphs (dst + 3)
-                        ptr <- peekElemOff (fontPtr :: Ptr (Ptr ())) i
-                        writePrimArray fontIndices (g0 + i) (fontIndex ptr)
-                        copyGlyphs (i + 1) (max ink (fromIntegral (x1 + gw) :: Int))
-                  clusterInt :: Int -> IO Int
-                  clusterInt k = fromIntegral <$> peekElemOff (clusterPtr :: Ptr CInt) k
-                  placeClusters !i !end
-                    | i >= nClusters = pure end
-                    | otherwise = do
-                        let at k = clusterInt (i * 5 + k)
-                        (off0, len, x0, cw, flags) <- (,,,,) <$> at 0 <*> at 1 <*> at 2 <*> at 3 <*> at 4
-                        if len <= 0
-                          then placeClusters (i + 1) end
-                          else do
-                            let off = off0 + byteStart
-                                x = fromIntegral (x0 + pen) :: Float
-                                fw = fromIntegral cw
-                                rtl = flags .&. 0xFF == 5
-                            c0 <- charAt off
-                            c1 <- charAt (off + len)
-                            let k = max 1 (c1 - c0)
-                                stop j
-                                  | c0 + j >= n = pure ()
-                                  | rtl = writePrimArray stops (c0 + j) (x + fw - fw * fromIntegral j / fromIntegral k)
-                                  | otherwise = writePrimArray stops (c0 + j) (x + fw * fromIntegral j / fromIntegral k)
-                            forM_ [0 .. k - 1] stop
-                            let end'
-                                  | isNaN end && c1 == n = if rtl then x else x + fw
-                                  | otherwise = end
-                            placeClusters (i + 1) end'
-              ink <- if glyphPtr == nullPtr then pure inkEnd else copyGlyphs 0 inkEnd
-              end <- if clusterPtr == nullPtr then pure endStop else placeClusters 0 endStop
+              w <- shapedInt result shapedWidth
+              h <- shapedInt result shapedHeight
+              nGlyphs <- shapedInt result shapedGlyphCount
+              nClusters <- shapedInt result shapedClusterCount
+              glyphPtr <- castPtr <$> ttfShapedPtr result (fromIntegral shapedGlyphs)
+              fontPtr <- castPtr <$> ttfShapedPtr result (fromIntegral shapedGlyphFonts)
+              clusterPtr <- castPtr <$> ttfShapedPtr result (fromIntegral shapedClusters)
+              ink <-
+                if glyphPtr == nullPtr
+                  then pure inkEnd
+                  else copyShapedGlyphs glyphs fontIndices fontIndex glyphPtr fontPtr nGlyphs g0 pen inkEnd
+              end <-
+                if clusterPtr == nullPtr
+                  then pure endStop
+                  else placeClusters stops charAt n clusterPtr nClusters byteStart pen endStop
               ttfShapedFree result
               fillPieces (p + 1) (pen + w) (max height h) (g0 + nGlyphs) ink end rest
       (total, height, inkEnd, endStop) <- fillPieces 0 0 (0 :: Int) 0 0 (0 / 0) runs
-      carets <- newPrimArray (n + 1)
-      let fillCaret prev i = do
-            v <- readPrimArray stops i
-            let v' = if isNaN v then prev else v / inv
-            v' <$ writePrimArray carets i v'
-      foldM_ fillCaret 0 [0 .. n - 1]
-      writePrimArray carets n ((if isNaN endStop then fromIntegral total else endStop) / inv)
-      caretArr <- unsafeFreezePrimArray carets
+      caretArr <- fillCarets stops n inv (if isNaN endStop then fromIntegral total else endStop)
       glyphArr <- unsafeFreezePrimArray glyphs
       indexArr <- unsafeFreezePrimArray fontIndices
       let !width = fromIntegral total / inv
           !measured = (width, fromIntegral height / inv)
       pure (Shaped (ShapedText width (fromIntegral inkEnd / inv) caretArr) measured glyphArr indexArr (smallArrayFromList fontList))
 
+-- | A field of a shaped line ('shapedWidth' and the rest).
+{-# INLINE shapedInt #-}
+shapedInt :: Ptr () -> Int -> IO Int
+shapedInt result field = fromIntegral <$> ttfShapedInt result (fromIntegral field)
+
+-- | Copy a shaped piece's @nGlyphs@ glyphs into the line's glyph records
+-- from record @g0@ on, moving each right by the piece's @pen@, and note
+-- each glyph's font as its index among the line's fonts. Answers the right
+-- edge of the line's ink so far, from @ink0@.
+{-# INLINE copyShapedGlyphs #-}
+copyShapedGlyphs ::
+  MutablePrimArray RealWorld Int32 ->
+  MutablePrimArray RealWorld Int32 ->
+  (Ptr () -> Int32) ->
+  Ptr CInt ->
+  Ptr (Ptr ()) ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  IO Int
+copyShapedGlyphs glyphs fontIndices fontIndex glyphPtr fontPtr nGlyphs g0 pen = go 0
+  where
+    go !i !ink
+      | i >= nGlyphs = pure ink
+      | otherwise = do
+          let src = i * shapedGlyphInts
+              dst = (g0 + i) * glyphRecordInts
+          forM_ [glyphIndex .. shapedGlyphInts - 1] $ \k -> do
+            v <- fromIntegral <$> peekElemOff glyphPtr (src + k)
+            writePrimArray glyphs (dst + recordField k) (if k == glyphDstX then v + fromIntegral pen else v)
+          x1 <- readPrimArray glyphs (dst + recordField glyphDstX)
+          gw <- readPrimArray glyphs (dst + recordField glyphDstW)
+          ptr <- peekElemOff fontPtr i
+          writePrimArray fontIndices (g0 + i) (fontIndex ptr)
+          go (i + 1) (max ink (fromIntegral (x1 + gw) :: Int))
+
+-- | Write the caret x of each character a shaped piece's @nClusters@
+-- clusters cover into @stops@, by character index: a cluster's width split
+-- evenly between its characters, right to left in a right-to-left cluster.
+-- @byteStart@ is the piece's first byte in the line, @pen@ its x, and
+-- @charAt@ the character a byte of the line starts. Answers the x where the
+-- line's last character ends once a cluster reaches it, else @end0@.
+{-# INLINE placeClusters #-}
+placeClusters ::
+  MutablePrimArray RealWorld Float ->
+  (Int -> IO Int) ->
+  Int ->
+  Ptr CInt ->
+  Int ->
+  Int ->
+  Int ->
+  Float ->
+  IO Float
+placeClusters stops charAt n clusterPtr nClusters byteStart pen = go 0
+  where
+    clusterInt :: Int -> Int -> IO Int
+    clusterInt i k = fromIntegral <$> peekElemOff clusterPtr (i * shapedClusterInts + k)
+    go !i !end
+      | i >= nClusters = pure end
+      | otherwise = do
+          len <- clusterInt i clusterLength
+          if len <= 0
+            then go (i + 1) end
+            else do
+              off0 <- clusterInt i clusterOffset
+              x0 <- clusterInt i clusterX
+              cw <- clusterInt i clusterWidth
+              flags <- clusterInt i clusterFlags
+              let off = off0 + byteStart
+                  x = fromIntegral (x0 + pen) :: Float
+                  fw = fromIntegral cw
+                  rtl = flags .&. directionMask == directionRtl
+              c0 <- charAt off
+              c1 <- charAt (off + len)
+              let k = max 1 (c1 - c0)
+                  stop j
+                    | c0 + j >= n = pure ()
+                    | rtl = writePrimArray stops (c0 + j) (x + fw - fw * fromIntegral j / fromIntegral k)
+                    | otherwise = writePrimArray stops (c0 + j) (x + fw * fromIntegral j / fromIntegral k)
+              forM_ [0 .. k - 1] stop
+              let end'
+                    | isNaN end && c1 == n = if rtl then x else x + fw
+                    | otherwise = end
+              go (i + 1) end'
+
+-- | The caret x before each of the line's @n@ characters and after the last
+-- (@endStop@), in layout units. A character no cluster placed ('NaN' in
+-- @stops@) takes the caret before it.
+fillCarets :: MutablePrimArray RealWorld Float -> Int -> Float -> Float -> IO (PrimArray Float)
+fillCarets stops n inv endStop = do
+  carets <- newPrimArray (n + 1)
+  let fillCaret prev i = do
+        v <- readPrimArray stops i
+        let v' = if isNaN v then prev else v / inv
+        v' <$ writePrimArray carets i v'
+  foldM_ fillCaret 0 [0 .. n - 1]
+  writePrimArray carets n (endStop / inv)
+  unsafeFreezePrimArray carets
+
 placeShapedGlyphs :: GlyphAtlas -> Float -> Shaped -> IO ShapedGlyphs
 placeShapedGlyphs ga inv (Shaped _ _ glyphs fontIndices fonts) = do
   let !count = sizeofPrimArray fontIndices
   out <- newPrimArray (count * 8)
   forM_ [0 .. count - 1] $ \i -> do
-    let g k = fromIntegral (indexPrimArray glyphs (i * 9 + k)) :: Float
+    let field k = indexPrimArray glyphs (i * glyphRecordInts + recordField k)
+        g k = fromIntegral (field k) :: Float
         write k = writePrimArray out (i * 8 + k)
         font = indexSmallArray fonts (fromIntegral (indexPrimArray fontIndices i))
-    mSlot <- lookupOrInsertGlyph ga font (fromIntegral (indexPrimArray glyphs (i * 9)))
-    forM_ [0 .. 3] $ \k -> write k (g (k + 1) / inv)
+    mSlot <- lookupOrInsertGlyph ga font (fromIntegral (field glyphIndex))
+    -- The quad: x, y, width and height, then u0, v0, u1 and v1.
+    write 0 (g glyphDstX / inv)
+    write 1 (g glyphDstY / inv)
+    write 2 (g glyphDstW / inv)
+    write 3 (g glyphDstH / inv)
     case mSlot of
       Just slot -> do
-        let u0 = gsU0 slot + g 5 / glyphAtlasSize
-            v0 = gsV0 slot + g 6 / glyphAtlasSize
+        let u0 = gsU0 slot + g glyphSrcX / glyphAtlasSize
+            v0 = gsV0 slot + g glyphSrcY / glyphAtlasSize
         write 4 u0
         write 5 v0
-        write 6 (if g 7 > 0 then u0 + g 7 / glyphAtlasSize else gsU1 slot)
-        write 7 (if g 8 > 0 then v0 + g 8 / glyphAtlasSize else gsV1 slot)
+        write 6 (if g glyphSrcW > 0 then u0 + g glyphSrcW / glyphAtlasSize else gsU1 slot)
+        write 7 (if g glyphSrcH > 0 then v0 + g glyphSrcH / glyphAtlasSize else gsV1 slot)
       Nothing -> zipWithM_ write [4 ..] [deadU, deadV, deadU, deadV]
   ShapedGlyphs <$> unsafeFreezePrimArray out
 
@@ -636,6 +766,36 @@ prepareGlyphAtlasForFrame cache = do
   modifyIORef' (gaFrame (sfcGlyphAtlas cache)) (+ 1)
   full <- glyphAtlasFull cache
   full <$ when full (resetGlyphAtlas cache)
+
+-- | The font work a backend does before a frame's UI pass records any text,
+-- answering whether the glyph atlas was reset ('prepareGlyphAtlasForFrame').
+-- A reset emptied the glyph slots a kept draw's text points at, so the
+-- frame repaints whole ('damageFull') rather than reuse one. Fonts the size
+-- cache evicted close now, and the measure caches that can still hold their
+-- metrics are dropped ('clearMeasureCache'), before the pass measures text.
+beginTtfFrame :: SdlFontCache -> Context -> IO Bool
+beginTtfFrame cache ctx = do
+  fresh <- prepareGlyphAtlasForFrame cache
+  when fresh (damageFull ctx)
+  whenM (closeEvictedFonts cache) (clearMeasureCache ctx)
+  pure fresh
+
+-- | Whether to drop the frame just built instead of presenting it: its UI
+-- pass ran out of glyph atlas room, so some of its text has no quads. A
+-- dropped frame damages the whole window and marks the context dirty, so
+-- the next frame, after 'beginTtfFrame' resets the atlas, repaints it all
+-- and the screen keeps the last good frame meanwhile. @fresh@ is what
+-- 'beginTtfFrame' answered for this frame: a frame that filled an atlas
+-- reset at its own start (a glyph larger than a page, or more glyphs than
+-- the pages hold) would fill it again after every reset, so it is presented
+-- with those glyphs missing instead.
+ttfFrameDropped :: SdlFontCache -> Context -> Bool -> IO Bool
+ttfFrameDropped cache ctx fresh = do
+  dropped <- (&& not fresh) <$> glyphAtlasFull cache
+  when dropped $ do
+    damageFull ctx
+    markDirty ctx
+  pure dropped
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource

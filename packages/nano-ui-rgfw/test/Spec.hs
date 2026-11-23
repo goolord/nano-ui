@@ -27,12 +27,12 @@ import NanoUI.Rgfw.Internal.Font.Cozette
   , renderGlyphScaledToBuffer
   )
 import NanoUI.Rgfw.Internal.Gl
-  (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, toPhysRect, writeSpanQuads)
+  (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glBufferStrides, glyphAtlasFor, toPhysRect, writeSpanQuads)
 import NanoUI.Rgfw.Internal.Session (applyRgfwEvent, decodeRgfwEvents, mapRgfwCursor)
 import NanoUI.Rgfw.Render (RgfwSurface (..), packColor, renderArena, withSurface)
 import NanoUI.Rgfw.Wake (testRgfwWake)
 import NanoUI.Rgfw.Window (testChildWindow, testGlWindow, testSessionWindow)
-import NanoUI.Testing (Context, collectRasterSpans)
+import NanoUI.Testing (Context, collectRasterSpans, indexSize, vertexSize)
 import NanoUI.Testing.Assert (run2Frames)
 import NanoUI.Testing.Harness (DemoSpan, nodesOfType, withInputOff)
 import NanoUI.Testing.Runner (check, runChecks)
@@ -97,6 +97,8 @@ testGlyphs failed = do
         | y <- [0 .. 2 * h - 1]
         , x <- [0 .. 2 * w - 1]
         ]
+  strides <- glBufferStrides
+  check failed "nano_ui_gl.c reads the core's vertex and index strides" (strides == (vertexSize, indexSize))
   let (x1, _, w1, _) = toPhysRect 1.33 0 0 63.7 30
       (x2, _, _, _) = toPhysRect 1.33 63.7 0 63.7 30
   check failed "Adjacent widgets at fractional scale have zero gap/overlap" (x1 + w1 == x2)

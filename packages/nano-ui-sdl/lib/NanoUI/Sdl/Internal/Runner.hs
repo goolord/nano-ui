@@ -9,7 +9,7 @@ module NanoUI.Sdl.Internal.Runner
   , resetRenderTextures
   ) where
 
-import Control.Exception (finally, mask_)
+import Control.Exception (mask_)
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
 import Data.IORef (IORef, readIORef, writeIORef)
@@ -18,8 +18,8 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend (answerScreenshots, answerScreenshotsAfter)
 import NanoUI.Testing
-import NanoUI.Internal.Context (Context (ctxDamageWanted), markDirtyCovered)
-import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugPresent, noteDebugSkip, refreshDebugSnapshot)
+import NanoUI.Internal.Context (markDirtyCovered, withFramePaint)
+import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugFrame, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState (..), defaultWindowChrome)
 import NanoUI.Sdl.Internal.Debug
 import NanoUI.Sdl.Internal.Display (outPair, queryMouseWindowPos, queryWindowLogicalSize, scaleMoved, sendWaylandSizeLimits)
@@ -28,6 +28,7 @@ import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Error (sdlFail)
 import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass, snapDamage)
+import NanoUI.Ttf.Internal.Font (beginTtfFrame, ttfFrameDropped)
 import NanoUI.Sdl.Internal.Window (PresentProbe (..), Retain (..), SdlEnv (..), captureFrame, notePresent, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
@@ -71,13 +72,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   -- out of space during the previous frame, reset it now (re-warming the
   -- base fonts) so a reset can never wipe the texture underneath
   -- already-recorded text mid-frame.
-  freshAtlas <- prepareGlyphAtlasForFrame (sdlFontCache env)
-  -- The reset emptied the glyph slots a kept draw's text points at, so the
-  -- frame paints rather than reuse one.
-  when freshAtlas (damageFull ctx)
-  -- Fonts the size cache evicted close only now, with the text caches that
-  -- can still hold their metrics dropped, before the UI pass draws.
-  whenM (closeEvictedFonts (sdlFontCache env)) (clearMeasureCache ctx)
+  freshAtlas <- beginTtfFrame (sdlFontCache env) ctx
   scale <- readIORef (sdlScaleRef env)
   -- The frame is the backbuffer's size. One worked out from the scale can be
   -- a pixel off it at a fractional scale, where each axis rounds apart, and
@@ -109,11 +104,6 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
       then (nullPtr, False) <$ dropRetain env
       else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
-  writeIORef (ctxPaintFull ctx) (presentFull || transparent)
-  -- A full present ignores the frame's damage (below), so the frame need not
-  -- work it out beyond what reusing its last draw takes. Frames run outside
-  -- a draw still do, even when the pass throws.
-  writeIORef (ctxDamageWanted ctx) (not presentFull)
   -- Chrome regions a view handed over lapse with the first frame whose view
   -- does not hand them over again: a title bar no longer drawn must not
   -- leave its drag region and edges answering the desktop's hit test.
@@ -121,7 +111,9 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   viewChrome <- readIORef (chromeFromView chrome)
   writeIORef (chromeFromView chrome) False
   t0 <- getMonotonicTime
-  (drawData, dirtyAfterUi) <- evaluateUi `finally` writeIORef (ctxDamageWanted ctx) True
+  -- A full present ignores the frame's damage (below), so the frame need not
+  -- work it out beyond what reusing its last draw takes.
+  (drawData, dirtyAfterUi) <- withFramePaint ctx (presentFull || transparent) presentFull evaluateUi
   when viewChrome $
     unlessM (readIORef (chromeFromView chrome)) (writeIORef (chromeRegions chrome) defaultWindowChrome)
   -- Images registered during the view (an icon rasterized the first time it
@@ -147,19 +139,12 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   writeIORef (sdlLastPresented env) False
   -- A glyph-atlas exhaustion during the UI pass means text quads the frame
   -- could not place. Drop the frame instead of presenting it: the screen
-  -- keeps the previous valid frame, 'damageFull' forces a full repaint, and
-  -- 'prepareGlyphAtlasForFrame' resets the atlas before the next frame
-  -- records any quads, so text never flickers or vanishes for a frame.
-  -- A frame that ran out of room in an atlas reset at its start (a glyph
-  -- larger than a page, or more glyphs than the pages hold) would fail the
-  -- same way after every reset, so it is presented with those glyphs missing
-  -- instead of dropped and run again forever.
-  atlasReset <- (&& not freshAtlas) <$> glyphAtlasFull (sdlFontCache env)
+  -- keeps the previous valid frame, and the next frame resets the atlas
+  -- before it records any quads and repaints whole, so text never flickers
+  -- or vanishes for a frame ('ttfFrameDropped').
+  atlasReset <- ttfFrameDropped (sdlFontCache env) ctx freshAtlas
   if atlasReset || damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
-      when atlasReset $ do
-        damageFull ctx
-        markDirty ctx
       noteDebugSkip (sdlDebug env)
       -- With nothing to repaint, the retained frame on screen is this one.
       -- A dropped frame's screenshots wait for the next frame, which the
@@ -214,9 +199,7 @@ presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
     else void (renderPresentSafe ren)
   t3 <- getMonotonicTime
   notePresent env t3
-  let ms a b = (b - a) * 1000
-  noteDebugPresent (sdlDebug env) (ms t0 t1) (ms t1 t2) (ms t2 t3) (ms t0 t3)
-    (drawVertexCount drawData) (drawIndexCount drawData) (drawCmdCount drawData)
+  noteDebugFrame (sdlDebug env) t0 t1 t2 t3 drawData
   writeIORef (sdlLastPresented env) True
   unless direct $ answerScreenshots ctx (captureFrame env tex)
   where

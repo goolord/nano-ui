@@ -29,6 +29,7 @@ module NanoUI.Rgfw.Internal.Gl
   , writeSpanQuads
   , toPhysRect
   , physClip
+  , glBufferStrides
   ) where
 
 import Control.Exception (bracket)
@@ -107,6 +108,18 @@ foreign import ccall unsafe "nano_ui_gl_draw_geometry"
 
 foreign import ccall unsafe "nano_ui_gl_draw_text"
   c_drawText :: Ptr NanoUiGl -> Int32 -> Int32 -> IO ()
+
+foreign import ccall unsafe "nano_ui_gl_vertex_bytes"
+  c_vertexBytes :: IO Int32
+
+foreign import ccall unsafe "nano_ui_gl_index_bytes"
+  c_indexBytes :: IO Int32
+
+-- | The vertex and index strides in bytes nano_ui_gl.c reads the draw
+-- buffers with. They must equal the core's 'vertexSize' and
+-- 'NanoUI.Testing.indexSize'; nano-ui-rgfw-test checks.
+glBufferStrides :: IO (Int, Int)
+glBufferStrides = (,) <$> (fromIntegral <$> c_vertexBytes) <*> (fromIntegral <$> c_indexBytes)
 
 -- | GPU resources and glyph scratch storage owned by one OpenGL context.
 -- Release with 'freeGlRenderer' while that context is still current.
@@ -240,6 +253,14 @@ drawCmd h !scale !fbW !fbH cmd
 
 -- | Scale logical x/y/width/height to physical pixels, snapping both edges
 -- with half-up rounding. Returns x/y/width/height with non-negative extents.
+--
+-- The SDL and web backends round a clip outwards instead
+-- ('NanoUI.Testing.clipPixelEdges'), to cover the pixels of damage they
+-- snapped outwards ('NanoUI.Backend.snapDamage'). This backend snaps no
+-- damage: it repaints a logical pixel past it ('damageBox'), and rounds
+-- each scissor edge to the pixel 'roundHalfUp' snaps geometry and Cozette
+-- glyph pens to, so a scissor edge falls where the shapes it cuts end, and
+-- two clips that meet share an edge with no pixel between or under both.
 {-# INLINE toPhysRect #-}
 toPhysRect :: Float -> Float -> Float -> Float -> Float -> (Int, Int, Int, Int)
 toPhysRect !scale !rx !ry !rw !rh =

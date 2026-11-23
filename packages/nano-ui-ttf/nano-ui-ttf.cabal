@@ -21,8 +21,11 @@ extra-doc-files:
     CHANGELOG.md
     README.md
 
+-- The header is listed so cabal rebuilds the C and hsc2hs sources when it
+-- changes; install-includes alone is not tracked.
 extra-source-files:
     data/inter.ttf
+    include/nano_ui_ttf_shared.h
 
 source-repository head
     type:     git
@@ -58,6 +61,7 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Ttf.Internal.Font
+        NanoUI.Ttf.Internal.Header
         NanoUI.Ttf.Internal.Inter
     build-depends:
         base >=4.20 && <4.23,
@@ -68,6 +72,11 @@ library
         primitive ^>=0.9,
         text >=2.1.2 && <2.2
     hs-source-dirs:   lib
+    -- nano-ui-sdl and nano-ui-sdl-web include the installed header from
+    -- their own C sources.
+    include-dirs:     include
+    install-includes: nano_ui_ttf_shared.h
+    build-tool-depends: hsc2hs:hsc2hs
     if !flag(sdl)
         buildable: False
     if flag(sdl)

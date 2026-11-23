@@ -13,6 +13,7 @@
  * GL entry points are resolved through RGFW's loader, so this file needs no
  * GL headers and adds no link dependencies. */
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,8 +142,26 @@ typedef struct ngl_api {
 #undef X
 } ngl_api;
 
-/* Must match the core's vertexSize / indexSize. */
+/* Must match the core's vertexSize / indexSize. nano-ui-rgfw-test checks
+ * them through nano_ui_gl_vertex_bytes and nano_ui_gl_index_bytes. */
 enum { NGL_VERTEX_BYTES = 32, NGL_INDEX_BYTES = 4 };
+
+/* One vertex of the core's draw buffer and of the text quads Gl.hs writes
+ * (writeSpanQuads): position, RGBA from 0 to 1, UV. ngl_vertex_layout points
+ * the attributes at these fields. */
+typedef struct ngl_vertex {
+  float x, y;
+  float r, g, b, a;
+  float u, v;
+} ngl_vertex;
+
+_Static_assert(sizeof(ngl_vertex) == NGL_VERTEX_BYTES, "ngl_vertex must be the core's 32-byte vertex");
+_Static_assert(offsetof(ngl_vertex, r) == 8, "colour follows the 2-float position");
+_Static_assert(offsetof(ngl_vertex, u) == 24, "UV follows the 4-float colour");
+_Static_assert(sizeof(uint32_t) == NGL_INDEX_BYTES, "indices are 32-bit");
+
+int32_t nano_ui_gl_vertex_bytes(void) { return NGL_VERTEX_BYTES; }
+int32_t nano_ui_gl_index_bytes(void) { return NGL_INDEX_BYTES; }
 
 enum { NGL_MODE_NONE, NGL_MODE_GEOMETRY, NGL_MODE_IMAGE, NGL_MODE_TEXT };
 
@@ -258,11 +277,11 @@ static int ngl_link(nano_ui_gl* r) {
 
 static void ngl_vertex_layout(ngl_api* gl) {
   gl->EnableVertexAttribArray(0);
-  gl->VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, NGL_VERTEX_BYTES, (const void*)0);
+  gl->VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, NGL_VERTEX_BYTES, (const void*)offsetof(ngl_vertex, x));
   gl->EnableVertexAttribArray(1);
-  gl->VertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, NGL_VERTEX_BYTES, (const void*)8);
+  gl->VertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, NGL_VERTEX_BYTES, (const void*)offsetof(ngl_vertex, r));
   gl->EnableVertexAttribArray(2);
-  gl->VertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, NGL_VERTEX_BYTES, (const void*)24);
+  gl->VertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, NGL_VERTEX_BYTES, (const void*)offsetof(ngl_vertex, u));
 }
 
 static int ngl_major_version(const uint8_t* version) {

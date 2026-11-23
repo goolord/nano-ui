@@ -5,13 +5,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Pages the atlas opens before it is out of space. Mirrors glyphAtlasPages
- * in NanoUI.Internal.Draw.Types. */
-#define NANO_UI_WEB_ATLAS_PAGES 4
+#include "nano_ui_ttf_shared.h"
 
-/* Width and height of a page in pixels. Mirrors glyphAtlasSize in
- * NanoUI.SdlWeb.Internal.Font. */
-#define NANO_UI_WEB_ATLAS_SIZE 2048
+/* Pages the atlas opens before it is out of space, and the width and height
+ * of a page in pixels: nano-ui-ttf's, which nano_ui_text_atlas.c in
+ * nano-ui-sdl uses too. */
+#define NANO_UI_WEB_ATLAS_PAGES NANO_UI_GLYPH_ATLAS_PAGES
+#define NANO_UI_WEB_ATLAS_SIZE NANO_UI_GLYPH_ATLAS_SIZE
 
 /* The glyph atlas of nano_ui_text_atlas.c in nano-ui-sdl, kept in memory
  * instead of SDL textures: each page is RGBA32 pixels, and the area written
