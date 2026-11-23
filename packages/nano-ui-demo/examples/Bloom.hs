@@ -15,10 +15,9 @@
 -- Dragging the canvas turns the flower by the angle the pointer moves
 -- around its centre.
 --
--- The view is shared by two programs: @cabal run nano-ui-example-bloom@
--- opens it in an SDL window, and @nano-ui-web-bloom@ is the canvas on the
--- project's landing page.
-module Bloom (bloomView) where
+-- Run it with @cabal run nano-ui-example-bloom@. It is also the first tab
+-- of the program on the project's landing page ("Landing").
+module Bloom (bloomView, bloomViewWith) where
 
 import Control.Monad (forM_, when)
 import Data.Text qualified as T
@@ -37,13 +36,17 @@ data Bloom = Bloom
   }
 
 bloomView :: NanoUI ()
-bloomView = do
+bloomView = bloomViewWith True
+
+-- | 'bloomView' with "Spin" starting ticked or not.
+bloomViewWith :: Bool -> NanoUI ()
+bloomViewWith spinning = do
   petals <- useVar 6
   rings <- useVar 5
   twist <- useVar 0.3
   depth <- useVar 0.55
   swatch <- useVar (0 :: Int)
-  spin <- useVar True
+  spin <- useVar spinning
   seed <- useVar (0 :: Int)
   angle <- useVar 0
   theme <- uiTheme

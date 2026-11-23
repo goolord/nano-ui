@@ -216,15 +216,15 @@ executable nano-ui-web-cookbook
     if !flag(web)
         buildable: False
 
--- "Bloom" in a browser canvas, for the landing page (site/index.html): a
+-- The landing page's program (site/index.html) in a browser canvas: a
 -- reactor module like nano-ui-web-cookbook, with only the view's own
 -- dependencies so the page's download stays small.
-executable nano-ui-web-bloom
+executable nano-ui-web-landing
     import:           extensions
     import:           warnings
     hs-source-dirs:   examples, examples/web
-    main-is:          BloomMain.hs
-    other-modules:    Bloom
+    main-is:          LandingMain.hs
+    other-modules:    Bloom, Landing
     build-depends:
         base >=4.20 && <4.23,
         nano-ui ^>=0.2,
@@ -346,13 +346,21 @@ executable nano-ui-example-animation
     main-is:          Animation.hs
     build-depends:    text ^>=2.1
 
--- The landing page's demo in an SDL window; nano-ui-web-bloom is the
--- browser build of the same view.
+-- The landing page's first tab on its own.
 executable nano-ui-example-bloom
     import:           example
     hs-source-dirs:   examples/sdl
     main-is:          BloomMain.hs
     other-modules:    Bloom
+    build-depends:    text ^>=2.1
+
+-- The landing page's program in an SDL window; nano-ui-web-landing is the
+-- browser build of the same view.
+executable nano-ui-sdl-landing
+    import:           example
+    hs-source-dirs:   examples/sdl
+    main-is:          LandingMain.hs
+    other-modules:    Bloom, Landing
     build-depends:    text ^>=2.1
 
 executable nano-ui-example-images
