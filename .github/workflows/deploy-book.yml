@@ -4,12 +4,19 @@ on:
   push:
     branches:
       - main
+    # The book, and everything the browser demo under demo/ builds from.
     paths:
       - 'book/**'
-      - 'packages/nano-ui-demo/examples/**'
-      - 'packages/nano-ui-demo/book/**'
+      - 'packages/nano-ui/**'
+      - 'packages/nano-ui-emit/**'
+      - 'packages/nano-ui-ttf/**'
+      - 'packages/nano-ui-sdl-web/**'
+      - 'packages/nano-ui-diagrams/**'
+      - 'packages/nano-ui-demo/**'
       - 'packages/nano-ui-svg/app/**'
+      - 'cabal.project.wasm'
       - '.github/workflows/deploy-book.yml'
+      - '.github/workflows/web.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +29,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The browser demo, built by the Web workflow into its web-demo artifact.
+  web:
+    uses: ./.github/workflows/web.yml
+
   build-and-deploy:
+    needs: web
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -38,6 +50,14 @@ jobs:
 
       - name: Build with mdBook
         run: mdbook build book
+
+      # Pages takes one artifact per deployment, so the demo goes inside the
+      # book's site.
+      - name: Add the browser demo under demo/
+        uses: actions/download-artifact@v4
+        with:
+          name: web-demo
+          path: book/book/demo
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

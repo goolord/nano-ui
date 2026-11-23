@@ -12,6 +12,8 @@ You describe the whole window as one `NanoUI ()` action, and the backend runs th
 
 Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source for each tutorial is in [`packages/nano-ui-demo/examples`](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples).
 
+The [widget cookbook](demo/index.html) runs in this site, in your browser. It is the desktop demo's view (`examples/Demo.hs`) compiled to WebAssembly and drawn with the `nano-ui-sdl-web` backend. File dialogs and frame statistics need the desktop backend, and the only font is the bundled Inter.
+
 ## Packages in the monorepo
 
 | Package | What it is | Read |
@@ -19,6 +21,7 @@ Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source
 | `packages/nano-ui` | Core toolkit: widgets, layout, input, theming, draw list, text arena. | [State](state/index.md), [Layout](layout/index.md), [Widget Gallery](widgets/index.md) |
 | `packages/nano-ui-sdl` | SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars. | [Ecosystem Packages](packages/index.md), [Desktop Windows](advanced/window-management.md) |
 | `packages/nano-ui-rgfw` | RGFW + OpenGL 3.2 backend with a bundled bitmap font and no system dependencies. | [Ecosystem Packages](packages/index.md) |
+| `packages/nano-ui-sdl-web` | Browser backend for GHC's WebAssembly target: SDL_ttf text, WebGL2 drawing. | [The cookbook in the browser](demo/index.html) |
 | `packages/nano-ui-emit` | Elm-style typed messages and update reducers (`NanoUIE msg a`). | [Elm-Style State](state/elm.md) |
 | `packages/nano-ui-diagrams` | Line, bar, scatter, and area charts (`NanoUI.Plot`) with diagrams-lib integration. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-form` | Validated applicative forms built on ditto. | [Ecosystem Packages](packages/index.md) |

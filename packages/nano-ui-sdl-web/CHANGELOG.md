@@ -11,4 +11,8 @@
   (`base >=4.20 && <4.23`).
 - `web/` holds the page's runtime, a loader and a demo page;
   `scripts/build-wasi-deps.sh` builds SDL3, SDL3_ttf, FreeType and
-  HarfBuzz for wasm32-wasi, and `scripts/build-web.sh` builds the demo.
+  HarfBuzz for wasm32-wasi, and `scripts/build-web.sh` builds the demo, or
+  any program given as its cabal target. `scripts/smoke-test.cjs` loads a
+  built page in headless Chromium and checks it draws and takes a click.
+- `formatExplainRows`, for showing the layout overlay's node, as
+  nano-ui-sdl exports it.

@@ -47,6 +47,11 @@ counter = row $ do
 
 ## Examples
 
+The widget cookbook runs in the browser at
+**[goolord.github.io/nano-ui/demo](https://goolord.github.io/nano-ui/demo/)**.
+It is the same view as `nano-ui-sdl-demo`, compiled with GHC's WebAssembly
+backend and drawn by [`nano-ui-sdl-web`](packages/nano-ui-sdl-web/README.md).
+
 See [`nano-ui-demo`](packages/nano-ui-demo/README.md) for full demo
 applications and single-topic examples.
 
@@ -103,6 +108,7 @@ used to check that the vertex writers compile without dictionaries or tuples.
 | `nano-ui-sdl` | Window backend on SDL3, with TrueType fonts, installed-font lookup, and native file dialogs |
 | `nano-ui-rgfw` | Window backend on RGFW and OpenGL 3.2, with a bundled bitmap font and no system dependencies beyond windowing |
 | `nano-ui-rgfw-bindings` | Haskell bindings to RGFW |
+| `nano-ui-sdl-web` | Browser backend for GHC's WebAssembly target, with SDL_ttf text and WebGL2 |
 | `nano-ui-diagrams` | Line, bar, scatter, and area charts, and drawing with [diagrams](https://diagrams.github.io/) |
 | `nano-ui-form` | Validated forms built on [ditto](https://hackage.haskell.org/package/ditto) |
 | `nano-ui-emit` | Statically typed emitting views, widget adapters, and reducers |

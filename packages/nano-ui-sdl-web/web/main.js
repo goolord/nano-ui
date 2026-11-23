@@ -1,8 +1,8 @@
 // Load a nano-ui-sdl-web program: the wasm module scripts/build-web.sh
-// links, and the JSFFI glue GHC's post-link.mjs generates for it, both
-// served beside this file. The page's canvas is passed to the runtime in
-// nano-ui-sdl-web.js before the program starts.
-import { WASI, OpenFile, File, ConsoleStdout } from "https://cdn.jsdelivr.net/npm/@bjorn3/browser_wasi_shim@0.4.1/dist/index.js";
+// links, the JSFFI glue GHC's post-link.mjs generates for it, and the WASI
+// shim, all served beside this file. The page's canvas is passed to the
+// runtime in nano-ui-sdl-web.js before the program starts.
+import { WASI, OpenFile, File, ConsoleStdout } from "./browser_wasi_shim/index.js";
 import ghcWasmJsffi from "./ghc_wasm_jsffi.js";
 
 export async function start(canvas, wasmUrl) {
