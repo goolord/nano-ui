@@ -1,0 +1,55 @@
+<!doctype html>
+<!--
+  Pages serves this for an address with no file. The book was at the site's
+  root before it moved under book/, so an address from then is sent to the
+  same page there. Links are absolute: this page is served at any depth.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page not found: nano-ui</title>
+  <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    (() => {
+      const root = "/nano-ui/";
+      if (!location.pathname.startsWith(root)) return;
+      const rest = location.pathname.slice(root.length);
+      const first = rest.split("/")[0];
+      // A miss under book/ or demo/ is a miss; sending it on would loop.
+      if (rest && first !== "book" && first !== "demo") {
+        location.replace(root + "book/" + rest + location.search + location.hash);
+      }
+    })();
+  </script>
+  <style>
+    :root { --window: #18181b; --text: #eceae6; --muted: #b0aca4; --link: #7cb2fa; --accent: #589cf6; }
+    @media (prefers-color-scheme: light) {
+      :root { --window: #f4f4f2; --text: #242428; --muted: #5f5c58; --link: #1d4ed8; --accent: #2563eb; }
+    }
+    body {
+      margin: 0; padding: 15vh 16px 0; background: var(--window); color: var(--text);
+      font: 16px/1.55 Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    main { max-width: 560px; margin: 0 auto; }
+    h1 { font-size: 28px; line-height: 1.2; font-weight: 600; margin: 0 0 8px; }
+    p { margin: 0 0 16px; color: var(--muted); }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+    nav { display: flex; gap: 20px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Page not found</h1>
+    <p>No page of nano-ui's site has this address.</p>
+    <nav aria-label="Site">
+      <a href="/nano-ui/">Home</a>
+      <a href="/nano-ui/book/">Book</a>
+      <a href="/nano-ui/demo/">Cookbook</a>
+    </nav>
+  </main>
+</body>
+</html>

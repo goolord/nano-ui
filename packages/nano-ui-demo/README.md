@@ -19,7 +19,7 @@ The package is split into two parts:
 | Executable | Source | Description |
 | --- | --- | --- |
 | `nano-ui-sdl-demo` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/sdl/`](examples/sdl/), [`lib/DemoData.hs`](lib/DemoData.hs) | Multi-tab showcase of built-in widgets, layout containers, custom 2D vector graphics, animated GIFs, rich text, trees, sortable tables, dynamic tabs, split panes, and `nano-ui-diagrams` charts. Includes a live state sidebar showing current `Var` values across tabs, an `About` modal (`F1`), and a `Debug` window (`F12`) with frame timings, damage statistics, and an interactive layout overlay. |
-| `nano-ui-web-cookbook` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/web/`](examples/web/) | The same cookbook in a browser canvas with `nano-ui-sdl-web`, [published with the book](https://goolord.github.io/nano-ui/demo/). `DemoPlatform` in `examples/sdl` and `examples/web` holds what differs: the web build embeds the data files, lists installed fonts (Chromium, once allowed) and Fontsource's, and opens and saves files by their contents. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-cookbook` (see that package's README). |
+| `nano-ui-web-cookbook` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/web/`](examples/web/) | The same cookbook in a browser canvas with `nano-ui-sdl-web`, [published on the project's site](https://goolord.github.io/nano-ui/demo/). `DemoPlatform` in `examples/sdl` and `examples/web` holds what differs: the web build embeds the data files, lists installed fonts (Chromium, once allowed) and Fontsource's, and opens and saves files by their contents. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-cookbook` (see that package's README). |
 | `nano-ui-sdl-landing` | [`examples/Landing.hs`](examples/Landing.hs), [`examples/Bloom.hs`](examples/Bloom.hs), [`examples/sdl/LandingMain.hs`](examples/sdl/LandingMain.hs) | The program on the [landing page](https://goolord.github.io/nano-ui/), in an SDL window: four tabs sized to fit a phone's screen. Bloom is the drawing; Controls, Text and Data hold buttons, a modal, a tooltip, choices, a slider, a numeric input, text fields, a combo box, a text area, a table and a tree. |
 | `nano-ui-web-landing` | the same, with [`examples/web/LandingMain.hs`](examples/web/LandingMain.hs) | The browser build that [`site/index.html`](../../site/index.html) loads, with only `nano-ui` and `nano-ui-sdl-web` as dependencies. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web/landing nano-ui-demo:exe:nano-ui-web-landing`. |
 | `nano-ui-sdl-notepad` | [`examples/Notepad.hs`](examples/Notepad.hs) | Plain-text editor with a menu bar built on `popup`, keyboard shortcuts, unsaved-change tracking in the window title, and asynchronous native open/save file dialogs. |
@@ -90,7 +90,7 @@ cabal run nano-ui-example-layout
 Requires GHC 9.10 through 9.14 (development uses GHC 9.14), Cabal, SDL3,
 SDL3_ttf 3.2+, and `pkg-config`. In a repository checkout, `nix develop`
 provides the full toolchain and native dependencies; see the
-[development guide](https://goolord.github.io/nano-ui/getting-started/development.html#setup)
+[development guide](https://goolord.github.io/nano-ui/book/getting-started/development.html#setup)
 for details. All executables are gated behind the package's `sdl` Cabal flag
 (enabled by default).
 
@@ -103,7 +103,7 @@ cabal test nano-ui-terminal-test  # tests the terminal emulator's ANSI parser an
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html): the comprehensive
+- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
   online guide, tutorials, and widget gallery.
-- [Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html#setup):
+- [Development Guide](https://goolord.github.io/nano-ui/book/getting-started/development.html#setup):
   toolchain setup, build instructions, and testing.

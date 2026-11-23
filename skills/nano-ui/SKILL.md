@@ -39,7 +39,7 @@ Reference files in this skill, read when the task needs them:
   plus `package nano-ui-sdl` with `flags: +sdl`). Cabal fetches it into
   `dist-newstyle/src/nano-ui-<hash>/`; read the source and export lists there.
   The Hackage release may lag the source.
-- The book (https://goolord.github.io/nano-ui/, or `book/src` in the repo)
+- The book (https://goolord.github.io/nano-ui/book/, or `book/src` in the repo)
   covers state, layout, every widget family, styling, input and async work.
   `packages/nano-ui-demo/examples/` has one concept per file (`Hello`,
   `State`, `Layout`, `Components`, `Forms`, `TodoList`, `Keyboard`,

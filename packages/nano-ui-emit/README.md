@@ -77,7 +77,7 @@ the latter only returns the final pass's messages if the view rebuilds.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html): the comprehensive
+- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
   online guide, tutorials, and Elm-style state documentation.
 
 ## Verification

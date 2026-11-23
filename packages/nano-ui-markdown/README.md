@@ -169,4 +169,4 @@ requires the `sdl` flag (off by default, on in this repository's
 
 ## Documentation
 
-[The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html)
+[The nano-ui Book](https://goolord.github.io/nano-ui/book/)

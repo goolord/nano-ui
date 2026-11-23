@@ -101,7 +101,7 @@ for typed messages, which the backend reducer runners fold into a model.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html): the comprehensive
+- [The nano-ui Book](https://goolord.github.io/nano-ui/book/): the comprehensive
   online guide, tutorials, widget gallery, architecture, and cookbook.
 - [User guide](https://github.com/goolord/nano-ui/blob/main/packages/nano-ui/GUIDE.md)
   (also bundled as `GUIDE.md` in the sdist tarball): application setup, state
@@ -111,7 +111,7 @@ for typed messages, which the backend reducer runners fold into a model.
   modifiers.
 - [GitHub repository](https://github.com/goolord/nano-ui): demo applications,
   video tour, and
-  [development guide](https://goolord.github.io/nano-ui/getting-started/development.html).
+  [development guide](https://goolord.github.io/nano-ui/book/getting-started/development.html).
 
 ## License
 

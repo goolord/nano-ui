@@ -344,7 +344,7 @@ details title body = column $ do
 ```haskell
 footer :: NanoUI ()
 footer = do
-  clicked <- richText ["Read the ", hyperlink "https://goolord.github.io/nano-ui/" "book", " first."]
+  clicked <- richText ["Read the ", hyperlink "https://goolord.github.io/nano-ui/book/" "book", " first."]
   for_ clicked (liftIO . void . openUrl)
 ```
 

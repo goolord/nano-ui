@@ -120,18 +120,18 @@ used to check that the vertex writers compile without dictionaries or tuples.
 
 ## Documentation
 
-Comprehensive documentation is available in **[The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html)** (and offline in the [`book/`](book/) directory):
+Comprehensive documentation is available in **[The nano-ui Book](https://goolord.github.io/nano-ui/book/)** (and offline in the [`book/`](book/) directory):
 
-- **[Quick Start](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
-- **[Tutorials](https://goolord.github.io/nano-ui/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.
-- **[State & `Var`](https://goolord.github.io/nano-ui/state/index.html)** and **[Elm-Style State](https://goolord.github.io/nano-ui/state/elm.html)**: Where state lives, write costs, `VarMap`, and typed reducers.
-- **[Layout & Scrolling](https://goolord.github.io/nano-ui/layout/index.html)**: Containers, modifiers, and 100,000-row list virtualization.
-- **[Widget Gallery](https://goolord.github.io/nano-ui/widgets/index.html)** and **[Styling & Theming](https://goolord.github.io/nano-ui/styling/index.html)**: One guide to every widget, plus theming, states, typography, and the [styling lab](https://goolord.github.io/nano-ui/styling/lab.html).
-- **[Keyboard, Focus & IME](https://goolord.github.io/nano-ui/input/index.html)**: Shortcuts, focus, and text input.
-- **[Async Work & Animation](https://goolord.github.io/nano-ui/advanced/async.html)** and **[Ecosystem Packages](https://goolord.github.io/nano-ui/packages/index.html)**: Background work, charts, forms, markdown, SVG, and backends.
-- **[Troubleshooting](https://goolord.github.io/nano-ui/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and their fixes.
-- **[Architecture & Internals](https://goolord.github.io/nano-ui/architecture/index.html)**: Frame lifecycle, application patterns, and internals.
-- **[Development Guide](https://goolord.github.io/nano-ui/getting-started/development.html)**: Building, testing, profiling, and repository conventions.
+- **[Quick Start](https://goolord.github.io/nano-ui/book/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
+- **[Tutorials](https://goolord.github.io/nano-ui/book/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.
+- **[State & `Var`](https://goolord.github.io/nano-ui/book/state/index.html)** and **[Elm-Style State](https://goolord.github.io/nano-ui/book/state/elm.html)**: Where state lives, write costs, `VarMap`, and typed reducers.
+- **[Layout & Scrolling](https://goolord.github.io/nano-ui/book/layout/index.html)**: Containers, modifiers, and 100,000-row list virtualization.
+- **[Widget Gallery](https://goolord.github.io/nano-ui/book/widgets/index.html)** and **[Styling & Theming](https://goolord.github.io/nano-ui/book/styling/index.html)**: One guide to every widget, plus theming, states, typography, and the [styling lab](https://goolord.github.io/nano-ui/book/styling/lab.html).
+- **[Keyboard, Focus & IME](https://goolord.github.io/nano-ui/book/input/index.html)**: Shortcuts, focus, and text input.
+- **[Async Work & Animation](https://goolord.github.io/nano-ui/book/advanced/async.html)** and **[Ecosystem Packages](https://goolord.github.io/nano-ui/book/packages/index.html)**: Background work, charts, forms, markdown, SVG, and backends.
+- **[Troubleshooting](https://goolord.github.io/nano-ui/book/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and their fixes.
+- **[Architecture & Internals](https://goolord.github.io/nano-ui/book/architecture/index.html)**: Frame lifecycle, application patterns, and internals.
+- **[Development Guide](https://goolord.github.io/nano-ui/book/getting-started/development.html)**: Building, testing, profiling, and repository conventions.
 - **[`NanoUI` Haddock](https://hackage.haskell.org/package/nano-ui)**: Released API documentation. For the current source, run `cabal haddock-project --output=haddocks --hoogle`.
 
 ## License

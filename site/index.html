@@ -1,8 +1,8 @@
 <!doctype html>
 <!--
   The project's landing page. The Pages workflow (deploy-book.yml) copies
-  this directory over the built book, so this file is the site's index.html
-  and the book's first chapter is introduction.html beside it.
+  this directory to the site's root, beside the book in book/ and the
+  browser demos in demo/. 404.html sends the book's old addresses to book/.
 
   The colours are NanoUI.Internal.Style.Presets' defaultTheme and
   defaultLightTheme. The canvas runs packages/nano-ui-demo/examples/Landing.hs,
@@ -203,7 +203,7 @@
       nano-ui
     </a>
     <nav aria-label="Site">
-      <a href="introduction.html">Book</a>
+      <a href="book/">Book</a>
       <a href="demo/">Cookbook</a>
       <a class="extra" href="https://hackage.haskell.org/package/nano-ui">Hackage</a>
       <a href="https://github.com/goolord/nano-ui">GitHub</a>
@@ -219,8 +219,8 @@
         <code>Var</code>s, and the loop sleeps until the next input.
       </p>
       <div class="actions">
-        <a class="button primary" href="getting-started/quickstart.html">Quick start</a>
-        <a class="button" href="introduction.html">Read the book</a>
+        <a class="button primary" href="book/getting-started/quickstart.html">Quick start</a>
+        <a class="button" href="book/">Read the book</a>
       </div>
     </div>
 
@@ -233,7 +233,7 @@
         choices, sliders, text fields, a table and a tree.
       </canvas>
     </div>
-    <noscript><p class="caption">The demo needs JavaScript. The <a href="widgets/index.html">widget gallery</a> in the book has pictures of every widget.</p></noscript>
+    <noscript><p class="caption">The demo needs JavaScript. The <a href="book/widgets/index.html">widget gallery</a> in the book has pictures of every widget.</p></noscript>
     <p class="caption" id="demo-help">
       This is nano-ui running in the page:
       <a href="https://github.com/goolord/nano-ui/blob/main/packages/nano-ui-demo/examples/Landing.hs">Landing.hs</a> and
@@ -313,16 +313,16 @@ cabal run nano-ui-sdl-demo</code></pre>
       </div>
       <p class="after">
         In a project of your own, add <code>nano-ui</code> and <code>nano-ui-sdl</code> to <code>build-depends</code>.
-        The <a href="getting-started/quickstart.html">quick start</a> has the setup for Windows and for systems without Nix,
-        and the <a href="tutorials/index.html">tutorials</a> build a todo list, a notepad and a live chart from there.
+        The <a href="book/getting-started/quickstart.html">quick start</a> has the setup for Windows and for systems without Nix,
+        and the <a href="book/tutorials/index.html">tutorials</a> build a todo list, a notepad and a live chart from there.
       </p>
     </section>
   </main>
 
   <footer>
     <span>nano-ui, MIT licence</span>
-    <a href="introduction.html">Book</a>
-    <a href="tutorials/index.html">Tutorials</a>
+    <a href="book/">Book</a>
+    <a href="book/tutorials/index.html">Tutorials</a>
     <a href="demo/">Cookbook</a>
     <a href="https://hackage.haskell.org/package/nano-ui">Hackage</a>
     <a href="https://github.com/goolord/nano-ui">GitHub</a>
@@ -378,7 +378,7 @@ cabal run nano-ui-sdl-demo</code></pre>
       stage.classList.remove("live");
       stage.classList.add("failed");
       stage.removeAttribute("tabindex");
-      statusText.innerHTML = 'The demo did not start. It needs WebAssembly and WebGL2. The <a href="widgets/index.html">widget gallery</a> in the book has pictures of every widget.';
+      statusText.innerHTML = 'The demo did not start. It needs WebAssembly and WebGL2. The <a href="book/widgets/index.html">widget gallery</a> in the book has pictures of every widget.';
     }
   </script>
   <script>
