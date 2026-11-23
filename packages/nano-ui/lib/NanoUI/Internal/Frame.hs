@@ -65,8 +65,6 @@ runFrameEff unlift ctx rawInp ui = do
   modifyDamage ctx (\ds -> ds {dsDirty = False})
   -- Timed wakes are re-requested by whatever is still built this frame.
   clearWakeAt ctx
-  -- A thread may have changed what the view reads before waking the loop,
-  -- so repaint in full.
   takeThreadWake ctx
   -- The focused field gets any IME composition, and while one shows, the IME
   -- owns the keys.

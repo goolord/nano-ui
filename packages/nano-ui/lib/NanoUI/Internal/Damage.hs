@@ -721,9 +721,14 @@ clipDamage ctx snap d owners = do
     forM_ (IS.toList (fsAnimKeys snap <> IM.keysSet (fdLiveAnims d))) $ \k ->
       unless (k == 0) (resolveSlop k)
     -- A node the view gave other paint inputs (text, value, style, colour,
-    -- scope, image) repaints with its halo, where it was and where it is.
+    -- scope, image) repaints. A widget repaints with its halo, where it was
+    -- and where it is; text, a box or an image paints inside its rect, which
+    -- a move damages already.
+    let repaintNode k = do
+          halo <- liftIO (lookupNodeByKey (ctxNodeArena ctx) k >>= maybe (pure False) (fmap isWidgetNode . getNodeType (ctxNodeArena ctx)))
+          if halo then resolveSlop k else addDamageKeyGrow new k id
     unless (ptrEq newHashes oldHashes) $
-      forM_ (IM.keys (IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newHashes oldHashes)) resolveSlop
+      forM_ (IM.keys (IM.differenceWith (\n o -> if n /= o then Just n else Nothing) newHashes oldHashes)) repaintNode
     forM_ (fdRedrawn d) $ \k -> addDamageKeyGrow new k id
     -- Also on a scroll-only frame: 'storeFloat' holds slider values too, and
     -- a label showing one can shrink or move what follows it. A scroll's own
