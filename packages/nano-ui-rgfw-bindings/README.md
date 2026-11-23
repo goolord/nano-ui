@@ -55,7 +55,7 @@ macOS; gdi32, user32, and shell32 on Windows.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+- [The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html): the comprehensive
   online guide, tutorials, and ecosystem overview.
 
 ## License

@@ -48,7 +48,8 @@ counter = row $ do
 ## Examples
 
 The widget cookbook runs in the browser at
-**[goolord.github.io/nano-ui/demo](https://goolord.github.io/nano-ui/demo/)**.
+**[goolord.github.io/nano-ui/demo](https://goolord.github.io/nano-ui/demo/)**,
+and a smaller demo on the [landing page](https://goolord.github.io/nano-ui/).
 It is the same view as `nano-ui-sdl-demo`, compiled with GHC's WebAssembly
 backend and drawn by [`nano-ui-sdl-web`](packages/nano-ui-sdl-web/README.md).
 
@@ -119,7 +120,7 @@ used to check that the vertex writers compile without dictionaries or tuples.
 
 ## Documentation
 
-Comprehensive documentation is available in **[The nano-ui Book](https://goolord.github.io/nano-ui/index.html)** (and offline in the [`book/`](book/) directory):
+Comprehensive documentation is available in **[The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html)** (and offline in the [`book/`](book/) directory):
 
 - **[Quick Start](https://goolord.github.io/nano-ui/getting-started/quickstart.html)**: Building a windowed app with Cabal or Nix.
 - **[Tutorials](https://goolord.github.io/nano-ui/tutorials/index.html)**: A todo list, a notepad, and a live data view, built end to end.

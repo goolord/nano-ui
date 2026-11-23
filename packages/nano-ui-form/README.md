@@ -117,5 +117,5 @@ To build only the form library without SDL, use `cabal build lib:nano-ui-form`.
 
 ## Documentation
 
-- [The nano-ui Book](https://goolord.github.io/nano-ui/index.html): the comprehensive
+- [The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html): the comprehensive
   online guide, tutorials, and form documentation.

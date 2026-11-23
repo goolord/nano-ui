@@ -49,4 +49,4 @@ measures in a 16 px monospace grid, so run frames inside an SDL session
 
 ## Documentation
 
-[The nano-ui Book](https://goolord.github.io/nano-ui/index.html)
+[The nano-ui Book](https://goolord.github.io/nano-ui/introduction.html)

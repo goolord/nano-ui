@@ -4,10 +4,14 @@
 // nothing is logged as an error.
 //
 //   node packages/nano-ui-sdl-web/scripts/smoke-test.cjs <dir> <x> <y> [screenshot.png]
+//   node packages/nano-ui-sdl-web/scripts/smoke-test.cjs <dir> - - [screenshot.png]
 //
 // The point is in CSS pixels of a 1280x800 page; pick one on a control
-// whose press redraws something. The screenshot, if named, is taken at the
-// end whether the checks pass or not. Needs the playwright package (ghc-wasm-meta
+// whose press redraws something. With "- -" for the point there is no
+// click: the program animates on its own, so its frame never settles for a
+// click to change, and the check is that the frame changes with no input.
+// The page's own <title> may then already be the program's. The
+// screenshot, if named, is taken at the end whether the checks pass or not. Needs the playwright package (ghc-wasm-meta
 // installs it under NODE_PATH). SMOKE_CHROME names a Chrome or Chromium
 // binary to use instead of Playwright's own.
 "use strict";
@@ -18,8 +22,9 @@ const path = require("path");
 const { chromium } = require("playwright");
 
 const [dir, x, y, shot] = process.argv.slice(2);
+const animated = x === "-" && y === "-";
 if (!dir || x === undefined || y === undefined) {
-  console.error("usage: smoke-test.cjs <dir> <x> <y> [screenshot.png]");
+  console.error("usage: smoke-test.cjs <dir> <x> <y> [screenshot.png]  (- - for x y: no click)");
   process.exit(2);
 }
 
@@ -103,14 +108,26 @@ async function waitFor(what, ms, check) {
     await page.goto(url);
     const title = await waitFor("the program to set the title", 60000, async () => {
       const t = await page.title();
-      return t !== "nano-ui" && t ? t : (errors.length ? Promise.reject(new Error(errors.join("\n"))) : null);
+      return (animated || t !== "nano-ui") && t ? t : (errors.length ? Promise.reject(new Error(errors.join("\n"))) : null);
     });
     console.log(`title: ${title}`);
-    const first = await waitFor("a frame with text", 30000, async () => {
+    // With no title to wait for first, the program may still be loading.
+    const first = await waitFor("a frame with text", animated ? 90000 : 30000, async () => {
       const s = await canvasSummary(page);
       return s.colours >= 8 ? s : null;
     });
     console.log(`first frame: ${first.colours} colours sampled`);
+    if (animated) {
+      await waitFor("the frame to change with no input", 10000, async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        const s = await canvasSummary(page);
+        return s.hash !== first.hash ? s : null;
+      });
+      console.log("the frame changed with no input");
+      if (errors.length) throw new Error(errors.join("\n"));
+      console.log(`ok: ${url}`);
+      return;
+    }
     // Hover first and let the frame settle, so only the press can change it.
     await page.mouse.move(Number(x), Number(y));
     let hovered = await canvasSummary(page);
