@@ -30,17 +30,37 @@ scale on top of the device pixel ratio.
 
 ## Fonts
 
-The bundled Inter is the default (`WebFontInter`). A page cannot read font
-files from disk, so other fonts come three ways:
+Fonts work as on the desktop. `webFontFamilies` lists the families there
+are, as `listFontFamilies` does, and `WebFontSearch ["Noto Sans", "sans-serif"]`
+uses the first that can be had, as `FontSearch` does, else the bundled Inter
+(`WebFontInter`, the default). Names compare ignoring case, spaces, `-` and
+`_`, and `sans-serif`, `serif` and `monospace` stand for the desktop's lists
+of common families. Pass a search as `webFont` or `webMonoFont`, or change the
+UI font from the view with `setSdlWebUiFont`, which loads it before the next
+frame as `setSdlUiFont` does.
 
-- `WebFontInstalled "Noto Sans"`: an installed family, which the browser
-  hands over through the Local Font Access API. Chromium-based browsers have
-  it; Firefox and Safari do not. `listWebFontFamilies` lists the families.
-  The browser asks the user the first time, and shows that question only
-  right after a click or key press, so call it from a task a button starts.
-- `WebFontUrl "fonts/Literata.ttf"`: a TrueType or OpenType file the page
-  fetches. A file on another origin needs CORS headers that allow the page.
-- `WebFontBytes bytes "label"`: a file the program embeds.
+A page cannot read font files from disk, so the families come from two
+places:
+
+- Installed families, through the Local Font Access API, in Chromium-based
+  browsers. The first time `webFontFamilies` is asked, the browser has not
+  asked the user yet, and it can ask only during a click or key press, so
+  the session asks at the user's next press on the page; that press works
+  as usual. The browser keeps the answer for the site, so on later visits
+  the installed families are there at once.
+- A font service (`webFontService = Just Fontsource`): about 2,100
+  open-licence families from fontsource.org, loaded by name as TrueType from
+  its CDN. This is what Firefox and Safari have, since they give a page no
+  installed fonts, and what Chromium has until the user allows installed
+  ones. It is off by default, since the page then fetches the catalogue and
+  fonts from a third party.
+
+A font can also be named by where it is: `WebFontInstalled "Noto Sans"` (an
+installed family only), `WebFontUrl "fonts/Literata.ttf"` (a TrueType or
+OpenType file the page fetches; another origin needs CORS headers that allow
+the page), or `WebFontBytes bytes "label"` (a file the program embeds).
+`listWebFontFamilies` asks for the installed families at once, from a task
+a press starts, for a page that wants to ask at a moment of its choosing.
 
 The bundled Inter covers printable ASCII only. For everything else (accented
 Latin, Greek, Cyrillic, the ellipsis, dashes and curly quotes, currency,
@@ -52,10 +72,8 @@ attaches system fonts: `webFallbackFonts`, by default
 file too, or sets `webFallbackFonts`. Combining accents typed apart from
 their letter still have no font that places them.
 
-Set them in `SdlWebOptions` (`webFont`, `webMonoFont`), or change the UI font
-from the view with `setSdlWebUiFont`, which loads it before the next frame as
-`setSdlUiFont` does on the desktop. A font that will not load is the bundled
-Inter, with a warning on the browser console.
+A font that will not load is the bundled Inter, with a warning on the
+browser console.
 
 ## File dialogs
 
@@ -198,8 +216,10 @@ command merging, and whole sessions on the scripted host (opening frame, a
 click on a button, a pixel ratio change reopening the fonts).
 
 In Chromium, the cookbook's Diagnostics tab shows the session's frame
-statistics, its font picker lists the installed families and switches the
-UI to one of them, and its File Dialogs section opens files and folders and
+statistics; its font picker lists the installed families and Fontsource's,
+and switches the UI to either (and, with the Local Font Access API removed
+as Firefox and Safari lack it, lists and uses Fontsource's); and its File
+Dialogs section opens files and folders and
 saves (checked with Playwright supplying the files and a stand-in save
 dialog, and with the download a browser without one falls back to).
 
@@ -209,7 +229,9 @@ browsers other than Chromium.
 ## Differences from nano-ui-sdl
 
 - There are no font directories. Installed families come only through the
-  Local Font Access API (see [Fonts](#fonts)), fallback fonts are the ones
+  Local Font Access API, in Chromium-based browsers after the user allows
+  it, and a font service stands in elsewhere (see [Fonts](#fonts)). Fallback
+  fonts are the ones
   the session loads (the wider Inter by default) rather than the system's,
   and no bold face is found beside a font file: bold and italic are drawn
   synthetically.

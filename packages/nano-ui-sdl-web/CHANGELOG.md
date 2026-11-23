@@ -20,6 +20,12 @@
   `listWebFontFamilies` (the Local Font Access API, in Chromium-based
   browsers), and `setSdlWebUiFont` to change the UI font from the view. A
   font that will not load falls back to the bundled Inter.
+- Fonts by name, as on the desktop: `WebFontSearch` uses the first family
+  that can be had (installed, else from the font service, else Inter), and
+  `webFontFamilies` lists them. Installed families are asked for at the
+  user's next press on the page, which is when browsers allow the question.
+  `webFontService = Just Fontsource` lists and loads Fontsource's families
+  in every browser, Firefox and Safari included.
 - Fallback fonts for the characters the UI font lacks: `webFallbackFonts`,
   by default the wider Inter subset (`web/fonts/inter-extended.ttf`,
   Latin beyond ASCII, Greek, Cyrillic, punctuation and common symbols) that

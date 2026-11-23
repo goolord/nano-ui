@@ -93,10 +93,13 @@ async function waitFor(what, ms, check) {
       if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push(`console error: ${m.text()}`);
       else if (m.type() !== "error") console.log(`[page] ${m.text()}`);
     });
+    // Only the page's own files count: a font service on another origin
+    // may be down, and the page falls back to its own fonts then.
+    const own = (u) => new URL(u).origin === new URL(url).origin;
     page.on("response", (r) => {
-      if (r.status() >= 400 && new URL(r.url()).pathname !== "/favicon.ico") errors.push(`HTTP ${r.status()}: ${r.url()}`);
+      if (own(r.url()) && r.status() >= 400 && new URL(r.url()).pathname !== "/favicon.ico") errors.push(`HTTP ${r.status()}: ${r.url()}`);
     });
-    page.on("requestfailed", (r) => errors.push(`request failed: ${r.url()}`));
+    page.on("requestfailed", (r) => { if (own(r.url())) errors.push(`request failed: ${r.url()}`); });
     await page.goto(url);
     const title = await waitFor("the program to set the title", 60000, async () => {
       const t = await page.title();

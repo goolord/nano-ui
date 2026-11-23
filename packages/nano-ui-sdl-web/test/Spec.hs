@@ -6,7 +6,7 @@ module Main (main) where
 import Control.Exception (Exception, catch, throwIO)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Foreign.Marshal.Utils (copyBytes)
-import NanoUI.Backend.SdlWeb (SdlWebDebugSnapshot (..), CoreDebugSnapshot (..), WebFont (..), askSdlWebDebug, listWebFontFamilies, setSdlWebUiFont)
+import NanoUI.Backend.SdlWeb (SdlWebDebugSnapshot (..), CoreDebugSnapshot (..), WebFont (..), WebFontService (..), askSdlWebDebug, listWebFontFamilies, setSdlWebUiFont, webFontFamilies)
 import NanoUI.SdlWeb.Internal.Files
   ( FileDialogMode (..)
   , FileDialogOptions (..)
@@ -45,7 +45,7 @@ import NanoUI.Backend
 import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input (cssCursor, decodeKey)
 import NanoUI.SdlWeb.Internal.Render (DrawCommand (..), drawCommands')
-import NanoUI.SdlWeb.Internal.Session (WebFrame, defaultSdlWebOptions, runWebSession)
+import NanoUI.SdlWeb.Internal.Session (SdlWebOptions (..), WebFrame, defaultSdlWebOptions, runWebSession)
 import NanoUI.Testing (runFrame)
 import NanoUI.Testing.Runner (check, runChecks)
 import NanoUI.Ttf.Internal.Header (glyphAtlasPageCount, vertexBytes)
@@ -75,6 +75,7 @@ data Recorded = Recorded
   , recFontsAsked :: IORef [String]
   , recFilters :: IORef [T.Text]
   , recSaved :: IORef [(T.Text, BS.ByteString)]
+  , recDiscovery :: IORef [Int]
   }
 
 data ScriptDone = ScriptDone deriving (Show)
@@ -90,7 +91,7 @@ scriptedHost canvas steps0 = do
   steps <- newIORef steps0
   queue <- newIORef []
   idle <- newIORef (0 :: Int)
-  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
+  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
   pendingFont <- newIORef BS.empty
   picked <- newIORef BS.empty
   extended <- BS.readFile extendedFontPath
@@ -150,9 +151,11 @@ scriptedHost canvas steps0 = do
               -- fallback Inter where the default options look for it, and
               -- has no installed families.
               let serve b = BS.length b <$ writeIORef pendingFont b
+              -- By name it has Noto Sans (as Inter's bytes).
               case (kind, name) of
                 (1, "fonts/inter.ttf") -> serve fontInterBytes
                 (1, "fonts/inter-extended.ttf") -> serve extended
+                (2, "Noto Sans") -> serve fontInterBytes
                 _ -> pure (-1)
           , whTakeFontBytes = \p -> readIORef pendingFont >>= \b -> () <$ copyOut p (BS.length b) b
           -- The chooser picks two files, or is cancelled when asked for a
@@ -169,6 +172,11 @@ scriptedHost canvas steps0 = do
               let saved = TE.encodeUtf8 name
               BS.length saved <$ writeIORef picked saved
           , whTakePicked = \p -> readIORef picked >>= \b -> () <$ copyOut p (BS.length b) b
+          , whStartFontDiscovery = \service -> modifyIORef' (recDiscovery rec) (service :)
+          , whFontsVersion = length <$> readIORef (recDiscovery rec)
+          , whFontFamilies = \p n -> do
+              started <- readIORef (recDiscovery rec)
+              copyOut p n (if null started then "" else "Inter\nNoto Sans")
           }
   pure (host, rec)
 
@@ -249,6 +257,7 @@ main =
     , ("fonts-and-debug", fontsAndDebug)
     , ("file-dialogs", fileDialogs)
     , ("fallback-fonts", fallbackFonts)
+    , ("font-search", fontSearch)
     ]
 
 pureChecks :: IORef Int -> IO ()
@@ -361,6 +370,29 @@ fontsAndDebug failed = do
   check failed "fonts: the family list drops repeats" (families == Right ["Inter", "Noto Sans"])
   outside <- listWebFontFamilies
   check failed "fonts: listing needs a browser" (either (const True) (const False) outside)
+
+-- | A search by name skips a family the host cannot load and takes the next,
+-- with the service named first; the view's family list comes from the host
+-- once it starts discovery, and a change to it runs the view again.
+fontSearch :: IORef Int -> IO ()
+fontSearch failed = do
+  listed <- newIORef []
+  let opts = defaultSdlWebOptions {webFont = WebFontSearch ["Missing Sans", "Noto Sans"], webFontService = Just Fontsource}
+      view = column $ do
+        families <- webFontFamilies
+        font <- maybe "" dbgFont <$> askSdlWebDebug
+        liftIO (modifyIORef' listed ((families, font) :))
+        label "Search"
+  canvas <- newIORef (800, 600, 1)
+  (host, rec) <- scriptedHost canvas [events [motion 5 5], events [motion 6 6]]
+  runWebSession host opts (viewFrame view) `catch` \ScriptDone -> pure ()
+  asked <- reverse <$> readIORef (recFontsAsked rec)
+  check failed "search: the missing family, then the next" (take 2 asked == ["Missing Sans", "Noto Sans"])
+  started <- reverse <$> readIORef (recDiscovery rec)
+  check failed "search: discovery starts with Fontsource named" (take 1 started == [1])
+  seen <- reverse <$> readIORef listed
+  check failed "search: the view gets the host's families" (any ((== ["Inter", "Noto Sans"]) . fst) seen)
+  check failed "search: the UI font is the family found" (any ((== "Noto Sans") . snd) seen)
 
 -- | A face gets the fallback attached for a character it lacks that the
 -- fallback has (the ellipsis, which the bundled ASCII Inter lacks), and none
