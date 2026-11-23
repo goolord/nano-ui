@@ -16,6 +16,10 @@
   built page in headless Chromium and checks it draws and takes a click.
 - `formatExplainRows`, for showing the layout overlay's node, as
   nano-ui-sdl exports it.
+- For a canvas inside a page: `start` in `web/main.js` takes `env`, the
+  program's environment variables; an inline `touch-action` on the canvas
+  is kept, and a `pointercancel` releases the press away from the canvas;
+  timed waits are held while the canvas is scrolled out of the viewport.
 - Installed fonts and fonts by URL: `WebFontInstalled` and `WebFontUrl`,
   `listWebFontFamilies` (the Local Font Access API, in Chromium-based
   browsers), and `setSdlWebUiFont` to change the UI font from the view. A

@@ -7,15 +7,19 @@ import ghcWasmJsffi from "./ghc_wasm_jsffi.js";
 
 // rtsFlags are GHC runtime options, read through GHCRTS as a reactor module
 // takes no command line: "-T" keeps the statistics askSdlWebDebug's runtime
-// rows show.
-export async function start(canvas, wasmUrl, { rtsFlags = "" } = {}) {
+// rows show. env is more of the program's environment, as { NAME: "value" }:
+// what the page has to tell the program before it starts, which the program
+// reads with System.Environment.lookupEnv.
+export async function start(canvas, wasmUrl, { rtsFlags = "", env = {} } = {}) {
   globalThis.nanoUiSdlWeb.setup(canvas);
   const fds = [
     new OpenFile(new File([])),
     ConsoleStdout.lineBuffered((msg) => console.log(msg)),
     ConsoleStdout.lineBuffered((msg) => console.warn(msg)),
   ];
-  const wasi = new WASI([], rtsFlags ? [`GHCRTS=${rtsFlags}`] : [], fds);
+  const environment = Object.entries(env).map(([name, value]) => `${name}=${value}`);
+  if (rtsFlags) environment.push(`GHCRTS=${rtsFlags}`);
+  const wasi = new WASI([], environment, fds);
   // The glue reads the instance's exports, which exist only once it is
   // instantiated; it is handed the object they are copied into.
   const exports = {};
