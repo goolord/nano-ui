@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-e1e274a1.js";
+            window.path_to_searchindex_js = "searchindex-282fa0c3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -191,6 +191,7 @@ counter = row $ do
   whenM (button "+") (modifyVar n (+ 1))
 </code></pre>
 <p>Code samples assume <code>import NanoUI</code> and <code>OverloadedStrings</code>. The runnable source for each tutorial is in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>.</p>
+<p>The <a href="demo/index.html">widget cookbook</a> runs in this site, in your browser. It is the desktop demo’s view (<code>examples/Demo.hs</code>) compiled to WebAssembly and drawn with the <code>nano-ui-sdl-web</code> backend. File dialogs and frame statistics need the desktop backend, and the only font is the bundled Inter.</p>
 <h2 id="packages-in-the-monorepo"><a class="header" href="#packages-in-the-monorepo">Packages in the monorepo</a></h2>
 <div class="table-wrapper">
 <table>
@@ -201,6 +202,7 @@ counter = row $ do
 <tr><td><code>packages/nano-ui</code></td><td>Core toolkit: widgets, layout, input, theming, draw list, text arena.</td><td><a href="#state--var">State</a>, <a href="#layout--scrolling">Layout</a>, <a href="#widget-gallery">Widget Gallery</a></td></tr>
 <tr><td><code>packages/nano-ui-sdl</code></td><td>SDL3 backend: TrueType fonts via HarfBuzz, system font search, native non-blocking file dialogs, custom title bars.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a>, <a href="#desktop-windows">Desktop Windows</a></td></tr>
 <tr><td><code>packages/nano-ui-rgfw</code></td><td>RGFW + OpenGL 3.2 backend with a bundled bitmap font and no system dependencies.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a></td></tr>
+<tr><td><code>packages/nano-ui-sdl-web</code></td><td>Browser backend for GHC’s WebAssembly target: SDL_ttf text, WebGL2 drawing.</td><td><a href="demo/index.html">The cookbook in the browser</a></td></tr>
 <tr><td><code>packages/nano-ui-emit</code></td><td>Elm-style typed messages and update reducers (<code>NanoUIE msg a</code>).</td><td><a href="#elm-style-state">Elm-Style State</a></td></tr>
 <tr><td><code>packages/nano-ui-diagrams</code></td><td>Line, bar, scatter, and area charts (<code>NanoUI.Plot</code>) with diagrams-lib integration.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a></td></tr>
 <tr><td><code>packages/nano-ui-form</code></td><td>Validated applicative forms built on ditto.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a></td></tr>
