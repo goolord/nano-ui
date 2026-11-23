@@ -89,7 +89,7 @@ fontFinder fl = do
   rowWith (tight . gap 12 . alignMid . fillW) $ do
     whenM (button "Find installed fonts") (modifyVar (flAsked fl) (+ 1))
     muted $ case found of
-      _ | asked > 0 && found == Nothing -> "Waiting for the browser..."
+      _ | asked > 0 && found == Nothing -> "Waiting for the browser…"
       Nothing -> "Inter is bundled."
       Just (Left why) -> T.pack ("None: " <> why)
       Just (Right families) -> T.pack (show (length families) <> " installed families")
@@ -155,9 +155,9 @@ fileDialogSection st opened = do
   muted "A page sees no paths: the browser hands over the files you pick, and saves where you say."
   rowWith (tight . gap 12 . alignMid . fillW) $ do
     let ask action = modifyVar (fdRequest st) (\(k, _) -> (k + 1, action))
-    whenM (button "Open File...") (ask OpenFiles)
-    whenM (button "Open Folder...") (ask OpenFolder)
-    whenM (button "Save...") (ask SaveFile)
+    whenM (button "Open File…") (ask OpenFiles)
+    whenM (button "Open Folder…") (ask OpenFolder)
+    whenM (button "Save…") (ask SaveFile)
     status <- readVar (fdStatus st)
     unless (T.null status) (muted status)
   names <- readVar opened
