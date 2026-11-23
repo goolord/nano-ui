@@ -37,7 +37,7 @@ jobs:
     needs: web
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-retry.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -67,8 +67,24 @@ jobs:
         with:
           path: book/book
 
+      # deploy-pages looks the artifact up once, and GitHub's list of a
+      # run's artifacts can lag an upload it has already confirmed, which
+      # fails with "No artifacts named github-pages were found". A failed
+      # lookup creates no deployment, so a second try after a wait is safe.
+      # Re-running the job does not help: it uploads a second artifact of
+      # the same name, which deploy-pages also refuses.
       - name: Deploy to GitHub Pages
         id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Wait for the artifact to be listed
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 60
+
+      - name: Deploy to GitHub Pages (second try)
+        id: deployment-retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
       - name: Deploy to gh-pages branch
