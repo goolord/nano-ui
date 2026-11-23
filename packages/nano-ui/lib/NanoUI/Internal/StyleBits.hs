@@ -109,7 +109,7 @@ module NanoUI.Internal.StyleBits
   , styleLayouts
   ) where
 
-import Data.Bits ((.&.), (.|.), shiftL, shiftR)
+import Data.Bits ((.&.), (.|.), finiteBitSize, shiftL, shiftR)
 
 -- | @bfWidth@ bits of a style index starting at bit @bfShift@. The fields
 -- below are INLINE constants, so 'getField' and 'packField' on one of them
@@ -134,10 +134,13 @@ lowMask f = (1 `shiftL` bfWidth f) - 1
 fieldMask :: BitField -> Int
 fieldMask f = lowMask f `shiftL` bfShift f
 
--- | The value a style index holds in a field.
+-- | The value a style index holds in a field. Fields past the platform's
+-- 'Int' width read as 0 instead of sign-extending bit 31 on 32-bit targets.
 {-# INLINE getField #-}
 getField :: BitField -> Int -> Int
-getField f si = (si `shiftR` bfShift f) .&. lowMask f
+getField f si
+  | bfShift f >= finiteBitSize (0 :: Int) = 0
+  | otherwise = (si `shiftR` bfShift f) .&. lowMask f
 
 -- | @v@ cut to the field's width and moved into place.
 {-# INLINE packField #-}

@@ -511,10 +511,12 @@ labelColor theme style font = fromMaybe (maybe (styleFg style) (toneColor theme)
 
 -- | A button's or select's label font from its layout: the text-node packing
 -- ('packTextNodeStyle') moved up to 'labelFontShift', for 'nodeFontBits' to
--- read back.
+-- read back. Returns 0 on 32-bit targets where 'Int' has no upper half.
 {-# INLINE labelFontStyle #-}
 labelFontStyle :: Layout -> Int
-labelFontStyle l = packTextNodeStyle l 0 `shiftL` labelFontShift
+labelFontStyle l
+  | labelFontShift >= finiteBitSize (0 :: Int) = 0
+  | otherwise = packTextNodeStyle l 0 `shiftL` labelFontShift
 
 -- | A plain button's packed style carrying the 'Tone' it fills with while
 -- its value is on ('SB.buttonTone', a toggle button's).

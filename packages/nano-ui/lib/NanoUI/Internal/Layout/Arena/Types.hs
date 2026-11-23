@@ -106,7 +106,7 @@ module NanoUI.Internal.Layout.Arena.Types
   ) where
 
 import Control.Monad (mfilter)
-import Data.Bits (shiftL, shiftR, xor, (.&.))
+import Data.Bits (finiteBitSize, shiftL, shiftR, xor, (.&.))
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray)
 import Data.Primitive.PrimArray
@@ -266,12 +266,15 @@ labelFontShift = bfShift SB.labelFont
 
 -- | The font bits of a node's style index @si@, in a text node's packing:
 -- all of a text node's or text field's, the label font of a button or select
--- ('labelFontShift'), and none for any other type.
+-- ('labelFontShift'), and none for any other type. On 32-bit targets
+-- ('wasm32'), 'Int' has no upper half above bit 31, so the shift returns 0
+-- rather than sign-extending negative flag bits such as 'SB.buttonTable'.
 {-# INLINE nodeFontBits #-}
 nodeFontBits :: NodeType -> Int -> Int
 nodeFontBits nt si
   | packsNodeFont nt = si
-  | hasCenteredLabel nt = si `shiftR` labelFontShift
+  | hasCenteredLabel nt =
+      if labelFontShift >= finiteBitSize (0 :: Int) then 0 else si `shiftR` labelFontShift
   | otherwise = 0
 
 -- | Whether the node paints one line of label text centered vertically in its
