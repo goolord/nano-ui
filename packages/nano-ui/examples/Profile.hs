@@ -371,6 +371,10 @@ main = do
             ("canvas" : _) -> ("canvas", canvasScene 0)
             ("canvas-keyed" : _) -> ("canvas-keyed", canvasScene 1)
             ("canvas-paths" : _) -> ("canvas-paths", pathScene)
+            -- A still frame of 1000 custom widgets, against 1000 buttons:
+            -- what a custom widget costs per frame beyond a built-in one.
+            ("knobs" : _) -> ("knobs", gridWith 40 (gap 2) (replicateM_ 1000 (void (withValue 50 (knob' 0 100)))))
+            ("buttons" : _) -> ("buttons", gridWith 40 (gap 2) (replicateM_ 1000 (void (button' "OK"))))
             _ -> ("widgets", widgetScene)
       replicateM_ iterations (void (runFrame ctx inp ui))
       builds <- readIORef buildCount

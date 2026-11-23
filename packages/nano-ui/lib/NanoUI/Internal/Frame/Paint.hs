@@ -196,7 +196,7 @@ paintFocusRing env idx nt rect = do
       if nt == NodeColorPicker
         then colorPickerPartRect (peNodeArena env) idx rect
         else pure rect
-    isRow <- if nt == NodeButton then hasFlag buttonFlagRow <$> getStyleIdx (peNodeArena env) idx else pure False
+    isRow <- if nt == NodeButton then (== ButtonRow) . buttonKindOf <$> getStyleIdx (peNodeArena env) idx else pure False
     let (ring, radius)
           | isRow = (rectInflate (-1) target, 0)
           | otherwise = (rectInflate 2 target, 4)

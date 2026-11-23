@@ -646,10 +646,11 @@ measureAdorned SolveEnv {seArena = na, seArrays = a} measurer@TextMeasurer {tmMe
     -- in one group with its label.
     _ -> do
       (labelW, groupW) <- adornedButtonGroup measurer txt gap rows
-      let (padX, padY)
-            | hasFlag buttonFlagTab si = (2 * tabHeaderPadX, snd (buttonPadding fm))
+      let kind = if nt == NodeButton then buttonKindOf si else ButtonPlain
+          (padX, padY)
+            | kind == ButtonTab = (2 * tabHeaderPadX, snd (buttonPadding fm))
             | otherwise = buttonPadding fm
-          sidePad = if labelW > 0 || hasFlag buttonFlagContent si then padX else padY
+          sidePad = if labelW > 0 || kind == ButtonContent then padX else padY
       pure (groupW + sidePad, max rawH (rowH + padY))
 
 -- | A button's label width, in the font paint draws it in (0 without a

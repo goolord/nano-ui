@@ -400,13 +400,13 @@ cachedWidgetLabel ctx nt idx labelAlign w h = do
 -- not the origin; final device-pixel snapping stays in the draw backend.
 computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
 computeWidgetLabel ctx nt txt si fontSizeVal ax w h
-  | nt == NodeButton && hasFlag buttonFlagClose si = pure Nothing
+  | kind == ButtonClose = pure Nothing
   | otherwise = do
       (source, _, measure) <- resolveFontFor ctx nt fontSizeVal si
       (tw0, th) <- measure txt
       let (ix, _) = widgetContentInset source
-          isTable = nt == NodeButton && hasFlag buttonFlagTable si
-          plain = nt == NodeButton && not (any (`hasFlag` si) [buttonFlagChoice, buttonFlagRow, buttonFlagTable, buttonFlagMenu])
+          isTable = kind == ButtonTable
+          plain = nt == NodeButton && kind `notElem` [ButtonChoice, ButtonRow, ButtonTable, ButtonMenu]
           -- The room a plain button's or a select's label has: inside the
           -- padding layout gave a centred label, all of the box beside
           -- adornments, and short of a select's chevron.
@@ -414,7 +414,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
             | isTable = max 0 (w - tableHeaderPadX)
             | nt == NodeSelect = w - ix - selectChevronReserve
             | ax /= AlignCenter = w
-            | hasFlag buttonFlagTab si = w - 2 * tabHeaderPadX
+            | kind == ButtonTab = w - 2 * tabHeaderPadX
             | otherwise = w - fst (buttonPadding source)
       -- A label longer than that ends in an ellipsis.
       (label, tw) <-
@@ -425,21 +425,23 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
           else pure (txt, tw0)
       -- Metrics for the label as it is shown, which places it.
       fm <- prepareFontMetrics source label
-      let (tx, used) = case nt of
-            NodeButton
-              | hasFlag buttonFlagChoice si -> (checkboxLeading fm, tw)
-              | hasFlag buttonFlagRow si ->
+      let (tx, used)
+            | nt /= NodeButton = (ix, min tw (w - ix - selectChevronReserve))
+            | otherwise = case kind of
+                ButtonChoice -> (checkboxLeading fm, tw)
+                ButtonRow ->
                   let (depth, _, _) = treeDecodeStyle si
                    in (treeRowLeading fm depth, tw)
-              | hasFlag buttonFlagTable si -> alignedTextPen ax 0 w tableCellInset fm label
-              | hasFlag buttonFlagMenu si ->
+                ButtonTable -> alignedTextPen ax 0 w tableCellInset fm label
+                ButtonMenu ->
                   let inset = menuItemPadX + ix
                    in (inset, min tw (max 0 (w - inset - ix)))
-              | otherwise -> alignedTextPen ax 0 w 0 fm label
-            -- A select, the other widget with a centred label.
-            _ -> (ix, min tw (w - ix - selectChevronReserve))
+                _ -> alignedTextPen ax 0 w 0 fm label
       let !placement = WidgetTextPlacement label tx (centeredTextY fm 0 h th) used th
       pure (Just placement)
+  where
+    -- A select is the other widget with a centred label.
+    !kind = if nt == NodeButton then buttonKindOf si else ButtonPlain
 
 -- | Pure geometry of selectable text: the pen origin, centered baseline box and
 -- line height. Selectable text never scrolls, so the pen is just the node x.
