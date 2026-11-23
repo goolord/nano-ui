@@ -36,7 +36,6 @@ module NanoUI.Sdl.Internal.Window
   , captureFrame
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (IOException, catch, finally, onException)
 import Control.Monad (forM_, mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
@@ -61,7 +60,7 @@ import NanoUI (Appearance, ImageId, Input (..), NanoUI, Size (..), Theme, V2 (..
 import NanoUI.Backend
   ( Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks, clearMeasureCache
   , closeWindowHost, damageFull, installWindowHost, markDirty, newPixelContext, registerImage, reportWindowState, setSystemAppearance
-  , setWakeLoopChecked, withClipboard, withTheme
+  , inBoundThread, setWakeLoopChecked, withClipboard, withTheme
   )
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
 import NanoUI.Sdl.Internal.Display
@@ -413,6 +412,9 @@ withRenderDriver driver create = do
 -- | Open a session: set the hints, then open a window with the flags.
 withSdlWindow :: IO () -> SDL_WindowFlags -> SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlWindow hints flags opts ctx act =
+  -- SDL's GL renderer -- what 'RenderDriverAuto' asks for on Windows --
+  -- keeps its context current on the OS thread that created it, and the
+  -- same thread pumps the window's messages, so the session runs on one.
   inBoundThread $ withTtf $ do
     -- The font directories are walked on a thread of their own from here,
     -- so the first character no loaded font has does not wait for the walk
@@ -423,12 +425,6 @@ withSdlWindow hints flags opts ctx act =
     monoSource <- resolveNanoUIFont (sdlAppMonoFont opts)
     Acquire.with (startSdl >> startSdlWindow opts flags ctx fontSource monoSource Nothing) $ \(ctx', env) ->
       withBackendSession ctx' SSdl env (act ctx' env)
-  where
-    -- SDL's GL renderer -- what 'RenderDriverAuto' asks for on Windows --
-    -- keeps its context current on the OS thread that created it, and the
-    -- same thread pumps the window's messages. An unbound caller can be moved
-    -- between OS threads across a safe foreign call, so pin the session to one.
-    inBoundThread a = if rtsSupportsBoundThreads then runInBoundThread a else a
 
 -- | An SDL session stores its 'SdlEnv' on the context so view-side operations
 -- can look it up without taking an explicit handle.

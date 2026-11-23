@@ -24,7 +24,6 @@ module NanoUI.Rgfw.Internal.Session
   , mapRgfwCursor
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket, finally, onException)
 import Control.Monad (forM_, unless, void, when)
 import Data.Bits (complement, (.&.), (.|.))
@@ -71,6 +70,7 @@ import NanoUI.Backend
   , defaultWindowHost
   , defaultWindowState
   , emptyInput
+  , inBoundThread
   , installWindowHost
   , releaseAllKeys
   , keypadKey
@@ -318,8 +318,6 @@ runRgfwAppReduceCustomWith opts getThemeAndScale updateModel initialModel setup 
   bracket (createRgfwWindow sh settings) R.closeWindow (runWindow sh)
   where
     settings = optWindow opts
-    -- The GL context is current only on the OS thread that created it.
-    inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act
     runWindow sh win = do
       rw <- setupRgfwWindow sh settings win
       reducer <- newReducer updateModel initialModel
