@@ -2,6 +2,12 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- On the OpenGL ES 2 renderer, a window's next frame after a further
+  window (`nativeWindow`) closed failed with "SDL_SetRenderTarget/Scale
+  failed: glFramebufferTexture2D() failed". SDL's renderer sets a render
+  target without making its GL context current, and closing a window
+  leaves none current. The session now queues a clear of the window first
+  in that case, which makes SDL activate the context.
 - A further window (`nativeWindow`) repaints while its border is dragged
   on Windows, as the first window does: the session's resize watch draws
   it at each new size while the modal size loop holds the event loop.

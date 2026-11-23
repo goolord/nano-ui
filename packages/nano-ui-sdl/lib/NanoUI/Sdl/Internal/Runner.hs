@@ -28,6 +28,7 @@ import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Error (sdlFail)
 import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass)
+import NanoUI.Sdl.Internal.Target (setRetainTarget)
 import NanoUI.Ttf.Internal.Font (beginTtfFrame, ttfFrameDropped)
 import NanoUI.Sdl.Internal.Window (PresentProbe (..), Retain (..), SdlEnv (..), captureFrame, notePresent, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
@@ -174,7 +175,7 @@ presentDamagedFrame ::
 presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
   -- A null texture draws full-repaint sessions straight to the window. The
   -- pass scales positions itself, so the renderer stays at scale 1.
-  unlessM ((&&) <$> setRenderTarget ren tex <*> setRenderScale ren 1 1) $
+  unlessM ((&&) <$> setRetainTarget env tex <*> setRenderScale ren 1 1) $
     sdlFail "SDL_SetRenderTarget/Scale failed"
   let glyphs = glyphAtlasHandle (sdlFontCache env)
   -- A transparent window draws atlas textures with its own blend mode.

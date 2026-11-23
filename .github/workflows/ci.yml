@@ -123,19 +123,17 @@ jobs:
           done
 
       # The suites that open windows, in an X server with Mesa's software
-      # GL, one step each. None has yet been seen passing on this runner, so
-      # a failure reports without failing the job; drop continue-on-error
-      # from a step once that suite is green.
+      # GL, one step each. A step with continue-on-error has not yet been
+      # seen passing on this runner, so its failure reports without failing
+      # the job; drop continue-on-error from a step once that suite is green.
       - name: Install Xvfb and Mesa
         if: matrix.ghc == '9.14.1'
-        continue-on-error: true
         run: |
           sudo apt-get install -y --no-install-recommends xvfb xauth libgl1-mesa-dri fonts-dejavu-core
           echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV"
 
       - name: Native suite nano-ui-render-test (Xvfb)
         if: matrix.ghc == '9.14.1'
-        continue-on-error: true
         run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-sdl:test:nano-ui-render-test --test-show-details=failures
 
       - name: Native suite nano-ui-font-effects-test (Xvfb)
