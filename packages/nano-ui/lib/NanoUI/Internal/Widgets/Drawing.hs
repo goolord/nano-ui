@@ -39,8 +39,8 @@ drawing = drawingVersioned 0
 drawingVersioned :: Int -> (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> NanoUI Response
 drawingVersioned version f build = do
   wid <- nextId
-  withContext (\ctx -> registerDrawing ctx wid version build)
-  addWidget wid NodeDrawing T.empty 0 (f defaultLayout)
+  resp <- addWidget wid NodeDrawing T.empty 0 (f defaultLayout)
+  resp <$ withContext (\ctx -> registerDrawing ctx wid version build)
 
 -- | Like 'drawingVersioned', but the layout itself comes from @compute@, which
 -- only reruns when the envelope, line height, content key, or modifier result
@@ -64,5 +64,5 @@ drawingCached ::
 drawingCached dw dh lh content f compute build = do
   (wid, ctx) <- freshWidget
   layout <- liftIO (cachedWidgetLayout ctx wid dw dh lh content (f defaultLayout) compute)
-  liftIO (registerDrawing ctx wid content build)
-  addWidget wid NodeDrawing T.empty 0 layout
+  resp <- addWidget wid NodeDrawing T.empty 0 layout
+  resp <$ liftIO (registerDrawing ctx wid content build)

@@ -18,8 +18,6 @@ import Control.Monad (foldM, forM_, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
-import Data.IntSet (IntSet)
-import qualified Data.IntSet as IS
 import Data.Primitive.PrimArray
   ( PrimArray
   , copyMutablePrimArray
@@ -47,10 +45,11 @@ data LayoutCache = LayoutCache
   -- Checked by the frame runner because a custom measure may read state
   -- outside the arena that is not reflected in the input signature. Empty
   -- when no node uses custom measurement.
-  , lcMeasureHooks :: !IntSet
-  -- ^ The widgets with a custom measure registered at capture. Frame checks
-  -- the set is unchanged, since gaining a hook changes a node's size without
-  -- touching the arena.
+  , lcMeasureHooks :: !Word64
+  -- ^ A signature of the nodes with a custom measure registered at capture
+  -- ('NanoUI.Internal.Context.customMeasureHooks'). Frame checks it is
+  -- unchanged, since gaining a hook changes a node's size without touching
+  -- the arena.
   , lcSub :: !(IOArr Word64)
   -- ^ The restore keys ('naSubHash') of the captured frame. A node whose
   -- current key matches this was measured the same way last solve, and the
@@ -102,7 +101,7 @@ newLayoutCache cap0 = do
   lcStyle <- newPrimArray (cap * 2)
   lcTags <- newPrimArray (cap * tagStride)
   lcPlaced <- newIORef IM.empty
-  pure (LayoutCache cap 0 0 IM.empty IS.empty lcSub lcMeasured lcOffered lcUnsnapped lcGeom lcStyle lcTags lcPlaced)
+  pure (LayoutCache cap 0 0 IM.empty 0 lcSub lcMeasured lcOffered lcUnsnapped lcGeom lcStyle lcTags lcPlaced)
 
 -- | Snapshot the current (post-solve) arena form, constraints and rects.
 captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache

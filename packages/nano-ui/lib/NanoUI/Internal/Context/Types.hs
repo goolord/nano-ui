@@ -43,6 +43,9 @@ module NanoUI.Internal.Context.Types
   , DrawFitCache (..)
   , DrawingEntry (..)
   , DrawingCacheState (..)
+  , NodeCustom (..)
+  , noNodeCustom
+  , customPassWords
   , PopupConfig (..)
   , HoverZone (..)
   , DrawOpCacheEntry (..)
@@ -701,13 +704,31 @@ data DrawingEntry = DrawingEntry
   , deBuild :: !DrawingBuild
   }
 
--- | Per-widget drawing registrations and compiled-op/layout caches. Builders
--- register during view construction; paint consumes them after layout.
+-- | What a node registered in this view pass ('ctxNodeCustom'): its
+-- drawing, its custom drawing and its custom measure. Entries are kept for
+-- the arena epoch ('NanoUI.Internal.Layout.Arena.naEpoch') they were
+-- written in, so the arena's reset empties every one without a write.
+data NodeCustom = NodeCustom
+  { ncEpoch :: {-# UNPACK #-} !Word32
+  , ncDrawing :: !(Maybe DrawingEntry)
+  , ncCustom :: !(Maybe CustomDrawingEntry)
+  , ncMeasure :: !(Maybe CustomMeasureFn)
+  }
+
+-- | No registrations, in no epoch.
+noNodeCustom :: NodeCustom
+noNodeCustom = NodeCustom 0 Nothing Nothing Nothing
+
+-- | Words of 'ctxCustomPass': whether a custom drawing was registered on a
+-- node that is no drawing (0 or 1), a signature of the nodes that registered
+-- a custom measure, and how many drawings and custom drawings registered.
+customPassWords :: Int
+customPassWords = 4
+
+-- | Compiled-op and layout caches of the drawings, by widget key, kept
+-- across frames. Registrations themselves are per node ('ctxNodeCustom').
 data DrawingCacheState = DrawingCacheState
   { dcsPopupConfigs :: !(IntMap PopupConfig)
-  , dcsDrawings :: !(IntMap DrawingEntry)
-  , dcsCustomDrawings :: !(IntMap CustomDrawingEntry)
-  , dcsCustomMeasures :: !(IntMap CustomMeasureFn)
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
@@ -754,9 +775,6 @@ data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
 initialDrawingCacheState :: DrawingCacheState
 initialDrawingCacheState = DrawingCacheState
   { dcsPopupConfigs = IM.empty
-  , dcsDrawings = IM.empty
-  , dcsCustomDrawings = IM.empty
-  , dcsCustomMeasures = IM.empty
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty
@@ -956,6 +974,10 @@ data Context = Context
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)
   , ctxDrawingCache :: IORef DrawingCacheState
+  , ctxNodeCustom :: !(IORef (MutableArray RealWorld NodeCustom))
+  -- ^ Each node's registrations ('NodeCustom'), by arena index.
+  , ctxCustomPass :: !(MutablePrimArray RealWorld Word64)
+  -- ^ The view pass's registration totals ('customPassWords').
   , ctxIdCursor :: !IdCursor
   -- ^ The id path and sibling position the next declared widget takes its
   -- id from. Starts at 'NanoUI.Internal.Id.initialIdContext'. Reset by

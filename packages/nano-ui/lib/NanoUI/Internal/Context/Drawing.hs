@@ -13,6 +13,10 @@ module NanoUI.Internal.Context.Drawing
   , registerCustomDrawing
   , registerCustomEntry
   , lookupCustomDrawing
+  , lookupCustomDrawingAt
+  , lookupDrawingAt
+  , lookupCustomMeasureAt
+  , customDrawingOffNode
   , cachedCustomDrawingOps
   , refreshCustomDrawingOps
   , drawingOpsStale
@@ -23,18 +27,24 @@ module NanoUI.Internal.Context.Drawing
   , resetDrawingScopeCache
   ) where
 
-import Control.Monad (mfilter, when)
+import Control.Monad (mfilter, unless, when)
 import Data.Bits (complement)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.IntSet (IntSet)
+import Data.Maybe (isJust)
+import Data.Primitive.Array (readArray, sizeofMutableArray, writeArray)
+import Data.Primitive.PrimArray (readPrimArray, setPrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
+import Data.Word (Word64)
 
 import NanoUI.Internal.Context.Animation (getLiveAnimations)
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
-import NanoUI.Internal.Id (WidgetId)
+import NanoUI.Internal.Id (WidgetId, mix64)
+import NanoUI.Internal.Layout.Arena (NodeArena (..), NodeIdx, NodeType (..), getNodeType, lookupNodeByKey, lookupNodeByWidgetId)
+import NanoUI.Internal.Layout.Arena.Types (growBoxedStoreCopy)
+import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectContains, rectH, rectW)
 
@@ -84,17 +94,65 @@ hoverZoneCrossed ctx from to =
   where
     crossed (HoverZone r tracked) = let on = rectContains r from in on /= rectContains r to || (on && tracked)
 
+-- | Node @idx@'s registrations this view pass ('ctxNodeCustom').
+{-# INLINE nodeCustomAt #-}
+nodeCustomAt :: Context -> NodeIdx -> IO NodeCustom
+nodeCustomAt ctx idx = do
+  arr <- readIORef (ctxNodeCustom ctx)
+  if idx < 0 || idx >= sizeofMutableArray arr
+    then pure noNodeCustom
+    else do
+      nc <- readArray arr idx
+      ep <- readIORef (naEpoch (ctxNodeArena ctx))
+      pure (if ncEpoch nc == ep then nc else noNodeCustom)
+
+-- | The registrations of the node widget @wid@ was declared as.
+{-# INLINE nodeCustomOf #-}
+nodeCustomOf :: Context -> WidgetId -> IO NodeCustom
+nodeCustomOf ctx wid = maybe (pure noNodeCustom) (nodeCustomAt ctx) =<< lookupNodeByWidgetId (ctxNodeArena ctx) wid
+
+-- | Change the registrations of the node widget @wid@ was declared as; a
+-- widget with no node this pass registers nothing.
+{-# INLINE registerAt #-}
+registerAt :: Context -> WidgetId -> (NodeIdx -> NodeCustom -> IO NodeCustom) -> IO ()
+registerAt ctx wid f =
+  lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= mapM_ (\idx -> do
+    arr0 <- readIORef (ctxNodeCustom ctx)
+    let size = sizeofMutableArray arr0
+    arr <-
+      if idx < size
+        then pure arr0
+        else do
+          grown <- growBoxedStoreCopy noNodeCustom arr0 size (max (idx + 1) (2 * size))
+          grown <$ writeIORef (ctxNodeCustom ctx) grown
+    ep <- readIORef (naEpoch (ctxNodeArena ctx))
+    old <- readArray arr idx
+    new <- f idx (if ncEpoch old == ep then old else noNodeCustom {ncEpoch = ep})
+    writeArray arr idx $! new)
+
+-- | Add @n@ to word @w@ of 'ctxCustomPass'.
+{-# INLINE bumpPass #-}
+bumpPass :: Context -> Int -> Word64 -> IO ()
+bumpPass ctx w n = readPrimArray (ctxCustomPass ctx) w >>= writePrimArray (ctxCustomPass ctx) w . (+ n)
+
 -- | Register a draw builder and content version. Change the version when
 -- captured content changes without a size change.
 {-# INLINE registerDrawing #-}
 registerDrawing :: Context -> WidgetId -> Int -> DrawingBuild -> IO ()
 registerDrawing ctx wid content build =
-  registerIn dcsDrawings (\m dc -> dc {dcsDrawings = m}) ctx wid (DrawingEntry content build)
+  registerAt ctx wid $ \_ nc -> do
+    when (null (ncDrawing nc)) (bumpPass ctx 2 1)
+    pure nc {ncDrawing = Just (DrawingEntry content build)}
 
 -- | The 'DrawingEntry' registered for the widget, if any.
 {-# INLINE lookupDrawing #-}
 lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
-lookupDrawing = lookupIn dcsDrawings
+lookupDrawing ctx wid = ncDrawing <$> nodeCustomOf ctx wid
+
+-- | The 'DrawingEntry' registered on node @idx@, if any.
+{-# INLINE lookupDrawingAt #-}
+lookupDrawingAt :: Context -> NodeIdx -> IO (Maybe DrawingEntry)
+lookupDrawingAt ctx idx = ncDrawing <$> nodeCustomAt ctx idx
 
 {-# INLINE sameSize #-}
 sameSize :: Rect -> Rect -> Bool
@@ -185,21 +243,35 @@ lookupDrawFitEnvelope ctx wid lh content incoming = do
     _ -> Nothing
 
 -- | Drop cached ops for drawings not registered in the current view pass.
+-- A cache holds an entry only for a widget that registered, so one with no
+-- more entries than this pass's registrations holds none to drop, and most
+-- frames compare sizes only. One that holds more keeps the keys that
+-- registered.
 pruneDrawOpCache :: Context -> IO ()
 pruneDrawOpCache ctx = do
   dc <- readIORef (ctxDrawingCache ctx)
-  let live = dcsDrawings dc
-      customLive = dcsCustomDrawings dc
-      -- The intersection copies a map even when it keeps every key, so
-      -- test first: most frames have nothing to drop.
-      stale cache keep = not (IM.isSubmapOfBy (\_ _ -> True) cache keep)
-  when (stale (dcsDrawOpCache dc) live || stale (dcsCustomDrawOpCache dc) customLive || stale (dcsDrawFitCache dc) live) $
-    writeIORef (ctxDrawingCache ctx) $!
-      dc
-        { dcsDrawOpCache = dcsDrawOpCache dc `IM.intersection` live
-        , dcsCustomDrawOpCache = dcsCustomDrawOpCache dc `IM.intersection` customLive
-        , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
-        }
+  unless (IM.null (dcsDrawOpCache dc) && IM.null (dcsCustomDrawOpCache dc) && IM.null (dcsDrawFitCache dc)) $
+    pruneDrawOpCaches ctx dc
+
+-- | 'pruneDrawOpCache' once some cache holds an entry.
+pruneDrawOpCaches :: Context -> DrawingCacheState -> IO ()
+pruneDrawOpCaches ctx dc = do
+  drawings <- fromIntegral <$> readPrimArray (ctxCustomPass ctx) 2
+  customs <- fromIntegral <$> readPrimArray (ctxCustomPass ctx) 3
+  let keep :: Int -> (NodeCustom -> Bool) -> IntMap a -> IO (IntMap a)
+      keep live registered cache
+        | IM.size cache <= live = pure cache
+        | otherwise = IM.fromDistinctAscList <$> filterLive (IM.toAscList cache)
+       where
+        filterLive [] = pure []
+        filterLive ((k, v) : rest) = do
+          nc <- maybe (pure noNodeCustom) (nodeCustomAt ctx) =<< lookupNodeByKey (ctxNodeArena ctx) k
+          if registered nc then ((k, v) :) <$> filterLive rest else filterLive rest
+  ops <- keep drawings (isJust . ncDrawing) (dcsDrawOpCache dc)
+  customOps <- keep customs (isJust . ncCustom) (dcsCustomDrawOpCache dc)
+  fits <- keep drawings (isJust . ncDrawing) (dcsDrawFitCache dc)
+  when (not (ptrEq ops (dcsDrawOpCache dc) && ptrEq customOps (dcsCustomDrawOpCache dc) && ptrEq fits (dcsDrawFitCache dc))) $
+    writeIORef (ctxDrawingCache ctx) $! dc {dcsDrawOpCache = ops, dcsCustomDrawOpCache = customOps, dcsDrawFitCache = fits}
 
 -- | Register an interaction-aware painter with the default cursor and
 -- repaint margin. A nonzero content key must cover its external inputs; zero
@@ -212,12 +284,28 @@ registerCustomDrawing ctx wid content build =
 -- | Store the widget's 'CustomDrawingEntry', replacing any earlier one.
 {-# INLINE registerCustomEntry #-}
 registerCustomEntry :: Context -> WidgetId -> CustomDrawingEntry -> IO ()
-registerCustomEntry = registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m})
+registerCustomEntry ctx wid entry =
+  registerAt ctx wid $ \idx nc -> do
+    when (null (ncCustom nc)) $ do
+      bumpPass ctx 3 1
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      when (nt /= NodeDrawing) (writePrimArray (ctxCustomPass ctx) 0 1)
+    pure nc {ncCustom = Just entry}
 
 -- | The 'CustomDrawingEntry' registered for the widget, if any.
 {-# INLINE lookupCustomDrawing #-}
 lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawingEntry)
-lookupCustomDrawing = lookupIn dcsCustomDrawings
+lookupCustomDrawing ctx wid = ncCustom <$> nodeCustomOf ctx wid
+
+-- | The 'CustomDrawingEntry' registered on node @idx@, if any.
+{-# INLINE lookupCustomDrawingAt #-}
+lookupCustomDrawingAt :: Context -> NodeIdx -> IO (Maybe CustomDrawingEntry)
+lookupCustomDrawingAt ctx idx = ncCustom <$> nodeCustomAt ctx idx
+
+-- | Whether a custom drawing was registered this pass on a node that is no
+-- drawing (a pane grid's focus ring), which paint builds afresh.
+customDrawingOffNode :: Context -> IO Bool
+customDrawingOffNode ctx = (/= 0) <$> readPrimArray (ctxCustomPass ctx) 0
 
 -- | Whether a cache entry matches the given content key, size, draw context,
 -- and font generation (ignoring origin, which only translates cached ops).
@@ -324,32 +412,40 @@ drawingOpsStale ctx wid content rect = do
 -- | Register a widget measurement callback for the current view pass.
 {-# INLINE registerCustomMeasure #-}
 registerCustomMeasure :: Context -> WidgetId -> CustomMeasureFn -> IO ()
-registerCustomMeasure = registerIn dcsCustomMeasures (\m dc -> dc {dcsCustomMeasures = m})
+registerCustomMeasure ctx wid fn =
+  registerAt ctx wid $ \idx nc -> do
+    when (null (ncMeasure nc)) (bumpPass ctx 1 (mix64 (fromIntegral idx) 0x4d454153))
+    pure nc {ncMeasure = Just fn}
 
 -- | Registered measurement callback, or 'Nothing' for default layout sizing.
 {-# INLINE lookupCustomMeasure #-}
 lookupCustomMeasure :: Context -> WidgetId -> IO (Maybe CustomMeasureFn)
-lookupCustomMeasure = lookupIn dcsCustomMeasures
+lookupCustomMeasure ctx wid = ncMeasure <$> nodeCustomOf ctx wid
 
--- | The widgets with a measurement callback registered this view pass.
-customMeasureHooks :: Context -> IO IntSet
-customMeasureHooks ctx = IM.keysSet . dcsCustomMeasures <$> readIORef (ctxDrawingCache ctx)
+-- | The measurement callback registered on node @idx@, if any.
+{-# INLINE lookupCustomMeasureAt #-}
+lookupCustomMeasureAt :: Context -> NodeIdx -> IO (Maybe CustomMeasureFn)
+lookupCustomMeasureAt ctx idx = ncMeasure <$> nodeCustomAt ctx idx
+
+-- | A signature of the nodes with a measurement callback registered this
+-- view pass: a sum of a hash of each one's index, so the layout cache can
+-- tell when one appears or goes.
+customMeasureHooks :: Context -> IO Word64
+customMeasureHooks ctx = readPrimArray (ctxCustomPass ctx) 1
 
 -- | Registered repaint margin, or 'Nothing' when no override exists.
 {-# INLINE lookupCustomDamageSlop #-}
 lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
 lookupCustomDamageSlop ctx wid =
-  mfilter (> 0) . fmap cdrDamageSlop <$> lookupIn dcsCustomDrawings ctx wid
+  mfilter (> 0) . fmap cdrDamageSlop <$> lookupCustomDrawing ctx wid
 
 -- | Clear per-pass registrations while retaining compiled ops and fitted
 -- layouts. Call before rebuilding the view, then prune caches against new registrations.
 resetDrawingScopeCache :: Context -> IO ()
-resetDrawingScopeCache ctx =
+resetDrawingScopeCache ctx = do
+  setPrimArray (ctxCustomPass ctx) 0 customPassWords 0
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
     dc
-      { dcsDrawings = IM.empty
-      , dcsPopupConfigs = IM.empty
-      , dcsCustomMeasures = IM.empty
-      , dcsCustomDrawings = IM.empty
+      { dcsPopupConfigs = IM.empty
       , dcsHoverZones = []
       }

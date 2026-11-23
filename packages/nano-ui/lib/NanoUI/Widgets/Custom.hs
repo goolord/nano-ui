@@ -245,11 +245,12 @@ customWidgetWithId :: WidgetId -> CustomWidgetSpec a -> NanoUI (Response, a)
 customWidgetWithId wid spec = do
   ctx <- askContext
   inp <- askInput
+  liftIO (when (widgetFocusable spec) $ registerFocusable ctx wid)
+  resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
+  -- Registered on the node just added ('NanoUI.Internal.Context.ctxNodeCustom').
   liftIO $ do
-    when (widgetFocusable spec) $ registerFocusable ctx wid
     mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
     registerCustomEntry ctx wid (specEntry spec)
-  resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
   cdc <- liftIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
   pure (widgetInteract spec resp0 cdc inp)
 

@@ -19,7 +19,7 @@ module NanoUI.Widgets.RichText
   , selectableRichTextWith'
   ) where
 
-import Control.Monad (forM_, foldM, unless, when)
+import Control.Monad (filterM, forM_, foldM, unless, when)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -39,7 +39,7 @@ import NanoUI.Internal.Font qualified as Font
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (Input (..), MouseButton (MouseLeft), UiCursorKind (..), heldIn, inputMousePos, pressedIn, releasedIn)
-import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
+import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing), lookupNodeByKey)
 import NanoUI.Internal.Store (eqByPtr, ptrEq, fieldRichSelection, findSlot, insertSlot)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
 import NanoUI.Internal.Style hiding (Flow (..))
@@ -307,8 +307,10 @@ cacheParagraph ctx cacheRef wid hadEntry para = do
       then pure $! ParagraphCache n' bound (IM.insert (intKey wid) para m)
       else do
         prev <- getsDamage ctx (pfRects . dsPrev)
-        now <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
-        let kept = IM.insert (intKey wid) para (IM.filterWithKey (\k _ -> IM.member k prev || IM.member k now) m)
+        -- A paragraph declared this pass has registered its custom drawing.
+        let declared k = maybe (pure False) (fmap isJust . lookupCustomDrawingAt ctx) =<< lookupNodeByKey (ctxNodeArena ctx) k
+        live <- filterM (\(k, _) -> if IM.member k prev then pure True else declared k) (IM.toAscList m)
+        let kept = IM.insert (intKey wid) para (IM.fromDistinctAscList live)
             size = IM.size kept
         pure $! ParagraphCache size (max paragraphBound (2 * size)) kept
 

@@ -213,7 +213,7 @@ paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
     then paintClippedChildren env idx rect
     else walkChildrenWithOccluders env idx
   wid <- getWidgetId (peNodeArena env) idx
-  mBuild <- lookupCustomDrawing ctx wid
+  mBuild <- lookupCustomDrawingAt ctx idx
   forM_ mBuild $ \CustomDrawingEntry {cdrBuild = build} -> do
     cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
     emitDrawingOps env rect (build cdc rect)
@@ -389,13 +389,13 @@ paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
 paintDrawingNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintDrawingNode env@PaintEnv {peContext = ctx} idx rect = do
   wid <- getWidgetId (peNodeArena env) idx
-  mCustomBuild <- lookupCustomDrawing ctx wid
+  mCustomBuild <- lookupCustomDrawingAt ctx idx
   case mCustomBuild of
     Just CustomDrawingEntry {cdrContent = content, cdrBuild = customBuild} -> do
       ops <- cachedCustomDrawingOps ctx wid content rect (mkCustomDrawContext ctx (peFontMetrics env) wid) customBuild
       emitDrawingOps env rect ops
     Nothing -> do
-      mBuild <- lookupDrawing ctx wid
+      mBuild <- lookupDrawingAt ctx idx
       forM_ mBuild $ \(DrawingEntry content build) -> do
         ops <- cachedDrawingOps ctx wid content rect build
         emitDrawingOps env rect ops

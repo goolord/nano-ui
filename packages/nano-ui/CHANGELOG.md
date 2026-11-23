@@ -2,6 +2,13 @@
 
 ## 0.2.0.0 -- Unreleased
 
+- A custom widget's registrations are kept on its node instead of in maps
+  rebuilt every frame: 1000 custom widgets cost a fifth less allocation and
+  time a frame. In `NanoUI.Internal.Context`, `DrawingCacheState` no longer
+  has `dcsDrawings`, `dcsCustomDrawings` or `dcsCustomMeasures`; look a
+  registration up by widget (`lookupCustomDrawing`) or by node
+  (`lookupCustomDrawingAt`). A registration names a node declared earlier in
+  the pass.
 - A press is resolved against the layout the user saw, before the view
   runs. The widget it reaches becomes active then, and a left click belongs
   to that widget and the containers around it wherever they move while the

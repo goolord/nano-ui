@@ -286,13 +286,8 @@ paintOrReuse ctx frameInp size explain paintFull clear reuse key mayReuse = do
 -- damage says when it changes.
 drawReuseKey :: Context -> Size -> Color -> IO (Maybe DrawReuseKey)
 drawReuseKey ctx@Context {ctxNodeArena = na, ctxDrawArena = da} size clear = do
-  customs <- dcsCustomDrawings <$> readIORef (ctxDrawingCache ctx)
-  let onDrawing k rest =
-        lookupNodeByKey na k >>= \case
-          Just idx -> getNodeType na idx >>= \nt -> if nt == NodeDrawing then rest else pure False
-          Nothing -> rest
-  reusable <- IM.foldrWithKey (\k _ rest -> onDrawing k rest) (pure True) customs
-  if not reusable
+  offNode <- customDrawingOffNode ctx
+  if offNode
     then pure Nothing
     else
       fmap Just $
@@ -497,7 +492,7 @@ layoutReuseValid ctx@Context {ctxNodeArena = na} lc = do
         if nt /= NodeDrawing
           then pure Nothing
           else do
-            mFn <- lookupCustomMeasure ctx =<< getWidgetId na idx
+            mFn <- lookupCustomMeasureAt ctx idx
             traverse (\fn -> runCustomMeasure na (ctxFontMetrics ctx) fn idx) mFn
       stable (idx, r) rest = measureOf idx >>= \c -> if c == Just r then placedStable idx >>= \ok -> if ok then rest else pure False else pure False
       -- The solve also ran the measure at the width the drawing was placed
@@ -506,7 +501,7 @@ layoutReuseValid ctx@Context {ctxNodeArena = na} lc = do
       -- with the same answer at the offered width.
       placedStable idx = do
         hAx <- getHeightSizing na idx
-        mFn <- lookupCustomMeasure ctx =<< getWidgetId na idx
+        mFn <- lookupCustomMeasureAt ctx idx
         case mFn of
           Just fn | axTag hAx == SizingFit -> do
             measuredW <- readPrimArray (lcMeasured lc) (idx * 2)

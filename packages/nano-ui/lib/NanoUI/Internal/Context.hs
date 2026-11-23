@@ -137,6 +137,7 @@ module NanoUI.Internal.Context
   , hoverZoneCrossed
   , registerDrawing
   , lookupDrawing
+  , lookupDrawingAt
   , cachedDrawingOps
   , cachedWidgetLayout
   , lookupDrawFitEnvelope
@@ -144,11 +145,14 @@ module NanoUI.Internal.Context
   , registerCustomDrawing
   , registerCustomEntry
   , lookupCustomDrawing
+  , lookupCustomDrawingAt
+  , customDrawingOffNode
   , cachedCustomDrawingOps
   , refreshCustomDrawingOps
   , drawingOpsStale
   , registerCustomMeasure
   , lookupCustomMeasure
+  , lookupCustomMeasureAt
   , customMeasureHooks
   , lookupCustomDamageSlop
   , resetDrawingScopeCache
@@ -183,6 +187,7 @@ module NanoUI.Internal.Context
   , PressPoint (..)
   , OverlayState (..)
   , DrawingCacheState (..)
+  , NodeCustom (..)
   , DrawingEntry (..)
   , SpanCacheEntry (..)
   , SpanLines (..)
@@ -289,6 +294,7 @@ import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import NanoUI.Internal.Derived (emptyDerivedCache)
 import NanoUI.Internal.Resource (Held (..), newHeld)
+import Data.Primitive.Array (newArray)
 import Data.Primitive.PrimVar (readPrimVar)
 import NanoUI.Internal.Host (Host, newHost, setHost, clearHost, askHostIO, hostOrInit)
 import Data.List (find)
@@ -330,7 +336,7 @@ import NanoUI.Internal.Input (Composition, Input (..), InputPurpose)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Appearance (..), FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
-import NanoUI.Internal.Types (ImageId, Rect)
+import NanoUI.Internal.Types (ImageId, Rect, newZeroedPrimArray)
 import NanoUI.Internal.Var.Cell (frameSlots, newStamps)
 
 -- | Register tightly packed RGBA8 pixels under an image id. Width and height
@@ -778,6 +784,8 @@ newContext = do
   ctxAnimationState <- newIORef initialAnimationState
   ctxScrollState <- newIORef initialScrollState
   ctxDrawingCache <- newIORef initialDrawingCacheState
+  ctxNodeCustom <- newIORef =<< newArray 64 noNodeCustom
+  ctxCustomPass <- newZeroedPrimArray customPassWords
   ctxIdCursor <- newIdCursor initialIdContext
   ctxVarFrame <- newStamps frameSlots
   ctxVarSlots <- newIORef IM.empty

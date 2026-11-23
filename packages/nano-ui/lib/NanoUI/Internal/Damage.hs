@@ -558,18 +558,14 @@ samePrev (PrevFrame !r0 !c0 !o0 !h0) (PrevFrame !r1 !c1 !o1 !h1) =
 -- replay the previous frame's ops for it. What this costs per widget is the
 -- widget's own choice: see 'refreshCustomDrawingOps'.
 refreshCustomDrawings :: Context -> IO [Int]
-refreshCustomDrawings ctx@Context {ctxNodeArena = na} = do
-  dc <- readIORef (ctxDrawingCache ctx)
-  -- A drawing with neither entry settles nothing, so a view without drawings
-  -- skips the walk, and the walk visits only the drawing nodes.
-  if IM.null (dcsDrawings dc) && IM.null (dcsCustomDrawings dc)
-    then pure []
-    else foldClassNodesM na DrawingNodes step []
+refreshCustomDrawings ctx@Context {ctxNodeArena = na} =
+  -- The walk visits only the drawing nodes, so a view without any skips it.
+  foldClassNodesM na DrawingNodes step []
   where
     step acc i = do
       wid <- getWidgetId na i
       rect <- getNodeRect na i
-      mCustom <- lookupCustomDrawing ctx wid
+      mCustom <- lookupCustomDrawingAt ctx i
       changed <- case mCustom of
         Just CustomDrawingEntry {cdrContent = content, cdrBuild = build} -> do
           cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
@@ -578,7 +574,7 @@ refreshCustomDrawings ctx@Context {ctxNodeArena = na} = do
           -- A versioned drawing rebuilds in paint once its version
           -- changes, but the pixels it covered still need damage. An
           -- unversioned one is cached by contract, so it stays put.
-          mDrawing <- lookupDrawing ctx wid
+          mDrawing <- lookupDrawingAt ctx i
           case mDrawing of
             Just (DrawingEntry content _) | content /= 0 -> drawingOpsStale ctx wid content rect
             _ -> pure False
