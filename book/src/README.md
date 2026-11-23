@@ -12,7 +12,7 @@ You describe the whole window as one `NanoUI ()` action, and the backend runs th
 
 Code samples assume `import NanoUI` and `OverloadedStrings`. The runnable source for each tutorial is in [`packages/nano-ui-demo/examples`](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples).
 
-The [widget cookbook](demo/index.html) runs in this site, in your browser. It is the desktop demo's view (`examples/Demo.hs`) compiled to WebAssembly and drawn with the `nano-ui-sdl-web` backend. File dialogs need the desktop backend. Fonts start with the bundled Inter; in Chromium-based browsers, Find installed fonts lists yours, after the browser asks you.
+The [widget cookbook](demo/index.html) runs in this site, in your browser. It is the desktop demo's view (`examples/Demo.hs`) compiled to WebAssembly and drawn with the `nano-ui-sdl-web` backend. Its file dialogs open files by their contents, since a page sees no paths. Fonts start with the bundled Inter; in Chromium-based browsers, Find installed fonts lists yours, after the browser asks you.
 
 ## Packages in the monorepo
 
