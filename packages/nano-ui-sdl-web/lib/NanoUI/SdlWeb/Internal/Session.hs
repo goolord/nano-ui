@@ -128,6 +128,14 @@ data SdlWebOptions = SdlWebOptions
   , webMonoFont :: !WebFont
   -- ^ Monospace font (default: 'WebFontInter', set on a grid of whole
   -- pixels).
+  , webFallbackFonts :: ![WebFont]
+  -- ^ Fonts for the characters the UI and monospace fonts lack, tried in
+  -- order, as the desktop finds them among the system's fonts. Loaded when
+  -- the session starts; one that will not load is left out, with a console
+  -- warning. The default is the wider Inter that @scripts/build-web.sh@
+  -- serves beside the page, @fonts/inter-extended.ttf@: Latin beyond ASCII,
+  -- Greek, Cyrillic, punctuation and common symbols, which the bundled
+  -- ASCII Inter lacks.
   , webFontSize :: !Float
   -- ^ Base font size in points (default: 16).
   , webUiScale :: !Float
@@ -149,6 +157,7 @@ defaultSdlWebOptions =
     , webThemeFor = Nothing
     , webFont = WebFontInter
     , webMonoFont = WebFontInter
+    , webFallbackFonts = [WebFontUrl "fonts/inter-extended.ttf"]
     , webFontSize = 16
     , webUiScale = 1
     , webRefreshHz = 60
@@ -205,10 +214,12 @@ runWebSession host opts frame = do
   scaleRef <- newIORef (ciPixelRatio canvas * zoom)
   sans <- resolveWebFont host (webFont opts)
   mono <- resolveWebFont host (webMonoFont opts)
+  fallbacks <- newWebFallbacks . concat =<< mapM (loadFallback host) (webFallbackFonts opts)
+  let hooks = webFontHooks fallbacks
   rendererLabel <- rendererName host
-  withTtf $
+  withTtf hooks $
     bracket newGlyphAtlas destroyGlyphAtlas $ \glyphs ->
-      bracket (newSdlFontCache sans mono glyphs (webFontSize opts) scaleRef) destroySdlFontCache $ \fonts ->
+      bracket (newSdlFontCache hooks sans mono glyphs (webFontSize opts) scaleRef) destroySdlFontCache $ \fonts ->
         bracket newRenderer freeRenderer $ \renderer -> do
           env <-
             WebEnv host fonts renderer scaleRef zoom
@@ -280,6 +291,20 @@ resolveWebFont host = \case
         Nothing -> do
           hPutStrLn stderr ("nano-ui-sdl-web: could not load the font " <> show name <> "; using Inter")
           pure embeddedFontSource
+
+-- | A fallback font's bytes: none for the bundled Inter, which is the UI
+-- font's own fallback already, or for a font that will not load.
+loadFallback :: WebHost -> WebFont -> IO [ByteString]
+loadFallback host = \case
+  WebFontInter -> pure []
+  WebFontBytes bytes _ -> pure [bytes]
+  WebFontInstalled family -> load InstalledFamily family
+  WebFontUrl url -> load FontUrl url
+  where
+    load origin name =
+      loadFontBytes host origin name >>= \case
+        Just bytes -> pure [bytes]
+        Nothing -> [] <$ hPutStrLn stderr ("nano-ui-sdl-web: could not load the fallback font " <> show name)
 
 -- | Ask for a UI font. The session loads and applies it before the next
 -- frame, which this asks for: the glyph atlas, metrics and text all change

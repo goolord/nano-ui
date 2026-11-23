@@ -5,4 +5,5 @@
 - First release: SDL3_ttf line shaping, glyph atlas bookkeeping, shaped-line
   and font caches, and the bundled Inter font, extracted from nano-ui-sdl so
   nano-ui-sdl-web shares them. `TTF_Init` and `TTF_OpenFont` failures carry
-  SDL's error text.
+  SDL's error text. `attachFallback` and `openFontBytes` let a backend
+  attach fallback fonts of its own, from files or from bytes.

@@ -20,6 +20,10 @@
   `listWebFontFamilies` (the Local Font Access API, in Chromium-based
   browsers), and `setSdlWebUiFont` to change the UI font from the view. A
   font that will not load falls back to the bundled Inter.
+- Fallback fonts for the characters the UI font lacks: `webFallbackFonts`,
+  by default the wider Inter subset (`web/fonts/inter-extended.ttf`,
+  Latin beyond ASCII, Greek, Cyrillic, punctuation and common symbols) that
+  `build-web.sh` serves beside the page.
 - File dialogs on contents: `openWebFiles`, `openWebFolder` and
   `saveWebFile`, with `FileDialogOptions` and `FileFilter` as nano-ui-sdl
   names them, and `WebFile` for a chosen file's name and bytes. Saving uses

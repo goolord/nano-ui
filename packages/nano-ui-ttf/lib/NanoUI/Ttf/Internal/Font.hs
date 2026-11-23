@@ -39,7 +39,9 @@ module NanoUI.Ttf.Internal.Font
   , withSdlFontCache
   , withTtf
   , openFontPath
+  , openFontBytes
   , readSdlFont
+  , attachFallback
   , closeFont
   , ttfOpenFont
   , ttfCloseFont
@@ -683,6 +685,30 @@ ttfFail what = do
 -- | Open a font file at a point size using the configured path encoding.
 openFontPath :: FontHooks -> FilePath -> CFloat -> IO (Ptr ())
 openFontPath hooks path pt = fhPathEncoding hooks >>= \enc -> GHC.withCString enc path (`ttfOpenFont` pt)
+
+-- | Open a font file's bytes at a point size; null when they will not open.
+-- SDL_ttf reads the bytes while the font is open, and from fonts copied
+-- from it ('ttfCopyFont'), so the caller keeps the 'ByteString' alive as
+-- long as any of them.
+openFontBytes :: ByteString -> CFloat -> IO (Ptr ())
+openFontBytes bs pt = unsafeUseAsCStringLen bs $ \(ptr, len) -> ttfOpenFontMemory (castPtr ptr) (fromIntegral len) pt
+
+-- | Attach a fallback to a face for the characters it lacks: a copy of
+-- @probe@ (an open font of the fallback, at any size) at the face's size,
+-- keyed by @source@ so a source is attached once. SDL_ttf tries the
+-- fallbacks in the order they were added, so all are re-added in source
+-- order.
+attachFallback :: SdlFont -> Int -> Ptr () -> IO ()
+attachFallback sf source probe = do
+  attached <- readIORef (sfFallbacks sf)
+  unless (IM.member source attached) $ do
+    copy <- ttfCopyFont probe (realToFrac (sfPointSize sf))
+    unless (copy == nullPtr) $ do
+      fallback <- readSdlFont (sfPointSize sf) copy
+      let attached' = IM.insert source fallback attached
+      forM_ attached $ \f -> ttfRemoveFallback (sfFont sf) (sfFont f)
+      forM_ attached' $ \f -> ttfAddFallback (sfFont sf) (sfFont f)
+      writeIORef (sfFallbacks sf) attached'
 
 -- | Wrap an open TTF font handle.
 readSdlFont :: Float -> Ptr () -> IO SdlFont

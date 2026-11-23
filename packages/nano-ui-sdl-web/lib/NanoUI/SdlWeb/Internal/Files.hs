@@ -130,7 +130,9 @@ openWebFolder :: IO (Maybe [WebFile])
 openWebFolder = inBrowser Nothing $ \host -> pickFiles host PickFolder defaultFileDialogOptions
 
 -- | Save bytes as a file, suggesting a name. Chromium-based browsers show a
--- save dialog; the others download the file under the suggested name. The
+-- save dialog (@showSaveFilePicker@, which no other browser implements);
+-- the others download the file under the suggested name, which Firefox
+-- saves where its "Always ask you where to save files" setting says. The
 -- name it was saved under, or 'Nothing' when the user cancelled, saving
 -- failed, or this is not a browser. Run it from a task a press starts.
 saveWebFile :: FileDialogOptions -> String -> ByteString -> IO (Maybe String)

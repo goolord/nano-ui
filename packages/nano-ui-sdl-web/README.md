@@ -42,6 +42,16 @@ files from disk, so other fonts come three ways:
   fetches. A file on another origin needs CORS headers that allow the page.
 - `WebFontBytes bytes "label"`: a file the program embeds.
 
+The bundled Inter covers printable ASCII only. For everything else (accented
+Latin, Greek, Cyrillic, the ellipsis, dashes and curly quotes, currency,
+arrows, common symbols) the session attaches fallback fonts, as the desktop
+attaches system fonts: `webFallbackFonts`, by default
+`fonts/inter-extended.ttf`, a wider subset of the same Inter that
+`build-web.sh` serves beside the page (154 KB, made with
+`scripts/prune_inter.py --web`). A page served some other way serves that
+file too, or sets `webFallbackFonts`. Combining accents typed apart from
+their letter still have no font that places them.
+
 Set them in `SdlWebOptions` (`webFont`, `webMonoFont`), or change the UI font
 from the view with `setSdlWebUiFont`, which loads it before the next frame as
 `setSdlUiFont` does on the desktop. A font that will not load is the bundled
@@ -58,8 +68,12 @@ A page sees no paths, so the dialogs trade in contents:
 - `openWebFolder` reads every file in a folder the user chooses, named by its
   path inside the folder.
 - `saveWebFile opts name bytes` shows the browser's save dialog where it has
-  one (Chromium-based browsers) and downloads the file under `name`
-  elsewhere. It answers the name the file was saved under.
+  one and downloads the file under `name` elsewhere. It answers the name the
+  file was saved under. The dialog is the File System Access API's
+  `showSaveFilePicker`, which only Chromium-based browsers implement; Firefox
+  and Safari have no API that lets a page open their save dialog. Firefox
+  asks where to save a download when its "Always ask you where to save
+  files" setting is on, and otherwise saves to the Downloads folder.
 
 Browsers show these only right after a click or key press on the page, so
 run them from a task the press starts (`useTask`), as the cookbook's File
@@ -195,9 +209,10 @@ browsers other than Chromium.
 ## Differences from nano-ui-sdl
 
 - There are no font directories. Installed families come only through the
-  Local Font Access API (see [Fonts](#fonts)), and there are no fallback
-  fonts for characters the UI font lacks, and no bold face found beside a
-  font file: bold and italic are drawn synthetically.
+  Local Font Access API (see [Fonts](#fonts)), fallback fonts are the ones
+  the session loads (the wider Inter by default) rather than the system's,
+  and no bold face is found beside a font file: bold and italic are drawn
+  synthetically.
 - Pasting reads the text of the page's `paste` event, and copying writes
   with `navigator.clipboard`. A view's clipboard read sees only what was last
   pasted or copied on the page.

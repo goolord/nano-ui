@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a nano-ui-sdl-web program with GHC's wasm backend and lay out a
-# directory to serve: the page, the runtime, the wasm module, its JSFFI glue
-# and the WASI shim the page loads it with.
+# directory to serve: the page, the runtime, the wasm module, its JSFFI glue,
+# the WASI shim the page loads it with, and the fallback font.
 #
 #   source ~/.ghc-wasm/env
 #   export PKG_CONFIG_PATH=~/.nano-ui-wasi/lib/pkgconfig   # build-wasi-deps.sh
@@ -31,6 +31,10 @@ wasm="$(cd "$root" && wasm32-wasi-cabal list-bin --project-file="$project" "$tar
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 cp "$pkg"/web/index.html "$pkg"/web/main.js "$pkg"/web/nano-ui-sdl-web.js "$out"/
+# The fallback font the default options load, with its licence.
+mkdir -p "$out/fonts"
+cp "$pkg"/web/fonts/*.ttf "$out/fonts/"
+cp "$pkg"/LICENSE-Inter "$out/fonts/"
 # The glue the module's JavaScript imports need, generated from the module
 # before wasm-opt drops the custom section it is read from.
 "$(wasm32-wasi-ghc --print-libdir)/post-link.mjs" -i "$wasm" -o "$out/ghc_wasm_jsffi.js"
