@@ -942,6 +942,10 @@ data Context = Context
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
   , ctxPrevWalk :: !(IORef PrevWalk)
+  , ctxStoreOwners :: !(IORef (IntMap Int))
+  -- ^ The widget key that owns each sub-slot store key the damage pass has
+  -- resolved ('NanoUI.Internal.Damage.storeKeyChanges'). A sub-slot key is
+  -- a hash of its widget's key, so an owner found once stays the owner.
   , ctxOverlayState :: IORef OverlayState
   , ctxAnimationState :: IORef AnimationState
   , ctxScrollState :: !(IORef ScrollState)

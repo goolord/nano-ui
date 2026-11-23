@@ -773,6 +773,7 @@ newContext = do
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
   ctxPrevWalk <- newIORef =<< newPrevWalk 0
+  ctxStoreOwners <- newIORef IM.empty
   ctxOverlayState <- newIORef initialOverlayState
   ctxAnimationState <- newIORef initialAnimationState
   ctxScrollState <- newIORef initialScrollState

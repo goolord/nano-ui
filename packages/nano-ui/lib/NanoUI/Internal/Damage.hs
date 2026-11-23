@@ -17,7 +17,7 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (forM_, unless, when)
+import Control.Monad (filterM, forM_, unless, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
 import Data.Bits (xor)
@@ -25,7 +25,7 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (partition, tails)
-import Data.Maybe (catMaybes, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import Data.Hashable (hashWithSalt)
 import Data.Primitive.Array (readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, writePrimArray)
@@ -928,24 +928,32 @@ scrollOffsetDamage Context {ctxNodeArena = na} oldStore newStore =
                 IM.insertWith (++) (slotKey SlotScrollRange widKey) one m
 
 -- | The store keys (outside the scroll offsets) whose value changed and that
--- are not themselves widget keys, with the node each changed key belongs to:
--- a widget key's own node, or the node that owns a sub-slot spelling. A
--- write through 'setStore' requests no damage of its own, so a changed
--- widget key is damaged here too. The owners fold runs only when some key
--- is no widget key.
+-- are not themselves widget keys, with the node that owns each through a
+-- sub-slot spelling. Changed widget keys were already damaged by their
+-- 'ReqKey' requests. An owner comes from 'ctxStoreOwners' when the widget
+-- it names is in the arena; only keys it does not answer cost a walk
+-- ('storeKeyOwners'), whose finds it keeps.
 storeKeyChanges :: Context -> WidgetStore -> WidgetStore -> IO ([Int], IM.IntMap NodeIdx)
 storeKeyChanges ctx oldStore newStore = do
   let na = ctxNodeArena ctx
-  resolved <- mapM (\k -> (k,) <$> lookupNodeByKey na k) (slotChangedKeys oldStore newStore)
-  let direct = IM.fromList [(k, i) | (k, Just i) <- resolved]
-      misses = [k | (k, Nothing) <- resolved]
-  owners <- if null misses then pure IM.empty else storeKeyOwners na (IS.fromList misses)
-  pure (misses, IM.union direct owners)
+  misses <- filterM (\k -> isNothing <$> lookupNodeByKey na k) (slotChangedKeys oldStore newStore)
+  if null misses
+    then pure ([], IM.empty)
+    else do
+      known <- readIORef (ctxStoreOwners ctx)
+      cached <- mapM (\k -> (k,) <$> maybe (pure Nothing) (lookupNodeByKey na) (IM.lookup k known)) misses
+      let hits = IM.fromList [(k, i) | (k, Just i) <- cached]
+          rest = [k | (k, Nothing) <- cached]
+      found <- if null rest then pure IM.empty else storeKeyOwners na (IS.fromList rest)
+      unless (IM.null found) $ do
+        owners <- traverse (fmap intKey . getWidgetId na) found
+        writeIORef (ctxStoreOwners ctx) $! IM.union owners known
+      pure (misses, IM.union hits found)
 
 -- | Each of @wanted@ that maps to a node this frame, keyed to the node that
 -- owns it: each widget's base key plus the sub-slot spellings its reads and
--- writes use. Built once per frame, only when a changed key is not itself a
--- widget key.
+-- writes use. Walks the arena, so 'storeKeyChanges' runs it only for keys
+-- whose owner it has not found before.
 storeKeyOwners :: NodeArena -> IS.IntSet -> IO (IM.IntMap NodeIdx)
 storeKeyOwners na wanted = do
   n <- arenaCount na
