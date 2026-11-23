@@ -39,7 +39,8 @@ symptom; the patterns repeat.
 - **A drop-down clips its longest option.** A guessed fixed width breaks on
   long options ("Unknown disk · 113 apps · 9.24 GB"). Measure the options
   with the font and add the insets and the arrow:
-  `fixedW (maximum (0 : map (lineWidth fm) options) + 56)`.
+  `widths <- mapM (lineWidthUi fm) options`, then
+  `fixedW (maximum (0 : widths) + 56)`.
 - **Content-derived grid sizes recompute every frame and jitter.** Lock the
   geometry: ned keeps its tree and editor column widths in saved layout state;
   winget-gui keys row heights on constants, not on text.
@@ -69,8 +70,8 @@ popups, dialogs and panes they draw a box inside a box.
 - **Per-glyph advance times count is not a shaped run's width.** A shaping
   backend lays out a run with unrounded advances (8 against 8.25 px per glyph
   at size 15), so per-glyph arithmetic drifts a cell every ~32 characters and
-  long runs overdraw what follows. Measure the whole run: `lineWidth fm run`
-  (ned).
+  long runs overdraw what follows. Measure the whole run in the view:
+  `lineWidthUi fm run` (ned).
 - **Rows must be a whole number of device pixels tall.** At 125% scaling,
   rows of 22.4 px land 22, 23, 22, 23 px apart and text shimmers. Snap
   positions with the font's snap scale, as winget-gui's `rowButton` does:

@@ -198,7 +198,7 @@ Joins shape the corners between segments. A miter longer than `strokeMiterLimit`
 {{#include ../../../packages/nano-ui-svg/app/CanvasExamples.hs:text}}
 ```
 
-Measure text with `lineWidth` and `uiFontMetrics`. Measure a whole run with `lineWidth` rather than adding per-glyph advances, because a shaping backend lays runs out by unrounded advances.
+Measure text in the view with `lineWidthUi` and `uiFontMetrics`, cut it to a width with `truncateTextUi`, and pass the results to the drawing. Both load the glyphs the text needs first. The pure `lineWidth` is exact only for text the metrics have already measured or drawn; for other text it adds per-glyph advances. Measure a whole run rather than adding per-glyph advances yourself, because a shaping backend lays runs out by unrounded advances.
 
 ### Borders: inset or centred
 

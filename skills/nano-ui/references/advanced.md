@@ -15,8 +15,9 @@ Vector paths come from `NanoUI.Path`, imported qualified as `P`: `P.moveTo`,
 `drawPathWith` (fill rule `P.NonZero`/`P.EvenOdd`, paint `P.Solid` or a
 `P.Linear` gradient) and `drawStrokePathWith` (a `P.Stroke` record: width,
 caps, joins, dash). `withTransform` (translate, rotate, scale) and `withClip`.
-Text: `drawText pos alignX alignY txt colour`; measure with `lineWidth` and
-`uiFontMetrics`. Shapes: `drawRect`, `drawRoundedRect`, and
+Text: `drawText pos alignX alignY txt colour`; measure in the view with
+`lineWidthUi` and `uiFontMetrics` (the pure `lineWidth` is exact only for
+text the metrics have already shaped). Shapes: `drawRect`, `drawRoundedRect`, and
 `drawStrokeRoundedRect` (its border is inset inside the bounds, unlike a
 centred path stroke).
 

@@ -86,7 +86,7 @@ The SDL backend bundles Inter and finds installed fonts by family name:
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:fonts}}
 ```
 
-`setSdlUiFont` changes fonts mid-session. `sdlAppUiScale = 0` follows the desktop scale on Windows. Measure text with `lineWidth`, `fmLineHeight`, and `fmSnapScale`, not by summing per-glyph advances.
+`setSdlUiFont` changes fonts mid-session. `sdlAppUiScale = 0` follows the desktop scale on Windows. Measure text with `lineWidthUi`, `fmLineHeight`, and `fmSnapScale`, not by summing per-glyph advances.
 
 The font modifiers side by side:
 

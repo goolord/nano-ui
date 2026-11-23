@@ -413,7 +413,7 @@ text spans: click them, screenshot, and assert on the image.
 - Escape behind the same guard as Ctrl+A or Delete stops working in fields.
 - A custom widget reading `inputChars` without `useInputMethod` gets no text.
 - Per-glyph advance times count drifts from a shaped run; measure the run with
-  `lineWidth`.
+  `lineWidthUi`.
 - Parsing or rebuilding large data every frame; keep it outside the view and
   recompute only when its inputs change.
 - `readVar` above the widget that edits the `Var` costs an extra pass.

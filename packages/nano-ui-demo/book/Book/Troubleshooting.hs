@@ -25,7 +25,8 @@ nameLine f = rowWith (fillW . tight) . labelWith (fillW . f)
 diskSelect :: [Text] -> Var Int -> NanoUI ()
 diskSelect options selectedVar = do
   fm <- uiFontMetrics
-  let w = maximum (0 : map (lineWidth fm) options) + 56
+  widths <- mapM (lineWidthUi fm) options
+  let w = maximum (0 : widths) + 56
   selectWith (fixedW w) options selectedVar
 -- ANCHOR_END: measured_select
 
@@ -35,8 +36,8 @@ flatList = styled (inputStyle (background colorTransparent . borderWidth 0))
 -- ANCHOR_END: strip_chrome
 
 -- ANCHOR: run_width
-runWidth :: FontMetrics -> Text -> Float
-runWidth fm run = lineWidth fm run
+runWidth :: FontMetrics -> Text -> NanoUI Float
+runWidth fm run = lineWidthUi fm run
 -- ANCHOR_END: run_width
 
 -- ANCHOR: snap

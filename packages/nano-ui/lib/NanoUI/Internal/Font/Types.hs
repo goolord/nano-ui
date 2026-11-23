@@ -334,7 +334,11 @@ selectionSpans fm txt lo hi
        in merge [charSpan i | i <- [max 0 lo .. min n hi - 1]]
   | otherwise = [(caretX fm txt lo, caretX fm txt hi)]
 
--- | Pure single-line advance in logical pixels.
+-- | Pure single-line advance in logical pixels. Metrics from a shaping
+-- backend shape only the text they were prepared for; for any other text
+-- this adds per-glyph advances, which can differ from the drawn run on a
+-- long line. In a view, measure with 'NanoUI.lineWidthUi', which prepares
+-- the metrics first.
 lineWidth :: FontMetrics -> Text -> Float
 lineWidth fm line
   | T.null line = 0

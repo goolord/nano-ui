@@ -94,7 +94,7 @@ Symptoms:
 
 `fmAdvance` per glyph multiplied by the character count is not the shaped width of a run. A shaping backend lays a run out by unrounded advances (8 vs 8.25 px at size 15), so per-glyph arithmetic drifts a cell every ~32 characters and long runs overdraw what follows.
 
-**Fix:** measure the whole run:
+**Fix:** measure the whole run in the view, where the metrics can load its glyphs first:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:run_width}}
@@ -231,7 +231,7 @@ A branch that declares different widgets than its alternative changes the id cou
 - [ ] Focus queries at the top of the view: the arena was reset; read them at the end.
 - [ ] Escape behind the same guard as Ctrl+A/Delete: text inputs do not claim Escape.
 - [ ] A focused widget reading `inputChars` without `useInputMethod`: typed text never arrives.
-- [ ] Per-glyph advance × count for a long run: use `lineWidth`.
+- [ ] Per-glyph advance × count for a long run: use `lineWidthUi`.
 - [ ] Parsing or rebuilding documents per frame: parse once and keep the result outside the view.
 - [ ] `readVar` above the widget that edits the `Var`: an extra pass per change.
 - [ ] Missing `-threaded`.
