@@ -4,7 +4,10 @@
 -- module of the same name in @examples/web@ with the same exports.
 module DemoPlatform
   ( backendLabel
-  , uiFontFamilies
+  , FontList
+  , newFontList
+  , fontFamilies
+  , fontFinder
   , setUiFontFamily
   , readDataFile
   , FileDialogState
@@ -28,12 +31,24 @@ import Text.Printf (printf)
 backendLabel :: Text
 backendLabel = "SDL3"
 
--- | The font families installed on this machine, or Inter alone when none
--- are found.
-uiFontFamilies :: IO [Text]
-uiFontFamilies = do
+-- | The font families installed on this machine, found when the demo
+-- starts.
+newtype FontList = FontList [Text]
+
+-- | Search the platform's font directories, or Inter alone when none are
+-- found.
+newFontList :: IO FontList
+newFontList = do
   families <- map T.pack <$> listFontFamilies
-  pure (if null families then ["Inter"] else families)
+  pure (FontList (if null families then ["Inter"] else families))
+
+-- | The families found.
+fontFamilies :: FontList -> NanoUI [Text]
+fontFamilies (FontList families) = pure families
+
+-- | Nothing to do: the families were found at start.
+fontFinder :: FontList -> NanoUI ()
+fontFinder _ = pure ()
 
 -- | Use an installed family as the UI font.
 setUiFontFamily :: Text -> NanoUI ()

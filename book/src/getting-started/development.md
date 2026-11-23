@@ -30,7 +30,7 @@ cabal test -j1 all
 | `nano-ui-form-test` | Form validation, reset, and submission |
 | `nano-ui-markdown-test` | Parsing, incremental append against a full parse (QuickCheck), layout |
 | `nano-ui-rgfw-test`, `nano-ui-rgfw-bindings-test` | RGFW input translation, bitmap font, frame delivery |
-| `nano-ui-sdl-web-test` | The browser backend's input decoding and draw batching, run natively |
+| `nano-ui-sdl-web-test` | The browser backend's input decoding, draw batching, font loading and debug snapshot, run natively |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, shaping, caches, handle lifetimes |
 | `nano-ui-render-test` | Native SDL readback: partial damage, clipping, screenshots |
 | `nano-ui-demo-test`, `nano-ui-terminal-test` | The demos and the terminal in hidden SDL windows |

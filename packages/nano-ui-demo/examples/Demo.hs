@@ -17,9 +17,9 @@
 -- shows the headline numbers. The @nano-ui-demo-test@ suite drives this demo.
 --
 -- The view runs on the SDL backend (@examples/sdl/DemoMain.hs@) and in a
--- browser (@examples/web/DemoMain.hs@). What differs between them (fonts,
--- data files, file dialogs, frame statistics) comes from "DemoPlatform",
--- which each build takes from its own directory.
+-- browser (@examples/web/DemoMain.hs@). What differs between them (finding
+-- fonts, data files, file dialogs, frame statistics) comes from
+-- "DemoPlatform", which each build takes from its own directory.
 module Demo
   ( DemoState
   , newDemo
@@ -61,7 +61,7 @@ data DemoState = DemoState
   , demoSwatchImages :: ![ImageHandle Text]
   , demoLandscapeImage :: !(ImageHandle Text)
   , demoPlotCache :: !PlotCache
-  , demoFontFamilies :: ![Text]
+  , demoFonts :: !FontList
   , demoDebugAtStart :: !Bool
   -- ^ @NANO_DEBUG_OPEN@ opens the Debug window at start.
   }
@@ -83,7 +83,7 @@ newDemo = do
   demoSwatchImages <- mapM (const newImageHandle) demoSwatches
   demoLandscapeImage <- newImageHandle
   demoPlotCache <- newPlotCache
-  demoFontFamilies <- uiFontFamilies
+  demoFonts <- newFontList
   demoDebugAtStart <- isJust <$> lookupEnv "NANO_DEBUG_OPEN"
   pure DemoState {..}
 
@@ -319,11 +319,13 @@ appearanceControls st theme font = do
   heading "Appearance"
   field "Theme" (radio (map fst themes) theme)
   snd . (themes !!) =<< readVar theme
-  fontResp <- field "Font" (comboBox' "Font" (demoFontFamilies st) font)
+  families <- fontFamilies (demoFonts st)
+  fontResp <- field "Font" (comboBox' "Font" families font)
   tooltip fontResp "Type to filter; Enter applies, Esc reverts."
   when (respChanged fontResp) $ do
     family <- readVar font
     unless (T.null family) (setUiFontFamily family)
+  fontFinder (demoFonts st)
   separator
   heading "Accent"
   muted "Choose a color or enter an exact value."
