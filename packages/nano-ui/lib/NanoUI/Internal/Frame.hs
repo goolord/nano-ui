@@ -198,8 +198,10 @@ runViewPasses unlift ctx frameInp ui = do
   beginVarPass ctx 1
   -- Opened only after layout, so whether it shows is known before the view.
   menuOpen <- isJust <$> getsInteraction ctx isTextInputMenu
-  let withMenu = if menuOpen then withTextEditMenu else id
-  result0 <- unlift (runUi ctx frameInp (withMenu ui))
+  -- Two calls rather than a wrapper chosen at run time, so the usual one
+  -- runs the view as it is.
+  let runPass inp = if menuOpen then unlift (runUi ctx inp (withTextEditMenu ui)) else unlift (runUi ctx inp ui)
+  result0 <- runPass frameInp
   -- Pending click is one-shot. Clear before a rerun so toggles do not fire twice.
   writeIORef (ctxClickedId ctx) (WidgetId 0)
   rerun <- takeVarRerun ctx
@@ -210,7 +212,7 @@ runViewPasses unlift ctx frameInp ui = do
         -- A modal is active only if this pass builds it.
         modifyOverlay ctx (\os -> os {osModalActive = False, osModalDepth = 0})
         beginVarPass ctx 2
-        unlift (runUi ctx (stripInteractionInput frameInp) (withMenu ui))
+        runPass (stripInteractionInput frameInp)
       else pure result0
   endVarFrame ctx
   pure r
